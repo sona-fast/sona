@@ -3,6 +3,7 @@ import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { isTelegramEnabled } from '$lib/server/telegram';
 import { resyncTelegramPacks } from '$lib/server/sticker-import';
+import { requireCronSecret } from '$lib/server/cron-auth';
 import type { RequestHandler } from './$types';
 
 // POST /api/cron/resync-telegram
@@ -28,12 +29,7 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	// Auth: constant secret in an Authorization: Bearer header. If CRON_SECRET isn't
 	// configured the endpoint can't be authenticated at all, so refuse rather than
 	// run open.
-	const secret = env?.CRON_SECRET;
-	if (!secret) error(503, 'Cron re-sync is not configured (no CRON_SECRET).');
-
-	const auth = request.headers.get('authorization') ?? '';
-	const presented = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : '';
-	if (presented !== secret) error(401, 'Unauthorized');
+	requireCronSecret(request, env);
 
 	// Honor the same feature gate as the admin importer — no token, no Telegram.
 	if (!isTelegramEnabled(env)) {

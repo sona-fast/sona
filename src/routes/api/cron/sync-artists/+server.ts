@@ -3,6 +3,7 @@ import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { isRegistryEnabled } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
+import { requireCronSecret } from '$lib/server/cron-auth';
 import type { RequestHandler } from './$types';
 
 // POST /api/cron/sync-artists
@@ -14,12 +15,7 @@ import type { RequestHandler } from './$types';
 // the registry is never on a render path, so this is purely a background refresh.
 export const POST: RequestHandler = async ({ request, platform }) => {
 	const env = platform?.env;
-
-	const secret = env?.CRON_SECRET;
-	if (!secret) error(503, 'Sync is not configured (no CRON_SECRET).');
-	const auth = request.headers.get('authorization') ?? '';
-	const presented = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : '';
-	if (presented !== secret) error(401, 'Unauthorized');
+	requireCronSecret(request, env);
 
 	if (!isRegistryEnabled(env)) error(503, 'Registry is not configured (no REGISTRY_API_KEY).');
 

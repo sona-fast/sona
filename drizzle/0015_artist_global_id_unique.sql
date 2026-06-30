@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `artists_global_id_unique` ON `artists` (`global_id`);

@@ -146,13 +146,7 @@ export async function saveSettings(db: Database, settings: Partial<SiteSettings>
 		if (rawValue === undefined) continue;
 		// The value column is TEXT — coerce non-strings (e.g. boolean toggles) to
 		// their string form. No-op for the existing string settings.
-		const value = String(rawValue);
-		const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).get();
-		if (existing) {
-			await db.update(siteSettings).set({ value }).where(eq(siteSettings.key, key));
-		} else {
-			await db.insert(siteSettings).values({ key, value });
-		}
+		await setRawSetting(db, key, String(rawValue));
 	}
 	// Invalidate so subsequent reads in this isolate see the new values.
 	clearSettingsCache();

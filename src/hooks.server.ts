@@ -1,12 +1,11 @@
 import type { Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
-import { getSessionToken } from '$lib/server/auth';
 import { redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
 import { isSetupComplete } from '$lib/server/admin-auth';
 import { getSettings } from '$lib/server/settings';
-import { THEME_MODE_COOKIE } from '$lib/config';
+import { THEME_MODE_COOKIE, SESSION_COOKIE } from '$lib/config';
 import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { getTextDirection } from '$lib/paraglide/runtime';
@@ -23,7 +22,7 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 	});
 
 const authHandle: Handle = async ({ event, resolve }) => {
-	const token = getSessionToken(event.request.headers.get('cookie'));
+	const token = event.cookies.get(SESSION_COOKIE);
 
 	// Validate session against D1
 	if (token && event.platform?.env.DB) {

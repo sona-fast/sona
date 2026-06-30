@@ -1,5 +1,4 @@
 import { redirect, type Cookies } from '@sveltejs/kit';
-import { getSessionToken } from '$lib/server/auth';
 import { SESSION_COOKIE } from '$lib/config';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
@@ -7,7 +6,7 @@ import { eq } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 
 async function performLogout(request: Request, platform: App.Platform | undefined, cookies: Cookies) {
-	const token = getSessionToken(request.headers.get('cookie'));
+	const token = cookies.get(SESSION_COOKIE);
 
 	if (token && platform?.env.DB) {
 		try {

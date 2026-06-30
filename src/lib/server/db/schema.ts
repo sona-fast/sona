@@ -13,8 +13,10 @@ export const artists = sqliteTable('artists', {
 	instagramUrl: text('instagram_url'),
 	// Link to the shared artist registry (sona-registry). NULL = local-only, not
 	// yet in the registry. The local autoincrement `id` stays the render-time
-	// identity + FK target; global_id is only the cross-instance bridge.
-	globalId: text('global_id'),
+	// identity + FK target; global_id is only the cross-instance bridge. Unique so
+	// two local rows can't link to the same registry artist (SQLite allows many
+	// NULLs under a unique index, so local-only artists are unaffected).
+	globalId: text('global_id').unique(),
 	registryVersion: integer('registry_version'),
 	registrySyncedAt: text('registry_synced_at'),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())

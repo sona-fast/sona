@@ -8,8 +8,9 @@
 // `setupComplete` (site_settings) + the presence of a credential drive the
 // first-run wizard gate in hooks.server.ts.
 
-import { eq, inArray } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import { siteSettings } from './db/schema';
+import { getRawSetting, setRawSetting } from './settings';
 import type { Database } from './db';
 
 // --- PBKDF2 (Web Crypto; available on Workers and Node 20+) -----------------
@@ -85,29 +86,17 @@ export function constantTimeEqual(a: string, b: string): boolean {
 	return timingSafeEqual(ae, be);
 }
 
-// --- site_settings access (raw; bypasses the client-facing SiteSettings) -----
-
-async function getSettingRaw(db: Database, key: string): Promise<string | null> {
-	const row = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).get();
-	return row?.value ?? null;
-}
-
-async function setSettingRaw(db: Database, key: string, value: string): Promise<void> {
-	const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).get();
-	if (existing) {
-		await db.update(siteSettings).set({ value }).where(eq(siteSettings.key, key));
-	} else {
-		await db.insert(siteSettings).values({ key, value });
-	}
-}
+// Raw site_settings access (bypasses the client-facing SiteSettings) reuses the
+// helpers in settings.ts — adminPasswordHash/setupComplete are never mapped into
+// the SiteSettings object, so they never reach page data.
 
 /** Store a new admin password (hashed). Used by the wizard and Settings. */
 export async function setAdminPassword(db: Database, password: string): Promise<void> {
-	await setSettingRaw(db, 'adminPasswordHash', await hashPassword(password));
+	await setRawSetting(db, 'adminPasswordHash', await hashPassword(password));
 }
 
 export async function markSetupComplete(db: Database): Promise<void> {
-	await setSettingRaw(db, 'setupComplete', 'true');
+	await setRawSetting(db, 'setupComplete', 'true');
 }
 
 type Env = App.Platform['env'];
@@ -124,7 +113,7 @@ export async function verifyAdminPassword(
 	env: Env | undefined,
 	password: string
 ): Promise<boolean> {
-	const hash = await getSettingRaw(db, 'adminPasswordHash');
+	const hash = await getRawSetting(db, 'adminPasswordHash');
 	if (hash) return verifyPasswordHash(password, hash);
 
 	const legacy = env?.ADMIN_PASSWORD;

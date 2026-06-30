@@ -13,11 +13,13 @@ import { eq, isNull, and, ne } from 'drizzle-orm';
 import { artists } from './db/schema';
 import { getRawSetting, setRawSetting } from './settings';
 import type { SiteSettings } from './settings';
+import { sanitizeUrl } from './validate';
 import {
 	isRegistryEnabled,
 	registryDelta,
 	registrySearch,
 	firstHandle,
+	SOCIAL_URL_KEYS,
 	type RegistryArtist
 } from './registry';
 import type { Database } from './db';
@@ -35,17 +37,14 @@ export interface SyncSummary {
 	scanned: number;
 }
 
-/** Map a registry record's socials onto the local artist *Url columns. */
-function socialsToColumns(socials: Record<string, string>) {
-	return {
-		twitterUrl: socials.twitterUrl ?? null,
-		blueskyUrl: socials.blueskyUrl ?? null,
-		telegramUrl: socials.telegramUrl ?? null,
-		furAffinityUrl: socials.furAffinityUrl ?? null,
-		deviantArtUrl: socials.deviantArtUrl ?? null,
-		patreonUrl: socials.patreonUrl ?? null,
-		instagramUrl: socials.instagramUrl ?? null
-	};
+// Map a registry record's socials onto the local artist *Url columns. The
+// registry is untrusted cross-tenant input, so every URL is run through
+// sanitizeUrl (dropping javascript:/data:/vbscript:) before it can be stored and
+// later rendered into href/src on public pages.
+function socialsToColumns(socials: Record<string, string>): Record<string, string | null> {
+	const out: Record<string, string | null> = {};
+	for (const k of SOCIAL_URL_KEYS) out[k] = sanitizeUrl(socials[k]);
+	return out;
 }
 
 export async function syncArtists(
@@ -77,26 +76,35 @@ export async function syncArtists(
 				.get();
 			if (!local) continue;
 
-			const base = {
-				registryVersion: ra.version,
-				registrySyncedAt: new Date().toISOString()
-			};
-			if (settings.registryOverridesLocal) {
-				// Authoritative refresh: registry wins.
+			const now = new Date().toISOString();
+
+			// Merged: re-point the local link to the surviving artist so the fork
+			// doesn't stay bound to a dead id. Clear the version so the survivor
+			// (whose updatedAt the registry bumps on merge) refreshes on a later pass.
+			if (ra.status === 'merged' && ra.mergedInto) {
 				await db
 					.update(artists)
-					.set({
-						name: ra.displayName,
-						avatarUrl: ra.avatarUrl,
-						...socialsToColumns(ra.socials),
-						...base
-					})
+					.set({ globalId: ra.mergedInto, registryVersion: null, registrySyncedAt: now })
+					.where(eq(artists.id, local.id));
+				refreshed++;
+				continue;
+			}
+			// Tombstoned (takedown) records: don't copy their data over local rows.
+			if (ra.status !== 'active') continue;
+
+			const avatar = sanitizeUrl(ra.avatarUrl);
+			const base = { registryVersion: ra.version, registrySyncedAt: now };
+			if (settings.registryOverridesLocal) {
+				// Authoritative refresh: registry wins (URLs sanitized).
+				await db
+					.update(artists)
+					.set({ name: ra.displayName, avatarUrl: avatar, ...socialsToColumns(ra.socials), ...base })
 					.where(eq(artists.id, local.id));
 			} else {
 				// Respect local edits: only fill an empty avatar; keep name/socials.
 				await db
 					.update(artists)
-					.set({ avatarUrl: local.avatarUrl || ra.avatarUrl, ...base })
+					.set({ avatarUrl: local.avatarUrl || avatar, ...base })
 					.where(eq(artists.id, local.id));
 			}
 			refreshed++;
@@ -123,6 +131,14 @@ export async function syncArtists(
 		const matches = await registrySearch(env, { handle });
 		const match = matches[0];
 		if (!match) continue;
+		// Don't link two local rows to the same registry artist (only one would
+		// ever refresh). The unique index on global_id also enforces this.
+		const already = await db
+			.select({ id: artists.id })
+			.from(artists)
+			.where(eq(artists.globalId, match.globalId))
+			.get();
+		if (already) continue;
 		await db
 			.update(artists)
 			.set({

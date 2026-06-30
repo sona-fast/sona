@@ -124,26 +124,23 @@ export async function registrySubmit(
 	);
 }
 
+/** The artist social-link columns, shared by every place that maps socials. */
+export const SOCIAL_URL_KEYS = [
+	'twitterUrl',
+	'blueskyUrl',
+	'telegramUrl',
+	'furAffinityUrl',
+	'deviantArtUrl',
+	'patreonUrl',
+	'instagramUrl'
+] as const;
+
+export type SocialUrls = Partial<Record<(typeof SOCIAL_URL_KEYS)[number], string | null>>;
+
 /** Build the registry `socials` payload from an artist's *Url fields. */
-export function artistSocials(a: {
-	twitterUrl?: string | null;
-	blueskyUrl?: string | null;
-	telegramUrl?: string | null;
-	furAffinityUrl?: string | null;
-	deviantArtUrl?: string | null;
-	patreonUrl?: string | null;
-	instagramUrl?: string | null;
-}): Record<string, string> {
+export function artistSocials(a: SocialUrls): Record<string, string> {
 	const out: Record<string, string> = {};
-	for (const k of [
-		'twitterUrl',
-		'blueskyUrl',
-		'telegramUrl',
-		'furAffinityUrl',
-		'deviantArtUrl',
-		'patreonUrl',
-		'instagramUrl'
-	] as const) {
+	for (const k of SOCIAL_URL_KEYS) {
 		const v = a[k];
 		if (typeof v === 'string' && v) out[k] = v;
 	}

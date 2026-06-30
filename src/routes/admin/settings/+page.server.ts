@@ -11,9 +11,11 @@ import {
 	tags,
 	imageTags,
 	characters,
-	imageCharacters
+	imageCharacters,
+	sessions
 } from '$lib/server/db/schema';
-import { sql, inArray } from 'drizzle-orm';
+import { sql, inArray, ne } from 'drizzle-orm';
+import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifyAdminPassword, setAdminPassword } from '$lib/server/admin-auth';
@@ -152,7 +154,7 @@ export const actions = {
 		};
 	},
 
-	changePassword: async ({ request, platform }) => {
+	changePassword: async ({ request, platform, cookies }) => {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
 		const current = (data.get('currentPassword') as string) ?? '';
@@ -169,6 +171,11 @@ export const actions = {
 			return fail(401, { error: 'Current password is incorrect.' });
 		}
 		await setAdminPassword(db, next);
+		// Rotating the password revokes every OTHER session (in case one was
+		// stolen) while keeping the admin who just changed it signed in.
+		const currentToken = cookies.get(SESSION_COOKIE);
+		if (currentToken) await db.delete(sessions).where(ne(sessions.token, currentToken));
+		else await db.delete(sessions);
 		return { passwordChanged: true };
 	},
 
