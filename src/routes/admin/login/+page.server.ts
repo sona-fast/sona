@@ -4,7 +4,8 @@ import {
 	verifyAdminPassword,
 	loginThrottleCheck,
 	loginThrottleFailure,
-	loginThrottleReset
+	loginThrottleReset,
+	hashToken
 } from '$lib/server/admin-auth';
 import { SESSION_COOKIE } from '$lib/config';
 import { getDb } from '$lib/server/db';
@@ -51,8 +52,8 @@ export const actions = {
 		// Sweep expired sessions before issuing a new one.
 		await db.delete(sessions).where(lt(sessions.expiresAt, new Date().toISOString()));
 
-		// Store session in D1
-		await db.insert(sessions).values({ token, expiresAt });
+		// Store the session HASH in D1; the cookie carries the raw token.
+		await db.insert(sessions).values({ token: await hashToken(token), expiresAt });
 
 		cookies.set(SESSION_COOKIE, token, {
 			path: '/',

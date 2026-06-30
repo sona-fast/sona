@@ -55,6 +55,17 @@ export async function hashPassword(password: string): Promise<string> {
 	return `pbkdf2$sha256$${PBKDF2_ITERATIONS}$${toB64(salt)}$${toB64(hash)}`;
 }
 
+/**
+ * Hash (SHA-256 hex) for admin session tokens stored at rest, so a leaked DB /
+ * backup doesn't yield usable cookies. Tokens are high-entropy random UUIDs, so a
+ * plain digest (not slow PBKDF2) is appropriate. The cookie holds the raw token;
+ * the sessions table holds its hash.
+ */
+export async function hashToken(token: string): Promise<string> {
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+	return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 	if (a.length !== b.length) return false;
 	let r = 0;

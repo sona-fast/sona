@@ -3,13 +3,14 @@ import { fail, redirect } from '@sveltejs/kit';
 import { lt } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { sessions, characters } from '$lib/server/db/schema';
-import { saveSettings } from '$lib/server/settings';
+import { saveSettings, getRawSetting } from '$lib/server/settings';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import {
 	isSetupComplete,
 	setAdminPassword,
 	markSetupComplete,
-	constantTimeEqual
+	constantTimeEqual,
+	hashToken
 } from '$lib/server/admin-auth';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
@@ -39,11 +40,22 @@ export const load: PageServerLoad = async ({ platform }) => {
 export const actions = {
 	default: async ({ request, platform, cookies }) => {
 		const db = getDb(platform!.env.DB);
+		const env = platform?.env;
 
-		// Defense in depth: never run setup twice.
-		if (await isSetupComplete(db, platform?.env)) {
-			redirect(302, '/admin/login');
+		// Defense in depth: never run setup twice. Unlike the load (which fails
+		// toward showing the wizard), the ACTION fails CLOSED — if we can't read the
+		// setup state (e.g. a transient D1 error), refuse rather than risk a takeover
+		// re-running setup on an already-configured site.
+		let alreadyComplete: boolean;
+		try {
+			alreadyComplete =
+				!!env?.ADMIN_PASSWORD ||
+				(await getRawSetting(db, 'setupComplete')) === 'true' ||
+				!!(await getRawSetting(db, 'adminPasswordHash'));
+		} catch {
+			return fail(503, { error: 'Could not verify setup state — try again shortly.' });
 		}
+		if (alreadyComplete) redirect(302, '/admin/login');
 
 		const hasToken = !!platform?.env.SETUP_TOKEN;
 		if (!dev && !hasToken) {
@@ -118,7 +130,7 @@ export const actions = {
 		const token = crypto.randomUUID();
 		const expiresAt = new Date(Date.now() + SESSION_DURATION * 1000).toISOString();
 		await db.delete(sessions).where(lt(sessions.expiresAt, new Date().toISOString()));
-		await db.insert(sessions).values({ token, expiresAt });
+		await db.insert(sessions).values({ token: await hashToken(token), expiresAt });
 		cookies.set(SESSION_COOKIE, token, {
 			path: '/',
 			httpOnly: true,

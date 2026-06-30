@@ -3,7 +3,7 @@ import { sequence } from '@sveltejs/kit/hooks';
 import { redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
-import { isSetupComplete } from '$lib/server/admin-auth';
+import { isSetupComplete, hashToken } from '$lib/server/admin-auth';
 import { getSettings } from '$lib/server/settings';
 import { THEME_MODE_COOKIE, SESSION_COOKIE } from '$lib/config';
 import { eq } from 'drizzle-orm';
@@ -31,7 +31,7 @@ const authHandle: Handle = async ({ event, resolve }) => {
 			const session = await db
 				.select()
 				.from(sessions)
-				.where(eq(sessions.token, token))
+				.where(eq(sessions.token, await hashToken(token)))
 				.get();
 
 			if (session && new Date(session.expiresAt) > new Date()) {

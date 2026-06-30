@@ -18,7 +18,7 @@ import { sql, inArray, ne } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { resolveAvatarUrl } from '$lib/server/avatar';
-import { verifyAdminPassword, setAdminPassword } from '$lib/server/admin-auth';
+import { verifyAdminPassword, setAdminPassword, hashToken } from '$lib/server/admin-auth';
 import { isRegistryEnabled } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
@@ -174,7 +174,7 @@ export const actions = {
 		// Rotating the password revokes every OTHER session (in case one was
 		// stolen) while keeping the admin who just changed it signed in.
 		const currentToken = cookies.get(SESSION_COOKIE);
-		if (currentToken) await db.delete(sessions).where(ne(sessions.token, currentToken));
+		if (currentToken) await db.delete(sessions).where(ne(sessions.token, await hashToken(currentToken)));
 		else await db.delete(sessions);
 		return { passwordChanged: true };
 	},
