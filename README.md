@@ -1,249 +1,139 @@
-# sparky.ink
+# Sona
 
-A personal furry art gallery for collecting and showcasing commissioned artwork from talented artists. Built as a self-hosted alternative to [AfterDark.art](https://afterdark.art/) (shutting down), inspired by [kobaj.art](https://kobaj.art/gallery/).
+A self-hostable, forkable **fursona site** — a personal gallery for your
+character's commissioned art, fursuit photos, and sticker packs, with a clean
+single-admin CMS. Fork it, deploy it to your own Cloudflare account, configure it
+through the setup UI, pick a theme, and it's your site.
 
-## Overview
+Sona is the generalized version of [sparky.ink](https://sparky.ink) (the original
+deployment, kept in-repo as the reference config under
+[`examples/sparky.ink/`](examples/sparky.ink)). The project home is
+[sona.fast](https://sona.fast).
 
-sparky.ink is a single-admin gallery site. Visitors browse publicly with no login required. The site owner (Sparky) manages all content through a protected admin panel — uploading images, managing artists, organizing collections, and tagging artwork.
+> **Status:** under active generalization. The de-branding (config + settings)
+> and repo/config scaffolding are in place; the first-run setup wizard, theming,
+> and the shared artist registry are in progress. See [Roadmap](#roadmap).
 
-This is **not** a platform — there are no user accounts, no social features, no moderation tools. It's a personal portfolio/gallery with a clean, purpose-built admin CMS.
+## What you get
 
-## Tech Stack
+- **Art gallery** — upload commissioned artwork, organize into collections, tag
+  it, credit artists, mark NSFW, link source posts. Public browse + search; no
+  visitor login.
+- **Fursuit photos** — import your fursuit photos from FurTrack (license-aware),
+  self-hosted afterward. *(Gated by `FURTRACK_MODE`; requires FurTrack approval
+  for live use.)*
+- **Sticker packs** — mirror Telegram sticker sets or upload your own; static,
+  animated (.tgs→Lottie), and video stickers, with per-sticker artist credit and
+  emoji search. *(Telegram import gated by `TELEGRAM_BOT_TOKEN`.)*
+- **Single-admin CMS** — a protected admin panel for all content management. No
+  user accounts, no moderation tools — it's a personal site, not a platform.
+- **Themes + landing layouts** *(in progress)* — selectable visual themes and
+  landing-page layouts (a mosaic hero, or a multi-path entry).
+- **Shared artist registry** *(in progress)* — opt into a central, curated artist
+  directory so you don't re-enter the same artists every fork.
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| Framework | **SvelteKit** | Full-stack SSR, form actions for admin CRUD |
-| Hosting | **Cloudflare Pages** | Edge deployment via `@sveltejs/adapter-cloudflare` |
-| Database | **Cloudflare D1** | SQLite at the edge, serverless |
-| ORM | **Drizzle** | Type-safe, lightweight, first-class D1 support |
-| Image Storage | **UploadThing** | Handles uploads, returns hosted URLs |
-| Auth | **Cookie-based session** | Single admin user, password hashed in D1 |
-| Styling | **TBD** | Dark theme default, light mode toggle |
+## Tech stack
 
-## Data Model
+| Layer | Technology |
+|-------|-----------|
+| Framework | **SvelteKit** (Svelte 5 runes), SSR + form actions |
+| Hosting | **Cloudflare Pages** (`@sveltejs/adapter-cloudflare`) |
+| Database | **Cloudflare D1** (SQLite at the edge) via **Drizzle ORM** |
+| Image storage | **R2** or **UploadThing** (pluggable, per-site setting) |
+| Auth | Cookie session, single admin |
+| i18n | **Paraglide** (inlang) — public UI localized (en/ja) |
 
-### Entities
+## Quick start (fork → deploy)
 
-**Images** — the core content unit
-- Title, alt text (derived from title), source post URL
-- Resolution, file size
-- NSFW flag
-- Upload date
-- References one Artist, one Collection (optional), many Tags
+> A guided setup CLI + first-run wizard are coming (Phase 2 of the roadmap).
+> Until then, the manual path:
 
-**Artists** — directory that grows over time as new commissions are added
-- Name, avatar
-- Social links: Twitter/X, Bluesky, Telegram, FurAffinity, DeviantArt, Patreon
+1. **Fork** this repo and clone it. `npm install`.
+2. **Create Cloudflare resources**: a D1 database and (if using R2) a bucket.
+   ```sh
+   npx wrangler d1 create your-db-name
+   npx wrangler r2 bucket create your-images-bucket
+   ```
+3. **Configure** `wrangler.toml`: copy the template and fill in your names + the
+   D1 `database_id` from step 2.
+   ```sh
+   cp wrangler.toml.example wrangler.toml
+   ```
+4. **Set secrets** (`wrangler pages secret put <NAME>`): `ADMIN_PASSWORD`, and as
+   needed `UPLOADTHING_TOKEN`, `TELEGRAM_BOT_TOKEN`, `CRON_SECRET`.
+5. **Deploy.** Pushing to `main` runs the GitHub Actions workflow
+   ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)): it applies
+   D1 migrations and deploys to Pages. Set repo secrets `CLOUDFLARE_ACCOUNT_ID` +
+   `CLOUDFLARE_API_TOKEN`, and (optionally) repo variables `CF_PAGES_PROJECT` /
+   `D1_DATABASE_NAME` / `SITE_URL`.
+6. **Configure your site** in the admin panel → **Settings**: site name, owner /
+   persona name, about text, social links, storage provider, primary character.
 
-**Collections** — curated groupings (e.g., "Nature Spirits", "Cyberpunk OCs", "Commission Showcase")
-- Name, cover image
-- Contains many Images
+### Local development
 
-**Tags** — freeform labels (e.g., "character", "fantasy", "cyberpunk", "portrait")
-- Name
-- Applied to many Images (many-to-many)
-
-**Sticker Packs** (`sticker_packs`) — a pack of stickers, either mirrored from a Telegram set or self-hosted from uploads
-- Name, slug, description, cover image, source (`telegram` / `self-hosted`), published flag
-- Belongs to one Character; `manager_artist_id` (null = mixed-artist pack managed by the site owner; a value = single-artist pack)
-
-**Stickers** (`stickers`) — one sticker within a pack
-- Image/thumbnail URL, width/height, format (`png` / `webp` / `animated` / `video`), position, NSFW flag
-- References one Pack and optionally one Artist (per-sticker attribution; null = "Unattributed")
-- `telegram_file_unique_id` dedupes re-imports of the same Telegram set
-
-**Sticker Emojis** (`sticker_emojis`) — emoji associated with a sticker
-- Sticker reference + emoji glyph (many emoji per sticker, powers emoji search/filter)
-
-### Relationships
-
+```sh
+npm run dev      # localhost:5173 (D1 + R2 via wrangler platformProxy)
+npm run check    # paraglide compile + svelte-check
+npm test         # vitest
 ```
-Artist 1──* Image *──* Tag
-                |
-        Collection 1──* Image
-```
 
-- An image belongs to **one artist** (the commissioned artist)
-- An image belongs to **zero or one collection**
-- An image can have **many tags**, and a tag can be on **many images**
-- An artist can have **many images** across different collections
+Local secrets go in `.dev.vars` (gitignored). `FURTRACK_MODE=mock` serves bundled
+demo fursuit data without calling FurTrack.
+
+## Configuration model
+
+Two tiers (see [`src/lib/config.ts`](src/lib/config.ts) and
+[`src/lib/server/settings.ts`](src/lib/server/settings.ts)):
+
+- **Runtime, editable in the admin UI → `site_settings` (D1):** site name, owner
+  name, about text, social links, storage provider, public R2 URL, primary
+  character, theme, landing layout. These are what make your site *yours*.
+- **Build/deploy-time → `src/lib/config.ts` + `wrangler.toml`:** values needed
+  before the DB exists or baked into the deploy (app name, session cookie name,
+  storage keys, Cloudflare resource IDs).
+
+## Data model
+
+- **Images** — the core unit: title, slug, URLs, dimensions, NSFW/published
+  flags, source post, md5 (dedup). Belongs to **one artist**, **zero or one
+  collection**, **many tags**, and is linked to the site **character(s)**.
+- **Artists** — directory of credited artists: name, avatar, social links. The
+  seam for the shared registry.
+- **Collections** — curated groupings of images.
+- **Tags** — freeform many-to-many labels.
+- **Characters** — the fursona(s) the site is about (single per instance by
+  convention; resolved implicitly).
+- **Fursuit photos** — imported from FurTrack; credit a free-text photographer,
+  carry a license + optional manual-permission audit string.
+- **Sticker packs / stickers / sticker emojis** — a pack (Telegram-mirrored or
+  self-hosted) of stickers; **per-sticker** artist attribution; emoji junction
+  powers search. Pack shape (single- vs multi-artist) is derived, not stored.
+
+Schema: [`src/lib/server/db/schema.ts`](src/lib/server/db/schema.ts); migrations
+in [`drizzle/`](drizzle).
 
 ## Pages
 
-### Public Pages
+**Public:** Home (`/`), Gallery (`/gallery`, `/gallery/[slug]`), Fursuit
+(`/gallery/fursuit/[id]`), Collections (`/collections`, `/collections/[slug]`),
+Stickers (`/stickers`, `/stickers/[slug]`, `/stickers/[slug]/[id]`), About
+(`/about`).
 
-#### Landing / Home (`/`)
-- Hero banner with site tagline: "A home for the art I love"
-- Subtitle describing the gallery's purpose
-- "Browse Gallery" CTA button
-- "Recent Uploads" section — 2 rows of 4 artwork cards
-- "See more" link to full gallery
-- Footer with copyright and social links
+**Admin** (behind auth, shared sidebar): Upload, All Images, Collections, Tags,
+Artists, Characters, Fursuit Photos, Stickers (import / manual / edit), Settings.
 
-#### Gallery / Browse (`/gallery`)
-- Page title with total artwork count
-- **Search bar** — search artworks by title
-- **Filters**: tag dropdown, artist dropdown, sort order (newest, oldest, etc.)
-- **View toggle**: grid view / list view
-- **Masonry-style grid** — artwork cards at varied sizes for visual interest
-- **Pagination** — numbered pages with previous/next
-- Each card shows: image thumbnail, title, artist name, primary tag
+## Roadmap
 
-#### Single Image View (`/gallery/:slug`)
-- **Breadcrumb navigation**: Gallery > Collection > Image Title
-- **Large image preview** (left side)
-- **Metadata panel** (right side):
-  - Title, "Commission by [Artist]"
-  - Artist avatar with social link icons
-  - Commissioned date
-  - "Source" link — "View original post on [platform]"
-  - Tags (displayed as labels)
-  - Details: resolution, file size, upload date, collection link
-- **Download button** — full-resolution original
-- **Share button**
-- **NSFW handling**: blurred by default with click-to-reveal overlay
+Generalization is phased (full plan tracked separately):
 
-#### About (`/about`)
-- Profile card with avatar
-- Name and role: "Furry art collector & commissioner"
-- Bio text describing the site's purpose
-- "Find me on" social links (same platforms as artists)
-- "Browse Gallery" CTA
-- Footer
-
-#### Stickers (`/stickers`)
-- **Pack grid** — each card shows an auto-generated mosaic cover (up to 2×2 of the pack's stickers), source chip (Telegram / Self-hosted), artist credit, sticker count, and an "Add to Telegram" link
-- **Emoji rail** — most-used emoji across packs, click to filter
-- **Filters**: free-text/emoji search and artist dropdown — when active, the page switches to a cross-pack grid of matching stickers
-- **Single pack (`/stickers/:slug`)** — pack header with cover, description, and artist credit; a scoped emoji rail and contributing-artist filter over the pack's stickers
-- **Single sticker (`/stickers/:slug/:id`)** — large preview (static image, animated Lottie, or video), emoji chips, artist credit + social links, NSFW blur with click-to-reveal, and a format-aware download
-- **Download (`/stickers/:slug/:id/download`)** — same-origin proxy that streams the original bytes (preserves animated/video formats)
-
-### Admin Pages (behind auth)
-
-All admin pages share a **sidebar navigation**: Upload, All Images, Collections, Tags, Settings. Top bar shows "Admin Panel" badge with admin avatar.
-
-#### Admin: All Images (`/admin/images`)
-- Page title with total count
-- **"Upload New" button** (top right)
-- **Search bar**
-- **Sort dropdown** (sort by date, etc.)
-- **Data table**: thumbnail, title, artist, tags, date, actions (edit, delete)
-- **Pagination** (previous/next)
-
-#### Admin: Upload / Edit Image (`/admin/upload`)
-- **Drag-and-drop upload area** with "Browse Files" button
-- Supported formats: PNG, JPG, GIF, WEBP up to 50MB
-- **Image Details form**:
-  - Title (text input)
-  - Artist (select from existing directory, or add new)
-  - Artist social links (Twitter/X, Bluesky, Telegram, FurAffinity, DeviantArt, Patreon) — shown when adding a new artist
-  - Collection (select dropdown)
-  - Tags (multi-select / comma-separated)
-  - NSFW checkbox ("Mark as NSFW")
-  - Source Post URL (link to original post on Twitter/FA/etc.)
-- **Cancel / Upload Artwork** buttons
-
-#### Admin: Collections (`/admin/collections`)
-- Page title with total count
-- **"New Collection" button**
-- **Grid of collection cards**: cover image, name, artwork count, edit button
-
-#### Admin: Tags (`/admin/tags`)
-- Page title with total count
-- **"Add Tag" button**
-- **Search bar**
-- **Data table**: tag name, "Used In" count, created date, actions (edit, delete)
-
-#### Admin: Stickers (`/admin/stickers`)
-- **Pack list** with client-side search and source filter: pack, credit, source, sticker count, published toggle, actions (open on Telegram, Re-sync, edit, delete)
-- **"Import from Telegram"** (`/admin/stickers/import`) — paste a Telegram set URL to load a review grid; batched/limit-safe import (20 per batch with progress), per-sticker emoji/artist/NSFW/exclude controls, bulk editing, and an inline new-artist modal
-- **Re-sync** — re-opens the import grid against the current Telegram set (already-imported stickers shown in place, new ones ready to add)
-- **"Add pack manually"** (`/admin/stickers/manual`) — drag-and-drop PNG/WebP upload with per-sticker emoji/artist/NSFW
-- **Edit pack** (`/admin/stickers/:id/edit`) — drag-to-reorder stickers, bulk artist/NSFW editing, inline new-artist modal, publish toggle
-
-#### Admin: Settings (`/admin/settings`)
-- **Site Information**: site name, tagline, about text
-- **Your Social Links**: Twitter/X, Bluesky, Telegram, FurAffinity
-- **Storage**: usage display (used space, image count, provider name)
-- **Danger Zone**: destructive actions (TBD)
-- **"Save Changes" button**
-
-## Key Features
-
-### For Visitors
-- Browse artwork without login
-- Search and filter by tags, artists, sort order
-- View full image details with artist credits and social links
-- Download original resolution images
-- NSFW images blurred by default, click to reveal
-- Dark theme (default) with light mode toggle
-- Responsive / mobile-friendly grid layout
-- Accessible alt text on all images
-- Browse sticker packs, search/filter by emoji or artist, and download stickers (static, animated, or video) in their original format
-
-### For Admin
-- Upload images with drag-and-drop
-- Manage artist directory (grows over time with each new commission)
-- Organize images into collections
-- Tag images with freeform labels
-- Mark images as NSFW
-- Link to original source posts
-- View storage usage
-- Edit site metadata and social links
-- Manage sticker packs: import from Telegram (batched, with per-sticker review and bulk editing) or upload manually, re-sync packs (manually or via a scheduled, opt-in daily cron), with per-sticker emoji/artist attribution
-
-## Design
-
-Mockups are in `sparky-ink.pen` (Pencil file). The design uses the **Lunaris** design system (dark theme) with orange accent colors.
-
-Key design decisions:
-- Dark background (`#1a1a1a`-ish) as default — standard for art gallery sites
-- Orange CTA buttons for primary actions
-- Monospace headings for a distinctive, slightly technical feel
-- Card-based artwork display with rounded corners
-- Masonry/varied-size grid for visual interest in the gallery
-- Clean metadata panel on single image view
-- Sidebar navigation for admin pages
-
-## Project Structure (Planned)
-
-```
-sparky.ink/
-  src/
-    lib/
-      server/
-        db/           # Drizzle schema & migrations
-        auth.ts       # Admin session management
-      components/     # Shared Svelte components
-    routes/
-      (public)/
-        +page.svelte          # Landing / Home
-        gallery/
-          +page.svelte        # Gallery / Browse
-          [slug]/
-            +page.svelte      # Single Image View
-        about/
-          +page.svelte        # About
-      admin/
-        +layout.svelte        # Admin layout with sidebar
-        images/
-          +page.svelte        # All Images
-        upload/
-          +page.svelte        # Upload / Edit Image
-        collections/
-          +page.svelte        # Collections
-        tags/
-          +page.svelte        # Tags
-        settings/
-          +page.svelte        # Settings
-  drizzle/                    # Migration files
-  static/                    # Static assets
-  sparky-ink.pen              # Design mockups
-  wrangler.toml               # Cloudflare config
-```
+- ✅ **Phase 0** — de-brand identity into config + settings.
+- ✅ **Phase 1** — repo split + config/seed (this).
+- ⏳ **Phase 2** — auth hardening (DB-hashed password) + first-run wizard + setup CLI.
+- ⏳ **Phase 3** — themes + selectable landing layouts.
+- ⏳ **Phase 4** — central artist registry service (`sona-registry`).
+- ⏳ **Phase 5** — fork ↔ registry integration.
 
 ## References
 
-- **AfterDark.art** — the platform being replaced ([example collection](https://afterdark.art/collection/Q29sbGVjdGlvbk5vZGU6MzM0))
-- **kobaj.art** — friend's gallery, similar concept, hosted on S3+CloudFront ([gallery](https://kobaj.art/gallery/))
+- **AfterDark.art** — the platform this lineage replaced.
+- **kobaj.art** — a similar self-hosted gallery.

@@ -2,8 +2,8 @@ import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 // Serves objects from the R2 bucket binding. Primary use is local dev (the
-// cdn.sparky.ink custom domain fronts the real bucket, not miniflare's local one).
-// In production, R2 images are served directly by cdn.sparky.ink, so this route
+// the R2 custom domain fronts the real bucket, not miniflare's local one).
+// In production, R2 images are served directly by the R2 custom domain, so this route
 // is a fallback. Resized variants still go through cdnImage() / Image Transformations.
 export const GET: RequestHandler = async ({ params, platform }) => {
 	const key = params.key;

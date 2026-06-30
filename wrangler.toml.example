@@ -1,0 +1,38 @@
+# Sona — Cloudflare configuration template.
+#
+# Copy this file to `wrangler.toml` and fill in your own values (or let the
+# setup CLI generate it for you). `wrangler.toml` itself is gitignored so each
+# deployment keeps its own resource IDs without merge conflicts when you pull
+# upstream Sona updates. A worked example is in `examples/sparky.ink/`.
+
+# Your Cloudflare Pages project name (lowercase, hyphenated). Also used as the
+# wrangler-action --project-name and the GitHub Actions CF_PAGES_PROJECT var.
+name = "sona"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".svelte-kit/cloudflare"
+
+# Fursuit-photos feature gate. 'off' disables it, 'mock' serves bundled demo
+# data for local dev, 'live' calls the real FurTrack API (requires approval).
+[vars]
+FURTRACK_MODE = "off"
+
+# Secrets (NOT defined here — set with `wrangler pages secret put <NAME>`):
+#   ADMIN_PASSWORD     — admin login password
+#   UPLOADTHING_TOKEN  — only if storageProvider = 'uploadthing'
+#   TELEGRAM_BOT_TOKEN — optional; enables the Telegram sticker importer
+#   CRON_SECRET        — optional; bearer for POST /api/cron/* (sticker re-sync)
+
+# D1 database. Create with `wrangler d1 create <your-db-name>` and paste the
+# returned database_id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "sona-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+# Image object storage (R2). Only used when the active storage provider is 'r2'
+# (a site setting). Public delivery is via a custom domain on the bucket, set as
+# the `r2PublicUrl` site setting (e.g. https://cdn.example.com).
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "sona-images"

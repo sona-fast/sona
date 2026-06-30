@@ -6,7 +6,7 @@ export interface R2Options {
 	bucket: R2Bucket;
 	/**
 	 * Public base URL objects are served from, no trailing slash.
-	 * Prod: the bucket's custom domain (https://cdn.sparky.ink).
+	 * Prod: the bucket's custom domain (the r2PublicUrl setting, e.g. https://cdn.example.com).
 	 * Dev: the local serving route ('/img'), since the custom domain only
 	 * fronts the real (non-miniflare) bucket.
 	 */

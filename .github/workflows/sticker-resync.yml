@@ -3,11 +3,13 @@
 # Cloudflare Pages can't run native cron, so GitHub Actions is the scheduler:
 # it POSTs to the app's re-sync endpoint, which pulls any newly-added stickers
 # into existing telegram-sourced packs (capped per run, idempotent).
-# Decision + rationale: https://github.com/sparkyfen/sparky.ink/issues/11
 #
-# Required: a repo secret CRON_SECRET (Settings → Secrets and variables →
-# Actions) matching the Pages secret of the same name (`wrangler pages secret
-# put CRON_SECRET`). Without it the endpoint returns 401/503 and this job fails.
+# Required:
+#   - repo secret CRON_SECRET (Settings → Secrets and variables → Actions)
+#     matching the Pages secret of the same name (`wrangler pages secret put
+#     CRON_SECRET`). Without it the endpoint returns 401/503 and this job fails.
+#   - repo variable SITE_URL (Actions → Variables) = your site's base URL.
+#     Defaults to https://sona.fast when unset.
 name: Sticker auto re-sync
 
 on:
@@ -30,6 +32,7 @@ jobs:
       - name: Trigger re-sync endpoint
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://sona.fast' }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
             echo "::error::CRON_SECRET repo secret is not set"; exit 1
@@ -37,7 +40,7 @@ jobs:
           code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
-            https://sparky.ink/api/cron/resync-telegram)
+            "${SITE_URL%/}/api/cron/resync-telegram")
           echo "HTTP $code"
           cat response.json || true
           echo

@@ -54,7 +54,7 @@ export interface PackSummary {
 	createdAt: string;
 	character: { id: number; name: string } | null;
 	shape: PackShape;
-	/** The managing artist, or null when managed by Sparky/site owner. */
+	/** The managing artist, or null when managed by the site owner. */
 	manager: ArtistView | null;
 	/** For single-artist packs, the one artist to credit ("by {artist}"). */
 	soleArtist: ArtistView | null;

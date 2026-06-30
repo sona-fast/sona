@@ -113,7 +113,7 @@ export const fursuitPhotos = sqliteTable('fursuit_photos', {
 // A pack is *of* one character. `managerArtistId` encodes pack shape: a value =
 // single-artist pack managed by that artist (every sticker's artistId equals it —
 // enforced in $lib/server/stickers); null = self-managed by the site owner
-// (Sparky), which may mix many artists. There is deliberately no stored
+// (the site owner), which may mix many artists. There is deliberately no stored
 // "single vs multi" flag — shape is derived. See stickers-design-brief.md.
 export const stickerPacks = sqliteTable('sticker_packs', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
@@ -123,7 +123,7 @@ export const stickerPacks = sqliteTable('sticker_packs', {
 	// Contact-sheet / preview only — a cover, never the source for emoji search.
 	coverImageUrl: text('cover_image_url'),
 	characterId: integer('character_id').notNull().references(() => characters.id),
-	// null = managed by Sparky/site owner; a value = managed by that artist (and
+	// null = managed by the site owner; a value = managed by that artist (and
 	// the pack is therefore single-artist).
 	managerArtistId: integer('manager_artist_id').references(() => artists.id),
 	telegramUrl: text('telegram_url'),

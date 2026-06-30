@@ -16,7 +16,7 @@ const CONTENT_TYPES: Record<string, string> = {
 
 // GET /stickers/[slug]/[id]/download
 // Streams a sticker's high-res file as a forced download (Content-Disposition).
-// A plain <a download> to cdn.sparky.ink wouldn't work (cross-origin downloads are
+// A plain <a download> to the R2 custom domain wouldn't work (cross-origin downloads are
 // ignored by browsers), so we proxy same-origin. We always serve the ORIGINAL
 // stored bytes: routing static stickers through a Cloudflare Image transform to
 // PNG would flatten animated WebP/GIF down to a single frame. The original is

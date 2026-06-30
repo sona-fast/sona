@@ -15,7 +15,7 @@ export const MOCK_PHOTOS: FursuitPhoto[] = [
 		photographer: 'GraphFox Photography',
 		photographerUrl: 'https://www.furtrack.com/user/graphfox',
 		event: 'FWA 2026',
-		character: 'sparky',
+		character: 'example_character',
 		tags: ['fox', 'fursuit'],
 		takenAt: '2026-03-21',
 		license: LICENSES['cc-by-nc-nd']
@@ -29,7 +29,7 @@ export const MOCK_PHOTOS: FursuitPhoto[] = [
 		photographer: 'Critter Lens',
 		photographerUrl: 'https://www.furtrack.com/user/critterlens',
 		event: 'MFF 2025',
-		character: 'sparky',
+		character: 'example_character',
 		tags: ['fox', 'fursuit', 'dance'],
 		takenAt: '2025-12-04',
 		license: LICENSES['cc-by']
@@ -43,7 +43,7 @@ export const MOCK_PHOTOS: FursuitPhoto[] = [
 		photographer: 'PawPrint Studios',
 		photographerUrl: 'https://www.furtrack.com/user/pawprint',
 		event: 'Anthrocon 2025',
-		character: 'sparky',
+		character: 'example_character',
 		tags: ['fox', 'fursuit', 'portrait'],
 		takenAt: '2025-07-05',
 		license: LICENSES['cc-by-nc']
@@ -57,7 +57,7 @@ export const MOCK_PHOTOS: FursuitPhoto[] = [
 		photographer: 'WildRuffer',
 		photographerUrl: 'https://www.furtrack.com/user/wildruffer',
 		event: 'FWA 2026',
-		character: 'sparky',
+		character: 'example_character',
 		tags: ['fox', 'fursuit', 'outdoor'],
 		takenAt: '2026-03-22',
 		license: LICENSES['public-domain']
@@ -71,7 +71,7 @@ export const MOCK_PHOTOS: FursuitPhoto[] = [
 		photographer: 'NocVision Media',
 		photographerUrl: 'https://www.furtrack.com/user/nocvision',
 		event: 'MFF 2025',
-		character: 'sparky',
+		character: 'example_character',
 		tags: ['fox', 'fursuit', 'lowlight'],
 		takenAt: '2025-12-06',
 		license: LICENSES['cc-by-nd']
@@ -87,7 +87,7 @@ export const MOCK_PHOTOS: FursuitPhoto[] = [
 		photographer: 'StudioLumen',
 		photographerUrl: 'https://www.furtrack.com/user/studiolumen',
 		event: 'FWA 2026',
-		character: 'sparky',
+		character: 'example_character',
 		tags: ['fox', 'fursuit'],
 		takenAt: '2026-03-22',
 		license: LICENSES['all-rights-reserved']
@@ -101,7 +101,7 @@ export const MOCK_PHOTOS: FursuitPhoto[] = [
 		photographer: 'Anon Shutterpup',
 		photographerUrl: 'https://www.furtrack.com/user/anonshutterpup',
 		event: 'MFF 2025',
-		character: 'sparky',
+		character: 'example_character',
 		tags: ['fox', 'fursuit'],
 		takenAt: '2025-12-05',
 		license: LICENSES['photographer-discretion']

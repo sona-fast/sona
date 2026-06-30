@@ -386,7 +386,7 @@ export async function importTelegramPack(opts: {
 	settings: SiteSettings;
 	db: Database;
 	nameOrUrl: string;
-	/** null = managed by Sparky; a value = single-artist pack. */
+	/** null = managed by the site owner; a value = single-artist pack. */
 	managerArtistId: number | null;
 	/** Fallback artist for stickers with no per-sticker override; null = unattributed. */
 	defaultArtistId: number | null;
@@ -573,7 +573,7 @@ export async function importStickerBatch(opts: {
 	settings: SiteSettings;
 	db: Database;
 	nameOrUrl: string;
-	/** null = managed by Sparky; a value = single-artist pack. */
+	/** null = managed by the site owner; a value = single-artist pack. */
 	managerArtistId: number | null;
 	items: StickerBatchItem[];
 	/** Make a provider's relative URL (R2 dev '/img/...') absolute for storage. */

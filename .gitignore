@@ -27,6 +27,10 @@ vite.config.ts.timestamp-*
 
 # Cloudflare
 .dev.vars
+# Per-deployment Cloudflare config (resource IDs). Copy wrangler.toml.example to
+# wrangler.toml and fill in your own. The reference values live in
+# examples/sparky.ink/wrangler.toml.
+/wrangler.toml
 
 # Pencil generated images
 /images/

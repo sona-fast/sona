@@ -23,7 +23,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	const contentType = file.type || 'application/octet-stream';
 	// Only store safe raster images. SVG/HTML/other types could execute as active
-	// content when served from the cdn.sparky.ink origin.
+	// content when served straight from the R2 custom-domain origin.
 	if (!isAllowedImageType(contentType)) {
 		error(415, `Unsupported image type: ${contentType}. Allowed: JPEG, PNG, GIF, WebP, AVIF.`);
 	}
@@ -32,7 +32,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	const { url } = await storage.put({ suggestedKey: key, body: file.stream(), contentType, filename: file.name });
 	// R2 in dev returns a root-relative '/img/...' URL; store it absolute so it
-	// survives sanitizeUrl and renders the same as prod (cdn.sparky.ink).
+	// survives sanitizeUrl and renders the same as prod (the R2 custom domain).
 	const absoluteUrl = url.startsWith('/') ? new URL(url, request.url).href : url;
 	return json({ url: absoluteUrl, size: file.size });
 };

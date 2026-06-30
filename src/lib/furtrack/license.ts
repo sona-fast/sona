@@ -1,7 +1,7 @@
 // FurTrack per-photo copyright/license handling.
 //
 // FurTrack lets each photographer pick a copyright option per photo. We mirror
-// those options here and decide which ones sparky.ink may display publicly.
+// those options here and decide which ones the site may display publicly.
 //
 // Rule for this (non-commercial, no-edits) site: a photo is shown publicly ONLY
 // if its license explicitly permits reposting — i.e. any Creative Commons option

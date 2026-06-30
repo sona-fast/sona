@@ -25,27 +25,33 @@ jobs:
 
       - run: npm run build
 
+      # Per-deployment names. Set repo variables CF_PAGES_PROJECT and
+      # D1_DATABASE_NAME (Settings → Secrets and variables → Actions → Variables);
+      # they default to the Sona template names when unset.
       - name: Create Pages project if needed
+        env:
+          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
         run: |
           curl -s -X POST \
             "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects" \
             -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d '{"name":"sparky-ink","production_branch":"main"}' \
+            -d "{\"name\":\"${CF_PAGES_PROJECT}\",\"production_branch\":\"main\"}" \
             | jq '.success // .errors'
 
       - name: Run D1 migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME || 'sona-db' }}
         run: |
           for f in drizzle/*.sql; do
             echo "Running migration: $f"
-            npx wrangler d1 execute sparky-ink-db --remote --file="$f" || true
+            npx wrangler d1 execute "$D1_DATABASE_NAME" --remote --file="$f" || true
           done
 
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .svelte-kit/cloudflare --project-name=sparky-ink
+          command: pages deploy .svelte-kit/cloudflare --project-name=${{ vars.CF_PAGES_PROJECT || 'sona' }}

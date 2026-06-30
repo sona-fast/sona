@@ -158,7 +158,7 @@ export async function importFursuitPhotos(opts: {
 			if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
 			const contentType = res.headers.get('content-type') ?? 'image/jpeg';
 			// Only self-host safe raster images. A non-image (or SVG) response would be
-			// served as active content from cdn.sparky.ink — refuse it.
+			// served as active content from the R2 custom domain — refuse it.
 			if (!isAllowedImageType(contentType)) throw new Error(`unsupported image type: ${contentType}`);
 			const ext = extFromContentType(contentType);
 

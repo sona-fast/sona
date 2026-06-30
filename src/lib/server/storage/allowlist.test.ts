@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { isAllowedImageType, isAllowedStickerType, extFromContentType } from './index';
 
 // These allow-lists ARE a security boundary: stored objects are served from
-// cdn.sparky.ink with their stored content-type, bypassing the worker's
+// the R2 custom domain with their stored content-type, bypassing the worker's
 // X-Content-Type-Options:nosniff. So nothing that could execute as active content
 // in that origin (svg+xml, html) may pass — for either images or stickers.
 

@@ -53,7 +53,7 @@ export function extFromContentType(contentType: string): string {
 
 // Content-types accepted for stored, publicly-served images. Deliberately raster
 // only — NOT image/svg+xml or any document/active type. Stored objects are served
-// from cdn.sparky.ink (the R2 custom domain serves them directly with their stored
+// from the R2 custom domain (which serves them directly with their stored
 // content-type, bypassing the worker's security headers), so an SVG with a <script>
 // or a text/html payload would execute in that origin. Keep this strict.
 const ALLOWED_IMAGE_TYPES = new Set([
@@ -77,7 +77,7 @@ export function isAllowedImageType(contentType: string | null | undefined): bool
 //  - application/json — Telegram animated (.tgs) stickers, gunzipped to plain
 //    Lottie JSON at import time. JSON is data, not script; safe to serve.
 // Still NO svg/html/active types — same reasoning as ALLOWED_IMAGE_TYPES (objects
-// are served from cdn.sparky.ink with their stored content-type, past the worker's
+// are served from the R2 custom domain with their stored content-type, past the worker's
 // security headers). Keep this strict; only add provably-inert media types.
 const ALLOWED_STICKER_TYPES = new Set([
 	'image/png',

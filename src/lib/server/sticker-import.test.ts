@@ -111,18 +111,18 @@ describe('parseStickerFormInputs', () => {
 	it('parses indexed sticker fields in order with compacted positions', () => {
 		const out = parseStickerFormInputs(
 			fd({
-				'sticker[0][imageUrl]': 'https://cdn.sparky.ink/stickers/a.webp',
+				'sticker[0][imageUrl]': 'https://cdn.example.com/stickers/a.webp',
 				'sticker[0][emojis]': '😀, 🔥',
 				'sticker[0][artistId]': '3',
 				'sticker[0][format]': 'webp',
-				'sticker[1][imageUrl]': 'https://cdn.sparky.ink/stickers/b.json',
+				'sticker[1][imageUrl]': 'https://cdn.example.com/stickers/b.json',
 				'sticker[1][format]': 'animated',
 				'sticker[1][nsfw]': '1'
 			}),
 			99
 		);
 		expect(out).toHaveLength(2);
-		expect(out[0]).toMatchObject({ imageUrl: 'https://cdn.sparky.ink/stickers/a.webp', artistId: 3, emojis: ['😀', '🔥'], position: 0, format: 'webp' });
+		expect(out[0]).toMatchObject({ imageUrl: 'https://cdn.example.com/stickers/a.webp', artistId: 3, emojis: ['😀', '🔥'], position: 0, format: 'webp' });
 		expect(out[1]).toMatchObject({ artistId: 99, nsfw: true, position: 1, format: 'animated' });
 	});
 
@@ -130,7 +130,7 @@ describe('parseStickerFormInputs', () => {
 		const out = parseStickerFormInputs(
 			fd({
 				'sticker[0][imageUrl]': '',
-				'sticker[1][imageUrl]': 'https://cdn.sparky.ink/stickers/b.webp'
+				'sticker[1][imageUrl]': 'https://cdn.example.com/stickers/b.webp'
 			}),
 			7
 		);
@@ -141,7 +141,7 @@ describe('parseStickerFormInputs', () => {
 
 	it('falls back to webp for an unknown format', () => {
 		const out = parseStickerFormInputs(
-			fd({ 'sticker[0][imageUrl]': 'https://cdn.sparky.ink/x.webp', 'sticker[0][format]': 'exe' }),
+			fd({ 'sticker[0][imageUrl]': 'https://cdn.example.com/x.webp', 'sticker[0][format]': 'exe' }),
 			1
 		);
 		expect(out[0].format).toBe('webp');
