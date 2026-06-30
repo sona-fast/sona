@@ -4,7 +4,12 @@ import { artists, images, stickers, stickerPacks } from '$lib/server/db/schema';
 import { eq, sql, like } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
-import { isRegistryEnabled, registrySubmit, artistSocials } from '$lib/server/registry';
+import {
+	isRegistryEnabled,
+	registrySubmit,
+	registrySubmissionsMine,
+	artistSocials
+} from '$lib/server/registry';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
@@ -47,13 +52,34 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		.limit(perPage)
 		.offset((page - 1) * perPage);
 
+	// Which of the artists on this page have an open registry submission? (Match an
+	// update by its target global_id, a create by the proposed display name.)
+	const registryEnabled = isRegistryEnabled(platform?.env);
+	let pendingArtistIds: number[] = [];
+	if (registryEnabled) {
+		const pending = (await registrySubmissionsMine(platform?.env)).filter((s) => s.status === 'pending');
+		pendingArtistIds = allArtists
+			.filter((a) =>
+				pending.some((s) => {
+					if (s.targetGlobalId) return !!a.globalId && s.targetGlobalId === a.globalId;
+					try {
+						return (JSON.parse(s.payload).displayName as string) === a.name;
+					} catch {
+						return false;
+					}
+				})
+			)
+			.map((a) => a.id);
+	}
+
 	return {
 		artists: allArtists,
 		page,
 		total,
 		totalPages: Math.ceil(total / perPage),
 		q,
-		registryEnabled: isRegistryEnabled(platform?.env)
+		registryEnabled,
+		pendingArtistIds
 	};
 };
 

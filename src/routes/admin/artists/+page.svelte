@@ -102,6 +102,7 @@
 					<td class="artist-name">
 						{artist.name}
 						{#if artist.globalId}<span class="reg-badge" title="Linked to the shared registry">shared</span>{/if}
+						{#if data.pendingArtistIds?.includes(artist.id)}<span class="reg-badge pending" title="Submitted to the shared registry — awaiting review">pending</span>{/if}
 					</td>
 					<td class="artwork-count">{worksLabel(artist)}</td>
 					<td>
@@ -400,6 +401,11 @@
 		border: 1px solid var(--primary);
 		border-radius: var(--radius-pill);
 		vertical-align: middle;
+	}
+
+	.reg-badge.pending {
+		color: var(--muted-foreground);
+		border-color: var(--muted-foreground);
 	}
 
 	.avatar {

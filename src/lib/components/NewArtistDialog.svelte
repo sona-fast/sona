@@ -118,7 +118,12 @@
 				toast.error(errorMsg);
 				return;
 			}
-			oncreated((await res.json()) as { id: number; name: string });
+			const result = (await res.json()) as { id: number; name: string; status?: string };
+			if (result.status === 'linked')
+				toast.success(`Linked to your existing artist "${result.name}"`);
+			else if (result.status === 'reused')
+				toast.success(`Using your existing registry-linked artist "${result.name}"`);
+			oncreated(result);
 		} catch {
 			errorMsg = 'Network error creating artist.';
 			toast.error(errorMsg);

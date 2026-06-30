@@ -96,7 +96,10 @@ const authHandle: Handle = async ({ event, resolve }) => {
 	// paint is correct (no flash). themeId comes from cached settings; mode from a
 	// cookie the client toggle sets. Both fill placeholders in app.html. Skip the
 	// settings read for assets/api (not HTML).
-	const mode = event.cookies.get(THEME_MODE_COOKIE) === 'light' ? 'light' : 'dark';
+	// Explicit cookie wins; otherwise emit 'auto' and let a tiny head script resolve
+	// it to the visitor's OS preference before first paint (see app.html).
+	const modeCookie = event.cookies.get(THEME_MODE_COOKIE);
+	const mode = modeCookie === 'light' || modeCookie === 'dark' ? modeCookie : 'auto';
 	let themeId = 'default';
 	if (event.platform?.env.DB && !isAsset && !path.startsWith('/api')) {
 		try {

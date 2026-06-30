@@ -137,6 +137,27 @@ export const SOCIAL_URL_KEYS = [
 
 export type SocialUrls = Partial<Record<(typeof SOCIAL_URL_KEYS)[number], string | null>>;
 
+export interface RegistrySubmission {
+	id: number;
+	kind: 'create' | 'update';
+	targetGlobalId: string | null;
+	payload: string; // JSON string
+	matchedGlobalId: string | null;
+	status: 'pending' | 'approved' | 'rejected' | 'superseded';
+	createdAt: string;
+}
+
+/** This fork's submissions + their fate (for showing per-artist status). */
+export async function registrySubmissionsMine(env: Env | undefined): Promise<RegistrySubmission[]> {
+	const out = await call<{ submissions: RegistrySubmission[] }>(
+		env,
+		`/v1/submissions/mine`,
+		{ method: 'GET', auth: true },
+		{ submissions: [] }
+	);
+	return out.submissions ?? [];
+}
+
 /** Build the registry `socials` payload from an artist's *Url fields. */
 export function artistSocials(a: SocialUrls): Record<string, string> {
 	const out: Record<string, string> = {};

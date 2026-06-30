@@ -13,6 +13,8 @@ function initialMode(): Theme {
 	if (typeof document !== 'undefined') {
 		const attr = document.documentElement.getAttribute('data-theme');
 		if (attr === 'light' || attr === 'dark') return attr;
+		// 'auto' or unset → follow OS (matches the head resolver in app.html).
+		return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 	}
 	return 'dark';
 }
