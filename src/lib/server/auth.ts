@@ -2,10 +2,6 @@ import { SESSION_COOKIE } from '$lib/config';
 
 const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days
 
-export function verifyPassword(input: string, adminPassword: string): boolean {
-	return input === adminPassword;
-}
-
 export function createSessionCookie(): string {
 	const token = crypto.randomUUID();
 	return [

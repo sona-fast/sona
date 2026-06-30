@@ -17,11 +17,16 @@ pages_build_output_dir = ".svelte-kit/cloudflare"
 [vars]
 FURTRACK_MODE = "off"
 
-# Secrets (NOT defined here — set with `wrangler pages secret put <NAME>`):
-#   ADMIN_PASSWORD     — admin login password
+# Secrets (NOT defined here — set with `wrangler pages secret put <NAME>`; the
+# `npm run setup` CLI sets SETUP_TOKEN + CRON_SECRET for you):
+#   SETUP_TOKEN        — one-time bootstrap token for the first-run wizard
+#                        (/admin/setup); required in production
 #   UPLOADTHING_TOKEN  — only if storageProvider = 'uploadthing'
 #   TELEGRAM_BOT_TOKEN — optional; enables the Telegram sticker importer
 #   CRON_SECRET        — optional; bearer for POST /api/cron/* (sticker re-sync)
+#   ADMIN_PASSWORD     — legacy/optional; new installs set the password in the
+#                        wizard (stored hashed). If present, login accepts it once
+#                        and migrates it to a hash.
 
 # D1 database. Create with `wrangler d1 create <your-db-name>` and paste the
 # returned database_id here.

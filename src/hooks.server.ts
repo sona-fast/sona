@@ -4,6 +4,7 @@ import { getSessionToken } from '$lib/server/auth';
 import { redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
+import { isSetupComplete } from '$lib/server/admin-auth';
 import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { getTextDirection } from '$lib/paraglide/runtime';
@@ -49,8 +50,29 @@ const authHandle: Handle = async ({ event, resolve }) => {
 		event.locals.admin = false;
 	}
 
-	// Protect admin routes (except login)
-	if (event.url.pathname.startsWith('/admin') && !event.url.pathname.startsWith('/admin/login')) {
+	// First-run setup gate. Until an admin credential exists, force every request
+	// to the setup wizard — a freshly deployed fork must not be browsable or
+	// admin-able before its owner has claimed it. Assets and the wizard itself are
+	// exempt. isSetupComplete caches the positive result, so this is a no-op (no
+	// query) once the site is configured. Fails toward setup, never toward an open
+	// admin (see admin-auth.ts).
+	const path = event.url.pathname;
+	const isSetupRoute = path === '/admin/setup' || path.startsWith('/admin/setup/');
+	const isAsset = path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png';
+	if (event.platform?.env.DB && !isSetupRoute && !isAsset) {
+		const db = getDb(event.platform.env.DB);
+		if (!(await isSetupComplete(db, event.platform.env))) {
+			if (path.startsWith('/api')) return new Response('Setup required', { status: 503 });
+			throw redirect(302, '/admin/setup');
+		}
+	}
+
+	// Protect admin routes (except login and the first-run setup wizard)
+	if (
+		event.url.pathname.startsWith('/admin') &&
+		!event.url.pathname.startsWith('/admin/login') &&
+		!event.url.pathname.startsWith('/admin/setup')
+	) {
 		if (!event.locals.admin) {
 			throw redirect(302, '/admin/login');
 		}

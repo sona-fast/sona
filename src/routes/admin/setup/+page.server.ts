@@ -1,0 +1,122 @@
+import { dev } from '$app/environment';
+import { fail, redirect } from '@sveltejs/kit';
+import { lt } from 'drizzle-orm';
+import { getDb } from '$lib/server/db';
+import { sessions, characters } from '$lib/server/db/schema';
+import { saveSettings } from '$lib/server/settings';
+import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import {
+	isSetupComplete,
+	setAdminPassword,
+	markSetupComplete,
+	constantTimeEqual
+} from '$lib/server/admin-auth';
+import { SESSION_COOKIE } from '$lib/config';
+import type { Actions, PageServerLoad } from './$types';
+
+const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days
+const MIN_PASSWORD_LENGTH = 8;
+
+export const load: PageServerLoad = async ({ platform }) => {
+	const db = getDb(platform!.env.DB);
+
+	// Already configured → the wizard is closed.
+	if (await isSetupComplete(db, platform?.env)) {
+		redirect(302, '/admin/login');
+	}
+
+	const hasToken = !!platform?.env.SETUP_TOKEN;
+	return {
+		// In production the bootstrap token is mandatory; if it's missing the deploy
+		// can't be safely claimed, so we block rather than run an open wizard.
+		tokenRequired: !dev && hasToken,
+		setupBlocked: !dev && !hasToken
+	};
+};
+
+export const actions = {
+	default: async ({ request, platform, cookies }) => {
+		const db = getDb(platform!.env.DB);
+
+		// Defense in depth: never run setup twice.
+		if (await isSetupComplete(db, platform?.env)) {
+			redirect(302, '/admin/login');
+		}
+
+		const hasToken = !!platform?.env.SETUP_TOKEN;
+		if (!dev && !hasToken) {
+			return fail(503, {
+				error:
+					'SETUP_TOKEN is not configured. Set it with `wrangler pages secret put SETUP_TOKEN` (the setup CLI does this) and redeploy before running setup.'
+			});
+		}
+
+		const data = await request.formData();
+
+		// 1. Bootstrap token (required in production).
+		if (!dev && hasToken) {
+			const token = (data.get('setupToken') as string) ?? '';
+			if (!constantTimeEqual(token, platform!.env.SETUP_TOKEN!)) {
+				return fail(401, { error: 'Invalid setup token.' });
+			}
+		}
+
+		// 2. Admin password.
+		const password = (data.get('password') as string) ?? '';
+		const confirm = (data.get('confirmPassword') as string) ?? '';
+		if (password.length < MIN_PASSWORD_LENGTH) {
+			return fail(400, { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+		}
+		if (password !== confirm) {
+			return fail(400, { error: 'Passwords do not match.' });
+		}
+
+		// 3. Branding + config.
+		const siteName = sanitizeText(data.get('siteName') as string, 100);
+		if (!siteName) {
+			return fail(400, { error: 'Site name is required.' });
+		}
+		const provider = data.get('storageProvider') === 'r2' ? 'r2' : 'uploadthing';
+		const fursonaName = sanitizeText(data.get('fursonaName') as string, 100);
+
+		await saveSettings(db, {
+			siteName,
+			ownerName: sanitizeText(data.get('ownerName') as string, 100),
+			aboutText: sanitizeText(data.get('aboutText') as string, 2000),
+			twitterUrl: sanitizeUrl(data.get('twitter') as string) || '',
+			blueskyUrl: sanitizeUrl(data.get('bluesky') as string) || '',
+			telegramUrl: sanitizeUrl(data.get('telegram') as string) || '',
+			furAffinityUrl: sanitizeUrl(data.get('furaffinity') as string) || '',
+			furtrackUrl: sanitizeUrl(data.get('furtrack') as string) || '',
+			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100),
+			storageProvider: provider,
+			r2PublicUrl: provider === 'r2' ? sanitizeUrl(data.get('r2PublicUrl') as string) || '' : ''
+		});
+
+		// 4. The fursona this site is about (stickers/fursuit resolve one character).
+		const characterName = fursonaName || siteName;
+		const existing = await db.select({ id: characters.id }).from(characters).get();
+		if (!existing) {
+			await db.insert(characters).values({ name: characterName });
+		}
+
+		// 5. Admin credential (hashed) + flip the gate.
+		await setAdminPassword(db, password);
+		await markSetupComplete(db);
+
+		// 6. Log the operator straight in.
+		const token = crypto.randomUUID();
+		const expiresAt = new Date(Date.now() + SESSION_DURATION * 1000).toISOString();
+		await db.delete(sessions).where(lt(sessions.expiresAt, new Date().toISOString()));
+		await db.insert(sessions).values({ token, expiresAt });
+		cookies.set(SESSION_COOKIE, token, {
+			path: '/',
+			httpOnly: true,
+			secure: !dev,
+			sameSite: 'lax',
+			maxAge: SESSION_DURATION
+		});
+
+		redirect(303, '/admin');
+	}
+} satisfies Actions;

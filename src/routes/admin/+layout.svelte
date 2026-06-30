@@ -24,7 +24,7 @@
 
 </script>
 
-{#if $page.url.pathname === '/admin/login'}
+{#if $page.url.pathname === '/admin/login' || $page.url.pathname === '/admin/setup'}
 	{@render children()}
 {:else}
 	<div class="admin-layout">

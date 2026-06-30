@@ -45,29 +45,34 @@ deployment, kept in-repo as the reference config under
 
 ## Quick start (fork → deploy)
 
-> A guided setup CLI + first-run wizard are coming (Phase 2 of the roadmap).
-> Until then, the manual path:
-
 1. **Fork** this repo and clone it. `npm install`.
-2. **Create Cloudflare resources**: a D1 database and (if using R2) a bucket.
+2. **Provision Cloudflare** with the setup CLI (after `npx wrangler login`):
    ```sh
-   npx wrangler d1 create your-db-name
-   npx wrangler r2 bucket create your-images-bucket
+   npm run setup
    ```
-3. **Configure** `wrangler.toml`: copy the template and fill in your names + the
-   D1 `database_id` from step 2.
-   ```sh
-   cp wrangler.toml.example wrangler.toml
-   ```
-4. **Set secrets** (`wrangler pages secret put <NAME>`): `ADMIN_PASSWORD`, and as
-   needed `UPLOADTHING_TOKEN`, `TELEGRAM_BOT_TOKEN`, `CRON_SECRET`.
-5. **Deploy.** Pushing to `main` runs the GitHub Actions workflow
+   It creates the Pages project, D1 database, and (optionally) an R2 bucket;
+   writes `wrangler.toml`; applies migrations; and generates + sets the
+   `SETUP_TOKEN` and `CRON_SECRET` secrets. It prints your one-time `SETUP_TOKEN`
+   — keep it for step 4.
+
+   *(Prefer to do it by hand? Copy `wrangler.toml.example` → `wrangler.toml`,
+   create the resources with `wrangler d1 create` / `wrangler r2 bucket create`,
+   and set `SETUP_TOKEN` yourself.)*
+3. **Deploy.** Pushing to `main` runs the GitHub Actions workflow
    ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)): it applies
    D1 migrations and deploys to Pages. Set repo secrets `CLOUDFLARE_ACCOUNT_ID` +
    `CLOUDFLARE_API_TOKEN`, and (optionally) repo variables `CF_PAGES_PROJECT` /
-   `D1_DATABASE_NAME` / `SITE_URL`.
-6. **Configure your site** in the admin panel → **Settings**: site name, owner /
-   persona name, about text, social links, storage provider, primary character.
+   `D1_DATABASE_NAME` / `SITE_URL`. (Or deploy directly:
+   `npx wrangler pages deploy .svelte-kit/cloudflare`.)
+4. **Finish in the first-run wizard.** Open `/admin/setup`, enter your
+   `SETUP_TOKEN`, and set your admin password + site name, owner/persona name,
+   social links, and storage provider. The wizard runs once, then closes itself.
+5. **(If using UploadThing)** set the token:
+   `wrangler pages secret put UPLOADTHING_TOKEN`. **(For Telegram stickers)** set
+   `TELEGRAM_BOT_TOKEN`.
+
+The admin password is stored as a salted **PBKDF2 hash** in D1 (never plaintext).
+You can rotate it later in **Settings → Security**.
 
 ### Local development
 
@@ -127,8 +132,8 @@ Artists, Characters, Fursuit Photos, Stickers (import / manual / edit), Settings
 Generalization is phased (full plan tracked separately):
 
 - ✅ **Phase 0** — de-brand identity into config + settings.
-- ✅ **Phase 1** — repo split + config/seed (this).
-- ⏳ **Phase 2** — auth hardening (DB-hashed password) + first-run wizard + setup CLI.
+- ✅ **Phase 1** — repo split + config/seed.
+- ✅ **Phase 2** — auth hardening (DB-hashed password) + first-run wizard + setup CLI (this).
 - ⏳ **Phase 3** — themes + selectable landing layouts.
 - ⏳ **Phase 4** — central artist registry service (`sona-registry`).
 - ⏳ **Phase 5** — fork ↔ registry integration.

@@ -1,6 +1,11 @@
 import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
-import { verifyPassword } from '$lib/server/auth';
+import {
+	verifyAdminPassword,
+	loginThrottleCheck,
+	loginThrottleFailure,
+	loginThrottleReset
+} from '$lib/server/admin-auth';
 import { SESSION_COOKIE } from '$lib/config';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
@@ -16,7 +21,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 };
 
 export const actions = {
-	default: async ({ request, platform, cookies }) => {
+	default: async ({ request, platform, cookies, getClientAddress }) => {
 		const data = await request.formData();
 		const password = data.get('password') as string;
 
@@ -24,12 +29,22 @@ export const actions = {
 			return fail(400, { error: 'Password is required' });
 		}
 
-		const adminPassword = platform?.env?.ADMIN_PASSWORD;
-		if (!adminPassword || !verifyPassword(password, adminPassword)) {
-			return fail(401, { error: 'Invalid password' });
+		// Best-effort brute-force throttle (per-isolate; see admin-auth.ts).
+		const ip = getClientAddress();
+		const now = Date.now();
+		const wait = loginThrottleCheck(ip, now);
+		if (wait !== null) {
+			return fail(429, {
+				error: `Too many attempts. Try again in ${Math.ceil(wait / 60)} minute(s).`
+			});
 		}
 
 		const db = getDb(platform!.env.DB);
+		if (!(await verifyAdminPassword(db, platform?.env, password))) {
+			loginThrottleFailure(ip, now);
+			return fail(401, { error: 'Invalid password' });
+		}
+		loginThrottleReset(ip);
 		const token = crypto.randomUUID();
 		const expiresAt = new Date(Date.now() + SESSION_DURATION * 1000).toISOString();
 

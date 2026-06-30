@@ -20,6 +20,7 @@
 	let storageProvider = $state(data.settings.storageProvider);
 	let r2PublicUrl = $state(data.settings.r2PublicUrl);
 	let savingStorage = $state(false);
+	let changingPassword = $state(false);
 
 	// Usage bar reflects the ACTIVE provider. R2 has no simple usage API, so we use
 	// the DB-tracked total (every image is on the active store) against the 10GB free tier.
@@ -269,6 +270,35 @@
 			</button>
 			<a href="/admin/storage/migrate" class="btn btn-outline">Migrate existing images →</a>
 		</div>
+	</section>
+</form>
+
+<form method="POST" action="?/changePassword" class="settings-form" use:enhance={() => {
+	changingPassword = true;
+	return async ({ result, update }) => {
+		await update({ reset: result.type === 'success' });
+		changingPassword = false;
+		if (result.type === 'success') toast.success('Password changed');
+		else if (result.type === 'failure') toast.error((result.data?.error as string) ?? 'Could not change password');
+	};
+}}>
+	<section>
+		<h2>Security</h2>
+		<label>
+			<span>Current password</span>
+			<input type="password" name="currentPassword" class="input" required autocomplete="current-password" />
+		</label>
+		<label>
+			<span>New password</span>
+			<input type="password" name="newPassword" class="input" required minlength="8" autocomplete="new-password" />
+		</label>
+		<label>
+			<span>Confirm new password</span>
+			<input type="password" name="confirmPassword" class="input" required minlength="8" autocomplete="new-password" />
+		</label>
+		<button type="submit" class="btn btn-secondary" disabled={changingPassword}>
+			{changingPassword ? 'Changing…' : 'Change password'}
+		</button>
 	</section>
 </form>
 

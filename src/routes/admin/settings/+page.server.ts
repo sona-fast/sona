@@ -16,6 +16,7 @@ import {
 import { sql, inArray } from 'drizzle-orm';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { resolveAvatarUrl } from '$lib/server/avatar';
+import { verifyAdminPassword, setAdminPassword } from '$lib/server/admin-auth';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -122,6 +123,26 @@ export const actions = {
 			success: true,
 			message: `Active storage provider set to ${provider === 'r2' ? 'Cloudflare R2' : 'UploadThing'}. New uploads will use it; existing images are unaffected until migrated.`
 		};
+	},
+
+	changePassword: async ({ request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const data = await request.formData();
+		const current = (data.get('currentPassword') as string) ?? '';
+		const next = (data.get('newPassword') as string) ?? '';
+		const confirm = (data.get('confirmPassword') as string) ?? '';
+
+		if (next.length < 8) {
+			return fail(400, { error: 'New password must be at least 8 characters.' });
+		}
+		if (next !== confirm) {
+			return fail(400, { error: 'New passwords do not match.' });
+		}
+		if (!(await verifyAdminPassword(db, platform?.env, current))) {
+			return fail(401, { error: 'Current password is incorrect.' });
+		}
+		await setAdminPassword(db, next);
+		return { passwordChanged: true };
 	},
 
 	export: async ({ platform }) => {

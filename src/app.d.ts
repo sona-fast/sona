@@ -11,7 +11,19 @@ declare global {
 		interface Platform {
 			env: {
 				DB: D1Database;
-				ADMIN_PASSWORD: string;
+				/**
+				 * Legacy admin password (plaintext secret). Optional: new installs set
+				 * the password through the first-run wizard, which stores a PBKDF2 hash
+				 * in the DB (site_settings `adminPasswordHash`). When only this env is
+				 * present, login accepts it once and auto-migrates to the hash.
+				 */
+				ADMIN_PASSWORD?: string;
+				/**
+				 * One-time bootstrap token for /admin/setup, set by the setup CLI
+				 * (`wrangler pages secret put SETUP_TOKEN`). Required to run the
+				 * first-run wizard in production; the route closes once setup completes.
+				 */
+				SETUP_TOKEN?: string;
 				UPLOADTHING_TOKEN: string;
 				/** Fursuit photos feature gate: 'off' (default) | 'mock' | 'live'. */
 				FURTRACK_MODE?: string;
