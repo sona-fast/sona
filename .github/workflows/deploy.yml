@@ -39,15 +39,40 @@ jobs:
             -d "{\"name\":\"${CF_PAGES_PROJECT}\",\"production_branch\":\"main\"}" \
             | jq '.success // .errors'
 
+      # Apply migrations with tracking: a _cf_migrations table records which files
+      # have run, so each is applied exactly once and a genuine SQL failure FAILS
+      # the deploy (no more `|| true` masking a broken/half-applied schema).
+      #
+      # One-time baseline for a DB already migrated out-of-band (e.g. the original
+      # sparky.ink prod): before the first run on the new pipeline, seed the table
+      # so existing files aren't re-applied —
+      #   for f in drizzle/*.sql; do
+      #     wrangler d1 execute <db> --remote --command \
+      #       "INSERT OR IGNORE INTO _cf_migrations(name,applied_at) VALUES ('$(basename $f)', datetime('now'));"
+      #   done
+      # (Create the table first with the CREATE below.) Fresh forks need nothing.
       - name: Run D1 migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME || 'sona-db' }}
         run: |
+          set -euo pipefail
+          DB="$D1_DATABASE_NAME"
+          npx wrangler d1 execute "$DB" --remote --command \
+            "CREATE TABLE IF NOT EXISTS _cf_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL);"
+          applied=$(npx wrangler d1 execute "$DB" --remote --json \
+            --command "SELECT name FROM _cf_migrations;" | jq -r '.[0].results[].name' 2>/dev/null || true)
           for f in drizzle/*.sql; do
-            echo "Running migration: $f"
-            npx wrangler d1 execute "$D1_DATABASE_NAME" --remote --file="$f" || true
+            name=$(basename "$f")
+            if printf '%s\n' "$applied" | grep -qxF "$name"; then
+              echo "✓ already applied: $name"
+              continue
+            fi
+            echo "→ applying: $name"
+            npx wrangler d1 execute "$DB" --remote --file="$f"
+            npx wrangler d1 execute "$DB" --remote --command \
+              "INSERT INTO _cf_migrations (name, applied_at) VALUES ('$name', datetime('now'));"
           done
 
       - uses: cloudflare/wrangler-action@v3
