@@ -17,6 +17,8 @@ import { sql, inArray } from 'drizzle-orm';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifyAdminPassword, setAdminPassword } from '$lib/server/admin-auth';
+import { isRegistryEnabled } from '$lib/server/registry';
+import { syncArtists } from '$lib/server/artist-sync';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import type { Actions, PageServerLoad } from './$types';
@@ -80,7 +82,8 @@ export const load: PageServerLoad = async ({ platform }) => {
 		imageCount: stats?.count || 0,
 		totalSize: stats?.totalSize || 0,
 		utUsage,
-		storageStatus
+		storageStatus,
+		registryEnabled: isRegistryEnabled(platform?.env)
 	};
 };
 
@@ -115,7 +118,8 @@ export const actions = {
 			themeId,
 			landingLayout,
 			// Unchecked checkboxes don't post a field, so absence means false.
-			autoResyncEnabled: data.get('autoResyncEnabled') === 'on'
+			autoResyncEnabled: data.get('autoResyncEnabled') === 'on',
+			registryOverridesLocal: data.get('registryOverridesLocal') === 'on'
 		});
 
 		return { success: true };
@@ -133,6 +137,18 @@ export const actions = {
 		return {
 			success: true,
 			message: `Active storage provider set to ${provider === 'r2' ? 'Cloudflare R2' : 'UploadThing'}. New uploads will use it; existing images are unaffected until migrated.`
+		};
+	},
+
+	syncNow: async ({ platform }) => {
+		const env = platform?.env;
+		if (!isRegistryEnabled(env)) return fail(400, { error: 'Shared registry is not configured.' });
+		const db = getDb(env!.DB);
+		const settings = await getSettings(db, { fresh: true });
+		const summary = await syncArtists(db, env, settings);
+		return {
+			success: true,
+			syncMessage: `Sync complete — ${summary.refreshed} refreshed, ${summary.linked} newly linked.`
 		};
 	},
 

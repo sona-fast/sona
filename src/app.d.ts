@@ -43,6 +43,17 @@ declare global {
 				CRON_SECRET?: string;
 				/** R2 bucket for self-hosted images (active when storageProvider = 'r2'). */
 				IMAGES: R2Bucket;
+				/**
+				 * Shared artist registry (sona-registry). Base URL defaults to
+				 * REGISTRY_DEFAULT_URL in config.ts; override here per deployment.
+				 */
+				REGISTRY_URL?: string;
+				/**
+				 * Per-fork API key for the registry's authenticated submit endpoints.
+				 * When unset, registry features (search/pull/submit/sync) are disabled —
+				 * the site runs entirely on its local artists table.
+				 */
+				REGISTRY_API_KEY?: string;
 			};
 		}
 	}

@@ -11,6 +11,12 @@ export const artists = sqliteTable('artists', {
 	deviantArtUrl: text('deviantart_url'),
 	patreonUrl: text('patreon_url'),
 	instagramUrl: text('instagram_url'),
+	// Link to the shared artist registry (sona-registry). NULL = local-only, not
+	// yet in the registry. The local autoincrement `id` stays the render-time
+	// identity + FK target; global_id is only the cross-instance bridge.
+	globalId: text('global_id'),
+	registryVersion: integer('registry_version'),
+	registrySyncedAt: text('registry_synced_at'),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
 

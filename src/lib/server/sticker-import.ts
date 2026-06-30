@@ -1167,29 +1167,51 @@ export async function resolveOrCreateArtist(
 		deviantArtUrl: string | null;
 		patreonUrl: string | null;
 		instagramUrl: string | null;
+		/** When this artist was pulled from the shared registry: its global id +
+		 * version + pre-resolved avatar, so the new local row is linked. */
+		globalId?: string | null;
+		registryVersion?: number | null;
+		avatarUrl?: string | null;
 	}
 ): Promise<number | null> {
-	const { artistId, artistName, ...socials } = opts;
+	const {
+		artistId,
+		artistName,
+		globalId,
+		registryVersion,
+		avatarUrl: providedAvatar,
+		...socials
+	} = opts;
 	if (artistId && artistId !== 'new') return Number(artistId);
 	if (!artistName) return null;
 
-	// Resolve avatar from social links (best-effort — ignore errors).
-	let avatarUrl: string | null = null;
-	try {
-		const { resolveAvatarUrl } = await import('$lib/server/avatar');
-		avatarUrl = await resolveAvatarUrl({
-			blueskyUrl: socials.blueskyUrl,
-			twitterUrl: socials.twitterUrl,
-			furAffinityUrl: socials.furAffinityUrl,
-			patreonUrl: socials.patreonUrl
-		});
-	} catch {
-		// avatar resolution is non-critical
+	// Use the registry-provided avatar when present; else resolve from social
+	// links (best-effort — ignore errors).
+	let avatarUrl: string | null = providedAvatar ?? null;
+	if (!avatarUrl) {
+		try {
+			const { resolveAvatarUrl } = await import('$lib/server/avatar');
+			avatarUrl = await resolveAvatarUrl({
+				blueskyUrl: socials.blueskyUrl,
+				twitterUrl: socials.twitterUrl,
+				furAffinityUrl: socials.furAffinityUrl,
+				patreonUrl: socials.patreonUrl
+			});
+		} catch {
+			// avatar resolution is non-critical
+		}
 	}
 
 	const [newArtist] = await db
 		.insert(artists)
-		.values({ name: artistName, avatarUrl, ...socials })
+		.values({
+			name: artistName,
+			avatarUrl,
+			...socials,
+			globalId: globalId ?? null,
+			registryVersion: registryVersion ?? null,
+			registrySyncedAt: globalId ? new Date().toISOString() : null
+		})
 		.returning({ id: artists.id });
 	return newArtist.id;
 }

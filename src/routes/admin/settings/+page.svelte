@@ -13,6 +13,8 @@
 	let aboutText = $state(data.settings.aboutText);
 	let themeId = $state(data.settings.themeId);
 	let landingLayout = $state(data.settings.landingLayout);
+	let registryOverridesLocal = $state(data.settings.registryOverridesLocal);
+	let syncing = $state(false);
 	let primaryCharacter = $state(data.settings.primaryCharacter);
 	let twitterUrl = $state(data.settings.twitterUrl);
 	let blueskyUrl = $state(data.settings.blueskyUrl);
@@ -60,6 +62,7 @@
 		aboutText = data.settings.aboutText;
 		themeId = data.settings.themeId;
 		landingLayout = data.settings.landingLayout;
+		registryOverridesLocal = data.settings.registryOverridesLocal;
 		primaryCharacter = data.settings.primaryCharacter;
 		twitterUrl = data.settings.twitterUrl;
 		blueskyUrl = data.settings.blueskyUrl;
@@ -200,6 +203,22 @@
 		</section>
 
 		<section>
+			<h2>Shared Artist Registry</h2>
+			{#if data.registryEnabled}
+				<p class="reg-status connected">Connected to the shared registry.</p>
+				<label class="checkbox-row">
+					<input type="checkbox" name="registryOverridesLocal" bind:checked={registryOverridesLocal} />
+					<span class="checkbox-text">
+						<span class="checkbox-title">Let the registry update my linked artists</span>
+						<span class="checkbox-desc">When on, syncing overwrites a linked artist's name, avatar, and socials with the registry's. Off keeps your local edits and only fills empty fields.</span>
+					</span>
+				</label>
+			{:else}
+				<p class="reg-status">Not configured. Set a <code>REGISTRY_API_KEY</code> secret to pull shared artist data and submit your artists.</p>
+			{/if}
+		</section>
+
+		<section>
 			<h2>Storage</h2>
 			{#if activeUsage}
 				{@const pct = Math.min(100, (activeUsage.used / activeUsage.limit) * 100)}
@@ -308,7 +327,7 @@
 		else if (result.type === 'failure') toast.error((result.data?.error as string) ?? 'Could not change password');
 	};
 }}>
-	<section>
+	<section class="security-section">
 		<h2>Security</h2>
 		<label>
 			<span>Current password</span>
@@ -327,6 +346,26 @@
 		</button>
 	</section>
 </form>
+
+{#if data.registryEnabled}
+	<form method="POST" action="?/syncNow" class="settings-form" use:enhance={() => {
+		syncing = true;
+		return async ({ result, update }) => {
+			await update();
+			syncing = false;
+			if (result.type === 'success') toast.success((result.data?.syncMessage as string) ?? 'Sync complete');
+			else if (result.type === 'failure') toast.error((result.data?.error as string) ?? 'Sync failed');
+		};
+	}}>
+		<section>
+			<h2>Registry Sync</h2>
+			<p class="reg-status">Pull artist updates from the shared registry now, and link any local artists already in it. (This also runs on a schedule via the sync cron.)</p>
+			<button type="submit" class="btn btn-secondary" disabled={syncing}>
+				{syncing ? 'Syncing…' : 'Sync now'}
+			</button>
+		</section>
+	</form>
+{/if}
 
 <section class="danger-zone">
 	<h2>Danger Zone</h2>
@@ -739,5 +778,22 @@
 		.danger-card .btn {
 			width: 100%;
 		}
+	}
+
+	.reg-status {
+		font-size: 13px;
+		color: var(--muted-foreground);
+		margin: 0 0 12px;
+		line-height: 1.5;
+	}
+	.reg-status.connected {
+		color: var(--primary);
+	}
+	.reg-status code {
+		font-family: var(--font-primary);
+		font-size: 0.9em;
+		background: var(--secondary);
+		padding: 1px 5px;
+		border-radius: var(--radius-xs);
 	}
 </style>

@@ -1,0 +1,46 @@
+# Scheduled pull from the shared artist registry.
+#
+# Like the sticker re-sync, GitHub Actions is the scheduler: it POSTs to the
+# app's sync endpoint, which refreshes registry-linked artists and links any
+# local artists already in the registry. Bounded + idempotent.
+#
+# Required:
+#   - repo secret CRON_SECRET (matches the Pages secret of the same name).
+#   - repo variable SITE_URL = your site's base URL (default https://sona.fast).
+# When the registry isn't configured on the site (no REGISTRY_API_KEY) the
+# endpoint returns 503 and this job treats it as a no-op (skip, not failure).
+name: Artist registry sync
+
+on:
+  schedule:
+    # Daily at 06:30 UTC (just after the sticker re-sync).
+    - cron: '30 6 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: artist-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger artist-sync endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://sona.fast' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is not set"; exit 1
+          fi
+          code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${SITE_URL%/}/api/cron/sync-artists")
+          echo "HTTP $code"; cat response.json || true; echo
+          if [ "$code" = "503" ]; then
+            echo "Registry not configured on the site — skipping."; exit 0
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::error::Sync endpoint returned HTTP $code"; exit 1
+          fi

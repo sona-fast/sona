@@ -133,10 +133,10 @@ Generalization is phased (full plan tracked separately):
 
 - ✅ **Phase 0** — de-brand identity into config + settings.
 - ✅ **Phase 1** — repo split + config/seed.
-- ✅ **Phase 2** — auth hardening (DB-hashed password) + first-run wizard + setup CLI (this).
-- ⏳ **Phase 3** — themes + selectable landing layouts.
-- ⏳ **Phase 4** — central artist registry service (`sona-registry`).
-- ⏳ **Phase 5** — fork ↔ registry integration.
+- ✅ **Phase 2** — auth hardening (DB-hashed password) + first-run wizard + setup CLI.
+- ✅ **Phase 3** — themes + selectable landing layouts.
+- ✅ **Phase 4** — central artist registry service ([`sona-registry`](https://github.com/sona-fast/sona-registry)).
+- ✅ **Phase 5** — fork ↔ registry integration (opt-in via `REGISTRY_API_KEY`; search/pull/submit + background sync).
 
 ## References
 

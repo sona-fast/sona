@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { X, Loader2 } from 'lucide-svelte';
+	import { onMount } from 'svelte';
+	import { X, Loader2, Search } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
@@ -29,6 +30,67 @@
 	let saving = $state(false);
 	let errorMsg = $state('');
 
+	// Optional pull from the shared registry: search → pick → prefill + link.
+	type RegResult = {
+		globalId: string;
+		name: string;
+		avatarUrl: string | null;
+		version: number;
+		socials: Record<string, string>;
+	};
+	let registryEnabled = $state<boolean | null>(null);
+	let registryQuery = $state('');
+	let registryResults = $state<RegResult[]>([]);
+	let registrySearching = $state(false);
+	let pulled = $state<{ globalId: string; version: number; avatarUrl: string | null } | null>(null);
+	let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+	onMount(async () => {
+		try {
+			const res = await fetch('/api/registry/search?q=');
+			if (res.ok) registryEnabled = (await res.json()).enabled ?? false;
+		} catch {
+			registryEnabled = false;
+		}
+	});
+
+	function onRegistryInput() {
+		clearTimeout(searchTimer);
+		if (registryQuery.trim().length < 2) {
+			registryResults = [];
+			return;
+		}
+		searchTimer = setTimeout(searchRegistry, 250);
+	}
+	async function searchRegistry() {
+		registrySearching = true;
+		try {
+			const res = await fetch('/api/registry/search?q=' + encodeURIComponent(registryQuery.trim()));
+			if (res.ok) {
+				const data = await res.json();
+				registryEnabled = data.enabled ?? registryEnabled;
+				registryResults = data.artists ?? [];
+			}
+		} catch {
+			/* ignore — manual entry still works */
+		} finally {
+			registrySearching = false;
+		}
+	}
+	function applyResult(r: RegResult) {
+		name = r.name;
+		twitter = r.socials.twitterUrl ?? '';
+		bluesky = r.socials.blueskyUrl ?? '';
+		telegram = r.socials.telegramUrl ?? '';
+		furaffinity = r.socials.furAffinityUrl ?? '';
+		deviantart = r.socials.deviantArtUrl ?? '';
+		patreon = r.socials.patreonUrl ?? '';
+		instagram = r.socials.instagramUrl ?? '';
+		pulled = { globalId: r.globalId, version: r.version, avatarUrl: r.avatarUrl };
+		registryResults = [];
+		registryQuery = r.name;
+	}
+
 	async function create() {
 		if (!name.trim() || saving) return;
 		saving = true;
@@ -37,7 +99,19 @@
 			const res = await fetch('/api/artists', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name, twitter, bluesky, telegram, furaffinity, deviantart, patreon, instagram })
+				body: JSON.stringify({
+					name,
+					twitter,
+					bluesky,
+					telegram,
+					furaffinity,
+					deviantart,
+					patreon,
+					instagram,
+					globalId: pulled?.globalId,
+					registryVersion: pulled?.version,
+					avatarUrl: pulled?.avatarUrl
+				})
 			});
 			if (!res.ok) {
 				errorMsg = (await res.text()) || 'Could not create artist.';
@@ -66,6 +140,36 @@
 		{#if errorMsg}<div class="err">{errorMsg}</div>{/if}
 
 		<div class="modal-form">
+			{#if registryEnabled !== false}
+				<div class="registry-search">
+					<span class="reg-label">Search shared registry <em>(optional — pull an existing artist)</em></span>
+					<div class="reg-input">
+						<Search size={14} />
+						<input
+							type="text"
+							class="input"
+							bind:value={registryQuery}
+							oninput={onRegistryInput}
+							placeholder="Find an artist already in the registry…"
+						/>
+						{#if registrySearching}<Loader2 size={14} class="spin" />{/if}
+					</div>
+					{#if registryResults.length}
+						<ul class="reg-results">
+							{#each registryResults as r}
+								<li>
+									<button type="button" onclick={() => applyResult(r)}>
+										{#if r.avatarUrl}<img src={r.avatarUrl} alt="" />{/if}
+										<span>{r.name}</span>
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+					{#if pulled}<small class="linked">✓ Linked to the shared registry</small>{/if}
+				</div>
+			{/if}
+
 			<label>
 				<span>Artist Name</span>
 				<!-- svelte-ignore a11y_autofocus -->
@@ -116,6 +220,16 @@
 	.social-field { flex-direction: row; align-items: center; gap: 8px; color: var(--muted-foreground); }
 	.social-field .input { flex: 1; }
 	.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+	.registry-search { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--secondary); border-radius: var(--radius-s); }
+	.reg-label { font-size: 12px; color: var(--muted-foreground); }
+	.reg-label em { opacity: 0.7; font-style: italic; }
+	.reg-input { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+	.reg-input .input { flex: 1; }
+	.reg-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; }
+	.reg-results button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 6px 10px; cursor: pointer; color: var(--foreground); font-size: 14px; }
+	.reg-results button:hover { border-color: var(--primary); }
+	.reg-results img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
+	.linked { color: var(--primary); font-size: 12px; }
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 </style>

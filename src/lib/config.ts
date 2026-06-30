@@ -37,3 +37,10 @@ export const BACKUP_FILENAME_BASE = 'sona-backup';
  * Identifies the software; FurTrack itself gates on Origin/Referer, not this.
  */
 export const USER_AGENT = `Mozilla/5.0 (compatible; ${APP_NAME}/1.0; +https://sona.fast)`;
+
+/**
+ * Default base URL of the shared artist registry (sona-registry). Overridable
+ * per-deployment with the REGISTRY_URL env var. Registry features are off unless
+ * a REGISTRY_API_KEY secret is also set.
+ */
+export const REGISTRY_DEFAULT_URL = 'https://registry.sona.fast';

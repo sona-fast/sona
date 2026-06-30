@@ -27,6 +27,10 @@ FURTRACK_MODE = "off"
 #   ADMIN_PASSWORD     — legacy/optional; new installs set the password in the
 #                        wizard (stored hashed). If present, login accepts it once
 #                        and migrates it to a hash.
+#   REGISTRY_API_KEY   — optional; enables the shared artist registry (search/pull/
+#                        submit/sync). Get one via POST /v1/forks on the registry.
+#   REGISTRY_URL       — optional; override the registry base URL (defaults to the
+#                        public registry, https://registry.sona.fast).
 
 # D1 database. Create with `wrangler d1 create <your-db-name>` and paste the
 # returned database_id here.

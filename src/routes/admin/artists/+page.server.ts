@@ -4,6 +4,7 @@ import { artists, images, stickers, stickerPacks } from '$lib/server/db/schema';
 import { eq, sql, like } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import { isRegistryEnabled, registrySubmit, artistSocials } from '$lib/server/registry';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
@@ -35,6 +36,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			deviantArtUrl: artists.deviantArtUrl,
 			patreonUrl: artists.patreonUrl,
 			instagramUrl: artists.instagramUrl,
+			globalId: artists.globalId,
 			createdAt: artists.createdAt,
 			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.artist_id = artists.id)`,
 			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`
@@ -45,7 +47,14 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		.limit(perPage)
 		.offset((page - 1) * perPage);
 
-	return { artists: allArtists, page, total, totalPages: Math.ceil(total / perPage), q };
+	return {
+		artists: allArtists,
+		page,
+		total,
+		totalPages: Math.ceil(total / perPage),
+		q,
+		registryEnabled: isRegistryEnabled(platform?.env)
+	};
 };
 
 export const actions = {
@@ -85,6 +94,32 @@ export const actions = {
 			.where(eq(artists.id, id));
 
 		return { success: true };
+	},
+
+	submitToRegistry: async ({ request, platform }) => {
+		const env = platform?.env;
+		if (!isRegistryEnabled(env)) return fail(400, { error: 'Shared registry is not configured.' });
+		const db = getDb(env!.DB);
+		const data = await request.formData();
+		const id = Number(data.get('id'));
+		if (!id) return fail(400, { error: 'Artist ID is required' });
+
+		const a = await db.select().from(artists).where(eq(artists.id, id)).get();
+		if (!a) return fail(404, { error: 'Artist not found' });
+
+		const result = await registrySubmit(env, {
+			kind: a.globalId ? 'update' : 'create',
+			targetGlobalId: a.globalId ?? undefined,
+			baseVersion: a.registryVersion ?? undefined,
+			payload: {
+				displayName: a.name,
+				avatarUrl: a.avatarUrl,
+				bio: null,
+				socials: artistSocials(a)
+			}
+		});
+		if (!result) return fail(502, { error: 'Registry submission failed (registry unreachable?).' });
+		return { success: true, submitted: true };
 	},
 
 	delete: async ({ request, platform }) => {

@@ -32,6 +32,10 @@ export interface SiteSettings {
 	themeId: string;
 	/** Landing-page layout id — see src/lib/landing (e.g. 'mosaic' | 'threePath'). */
 	landingLayout: string;
+	/** When on, the registry sync overwrites locally-edited artist fields (name,
+	 * avatar, socials) for registry-linked artists. Off (default) keeps local
+	 * edits and only fills empty fields. */
+	registryOverridesLocal: boolean;
 }
 
 // Neutral, brand-agnostic defaults. A real deployment overrides these via the
@@ -56,7 +60,8 @@ const DEFAULTS: SiteSettings = {
 	// Opt-in: the daily Telegram re-sync cron is a no-op until an admin enables it.
 	autoResyncEnabled: false,
 	themeId: 'default',
-	landingLayout: 'mosaic'
+	landingLayout: 'mosaic',
+	registryOverridesLocal: false
 };
 
 // Short-TTL in-memory cache. siteSettings is global (not per-user) and changes
@@ -107,7 +112,8 @@ export async function getSettings(
 			// Booleans are persisted as the text 'true'/'false'; absent → default.
 			autoResyncEnabled: map.autoResyncEnabled === 'true',
 			themeId: map.themeId ?? DEFAULTS.themeId,
-			landingLayout: map.landingLayout ?? DEFAULTS.landingLayout
+			landingLayout: map.landingLayout ?? DEFAULTS.landingLayout,
+			registryOverridesLocal: map.registryOverridesLocal === 'true'
 		};
 		settingsCache = { value, expires: Date.now() + SETTINGS_TTL_MS };
 		return value;
@@ -115,6 +121,23 @@ export async function getSettings(
 		// Table may not exist yet during deployment — fall back to defaults.
 		// Don't cache the failure so we retry on the next request.
 		return { ...DEFAULTS };
+	}
+}
+
+/** Read a single raw site_settings row (for internal keys not in SiteSettings,
+ * e.g. the registry sync cursor). Returns null if absent. */
+export async function getRawSetting(db: Database, key: string): Promise<string | null> {
+	const row = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).get();
+	return row?.value ?? null;
+}
+
+/** Upsert a single raw site_settings row. */
+export async function setRawSetting(db: Database, key: string, value: string): Promise<void> {
+	const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).get();
+	if (existing) {
+		await db.update(siteSettings).set({ value }).where(eq(siteSettings.key, key));
+	} else {
+		await db.insert(siteSettings).values({ key, value });
 	}
 }
 

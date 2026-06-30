@@ -99,6 +99,13 @@
       "when": 1782759681573,
       "tag": "0013_nullable_sticker_artist",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1782806164833,
+      "tag": "0014_registry_artist_link",
+      "breakpoints": true
     }
   ]
 }

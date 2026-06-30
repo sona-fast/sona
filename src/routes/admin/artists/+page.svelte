@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { Search, Plus, Pencil, Trash2, X } from 'lucide-svelte';
+	import { Search, Plus, Pencil, Trash2, X, Share2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { toast } from '$lib/toast.svelte';
 	import { plural, formatDate } from '$lib';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
@@ -98,7 +99,10 @@
 							{/if}
 						</div>
 					</td>
-					<td class="artist-name">{artist.name}</td>
+					<td class="artist-name">
+						{artist.name}
+						{#if artist.globalId}<span class="reg-badge" title="Linked to the shared registry">shared</span>{/if}
+					</td>
 					<td class="artwork-count">{worksLabel(artist)}</td>
 					<td>
 						<div class="social-icons">
@@ -126,6 +130,25 @@
 						</div>
 					</td>
 					<td class="col-actions">
+						{#if data.registryEnabled}
+							<form
+								method="POST"
+								action="?/submitToRegistry"
+								style="display:inline"
+								use:enhance={() => async ({ result, update }) => {
+									await update();
+									if (result.type === 'success')
+										toast.success(artist.globalId ? 'Update submitted to registry' : 'Submitted to the registry for review');
+									else if (result.type === 'failure')
+										toast.error((result.data?.error as string) ?? 'Registry submit failed');
+								}}
+							>
+								<input type="hidden" name="id" value={artist.id} />
+								<button class="icon-btn" type="submit" aria-label="Submit to shared registry" title="Submit to shared registry">
+									<Share2 size={16} />
+								</button>
+							</form>
+						{/if}
 						<button class="icon-btn" aria-label="Edit artist" onclick={() => (editingArtist = artist)}>
 							<Pencil size={16} />
 						</button>
@@ -362,7 +385,21 @@
 	}
 
 	.col-actions {
-		width: 80px;
+		width: 120px;
+	}
+
+	.reg-badge {
+		display: inline-block;
+		margin-left: 8px;
+		padding: 1px 7px;
+		font-size: 10px;
+		font-family: var(--font-primary);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--primary);
+		border: 1px solid var(--primary);
+		border-radius: var(--radius-pill);
+		vertical-align: middle;
 	}
 
 	.avatar {

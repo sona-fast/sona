@@ -17,6 +17,10 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	const name = sanitizeText(body.name ?? '', 200);
 	if (!name) error(400, 'Artist name is required');
 
+	// Optional shared-registry link (when the artist was pulled from the registry).
+	const globalId = typeof body.globalId === 'string' && body.globalId ? body.globalId : null;
+	const rv = globalId ? Number(body.registryVersion) : NaN;
+
 	const id = await resolveOrCreateArtist(db, {
 		artistId: null,
 		artistName: name,
@@ -26,7 +30,10 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		furAffinityUrl: sanitizeUrl(body.furaffinity ?? ''),
 		deviantArtUrl: sanitizeUrl(body.deviantart ?? ''),
 		patreonUrl: sanitizeUrl(body.patreon ?? ''),
-		instagramUrl: sanitizeUrl(body.instagram ?? '')
+		instagramUrl: sanitizeUrl(body.instagram ?? ''),
+		globalId,
+		registryVersion: Number.isFinite(rv) ? rv : null,
+		avatarUrl: globalId ? sanitizeUrl(body.avatarUrl ?? '') || null : null
 	});
 	if (!id) error(400, 'Could not create artist');
 
