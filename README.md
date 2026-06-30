@@ -66,10 +66,10 @@ deployment, kept in-repo as the reference config under
    `npx wrangler pages deploy .svelte-kit/cloudflare`.)
 4. **Finish in the first-run wizard.** Open `/admin/setup`, enter your
    `SETUP_TOKEN`, and set your admin password + site name, owner/persona name,
-   social links, and storage provider. The wizard runs once, then closes itself.
-5. **(If using UploadThing)** set the token:
-   `wrangler pages secret put UPLOADTHING_TOKEN`. **(For Telegram stickers)** set
-   `TELEGRAM_BOT_TOKEN`.
+   social links, theme, and landing layout. The wizard runs once, then closes
+   itself. (Your **image storage backend is chosen in the setup CLI** above, not
+   here — switch it later in Settings → Storage Provider.)
+5. **(For Telegram stickers)** set `TELEGRAM_BOT_TOKEN`.
 
 The admin password is stored as a salted **PBKDF2 hash** in D1 (never plaintext).
 You can rotate it later in **Settings → Security**.

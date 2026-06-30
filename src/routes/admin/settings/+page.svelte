@@ -276,9 +276,11 @@
 	<section>
 		<h2>Storage Provider</h2>
 		<p class="section-desc">
-			Where new images (gallery + fursuit photos) are uploaded and served. Switching only
-			changes where <em>new</em> uploads go — existing images keep working. To move existing
-			images too, run a migration.
+			Where new images (gallery + fursuit photos) are uploaded and served. Your initial
+			provider is set up by the setup CLI; switch here to migrate to the other one. First make
+			sure the target's credentials exist (the R2 <code>IMAGES</code> binding, or the
+			<code>UPLOADTHING_TOKEN</code> secret) — see the status below. Switching only changes where
+			<em>new</em> uploads go; run a migration to move existing images too.
 		</p>
 		<div class="provider-options">
 			<label class="provider-card" class:selected={storageProvider === 'r2'}>

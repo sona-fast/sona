@@ -90,7 +90,6 @@ export const actions = {
 		if (!siteName) {
 			return fail(400, { error: 'Site name is required.' });
 		}
-		const provider = data.get('storageProvider') === 'r2' ? 'r2' : 'uploadthing';
 		const fursonaName = sanitizeText(data.get('fursonaName') as string, 100);
 		const themeRaw = (data.get('themeId') as string) ?? '';
 		const themeId = isValidThemeId(themeRaw) ? themeRaw : DEFAULT_THEME_ID;
@@ -99,6 +98,9 @@ export const actions = {
 			? layoutRaw
 			: DEFAULT_LANDING_LAYOUT;
 
+		// NB: storageProvider / r2PublicUrl are NOT set here — the setup CLI decides
+		// the storage backend (it's the only thing that can create a bucket / set a
+		// token). Switching later is a migration in Settings → Storage Provider.
 		await saveSettings(db, {
 			siteName,
 			ownerName: sanitizeText(data.get('ownerName') as string, 100),
@@ -109,8 +111,6 @@ export const actions = {
 			furAffinityUrl: sanitizeUrl(data.get('furaffinity') as string) || '',
 			furtrackUrl: sanitizeUrl(data.get('furtrack') as string) || '',
 			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100),
-			storageProvider: provider,
-			r2PublicUrl: provider === 'r2' ? sanitizeUrl(data.get('r2PublicUrl') as string) || '' : '',
 			themeId,
 			landingLayout
 		});

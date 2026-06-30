@@ -6,7 +6,6 @@
 
 	let { data, form } = $props();
 
-	let storageProvider = $state<'uploadthing' | 'r2'>('uploadthing');
 	let submitting = $state(false);
 </script>
 
@@ -92,26 +91,6 @@
 						<label><span>FurTrack</span><input type="text" name="furtrack" class="input" /></label>
 						<label><span>Primary character (FurTrack tag)</span><input type="text" name="primaryCharacter" class="input" /></label>
 					</div>
-				</section>
-
-				<section>
-					<h2>Image storage</h2>
-					<label>
-						<span>Provider</span>
-						<select name="storageProvider" class="input" bind:value={storageProvider}>
-							<option value="uploadthing">UploadThing</option>
-							<option value="r2">Cloudflare R2</option>
-						</select>
-					</label>
-					{#if storageProvider === 'r2'}
-						<label>
-							<span>R2 public URL</span>
-							<input type="text" name="r2PublicUrl" class="input" placeholder="https://cdn.example.com" />
-							<small>Your R2 bucket's custom domain.</small>
-						</label>
-					{:else}
-						<p class="hint">Set the <code>UPLOADTHING_TOKEN</code> secret for uploads to work.</p>
-					{/if}
 				</section>
 
 				<section>
