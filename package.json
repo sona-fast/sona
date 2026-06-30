@@ -1,0 +1,42 @@
+{
+	"name": "sparky.ink",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"paraglide": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --output-structure locale-modules",
+		"prepare": "npm run paraglide || echo '' && svelte-kit sync || echo ''",
+		"check": "npm run paraglide && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"devDependencies": {
+		"@inlang/paraglide-js": "^2.18.1",
+		"@sveltejs/adapter-auto": "^7.0.1",
+		"@sveltejs/kit": "^2.57.0",
+		"@sveltejs/vite-plugin-svelte": "^7.0.0",
+		"@types/node": "^25.9.1",
+		"better-sqlite3": "^12.9.0",
+		"drizzle-kit": "^0.31.10",
+		"svelte": "^5.55.2",
+		"svelte-check": "^4.4.6",
+		"tsx": "^4.21.0",
+		"typescript": "^6.0.2",
+		"vite": "^8.0.7",
+		"vitest": "^4.1.7"
+	},
+	"dependencies": {
+		"@sveltejs/adapter-cloudflare": "^7.2.8",
+		"@uploadthing/svelte": "^7.3.3",
+		"drizzle-orm": "^0.45.2",
+		"emojilib": "^4.0.3",
+		"lottie-web": "^5.13.0",
+		"lucide-svelte": "^0.468.0",
+		"uploadthing": "^7.7.4",
+		"wrangler": "^4.81.1"
+	}
+}

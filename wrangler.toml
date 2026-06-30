@@ -1,0 +1,29 @@
+name = "sparky-ink"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".svelte-kit/cloudflare"
+
+# Fursuit photos feature gate. Stays 'off' in production until FurTrack grants
+# API access; flip to 'live' only after approval. Dev uses 'mock' via .dev.vars.
+[vars]
+FURTRACK_MODE = "off"
+
+# Secrets (NOT defined here — set with `wrangler secret put <NAME>`):
+#   ADMIN_PASSWORD, UPLOADTHING_TOKEN
+#   TELEGRAM_BOT_TOKEN — Bot API token for the sticker importer; when unset the
+#   Telegram import UI stays hidden and only manual sticker upload is available.
+#   CRON_SECRET — shared bearer secret for POST /api/cron/resync-telegram (the
+#   scheduled Telegram re-sync). Set with `wrangler pages secret put CRON_SECRET`;
+#   the external scheduler sends it as `Authorization: Bearer <CRON_SECRET>`. When
+#   unset the endpoint returns 503 instead of running open.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sparky-ink-db"
+database_id = "36461474-0a61-4c8f-84cb-fd322554cab0"
+
+# Image object storage (R2). Public delivery via cdn.sparky.ink (custom domain on
+# the bucket). Only used when the active storage provider is 'r2' (a site setting).
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "sparky-ink-images"

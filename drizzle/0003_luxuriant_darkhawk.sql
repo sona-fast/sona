@@ -1,0 +1,1 @@
+ALTER TABLE `artists` ADD `instagram_url` text;

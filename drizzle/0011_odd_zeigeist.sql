@@ -1,0 +1,1 @@
+ALTER TABLE `fursuit_photos` ADD `permission_source` text;

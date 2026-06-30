@@ -1,0 +1,50 @@
+node_modules
+
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Paraglide (compiled i18n runtime — generated from messages/ + project.inlang)
+/src/lib/paraglide
+
+# Cloudflare
+.dev.vars
+
+# Pencil generated images
+/images/
+
+# Exported mockups (shared externally, not source)
+/docs/fursuit-photos-mockups/
+
+# Claude Design bundle (HTML exported from sparky-ink.pen + synced to claude.ai/design)
+/design/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code local config
+.claude/
+
+# Raw sticker downloads from dev/import (re-downloadable; not source)
+sticker-assets/

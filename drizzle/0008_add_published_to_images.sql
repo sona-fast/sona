@@ -1,0 +1,1 @@
+ALTER TABLE `images` ADD `published` integer DEFAULT true NOT NULL;

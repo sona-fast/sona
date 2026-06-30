@@ -1,0 +1,318 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@font-face {
+	font-family: 'Geist';
+	src: url('/fonts/Geist-Regular.woff2') format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Geist';
+	src: url('/fonts/Geist-Medium.woff2') format('woff2');
+	font-weight: 500;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Geist';
+	src: url('/fonts/Geist-SemiBold.woff2') format('woff2');
+	font-weight: 600;
+	font-style: normal;
+	font-display: swap;
+}
+
+:root {
+	/* Dark theme (default) */
+	--background: #111111;
+	--foreground: #FFFFFF;
+	--card: #1A1A1A;
+	--card-foreground: #FFFFFF;
+	--primary: #FF8400;
+	--primary-foreground: #111111;
+	--secondary: #2E2E2E;
+	--secondary-foreground: #FFFFFF;
+	--muted: #2E2E2E;
+	--muted-foreground: #B8B9B6;
+	--accent: #111111;
+	--accent-foreground: #F2F3F0;
+	--destructive: #FF5C33;
+	--border: #2E2E2E;
+	--input: #2E2E2E;
+	--ring: #666666;
+	--sidebar: #18181b;
+	--sidebar-accent: #2a2a30;
+	--sidebar-foreground: #fafafa;
+	--sidebar-border: rgba(255, 255, 255, 0.1);
+
+	--radius-m: 16px;
+	--radius-s: 8px;
+	--radius-xs: 4px;
+	--radius-pill: 999px;
+
+	--font-primary: 'JetBrains Mono', monospace;
+	--font-secondary: 'Geist', sans-serif;
+
+	color-scheme: dark;
+}
+
+[data-theme='light'] {
+	--background: #F2F3F0;
+	--foreground: #111111;
+	--card: #FFFFFF;
+	--card-foreground: #111111;
+	--primary: #FF8400;
+	--primary-foreground: #111111;
+	--secondary: #E7E8E5;
+	--secondary-foreground: #111111;
+	--muted: #F2F3F0;
+	--muted-foreground: #666666;
+	--accent: #F2F3F0;
+	--accent-foreground: #111111;
+	--destructive: #D93C15;
+	--border: #CBCCC9;
+	--input: #CBCCC9;
+	--ring: #666666;
+	--sidebar: #E7E8E5;
+	--sidebar-accent: #CBCCC9;
+	--sidebar-foreground: #18181b;
+	--sidebar-border: #CBCCC9;
+
+	color-scheme: light;
+}
+
+/* Reset */
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html {
+	font-family: var(--font-secondary);
+	font-size: 16px;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+body {
+	background-color: var(--background);
+	color: var(--foreground);
+	min-height: 100vh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+	font-family: var(--font-primary);
+	font-weight: 600;
+}
+
+a {
+	color: var(--primary);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+img {
+	max-width: 100%;
+	height: auto;
+	display: block;
+}
+
+button {
+	font-family: var(--font-secondary);
+	cursor: pointer;
+}
+
+input, select, textarea {
+	font-family: var(--font-secondary);
+}
+
+/* Utility classes */
+.container {
+	width: 100%;
+	max-width: 1280px;
+	margin: 0 auto;
+	padding: 0 24px;
+}
+
+/* Buttons — matches Lunaris Button/Default, Secondary, Outline, Destructive */
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	height: 40px;
+	padding: 10px 16px;
+	border-radius: var(--radius-pill);
+	font-family: var(--font-primary);
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 1.4286;
+	border: none;
+	transition: opacity 0.15s;
+}
+
+.btn:hover {
+	opacity: 0.85;
+}
+
+.btn-primary {
+	background-color: var(--primary);
+	color: var(--primary-foreground);
+}
+
+.btn-secondary {
+	background-color: var(--secondary);
+	color: var(--secondary-foreground);
+}
+
+.btn-outline {
+	background-color: var(--background);
+	color: var(--foreground);
+	border: 1px solid var(--border);
+	box-shadow: 0 1px 1.75px rgba(0, 0, 0, 0.05);
+}
+
+.btn-destructive {
+	background-color: var(--destructive);
+	color: var(--foreground);
+}
+
+/* Large button variant — matches Button/Large/* (height 48, padding 12 24) */
+.btn-lg {
+	height: 48px;
+	padding: 12px 24px;
+}
+
+/* Tags / Labels — matches Icon Label/Secondary */
+.tag {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	padding: 8px;
+	border-radius: var(--radius-pill);
+	font-size: 12px;
+	font-weight: 500;
+	background-color: var(--secondary);
+	color: var(--secondary-foreground);
+}
+
+/* Inputs — matches Input Group/Default (pill radius, 40px height, 8px 16px padding) */
+.input {
+	width: 100%;
+	height: 40px;
+	padding: 8px 16px;
+	border-radius: var(--radius-pill);
+	border: 1px solid var(--input);
+	background-color: var(--background);
+	color: var(--foreground);
+	font-family: var(--font-secondary);
+	font-size: 14px;
+	line-height: 1.4286;
+}
+
+.input::placeholder {
+	color: var(--muted-foreground);
+}
+
+.input:focus {
+	outline: 2px solid var(--primary);
+	outline-offset: -1px;
+}
+
+/* Textarea inherits input styling but allows height override */
+textarea.input {
+	height: auto;
+	border-radius: var(--radius-s);
+}
+
+/* Select — replace the native arrow with a single CSS chevron with breathing room */
+select.input {
+	appearance: none;
+	-webkit-appearance: none;
+	-moz-appearance: none;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 14px center;
+	background-size: 16px;
+	padding-right: 40px;
+}
+
+/* Card — matches Lunaris Card (radius-none, card fill, 1px border, shadow) */
+.card {
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 0;
+	box-shadow: 0 1px 1.75px rgba(0, 0, 0, 0.05);
+}
+
+/* Data table — matches Table/Table Row/Table Cell structure */
+.data-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 14px;
+}
+
+.data-table th {
+	text-align: left;
+	padding: 12px;
+	font-family: var(--font-primary);
+	font-size: 14px;
+	font-weight: 400;
+	color: var(--muted-foreground);
+	border-bottom: 1px solid var(--border);
+}
+
+.data-table td {
+	padding: 12px;
+	border-bottom: 1px solid var(--border);
+}
+
+/* Utility: handled in JS, not CSS */
+
+/* Mobile: page headers sit above admin tab bar */
+@media (max-width: 768px) {
+	.admin-content > .page-header,
+	.admin-content > .settings-page > .page-header {
+		order: -2;
+	}
+}
+
+/* Page transitions — gentle crossfade + few-px slide for client-side navigation.
+   Driven by the View Transitions API wired through onNavigate in +layout.svelte. */
+@keyframes page-fade-out {
+	to {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+}
+
+@keyframes page-fade-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+}
+
+::view-transition-old(root) {
+	animation: page-fade-out 200ms ease both;
+}
+
+::view-transition-new(root) {
+	animation: page-fade-in 200ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	::view-transition-old(root),
+	::view-transition-new(root) {
+		animation: none;
+	}
+}
