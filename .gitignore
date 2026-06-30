@@ -38,7 +38,7 @@ vite.config.ts.timestamp-*
 # Exported mockups (shared externally, not source)
 /docs/fursuit-photos-mockups/
 
-# Claude Design bundle (HTML exported from sparky-ink.pen + synced to claude.ai/design)
+# Claude Design bundle (HTML exported from examples/sparky.ink/sparky-ink.pen + synced to claude.ai/design)
 /design/
 
 # IDE

@@ -114,7 +114,7 @@ export const fursuitPhotos = sqliteTable('fursuit_photos', {
 // single-artist pack managed by that artist (every sticker's artistId equals it —
 // enforced in $lib/server/stickers); null = self-managed by the site owner
 // (the site owner), which may mix many artists. There is deliberately no stored
-// "single vs multi" flag — shape is derived. See stickers-design-brief.md.
+// "single vs multi" flag — shape is derived. See examples/sparky.ink/stickers-design-brief.md.
 export const stickerPacks = sqliteTable('sticker_packs', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	name: text('name').notNull(),

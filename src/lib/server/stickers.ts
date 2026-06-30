@@ -3,7 +3,7 @@
 // public /stickers section and the admin list. The write side (Telegram import,
 // manual save, delete + storage cleanup) lives in sticker-import.ts.
 //
-// Pack shape is DERIVED, never stored (see stickers-design-brief.md):
+// Pack shape is DERIVED, never stored (see examples/sparky.ink/stickers-design-brief.md):
 //   managerArtistId set  → single-artist  (every sticker's artistId equals it)
 //   managerArtistId null → self-managed   (single or multi by distinct artists)
 
