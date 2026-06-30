@@ -22,10 +22,12 @@
 		}
 	}
 
+	const ownerName = settings.ownerName || settings.siteName;
+
 	const socialLinks = [
-		{ url: settings.twitterUrl, icon: TwitterIcon, label: '@sparkyfen' },
-		{ url: settings.telegramUrl, icon: TelegramIcon, label: 't.me/sparkyfen' },
-		{ url: settings.blueskyUrl, icon: BlueskyIcon, label: 'sparky.social' },
+		{ url: settings.twitterUrl, icon: TwitterIcon, label: settings.twitterUrl ? `@${handleFromUrl(settings.twitterUrl, 'Twitter')}` : 'Twitter' },
+		{ url: settings.telegramUrl, icon: TelegramIcon, label: handleFromUrl(settings.telegramUrl, 'Telegram') },
+		{ url: settings.blueskyUrl, icon: BlueskyIcon, label: handleFromUrl(settings.blueskyUrl, 'Bluesky') },
 		{ url: settings.furAffinityUrl, icon: FurAffinityIcon, label: handleFromUrl(settings.furAffinityUrl, 'FurAffinity') },
 		{ url: settings.furtrackUrl, icon: FurTrackIcon, label: handleFromUrl(settings.furtrackUrl, 'FurTrack') }
 	].filter((l) => l.url);
@@ -43,10 +45,10 @@
 	<div class="profile-card">
 		<div class="avatar">
 			{#if data.avatarUrl}
-				<img src={data.avatarUrl} alt="Sparky" />
+				<img src={data.avatarUrl} alt={ownerName} />
 			{/if}
 		</div>
-		<h1>Sparky</h1>
+		<h1>{ownerName}</h1>
 		<p class="bio">{settings.aboutText}</p>
 
 		<div class="stats-row">

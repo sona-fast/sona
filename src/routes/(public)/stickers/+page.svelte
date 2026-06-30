@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { APP_NAME } from '$lib/config';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
@@ -10,7 +11,8 @@
 
 	let { data } = $props();
 
-	const siteName = $derived(data.settings?.siteName ?? 'sparky.ink');
+	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
+	const ownerName = $derived(data.settings?.ownerName || data.settings?.siteName || APP_NAME);
 
 	function updateFilter(key: string, value: string) {
 		const params = new URLSearchParams($page.url.searchParams);
@@ -35,7 +37,7 @@
 
 <Meta
 	title={m.stickers_meta_title({ siteName })}
-	description={m.stickers_meta_description({ siteName })}
+	description={m.stickers_meta_description({ siteName, ownerName })}
 	url={`${pageState.url.origin}${pageState.url.pathname}`}
 	image={null}
 	{siteName}
@@ -54,7 +56,7 @@
 <div class="container stickers-page">
 	<div class="page-header">
 		<h1>{m.stickers_title()}</h1>
-		<p class="subtitle">{m.stickers_subtitle()}</p>
+		<p class="subtitle">{m.stickers_subtitle({ ownerName })}</p>
 	</div>
 
 	<!-- Tab bar — pill segmented control; Stickers is active here -->
@@ -192,7 +194,7 @@
 									{/if}
 									{m.stickers_by_artist({ artist: pack.soleArtist.name })}
 								{:else}
-									{m.stickers_managed_by_sparky({ n: pack.artists.length })}
+									{m.stickers_managed_by_owner({ ownerName, n: pack.artists.length })}
 								{/if}
 							</p>
 

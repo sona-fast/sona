@@ -8,7 +8,7 @@
 
 <div class="public-layout">
 	<div class="desktop-header">
-		<Header />
+		<Header siteName={data.settings.siteName} />
 	</div>
 	<main>
 		{@render children()}

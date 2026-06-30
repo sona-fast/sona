@@ -3,7 +3,10 @@
 	import { Sun, Moon } from 'lucide-svelte';
 	import { getTheme } from '$lib/theme.svelte';
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
+	import { APP_NAME } from '$lib/config';
 	import * as m from '$lib/paraglide/messages';
+
+	let { siteName = APP_NAME }: { siteName?: string } = $props();
 
 	const theme = getTheme();
 
@@ -17,7 +20,7 @@
 
 <header class="header">
 	<div class="header-inner container">
-		<a href="/" class="logo">sparky.ink</a>
+		<a href="/" class="logo">{siteName}</a>
 		<nav>
 			{#each navItems as item}
 				<a href={item.href} class="nav-link" class:active={$page.url.pathname.startsWith(item.href)}>

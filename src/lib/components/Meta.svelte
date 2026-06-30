@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { APP_NAME } from '$lib/config';
+
 	interface Props {
 		title: string;
 		description: string;
@@ -19,7 +21,7 @@
 		imageWidth = null,
 		imageHeight = null,
 		type = 'website',
-		siteName = 'sparky.ink',
+		siteName = APP_NAME,
 		oembedUrl = null
 	}: Props = $props();
 

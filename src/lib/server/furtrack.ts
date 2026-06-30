@@ -10,6 +10,7 @@
 import type { FursuitPhoto, FurtrackMode } from '$lib/furtrack/types';
 import { resolveLicense } from '$lib/furtrack/license';
 import { MOCK_PHOTOS } from '$lib/furtrack/mock';
+import { USER_AGENT } from '$lib/config';
 
 const SOLAR = 'https://solar.furtrack.com';
 const ORCA = 'https://orca2.furtrack.com';
@@ -22,7 +23,7 @@ const REQUEST_HEADERS = {
 	Referer: 'https://www.furtrack.com/',
 	Origin: 'https://www.furtrack.com',
 	Accept: 'application/json, text/plain, */*',
-	'User-Agent': 'Mozilla/5.0 (compatible; sparky.ink/1.0; +https://sparky.ink)'
+	'User-Agent': USER_AGENT
 };
 
 /**

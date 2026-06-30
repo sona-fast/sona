@@ -1,11 +1,15 @@
 import { eq } from 'drizzle-orm';
 import { siteSettings } from './db/schema';
+import { APP_NAME } from '$lib/config';
 import type { Database } from './db';
 
 export type StorageProviderId = 'uploadthing' | 'r2';
 
 export interface SiteSettings {
 	siteName: string;
+	/** The site owner's / persona's display name (e.g. shown on the About page).
+	 * Empty falls back to `siteName` at the point of use. */
+	ownerName: string;
 	aboutText: string;
 	twitterUrl: string;
 	blueskyUrl: string;
@@ -25,20 +29,25 @@ export interface SiteSettings {
 	autoResyncEnabled: boolean;
 }
 
+// Neutral, brand-agnostic defaults. A real deployment overrides these via the
+// first-run setup wizard / admin Settings (stored as site_settings rows); the
+// example sparky.ink config seeds its own values. Keep these generic so a fresh
+// fork starts unbranded rather than impersonating another site.
 const DEFAULTS: SiteSettings = {
-	siteName: 'sparky.ink',
+	siteName: APP_NAME,
+	ownerName: '',
 	aboutText: 'A personal gallery for collecting and showcasing furry artwork from talented artists.',
-	twitterUrl: 'https://twitter.com/sparkyfen',
-	blueskyUrl: 'https://bsky.app/profile/sparky.social',
-	telegramUrl: 'https://t.me/sparkyfen',
-	furAffinityUrl: 'https://www.furaffinity.net/user/sparkyyy',
-	furtrackUrl: 'https://www.furtrack.com/user/sparkyfen',
+	twitterUrl: '',
+	blueskyUrl: '',
+	telegramUrl: '',
+	furAffinityUrl: '',
+	furtrackUrl: '',
 	adminAvatarUrl: '',
 	primaryCharacter: '',
 	// Default to UploadThing so existing sites behave exactly as before until an
 	// admin explicitly switches/migrates to R2.
 	storageProvider: 'uploadthing',
-	r2PublicUrl: 'https://cdn.sparky.ink',
+	r2PublicUrl: '',
 	// Opt-in: the daily Telegram re-sync cron is a no-op until an admin enables it.
 	autoResyncEnabled: false
 };
@@ -77,6 +86,7 @@ export async function getSettings(
 
 		const value: SiteSettings = {
 			siteName: map.siteName ?? DEFAULTS.siteName,
+			ownerName: map.ownerName ?? DEFAULTS.ownerName,
 			aboutText: map.aboutText ?? DEFAULTS.aboutText,
 			twitterUrl: map.twitterUrl ?? DEFAULTS.twitterUrl,
 			blueskyUrl: map.blueskyUrl ?? DEFAULTS.blueskyUrl,

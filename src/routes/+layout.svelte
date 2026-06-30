@@ -4,7 +4,7 @@
 	import { createThemeState } from '$lib/theme.svelte';
 	import Toaster from '$lib/components/Toaster.svelte';
 
-	let { children } = $props();
+	let { children, data } = $props();
 
 	const theme = createThemeState();
 
@@ -27,7 +27,7 @@
 </script>
 
 <svelte:head>
-	<title>sparky.ink</title>
+	<title>{data.siteName}</title>
 </svelte:head>
 
 {@render children()}

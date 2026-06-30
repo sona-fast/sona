@@ -1,4 +1,5 @@
 import { getContext, setContext } from 'svelte';
+import { THEME_STORAGE_KEY } from '$lib/config';
 
 const THEME_KEY = 'theme';
 
@@ -9,14 +10,14 @@ export function createThemeState() {
 
 	// Load from localStorage on init
 	if (typeof window !== 'undefined') {
-		const saved = localStorage.getItem('sparky-theme') as Theme | null;
+		const saved = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
 		if (saved) theme = saved;
 	}
 
 	function toggle() {
 		theme = theme === 'dark' ? 'light' : 'dark';
 		if (typeof window !== 'undefined') {
-			localStorage.setItem('sparky-theme', theme);
+			localStorage.setItem(THEME_STORAGE_KEY, theme);
 		}
 	}
 

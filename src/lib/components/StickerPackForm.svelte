@@ -34,9 +34,11 @@
 		/** Prefilled stickers for edit mode. */
 		stickers?: StickerInit[];
 		form?: { error?: string } | null;
+		/** Site owner / persona name, used in the "managed by" labels. */
+		ownerName?: string;
 	}
 
-	let { heading, submitLabel, intro, artists, pack = null, stickers = [], form = null }: Props = $props();
+	let { heading, submitLabel, intro, artists, pack = null, stickers = [], form = null, ownerName = 'the site owner' }: Props = $props();
 
 	const isEdit = pack !== null;
 
@@ -287,10 +289,10 @@
 				<input type="text" class="input" name="name" value={pack?.name ?? ''} required placeholder="My sticker pack" />
 			</label>
 			<label>
-				<span>Manager (leave blank = Sparky)</span>
+				<span>Manager (leave blank = {ownerName})</span>
 				<div class="select-with-action">
 					<select class="input" name="managerArtistId" bind:value={managerArtistId}>
-						<option value="">Myself (Sparky)</option>
+						<option value="">Myself ({ownerName})</option>
 						{#each artistList as a}
 							<option value={String(a.id)}>{a.name}</option>
 						{/each}
@@ -466,7 +468,7 @@
 	</section>
 
 	<div class="save-bar">
-		<span class="save-note">{isEdit ? 'Self-hosted on cdn.sparky.ink' : 'Self-hosted on cdn.sparky.ink'} · {stickerEntries.length} sticker{stickerEntries.length === 1 ? '' : 's'}</span>
+		<span class="save-note">Self-hosted · {stickerEntries.length} sticker{stickerEntries.length === 1 ? '' : 's'}</span>
 		<div class="save-actions">
 			<a href="/admin/stickers" class="btn btn-outline">Cancel</a>
 			<button type="submit" class="btn btn-primary" disabled={saving}>

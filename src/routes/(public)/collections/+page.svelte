@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage } from '$lib';
@@ -6,7 +7,7 @@
 
 	let { data } = $props();
 
-	const siteName = data.settings?.siteName ?? 'sparky.ink';
+	const siteName = data.settings?.siteName ?? APP_NAME;
 	const firstCover = data.collections.find((c) => c.coverImageUrl || c.previewImages.length > 0);
 	const metaImage = firstCover?.coverImageUrl || firstCover?.previewImages[0] || null;
 </script>

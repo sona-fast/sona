@@ -1,6 +1,7 @@
 import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
 import { verifyPassword } from '$lib/server/auth';
+import { SESSION_COOKIE } from '$lib/config';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
 import { lt } from 'drizzle-orm';
@@ -38,7 +39,7 @@ export const actions = {
 		// Store session in D1
 		await db.insert(sessions).values({ token, expiresAt });
 
-		cookies.set('sparky_admin_session', token, {
+		cookies.set(SESSION_COOKIE, token, {
 			path: '/',
 			httpOnly: true,
 			secure: !dev,

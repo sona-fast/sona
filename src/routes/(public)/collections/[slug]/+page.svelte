@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
 	import ArtworkCard from '$lib/components/ArtworkCard.svelte';
 	import Meta from '$lib/components/Meta.svelte';
@@ -6,7 +7,7 @@
 
 	let { data } = $props();
 
-	const siteName = data.settings?.siteName ?? 'sparky.ink';
+	const siteName = data.settings?.siteName ?? APP_NAME;
 	const metaImage = data.collection.coverImageUrl || data.images[0]?.imageUrl || null;
 	const metaDescription = m.collection_meta_description({
 		countLabel: m.gallery_count_artwork({ count: data.images.length }),

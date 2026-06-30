@@ -30,7 +30,7 @@
 	<div class="admin-layout">
 		<aside class="sidebar">
 			<div class="sidebar-header">
-				<a href="/" class="logo">sparky.ink</a>
+				<a href="/" class="logo">{data.siteName}</a>
 			</div>
 			<nav class="sidebar-nav">
 				{#each sidebarItems as item}

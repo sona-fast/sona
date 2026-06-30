@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { APP_NAME } from '$lib/config';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
@@ -18,7 +19,8 @@
 	let { data } = $props();
 
 	const pack = $derived(data.pack);
-	const siteName = $derived(data.settings?.siteName ?? 'sparky.ink');
+	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
+	const ownerName = $derived(data.settings?.ownerName || data.settings?.siteName || APP_NAME);
 
 	// `pack.artists` is already distinct-by-id (getPackBySlug builds it from a Set).
 	const distinctArtists = $derived(pack.artists);
@@ -96,7 +98,7 @@
 
 <Meta
 	title={m.stickers_pack_meta_title({ name: pack.name, siteName })}
-	description={pack.description ?? m.stickers_meta_description({ siteName })}
+	description={pack.description ?? m.stickers_meta_description({ siteName, ownerName })}
 	url={`${pageState.url.origin}${pageState.url.pathname}`}
 	image={pack.previewImages?.[0] ?? null}
 	{siteName}
@@ -152,10 +154,10 @@
 					{/if}
 				</div>
 
-			<!-- Multi-artist: managed by Sparky -->
+			<!-- Multi-artist: managed by the site owner -->
 			{:else}
 				<div class="managed-block">
-					<span class="managed-by">{m.stickers_managed_by_sparky_label()}</span>
+					<span class="managed-by">{m.stickers_managed_by_owner_label({ ownerName })}</span>
 				</div>
 			{/if}
 		</div>
@@ -177,7 +179,7 @@
 					{m.stickers_add_to_telegram()}
 				</a>
 			{:else}
-				<p class="self-hosted-note">{m.stickers_hosted_by_sparky()}</p>
+				<p class="self-hosted-note">{m.stickers_hosted_by_owner({ ownerName })}</p>
 			{/if}
 		</div>
 	</div>

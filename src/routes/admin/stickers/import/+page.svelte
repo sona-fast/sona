@@ -9,8 +9,10 @@
 
 	let { data, form } = $props();
 
+	const ownerName = $derived(data.ownerName || data.siteName || 'the site owner');
+
 	let packInput = $state(data.nameOrUrl);
-	let managerArtistId = $state<number | ''>(''); // '' = "myself" (Sparky)
+	let managerArtistId = $state<number | ''>(''); // '' = "myself" (the site owner)
 	// Reactive artist pool, seeded from the server. Artists created inline are
 	// appended here so they instantly appear in every dropdown.
 	let artists = $state([...data.artists]);
@@ -292,7 +294,7 @@
 		<CheckCircle2 size={18} />
 		<div>
 			<strong>Imported {r.imported} sticker{r.imported === 1 ? '' : 's'}{r.updated ? ` · ${r.updated} updated` : ''}{r.skipped ? ` · ${r.skipped} skipped` : ''}{r.failed ? ` · ${r.failed} failed` : ''}</strong>
-			<p>Hosted on cdn.sparky.ink. Each sticker was credited to its artist.</p>
+			<p>Hosted on your own storage. Each sticker was credited to its artist.</p>
 		</div>
 	</div>
 	<div class="summary">
@@ -458,9 +460,9 @@
 			<div class="action-summary">
 				<strong>{eligibleCount} of {data.candidates.length} selected · {artistsCount} artist{artistsCount === 1 ? '' : 's'} · {nsfwCount} NSFW</strong>
 				{#if unattributedCount > 0}
-					<span>{unattributedCount} will import unattributed — assign artists now or later in the pack editor. Images hosted on sparky.ink.</span>
+					<span>{unattributedCount} will import unattributed — assign artists now or later in the pack editor. Images hosted on your own storage.</span>
 				{:else}
-					<span>Images will be downloaded and hosted on sparky.ink, crediting each artist.</span>
+					<span>Images will be downloaded and hosted on your own storage, crediting each artist.</span>
 				{/if}
 			</div>
 			<div class="action-btns">
@@ -499,7 +501,7 @@
 			<div class="field">
 				<label for="manager-select">Managed by</label>
 				<select id="manager-select" class="input" bind:value={managerArtistId}>
-					<option value="">Myself (Sparky)</option>
+					<option value="">Myself ({ownerName})</option>
 					{#each artists as a}
 						<option value={a.id}>{a.name}</option>
 					{/each}
@@ -523,7 +525,7 @@
 				<Info size={18} />
 				<div>
 					<strong>Images are downloaded and self-hosted</strong>
-					<p>We fetch each sticker and its auto-detected emoji via the Telegram Bot API, then host them on cdn.sparky.ink — crediting the default artist (override per sticker on the next step).</p>
+					<p>We fetch each sticker and its auto-detected emoji via the Telegram Bot API, then host them on your own storage — crediting the default artist (override per sticker on the next step).</p>
 				</div>
 			</div>
 
@@ -549,7 +551,7 @@
 {#if showConfirm}
 	<ConfirmDialog
 		title="Import sticker pack"
-		message={`Import ${eligibleCount} sticker${eligibleCount === 1 ? '' : 's'} from "${data.setTitle || data.nameOrUrl}" into the pack? Images will be downloaded and hosted on sparky.ink.`}
+		message={`Import ${eligibleCount} sticker${eligibleCount === 1 ? '' : 's'} from "${data.setTitle || data.nameOrUrl}" into the pack? Images will be downloaded and hosted on your own storage.`}
 		confirmLabel="Import"
 		oncancel={() => (showConfirm = false)}
 		onconfirm={() => {

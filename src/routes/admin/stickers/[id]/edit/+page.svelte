@@ -23,5 +23,6 @@
 		nsfw: s.nsfw,
 		format: s.format
 	}))}
+	ownerName={data.ownerName || data.siteName}
 	{form}
 />

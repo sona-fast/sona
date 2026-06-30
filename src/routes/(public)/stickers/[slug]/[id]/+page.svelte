@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { APP_NAME } from '$lib/config';
 	import { page as pageState } from '$app/state';
 	import { Download, ArrowLeft, ChevronRight } from 'lucide-svelte';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
@@ -16,7 +17,7 @@
 
 	const pack = $derived(data.pack);
 	const sticker = $derived(data.sticker);
-	const siteName = $derived(data.settings?.siteName ?? 'sparky.ink');
+	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
 
 	let revealed = $state(false);
 

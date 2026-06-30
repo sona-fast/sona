@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { APP_NAME, GALLERY_VIEW_STORAGE_KEY } from '$lib/config';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
@@ -26,16 +27,16 @@
 		fursuitPage = 1;
 	});
 
-	const siteName = data.settings?.siteName ?? 'sparky.ink';
+	const siteName = data.settings?.siteName ?? APP_NAME;
 	const metaTitle = m.gallery_meta_title({ siteName });
 	const metaDescription = m.gallery_meta_description({ count: data.total, siteName });
 
 	let view = $state<'grid' | 'list'>(
-		(typeof window !== 'undefined' && localStorage.getItem('sparky-gallery-view') as 'grid' | 'list') || 'grid'
+		(typeof window !== 'undefined' && localStorage.getItem(GALLERY_VIEW_STORAGE_KEY) as 'grid' | 'list') || 'grid'
 	);
 
 	$effect(() => {
-		localStorage.setItem('sparky-gallery-view', view);
+		localStorage.setItem(GALLERY_VIEW_STORAGE_KEY, view);
 	});
 
 	function updateFilter(key: string, value: string) {

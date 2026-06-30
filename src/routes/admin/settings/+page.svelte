@@ -2,10 +2,12 @@
 	import { enhance } from '$app/forms';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
+	import { BACKUP_FILENAME_BASE } from '$lib/config';
 
 	let { data, form } = $props();
 
 	let siteName = $state(data.settings.siteName);
+	let ownerName = $state(data.settings.ownerName);
 	let aboutText = $state(data.settings.aboutText);
 	let primaryCharacter = $state(data.settings.primaryCharacter);
 	let twitterUrl = $state(data.settings.twitterUrl);
@@ -49,6 +51,7 @@
 	// Sync from server when data changes (after form submission)
 	$effect(() => {
 		siteName = data.settings.siteName;
+		ownerName = data.settings.ownerName;
 		aboutText = data.settings.aboutText;
 		primaryCharacter = data.settings.primaryCharacter;
 		twitterUrl = data.settings.twitterUrl;
@@ -72,7 +75,7 @@
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
-		a.download = `sparky-ink-backup-${new Date().toISOString().slice(0, 10)}.json`;
+		a.download = `${BACKUP_FILENAME_BASE}-${new Date().toISOString().slice(0, 10)}.json`;
 		a.click();
 		URL.revokeObjectURL(url);
 	}
@@ -117,6 +120,10 @@
 			<label>
 				<span>Site Name</span>
 				<input type="text" class="input" bind:value={siteName} name="siteName" />
+			</label>
+			<label>
+				<span>Owner / Persona Name</span>
+				<input type="text" class="input" bind:value={ownerName} name="ownerName" placeholder="Shown on the About page; defaults to Site Name" />
 			</label>
 			<label>
 				<span>About Text</span>
@@ -251,7 +258,7 @@
 		{#if storageProvider === 'r2'}
 			<label>
 				<span>R2 public domain</span>
-				<input type="text" class="input" name="r2PublicUrl" bind:value={r2PublicUrl} placeholder="https://cdn.sparky.ink" />
+				<input type="text" class="input" name="r2PublicUrl" bind:value={r2PublicUrl} placeholder="https://cdn.example.com" />
 			</label>
 		{:else}
 			<input type="hidden" name="r2PublicUrl" value={r2PublicUrl} />

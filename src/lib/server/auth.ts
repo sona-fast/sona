@@ -1,4 +1,5 @@
-const SESSION_COOKIE = 'sparky_admin_session';
+import { SESSION_COOKIE } from '$lib/config';
+
 const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days
 
 export function verifyPassword(input: string, adminPassword: string): boolean {

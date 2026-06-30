@@ -93,6 +93,7 @@ export const actions = {
 
 		await saveSettings(db, {
 			siteName: sanitizeText(data.get('siteName') as string, 100),
+			ownerName: sanitizeText(data.get('ownerName') as string, 100),
 			aboutText: sanitizeText(data.get('aboutText') as string, 2000),
 			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100),
 			twitterUrl: sanitizeUrl(data.get('twitter') as string) || '',
@@ -113,7 +114,7 @@ export const actions = {
 		const data = await request.formData();
 
 		const provider = data.get('storageProvider') === 'r2' ? 'r2' : 'uploadthing';
-		const r2PublicUrl = sanitizeUrl(data.get('r2PublicUrl') as string) || 'https://cdn.sparky.ink';
+		const r2PublicUrl = sanitizeUrl(data.get('r2PublicUrl') as string) || '';
 
 		await saveSettings(db, { storageProvider: provider, r2PublicUrl });
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
 	import { Download, Share2, ExternalLink } from 'lucide-svelte';
 	import { formatDate } from '$lib';
@@ -20,7 +21,7 @@
 
 	async function share() {
 		const url = window.location.href;
-		const title = `${image.title} — sparky.ink`;
+		const title = `${image.title} — ${siteName}`;
 
 		if (navigator.share) {
 			try {
@@ -43,7 +44,7 @@
 	}
 
 
-	const siteName = data.settings?.siteName ?? 'sparky.ink';
+	const siteName = data.settings?.siteName ?? APP_NAME;
 	const canonicalUrl = `${page.url.origin}${page.url.pathname}`;
 	const metaTitle = `${image.title} — ${siteName}`;
 	const tagSuffix = tags.length > 0 ? ` · ${tags.slice(0, 6).join(', ')}` : '';

@@ -7,6 +7,9 @@
 
 	let { data } = $props();
 
+	// Falls back to the site name, then a generic label, when no persona name is set.
+	const ownerName = $derived(data.ownerName || data.siteName || 'the site owner');
+
 	let deleteTarget = $state<{ id: number; name: string } | null>(null);
 	let deleteForm: HTMLFormElement;
 	// Per-row pending state, keyed by pack id, so one row's spinner doesn't block others.
@@ -25,10 +28,10 @@
 
 	function creditText(pack: (typeof data.packs)[number]): string {
 		if (pack.shape === 'single' && pack.soleArtist) return `by ${pack.soleArtist.name}`;
-		return `managed by Sparky · ${pack.artists.length} artist${pack.artists.length === 1 ? '' : 's'}`;
+		return `managed by ${ownerName} · ${pack.artists.length} artist${pack.artists.length === 1 ? '' : 's'}`;
 	}
 	function creditInitial(pack: (typeof data.packs)[number]): string {
-		const name = pack.shape === 'single' && pack.soleArtist ? pack.soleArtist.name : 'Sparky';
+		const name = pack.shape === 'single' && pack.soleArtist ? pack.soleArtist.name : ownerName;
 		return name.charAt(0).toUpperCase();
 	}
 	function creditAvatarUrl(pack: (typeof data.packs)[number]): string {
@@ -36,7 +39,7 @@
 		return data.adminAvatarUrl ?? '';
 	}
 	function creditAvatarAlt(pack: (typeof data.packs)[number]): string {
-		return pack.shape === 'single' && pack.soleArtist ? pack.soleArtist.name : 'Sparky';
+		return pack.shape === 'single' && pack.soleArtist ? pack.soleArtist.name : ownerName;
 	}
 
 	const filtered = $derived(

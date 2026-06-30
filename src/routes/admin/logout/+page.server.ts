@@ -1,5 +1,6 @@
 import { redirect, type Cookies } from '@sveltejs/kit';
 import { getSessionToken } from '$lib/server/auth';
+import { SESSION_COOKIE } from '$lib/config';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -17,7 +18,7 @@ async function performLogout(request: Request, platform: App.Platform | undefine
 		}
 	}
 
-	cookies.delete('sparky_admin_session', { path: '/' });
+	cookies.delete(SESSION_COOKIE, { path: '/' });
 }
 
 // Handle direct navigation to /admin/logout (GET) — log out and redirect.

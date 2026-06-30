@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
 	import { ExternalLink, Share2, ShieldCheck } from 'lucide-svelte';
 	import FurTrackIcon from '$lib/components/icons/FurTrackIcon.svelte';
@@ -20,7 +21,7 @@
 	// (muted) when it's empty — mirror that rather than echoing the character tag.
 	const description = photo.description?.trim();
 
-	const siteName = data.settings?.siteName ?? 'sparky.ink';
+	const siteName = data.settings?.siteName ?? APP_NAME;
 	const canonicalUrl = `${page.url.origin}${page.url.pathname}`;
 	const metaTitle = `${characterTitle} — fursuit photo by ${photo.photographer} — ${siteName}`;
 	const metaDescription = `Fursuit photo of ${characterTitle} by ${photo.photographer}${photo.event ? ` at ${photo.event}` : ''}. ${photo.license.label}.`;

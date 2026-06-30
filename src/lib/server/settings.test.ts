@@ -53,8 +53,8 @@ describe('getSettings — mapping & defaults', () => {
 		const s = await getSettings(db);
 		expect(s.siteName).toBe('My Gallery');
 		expect(s.storageProvider).toBe('r2');
-		// Unset keys fall back to defaults.
-		expect(s.r2PublicUrl).toBe('https://cdn.sparky.ink');
+		// Unset keys fall back to defaults (neutral/empty for a fresh fork).
+		expect(s.r2PublicUrl).toBe('');
 	});
 
 	it('defaults autoResyncEnabled to false when unset', async () => {
@@ -88,7 +88,7 @@ describe('getSettings — mapping & defaults', () => {
 	it('returns defaults (and does NOT cache) when the read throws', async () => {
 		const failing = throwingDb();
 		const first = await getSettings(failing);
-		expect(first.siteName).toBe('sparky.ink');
+		expect(first.siteName).toBe('Sona');
 
 		// A failure must not poison the cache — the next call has to retry and can
 		// succeed once the table exists.

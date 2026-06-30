@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 
-	let { form } = $props();
+	let { form, data } = $props();
 </script>
 
 <div class="login-page">
 	<div class="login-card">
-		<h1>sparky.ink</h1>
+		<h1>{data.siteName}</h1>
 		<p class="subtitle">Admin Login</p>
 
 		{#if form?.error}
