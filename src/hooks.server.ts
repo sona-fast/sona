@@ -5,6 +5,8 @@ import { redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
 import { isSetupComplete } from '$lib/server/admin-auth';
+import { getSettings } from '$lib/server/settings';
+import { THEME_MODE_COOKIE } from '$lib/config';
 import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { getTextDirection } from '$lib/paraglide/runtime';
@@ -91,7 +93,22 @@ const authHandle: Handle = async ({ event, resolve }) => {
 		return new Response('Unauthorized', { status: 401 });
 	}
 
-	const response = await resolve(event);
+	// Apply the active theme + the visitor's dark/light mode at SSR so the first
+	// paint is correct (no flash). themeId comes from cached settings; mode from a
+	// cookie the client toggle sets. Both fill placeholders in app.html. Skip the
+	// settings read for assets/api (not HTML).
+	const mode = event.cookies.get(THEME_MODE_COOKIE) === 'light' ? 'light' : 'dark';
+	let themeId = 'default';
+	if (event.platform?.env.DB && !isAsset && !path.startsWith('/api')) {
+		try {
+			themeId = (await getSettings(getDb(event.platform.env.DB))).themeId || 'default';
+		} catch {
+			themeId = 'default';
+		}
+	}
+	const response = await resolve(event, {
+		transformPageChunk: ({ html }) => html.replace('%theme%', themeId).replace('%mode%', mode)
+	});
 
 	// Security headers
 	response.headers.set('X-Frame-Options', 'DENY');

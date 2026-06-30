@@ -19,8 +19,12 @@ export const APP_NAME = 'Sona';
  */
 export const SESSION_COOKIE = 'sona_admin_session';
 
-/** localStorage key for the client-side dark/light theme preference. */
-export const THEME_STORAGE_KEY = 'sona-theme';
+/**
+ * Cookie holding the visitor's dark/light *mode* preference. A cookie (not
+ * localStorage) so the server can read it and emit the correct `data-theme` at
+ * SSR — avoiding a flash of the wrong mode on first paint.
+ */
+export const THEME_MODE_COOKIE = 'sona-mode';
 
 /** localStorage key for the gallery grid/list view preference. */
 export const GALLERY_VIEW_STORAGE_KEY = 'sona-gallery-view';

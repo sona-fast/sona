@@ -3,12 +3,16 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
+	import { THEMES } from '$lib/themes';
+	import { LANDING_LAYOUTS } from '$lib/landing';
 
 	let { data, form } = $props();
 
 	let siteName = $state(data.settings.siteName);
 	let ownerName = $state(data.settings.ownerName);
 	let aboutText = $state(data.settings.aboutText);
+	let themeId = $state(data.settings.themeId);
+	let landingLayout = $state(data.settings.landingLayout);
 	let primaryCharacter = $state(data.settings.primaryCharacter);
 	let twitterUrl = $state(data.settings.twitterUrl);
 	let blueskyUrl = $state(data.settings.blueskyUrl);
@@ -54,6 +58,8 @@
 		siteName = data.settings.siteName;
 		ownerName = data.settings.ownerName;
 		aboutText = data.settings.aboutText;
+		themeId = data.settings.themeId;
+		landingLayout = data.settings.landingLayout;
 		primaryCharacter = data.settings.primaryCharacter;
 		twitterUrl = data.settings.twitterUrl;
 		blueskyUrl = data.settings.blueskyUrl;
@@ -133,6 +139,26 @@
 			<label>
 				<span>Primary character (FurTrack tag)</span>
 				<input type="text" class="input" bind:value={primaryCharacter} name="primaryCharacter" placeholder="e.g. aspen_(zangoose)" />
+			</label>
+		</section>
+
+		<section>
+			<h2>Appearance</h2>
+			<label>
+				<span>Theme</span>
+				<select class="input" name="themeId" bind:value={themeId}>
+					{#each THEMES as t}
+						<option value={t.id}>{t.label}</option>
+					{/each}
+				</select>
+			</label>
+			<label>
+				<span>Landing layout</span>
+				<select class="input" name="landingLayout" bind:value={landingLayout}>
+					{#each LANDING_LAYOUTS as l}
+						<option value={l.id}>{l.label}</option>
+					{/each}
+				</select>
 			</label>
 		</section>
 

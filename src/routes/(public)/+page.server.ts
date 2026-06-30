@@ -110,6 +110,10 @@ export const load: PageServerLoad = async ({ platform, parent }) => {
 	return {
 		recentImages: imagesWithTags,
 		mosaicImageUrls,
-		settings
+		settings,
+		// Feature availability for the three-path landing layout.
+		features: {
+			fursuit: (platform?.env.FURTRACK_MODE ?? 'off') !== 'off'
+		}
 	};
 };

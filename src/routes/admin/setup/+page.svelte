@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { APP_NAME } from '$lib/config';
+	import { THEMES } from '$lib/themes';
+	import { LANDING_LAYOUTS } from '$lib/landing';
 
 	let { data, form } = $props();
 
@@ -110,6 +112,27 @@
 					{:else}
 						<p class="hint">Set the <code>UPLOADTHING_TOKEN</code> secret for uploads to work.</p>
 					{/if}
+				</section>
+
+				<section>
+					<h2>Appearance</h2>
+					<label>
+						<span>Theme</span>
+						<select name="themeId" class="input">
+							{#each THEMES as t}
+								<option value={t.id}>{t.label}</option>
+							{/each}
+						</select>
+					</label>
+					<label>
+						<span>Landing layout</span>
+						<select name="landingLayout" class="input">
+							{#each LANDING_LAYOUTS as l}
+								<option value={l.id}>{l.label}</option>
+							{/each}
+						</select>
+						<small>You can change these any time in Settings.</small>
+					</label>
 				</section>
 
 				<button type="submit" class="btn btn-primary btn-lg full-width" disabled={submitting}>

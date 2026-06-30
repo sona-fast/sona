@@ -17,6 +17,8 @@ import { sql, inArray } from 'drizzle-orm';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifyAdminPassword, setAdminPassword } from '$lib/server/admin-auth';
+import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
+import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -92,6 +94,13 @@ export const actions = {
 			? (await resolveAvatarUrl({ blueskyUrl })) ?? ''
 			: '';
 
+		const themeRaw = (data.get('themeId') as string) ?? '';
+		const themeId = isValidThemeId(themeRaw) ? themeRaw : DEFAULT_THEME_ID;
+		const layoutRaw = (data.get('landingLayout') as string) ?? '';
+		const landingLayout = LANDING_LAYOUTS.some((l) => l.id === layoutRaw)
+			? layoutRaw
+			: DEFAULT_LANDING_LAYOUT;
+
 		await saveSettings(db, {
 			siteName: sanitizeText(data.get('siteName') as string, 100),
 			ownerName: sanitizeText(data.get('ownerName') as string, 100),
@@ -103,6 +112,8 @@ export const actions = {
 			furAffinityUrl: sanitizeUrl(data.get('furaffinity') as string) || '',
 			furtrackUrl: sanitizeUrl(data.get('furtrack') as string) || '',
 			adminAvatarUrl,
+			themeId,
+			landingLayout,
 			// Unchecked checkboxes don't post a field, so absence means false.
 			autoResyncEnabled: data.get('autoResyncEnabled') === 'on'
 		});

@@ -11,6 +11,8 @@ import {
 	markSetupComplete,
 	constantTimeEqual
 } from '$lib/server/admin-auth';
+import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
+import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { SESSION_COOKIE } from '$lib/config';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -78,6 +80,12 @@ export const actions = {
 		}
 		const provider = data.get('storageProvider') === 'r2' ? 'r2' : 'uploadthing';
 		const fursonaName = sanitizeText(data.get('fursonaName') as string, 100);
+		const themeRaw = (data.get('themeId') as string) ?? '';
+		const themeId = isValidThemeId(themeRaw) ? themeRaw : DEFAULT_THEME_ID;
+		const layoutRaw = (data.get('landingLayout') as string) ?? '';
+		const landingLayout = LANDING_LAYOUTS.some((l) => l.id === layoutRaw)
+			? layoutRaw
+			: DEFAULT_LANDING_LAYOUT;
 
 		await saveSettings(db, {
 			siteName,
@@ -90,7 +98,9 @@ export const actions = {
 			furtrackUrl: sanitizeUrl(data.get('furtrack') as string) || '',
 			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100),
 			storageProvider: provider,
-			r2PublicUrl: provider === 'r2' ? sanitizeUrl(data.get('r2PublicUrl') as string) || '' : ''
+			r2PublicUrl: provider === 'r2' ? sanitizeUrl(data.get('r2PublicUrl') as string) || '' : '',
+			themeId,
+			landingLayout
 		});
 
 		// 4. The fursona this site is about (stickers/fursuit resolve one character).

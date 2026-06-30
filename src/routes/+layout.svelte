@@ -6,11 +6,10 @@
 
 	let { children, data } = $props();
 
-	const theme = createThemeState();
-
-	$effect(() => {
-		document.documentElement.setAttribute('data-theme', theme.current);
-	});
+	// Sets up the dark/light mode store (and Svelte context for the toggle). The
+	// initial `data-theme` is rendered at SSR from the mode cookie (hooks.server.ts),
+	// so there's no flash; the toggle updates the attribute + cookie live.
+	createThemeState();
 
 	// Smooth cross-page transitions via the View Transitions API.
 	// Browsers without the API just navigate instantly (graceful fallback).

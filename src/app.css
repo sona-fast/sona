@@ -83,6 +83,64 @@
 	color-scheme: light;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Themes (palette families). The default theme is :root + [data-theme='light']
+   above. Each alternate theme defines a COMPLETE colour-token set for both its
+   dark and light variants so nothing bleeds from the default. Radii/fonts are
+   theme-independent (inherited from :root). Selected at SSR via data-theme-id.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Aurora — cool violet */
+[data-theme-id='aurora'] {
+	--background: #0e0f1a;
+	--foreground: #f4f4ff;
+	--card: #16172a;
+	--card-foreground: #f4f4ff;
+	--primary: #7c5cff;
+	--primary-foreground: #0e0f1a;
+	--secondary: #232544;
+	--secondary-foreground: #f4f4ff;
+	--muted: #232544;
+	--muted-foreground: #a9abce;
+	--accent: #0e0f1a;
+	--accent-foreground: #f4f4ff;
+	--destructive: #ff5c7a;
+	--border: #2a2c50;
+	--input: #2a2c50;
+	--ring: #7c5cff;
+	--sidebar: #131426;
+	--sidebar-accent: #232544;
+	--sidebar-foreground: #f4f4ff;
+	--sidebar-border: rgba(255, 255, 255, 0.1);
+
+	color-scheme: dark;
+}
+
+[data-theme-id='aurora'][data-theme='light'] {
+	--background: #f5f5fc;
+	--foreground: #16172a;
+	--card: #ffffff;
+	--card-foreground: #16172a;
+	--primary: #6a4cf0;
+	--primary-foreground: #ffffff;
+	--secondary: #ececfa;
+	--secondary-foreground: #16172a;
+	--muted: #f0f0fb;
+	--muted-foreground: #5b5d80;
+	--accent: #f5f5fc;
+	--accent-foreground: #16172a;
+	--destructive: #e23a5e;
+	--border: #d8d8ee;
+	--input: #d8d8ee;
+	--ring: #6a4cf0;
+	--sidebar: #ececfa;
+	--sidebar-accent: #d8d8ee;
+	--sidebar-foreground: #16172a;
+	--sidebar-border: #d8d8ee;
+
+	color-scheme: light;
+}
+
 /* Reset */
 *,
 *::before,

@@ -27,6 +27,11 @@ export interface SiteSettings {
 	/** When on, the daily cron pulls new stickers into Telegram-sourced packs.
 	 * Opt-in — defaults off so the scheduled job does nothing until enabled. */
 	autoResyncEnabled: boolean;
+	/** Active visual theme (palette family) id — see src/lib/themes. Applied at
+	 * SSR via a data-theme-id attribute; orthogonal to the dark/light mode. */
+	themeId: string;
+	/** Landing-page layout id — see src/lib/landing (e.g. 'mosaic' | 'threePath'). */
+	landingLayout: string;
 }
 
 // Neutral, brand-agnostic defaults. A real deployment overrides these via the
@@ -49,7 +54,9 @@ const DEFAULTS: SiteSettings = {
 	storageProvider: 'uploadthing',
 	r2PublicUrl: '',
 	// Opt-in: the daily Telegram re-sync cron is a no-op until an admin enables it.
-	autoResyncEnabled: false
+	autoResyncEnabled: false,
+	themeId: 'default',
+	landingLayout: 'mosaic'
 };
 
 // Short-TTL in-memory cache. siteSettings is global (not per-user) and changes
@@ -98,7 +105,9 @@ export async function getSettings(
 			storageProvider: map.storageProvider === 'r2' ? 'r2' : DEFAULTS.storageProvider,
 			r2PublicUrl: map.r2PublicUrl ?? DEFAULTS.r2PublicUrl,
 			// Booleans are persisted as the text 'true'/'false'; absent → default.
-			autoResyncEnabled: map.autoResyncEnabled === 'true'
+			autoResyncEnabled: map.autoResyncEnabled === 'true',
+			themeId: map.themeId ?? DEFAULTS.themeId,
+			landingLayout: map.landingLayout ?? DEFAULTS.landingLayout
 		};
 		settingsCache = { value, expires: Date.now() + SETTINGS_TTL_MS };
 		return value;

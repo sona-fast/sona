@@ -1,11 +1,23 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { Images, Smile, Camera, User } from 'lucide-svelte';
 	import ArtworkCard from '$lib/components/ArtworkCard.svelte';
 	import MosaicBanner from '$lib/components/MosaicBanner.svelte';
+	import ThreePathBanner from '$lib/components/ThreePathBanner.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
+
+	// Three-path layout: two fixed entries plus fursuit when enabled, else About,
+	// so there are always exactly three ways in.
+	const paths = [
+		{ href: '/gallery', label: m.nav_gallery(), description: m.home_path_gallery(), icon: Images },
+		{ href: '/stickers', label: m.nav_stickers(), description: m.home_path_stickers(), icon: Smile },
+		data.features.fursuit
+			? { href: '/gallery?view=fursuit', label: m.nav_fursuit(), description: m.home_path_fursuit(), icon: Camera }
+			: { href: '/about', label: m.nav_about(), description: m.home_path_about(), icon: User }
+	];
 </script>
 
 <Meta
@@ -16,11 +28,15 @@
 	siteName={data.settings.siteName}
 />
 
-<MosaicBanner
-	images={data.mosaicImageUrls}
-	subtitle={data.settings.aboutText}
-	siteName={data.settings.siteName}
-/>
+{#if data.settings.landingLayout === 'threePath'}
+	<ThreePathBanner siteName={data.settings.siteName} subtitle={data.settings.aboutText} {paths} />
+{:else}
+	<MosaicBanner
+		images={data.mosaicImageUrls}
+		subtitle={data.settings.aboutText}
+		siteName={data.settings.siteName}
+	/>
+{/if}
 
 <section class="recent container">
 	<div class="section-header">
