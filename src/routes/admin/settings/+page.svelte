@@ -216,6 +216,9 @@
 			{:else}
 				<p class="reg-status">Not configured. Set a <code>REGISTRY_API_KEY</code> secret to pull shared artist data and submit your artists.</p>
 			{/if}
+			<a href="/api/registry/export-artists" class="btn btn-secondary" download>
+				Download artists JSON (for registry seed)
+			</a>
 		</section>
 
 		<section>
