@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an idea or improvement for Sona.
+labels: ["type: feature", "needs triage"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Gallery, Stickers, Fursuit photos, Shared registry, Themes / layouts, Setup / deploy, Admin / CMS, Managed hosting, Other]
+    validations: { required: true }
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Account or privacy matters
+    url: mailto:hello@sona.fast
+    about: For private, account, security, or privacy questions, email us instead.
+  - name: What is Sona?
+    url: https://sona.fast
+    about: Learn what Sona is and how to get started.

@@ -1,0 +1,17 @@
+name: Question / support
+description: Ask a question about using or running Sona.
+labels: ["type: question"]
+body:
+  - type: markdown
+    attributes:
+      value: For account or privacy matters, email hello@sona.fast instead. Please do not post secrets.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations: { required: true }
+  - type: input
+    id: context
+    attributes:
+      label: Context
+      description: Self-hosted or managed? Which version?

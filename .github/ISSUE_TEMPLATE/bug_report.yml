@@ -1,0 +1,28 @@
+name: Bug report
+description: Something in Sona isn't working right.
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting. Please do not include passwords, tokens, or other secrets.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Gallery, Stickers, Fursuit photos, Shared registry, Themes / layouts, Setup / deploy, Admin / CMS, Other]
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what actually happened.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: Browser / OS, Sona version or commit, self-hosted or managed.
