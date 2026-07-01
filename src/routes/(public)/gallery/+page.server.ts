@@ -3,6 +3,7 @@ import { images, artists, imageTags, tags, characters, fursuitPhotos as fursuitP
 import { eq, desc, asc, like, sql, and, inArray, type SQL } from 'drizzle-orm';
 import { fursuitPhotoFromRow } from '$lib/server/fursuit-import';
 import { getMode } from '$lib/server/furtrack';
+import { parseAliases } from '$lib/server/registry';
 import { withTimeout } from '$lib/server/timeout';
 import type { FursuitPhoto } from '$lib/furtrack/types';
 import type { PageServerLoad } from './$types';
@@ -43,20 +44,44 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		page,
 		totalPages: 0,
 		tags: [] as Array<{ name: string }>,
-		artists: [] as Array<{ name: string }>,
+		artists: [] as Array<{ name: string; formerly?: string[] }>,
 		characters: [] as Array<{ name: string }>,
 		filters,
+		formerName: null as { searched: string; current: string } | null,
 		degraded: true
 	};
 
 	const build = async () => {
+		// Load artists (with former names) up front — used both to resolve the artist
+		// filter and to build the combobox options below.
+		const allArtistsRaw = await db
+			.select({ name: artists.name, aliases: artists.aliases })
+			.from(artists)
+			.orderBy(artists.name);
+
+		// Resolve the artist filter: a ?artist=X that isn't a current name may be a
+		// former name — point it at the artist who now goes by something else, and
+		// flag it so the page can show the "formerly" pointer.
+		let effectiveArtist = artistFilter;
+		let formerName: { searched: string; current: string } | null = null;
+		if (artistFilter && !allArtistsRaw.some((a) => a.name === artistFilter)) {
+			const q = artistFilter.toLowerCase();
+			const viaAlias = allArtistsRaw.find((a) =>
+				parseAliases(a.aliases).some((al) => al.displayName.toLowerCase() === q)
+			);
+			if (viaAlias) {
+				effectiveArtist = viaAlias.name;
+				formerName = { searched: artistFilter, current: viaAlias.name };
+			}
+		}
+
 		// Build where conditions
 		const conditions: SQL[] = [eq(images.published, true)];
 		if (search) {
 			conditions.push(like(images.title, `%${search}%`));
 		}
-		if (artistFilter) {
-			conditions.push(eq(artists.name, artistFilter));
+		if (effectiveArtist) {
+			conditions.push(eq(artists.name, effectiveArtist));
 		}
 		if (tagFilter) {
 			conditions.push(
@@ -129,12 +154,18 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			tag: firstTagByImage[img.id] || undefined
 		}));
 
-		// Get all tags, artists, and characters for filters
-		const [allTags, allArtists, allCharacters] = await Promise.all([
+		// Get all tags and characters for filters (artists already loaded above).
+		const [allTags, allCharacters] = await Promise.all([
 			db.select({ name: tags.name }).from(tags).orderBy(tags.name),
-			db.select({ name: artists.name }).from(artists).orderBy(artists.name),
 			db.select({ name: characters.name }).from(characters).orderBy(characters.name)
 		]);
+
+		// Carry each artist's former names so the combobox can offer an old name
+		// ("Kestrel · formerly KesForge") and stay reachable in-app.
+		const allArtists = allArtistsRaw.map((a) => {
+			const formerly = parseAliases(a.aliases).map((al) => al.displayName);
+			return formerly.length ? { name: a.name, formerly } : { name: a.name };
+		});
 
 		// Fursuit Photos tab (FurTrack). Only active when the feature is enabled; the
 		// Fursuit Photos tab — reads imported, self-hosted photos from the DB. No
@@ -181,7 +212,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			tags: allTags,
 			artists: allArtists,
 			characters: allCharacters,
-			filters,
+			// The active pill/input shows the current name, even when arrived via a
+			// former name (the pointer banner explains the redirect).
+			filters: { ...filters, artist: effectiveArtist },
+			formerName,
 			degraded: false
 		};
 	};

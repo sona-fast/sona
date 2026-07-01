@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
-	import { Search, ChevronDown, LayoutGrid, List, ImageOff } from 'lucide-svelte';
+	import { Search, ChevronDown, LayoutGrid, List, ImageOff, ArrowRight } from 'lucide-svelte';
 	import ArtworkCard from '$lib/components/ArtworkCard.svelte';
 	import FursuitPhotoCard from '$lib/components/FursuitPhotoCard.svelte';
 	import Meta from '$lib/components/Meta.svelte';
@@ -65,8 +65,16 @@
 		if (!artistOpen) artistQuery = active;
 	});
 
+	// Match on the current name OR any former name, so an old handle still finds
+	// the artist in the combobox.
 	const artistMatches = $derived(
-		data.artists.filter((a) => a.name.toLowerCase().includes(artistQuery.toLowerCase()))
+		data.artists.filter((a) => {
+			const q = artistQuery.toLowerCase();
+			return (
+				a.name.toLowerCase().includes(q) ||
+				(a.formerly ?? []).some((f) => f.toLowerCase().includes(q))
+			);
+		})
 	);
 
 	function selectArtist(name: string) {
@@ -185,6 +193,18 @@
 			</div>
 		{/if}
 	{:else}
+	{#if data.formerName}
+		<div class="aka-pointer">
+			<div class="txt">
+				<span class="cmt">// {m.gallery_aka_formerly()}</span>{m.gallery_aka_pointer({ old: data.formerName.searched, current: data.formerName.current })}
+			</div>
+			<div class="spacer"></div>
+			<a class="go" href="/gallery?artist={encodeURIComponent(data.formerName.current)}">
+				{m.gallery_aka_view({ current: data.formerName.current })}
+				<ArrowRight size={13} />
+			</a>
+		</div>
+	{/if}
 	<div class="filters">
 		<div class="search-wrapper">
 			<Search size={16} class="search-icon" />
@@ -253,7 +273,7 @@
 								role="option"
 								aria-selected={artist.name === data.filters.artist}
 								onclick={() => selectArtist(artist.name)}
-							>{artist.name}</button>
+							>{artist.name}{#if artist.formerly?.length}<span class="combobox-former">· {m.gallery_aka_formerly()} {artist.formerly.join(', ')}</span>{/if}</button>
 						</li>
 					{:else}
 						<li class="combobox-empty">No matching artists</li>
@@ -542,6 +562,59 @@
 		padding: 8px 10px;
 		font-size: 13px;
 		color: var(--muted-foreground);
+	}
+
+	/* Former name annotation in the combobox — quiet mono, like the credit line. */
+	.combobox-former {
+		margin-left: 6px;
+		font-family: var(--font-primary);
+		font-size: 12px;
+		color: var(--muted-foreground);
+	}
+
+	/* AKA pointer — one quiet line when an old ?artist= name was redirected. A thin
+	   ember accent rule on the left, not a glowing box; matches the design mock. */
+	.aka-pointer {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		padding: 12px 16px;
+		border: 1px solid var(--border);
+		border-left: 2px solid var(--primary);
+		border-radius: var(--radius-s);
+		background: var(--card);
+		margin-bottom: 24px;
+	}
+
+	.aka-pointer .txt {
+		font-size: 14px;
+		color: var(--foreground);
+		line-height: 1.5;
+	}
+
+	.aka-pointer .cmt {
+		font-family: var(--font-primary);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin-right: 6px;
+	}
+
+	.aka-pointer .spacer {
+		flex: 1;
+	}
+
+	.aka-pointer .go {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font-size: 13px;
+		color: var(--muted-foreground);
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.aka-pointer .go:hover {
+		color: var(--foreground);
 	}
 
 	.view-toggle {

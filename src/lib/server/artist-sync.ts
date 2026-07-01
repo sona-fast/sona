@@ -47,6 +47,25 @@ function socialsToColumns(socials: Record<string, string>): Record<string, strin
 	return out;
 }
 
+// Serialize a registry record's former identities for the local `aliases` column.
+// Like socials, alias URLs are untrusted cross-tenant input, so every one is run
+// through sanitizeUrl before it can be stored and later rendered into href on
+// public pages. Empty/absent → null (the "no aliases" state).
+function aliasesToColumn(aliases: RegistryArtist['aliases']): string | null {
+	if (!aliases || aliases.length === 0) return null;
+	const clean = aliases
+		.filter((a) => a && typeof a.displayName === 'string' && a.displayName)
+		.map((a) => {
+			const socials: Record<string, string> = {};
+			for (const [k, v] of Object.entries(a.socials ?? {})) {
+				const url = sanitizeUrl(v);
+				if (url) socials[k] = url;
+			}
+			return { displayName: a.displayName, socials };
+		});
+	return clean.length ? JSON.stringify(clean) : null;
+}
+
 export async function syncArtists(
 	db: Database,
 	env: Env | undefined,
@@ -98,7 +117,13 @@ export async function syncArtists(
 				// Authoritative refresh: registry wins (URLs sanitized).
 				await db
 					.update(artists)
-					.set({ name: ra.displayName, avatarUrl: avatar, ...socialsToColumns(ra.socials), ...base })
+					.set({
+						name: ra.displayName,
+						avatarUrl: avatar,
+						...socialsToColumns(ra.socials),
+						aliases: aliasesToColumn(ra.aliases),
+						...base
+					})
 					.where(eq(artists.id, local.id));
 			} else {
 				// Respect local edits: only fill an empty avatar; keep name/socials.

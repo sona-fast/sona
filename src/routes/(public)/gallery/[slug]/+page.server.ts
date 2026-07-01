@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { images, artists, collections, imageTags, tags, characters, imageCharacters } from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { parseAliases } from '$lib/server/registry';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -30,6 +31,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 			artistDeviantArt: artists.deviantArtUrl,
 			artistPatreon: artists.patreonUrl,
 			artistInstagram: artists.instagramUrl,
+			artistAliases: artists.aliases,
 			collectionId: images.collectionId,
 			collectionName: collections.name,
 			collectionSlug: collections.slug
@@ -68,9 +70,13 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		.innerJoin(characters, eq(imageCharacters.characterId, characters.id))
 		.where(eq(imageCharacters.imageId, image.id));
 
+	// Former artist names ("also known as") for the quiet "// formerly" credit line.
+	const formerNames = parseAliases(image.artistAliases).map((a) => a.displayName);
+
 	return {
 		image,
 		tags: imageTags_.map((t) => t.name),
-		characters: imageChars
+		characters: imageChars,
+		formerNames
 	};
 };

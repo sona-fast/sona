@@ -8,16 +8,37 @@ import { withTimeout } from './timeout';
 
 type Env = App.Platform['env'];
 
+/** A former identity of an artist — an old display name plus its social links. */
+export interface ArtistAlias {
+	displayName: string;
+	socials: Record<string, string>;
+}
+
 export interface RegistryArtist {
 	globalId: string;
 	displayName: string;
 	avatarUrl: string | null;
 	bio: string | null;
 	socials: Record<string, string>;
+	aliases?: ArtistAlias[];
 	status: 'active' | 'merged' | 'tombstoned';
 	mergedInto: string | null;
 	version: number;
 	updatedAt: string;
+}
+
+/** Parse the local `artists.aliases` JSON column; tolerates NULL/malformed data. */
+export function parseAliases(json: string | null | undefined): ArtistAlias[] {
+	if (!json) return [];
+	try {
+		const parsed = JSON.parse(json);
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter(
+			(a): a is ArtistAlias => !!a && typeof a.displayName === 'string' && a.displayName !== ''
+		);
+	} catch {
+		return [];
+	}
 }
 
 const TIMEOUT_MS = 5000;

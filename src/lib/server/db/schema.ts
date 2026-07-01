@@ -19,6 +19,10 @@ export const artists = sqliteTable('artists', {
 	globalId: text('global_id').unique(),
 	registryVersion: integer('registry_version'),
 	registrySyncedAt: text('registry_synced_at'),
+	// Former identities ("also known as"), JSON array of {displayName, socials}.
+	// NULL = none. Sourced from the registry (an artist who renamed keeps their old
+	// handles here) so old ?artist=<OldName> links still resolve. See artist-sync.ts.
+	aliases: text('aliases'),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
 

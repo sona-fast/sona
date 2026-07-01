@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isRegistryEnabled, artistSocials, firstHandle } from './registry';
+import { isRegistryEnabled, artistSocials, firstHandle, parseAliases } from './registry';
 
 describe('isRegistryEnabled', () => {
 	it('is true only when a fork API key is present', () => {
@@ -27,5 +27,28 @@ describe('artistSocials / firstHandle', () => {
 		expect(firstHandle({ twitterUrl: 'https://x.com/a' })).toBe('https://x.com/a');
 		expect(firstHandle({ twitterUrl: '', blueskyUrl: 'bsky' })).toBe('bsky');
 		expect(firstHandle({})).toBeNull();
+	});
+});
+
+describe('parseAliases', () => {
+	it('returns [] for null / empty / malformed input', () => {
+		expect(parseAliases(null)).toEqual([]);
+		expect(parseAliases(undefined)).toEqual([]);
+		expect(parseAliases('')).toEqual([]);
+		expect(parseAliases('not json')).toEqual([]);
+		expect(parseAliases('{"displayName":"x"}')).toEqual([]); // not an array
+	});
+
+	it('keeps only entries with a non-empty displayName', () => {
+		const json = JSON.stringify([
+			{ displayName: 'KesForge', socials: { twitterUrl: 'https://x.com/kf' } },
+			{ displayName: '', socials: {} },
+			{ socials: {} },
+			{ displayName: 'OldName', socials: {} }
+		]);
+		expect(parseAliases(json)).toEqual([
+			{ displayName: 'KesForge', socials: { twitterUrl: 'https://x.com/kf' } },
+			{ displayName: 'OldName', socials: {} }
+		]);
 	});
 });
