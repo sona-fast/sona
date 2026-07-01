@@ -34,8 +34,11 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           SITE_URL: ${{ vars.SITE_URL || 'https://sona.fast' }}
         run: |
+          # Registry sync is OPTIONAL (a fork may not use the shared registry), so
+          # an unset secret means "not opted in" — skip quietly, don't fail. Deploy
+          # (which is mandatory) still fails loudly on missing creds.
           if [ -z "$CRON_SECRET" ]; then
-            echo "::error::CRON_SECRET not set — add it as a repo secret (Settings → Secrets and variables → Actions), matching your Pages secret of the same name, to enable the scheduled sync"; exit 1
+            echo "::warning::CRON_SECRET not set — skipping scheduled sync (optional; set the repo secret to opt in)"; exit 0
           fi
           code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
             -X POST \
