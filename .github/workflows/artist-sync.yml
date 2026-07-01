@@ -24,6 +24,10 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # The canonical template is intentionally unconfigured, so it must not run
+    # fork workflows. Every fork (any other repo) runs this normally and fails
+    # loudly if CRON_SECRET is missing — that's a real misconfiguration to fix.
+    if: github.repository != 'sona-fast/sona'
     steps:
       - name: Trigger artist-sync endpoint
         env:
@@ -31,7 +35,7 @@ jobs:
           SITE_URL: ${{ vars.SITE_URL || 'https://sona.fast' }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
-            echo "::error::CRON_SECRET repo secret is not set"; exit 1
+            echo "::error::CRON_SECRET not set — add it as a repo secret (Settings → Secrets and variables → Actions), matching your Pages secret of the same name, to enable the scheduled sync"; exit 1
           fi
           code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
             -X POST \

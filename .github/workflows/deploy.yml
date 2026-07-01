@@ -7,6 +7,11 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # The canonical template is intentionally not a deployment (no Cloudflare
+    # account/project/D1), so it must not run this. Every fork (any other repo)
+    # runs it and fails loudly if the credentials are missing — a real setup
+    # step to fix, not something to silently skip.
+    if: github.repository != 'sona-fast/sona'
     permissions:
       contents: read
       deployments: write
@@ -24,6 +29,18 @@ jobs:
       - run: npm test
 
       - run: npm run build
+
+      # Fail fast with a clear, actionable message if a fork runs this without
+      # Cloudflare credentials (rather than a cryptic wrangler error three steps
+      # later). The template never reaches here — the job is gated off above.
+      - name: Verify Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set — run 'npm run setup' or add both in Settings → Secrets and variables → Actions to enable deploys"; exit 1
+          fi
 
       # Per-deployment names. Set repo variables CF_PAGES_PROJECT and
       # D1_DATABASE_NAME (Settings → Secrets and variables → Actions → Variables);
