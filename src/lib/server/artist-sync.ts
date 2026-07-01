@@ -129,7 +129,7 @@ export async function syncArtists(
 				// Respect local edits: only fill an empty avatar; keep name/socials.
 				await db
 					.update(artists)
-					.set({ avatarUrl: local.avatarUrl || avatar, ...base })
+					.set({ avatarUrl: local.avatarUrl || avatar, aliases: aliasesToColumn(ra.aliases), ...base })
 					.where(eq(artists.id, local.id));
 			}
 			refreshed++;

@@ -64,14 +64,16 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// flag it so the page can show the "formerly" pointer.
 		let effectiveArtist = artistFilter;
 		let formerName: { searched: string; current: string } | null = null;
-		if (artistFilter && !allArtistsRaw.some((a) => a.name === artistFilter)) {
+		if (artistFilter && !allArtistsRaw.some((a) => a.name.toLowerCase() === artistFilter.toLowerCase())) {
 			const q = artistFilter.toLowerCase();
-			const viaAlias = allArtistsRaw.find((a) =>
+			// Only resolve when EXACTLY ONE artist claims this former name — an
+			// ambiguous former name must not silently credit the wrong artist.
+			const viaAlias = allArtistsRaw.filter((a) =>
 				parseAliases(a.aliases).some((al) => al.displayName.toLowerCase() === q)
 			);
-			if (viaAlias) {
-				effectiveArtist = viaAlias.name;
-				formerName = { searched: artistFilter, current: viaAlias.name };
+			if (viaAlias.length === 1) {
+				effectiveArtist = viaAlias[0].name;
+				formerName = { searched: artistFilter, current: viaAlias[0].name };
 			}
 		}
 
