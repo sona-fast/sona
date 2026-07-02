@@ -407,7 +407,7 @@
 	"admin_characters_delete_message": "Delete character \"{name}\"? They will be removed from all images.",
 	"admin_characters_edit_title": "Edit Character",
 	"admin_characters_name_label": "Character Name",
-	"admin_characters_profile_url": "Profile / Ref Sheet URL",
+	"admin_characters_profile_url": "Profile URL",
 	"admin_characters_profile_placeholder": "Optional — e.g. toyhouse.com/...",
 	"admin_view": "View",
 	"admin_fursuit_title": "Import from FurTrack",
@@ -716,5 +716,6 @@
 	"admin_registry_keep_updated": "Keep imported artists updated from the registry",
 	"admin_registry_editable_note": "Imported artists remain fully editable and deletable on your site.",
 	"admin_registry_import_n": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Import {count} artist", "countPlural=other": "Import {count} artists"}}],
-	"admin_registry_imported_toast": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Imported {count} artist from the registry", "countPlural=other": "Imported {count} artists from the registry"}}]
+	"admin_registry_imported_toast": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Imported {count} artist from the registry", "countPlural=other": "Imported {count} artists from the registry"}}],
+	"admin_characters_profile_hint": "Linked from the character on public pages. The site's icon (favicon) also becomes this character's avatar, replacing any avatar derived from their social links."
 }

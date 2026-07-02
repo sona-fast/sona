@@ -195,6 +195,7 @@
 				<label>
 					<span>{m.admin_characters_profile_url()}</span>
 					<input type="text" class="input" name="url" value={editingChar.url || ''} placeholder={m.admin_characters_profile_placeholder()} />
+					<small class="field-hint">{m.admin_characters_profile_hint()}</small>
 				</label>
 
 				<div class="social-section">
@@ -385,6 +386,8 @@
 	}
 
 	.icon-btn:hover { color: var(--foreground); }
+
+	.field-hint { font-size: 12px; color: var(--muted-foreground); margin-top: 2px; }
 
 	:global(.spin) {
 		animation: spin 1s linear infinite;

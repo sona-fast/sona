@@ -371,7 +371,7 @@
 	"admin_characters_delete_message": "キャラクター「{name}」を削除しますか？すべての画像から削除されます。",
 	"admin_characters_edit_title": "キャラクターを編集",
 	"admin_characters_name_label": "キャラクター名",
-	"admin_characters_profile_url": "プロフィール／レフシートのURL",
+	"admin_characters_profile_url": "プロフィールURL",
 	"admin_characters_profile_placeholder": "任意 — 例: toyhouse.com/...",
 	"admin_view": "表示",
 	"admin_fursuit_title": "FurTrackからインポート",
@@ -680,5 +680,6 @@
 	"admin_registry_keep_updated": "インポートしたアーティストをレジストリの更新に追従させる",
 	"admin_registry_editable_note": "インポートしたアーティストは、サイト上で自由に編集・削除できます。",
 	"admin_registry_import_n": "アーティスト{count}名をインポート",
-	"admin_registry_imported_toast": "レジストリからアーティスト{count}名をインポートしました"
+	"admin_registry_imported_toast": "レジストリからアーティスト{count}名をインポートしました",
+	"admin_characters_profile_hint": "公開ページのキャラクターからリンクされます。また、そのサイトのアイコン（ファビコン）がこのキャラクターのアバターとなり、ソーシャルリンクから取得したアバターを上書きします。"
 }
