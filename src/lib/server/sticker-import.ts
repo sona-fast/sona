@@ -944,13 +944,25 @@ export function parseStickerFormInputs(data: FormData, defaultArtistId: number |
  * submits URLs returned by /api/upload (our storage), so a URL we don't own means
  * a hand-crafted request trying to point a sticker at off-origin content — refuse
  * it so stored media is always self-hosted (defeats the off-origin Lottie vector).
+ *
+ * `knownUrls` — URLs already stored for the pack being edited — are exempt: they
+ * were validated when first stored, and re-checking them against the CURRENT
+ * storage config (public domain / providers, which may have changed since) would
+ * make any edit of an older pack fail even when no image changed. Only URLs new
+ * to the pack must pass the self-hosted check.
  */
-function assertSelfHosted(env: Env | undefined, settings: SiteSettings, input: ManualPackInput): void {
+function assertSelfHosted(
+	env: Env | undefined,
+	settings: SiteSettings,
+	input: ManualPackInput,
+	knownUrls?: ReadonlySet<string>
+): void {
 	const urls = [
 		...(input.coverImageUrl ? [input.coverImageUrl] : []),
 		...input.stickerInputs.map((s) => s.imageUrl)
 	];
 	for (const url of urls) {
+		if (knownUrls?.has(url)) continue;
 		if (!isOwnedUrl(env, settings, url)) {
 			throw new Error('Sticker and cover images must be uploaded here, not external URLs.');
 		}
@@ -1028,7 +1040,6 @@ export async function updateManualPack(opts: {
 	input: ManualPackInput;
 }): Promise<void> {
 	const { env, settings, db, packId, input } = opts;
-	assertSelfHosted(env, settings, input);
 
 	// Snapshot existing stickers before we mutate. We need imageUrl for storage
 	// cleanup AND width/height/telegramFileUniqueId so the edit PRESERVES the columns
@@ -1053,6 +1064,13 @@ export async function updateManualPack(opts: {
 		.from(stickerPacks)
 		.where(eq(stickerPacks.id, packId))
 		.get();
+
+	// URLs already stored for this pack were validated when first stored — exempt
+	// them so an edit that touches no images can't fail if the storage config has
+	// changed since. Anything else must be self-hosted (see assertSelfHosted).
+	const knownUrls = new Set(oldStickers.map((s) => s.imageUrl));
+	if (oldPack?.coverImageUrl) knownUrls.add(oldPack.coverImageUrl);
+	assertSelfHosted(env, settings, input, knownUrls);
 
 	const resolvedArtistIds = resolveStickerArtistIds(input.managerArtistId, input.stickerInputs.map((s) => s.artistId));
 

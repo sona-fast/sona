@@ -319,6 +319,74 @@ describe('updateManualPack', () => {
 		expect(emojiRows.map((e) => e.emoji)).toEqual(['🔥']);
 	});
 
+	it('saves a pack whose existing sticker URLs predate the current storage config', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+
+		// Seed a pack whose stored sticker URL no configured provider recognises —
+		// e.g. imported under an old public domain or a since-removed provider.
+		const legacyUrl = 'https://old-cdn.example.com/stickers/legacy.webp';
+		const [pack] = await db
+			.insert(stickerPacks)
+			.values({
+				name: 'Legacy Pack',
+				slug: 'legacy-pack',
+				characterId: 1,
+				source: 'telegram',
+				managerArtistId: null,
+				published: false,
+				createdAt: new Date().toISOString()
+			})
+			.returning({ id: stickerPacks.id });
+		await db.insert(stickers).values({
+			packId: pack.id,
+			artistId: null,
+			imageUrl: legacyUrl,
+			format: 'webp',
+			position: 0,
+			nsfw: false,
+			createdAt: new Date().toISOString()
+		});
+
+		const legacyInput = { imageUrl: legacyUrl, artistId: null, emojis: [], nsfw: false, position: 0, format: 'webp' as const };
+
+		// Editing only the description must not reject the already-stored URL.
+		await updateManualPack({
+			env: testEnv,
+			settings: testSettings,
+			db,
+			packId: pack.id,
+			input: {
+				name: 'Legacy Pack',
+				description: 'edited',
+				managerArtistId: null,
+				stickerInputs: [legacyInput]
+			}
+		});
+		const packRow = await db.select().from(stickerPacks).where(eq(stickerPacks.id, pack.id)).get();
+		expect(packRow?.description).toBe('edited');
+		const row = await db.select().from(stickers).where(eq(stickers.packId, pack.id)).get();
+		expect(row?.imageUrl).toBe(legacyUrl);
+
+		// A NEW external URL is still rejected — only pre-existing rows are exempt.
+		await expect(
+			updateManualPack({
+				env: testEnv,
+				settings: testSettings,
+				db,
+				packId: pack.id,
+				input: {
+					name: 'Legacy Pack',
+					managerArtistId: null,
+					stickerInputs: [
+						legacyInput,
+						{ imageUrl: 'https://evil.example.com/x.webp', artistId: null, emojis: [], nsfw: false, position: 1, format: 'webp' }
+					]
+				}
+			})
+		).rejects.toThrow(/uploaded here/);
+	});
+
 	it('is atomic: a failed re-insert leaves the existing rows intact', async () => {
 		const { db } = makeDb();
 		await seedCharacterAndArtist(db);
