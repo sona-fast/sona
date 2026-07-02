@@ -93,7 +93,10 @@ export const load: PageServerLoad = async ({ platform }) => {
 };
 
 export const actions = {
-	save: async ({ request, platform }) => {
+	// One save per tab: each action persists ONLY its tab's fields (saveSettings
+	// writes just the keys it's given), so saving one tab can never clobber
+	// another tab's pending edits.
+	saveSite: async ({ request, platform }) => {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
 
@@ -121,7 +124,17 @@ export const actions = {
 			furtrackUrl: sanitizeUrl(data.get('furtrack') as string) || '',
 			adminAvatarUrl,
 			themeId,
-			landingLayout,
+			landingLayout
+		});
+
+		return { success: true };
+	},
+
+	saveConnections: async ({ request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const data = await request.formData();
+
+		await saveSettings(db, {
 			// Unchecked checkboxes don't post a field, so absence means false.
 			autoResyncEnabled: data.get('autoResyncEnabled') === 'on',
 			registryOverridesLocal: data.get('registryOverridesLocal') === 'on'

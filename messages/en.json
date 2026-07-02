@@ -580,6 +580,8 @@
 	"admin_settings_tab_storage": "Storage",
 	"admin_settings_tab_account": "Account",
 	"admin_settings_saved": "Settings saved",
+	"admin_settings_save_site": "Save site settings",
+	"admin_settings_save_connections": "Save connection settings",
 	"admin_settings_site_info": "Site Information",
 	"admin_settings_site_name": "Site Name",
 	"admin_settings_owner_name": "Owner / Persona Name",

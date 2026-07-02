@@ -56,20 +56,24 @@
 	let actionMessage = $state('');
 	let actionError = $state('');
 
-	let saving = $state(false);
+	let savingSite = $state(false);
+	let savingConnections = $state(false);
 	let exportForm: HTMLFormElement;
 	let deleteAllForm: HTMLFormElement;
 	let clearCacheForm: HTMLFormElement;
 	let resetTagsForm: HTMLFormElement;
 
-	// Sync from server when data changes (after form submission)
+	// Sync from server when data changes (after form submission).
+	// registryOverridesLocal is intentionally NOT resynced here: a registry sync
+	// reloads `data` too, and resyncing would discard an unsaved toggle of this
+	// checkbox mid-sync. It's seeded once above and only changes when the user
+	// edits it or saves (after which local already equals server).
 	$effect(() => {
 		siteName = data.settings.siteName;
 		ownerName = data.settings.ownerName;
 		aboutText = data.settings.aboutText;
 		themeId = data.settings.themeId;
 		landingLayout = data.settings.landingLayout;
-		registryOverridesLocal = data.settings.registryOverridesLocal;
 		primaryCharacter = data.settings.primaryCharacter;
 		twitterUrl = data.settings.twitterUrl;
 		blueskyUrl = data.settings.blueskyUrl;
@@ -120,9 +124,6 @@
 	<div class="settings-header">
 		<div class="page-header">
 			<h1>{m.admin_nav_settings()}</h1>
-			<button type="submit" form="form-save" class="btn btn-primary" disabled={saving}>
-				{saving ? m.admin_saving() : m.admin_save_changes()}
-			</button>
 		</div>
 		<nav class="settings-tabnav">
 			<button type="button" class:active={activeTab === 'site'} onclick={() => (activeTab = 'site')}>{m.admin_settings_tab_site()}</button>
@@ -133,11 +134,13 @@
 	</div>
 
 	<div class="settings-panels">
-<form method="POST" action="?/save" id="form-save" class="contents" use:enhance={() => {
-	saving = true;
+<form method="POST" action="?/saveSite" class="contents" use:enhance={() => {
+	savingSite = true;
 	return async ({ result, update }) => {
-		await update();
-		saving = false;
+		// reset: false — keep the bound inputs; the $effect above rebinds them
+		// from the reloaded data, so saved values never visually revert.
+		await update({ reset: false });
+		savingSite = false;
 		if (result.type === 'success') toast.success(m.admin_settings_saved());
 	};
 }}>
@@ -207,6 +210,21 @@
 			</div>
 		</section>
 
+		<div class="tab-actions" data-tab="site">
+			<button type="submit" class="btn btn-primary" disabled={savingSite}>
+				{savingSite ? m.admin_saving() : m.admin_settings_save_site()}
+			</button>
+		</div>
+</form>
+
+<form method="POST" action="?/saveConnections" class="contents" use:enhance={() => {
+	savingConnections = true;
+	return async ({ result, update }) => {
+		await update({ reset: false });
+		savingConnections = false;
+		if (result.type === 'success') toast.success(m.admin_settings_saved());
+	};
+}}>
 		<section data-tab="connections">
 			<h2>Telegram</h2>
 			<label class="checkbox-row">
@@ -237,6 +255,14 @@
 			</a>
 		</section>
 
+		<div class="tab-actions" data-tab="connections">
+			<button type="submit" class="btn btn-primary" disabled={savingConnections}>
+				{savingConnections ? m.admin_saving() : m.admin_settings_save_connections()}
+			</button>
+		</div>
+</form>
+
+		<!-- Read-only usage/stats — not part of any save form. -->
 		<section data-tab="storage">
 			<h2>{m.admin_settings_tab_storage()}</h2>
 			{#if activeUsage}
@@ -277,7 +303,6 @@
 				</div>
 			</div>
 		</section>
-</form>
 
 <form method="POST" action="?/saveStorage" class="contents" use:enhance={() => {
 	savingStorage = true;
@@ -675,6 +700,12 @@
 	/* Same rhythm between the last password field and its submit button. */
 	.security-section > .btn {
 		margin-top: 20px;
+	}
+
+	/* Per-tab save row (site / connections). */
+	.tab-actions {
+		display: flex;
+		justify-content: flex-end;
 	}
 
 	label > span {
