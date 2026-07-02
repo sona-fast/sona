@@ -11,5 +11,6 @@
 	intro={m.admin_pack_manual_intro()}
 	artists={data.artists}
 	ownerName={data.ownerName || data.siteName}
+	registryEnabled={data.registryEnabled}
 	{form}
 />

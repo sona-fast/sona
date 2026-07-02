@@ -37,9 +37,11 @@
 		form?: { error?: string } | null;
 		/** Site owner / persona name, used in the "managed by" labels. */
 		ownerName?: string;
+		/** Whether the shared registry is connected — forwarded to the New-artist modal. */
+		registryEnabled?: boolean;
 	}
 
-	let { heading, submitLabel, intro, artists, pack = null, stickers = [], form = null, ownerName = m.admin_stickers_site_owner() }: Props = $props();
+	let { heading, submitLabel, intro, artists, pack = null, stickers = [], form = null, ownerName = m.admin_stickers_site_owner(), registryEnabled = false }: Props = $props();
 
 	const isEdit = pack !== null;
 
@@ -475,6 +477,7 @@
 {#if showNewArtist}
 	<NewArtistDialog
 		title={newArtistTarget === 'manager' ? 'New Manager' : 'New Artist'}
+		registryEnabled={registryEnabled}
 		oncreated={onArtistCreated}
 		oncancel={() => (showNewArtist = false)}
 	/>
