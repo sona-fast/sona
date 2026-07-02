@@ -202,46 +202,42 @@
 	// --- Drag-to-reorder. Reordering the array directly is all that's needed: the
 	// hidden inputs are emitted in array order and the server assigns `position` from
 	// that order. animate:flip (keyed by uid) slides the other rows into place.
-	// dragIndex = the row being dragged; overIndex = where it would drop (for the
-	// insertion highlight). Drag is gated to the GripVertical handle (handleGrab) so it
-	// doesn't fight the thumbnail's click-to-select.
+	// Implemented with pointer events (not HTML5 drag-and-drop, which never fires on
+	// touch) so it works on mobile too: the handle captures the pointer, its
+	// touch-action: none stops the page from scrolling mid-drag, and the row under
+	// the pointer is resolved via elementFromPoint. dragIndex = the row being
+	// dragged; overIndex = where it would drop (for the insertion highlight). The
+	// drag only ever starts from the GripVertical handle, so it doesn't fight the
+	// thumbnail's click-to-select or the inputs' text selection.
 	let dragIndex = $state<number | null>(null);
 	let overIndex = $state<number | null>(null);
-	// True only while a pointer is held on a row's drag handle. Gates `draggable` so a
-	// drag can ONLY begin from the handle — the rest of the row (and the thumbnail's
-	// click-to-select / the inputs' text selection) stays a normal, non-draggable area.
-	let handleGrab = $state(false);
 
-	function onDragStart(i: number, ev: DragEvent) {
-		// Only start a real reorder when the drag began on the handle; otherwise cancel
-		// so a stray drag on the row (e.g. selecting text) doesn't move anything.
-		if (!handleGrab) {
-			ev.preventDefault();
-			return;
-		}
-		dragIndex = i;
-		if (ev.dataTransfer) {
-			ev.dataTransfer.effectAllowed = 'move';
-			// Firefox needs data set for the drag to fire at all.
-			ev.dataTransfer.setData('text/plain', String(i));
-		}
-	}
-
-	function onDragOver(i: number, ev: DragEvent) {
-		if (dragIndex === null) return;
+	function onHandlePointerDown(i: number, ev: PointerEvent) {
+		if (ev.button !== 0) return; // primary button / touch only
 		ev.preventDefault();
-		if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+		(ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
+		dragIndex = i;
 		overIndex = i;
 	}
 
-	function onDrop(i: number, ev: DragEvent) {
-		ev.preventDefault();
+	function onHandlePointerMove(ev: PointerEvent) {
+		if (dragIndex === null) return;
+		// The handle holds pointer capture, so events target it regardless of what's
+		// under the finger — hit-test the rows by coordinates instead.
+		const row = document
+			.elementFromPoint(ev.clientX, ev.clientY)
+			?.closest<HTMLElement>('[data-row-index]');
+		if (row) overIndex = Number(row.dataset.rowIndex);
+	}
+
+	function onHandlePointerUp() {
 		const from = dragIndex;
+		const to = overIndex;
 		resetDrag();
-		if (from === null || from === i) return;
+		if (from === null || to === null || from === to) return;
 		const next = [...stickerEntries];
 		const [moved] = next.splice(from, 1);
-		next.splice(i, 0, moved);
+		next.splice(to, 0, moved);
 		stickerEntries = next;
 		// Reordering shifts every index, so the index-keyed selection now points at the
 		// wrong rows — drop it (same reasoning as removeSticker).
@@ -251,7 +247,6 @@
 	function resetDrag() {
 		dragIndex = null;
 		overIndex = null;
-		handleGrab = false;
 	}
 </script>
 
@@ -393,22 +388,20 @@
 						class:dragging={dragIndex === i}
 						class:drop-target={overIndex === i && dragIndex !== null && dragIndex !== i}
 						animate:flip={{ duration: 200 }}
-						draggable={handleGrab}
-						ondragstart={(e) => onDragStart(i, e)}
-						ondragover={(e) => onDragOver(i, e)}
-						ondrop={(e) => onDrop(i, e)}
-						ondragend={resetDrag}
+						data-row-index={i}
 					>
-						<!-- Dedicated drag handle: gates dragstart so reordering can't be triggered
-						     by a stray drag elsewhere on the row, and never fires the thumbnail's
-						     click-to-select. -->
+						<!-- Dedicated drag handle: the pointer-event reorder only ever starts here,
+						     so it can't be triggered by a stray drag elsewhere on the row and never
+						     fires the thumbnail's click-to-select. -->
 						<button
 							type="button"
 							class="drag-handle"
 							aria-label="Drag to reorder"
 							title="Drag to reorder"
-							onpointerdown={() => (handleGrab = true)}
-							onpointerup={() => (handleGrab = false)}
+							onpointerdown={(e) => onHandlePointerDown(i, e)}
+							onpointermove={onHandlePointerMove}
+							onpointerup={onHandlePointerUp}
+							onpointercancel={resetDrag}
 						>
 							<GripVertical size={16} />
 						</button>
