@@ -91,51 +91,58 @@ export async function syncArtists(
 
 		for (const ra of batch) {
 			if (ra.updatedAt > maxUpdatedAt) maxUpdatedAt = ra.updatedAt;
-			const local = await db
-				.select()
-				.from(artists)
-				.where(eq(artists.globalId, ra.globalId))
-				.get();
-			if (!local) continue;
+			// One malformed record must not abort the whole batch: the sync cursor only
+			// persists after the loop, so an uncaught throw here would re-process the
+			// poison record every run and wedge sync. maxUpdatedAt already advanced above.
+			try {
+				const local = await db
+					.select()
+					.from(artists)
+					.where(eq(artists.globalId, ra.globalId))
+					.get();
+				if (!local) continue;
 
-			const now = new Date().toISOString();
+				const now = new Date().toISOString();
 
-			// Merged: re-point the local link to the surviving artist so the fork
-			// doesn't stay bound to a dead id. Clear the version so the survivor
-			// (whose updatedAt the registry bumps on merge) refreshes on a later pass.
-			if (ra.status === 'merged' && ra.mergedInto) {
-				await db
-					.update(artists)
-					.set({ globalId: ra.mergedInto, registryVersion: null, registrySyncedAt: now })
-					.where(eq(artists.id, local.id));
+				// Merged: re-point the local link to the surviving artist so the fork
+				// doesn't stay bound to a dead id. Clear the version so the survivor
+				// (whose updatedAt the registry bumps on merge) refreshes on a later pass.
+				if (ra.status === 'merged' && ra.mergedInto) {
+					await db
+						.update(artists)
+						.set({ globalId: ra.mergedInto, registryVersion: null, registrySyncedAt: now })
+						.where(eq(artists.id, local.id));
+					refreshed++;
+					continue;
+				}
+				// Tombstoned (takedown) records: don't copy their data over local rows.
+				if (ra.status !== 'active') continue;
+
+				const avatar = sanitizeUrl(ra.avatarUrl);
+				const base = { registryVersion: ra.version, registrySyncedAt: now };
+				if (settings.registryOverridesLocal) {
+					// Authoritative refresh: registry wins (URLs sanitized).
+					await db
+						.update(artists)
+						.set({
+							name: ra.displayName,
+							avatarUrl: avatar,
+							...socialsToColumns(ra.socials),
+							aliases: aliasesToColumn(ra.aliases),
+							...base
+						})
+						.where(eq(artists.id, local.id));
+				} else {
+					// Respect local edits: only fill an empty avatar; keep name/socials.
+					await db
+						.update(artists)
+						.set({ avatarUrl: local.avatarUrl || avatar, aliases: aliasesToColumn(ra.aliases), ...base })
+						.where(eq(artists.id, local.id));
+				}
 				refreshed++;
+			} catch {
 				continue;
 			}
-			// Tombstoned (takedown) records: don't copy their data over local rows.
-			if (ra.status !== 'active') continue;
-
-			const avatar = sanitizeUrl(ra.avatarUrl);
-			const base = { registryVersion: ra.version, registrySyncedAt: now };
-			if (settings.registryOverridesLocal) {
-				// Authoritative refresh: registry wins (URLs sanitized).
-				await db
-					.update(artists)
-					.set({
-						name: ra.displayName,
-						avatarUrl: avatar,
-						...socialsToColumns(ra.socials),
-						aliases: aliasesToColumn(ra.aliases),
-						...base
-					})
-					.where(eq(artists.id, local.id));
-			} else {
-				// Respect local edits: only fill an empty avatar; keep name/socials.
-				await db
-					.update(artists)
-					.set({ avatarUrl: local.avatarUrl || avatar, aliases: aliasesToColumn(ra.aliases), ...base })
-					.where(eq(artists.id, local.id));
-			}
-			refreshed++;
 		}
 
 		if (!nextCursor) break;
