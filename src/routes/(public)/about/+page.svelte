@@ -24,6 +24,16 @@
 
 	const ownerName = settings.ownerName || settings.siteName;
 
+	// 2026-09-12 → 2026.09.12; same-year ranges trim the end date (→ 09.14).
+	function fmt(d: string): string {
+		return d.replaceAll('-', '.');
+	}
+	function dateRange(start: string, end: string | null): string {
+		if (!end || end === start) return fmt(start);
+		const same = start.slice(0, 4) === end.slice(0, 4);
+		return `${fmt(start)} → ${same ? fmt(end).slice(5) : fmt(end)}`;
+	}
+
 	const socialLinks = [
 		{ url: settings.twitterUrl, icon: TwitterIcon, label: settings.twitterUrl ? `@${handleFromUrl(settings.twitterUrl, 'Twitter')}` : 'Twitter' },
 		{ url: settings.telegramUrl, icon: TelegramIcon, label: handleFromUrl(settings.telegramUrl, 'Telegram') },
@@ -77,6 +87,29 @@
 				{/each}
 			</div>
 		</div>
+
+		{#if data.conventions.length > 0}
+			<div class="cons-section">
+				<h3>{m.about_conventions()}</h3>
+				<div class="cons-list">
+					{#each data.conventions as con}
+						<svelte:element
+							this={con.url ? 'a' : 'div'}
+							class="con-item"
+							href={con.url ?? undefined}
+							target={con.url ? '_blank' : undefined}
+							rel={con.url ? 'noopener' : undefined}
+						>
+							<span class="con-dates">{dateRange(con.startDate, con.endDate)}</span>
+							<span class="con-info">
+								<span class="con-name">{con.name}</span>
+								{#if con.location}<span class="con-loc">{con.location}</span>{/if}
+							</span>
+						</svelte:element>
+					{/each}
+				</div>
+			</div>
+		{/if}
 
 		<a href="/gallery" class="btn btn-primary btn-lg browse-btn">{m.browse_gallery()}</a>
 	</div>
@@ -189,6 +222,66 @@
 	.social-item:hover {
 		background: var(--muted);
 		text-decoration: none;
+	}
+
+	.cons-section {
+		width: 100%;
+		margin-top: 8px;
+	}
+
+	.cons-section h3 {
+		font-size: 12px;
+		color: var(--muted-foreground);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 12px;
+	}
+
+	.cons-list {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		width: 100%;
+	}
+
+	.con-item {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 16px;
+		border-radius: var(--radius-s);
+		background: var(--secondary);
+		color: var(--foreground);
+		text-decoration: none;
+		font-size: 14px;
+		text-align: left;
+	}
+
+	a.con-item:hover {
+		background: var(--muted);
+		text-decoration: none;
+	}
+
+	.con-dates {
+		font-size: 12px;
+		color: var(--muted-foreground);
+		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.con-info {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.con-name {
+		font-weight: 500;
+	}
+
+	.con-loc {
+		font-size: 12px;
+		color: var(--muted-foreground);
 	}
 
 	.browse-btn {

@@ -1,7 +1,7 @@
 import { getReadDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
-import { images, artists, collections } from '$lib/server/db/schema';
-import { sql } from 'drizzle-orm';
+import { images, artists, collections, conventions } from '$lib/server/db/schema';
+import { asc, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 
 async function fetchBlueskyAvatar(blueskyUrl: string): Promise<string | null> {
@@ -32,10 +32,18 @@ export const load: PageServerLoad = async ({ platform }) => {
 	const db = getReadDb(platform!.env.DB);
 	const settings = await getSettings(db);
 
-	const [imageCount, artistCount, collectionCount] = await Promise.all([
+	// Cons that haven't finished yet (use end date when present), soonest first.
+	const today = new Date().toISOString().slice(0, 10);
+
+	const [imageCount, artistCount, collectionCount, upcomingCons] = await Promise.all([
 		db.select({ count: sql<number>`COUNT(*)` }).from(images).where(sql`published = 1`).get(),
 		db.select({ count: sql<number>`COUNT(*)` }).from(artists).get(),
-		db.select({ count: sql<number>`COUNT(*)` }).from(collections).get()
+		db.select({ count: sql<number>`COUNT(*)` }).from(collections).get(),
+		db
+			.select()
+			.from(conventions)
+			.where(sql`COALESCE(${conventions.endDate}, ${conventions.startDate}) >= ${today}`)
+			.orderBy(asc(conventions.startDate))
 	]);
 
 	// Fetch avatar from Bluesky if configured
@@ -47,6 +55,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 	return {
 		settings,
 		avatarUrl,
+		conventions: upcomingCons,
 		stats: {
 			artworks: imageCount?.count || 0,
 			artists: artistCount?.count || 0,

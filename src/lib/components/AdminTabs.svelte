@@ -11,6 +11,7 @@
 		{ href: '/admin/characters', label: m.admin_nav_characters },
 		{ href: '/admin/fursuit', label: m.admin_tab_fursuit },
 		{ href: '/admin/stickers', label: m.admin_nav_stickers },
+		{ href: '/admin/conventions', label: m.admin_nav_conventions },
 		{ href: '/admin/settings', label: m.admin_nav_settings }
 	];
 </script>

@@ -171,3 +171,19 @@ export const stickerEmojis = sqliteTable('sticker_emojis', {
 	stickerId: integer('sticker_id').notNull().references(() => stickers.id, { onDelete: 'cascade' }),
 	emoji: text('emoji').notNull()
 });
+
+// Convention appearances, shown publicly on /about ("Upcoming conventions").
+// Rows are picked from the cons.fyi feed in admin or entered manually.
+export const conventions = sqliteTable('conventions', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	name: text('name').notNull(),
+	location: text('location'),
+	startDate: text('start_date').notNull(),
+	endDate: text('end_date'),
+	url: text('url'),
+	// 'confirmed' | 'maybe' | 'considering' — planning state shown as a badge in admin.
+	status: text('status').notNull().default('confirmed'),
+	// cons.fyi event id when picked from the feed (null for manual entries); used to dedupe.
+	sourceId: text('source_id'),
+	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
+});
