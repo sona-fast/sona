@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { Plus, Pencil, Trash2, X } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { plural } from '$lib';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
@@ -26,8 +26,8 @@
 </script>
 
 <div class="page-header">
-	<h1>Collections <span class="count">{plural(data.collections.length, 'collection')}</span></h1>
-	<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> New Collection</button>
+	<h1>{m.admin_nav_collections()} <span class="count">{m.admin_count_collections({ count: data.collections.length })}</span></h1>
+	<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> {m.admin_collections_new()}</button>
 </div>
 
 {#if form?.error}
@@ -41,9 +41,9 @@
 			showAdd = false;
 		};
 	}} class="add-form">
-		<input type="text" class="input" name="name" placeholder="Collection name..." autofocus />
-		<button type="submit" class="btn btn-primary">Create</button>
-		<button type="button" class="btn btn-secondary" onclick={() => (showAdd = false)}>Cancel</button>
+		<input type="text" class="input" name="name" placeholder={m.admin_collections_name_placeholder()} autofocus />
+		<button type="submit" class="btn btn-primary">{m.admin_create()}</button>
+		<button type="button" class="btn btn-secondary" onclick={() => (showAdd = false)}>{m.admin_cancel()}</button>
 	</form>
 {/if}
 
@@ -58,20 +58,20 @@
 			<div class="collection-info">
 				<div class="collection-meta">
 					<a href="/collections/{collection.slug}" class="collection-link"><h3>{collection.name}</h3></a>
-					<p class="artwork-count">{plural(collection.artworkCount, 'artwork')}</p>
+					<p class="artwork-count">{m.admin_count_artworks({ count: collection.artworkCount })}</p>
 				</div>
 				<div class="collection-actions">
-					<button class="icon-btn" aria-label="Edit collection" onclick={() => startEdit(collection)}>
+					<button class="icon-btn" aria-label={m.admin_collections_edit_aria()} onclick={() => startEdit(collection)}>
 						<Pencil size={16} />
 					</button>
-					<button class="icon-btn" aria-label="Delete collection" onclick={() => (deleteTarget = { id: collection.id, name: collection.name })}>
+					<button class="icon-btn" aria-label={m.admin_collections_delete_aria()} onclick={() => (deleteTarget = { id: collection.id, name: collection.name })}>
 						<Trash2 size={16} />
 					</button>
 				</div>
 			</div>
 		</div>
 	{:else}
-		<p class="empty">No collections yet. Create one to organize your artwork.</p>
+		<p class="empty">{m.admin_collections_empty_hint()}</p>
 	{/each}
 </div>
 
@@ -86,7 +86,7 @@
 			</a>
 			<div class="mobile-collection-info">
 				<a href="/collections/{collection.slug}" class="mobile-collection-name">{collection.name}</a>
-				<p class="mobile-collection-count">{plural(collection.artworkCount, 'artwork')}</p>
+				<p class="mobile-collection-count">{m.admin_count_artworks({ count: collection.artworkCount })}</p>
 			</div>
 			<div class="mobile-collection-actions">
 				<button class="icon-btn" onclick={() => startEdit(collection)}><Pencil size={16} /></button>
@@ -94,9 +94,9 @@
 			</div>
 		</div>
 	{:else}
-		<p class="empty">No collections yet.</p>
+		<p class="empty">{m.collections_empty()}</p>
 	{/each}
-	<button class="mobile-add-row" onclick={() => (showAdd = true)}>+ New Collection</button>
+	<button class="mobile-add-row" onclick={() => (showAdd = true)}>+ {m.admin_collections_new()}</button>
 </div>
 
 <form method="POST" action="?/delete" use:enhance bind:this={deleteForm} style="display:none">
@@ -105,8 +105,8 @@
 
 {#if deleteTarget}
 	<ConfirmDialog
-		title="Delete Collection"
-		message={`Delete collection "${deleteTarget.name}"? Images will be unlinked but not deleted.`}
+		title={m.admin_collections_delete_title()}
+		message={m.admin_collections_delete_message({ name: deleteTarget.name })}
 		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
@@ -119,8 +119,8 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal" onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
-				<h2>Edit Collection</h2>
-				<button class="icon-btn" onclick={() => (editingCollection = null)} aria-label="Close">
+				<h2>{m.admin_collections_edit_title()}</h2>
+				<button class="icon-btn" onclick={() => (editingCollection = null)} aria-label={m.admin_close()}>
 					<X size={18} />
 				</button>
 			</div>
@@ -134,25 +134,25 @@
 				<input type="hidden" name="id" value={editingCollection.id} />
 
 				<label>
-					<span>Collection Name</span>
+					<span>{m.admin_collections_name_label()}</span>
 					<input type="text" class="input" name="name" value={editingCollection.name} required />
 				</label>
 
 				<div class="cover-section">
-					<span class="field-label">Cover Image</span>
+					<span class="field-label">{m.admin_collections_cover_image()}</span>
 					<input type="hidden" name="coverImageUrl" value={editCoverUrl} />
 
 					{#if editCoverUrl}
 						<div class="cover-preview">
-							<img src={editCoverUrl} alt="Cover preview" />
+							<img src={editCoverUrl} alt={m.admin_collections_cover_preview_alt()} />
 							<button type="button" class="remove-cover" onclick={() => (editCoverUrl = '')}>
-								<X size={14} /> Remove
+								<X size={14} /> {m.admin_remove()}
 							</button>
 						</div>
 					{/if}
 
 					{#if collectionImages.length > 0}
-						<p class="cover-hint">Select from collection images:</p>
+						<p class="cover-hint">{m.admin_collections_cover_select_hint()}</p>
 						<div class="cover-grid">
 							{#each collectionImages as img}
 								<button
@@ -166,13 +166,13 @@
 							{/each}
 						</div>
 					{:else}
-						<p class="cover-hint">Add images to this collection to set a cover.</p>
+						<p class="cover-hint">{m.admin_collections_cover_empty_hint()}</p>
 					{/if}
 				</div>
 
 				<div class="modal-actions">
-					<button type="button" class="btn btn-secondary" onclick={() => (editingCollection = null)}>Cancel</button>
-					<button type="submit" class="btn btn-primary">Save Changes</button>
+					<button type="button" class="btn btn-secondary" onclick={() => (editingCollection = null)}>{m.admin_cancel()}</button>
+					<button type="submit" class="btn btn-primary">{m.admin_save_changes()}</button>
 				</div>
 			</form>
 		</div>

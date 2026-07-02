@@ -2,7 +2,8 @@
 	import { enhance } from '$app/forms';
 	import { Search, Plus, Pencil, Trash2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { plural, formatDate } from '$lib';
+	import { formatDate } from '$lib';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
@@ -18,8 +19,8 @@
 </script>
 
 <div class="page-header">
-	<h1>Tags <span class="count">{plural(data.total, 'tag')}</span></h1>
-	<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> Add Tag</button>
+	<h1>{m.admin_nav_tags()} <span class="count">{m.admin_count_tags({ count: data.total })}</span></h1>
+	<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> {m.admin_tags_add()}</button>
 </div>
 
 {#if form?.error}
@@ -33,16 +34,16 @@
 			showAdd = false;
 		};
 	}} class="add-form">
-		<input type="text" class="input" name="name" placeholder="Tag name..." autofocus />
-		<button type="submit" class="btn btn-primary">Add</button>
-		<button type="button" class="btn btn-secondary" onclick={() => (showAdd = false)}>Cancel</button>
+		<input type="text" class="input" name="name" placeholder={m.admin_tags_name_placeholder()} autofocus />
+		<button type="submit" class="btn btn-primary">{m.admin_add()}</button>
+		<button type="button" class="btn btn-secondary" onclick={() => (showAdd = false)}>{m.admin_cancel()}</button>
 	</form>
 {/if}
 
 <div class="toolbar">
 	<div class="search-wrapper">
 		<Search size={16} class="search-icon" />
-		<input type="search" class="input search" placeholder="Search..." bind:value={search} />
+		<input type="search" class="input search" placeholder={m.admin_search_placeholder()} bind:value={search} />
 	</div>
 </div>
 
@@ -50,20 +51,20 @@
 	<table class="data-table">
 		<thead>
 			<tr>
-				<th>Tag Name</th>
-				<th>Used In</th>
-				<th>Created</th>
-				<th>Actions</th>
+				<th>{m.admin_tags_col_name()}</th>
+				<th>{m.admin_tags_col_used_in()}</th>
+				<th>{m.admin_tags_col_created()}</th>
+				<th>{m.admin_col_actions()}</th>
 			</tr>
 		</thead>
 		<tbody>
 			{#each filtered as tag}
 				<tr>
 					<td><span class="tag">{tag.name}</span></td>
-					<td>{plural(tag.usageCount, 'image')}</td>
+					<td>{m.admin_count_images({ count: tag.usageCount })}</td>
 					<td>{formatDate(tag.createdAt)}</td>
 					<td>
-						<button class="icon-btn" aria-label="Delete tag" onclick={() => (deleteTarget = { id: tag.id, name: tag.name })}>
+						<button class="icon-btn" aria-label={m.admin_tags_delete_aria()} onclick={() => (deleteTarget = { id: tag.id, name: tag.name })}>
 							<Trash2 size={16} />
 						</button>
 					</td>
@@ -72,9 +73,9 @@
 				<tr>
 					<td colspan="4" class="empty">
 						{#if search}
-							No tags matching "{search}"
+							{m.admin_tags_no_match({ search })}
 						{:else}
-							No tags yet.
+							{m.admin_tags_empty()}
 						{/if}
 					</td>
 				</tr>
@@ -93,26 +94,26 @@
 			<div class="mobile-tag-actions">
 				<form method="POST" action="?/delete" use:enhance class="inline-form">
 					<input type="hidden" name="id" value={tag.id} />
-					<button type="submit" class="icon-btn" aria-label="Delete tag">
+					<button type="submit" class="icon-btn" aria-label={m.admin_tags_delete_aria()}>
 						<Trash2 size={16} />
 					</button>
 				</form>
 			</div>
 		</div>
 	{:else}
-		<p class="empty">{search ? `No tags matching "${search}"` : 'No tags yet.'}</p>
+		<p class="empty">{search ? m.admin_tags_no_match({ search }) : m.admin_tags_empty()}</p>
 	{/each}
-	<button class="mobile-add-row" onclick={() => (showAdd = true)}>+ New Tag</button>
+	<button class="mobile-add-row" onclick={() => (showAdd = true)}>+ {m.admin_tags_new()}</button>
 </div>
 
 {#if data.totalPages > 1}
 	<nav class="pagination">
 		{#if data.page > 1}
-			<a href="?page={data.page - 1}" class="btn btn-secondary">Previous</a>
+			<a href="?page={data.page - 1}" class="btn btn-secondary">{m.gallery_previous()}</a>
 		{/if}
-		<span class="page-info">Page {data.page} of {data.totalPages}</span>
+		<span class="page-info">{m.admin_page_info({ page: data.page, total: data.totalPages })}</span>
 		{#if data.page < data.totalPages}
-			<a href="?page={data.page + 1}" class="btn btn-secondary">Next</a>
+			<a href="?page={data.page + 1}" class="btn btn-secondary">{m.gallery_next()}</a>
 		{/if}
 	</nav>
 {/if}
@@ -123,8 +124,8 @@
 
 {#if deleteTarget}
 	<ConfirmDialog
-		title="Delete Tag"
-		message={`Delete tag "${deleteTarget.name}"? It will be removed from all images.`}
+		title={m.admin_tags_delete_title()}
+		message={m.admin_tags_delete_message({ name: deleteTarget.name })}
 		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>

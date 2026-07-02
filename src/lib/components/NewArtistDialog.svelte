@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { X, Loader2, Search } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
+	import * as m from '$lib/paraglide/messages';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
@@ -116,18 +117,18 @@
 				})
 			});
 			if (!res.ok) {
-				errorMsg = (await res.text()) || 'Could not create artist.';
+				errorMsg = (await res.text()) || m.admin_new_artist_create_failed();
 				toast.error(errorMsg);
 				return;
 			}
 			const result = (await res.json()) as { id: number; name: string; status?: string };
 			if (result.status === 'linked')
-				toast.success(`Linked to your existing artist "${result.name}"`);
+				toast.success(m.admin_new_artist_linked({ name: result.name }));
 			else if (result.status === 'reused')
-				toast.success(`Using your existing registry-linked artist "${result.name}"`);
+				toast.success(m.admin_new_artist_reused({ name: result.name }));
 			oncreated(result);
 		} catch {
-			errorMsg = 'Network error creating artist.';
+			errorMsg = m.admin_new_artist_network_error();
 			toast.error(errorMsg);
 		} finally {
 			saving = false;
@@ -141,7 +142,7 @@
 	<div class="modal" role="dialog" aria-modal="true" aria-label={title} onclick={(e) => e.stopPropagation()}>
 		<div class="modal-header">
 			<h2>{title}</h2>
-			<button class="icon-btn" onclick={oncancel} aria-label="Close"><X size={18} /></button>
+			<button class="icon-btn" onclick={oncancel} aria-label={m.admin_close()}><X size={18} /></button>
 		</div>
 
 		{#if errorMsg}<div class="err">{errorMsg}</div>{/if}
@@ -149,7 +150,7 @@
 		<div class="modal-form">
 			{#if registryEnabled !== false}
 				<div class="registry-search">
-					<span class="reg-label">Search shared registry <em>(optional — pull an existing artist)</em></span>
+					<span class="reg-label">{m.admin_new_artist_registry_label()} <em>{m.admin_new_artist_registry_hint()}</em></span>
 					<div class="reg-input">
 						<Search size={14} />
 						<input
@@ -157,7 +158,7 @@
 							class="input"
 							bind:value={registryQuery}
 							oninput={onRegistryInput}
-							placeholder="Find an artist already in the registry…"
+							placeholder={m.admin_new_artist_registry_placeholder()}
 						/>
 						{#if registrySearching}<Loader2 size={14} class="spin" />{/if}
 					</div>
@@ -173,18 +174,18 @@
 							{/each}
 						</ul>
 					{/if}
-					{#if pulled}<small class="linked">✓ Linked to the shared registry</small>{/if}
+					{#if pulled}<small class="linked">✓ {m.admin_new_artist_registry_linked()}</small>{/if}
 				</div>
 			{/if}
 
 			<label>
-				<span>Artist Name</span>
+				<span>{m.admin_field_artist_name()}</span>
 				<!-- svelte-ignore a11y_autofocus -->
-				<input type="text" class="input" bind:value={name} required autofocus placeholder="Artist name…" onkeydown={(e) => { if (e.key === 'Enter') create(); }} />
+				<input type="text" class="input" bind:value={name} required autofocus placeholder={m.admin_upload_artist_name_placeholder()} onkeydown={(e) => { if (e.key === 'Enter') create(); }} />
 			</label>
 
 			<div class="social-section">
-				<h3>Social Links</h3>
+				<h3>{m.admin_artists_col_social()}</h3>
 				<div class="social-grid">
 					<label class="social-field"><TwitterIcon size={14} /><input type="text" class="input" bind:value={twitter} placeholder="@handle" /></label>
 					<label class="social-field"><BlueskyIcon size={14} /><input type="text" class="input" bind:value={bluesky} placeholder="lunarpaws.bsky.social" /></label>
@@ -197,9 +198,9 @@
 			</div>
 
 			<div class="modal-actions">
-				<button type="button" class="btn btn-secondary" onclick={oncancel}>Cancel</button>
+				<button type="button" class="btn btn-secondary" onclick={oncancel}>{m.admin_cancel()}</button>
 				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving}>
-					{#if saving}<Loader2 size={16} class="spin" /> Creating…{:else}Create Artist{/if}
+					{#if saving}<Loader2 size={16} class="spin" /> {m.admin_new_artist_creating()}{:else}{m.admin_new_artist_create()}{/if}
 				</button>
 			</div>
 		</div>

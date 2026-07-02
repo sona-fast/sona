@@ -4,7 +4,8 @@
 	import { Search, Plus, Pencil, Trash2, X, Share2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
-	import { plural, formatDate } from '$lib';
+	import { formatDate } from '$lib';
+	import * as m from '$lib/paraglide/messages';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
@@ -41,15 +42,15 @@
 	// An artist may have drawn artworks, stickers, or both — show whatever's non-zero.
 	function worksLabel(a: { artworkCount: number; stickerCount: number }): string {
 		const parts: string[] = [];
-		if (a.artworkCount > 0) parts.push(plural(a.artworkCount, 'artwork'));
-		if (a.stickerCount > 0) parts.push(plural(a.stickerCount, 'sticker'));
-		return parts.length ? parts.join(' · ') : 'No works yet';
+		if (a.artworkCount > 0) parts.push(m.admin_count_artworks({ count: a.artworkCount }));
+		if (a.stickerCount > 0) parts.push(m.admin_count_stickers({ count: a.stickerCount }));
+		return parts.length ? parts.join(' · ') : m.admin_artists_no_works();
 	}
 </script>
 
 <div class="page-header">
-	<h1>Artists <span class="count">{plural(data.total, 'artist')}</span></h1>
-	<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> Add Artist</button>
+	<h1>{m.admin_nav_artists()} <span class="count">{m.admin_count_artists({ count: data.total })}</span></h1>
+	<button class="btn btn-primary" onclick={() => (showAdd = true)}><Plus size={16} /> {m.admin_artists_add()}</button>
 </div>
 
 {#if form?.error}
@@ -72,7 +73,7 @@
 <div class="toolbar">
 	<div class="search-wrapper">
 		<Search size={16} class="search-icon" />
-		<input type="search" class="input search" placeholder="Search all artists..." bind:value={search} oninput={onSearchInput} />
+		<input type="search" class="input search" placeholder={m.admin_artists_search_placeholder()} bind:value={search} oninput={onSearchInput} />
 	</div>
 </div>
 
@@ -81,10 +82,10 @@
 		<thead>
 			<tr>
 				<th class="col-avatar"></th>
-				<th>Name</th>
-				<th>Works</th>
-				<th>Social Links</th>
-				<th class="col-actions">Actions</th>
+				<th>{m.admin_artists_col_name()}</th>
+				<th>{m.admin_artists_col_works()}</th>
+				<th>{m.admin_artists_col_social()}</th>
+				<th class="col-actions">{m.admin_col_actions()}</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -101,8 +102,8 @@
 					</td>
 					<td class="artist-name">
 						{artist.name}
-						{#if artist.globalId}<span class="reg-badge" title="Linked to the shared registry">shared</span>{/if}
-						{#if data.pendingArtistIds?.includes(artist.id)}<span class="reg-badge pending" title="Submitted to the shared registry — awaiting review">pending</span>{/if}
+						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
+						{#if data.pendingArtistIds?.includes(artist.id)}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
 					</td>
 					<td class="artwork-count">{worksLabel(artist)}</td>
 					<td>
@@ -139,21 +140,21 @@
 								use:enhance={() => async ({ result, update }) => {
 									await update();
 									if (result.type === 'success')
-										toast.success(artist.globalId ? 'Update submitted to registry' : 'Submitted to the registry for review');
+										toast.success(artist.globalId ? m.admin_artists_registry_update_submitted() : m.admin_artists_registry_submitted());
 									else if (result.type === 'failure')
-										toast.error((result.data?.error as string) ?? 'Registry submit failed');
+										toast.error((result.data?.error as string) ?? m.admin_artists_registry_failed());
 								}}
 							>
 								<input type="hidden" name="id" value={artist.id} />
-								<button class="icon-btn" type="submit" aria-label="Submit to shared registry" title="Submit to shared registry">
+								<button class="icon-btn" type="submit" aria-label={m.admin_artists_submit_registry()} title={m.admin_artists_submit_registry()}>
 									<Share2 size={16} />
 								</button>
 							</form>
 						{/if}
-						<button class="icon-btn" aria-label="Edit artist" onclick={() => (editingArtist = artist)}>
+						<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}>
 							<Pencil size={16} />
 						</button>
-						<button class="icon-btn" aria-label="Delete artist" onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
+						<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
 							<Trash2 size={16} />
 						</button>
 					</td>
@@ -162,9 +163,9 @@
 				<tr>
 					<td colspan="5" class="empty">
 						{#if search}
-							No artists matching "{search}"
+							{m.admin_artists_no_match({ search })}
 						{:else}
-							No artists yet.
+							{m.admin_artists_empty()}
 						{/if}
 					</td>
 				</tr>
@@ -203,20 +204,20 @@
 			</div>
 		</div>
 	{:else}
-		<p class="empty">{search ? `No artists matching "${search}"` : 'No artists yet.'}</p>
+		<p class="empty">{search ? m.admin_artists_no_match({ search }) : m.admin_artists_empty()}</p>
 	{/each}
-	<button class="mobile-add-row" onclick={() => (showAdd = true)}>+ Add Artist</button>
+	<button class="mobile-add-row" onclick={() => (showAdd = true)}>+ {m.admin_artists_add()}</button>
 </div>
 
 {#if data.totalPages > 1}
 	{@const qs = data.q ? `&q=${encodeURIComponent(data.q)}` : ''}
 	<nav class="pagination">
 		{#if data.page > 1}
-			<a href="?page={data.page - 1}{qs}" class="btn btn-secondary">Previous</a>
+			<a href="?page={data.page - 1}{qs}" class="btn btn-secondary">{m.gallery_previous()}</a>
 		{/if}
-		<span class="page-info">Page {data.page} of {data.totalPages}</span>
+		<span class="page-info">{m.admin_page_info({ page: data.page, total: data.totalPages })}</span>
 		{#if data.page < data.totalPages}
-			<a href="?page={data.page + 1}{qs}" class="btn btn-secondary">Next</a>
+			<a href="?page={data.page + 1}{qs}" class="btn btn-secondary">{m.gallery_next()}</a>
 		{/if}
 	</nav>
 {/if}
@@ -227,8 +228,8 @@
 
 {#if deleteTarget}
 	<ConfirmDialog
-		title="Delete Artist"
-		message={`Delete artist "${deleteTarget.name}"? You must remove their images first.`}
+		title={m.admin_artists_delete_title()}
+		message={m.admin_artists_delete_message({ name: deleteTarget.name })}
 		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
@@ -241,8 +242,8 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal" onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
-				<h2>Edit Artist</h2>
-				<button class="icon-btn" onclick={() => (editingArtist = null)} aria-label="Close">
+				<h2>{m.admin_artists_edit_title()}</h2>
+				<button class="icon-btn" onclick={() => (editingArtist = null)} aria-label={m.admin_close()}>
 					<X size={18} />
 				</button>
 			</div>
@@ -257,7 +258,7 @@
 				</div>
 				<div>
 					<p class="modal-artist-name">{editingArtist.name}</p>
-					<p class="modal-artist-meta">{worksLabel(editingArtist)} &bull; Added {formatDate(editingArtist.createdAt, { year: 'numeric', month: 'short' })}</p>
+					<p class="modal-artist-meta">{worksLabel(editingArtist)} &bull; {m.admin_artists_added({ date: formatDate(editingArtist.createdAt, { year: 'numeric', month: 'short' }) })}</p>
 				</div>
 			</div>
 
@@ -270,12 +271,12 @@
 				<input type="hidden" name="id" value={editingArtist.id} />
 
 				<label>
-					<span>Artist Name</span>
+					<span>{m.admin_field_artist_name()}</span>
 					<input type="text" class="input" name="name" value={editingArtist.name} required />
 				</label>
 
 				<div class="social-section">
-					<h3>Social Links</h3>
+					<h3>{m.admin_artists_col_social()}</h3>
 					<div class="social-grid">
 						<label class="social-field">
 							<TwitterIcon size={14} />
@@ -309,8 +310,8 @@
 				</div>
 
 				<div class="modal-actions">
-					<button type="button" class="btn btn-secondary" onclick={() => (editingArtist = null)}>Cancel</button>
-					<button type="submit" class="btn btn-primary">Save Changes</button>
+					<button type="button" class="btn btn-secondary" onclick={() => (editingArtist = null)}>{m.admin_cancel()}</button>
+					<button type="submit" class="btn btn-primary">{m.admin_save_changes()}</button>
 				</div>
 			</form>
 		</div>

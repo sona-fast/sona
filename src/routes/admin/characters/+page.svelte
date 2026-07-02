@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { Search, Plus, Pencil, Trash2, X, Link as LinkIcon } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { plural } from '$lib';
+	import * as m from '$lib/paraglide/messages';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
@@ -42,8 +42,8 @@
 </script>
 
 <div class="page-header">
-	<h1>Characters <span class="count">{plural(data.characters.length, 'character')}</span></h1>
-	<button class="btn btn-primary" onclick={() => (editingChar = { ...BLANK_CHAR })}><Plus size={16} /> Add Character</button>
+	<h1>{m.admin_nav_characters()} <span class="count">{m.admin_count_characters({ count: data.characters.length })}</span></h1>
+	<button class="btn btn-primary" onclick={() => (editingChar = { ...BLANK_CHAR })}><Plus size={16} /> {m.admin_characters_add()}</button>
 </div>
 
 {#if form?.error}
@@ -53,7 +53,7 @@
 <div class="toolbar">
 	<div class="search-wrapper">
 		<Search size={16} class="search-icon" />
-		<input type="search" class="input search" placeholder="Search..." bind:value={search} />
+		<input type="search" class="input search" placeholder={m.admin_search_placeholder()} bind:value={search} />
 	</div>
 </div>
 
@@ -61,11 +61,11 @@
 	<table class="data-table">
 		<thead>
 			<tr>
-				<th>Name</th>
-				<th>Owner</th>
-				<th>Appearances</th>
-				<th>Social Links</th>
-				<th>Actions</th>
+				<th>{m.admin_artists_col_name()}</th>
+				<th>{m.admin_characters_col_owner()}</th>
+				<th>{m.admin_characters_col_appearances()}</th>
+				<th>{m.admin_artists_col_social()}</th>
+				<th>{m.admin_col_actions()}</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -86,7 +86,7 @@
 						</div>
 					</td>
 					<td class="char-owner">{char.ownerName || '—'}</td>
-					<td>{plural(char.imageCount, 'image')}</td>
+					<td>{m.admin_count_images({ count: char.imageCount })}</td>
 					<td>
 						<div class="social-icons">
 							{#if char.twitterUrl}<a href={char.twitterUrl} target="_blank" rel="noopener" class="social-icon"><TwitterIcon size={14} /></a>{/if}
@@ -106,7 +106,7 @@
 			{:else}
 				<tr>
 					<td colspan="5" class="empty">
-						{#if search}No characters matching "{search}"{:else}No characters yet.{/if}
+						{#if search}{m.admin_characters_no_match({ search })}{:else}{m.admin_characters_empty()}{/if}
 					</td>
 				</tr>
 			{/each}
@@ -126,7 +126,7 @@
 			<div class="mobile-char-info">
 				<p class="mobile-char-name">{char.name}</p>
 				<p class="mobile-char-meta">
-					{#if char.ownerName}{char.ownerName} &bull; {/if}{plural(char.imageCount, 'image')}
+					{#if char.ownerName}{char.ownerName} &bull; {/if}{m.admin_count_images({ count: char.imageCount })}
 				</p>
 			</div>
 			<div class="mobile-char-actions">
@@ -135,9 +135,9 @@
 			</div>
 		</div>
 	{:else}
-		<p class="empty">{search ? `No characters matching "${search}"` : 'No characters yet.'}</p>
+		<p class="empty">{search ? m.admin_characters_no_match({ search }) : m.admin_characters_empty()}</p>
 	{/each}
-	<button class="mobile-add-row" onclick={() => (editingChar = { ...BLANK_CHAR })}>+ Add Character</button>
+	<button class="mobile-add-row" onclick={() => (editingChar = { ...BLANK_CHAR })}>+ {m.admin_characters_add()}</button>
 </div>
 
 <form method="POST" action="?/delete" use:enhance bind:this={deleteForm} style="display:none">
@@ -146,8 +146,8 @@
 
 {#if deleteTarget}
 	<ConfirmDialog
-		title="Delete Character"
-		message={`Delete character "${deleteTarget.name}"? They will be removed from all images.`}
+		title={m.admin_characters_delete_title()}
+		message={m.admin_characters_delete_message({ name: deleteTarget.name })}
 		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
@@ -159,7 +159,7 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal" onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
-				<h2>{editingChar.id ? 'Edit' : 'Add'} Character</h2>
+				<h2>{editingChar.id ? m.admin_characters_edit_title() : m.admin_characters_add()}</h2>
 				<button class="icon-btn" onclick={() => (editingChar = null)}><X size={18} /></button>
 			</div>
 			<form method="POST" action={editingChar.id ? '?/update' : '?/create'} use:enhance={() => {
@@ -172,20 +172,20 @@
 					<input type="hidden" name="id" value={editingChar.id} />
 				{/if}
 				<label>
-					<span>Character Name</span>
+					<span>{m.admin_characters_name_label()}</span>
 					<input type="text" class="input" name="name" value={editingChar.name} required />
 				</label>
 				<label>
-					<span>Owner</span>
-					<input type="text" class="input" name="ownerName" value={editingChar.ownerName || ''} placeholder="Optional" />
+					<span>{m.admin_characters_col_owner()}</span>
+					<input type="text" class="input" name="ownerName" value={editingChar.ownerName || ''} placeholder={m.admin_optional_placeholder()} />
 				</label>
 				<label>
-					<span>Profile / Ref Sheet URL</span>
-					<input type="text" class="input" name="url" value={editingChar.url || ''} placeholder="Optional — e.g. toyhouse.com/..." />
+					<span>{m.admin_characters_profile_url()}</span>
+					<input type="text" class="input" name="url" value={editingChar.url || ''} placeholder={m.admin_characters_profile_placeholder()} />
 				</label>
 
 				<div class="social-section">
-					<h3>Social Links</h3>
+					<h3>{m.admin_artists_col_social()}</h3>
 					<div class="social-grid">
 						<label class="social-field">
 							<TwitterIcon size={14} />
@@ -219,8 +219,8 @@
 				</div>
 
 				<div class="modal-actions">
-					<button type="button" class="btn btn-secondary" onclick={() => (editingChar = null)}>Cancel</button>
-					<button type="submit" class="btn btn-primary">{editingChar.id ? 'Save Changes' : 'Add Character'}</button>
+					<button type="button" class="btn btn-secondary" onclick={() => (editingChar = null)}>{m.admin_cancel()}</button>
+					<button type="submit" class="btn btn-primary">{editingChar.id ? m.admin_save_changes() : m.admin_characters_add()}</button>
 				</div>
 			</form>
 		</div>
