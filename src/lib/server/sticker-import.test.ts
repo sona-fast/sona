@@ -146,6 +146,27 @@ describe('parseStickerFormInputs', () => {
 		);
 		expect(out[0].format).toBe('webp');
 	});
+
+	it('reads a checked NSFW box even though the hidden 0 fallback posts first', () => {
+		// The form emits BOTH the hidden `0` and the checked box's `1` under the same
+		// name, in that order — exactly what the real pack-edit form submits.
+		const f = new FormData();
+		f.append('sticker[0][imageUrl]', 'https://cdn.example.com/stickers/a.webp');
+		f.append('sticker[0][format]', 'webp');
+		f.append('sticker[0][nsfw]', '0');
+		f.append('sticker[0][nsfw]', '1');
+		const out = parseStickerFormInputs(f, null);
+		expect(out[0].nsfw).toBe(true);
+	});
+
+	it('leaves NSFW off when only the hidden 0 is posted (unchecked)', () => {
+		const f = new FormData();
+		f.append('sticker[0][imageUrl]', 'https://cdn.example.com/stickers/b.webp');
+		f.append('sticker[0][format]', 'webp');
+		f.append('sticker[0][nsfw]', '0');
+		const out = parseStickerFormInputs(f, null);
+		expect(out[0].nsfw).toBe(false);
+	});
 });
 
 // --- DB-backed tests (manual save/edit + Telegram import) -------------------

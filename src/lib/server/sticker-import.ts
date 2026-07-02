@@ -929,7 +929,10 @@ export function parseStickerFormInputs(data: FormData, defaultArtistId: number |
 			imageUrl,
 			artistId: artistIdRaw ? Number(artistIdRaw) : defaultArtistId ?? null,
 			emojis: emojisRaw ? emojisRaw.split(',').map((e) => e.trim()).filter(Boolean) : [],
-			nsfw: data.get(`sticker[${i}][nsfw]`) === '1',
+			// The checkbox ships a hidden `0` fallback BEFORE the `1`, so a checked box
+			// posts both values. .get() returns the first ('0') and would drop every
+			// NSFW flag — read all values and look for the '1'.
+			nsfw: data.getAll(`sticker[${i}][nsfw]`).includes('1'),
 			position: inputs.length,
 			format: (STICKER_FORMATS as readonly string[]).includes(formatRaw)
 				? (formatRaw as ManualStickerInput['format'])
