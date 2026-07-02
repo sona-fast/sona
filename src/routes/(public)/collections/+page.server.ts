@@ -1,10 +1,11 @@
-import { getDb } from '$lib/server/db';
+import { getReadDb } from '$lib/server/db';
 import { collections, images } from '$lib/server/db/schema';
 import { sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
-	const db = getDb(platform!.env.DB);
+	// read replica (eventually consistent); admin writes use the primary
+	const db = getReadDb(platform!.env.DB);
 
 	const allCollections = await db
 		.select({

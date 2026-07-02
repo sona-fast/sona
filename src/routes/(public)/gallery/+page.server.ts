@@ -1,4 +1,4 @@
-import { getDb } from '$lib/server/db';
+import { getReadDb } from '$lib/server/db';
 import { images, artists, imageTags, tags, characters, fursuitPhotos as fursuitPhotosTable } from '$lib/server/db/schema';
 import { eq, desc, asc, like, sql, and, inArray, type SQL } from 'drizzle-orm';
 import { fursuitPhotoFromRow } from '$lib/server/fursuit-import';
@@ -14,7 +14,8 @@ import type { PageServerLoad } from './$types';
 const GALLERY_TIMEOUT_MS = 9000;
 
 export const load: PageServerLoad = async ({ platform, url }) => {
-	const db = getDb(platform!.env.DB);
+	// read replica (eventually consistent); admin writes use the primary
+	const db = getReadDb(platform!.env.DB);
 
 	const search = url.searchParams.get('q') || '';
 	const tagFilter = url.searchParams.get('tag') || '';

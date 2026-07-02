@@ -1,12 +1,13 @@
 import { error } from '@sveltejs/kit';
-import { getDb } from '$lib/server/db';
+import { getReadDb } from '$lib/server/db';
 import { images, artists, collections, imageTags, tags, characters, imageCharacters } from '$lib/server/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { parseAliases } from '$lib/server/registry';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
-	const db = getDb(platform!.env.DB);
+	// read replica (eventually consistent); admin writes use the primary
+	const db = getReadDb(platform!.env.DB);
 
 	const image = await db
 		.select({

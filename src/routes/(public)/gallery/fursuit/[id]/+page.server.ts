@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
-import { getDb } from '$lib/server/db';
+import { getReadDb } from '$lib/server/db';
 import { fursuitPhotos } from '$lib/server/db/schema';
 import { fursuitPhotoFromRow } from '$lib/server/fursuit-import';
 import type { PageServerLoad } from './$types';
@@ -9,7 +9,8 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 	const id = Number(params.id);
 	if (!Number.isInteger(id) || id <= 0) error(404, 'Not found');
 
-	const db = getDb(platform!.env.DB);
+	// read replica (eventually consistent); admin writes use the primary
+	const db = getReadDb(platform!.env.DB);
 	const row = await db.select().from(fursuitPhotos).where(eq(fursuitPhotos.id, id)).get();
 	if (!row) error(404, 'Fursuit photo not found');
 
