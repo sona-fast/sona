@@ -675,5 +675,7 @@
 	"admin_migrate_delete_originals": "Delete original files from {source}",
 	"admin_migrate_cleaned": "Originals cleaned up — nothing left on {source}.",
 	"admin_migrate_nothing_lost": "Nothing was lost — originals remain on {source}.",
-	"admin_migrate_try_again": "Try again"
+	"admin_migrate_try_again": "Try again",
+	"admin_import_batch_failed": "Batch failed",
+	"admin_import_unexpected": "Unexpected response"
 }

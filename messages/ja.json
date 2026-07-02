@@ -639,5 +639,7 @@
 	"admin_migrate_delete_originals": "{source} からオリジナルファイルを削除",
 	"admin_migrate_cleaned": "オリジナルのクリーンアップが完了しました — {source} には何も残っていません。",
 	"admin_migrate_nothing_lost": "データは失われていません — オリジナルは {source} に残っています。",
-	"admin_migrate_try_again": "もう一度試す"
+	"admin_migrate_try_again": "もう一度試す",
+	"admin_import_batch_failed": "バッチ処理に失敗しました",
+	"admin_import_unexpected": "予期しない応答です"
 }
