@@ -508,16 +508,16 @@
 				</select>
 			</div>
 			<div class="field">
-				<div class="field-head">
-					<label for="default-artist">Pack-wide default artist</label>
-					<button type="button" class="link-btn" onclick={() => openNewArtist('default')}><UserPlus size={14} /> New artist</button>
+				<label for="default-artist">Pack-wide default artist</label>
+				<div class="select-with-action">
+					<select id="default-artist" class="input" bind:value={defaultArtistId}>
+						<option value="">Select artist…</option>
+						{#each artists as a}
+							<option value={String(a.id)}>{a.name}</option>
+						{/each}
+					</select>
+					<button type="button" class="ctx-new-artist" onclick={() => openNewArtist('default')}><UserPlus size={13} /> New artist</button>
 				</div>
-				<select id="default-artist" class="input" bind:value={defaultArtistId}>
-					<option value="">Select artist…</option>
-					{#each artists as a}
-						<option value={String(a.id)}>{a.name}</option>
-					{/each}
-				</select>
 				<p class="hint">Each sticker is credited to this artist by default — override any of them on the next step.</p>
 			</div>
 
@@ -623,7 +623,10 @@
 	}
 	.field { display: flex; flex-direction: column; gap: 6px; }
 	.field label { font-size: 12px; color: var(--muted-foreground); }
-	.field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+	/* Select + inline "New artist" action on one row — the same pattern as the pack
+	   form's manager/default selects, so the control reads identically everywhere. */
+	.select-with-action { display: flex; align-items: stretch; gap: 8px; }
+	.select-with-action .input { flex: 1; min-width: 0; }
 	.link-btn {
 		display: inline-flex; align-items: center; gap: 5px; background: none; border: none;
 		color: var(--primary); font-size: 12px; padding: 0; cursor: pointer;
