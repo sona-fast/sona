@@ -2,8 +2,16 @@
 	import { enhance } from '$app/forms';
 	import { Plus, Trash2, ExternalLink, RefreshCw } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
+
+	function statusLabel(status: string): string {
+		if (status === 'confirmed') return m.admin_conventions_status_confirmed();
+		if (status === 'maybe') return m.admin_conventions_status_maybe();
+		if (status === 'considering') return m.admin_conventions_status_considering();
+		return status;
+	}
 
 	let showAdd = $state(false);
 	let showManual = $state(false);
@@ -29,12 +37,12 @@
 </script>
 
 <div class="page-header">
-	<h1>Conventions <span class="count">{data.conventions.length}</span></h1>
+	<h1>{m.admin_nav_conventions()} <span class="count">{data.conventions.length}</span></h1>
 	<div class="header-actions">
 		<button class="btn btn-outline" disabled={syncing} onclick={() => syncForm.requestSubmit()}>
-			<RefreshCw size={16} /> {syncing ? 'Syncing…' : 'Sync from cons.fyi'}
+			<RefreshCw size={16} /> {syncing ? m.admin_conventions_syncing() : m.admin_conventions_sync()}
 		</button>
-		<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> Add Convention</button>
+		<button class="btn btn-primary" onclick={() => (showAdd = !showAdd)}><Plus size={16} /> {m.admin_conventions_add()}</button>
 	</div>
 </div>
 
@@ -73,29 +81,29 @@
 			class="pick-form"
 		>
 			<label class="grow">
-				<span>Add from cons.fyi</span>
+				<span>{m.admin_conventions_add_from_source()}</span>
 				<select class="input" name="sourceId" required>
-					<option value="" disabled selected>Select a convention…</option>
+					<option value="" disabled selected>{m.admin_conventions_select_placeholder()}</option>
 					{#each data.available as e}
 						<option value={e.id}>{sourceLabel(e)}</option>
 					{:else}
-						<option value="" disabled>No upcoming cons available from the feed</option>
+						<option value="" disabled>{m.admin_conventions_none_available()}</option>
 					{/each}
 				</select>
 			</label>
 			<label class="status-field">
-				<span>Status</span>
+				<span>{m.admin_conventions_status()}</span>
 				<select class="input" name="status">
-					<option value="confirmed">Confirmed</option>
-					<option value="maybe">Maybe</option>
-					<option value="considering">Considering</option>
+					<option value="confirmed">{m.admin_conventions_status_confirmed()}</option>
+					<option value="maybe">{m.admin_conventions_status_maybe()}</option>
+					<option value="considering">{m.admin_conventions_status_considering()}</option>
 				</select>
 			</label>
-			<button type="submit" class="btn btn-primary" disabled={data.available.length === 0}>Add</button>
+			<button type="submit" class="btn btn-primary" disabled={data.available.length === 0}>{m.admin_add()}</button>
 		</form>
 
 		<button type="button" class="manual-toggle" onclick={() => (showManual = !showManual)}>
-			{showManual ? '− Hide manual entry' : "+ Can't find it? Add manually"}
+			{showManual ? m.admin_conventions_manual_hide() : m.admin_conventions_manual_show()}
 		</button>
 
 		{#if showManual}
@@ -112,36 +120,36 @@
 			>
 				<div class="add-grid">
 					<label>
-						<span>Name</span>
+						<span>{m.admin_conventions_field_name()}</span>
 						<input type="text" class="input" name="name" placeholder="Midwest FurFest" required />
 					</label>
 					<label>
-						<span>Location</span>
+						<span>{m.admin_conventions_field_location()}</span>
 						<input type="text" class="input" name="location" placeholder="Chicago, IL" />
 					</label>
 					<label>
-						<span>Start date</span>
+						<span>{m.admin_conventions_field_start()}</span>
 						<input type="date" class="input" name="startDate" required />
 					</label>
 					<label>
-						<span>End date</span>
+						<span>{m.admin_conventions_field_end()}</span>
 						<input type="date" class="input" name="endDate" />
 					</label>
 					<label>
-						<span>Website</span>
+						<span>{m.admin_conventions_field_website()}</span>
 						<input type="text" class="input" name="url" placeholder="https://…" />
 					</label>
 					<label>
-						<span>Status</span>
+						<span>{m.admin_conventions_status()}</span>
 						<select class="input" name="status">
-							<option value="confirmed">Confirmed</option>
-							<option value="maybe">Maybe</option>
-							<option value="considering">Considering</option>
+							<option value="confirmed">{m.admin_conventions_status_confirmed()}</option>
+							<option value="maybe">{m.admin_conventions_status_maybe()}</option>
+							<option value="considering">{m.admin_conventions_status_considering()}</option>
 						</select>
 					</label>
 				</div>
 				<div class="add-actions">
-					<button type="submit" class="btn btn-primary">Add manually</button>
+					<button type="submit" class="btn btn-primary">{m.admin_conventions_add_manually()}</button>
 				</div>
 			</form>
 		{/if}
@@ -152,10 +160,10 @@
 	<table class="data-table">
 		<thead>
 			<tr>
-				<th>Convention</th>
-				<th>Dates</th>
-				<th>Location</th>
-				<th>Status</th>
+				<th>{m.admin_conventions_col_name()}</th>
+				<th>{m.admin_conventions_col_dates()}</th>
+				<th>{m.admin_conventions_field_location()}</th>
+				<th>{m.admin_conventions_status()}</th>
 				<th></th>
 			</tr>
 		</thead>
@@ -165,25 +173,25 @@
 					<td>
 						<span class="con-name">{con.name}</span>
 						{#if con.sourceId}
-							<span class="src-badge" title="Added from cons.fyi">cons.fyi</span>
+							<span class="src-badge" title={m.admin_conventions_source_title()}>cons.fyi</span>
 						{/if}
 						{#if con.url}
-							<a href={con.url} target="_blank" rel="noopener noreferrer" class="con-link" aria-label="Open website">
+							<a href={con.url} target="_blank" rel="noopener noreferrer" class="con-link" aria-label={m.admin_conventions_open_website()}>
 								<ExternalLink size={13} />
 							</a>
 						{/if}
 					</td>
 					<td>{dateRange(con.startDate, con.endDate)}</td>
 					<td>{con.location ?? '—'}</td>
-					<td><span class="status status-{con.status}">{con.status}</span></td>
+					<td><span class="status status-{con.status}">{statusLabel(con.status)}</span></td>
 					<td>
-						<button class="icon-btn" aria-label="Delete convention" onclick={() => (deleteTarget = { id: con.id, name: con.name })}>
+						<button class="icon-btn" aria-label={m.admin_conventions_delete_aria()} onclick={() => (deleteTarget = { id: con.id, name: con.name })}>
 							<Trash2 size={16} />
 						</button>
 					</td>
 				</tr>
 			{:else}
-				<tr><td colspan="5" class="empty">No conventions yet.</td></tr>
+				<tr><td colspan="5" class="empty">{m.admin_conventions_empty()}</td></tr>
 			{/each}
 		</tbody>
 	</table>
@@ -197,18 +205,18 @@
 				<span class="con-name">{con.name}</span>
 				<span class="mobile-meta">{dateRange(con.startDate, con.endDate)}{con.location ? ` · ${con.location}` : ''}</span>
 			</div>
-			<span class="status status-{con.status}">{con.status}</span>
+			<span class="status status-{con.status}">{statusLabel(con.status)}</span>
 			<form method="POST" action="?/delete" use:enhance class="inline-form">
 				<input type="hidden" name="id" value={con.id} />
-				<button type="submit" class="icon-btn" aria-label="Delete convention"><Trash2 size={16} /></button>
+				<button type="submit" class="icon-btn" aria-label={m.admin_conventions_delete_aria()}><Trash2 size={16} /></button>
 			</form>
 		</div>
 	{:else}
-		<p class="empty">No conventions yet.</p>
+		<p class="empty">{m.admin_conventions_empty()}</p>
 	{/each}
-	<button class="mobile-add-row" onclick={() => (showAdd = true)}>+ New Convention</button>
+	<button class="mobile-add-row" onclick={() => (showAdd = true)}>+ {m.admin_conventions_add()}</button>
 	<button class="mobile-add-row" disabled={syncing} onclick={() => syncForm.requestSubmit()}>
-		{syncing ? 'Syncing…' : '⟳ Sync from cons.fyi'}
+		{syncing ? m.admin_conventions_syncing() : `⟳ ${m.admin_conventions_sync()}`}
 	</button>
 </div>
 
@@ -218,8 +226,8 @@
 
 {#if deleteTarget}
 	<ConfirmDialog
-		title="Delete Convention"
-		message={`Delete "${deleteTarget.name}" from your schedule?`}
+		title={m.admin_conventions_delete_title()}
+		message={m.admin_conventions_delete_message({ name: deleteTarget.name })}
 		onconfirm={() => {
 			deleteForm.requestSubmit();
 			deleteTarget = null;
