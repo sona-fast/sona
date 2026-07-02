@@ -107,7 +107,10 @@ export async function getSettings(
 			furtrackUrl: map.furtrackUrl ?? DEFAULTS.furtrackUrl,
 			adminAvatarUrl: map.adminAvatarUrl ?? DEFAULTS.adminAvatarUrl,
 			primaryCharacter: map.primaryCharacter ?? DEFAULTS.primaryCharacter,
-			storageProvider: map.storageProvider === 'r2' ? 'r2' : DEFAULTS.storageProvider,
+			storageProvider:
+				map.storageProvider === 'r2' || map.storageProvider === 'uploadthing'
+					? map.storageProvider
+					: DEFAULTS.storageProvider,
 			r2PublicUrl: map.r2PublicUrl ?? DEFAULTS.r2PublicUrl,
 			// Booleans are persisted as the text 'true'/'false'; absent → default.
 			autoResyncEnabled: map.autoResyncEnabled === 'true',

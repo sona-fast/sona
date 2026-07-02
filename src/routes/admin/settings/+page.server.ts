@@ -14,7 +14,7 @@ import {
 	imageCharacters,
 	sessions
 } from '$lib/server/db/schema';
-import { sql, inArray, ne } from 'drizzle-orm';
+import { sql, inArray } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { resolveAvatarUrl } from '$lib/server/avatar';
@@ -24,6 +24,8 @@ import { syncArtists } from '$lib/server/artist-sync';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import type { Actions, PageServerLoad } from './$types';
+
+const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days in seconds
 
 export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
@@ -157,9 +159,12 @@ export const actions = {
 	changePassword: async ({ request, platform, cookies }) => {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
-		const current = (data.get('currentPassword') as string) ?? '';
-		const next = (data.get('newPassword') as string) ?? '';
-		const confirm = (data.get('confirmPassword') as string) ?? '';
+		// Form fields can arrive as File entries; coerce non-strings to '' so a File
+		// can't slip past the length check (a File's .length is undefined).
+		const asStr = (v: FormDataEntryValue | null) => (typeof v === 'string' ? v : '');
+		const current = asStr(data.get('currentPassword'));
+		const next = asStr(data.get('newPassword'));
+		const confirm = asStr(data.get('confirmPassword'));
 
 		if (next.length < 8) {
 			return fail(400, { error: 'New password must be at least 8 characters.' });
@@ -171,11 +176,20 @@ export const actions = {
 			return fail(401, { error: 'Current password is incorrect.' });
 		}
 		await setAdminPassword(db, next);
-		// Rotating the password revokes every OTHER session (in case one was
-		// stolen) while keeping the admin who just changed it signed in.
-		const currentToken = cookies.get(SESSION_COOKIE);
-		if (currentToken) await db.delete(sessions).where(ne(sessions.token, await hashToken(currentToken)));
-		else await db.delete(sessions);
+		// Rotate sessions on a credential change: revoke ALL existing sessions
+		// (defeats any stolen token, including the current one) and mint a fresh
+		// session so the admin who just changed the password stays signed in.
+		await db.delete(sessions);
+		const token = crypto.randomUUID();
+		const expiresAt = new Date(Date.now() + SESSION_DURATION * 1000).toISOString();
+		await db.insert(sessions).values({ token: await hashToken(token), expiresAt });
+		cookies.set(SESSION_COOKIE, token, {
+			path: '/',
+			httpOnly: true,
+			secure: !dev,
+			sameSite: 'lax',
+			maxAge: SESSION_DURATION
+		});
 		return { passwordChanged: true };
 	},
 
