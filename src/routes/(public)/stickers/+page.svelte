@@ -650,6 +650,18 @@
 			width: 100%;
 		}
 
+		/* The artist select is width:auto, so a long artist name grew it past the
+		   viewport and pushed the whole page into horizontal overflow (the grid then
+		   looked shifted). Make it full-width like the search so it can't overflow. */
+		.select-wrapper {
+			width: 100%;
+		}
+
+		.filter-select {
+			width: 100%;
+			min-width: 0;
+		}
+
 		.sticker-grid {
 			grid-template-columns: repeat(3, 1fr);
 			gap: 10px;
