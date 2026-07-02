@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { Camera, ShieldCheck, Search, Loader2, CheckCircle2, AlertTriangle, ImageOff, Trash2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
@@ -49,62 +50,60 @@
 		selected = on ? new Set(bulkEligible.map((c) => c.id)) : new Set();
 	}
 
-	const statusLabel = { new: 'New', imported: 'Already imported', excluded: 'Excluded' };
+	const statusLabel = { new: m.admin_fursuit_status_new, imported: m.admin_fursuit_status_imported, excluded: m.admin_fursuit_status_excluded };
 </script>
 
-<div class="page-header"><h1>Import from FurTrack</h1></div>
-<p class="intro">Pull fursuit photos of your character from FurTrack into your gallery. Only photos with a Creative Commons or Public Domain license can be imported; they're downloaded and self-hosted.</p>
+<div class="page-header"><h1>{m.admin_fursuit_title()}</h1></div>
+<p class="intro">{m.admin_fursuit_intro()}</p>
 
 {#if form?.deleted}
-	<div class="banner ok"><CheckCircle2 size={18} /> Photo deleted.</div>
+	<div class="banner ok"><CheckCircle2 size={18} /> {m.admin_fursuit_photo_deleted()}</div>
 {/if}
 
 {#if !data.enabled}
 	<div class="banner warn">
-		<AlertTriangle size={18} /> FurTrack import is turned off. Set <code>FURTRACK_MODE</code> to
-		<code>mock</code> (dev) or <code>live</code> (after FurTrack approves API access) to enable it.
+		<AlertTriangle size={18} /> {m.admin_fursuit_disabled_pre()}<code>FURTRACK_MODE</code>{m.admin_fursuit_disabled_mid1()}<code>mock</code>{m.admin_fursuit_disabled_mid2()}<code>live</code>{m.admin_fursuit_disabled_post()}
 	</div>
 {:else if form?.success}
 	{@const r = form.result}
-	<div class="banner ok"><CheckCircle2 size={18} /> Imported {r.imported} photo{r.imported === 1 ? '' : 's'}{r.skipped ? ` · ${r.skipped} already imported` : ''}{r.failed ? ` · ${r.failed} failed` : ''}.</div>
+	<div class="banner ok"><CheckCircle2 size={18} /> {m.admin_fursuit_import_summary({ count: r.imported })}{r.skipped ? m.admin_fursuit_import_skipped({ count: r.skipped }) : ''}{r.failed ? m.admin_fursuit_import_failed({ count: r.failed }) : ''}</div>
 	<div class="actions">
-		<a class="btn btn-primary" href="/gallery?view=fursuit">View in gallery →</a>
-		<button class="btn btn-outline" onclick={check}>Check FurTrack again</button>
+		<a class="btn btn-primary" href="/gallery?view=fursuit">{m.admin_fursuit_view_gallery()} →</a>
+		<button class="btn btn-outline" onclick={check}>{m.admin_fursuit_check_again()}</button>
 	</div>
 {:else}
 	<div class="controls">
 		<div class="tag-field">
-			<label for="tag">FurTrack character tag</label>
+			<label for="tag">{m.admin_fursuit_tag_label()}</label>
 			<input
 				id="tag"
 				class="input"
 				list="char-suggestions"
 				bind:value={character}
-				placeholder="e.g. aspen_(zangoose)"
+				placeholder={m.admin_fursuit_tag_placeholder()}
 				onkeydown={(e) => { if (e.key === 'Enter') check(); }}
 			/>
 			<datalist id="char-suggestions">
 				{#each data.characters as c}<option value={c.name}></option>{/each}
 			</datalist>
 		</div>
-		<button class="btn btn-primary" onclick={check}><Search size={16} /> Check FurTrack for new photos</button>
+		<button class="btn btn-primary" onclick={check}><Search size={16} /> {m.admin_fursuit_check()}</button>
 	</div>
-	<p class="hint">The tag as it appears on FurTrack (the part after <code>1:</code>). Queries <code>1:{character || '…'}</code>.</p>
+	<p class="hint">{m.admin_fursuit_tag_hint_pre()}<code>1:</code>{m.admin_fursuit_tag_hint_mid()}<code>1:{character || '…'}</code></p>
 
 	<div class="banner info">
-		Only Creative Commons (CC-BY, CC-BY-NC, CC-BY-ND, CC-BY-NC-ND) or Public Domain photos are imported.
-		All Rights Reserved or unspecified photos are excluded automatically — protecting you and the photographers.
+		{m.admin_fursuit_license_info()}
 	</div>
 
 	{#if data.reachError}
-		<div class="banner err"><AlertTriangle size={18} /> Couldn't reach FurTrack. Try again in a moment.</div>
+		<div class="banner err"><AlertTriangle size={18} /> {m.admin_fursuit_reach_error()}</div>
 	{:else if !data.checked}
-		<div class="empty"><Camera size={36} /><p>Pick a character and check FurTrack to see importable photos.</p></div>
+		<div class="empty"><Camera size={36} /><p>{m.admin_fursuit_pick_prompt()}</p></div>
 	{:else if data.candidates.length === 0}
-		<div class="empty"><ImageOff size={36} /><p>No photos found on FurTrack for "{data.character}".</p></div>
+		<div class="empty"><ImageOff size={36} /><p>{m.admin_fursuit_none_found({ character: data.character })}</p></div>
 	{:else}
-		<div class="summary">{counts.new} new · {counts.imported} already imported · {counts.excluded} excluded (license)</div>
-		{#if data.capped}<p class="muted">Showing the most recent photos — older ones aren't loaded.</p>{/if}
+		<div class="summary">{m.admin_fursuit_summary({ newCount: counts.new, imported: counts.imported, excluded: counts.excluded })}</div>
+		{#if data.capped}<p class="muted">{m.admin_fursuit_capped()}</p>{/if}
 
 		<form method="POST" action="?/import" use:enhance={() => {
 			importing = true;
@@ -115,10 +114,10 @@
 			<div class="toolbar">
 				<label class="select-all">
 					<input type="checkbox" onchange={(e) => selectAllEligible(e.currentTarget.checked)} disabled={bulkEligible.length === 0} />
-					Select all eligible ({bulkEligible.length})
+					{m.admin_fursuit_select_all({ count: bulkEligible.length })}
 				</label>
 				<button type="submit" class="btn btn-primary" disabled={selected.size === 0 || importing}>
-					{importing ? 'Importing…' : `Import ${selected.size} selected`}
+					{importing ? m.admin_fursuit_importing() : m.admin_fursuit_import_selected({ count: selected.size })}
 				</button>
 			</div>
 
@@ -133,13 +132,13 @@
 								<input type="checkbox" name="postId" value={photo.id} disabled={!src} checked={selected.has(photo.id)} onchange={(e) => toggle(photo.id, e.currentTarget.checked)} />
 							{/if}
 						</div>
-						<div class="cell thumb"><img src={photo.imageUrl} alt="by {photo.photographer}" loading="lazy" /></div>
+						<div class="cell thumb"><img src={photo.imageUrl} alt={m.fursuit_card_by({ photographer: photo.photographer })} loading="lazy" /></div>
 						<div class="cell who"><Camera size={13} /> {photo.photographer}</div>
 						<div class="cell ev">{photo.event ?? '—'}</div>
 						<div class="cell lic" title={photo.license.terms}><ShieldCheck size={12} /> {photo.license.label}</div>
 						<div class="cell st">
-							<span class="status {photo.status}">{statusLabel[photo.status]}</span>
-							{#if photo.status === 'excluded'}<span class="reason">{src ? 'manual permission' : 'license'}</span>{/if}
+							<span class="status {photo.status}">{statusLabel[photo.status]()}</span>
+							{#if photo.status === 'excluded'}<span class="reason">{src ? m.admin_fursuit_reason_manual() : m.admin_fursuit_reason_license()}</span>{/if}
 						</div>
 						<div class="cell link"><a href={photo.furtrackUrl} target="_blank" rel="noopener">FurTrack ↗</a></div>
 					</div>
@@ -147,8 +146,8 @@
 						<div class="grant-row">
 							<input type="text" class="input perm-source"
 								bind:value={permissions[photo.id]}
-								placeholder="Permission source (e.g. Telegram DM 2026-05-30) — required to import this photo"
-								aria-label="Permission source for {photo.photographer}" />
+								placeholder={m.admin_fursuit_permission_placeholder()}
+								aria-label={m.admin_fursuit_permission_aria({ photographer: photo.photographer })} />
 							{#if selected.has(photo.id) && src}
 								<input type="hidden" name="permission[{photo.id}]" value={src} />
 							{/if}
@@ -165,24 +164,24 @@
 {#if data.imported.length > 0}
 	<section class="manage">
 		<div class="manage-header">
-			<h2>Imported photos ({data.imported.length})</h2>
-			<p class="manage-sub">Delete a photo to remove it from the gallery, the stored file, and (if any) the recorded manual permission. Re-importing the same FurTrack post will work fresh.</p>
+			<h2>{m.admin_fursuit_imported_heading({ count: data.imported.length })}</h2>
+			<p class="manage-sub">{m.admin_fursuit_manage_sub()}</p>
 		</div>
 		<div class="imp-rows">
 			{#each data.imported as photo}
 				<div class="imp-row">
-					<div class="cell thumb"><img src={photo.imageUrl} alt="by {photo.photographer}" loading="lazy" /></div>
+					<div class="cell thumb"><img src={photo.imageUrl} alt={m.fursuit_card_by({ photographer: photo.photographer })} loading="lazy" /></div>
 					<div class="cell who"><Camera size={13} /> {photo.photographer}</div>
 					<div class="cell ev">{photo.event ?? '—'}</div>
 					<div class="cell lic" title={photo.license.terms}><ShieldCheck size={12} /> {photo.license.label}</div>
 					<div class="cell perm">
 						{#if photo.permissionSource}
-							<span class="badge perm" title={photo.permissionSource}><ShieldCheck size={11} /> manual permission</span>
+							<span class="badge perm" title={photo.permissionSource}><ShieldCheck size={11} /> {m.admin_fursuit_reason_manual()}</span>
 						{/if}
 					</div>
-					<div class="cell link"><a href="/gallery/fursuit/{photo.id}" target="_blank" rel="noopener">View ↗</a></div>
+					<div class="cell link"><a href="/gallery/fursuit/{photo.id}" target="_blank" rel="noopener">{m.admin_view()} ↗</a></div>
 					<div class="cell del">
-						<button type="button" class="btn-icon" aria-label="Delete photo by {photo.photographer}" onclick={() => (deleteTarget = photo)}>
+						<button type="button" class="btn-icon" aria-label={m.admin_fursuit_delete_aria({ photographer: photo.photographer })} onclick={() => (deleteTarget = photo)}>
 							<Trash2 size={16} />
 						</button>
 					</div>
@@ -198,8 +197,8 @@
 
 {#if deleteTarget}
 	<ConfirmDialog
-		title="Delete fursuit photo"
-		message={`Delete the photo by ${deleteTarget.photographer}${deleteTarget.event ? ` at ${deleteTarget.event}` : ''}? The stored file${deleteTarget.permissionSource ? ' and the recorded permission grant will both' : ' will'} be removed. This can't be undone.`}
+		title={m.admin_fursuit_delete_title()}
+		message={(deleteTarget.event ? m.admin_fursuit_delete_q_event({ photographer: deleteTarget.photographer, event: deleteTarget.event }) : m.admin_fursuit_delete_q({ photographer: deleteTarget.photographer })) + ' ' + (deleteTarget.permissionSource ? m.admin_fursuit_delete_perm_both() : m.admin_fursuit_delete_file_only())}
 		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
