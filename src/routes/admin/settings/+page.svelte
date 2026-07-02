@@ -3,6 +3,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
+	import { RefreshCw, Loader2 } from 'lucide-svelte';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
 
@@ -375,7 +376,7 @@
 			<h2>Registry Sync</h2>
 			<p class="reg-status">Pull artist updates from the shared registry now, and link any local artists already in it. (This also runs on a schedule via the sync cron.)</p>
 			<button type="submit" class="btn btn-secondary" disabled={syncing}>
-				{syncing ? 'Syncing…' : 'Sync now'}
+				{#if syncing}<Loader2 size={16} class="spin" /> Syncing…{:else}<RefreshCw size={16} /> Sync now{/if}
 			</button>
 		</section>
 	</form>
@@ -646,6 +647,11 @@
 		margin-top: 20px;
 	}
 
+	/* Same rhythm between the last password field and its submit button. */
+	.security-section > .btn {
+		margin-top: 20px;
+	}
+
 	label > span {
 		font-size: 14px;
 		font-weight: 500;
@@ -866,5 +872,13 @@
 		background: var(--secondary);
 		padding: 1px 5px;
 		border-radius: var(--radius-xs);
+	}
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 </style>
