@@ -476,7 +476,7 @@
 
 {#if showNewArtist}
 	<NewArtistDialog
-		title={newArtistTarget === 'manager' ? 'New Manager' : 'New Artist'}
+		title={newArtistTarget === 'manager' ? m.admin_new_manager_title() : m.admin_new_artist_title()}
 		registryEnabled={registryEnabled}
 		oncreated={onArtistCreated}
 		oncancel={() => (showNewArtist = false)}
