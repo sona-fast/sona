@@ -582,6 +582,7 @@
 	"admin_settings_ut_unverified": "トークン設定済み（使用量は確認できませんでした）",
 	"admin_settings_ut_not_set": "未設定 — シークレットとして UPLOADTHING_TOKEN を追加してください",
 	"admin_settings_r2_domain": "R2の公開ドメイン",
+	"admin_settings_r2_no_url_hint": "公開URLが未設定です。CDNドメインを追加するまで、アップロードはこのサイトの /img ルートから配信されます。",
 	"admin_settings_save_storage": "ストレージ設定を保存",
 	"admin_settings_migrate_link": "既存の画像を移行",
 	"admin_settings_password_changed": "パスワードを変更しました",

@@ -345,6 +345,9 @@
 				<span>{m.admin_settings_r2_domain()}</span>
 				<input type="text" class="input" name="r2PublicUrl" bind:value={r2PublicUrl} placeholder="https://cdn.example.com" />
 			</label>
+			{#if !r2PublicUrl?.trim()}
+				<p class="hint">{m.admin_settings_r2_no_url_hint()}</p>
+			{/if}
 		{:else}
 			<input type="hidden" name="r2PublicUrl" value={r2PublicUrl} />
 		{/if}
