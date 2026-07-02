@@ -3,6 +3,8 @@
 	import * as m from '$lib/paraglide/messages';
 
 	let { form, data } = $props();
+
+	let signingIn = $state(false);
 </script>
 
 <div class="login-page">
@@ -14,12 +16,20 @@
 			<p class="error">{form.error}</p>
 		{/if}
 
-		<form method="POST" use:enhance>
+		<form method="POST" use:enhance={() => {
+			signingIn = true;
+			return async ({ update }) => {
+				await update();
+				signingIn = false;
+			};
+		}}>
 			<label>
 				<span>{m.admin_field_password()}</span>
 				<input type="password" name="password" class="input" required autofocus />
 			</label>
-			<button type="submit" class="btn btn-primary full-width">{m.admin_login_sign_in()}</button>
+			<button type="submit" class="btn btn-primary full-width" disabled={signingIn}>
+				{signingIn ? m.admin_login_signing_in() : m.admin_login_sign_in()}
+			</button>
 		</form>
 	</div>
 </div>

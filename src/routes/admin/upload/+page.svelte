@@ -14,6 +14,7 @@
 	let uploadError = $state('');
 	let dragOver = $state(false);
 	let isUploading = $state(false);
+	let saving = $state(false);
 	let previewUrl = $state('');
 	let fileInput: HTMLInputElement;
 
@@ -118,7 +119,13 @@
 	<p class="error">{form.error}</p>
 {/if}
 
-<form method="POST" use:enhance class="upload-form">
+<form method="POST" use:enhance={() => {
+	saving = true;
+	return async ({ update }) => {
+		await update();
+		saving = false;
+	};
+}} class="upload-form">
 	<input type="hidden" name="imageUrl" value={imageUrl} />
 	<input type="hidden" name="width" value={imageWidth} />
 	<input type="hidden" name="height" value={imageHeight} />
@@ -315,7 +322,9 @@
 
 	<div class="form-actions">
 		<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
-		<button type="submit" class="btn btn-primary" disabled={!imageUrl || isUploading}>{m.admin_upload_submit()}</button>
+		<button type="submit" class="btn btn-primary" disabled={!imageUrl || isUploading || saving}>
+			{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_upload_submit()}{/if}
+		</button>
 	</div>
 </form>
 

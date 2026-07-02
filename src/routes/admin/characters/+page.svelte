@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Search, Plus, Pencil, Trash2, X, Link as LinkIcon } from 'lucide-svelte';
+	import { Search, Plus, Pencil, Trash2, X, Link as LinkIcon, Loader2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
@@ -35,6 +35,8 @@
 	let editingChar = $state<CharForm | null>(null);
 	let deleteTarget = $state<{ id: number; name: string } | null>(null);
 	let deleteForm: HTMLFormElement;
+	let saving = $state(false);
+	let deletingId = $state<number | null>(null);
 
 	let filtered = $derived(
 		data.characters.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
@@ -100,7 +102,9 @@
 					</td>
 					<td>
 						<button class="icon-btn" onclick={() => (editingChar = char)}><Pencil size={16} /></button>
-						<button class="icon-btn" onclick={() => (deleteTarget = { id: char.id, name: char.name })}><Trash2 size={16} /></button>
+						<button class="icon-btn" disabled={deletingId === char.id} onclick={() => (deleteTarget = { id: char.id, name: char.name })}>
+							{#if deletingId === char.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
+						</button>
 					</td>
 				</tr>
 			{:else}
@@ -131,7 +135,9 @@
 			</div>
 			<div class="mobile-char-actions">
 				<button class="icon-btn" onclick={() => (editingChar = char)}><Pencil size={16} /></button>
-				<button class="icon-btn" onclick={() => (deleteTarget = { id: char.id, name: char.name })}><Trash2 size={16} /></button>
+				<button class="icon-btn" disabled={deletingId === char.id} onclick={() => (deleteTarget = { id: char.id, name: char.name })}>
+					{#if deletingId === char.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
+				</button>
 			</div>
 		</div>
 	{:else}
@@ -140,7 +146,12 @@
 	<button class="mobile-add-row" onclick={() => (editingChar = { ...BLANK_CHAR })}>+ {m.admin_characters_add()}</button>
 </div>
 
-<form method="POST" action="?/delete" use:enhance bind:this={deleteForm} style="display:none">
+<form method="POST" action="?/delete" use:enhance={() => {
+	return async ({ update }) => {
+		await update();
+		deletingId = null;
+	};
+}} bind:this={deleteForm} style="display:none">
 	<input type="hidden" name="id" value={deleteTarget?.id ?? ''} />
 </form>
 
@@ -148,7 +159,7 @@
 	<ConfirmDialog
 		title={m.admin_characters_delete_title()}
 		message={m.admin_characters_delete_message({ name: deleteTarget.name })}
-		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
+		onconfirm={() => { deletingId = deleteTarget!.id; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
 {/if}
@@ -163,8 +174,10 @@
 				<button class="icon-btn" onclick={() => (editingChar = null)}><X size={18} /></button>
 			</div>
 			<form method="POST" action={editingChar.id ? '?/update' : '?/create'} use:enhance={() => {
+				saving = true;
 				return async ({ update }) => {
 					await update();
+					saving = false;
 					editingChar = null;
 				};
 			}} class="modal-form">
@@ -220,7 +233,9 @@
 
 				<div class="modal-actions">
 					<button type="button" class="btn btn-secondary" onclick={() => (editingChar = null)}>{m.admin_cancel()}</button>
-					<button type="submit" class="btn btn-primary">{editingChar.id ? m.admin_save_changes() : m.admin_characters_add()}</button>
+					<button type="submit" class="btn btn-primary" disabled={saving}>
+						{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{editingChar.id ? m.admin_save_changes() : m.admin_characters_add()}{/if}
+					</button>
 				</div>
 			</form>
 		</div>
@@ -370,6 +385,15 @@
 	}
 
 	.icon-btn:hover { color: var(--foreground); }
+
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
 
 	.mobile-list { display: none; }
 

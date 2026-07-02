@@ -49,6 +49,9 @@
 	);
 
 	let confirmingAction = $state<'deleteAll' | 'clearCache' | 'resetTags' | null>(null);
+	// Which danger-zone / export action is in flight (disables + labels
+	// its button while the form round-trips).
+	let runningAction = $state<'deleteAll' | 'clearCache' | 'resetTags' | 'export' | null>(null);
 	let actionMessage = $state('');
 	let actionError = $state('');
 
@@ -399,13 +402,17 @@
 			<p class="danger-desc">Download a full backup of all images, metadata, collections, and tags as a JSON file.</p>
 		</div>
 		<form method="POST" action="?/export" bind:this={exportForm} use:enhance={() => {
+			runningAction = 'export';
 			return async ({ result }) => {
+				runningAction = null;
 				if (result.type === 'success' && result.data?.export) {
 					downloadExport(result.data.export as string);
 				}
 			};
 		}}>
-			<button type="submit" class="btn btn-outline">Export</button>
+			<button type="submit" class="btn btn-outline" disabled={runningAction === 'export'}>
+				{runningAction === 'export' ? 'Exporting…' : 'Export'}
+			</button>
 		</form>
 	</div>
 
@@ -414,8 +421,15 @@
 			<p class="danger-title">Clear all data</p>
 			<p class="danger-desc">Delete all images, collections, and tags. This cannot be undone.</p>
 		</div>
-		<form method="POST" action="?/deleteAll" bind:this={deleteAllForm} use:enhance>
-			<button type="button" class="btn btn-destructive" onclick={() => (confirmingAction = 'deleteAll')}>Delete All</button>
+		<form method="POST" action="?/deleteAll" bind:this={deleteAllForm} use:enhance={() => {
+			return async ({ update }) => {
+				await update();
+				runningAction = null;
+			};
+		}}>
+			<button type="button" class="btn btn-destructive" disabled={runningAction === 'deleteAll'} onclick={() => (confirmingAction = 'deleteAll')}>
+				{runningAction === 'deleteAll' ? 'Deleting…' : 'Delete All'}
+			</button>
 		</form>
 	</div>
 
@@ -424,8 +438,15 @@
 			<p class="danger-title">Clear upload cache</p>
 			<p class="danger-desc">Remove orphaned files from your storage (R2 and UploadThing) that are no longer referenced in your database.</p>
 		</div>
-		<form method="POST" action="?/clearCache" bind:this={clearCacheForm} use:enhance>
-			<button type="button" class="btn btn-destructive" onclick={() => (confirmingAction = 'clearCache')}>Clear Cache</button>
+		<form method="POST" action="?/clearCache" bind:this={clearCacheForm} use:enhance={() => {
+			return async ({ update }) => {
+				await update();
+				runningAction = null;
+			};
+		}}>
+			<button type="button" class="btn btn-destructive" disabled={runningAction === 'clearCache'} onclick={() => (confirmingAction = 'clearCache')}>
+				{runningAction === 'clearCache' ? 'Clearing…' : 'Clear Cache'}
+			</button>
 		</form>
 	</div>
 
@@ -434,8 +455,15 @@
 			<p class="danger-title">Reset all tags</p>
 			<p class="danger-desc">Remove all tags from images. Images and collections are preserved.</p>
 		</div>
-		<form method="POST" action="?/resetTags" bind:this={resetTagsForm} use:enhance>
-			<button type="button" class="btn btn-destructive" onclick={() => (confirmingAction = 'resetTags')}>Reset Tags</button>
+		<form method="POST" action="?/resetTags" bind:this={resetTagsForm} use:enhance={() => {
+			return async ({ update }) => {
+				await update();
+				runningAction = null;
+			};
+		}}>
+			<button type="button" class="btn btn-destructive" disabled={runningAction === 'resetTags'} onclick={() => (confirmingAction = 'resetTags')}>
+				{runningAction === 'resetTags' ? 'Resetting…' : 'Reset Tags'}
+			</button>
 		</form>
 	</div>
 </section>
@@ -448,6 +476,7 @@
 		message={confirmConfig[confirmingAction].message}
 		confirmLabel={confirmConfig[confirmingAction].confirmLabel}
 		onconfirm={() => {
+			runningAction = confirmingAction;
 			if (confirmingAction === 'deleteAll') deleteAllForm.requestSubmit();
 			else if (confirmingAction === 'clearCache') clearCacheForm.requestSubmit();
 			else if (confirmingAction === 'resetTags') resetTagsForm.requestSubmit();

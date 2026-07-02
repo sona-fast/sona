@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { goto } from '$app/navigation';
-	import { Search, Plus, Pencil, Trash2, X, Share2 } from 'lucide-svelte';
+	import { goto, invalidateAll } from '$app/navigation';
+	import { Search, Plus, Pencil, Trash2, X, Share2, Loader2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { formatDate } from '$lib';
 	import * as m from '$lib/paraglide/messages';
@@ -21,6 +22,9 @@
 	let editingArtist = $state<typeof data.artists[0] | null>(null);
 	let deleteTarget = $state<{ id: number; name: string } | null>(null);
 	let deleteForm: HTMLFormElement;
+	let saving = $state(false);
+	let deletingId = $state<number | null>(null);
+	let submittingId = $state<number | null>(null);
 
 	// Search runs SERVER-SIDE across all artists (not just the current page).
 	// Debounce keystrokes into a ?q= navigation; keepFocus so typing isn't interrupted.
@@ -55,19 +59,6 @@
 
 {#if form?.error}
 	<p class="error">{form.error}</p>
-{/if}
-
-{#if showAdd}
-	<form method="POST" action="?/create" use:enhance={() => {
-		return async ({ update }) => {
-			await update();
-			showAdd = false;
-		};
-	}} class="add-form">
-		<input type="text" class="input" name="name" placeholder="Artist name..." autofocus />
-		<button type="submit" class="btn btn-primary">Add</button>
-		<button type="button" class="btn btn-secondary" onclick={() => (showAdd = false)}>Cancel</button>
-	</form>
 {/if}
 
 <div class="toolbar">
@@ -137,25 +128,29 @@
 								method="POST"
 								action="?/submitToRegistry"
 								style="display:inline"
-								use:enhance={() => async ({ result, update }) => {
-									await update();
-									if (result.type === 'success')
-										toast.success(artist.globalId ? m.admin_artists_registry_update_submitted() : m.admin_artists_registry_submitted());
-									else if (result.type === 'failure')
-										toast.error((result.data?.error as string) ?? m.admin_artists_registry_failed());
+								use:enhance={() => {
+									submittingId = artist.id;
+									return async ({ result, update }) => {
+										await update();
+										submittingId = null;
+										if (result.type === 'success')
+											toast.success(artist.globalId ? m.admin_artists_registry_update_submitted() : m.admin_artists_registry_submitted());
+										else if (result.type === 'failure')
+											toast.error((result.data?.error as string) ?? m.admin_artists_registry_failed());
+									};
 								}}
 							>
 								<input type="hidden" name="id" value={artist.id} />
-								<button class="icon-btn" type="submit" aria-label={m.admin_artists_submit_registry()} title={m.admin_artists_submit_registry()}>
-									<Share2 size={16} />
+								<button class="icon-btn" type="submit" disabled={submittingId !== null} aria-busy={submittingId === artist.id} aria-label={m.admin_artists_submit_registry()} title={m.admin_artists_submit_registry()}>
+									{#if submittingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Share2 size={16} />{/if}
 								</button>
 							</form>
 						{/if}
 						<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}>
 							<Pencil size={16} />
 						</button>
-						<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
-							<Trash2 size={16} />
+						<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
+							{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 						</button>
 					</td>
 				</tr>
@@ -200,7 +195,9 @@
 			</div>
 			<div class="mobile-artist-actions">
 				<button class="icon-btn" onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
-				<button class="icon-btn" onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}><Trash2 size={16} /></button>
+				<button class="icon-btn" disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
+					{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
+				</button>
 			</div>
 		</div>
 	{:else}
@@ -222,7 +219,12 @@
 	</nav>
 {/if}
 
-<form method="POST" action="?/delete" use:enhance bind:this={deleteForm} style="display:none">
+<form method="POST" action="?/delete" use:enhance={() => {
+	return async ({ update }) => {
+		await update();
+		deletingId = null;
+	};
+}} bind:this={deleteForm} style="display:none">
 	<input type="hidden" name="id" value={deleteTarget?.id ?? ''} />
 </form>
 
@@ -230,7 +232,7 @@
 	<ConfirmDialog
 		title={m.admin_artists_delete_title()}
 		message={m.admin_artists_delete_message({ name: deleteTarget.name })}
-		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
+		onconfirm={() => { deletingId = deleteTarget!.id; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
 {/if}
@@ -263,8 +265,10 @@
 			</div>
 
 			<form method="POST" action="?/update" use:enhance={() => {
+				saving = true;
 				return async ({ update }) => {
 					await update();
+					saving = false;
 					editingArtist = null;
 				};
 			}} class="modal-form">
@@ -311,11 +315,20 @@
 
 				<div class="modal-actions">
 					<button type="button" class="btn btn-secondary" onclick={() => (editingArtist = null)}>{m.admin_cancel()}</button>
-					<button type="submit" class="btn btn-primary">{m.admin_save_changes()}</button>
+					<button type="submit" class="btn btn-primary" disabled={saving}>
+						{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_save_changes()}{/if}
+					</button>
 				</div>
 			</form>
 		</div>
 	</div>
+{/if}
+
+{#if showAdd}
+	<NewArtistDialog
+		oncreated={async () => { showAdd = false; await invalidateAll(); }}
+		oncancel={() => (showAdd = false)}
+	/>
 {/if}
 
 <style>
@@ -480,6 +493,15 @@
 
 	.icon-btn:hover {
 		color: var(--foreground);
+	}
+
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	/* Modal */

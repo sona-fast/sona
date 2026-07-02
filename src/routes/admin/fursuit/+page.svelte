@@ -10,6 +10,8 @@
 	let character = $state(data.character);
 	let selected = $state<Set<number>>(new Set());
 	let importing = $state(false);
+	let checking = $state(false);
+	let deletingId = $state<number | null>(null);
 	// One photo at a time — captures the row the admin clicked Delete on so the
 	// ConfirmDialog can name it specifically before the hidden form is submitted.
 	let deleteTarget = $state<(typeof data.imported)[number] | null>(null);
@@ -36,8 +38,13 @@
 		excluded: data.candidates.filter((c) => c.status === 'excluded').length
 	});
 
-	function check() {
-		goto(`/admin/fursuit?character=${encodeURIComponent(character)}&check=1`);
+	async function check() {
+		if (checking) return;
+		// The ?check navigation re-runs the load (which queries FurTrack server-side);
+		// goto resolves once the new data is in, so show the loading state until then.
+		checking = true;
+		await goto(`/admin/fursuit?character=${encodeURIComponent(character)}&check=1`);
+		checking = false;
 	}
 
 	function toggle(id: number, on: boolean) {
@@ -69,7 +76,9 @@
 	<div class="banner ok"><CheckCircle2 size={18} /> {m.admin_fursuit_import_summary({ count: r.imported })}{r.skipped ? m.admin_fursuit_import_skipped({ count: r.skipped }) : ''}{r.failed ? m.admin_fursuit_import_failed({ count: r.failed }) : ''}</div>
 	<div class="actions">
 		<a class="btn btn-primary" href="/gallery?view=fursuit">{m.admin_fursuit_view_gallery()} →</a>
-		<button class="btn btn-outline" onclick={check}>{m.admin_fursuit_check_again()}</button>
+		<button class="btn btn-outline" onclick={check} disabled={checking}>
+			{#if checking}<Loader2 size={16} class="spin" /> {m.admin_checking()}{:else}{m.admin_fursuit_check_again()}{/if}
+		</button>
 	</div>
 {:else}
 	<div class="controls">
@@ -87,7 +96,9 @@
 				{#each data.characters as c}<option value={c.name}></option>{/each}
 			</datalist>
 		</div>
-		<button class="btn btn-primary" onclick={check}><Search size={16} /> {m.admin_fursuit_check()}</button>
+		<button class="btn btn-primary" onclick={check} disabled={checking}>
+			{#if checking}<Loader2 size={16} class="spin" /> {m.admin_checking()}{:else}<Search size={16} /> {m.admin_fursuit_check()}{/if}
+		</button>
 	</div>
 	<p class="hint">{m.admin_fursuit_tag_hint_pre()}<code>1:</code>{m.admin_fursuit_tag_hint_mid()}<code>1:{character || '…'}</code></p>
 
@@ -181,8 +192,8 @@
 					</div>
 					<div class="cell link"><a href="/gallery/fursuit/{photo.id}" target="_blank" rel="noopener">{m.admin_view()} ↗</a></div>
 					<div class="cell del">
-						<button type="button" class="btn-icon" aria-label={m.admin_fursuit_delete_aria({ photographer: photo.photographer })} onclick={() => (deleteTarget = photo)}>
-							<Trash2 size={16} />
+						<button type="button" class="btn-icon" aria-label={m.admin_fursuit_delete_aria({ photographer: photo.photographer })} disabled={deletingId === photo.id} onclick={() => (deleteTarget = photo)}>
+							{#if deletingId === photo.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 						</button>
 					</div>
 				</div>
@@ -191,7 +202,12 @@
 	</section>
 {/if}
 
-<form method="POST" action="?/delete" use:enhance bind:this={deleteForm} style="display:none">
+<form method="POST" action="?/delete" use:enhance={() => {
+	return async ({ update }) => {
+		await update();
+		deletingId = null;
+	};
+}} bind:this={deleteForm} style="display:none">
 	<input type="hidden" name="id" value={deleteTarget?.id ?? ''} />
 </form>
 
@@ -199,7 +215,7 @@
 	<ConfirmDialog
 		title={m.admin_fursuit_delete_title()}
 		message={(deleteTarget.event ? m.admin_fursuit_delete_q_event({ photographer: deleteTarget.photographer, event: deleteTarget.event }) : m.admin_fursuit_delete_q({ photographer: deleteTarget.photographer })) + ' ' + (deleteTarget.permissionSource ? m.admin_fursuit_delete_perm_both() : m.admin_fursuit_delete_file_only())}
-		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
+		onconfirm={() => { deletingId = deleteTarget!.id; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
 {/if}
@@ -261,4 +277,6 @@
 	.empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px; color: var(--muted-foreground); text-align: center; }
 	.error { color: #f87171; font-size: 14px; margin-top: 12px; }
 	code { background: var(--secondary); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+	:global(.spin) { animation: spin 1s linear infinite; }
+	@keyframes spin { to { transform: rotate(360deg); } }
 </style>

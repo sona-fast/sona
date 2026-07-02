@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { Loader2 } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
 	let artistMode = $state<'existing' | 'new'>('existing');
+	let saving = $state(false);
 </script>
 
 <div class="page-header">
@@ -20,7 +22,13 @@
 		<img src={data.image.imageUrl} alt={data.image.title} />
 	</div>
 
-	<form method="POST" use:enhance class="edit-form">
+	<form method="POST" use:enhance={() => {
+		saving = true;
+		return async ({ update }) => {
+			await update();
+			saving = false;
+		};
+	}} class="edit-form">
 		<label>
 			<span>{m.admin_field_title()}</span>
 			<input type="text" class="input" name="title" value={data.image.title} required />
@@ -159,12 +167,23 @@
 
 		<div class="form-actions">
 			<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
-			<button type="submit" class="btn btn-primary">{m.admin_save_changes()}</button>
+			<button type="submit" class="btn btn-primary" disabled={saving}>
+				{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_save_changes()}{/if}
+			</button>
 		</div>
 	</form>
 </div>
 
 <style>
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
 	.page-header {
 		margin-bottom: 24px;
 	}

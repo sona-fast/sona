@@ -232,11 +232,11 @@
 
 				const resp = await fetch('?/importBatch', { method: 'POST', body: fd });
 				const des = deserialize(await resp.text());
-				if (des.type === 'error') throw des.error ?? new Error('Batch failed');
+				if (des.type === 'error') throw des.error ?? new Error(m.admin_import_batch_failed());
 				if (des.type === 'failure') {
-					throw new Error((des.data as { error?: string } | undefined)?.error ?? 'Batch failed');
+					throw new Error((des.data as { error?: string } | undefined)?.error ?? m.admin_import_batch_failed());
 				}
-				if (des.type !== 'success') throw new Error('Unexpected response');
+				if (des.type !== 'success') throw new Error(m.admin_import_unexpected());
 
 				const batch = (des.data as { batch: { imported: number; updated: number; skipped: number; failed: { fileId: string; reason: string }[] } }).batch;
 				imported += batch.imported;
@@ -332,7 +332,14 @@
 		<div class="actions">
 		<a class="btn btn-primary" href="/admin/stickers"><ArrowRight size={16} /> {m.admin_import_view_section()}</a>
 			{#if r.failed > 0 && data.nameOrUrl}
-				<button class="btn btn-outline" onclick={() => goto(`/admin/stickers/import?pack=${encodeURIComponent(data.nameOrUrl)}&check=1`)}><RefreshCw size={16} /> {m.admin_import_retry_failed({ count: r.failed })}</button>
+				<button class="btn btn-outline" disabled={checking} onclick={async () => {
+					// Same re-check navigation as the Fetch pack button — reuse its loading state.
+					checking = true;
+					await goto(`/admin/stickers/import?pack=${encodeURIComponent(data.nameOrUrl)}&check=1`);
+					checking = false;
+				}}>
+					{#if checking}<Loader2 size={16} class="spin" /> {m.admin_import_fetching()}{:else}<RefreshCw size={16} /> {m.admin_import_retry_failed({ count: r.failed })}{/if}
+				</button>
 			{/if}
 		<button class="btn btn-outline" onclick={() => goto('/admin/stickers/import')}><Plus size={16} /> {m.admin_import_another()}</button>
 	</div>

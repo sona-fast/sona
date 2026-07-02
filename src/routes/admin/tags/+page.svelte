@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Search, Plus, Pencil, Trash2 } from 'lucide-svelte';
+	import { Search, Plus, Pencil, Trash2, Loader2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate } from '$lib';
 	import * as m from '$lib/paraglide/messages';
@@ -12,6 +12,8 @@
 
 	let search = $state('');
 	let showAdd = $state(false);
+	let creating = $state(false);
+	let deletingId = $state<number | null>(null);
 
 	let filtered = $derived(
 		data.tags.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()))
@@ -29,13 +31,17 @@
 
 {#if showAdd}
 	<form method="POST" action="?/create" use:enhance={() => {
+		creating = true;
 		return async ({ update }) => {
 			await update();
+			creating = false;
 			showAdd = false;
 		};
 	}} class="add-form">
 		<input type="text" class="input" name="name" placeholder={m.admin_tags_name_placeholder()} autofocus />
-		<button type="submit" class="btn btn-primary">{m.admin_add()}</button>
+		<button type="submit" class="btn btn-primary" disabled={creating}>
+			{#if creating}<Loader2 size={16} class="spin" /> {m.admin_adding()}{:else}{m.admin_add()}{/if}
+		</button>
 		<button type="button" class="btn btn-secondary" onclick={() => (showAdd = false)}>{m.admin_cancel()}</button>
 	</form>
 {/if}
@@ -64,8 +70,8 @@
 					<td>{m.admin_count_images({ count: tag.usageCount })}</td>
 					<td>{formatDate(tag.createdAt)}</td>
 					<td>
-						<button class="icon-btn" aria-label={m.admin_tags_delete_aria()} onclick={() => (deleteTarget = { id: tag.id, name: tag.name })}>
-							<Trash2 size={16} />
+						<button class="icon-btn" aria-label={m.admin_tags_delete_aria()} disabled={deletingId === tag.id} onclick={() => (deleteTarget = { id: tag.id, name: tag.name })}>
+							{#if deletingId === tag.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 						</button>
 					</td>
 				</tr>
@@ -92,10 +98,16 @@
 			<span class="mobile-tag-name">{tag.name}</span>
 			<span class="mobile-tag-count">{tag.usageCount}</span>
 			<div class="mobile-tag-actions">
-				<form method="POST" action="?/delete" use:enhance class="inline-form">
+				<form method="POST" action="?/delete" use:enhance={() => {
+					deletingId = tag.id;
+					return async ({ update }) => {
+						await update();
+						deletingId = null;
+					};
+				}} class="inline-form">
 					<input type="hidden" name="id" value={tag.id} />
-					<button type="submit" class="icon-btn" aria-label={m.admin_tags_delete_aria()}>
-						<Trash2 size={16} />
+					<button type="submit" class="icon-btn" aria-label={m.admin_tags_delete_aria()} disabled={deletingId === tag.id}>
+						{#if deletingId === tag.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 					</button>
 				</form>
 			</div>
@@ -118,7 +130,12 @@
 	</nav>
 {/if}
 
-<form method="POST" action="?/delete" use:enhance bind:this={deleteForm} style="display:none">
+<form method="POST" action="?/delete" use:enhance={() => {
+	return async ({ update }) => {
+		await update();
+		deletingId = null;
+	};
+}} bind:this={deleteForm} style="display:none">
 	<input type="hidden" name="id" value={deleteTarget?.id ?? ''} />
 </form>
 
@@ -126,7 +143,7 @@
 	<ConfirmDialog
 		title={m.admin_tags_delete_title()}
 		message={m.admin_tags_delete_message({ name: deleteTarget.name })}
-		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
+		onconfirm={() => { deletingId = deleteTarget!.id; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
 {/if}
@@ -218,6 +235,15 @@
 
 	.icon-btn:hover {
 		color: var(--destructive);
+	}
+
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	.pagination {

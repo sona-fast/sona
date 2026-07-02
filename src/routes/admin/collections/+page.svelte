@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Plus, Pencil, Trash2, X } from 'lucide-svelte';
+	import { Plus, Pencil, Trash2, X, Loader2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -11,6 +11,9 @@
 	let deleteTarget = $state<{ id: number; name: string } | null>(null);
 	let deleteForm: HTMLFormElement;
 	let editCoverUrl = $state('');
+	let creating = $state(false);
+	let saving = $state(false);
+	let deletingId = $state<number | null>(null);
 
 	function startEdit(collection: typeof data.collections[0]) {
 		editingCollection = collection;
@@ -36,13 +39,17 @@
 
 {#if showAdd}
 	<form method="POST" action="?/create" use:enhance={() => {
+		creating = true;
 		return async ({ update }) => {
 			await update();
+			creating = false;
 			showAdd = false;
 		};
 	}} class="add-form">
 		<input type="text" class="input" name="name" placeholder={m.admin_collections_name_placeholder()} autofocus />
-		<button type="submit" class="btn btn-primary">{m.admin_create()}</button>
+		<button type="submit" class="btn btn-primary" disabled={creating}>
+			{#if creating}<Loader2 size={16} class="spin" /> {m.admin_creating()}{:else}{m.admin_create()}{/if}
+		</button>
 		<button type="button" class="btn btn-secondary" onclick={() => (showAdd = false)}>{m.admin_cancel()}</button>
 	</form>
 {/if}
@@ -64,8 +71,8 @@
 					<button class="icon-btn" aria-label={m.admin_collections_edit_aria()} onclick={() => startEdit(collection)}>
 						<Pencil size={16} />
 					</button>
-					<button class="icon-btn" aria-label={m.admin_collections_delete_aria()} onclick={() => (deleteTarget = { id: collection.id, name: collection.name })}>
-						<Trash2 size={16} />
+					<button class="icon-btn" aria-label={m.admin_collections_delete_aria()} disabled={deletingId === collection.id} onclick={() => (deleteTarget = { id: collection.id, name: collection.name })}>
+						{#if deletingId === collection.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 					</button>
 				</div>
 			</div>
@@ -90,7 +97,9 @@
 			</div>
 			<div class="mobile-collection-actions">
 				<button class="icon-btn" onclick={() => startEdit(collection)}><Pencil size={16} /></button>
-				<button class="icon-btn" onclick={() => (deleteTarget = { id: collection.id, name: collection.name })}><Trash2 size={16} /></button>
+				<button class="icon-btn" disabled={deletingId === collection.id} onclick={() => (deleteTarget = { id: collection.id, name: collection.name })}>
+					{#if deletingId === collection.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
+				</button>
 			</div>
 		</div>
 	{:else}
@@ -99,7 +108,12 @@
 	<button class="mobile-add-row" onclick={() => (showAdd = true)}>+ {m.admin_collections_new()}</button>
 </div>
 
-<form method="POST" action="?/delete" use:enhance bind:this={deleteForm} style="display:none">
+<form method="POST" action="?/delete" use:enhance={() => {
+	return async ({ update }) => {
+		await update();
+		deletingId = null;
+	};
+}} bind:this={deleteForm} style="display:none">
 	<input type="hidden" name="id" value={deleteTarget?.id ?? ''} />
 </form>
 
@@ -107,7 +121,7 @@
 	<ConfirmDialog
 		title={m.admin_collections_delete_title()}
 		message={m.admin_collections_delete_message({ name: deleteTarget.name })}
-		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
+		onconfirm={() => { deletingId = deleteTarget!.id; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
 {/if}
@@ -126,8 +140,10 @@
 			</div>
 
 			<form method="POST" action="?/update" use:enhance={() => {
+				saving = true;
 				return async ({ update }) => {
 					await update();
+					saving = false;
 					editingCollection = null;
 				};
 			}} class="modal-form">
@@ -172,7 +188,9 @@
 
 				<div class="modal-actions">
 					<button type="button" class="btn btn-secondary" onclick={() => (editingCollection = null)}>{m.admin_cancel()}</button>
-					<button type="submit" class="btn btn-primary">{m.admin_save_changes()}</button>
+					<button type="submit" class="btn btn-primary" disabled={saving}>
+						{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_save_changes()}{/if}
+					</button>
 				</div>
 			</form>
 		</div>
@@ -289,6 +307,15 @@
 
 	.icon-btn:hover {
 		color: var(--foreground);
+	}
+
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	.empty {

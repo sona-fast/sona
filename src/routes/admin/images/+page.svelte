@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff } from 'lucide-svelte';
+	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff, Loader2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate, cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
@@ -11,6 +11,17 @@
 
 	let deleteTarget = $state<{ id: number; title: string } | null>(null);
 	let deleteForm: HTMLFormElement;
+	let deletingId = $state<number | null>(null);
+	// Publish toggles in flight — a Set so rapid clicks on different rows each show
+	// their own spinner (same pattern as the sticker pack list).
+	let togglingIds = $state<Set<number>>(new Set());
+
+	function setToggling(id: number, on: boolean) {
+		const next = new Set(togglingIds);
+		if (on) next.add(id);
+		else next.delete(id);
+		togglingIds = next;
+	}
 
 	function toggleSort(col: string) {
 		const params = new URLSearchParams($page.url.searchParams);
@@ -95,16 +106,27 @@
 					<td class="date">{image.commissionedAt ? formatDate(image.commissionedAt) : '—'}</td>
 					<td class="date">{formatDate(image.createdAt)}</td>
 					<td class="col-status">
-						<form method="POST" action="?/togglePublished" use:enhance class="inline-form">
+						<form method="POST" action="?/togglePublished" use:enhance={() => {
+							setToggling(image.id, true);
+							return async ({ update }) => {
+								await update();
+								setToggling(image.id, false);
+							};
+						}} class="inline-form">
 							<input type="hidden" name="id" value={image.id} />
 							<button
 								type="submit"
 								class="status-btn"
 								class:is-private={!image.published}
+								disabled={togglingIds.has(image.id)}
+								aria-busy={togglingIds.has(image.id)}
 								aria-label={image.published ? m.admin_images_make_private() : m.admin_images_make_public()}
 								title={image.published ? m.admin_images_public_click_hide() : m.admin_images_private_click_publish()}
 							>
-								{#if image.published}
+								{#if togglingIds.has(image.id)}
+									<Loader2 size={14} class="spin" />
+									<span>{image.published ? m.admin_status_public() : m.admin_status_private()}</span>
+								{:else if image.published}
 									<Eye size={14} />
 									<span>{m.admin_status_public()}</span>
 								{:else}
@@ -118,8 +140,8 @@
 						<a href="/admin/images/{image.id}/edit" class="icon-btn" aria-label={m.admin_images_edit_aria()}>
 							<Pencil size={16} />
 						</a>
-						<button class="icon-btn" aria-label={m.admin_images_delete_aria()} onclick={() => (deleteTarget = { id: image.id, title: image.title })}>
-							<Trash2 size={16} />
+						<button class="icon-btn" aria-label={m.admin_images_delete_aria()} disabled={deletingId === image.id} onclick={() => (deleteTarget = { id: image.id, title: image.title })}>
+							{#if deletingId === image.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 						</button>
 					</td>
 				</tr>
@@ -167,16 +189,30 @@
 				{/if}
 			</div>
 			<div class="mobile-actions">
-				<form method="POST" action="?/togglePublished" use:enhance class="inline-form">
+				<form method="POST" action="?/togglePublished" use:enhance={() => {
+					setToggling(image.id, true);
+					return async ({ update }) => {
+						await update();
+						setToggling(image.id, false);
+					};
+				}} class="inline-form">
 					<input type="hidden" name="id" value={image.id} />
-					<button type="submit" class="icon-btn" aria-label={image.published ? m.admin_images_make_private() : m.admin_images_make_public()}>
-						{#if image.published}<Eye size={16} />{:else}<EyeOff size={16} />{/if}
+					<button type="submit" class="icon-btn" disabled={togglingIds.has(image.id)} aria-busy={togglingIds.has(image.id)} aria-label={image.published ? m.admin_images_make_private() : m.admin_images_make_public()}>
+						{#if togglingIds.has(image.id)}<Loader2 size={16} class="spin" />{:else if image.published}<Eye size={16} />{:else}<EyeOff size={16} />{/if}
 					</button>
 				</form>
 				<a href="/admin/images/{image.id}/edit" class="icon-btn"><Pencil size={16} /></a>
-				<form method="POST" action="?/delete" use:enhance class="inline-form">
+				<form method="POST" action="?/delete" use:enhance={() => {
+					deletingId = image.id;
+					return async ({ update }) => {
+						await update();
+						deletingId = null;
+					};
+				}} class="inline-form">
 					<input type="hidden" name="id" value={image.id} />
-					<button type="submit" class="icon-btn"><Trash2 size={16} /></button>
+					<button type="submit" class="icon-btn" disabled={deletingId === image.id}>
+						{#if deletingId === image.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
+					</button>
 				</form>
 			</div>
 		</div>
@@ -201,7 +237,12 @@
 	</nav>
 {/if}
 
-<form method="POST" action="?/delete" use:enhance bind:this={deleteForm} style="display:none">
+<form method="POST" action="?/delete" use:enhance={() => {
+	return async ({ update }) => {
+		await update();
+		deletingId = null;
+	};
+}} bind:this={deleteForm} style="display:none">
 	<input type="hidden" name="id" value={deleteTarget?.id ?? ''} />
 </form>
 
@@ -209,7 +250,7 @@
 	<ConfirmDialog
 		title={m.admin_images_delete_title()}
 		message={m.admin_images_delete_message({ title: deleteTarget.title })}
-		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
+		onconfirm={() => { deletingId = deleteTarget!.id; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
 {/if}
@@ -380,6 +421,15 @@
 
 	.icon-btn:hover {
 		color: var(--destructive);
+	}
+
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 
 	.pagination {
