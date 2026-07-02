@@ -12,13 +12,14 @@ import {
 	imageTags,
 	characters,
 	imageCharacters,
-	sessions
+	sessions,
+	siteSettings
 } from '$lib/server/db/schema';
 import { sql, inArray } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { resolveAvatarUrl } from '$lib/server/avatar';
-import { verifyAdminPassword, setAdminPassword, hashToken } from '$lib/server/admin-auth';
+import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
 import { isRegistryEnabled } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
@@ -175,14 +176,24 @@ export const actions = {
 		if (!(await verifyAdminPassword(db, platform?.env, current))) {
 			return fail(401, { error: 'Current password is incorrect.' });
 		}
-		await setAdminPassword(db, next);
-		// Rotate sessions on a credential change: revoke ALL existing sessions
-		// (defeats any stolen token, including the current one) and mint a fresh
-		// session so the admin who just changed the password stays signed in.
-		await db.delete(sessions);
+		// D1 has no interactive transactions; db.batch() is atomic (all-or-nothing).
+		// Store the new password hash AND rotate sessions in one batch, so a partial
+		// failure can't leave the new credential set with old sessions still valid.
+		// Revoking ALL sessions defeats any stolen token (including the current one);
+		// the fresh row below keeps the admin who just changed it signed in.
+		// ('adminPasswordHash' is the same site_settings key admin-auth reads.)
+		const passwordHash = await hashPassword(next);
 		const token = crypto.randomUUID();
+		const tokenHash = await hashToken(token);
 		const expiresAt = new Date(Date.now() + SESSION_DURATION * 1000).toISOString();
-		await db.insert(sessions).values({ token: await hashToken(token), expiresAt });
+		await db.batch([
+			db
+				.insert(siteSettings)
+				.values({ key: 'adminPasswordHash', value: passwordHash })
+				.onConflictDoUpdate({ target: siteSettings.key, set: { value: passwordHash } }),
+			db.delete(sessions),
+			db.insert(sessions).values({ token: tokenHash, expiresAt })
+		]);
 		cookies.set(SESSION_COOKIE, token, {
 			path: '/',
 			httpOnly: true,
