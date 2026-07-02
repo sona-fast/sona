@@ -1,16 +1,17 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import * as m from '$lib/paraglide/messages';
 
 	const tabs = [
-		{ href: '/admin/upload', label: 'Upload' },
-		{ href: '/admin/images', label: 'Images' },
-		{ href: '/admin/collections', label: 'Collections' },
-		{ href: '/admin/tags', label: 'Tags' },
-		{ href: '/admin/artists', label: 'Artists' },
-		{ href: '/admin/characters', label: 'Characters' },
-		{ href: '/admin/fursuit', label: 'Fursuit' },
-		{ href: '/admin/stickers', label: 'Stickers' },
-		{ href: '/admin/settings', label: 'Settings' }
+		{ href: '/admin/upload', label: m.admin_nav_upload },
+		{ href: '/admin/images', label: m.admin_tab_images },
+		{ href: '/admin/collections', label: m.admin_nav_collections },
+		{ href: '/admin/tags', label: m.admin_nav_tags },
+		{ href: '/admin/artists', label: m.admin_nav_artists },
+		{ href: '/admin/characters', label: m.admin_nav_characters },
+		{ href: '/admin/fursuit', label: m.admin_tab_fursuit },
+		{ href: '/admin/stickers', label: m.admin_nav_stickers },
+		{ href: '/admin/settings', label: m.admin_nav_settings }
 	];
 </script>
 
@@ -21,7 +22,7 @@
 			class="admin-tab"
 			class:active={$page.url.pathname.startsWith(tab.href)}
 		>
-			{tab.label}
+			{tab.label()}
 		</a>
 	{/each}
 </nav>

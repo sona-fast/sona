@@ -5,21 +5,23 @@
 	import { getTheme } from '$lib/theme.svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import AdminTabs from '$lib/components/AdminTabs.svelte';
+	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { children, data } = $props();
 
 	const theme = getTheme();
 
 	const sidebarItems = [
-		{ href: '/admin/upload', label: 'Upload', icon: Upload },
-		{ href: '/admin/images', label: 'All Images', icon: Images },
-		{ href: '/admin/collections', label: 'Collections', icon: Folder },
-		{ href: '/admin/artists', label: 'Artists', icon: User },
-		{ href: '/admin/characters', label: 'Characters', icon: PawPrint },
-		{ href: '/admin/fursuit', label: 'Fursuit Photos', icon: Camera },
-		{ href: '/admin/stickers', label: 'Stickers', icon: Smile },
-		{ href: '/admin/tags', label: 'Tags', icon: Tags },
-		{ href: '/admin/settings', label: 'Settings', icon: Settings }
+		{ href: '/admin/upload', label: m.admin_nav_upload, icon: Upload },
+		{ href: '/admin/images', label: m.admin_nav_all_images, icon: Images },
+		{ href: '/admin/collections', label: m.admin_nav_collections, icon: Folder },
+		{ href: '/admin/artists', label: m.admin_nav_artists, icon: User },
+		{ href: '/admin/characters', label: m.admin_nav_characters, icon: PawPrint },
+		{ href: '/admin/fursuit', label: m.admin_nav_fursuit_photos, icon: Camera },
+		{ href: '/admin/stickers', label: m.admin_nav_stickers, icon: Smile },
+		{ href: '/admin/tags', label: m.admin_nav_tags, icon: Tags },
+		{ href: '/admin/settings', label: m.admin_nav_settings, icon: Settings }
 	];
 
 </script>
@@ -40,7 +42,7 @@
 						class:active={$page.url.pathname.startsWith(item.href)}
 					>
 						<item.icon size={16} />
-						{item.label}
+						{item.label()}
 					</a>
 				{/each}
 			</nav>
@@ -48,7 +50,7 @@
 				<form method="POST" action="/admin/logout" use:enhance>
 					<button type="submit" class="sidebar-link logout-btn">
 						<LogOut size={16} />
-						Logout
+						{m.admin_logout()}
 					</button>
 				</form>
 			</div>
@@ -56,8 +58,9 @@
 
 		<div class="admin-main">
 			<header class="admin-header desktop-header">
-				<div class="admin-badge">Admin Panel</div>
-				<button class="theme-toggle" onclick={theme.toggle} aria-label="Toggle theme">
+				<div class="admin-badge">{m.admin_badge()}</div>
+				<LanguageToggle />
+				<button class="theme-toggle" onclick={theme.toggle} aria-label={m.theme_toggle()}>
 					{#if theme.current === 'dark'}
 						<Sun size={16} />
 					{:else}
@@ -66,7 +69,7 @@
 				</button>
 				<div class="admin-avatar">
 					{#if data.adminAvatarUrl}
-						<img src={data.adminAvatarUrl} alt="Admin" />
+						<img src={data.adminAvatarUrl} alt={m.nav_admin()} />
 					{/if}
 				</div>
 			</header>

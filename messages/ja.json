@@ -152,5 +152,19 @@
 	"stickers_from_pack": "セット",
 	"stickers_across_packs": "{packs}セットにわたって",
 	"stickers_empty_subtext": "この絵文字でタグ付けされたスタンプはまだありません。別のリアクションを試すか、フィルターをクリアしてすべてのセットを表示してください。",
-	"stickers_reset_filters": "フィルターをリセット"
+	"stickers_reset_filters": "フィルターをリセット",
+	"admin_badge": "管理パネル",
+	"admin_logout": "ログアウト",
+	"admin_nav_upload": "アップロード",
+	"admin_nav_all_images": "すべての画像",
+	"admin_nav_collections": "コレクション",
+	"admin_nav_artists": "アーティスト",
+	"admin_nav_characters": "キャラクター",
+	"admin_nav_fursuit_photos": "着ぐるみ写真",
+	"admin_nav_stickers": "スタンプ",
+	"admin_nav_tags": "タグ",
+	"admin_nav_settings": "設定",
+	"admin_tab_images": "画像",
+	"admin_tab_fursuit": "着ぐるみ"
 }
+

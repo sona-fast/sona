@@ -188,5 +188,18 @@
 	"stickers_from_pack": "From pack",
 	"stickers_across_packs": "across {packs} packs",
 	"stickers_empty_subtext": "Nobody's tagged a sticker with this emoji so far. Try another reaction or clear your filters to see every pack.",
-	"stickers_reset_filters": "Reset filters"
+	"stickers_reset_filters": "Reset filters",
+	"admin_badge": "Admin Panel",
+	"admin_logout": "Logout",
+	"admin_nav_upload": "Upload",
+	"admin_nav_all_images": "All Images",
+	"admin_nav_collections": "Collections",
+	"admin_nav_artists": "Artists",
+	"admin_nav_characters": "Characters",
+	"admin_nav_fursuit_photos": "Fursuit Photos",
+	"admin_nav_stickers": "Stickers",
+	"admin_nav_tags": "Tags",
+	"admin_nav_settings": "Settings",
+	"admin_tab_images": "Images",
+	"admin_tab_fursuit": "Fursuit"
 }
