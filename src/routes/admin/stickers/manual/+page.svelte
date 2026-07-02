@@ -1,13 +1,14 @@
 <script lang="ts">
 	import StickerPackForm from '$lib/components/StickerPackForm.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 </script>
 
 <StickerPackForm
-	heading="Add pack manually"
-	submitLabel="Save pack"
-	intro="Upload sticker images (PNG or WebP) and fill in the pack details. Each sticker can have its own artist and emoji. Files are uploaded to storage before saving."
+	heading={m.admin_stickers_add_manual()}
+	submitLabel={m.admin_pack_save()}
+	intro={m.admin_pack_manual_intro()}
 	artists={data.artists}
 	ownerName={data.ownerName || data.siteName}
 	{form}

@@ -4,11 +4,12 @@
 	import { Smile, Plus, ExternalLink, Pencil, Trash2, Send, Search, Loader2, RefreshCw } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
 	// Falls back to the site name, then a generic label, when no persona name is set.
-	const ownerName = $derived(data.ownerName || data.siteName || 'the site owner');
+	const ownerName = $derived(data.ownerName || data.siteName || m.admin_stickers_site_owner());
 
 	let deleteTarget = $state<{ id: number; name: string } | null>(null);
 	let deleteForm: HTMLFormElement;
@@ -27,8 +28,8 @@
 	let sourceFilter = $state<'all' | 'telegram' | 'self-hosted'>('all');
 
 	function creditText(pack: (typeof data.packs)[number]): string {
-		if (pack.shape === 'single' && pack.soleArtist) return `by ${pack.soleArtist.name}`;
-		return `managed by ${ownerName} · ${pack.artists.length} artist${pack.artists.length === 1 ? '' : 's'}`;
+		if (pack.shape === 'single' && pack.soleArtist) return m.stickers_by_artist({ artist: pack.soleArtist.name });
+		return m.stickers_managed_by_owner({ ownerName, n: pack.artists.length });
 	}
 	function creditInitial(pack: (typeof data.packs)[number]): string {
 		const name = pack.shape === 'single' && pack.soleArtist ? pack.soleArtist.name : ownerName;
@@ -58,38 +59,38 @@
 
 <div class="page-header">
 	<div>
-		<h1>Stickers</h1>
-		<p class="subtitle">Sticker packs for Telegram &amp; self-hosted — {data.packs.length} pack{data.packs.length === 1 ? '' : 's'}</p>
+		<h1>{m.admin_nav_stickers()}</h1>
+		<p class="subtitle">{m.admin_stickers_subtitle({ count: data.packs.length })}</p>
 	</div>
 	<div class="header-actions">
-		<a href="/admin/stickers/manual" class="btn btn-outline"><Plus size={16} /> Add pack manually</a>
+		<a href="/admin/stickers/manual" class="btn btn-outline"><Plus size={16} /> {m.admin_stickers_add_manual()}</a>
 		{#if data.telegramEnabled}
-			<a href="/admin/stickers/import" class="btn btn-primary"><Send size={16} /> Import from Telegram</a>
+			<a href="/admin/stickers/import" class="btn btn-primary"><Send size={16} /> {m.admin_stickers_import_telegram()}</a>
 		{:else}
-			<span class="btn btn-primary disabled" title="Set TELEGRAM_BOT_TOKEN to enable Telegram import"><Send size={16} /> Import from Telegram</span>
+			<span class="btn btn-primary disabled" title={m.admin_stickers_import_disabled_title()}><Send size={16} /> {m.admin_stickers_import_telegram()}</span>
 		{/if}
 	</div>
 </div>
 
 {#if !data.telegramEnabled}
-	<div class="banner warn">Telegram import is disabled. Set <code>TELEGRAM_BOT_TOKEN</code> to enable it. Manual packs still work.</div>
+	<div class="banner warn">{m.admin_stickers_disabled_pre()}<code>TELEGRAM_BOT_TOKEN</code>{m.admin_stickers_disabled_post()}</div>
 {/if}
 
 {#if data.packs.length === 0}
 	<div class="empty">
 		<Smile size={36} />
-		<p>No sticker packs yet. Import one from Telegram or add a pack manually.</p>
+		<p>{m.admin_stickers_empty()}</p>
 	</div>
 {:else}
 	<div class="toolbar">
 		<div class="search-wrapper">
 			<Search size={16} class="search-icon" />
-			<input type="search" class="input search" placeholder="Search packs, artists…" bind:value={search} />
+			<input type="search" class="input search" placeholder={m.admin_stickers_search_placeholder()} bind:value={search} />
 		</div>
-		<select class="input source-select" bind:value={sourceFilter} aria-label="Filter by source">
-			<option value="all">All sources</option>
+		<select class="input source-select" bind:value={sourceFilter} aria-label={m.admin_stickers_filter_source()}>
+			<option value="all">{m.admin_stickers_all_sources()}</option>
 			<option value="telegram">Telegram</option>
-			<option value="self-hosted">Self-hosted</option>
+			<option value="self-hosted">{m.stickers_source_self_hosted()}</option>
 		</select>
 	</div>
 
@@ -97,12 +98,12 @@
 		<table class="data-table">
 			<thead>
 				<tr>
-					<th>Pack</th>
-					<th class="col-credit">Credit</th>
-					<th class="col-source">Source</th>
-					<th class="col-count">Stickers</th>
-					<th class="col-status">Published</th>
-					<th class="col-actions">Actions</th>
+					<th>{m.admin_stickers_col_pack()}</th>
+					<th class="col-credit">{m.admin_stickers_col_credit()}</th>
+					<th class="col-source">{m.admin_stickers_col_source()}</th>
+					<th class="col-count">{m.admin_nav_stickers()}</th>
+					<th class="col-status">{m.admin_stickers_col_published()}</th>
+					<th class="col-actions">{m.admin_col_actions()}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -128,7 +129,7 @@
 							</div>
 						</td>
 						<td class="col-source" data-label="Source">
-							<span class="source-chip {pack.source}">{pack.source === 'telegram' ? 'Telegram' : 'Self-hosted'}</span>
+							<span class="source-chip {pack.source}">{pack.source === 'telegram' ? m.stickers_source_telegram() : m.stickers_source_self_hosted()}</span>
 						</td>
 						<td class="col-count" data-label="Stickers">{pack.stickerCount}</td>
 						<td class="col-status" data-label="Published">
@@ -142,8 +143,8 @@
 									return async ({ update, result }) => {
 										await update({ reset: false });
 										togglingIds = new Set([...togglingIds].filter((x) => x !== id));
-										if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? 'Could not update pack');
-										else if (result.type === 'error') toast.error('Something went wrong');
+										if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? m.admin_stickers_update_failed());
+										else if (result.type === 'error') toast.error(m.admin_something_wrong());
 									};
 								}}
 							>
@@ -156,8 +157,8 @@
 									role="switch"
 									aria-checked={pack.published}
 									aria-busy={togglingIds.has(pack.id)}
-									title={pack.published ? 'Public — click to hide' : 'Private — click to publish'}
-									aria-label={pack.published ? 'Make private' : 'Make public'}
+									title={pack.published ? m.admin_images_public_click_hide() : m.admin_images_private_click_publish()}
+									aria-label={pack.published ? m.admin_images_make_private() : m.admin_images_make_public()}
 								>
 									<span class="switch-knob"></span>
 								</button>
@@ -165,7 +166,7 @@
 						</td>
 						<td class="col-actions" data-label="Actions">
 							{#if pack.telegramUrl}
-								<a href={pack.telegramUrl} target="_blank" rel="noopener" class="icon-btn" aria-label="Open on Telegram">
+								<a href={pack.telegramUrl} target="_blank" rel="noopener" class="icon-btn" aria-label={m.admin_stickers_open_telegram()}>
 									<ExternalLink size={15} />
 								</a>
 							{/if}
@@ -173,8 +174,8 @@
 								<button
 									type="button"
 									class="icon-btn"
-									aria-label="Re-sync from Telegram (import new stickers)"
-									title="Re-sync from Telegram (import new stickers)"
+									aria-label={m.admin_stickers_resync()}
+									title={m.admin_stickers_resync()}
 									disabled={resyncingId !== null}
 									aria-busy={resyncingId === pack.id}
 									onclick={() => resync(pack)}
@@ -186,13 +187,13 @@
 									{/if}
 								</button>
 							{/if}
-							<a href="/admin/stickers/{pack.id}/edit" class="icon-btn" aria-label="Edit pack">
+							<a href="/admin/stickers/{pack.id}/edit" class="icon-btn" aria-label={m.admin_stickers_edit_aria()}>
 								<Pencil size={15} />
 							</a>
 							<button
 								type="button"
 								class="icon-btn danger"
-								aria-label="Delete pack"
+								aria-label={m.admin_stickers_delete_aria()}
 								disabled={deletingId === pack.id}
 								onclick={() => (deleteTarget = { id: pack.id, name: pack.name })}
 							>
@@ -207,7 +208,7 @@
 				{/each}
 				{#if filtered.length === 0}
 					<tr>
-						<td colspan="6" class="no-match">No packs match your filters.</td>
+						<td colspan="6" class="no-match">{m.admin_stickers_no_match()}</td>
 					</tr>
 				{/if}
 			</tbody>
@@ -224,9 +225,9 @@
 		return async ({ update, result }) => {
 			await update({ reset: false });
 			deletingId = null;
-			if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? 'Could not delete pack');
-			else if (result.type === 'error') toast.error('Something went wrong');
-			else toast.success('Pack deleted');
+			if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? m.admin_stickers_delete_failed());
+			else if (result.type === 'error') toast.error(m.admin_something_wrong());
+			else toast.success(m.admin_stickers_deleted());
 		};
 	}}
 >
@@ -235,8 +236,8 @@
 
 {#if deleteTarget}
 	<ConfirmDialog
-		title="Delete sticker pack"
-		message={`Delete "${deleteTarget.name}"? All stickers, emoji rows, and stored files will be removed. This can't be undone.`}
+		title={m.admin_stickers_delete_title()}
+		message={m.admin_stickers_delete_message({ name: deleteTarget.name })}
 		onconfirm={() => { deletingId = deleteTarget?.id ?? null; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>

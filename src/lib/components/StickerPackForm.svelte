@@ -3,6 +3,7 @@
 	import { flip } from 'svelte/animate';
 	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
+	import * as m from '$lib/paraglide/messages';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 
@@ -38,7 +39,7 @@
 		ownerName?: string;
 	}
 
-	let { heading, submitLabel, intro, artists, pack = null, stickers = [], form = null, ownerName = 'the site owner' }: Props = $props();
+	let { heading, submitLabel, intro, artists, pack = null, stickers = [], form = null, ownerName = m.admin_stickers_site_owner() }: Props = $props();
 
 	const isEdit = pack !== null;
 
@@ -151,7 +152,7 @@
 			uploading = false;
 		}
 		// Keep the successful uploads; surface the failures without discarding them.
-		if (failed > 0) toast.error(`${ok} of ${files.length} uploaded, ${failed} failed`);
+		if (failed > 0) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
 	}
 
 	function removeSticker(i: number) {
@@ -250,7 +251,7 @@
 	}
 </script>
 
-<a class="back-link" href="/admin/stickers"><ArrowLeft size={16} /> Back to Stickers</a>
+<a class="back-link" href="/admin/stickers"><ArrowLeft size={16} /> {m.admin_pack_back()}</a>
 <div class="page-header">
 	<h1>{heading}</h1>
 	{#if intro}
@@ -271,39 +272,39 @@
 			// On success the action redirects, which enhance follows; only failures stay here.
 			await update({ reset: false });
 			saving = false;
-			if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? 'Could not save pack');
-			else if (result.type === 'error') toast.error('Something went wrong');
+			if (result.type === 'failure') toast.error((result.data as { error?: string })?.error ?? m.admin_pack_save_failed());
+			else if (result.type === 'error') toast.error(m.admin_something_wrong());
 		};
 	}}
 >
 	<section class="section">
-		<h2>Pack details</h2>
+		<h2>{m.admin_pack_details()}</h2>
 		<div class="fields">
 			<label>
-				<span>Pack name</span>
-				<input type="text" class="input" name="name" value={pack?.name ?? ''} required placeholder="My sticker pack" />
+				<span>{m.admin_pack_name()}</span>
+				<input type="text" class="input" name="name" value={pack?.name ?? ''} required placeholder={m.admin_pack_name_placeholder()} />
 			</label>
 			<label>
-				<span>Manager (leave blank = {ownerName})</span>
+				<span>{m.admin_pack_manager({ ownerName })}</span>
 				<div class="select-with-action">
 					<select class="input" name="managerArtistId" bind:value={managerArtistId}>
-						<option value="">Myself ({ownerName})</option>
+						<option value="">{m.admin_pack_manager_self({ ownerName })}</option>
 						{#each artistList as a}
 							<option value={String(a.id)}>{a.name}</option>
 						{/each}
 					</select>
-					<button type="button" class="new-artist-btn" onclick={() => openNewArtist('manager')}><UserPlus size={13} /> New manager</button>
+					<button type="button" class="new-artist-btn" onclick={() => openNewArtist('manager')}><UserPlus size={13} /> {m.admin_pack_new_manager()}</button>
 				</div>
 				{#if managerArtistId}
-					<small class="manager-hint">Single-artist pack — every sticker is credited to {managerName}.</small>
+					<small class="manager-hint">{m.admin_pack_manager_hint({ managerName })}</small>
 				{/if}
 			</label>
 			<label>
-				<span>Description (optional)</span>
-				<textarea class="input" name="description" rows="3" placeholder="A short description of this pack…">{pack?.description ?? ''}</textarea>
+				<span>{m.admin_pack_description()}</span>
+				<textarea class="input" name="description" rows="3" placeholder={m.admin_pack_description_placeholder()}>{pack?.description ?? ''}</textarea>
 			</label>
 			<label>
-				<span>Telegram link (optional)</span>
+				<span>{m.admin_pack_telegram_link()}</span>
 				<input type="text" class="input" name="telegramUrl" value={pack?.telegramUrl ?? ''} placeholder="https://t.me/addstickers/…" />
 			</label>
 			<div class="pub-row">
@@ -316,35 +317,35 @@
 					<span class="switch-visual"></span>
 				</label>
 				<div class="pub-text">
-					<strong>Publish to public section</strong>
-					<span>{published ? 'On — visible publicly' : 'Off — saved as draft'}</span>
+					<strong>{m.admin_pack_publish()}</strong>
+					<span>{published ? m.admin_pack_publish_on() : m.admin_pack_publish_off()}</span>
 				</div>
 			</div>
 		</div>
 	</section>
 
 	<section class="section">
-		<h2>Default artist</h2>
+		<h2>{m.admin_pack_default_artist()}</h2>
 		<div class="select-with-action">
 			<select class="input" name="defaultArtistId" bind:value={defaultArtistId}>
-				<option value="">Select artist…</option>
+				<option value="">{m.admin_upload_select_artist()}</option>
 				{#each artistList as a}
 					<option value={String(a.id)}>{a.name}</option>
 				{/each}
 			</select>
-			<button type="button" class="new-artist-btn" onclick={() => openNewArtist('default')}><UserPlus size={13} /> New artist</button>
+			<button type="button" class="new-artist-btn" onclick={() => openNewArtist('default')}><UserPlus size={13} /> {m.admin_pack_new_artist()}</button>
 		</div>
 	</section>
 
 	<section class="section">
-		<h2>Stickers{isEdit ? ` (${stickerEntries.length})` : ''}</h2>
+		<h2>{m.admin_nav_stickers()}{isEdit ? ` (${stickerEntries.length})` : ''}</h2>
 		{#if isEdit}
-			<p class="hint">Note: saving replaces all sticker rows. Drag the handle to reorder; order is saved top-to-bottom.</p>
+			<p class="hint">{m.admin_pack_edit_hint()}</p>
 		{/if}
 
 		<label class="upload-zone multi">
 			<Plus size={20} />
-			<span>{uploading ? 'Uploading…' : 'Drag & drop PNGs or WebP here, or click to browse'}</span>
+			<span>{uploading ? m.admin_upload_uploading() : m.admin_pack_dropzone()}</span>
 			<input type="file" accept="image/png,image/webp" multiple onchange={uploadStickers} disabled={uploading} style="display:none" />
 		</label>
 
@@ -353,28 +354,28 @@
 			     the artist or NSFW for the whole selection at once. -->
 			<div class="bulk-bar" class:active={selected.size > 0}>
 				{#if selected.size === 0}
-					<span class="bulk-hint">Tip: click a sticker to select (shift-click for a range), then bulk-set the artist or NSFW.</span>
-					<button type="button" class="link-btn" onclick={selectAll}>Select all {stickerEntries.length}</button>
+					<span class="bulk-hint">{m.admin_pack_bulk_tip()}</span>
+					<button type="button" class="link-btn" onclick={selectAll}>{m.admin_pack_select_all({ count: stickerEntries.length })}</button>
 				{:else}
-					<span class="bulk-count">{selected.size} selected</span>
+					<span class="bulk-count">{m.admin_pack_selected({ count: selected.size })}</span>
 					<div class="bulk-actions">
 						{#if managerArtistId}
-							<span class="bulk-managed">Artist locked to {managerName}</span>
+							<span class="bulk-managed">{m.admin_pack_artist_locked({ managerName })}</span>
 							<span class="bulk-div"></span>
 						{:else}
-							<select class="input sm" bind:value={bulkArtist} aria-label="Artist to apply">
-								<option value="">Set artist…</option>
+							<select class="input sm" bind:value={bulkArtist} aria-label={m.admin_pack_bulk_artist_aria()}>
+								<option value="">{m.admin_pack_set_artist()}</option>
 								{#each artistList as a}<option value={String(a.id)}>{a.name}</option>{/each}
 							</select>
-							<button type="button" class="btn-sm" disabled={!bulkArtist} onclick={() => applyArtistToSelected(bulkArtist)}>Apply</button>
-							<button type="button" class="btn-sm" onclick={() => applyArtistToSelected('')}>Unassign</button>
-							<button type="button" class="new-artist-btn" onclick={() => openNewArtist('bulk')}><UserPlus size={13} /> New artist</button>
+							<button type="button" class="btn-sm" disabled={!bulkArtist} onclick={() => applyArtistToSelected(bulkArtist)}>{m.admin_pack_apply()}</button>
+							<button type="button" class="btn-sm" onclick={() => applyArtistToSelected('')}>{m.admin_pack_unassign()}</button>
+							<button type="button" class="new-artist-btn" onclick={() => openNewArtist('bulk')}><UserPlus size={13} /> {m.admin_pack_new_artist()}</button>
 							<span class="bulk-div"></span>
 						{/if}
-						<button type="button" class="btn-sm" onclick={() => bulkSetNsfw(true)}>NSFW on</button>
-						<button type="button" class="btn-sm" onclick={() => bulkSetNsfw(false)}>NSFW off</button>
+						<button type="button" class="btn-sm" onclick={() => bulkSetNsfw(true)}>{m.admin_pack_nsfw_on()}</button>
+						<button type="button" class="btn-sm" onclick={() => bulkSetNsfw(false)}>{m.admin_pack_nsfw_off()}</button>
 					</div>
-					<button type="button" class="link-btn" onclick={clearSelection}>Clear</button>
+					<button type="button" class="link-btn" onclick={clearSelection}>{m.admin_pack_clear()}</button>
 				{/if}
 			</div>
 
@@ -396,8 +397,8 @@
 						<button
 							type="button"
 							class="drag-handle"
-							aria-label="Drag to reorder"
-							title="Drag to reorder"
+							aria-label={m.admin_pack_drag_reorder()}
+							title={m.admin_pack_drag_reorder()}
 							onpointerdown={(e) => onHandlePointerDown(i, e)}
 							onpointermove={onHandlePointerMove}
 							onpointerup={onHandlePointerUp}
@@ -411,30 +412,30 @@
 							role="button"
 							tabindex="0"
 							aria-pressed={isSel}
-							title="Click to select (shift-click for a range)"
+							title={m.admin_pack_click_select()}
 							onclick={(e) => toggleSelect(i, e)}
 							onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSelect(i, e); } }}
 						>
 							<span class="select-check" class:on={isSel}><Check size={12} /></span>
-							<StickerMedia format={sticker.format as 'png' | 'webp' | 'animated' | 'video'} imageUrl={sticker.imageUrl} alt="Sticker {i + 1}" width={112} />
+							<StickerMedia format={sticker.format as 'png' | 'webp' | 'animated' | 'video'} imageUrl={sticker.imageUrl} alt={m.admin_pack_sticker_alt({ n: i + 1 })} width={112} />
 						</div>
 						<div class="sticker-fields">
 							<input type="hidden" name="sticker[{i}][imageUrl]" value={sticker.imageUrl} />
 							<input type="hidden" name="sticker[{i}][format]" value={sticker.format} />
 							<label>
-								<span>Emoji</span>
+								<span>{m.stickers_emojis_label()}</span>
 								<input type="text" class="input sm" name="sticker[{i}][emojis]" bind:value={sticker.emojis} placeholder="😀,🔥" />
 							</label>
 							{#if managerArtistId}
 								<label>
-									<span>Artist</span>
+									<span>{m.admin_field_artist()}</span>
 									<span class="locked-artist">{managerName}</span>
 								</label>
 							{:else}
 								<label>
-									<span>Artist</span>
+									<span>{m.admin_field_artist()}</span>
 									<select class="input sm" name="sticker[{i}][artistId]" bind:value={sticker.artistId}>
-										<option value="">Default artist</option>
+										<option value="">{m.admin_pack_default_artist()}</option>
 										{#each artistList as a}
 											<option value={String(a.id)}>{a.name}</option>
 										{/each}
@@ -448,7 +449,7 @@
 								<input type="checkbox" name="sticker[{i}][nsfw]" value="1" bind:checked={sticker.nsfw} />
 								NSFW
 							</label>
-							<button type="button" class="remove-btn" onclick={() => removeSticker(i)} aria-label="Remove sticker">
+							<button type="button" class="remove-btn" onclick={() => removeSticker(i)} aria-label={m.admin_pack_remove_sticker()}>
 								<X size={16} />
 							</button>
 						</div>
@@ -456,16 +457,16 @@
 				{/each}
 			</div>
 		{:else}
-			<p class="muted">No stickers added yet. Upload PNG or WebP files above.</p>
+			<p class="muted">{m.admin_pack_no_stickers()}</p>
 		{/if}
 	</section>
 
 	<div class="save-bar">
-		<span class="save-note">Self-hosted · {stickerEntries.length} sticker{stickerEntries.length === 1 ? '' : 's'}</span>
+		<span class="save-note">{m.stickers_source_self_hosted()} · {m.admin_count_stickers({ count: stickerEntries.length })}</span>
 		<div class="save-actions">
-			<a href="/admin/stickers" class="btn btn-outline">Cancel</a>
+			<a href="/admin/stickers" class="btn btn-outline">{m.admin_cancel()}</a>
 			<button type="submit" class="btn btn-primary" disabled={saving}>
-				{#if saving}<Loader2 size={16} class="spin" /> Saving…{:else}<Check size={16} /> {submitLabel}{/if}
+				{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}<Check size={16} /> {submitLabel}{/if}
 			</button>
 		</div>
 	</div>

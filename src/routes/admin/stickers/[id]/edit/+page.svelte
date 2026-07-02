@@ -1,12 +1,13 @@
 <script lang="ts">
 	import StickerPackForm from '$lib/components/StickerPackForm.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 </script>
 
 <StickerPackForm
-	heading="Edit pack: {data.pack.name}"
-	submitLabel="Save changes"
+	heading={m.admin_pack_edit_heading({ name: data.pack.name })}
+	submitLabel={m.admin_save_changes()}
 	artists={data.artists}
 	pack={{
 		name: data.pack.name,

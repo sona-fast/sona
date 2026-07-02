@@ -6,10 +6,11 @@
 	import { Smile, Loader2, CheckCircle2, AlertTriangle, Film, ArrowLeft, ArrowRight, Download, RefreshCw, Check, Plus, UserPlus, Info, Shield, Palette } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
-	const ownerName = $derived(data.ownerName || data.siteName || 'the site owner');
+	const ownerName = $derived(data.ownerName || data.siteName || m.admin_stickers_site_owner());
 
 	let packInput = $state(data.nameOrUrl);
 	let managerArtistId = $state<number | ''>(''); // '' = "myself" (the site owner)
@@ -97,7 +98,7 @@
 	// reactive updates by only toasting when the value transitions into an error.
 	let lastReachError = false;
 	$effect(() => {
-		if (data.reachError && !lastReachError) toast.error("Couldn't reach Telegram or pack not found");
+		if (data.reachError && !lastReachError) toast.error(m.admin_import_reach_toast());
 		lastReachError = data.reachError;
 	});
 	let lastFormError: string | undefined;
@@ -250,16 +251,16 @@
 
 			result = { imported, updated, skipped, failed: failedItems.length, items: failedItems };
 			if (failedItems.length === 0) {
-				const parts = [`Imported ${imported}`];
-				if (updated) parts.push(`updated ${updated}`);
+				const parts = [m.admin_import_toast_imported({ count: imported })];
+				if (updated) parts.push(m.admin_import_toast_updated({ count: updated }));
 				toast.success(parts.join(' · '));
 			} else {
-				toast.error(`${failedItems.length} sticker${failedItems.length === 1 ? '' : 's'} failed to import`);
+				toast.error(m.admin_import_toast_failed({ count: failedItems.length }));
 			}
 		} catch (e) {
 			// Hard/network error mid-loop: surface it and stop. Already-stored batches
 			// persist; show the partial result so the admin can see what got in + retry.
-			toast.error(e instanceof Error ? e.message : 'Import failed');
+			toast.error(e instanceof Error ? e.message : m.admin_import_failed());
 			if (imported > 0 || updated > 0 || skipped > 0 || failedItems.length > 0) {
 				result = { imported, updated, skipped, failed: failedItems.length, items: failedItems };
 			}
@@ -269,45 +270,45 @@
 	}
 </script>
 
-<a class="back-link" href="/admin/stickers"><ArrowLeft size={16} /> Back to Stickers</a>
+<a class="back-link" href="/admin/stickers"><ArrowLeft size={16} /> {m.admin_pack_back()}</a>
 
 <div class="page-header">
-	<h1>{showReview ? `${isResync ? 'Re-sync' : 'Review import'} — ${data.setTitle}` : 'Import from Telegram'}</h1>
+	<h1>{showReview ? `${isResync ? m.admin_import_resync() : m.admin_import_review()} — ${data.setTitle}` : m.admin_stickers_import_telegram()}</h1>
 	<p class="subtitle">
 		{#if showReview}
 			{#if isResync}
-				{alreadyCount} already imported · {newCount} new. Edit emoji, artist or NSFW on any sticker — existing ones update in place (no re-download) — exclude new ones you don't want, then re-sync.
+				{m.admin_import_resync_sub({ already: alreadyCount, newCount })}
 			{:else}
-				{data.candidates.length} stickers fetched. Tweak emoji, override the artist per sticker, exclude or mark NSFW, then confirm.
+				{m.admin_import_review_sub({ count: data.candidates.length })}
 			{/if}
 		{:else}
-			Paste a pack link and we'll fetch every sticker and its emoji.
+			{m.admin_import_intro()}
 		{/if}
 	</p>
 </div>
 
 {#if !data.telegramEnabled}
-	<div class="banner warn"><AlertTriangle size={18} /> Telegram import is disabled. Set <code>TELEGRAM_BOT_TOKEN</code> to enable it.</div>
+	<div class="banner warn"><AlertTriangle size={18} /> {m.admin_import_disabled_pre()}<code>TELEGRAM_BOT_TOKEN</code>{m.admin_import_disabled_post()}</div>
 {:else if result}
 	{@const r = result}
 	<div class="alert ok">
 		<CheckCircle2 size={18} />
 		<div>
-			<strong>Imported {r.imported} sticker{r.imported === 1 ? '' : 's'}{r.updated ? ` · ${r.updated} updated` : ''}{r.skipped ? ` · ${r.skipped} skipped` : ''}{r.failed ? ` · ${r.failed} failed` : ''}</strong>
-			<p>Hosted on your own storage. Each sticker was credited to its artist.</p>
+			<strong>{m.admin_import_result_main({ count: r.imported })}{r.updated ? m.admin_import_result_updated({ count: r.updated }) : ''}{r.skipped ? m.admin_import_result_skipped({ count: r.skipped }) : ''}{r.failed ? m.admin_import_result_failed({ count: r.failed }) : ''}</strong>
+			<p>{m.admin_import_result_note()}</p>
 		</div>
 	</div>
 	<div class="summary">
-		<div class="stat"><span class="stat-label">Stickers imported</span><span class="stat-val">{r.imported}</span></div>
-		<div class="stat"><span class="stat-label">Updated</span><span class="stat-val">{r.updated}</span></div>
-		<div class="stat"><span class="stat-label">Skipped</span><span class="stat-val">{r.skipped}</span></div>
-		<div class="stat"><span class="stat-label">Failed</span><span class="stat-val">{r.failed}</span></div>
+		<div class="stat"><span class="stat-label">{m.admin_import_stat_imported()}</span><span class="stat-val">{r.imported}</span></div>
+		<div class="stat"><span class="stat-label">{m.admin_import_stat_updated()}</span><span class="stat-val">{r.updated}</span></div>
+		<div class="stat"><span class="stat-label">{m.admin_import_stat_skipped()}</span><span class="stat-val">{r.skipped}</span></div>
+		<div class="stat"><span class="stat-label">{m.admin_import_stat_failed()}</span><span class="stat-val">{r.failed}</span></div>
 	</div>
 			{#if r.failed > 0}
 			{@const failedItems = r.items.filter((it) => it.status === 'failed')}
 			<div class="failed-block">
-				<h3>Failed to import ({r.failed})</h3>
-				<p class="failed-hint">These weren't added. "Retry failed" re-fetches the pack — already-imported stickers are skipped and these are re-attempted into the same pack.</p>
+				<h3>{m.admin_import_failed_heading({ count: r.failed })}</h3>
+				<p class="failed-hint">{m.admin_import_failed_hint()}</p>
 				<div class="failed-grid">
 					{#each failedItems as it}
 						<div class="failed-card">
@@ -320,7 +321,7 @@
 							</div>
 							<div class="failed-meta">
 								<span class="failed-emoji">{it.emoji ?? '#' + (it.index + 1)}</span>
-								<span class="failed-error" title={it.error}>{it.error ?? 'Unknown error'}</span>
+								<span class="failed-error" title={it.error}>{it.error ?? m.admin_import_unknown_error()}</span>
 							</div>
 						</div>
 					{/each}
@@ -329,54 +330,54 @@
 		{/if}
 
 		<div class="actions">
-		<a class="btn btn-primary" href="/admin/stickers"><ArrowRight size={16} /> View in section</a>
+		<a class="btn btn-primary" href="/admin/stickers"><ArrowRight size={16} /> {m.admin_import_view_section()}</a>
 			{#if r.failed > 0 && data.nameOrUrl}
-				<button class="btn btn-outline" onclick={() => goto(`/admin/stickers/import?pack=${encodeURIComponent(data.nameOrUrl)}&check=1`)}><RefreshCw size={16} /> Retry failed ({r.failed})</button>
+				<button class="btn btn-outline" onclick={() => goto(`/admin/stickers/import?pack=${encodeURIComponent(data.nameOrUrl)}&check=1`)}><RefreshCw size={16} /> {m.admin_import_retry_failed({ count: r.failed })}</button>
 			{/if}
-		<button class="btn btn-outline" onclick={() => goto('/admin/stickers/import')}><Plus size={16} /> Import another</button>
+		<button class="btn btn-outline" onclick={() => goto('/admin/stickers/import')}><Plus size={16} /> {m.admin_import_another()}</button>
 	</div>
 {:else}
 	{#if data.reachError}
 		<div class="alert err">
 			<AlertTriangle size={18} />
 			<div>
-				<strong>Couldn't reach Telegram</strong>
-				<p>Pack "{data.nameOrUrl}" was not found, or the Bot API is unreachable. Nothing was imported — check the link and try again.</p>
+				<strong>{m.admin_import_reach_title()}</strong>
+				<p>{m.admin_import_reach_body({ pack: data.nameOrUrl })}</p>
 			</div>
 		</div>
 	{/if}
 
 	{#if showReview}
 		<div class="ctx">
-			<span class="ctx-chip"><Shield size={13} /> {managerArtistId === '' ? 'managed by you' : `managed by ${managerName}`}</span>
+			<span class="ctx-chip"><Shield size={13} /> {managerArtistId === '' ? m.admin_import_managed_by_you() : m.admin_import_managed_by({ name: managerName })}</span>
 			{#if defaultArtistDisplay}
-				<span class="ctx-chip"><Palette size={13} /> default artist: {defaultArtistDisplay}</span>
+				<span class="ctx-chip"><Palette size={13} /> {m.admin_import_default_artist_chip({ name: defaultArtistDisplay })}</span>
 			{/if}
-			<button type="button" class="ctx-new-artist" onclick={() => openNewArtist('pool')}><UserPlus size={13} /> New artist</button>
+			<button type="button" class="ctx-new-artist" onclick={() => openNewArtist('pool')}><UserPlus size={13} /> {m.admin_pack_new_artist()}</button>
 		</div>
 
 		<!-- Bulk-label bar: select stickers (click / shift-click range / Select all),
 		     then assign an artist or toggle exclude/NSFW for the whole selection. -->
 		<div class="bulk-bar" class:active={selected.size > 0}>
 			{#if selected.size === 0}
-				<span class="bulk-hint">Tip: click stickers to select (shift-click for a range), then bulk-assign an artist.</span>
-				<button type="button" class="link-btn" onclick={selectAll}>Select all {data.candidates.length}</button>
+				<span class="bulk-hint">{m.admin_import_bulk_tip()}</span>
+				<button type="button" class="link-btn" onclick={selectAll}>{m.admin_pack_select_all({ count: data.candidates.length })}</button>
 			{:else}
-				<span class="bulk-count">{selected.size} selected</span>
+				<span class="bulk-count">{m.admin_pack_selected({ count: selected.size })}</span>
 				<div class="bulk-actions">
-					<select class="input sm" bind:value={bulkArtist} aria-label="Artist to apply">
-						<option value="">Set artist…</option>
+					<select class="input sm" bind:value={bulkArtist} aria-label={m.admin_pack_bulk_artist_aria()}>
+						<option value="">{m.admin_pack_set_artist()}</option>
 						{#each artists as a}<option value={String(a.id)}>{a.name}</option>{/each}
 					</select>
-					<button type="button" class="btn-sm" disabled={!bulkArtist} onclick={() => applyArtistToSelected(bulkArtist)}>Apply</button>
-					<button type="button" class="btn-sm" onclick={() => applyArtistToSelected('')}>Unassign</button>
-					<button type="button" class="btn-sm" onclick={() => openNewArtist('bulk')}><UserPlus size={13} /> New</button>
+					<button type="button" class="btn-sm" disabled={!bulkArtist} onclick={() => applyArtistToSelected(bulkArtist)}>{m.admin_pack_apply()}</button>
+					<button type="button" class="btn-sm" onclick={() => applyArtistToSelected('')}>{m.admin_pack_unassign()}</button>
+					<button type="button" class="btn-sm" onclick={() => openNewArtist('bulk')}><UserPlus size={13} /> {m.admin_import_new()}</button>
 					<span class="bulk-div"></span>
-					<button type="button" class="btn-sm" onclick={() => bulkSetExcluded(true)}>Exclude</button>
-					<button type="button" class="btn-sm" onclick={() => bulkSetExcluded(false)}>Include</button>
+					<button type="button" class="btn-sm" onclick={() => bulkSetExcluded(true)}>{m.admin_import_exclude()}</button>
+					<button type="button" class="btn-sm" onclick={() => bulkSetExcluded(false)}>{m.admin_import_include()}</button>
 					<button type="button" class="btn-sm" onclick={() => bulkSetNsfw(true)}>NSFW</button>
 				</div>
-				<button type="button" class="link-btn" onclick={clearSelection}>Clear</button>
+				<button type="button" class="link-btn" onclick={clearSelection}>{m.admin_pack_clear()}</button>
 			{/if}
 		</div>
 
@@ -392,7 +393,7 @@
 						role="button"
 						tabindex="0"
 						aria-pressed={isSel}
-						title="Click to select (shift-click for a range)"
+						title={m.admin_pack_click_select()}
 						onclick={(e) => toggleSelect(c.index, e)}
 						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSelect(c.index, e); } }}
 					>
@@ -400,7 +401,7 @@
 						{#if ps.nsfw}<span class="nsfw-badge">NSFW</span>{/if}
 						<!-- Previews stream through our token-auth proxy (no token in the client). -->
 						{#if c.format === 'animated'}
-							<div class="img-placeholder"><Film size={28} /><span class="anim-label">animated</span></div>
+							<div class="img-placeholder"><Film size={28} /><span class="anim-label">{m.admin_import_animated()}</span></div>
 						{:else if c.format === 'video'}
 							<video
 								src="/admin/stickers/import/preview?fileId={encodeURIComponent(c.fileId)}"
@@ -425,12 +426,12 @@
 							<input
 								class="input emoji-input"
 								bind:value={ps.emojis}
-								placeholder="emoji (comma-separated)"
+								placeholder={m.admin_import_emoji_placeholder()}
 								disabled={ps.excluded}
 							/>
 						</div>
 						<select class="input sm artist-select" bind:value={ps.artistId} disabled={ps.excluded}>
-							<option value="">Unassigned</option>
+							<option value="">{m.admin_import_unassigned()}</option>
 							{#each artists as a}
 								<option value={String(a.id)}>{a.name}</option>
 							{/each}
@@ -439,7 +440,7 @@
 							<div class="toggle-row">
 								<label class="check-label">
 									<input type="checkbox" bind:checked={ps.excluded} />
-									Exclude
+									{m.admin_import_exclude()}
 								</label>
 								<label class="check-label">
 									<input type="checkbox" bind:checked={ps.nsfw} disabled={ps.excluded} />
@@ -448,7 +449,7 @@
 							</div>
 							<div class="badge-row">
 								<span class="fmt-chip">{c.format}</span>
-								{#if c.alreadyImported}<span class="status-chip imported">imported</span>{/if}
+								{#if c.alreadyImported}<span class="status-chip imported">{m.admin_import_chip_imported()}</span>{/if}
 							</div>
 						</div>
 					</div>
@@ -458,20 +459,20 @@
 
 		<div class="action-bar">
 			<div class="action-summary">
-				<strong>{eligibleCount} of {data.candidates.length} selected · {artistsCount} artist{artistsCount === 1 ? '' : 's'} · {nsfwCount} NSFW</strong>
+				<strong>{m.admin_import_summary({ eligible: eligibleCount, total: data.candidates.length, artists: artistsCount, nsfw: nsfwCount })}</strong>
 				{#if unattributedCount > 0}
-					<span>{unattributedCount} will import unattributed — assign artists now or later in the pack editor. Images hosted on your own storage.</span>
+					<span>{m.admin_import_unattributed_note({ count: unattributedCount })}</span>
 				{:else}
-					<span>Images will be downloaded and hosted on your own storage, crediting each artist.</span>
+					<span>{m.admin_import_hosted_note()}</span>
 				{/if}
 			</div>
 			<div class="action-btns">
-				<a class="btn btn-outline" href="/admin/stickers">Cancel</a>
+				<a class="btn btn-outline" href="/admin/stickers">{m.admin_cancel()}</a>
 				<button class="btn btn-primary" onclick={() => (showConfirm = true)} disabled={eligibleCount === 0 || importing}>
 					{#if importing}
-						<Loader2 size={16} class="spin" /> Importing… {progress.done} / {progress.total}
+						<Loader2 size={16} class="spin" /> {m.admin_fursuit_importing()} {progress.done} / {progress.total}
 					{:else}
-						<Check size={16} /> {isResync ? 'Re-sync' : 'Import'} {eligibleCount} sticker{eligibleCount === 1 ? '' : 's'}
+						<Check size={16} /> {isResync ? m.admin_import_resync_count({ count: eligibleCount }) : m.admin_import_import_count({ count: eligibleCount })}
 					{/if}
 				</button>
 			</div>
@@ -484,12 +485,12 @@
 		{/if}
 	{:else}
 		{#if data.checked && !data.reachError && data.candidates.length === 0}
-			<div class="empty"><Smile size={36} /><p>No stickers found in "{data.nameOrUrl}".</p></div>
+			<div class="empty"><Smile size={36} /><p>{m.admin_import_none_found({ pack: data.nameOrUrl })}</p></div>
 		{/if}
 
 		<div class="form-card">
 			<div class="field">
-				<label for="pack-input">Telegram pack link</label>
+				<label for="pack-input">{m.admin_import_pack_link()}</label>
 				<input
 					id="pack-input"
 					class="input"
@@ -499,44 +500,44 @@
 				/>
 			</div>
 			<div class="field">
-				<label for="manager-select">Managed by</label>
+				<label for="manager-select">{m.admin_import_managed_label()}</label>
 				<select id="manager-select" class="input" bind:value={managerArtistId}>
-					<option value="">Myself ({ownerName})</option>
+					<option value="">{m.admin_pack_manager_self({ ownerName })}</option>
 					{#each artists as a}
 						<option value={a.id}>{a.name}</option>
 					{/each}
 				</select>
 			</div>
 			<div class="field">
-				<label for="default-artist">Pack-wide default artist</label>
+				<label for="default-artist">{m.admin_import_default_artist_label()}</label>
 				<div class="select-with-action">
 					<select id="default-artist" class="input" bind:value={defaultArtistId}>
-						<option value="">Select artist…</option>
+						<option value="">{m.admin_upload_select_artist()}</option>
 						{#each artists as a}
 							<option value={String(a.id)}>{a.name}</option>
 						{/each}
 					</select>
-					<button type="button" class="ctx-new-artist" onclick={() => openNewArtist('default')}><UserPlus size={13} /> New artist</button>
+					<button type="button" class="ctx-new-artist" onclick={() => openNewArtist('default')}><UserPlus size={13} /> {m.admin_pack_new_artist()}</button>
 				</div>
-				<p class="hint">Each sticker is credited to this artist by default — override any of them on the next step.</p>
+				<p class="hint">{m.admin_import_default_artist_hint()}</p>
 			</div>
 
 			<div class="note">
 				<Info size={18} />
 				<div>
-					<strong>Images are downloaded and self-hosted</strong>
-					<p>We fetch each sticker and its auto-detected emoji via the Telegram Bot API, then host them on your own storage — crediting the default artist (override per sticker on the next step).</p>
+					<strong>{m.admin_import_note_title()}</strong>
+					<p>{m.admin_import_note_body()}</p>
 				</div>
 			</div>
 
 			<div class="card-actions">
 				<button class="btn btn-primary" onclick={check} disabled={!packInput.trim() || checking}>
 					{#if checking}
-						<Loader2 size={16} class="spin" /> Fetching pack…
+						<Loader2 size={16} class="spin" /> {m.admin_import_fetching()}
 					{:else if data.reachError}
-						<RefreshCw size={16} /> Retry
+						<RefreshCw size={16} /> {m.admin_import_retry()}
 					{:else}
-						<Download size={16} /> Fetch pack
+						<Download size={16} /> {m.admin_import_fetch()}
 					{/if}
 				</button>
 			</div>
@@ -550,9 +551,9 @@
 
 {#if showConfirm}
 	<ConfirmDialog
-		title="Import sticker pack"
-		message={`Import ${eligibleCount} sticker${eligibleCount === 1 ? '' : 's'} from "${data.setTitle || data.nameOrUrl}" into the pack? Images will be downloaded and hosted on your own storage.`}
-		confirmLabel="Import"
+		title={m.admin_import_confirm_title()}
+		message={m.admin_import_confirm_message({ count: eligibleCount, pack: data.setTitle || data.nameOrUrl })}
+		confirmLabel={m.admin_import_confirm_label()}
 		oncancel={() => (showConfirm = false)}
 		onconfirm={() => {
 			showConfirm = false;
