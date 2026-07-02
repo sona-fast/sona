@@ -8,8 +8,11 @@
 	let { data } = $props();
 
 	const siteName = data.settings?.siteName ?? APP_NAME;
-	const firstCover = data.collections.find((c) => c.coverImageUrl || c.previewImages.length > 0);
-	const metaImage = firstCover?.coverImageUrl || firstCover?.previewImages[0] || null;
+	const firstCover = data.collections.find(
+		(c) => c.coverImageUrl || c.previewImages.some((p) => !p.nsfw)
+	);
+	const metaImage =
+		firstCover?.coverImageUrl || firstCover?.previewImages.find((p) => !p.nsfw)?.url || null;
 </script>
 
 <Meta
@@ -37,7 +40,14 @@
 						     3=two-up + wide, 4=2×2. Cover-fit to match the single-cover look. -->
 						<div class="mosaic" data-count={Math.min(collection.previewImages.length, 4)}>
 							{#each collection.previewImages.slice(0, 4) as image}
-								<img src={cdnImage(image, 400)} alt="" loading="lazy" />
+								<div class="mosaic-tile">
+									<!-- Only reached when the collection has no SFW images at all: blur +
+									     label, the same masking ArtworkCard uses inside the collection. -->
+									<img src={cdnImage(image.url, 400)} alt="" loading="lazy" class:blurred={image.nsfw} />
+									{#if image.nsfw}
+										<span class="nsfw-overlay">NSFW</span>
+									{/if}
+								</div>
 							{/each}
 						</div>
 					{/if}
@@ -119,13 +129,32 @@
 	}
 
 	/* 3 tiles: two side by side on top, the third spanning the full bottom row */
-	.mosaic[data-count='3'] img:nth-child(3) {
+	.mosaic[data-count='3'] .mosaic-tile:nth-child(3) {
 		grid-column: span 2;
 	}
 
-	.mosaic img {
+	.mosaic-tile {
+		position: relative;
 		min-width: 0;
 		min-height: 0;
+		overflow: hidden;
+	}
+
+	/* NSFW fallback masking — same treatment as ArtworkCard inside the collection */
+	.mosaic-tile img.blurred {
+		filter: blur(24px);
+	}
+
+	.nsfw-overlay {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.5);
+		color: white;
+		font-size: 12px;
+		font-weight: 600;
 	}
 
 	.collection-info {
