@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { Home, LayoutGrid, Smile, User, Sun, Moon } from 'lucide-svelte';
+	import { Home, LayoutGrid, Sticker, User, Sun, Moon } from 'lucide-svelte';
 	import { getTheme } from '$lib/theme.svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -9,7 +9,7 @@
 	const tabs = [
 		{ href: '/', label: m.nav_home, icon: Home },
 		{ href: '/gallery', label: m.nav_gallery, icon: LayoutGrid },
-		{ href: '/stickers', label: m.nav_stickers, icon: Smile },
+		{ href: '/stickers', label: m.nav_stickers, icon: Sticker },
 		{ href: '/about', label: m.nav_about, icon: User }
 	];
 
