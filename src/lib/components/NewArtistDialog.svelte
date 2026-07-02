@@ -13,8 +13,10 @@
 	interface Props {
 		oncreated: (artist: { id: number; name: string }) => void;
 		oncancel: () => void;
+		/** Dialog heading — e.g. "New Manager" when the created artist will manage a pack. */
+		title?: string;
 	}
-	let { oncreated, oncancel }: Props = $props();
+	let { oncreated, oncancel, title = 'New Artist' }: Props = $props();
 
 	// Mirrors the Edit Artist modal on /admin/artists, but creates via the
 	// /api/artists endpoint (AJAX) so the caller gets the new id back immediately
@@ -136,9 +138,9 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="modal-backdrop" onclick={oncancel} onkeydown={(e) => { if (e.key === 'Escape') oncancel(); }}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal" role="dialog" aria-modal="true" aria-label="New artist" onclick={(e) => e.stopPropagation()}>
+	<div class="modal" role="dialog" aria-modal="true" aria-label={title} onclick={(e) => e.stopPropagation()}>
 		<div class="modal-header">
-			<h2>New Artist</h2>
+			<h2>{title}</h2>
 			<button class="icon-btn" onclick={oncancel} aria-label="Close"><X size={18} /></button>
 		</div>
 

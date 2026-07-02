@@ -297,7 +297,7 @@
 							<option value={String(a.id)}>{a.name}</option>
 						{/each}
 					</select>
-					<button type="button" class="new-artist-btn" onclick={() => openNewArtist('manager')}><UserPlus size={13} /> New artist</button>
+					<button type="button" class="new-artist-btn" onclick={() => openNewArtist('manager')}><UserPlus size={13} /> New manager</button>
 				</div>
 				{#if managerArtistId}
 					<small class="manager-hint">Single-artist pack — every sticker is credited to {managerName}.</small>
@@ -479,7 +479,11 @@
 </form>
 
 {#if showNewArtist}
-	<NewArtistDialog oncreated={onArtistCreated} oncancel={() => (showNewArtist = false)} />
+	<NewArtistDialog
+		title={newArtistTarget === 'manager' ? 'New Manager' : 'New Artist'}
+		oncreated={onArtistCreated}
+		oncancel={() => (showNewArtist = false)}
+	/>
 {/if}
 
 <style>
