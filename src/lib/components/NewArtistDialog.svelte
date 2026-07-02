@@ -19,8 +19,15 @@
 		/** Called after a successful "Import all" (bulk catalog import) so the
 		 * caller can refresh its artist list. Optional — a toast is shown anyway. */
 		onimportedall?: () => void;
+		/** Whether the shared registry is connected — passed from page load so the
+		 *  registry search UI is decided BEFORE the modal renders (no flash-then-hide). */
+		registryEnabled?: boolean;
 	}
-	let { oncreated, oncancel, title = m.admin_new_artist_title(), onimportedall }: Props = $props();
+	let { oncreated, oncancel, title = m.admin_new_artist_title(), onimportedall, registryEnabled = false }: Props = $props();
+
+	function initials(n: string): string {
+		return n.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2);
+	}
 
 	// Mirrors the Edit Artist modal on /admin/artists, but creates via the
 	// /api/artists endpoint (AJAX) so the caller gets the new id back immediately
@@ -44,7 +51,6 @@
 		version: number;
 		socials: Record<string, string>;
 	};
-	let registryEnabled = $state<boolean | null>(null);
 	let registryQuery = $state('');
 	let registryResults = $state<RegResult[]>([]);
 	let registrySearching = $state(false);
@@ -63,23 +69,19 @@
 	let keepUpdated = $state(true);
 	let importingAll = $state(false);
 
+	// registryEnabled arrives as a prop (resolved in the admin layout load), so the
+	// search box's presence is decided before render. When on, fetch the catalog
+	// import plan for the footer + "Import all" flow.
 	onMount(async () => {
+		if (!registryEnabled) return;
 		try {
-			const res = await fetch('/api/registry/search?q=');
-			if (res.ok) registryEnabled = (await res.json()).enabled ?? false;
-		} catch {
-			registryEnabled = false;
-		}
-		if (registryEnabled) {
-			try {
-				const res = await fetch('/api/registry/import');
-				const data = res.ok ? await res.json() : null;
-				if (data?.enabled) {
-					importPlan = { total: data.total, toCreate: data.toCreate, skipped: data.skipped };
-				}
-			} catch {
-				/* footer just stays hidden */
+			const res = await fetch('/api/registry/import');
+			const data = res.ok ? await res.json() : null;
+			if (data?.enabled) {
+				importPlan = { total: data.total, toCreate: data.toCreate, skipped: data.skipped };
 			}
+		} catch {
+			/* footer just stays hidden */
 		}
 	});
 
@@ -132,7 +134,6 @@
 			const res = await fetch('/api/registry/search?q=' + encodeURIComponent(registryQuery.trim()));
 			if (res.ok) {
 				const data = await res.json();
-				registryEnabled = data.enabled ?? registryEnabled;
 				registryResults = data.artists ?? [];
 			}
 		} catch {
@@ -209,7 +210,7 @@
 		{#if errorMsg}<div class="err">{errorMsg}</div>{/if}
 
 		<div class="modal-form">
-			{#if registryEnabled !== false}
+			{#if registryEnabled}
 				<div class="registry-search">
 					<span class="reg-label">{m.admin_new_artist_registry_label()} <em>{m.admin_new_artist_registry_hint()}</em></span>
 					<div class="reg-input">
@@ -229,11 +230,13 @@
 								{@const handle = resultHandle(r)}
 								<li>
 									<button type="button" onclick={() => applyResult(r)}>
-										{#if r.avatarUrl}
-											<img src={r.avatarUrl} alt="" />
-										{:else}
-											<span class="reg-monogram" aria-hidden="true">{r.name.charAt(0).toUpperCase()}</span>
-										{/if}
+										<span class="reg-avatar">
+											<span class="reg-initials" aria-hidden="true">{initials(r.name)}</span>
+											<!-- Overlays the monogram; if the registry has no avatar (or the
+											     URL fails to load) the initials show through instead of an
+											     empty circle. -->
+											{#if r.avatarUrl}<img src={r.avatarUrl} alt="" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />{/if}
+										</span>
 										<span class="reg-id">
 											<span class="reg-name">{r.name}</span>
 											{#if handle}<span class="reg-handle">{handle}</span>{/if}
@@ -348,15 +351,10 @@
 	.reg-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; }
 	.reg-results button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 6px 10px; cursor: pointer; color: var(--foreground); font-size: 14px; }
 	.reg-results button:hover { border-color: var(--primary); }
-	.reg-results img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
+	.reg-avatar { position: relative; flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; overflow: hidden; background: var(--secondary); }
+	.reg-initials { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-primary); font-size: 9px; font-weight: 600; color: var(--muted-foreground); }
+	.reg-results img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 	.linked { color: var(--primary); font-size: 12px; }
-	.reg-monogram {
-		width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
-		display: inline-flex; align-items: center; justify-content: center;
-		background: var(--secondary); color: var(--muted-foreground);
-		font-size: 11px; font-weight: 600;
-	}
-	.reg-results img { flex-shrink: 0; }
 	.reg-id { display: flex; flex-direction: column; min-width: 0; }
 	.reg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.reg-handle { font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

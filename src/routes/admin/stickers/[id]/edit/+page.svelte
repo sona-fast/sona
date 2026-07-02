@@ -25,5 +25,6 @@
 		format: s.format
 	}))}
 	ownerName={data.ownerName || data.siteName}
+	registryEnabled={data.registryEnabled}
 	{form}
 />

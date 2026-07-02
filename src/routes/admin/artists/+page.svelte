@@ -326,6 +326,7 @@
 
 {#if showAdd}
 	<NewArtistDialog
+		registryEnabled={data.registryEnabled}
 		oncreated={async () => { showAdd = false; await invalidateAll(); }}
 		onimportedall={async () => { showAdd = false; await invalidateAll(); }}
 		oncancel={() => (showAdd = false)}

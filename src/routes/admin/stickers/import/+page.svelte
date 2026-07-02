@@ -571,7 +571,7 @@
 {/if}
 
 {#if showNewArtist}
-	<NewArtistDialog oncreated={onArtistCreated} oncancel={() => (showNewArtist = false)} />
+	<NewArtistDialog registryEnabled={data.registryEnabled} oncreated={onArtistCreated} oncancel={() => (showNewArtist = false)} />
 {/if}
 
 <style>
