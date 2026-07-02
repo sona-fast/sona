@@ -28,6 +28,8 @@
 	let savingStorage = $state(false);
 	let changingPassword = $state(false);
 
+	let activeTab = $state<'site' | 'connections' | 'storage' | 'account'>('site');
+
 	// Usage bar reflects the ACTIVE provider. R2 has no simple usage API, so we use
 	// the DB-tracked total (every image is on the active store) against the 10GB free tier.
 	const R2_FREE_LIMIT = 10 * 1024 * 1024 * 1024;
@@ -109,23 +111,32 @@
 	};
 </script>
 
-<form method="POST" action="?/save" use:enhance={() => {
+<div class="settings-tabs" data-active-tab={activeTab}>
+	<div class="settings-header">
+		<div class="page-header">
+			<h1>Settings</h1>
+			<button type="submit" form="form-save" class="btn btn-primary" disabled={saving}>
+				{saving ? 'Saving...' : 'Save Changes'}
+			</button>
+		</div>
+		<nav class="settings-tabnav">
+			<button type="button" class:active={activeTab === 'site'} onclick={() => (activeTab = 'site')}>Site</button>
+			<button type="button" class:active={activeTab === 'connections'} onclick={() => (activeTab = 'connections')}>Connections</button>
+			<button type="button" class:active={activeTab === 'storage'} onclick={() => (activeTab = 'storage')}>Storage</button>
+			<button type="button" class:active={activeTab === 'account'} onclick={() => (activeTab = 'account')}>Account</button>
+		</nav>
+	</div>
+
+	<div class="settings-panels">
+<form method="POST" action="?/save" id="form-save" class="contents" use:enhance={() => {
 	saving = true;
 	return async ({ result, update }) => {
 		await update();
 		saving = false;
 		if (result.type === 'success') toast.success('Settings saved');
 	};
-}} class="settings-page">
-	<div class="page-header">
-		<h1>Settings</h1>
-		<button type="submit" class="btn btn-primary" disabled={saving}>
-			{saving ? 'Saving...' : 'Save Changes'}
-		</button>
-	</div>
-
-	<div class="settings-form">
-		<section>
+}}>
+		<section data-tab="site">
 			<h2>Site Information</h2>
 			<label>
 				<span>Site Name</span>
@@ -145,7 +156,7 @@
 			</label>
 		</section>
 
-		<section>
+		<section data-tab="site">
 			<h2>Appearance</h2>
 			<label>
 				<span>Theme</span>
@@ -165,7 +176,7 @@
 			</label>
 		</section>
 
-		<section>
+		<section data-tab="site">
 			<h2>Your Social Links</h2>
 			<div class="social-grid">
 				<label>
@@ -191,7 +202,7 @@
 			</div>
 		</section>
 
-		<section>
+		<section data-tab="connections">
 			<h2>Telegram</h2>
 			<label class="checkbox-row">
 				<input type="checkbox" name="autoResyncEnabled" bind:checked={autoResyncEnabled} />
@@ -202,7 +213,7 @@
 			</label>
 		</section>
 
-		<section>
+		<section data-tab="connections">
 			<h2>Shared Artist Registry</h2>
 			{#if data.registryEnabled}
 				<p class="reg-status connected">Connected to the shared registry.</p>
@@ -221,7 +232,7 @@
 			</a>
 		</section>
 
-		<section>
+		<section data-tab="storage">
 			<h2>Storage</h2>
 			{#if activeUsage}
 				{@const pct = Math.min(100, (activeUsage.used / activeUsage.limit) * 100)}
@@ -262,18 +273,16 @@
 				</div>
 			</div>
 		</section>
-
-	</div>
 </form>
 
-<form method="POST" action="?/saveStorage" class="settings-form" use:enhance={() => {
+<form method="POST" action="?/saveStorage" class="contents" use:enhance={() => {
 	savingStorage = true;
 	return async ({ update }) => {
 		await update({ reset: false });
 		savingStorage = false;
 	};
 }}>
-	<section>
+	<section data-tab="storage">
 		<h2>Storage Provider</h2>
 		<p class="section-desc">
 			Where new images (gallery + fursuit photos) are uploaded and served. Your initial
@@ -323,7 +332,7 @@
 	</section>
 </form>
 
-<form method="POST" action="?/changePassword" class="settings-form" use:enhance={() => {
+<form method="POST" action="?/changePassword" class="contents" use:enhance={() => {
 	changingPassword = true;
 	return async ({ result, update }) => {
 		await update({ reset: result.type === 'success' });
@@ -332,7 +341,7 @@
 		else if (result.type === 'failure') toast.error((result.data?.error as string) ?? 'Could not change password');
 	};
 }}>
-	<section class="security-section">
+	<section class="security-section" data-tab="account">
 		<h2>Security</h2>
 		<label>
 			<span>Current password</span>
@@ -353,7 +362,7 @@
 </form>
 
 {#if data.registryEnabled}
-	<form method="POST" action="?/syncNow" class="settings-form" use:enhance={() => {
+	<form method="POST" action="?/syncNow" class="contents" use:enhance={() => {
 		syncing = true;
 		return async ({ result, update }) => {
 			await update();
@@ -362,7 +371,7 @@
 			else if (result.type === 'failure') toast.error((result.data?.error as string) ?? 'Sync failed');
 		};
 	}}>
-		<section>
+		<section data-tab="connections">
 			<h2>Registry Sync</h2>
 			<p class="reg-status">Pull artist updates from the shared registry now, and link any local artists already in it. (This also runs on a schedule via the sync cron.)</p>
 			<button type="submit" class="btn btn-secondary" disabled={syncing}>
@@ -372,7 +381,7 @@
 	</form>
 {/if}
 
-<section class="danger-zone">
+<section class="danger-zone" data-tab="account">
 	<h2>Danger Zone</h2>
 	<div class="danger-divider"></div>
 
@@ -429,6 +438,8 @@
 		</form>
 	</div>
 </section>
+	</div>
+</div>
 
 {#if confirmingAction}
 	<ConfirmDialog
@@ -446,15 +457,77 @@
 {/if}
 
 <style>
-	.settings-page {
+	.contents {
 		display: contents;
+	}
+
+	.settings-header {
+		max-width: 700px;
 	}
 
 	.page-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 32px;
+		margin-bottom: 16px;
+	}
+
+	.settings-tabnav {
+		display: flex;
+		border-bottom: 1px solid var(--border);
+		margin-bottom: 28px;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none;
+	}
+	.settings-tabnav::-webkit-scrollbar {
+		display: none;
+	}
+	.settings-tabnav button {
+		position: relative;
+		flex: none;
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 10px 4px;
+		margin-right: 14px;
+		font-family: var(--font-primary);
+		font-size: 14px;
+		font-weight: 500;
+		color: var(--muted-foreground);
+		white-space: nowrap;
+	}
+	.settings-tabnav button:hover {
+		color: var(--foreground);
+	}
+	.settings-tabnav button.active {
+		color: var(--foreground);
+	}
+	.settings-tabnav button.active::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 14px;
+		bottom: -1px;
+		height: 2px;
+		background: var(--primary);
+		border-radius: 2px;
+	}
+
+	.settings-panels {
+		display: flex;
+		flex-direction: column;
+		gap: 40px;
+		max-width: 700px;
+	}
+
+	/* Tabbed grouping: hide only the sections that don't belong to the active
+	   tab, so visible sections keep their own display (e.g. flex .danger-zone). */
+	.settings-tabs[data-active-tab='site'] [data-tab]:not([data-tab~='site']),
+	.settings-tabs[data-active-tab='connections'] [data-tab]:not([data-tab~='connections']),
+	.settings-tabs[data-active-tab='storage'] [data-tab]:not([data-tab~='storage']),
+	.settings-tabs[data-active-tab='account'] [data-tab]:not([data-tab~='account']) {
+		display: none;
 	}
 
 	h1 {
@@ -465,13 +538,6 @@
 		color: #4ade80;
 		font-size: 14px;
 		margin-bottom: 16px;
-	}
-
-	.settings-form {
-		display: flex;
-		flex-direction: column;
-		gap: 40px;
-		max-width: 700px;
 	}
 
 	.section-desc {
