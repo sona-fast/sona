@@ -318,9 +318,10 @@ function stickerWriteStatements(
 /**
  * The character a new pack belongs to. The site is for ONE character (the owner's
  * fursona), so this is implicit, never asked in the UI: prefer the configured
- * primaryCharacter by name, else the only/first character row. Throws if no
- * character exists yet (characterId is a NOT NULL fk). Revisit if the site ever
- * hosts multiple characters.
+ * primaryCharacter by name, else the only/first character row. If none exists
+ * yet, auto-creates one from the owner/persona name (characterId is a NOT NULL
+ * fk) so first-run import "just works". Revisit if the site ever hosts multiple
+ * characters.
  */
 export async function resolveSiteCharacterId(db: Database, settings: SiteSettings): Promise<number> {
 	if (settings.primaryCharacter) {
@@ -332,8 +333,13 @@ export async function resolveSiteCharacterId(db: Database, settings: SiteSetting
 		if (c) return c.id;
 	}
 	const first = await db.select({ id: characters.id }).from(characters).orderBy(asc(characters.id)).get();
-	if (!first) throw new Error('No character exists yet — add one on the Characters page first.');
-	return first.id;
+	if (first) return first.id;
+	// The site is for ONE character (the owner's fursona) and none exists yet.
+	// Auto-create it from the owner/persona name (falling back to the site name)
+	// instead of failing, so first-run import just works.
+	const name = (settings.ownerName || settings.siteName || 'Me').trim() || 'Me';
+	const created = await db.insert(characters).values({ name }).returning({ id: characters.id }).get();
+	return created.id;
 }
 
 /**
