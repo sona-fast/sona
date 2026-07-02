@@ -25,6 +25,9 @@ deployment, kept in-repo as the reference config under
 - **Sticker packs** — mirror Telegram sticker sets or upload your own; static,
   animated (.tgs→Lottie), and video stickers, with per-sticker artist credit and
   emoji search. *(Telegram import gated by `TELEGRAM_BOT_TOKEN`.)*
+- **Conventions** — track the cons you're attending (picked from the
+  [cons.fyi](https://cons.fyi) feed, synced from your Bluesky "going" labels, or
+  entered manually); upcoming ones show on the About page.
 - **Single-admin CMS** — a protected admin panel for all content management. No
   user accounts, no moderation tools — it's a personal site, not a platform.
 - **Themes + landing layouts** *(in progress)* — selectable visual themes and
@@ -113,6 +116,9 @@ Two tiers (see [`src/lib/config.ts`](src/lib/config.ts) and
 - **Sticker packs / stickers / sticker emojis** — a pack (Telegram-mirrored or
   self-hosted) of stickers; **per-sticker** artist attribution; emoji junction
   powers search. Pack shape (single- vs multi-artist) is derived, not stored.
+- **Conventions** — cons on your schedule: name, dates, location, URL, a
+  confirmed/maybe/considering status, and the cons.fyi event id when picked from
+  the feed (dedupes re-adds).
 
 Schema: [`src/lib/server/db/schema.ts`](src/lib/server/db/schema.ts); migrations
 in [`drizzle/`](drizzle).
@@ -125,7 +131,8 @@ Stickers (`/stickers`, `/stickers/[slug]`, `/stickers/[slug]/[id]`), About
 (`/about`).
 
 **Admin** (behind auth, shared sidebar): Upload, All Images, Collections, Tags,
-Artists, Characters, Fursuit Photos, Stickers (import / manual / edit), Settings.
+Artists, Characters, Fursuit Photos, Stickers (import / manual / edit),
+Conventions, Settings.
 
 ## Roadmap
 

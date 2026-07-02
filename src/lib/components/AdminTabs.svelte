@@ -10,6 +10,7 @@
 		{ href: '/admin/characters', label: 'Characters' },
 		{ href: '/admin/fursuit', label: 'Fursuit' },
 		{ href: '/admin/stickers', label: 'Stickers' },
+		{ href: '/admin/conventions', label: 'Conventions' },
 		{ href: '/admin/settings', label: 'Settings' }
 	];
 </script>

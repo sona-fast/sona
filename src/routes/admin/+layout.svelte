@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { enhance } from '$app/forms';
-	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Sun, Moon, Camera, Smile } from 'lucide-svelte';
+	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Sun, Moon, Camera, Smile, CalendarDays } from 'lucide-svelte';
 	import { getTheme } from '$lib/theme.svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import AdminTabs from '$lib/components/AdminTabs.svelte';
@@ -19,6 +19,7 @@
 		{ href: '/admin/fursuit', label: 'Fursuit Photos', icon: Camera },
 		{ href: '/admin/stickers', label: 'Stickers', icon: Smile },
 		{ href: '/admin/tags', label: 'Tags', icon: Tags },
+		{ href: '/admin/conventions', label: 'Conventions', icon: CalendarDays },
 		{ href: '/admin/settings', label: 'Settings', icon: Settings }
 	];
 
