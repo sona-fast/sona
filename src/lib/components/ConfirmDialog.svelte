@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { AlertTriangle } from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		title: string;
@@ -9,7 +10,7 @@
 		oncancel: () => void;
 	}
 
-	let { title, message, confirmLabel = 'Delete', onconfirm, oncancel }: Props = $props();
+	let { title, message, confirmLabel = m.admin_delete(), onconfirm, oncancel }: Props = $props();
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -22,7 +23,7 @@
 		<h2>{title}</h2>
 		<p>{message}</p>
 		<div class="dialog-actions">
-			<button class="btn btn-secondary" onclick={oncancel}>Cancel</button>
+			<button class="btn btn-secondary" onclick={oncancel}>{m.admin_cancel()}</button>
 			<button class="btn btn-destructive" onclick={onconfirm}>{confirmLabel}</button>
 		</div>
 	</div>

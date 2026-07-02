@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
@@ -7,7 +8,7 @@
 </script>
 
 <div class="page-header">
-	<h1>Edit Image</h1>
+	<h1>{m.admin_image_edit_title()}</h1>
 </div>
 
 {#if form?.error}
@@ -21,12 +22,12 @@
 
 	<form method="POST" use:enhance class="edit-form">
 		<label>
-			<span>Title</span>
+			<span>{m.admin_field_title()}</span>
 			<input type="text" class="input" name="title" value={data.image.title} required />
 		</label>
 
 		<fieldset class="artist-section">
-			<legend>Artist</legend>
+			<legend>{m.admin_field_artist()}</legend>
 			<div class="artist-toggle">
 				<button
 					type="button"
@@ -34,7 +35,7 @@
 					class:active={artistMode === 'existing'}
 					onclick={() => (artistMode = 'existing')}
 				>
-					Select Existing
+					{m.admin_upload_select_existing()}
 				</button>
 				<button
 					type="button"
@@ -42,15 +43,15 @@
 					class:active={artistMode === 'new'}
 					onclick={() => (artistMode = 'new')}
 				>
-					Add New Artist
+					{m.admin_upload_add_new_artist()}
 				</button>
 			</div>
 
 			{#if artistMode === 'existing'}
 				<label>
-					<span>Artist</span>
+					<span>{m.admin_field_artist()}</span>
 					<select class="input" name="artistId" required>
-						<option value="">Select artist...</option>
+						<option value="">{m.admin_upload_select_artist()}</option>
 						{#each data.artists as artist}
 							<option value={artist.id} selected={artist.id === data.image.artistId}>{artist.name}</option>
 						{/each}
@@ -59,13 +60,13 @@
 			{:else}
 				<input type="hidden" name="artistId" value="new" />
 				<label>
-					<span>Artist Name</span>
-					<input type="text" class="input" placeholder="Artist name..." name="artistName" required />
+					<span>{m.admin_field_artist_name()}</span>
+					<input type="text" class="input" placeholder={m.admin_upload_artist_name_placeholder()} name="artistName" required />
 				</label>
 				<div class="social-grid">
 					<label>
 						<span>Twitter/X</span>
-						<input type="text" class="input" placeholder="@handle or URL" name="twitter" />
+						<input type="text" class="input" placeholder={m.admin_social_handle_placeholder()} name="twitter" />
 					</label>
 					<label>
 						<span>Bluesky</span>
@@ -97,26 +98,26 @@
 
 		<div class="row">
 			<label class="flex-1">
-				<span>Collection</span>
+				<span>{m.admin_field_collection()}</span>
 				<select class="input" name="collectionId">
-					<option value="">No collection</option>
+					<option value="">{m.admin_upload_no_collection()}</option>
 					{#each data.collections as collection}
 						<option value={collection.id} selected={collection.id === data.image.collectionId}>{collection.name}</option>
 					{/each}
 				</select>
 			</label>
 			<label class="flex-1">
-				<span>Tags</span>
+				<span>{m.admin_field_tags()}</span>
 				<input type="text" class="input" name="tags" value={data.imageTags.join(', ')} />
 				{#if data.tags.length > 0}
-					<small class="hint">Existing: {data.tags.map((t) => t.name).join(', ')}</small>
+					<small class="hint">{m.admin_upload_existing_tags({ tags: data.tags.map((t) => t.name).join(', ') })}</small>
 				{/if}
 			</label>
 		</div>
 
 		{#if data.characters.length > 0}
 			<div class="field">
-				<span class="field-label">Featured Characters</span>
+				<span class="field-label">{m.gallery_featured_characters()}</span>
 				<div class="character-chips">
 					{#each data.characters as char}
 						<label class="chip">
@@ -137,28 +138,28 @@
 		{/if}
 
 		<label>
-			<span>Commissioned Date</span>
+			<span>{m.admin_field_commissioned_date()}</span>
 			<input type="date" class="input" name="commissionedAt" value={data.image.commissionedAt || ''} />
 		</label>
 
 		<label class="checkbox-label">
 			<input type="checkbox" name="nsfw" checked={data.image.nsfw} />
-			<span>Mark as NSFW</span>
+			<span>{m.admin_field_mark_nsfw()}</span>
 		</label>
 
 		<label class="checkbox-label">
 			<input type="checkbox" name="published" checked={!data.image.published} />
-			<span>Private <span class="checkbox-helper">(not shown in gallery)</span></span>
+			<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
 		</label>
 
 		<label>
-			<span>Source Post URL</span>
+			<span>{m.admin_field_source_url()}</span>
 			<input type="url" class="input" name="sourcePostUrl" value={data.image.sourcePostUrl || ''} />
 		</label>
 
 		<div class="form-actions">
-			<a href="/admin/images" class="btn btn-secondary">Cancel</a>
-			<button type="submit" class="btn btn-primary">Save Changes</button>
+			<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
+			<button type="submit" class="btn btn-primary">{m.admin_save_changes()}</button>
 		</div>
 	</form>
 </div>

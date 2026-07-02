@@ -4,7 +4,8 @@
 	import { page } from '$app/stores';
 	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { plural, formatDate, cdnImage } from '$lib';
+	import { formatDate, cdnImage } from '$lib';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
@@ -35,15 +36,15 @@
 
 <div class="page-header">
 	<div>
-		<h1>All Images <span class="count">{plural(data.total, 'item')}</span></h1>
+		<h1>{m.admin_nav_all_images()} <span class="count">{m.admin_count_items({ count: data.total })}</span></h1>
 	</div>
-	<a href="/admin/upload" class="btn btn-primary desktop-upload"><Upload size={16} /> Upload New</a>
+	<a href="/admin/upload" class="btn btn-primary desktop-upload"><Upload size={16} /> {m.admin_images_upload_new()}</a>
 </div>
 
 <div class="toolbar">
 	<div class="search-wrapper">
 		<Search size={16} class="search-icon" />
-		<input type="search" class="input search" placeholder="Search..." bind:value={search} />
+		<input type="search" class="input search" placeholder={m.admin_search_placeholder()} bind:value={search} />
 	</div>
 </div>
 
@@ -51,18 +52,18 @@
 	<table class="data-table">
 		<thead>
 			<tr>
-				<th class="col-thumb">Thumbnail</th>
-				<th>Title</th>
-				<th>Artist</th>
-				<th>Tags</th>
+				<th class="col-thumb">{m.admin_col_thumbnail()}</th>
+				<th>{m.admin_field_title()}</th>
+				<th>{m.admin_field_artist()}</th>
+				<th>{m.admin_field_tags()}</th>
 				<th class="sortable" onclick={() => toggleSort('commissioned')}>
-					Commissioned {#if data.sort === 'commissioned'}<span class="sort-arrow">{data.dir === 'asc' ? '↑' : '↓'}</span>{/if}
+					{m.admin_col_commissioned()} {#if data.sort === 'commissioned'}<span class="sort-arrow">{data.dir === 'asc' ? '↑' : '↓'}</span>{/if}
 				</th>
 				<th class="sortable" onclick={() => toggleSort('uploaded')}>
-					Uploaded {#if data.sort === 'uploaded'}<span class="sort-arrow">{data.dir === 'asc' ? '↑' : '↓'}</span>{/if}
+					{m.admin_col_uploaded()} {#if data.sort === 'uploaded'}<span class="sort-arrow">{data.dir === 'asc' ? '↑' : '↓'}</span>{/if}
 				</th>
-				<th class="col-status">Status</th>
-				<th class="col-actions">Actions</th>
+				<th class="col-status">{m.admin_col_status()}</th>
+				<th class="col-actions">{m.admin_col_actions()}</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -100,24 +101,24 @@
 								type="submit"
 								class="status-btn"
 								class:is-private={!image.published}
-								aria-label={image.published ? 'Make private' : 'Make public'}
-								title={image.published ? 'Public — click to hide' : 'Private — click to publish'}
+								aria-label={image.published ? m.admin_images_make_private() : m.admin_images_make_public()}
+								title={image.published ? m.admin_images_public_click_hide() : m.admin_images_private_click_publish()}
 							>
 								{#if image.published}
 									<Eye size={14} />
-									<span>Public</span>
+									<span>{m.admin_status_public()}</span>
 								{:else}
 									<EyeOff size={14} />
-									<span>Private</span>
+									<span>{m.admin_status_private()}</span>
 								{/if}
 							</button>
 						</form>
 					</td>
 					<td class="col-actions">
-						<a href="/admin/images/{image.id}/edit" class="icon-btn" aria-label="Edit image">
+						<a href="/admin/images/{image.id}/edit" class="icon-btn" aria-label={m.admin_images_edit_aria()}>
 							<Pencil size={16} />
 						</a>
-						<button class="icon-btn" aria-label="Delete image" onclick={() => (deleteTarget = { id: image.id, title: image.title })}>
+						<button class="icon-btn" aria-label={m.admin_images_delete_aria()} onclick={() => (deleteTarget = { id: image.id, title: image.title })}>
 							<Trash2 size={16} />
 						</button>
 					</td>
@@ -126,9 +127,9 @@
 				<tr>
 					<td colspan="8" class="empty">
 						{#if search}
-							No images matching "{search}"
+							{m.admin_images_no_match({ search })}
 						{:else}
-							No images uploaded yet.
+							{m.admin_images_empty()}
 						{/if}
 					</td>
 				</tr>
@@ -162,13 +163,13 @@
 					<span class="sfw-badge">SFW</span>
 				{/if}
 				{#if !image.published}
-					<span class="private-badge">Private</span>
+					<span class="private-badge">{m.admin_status_private()}</span>
 				{/if}
 			</div>
 			<div class="mobile-actions">
 				<form method="POST" action="?/togglePublished" use:enhance class="inline-form">
 					<input type="hidden" name="id" value={image.id} />
-					<button type="submit" class="icon-btn" aria-label={image.published ? 'Make private' : 'Make public'}>
+					<button type="submit" class="icon-btn" aria-label={image.published ? m.admin_images_make_private() : m.admin_images_make_public()}>
 						{#if image.published}<Eye size={16} />{:else}<EyeOff size={16} />{/if}
 					</button>
 				</form>
@@ -180,7 +181,7 @@
 			</div>
 		</div>
 	{:else}
-		<p class="empty">{search ? `No images matching "${search}"` : 'No images uploaded yet.'}</p>
+		<p class="empty">{search ? m.admin_images_no_match({ search }) : m.admin_images_empty()}</p>
 	{/each}
 </div>
 
@@ -191,11 +192,11 @@
 {#if data.totalPages > 1}
 	<nav class="pagination">
 		{#if data.page > 1}
-			<a href="?page={data.page - 1}&sort={data.sort}&dir={data.dir}" class="btn btn-secondary">Previous</a>
+			<a href="?page={data.page - 1}&sort={data.sort}&dir={data.dir}" class="btn btn-secondary">{m.gallery_previous()}</a>
 		{/if}
-		<span class="page-info">Page {data.page} of {data.totalPages}</span>
+		<span class="page-info">{m.admin_page_info({ page: data.page, total: data.totalPages })}</span>
 		{#if data.page < data.totalPages}
-			<a href="?page={data.page + 1}&sort={data.sort}&dir={data.dir}" class="btn btn-secondary">Next</a>
+			<a href="?page={data.page + 1}&sort={data.sort}&dir={data.dir}" class="btn btn-secondary">{m.gallery_next()}</a>
 		{/if}
 	</nav>
 {/if}
@@ -206,8 +207,8 @@
 
 {#if deleteTarget}
 	<ConfirmDialog
-		title="Delete Image"
-		message={`Are you sure you want to delete "${deleteTarget.title}"? This cannot be undone.`}
+		title={m.admin_images_delete_title()}
+		message={m.admin_images_delete_message({ title: deleteTarget.title })}
 		onconfirm={() => { deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
