@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import * as m from '$lib/paraglide/messages';
 
 	let { form, data } = $props();
 </script>
@@ -7,7 +8,7 @@
 <div class="login-page">
 	<div class="login-card">
 		<h1>{data.siteName}</h1>
-		<p class="subtitle">Admin Login</p>
+		<p class="subtitle">{m.admin_login_subtitle()}</p>
 
 		{#if form?.error}
 			<p class="error">{form.error}</p>
@@ -15,10 +16,10 @@
 
 		<form method="POST" use:enhance>
 			<label>
-				<span>Password</span>
+				<span>{m.admin_field_password()}</span>
 				<input type="password" name="password" class="input" required autofocus />
 			</label>
-			<button type="submit" class="btn btn-primary full-width">Sign In</button>
+			<button type="submit" class="btn btn-primary full-width">{m.admin_login_sign_in()}</button>
 		</form>
 	</div>
 </div>

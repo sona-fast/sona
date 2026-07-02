@@ -3,6 +3,7 @@
 	import { APP_NAME } from '$lib/config';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
@@ -11,15 +12,14 @@
 
 <div class="setup-page">
 	<div class="setup-card">
-		<h1>Welcome to {APP_NAME}</h1>
-		<p class="subtitle">Let's set up your site. This runs once.</p>
+		<h1>{m.admin_setup_welcome({ appName: APP_NAME })}</h1>
+		<p class="subtitle">{m.admin_setup_subtitle()}</p>
 
 		{#if data.setupBlocked}
 			<div class="blocked">
 				<p>
-					Setup is locked because <code>SETUP_TOKEN</code> isn't configured. Set it with
-					<code>wrangler pages secret put SETUP_TOKEN</code> (the setup CLI does this for you), then
-					redeploy and reload this page.
+					{m.admin_setup_blocked_locked_pre()}<code>SETUP_TOKEN</code>{m.admin_setup_blocked_locked_post()}
+					{m.admin_setup_blocked_set_pre()}<code>wrangler pages secret put SETUP_TOKEN</code>{m.admin_setup_blocked_set_post()}
 				</p>
 			</div>
 		{:else}
@@ -39,64 +39,64 @@
 			>
 				{#if data.tokenRequired}
 					<section>
-						<h2>Bootstrap token</h2>
+						<h2>{m.admin_setup_bootstrap_token()}</h2>
 						<label>
-							<span>Setup token</span>
+							<span>{m.admin_setup_token_label()}</span>
 							<input type="password" name="setupToken" class="input" required autocomplete="off" />
-							<small>Printed by the setup CLI (the <code>SETUP_TOKEN</code> secret).</small>
+							<small>{m.admin_setup_token_hint_pre()}<code>SETUP_TOKEN</code>{m.admin_setup_token_hint_post()}</small>
 						</label>
 					</section>
 				{/if}
 
 				<section>
-					<h2>Admin password</h2>
-					<p class="hint">You'll use this to sign in to the admin panel.</p>
+					<h2>{m.admin_setup_admin_password()}</h2>
+					<p class="hint">{m.admin_setup_password_hint()}</p>
 					<label>
-						<span>Password</span>
+						<span>{m.admin_field_password()}</span>
 						<input type="password" name="password" class="input" required minlength="8" autocomplete="new-password" />
 					</label>
 					<label>
-						<span>Confirm password</span>
+						<span>{m.admin_field_confirm_password()}</span>
 						<input type="password" name="confirmPassword" class="input" required minlength="8" autocomplete="new-password" />
 					</label>
 				</section>
 
 				<section>
-					<h2>Your site</h2>
+					<h2>{m.admin_setup_your_site()}</h2>
 					<label>
-						<span>Site name *</span>
-						<input type="text" name="siteName" class="input" required placeholder="e.g. mysona.example" />
+						<span>{m.admin_setup_site_name()} *</span>
+						<input type="text" name="siteName" class="input" required placeholder={m.admin_setup_site_name_placeholder()} />
 					</label>
 					<label>
-						<span>Owner / persona name</span>
-						<input type="text" name="ownerName" class="input" placeholder="Shown on the About page" />
+						<span>{m.admin_setup_owner_name()}</span>
+						<input type="text" name="ownerName" class="input" placeholder={m.admin_setup_owner_placeholder()} />
 					</label>
 					<label>
-						<span>Fursona / character name</span>
-						<input type="text" name="fursonaName" class="input" placeholder="The character this site is about" />
+						<span>{m.admin_setup_fursona_name()}</span>
+						<input type="text" name="fursonaName" class="input" placeholder={m.admin_setup_fursona_placeholder()} />
 					</label>
 					<label>
-						<span>About text</span>
-						<textarea name="aboutText" class="input" rows="3" placeholder="A short description of your site"></textarea>
+						<span>{m.admin_setup_about_text()}</span>
+						<textarea name="aboutText" class="input" rows="3" placeholder={m.admin_setup_about_placeholder()}></textarea>
 					</label>
 				</section>
 
 				<section>
-					<h2>Social links <span class="optional">(optional)</span></h2>
+					<h2>{m.admin_setup_social_links()} <span class="optional">{m.admin_setup_optional()}</span></h2>
 					<div class="grid">
 						<label><span>Twitter / X</span><input type="text" name="twitter" class="input" /></label>
 						<label><span>Bluesky</span><input type="text" name="bluesky" class="input" /></label>
 						<label><span>Telegram</span><input type="text" name="telegram" class="input" /></label>
 						<label><span>FurAffinity</span><input type="text" name="furaffinity" class="input" /></label>
 						<label><span>FurTrack</span><input type="text" name="furtrack" class="input" /></label>
-						<label><span>Primary character (FurTrack tag)</span><input type="text" name="primaryCharacter" class="input" /></label>
+						<label><span>{m.admin_setup_primary_character()}</span><input type="text" name="primaryCharacter" class="input" /></label>
 					</div>
 				</section>
 
 				<section>
-					<h2>Appearance</h2>
+					<h2>{m.admin_setup_appearance()}</h2>
 					<label>
-						<span>Theme</span>
+						<span>{m.admin_setup_theme()}</span>
 						<select name="themeId" class="input">
 							{#each THEMES as t}
 								<option value={t.id}>{t.label}</option>
@@ -104,18 +104,18 @@
 						</select>
 					</label>
 					<label>
-						<span>Landing layout</span>
+						<span>{m.admin_setup_landing_layout()}</span>
 						<select name="landingLayout" class="input">
 							{#each LANDING_LAYOUTS as l}
 								<option value={l.id}>{l.label}</option>
 							{/each}
 						</select>
-						<small>You can change these any time in Settings.</small>
+						<small>{m.admin_setup_change_later()}</small>
 					</label>
 				</section>
 
 				<button type="submit" class="btn btn-primary btn-lg full-width" disabled={submitting}>
-					{submitting ? 'Setting up…' : 'Finish setup'}
+					{submitting ? m.admin_setup_submitting() : m.admin_setup_finish()}
 				</button>
 			</form>
 		{/if}
