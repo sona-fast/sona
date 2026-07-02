@@ -392,6 +392,7 @@
 	"admin_new_artist_reused": "Using your existing registry-linked artist \"{name}\"",
 	"admin_new_artist_network_error": "Network error creating artist.",
 	"admin_new_artist_title": "New Artist",
+	"admin_new_manager_title": "New Manager",
 	"admin_new_artist_registry_label": "Search shared registry",
 	"admin_new_artist_registry_hint": "(optional — pull an existing artist)",
 	"admin_new_artist_registry_placeholder": "Find an artist already in the registry…",

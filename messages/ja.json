@@ -356,6 +356,7 @@
 	"admin_new_artist_reused": "レジストリ連携済みの既存アーティスト「{name}」を使用します",
 	"admin_new_artist_network_error": "アーティストの作成中にネットワークエラーが発生しました。",
 	"admin_new_artist_title": "新規アーティスト",
+	"admin_new_manager_title": "新規管理者",
 	"admin_new_artist_registry_label": "共有レジストリを検索",
 	"admin_new_artist_registry_hint": "（任意 — 既存のアーティストを取り込めます）",
 	"admin_new_artist_registry_placeholder": "レジストリに登録済みのアーティストを検索…",
