@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { Plus, Trash2, ExternalLink, RefreshCw } from 'lucide-svelte';
+	import { formatDate, formatDateRange } from '$lib';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -22,17 +23,7 @@
 
 	function sourceLabel(e: { name: string; location: string; startDate: string }): string {
 		const loc = e.location ? ` · ${e.location}` : '';
-		return `${e.name}${loc} (${e.startDate.replaceAll('-', '.')})`;
-	}
-
-	function fmt(d: string): string {
-		return d.replaceAll('-', '.');
-	}
-	function dateRange(start: string, end: string | null): string {
-		if (!end || end === start) return fmt(start);
-		// Same year: trim the year off the end date for brevity (2026.09.12 → 09.14)
-		const same = start.slice(0, 4) === end.slice(0, 4);
-		return `${fmt(start)} → ${same ? fmt(end).slice(5) : fmt(end)}`;
+		return `${e.name}${loc} (${formatDate(e.startDate)})`;
 	}
 </script>
 
@@ -181,7 +172,7 @@
 							</a>
 						{/if}
 					</td>
-					<td>{dateRange(con.startDate, con.endDate)}</td>
+					<td>{formatDateRange(con.startDate, con.endDate)}</td>
 					<td>{con.location ?? '—'}</td>
 					<td><span class="status status-{con.status}">{statusLabel(con.status)}</span></td>
 					<td>
@@ -203,7 +194,7 @@
 		<div class="mobile-item">
 			<div class="mobile-main">
 				<span class="con-name">{con.name}</span>
-				<span class="mobile-meta">{dateRange(con.startDate, con.endDate)}{con.location ? ` · ${con.location}` : ''}</span>
+				<span class="mobile-meta">{formatDateRange(con.startDate, con.endDate)}{con.location ? ` · ${con.location}` : ''}</span>
 			</div>
 			<span class="status status-{con.status}">{statusLabel(con.status)}</span>
 			<form method="POST" action="?/delete" use:enhance class="inline-form">
