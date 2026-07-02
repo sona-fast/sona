@@ -176,7 +176,7 @@
 						—
 					{/if}
 					{#if image.commissionedAt}
-						&bull; {formatDate(image.commissionedAt, { month: 'short', day: 'numeric' })}
+						&bull; {formatDate(image.commissionedAt)}
 					{/if}
 				</p>
 				{#if image.nsfw}

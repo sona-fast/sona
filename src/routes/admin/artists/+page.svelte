@@ -260,7 +260,7 @@
 				</div>
 				<div>
 					<p class="modal-artist-name">{editingArtist.name}</p>
-					<p class="modal-artist-meta">{worksLabel(editingArtist)} &bull; {m.admin_artists_added({ date: formatDate(editingArtist.createdAt, { year: 'numeric', month: 'short' }) })}</p>
+					<p class="modal-artist-meta">{worksLabel(editingArtist)} &bull; {m.admin_artists_added({ date: formatDate(editingArtist.createdAt) })}</p>
 				</div>
 			</div>
 
