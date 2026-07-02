@@ -43,7 +43,10 @@ export interface SyncSummary {
 // later rendered into href/src on public pages.
 function socialsToColumns(socials: Record<string, string>): Record<string, string | null> {
 	const out: Record<string, string | null> = {};
-	for (const k of SOCIAL_URL_KEYS) out[k] = sanitizeUrl(socials[k]);
+	// The registry payload is untrusted — `socials` may be null / not an object.
+	// Guard so a malformed record can't throw and wedge the whole sync batch.
+	const s = socials && typeof socials === 'object' ? socials : {};
+	for (const k of SOCIAL_URL_KEYS) out[k] = sanitizeUrl(s[k]);
 	return out;
 }
 
