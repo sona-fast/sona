@@ -327,6 +327,7 @@
 {#if showAdd}
 	<NewArtistDialog
 		oncreated={async () => { showAdd = false; await invalidateAll(); }}
+		onimportedall={async () => { showAdd = false; await invalidateAll(); }}
 		oncancel={() => (showAdd = false)}
 	/>
 {/if}

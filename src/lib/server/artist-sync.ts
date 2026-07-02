@@ -40,8 +40,9 @@ export interface SyncSummary {
 // Map a registry record's socials onto the local artist *Url columns. The
 // registry is untrusted cross-tenant input, so every URL is run through
 // sanitizeUrl (dropping javascript:/data:/vbscript:) before it can be stored and
-// later rendered into href/src on public pages.
-function socialsToColumns(socials: Record<string, string>): Record<string, string | null> {
+// later rendered into href/src on public pages. Exported for registry-import,
+// which stores the same shape when creating artists from the catalog.
+export function socialsToColumns(socials: Record<string, string>): Record<string, string | null> {
 	const out: Record<string, string | null> = {};
 	// The registry payload is untrusted — `socials` may be null / not an object.
 	// Guard so a malformed record can't throw and wedge the whole sync batch.
@@ -53,8 +54,9 @@ function socialsToColumns(socials: Record<string, string>): Record<string, strin
 // Serialize a registry record's former identities for the local `aliases` column.
 // Like socials, alias URLs are untrusted cross-tenant input, so every one is run
 // through sanitizeUrl before it can be stored and later rendered into href on
-// public pages. Empty/absent → null (the "no aliases" state).
-function aliasesToColumn(aliases: RegistryArtist['aliases']): string | null {
+// public pages. Empty/absent → null (the "no aliases" state). Exported for
+// registry-import (same reasoning as socialsToColumns).
+export function aliasesToColumn(aliases: RegistryArtist['aliases']): string | null {
 	if (!aliases || aliases.length === 0) return null;
 	const clean = aliases
 		.filter((a) => a && typeof a.displayName === 'string' && a.displayName)

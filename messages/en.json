@@ -705,5 +705,16 @@
 	"admin_migrate_nothing_lost": "Nothing was lost — originals remain on {source}.",
 	"admin_migrate_try_again": "Try again",
 	"admin_import_batch_failed": "Batch failed",
-	"admin_import_unexpected": "Unexpected response"
+	"admin_import_unexpected": "Unexpected response",
+	"admin_registry_import_pill": "Import",
+	"admin_registry_import_artist": "Import Artist",
+	"admin_registry_importing": "Importing…",
+	"admin_registry_footer_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} artist in the shared registry", "countPlural=other": "{count} artists in the shared registry"}}],
+	"admin_registry_import_all": "Import all…",
+	"admin_registry_import_all_title": "Import all registry artists",
+	"admin_registry_import_all_message": "This creates {count} new artists on your site. {skipped} registry artists already linked to your existing artists are skipped — nothing local is ever overwritten.",
+	"admin_registry_keep_updated": "Keep imported artists updated from the registry",
+	"admin_registry_editable_note": "Imported artists remain fully editable and deletable on your site.",
+	"admin_registry_import_n": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Import {count} artist", "countPlural=other": "Import {count} artists"}}],
+	"admin_registry_imported_toast": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Imported {count} artist from the registry", "countPlural=other": "Imported {count} artists from the registry"}}]
 }

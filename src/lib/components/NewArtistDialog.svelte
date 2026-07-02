@@ -16,8 +16,11 @@
 		oncancel: () => void;
 		/** Dialog heading — e.g. "New Manager" when the created artist will manage a pack. */
 		title?: string;
+		/** Called after a successful "Import all" (bulk catalog import) so the
+		 * caller can refresh its artist list. Optional — a toast is shown anyway. */
+		onimportedall?: () => void;
 	}
-	let { oncreated, oncancel, title = 'New Artist' }: Props = $props();
+	let { oncreated, oncancel, title = m.admin_new_artist_title(), onimportedall }: Props = $props();
 
 	// Mirrors the Edit Artist modal on /admin/artists, but creates via the
 	// /api/artists endpoint (AJAX) so the caller gets the new id back immediately
@@ -48,6 +51,18 @@
 	let pulled = $state<{ globalId: string; version: number; avatarUrl: string | null } | null>(null);
 	let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
+	// Catalog import plan for the panel footer + "Import all" confirmation: how
+	// many artists the registry holds, how many an import would create, and how
+	// many it skips (already linked / handle-matched). null = not loaded (footer
+	// hidden) — the dialog works fine without it.
+	let importPlan = $state<{ total: number; toCreate: number; skipped: number } | null>(null);
+	let showImportAll = $state(false);
+	// "Keep imported artists updated from the registry" — wired to the site-wide
+	// registryOverridesLocal setting (the existing sync-update mechanism).
+	// Default checked per the approved design.
+	let keepUpdated = $state(true);
+	let importingAll = $state(false);
+
 	onMount(async () => {
 		try {
 			const res = await fetch('/api/registry/search?q=');
@@ -55,7 +70,53 @@
 		} catch {
 			registryEnabled = false;
 		}
+		if (registryEnabled) {
+			try {
+				const res = await fetch('/api/registry/import');
+				const data = res.ok ? await res.json() : null;
+				if (data?.enabled) {
+					importPlan = { total: data.total, toCreate: data.toCreate, skipped: data.skipped };
+				}
+			} catch {
+				/* footer just stays hidden */
+			}
+		}
 	});
+
+	/** "@handle" for a result row, derived from its first social URL. */
+	function resultHandle(r: RegResult): string {
+		for (const v of Object.values(r.socials ?? {})) {
+			if (typeof v !== 'string' || !v) continue;
+			const seg = v.replace(/\/+$/, '').split('/').pop() ?? '';
+			const handle = seg.replace(/^@+/, '');
+			if (handle) return '@' + handle;
+		}
+		return '';
+	}
+
+	async function runImportAll() {
+		if (importingAll || !importPlan) return;
+		importingAll = true;
+		try {
+			const res = await fetch('/api/registry/import', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ keepUpdated })
+			});
+			const data = res.ok ? ((await res.json()) as { enabled?: boolean; created?: number }) : null;
+			if (!data?.enabled) {
+				toast.error(m.admin_import_failed());
+				return;
+			}
+			toast.success(m.admin_registry_imported_toast({ count: data.created ?? 0 }));
+			showImportAll = false;
+			onimportedall?.();
+		} catch {
+			toast.error(m.admin_new_artist_network_error());
+		} finally {
+			importingAll = false;
+		}
+	}
 
 	function onRegistryInput() {
 		clearTimeout(searchTimer);
@@ -165,16 +226,32 @@
 					{#if registryResults.length}
 						<ul class="reg-results">
 							{#each registryResults as r}
+								{@const handle = resultHandle(r)}
 								<li>
 									<button type="button" onclick={() => applyResult(r)}>
-										{#if r.avatarUrl}<img src={r.avatarUrl} alt="" />{/if}
-										<span>{r.name}</span>
+										{#if r.avatarUrl}
+											<img src={r.avatarUrl} alt="" />
+										{:else}
+											<span class="reg-monogram" aria-hidden="true">{r.name.charAt(0).toUpperCase()}</span>
+										{/if}
+										<span class="reg-id">
+											<span class="reg-name">{r.name}</span>
+											{#if handle}<span class="reg-handle">{handle}</span>{/if}
+										</span>
+										<span class="reg-import-pill">{m.admin_registry_import_pill()}</span>
 									</button>
 								</li>
 							{/each}
 						</ul>
 					{/if}
 					{#if pulled}<small class="linked">✓ {m.admin_new_artist_registry_linked()}</small>{/if}
+					{#if importPlan}
+						<div class="reg-footer">
+							<span>{m.admin_registry_footer_count({ count: importPlan.total })}</span>
+							<span aria-hidden="true">·</span>
+							<button type="button" class="reg-import-all" onclick={() => (showImportAll = true)}>{m.admin_registry_import_all()}</button>
+						</div>
+					{/if}
 				</div>
 			{/if}
 
@@ -200,12 +277,47 @@
 			<div class="modal-actions">
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>{m.admin_cancel()}</button>
 				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving}>
-					{#if saving}<Loader2 size={16} class="spin" /> {m.admin_new_artist_creating()}{:else}{m.admin_new_artist_create()}{/if}
+					{#if saving}
+						<Loader2 size={16} class="spin" /> {pulled ? m.admin_registry_importing() : m.admin_new_artist_creating()}
+					{:else}
+						{pulled ? m.admin_registry_import_artist() : m.admin_new_artist_create()}
+					{/if}
 				</button>
 			</div>
 		</div>
 	</div>
 </div>
+
+{#if showImportAll && importPlan}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="modal-backdrop confirm-layer" onclick={() => { if (!importingAll) showImportAll = false; }} onkeydown={(e) => { if (e.key === 'Escape' && !importingAll) showImportAll = false; }}>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="modal confirm-modal" role="dialog" aria-modal="true" aria-label={m.admin_registry_import_all_title()} onclick={(e) => e.stopPropagation()}>
+			<div class="modal-header">
+				<h2>{m.admin_registry_import_all_title()}</h2>
+				<button class="icon-btn" onclick={() => (showImportAll = false)} disabled={importingAll} aria-label={m.admin_close()}><X size={18} /></button>
+			</div>
+			<div class="confirm-body">
+				<p>{m.admin_registry_import_all_message({ count: importPlan.toCreate, skipped: importPlan.skipped })}</p>
+				<label class="keep-updated">
+					<input type="checkbox" bind:checked={keepUpdated} disabled={importingAll} />
+					<span>{m.admin_registry_keep_updated()}</span>
+				</label>
+				<p class="reassure">{m.admin_registry_editable_note()}</p>
+			</div>
+			<div class="modal-actions">
+				<button type="button" class="btn btn-secondary" onclick={() => (showImportAll = false)} disabled={importingAll}>{m.admin_cancel()}</button>
+				<button type="button" class="btn btn-primary" onclick={runImportAll} disabled={importingAll || importPlan.toCreate === 0}>
+					{#if importingAll}
+						<Loader2 size={16} class="spin" /> {m.admin_registry_importing()}
+					{:else}
+						{m.admin_registry_import_n({ count: importPlan.toCreate })}
+					{/if}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.modal-backdrop {
@@ -238,6 +350,34 @@
 	.reg-results button:hover { border-color: var(--primary); }
 	.reg-results img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; }
 	.linked { color: var(--primary); font-size: 12px; }
+	.reg-monogram {
+		width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+		display: inline-flex; align-items: center; justify-content: center;
+		background: var(--secondary); color: var(--muted-foreground);
+		font-size: 11px; font-weight: 600;
+	}
+	.reg-results img { flex-shrink: 0; }
+	.reg-id { display: flex; flex-direction: column; min-width: 0; }
+	.reg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.reg-handle { font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.reg-import-pill {
+		margin-left: auto; flex-shrink: 0; padding: 1px 8px; font-size: 11px;
+		color: var(--primary); border: 1px solid var(--primary); border-radius: var(--radius-pill);
+	}
+	.reg-footer { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
+	.reg-import-all {
+		background: none; border: none; padding: 0; cursor: pointer;
+		color: var(--primary); font-size: 12px; font-family: inherit;
+	}
+	.reg-import-all:hover { text-decoration: underline; }
+	.confirm-layer { z-index: 110; }
+	.confirm-modal { max-width: 440px; }
+	.confirm-body { display: flex; flex-direction: column; gap: 12px; font-size: 13px; margin-bottom: 16px; }
+	.confirm-body p { margin: 0; line-height: 1.5; }
+	.keep-updated { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+	.keep-updated span { font-size: 13px; color: var(--foreground); }
+	.keep-updated input { margin: 0; flex-shrink: 0; }
+	.reassure { color: var(--muted-foreground); font-size: 12px; }
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 </style>
