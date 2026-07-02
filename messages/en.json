@@ -618,6 +618,7 @@
 	"admin_settings_ut_unverified": "Token set (couldn't verify usage)",
 	"admin_settings_ut_not_set": "Not set — add UPLOADTHING_TOKEN as a secret",
 	"admin_settings_r2_domain": "R2 public domain",
+	"admin_settings_r2_no_url_hint": "No public URL set — uploads will be served from this site's /img route until you add a CDN domain.",
 	"admin_settings_save_storage": "Save storage settings",
 	"admin_settings_migrate_link": "Migrate existing images",
 	"admin_settings_password_changed": "Password changed",

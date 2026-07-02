@@ -22,8 +22,11 @@ export function getStorage(
 			throw new Error('R2 selected but the IMAGES bucket binding is not available');
 		}
 		// In dev the custom domain fronts the real bucket, not miniflare's local
-		// one, so serve through our own /img route instead.
-		const publicBase = dev ? '/img' : settings.r2PublicUrl;
+		// one, so serve through our own /img route. In prod, fall back to that same
+		// /img route when no public/CDN URL is configured yet, rather than emitting
+		// broken bare-key URLs (missing the domain). The /img route serves from the
+		// bucket in prod too, so objects stay reachable until a CDN URL is set.
+		const publicBase = dev || !settings.r2PublicUrl ? '/img' : settings.r2PublicUrl;
 		return new R2Storage({ bucket: env.IMAGES, publicBase });
 	}
 
