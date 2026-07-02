@@ -190,4 +190,20 @@ describe('saveSettings — invalidation', () => {
 		await saveSettings(writeDb, { siteName: 'My Gallery' });
 		expect(inserted).toEqual([{ key: 'siteName', value: 'My Gallery' }]);
 	});
+
+	it('writes only the keys it is given — the per-tab save actions rely on this', async () => {
+		// The settings page saves one tab at a time (saveSite / saveConnections /
+		// saveStorage); a tab's subset must never touch another tab's keys.
+		const inserted: Array<{ key: string; value: unknown }> = [];
+		const writeDb = {
+			select: () => ({ from: () => ({ where: () => ({ get: async () => undefined }) }) }),
+			insert: () => ({ values: async (row: { key: string; value: unknown }) => void inserted.push(row) })
+		} as unknown as Database;
+
+		await saveSettings(writeDb, { autoResyncEnabled: false, registryOverridesLocal: true });
+		expect(inserted).toEqual([
+			{ key: 'autoResyncEnabled', value: 'false' },
+			{ key: 'registryOverridesLocal', value: 'true' }
+		]);
+	});
 });

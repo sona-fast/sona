@@ -544,6 +544,8 @@
 	"admin_settings_tab_storage": "ストレージ",
 	"admin_settings_tab_account": "アカウント",
 	"admin_settings_saved": "設定を保存しました",
+	"admin_settings_save_site": "サイト設定を保存",
+	"admin_settings_save_connections": "連携設定を保存",
 	"admin_settings_site_info": "サイト情報",
 	"admin_settings_site_name": "サイト名",
 	"admin_settings_owner_name": "オーナー／ペルソナ名",
