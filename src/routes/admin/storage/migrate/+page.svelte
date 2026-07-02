@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { ArrowRight, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
@@ -48,7 +49,7 @@
 			// (persistent failures) so we don't spin forever.
 			while (true) {
 				const res = await fetch('/api/storage/migrate', { method: 'POST' });
-				if (!res.ok) throw new Error(`Migration request failed (${res.status})`);
+				if (!res.ok) throw new Error(m.admin_migrate_request_failed({ status: res.status }));
 				progress = await res.json();
 				recentActivity = [...progress.recent, ...recentActivity].slice(0, 20);
 				if (progress.remaining <= 0) break;
@@ -56,7 +57,7 @@
 			}
 			phase = 'done';
 		} catch (e) {
-			errorMsg = e instanceof Error ? e.message : 'Migration failed';
+			errorMsg = e instanceof Error ? e.message : m.admin_migrate_failed();
 			phase = 'error';
 		}
 	}
@@ -64,7 +65,7 @@
 
 <div class="migrate-page">
 	<div class="page-header">
-		<h1>Storage Migration</h1>
+		<h1>{m.admin_migrate_title()}</h1>
 	</div>
 
 	<div class="route">
@@ -76,37 +77,37 @@
 	{#if phase === 'confirm'}
 		<section class="card">
 			<div class="stats">
-				<div><span class="stat-num">{progress.total - progress.done}</span><span class="stat-lbl">to migrate</span></div>
-				<div><span class="stat-num">{formatSize(data.totalSize)}</span><span class="stat-lbl">total size</span></div>
-				{#if progress.done > 0}<div><span class="stat-num">{progress.done}</span><span class="stat-lbl">already done</span></div>{/if}
+				<div><span class="stat-num">{progress.total - progress.done}</span><span class="stat-lbl">{m.admin_migrate_stat_to_migrate()}</span></div>
+				<div><span class="stat-num">{formatSize(data.totalSize)}</span><span class="stat-lbl">{m.admin_migrate_stat_total_size()}</span></div>
+				{#if progress.done > 0}<div><span class="stat-num">{progress.done}</span><span class="stat-lbl">{m.admin_migrate_stat_done()}</span></div>{/if}
 			</div>
 			<ul class="checklist">
-				<li>Images are copied to {data.targetLabel}; originals stay on {data.sourceLabel}, untouched.</li>
-				<li>Your images stay online the whole time.</li>
-				<li>You choose when to switch new uploads over (a separate step).</li>
-				<li>Originals are deleted only later, after you confirm everything works.</li>
-				<li>Safe to stop and resume — already-copied images are skipped.</li>
+				<li>{m.admin_migrate_check_copy({ target: data.targetLabel, source: data.sourceLabel })}</li>
+				<li>{m.admin_migrate_check_online()}</li>
+				<li>{m.admin_migrate_check_switch()}</li>
+				<li>{m.admin_migrate_check_originals()}</li>
+				<li>{m.admin_migrate_check_resume()}</li>
 			</ul>
 			<div class="actions">
-				<a href="/admin/settings" class="btn btn-outline">Cancel</a>
-				<button class="btn btn-primary" onclick={runMigration}>Start migration</button>
+				<a href="/admin/settings" class="btn btn-outline">{m.admin_cancel()}</a>
+				<button class="btn btn-primary" onclick={runMigration}>{m.admin_migrate_start()}</button>
 			</div>
 		</section>
 	{:else if phase === 'running'}
 		<section class="card">
 			<div class="progress-head">
-				<span><Loader2 size={16} class="spin" /> Copying… {progress.done} of {progress.total}</span>
+				<span><Loader2 size={16} class="spin" /> {m.admin_migrate_copying({ done: progress.done, total: progress.total })}</span>
 				<span>{pct}%</span>
 			</div>
 			<div class="bar"><div class="bar-fill" style="width: {pct}%"></div></div>
-			<p class="muted">Keep this page open. Migration is resumable — if it stops, reopen and start again to pick up where it left off.</p>
+			<p class="muted">{m.admin_migrate_keep_open()}</p>
 			{#if recentActivity.length > 0}
 				<div class="activity">
-					<span class="activity-head">Recent activity</span>
+					<span class="activity-head">{m.admin_migrate_recent()}</span>
 					{#each recentActivity as item}
 						<div class="activity-row">
 							<span class="activity-slug">{item.slug}</span>
-							<span class="activity-status {item.status}">{item.status === 'migrated' ? 'Copied' : 'Failed'}</span>
+							<span class="activity-status {item.status}">{item.status === 'migrated' ? m.admin_migrate_copied() : m.admin_import_stat_failed()}</span>
 						</div>
 					{/each}
 				</div>
@@ -114,29 +115,26 @@
 		</section>
 	{:else if phase === 'done'}
 		{#if succeeded}
-			<div class="banner ok"><CheckCircle2 size={18} /> All {progress.total} images are on {data.targetLabel}.</div>
+			<div class="banner ok"><CheckCircle2 size={18} /> {m.admin_migrate_all_done({ total: progress.total, target: data.targetLabel })}</div>
 		{:else}
-			<div class="banner warn"><AlertTriangle size={18} /> {progress.done} of {progress.total} copied · {progress.failed || progress.remaining} not copied. Originals remain safe on {data.sourceLabel}.</div>
+			<div class="banner warn"><AlertTriangle size={18} /> {m.admin_migrate_partial({ done: progress.done, total: progress.total, failed: progress.failed || progress.remaining, source: data.sourceLabel })}</div>
 		{/if}
 
 		{#if progress.failures.length > 0}
 			<section class="card">
-				<h2>Failures</h2>
+				<h2>{m.admin_migrate_failures()}</h2>
 				<ul class="failures">
-					{#each progress.failures as f}<li>Image #{f.imageId}: {f.error}</li>{/each}
+					{#each progress.failures as f}<li>{m.admin_migrate_failure_item({ id: f.imageId, error: f.error })}</li>{/each}
 				</ul>
-				<button class="btn btn-outline" onclick={runMigration}>Retry remaining</button>
+				<button class="btn btn-outline" onclick={runMigration}>{m.admin_migrate_retry_remaining()}</button>
 			</section>
 		{/if}
 
 		{#if data.source === 'uploadthing' && data.sourceLeftover !== 0}
 			<section class="card danger">
-				<h2>Clean up — delete originals</h2>
+				<h2>{m.admin_migrate_cleanup_heading()}</h2>
 				<p class="muted">
-					Now that images serve from {data.targetLabel}, delete the
-					{data.sourceLeftover > 0 ? `${data.sourceLeftover} ` : ''}leftover
-					original{data.sourceLeftover === 1 ? '' : 's'} from {data.sourceLabel} to free space.
-					Permanent and irreversible.
+					{data.sourceLeftover > 0 ? m.admin_migrate_cleanup_desc_count({ target: data.targetLabel, count: data.sourceLeftover, source: data.sourceLabel }) : m.admin_migrate_cleanup_desc({ target: data.targetLabel, source: data.sourceLabel })}
 				</p>
 				<form
 					method="POST"
@@ -150,16 +148,16 @@
 					}}
 				>
 					<button class="btn btn-destructive" disabled={cleaning}>
-						{cleaning ? 'Deleting…' : `Delete original files from ${data.sourceLabel}`}
+						{cleaning ? m.admin_migrate_deleting() : m.admin_migrate_delete_originals({ source: data.sourceLabel })}
 					</button>
 				</form>
 			</section>
 		{:else if data.source === 'uploadthing'}
-			<div class="banner ok"><CheckCircle2 size={18} /> Originals cleaned up — nothing left on {data.sourceLabel}.</div>
+			<div class="banner ok"><CheckCircle2 size={18} /> {m.admin_migrate_cleaned({ source: data.sourceLabel })}</div>
 		{/if}
 	{:else if phase === 'error'}
-		<div class="banner err"><AlertTriangle size={18} /> {errorMsg} Nothing was lost — originals remain on {data.sourceLabel}.</div>
-		<button class="btn btn-primary" onclick={runMigration}>Try again</button>
+		<div class="banner err"><AlertTriangle size={18} /> {errorMsg} {m.admin_migrate_nothing_lost({ source: data.sourceLabel })}</div>
+		<button class="btn btn-primary" onclick={runMigration}>{m.admin_migrate_try_again()}</button>
 	{/if}
 
 	{#if form?.message}<p class="success">{form.message}</p>{/if}

@@ -6,6 +6,7 @@
 	import { RefreshCw, Loader2 } from 'lucide-svelte';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
+	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
@@ -98,19 +99,19 @@
 
 	const confirmConfig = {
 		deleteAll: {
-			title: 'Delete All Data',
-			message: 'This will delete ALL images, collections, tags, characters, and artists. Files will also be removed from your storage (R2 and UploadThing). This cannot be undone.',
-			confirmLabel: 'Delete Everything'
+			title: m.admin_settings_delete_all_title,
+			message: m.admin_settings_delete_all_message,
+			confirmLabel: m.admin_settings_delete_all_confirm
 		},
 		clearCache: {
-			title: 'Clear Upload Cache',
-			message: 'This will find files in your storage (R2 and UploadThing) that are no longer referenced in your database and delete them. Useful for cleaning up orphaned uploads.',
-			confirmLabel: 'Clear Cache'
+			title: m.admin_settings_clear_cache_title,
+			message: m.admin_settings_clear_cache_message,
+			confirmLabel: m.admin_settings_clear_cache_confirm
 		},
 		resetTags: {
-			title: 'Reset All Tags',
-			message: 'This will remove all tags from all images. Images and collections are preserved. This cannot be undone.',
-			confirmLabel: 'Reset Tags'
+			title: m.admin_settings_reset_tags_title,
+			message: m.admin_settings_reset_tags_message,
+			confirmLabel: m.admin_settings_reset_tags_confirm
 		}
 	};
 </script>
@@ -118,16 +119,16 @@
 <div class="settings-tabs" data-active-tab={activeTab}>
 	<div class="settings-header">
 		<div class="page-header">
-			<h1>Settings</h1>
+			<h1>{m.admin_nav_settings()}</h1>
 			<button type="submit" form="form-save" class="btn btn-primary" disabled={saving}>
-				{saving ? 'Saving...' : 'Save Changes'}
+				{saving ? m.admin_saving() : m.admin_save_changes()}
 			</button>
 		</div>
 		<nav class="settings-tabnav">
-			<button type="button" class:active={activeTab === 'site'} onclick={() => (activeTab = 'site')}>Site</button>
-			<button type="button" class:active={activeTab === 'connections'} onclick={() => (activeTab = 'connections')}>Connections</button>
-			<button type="button" class:active={activeTab === 'storage'} onclick={() => (activeTab = 'storage')}>Storage</button>
-			<button type="button" class:active={activeTab === 'account'} onclick={() => (activeTab = 'account')}>Account</button>
+			<button type="button" class:active={activeTab === 'site'} onclick={() => (activeTab = 'site')}>{m.admin_settings_tab_site()}</button>
+			<button type="button" class:active={activeTab === 'connections'} onclick={() => (activeTab = 'connections')}>{m.admin_settings_tab_connections()}</button>
+			<button type="button" class:active={activeTab === 'storage'} onclick={() => (activeTab = 'storage')}>{m.admin_settings_tab_storage()}</button>
+			<button type="button" class:active={activeTab === 'account'} onclick={() => (activeTab = 'account')}>{m.admin_settings_tab_account()}</button>
 		</nav>
 	</div>
 
@@ -137,33 +138,33 @@
 	return async ({ result, update }) => {
 		await update();
 		saving = false;
-		if (result.type === 'success') toast.success('Settings saved');
+		if (result.type === 'success') toast.success(m.admin_settings_saved());
 	};
 }}>
 		<section data-tab="site">
-			<h2>Site Information</h2>
+			<h2>{m.admin_settings_site_info()}</h2>
 			<label>
-				<span>Site Name</span>
+				<span>{m.admin_settings_site_name()}</span>
 				<input type="text" class="input" bind:value={siteName} name="siteName" />
 			</label>
 			<label>
-				<span>Owner / Persona Name</span>
-				<input type="text" class="input" bind:value={ownerName} name="ownerName" placeholder="Shown on the About page; defaults to Site Name" />
+				<span>{m.admin_settings_owner_name()}</span>
+				<input type="text" class="input" bind:value={ownerName} name="ownerName" placeholder={m.admin_settings_owner_placeholder()} />
 			</label>
 			<label>
-				<span>About Text</span>
+				<span>{m.admin_settings_about_text()}</span>
 				<textarea class="input" rows="4" name="aboutText" bind:value={aboutText}></textarea>
 			</label>
 			<label>
-				<span>Primary character (FurTrack tag)</span>
-				<input type="text" class="input" bind:value={primaryCharacter} name="primaryCharacter" placeholder="e.g. aspen_(zangoose)" />
+				<span>{m.admin_setup_primary_character()}</span>
+				<input type="text" class="input" bind:value={primaryCharacter} name="primaryCharacter" placeholder={m.admin_fursuit_tag_placeholder()} />
 			</label>
 		</section>
 
 		<section data-tab="site">
-			<h2>Appearance</h2>
+			<h2>{m.admin_setup_appearance()}</h2>
 			<label>
-				<span>Theme</span>
+				<span>{m.admin_setup_theme()}</span>
 				<select class="input" name="themeId" bind:value={themeId}>
 					{#each THEMES as t}
 						<option value={t.id}>{t.label}</option>
@@ -171,7 +172,7 @@
 				</select>
 			</label>
 			<label>
-				<span>Landing layout</span>
+				<span>{m.admin_setup_landing_layout()}</span>
 				<select class="input" name="landingLayout" bind:value={landingLayout}>
 					{#each LANDING_LAYOUTS as l}
 						<option value={l.id}>{l.label}</option>
@@ -181,7 +182,7 @@
 		</section>
 
 		<section data-tab="site">
-			<h2>Your Social Links</h2>
+			<h2>{m.admin_settings_social_links()}</h2>
 			<div class="social-grid">
 				<label>
 					<span>Twitter / X</span>
@@ -211,38 +212,38 @@
 			<label class="checkbox-row">
 				<input type="checkbox" name="autoResyncEnabled" bind:checked={autoResyncEnabled} />
 				<span class="checkbox-text">
-					<span class="checkbox-title">Automatically re-sync Telegram sticker packs</span>
-					<span class="checkbox-desc">When on, new stickers in your Telegram packs are pulled in daily (via a scheduled job).</span>
+					<span class="checkbox-title">{m.admin_settings_auto_resync()}</span>
+					<span class="checkbox-desc">{m.admin_settings_auto_resync_desc()}</span>
 				</span>
 			</label>
 		</section>
 
 		<section data-tab="connections">
-			<h2>Shared Artist Registry</h2>
+			<h2>{m.admin_settings_registry()}</h2>
 			{#if data.registryEnabled}
-				<p class="reg-status connected">Connected to the shared registry.</p>
+				<p class="reg-status connected">{m.admin_settings_registry_connected()}</p>
 				<label class="checkbox-row">
 					<input type="checkbox" name="registryOverridesLocal" bind:checked={registryOverridesLocal} />
 					<span class="checkbox-text">
-						<span class="checkbox-title">Let the registry update my linked artists</span>
-						<span class="checkbox-desc">When on, syncing overwrites a linked artist's name, avatar, and socials with the registry's. Off keeps your local edits and only fills empty fields.</span>
+						<span class="checkbox-title">{m.admin_settings_registry_overrides()}</span>
+						<span class="checkbox-desc">{m.admin_settings_registry_overrides_desc()}</span>
 					</span>
 				</label>
 			{:else}
-				<p class="reg-status">Not configured. Set a <code>REGISTRY_API_KEY</code> secret to pull shared artist data and submit your artists.</p>
+				<p class="reg-status">{m.admin_settings_registry_not_connected()}</p>
 			{/if}
 			<a href="/api/registry/export-artists" class="btn btn-secondary" download>
-				Download artists JSON (for registry seed)
+				{m.admin_settings_registry_download()}
 			</a>
 		</section>
 
 		<section data-tab="storage">
-			<h2>Storage</h2>
+			<h2>{m.admin_settings_tab_storage()}</h2>
 			{#if activeUsage}
 				{@const pct = Math.min(100, (activeUsage.used / activeUsage.limit) * 100)}
 				<div class="storage-bar-wrap">
 					<div class="storage-bar-header">
-						<span>{activeUsage.label}: {formatSize(activeUsage.used)} of {formatSize(activeUsage.limit)}</span>
+						<span>{m.admin_settings_usage({ label: activeUsage.label, used: formatSize(activeUsage.used), limit: formatSize(activeUsage.limit) })}</span>
 						<span class="storage-pct">{pct.toFixed(1)}%</span>
 					</div>
 					<div class="storage-bar">
@@ -252,27 +253,26 @@
 			{/if}
 			{#if utLeftover > 0}
 				<p class="ut-leftover">
-					UploadThing still holds {formatSize(utLeftover)} of pre-migration originals.
-					Delete them on the <a href="/admin/storage/migrate">Storage Migration</a> page (Clean up) to reclaim it.
+					{m.admin_settings_ut_leftover_pre({ size: formatSize(utLeftover) })}<a href="/admin/storage/migrate">{m.admin_settings_ut_leftover_link()}</a>{m.admin_settings_ut_leftover_post()}
 				</p>
 			{/if}
 			<div class="storage-info">
 				<div class="storage-stat">
-					<span class="stat-label">Tracked</span>
+					<span class="stat-label">{m.admin_settings_stat_tracked()}</span>
 					<span class="stat-value">{formatSize(data.totalSize)}</span>
 				</div>
 				<div class="storage-stat">
-					<span class="stat-label">Images</span>
+					<span class="stat-label">{m.admin_tab_images()}</span>
 					<span class="stat-value">{data.imageCount}</span>
 				</div>
 				{#if data.utUsage}
 					<div class="storage-stat">
-						<span class="stat-label">UT Files</span>
+						<span class="stat-label">{m.admin_settings_stat_ut_files()}</span>
 						<span class="stat-value">{data.utUsage.filesUploaded}</span>
 					</div>
 				{/if}
 				<div class="storage-stat">
-					<span class="stat-label">Provider</span>
+					<span class="stat-label">{m.admin_settings_stat_provider()}</span>
 					<span class="stat-value provider">{data.settings.storageProvider === 'r2' ? 'Cloudflare R2' : 'UploadThing'}</span>
 				</div>
 			</div>
@@ -287,41 +287,37 @@
 	};
 }}>
 	<section data-tab="storage">
-		<h2>Storage Provider</h2>
+		<h2>{m.admin_settings_provider_heading()}</h2>
 		<p class="section-desc">
-			Where new images (gallery + fursuit photos) are uploaded and served. Your initial
-			provider is set up by the setup CLI; switch here to migrate to the other one. First make
-			sure the target's credentials exist (the R2 <code>IMAGES</code> binding, or the
-			<code>UPLOADTHING_TOKEN</code> secret) — see the status below. Switching only changes where
-			<em>new</em> uploads go; run a migration to move existing images too.
+			{m.admin_settings_provider_desc_pre()}<code>IMAGES</code>{m.admin_settings_provider_desc_mid1()}<code>UPLOADTHING_TOKEN</code>{m.admin_settings_provider_desc_mid2()}<em>{m.admin_settings_provider_desc_em()}</em>{m.admin_settings_provider_desc_post()}
 		</p>
 		<div class="provider-options">
 			<label class="provider-card" class:selected={storageProvider === 'r2'}>
 				<input type="radio" name="storageProvider" value="r2" bind:group={storageProvider} />
-				<span class="provider-name">Cloudflare R2 <span class="provider-badge">Recommended</span></span>
-				<span class="provider-desc">10 GB free · no egress fees</span>
+				<span class="provider-name">Cloudflare R2 <span class="provider-badge">{m.admin_settings_recommended()}</span></span>
+				<span class="provider-desc">{m.admin_settings_r2_desc()}</span>
 				{#if data.storageStatus.r2}
-					<span class="provider-status ok">● Bucket binding connected</span>
+					<span class="provider-status ok">● {m.admin_settings_r2_connected()}</span>
 				{:else}
-					<span class="provider-status bad">● Not configured — add the IMAGES R2 binding in wrangler.toml</span>
+					<span class="provider-status bad">● {m.admin_settings_r2_not_configured()}</span>
 				{/if}
 			</label>
 			<label class="provider-card" class:selected={storageProvider === 'uploadthing'}>
 				<input type="radio" name="storageProvider" value="uploadthing" bind:group={storageProvider} />
 				<span class="provider-name">UploadThing</span>
-				<span class="provider-desc">Hosted uploads · 2 GB free</span>
+				<span class="provider-desc">{m.admin_settings_ut_desc()}</span>
 				{#if data.storageStatus.uploadthingVerified}
-					<span class="provider-status ok">● Token configured & verified</span>
+					<span class="provider-status ok">● {m.admin_settings_ut_verified()}</span>
 				{:else if data.storageStatus.uploadthing}
-					<span class="provider-status warn">● Token set (couldn't verify usage)</span>
+					<span class="provider-status warn">● {m.admin_settings_ut_unverified()}</span>
 				{:else}
-					<span class="provider-status bad">● Not set — add UPLOADTHING_TOKEN as a secret</span>
+					<span class="provider-status bad">● {m.admin_settings_ut_not_set()}</span>
 				{/if}
 			</label>
 		</div>
 		{#if storageProvider === 'r2'}
 			<label>
-				<span>R2 public domain</span>
+				<span>{m.admin_settings_r2_domain()}</span>
 				<input type="text" class="input" name="r2PublicUrl" bind:value={r2PublicUrl} placeholder="https://cdn.example.com" />
 			</label>
 		{:else}
@@ -329,9 +325,9 @@
 		{/if}
 		<div class="storage-actions">
 			<button type="submit" class="btn btn-primary" disabled={savingStorage}>
-				{savingStorage ? 'Saving…' : 'Save storage settings'}
+				{savingStorage ? m.admin_saving() : m.admin_settings_save_storage()}
 			</button>
-			<a href="/admin/storage/migrate" class="btn btn-outline">Migrate existing images →</a>
+			<a href="/admin/storage/migrate" class="btn btn-outline">{m.admin_settings_migrate_link()} →</a>
 		</div>
 	</section>
 </form>
@@ -341,26 +337,26 @@
 	return async ({ result, update }) => {
 		await update({ reset: result.type === 'success' });
 		changingPassword = false;
-		if (result.type === 'success') toast.success('Password changed');
-		else if (result.type === 'failure') toast.error((result.data?.error as string) ?? 'Could not change password');
+		if (result.type === 'success') toast.success(m.admin_settings_password_changed());
+		else if (result.type === 'failure') toast.error((result.data?.error as string) ?? m.admin_settings_password_failed());
 	};
 }}>
 	<section class="security-section" data-tab="account">
-		<h2>Security</h2>
+		<h2>{m.admin_settings_security()}</h2>
 		<label>
-			<span>Current password</span>
+			<span>{m.admin_settings_current_password()}</span>
 			<input type="password" name="currentPassword" class="input" required autocomplete="current-password" />
 		</label>
 		<label>
-			<span>New password</span>
+			<span>{m.admin_settings_new_password()}</span>
 			<input type="password" name="newPassword" class="input" required minlength="8" autocomplete="new-password" />
 		</label>
 		<label>
-			<span>Confirm new password</span>
+			<span>{m.admin_settings_confirm_new_password()}</span>
 			<input type="password" name="confirmPassword" class="input" required minlength="8" autocomplete="new-password" />
 		</label>
 		<button type="submit" class="btn btn-secondary" disabled={changingPassword}>
-			{changingPassword ? 'Changing…' : 'Change password'}
+			{changingPassword ? m.admin_settings_changing() : m.admin_settings_change_password()}
 		</button>
 	</section>
 </form>
@@ -371,22 +367,22 @@
 		return async ({ result, update }) => {
 			await update();
 			syncing = false;
-			if (result.type === 'success') toast.success((result.data?.syncMessage as string) ?? 'Sync complete');
-			else if (result.type === 'failure') toast.error((result.data?.error as string) ?? 'Sync failed');
+			if (result.type === 'success') toast.success((result.data?.syncMessage as string) ?? m.admin_settings_sync_complete());
+			else if (result.type === 'failure') toast.error((result.data?.error as string) ?? m.admin_settings_sync_failed());
 		};
 	}}>
 		<section data-tab="connections">
-			<h2>Registry Sync</h2>
-			<p class="reg-status">Pull artist updates from the shared registry now, and link any local artists already in it. (This also runs on a schedule via the sync cron.)</p>
+			<h2>{m.admin_settings_registry_sync()}</h2>
+			<p class="reg-status">{m.admin_settings_registry_sync_desc()}</p>
 			<button type="submit" class="btn btn-secondary" disabled={syncing}>
-				{#if syncing}<Loader2 size={16} class="spin" /> Syncing…{:else}<RefreshCw size={16} /> Sync now{/if}
+				{#if syncing}<Loader2 size={16} class="spin" /> {m.admin_settings_syncing()}{:else}<RefreshCw size={16} /> {m.admin_settings_sync_now()}{/if}
 			</button>
 		</section>
 	</form>
 {/if}
 
 <section class="danger-zone" data-tab="account">
-	<h2>Danger Zone</h2>
+	<h2>{m.admin_settings_danger_zone()}</h2>
 	<div class="danger-divider"></div>
 
 	{#if form?.message}
@@ -398,8 +394,8 @@
 
 	<div class="export-card">
 		<div class="danger-text">
-			<p class="danger-title">Export data</p>
-			<p class="danger-desc">Download a full backup of all images, metadata, collections, and tags as a JSON file.</p>
+			<p class="danger-title">{m.admin_settings_export_title()}</p>
+			<p class="danger-desc">{m.admin_settings_export_desc()}</p>
 		</div>
 		<form method="POST" action="?/export" bind:this={exportForm} use:enhance={() => {
 			runningAction = 'export';
@@ -411,15 +407,15 @@
 			};
 		}}>
 			<button type="submit" class="btn btn-outline" disabled={runningAction === 'export'}>
-				{runningAction === 'export' ? 'Exporting…' : 'Export'}
+				{runningAction === 'export' ? m.admin_settings_exporting() : m.admin_settings_export()}
 			</button>
 		</form>
 	</div>
 
 	<div class="danger-card">
 		<div class="danger-text">
-			<p class="danger-title">Clear all data</p>
-			<p class="danger-desc">Delete all images, collections, and tags. This cannot be undone.</p>
+			<p class="danger-title">{m.admin_settings_clear_all_title()}</p>
+			<p class="danger-desc">{m.admin_settings_clear_all_desc()}</p>
 		</div>
 		<form method="POST" action="?/deleteAll" bind:this={deleteAllForm} use:enhance={() => {
 			return async ({ update }) => {
@@ -428,15 +424,15 @@
 			};
 		}}>
 			<button type="button" class="btn btn-destructive" disabled={runningAction === 'deleteAll'} onclick={() => (confirmingAction = 'deleteAll')}>
-				{runningAction === 'deleteAll' ? 'Deleting…' : 'Delete All'}
+				{runningAction === 'deleteAll' ? m.admin_migrate_deleting() : m.admin_settings_delete_all()}
 			</button>
 		</form>
 	</div>
 
 	<div class="danger-card">
 		<div class="danger-text">
-			<p class="danger-title">Clear upload cache</p>
-			<p class="danger-desc">Remove orphaned files from your storage (R2 and UploadThing) that are no longer referenced in your database.</p>
+			<p class="danger-title">{m.admin_settings_clear_cache_card_title()}</p>
+			<p class="danger-desc">{m.admin_settings_clear_cache_card_desc()}</p>
 		</div>
 		<form method="POST" action="?/clearCache" bind:this={clearCacheForm} use:enhance={() => {
 			return async ({ update }) => {
@@ -445,15 +441,15 @@
 			};
 		}}>
 			<button type="button" class="btn btn-destructive" disabled={runningAction === 'clearCache'} onclick={() => (confirmingAction = 'clearCache')}>
-				{runningAction === 'clearCache' ? 'Clearing…' : 'Clear Cache'}
+				{runningAction === 'clearCache' ? m.admin_settings_clearing() : m.admin_settings_clear_cache_confirm()}
 			</button>
 		</form>
 	</div>
 
 	<div class="danger-card">
 		<div class="danger-text">
-			<p class="danger-title">Reset all tags</p>
-			<p class="danger-desc">Remove all tags from images. Images and collections are preserved.</p>
+			<p class="danger-title">{m.admin_settings_reset_tags_card_title()}</p>
+			<p class="danger-desc">{m.admin_settings_reset_tags_card_desc()}</p>
 		</div>
 		<form method="POST" action="?/resetTags" bind:this={resetTagsForm} use:enhance={() => {
 			return async ({ update }) => {
@@ -462,7 +458,7 @@
 			};
 		}}>
 			<button type="button" class="btn btn-destructive" disabled={runningAction === 'resetTags'} onclick={() => (confirmingAction = 'resetTags')}>
-				{runningAction === 'resetTags' ? 'Resetting…' : 'Reset Tags'}
+				{runningAction === 'resetTags' ? m.admin_settings_resetting() : m.admin_settings_reset_tags_confirm()}
 			</button>
 		</form>
 	</div>
@@ -472,9 +468,9 @@
 
 {#if confirmingAction}
 	<ConfirmDialog
-		title={confirmConfig[confirmingAction].title}
-		message={confirmConfig[confirmingAction].message}
-		confirmLabel={confirmConfig[confirmingAction].confirmLabel}
+		title={confirmConfig[confirmingAction].title()}
+		message={confirmConfig[confirmingAction].message()}
+		confirmLabel={confirmConfig[confirmingAction].confirmLabel()}
 		onconfirm={() => {
 			runningAction = confirmingAction;
 			if (confirmingAction === 'deleteAll') deleteAllForm.requestSubmit();
@@ -894,13 +890,6 @@
 	}
 	.reg-status.connected {
 		color: var(--primary);
-	}
-	.reg-status code {
-		font-family: var(--font-primary);
-		font-size: 0.9em;
-		background: var(--secondary);
-		padding: 1px 5px;
-		border-radius: var(--radius-xs);
 	}
 	:global(.spin) {
 		animation: spin 1s linear infinite;
