@@ -6,7 +6,7 @@
 #
 # Required:
 #   - repo secret CRON_SECRET (matches the Pages secret of the same name).
-#   - repo variable SITE_URL = your site's base URL (default https://sona.fast).
+#   - repo variable SITE_URL = your site's base URL (e.g. https://example.com).
 # When the registry isn't configured on the site (no REGISTRY_API_KEY) the
 # endpoint returns 503 and this job treats it as a no-op (skip, not failure).
 name: Artist registry sync
@@ -32,8 +32,11 @@ jobs:
       - name: Trigger artist-sync endpoint
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          SITE_URL: ${{ vars.SITE_URL || 'https://sona.fast' }}
+          SITE_URL: ${{ vars.SITE_URL }}
         run: |
+          if [ -z "$SITE_URL" ]; then
+            echo "::error::SITE_URL repo variable is not set (Settings → Secrets and variables → Actions → Variables) — set it to your site's base URL, e.g. https://example.com"; exit 1
+          fi
           # Registry sync is OPTIONAL (a fork may not use the shared registry), so
           # an unset secret means "not opted in" — skip quietly, don't fail. Deploy
           # (which is mandatory) still fails loudly on missing creds.
