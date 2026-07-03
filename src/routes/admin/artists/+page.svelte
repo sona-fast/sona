@@ -493,8 +493,15 @@
 		transition: color 0.15s;
 	}
 
-	.icon-btn:hover {
+	.icon-btn:not(:disabled):hover {
 		color: var(--foreground);
+	}
+
+	/* Greyed out so "nothing to submit" is visible at rest — the aria-label/title
+	   explanation is hover-only and never shows on touch devices. */
+	.icon-btn:disabled {
+		opacity: 0.35;
+		cursor: default;
 	}
 
 	:global(.spin) {
