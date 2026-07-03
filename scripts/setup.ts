@@ -159,6 +159,23 @@ async function main() {
 		);
 	}
 
+	// Telegram sticker importing (optional). The stickers feature can import Telegram
+	// sticker packs, which needs a Bot API token from @BotFather (set as the
+	// TELEGRAM_BOT_TOKEN secret). Off by default; skip to leave it unset.
+	console.log(
+		'\nTelegram sticker import lets your site pull in Telegram sticker packs you want to host.'
+	);
+	let telegramBotToken = '';
+	if (await askYesNo('Import Telegram sticker packs? (needs a bot token from @BotFather)', false)) {
+		console.log(
+			'  This bot token lets your site call the Telegram Bot API to download the packs you host.'
+		);
+		console.log(
+			'  Without it, Telegram import stays hidden and only manual sticker upload is available.'
+		);
+		telegramBotToken = await ask('Telegram bot token (TELEGRAM_BOT_TOKEN)', '');
+	}
+
 	// 1. Pages project (idempotent — ignore "already exists").
 	run(`npx wrangler pages project create ${project} --production-branch main`, { allowFail: true });
 
@@ -247,6 +264,7 @@ async function main() {
 	putSecret('SETUP_TOKEN', setupToken);
 	putSecret('CRON_SECRET', cronSecret);
 	if (!useR2 && uploadThingToken) putSecret('UPLOADTHING_TOKEN', uploadThingToken);
+	if (telegramBotToken) putSecret('TELEGRAM_BOT_TOKEN', telegramBotToken);
 
 	// 8. Offer to wire the fork's GitHub Actions secrets/vars so CI deploys work
 	//    with no separate manual step. Only when gh is installed + authenticated,
@@ -303,6 +321,7 @@ async function main() {
 	console.log(
 		`Fursuit photos: ${furtrackMode === 'off' ? 'disabled' : `enabled (${furtrackMode})`}${primaryCharacter ? ` — character "${primaryCharacter}"` : ''}.`
 	);
+	console.log(`Telegram sticker import: ${telegramBotToken ? 'enabled (bot token set)' : 'not configured'}.`);
 	console.log('Migrations applied and recorded in schema_migrations (first CI deploy is a no-op).');
 	console.log('\nNext steps:\n');
 	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');
