@@ -47,7 +47,9 @@ export async function fetchRegistryCatalog(env: Env | undefined): Promise<Regist
 			env,
 			cursor ? { cursor } : { limit: 100 }
 		);
-		if (batch.length === 0) break;
+		// A 200 with a malformed body (schema drift, an error page served as 200)
+		// must degrade like an unreachable registry — not throw and 500 the caller.
+		if (!Array.isArray(batch) || batch.length === 0) break;
 		for (const ra of batch) {
 			if (ra && ra.status === 'active' && ra.globalId) byId.set(ra.globalId, ra);
 		}
