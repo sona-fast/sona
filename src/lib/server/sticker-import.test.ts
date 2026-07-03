@@ -158,6 +158,14 @@ describe('parseStickerFormInputs', () => {
 		expect(out[0].imageUrl).toBe('/img/stickers/pack-a/a.webp');
 	});
 
+	it("does not pass through protocol-relative lookalikes ('//' or '/\\')", () => {
+		// Browsers treat '/\\host' like '//host' — both must NOT survive as-is.
+		for (const raw of ['//evil.com/x.webp', '/\\evil.com/x.webp']) {
+			const out = parseStickerFormInputs(fd({ 'sticker[0][imageUrl]': raw }), null);
+			expect(out[0].imageUrl).not.toBe(raw);
+		}
+	});
+
 	it('reads a checked NSFW box even though the hidden 0 fallback posts first', () => {
 		// The form emits BOTH the hidden `0` and the checked box's `1` under the same
 		// name, in that order — exactly what the real pack-edit form submits.
