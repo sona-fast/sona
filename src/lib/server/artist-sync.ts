@@ -71,6 +71,22 @@ export function aliasesToColumn(aliases: RegistryArtist['aliases']): string | nu
 	return clean.length ? JSON.stringify(clean) : null;
 }
 
+// Is this a Bluesky CDN avatar URL? Those embed a content hash that changes when
+// the account swaps its profile picture, so a stored one goes stale. Only these
+// are treated as registry-authoritative in the non-override refresh below.
+function isBlueskyAvatar(url: string): boolean {
+	return /^https?:\/\/cdn\.bsky\.app\//i.test(url);
+}
+
+// Non-override avatar pick: fill an empty local avatar from the registry, and
+// replace a STALE bsky-derived local avatar when the registry has a different
+// one. Any other local avatar (hand-set / self-hosted) is left untouched.
+export function pickRefreshedAvatar(local: string | null, registry: string | null): string | null {
+	if (!local) return registry;
+	if (isBlueskyAvatar(local) && registry && registry !== local) return registry;
+	return local;
+}
+
 export async function syncArtists(
 	db: Database,
 	env: Env | undefined,
@@ -135,10 +151,12 @@ export async function syncArtists(
 						})
 						.where(eq(artists.id, local.id));
 				} else {
-					// Respect local edits: only fill an empty avatar; keep name/socials.
+					// Respect local edits: keep name/socials. For the avatar, fill an empty
+					// one and refresh a stale bsky-derived one from the registry (see
+					// pickRefreshedAvatar); a hand-set/self-hosted avatar is left as-is.
 					await db
 						.update(artists)
-						.set({ avatarUrl: local.avatarUrl || avatar, aliases: aliasesToColumn(ra.aliases), ...base })
+						.set({ avatarUrl: pickRefreshedAvatar(local.avatarUrl, avatar), aliases: aliasesToColumn(ra.aliases), ...base })
 						.where(eq(artists.id, local.id));
 				}
 				refreshed++;
