@@ -13,6 +13,7 @@ import {
 } from '$lib/server/registry';
 import { fetchRegistryCatalog } from '$lib/server/registry-import';
 import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
+import { approvedSubmissionGlobalId, artistInCatalog } from '$lib/server/registry-submissions';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
@@ -64,7 +65,31 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// no-op and gets disabled. Fails open: an empty/unreachable catalog leaves it {}.
 	const upToDate: Record<number, boolean> = {};
 	if (registryEnabled) {
-		const pending = (await registrySubmissionsMine(platform?.env)).filter((s) => s.status === 'pending');
+		const subs = await registrySubmissionsMine(platform?.env);
+
+		// An APPROVED submission means the maintainer linked this artist into the
+		// registry. Stamp the global id now (marking it shared) instead of waiting
+		// for the next background sync — otherwise the pending badge just clears, the
+		// artist still looks unshared, and its "submit" re-enables, inviting a
+		// duplicate submission of an already-approved artist.
+		for (const a of allArtists) {
+			const linkedId = approvedSubmissionGlobalId(a, subs);
+			if (!linkedId) continue;
+			// The unique index on global_id forbids two local rows sharing an id.
+			const taken = await db
+				.select({ id: artists.id })
+				.from(artists)
+				.where(eq(artists.globalId, linkedId))
+				.get();
+			if (taken) continue;
+			await db
+				.update(artists)
+				.set({ globalId: linkedId, registrySyncedAt: new Date().toISOString() })
+				.where(eq(artists.id, a.id));
+			a.globalId = linkedId; // reflect in this render so the badge + guard update
+		}
+
+		const pending = subs.filter((s) => s.status === 'pending');
 		pendingArtistIds = allArtists
 			.filter((a) =>
 				pending.some((s) => {
@@ -78,13 +103,19 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			)
 			.map((a) => a.id);
 
-		// One catalog fetch; compare each linked artist against its entry.
+		// One catalog fetch; compare each linked artist against its entry. A linked
+		// artist that already matches has nothing to submit; an unlinked artist
+		// that's already in the catalog would be a duplicate — disable "submit" for
+		// both so an already-shared artist can't be resubmitted.
 		const catalog = await fetchRegistryCatalog(platform?.env);
 		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));
 		for (const a of allArtists) {
-			if (!a.globalId) continue;
-			const entry = byGlobalId.get(a.globalId);
-			if (entry && !artistDiffersFromRegistry(a, entry)) upToDate[a.id] = true;
+			if (a.globalId) {
+				const entry = byGlobalId.get(a.globalId);
+				if (entry && !artistDiffersFromRegistry(a, entry)) upToDate[a.id] = true;
+			} else if (artistInCatalog(a, catalog)) {
+				upToDate[a.id] = true;
+			}
 		}
 	}
 
