@@ -28,7 +28,7 @@ const REQUEST_HEADERS = {
 };
 
 /** Product token identifying the Sona fursuit-photos integration in the UA. */
-const UA_PRODUCT = 'Sona-Fursuit/1.0';
+const UA_PRODUCT = 'Sona-Fast/1.0';
 
 /**
  * User-Agent for outbound FurTrack requests. FurTrack 403s a non-Mozilla UA, so we
