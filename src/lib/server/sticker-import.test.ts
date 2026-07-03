@@ -20,9 +20,12 @@ import {
 	importTelegramPack,
 	importStickerBatch,
 	resyncTelegramPacks,
+	resolveSiteCharacterId,
 	CRON_MAX_NEW
 } from './sticker-import';
+import { listPublicCharacterNames } from '$lib/server/characters';
 import { getStickerSet, downloadFile } from '$lib/server/telegram';
+import { readFileSync } from 'node:fs';
 
 // Telegram is mocked so the import path is exercisable offline. getStickerSet
 // returns a one-sticker set and downloadFile always throws — i.e. the "every
@@ -234,7 +237,8 @@ const DDL = `
 CREATE TABLE characters (
 	id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, owner_name TEXT, url TEXT,
 	twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
-	deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT, avatar_url TEXT, created_at TEXT NOT NULL
+	deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT, avatar_url TEXT,
+	is_owner INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
 );
 CREATE TABLE artists (
 	id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT, twitter_url TEXT,
@@ -875,5 +879,73 @@ describe('resyncTelegramPacks', () => {
 		const r = await resyncTelegramPacks({ env: r2Env, settings: r2Settings, db });
 		expect(r).toMatchObject({ packsChecked: 1, imported: 0, capReached: false });
 		expect(r.perPack).toEqual([{ slug: 'mega-pack', imported: 0 }]);
+	});
+});
+
+describe('resolveSiteCharacterId', () => {
+	// The auto-create branch (fresh fork, no characters) manufactures a placeholder
+	// solely to satisfy the stickers character FK. It must be flagged is_owner so it
+	// stays out of public character listings; a pre-existing character we merely
+	// resolve must NOT be flagged (it's a real, publicly-featured character).
+	function settings(overrides: Partial<SiteSettings>): SiteSettings {
+		return { primaryCharacter: '', ownerName: '', siteName: '', ...overrides } as unknown as SiteSettings;
+	}
+
+	it('auto-creates an is_owner character named after the owner when none exist', async () => {
+		const { db } = makeDb();
+		const id = await resolveSiteCharacterId(db, settings({ ownerName: 'Taro', siteName: 'taro.surf' }));
+		const row = await db.select({ name: characters.name, isOwner: characters.isOwner }).from(characters).where(eq(characters.id, id)).get();
+		expect(row).toEqual({ name: 'Taro', isOwner: true });
+	});
+
+	it('reuses the configured primaryCharacter WITHOUT flagging it is_owner', async () => {
+		const { db } = makeDb();
+		await db.insert(characters).values({ name: 'Rex', createdAt: new Date().toISOString() });
+		const id = await resolveSiteCharacterId(db, settings({ primaryCharacter: 'Rex' }));
+		const row = await db.select({ name: characters.name, isOwner: characters.isOwner }).from(characters).where(eq(characters.id, id)).get();
+		expect(row).toEqual({ name: 'Rex', isOwner: false });
+	});
+
+	it('falls back to the first existing character WITHOUT flagging it is_owner', async () => {
+		const { db } = makeDb();
+		await db.insert(characters).values({ name: 'Rex', createdAt: new Date().toISOString() });
+		const id = await resolveSiteCharacterId(db, settings({}));
+		const row = await db.select({ isOwner: characters.isOwner }).from(characters).where(eq(characters.id, id)).get();
+		expect(row).toEqual({ isOwner: false });
+	});
+});
+
+describe('listPublicCharacterNames', () => {
+	it('excludes is_owner characters and returns the rest ordered by name', async () => {
+		const { db } = makeDb();
+		await db.insert(characters).values([
+			{ name: 'Zephyr', createdAt: new Date().toISOString() },
+			{ name: 'taro.surf', isOwner: true, createdAt: new Date().toISOString() },
+			{ name: 'Aria', createdAt: new Date().toISOString() }
+		]);
+		const rows = await listPublicCharacterNames(db);
+		expect(rows).toEqual([{ name: 'Aria' }, { name: 'Zephyr' }]);
+	});
+});
+
+describe('migration 0018 owner_character_flag backfill', () => {
+	// Runs the REAL migration SQL against a pre-migration schema so the backfill
+	// signal is verified end-to-end (not a re-implementation that could drift).
+	it('flags a pack-owning imageless character but never a featured one', () => {
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`
+			CREATE TABLE characters (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+			CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY, character_id INTEGER NOT NULL);
+			CREATE TABLE image_characters (image_id INTEGER NOT NULL, character_id INTEGER NOT NULL);
+			-- id 1: auto-created owner (owns a pack, in no art). id 2: featured (in art,
+			-- also owns a pack — proves owning a pack alone doesn't flag a featured char).
+			INSERT INTO characters (id, name) VALUES (1, 'taro.surf'), (2, 'Rex');
+			INSERT INTO sticker_packs (id, character_id) VALUES (1, 1), (2, 2);
+			INSERT INTO image_characters (image_id, character_id) VALUES (5, 2);
+		`);
+		const migration = readFileSync(new URL('../../../drizzle/0018_owner_character_flag.sql', import.meta.url), 'utf8');
+		for (const stmt of migration.split('--> statement-breakpoint')) sqlite.exec(stmt);
+		const rows = sqlite.prepare('SELECT id, is_owner FROM characters ORDER BY id').all();
+		expect(rows).toEqual([{ id: 1, is_owner: 1 }, { id: 2, is_owner: 0 }]);
 	});
 });

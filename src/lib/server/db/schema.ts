@@ -83,6 +83,11 @@ export const characters = sqliteTable('characters', {
 	patreonUrl: text('patreon_url'),
 	instagramUrl: text('instagram_url'),
 	avatarUrl: text('avatar_url'),
+	// The site's implicit "owner" character, auto-created only to satisfy the
+	// stickers character FK on a fork that had no characters yet (see
+	// resolveSiteCharacterId). Excluded from public character listings — it's the
+	// pack owner, not part of the featured cast — but still editable in admin.
+	isOwner: integer('is_owner', { mode: 'boolean' }).notNull().default(false),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
 

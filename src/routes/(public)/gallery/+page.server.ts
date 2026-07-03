@@ -1,6 +1,7 @@
 import { getReadDb } from '$lib/server/db';
-import { images, artists, imageTags, tags, characters, fursuitPhotos as fursuitPhotosTable } from '$lib/server/db/schema';
+import { images, artists, imageTags, tags, fursuitPhotos as fursuitPhotosTable } from '$lib/server/db/schema';
 import { eq, desc, asc, like, sql, and, inArray, type SQL } from 'drizzle-orm';
+import { listPublicCharacterNames } from '$lib/server/characters';
 import { fursuitPhotoFromRow } from '$lib/server/fursuit-import';
 import { getMode } from '$lib/server/furtrack';
 import { parseAliases } from '$lib/server/registry';
@@ -158,9 +159,11 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		}));
 
 		// Get all tags and characters for filters (artists already loaded above).
+		// Owner/site characters are excluded from the public character filter — see
+		// listPublicCharacterNames.
 		const [allTags, allCharacters] = await Promise.all([
 			db.select({ name: tags.name }).from(tags).orderBy(tags.name),
-			db.select({ name: characters.name }).from(characters).orderBy(characters.name)
+			listPublicCharacterNames(db)
 		]);
 
 		// Carry each artist's former names so the combobox can offer an old name

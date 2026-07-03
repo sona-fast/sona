@@ -322,6 +322,13 @@ function stickerWriteStatements(
  * yet, auto-creates one from the owner/persona name (characterId is a NOT NULL
  * fk) so first-run import "just works". Revisit if the site ever hosts multiple
  * characters.
+ *
+ * Only the auto-create path flags the row is_owner. A pre-existing character we
+ * resolve here (the configured primaryCharacter, or the first row) is a real
+ * curated character that legitimately belongs in public listings — flagging it
+ * would hide a fork's actual fursona from the gallery — so it is left as-is. The
+ * flag marks specifically the placeholder we manufacture solely for the stickers
+ * FK, which is what pollutes public character surfaces on a fresh fork.
  */
 export async function resolveSiteCharacterId(db: Database, settings: SiteSettings): Promise<number> {
 	if (settings.primaryCharacter) {
@@ -336,9 +343,11 @@ export async function resolveSiteCharacterId(db: Database, settings: SiteSetting
 	if (first) return first.id;
 	// The site is for ONE character (the owner's fursona) and none exists yet.
 	// Auto-create it from the owner/persona name (falling back to the site name)
-	// instead of failing, so first-run import just works.
+	// instead of failing, so first-run import just works. Flag it is_owner so it
+	// stays out of public "featured characters" surfaces (it's the pack owner, not
+	// a featured character) while remaining editable in admin.
 	const name = (settings.ownerName || settings.siteName || 'Me').trim() || 'Me';
-	const created = await db.insert(characters).values({ name }).returning({ id: characters.id }).get();
+	const created = await db.insert(characters).values({ name, isOwner: true }).returning({ id: characters.id }).get();
 	return created.id;
 }
 
