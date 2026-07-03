@@ -101,19 +101,32 @@ async function main() {
 		}
 	}
 
-	// Default the project name from the fork's directory so a rename doesn't
-	// silently reuse the template's `sona` resources; the operator can override.
-	const defaultProject = sanitizeProjectName(basename(cwd()));
+	// Storage backend is decided first (it needs a bucket / a token). The bucket is
+	// created either way so the IMAGES binding is always valid and you can switch
+	// to R2 later without re-provisioning.
+	const useR2 = await askYesNo('Use Cloudflare R2 for image storage now? (otherwise UploadThing)', true);
+
+	// The site's domain only seeds sensible defaults (the Pages project name and the
+	// R2 public/CDN URL). Setup does NOT configure DNS or attach a custom domain to
+	// the bucket — that needs DNS-scoped access we don't ask for, so it stays a
+	// manual step (called out in Next steps). Only asked for R2, where it seeds the
+	// CDN URL.
+	const domain = useR2 ? await ask("Your site's domain (e.g. taro.surf) — blank to skip", '') : '';
+
+	// Default the project name from the domain (the most meaningful identifier),
+	// else the fork's directory, so a rename doesn't silently reuse the template's
+	// `sona` resources; the operator can override.
+	const defaultProject = sanitizeProjectName(domain || basename(cwd()));
 	const project = await ask('Cloudflare Pages project name (lowercase, hyphenated)', defaultProject);
 	const dbName = await ask('D1 database name', `${project}-db`);
 	const bucket = await ask('R2 bucket name', `${project}-images`);
 
-	// Storage backend is decided here (it needs a bucket / a token). The bucket is
-	// created either way so the IMAGES binding is always valid and you can switch
-	// to R2 later without re-provisioning.
-	const useR2 = await askYesNo('Use Cloudflare R2 for image storage now? (otherwise UploadThing)', true);
+	// Default the R2 public URL to cdn.<domain> when a domain was given.
 	const r2PublicUrl = useR2
-		? await ask("R2 public URL (the bucket's custom domain; blank to set later)", '')
+		? await ask(
+				"R2 public URL (the bucket's custom domain; blank to set later)",
+				domain ? `cdn.${domain}` : ''
+			)
 		: '';
 	const uploadThingToken = useR2 ? '' : await ask('UploadThing token (UPLOADTHING_TOKEN)', '');
 	const provider = useR2 ? 'r2' : 'uploadthing';
@@ -253,6 +266,13 @@ async function main() {
 	console.log('\nNext steps:\n');
 	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');
 	console.log(`  2. Open  https://${project}.pages.dev/admin/setup  and finish in the wizard.`);
+	if (useR2 && r2PublicUrl) {
+		console.log(`  3. Point ${r2PublicUrl} at the bucket YOURSELF (setup did not touch DNS):`);
+		console.log(
+			`     Cloudflare dashboard → R2 → ${bucket} → Settings → Custom Domains → add ${r2PublicUrl},`
+		);
+		console.log('     then create the DNS record it prompts for. Images 404 until this is done.');
+	}
 	console.log('\n  Your one-time setup token (enter it in the wizard):\n');
 	console.log(`     SETUP_TOKEN = ${setupToken}`);
 	if (ciSecretsSet) {
