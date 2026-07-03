@@ -7,18 +7,28 @@
  *
  * It creates the Pages project, D1 database, and R2 bucket; picks the storage
  * provider (R2 or UploadThing) and wires its secret/URL; writes `wrangler.toml`;
- * applies migrations; seeds storageProvider; and generates + sets SETUP_TOKEN and
- * CRON_SECRET. Branding, theme, and the admin password are set afterward in the
- * in-app first-run wizard at /admin/setup. To switch storage later, use
- * Settings → Storage Provider (which sets up the new token/bucket + migrates).
+ * applies migrations (recording them in schema_migrations so the first CI deploy
+ * is a no-op); seeds storageProvider; generates + sets SETUP_TOKEN and
+ * CRON_SECRET; and optionally wires the fork's GitHub Actions secrets/vars.
+ * Branding, theme, and the admin password are set afterward in the in-app
+ * first-run wizard at /admin/setup. To switch storage later, use Settings →
+ * Storage Provider (which sets up the new token/bucket + migrates).
  *
  * Prerequisites: `wrangler login` (or CLOUDFLARE_API_TOKEN) must be set up first.
  */
 import { execSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { stdin, stdout } from 'node:process';
+import { stdin, stdout, env, cwd } from 'node:process';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import {
+	buildMigrationSql,
+	sanitizeProjectName,
+	isR2NotEnabled,
+	ghSecretEligibility
+} from './setup-lib.ts';
 
 const rl = createInterface({ input: stdin, output: stdout });
 const ask = async (q: string, def: string) => {
@@ -31,14 +41,47 @@ const askYesNo = async (q: string, def = true) => {
 	return a === 'y' || a === 'yes';
 };
 
-function run(cmd: string, opts: { capture?: boolean; allowFail?: boolean } = {}): string {
+type RunOpts = { capture?: boolean; allowFail?: boolean; stdin?: 'inherit' | 'ignore' };
+function run(cmd: string, opts: RunOpts = {}): string {
 	console.log(`\n$ ${cmd}`);
 	try {
-		const out = execSync(cmd, { stdio: opts.capture ? 'pipe' : 'inherit', encoding: 'utf8' });
+		const stdio: import('node:child_process').StdioOptions = opts.capture
+			? 'pipe'
+			: [opts.stdin ?? 'inherit', 'inherit', 'inherit'];
+		const out = execSync(cmd, { stdio, encoding: 'utf8' });
 		return out ?? '';
 	} catch (err) {
-		if (opts.allowFail) return '';
+		if (opts.allowFail) {
+			// On a tolerated failure, hand back whatever the command printed so callers
+			// can sniff it (e.g. the R2 "not enabled" error). Inherited stdio isn't
+			// captured, so this is only non-empty when `capture` was set.
+			const e = err as { stdout?: string | Buffer; stderr?: string | Buffer };
+			return `${e.stdout ?? ''}${e.stderr ?? ''}`;
+		}
 		throw err;
+	}
+}
+
+// True when the command runs to a zero exit. Used for gh/git probes where we
+// only care about success, not output.
+function commandSucceeds(cmd: string): boolean {
+	try {
+		execSync(cmd, { stdio: 'ignore' });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// Set a GitHub Actions secret/variable, passing the value on stdin so it is
+// never printed (the token must not land in the console log).
+function ghSet(kind: 'secret' | 'variable', name: string, value: string): boolean {
+	console.log(`\n$ gh ${kind} set ${name}`);
+	try {
+		execSync(`gh ${kind} set ${name}`, { input: value, stdio: ['pipe', 'inherit', 'inherit'] });
+		return true;
+	} catch {
+		return false;
 	}
 }
 
@@ -58,7 +101,10 @@ async function main() {
 		}
 	}
 
-	const project = await ask('Cloudflare Pages project name (lowercase, hyphenated)', 'sona');
+	// Default the project name from the fork's directory so a rename doesn't
+	// silently reuse the template's `sona` resources; the operator can override.
+	const defaultProject = sanitizeProjectName(basename(cwd()));
+	const project = await ask('Cloudflare Pages project name (lowercase, hyphenated)', defaultProject);
 	const dbName = await ask('D1 database name', `${project}-db`);
 	const bucket = await ask('R2 bucket name', `${project}-images`);
 
@@ -81,8 +127,19 @@ async function main() {
 	let dbId = (d1Out.match(/database_id\s*=\s*"([0-9a-fA-F-]+)"/) || [])[1] ?? '';
 	if (!dbId) dbId = await ask('Could not auto-detect database_id — paste it from the output above', '');
 
-	// 3. R2 bucket — always create it so the IMAGES binding is valid.
-	run(`npx wrangler r2 bucket create ${bucket}`, { allowFail: true });
+	// 3. R2 bucket — always create it so the IMAGES binding is valid. Detect the
+	//    "R2 not enabled on this account" case (error 10042) rather than swallowing
+	//    it as success and later claiming the R2 backend is set up.
+	const r2Out = run(`npx wrangler r2 bucket create ${bucket}`, { capture: true, allowFail: true });
+	process.stdout.write(r2Out);
+	const r2Missing = isR2NotEnabled(r2Out);
+	if (r2Missing) {
+		console.warn('\n⚠ R2 does not appear to be enabled on this Cloudflare account.');
+		console.warn('  Enable it at dash.cloudflare.com → R2, then re-run setup');
+		console.warn(`  (or run:  npx wrangler r2 bucket create ${bucket}).`);
+		if (useR2)
+			console.warn(`  Image uploads will NOT work until the bucket "${bucket}" exists.`);
+	}
 
 	// 4. Render wrangler.toml from the template.
 	const tpl = readFileSync('wrangler.toml.example', 'utf8');
@@ -94,13 +151,29 @@ async function main() {
 	writeFileSync('wrangler.toml', toml);
 	console.log('\n✔ wrote wrangler.toml');
 
-	// 5. Apply D1 migrations (remote).
-	const migrations = run('ls drizzle/*.sql', { capture: true })
-		.split('\n')
-		.map((s) => s.trim())
-		.filter(Boolean);
-	for (const f of migrations) {
-		run(`npx wrangler d1 execute ${dbName} --remote --file="${f}"`, { allowFail: true });
+	// 5. Apply D1 migrations (remote) in ONE execute. We build a single SQL script
+	//    — CREATE schema_migrations + every drizzle/*.sql in order, each followed
+	//    by an INSERT that records its basename — so there is one remote call (not
+	//    ~18) and the DB ends in the state the deploy workflow's tracked migration
+	//    step treats as already-applied (a clean no-op on the first CI deploy).
+	//    stdin is ignored so wrangler's interactive "Ok to proceed?" never fires
+	//    (the same reason CI, which has no TTY, is never prompted).
+	const migFiles = readdirSync('drizzle')
+		.filter((f) => f.endsWith('.sql'))
+		.sort();
+	const combinedSql = buildMigrationSql(
+		migFiles.map((name) => ({ name, sql: readFileSync(join('drizzle', name), 'utf8') }))
+	);
+	const combinedPath = join(tmpdir(), `sona-migrations-${token(6)}.sql`);
+	writeFileSync(combinedPath, combinedSql);
+	try {
+		run(`npx wrangler d1 execute ${dbName} --remote --file="${combinedPath}"`, { stdin: 'ignore' });
+	} finally {
+		try {
+			unlinkSync(combinedPath);
+		} catch {
+			/* best-effort temp cleanup */
+		}
 	}
 
 	// 6. Seed the storage provider so the app boots with the chosen backend (the
@@ -108,7 +181,10 @@ async function main() {
 	let seed = `INSERT OR REPLACE INTO site_settings (key,value) VALUES ('storageProvider','${provider}')`;
 	if (useR2 && r2PublicUrl) seed += `, ('r2PublicUrl','${sqlStr(r2PublicUrl)}')`;
 	seed += ';';
-	run(`npx wrangler d1 execute ${dbName} --remote --command "${seed}"`, { allowFail: true });
+	run(`npx wrangler d1 execute ${dbName} --remote --command "${seed}"`, {
+		allowFail: true,
+		stdin: 'ignore'
+	});
 
 	// 7. Generate + set secrets. SETUP_TOKEN gates the first-run wizard.
 	const setupToken = token();
@@ -121,16 +197,71 @@ async function main() {
 	putSecret('CRON_SECRET', cronSecret);
 	if (!useR2 && uploadThingToken) putSecret('UPLOADTHING_TOKEN', uploadThingToken);
 
+	// 8. Offer to wire the fork's GitHub Actions secrets/vars so CI deploys work
+	//    with no separate manual step. Only when gh is installed + authenticated,
+	//    there is a GitHub origin, and the CLOUDFLARE_* values are in the env (if
+	//    the operator used `wrangler login` there is no token value to pass on).
+	const originUrl = run('git remote get-url origin', { capture: true, allowFail: true }).trim();
+	const gh = ghSecretEligibility({
+		ghInstalled: commandSucceeds('gh --version'),
+		ghAuthenticated: commandSucceeds('gh auth status'),
+		hasGithubOrigin: /github\.com/i.test(originUrl),
+		apiToken: env.CLOUDFLARE_API_TOKEN,
+		accountId: env.CLOUDFLARE_ACCOUNT_ID
+	});
+	let ciSecretsSet = false;
+	if (gh.eligible) {
+		const doIt = await askYesNo(
+			'Set this repo\'s GitHub Actions secrets/vars for CI deploys (from your CLOUDFLARE_* env)?',
+			false
+		);
+		if (doIt) {
+			const ok = [
+				ghSet('secret', 'CLOUDFLARE_API_TOKEN', env.CLOUDFLARE_API_TOKEN!),
+				ghSet('secret', 'CLOUDFLARE_ACCOUNT_ID', env.CLOUDFLARE_ACCOUNT_ID!),
+				ghSet('variable', 'CF_PAGES_PROJECT', project),
+				ghSet('variable', 'D1_DATABASE_NAME', dbName)
+			].every(Boolean);
+			ciSecretsSet = ok;
+			if (ok)
+				console.log(
+					'\n✔ CI secrets/variables set (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CF_PAGES_PROJECT, D1_DATABASE_NAME).'
+				);
+			else
+				console.warn(
+					'\n⚠ Some `gh` secret/variable commands failed — check `gh` auth/permissions and set them manually.'
+				);
+		}
+	} else {
+		console.log(`\nℹ Skipping GitHub Actions secret setup: ${gh.reason}.`);
+		console.log(
+			'  CI deploys need CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID secrets and CF_PAGES_PROJECT'
+		);
+		console.log('  + D1_DATABASE_NAME variables (Settings → Secrets and variables → Actions).');
+	}
+
 	rl.close();
 
 	console.log('\n──────────────────────────────────────────────');
-	console.log(`Storage backend: ${provider === 'r2' ? 'Cloudflare R2' : 'UploadThing'} (set up).`);
-	console.log('Next steps:\n');
+	if (useR2 && r2Missing) {
+		console.log('Storage backend: Cloudflare R2 — NOT READY (R2 is not enabled on this account).');
+		console.log(`  Create the bucket, then re-run setup:  npx wrangler r2 bucket create ${bucket}`);
+	} else {
+		console.log(`Storage backend: ${provider === 'r2' ? 'Cloudflare R2' : 'UploadThing'} (set up).`);
+	}
+	console.log('Migrations applied and recorded in schema_migrations (first CI deploy is a no-op).');
+	console.log('\nNext steps:\n');
 	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');
 	console.log(`  2. Open  https://${project}.pages.dev/admin/setup  and finish in the wizard.`);
 	console.log('\n  Your one-time setup token (enter it in the wizard):\n');
 	console.log(`     SETUP_TOKEN = ${setupToken}`);
-	console.log('\n  (CRON_SECRET set for the cron jobs; storageProvider seeded.)');
+	if (ciSecretsSet) {
+		console.log('\n  CI deploy secrets/variables are set — pushing to main will deploy.');
+	} else {
+		console.log('\n  Before deploying via GitHub, set the CI secrets/variables (see the note above).');
+	}
+	console.log('  Verify bindings any time with:  npx wrangler pages project list  /  npx wrangler d1 list');
+	console.log('  (CRON_SECRET set for the cron jobs; storageProvider seeded.)');
 	console.log('──────────────────────────────────────────────\n');
 }
 
