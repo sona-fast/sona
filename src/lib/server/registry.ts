@@ -5,8 +5,15 @@
 
 import { REGISTRY_DEFAULT_URL } from '$lib/config';
 import { withTimeout } from './timeout';
+import { getRawSetting } from './settings';
+import type { Database } from './db';
 
 type Env = App.Platform['env'];
+
+/** site_settings keys for an in-app (D1-stored) registry connection. Kept out of
+ * the SiteSettings interface so the fork key never serializes to the browser. */
+export const REGISTRY_API_KEY_SETTING = 'registryApiKey';
+export const REGISTRY_URL_SETTING = 'registryUrl';
 
 /** A former identity of an artist — an old display name plus its social links. */
 export interface ArtistAlias {
@@ -46,6 +53,57 @@ const TIMEOUT_MS = 5000;
 /** Registry features are opt-in: enabled only when a fork API key is configured. */
 export function isRegistryEnabled(env: Env | undefined): boolean {
 	return !!env?.REGISTRY_API_KEY;
+}
+
+/**
+ * Overlay a D1-stored fork key / registry URL onto the platform env, so a fork
+ * can be connected from the admin UI (key in site_settings) without a deploy-time
+ * secret. A `REGISTRY_API_KEY` env secret always wins and short-circuits the DB
+ * read. Callers pass the result to the registry functions / isRegistryEnabled.
+ */
+export async function resolveRegistryEnv(
+	db: Database,
+	env: Env | undefined
+): Promise<Env | undefined> {
+	if (!env || env.REGISTRY_API_KEY) return env; // secret wins; no DB read needed
+	const apiKey = (await getRawSetting(db, REGISTRY_API_KEY_SETTING)) || undefined;
+	if (!apiKey) return env;
+	const url = (await getRawSetting(db, REGISTRY_URL_SETTING)) || undefined;
+	return { ...env, REGISTRY_API_KEY: apiKey, REGISTRY_URL: url || env.REGISTRY_URL };
+}
+
+/**
+ * Register this fork with the registry (`POST /v1/forks`) using a maintainer
+ * invite token, returning the one-time fork key to store. Used by the in-app
+ * "Connect to registry" flow. No existing key needed (this is how you get one).
+ */
+export async function registryRegisterFork(opts: {
+	url?: string;
+	signupToken?: string;
+	label?: string;
+}): Promise<{ forkId: string; key: string } | { error: string }> {
+	const base = (opts.url || REGISTRY_DEFAULT_URL).replace(/\/+$/, '');
+	try {
+		const res = await withTimeout(
+			fetch(`${base}/v1/forks`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ signupToken: opts.signupToken, label: opts.label })
+			}),
+			TIMEOUT_MS,
+			null
+		);
+		if (!res) return { error: 'the registry did not respond — check the URL and try again' };
+		const data = (await res.json().catch(() => null)) as
+			| { forkId?: string; key?: string; error?: string }
+			| null;
+		if (!res.ok || !data?.key || !data?.forkId) {
+			return { error: data?.error || `registry returned HTTP ${res.status}` };
+		}
+		return { forkId: data.forkId, key: data.key };
+	} catch {
+		return { error: 'could not reach the registry' };
+	}
 }
 
 function baseUrl(env: Env): string {

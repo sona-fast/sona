@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
@@ -17,6 +18,7 @@
 	let landingLayout = $state(data.settings.landingLayout);
 	let registryOverridesLocal = $state(data.settings.registryOverridesLocal);
 	let syncing = $state(false);
+	let connectingRegistry = $state(false);
 	let primaryCharacter = $state(data.settings.primaryCharacter);
 	let twitterUrl = $state(data.settings.twitterUrl);
 	let blueskyUrl = $state(data.settings.blueskyUrl);
@@ -53,6 +55,7 @@
 	// Which danger-zone / export action is in flight (disables + labels
 	// its button while the form round-trips).
 	let runningAction = $state<'deleteAll' | 'clearCache' | 'resetTags' | 'export' | null>(null);
+	let disconnecting = $state(false);
 	let actionMessage = $state('');
 	let actionError = $state('');
 
@@ -405,6 +408,69 @@
 			<button type="submit" class="btn btn-secondary" disabled={syncing}>
 				{#if syncing}<Loader2 size={16} class="spin" /> {m.admin_settings_syncing()}{:else}<RefreshCw size={16} /> {m.admin_settings_sync_now()}{/if}
 			</button>
+		</section>
+	</form>
+{/if}
+
+{#if data.registryHasSecret}
+	<div class="contents">
+		<section data-tab="connections">
+			<h2>{m.admin_settings_registry_connection()}</h2>
+			<p class="reg-status connected">{m.admin_settings_registry_secret_pre()}<code>REGISTRY_API_KEY</code>{m.admin_settings_registry_secret_post()}</p>
+		</section>
+	</div>
+{:else if data.registryEnabled}
+	<form method="POST" action="?/disconnectRegistry" class="contents" use:enhance={() => {
+		disconnecting = true;
+		return async ({ result }) => {
+			disconnecting = false;
+			if (result.type === 'success') { toast.success(m.admin_settings_registry_disconnected()); await invalidateAll(); }
+			else toast.error(m.admin_settings_registry_disconnect_failed());
+		};
+	}}>
+		<section data-tab="connections">
+			<h2>{m.admin_settings_registry_connection()}</h2>
+			<p class="reg-status">{m.admin_settings_registry_forkkey_desc()}</p>
+			<p class="section-desc">
+				{m.admin_settings_registry_disconnect_desc()}
+			</p>
+			<button type="submit" class="btn btn-secondary" disabled={disconnecting || syncing}>
+				{disconnecting ? m.admin_settings_disconnecting() : m.admin_settings_registry_disconnect()}
+			</button>
+		</section>
+	</form>
+{:else}
+	<form method="POST" action="?/connectRegistry" class="contents" use:enhance={() => {
+		connectingRegistry = true;
+		return async ({ result }) => {
+			connectingRegistry = false;
+			if (result.type === 'success') { toast.success(m.admin_settings_registry_connected_toast()); await invalidateAll(); }
+			else if (result.type === 'failure') toast.error((result.data?.error as string) ?? m.admin_settings_registry_connect_failed());
+		};
+	}}>
+		<section data-tab="connections">
+			<h2>{m.admin_settings_registry_connect_heading()}</h2>
+			<p class="section-desc">
+				{m.admin_settings_registry_connect_desc()}
+			</p>
+			<label>
+				<span>{m.admin_settings_invite_token()}</span>
+				<input type="text" name="signupToken" class="input" placeholder={m.admin_settings_invite_token_placeholder()} required />
+			</label>
+			<details class="reg-advanced">
+				<summary>{m.admin_settings_registry_advanced()}</summary>
+				<label>
+					<span>{m.admin_settings_registry_url()}</span>
+					<input type="url" name="registryUrl" class="input" placeholder={m.admin_settings_registry_url_placeholder()} />
+				</label>
+				<p class="hint">{m.admin_settings_registry_url_hint()}</p>
+			</details>
+			<button type="submit" class="btn btn-primary" disabled={connectingRegistry}>
+				{connectingRegistry ? m.admin_settings_connecting() : m.admin_settings_connect_registry()}
+			</button>
+			<p class="hint">
+				{m.admin_settings_forkkey_hint()}
+			</p>
 		</section>
 	</form>
 {/if}
@@ -924,6 +990,28 @@
 	}
 	.reg-status.connected {
 		color: var(--primary);
+	}
+	.reg-status code {
+		font-family: var(--font-primary);
+		font-size: 0.9em;
+		background: var(--secondary);
+		padding: 1px 5px;
+		border-radius: var(--radius-xs);
+	}
+	.reg-advanced {
+		margin: 4px 0 8px;
+	}
+	.reg-advanced summary {
+		font-size: 13px;
+		color: var(--muted-foreground);
+		cursor: pointer;
+		margin-bottom: 10px;
+	}
+	.hint {
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin: 8px 0 0;
+		line-height: 1.5;
 	}
 	:global(.spin) {
 		animation: spin 1s linear infinite;

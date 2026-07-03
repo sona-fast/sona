@@ -2,7 +2,12 @@ import { dev } from '$app/environment';
 import { fail } from '@sveltejs/kit';
 import { UTApi } from 'uploadthing/server';
 import { getDb } from '$lib/server/db';
-import { getSettings, saveSettings } from '$lib/server/settings';
+import {
+	getSettings,
+	saveSettings,
+	setRawSetting,
+	clearSettingsCache
+} from '$lib/server/settings';
 import { deleteOrphansAll } from '$lib/server/storage';
 import {
 	images,
@@ -20,7 +25,13 @@ import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
-import { isRegistryEnabled } from '$lib/server/registry';
+import {
+	isRegistryEnabled,
+	resolveRegistryEnv,
+	registryRegisterFork,
+	REGISTRY_API_KEY_SETTING,
+	REGISTRY_URL_SETTING
+} from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
@@ -82,13 +93,18 @@ export const load: PageServerLoad = async ({ platform }) => {
 		r2: !!platform?.env.IMAGES
 	};
 
+	// Registry can be connected either by a deploy-time secret OR an in-app
+	// (D1-stored) fork key — resolve both. registryHasSecret tells the UI to hide
+	// the connect/disconnect controls (a secret can't be managed from here).
+	const renv = await resolveRegistryEnv(db, platform?.env);
 	return {
 		settings,
 		imageCount: stats?.count || 0,
 		totalSize: stats?.totalSize || 0,
 		utUsage,
 		storageStatus,
-		registryEnabled: isRegistryEnabled(platform?.env)
+		registryEnabled: isRegistryEnabled(renv),
+		registryHasSecret: !!platform?.env?.REGISTRY_API_KEY
 	};
 };
 
@@ -160,14 +176,54 @@ export const actions = {
 
 	syncNow: async ({ platform }) => {
 		const env = platform?.env;
-		if (!isRegistryEnabled(env)) return fail(400, { error: 'Shared registry is not configured.' });
 		const db = getDb(env!.DB);
+		const renv = await resolveRegistryEnv(db, env);
+		if (!isRegistryEnabled(renv)) return fail(400, { error: 'Shared registry is not configured.' });
 		const settings = await getSettings(db, { fresh: true });
-		const summary = await syncArtists(db, env, settings);
+		const summary = await syncArtists(db, renv, settings);
 		return {
 			success: true,
 			syncMessage: `Sync complete — ${summary.refreshed} refreshed, ${summary.linked} newly linked.`
 		};
+	},
+
+	connectRegistry: async ({ request, platform }) => {
+		const env = platform?.env;
+		const db = getDb(env!.DB);
+		// A deploy-time secret already connects the fork; nothing to do here.
+		if (env?.REGISTRY_API_KEY) {
+			return fail(400, {
+				error: 'A REGISTRY_API_KEY secret is already configured at deploy time.'
+			});
+		}
+		const data = await request.formData();
+		const signupToken = sanitizeText(data.get('signupToken') as string, 200);
+		const registryUrl = sanitizeUrl(data.get('registryUrl') as string) || '';
+		const label = sanitizeText(data.get('label') as string, 200) || undefined;
+		if (!signupToken) return fail(400, { error: 'An invite token is required to connect.' });
+
+		const result = await registryRegisterFork({
+			url: registryUrl || undefined,
+			signupToken,
+			label
+		});
+		if ('error' in result) return fail(400, { error: `Could not connect: ${result.error}.` });
+
+		// Store the one-time fork key (and any custom URL) in D1 so the connection
+		// survives without a deploy. The key never goes back to the client.
+		await setRawSetting(db, REGISTRY_API_KEY_SETTING, result.key);
+		await setRawSetting(db, REGISTRY_URL_SETTING, registryUrl);
+		clearSettingsCache();
+		return { success: true, registryMessage: 'Connected to the shared registry.' };
+	},
+
+	disconnectRegistry: async ({ platform }) => {
+		const env = platform?.env;
+		const db = getDb(env!.DB);
+		await setRawSetting(db, REGISTRY_API_KEY_SETTING, '');
+		await setRawSetting(db, REGISTRY_URL_SETTING, '');
+		clearSettingsCache();
+		return { success: true, registryMessage: 'Disconnected from the shared registry.' };
 	},
 
 	changePassword: async ({ request, platform, cookies }) => {
