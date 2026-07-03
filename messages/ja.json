@@ -343,6 +343,7 @@
 	"admin_artists_registry_submitted": "レジストリに審査を申請しました",
 	"admin_artists_registry_failed": "レジストリへの送信に失敗しました",
 	"admin_artists_submit_registry": "共有レジストリに申請",
+	"admin_artists_up_to_date": "すでに共有レジストリに反映済みです",
 	"admin_artists_edit_aria": "アーティストを編集",
 	"admin_artists_delete_aria": "アーティストを削除",
 	"admin_artists_no_match": "「{search}」に一致するアーティストはいません",
