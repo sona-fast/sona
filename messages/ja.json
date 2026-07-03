@@ -453,7 +453,7 @@
 	"admin_pack_details": "セットの詳細",
 	"admin_pack_name": "セット名",
 	"admin_pack_name_placeholder": "マイスタンプセット",
-	"admin_pack_manager": "管理者（空欄の場合は {ownerName}）",
+	"admin_pack_manager": "管理者（既定: {ownerName}）",
 	"admin_pack_manager_self": "自分（{ownerName}）",
 	"admin_pack_new_artist": "新規アーティスト",
 	"admin_pack_new_manager": "新規管理者",

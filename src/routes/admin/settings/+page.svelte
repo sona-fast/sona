@@ -189,19 +189,19 @@
 			<div class="social-grid">
 				<label>
 					<span>Twitter / X</span>
-					<input type="text" class="input" bind:value={twitterUrl} name="twitter" />
+					<input type="text" class="input" bind:value={twitterUrl} name="twitter" placeholder="https://twitter.com/yourname" />
 				</label>
 				<label>
 					<span>Bluesky</span>
-					<input type="text" class="input" bind:value={blueskyUrl} name="bluesky" />
+					<input type="text" class="input" bind:value={blueskyUrl} name="bluesky" placeholder="https://bsky.app/profile/yourname.bsky.social" />
 				</label>
 				<label>
 					<span>Telegram</span>
-					<input type="text" class="input" bind:value={telegramUrl} name="telegram" />
+					<input type="text" class="input" bind:value={telegramUrl} name="telegram" placeholder="https://t.me/yourname" />
 				</label>
 				<label>
 					<span>FurAffinity</span>
-					<input type="text" class="input" bind:value={furAffinityUrl} name="furaffinity" />
+					<input type="text" class="input" bind:value={furAffinityUrl} name="furaffinity" placeholder="https://www.furaffinity.net/user/yourname" />
 				</label>
 				<label>
 					<span>FurTrack</span>

@@ -489,7 +489,7 @@
 	"admin_pack_details": "Pack details",
 	"admin_pack_name": "Pack name",
 	"admin_pack_name_placeholder": "My sticker pack",
-	"admin_pack_manager": "Manager (leave blank = {ownerName})",
+	"admin_pack_manager": "Manager (default: {ownerName})",
 	"admin_pack_manager_self": "Myself ({ownerName})",
 	"admin_pack_new_artist": "New artist",
 	"admin_pack_new_manager": "New manager",
