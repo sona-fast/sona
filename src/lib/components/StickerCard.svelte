@@ -81,7 +81,8 @@
 	.tile {
 		position: relative;
 		aspect-ratio: 19 / 15;
-		padding: 18px;
+		--tile-pad: 18px;
+		padding: var(--tile-pad);
 		border-bottom: 1px solid var(--border);
 		background-image:
 			linear-gradient(45deg, var(--secondary) 25%, transparent 25%),
@@ -105,14 +106,17 @@
 	@media (max-width: 640px) {
 		.tile {
 			aspect-ratio: 1 / 1;
-			padding: 10px;
+			--tile-pad: 10px;
 		}
 	}
 
-	/* Wrapper so the blur applies uniformly to img/video/lottie alike. */
+	/* Wrapper so the blur applies uniformly to img/video/lottie alike.
+	   Pinned by inset rather than %-sized: iOS WebKit resolves a percentage height
+	   against the tile's aspect-ratio border box instead of its content box, which
+	   made the sticker overflow the padding and clip at the tile's bottom edge. */
 	.media {
-		width: 100%;
-		height: 100%;
+		position: absolute;
+		inset: var(--tile-pad);
 		transition: filter 0.2s;
 	}
 
