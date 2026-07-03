@@ -8,8 +8,8 @@
 #   - repo secret CRON_SECRET (Settings → Secrets and variables → Actions)
 #     matching the Pages secret of the same name (`wrangler pages secret put
 #     CRON_SECRET`). Without it the endpoint returns 401/503 and this job fails.
-#   - repo variable SITE_URL (Actions → Variables) = your site's base URL.
-#     Defaults to https://sona.fast when unset.
+#   - repo variable SITE_URL (Actions → Variables) = your site's base URL,
+#     e.g. https://example.com.
 name: Sticker auto re-sync
 
 on:
@@ -36,8 +36,11 @@ jobs:
       - name: Trigger re-sync endpoint
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          SITE_URL: ${{ vars.SITE_URL || 'https://sona.fast' }}
+          SITE_URL: ${{ vars.SITE_URL }}
         run: |
+          if [ -z "$SITE_URL" ]; then
+            echo "::error::SITE_URL repo variable is not set (Settings → Secrets and variables → Actions → Variables) — set it to your site's base URL, e.g. https://example.com"; exit 1
+          fi
           # Sticker re-sync is OPTIONAL (a fork may not mirror Telegram packs), so
           # an unset secret means "not opted in" — skip quietly, don't fail. Deploy
           # (which is mandatory) still fails loudly on missing creds.
