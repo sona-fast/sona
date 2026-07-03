@@ -182,6 +182,12 @@
 			</div>
 			<div class="mobile-artist-info">
 				<p class="mobile-artist-name">{artist.name}</p>
+				{#if artist.globalId || data.pendingArtistIds?.includes(artist.id)}
+					<div class="mobile-artist-badges">
+						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
+						{#if data.pendingArtistIds?.includes(artist.id)}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
+					</div>
+				{/if}
 				<p class="mobile-artist-meta">
 					{worksLabel(artist)}
 					{#if artist.twitterUrl}<span class="mobile-social-icon"><TwitterIcon size={10} /></span>{/if}
@@ -194,6 +200,29 @@
 				</p>
 			</div>
 			<div class="mobile-artist-actions">
+				{#if data.registryEnabled}
+					<form
+						method="POST"
+						action="?/submitToRegistry"
+						style="display:inline"
+						use:enhance={() => {
+							submittingId = artist.id;
+							return async ({ result, update }) => {
+								await update();
+								submittingId = null;
+								if (result.type === 'success')
+									toast.success(artist.globalId ? m.admin_artists_registry_update_submitted() : m.admin_artists_registry_submitted());
+								else if (result.type === 'failure')
+									toast.error((result.data?.error as string) ?? m.admin_artists_registry_failed());
+							};
+						}}
+					>
+						<input type="hidden" name="id" value={artist.id} />
+						<button class="icon-btn" type="submit" disabled={submittingId !== null || data.upToDate?.[artist.id]} aria-busy={submittingId === artist.id} aria-label={data.upToDate?.[artist.id] ? m.admin_artists_up_to_date() : m.admin_artists_submit_registry()} title={data.upToDate?.[artist.id] ? m.admin_artists_up_to_date() : m.admin_artists_submit_registry()}>
+							{#if submittingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Share2 size={16} />{/if}
+						</button>
+					</form>
+				{/if}
 				<button class="icon-btn" onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
 				<button class="icon-btn" disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
 					{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
@@ -267,7 +296,10 @@
 			<form method="POST" action="?/update" use:enhance={() => {
 				saving = true;
 				return async ({ update }) => {
-					await update();
+					// reset:false — the default form reset blanks the value-bound inputs
+					// (Svelte sets value as a property, so their default is empty),
+					// which flashed every field to its placeholder mid-save on mobile.
+					await update({ reset: false });
 					saving = false;
 					editingArtist = null;
 				};
@@ -276,7 +308,7 @@
 
 				<label>
 					<span>{m.admin_field_artist_name()}</span>
-					<input type="text" class="input" name="name" value={editingArtist.name} required />
+					<input type="text" class="input" name="name" value={editingArtist.name} required disabled={saving} />
 				</label>
 
 				<div class="social-section">
@@ -284,31 +316,31 @@
 					<div class="social-grid">
 						<label class="social-field">
 							<TwitterIcon size={14} />
-							<input type="text" class="input" name="twitter" value={editingArtist.twitterUrl || ''} placeholder="@handle" />
+							<input type="text" class="input" name="twitter" value={editingArtist.twitterUrl || ''} placeholder="@handle" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<BlueskyIcon size={14} />
-							<input type="text" class="input" name="bluesky" value={editingArtist.blueskyUrl || ''} placeholder="lunarpaws.bsky.social" />
+							<input type="text" class="input" name="bluesky" value={editingArtist.blueskyUrl || ''} placeholder="lunarpaws.bsky.social" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<TelegramIcon size={14} />
-							<input type="text" class="input" name="telegram" value={editingArtist.telegramUrl || ''} placeholder="t.me/lunarpaws" />
+							<input type="text" class="input" name="telegram" value={editingArtist.telegramUrl || ''} placeholder="t.me/lunarpaws" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<FurAffinityIcon size={14} />
-							<input type="text" class="input" name="furaffinity" value={editingArtist.furAffinityUrl || ''} placeholder="furaffinity.net/user/lunarpaws" />
+							<input type="text" class="input" name="furaffinity" value={editingArtist.furAffinityUrl || ''} placeholder="furaffinity.net/user/lunarpaws" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<DeviantArtIcon size={14} />
-							<input type="text" class="input" name="deviantart" value={editingArtist.deviantArtUrl || ''} placeholder="deviantart.com/..." />
+							<input type="text" class="input" name="deviantart" value={editingArtist.deviantArtUrl || ''} placeholder="deviantart.com/..." disabled={saving} />
 						</label>
 						<label class="social-field">
 							<PatreonIcon size={14} />
-							<input type="text" class="input" name="patreon" value={editingArtist.patreonUrl || ''} placeholder="patreon.com/lunarpaws" />
+							<input type="text" class="input" name="patreon" value={editingArtist.patreonUrl || ''} placeholder="patreon.com/lunarpaws" disabled={saving} />
 						</label>
 						<label class="social-field">
 							<InstagramIcon size={14} />
-							<input type="text" class="input" name="instagram" value={editingArtist.instagramUrl || ''} placeholder="instagram.com/..." />
+							<input type="text" class="input" name="instagram" value={editingArtist.instagramUrl || ''} placeholder="instagram.com/..." disabled={saving} />
 						</label>
 					</div>
 				</div>
@@ -695,6 +727,20 @@
 			font-weight: 600;
 		}
 
+		.mobile-artist-badges {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 4px;
+			margin-top: 3px;
+		}
+
+		/* Gap handles spacing here; drop the desktop inline margin so the first
+		   badge isn't pushed off the row's left edge. */
+		.mobile-artist-badges .reg-badge {
+			margin-left: 0;
+		}
+
 		.mobile-artist-meta {
 			font-size: 12px;
 			color: var(--muted-foreground);
@@ -746,6 +792,13 @@
 
 		.social-grid {
 			grid-template-columns: 1fr;
+		}
+
+		/* Equal-width buttons that never wrap, so the wider "Saving…" state fits in
+		   its half instead of growing and overlapping Cancel on a narrow modal. */
+		.modal-actions .btn {
+			flex: 1;
+			white-space: nowrap;
 		}
 	}
 </style>
