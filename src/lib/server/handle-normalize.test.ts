@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeSocialUrl } from './handle-normalize';
+import { normalizeHandle, normalizeSocialUrl } from './handle-normalize';
 
 describe('normalizeSocialUrl', () => {
 	it('builds the canonical profile URL from a bare handle per platform', () => {
@@ -62,5 +62,21 @@ describe('normalizeSocialUrl', () => {
 		expect(normalizeSocialUrl('twitter', 'javascript:alert(1)')).toBe('');
 		expect(normalizeSocialUrl('twitter', 'data:text/html,x')).toBe('');
 		expect(normalizeSocialUrl('twitter', 'JavaScript:alert(1)')).toBe('');
+	});
+});
+
+// The regression this guards: Patreon's newer creator URLs are 'patreon.com/c/<user>'.
+// If the bare 'patreon.com/' prefix is checked first, the handle collapses to 'c', so
+// 'patreon.com/c/<user>' must be tried before 'patreon.com/'.
+
+describe('normalizeHandle (patreon)', () => {
+	it('extracts the handle from a bare patreon.com URL', () => {
+		expect(normalizeHandle('patreon', 'https://patreon.com/sparky')).toBe('sparky');
+		expect(normalizeHandle('patreon', 'www.patreon.com/sparky')).toBe('sparky');
+	});
+
+	it('extracts the handle from a patreon.com/c/ creator URL', () => {
+		expect(normalizeHandle('patreon', 'https://patreon.com/c/sparky')).toBe('sparky');
+		expect(normalizeHandle('patreon', 'patreon.com/c/sparky/')).toBe('sparky');
 	});
 });

@@ -19,7 +19,9 @@ const HOST_PREFIXES: Record<Platform, string[]> = {
 	telegram: ['t.me/', 'telegram.me/'],
 	furaffinity: ['furaffinity.net/user/'],
 	deviantart: ['deviantart.com/'],
-	patreon: ['patreon.com/'],
+	// 'patreon.com/c/<user>' (newer creator pages) must be tried before the bare
+	// 'patreon.com/' prefix, else the username collapses to 'c'.
+	patreon: ['patreon.com/c/', 'patreon.com/'],
 	instagram: ['instagram.com/']
 };
 
