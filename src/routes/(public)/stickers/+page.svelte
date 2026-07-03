@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
-	import { Search, Send, Server, Sticker, X, RotateCcw } from 'lucide-svelte';
+	import { Search, Send, Server, Sticker, X, RotateCcw, ChevronDown } from 'lucide-svelte';
 	import StickerCard from '$lib/components/StickerCard.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage } from '$lib';
@@ -109,6 +109,7 @@
 							<option value={String(artist.id)}>{artist.name}</option>
 						{/each}
 					</select>
+					<ChevronDown size={16} class="select-chevron" />
 				</div>
 			{/if}
 		</div>
@@ -355,6 +356,15 @@
 
 	.select-wrapper {
 		position: relative;
+	}
+
+	.select-wrapper :global(.select-chevron) {
+		position: absolute;
+		right: 14px;
+		top: 50%;
+		transform: translateY(-50%);
+		color: var(--muted-foreground);
+		pointer-events: none;
 	}
 
 	.filter-select {
