@@ -253,7 +253,7 @@
 			{:else}
 				<p class="reg-status">{m.admin_settings_registry_not_connected()}</p>
 			{/if}
-			<a href="/api/registry/export-artists" class="btn btn-secondary" download>
+			<a href="/api/registry/export-artists" class="btn btn-secondary reg-download" download>
 				{m.admin_settings_registry_download()}
 			</a>
 		</section>
@@ -982,6 +982,7 @@
 		}
 	}
 
+	.reg-download { height: auto; min-height: 40px; }
 	.reg-status {
 		font-size: 13px;
 		color: var(--muted-foreground);
