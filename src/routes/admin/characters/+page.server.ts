@@ -3,6 +3,7 @@ import { getDb } from '$lib/server/db';
 import { characters, imageCharacters } from '$lib/server/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import { resolveCharacterIcon } from '$lib/server/avatar';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -34,13 +35,13 @@ export const load: PageServerLoad = async ({ platform }) => {
 
 function parseSocials(data: FormData) {
 	return {
-		twitterUrl: sanitizeUrl(data.get('twitter') as string),
-		blueskyUrl: sanitizeUrl(data.get('bluesky') as string),
-		telegramUrl: sanitizeUrl(data.get('telegram') as string),
-		furAffinityUrl: sanitizeUrl(data.get('furaffinity') as string),
-		deviantArtUrl: sanitizeUrl(data.get('deviantart') as string),
-		patreonUrl: sanitizeUrl(data.get('patreon') as string),
-		instagramUrl: sanitizeUrl(data.get('instagram') as string)
+		twitterUrl: normalizeSocialUrl('twitter', data.get('twitter') as string) || null,
+		blueskyUrl: normalizeSocialUrl('bluesky', data.get('bluesky') as string) || null,
+		telegramUrl: normalizeSocialUrl('telegram', data.get('telegram') as string) || null,
+		furAffinityUrl: normalizeSocialUrl('furaffinity', data.get('furaffinity') as string) || null,
+		deviantArtUrl: normalizeSocialUrl('deviantart', data.get('deviantart') as string) || null,
+		patreonUrl: normalizeSocialUrl('patreon', data.get('patreon') as string) || null,
+		instagramUrl: normalizeSocialUrl('instagram', data.get('instagram') as string) || null
 	};
 }
 

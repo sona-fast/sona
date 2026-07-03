@@ -23,6 +23,7 @@ import {
 import { sql, inArray } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
 import {
@@ -116,7 +117,7 @@ export const actions = {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
 
-		const blueskyUrl = sanitizeUrl(data.get('bluesky') as string) || '';
+		const blueskyUrl = normalizeSocialUrl('bluesky', data.get('bluesky') as string);
 		const adminAvatarUrl = blueskyUrl
 			? (await resolveAvatarUrl({ blueskyUrl })) ?? ''
 			: '';
@@ -133,11 +134,11 @@ export const actions = {
 			ownerName: sanitizeText(data.get('ownerName') as string, 100),
 			aboutText: sanitizeText(data.get('aboutText') as string, 2000),
 			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100),
-			twitterUrl: sanitizeUrl(data.get('twitter') as string) || '',
+			twitterUrl: normalizeSocialUrl('twitter', data.get('twitter') as string),
 			blueskyUrl,
-			telegramUrl: sanitizeUrl(data.get('telegram') as string) || '',
-			furAffinityUrl: sanitizeUrl(data.get('furaffinity') as string) || '',
-			furtrackUrl: sanitizeUrl(data.get('furtrack') as string) || '',
+			telegramUrl: normalizeSocialUrl('telegram', data.get('telegram') as string),
+			furAffinityUrl: normalizeSocialUrl('furaffinity', data.get('furaffinity') as string),
+			furtrackUrl: normalizeSocialUrl('furtrack', data.get('furtrack') as string),
 			adminAvatarUrl,
 			themeId,
 			landingLayout
