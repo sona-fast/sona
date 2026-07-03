@@ -2,10 +2,8 @@ import { fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { artists, collections, tags, images, imageTags, characters, imageCharacters } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
-import { resolveAvatarUrl } from '$lib/server/avatar';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
-import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -37,7 +35,6 @@ export const actions = {
 		const height = Number(data.get('height')) || null;
 		const fileSize = Number(data.get('fileSize')) || null;
 		const artistId = data.get('artistId') as string;
-		const artistName = sanitizeText(data.get('artistName') as string, 200);
 		const collectionId = data.get('collectionId') as string;
 		const tagNames = sanitizeText(data.get('tags') as string, 500);
 		const characterIds = (data.get('characters') as string)?.trim();
@@ -46,43 +43,13 @@ export const actions = {
 		const sourcePostUrl = sanitizeUrl(data.get('sourcePostUrl') as string);
 		const commissionedAt = (data.get('commissionedAt') as string)?.trim();
 
-		// Artist social links (for new artists)
-		const twitterUrl = normalizeSocialUrl('twitter', data.get('twitter') as string) || null;
-		const blueskyUrl = normalizeSocialUrl('bluesky', data.get('bluesky') as string) || null;
-		const telegramUrl = normalizeSocialUrl('telegram', data.get('telegram') as string) || null;
-		const furAffinityUrl = normalizeSocialUrl('furaffinity', data.get('furaffinity') as string) || null;
-		const deviantArtUrl = normalizeSocialUrl('deviantart', data.get('deviantart') as string) || null;
-		const patreonUrl = normalizeSocialUrl('patreon', data.get('patreon') as string) || null;
-		const instagramUrl = normalizeSocialUrl('instagram', data.get('instagram') as string) || null;
-
 		if (!title) return fail(400, { error: 'Title is required' });
 		if (!imageUrl) return fail(400, { error: 'Image URL is required' });
 
-		// Resolve or create artist
-		let resolvedArtistId: number;
-		if (artistId && artistId !== 'new') {
-			resolvedArtistId = Number(artistId);
-		} else if (artistName) {
-			const avatarUrl = await resolveAvatarUrl({ blueskyUrl, twitterUrl, furAffinityUrl, patreonUrl });
-			const newArtist = await db
-				.insert(artists)
-				.values({
-					name: artistName,
-					avatarUrl,
-					twitterUrl,
-					blueskyUrl,
-					telegramUrl,
-					furAffinityUrl,
-					deviantArtUrl,
-					patreonUrl,
-					instagramUrl
-				})
-				.returning({ id: artists.id })
-				.get();
-			resolvedArtistId = newArtist.id;
-		} else {
-			return fail(400, { error: 'Artist is required' });
-		}
+		// The New Artist dialog creates the artist up front (via /api/artists), so
+		// the form always submits an existing artist id.
+		const resolvedArtistId = Number(artistId);
+		if (!resolvedArtistId) return fail(400, { error: 'Artist is required' });
 
 		const slug = slugify(title);
 
