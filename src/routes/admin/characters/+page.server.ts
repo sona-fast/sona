@@ -24,6 +24,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 			patreonUrl: characters.patreonUrl,
 			instagramUrl: characters.instagramUrl,
 			avatarUrl: characters.avatarUrl,
+			isOwner: characters.isOwner,
 			createdAt: characters.createdAt,
 			imageCount: sql<number>`(SELECT COUNT(*) FROM image_characters WHERE image_characters.character_id = characters.id)`
 		})
@@ -53,11 +54,12 @@ export const actions = {
 		const ownerName = sanitizeText(data.get('ownerName') as string, 200) || null;
 		const url = sanitizeUrl(data.get('url') as string);
 		const socials = parseSocials(data);
+		const isOwner = data.get('isOwner') === 'on';
 
 		if (!name) return fail(400, { error: 'Character name is required' });
 
 		const avatarUrl = await resolveCharacterIcon({ url, blueskyUrl: socials.blueskyUrl });
-		await db.insert(characters).values({ name, ownerName, url, ...socials, avatarUrl });
+		await db.insert(characters).values({ name, ownerName, url, ...socials, avatarUrl, isOwner });
 		return { success: true };
 	},
 
@@ -69,12 +71,13 @@ export const actions = {
 		const ownerName = sanitizeText(data.get('ownerName') as string, 200) || null;
 		const url = sanitizeUrl(data.get('url') as string);
 		const socials = parseSocials(data);
+		const isOwner = data.get('isOwner') === 'on';
 
 		if (!id) return fail(400, { error: 'Character ID is required' });
 		if (!name) return fail(400, { error: 'Character name is required' });
 
 		const avatarUrl = await resolveCharacterIcon({ url, blueskyUrl: socials.blueskyUrl });
-		await db.update(characters).set({ name, ownerName, url, ...socials, avatarUrl }).where(eq(characters.id, id));
+		await db.update(characters).set({ name, ownerName, url, ...socials, avatarUrl, isOwner }).where(eq(characters.id, id));
 		return { success: true };
 	},
 

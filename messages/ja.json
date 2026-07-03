@@ -375,6 +375,8 @@
 	"admin_characters_name_label": "キャラクター名",
 	"admin_characters_profile_url": "プロフィールURL",
 	"admin_characters_profile_placeholder": "任意 — 例: toyhouse.com/...",
+	"admin_characters_owner_label": "オーナーキャラクター",
+	"admin_characters_owner_hint": "公開の注目リストとギャラリーのキャラクターフィルターから非表示になります。",
 	"admin_view": "表示",
 	"admin_fursuit_title": "FurTrackからインポート",
 	"admin_fursuit_intro": "FurTrackからあなたのキャラクターの着ぐるみ写真をギャラリーに取り込みます。インポートできるのはクリエイティブ・コモンズまたはパブリックドメインのライセンスが付いた写真のみで、ダウンロードして自サイトでホストされます。",

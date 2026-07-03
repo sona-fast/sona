@@ -411,6 +411,8 @@
 	"admin_characters_name_label": "Character Name",
 	"admin_characters_profile_url": "Profile URL",
 	"admin_characters_profile_placeholder": "Optional — e.g. toyhouse.com/...",
+	"admin_characters_owner_label": "Owner character",
+	"admin_characters_owner_hint": "Hidden from public featured lists and the gallery character filter.",
 	"admin_view": "View",
 	"admin_fursuit_title": "Import from FurTrack",
 	"admin_fursuit_intro": "Pull fursuit photos of your character from FurTrack into your gallery. Only photos with a Creative Commons or Public Domain license can be imported; they're downloaded and self-hosted.",

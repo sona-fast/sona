@@ -28,7 +28,8 @@
 		deviantArtUrl: null,
 		patreonUrl: null,
 		instagramUrl: null,
-		avatarUrl: null
+		avatarUrl: null,
+		isOwner: false
 	};
 
 	let search = $state('');
@@ -231,6 +232,11 @@
 						</label>
 					</div>
 				</div>
+
+				<label class="checkbox-label">
+					<input type="checkbox" name="isOwner" checked={editingChar.isOwner} />
+					<span>{m.admin_characters_owner_label()} <span class="checkbox-helper">{m.admin_characters_owner_hint()}</span></span>
+				</label>
 
 				<div class="modal-actions">
 					<button type="button" class="btn btn-secondary" onclick={() => (editingChar = null)}>{m.admin_cancel()}</button>
@@ -448,6 +454,24 @@
 	.modal-form label > span {
 		font-size: 14px;
 		font-weight: 500;
+	}
+
+	.checkbox-label {
+		flex-direction: row !important;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.checkbox-label input {
+		width: 16px;
+		height: 16px;
+	}
+
+	.checkbox-helper {
+		color: var(--muted-foreground);
+		font-size: 12px;
+		font-weight: 400;
+		margin-left: 4px;
 	}
 
 	.modal-actions {
