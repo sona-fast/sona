@@ -15,7 +15,12 @@ import type { Database } from './db';
 
 // --- PBKDF2 (Web Crypto; available on Workers and Node 20+) -----------------
 
-const PBKDF2_ITERATIONS = 210_000; // OWASP-recommended floor for PBKDF2-HMAC-SHA256
+// Cloudflare Workers' Web Crypto caps PBKDF2 at 100k iterations and throws above
+// it (NotSupportedError), so we can't use OWASP's 210k floor on that runtime — it
+// fails every password hash in production. 100k is the max Workers allows (and the
+// prior OWASP floor). Verify reads the iteration count from the stored hash, so
+// this only affects newly-created hashes; existing hashes keep verifying.
+const PBKDF2_ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const HASH_BYTES = 32;
 
