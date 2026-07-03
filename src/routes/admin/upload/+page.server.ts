@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
+import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -46,13 +47,13 @@ export const actions = {
 		const commissionedAt = (data.get('commissionedAt') as string)?.trim();
 
 		// Artist social links (for new artists)
-		const twitterUrl = sanitizeUrl(data.get('twitter') as string);
-		const blueskyUrl = sanitizeUrl(data.get('bluesky') as string);
-		const telegramUrl = sanitizeUrl(data.get('telegram') as string);
-		const furAffinityUrl = sanitizeUrl(data.get('furaffinity') as string);
-		const deviantArtUrl = sanitizeUrl(data.get('deviantart') as string);
-		const patreonUrl = sanitizeUrl(data.get('patreon') as string);
-		const instagramUrl = sanitizeUrl(data.get('instagram') as string);
+		const twitterUrl = normalizeSocialUrl('twitter', data.get('twitter') as string) || null;
+		const blueskyUrl = normalizeSocialUrl('bluesky', data.get('bluesky') as string) || null;
+		const telegramUrl = normalizeSocialUrl('telegram', data.get('telegram') as string) || null;
+		const furAffinityUrl = normalizeSocialUrl('furaffinity', data.get('furaffinity') as string) || null;
+		const deviantArtUrl = normalizeSocialUrl('deviantart', data.get('deviantart') as string) || null;
+		const patreonUrl = normalizeSocialUrl('patreon', data.get('patreon') as string) || null;
+		const instagramUrl = normalizeSocialUrl('instagram', data.get('instagram') as string) || null;
 
 		if (!title) return fail(400, { error: 'Title is required' });
 		if (!imageUrl) return fail(400, { error: 'Image URL is required' });

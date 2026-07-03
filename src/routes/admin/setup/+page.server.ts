@@ -4,7 +4,8 @@ import { lt } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { sessions, characters } from '$lib/server/db/schema';
 import { saveSettings, getRawSetting } from '$lib/server/settings';
-import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import { sanitizeText } from '$lib/server/validate';
+import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
 	isSetupComplete,
 	setAdminPassword,
@@ -105,11 +106,11 @@ export const actions = {
 			siteName,
 			ownerName: sanitizeText(data.get('ownerName') as string, 100),
 			aboutText: sanitizeText(data.get('aboutText') as string, 2000),
-			twitterUrl: sanitizeUrl(data.get('twitter') as string) || '',
-			blueskyUrl: sanitizeUrl(data.get('bluesky') as string) || '',
-			telegramUrl: sanitizeUrl(data.get('telegram') as string) || '',
-			furAffinityUrl: sanitizeUrl(data.get('furaffinity') as string) || '',
-			furtrackUrl: sanitizeUrl(data.get('furtrack') as string) || '',
+			twitterUrl: normalizeSocialUrl('twitter', data.get('twitter') as string),
+			blueskyUrl: normalizeSocialUrl('bluesky', data.get('bluesky') as string),
+			telegramUrl: normalizeSocialUrl('telegram', data.get('telegram') as string),
+			furAffinityUrl: normalizeSocialUrl('furaffinity', data.get('furaffinity') as string),
+			furtrackUrl: normalizeSocialUrl('furtrack', data.get('furtrack') as string),
 			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100),
 			themeId,
 			landingLayout

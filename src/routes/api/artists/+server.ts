@@ -4,7 +4,7 @@ import { getDb } from '$lib/server/db';
 import { artists } from '$lib/server/db/schema';
 import { resolveOrCreateArtist } from '$lib/server/sticker-import';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
-import { socialsToHandles } from '$lib/server/handle-normalize';
+import { normalizeSocialUrl, socialsToHandles } from '$lib/server/handle-normalize';
 import type { RequestHandler } from './$types';
 
 // POST /api/artists  (admin-only via hooks)
@@ -24,13 +24,13 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	if (!name) error(400, 'Artist name is required');
 
 	const socials = {
-		twitterUrl: sanitizeUrl(body.twitter ?? ''),
-		blueskyUrl: sanitizeUrl(body.bluesky ?? ''),
-		telegramUrl: sanitizeUrl(body.telegram ?? ''),
-		furAffinityUrl: sanitizeUrl(body.furaffinity ?? ''),
-		deviantArtUrl: sanitizeUrl(body.deviantart ?? ''),
-		patreonUrl: sanitizeUrl(body.patreon ?? ''),
-		instagramUrl: sanitizeUrl(body.instagram ?? '')
+		twitterUrl: normalizeSocialUrl('twitter', body.twitter ?? '') || null,
+		blueskyUrl: normalizeSocialUrl('bluesky', body.bluesky ?? '') || null,
+		telegramUrl: normalizeSocialUrl('telegram', body.telegram ?? '') || null,
+		furAffinityUrl: normalizeSocialUrl('furaffinity', body.furaffinity ?? '') || null,
+		deviantArtUrl: normalizeSocialUrl('deviantart', body.deviantart ?? '') || null,
+		patreonUrl: normalizeSocialUrl('patreon', body.patreon ?? '') || null,
+		instagramUrl: normalizeSocialUrl('instagram', body.instagram ?? '') || null
 	};
 
 	// Optional shared-registry link (when the artist was pulled from the registry).

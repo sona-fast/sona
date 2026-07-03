@@ -4,6 +4,7 @@ import { getSettings } from '$lib/server/settings';
 import { artists } from '$lib/server/db/schema';
 import { saveManualPack, resolveOrCreateArtist, parseStickerFormInputs } from '$lib/server/sticker-import';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -35,13 +36,13 @@ export const actions = {
 		const defaultArtistId = await resolveOrCreateArtist(db, {
 			artistId: defaultArtistIdRaw && defaultArtistIdRaw !== 'new' ? defaultArtistIdRaw : null,
 			artistName: newArtistName,
-			twitterUrl: sanitizeUrl(data.get('twitter') as string),
-			blueskyUrl: sanitizeUrl(data.get('bluesky') as string),
-			telegramUrl: sanitizeUrl(data.get('artistTelegram') as string),
-			furAffinityUrl: sanitizeUrl(data.get('furaffinity') as string),
-			deviantArtUrl: sanitizeUrl(data.get('deviantart') as string),
-			patreonUrl: sanitizeUrl(data.get('patreon') as string),
-			instagramUrl: sanitizeUrl(data.get('instagram') as string)
+			twitterUrl: normalizeSocialUrl('twitter', data.get('twitter') as string) || null,
+			blueskyUrl: normalizeSocialUrl('bluesky', data.get('bluesky') as string) || null,
+			telegramUrl: normalizeSocialUrl('telegram', data.get('artistTelegram') as string) || null,
+			furAffinityUrl: normalizeSocialUrl('furaffinity', data.get('furaffinity') as string) || null,
+			deviantArtUrl: normalizeSocialUrl('deviantart', data.get('deviantart') as string) || null,
+			patreonUrl: normalizeSocialUrl('patreon', data.get('patreon') as string) || null,
+			instagramUrl: normalizeSocialUrl('instagram', data.get('instagram') as string) || null
 		});
 		// Default artist is optional — stickers with none import as "unattributed".
 		const stickerInputs = parseStickerFormInputs(data, defaultArtistId);
