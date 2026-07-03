@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { page as pageState } from '$app/state';
-	import { Search, Send, Server, X, RotateCcw } from 'lucide-svelte';
+	import { Search, Send, Server, Sticker, X, RotateCcw } from 'lucide-svelte';
 	import StickerCard from '$lib/components/StickerCard.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage } from '$lib';
@@ -219,7 +219,7 @@
 			</div>
 		{:else}
 			<div class="empty-state">
-				<div class="empty-icon">🎭</div>
+				<div class="empty-icon"><Sticker size={48} /></div>
 				<div class="empty-text">
 					<p class="empty-title">{m.stickers_no_packs()}</p>
 				</div>
