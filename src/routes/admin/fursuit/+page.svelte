@@ -69,7 +69,7 @@
 
 {#if !data.enabled}
 	<div class="banner warn">
-		<AlertTriangle size={18} /> {m.admin_fursuit_disabled_pre()}<code>FURTRACK_MODE</code>{m.admin_fursuit_disabled_mid1()}<code>mock</code>{m.admin_fursuit_disabled_mid2()}<code>live</code>{m.admin_fursuit_disabled_post()}
+		<AlertTriangle size={18} /> <span class="banner-msg">{m.admin_fursuit_disabled_pre()}<code>FURTRACK_MODE</code>{m.admin_fursuit_disabled_mid1()}<code>mock</code>{m.admin_fursuit_disabled_mid2()}<code>live</code>{m.admin_fursuit_disabled_post()}</span>
 	</div>
 {:else if form?.success}
 	{@const r = form.result}
@@ -228,7 +228,9 @@
 	.tag-field label { font-size: 12px; color: var(--muted-foreground); }
 	.tag-field .input { min-width: 280px; }
 	.hint { font-size: 11px; color: var(--muted-foreground); margin: -8px 0 16px; }
-	.banner { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
+	.banner { display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
+	.banner :global(svg) { flex: none; margin-top: 1px; }
+	.banner-msg { min-width: 0; overflow-wrap: anywhere; }
 	.banner.info { background: var(--secondary); color: var(--muted-foreground); }
 	.banner.ok { background: rgba(74,222,128,0.1); color: #4ade80; }
 	.banner.warn { background: rgba(245,166,35,0.1); color: #f5a623; }
