@@ -1,12 +1,16 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
-	import { Smile, Plus, ExternalLink, Pencil, Trash2, Send, Search, Loader2, RefreshCw } from 'lucide-svelte';
+	import { Smile, Plus, ExternalLink, Pencil, Trash2, Send, Search, Loader2, RefreshCw, AlertTriangle } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import SetupDialog from '$lib/components/SetupDialog.svelte';
+	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
+
+	let showSetup = $state(false);
 
 	// Falls back to the site name, then a generic label, when no persona name is set.
 	const ownerName = $derived(data.ownerName || data.siteName || m.admin_stickers_site_owner());
@@ -73,7 +77,43 @@
 </div>
 
 {#if !data.telegramEnabled}
-	<div class="banner warn">{m.admin_stickers_disabled_pre()}<code>TELEGRAM_BOT_TOKEN</code>{m.admin_stickers_disabled_post()}</div>
+	<div class="banner warn">
+		<AlertTriangle size={18} />
+		<span class="banner-msg">{m.admin_stickers_disabled_pre()}<code>TELEGRAM_BOT_TOKEN</code>{m.admin_stickers_disabled_post()}</span>
+		<button type="button" class="hint-link" onclick={() => (showSetup = true)}>{m.admin_setup_help_link()}</button>
+	</div>
+{/if}
+
+{#if showSetup}
+	<SetupDialog title={m.admin_stickers_setup_title()} sub={m.admin_stickers_setup_sub()} onclose={() => (showSetup = false)}>
+		{#snippet icon()}<Send size={15} />{/snippet}
+		<p class="lede">{m.admin_stickers_setup_lede()}</p>
+		<ol class="steps">
+			<li>
+				<span class="step-num">1</span>
+				<div class="step-body">
+					<div class="step-title">{m.admin_stickers_setup_step1_title()}</div>
+					<div class="step-text">{m.admin_stickers_setup_step1_a()}<code>@BotFather</code>{m.admin_stickers_setup_step1_b()}<code>/newbot</code>{m.admin_stickers_setup_step1_c()}<code>123456789:AA…</code>{m.admin_stickers_setup_step1_d()}</div>
+				</div>
+			</li>
+			<li>
+				<span class="step-num">2</span>
+				<div class="step-body">
+					<div class="step-title">{m.admin_stickers_setup_step2_title()}</div>
+					<div class="step-text">{m.admin_stickers_setup_step2_a()}<code>&lt;your-project&gt;</code>{m.admin_stickers_setup_step2_b()}</div>
+					<CopyCommand text="npx wrangler pages secret put TELEGRAM_BOT_TOKEN --project-name <your-project>" />
+				</div>
+			</li>
+			<li>
+				<span class="step-num">3</span>
+				<div class="step-body">
+					<div class="step-title">{m.admin_stickers_setup_step3_title()}</div>
+					<div class="step-text">{m.admin_stickers_setup_step3_a()}<code>main</code>{m.admin_stickers_setup_step3_b()}<code>npx wrangler pages deploy</code>{m.admin_stickers_setup_step3_c()}<strong>{m.admin_stickers_import_telegram()}</strong>{m.admin_stickers_setup_step3_d()}<code>t.me/addstickers/…</code>{m.admin_stickers_setup_step3_e()}</div>
+				</div>
+			</li>
+		</ol>
+		<div class="unlocks"><strong>{m.admin_stickers_setup_unlocks_label()}</strong>{m.admin_stickers_setup_unlocks_a()}<strong>{m.admin_stickers_import_telegram()}</strong>{m.admin_stickers_setup_unlocks_b()}<code>/admin/stickers/import</code>{m.admin_stickers_setup_unlocks_c()}</div>
+	</SetupDialog>
 {/if}
 
 {#if data.packs.length === 0}
@@ -261,7 +301,34 @@
 		border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px;
 	}
 	.banner.warn { background: rgba(245,166,35,0.1); color: #f5a623; }
+	.banner :global(svg) { flex-shrink: 0; }
+	.banner-msg { flex: 1; min-width: 0; }
+	.hint-link {
+		flex-shrink: 0; background: none; border: none; padding: 0; cursor: pointer;
+		color: #f5a623; font-weight: 600; text-decoration: underline;
+		font: inherit; white-space: nowrap;
+	}
 	code { background: var(--secondary); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+
+	/* Setup modal body (rendered inside SetupDialog). */
+	.lede { font-size: 13px; color: var(--muted-foreground); line-height: 1.6; margin-bottom: 18px; }
+	.steps { list-style: none; display: flex; flex-direction: column; gap: 18px; padding: 0; margin: 0; }
+	.steps li { display: flex; gap: 14px; }
+	.step-num {
+		flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+		background: var(--secondary); color: var(--foreground);
+		font: 600 13px var(--font-primary); display: flex; align-items: center; justify-content: center;
+	}
+	.step-body { flex: 1; min-width: 0; }
+	.step-title { font-size: 13.5px; font-weight: 600; margin-bottom: 4px; color: var(--foreground); }
+	.step-text { font-size: 12.5px; color: var(--muted-foreground); line-height: 1.6; }
+	.step-text code { background: var(--secondary); }
+	.unlocks {
+		margin-top: 18px; padding: 12px 14px; border-left: 2px solid var(--primary);
+		background: rgba(255,132,0,0.06); font-size: 12.5px; color: var(--muted-foreground);
+		line-height: 1.6; border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+	}
+	.unlocks strong { color: var(--foreground); font-weight: 600; }
 	.empty {
 		display: flex; flex-direction: column; align-items: center; gap: 8px;
 		padding: 48px; color: var(--muted-foreground); text-align: center;
