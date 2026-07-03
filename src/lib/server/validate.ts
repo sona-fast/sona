@@ -14,6 +14,13 @@ export function sanitizeUrl(url: string | null | undefined): string | null {
 		return null;
 	}
 
+	// Root-relative path — the /img/<key> form storage falls back to when no
+	// public CDN URL is configured. Same-origin by construction; prefixing
+	// https:// would corrupt it into an external-looking URL.
+	if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+		return trimmed;
+	}
+
 	// Add https:// if no protocol present
 	if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
 		return 'https://' + trimmed;
