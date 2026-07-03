@@ -29,6 +29,14 @@ describe('password hashing (PBKDF2)', () => {
 		expect(await verifyPasswordHash('same', b)).toBe(true);
 	});
 
+	it('keeps iterations within the Cloudflare Workers PBKDF2 cap (≤100k)', async () => {
+		// Workers' Web Crypto throws (NotSupportedError) above 100k iterations, so a
+		// higher count passes in Node/CI but 500s every hash in production.
+		const iterations = Number((await hashPassword('pw')).split('$')[2]);
+		expect(iterations).toBeGreaterThan(0);
+		expect(iterations).toBeLessThanOrEqual(100_000);
+	});
+
 	it('rejects malformed stored hashes', async () => {
 		expect(await verifyPasswordHash('x', 'not-a-hash')).toBe(false);
 		expect(await verifyPasswordHash('x', 'pbkdf2$sha256$abc$salt$hash')).toBe(false);
