@@ -3,6 +3,7 @@ import {
 	buildMigrationSql,
 	sanitizeProjectName,
 	isR2NotEnabled,
+	ensureUrlScheme,
 	ghSecretEligibility
 } from './setup-lib.ts';
 
@@ -92,6 +93,26 @@ describe('isR2NotEnabled', () => {
 	it('does not flag empty/success output', () => {
 		expect(isR2NotEnabled('')).toBe(false);
 		expect(isR2NotEnabled('Created bucket sona-images')).toBe(false);
+	});
+});
+
+describe('ensureUrlScheme', () => {
+	it('prepends https:// to a bare host (the cdn.<domain> default)', () => {
+		expect(ensureUrlScheme('cdn.taro.surf')).toBe('https://cdn.taro.surf');
+	});
+
+	it('leaves an already-schemed URL untouched', () => {
+		expect(ensureUrlScheme('https://cdn.taro.surf')).toBe('https://cdn.taro.surf');
+		expect(ensureUrlScheme('http://cdn.taro.surf')).toBe('http://cdn.taro.surf');
+	});
+
+	it('keeps empty/whitespace input empty (set later)', () => {
+		expect(ensureUrlScheme('')).toBe('');
+		expect(ensureUrlScheme('   ')).toBe('');
+	});
+
+	it('trims surrounding whitespace', () => {
+		expect(ensureUrlScheme('  cdn.taro.surf  ')).toBe('https://cdn.taro.surf');
 	});
 });
 
