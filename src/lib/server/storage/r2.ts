@@ -45,17 +45,14 @@ export class R2Storage implements StorageProvider {
 	}
 
 	owns(url: string): boolean {
-		if (url.startsWith(`${this.#base}/`)) return true;
-		// Dev stores an absolutized form of the relative '/img' base
-		// (http://host/img/...); match by path so it's still recognized as ours.
-		if (this.#base.startsWith('/')) {
-			try {
-				return new URL(url).pathname.startsWith(`${this.#base}/`);
-			} catch {
-				return false;
-			}
-		}
-		return false;
+		// Owned == served from our own base. With a CDN configured `#base` is a full
+		// origin, so this is a prefix match on the absolute URL. With `#base`
+		// root-relative ('/img' — dev, or prod before a CDN URL is set) an owned URL
+		// is itself root-relative. We must NOT match an ABSOLUTE URL merely because
+		// its path starts with '/img/': that is a different origin, and treating it
+		// as owned would let an off-origin URL pass the self-hosted gate and be
+		// fetched+streamed by the public download route (SSRF).
+		return url.startsWith(`${this.#base}/`);
 	}
 
 	async deleteOrphans(referencedUrls: string[]): Promise<number> {
@@ -77,15 +74,8 @@ export class R2Storage implements StorageProvider {
 	}
 
 	#keyFromUrl(url: string): string | null {
-		if (url.startsWith(`${this.#base}/`)) return url.slice(this.#base.length + 1);
-		if (this.#base.startsWith('/')) {
-			try {
-				const path = new URL(url).pathname;
-				if (path.startsWith(`${this.#base}/`)) return path.slice(this.#base.length + 1);
-			} catch {
-				return null;
-			}
-		}
-		return null;
+		// Mirror owns(): only a URL under our own base yields a key. An off-origin
+		// URL whose path starts with '/img/' is not ours (see owns()).
+		return url.startsWith(`${this.#base}/`) ? url.slice(this.#base.length + 1) : null;
 	}
 }

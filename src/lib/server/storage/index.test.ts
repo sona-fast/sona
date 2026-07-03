@@ -29,8 +29,12 @@ describe('getStorage r2 public-base fallback (prod)', () => {
 		});
 		// Not a broken bare-key URL ("/abc.webp") — prefixed with the /img route.
 		expect(url).toBe('/img/stickers/pack/abc.webp');
-		// And it recognises that (absolutized) URL as its own for deletes.
-		expect(storage.owns('https://site.example/img/stickers/pack/abc.webp')).toBe(true);
+		// It recognises its own root-relative URL for deletes.
+		expect(storage.owns('/img/stickers/pack/abc.webp')).toBe(true);
+		// SECURITY: an ABSOLUTE off-origin URL whose path merely starts with /img/
+		// is NOT ours — matching it would let an attacker-hosted URL pass the
+		// self-hosted gate and be fetched by the public download route (SSRF).
+		expect(storage.owns('https://attacker.example/img/stickers/pack/abc.webp')).toBe(false);
 	});
 
 	it('uses the configured CDN domain when a public URL is set', async () => {
