@@ -147,6 +147,17 @@ describe('parseStickerFormInputs', () => {
 		expect(out[0].format).toBe('webp');
 	});
 
+	it('keeps root-relative /img URLs intact (empty-CDN storage fallback)', () => {
+		// Packs stored while r2PublicUrl is unset carry /img/<key> URLs; mangling
+		// them into https:///img/... made every edit of such a pack fail the
+		// self-hosted check even when no image changed.
+		const out = parseStickerFormInputs(
+			fd({ 'sticker[0][imageUrl]': '/img/stickers/pack-a/a.webp' }),
+			null
+		);
+		expect(out[0].imageUrl).toBe('/img/stickers/pack-a/a.webp');
+	});
+
 	it('reads a checked NSFW box even though the hidden 0 fallback posts first', () => {
 		// The form emits BOTH the hidden `0` and the checked box's `1` under the same
 		// name, in that order — exactly what the real pack-edit form submits.
