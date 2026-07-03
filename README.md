@@ -88,6 +88,13 @@ npm test         # vitest
 Local secrets go in `.dev.vars` (gitignored). `FURTRACK_MODE=mock` serves bundled
 demo fursuit data without calling FurTrack.
 
+### Keeping your fork up to date
+
+Pull template improvements into your fork with GitHub's **Sync fork** button (or
+`git merge` + push); your deploy workflow runs the tests, applies new migrations,
+and redeploys automatically. See [`UPDATING.md`](UPDATING.md) for the full guide,
+including the first-sync gotcha and conflict handling.
+
 ## Configuration model
 
 Two tiers (see [`src/lib/config.ts`](src/lib/config.ts) and
