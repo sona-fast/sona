@@ -113,10 +113,17 @@ async function main() {
 	// 7. Generate + set secrets. SETUP_TOKEN gates the first-run wizard.
 	const setupToken = token();
 	const cronSecret = token();
-	const putSecret = (name: string, value: string) =>
-		run(`echo "${value}" | npx wrangler pages secret put ${name} --project-name ${project}`, {
-			allowFail: true
-		});
+	const putSecret = (name: string, value: string) => {
+		// Feed the value over stdin (never the command line or the log) so the
+		// secret is not echoed to the console or exposed in the process list.
+		const cmd = `npx wrangler pages secret put ${name} --project-name ${project}`;
+		console.log(`\n$ ${cmd}`);
+		try {
+			execSync(cmd, { input: `${value}\n`, stdio: ['pipe', 'inherit', 'inherit'] });
+		} catch {
+			// allowFail
+		}
+	};
 	putSecret('SETUP_TOKEN', setupToken);
 	putSecret('CRON_SECRET', cronSecret);
 	if (!useR2 && uploadThingToken) putSecret('UPLOADTHING_TOKEN', uploadThingToken);
