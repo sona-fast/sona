@@ -7,7 +7,7 @@ import { fursuitPhotos } from '$lib/server/db/schema';
 import type { Database } from '$lib/server/db';
 import type { SiteSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
-import { fetchCharacterPhotos } from '$lib/server/furtrack';
+import { fetchCharacterPhotos, furtrackUserAgent } from '$lib/server/furtrack';
 import { LICENSES, type LicenseKey } from '$lib/furtrack/license';
 import type { FursuitPhoto } from '$lib/furtrack/types';
 
@@ -84,12 +84,16 @@ export interface ImportResult {
  */
 export async function getImportCandidates(opts: {
 	env: Env | undefined;
+	settings: SiteSettings;
 	db: Database;
 	fetchFn: typeof fetch;
 	character: string;
 }): Promise<{ candidates: ImportCandidate[]; capped: boolean } | null> {
-	const { env, db, fetchFn, character } = opts;
-	const result = await fetchCharacterPhotos(env, character, fetchFn, { includeAll: true });
+	const { env, settings, db, fetchFn, character } = opts;
+	const result = await fetchCharacterPhotos(env, character, fetchFn, {
+		includeAll: true,
+		userAgent: furtrackUserAgent(settings)
+	});
 	if (result === null) return null;
 
 	const existing = new Set(
@@ -132,8 +136,9 @@ export async function importFursuitPhotos(opts: {
 }): Promise<ImportResult> {
 	const { env, settings, db, fetchFn, character, postIds, manualPermissions = new Map(), absolutize = (u) => u } = opts;
 	const wanted = new Set(postIds);
+	const userAgent = furtrackUserAgent(settings);
 
-	const fetched = await fetchCharacterPhotos(env, character, fetchFn, { includeAll: true });
+	const fetched = await fetchCharacterPhotos(env, character, fetchFn, { includeAll: true, userAgent });
 	const candidates = fetched?.photos ?? [];
 	// Import if selected AND (license permits OR admin recorded direct permission).
 	const selected = candidates.filter(
@@ -154,7 +159,7 @@ export async function importFursuitPhotos(opts: {
 			continue;
 		}
 		try {
-			const res = await fetchFn(photo.imageUrl, { headers: DOWNLOAD_HEADERS });
+			const res = await fetchFn(photo.imageUrl, { headers: { ...DOWNLOAD_HEADERS, 'User-Agent': userAgent } });
 			if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
 			const contentType = res.headers.get('content-type') ?? 'image/jpeg';
 			// Only self-host safe raster images. A non-image (or SVG) response would be

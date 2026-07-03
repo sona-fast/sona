@@ -26,7 +26,7 @@ export const load: PageServerLoad = async ({ platform, url, fetch }) => {
 	if (enabled && url.searchParams.get('check')) {
 		checked = true;
 		try {
-			const r = await getImportCandidates({ env: platform?.env, db, fetchFn: fetch, character });
+			const r = await getImportCandidates({ env: platform?.env, settings, db, fetchFn: fetch, character });
 			if (r) {
 				candidates = r.candidates;
 				capped = r.capped;

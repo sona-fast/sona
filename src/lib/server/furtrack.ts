@@ -8,6 +8,7 @@
 // API + image-URL shapes are documented in the project's furtrack-api notes.
 
 import type { FursuitPhoto, FurtrackMode } from '$lib/furtrack/types';
+import type { SiteSettings } from '$lib/server/settings';
 import { resolveLicense } from '$lib/furtrack/license';
 import { MOCK_PHOTOS } from '$lib/furtrack/mock';
 import { USER_AGENT } from '$lib/config';
@@ -17,14 +18,37 @@ const ORCA = 'https://orca2.furtrack.com';
 
 /**
  * FurTrack requires the www.furtrack.com Origin + a Mozilla-style UA, or it 403s.
- * We still identify ourselves honestly in the UA. (Stay low-volume / on-demand.)
+ * The per-request User-Agent (see furtrackUserAgent) is layered on top so FurTrack
+ * can attribute traffic to this fork. (Stay low-volume / on-demand.)
  */
 const REQUEST_HEADERS = {
 	Referer: 'https://www.furtrack.com/',
 	Origin: 'https://www.furtrack.com',
-	Accept: 'application/json, text/plain, */*',
-	'User-Agent': USER_AGENT
+	Accept: 'application/json, text/plain, */*'
 };
+
+/** Product token identifying the Sona fursuit-photos integration in the UA. */
+const UA_PRODUCT = 'Sona-Fursuit/1.0';
+
+/**
+ * User-Agent for outbound FurTrack requests. FurTrack 403s a non-Mozilla UA, so we
+ * keep the Mozilla-style shell and embed fork-identifying details from site
+ * settings — the site name, the operator's FurTrack profile URL, and the owner
+ * name — so FurTrack can attribute traffic (and any abuse) to THIS fork. Unset
+ * fields are skipped; with no site name we fall back to the generic build-time UA.
+ */
+export function furtrackUserAgent(
+	settings?: Pick<SiteSettings, 'siteName' | 'ownerName' | 'furtrackUrl'>
+): string {
+	const siteName = settings?.siteName?.trim();
+	if (!siteName) return USER_AGENT;
+	const parts = [UA_PRODUCT, siteName];
+	const profile = settings?.furtrackUrl?.trim();
+	if (profile) parts.push(`+${profile}`);
+	const owner = settings?.ownerName?.trim();
+	if (owner && owner !== siteName) parts.push(owner);
+	return `Mozilla/5.0 (compatible; ${parts.join('; ')})`;
+}
 
 /**
  * Hard cap on photos per character. Each photo = one FurTrack detail subrequest,
@@ -59,7 +83,7 @@ export async function fetchCharacterPhotos(
 	env: Env | undefined,
 	character: string,
 	fetchFn: typeof fetch,
-	opts: { includeAll?: boolean } = {}
+	opts: { includeAll?: boolean; userAgent?: string } = {}
 ): Promise<CharacterPhotos | null> {
 	const mode = getMode(env);
 	if (mode === 'off') return null;
@@ -71,10 +95,11 @@ export async function fetchCharacterPhotos(
 	}
 
 	// mode === 'live' — real API calls (only reachable after approval).
+	const userAgent = opts.userAgent ?? furtrackUserAgent();
 	// Degrade gracefully: a FurTrack outage/rate-limit/404 must NOT take down the
 	// gallery, so a failed index fetch yields an empty list rather than throwing.
 	const tag = `1:${normalizeTag(character)}`;
-	const index = await getJson(fetchFn, `${SOLAR}/get/index/${encodeURIComponent(tag)}`).catch(
+	const index = await getJson(fetchFn, `${SOLAR}/get/index/${encodeURIComponent(tag)}`, userAgent).catch(
 		(err) => {
 			console.error(`FurTrack index fetch failed for ${tag}:`, err instanceof Error ? err.message : err);
 			return null;
@@ -86,7 +111,7 @@ export async function fetchCharacterPhotos(
 	const capped = allPostIds.length > MAX_PHOTOS;
 	const postIds = allPostIds.slice(0, MAX_PHOTOS);
 
-	const posts = await mapWithConcurrency(postIds, CONCURRENCY, (id) => fetchPost(fetchFn, id));
+	const posts = await mapWithConcurrency(postIds, CONCURRENCY, (id) => fetchPost(fetchFn, id, userAgent));
 
 	const all = posts.filter((p): p is FursuitPhoto => p !== null);
 	// Public callers get only displayable (CC/PD) photos; admin import passes
@@ -105,19 +130,20 @@ export async function fetchCharacterPhotos(
 export async function fetchPhoto(
 	env: Env | undefined,
 	id: number,
-	fetchFn: typeof fetch
+	fetchFn: typeof fetch,
+	opts: { userAgent?: string } = {}
 ): Promise<FursuitPhoto | null> {
 	const mode = getMode(env);
 	if (mode === 'off') return null;
 	if (mode === 'mock') return MOCK_PHOTOS.find((p) => p.id === id) ?? null;
 
-	const photo = await fetchPost(fetchFn, id).catch(() => null);
+	const photo = await fetchPost(fetchFn, id, opts.userAgent ?? furtrackUserAgent()).catch(() => null);
 	if (!photo || !photo.license.displayable) return null;
 	return photo;
 }
 
-async function fetchPost(fetchFn: typeof fetch, postId: number): Promise<FursuitPhoto | null> {
-	const data = await getJson(fetchFn, `${SOLAR}/view/post/${postId}`).catch(() => null);
+async function fetchPost(fetchFn: typeof fetch, postId: number, userAgent: string): Promise<FursuitPhoto | null> {
+	const data = await getJson(fetchFn, `${SOLAR}/view/post/${postId}`, userAgent).catch(() => null);
 	const post = data?.post;
 	if (!post) return null;
 
@@ -159,9 +185,9 @@ async function fetchPost(fetchFn: typeof fetch, postId: number): Promise<Fursuit
 	};
 }
 
-async function getJson(fetchFn: typeof fetch, url: string): Promise<any> {
+async function getJson(fetchFn: typeof fetch, url: string, userAgent: string): Promise<any> {
 	const res = await fetchFn(url, {
-		headers: REQUEST_HEADERS,
+		headers: { ...REQUEST_HEADERS, 'User-Agent': userAgent },
 		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
 	});
 	if (!res.ok) throw new Error(`FurTrack ${res.status} for ${url}`);

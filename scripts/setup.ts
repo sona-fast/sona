@@ -135,6 +135,30 @@ async function main() {
 	const uploadThingToken = useR2 ? '' : await ask('UploadThing token (UPLOADTHING_TOKEN)', '');
 	const provider = useR2 ? 'r2' : 'uploadthing';
 
+	// Fursuit photos (FurTrack). Off by default — a fresh fork shouldn't call an
+	// external API until the operator opts in. When enabled we set FURTRACK_MODE in
+	// wrangler.toml and seed the character/tag the feature queries; switch it later
+	// by editing FURTRACK_MODE or in admin Settings.
+	console.log(
+		"\nFursuit photos import a character's photos from FurTrack and self-host them."
+	);
+	let furtrackMode = 'off';
+	let primaryCharacter = '';
+	if (await askYesNo('Enable fursuit photos now?', false)) {
+		console.log(
+			"  'live' calls the real FurTrack API (self-host CC/public-domain photos per FurTrack's terms;"
+		);
+		console.log("         direct API use requires approval from FurTrack).");
+		console.log("  'mock' serves bundled demo data (safe for local/dev).");
+		furtrackMode = (await askYesNo('Use live FurTrack data? (No = mock demo data)', false))
+			? 'live'
+			: 'mock';
+		primaryCharacter = await ask(
+			'FurTrack character/tag to feature (the fursuit the gallery imports; blank to set later)',
+			''
+		);
+	}
+
 	// 1. Pages project (idempotent — ignore "already exists").
 	run(`npx wrangler pages project create ${project} --production-branch main`, { allowFail: true });
 
@@ -164,7 +188,8 @@ async function main() {
 		.replace(/^name = ".*"/m, `name = "${project}"`)
 		.replace(/database_name = ".*"/, `database_name = "${dbName}"`)
 		.replace(/database_id = ".*"/, `database_id = "${dbId}"`)
-		.replace(/bucket_name = ".*"/, `bucket_name = "${bucket}"`);
+		.replace(/bucket_name = ".*"/, `bucket_name = "${bucket}"`)
+		.replace(/^FURTRACK_MODE = ".*"/m, `FURTRACK_MODE = "${furtrackMode}"`);
 	writeFileSync('wrangler.toml', toml);
 	console.log('\n✔ wrote wrangler.toml');
 
@@ -197,6 +222,8 @@ async function main() {
 	//    wizard no longer asks; switching later is a migration in Settings).
 	let seed = `INSERT OR REPLACE INTO site_settings (key,value) VALUES ('storageProvider','${provider}')`;
 	if (useR2 && r2PublicUrl) seed += `, ('r2PublicUrl','${sqlStr(r2PublicUrl)}')`;
+	// Seed the FurTrack character/tag the fursuit feature queries (mirrors storageProvider).
+	if (primaryCharacter) seed += `, ('primaryCharacter','${sqlStr(primaryCharacter)}')`;
 	seed += ';';
 	run(`npx wrangler d1 execute ${dbName} --remote --command "${seed}"`, {
 		allowFail: true,
@@ -273,6 +300,9 @@ async function main() {
 	} else {
 		console.log(`Storage backend: ${provider === 'r2' ? 'Cloudflare R2' : 'UploadThing'} (set up).`);
 	}
+	console.log(
+		`Fursuit photos: ${furtrackMode === 'off' ? 'disabled' : `enabled (${furtrackMode})`}${primaryCharacter ? ` — character "${primaryCharacter}"` : ''}.`
+	);
 	console.log('Migrations applied and recorded in schema_migrations (first CI deploy is a no-op).');
 	console.log('\nNext steps:\n');
 	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');
