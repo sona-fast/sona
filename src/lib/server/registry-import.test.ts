@@ -129,6 +129,13 @@ describe('fetchRegistryCatalog', () => {
 		// The duplicate g1 collapsed to the later record.
 		expect(catalog.find((a) => a.globalId === 'g1')?.version).toBe(2);
 	});
+
+	it('degrades to [] when a 200 delta response has no artists array', async () => {
+		// Schema drift or an error page served as 200 — must not throw (this was
+		// the one unguarded 500 path into the admin artists loader).
+		catalogPages = [{ error: 'oops' } as unknown as (typeof catalogPages)[number]];
+		expect(await fetchRegistryCatalog(env)).toEqual([]);
+	});
 });
 
 describe('planImport', () => {
