@@ -15,7 +15,7 @@ describe('furtrackUserAgent', () => {
 		});
 		// Keeps the Mozilla-style shell FurTrack requires, and identifies this fork.
 		expect(ua).toMatch(/^Mozilla\/5\.0 \(compatible;/);
-		expect(ua).toContain('Sona-Fursuit/');
+		expect(ua).toContain('Sona-Fast/');
 		expect(ua).toContain('Sparky.ink');
 		expect(ua).toContain('https://www.furtrack.com/user/sparky');
 		expect(ua).toContain('Sparky');
@@ -23,7 +23,7 @@ describe('furtrackUserAgent', () => {
 
 	it('omits unset identity fields but stays non-empty and product-tagged', () => {
 		const ua = furtrackUserAgent({ siteName: 'Sona', ownerName: '', furtrackUrl: '' });
-		expect(ua).toContain('Sona-Fursuit/');
+		expect(ua).toContain('Sona-Fast/');
 		expect(ua).toContain('Sona');
 		expect(ua).not.toContain('+'); // no profile URL when furtrackUrl is empty
 	});
