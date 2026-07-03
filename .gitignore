@@ -52,3 +52,6 @@ vite.config.ts.timestamp-*
 
 # Raw sticker downloads from dev/import (re-downloadable; not source)
 sticker-assets/
+
+# Pencil design files — kept local only (Pencil deprecated; source of truth is Claude Design)
+*.pen
