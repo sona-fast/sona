@@ -27,6 +27,7 @@ import {
 	buildMigrationSql,
 	sanitizeProjectName,
 	isR2NotEnabled,
+	ensureUrlScheme,
 	ghSecretEligibility
 } from './setup-lib.ts';
 
@@ -121,13 +122,16 @@ async function main() {
 	const dbName = await ask('D1 database name', `${project}-db`);
 	const bucket = await ask('R2 bucket name', `${project}-images`);
 
-	// Default the R2 public URL to cdn.<domain> when a domain was given.
-	const r2PublicUrl = useR2
+	// Default the R2 public URL to https://cdn.<domain> when a domain was given.
+	// The app uses this verbatim as `${base}/${key}`, so normalize whatever the
+	// operator ends up with to carry a scheme (a bare host would break delivery).
+	const r2PublicUrlRaw = useR2
 		? await ask(
 				"R2 public URL (the bucket's custom domain; blank to set later)",
-				domain ? `cdn.${domain}` : ''
+				domain ? ensureUrlScheme(`cdn.${domain}`) : ''
 			)
 		: '';
+	const r2PublicUrl = ensureUrlScheme(r2PublicUrlRaw);
 	const uploadThingToken = useR2 ? '' : await ask('UploadThing token (UPLOADTHING_TOKEN)', '');
 	const provider = useR2 ? 'r2' : 'uploadthing';
 

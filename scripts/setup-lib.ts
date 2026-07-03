@@ -66,6 +66,21 @@ export function isR2NotEnabled(output: string): boolean {
 	return /\b10042\b/.test(output) || /enable R2/i.test(output) || /must (be|first be) enabled/i.test(output);
 }
 
+/**
+ * Ensures a URL carries an http(s) scheme, mirroring `sanitizeUrl` in
+ * src/lib/server/validate.ts: a value with no `http://`/`https://` prefix is
+ * assumed https. Empty input stays empty (the operator can set it later). Used
+ * so the seeded `r2PublicUrl` is a full URL — R2Storage uses it verbatim as
+ * `${base}/${key}`, so a bare host like `cdn.example.com` would be broken.
+ */
+export function ensureUrlScheme(value: string): string {
+	const trimmed = value.trim();
+	if (!trimmed) return '';
+	const lower = trimmed.toLowerCase();
+	if (lower.startsWith('http://') || lower.startsWith('https://')) return trimmed;
+	return 'https://' + trimmed;
+}
+
 export interface GhEligibilityInput {
 	/** `gh` binary is on PATH. */
 	ghInstalled: boolean;
