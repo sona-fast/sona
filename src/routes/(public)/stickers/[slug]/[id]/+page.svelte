@@ -193,10 +193,13 @@
 		background-color: var(--background);
 	}
 
-	/* Wrapper so the blur applies uniformly to img/video/lottie alike. */
+	/* Wrapper so the blur applies uniformly to img/video/lottie alike.
+	   Pinned by inset rather than %-sized: iOS WebKit resolves a percentage height
+	   against the aspect-ratio border box instead of the content box, which made
+	   the sticker overflow the padding and clip at the bottom edge. */
 	.media {
-		width: 100%;
-		height: 100%;
+		position: absolute;
+		inset: 30px;
 		transition: filter 0.2s;
 	}
 
