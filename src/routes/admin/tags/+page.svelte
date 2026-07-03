@@ -39,10 +39,12 @@
 		};
 	}} class="add-form">
 		<input type="text" class="input" name="name" placeholder={m.admin_tags_name_placeholder()} autofocus />
-		<button type="submit" class="btn btn-primary" disabled={creating}>
-			{#if creating}<Loader2 size={16} class="spin" /> {m.admin_adding()}{:else}{m.admin_add()}{/if}
-		</button>
-		<button type="button" class="btn btn-secondary" onclick={() => (showAdd = false)}>{m.admin_cancel()}</button>
+		<div class="add-form-actions">
+			<button type="submit" class="btn btn-primary" disabled={creating}>
+				{#if creating}<Loader2 size={16} class="spin" /> {m.admin_adding()}{:else}{m.admin_add()}{/if}
+			</button>
+			<button type="button" class="btn btn-secondary" onclick={() => (showAdd = false)}>{m.admin_cancel()}</button>
+		</div>
 	</form>
 {/if}
 
@@ -182,6 +184,11 @@
 
 	.add-form .input {
 		max-width: 300px;
+	}
+
+	.add-form-actions {
+		display: flex;
+		gap: 8px;
 	}
 
 	.toolbar {
@@ -330,10 +337,15 @@
 
 		.add-form {
 			flex-direction: column;
+			align-items: stretch;
 		}
 
 		.add-form .input {
 			max-width: 100%;
+		}
+
+		.add-form-actions .btn {
+			flex: 1;
 		}
 	}
 </style>
