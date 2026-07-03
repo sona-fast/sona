@@ -135,6 +135,10 @@ async function main() {
 	const uploadThingToken = useR2 ? '' : await ask('UploadThing token (UPLOADTHING_TOKEN)', '');
 	const provider = useR2 ? 'r2' : 'uploadthing';
 
+	// Base URL the scheduled sync workflows POST to. Use the custom domain when
+	// the operator gave one, else the default Pages URL.
+	const siteUrl = domain ? ensureUrlScheme(domain) : `https://${project}.pages.dev`;
+
 	// Fursuit photos (FurTrack). Off by default — a fresh fork shouldn't call an
 	// external API until the operator opts in. When enabled we set FURTRACK_MODE in
 	// wrangler.toml and seed the character/tag the feature queries; switch it later
@@ -289,12 +293,13 @@ async function main() {
 				ghSet('secret', 'CLOUDFLARE_API_TOKEN', env.CLOUDFLARE_API_TOKEN!),
 				ghSet('secret', 'CLOUDFLARE_ACCOUNT_ID', env.CLOUDFLARE_ACCOUNT_ID!),
 				ghSet('variable', 'CF_PAGES_PROJECT', project),
-				ghSet('variable', 'D1_DATABASE_NAME', dbName)
+				ghSet('variable', 'D1_DATABASE_NAME', dbName),
+				ghSet('variable', 'SITE_URL', siteUrl)
 			].every(Boolean);
 			ciSecretsSet = ok;
 			if (ok)
 				console.log(
-					'\n✔ CI secrets/variables set (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CF_PAGES_PROJECT, D1_DATABASE_NAME).'
+					'\n✔ CI secrets/variables set (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CF_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL).'
 				);
 			else
 				console.warn(
@@ -304,9 +309,9 @@ async function main() {
 	} else {
 		console.log(`\nℹ Skipping GitHub Actions secret setup: ${gh.reason}.`);
 		console.log(
-			'  CI deploys need CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID secrets and CF_PAGES_PROJECT'
+			'  CI deploys need CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID secrets and CF_PAGES_PROJECT,'
 		);
-		console.log('  + D1_DATABASE_NAME variables (Settings → Secrets and variables → Actions).');
+		console.log('  D1_DATABASE_NAME + SITE_URL variables (Settings → Secrets and variables → Actions).');
 	}
 
 	rl.close();
