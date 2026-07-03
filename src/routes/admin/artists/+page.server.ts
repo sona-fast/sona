@@ -10,6 +10,8 @@ import {
 	registrySubmissionsMine,
 	artistSocials
 } from '$lib/server/registry';
+import { fetchRegistryCatalog } from '$lib/server/registry-import';
+import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
@@ -42,6 +44,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			patreonUrl: artists.patreonUrl,
 			instagramUrl: artists.instagramUrl,
 			globalId: artists.globalId,
+			aliases: artists.aliases,
 			createdAt: artists.createdAt,
 			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.artist_id = artists.id)`,
 			stickerCount: sql<number>`(SELECT COUNT(*) FROM stickers WHERE stickers.artist_id = artists.id)`
@@ -56,6 +59,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// update by its target global_id, a create by the proposed display name.)
 	const registryEnabled = isRegistryEnabled(platform?.env);
 	let pendingArtistIds: number[] = [];
+	// Linked artists that already match the registry catalog — their "submit" is a
+	// no-op and gets disabled. Fails open: an empty/unreachable catalog leaves it {}.
+	const upToDate: Record<number, boolean> = {};
 	if (registryEnabled) {
 		const pending = (await registrySubmissionsMine(platform?.env)).filter((s) => s.status === 'pending');
 		pendingArtistIds = allArtists
@@ -70,6 +76,15 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 				})
 			)
 			.map((a) => a.id);
+
+		// One catalog fetch; compare each linked artist against its entry.
+		const catalog = await fetchRegistryCatalog(platform?.env);
+		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));
+		for (const a of allArtists) {
+			if (!a.globalId) continue;
+			const entry = byGlobalId.get(a.globalId);
+			if (entry && !artistDiffersFromRegistry(a, entry)) upToDate[a.id] = true;
+		}
 	}
 
 	return {
@@ -79,7 +94,8 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		totalPages: Math.ceil(total / perPage),
 		q,
 		registryEnabled,
-		pendingArtistIds
+		pendingArtistIds,
+		upToDate
 	};
 };
 

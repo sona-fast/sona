@@ -141,7 +141,7 @@
 								}}
 							>
 								<input type="hidden" name="id" value={artist.id} />
-								<button class="icon-btn" type="submit" disabled={submittingId !== null} aria-busy={submittingId === artist.id} aria-label={m.admin_artists_submit_registry()} title={m.admin_artists_submit_registry()}>
+								<button class="icon-btn" type="submit" disabled={submittingId !== null || data.upToDate?.[artist.id]} aria-busy={submittingId === artist.id} aria-label={data.upToDate?.[artist.id] ? m.admin_artists_up_to_date() : m.admin_artists_submit_registry()} title={data.upToDate?.[artist.id] ? m.admin_artists_up_to_date() : m.admin_artists_submit_registry()}>
 									{#if submittingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Share2 size={16} />{/if}
 								</button>
 							</form>
