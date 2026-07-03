@@ -3,10 +3,13 @@
 	import { goto } from '$app/navigation';
 	import { Camera, ShieldCheck, Search, Loader2, CheckCircle2, AlertTriangle, ImageOff, Trash2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import SetupDialog from '$lib/components/SetupDialog.svelte';
+	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
+	let showSetup = $state(false);
 	let character = $state(data.character);
 	let selected = $state<Set<number>>(new Set());
 	let importing = $state(false);
@@ -70,6 +73,7 @@
 {#if !data.enabled}
 	<div class="banner warn">
 		<AlertTriangle size={18} /> <span class="banner-msg">{m.admin_fursuit_disabled_pre()}<code>FURTRACK_MODE</code>{m.admin_fursuit_disabled_mid1()}<code>mock</code>{m.admin_fursuit_disabled_mid2()}<code>live</code>{m.admin_fursuit_disabled_post()}</span>
+		<button type="button" class="hint-link" onclick={() => (showSetup = true)}>{m.admin_setup_help_link()}</button>
 	</div>
 {:else if form?.success}
 	{@const r = form.result}
@@ -170,6 +174,35 @@
 	{/if}
 {/if}
 
+{#if showSetup}
+	<SetupDialog title={m.admin_fursuit_setup_title()} sub={m.admin_fursuit_setup_sub()} onclose={() => (showSetup = false)}>
+		{#snippet icon()}<Camera size={15} />{/snippet}
+		<p class="lede">{m.admin_fursuit_setup_lede_a()}<code>FURTRACK_MODE</code>{m.admin_fursuit_setup_lede_b()}</p>
+		<div class="subhead">{m.admin_fursuit_setup_modes_head()}</div>
+		<div class="modes">
+			<div class="mode"><span class="mode-key off">off</span><span class="mode-desc">{m.admin_fursuit_setup_mode_off()}</span></div>
+			<div class="mode"><span class="mode-key mock">mock</span><span class="mode-desc">{m.admin_fursuit_setup_mode_mock()}</span></div>
+			<div class="mode"><span class="mode-key live">live</span><span class="mode-desc">{m.admin_fursuit_setup_mode_live()}</span></div>
+		</div>
+		<div class="callout">
+			<AlertTriangle size={18} />
+			<span><strong>{m.admin_fursuit_setup_callout_lead()}</strong>{m.admin_fursuit_setup_callout_a()}<code>off</code>{m.admin_fursuit_setup_callout_b()}<code>mock</code>{m.admin_fursuit_setup_callout_c()}</span>
+		</div>
+		<div class="subhead">{m.admin_fursuit_setup_where_head()}</div>
+		<div class="cfg-row">
+			<div class="cfg-col">
+				<div class="cfg-label">{m.admin_fursuit_setup_cfg_prod_a()}<code>wrangler.toml</code>{m.admin_fursuit_setup_cfg_prod_b()}</div>
+				<CopyCommand text={"# wrangler.toml\n[vars]\nFURTRACK_MODE = \"live\""} />
+			</div>
+			<div class="cfg-col">
+				<div class="cfg-label">{m.admin_fursuit_setup_cfg_dev_a()}<code>.dev.vars</code>{m.admin_fursuit_setup_cfg_dev_b()}</div>
+				<CopyCommand text="FURTRACK_MODE=mock" />
+			</div>
+		</div>
+		<div class="unlocks"><strong>{m.admin_fursuit_setup_char_label()}</strong>{m.admin_fursuit_setup_char_a()}<strong>{m.admin_fursuit_setup_char_primary()}</strong>{m.admin_fursuit_setup_char_b()}</div>
+	</SetupDialog>
+{/if}
+
 {#if form?.error}<p class="error">{form.error}</p>{/if}
 
 {#if data.imported.length > 0}
@@ -235,6 +268,47 @@
 	.banner.ok { background: rgba(74,222,128,0.1); color: #4ade80; }
 	.banner.warn { background: rgba(245,166,35,0.1); color: #f5a623; }
 	.banner.err { background: rgba(248,113,113,0.12); color: #f87171; }
+	.hint-link {
+		flex-shrink: 0; background: none; border: none; padding: 0; cursor: pointer;
+		color: #f5a623; font-weight: 600; text-decoration: underline;
+		font: inherit; white-space: nowrap; align-self: center;
+	}
+
+	/* Setup modal body (rendered inside SetupDialog). */
+	.lede { font-size: 13px; color: var(--muted-foreground); line-height: 1.6; margin-bottom: 18px; }
+	.subhead {
+		font: 12px var(--font-primary); color: var(--muted-foreground);
+		text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 0 8px;
+	}
+	.modes { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+	.mode {
+		display: flex; gap: 12px; align-items: flex-start; padding: 10px 14px;
+		border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--background);
+	}
+	.mode-key {
+		font: 600 12px var(--font-primary); padding: 2px 9px;
+		border-radius: var(--radius-pill); flex-shrink: 0;
+	}
+	.mode-key.off { background: var(--secondary); color: var(--muted-foreground); }
+	.mode-key.mock { background: rgba(0,136,204,0.15); color: #3aa0e0; }
+	.mode-key.live { background: rgba(255,132,0,0.16); color: var(--primary); }
+	.mode-desc { font-size: 12.5px; color: var(--muted-foreground); line-height: 1.55; }
+	.callout {
+		display: flex; gap: 10px; padding: 12px 14px; border-radius: var(--radius-s);
+		background: rgba(245,166,35,0.1); color: #f5a623; font-size: 12.5px;
+		line-height: 1.55; margin-bottom: 16px;
+	}
+	.callout :global(svg) { flex-shrink: 0; margin-top: 1px; }
+	.callout strong { color: #f7b74d; }
+	.cfg-row { display: flex; gap: 12px; flex-wrap: wrap; }
+	.cfg-col { flex: 1; min-width: 240px; }
+	.cfg-label { font-size: 12px; color: var(--muted-foreground); line-height: 1.5; margin-bottom: 2px; }
+	.unlocks {
+		margin-top: 18px; padding: 12px 14px; border-left: 2px solid var(--primary);
+		background: rgba(255,132,0,0.06); font-size: 12.5px; color: var(--muted-foreground);
+		line-height: 1.6; border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+	}
+	.unlocks strong { color: var(--foreground); font-weight: 600; }
 	.summary { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
 	.muted { font-size: 12px; color: var(--muted-foreground); margin-bottom: 12px; }
 	.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; flex-wrap: wrap; }
