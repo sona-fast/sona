@@ -1,11 +1,18 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { CloudUpload, Check, Loader2 } from 'lucide-svelte';
+	import { CloudUpload, Check, Loader2, Plus } from 'lucide-svelte';
+	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
 
-	let artistMode = $state<'existing' | 'new'>(data.artists.length > 0 ? 'existing' : 'new');
+	// A newly created artist (via the New Artist dialog) is appended here so it
+	// appears in the select without a reload. `data.artists` is left untouched.
+	let artistList = $state<{ id: number; name: string }[]>(
+		data.artists.map((a) => ({ id: a.id, name: a.name }))
+	);
+	let selectedArtistId = $state('');
+	let showNewArtist = $state(false);
 	let imageUrl = $state('');
 	let imageWidth = $state(0);
 	let imageHeight = $state(0);
@@ -109,6 +116,12 @@
 			handleFiles(input.files);
 		}
 	}
+
+	function onArtistCreated(artist: { id: number; name: string }) {
+		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
+		selectedArtistId = String(artist.id);
+		showNewArtist = false;
+	}
 </script>
 
 <div class="page-header">
@@ -190,73 +203,18 @@
 
 	<fieldset class="artist-section">
 		<legend>{m.admin_field_artist()}</legend>
-		<div class="artist-toggle">
-			<button
-				type="button"
-				class="toggle-btn"
-				class:active={artistMode === 'existing'}
-				onclick={() => (artistMode = 'existing')}
-				disabled={data.artists.length === 0}
-			>
-				{m.admin_upload_select_existing()}
-			</button>
-			<button
-				type="button"
-				class="toggle-btn"
-				class:active={artistMode === 'new'}
-				onclick={() => (artistMode = 'new')}
-			>
-				{m.admin_upload_add_new_artist()}
-			</button>
-		</div>
-
-		{#if artistMode === 'existing'}
-			<label>
-				<span>{m.admin_field_artist()}</span>
-				<select class="input" name="artistId" required>
-					<option value="">{m.admin_upload_select_artist()}</option>
-					{#each data.artists as artist}
-						<option value={artist.id}>{artist.name}</option>
-					{/each}
-				</select>
-			</label>
-		{:else}
-			<input type="hidden" name="artistId" value="new" />
-			<label>
-				<span>{m.admin_field_artist_name()}</span>
-				<input type="text" class="input" placeholder={m.admin_upload_artist_name_placeholder()} name="artistName" required />
-			</label>
-			<div class="social-grid">
-				<label>
-					<span>Twitter/X</span>
-					<input type="text" class="input" placeholder={m.admin_social_handle_placeholder()} name="twitter" />
-				</label>
-				<label>
-					<span>Bluesky</span>
-					<input type="text" class="input" placeholder="bsky.app/profile/..." name="bluesky" />
-				</label>
-				<label>
-					<span>Telegram</span>
-					<input type="text" class="input" placeholder="t.me/..." name="telegram" />
-				</label>
-				<label>
-					<span>FurAffinity</span>
-					<input type="text" class="input" placeholder="furaffinity.net/user/..." name="furaffinity" />
-				</label>
-				<label>
-					<span>DeviantArt</span>
-					<input type="text" class="input" placeholder="deviantart.com/..." name="deviantart" />
-				</label>
-				<label>
-					<span>Patreon</span>
-					<input type="text" class="input" placeholder="patreon.com/..." name="patreon" />
-				</label>
-				<label>
-					<span>Instagram</span>
-					<input type="text" class="input" placeholder="instagram.com/..." name="instagram" />
-				</label>
-			</div>
-		{/if}
+		<label>
+			<span>{m.admin_field_artist()}</span>
+			<select class="input" name="artistId" bind:value={selectedArtistId} required>
+				<option value="">{m.admin_upload_select_artist()}</option>
+				{#each artistList as artist}
+					<option value={artist.id}>{artist.name}</option>
+				{/each}
+			</select>
+		</label>
+		<button type="button" class="add-artist-btn" onclick={() => (showNewArtist = true)}>
+			<Plus size={14} /> {m.admin_upload_add_new_artist()}
+		</button>
 	</fieldset>
 
 	<div class="row">
@@ -327,6 +285,14 @@
 		</button>
 	</div>
 </form>
+
+{#if showNewArtist}
+	<NewArtistDialog
+		registryEnabled={data.registryEnabled}
+		oncreated={onArtistCreated}
+		oncancel={() => (showNewArtist = false)}
+	/>
+{/if}
 
 <style>
 	.page-header {
@@ -464,41 +430,25 @@
 		padding: 0 8px;
 	}
 
-	.artist-toggle {
-		display: flex;
-		gap: 4px;
-		background: var(--secondary);
+	.add-artist-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		align-self: flex-start;
+		padding: 6px 12px;
+		border: 1px solid var(--border);
 		border-radius: var(--radius-pill);
-		padding: 4px;
-		width: fit-content;
-	}
-
-	.toggle-btn {
-		padding: 6px 16px;
-		border-radius: var(--radius-pill);
-		border: none;
 		background: none;
-		color: var(--muted-foreground);
+		color: var(--foreground);
 		font-size: 13px;
 		font-family: var(--font-primary);
 		cursor: pointer;
-		transition: background 0.15s, color 0.15s;
+		transition: border-color 0.15s, color 0.15s;
 	}
 
-	.toggle-btn.active {
-		background: var(--background);
-		color: var(--foreground);
-	}
-
-	.toggle-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.social-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 16px;
+	.add-artist-btn:hover {
+		border-color: var(--primary);
+		color: var(--primary);
 	}
 
 	.row {
@@ -595,10 +545,6 @@
 
 		.dropzone {
 			padding: 32px 16px;
-		}
-
-		.social-grid {
-			grid-template-columns: 1fr;
 		}
 
 		.row {
