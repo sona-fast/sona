@@ -127,6 +127,13 @@
       "when": 1783025545790,
       "tag": "0017_conventions",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1783074407314,
+      "tag": "0018_owner_character_flag",
+      "breakpoints": true
     }
   ]
 }
