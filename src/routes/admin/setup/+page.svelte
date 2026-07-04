@@ -32,7 +32,11 @@
 				use:enhance={() => {
 					submitting = true;
 					return async ({ update }) => {
-						await update();
+						// Keep what the operator typed/picked when the submit fails —
+						// the default reset silently reverts selects (e.g. theme) to
+						// their first option, and a blind resubmit then saves those
+						// defaults instead of the chosen values.
+						await update({ reset: false });
 						submitting = false;
 					};
 				}}
