@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { isRegistryEnabled, registrySearch } from '$lib/server/registry';
+import { getDb } from '$lib/server/db';
+import { isRegistryEnabled, registrySearch, resolveRegistryEnv } from '$lib/server/registry';
 import type { RequestHandler } from './$types';
 
 // GET /api/registry/search?q=<name>   (admin-only via hooks)
@@ -9,12 +10,13 @@ import type { RequestHandler } from './$types';
 // registry is disabled or unreachable — the dialog just falls back to manual entry.
 export const GET: RequestHandler = async ({ url, platform }) => {
 	const env = platform?.env;
-	if (!isRegistryEnabled(env)) return json({ enabled: false, artists: [] });
+	const renv = await resolveRegistryEnv(getDb(env!.DB), env);
+	if (!isRegistryEnabled(renv)) return json({ enabled: false, artists: [] });
 
 	const q = (url.searchParams.get('q') ?? '').trim();
 	if (q.length < 2) return json({ enabled: true, artists: [] });
 
-	const results = await registrySearch(env, { q });
+	const results = await registrySearch(renv, { q });
 	// Only surface active records, and shape them for the dialog.
 	const artists = results
 		.filter((a) => a.status === 'active')

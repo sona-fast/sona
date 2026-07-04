@@ -7,6 +7,7 @@ import { sanitizeText } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
 	isRegistryEnabled,
+	resolveRegistryEnv,
 	registrySubmit,
 	registrySubmissionsMine,
 	artistSocials
@@ -59,13 +60,14 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 
 	// Which of the artists on this page have an open registry submission? (Match an
 	// update by its target global_id, a create by the proposed display name.)
-	const registryEnabled = isRegistryEnabled(platform?.env);
+	const renv = await resolveRegistryEnv(db, platform?.env);
+	const registryEnabled = isRegistryEnabled(renv);
 	let pendingArtistIds: number[] = [];
 	// Linked artists that already match the registry catalog — their "submit" is a
 	// no-op and gets disabled. Fails open: an empty/unreachable catalog leaves it {}.
 	const upToDate: Record<number, boolean> = {};
 	if (registryEnabled) {
-		const subs = await registrySubmissionsMine(platform?.env);
+		const subs = await registrySubmissionsMine(renv);
 
 		// An APPROVED submission means the maintainer linked this artist into the
 		// registry. Stamp the global id now (marking it shared) instead of waiting
@@ -107,7 +109,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// artist that already matches has nothing to submit; an unlinked artist
 		// that's already in the catalog would be a duplicate — disable "submit" for
 		// both so an already-shared artist can't be resubmitted.
-		const catalog = await fetchRegistryCatalog(platform?.env);
+		const catalog = await fetchRegistryCatalog(renv);
 		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));
 		for (const a of allArtists) {
 			if (a.globalId) {
@@ -172,8 +174,9 @@ export const actions = {
 
 	submitToRegistry: async ({ request, platform }) => {
 		const env = platform?.env;
-		if (!isRegistryEnabled(env)) return fail(400, { error: 'Shared registry is not configured.' });
 		const db = getDb(env!.DB);
+		const renv = await resolveRegistryEnv(db, env);
+		if (!isRegistryEnabled(renv)) return fail(400, { error: 'Shared registry is not configured.' });
 		const data = await request.formData();
 		const id = Number(data.get('id'));
 		if (!id) return fail(400, { error: 'Artist ID is required' });
@@ -181,7 +184,7 @@ export const actions = {
 		const a = await db.select().from(artists).where(eq(artists.id, id)).get();
 		if (!a) return fail(404, { error: 'Artist not found' });
 
-		const result = await registrySubmit(env, {
+		const result = await registrySubmit(renv, {
 			kind: a.globalId ? 'update' : 'create',
 			targetGlobalId: a.globalId ?? undefined,
 			baseVersion: a.registryVersion ?? undefined,
