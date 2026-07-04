@@ -24,6 +24,7 @@ import {
 	CRON_MAX_NEW
 } from './sticker-import';
 import { listPublicCharacterNames } from '$lib/server/characters';
+import { slugify } from '$lib/server/slugify';
 import { getStickerSet, downloadFile } from '$lib/server/telegram';
 import { readFileSync } from 'node:fs';
 
@@ -277,6 +278,7 @@ CREATE TABLE sticker_emojis (
 	sticker_id INTEGER NOT NULL REFERENCES stickers(id) ON DELETE CASCADE,
 	emoji TEXT NOT NULL
 );
+CREATE UNIQUE INDEX stickers_telegram_file_unique_id_unique ON stickers (telegram_file_unique_id);
 `;
 
 /** A self-hosted-looking URL — isOwnedUrl recognises UploadThing's *.ufs.sh/f/ path. */
@@ -289,6 +291,49 @@ function makeDb() {
 	sqlite.pragma('foreign_keys = ON');
 	sqlite.exec(DDL);
 	const db = drizzle(makeD1(sqlite), { schema });
+	return { db, sqlite };
+}
+
+/**
+ * A DB whose first statement matching `trigger.match` runs `trigger.inject` right
+ * BEFORE it executes — simulating a concurrent import that committed between this
+ * flow's SELECT and its INSERT. Used to test the onConflictDoNothing race branches
+ * (pack get-or-create losing the race; a duplicate telegram_file_unique_id insert
+ * being skipped) deterministically, without real threads.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeRacingDb(trigger: { match: RegExp; inject: (sqlite: any) => void }) {
+	const sqlite = new Database(':memory:');
+	sqlite.pragma('foreign_keys = ON');
+	sqlite.exec(DDL);
+	const base = makeD1(sqlite);
+	let fired = false;
+	const racing = {
+		prepare(sql: string) {
+			const stmt = base.prepare(sql);
+			if (fired || !trigger.match.test(sql)) return stmt;
+			return {
+				bind(...params: unknown[]) {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const bound = (stmt as any).bind(...params);
+					const fire = () => {
+						if (!fired) {
+							fired = true;
+							trigger.inject(sqlite);
+						}
+					};
+					return {
+						run: () => (fire(), bound.run()),
+						all: () => (fire(), bound.all()),
+						raw: () => (fire(), bound.raw()),
+						_run: () => (fire(), bound._run())
+					};
+				}
+			};
+		},
+		batch: base.batch
+	} as unknown as D1Database;
+	const db = drizzle(racing, { schema });
 	return { db, sqlite };
 }
 
@@ -723,6 +768,100 @@ describe('importStickerBatch', () => {
 		expect(vi.mocked(downloadFile).mock.calls.length).toBe(downloadsAfterImport);
 		expect(await db.select().from(stickers)).toHaveLength(1);
 	});
+
+	it('skips a sticker whose telegram_file_unique_id was inserted concurrently (no double-insert)', async () => {
+		// A concurrent import stores sticker 'a' (fileUniqueId 'ua') AFTER this batch
+		// snapshots existingFileUniqueIds but BEFORE it inserts. The UNIQUE index makes
+		// our insert a no-op, so 'a' is reported skipped (not imported) and never doubled.
+		const { db, sqlite } = makeRacingDb({
+			match: /insert into "stickers"/i,
+			inject: (s) => {
+				s.prepare('INSERT INTO sticker_packs (name, slug, character_id, source, published, created_at) VALUES (?,?,?,?,?,?)')
+					.run('Other', 'other-pack', 1, 'telegram', 0, new Date().toISOString());
+				s.prepare('INSERT INTO stickers (pack_id, artist_id, image_url, format, position, nsfw, telegram_file_unique_id, created_at) VALUES (?,?,?,?,?,?,?,?)')
+					.run(2, null, 'https://cdn.test/race.webp', 'webp', 0, 0, 'ua', new Date().toISOString());
+			}
+		});
+		await seedCharacterAndArtist(db);
+		mockDownloadOk();
+
+		const r = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: 'megapack', managerArtistId: null,
+			items: [item('a'), item('b')]
+		});
+
+		// 'a' lost the race → skipped; only 'b' newly imported.
+		expect(r).toMatchObject({ imported: 1, skipped: 1 });
+		expect(r.failed).toHaveLength(0);
+		// 'ua' exists exactly once (the injected row) — our conflicting insert no-op'd.
+		const fuids = (sqlite.prepare('SELECT telegram_file_unique_id AS f FROM stickers').all() as { f: string }[]).map((x) => x.f).sort();
+		expect(fuids).toEqual(['ua', 'ub']);
+		// No emoji rows written for the skipped 'a' — only 'b' (🔥) got one.
+		const emojiCount = sqlite.prepare('SELECT COUNT(*) AS c FROM sticker_emojis').get() as { c: number };
+		expect(emojiCount.c).toBe(1);
+	});
+
+	it('appends to the winner pack when a concurrent import created it first (no duplicate pack, no throw)', async () => {
+		// getOrCreatePack's SELECT misses, but a concurrent import inserts the pack (same
+		// slug + telegramUrl) before our INSERT. onConflictDoNothing no-ops and we
+		// re-select + append to the winner instead of throwing the raw UNIQUE error.
+		// slugify appends a random suffix, so pin Math.random to make the slug the flow
+		// computes predictable — and inject a pack carrying that exact slug.
+		const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		const winnerSlug = slugify('Mega Pack');
+		const { db, sqlite } = makeRacingDb({
+			match: /insert into "sticker_packs"/i,
+			inject: (s) => {
+				s.prepare('INSERT INTO sticker_packs (name, slug, character_id, telegram_url, source, published, created_at) VALUES (?,?,?,?,?,?,?)')
+					.run('Mega Pack', winnerSlug, 1, 'https://t.me/addstickers/megapack', 'telegram', 0, new Date().toISOString());
+			}
+		});
+		await seedCharacterAndArtist(db);
+		mockDownloadOk();
+
+		const r = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: 'megapack', managerArtistId: null,
+			items: [item('a'), item('b')]
+		});
+
+		// The loser reports created=false and still imports both stickers into the winner.
+		expect(r).toMatchObject({ created: false, imported: 2, skipped: 0 });
+		expect(r.failed).toHaveLength(0);
+		// Exactly one pack row — no duplicate.
+		expect(await db.select().from(stickerPacks)).toHaveLength(1);
+		const packRow = sqlite.prepare('SELECT id, slug FROM sticker_packs').get() as { id: number; slug: string };
+		expect(packRow.slug).toBe(winnerSlug);
+		const rows = await db.select().from(stickers);
+		expect(rows).toHaveLength(2);
+		expect(rows.map((x) => x.telegramFileUniqueId).sort()).toEqual(['ua', 'ub']);
+		expect(rows.every((x) => x.packId === packRow.id)).toBe(true);
+		rnd.mockRestore();
+	});
+
+	it('throws a clear error when the slug collides with a DIFFERENT set', async () => {
+		// A pre-existing pack with the SAME slug but a DIFFERENT telegramUrl (two sets
+		// whose titles happen to slugify identically). getOrCreatePack's insert conflicts
+		// and the re-select by telegramUrl finds nothing → a named error naming the slug,
+		// not the raw constraint 500. (Slug pinned via Math.random for determinism.)
+		const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		const collidingSlug = slugify('Mega Pack');
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		await db.insert(stickerPacks).values({
+			name: 'Mega Pack', slug: collidingSlug, characterId: 1, source: 'telegram',
+			telegramUrl: 'https://t.me/addstickers/someotherset', managerArtistId: null,
+			published: false, createdAt: new Date().toISOString()
+		});
+		mockDownloadOk();
+
+		await expect(
+			importStickerBatch({
+				env: r2Env, settings: r2Settings, db, nameOrUrl: 'megapack', managerArtistId: null,
+				items: [item('a')]
+			})
+		).rejects.toThrow(collidingSlug);
+		rnd.mockRestore();
+	});
 });
 
 // --- Cron re-sync (resyncTelegramPacks) -------------------------------------
@@ -947,5 +1086,33 @@ describe('migration 0018 owner_character_flag backfill', () => {
 		for (const stmt of migration.split('--> statement-breakpoint')) sqlite.exec(stmt);
 		const rows = sqlite.prepare('SELECT id, is_owner FROM characters ORDER BY id').all();
 		expect(rows).toEqual([{ id: 1, is_owner: 1 }, { id: 2, is_owner: 0 }]);
+	});
+});
+
+describe('migration 0019 stickers_dedupe_unique_id', () => {
+	// Runs the REAL migration SQL: it must delete only genuine duplicate
+	// telegram_file_unique_id rows (keep MIN id) + their emoji rows before adding the
+	// UNIQUE index, and leave NULL (self-hosted) stickers untouched.
+	it('drops duplicate telegram ids (keeping the lowest) + their emojis, then enforces uniqueness', () => {
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`
+			CREATE TABLE stickers (id INTEGER PRIMARY KEY, telegram_file_unique_id TEXT);
+			CREATE TABLE sticker_emojis (sticker_id INTEGER NOT NULL, emoji TEXT NOT NULL);
+			-- ids 1 & 3 share 'dup' (keep 1, drop 3). id 2 is unique 'a'. ids 4 & 5 are
+			-- self-hosted (NULL) — SQLite allows many NULLs, so both must survive.
+			INSERT INTO stickers (id, telegram_file_unique_id) VALUES (1,'dup'), (2,'a'), (3,'dup'), (4,NULL), (5,NULL);
+			INSERT INTO sticker_emojis (sticker_id, emoji) VALUES (1,'😀'), (3,'🔥'), (2,'🎉');
+		`);
+		const migration = readFileSync(new URL('../../../drizzle/0019_stickers_dedupe_unique_id.sql', import.meta.url), 'utf8');
+		for (const stmt of migration.split('--> statement-breakpoint')) sqlite.exec(stmt);
+
+		const ids = (sqlite.prepare('SELECT id FROM stickers ORDER BY id').all() as { id: number }[]).map((r) => r.id);
+		expect(ids).toEqual([1, 2, 4, 5]); // duplicate id 3 removed; the two NULLs kept
+		const emojiOwners = (sqlite.prepare('SELECT sticker_id FROM sticker_emojis ORDER BY sticker_id').all() as { sticker_id: number }[]).map((r) => r.sticker_id);
+		expect(emojiOwners).toEqual([1, 2]); // id 3's emoji went with it
+
+		// The index now rejects a new duplicate but still allows another NULL.
+		expect(() => sqlite.prepare("INSERT INTO stickers (id, telegram_file_unique_id) VALUES (6,'a')").run()).toThrow();
+		expect(() => sqlite.prepare('INSERT INTO stickers (id, telegram_file_unique_id) VALUES (7,NULL)').run()).not.toThrow();
 	});
 });

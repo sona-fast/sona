@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const artists = sqliteTable('artists', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
@@ -168,7 +168,14 @@ export const stickers = sqliteTable('stickers', {
 	nsfw: integer('nsfw', { mode: 'boolean' }).notNull().default(false),
 	telegramFileUniqueId: text('telegram_file_unique_id'),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
-});
+}, (table) => [
+	// Telegram's fileUniqueId dedupes re-imports of the same set. UNIQUE so two
+	// concurrent imports can't double-insert the same sticker (both snapshot the
+	// existing-ids set before either writes, so the app-level check races). The
+	// column is nullable and SQLite allows many NULLs under a unique index, so
+	// self-hosted stickers (no Telegram id) are unaffected.
+	uniqueIndex('stickers_telegram_file_unique_id_unique').on(table.telegramFileUniqueId)
+]);
 
 // Many emoji per sticker; search-by-emoji filters on this junction. No PK, mirroring
 // image_tags/image_characters; (stickerId, emoji) uniqueness is kept in app code.
