@@ -83,3 +83,31 @@ describe('admin artists load — registry enablement', () => {
 		expect(result).toMatchObject({ registryEnabled: false });
 	});
 });
+
+describe('admin artists load — former names (aliases)', () => {
+	it('exposes parsed alias display names as formerly, skipping the current name', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(schema.artists).values({
+			name: 'Zaps',
+			aliases: JSON.stringify([
+				{ displayName: 'Boltie', socials: {} },
+				// Identical to the current display name (case-insensitively) — must be skipped.
+				{ displayName: 'zaps', socials: {} }
+			])
+		});
+
+		// load's SvelteKit signature admits void; the cast narrows to the data shape.
+		const result = (await load(loadEvent(platform))) as { artists: Array<{ formerly: string[] }> };
+		expect(result.artists).toHaveLength(1);
+		expect(result.artists[0].formerly).toEqual(['Boltie']);
+	});
+
+	it('exposes an empty formerly for artists without aliases or with malformed JSON', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(schema.artists).values({ name: 'NoAka' });
+		await db.insert(schema.artists).values({ name: 'BadJson', aliases: 'not-json{' });
+
+		const result = (await load(loadEvent(platform))) as { artists: Array<{ formerly: string[] }> };
+		expect(result.artists.map((a) => a.formerly)).toEqual([[], []]);
+	});
+});

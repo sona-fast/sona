@@ -1,0 +1,114 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+// better-sqlite3 ships no bundled types and is a dev-only test dependency here.
+// @ts-expect-error - no declaration file for 'better-sqlite3'
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import type { D1Database } from '@cloudflare/workers-types';
+import * as schema from '$lib/server/db/schema';
+import { siteSettings } from '$lib/server/db/schema';
+import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
+import { getRawSetting } from '$lib/server/settings';
+import { actions } from './+page.server';
+
+// Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses
+// (client.prepare().bind().run()/all()), same approach as sticker-import.test.ts.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeD1(sqlite: any): D1Database {
+	function exec(sql: string, params: unknown[], mode: 'run' | 'all' | 'raw') {
+		const stmt = sqlite.prepare(sql);
+		if (mode === 'raw') {
+			try {
+				return stmt.raw(true).all(...params) as unknown[];
+			} finally {
+				stmt.raw(false);
+			}
+		}
+		if (stmt.reader) return { results: stmt.all(...params), success: true, meta: {} };
+		const info = stmt.run(...params);
+		return { results: [], success: true, meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid) } };
+	}
+	function prepare(sql: string) {
+		return {
+			bind: (...params: unknown[]) => ({
+				run: () => exec(sql, params, 'run'),
+				all: () => exec(sql, params, 'all'),
+				raw: () => exec(sql, params, 'raw')
+			})
+		};
+	}
+	return { prepare } as unknown as D1Database;
+}
+
+function makeDb() {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+	const d1 = makeD1(sqlite);
+	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
+}
+
+function connectEvent(platform: App.Platform, fields: Record<string, string>) {
+	const body = new FormData();
+	for (const [k, v] of Object.entries(fields)) body.append(k, v);
+	return {
+		platform,
+		url: new URL('https://taro.surf/admin/settings'),
+		request: new Request('https://taro.surf/admin/settings?/connectRegistry', { method: 'POST', body })
+	} as never;
+}
+
+// Capture the registration request instead of hitting a real registry.
+let fetchMock: ReturnType<typeof vi.fn>;
+beforeEach(() => {
+	fetchMock = vi.fn(
+		async () =>
+			new Response(JSON.stringify({ forkId: 'fork-1', key: 'minted-key' }), { status: 201 })
+	);
+	vi.stubGlobal('fetch', fetchMock);
+});
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
+function sentBody(): Record<string, unknown> {
+	expect(fetchMock).toHaveBeenCalledTimes(1);
+	const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+	expect(String(url)).toContain('/v1/forks');
+	return JSON.parse(init.body as string);
+}
+
+describe('settings connectRegistry — fork key label', () => {
+	it('labels the fork key with the configured site name', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'siteName', value: 'Taro Surf' });
+
+		const result = await actions.connectRegistry(connectEvent(platform, { signupToken: 'tok' }));
+
+		expect(result).toMatchObject({ success: true });
+		expect(sentBody()).toMatchObject({ signupToken: 'tok', label: 'Taro Surf' });
+		// The minted key is persisted so the connection survives without a deploy.
+		expect(await getRawSetting(db, REGISTRY_API_KEY_SETTING)).toBe('minted-key');
+	});
+
+	it('falls back to the site hostname when no site name is configured', async () => {
+		const { platform } = makeDb();
+
+		const result = await actions.connectRegistry(connectEvent(platform, { signupToken: 'tok' }));
+
+		expect(result).toMatchObject({ success: true });
+		expect(sentBody()).toMatchObject({ label: 'taro.surf' });
+	});
+});
+
+describe('settings connectRegistry — reconnect guard', () => {
+	it('refuses to mint a second key while one is already stored', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'existing-key' });
+
+		const result = await actions.connectRegistry(connectEvent(platform, { signupToken: 'tok' }));
+
+		expect(result).toMatchObject({ status: 400, data: { alreadyConnected: true } });
+		// No registration request went out, and the stored key is untouched.
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(await getRawSetting(db, REGISTRY_API_KEY_SETTING)).toBe('existing-key');
+	});
+});

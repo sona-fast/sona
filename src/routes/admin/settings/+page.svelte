@@ -445,7 +445,7 @@
 		return async ({ result }) => {
 			connectingRegistry = false;
 			if (result.type === 'success') { toast.success(m.admin_settings_registry_connected_toast()); await invalidateAll(); }
-			else if (result.type === 'failure') toast.error((result.data?.error as string) ?? m.admin_settings_registry_connect_failed());
+			else if (result.type === 'failure') toast.error(result.data?.alreadyConnected ? m.admin_settings_registry_already_connected() : ((result.data?.error as string) ?? m.admin_settings_registry_connect_failed()));
 		};
 	}}>
 		<section data-tab="connections">

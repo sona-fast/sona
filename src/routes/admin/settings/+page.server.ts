@@ -5,6 +5,7 @@ import { getDb } from '$lib/server/db';
 import {
 	getSettings,
 	saveSettings,
+	getRawSetting,
 	setRawSetting,
 	clearSettingsCache
 } from '$lib/server/settings';
@@ -188,7 +189,7 @@ export const actions = {
 		};
 	},
 
-	connectRegistry: async ({ request, platform }) => {
+	connectRegistry: async ({ request, platform, url }) => {
 		const env = platform?.env;
 		const db = getDb(env!.DB);
 		// A deploy-time secret already connects the fork; nothing to do here.
@@ -197,10 +198,24 @@ export const actions = {
 				error: 'A REGISTRY_API_KEY secret is already configured at deploy time.'
 			});
 		}
+		// Already holding a fork key: connecting again would mint a brand-new key on
+		// the registry that we can't revoke (there's no self-revocation endpoint),
+		// leaving an orphan. Refuse — disconnect first to rotate.
+		if (await getRawSetting(db, REGISTRY_API_KEY_SETTING)) {
+			return fail(400, {
+				alreadyConnected: true,
+				error: 'Already connected — disconnect first to rotate the key.'
+			});
+		}
 		const data = await request.formData();
 		const signupToken = sanitizeText(data.get('signupToken') as string, 200);
 		const registryUrl = sanitizeUrl(data.get('registryUrl') as string) || '';
-		const label = sanitizeText(data.get('label') as string, 200) || undefined;
+		// Label the fork key so the registry maintainer can tell keys apart (a NULL
+		// label makes registry-side hygiene guesswork). Prefer an explicit form
+		// value, else the configured site name, else this site's hostname.
+		const siteName = (await getRawSetting(db, 'siteName'))?.trim();
+		const label =
+			sanitizeText(data.get('label') as string, 200) || siteName || url.hostname;
 		if (!signupToken) return fail(400, { error: 'An invite token is required to connect.' });
 
 		const result = await registryRegisterFork({

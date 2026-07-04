@@ -10,7 +10,8 @@ import {
 	resolveRegistryEnv,
 	registrySubmit,
 	registrySubmissionsMine,
-	artistSocials
+	artistSocials,
+	parseAliases
 } from '$lib/server/registry';
 import { fetchRegistryCatalog } from '$lib/server/registry-import';
 import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
@@ -122,7 +123,15 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	}
 
 	return {
-		artists: allArtists,
+		// Surface registry-synced former names ("formerly …") so a renamed artist
+		// (e.g. Boltie→Zaps) is explainable from the admin list, not just the
+		// public gallery. Skip aliases identical to the current display name.
+		artists: allArtists.map((a) => ({
+			...a,
+			formerly: parseAliases(a.aliases)
+				.map((al) => al.displayName)
+				.filter((n) => n.toLowerCase() !== a.name.toLowerCase())
+		})),
 		page,
 		total,
 		totalPages: Math.ceil(total / perPage),

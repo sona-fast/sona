@@ -95,6 +95,7 @@
 						{artist.name}
 						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
 						{#if data.pendingArtistIds?.includes(artist.id)}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
+						{#if artist.formerly.length}<span class="aka-hint">{m.admin_artists_formerly({ names: artist.formerly.join(', ') })}</span>{/if}
 					</td>
 					<td class="artwork-count">{worksLabel(artist)}</td>
 					<td>
@@ -182,6 +183,7 @@
 			</div>
 			<div class="mobile-artist-info">
 				<p class="mobile-artist-name">{artist.name}</p>
+				{#if artist.formerly.length}<p class="aka-hint">{m.admin_artists_formerly({ names: artist.formerly.join(', ') })}</p>{/if}
 				{#if artist.globalId || data.pendingArtistIds?.includes(artist.id)}
 					<div class="mobile-artist-badges">
 						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
@@ -482,6 +484,15 @@
 
 	.artist-name {
 		font-weight: 500;
+	}
+
+	/* Registry-synced former names — a muted line under the artist name so a
+	   rename (Boltie→Zaps) is explainable at a glance. */
+	.aka-hint {
+		display: block;
+		font-size: 12px;
+		font-weight: 400;
+		color: var(--muted-foreground);
 	}
 
 	.artwork-count {
