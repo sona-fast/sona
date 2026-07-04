@@ -94,7 +94,13 @@
 					<td class="artist-name">
 						{artist.name}
 						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
-						{#if data.pendingArtistIds?.includes(artist.id)}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
+						{#if data.registryStatus?.[artist.id]?.status === 'pending'}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
+						{#if data.registryStatus?.[artist.id]?.status === 'rejected'}<span class="reg-badge rejected" title={data.registryStatus[artist.id].note ? m.admin_artists_rejected_note({ note: data.registryStatus[artist.id].note ?? '' }) : m.admin_artists_rejected_title()}>{m.admin_artists_badge_rejected()}</span><form method="POST" action="?/dismissRejection" style="display:inline" use:enhance={() => {
+							return async ({ result, update }) => {
+								await update();
+								if (result.type === 'success') toast.success(m.admin_artists_rejection_dismissed());
+							};
+						}}><input type="hidden" name="submissionId" value={data.registryStatus[artist.id].submissionId} /><button class="reg-dismiss" type="submit" aria-label={m.admin_artists_dismiss_rejection()} title={m.admin_artists_dismiss_rejection()}>×</button></form>{/if}
 						{#if artist.formerly.length}<span class="aka-hint">{m.admin_artists_formerly({ names: artist.formerly.join(', ') })}</span>{/if}
 					</td>
 					<td class="artwork-count">{worksLabel(artist)}</td>
@@ -184,10 +190,16 @@
 			<div class="mobile-artist-info">
 				<p class="mobile-artist-name">{artist.name}</p>
 				{#if artist.formerly.length}<p class="aka-hint">{m.admin_artists_formerly({ names: artist.formerly.join(', ') })}</p>{/if}
-				{#if artist.globalId || data.pendingArtistIds?.includes(artist.id)}
+				{#if artist.globalId || data.registryStatus?.[artist.id]}
 					<div class="mobile-artist-badges">
 						{#if artist.globalId}<span class="reg-badge" title={m.admin_artists_shared_title()}>{m.admin_artists_badge_shared()}</span>{/if}
-						{#if data.pendingArtistIds?.includes(artist.id)}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
+						{#if data.registryStatus?.[artist.id]?.status === 'pending'}<span class="reg-badge pending" title={m.admin_artists_pending_title()}>{m.admin_artists_badge_pending()}</span>{/if}
+						{#if data.registryStatus?.[artist.id]?.status === 'rejected'}<span class="reg-badge rejected" title={data.registryStatus[artist.id].note ? m.admin_artists_rejected_note({ note: data.registryStatus[artist.id].note ?? '' }) : m.admin_artists_rejected_title()}>{m.admin_artists_badge_rejected()}</span><form method="POST" action="?/dismissRejection" style="display:inline" use:enhance={() => {
+							return async ({ result, update }) => {
+								await update();
+								if (result.type === 'success') toast.success(m.admin_artists_rejection_dismissed());
+							};
+						}}><input type="hidden" name="submissionId" value={data.registryStatus[artist.id].submissionId} /><button class="reg-dismiss" type="submit" aria-label={m.admin_artists_dismiss_rejection()} title={m.admin_artists_dismiss_rejection()}>×</button></form>{/if}
 					</div>
 				{/if}
 				<p class="mobile-artist-meta">
@@ -456,6 +468,27 @@
 	.reg-badge.pending {
 		color: var(--muted-foreground);
 		border-color: var(--muted-foreground);
+	}
+
+	.reg-badge.rejected {
+		color: var(--destructive);
+		border-color: var(--destructive);
+		cursor: help;
+	}
+
+	.reg-dismiss {
+		margin-left: 2px;
+		padding: 0 4px;
+		font-size: 0.85rem;
+		line-height: 1;
+		background: none;
+		border: none;
+		color: var(--muted-foreground);
+		cursor: pointer;
+		vertical-align: middle;
+	}
+	.reg-dismiss:hover {
+		color: var(--destructive);
 	}
 
 	.avatar {

@@ -370,6 +370,8 @@
 	"admin_artists_badge_pending": "pending",
 	"admin_artists_formerly": "formerly {names}",
 	"admin_artists_rejected_note": "Rejected by the registry: {note}",
+	"admin_artists_dismiss_rejection": "Dismiss this rejection",
+	"admin_artists_rejection_dismissed": "Rejection dismissed",
 	"admin_artists_rejected_title": "This submission was rejected by the registry maintainer.",
 	"admin_artists_badge_rejected": "rejected",
 	"admin_artists_registry_update_submitted": "Update submitted to registry",

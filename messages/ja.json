@@ -334,6 +334,8 @@
 	"admin_artists_badge_pending": "審査中",
 	"admin_artists_formerly": "旧名 {names}",
 	"admin_artists_rejected_note": "レジストリに却下されました: {note}",
+	"admin_artists_dismiss_rejection": "この却下通知を消す",
+	"admin_artists_rejection_dismissed": "却下通知を消しました",
 	"admin_artists_rejected_title": "この申請はレジストリ管理者によって却下されました。",
 	"admin_artists_badge_rejected": "却下",
 	"admin_artists_registry_update_submitted": "更新内容をレジストリに送信しました",

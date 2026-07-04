@@ -16,7 +16,13 @@ import {
 import { fetchRegistryCatalog } from '$lib/server/registry-import';
 import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
 import { approvedSubmissionGlobalId, artistInCatalog } from '$lib/server/registry-submissions';
+import { getRawSetting, setRawSetting } from '$lib/server/settings';
+import { parseDismissed, addDismissed } from '$lib/server/registry-dismissals';
 import type { Actions, PageServerLoad } from './$types';
+
+// site_settings key: JSON array of registry submission ids the contributor has
+// dismissed, so an acknowledged rejection stops re-surfacing on every load.
+const DISMISSED_KEY = 'registryDismissedSubmissions';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
 	const db = getDb(platform!.env.DB);
@@ -59,16 +65,23 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		.limit(perPage)
 		.offset((page - 1) * perPage);
 
-	// Which of the artists on this page have an open registry submission? (Match an
-	// update by its target global_id, a create by the proposed display name.)
+	// What's each artist's standing with the registry? Match an update by its
+	// target global_id, a create by the proposed display name. We surface the most
+	// recent pending/rejected submission per artist (with the reviewer's note) so
+	// the contributor sees the outcome instead of it vanishing silently.
 	const renv = await resolveRegistryEnv(db, platform?.env);
 	const registryEnabled = isRegistryEnabled(renv);
-	let pendingArtistIds: number[] = [];
+	const registryStatus: Record<
+		number,
+		{ status: 'pending' | 'rejected'; note: string | null; submissionId: number }
+	> = {};
 	// Linked artists that already match the registry catalog — their "submit" is a
 	// no-op and gets disabled. Fails open: an empty/unreachable catalog leaves it {}.
 	const upToDate: Record<number, boolean> = {};
 	if (registryEnabled) {
-		const subs = await registrySubmissionsMine(renv);
+		const dismissed = parseDismissed(await getRawSetting(db, DISMISSED_KEY));
+		// A dismissed rejection is acknowledged locally — drop it so it stops showing.
+		const subs = (await registrySubmissionsMine(renv)).filter((s) => !dismissed.has(s.id));
 
 		// An APPROVED submission means the maintainer linked this artist into the
 		// registry. Stamp the global id now (marking it shared) instead of waiting
@@ -92,19 +105,20 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			a.globalId = linkedId; // reflect in this render so the badge + guard update
 		}
 
-		const pending = subs.filter((s) => s.status === 'pending');
-		pendingArtistIds = allArtists
-			.filter((a) =>
-				pending.some((s) => {
-					if (s.targetGlobalId) return !!a.globalId && s.targetGlobalId === a.globalId;
-					try {
-						return (JSON.parse(s.payload).displayName as string) === a.name;
-					} catch {
-						return false;
-					}
-				})
-			)
-			.map((a) => a.id);
+		for (const a of allArtists) {
+			// registrySubmissionsMine is newest-first, so the first match is the latest.
+			const sub = subs.find((s) => {
+				if (s.targetGlobalId) return !!a.globalId && s.targetGlobalId === a.globalId;
+				try {
+					return (JSON.parse(s.payload).displayName as string) === a.name;
+				} catch {
+					return false;
+				}
+			});
+			if (sub && (sub.status === 'pending' || sub.status === 'rejected')) {
+				registryStatus[a.id] = { status: sub.status, note: sub.reviewerNote ?? null, submissionId: sub.id };
+			}
+		}
 
 		// One catalog fetch; compare each linked artist against its entry. A linked
 		// artist that already matches has nothing to submit; an unlinked artist
@@ -137,7 +151,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		totalPages: Math.ceil(total / perPage),
 		q,
 		registryEnabled,
-		pendingArtistIds,
+		registryStatus,
 		upToDate
 	};
 };
@@ -206,6 +220,20 @@ export const actions = {
 		});
 		if (!result) return fail(502, { error: 'Registry submission failed (registry unreachable?).' });
 		return { success: true, submitted: true };
+	},
+
+	// Acknowledge a rejected submission: record its id locally so the rejected badge
+	// stops re-appearing. We keep the (immutable) registry record; this is a local
+	// dismissal, not a delete.
+	dismissRejection: async ({ request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const data = await request.formData();
+		const submissionId = Number(data.get('submissionId'));
+		if (!submissionId) return fail(400, { error: 'Submission ID is required' });
+		const dismissed = parseDismissed(await getRawSetting(db, DISMISSED_KEY));
+		const capped = addDismissed(dismissed, submissionId);
+		await setRawSetting(db, DISMISSED_KEY, JSON.stringify(capped));
+		return { success: true, dismissed: true };
 	},
 
 	delete: async ({ request, platform }) => {
