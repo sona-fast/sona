@@ -227,7 +227,9 @@ export interface RegistrySubmission {
 	payload: string; // JSON string
 	matchedGlobalId: string | null;
 	status: 'pending' | 'approved' | 'rejected' | 'superseded';
+	reviewerNote: string | null;
 	createdAt: string;
+	decidedAt: string | null;
 }
 
 /** This fork's submissions + their fate (for showing per-artist status). */

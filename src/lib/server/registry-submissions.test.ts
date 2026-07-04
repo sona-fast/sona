@@ -10,7 +10,9 @@ function sub(partial: Partial<RegistrySubmission>): RegistrySubmission {
 		payload: JSON.stringify({ displayName: 'Jinho', socials: {} }),
 		matchedGlobalId: null,
 		status: 'pending',
+		reviewerNote: null,
 		createdAt: '2026-07-01T00:00:00Z',
+		decidedAt: null,
 		...partial
 	};
 }
