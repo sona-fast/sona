@@ -13,12 +13,12 @@ export const load: PageServerLoad = async ({ platform }) => {
 			name: collections.name,
 			slug: collections.slug,
 			coverImageUrl: collections.coverImageUrl,
-			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.collection_id = collections.id AND images.published = 1)`,
+			artworkCount: sql<number>`(SELECT COUNT(*) FROM images WHERE images.collection_id = collections.id AND images.published = 1 AND images.parent_image_id IS NULL)`,
 			// First ≤4 images (SFW first, then newest) as a JSON array, aggregated in
 			// SQLite so each collection's mosaic comes back in the single list query — no
 			// N+1. nsfw rides along so a fully-NSFW collection can fall back to a masked
 			// (blurred) mosaic instead of showing the raw image.
-			previewImagesJson: sql<string>`(SELECT json_group_array(json_object('url', image_url, 'nsfw', nsfw)) FROM (SELECT images.image_url, images.nsfw FROM images WHERE images.collection_id = collections.id AND images.published = 1 ORDER BY images.nsfw ASC, images.created_at DESC LIMIT 4))`
+			previewImagesJson: sql<string>`(SELECT json_group_array(json_object('url', image_url, 'nsfw', nsfw)) FROM (SELECT images.image_url, images.nsfw FROM images WHERE images.collection_id = collections.id AND images.published = 1 AND images.parent_image_id IS NULL ORDER BY images.nsfw ASC, images.created_at DESC LIMIT 4))`
 		})
 		.from(collections)
 		.orderBy(collections.name);

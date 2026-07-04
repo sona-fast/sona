@@ -1,6 +1,6 @@
 import { getReadDb } from '$lib/server/db';
 import { images, artists, imageTags, tags } from '$lib/server/db/schema';
-import { eq, desc, and, notInArray, inArray, sql } from 'drizzle-orm';
+import { eq, desc, and, notInArray, inArray, isNull, sql } from 'drizzle-orm';
 import { getSettings, settingsFallback } from '$lib/server/settings';
 import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
@@ -40,14 +40,14 @@ export const load: PageServerLoad = async ({ platform }) => {
 			})
 			.from(images)
 			.leftJoin(artists, eq(images.artistId, artists.id))
-			.where(eq(images.published, true))
+			.where(and(eq(images.published, true), isNull(images.parentImageId)))
 			.orderBy(desc(images.createdAt))
 			.limit(RECENT_COUNT),
 		// Mosaic banner: the most recent SFW images up front (random fill added below).
 		db
 			.select({ id: images.id, imageUrl: images.imageUrl })
 			.from(images)
-			.where(and(eq(images.nsfw, false), eq(images.published, true)))
+			.where(and(eq(images.nsfw, false), eq(images.published, true), isNull(images.parentImageId)))
 			.orderBy(desc(images.createdAt))
 			.limit(RECENT_COUNT)
 	]);
@@ -82,9 +82,10 @@ export const load: PageServerLoad = async ({ platform }) => {
 					? and(
 							eq(images.nsfw, false),
 							eq(images.published, true),
+							isNull(images.parentImageId),
 							notInArray(images.id, recentIds)
 						)
-					: and(eq(images.nsfw, false), eq(images.published, true))
+					: and(eq(images.nsfw, false), eq(images.published, true), isNull(images.parentImageId))
 			)
 			.orderBy(sql`RANDOM()`)
 			.limit(remainingSlots)

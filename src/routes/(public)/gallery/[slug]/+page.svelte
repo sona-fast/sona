@@ -19,6 +19,15 @@
 	let revealed = $state(!image.nsfw);
 	let copied = $state(false);
 
+	// Strip tile caption: the group parent reads "Original"; unlabeled variants
+	// fall back to "Variant N", numbering variants only (the parent isn't one).
+	function stripLabel(variant: (typeof data.variants)[number]): string {
+		if (variant.parentImageId === null) return m.gallery_variant_original();
+		if (variant.variantLabel) return variant.variantLabel;
+		const n = data.variants.filter((v) => v.parentImageId !== null).indexOf(variant) + 1;
+		return m.gallery_variant_n({ n });
+	}
+
 	async function share() {
 		const url = window.location.href;
 		const title = `${image.title} — ${siteName}`;
@@ -199,6 +208,30 @@
 					{/if}
 				</dl>
 			</div>
+
+			{#if data.variants.length > 0}
+				<div class="meta-section">
+					<h3>{m.gallery_variants()}</h3>
+					<div class="variant-strip">
+						{#each data.variants as variant}
+							<a
+								href="/gallery/{variant.slug}"
+								class="variant-tile"
+								class:current={variant.slug === image.slug}
+								aria-current={variant.slug === image.slug ? 'page' : undefined}
+							>
+								<img
+									src={variant.thumbnailUrl || variant.imageUrl}
+									alt={stripLabel(variant)}
+									class:blurred-thumb={variant.nsfw && !revealed}
+									loading="lazy"
+								/>
+								<span class="variant-label">{stripLabel(variant)}</span>
+							</a>
+						{/each}
+					</div>
+				</div>
+			{/if}
 
 			<div class="actions">
 				<a href={image.imageUrl} download class="btn btn-primary"><Download size={16} /> {m.gallery_download()}</a>
@@ -508,5 +541,52 @@
 		.actions .btn {
 			width: 100%;
 		}
+	}
+
+	.variant-strip {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+	}
+
+	.variant-tile {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		width: 84px;
+		text-decoration: none;
+		color: var(--muted-foreground);
+		font-size: 11px;
+	}
+
+	.variant-tile img {
+		width: 84px;
+		height: 84px;
+		object-fit: cover;
+		border-radius: var(--radius-xs);
+		border: 2px solid transparent;
+		transition: border-color 0.15s;
+	}
+
+	.variant-tile:hover img {
+		border-color: var(--border);
+	}
+
+	.variant-tile.current img {
+		border-color: var(--primary);
+	}
+
+	.variant-tile.current .variant-label {
+		color: var(--foreground);
+	}
+
+	.variant-label {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.blurred-thumb {
+		filter: blur(8px);
 	}
 </style>

@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { getReadDb } from '$lib/server/db';
 import { collections, images, artists, imageTags, tags } from '$lib/server/db/schema';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, isNull } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -28,7 +28,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		})
 		.from(images)
 		.leftJoin(artists, eq(images.artistId, artists.id))
-		.where(and(eq(images.collectionId, collection.id), eq(images.published, true)))
+		.where(and(eq(images.collectionId, collection.id), eq(images.published, true), isNull(images.parentImageId)))
 		.orderBy(desc(images.createdAt));
 
 	// Get first tag per image

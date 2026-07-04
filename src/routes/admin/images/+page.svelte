@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff, Loader2 } from 'lucide-svelte';
+	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff, Loader2, Layers } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate, cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
@@ -43,6 +43,23 @@
 				img.artistName?.toLowerCase().includes(search.toLowerCase())
 		)
 	);
+
+	// Multi-select → "group as variants". Only parent-eligible rows (not already
+	// a variant) can be selected; the server re-validates everything.
+	let selectedIds = $state<Set<number>>(new Set());
+	let groupDialogOpen = $state(false);
+	let groupParentId = $state<number | null>(null);
+	let grouping = $state(false);
+	let groupForm: HTMLFormElement;
+
+	function toggleSelected(id: number, on: boolean) {
+		const next = new Set(selectedIds);
+		if (on) next.add(id);
+		else next.delete(id);
+		selectedIds = next;
+	}
+
+	const selectedRows = $derived(data.images.filter((img) => selectedIds.has(img.id)));
 </script>
 
 <div class="page-header">
@@ -57,12 +74,18 @@
 		<Search size={16} class="search-icon" />
 		<input type="search" class="input search" placeholder={m.admin_search_placeholder()} bind:value={search} />
 	</div>
+	{#if selectedIds.size >= 2}
+		<button class="btn btn-secondary" onclick={() => { groupParentId = selectedRows[0]?.id ?? null; groupDialogOpen = true; }}>
+			<Layers size={16} /> {m.admin_variant_group_button({ count: selectedIds.size })}
+		</button>
+	{/if}
 </div>
 
 <div class="table-wrapper">
 	<table class="data-table">
 		<thead>
 			<tr>
+				<th class="col-select"></th>
 				<th class="col-thumb">{m.admin_col_thumbnail()}</th>
 				<th>{m.admin_field_title()}</th>
 				<th>{m.admin_field_artist()}</th>
@@ -80,6 +103,16 @@
 		<tbody>
 			{#each filtered as image}
 				<tr>
+					<td class="col-select">
+						<input
+							type="checkbox"
+							checked={selectedIds.has(image.id)}
+							disabled={image.parentImageId !== null}
+							title={image.parentImageId !== null ? m.admin_variant_already_variant() : undefined}
+							onchange={(e) => toggleSelected(image.id, e.currentTarget.checked)}
+							aria-label={m.admin_variant_select_aria({ title: image.title })}
+						/>
+					</td>
 					<td class="col-thumb">
 						<div class="thumb">
 							<img src={cdnImage(image.thumbnailUrl || image.imageUrl, 200)} alt={image.title} loading="lazy" />
@@ -88,6 +121,12 @@
 					<td>
 						<a href="/gallery/{image.slug}" class="image-title">{image.title}</a>
 						{#if image.nsfw}<span class="nsfw-badge">NSFW</span>{/if}
+						{#if image.parentTitle}
+							<div class="variant-of">
+								{m.admin_variant_of_label()}
+								<a href="/admin/images/{image.parentId}/edit">{image.parentTitle}</a>
+							</div>
+						{/if}
 					</td>
 					<td>
 						{#if image.artistName}
@@ -147,7 +186,7 @@
 				</tr>
 			{:else}
 				<tr>
-					<td colspan="8" class="empty">
+					<td colspan="9" class="empty">
 						{#if search}
 							{m.admin_images_no_match({ search })}
 						{:else}
@@ -253,6 +292,50 @@
 		onconfirm={() => { deletingId = deleteTarget!.id; deleteForm.requestSubmit(); deleteTarget = null; }}
 		oncancel={() => (deleteTarget = null)}
 	/>
+{/if}
+
+<form
+	method="POST"
+	action="?/groupVariants"
+	use:enhance={() => {
+		grouping = true;
+		return async ({ update }) => {
+			await update();
+			grouping = false;
+			groupDialogOpen = false;
+			selectedIds = new Set();
+		};
+	}}
+	bind:this={groupForm}
+	style="display:none"
+>
+	<input type="hidden" name="ids" value={Array.from(selectedIds).join(',')} />
+	<input type="hidden" name="parentId" value={groupParentId ?? ''} />
+</form>
+
+{#if groupDialogOpen}
+	<div class="dialog-backdrop" role="presentation" onclick={() => (groupDialogOpen = false)}>
+		<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+		<div class="dialog" role="dialog" aria-modal="true" aria-label={m.admin_variant_group_title()} onclick={(e) => e.stopPropagation()}>
+			<h2>{m.admin_variant_group_title()}</h2>
+			<p class="dialog-hint">{m.admin_variant_group_pick_parent()}</p>
+			<div class="dialog-rows">
+				{#each selectedRows as row}
+					<label class="dialog-row">
+						<input type="radio" checked={groupParentId === row.id} onchange={() => (groupParentId = row.id)} />
+						<img src={cdnImage(row.thumbnailUrl || row.imageUrl, 200)} alt={row.title} />
+						<span>{row.title}</span>
+					</label>
+				{/each}
+			</div>
+			<div class="dialog-actions">
+				<button class="btn btn-secondary" onclick={() => (groupDialogOpen = false)}>{m.admin_cancel()}</button>
+				<button class="btn btn-primary" disabled={!groupParentId || grouping} onclick={() => groupForm.requestSubmit()}>
+					{#if grouping}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_variant_group_confirm()}{/if}
+				</button>
+			</div>
+		</div>
+	</div>
 {/if}
 
 <style>
@@ -541,5 +624,91 @@
 			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 			z-index: 40;
 		}
+	}
+
+	.col-select {
+		width: 32px;
+	}
+
+	.col-select input {
+		width: 15px;
+		height: 15px;
+	}
+
+	.variant-of {
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin-top: 2px;
+	}
+
+	.variant-of a {
+		color: var(--muted-foreground);
+		text-decoration: underline;
+	}
+
+	.dialog-backdrop {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 60;
+	}
+
+	.dialog {
+		width: min(440px, calc(100vw - 32px));
+		max-height: 80vh;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		padding: 20px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-s);
+		background: var(--card);
+	}
+
+	.dialog h2 {
+		font-size: 17px;
+	}
+
+	.dialog-hint {
+		font-size: 13px;
+		color: var(--muted-foreground);
+	}
+
+	.dialog-rows {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.dialog-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 8px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-xs);
+		font-size: 14px;
+		cursor: pointer;
+	}
+
+	.dialog-row:has(input:checked) {
+		border-color: var(--primary);
+	}
+
+	.dialog-row img {
+		width: 40px;
+		height: 40px;
+		object-fit: cover;
+		border-radius: var(--radius-xs);
+	}
+
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 10px;
 	}
 </style>

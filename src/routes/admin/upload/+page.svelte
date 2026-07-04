@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { CloudUpload, Check, Loader2, Plus } from 'lucide-svelte';
+	import { CloudUpload, Check, Loader2, Plus, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -13,17 +13,34 @@
 	);
 	let selectedArtistId = $state('');
 	let showNewArtist = $state(false);
-	let imageUrl = $state('');
-	let imageWidth = $state(0);
-	let imageHeight = $state(0);
-	let fileSize = $state(0);
-	let uploadStatus = $state<'idle' | 'uploading' | 'done' | 'error'>('idle');
-	let uploadError = $state('');
 	let dragOver = $state(false);
-	let isUploading = $state(false);
 	let saving = $state(false);
-	let previewUrl = $state('');
 	let fileInput: HTMLInputElement;
+
+	type Tile = {
+		key: number;
+		fileName: string;
+		previewUrl: string;
+		url: string;
+		width: number;
+		height: number;
+		fileSize: number;
+		status: 'uploading' | 'done' | 'error';
+		error: string;
+		label: string;
+		nsfw: boolean;
+	};
+	let tiles = $state<Tile[]>([]);
+	let tileKey = 0;
+	let parentIndex = $state(0);
+	// 'new' = the set becomes a new piece (one tile is the parent);
+	// 'existing' = every file becomes a variant of an already-uploaded piece.
+	let groupMode = $state<'new' | 'existing'>('new');
+	let existingParentId = $state('');
+
+	const isUploading = $derived(tiles.some((t) => t.status === 'uploading'));
+	const allUploaded = $derived(tiles.length > 0 && tiles.every((t) => t.status === 'done'));
+	const isGroup = $derived(tiles.length > 1 || groupMode === 'existing');
 
 	function formatSize(bytes: number): string {
 		if (bytes < 1024) return `${bytes} B`;
@@ -43,26 +60,7 @@
 		});
 	}
 
-	async function handleFiles(files: FileList | File[]) {
-		const fileArray = Array.from(files);
-		if (fileArray.length === 0) return;
-
-		const file = fileArray[0];
-		fileSize = file.size;
-
-		// Create local preview
-		if (previewUrl) URL.revokeObjectURL(previewUrl);
-		previewUrl = URL.createObjectURL(file);
-
-		const dims = await getImageDimensions(file);
-		imageWidth = dims.width;
-		imageHeight = dims.height;
-
-		// Check for duplicate before uploading
-		uploadStatus = 'uploading';
-		uploadError = '';
-		isUploading = true;
-
+	async function uploadOne(tile: Tile, file: File) {
 		try {
 			const checkRes = await fetch('/api/check-duplicate', {
 				method: 'POST',
@@ -72,9 +70,7 @@
 			const { exists } = await checkRes.json();
 
 			if (exists && !confirm(m.admin_upload_duplicate_confirm({ fileName: file.name }))) {
-				uploadStatus = 'idle';
-				isUploading = false;
-				previewUrl = '';
+				tiles = tiles.filter((t) => t.key !== tile.key);
 				return;
 			}
 
@@ -83,14 +79,46 @@
 			const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd });
 			if (!uploadRes.ok) throw new Error(m.admin_upload_failed_status({ status: uploadRes.status }));
 			const result = await uploadRes.json();
-			imageUrl = result.url;
-			uploadStatus = 'done';
+			tile.url = result.url;
+			tile.status = 'done';
 		} catch (e) {
-			uploadError = e instanceof Error ? e.message : m.admin_upload_failed();
-			uploadStatus = 'error';
-		} finally {
-			isUploading = false;
+			tile.error = e instanceof Error ? e.message : m.admin_upload_failed();
+			tile.status = 'error';
 		}
+	}
+
+	async function handleFiles(files: FileList | File[]) {
+		const room = data.maxVariantSet - tiles.length;
+		const fileArray = Array.from(files).slice(0, room);
+		if (fileArray.length === 0) return;
+
+		for (const file of fileArray) {
+			const dims = await getImageDimensions(file);
+			const tile: Tile = {
+				key: tileKey++,
+				fileName: file.name,
+				previewUrl: URL.createObjectURL(file),
+				url: '',
+				width: dims.width,
+				height: dims.height,
+				fileSize: file.size,
+				status: 'uploading',
+				error: '',
+				label: '',
+				nsfw: false
+			};
+			tiles = [...tiles, tile];
+			// Uploads run concurrently; each tile tracks its own progress.
+			uploadOne(tiles[tiles.length - 1], file);
+		}
+	}
+
+	function removeTile(key: number) {
+		const idx = tiles.findIndex((t) => t.key === key);
+		if (idx === -1) return;
+		URL.revokeObjectURL(tiles[idx].previewUrl);
+		tiles = tiles.filter((t) => t.key !== key);
+		if (parentIndex >= tiles.length) parentIndex = 0;
 	}
 
 	function handleDrop(e: DragEvent) {
@@ -114,6 +142,7 @@
 		const input = e.target as HTMLInputElement;
 		if (input.files) {
 			handleFiles(input.files);
+			input.value = '';
 		}
 	}
 
@@ -139,67 +168,136 @@
 		saving = false;
 	};
 }} class="upload-form">
-	<input type="hidden" name="imageUrl" value={imageUrl} />
-	<input type="hidden" name="width" value={imageWidth} />
-	<input type="hidden" name="height" value={imageHeight} />
-	<input type="hidden" name="fileSize" value={fileSize} />
+	<input type="hidden" name="count" value={tiles.length} />
+	{#if groupMode === 'new'}
+		<input type="hidden" name="parentIndex" value={parentIndex} />
+	{:else}
+		<input type="hidden" name="existingParentId" value={existingParentId} />
+	{/if}
+	{#each tiles as tile, i (tile.key)}
+		<input type="hidden" name="imageUrl_{i}" value={tile.url} />
+		<input type="hidden" name="width_{i}" value={tile.width} />
+		<input type="hidden" name="height_{i}" value={tile.height} />
+		<input type="hidden" name="fileSize_{i}" value={tile.fileSize} />
+	{/each}
 
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class="dropzone"
-		class:drag-over={dragOver}
-		class:uploaded={uploadStatus === 'done'}
-		class:error={uploadStatus === 'error'}
-		ondrop={handleDrop}
-		ondragover={handleDragOver}
-		ondragleave={handleDragLeave}
-		onclick={() => fileInput?.click()}
-		role="button"
-		tabindex="0"
-		onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInput?.click(); }}
-	>
-		{#if previewUrl}
-			<div class="preview-container">
-				<img src={previewUrl} alt={m.admin_upload_preview_alt()} class="preview-image" />
-				<div class="preview-overlay">
-					{#if uploadStatus === 'uploading'}
-						<Loader2 size={24} class="spin" />
-						<span>{m.admin_upload_uploading()}</span>
-					{:else if uploadStatus === 'done'}
-						<Check size={24} />
-						<span>{m.admin_upload_uploaded()}</span>
-					{:else if uploadStatus === 'error'}
-						<span class="error-text">{uploadError}</span>
+	{#if tiles.length === 0}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="dropzone"
+			class:drag-over={dragOver}
+			ondrop={handleDrop}
+			ondragover={handleDragOver}
+			ondragleave={handleDragLeave}
+			onclick={() => fileInput?.click()}
+			role="button"
+			tabindex="0"
+			onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInput?.click(); }}
+		>
+			<CloudUpload size={40} />
+			<p>{m.admin_upload_dropzone_multi({ max: data.maxVariantSet })}</p>
+			<p class="dropzone-hint">{m.admin_upload_formats()}</p>
+		</div>
+	{:else}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="tile-grid"
+			ondrop={handleDrop}
+			ondragover={handleDragOver}
+			ondragleave={handleDragLeave}
+		>
+			{#each tiles as tile, i (tile.key)}
+				<div class="tile" class:tile-error={tile.status === 'error'} class:tile-parent={isGroup && groupMode === 'new' && parentIndex === i}>
+					<div class="tile-preview">
+						<img src={tile.previewUrl} alt={tile.fileName} />
+						<div class="tile-status">
+							{#if tile.status === 'uploading'}
+								<Loader2 size={16} class="spin" />
+							{:else if tile.status === 'done'}
+								<Check size={16} />
+							{:else}
+								<span class="error-text">{tile.error}</span>
+							{/if}
+						</div>
+						<button type="button" class="tile-remove" aria-label={m.admin_variant_remove_file()} onclick={() => removeTile(tile.key)}>
+							<X size={14} />
+						</button>
+					</div>
+					<div class="tile-meta">{tile.width} x {tile.height} &bull; {formatSize(tile.fileSize)}</div>
+					{#if isGroup}
+						{#if groupMode === 'new'}
+							<label class="tile-parent-pick">
+								<input type="radio" name="parentPick" checked={parentIndex === i} onchange={() => (parentIndex = i)} />
+								<span>{m.admin_variant_parent_radio()}</span>
+							</label>
+						{/if}
+						{#if groupMode === 'existing' || parentIndex !== i}
+							<input
+								type="text"
+								class="input tile-label"
+								name="label_{i}"
+								placeholder={m.admin_variant_label_placeholder()}
+								bind:value={tile.label}
+							/>
+							<label class="tile-nsfw">
+								<input type="checkbox" name="nsfw_{i}" bind:checked={tile.nsfw} />
+								<span>{m.admin_field_mark_nsfw()}</span>
+							</label>
+						{/if}
 					{/if}
 				</div>
-			</div>
-			<p class="dropzone-hint">{imageWidth} x {imageHeight} &bull; {formatSize(fileSize)}</p>
-			<p class="dropzone-hint">{m.admin_upload_replace_hint()}</p>
-		{:else if uploadStatus === 'error'}
-			<CloudUpload size={40} />
-			<p class="error-text">{uploadError}</p>
-			<p class="dropzone-hint">{m.admin_upload_retry_hint()}</p>
-		{:else}
-			<CloudUpload size={40} />
-			<p>{m.admin_upload_dropzone()}</p>
-			<p class="dropzone-hint">{m.admin_upload_formats()}</p>
-		{/if}
-	</div>
+			{/each}
+			{#if tiles.length < data.maxVariantSet}
+				<button type="button" class="tile tile-add" onclick={() => fileInput?.click()}>
+					<Plus size={20} />
+					<span>{m.admin_variant_add_files()}</span>
+				</button>
+			{/if}
+		</div>
+	{/if}
 
 	<input
 		type="file"
 		accept="image/*"
+		multiple
 		bind:this={fileInput}
 		onchange={handleFileSelect}
 		style="display: none"
 	/>
 
+	{#if tiles.length > 0}
+		<fieldset class="group-section">
+			<legend>{m.admin_variant_group_legend()}</legend>
+			<label class="radio-label">
+				<input type="radio" checked={groupMode === 'new'} onchange={() => (groupMode = 'new')} />
+				<span>{tiles.length > 1 ? m.admin_variant_group_new() : m.admin_variant_group_single()}</span>
+			</label>
+			<label class="radio-label">
+				<input type="radio" checked={groupMode === 'existing'} onchange={() => (groupMode = 'existing')} />
+				<span>{m.admin_variant_group_existing()}</span>
+			</label>
+			{#if groupMode === 'existing'}
+				<select class="input" bind:value={existingParentId} required>
+					<option value="">{m.admin_variant_pick_parent()}</option>
+					{#each data.parentCandidates as candidate}
+						<option value={String(candidate.id)}>{candidate.title}</option>
+					{/each}
+				</select>
+			{/if}
+		</fieldset>
+	{/if}
+
 	<h2>{m.admin_upload_image_details()}</h2>
 
-	<label>
-		<span>{m.admin_field_title()}</span>
-		<input type="text" class="input" placeholder={m.admin_upload_title_placeholder()} name="title" required />
-	</label>
+	{#if groupMode === 'new'}
+		<label>
+			<span>{m.admin_field_title()}</span>
+			<input type="text" class="input" placeholder={m.admin_upload_title_placeholder()} name="title" required />
+			{#if tiles.length > 1}
+				<small class="hint">{m.admin_variant_title_hint()}</small>
+			{/if}
+		</label>
+	{/if}
 
 	<fieldset class="artist-section">
 		<legend>{m.admin_field_artist()}</legend>
@@ -280,7 +378,7 @@
 
 	<div class="form-actions">
 		<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
-		<button type="submit" class="btn btn-primary" disabled={!imageUrl || isUploading || saving}>
+		<button type="submit" class="btn btn-primary" disabled={!allUploaded || isUploading || saving}>
 			{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_upload_submit()}{/if}
 		</button>
 	</div>
@@ -341,30 +439,45 @@
 		background: rgba(255, 132, 0, 0.05);
 	}
 
-	.dropzone.uploaded {
-		border-color: #4ade80;
-		color: #4ade80;
+	.tile-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+		gap: 12px;
 	}
 
-	.dropzone.error {
+	.tile {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 10px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-s);
+		background: var(--card);
+	}
+
+	.tile-parent {
+		border-color: var(--primary);
+	}
+
+	.tile-error {
 		border-color: var(--destructive);
 	}
 
-	.preview-container {
+	.tile-preview {
 		position: relative;
-		max-width: 300px;
-		max-height: 200px;
+		aspect-ratio: 1;
 		border-radius: var(--radius-xs);
 		overflow: hidden;
+		background: var(--secondary);
 	}
 
-	.preview-image {
+	.tile-preview img {
 		width: 100%;
 		height: 100%;
-		object-fit: contain;
+		object-fit: cover;
 	}
 
-	.preview-overlay {
+	.tile-status {
 		position: absolute;
 		bottom: 0;
 		left: 0;
@@ -373,11 +486,100 @@
 		align-items: center;
 		justify-content: center;
 		gap: 6px;
-		padding: 6px;
+		padding: 4px;
 		background: rgba(0, 0, 0, 0.6);
 		color: white;
+		font-size: 11px;
+	}
+
+	.tile-remove {
+		position: absolute;
+		top: 6px;
+		right: 6px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border: none;
+		border-radius: var(--radius-pill);
+		background: rgba(0, 0, 0, 0.6);
+		color: white;
+		cursor: pointer;
+	}
+
+	.tile-remove:hover {
+		background: var(--destructive);
+	}
+
+	.tile-meta {
+		font-size: 11px;
+		color: var(--muted-foreground);
+		word-break: break-all;
+	}
+
+	.tile-parent-pick,
+	.tile-nsfw {
+		display: flex;
+		flex-direction: row !important;
+		align-items: center;
+		gap: 6px;
+		font-size: 12px;
+		color: var(--muted-foreground);
+		cursor: pointer;
+	}
+
+	.tile-parent-pick input,
+	.tile-nsfw input {
+		width: 14px;
+		height: 14px;
+	}
+
+	.tile-parent .tile-parent-pick {
+		color: var(--primary);
+		font-weight: 500;
+	}
+
+	.tile-label {
+		font-size: 12px;
+		padding: 6px 8px;
+	}
+
+	.tile-add {
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		min-height: 160px;
+		border-style: dashed;
+		background: none;
+		color: var(--muted-foreground);
 		font-size: 13px;
 		font-family: var(--font-primary);
+		cursor: pointer;
+		transition: border-color 0.15s, color 0.15s;
+	}
+
+	.tile-add:hover {
+		border-color: var(--primary);
+		color: var(--primary);
+	}
+
+	.group-section {
+		gap: 10px;
+	}
+
+	.radio-label {
+		display: flex;
+		flex-direction: row !important;
+		align-items: center;
+		gap: 8px;
+		font-size: 14px;
+		cursor: pointer;
+	}
+
+	.radio-label input {
+		width: 15px;
+		height: 15px;
 	}
 
 	.error-text {
@@ -545,6 +747,10 @@
 
 		.dropzone {
 			padding: 32px 16px;
+		}
+
+		.tile-grid {
+			grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 		}
 
 		.row {

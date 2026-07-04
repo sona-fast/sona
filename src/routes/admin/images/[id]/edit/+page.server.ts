@@ -1,10 +1,11 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { images, artists, collections, tags, imageTags, characters, imageCharacters } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull, ne } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
+import { variantAssignmentError } from '$lib/server/variants';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -31,12 +32,20 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		.innerJoin(characters, eq(imageCharacters.characterId, characters.id))
 		.where(eq(imageCharacters.imageId, id));
 
-	const [allArtists, allCollections, allTags, allCharacters] = await Promise.all([
-		db.select().from(artists).orderBy(artists.name),
-		db.select().from(collections).orderBy(collections.name),
-		db.select().from(tags).orderBy(tags.name),
-		db.select().from(characters).orderBy(characters.name)
-	]);
+	const [allArtists, allCollections, allTags, allCharacters, parentCandidates, firstVariant] =
+		await Promise.all([
+			db.select().from(artists).orderBy(artists.name),
+			db.select().from(collections).orderBy(collections.name),
+			db.select().from(tags).orderBy(tags.name),
+			db.select().from(characters).orderBy(characters.name),
+			// Parent-eligible = images that are not variants themselves (one level only).
+			db
+				.select({ id: images.id, title: images.title })
+				.from(images)
+				.where(and(isNull(images.parentImageId), ne(images.id, id)))
+				.orderBy(images.title),
+			db.select({ id: images.id }).from(images).where(eq(images.parentImageId, id)).get()
+		]);
 
 	return {
 		image,
@@ -45,7 +54,10 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		artists: allArtists,
 		collections: allCollections,
 		tags: allTags,
-		characters: allCharacters
+		characters: allCharacters,
+		parentCandidates,
+		// An image that already has variants is a parent — it can't also be a variant.
+		hasVariants: !!firstVariant
 	};
 };
 
@@ -65,6 +77,8 @@ export const actions = {
 		const published = data.get('published') !== 'on';
 		const sourcePostUrl = sanitizeUrl(data.get('sourcePostUrl') as string);
 		const commissionedAt = (data.get('commissionedAt') as string)?.trim();
+		const parentImageIdRaw = (data.get('parentImageId') as string)?.trim();
+		const variantLabel = sanitizeText(data.get('variantLabel') as string, 100);
 
 		// Artist social links (for new artists)
 		const twitterUrl = normalizeSocialUrl('twitter', data.get('twitter') as string) || null;
@@ -76,6 +90,34 @@ export const actions = {
 		const instagramUrl = normalizeSocialUrl('instagram', data.get('instagram') as string) || null;
 
 		if (!title) return fail(400, { error: 'Title is required' });
+
+		// Variant link: validate before writing anything.
+		let parentImageId: number | null = null;
+		if (parentImageIdRaw) {
+			parentImageId = Number(parentImageIdRaw);
+			if (!Number.isInteger(parentImageId) || parentImageId <= 0) {
+				return fail(400, { error: 'Invalid parent image' });
+			}
+			const [parent, firstVariant] = await Promise.all([
+				db
+					.select({ id: images.id, parentImageId: images.parentImageId })
+					.from(images)
+					.where(eq(images.id, parentImageId))
+					.get(),
+				db.select({ id: images.id }).from(images).where(eq(images.parentImageId, id)).get()
+			]);
+			const variantError = variantAssignmentError({
+				selfId: id,
+				parent,
+				selfHasVariants: !!firstVariant
+			});
+			if (variantError === 'self') return fail(400, { error: 'An image cannot be a variant of itself' });
+			if (variantError === 'missing') return fail(400, { error: 'Parent image not found' });
+			if (variantError === 'nested')
+				return fail(400, { error: 'Variants cannot be nested — the chosen parent is itself a variant' });
+			if (variantError === 'has_variants')
+				return fail(400, { error: 'This image has variants of its own and cannot become a variant' });
+		}
 
 		// Resolve or create artist
 		let resolvedArtistId: number;
@@ -113,7 +155,10 @@ export const actions = {
 				nsfw,
 				published,
 				sourcePostUrl: sourcePostUrl || null,
-				commissionedAt: commissionedAt || null
+				commissionedAt: commissionedAt || null,
+				parentImageId,
+				// Clearing the variant link clears the label with it.
+				variantLabel: parentImageId ? variantLabel || null : null
 			})
 			.where(eq(images.id, id));
 
