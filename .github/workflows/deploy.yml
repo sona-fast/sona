@@ -98,6 +98,60 @@ jobs:
               "INSERT INTO schema_migrations (name, applied_at) VALUES ('$name', datetime('now'));"
           done
 
+      # Optional feature: FurTrack photo integration. Set the repo Actions
+      # VARIABLE `FURTRACK_MODE` (Settings → Secrets and variables → Actions →
+      # Variables) to `live` or `mock` and the next deploy turns it on — no
+      # Cloudflare dashboard access needed. The PATCH merges per key (the Pages
+      # API only touches the env vars you name; deleting one requires an
+      # explicit null), so nothing else on the project is clobbered. Unset =
+      # logged skip, zero behavior change for existing forks.
+      - name: Sync FURTRACK_MODE to Pages project
+        env:
+          FURTRACK_MODE: ${{ vars.FURTRACK_MODE }}
+          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FURTRACK_MODE" ]; then
+            echo "FURTRACK_MODE repo variable not set — skipping env var sync (FurTrack stays off)"
+            exit 0
+          fi
+          payload=$(jq -n --arg v "$FURTRACK_MODE" \
+            '{deployment_configs: {production: {env_vars: {FURTRACK_MODE: {type: "plain_text", value: $v}}}}}')
+          resp=$(curl -s -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/${CF_PAGES_PROJECT}" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          if ! echo "$resp" | jq -e '.success' >/dev/null; then
+            echo "::error::Failed to set FURTRACK_MODE on Pages project ${CF_PAGES_PROJECT}"
+            echo "$resp" | jq '.errors'
+            exit 1
+          fi
+          echo "FURTRACK_MODE=${FURTRACK_MODE} set on Pages project ${CF_PAGES_PROJECT}"
+
+      # Optional feature: Telegram sticker import. Add the repo Actions SECRET
+      # `TELEGRAM_BOT_TOKEN` and it's synced to the Pages project here. Pages
+      # secrets bind at deploy time, so putting it before the deploy below means
+      # this very deployment picks it up. `secret put` is an upsert, so re-runs
+      # are idempotent. Unset = logged skip. (The manual
+      # `wrangler pages secret put` path from the setup-help modals still works
+      # if you'd rather not give CI the token.)
+      - name: Sync TELEGRAM_BOT_TOKEN to Pages project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "TELEGRAM_BOT_TOKEN repo secret not set — skipping secret sync (Telegram stickers stay off)"
+            exit 0
+          fi
+          printf '%s' "$TELEGRAM_BOT_TOKEN" | \
+            npx wrangler pages secret put TELEGRAM_BOT_TOKEN --project-name "$CF_PAGES_PROJECT"
+          echo "TELEGRAM_BOT_TOKEN synced to Pages project ${CF_PAGES_PROJECT} (binds on the deploy below)"
+
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
