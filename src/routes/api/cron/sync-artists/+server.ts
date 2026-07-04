@@ -1,7 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
-import { isRegistryEnabled } from '$lib/server/registry';
+import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
 import { requireCronSecret } from '$lib/server/cron-auth';
 import type { RequestHandler } from './$types';
@@ -17,10 +17,12 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	const env = platform?.env;
 	requireCronSecret(request, env);
 
-	if (!isRegistryEnabled(env)) error(503, 'Registry is not configured (no REGISTRY_API_KEY).');
-
 	const db = getDb(env!.DB);
+	const renv = await resolveRegistryEnv(db, env);
+	if (!isRegistryEnabled(renv))
+		error(503, 'Registry is not configured (set the REGISTRY_API_KEY secret or connect in admin Settings).');
+
 	const settings = await getSettings(db);
-	const summary = await syncArtists(db, env, settings);
+	const summary = await syncArtists(db, renv, settings);
 	return json({ ok: true, ...summary });
 };

@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { artists } from '$lib/server/db/schema';
-import { isRegistryEnabled } from '$lib/server/registry';
+import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
 import {
 	fetchRegistryCatalog,
 	planImport,
@@ -25,11 +25,11 @@ import type { RequestHandler } from './$types';
 //   linked artists' name/avatar/socials (there is no per-artist flag).
 export const GET: RequestHandler = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
-	const env = platform?.env;
-	if (!isRegistryEnabled(env)) return json({ enabled: false });
+	const renv = await resolveRegistryEnv(db, platform?.env);
+	if (!isRegistryEnabled(renv)) return json({ enabled: false });
 
 	const [catalog, locals, settings] = await Promise.all([
-		fetchRegistryCatalog(env),
+		fetchRegistryCatalog(renv),
 		db.select().from(artists),
 		getSettings(db)
 	]);
@@ -45,15 +45,15 @@ export const GET: RequestHandler = async ({ platform }) => {
 
 export const POST: RequestHandler = async ({ request, platform }) => {
 	const db = getDb(platform!.env.DB);
-	const env = platform?.env;
-	if (!isRegistryEnabled(env)) return json({ enabled: false }, { status: 400 });
+	const renv = await resolveRegistryEnv(db, platform?.env);
+	if (!isRegistryEnabled(renv)) return json({ enabled: false }, { status: 400 });
 
 	const body = (await request.json().catch(() => null)) as { keepUpdated?: unknown } | null;
 	if (typeof body?.keepUpdated === 'boolean') {
 		await saveSettings(db, { registryOverridesLocal: body.keepUpdated });
 	}
 
-	const result = await importRegistryCatalog(db, env);
+	const result = await importRegistryCatalog(db, renv);
 	if (!result) return json({ enabled: false }, { status: 400 });
 	return json({ enabled: true, ...result });
 };
