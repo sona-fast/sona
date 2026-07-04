@@ -16,6 +16,7 @@
 	let aboutText = $state(data.settings.aboutText);
 	let themeId = $state(data.settings.themeId);
 	let landingLayout = $state(data.settings.landingLayout);
+	let splashSubtitle = $state(data.settings.splashSubtitle);
 	let registryOverridesLocal = $state(data.settings.registryOverridesLocal);
 	let syncing = $state(false);
 	let connectingRegistry = $state(false);
@@ -108,6 +109,7 @@
 		aboutText = data.settings.aboutText;
 		themeId = data.settings.themeId;
 		landingLayout = data.settings.landingLayout;
+		splashSubtitle = data.settings.splashSubtitle;
 		primaryCharacter = data.settings.primaryCharacter;
 		twitterUrl = data.settings.twitterUrl;
 		blueskyUrl = data.settings.blueskyUrl;
@@ -226,6 +228,10 @@
 						<option value={l.id}>{l.label}</option>
 					{/each}
 				</select>
+			</label>
+			<label>
+				<span>{m.admin_settings_splash_subtitle()}</span>
+				<input type="text" class="input" bind:value={splashSubtitle} name="splashSubtitle" placeholder={m.admin_settings_splash_subtitle_placeholder()} />
 			</label>
 		</section>
 

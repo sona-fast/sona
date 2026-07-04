@@ -48,6 +48,9 @@ export interface SiteSettings {
 	themeId: string;
 	/** Landing-page layout id — see src/lib/landing (e.g. 'mosaic' | 'threePath'). */
 	landingLayout: string;
+	/** Subtitle under the wordmark on the threePath splash. Empty falls back to
+	 * the localized default (m.splash_subtitle) at the point of use. */
+	splashSubtitle: string;
 	/** When on, the registry sync overwrites locally-edited artist fields (name,
 	 * avatar, socials) for registry-linked artists. Off (default) keeps local
 	 * edits and only fills empty fields. */
@@ -112,6 +115,8 @@ const DEFAULTS: SiteSettings = {
 	autoResyncEnabled: false,
 	themeId: 'default',
 	landingLayout: 'mosaic',
+	// Empty → the splash renders the localized default subtitle.
+	splashSubtitle: '',
 	registryOverridesLocal: false
 };
 
@@ -174,6 +179,7 @@ export async function getSettings(
 			autoResyncEnabled: map.autoResyncEnabled === 'true',
 			themeId: map.themeId ?? DEFAULTS.themeId,
 			landingLayout: map.landingLayout ?? DEFAULTS.landingLayout,
+			splashSubtitle: map.splashSubtitle ?? DEFAULTS.splashSubtitle,
 			registryOverridesLocal: map.registryOverridesLocal === 'true'
 		};
 		settingsCache = { value, expires: Date.now() + SETTINGS_TTL_MS };

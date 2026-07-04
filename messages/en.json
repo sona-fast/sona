@@ -258,6 +258,8 @@
 	"admin_setup_appearance": "Appearance",
 	"admin_setup_theme": "Theme",
 	"admin_setup_landing_layout": "Landing layout",
+	"admin_settings_splash_subtitle": "Splash subtitle",
+	"admin_settings_splash_subtitle_placeholder": "fursuit character",
 	"admin_setup_change_later": "You can change these any time in Settings.",
 	"admin_setup_submitting": "Setting up…",
 	"admin_setup_finish": "Finish setup",
