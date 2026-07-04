@@ -88,6 +88,26 @@ are optional — a missing `CRON_SECRET` makes those jobs skip quietly rather th
 fail — but set `SITE_URL` if you use the shared artist registry or Telegram
 sticker re-sync, or those cron jobs will hit the wrong host.
 
+## Enabling optional features
+
+Two optional features can be switched on entirely from your fork's repo
+settings — the deploy workflow syncs them to your Pages project, so no
+Cloudflare dashboard access is needed:
+
+| Feature | What to set (Settings → Secrets and variables → Actions) |
+|---------|-----------------------------------------------------------|
+| FurTrack photo integration | Variable `FURTRACK_MODE` = `live` (or `mock` for fake data) |
+| Telegram sticker import | Secret `TELEGRAM_BOT_TOKEN` = your bot's token |
+
+The **next deploy** (push to `main`, or Actions → Run workflow) applies both:
+the workflow writes `FURTRACK_MODE` into the Pages project's production env
+vars and uploads `TELEGRAM_BOT_TOKEN` as a Pages secret before deploying. When
+neither is set, the sync steps log a skip and change nothing.
+
+Setting the secret manually with `wrangler pages secret put TELEGRAM_BOT_TOKEN`
+(as the in-app setup help describes) still works — that's the path if you'd
+rather not store the token in GitHub.
+
 ## Pre-pipeline forks: seed the migration baseline once
 
 The tracked-migration step assumes `schema_migrations` reflects reality. A fork
