@@ -107,12 +107,13 @@ async function main() {
 	// to R2 later without re-provisioning.
 	const useR2 = await askYesNo('Use Cloudflare R2 for image storage now? (otherwise UploadThing)', true);
 
-	// The site's domain only seeds sensible defaults (the Pages project name and the
-	// R2 public/CDN URL). Setup does NOT configure DNS or attach a custom domain to
+	// The site's domain only seeds sensible defaults (the Pages project name, the
+	// SITE_URL Actions variable the scheduled syncs POST to, and — on R2 — the
+	// public/CDN URL). Setup does NOT configure DNS or attach a custom domain to
 	// the bucket — that needs DNS-scoped access we don't ask for, so it stays a
-	// manual step (called out in Next steps). Only asked for R2, where it seeds the
-	// CDN URL.
-	const domain = useR2 ? await ask("Your site's domain (e.g. taro.surf) — blank to skip", '') : '';
+	// manual step (called out in Next steps). Asked on BOTH storage paths: gating
+	// it on R2 left UploadThing forks with SITE_URL pointing at pages.dev (#33).
+	const domain = await ask("Your site's domain (e.g. taro.surf) — blank to skip", '');
 
 	// Default the project name from the domain (the most meaningful identifier),
 	// else the fork's directory, so a rename doesn't silently reuse the template's
