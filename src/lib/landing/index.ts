@@ -13,3 +13,13 @@ export const LANDING_LAYOUTS: LandingLayoutOption[] = [
 ];
 
 export const DEFAULT_LANDING_LAYOUT = 'mosaic';
+
+/**
+ * The threePath splash headline. The splash identity block is the CHARACTER, so
+ * an explicit owner name wins (siteName stays the domain brand in the header,
+ * tab title and footer-mark). Without one, fall back to the site name with a
+ * trailing domain-style suffix stripped ("akito.dog" → "AKITO").
+ */
+export function splashWordmark(ownerName: string, siteName: string): string {
+	return (ownerName || siteName.replace(/\.[a-z]+$/i, '')).toUpperCase();
+}

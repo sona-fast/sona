@@ -11,14 +11,15 @@
 	import Header from '$lib/components/Header.svelte';
 	import Footer from '$lib/components/Footer.svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
+	import { splashWordmark } from '$lib/landing';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
 	const splash = $derived(data.settings.landingLayout === 'threePath');
 
-	// "example.ink" -> "EXAMPLE"
-	const wordmark = $derived(data.settings.siteName.replace(/\.[a-z]+$/i, '').toUpperCase());
+	// ownerName "Sunday" -> "SUNDAY"; else "example.ink" -> "EXAMPLE"
+	const wordmark = $derived(splashWordmark(data.settings.ownerName, data.settings.siteName));
 	// The persona's name for the "art of {name}" card copy.
 	const personaName = $derived(data.settings.ownerName || data.settings.siteName);
 
