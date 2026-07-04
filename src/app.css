@@ -168,6 +168,9 @@
 	--accent: #1E1E1E;
 	--accent-foreground: #EADED6;
 	--destructive: #FF5C33;
+	/* The light foreground (#EADED6) was 2.33:1 on the destructive fill — the
+	   near-black foreground clears AA at 5.42:1, mirroring the primary button. */
+	--destructive-foreground: #1E1E1E;
 	--border: #3A3633;
 	--input: #3A3633;
 	--ring: #E2694D;
@@ -199,7 +202,13 @@
 	--muted-foreground: #6B6259;
 	--accent: #EADED6;
 	--accent-foreground: #1E1E1E;
-	--destructive: #D93C15;
+	/* Darkened destructive: #D93C15 was 3.66:1 under the near-black foreground
+	   on the button fill and 3.45:1 as error text on the page background.
+	   #B23008 clears AA in every role it plays: 4.80:1 as text on the page
+	   background, 6.33:1 on white cards, and 4.80:1 under the light foreground
+	   on the button fill. */
+	--destructive: #B23008;
+	--destructive-foreground: #EADED6;
 	--border: #CBBEB3;
 	--input: #CBBEB3;
 	--ring: #AD3A1E;
@@ -310,7 +319,9 @@ input, select, textarea {
 
 .btn-destructive {
 	background-color: var(--destructive);
-	color: var(--foreground);
+	/* Themes whose --foreground fails AA on the destructive fill override the
+	   text via --destructive-foreground (see the terracotta blocks). */
+	color: var(--destructive-foreground, var(--foreground));
 }
 
 /* Large button variant — matches Button/Large/* (height 48, padding 12 24) */

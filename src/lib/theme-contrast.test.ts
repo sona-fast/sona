@@ -42,6 +42,20 @@ describe('terracotta light theme WCAG AA contrast', () => {
 	const background = blockToken(sel, 'background');
 	const card = blockToken(sel, 'card');
 	const ring = blockToken(sel, 'ring');
+	const destructive = blockToken(sel, 'destructive');
+	const destructiveForeground = blockToken(sel, 'destructive-foreground');
+
+	it('destructive text on the page background meets 4.5:1', () => {
+		expect(contrast(destructive, background)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('destructive text on cards meets 4.5:1', () => {
+		expect(contrast(destructive, card)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('destructive-foreground text on destructive buttons meets 4.5:1', () => {
+		expect(contrast(destructiveForeground, destructive)).toBeGreaterThanOrEqual(4.5);
+	});
 
 	it('primary text on the page background meets 4.5:1', () => {
 		expect(contrast(primary, background)).toBeGreaterThanOrEqual(4.5);
@@ -67,6 +81,20 @@ describe('terracotta dark theme WCAG AA contrast', () => {
 	const background = blockToken(sel, 'background');
 	const card = blockToken(sel, 'card');
 	const ring = blockToken(sel, 'ring');
+	const destructive = blockToken(sel, 'destructive');
+	const destructiveForeground = blockToken(sel, 'destructive-foreground');
+
+	it('destructive text on the page background meets 4.5:1', () => {
+		expect(contrast(destructive, background)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('destructive text on cards meets 4.5:1', () => {
+		expect(contrast(destructive, card)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('destructive-foreground text on destructive buttons meets 4.5:1', () => {
+		expect(contrast(destructiveForeground, destructive)).toBeGreaterThanOrEqual(4.5);
+	});
 
 	it('primary text on the page background meets 4.5:1', () => {
 		expect(contrast(primary, background)).toBeGreaterThanOrEqual(4.5);
