@@ -1,3 +1,5 @@
+import { fetchTwitterAvatar } from './twitter-avatar';
+
 /**
  * Try to resolve an artist's avatar from their social media profiles.
  * Priority: Bluesky > Twitter > FurAffinity > Patreon
@@ -14,8 +16,15 @@ export async function resolveAvatarUrl(socials: {
 		if (avatar) return avatar;
 	}
 
+	// Twitter next — the guest-token flow (see twitter-avatar.ts). Fail-soft:
+	// a null here just means the artist saves without an avatar.
+	if (socials.twitterUrl) {
+		const avatar = await fetchTwitterAvatar(socials.twitterUrl);
+		if (avatar) return avatar;
+	}
+
 	// Other platforms would need scraping or auth — skip for now
-	// TODO: Twitter, FurAffinity, Patreon avatar fetching
+	// TODO: FurAffinity, Patreon avatar fetching
 
 	return null;
 }
