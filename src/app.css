@@ -1,4 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+/* Terracotta theme fonts (Chakra Petch headings, IBM Plex Sans JP body). The
+   import is unconditional, but font binaries only download when the family is
+   actually used — i.e. when the terracotta theme is selected. */
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Sans+JP:wght@400;500;600;700&display=swap');
 
 @font-face {
 	font-family: 'Geist';
@@ -86,8 +90,9 @@
 /* ─────────────────────────────────────────────────────────────────────────
    Themes (palette families). The default theme is :root + [data-theme='light']
    above. Each alternate theme defines a COMPLETE colour-token set for both its
-   dark and light variants so nothing bleeds from the default. Radii/fonts are
-   theme-independent (inherited from :root). Selected at SSR via data-theme-id.
+   dark and light variants so nothing bleeds from the default. Radii are
+   theme-independent (inherited from :root); fonts inherit from :root unless a
+   theme overrides them. Selected at SSR via data-theme-id.
    ───────────────────────────────────────────────────────────────────────── */
 
 /* Aurora — cool violet */
@@ -137,6 +142,66 @@
 	--sidebar-accent: #d8d8ee;
 	--sidebar-foreground: #16172a;
 	--sidebar-border: #d8d8ee;
+
+	color-scheme: light;
+}
+
+/* Terracotta — warm clay (akito.dog's brand palette, upstreamed). Also carries
+   akito's typography; the font tokens set in the dark block apply to the light
+   variant too since [data-theme-id='terracotta'] matches in both modes. */
+[data-theme-id='terracotta'] {
+	--background: #1E1E1E;
+	--foreground: #EADED6;
+	--card: #282624;
+	--card-foreground: #EADED6;
+	--primary: #DD5131;
+	--primary-foreground: #1E1E1E;
+	--secondary: #3A3633;
+	--secondary-foreground: #EADED6;
+	--muted: #3A3633;
+	--muted-foreground: #B5A99E;
+	--accent: #1E1E1E;
+	--accent-foreground: #EADED6;
+	--destructive: #FF5C33;
+	--border: #3A3633;
+	--input: #3A3633;
+	--ring: #DD5131;
+	--sidebar: #181716;
+	--sidebar-accent: #2A2724;
+	--sidebar-foreground: #EADED6;
+	--sidebar-border: rgba(255, 255, 255, 0.1);
+
+	--font-primary: 'Chakra Petch', sans-serif;
+	--font-secondary: 'IBM Plex Sans JP', sans-serif;
+
+	color-scheme: dark;
+}
+
+[data-theme-id='terracotta'][data-theme='light'] {
+	--background: #EADED6;
+	--foreground: #1E1E1E;
+	--card: #FFFFFF;
+	--card-foreground: #1E1E1E;
+	/* Darkened terracotta: #DD5131 was 3.0:1 on the light background — below
+	   WCAG AA (4.5:1) for small text. #AD3A1E clears AA on both the page
+	   background (4.68:1) and white cards (6.18:1); the light foreground on it
+	   is 4.68:1. */
+	--primary: #AD3A1E;
+	--primary-foreground: #EADED6;
+	--secondary: #DDD0C6;
+	--secondary-foreground: #1E1E1E;
+	--muted: #E0D4CA;
+	--muted-foreground: #6B6259;
+	--accent: #EADED6;
+	--accent-foreground: #1E1E1E;
+	--destructive: #D93C15;
+	--border: #CBBEB3;
+	--input: #CBBEB3;
+	--ring: #AD3A1E;
+	--sidebar: #DDD0C6;
+	--sidebar-accent: #CBBEB3;
+	--sidebar-foreground: #1E1E1E;
+	--sidebar-border: #CBBEB3;
 
 	color-scheme: light;
 }

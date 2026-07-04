@@ -11,7 +11,8 @@ export interface ThemeOption {
 
 export const THEMES: ThemeOption[] = [
 	{ id: 'default', label: 'Ember — warm orange (default)' },
-	{ id: 'aurora', label: 'Aurora — cool violet' }
+	{ id: 'aurora', label: 'Aurora — cool violet' },
+	{ id: 'terracotta', label: 'Terracotta — warm clay' }
 ];
 
 export const DEFAULT_THEME_ID = 'default';
