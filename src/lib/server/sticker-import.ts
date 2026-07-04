@@ -124,6 +124,65 @@ async function packForSet(db: Database, setName: string): Promise<{ id: number; 
 }
 
 /**
+ * Get the pack for a Telegram set (keyed by its t.me URL), creating it if absent.
+ * `created` is true only when THIS call inserted the row; a caller uses it to decide
+ * whether to append (continue positions after the current max) and whether to drop
+ * the pack if the whole import fails.
+ *
+ * The create INSERT uses onConflictDoNothing against sticker_packs.slug (the only
+ * UNIQUE key here) + re-SELECT so a slug collision surfaces as a clear, named error
+ * rather than a raw constraint 500 mid-import. slugify() appends a random suffix, so
+ * that collision is rare in practice.
+ *
+ * NOTE: because slugs are randomly suffixed, two simultaneous imports of the SAME set
+ * compute DIFFERENT slugs and so BOTH inserts succeed — this does NOT dedupe the pack
+ * itself (you can still get two packs for one telegramUrl). Fully closing that needs a
+ * UNIQUE key on telegram_url (which packForSet already assumes) — deliberately left as
+ * a follow-up; here we only make the slug-collision path fail cleanly and keep the
+ * re-SELECT-by-telegramUrl as the authoritative "append to existing" branch.
+ */
+async function getOrCreatePack(
+	db: Database,
+	opts: { telegramUrl: string; title: string; characterId: number; managerArtistId: number | null }
+): Promise<{ packId: number; packSlug: string; created: boolean }> {
+	const existing = await db
+		.select({ id: stickerPacks.id, slug: stickerPacks.slug })
+		.from(stickerPacks)
+		.where(eq(stickerPacks.telegramUrl, opts.telegramUrl))
+		.get();
+	if (existing) return { packId: existing.id, packSlug: existing.slug, created: false };
+
+	const slug = slugify(opts.title);
+	const inserted = await db
+		.insert(stickerPacks)
+		.values({
+			name: opts.title,
+			slug,
+			characterId: opts.characterId,
+			managerArtistId: opts.managerArtistId,
+			telegramUrl: opts.telegramUrl,
+			source: 'telegram',
+			published: false
+		})
+		.onConflictDoNothing()
+		.returning({ id: stickerPacks.id });
+	if (inserted.length > 0) return { packId: inserted[0].id, packSlug: slug, created: true };
+
+	// Insert no-op'd on the UNIQUE slug. Re-select this set's pack in case a concurrent
+	// import of the SAME set created it (matching telegramUrl) and append to that.
+	const raced = await db
+		.select({ id: stickerPacks.id, slug: stickerPacks.slug })
+		.from(stickerPacks)
+		.where(eq(stickerPacks.telegramUrl, opts.telegramUrl))
+		.get();
+	if (raced) return { packId: raced.id, packSlug: raced.slug, created: false };
+
+	// No pack with this telegramUrl → the slug belongs to a DIFFERENT set. Surface it
+	// clearly instead of letting the raw constraint error escape.
+	throw new Error(`sticker pack slug "${slug}" is already taken by a different set`);
+}
+
+/**
  * Fetch a sticker set and annotate each sticker with import state.
  * Returns null when Telegram is not configured or the set is unreachable.
  */
@@ -235,17 +294,26 @@ type StickerRowValues = {
 	telegramFileUniqueId?: string | null;
 };
 
-/** Insert one sticker row + its emoji rows. The single insert path for all 3 flows. */
+/**
+ * Insert one sticker row + its emoji rows. The single insert path for all 3 flows.
+ * Returns false when the insert was skipped because its telegram_file_unique_id
+ * already exists (the UNIQUE index catches a concurrent import that inserted the same
+ * sticker after this flow snapshotted existingFileUniqueIds) — callers count that as
+ * skipped, not imported, and no emoji rows are written for it.
+ */
 async function insertStickerWithEmojis(
 	db: Database,
 	values: StickerRowValues & { packId: number; position: number },
 	emojis: string[]
-): Promise<void> {
-	const [inserted] = await db.insert(stickers).values(values).returning({ id: stickers.id });
+): Promise<boolean> {
+	const inserted = await db.insert(stickers).values(values).onConflictDoNothing().returning({ id: stickers.id });
+	if (inserted.length === 0) return false; // concurrent duplicate — skip, don't add emoji rows
+	const stickerId = inserted[0].id;
 	// De-dupe emoji within a sticker (the junction has no PK; keep rows clean).
 	for (const emoji of [...new Set(emojis)]) {
-		await db.insert(stickerEmojis).values({ stickerId: inserted.id, emoji });
+		await db.insert(stickerEmojis).values({ stickerId, emoji });
 	}
+	return true;
 }
 
 /** Update an existing sticker's editable metadata (nsfw + artist) and replace its
@@ -292,6 +360,12 @@ async function nextPackId(db: Database): Promise<number> {
  * explicitly starting at `startId` (which callers set past the current MAX, so the
  * ids never collide with existing rows or future autoincrement ids). Statements are
  * emitted as: sticker row, then that sticker's emoji rows, per sticker in order.
+ *
+ * This path does NOT use onConflictDoNothing: with the UNIQUE index on
+ * telegram_file_unique_id, a sticker whose id collides with a concurrent insert now
+ * fails the whole batch loudly (it rolls back atomically) rather than double-inserting.
+ * Only the manual self-hosted create/edit paths use this, where such a race is not a
+ * concern; that loud failure is acceptable.
  */
 function stickerWriteStatements(
 	db: Database,
@@ -456,43 +530,26 @@ export async function importTelegramPack(opts: {
 
 	// APPEND to the existing pack for this set if there is one (so re-importing to
 	// retry a previously-failed sticker tops up the same pack instead of making a
-	// duplicate). Otherwise create the pack. Continue positions after the current max.
+	// duplicate). Otherwise create the pack (race-safe — a concurrent import of the
+	// same set appends to the winner's pack rather than throwing). The pack slug
+	// partitions this pack's objects in storage (stickers/{packSlug}/...); it's known
+	// before the per-sticker put loop because the pack row exists (or is created) first.
 	const telegramUrl = stickerSetUrl(set.name);
-	const existingPack = await db
-		.select({ id: stickerPacks.id, slug: stickerPacks.slug })
-		.from(stickerPacks)
-		.where(eq(stickerPacks.telegramUrl, telegramUrl))
-		.get();
+	const { packId, packSlug, created } = await getOrCreatePack(db, {
+		telegramUrl,
+		title: set.title,
+		characterId,
+		managerArtistId
+	});
 
-	let packId: number;
-	// The pack slug partitions this pack's objects in storage
-	// (stickers/{packSlug}/...). It's known before the per-sticker put loop because
-	// the pack row exists (or is created) first.
-	let packSlug: string;
+	// Continue positions after the current max when appending (an existing pack, or one
+	// a concurrent import created — created=false covers both).
 	let position = 0;
-	if (existingPack) {
-		packId = existingPack.id;
-		packSlug = existingPack.slug;
+	if (!created) {
 		const maxPos = (
 			await db.select({ m: sql<number>`COALESCE(MAX(${stickers.position}), -1)` }).from(stickers).where(eq(stickers.packId, packId)).get()
 		)?.m ?? -1;
 		position = maxPos + 1;
-	} else {
-		const slug = slugify(set.title);
-		const [pack] = await db
-			.insert(stickerPacks)
-			.values({
-				name: set.title,
-				slug,
-				characterId,
-				managerArtistId,
-				telegramUrl,
-				source: 'telegram',
-				published: false
-			})
-			.returning({ id: stickerPacks.id });
-		packId = pack.id;
-		packSlug = slug;
 	}
 
 	for (const { sticker, index } of toImport) {
@@ -500,7 +557,7 @@ export async function importTelegramPack(opts: {
 			const override = perSticker[index];
 			const { storedUrl, format } = await downloadAndStoreSticker({ env, storage, packSlug, sticker, absolutize });
 
-			await insertStickerWithEmojis(
+			const didInsert = await insertStickerWithEmojis(
 				db,
 				{
 					packId,
@@ -516,9 +573,15 @@ export async function importTelegramPack(opts: {
 				override?.emojis ?? (sticker.emoji ? [sticker.emoji] : [])
 			);
 
-			position++;
-			result.imported++;
-			result.items.push({ fileUniqueId: sticker.fileUniqueId, index, status: 'imported', emoji: sticker.emoji, fileId: sticker.fileId });
+			if (didInsert) {
+				position++;
+				result.imported++;
+				result.items.push({ fileUniqueId: sticker.fileUniqueId, index, status: 'imported', emoji: sticker.emoji, fileId: sticker.fileId });
+			} else {
+				// A concurrent import inserted this sticker after our existingIds snapshot.
+				result.skipped++;
+				result.items.push({ fileUniqueId: sticker.fileUniqueId, index, status: 'skipped', emoji: sticker.emoji, fileId: sticker.fileId });
+			}
 		} catch (e) {
 			result.failed++;
 			result.items.push({
@@ -534,8 +597,8 @@ export async function importTelegramPack(opts: {
 
 	// If every download/store failed AND we created the pack in this call, drop the
 	// now-empty pack so we don't leave a 0-sticker pack with a dangling managerArtistId.
-	// (An existing pack we only appended to is left untouched.)
-	if (result.imported === 0 && !existingPack) {
+	// (An existing pack — or one a concurrent import created — is left untouched.)
+	if (result.imported === 0 && created) {
 		try {
 			await db.delete(stickerPacks).where(eq(stickerPacks.id, packId));
 		} catch {
@@ -618,43 +681,26 @@ export async function importStickerBatch(opts: {
 	// APPEND to the existing pack for this set if there is one (so each subsequent
 	// batch tops up the same pack instead of making duplicates); otherwise create it.
 	const telegramUrl = stickerSetUrl(set.name);
-	const existingPack = await db
-		.select({ id: stickerPacks.id, slug: stickerPacks.slug })
-		.from(stickerPacks)
-		.where(eq(stickerPacks.telegramUrl, telegramUrl))
-		.get();
+	const { packId, packSlug, created } = await getOrCreatePack(db, {
+		telegramUrl,
+		title: set.title,
+		characterId,
+		managerArtistId
+	});
+	result.created = created;
 
-	let packId: number;
-	let packSlug: string;
 	let position = 0;
 	// Metadata of stickers already in THIS pack, keyed by fileUniqueId — the update
-	// targets for re-sync. Empty for a freshly-created pack.
+	// targets for re-sync. Empty for a freshly-created pack. When a concurrent import
+	// created the pack (created=false), this loads its already-inserted stickers, so
+	// the loser skips/updates them exactly like appending to a pre-existing pack.
 	let inPackMeta = new Map<string, ExistingStickerMeta>();
-	if (existingPack) {
-		packId = existingPack.id;
-		packSlug = existingPack.slug;
+	if (!created) {
 		const maxPos = (
 			await db.select({ m: sql<number>`COALESCE(MAX(${stickers.position}), -1)` }).from(stickers).where(eq(stickers.packId, packId)).get()
 		)?.m ?? -1;
 		position = maxPos + 1;
 		inPackMeta = await packStickerMeta(db, packId);
-	} else {
-		const slug = slugify(set.title);
-		const [pack] = await db
-			.insert(stickerPacks)
-			.values({
-				name: set.title,
-				slug,
-				characterId,
-				managerArtistId,
-				telegramUrl,
-				source: 'telegram',
-				published: false
-			})
-			.returning({ id: stickerPacks.id });
-		packId = pack.id;
-		packSlug = slug;
-		result.created = true;
 	}
 
 	for (let i = 0; i < items.length; i++) {
@@ -699,7 +745,7 @@ export async function importStickerBatch(opts: {
 		// New sticker → download + store + insert.
 		try {
 			const { storedUrl, format } = await downloadAndStoreSticker({ env, storage, packSlug, sticker, absolutize });
-			await insertStickerWithEmojis(
+			const didInsert = await insertStickerWithEmojis(
 				db,
 				{
 					packId,
@@ -716,8 +762,13 @@ export async function importStickerBatch(opts: {
 			);
 			// Guard against the same fileUniqueId appearing twice within one batch.
 			existingIds.add(sticker.fileUniqueId);
-			position++;
-			result.imported++;
+			if (didInsert) {
+				position++;
+				result.imported++;
+			} else {
+				// A concurrent import inserted this sticker after our existingIds snapshot.
+				result.skipped++;
+			}
 		} catch (e) {
 			result.failed.push({ fileId: item.fileId, reason: e instanceof Error ? e.message : String(e) });
 		}
@@ -838,7 +889,7 @@ export async function resyncTelegramPacks(opts: {
 					}
 					try {
 						const { storedUrl, format } = await downloadAndStoreSticker({ env, storage, packSlug: pack.slug, sticker, absolutize });
-						await insertStickerWithEmojis(
+						const didInsert = await insertStickerWithEmojis(
 							db,
 							{
 								packId: pack.id,
@@ -855,10 +906,14 @@ export async function resyncTelegramPacks(opts: {
 							sticker.emoji ? [sticker.emoji] : []
 						);
 						existingIds.add(sticker.fileUniqueId);
-						position++;
-						budget--;
-						importedForPack++;
-						result.imported++;
+						// A concurrent insert of the same sticker (unlikely for a solo cron)
+						// no-ops on the UNIQUE index — don't count it or spend budget on it.
+						if (didInsert) {
+							position++;
+							budget--;
+							importedForPack++;
+							result.imported++;
+						}
 					} catch (e) {
 						// One sticker failing (bad download/store) shouldn't abort the run.
 						console.error(`[resync] ${pack.slug}: sticker ${sticker.fileUniqueId} failed:`, e instanceof Error ? e.message : e);
