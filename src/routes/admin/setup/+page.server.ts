@@ -92,12 +92,19 @@ export const actions = {
 			return fail(400, { error: 'Site name is required.' });
 		}
 		const fursonaName = sanitizeText(data.get('fursonaName') as string, 100);
+		// An empty field means "no choice made" and takes the default; a present but
+		// unrecognized value is a real error — silently substituting the default here
+		// made a theme pick vanish without feedback (#34).
 		const themeRaw = (data.get('themeId') as string) ?? '';
-		const themeId = isValidThemeId(themeRaw) ? themeRaw : DEFAULT_THEME_ID;
+		if (themeRaw && !isValidThemeId(themeRaw)) {
+			return fail(400, { error: `Unrecognized theme "${themeRaw}".` });
+		}
+		const themeId = themeRaw || DEFAULT_THEME_ID;
 		const layoutRaw = (data.get('landingLayout') as string) ?? '';
-		const landingLayout = LANDING_LAYOUTS.some((l) => l.id === layoutRaw)
-			? layoutRaw
-			: DEFAULT_LANDING_LAYOUT;
+		if (layoutRaw && !LANDING_LAYOUTS.some((l) => l.id === layoutRaw)) {
+			return fail(400, { error: `Unrecognized landing layout "${layoutRaw}".` });
+		}
+		const landingLayout = layoutRaw || DEFAULT_LANDING_LAYOUT;
 
 		// NB: storageProvider / r2PublicUrl are NOT set here — the setup CLI decides
 		// the storage backend (it's the only thing that can create a bucket / set a
