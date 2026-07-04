@@ -154,7 +154,12 @@
 	--foreground: #EADED6;
 	--card: #282624;
 	--card-foreground: #EADED6;
-	--primary: #DD5131;
+	/* Lightened terracotta: akito's brand #DD5131 was 4.20:1 on the dark
+	   background and 3.80:1 on cards — below WCAG AA (4.5:1) for small text.
+	   #E2694D (same hue/saturation, minimally lighter) clears AA on both the
+	   background (5.05:1) and cards (4.57:1); the near-black foreground on it
+	   is 5.05:1. */
+	--primary: #E2694D;
 	--primary-foreground: #1E1E1E;
 	--secondary: #3A3633;
 	--secondary-foreground: #EADED6;
@@ -165,7 +170,7 @@
 	--destructive: #FF5C33;
 	--border: #3A3633;
 	--input: #3A3633;
-	--ring: #DD5131;
+	--ring: #E2694D;
 	--sidebar: #181716;
 	--sidebar-accent: #2A2724;
 	--sidebar-foreground: #EADED6;

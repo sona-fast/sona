@@ -7,11 +7,8 @@ import { fileURLToPath } from 'node:url';
 // the button background under --primary-foreground text. A future accent
 // tweak that drops any of the asserted pairings below threshold fails here.
 //
-// Scope: terracotta only. Ember and Aurora predate the AA work and are not
-// asserted. The terracotta DARK primary pairings sit below 4.5:1 (primary on
-// background 4.20:1, on card 3.80:1, primary-foreground on primary 4.20:1) —
-// inherited from akito.dog's brand palette — so only the dark focus ring
-// (non-text, 3:1) is asserted for the dark variant.
+// Scope: terracotta only, both variants. Ember and Aurora predate the AA work
+// and are not asserted.
 
 const css = readFileSync(fileURLToPath(new URL('../app.css', import.meta.url)), 'utf8');
 
@@ -63,10 +60,25 @@ describe('terracotta light theme WCAG AA contrast', () => {
 	});
 });
 
-describe('terracotta dark theme contrast', () => {
+describe('terracotta dark theme WCAG AA contrast', () => {
 	const sel = "[data-theme-id='terracotta']";
+	const primary = blockToken(sel, 'primary');
+	const primaryForeground = blockToken(sel, 'primary-foreground');
 	const background = blockToken(sel, 'background');
+	const card = blockToken(sel, 'card');
 	const ring = blockToken(sel, 'ring');
+
+	it('primary text on the page background meets 4.5:1', () => {
+		expect(contrast(primary, background)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('primary text on cards meets 4.5:1', () => {
+		expect(contrast(primary, card)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('primary-foreground text on primary buttons meets 4.5:1', () => {
+		expect(contrast(primaryForeground, primary)).toBeGreaterThanOrEqual(4.5);
+	});
 
 	it('focus ring against the page background meets 3:1 (non-text UI)', () => {
 		expect(contrast(ring, background)).toBeGreaterThanOrEqual(3);
