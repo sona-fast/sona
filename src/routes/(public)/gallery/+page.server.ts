@@ -1,6 +1,6 @@
 import { getReadDb } from '$lib/server/db';
 import { images, artists, imageTags, tags, fursuitPhotos as fursuitPhotosTable } from '$lib/server/db/schema';
-import { eq, desc, asc, like, sql, and, inArray, type SQL } from 'drizzle-orm';
+import { eq, desc, asc, like, sql, and, inArray, isNull, type SQL } from 'drizzle-orm';
 import { listPublicCharacterNames } from '$lib/server/characters';
 import { fursuitPhotoFromRow } from '$lib/server/fursuit-import';
 import { getMode } from '$lib/server/furtrack';
@@ -80,7 +80,8 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		}
 
 		// Build where conditions
-		const conditions: SQL[] = [eq(images.published, true)];
+		// Variants never appear as standalone gallery cards — only their parent does.
+		const conditions: SQL[] = [eq(images.published, true), isNull(images.parentImageId)];
 		if (search) {
 			conditions.push(like(images.title, `%${search}%`));
 		}

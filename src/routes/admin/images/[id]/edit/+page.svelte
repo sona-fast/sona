@@ -7,6 +7,7 @@
 
 	let artistMode = $state<'existing' | 'new'>('existing');
 	let saving = $state(false);
+	let selectedParentId = $state(String(data.image.parentImageId ?? ''));
 </script>
 
 <div class="page-header">
@@ -122,6 +123,34 @@
 				{/if}
 			</label>
 		</div>
+
+		{#if data.hasVariants}
+			<p class="hint">{m.admin_variant_parent_hint()}</p>
+		{:else}
+			<div class="row">
+				<label class="flex-1">
+					<span>{m.admin_field_variant_of()}</span>
+					<select class="input" name="parentImageId" bind:value={selectedParentId}>
+						<option value="">{m.admin_variant_none()}</option>
+						{#each data.parentCandidates as candidate}
+							<option value={String(candidate.id)}>{candidate.title}</option>
+						{/each}
+					</select>
+				</label>
+				{#if selectedParentId}
+					<label class="flex-1">
+						<span>{m.admin_field_variant_label()}</span>
+						<input
+							type="text"
+							class="input"
+							name="variantLabel"
+							placeholder={m.admin_variant_label_placeholder()}
+							value={data.image.variantLabel || ''}
+						/>
+					</label>
+				{/if}
+			</div>
+		{/if}
 
 		{#if data.characters.length > 0}
 			<div class="field">

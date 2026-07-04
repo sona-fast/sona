@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 export const artists = sqliteTable('artists', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
@@ -56,6 +56,12 @@ export const images = sqliteTable('images', {
 	artistId: integer('artist_id').notNull().references(() => artists.id),
 	collectionId: integer('collection_id').references(() => collections.id),
 	commissionedAt: text('commissioned_at'),
+	// Variant grouping: a row is a parent when null, a variant when set. One level
+	// only (enforced in form actions, not schema). Deleting a parent cascades.
+	parentImageId: integer('parent_image_id').references((): AnySQLiteColumn => images.id, {
+		onDelete: 'cascade'
+	}),
+	variantLabel: text('variant_label'),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
 

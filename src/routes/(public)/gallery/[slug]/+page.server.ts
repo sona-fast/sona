@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { getReadDb } from '$lib/server/db';
 import { images, artists, collections, imageTags, tags, characters, imageCharacters } from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or, asc } from 'drizzle-orm';
 import { parseAliases } from '$lib/server/registry';
 import type { PageServerLoad } from './$types';
 
@@ -35,7 +35,9 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 			artistAliases: artists.aliases,
 			collectionId: images.collectionId,
 			collectionName: collections.name,
-			collectionSlug: collections.slug
+			collectionSlug: collections.slug,
+			parentImageId: images.parentImageId,
+			variantLabel: images.variantLabel
 		})
 		.from(images)
 		.leftJoin(artists, eq(images.artistId, artists.id))
@@ -74,10 +76,35 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 	// Former artist names ("also known as") for the quiet "// formerly" credit line.
 	const formerNames = parseAliases(image.artistAliases).map((a) => a.displayName);
 
+	// Variant strip: the parent + all of its (published) variants, in id order.
+	// Direct links to a variant's slug resolve like any image, so the strip is
+	// anchored on whichever group this image belongs to.
+	const groupParentId = image.parentImageId ?? image.id;
+	const siblings = await db
+		.select({
+			id: images.id,
+			slug: images.slug,
+			imageUrl: images.imageUrl,
+			thumbnailUrl: images.thumbnailUrl,
+			variantLabel: images.variantLabel,
+			parentImageId: images.parentImageId,
+			nsfw: images.nsfw
+		})
+		.from(images)
+		.where(
+			and(
+				or(eq(images.id, groupParentId), eq(images.parentImageId, groupParentId)),
+				eq(images.published, true)
+			)
+		)
+		.orderBy(asc(images.id));
+
 	return {
 		image,
 		tags: imageTags_.map((t) => t.name),
 		characters: imageChars,
-		formerNames
+		formerNames,
+		// Only meaningful when the group has more than one member.
+		variants: siblings.length > 1 ? siblings : []
 	};
 };

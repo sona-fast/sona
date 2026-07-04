@@ -36,7 +36,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 	const today = new Date().toISOString().slice(0, 10);
 
 	const [imageCount, artistCount, collectionCount, upcomingCons] = await Promise.all([
-		db.select({ count: sql<number>`COUNT(*)` }).from(images).where(sql`published = 1`).get(),
+		db.select({ count: sql<number>`COUNT(*)` }).from(images).where(sql`published = 1 AND parent_image_id IS NULL`).get(),
 		db.select({ count: sql<number>`COUNT(*)` }).from(artists).get(),
 		db.select({ count: sql<number>`COUNT(*)` }).from(collections).get(),
 		db

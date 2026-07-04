@@ -141,6 +141,13 @@
       "when": 1783147956558,
       "tag": "0019_stickers_dedupe_unique_id",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1783301980171,
+      "tag": "0020_add_image_variants",
+      "breakpoints": true
     }
   ]
 }
