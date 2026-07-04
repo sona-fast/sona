@@ -65,7 +65,7 @@
 
 				<div class="identity">
 					<h1>{wordmark}</h1>
-					<p class="subtitle">{m.splash_subtitle()}</p>
+					<p class="subtitle">{data.settings.splashSubtitle || m.splash_subtitle()}</p>
 				</div>
 
 				<p class="prompt">{m.splash_prompt()}</p>

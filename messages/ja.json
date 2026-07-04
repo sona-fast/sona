@@ -222,6 +222,8 @@
 	"admin_setup_appearance": "外観",
 	"admin_setup_theme": "テーマ",
 	"admin_setup_landing_layout": "ランディングレイアウト",
+	"admin_settings_splash_subtitle": "スプラッシュのサブタイトル",
+	"admin_settings_splash_subtitle_placeholder": "ファースーツキャラクター",
 	"admin_setup_change_later": "これらは設定画面からいつでも変更できます。",
 	"admin_setup_submitting": "セットアップ中…",
 	"admin_setup_finish": "セットアップを完了",

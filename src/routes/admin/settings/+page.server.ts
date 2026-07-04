@@ -144,6 +144,7 @@ export const actions = {
 			adminAvatarUrl,
 			themeId,
 			landingLayout,
+			splashSubtitle: sanitizeText(data.get('splashSubtitle') as string, 100),
 			// Three-path profile fields — feed the /art, /connect and /share pages.
 			contactEmail: sanitizeText(data.get('contactEmail') as string, 200),
 			sonaSpecies: sanitizeText(data.get('sonaSpecies') as string, 200),

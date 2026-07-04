@@ -115,6 +115,7 @@ describe('settings saveSite — three-path profile fields', () => {
 		const result = await actions.saveSite(
 			saveSiteEvent(platform, {
 				siteName: 'Taro Surf',
+				splashSubtitle: 'surfing shark',
 				contactEmail: 'paws@example.com',
 				sonaSpecies: 'Shark',
 				sonaBuild: 'Round',
@@ -130,6 +131,7 @@ describe('settings saveSite — three-path profile fields', () => {
 
 		expect(result).toMatchObject({ success: true });
 		expect(await getRawSetting(db, 'contactEmail')).toBe('paws@example.com');
+		expect(await getRawSetting(db, 'splashSubtitle')).toBe('surfing shark');
 		expect(await getRawSetting(db, 'sonaSpecies')).toBe('Shark');
 		// Multipart form encoding normalizes newlines to CRLF (as browsers do);
 		// assert through parseLines, which is how /art consumes the value.
