@@ -11,6 +11,22 @@ export interface SiteSettings {
 	 * Empty falls back to `siteName` at the point of use. */
 	ownerName: string;
 	aboutText: string;
+	/** Contact email shown on /share for larger photo batches. */
+	contactEmail: string;
+
+	// --- Sona / reference profile (shown on /art, part of the threePath landing) ---
+	// The reference sheet itself is the most recent published gallery image
+	// tagged "reference" — not stored here (see /art load).
+	sonaSpecies: string;
+	sonaBuild: string;
+	sonaKeyFeatures: string;
+	/** JSON array of { name, hex } color swatches. */
+	sonaColors: string;
+	/** Newline-separated "do" items (what artists are encouraged to do). */
+	sonaDos: string;
+	/** Newline-separated "don't" items. */
+	sonaDonts: string;
+
 	twitterUrl: string;
 	blueskyUrl: string;
 	telegramUrl: string;
@@ -38,6 +54,32 @@ export interface SiteSettings {
 	registryOverridesLocal: boolean;
 }
 
+export interface SonaColor {
+	name: string;
+	hex: string;
+}
+
+/** Parse the stored sonaColors JSON into a typed array, tolerating bad data. */
+export function parseSonaColors(raw: string): SonaColor[] {
+	try {
+		const parsed = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.filter((c) => c && typeof c.hex === 'string')
+			.map((c) => ({ name: String(c.name ?? ''), hex: String(c.hex) }));
+	} catch {
+		return [];
+	}
+}
+
+/** Split a newline-separated list setting into trimmed, non-empty lines. */
+export function parseLines(raw: string): string[] {
+	return raw
+		.split('\n')
+		.map((l) => l.trim())
+		.filter(Boolean);
+}
+
 // Neutral, brand-agnostic defaults. A real deployment overrides these via the
 // first-run setup wizard / admin Settings (stored as site_settings rows); the
 // example sparky.ink config seeds its own values. Keep these generic so a fresh
@@ -46,6 +88,15 @@ const DEFAULTS: SiteSettings = {
 	siteName: APP_NAME,
 	ownerName: '',
 	aboutText: 'A personal gallery for collecting and showcasing furry artwork from talented artists.',
+	// The three-path pages (/art, /connect, /share) render gracefully with these
+	// empty — sections that have no data simply don't show.
+	contactEmail: '',
+	sonaSpecies: '',
+	sonaBuild: '',
+	sonaKeyFeatures: '',
+	sonaColors: '[]',
+	sonaDos: '',
+	sonaDonts: '',
 	twitterUrl: '',
 	blueskyUrl: '',
 	telegramUrl: '',
@@ -100,6 +151,13 @@ export async function getSettings(
 			siteName: map.siteName ?? DEFAULTS.siteName,
 			ownerName: map.ownerName ?? DEFAULTS.ownerName,
 			aboutText: map.aboutText ?? DEFAULTS.aboutText,
+			contactEmail: map.contactEmail ?? DEFAULTS.contactEmail,
+			sonaSpecies: map.sonaSpecies ?? DEFAULTS.sonaSpecies,
+			sonaBuild: map.sonaBuild ?? DEFAULTS.sonaBuild,
+			sonaKeyFeatures: map.sonaKeyFeatures ?? DEFAULTS.sonaKeyFeatures,
+			sonaColors: map.sonaColors ?? DEFAULTS.sonaColors,
+			sonaDos: map.sonaDos ?? DEFAULTS.sonaDos,
+			sonaDonts: map.sonaDonts ?? DEFAULTS.sonaDonts,
 			twitterUrl: map.twitterUrl ?? DEFAULTS.twitterUrl,
 			blueskyUrl: map.blueskyUrl ?? DEFAULTS.blueskyUrl,
 			telegramUrl: map.telegramUrl ?? DEFAULTS.telegramUrl,

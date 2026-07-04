@@ -7,7 +7,8 @@ import {
 	saveSettings,
 	getRawSetting,
 	setRawSetting,
-	clearSettingsCache
+	clearSettingsCache,
+	parseSonaColors
 } from '$lib/server/settings';
 import { deleteOrphansAll } from '$lib/server/storage';
 import {
@@ -142,7 +143,20 @@ export const actions = {
 			furtrackUrl: normalizeSocialUrl('furtrack', data.get('furtrack') as string),
 			adminAvatarUrl,
 			themeId,
-			landingLayout
+			landingLayout,
+			// Three-path profile fields — feed the /art, /connect and /share pages.
+			contactEmail: sanitizeText(data.get('contactEmail') as string, 200),
+			sonaSpecies: sanitizeText(data.get('sonaSpecies') as string, 200),
+			sonaBuild: sanitizeText(data.get('sonaBuild') as string, 200),
+			sonaKeyFeatures: sanitizeText(data.get('sonaKeyFeatures') as string, 500),
+			// Re-parse + re-serialize the swatch JSON so only well-formed { name, hex } survive.
+			sonaColors: JSON.stringify(
+				parseSonaColors((data.get('sonaColors') as string) || '[]').filter((c) =>
+					/^#[0-9a-fA-F]{3,8}$/.test(c.hex)
+				)
+			),
+			sonaDos: sanitizeText(data.get('sonaDos') as string, 1000),
+			sonaDonts: sanitizeText(data.get('sonaDonts') as string, 1000)
 		});
 
 		return { success: true };
