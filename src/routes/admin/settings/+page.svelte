@@ -26,6 +26,37 @@
 	let furAffinityUrl = $state(data.settings.furAffinityUrl);
 	let furtrackUrl = $state(data.settings.furtrackUrl);
 	let autoResyncEnabled = $state(data.settings.autoResyncEnabled);
+	let contactEmail = $state(data.settings.contactEmail);
+
+	// Sona / character profile — feeds the /art page of the threePath landing.
+	type SonaColor = { name: string; hex: string };
+	function parseColors(raw: string): SonaColor[] {
+		try {
+			const a = JSON.parse(raw);
+			return Array.isArray(a) ? a.filter((c) => c && typeof c.hex === 'string') : [];
+		} catch {
+			return [];
+		}
+	}
+	let sonaSpecies = $state(data.settings.sonaSpecies);
+	let sonaBuild = $state(data.settings.sonaBuild);
+	let sonaKeyFeatures = $state(data.settings.sonaKeyFeatures);
+	let sonaDos = $state(data.settings.sonaDos);
+	let sonaDonts = $state(data.settings.sonaDonts);
+	let colors = $state<SonaColor[]>(parseColors(data.settings.sonaColors));
+	let newColorName = $state('');
+	let newColorHex = $state('#888888');
+
+	function addColor() {
+		const hex = newColorHex.trim();
+		if (!/^#[0-9a-fA-F]{3,8}$/.test(hex)) return;
+		colors = [...colors, { name: newColorName.trim() || 'Color', hex }];
+		newColorName = '';
+		newColorHex = '#888888';
+	}
+	function removeColor(i: number) {
+		colors = colors.filter((_, idx) => idx !== i);
+	}
 
 	let storageProvider = $state(data.settings.storageProvider);
 	let r2PublicUrl = $state(data.settings.r2PublicUrl);
@@ -86,6 +117,13 @@
 		autoResyncEnabled = data.settings.autoResyncEnabled;
 		storageProvider = data.settings.storageProvider;
 		r2PublicUrl = data.settings.r2PublicUrl;
+		contactEmail = data.settings.contactEmail;
+		sonaSpecies = data.settings.sonaSpecies;
+		sonaBuild = data.settings.sonaBuild;
+		sonaKeyFeatures = data.settings.sonaKeyFeatures;
+		sonaDos = data.settings.sonaDos;
+		sonaDonts = data.settings.sonaDonts;
+		colors = parseColors(data.settings.sonaColors);
 	});
 
 	function formatSize(bytes: number): string {
@@ -165,6 +203,10 @@
 				<span>{m.admin_setup_primary_character()}</span>
 				<input type="text" class="input" bind:value={primaryCharacter} name="primaryCharacter" placeholder={m.admin_fursuit_tag_placeholder()} />
 			</label>
+			<label>
+				<span>{m.admin_settings_contact_email()}</span>
+				<input type="text" class="input" bind:value={contactEmail} name="contactEmail" placeholder="hello@example.com" />
+			</label>
 		</section>
 
 		<section data-tab="site">
@@ -210,6 +252,57 @@
 					<span>FurTrack</span>
 					<input type="text" class="input" bind:value={furtrackUrl} name="furtrack" placeholder="https://www.furtrack.com/user/yourname" />
 				</label>
+			</div>
+		</section>
+
+		<!-- Sona / reference profile shown on the /art page (threePath landing). -->
+		<section data-tab="site">
+			<h2>{m.admin_settings_sona_heading()}</h2>
+			<p class="section-desc">
+				{m.admin_settings_sona_desc_pre()}<a href="/art">/art</a>{m.admin_settings_sona_desc_mid1()}<code>reference</code>{m.admin_settings_sona_desc_mid2()}<a href="/admin/images">{m.admin_tab_images()}</a>{m.admin_settings_sona_desc_post()}
+			</p>
+			<div class="social-grid">
+				<label>
+					<span>{m.admin_settings_sona_species()}</span>
+					<input type="text" class="input" bind:value={sonaSpecies} name="sonaSpecies" placeholder={m.admin_settings_sona_species_placeholder()} />
+				</label>
+				<label>
+					<span>{m.admin_settings_sona_build()}</span>
+					<input type="text" class="input" bind:value={sonaBuild} name="sonaBuild" placeholder={m.admin_settings_sona_build_placeholder()} />
+				</label>
+			</div>
+			<label>
+				<span>{m.admin_settings_sona_key_features()}</span>
+				<input type="text" class="input" bind:value={sonaKeyFeatures} name="sonaKeyFeatures" placeholder={m.admin_settings_sona_key_features_placeholder()} />
+			</label>
+			<div class="social-grid">
+				<label>
+					<span>{m.admin_settings_sona_dos()} <small>{m.admin_settings_sona_per_line()}</small></span>
+					<textarea class="input" rows="4" name="sonaDos" bind:value={sonaDos}></textarea>
+				</label>
+				<label>
+					<span>{m.admin_settings_sona_donts()} <small>{m.admin_settings_sona_per_line()}</small></span>
+					<textarea class="input" rows="4" name="sonaDonts" bind:value={sonaDonts}></textarea>
+				</label>
+			</div>
+
+			<div class="palette">
+				<span class="palette-label">{m.admin_settings_sona_palette()}</span>
+				<div class="swatch-list">
+					{#each colors as color, i}
+						<div class="swatch-chip">
+							<span class="swatch-dot" style="background:{color.hex}"></span>
+							<span class="swatch-name">{color.name}</span>
+							<button type="button" class="swatch-remove" aria-label={m.admin_settings_sona_remove_color()} onclick={() => removeColor(i)}>×</button>
+						</div>
+					{/each}
+				</div>
+				<div class="add-color">
+					<input type="color" class="color-input" bind:value={newColorHex} aria-label={m.admin_settings_sona_pick_color()} />
+					<input type="text" class="input" bind:value={newColorName} placeholder={m.admin_settings_sona_color_name_placeholder()} />
+					<button type="button" class="btn btn-secondary" onclick={addColor}>{m.admin_settings_sona_add_color()}</button>
+				</div>
+				<input type="hidden" name="sonaColors" value={JSON.stringify(colors)} />
 			</div>
 		</section>
 
@@ -1021,5 +1114,79 @@
 		to {
 			transform: rotate(360deg);
 		}
+	}
+
+	/* Sona-profile palette editor. */
+	.palette {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		margin-top: 20px;
+	}
+
+	.palette-label {
+		font-size: 14px;
+		font-weight: 500;
+	}
+
+	.swatch-list {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.swatch-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 10px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+	}
+
+	.swatch-dot {
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		border: 1px solid color-mix(in srgb, var(--foreground) 20%, transparent);
+	}
+
+	.swatch-name {
+		font-size: 13px;
+	}
+
+	.swatch-remove {
+		background: none;
+		border: none;
+		color: var(--muted-foreground);
+		cursor: pointer;
+		font-size: 16px;
+		line-height: 1;
+		padding: 0 2px;
+	}
+
+	.swatch-remove:hover {
+		color: var(--destructive);
+	}
+
+	.add-color {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.add-color .input {
+		max-width: 240px;
+	}
+
+	.color-input {
+		width: 40px;
+		height: 40px;
+		padding: 2px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-s);
+		background: var(--background);
+		cursor: pointer;
+		flex-shrink: 0;
 	}
 </style>

@@ -7,7 +7,7 @@ import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
-import { getRawSetting } from '$lib/server/settings';
+import { getRawSetting, parseLines } from '$lib/server/settings';
 import { actions } from './+page.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses
@@ -96,6 +96,51 @@ describe('settings connectRegistry — fork key label', () => {
 
 		expect(result).toMatchObject({ success: true });
 		expect(sentBody()).toMatchObject({ label: 'taro.surf' });
+	});
+});
+
+function saveSiteEvent(platform: App.Platform, fields: Record<string, string>) {
+	const body = new FormData();
+	for (const [k, v] of Object.entries(fields)) body.append(k, v);
+	return {
+		platform,
+		request: new Request('https://taro.surf/admin/settings?/saveSite', { method: 'POST', body })
+	} as never;
+}
+
+describe('settings saveSite — three-path profile fields', () => {
+	it('persists the sona profile + contact email and drops malformed swatches', async () => {
+		const { db, platform } = makeDb();
+
+		const result = await actions.saveSite(
+			saveSiteEvent(platform, {
+				siteName: 'Taro Surf',
+				contactEmail: 'paws@example.com',
+				sonaSpecies: 'Shark',
+				sonaBuild: 'Round',
+				sonaKeyFeatures: 'Blue fins',
+				sonaDos: 'Any style\nShip art is fine',
+				sonaDonts: 'No NSFW',
+				sonaColors: JSON.stringify([
+					{ name: 'Blue', hex: '#3A6EA5' },
+					{ name: 'Bad', hex: 'not-a-hex' }
+				])
+			})
+		);
+
+		expect(result).toMatchObject({ success: true });
+		expect(await getRawSetting(db, 'contactEmail')).toBe('paws@example.com');
+		expect(await getRawSetting(db, 'sonaSpecies')).toBe('Shark');
+		// Multipart form encoding normalizes newlines to CRLF (as browsers do);
+		// assert through parseLines, which is how /art consumes the value.
+		expect(parseLines((await getRawSetting(db, 'sonaDos'))!)).toEqual([
+			'Any style',
+			'Ship art is fine'
+		]);
+		// The swatch JSON is re-parsed server-side; entries without a valid hex are dropped.
+		expect(JSON.parse((await getRawSetting(db, 'sonaColors'))!)).toEqual([
+			{ name: 'Blue', hex: '#3A6EA5' }
+		]);
 	});
 });
 

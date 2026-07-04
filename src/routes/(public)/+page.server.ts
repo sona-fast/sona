@@ -1,6 +1,7 @@
 import { getReadDb } from '$lib/server/db';
 import { images, artists, imageTags, tags } from '$lib/server/db/schema';
 import { eq, desc, and, notInArray, inArray, sql } from 'drizzle-orm';
+import { getSettings, settingsFallback } from '$lib/server/settings';
 import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
 
@@ -8,13 +9,19 @@ import type { PageServerLoad } from './$types';
 // with fewer images instead of hanging until the edge returns a 524.
 const READ_TIMEOUT_MS = 5000;
 
-export const load: PageServerLoad = async ({ platform, parent }) => {
-	// Settings are already loaded by (public)/+layout.server.ts — reuse them
-	// instead of re-querying D1 here (one fewer round-trip per page load).
-	const { settings } = await parent();
-
+export const load: PageServerLoad = async ({ platform }) => {
 	// Read-only path: route to a D1 read replica when replication is enabled.
 	const db = getReadDb(platform!.env.DB);
+
+	// The homepage escapes the (public) layout (+page@), so that layout's
+	// settings load doesn't run here — read settings directly (cached
+	// per-isolate, usually zero round-trips).
+	const settings = await withTimeout(getSettings(db), READ_TIMEOUT_MS, settingsFallback());
+
+	// The threePath splash is a standalone hub page — no image queries needed.
+	if (settings.landingLayout === 'threePath') {
+		return { settings, recentImages: [], mosaicImageUrls: [] };
+	}
 
 	const RECENT_COUNT = 8;
 	const MOSAIC_TOTAL = 40;
@@ -110,10 +117,6 @@ export const load: PageServerLoad = async ({ platform, parent }) => {
 	return {
 		recentImages: imagesWithTags,
 		mosaicImageUrls,
-		settings,
-		// Feature availability for the three-path landing layout.
-		features: {
-			fursuit: (platform?.env.FURTRACK_MODE ?? 'off') !== 'off'
-		}
+		settings
 	};
 };

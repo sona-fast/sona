@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { getSettings, saveSettings, clearSettingsCache } from './settings';
+import {
+	getSettings,
+	saveSettings,
+	clearSettingsCache,
+	parseSonaColors,
+	parseLines
+} from './settings';
 import type { Database } from './db';
 
 // These tests pin the per-isolate settings cache that sits on the hot path of
@@ -83,6 +89,21 @@ describe('getSettings — mapping & defaults', () => {
 		const { db } = fakeReadDb([{ key: 'storageProvider', value: 'wasabi' }]);
 		const s = await getSettings(db);
 		expect(s.storageProvider).toBe('uploadthing');
+	});
+
+	it('maps the three-path profile fields (sona profile + contact email)', async () => {
+		// These feed the /art, /connect and /share pages of the threePath landing.
+		const { db } = fakeReadDb([
+			{ key: 'contactEmail', value: 'paws@example.com' },
+			{ key: 'sonaSpecies', value: 'Wolf' }
+		]);
+		const s = await getSettings(db);
+		expect(s.contactEmail).toBe('paws@example.com');
+		expect(s.sonaSpecies).toBe('Wolf');
+		// Unset profile keys fall back to neutral empties — a fresh fork's /art
+		// page renders without any placeholder character data.
+		expect(parseSonaColors(s.sonaColors)).toEqual([]);
+		expect(s.sonaDos).toBe('');
 	});
 
 	it('returns defaults (and does NOT cache) when the read throws', async () => {
@@ -205,5 +226,30 @@ describe('saveSettings — invalidation', () => {
 			{ key: 'autoResyncEnabled', value: 'false' },
 			{ key: 'registryOverridesLocal', value: 'true' }
 		]);
+	});
+});
+
+// Helpers for the sona/reference profile shown on /art (threePath landing).
+describe('parseSonaColors / parseLines', () => {
+	it('parses well-formed swatches and drops malformed entries', () => {
+		const raw = JSON.stringify([
+			{ name: 'Charcoal', hex: '#172937' },
+			{ hex: '#FAFAFA' },
+			{ name: 'no-hex' },
+			'garbage'
+		]);
+		expect(parseSonaColors(raw)).toEqual([
+			{ name: 'Charcoal', hex: '#172937' },
+			{ name: '', hex: '#FAFAFA' }
+		]);
+	});
+
+	it('returns [] for invalid JSON or a non-array', () => {
+		expect(parseSonaColors('not json')).toEqual([]);
+		expect(parseSonaColors('{"a":1}')).toEqual([]);
+	});
+
+	it('splits newline lists into trimmed, non-empty lines', () => {
+		expect(parseLines(' one \n\n two\n')).toEqual(['one', 'two']);
 	});
 });
