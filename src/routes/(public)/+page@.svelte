@@ -124,7 +124,7 @@
 			</section>
 		</main>
 		<div class="desktop-footer">
-			<Footer settings={data.settings} />
+			<Footer settings={data.settings} host={data.host} />
 		</div>
 		<MobileNav />
 	</div>

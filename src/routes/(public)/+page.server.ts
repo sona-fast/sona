@@ -9,7 +9,7 @@ import type { PageServerLoad } from './$types';
 // with fewer images instead of hanging until the edge returns a 524.
 const READ_TIMEOUT_MS = 5000;
 
-export const load: PageServerLoad = async ({ platform }) => {
+export const load: PageServerLoad = async ({ platform, url }) => {
 	// Read-only path: route to a D1 read replica when replication is enabled.
 	const db = getReadDb(platform!.env.DB);
 
@@ -20,7 +20,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 
 	// The threePath splash is a standalone hub page — no image queries needed.
 	if (settings.landingLayout === 'threePath') {
-		return { settings, recentImages: [], mosaicImageUrls: [] };
+		return { settings, recentImages: [], mosaicImageUrls: [], host: url.host };
 	}
 
 	const RECENT_COUNT = 8;
@@ -117,6 +117,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 	return {
 		recentImages: imagesWithTags,
 		mosaicImageUrls,
-		settings
+		settings,
+		host: url.host
 	};
 };
