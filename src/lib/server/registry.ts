@@ -187,6 +187,10 @@ export async function registrySubmit(
 		kind: 'create' | 'update';
 		targetGlobalId?: string;
 		baseVersion?: number;
+		// This fork's own host (siteName setting || site hostname). The registry uses
+		// it to self-heal a null fork-key label so submissions attribute back to the
+		// fork; it's a display hint only — the forkId (from the key) is the auth anchor.
+		siteLabel?: string;
 		payload: {
 			displayName: string;
 			avatarUrl?: string | null;
