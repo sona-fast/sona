@@ -5,6 +5,7 @@ import { eq, sql, like } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { sanitizeText } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
+import { getRawSetting } from '$lib/server/settings';
 import {
 	isRegistryEnabled,
 	resolveRegistryEnv,
@@ -181,7 +182,7 @@ export const actions = {
 		return { success: true };
 	},
 
-	submitToRegistry: async ({ request, platform }) => {
+	submitToRegistry: async ({ request, platform, url }) => {
 		const env = platform?.env;
 		const db = getDb(env!.DB);
 		const renv = await resolveRegistryEnv(db, env);
@@ -193,10 +194,16 @@ export const actions = {
 		const a = await db.select().from(artists).where(eq(artists.id, id)).get();
 		if (!a) return fail(404, { error: 'Artist not found' });
 
+		// Report this fork's own host so the registry can self-heal a null key label
+		// (attribution). Derived the same way the connect-registry flow labels the key:
+		// the configured site name, else this site's hostname.
+		const siteLabel = (await getRawSetting(db, 'siteName'))?.trim() || url.hostname;
+
 		const result = await registrySubmit(renv, {
 			kind: a.globalId ? 'update' : 'create',
 			targetGlobalId: a.globalId ?? undefined,
 			baseVersion: a.registryVersion ?? undefined,
+			siteLabel,
 			payload: {
 				displayName: a.name,
 				avatarUrl: a.avatarUrl,

@@ -5,6 +5,7 @@ import {
 	firstHandle,
 	parseAliases,
 	registryRegisterFork,
+	registrySubmit,
 	resolveRegistryEnv,
 	REGISTRY_API_KEY_SETTING,
 	REGISTRY_URL_SETTING
@@ -101,6 +102,44 @@ describe('registryRegisterFork', () => {
 		expect(result).toEqual({
 			error: 'the registry did not respond — check the URL and try again'
 		});
+	});
+});
+
+describe('registrySubmit', () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const env = { REGISTRY_API_KEY: 'fork-key' } as App.Platform['env'];
+
+	it('POSTs to /v1/submissions with the auth header and forwards siteLabel', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ id: 1, status: 'pending', matchedGlobalId: null }), { status: 201 })
+		);
+		vi.stubGlobal('fetch', fetchMock);
+
+		const result = await registrySubmit(env, {
+			kind: 'create',
+			siteLabel: 'sparky.ink',
+			payload: { displayName: 'Nyx', socials: {} }
+		});
+		expect(result).toEqual({ id: 1, status: 'pending', matchedGlobalId: null });
+
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toMatch(/\/v1\/submissions$/);
+		expect(init.method).toBe('POST');
+		expect((init.headers as Record<string, string>).authorization).toBe('Bearer fork-key');
+		// The fork's self-reported host rides along on the submission for backfill.
+		expect(JSON.parse(init.body as string)).toMatchObject({ siteLabel: 'sparky.ink' });
+	});
+
+	it('returns null (and sends nothing) when the registry is not configured', async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+		const result = await registrySubmit(undefined, {
+			kind: 'create',
+			siteLabel: 'x',
+			payload: { displayName: 'A', socials: {} }
+		});
+		expect(result).toBeNull();
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });
 
