@@ -130,6 +130,41 @@ describe('registrySubmit', () => {
 		expect(JSON.parse(init.body as string)).toMatchObject({ siteLabel: 'sparky.ink' });
 	});
 
+	it('surfaces a 4xx refusal body (tombstoned match) instead of failing soft', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						error: 'This artist was removed from the registry and cannot be resubmitted.',
+						matchedGlobalId: 'g-ghost',
+						tombstoned: true
+					}),
+					{ status: 409 }
+				)
+			)
+		);
+		const result = await registrySubmit(env, {
+			kind: 'create',
+			siteLabel: 'sparky.ink',
+			payload: { displayName: 'Ghost', socials: { twitterUrl: 'https://x.com/ghostpaws' } }
+		});
+		expect(result?.error).toMatch(/removed from the registry/i);
+	});
+
+	it('still fails soft (null) on a 5xx', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(new Response('gateway broke', { status: 502 }))
+		);
+		const result = await registrySubmit(env, {
+			kind: 'create',
+			siteLabel: 'sparky.ink',
+			payload: { displayName: 'A', socials: {} }
+		});
+		expect(result).toBeNull();
+	});
+
 	it('returns null (and sends nothing) when the registry is not configured', async () => {
 		const fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);

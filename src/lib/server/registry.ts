@@ -113,7 +113,7 @@ function baseUrl(env: Env): string {
 async function call<T>(
 	env: Env | undefined,
 	path: string,
-	init: RequestInit & { auth?: boolean },
+	init: RequestInit & { auth?: boolean; errorBody?: boolean },
 	fallback: T
 ): Promise<T> {
 	if (!env || !isRegistryEnabled(env)) return fallback;
@@ -125,7 +125,17 @@ async function call<T>(
 			TIMEOUT_MS,
 			null
 		);
-		if (!res || !res.ok) return fallback;
+		if (!res) return fallback;
+		if (!res.ok) {
+			// Opt-in: surface a 4xx refusal's body (it carries the registry's reason,
+			// e.g. "artist was removed from the registry") instead of collapsing it
+			// into the fail-soft fallback. 5xx/network errors still fail soft.
+			if (init.errorBody && res.status >= 400 && res.status < 500) {
+				const body = (await res.json().catch(() => null)) as { error?: string } | null;
+				if (body && typeof body.error === 'string') return body as T;
+			}
+			return fallback;
+		}
 		return (await res.json()) as T;
 	} catch {
 		return fallback;
@@ -179,6 +189,9 @@ export interface RegistrySubmitResult {
 	status: string;
 	matchedGlobalId: string | null;
 	multipleMatches?: boolean;
+	/** Set when the registry refused the submission (e.g. the matched artist is
+	 * tombstoned) — carries the registry's own message for the admin UI. */
+	error?: string;
 }
 
 export async function registrySubmit(
@@ -202,7 +215,9 @@ export async function registrySubmit(
 	return call<RegistrySubmitResult | null>(
 		env,
 		`/v1/submissions`,
-		{ method: 'POST', auth: true, body: JSON.stringify(body) },
+		// errorBody: a 4xx here is a meaningful refusal (e.g. "artist was removed
+		// from the registry") that the admin UI must show — not an outage.
+		{ method: 'POST', auth: true, body: JSON.stringify(body), errorBody: true },
 		null
 	);
 }
