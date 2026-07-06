@@ -13,6 +13,9 @@ pages_build_output_dir = ".svelte-kit/cloudflare"
 
 [vars]
 FURTRACK_MODE = "off"
+# Legacy env credential path: lets specs log in to /admin without seeding a
+# PBKDF2 hash. Throwaway local value — never a real secret.
+ADMIN_PASSWORD = "e2e-admin-password"
 
 [[d1_databases]]
 binding = "DB"
