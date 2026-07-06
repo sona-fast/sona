@@ -10,6 +10,7 @@ import {
 	resolveRegistryEnv,
 	registrySubmit,
 	registrySubmissionsMine,
+	registryGetArtist,
 	artistSocials,
 	parseAliases
 } from '$lib/server/registry';
@@ -97,6 +98,11 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// A dismissed rejection is acknowledged locally — drop it so it stops showing.
 		const subs = (await registrySubmissionsMine(renv)).filter((s) => !dismissed.has(s.id));
 
+		// One catalog fetch, reused twice: to stamp registry_version at link time
+		// (just below) and to compute per-artist up-to-date state (further down).
+		const catalog = await fetchRegistryCatalog(renv);
+		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));
+
 		// An APPROVED submission means the maintainer linked this artist into the
 		// registry. Stamp the global id now (marking it shared) instead of waiting
 		// for the next background sync — otherwise the pending badge just clears, the
@@ -114,7 +120,15 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			if (taken) continue;
 			await db
 				.update(artists)
-				.set({ globalId: linkedId, registrySyncedAt: new Date().toISOString() })
+				.set({
+					globalId: linkedId,
+					// Stamp the current registry version too — without it the next share
+					// goes out as an update with no baseVersion and the registry 400s
+					// (#71). If the catalog fetch failed or the entry is missing, still
+					// link (submitToRegistry resolves the version as a backstop).
+					registryVersion: byGlobalId.get(linkedId)?.version ?? null,
+					registrySyncedAt: new Date().toISOString()
+				})
 				.where(eq(artists.id, a.id));
 			a.globalId = linkedId; // reflect in this render so the badge + guard update
 		}
@@ -134,12 +148,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			}
 		}
 
-		// One catalog fetch; compare each linked artist against its entry. A linked
-		// artist that already matches has nothing to submit; an unlinked artist
-		// that's already in the catalog would be a duplicate — disable "submit" for
-		// both so an already-shared artist can't be resubmitted.
-		const catalog = await fetchRegistryCatalog(renv);
-		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));
+		// Compare each linked artist against its catalog entry. A linked artist
+		// that already matches has nothing to submit; an unlinked artist that's
+		// already in the catalog would be a duplicate — disable "submit" for both
+		// so an already-shared artist can't be resubmitted.
 		for (const a of allArtists) {
 			if (a.globalId) {
 				const entry = byGlobalId.get(a.globalId);
@@ -221,6 +233,24 @@ export const actions = {
 		const a = await db.select().from(artists).where(eq(artists.id, id)).get();
 		if (!a) return fail(404, { error: 'Artist not found' });
 
+		// Belt-and-braces for #71: a linked artist with no stored registry version
+		// (e.g. linked by the status-poll path before it stamped versions, or an
+		// AKA approval the daily sync can't backfill) would go out as an update
+		// with no baseVersion — which the registry hard-rejects (400). Resolve the
+		// current version now, persist it, and use it; if that fails, refuse the
+		// doomed submit with a clear error instead.
+		let baseVersion = a.registryVersion ?? undefined;
+		if (a.globalId && baseVersion === undefined) {
+			const reg = await registryGetArtist(renv, a.globalId);
+			if (typeof reg?.version !== 'number') {
+				return fail(502, {
+					error: "Couldn't resolve the artist's registry version — try again or run the artist sync."
+				});
+			}
+			baseVersion = reg.version;
+			await db.update(artists).set({ registryVersion: reg.version }).where(eq(artists.id, a.id));
+		}
+
 		// Report this fork's own host so the registry can self-heal a null key label
 		// (attribution). Derived the same way the connect-registry flow labels the key:
 		// the configured site name, else this site's hostname.
@@ -229,7 +259,7 @@ export const actions = {
 		const result = await registrySubmit(renv, {
 			kind: a.globalId ? 'update' : 'create',
 			targetGlobalId: a.globalId ?? undefined,
-			baseVersion: a.registryVersion ?? undefined,
+			baseVersion,
 			siteLabel,
 			payload: {
 				displayName: a.name,
