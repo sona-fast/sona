@@ -296,6 +296,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		flex-wrap: wrap;
 		gap: 12px;
 	}
 
@@ -303,6 +304,7 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
+		min-width: 0;
 	}
 
 	.artist-avatar {
@@ -317,11 +319,15 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+		min-width: 0;
 	}
 
 	.artist-name {
 		font-size: 14px;
 		font-weight: 600;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.artist-role {
