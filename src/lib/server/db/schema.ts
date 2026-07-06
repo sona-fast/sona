@@ -94,6 +94,10 @@ export const characters = sqliteTable('characters', {
 	// resolveSiteCharacterId). Excluded from public character listings — it's the
 	// pack owner, not part of the featured cast — but still editable in admin.
 	isOwner: integer('is_owner', { mode: 'boolean' }).notNull().default(false),
+	// The character's canonical reference image ("ref sheet"), chosen explicitly by
+	// an operator from the gallery. NULL = none set; the About page then falls back
+	// to the fetched Bluesky avatar. Kept nullable so clearing it is a no-op.
+	referenceImageId: integer('reference_image_id').references(() => images.id),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
 

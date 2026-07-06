@@ -47,6 +47,10 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 			db.select({ id: images.id }).from(images).where(eq(images.parentImageId, id)).get()
 		]);
 
+	// The site's owner character (first, if several) carries the canonical
+	// reference image. Only then do we offer the "use as reference" control.
+	const ownerCharacter = allCharacters.find((c) => c.isOwner) ?? null;
+
 	return {
 		image,
 		imageTags: imageTagRows.map((t) => t.name),
@@ -57,12 +61,17 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		characters: allCharacters,
 		parentCandidates,
 		// An image that already has variants is a parent — it can't also be a variant.
-		hasVariants: !!firstVariant
+		hasVariants: !!firstVariant,
+		ownerCharacter: ownerCharacter && {
+			id: ownerCharacter.id,
+			name: ownerCharacter.name,
+			isReference: ownerCharacter.referenceImageId === image.id
+		}
 	};
 };
 
 export const actions = {
-	default: async ({ params, request, platform }) => {
+	save: async ({ params, request, platform }) => {
 		const db = getDb(platform!.env.DB);
 		const id = Number(params.id);
 		const data = await request.formData();
@@ -187,5 +196,29 @@ export const actions = {
 		}
 
 		redirect(302, '/admin/images');
+	},
+
+	// Toggle this image as the owner character's canonical reference image.
+	// `clear` un-sets it (only offered when this image is the current ref).
+	reference: async ({ params, request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const id = Number(params.id);
+		const data = await request.formData();
+		const clear = data.get('clear') === 'on';
+
+		const owner = await db
+			.select({ id: characters.id })
+			.from(characters)
+			.where(eq(characters.isOwner, true))
+			.orderBy(characters.name)
+			.get();
+		if (!owner) return fail(400, { error: 'No owner character' });
+
+		await db
+			.update(characters)
+			.set({ referenceImageId: clear ? null : id })
+			.where(eq(characters.id, owner.id));
+
+		redirect(302, `/admin/images/${id}/edit`);
 	}
 } satisfies Actions;

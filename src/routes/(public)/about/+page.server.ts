@@ -1,7 +1,8 @@
 import { getReadDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
-import { images, artists, collections, conventions } from '$lib/server/db/schema';
-import { asc, sql } from 'drizzle-orm';
+import { images, artists, collections, conventions, characters } from '$lib/server/db/schema';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { cdnImage } from '$lib';
 import type { PageServerLoad } from './$types';
 
 async function fetchBlueskyAvatar(blueskyUrl: string): Promise<string | null> {
@@ -46,9 +47,25 @@ export const load: PageServerLoad = async ({ platform }) => {
 			.orderBy(asc(conventions.startDate))
 	]);
 
-	// Fetch avatar from Bluesky if configured
+	// Prefer the owner character's explicit reference image ("ref sheet") when it's
+	// set AND still published; only then fall back to the fetched Bluesky avatar
+	// (skipping that network call entirely when the reference image wins).
 	let avatarUrl: string | null = null;
-	if (settings.blueskyUrl) {
+	const owner = await db
+		.select({ referenceImageId: characters.referenceImageId })
+		.from(characters)
+		.where(eq(characters.isOwner, true))
+		.orderBy(characters.name)
+		.get();
+	if (owner?.referenceImageId) {
+		const refImage = await db
+			.select({ imageUrl: images.imageUrl })
+			.from(images)
+			.where(and(eq(images.id, owner.referenceImageId), eq(images.published, true)))
+			.get();
+		if (refImage) avatarUrl = cdnImage(refImage.imageUrl, 400);
+	}
+	if (!avatarUrl && settings.blueskyUrl) {
 		avatarUrl = await fetchBlueskyAvatar(settings.blueskyUrl);
 	}
 

@@ -23,7 +23,19 @@
 		<img src={data.image.imageUrl} alt={data.image.title} />
 	</div>
 
-	<form method="POST" use:enhance={() => {
+	{#if data.ownerCharacter}
+		<form method="POST" action="?/reference" use:enhance class="reference-control">
+			{#if data.ownerCharacter.isReference}
+				<p class="reference-current">{m.admin_image_reference_current({ name: data.ownerCharacter.name })}</p>
+				<input type="hidden" name="clear" value="on" />
+				<button type="submit" class="btn btn-secondary">{m.admin_image_reference_clear()}</button>
+			{:else}
+				<button type="submit" class="btn btn-secondary">{m.admin_image_reference_set({ name: data.ownerCharacter.name })}</button>
+			{/if}
+		</form>
+	{/if}
+
+	<form method="POST" action="?/save" use:enhance={() => {
 		saving = true;
 		return async ({ update }) => {
 			await update();
@@ -243,6 +255,19 @@
 	.image-preview img {
 		width: 100%;
 		display: block;
+	}
+
+	.reference-control {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-top: 12px;
+	}
+
+	.reference-current {
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--primary);
 	}
 
 	.edit-form {
