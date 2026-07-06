@@ -28,7 +28,7 @@ vite.config.ts.timestamp-*
 # Cloudflare
 .dev.vars
 
-# Throwaway local D1 built by the E2E harness (tests/e2e/global-setup.ts)
+# Throwaway local D1 built by the E2E harness (tests/e2e/seed.ts)
 .wrangler-e2e
 
 # Playwright

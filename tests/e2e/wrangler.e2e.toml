@@ -1,10 +1,10 @@
 # Wrangler config used ONLY by the E2E harness (playwright).
 #
-# The dev server for tests points at this file via WRANGLER_CONFIG so the tests
-# get their own throwaway local D1 + persist dir (WRANGLER_PERSIST_TO), never the
-# developer's real wrangler.toml / dev database. See playwright.config.ts and
-# tests/e2e/global-setup.ts. database_id is a local placeholder (miniflare only
-# needs the binding + name locally); nothing here talks to a real Cloudflare account.
+# The dev server for tests points at this file via SONA_E2E_WRANGLER_CONFIG so
+# the tests get their own throwaway local D1 + persist dir (SONA_E2E_PERSIST_TO),
+# never the developer's real wrangler.toml / dev database. See playwright.config.ts
+# and tests/e2e/seed.ts. database_id is a local placeholder (miniflare only needs
+# the binding + name locally); nothing here talks to a real Cloudflare account.
 
 name = "sona-e2e"
 compatibility_date = "2025-04-01"

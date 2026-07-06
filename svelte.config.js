@@ -13,10 +13,11 @@ const config = {
 		adapter: adapter({
 			platformProxy: {
 				// E2E tests override these (see playwright.config.ts) to run the dev
-				// server against a throwaway local D1 in an isolated persist dir.
-				configPath: process.env.WRANGLER_CONFIG ?? 'wrangler.toml',
-				persist: process.env.WRANGLER_PERSIST_TO
-					? { path: process.env.WRANGLER_PERSIST_TO }
+				// server against a throwaway local D1 in an isolated persist dir. The
+				// SONA_E2E_ prefix keeps them from colliding with any real wrangler env.
+				configPath: process.env.SONA_E2E_WRANGLER_CONFIG ?? 'wrangler.toml',
+				persist: process.env.SONA_E2E_PERSIST_TO
+					? { path: process.env.SONA_E2E_PERSIST_TO }
 					: undefined
 			}
 		})

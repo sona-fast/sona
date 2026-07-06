@@ -21,10 +21,10 @@ function wrangler(args: string[]): void {
  * dir, apply every drizzle migration in order, then load the seed fixture.
  *
  * Run from the playwright webServer command *before* `vite dev` boots (see
- * playwright.config.ts) — not from a globalSetup: playwright starts the
- * webServer before globalSetup, so seeding there would race the running
+ * playwright.config.ts) — not from a playwright globalSetup: playwright starts
+ * the webServer before globalSetup, so seeding there would race the running
  * miniflare and wipe the DB out from under it. The dev server reads the same
- * files via getPlatformProxy (WRANGLER_PERSIST_TO = E2E_PLATFORM_PERSIST), so it
+ * files via getPlatformProxy (SONA_E2E_PERSIST_TO = E2E_PLATFORM_PERSIST), so it
  * boots against exactly this DB — never the developer's real dev database.
  */
 function seed(): void {

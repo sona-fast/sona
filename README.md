@@ -160,7 +160,7 @@ npm run test:e2e                  # browser tests (playwright)
 ```
 
 These are browser tests (kept out of `npm test` so the unit suite stays fast).
-They boot `npm run dev` against a **throwaway local D1** — a global setup wipes,
+They boot `npm run dev` against a **throwaway local D1** — a seed step wipes,
 migrates and seeds it (`tests/e2e/fixtures/seed.sql`) in an isolated persist dir,
 so your real dev database is untouched. CI runs them on the canonical repo (a
 separate `e2e` job in `.github/workflows/ci.yml`); forks skip them.

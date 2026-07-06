@@ -1,9 +1,7 @@
--- E2E seed fixture. Applied by tests/e2e/global-setup.ts to a throwaway local
--- D1 after migrations, before the dev server boots. Keep it minimal: just enough
--- for the gallery specs. Row ids are fixed so specs can reason about them.
---
--- Idempotent (INSERT OR REPLACE) so re-running global-setup against a persisted
--- DB does not error.
+-- E2E seed fixture. Applied by tests/e2e/seed.ts to a throwaway local D1 after
+-- migrations, before the dev server boots. Keep it minimal: just enough for the
+-- gallery specs. Row ids are fixed so specs can reason about them. (INSERT OR
+-- REPLACE is used defensively; seed.ts wipes the DB first, so it never collides.)
 
 -- Site must be past first-run setup or hooks.server.ts redirects every route to
 -- /admin/setup. setupComplete=true is the gate; the rest gives the chrome a name.
