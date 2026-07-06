@@ -36,6 +36,7 @@ import {
 	REGISTRY_URL_SETTING
 } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
+import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { isValidGallerySort, DEFAULT_GALLERY_SORT, type GallerySort } from '$lib/gallery';
@@ -43,10 +44,18 @@ import type { Actions, PageServerLoad } from './$types';
 
 const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days in seconds
 
-export const load: PageServerLoad = async ({ platform }) => {
+export const load: PageServerLoad = async ({ platform, url }) => {
 	const db = getDb(platform!.env.DB);
 	// The editor must render current persisted values, not a cached snapshot.
 	const settings = await getSettings(db, { fresh: true });
+
+	// Ref-sheet color picker: resolve the sheet (same precedence as /art) and
+	// pre-compute how the client can draw it on a canvas without tainting it.
+	// null = no sheet yet; the palette editor shows a designate-one hint instead.
+	const refImage = await resolveRefImage(db);
+	const refImageSrc = refImage
+		? refImageSource(refImage, { origin: url.origin, r2PublicUrl: settings.r2PublicUrl, dev })
+		: null;
 
 	const stats = await db
 		.select({
@@ -106,6 +115,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 	const adminEmail = (await getRawSetting(db, 'adminEmail')) ?? '';
 	return {
 		settings,
+		refImageSrc,
 		adminEmail,
 		imageCount: stats?.count || 0,
 		totalSize: stats?.totalSize || 0,
