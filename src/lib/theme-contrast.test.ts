@@ -1,20 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { THEMES } from './themes';
 
 // Guards WCAG AA contrast for the terracotta theme: the terracotta accent is
 // used as small-text foreground on the page background and on cards, and as
 // the button background under --primary-foreground text. A future accent
 // tweak that drops any of the asserted pairings below threshold fails here.
 //
-// Scope: terracotta only, both variants. Ember and Aurora predate the AA work
-// and are not asserted.
+// Scope: the full terracotta pairings, both variants, plus the destructive
+// button (fill vs --destructive-foreground) for EVERY theme × mode (#76). The
+// remaining Ember/Aurora pairings predate the AA work and are not asserted.
 
 const css = readFileSync(fileURLToPath(new URL('../app.css', import.meta.url)), 'utf8');
 
 function blockToken(selector: string, name: string): string {
 	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const block = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1];
+	// Anchored to a line start so a plain selector (e.g. [data-theme='light'])
+	// can't match the tail of a compound one ([data-theme-id='aurora'][data-theme='light']).
+	const block = css.match(new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
 	if (!block) throw new Error(`${selector} block not found in app.css`);
 	const value = block.match(new RegExp(`--${name}:\\s*(#[0-9A-Fa-f]{6})\\s*;`))?.[1];
 	if (!value) throw new Error(`--${name} not found as a 6-digit hex in the ${selector} block`);
@@ -35,6 +39,39 @@ function contrast(a: string, b: string): number {
 	return (hi + 0.05) / (lo + 0.05);
 }
 
+describe('destructive button WCAG AA contrast, every theme × mode', () => {
+	// The default theme lives on :root / [data-theme='light']; alternate themes
+	// on [data-theme-id='<id>'] and its [data-theme='light'] variant.
+	const blocks = THEMES.flatMap(({ id }) =>
+		id === 'default'
+			? [
+					{ name: 'default dark', sel: ':root' },
+					{ name: 'default light', sel: "[data-theme='light']" }
+				]
+			: [
+					{ name: `${id} dark`, sel: `[data-theme-id='${id}']` },
+					{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
+				]
+	);
+
+	for (const { name, sel } of blocks) {
+		it(`${name}: destructive-foreground text on destructive buttons meets 4.5:1`, () => {
+			const destructive = blockToken(sel, 'destructive');
+			const destructiveForeground = blockToken(sel, 'destructive-foreground');
+			expect(contrast(destructiveForeground, destructive)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+
+	it('.btn-destructive colors its text with var(--destructive-foreground)', () => {
+		// The token assertions above are only meaningful if the rule actually
+		// uses the token; a refactor back to var(--foreground) reintroduces #76.
+		// No fallback either: every theme block must define the token itself.
+		const rule = css.match(/^\.btn-destructive\s*\{([^}]*)\}/m)?.[1];
+		if (!rule) throw new Error('.btn-destructive rule not found in app.css');
+		expect(rule).toMatch(/color:\s*var\(--destructive-foreground\)\s*;/);
+	});
+});
+
 describe('terracotta light theme WCAG AA contrast', () => {
 	const sel = "[data-theme-id='terracotta'][data-theme='light']";
 	const primary = blockToken(sel, 'primary');
@@ -43,7 +80,6 @@ describe('terracotta light theme WCAG AA contrast', () => {
 	const card = blockToken(sel, 'card');
 	const ring = blockToken(sel, 'ring');
 	const destructive = blockToken(sel, 'destructive');
-	const destructiveForeground = blockToken(sel, 'destructive-foreground');
 
 	it('destructive text on the page background meets 4.5:1', () => {
 		expect(contrast(destructive, background)).toBeGreaterThanOrEqual(4.5);
@@ -51,10 +87,6 @@ describe('terracotta light theme WCAG AA contrast', () => {
 
 	it('destructive text on cards meets 4.5:1', () => {
 		expect(contrast(destructive, card)).toBeGreaterThanOrEqual(4.5);
-	});
-
-	it('destructive-foreground text on destructive buttons meets 4.5:1', () => {
-		expect(contrast(destructiveForeground, destructive)).toBeGreaterThanOrEqual(4.5);
 	});
 
 	it('primary text on the page background meets 4.5:1', () => {
@@ -82,7 +114,6 @@ describe('terracotta dark theme WCAG AA contrast', () => {
 	const card = blockToken(sel, 'card');
 	const ring = blockToken(sel, 'ring');
 	const destructive = blockToken(sel, 'destructive');
-	const destructiveForeground = blockToken(sel, 'destructive-foreground');
 
 	it('destructive text on the page background meets 4.5:1', () => {
 		expect(contrast(destructive, background)).toBeGreaterThanOrEqual(4.5);
@@ -90,10 +121,6 @@ describe('terracotta dark theme WCAG AA contrast', () => {
 
 	it('destructive text on cards meets 4.5:1', () => {
 		expect(contrast(destructive, card)).toBeGreaterThanOrEqual(4.5);
-	});
-
-	it('destructive-foreground text on destructive buttons meets 4.5:1', () => {
-		expect(contrast(destructiveForeground, destructive)).toBeGreaterThanOrEqual(4.5);
 	});
 
 	it('primary text on the page background meets 4.5:1', () => {
