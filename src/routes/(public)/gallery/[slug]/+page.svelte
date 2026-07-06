@@ -229,13 +229,20 @@
 								class="variant-tile"
 								class:current={variant.slug === image.slug}
 								aria-current={variant.slug === image.slug ? 'page' : undefined}
+								data-sveltekit-keepfocus
+								data-sveltekit-noscroll
 							>
-								<img
-									src={variant.thumbnailUrl || variant.imageUrl}
-									alt={stripLabel(variant)}
-									class:blurred-thumb={variant.nsfw && !revealed}
-									loading="lazy"
-								/>
+								<span class="variant-thumb">
+									<img
+										src={variant.thumbnailUrl || variant.imageUrl}
+										alt={stripLabel(variant)}
+										class:blurred-thumb={variant.nsfw && !revealed}
+										loading="lazy"
+									/>
+									{#if variant.nsfw && !revealed}
+										<span class="variant-badge">NSFW</span>
+									{/if}
+								</span>
 								<span class="variant-label">{stripLabel(variant)}</span>
 							</a>
 						{/each}
@@ -569,21 +576,46 @@
 		font-size: 11px;
 	}
 
-	.variant-tile img {
+	/* The ring lives on the wrapper (not the img) so overflow:hidden clips the
+	   NSFW blur to the tile instead of letting it bleed over the current ring. */
+	.variant-thumb {
+		position: relative;
+		display: block;
 		width: 84px;
 		height: 84px;
-		object-fit: cover;
 		border-radius: var(--radius-xs);
+		overflow: hidden;
 		border: 2px solid transparent;
 		transition: border-color 0.15s;
 	}
 
-	.variant-tile:hover img {
+	.variant-tile img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.variant-tile:hover .variant-thumb {
 		border-color: var(--border);
 	}
 
-	.variant-tile.current img {
+	.variant-tile.current .variant-thumb {
 		border-color: var(--primary);
+	}
+
+	.variant-badge {
+		position: absolute;
+		top: 4px;
+		right: 4px;
+		background: rgba(0, 0, 0, 0.7);
+		color: white;
+		font-size: 9px;
+		font-weight: 600;
+		letter-spacing: 0.03em;
+		padding: 1px 4px;
+		border-radius: var(--radius-xs);
+		pointer-events: none;
 	}
 
 	.variant-tile.current .variant-label {

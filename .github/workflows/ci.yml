@@ -1,0 +1,33 @@
+name: CI
+
+# The canonical template deliberately skips deploy.yml (no Cloudflare account),
+# so its check/test/build never ran anywhere. This runs them ON the canonical
+# repo. Forks already run the same steps inside deploy.yml, so this job is gated
+# to the canonical repo to avoid duplicating that work on every fork.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    if: github.repository == 'sona-fast/sona'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # match deploy.yml
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run check
+
+      - run: npm test
+
+      - run: npm run build

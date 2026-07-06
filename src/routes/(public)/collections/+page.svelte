@@ -7,12 +7,13 @@
 
 	let { data } = $props();
 
-	const siteName = data.settings?.siteName ?? APP_NAME;
-	const firstCover = data.collections.find(
-		(c) => c.coverImageUrl || c.previewImages.some((p) => !p.nsfw)
+	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
+	const firstCover = $derived(
+		data.collections.find((c) => c.coverImageUrl || c.previewImages.some((p) => !p.nsfw))
 	);
-	const metaImage =
-		firstCover?.coverImageUrl || firstCover?.previewImages.find((p) => !p.nsfw)?.url || null;
+	const metaImage = $derived(
+		firstCover?.coverImageUrl || firstCover?.previewImages.find((p) => !p.nsfw)?.url || null
+	);
 </script>
 
 <Meta

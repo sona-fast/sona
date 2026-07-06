@@ -36,20 +36,19 @@
 		}
 	}
 
-	const ogImage = image ? transformedImage(image, url) : null;
+	// $derived so the tags track prop changes on a same-route nav (e.g. the gallery
+	// detail page swapping images), not just the initial value.
+	const ogImage = $derived(image ? transformedImage(image, url) : null);
 
-	let ogWidth: number | null = null;
-	let ogHeight: number | null = null;
-	if (image && imageWidth && imageHeight) {
+	const ogDimensions = $derived.by(() => {
+		if (!(image && imageWidth && imageHeight)) return { width: null, height: null };
 		if (imageWidth > OG_MAX_WIDTH) {
-			const scale = OG_MAX_WIDTH / imageWidth;
-			ogWidth = OG_MAX_WIDTH;
-			ogHeight = Math.round(imageHeight * scale);
-		} else {
-			ogWidth = imageWidth;
-			ogHeight = imageHeight;
+			return { width: OG_MAX_WIDTH, height: Math.round(imageHeight * (OG_MAX_WIDTH / imageWidth)) };
 		}
-	}
+		return { width: imageWidth, height: imageHeight };
+	});
+	const ogWidth = $derived(ogDimensions.width);
+	const ogHeight = $derived(ogDimensions.height);
 </script>
 
 <svelte:head>
