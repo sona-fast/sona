@@ -48,6 +48,26 @@ export function parseAliases(json: string | null | undefined): ArtistAlias[] {
 	}
 }
 
+/**
+ * True when a local row's name matches one of its linked registry artist's
+ * ALIASES (not its display name) — i.e. the row is an AKA link (#71). Sharing
+ * such a row as an update would propose renaming the registry artist back to
+ * the alias, so callers disable/refuse the share. Deliberately NOT "local name
+ * != registry displayName": a direct-linked artist renamed locally is a
+ * legitimate rename proposal and must stay shareable.
+ */
+export function isLocalNameAliasOf(
+	localName: string,
+	reg: Pick<RegistryArtist, 'displayName' | 'aliases'>
+): boolean {
+	const n = localName.toLowerCase();
+	if (reg.displayName.toLowerCase() === n) return false;
+	// Registry data is untrusted: tolerate malformed alias entries.
+	return (reg.aliases ?? []).some(
+		(al) => typeof al?.displayName === 'string' && al.displayName.toLowerCase() === n
+	);
+}
+
 const TIMEOUT_MS = 5000;
 
 /** Registry features are opt-in: enabled only when a fork API key is configured. */

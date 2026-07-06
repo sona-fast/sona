@@ -12,7 +12,8 @@ import {
 	registrySubmissionsMine,
 	registryGetArtist,
 	artistSocials,
-	parseAliases
+	parseAliases,
+	isLocalNameAliasOf
 } from '$lib/server/registry';
 import { fetchRegistryCatalog } from '$lib/server/registry-import';
 import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
@@ -93,6 +94,11 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// Linked artists that already match the registry catalog — their "submit" is a
 	// no-op and gets disabled. Fails open: an empty/unreachable catalog leaves it {}.
 	const upToDate: Record<number, boolean> = {};
+	// AKA-linked rows (#71): local name matches an ALIAS of the linked registry
+	// artist, so a share would propose renaming that artist back to the alias.
+	// Maps artist id → the registry artist's current display name (for the hint).
+	// Fails open like upToDate: no catalog → {} (the submit action re-checks).
+	const aliasLinked: Record<number, string> = {};
 	if (registryEnabled) {
 		const dismissed = parseDismissed(await getRawSetting(db, DISMISSED_KEY));
 		// A dismissed rejection is acknowledged locally — drop it so it stops showing.
@@ -159,6 +165,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			if (a.globalId) {
 				const entry = byGlobalId.get(a.globalId);
 				if (entry && !artistDiffersFromRegistry(a, entry)) upToDate[a.id] = true;
+				if (entry && isLocalNameAliasOf(a.name, entry)) aliasLinked[a.id] = entry.displayName;
 			} else if (artistInCatalog(a, catalog)) {
 				upToDate[a.id] = true;
 			}
@@ -181,7 +188,8 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		q,
 		registryEnabled,
 		registryStatus,
-		upToDate
+		upToDate,
+		aliasLinked
 	};
 };
 
@@ -236,22 +244,38 @@ export const actions = {
 		const a = await db.select().from(artists).where(eq(artists.id, id)).get();
 		if (!a) return fail(404, { error: 'Artist not found' });
 
-		// Belt-and-braces for #71: a linked artist with no stored registry version
-		// (e.g. linked by the status-poll path before it stamped versions, or an
-		// AKA approval the daily sync can't backfill) would go out as an update
-		// with no baseVersion — which the registry hard-rejects (400). Resolve the
-		// current version now, persist it, and use it; if that fails, refuse the
-		// doomed submit with a clear error instead.
 		let baseVersion = a.registryVersion ?? undefined;
-		if (a.globalId && baseVersion === undefined) {
+		if (a.globalId) {
+			// One registry lookup serves both linked-artist guards below. A null
+			// (offline/unreachable) fails OPEN for the alias check — the moderation
+			// queue is the backstop; an outage must not hard-block normal shares.
 			const reg = await registryGetArtist(renv, a.globalId);
-			if (typeof reg?.version !== 'number') {
-				return fail(502, {
-					error: "Couldn't resolve the artist's registry version — try again or run the artist sync."
+
+			// Alias guard (#71): this row's name matches an ALIAS of the linked
+			// registry artist (an AKA approval kept the old identity's name locally).
+			// Sharing it would semantically propose renaming the survivor back to the
+			// alias — refuse, mirroring the disabled Share button in the UI.
+			if (reg && isLocalNameAliasOf(a.name, reg)) {
+				return fail(400, {
+					error: `This entry is an AKA of ${reg.displayName} in the registry — sharing is disabled so it doesn't propose renaming that artist.`
 				});
 			}
-			baseVersion = reg.version;
-			await db.update(artists).set({ registryVersion: reg.version }).where(eq(artists.id, a.id));
+
+			// Belt-and-braces for #71: a linked artist with no stored registry version
+			// (e.g. linked by the status-poll path before it stamped versions, or an
+			// AKA approval the daily sync can't backfill) would go out as an update
+			// with no baseVersion — which the registry hard-rejects (400). Resolve the
+			// current version now, persist it, and use it; if that fails, refuse the
+			// doomed submit with a clear error instead.
+			if (baseVersion === undefined) {
+				if (typeof reg?.version !== 'number') {
+					return fail(502, {
+						error: "Couldn't resolve the artist's registry version — try again or run the artist sync."
+					});
+				}
+				baseVersion = reg.version;
+				await db.update(artists).set({ registryVersion: reg.version }).where(eq(artists.id, a.id));
+			}
 		}
 
 		// Report this fork's own host so the registry can self-heal a null key label
