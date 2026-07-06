@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 export const artists = sqliteTable('artists', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
@@ -63,7 +63,11 @@ export const images = sqliteTable('images', {
 	}),
 	variantLabel: text('variant_label'),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
-});
+}, (table) => [
+	// Public gallery filters and admin views join/filter on artist_id constantly;
+	// without this every lookup scans the whole images table.
+	index('images_artist_id_idx').on(table.artistId)
+]);
 
 export const siteSettings = sqliteTable('site_settings', {
 	key: text('key').primaryKey(),
