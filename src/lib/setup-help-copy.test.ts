@@ -46,4 +46,10 @@ describe('featured-character deep link (sona#35)', () => {
 			'href="/admin/settings#primary-character"'
 		);
 	});
+
+	it('note link keeps WCAG-AA contrast on the light admin theme', () => {
+		expect(source('src/routes/admin/fursuit/+page.svelte')).toContain(
+			":global([data-theme='light']) .unlocks a { color: #8A5A00; }"
+		);
+	});
 });

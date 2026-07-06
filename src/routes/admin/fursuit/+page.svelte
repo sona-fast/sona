@@ -310,6 +310,9 @@
 	}
 	.unlocks strong { color: var(--foreground); font-weight: 600; }
 	.unlocks a { color: var(--primary); font-weight: 600; text-decoration: underline; }
+	/* Amber #FF8400 is ~2.1:1 on the light .unlocks panel; darken to #8A5A00
+	   for WCAG AA, matching the settings page's light-theme link fix. */
+	:global([data-theme='light']) .unlocks a { color: #8A5A00; }
 	.summary { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
 	.muted { font-size: 12px; color: var(--muted-foreground); margin-bottom: 12px; }
 	.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; flex-wrap: wrap; }
