@@ -323,9 +323,9 @@ input, select, textarea {
 
 .btn-destructive {
 	background-color: var(--destructive);
-	/* Themes whose --foreground fails AA on the destructive fill override the
-	   text via --destructive-foreground (see the terracotta blocks). */
-	color: var(--destructive-foreground, var(--foreground));
+	/* Every theme block defines --destructive-foreground; the AA pairing (and
+	   this rule using the token) is guarded by theme-contrast.test.ts. */
+	color: var(--destructive-foreground);
 }
 
 /* Large button variant — matches Button/Large/* (height 48, padding 12 24) */
