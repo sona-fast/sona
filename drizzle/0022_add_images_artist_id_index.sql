@@ -1,0 +1,1 @@
+CREATE INDEX `images_artist_id_idx` ON `images` (`artist_id`);
