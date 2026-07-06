@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { artists, images, stickers, stickerPacks } from '$lib/server/db/schema';
-import { eq, sql, like } from 'drizzle-orm';
+import { eq, sql, like, or } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { sanitizeText } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
@@ -30,9 +30,19 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const page = Math.max(1, Number(url.searchParams.get('page') || 1));
 	const perPage = 25;
 	// Server-side name search so it matches across the WHOLE set, not just the
-	// current page. SQLite LIKE is case-insensitive for ASCII.
+	// current page. SQLite LIKE is case-insensitive for ASCII. Also match former
+	// (AKA) names the row displays as "formerly …" — the aliases JSON array's
+	// displayName fields, not the raw blob (a bare LIKE would false-positive on
+	// URLs/keys inside the JSON). json_valid guards the malformed/NULL rows that
+	// parseAliases tolerates, so json_each never throws for the whole query.
 	const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
-	const whereClause = q ? like(artists.name, `%${q}%`) : undefined;
+	const like_ = `%${q}%`;
+	const whereClause = q
+		? or(
+				like(artists.name, like_),
+				sql`(${artists.aliases} IS NOT NULL AND json_valid(${artists.aliases}) AND EXISTS (SELECT 1 FROM json_each(${artists.aliases}) WHERE json_extract(value, '$.displayName') LIKE ${like_}))`
+			)
+		: undefined;
 
 	const totalResult = await db
 		.select({ count: sql<number>`COUNT(*)` })

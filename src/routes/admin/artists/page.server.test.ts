@@ -64,8 +64,10 @@ function makeDb() {
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
 
-function loadEvent(platform: App.Platform) {
-	return { platform, url: new URL('http://localhost/admin/artists') } as never;
+function loadEvent(platform: App.Platform, q?: string) {
+	const url = new URL('http://localhost/admin/artists');
+	if (q !== undefined) url.searchParams.set('q', q);
+	return { platform, url } as never;
 }
 
 // The registry itself must never be hit from tests: fail every fetch so the
@@ -119,6 +121,57 @@ describe('admin artists load — former names (aliases)', () => {
 
 		const result = (await load(loadEvent(platform))) as { artists: Array<{ formerly: string[] }> };
 		expect(result.artists.map((a) => a.formerly)).toEqual([[], []]);
+	});
+});
+
+describe('admin artists load — server-side search matches AKA names', () => {
+	// Zaps was formerly "Boltie"; the alias JSON also carries a social URL we must
+	// NOT match on. Nova is an unrelated artist used to prove the search narrows.
+	async function seedRenamedArtist(db: ReturnType<typeof makeDb>['db']) {
+		await db.insert(schema.artists).values({
+			name: 'Zaps',
+			aliases: JSON.stringify([{ displayName: 'Boltie', socials: { twitter: 'https://x.com/boltie' } }])
+		});
+		await db.insert(schema.artists).values({ name: 'Nova' });
+	}
+
+	it('finds an artist by a former (alias) display name', async () => {
+		const { db, platform } = makeDb();
+		await seedRenamedArtist(db);
+
+		const result = (await load(loadEvent(platform, 'boltie'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists.map((a) => a.name)).toEqual(['Zaps']);
+		// Count query shares the widened where — it must reflect the alias hit too.
+		expect(result.total).toBe(1);
+	});
+
+	it('does NOT match on a URL buried inside the aliases JSON (precision)', async () => {
+		const { db, platform } = makeDb();
+		await seedRenamedArtist(db);
+
+		const result = (await load(loadEvent(platform, 'x.com'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists).toHaveLength(0);
+		expect(result.total).toBe(0);
+	});
+
+	it('still matches on the current name, and tolerates NULL/malformed aliases', async () => {
+		const { db, platform } = makeDb();
+		await seedRenamedArtist(db);
+		// A malformed-JSON aliases row must not make json_each throw for the query.
+		await db.insert(schema.artists).values({ name: 'BadJson', aliases: 'not-json{' });
+
+		const result = (await load(loadEvent(platform, 'zaps'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists.map((a) => a.name)).toEqual(['Zaps']);
+		expect(result.total).toBe(1);
 	});
 });
 
