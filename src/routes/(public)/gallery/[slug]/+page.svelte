@@ -14,9 +14,18 @@
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
-	const { image, tags } = data;
+	let image = $derived(data.image);
+	let tags = $derived(data.tags);
 
-	let revealed = $state(!image.nsfw);
+	// Reveal resets whenever the shown image changes — variant-strip tiles are
+	// same-route navs that reuse this component, so an NSFW sibling must not
+	// inherit a previous image's reveal. $effect.pre clears it before the DOM
+	// updates, so the incoming image never flashes unblurred.
+	let revealed = $state(false);
+	$effect.pre(() => {
+		image.id;
+		revealed = false;
+	});
 	let copied = $state(false);
 
 	// Strip tile caption: the group parent reads "Original"; unlabeled variants
@@ -53,14 +62,14 @@
 	}
 
 
-	const siteName = data.settings?.siteName ?? APP_NAME;
-	const canonicalUrl = `${page.url.origin}${page.url.pathname}`;
-	const metaTitle = `${image.title} — ${siteName}`;
-	const tagSuffix = tags.length > 0 ? ` · ${tags.slice(0, 6).join(', ')}` : '';
-	const metaDescription = `Commission by ${image.artistName ?? 'unknown artist'}${tagSuffix}`;
-	const oembedUrl = `${page.url.origin}/api/oembed?url=${encodeURIComponent(canonicalUrl)}`;
+	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
+	const canonicalUrl = $derived(`${page.url.origin}${page.url.pathname}`);
+	const metaTitle = $derived(`${image.title} — ${siteName}`);
+	const tagSuffix = $derived(tags.length > 0 ? ` · ${tags.slice(0, 6).join(', ')}` : '');
+	const metaDescription = $derived(`Commission by ${image.artistName ?? 'unknown artist'}${tagSuffix}`);
+	const oembedUrl = $derived(`${page.url.origin}/api/oembed?url=${encodeURIComponent(canonicalUrl)}`);
 
-	const socialLinks = [
+	const socialLinks = $derived([
 		{ url: image.artistTwitter, icon: TwitterIcon, label: 'Twitter' },
 		{ url: image.artistBluesky, icon: BlueskyIcon, label: 'Bluesky' },
 		{ url: image.artistTelegram, icon: TelegramIcon, label: 'Telegram' },
@@ -68,7 +77,7 @@
 		{ url: image.artistDeviantArt, icon: DeviantArtIcon, label: 'DeviantArt' },
 		{ url: image.artistPatreon, icon: PatreonIcon, label: 'Patreon' },
 		{ url: image.artistInstagram, icon: InstagramIcon, label: 'Instagram' },
-	].filter((l) => l.url);
+	].filter((l) => l.url));
 </script>
 
 <Meta
