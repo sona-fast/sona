@@ -81,6 +81,160 @@ export function ensureUrlScheme(value: string): string {
 	return 'https://' + trimmed;
 }
 
+/**
+ * Extracts the D1 `database_id` from `wrangler d1 create` output. Current
+ * wrangler prints a JSONC binding block (`"database_id": "..."`); older versions
+ * printed a TOML one (`database_id = "..."`). Match both so auto-detect keeps
+ * working across wrangler versions instead of falling back to the paste prompt.
+ * Returns '' when no id is found.
+ */
+export function parseDatabaseId(output: string): string {
+	return (output.match(/"?database_id"?\s*[:=]\s*"([0-9a-fA-F-]+)"/) || [])[1] ?? '';
+}
+
+/**
+ * Derives `owner/repo` from a git `origin` URL (ssh or https form) so `gh`
+ * commands can be pinned with `-R owner/repo`. Every fork has two remotes
+ * (origin + upstream sona), so a bare `gh secret set` errors with "multiple
+ * remotes detected"; passing `-R` fixes it. Returns null when the URL isn't a
+ * recognizable GitHub remote.
+ */
+export function deriveRepoSlug(originUrl: string): string | null {
+	const url = originUrl.trim();
+	if (!url) return null;
+	// Matches both git@github.com:owner/repo(.git), ssh://git@github.com/owner/repo,
+	// and https://github.com/owner/repo(.git), with or without a trailing slash.
+	const m = url.match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+	return m ? `${m[1]}/${m[2]}` : null;
+}
+
+export interface PagesConfigInput {
+	/** D1 binding name (DB) and the created database's id. */
+	dbBinding: string;
+	dbId: string;
+	/** R2 binding name (IMAGES) and bucket; omit `bucket` to skip the R2 binding. */
+	r2Binding: string;
+	bucket?: string;
+	/** Plain-text environment variables to attach (e.g. FURTRACK_MODE). */
+	envVars: Record<string, string>;
+}
+
+/**
+ * Builds the `PATCH /accounts/{id}/pages/projects/{project}` body that attaches
+ * the D1/R2 bindings + plain-text vars to the Pages project's PRODUCTION config.
+ * setup writes these only to the gitignored `wrangler.toml`, so a CI-only deploy
+ * (which never sees that file) ships without them; this wires them onto the
+ * project itself. The PATCH merges per key, so unrelated project config is
+ * untouched. The R2 binding is omitted when no bucket exists (R2 not enabled).
+ */
+export function buildPagesConfigPayload(input: PagesConfigInput): Record<string, unknown> {
+	const env_vars: Record<string, { type: string; value: string }> = {};
+	for (const [name, value] of Object.entries(input.envVars)) {
+		env_vars[name] = { type: 'plain_text', value };
+	}
+	const production: Record<string, unknown> = {
+		d1_databases: { [input.dbBinding]: { id: input.dbId } },
+		env_vars
+	};
+	if (input.bucket) production.r2_buckets = { [input.r2Binding]: { name: input.bucket } };
+	return { deployment_configs: { production } };
+}
+
+/**
+ * True when `wrangler whoami` output indicates the credentials resolve. Used by
+ * the setup preflight to fail early with an actionable message rather than
+ * midway through provisioning. Checks the "You are logged in" success marker
+ * FIRST: a User API Token lacking User → User Details → Read still authenticates
+ * (exit 0) but prints "Unable to retrieve email for this user" — that token
+ * provisions fine, so it must not be read as a failure. Every real wrangler
+ * success banner starts with "You are logged in", so anything that misses that
+ * marker is treated as unresolved — an expired OAuth login whose refresh fails
+ * prints "✘ [ERROR] Not logged in." and must return false, not slip through.
+ */
+export function tokenResolves(whoamiOutput: string): boolean {
+	if (/you are logged in/i.test(whoamiOutput)) return true;
+	return false;
+}
+
+/**
+ * Strips scheme and path from a domain input, leaving the bare host (lowercased).
+ * Used to look up the Cloudflare zone for the DNS-scope preflight and the image
+ * transformations check. Empty input stays empty.
+ */
+export function hostFromDomain(domain: string): string {
+	return domain
+		.trim()
+		.replace(/^https?:\/\//i, '')
+		.replace(/\/.*$/, '')
+		.toLowerCase();
+}
+
+/**
+ * True when the custom-domain DNS-scope probe means setup must abort: the token
+ * can't list DNS records for the zone (401/403), so it can't write the apex
+ * CNAME later and the domain would stick pending with a 522. Any other outcome
+ * (ok, or a transient 5xx / network error with status 0) does NOT block setup.
+ */
+export function dnsProbeBlocksSetup(probe: { ok: boolean; status: number }): boolean {
+	return !probe.ok && (probe.status === 401 || probe.status === 403);
+}
+
+/**
+ * Classifies the Image Transformations preflight outcome from the zone-setting
+ * GET and (when it was off) the enabling PATCH's success: `true` = on (already
+ * on, or PATCHed on), `false` = still off (PATCH failed), `null` = unknown (the
+ * GET failed, e.g. the token lacks Zone Settings·Read). `patchOk` is ignored
+ * unless the GET succeeded and reported the setting as off.
+ */
+export function imageResizingOutcome(
+	getRes: { ok: boolean; result?: unknown },
+	patchOk: boolean
+): boolean | null {
+	if (!getRes.ok) return null;
+	if ((getRes.result as { value?: string } | undefined)?.value === 'on') return true;
+	return patchOk;
+}
+
+export interface CfApiResult {
+	ok: boolean;
+	status: number;
+	result?: unknown;
+	errors?: unknown;
+}
+
+/**
+ * Minimal Cloudflare REST caller for the few steps wrangler can't do (attaching
+ * Pages project bindings, the zone/DNS + image-transformations preflights).
+ * Returns ok=false with the parsed errors so callers can print an actionable
+ * fallback rather than throwing. `ok` requires BOTH an HTTP-ok response and
+ * `success !== false` in the body, so a 200 with `"success": false` (e.g. a
+ * PATCH the token wasn't scoped for) is correctly reported as a failure rather
+ * than a spurious "✔ attached bindings". A thrown fetch (network error) is
+ * `{ ok: false, status: 0 }`. Lives here (not setup.ts) so it is unit-testable —
+ * setup.ts self-executes and can't be imported.
+ */
+export async function cfApi(
+	apiToken: string,
+	path: string,
+	init: { method?: string; body?: unknown } = {}
+): Promise<CfApiResult> {
+	try {
+		const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+			method: init.method ?? 'GET',
+			headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+			body: init.body ? JSON.stringify(init.body) : undefined
+		});
+		const json = (await res.json().catch(() => ({}))) as {
+			success?: boolean;
+			result?: unknown;
+			errors?: unknown;
+		};
+		return { ok: res.ok && json.success !== false, status: res.status, result: json.result, errors: json.errors };
+	} catch (e) {
+		return { ok: false, status: 0, errors: e };
+	}
+}
+
 export interface GhEligibilityInput {
 	/** `gh` binary is on PATH. */
 	ghInstalled: boolean;
