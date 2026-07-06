@@ -59,6 +59,9 @@ vite.config.ts.timestamp-*
 # Claude Code local config
 .claude/
 
+# Ship review artifacts (screenshots, gate output — not source)
+.ship/
+
 # Raw sticker downloads from dev/import (re-downloadable; not source)
 sticker-assets/
 

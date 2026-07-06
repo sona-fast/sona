@@ -60,10 +60,18 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 
 	const build = async () => {
 		// Load artists (with former names) up front — used both to resolve the artist
-		// filter and to build the combobox options below.
+		// filter and to build the combobox options below. Restrict to artists who have
+		// at least one image that actually shows in the grid (published, non-variant —
+		// mirrors the card predicate below): unpublished-only, sticker-only, and
+		// imported-but-unused artists would otherwise be offered as options that can
+		// only ever yield an empty grid. Alias resolution narrows with it — resolving a
+		// former name to an artist with no live work would land on an empty grid too.
 		const allArtistsRaw = await db
 			.select({ name: artists.name, aliases: artists.aliases })
 			.from(artists)
+			.where(
+				sql`EXISTS (SELECT 1 FROM images WHERE images.artist_id = ${artists.id} AND images.published = 1 AND images.parent_image_id IS NULL)`
+			)
 			.orderBy(artists.name);
 
 		// Resolve the artist filter: a ?artist=X that isn't a current name may be a
@@ -71,16 +79,28 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// flag it so the page can show the "formerly" pointer.
 		let effectiveArtist = artistFilter;
 		let formerName: { searched: string; current: string } | null = null;
-		if (artistFilter && !allArtistsRaw.some((a) => a.name.toLowerCase() === artistFilter.toLowerCase())) {
+		if (artistFilter) {
 			const q = artistFilter.toLowerCase();
-			// Only resolve when EXACTLY ONE artist claims this former name — an
-			// ambiguous former name must not silently credit the wrong artist.
-			const viaAlias = allArtistsRaw.filter((a) =>
-				parseAliases(a.aliases).some((al) => al.displayName.toLowerCase() === q)
-			);
-			if (viaAlias.length === 1) {
-				effectiveArtist = viaAlias[0].name;
-				formerName = { searched: artistFilter, current: viaAlias[0].name };
+			// A live current name needs no resolution — go straight to the grid and
+			// skip the extra unfiltered read on this hot path.
+			if (!allArtistsRaw.some((a) => a.name.toLowerCase() === q)) {
+				// The "is this a current name?" check runs against the UNFILTERED artist
+				// set, on purpose: a real current name must never be hijacked into
+				// former-name resolution (and shown under a false "formerly" banner) just
+				// because that artist has no live work. The combobox options and the
+				// alias-candidate set below stay LIVE-ONLY (allArtistsRaw).
+				const allNames = await db.select({ name: artists.name }).from(artists);
+				if (!allNames.some((a) => a.name.toLowerCase() === q)) {
+					// Only resolve when EXACTLY ONE live artist claims this former name — an
+					// ambiguous former name must not silently credit the wrong artist.
+					const viaAlias = allArtistsRaw.filter((a) =>
+						parseAliases(a.aliases).some((al) => al.displayName.toLowerCase() === q)
+					);
+					if (viaAlias.length === 1) {
+						effectiveArtist = viaAlias[0].name;
+						formerName = { searched: artistFilter, current: viaAlias[0].name };
+					}
+				}
 			}
 		}
 
