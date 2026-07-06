@@ -2,6 +2,7 @@ import { getReadDb } from '$lib/server/db';
 import { images, artists, imageTags, tags } from '$lib/server/db/schema';
 import { eq, desc, and, notInArray, inArray, isNull, sql } from 'drizzle-orm';
 import { getSettings, settingsFallback } from '$lib/server/settings';
+import { probeArtContent, shareHasContent } from '$lib/server/presence';
 import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
 
@@ -20,7 +21,24 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 
 	// The threePath splash is a standalone hub page — no image queries needed.
 	if (settings.landingLayout === 'threePath') {
-		return { settings, recentImages: [], mosaicImageUrls: [], host: url.host };
+		// Presence flags for the /art and /share cards (#42): hide a card whose
+		// target page would 404, reusing those pages' presence predicates
+		// (/connect has no gate, so its card is always shown). Failure mode is
+		// the OPPOSITE of the /share 404 gate: a probe that times out or throws
+		// fails OPEN (card shown) — a dead card link during a transient D1 blip
+		// beats hiding sections of a healthy homepage. withTimeout falls back on
+		// rejection as well as timeout.
+		const [art, share] = await Promise.all([
+			withTimeout(probeArtContent(db), READ_TIMEOUT_MS, true),
+			withTimeout(shareHasContent(db), READ_TIMEOUT_MS, true)
+		]);
+		return {
+			settings,
+			recentImages: [],
+			mosaicImageUrls: [],
+			host: url.host,
+			pathPresence: { art, share }
+		};
 	}
 
 	const RECENT_COUNT = 8;
@@ -119,6 +137,8 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		recentImages: imagesWithTags,
 		mosaicImageUrls,
 		settings,
-		host: url.host
+		host: url.host,
+		// The mosaic branch renders no path cards; true keeps the type uniform.
+		pathPresence: { art: true, share: true }
 	};
 };
