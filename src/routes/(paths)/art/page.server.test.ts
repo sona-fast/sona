@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
-import { characters, images, artists, tags, imageTags } from '$lib/server/db/schema';
+import { characters, images, artists, tags, imageTags, siteSettings } from '$lib/server/db/schema';
 import { clearSettingsCache } from '$lib/server/settings';
 import { load } from './+page.server';
 
@@ -109,5 +109,88 @@ describe('art load — refSheet precedence', () => {
 
 		const data = (await load({ platform } as never)) as { refSheet: { slug: string } | null };
 		expect(data.refSheet?.slug).toBe('art-6');
+	});
+});
+
+describe('art load — content-presence gate (#42)', () => {
+	it('404s when every content source is absent', async () => {
+		const { platform } = makeDb();
+		await expect(load({ platform } as never)).rejects.toMatchObject({ status: 404 });
+	});
+
+	it('loads with only a reference-tagged image', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+		await db.insert(images).values({ id: 1, title: 'Ref', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, nsfw: true, createdAt: '2026-01-01T00:00:00.000Z' });
+		await db.insert(imageTags).values({ imageId: 1, tagId: 1 });
+
+		const data = (await load({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(data.refSheet?.slug).toBe('art-1');
+	});
+
+	it('loads with only an explicitly designated reference image', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(images).values({ id: 1, title: 'Ref', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, nsfw: true, createdAt: '2026-01-01T00:00:00.000Z' });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 1 });
+
+		const data = (await load({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(data.refSheet?.slug).toBe('art-1');
+	});
+
+	it('loads with only recent art (published, untagged)', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, createdAt: '2026-01-01T00:00:00.000Z' });
+
+		const data = (await load({ platform } as never)) as { recentArt: unknown[] };
+		expect(data.recentArt).toHaveLength(1);
+	});
+
+	it('loads with only sheet details (species setting)', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'sonaSpecies', value: 'Dragon' });
+
+		const data = (await load({ platform } as never)) as { sona: { species: string } };
+		expect(data.sona.species).toBe('Dragon');
+	});
+
+	it('loads with only color swatches', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'sonaColors', value: '[{"name":"Fur","hex":"#aabbcc"}]' });
+
+		const data = (await load({ platform } as never)) as { sona: { colors: unknown[] } };
+		expect(data.sona.colors).toHaveLength(1);
+	});
+
+	it('loads with only do/don\'t lines', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'sonaDonts', value: 'No mecha' });
+
+		const data = (await load({ platform } as never)) as { sona: { donts: string[] } };
+		expect(data.sona.donts).toEqual(['No mecha']);
+	});
+
+	it('loads when fully populated', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+		await db.insert(images).values({ id: 1, title: 'Ref', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, createdAt: '2026-01-01T00:00:00.000Z' });
+		await db.insert(imageTags).values({ imageId: 1, tagId: 1 });
+		await db.insert(siteSettings).values([
+			{ key: 'sonaSpecies', value: 'Dragon' },
+			{ key: 'sonaDos', value: 'Big wings' }
+		]);
+
+		const data = (await load({ platform } as never)) as {
+			refSheet: { slug: string } | null;
+			recentArt: unknown[];
+			sona: { species: string; dos: string[] };
+		};
+		expect(data.refSheet?.slug).toBe('art-1');
+		expect(data.recentArt).toHaveLength(1);
+		expect(data.sona.species).toBe('Dragon');
+		expect(data.sona.dos).toEqual(['Big wings']);
 	});
 });

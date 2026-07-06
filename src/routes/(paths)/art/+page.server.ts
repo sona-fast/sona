@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { images, artists, imageTags, tags, characters } from '$lib/server/db/schema';
 import { getSettings, parseSonaColors, parseLines } from '$lib/server/settings';
@@ -60,16 +61,27 @@ export const load: PageServerLoad = async ({ platform }) => {
 		.orderBy(desc(images.createdAt))
 		.limit(3);
 
-	return {
-		refSheet,
-		recentArt,
-		sona: {
-			species: settings.sonaSpecies,
-			build: settings.sonaBuild,
-			keyFeatures: settings.sonaKeyFeatures,
-			colors: parseSonaColors(settings.sonaColors),
-			dos: parseLines(settings.sonaDos),
-			donts: parseLines(settings.sonaDonts)
-		}
+	const sona = {
+		species: settings.sonaSpecies,
+		build: settings.sonaBuild,
+		keyFeatures: settings.sonaKeyFeatures,
+		colors: parseSonaColors(settings.sonaColors),
+		dos: parseLines(settings.sonaDos),
+		donts: parseLines(settings.sonaDonts)
 	};
+
+	// Content-presence gate (#42): 404 only when every content source this page
+	// renders is absent — no ref sheet, no recent art, and no sona details at
+	// all. Any single source keeps the page URL-reachable (deep-link use case:
+	// mosaic forks sharing their ref sheet).
+	const hasContent =
+		refSheet !== null ||
+		recentArt.length > 0 ||
+		Boolean(sona.species || sona.build || sona.keyFeatures) ||
+		sona.colors.length > 0 ||
+		sona.dos.length > 0 ||
+		sona.donts.length > 0;
+	if (!hasContent) error(404, 'Not found');
+
+	return { refSheet, recentArt, sona };
 };
