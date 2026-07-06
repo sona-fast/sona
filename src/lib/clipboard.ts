@@ -15,15 +15,29 @@ const IMAGE_EXT: Record<string, string> = {
 	'image/webp': 'webp'
 };
 
+/** Input types whose paste should stay a text paste, never an image hijack. */
+const TEXT_INPUT_TYPES = new Set([
+	'text',
+	'search',
+	'url',
+	'email',
+	'password',
+	'tel',
+	'number'
+]);
+
 /** File extension for an image mime type, falling back to its subtype. */
 export function extFromType(type: string): string {
 	return IMAGE_EXT[type] ?? (type.split('/')[1] || 'png');
 }
 
 /**
- * Browsers name pasted bitmaps generically ("image.png"), which collides on the
- * duplicate check and reads poorly in the queue. Only those get renamed; a real
- * filename pasted from a file manager is kept.
+ * Browsers name pasted bitmaps generically ("image.png"). We give those a unique
+ * timestamped name so the queue reads clearly and repeated pastes don't clash.
+ * Tradeoff: a unique name means the fileName+size duplicate check can no longer
+ * recognize a paste as a re-upload of existing content — pasted images always
+ * read as new. A real filename (pasted from a file manager) is kept so its
+ * dedupe still works.
  */
 export function needsRename(name: string): boolean {
 	return !name || /^image\.\w+$/i.test(name);
@@ -44,35 +58,46 @@ export function extractImageFiles(
 	items: Iterable<ClipboardItemLike>,
 	now: () => Date = () => new Date()
 ): File[] {
-	const imageItems = Array.from(items).filter(
-		(it) => it.kind === 'file' && it.type.startsWith('image/')
-	);
 	const date = now();
-	const files: File[] = [];
-	imageItems.forEach((it, i) => {
-		const file = it.getAsFile();
-		if (!file) return;
-		if (needsRename(file.name)) {
-			const name = pastedFileName(date, extFromType(file.type), imageItems.length > 1 ? i + 1 : undefined);
-			files.push(new File([file], name, { type: file.type }));
-		} else {
-			files.push(file);
-		}
+	const files = Array.from(items)
+		.filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+		.map((it) => it.getAsFile())
+		.filter((f): f is File => f !== null);
+	// The -N suffix numbers only the renamed files, so a lone generic file next
+	// to a real-named one stays unsuffixed rather than jumping to "-2".
+	const renameCount = files.filter((f) => needsRename(f.name)).length;
+	let renamed = 0;
+	return files.map((f) => {
+		if (!needsRename(f.name)) return f;
+		renamed += 1;
+		const name = pastedFileName(date, extFromType(f.type), renameCount > 1 ? renamed : undefined);
+		return new File([f], name, { type: f.type });
 	});
-	return files;
 }
 
 /**
- * Whether a paste carrying image(s) should be routed to the uploader. When the
- * cursor is in a text field and the clipboard also has text, we defer to the
- * normal text paste rather than hijacking it.
+ * Whether an element receiving focus accepts a text paste (TEXTAREA,
+ * contenteditable, or a text-like INPUT). Checkboxes/radios/selects/buttons
+ * do not, so an image paste while one is focused should still upload.
  */
-export function shouldHandleImagePaste(o: {
-	imageCount: number;
-	hasText: boolean;
-	focusInEditable: boolean;
+export function isTextEditable(el: {
+	tagName: string;
+	type?: string;
+	isContentEditable?: boolean;
 }): boolean {
+	if (el.isContentEditable) return true;
+	if (el.tagName === 'TEXTAREA') return true;
+	if (el.tagName === 'INPUT') return TEXT_INPUT_TYPES.has(el.type ?? 'text');
+	return false;
+}
+
+/**
+ * Whether a paste carrying image(s) should be routed to the uploader. We never
+ * hijack a paste while a text-editable field is focused — the user pastes an
+ * image by clicking off the field first (standard editor behavior).
+ */
+export function shouldHandleImagePaste(o: { imageCount: number; focusInEditable: boolean }): boolean {
 	if (o.imageCount === 0) return false;
-	if (o.focusInEditable && o.hasText) return false;
+	if (o.focusInEditable) return false;
 	return true;
 }

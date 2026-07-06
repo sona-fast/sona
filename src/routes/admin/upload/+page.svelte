@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { CloudUpload, Check, Loader2, Plus, X } from 'lucide-svelte';
+	import { tick } from 'svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
-	import { extractImageFiles, shouldHandleImagePaste } from '$lib/clipboard';
+	import { extractImageFiles, isTextEditable, shouldHandleImagePaste } from '$lib/clipboard';
+	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
@@ -16,6 +18,7 @@
 	let showNewArtist = $state(false);
 	let dragOver = $state(false);
 	let saving = $state(false);
+	let announce = $state('');
 	let fileInput: HTMLInputElement;
 
 	type Tile = {
@@ -89,9 +92,20 @@
 	}
 
 	async function handleFiles(files: FileList | File[]) {
+		const incoming = Array.from(files);
 		const room = data.maxVariantSet - tiles.length;
-		const fileArray = Array.from(files).slice(0, room);
+		const fileArray = incoming.slice(0, room);
+		const skipped = incoming.length - fileArray.length;
+		if (skipped > 0) {
+			toast.info(m.admin_upload_over_limit({ count: skipped, max: data.maxVariantSet }));
+		}
 		if (fileArray.length === 0) return;
+
+		// Reset then set on the next tick so identical consecutive adds still
+		// re-announce to screen readers via the aria-live region.
+		announce = '';
+		await tick();
+		announce = m.admin_upload_images_added({ count: fileArray.length });
 
 		for (const file of fileArray) {
 			const dims = await getImageDimensions(file);
@@ -148,22 +162,19 @@
 	}
 
 	function isEditable(el: EventTarget | null): boolean {
-		if (!(el instanceof HTMLElement)) return false;
-		const tag = el.tagName;
-		return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+		return el instanceof HTMLElement && isTextEditable(el);
 	}
 
 	function handlePaste(e: ClipboardEvent) {
+		// The New Artist dialog owns the clipboard while open (its name field
+		// autofocuses); don't create tiles behind the modal.
+		if (showNewArtist) return;
 		const dt = e.clipboardData;
 		if (!dt) return;
 		const files = extractImageFiles(dt.items);
-		const hasText = Array.from(dt.items).some(
-			(it) => it.kind === 'string' && it.type.startsWith('text/')
-		);
 		if (
 			!shouldHandleImagePaste({
 				imageCount: files.length,
-				hasText,
 				focusInEditable: isEditable(e.target)
 			})
 		)
@@ -180,6 +191,8 @@
 </script>
 
 <svelte:window onpaste={handlePaste} />
+
+<div class="sr-only" aria-live="polite">{announce}</div>
 
 <div class="page-header">
 	<h1>{m.admin_upload_title()}</h1>
@@ -421,6 +434,18 @@
 {/if}
 
 <style>
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
 	.page-header {
 		margin-bottom: 24px;
 	}

@@ -4,6 +4,7 @@ import {
 	needsRename,
 	pastedFileName,
 	extractImageFiles,
+	isTextEditable,
 	shouldHandleImagePaste,
 	type ClipboardItemLike
 } from './clipboard';
@@ -88,19 +89,48 @@ describe('extractImageFiles', () => {
 		const files = extractImageFiles([item('file', 'image/png', null)], clock);
 		expect(files).toHaveLength(0);
 	});
+
+	it('numbers only the renamed files, leaving a real name unsuffixed', () => {
+		const real = new File(['a'], 'my-art.png', { type: 'image/png' });
+		const generic = new File(['b'], 'image.png', { type: 'image/png' });
+		const files = extractImageFiles(
+			[item('file', 'image/png', real), item('file', 'image/png', generic)],
+			clock
+		);
+		// One real + one generic: the generic is the only rename, so no "-N".
+		expect(files.map((f) => f.name)).toEqual(['my-art.png', 'pasted-20260706-090807.png']);
+	});
+});
+
+describe('isTextEditable', () => {
+	it('accepts textareas, contenteditable, and text-like inputs', () => {
+		expect(isTextEditable({ tagName: 'TEXTAREA' })).toBe(true);
+		expect(isTextEditable({ tagName: 'DIV', isContentEditable: true })).toBe(true);
+		expect(isTextEditable({ tagName: 'INPUT', type: 'text' })).toBe(true);
+		expect(isTextEditable({ tagName: 'INPUT', type: 'email' })).toBe(true);
+		expect(isTextEditable({ tagName: 'INPUT' })).toBe(true); // default type is text
+	});
+
+	it('rejects non-text controls so a paste there still uploads', () => {
+		expect(isTextEditable({ tagName: 'INPUT', type: 'checkbox' })).toBe(false);
+		expect(isTextEditable({ tagName: 'INPUT', type: 'radio' })).toBe(false);
+		expect(isTextEditable({ tagName: 'INPUT', type: 'file' })).toBe(false);
+		expect(isTextEditable({ tagName: 'SELECT' })).toBe(false);
+		expect(isTextEditable({ tagName: 'BUTTON' })).toBe(false);
+		expect(isTextEditable({ tagName: 'DIV' })).toBe(false);
+	});
 });
 
 describe('shouldHandleImagePaste', () => {
-	it('ignores pastes with no image', () => {
-		expect(shouldHandleImagePaste({ imageCount: 0, hasText: false, focusInEditable: false })).toBe(false);
+	// Post-MF1 the decision depends on two inputs only (hasText was dropped):
+	// handle iff there is an image AND focus is not in a text-editable field.
+	it('never handles a paste with no image', () => {
+		expect(shouldHandleImagePaste({ imageCount: 0, focusInEditable: false })).toBe(false);
+		expect(shouldHandleImagePaste({ imageCount: 0, focusInEditable: true })).toBe(false);
 	});
 
-	it('handles an image paste anywhere when there is no competing text', () => {
-		expect(shouldHandleImagePaste({ imageCount: 1, hasText: false, focusInEditable: true })).toBe(true);
-		expect(shouldHandleImagePaste({ imageCount: 1, hasText: true, focusInEditable: false })).toBe(true);
-	});
-
-	it('defers to text paste inside an input when both are present', () => {
-		expect(shouldHandleImagePaste({ imageCount: 1, hasText: true, focusInEditable: true })).toBe(false);
+	it('handles an image paste only when focus is not in an editable field', () => {
+		expect(shouldHandleImagePaste({ imageCount: 1, focusInEditable: false })).toBe(true);
+		expect(shouldHandleImagePaste({ imageCount: 1, focusInEditable: true })).toBe(false);
 	});
 });
