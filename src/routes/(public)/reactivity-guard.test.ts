@@ -29,20 +29,32 @@ const pages = readdirSync(routesDir, { recursive: true })
 	.filter((p) => p.split(/[/\\]/).pop() === '+page.svelte')
 	.sort();
 
+function warningCount(fileUrl: URL, filename: string): number {
+	const src = readFileSync(fileUrl, 'utf8');
+	const { warnings } = compile(src, { filename, generate: 'client' });
+	return warnings.filter((w) => w.code === 'state_referenced_locally').length;
+}
+
 describe('public route pages: no stale prop reads (state_referenced_locally)', () => {
 	it('finds the public route pages to check', () => {
-		expect(pages.length).toBeGreaterThan(0);
+		// Coverage floor: this repo has 9 public route pages; a drop below means
+		// the scan silently stopped covering some.
+		expect(pages.length).toBeGreaterThanOrEqual(9);
 	});
 
 	for (const rel of pages) {
 		const key = `(public)/${rel.split(/[/\\]/).join('/')}`;
 		const allowed = BASELINE[key] ?? 0;
 		it(`${key} has exactly ${allowed} state_referenced_locally warning(s)`, () => {
-			const src = readFileSync(new URL(rel, new URL('.', import.meta.url)), 'utf8');
-			const { warnings } = compile(src, { filename: key, generate: 'client' });
-			const count = warnings.filter((w) => w.code === 'state_referenced_locally').length;
 			// Exact match: fixing a baseline file must also zero its entry here.
-			expect(count).toBe(allowed);
+			expect(warningCount(new URL(rel, new URL('.', import.meta.url)), key)).toBe(allowed);
 		});
 	}
+
+	// Meta.svelte lives outside the route scan but carries the same bug class (its
+	// og:* tags go stale on a same-route nav), so guard it explicitly too.
+	it('lib/components/Meta.svelte has exactly 0 state_referenced_locally warning(s)', () => {
+		const url = new URL('../../lib/components/Meta.svelte', new URL('.', import.meta.url));
+		expect(warningCount(url, 'lib/components/Meta.svelte')).toBe(0);
+	});
 });
