@@ -14,6 +14,7 @@ import { artists } from './db/schema';
 import { getRawSetting, setRawSetting } from './settings';
 import type { SiteSettings } from './settings';
 import { sanitizeUrl } from './validate';
+import { handlesOverlap } from './handle-normalize';
 import {
 	isRegistryEnabled,
 	registryDelta,
@@ -184,7 +185,13 @@ export async function syncArtists(
 		if (!handle) continue;
 		scanned++;
 		const matches = await registrySearch(env, { handle });
-		const match = matches[0];
+		// A handle search ranks candidates by similarity — it does NOT prove identity.
+		// Trusting matches[0] blindly let a same-string handle under a DIFFERENT platform
+		// (e.g. a Twitter URL pasted into a registry artist's Instagram field, indexed as
+		// an instagram handle "twitter.com") link a fork's artist to an unrelated registry
+		// entry. Only stamp a candidate that shares a normalized handle on the SAME platform
+		// as this local artist; if none does, leave it unlinked rather than guess.
+		const match = matches.find((m) => handlesOverlap(a, m.socials));
 		if (!match) continue;
 		// Don't link two local rows to the same registry artist (only one would
 		// ever refresh). The unique index on global_id also enforces this.
