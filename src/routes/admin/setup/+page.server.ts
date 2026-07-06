@@ -109,8 +109,13 @@ export const actions = {
 		// NB: storageProvider / r2PublicUrl are NOT set here — the setup CLI decides
 		// the storage backend (it's the only thing that can create a bucket / set a
 		// token). Switching later is a migration in Settings → Storage Provider.
-		await saveSettings(db, {
-			siteName,
+		//
+		// A BLANK optional wizard field means "no answer", not "clear it" — the
+		// setup CLI may have already seeded these (e.g. primaryCharacter), and a
+		// first-run wizard has nothing deliberate to clear. Only filled-in values
+		// are saved (#60). siteName is required above; theme/layout default by
+		// design when unchosen.
+		const optional: Record<string, string> = {
 			ownerName: sanitizeText(data.get('ownerName') as string, 100),
 			aboutText: sanitizeText(data.get('aboutText') as string, 2000),
 			twitterUrl: normalizeSocialUrl('twitter', data.get('twitter') as string),
@@ -118,9 +123,15 @@ export const actions = {
 			telegramUrl: normalizeSocialUrl('telegram', data.get('telegram') as string),
 			furAffinityUrl: normalizeSocialUrl('furaffinity', data.get('furaffinity') as string),
 			furtrackUrl: normalizeSocialUrl('furtrack', data.get('furtrack') as string),
-			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100),
+			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100)
+		};
+		for (const key of Object.keys(optional)) if (!optional[key]) delete optional[key];
+
+		await saveSettings(db, {
+			siteName,
 			themeId,
-			landingLayout
+			landingLayout,
+			...optional
 		});
 
 		// 4. The fursona this site is about (stickers/fursuit resolve one character).

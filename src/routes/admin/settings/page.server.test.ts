@@ -159,3 +159,64 @@ describe('settings connectRegistry — reconnect guard', () => {
 		expect(await getRawSetting(db, REGISTRY_API_KEY_SETTING)).toBe('existing-key');
 	});
 });
+
+// saveSite must distinguish a field ABSENT from the POST (skip — the posting
+// form doesn't manage that setting) from a field PRESENT but blank (deliberate
+// clear). Conditionally-rendered fields (splash subtitle, sona sheet, theme
+// pickers) were otherwise silently blanked by saves from forms that don't
+// render them (#60 — Sunday's splash subtitle kept reverting to the fallback).
+async function seed(db: ReturnType<typeof makeDb>['db'], key: string, value: string) {
+	await db.insert(siteSettings).values({ key, value });
+}
+
+describe('saveSite — absent fields are skipped, blank fields clear (#60)', () => {
+	it('a POST omitting splashSubtitle leaves the stored value intact', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'splashSubtitle', 'shiba supreme');
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'sheeb.net' }));
+
+		expect(await getRawSetting(db, 'splashSubtitle')).toBe('shiba supreme');
+		expect(await getRawSetting(db, 'siteName')).toBe('sheeb.net');
+	});
+
+	it('a POST with splashSubtitle present-but-blank clears it deliberately', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'splashSubtitle', 'shiba supreme');
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'sheeb.net', splashSubtitle: '' }));
+
+		expect(await getRawSetting(db, 'splashSubtitle')).toBe('');
+	});
+
+	it('a POST omitting themeId/landingLayout does not reset them to defaults', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'themeId', 'terracotta');
+		await seed(db, 'landingLayout', 'threePath');
+
+		await actions.saveSite(saveSiteEvent(platform, { ownerName: 'Sunday' }));
+
+		expect(await getRawSetting(db, 'themeId')).toBe('terracotta');
+		expect(await getRawSetting(db, 'landingLayout')).toBe('threePath');
+	});
+
+	it('a POST omitting bluesky leaves blueskyUrl and the derived avatar alone', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'adminAvatarUrl', 'https://cdn.bsky.app/img/avatar/plain/x');
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'sheeb.net' }));
+
+		expect(await getRawSetting(db, 'blueskyUrl')).toBe('https://bsky.app/profile/sunday.bsky.social');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('https://cdn.bsky.app/img/avatar/plain/x');
+	});
+
+	it('a POST omitting sonaColors keeps the stored swatches', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'sonaColors', '[{"name":"fur","hex":"#DD5131"}]');
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'sheeb.net' }));
+
+		expect(await getRawSetting(db, 'sonaColors')).toBe('[{"name":"fur","hex":"#DD5131"}]');
+	});
+});

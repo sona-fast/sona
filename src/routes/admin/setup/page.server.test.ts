@@ -121,3 +121,30 @@ describe('setup wizard — unrecognized enum values fail instead of silently def
 		expect(await getRawSetting(db, 'themeId')).toBe(DEFAULT_THEME_ID);
 	});
 });
+
+describe('setup wizard — blank optional fields never clobber CLI-seeded settings (#60)', () => {
+	it('a blank primaryCharacter leaves the CLI-seeded value intact', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(schema.siteSettings).values({ key: 'primaryCharacter', value: 'Sparky' });
+
+		try {
+			await actions.default(setupEvent(platform, { primaryCharacter: '' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		expect(await getRawSetting(db, 'primaryCharacter')).toBe('Sparky');
+	});
+
+	it('a filled primaryCharacter still saves', async () => {
+		const { db, platform } = makeDb();
+
+		try {
+			await actions.default(setupEvent(platform, { primaryCharacter: 'Taro' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		expect(await getRawSetting(db, 'primaryCharacter')).toBe('Taro');
+	});
+});
