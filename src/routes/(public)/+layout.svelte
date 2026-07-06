@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Header from '$lib/components/Header.svelte';
 	import Footer from '$lib/components/Footer.svelte';
+	import MobileCredit from '$lib/components/MobileCredit.svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
 
 	let { children, data } = $props();
@@ -16,6 +17,7 @@
 	<div class="desktop-footer">
 		<Footer settings={data.settings} host={data.host} />
 	</div>
+	<MobileCredit host={data.host} />
 	<MobileNav />
 </div>
 
@@ -37,10 +39,6 @@
 
 		.desktop-footer {
 			display: none;
-		}
-
-		main {
-			padding-bottom: 72px;
 		}
 	}
 </style>
