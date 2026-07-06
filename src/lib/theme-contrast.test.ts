@@ -1,14 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { THEMES } from './themes';
 
 // Guards WCAG AA contrast for the terracotta theme: the terracotta accent is
 // used as small-text foreground on the page background and on cards, and as
 // the button background under --primary-foreground text. A future accent
 // tweak that drops any of the asserted pairings below threshold fails here.
 //
-// Scope: terracotta only, both variants. Ember and Aurora predate the AA work
-// and are not asserted.
+// Scope: the full terracotta pairings, both variants, plus the destructive
+// button (fill vs --destructive-foreground) for EVERY theme × mode (#76). The
+// remaining Ember/Aurora pairings predate the AA work and are not asserted.
 
 const css = readFileSync(fileURLToPath(new URL('../app.css', import.meta.url)), 'utf8');
 
@@ -34,6 +36,30 @@ function contrast(a: string, b: string): number {
 	const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
 	return (hi + 0.05) / (lo + 0.05);
 }
+
+describe('destructive button WCAG AA contrast, every theme × mode', () => {
+	// The default theme lives on :root / [data-theme='light']; alternate themes
+	// on [data-theme-id='<id>'] and its [data-theme='light'] variant.
+	const blocks = THEMES.flatMap(({ id }) =>
+		id === 'default'
+			? [
+					{ name: 'default dark', sel: ':root' },
+					{ name: 'default light', sel: "[data-theme='light']" }
+				]
+			: [
+					{ name: `${id} dark`, sel: `[data-theme-id='${id}']` },
+					{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
+				]
+	);
+
+	for (const { name, sel } of blocks) {
+		it(`${name}: destructive-foreground text on destructive buttons meets 4.5:1`, () => {
+			const destructive = blockToken(sel, 'destructive');
+			const destructiveForeground = blockToken(sel, 'destructive-foreground');
+			expect(contrast(destructiveForeground, destructive)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
 
 describe('terracotta light theme WCAG AA contrast', () => {
 	const sel = "[data-theme-id='terracotta'][data-theme='light']";
