@@ -283,7 +283,7 @@
 	"admin_upload_replace_hint": "クリックまたはドラッグで差し替え",
 	"admin_upload_retry_hint": "クリックまたはドラッグで再試行",
 	"admin_upload_dropzone": "ここに画像をドラッグ＆ドロップするか、クリックして選択してください",
-	"admin_upload_dropzone_multi": "ここに最大{max}枚の画像をドラッグ＆ドロップするか、クリックして選択してください",
+	"admin_upload_dropzone_multi": "ここに最大{max}枚の画像をドラッグ＆ドロップ、クリックして選択、またはクリップボードから貼り付けできます",
 	"admin_field_variant_of": "バリエーション元",
 	"admin_field_variant_label": "バリエーションラベル",
 	"admin_variant_none": "バリエーションではない",

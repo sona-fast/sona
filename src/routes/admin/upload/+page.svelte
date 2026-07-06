@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { CloudUpload, Check, Loader2, Plus, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
+	import { extractImageFiles, shouldHandleImagePaste } from '$lib/clipboard';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
@@ -146,12 +147,39 @@
 		}
 	}
 
+	function isEditable(el: EventTarget | null): boolean {
+		if (!(el instanceof HTMLElement)) return false;
+		const tag = el.tagName;
+		return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+	}
+
+	function handlePaste(e: ClipboardEvent) {
+		const dt = e.clipboardData;
+		if (!dt) return;
+		const files = extractImageFiles(dt.items);
+		const hasText = Array.from(dt.items).some(
+			(it) => it.kind === 'string' && it.type.startsWith('text/')
+		);
+		if (
+			!shouldHandleImagePaste({
+				imageCount: files.length,
+				hasText,
+				focusInEditable: isEditable(e.target)
+			})
+		)
+			return;
+		e.preventDefault();
+		handleFiles(files);
+	}
+
 	function onArtistCreated(artist: { id: number; name: string }) {
 		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
 		selectedArtistId = String(artist.id);
 		showNewArtist = false;
 	}
 </script>
+
+<svelte:window onpaste={handlePaste} />
 
 <div class="page-header">
 	<h1>{m.admin_upload_title()}</h1>
