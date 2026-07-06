@@ -688,7 +688,7 @@
 	"admin_settings_changing": "変更中…",
 	"admin_settings_change_password": "パスワードを変更",
 	"admin_settings_recovery_email": "復旧用メールアドレス",
-	"admin_settings_recovery_email_hint": "ログインできなくなった場合にパスワードリセットリンクを送る先です。リセットメールを送信するには RESEND_API_KEY シークレットの設定が必要です。",
+	"admin_settings_recovery_email_hint": "ログインできなくなった場合にパスワードリセットリンクを送る先です。リセットメールを送信するには RESEND_API_KEY シークレットの設定が必要です。既定の送信元では、Resend アカウントと同じメールアドレスである必要があります（または RESEND_FROM に検証済みドメインを設定してください）。",
 	"admin_settings_recovery_email_label": "復旧用メールアドレス",
 	"admin_settings_save_recovery_email": "復旧用メールを保存",
 	"admin_settings_recovery_email_saved": "復旧用メールを保存しました",

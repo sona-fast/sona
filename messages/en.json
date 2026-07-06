@@ -724,7 +724,7 @@
 	"admin_settings_changing": "Changing…",
 	"admin_settings_change_password": "Change password",
 	"admin_settings_recovery_email": "Recovery email",
-	"admin_settings_recovery_email_hint": "Where a password reset link is sent if you get locked out. Requires the RESEND_API_KEY secret to be configured for the reset email to send.",
+	"admin_settings_recovery_email_hint": "Where a password reset link is sent if you get locked out. Requires the RESEND_API_KEY secret to be configured for the reset email to send. With the default sender, this must be the same email as your Resend account (or set RESEND_FROM with a verified domain).",
 	"admin_settings_recovery_email_label": "Recovery email",
 	"admin_settings_save_recovery_email": "Save recovery email",
 	"admin_settings_recovery_email_saved": "Recovery email saved",
