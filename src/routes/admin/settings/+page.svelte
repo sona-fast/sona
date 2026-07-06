@@ -490,11 +490,20 @@
 }}>
 	<section class="security-section" data-tab="account">
 		<h2>{m.admin_settings_recovery_email()}</h2>
-		<p class="hint">{m.admin_settings_recovery_email_hint()} <button type="button" class="hint-link" onclick={() => (showResendSetup = true)}>{m.admin_resend_setup_help_link()}</button></p>
 		<label>
 			<span>{m.admin_settings_recovery_email_label()}</span>
 			<input type="email" name="adminEmail" class="input" bind:value={adminEmail} autocomplete="email" placeholder="you@example.com" />
 		</label>
+		<div class="reset-status">
+			{#if resendProgress.ready}
+				<span class="status-tag active"><Check size={13} /> {m.admin_resend_status_active()}</span>
+				<button type="button" class="hint-link" onclick={() => (showResendSetup = true)}>{m.admin_resend_setup_link_active()}</button>
+			{:else}
+				<span class="status-tag unset"><span class="dot"></span> {m.admin_resend_status_unset()}</span>
+				<button type="button" class="hint-link" onclick={() => (showResendSetup = true)}>{m.admin_resend_setup_link_unset()}</button>
+			{/if}
+		</div>
+		<p class="field-hint">{resendProgress.ready ? m.admin_resend_hint_active() : m.admin_resend_hint_unset()}</p>
 		<button type="submit" class="btn btn-secondary" disabled={savingRecoveryEmail}>
 			{savingRecoveryEmail ? m.admin_saving() : m.admin_settings_save_recovery_email()}
 		</button>
@@ -1327,11 +1336,37 @@
 		border: none;
 		padding: 0;
 		cursor: pointer;
-		color: var(--primary);
+		color: #f5a623;
 		font-weight: 600;
 		text-decoration: underline;
 		font: inherit;
+		font-size: 12.5px;
 		white-space: nowrap;
+	}
+	/* Entry point under the recovery-email field: inline status tag + trigger. */
+	.reset-status {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 10px 14px;
+		margin-top: 10px;
+	}
+	.status-tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		font: 600 12px var(--font-primary);
+	}
+	.status-tag .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+	.status-tag.unset { color: #f5a623; }
+	.status-tag.unset .dot { background: #f5a623; }
+	.status-tag.active { color: #4ade80; }
+	.field-hint {
+		font-size: 11px;
+		color: var(--muted-foreground);
+		margin-top: 8px;
+		line-height: 1.55;
+		max-width: 60ch;
 	}
 	.status-strip {
 		display: flex;
