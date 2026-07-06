@@ -287,6 +287,23 @@ describe('admin artists load — approved-submission linking stamps registry_ver
 		expect(row!.registryVersion).toBe(7); // the next share submits baseVersion 7
 	});
 
+	it('still links (version null) when the catalog entry carries a non-numeric version', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		await db.insert(schema.artists).values({ name: 'Nyx' });
+		// A malformed catalog response must not stamp garbage into the integer column.
+		stubRegistryFetch({
+			'/v1/submissions/mine': { submissions: [approvedSub] },
+			'/v1/artists?': { artists: [{ ...catalogEntry, version: '7' }], nextCursor: null }
+		});
+
+		await load(loadEvent(platform));
+
+		const row = await db.select().from(schema.artists).get();
+		expect(row!.globalId).toBe('g-1');
+		expect(row!.registryVersion).toBeNull();
+	});
+
 	it('still links (version null) when the catalog fetch fails — the submit backstop heals it', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });

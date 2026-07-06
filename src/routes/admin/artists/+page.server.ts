@@ -118,6 +118,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 				.where(eq(artists.globalId, linkedId))
 				.get();
 			if (taken) continue;
+			// Same runtime guard as the submit backstop: a malformed catalog entry
+			// (non-numeric version) must not reach the integer column.
+			const v = byGlobalId.get(linkedId)?.version;
 			await db
 				.update(artists)
 				.set({
@@ -126,7 +129,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 					// goes out as an update with no baseVersion and the registry 400s
 					// (#71). If the catalog fetch failed or the entry is missing, still
 					// link (submitToRegistry resolves the version as a backstop).
-					registryVersion: byGlobalId.get(linkedId)?.version ?? null,
+					registryVersion: typeof v === 'number' ? v : null,
 					registrySyncedAt: new Date().toISOString()
 				})
 				.where(eq(artists.id, a.id));
