@@ -146,6 +146,18 @@ describe('gallery load — artist combobox lists only live artists', () => {
 		const data = await loadData(platform);
 		expect(data.artists.map((a) => a.name)).not.toContain('VariantOnly');
 	});
+
+	it('includes an artist who has both a published standalone AND a published variant', async () => {
+		const { db, platform } = makeDb();
+		const [{ id }] = await addArtist(db, 'Mixed');
+		const [{ id: parentId }] = await addImage(db, { artistId: id, published: true }).returning({
+			id: images.id
+		});
+		await addImage(db, { artistId: id, published: true, parentImageId: parentId });
+
+		const data = await loadData(platform);
+		expect(data.artists.map((a) => a.name)).toContain('Mixed');
+	});
 });
 
 describe('gallery load — former-name (alias) resolution', () => {
@@ -172,6 +184,47 @@ describe('gallery load — former-name (alias) resolution', () => {
 		const data = await loadData(platform, '?artist=Draft');
 		expect(data.formerName).toBeNull();
 		expect(data.filters.artist).toBe('Draft');
+		expect(data.images).toHaveLength(0);
+		expect(data.degraded).toBe(false);
+	});
+
+	it('never hijacks a real current name with no live work into another artist via an alias', async () => {
+		// Repro: current artist "Draft" has no live work (exactly the population the
+		// combobox now hides), and a DIFFERENT live artist "Phoenix" lists "Draft" as
+		// a former name. ?artist=Draft must NOT resolve to Phoenix (that would show
+		// Phoenix's work under a false "formerly Draft" banner) — the name-existence
+		// check runs against the unfiltered artist set.
+		const { db, platform } = makeDb();
+		const [{ id: draftId }] = await addArtist(db, 'Draft');
+		await addImage(db, { artistId: draftId, published: false });
+		const [{ id: phoenixId }] = await addArtist(
+			db,
+			'Phoenix',
+			JSON.stringify([{ displayName: 'Draft', socials: {} }])
+		);
+		await addImage(db, { artistId: phoenixId, published: true });
+
+		const data = await loadData(platform, '?artist=Draft');
+		expect(data.formerName).toBeNull();
+		expect(data.filters.artist).toBe('Draft');
+		expect(data.images).toHaveLength(0);
+		expect(data.degraded).toBe(false);
+	});
+
+	it('does not resolve a former name claimed only by a non-live artist', async () => {
+		// "OldGhost" is an alias of "Ghost", who has no live work — so Ghost is absent
+		// from the live-only alias-candidate set and the former name stays unresolved.
+		const { db, platform } = makeDb();
+		const [{ id }] = await addArtist(
+			db,
+			'Ghost',
+			JSON.stringify([{ displayName: 'OldGhost', socials: {} }])
+		);
+		await addImage(db, { artistId: id, published: false });
+
+		const data = await loadData(platform, '?artist=OldGhost');
+		expect(data.formerName).toBeNull();
+		expect(data.filters.artist).toBe('OldGhost');
 		expect(data.images).toHaveLength(0);
 		expect(data.degraded).toBe(false);
 	});
