@@ -1,57 +1,20 @@
 // Handle normalization for matching a registry artist against LOCAL artists when
 // pulling. Mirrors the registry's src/lib/normalize.ts so the two agree on what
 // counts as "the same handle". Pure — no DB.
+//
+// The platform table + bare-handle normalizer live in the client-safe
+// `$lib/handle-classify` (the New Artist combobox needs them too); re-exported
+// here so existing server importers keep their `handle-normalize` import path.
 
 import { sanitizeUrl } from './validate';
+import {
+	HOST_PREFIXES,
+	SOCIAL_KEY_TO_PLATFORM,
+	normalizeHandle,
+	type Platform
+} from '../handle-classify';
 
-export type Platform =
-	| 'twitter'
-	| 'bluesky'
-	| 'telegram'
-	| 'furaffinity'
-	| 'deviantart'
-	| 'patreon'
-	| 'instagram';
-
-const HOST_PREFIXES: Record<Platform, string[]> = {
-	twitter: ['twitter.com/', 'x.com/', 'mobile.twitter.com/'],
-	bluesky: ['bsky.app/profile/', 'staging.bsky.app/profile/'],
-	telegram: ['t.me/', 'telegram.me/'],
-	furaffinity: ['furaffinity.net/user/'],
-	deviantart: ['deviantart.com/'],
-	// 'patreon.com/c/<user>' (newer creator pages) must be tried before the bare
-	// 'patreon.com/' prefix, else the username collapses to 'c'.
-	patreon: ['patreon.com/c/', 'patreon.com/'],
-	instagram: ['instagram.com/']
-};
-
-/** Maps the artist *Url column / payload keys to platforms. */
-export const SOCIAL_KEY_TO_PLATFORM: Record<string, Platform> = {
-	twitterUrl: 'twitter',
-	blueskyUrl: 'bluesky',
-	telegramUrl: 'telegram',
-	furAffinityUrl: 'furaffinity',
-	deviantArtUrl: 'deviantart',
-	patreonUrl: 'patreon',
-	instagramUrl: 'instagram'
-};
-
-export function normalizeHandle(platform: Platform, raw: string | null | undefined): string {
-	if (!raw) return '';
-	let s = raw.trim().toLowerCase();
-	s = s.replace(/^https?:\/\//, '');
-	s = s.replace(/^www\./, '');
-	for (const prefix of HOST_PREFIXES[platform] ?? []) {
-		if (s.startsWith(prefix)) {
-			s = s.slice(prefix.length);
-			break;
-		}
-	}
-	s = s.replace(/^@+/, '');
-	s = s.replace(/[/?#].*$/, '');
-	s = s.replace(/\/+$/, '');
-	return s;
-}
+export { SOCIAL_KEY_TO_PLATFORM, normalizeHandle, type Platform };
 
 export interface NormalizedHandle {
 	platform: Platform;

@@ -416,6 +416,8 @@
 	"admin_new_artist_registry_results_label": "一致するレジストリのアーティスト",
 	"admin_new_artist_registry_results_count": "レジストリに{count}件の一致",
 	"admin_new_artist_registry_no_matches": "一致するアーティストはいません — 新規アーティストを作成します。",
+	"admin_new_artist_registry_handle_hint": "ソーシャルリンクのようです — ハンドル「{handle}」でレジストリを検索しています。一致を選ぶか、名前を入力して新規アーティストを追加してください。",
+	"admin_new_artist_registry_handle_no_match": "そのハンドルに一致するレジストリのアーティストはいません。消去するか、名前を入力して新規アーティストを追加してください。",
 	"admin_new_artist_registry_linked": "共有レジストリに連携しました",
 	"admin_new_artist_unlink": "連携を解除",
 	"admin_new_artist_creating": "作成中…",

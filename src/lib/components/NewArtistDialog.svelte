@@ -4,6 +4,7 @@
 	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { shouldSearch, resultToPrefill, type RegResult } from '$lib/registry-search';
+	import { classifyQuery } from '$lib/handle-classify';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
@@ -59,12 +60,21 @@
 	let hasSearched = $state(false);
 	const listboxId = 'new-artist-registry-listbox';
 
+	// The name field doubles as a social-handle search: a typed @handle or social
+	// URL searches the registry by HANDLE rather than by name. A handle/URL that
+	// matches nothing must NOT silently become the artist's name — so while the
+	// input still looks like a handle and nothing is linked, plain-create is
+	// blocked and the field nudges the operator to pick a match or type a name.
+	let query = $derived(registryEnabled ? classifyQuery(name) : { kind: 'name' as const, handleParam: '', handle: '' });
+	let isHandleQuery = $derived(query.kind === 'handle');
+	let blockHandleCreate = $derived(isHandleQuery && !pulled);
+
 	// Polite announcement of result counts for screen-reader users. Silent while
 	// typing/searching; speaks once a search settles.
 	let resultsAnnouncement = $derived.by(() => {
 		if (!registryEnabled || !shouldSearch(name) || registrySearching) return '';
 		if (registryResults.length) return m.admin_new_artist_registry_results_count({ count: registryResults.length });
-		if (hasSearched) return m.admin_new_artist_registry_no_matches();
+		if (hasSearched) return isHandleQuery ? m.admin_new_artist_registry_handle_no_match() : m.admin_new_artist_registry_no_matches();
 		return '';
 	});
 
@@ -149,9 +159,12 @@
 	}
 	async function searchRegistry() {
 		if (!shouldSearch(name)) return;
+		// A typed @handle / social URL searches by handle; plain text by name.
+		const c = classifyQuery(name);
+		const qs = c.kind === 'handle' ? 'handle=' + encodeURIComponent(c.handleParam) : 'q=' + encodeURIComponent(name.trim());
 		registrySearching = true;
 		try {
-			const res = await fetch('/api/registry/search?q=' + encodeURIComponent(name.trim()));
+			const res = await fetch('/api/registry/search?' + qs);
 			if (res.ok) {
 				const data = await res.json();
 				registryResults = data.artists ?? [];
@@ -220,7 +233,8 @@
 	}
 
 	async function create() {
-		if (!name.trim() || saving) return;
+		// Guard: a bare handle/URL that matched nothing must not become the name.
+		if (!name.trim() || saving || blockHandleCreate) return;
 		saving = true;
 		errorMsg = '';
 		try {
@@ -328,7 +342,13 @@
 					{/if}
 				</div>
 				{#if registryEnabled}
-					<p class="reg-hint" id="new-artist-name-hint">{m.admin_new_artist_registry_search_hint()}</p>
+					{#if blockHandleCreate && hasSearched && registryResults.length === 0}
+						<p class="reg-hint reg-hint-warn" id="new-artist-name-hint">{m.admin_new_artist_registry_handle_no_match()}</p>
+					{:else if blockHandleCreate}
+						<p class="reg-hint" id="new-artist-name-hint">{m.admin_new_artist_registry_handle_hint({ handle: query.handle })}</p>
+					{:else}
+						<p class="reg-hint" id="new-artist-name-hint">{m.admin_new_artist_registry_search_hint()}</p>
+					{/if}
 				{/if}
 				{#if pulled}
 					<div class="linked-row">
@@ -361,7 +381,7 @@
 
 			<div class="modal-actions">
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>{m.admin_cancel()}</button>
-				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving}>
+				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving || blockHandleCreate}>
 					{#if saving}
 						<Loader2 size={16} class="spin" /> {pulled ? m.admin_registry_importing() : m.admin_new_artist_creating()}
 					{:else}
@@ -431,6 +451,7 @@
 	.name-field .input { flex: 1; }
 	.name-spin { position: absolute; right: 10px; color: var(--muted-foreground); pointer-events: none; }
 	.reg-hint { margin: 0; font-size: 11px; color: var(--muted-foreground); }
+	.reg-hint-warn { color: var(--destructive); }
 	.reg-results {
 		list-style: none; margin: 4px 0 0; padding: 4px; position: absolute; top: 100%; left: 0; right: 0;
 		z-index: 10; display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto;
