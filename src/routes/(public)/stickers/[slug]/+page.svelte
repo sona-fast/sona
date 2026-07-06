@@ -264,7 +264,7 @@
 			<div class="empty-state">
 				<div class="empty-icon">{activeEmoji && /\p{Emoji}/u.test(activeEmoji) ? activeEmoji : '🦊'}</div>
 				<div class="empty-text">
-					<p class="empty-title">{m.stickers_empty_title({ query: activeEmoji || m.stickers_empty_fallback() })}</p>
+					<p class="empty-title">{m.stickers_empty_title({ query: activeEmoji ? m.stickers_query_term({ query: activeEmoji }) : m.stickers_empty_fallback() })}</p>
 					<p class="empty-subtext">{m.stickers_empty_subtext()}</p>
 				</div>
 				<button class="btn btn-outline" onclick={clearFilters}>{m.stickers_clear_filters()}</button>

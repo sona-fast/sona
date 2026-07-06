@@ -152,6 +152,11 @@ npm test         # vitest
 Local secrets go in `.dev.vars` (gitignored). `FURTRACK_MODE=mock` serves bundled
 demo fursuit data without calling FurTrack.
 
+#### Terminology (ja)
+
+日本語UIでは、Telegram/チャットのステッカー系コンテンツは常に「ステッカー」と表記する（「スタンプ」は使わない）。物理的なダイカットグッズは「シール」で区別する。
+_(In the JA UI, Telegram/chat sticker content is always ステッカー — never スタンプ; physical die-cut merch is シール.)_ Enforced by `src/lib/i18n-parity.test.ts`.
+
 ### Keeping your fork up to date
 
 Pull template improvements into your fork with GitHub's **Sync fork** button (or
