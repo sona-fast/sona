@@ -142,4 +142,24 @@ describe('R2 deleteOrphans keep set is base-agnostic', () => {
 		expect(deleted).toBe(1);
 		expect(bucket.delete).toHaveBeenCalledWith(['true-orphan.png']);
 	});
+
+	it('keeps a key referenced through a percent-encoded URL (stored keys are raw)', async () => {
+		const bucket = {
+			put: vi.fn(async () => {}),
+			delete: vi.fn(async () => {}),
+			list: vi.fn(async () => ({
+				objects: [
+					{ key: 'artwork/café.png', uploaded: old },
+					{ key: 'true-orphan.png', uploaded: old }
+				],
+				truncated: false
+			}))
+		};
+		const storage = getStorage({ IMAGES: bucket } as unknown as Env, r2Settings('https://cdn.example.com'));
+		const deleted = await storage.deleteOrphans(['https://cdn.example.com/artwork/caf%C3%A9.png'], {
+			olderThan: new Date(Date.now() - HOUR)
+		});
+		expect(deleted).toBe(1);
+		expect(bucket.delete).toHaveBeenCalledWith(['true-orphan.png']);
+	});
 });

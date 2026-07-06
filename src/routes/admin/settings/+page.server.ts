@@ -218,7 +218,29 @@ export const actions = {
 		const data = await request.formData();
 
 		const provider = data.get('storageProvider') === 'r2' ? 'r2' : 'uploadthing';
-		const r2PublicUrl = sanitizeUrl(data.get('r2PublicUrl') as string) || '';
+		let r2PublicUrl = sanitizeUrl(data.get('r2PublicUrl') as string) || '';
+		// The public base must be an ORIGIN only. Orphan cleanup derives storage
+		// keys from URL pathnames, so a path-bearing base (https://example.com/cdn)
+		// would yield keys like 'cdn/artwork/x.png' that never match stored keys —
+		// every referenced object would be judged an orphan on the next sweep.
+		// Reject loudly rather than silently stripping the path, so an admin
+		// fronting the bucket through a sub-path proxy learns it isn't supported.
+		// (R2 custom domains are origin-only anyway.)
+		if (r2PublicUrl) {
+			let origin = '';
+			try {
+				const u = new URL(r2PublicUrl);
+				if (u.pathname === '/' && !u.search && !u.hash) origin = u.origin;
+			} catch {
+				// not an absolute URL (e.g. a root-relative path) — rejected below
+			}
+			if (!origin) {
+				return fail(400, {
+					error: 'R2 public URL must be an origin only, like https://cdn.example.com — no path, query, or fragment.'
+				});
+			}
+			r2PublicUrl = origin;
+		}
 
 		await saveSettings(db, { storageProvider: provider, r2PublicUrl });
 

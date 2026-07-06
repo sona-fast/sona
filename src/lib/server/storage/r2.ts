@@ -75,8 +75,14 @@ export class R2Storage implements StorageProvider {
 				const path = new URL(u, 'http://relative-base.invalid').pathname;
 				const fromPath = path.startsWith('/img/') ? path.slice('/img/'.length) : path.replace(/^\//, '');
 				if (fromPath) keep.add(fromPath);
+				// Pathnames keep percent-encoding but stored keys are raw, so ALSO
+				// keep the decoded variant — an encoded char in a referenced URL
+				// must not orphan its object. Over-keep only: an extra key can
+				// prevent a deletion, never cause one.
+				const decoded = decodeURIComponent(fromPath);
+				if (decoded !== fromPath) keep.add(decoded);
 			} catch {
-				// not URL-shaped — contributes no key
+				// not URL-shaped / not decodable — contributes no (further) key
 			}
 		}
 		if (opts?.abortOnEmptyKeepSet && keep.size === 0) {

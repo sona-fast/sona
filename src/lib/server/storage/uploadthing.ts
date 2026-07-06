@@ -38,6 +38,10 @@ export class UploadThingStorage implements StorageProvider {
 		// Keys here are host-agnostic (any …/f/<key> URL), so an empty keep set
 		// with files present means the reference set itself is empty/broken —
 		// deleting would wipe every stored file. See DeleteOrphansOptions.
+		// KNOWN CASE: after a full UT→R2 migration no DB URL points at UT, so the
+		// scheduled cron trips this belt forever and never removes the leftover
+		// originals. That's intended — the migrate page's manual cleanup button
+		// (which doesn't set abortOnEmptyKeepSet) is the post-migration path.
 		if (opts?.abortOnEmptyKeepSet && keep.size === 0 && files.length > 0) {
 			throw new ZeroKeepError(
 				'uploadthing: no referenced URL resolves to a stored key — refusing to treat every file as an orphan (empty or unmappable reference set?)'

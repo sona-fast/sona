@@ -146,6 +146,44 @@ describe('settings saveSite — three-path profile fields', () => {
 	});
 });
 
+function saveStorageEvent(platform: App.Platform, fields: Record<string, string>) {
+	const body = new FormData();
+	for (const [k, v] of Object.entries(fields)) body.append(k, v);
+	return {
+		platform,
+		request: new Request('https://taro.surf/admin/settings?/saveStorage', { method: 'POST', body })
+	} as never;
+}
+
+describe('settings saveStorage — r2PublicUrl must be origin-only', () => {
+	// A path-bearing base would make orphan cleanup derive keys like
+	// 'cdn/artwork/x.png' that never match stored keys — every referenced
+	// object would look like an orphan on the next sweep.
+	it('rejects a base with a path', async () => {
+		const { db, platform } = makeDb();
+
+		const result = await actions.saveStorage(
+			saveStorageEvent(platform, { storageProvider: 'r2', r2PublicUrl: 'https://example.com/cdn' })
+		);
+
+		expect(result).toMatchObject({ status: 400 });
+		expect((result as { data: { error: string } }).data.error).toContain('origin only');
+		// A rejected save persists nothing.
+		expect((await getRawSetting(db, 'r2PublicUrl')) ?? '').toBe('');
+	});
+
+	it('accepts an origin-only base and normalizes a trailing slash', async () => {
+		const { db, platform } = makeDb();
+
+		const result = await actions.saveStorage(
+			saveStorageEvent(platform, { storageProvider: 'r2', r2PublicUrl: 'https://cdn.example.com/' })
+		);
+
+		expect(result).toMatchObject({ success: true });
+		expect(await getRawSetting(db, 'r2PublicUrl')).toBe('https://cdn.example.com');
+	});
+});
+
 function saveSecurityEmailEvent(platform: App.Platform, adminEmail: string) {
 	const body = new FormData();
 	body.append('adminEmail', adminEmail);

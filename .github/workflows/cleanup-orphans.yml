@@ -52,3 +52,11 @@ jobs:
           if [ "$code" != "200" ]; then
             echo "::error::Cleanup endpoint returned HTTP $code"; exit 1
           fi
+          # A provider can SKIP itself (zero-keep safety belt) while the run
+          # stays HTTP 200. Surface that as a warning so the anomaly shows in
+          # the run list, but do NOT fail the run — an empty-but-alive fork
+          # trips the belt legitimately and would otherwise be permanently red.
+          skipped=$(jq -r '(.skipped // []) | join("; ")' response.json 2>/dev/null || true)
+          if [ -n "$skipped" ]; then
+            echo "::warning::Cleanup skipped a provider: $skipped"
+          fi

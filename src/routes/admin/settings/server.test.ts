@@ -103,4 +103,34 @@ describe('settings clearCache action', () => {
 		expect(bucket.delete).toHaveBeenCalledTimes(1);
 		expect(bucket.delete).toHaveBeenCalledWith(['true-orphan.png']);
 	});
+
+	// REGRESSION: a configured provider failing mid-cleanup used to be swallowed
+	// as "not configured" — the admin was told success while nothing was cleaned.
+	it('surfaces a provider failure as fail(500) instead of a false success', async () => {
+		const sqlite = new Database(':memory:');
+		sqlite.exec('CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
+		for (const { table, columns } of URL_COLUMNS) {
+			const cols = getTableColumns(table) as Record<string, SQLiteColumn>;
+			const ddl = columns.map((c) => `"${cols[c].name}" TEXT`).join(', ');
+			sqlite.exec(`CREATE TABLE "${getTableName(table)}" (${ddl})`);
+		}
+		const seedSetting = sqlite.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)');
+		seedSetting.run('storageProvider', 'r2');
+		seedSetting.run('r2PublicUrl', CDN);
+
+		const bucket = {
+			put: vi.fn(async () => {}),
+			delete: vi.fn(async () => {}),
+			list: vi.fn(async () => {
+				throw new Error('R2 list timed out');
+			})
+		};
+		const platform = { env: { DB: makeD1(sqlite), IMAGES: bucket } } as unknown as App.Platform;
+
+		const result = await actions.clearCache({ platform } as never);
+
+		expect(result).toMatchObject({ status: 500 });
+		expect((result as { data: { error: string } }).data.error).toContain('r2: R2 list timed out');
+		expect(bucket.delete).not.toHaveBeenCalled();
+	});
 });

@@ -87,6 +87,9 @@ export const actions = {
 			// files, thumbnails, avatars and covers the DB references; anything
 			// missed would be deleted as an "orphan". The 1h gate protects an
 			// upload racing this button (bytes land before any D1 row exists).
+			// After a full UT→R2 migration this button is the REQUIRED cleanup
+			// step: the scheduled cron aborts on UT's then-empty keep set (its
+			// zero-keep belt), so it will never sweep the leftover originals.
 			const referenced = await collectReferencedUrls(db, settings);
 			const deleted = await getStorage(platform?.env, settings, source).deleteOrphans(referenced, {
 				olderThan: new Date(Date.now() - 60 * 60 * 1000)
