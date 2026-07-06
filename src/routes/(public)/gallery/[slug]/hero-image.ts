@@ -1,8 +1,10 @@
 import { cdnImage } from '$lib';
 
-// The detail-page hero renders ~810 CSS px on desktop (the 1fr column beside
-// the 380px meta panel) and full-width on mobile.
-const HERO_SIZES = '(max-width: 768px) 100vw, 810px';
+// The detail-page hero is the 1fr column beside the 380px meta panel:
+// full-width on mobile, then calc(100vw - 468px) (380px meta column + 40px
+// grid gap + 48px .image-page padding) until the 1280px container cap, where
+// it settles at ~810 CSS px.
+const HERO_SIZES = '(max-width: 768px) 100vw, (max-width: 1280px) calc(100vw - 468px), 810px';
 const HERO_WIDTHS = [800, 1200, 1600];
 const HERO_QUALITY = 80;
 
@@ -12,6 +14,12 @@ const HERO_QUALITY = 80;
  * StickerMedia, which keeps animated formats out of cdnImage entirely. GIF is
  * the only allowed upload type whose animation is detectable from the URL
  * (animated WebP/AVIF can't be told apart from static without the bytes).
+ *
+ * Known gap: UploadThing URLs (`ufs.sh/f/<key>`, legacy `utfs.io`) carry no
+ * extension, so GIFs hosted there are never detected. Today they still animate
+ * because the transform 403s on those off-zone sources and rawFallback swaps
+ * in the original; on a zone configured to "resize from any origin" the
+ * transform would succeed and freeze them.
  */
 export function isAnimatedSource(url: string): boolean {
 	return /\.gif($|[?#])/i.test(url);

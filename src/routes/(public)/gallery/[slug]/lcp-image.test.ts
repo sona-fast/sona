@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { cdnImage } from '$lib';
 import { heroSrc, heroSrcset, heroSizes, isAnimatedSource, variantThumbSrc, rawFallback } from './hero-image';
 
 // Guards the sona#97 LCP fix: the gallery detail page must request the CDN
@@ -42,6 +43,12 @@ describe('gallery detail hero markup (sona#97)', () => {
 		expect(pageSrc).toContain('src={variant.thumbnailUrl || variantThumbSrc(variant.imageUrl)}');
 		expect(pageSrc).not.toMatch(/src=\{\s*variant\.thumbnailUrl\s*\|\|\s*variant\.imageUrl\s*\}/);
 	});
+
+	it('the hero CSS keeps height:auto — without it the intrinsic height attribute fixes the rendered height while CSS scales width, distorting every hero', () => {
+		const rule = pageSrc.match(/\.image-preview img \{[^}]*\}/)?.[0];
+		expect(rule).toBeDefined();
+		expect(rule).toContain('height: auto;');
+	});
 });
 
 describe('hero src selection', () => {
@@ -52,18 +59,20 @@ describe('hero src selection', () => {
 	const gif = 'https://cdn.example.com/anim.gif';
 
 	it('static sources get the 1200px/q80 CDN transform by default', () => {
-		expect(heroSrc(png)).toBe(
-			`/cdn-cgi/image/width=1200,quality=80,fit=scale-down,format=auto,anim=false/${png}`
-		);
+		expect(heroSrc(png)).toBe(cdnImage(png, 1200, 80));
+		// Loose anchor so the transform's presence stays pinned even if the
+		// cdnImage comparison above ever degenerates (e.g. both sides raw).
+		expect(heroSrc(png)).toContain('width=1200');
+		expect(heroSrc(png)).not.toBe(png);
 	});
 
 	it('offers 800/1200/1600 width variants with hero sizes', () => {
 		expect(heroSrcset(png)).toBe(
-			[800, 1200, 1600]
-				.map((w) => `/cdn-cgi/image/width=${w},quality=80,fit=scale-down,format=auto,anim=false/${png} ${w}w`)
-				.join(', ')
+			[800, 1200, 1600].map((w) => `${cdnImage(png, w, 80)} ${w}w`).join(', ')
 		);
-		expect(heroSizes(png)).toBe('(max-width: 768px) 100vw, 810px');
+		expect(heroSizes(png)).toBe(
+			'(max-width: 768px) 100vw, (max-width: 1280px) calc(100vw - 468px), 810px'
+		);
 	});
 
 	it('animated GIFs bypass the transform entirely (anim=false would freeze them)', () => {
@@ -76,9 +85,8 @@ describe('hero src selection', () => {
 	});
 
 	it('variant tiles get the 168px transform, with the same GIF bypass', () => {
-		expect(variantThumbSrc(png)).toBe(
-			`/cdn-cgi/image/width=168,quality=75,fit=scale-down,format=auto,anim=false/${png}`
-		);
+		expect(variantThumbSrc(png)).toBe(cdnImage(png, 168));
+		expect(variantThumbSrc(png)).toContain('width=168');
 		expect(variantThumbSrc(gif)).toBe(gif);
 	});
 });
@@ -90,17 +98,22 @@ describe('rawFallback action (off-zone 403 → raw original)', () => {
 		const attrs = new Map<string, string>([['src', init.src]]);
 		if (init.srcset !== undefined) attrs.set('srcset', init.srcset);
 		const listeners = new Set<() => void>();
+		let srcWrites = 0;
 		return {
 			complete: init.complete ?? false,
 			naturalWidth: init.naturalWidth ?? 1,
 			getAttribute: (k: string) => attrs.get(k) ?? null,
-			setAttribute: (k: string, v: string) => void attrs.set(k, v),
+			setAttribute: (k: string, v: string) => {
+				if (k === 'src') srcWrites++;
+				attrs.set(k, v);
+			},
 			removeAttribute: (k: string) => void attrs.delete(k),
 			hasAttribute: (k: string) => attrs.has(k),
 			addEventListener: (_: string, fn: () => void) => void listeners.add(fn),
 			removeEventListener: (_: string, fn: () => void) => void listeners.delete(fn),
 			fireError: () => listeners.forEach((fn) => fn()),
-			listenerCount: () => listeners.size
+			listenerCount: () => listeners.size,
+			srcWriteCount: () => srcWrites
 		};
 	}
 
@@ -115,12 +128,24 @@ describe('rawFallback action (off-zone 403 → raw original)', () => {
 		expect(img.hasAttribute('srcset')).toBe(false);
 	});
 
-	it('an error on the raw URL itself is terminal — no retry loop', () => {
+	it('an error on the raw URL itself is terminal — the swap runs exactly once across two errors', () => {
 		const img = stubImg({ src: transformed });
 		rawFallback(img as unknown as HTMLImageElement, raw);
 		img.fireError();
 		img.fireError();
 		expect(img.getAttribute('src')).toBe(raw);
+		// Counting writes (not just the final value) is what catches a deleted
+		// terminal guard: a second swap re-sets the same src.
+		expect(img.srcWriteCount()).toBe(1);
+	});
+
+	it('update() retargets the fallback: an error after update swaps to the NEW raw URL', () => {
+		const img = stubImg({ src: transformed });
+		const action = rawFallback(img as unknown as HTMLImageElement, raw);
+		const newRaw = 'https://app.ufs.sh/f/def';
+		action.update(newRaw);
+		img.fireError();
+		expect(img.getAttribute('src')).toBe(newRaw);
 	});
 
 	it('swaps an img that already failed BEFORE hydration (complete, zero naturalWidth)', () => {
