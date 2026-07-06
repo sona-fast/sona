@@ -3,7 +3,8 @@
 	import { page } from '$app/state';
 	import { onNavigate } from '$app/navigation';
 	import { Download, Share2, ExternalLink } from 'lucide-svelte';
-	import { formatDate, cdnImage } from '$lib';
+	import { formatDate } from '$lib';
+	import { heroSrc, heroSrcset, heroSizes, variantThumbSrc, rawFallback } from './hero-image';
 	import Meta from '$lib/components/Meta.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
@@ -108,14 +109,14 @@
 		<div class="image-preview">
 			{#if image.nsfw && !revealed}
 				<div class="nsfw-overlay">
-					<img src={cdnImage(image.imageUrl, 1200)} alt={image.title} width={image.width} height={image.height} class="blurred" />
+					<img src={heroSrc(image.imageUrl)} srcset={heroSrcset(image.imageUrl)} sizes={heroSizes(image.imageUrl)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" use:rawFallback={image.imageUrl} class="blurred" />
 					<button class="reveal-btn" onclick={() => (revealedId = image.id)}>
 						<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
 						<span>{m.gallery_click_reveal()}</span>
 					</button>
 				</div>
 			{:else}
-				<img src={cdnImage(image.imageUrl, 1200)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" />
+				<img src={heroSrc(image.imageUrl)} srcset={heroSrcset(image.imageUrl)} sizes={heroSizes(image.imageUrl)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" use:rawFallback={image.imageUrl} />
 			{/if}
 		</div>
 
@@ -234,10 +235,11 @@
 							>
 								<span class="variant-thumb">
 									<img
-										src={variant.thumbnailUrl || variant.imageUrl}
+										src={variant.thumbnailUrl || variantThumbSrc(variant.imageUrl)}
 										alt={stripLabel(variant)}
 										class:blurred-thumb={variant.nsfw && !revealed}
 										loading="lazy"
+										use:rawFallback={variant.imageUrl}
 									/>
 									{#if variant.nsfw && !revealed}
 										<span class="variant-badge">NSFW</span>
