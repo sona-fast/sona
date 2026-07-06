@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { onNavigate } from '$app/navigation';
 	import { Download, Share2, ExternalLink } from 'lucide-svelte';
-	import { formatDate } from '$lib';
+	import { formatDate, cdnImage } from '$lib';
 	import Meta from '$lib/components/Meta.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
@@ -108,14 +108,14 @@
 		<div class="image-preview">
 			{#if image.nsfw && !revealed}
 				<div class="nsfw-overlay">
-					<img src={image.imageUrl} alt={image.title} class="blurred" />
+					<img src={cdnImage(image.imageUrl, 1200)} alt={image.title} width={image.width} height={image.height} class="blurred" />
 					<button class="reveal-btn" onclick={() => (revealedId = image.id)}>
 						<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
 						<span>{m.gallery_click_reveal()}</span>
 					</button>
 				</div>
 			{:else}
-				<img src={image.imageUrl} alt={image.title} />
+				<img src={cdnImage(image.imageUrl, 1200)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" />
 			{/if}
 		</div>
 
@@ -292,6 +292,10 @@
 
 	.image-preview img {
 		width: 100%;
+		/* The intrinsic width/height attributes reserve layout space (no CLS);
+		   height:auto stops the height attribute from fixing the rendered height
+		   when CSS scales the width. */
+		height: auto;
 		display: block;
 	}
 
