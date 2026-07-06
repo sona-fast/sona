@@ -38,6 +38,7 @@ import {
 import { syncArtists } from '$lib/server/artist-sync';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
+import { isValidGallerySort, DEFAULT_GALLERY_SORT, type GallerySort } from '$lib/gallery';
 import type { Actions, PageServerLoad } from './$types';
 
 const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days in seconds
@@ -158,6 +159,11 @@ export const actions = {
 				? layoutRaw
 				: DEFAULT_LANDING_LAYOUT;
 		}
+		let galleryDefaultSort: GallerySort | undefined;
+		if (data.has('galleryDefaultSort')) {
+			const sortRaw = (data.get('galleryDefaultSort') as string) ?? '';
+			galleryDefaultSort = isValidGallerySort(sortRaw) ? sortRaw : DEFAULT_GALLERY_SORT;
+		}
 
 		await saveSettings(db, {
 			siteName: text('siteName', 100),
@@ -172,6 +178,7 @@ export const actions = {
 			adminAvatarUrl,
 			themeId,
 			landingLayout,
+			galleryDefaultSort,
 			splashSubtitle: text('splashSubtitle', 100),
 			// Three-path profile fields — feed the /art, /connect and /share pages.
 			contactEmail: text('contactEmail', 200),

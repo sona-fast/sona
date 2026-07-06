@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { siteSettings } from './db/schema';
 import { APP_NAME } from '$lib/config';
+import { DEFAULT_GALLERY_SORT, isValidGallerySort, type GallerySort } from '$lib/gallery';
 import type { Database } from './db';
 
 export type StorageProviderId = 'uploadthing' | 'r2';
@@ -55,6 +56,9 @@ export interface SiteSettings {
 	 * avatar, socials) for registry-linked artists. Off (default) keeps local
 	 * edits and only fills empty fields. */
 	registryOverridesLocal: boolean;
+	/** Default gallery sort when a request carries no ?sort= param. One of the
+	 * four gallery sort keys; an explicit param still wins. */
+	galleryDefaultSort: GallerySort;
 }
 
 export interface SonaColor {
@@ -117,7 +121,8 @@ const DEFAULTS: SiteSettings = {
 	landingLayout: 'mosaic',
 	// Empty → the splash renders the localized default subtitle.
 	splashSubtitle: '',
-	registryOverridesLocal: false
+	registryOverridesLocal: false,
+	galleryDefaultSort: DEFAULT_GALLERY_SORT
 };
 
 // Short-TTL in-memory cache. siteSettings is global (not per-user) and changes
@@ -180,7 +185,10 @@ export async function getSettings(
 			themeId: map.themeId ?? DEFAULTS.themeId,
 			landingLayout: map.landingLayout ?? DEFAULTS.landingLayout,
 			splashSubtitle: map.splashSubtitle ?? DEFAULTS.splashSubtitle,
-			registryOverridesLocal: map.registryOverridesLocal === 'true'
+			registryOverridesLocal: map.registryOverridesLocal === 'true',
+			galleryDefaultSort: isValidGallerySort(map.galleryDefaultSort ?? '')
+				? (map.galleryDefaultSort as GallerySort)
+				: DEFAULTS.galleryDefaultSort
 		};
 		settingsCache = { value, expires: Date.now() + SETTINGS_TTL_MS };
 		return value;
