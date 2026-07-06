@@ -63,8 +63,9 @@ declare global {
 				RESEND_API_KEY?: string;
 				/**
 				 * Sender identity for reset email, format `Name <addr@domain>`. Optional;
-				 * defaults to `Sona <onboarding@resend.dev>`. A custom domain must be
-				 * verified in this fork's own Resend account first.
+				 * defaults to `"<siteName>" <onboarding@resend.dev>` using the fork's own
+				 * siteName. A custom domain must be verified in this fork's own Resend
+				 * account first.
 				 */
 				RESEND_FROM?: string;
 			};
