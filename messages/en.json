@@ -380,6 +380,7 @@
 	"admin_image_reference_set": "Use as {name}'s reference sheet",
 	"admin_image_reference_current": "This is {name}'s reference sheet",
 	"admin_image_reference_clear": "Clear reference sheet",
+	"admin_image_reference_replaces": "(replaces the current one)",
 	"admin_add": "Add",
 	"admin_adding": "Adding…",
 	"admin_create": "Create",

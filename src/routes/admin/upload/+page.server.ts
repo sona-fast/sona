@@ -34,7 +34,11 @@ export const load: PageServerLoad = async ({ platform }) => {
 		characters: allCharacters,
 		parentCandidates,
 		maxVariantSet: MAX_VARIANT_SET,
-		ownerCharacter: ownerCharacter && { name: ownerCharacter.name }
+		ownerCharacter: ownerCharacter && {
+			name: ownerCharacter.name,
+			// A designation already exists on some image — checking the box replaces it.
+			hasReference: ownerCharacter.referenceImageId != null
+		}
 	};
 };
 

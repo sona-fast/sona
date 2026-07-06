@@ -64,7 +64,11 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		hasVariants: !!firstVariant,
 		ownerCharacter: ownerCharacter && {
 			name: ownerCharacter.name,
-			isReference: ownerCharacter.referenceImageId === image.id
+			isReference: ownerCharacter.referenceImageId === image.id,
+			// A designation already exists, but on a different image — setting this
+			// one replaces it.
+			replacesOther:
+				ownerCharacter.referenceImageId != null && ownerCharacter.referenceImageId !== image.id
 		}
 	};
 };

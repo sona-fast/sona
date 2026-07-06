@@ -152,27 +152,38 @@ describe('admin image edit — save action', () => {
 });
 
 describe('admin image edit — load ownerCharacter', () => {
-	it('marks isReference true when the owner reference points at this image', async () => {
+	it('marks isReference true and replacesOther false when the owner reference points at this image', async () => {
 		const { db, platform } = makeDb();
 		await seedImage(db, 5);
 		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 5 });
 
 		const data = (await load({ params: { id: '5' }, platform } as never)) as {
-			ownerCharacter: { name: string; isReference: boolean } | null;
+			ownerCharacter: { name: string; isReference: boolean; replacesOther: boolean } | null;
 		};
-		expect(data.ownerCharacter).toEqual({ name: 'Owner', isReference: true });
+		expect(data.ownerCharacter).toEqual({ name: 'Owner', isReference: true, replacesOther: false });
 	});
 
-	it('marks isReference false when the owner reference points elsewhere', async () => {
+	it('marks isReference false and replacesOther true when the owner reference points elsewhere', async () => {
 		const { db, platform } = makeDb();
 		await seedImage(db, 5);
 		await seedImage(db, 6);
 		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 6 });
 
 		const data = (await load({ params: { id: '5' }, platform } as never)) as {
-			ownerCharacter: { name: string; isReference: boolean } | null;
+			ownerCharacter: { name: string; isReference: boolean; replacesOther: boolean } | null;
 		};
-		expect(data.ownerCharacter).toEqual({ name: 'Owner', isReference: false });
+		expect(data.ownerCharacter).toEqual({ name: 'Owner', isReference: false, replacesOther: true });
+	});
+
+	it('marks isReference false and replacesOther false when no designation is set', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: null });
+
+		const data = (await load({ params: { id: '5' }, platform } as never)) as {
+			ownerCharacter: { name: string; isReference: boolean; replacesOther: boolean } | null;
+		};
+		expect(data.ownerCharacter).toEqual({ name: 'Owner', isReference: false, replacesOther: false });
 	});
 
 	it('returns null ownerCharacter when no owner character exists', async () => {

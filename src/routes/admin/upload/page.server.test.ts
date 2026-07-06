@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
 import { characters, images } from '$lib/server/db/schema';
-import { actions } from './+page.server';
+import { load, actions } from './+page.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses,
 // same approach as admin/characters/page.server.test.ts.
@@ -41,6 +41,13 @@ function makeD1(sqlite: any): D1Database {
 function makeDb() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec(`
+		CREATE TABLE artists (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT, twitter_url TEXT,
+			bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT, deviantart_url TEXT, patreon_url TEXT,
+			instagram_url TEXT, global_id TEXT, registry_version INTEGER, registry_synced_at TEXT, aliases TEXT,
+			created_at TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE collections (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, slug TEXT NOT NULL, cover_image_url TEXT, created_at TEXT NOT NULL DEFAULT '');
 		CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT '');
 		CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
 		CREATE TABLE image_characters (image_id INTEGER NOT NULL, character_id INTEGER NOT NULL);
@@ -104,5 +111,32 @@ describe('admin upload — use as reference sheet', () => {
 
 		const owner = await db.select({ ref: characters.referenceImageId }).from(characters).where(eq(characters.id, c.id)).get();
 		expect(owner?.ref ?? null).toBe(null);
+	});
+});
+
+describe('admin upload — load ownerCharacter', () => {
+	it('exposes hasReference true when the owner already has a designation', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(images).values({ id: 9, title: 'Ref', slug: 'ref-9', imageUrl: 'https://cdn.example.com/9.png', artistId: 1 });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 9 });
+
+		const data = (await load({ platform } as never)) as { ownerCharacter: { name: string; hasReference: boolean } | null };
+		expect(data.ownerCharacter).toEqual({ name: 'Owner', hasReference: true });
+	});
+
+	it('exposes hasReference false when the owner has no designation', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: null });
+
+		const data = (await load({ platform } as never)) as { ownerCharacter: { name: string; hasReference: boolean } | null };
+		expect(data.ownerCharacter).toEqual({ name: 'Owner', hasReference: false });
+	});
+
+	it('returns null ownerCharacter when no owner character exists', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(characters).values({ name: 'Featured', isOwner: false });
+
+		const data = (await load({ platform } as never)) as { ownerCharacter: unknown };
+		expect(data.ownerCharacter).toBe(null);
 	});
 });

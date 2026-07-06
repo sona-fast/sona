@@ -344,6 +344,7 @@
 	"admin_image_reference_set": "{name}のリファレンスシートに設定",
 	"admin_image_reference_current": "これは{name}のリファレンスシートです",
 	"admin_image_reference_clear": "リファレンスシートを解除",
+	"admin_image_reference_replaces": "（現在の設定を置き換えます）",
 	"admin_add": "追加",
 	"admin_adding": "追加中…",
 	"admin_create": "作成",

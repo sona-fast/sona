@@ -46,6 +46,9 @@
 					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_clear()}</button>
 				{:else}
 					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_set({ name: data.ownerCharacter.name })}</button>
+					{#if data.ownerCharacter.replacesOther}
+						<small class="hint">{m.admin_image_reference_replaces()}</small>
+					{/if}
 				{/if}
 			</form>
 		{/if}

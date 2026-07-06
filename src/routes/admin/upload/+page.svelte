@@ -415,7 +415,7 @@
 	{#if data.ownerCharacter}
 		<label class="checkbox-label">
 			<input type="checkbox" name="useAsReference" />
-			<span>{m.admin_image_reference_set({ name: data.ownerCharacter.name })}</span>
+			<span>{m.admin_image_reference_set({ name: data.ownerCharacter.name })}{#if data.ownerCharacter.hasReference} <span class="checkbox-helper">{m.admin_image_reference_replaces()}</span>{/if}</span>
 		</label>
 	{/if}
 
