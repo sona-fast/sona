@@ -109,8 +109,12 @@ Sona is single-admin, so there's no second account to let you back in. Two paths
   default `onboarding@resend.dev` shared sender is used. **Note:** that shared
   sender only delivers to the email address on your own Resend account, so with
   the default the recovery email must be that same address; verify a custom
-  domain and set `RESEND_FROM` to lift this. The flow always shows the same
-  confirmation (it never reveals whether an email matched).
+  domain and set `RESEND_FROM` to lift this. When you verify your own sender
+  domain in Resend, also add the DNS records it asks for (SPF + DKIM) plus a
+  DMARC record (start with `v=DMARC1; p=none; rua=mailto:you@yourdomain`) —
+  without them, reset emails risk the spam folder as receivers tighten
+  enforcement. The flow always shows the same confirmation (it never reveals
+  whether an email matched).
 - **CLI fallback (always available).** From the project root:
 
   ```sh
