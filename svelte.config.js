@@ -12,7 +12,12 @@ const config = {
 		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
 		adapter: adapter({
 			platformProxy: {
-				configPath: 'wrangler.toml'
+				// E2E tests override these (see playwright.config.ts) to run the dev
+				// server against a throwaway local D1 in an isolated persist dir.
+				configPath: process.env.WRANGLER_CONFIG ?? 'wrangler.toml',
+				persist: process.env.WRANGLER_PERSIST_TO
+					? { path: process.env.WRANGLER_PERSIST_TO }
+					: undefined
 			}
 		})
 	}
