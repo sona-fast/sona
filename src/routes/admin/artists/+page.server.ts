@@ -256,6 +256,8 @@ export const actions = {
 			// Sharing it would semantically propose renaming the survivor back to the
 			// alias — refuse, mirroring the disabled Share button in the UI.
 			if (reg && isLocalNameAliasOf(a.name, reg)) {
+				// Hardcoded English per this file's convention — keep the wording in
+				// sync with `admin_artists_alias_linked` in messages/en.json.
 				return fail(400, {
 					error: `This entry is an AKA of ${reg.displayName} in the registry — sharing is disabled so it doesn't propose renaming that artist.`
 				});

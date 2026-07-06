@@ -247,8 +247,8 @@
 						</button>
 					</form>
 				{/if}
-				<button class="icon-btn" onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
-				<button class="icon-btn" disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
+				<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
+				<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
 					{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 				</button>
 			</div>

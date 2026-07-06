@@ -60,11 +60,14 @@ export function isLocalNameAliasOf(
 	localName: string,
 	reg: Pick<RegistryArtist, 'displayName' | 'aliases'>
 ): boolean {
-	const n = localName.toLowerCase();
-	if (reg.displayName.toLowerCase() === n) return false;
+	// Registry data is untrusted: fail open on a malformed/drifted entry.
+	if (typeof reg?.displayName !== 'string') return false;
+	const fold = (s: string) => s.normalize('NFC').toLowerCase();
+	const n = fold(localName);
+	if (fold(reg.displayName) === n) return false;
 	// Registry data is untrusted: tolerate malformed alias entries.
 	return (reg.aliases ?? []).some(
-		(al) => typeof al?.displayName === 'string' && al.displayName.toLowerCase() === n
+		(al) => typeof al?.displayName === 'string' && fold(al.displayName) === n
 	);
 }
 
