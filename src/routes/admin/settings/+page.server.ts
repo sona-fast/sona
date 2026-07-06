@@ -111,7 +111,11 @@ export const load: PageServerLoad = async ({ platform }) => {
 		utUsage,
 		storageStatus,
 		registryEnabled: isRegistryEnabled(renv),
-		registryHasSecret: !!platform?.env?.REGISTRY_API_KEY
+		registryHasSecret: !!platform?.env?.REGISTRY_API_KEY,
+		// Presence-only flags for the password-reset setup guide. The secret VALUES
+		// are deploy-time env and must never reach the client — only whether they exist.
+		resendKeySet: !!platform?.env?.RESEND_API_KEY,
+		resendFromSet: !!platform?.env?.RESEND_FROM
 	};
 };
 

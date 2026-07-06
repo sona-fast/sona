@@ -197,6 +197,40 @@ describe('settings load — adminEmail is raw, never in public settings', () => 
 	});
 });
 
+describe('settings load — Resend config exposes presence only', () => {
+	function makeLoadDb(env: Record<string, unknown>) {
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+			CREATE TABLE images (id INTEGER PRIMARY KEY, file_size INTEGER);`);
+		const d1 = makeD1(sqlite);
+		return { platform: { env: { DB: d1, ...env } } as unknown as App.Platform };
+	}
+
+	it('reports both secrets as set without echoing their values', async () => {
+		const { platform } = makeLoadDb({
+			RESEND_API_KEY: 're_secret_value',
+			RESEND_FROM: 'Sona <hi@example.com>'
+		});
+
+		const result = (await load({ platform } as never)) as unknown as Record<string, unknown>;
+
+		expect(result.resendKeySet).toBe(true);
+		expect(result.resendFromSet).toBe(true);
+		// Presence only — the secret strings must never appear anywhere in the payload.
+		expect(JSON.stringify(result)).not.toContain('re_secret_value');
+		expect(JSON.stringify(result)).not.toContain('hi@example.com');
+	});
+
+	it('reports both secrets as unset when the env vars are absent', async () => {
+		const { platform } = makeLoadDb({});
+
+		const result = (await load({ platform } as never)) as unknown as Record<string, unknown>;
+
+		expect(result.resendKeySet).toBe(false);
+		expect(result.resendFromSet).toBe(false);
+	});
+});
+
 describe('settings connectRegistry — reconnect guard', () => {
 	it('refuses to mint a second key while one is already stored', async () => {
 		const { db, platform } = makeDb();
