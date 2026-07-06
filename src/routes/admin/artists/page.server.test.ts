@@ -64,8 +64,10 @@ function makeDb() {
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
 
-function loadEvent(platform: App.Platform) {
-	return { platform, url: new URL('http://localhost/admin/artists') } as never;
+function loadEvent(platform: App.Platform, q?: string) {
+	const url = new URL('http://localhost/admin/artists');
+	if (q !== undefined) url.searchParams.set('q', q);
+	return { platform, url } as never;
 }
 
 // The registry itself must never be hit from tests: fail every fetch so the
@@ -119,6 +121,112 @@ describe('admin artists load — former names (aliases)', () => {
 
 		const result = (await load(loadEvent(platform))) as { artists: Array<{ formerly: string[] }> };
 		expect(result.artists.map((a) => a.formerly)).toEqual([[], []]);
+	});
+});
+
+describe('admin artists load — server-side search matches AKA names', () => {
+	// Zaps was formerly "Boltie"; the alias JSON also carries a social URL we must
+	// NOT match on. Nova is an unrelated artist used to prove the search narrows.
+	async function seedRenamedArtist(db: ReturnType<typeof makeDb>['db']) {
+		await db.insert(schema.artists).values({
+			name: 'Zaps',
+			aliases: JSON.stringify([{ displayName: 'Boltie', socials: { twitter: 'https://x.com/boltie' } }])
+		});
+		await db.insert(schema.artists).values({ name: 'Nova' });
+	}
+
+	it('finds an artist by a former (alias) display name', async () => {
+		const { db, platform } = makeDb();
+		await seedRenamedArtist(db);
+
+		const result = (await load(loadEvent(platform, 'boltie'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists.map((a) => a.name)).toEqual(['Zaps']);
+		// Count query shares the widened where — it must reflect the alias hit too.
+		expect(result.total).toBe(1);
+	});
+
+	it('does NOT match on a URL buried inside the aliases JSON (precision)', async () => {
+		const { db, platform } = makeDb();
+		await seedRenamedArtist(db);
+
+		const result = (await load(loadEvent(platform, 'x.com'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists).toHaveLength(0);
+		expect(result.total).toBe(0);
+	});
+
+	it('still matches on the current name, and tolerates NULL/malformed aliases', async () => {
+		const { db, platform } = makeDb();
+		await seedRenamedArtist(db);
+		// A malformed-JSON aliases row must not make json_each throw for the query.
+		await db.insert(schema.artists).values({ name: 'BadJson', aliases: 'not-json{' });
+
+		const result = (await load(loadEvent(platform, 'zaps'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists.map((a) => a.name)).toEqual(['Zaps']);
+		expect(result.total).toBe(1);
+	});
+
+	// Valid-JSON shapes that json_extract would throw on (bare scalar element,
+	// top-level scalar, top-level object) if the query drilled into them
+	// unguarded — each must return cleanly with no match and no 500.
+	it.each([
+		['bare-string array element', '["Boltie"]'],
+		['top-level string scalar', '"Boltie"'],
+		['array mixing an object and a bare string', '[{"displayName":"Nope"},"Boltie"]'],
+		['top-level object with a nested displayName', '{"foo":{"displayName":"Boltie"}}']
+	])('does not throw or match on a %s', async (_label, aliases) => {
+		const { db, platform } = makeDb();
+		await db.insert(schema.artists).values({ name: 'Odd', aliases });
+
+		const result = (await load(loadEvent(platform, 'boltie'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists).toHaveLength(0);
+		expect(result.total).toBe(0);
+	});
+
+	it('returns one row when q matches both the current name and an alias', async () => {
+		const { db, platform } = makeDb();
+		// "Bolt" appears in both the current name and the former name — the OR must
+		// not double-count the row.
+		await db.insert(schema.artists).values({
+			name: 'Boltz',
+			aliases: JSON.stringify([{ displayName: 'Boltie', socials: {} }])
+		});
+
+		const result = (await load(loadEvent(platform, 'bolt'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists.map((a) => a.name)).toEqual(['Boltz']);
+		expect(result.total).toBe(1);
+	});
+
+	it('matches when only the SECOND of multiple aliases is the hit', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(schema.artists).values({
+			name: 'Zaps',
+			aliases: JSON.stringify([
+				{ displayName: 'Alpha', socials: {} },
+				{ displayName: 'Boltie', socials: {} }
+			])
+		});
+
+		const result = (await load(loadEvent(platform, 'boltie'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists.map((a) => a.name)).toEqual(['Zaps']);
+		expect(result.total).toBe(1);
 	});
 });
 

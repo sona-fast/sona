@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { artists, images, stickers, stickerPacks } from '$lib/server/db/schema';
-import { eq, sql, like } from 'drizzle-orm';
+import { eq, sql, like, or } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { sanitizeText } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
@@ -30,9 +30,23 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const page = Math.max(1, Number(url.searchParams.get('page') || 1));
 	const perPage = 25;
 	// Server-side name search so it matches across the WHOLE set, not just the
-	// current page. SQLite LIKE is case-insensitive for ASCII.
+	// current page. SQLite LIKE is case-insensitive for ASCII. Also match former
+	// (AKA) names the row displays as "formerly …" — the aliases JSON array's
+	// displayName fields, not the raw blob (a bare LIKE would false-positive on
+	// URLs/keys inside the JSON). Guards, in order, so a bad shape can't throw and
+	// 500 the page: json_valid rejects malformed/NULL text; json_type = 'array'
+	// keeps json_each off a top-level scalar/object (and drops phantom matches from
+	// an object's nested values); je.type = 'object' skips bare-string array
+	// elements so json_extract only ever sees an object. parseAliases tolerates all
+	// these shapes, so the search must too.
 	const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
-	const whereClause = q ? like(artists.name, `%${q}%`) : undefined;
+	const like_ = `%${q}%`;
+	const whereClause = q
+		? or(
+				like(artists.name, like_),
+				sql`(json_valid(${artists.aliases}) AND json_type(${artists.aliases}) = 'array' AND EXISTS (SELECT 1 FROM json_each(${artists.aliases}) AS je WHERE je.type = 'object' AND json_extract(je.value, '$.displayName') LIKE ${like_}))`
+			)
+		: undefined;
 
 	const totalResult = await db
 		.select({ count: sql<number>`COUNT(*)` })
