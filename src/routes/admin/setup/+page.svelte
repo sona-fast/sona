@@ -63,6 +63,11 @@
 						<span>{m.admin_field_confirm_password()}</span>
 						<input type="password" name="confirmPassword" class="input" required minlength="8" autocomplete="new-password" />
 					</label>
+					<label>
+						<span>{m.admin_setup_recovery_email()} <span class="optional">{m.admin_setup_optional()}</span></span>
+						<input type="email" name="adminEmail" class="input" autocomplete="email" placeholder={m.admin_setup_recovery_email_placeholder()} />
+						<small>{m.admin_setup_recovery_email_hint()}</small>
+					</label>
 				</section>
 
 				<section>

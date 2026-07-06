@@ -181,6 +181,23 @@ async function main() {
 		telegramBotToken = await ask('Telegram bot token (TELEGRAM_BOT_TOKEN)', '');
 	}
 
+	// Admin password recovery email (optional). The in-app "Forgot password" flow
+	// sends a reset link via Resend; it needs a RESEND_API_KEY. Off by default —
+	// without it, recovery is the `npm run reset-password` CLI. See README.
+	console.log(
+		'\nAdmin password recovery can email a reset link via Resend (https://resend.com).'
+	);
+	let resendApiKey = '';
+	let resendFrom = '';
+	if (await askYesNo('Enable "Forgot password" reset emails? (needs a Resend API key)', false)) {
+		resendApiKey = await ask('Resend API key (RESEND_API_KEY)', '');
+		console.log(
+			'  Sender identity (RESEND_FROM), format "Name <you@yourdomain>". A custom domain'
+		);
+		console.log('  must be verified in your own Resend account first; blank uses Resend\'s shared sender.');
+		resendFrom = await ask('Resend sender (RESEND_FROM)', '');
+	}
+
 	// 1. Pages project (idempotent — ignore "already exists").
 	run(`npx wrangler pages project create ${project} --production-branch main`, { allowFail: true });
 
@@ -270,6 +287,8 @@ async function main() {
 	putSecret('CRON_SECRET', cronSecret);
 	if (!useR2 && uploadThingToken) putSecret('UPLOADTHING_TOKEN', uploadThingToken);
 	if (telegramBotToken) putSecret('TELEGRAM_BOT_TOKEN', telegramBotToken);
+	if (resendApiKey) putSecret('RESEND_API_KEY', resendApiKey);
+	if (resendFrom) putSecret('RESEND_FROM', resendFrom);
 
 	// 8. Offer to wire the fork's GitHub Actions secrets/vars so CI deploys work
 	//    with no separate manual step. Only when gh is installed + authenticated,

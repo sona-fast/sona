@@ -3,7 +3,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import { lt } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { sessions, characters } from '$lib/server/db/schema';
-import { saveSettings, getRawSetting } from '$lib/server/settings';
+import { saveSettings, getRawSetting, setRawSetting } from '$lib/server/settings';
 import { sanitizeText } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
@@ -133,6 +133,12 @@ export const actions = {
 			landingLayout,
 			...optional
 		});
+
+		// Optional admin recovery email (raw setting, never client-exposed). Only
+		// persist when provided — an empty field leaves password recovery disabled
+		// until it's set in Settings → Security.
+		const adminEmail = sanitizeText(data.get('adminEmail') as string, 200);
+		if (adminEmail) await setRawSetting(db, 'adminEmail', adminEmail);
 
 		// 4. The fursona this site is about (stickers/fursuit resolve one character).
 		const characterName = fursonaName || siteName;

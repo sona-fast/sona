@@ -54,6 +54,19 @@ declare global {
 				 * the site runs entirely on its local artists table.
 				 */
 				REGISTRY_API_KEY?: string;
+				/**
+				 * Resend API key. Gates the admin "Forgot password" flow: when unset,
+				 * /admin/forgot silently no-ops (still returns the generic response) and
+				 * the only recovery path is the `npm run reset-password` CLI. Set via
+				 * `wrangler pages secret put RESEND_API_KEY`.
+				 */
+				RESEND_API_KEY?: string;
+				/**
+				 * Sender identity for reset email, format `Name <addr@domain>`. Optional;
+				 * defaults to `Sona <onboarding@resend.dev>`. A custom domain must be
+				 * verified in this fork's own Resend account first.
+				 */
+				RESEND_FROM?: string;
 			};
 		}
 	}

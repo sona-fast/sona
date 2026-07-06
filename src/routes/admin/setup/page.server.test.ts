@@ -99,7 +99,13 @@ describe('setup wizard — unrecognized enum values fail instead of silently def
 		const { db, platform } = makeDb();
 
 		try {
-			await actions.default(setupEvent(platform, { themeId: 'terracotta', landingLayout: 'threePath' }));
+			await actions.default(
+				setupEvent(platform, {
+					themeId: 'terracotta',
+					landingLayout: 'threePath',
+					adminEmail: 'admin@taro.surf'
+				})
+			);
 			expect.unreachable('setup should redirect on success');
 		} catch (e) {
 			if (!isRedirect(e)) throw e;
@@ -107,6 +113,20 @@ describe('setup wizard — unrecognized enum values fail instead of silently def
 		}
 		expect(await getRawSetting(db, 'themeId')).toBe('terracotta');
 		expect(await getRawSetting(db, 'landingLayout')).toBe('threePath');
+		// The optional recovery email is persisted when provided.
+		expect(await getRawSetting(db, 'adminEmail')).toBe('admin@taro.surf');
+	});
+
+	it('does not write adminEmail when the field is empty', async () => {
+		const { db, platform } = makeDb();
+
+		try {
+			await actions.default(setupEvent(platform, { adminEmail: '' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		expect(await getRawSetting(db, 'adminEmail')).toBeNull();
 	});
 
 	it('takes the defaults when the fields are absent', async () => {

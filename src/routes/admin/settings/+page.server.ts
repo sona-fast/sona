@@ -100,8 +100,12 @@ export const load: PageServerLoad = async ({ platform }) => {
 	// (D1-stored) fork key — resolve both. registryHasSecret tells the UI to hide
 	// the connect/disconnect controls (a secret can't be managed from here).
 	const renv = await resolveRegistryEnv(db, platform?.env);
+	// Raw setting (never part of the client-exposed SiteSettings) — surfaced only
+	// to the admin Security form so the recovery address can be edited.
+	const adminEmail = (await getRawSetting(db, 'adminEmail')) ?? '';
 	return {
 		settings,
+		adminEmail,
 		imageCount: stats?.count || 0,
 		totalSize: stats?.totalSize || 0,
 		utUsage,
@@ -277,6 +281,16 @@ export const actions = {
 		await setRawSetting(db, REGISTRY_URL_SETTING, '');
 		clearSettingsCache();
 		return { success: true, registryMessage: 'Disconnected from the shared registry.' };
+	},
+
+	saveSecurityEmail: async ({ request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const data = await request.formData();
+		// adminEmail is a raw site_settings row, never mapped into SiteSettings.
+		// Writing an empty value clears the recovery address (disables email reset).
+		const adminEmail = sanitizeText(data.get('adminEmail') as string, 200);
+		await setRawSetting(db, 'adminEmail', adminEmail);
+		return { recoveryEmailSaved: true };
 	},
 
 	changePassword: async ({ request, platform, cookies }) => {
