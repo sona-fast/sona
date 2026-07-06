@@ -48,3 +48,52 @@ describe('getStorage r2 public-base fallback (prod)', () => {
 		expect(url).toBe('https://cdn.example.com/stickers/pack/abc.webp');
 	});
 });
+
+describe('R2 deleteOrphans age gate + dryRun', () => {
+	const HOUR = 60 * 60 * 1000;
+
+	function makeBucket() {
+		return {
+			put: vi.fn(async () => {}),
+			delete: vi.fn(async () => {}),
+			list: vi.fn(async () => ({
+				objects: [
+					{ key: 'referenced.png', uploaded: new Date(Date.now() - 10 * HOUR) },
+					{ key: 'old-orphan.png', uploaded: new Date(Date.now() - 10 * HOUR) },
+					{ key: 'young-orphan.png', uploaded: new Date() }
+				],
+				truncated: false
+			}))
+		};
+	}
+
+	it('deletes only orphans older than the gate; referenced and young objects survive', async () => {
+		const bucket = makeBucket();
+		const storage = getStorage({ IMAGES: bucket } as unknown as Env, r2Settings('https://cdn.example.com'));
+		const deleted = await storage.deleteOrphans(['https://cdn.example.com/referenced.png'], {
+			olderThan: new Date(Date.now() - HOUR)
+		});
+		expect(deleted).toBe(1);
+		expect(bucket.delete).toHaveBeenCalledTimes(1);
+		expect(bucket.delete).toHaveBeenCalledWith(['old-orphan.png']);
+	});
+
+	it('deletes every orphan when no olderThan is given', async () => {
+		const bucket = makeBucket();
+		const storage = getStorage({ IMAGES: bucket } as unknown as Env, r2Settings('https://cdn.example.com'));
+		const deleted = await storage.deleteOrphans(['https://cdn.example.com/referenced.png']);
+		expect(deleted).toBe(2);
+		expect(bucket.delete).toHaveBeenCalledWith(['old-orphan.png', 'young-orphan.png']);
+	});
+
+	it('dryRun counts without deleting', async () => {
+		const bucket = makeBucket();
+		const storage = getStorage({ IMAGES: bucket } as unknown as Env, r2Settings('https://cdn.example.com'));
+		const count = await storage.deleteOrphans(['https://cdn.example.com/referenced.png'], {
+			olderThan: new Date(Date.now() - HOUR),
+			dryRun: true
+		});
+		expect(count).toBe(1);
+		expect(bucket.delete).not.toHaveBeenCalled();
+	});
+});

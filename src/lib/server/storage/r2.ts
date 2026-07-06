@@ -1,5 +1,5 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
-import type { StorageProvider, PutInput, PutResult } from './types';
+import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
 
 export interface R2Options {
 	/** The R2 bucket binding (platform.env.IMAGES). */
@@ -55,7 +55,7 @@ export class R2Storage implements StorageProvider {
 		return url.startsWith(`${this.#base}/`);
 	}
 
-	async deleteOrphans(referencedUrls: string[]): Promise<number> {
+	async deleteOrphans(referencedUrls: string[], opts?: DeleteOrphansOptions): Promise<number> {
 		const keep = new Set(
 			referencedUrls.map((u) => this.#keyFromUrl(u)).filter((k): k is string => !!k)
 		);
@@ -63,9 +63,11 @@ export class R2Storage implements StorageProvider {
 		let cursor: string | undefined;
 		do {
 			const listing = await this.#bucket.list(cursor ? { cursor, limit: 1000 } : { limit: 1000 });
-			const orphans = listing.objects.map((o) => o.key).filter((k) => !keep.has(k));
+			const orphans = listing.objects
+				.filter((o) => !keep.has(o.key) && (!opts?.olderThan || o.uploaded < opts.olderThan))
+				.map((o) => o.key);
 			if (orphans.length) {
-				await this.#bucket.delete(orphans);
+				if (!opts?.dryRun) await this.#bucket.delete(orphans);
 				deleted += orphans.length;
 			}
 			cursor = listing.truncated ? listing.cursor : undefined;

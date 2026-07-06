@@ -10,7 +10,7 @@ import {
 	clearSettingsCache,
 	parseSonaColors
 } from '$lib/server/settings';
-import { deleteOrphansAll } from '$lib/server/storage';
+import { deleteOrphansAll, collectReferencedUrls } from '$lib/server/storage';
 import {
 	images,
 	artists,
@@ -402,9 +402,18 @@ export const actions = {
 
 		try {
 			const settings = await getSettings(db);
-			const dbUrls = (await db.select({ imageUrl: images.imageUrl }).from(images)).map((i) => i.imageUrl);
-			// Remove orphans from every configured provider (R2 + UploadThing).
-			const deleted = await deleteOrphansAll(platform?.env, settings, dbUrls);
+			// The reference set is EVERY URL-bearing column in the schema plus the
+			// URL-ish settings — not just images.imageUrl. Anything missed there
+			// (sticker files, thumbnails, avatars, covers) would be deleted as an
+			// "orphan". See collectReferencedUrls + its completeness guard test.
+			const referenced = await collectReferencedUrls(db, settings);
+			// Remove orphans from every configured provider (R2 + UploadThing), but
+			// only objects older than an hour: /api/upload stores bytes before any
+			// D1 row exists, so an upload racing this button would look orphaned.
+			// The button's purpose is stale junk, not just-uploaded bytes.
+			const deleted = await deleteOrphansAll(platform?.env, settings, referenced, {
+				olderThan: new Date(Date.now() - 60 * 60 * 1000)
+			});
 			return {
 				success: true,
 				message: deleted === 0 ? 'No orphaned files found.' : `Deleted ${deleted} orphaned file${deleted === 1 ? '' : 's'}.`

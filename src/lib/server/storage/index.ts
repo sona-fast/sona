@@ -1,10 +1,11 @@
 import { dev } from '$app/environment';
 import type { SiteSettings, StorageProviderId } from '$lib/server/settings';
-import type { StorageProvider } from './types';
+import type { StorageProvider, DeleteOrphansOptions } from './types';
 import { R2Storage } from './r2';
 import { UploadThingStorage } from './uploadthing';
 
-export type { StorageProvider } from './types';
+export type { StorageProvider, DeleteOrphansOptions } from './types';
+export { collectReferencedUrls } from './referenced-urls';
 
 type Env = App.Platform['env'];
 
@@ -133,12 +134,13 @@ export async function deleteFile(env: Env | undefined, settings: SiteSettings, u
 export async function deleteOrphansAll(
 	env: Env | undefined,
 	settings: SiteSettings,
-	referencedUrls: string[]
+	referencedUrls: string[],
+	opts?: DeleteOrphansOptions
 ): Promise<number> {
 	let deleted = 0;
 	for (const id of ALL_PROVIDERS) {
 		try {
-			deleted += await getStorage(env, settings, id).deleteOrphans(referencedUrls);
+			deleted += await getStorage(env, settings, id).deleteOrphans(referencedUrls, opts);
 		} catch {
 			// provider not configured — skip
 		}

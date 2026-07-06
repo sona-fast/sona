@@ -19,6 +19,18 @@ export interface PutResult {
 	url: string;
 }
 
+export interface DeleteOrphansOptions {
+	/**
+	 * Only treat objects uploaded before this time as orphans. Protects
+	 * in-flight uploads: /api/upload stores bytes before any D1 row references
+	 * them, so a just-uploaded object always looks orphaned. Both providers
+	 * honor it (R2 via object.uploaded, UploadThing via file.uploadedAt).
+	 */
+	olderThan?: Date;
+	/** Count orphans without deleting anything. */
+	dryRun?: boolean;
+}
+
 /**
  * A pluggable image store. The whole site (artwork gallery + fursuit photos)
  * uses one active provider at a time; migration copies between providers.
@@ -33,7 +45,8 @@ export interface StorageProvider {
 	owns(url: string): boolean;
 	/**
 	 * Delete every object in this store that is NOT in `referencedUrls`
-	 * (orphan cleanup). Returns the number of files deleted.
+	 * (orphan cleanup). Returns the number of files deleted (or, with
+	 * `dryRun`, the number that would be).
 	 */
-	deleteOrphans(referencedUrls: string[]): Promise<number>;
+	deleteOrphans(referencedUrls: string[], opts?: DeleteOrphansOptions): Promise<number>;
 }
