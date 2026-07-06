@@ -224,7 +224,7 @@
 				<span>{m.admin_settings_about_text()}</span>
 				<textarea class="input" rows="4" name="aboutText" bind:value={aboutText}></textarea>
 			</label>
-			<label>
+			<label id="primary-character">
 				<span>{m.admin_setup_primary_character()}</span>
 				<input type="text" class="input" bind:value={primaryCharacter} name="primaryCharacter" placeholder={m.admin_fursuit_tag_placeholder()} />
 			</label>
