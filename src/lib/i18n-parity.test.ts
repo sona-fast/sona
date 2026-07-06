@@ -29,9 +29,17 @@ describe('message catalogue parity', () => {
 
 // Terminology guard (sona#45): the JA UI always calls Telegram/chat sticker
 // content ステッカー, never スタンプ. Every スタンプ occurrence in the catalogue was
-// sticker-domain, so the whole file must stay free of it.
+// sticker-domain, so the whole file must stay free of it. If a non-sticker
+// feature ever legitimately needs スタンプ, SCOPE this check to the sticker-domain
+// key prefixes (stickers_, admin_stickers_, admin_pack_, admin_import_,
+// nav_stickers, …) — do not delete it.
 describe('ja terminology', () => {
 	it('never uses スタンプ for sticker content', () => {
-		expect(rawOf('ja')).not.toContain('スタンプ');
+		// Parse (decodes any \uXXXX escapes) + NFKC (folds half-width kana) so the
+		// guard catches スタンプ however it is encoded.
+		const values = Object.values(JSON.parse(rawOf('ja')) as Record<string, string>)
+			.join('\n')
+			.normalize('NFKC');
+		expect(values).not.toContain('スタンプ');
 	});
 });

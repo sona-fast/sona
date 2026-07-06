@@ -67,13 +67,19 @@
 		flex-direction: column;
 		align-items: center;
 		gap: 2px;
-		padding: 4px 16px;
+		padding: 4px 6px;
 		border-radius: var(--radius-s);
 		text-decoration: none;
 		color: var(--muted-foreground);
 		font-size: 11px;
 		font-family: var(--font-secondary);
 		transition: color 0.15s;
+	}
+
+	/* Keep multi-character JA labels (e.g. サイトについて) on one line; the reduced
+	   horizontal padding above lets all five tabs fit at 390px without wrapping. */
+	.tab span {
+		white-space: nowrap;
 	}
 
 	.tab:hover {

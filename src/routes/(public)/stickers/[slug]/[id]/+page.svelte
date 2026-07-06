@@ -40,7 +40,7 @@
 	// Static stickers are served as their original file (WebP/PNG/GIF, animation
 	// intact), so a generic "Download" label avoids mislabelling an animated file.
 	const downloadLabel = $derived(
-		sticker.format === 'video' ? 'Download WEBM' : sticker.format === 'animated' ? 'Download Lottie' : 'Download'
+		sticker.format === 'video' ? m.stickers_download_webm() : sticker.format === 'animated' ? m.stickers_download_lottie() : m.stickers_download()
 	);
 	// Social previews need a static image. Animated stickers are .json (Lottie) and
 	// video stickers are .webm — neither renders as an OG image — so only use the
@@ -133,7 +133,7 @@
 					<Download size={16} />
 					{downloadLabel}
 				</a>
-				<p class="dl-caption">Stickers download in their original format. Want the whole set? Add the pack to Telegram from the <a href="/stickers/{pack.slug}">pack page</a>.</p>
+				<p class="dl-caption">{m.stickers_dl_caption_before()}<a href="/stickers/{pack.slug}">{m.stickers_dl_caption_link()}</a>{m.stickers_dl_caption_after()}</p>
 			</div>
 		</div>
 	</div>
