@@ -19,6 +19,7 @@
 	let aboutText = $state(data.settings.aboutText);
 	let themeId = $state(data.settings.themeId);
 	let landingLayout = $state(data.settings.landingLayout);
+	let galleryDefaultSort = $state(data.settings.galleryDefaultSort);
 	let splashSubtitle = $state(data.settings.splashSubtitle);
 	let registryOverridesLocal = $state(data.settings.registryOverridesLocal);
 	let syncing = $state(false);
@@ -129,6 +130,7 @@
 		aboutText = data.settings.aboutText;
 		themeId = data.settings.themeId;
 		landingLayout = data.settings.landingLayout;
+		galleryDefaultSort = data.settings.galleryDefaultSort;
 		splashSubtitle = data.settings.splashSubtitle;
 		primaryCharacter = data.settings.primaryCharacter;
 		twitterUrl = data.settings.twitterUrl;
@@ -248,6 +250,15 @@
 					{#each LANDING_LAYOUTS as l}
 						<option value={l.id}>{l.label}</option>
 					{/each}
+				</select>
+			</label>
+			<label>
+				<span>{m.admin_settings_gallery_default_sort()}</span>
+				<select class="input" name="galleryDefaultSort" bind:value={galleryDefaultSort}>
+					<option value="newest">{m.gallery_sort_newest()}</option>
+					<option value="oldest">{m.gallery_sort_oldest()}</option>
+					<option value="commissioned-newest">{m.gallery_sort_commissioned_newest()}</option>
+					<option value="commissioned-oldest">{m.gallery_sort_commissioned_oldest()}</option>
 				</select>
 			</label>
 			<label>

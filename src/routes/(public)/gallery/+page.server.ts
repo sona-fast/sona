@@ -5,6 +5,8 @@ import { listPublicCharacterNames } from '$lib/server/characters';
 import { fursuitPhotoFromRow } from '$lib/server/fursuit-import';
 import { getMode } from '$lib/server/furtrack';
 import { parseAliases } from '$lib/server/registry';
+import { getSettings } from '$lib/server/settings';
+import { resolveGallerySort } from '$lib/gallery';
 import { withTimeout } from '$lib/server/timeout';
 import type { FursuitPhoto } from '$lib/furtrack/types';
 import type { PageServerLoad } from './$types';
@@ -22,7 +24,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const tagFilter = url.searchParams.get('tag') || '';
 	const artistFilter = url.searchParams.get('artist') || '';
 	const characterFilter = url.searchParams.get('character') || '';
-	const sort = url.searchParams.get('sort') || 'newest';
+	// An explicit ?sort= wins (keeps shared links stable); otherwise fall back to
+	// the site's configured default gallery sort.
+	const settings = await getSettings(db);
+	const sort = resolveGallerySort(url.searchParams.get('sort'), settings.galleryDefaultSort);
 	const page = Math.max(1, Number(url.searchParams.get('page') || 1));
 	const perPage = 20;
 	const photographerFilter = url.searchParams.get('photographer') || '';

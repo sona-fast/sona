@@ -91,6 +91,21 @@ describe('getSettings — mapping & defaults', () => {
 		expect(s.storageProvider).toBe('uploadthing');
 	});
 
+	it('maps a stored galleryDefaultSort and defaults it to newest when unset', async () => {
+		const { db } = fakeReadDb([{ key: 'galleryDefaultSort', value: 'commissioned-newest' }]);
+		expect((await getSettings(db)).galleryDefaultSort).toBe('commissioned-newest');
+
+		clearSettingsCache();
+		const empty = fakeReadDb([]);
+		expect((await getSettings(empty.db)).galleryDefaultSort).toBe('newest');
+	});
+
+	it('coerces an unknown galleryDefaultSort back to the safe default', async () => {
+		// An out-of-range value must not reach the gallery's orderBy switch.
+		const { db } = fakeReadDb([{ key: 'galleryDefaultSort', value: 'by-vibes' }]);
+		expect((await getSettings(db)).galleryDefaultSort).toBe('newest');
+	});
+
 	it('maps the three-path profile fields (sona profile + contact email)', async () => {
 		// These feed the /art, /connect and /share pages of the threePath landing.
 		const { db } = fakeReadDb([
