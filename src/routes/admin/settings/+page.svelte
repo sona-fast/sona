@@ -1537,6 +1537,11 @@
 	   surfaces and fail WCAG. Darken to amber #8A5A00 (~5.9:1 on white) and green
 	   #15803D (~5:1) for text; both clear 3:1 for the ring/dot graphics too. */
 	:global([data-theme='light']) .hint-link { color: #8A5A00; }
+	/* The muted (configured-state) trigger must stay muted in light theme too —
+	   amber is reserved for the unconfigured CTA. */
+	:global([data-theme='light']) .hint-link.muted { color: var(--muted-foreground); }
+	/* Links inside checklist rows (e.g. resend.com in step 1) — same AA fix. */
+	:global([data-theme='light']) .item .text a { color: #8A5A00; }
 	:global([data-theme='light']) .status-tag.unset,
 	:global([data-theme='light']) .status-tag.unset .dot { color: #8A5A00; }
 	:global([data-theme='light']) .status-tag.unset .dot { background: #8A5A00; }
