@@ -412,6 +412,13 @@
 		<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
 	</label>
 
+	{#if data.ownerCharacter}
+		<label class="checkbox-label">
+			<input type="checkbox" name="useAsReference" />
+			<span>{m.admin_image_reference_set({ name: data.ownerCharacter.name })}</span>
+		</label>
+	{/if}
+
 	<label>
 		<span>{m.admin_field_source_url()}</span>
 		<input type="url" class="input" placeholder={m.admin_upload_source_placeholder()} name="sourcePostUrl" />
