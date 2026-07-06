@@ -135,10 +135,15 @@ export const actions = {
 		});
 
 		// 4. The fursona this site is about (stickers/fursuit resolve one character).
+		//    Flag it is_owner so it's excluded from the public "Featured Characters"
+		//    cast (which showcases guests / other characters), matching the
+		//    sticker-import auto-create path. resolveSiteCharacterId still resolves it
+		//    by the primaryCharacter name / first row, so stickers/fursuit/hero are
+		//    unaffected — only its inclusion in the Featured cast changes.
 		const characterName = fursonaName || siteName;
 		const existing = await db.select({ id: characters.id }).from(characters).get();
 		if (!existing) {
-			await db.insert(characters).values({ name: characterName });
+			await db.insert(characters).values({ name: characterName, isOwner: true });
 		}
 
 		// 5. Admin credential (hashed) + flip the gate.

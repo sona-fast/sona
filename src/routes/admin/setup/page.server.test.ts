@@ -148,3 +148,22 @@ describe('setup wizard — blank optional fields never clobber CLI-seeded settin
 		expect(await getRawSetting(db, 'primaryCharacter')).toBe('Taro');
 	});
 });
+
+describe('setup wizard — creates the site character as is_owner (excluded from Featured) (#51)', () => {
+	it('flags the wizard-created character is_owner=true', async () => {
+		const { db, platform } = makeDb();
+
+		try {
+			await actions.default(setupEvent(platform, { fursonaName: 'Sparky' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+
+		const row = await db
+			.select({ name: schema.characters.name, isOwner: schema.characters.isOwner })
+			.from(schema.characters)
+			.get();
+		expect(row).toEqual({ name: 'Sparky', isOwner: true });
+	});
+});
