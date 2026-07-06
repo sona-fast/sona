@@ -214,6 +214,8 @@ export const actions = {
 			.select({ id: characters.id })
 			.from(characters)
 			.where(eq(characters.isOwner, true))
+			// first owner by name — must match the loads' find() over name-ordered characters
+			.orderBy(characters.name)
 			.get();
 		if (!owner) return fail(400, { error: 'No owner character' });
 

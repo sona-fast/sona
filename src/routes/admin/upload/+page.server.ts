@@ -227,7 +227,8 @@ export const actions = {
 		// Optionally designate the primary (parent) image as the owner character's
 		// reference sheet — same semantics as the edit-page control.
 		if (data.get('useAsReference') === 'on') {
-			const owner = await db.select({ id: characters.id }).from(characters).where(eq(characters.isOwner, true)).get();
+			// first owner by name — must match the loads' find() over name-ordered characters
+			const owner = await db.select({ id: characters.id }).from(characters).where(eq(characters.isOwner, true)).orderBy(characters.name).get();
 			if (owner) {
 				await db.update(characters).set({ referenceImageId: parentDbId }).where(eq(characters.id, owner.id));
 			}

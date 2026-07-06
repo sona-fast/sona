@@ -18,6 +18,8 @@ export const load: PageServerLoad = async ({ platform }) => {
 		.select({ referenceImageId: characters.referenceImageId })
 		.from(characters)
 		.where(eq(characters.isOwner, true))
+		// first owner by name — must match the loads' find() over name-ordered characters
+		.orderBy(characters.name)
 		.get();
 
 	let refSheet =

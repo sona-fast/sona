@@ -36,8 +36,12 @@
 					if (result.type === 'success') referenceButton?.focus();
 				};
 			}} class="reference-control">
+				<!-- Persistent live region: text toggles in place (rather than the node
+				     being inserted/removed) so NVDA/JAWS announce the state change reliably. -->
+				<p class="reference-current" role="status">
+					{#if data.ownerCharacter.isReference}✓ {m.admin_image_reference_current({ name: data.ownerCharacter.name })}{/if}
+				</p>
 				{#if data.ownerCharacter.isReference}
-					<p class="reference-current" role="status">✓ {m.admin_image_reference_current({ name: data.ownerCharacter.name })}</p>
 					<input type="hidden" name="clear" value="on" />
 					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_clear()}</button>
 				{:else}
@@ -288,9 +292,12 @@
 	}
 
 	/* Desktop: size to content in the narrow sidebar column, not a full-width pill.
-	   Mobile keeps the full-width button (restored in the media query below). */
+	   Mobile keeps the full-width button (restored in the media query below). The
+	   long "use as reference sheet" label can wrap in the 300px column — left-align
+	   the wrapped lines instead of the button's default centering. */
 	.reference-btn {
 		align-self: flex-start;
+		text-align: left;
 	}
 
 	.edit-form {
