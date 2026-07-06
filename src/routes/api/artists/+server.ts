@@ -11,9 +11,13 @@ import type { RequestHandler } from './$types';
 // Creates an artist and returns { id, name, status } so the sticker import review
 // and other admin UIs can add an artist on the fly. When the artist was pulled
 // from the shared registry (globalId present), this first tries to reuse/link an
-// existing LOCAL artist instead of creating a duplicate:
-//   - status 'reused'  → a local artist is already linked to this global_id
-//   - status 'linked'  → an unlinked local artist matched by handle, now linked
+// existing LOCAL artist instead of creating a duplicate — and because importing
+// from the registry is an explicit "give me the registry's copy", the registry
+// fields OVERRIDE the local ones (unlike the background sync, where local wins):
+//   - status 'reused'  → a local artist was already linked to this global_id;
+//                        its fields were refreshed from the registry copy
+//   - status 'linked'  → an unlinked local artist matched by handle — linked,
+//                        and refreshed the same way
 //   - status 'created' → a new local artist was created
 export const POST: RequestHandler = async ({ request, platform }) => {
 	const db = getDb(platform!.env.DB);
@@ -39,15 +43,33 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	const registryVersion = Number.isFinite(rv) ? rv : null;
 
 	if (globalId) {
-		// 1. Already linked locally → reuse it.
+		// The registry copy as sent by the import dialog. An explicit import means
+		// "take the registry's version", so registry values override local ones —
+		// but a field the registry does NOT have never blanks a local value (only
+		// present fields are applied; same never-overwrite-with-nothing rule the
+		// avatar refreshes follow).
+		const registryAvatar = sanitizeUrl(body.avatarUrl ?? '') || null;
+		const registryFields: Record<string, string | number | null> = {
+			name,
+			registryVersion,
+			registrySyncedAt: new Date().toISOString()
+		};
+		for (const [k, v] of Object.entries(socials)) if (v) registryFields[k] = v;
+		if (registryAvatar) registryFields.avatarUrl = registryAvatar;
+
+		// 1. Already linked locally → refresh it from the registry copy.
 		const byGid = await db
-			.select({ id: artists.id, name: artists.name })
+			.select({ id: artists.id })
 			.from(artists)
 			.where(eq(artists.globalId, globalId))
 			.get();
-		if (byGid) return json({ id: byGid.id, name: byGid.name, status: 'reused' });
+		if (byGid) {
+			await db.update(artists).set(registryFields).where(eq(artists.id, byGid.id));
+			return json({ id: byGid.id, name, status: 'reused' });
+		}
 
-		// 2. An UNLINKED local artist that matches by handle → link it (no duplicate).
+		// 2. An UNLINKED local artist that matches by handle → link it (no duplicate)
+		//    and refresh it the same way.
 		const incoming = socialsToHandles(socials);
 		if (incoming.length > 0) {
 			const want = new Set(incoming.map((h) => `${h.platform} ${h.handleNorm}`));
@@ -57,9 +79,9 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 				if (socialsToHandles(a).some((h) => want.has(`${h.platform} ${h.handleNorm}`))) {
 					await db
 						.update(artists)
-						.set({ globalId, registryVersion, registrySyncedAt: new Date().toISOString() })
+						.set({ ...registryFields, globalId })
 						.where(eq(artists.id, a.id));
-					return json({ id: a.id, name: a.name, status: 'linked' });
+					return json({ id: a.id, name, status: 'linked' });
 				}
 			}
 		}
