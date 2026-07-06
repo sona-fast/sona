@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -6,7 +6,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
-import { clearSettingsCache } from '$lib/server/settings';
 import { load } from './+page.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses,
@@ -45,7 +44,9 @@ function makeDb() {
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
 
-beforeEach(() => clearSettingsCache());
+// No clearSettingsCache() here: the share gate reads site_settings directly
+// (bypassing the getSettings cache) so a D1 failure surfaces instead of
+// decaying into a false 404.
 
 describe('share load — content-presence gate (#42)', () => {
 	it('404s when neither contact email nor Telegram is configured', async () => {
@@ -72,5 +73,17 @@ describe('share load — content-presence gate (#42)', () => {
 			{ key: 'telegramUrl', value: 'https://t.me/example' }
 		]);
 		await expect(load({ platform } as never)).resolves.toEqual({});
+	});
+
+	it('rejects with the query error (not a 404) when D1 fails transiently', async () => {
+		const failingD1 = {
+			prepare: () => {
+				throw new Error('D1_ERROR: transient');
+			}
+		} as unknown as D1Database;
+		const platform = { env: { DB: failingD1 } } as unknown as App.Platform;
+		// The raw D1 error must surface (→ 500 "retry" semantics), not the
+		// gate's 404 — a configured fork must not look deleted during a blip.
+		await expect(load({ platform } as never)).rejects.toThrow('D1_ERROR: transient');
 	});
 });

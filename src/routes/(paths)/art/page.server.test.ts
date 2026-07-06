@@ -164,12 +164,48 @@ describe('art load — content-presence gate (#42)', () => {
 		expect(data.sona.colors).toHaveLength(1);
 	});
 
-	it('loads with only do/don\'t lines', async () => {
+	it('loads with only a build setting', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'sonaBuild', value: 'Stocky' });
+
+		const data = (await load({ platform } as never)) as { sona: { build: string } };
+		expect(data.sona.build).toBe('Stocky');
+	});
+
+	it('loads with only a key-features setting', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'sonaKeyFeatures', value: 'Glowing markings' });
+
+		const data = (await load({ platform } as never)) as { sona: { keyFeatures: string } };
+		expect(data.sona.keyFeatures).toBe('Glowing markings');
+	});
+
+	it('loads with only do lines', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'sonaDos', value: 'Big wings' });
+
+		const data = (await load({ platform } as never)) as { sona: { dos: string[] } };
+		expect(data.sona.dos).toEqual(['Big wings']);
+	});
+
+	it('loads with only don\'t lines', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(siteSettings).values({ key: 'sonaDonts', value: 'No mecha' });
 
 		const data = (await load({ platform } as never)) as { sona: { donts: string[] } };
 		expect(data.sona.donts).toEqual(['No mecha']);
+	});
+
+	it('404s when the only rows are whitespace-only dos and malformed colors', async () => {
+		const { db, platform } = makeDb();
+		// Junk that parseLines/parseSonaColors must normalize away — if either
+		// parser regresses to passing raw values through, this stops 404ing.
+		await db.insert(siteSettings).values([
+			{ key: 'sonaDos', value: '\n \n' },
+			{ key: 'sonaColors', value: 'not json' }
+		]);
+
+		await expect(load({ platform } as never)).rejects.toMatchObject({ status: 404 });
 	});
 
 	it('loads when fully populated', async () => {
