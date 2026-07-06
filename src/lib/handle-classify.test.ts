@@ -95,6 +95,14 @@ describe('classifyQuery — URL edge cases', () => {
 		expect(c.kind).toBe('handle');
 		expect(c.platform).toBe('twitter');
 	});
+	it('a bare domain with no username yields a handle with an EMPTY normalized handle', () => {
+		// Drives the client "too short" gate: platform detected but nothing to
+		// search on, so the UI must not fire a request or claim it is searching.
+		const c = classifyQuery('twitter.com/');
+		expect(c.kind).toBe('handle');
+		expect(c.platform).toBe('twitter');
+		expect(c.handle).toBe('');
+	});
 });
 
 describe('normalizeHandle', () => {

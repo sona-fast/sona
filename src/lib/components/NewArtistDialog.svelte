@@ -68,9 +68,11 @@
 	// Live-region text set explicitly on pick/unpick (a programmatic name= change
 	// skips oninput, so the search announcement can't cover the linked state).
 	let pickAnnouncement = $state('');
-	// The socials a pick prefilled, so we can drop the ones the operator never
-	// edited when the link is dropped (no silent carry-over of a dropped match).
+	// The socials a pick prefilled, plus the values that were in those fields
+	// BEFORE the pick, so dropping the link RESTORES what the operator had typed
+	// (for fields they haven't edited since) rather than blanking them.
 	let prefilled = $state<ReturnType<typeof resultToPrefill> | null>(null);
+	let preFill = $state<Record<string, string> | null>(null);
 	const listboxId = 'new-artist-registry-listbox';
 
 	// The name field doubles as a social-handle search: a typed @handle or social
@@ -82,6 +84,13 @@
 	let isHandleQuery = $derived(query.kind === 'handle');
 	// Don't block when the registry is unreachable — fall back to manual entry.
 	let blockHandleCreate = $derived(isHandleQuery && !pulled && !searchError);
+	// The term we actually search on: the NORMALIZED handle when a platform was
+	// detected (so "twitter.com/" with an empty handle doesn't fire a request), the
+	// bare handle/URL otherwise, or the plain name.
+	let searchTermValue = $derived(query.kind === 'handle' ? (query.platform ? query.handle : query.handleParam) : name);
+	// A handle query whose searchable term is still under the 2-char minimum: show
+	// a "type more" hint (not a false "searching…") and keep create blocked.
+	let handleTermTooShort = $derived(isHandleQuery && !shouldSearch(searchTermValue));
 	// Truncated handle for the hint so a long pasted URL can't blow out the line.
 	let handleHintValue = $derived(query.handle.length > 40 ? query.handle.slice(0, 39) + '…' : query.handle);
 
@@ -89,7 +98,7 @@
 	// pick, else result counts / no-match once a search settles (silent mid-type).
 	let resultsAnnouncement = $derived.by(() => {
 		if (pickAnnouncement) return pickAnnouncement;
-		if (!registryEnabled || !shouldSearch(query.kind === 'handle' ? query.handleParam : name) || registrySearching) return '';
+		if (!registryEnabled || !shouldSearch(searchTermValue) || registrySearching) return '';
 		if (searchError) return m.admin_new_artist_registry_unreachable();
 		if (registryResults.length) return m.admin_new_artist_registry_results_count({ count: registryResults.length });
 		if (hasSearched) return isHandleQuery ? m.admin_new_artist_registry_handle_no_match() : m.admin_new_artist_registry_no_matches();
@@ -165,29 +174,37 @@
 		}
 	}
 
-	/** Reset the transient search state and invalidate any in-flight request. */
+	/** Reset the transient search state and invalidate any in-flight request. Also
+	 *  stops the spinner: resetSearch bumps searchSeq, so the in-flight request's
+	 *  seq-gated finally won't fire — without this the spinner would spin forever
+	 *  when the field is emptied mid-flight. */
 	function resetSearch() {
 		clearTimeout(searchTimer);
 		searchSeq++;
+		registrySearching = false;
 		registryResults = [];
 		resultsOpen = false;
 		activeIndex = -1;
 		hasSearched = false;
 		searchError = false;
 	}
-	/** Drop the socials a pick prefilled that the operator never edited, so a
-	 *  dropped match's links don't silently carry into a plain create. */
-	function clearUneditedPrefill() {
+	/** Drop the registry link: for each social the pick prefilled and the operator
+	 *  hasn't edited since, RESTORE the value that was there before the pick (rather
+	 *  than blanking it), so a dropped match doesn't silently rewrite the field. */
+	function restoreUneditedPrefill() {
 		const p = prefilled;
-		if (!p) return;
-		if (twitter === p.twitter) twitter = '';
-		if (bluesky === p.bluesky) bluesky = '';
-		if (telegram === p.telegram) telegram = '';
-		if (furaffinity === p.furaffinity) furaffinity = '';
-		if (deviantart === p.deviantart) deviantart = '';
-		if (patreon === p.patreon) patreon = '';
-		if (instagram === p.instagram) instagram = '';
+		const before = preFill;
+		if (p && before) {
+			if (twitter === p.twitter) twitter = before.twitter;
+			if (bluesky === p.bluesky) bluesky = before.bluesky;
+			if (telegram === p.telegram) telegram = before.telegram;
+			if (furaffinity === p.furaffinity) furaffinity = before.furaffinity;
+			if (deviantart === p.deviantart) deviantart = before.deviantart;
+			if (patreon === p.patreon) patreon = before.patreon;
+			if (instagram === p.instagram) instagram = before.instagram;
+		}
 		prefilled = null;
+		preFill = null;
 	}
 
 	// Typing in the name field (registry on) re-searches. Editing after a pick
@@ -197,20 +214,20 @@
 		if (!registryEnabled) return;
 		if (pulled) {
 			pulled = null;
-			clearUneditedPrefill();
+			restoreUneditedPrefill();
 		}
 		pickAnnouncement = '';
 		resetSearch();
 		// Gate on the term we'll actually search (normalized handle for a handle).
 		const c = classifyQuery(name);
-		const term = c.kind === 'handle' ? c.handleParam : name;
+		const term = c.kind === 'handle' ? (c.platform ? c.handle : c.handleParam) : name;
 		if (!shouldSearch(term)) return;
 		searchTimer = setTimeout(searchRegistry, 250);
 	}
 	async function searchRegistry() {
 		// A typed @handle / social URL searches by handle; plain text by name.
 		const c = classifyQuery(name);
-		const term = c.kind === 'handle' ? c.handleParam : name;
+		const term = c.kind === 'handle' ? (c.platform ? c.handle : c.handleParam) : name;
 		if (!shouldSearch(term)) return;
 		const qs = c.kind === 'handle' ? 'handle=' + encodeURIComponent(c.handleParam) : 'q=' + encodeURIComponent(name.trim());
 		const seq = searchSeq;
@@ -220,6 +237,7 @@
 			if (seq !== searchSeq) return; // a newer query superseded this one
 			if (res.ok) {
 				const data = await res.json();
+				if (seq !== searchSeq) return; // re-check: a keystroke may have landed during the body read
 				registryResults = data.artists ?? [];
 				resultsOpen = registryResults.length > 0;
 			} else {
@@ -237,6 +255,9 @@
 	}
 	function applyResult(r: RegResult) {
 		const p = resultToPrefill(r);
+		// Snapshot the socials as they were before the pick, so unlink can restore
+		// anything the pull overwrote that the operator then leaves untouched.
+		preFill = { twitter, bluesky, telegram, furaffinity, deviantart, patreon, instagram };
 		name = p.name;
 		twitter = p.twitter;
 		bluesky = p.bluesky;
@@ -253,7 +274,7 @@
 	/** Drop the registry link and return to plain-create, keeping the typed name. */
 	function unpick() {
 		pulled = null;
-		clearUneditedPrefill();
+		restoreUneditedPrefill();
 		resetSearch();
 		pickAnnouncement = '';
 	}
@@ -369,7 +390,10 @@
 					/>
 					{#if registrySearching}<span class="name-spin"><Loader2 size={14} class="spin" /></span>{/if}
 					{#if registryEnabled && resultsOpen && registryResults.length}
-						<ul class="reg-results" role="listbox" id={listboxId} aria-label={m.admin_new_artist_registry_results_label()}>
+						<!-- preventDefault keeps input focus when the user grabs the scrollbar (or the
+							     gaps between rows) — else the blur would close the dropdown mid-drag. -->
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
+							<ul class="reg-results" role="listbox" id={listboxId} aria-label={m.admin_new_artist_registry_results_label()} onmousedown={(e) => e.preventDefault()}>
 							{#each registryResults as r, i}
 								{@const handle = resultHandle(r)}
 								<!-- Selection is keyboard-driven from the combobox input (Down/Up/Enter),
@@ -405,6 +429,8 @@
 				{#if registryEnabled}
 					{#if searchError}
 						<p class="reg-hint reg-hint-warn" id="new-artist-name-hint">{m.admin_new_artist_registry_unreachable()}</p>
+					{:else if blockHandleCreate && handleTermTooShort}
+						<p class="reg-hint" id="new-artist-name-hint">{m.admin_new_artist_registry_handle_too_short()}</p>
 					{:else if blockHandleCreate && hasSearched && registryResults.length === 0}
 						<p class="reg-hint reg-hint-warn" id="new-artist-name-hint">{m.admin_new_artist_registry_handle_no_match()}</p>
 					{:else if blockHandleCreate}
