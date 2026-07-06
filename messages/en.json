@@ -176,6 +176,7 @@
 	"stickers_clear_filters": "Clear filters",
 	"stickers_empty_title": "No stickers match {query} yet.",
 	"stickers_empty_fallback": "your search",
+	"stickers_query_term": "{query}",
 	"stickers_no_packs": "No sticker packs yet.",
 	"stickers_pack_filter_summary": "{count} stickers",
 	"stickers_emojis_label": "Emoji",

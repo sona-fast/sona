@@ -140,6 +140,7 @@
 	"stickers_clear_filters": "フィルターをクリア",
 	"stickers_empty_title": "{query}に一致するステッカーはまだありません。",
 	"stickers_empty_fallback": "検索条件",
+	"stickers_query_term": "「{query}」",
 	"stickers_no_packs": "ステッカーセットはまだありません。",
 	"stickers_pack_filter_summary": "ステッカー {count}件",
 	"stickers_emojis_label": "絵文字",
