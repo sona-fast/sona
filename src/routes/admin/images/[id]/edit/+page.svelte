@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { tick } from 'svelte';
 	import { Loader2 } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -8,6 +9,9 @@
 	let artistMode = $state<'existing' | 'new'>('existing');
 	let saving = $state(false);
 	let selectedParentId = $state(String(data.image.parentImageId ?? ''));
+	// The reference button swaps between set/clear on toggle; move focus back to it
+	// so keyboard/screen-reader users hear the new state instead of losing focus.
+	let referenceButton = $state<HTMLButtonElement | null>(null);
 </script>
 
 <div class="page-header">
@@ -15,15 +19,42 @@
 </div>
 
 {#if form?.error}
-	<p class="error">{form.error}</p>
+	<p class="error" role="alert">{form.error}</p>
 {/if}
 
 <div class="edit-layout">
-	<div class="image-preview">
-		<img src={data.image.imageUrl} alt={data.image.title} />
+	<div class="edit-sidebar">
+		<div class="image-preview">
+			<img src={data.image.imageUrl} alt={data.image.title} />
+		</div>
+
+		{#if data.ownerCharacter}
+			<form method="POST" action="?/reference" use:enhance={() => {
+				return async ({ update, result }) => {
+					await update();
+					await tick();
+					if (result.type === 'success') referenceButton?.focus();
+				};
+			}} class="reference-control">
+				<!-- Persistent live region: text toggles in place (rather than the node
+				     being inserted/removed) so NVDA/JAWS announce the state change reliably. -->
+				<p class="reference-current" role="status">
+					{#if data.ownerCharacter.isReference}✓ {m.admin_image_reference_current({ name: data.ownerCharacter.name })}{/if}
+				</p>
+				{#if data.ownerCharacter.isReference}
+					<input type="hidden" name="clear" value="on" />
+					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_clear()}</button>
+				{:else}
+					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_set({ name: data.ownerCharacter.name })}</button>
+					{#if data.ownerCharacter.replacesOther}
+						<small class="hint">{m.admin_image_reference_replaces()}</small>
+					{/if}
+				{/if}
+			</form>
+		{/if}
 	</div>
 
-	<form method="POST" use:enhance={() => {
+	<form method="POST" action="?/save" use:enhance={() => {
 		saving = true;
 		return async ({ update }) => {
 			await update();
@@ -245,6 +276,33 @@
 		display: block;
 	}
 
+	.edit-sidebar {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.reference-control {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-top: 12px;
+	}
+
+	.reference-current {
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--foreground);
+	}
+
+	/* Desktop: size to content in the narrow sidebar column, not a full-width pill.
+	   Mobile keeps the full-width button (restored in the media query below). The
+	   long "use as reference sheet" label can wrap in the 300px column — left-align
+	   the wrapped lines instead of the button's default centering. */
+	.reference-btn {
+		align-self: flex-start;
+		text-align: left;
+	}
+
 	.edit-form {
 		display: flex;
 		flex-direction: column;
@@ -431,6 +489,10 @@
 		.form-actions a {
 			width: 100%;
 			text-align: center;
+		}
+
+		.reference-btn {
+			align-self: stretch;
 		}
 	}
 </style>

@@ -23,13 +23,22 @@ export const load: PageServerLoad = async ({ platform }) => {
 			.orderBy(images.title)
 	]);
 
+	// Only offer the "use as reference sheet" control when an owner character
+	// exists (first, if several) — it carries the canonical reference image.
+	const ownerCharacter = allCharacters.find((c) => c.isOwner) ?? null;
+
 	return {
 		artists: allArtists,
 		collections: allCollections,
 		tags: allTags,
 		characters: allCharacters,
 		parentCandidates,
-		maxVariantSet: MAX_VARIANT_SET
+		maxVariantSet: MAX_VARIANT_SET,
+		ownerCharacter: ownerCharacter && {
+			name: ownerCharacter.name,
+			// A designation already exists on some image — checking the box replaces it.
+			hasReference: ownerCharacter.referenceImageId != null
+		}
 	};
 };
 
@@ -217,6 +226,16 @@ export const actions = {
 				.returning({ id: images.id })
 				.get();
 			await attachTagsAndCharacters(db, variantRow.id, tagNames, characterIds);
+		}
+
+		// Optionally designate the primary (parent) image as the owner character's
+		// reference sheet — same semantics as the edit-page control.
+		if (data.get('useAsReference') === 'on') {
+			// first owner by name — must match the loads' find() over name-ordered characters
+			const owner = await db.select({ id: characters.id }).from(characters).where(eq(characters.isOwner, true)).orderBy(characters.name).get();
+			if (owner) {
+				await db.update(characters).set({ referenceImageId: parentDbId }).where(eq(characters.id, owner.id));
+			}
 		}
 
 		redirect(302, '/admin/images');
