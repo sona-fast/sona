@@ -114,6 +114,44 @@ describe('forgot action', () => {
 		expect(email.from).toBe('"Aki, \\"The\\" Serval" <onboarding@resend.dev>');
 	});
 
+	it('HTML-escapes the siteName in the email body', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await db.insert(siteSettings).values({ key: 'siteName', value: 'Taro & <Surf>' });
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const email = sentEmail();
+		expect(email.html).toContain('Taro &amp; &lt;Surf&gt;');
+		expect(email.html).not.toContain('<Surf>');
+	});
+
+	it('uses RESEND_FROM verbatim when set, overriding the fork-siteName default', async () => {
+		const { db, platform } = makeDb({
+			RESEND_API_KEY: 'rk_test',
+			RESEND_FROM: 'Taro <noreply@taro.surf>'
+		});
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await db.insert(siteSettings).values({ key: 'siteName', value: 'Taro Surf' });
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const email = sentEmail();
+		expect(email.from).toBe('Taro <noreply@taro.surf>');
+	});
+
+	it('strips CR/LF from the siteName in the From name and subject (header safety)', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await db.insert(siteSettings).values({ key: 'siteName', value: 'Aki\nServal' });
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const email = sentEmail();
+		expect(email.from).toBe('"Aki Serval" <onboarding@resend.dev>');
+		expect(email.subject).toBe('Reset your Aki Serval admin password');
+	});
+
 	it('returns the same generic response and does nothing when the email does not match', async () => {
 		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
 		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });

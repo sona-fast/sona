@@ -708,7 +708,6 @@
 	"admin_settings_changing": "変更中…",
 	"admin_settings_change_password": "パスワードを変更",
 	"admin_settings_recovery_email": "復旧用メールアドレス",
-	"admin_settings_recovery_email_label": "復旧用メールアドレス",
 	"admin_settings_save_recovery_email": "復旧用メールを保存",
 	"admin_settings_recovery_email_saved": "復旧用メールを保存しました",
 	"admin_resend_status_unset": "リセットメール: 未設定",

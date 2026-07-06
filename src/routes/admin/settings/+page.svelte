@@ -505,7 +505,7 @@
 	<section class="security-section" data-tab="account">
 		<h2>{m.admin_settings_recovery_email()}</h2>
 		<label>
-			<span>{m.admin_settings_recovery_email_label()}</span>
+			<span>{m.admin_settings_recovery_email()}</span>
 			<input type="email" name="adminEmail" class="input" bind:value={adminEmail} autocomplete="email" placeholder="you@example.com" />
 		</label>
 		<div class="reset-status" aria-live="polite">

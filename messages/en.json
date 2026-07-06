@@ -744,7 +744,6 @@
 	"admin_settings_changing": "Changing…",
 	"admin_settings_change_password": "Change password",
 	"admin_settings_recovery_email": "Recovery email",
-	"admin_settings_recovery_email_label": "Recovery email",
 	"admin_settings_save_recovery_email": "Save recovery email",
 	"admin_settings_recovery_email_saved": "Recovery email saved",
 	"admin_resend_status_unset": "Reset emails: not set up",

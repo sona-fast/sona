@@ -20,7 +20,7 @@ type Env = App.Platform['env'];
 
 export const PASSWORD_RESET_SETTING = 'passwordResetToken';
 /** Reset links are valid for 30 minutes. */
-export const RESET_TTL_MS = 30 * 60 * 1000;
+const RESET_TTL_MS = 30 * 60 * 1000;
 /** Don't send a second reset email within this window (anti-flood). */
 const RESEND_COOLDOWN_MS = 2 * 60 * 1000;
 /** Fallback sender address when RESEND_FROM is unset. The display name is the
@@ -120,11 +120,13 @@ async function sendResetEmail(
 ): Promise<void> {
 	const link = new URL('/admin/reset', origin);
 	link.searchParams.set('token', token);
+	// Header fields can't carry CR/LF; strip them once for both the From name and subject.
+	const cleanName = siteName.replace(/[\r\n]+/g, ' ');
 	// siteName lands in an RFC-5322 display name, so emit it as a quoted-string
 	// (escaping \ and ") — a raw comma/colon/quote would otherwise make Resend 422.
-	const displayName = `"${siteName.replace(/[\r\n]+/g, ' ').replace(/[\\"]/g, '\\$&')}"`;
+	const displayName = `"${cleanName.replace(/[\\"]/g, '\\$&')}"`;
 	const from = env?.RESEND_FROM?.trim() || `${displayName} <${RESEND_FALLBACK_ADDRESS}>`;
-	const subject = `Reset your ${siteName.replace(/[\r\n]+/g, ' ')} admin password`;
+	const subject = `Reset your ${cleanName} admin password`;
 	const url = link.toString();
 	const text =
 		`A password reset was requested for the admin account on ${siteName}.\n\n` +
@@ -152,8 +154,6 @@ async function sendResetEmail(
 		`<div style="font-size:14px;line-height:1.6;color:#52525b;">If you didn't request this, you can ignore this email — your password is unchanged.</div>` +
 		`</td></tr></table></td></tr></table></body></html>`;
 
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
 	try {
 		const resp = await fetch(RESEND_ENDPOINT, {
 			method: 'POST',
@@ -162,15 +162,13 @@ async function sendResetEmail(
 				'Content-Type': 'application/json'
 			},
 			body: JSON.stringify({ from, to, subject, html, text }),
-			signal: controller.signal
+			signal: AbortSignal.timeout(RESEND_TIMEOUT_MS)
 		});
 		if (!resp.ok) {
 			console.error(`Resend password-reset send failed: ${resp.status}`);
 		}
 	} catch (e) {
 		console.error('Resend password-reset send error:', e instanceof Error ? e.message : e);
-	} finally {
-		clearTimeout(timeout);
 	}
 }
 
