@@ -15,10 +15,12 @@ import type { Actions, PageServerLoad } from './$types';
 
 const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days in seconds
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
 	if (locals.admin) {
 		redirect(302, '/admin/images');
 	}
+	// Set by the /admin/reset redirect after a successful password reset.
+	return { resetSuccess: url.searchParams.get('reset') === '1' };
 };
 
 export const actions = {

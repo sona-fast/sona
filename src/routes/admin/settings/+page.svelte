@@ -63,6 +63,8 @@
 	let r2PublicUrl = $state(data.settings.r2PublicUrl);
 	let savingStorage = $state(false);
 	let changingPassword = $state(false);
+	let adminEmail = $state(data.adminEmail);
+	let savingRecoveryEmail = $state(false);
 
 	let activeTab = $state<'site' | 'connections' | 'storage' | 'account'>('site');
 
@@ -120,6 +122,7 @@
 		storageProvider = data.settings.storageProvider;
 		r2PublicUrl = data.settings.r2PublicUrl;
 		contactEmail = data.settings.contactEmail;
+		adminEmail = data.adminEmail;
 		sonaSpecies = data.settings.sonaSpecies;
 		sonaBuild = data.settings.sonaBuild;
 		sonaKeyFeatures = data.settings.sonaKeyFeatures;
@@ -459,6 +462,27 @@
 			</button>
 			<a href="/admin/storage/migrate" class="btn btn-outline">{m.admin_settings_migrate_link()} →</a>
 		</div>
+	</section>
+</form>
+
+<form method="POST" action="?/saveSecurityEmail" class="contents" use:enhance={() => {
+	savingRecoveryEmail = true;
+	return async ({ result, update }) => {
+		await update({ reset: false });
+		savingRecoveryEmail = false;
+		if (result.type === 'success') toast.success(m.admin_settings_recovery_email_saved());
+	};
+}}>
+	<section class="security-section" data-tab="account">
+		<h2>{m.admin_settings_recovery_email()}</h2>
+		<p class="hint">{m.admin_settings_recovery_email_hint()}</p>
+		<label>
+			<span>{m.admin_settings_recovery_email_label()}</span>
+			<input type="email" name="adminEmail" class="input" bind:value={adminEmail} autocomplete="email" placeholder="you@example.com" />
+		</label>
+		<button type="submit" class="btn btn-secondary" disabled={savingRecoveryEmail}>
+			{savingRecoveryEmail ? m.admin_saving() : m.admin_settings_save_recovery_email()}
+		</button>
 	</section>
 </form>
 

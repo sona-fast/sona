@@ -27,7 +27,7 @@
 
 </script>
 
-{#if $page.url.pathname === '/admin/login' || $page.url.pathname === '/admin/setup'}
+{#if ['/admin/login', '/admin/setup', '/admin/forgot', '/admin/reset'].includes($page.url.pathname)}
 	{@render children()}
 {:else}
 	<div class="admin-layout">

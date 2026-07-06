@@ -152,6 +152,34 @@ jobs:
             npx wrangler pages secret put TELEGRAM_BOT_TOKEN --project-name "$CF_PAGES_PROJECT"
           echo "TELEGRAM_BOT_TOKEN synced to Pages project ${CF_PAGES_PROJECT} (binds on the deploy below)"
 
+      # Optional feature: admin password recovery ("Forgot password") email. Add
+      # the repo Actions secrets `RESEND_API_KEY` (required to enable) and,
+      # optionally, `RESEND_FROM` (sender identity, format "Name <you@domain>";
+      # a custom domain must be verified in your own Resend account). Synced to
+      # the Pages project here so this deploy binds them. Unset = logged skip;
+      # recovery then falls back to the `npm run reset-password` CLI.
+      - name: Sync RESEND secrets to Pages project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM: ${{ secrets.RESEND_FROM }}
+          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RESEND_API_KEY" ]; then
+            echo "RESEND_API_KEY repo secret not set — skipping secret sync (email password reset stays off; use npm run reset-password)"
+            exit 0
+          fi
+          printf '%s' "$RESEND_API_KEY" | \
+            npx wrangler pages secret put RESEND_API_KEY --project-name "$CF_PAGES_PROJECT"
+          echo "RESEND_API_KEY synced to Pages project ${CF_PAGES_PROJECT}"
+          if [ -n "$RESEND_FROM" ]; then
+            printf '%s' "$RESEND_FROM" | \
+              npx wrangler pages secret put RESEND_FROM --project-name "$CF_PAGES_PROJECT"
+            echo "RESEND_FROM synced to Pages project ${CF_PAGES_PROJECT}"
+          fi
+
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

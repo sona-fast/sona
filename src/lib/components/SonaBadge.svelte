@@ -22,7 +22,7 @@
 <style>
 	.sona-badge {
 		display: inline-flex;
-		align-items: center;
+		align-items: baseline;
 		gap: 0.5ch;
 		font-size: 12px;
 		line-height: 1;

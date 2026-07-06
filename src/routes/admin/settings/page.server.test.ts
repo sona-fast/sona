@@ -7,8 +7,8 @@ import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
-import { getRawSetting, parseLines } from '$lib/server/settings';
-import { actions } from './+page.server';
+import { getRawSetting, setRawSetting, parseLines } from '$lib/server/settings';
+import { actions, load } from './+page.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses
 // (client.prepare().bind().run()/all()), same approach as sticker-import.test.ts.
@@ -143,6 +143,57 @@ describe('settings saveSite — three-path profile fields', () => {
 		expect(JSON.parse((await getRawSetting(db, 'sonaColors'))!)).toEqual([
 			{ name: 'Blue', hex: '#3A6EA5' }
 		]);
+	});
+});
+
+function saveSecurityEmailEvent(platform: App.Platform, adminEmail: string) {
+	const body = new FormData();
+	body.append('adminEmail', adminEmail);
+	return {
+		platform,
+		request: new Request('https://taro.surf/admin/settings?/saveSecurityEmail', { method: 'POST', body })
+	} as never;
+}
+
+describe('settings saveSecurityEmail — admin recovery address', () => {
+	it('persists a submitted address and reports it saved', async () => {
+		const { db, platform } = makeDb();
+
+		const result = await actions.saveSecurityEmail(saveSecurityEmailEvent(platform, 'new@x.y'));
+
+		expect(result).toEqual({ recoveryEmailSaved: true });
+		expect(await getRawSetting(db, 'adminEmail')).toBe('new@x.y');
+	});
+
+	it('clears the stored address when saved empty (disables email reset)', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'adminEmail', 'old@x.y');
+
+		const result = await actions.saveSecurityEmail(saveSecurityEmailEvent(platform, ''));
+
+		expect(result).toEqual({ recoveryEmailSaved: true });
+		expect(await getRawSetting(db, 'adminEmail')).toBe('');
+	});
+});
+
+describe('settings load — adminEmail is raw, never in public settings', () => {
+	it('surfaces the raw adminEmail and keeps it out of the settings object', async () => {
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+			CREATE TABLE images (id INTEGER PRIMARY KEY, file_size INTEGER);`);
+		const d1 = makeD1(sqlite);
+		const db = drizzle(d1, { schema });
+		const platform = { env: { DB: d1 } } as unknown as App.Platform;
+		await setRawSetting(db, 'adminEmail', 'recover@taro.surf');
+
+		const result = (await load({ platform } as never)) as {
+			adminEmail: string;
+			settings: Record<string, unknown>;
+		};
+
+		expect(result.adminEmail).toBe('recover@taro.surf');
+		// adminEmail must never leak into the client-exposed SiteSettings.
+		expect(result.settings.adminEmail).toBeUndefined();
 	});
 });
 

@@ -12,6 +12,10 @@
 		<h1>{data.siteName}</h1>
 		<p class="subtitle">{m.admin_login_subtitle()}</p>
 
+		{#if data.resetSuccess}
+			<p class="notice">{m.admin_login_reset_success()}</p>
+		{/if}
+
 		{#if form?.error}
 			<p class="error">{form.error}</p>
 		{/if}
@@ -31,6 +35,8 @@
 				{signingIn ? m.admin_login_signing_in() : m.admin_login_sign_in()}
 			</button>
 		</form>
+
+		<a href="/admin/forgot" class="forgot">{m.admin_login_forgot_password()}</a>
 	</div>
 </div>
 
@@ -68,6 +74,18 @@
 		color: var(--destructive);
 		font-size: 14px;
 		margin-bottom: 16px;
+	}
+
+	.notice {
+		font-size: 14px;
+		margin-bottom: 16px;
+	}
+
+	.forgot {
+		display: inline-block;
+		margin-top: 20px;
+		font-size: 14px;
+		color: var(--muted-foreground);
 	}
 
 	form {
