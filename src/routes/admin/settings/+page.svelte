@@ -4,9 +4,11 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SetupDialog from '$lib/components/SetupDialog.svelte';
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
+	import RefSheetPicker from '$lib/components/RefSheetPicker.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
-	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X } from 'lucide-svelte';
+	import { normalizeHex } from '$lib/color-hex';
+	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X, Pipette } from 'lucide-svelte';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
 	import { resendSetupProgress } from '$lib/resend-setup';
@@ -51,6 +53,7 @@
 	let colors = $state<SonaColor[]>(parseColors(data.settings.sonaColors));
 	let newColorName = $state('');
 	let newColorHex = $state('#888888');
+	let showRefPicker = $state(false);
 
 	function addColor() {
 		const hex = newColorHex.trim();
@@ -61,6 +64,24 @@
 	}
 	function removeColor(i: number) {
 		colors = colors.filter((_, idx) => idx !== i);
+	}
+	// Hex text inputs normalize on change (#RGB / RGB / RRGGBB → #RRGGBB); an
+	// invalid entry reverts to the current value instead of corrupting state.
+	function setColorHex(i: number, input: HTMLInputElement) {
+		const hex = normalizeHex(input.value);
+		if (hex) colors = colors.map((c, idx) => (idx === i ? { ...c, hex } : c));
+		input.value = hex ?? colors[i].hex;
+	}
+	function setNewColorHex(input: HTMLInputElement) {
+		const hex = normalizeHex(input.value);
+		if (hex) newColorHex = hex;
+		input.value = hex ?? newColorHex;
+	}
+	// The ref-sheet picker commits into either an existing swatch or the
+	// pending "new color" slot (named + added via the Add color button).
+	function applyPickedColor(slot: number | 'new', hex: string) {
+		if (slot === 'new') newColorHex = hex;
+		else colors = colors.map((c, i) => (i === slot ? { ...c, hex } : c));
 	}
 
 	let storageProvider = $state(data.settings.storageProvider);
@@ -331,15 +352,40 @@
 						<div class="swatch-chip">
 							<span class="swatch-dot" style="background:{color.hex}"></span>
 							<span class="swatch-name">{color.name}</span>
+							<input
+								type="text"
+								class="input hex-input"
+								value={color.hex}
+								placeholder="#RRGGBB"
+								aria-label={m.admin_settings_sona_hex_label({ name: color.name })}
+								onchange={(e) => setColorHex(i, e.currentTarget)}
+							/>
 							<button type="button" class="swatch-remove" aria-label={m.admin_settings_sona_remove_color()} onclick={() => removeColor(i)}>×</button>
 						</div>
 					{/each}
 				</div>
 				<div class="add-color">
 					<input type="color" class="color-input" bind:value={newColorHex} aria-label={m.admin_settings_sona_pick_color()} />
+					<input
+						type="text"
+						class="input hex-input"
+						value={newColorHex}
+						placeholder="#RRGGBB"
+						aria-label={m.admin_settings_sona_new_hex_label()}
+						onchange={(e) => setNewColorHex(e.currentTarget)}
+					/>
 					<input type="text" class="input" bind:value={newColorName} placeholder={m.admin_settings_sona_color_name_placeholder()} />
 					<button type="button" class="btn btn-secondary" onclick={addColor}>{m.admin_settings_sona_add_color()}</button>
 				</div>
+				{#if data.refImageSrc}
+					<div>
+						<button type="button" class="btn btn-secondary" onclick={() => (showRefPicker = true)}>
+							<Pipette size={16} /> {m.admin_settings_sona_pick_from_ref()}
+						</button>
+					</div>
+				{:else}
+					<p class="hint">{m.admin_settings_sona_no_ref_hint()}</p>
+				{/if}
 				<input type="hidden" name="sonaColors" value={JSON.stringify(colors)} />
 			</div>
 		</section>
@@ -835,6 +881,16 @@
 	/>
 {/if}
 
+{#if showRefPicker && data.refImageSrc}
+	<RefSheetPicker
+		src={data.refImageSrc.src}
+		crossorigin={data.refImageSrc.crossorigin}
+		slots={colors}
+		onpick={applyPickedColor}
+		onclose={() => (showRefPicker = false)}
+	/>
+{/if}
+
 <style>
 	.contents {
 		display: contents;
@@ -1319,6 +1375,20 @@
 
 	.swatch-name {
 		font-size: 13px;
+	}
+
+	/* Hex text inputs — compact, monospace-ish via the primary font. */
+	.hex-input {
+		width: 92px;
+		max-width: 92px;
+		height: 28px;
+		padding: 2px 8px;
+		font-family: var(--font-primary);
+		font-size: 12px;
+	}
+
+	.add-color .hex-input {
+		height: 40px;
 	}
 
 	.swatch-remove {
