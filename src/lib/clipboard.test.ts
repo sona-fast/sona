@@ -111,6 +111,11 @@ describe('isTextEditable', () => {
 		expect(isTextEditable({ tagName: 'INPUT' })).toBe(true); // default type is text
 	});
 
+	it('treats date/time pickers as text-ish so a paste there defers', () => {
+		expect(isTextEditable({ tagName: 'INPUT', type: 'date' })).toBe(true);
+		expect(isTextEditable({ tagName: 'INPUT', type: 'datetime-local' })).toBe(true);
+	});
+
 	it('rejects non-text controls so a paste there still uploads', () => {
 		expect(isTextEditable({ tagName: 'INPUT', type: 'checkbox' })).toBe(false);
 		expect(isTextEditable({ tagName: 'INPUT', type: 'radio' })).toBe(false);

@@ -93,7 +93,7 @@
 
 	async function handleFiles(files: FileList | File[]) {
 		const incoming = Array.from(files);
-		const room = data.maxVariantSet - tiles.length;
+		const room = Math.max(0, data.maxVariantSet - tiles.length);
 		const fileArray = incoming.slice(0, room);
 		const skipped = incoming.length - fileArray.length;
 		if (skipped > 0) {

@@ -23,7 +23,12 @@ const TEXT_INPUT_TYPES = new Set([
 	'email',
 	'password',
 	'tel',
-	'number'
+	'number',
+	'date',
+	'time',
+	'month',
+	'week',
+	'datetime-local'
 ]);
 
 /** File extension for an image mime type, falling back to its subtype. */
