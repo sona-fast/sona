@@ -173,6 +173,61 @@ describe('admin artists load — server-side search matches AKA names', () => {
 		expect(result.artists.map((a) => a.name)).toEqual(['Zaps']);
 		expect(result.total).toBe(1);
 	});
+
+	// Valid-JSON shapes that json_extract would throw on (bare scalar element,
+	// top-level scalar, top-level object) if the query drilled into them
+	// unguarded — each must return cleanly with no match and no 500.
+	it.each([
+		['bare-string array element', '["Boltie"]'],
+		['top-level string scalar', '"Boltie"'],
+		['array mixing an object and a bare string', '[{"displayName":"Nope"},"Boltie"]'],
+		['top-level object with a nested displayName', '{"foo":{"displayName":"Boltie"}}']
+	])('does not throw or match on a %s', async (_label, aliases) => {
+		const { db, platform } = makeDb();
+		await db.insert(schema.artists).values({ name: 'Odd', aliases });
+
+		const result = (await load(loadEvent(platform, 'boltie'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists).toHaveLength(0);
+		expect(result.total).toBe(0);
+	});
+
+	it('returns one row when q matches both the current name and an alias', async () => {
+		const { db, platform } = makeDb();
+		// "Bolt" appears in both the current name and the former name — the OR must
+		// not double-count the row.
+		await db.insert(schema.artists).values({
+			name: 'Boltz',
+			aliases: JSON.stringify([{ displayName: 'Boltie', socials: {} }])
+		});
+
+		const result = (await load(loadEvent(platform, 'bolt'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists.map((a) => a.name)).toEqual(['Boltz']);
+		expect(result.total).toBe(1);
+	});
+
+	it('matches when only the SECOND of multiple aliases is the hit', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(schema.artists).values({
+			name: 'Zaps',
+			aliases: JSON.stringify([
+				{ displayName: 'Alpha', socials: {} },
+				{ displayName: 'Boltie', socials: {} }
+			])
+		});
+
+		const result = (await load(loadEvent(platform, 'boltie'))) as {
+			artists: Array<{ name: string }>;
+			total: number;
+		};
+		expect(result.artists.map((a) => a.name)).toEqual(['Zaps']);
+		expect(result.total).toBe(1);
+	});
 });
 
 describe('submitToRegistry action — surfaces the registry outcome', () => {

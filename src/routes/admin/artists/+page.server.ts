@@ -33,14 +33,18 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// current page. SQLite LIKE is case-insensitive for ASCII. Also match former
 	// (AKA) names the row displays as "formerly …" — the aliases JSON array's
 	// displayName fields, not the raw blob (a bare LIKE would false-positive on
-	// URLs/keys inside the JSON). json_valid guards the malformed/NULL rows that
-	// parseAliases tolerates, so json_each never throws for the whole query.
+	// URLs/keys inside the JSON). Guards, in order, so a bad shape can't throw and
+	// 500 the page: json_valid rejects malformed/NULL text; json_type = 'array'
+	// keeps json_each off a top-level scalar/object (and drops phantom matches from
+	// an object's nested values); je.type = 'object' skips bare-string array
+	// elements so json_extract only ever sees an object. parseAliases tolerates all
+	// these shapes, so the search must too.
 	const q = (url.searchParams.get('q') || '').trim().slice(0, 100);
 	const like_ = `%${q}%`;
 	const whereClause = q
 		? or(
 				like(artists.name, like_),
-				sql`(${artists.aliases} IS NOT NULL AND json_valid(${artists.aliases}) AND EXISTS (SELECT 1 FROM json_each(${artists.aliases}) WHERE json_extract(value, '$.displayName') LIKE ${like_}))`
+				sql`(json_valid(${artists.aliases}) AND json_type(${artists.aliases}) = 'array' AND EXISTS (SELECT 1 FROM json_each(${artists.aliases}) AS je WHERE je.type = 'object' AND json_extract(je.value, '$.displayName') LIKE ${like_}))`
 			)
 		: undefined;
 
