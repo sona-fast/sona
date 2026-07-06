@@ -120,8 +120,11 @@ async function sendResetEmail(
 ): Promise<void> {
 	const link = new URL('/admin/reset', origin);
 	link.searchParams.set('token', token);
-	const from = env?.RESEND_FROM?.trim() || `${siteName} <${RESEND_FALLBACK_ADDRESS}>`;
-	const subject = `Reset your ${siteName} admin password`;
+	// siteName lands in an RFC-5322 display name, so emit it as a quoted-string
+	// (escaping \ and ") — a raw comma/colon/quote would otherwise make Resend 422.
+	const displayName = `"${siteName.replace(/[\r\n]+/g, ' ').replace(/[\\"]/g, '\\$&')}"`;
+	const from = env?.RESEND_FROM?.trim() || `${displayName} <${RESEND_FALLBACK_ADDRESS}>`;
+	const subject = `Reset your ${siteName.replace(/[\r\n]+/g, ' ')} admin password`;
 	const url = link.toString();
 	const text =
 		`A password reset was requested for the admin account on ${siteName}.\n\n` +
@@ -137,7 +140,7 @@ async function sendResetEmail(
 	const html =
 		`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"></head><body style="margin:0;background-color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">` +
 		`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f4f5" style="background-color:#f4f4f5;"><tr><td align="center" style="padding:32px 16px;">` +
-		`<table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="width:520px;max-width:520px;">` +
+		`<table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;">` +
 		`<tr><td style="padding:8px 8px 18px 8px;font-size:18px;font-weight:bold;color:#18181b;">${safeName}</td></tr>` +
 		`<tr><td bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #e4e4e7;border-radius:12px;padding:32px;">` +
 		`<div style="font-size:20px;line-height:1.3;font-weight:bold;color:#18181b;padding-bottom:16px;">Reset your admin password</div>` +

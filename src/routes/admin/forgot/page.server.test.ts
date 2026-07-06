@@ -94,10 +94,24 @@ describe('forgot action', () => {
 		expect(email.subject).toContain('Taro Surf');
 		expect(email.text).toMatch(/https:\/\/taro\.surf\/admin\/reset\?token=/);
 		// From identifies the fork (its siteName), not Sona, when RESEND_FROM is unset.
-		expect(email.from).toBe('Taro Surf <onboarding@resend.dev>');
+		// The display name is a quoted-string (RFC 5322), so Resend accepts names
+		// with commas/colons/quotes.
+		expect(email.from).toBe('"Taro Surf" <onboarding@resend.dev>');
 		// An HTML body ships alongside the text, carrying the fork identity + reset link.
 		expect(email.html).toContain('Taro Surf');
 		expect(email.html).toMatch(/https:\/\/taro\.surf\/admin\/reset\?token=/);
+	});
+
+	it('quotes and escapes a siteName with a comma and double-quote in the From display name', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await db.insert(siteSettings).values({ key: 'siteName', value: 'Aki, "The" Serval' });
+
+		const result = await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		expect(result).toEqual({ sent: true });
+		const email = sentEmail();
+		expect(email.from).toBe('"Aki, \\"The\\" Serval" <onboarding@resend.dev>');
 	});
 
 	it('returns the same generic response and does nothing when the email does not match', async () => {
