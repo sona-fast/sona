@@ -36,9 +36,25 @@ export const POST: RequestHandler = async ({ request, url, platform }) => {
 	const referenced = await collectReferencedUrls(db, settings);
 	const dryRunParam = url.searchParams.get('dryRun');
 	const dryRun = dryRunParam === '1' || dryRunParam === 'true';
-	const count = await deleteOrphansAll(env, settings, referenced, {
+	// abortOnEmptyKeepSet: this endpoint runs unattended, so if NO referenced
+	// URL resolves to a stored key (broken/empty reference set — everything
+	// would be judged an orphan), the provider skips deletion and the anomaly
+	// is reported in `skipped` instead of wiping the store.
+	const result = await deleteOrphansAll(env, settings, referenced, {
 		olderThan: new Date(Date.now() - ORPHAN_MIN_AGE_MS),
-		dryRun
+		dryRun,
+		abortOnEmptyKeepSet: true
 	});
-	return json(dryRun ? { ok: true, wouldDelete: count } : { ok: true, deleted: count });
+	const ok = result.errors.length === 0;
+	// A configured provider failing must fail the workflow run, which only
+	// checks the HTTP status — so real errors return 500, not a green ok:true.
+	return json(
+		{
+			ok,
+			...(dryRun ? { wouldDelete: result.deleted } : { deleted: result.deleted }),
+			skipped: result.skipped,
+			errors: result.errors
+		},
+		{ status: ok ? 200 : 500 }
+	);
 };

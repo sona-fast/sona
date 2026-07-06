@@ -43,7 +43,8 @@ const HOUR = 60 * 60 * 1000;
 const CDN = 'https://cdn.example.com';
 
 // A mock R2 bucket holding one referenced object, one old orphan (past the 48h
-// gate) and one fresh orphan (uploaded just now — must be protected).
+// gate), one day-old orphan (would pass the manual button's 1h gate but NOT the
+// cron's 48h gate — pins the constant) and one fresh orphan (uploaded just now).
 function makeBucket() {
 	return {
 		put: vi.fn(async () => {}),
@@ -52,6 +53,7 @@ function makeBucket() {
 			objects: [
 				{ key: 'referenced.png', uploaded: new Date(Date.now() - 100 * HOUR) },
 				{ key: 'old-orphan.png', uploaded: new Date(Date.now() - 100 * HOUR) },
+				{ key: 'day-old-orphan.png', uploaded: new Date(Date.now() - 24 * HOUR) },
 				{ key: 'young-orphan.png', uploaded: new Date() }
 			],
 			truncated: false
@@ -59,7 +61,7 @@ function makeBucket() {
 	};
 }
 
-function makeEnv() {
+function makeEnv({ seedReference = true } = {}) {
 	const sqlite = new Database(':memory:');
 	sqlite.exec('CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
 	// Minimal URL-column-only tables, generated from the collector's source list.
@@ -70,9 +72,11 @@ function makeEnv() {
 	}
 	sqlite.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)').run('storageProvider', 'r2');
 	sqlite.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)').run('r2PublicUrl', CDN);
-	sqlite
-		.prepare('INSERT INTO images (image_url, thumbnail_url, source_post_url) VALUES (?, ?, ?)')
-		.run(`${CDN}/referenced.png`, null, null);
+	if (seedReference) {
+		sqlite
+			.prepare('INSERT INTO images (image_url, thumbnail_url, source_post_url) VALUES (?, ?, ?)')
+			.run(`${CDN}/referenced.png`, null, null);
+	}
 
 	const bucket = makeBucket();
 	const env = { DB: makeD1(sqlite), CRON_SECRET, IMAGES: bucket };
@@ -105,16 +109,46 @@ describe('POST /api/cron/cleanup-orphans', () => {
 		const { bucket, platform } = makeEnv();
 		const res = await POST(postEvent(platform, { query: '?dryRun=1' }));
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ ok: true, wouldDelete: 1 });
+		expect(await res.json()).toEqual({ ok: true, wouldDelete: 1, skipped: [], errors: [] });
 		expect(bucket.delete).not.toHaveBeenCalled();
 	});
 
-	it('deletes only orphans older than 48h; referenced and fresh objects survive', async () => {
+	it('deletes only orphans older than 48h; referenced, day-old and fresh objects survive', async () => {
 		const { bucket, platform } = makeEnv();
 		const res = await POST(postEvent(platform));
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ ok: true, deleted: 1 });
+		expect(await res.json()).toEqual({ ok: true, deleted: 1, skipped: [], errors: [] });
 		expect(bucket.delete).toHaveBeenCalledTimes(1);
+		// Pins the 48h constant: the 24h-old orphan would be swept by the manual
+		// button's 1h gate, but the unattended cron must leave it alone.
 		expect(bucket.delete).toHaveBeenCalledWith(['old-orphan.png']);
+	});
+
+	// SAFETY BELT: if not one referenced URL resolves to a stored key (broken or
+	// empty reference set — here the DB holds no URLs at all), every object would
+	// be judged an orphan. The unattended cron must refuse and report, not sweep.
+	it('skips a provider and reports the anomaly when no reference maps to a key', async () => {
+		const { bucket, platform } = makeEnv({ seedReference: false });
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { ok: boolean; deleted: number; skipped: string[] };
+		expect(body.ok).toBe(true);
+		expect(body.deleted).toBe(0);
+		expect(body.skipped).toHaveLength(1);
+		expect(body.skipped[0]).toMatch(/^r2:/);
+		expect(bucket.delete).not.toHaveBeenCalled();
+	});
+
+	// A CONFIGURED provider failing mid-cleanup must fail the workflow run
+	// (which only checks the HTTP status) — not report ok:true and stay green.
+	it('returns 500 with the provider error when cleanup throws', async () => {
+		const { bucket, platform } = makeEnv();
+		bucket.list.mockRejectedValueOnce(new Error('R2 unavailable'));
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(500);
+		const body = (await res.json()) as { ok: boolean; errors: string[] };
+		expect(body.ok).toBe(false);
+		expect(body.errors).toEqual(['r2: R2 unavailable']);
+		expect(bucket.delete).not.toHaveBeenCalled();
 	});
 });

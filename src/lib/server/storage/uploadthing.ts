@@ -1,4 +1,5 @@
 import { UTApi } from 'uploadthing/server';
+import { ZeroKeepError } from './types';
 import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
 
 export class UploadThingStorage implements StorageProvider {
@@ -34,6 +35,14 @@ export class UploadThingStorage implements StorageProvider {
 		);
 		// 500 covers this site's volume; paginate if it ever grows past that.
 		const { files } = await this.#api.listFiles({ limit: 500 });
+		// Keys here are host-agnostic (any …/f/<key> URL), so an empty keep set
+		// with files present means the reference set itself is empty/broken —
+		// deleting would wipe every stored file. See DeleteOrphansOptions.
+		if (opts?.abortOnEmptyKeepSet && keep.size === 0 && files.length > 0) {
+			throw new ZeroKeepError(
+				'uploadthing: no referenced URL resolves to a stored key — refusing to treat every file as an orphan (empty or unmappable reference set?)'
+			);
+		}
 		// listFiles exposes uploadedAt as epoch millis, so the age gate works here too.
 		const cutoff = opts?.olderThan?.getTime();
 		const orphans = files

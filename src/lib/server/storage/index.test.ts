@@ -97,3 +97,49 @@ describe('R2 deleteOrphans age gate + dryRun', () => {
 		expect(bucket.delete).not.toHaveBeenCalled();
 	});
 });
+
+// REGRESSION (data loss): DB URLs are absolutized against whatever base was
+// active AT UPLOAD TIME (/api/upload turns '/img/<key>' into an absolute URL),
+// but the keep set used to be derived ONLY from the CURRENT base. With
+// r2PublicUrl unset (serving via /img) or changed after uploads, no referenced
+// URL mapped to a key → empty keep set → the cron deleted every referenced
+// object older than the gate. The keep set must be base-agnostic.
+describe('R2 deleteOrphans keep set is base-agnostic', () => {
+	const HOUR = 60 * 60 * 1000;
+	const old = new Date(Date.now() - 10 * HOUR);
+
+	function makeBucket() {
+		return {
+			put: vi.fn(async () => {}),
+			delete: vi.fn(async () => {}),
+			list: vi.fn(async () => ({
+				objects: [
+					{ key: 'artwork/x.png', uploaded: old },
+					{ key: 'true-orphan.png', uploaded: old }
+				],
+				truncated: false
+			}))
+		};
+	}
+
+	it('keeps an absolute /img URL when serving via the /img route (no r2PublicUrl)', async () => {
+		const bucket = makeBucket();
+		const storage = getStorage({ IMAGES: bucket } as unknown as Env, r2Settings(''));
+		const deleted = await storage.deleteOrphans(['https://site.example/img/artwork/x.png'], {
+			olderThan: new Date(Date.now() - HOUR)
+		});
+		// The referenced object survives; only the true orphan is deleted.
+		expect(deleted).toBe(1);
+		expect(bucket.delete).toHaveBeenCalledWith(['true-orphan.png']);
+	});
+
+	it('keeps a URL uploaded under an OLD base after r2PublicUrl changes', async () => {
+		const bucket = makeBucket();
+		const storage = getStorage({ IMAGES: bucket } as unknown as Env, r2Settings('https://cdn.example.com'));
+		const deleted = await storage.deleteOrphans(['https://site.example/img/artwork/x.png'], {
+			olderThan: new Date(Date.now() - HOUR)
+		});
+		expect(deleted).toBe(1);
+		expect(bucket.delete).toHaveBeenCalledWith(['true-orphan.png']);
+	});
+});

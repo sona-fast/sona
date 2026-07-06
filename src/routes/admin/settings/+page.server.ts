@@ -411,9 +411,14 @@ export const actions = {
 			// only objects older than an hour: /api/upload stores bytes before any
 			// D1 row exists, so an upload racing this button would look orphaned.
 			// The button's purpose is stale junk, not just-uploaded bytes.
-			const deleted = await deleteOrphansAll(platform?.env, settings, referenced, {
+			const { deleted, errors } = await deleteOrphansAll(platform?.env, settings, referenced, {
 				olderThan: new Date(Date.now() - 60 * 60 * 1000)
 			});
+			// A configured provider failing mid-cleanup used to be swallowed as
+			// "not configured" — surface it so the admin isn't told success.
+			if (errors.length) {
+				return fail(500, { error: `Failed to clear cache: ${errors.join('; ')}` });
+			}
 			return {
 				success: true,
 				message: deleted === 0 ? 'No orphaned files found.' : `Deleted ${deleted} orphaned file${deleted === 1 ? '' : 's'}.`
@@ -445,12 +450,9 @@ export const actions = {
 		await db.delete(artists);
 
 		// With no DB rows left, every stored object is an orphan — wipe both stores.
-		let filesDeleted = 0;
-		try {
-			filesDeleted = await deleteOrphansAll(platform?.env, settings, []);
-		} catch {
-			// Don't fail the wipe if storage cleanup errors.
-		}
+		// Deliberately fail-soft: don't fail the wipe if storage cleanup errors
+		// (deleteOrphansAll reports provider errors instead of throwing).
+		const filesDeleted = (await deleteOrphansAll(platform?.env, settings, [])).deleted;
 
 		return {
 			success: true,

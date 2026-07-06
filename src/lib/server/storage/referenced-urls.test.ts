@@ -49,17 +49,27 @@ describe('URL_COLUMNS completeness guard', () => {
 		const covered = new Map(
 			URL_COLUMNS.map(({ table, columns }) => [getTableName(table), new Set(columns)])
 		);
+		let tablesSeen = 0;
+		let urlColumnsSeen = 0;
 		for (const exported of Object.values(schema)) {
 			if (!is(exported, SQLiteTable)) continue;
+			tablesSeen++;
 			const tableName = getTableName(exported);
 			for (const key of Object.keys(getTableColumns(exported))) {
 				if (!/url$/i.test(key)) continue;
+				urlColumnsSeen++;
 				expect(
 					covered.get(tableName)?.has(key),
 					`URL column ${tableName}.${key} is missing from URL_COLUMNS — orphan cleanup would delete the files it references. Add it to the source list in referenced-urls.ts.`
 				).toBe(true);
 			}
 		}
+		// Anti-vacuity: if drizzle's is()/table metadata ever stops recognising
+		// the schema exports, the loop above would pass having checked NOTHING —
+		// silently disabling this guard on a destructive path. The real schema
+		// has many tables and well over ten URL columns.
+		expect(tablesSeen).toBeGreaterThan(0);
+		expect(urlColumnsSeen).toBeGreaterThan(10);
 	});
 
 	it('lists only columns that actually exist', () => {
