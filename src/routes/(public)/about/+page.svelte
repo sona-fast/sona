@@ -9,7 +9,8 @@
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
-	const { settings, stats } = data;
+	let settings = $derived(data.settings);
+	let stats = $derived(data.stats);
 
 	// FurTrack and FurAffinity profile URLs are .../user/<handle> — show the handle
 	// like the other socials do, rather than the platform name.
@@ -22,7 +23,7 @@
 		}
 	}
 
-	const ownerName = settings.ownerName || settings.siteName;
+	const ownerName = $derived(settings.ownerName || settings.siteName);
 
 	// 2026-09-12 → 2026.09.12; same-year ranges trim the end date (→ 09.14).
 	function fmt(d: string): string {
@@ -34,13 +35,13 @@
 		return `${fmt(start)} → ${same ? fmt(end).slice(5) : fmt(end)}`;
 	}
 
-	const socialLinks = [
+	const socialLinks = $derived([
 		{ url: settings.twitterUrl, icon: TwitterIcon, label: settings.twitterUrl ? `@${handleFromUrl(settings.twitterUrl, 'Twitter')}` : 'Twitter' },
 		{ url: settings.telegramUrl, icon: TelegramIcon, label: handleFromUrl(settings.telegramUrl, 'Telegram') },
 		{ url: settings.blueskyUrl, icon: BlueskyIcon, label: handleFromUrl(settings.blueskyUrl, 'Bluesky') },
 		{ url: settings.furAffinityUrl, icon: FurAffinityIcon, label: handleFromUrl(settings.furAffinityUrl, 'FurAffinity') },
 		{ url: settings.furtrackUrl, icon: FurTrackIcon, label: handleFromUrl(settings.furtrackUrl, 'FurTrack') }
-	].filter((l) => l.url);
+	].filter((l) => l.url));
 </script>
 
 <Meta

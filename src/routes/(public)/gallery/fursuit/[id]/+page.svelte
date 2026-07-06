@@ -9,22 +9,24 @@
 	import { licenseTerms } from '$lib/furtrack/license-terms';
 
 	let { data } = $props();
-	const { photo } = data;
+	let photo = $derived(data.photo);
 
 	let copied = $state(false);
 
-	const characterTitle = photo.character
-		? photo.character.charAt(0).toUpperCase() + photo.character.slice(1)
-		: m.fursuit_default_title();
+	const characterTitle = $derived(
+		photo.character
+			? photo.character.charAt(0).toUpperCase() + photo.character.slice(1)
+			: m.fursuit_default_title()
+	);
 
 	// FurTrack shows the post's description as the heading, or "No description"
 	// (muted) when it's empty — mirror that rather than echoing the character tag.
-	const description = photo.description?.trim();
+	const description = $derived(photo.description?.trim());
 
-	const siteName = data.settings?.siteName ?? APP_NAME;
-	const canonicalUrl = `${page.url.origin}${page.url.pathname}`;
-	const metaTitle = `${characterTitle} — fursuit photo by ${photo.photographer} — ${siteName}`;
-	const metaDescription = `Fursuit photo of ${characterTitle} by ${photo.photographer}${photo.event ? ` at ${photo.event}` : ''}. ${photo.license.label}.`;
+	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
+	const canonicalUrl = $derived(`${page.url.origin}${page.url.pathname}`);
+	const metaTitle = $derived(`${characterTitle} — fursuit photo by ${photo.photographer} — ${siteName}`);
+	const metaDescription = $derived(`Fursuit photo of ${characterTitle} by ${photo.photographer}${photo.event ? ` at ${photo.event}` : ''}. ${photo.license.label}.`);
 
 	async function share() {
 		const url = window.location.href;

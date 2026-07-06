@@ -7,13 +7,15 @@
 
 	let { data } = $props();
 
-	const siteName = data.settings?.siteName ?? APP_NAME;
-	const metaImage = data.collection.coverImageUrl || data.images[0]?.imageUrl || null;
-	const metaDescription = m.collection_meta_description({
-		countLabel: m.gallery_count_artwork({ count: data.images.length }),
-		name: data.collection.name,
-		siteName
-	});
+	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
+	const metaImage = $derived(data.collection.coverImageUrl || data.images[0]?.imageUrl || null);
+	const metaDescription = $derived(
+		m.collection_meta_description({
+			countLabel: m.gallery_count_artwork({ count: data.images.length }),
+			name: data.collection.name,
+			siteName
+		})
+	);
 </script>
 
 <Meta

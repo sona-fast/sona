@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
+	import { onNavigate } from '$app/navigation';
 	import { Download, Share2, ExternalLink } from 'lucide-svelte';
 	import { formatDate } from '$lib';
 	import Meta from '$lib/components/Meta.svelte';
@@ -14,9 +15,18 @@
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
-	const { image, tags } = data;
+	let image = $derived(data.image);
+	let tags = $derived(data.tags);
 
-	let revealed = $state(!image.nsfw);
+	// Reveal is keyed to the shown image id. onNavigate clears it before the next
+	// page renders, so returning to a revealed image (strip or browser history)
+	// re-blurs with no unblurred flash; a same-slug load re-run fires no nav, so
+	// it stays revealed.
+	let revealedId = $state<number | null>(null);
+	const revealed = $derived(revealedId === image.id);
+	onNavigate(() => {
+		revealedId = null;
+	});
 	let copied = $state(false);
 
 	// Strip tile caption: the group parent reads "Original"; unlabeled variants
@@ -53,14 +63,14 @@
 	}
 
 
-	const siteName = data.settings?.siteName ?? APP_NAME;
-	const canonicalUrl = `${page.url.origin}${page.url.pathname}`;
-	const metaTitle = `${image.title} — ${siteName}`;
-	const tagSuffix = tags.length > 0 ? ` · ${tags.slice(0, 6).join(', ')}` : '';
-	const metaDescription = `Commission by ${image.artistName ?? 'unknown artist'}${tagSuffix}`;
-	const oembedUrl = `${page.url.origin}/api/oembed?url=${encodeURIComponent(canonicalUrl)}`;
+	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
+	const canonicalUrl = $derived(`${page.url.origin}${page.url.pathname}`);
+	const metaTitle = $derived(`${image.title} — ${siteName}`);
+	const tagSuffix = $derived(tags.length > 0 ? ` · ${tags.slice(0, 6).join(', ')}` : '');
+	const metaDescription = $derived(`Commission by ${image.artistName ?? 'unknown artist'}${tagSuffix}`);
+	const oembedUrl = $derived(`${page.url.origin}/api/oembed?url=${encodeURIComponent(canonicalUrl)}`);
 
-	const socialLinks = [
+	const socialLinks = $derived([
 		{ url: image.artistTwitter, icon: TwitterIcon, label: 'Twitter' },
 		{ url: image.artistBluesky, icon: BlueskyIcon, label: 'Bluesky' },
 		{ url: image.artistTelegram, icon: TelegramIcon, label: 'Telegram' },
@@ -68,7 +78,7 @@
 		{ url: image.artistDeviantArt, icon: DeviantArtIcon, label: 'DeviantArt' },
 		{ url: image.artistPatreon, icon: PatreonIcon, label: 'Patreon' },
 		{ url: image.artistInstagram, icon: InstagramIcon, label: 'Instagram' },
-	].filter((l) => l.url);
+	].filter((l) => l.url));
 </script>
 
 <Meta
@@ -99,7 +109,7 @@
 			{#if image.nsfw && !revealed}
 				<div class="nsfw-overlay">
 					<img src={image.imageUrl} alt={image.title} class="blurred" />
-					<button class="reveal-btn" onclick={() => (revealed = true)}>
+					<button class="reveal-btn" onclick={() => (revealedId = image.id)}>
 						<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
 						<span>{m.gallery_click_reveal()}</span>
 					</button>
@@ -219,13 +229,20 @@
 								class="variant-tile"
 								class:current={variant.slug === image.slug}
 								aria-current={variant.slug === image.slug ? 'page' : undefined}
+								data-sveltekit-keepfocus
+								data-sveltekit-noscroll
 							>
-								<img
-									src={variant.thumbnailUrl || variant.imageUrl}
-									alt={stripLabel(variant)}
-									class:blurred-thumb={variant.nsfw && !revealed}
-									loading="lazy"
-								/>
+								<span class="variant-thumb">
+									<img
+										src={variant.thumbnailUrl || variant.imageUrl}
+										alt={stripLabel(variant)}
+										class:blurred-thumb={variant.nsfw && !revealed}
+										loading="lazy"
+									/>
+									{#if variant.nsfw && !revealed}
+										<span class="variant-badge">NSFW</span>
+									{/if}
+								</span>
 								<span class="variant-label">{stripLabel(variant)}</span>
 							</a>
 						{/each}
@@ -559,21 +576,46 @@
 		font-size: 11px;
 	}
 
-	.variant-tile img {
+	/* The ring lives on the wrapper (not the img) so overflow:hidden clips the
+	   NSFW blur to the tile instead of letting it bleed over the current ring. */
+	.variant-thumb {
+		position: relative;
+		display: block;
 		width: 84px;
 		height: 84px;
-		object-fit: cover;
 		border-radius: var(--radius-xs);
+		overflow: hidden;
 		border: 2px solid transparent;
 		transition: border-color 0.15s;
 	}
 
-	.variant-tile:hover img {
+	.variant-tile img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.variant-tile:hover .variant-thumb {
 		border-color: var(--border);
 	}
 
-	.variant-tile.current img {
+	.variant-tile.current .variant-thumb {
 		border-color: var(--primary);
+	}
+
+	.variant-badge {
+		position: absolute;
+		top: 4px;
+		right: 4px;
+		background: rgba(0, 0, 0, 0.7);
+		color: white;
+		font-size: 9px;
+		font-weight: 600;
+		letter-spacing: 0.03em;
+		padding: 1px 4px;
+		border-radius: var(--radius-xs);
+		pointer-events: none;
 	}
 
 	.variant-tile.current .variant-label {
