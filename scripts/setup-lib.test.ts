@@ -4,7 +4,12 @@ import {
 	sanitizeProjectName,
 	isR2NotEnabled,
 	ensureUrlScheme,
-	ghSecretEligibility
+	ghSecretEligibility,
+	parseDatabaseId,
+	deriveRepoSlug,
+	buildPagesConfigPayload,
+	tokenResolves,
+	hostFromDomain
 } from './setup-lib.ts';
 
 describe('buildMigrationSql', () => {
@@ -150,5 +155,121 @@ describe('ghSecretEligibility', () => {
 	it('skips when the CLOUDFLARE_* env values are absent (wrangler login)', () => {
 		expect(ghSecretEligibility({ ...ok, apiToken: undefined }).eligible).toBe(false);
 		expect(ghSecretEligibility({ ...ok, accountId: '' }).eligible).toBe(false);
+	});
+});
+
+describe('parseDatabaseId', () => {
+	const id = '1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d';
+
+	it('matches the current wrangler JSONC output shape', () => {
+		// Captured from `wrangler d1 create` on current wrangler.
+		const out = `✅ Successfully created DB 'my-db'
+
+{
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "my-db",
+      "database_id": "${id}"
+    }
+  ]
+}`;
+		expect(parseDatabaseId(out)).toBe(id);
+	});
+
+	it('matches the legacy wrangler TOML output shape', () => {
+		const out = `✅ Successfully created DB 'my-db'
+
+[[d1_databases]]
+binding = "DB"
+database_name = "my-db"
+database_id = "${id}"`;
+		expect(parseDatabaseId(out)).toBe(id);
+	});
+
+	it('returns empty string when no id is present', () => {
+		expect(parseDatabaseId('some unrelated output')).toBe('');
+		expect(parseDatabaseId('')).toBe('');
+	});
+});
+
+describe('deriveRepoSlug', () => {
+	it('derives owner/repo from an https remote (with and without .git)', () => {
+		expect(deriveRepoSlug('https://github.com/sona-fast/sona.git')).toBe('sona-fast/sona');
+		expect(deriveRepoSlug('https://github.com/sona-fast/sona')).toBe('sona-fast/sona');
+	});
+
+	it('derives owner/repo from an scp-style ssh remote', () => {
+		expect(deriveRepoSlug('git@github.com:sona-fast/sona.git')).toBe('sona-fast/sona');
+		expect(deriveRepoSlug('git@github.com:sona-fast/sona')).toBe('sona-fast/sona');
+	});
+
+	it('derives owner/repo from an ssh:// remote', () => {
+		expect(deriveRepoSlug('ssh://git@github.com/sona-fast/sona.git')).toBe('sona-fast/sona');
+	});
+
+	it('tolerates a trailing slash and surrounding whitespace', () => {
+		expect(deriveRepoSlug('  https://github.com/owner/repo/  ')).toBe('owner/repo');
+	});
+
+	it('returns null for a non-GitHub or empty remote', () => {
+		expect(deriveRepoSlug('https://gitlab.com/owner/repo.git')).toBeNull();
+		expect(deriveRepoSlug('')).toBeNull();
+	});
+});
+
+describe('buildPagesConfigPayload', () => {
+	it('wires D1 + R2 bindings and plain-text vars onto the production config', () => {
+		const payload = buildPagesConfigPayload({
+			dbBinding: 'DB',
+			dbId: 'db-123',
+			r2Binding: 'IMAGES',
+			bucket: 'my-images',
+			envVars: { FURTRACK_MODE: 'mock' }
+		});
+		expect(payload).toEqual({
+			deployment_configs: {
+				production: {
+					d1_databases: { DB: { id: 'db-123' } },
+					r2_buckets: { IMAGES: { name: 'my-images' } },
+					env_vars: { FURTRACK_MODE: { type: 'plain_text', value: 'mock' } }
+				}
+			}
+		});
+	});
+
+	it('omits the R2 binding when no bucket exists (R2 not enabled)', () => {
+		const payload = buildPagesConfigPayload({
+			dbBinding: 'DB',
+			dbId: 'db-123',
+			r2Binding: 'IMAGES',
+			bucket: '',
+			envVars: {}
+		});
+		const production = (payload.deployment_configs as { production: Record<string, unknown> })
+			.production;
+		expect(production).not.toHaveProperty('r2_buckets');
+		expect(production.d1_databases).toEqual({ DB: { id: 'db-123' } });
+	});
+});
+
+describe('tokenResolves', () => {
+	it('is true for an authenticated whoami banner', () => {
+		expect(
+			tokenResolves("👋 You are logged in with an API Token, associated with the email 'x@y.z'!")
+		).toBe(true);
+	});
+
+	it('is false when whoami reports no authentication', () => {
+		expect(tokenResolves('You are not authenticated. Please run `wrangler login`.')).toBe(false);
+		expect(tokenResolves('Authentication error [code: 10000]')).toBe(false);
+	});
+});
+
+describe('hostFromDomain', () => {
+	it('strips scheme and path, lowercasing the host', () => {
+		expect(hostFromDomain('https://Taro.Surf/gallery')).toBe('taro.surf');
+		expect(hostFromDomain('taro.surf')).toBe('taro.surf');
+		expect(hostFromDomain('  cdn.taro.surf  ')).toBe('cdn.taro.surf');
 	});
 });

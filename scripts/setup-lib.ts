@@ -81,6 +81,90 @@ export function ensureUrlScheme(value: string): string {
 	return 'https://' + trimmed;
 }
 
+/**
+ * Extracts the D1 `database_id` from `wrangler d1 create` output. Current
+ * wrangler prints a JSONC binding block (`"database_id": "..."`); older versions
+ * printed a TOML one (`database_id = "..."`). Match both so auto-detect keeps
+ * working across wrangler versions instead of falling back to the paste prompt.
+ * Returns '' when no id is found.
+ */
+export function parseDatabaseId(output: string): string {
+	return (output.match(/"?database_id"?\s*[:=]\s*"([0-9a-fA-F-]+)"/) || [])[1] ?? '';
+}
+
+/**
+ * Derives `owner/repo` from a git `origin` URL (ssh or https form) so `gh`
+ * commands can be pinned with `-R owner/repo`. Every fork has two remotes
+ * (origin + upstream sona), so a bare `gh secret set` errors with "multiple
+ * remotes detected"; passing `-R` fixes it. Returns null when the URL isn't a
+ * recognizable GitHub remote.
+ */
+export function deriveRepoSlug(originUrl: string): string | null {
+	const url = originUrl.trim();
+	if (!url) return null;
+	// Matches both git@github.com:owner/repo(.git), ssh://git@github.com/owner/repo,
+	// and https://github.com/owner/repo(.git), with or without a trailing slash.
+	const m = url.match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+	return m ? `${m[1]}/${m[2]}` : null;
+}
+
+export interface PagesConfigInput {
+	/** D1 binding name (DB) and the created database's id. */
+	dbBinding: string;
+	dbId: string;
+	/** R2 binding name (IMAGES) and bucket; omit `bucket` to skip the R2 binding. */
+	r2Binding: string;
+	bucket?: string;
+	/** Plain-text environment variables to attach (e.g. FURTRACK_MODE). */
+	envVars: Record<string, string>;
+}
+
+/**
+ * Builds the `PATCH /accounts/{id}/pages/projects/{project}` body that attaches
+ * the D1/R2 bindings + plain-text vars to the Pages project's PRODUCTION config.
+ * setup writes these only to the gitignored `wrangler.toml`, so a CI-only deploy
+ * (which never sees that file) ships without them; this wires them onto the
+ * project itself. The PATCH merges per key, so unrelated project config is
+ * untouched. The R2 binding is omitted when no bucket exists (R2 not enabled).
+ */
+export function buildPagesConfigPayload(input: PagesConfigInput): Record<string, unknown> {
+	const env_vars: Record<string, { type: string; value: string }> = {};
+	for (const [name, value] of Object.entries(input.envVars)) {
+		env_vars[name] = { type: 'plain_text', value };
+	}
+	const production: Record<string, unknown> = {
+		d1_databases: { [input.dbBinding]: { id: input.dbId } },
+		env_vars
+	};
+	if (input.bucket) production.r2_buckets = { [input.r2Binding]: { name: input.bucket } };
+	return { deployment_configs: { production } };
+}
+
+/**
+ * True when `wrangler whoami` output indicates the credentials resolve. Used by
+ * the setup preflight to fail early with an actionable message rather than
+ * midway through provisioning. Checks for the "not authenticated" failure marker
+ * first (an unresolved token still prints a banner), then the success marker.
+ */
+export function tokenResolves(whoamiOutput: string): boolean {
+	if (/not authenticated|unable to (retrieve|fetch)|authentication error/i.test(whoamiOutput))
+		return false;
+	return /logged in|associated with/i.test(whoamiOutput);
+}
+
+/**
+ * Strips scheme and path from a domain input, leaving the bare host (lowercased).
+ * Used to look up the Cloudflare zone for the DNS-scope preflight and the image
+ * transformations check. Empty input stays empty.
+ */
+export function hostFromDomain(domain: string): string {
+	return domain
+		.trim()
+		.replace(/^https?:\/\//i, '')
+		.replace(/\/.*$/, '')
+		.toLowerCase();
+}
+
 export interface GhEligibilityInput {
 	/** `gh` binary is on PATH. */
 	ghInstalled: boolean;
