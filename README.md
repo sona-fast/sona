@@ -54,9 +54,13 @@ deployment, kept in-repo as the reference config under
    npm run setup
    ```
    It creates the Pages project, D1 database, and (optionally) an R2 bucket;
-   writes `wrangler.toml`; applies migrations; and generates + sets the
-   `SETUP_TOKEN` and `CRON_SECRET` secrets. It prints your one-time `SETUP_TOKEN`
-   — keep it for step 4.
+   writes `wrangler.toml`; attaches the D1/R2 bindings to the Pages project;
+   applies migrations; and generates + sets the `SETUP_TOKEN` and `CRON_SECRET`
+   secrets. It prints your one-time `SETUP_TOKEN` — keep it for step 4.
+
+   > **Run it in a real terminal.** `npm run setup` is interactive; piping input
+   > through `npm run` (e.g. `printf ... | npm run setup`) truncates stdin. If you
+   > must script it, run the script directly: `npx tsx scripts/setup.ts < answers`.
 
    *(Prefer to do it by hand? Copy `wrangler.toml.example` → `wrangler.toml`,
    create the resources with `wrangler d1 create` / `wrangler r2 bucket create`,
@@ -65,8 +69,23 @@ deployment, kept in-repo as the reference config under
    ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)): it applies
    D1 migrations and deploys to Pages. Set repo secrets `CLOUDFLARE_ACCOUNT_ID` +
    `CLOUDFLARE_API_TOKEN`, and (optionally) repo variables `CF_PAGES_PROJECT` /
-   `D1_DATABASE_NAME` / `SITE_URL`. (Or deploy directly:
+   `D1_DATABASE_NAME` / `SITE_URL` / `FURTRACK_MODE` (`npm run setup` can set
+   these for you). (Or deploy directly:
    `npx wrangler pages deploy .svelte-kit/cloudflare`.)
+
+   **API token scopes.** Create a Cloudflare API token (dash → *My Profile → API
+   Tokens → Create Token → Custom token*) with:
+
+   | Scope | Why |
+   |-------|-----|
+   | Account · Cloudflare Pages · Edit | create/deploy the Pages project |
+   | Account · D1 · Edit | create + migrate the database |
+   | Account · Workers R2 Storage · Edit | create the image bucket |
+   | Zone · DNS · Edit | **only if** attaching a custom domain (writes the apex record) |
+   | Zone · Zone Settings · Edit | *optional* — lets setup enable image resizing for you |
+
+   Without **DNS · Edit**, registering the Pages apex domain succeeds but the DNS
+   write fails, leaving the domain stuck `pending` with a confusing 522.
 4. **Finish in the first-run wizard.** Open `/admin/setup`, enter your
    `SETUP_TOKEN`, and set your admin password + site name, owner/persona name,
    social links, theme, and landing layout. The wizard runs once, then closes
@@ -76,6 +95,26 @@ deployment, kept in-repo as the reference config under
 
 The admin password is stored as a salted **PBKDF2 hash** in D1 (never plaintext).
 You can rotate it later in **Settings → Security**.
+
+### Custom domain + image thumbnails (post-deploy)
+
+Two things need a manual step on a custom domain — setup preflights them when it
+can, but calls them out here because they need dashboard/DNS access:
+
+- **Pages apex domain.** After adding your domain to the Pages project, the
+  **apex** needs a manual **proxied CNAME** `yourdomain.com → <project>.pages.dev`
+  in the zone's DNS. (The R2 image domain is different — `wrangler r2 bucket
+  domain add` creates its own record.) Without the apex CNAME the domain sticks
+  `pending` and serves a 522.
+- **Image Transformations.** Thumbnails and OG images are built via
+  `/cdn-cgi/image/…` (Cloudflare Image Transformations), which is **off by
+  default**, enabled **per zone**, and only works on a custom-domain zone (not
+  `*.pages.dev`). Enable it at **dashboard → your zone → Images →
+  Transformations → "Enable for zone"**, and turn on **"Resize images from any
+  origin"** so it can pull from the R2 CDN host. Free tier: **5,000
+  transformations/month**. Until it's on, gallery thumbnails serve the full-size
+  original (slow) or fail. The deploy token can't enable this unless it carries
+  *Zone · Zone Settings · Edit*.
 
 ### Local development
 
