@@ -10,6 +10,11 @@ function keysOf(locale: string): string[] {
 	return Object.keys(json).filter((k) => k !== '$schema');
 }
 
+function rawOf(locale: string): string {
+	const path = fileURLToPath(new URL(`../../messages/${locale}.json`, import.meta.url));
+	return readFileSync(path, 'utf8');
+}
+
 describe('message catalogue parity', () => {
 	const en = keysOf('en');
 	const ja = keysOf('ja');
@@ -19,5 +24,14 @@ describe('message catalogue parity', () => {
 		const jaSet = new Set(ja);
 		expect(en.filter((k) => !jaSet.has(k))).toEqual([]);
 		expect(ja.filter((k) => !enSet.has(k))).toEqual([]);
+	});
+});
+
+// Terminology guard (sona#45): the JA UI always calls Telegram/chat sticker
+// content ステッカー, never スタンプ. Every スタンプ occurrence in the catalogue was
+// sticker-domain, so the whole file must stay free of it.
+describe('ja terminology', () => {
+	it('never uses スタンプ for sticker content', () => {
+		expect(rawOf('ja')).not.toContain('スタンプ');
 	});
 });
