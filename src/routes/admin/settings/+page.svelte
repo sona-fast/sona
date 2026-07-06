@@ -2,11 +2,14 @@
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import SetupDialog from '$lib/components/SetupDialog.svelte';
+	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
-	import { RefreshCw, Loader2 } from 'lucide-svelte';
+	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X } from 'lucide-svelte';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
+	import { resendSetupProgress } from '$lib/resend-setup';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
@@ -65,6 +68,21 @@
 	let changingPassword = $state(false);
 	let adminEmail = $state(data.adminEmail);
 	let savingRecoveryEmail = $state(false);
+	let showResendSetup = $state(false);
+
+	// Readiness reflects the SAVED recovery email (data.adminEmail, kept fresh by
+	// the post-save load re-run), never the live input: an unsaved keystroke must
+	// not flip the status to "active" while the DB is still empty (recovery would
+	// look armed but be dead at lockout). A minimal shape check keeps a stray
+	// non-address string from counting as "set".
+	const emailSet = $derived(/\S+@\S+/.test(data.adminEmail));
+	const resendProgress = $derived(
+		resendSetupProgress({ resendKeySet: data.resendKeySet, adminEmailSet: emailSet })
+	);
+	// Progress-ring geometry: full circumference is 2·π·18 ≈ 113.1; the filled arc
+	// is the done fraction, so the dash gap is the remainder.
+	const RESEND_RING_C = 113.1;
+	const resendRingOffset = $derived(RESEND_RING_C * (1 - resendProgress.done / resendProgress.total));
 
 	let activeTab = $state<'site' | 'connections' | 'storage' | 'account'>('site');
 
@@ -475,16 +493,123 @@
 }}>
 	<section class="security-section" data-tab="account">
 		<h2>{m.admin_settings_recovery_email()}</h2>
-		<p class="hint">{m.admin_settings_recovery_email_hint()}</p>
 		<label>
 			<span>{m.admin_settings_recovery_email_label()}</span>
 			<input type="email" name="adminEmail" class="input" bind:value={adminEmail} autocomplete="email" placeholder="you@example.com" />
 		</label>
+		<div class="reset-status" aria-live="polite">
+			{#if resendProgress.ready}
+				<span class="status-tag active"><Check size={13} /> {m.admin_resend_status_active()}</span>
+				<button type="button" class="hint-link muted" onclick={() => (showResendSetup = true)}>{m.admin_resend_setup_link_active()}</button>
+			{:else}
+				<span class="status-tag unset"><span class="dot"></span> {m.admin_resend_status_unset()}</span>
+				<button type="button" class="hint-link" onclick={() => (showResendSetup = true)}>{m.admin_resend_setup_link_unset()}</button>
+			{/if}
+		</div>
+		<p class="field-hint">
+			{#if resendProgress.ready}
+				{m.admin_resend_hint_active_a()}<code>{m.admin_login_forgot_password()}</code>{m.admin_resend_hint_active_b()}<code>RESEND_FROM</code>{m.admin_resend_hint_active_c()}
+			{:else}
+				{m.admin_resend_hint_unset_a()}<code>RESEND_API_KEY</code>{m.admin_resend_hint_unset_b()}
+			{/if}
+		</p>
 		<button type="submit" class="btn btn-secondary" disabled={savingRecoveryEmail}>
 			{savingRecoveryEmail ? m.admin_saving() : m.admin_settings_save_recovery_email()}
 		</button>
 	</section>
 </form>
+
+{#if showResendSetup}
+	<SetupDialog title={m.admin_resend_setup_title()} sub={m.admin_resend_setup_sub()} onclose={() => (showResendSetup = false)}>
+		{#snippet icon()}<Mail size={15} />{/snippet}
+
+		<div class="status-strip">
+			<div class="status-ring" class:ready={resendProgress.ready}>
+				<svg width="42" height="42" viewBox="0 0 42 42" aria-hidden="true">
+					<circle cx="21" cy="21" r="18" fill="none" stroke="var(--secondary)" stroke-width="4" />
+					<circle cx="21" cy="21" r="18" fill="none" class="ring-fill" stroke-width="4" stroke-linecap="round" stroke-dasharray={RESEND_RING_C} stroke-dashoffset={resendRingOffset} transform="rotate(-90 21 21)" />
+				</svg>
+				<span class="frac">{resendProgress.done}/{resendProgress.total}</span>
+			</div>
+			<div class="status-copy" aria-live="polite">
+				<div class="st-title">{resendProgress.ready ? m.admin_resend_setup_ready_title() : m.admin_resend_setup_pending_title()}</div>
+				<div class="st-sub">{resendProgress.ready ? m.admin_resend_setup_ready_sub() : m.admin_resend_setup_pending_sub()}</div>
+			</div>
+		</div>
+
+		<p class="lede">{m.admin_resend_setup_lede()}</p>
+
+		<div class="checklist">
+			<!-- Step 1: account — no direct config, but a set API key implies an
+			     account exists, so mark it done by inference in that case. -->
+			<div class="item" class:done={data.resendKeySet}>
+				<span class="mark" class:done={data.resendKeySet} class:info={!data.resendKeySet}>
+					{#if data.resendKeySet}<Check size={18} />{:else}<span class="dot"></span>{/if}
+				</span>
+				<div class="body">
+					<div class="title">{m.admin_resend_setup_s1_title()}</div>
+					<div class="text">{m.admin_resend_setup_s1_text_a()}<a href="https://resend.com" target="_blank" rel="noopener">resend.com</a>{m.admin_resend_setup_s1_text_b()}</div>
+				</div>
+				{#if data.resendKeySet}
+					<span class="chip set">{m.admin_resend_setup_chip_done()} <Check size={11} /></span>
+				{/if}
+			</div>
+
+			<!-- Step 2: RESEND_API_KEY secret (required). -->
+			<div class="item" class:done={data.resendKeySet} class:pending={!data.resendKeySet}>
+				<span class="mark" class:done={data.resendKeySet} class:pending={!data.resendKeySet}>
+					{#if data.resendKeySet}<Check size={18} />{:else}<span class="ring-dot"></span>{/if}
+				</span>
+				<div class="body">
+					<div class="title">{m.admin_resend_setup_s2_title()}</div>
+					<div class="text">{m.admin_resend_setup_s2_text_a()}<strong>{m.admin_resend_setup_s2_create()}</strong>{m.admin_resend_setup_s2_text_b()}<code>re_</code>{m.admin_resend_setup_s2_text_c()}</div>
+					<CopyCommand text="npx wrangler pages secret put RESEND_API_KEY --project-name <your-project>" />
+					<div class="text note">{m.admin_resend_setup_s2_note()}</div>
+				</div>
+				<span class="chip" class:set={data.resendKeySet} class:unset={!data.resendKeySet}>
+					{data.resendKeySet ? m.admin_resend_setup_chip_set() : m.admin_resend_setup_chip_unset()}
+					{#if data.resendKeySet}<Check size={11} />{:else}<X size={11} />{/if}
+				</span>
+			</div>
+
+			<!-- Step 3: recovery email (required) — the SAVED value from the field above. -->
+			<div class="item" class:done={emailSet} class:pending={!emailSet}>
+				<span class="mark" class:done={emailSet} class:pending={!emailSet}>
+					{#if emailSet}<Check size={18} />{:else}<span class="ring-dot"></span>{/if}
+				</span>
+				<div class="body">
+					<div class="title">{m.admin_resend_setup_s3_title()}</div>
+					<div class="text">{m.admin_resend_setup_s3_text()}</div>
+				</div>
+				<span class="chip" class:set={emailSet} class:unset={!emailSet}>
+					{emailSet ? m.admin_resend_setup_chip_set() : m.admin_resend_setup_chip_unset()}
+					{#if emailSet}<Check size={11} />{:else}<X size={11} />{/if}
+				</span>
+			</div>
+
+			<!-- Step 4: RESEND_FROM (optional). -->
+			<div class="item">
+				<span class="mark optional"><span class="ring-dot dashed"></span></span>
+				<div class="body">
+					<div class="title">{m.admin_resend_setup_s4_title()} <span class="opt">{m.admin_resend_setup_s4_opt()}</span></div>
+					<div class="text">{m.admin_resend_setup_s4_text_a()}<code>RESEND_FROM</code>{m.admin_resend_setup_s4_text_b()}</div>
+					<CopyCommand text={"npx wrangler pages secret put RESEND_FROM --project-name <your-project>\n# value:  Your Site <you@yourdomain.com>"} />
+				</div>
+				<span class="chip" class:set={data.resendFromSet} class:optional={!data.resendFromSet}>
+					{data.resendFromSet ? m.admin_resend_setup_chip_set() : m.admin_resend_setup_chip_optional()}
+					{#if data.resendFromSet}<Check size={11} />{/if}
+				</span>
+			</div>
+		</div>
+
+		<div class="resend-callout">
+			<AlertTriangle size={18} />
+			<span><strong>{m.admin_resend_setup_callout_strong()}</strong>{m.admin_resend_setup_callout_a()}<code>onboarding@resend.dev</code>{m.admin_resend_setup_callout_b()}<code>RESEND_FROM</code>{m.admin_resend_setup_callout_c()}</span>
+		</div>
+
+		<div class="unlocks"><strong>{m.admin_resend_setup_unlocks_label()}</strong> <strong>{m.admin_login_forgot_password()}</strong>{m.admin_resend_setup_unlocks_a()}</div>
+	</SetupDialog>
+{/if}
 
 <form method="POST" action="?/changePassword" class="contents" use:enhance={() => {
 	changingPassword = true;
@@ -1218,5 +1343,225 @@
 		background: var(--background);
 		cursor: pointer;
 		flex-shrink: 0;
+	}
+
+	/* Resend password-reset setup guide (rendered inside SetupDialog). */
+	.hint-link {
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+		color: #f5a623;
+		font-weight: 600;
+		text-decoration: underline;
+		font: inherit;
+		font-size: 12.5px;
+		white-space: nowrap;
+	}
+	/* Configured-state trigger is muted (owner decision) — amber is reserved for
+	   the unconfigured call-to-action. */
+	.hint-link.muted { color: var(--muted-foreground); }
+	.hint-link.muted:hover { color: var(--foreground); }
+	/* Entry point under the recovery-email field: inline status tag + trigger. */
+	.reset-status {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 10px 14px;
+		margin-top: 10px;
+	}
+	.status-tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		font: 600 12px var(--font-primary);
+	}
+	.status-tag .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+	.status-tag.unset { color: #f5a623; }
+	.status-tag.unset .dot { background: #f5a623; }
+	.status-tag.active { color: #4ade80; }
+	.field-hint {
+		font-size: 11px;
+		color: var(--muted-foreground);
+		margin-top: 8px;
+		line-height: 1.55;
+		max-width: 60ch;
+	}
+	.field-hint code {
+		font-family: var(--font-primary);
+		font-size: 0.92em;
+		background: var(--secondary);
+		padding: 1px 4px;
+		border-radius: var(--radius-xs);
+	}
+	.status-strip {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		padding: 14px 16px;
+		margin-bottom: 20px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-s);
+		background: var(--background);
+	}
+	.status-ring {
+		flex: none;
+		position: relative;
+		width: 42px;
+		height: 42px;
+	}
+	.status-ring .ring-fill { stroke: #f5a623; }
+	.status-ring.ready .ring-fill { stroke: #4ade80; }
+	.status-ring .frac {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font: 600 11px var(--font-primary);
+		color: var(--foreground);
+	}
+	.status-copy { min-width: 0; }
+	.status-copy .st-title { font-size: 13px; font-weight: 600; }
+	.status-copy .st-sub {
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin-top: 2px;
+		line-height: 1.5;
+	}
+	.lede {
+		font-size: 12.5px;
+		color: var(--muted-foreground);
+		line-height: 1.6;
+		margin: 0 0 16px;
+	}
+	.checklist { display: flex; flex-direction: column; gap: 10px; }
+	.item {
+		border: 1px solid var(--border);
+		border-radius: var(--radius-s);
+		background: var(--background);
+		padding: 13px 15px;
+		display: grid;
+		grid-template-columns: 22px 1fr auto;
+		gap: 12px;
+		align-items: start;
+	}
+	.item.done { border-color: rgba(74, 222, 128, 0.28); }
+	.item.pending { border-color: rgba(245, 166, 35, 0.3); }
+	.mark { margin-top: 1px; display: flex; }
+	.mark.done { color: #4ade80; }
+	.mark.pending { color: #f5a623; }
+	.mark.optional,
+	.mark.info { color: var(--muted-foreground); }
+	.mark .dot {
+		width: 8px;
+		height: 8px;
+		margin: 6px;
+		border-radius: 50%;
+		background: var(--muted-foreground);
+	}
+	.mark .ring-dot {
+		width: 16px;
+		height: 16px;
+		margin: 1px;
+		border-radius: 50%;
+		border: 2px solid currentColor;
+	}
+	.mark .ring-dot.dashed { border-style: dashed; }
+	.item .body { min-width: 0; }
+	.item .title {
+		font-size: 13.5px;
+		font-weight: 600;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.item .title .opt {
+		font-weight: 500;
+		color: var(--muted-foreground);
+		font-size: 10.5px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.item .text {
+		font-size: 12.5px;
+		color: var(--muted-foreground);
+		line-height: 1.55;
+		margin-top: 3px;
+	}
+	.item .text a { color: var(--primary); text-decoration: none; }
+	.item .text a:hover { text-decoration: underline; }
+	.item .text code { background: var(--secondary); }
+	.item .text.note { font-size: 11.5px; margin-top: 8px; opacity: 0.9; }
+	.chip {
+		flex: none;
+		align-self: center;
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font: 600 11px var(--font-primary);
+		padding: 4px 9px;
+		border-radius: var(--radius-pill);
+		white-space: nowrap;
+	}
+	.chip.set { background: rgba(74, 222, 128, 0.13); color: #4ade80; }
+	.chip.unset { background: rgba(245, 166, 35, 0.13); color: #f5a623; }
+	.chip.optional { background: var(--secondary); color: var(--muted-foreground); }
+	.resend-callout {
+		display: flex;
+		gap: 10px;
+		padding: 12px 14px;
+		border-radius: var(--radius-s);
+		background: rgba(245, 166, 35, 0.1);
+		color: #f5a623;
+		font-size: 12.5px;
+		line-height: 1.55;
+		margin: 18px 0 0;
+	}
+	.resend-callout :global(svg) { flex-shrink: 0; margin-top: 1px; }
+	.resend-callout strong { color: #f7b74d; }
+	.resend-callout code { background: rgba(245, 166, 35, 0.14); color: #f7b74d; }
+	.unlocks {
+		margin-top: 16px;
+		padding: 12px 14px;
+		border-left: 2px solid var(--primary);
+		background: rgba(255, 132, 0, 0.06);
+		font-size: 12.5px;
+		color: var(--muted-foreground);
+		line-height: 1.6;
+		border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+	}
+	.unlocks strong { color: var(--foreground); font-weight: 600; }
+
+	/* Light theme: the amber/green used above sit at ~1.5–2:1 on the light
+	   surfaces and fail WCAG. Darken to amber #8A5A00 (~5.9:1 on white) and green
+	   #15803D (~5:1) for text; both clear 3:1 for the ring/dot graphics too. */
+	:global([data-theme='light']) .hint-link { color: #8A5A00; }
+	/* The muted (configured-state) trigger must stay muted in light theme too —
+	   amber is reserved for the unconfigured CTA. */
+	:global([data-theme='light']) .hint-link.muted { color: var(--muted-foreground); }
+	/* Links inside checklist rows (e.g. resend.com in step 1) — same AA fix. */
+	:global([data-theme='light']) .item .text a { color: #8A5A00; }
+	:global([data-theme='light']) .status-tag.unset,
+	:global([data-theme='light']) .status-tag.unset .dot { color: #8A5A00; }
+	:global([data-theme='light']) .status-tag.unset .dot { background: #8A5A00; }
+	:global([data-theme='light']) .status-tag.active,
+	:global([data-theme='light']) .mark.done { color: #15803D; }
+	:global([data-theme='light']) .mark.pending { color: #8A5A00; }
+	:global([data-theme='light']) .status-ring .ring-fill { stroke: #8A5A00; }
+	:global([data-theme='light']) .status-ring.ready .ring-fill { stroke: #15803D; }
+	:global([data-theme='light']) .chip.set { color: #15803D; }
+	:global([data-theme='light']) .chip.unset { color: #8A5A00; }
+	:global([data-theme='light']) .resend-callout,
+	:global([data-theme='light']) .resend-callout strong,
+	:global([data-theme='light']) .resend-callout code { color: #8A5A00; }
+
+	/* Narrow screens: the 22px/1fr/auto grid starves the body (CopyCommand wraps
+	   one word per line). Below 480px drop to two columns and move the chip below
+	   the body, leaving the body + command full-width. */
+	@media (max-width: 480px) {
+		.item { grid-template-columns: 22px 1fr; }
+		.item .body { grid-column: 2; }
+		.item .chip { grid-column: 2; justify-self: start; align-self: start; margin-top: 8px; }
 	}
 </style>

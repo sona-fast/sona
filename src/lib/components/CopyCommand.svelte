@@ -9,21 +9,25 @@
 
 	let { text }: Props = $props();
 	let copied = $state(false);
+	// Announced to screen readers on copy — the icon swap alone is silent.
+	let announce = $state('');
 
 	async function copy() {
 		try {
 			await navigator.clipboard.writeText(text);
 			copied = true;
+			announce = m.admin_setup_copied();
 			setTimeout(() => (copied = false), 1200);
 		} catch {
-			// Clipboard can be unavailable (insecure context / permission) — no-op.
+			// Clipboard can be unavailable (insecure context / permission).
+			announce = m.admin_setup_copy_failed();
 		}
 	}
 </script>
 
 <div class="cmd">{text}<button class="copy" class:copied onclick={copy} aria-label={m.admin_setup_copy()}>
 		{#if copied}<Check size={14} />{:else}<Copy size={14} />{/if}
-	</button></div>
+	</button><span class="sr-only" aria-live="polite">{announce}</span></div>
 
 <style>
 	.cmd {
@@ -55,4 +59,15 @@
 	}
 	.copy:hover { color: var(--foreground); }
 	.copy.copied { color: var(--primary); }
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
 </style>
