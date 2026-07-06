@@ -24,21 +24,34 @@
 	// The persona's name for the "art of {name}" card copy.
 	const personaName = $derived(data.settings.ownerName || data.settings.siteName);
 
-	const cards = $derived([
-		{
-			href: '/art',
-			icon: Palette,
-			title: m.splash_artist_title,
-			desc: () => m.splash_artist_desc({ name: personaName })
-		},
-		{ href: '/connect', icon: Hand, title: m.splash_met_title, desc: () => m.splash_met_desc() },
-		{
-			href: '/share',
-			icon: Camera,
-			title: m.splash_photos_title,
-			desc: () => m.splash_photos_desc({ name: personaName })
-		}
-	]);
+	// A card is hidden when its target page would 404 on this fork (#42) — the
+	// load computes pathPresence from the same predicates those pages gate on.
+	// /connect has no gate, so its card always shows.
+	const cards = $derived(
+		[
+			{
+				href: '/art',
+				icon: Palette,
+				title: m.splash_artist_title,
+				desc: () => m.splash_artist_desc({ name: personaName }),
+				show: data.pathPresence.art
+			},
+			{
+				href: '/connect',
+				icon: Hand,
+				title: m.splash_met_title,
+				desc: () => m.splash_met_desc(),
+				show: true
+			},
+			{
+				href: '/share',
+				icon: Camera,
+				title: m.splash_photos_title,
+				desc: () => m.splash_photos_desc({ name: personaName }),
+				show: data.pathPresence.share
+			}
+		].filter((card) => card.show)
+	);
 </script>
 
 <Meta
