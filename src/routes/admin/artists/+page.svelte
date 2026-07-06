@@ -43,6 +43,16 @@
 		return name.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 	}
 
+	// Why the Share button is disabled (or what it does): an AKA-linked row (#71)
+	// explains itself via the registry artist's name; an up-to-date row says so;
+	// otherwise it's the plain submit label. Used for both title and aria-label.
+	function shareLabel(id: number): string {
+		const aliasOf = data.aliasLinked?.[id];
+		if (aliasOf) return m.admin_artists_alias_linked({ name: aliasOf });
+		if (data.upToDate?.[id]) return m.admin_artists_up_to_date();
+		return m.admin_artists_submit_registry();
+	}
+
 	// An artist may have drawn artworks, stickers, or both — show whatever's non-zero.
 	function worksLabel(a: { artworkCount: number; stickerCount: number }): string {
 		const parts: string[] = [];
@@ -148,7 +158,7 @@
 								}}
 							>
 								<input type="hidden" name="id" value={artist.id} />
-								<button class="icon-btn" type="submit" disabled={submittingId !== null || data.upToDate?.[artist.id]} aria-busy={submittingId === artist.id} aria-label={data.upToDate?.[artist.id] ? m.admin_artists_up_to_date() : m.admin_artists_submit_registry()} title={data.upToDate?.[artist.id] ? m.admin_artists_up_to_date() : m.admin_artists_submit_registry()}>
+								<button class="icon-btn" type="submit" disabled={submittingId !== null || data.upToDate?.[artist.id] || !!data.aliasLinked?.[artist.id]} aria-busy={submittingId === artist.id} aria-label={shareLabel(artist.id)} title={shareLabel(artist.id)}>
 									{#if submittingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Share2 size={16} />{/if}
 								</button>
 							</form>
@@ -232,13 +242,13 @@
 						}}
 					>
 						<input type="hidden" name="id" value={artist.id} />
-						<button class="icon-btn" type="submit" disabled={submittingId !== null || data.upToDate?.[artist.id]} aria-busy={submittingId === artist.id} aria-label={data.upToDate?.[artist.id] ? m.admin_artists_up_to_date() : m.admin_artists_submit_registry()} title={data.upToDate?.[artist.id] ? m.admin_artists_up_to_date() : m.admin_artists_submit_registry()}>
+						<button class="icon-btn" type="submit" disabled={submittingId !== null || data.upToDate?.[artist.id] || !!data.aliasLinked?.[artist.id]} aria-busy={submittingId === artist.id} aria-label={shareLabel(artist.id)} title={shareLabel(artist.id)}>
 							{#if submittingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Share2 size={16} />{/if}
 						</button>
 					</form>
 				{/if}
-				<button class="icon-btn" onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
-				<button class="icon-btn" disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
+				<button class="icon-btn" aria-label={m.admin_artists_edit_aria()} onclick={() => (editingArtist = artist)}><Pencil size={16} /></button>
+				<button class="icon-btn" aria-label={m.admin_artists_delete_aria()} disabled={deletingId === artist.id} onclick={() => (deleteTarget = { id: artist.id, name: artist.name })}>
 					{#if deletingId === artist.id}<Loader2 size={16} class="spin" />{:else}<Trash2 size={16} />{/if}
 				</button>
 			</div>

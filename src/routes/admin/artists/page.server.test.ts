@@ -79,6 +79,21 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
+// Route registry HTTP calls by URL substring so the REAL client code runs
+// against canned responses; anything unrouted still fails like the default stub.
+function stubRegistryFetch(routes: Record<string, unknown>) {
+	vi.stubGlobal(
+		'fetch',
+		vi.fn((input: RequestInfo | URL) => {
+			const url = String(input);
+			for (const [needle, body] of Object.entries(routes)) {
+				if (url.includes(needle)) return Promise.resolve(new Response(JSON.stringify(body)));
+			}
+			return Promise.reject(new Error('offline'));
+		})
+	);
+}
+
 describe('admin artists load — registry enablement', () => {
 	it('reports registryEnabled with a D1-stored fork key and no env secret', async () => {
 		const { db, platform } = makeDb();
@@ -230,12 +245,147 @@ describe('admin artists load — server-side search matches AKA names', () => {
 	});
 });
 
+describe('admin artists load — approved-submission linking stamps registry_version (#71)', () => {
+	// An approved CREATE submission (matched by display name) whose approval
+	// linked it to g-1 — the aliased/AKA approval shape looks the same to the fork.
+	const approvedSub = {
+		id: 5,
+		kind: 'create',
+		targetGlobalId: null,
+		payload: JSON.stringify({ displayName: 'Nyx' }),
+		matchedGlobalId: 'g-1',
+		status: 'approved',
+		reviewerNote: null,
+		createdAt: '2026-01-01T00:00:00Z',
+		decidedAt: '2026-01-02T00:00:00Z'
+	};
+	const catalogEntry = {
+		globalId: 'g-1',
+		displayName: 'Nyx',
+		avatarUrl: null,
+		bio: null,
+		socials: {},
+		status: 'active',
+		mergedInto: null,
+		version: 7,
+		updatedAt: '2026-01-02T00:00:00Z'
+	};
+
+	it('stamps registryVersion alongside globalId when the catalog has the entry', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		await db.insert(schema.artists).values({ name: 'Nyx' });
+		stubRegistryFetch({
+			'/v1/submissions/mine': { submissions: [approvedSub] },
+			'/v1/artists?': { artists: [catalogEntry], nextCursor: null }
+		});
+
+		await load(loadEvent(platform));
+
+		const row = await db.select().from(schema.artists).get();
+		expect(row!.globalId).toBe('g-1');
+		expect(row!.registryVersion).toBe(7); // the next share submits baseVersion 7
+	});
+
+	it('still links (version null) when the catalog entry carries a non-numeric version', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		await db.insert(schema.artists).values({ name: 'Nyx' });
+		// A malformed catalog response must not stamp garbage into the integer column.
+		stubRegistryFetch({
+			'/v1/submissions/mine': { submissions: [approvedSub] },
+			'/v1/artists?': { artists: [{ ...catalogEntry, version: '7' }], nextCursor: null }
+		});
+
+		await load(loadEvent(platform));
+
+		const row = await db.select().from(schema.artists).get();
+		expect(row!.globalId).toBe('g-1');
+		expect(row!.registryVersion).toBeNull();
+	});
+
+	it('still links (version null) when the catalog fetch fails — the submit backstop heals it', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		await db.insert(schema.artists).values({ name: 'Nyx' });
+		// Only the submissions endpoint responds; the delta/catalog fetch stays offline.
+		stubRegistryFetch({ '/v1/submissions/mine': { submissions: [approvedSub] } });
+
+		await load(loadEvent(platform));
+
+		const row = await db.select().from(schema.artists).get();
+		expect(row!.globalId).toBe('g-1');
+		expect(row!.registryVersion).toBeNull();
+	});
+});
+
+describe('admin artists load — alias-linked share guard (#71)', () => {
+	// Survivor "Funereal" absorbed "CinnamonServal" as an AKA: the local row keeps
+	// the alias name but is linked to the survivor's globalId.
+	const survivor = {
+		globalId: 'g-1',
+		displayName: 'Funereal',
+		avatarUrl: null,
+		bio: null,
+		socials: {},
+		aliases: [{ displayName: 'CinnamonServal', socials: {} }],
+		status: 'active',
+		mergedInto: null,
+		version: 3,
+		updatedAt: '2026-01-02T00:00:00Z'
+	};
+
+	async function seedLinked(db: ReturnType<typeof makeDb>['db'], name: string) {
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		await db.insert(schema.artists).values({ name, globalId: 'g-1', registryVersion: 3 });
+	}
+
+	it('marks aliasLinked (with the registry name) when the local name matches an alias, case-insensitively', async () => {
+		const { db, platform } = makeDb();
+		await seedLinked(db, 'cinnamonserval');
+		stubRegistryFetch({
+			'/v1/submissions/mine': { submissions: [] },
+			'/v1/artists?': { artists: [survivor], nextCursor: null }
+		});
+
+		const result = (await load(loadEvent(platform))) as {
+			artists: Array<{ id: number }>;
+			aliasLinked: Record<number, string>;
+		};
+		expect(result.aliasLinked).toEqual({ [result.artists[0].id]: 'Funereal' });
+	});
+
+	it('does NOT mark a direct-linked artist renamed locally (name is not an alias)', async () => {
+		const { db, platform } = makeDb();
+		await seedLinked(db, 'Graveside'); // legit local rename → shareable update proposal
+		stubRegistryFetch({
+			'/v1/submissions/mine': { submissions: [] },
+			'/v1/artists?': { artists: [survivor], nextCursor: null }
+		});
+
+		const result = (await load(loadEvent(platform))) as { aliasLinked: Record<number, string> };
+		expect(result.aliasLinked).toEqual({});
+	});
+
+	it('fails open (no marks) when the catalog is unreachable', async () => {
+		const { db, platform } = makeDb();
+		await seedLinked(db, 'CinnamonServal');
+		// Default beforeEach stub: every fetch is offline.
+
+		const result = (await load(loadEvent(platform))) as { aliasLinked: Record<number, string> };
+		expect(result.aliasLinked).toEqual({});
+	});
+});
+
 describe('submitToRegistry action — surfaces the registry outcome', () => {
 	// Enable the registry via a stored fork key (same path the load tests use) and
 	// seed the artist row the action reads, then return its id.
-	async function seedEnabledArtist(db: ReturnType<typeof makeDb>['db']) {
+	async function seedEnabledArtist(
+		db: ReturnType<typeof makeDb>['db'],
+		extra: Partial<typeof schema.artists.$inferInsert> = {}
+	) {
 		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
-		const row = await db.insert(schema.artists).values({ name: 'Nyx' }).returning({ id: schema.artists.id }).get();
+		const row = await db.insert(schema.artists).values({ name: 'Nyx', ...extra }).returning({ id: schema.artists.id }).get();
 		return row.id;
 	}
 
@@ -278,5 +428,114 @@ describe('submitToRegistry action — surfaces the registry outcome', () => {
 
 		const result = await actions.submitToRegistry(submitEvent(platform, id));
 		expect(result).toEqual({ success: true, submitted: true });
+	});
+
+	it('submits an update with the stored registryVersion as baseVersion (unchanged path)', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db, { globalId: 'g-9', registryVersion: 3 });
+		mockRegistrySubmit.mockResolvedValue({ id: 1, status: 'pending', matchedGlobalId: null });
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toEqual({ success: true, submitted: true });
+		expect(mockRegistrySubmit).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ kind: 'update', targetGlobalId: 'g-9', baseVersion: 3 })
+		);
+	});
+
+	it('resolves + persists a missing registryVersion before submitting an update (#71)', async () => {
+		const { db, platform } = makeDb();
+		// Linked but never version-stamped — the exact state issue #71 describes.
+		const id = await seedEnabledArtist(db, { globalId: 'g-9' });
+		stubRegistryFetch({
+			'/v1/artists/g-9': {
+				globalId: 'g-9',
+				displayName: 'Nyx',
+				avatarUrl: null,
+				bio: null,
+				socials: {},
+				status: 'active',
+				mergedInto: null,
+				version: 4,
+				updatedAt: '2026-01-02T00:00:00Z'
+			}
+		});
+		mockRegistrySubmit.mockResolvedValue({ id: 1, status: 'pending', matchedGlobalId: null });
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toEqual({ success: true, submitted: true });
+		// The update went out with a NUMERIC baseVersion, not undefined.
+		expect(mockRegistrySubmit).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ kind: 'update', targetGlobalId: 'g-9', baseVersion: 4 })
+		);
+		// And the resolved version was persisted so the next share skips the lookup.
+		const row = await db.select().from(schema.artists).get();
+		expect(row!.registryVersion).toBe(4);
+	});
+
+	// The registry artist "Funereal" carrying "CinnamonServal" as an alias — the
+	// shape registryGetArtist returns for the alias-guard checks below.
+	const survivorEntry = {
+		globalId: 'g-1',
+		displayName: 'Funereal',
+		avatarUrl: null,
+		bio: null,
+		socials: {},
+		aliases: [{ displayName: 'CinnamonServal', socials: {} }],
+		status: 'active',
+		mergedInto: null,
+		version: 3,
+		updatedAt: '2026-01-02T00:00:00Z'
+	};
+
+	it('refuses (400, no submit) sharing a row whose name is an alias of its linked registry artist (#71)', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db, { name: 'CinnamonServal', globalId: 'g-1', registryVersion: 3 });
+		stubRegistryFetch({ '/v1/artists/g-1': survivorEntry });
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toMatchObject({ status: 400 });
+		expect((result as { data: { error: string } }).data.error).toMatch(/AKA of Funereal/);
+		expect(mockRegistrySubmit).not.toHaveBeenCalled();
+	});
+
+	it('still submits a direct-linked local rename as an update (#71 guard must not overblock)', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db, { name: 'Graveside', globalId: 'g-1', registryVersion: 3 });
+		stubRegistryFetch({ '/v1/artists/g-1': survivorEntry });
+		mockRegistrySubmit.mockResolvedValue({ id: 1, status: 'pending', matchedGlobalId: null });
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toEqual({ success: true, submitted: true });
+		expect(mockRegistrySubmit).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				kind: 'update',
+				targetGlobalId: 'g-1',
+				payload: expect.objectContaining({ displayName: 'Graveside' })
+			})
+		);
+	});
+
+	it('fails open when the registry is unreachable: the alias check is skipped and the share proceeds (#71)', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db, { name: 'CinnamonServal', globalId: 'g-1', registryVersion: 3 });
+		// Default beforeEach stub: the registryGetArtist lookup is offline.
+		mockRegistrySubmit.mockResolvedValue({ id: 1, status: 'pending', matchedGlobalId: null });
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toEqual({ success: true, submitted: true });
+	});
+
+	it('fails 502 (and never submits) when the missing version cannot be resolved (#71)', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db, { globalId: 'g-9' });
+		// Default beforeEach stub: every fetch (incl. the version lookup) is offline.
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toMatchObject({ status: 502 });
+		expect((result as { data: { error: string } }).data.error).toMatch(/registry version/i);
+		expect(mockRegistrySubmit).not.toHaveBeenCalled();
 	});
 });

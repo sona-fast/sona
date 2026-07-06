@@ -441,6 +441,7 @@
 	"admin_artists_registry_failed": "Registry submit failed",
 	"admin_artists_submit_registry": "Submit to shared registry",
 	"admin_artists_up_to_date": "Already up to date in the shared registry",
+	"admin_artists_alias_linked": "This entry is an AKA of {name} in the registry — sharing is disabled so it doesn't propose renaming that artist.",
 	"admin_artists_edit_aria": "Edit artist",
 	"admin_artists_delete_aria": "Delete artist",
 	"admin_artists_no_match": "No artists matching \"{search}\"",

@@ -3,6 +3,7 @@ import {
 	isRegistryEnabled,
 	artistSocials,
 	firstHandle,
+	isLocalNameAliasOf,
 	parseAliases,
 	registryRegisterFork,
 	registrySubmit,
@@ -65,6 +66,52 @@ describe('parseAliases', () => {
 			{ displayName: 'KesForge', socials: { twitterUrl: 'https://x.com/kf' } },
 			{ displayName: 'OldName', socials: {} }
 		]);
+	});
+});
+
+describe('isLocalNameAliasOf', () => {
+	type Reg = Parameters<typeof isLocalNameAliasOf>[1];
+
+	it('is true when the local name matches an alias (case-insensitive)', () => {
+		const reg: Reg = {
+			displayName: 'Buttsteak',
+			aliases: [{ displayName: 'Mlyeko', socials: {} }]
+		};
+		expect(isLocalNameAliasOf('mlyeko', reg)).toBe(true);
+	});
+
+	it('displayName takes precedence: a name that is BOTH the displayName and an alias is not an alias link', () => {
+		const reg: Reg = {
+			displayName: 'Buttsteak',
+			aliases: [{ displayName: 'Buttsteak', socials: {} }]
+		};
+		expect(isLocalNameAliasOf('Buttsteak', reg)).toBe(false);
+	});
+
+	it('is false (no throw) when aliases is undefined', () => {
+		expect(isLocalNameAliasOf('anyone', { displayName: 'Buttsteak' })).toBe(false);
+	});
+
+	it('tolerates malformed alias entries and still matches the valid one', () => {
+		const reg = {
+			displayName: 'Buttsteak',
+			aliases: [null, { displayName: 42 }, { socials: {} }, { displayName: 'CinnamonServal' }]
+		} as unknown as Reg;
+		expect(isLocalNameAliasOf('cinnamonserval', reg)).toBe(true);
+	});
+
+	it('fails open (false, no throw) when the registry entry lacks a string displayName', () => {
+		const reg = { aliases: [{ displayName: 'Mlyeko', socials: {} }] } as unknown as Reg;
+		expect(isLocalNameAliasOf('mlyeko', reg)).toBe(false);
+		expect(isLocalNameAliasOf('mlyeko', { displayName: 42 } as unknown as Reg)).toBe(false);
+	});
+
+	it('matches across Unicode normal forms (NFC local vs NFD alias)', () => {
+		const reg: Reg = {
+			displayName: 'Buttsteak',
+			aliases: [{ displayName: 'Re\u0301my', socials: {} }] // NFD (e + combining acute)
+		};
+		expect(isLocalNameAliasOf('R\u00e9my', reg)).toBe(true); // NFC (precomposed é)
 	});
 });
 

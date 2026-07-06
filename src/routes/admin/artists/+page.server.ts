@@ -10,8 +10,10 @@ import {
 	resolveRegistryEnv,
 	registrySubmit,
 	registrySubmissionsMine,
+	registryGetArtist,
 	artistSocials,
-	parseAliases
+	parseAliases,
+	isLocalNameAliasOf
 } from '$lib/server/registry';
 import { fetchRegistryCatalog } from '$lib/server/registry-import';
 import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
@@ -92,10 +94,20 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// Linked artists that already match the registry catalog — their "submit" is a
 	// no-op and gets disabled. Fails open: an empty/unreachable catalog leaves it {}.
 	const upToDate: Record<number, boolean> = {};
+	// AKA-linked rows (#71): local name matches an ALIAS of the linked registry
+	// artist, so a share would propose renaming that artist back to the alias.
+	// Maps artist id → the registry artist's current display name (for the hint).
+	// Fails open like upToDate: no catalog → {} (the submit action re-checks).
+	const aliasLinked: Record<number, string> = {};
 	if (registryEnabled) {
 		const dismissed = parseDismissed(await getRawSetting(db, DISMISSED_KEY));
 		// A dismissed rejection is acknowledged locally — drop it so it stops showing.
 		const subs = (await registrySubmissionsMine(renv)).filter((s) => !dismissed.has(s.id));
+
+		// One catalog fetch, reused twice: to stamp registry_version at link time
+		// (just below) and to compute per-artist up-to-date state (further down).
+		const catalog = await fetchRegistryCatalog(renv);
+		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));
 
 		// An APPROVED submission means the maintainer linked this artist into the
 		// registry. Stamp the global id now (marking it shared) instead of waiting
@@ -112,9 +124,20 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 				.where(eq(artists.globalId, linkedId))
 				.get();
 			if (taken) continue;
+			// Same runtime guard as the submit backstop: a malformed catalog entry
+			// (non-numeric version) must not reach the integer column.
+			const v = byGlobalId.get(linkedId)?.version;
 			await db
 				.update(artists)
-				.set({ globalId: linkedId, registrySyncedAt: new Date().toISOString() })
+				.set({
+					globalId: linkedId,
+					// Stamp the current registry version too — without it the next share
+					// goes out as an update with no baseVersion and the registry 400s
+					// (#71). If the catalog fetch failed or the entry is missing, still
+					// link (submitToRegistry resolves the version as a backstop).
+					registryVersion: typeof v === 'number' ? v : null,
+					registrySyncedAt: new Date().toISOString()
+				})
 				.where(eq(artists.id, a.id));
 			a.globalId = linkedId; // reflect in this render so the badge + guard update
 		}
@@ -134,16 +157,15 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			}
 		}
 
-		// One catalog fetch; compare each linked artist against its entry. A linked
-		// artist that already matches has nothing to submit; an unlinked artist
-		// that's already in the catalog would be a duplicate — disable "submit" for
-		// both so an already-shared artist can't be resubmitted.
-		const catalog = await fetchRegistryCatalog(renv);
-		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));
+		// Compare each linked artist against its catalog entry. A linked artist
+		// that already matches has nothing to submit; an unlinked artist that's
+		// already in the catalog would be a duplicate — disable "submit" for both
+		// so an already-shared artist can't be resubmitted.
 		for (const a of allArtists) {
 			if (a.globalId) {
 				const entry = byGlobalId.get(a.globalId);
 				if (entry && !artistDiffersFromRegistry(a, entry)) upToDate[a.id] = true;
+				if (entry && isLocalNameAliasOf(a.name, entry)) aliasLinked[a.id] = entry.displayName;
 			} else if (artistInCatalog(a, catalog)) {
 				upToDate[a.id] = true;
 			}
@@ -166,7 +188,8 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		q,
 		registryEnabled,
 		registryStatus,
-		upToDate
+		upToDate,
+		aliasLinked
 	};
 };
 
@@ -221,6 +244,42 @@ export const actions = {
 		const a = await db.select().from(artists).where(eq(artists.id, id)).get();
 		if (!a) return fail(404, { error: 'Artist not found' });
 
+		let baseVersion = a.registryVersion ?? undefined;
+		if (a.globalId) {
+			// One registry lookup serves both linked-artist guards below. A null
+			// (offline/unreachable) fails OPEN for the alias check — the moderation
+			// queue is the backstop; an outage must not hard-block normal shares.
+			const reg = await registryGetArtist(renv, a.globalId);
+
+			// Alias guard (#71): this row's name matches an ALIAS of the linked
+			// registry artist (an AKA approval kept the old identity's name locally).
+			// Sharing it would semantically propose renaming the survivor back to the
+			// alias — refuse, mirroring the disabled Share button in the UI.
+			if (reg && isLocalNameAliasOf(a.name, reg)) {
+				// Hardcoded English per this file's convention — keep the wording in
+				// sync with `admin_artists_alias_linked` in messages/en.json.
+				return fail(400, {
+					error: `This entry is an AKA of ${reg.displayName} in the registry — sharing is disabled so it doesn't propose renaming that artist.`
+				});
+			}
+
+			// Belt-and-braces for #71: a linked artist with no stored registry version
+			// (e.g. linked by the status-poll path before it stamped versions, or an
+			// AKA approval the daily sync can't backfill) would go out as an update
+			// with no baseVersion — which the registry hard-rejects (400). Resolve the
+			// current version now, persist it, and use it; if that fails, refuse the
+			// doomed submit with a clear error instead.
+			if (baseVersion === undefined) {
+				if (typeof reg?.version !== 'number') {
+					return fail(502, {
+						error: "Couldn't resolve the artist's registry version — try again or run the artist sync."
+					});
+				}
+				baseVersion = reg.version;
+				await db.update(artists).set({ registryVersion: reg.version }).where(eq(artists.id, a.id));
+			}
+		}
+
 		// Report this fork's own host so the registry can self-heal a null key label
 		// (attribution). Derived the same way the connect-registry flow labels the key:
 		// the configured site name, else this site's hostname.
@@ -229,7 +288,7 @@ export const actions = {
 		const result = await registrySubmit(renv, {
 			kind: a.globalId ? 'update' : 'create',
 			targetGlobalId: a.globalId ?? undefined,
-			baseVersion: a.registryVersion ?? undefined,
+			baseVersion,
 			siteLabel,
 			payload: {
 				displayName: a.name,
