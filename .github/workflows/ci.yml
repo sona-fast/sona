@@ -31,3 +31,32 @@ jobs:
       - run: npm test
 
       - run: npm run build
+
+  # Browser E2E (playwright). Separate from the unit suite so `npm test` stays
+  # fast; gated to the canonical repo like `check`, and skipped on forks (their
+  # deploy.yml already runs check/test/build).
+  e2e:
+    runs-on: ubuntu-latest
+    if: github.repository == 'sona-fast/sona'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # match deploy.yml
+          cache: npm
+
+      - run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run test:e2e

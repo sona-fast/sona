@@ -27,6 +27,15 @@ vite.config.ts.timestamp-*
 
 # Cloudflare
 .dev.vars
+
+# Throwaway local D1 built by the E2E harness (tests/e2e/seed.ts)
+.wrangler-e2e
+
+# Playwright
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
 # Per-deployment Cloudflare config (resource IDs). Copy wrangler.toml.example to
 # wrangler.toml and fill in your own. The reference values live in
 # examples/sparky.ink/wrangler.toml.

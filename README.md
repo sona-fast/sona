@@ -152,6 +152,19 @@ npm test         # vitest
 Local secrets go in `.dev.vars` (gitignored). `FURTRACK_MODE=mock` serves bundled
 demo fursuit data without calling FurTrack.
 
+#### E2E tests
+
+```sh
+npx playwright install chromium   # one-time
+npm run test:e2e                  # browser tests (playwright)
+```
+
+These are browser tests (kept out of `npm test` so the unit suite stays fast).
+They boot `npm run dev` against a **throwaway local D1** — a seed step wipes,
+migrates and seeds it (`tests/e2e/fixtures/seed.sql`) in an isolated persist dir,
+so your real dev database is untouched. CI runs them on the canonical repo (a
+separate `e2e` job in `.github/workflows/ci.yml`); forks skip them.
+
 #### Terminology (ja)
 
 日本語UIでは、Telegram/チャットのステッカー系コンテンツは常に「ステッカー」と表記する（「スタンプ」は使わない）。物理的なダイカットグッズは「シール」で区別する。
