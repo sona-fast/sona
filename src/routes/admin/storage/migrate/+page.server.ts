@@ -3,7 +3,7 @@ import { fail } from '@sveltejs/kit';
 import { UTApi } from 'uploadthing/server';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
-import { getStorage } from '$lib/server/storage';
+import { getStorage, collectReferencedUrls } from '$lib/server/storage';
 import { images } from '$lib/server/db/schema';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -82,8 +82,18 @@ export const actions = {
 			const settings = await getSettings(db, { fresh: true });
 			// The source = the non-active provider (where the pre-migration originals sit).
 			const source: 'uploadthing' | 'r2' = settings.storageProvider === 'uploadthing' ? 'r2' : 'uploadthing';
-			const dbUrls = (await db.select({ imageUrl: images.imageUrl }).from(images)).map((i) => i.imageUrl);
-			const deleted = await getStorage(platform?.env, settings, source).deleteOrphans(dbUrls);
+			// The reference set is EVERY URL-bearing column plus URL-ish settings —
+			// not just images.imageUrl. The source provider may still hold sticker
+			// files, thumbnails, avatars and covers the DB references; anything
+			// missed would be deleted as an "orphan". The 1h gate protects an
+			// upload racing this button (bytes land before any D1 row exists).
+			// After a full UT→R2 migration this button is the REQUIRED cleanup
+			// step: the scheduled cron aborts on UT's then-empty keep set (its
+			// zero-keep belt), so it will never sweep the leftover originals.
+			const referenced = await collectReferencedUrls(db, settings);
+			const deleted = await getStorage(platform?.env, settings, source).deleteOrphans(referenced, {
+				olderThan: new Date(Date.now() - 60 * 60 * 1000)
+			});
 			return {
 				success: true,
 				message: deleted === 0 ? 'No leftover originals to delete.' : `Deleted ${deleted} original file${deleted === 1 ? '' : 's'} from ${PROVIDER_LABEL[source]}.`

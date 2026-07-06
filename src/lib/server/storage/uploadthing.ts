@@ -1,5 +1,6 @@
 import { UTApi } from 'uploadthing/server';
-import type { StorageProvider, PutInput, PutResult } from './types';
+import { ZeroKeepError } from './types';
+import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
 
 export class UploadThingStorage implements StorageProvider {
 	readonly id = 'uploadthing' as const;
@@ -28,14 +29,30 @@ export class UploadThingStorage implements StorageProvider {
 		return /\.ufs\.sh\/f\/|utfs\.io\/f\//.test(url);
 	}
 
-	async deleteOrphans(referencedUrls: string[]): Promise<number> {
+	async deleteOrphans(referencedUrls: string[], opts?: DeleteOrphansOptions): Promise<number> {
 		const keep = new Set(
 			referencedUrls.map((u) => this.#keyFromUrl(u)).filter((k): k is string => !!k)
 		);
 		// 500 covers this site's volume; paginate if it ever grows past that.
 		const { files } = await this.#api.listFiles({ limit: 500 });
-		const orphans = files.filter((f) => !keep.has(f.key)).map((f) => f.key);
-		if (orphans.length) await this.#api.deleteFiles(orphans);
+		// Keys here are host-agnostic (any …/f/<key> URL), so an empty keep set
+		// with files present means the reference set itself is empty/broken —
+		// deleting would wipe every stored file. See DeleteOrphansOptions.
+		// KNOWN CASE: after a full UT→R2 migration no DB URL points at UT, so the
+		// scheduled cron trips this belt forever and never removes the leftover
+		// originals. That's intended — the migrate page's manual cleanup button
+		// (which doesn't set abortOnEmptyKeepSet) is the post-migration path.
+		if (opts?.abortOnEmptyKeepSet && keep.size === 0 && files.length > 0) {
+			throw new ZeroKeepError(
+				'uploadthing: no referenced URL resolves to a stored key — refusing to treat every file as an orphan (empty or unmappable reference set?)'
+			);
+		}
+		// listFiles exposes uploadedAt as epoch millis, so the age gate works here too.
+		const cutoff = opts?.olderThan?.getTime();
+		const orphans = files
+			.filter((f) => !keep.has(f.key) && (cutoff === undefined || f.uploadedAt < cutoff))
+			.map((f) => f.key);
+		if (orphans.length && !opts?.dryRun) await this.#api.deleteFiles(orphans);
 		return orphans.length;
 	}
 

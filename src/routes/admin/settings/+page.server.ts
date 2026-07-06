@@ -10,7 +10,7 @@ import {
 	clearSettingsCache,
 	parseSonaColors
 } from '$lib/server/settings';
-import { deleteOrphansAll } from '$lib/server/storage';
+import { deleteOrphansAll, collectReferencedUrls } from '$lib/server/storage';
 import {
 	images,
 	artists,
@@ -218,7 +218,29 @@ export const actions = {
 		const data = await request.formData();
 
 		const provider = data.get('storageProvider') === 'r2' ? 'r2' : 'uploadthing';
-		const r2PublicUrl = sanitizeUrl(data.get('r2PublicUrl') as string) || '';
+		let r2PublicUrl = sanitizeUrl(data.get('r2PublicUrl') as string) || '';
+		// The public base must be an ORIGIN only. Orphan cleanup derives storage
+		// keys from URL pathnames, so a path-bearing base (https://example.com/cdn)
+		// would yield keys like 'cdn/artwork/x.png' that never match stored keys —
+		// every referenced object would be judged an orphan on the next sweep.
+		// Reject loudly rather than silently stripping the path, so an admin
+		// fronting the bucket through a sub-path proxy learns it isn't supported.
+		// (R2 custom domains are origin-only anyway.)
+		if (r2PublicUrl) {
+			let origin = '';
+			try {
+				const u = new URL(r2PublicUrl);
+				if (u.pathname === '/' && !u.search && !u.hash) origin = u.origin;
+			} catch {
+				// not an absolute URL (e.g. a root-relative path) — rejected below
+			}
+			if (!origin) {
+				return fail(400, {
+					error: 'R2 public URL must be an origin only, like https://cdn.example.com — no path, query, or fragment.'
+				});
+			}
+			r2PublicUrl = origin;
+		}
 
 		await saveSettings(db, { storageProvider: provider, r2PublicUrl });
 
@@ -402,9 +424,23 @@ export const actions = {
 
 		try {
 			const settings = await getSettings(db);
-			const dbUrls = (await db.select({ imageUrl: images.imageUrl }).from(images)).map((i) => i.imageUrl);
-			// Remove orphans from every configured provider (R2 + UploadThing).
-			const deleted = await deleteOrphansAll(platform?.env, settings, dbUrls);
+			// The reference set is EVERY URL-bearing column in the schema plus the
+			// URL-ish settings — not just images.imageUrl. Anything missed there
+			// (sticker files, thumbnails, avatars, covers) would be deleted as an
+			// "orphan". See collectReferencedUrls + its completeness guard test.
+			const referenced = await collectReferencedUrls(db, settings);
+			// Remove orphans from every configured provider (R2 + UploadThing), but
+			// only objects older than an hour: /api/upload stores bytes before any
+			// D1 row exists, so an upload racing this button would look orphaned.
+			// The button's purpose is stale junk, not just-uploaded bytes.
+			const { deleted, errors } = await deleteOrphansAll(platform?.env, settings, referenced, {
+				olderThan: new Date(Date.now() - 60 * 60 * 1000)
+			});
+			// A configured provider failing mid-cleanup used to be swallowed as
+			// "not configured" — surface it so the admin isn't told success.
+			if (errors.length) {
+				return fail(500, { error: `Failed to clear cache: ${errors.join('; ')}` });
+			}
 			return {
 				success: true,
 				message: deleted === 0 ? 'No orphaned files found.' : `Deleted ${deleted} orphaned file${deleted === 1 ? '' : 's'}.`
@@ -436,12 +472,9 @@ export const actions = {
 		await db.delete(artists);
 
 		// With no DB rows left, every stored object is an orphan — wipe both stores.
-		let filesDeleted = 0;
-		try {
-			filesDeleted = await deleteOrphansAll(platform?.env, settings, []);
-		} catch {
-			// Don't fail the wipe if storage cleanup errors.
-		}
+		// Deliberately fail-soft: don't fail the wipe if storage cleanup errors
+		// (deleteOrphansAll reports provider errors instead of throwing).
+		const filesDeleted = (await deleteOrphansAll(platform?.env, settings, [])).deleted;
 
 		return {
 			success: true,

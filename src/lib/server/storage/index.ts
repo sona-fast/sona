@@ -1,10 +1,12 @@
 import { dev } from '$app/environment';
 import type { SiteSettings, StorageProviderId } from '$lib/server/settings';
-import type { StorageProvider } from './types';
+import { ZeroKeepError } from './types';
+import type { StorageProvider, DeleteOrphansOptions } from './types';
 import { R2Storage } from './r2';
 import { UploadThingStorage } from './uploadthing';
 
 export type { StorageProvider } from './types';
+export { collectReferencedUrls } from './referenced-urls';
 
 type Env = App.Platform['env'];
 
@@ -129,19 +131,43 @@ export async function deleteFile(env: Env | undefined, settings: SiteSettings, u
 	}
 }
 
+export interface OrphanCleanupResult {
+	/** Files deleted (or, with dryRun, that would be) across configured providers. */
+	deleted: number;
+	/** Providers that refused to run because the keep set was empty (see DeleteOrphansOptions.abortOnEmptyKeepSet). */
+	skipped: string[];
+	/** CONFIGURED providers whose cleanup threw. Distinct from "not configured", which is silently skipped. */
+	errors: string[];
+}
+
 /** Delete orphaned objects (not referenced by `referencedUrls`) across every configured provider. */
 export async function deleteOrphansAll(
 	env: Env | undefined,
 	settings: SiteSettings,
-	referencedUrls: string[]
-): Promise<number> {
-	let deleted = 0;
+	referencedUrls: string[],
+	opts?: DeleteOrphansOptions
+): Promise<OrphanCleanupResult> {
+	const result: OrphanCleanupResult = { deleted: 0, skipped: [], errors: [] };
 	for (const id of ALL_PROVIDERS) {
+		let provider: StorageProvider;
 		try {
-			deleted += await getStorage(env, settings, id).deleteOrphans(referencedUrls);
+			provider = getStorage(env, settings, id);
 		} catch {
-			// provider not configured — skip
+			continue; // provider not configured — skip
+		}
+		try {
+			result.deleted += await provider.deleteOrphans(referencedUrls, opts);
+		} catch (e) {
+			// A configured provider failing mid-cleanup is a REAL error the caller
+			// must be able to see (the cron workflow turns errors into a red run;
+			// swallowing them here kept it green while nothing was cleaned). The
+			// zero-keep abort is reported separately as an anomaly, not a failure.
+			if (e instanceof ZeroKeepError) {
+				result.skipped.push(e.message);
+			} else {
+				result.errors.push(`${id}: ${e instanceof Error ? e.message : String(e)}`);
+			}
 		}
 	}
-	return deleted;
+	return result;
 }

@@ -1,5 +1,6 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
-import type { StorageProvider, PutInput, PutResult } from './types';
+import { ZeroKeepError } from './types';
+import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
 
 export interface R2Options {
 	/** The R2 bucket binding (platform.env.IMAGES). */
@@ -55,17 +56,52 @@ export class R2Storage implements StorageProvider {
 		return url.startsWith(`${this.#base}/`);
 	}
 
-	async deleteOrphans(referencedUrls: string[]): Promise<number> {
-		const keep = new Set(
-			referencedUrls.map((u) => this.#keyFromUrl(u)).filter((k): k is string => !!k)
-		);
+	async deleteOrphans(referencedUrls: string[], opts?: DeleteOrphansOptions): Promise<number> {
+		// The keep set must be BASE-AGNOSTIC, unlike owns()/#keyFromUrl. DB URLs
+		// were absolutized against whatever base was active AT UPLOAD TIME
+		// (/api/upload and the sticker/fursuit imports), so matching only the
+		// CURRENT base can miss every referenced object — r2PublicUrl unset
+		// (serving via /img) or set/changed after uploads — and the sweep would
+		// delete referenced data as "orphans". Each URL therefore ALSO
+		// contributes a key derived from its pathname ('/img/<key>' → <key>,
+		// else the path minus its leading slash). Over-keeping is safe by
+		// design: keys are folder/uuid.ext, so a stray external URL's path can
+		// only PREVENT a deletion, never cause one.
+		const keep = new Set<string>();
+		for (const u of referencedUrls) {
+			const fromBase = this.#keyFromUrl(u);
+			if (fromBase) keep.add(fromBase);
+			try {
+				const path = new URL(u, 'http://relative-base.invalid').pathname;
+				const fromPath = path.startsWith('/img/') ? path.slice('/img/'.length) : path.replace(/^\//, '');
+				if (fromPath) keep.add(fromPath);
+				// Pathnames keep percent-encoding but stored keys are raw, so ALSO
+				// keep the decoded variant — an encoded char in a referenced URL
+				// must not orphan its object. Over-keep only: an extra key can
+				// prevent a deletion, never cause one.
+				const decoded = decodeURIComponent(fromPath);
+				if (decoded !== fromPath) keep.add(decoded);
+			} catch {
+				// not URL-shaped / not decodable — contributes no (further) key
+			}
+		}
+		if (opts?.abortOnEmptyKeepSet && keep.size === 0) {
+			const probe = await this.#bucket.list({ limit: 1 });
+			if (probe.objects.length) {
+				throw new ZeroKeepError(
+					'r2: no referenced URL resolves to a stored key — refusing to treat the whole bucket as orphans (empty or unmappable reference set?)'
+				);
+			}
+		}
 		let deleted = 0;
 		let cursor: string | undefined;
 		do {
 			const listing = await this.#bucket.list(cursor ? { cursor, limit: 1000 } : { limit: 1000 });
-			const orphans = listing.objects.map((o) => o.key).filter((k) => !keep.has(k));
+			const orphans = listing.objects
+				.filter((o) => !keep.has(o.key) && (!opts?.olderThan || o.uploaded < opts.olderThan))
+				.map((o) => o.key);
 			if (orphans.length) {
-				await this.#bucket.delete(orphans);
+				if (!opts?.dryRun) await this.#bucket.delete(orphans);
 				deleted += orphans.length;
 			}
 			cursor = listing.truncated ? listing.cursor : undefined;
