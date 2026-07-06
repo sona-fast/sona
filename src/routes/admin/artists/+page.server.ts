@@ -5,7 +5,6 @@ import { eq, sql, like } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { sanitizeText } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
-import { getRawSetting } from '$lib/server/settings';
 import {
 	isRegistryEnabled,
 	resolveRegistryEnv,
