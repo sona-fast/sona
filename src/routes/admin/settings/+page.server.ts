@@ -119,45 +119,67 @@ export const actions = {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
 
-		const blueskyUrl = normalizeSocialUrl('bluesky', data.get('bluesky') as string);
-		const adminAvatarUrl = blueskyUrl
-			? (await resolveAvatarUrl({ blueskyUrl })) ?? ''
-			: '';
+		// A field ABSENT from the POST means "this form doesn't manage that
+		// setting" — skip it (saveSettings only writes provided keys). A field
+		// PRESENT but blank is a deliberate clear. Without this split, saves from
+		// forms that conditionally render fields (splash subtitle, the sona sheet,
+		// theme pickers) silently blank whatever they don't render (#60).
+		const text = (key: string, max: number) =>
+			data.has(key) ? sanitizeText(data.get(key) as string, max) : undefined;
+		const social = (platformKey: Parameters<typeof normalizeSocialUrl>[0], key: string) =>
+			data.has(key) ? normalizeSocialUrl(platformKey, data.get(key) as string) : undefined;
 
-		const themeRaw = (data.get('themeId') as string) ?? '';
-		const themeId = isValidThemeId(themeRaw) ? themeRaw : DEFAULT_THEME_ID;
-		const layoutRaw = (data.get('landingLayout') as string) ?? '';
-		const landingLayout = LANDING_LAYOUTS.some((l) => l.id === layoutRaw)
-			? layoutRaw
-			: DEFAULT_LANDING_LAYOUT;
+		// The avatar re-resolves only when this form carries the bluesky field;
+		// clearing bluesky clears the derived avatar with it (paired on purpose).
+		let blueskyUrl: string | undefined;
+		let adminAvatarUrl: string | undefined;
+		if (data.has('bluesky')) {
+			blueskyUrl = normalizeSocialUrl('bluesky', data.get('bluesky') as string);
+			adminAvatarUrl = blueskyUrl ? ((await resolveAvatarUrl({ blueskyUrl })) ?? '') : '';
+		}
+
+		let themeId: string | undefined;
+		if (data.has('themeId')) {
+			const themeRaw = (data.get('themeId') as string) ?? '';
+			themeId = isValidThemeId(themeRaw) ? themeRaw : DEFAULT_THEME_ID;
+		}
+		let landingLayout: string | undefined;
+		if (data.has('landingLayout')) {
+			const layoutRaw = (data.get('landingLayout') as string) ?? '';
+			landingLayout = LANDING_LAYOUTS.some((l) => l.id === layoutRaw)
+				? layoutRaw
+				: DEFAULT_LANDING_LAYOUT;
+		}
 
 		await saveSettings(db, {
-			siteName: sanitizeText(data.get('siteName') as string, 100),
-			ownerName: sanitizeText(data.get('ownerName') as string, 100),
-			aboutText: sanitizeText(data.get('aboutText') as string, 2000),
-			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100),
-			twitterUrl: normalizeSocialUrl('twitter', data.get('twitter') as string),
+			siteName: text('siteName', 100),
+			ownerName: text('ownerName', 100),
+			aboutText: text('aboutText', 2000),
+			primaryCharacter: text('primaryCharacter', 100),
+			twitterUrl: social('twitter', 'twitter'),
 			blueskyUrl,
-			telegramUrl: normalizeSocialUrl('telegram', data.get('telegram') as string),
-			furAffinityUrl: normalizeSocialUrl('furaffinity', data.get('furaffinity') as string),
-			furtrackUrl: normalizeSocialUrl('furtrack', data.get('furtrack') as string),
+			telegramUrl: social('telegram', 'telegram'),
+			furAffinityUrl: social('furaffinity', 'furaffinity'),
+			furtrackUrl: social('furtrack', 'furtrack'),
 			adminAvatarUrl,
 			themeId,
 			landingLayout,
-			splashSubtitle: sanitizeText(data.get('splashSubtitle') as string, 100),
+			splashSubtitle: text('splashSubtitle', 100),
 			// Three-path profile fields — feed the /art, /connect and /share pages.
-			contactEmail: sanitizeText(data.get('contactEmail') as string, 200),
-			sonaSpecies: sanitizeText(data.get('sonaSpecies') as string, 200),
-			sonaBuild: sanitizeText(data.get('sonaBuild') as string, 200),
-			sonaKeyFeatures: sanitizeText(data.get('sonaKeyFeatures') as string, 500),
+			contactEmail: text('contactEmail', 200),
+			sonaSpecies: text('sonaSpecies', 200),
+			sonaBuild: text('sonaBuild', 200),
+			sonaKeyFeatures: text('sonaKeyFeatures', 500),
 			// Re-parse + re-serialize the swatch JSON so only well-formed { name, hex } survive.
-			sonaColors: JSON.stringify(
-				parseSonaColors((data.get('sonaColors') as string) || '[]').filter((c) =>
-					/^#[0-9a-fA-F]{3,8}$/.test(c.hex)
-				)
-			),
-			sonaDos: sanitizeText(data.get('sonaDos') as string, 1000),
-			sonaDonts: sanitizeText(data.get('sonaDonts') as string, 1000)
+			sonaColors: data.has('sonaColors')
+				? JSON.stringify(
+						parseSonaColors((data.get('sonaColors') as string) || '[]').filter((c) =>
+							/^#[0-9a-fA-F]{3,8}$/.test(c.hex)
+						)
+					)
+				: undefined,
+			sonaDos: text('sonaDos', 1000),
+			sonaDonts: text('sonaDonts', 1000)
 		});
 
 		return { success: true };
