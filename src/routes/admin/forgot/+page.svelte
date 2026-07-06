@@ -5,6 +5,12 @@
 	let { form, data } = $props();
 
 	let submitting = $state(false);
+	// Move focus to the confirmation once the form is replaced by it, so
+	// keyboard/screen-reader users aren't stranded on <body> (WCAG 2.4.3/4.1.3).
+	let noticeEl = $state<HTMLParagraphElement | null>(null);
+	$effect(() => {
+		if (form?.sent) noticeEl?.focus();
+	});
 </script>
 
 <div class="forgot-page">
@@ -13,7 +19,7 @@
 		<p class="subtitle">{m.admin_forgot_title()}</p>
 
 		{#if form?.sent}
-			<p class="notice">{m.admin_forgot_sent()}</p>
+			<p class="notice" role="status" tabindex="-1" bind:this={noticeEl}>{m.admin_forgot_sent()}</p>
 			<a href="/admin/login" class="back">{m.admin_forgot_back_to_login()}</a>
 		{:else}
 			<p class="hint">{m.admin_forgot_hint()}</p>

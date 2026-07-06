@@ -12,6 +12,12 @@
 		Boolean((form as { invalidToken?: boolean } | null | undefined)?.invalidToken)
 	);
 	let showForm = $derived(data.valid && !invalidOnSubmit);
+	// When the invalid-token branch replaces the form, move focus to the error so
+	// keyboard/screen-reader users aren't stranded on <body> (WCAG 2.4.3/4.1.3).
+	let invalidEl = $state<HTMLParagraphElement | null>(null);
+	$effect(() => {
+		if (!showForm) invalidEl?.focus();
+	});
 </script>
 
 <div class="reset-page">
@@ -21,7 +27,7 @@
 
 		{#if showForm}
 			{#if form?.error}
-				<p class="error">{form.error}</p>
+				<p class="error" role="alert">{form.error}</p>
 			{/if}
 			<form method="POST" use:enhance={() => {
 				submitting = true;
@@ -44,7 +50,7 @@
 				</button>
 			</form>
 		{:else}
-			<p class="error">{m.admin_reset_invalid()}</p>
+			<p class="error" role="alert" tabindex="-1" bind:this={invalidEl}>{m.admin_reset_invalid()}</p>
 			<a href="/admin/forgot" class="back">{m.admin_reset_request_new()}</a>
 		{/if}
 	</div>

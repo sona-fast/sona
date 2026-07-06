@@ -65,7 +65,7 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-function sentEmail(): { from: string; to: string; subject: string; text: string } {
+function sentEmail(): { from: string; to: string; subject: string; html: string; text: string } {
 	expect(fetchMock).toHaveBeenCalledTimes(1);
 	const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
 	expect(String(url)).toBe('https://api.resend.com/emails');
@@ -93,6 +93,11 @@ describe('forgot action', () => {
 		expect(email.to).toBe('admin@taro.surf');
 		expect(email.subject).toContain('Taro Surf');
 		expect(email.text).toMatch(/https:\/\/taro\.surf\/admin\/reset\?token=/);
+		// From identifies the fork (its siteName), not Sona, when RESEND_FROM is unset.
+		expect(email.from).toBe('Taro Surf <onboarding@resend.dev>');
+		// An HTML body ships alongside the text, carrying the fork identity + reset link.
+		expect(email.html).toContain('Taro Surf');
+		expect(email.html).toMatch(/https:\/\/taro\.surf\/admin\/reset\?token=/);
 	});
 
 	it('returns the same generic response and does nothing when the email does not match', async () => {

@@ -21,7 +21,10 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 		});
 	});
 
-const authHandle: Handle = async ({ event, resolve }) => {
+// Exported for unit testing the auth/setup gate in isolation (driving the
+// composed `handle` would also run paraglideMiddleware, which needs a full
+// request pipeline).
+export const authHandle: Handle = async ({ event, resolve }) => {
 	const token = event.cookies.get(SESSION_COOKIE);
 
 	// Validate session against D1
