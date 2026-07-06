@@ -268,6 +268,13 @@ describe('tokenResolves', () => {
 		expect(tokenResolves('Authentication error [code: 10000]')).toBe(false);
 	});
 
+	it('is false for an expired OAuth login whose refresh fails under non-TTY', () => {
+		// wrangler 4.81.1 prints this when an expired OAuth token cannot refresh
+		// under execSync (no TTY). The word "logged in" appears in "Not logged in",
+		// so the old fallback matched it and passed preflight on dead credentials.
+		expect(tokenResolves('Getting User settings...\n✘ [ERROR] Not logged in.\n')).toBe(false);
+	});
+
 	it('is true for a User API Token that lacks User Details·Read (the README recipe)', () => {
 		// wrangler's REAL banner for a token without User → User Details → Read: it
 		// authenticates (exit 0) but can't read the email. Must NOT be a failure —

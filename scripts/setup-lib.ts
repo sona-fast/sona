@@ -146,13 +146,14 @@ export function buildPagesConfigPayload(input: PagesConfigInput): Record<string,
  * midway through provisioning. Checks the "You are logged in" success marker
  * FIRST: a User API Token lacking User → User Details → Read still authenticates
  * (exit 0) but prints "Unable to retrieve email for this user" — that token
- * provisions fine, so it must not be read as a failure. Only then check the
- * hard "not authenticated" failure markers.
+ * provisions fine, so it must not be read as a failure. Every real wrangler
+ * success banner starts with "You are logged in", so anything that misses that
+ * marker is treated as unresolved — an expired OAuth login whose refresh fails
+ * prints "✘ [ERROR] Not logged in." and must return false, not slip through.
  */
 export function tokenResolves(whoamiOutput: string): boolean {
 	if (/you are logged in/i.test(whoamiOutput)) return true;
-	if (/not authenticated|authentication error/i.test(whoamiOutput)) return false;
-	return /logged in|associated with/i.test(whoamiOutput);
+	return false;
 }
 
 /**
