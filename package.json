@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"setup": "tsx scripts/setup.ts",
+		"reset-password": "tsx scripts/reset-password.ts",
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",

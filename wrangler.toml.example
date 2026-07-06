@@ -31,6 +31,11 @@ FURTRACK_MODE = "off"
 #                        submit/sync). Get one via POST /v1/forks on the registry.
 #   REGISTRY_URL       — optional; override the registry base URL (defaults to the
 #                        public registry, https://registry.sona.fast).
+#   RESEND_API_KEY     — optional; enables the admin "Forgot password" reset email
+#                        (via Resend). Without it, recovery is `npm run reset-password`.
+#   RESEND_FROM        — optional; reset-email sender, format "Name <you@domain>".
+#                        Defaults to "Sona <onboarding@resend.dev>". A custom domain
+#                        must be verified in your own Resend account first.
 
 # D1 database. Create with `wrangler d1 create <your-db-name>` and paste the
 # returned database_id here.

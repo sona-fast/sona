@@ -77,6 +77,28 @@ deployment, kept in-repo as the reference config under
 The admin password is stored as a salted **PBKDF2 hash** in D1 (never plaintext).
 You can rotate it later in **Settings → Security**.
 
+#### Locked out? (password recovery)
+
+Sona is single-admin, so there's no second account to let you back in. Two paths:
+
+- **Email reset (if configured).** Set a **recovery email** in the first-run
+  wizard or **Settings → Security**, and add the `RESEND_API_KEY` secret (the
+  setup CLI offers this; or `wrangler pages secret put RESEND_API_KEY`). Then
+  `/admin/login` → **Forgot password?** emails a single-use link (valid 30 min)
+  that lets you set a new password. Optionally set `RESEND_FROM`
+  (`"Name <you@domain>"`) to send from your own verified domain — otherwise the
+  default `Sona <onboarding@resend.dev>` sender is used. The flow always shows the
+  same confirmation (it never reveals whether an email matched).
+- **CLI fallback (always available).** From the project root:
+
+  ```sh
+  npm run reset-password
+  ```
+
+  It prompts for a new password, hashes it the same way the app does, writes it to
+  your remote D1, and clears all sessions. Needs `wrangler login` (or
+  `CLOUDFLARE_API_TOKEN`) and a `wrangler.toml` with your `database_name`.
+
 ### Local development
 
 ```sh
