@@ -362,6 +362,15 @@
 			flex: 1;
 			padding: 20px;
 		}
+
+		/* A lone card (both siblings' pages 404ed, #42) shouldn't stretch across
+		   the full 960px hub — cap and center it. :only-child can't match the
+		   2- and 3-card rows. */
+		.card:only-child {
+			max-width: 520px;
+			margin-inline: auto;
+			flex: 0 1 auto;
+		}
 	}
 
 	/* ---- Mosaic branch: replicates the (public) layout wrapper this page

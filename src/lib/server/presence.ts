@@ -1,6 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { characters, images, imageTags, siteSettings, tags } from './db/schema';
-import { getSettings, parseSonaColors, parseLines, type SiteSettings } from './settings';
+import { parseSonaColors, parseLines, type SiteSettings } from './settings';
 import type { Database } from './db';
 
 /**
@@ -15,7 +15,12 @@ import type { Database } from './db';
 export const REFERENCE_TAG = 'reference';
 
 /** The sona-details block the /art page renders, derived from settings. */
-export function sonaDetails(settings: SiteSettings) {
+export function sonaDetails(
+	settings: Pick<
+		SiteSettings,
+		'sonaSpecies' | 'sonaBuild' | 'sonaKeyFeatures' | 'sonaColors' | 'sonaDos' | 'sonaDonts'
+	>
+) {
 	return {
 		species: settings.sonaSpecies,
 		build: settings.sonaBuild,
@@ -50,13 +55,41 @@ export function artHasContent(
 
 /**
  * EXISTS-style evaluation of artHasContent for pages that don't render /art's
- * data (the splash card): settings first (cached per-isolate, usually zero
- * round-trips), then minimal limit-1 probes of the same three image sources
- * the /art load reads — designated ref sheet, reference-tag fallback, recent
- * SFW art — short-circuiting on the first hit.
+ * data (the splash card): the six sona-details settings first, then minimal
+ * limit-1 probes of the same three image sources the /art load reads —
+ * designated ref sheet, reference-tag fallback, recent SFW art —
+ * short-circuiting on the first hit.
+ *
+ * Reads the sona keys directly rather than via getSettings(): getSettings
+ * swallows D1 errors into empty defaults, which would resolve this probe false
+ * and false-hide the card on a details-only fork. A direct select throws on
+ * failure instead, so the splash caller catches it and fails open (same
+ * rationale as shareHasContent).
  */
 export async function probeArtContent(db: Database): Promise<boolean> {
-	if (artHasContent(sonaDetails(await getSettings(db)), null, [])) return true;
+	const sonaRows = await db
+		.select({ key: siteSettings.key, value: siteSettings.value })
+		.from(siteSettings)
+		.where(
+			inArray(siteSettings.key, [
+				'sonaSpecies',
+				'sonaBuild',
+				'sonaKeyFeatures',
+				'sonaColors',
+				'sonaDos',
+				'sonaDonts'
+			])
+		);
+	const sonaMap = Object.fromEntries(sonaRows.map((r) => [r.key, r.value]));
+	const sona = sonaDetails({
+		sonaSpecies: sonaMap.sonaSpecies ?? '',
+		sonaBuild: sonaMap.sonaBuild ?? '',
+		sonaKeyFeatures: sonaMap.sonaKeyFeatures ?? '',
+		sonaColors: sonaMap.sonaColors ?? '[]',
+		sonaDos: sonaMap.sonaDos ?? '',
+		sonaDonts: sonaMap.sonaDonts ?? ''
+	});
+	if (artHasContent(sona, null, [])) return true;
 
 	// Designated ref sheet: the first owner character by name — must match the
 	// /art load's precedence query.

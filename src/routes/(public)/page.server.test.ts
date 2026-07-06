@@ -8,6 +8,7 @@ import * as schema from '$lib/server/db/schema';
 import { characters, images, artists, tags, imageTags, siteSettings } from '$lib/server/db/schema';
 import { clearSettingsCache } from '$lib/server/settings';
 import { load } from './+page.server';
+import { load as artLoad } from '../(paths)/art/+page.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses,
 // same approach as art/page.server.test.ts. (No `batch` — these tests exercise
@@ -71,6 +72,7 @@ function makeDb() {
 
 function loadSplash(platform: App.Platform) {
 	return load({ platform, url: new URL('http://example.ink/') } as never) as Promise<{
+		settings: { landingLayout: string };
 		pathPresence: { art: boolean; share: boolean };
 	}>;
 }
@@ -110,6 +112,33 @@ describe('splash load — pathPresence card flags (#42)', () => {
 		expect(data.pathPresence).toEqual({ art: true, share: false });
 	});
 
+	it('hides the /art card when the only image — reference-tagged AND owner-designated — is unpublished', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'landingLayout', value: 'threePath' });
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+		// SFW + unpublished: dropping eq(published, true) from ANY of the three
+		// probes (designated, tagged, recent-SFW) would false-positive on this row.
+		await db.insert(images).values({ id: 1, title: 'Ref', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: false, nsfw: false, createdAt: '2026-01-01T00:00:00.000Z' });
+		await db.insert(imageTags).values({ imageId: 1, tagId: 1 });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 1 });
+
+		const data = await loadSplash(platform);
+		expect(data.pathPresence).toEqual({ art: false, share: false });
+	});
+
+	it('hides the /art card when the only image is published NSFW and untagged', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'landingLayout', value: 'threePath' });
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		// No tag rows and no owner character: only the recent-art probe sees this
+		// image, and dropping eq(nsfw, false) from it would false-positive.
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, nsfw: true, createdAt: '2026-01-01T00:00:00.000Z' });
+
+		const data = await loadSplash(platform);
+		expect(data.pathPresence).toEqual({ art: false, share: false });
+	});
+
 	it('shows the /art card with only recent SFW art', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(siteSettings).values({ key: 'landingLayout', value: 'threePath' });
@@ -118,6 +147,25 @@ describe('splash load — pathPresence card flags (#42)', () => {
 
 		const data = await loadSplash(platform);
 		expect(data.pathPresence).toEqual({ art: true, share: false });
+	});
+
+	it('uses the name-first owner for the designated-ref probe, agreeing with the /art load', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'landingLayout', value: 'threePath' });
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		// NSFW + untagged: only the designated-ref probe can flip the flag.
+		await db.insert(images).values({ id: 1, title: 'Ref', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, nsfw: true, createdAt: '2026-01-01T00:00:00.000Z' });
+		// Ref-less owner inserted FIRST so a probe that regresses to rowid order
+		// (dropping orderBy(name)) would pick it and miss the designation.
+		await db.insert(characters).values({ name: 'Zeta', isOwner: true, referenceImageId: null });
+		await db.insert(characters).values({ name: 'Alpha', isOwner: true, referenceImageId: 1 });
+
+		const data = await loadSplash(platform);
+		expect(data.pathPresence).toEqual({ art: true, share: false });
+
+		// Probe⟺page agreement: the /art load must resolve (not 404) on the same data.
+		const artData = (await artLoad({ platform } as never)) as { refSheet: { slug: string } | null };
+		expect(artData.refSheet?.slug).toBe('art-1');
 	});
 
 	it('shows the /art card with only sona details (no image queries needed)', async () => {
@@ -158,6 +206,9 @@ describe('splash load — pathPresence card flags (#42)', () => {
 		const failingPlatform = { env: { DB: failingD1 } } as unknown as App.Platform;
 
 		const data = await loadSplash(failingPlatform);
+		// Guard against passing vacuously via the mosaic branch (which hardcodes
+		// pathPresence true): the cached settings must keep us on threePath.
+		expect(data.settings.landingLayout).toBe('threePath');
 		expect(data.pathPresence).toEqual({ art: true, share: true });
 	});
 });
