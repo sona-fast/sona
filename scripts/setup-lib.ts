@@ -143,12 +143,15 @@ export function buildPagesConfigPayload(input: PagesConfigInput): Record<string,
 /**
  * True when `wrangler whoami` output indicates the credentials resolve. Used by
  * the setup preflight to fail early with an actionable message rather than
- * midway through provisioning. Checks for the "not authenticated" failure marker
- * first (an unresolved token still prints a banner), then the success marker.
+ * midway through provisioning. Checks the "You are logged in" success marker
+ * FIRST: a User API Token lacking User → User Details → Read still authenticates
+ * (exit 0) but prints "Unable to retrieve email for this user" — that token
+ * provisions fine, so it must not be read as a failure. Only then check the
+ * hard "not authenticated" failure markers.
  */
 export function tokenResolves(whoamiOutput: string): boolean {
-	if (/not authenticated|unable to (retrieve|fetch)|authentication error/i.test(whoamiOutput))
-		return false;
+	if (/you are logged in/i.test(whoamiOutput)) return true;
+	if (/not authenticated|authentication error/i.test(whoamiOutput)) return false;
 	return /logged in|associated with/i.test(whoamiOutput);
 }
 
@@ -163,6 +166,72 @@ export function hostFromDomain(domain: string): string {
 		.replace(/^https?:\/\//i, '')
 		.replace(/\/.*$/, '')
 		.toLowerCase();
+}
+
+/**
+ * True when the custom-domain DNS-scope probe means setup must abort: the token
+ * can't list DNS records for the zone (401/403), so it can't write the apex
+ * CNAME later and the domain would stick pending with a 522. Any other outcome
+ * (ok, or a transient 5xx / network error with status 0) does NOT block setup.
+ */
+export function dnsProbeBlocksSetup(probe: { ok: boolean; status: number }): boolean {
+	return !probe.ok && (probe.status === 401 || probe.status === 403);
+}
+
+/**
+ * Classifies the Image Transformations preflight outcome from the zone-setting
+ * GET and (when it was off) the enabling PATCH's success: `true` = on (already
+ * on, or PATCHed on), `false` = still off (PATCH failed), `null` = unknown (the
+ * GET failed, e.g. the token lacks Zone Settings·Read). `patchOk` is ignored
+ * unless the GET succeeded and reported the setting as off.
+ */
+export function imageResizingOutcome(
+	getRes: { ok: boolean; result?: unknown },
+	patchOk: boolean
+): boolean | null {
+	if (!getRes.ok) return null;
+	if ((getRes.result as { value?: string } | undefined)?.value === 'on') return true;
+	return patchOk;
+}
+
+export interface CfApiResult {
+	ok: boolean;
+	status: number;
+	result?: unknown;
+	errors?: unknown;
+}
+
+/**
+ * Minimal Cloudflare REST caller for the few steps wrangler can't do (attaching
+ * Pages project bindings, the zone/DNS + image-transformations preflights).
+ * Returns ok=false with the parsed errors so callers can print an actionable
+ * fallback rather than throwing. `ok` requires BOTH an HTTP-ok response and
+ * `success !== false` in the body, so a 200 with `"success": false` (e.g. a
+ * PATCH the token wasn't scoped for) is correctly reported as a failure rather
+ * than a spurious "✔ attached bindings". A thrown fetch (network error) is
+ * `{ ok: false, status: 0 }`. Lives here (not setup.ts) so it is unit-testable —
+ * setup.ts self-executes and can't be imported.
+ */
+export async function cfApi(
+	apiToken: string,
+	path: string,
+	init: { method?: string; body?: unknown } = {}
+): Promise<CfApiResult> {
+	try {
+		const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+			method: init.method ?? 'GET',
+			headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+			body: init.body ? JSON.stringify(init.body) : undefined
+		});
+		const json = (await res.json().catch(() => ({}))) as {
+			success?: boolean;
+			result?: unknown;
+			errors?: unknown;
+		};
+		return { ok: res.ok && json.success !== false, status: res.status, result: json.result, errors: json.errors };
+	} catch (e) {
+		return { ok: false, status: 0, errors: e };
+	}
 }
 
 export interface GhEligibilityInput {

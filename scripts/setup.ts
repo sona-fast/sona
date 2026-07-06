@@ -33,7 +33,10 @@ import {
 	deriveRepoSlug,
 	buildPagesConfigPayload,
 	tokenResolves,
-	hostFromDomain
+	hostFromDomain,
+	dnsProbeBlocksSetup,
+	imageResizingOutcome,
+	cfApi
 } from './setup-lib.ts';
 
 const rl = createInterface({ input: stdin, output: stdout });
@@ -99,33 +102,6 @@ function ghSet(kind: 'secret' | 'variable', name: string, value: string, repo: s
 const token = (bytes = 32) => randomBytes(bytes).toString('hex');
 const sqlStr = (s: string) => s.replace(/'/g, "''");
 
-// Minimal Cloudflare REST caller for the few steps wrangler can't do (attaching
-// Pages project bindings, the zone/DNS + image-transformations preflights).
-// Returns ok=false with the parsed errors so callers can print an actionable
-// fallback rather than throwing. Uses the same CLOUDFLARE_API_TOKEN setup relies
-// on for CI wiring.
-async function cfApi(
-	apiToken: string,
-	path: string,
-	init: { method?: string; body?: unknown } = {}
-): Promise<{ ok: boolean; status: number; result?: unknown; errors?: unknown }> {
-	try {
-		const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
-			method: init.method ?? 'GET',
-			headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
-			body: init.body ? JSON.stringify(init.body) : undefined
-		});
-		const json = (await res.json().catch(() => ({}))) as {
-			success?: boolean;
-			result?: unknown;
-			errors?: unknown;
-		};
-		return { ok: res.ok && json.success !== false, status: res.status, result: json.result, errors: json.errors };
-	} catch (e) {
-		return { ok: false, status: 0, errors: e };
-	}
-}
-
 // The friend-facing API-token recipe, printed whenever a scope preflight fails so
 // the operator knows exactly what to (re)create. Kept in one place so the CLI and
 // the message stay in sync with README's "API token" section.
@@ -161,6 +137,14 @@ async function main() {
 		console.error(TOKEN_RECIPE);
 		rl.close();
 		return;
+	}
+	// A User API Token without User → User Details → Read authenticates fine but
+	// can't read the account email, so wrangler prints "Unable to retrieve email".
+	// That token still provisions everything — note it rather than aborting.
+	if (/unable to (retrieve|fetch) email/i.test(whoami)) {
+		console.log(
+			"\nℹ Logged in, but this token can't read your account email (missing User → User Details → Read). That's fine for setup."
+		);
 	}
 
 	if (existsSync('wrangler.toml')) {
@@ -289,7 +273,7 @@ async function main() {
 				// DNS scope probe: listing records needs DNS access; a 401/403 means the
 				// token can't write the apex CNAME later, so fail early with the recipe.
 				const dnsProbe = await cfApi(cfToken, `/zones/${zoneId}/dns_records?per_page=1`);
-				if (!dnsProbe.ok && (dnsProbe.status === 401 || dnsProbe.status === 403)) {
+				if (dnsProbeBlocksSetup(dnsProbe)) {
 					console.error(`\n✖ The API token cannot manage DNS for ${host} (needs Zone · DNS · Edit).`);
 					console.error('  Attaching the custom apex domain would leave it stuck pending with a 522.\n');
 					console.error(TOKEN_RECIPE);
@@ -300,16 +284,15 @@ async function main() {
 				// the deploy token — enable it if the token carries Zone Settings·Edit,
 				// else leave imageResizingOn=null (unknown) and warn in Next steps.
 				const ir = await cfApi(cfToken, `/zones/${zoneId}/settings/image_resizing`);
-				if (ir.ok) {
-					imageResizingOn = (ir.result as { value?: string } | undefined)?.value === 'on';
-					if (!imageResizingOn) {
-						const enabled = await cfApi(cfToken, `/zones/${zoneId}/settings/image_resizing`, {
-							method: 'PATCH',
-							body: { value: 'on' }
-						});
-						imageResizingOn = enabled.ok;
-					}
+				let patchOk = false;
+				if (ir.ok && (ir.result as { value?: string } | undefined)?.value !== 'on') {
+					const enabled = await cfApi(cfToken, `/zones/${zoneId}/settings/image_resizing`, {
+						method: 'PATCH',
+						body: { value: 'on' }
+					});
+					patchOk = enabled.ok;
 				}
+				imageResizingOn = imageResizingOutcome(ir, patchOk);
 			}
 		} else {
 			console.warn(

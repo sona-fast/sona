@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
 	buildMigrationSql,
 	sanitizeProjectName,
@@ -9,7 +9,10 @@ import {
 	deriveRepoSlug,
 	buildPagesConfigPayload,
 	tokenResolves,
-	hostFromDomain
+	hostFromDomain,
+	dnsProbeBlocksSetup,
+	imageResizingOutcome,
+	cfApi
 } from './setup-lib.ts';
 
 describe('buildMigrationSql', () => {
@@ -263,6 +266,108 @@ describe('tokenResolves', () => {
 	it('is false when whoami reports no authentication', () => {
 		expect(tokenResolves('You are not authenticated. Please run `wrangler login`.')).toBe(false);
 		expect(tokenResolves('Authentication error [code: 10000]')).toBe(false);
+	});
+
+	it('is true for a User API Token that lacks User Details·Read (the README recipe)', () => {
+		// wrangler's REAL banner for a token without User → User Details → Read: it
+		// authenticates (exit 0) but can't read the email. Must NOT be a failure —
+		// the old "unable to retrieve" marker false-aborted setup in a dead loop.
+		expect(
+			tokenResolves(
+				'👋 You are logged in with an User API Token. Unable to retrieve email for this user. Are you missing the `User->User Details->Read` permission?'
+			)
+		).toBe(true);
+	});
+});
+
+describe('dnsProbeBlocksSetup', () => {
+	it('blocks on a 401 or 403 (token cannot manage DNS)', () => {
+		expect(dnsProbeBlocksSetup({ ok: false, status: 401 })).toBe(true);
+		expect(dnsProbeBlocksSetup({ ok: false, status: 403 })).toBe(true);
+	});
+
+	it('does not block when the probe succeeded', () => {
+		expect(dnsProbeBlocksSetup({ ok: true, status: 200 })).toBe(false);
+	});
+
+	it('does not block on a transient 5xx or a network error (status 0)', () => {
+		expect(dnsProbeBlocksSetup({ ok: false, status: 500 })).toBe(false);
+		expect(dnsProbeBlocksSetup({ ok: false, status: 0 })).toBe(false);
+	});
+});
+
+describe('imageResizingOutcome', () => {
+	it('is true when the setting is already on (no PATCH needed)', () => {
+		expect(imageResizingOutcome({ ok: true, result: { value: 'on' } }, false)).toBe(true);
+	});
+
+	it('is true when it was off and the enabling PATCH succeeded', () => {
+		expect(imageResizingOutcome({ ok: true, result: { value: 'off' } }, true)).toBe(true);
+	});
+
+	it('is false when it was off and the enabling PATCH failed', () => {
+		expect(imageResizingOutcome({ ok: true, result: { value: 'off' } }, false)).toBe(false);
+	});
+
+	it('is null (unknown) when the GET failed (token lacks Zone Settings·Read)', () => {
+		expect(imageResizingOutcome({ ok: false }, false)).toBeNull();
+	});
+});
+
+describe('cfApi', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	const jsonRes = (status: number, body: unknown) =>
+		new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+	it('is ok for a 200 with success:true, surfacing the result', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonRes(200, { success: true, result: [{ id: 'z1' }] })));
+		const r = await cfApi('tok', '/zones');
+		expect(r.ok).toBe(true);
+		expect(r.status).toBe(200);
+		expect(r.result).toEqual([{ id: 'z1' }]);
+	});
+
+	it('is NOT ok for a 200 with success:false, surfacing the errors', async () => {
+		// The regression guard: a broken success guard would report this as ok and
+		// print "✔ attached bindings" while the PATCH actually failed.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(jsonRes(200, { success: false, errors: [{ code: 10000, message: 'nope' }] }))
+		);
+		const r = await cfApi('tok', '/accounts/a/pages/projects/p', { method: 'PATCH', body: {} });
+		expect(r.ok).toBe(false);
+		expect(r.errors).toEqual([{ code: 10000, message: 'nope' }]);
+	});
+
+	it('is NOT ok for a 403 error body', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(jsonRes(403, { success: false, errors: [{ code: 9109 }] }))
+		);
+		const r = await cfApi('tok', '/zones/z/dns_records');
+		expect(r.ok).toBe(false);
+		expect(r.status).toBe(403);
+	});
+
+	it('is {ok:false,status:0} when fetch throws (network error)', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+		const r = await cfApi('tok', '/zones');
+		expect(r.ok).toBe(false);
+		expect(r.status).toBe(0);
+	});
+
+	it('falls back to res.ok when the body is not JSON', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(new Response('<html>gateway</html>', { status: 502 }))
+		);
+		const r = await cfApi('tok', '/zones');
+		// No parseable success flag ⇒ classified purely by the HTTP status.
+		expect(r.ok).toBe(false);
+		expect(r.status).toBe(502);
 	});
 });
 

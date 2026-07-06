@@ -458,20 +458,21 @@
 
 	.checkbox-label {
 		flex-direction: row !important;
-		align-items: center;
+		align-items: flex-start;
 		gap: 8px;
 	}
 
 	.checkbox-label input {
 		width: 16px;
 		height: 16px;
+		margin-top: 2px;
 	}
 
 	.checkbox-helper {
+		display: block;
 		color: var(--muted-foreground);
 		font-size: 12px;
 		font-weight: 400;
-		margin-left: 4px;
 	}
 
 	.modal-actions {
