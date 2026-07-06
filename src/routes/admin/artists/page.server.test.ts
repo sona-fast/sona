@@ -7,7 +7,17 @@ import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
-import { load } from './+page.server';
+
+// submitToRegistry's registry call is the one thing we don't want to hit for real;
+// stub just that export and keep the rest of the module (isRegistryEnabled,
+// resolveRegistryEnv, …) intact so load's tests still exercise the real code.
+const { mockRegistrySubmit } = vi.hoisted(() => ({ mockRegistrySubmit: vi.fn() }));
+vi.mock('$lib/server/registry', async (importActual) => ({
+	...(await importActual<typeof import('$lib/server/registry')>()),
+	registrySubmit: mockRegistrySubmit
+}));
+
+import { load, actions } from './+page.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses
 // (client.prepare().bind().run()/all()), same approach as sticker-import.test.ts.
@@ -109,5 +119,56 @@ describe('admin artists load — former names (aliases)', () => {
 
 		const result = (await load(loadEvent(platform))) as { artists: Array<{ formerly: string[] }> };
 		expect(result.artists.map((a) => a.formerly)).toEqual([[], []]);
+	});
+});
+
+describe('submitToRegistry action — surfaces the registry outcome', () => {
+	// Enable the registry via a stored fork key (same path the load tests use) and
+	// seed the artist row the action reads, then return its id.
+	async function seedEnabledArtist(db: ReturnType<typeof makeDb>['db']) {
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		const row = await db.insert(schema.artists).values({ name: 'Nyx' }).returning({ id: schema.artists.id }).get();
+		return row.id;
+	}
+
+	function submitEvent(platform: App.Platform, id: number) {
+		const body = new FormData();
+		body.append('id', String(id));
+		return {
+			platform,
+			url: new URL('http://localhost/admin/artists'),
+			request: new Request('http://localhost/admin/artists', { method: 'POST', body })
+		} as never;
+	}
+
+	beforeEach(() => mockRegistrySubmit.mockReset());
+
+	it('returns fail(409) carrying the registry’s own reason when the submission is refused', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db);
+		mockRegistrySubmit.mockResolvedValue({ error: 'This artist was removed from the registry and cannot be resubmitted.' });
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toMatchObject({ status: 409 });
+		expect((result as { data: { error: string } }).data.error).toMatch(/removed from the registry/i);
+	});
+
+	it('returns fail(502) when the registry is unreachable (null result)', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db);
+		mockRegistrySubmit.mockResolvedValue(null);
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toMatchObject({ status: 502 });
+		expect((result as { data: { error: string } }).data.error).toMatch(/unreachable/i);
+	});
+
+	it('returns success on a clean submission', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db);
+		mockRegistrySubmit.mockResolvedValue({ id: 1, status: 'pending', matchedGlobalId: null });
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toEqual({ success: true, submitted: true });
 	});
 });
