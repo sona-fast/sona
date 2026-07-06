@@ -51,7 +51,7 @@
 						{/if}
 						<span class="artist-name">{m.stickers_by_artist({ artist: sticker.artist.name })}</span>
 					{:else}
-						<span class="artist-name unattributed">Unattributed</span>
+						<span class="artist-name unattributed">{m.stickers_unattributed()}</span>
 					{/if}
 				</div>
 			{/if}

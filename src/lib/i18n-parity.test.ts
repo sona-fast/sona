@@ -43,3 +43,14 @@ describe('ja terminology', () => {
 		expect(values).not.toContain('スタンプ');
 	});
 });
+
+// The sticker download caption is assembled from three keys around an inline
+// link; the "_before" part ends with a load-bearing trailing space. Formatters
+// and translation tools silently trim trailing whitespace, which would render
+// "from thepack page" — so guard it explicitly.
+describe('sticker caption spacing', () => {
+	it('en stickers_dl_caption_before keeps its trailing space', () => {
+		const en = JSON.parse(rawOf('en')) as Record<string, string>;
+		expect(en.stickers_dl_caption_before.endsWith(' ')).toBe(true);
+	});
+});

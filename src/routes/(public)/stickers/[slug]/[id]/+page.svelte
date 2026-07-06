@@ -60,7 +60,7 @@
 
 <Meta
 	title={metaTitle}
-	description={m.stickers_sticker_meta_description({ pack: pack.name, artist: sticker.artist?.name ?? 'Unattributed', siteName })}
+	description={m.stickers_sticker_meta_description({ pack: pack.name, artist: sticker.artist?.name ?? m.stickers_unattributed(), siteName })}
 	url={`${pageState.url.origin}${pageState.url.pathname}`}
 	image={metaImage}
 	{siteName}
@@ -112,7 +112,7 @@
 						<img src={sticker.artist.avatarUrl} alt={sticker.artist.name} class="artist-avatar" />
 					{/if}
 					<div class="artist-namecol">
-						<span class="artist-name">{sticker.artist?.name ?? 'Unattributed'}</span>
+						<span class="artist-name">{sticker.artist?.name ?? m.stickers_unattributed()}</span>
 						<span class="artist-role">{m.stickers_artist_role()}</span>
 					</div>
 				</div>
