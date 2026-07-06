@@ -10,6 +10,7 @@
 	import Meta from '$lib/components/Meta.svelte';
 	import Header from '$lib/components/Header.svelte';
 	import Footer from '$lib/components/Footer.svelte';
+	import MobileCredit from '$lib/components/MobileCredit.svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import { splashWordmark } from '$lib/landing';
 	import * as m from '$lib/paraglide/messages';
@@ -126,6 +127,7 @@
 		<div class="desktop-footer">
 			<Footer settings={data.settings} host={data.host} />
 		</div>
+		<MobileCredit host={data.host} />
 		<MobileNav />
 	</div>
 {/if}
@@ -394,10 +396,6 @@
 	@media (max-width: 768px) {
 		.desktop-footer {
 			display: none;
-		}
-
-		.public-layout main {
-			padding-bottom: 72px;
 		}
 
 		.recent {
