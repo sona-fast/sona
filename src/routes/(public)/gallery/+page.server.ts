@@ -60,10 +60,18 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 
 	const build = async () => {
 		// Load artists (with former names) up front — used both to resolve the artist
-		// filter and to build the combobox options below.
+		// filter and to build the combobox options below. Restrict to artists who have
+		// at least one image that actually shows in the grid (published, non-variant —
+		// mirrors the card predicate below): unpublished-only, sticker-only, and
+		// imported-but-unused artists would otherwise be offered as options that can
+		// only ever yield an empty grid. Alias resolution narrows with it — resolving a
+		// former name to an artist with no live work would land on an empty grid too.
 		const allArtistsRaw = await db
 			.select({ name: artists.name, aliases: artists.aliases })
 			.from(artists)
+			.where(
+				sql`EXISTS (SELECT 1 FROM images WHERE images.artist_id = ${artists.id} AND images.published = 1 AND images.parent_image_id IS NULL)`
+			)
 			.orderBy(artists.name);
 
 		// Resolve the artist filter: a ?artist=X that isn't a current name may be a
