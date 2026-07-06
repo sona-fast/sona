@@ -229,6 +229,15 @@ describe('settings load — Resend config exposes presence only', () => {
 		expect(result.resendKeySet).toBe(false);
 		expect(result.resendFromSet).toBe(false);
 	});
+
+	it('treats an empty-string secret as unset (a blank binding is not configured)', async () => {
+		const { platform } = makeLoadDb({ RESEND_API_KEY: '', RESEND_FROM: '' });
+
+		const result = (await load({ platform } as never)) as unknown as Record<string, unknown>;
+
+		expect(result.resendKeySet).toBe(false);
+		expect(result.resendFromSet).toBe(false);
+	});
 });
 
 describe('settings connectRegistry — reconnect guard', () => {

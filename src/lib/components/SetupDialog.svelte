@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { X } from 'lucide-svelte';
+	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
 		title: string;
@@ -12,16 +13,56 @@
 	}
 
 	let { title, sub, onclose, icon, children }: Props = $props();
+
+	let modal = $state<HTMLDivElement>();
+
+	// Focus management for the modal dialog (WCAG 2.4.3 / ARIA dialog pattern):
+	// move focus into the panel on open, keep Tab cycling inside it, close on
+	// Escape from anywhere, and return focus to the invoker when it closes.
+	$effect(() => {
+		const invoker = document.activeElement as HTMLElement | null;
+		modal?.focus();
+
+		function onKeydown(e: KeyboardEvent) {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				onclose();
+				return;
+			}
+			if (e.key !== 'Tab' || !modal) return;
+			const focusable = modal.querySelectorAll<HTMLElement>(
+				'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			);
+			if (focusable.length === 0) return;
+			const first = focusable[0];
+			const last = focusable[focusable.length - 1];
+			const active = document.activeElement;
+			if (e.shiftKey && (active === first || active === modal)) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && active === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
+
+		window.addEventListener('keydown', onKeydown);
+		return () => {
+			window.removeEventListener('keydown', onKeydown);
+			invoker?.focus?.();
+		};
+	});
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="backdrop" onclick={onclose} onkeydown={(e) => { if (e.key === 'Escape') onclose(); }}>
-	<!-- Backdrop above owns Escape-to-close; this stops backdrop clicks leaking through. -->
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<div class="modal" role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="setup-title" onclick={(e) => e.stopPropagation()}>
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<div class="backdrop" onclick={onclose}>
+	<!-- Escape/Tab are handled at the window level while open (see $effect); this
+	     stops backdrop clicks from leaking through to the panel. -->
+	<div class="modal" bind:this={modal} role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="setup-title" onclick={(e) => e.stopPropagation()}>
 		<div class="modal-head">
 			<h2 id="setup-title">{title}</h2>
-			<button class="modal-close" aria-label="Close" onclick={onclose}><X size={18} /></button>
+			<button class="modal-close" aria-label={m.admin_close()} onclick={onclose}><X size={18} /></button>
 		</div>
 		<p class="modal-sub">{#if icon}{@render icon()}{/if}{sub}</p>
 		<div class="modal-body">

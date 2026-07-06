@@ -70,11 +70,14 @@
 	let savingRecoveryEmail = $state(false);
 	let showResendSetup = $state(false);
 
-	// The recovery-email chip reads the LIVE field, so it flips the moment an
-	// address is present; a successful save re-runs load and the $effect above
-	// keeps adminEmail in sync, so the chip stays correct after saving too.
+	// Readiness reflects the SAVED recovery email (data.adminEmail, kept fresh by
+	// the post-save load re-run), never the live input: an unsaved keystroke must
+	// not flip the status to "active" while the DB is still empty (recovery would
+	// look armed but be dead at lockout). A minimal shape check keeps a stray
+	// non-address string from counting as "set".
+	const emailSet = $derived(/\S+@\S+/.test(data.adminEmail));
 	const resendProgress = $derived(
-		resendSetupProgress({ resendKeySet: data.resendKeySet, adminEmailSet: adminEmail.trim() !== '' })
+		resendSetupProgress({ resendKeySet: data.resendKeySet, adminEmailSet: emailSet })
 	);
 	// Progress-ring geometry: full circumference is 2·π·18 ≈ 113.1; the filled arc
 	// is the done fraction, so the dash gap is the remainder.
@@ -494,16 +497,22 @@
 			<span>{m.admin_settings_recovery_email_label()}</span>
 			<input type="email" name="adminEmail" class="input" bind:value={adminEmail} autocomplete="email" placeholder="you@example.com" />
 		</label>
-		<div class="reset-status">
+		<div class="reset-status" aria-live="polite">
 			{#if resendProgress.ready}
 				<span class="status-tag active"><Check size={13} /> {m.admin_resend_status_active()}</span>
-				<button type="button" class="hint-link" onclick={() => (showResendSetup = true)}>{m.admin_resend_setup_link_active()}</button>
+				<button type="button" class="hint-link muted" onclick={() => (showResendSetup = true)}>{m.admin_resend_setup_link_active()}</button>
 			{:else}
 				<span class="status-tag unset"><span class="dot"></span> {m.admin_resend_status_unset()}</span>
 				<button type="button" class="hint-link" onclick={() => (showResendSetup = true)}>{m.admin_resend_setup_link_unset()}</button>
 			{/if}
 		</div>
-		<p class="field-hint">{resendProgress.ready ? m.admin_resend_hint_active() : m.admin_resend_hint_unset()}</p>
+		<p class="field-hint">
+			{#if resendProgress.ready}
+				{m.admin_resend_hint_active_a()}<code>{m.admin_login_forgot_password()}</code>{m.admin_resend_hint_active_b()}<code>RESEND_FROM</code>{m.admin_resend_hint_active_c()}
+			{:else}
+				{m.admin_resend_hint_unset_a()}<code>RESEND_API_KEY</code>{m.admin_resend_hint_unset_b()}
+			{/if}
+		</p>
 		<button type="submit" class="btn btn-secondary" disabled={savingRecoveryEmail}>
 			{savingRecoveryEmail ? m.admin_saving() : m.admin_settings_save_recovery_email()}
 		</button>
@@ -511,7 +520,6 @@
 </form>
 
 {#if showResendSetup}
-	{@const emailSet = adminEmail.trim() !== ''}
 	<SetupDialog title={m.admin_resend_setup_title()} sub={m.admin_resend_setup_sub()} onclose={() => (showResendSetup = false)}>
 		{#snippet icon()}<Mail size={15} />{/snippet}
 
@@ -523,7 +531,7 @@
 				</svg>
 				<span class="frac">{resendProgress.done}/{resendProgress.total}</span>
 			</div>
-			<div class="status-copy">
+			<div class="status-copy" aria-live="polite">
 				<div class="st-title">{resendProgress.ready ? m.admin_resend_setup_ready_title() : m.admin_resend_setup_pending_title()}</div>
 				<div class="st-sub">{resendProgress.ready ? m.admin_resend_setup_ready_sub() : m.admin_resend_setup_pending_sub()}</div>
 			</div>
@@ -532,13 +540,19 @@
 		<p class="lede">{m.admin_resend_setup_lede()}</p>
 
 		<div class="checklist">
-			<!-- Step 1: account — external, no live config state. -->
-			<div class="item">
-				<span class="mark info"><span class="dot"></span></span>
+			<!-- Step 1: account — no direct config, but a set API key implies an
+			     account exists, so mark it done by inference in that case. -->
+			<div class="item" class:done={data.resendKeySet}>
+				<span class="mark" class:done={data.resendKeySet} class:info={!data.resendKeySet}>
+					{#if data.resendKeySet}<Check size={18} />{:else}<span class="dot"></span>{/if}
+				</span>
 				<div class="body">
 					<div class="title">{m.admin_resend_setup_s1_title()}</div>
 					<div class="text">{m.admin_resend_setup_s1_text_a()}<a href="https://resend.com" target="_blank" rel="noopener">resend.com</a>{m.admin_resend_setup_s1_text_b()}</div>
 				</div>
+				{#if data.resendKeySet}
+					<span class="chip set">{m.admin_resend_setup_chip_done()} <Check size={11} /></span>
+				{/if}
 			</div>
 
 			<!-- Step 2: RESEND_API_KEY secret (required). -->
@@ -550,6 +564,7 @@
 					<div class="title">{m.admin_resend_setup_s2_title()}</div>
 					<div class="text">{m.admin_resend_setup_s2_text_a()}<strong>{m.admin_resend_setup_s2_create()}</strong>{m.admin_resend_setup_s2_text_b()}<code>re_</code>{m.admin_resend_setup_s2_text_c()}</div>
 					<CopyCommand text="npx wrangler pages secret put RESEND_API_KEY --project-name <your-project>" />
+					<div class="text note">{m.admin_resend_setup_s2_note()}</div>
 				</div>
 				<span class="chip" class:set={data.resendKeySet} class:unset={!data.resendKeySet}>
 					{data.resendKeySet ? m.admin_resend_setup_chip_set() : m.admin_resend_setup_chip_unset()}
@@ -557,7 +572,7 @@
 				</span>
 			</div>
 
-			<!-- Step 3: recovery email (required) — live from the field above. -->
+			<!-- Step 3: recovery email (required) — the SAVED value from the field above. -->
 			<div class="item" class:done={emailSet} class:pending={!emailSet}>
 				<span class="mark" class:done={emailSet} class:pending={!emailSet}>
 					{#if emailSet}<Check size={18} />{:else}<span class="ring-dot"></span>{/if}
@@ -578,7 +593,7 @@
 				<div class="body">
 					<div class="title">{m.admin_resend_setup_s4_title()} <span class="opt">{m.admin_resend_setup_s4_opt()}</span></div>
 					<div class="text">{m.admin_resend_setup_s4_text_a()}<code>RESEND_FROM</code>{m.admin_resend_setup_s4_text_b()}</div>
-					<CopyCommand text={"npx wrangler pages secret put RESEND_FROM --project-name <your-project>\n# value:  Sona <you@yourdomain.com>"} />
+					<CopyCommand text={"npx wrangler pages secret put RESEND_FROM --project-name <your-project>\n# value:  Your Site <you@yourdomain.com>"} />
 				</div>
 				<span class="chip" class:set={data.resendFromSet} class:optional={!data.resendFromSet}>
 					{data.resendFromSet ? m.admin_resend_setup_chip_set() : m.admin_resend_setup_chip_optional()}
@@ -1343,6 +1358,10 @@
 		font-size: 12.5px;
 		white-space: nowrap;
 	}
+	/* Configured-state trigger is muted (owner decision) — amber is reserved for
+	   the unconfigured call-to-action. */
+	.hint-link.muted { color: var(--muted-foreground); }
+	.hint-link.muted:hover { color: var(--foreground); }
 	/* Entry point under the recovery-email field: inline status tag + trigger. */
 	.reset-status {
 		display: flex;
@@ -1367,6 +1386,13 @@
 		margin-top: 8px;
 		line-height: 1.55;
 		max-width: 60ch;
+	}
+	.field-hint code {
+		font-family: var(--font-primary);
+		font-size: 0.92em;
+		background: var(--secondary);
+		padding: 1px 4px;
+		border-radius: var(--radius-xs);
 	}
 	.status-strip {
 		display: flex;
@@ -1466,6 +1492,7 @@
 	.item .text a { color: var(--primary); text-decoration: none; }
 	.item .text a:hover { text-decoration: underline; }
 	.item .text code { background: var(--secondary); }
+	.item .text.note { font-size: 11.5px; margin-top: 8px; opacity: 0.9; }
 	.chip {
 		flex: none;
 		align-self: center;
@@ -1505,4 +1532,31 @@
 		border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
 	}
 	.unlocks strong { color: var(--foreground); font-weight: 600; }
+
+	/* Light theme: the amber/green used above sit at ~1.5–2:1 on the light
+	   surfaces and fail WCAG. Darken to amber #8A5A00 (~5.9:1 on white) and green
+	   #15803D (~5:1) for text; both clear 3:1 for the ring/dot graphics too. */
+	:global([data-theme='light']) .hint-link { color: #8A5A00; }
+	:global([data-theme='light']) .status-tag.unset,
+	:global([data-theme='light']) .status-tag.unset .dot { color: #8A5A00; }
+	:global([data-theme='light']) .status-tag.unset .dot { background: #8A5A00; }
+	:global([data-theme='light']) .status-tag.active,
+	:global([data-theme='light']) .mark.done { color: #15803D; }
+	:global([data-theme='light']) .mark.pending { color: #8A5A00; }
+	:global([data-theme='light']) .status-ring .ring-fill { stroke: #8A5A00; }
+	:global([data-theme='light']) .status-ring.ready .ring-fill { stroke: #15803D; }
+	:global([data-theme='light']) .chip.set { color: #15803D; }
+	:global([data-theme='light']) .chip.unset { color: #8A5A00; }
+	:global([data-theme='light']) .resend-callout,
+	:global([data-theme='light']) .resend-callout strong,
+	:global([data-theme='light']) .resend-callout code { color: #8A5A00; }
+
+	/* Narrow screens: the 22px/1fr/auto grid starves the body (CopyCommand wraps
+	   one word per line). Below 480px drop to two columns and move the chip below
+	   the body, leaving the body + command full-width. */
+	@media (max-width: 480px) {
+		.item { grid-template-columns: 22px 1fr; }
+		.item .body { grid-column: 2; }
+		.item .chip { grid-column: 2; justify-self: start; align-self: start; margin-top: 8px; }
+	}
 </style>
