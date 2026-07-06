@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
+	import { onNavigate } from '$app/navigation';
 	import { Download, Share2, ExternalLink } from 'lucide-svelte';
 	import { formatDate } from '$lib';
 	import Meta from '$lib/components/Meta.svelte';
@@ -17,14 +18,14 @@
 	let image = $derived(data.image);
 	let tags = $derived(data.tags);
 
-	// Reveal resets whenever the shown image changes — variant-strip tiles are
-	// same-route navs that reuse this component, so an NSFW sibling must not
-	// inherit a previous image's reveal. $effect.pre clears it before the DOM
-	// updates, so the incoming image never flashes unblurred.
-	let revealed = $state(false);
-	$effect.pre(() => {
-		image.id;
-		revealed = false;
+	// Reveal is keyed to the shown image id. onNavigate clears it before the next
+	// page renders, so returning to a revealed image (strip or browser history)
+	// re-blurs with no unblurred flash; a same-slug load re-run fires no nav, so
+	// it stays revealed.
+	let revealedId = $state<number | null>(null);
+	const revealed = $derived(revealedId === image.id);
+	onNavigate(() => {
+		revealedId = null;
 	});
 	let copied = $state(false);
 
@@ -108,7 +109,7 @@
 			{#if image.nsfw && !revealed}
 				<div class="nsfw-overlay">
 					<img src={image.imageUrl} alt={image.title} class="blurred" />
-					<button class="reveal-btn" onclick={() => (revealed = true)}>
+					<button class="reveal-btn" onclick={() => (revealedId = image.id)}>
 						<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
 						<span>{m.gallery_click_reveal()}</span>
 					</button>
