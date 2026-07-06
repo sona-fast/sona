@@ -112,7 +112,7 @@
 						<img src={sticker.artist.avatarUrl} alt={sticker.artist.name} class="artist-avatar" />
 					{/if}
 					<div class="artist-namecol">
-						<span class="artist-name">{sticker.artist?.name ?? m.stickers_unattributed()}</span>
+						<span class="artist-name" title={sticker.artist?.name}>{sticker.artist?.name ?? m.stickers_unattributed()}</span>
 						<span class="artist-role">{m.stickers_artist_role()}</span>
 					</div>
 				</div>
@@ -338,7 +338,9 @@
 	.artist-socials {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 8px;
+		/* 6px keeps a 7-icon strip on one row at 390px (7×38 + 6×6 = 302px ≤ 308px
+		   content width) without shrinking the 38px touch targets. */
+		gap: 6px;
 	}
 
 	/* Social links rendered as outline icon buttons */
