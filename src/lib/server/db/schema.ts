@@ -96,8 +96,9 @@ export const characters = sqliteTable('characters', {
 	isOwner: integer('is_owner', { mode: 'boolean' }).notNull().default(false),
 	// The character's canonical reference image ("ref sheet"), chosen explicitly by
 	// an operator from the gallery. NULL = none set; the About page then falls back
-	// to the fetched Bluesky avatar. Kept nullable so clearing it is a no-op.
-	referenceImageId: integer('reference_image_id').references(() => images.id),
+	// to the fetched Bluesky avatar. Kept nullable so clearing it is a no-op; the
+	// image being deleted just nulls this out (SET NULL) rather than blocking it.
+	referenceImageId: integer('reference_image_id').references(() => images.id, { onDelete: 'set null' }),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
 

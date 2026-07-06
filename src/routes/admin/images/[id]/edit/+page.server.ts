@@ -63,7 +63,6 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		// An image that already has variants is a parent — it can't also be a variant.
 		hasVariants: !!firstVariant,
 		ownerCharacter: ownerCharacter && {
-			id: ownerCharacter.id,
 			name: ownerCharacter.name,
 			isReference: ownerCharacter.referenceImageId === image.id
 		}
@@ -206,11 +205,15 @@ export const actions = {
 		const data = await request.formData();
 		const clear = data.get('clear') === 'on';
 
+		if (!clear) {
+			const image = await db.select({ id: images.id }).from(images).where(eq(images.id, id)).get();
+			if (!image) return fail(404, { error: 'Image not found' });
+		}
+
 		const owner = await db
 			.select({ id: characters.id })
 			.from(characters)
 			.where(eq(characters.isOwner, true))
-			.orderBy(characters.name)
 			.get();
 		if (!owner) return fail(400, { error: 'No owner character' });
 
@@ -219,6 +222,6 @@ export const actions = {
 			.set({ referenceImageId: clear ? null : id })
 			.where(eq(characters.id, owner.id));
 
-		redirect(302, `/admin/images/${id}/edit`);
+		return { referenceCleared: clear };
 	}
 } satisfies Actions;

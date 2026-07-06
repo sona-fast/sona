@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { tick } from 'svelte';
 	import { Loader2 } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -8,6 +9,9 @@
 	let artistMode = $state<'existing' | 'new'>('existing');
 	let saving = $state(false);
 	let selectedParentId = $state(String(data.image.parentImageId ?? ''));
+	// The reference button swaps between set/clear on toggle; move focus back to it
+	// so keyboard/screen-reader users hear the new state instead of losing focus.
+	let referenceButton = $state<HTMLButtonElement | null>(null);
 </script>
 
 <div class="page-header">
@@ -15,25 +19,33 @@
 </div>
 
 {#if form?.error}
-	<p class="error">{form.error}</p>
+	<p class="error" role="alert">{form.error}</p>
 {/if}
 
 <div class="edit-layout">
-	<div class="image-preview">
-		<img src={data.image.imageUrl} alt={data.image.title} />
-	</div>
+	<div class="edit-sidebar">
+		<div class="image-preview">
+			<img src={data.image.imageUrl} alt={data.image.title} />
+		</div>
 
-	{#if data.ownerCharacter}
-		<form method="POST" action="?/reference" use:enhance class="reference-control">
-			{#if data.ownerCharacter.isReference}
-				<p class="reference-current">{m.admin_image_reference_current({ name: data.ownerCharacter.name })}</p>
-				<input type="hidden" name="clear" value="on" />
-				<button type="submit" class="btn btn-secondary">{m.admin_image_reference_clear()}</button>
-			{:else}
-				<button type="submit" class="btn btn-secondary">{m.admin_image_reference_set({ name: data.ownerCharacter.name })}</button>
-			{/if}
-		</form>
-	{/if}
+		{#if data.ownerCharacter}
+			<form method="POST" action="?/reference" use:enhance={() => {
+				return async ({ update, result }) => {
+					await update();
+					await tick();
+					if (result.type === 'success') referenceButton?.focus();
+				};
+			}} class="reference-control">
+				{#if data.ownerCharacter.isReference}
+					<p class="reference-current" role="status">✓ {m.admin_image_reference_current({ name: data.ownerCharacter.name })}</p>
+					<input type="hidden" name="clear" value="on" />
+					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_clear()}</button>
+				{:else}
+					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_set({ name: data.ownerCharacter.name })}</button>
+				{/if}
+			</form>
+		{/if}
+	</div>
 
 	<form method="POST" action="?/save" use:enhance={() => {
 		saving = true;
@@ -257,6 +269,11 @@
 		display: block;
 	}
 
+	.edit-sidebar {
+		display: flex;
+		flex-direction: column;
+	}
+
 	.reference-control {
 		display: flex;
 		flex-direction: column;
@@ -267,7 +284,13 @@
 	.reference-current {
 		font-size: 13px;
 		font-weight: 500;
-		color: var(--primary);
+		color: var(--foreground);
+	}
+
+	/* Desktop: size to content in the narrow sidebar column, not a full-width pill.
+	   Mobile keeps the full-width button (restored in the media query below). */
+	.reference-btn {
+		align-self: flex-start;
 	}
 
 	.edit-form {
@@ -456,6 +479,10 @@
 		.form-actions a {
 			width: 100%;
 			text-align: center;
+		}
+
+		.reference-btn {
+			align-self: stretch;
 		}
 	}
 </style>

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "16afea4f-2a53-49c0-91cc-0bcc1ba2db0e",
+  "id": "25bdddbe-80d2-4e36-967c-51a63e6ca32e",
   "prevId": "a417e2b0-35ac-4d8e-a28e-642198a9ae82",
   "tables": {
     "artists": {
@@ -249,7 +249,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

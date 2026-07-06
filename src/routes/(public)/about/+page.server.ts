@@ -55,7 +55,6 @@ export const load: PageServerLoad = async ({ platform }) => {
 		.select({ referenceImageId: characters.referenceImageId })
 		.from(characters)
 		.where(eq(characters.isOwner, true))
-		.orderBy(characters.name)
 		.get();
 	if (owner?.referenceImageId) {
 		const refImage = await db

@@ -1,1 +1,1 @@
-ALTER TABLE `characters` ADD `reference_image_id` integer REFERENCES images(id);
+ALTER TABLE `characters` ADD `reference_image_id` integer REFERENCES images(id) ON DELETE SET NULL;
