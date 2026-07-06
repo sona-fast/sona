@@ -199,7 +199,7 @@
 				<CopyCommand text="FURTRACK_MODE=mock" />
 			</div>
 		</div>
-		<div class="unlocks"><strong>{m.admin_fursuit_setup_char_label()}</strong>{m.admin_fursuit_setup_char_a()}<strong>{m.admin_fursuit_setup_char_primary()}</strong>{m.admin_fursuit_setup_char_b()}</div>
+		<div class="unlocks"><strong>{m.admin_fursuit_setup_char_label()}</strong>{m.admin_fursuit_setup_char_a()}<a href="/admin/settings#primary-character">{m.admin_fursuit_setup_char_primary()}</a>{m.admin_fursuit_setup_char_b()}</div>
 	</SetupDialog>
 {/if}
 
@@ -263,7 +263,7 @@
 	.hint { font-size: 11px; color: var(--muted-foreground); margin: -8px 0 16px; }
 	.banner { display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
 	.banner :global(svg) { flex: none; margin-top: 1px; }
-	.banner-msg { min-width: 0; overflow-wrap: anywhere; }
+	.banner-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 	.banner.info { background: var(--secondary); color: var(--muted-foreground); }
 	.banner.ok { background: rgba(74,222,128,0.1); color: #4ade80; }
 	.banner.warn { background: rgba(245,166,35,0.1); color: #f5a623; }
@@ -309,6 +309,10 @@
 		line-height: 1.6; border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
 	}
 	.unlocks strong { color: var(--foreground); font-weight: 600; }
+	.unlocks a { color: var(--primary); font-weight: 600; text-decoration: underline; }
+	/* Amber #FF8400 is ~2.1:1 on the light .unlocks panel; darken to #8A5A00
+	   for WCAG AA, matching the settings page's light-theme link fix. */
+	:global([data-theme='light']) .unlocks a { color: #8A5A00; }
 	.summary { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
 	.muted { font-size: 12px; color: var(--muted-foreground); margin-bottom: 12px; }
 	.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; flex-wrap: wrap; }

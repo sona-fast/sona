@@ -64,3 +64,4 @@ sticker-assets/
 
 # Pencil design files — kept local only (Pencil deprecated; source of truth is Claude Design)
 *.pen
+.ship/
