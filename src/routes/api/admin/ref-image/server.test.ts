@@ -80,11 +80,85 @@ describe('GET /api/admin/ref-image — by-ID image proxy', () => {
 
 		const res = (await GET(makeEvent(platform, `?id=${row.id}`, fetchMock))) as Response;
 
-		// Fetched the DB-stored URL — never a caller-supplied one.
-		expect(vi.mocked(fetchMock)).toHaveBeenCalledWith('https://cdn.x/ref.png');
+		// Fetched the DB-stored URL — never a caller-supplied one — and never
+		// follows a redirect away from it.
+		expect(vi.mocked(fetchMock)).toHaveBeenCalledWith('https://cdn.x/ref.png', {
+			redirect: 'manual'
+		});
 		expect(res.status).toBe(200);
 		expect(res.headers.get('content-type')).toBe('image/png');
+		expect(res.headers.get('content-disposition')).toBe('inline');
 		expect(await res.text()).toBe('PNGBYTES');
+	});
+
+	it('coerces a non-image upstream content type to application/octet-stream', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(images)
+			.values({ title: 'ref', slug: 'ref', imageUrl: 'https://cdn.x/ref.png', artistId: 1, createdAt: '2026-01-01' })
+			.returning({ id: images.id })
+			.get();
+		const fetchMock = vi.fn(
+			async () => new Response('<html>oops</html>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
+		) as unknown as typeof fetch;
+
+		const res = (await GET(makeEvent(platform, `?id=${row.id}`, fetchMock))) as Response;
+
+		expect(res.headers.get('content-type')).toBe('application/octet-stream');
+	});
+
+	it('502s on an upstream redirect instead of following it', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(images)
+			.values({ title: 'ref', slug: 'ref', imageUrl: 'https://cdn.x/ref.png', artistId: 1, createdAt: '2026-01-01' })
+			.returning({ id: images.id })
+			.get();
+		const fetchMock = vi.fn(
+			async () => new Response(null, { status: 302, headers: { location: 'https://evil.example/' } })
+		) as unknown as typeof fetch;
+
+		expect(await statusOf(() => GET(makeEvent(platform, `?id=${row.id}`, fetchMock)))).toBe(502);
+	});
+
+	it('rejects private / link-local stored hosts WITHOUT fetching', async () => {
+		const urls = [
+			'https://localhost/x.png',
+			'https://127.0.0.1/x.png',
+			'https://10.1.2.3/x.png',
+			'https://192.168.0.9/x.png',
+			'https://172.16.0.1/x.png',
+			'https://172.31.9.9/x.png',
+			'https://169.254.1.1/x.png',
+			'http://[::1]/x.png'
+		];
+		for (const imageUrl of urls) {
+			const { db, platform } = makeDb();
+			const row = await db
+				.insert(images)
+				.values({ title: 'ref', slug: 'ref', imageUrl, artistId: 1, createdAt: '2026-01-01' })
+				.returning({ id: images.id })
+				.get();
+			const fetchMock = vi.fn() as unknown as typeof fetch;
+
+			expect(await statusOf(() => GET(makeEvent(platform, `?id=${row.id}`, fetchMock)))).toBe(502);
+			expect(vi.mocked(fetchMock)).not.toHaveBeenCalled();
+		}
+	});
+
+	it('still allows public hosts that merely resemble private prefixes', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(images)
+			.values({ title: 'ref', slug: 'ref', imageUrl: 'https://172.200.0.1/x.png', artistId: 1, createdAt: '2026-01-01' })
+			.returning({ id: images.id })
+			.get();
+		const fetchMock = vi.fn(
+			async () => new Response('PNGBYTES', { status: 200, headers: { 'content-type': 'image/png' } })
+		) as unknown as typeof fetch;
+
+		const res = (await GET(makeEvent(platform, `?id=${row.id}`, fetchMock))) as Response;
+		expect(res.status).toBe(200);
 	});
 
 	it('404s for an unknown image id without fetching anything', async () => {

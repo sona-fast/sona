@@ -58,7 +58,9 @@ export interface RefImageSource {
  * Pick the client image-loading strategy for the ref-sheet color picker:
  * 1. root-relative / same-origin URL → as-is (never taints the canvas);
  * 2. our own R2 public URL in prod → same-origin Cloudflare image transform
- *    (`format=png` re-encodes losslessly, so sampled pixels are exact);
+ *    (`format=png` re-encodes losslessly and `width=1600,fit=scale-down` caps
+ *    the decode cost, so sampled pixels are exact within the ≤1600px working
+ *    image the picker samples from);
  * 3. UploadThing (ufs.sh / utfs.io) → raw URL + crossorigin="anonymous"
  *    (UT serves Access-Control-Allow-Origin: *);
  * 4. anything else (incl. dev pointing at prod-origin URLs) → the admin-gated
@@ -81,7 +83,7 @@ export function refImageSource(
 	// 2. R2-owned absolute URL, prod only (the CF edge isn't there in dev).
 	const r2 = opts.r2PublicUrl.trim().replace(/\/+$/, '');
 	if (!opts.dev && r2 && imageUrl.startsWith(r2 + '/')) {
-		return { src: `/cdn-cgi/image/format=png/${imageUrl}`, crossorigin: false };
+		return { src: `/cdn-cgi/image/format=png,width=1600,fit=scale-down/${imageUrl}`, crossorigin: false };
 	}
 
 	// 3. UploadThing hosts.

@@ -132,9 +132,9 @@ describe('refImageSource — client canvas-loading strategy', () => {
 		});
 	});
 
-	it('routes an R2-owned URL through the same-origin lossless PNG transform in prod', () => {
+	it('routes an R2-owned URL through the same-origin lossless size-capped PNG transform in prod', () => {
 		expect(refImageSource({ id: 1, imageUrl: 'https://cdn.taro.surf/ref.png' }, opts)).toEqual({
-			src: '/cdn-cgi/image/format=png/https://cdn.taro.surf/ref.png',
+			src: '/cdn-cgi/image/format=png,width=1600,fit=scale-down/https://cdn.taro.surf/ref.png',
 			crossorigin: false
 		});
 	});

@@ -12,17 +12,18 @@
 export interface ExtractOptions {
 	/** How many suggestions to return. */
 	count?: number;
-	/** Minimum RGB distance between returned colors (protects small accents). */
-	minDistance?: number;
-	/** Border-ring thickness as a fraction of the shorter side (≥ 1px). */
-	ringFraction?: number;
-	/** Share (0–1) of the opaque ring a color needs to count as background. */
-	backgroundMinShare?: number;
-	/** Candidates within this RGB distance of a background color are dropped. */
-	backgroundDistance?: number;
-	/** Double-weight pixels in the central half of the sheet (off by default). */
-	centerWeight?: boolean;
 }
+
+// Extraction tuning, fixed by design (see the tests for the behaviors these
+// values guarantee — accent survival, colored-backdrop exclusion, dedupe).
+/** Minimum RGB distance between returned colors (protects small accents). */
+const MIN_DISTANCE = 40;
+/** Border-ring thickness as a fraction of the shorter side (≥ 1px). */
+const RING_FRACTION = 0.04;
+/** Share (0–1) of the opaque ring a color needs to count as background. */
+const BACKGROUND_MIN_SHARE = 0.08;
+/** Candidates within this RGB distance of a background color are dropped. */
+const BACKGROUND_DISTANCE = 60;
 
 /** The ImageData surface we need — lets tests pass plain objects in node. */
 export type PixelSource = Pick<ImageData, 'data' | 'width' | 'height'>;
@@ -40,14 +41,7 @@ function toHex(rgb: number): string {
 
 /** Suggest up to `count` palette colors from raw pixels, largest areas first. */
 export function extractPalette(image: PixelSource, options: ExtractOptions = {}): string[] {
-	const {
-		count = 5,
-		minDistance = 40,
-		ringFraction = 0.04,
-		backgroundMinShare = 0.08,
-		backgroundDistance = 60,
-		centerWeight = false
-	} = options;
+	const { count = 5 } = options;
 	const { data, width, height } = image;
 
 	// Pass 1: quantized histogram. Per bucket we also count each exact pixel so
@@ -55,11 +49,7 @@ export function extractPalette(image: PixelSource, options: ExtractOptions = {})
 	const buckets = new Map<number, { total: number; pixels: Map<number, number> }>();
 	const ringCounts = new Map<number, number>(); // bucket key → opaque ring pixels
 	let ringTotal = 0;
-	const ringPx = Math.max(1, Math.floor(Math.min(width, height) * ringFraction));
-	const cx0 = width / 4;
-	const cx1 = (3 * width) / 4;
-	const cy0 = height / 4;
-	const cy1 = (3 * height) / 4;
+	const ringPx = Math.max(1, Math.floor(Math.min(width, height) * RING_FRACTION));
 
 	for (let y = 0; y < height; y++) {
 		for (let x = 0; x < width; x++) {
@@ -71,11 +61,10 @@ export function extractPalette(image: PixelSource, options: ExtractOptions = {})
 				ringCounts.set(key, (ringCounts.get(key) ?? 0) + 1);
 				ringTotal++;
 			}
-			const w = centerWeight && x >= cx0 && x < cx1 && y >= cy0 && y < cy1 ? 2 : 1;
 			let bucket = buckets.get(key);
 			if (!bucket) buckets.set(key, (bucket = { total: 0, pixels: new Map() }));
-			bucket.total += w;
-			bucket.pixels.set(rgb, (bucket.pixels.get(rgb) ?? 0) + w);
+			bucket.total += 1;
+			bucket.pixels.set(rgb, (bucket.pixels.get(rgb) ?? 0) + 1);
 		}
 	}
 
@@ -95,7 +84,7 @@ export function extractPalette(image: PixelSource, options: ExtractOptions = {})
 	// Background colors: buckets covering a meaningful share of the opaque ring.
 	const background: number[] = [];
 	for (const [key, c] of ringCounts) {
-		if (c / ringTotal >= backgroundMinShare) {
+		if (c / ringTotal >= BACKGROUND_MIN_SHARE) {
 			const bucket = candidates.find((b) => b.key === key);
 			if (bucket) background.push(bucket.rgb);
 		}
@@ -107,8 +96,8 @@ export function extractPalette(image: PixelSource, options: ExtractOptions = {})
 	const picked: number[] = [];
 	for (const c of candidates) {
 		if (picked.length >= count) break;
-		if (background.some((bg) => rgbDistance(bg, c.rgb) <= backgroundDistance)) continue;
-		if (picked.some((p) => rgbDistance(p, c.rgb) < minDistance)) continue;
+		if (background.some((bg) => rgbDistance(bg, c.rgb) <= BACKGROUND_DISTANCE)) continue;
+		if (picked.some((p) => rgbDistance(p, c.rgb) < MIN_DISTANCE)) continue;
 		picked.push(c.rgb);
 	}
 	return picked.map(toHex);

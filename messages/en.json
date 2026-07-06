@@ -914,7 +914,7 @@
 	"admin_settings_sona_key_features": "Key features",
 	"admin_settings_sona_key_features_placeholder": "Blue eyes, white chest patch, fluffy tail",
 	"admin_settings_sona_new_hex_label": "Hex value for the new color",
-	"admin_settings_sona_no_ref_hint": "To pick colors straight off your reference sheet, publish one first — tag an artwork reference or designate it on the Images page.",
+	"admin_settings_sona_no_ref_hint": "To pick colors straight off your reference sheet, publish one first — tag an image with the reference tag, or set it as your reference sheet on the Images page.",
 	"admin_settings_sona_palette": "Color palette",
 	"admin_settings_sona_per_line": "(one per line)",
 	"admin_settings_sona_pick_color": "Pick color",

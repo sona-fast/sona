@@ -4,7 +4,6 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SetupDialog from '$lib/components/SetupDialog.svelte';
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
-	import RefSheetPicker from '$lib/components/RefSheetPicker.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
@@ -374,7 +373,7 @@
 						aria-label={m.admin_settings_sona_new_hex_label()}
 						onchange={(e) => setNewColorHex(e.currentTarget)}
 					/>
-					<input type="text" class="input" bind:value={newColorName} placeholder={m.admin_settings_sona_color_name_placeholder()} />
+					<input type="text" class="input" bind:value={newColorName} aria-label={m.admin_settings_sona_color_name_placeholder()} placeholder={m.admin_settings_sona_color_name_placeholder()} />
 					<button type="button" class="btn btn-secondary" onclick={addColor}>{m.admin_settings_sona_add_color()}</button>
 				</div>
 				{#if data.refImageSrc}
@@ -882,13 +881,17 @@
 {/if}
 
 {#if showRefPicker && data.refImageSrc}
-	<RefSheetPicker
-		src={data.refImageSrc.src}
-		crossorigin={data.refImageSrc.crossorigin}
-		slots={colors}
-		onpick={applyPickedColor}
-		onclose={() => (showRefPicker = false)}
-	/>
+	<!-- Lazy chunk: the picker (canvas + extraction code) only loads on first
+	     open, so the settings page doesn't carry it. -->
+	{#await import('$lib/components/RefSheetPicker.svelte') then { default: RefSheetPicker }}
+		<RefSheetPicker
+			src={data.refImageSrc.src}
+			crossorigin={data.refImageSrc.crossorigin}
+			slots={colors}
+			onpick={applyPickedColor}
+			onclose={() => (showRefPicker = false)}
+		/>
+	{/await}
 {/if}
 
 <style>

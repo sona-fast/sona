@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { Pipette, X } from 'lucide-svelte';
+	import { Check, Pipette, X } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { extractPalette } from '$lib/palette-extract';
 	import { rgbToHex } from '$lib/color-hex';
+	import { focusTrap } from '$lib/focus-trap';
 
 	interface Slot {
 		name: string;
@@ -19,54 +20,29 @@
 
 	let { src, crossorigin, slots, onpick, onclose }: Props = $props();
 
-	let modal = $state<HTMLDivElement>();
 	let canvas = $state<HTMLCanvasElement>();
 	let loupeCanvas = $state<HTMLCanvasElement>();
 	let activeSlot = $state<number | 'new'>('new');
 	let suggestions = $state<string[]>([]);
 	let loadError = $state(false);
-	let hover = $state<{ hex: string; r: number; g: number; b: number; x: number; y: number; touch: boolean } | null>(null);
+	let hover = $state<{ hex: string; r: number; g: number; b: number; x: number; y: number; touch: boolean; below: boolean } | null>(null);
 
 	const LOUPE = 120; // loupe canvas CSS size
-	const ZOOM = 8; // magnification of the canvas backing pixels
+	const ZOOM = 8; // CSS px shown per working-image pixel in the loupe
+	// Long-side cap for the offscreen sampling canvas: bounds decode/memory cost
+	// for full-res originals (UploadThing/proxy paths serve the raw file). Picks
+	// are exact pixels of this ≤1600px working image.
+	const MAX_SAMPLE = 1600;
+	// Approximate CSS height of the loupe column below the glass (gap + readout);
+	// used only to decide when to flip the loupe below the pointer.
+	const READOUT_H = 40;
 
-	// Focus management for the modal dialog (WCAG 2.4.3 / ARIA dialog pattern):
-	// move focus into the panel on open, keep Tab cycling inside it, close on
-	// Escape from anywhere, and return focus to the invoker when it closes.
-	// (Same pattern as SetupDialog.)
-	$effect(() => {
-		const invoker = document.activeElement as HTMLElement | null;
-		modal?.focus();
-
-		function onKeydown(e: KeyboardEvent) {
-			if (e.key === 'Escape') {
-				e.preventDefault();
-				onclose();
-				return;
-			}
-			if (e.key !== 'Tab' || !modal) return;
-			const focusable = modal.querySelectorAll<HTMLElement>(
-				'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-			);
-			if (focusable.length === 0) return;
-			const first = focusable[0];
-			const last = focusable[focusable.length - 1];
-			const active = document.activeElement;
-			if (e.shiftKey && (active === first || active === modal)) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && active === last) {
-				e.preventDefault();
-				first.focus();
-			}
-		}
-
-		window.addEventListener('keydown', onKeydown);
-		return () => {
-			window.removeEventListener('keydown', onKeydown);
-			invoker?.focus?.();
-		};
-	});
+	// The sampling source: an offscreen size-capped copy of the sheet. sample()
+	// reads THIS, never the display canvas (which is scaled to the layout width
+	// and would blend pixels).
+	let sampleCanvas: HTMLCanvasElement | null = null;
+	let sampleCtx: CanvasRenderingContext2D | null = null;
+	let loupeCtx: CanvasRenderingContext2D | null = null;
 
 	// Load the sheet with the strategy the server computed (see ref-image.ts).
 	$effect(() => {
@@ -77,29 +53,52 @@
 		img.src = src;
 	});
 
+	// Size the loupe's backing store once (dpr-scaled), and cache its context.
+	$effect(() => {
+		if (!loupeCanvas) return;
+		const dpr = window.devicePixelRatio || 1;
+		loupeCanvas.width = LOUPE * dpr;
+		loupeCanvas.height = LOUPE * dpr;
+		loupeCtx = loupeCanvas.getContext('2d');
+		if (loupeCtx) loupeCtx.imageSmoothingEnabled = false;
+	});
+
 	function draw(img: HTMLImageElement) {
 		if (!canvas) return;
-		// Backing store at devicePixelRatio so the loupe magnifies real pixels.
+		// Working image: cap the long side at MAX_SAMPLE so a huge original never
+		// costs full-res decode/readback. Everything downstream (display, loupe,
+		// suggestions, picks) reads from this copy.
+		const scale = Math.min(1, MAX_SAMPLE / Math.max(img.naturalWidth, img.naturalHeight));
+		const sw = Math.max(1, Math.round(img.naturalWidth * scale));
+		const sh = Math.max(1, Math.round(img.naturalHeight * scale));
+		sampleCanvas = document.createElement('canvas');
+		sampleCanvas.width = sw;
+		sampleCanvas.height = sh;
+		sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+		if (!sampleCtx) return;
+		sampleCtx.drawImage(img, 0, 0, sw, sh);
+
+		// Display canvas: a dpr-scaled view of the working image at layout width.
 		const dpr = window.devicePixelRatio || 1;
 		const cssW = canvas.parentElement?.clientWidth || 600;
-		const cssH = Math.max(1, Math.round((cssW * img.naturalHeight) / img.naturalWidth));
+		const cssH = Math.max(1, Math.round((cssW * sh) / sw));
 		canvas.width = Math.round(cssW * dpr);
 		canvas.height = Math.round(cssH * dpr);
 		canvas.style.height = `${cssH}px`;
 		const ctx = canvas.getContext('2d');
 		if (!ctx) return;
-		ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+		ctx.drawImage(sampleCanvas, 0, 0, canvas.width, canvas.height);
 
 		// Auto-palette suggestions from a downscaled copy (fast, plenty for the
 		// flat color regions of a ref sheet).
 		try {
-			const scale = Math.min(1, 256 / Math.max(img.naturalWidth, img.naturalHeight));
+			const s = Math.min(1, 256 / Math.max(sw, sh));
 			const off = document.createElement('canvas');
-			off.width = Math.max(1, Math.round(img.naturalWidth * scale));
-			off.height = Math.max(1, Math.round(img.naturalHeight * scale));
+			off.width = Math.max(1, Math.round(sw * s));
+			off.height = Math.max(1, Math.round(sh * s));
 			const octx = off.getContext('2d');
 			if (!octx) return;
-			octx.drawImage(img, 0, 0, off.width, off.height);
+			octx.drawImage(sampleCanvas, 0, 0, off.width, off.height);
 			suggestions = extractPalette(octx.getImageData(0, 0, off.width, off.height));
 		} catch {
 			// Tainted canvas (CORS) — no pixel access, so the picker can't work.
@@ -107,46 +106,76 @@
 		}
 	}
 
+	// rAF-coalesce pointer sampling: pointermove fires faster than frames, and
+	// every sample costs a getImageData + loupe draw.
+	let pendingSample: PointerEvent | null = null;
+	let sampleRaf = 0;
+	function queueSample(e: PointerEvent) {
+		pendingSample = e;
+		if (sampleRaf) return;
+		sampleRaf = requestAnimationFrame(() => {
+			sampleRaf = 0;
+			if (pendingSample) sample(pendingSample);
+			pendingSample = null;
+		});
+	}
+	function clearHover() {
+		pendingSample = null;
+		hover = null;
+	}
+	$effect(() => () => cancelAnimationFrame(sampleRaf));
+
 	function sample(e: PointerEvent) {
-		if (!canvas || loadError) return;
+		if (!canvas || !sampleCanvas || !sampleCtx || loadError) return;
 		const rect = canvas.getBoundingClientRect();
+		// Map display coords → working-image coords (exact pixels of the ≤1600px
+		// sampling canvas; the display canvas is only a scaled view of it).
 		const px = Math.min(
-			canvas.width - 1,
-			Math.max(0, Math.round((e.clientX - rect.left) * (canvas.width / rect.width)))
+			sampleCanvas.width - 1,
+			Math.max(0, Math.round(((e.clientX - rect.left) * sampleCanvas.width) / rect.width))
 		);
 		const py = Math.min(
-			canvas.height - 1,
-			Math.max(0, Math.round((e.clientY - rect.top) * (canvas.height / rect.height)))
+			sampleCanvas.height - 1,
+			Math.max(0, Math.round(((e.clientY - rect.top) * sampleCanvas.height) / rect.height))
 		);
 		let d: Uint8ClampedArray;
 		try {
-			d = canvas.getContext('2d')!.getImageData(px, py, 1, 1).data;
+			d = sampleCtx.getImageData(px, py, 1, 1).data;
 		} catch {
 			loadError = true;
 			return;
 		}
+		// Keep the loupe inside the canvas: clamp it horizontally, and flip it
+		// below the pointer when there's no room above (near the top edge).
+		const touch = e.pointerType === 'touch';
+		const y = e.clientY - rect.top;
 		hover = {
 			hex: rgbToHex(d[0], d[1], d[2]),
 			r: d[0],
 			g: d[1],
 			b: d[2],
-			x: e.clientX - rect.left,
-			y: e.clientY - rect.top,
-			touch: e.pointerType === 'touch'
+			x: Math.max(LOUPE / 2 + 4, Math.min(rect.width - LOUPE / 2 - 4, e.clientX - rect.left)),
+			y,
+			touch,
+			below: y < LOUPE + READOUT_H + (touch ? 56 : 16)
 		};
 		drawLoupe(px, py);
 	}
 
 	function drawLoupe(px: number, py: number) {
-		if (!canvas || !loupeCanvas) return;
-		const dpr = window.devicePixelRatio || 1;
-		loupeCanvas.width = LOUPE * dpr;
-		loupeCanvas.height = LOUPE * dpr;
-		const ctx = loupeCanvas.getContext('2d');
-		if (!ctx) return;
-		ctx.imageSmoothingEnabled = false;
-		const srcSize = (LOUPE * dpr) / ZOOM;
-		ctx.drawImage(canvas, px - srcSize / 2, py - srcSize / 2, srcSize, srcSize, 0, 0, LOUPE * dpr, LOUPE * dpr);
+		if (!sampleCanvas || !loupeCanvas || !loupeCtx) return;
+		const srcSize = LOUPE / ZOOM; // working-image pixels shown across the glass
+		loupeCtx.drawImage(
+			sampleCanvas,
+			px - srcSize / 2,
+			py - srcSize / 2,
+			srcSize,
+			srcSize,
+			0,
+			0,
+			loupeCanvas.width,
+			loupeCanvas.height
+		);
 	}
 
 	function commit(e: PointerEvent) {
@@ -158,24 +187,24 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <div class="backdrop" onclick={onclose}>
-	<!-- Escape/Tab are handled at the window level while open (see $effect); this
+	<!-- Escape/Tab are handled at the window level while open (see focusTrap); this
 	     stops backdrop clicks from leaking through to the panel. -->
-	<div class="modal" bind:this={modal} role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="refpicker-title" onclick={(e) => e.stopPropagation()}>
+	<div class="modal" use:focusTrap={onclose} role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="refpicker-title" onclick={(e) => e.stopPropagation()}>
 		<div class="modal-head">
 			<h2 id="refpicker-title">{m.admin_ref_picker_title()}</h2>
 			<button class="modal-close" aria-label={m.admin_close()} onclick={onclose}><X size={18} /></button>
 		</div>
 		<p class="modal-sub"><Pipette size={15} />{m.admin_ref_picker_sub()}</p>
 		<div class="modal-body">
-			<div class="slot-row" role="radiogroup" aria-label={m.admin_ref_picker_apply_to()}>
+			<div class="slot-row" role="group" aria-label={m.admin_ref_picker_apply_to()}>
 				<span class="slot-label">{m.admin_ref_picker_apply_to()}</span>
 				{#each slots as slot, i}
-					<button type="button" class="slot-chip" class:active={activeSlot === i} role="radio" aria-checked={activeSlot === i} onclick={() => (activeSlot = i)}>
-						<span class="dot" style="background:{slot.hex}"></span>{slot.name}
+					<button type="button" class="slot-chip" class:active={activeSlot === i} aria-pressed={activeSlot === i} onclick={() => (activeSlot = i)}>
+						{#if activeSlot === i}<Check size={13} />{/if}<span class="dot" style="background:{slot.hex}"></span>{slot.name}
 					</button>
 				{/each}
-				<button type="button" class="slot-chip" class:active={activeSlot === 'new'} role="radio" aria-checked={activeSlot === 'new'} onclick={() => (activeSlot = 'new')}>
-					{m.admin_ref_picker_slot_new()}
+				<button type="button" class="slot-chip" class:active={activeSlot === 'new'} aria-pressed={activeSlot === 'new'} onclick={() => (activeSlot = 'new')}>
+					{#if activeSlot === 'new'}<Check size={13} />{/if}{m.admin_ref_picker_slot_new()}
 				</button>
 			</div>
 
@@ -186,10 +215,11 @@
 					<canvas
 						bind:this={canvas}
 						aria-describedby="refpicker-canvas-desc"
-						onpointermove={sample}
-						onpointerdown={sample}
+						onpointermove={queueSample}
+						onpointerdown={queueSample}
 						onpointerup={commit}
-						onpointerleave={() => (hover = null)}
+						onpointerleave={clearHover}
+						onpointercancel={clearHover}
 					></canvas>
 					<!-- Loupe stays mounted (drawLoupe needs the bound canvas before the
 					     first hover); it's display:none until there's a sample. On touch it
@@ -197,6 +227,7 @@
 					<div
 						class="loupe"
 						class:touch={hover?.touch}
+						class:below={hover?.below}
 						style="left:{hover?.x ?? 0}px; top:{hover?.y ?? 0}px; display:{hover ? 'flex' : 'none'}"
 						aria-hidden="true"
 					>
@@ -328,8 +359,15 @@
 		font-size: 13px;
 		cursor: pointer;
 	}
+	/* The selected chip is signaled by more than border color alone (WCAG 1.4.1):
+	   a primary-tinted fill + the leading check glyph. */
 	.slot-chip.active {
 		border-color: var(--primary, var(--foreground));
+		background: color-mix(in srgb, var(--primary, var(--foreground)) 14%, transparent);
+	}
+	.slot-chip :global(svg) {
+		flex: none;
+		color: var(--primary, var(--foreground));
 	}
 	.dot {
 		width: 14px;
@@ -364,6 +402,12 @@
 	/* On touch the finger occludes far more — lift the loupe higher. */
 	.loupe.touch {
 		transform: translate(-50%, calc(-100% - 56px));
+	}
+	/* Near the top edge there's no room above — flip the loupe below the pointer
+	   (sample() sets `below`; horizontal clamping also happens there). */
+	.loupe.below,
+	.loupe.below.touch {
+		transform: translate(-50%, 24px);
 	}
 	.loupe-glass {
 		position: relative;
