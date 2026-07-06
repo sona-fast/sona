@@ -454,6 +454,8 @@
 	"admin_new_artist_registry_no_matches": "No registry match — a new artist will be created.",
 	"admin_new_artist_registry_handle_hint": "Looks like a social link — searching the registry by handle “{handle}”. Pick a match, or type a name to add a new artist.",
 	"admin_new_artist_registry_handle_no_match": "No registry artist has that handle. Clear it or type a name to add a new artist.",
+	"admin_new_artist_registry_unreachable": "Couldn't reach the registry — you can still add this artist manually.",
+	"admin_new_artist_registry_linked_announce": "Linked to {name} from the shared registry.",
 	"admin_new_artist_registry_linked": "Linked to the shared registry",
 	"admin_new_artist_unlink": "Unlink",
 	"admin_new_artist_creating": "Creating…",

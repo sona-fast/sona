@@ -74,6 +74,29 @@ describe('classifyQuery — non-social URLs', () => {
 	});
 });
 
+describe('classifyQuery — ordinary names that merely contain a domain fragment', () => {
+	// Regression pins: substring matching used to misread these as handles
+	// (t.me ⊂ cat.meow / Sweet.Melody, x.com ⊂ wolfx.community / rex.comics),
+	// which the create-block then made impossible to enter as artist names.
+	it.each(['cat.meow', 'wolfx.community', 'rex.comics', 'Sweet.Melody', 'someone@x.com'])(
+		'%s → name',
+		(s) => {
+			expect(classifyQuery(s).kind).toBe('name');
+		}
+	);
+});
+
+describe('classifyQuery — URL edge cases', () => {
+	it('strips a #fragment from the normalized handle', () => {
+		expect(classifyQuery('twitter.com/kuttoya#photos').handle).toBe('kuttoya');
+	});
+	it('classifies a protocol-relative social URL as a handle on the right platform', () => {
+		const c = classifyQuery('//twitter.com/kuttoya');
+		expect(c.kind).toBe('handle');
+		expect(c.platform).toBe('twitter');
+	});
+});
+
 describe('normalizeHandle', () => {
 	it('normalizes patreon creator URLs without collapsing to "c"', () => {
 		expect(normalizeHandle('patreon', 'https://patreon.com/c/kuttoya')).toBe('kuttoya');

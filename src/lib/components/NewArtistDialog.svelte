@@ -58,6 +58,19 @@
 	let resultsOpen = $state(false);
 	let activeIndex = $state(-1);
 	let hasSearched = $state(false);
+	// The registry fetch failed (offline / non-OK). Distinct from "no such
+	// handle": we must NOT block create on an outage — manual entry still works.
+	let searchError = $state(false);
+	// Monotonic request id: a captured seq stale by the time a response lands is
+	// discarded, so a slow name-search can't overwrite a newer handle-search
+	// (which could otherwise link the WRONG artist).
+	let searchSeq = 0;
+	// Live-region text set explicitly on pick/unpick (a programmatic name= change
+	// skips oninput, so the search announcement can't cover the linked state).
+	let pickAnnouncement = $state('');
+	// The socials a pick prefilled, so we can drop the ones the operator never
+	// edited when the link is dropped (no silent carry-over of a dropped match).
+	let prefilled = $state<ReturnType<typeof resultToPrefill> | null>(null);
 	const listboxId = 'new-artist-registry-listbox';
 
 	// The name field doubles as a social-handle search: a typed @handle or social
@@ -67,15 +80,26 @@
 	// blocked and the field nudges the operator to pick a match or type a name.
 	let query = $derived(registryEnabled ? classifyQuery(name) : { kind: 'name' as const, handleParam: '', handle: '' });
 	let isHandleQuery = $derived(query.kind === 'handle');
-	let blockHandleCreate = $derived(isHandleQuery && !pulled);
+	// Don't block when the registry is unreachable — fall back to manual entry.
+	let blockHandleCreate = $derived(isHandleQuery && !pulled && !searchError);
+	// Truncated handle for the hint so a long pasted URL can't blow out the line.
+	let handleHintValue = $derived(query.handle.length > 40 ? query.handle.slice(0, 39) + '…' : query.handle);
 
-	// Polite announcement of result counts for screen-reader users. Silent while
-	// typing/searching; speaks once a search settles.
+	// Polite announcement for screen-reader users: the linked confirmation after a
+	// pick, else result counts / no-match once a search settles (silent mid-type).
 	let resultsAnnouncement = $derived.by(() => {
-		if (!registryEnabled || !shouldSearch(name) || registrySearching) return '';
+		if (pickAnnouncement) return pickAnnouncement;
+		if (!registryEnabled || !shouldSearch(query.kind === 'handle' ? query.handleParam : name) || registrySearching) return '';
+		if (searchError) return m.admin_new_artist_registry_unreachable();
 		if (registryResults.length) return m.admin_new_artist_registry_results_count({ count: registryResults.length });
 		if (hasSearched) return isHandleQuery ? m.admin_new_artist_registry_handle_no_match() : m.admin_new_artist_registry_no_matches();
 		return '';
+	});
+
+	// MUST-FIX: keep the keyboard-active option scrolled into the 240px listbox.
+	$effect(() => {
+		if (activeIndex < 0) return;
+		document.getElementById(`new-artist-opt-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
 	});
 
 	// Catalog import plan for the panel footer + "Import all" confirmation: how
@@ -141,40 +165,74 @@
 		}
 	}
 
-	// Typing in the name field (registry on) re-searches. Editing after a pick
-	// unlinks — the identity no longer matches what's typed, so we drop back to
-	// plain-create until they pick again.
-	function onNameInput() {
-		if (!registryEnabled) return;
-		if (pulled) pulled = null;
+	/** Reset the transient search state and invalidate any in-flight request. */
+	function resetSearch() {
 		clearTimeout(searchTimer);
+		searchSeq++;
+		registryResults = [];
+		resultsOpen = false;
 		activeIndex = -1;
 		hasSearched = false;
-		if (!shouldSearch(name)) {
-			registryResults = [];
-			resultsOpen = false;
-			return;
+		searchError = false;
+	}
+	/** Drop the socials a pick prefilled that the operator never edited, so a
+	 *  dropped match's links don't silently carry into a plain create. */
+	function clearUneditedPrefill() {
+		const p = prefilled;
+		if (!p) return;
+		if (twitter === p.twitter) twitter = '';
+		if (bluesky === p.bluesky) bluesky = '';
+		if (telegram === p.telegram) telegram = '';
+		if (furaffinity === p.furaffinity) furaffinity = '';
+		if (deviantart === p.deviantart) deviantart = '';
+		if (patreon === p.patreon) patreon = '';
+		if (instagram === p.instagram) instagram = '';
+		prefilled = null;
+	}
+
+	// Typing in the name field (registry on) re-searches. Editing after a pick
+	// unlinks — the identity no longer matches what's typed, so we drop back to
+	// plain-create (dropping the unedited pulled socials) until they pick again.
+	function onNameInput() {
+		if (!registryEnabled) return;
+		if (pulled) {
+			pulled = null;
+			clearUneditedPrefill();
 		}
+		pickAnnouncement = '';
+		resetSearch();
+		// Gate on the term we'll actually search (normalized handle for a handle).
+		const c = classifyQuery(name);
+		const term = c.kind === 'handle' ? c.handleParam : name;
+		if (!shouldSearch(term)) return;
 		searchTimer = setTimeout(searchRegistry, 250);
 	}
 	async function searchRegistry() {
-		if (!shouldSearch(name)) return;
 		// A typed @handle / social URL searches by handle; plain text by name.
 		const c = classifyQuery(name);
+		const term = c.kind === 'handle' ? c.handleParam : name;
+		if (!shouldSearch(term)) return;
 		const qs = c.kind === 'handle' ? 'handle=' + encodeURIComponent(c.handleParam) : 'q=' + encodeURIComponent(name.trim());
+		const seq = searchSeq;
 		registrySearching = true;
 		try {
 			const res = await fetch('/api/registry/search?' + qs);
+			if (seq !== searchSeq) return; // a newer query superseded this one
 			if (res.ok) {
 				const data = await res.json();
 				registryResults = data.artists ?? [];
 				resultsOpen = registryResults.length > 0;
+			} else {
+				searchError = true;
 			}
 		} catch {
-			/* ignore — manual entry still works */
+			if (seq !== searchSeq) return;
+			searchError = true; // offline — manual entry still works, don't block
 		} finally {
-			registrySearching = false;
-			hasSearched = true;
+			if (seq === searchSeq) {
+				registrySearching = false;
+				hasSearched = true;
+			}
 		}
 	}
 	function applyResult(r: RegResult) {
@@ -188,16 +246,16 @@
 		patreon = p.patreon;
 		instagram = p.instagram;
 		pulled = p.pulled;
-		registryResults = [];
-		resultsOpen = false;
-		activeIndex = -1;
+		prefilled = p;
+		resetSearch();
+		pickAnnouncement = m.admin_new_artist_registry_linked_announce({ name: p.name });
 	}
 	/** Drop the registry link and return to plain-create, keeping the typed name. */
 	function unpick() {
 		pulled = null;
-		registryResults = [];
-		resultsOpen = false;
-		activeIndex = -1;
+		clearUneditedPrefill();
+		resetSearch();
+		pickAnnouncement = '';
 	}
 	// Full keyboard support for the combobox; falls through to create() on Enter
 	// when there's nothing to pick (and behaves as a plain field when registry off).
@@ -301,6 +359,7 @@
 						placeholder={m.admin_upload_artist_name_placeholder()}
 						oninput={onNameInput}
 						onkeydown={onNameKeydown}
+						onblur={() => { if (registryEnabled) { resultsOpen = false; activeIndex = -1; } }}
 						role={registryEnabled ? 'combobox' : undefined}
 						aria-autocomplete={registryEnabled ? 'list' : undefined}
 						aria-expanded={registryEnabled ? resultsOpen : undefined}
@@ -315,14 +374,16 @@
 								{@const handle = resultHandle(r)}
 								<!-- Selection is keyboard-driven from the combobox input (Down/Up/Enter),
 								     so options carry no key handlers of their own. onmousedown +
-								     preventDefault picks without stealing focus from the input. -->
+								     preventDefault picks (left button only) without stealing focus
+								     from the input; hover just moves the active option. -->
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
 								<li
 									role="option"
 									id={`new-artist-opt-${i}`}
 									class:active={i === activeIndex}
 									aria-selected={i === activeIndex}
-									onmousedown={(e) => { e.preventDefault(); applyResult(r); }}
+									onmouseenter={() => (activeIndex = i)}
+									onmousedown={(e) => { if (e.button !== 0) return; e.preventDefault(); applyResult(r); }}
 								>
 									<span class="reg-avatar">
 										<span class="reg-initials" aria-hidden="true">{initials(r.name)}</span>
@@ -342,17 +403,21 @@
 					{/if}
 				</div>
 				{#if registryEnabled}
-					{#if blockHandleCreate && hasSearched && registryResults.length === 0}
+					{#if searchError}
+						<p class="reg-hint reg-hint-warn" id="new-artist-name-hint">{m.admin_new_artist_registry_unreachable()}</p>
+					{:else if blockHandleCreate && hasSearched && registryResults.length === 0}
 						<p class="reg-hint reg-hint-warn" id="new-artist-name-hint">{m.admin_new_artist_registry_handle_no_match()}</p>
 					{:else if blockHandleCreate}
-						<p class="reg-hint" id="new-artist-name-hint">{m.admin_new_artist_registry_handle_hint({ handle: query.handle })}</p>
-					{:else}
+						<p class="reg-hint" id="new-artist-name-hint">{m.admin_new_artist_registry_handle_hint({ handle: handleHintValue })}</p>
+					{:else if !pulled}
 						<p class="reg-hint" id="new-artist-name-hint">{m.admin_new_artist_registry_search_hint()}</p>
 					{/if}
 				{/if}
 				{#if pulled}
 					<div class="linked-row">
-						<small class="linked">✓ {m.admin_new_artist_registry_linked()}</small>
+						<!-- Carries the input's aria-describedby target while linked (the
+						     "Start typing…" hint is suppressed). -->
+						<small class="linked" id="new-artist-name-hint">✓ {m.admin_new_artist_registry_linked()}</small>
 						<button type="button" class="unlink" onclick={unpick}>{m.admin_new_artist_unlink()}</button>
 					</div>
 				{/if}
@@ -381,7 +446,7 @@
 
 			<div class="modal-actions">
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>{m.admin_cancel()}</button>
-				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving || blockHandleCreate}>
+				<button type="button" class="btn btn-primary" onclick={create} disabled={!name.trim() || saving || blockHandleCreate} aria-describedby={registryEnabled ? 'new-artist-name-hint' : undefined}>
 					{#if saving}
 						<Loader2 size={16} class="spin" /> {pulled ? m.admin_registry_importing() : m.admin_new_artist_creating()}
 					{:else}
@@ -458,7 +523,12 @@
 		background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-s); box-shadow: 0 8px 24px rgba(0,0,0,0.28);
 	}
 	.reg-results li { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 1px solid transparent; border-radius: var(--radius-xs); padding: 6px 10px; cursor: pointer; color: var(--foreground); font-size: 14px; }
-	.reg-results li:hover, .reg-results li.active { border-color: var(--primary); background: var(--secondary); }
+	/* Hover and keyboard both drive activeIndex, so only .active is styled. */
+	.reg-results li.active { border-color: var(--primary); background: var(--secondary); }
+	/* Default-light --primary (#FF8400) is only ~2.5:1 on the card; add a --ring
+	   outline in light mode for a ≥3:1 non-text indicator (1.4.11). Dark themes
+	   keep the passing --primary border. */
+	:global([data-theme='light']) .reg-results li.active { outline: 2px solid var(--ring); outline-offset: -2px; }
 	.reg-avatar { position: relative; flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; overflow: hidden; background: var(--secondary); }
 	.reg-initials { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-primary); font-size: 9px; font-weight: 600; color: var(--muted-foreground); }
 	.reg-results img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }

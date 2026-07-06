@@ -108,7 +108,7 @@ describe('GET /api/registry/search — handle search', () => {
 		const res = await GET(getEventQS(platform, 'handle=%40kuttoya'));
 		expect(fetchMock).toHaveBeenCalled();
 		const calledUrl = String(fetchMock.mock.calls[0][0]);
-		expect(calledUrl).toContain('/v1/artists/search?handle=');
+		expect(calledUrl).toContain('/v1/artists/search?handle=%40kuttoya');
 		expect(await res.json()).toEqual({
 			enabled: true,
 			artists: [{ globalId: 'g1', name: 'Kuttoya', avatarUrl: null, version: 2, socials: { twitterUrl: 'https://x.com/kuttoya' } }]
@@ -123,7 +123,7 @@ describe('GET /api/registry/search — handle search', () => {
 
 		await GET(getEventQS(platform, 'handle=twitter.com%2Fkuttoya&q=somename'));
 		const calledUrl = String(fetchMock.mock.calls[0][0]);
-		expect(calledUrl).toContain('handle=');
+		expect(calledUrl).toContain('handle=twitter.com%2Fkuttoya');
 		expect(calledUrl).not.toContain('q=');
 	});
 
@@ -136,5 +136,27 @@ describe('GET /api/registry/search — handle search', () => {
 		const res = await GET(getEventQS(platform, 'handle=%40'));
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(await res.json()).toEqual({ enabled: true, artists: [] });
+	});
+
+	it('does not proxy an over-long (>200 char) handle', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		const fetchMock = vi.fn((_url: unknown) => okJson({ artists: [REG_ARTIST] }));
+		vi.stubGlobal('fetch', fetchMock);
+
+		const res = await GET(getEventQS(platform, 'handle=' + 'a'.repeat(201)));
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(await res.json()).toEqual({ enabled: true, artists: [] });
+	});
+
+	it('sanitizes a dangerous registry-supplied avatar URL to null', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		const evil = { ...REG_ARTIST, avatarUrl: 'javascript:alert(1)' };
+		vi.stubGlobal('fetch', vi.fn((_url: unknown) => okJson({ artists: [evil] })));
+
+		const res = await GET(getEventQS(platform, 'handle=%40kuttoya'));
+		const body = (await res.json()) as { artists: Array<{ avatarUrl: string | null }> };
+		expect(body.artists[0].avatarUrl).toBeNull();
 	});
 });

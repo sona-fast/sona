@@ -86,17 +86,25 @@ export function classifyQuery(input: string): QueryClassification {
 		return bare ? { kind: 'handle', handleParam: bare, handle: bare } : NAME;
 	}
 
+	// Strip the scheme / protocol-relative slashes / www., then require an EXACT
+	// prefix match (mirroring normalizeHandle) and take the platform from the
+	// matching prefix. Substring matching would misread ordinary names that merely
+	// contain a domain fragment — "cat.meow" (t.me), "wolfx.community" (x.com),
+	// "Sweet.Melody" (t.me) — as handles, and the create-block would make those
+	// names impossible to enter.
 	const lower = t.toLowerCase();
+	const s = lower.replace(/^https?:\/\//, '').replace(/^\/\//, '').replace(/^www\./, '');
 	for (const platform of Object.keys(HOST_PREFIXES) as Platform[]) {
 		for (const prefix of HOST_PREFIXES[platform]) {
-			const domain = prefix.split('/')[0];
-			if (lower.includes(domain)) {
+			if (s.startsWith(prefix)) {
 				return { kind: 'handle', handleParam: t, platform, handle: normalizeHandle(platform, t) };
 			}
 		}
 	}
 
-	if (lower.startsWith('http://') || lower.startsWith('https://')) {
+	if (/^(https?:\/\/|\/\/)/.test(lower)) {
+		// A pasted link with no recognized social domain — still must not silently
+		// become the artist's name.
 		return { kind: 'handle', handleParam: t, handle: t };
 	}
 
