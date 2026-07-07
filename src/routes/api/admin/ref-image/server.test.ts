@@ -139,7 +139,9 @@ describe('GET /api/admin/ref-image — by-ID image proxy', () => {
 			'http://[::ffff:c0a8:9]/x.png',
 			'http://[fc00::1]/x.png',
 			'http://[fd12:3456::1]/x.png',
-			'http://[fe80::1]/x.png'
+			'http://[fe80::1]/x.png',
+			// Round 4: IPv6 unspecified — connect() reaches loopback like 0.0.0.0.
+			'http://[::]/x.png'
 		];
 		for (const imageUrl of urls) {
 			const { db, platform } = makeDb();

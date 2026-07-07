@@ -16,10 +16,13 @@
 		/** Existing palette colors — pickable targets alongside the "new color" slot. */
 		slots: Slot[];
 		onpick: (slot: number | 'new', hex: string) => void;
+		/** "Add all" — append the current suggestions to the palette (the parent
+		 *  dedupes against its live palette state). */
+		onaddall: (hexes: string[]) => void;
 		onclose: () => void;
 	}
 
-	let { src, crossorigin, slots, onpick, onclose }: Props = $props();
+	let { src, crossorigin, slots, onpick, onaddall, onclose }: Props = $props();
 
 	let canvas = $state<HTMLCanvasElement>();
 	let loupeCanvas = $state<HTMLCanvasElement>();
@@ -250,7 +253,17 @@
 
 				{#if suggestions.length > 0}
 					<div class="suggestions">
-						<span class="slot-label">{m.admin_ref_picker_suggestions()}</span>
+						<div class="suggestion-head">
+							<span class="slot-label">{m.admin_ref_picker_suggestions()}</span>
+							<button
+								type="button"
+								class="add-all"
+								aria-label={m.admin_ref_picker_add_all_label()}
+								onclick={() => onaddall(suggestions)}
+							>
+								{m.admin_ref_picker_add_all()}
+							</button>
+						</div>
 						<div class="suggestion-row">
 							{#each suggestions as hex (hex)}
 								<button
@@ -337,6 +350,13 @@
 	.modal-body {
 		padding: 22px 24px 24px;
 		overflow-y: auto;
+		/* iOS Safari: an eyedropper drag or long-press must never start text
+		   selection (chip labels, hex readouts) or the copy callout. Everything
+		   in here is pick-a-color UI — nothing is selectable-by-design (no text
+		   inputs live inside this modal). */
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
 	}
 
 	.slot-row {
@@ -463,6 +483,25 @@
 
 	.suggestions {
 		margin-top: 16px;
+	}
+	.suggestion-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+	/* Pill-shaped like the suggestion chips below it. */
+	.add-all {
+		padding: 5px 11px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		background: none;
+		color: var(--foreground);
+		font-size: 12.5px;
+		cursor: pointer;
+	}
+	.add-all:hover {
+		border-color: var(--primary, var(--foreground));
 	}
 	.suggestion-row {
 		display: flex;

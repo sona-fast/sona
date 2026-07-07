@@ -35,8 +35,9 @@ function isPrivateHost(hostname: string): boolean {
 			const lo = parseInt(hexed[2], 16);
 			host = `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
 		} else {
-			// Loopback (::1), ULA (fc00::/7), link-local (fe80::/10).
-			return /^\[(::1\]$|f[cd]|fe80:)/.test(host);
+			// Loopback (::1), unspecified (:: — connect() reaches loopback, same
+			// as its IPv4 twin 0.0.0.0), ULA (fc00::/7), link-local (fe80::/10).
+			return /^\[(::1?\]$|f[cd]|fe80:)/.test(host);
 		}
 	}
 	// IPv4 loopback / unspecified / RFC1918 / link-local.

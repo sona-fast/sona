@@ -888,6 +888,8 @@
 	"admin_registry_imported_toast": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Imported {count} artist from the registry", "countPlural=other": "Imported {count} artists from the registry"}}],
 	"admin_characters_profile_hint": "Linked from the character on public pages. The site's icon (favicon) also becomes this character's avatar, replacing any avatar derived from their social links.",
 
+	"admin_ref_picker_add_all": "Add all",
+	"admin_ref_picker_add_all_label": "Add all suggested colors to the palette",
 	"admin_ref_picker_apply_to": "Apply to",
 	"admin_ref_picker_canvas_desc": "Your reference sheet. Move the pointer to magnify an area and click to pick that color. The picker is pointer-driven — with a keyboard, type hex values into the palette fields instead.",
 	"admin_ref_picker_done": "Done",

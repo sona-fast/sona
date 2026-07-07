@@ -852,6 +852,8 @@
 	"admin_registry_imported_toast": "レジストリからアーティスト{count}名をインポートしました",
 	"admin_characters_profile_hint": "公開ページのキャラクターからリンクされます。また、そのサイトのアイコン（ファビコン）がこのキャラクターのアバターとなり、ソーシャルリンクから取得したアバターを上書きします。",
 
+	"admin_ref_picker_add_all": "すべて追加",
+	"admin_ref_picker_add_all_label": "おすすめの色をすべてパレットに追加",
 	"admin_ref_picker_apply_to": "適用先",
 	"admin_ref_picker_canvas_desc": "リファレンスシートです。ポインターを動かすと周辺が拡大表示され、クリックでその色を選択できます。ポインター操作が前提のため、キーボードをお使いの場合はパレットの16進数入力欄をご利用ください。",
 	"admin_ref_picker_done": "完了",

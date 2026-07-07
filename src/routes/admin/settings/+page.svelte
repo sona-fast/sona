@@ -7,6 +7,7 @@
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
+	import { mergeSuggestions } from '$lib/palette-merge';
 	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X, Pipette } from 'lucide-svelte';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
@@ -81,6 +82,13 @@
 	function applyPickedColor(slot: number | 'new', hex: string) {
 		if (slot === 'new') newColorHex = hex;
 		else colors = colors.map((c, i) => (i === slot ? { ...c, hex } : c));
+	}
+	// "Add all" in the picker: append every suggestion not already in the
+	// palette (case-insensitive, deduped) with the same default name the
+	// Add color button gives an unnamed color.
+	function addAllSuggestions(hexes: string[]) {
+		const toAdd = mergeSuggestions(colors.map((c) => c.hex), hexes);
+		colors = [...colors, ...toAdd.map((hex) => ({ name: 'Color', hex }))];
 	}
 
 	let storageProvider = $state(data.settings.storageProvider);
@@ -889,6 +897,7 @@
 			crossorigin={data.refImageSrc.crossorigin}
 			slots={colors}
 			onpick={applyPickedColor}
+			onaddall={addAllSuggestions}
 			onclose={() => (showRefPicker = false)}
 		/>
 	{/await}
