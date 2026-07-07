@@ -120,6 +120,9 @@
 	--card-foreground: #f4f4ff;
 	--primary: #7c5cff;
 	--primary-foreground: #0e0f1a;
+	/* --primary is too light on this dark card for AA text (4.06:1). Status
+	   attention gets a lighter violet that clears 4.5:1 on --card and --background. */
+	--status-attention: #a48bff;
 	--secondary: #232544;
 	--secondary-foreground: #f4f4ff;
 	--muted: #232544;
