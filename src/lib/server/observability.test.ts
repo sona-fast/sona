@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -114,8 +114,6 @@ describe('getObservability — provider health', () => {
 
 		expect(o.providers.email.configured).toBe(true);
 		expect(o.providers.email.sent).toBe(3);
-		// Delivery/bounce/complaint data is webhook-only and never available in-app.
-		expect(o.providers.email.deliveryDataUnavailable).toBe(true);
 		expect(o.providers.email.lastFailure?.message).toBe('invalid from domain');
 	});
 
@@ -148,10 +146,99 @@ describe('getObservability — background jobs', () => {
 });
 
 describe('getCloudflareEdge — optional, graceful', () => {
+	// All three secrets present → the query runs and we control fetch.
+	const CF_ENV = {
+		CF_ANALYTICS_TOKEN: 'token',
+		CF_ZONE_ID: 'zone',
+		CF_ACCOUNT_ID: 'acct'
+	} as unknown as App.Platform['env'];
+
+	// Minimal Response-like the code path uses (resp.ok, resp.status, resp.json()).
+	function stubFetchJson(body: unknown, init: { ok?: boolean; status?: number } = {}) {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({
+				ok: init.ok ?? true,
+				status: init.status ?? 200,
+				json: async () => body
+			})
+		);
+	}
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
 	it('returns not-configured when the secrets are absent', async () => {
 		expect(await getCloudflareEdge(undefined)).toEqual({ state: 'not-configured' });
 		const partial = { CF_ANALYTICS_TOKEN: 'x' } as unknown as App.Platform['env'];
 		expect(await getCloudflareEdge(partial)).toEqual({ state: 'not-configured' });
+	});
+
+	it('connects: sums a multi-group payload and derives the cache-hit rate', async () => {
+		stubFetchJson({
+			data: {
+				viewer: {
+					zones: [
+						{
+							httpRequests1dGroups: [
+								{ sum: { requests: 100, cachedRequests: 60, bytes: 1000, threats: 2 } },
+								{ sum: { requests: 50, cachedRequests: 40, bytes: 500, threats: 1 } }
+							]
+						}
+					]
+				}
+			}
+		});
+
+		const cf = await getCloudflareEdge(CF_ENV);
+		expect(cf).toEqual({
+			state: 'connected',
+			requests: 150,
+			cachedRequests: 100,
+			cacheHitRate: 100 / 150,
+			bytes: 1500,
+			threats: 3
+		});
+	});
+
+	it('connects with a zero cache-hit rate when there were zero requests (no divide-by-zero)', async () => {
+		stubFetchJson({
+			data: {
+				viewer: {
+					zones: [{ httpRequests1dGroups: [{ sum: { requests: 0, cachedRequests: 0, bytes: 0, threats: 0 } }] }]
+				}
+			}
+		});
+
+		const cf = await getCloudflareEdge(CF_ENV);
+		expect(cf).toMatchObject({ state: 'connected', requests: 0, cacheHitRate: 0 });
+	});
+
+	it('errors when the HTTP response is not ok (e.g. a mis-scoped 403 token)', async () => {
+		stubFetchJson({}, { ok: false, status: 403 });
+		const cf = await getCloudflareEdge(CF_ENV);
+		expect(cf.state).toBe('error');
+		if (cf.state === 'error') expect(cf.message).toContain('403');
+	});
+
+	it('errors when the GraphQL body carries an errors[] array', async () => {
+		stubFetchJson({ errors: [{ message: 'Invalid token' }] });
+		const cf = await getCloudflareEdge(CF_ENV);
+		expect(cf).toEqual({ state: 'error', message: 'Invalid token' });
+	});
+
+	it('errors when no zone groups come back (bare pages.dev / no zone)', async () => {
+		stubFetchJson({ data: { viewer: { zones: [{ httpRequests1dGroups: [] }] } } });
+		const cf = await getCloudflareEdge(CF_ENV);
+		expect(cf.state).toBe('error');
+		if (cf.state === 'error') expect(cf.message).toMatch(/no traffic|custom domain|zone/i);
+	});
+
+	it('errors (never throws) when fetch itself rejects', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+		const cf = await getCloudflareEdge(CF_ENV);
+		expect(cf).toEqual({ state: 'error', message: 'network down' });
 	});
 });
 

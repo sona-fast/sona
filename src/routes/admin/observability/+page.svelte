@@ -132,10 +132,10 @@
 				<table>
 					<thead>
 						<tr>
-							<th class="col-status">{m.admin_obs_col_status()}</th>
-							<th class="col-route">{m.admin_obs_col_route()}</th>
-							<th>{m.admin_obs_col_message()}</th>
-							<th class="col-when">{m.admin_obs_col_when()}</th>
+							<th scope="col" class="col-status">{m.admin_obs_col_status()}</th>
+							<th scope="col" class="col-route">{m.admin_obs_col_route()}</th>
+							<th scope="col">{m.admin_obs_col_message()}</th>
+							<th scope="col" class="col-when">{m.admin_obs_col_when()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -233,36 +233,39 @@
 		</section>
 	</div>
 
-	<!-- Cloudflare edge: connected panel OR connect card -->
-	{#if o.cfEdge.state === 'connected'}
-		<section class="card cf-edge">
-			<div class="row-between tight">
-				<h2 class="h2 flush">{m.admin_obs_cf_title()} <span class="en">{m.admin_obs_badge_connected()}</span></h2>
-				<span class="mut">{m.admin_obs_cf_sub()}</span>
+	<!-- Cloudflare edge: streamed (see +page.server.ts). Renders nothing until the
+	     deferred query resolves, then the connected panel OR the connect card. -->
+	{#await data.cfEdge then cfEdge}
+		{#if cfEdge.state === 'connected'}
+			<section class="card cf-edge">
+				<div class="row-between tight">
+					<h2 class="h2 flush">{m.admin_obs_cf_title()} <span class="en">{m.admin_obs_badge_connected()}</span></h2>
+					<span class="mut">{m.admin_obs_cf_sub()}</span>
+				</div>
+				<div class="stats stats-4">
+					<div><div class="snum">{pct(cfEdge.cacheHitRate, 0)}</div><div class="vlbl">{m.admin_obs_cf_cache_hit()}</div></div>
+					<div><div class="snum">{fmtCompact(cfEdge.cachedRequests)}</div><div class="vlbl">{m.admin_obs_cf_cached()}</div></div>
+					<div><div class="snum">{fmtBytes(cfEdge.bytes)}</div><div class="vlbl">{m.admin_obs_cf_bandwidth()}</div></div>
+					<div><div class="snum" class:amber-num={cfEdge.threats > 0}>{fmtInt(cfEdge.threats)}</div><div class="vlbl">{m.admin_obs_cf_threats()}</div></div>
+				</div>
+				<div class="last-row">
+					<span class="mut">{m.admin_obs_cf_footer()}</span>
+					<a class="mut manage" href="/admin/settings">{m.admin_obs_cf_manage()}</a>
+				</div>
+			</section>
+		{:else}
+			<div class="cf-card">
+				<div>
+					<div class="cf-card-title">{m.admin_obs_cf_card_title()} <span class="mut">· {m.admin_obs_cf_card_optional()}</span></div>
+					<div class="mut cf-card-desc">{m.admin_obs_cf_card_desc()}</div>
+					{#if cfEdge.state === 'error'}
+						<div class="cf-error">{m.admin_obs_cf_error_prefix()} {cfEdge.message}</div>
+					{/if}
+				</div>
+				<button type="button" class="connect-btn" onclick={() => (showCfSetup = true)}>{m.admin_obs_cf_connect()}</button>
 			</div>
-			<div class="stats stats-4">
-				<div><div class="snum">{pct(o.cfEdge.cacheHitRate, 0)}</div><div class="vlbl">{m.admin_obs_cf_cache_hit()}</div></div>
-				<div><div class="snum">{fmtCompact(o.cfEdge.cachedRequests)}</div><div class="vlbl">{m.admin_obs_cf_cached()}</div></div>
-				<div><div class="snum">{fmtBytes(o.cfEdge.bytes)}</div><div class="vlbl">{m.admin_obs_cf_bandwidth()}</div></div>
-				<div><div class="snum" class:amber-num={o.cfEdge.threats > 0}>{fmtInt(o.cfEdge.threats)}</div><div class="vlbl">{m.admin_obs_cf_threats()}</div></div>
-			</div>
-			<div class="last-row">
-				<span class="mut">{m.admin_obs_cf_footer()}</span>
-				<a class="mut manage" href="/admin/settings">{m.admin_obs_cf_manage()}</a>
-			</div>
-		</section>
-	{:else}
-		<div class="cf-card">
-			<div>
-				<div class="cf-card-title">{m.admin_obs_cf_card_title()} <span class="mut">· {m.admin_obs_cf_card_optional()}</span></div>
-				<div class="mut cf-card-desc">{m.admin_obs_cf_card_desc()}</div>
-				{#if o.cfEdge.state === 'error'}
-					<div class="cf-error">{m.admin_obs_cf_error_prefix()} {o.cfEdge.message}</div>
-				{/if}
-			</div>
-			<button type="button" class="connect-btn" onclick={() => (showCfSetup = true)}>{m.admin_obs_cf_connect()}</button>
-		</div>
-	{/if}
+		{/if}
+	{/await}
 
 	<!-- Privacy footer -->
 	<div class="privacy">
@@ -295,8 +298,8 @@
 		font-size: 9px;
 		letter-spacing: 0.05em;
 		text-transform: uppercase;
-		color: var(--primary);
-		border: 1px solid var(--primary);
+		color: var(--status-attention);
+		border: 1px solid var(--status-attention);
 		border-radius: var(--radius-pill);
 		padding: 1px 6px;
 		vertical-align: middle;
@@ -363,12 +366,12 @@
 		margin-top: 4px;
 	}
 	.verdict-ok .ring {
-		background: #4ade80;
-		box-shadow: 0 0 0 4px color-mix(in srgb, #4ade80 14%, transparent);
+		background: var(--status-ok);
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--status-ok) 14%, transparent);
 	}
 	.verdict-warn .ring {
-		background: #f5a623;
-		box-shadow: 0 0 0 4px color-mix(in srgb, #f5a623 14%, transparent);
+		background: var(--status-warn);
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--status-warn) 14%, transparent);
 	}
 	.verdict-down .ring {
 		background: var(--destructive);
@@ -382,10 +385,10 @@
 		font-weight: 600;
 	}
 	.verdict-ok .eyebrow {
-		color: #4ade80;
+		color: var(--status-ok);
 	}
 	.verdict-warn .eyebrow {
-		color: #f5a623;
+		color: var(--status-warn);
 	}
 	.verdict-down .eyebrow {
 		color: var(--destructive);
@@ -434,7 +437,7 @@
 	}
 	.failed {
 		font-size: 13px;
-		color: var(--primary);
+		color: var(--status-attention);
 		font-weight: 500;
 	}
 	.vlbl {
@@ -519,8 +522,8 @@
 		color: var(--destructive);
 	}
 	.sbadge.amber {
-		background: color-mix(in srgb, #f5a623 20%, transparent);
-		color: #f5a623;
+		background: color-mix(in srgb, var(--status-warn) 20%, transparent);
+		color: var(--status-warn);
 	}
 	.sbadge.muted {
 		background: var(--secondary);
@@ -560,7 +563,7 @@
 		margin-top: 6px;
 	}
 	.dot.green {
-		background: #4ade80;
+		background: var(--status-ok);
 	}
 	.dot.red {
 		background: var(--destructive);
@@ -580,9 +583,9 @@
 		font-size: 9px;
 		letter-spacing: 0.05em;
 		text-transform: uppercase;
-		color: #35c46b;
-		border: 1px solid color-mix(in srgb, #35c46b 45%, transparent);
-		background: color-mix(in srgb, #35c46b 14%, transparent);
+		color: var(--status-ok);
+		border: 1px solid color-mix(in srgb, var(--status-ok) 45%, transparent);
+		background: color-mix(in srgb, var(--status-ok) 14%, transparent);
 		border-radius: var(--radius-pill);
 		padding: 1px 7px;
 		margin-left: 8px;
@@ -623,7 +626,7 @@
 		color: var(--destructive);
 	}
 	.amber-num {
-		color: #f5a623;
+		color: var(--status-warn);
 	}
 
 	.last-row {
@@ -673,7 +676,7 @@
 	.cf-error {
 		margin-top: 8px;
 		font-size: 12px;
-		color: #f5a623;
+		color: var(--status-warn);
 	}
 	.connect-btn {
 		flex: none;
@@ -728,6 +731,16 @@
 		.cf-card {
 			flex-direction: column;
 			align-items: flex-start;
+		}
+	}
+
+	/* On narrow phones the recent-errors table has no room for the relative-age
+	   column; drop it so the status/route/message stay readable (the age is
+	   secondary and still available on wider screens). */
+	@media (max-width: 480px) {
+		.col-when,
+		.when {
+			display: none;
 		}
 	}
 </style>

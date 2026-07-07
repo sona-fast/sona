@@ -38,7 +38,9 @@ export const WINDOW_DAYS = 7;
 /** Recent-errors table depth. */
 const RECENT_ERRORS_LIMIT = 8;
 const CF_GRAPHQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql';
-const CF_TIMEOUT_MS = 5000;
+// Kept short: the CF query is streamed (see the page load), so this only bounds how
+// long the deferred panel waits before degrading to an error state — never TTFB.
+const CF_TIMEOUT_MS = 3000;
 
 export type VerdictLevel = 'ok' | 'warn' | 'down';
 
@@ -88,10 +90,9 @@ export interface EmailHealth {
 	sent: number;
 	failed: number;
 	lastFailure: { message: string; status: number; ts: string } | null;
-	/** True: delivered/bounced/complaints are webhook-only and NOT available yet.
-	 * There is no Resend stats API, so the dashboard shows in-app sent/failed only
-	 * and marks the rest unavailable until a Resend webhook is wired up (GAP). */
-	deliveryDataUnavailable: true;
+	// Delivered/bounced/complaints are webhook-only and NOT available yet: there is
+	// no Resend stats API, so the dashboard shows in-app sent/failed only and marks
+	// the rest unavailable in the panel (GAP, until a Resend webhook is wired up).
 }
 
 export type CfEdge =
@@ -119,7 +120,6 @@ export interface ObservabilityData {
 	jobs: JobStatus[];
 	verdict: Verdict;
 	providers: { storage: StorageHealth; email: EmailHealth };
-	cfEdge: CfEdge;
 }
 
 /** The background jobs we know about, in display order. There is deliberately no
@@ -154,16 +154,31 @@ export async function getObservability(
 	const days = windowDays(WINDOW_DAYS);
 	const since = days[0];
 
-	// One grouped read for every counter in the window; reduce in JS.
-	const rows = await db
-		.select({
-			metric: metricRollup.metric,
-			dim: metricRollup.dim,
-			total: sql<number>`SUM(${metricRollup.count})`
-		})
-		.from(metricRollup)
-		.where(gte(metricRollup.day, since))
-		.groupBy(metricRollup.metric, metricRollup.dim);
+	// The four in-app reads are independent, so fire them together to shave TTFB:
+	// grouped counters, per-day request totals (sparkline), the recent-error ring,
+	// and job heartbeats. Each reduces in JS below.
+	const [rows, perDay, recentErrors, jobRows] = await Promise.all([
+		db
+			.select({
+				metric: metricRollup.metric,
+				dim: metricRollup.dim,
+				total: sql<number>`SUM(${metricRollup.count})`
+			})
+			.from(metricRollup)
+			.where(gte(metricRollup.day, since))
+			.groupBy(metricRollup.metric, metricRollup.dim),
+		db
+			.select({ day: metricRollup.day, total: sql<number>`SUM(${metricRollup.count})` })
+			.from(metricRollup)
+			.where(and(eq(metricRollup.metric, 'request'), gte(metricRollup.day, since)))
+			.groupBy(metricRollup.day),
+		db
+			.select()
+			.from(errorSample)
+			.orderBy(desc(errorSample.id))
+			.limit(RECENT_ERRORS_LIMIT) as Promise<ErrorSampleRow[]>,
+		db.select().from(jobRun)
+	]);
 
 	let appRequests = 0;
 	let errors5xx = 0;
@@ -185,21 +200,9 @@ export async function getObservability(
 
 	// Per-day request totals for the sparkline, mapped onto every day in the window
 	// so gaps render as zero rather than collapsing the x-axis.
-	const perDay = await db
-		.select({ day: metricRollup.day, total: sql<number>`SUM(${metricRollup.count})` })
-		.from(metricRollup)
-		.where(and(eq(metricRollup.metric, 'request'), gte(metricRollup.day, since)))
-		.groupBy(metricRollup.day);
 	const perDayMap = new Map(perDay.map((d) => [d.day, Number(d.total) || 0]));
 	const sparkline = days.map((d) => perDayMap.get(d) ?? 0);
 
-	const recentErrors = (await db
-		.select()
-		.from(errorSample)
-		.orderBy(desc(errorSample.id))
-		.limit(RECENT_ERRORS_LIMIT)) as ErrorSampleRow[];
-
-	const jobRows = await db.select().from(jobRun);
 	const jobMap = new Map(jobRows.map((j) => [j.name, j]));
 	const jobs: JobStatus[] = KNOWN_JOBS.map(({ name, label }) => {
 		const row = jobMap.get(name);
@@ -233,13 +236,14 @@ export async function getObservability(
 		failed: emails.failed,
 		lastFailure: lastEmailFailure
 			? { message: lastEmailFailure.message, status: lastEmailFailure.status, ts: lastEmailFailure.ts }
-			: null,
-		deliveryDataUnavailable: true
+			: null
 	};
 
-	const cfEdge = await getCloudflareEdge(env);
 	const verdict = deriveVerdict({ errorRate, jobs, storage });
 
+	// The optional Cloudflare edge query is NOT awaited here — it is streamed
+	// separately from the page load (see +page.server.ts) so it never blocks the
+	// in-app metrics or TTFB.
 	return {
 		windowDays: WINDOW_DAYS,
 		appRequests,
@@ -251,8 +255,7 @@ export async function getObservability(
 		recentErrors,
 		jobs,
 		verdict,
-		providers: { storage, email },
-		cfEdge
+		providers: { storage, email }
 	};
 }
 
@@ -355,8 +358,14 @@ export async function getCloudflareEdge(env: App.Platform['env'] | undefined): P
 		}
 		const groups = body.data?.viewer?.zones?.[0]?.httpRequests1dGroups ?? [];
 		if (groups.length === 0) {
-			// A bare pages.dev (or a token without the zone) returns no zone data.
-			return { state: 'error', message: 'No zone analytics. A custom domain is required.' };
+			// Empty result: either a bare pages.dev / token without the zone (no zone at
+			// all), OR a valid but idle zone with no traffic in the window. We can't tell
+			// them apart from this response, so the copy covers both rather than wrongly
+			// insisting a custom domain is required.
+			return {
+				state: 'error',
+				message: 'No zone analytics for this window yet — a custom domain must be connected, or the zone has had no traffic.'
+			};
 		}
 		let requests = 0;
 		let cachedRequests = 0;

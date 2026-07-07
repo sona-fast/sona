@@ -126,13 +126,30 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// response. Writes to THIS fork's own DB — tenant-isolated by construction.
 	// Note: this counts app/SSR requests that reach the Function; edge-cached hits
 	// and static assets are invisible here (the "app requests" label reflects that,
-	// and the optional Cloudflare edge panel fills the gap). 5xx error samples are
-	// captured in handleError below, where the real error message is available.
+	// and the optional Cloudflare edge panel fills the gap).
+	//
+	// EVERY 5xx is also counted toward the error rate here — including DELIBERATE
+	// error(5xx) responses (e.g. sticker downloads) that never reach handleError.
+	// Counting 5xx only in handleError undercounted the rate, so the dashboard could
+	// read "All clear" while a whole error class was broken. The rollup is recorded
+	// exactly once per 5xx (here), keeping the error numerator and request
+	// denominator consistent. handleError (which runs during resolve, before this
+	// code) records the richer message for genuine exceptions and sets
+	// locals.errorSampled; we skip the generic fallback sample for those so a thrown
+	// error yields one detailed row, not a duplicate — but its rollup still lands
+	// here, so it is never double-counted in the rate.
 	if (event.platform?.env.DB && !isAssetPath(path)) {
-		schedule(
-			event.platform,
-			recordMetric(getDb(event.platform.env.DB), 'request', routeClass(path))
-		);
+		const db = getDb(event.platform.env.DB);
+		const work: Promise<unknown>[] = [recordMetric(db, 'request', routeClass(path))];
+		if (response.status >= 500) {
+			work.push(recordMetric(db, 'error', String(response.status)));
+			if (!event.locals.errorSampled) {
+				work.push(
+					recordError(db, { route: path, status: response.status, message: `HTTP ${response.status}` })
+				);
+			}
+		}
+		schedule(event.platform, Promise.all(work));
 	}
 
 	// Security headers
@@ -166,25 +183,24 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 
 export const handle: Handle = sequence(paraglideHandle, authHandle);
 
-// Observability (issue #6): sample unexpected 5xx errors for the dashboard's
-// "Recent errors" table. handleError fires only for genuine exceptions (not
-// deliberate `error(4xx/5xx, …)` HttpErrors), so this is exactly the broken-500
-// set worth surfacing — and it's the one place the real error message
-// ("D1_ERROR: …") is available. Records the error counter (dim = status) plus one
-// capped-ring sample with route + status + a trimmed, PII-free message; the
-// request counter itself is incremented in authHandle above. Fire-and-forget so
-// error handling never depends on the metrics write; returns undefined to keep
-// SvelteKit's default error response unchanged.
+// Observability (issue #6): add the RICH error sample for genuine exceptions.
+// handleError fires only for real thrown errors (not deliberate `error(4xx/5xx, …)`
+// HttpErrors), and it's the one place the real message ("D1_ERROR: …") is
+// available. It records ONLY the detailed capped-ring sample — the error-RATE
+// rollup and the request counter are both incremented once per 5xx in authHandle
+// above (which also samples the deliberate error(5xx) responses that never reach
+// here). Setting locals.errorSampled tells that code to skip its generic fallback
+// sample for this same 5xx, so a thrown error yields one detailed row, not a
+// duplicate. Fire-and-forget so error handling never depends on the metrics write;
+// returns undefined to keep SvelteKit's default error response unchanged.
 export const handleError: HandleServerError = ({ error, event, status, message }) => {
 	if (event.platform?.env.DB && status >= 500) {
+		event.locals.errorSampled = true;
 		const db = getDb(event.platform.env.DB);
 		const detail = error instanceof Error ? error.message : message;
 		schedule(
 			event.platform,
-			(async () => {
-				await recordMetric(db, 'error', String(status));
-				await recordError(db, { route: event.url.pathname, status, message: detail });
-			})()
+			recordError(db, { route: event.url.pathname, status, message: detail })
 		);
 	}
 };

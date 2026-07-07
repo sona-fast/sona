@@ -17,7 +17,7 @@ npx wrangler pages secret put CF_ZONE_ID       --project-name <your-project>`;
 </script>
 
 <SetupDialog title={m.admin_cf_setup_title()} sub={m.admin_cf_setup_sub()} {onclose}>
-	{#snippet icon()}<Cloud size={15} />{/snippet}
+	{#snippet icon()}<Cloud size={15} aria-hidden="true" />{/snippet}
 
 	<p class="lede">{m.admin_cf_setup_lede()}</p>
 
@@ -27,7 +27,7 @@ npx wrangler pages secret put CF_ZONE_ID       --project-name <your-project>`;
 			<div class="step-body">
 				<div class="step-title">{m.admin_cf_setup_s1_title()}</div>
 				<div class="step-text">{m.admin_cf_setup_s1_text()}</div>
-				<div class="scope"><Check size={12} /> {m.admin_cf_setup_s1_scope()}</div>
+				<div class="scope"><Check size={12} aria-hidden="true" /> {m.admin_cf_setup_s1_scope()}</div>
 				<div class="step-text zone">{m.admin_cf_setup_s1_zone()}</div>
 			</div>
 		</li>
@@ -49,7 +49,7 @@ npx wrangler pages secret put CF_ZONE_ID       --project-name <your-project>`;
 	</ol>
 
 	<div class="callout">
-		<AlertTriangle size={18} />
+		<AlertTriangle size={18} aria-hidden="true" />
 		<span><strong>{m.admin_cf_setup_callout_strong()}</strong>{m.admin_cf_setup_callout()}</span>
 	</div>
 
@@ -112,9 +112,9 @@ npx wrangler pages secret put CF_ZONE_ID       --project-name <your-project>`;
 		margin-top: 8px;
 		font-family: var(--font-primary);
 		font-size: 11.5px;
-		background: color-mix(in srgb, #4ade80 12%, transparent);
-		color: #35c46b;
-		border: 1px solid color-mix(in srgb, #35c46b 45%, transparent);
+		background: color-mix(in srgb, var(--status-ok) 12%, transparent);
+		color: var(--status-ok);
+		border: 1px solid color-mix(in srgb, var(--status-ok) 45%, transparent);
 		border-radius: var(--radius-pill);
 		padding: 3px 10px;
 	}
@@ -123,8 +123,8 @@ npx wrangler pages secret put CF_ZONE_ID       --project-name <your-project>`;
 		gap: 10px;
 		padding: 12px 14px;
 		border-radius: var(--radius-s);
-		background: color-mix(in srgb, #f5a623 12%, transparent);
-		color: #f5a623;
+		background: color-mix(in srgb, var(--status-warn) 12%, transparent);
+		color: var(--status-warn);
 		font-size: 12.5px;
 		line-height: 1.55;
 		margin: 20px 0 0;
@@ -134,7 +134,7 @@ npx wrangler pages secret put CF_ZONE_ID       --project-name <your-project>`;
 		margin-top: 1px;
 	}
 	.callout strong {
-		color: #f7b74d;
+		color: var(--status-warn);
 	}
 	.unlocks {
 		margin-top: 18px;

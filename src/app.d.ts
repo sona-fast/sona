@@ -5,6 +5,12 @@ declare global {
 		// interface Error {}
 		interface Locals {
 			admin?: boolean;
+			/**
+			 * Set by handleError when it records a detailed 5xx error sample, so the
+			 * request `handle` skips its generic fallback sample for the same 5xx and
+			 * avoids a duplicate row in the error ring (see hooks.server.ts).
+			 */
+			errorSampled?: boolean;
 		}
 		// interface PageData {}
 		// interface PageState {}

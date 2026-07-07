@@ -7,8 +7,9 @@ import { getDb } from './db';
 import {
 	recordMetric,
 	recordError,
+	recordUpload,
+	recordEmail,
 	recordJobRun,
-	recordRequestOutcome,
 	dayKey,
 	routeClass,
 	isAssetPath,
@@ -141,22 +142,56 @@ describe('recordError — capped ring', () => {
 		const rows = sqlite.prepare('SELECT message FROM error_sample ORDER BY id DESC').all();
 		expect(rows[0].message.length).toBeLessThanOrEqual(300);
 	});
-});
 
-describe('recordRequestOutcome', () => {
-	it('counts the request; on a 5xx also counts an error and drops one sample', async () => {
+	it('redacts email addresses and long token-like runs (no PII/secrets stored)', async () => {
 		const sqlite = makeSqlite();
 		const db = getDb(makeD1(sqlite));
 
-		await recordRequestOutcome(db, { routeClass: 'public', status: 200, route: '/gallery' });
-		await recordRequestOutcome(db, { routeClass: 'admin', status: 500, route: '/admin/images', message: 'boom' });
+		await recordError(db, {
+			route: 'email',
+			status: 500,
+			message: 'send to user@example.com failed with key sk_live_0123456789abcdefABCDEF'
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).not.toContain('user@example.com');
+		expect(row.message).not.toContain('sk_live_0123456789abcdefABCDEF');
+		expect(row.message).toContain('[redacted]');
+		// Ordinary words are left intact.
+		expect(row.message).toContain('failed');
+	});
+});
 
-		const req = sqlite.prepare("SELECT SUM(count) c FROM metric_rollup WHERE metric='request'").get();
-		expect(req.c).toBe(2);
-		const err = sqlite.prepare("SELECT SUM(count) c FROM metric_rollup WHERE metric='error'").get();
-		expect(err.c).toBe(1);
-		const samples = sqlite.prepare('SELECT route, status FROM error_sample').all();
-		expect(samples).toEqual([{ route: '/admin/images', status: 500 }]);
+describe('recordUpload / recordEmail — outcome + failure sample', () => {
+	it('recordUpload: success bumps only the ok rollup; failure bumps fail + one sample', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordUpload(db, true);
+		await recordUpload(db, false, { status: 413, message: 'file too large' });
+
+		const rollups = sqlite.prepare("SELECT dim, count FROM metric_rollup WHERE metric='upload' ORDER BY dim").all();
+		expect(rollups).toEqual([
+			{ dim: 'fail', count: 1 },
+			{ dim: 'ok', count: 1 }
+		]);
+		const samples = sqlite.prepare('SELECT route, status, message FROM error_sample').all();
+		expect(samples).toEqual([{ route: 'upload', status: 413, message: 'file too large' }]);
+	});
+
+	it('recordEmail: sent bumps only the sent rollup; failure bumps failed + one sample', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordEmail(db, true);
+		await recordEmail(db, false, { status: 422, message: 'invalid from domain' });
+
+		const rollups = sqlite.prepare("SELECT dim, count FROM metric_rollup WHERE metric='email' ORDER BY dim").all();
+		expect(rollups).toEqual([
+			{ dim: 'failed', count: 1 },
+			{ dim: 'sent', count: 1 }
+		]);
+		const samples = sqlite.prepare('SELECT route, status, message FROM error_sample').all();
+		expect(samples).toEqual([{ route: 'email', status: 422, message: 'invalid from domain' }]);
 	});
 });
 

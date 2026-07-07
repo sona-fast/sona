@@ -1,6 +1,6 @@
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
-import { getObservability } from '$lib/server/observability';
+import { getObservability, getCloudflareEdge } from '$lib/server/observability';
 import type { PageServerLoad } from './$types';
 
 // Admin-guarded by hooks.server.ts (every /admin/* path except login/setup/forgot/
@@ -11,5 +11,9 @@ export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
 	const settings = await getSettings(db);
 	const observability = await getObservability(db, settings, platform?.env);
-	return { observability };
+	// Stream the OPTIONAL Cloudflare edge query: return the promise UNRESOLVED so the
+	// shell and every in-app metric paint immediately (SvelteKit serialises the
+	// pending promise). The CF panel fills in via {#await} when it resolves.
+	// getCloudflareEdge never throws — it degrades to a not-configured/error state.
+	return { observability, cfEdge: getCloudflareEdge(platform?.env) };
 };

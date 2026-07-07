@@ -1023,7 +1023,7 @@
 	"admin_obs_cf_card_desc": "Edge-cached traffic the app never counts. Needs a scoped, read-only Cloudflare token. It's optional, and it never reads another fork's data.",
 	"admin_obs_cf_connect": "Connect Cloudflare",
 	"admin_obs_cf_error_prefix": "Could not load edge analytics:",
-	"admin_obs_privacy_footer": "Visitor aggregates and operational health live in this fork's own database and never leave it. Only coarse, opt-in fleet numbers are ever shared.",
+	"admin_obs_privacy_footer": "Visitor aggregates and operational health live in this fork's own database and never leave it. Nothing here is shared with any other site.",
 	"admin_settings_tab_observability": "Observability",
 	"admin_settings_obs_heading": "Cloudflare edge analytics",
 	"admin_settings_obs_lede_unset": "Optional. Adds the cached traffic, bandwidth and blocked threats the in-app metrics can't see. Read-only, your account only.",

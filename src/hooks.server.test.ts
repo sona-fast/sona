@@ -13,7 +13,7 @@ vi.mock('$lib/server/admin-auth', async (orig) => ({
 }));
 
 import { isSetupComplete } from '$lib/server/admin-auth';
-import { authHandle } from './hooks.server';
+import { authHandle, handleError } from './hooks.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,5 +115,104 @@ describe('authHandle — /api/admin/ref-image stays behind the admin gate', () =
 		} as never)) as Response;
 
 		expect(res.status).toBe(401);
+	});
+});
+
+// Observability 5xx accounting (issue #6). A metrics-capable DB plus a waitUntil
+// that captures the fire-and-forget writes so a test can await them.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeMetricsDb(): { db: D1Database; sqlite: any } {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const sqlite = new Database(':memory:') as any;
+	sqlite.exec(`
+		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE TABLE metric_rollup (day TEXT NOT NULL, metric TEXT NOT NULL, dim TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, metric, dim));
+		CREATE TABLE error_sample (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, route TEXT NOT NULL, status INTEGER NOT NULL, message TEXT NOT NULL);
+		CREATE TABLE job_run (name TEXT PRIMARY KEY, status TEXT NOT NULL, ran_at TEXT NOT NULL, detail TEXT);
+	`);
+	return { db: makeD1(sqlite), sqlite };
+}
+
+function metricsEvent(pathname: string, db: D1Database, waits: Promise<unknown>[], locals: App.Locals = {}) {
+	return {
+		cookies: { get: () => undefined },
+		url: new URL(`https://taro.surf${pathname}`),
+		locals,
+		platform: { env: { DB: db }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
+	} as never;
+}
+
+describe('handleError — rich 5xx sample (issue #6)', () => {
+	it('records ONE detailed error sample (no rollup) and flags the event for a 5xx', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const locals = {} as App.Locals;
+		const event = {
+			url: new URL('https://taro.surf/admin/images'),
+			locals,
+			platform: { env: { DB: db }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
+		} as never;
+
+		handleError({ error: new Error('D1_ERROR: boom'), event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		// The detailed row carries the real message; the RATE rollup is authHandle's job.
+		const samples = sqlite.prepare('SELECT route, status, message FROM error_sample').all();
+		expect(samples).toEqual([{ route: '/admin/images', status: 500, message: 'D1_ERROR: boom' }]);
+		expect(sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE metric='error'").get().c).toBe(0);
+		// The flag tells authHandle to skip its generic fallback sample for this 5xx.
+		expect(locals.errorSampled).toBe(true);
+	});
+
+	it('does nothing for a sub-500 status', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const locals = {} as App.Locals;
+		const event = {
+			url: new URL('https://taro.surf/gallery'),
+			locals,
+			platform: { env: { DB: db }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
+		} as never;
+
+		handleError({ error: new Error('not found'), event, status: 404, message: 'Not Found' } as never);
+		await Promise.all(waits);
+
+		expect(sqlite.prepare('SELECT COUNT(*) c FROM error_sample').get().c).toBe(0);
+		expect(locals.errorSampled).toBeUndefined();
+	});
+});
+
+describe('authHandle — 5xx counts toward the error rate (issue #6)', () => {
+	beforeEach(() => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+	});
+
+	const resolve500 = async () =>
+		new Response('err', { status: 500, headers: { 'content-type': 'text/html' } });
+
+	it('counts a request + error rollup and drops a generic sample for a deliberate 5xx', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		// errorSampled unset: this 5xx never reached handleError (a deliberate error(500)).
+		await authHandle({ event: metricsEvent('/gallery', db, waits), resolve: resolve500 } as never);
+		await Promise.all(waits);
+
+		expect(sqlite.prepare("SELECT SUM(count) c FROM metric_rollup WHERE metric='request'").get().c).toBe(1);
+		expect(sqlite.prepare("SELECT SUM(count) c FROM metric_rollup WHERE metric='error'").get().c).toBe(1);
+		const samples = sqlite.prepare('SELECT route, status, message FROM error_sample').all();
+		expect(samples).toEqual([{ route: '/gallery', status: 500, message: 'HTTP 500' }]);
+	});
+
+	it('skips the generic sample when handleError already sampled this 5xx (no duplicate row)', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		// errorSampled preset: a thrown exception already logged the detailed row.
+		await authHandle({ event: metricsEvent('/gallery', db, waits, { errorSampled: true }), resolve: resolve500 } as never);
+		await Promise.all(waits);
+
+		// Rollup still lands exactly once (rate stays correct)...
+		expect(sqlite.prepare("SELECT SUM(count) c FROM metric_rollup WHERE metric='error'").get().c).toBe(1);
+		// ...but no generic fallback sample is added on top of the detailed one.
+		expect(sqlite.prepare('SELECT COUNT(*) c FROM error_sample').get().c).toBe(0);
 	});
 });

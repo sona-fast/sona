@@ -43,9 +43,20 @@ export function isAssetPath(pathname: string): boolean {
 	return pathname.startsWith('/_app/') || pathname === '/favicon.ico' || pathname === '/favicon.png';
 }
 
-/** One PII-free line: collapse whitespace and clamp length. */
+/**
+ * One PII-free line: collapse whitespace, redact anything that could carry PII or a
+ * secret, then clamp length. Masks email-like addresses and long token-like runs
+ * (API keys, bearer tokens) so error_sample.message and job_run.detail can't leak
+ * them — keeping the dashboard's "no PII" claim true even when a raw error embeds
+ * them.
+ */
 function cleanMessage(message: string): string {
-	return (message ?? '').replace(/\s+/g, ' ').trim().slice(0, ERROR_MESSAGE_MAX);
+	return (message ?? '')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.replace(/\S+@\S+/g, '[redacted]')
+		.replace(/[A-Za-z0-9_\-+=]{20,}/g, '[redacted]')
+		.slice(0, ERROR_MESSAGE_MAX);
 }
 
 /**
@@ -88,27 +99,6 @@ export async function recordError(
 	await db.delete(errorSample).where(
 		sql`${errorSample.id} <= (SELECT MAX(${errorSample.id}) - ${ERROR_SAMPLE_CAP} FROM ${errorSample})`
 	);
-}
-
-/**
- * Record a request outcome: always bump the request counter for its route class;
- * on a 5xx, also bump the error counter (dim = status) and drop one error sample.
- * `route` is the real path (Tier-B, admin-only, not PII); the request `dim` stays
- * the coarse class so metric_rollup cardinality is bounded.
- */
-export async function recordRequestOutcome(
-	db: Database,
-	outcome: { routeClass: RouteClass; status: number; route: string; message?: string }
-): Promise<void> {
-	await recordMetric(db, 'request', outcome.routeClass);
-	if (outcome.status >= 500) {
-		await recordMetric(db, 'error', String(outcome.status));
-		await recordError(db, {
-			route: outcome.route,
-			status: outcome.status,
-			message: outcome.message ?? `HTTP ${outcome.status}`
-		});
-	}
 }
 
 /** Record an upload attempt outcome. A failure also drops an error sample. */
