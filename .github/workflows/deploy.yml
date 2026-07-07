@@ -180,6 +180,39 @@ jobs:
             echo "RESEND_FROM synced to Pages project ${CF_PAGES_PROJECT}"
           fi
 
+      # Bootstrap + cron secrets. setup.ts sets SETUP_TOKEN (first-run wizard
+      # gate) and CRON_SECRET (cron endpoint auth) as Pages secrets, but Pages
+      # secrets bind at DEPLOY TIME and a fork's FIRST CI deploy does NOT bind a
+      # secret that was only `put` in a prior session (setup.ts). Without this
+      # re-sync a fresh CI-first onboarding shows "/admin/setup: SETUP_TOKEN is
+      # not configured" until a second deploy, and the cron jobs 401. Re-putting
+      # them here — right before the deploy, from the repo secrets setup.ts also
+      # stores — guarantees THIS deployment binds them. `secret put` is an
+      # idempotent upsert; unset (older forks / no CI wiring) = logged skip.
+      - name: Sync SETUP_TOKEN + CRON_SECRET to Pages project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SETUP_TOKEN" ]; then
+            printf '%s' "$SETUP_TOKEN" | \
+              npx wrangler pages secret put SETUP_TOKEN --project-name "$CF_PAGES_PROJECT"
+            echo "SETUP_TOKEN synced to Pages project ${CF_PAGES_PROJECT} (binds on the deploy below)"
+          else
+            echo "SETUP_TOKEN repo secret not set — skipping (older fork, or wizard already completed)"
+          fi
+          if [ -n "$CRON_SECRET" ]; then
+            printf '%s' "$CRON_SECRET" | \
+              npx wrangler pages secret put CRON_SECRET --project-name "$CF_PAGES_PROJECT"
+            echo "CRON_SECRET synced to Pages project ${CF_PAGES_PROJECT} (binds on the deploy below)"
+          else
+            echo "CRON_SECRET repo secret not set — skipping"
+          fi
+
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

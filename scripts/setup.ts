@@ -481,6 +481,13 @@ async function main() {
 				ghSet('secret', 'CLOUDFLARE_API_TOKEN', env.CLOUDFLARE_API_TOKEN!, repoSlug),
 				ghSet('secret', 'CLOUDFLARE_ACCOUNT_ID', env.CLOUDFLARE_ACCOUNT_ID!, repoSlug),
 				ghSet('secret', 'CRON_SECRET', cronSecret, repoSlug),
+				// SETUP_TOKEN as a repo secret so deploy.yml can re-sync it onto the
+				// Pages project right before deploying. Pages secrets bind at DEPLOY
+				// TIME, and a secret merely `put` by this CLI (before any deploy) is
+				// NOT bound by the fork's first CI deploy — so without this the
+				// /admin/setup wizard reports "SETUP_TOKEN is not configured" on a
+				// fresh CI-first onboarding until a second deploy happens.
+				ghSet('secret', 'SETUP_TOKEN', setupToken, repoSlug),
 				ghSet('variable', 'CF_PAGES_PROJECT', project, repoSlug),
 				ghSet('variable', 'D1_DATABASE_NAME', dbName, repoSlug),
 				ghSet('variable', 'SITE_URL', siteUrl, repoSlug)
@@ -490,7 +497,7 @@ async function main() {
 			ciSecretsSet = ok;
 			if (ok)
 				console.log(
-					`\n✔ CI secrets/variables set (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CRON_SECRET, CF_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL${furtrackMode !== 'off' ? ', FURTRACK_MODE' : ''}).`
+					`\n✔ CI secrets/variables set (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CRON_SECRET, SETUP_TOKEN, CF_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL${furtrackMode !== 'off' ? ', FURTRACK_MODE' : ''}).`
 				);
 			else
 				console.warn(
