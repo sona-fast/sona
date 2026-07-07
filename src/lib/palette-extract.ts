@@ -4,7 +4,7 @@
 // Approach: quantized histogram (4 bits/channel), skip transparent pixels,
 // exclude the background by clustering the border ring's dominant colors (real
 // fleet sheets ship flat gray-blue / lavender / teal backdrops, not just
-// white), then greedily pick the top-N buckets with a minimum color-distance
+// white), then greedily pick the top-N buckets with a hue-aware min-distance
 // constraint so small accents (eye colors, paw pads) survive next to large fur
 // regions. Each pick reports the ACTUAL most-common pixel of its bucket — a
 // bucket average would invent colors that aren't on the sheet.
@@ -18,6 +18,13 @@ export interface ExtractOptions {
 // values guarantee — accent survival, colored-backdrop exclusion, dedupe).
 /** Minimum RGB distance between returned colors (protects small accents). */
 const MIN_DISTANCE = 40;
+/** Same-hue-family colors need this RGB distance instead — stops one big
+ * fur/photo region from filling every slot with near-neighbor shades. */
+const SAME_HUE_DISTANCE = 100;
+/** Hue difference (degrees) below which two chromatic colors share a family. */
+const HUE_FAMILY_DEGREES = 30;
+/** Chroma (max−min channel) under which hue is meaningless (near-neutral). */
+const NEUTRAL_CHROMA = 30;
 /** Border-ring thickness as a fraction of the shorter side (≥ 1px). */
 const RING_FRACTION = 0.04;
 /** Share (0–1) of the opaque ring a color needs to count as background. */
@@ -33,6 +40,31 @@ function rgbDistance(a: number, b: number): number {
 	const dg = ((a >> 8) & 0xff) - ((b >> 8) & 0xff);
 	const db = (a & 0xff) - (b & 0xff);
 	return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+
+/** Hue in degrees (0–360) and chroma (0–255) of a packed RGB value. */
+function hueChroma(rgb: number): { hue: number; chroma: number } {
+	const r = (rgb >> 16) & 0xff;
+	const g = (rgb >> 8) & 0xff;
+	const b = rgb & 0xff;
+	const max = Math.max(r, g, b);
+	const chroma = max - Math.min(r, g, b);
+	if (chroma === 0) return { hue: 0, chroma: 0 };
+	const h = max === r ? (g - b) / chroma : max === g ? (b - r) / chroma + 2 : (r - g) / chroma + 4;
+	return { hue: (h * 60 + 360) % 360, chroma };
+}
+
+/** Near colors always fold; same-hue-family colors need a much larger RGB
+ * gap; near-neutrals fall back to plain distance. */
+function tooClose(a: number, b: number): boolean {
+	const d = rgbDistance(a, b);
+	if (d < MIN_DISTANCE) return true;
+	if (d >= SAME_HUE_DISTANCE) return false;
+	const ha = hueChroma(a);
+	const hb = hueChroma(b);
+	if (ha.chroma < NEUTRAL_CHROMA || hb.chroma < NEUTRAL_CHROMA) return false;
+	const dh = Math.abs(ha.hue - hb.hue);
+	return Math.min(dh, 360 - dh) < HUE_FAMILY_DEGREES;
 }
 
 function toHex(rgb: number): string {
@@ -97,7 +129,7 @@ export function extractPalette(image: PixelSource, options: ExtractOptions = {})
 	for (const c of candidates) {
 		if (picked.length >= count) break;
 		if (background.some((bg) => rgbDistance(bg, c.rgb) <= BACKGROUND_DISTANCE)) continue;
-		if (picked.some((p) => rgbDistance(p, c.rgb) < MIN_DISTANCE)) continue;
+		if (picked.some((p) => tooClose(p, c.rgb))) continue;
 		picked.push(c.rgb);
 	}
 	return picked.map(toHex);

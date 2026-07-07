@@ -61,6 +61,24 @@ describe('extractPalette', () => {
 		expect(result).not.toContain('#C84428'); // shade within minDistance is folded
 	});
 
+	it('same-hue shades collapse so a small distinct-hue accent wins a slot', () => {
+		// A big warm-brown gradient family (blurred-photo-panel case): five
+		// shades, pairwise ≥ 40 RGB apart, all hue ~23–27°. Under a plain
+		// 40-RGB rule they fill every slot and the tiny plum accent never
+		// surfaces; the hue-aware rule folds near-neighbor shades instead.
+		const img = blank(64, 64); // transparent border → no background exclusion
+		fillRect(img, 2, 2, 20, 20, [245, 165, 114]); // 400 px cream-orange
+		fillRect(img, 24, 2, 18, 18, [200, 130, 85]); // 324 px light brown
+		fillRect(img, 44, 2, 16, 16, [155, 100, 60]); // 256 px mid brown
+		fillRect(img, 2, 24, 14, 14, [110, 70, 40]); // 196 px dark brown
+		fillRect(img, 18, 24, 12, 12, [65, 40, 20]); // 144 px darkest brown
+		fillRect(img, 32, 24, 6, 6, [154, 83, 99]); // 36 px plum accent
+
+		const result = extractPalette(img);
+		expect(result).toContain('#9A5363'); // the accent made it
+		expect(result).toEqual(['#F5A572', '#9B643C', '#412814', '#9A5363']);
+	});
+
 	it('skips transparent pixels (alpha < 128)', () => {
 		const img = blank(20, 20);
 		fillRect(img, 2, 2, 16, 8, [255, 0, 0, 0]); // "red" but fully transparent
