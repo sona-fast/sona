@@ -4,6 +4,7 @@
 	import { extractPalette } from '$lib/palette-extract';
 	import { rgbToHex } from '$lib/color-hex';
 	import { focusTrap } from '$lib/focus-trap';
+	import { loupeCenterX } from '$lib/loupe-position';
 
 	interface Slot {
 		name: string;
@@ -146,18 +147,21 @@
 			return;
 		}
 		// Keep the loupe inside the canvas: clamp it horizontally, and flip it
-		// below the pointer when there's no room above (near the top edge).
+		// below the pointer when there's no room above (near the top edge). On
+		// touch a below-flip would sit right under the finger, so loupeCenterX
+		// shifts it to whichever side of the contact point has room instead.
 		const touch = e.pointerType === 'touch';
 		const y = e.clientY - rect.top;
+		const below = y < LOUPE + READOUT_H + (touch ? 56 : 16);
 		hover = {
 			hex: rgbToHex(d[0], d[1], d[2]),
 			r: d[0],
 			g: d[1],
 			b: d[2],
-			x: Math.max(LOUPE / 2 + 4, Math.min(rect.width - LOUPE / 2 - 4, e.clientX - rect.left)),
+			x: loupeCenterX(e.clientX - rect.left, rect.width, LOUPE, touch && below),
 			y,
 			touch,
-			below: y < LOUPE + READOUT_H + (touch ? 56 : 16)
+			below
 		};
 		drawLoupe(px, py);
 	}
@@ -405,9 +409,14 @@
 	}
 	/* Near the top edge there's no room above — flip the loupe below the pointer
 	   (sample() sets `below`; horizontal clamping also happens there). */
-	.loupe.below,
-	.loupe.below.touch {
+	.loupe.below {
 		transform: translate(-50%, 24px);
+	}
+	/* Touch + below would land under the finger: sample() shifts x to the side
+	   of the contact point (loupeCenterX), and the glass tops out at the touch y
+	   so it stays inside the canvas. */
+	.loupe.below.touch {
+		transform: translate(-50%, 0);
 	}
 	.loupe-glass {
 		position: relative;

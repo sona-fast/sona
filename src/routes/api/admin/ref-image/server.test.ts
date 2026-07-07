@@ -130,7 +130,16 @@ describe('GET /api/admin/ref-image — by-ID image proxy', () => {
 			'https://172.16.0.1/x.png',
 			'https://172.31.9.9/x.png',
 			'https://169.254.1.1/x.png',
-			'http://[::1]/x.png'
+			'http://[::1]/x.png',
+			// Hardened round 2: trailing-dot FQDN, unspecified, IPv4-mapped IPv6
+			// (raw dotted + the WHATWG-normalized hex form), ULA, link-local.
+			'https://localhost./x.png',
+			'https://0.0.0.0/x.png',
+			'http://[::ffff:127.0.0.1]/x.png',
+			'http://[::ffff:c0a8:9]/x.png',
+			'http://[fc00::1]/x.png',
+			'http://[fd12:3456::1]/x.png',
+			'http://[fe80::1]/x.png'
 		];
 		for (const imageUrl of urls) {
 			const { db, platform } = makeDb();
@@ -147,18 +156,25 @@ describe('GET /api/admin/ref-image — by-ID image proxy', () => {
 	});
 
 	it('still allows public hosts that merely resemble private prefixes', async () => {
-		const { db, platform } = makeDb();
-		const row = await db
-			.insert(images)
-			.values({ title: 'ref', slug: 'ref', imageUrl: 'https://172.200.0.1/x.png', artistId: 1, createdAt: '2026-01-01' })
-			.returning({ id: images.id })
-			.get();
-		const fetchMock = vi.fn(
-			async () => new Response('PNGBYTES', { status: 200, headers: { 'content-type': 'image/png' } })
-		) as unknown as typeof fetch;
+		const urls = [
+			'https://172.200.0.1/x.png',
+			'https://cdn.example.com/x.png',
+			'http://[2606:4700::6810:84e5]/x.png' // public IPv6 — not ::1 / ULA / link-local
+		];
+		for (const imageUrl of urls) {
+			const { db, platform } = makeDb();
+			const row = await db
+				.insert(images)
+				.values({ title: 'ref', slug: 'ref', imageUrl, artistId: 1, createdAt: '2026-01-01' })
+				.returning({ id: images.id })
+				.get();
+			const fetchMock = vi.fn(
+				async () => new Response('PNGBYTES', { status: 200, headers: { 'content-type': 'image/png' } })
+			) as unknown as typeof fetch;
 
-		const res = (await GET(makeEvent(platform, `?id=${row.id}`, fetchMock))) as Response;
-		expect(res.status).toBe(200);
+			const res = (await GET(makeEvent(platform, `?id=${row.id}`, fetchMock))) as Response;
+			expect(res.status).toBe(200);
+		}
 	});
 
 	it('404s for an unknown image id without fetching anything', async () => {
