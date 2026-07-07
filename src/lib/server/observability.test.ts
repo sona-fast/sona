@@ -148,9 +148,9 @@ describe('getObservability — background jobs', () => {
 describe('getCloudflareEdge — optional, graceful', () => {
 	// All three secrets present → the query runs and we control fetch.
 	const CF_ENV = {
-		CF_ANALYTICS_TOKEN: 'token',
-		CF_ZONE_ID: 'zone',
-		CF_ACCOUNT_ID: 'acct'
+		CLOUDFLARE_ANALYTICS_TOKEN: 'token',
+		CLOUDFLARE_ZONE_ID: 'zone',
+		CLOUDFLARE_ACCOUNT_ID: 'acct'
 	} as unknown as App.Platform['env'];
 
 	// Minimal Response-like the code path uses (resp.ok, resp.status, resp.json()).
@@ -171,7 +171,7 @@ describe('getCloudflareEdge — optional, graceful', () => {
 
 	it('returns not-configured when the secrets are absent', async () => {
 		expect(await getCloudflareEdge(undefined)).toEqual({ state: 'not-configured' });
-		const partial = { CF_ANALYTICS_TOKEN: 'x' } as unknown as App.Platform['env'];
+		const partial = { CLOUDFLARE_ANALYTICS_TOKEN: 'x' } as unknown as App.Platform['env'];
 		expect(await getCloudflareEdge(partial)).toEqual({ state: 'not-configured' });
 	});
 

@@ -73,7 +73,7 @@ provision time; if you skipped that, add them under
 |------|------|---------|
 | Secret | `CLOUDFLARE_API_TOKEN` | Deploy + run D1 migrations |
 | Secret | `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account |
-| Variable | `CF_PAGES_PROJECT` | Your Pages project name (defaults to `sona`) |
+| Variable | `CLOUDFLARE_PAGES_PROJECT` | Your Pages project name (defaults to `sona`) |
 | Variable | `D1_DATABASE_NAME` | Your D1 database name (defaults to `sona-db`) |
 
 If `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` are missing, the deploy fails

@@ -319,11 +319,11 @@ export function deriveVerdict(input: {
  * connected. Never throws — this is enrichment, never required.
  */
 export async function getCloudflareEdge(env: App.Platform['env'] | undefined): Promise<CfEdge> {
-	const token = env?.CF_ANALYTICS_TOKEN;
-	const zoneTag = env?.CF_ZONE_ID;
-	// CF_ACCOUNT_ID is documented in the connect flow and validated for presence,
+	const token = env?.CLOUDFLARE_ANALYTICS_TOKEN;
+	const zoneTag = env?.CLOUDFLARE_ZONE_ID;
+	// CLOUDFLARE_ACCOUNT_ID is documented in the connect flow and validated for presence,
 	// though the zone-scoped query keys off the zone tag.
-	if (!token || !zoneTag || !env?.CF_ACCOUNT_ID) return { state: 'not-configured' };
+	if (!token || !zoneTag || !env?.CLOUDFLARE_ACCOUNT_ID) return { state: 'not-configured' };
 
 	const until = dayKey();
 	const since = dayKey(new Date(Date.now() - (WINDOW_DAYS - 1) * 24 * 60 * 60 * 1000));

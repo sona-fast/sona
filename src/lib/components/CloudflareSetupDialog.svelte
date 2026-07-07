@@ -11,9 +11,9 @@
 
 	let { onclose }: { onclose: () => void } = $props();
 
-	const SECRETS = `npx wrangler pages secret put CF_ANALYTICS_TOKEN --project-name <your-project>
-npx wrangler pages secret put CF_ACCOUNT_ID    --project-name <your-project>
-npx wrangler pages secret put CF_ZONE_ID       --project-name <your-project>`;
+	const SECRETS = `npx wrangler pages secret put CLOUDFLARE_ANALYTICS_TOKEN --project-name <your-project>
+npx wrangler pages secret put CLOUDFLARE_ACCOUNT_ID    --project-name <your-project>
+npx wrangler pages secret put CLOUDFLARE_ZONE_ID       --project-name <your-project>`;
 </script>
 
 <SetupDialog title={m.admin_cf_setup_title()} sub={m.admin_cf_setup_sub()} {onclose}>

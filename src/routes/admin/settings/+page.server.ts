@@ -133,9 +133,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// #6). All three secrets are needed for the edge panel; the values never
 		// reach the client — only whether the connection is complete.
 		cfAnalyticsConnected: !!(
-			platform?.env?.CF_ANALYTICS_TOKEN &&
-			platform?.env?.CF_ACCOUNT_ID &&
-			platform?.env?.CF_ZONE_ID
+			platform?.env?.CLOUDFLARE_ANALYTICS_TOKEN &&
+			platform?.env?.CLOUDFLARE_ACCOUNT_ID &&
+			platform?.env?.CLOUDFLARE_ZONE_ID
 		),
 		// Opt-in gate (issue #6): hides the Observability settings tab + section when off.
 		observabilityEnabled: isObservabilityEnabled(platform?.env)
