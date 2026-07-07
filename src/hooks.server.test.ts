@@ -101,3 +101,17 @@ describe('authHandle — password-recovery route exemption', () => {
 		expect(await redirectFor('/admin/forgot', db)).toEqual({ status: 302, location: '/admin/setup' });
 	});
 });
+
+describe('authHandle — /api/admin/ref-image stays behind the admin gate', () => {
+	it('returns 401 without a session (not in the /api/cron/ exempt namespace)', async () => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		const db = makeDb();
+
+		const res = (await authHandle({
+			event: makeEvent('/api/admin/ref-image?id=1', db),
+			resolve
+		} as never)) as Response;
+
+		expect(res.status).toBe(401);
+	});
+});

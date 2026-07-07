@@ -8,6 +8,7 @@ import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import { getRawSetting, setRawSetting, parseLines } from '$lib/server/settings';
+import { MAX_SONA_COLORS } from '$lib/palette-merge';
 import { actions, load } from './+page.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses
@@ -144,6 +145,39 @@ describe('settings saveSite — three-path profile fields', () => {
 			{ name: 'Blue', hex: '#3A6EA5' }
 		]);
 	});
+
+	it('drops duplicate swatches on save (case-insensitive, first wins)', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(
+			saveSiteEvent(platform, {
+				sonaColors: JSON.stringify([
+					{ name: 'Plum', hex: '#9A5363' },
+					{ name: 'Orange', hex: '#F5A572' },
+					{ name: 'Plum again', hex: '#9a5363' }
+				])
+			})
+		);
+
+		expect(JSON.parse((await getRawSetting(db, 'sonaColors'))!)).toEqual([
+			{ name: 'Plum', hex: '#9A5363' },
+			{ name: 'Orange', hex: '#F5A572' }
+		]);
+	});
+
+	it('clamps the saved swatches to the palette cap', async () => {
+		const { db, platform } = makeDb();
+		const swatches = Array.from({ length: MAX_SONA_COLORS + 4 }, (_, i) => ({
+			name: `c${i}`,
+			hex: `#${i.toString(16).padStart(2, '0').repeat(3)}`
+		}));
+
+		await actions.saveSite(saveSiteEvent(platform, { sonaColors: JSON.stringify(swatches) }));
+
+		const saved = JSON.parse((await getRawSetting(db, 'sonaColors'))!);
+		expect(saved).toHaveLength(MAX_SONA_COLORS);
+		expect(saved).toEqual(swatches.slice(0, MAX_SONA_COLORS));
+	});
 });
 
 function saveStorageEvent(platform: App.Platform, fields: Record<string, string>) {
@@ -214,17 +248,31 @@ describe('settings saveSecurityEmail — admin recovery address', () => {
 	});
 });
 
+// Schema for tests that drive the full load (which also resolves the ref-sheet
+// image for the palette picker, touching images/characters/tags/image_tags).
+const LOAD_DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, slug TEXT,
+		image_url TEXT, thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER,
+		md5hash TEXT, nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1,
+		source_post_url TEXT, artist_id INTEGER, collection_id INTEGER, commissioned_at TEXT,
+		parent_image_id INTEGER, variant_label TEXT, created_at TEXT);
+	CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+		is_owner INTEGER NOT NULL DEFAULT 0, reference_image_id INTEGER, created_at TEXT);
+	CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at TEXT);
+	CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);`;
+
+const LOAD_URL = new URL('https://taro.surf/admin/settings');
+
 describe('settings load — adminEmail is raw, never in public settings', () => {
 	it('surfaces the raw adminEmail and keeps it out of the settings object', async () => {
 		const sqlite = new Database(':memory:');
-		sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-			CREATE TABLE images (id INTEGER PRIMARY KEY, file_size INTEGER);`);
+		sqlite.exec(LOAD_DDL);
 		const d1 = makeD1(sqlite);
 		const db = drizzle(d1, { schema });
 		const platform = { env: { DB: d1 } } as unknown as App.Platform;
 		await setRawSetting(db, 'adminEmail', 'recover@taro.surf');
 
-		const result = (await load({ platform } as never)) as {
+		const result = (await load({ platform, url: LOAD_URL } as never)) as {
 			adminEmail: string;
 			settings: Record<string, unknown>;
 		};
@@ -235,22 +283,24 @@ describe('settings load — adminEmail is raw, never in public settings', () => 
 	});
 });
 
-describe('settings load — Resend config exposes presence only', () => {
-	function makeLoadDb(env: Record<string, unknown>) {
-		const sqlite = new Database(':memory:');
-		sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-			CREATE TABLE images (id INTEGER PRIMARY KEY, file_size INTEGER);`);
-		const d1 = makeD1(sqlite);
-		return { platform: { env: { DB: d1, ...env } } as unknown as App.Platform };
-	}
+function makeLoadDb(env: Record<string, unknown> = {}) {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(LOAD_DDL);
+	const d1 = makeD1(sqlite);
+	return {
+		db: drizzle(d1, { schema }),
+		platform: { env: { DB: d1, ...env } } as unknown as App.Platform
+	};
+}
 
+describe('settings load — Resend config exposes presence only', () => {
 	it('reports both secrets as set without echoing their values', async () => {
 		const { platform } = makeLoadDb({
 			RESEND_API_KEY: 're_secret_value',
 			RESEND_FROM: 'Sona <hi@example.com>'
 		});
 
-		const result = (await load({ platform } as never)) as unknown as Record<string, unknown>;
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as Record<string, unknown>;
 
 		expect(result.resendKeySet).toBe(true);
 		expect(result.resendFromSet).toBe(true);
@@ -262,7 +312,7 @@ describe('settings load — Resend config exposes presence only', () => {
 	it('reports both secrets as unset when the env vars are absent', async () => {
 		const { platform } = makeLoadDb({});
 
-		const result = (await load({ platform } as never)) as unknown as Record<string, unknown>;
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as Record<string, unknown>;
 
 		expect(result.resendKeySet).toBe(false);
 		expect(result.resendFromSet).toBe(false);
@@ -271,10 +321,47 @@ describe('settings load — Resend config exposes presence only', () => {
 	it('treats an empty-string secret as unset (a blank binding is not configured)', async () => {
 		const { platform } = makeLoadDb({ RESEND_API_KEY: '', RESEND_FROM: '' });
 
-		const result = (await load({ platform } as never)) as unknown as Record<string, unknown>;
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as Record<string, unknown>;
 
 		expect(result.resendKeySet).toBe(false);
 		expect(result.resendFromSet).toBe(false);
+	});
+});
+
+describe('settings load — ref-sheet picker source', () => {
+	it('is null when no reference sheet exists (the UI shows a designate-one hint)', async () => {
+		const { platform } = makeLoadDb();
+
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+			refImageSrc: unknown;
+		};
+
+		expect(result.refImageSrc).toBeNull();
+	});
+
+	it('resolves the newest published reference-tagged image with a client strategy', async () => {
+		const { db, platform } = makeLoadDb();
+		const img = await db
+			.insert(schema.images)
+			.values({
+				title: 'ref',
+				slug: 'ref',
+				imageUrl: 'https://abc12.ufs.sh/f/key',
+				artistId: 1,
+				createdAt: '2026-01-01'
+			})
+			.returning({ id: schema.images.id })
+			.get();
+		const tag = await db.insert(schema.tags).values({ name: 'reference' }).returning({ id: schema.tags.id }).get();
+		await db.insert(schema.imageTags).values({ imageId: img.id, tagId: tag.id });
+
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+			refImageSrc: { src: string; crossorigin: boolean };
+		};
+
+		// UploadThing host → raw URL + crossorigin (see ref-image.test.ts for the
+		// full strategy matrix; this just proves the load wires it through).
+		expect(result.refImageSrc).toEqual({ src: 'https://abc12.ufs.sh/f/key', crossorigin: true });
 	});
 });
 

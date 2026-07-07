@@ -29,3 +29,16 @@ VALUES
   (2, 'Variant Piece NSFW', 'variant-piece',
    '/e2e/variantpiece.png', '/e2e/variantpiece-thumb.png',
    900, 700, 1, 1, 1, 1, 'Alt', '2026-07-02T00:00:00.000Z');
+
+-- Reference sheet for the admin palette-picker spec: a published image tagged
+-- 'reference' (resolveRefImage's fallback path). Like the gallery fixtures its
+-- URL is a same-origin placeholder that 404s harmlessly -- the palette specs
+-- assert dialog/input behavior, never canvas pixels.
+INSERT OR REPLACE INTO images
+  (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
+VALUES
+  (3, 'Ref Sheet', 'ref-sheet',
+   '/e2e/refsheet.png', '/e2e/refsheet-thumb.png',
+   1200, 900, 0, 1, 1, NULL, NULL, '2026-07-03T00:00:00.000Z');
+INSERT OR REPLACE INTO tags (id, name, created_at) VALUES (1, 'reference', '2026-07-01T00:00:00.000Z');
+INSERT OR REPLACE INTO image_tags (image_id, tag_id) VALUES (3, 1);

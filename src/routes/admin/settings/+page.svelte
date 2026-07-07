@@ -6,7 +6,9 @@
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
-	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X } from 'lucide-svelte';
+	import { normalizeHex } from '$lib/color-hex';
+	import { MAX_SONA_COLORS, mergeSuggestions, paletteHas } from '$lib/palette-merge';
+	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X, Pipette } from 'lucide-svelte';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
 	import { resendSetupProgress } from '$lib/resend-setup';
@@ -51,16 +53,61 @@
 	let colors = $state<SonaColor[]>(parseColors(data.settings.sonaColors));
 	let newColorName = $state('');
 	let newColorHex = $state('#888888');
+	let showRefPicker = $state(false);
 
+	// The cap (MAX_SONA_COLORS) is also enforced server-side on save.
+	const paletteFull = $derived(colors.length >= MAX_SONA_COLORS);
+	// Transient "already in your palette" cue for a duplicate Add color (mirrors
+	// the picker's dedupe cue); the server dedupes on save as the backstop.
+	let addDupHint = $state(false);
+	let addDupTimer: ReturnType<typeof setTimeout> | undefined;
+	$effect(() => () => clearTimeout(addDupTimer));
 	function addColor() {
+		if (paletteFull) return;
 		const hex = newColorHex.trim();
 		if (!/^#[0-9a-fA-F]{3,8}$/.test(hex)) return;
+		if (paletteHas(colors.map((c) => c.hex), hex)) {
+			addDupHint = true;
+			clearTimeout(addDupTimer);
+			addDupTimer = setTimeout(() => (addDupHint = false), 2500);
+			return;
+		}
 		colors = [...colors, { name: newColorName.trim() || 'Color', hex }];
 		newColorName = '';
 		newColorHex = '#888888';
 	}
 	function removeColor(i: number) {
 		colors = colors.filter((_, idx) => idx !== i);
+	}
+	// Hex text inputs normalize on change (#RGB / RGB / RRGGBB → #RRGGBB); an
+	// invalid entry reverts to the current value instead of corrupting state.
+	function setColorHex(i: number, input: HTMLInputElement) {
+		const hex = normalizeHex(input.value);
+		if (hex) colors = colors.map((c, idx) => (idx === i ? { ...c, hex } : c));
+		input.value = hex ?? colors[i].hex;
+	}
+	function setNewColorHex(input: HTMLInputElement) {
+		const hex = normalizeHex(input.value);
+		if (hex) newColorHex = hex;
+		input.value = hex ?? newColorHex;
+	}
+	// The ref-sheet picker commits into either an existing swatch or the
+	// pending "new color" slot (named + added via the Add color button). A
+	// "new" pick of a hex already in the palette is dropped — same dedupe as
+	// Add all (the picker shows the "already in your palette" cue); explicit
+	// overwrites of an existing slot stay unrestricted.
+	function applyPickedColor(slot: number | 'new', hex: string) {
+		if (slot === 'new') {
+			if (paletteHas(colors.map((c) => c.hex), hex)) return;
+			newColorHex = hex;
+		} else colors = colors.map((c, i) => (i === slot ? { ...c, hex } : c));
+	}
+	// "Add all" in the picker: append every suggestion not already in the
+	// palette (case-insensitive, deduped) with the same default name the
+	// Add color button gives an unnamed color — up to the palette cap.
+	function addAllSuggestions(hexes: string[]) {
+		const toAdd = mergeSuggestions(colors.map((c) => c.hex), hexes, MAX_SONA_COLORS - colors.length);
+		colors = [...colors, ...toAdd.map((hex) => ({ name: 'Color', hex }))];
 	}
 
 	let storageProvider = $state(data.settings.storageProvider);
@@ -331,15 +378,45 @@
 						<div class="swatch-chip">
 							<span class="swatch-dot" style="background:{color.hex}"></span>
 							<span class="swatch-name">{color.name}</span>
+							<input
+								type="text"
+								class="input hex-input"
+								value={color.hex}
+								placeholder="#RRGGBB"
+								aria-label={m.admin_settings_sona_hex_label({ name: color.name })}
+								onchange={(e) => setColorHex(i, e.currentTarget)}
+							/>
 							<button type="button" class="swatch-remove" aria-label={m.admin_settings_sona_remove_color()} onclick={() => removeColor(i)}>×</button>
 						</div>
 					{/each}
 				</div>
 				<div class="add-color">
 					<input type="color" class="color-input" bind:value={newColorHex} aria-label={m.admin_settings_sona_pick_color()} />
-					<input type="text" class="input" bind:value={newColorName} placeholder={m.admin_settings_sona_color_name_placeholder()} />
-					<button type="button" class="btn btn-secondary" onclick={addColor}>{m.admin_settings_sona_add_color()}</button>
+					<input
+						type="text"
+						class="input hex-input"
+						value={newColorHex}
+						placeholder="#RRGGBB"
+						aria-label={m.admin_settings_sona_new_hex_label()}
+						onchange={(e) => setNewColorHex(e.currentTarget)}
+					/>
+					<input type="text" class="input" bind:value={newColorName} aria-label={m.admin_settings_sona_color_name_placeholder()} placeholder={m.admin_settings_sona_color_name_placeholder()} />
+					<button type="button" class="btn btn-secondary" disabled={paletteFull} onclick={addColor}>{m.admin_settings_sona_add_color()}</button>
 				</div>
+				{#if paletteFull}
+					<p class="hint" role="status">{m.admin_settings_sona_palette_full({ max: MAX_SONA_COLORS })}</p>
+				{:else if addDupHint}
+					<p class="hint" role="status">{m.admin_ref_picker_already_in_palette()}</p>
+				{/if}
+				{#if data.refImageSrc}
+					<div>
+						<button type="button" class="btn btn-secondary" onclick={() => (showRefPicker = true)}>
+							<Pipette size={16} /> {m.admin_settings_sona_pick_from_ref()}
+						</button>
+					</div>
+				{:else}
+					<p class="hint">{m.admin_settings_sona_no_ref_hint()}</p>
+				{/if}
 				<input type="hidden" name="sonaColors" value={JSON.stringify(colors)} />
 			</div>
 		</section>
@@ -835,6 +912,21 @@
 	/>
 {/if}
 
+{#if showRefPicker && data.refImageSrc}
+	<!-- Lazy chunk: the picker (canvas + extraction code) only loads on first
+	     open, so the settings page doesn't carry it. -->
+	{#await import('$lib/components/RefSheetPicker.svelte') then { default: RefSheetPicker }}
+		<RefSheetPicker
+			src={data.refImageSrc.src}
+			crossorigin={data.refImageSrc.crossorigin}
+			slots={colors}
+			onpick={applyPickedColor}
+			onaddall={addAllSuggestions}
+			onclose={() => (showRefPicker = false)}
+		/>
+	{/await}
+{/if}
+
 <style>
 	.contents {
 		display: contents;
@@ -1319,6 +1411,20 @@
 
 	.swatch-name {
 		font-size: 13px;
+	}
+
+	/* Hex text inputs — compact, monospace-ish via the primary font. */
+	.hex-input {
+		width: 92px;
+		max-width: 92px;
+		height: 28px;
+		padding: 2px 8px;
+		font-family: var(--font-primary);
+		font-size: 12px;
+	}
+
+	.add-color .hex-input {
+		height: 40px;
 	}
 
 	.swatch-remove {
