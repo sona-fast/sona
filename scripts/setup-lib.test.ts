@@ -222,7 +222,7 @@ describe('deriveRepoSlug', () => {
 });
 
 describe('buildPagesConfigPayload', () => {
-	it('wires D1 + R2 bindings and plain-text vars onto the production config', () => {
+	it('wires bindings, vars, and the nodejs_compat flag onto production + preview', () => {
 		const payload = buildPagesConfigPayload({
 			dbBinding: 'DB',
 			dbId: 'db-123',
@@ -233,15 +233,24 @@ describe('buildPagesConfigPayload', () => {
 		expect(payload).toEqual({
 			deployment_configs: {
 				production: {
+					compatibility_date: '2025-04-01',
+					compatibility_flags: ['nodejs_compat'],
 					d1_databases: { DB: { id: 'db-123' } },
 					r2_buckets: { IMAGES: { name: 'my-images' } },
 					env_vars: { FURTRACK_MODE: { type: 'plain_text', value: 'mock' } }
+				},
+				// nodejs_compat on preview too so PR-preview deploys don't fail the
+				// same way; a CI-first `git push` deploy needs it on the project since
+				// wrangler.toml (which also carries it) is gitignored.
+				preview: {
+					compatibility_date: '2025-04-01',
+					compatibility_flags: ['nodejs_compat']
 				}
 			}
 		});
 	});
 
-	it('omits the R2 binding when no bucket exists (R2 not enabled)', () => {
+	it('omits the R2 binding when no bucket exists (R2 not enabled) but keeps nodejs_compat', () => {
 		const payload = buildPagesConfigPayload({
 			dbBinding: 'DB',
 			dbId: 'db-123',
@@ -253,6 +262,9 @@ describe('buildPagesConfigPayload', () => {
 			.production;
 		expect(production).not.toHaveProperty('r2_buckets');
 		expect(production.d1_databases).toEqual({ DB: { id: 'db-123' } });
+		expect(production.compatibility_flags).toEqual(['nodejs_compat']);
+		const preview = (payload.deployment_configs as { preview: Record<string, unknown> }).preview;
+		expect(preview.compatibility_flags).toEqual(['nodejs_compat']);
 	});
 });
 

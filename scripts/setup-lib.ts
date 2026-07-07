@@ -119,12 +119,20 @@ export interface PagesConfigInput {
 	envVars: Record<string, string>;
 }
 
+/** Kept in sync with wrangler.toml.example — the source of truth for local deploys. */
+const PAGES_COMPAT = {
+	compatibility_date: '2025-04-01',
+	compatibility_flags: ['nodejs_compat']
+};
+
 /**
  * Builds the `PATCH /accounts/{id}/pages/projects/{project}` body that attaches
- * the D1/R2 bindings + plain-text vars to the Pages project's PRODUCTION config.
- * setup writes these only to the gitignored `wrangler.toml`, so a CI-only deploy
- * (which never sees that file) ships without them; this wires them onto the
- * project itself. The PATCH merges per key, so unrelated project config is
+ * the D1/R2 bindings + plain-text vars AND the nodejs_compat flag to the Pages
+ * project (production + preview). setup writes these only to the gitignored
+ * `wrangler.toml`, so a CI-only deploy (which never sees that file) ships without
+ * them; this wires them onto the project itself. Without nodejs_compat the
+ * SvelteKit adapter's build can't resolve node built-ins (async_hooks) and the
+ * first CI deploy dies. The PATCH merges per key, so unrelated project config is
  * untouched. The R2 binding is omitted when no bucket exists (R2 not enabled).
  */
 export function buildPagesConfigPayload(input: PagesConfigInput): Record<string, unknown> {
@@ -133,11 +141,12 @@ export function buildPagesConfigPayload(input: PagesConfigInput): Record<string,
 		env_vars[name] = { type: 'plain_text', value };
 	}
 	const production: Record<string, unknown> = {
+		...PAGES_COMPAT,
 		d1_databases: { [input.dbBinding]: { id: input.dbId } },
 		env_vars
 	};
 	if (input.bucket) production.r2_buckets = { [input.r2Binding]: { name: input.bucket } };
-	return { deployment_configs: { production } };
+	return { deployment_configs: { production, preview: { ...PAGES_COMPAT } } };
 }
 
 /**
