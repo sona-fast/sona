@@ -1,28 +1,46 @@
+import { dev } from '$app/environment';
 import { fail, redirect } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { hashPassword } from '$lib/server/admin-auth';
 import { validateResetToken, PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
 import { siteSettings, sessions } from '$lib/server/db/schema';
+import { RESET_TOKEN_COOKIE } from '$lib/config';
 import type { Actions, PageServerLoad } from './$types';
 
 const MIN_PASSWORD_LENGTH = 8;
+// Comfortably covers the click-through from the email without extending
+// exposure past the token's own 30-minute TTL (see password-reset.ts).
+const RESET_COOKIE_MAX_AGE_S = 10 * 60;
 
-export const load: PageServerLoad = async ({ platform, url }) => {
-	const token = url.searchParams.get('token') ?? '';
+export const load: PageServerLoad = async ({ platform, url, cookies }) => {
+	const queryToken = url.searchParams.get('token');
+	if (queryToken) {
+		// The raw token would otherwise sit in the URL — browser history, proxy/CDN
+		// access logs — for the rest of its TTL. Move it into a short-lived, scoped
+		// cookie instead and redirect to the clean URL; the form action below reads
+		// it back from there.
+		cookies.set(RESET_TOKEN_COOKIE, queryToken, {
+			path: '/admin/reset',
+			httpOnly: true,
+			secure: !dev,
+			sameSite: 'strict',
+			maxAge: RESET_COOKIE_MAX_AGE_S
+		});
+		redirect(303, '/admin/reset');
+	}
+	const token = cookies.get(RESET_TOKEN_COOKIE) ?? '';
 	const valid = await validateResetToken(getDb(platform!.env.DB), token);
-	// The token is the caller's own reset link — echoing it into the form is no
-	// additional exposure, and lets the POST re-present it for a fresh check.
-	return { valid, token };
+	return { valid };
 };
 
 export const actions = {
-	default: async ({ request, platform, url }) => {
+	default: async ({ request, platform, cookies }) => {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
 		// Coerce non-strings (a File entry has no usable .length) to ''.
 		const asStr = (v: FormDataEntryValue | null) => (typeof v === 'string' ? v : '');
-		const token = asStr(data.get('token')) || (url.searchParams.get('token') ?? '');
+		const token = cookies.get(RESET_TOKEN_COOKIE) ?? '';
 		const password = asStr(data.get('password'));
 		const confirm = asStr(data.get('confirmPassword'));
 
@@ -50,6 +68,7 @@ export const actions = {
 			db.delete(siteSettings).where(eq(siteSettings.key, PASSWORD_RESET_SETTING))
 		]);
 
+		cookies.delete(RESET_TOKEN_COOKIE, { path: '/admin/reset' });
 		// No auto-login — send them to sign in with the new password.
 		redirect(303, '/admin/login?reset=1');
 	}

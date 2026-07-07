@@ -1,5 +1,7 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
+import type { ExecutionContext } from '@cloudflare/workers-types';
+
 declare global {
 	namespace App {
 		// interface Error {}
@@ -9,6 +11,15 @@ declare global {
 		// interface PageData {}
 		// interface PageState {}
 		interface Platform {
+			/**
+			 * The request's execution context — used to run work past the response
+			 * via `ctx.waitUntil` (e.g. the /admin/forgot mint+send, deferred so a
+			 * matching and non-matching email return equally fast; see
+			 * password-reset.ts). adapter-cloudflare provides this at runtime; declared
+			 * here directly (rather than relying on the adapter's own ambient types)
+			 * since svelte-check's program doesn't pick those up.
+			 */
+			ctx?: ExecutionContext;
 			env: {
 				DB: D1Database;
 				/**

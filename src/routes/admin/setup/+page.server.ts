@@ -4,7 +4,7 @@ import { lt } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { sessions, characters } from '$lib/server/db/schema';
 import { saveSettings, getRawSetting, setRawSetting } from '$lib/server/settings';
-import { sanitizeText } from '$lib/server/validate';
+import { sanitizeText, isValidEmail } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
 	isSetupComplete,
@@ -106,6 +106,14 @@ export const actions = {
 		}
 		const landingLayout = layoutRaw || DEFAULT_LANDING_LAYOUT;
 
+		// Optional admin recovery email (raw setting, never client-exposed) —
+		// validated here, before any writes, so a typo fails the whole wizard
+		// instead of silently persisting an address that can't receive mail.
+		const adminEmail = sanitizeText(data.get('adminEmail') as string, 200);
+		if (adminEmail && !isValidEmail(adminEmail)) {
+			return fail(400, { error: 'Enter a valid recovery email address, like you@example.com.' });
+		}
+
 		// NB: storageProvider / r2PublicUrl are NOT set here — the setup CLI decides
 		// the storage backend (it's the only thing that can create a bucket / set a
 		// token). Switching later is a migration in Settings → Storage Provider.
@@ -134,10 +142,9 @@ export const actions = {
 			...optional
 		});
 
-		// Optional admin recovery email (raw setting, never client-exposed). Only
-		// persist when provided — an empty field leaves password recovery disabled
-		// until it's set in Settings → Security.
-		const adminEmail = sanitizeText(data.get('adminEmail') as string, 200);
+		// Persist the recovery email (validated above) only when provided — an
+		// empty field leaves password recovery disabled until it's set in
+		// Settings → Security.
 		if (adminEmail) await setRawSetting(db, 'adminEmail', adminEmail);
 
 		// 4. The fursona this site is about (stickers/fursuit resolve one character).

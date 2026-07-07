@@ -117,6 +117,17 @@ describe('setup wizard — unrecognized enum values fail instead of silently def
 		expect(await getRawSetting(db, 'adminEmail')).toBe('admin@taro.surf');
 	});
 
+	it('rejects an adminEmail that does not look like an email and saves nothing', async () => {
+		const { db, platform } = makeDb();
+
+		const result = await actions.default(setupEvent(platform, { adminEmail: 'not-an-email' }));
+
+		expect(result).toMatchObject({ status: 400 });
+		expect((result as { data: { error: string } }).data.error).toMatch(/email/i);
+		expect(await getRawSetting(db, 'adminEmail')).toBeNull();
+		expect(await getRawSetting(db, 'siteName')).toBeNull();
+	});
+
 	it('does not write adminEmail when the field is empty', async () => {
 		const { db, platform } = makeDb();
 

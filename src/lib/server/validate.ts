@@ -31,6 +31,14 @@ export function sanitizeUrl(url: string | null | undefined): string | null {
 }
 
 /**
+ * Minimal email shape check (not full RFC 5322) — just enough to catch a typo
+ * before it silently breaks password-recovery delivery at send time.
+ */
+export function isValidEmail(email: string): boolean {
+	return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+/**
  * Sanitize a text input — trim, enforce max length.
  */
 export function sanitizeText(text: string | null | undefined, maxLength = 500): string {

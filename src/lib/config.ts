@@ -26,6 +26,13 @@ export const SESSION_COOKIE = 'sona_admin_session';
  */
 export const THEME_MODE_COOKIE = 'sona-mode';
 
+/**
+ * Cookie that carries a /admin/reset token from the query string (see the
+ * route's load) into the form POST, so the raw token doesn't sit in the URL —
+ * browser history, proxy/CDN access logs — for its whole TTL.
+ */
+export const RESET_TOKEN_COOKIE = 'sona_reset_token';
+
 /** localStorage key for the gallery grid/list view preference. */
 export const GALLERY_VIEW_STORAGE_KEY = 'sona-gallery-view';
 
