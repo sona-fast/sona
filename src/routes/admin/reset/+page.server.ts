@@ -24,7 +24,13 @@ export const load: PageServerLoad = async ({ platform, url, cookies }) => {
 			path: '/admin/reset',
 			httpOnly: true,
 			secure: !dev,
-			sameSite: 'strict',
+			// Lax, not Strict: webmail wraps the reset link (Gmail routes it through
+			// google.com/url), so following it is cross-site — a Strict cookie is
+			// withheld on the GET→303→clean-URL redirect and the admin is silently
+			// locked out. Lax IS sent on the top-level 303 but still not on a
+			// cross-site POST, so the form action's CSRF posture is unchanged (and
+			// this matches the session cookie in admin/login).
+			sameSite: 'lax',
 			maxAge: RESET_COOKIE_MAX_AGE_S
 		});
 		redirect(303, '/admin/reset');

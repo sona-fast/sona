@@ -16,8 +16,11 @@ export const actions = {
 		// which one happened through response latency. Run it off the response path
 		// via waitUntil so the response returns equally fast either way; fall back
 		// to awaiting it only where waitUntil isn't available (e.g. local dev).
-		const task = requestPasswordReset(getDb(platform!.env.DB), platform?.env, url.origin, email).catch(() => {
-			// Never leak internal state through the response.
+		const task = requestPasswordReset(getDb(platform!.env.DB), platform?.env, url.origin, email).catch((e) => {
+			// Never leak internal state through the response (enumeration) — but a
+			// deferred failure (e.g. a 2xx send followed by a D1 write failure, which
+			// mails a dead reset link) must stay diagnosable, so log it distinctly.
+			console.error('password-reset deferred task failed:', e instanceof Error ? e.message : e);
 		});
 		if (platform?.ctx) {
 			platform.ctx.waitUntil(task);

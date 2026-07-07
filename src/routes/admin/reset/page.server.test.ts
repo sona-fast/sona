@@ -61,11 +61,16 @@ function makeDb() {
  * route: it reads/writes/deletes the one cookie it cares about. */
 function makeCookies(initial: Record<string, string> = {}) {
 	const store = { ...initial };
+	// Capture the options passed to set() per key so tests can assert the cookie
+	// hardening attributes (httpOnly / sameSite / secure / path / maxAge).
+	const opts: Record<string, Record<string, unknown>> = {};
 	return {
 		store,
+		opts,
 		get: (name: string) => store[name],
-		set: (name: string, value: string) => {
+		set: (name: string, value: string, options: Record<string, unknown> = {}) => {
 			store[name] = value;
+			opts[name] = options;
 		},
 		delete: (name: string) => {
 			delete store[name];
@@ -230,6 +235,17 @@ describe('reset load', () => {
 		}
 
 		expect(cookies.get(RESET_TOKEN_COOKIE)).toBe(TOKEN);
+		// The token cookie is hardened: httpOnly, scoped path, 10-minute TTL, and
+		// SameSite=Lax (NOT Strict — Strict is withheld on the cross-site webmail
+		// click-through and silently locks the admin out). secure is off only under
+		// the dev flag, which is unset in tests.
+		expect(cookies.opts[RESET_TOKEN_COOKIE]).toMatchObject({
+			httpOnly: true,
+			sameSite: 'lax',
+			secure: true,
+			path: '/admin/reset',
+			maxAge: 10 * 60
+		});
 	});
 
 	it('validates against the cookie once the query string is gone', async () => {

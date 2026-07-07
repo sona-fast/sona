@@ -230,6 +230,25 @@ describe('forgot action', () => {
 		errorSpy.mockRestore();
 	});
 
+	it('redacts an email address echoed in the Resend error body before logging it', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		fetchMock.mockImplementation(
+			async () =>
+				new Response(JSON.stringify({ message: 'admin@taro.surf is not a verified sender' }), { status: 403 })
+		);
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const logged = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+		// Status + reason kept for diagnosis; the recovery address stripped (PII).
+		expect(logged).toContain('403');
+		expect(logged).toContain('[redacted]');
+		expect(logged).not.toContain('admin@taro.surf');
+		errorSpy.mockRestore();
+	});
+
 	it('strips other C0 control chars (not just CR/LF) from the siteName in the From name and subject', async () => {
 		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
 		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
@@ -242,35 +261,19 @@ describe('forgot action', () => {
 		expect(email.subject).toBe('Reset your Aki Serval ! admin password');
 	});
 
-	it('pins the reset link to a configured siteUrl setting instead of the request origin', async () => {
+	it('pins the reset link to the request origin', async () => {
 		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
 		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
-		await setRawSetting(db, 'siteUrl', 'https://custom.example');
 
 		const result = await actions.default(forgotEvent(platform, 'admin@taro.surf'));
 
 		expect(result).toEqual({ sent: true });
 		const email = sentEmail();
-		expect(email.text).toMatch(/https:\/\/custom\.example\/admin\/reset\?token=/);
-		expect(email.html).toMatch(/https:\/\/custom\.example\/admin\/reset\?token=/);
-		expect(email.html).not.toContain('taro.surf');
+		expect(email.text).toMatch(/https:\/\/taro\.surf\/admin\/reset\?token=/);
+		expect(email.html).toMatch(/https:\/\/taro\.surf\/admin\/reset\?token=/);
 	});
 
-	it('renders the reset email in the configured siteLocale', async () => {
-		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
-		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
-		await setRawSetting(db, 'siteLocale', 'ja');
-
-		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
-
-		const email = sentEmail();
-		expect(email.subject).toContain('管理者パスワードをリセット');
-		expect(email.html).toContain('lang="ja"');
-		expect(email.html).toContain('パスワードをリセット');
-		expect(email.text).toContain('パスワードのリセットがリクエストされました');
-	});
-
-	it('defaults the reset email to English when no siteLocale is configured', async () => {
+	it('renders the reset email in the base locale (English)', async () => {
 		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
 		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
 

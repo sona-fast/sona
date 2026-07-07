@@ -15,8 +15,7 @@ import { hashToken, constantTimeEqual } from './admin-auth';
 import { getRawSetting, setRawSetting } from './settings';
 import { APP_NAME } from '$lib/config';
 import * as m from '$lib/paraglide/messages';
-import { isLocale, baseLocale } from '$lib/paraglide/runtime';
-import type { Locale } from '$lib/paraglide/runtime';
+import { baseLocale } from '$lib/paraglide/runtime';
 import type { Database } from './db';
 
 type Env = App.Platform['env'];
@@ -103,19 +102,20 @@ export async function requestPasswordReset(
 
 	const token = generateToken();
 	const siteName = (await getRawSetting(db, 'siteName'))?.trim() || APP_NAME;
-	// Pin the link to the site's own canonical URL when one is configured,
-	// rather than whatever Host the request came in on — an alias/preview
-	// domain hitting /admin/forgot would otherwise mail out a link to itself.
-	const siteUrl = (await getRawSetting(db, 'siteUrl'))?.trim() || origin;
-	const rawLocale = (await getRawSetting(db, 'siteLocale'))?.trim();
-	const locale = isLocale(rawLocale) ? rawLocale : baseLocale;
 
-	const sent = await sendResetEmail(env, apiKey, siteUrl, adminEmail, token, siteName, locale);
+	const sent = await sendResetEmail(env, apiKey, origin, adminEmail, token, siteName);
 	// Persist the token hash ONLY once Resend has confirmed the send. Writing it
 	// first (the old order) meant a failed/timed-out send invalidated a prior
 	// valid link and started the resend cooldown, locking an operator out during
 	// exactly the outage they're trying to recover from. On failure we simply
 	// leave whatever row (if any) already exists untouched.
+	//
+	// Trade-off: the token row is what anchors the resend cooldown, and it's only
+	// written on a 2xx — so during a Resend outage the anti-flood cooldown never
+	// engages. That's intentional: it lets the operator keep retrying while sends
+	// fail (rather than locking them out mid-outage), it's bounded by Resend's own
+	// rate limits, and enumeration stays closed (the caller's response is generic
+	// either way).
 	if (!sent) return;
 	const record: StoredReset = {
 		tokenHash: await hashToken(token),
@@ -135,9 +135,12 @@ async function sendResetEmail(
 	origin: string,
 	to: string,
 	token: string,
-	siteName: string,
-	locale: Locale
+	siteName: string
 ): Promise<boolean> {
+	// No configurable site locale exists (nothing writes one), so the email always
+	// renders in the base locale — passed explicitly since this runs off the
+	// request path (via waitUntil), where the ambient request locale isn't reliable.
+	const locale = baseLocale;
 	const link = new URL('/admin/reset', origin);
 	link.searchParams.set('token', token);
 	// Header fields can't carry CR/LF or other control chars; strip them once for
@@ -187,10 +190,12 @@ async function sendResetEmail(
 			signal: AbortSignal.timeout(RESEND_TIMEOUT_MS)
 		});
 		if (!resp.ok) {
-			// Log the response body, not just the status — Resend's 4xx bodies carry
-			// the actual reason (e.g. an unverified domain), which the status alone
-			// doesn't tell you.
-			console.error(`Resend password-reset send failed: ${resp.status} ${await resp.text()}`);
+			// Log the status plus a redacted, length-capped body — Resend's 4xx bodies
+			// carry the actual reason (e.g. an unverified domain) the status alone
+			// doesn't, but can also echo the recovery `to` address, which must not
+			// land in CF logs (PII). Strip anything email-shaped, then cap length.
+			const body = (await resp.text()).replace(/[^\s@]+@[^\s@]+/g, '[redacted]').slice(0, 300);
+			console.error(`Resend password-reset send failed: ${resp.status} ${body}`);
 			return false;
 		}
 		return true;
