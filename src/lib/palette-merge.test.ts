@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeSuggestions, paletteHas } from './palette-merge';
+import { mergeSuggestions, paletteHas, dedupePalette } from './palette-merge';
 
 describe('mergeSuggestions', () => {
 	it('returns every suggestion when none are in the palette yet', () => {
@@ -47,5 +47,28 @@ describe('paletteHas', () => {
 	it('is false when the hex is absent or the palette is empty', () => {
 		expect(paletteHas(['#AABBCC'], '#123456')).toBe(false);
 		expect(paletteHas([], '#AABBCC')).toBe(false);
+	});
+});
+
+describe('dedupePalette', () => {
+	it('drops duplicate hexes case-insensitively, keeping the first occurrence', () => {
+		expect(
+			dedupePalette([
+				{ name: 'Plum', hex: '#9A5363' },
+				{ name: 'Orange', hex: '#F5A572' },
+				{ name: 'Plum again', hex: '#9a5363' }
+			])
+		).toEqual([
+			{ name: 'Plum', hex: '#9A5363' },
+			{ name: 'Orange', hex: '#F5A572' }
+		]);
+	});
+
+	it('leaves a duplicate-free palette untouched', () => {
+		const swatches = [
+			{ name: 'a', hex: '#111111' },
+			{ name: 'b', hex: '#222222' }
+		];
+		expect(dedupePalette(swatches)).toEqual(swatches);
 	});
 });

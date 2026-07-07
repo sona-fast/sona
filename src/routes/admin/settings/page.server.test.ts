@@ -146,6 +146,25 @@ describe('settings saveSite — three-path profile fields', () => {
 		]);
 	});
 
+	it('drops duplicate swatches on save (case-insensitive, first wins)', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(
+			saveSiteEvent(platform, {
+				sonaColors: JSON.stringify([
+					{ name: 'Plum', hex: '#9A5363' },
+					{ name: 'Orange', hex: '#F5A572' },
+					{ name: 'Plum again', hex: '#9a5363' }
+				])
+			})
+		);
+
+		expect(JSON.parse((await getRawSetting(db, 'sonaColors'))!)).toEqual([
+			{ name: 'Plum', hex: '#9A5363' },
+			{ name: 'Orange', hex: '#F5A572' }
+		]);
+	});
+
 	it('clamps the saved swatches to the palette cap', async () => {
 		const { db, platform } = makeDb();
 		const swatches = Array.from({ length: MAX_SONA_COLORS + 4 }, (_, i) => ({

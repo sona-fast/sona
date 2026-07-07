@@ -57,10 +57,20 @@
 
 	// The cap (MAX_SONA_COLORS) is also enforced server-side on save.
 	const paletteFull = $derived(colors.length >= MAX_SONA_COLORS);
+	// Transient "already in your palette" cue for a duplicate Add color (mirrors
+	// the picker's dedupe cue); the server dedupes on save as the backstop.
+	let addDupHint = $state(false);
+	let addDupTimer: ReturnType<typeof setTimeout> | undefined;
 	function addColor() {
 		if (paletteFull) return;
 		const hex = newColorHex.trim();
 		if (!/^#[0-9a-fA-F]{3,8}$/.test(hex)) return;
+		if (paletteHas(colors.map((c) => c.hex), hex)) {
+			addDupHint = true;
+			clearTimeout(addDupTimer);
+			addDupTimer = setTimeout(() => (addDupHint = false), 2500);
+			return;
+		}
 		colors = [...colors, { name: newColorName.trim() || 'Color', hex }];
 		newColorName = '';
 		newColorHex = '#888888';
@@ -394,6 +404,8 @@
 				</div>
 				{#if paletteFull}
 					<p class="hint" role="status">{m.admin_settings_sona_palette_full({ max: MAX_SONA_COLORS })}</p>
+				{:else if addDupHint}
+					<p class="hint" role="status">{m.admin_ref_picker_already_in_palette()}</p>
 				{/if}
 				{#if data.refImageSrc}
 					<div>

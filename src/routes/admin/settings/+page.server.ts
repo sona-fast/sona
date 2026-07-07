@@ -26,7 +26,7 @@ import { sql, inArray } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
-import { MAX_SONA_COLORS } from '$lib/palette-merge';
+import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
 import {
@@ -197,12 +197,15 @@ export const actions = {
 			sonaBuild: text('sonaBuild', 200),
 			sonaKeyFeatures: text('sonaKeyFeatures', 500),
 			// Re-parse + re-serialize the swatch JSON so only well-formed { name, hex }
-			// survive, clamped to the palette cap (the UI enforces it too).
+			// survive, deduped by hex, then clamped to the palette cap (the UI
+			// enforces both too).
 			sonaColors: data.has('sonaColors')
 				? JSON.stringify(
-						parseSonaColors((data.get('sonaColors') as string) || '[]')
-							.filter((c) => /^#[0-9a-fA-F]{3,8}$/.test(c.hex))
-							.slice(0, MAX_SONA_COLORS)
+						dedupePalette(
+							parseSonaColors((data.get('sonaColors') as string) || '[]').filter((c) =>
+								/^#[0-9a-fA-F]{3,8}$/.test(c.hex)
+							)
+						).slice(0, MAX_SONA_COLORS)
 					)
 				: undefined,
 			sonaDos: text('sonaDos', 1000),

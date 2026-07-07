@@ -31,3 +31,17 @@ export function paletteHas(existingHexes: string[], hex: string): boolean {
 	const key = hex.toLowerCase();
 	return existingHexes.some((h) => h.toLowerCase() === key);
 }
+
+// Drop duplicate swatches by hex (case-insensitive, first occurrence wins).
+// The server backstop for the palette's no-duplicates rule — the add paths
+// dedupe in the UI, but a manual edit of two hex fields to the same value
+// could otherwise persist a duplicate.
+export function dedupePalette<T extends { hex: string }>(swatches: T[]): T[] {
+	const seen = new Set<string>();
+	return swatches.filter((s) => {
+		const key = s.hex.toLowerCase();
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+}
