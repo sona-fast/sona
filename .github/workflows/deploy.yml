@@ -129,6 +129,36 @@ jobs:
           fi
           echo "FURTRACK_MODE=${FURTRACK_MODE} set on Pages project ${CF_PAGES_PROJECT}"
 
+      # Optional feature: observability (issue #6). Set the repo Actions VARIABLE
+      # `OBSERVABILITY_ENABLED` (Settings → Secrets and variables → Actions →
+      # Variables) to `true` and the next deploy turns the in-app metrics
+      # dashboard on for this fork. Same per-key PATCH as FURTRACK_MODE above, so
+      # nothing else on the project is touched. Unset = logged skip, feature stays
+      # dormant (default off) — this is what keeps it a selective, per-fork opt-in.
+      - name: Sync OBSERVABILITY_ENABLED to Pages project
+        env:
+          OBSERVABILITY_ENABLED: ${{ vars.OBSERVABILITY_ENABLED }}
+          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$OBSERVABILITY_ENABLED" ]; then
+            echo "OBSERVABILITY_ENABLED repo variable not set — skipping env var sync (observability stays off)"
+            exit 0
+          fi
+          payload=$(jq -n --arg v "$OBSERVABILITY_ENABLED" \
+            '{deployment_configs: {production: {env_vars: {OBSERVABILITY_ENABLED: {type: "plain_text", value: $v}}}}}')
+          resp=$(curl -s -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/${CF_PAGES_PROJECT}" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          if ! echo "$resp" | jq -e '.success' >/dev/null; then
+            echo "::error::Failed to set OBSERVABILITY_ENABLED on Pages project ${CF_PAGES_PROJECT}"
+            echo "$resp" | jq '.errors'
+            exit 1
+          fi
+          echo "OBSERVABILITY_ENABLED=${OBSERVABILITY_ENABLED} set on Pages project ${CF_PAGES_PROJECT}"
+
       # Optional feature: Telegram sticker import. Add the repo Actions SECRET
       # `TELEGRAM_BOT_TOKEN` and it's synced to the Pages project here. Pages
       # secrets bind at deploy time, so putting it before the deploy below means

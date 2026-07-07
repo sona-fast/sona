@@ -44,6 +44,14 @@
 	--accent-foreground: #F2F3F0;
 	--destructive: #FF5C33;
 	--destructive-foreground: #111111;
+	/* Status colours for the observability dashboard, themed like --destructive so
+	   they clear WCAG AA (4.5:1 text) on the card in BOTH modes. On dark cards the
+	   bright mock values pass; the light-mode overrides below darken them for the
+	   white card. --status-attention tracks each theme's --primary (resolved lazily
+	   per element), overridden only where the light primary would be too light. */
+	--status-ok: #4ade80;
+	--status-warn: #f5a623;
+	--status-attention: var(--primary);
 	--border: #2E2E2E;
 	--input: #2E2E2E;
 	--ring: #666666;
@@ -78,6 +86,13 @@
 	--accent-foreground: #111111;
 	--destructive: #D93C15;
 	--destructive-foreground: #FFFFFF;
+	/* Darkened for the white card (the mock values fail on white): #166534 is
+	   7.1:1 on white and 6.2:1 on the 14% tint the badges use; #92400E is 7.1:1 /
+	   6.3:1; #C2410C is 5.2:1. These are family-neutral (green is green, amber is
+	   amber) — the alternate light themes reuse them and only re-point attention. */
+	--status-ok: #166534;
+	--status-warn: #92400E;
+	--status-attention: #C2410C;
 	--border: #CBCCC9;
 	--input: #CBCCC9;
 	--ring: #666666;
@@ -105,6 +120,9 @@
 	--card-foreground: #f4f4ff;
 	--primary: #7c5cff;
 	--primary-foreground: #0e0f1a;
+	/* --primary is too light on this dark card for AA text (4.06:1). Status
+	   attention gets a lighter violet that clears 4.5:1 on --card and --background. */
+	--status-attention: #a48bff;
 	--secondary: #232544;
 	--secondary-foreground: #f4f4ff;
 	--muted: #232544;
@@ -139,6 +157,9 @@
 	--accent-foreground: #16172a;
 	--destructive: #d1284c;
 	--destructive-foreground: #ffffff;
+	/* status-ok/warn inherit the family-neutral light values; only re-point
+	   attention to this theme's primary (#6a4cf0 is 5.4:1 on white). */
+	--status-attention: var(--primary);
 	--border: #d8d8ee;
 	--input: #d8d8ee;
 	--ring: #6a4cf0;
@@ -213,6 +234,9 @@
 	   on the button fill. */
 	--destructive: #B23008;
 	--destructive-foreground: #EADED6;
+	/* status-ok/warn inherit the family-neutral light values; only re-point
+	   attention to this theme's primary (#AD3A1E is 6.2:1 on white). */
+	--status-attention: var(--primary);
 	--border: #CBBEB3;
 	--input: #CBBEB3;
 	--ring: #AD3A1E;

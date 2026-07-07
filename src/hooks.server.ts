@@ -1,10 +1,11 @@
-import type { Handle } from '@sveltejs/kit';
+import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
 import { isSetupComplete, hashToken } from '$lib/server/admin-auth';
 import { getSettings } from '$lib/server/settings';
+import { recordMetric, recordError, routeClass, isAssetPath, schedule, isObservabilityEnabled } from '$lib/server/metrics';
 import { THEME_MODE_COOKIE, SESSION_COOKIE } from '$lib/config';
 import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
@@ -119,6 +120,38 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 		transformPageChunk: ({ html }) => html.replace('%theme%', themeId).replace('%mode%', mode)
 	});
 
+	// Observability (issue #6): count one in-app request per non-asset path, keyed
+	// by coarse route class only (never the raw path). Fire-and-forget via
+	// waitUntil so it adds no latency and a metrics failure can't break the
+	// response. Writes to THIS fork's own DB — tenant-isolated by construction.
+	// Note: this counts app/SSR requests that reach the Function; edge-cached hits
+	// and static assets are invisible here (the "app requests" label reflects that,
+	// and the optional Cloudflare edge panel fills the gap).
+	//
+	// EVERY 5xx is also counted toward the error rate here — including DELIBERATE
+	// error(5xx) responses (e.g. sticker downloads) that never reach handleError.
+	// Counting 5xx only in handleError undercounted the rate, so the dashboard could
+	// read "All clear" while a whole error class was broken. The rollup is recorded
+	// exactly once per 5xx (here), keeping the error numerator and request
+	// denominator consistent. handleError (which runs during resolve, before this
+	// code) records the richer message for genuine exceptions and sets
+	// locals.errorSampled; we skip the generic fallback sample for those so a thrown
+	// error yields one detailed row, not a duplicate — but its rollup still lands
+	// here, so it is never double-counted in the rate.
+	if (event.platform?.env.DB && !isAssetPath(path) && isObservabilityEnabled(event.platform?.env)) {
+		const db = getDb(event.platform.env.DB);
+		const work: Promise<unknown>[] = [recordMetric(db, 'request', routeClass(path))];
+		if (response.status >= 500) {
+			work.push(recordMetric(db, 'error', String(response.status)));
+			if (!event.locals.errorSampled) {
+				work.push(
+					recordError(db, { route: path, status: response.status, message: `HTTP ${response.status}` })
+				);
+			}
+		}
+		schedule(event.platform, Promise.all(work));
+	}
+
 	// Security headers
 	response.headers.set('X-Frame-Options', 'DENY');
 	response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -149,3 +182,25 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 };
 
 export const handle: Handle = sequence(paraglideHandle, authHandle);
+
+// Observability (issue #6): add the RICH error sample for genuine exceptions.
+// handleError fires only for real thrown errors (not deliberate `error(4xx/5xx, …)`
+// HttpErrors), and it's the one place the real message ("D1_ERROR: …") is
+// available. It records ONLY the detailed capped-ring sample — the error-RATE
+// rollup and the request counter are both incremented once per 5xx in authHandle
+// above (which also samples the deliberate error(5xx) responses that never reach
+// here). Setting locals.errorSampled tells that code to skip its generic fallback
+// sample for this same 5xx, so a thrown error yields one detailed row, not a
+// duplicate. Fire-and-forget so error handling never depends on the metrics write;
+// returns undefined to keep SvelteKit's default error response unchanged.
+export const handleError: HandleServerError = ({ error, event, status, message }) => {
+	if (event.platform?.env.DB && status >= 500 && isObservabilityEnabled(event.platform?.env)) {
+		event.locals.errorSampled = true;
+		const db = getDb(event.platform.env.DB);
+		const detail = error instanceof Error ? error.message : message;
+		schedule(
+			event.platform,
+			recordError(db, { route: event.url.pathname, status, message: detail })
+		);
+	}
+};

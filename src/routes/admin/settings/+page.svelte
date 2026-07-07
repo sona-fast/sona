@@ -4,6 +4,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SetupDialog from '$lib/components/SetupDialog.svelte';
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
+	import CloudflareSetupDialog from '$lib/components/CloudflareSetupDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
@@ -117,6 +118,7 @@
 	let adminEmail = $state(data.adminEmail);
 	let savingRecoveryEmail = $state(false);
 	let showResendSetup = $state(false);
+	let showCfSetup = $state(false);
 
 	// Readiness reflects the SAVED recovery email (data.adminEmail, kept fresh by
 	// the post-save load re-run), never the live input: an unsaved keystroke must
@@ -132,7 +134,7 @@
 	const RESEND_RING_C = 113.1;
 	const resendRingOffset = $derived(RESEND_RING_C * (1 - resendProgress.done / resendProgress.total));
 
-	let activeTab = $state<'site' | 'connections' | 'storage' | 'account'>('site');
+	let activeTab = $state<'site' | 'connections' | 'storage' | 'account' | 'observability'>('site');
 
 	// Usage bar reflects the ACTIVE provider. R2 has no simple usage API, so we use
 	// the DB-tracked total (every image is on the active store) against the 10GB free tier.
@@ -243,6 +245,9 @@
 			<button type="button" class:active={activeTab === 'connections'} onclick={() => (activeTab = 'connections')}>{m.admin_settings_tab_connections()}</button>
 			<button type="button" class:active={activeTab === 'storage'} onclick={() => (activeTab = 'storage')}>{m.admin_settings_tab_storage()}</button>
 			<button type="button" class:active={activeTab === 'account'} onclick={() => (activeTab = 'account')}>{m.admin_settings_tab_account()}</button>
+			{#if data.observabilityEnabled}
+				<button type="button" class:active={activeTab === 'observability'} onclick={() => (activeTab = 'observability')}>{m.admin_settings_tab_observability()}</button>
+			{/if}
 		</nav>
 	</div>
 
@@ -893,8 +898,39 @@
 		</form>
 	</div>
 </section>
+
+<!-- Observability → Cloudflare edge analytics (issue #6). Secret-gated, same
+     pattern as the Resend entry above: presence-only status + connect help +
+     disconnect-via-secret note. The token lives in Pages secrets, not the DB, so
+     there is nothing to submit here. -->
+<section class="security-section" data-tab="observability" hidden={!data.observabilityEnabled}>
+	<h2>{m.admin_settings_obs_heading()}</h2>
+	<p class="section-desc">
+		{data.cfAnalyticsConnected ? m.admin_settings_obs_lede_set() : m.admin_settings_obs_lede_unset()}
+	</p>
+	<div class="reset-status" aria-live="polite">
+		{#if data.cfAnalyticsConnected}
+			<span class="status-tag active"><Check size={13} /> {m.admin_settings_obs_status_set()}</span>
+			<a class="hint-link muted" href="/admin/observability">{m.admin_settings_obs_link_set()}</a>
+		{:else}
+			<span class="status-tag unset"><span class="dot"></span> {m.admin_settings_obs_status_unset()}</span>
+			<button type="button" class="hint-link" onclick={() => (showCfSetup = true)}>{m.admin_settings_obs_link_unset()}</button>
+		{/if}
+	</div>
+	<p class="field-hint">
+		{#if data.cfAnalyticsConnected}
+			{m.admin_settings_obs_hint_set_a()}<code>wrangler pages secret delete CF_ANALYTICS_TOKEN</code>{m.admin_settings_obs_hint_set_b()}
+		{:else}
+			{m.admin_settings_obs_hint_unset_a()}<code>Account Analytics: Read</code>{m.admin_settings_obs_hint_unset_b()}<code>pages.dev</code>{m.admin_settings_obs_hint_unset_c()}
+		{/if}
+	</p>
+</section>
 	</div>
 </div>
+
+{#if showCfSetup}
+	<CloudflareSetupDialog onclose={() => (showCfSetup = false)} />
+{/if}
 
 {#if confirmingAction}
 	<ConfirmDialog
@@ -997,7 +1033,8 @@
 	.settings-tabs[data-active-tab='site'] [data-tab]:not([data-tab~='site']),
 	.settings-tabs[data-active-tab='connections'] [data-tab]:not([data-tab~='connections']),
 	.settings-tabs[data-active-tab='storage'] [data-tab]:not([data-tab~='storage']),
-	.settings-tabs[data-active-tab='account'] [data-tab]:not([data-tab~='account']) {
+	.settings-tabs[data-active-tab='account'] [data-tab]:not([data-tab~='account']),
+	.settings-tabs[data-active-tab='observability'] [data-tab]:not([data-tab~='observability']) {
 		display: none;
 	}
 
