@@ -192,9 +192,13 @@ async function sendResetEmail(
 		if (!resp.ok) {
 			// Log the status plus a redacted, length-capped body — Resend's 4xx bodies
 			// carry the actual reason (e.g. an unverified domain) the status alone
-			// doesn't, but can also echo the recovery `to` address, which must not
-			// land in CF logs (PII). Strip anything email-shaped, then cap length.
-			const body = (await resp.text()).replace(/[^\s@]+@[^\s@]+/g, '[redacted]').slice(0, 300);
+			// doesn't, but can also echo the recovery `to` address (PII) or, if a body
+			// ever reflected the payload, the reset link's token. Strip anything
+			// email-shaped and any token= param, then cap length, before logging.
+			const body = (await resp.text())
+				.replace(/[^\s@]+@[^\s@]+/g, '[redacted]')
+				.replace(/token=[^\s&"']+/gi, 'token=[redacted]')
+				.slice(0, 300);
 			console.error(`Resend password-reset send failed: ${resp.status} ${body}`);
 			return false;
 		}

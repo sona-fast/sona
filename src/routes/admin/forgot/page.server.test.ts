@@ -311,4 +311,53 @@ describe('forgot action', () => {
 		// Once the deferred work has actually run, the token is there.
 		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeTruthy();
 	});
+
+	it('redacts a reset-link token echoed in the Resend error body before logging it', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		fetchMock.mockImplementation(
+			async () =>
+				new Response(
+					JSON.stringify({ message: 'bad link https://taro.surf/admin/reset?token=SECRETTOKEN123 rejected' }),
+					{ status: 422 }
+				)
+		);
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const logged = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+		// Status + reason kept; the reset token stripped so it can't be replayed from logs.
+		expect(logged).toContain('422');
+		expect(logged).toContain('token=[redacted]');
+		expect(logged).not.toContain('SECRETTOKEN123');
+		errorSpy.mockRestore();
+	});
+
+	it('logs a deferred-task failure distinctly and still returns the generic response', async () => {
+		// A DB that throws on use forces the deferred mint+send task to reject after
+		// the response has already returned — the "2xx send then D1 write fails"
+		// dead-link case the failure log exists to surface.
+		const brokenDb = {
+			prepare: () => {
+				throw new Error('D1 unavailable');
+			}
+		};
+		let captured: Promise<unknown> | undefined;
+		const platform = {
+			env: { DB: brokenDb, RESEND_API_KEY: 'rk_test' },
+			ctx: { waitUntil: (p: Promise<unknown>) => (captured = p) }
+		} as unknown as App.Platform;
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		const result = await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		// Generic response regardless of the deferred failure (no enumeration).
+		expect(result).toEqual({ sent: true });
+		await captured; // let the deferred .catch run
+		const logged = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+		expect(logged).toContain('password-reset deferred task failed:');
+		expect(logged).toContain('D1 unavailable');
+		errorSpy.mockRestore();
+	});
 });
