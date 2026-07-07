@@ -61,6 +61,7 @@
 	// the picker's dedupe cue); the server dedupes on save as the backstop.
 	let addDupHint = $state(false);
 	let addDupTimer: ReturnType<typeof setTimeout> | undefined;
+	$effect(() => () => clearTimeout(addDupTimer));
 	function addColor() {
 		if (paletteFull) return;
 		const hex = newColorHex.trim();
