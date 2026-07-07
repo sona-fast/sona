@@ -1,7 +1,5 @@
 # Image Variants — Implementation Plan
 
-Tracks [#1](https://github.com/sparkyfen/sparky.ink/issues/1).
-
 ## Goal
 
 Allow an image to have related "variants" — alternate versions of the same piece (transparent background, NSFW alt ending, color swap, etc.) — grouped under a single parent so the gallery isn't cluttered with near-duplicates.
