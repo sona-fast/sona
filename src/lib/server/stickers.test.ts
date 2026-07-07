@@ -8,8 +8,8 @@ import { derivePackShape, resolveStickerArtistIds, findStickers, listPacks } fro
 import * as schema from './db/schema';
 import type { Database as Db } from './db';
 
-// The single-artist invariant is the core data rule of the stickers feature
-// (examples/sparky.ink/stickers-design-brief.md): a pack with a managerArtistId is single-artist and
+// The single-artist invariant is the core data rule of the stickers feature:
+// a pack with a managerArtistId is single-artist and
 // EVERY sticker must be credited to that manager; without one, the pack is
 // self-managed and may mix artists. These two pure functions encode that rule —
 // resolveStickerArtistIds enforces it on every write path, derivePackShape reads

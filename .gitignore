@@ -37,8 +37,7 @@ vite.config.ts.timestamp-*
 /blob-report
 /playwright/.cache
 # Per-deployment Cloudflare config (resource IDs). Copy wrangler.toml.example to
-# wrangler.toml and fill in your own. The reference values live in
-# examples/sparky.ink/wrangler.toml.
+# wrangler.toml and fill in your own.
 /wrangler.toml
 
 # Pencil generated images
@@ -47,7 +46,7 @@ vite.config.ts.timestamp-*
 # Exported mockups (shared externally, not source)
 /docs/fursuit-photos-mockups/
 
-# Claude Design bundle (HTML exported from examples/sparky.ink/sparky-ink.pen + synced to claude.ai/design)
+# Claude Design bundle (HTML exported from the design file + synced to claude.ai/design)
 /design/
 
 # IDE

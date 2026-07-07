@@ -3,7 +3,7 @@
 # Copy this file to `wrangler.toml` and fill in your own values (or let the
 # setup CLI generate it for you). `wrangler.toml` itself is gitignored so each
 # deployment keeps its own resource IDs without merge conflicts when you pull
-# upstream Sona updates. A worked example is in `examples/sparky.ink/`.
+# upstream Sona updates.
 
 # Your Cloudflare Pages project name (lowercase, hyphenated). Also used as the
 # wrangler-action --project-name and the GitHub Actions CF_PAGES_PROJECT var.

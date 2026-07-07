@@ -5,9 +5,8 @@ character's commissioned art, fursuit photos, and sticker packs, with a clean
 single-admin CMS. Fork it, deploy it to your own Cloudflare account, configure it
 through the setup UI, pick a theme, and it's your site.
 
-Sona is the generalized version of [sparky.ink](https://sparky.ink) (the original
-deployment, kept in-repo as the reference config under
-[`examples/sparky.ink/`](examples/sparky.ink)). The project home is
+Sona is the generalized version of [sparky.ink](https://sparky.ink) (the
+original deployment it grew out of). The project home is
 [sona.fast](https://sona.fast).
 
 > **Status:** under active generalization. The de-branding (config + settings)
