@@ -34,6 +34,16 @@ declare global {
 				/** Fursuit photos feature gate: 'off' (default) | 'mock' | 'live'. */
 				FURTRACK_MODE?: string;
 				/**
+				 * Opt-in gate for the issue #6 observability feature. DEFAULT OFF:
+				 * enable with 'true'/'1'/'on'/'yes' (case-insensitive); anything else
+				 * (unset, 'false', '0', 'off', 'no') keeps it dormant. Gates the in-app
+				 * instrumentation (no metric/error rows written), the
+				 * /admin/observability dashboard (nav hidden + route redirects to
+				 * /admin when off), and the Settings → Observability entry. Set via
+				 * `wrangler pages secret put OBSERVABILITY_ENABLED` or `[vars]`.
+				 */
+				OBSERVABILITY_ENABLED?: string;
+				/**
 				 * Telegram Bot API token (from @BotFather). Gates the sticker
 				 * importer: when unset, Telegram import is hidden and only manual
 				 * upload works. Set via `wrangler secret put TELEGRAM_BOT_TOKEN`.

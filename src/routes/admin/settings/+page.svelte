@@ -245,7 +245,9 @@
 			<button type="button" class:active={activeTab === 'connections'} onclick={() => (activeTab = 'connections')}>{m.admin_settings_tab_connections()}</button>
 			<button type="button" class:active={activeTab === 'storage'} onclick={() => (activeTab = 'storage')}>{m.admin_settings_tab_storage()}</button>
 			<button type="button" class:active={activeTab === 'account'} onclick={() => (activeTab = 'account')}>{m.admin_settings_tab_account()}</button>
-			<button type="button" class:active={activeTab === 'observability'} onclick={() => (activeTab = 'observability')}>{m.admin_settings_tab_observability()}</button>
+			{#if data.observabilityEnabled}
+				<button type="button" class:active={activeTab === 'observability'} onclick={() => (activeTab = 'observability')}>{m.admin_settings_tab_observability()}</button>
+			{/if}
 		</nav>
 	</div>
 
@@ -901,7 +903,7 @@
      pattern as the Resend entry above: presence-only status + connect help +
      disconnect-via-secret note. The token lives in Pages secrets, not the DB, so
      there is nothing to submit here. -->
-<section class="security-section" data-tab="observability">
+<section class="security-section" data-tab="observability" hidden={!data.observabilityEnabled}>
 	<h2>{m.admin_settings_obs_heading()}</h2>
 	<p class="section-desc">
 		{data.cfAnalyticsConnected ? m.admin_settings_obs_lede_set() : m.admin_settings_obs_lede_unset()}

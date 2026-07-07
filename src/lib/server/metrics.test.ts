@@ -13,6 +13,7 @@ import {
 	dayKey,
 	routeClass,
 	isAssetPath,
+	isObservabilityEnabled,
 	ERROR_SAMPLE_CAP
 } from './metrics';
 
@@ -79,6 +80,19 @@ describe('metrics — pure helpers', () => {
 		expect(isAssetPath('/_app/immutable/x.js')).toBe(true);
 		expect(isAssetPath('/favicon.ico')).toBe(true);
 		expect(isAssetPath('/gallery')).toBe(false);
+	});
+
+	it('isObservabilityEnabled defaults OFF and is opt-in', () => {
+		// Off for unset / empty / explicit-negative values.
+		expect(isObservabilityEnabled(undefined)).toBe(false);
+		expect(isObservabilityEnabled({})).toBe(false);
+		for (const v of ['', 'false', '0', 'off', 'no', ' ', 'nope']) {
+			expect(isObservabilityEnabled({ OBSERVABILITY_ENABLED: v })).toBe(false);
+		}
+		// On only for the accepted truthy tokens, case-insensitive + trimmed.
+		for (const v of ['true', '1', 'on', 'yes', 'TRUE', 'On', ' yes ']) {
+			expect(isObservabilityEnabled({ OBSERVABILITY_ENABLED: v })).toBe(true);
+		}
 	});
 });
 

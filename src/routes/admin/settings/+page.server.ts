@@ -38,6 +38,7 @@ import {
 } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
 import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
+import { isObservabilityEnabled } from '$lib/server/metrics';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { isValidGallerySort, DEFAULT_GALLERY_SORT, type GallerySort } from '$lib/gallery';
@@ -135,7 +136,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			platform?.env?.CF_ANALYTICS_TOKEN &&
 			platform?.env?.CF_ACCOUNT_ID &&
 			platform?.env?.CF_ZONE_ID
-		)
+		),
+		// Opt-in gate (issue #6): hides the Observability settings tab + section when off.
+		observabilityEnabled: isObservabilityEnabled(platform?.env)
 	};
 };
 

@@ -5,7 +5,7 @@ import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
 import { isSetupComplete, hashToken } from '$lib/server/admin-auth';
 import { getSettings } from '$lib/server/settings';
-import { recordMetric, recordError, routeClass, isAssetPath, schedule } from '$lib/server/metrics';
+import { recordMetric, recordError, routeClass, isAssetPath, schedule, isObservabilityEnabled } from '$lib/server/metrics';
 import { THEME_MODE_COOKIE, SESSION_COOKIE } from '$lib/config';
 import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
@@ -138,7 +138,7 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// locals.errorSampled; we skip the generic fallback sample for those so a thrown
 	// error yields one detailed row, not a duplicate — but its rollup still lands
 	// here, so it is never double-counted in the rate.
-	if (event.platform?.env.DB && !isAssetPath(path)) {
+	if (event.platform?.env.DB && !isAssetPath(path) && isObservabilityEnabled(event.platform?.env)) {
 		const db = getDb(event.platform.env.DB);
 		const work: Promise<unknown>[] = [recordMetric(db, 'request', routeClass(path))];
 		if (response.status >= 500) {
@@ -194,7 +194,7 @@ export const handle: Handle = sequence(paraglideHandle, authHandle);
 // duplicate. Fire-and-forget so error handling never depends on the metrics write;
 // returns undefined to keep SvelteKit's default error response unchanged.
 export const handleError: HandleServerError = ({ error, event, status, message }) => {
-	if (event.platform?.env.DB && status >= 500) {
+	if (event.platform?.env.DB && status >= 500 && isObservabilityEnabled(event.platform?.env)) {
 		event.locals.errorSampled = true;
 		const db = getDb(event.platform.env.DB);
 		const detail = error instanceof Error ? error.message : message;

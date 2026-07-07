@@ -17,6 +17,18 @@ import { sql } from 'drizzle-orm';
 import { metricRollup, errorSample, jobRun } from './db/schema';
 import type { Database } from './db';
 
+type Env = { OBSERVABILITY_ENABLED?: string };
+
+/**
+ * Opt-in gate for the issue #6 observability feature. DEFAULT OFF: enabled only
+ * when OBSERVABILITY_ENABLED is one of 'true'/'1'/'on'/'yes' (case-insensitive);
+ * anything else (unset, '', 'false', '0', 'off', 'no') leaves the feature dormant.
+ */
+export function isObservabilityEnabled(env: Env | undefined): boolean {
+	const v = (env?.OBSERVABILITY_ENABLED ?? '').toString().trim().toLowerCase();
+	return v === 'true' || v === '1' || v === 'on' || v === 'yes';
+}
+
 export type Metric = 'request' | 'error' | 'upload' | 'email';
 /** Coarse request bucket — the only `dim` used for metric='request'. */
 export type RouteClass = 'public' | 'admin' | 'api';

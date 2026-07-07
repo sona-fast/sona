@@ -12,7 +12,9 @@
 
 	const theme = getTheme();
 
-	const sidebarItems = [
+	// Opt-in gate (issue #6): the Observability item only appears when the feature
+	// is enabled (data.observabilityEnabled from the admin layout load).
+	const sidebarItems = $derived([
 		{ href: '/admin/upload', label: m.admin_nav_upload, icon: Upload },
 		{ href: '/admin/images', label: m.admin_nav_all_images, icon: Images },
 		{ href: '/admin/collections', label: m.admin_nav_collections, icon: Folder },
@@ -23,8 +25,10 @@
 		{ href: '/admin/tags', label: m.admin_nav_tags, icon: Tags },
 		{ href: '/admin/conventions', label: m.admin_nav_conventions, icon: CalendarDays },
 		{ href: '/admin/settings', label: m.admin_nav_settings, icon: Settings },
-		{ href: '/admin/observability', label: m.admin_nav_observability, icon: Activity }
-	];
+		...(data.observabilityEnabled
+			? [{ href: '/admin/observability', label: m.admin_nav_observability, icon: Activity }]
+			: [])
+	]);
 
 </script>
 

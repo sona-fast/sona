@@ -133,12 +133,20 @@ function makeMetricsDb(): { db: D1Database; sqlite: any } {
 	return { db: makeD1(sqlite), sqlite };
 }
 
-function metricsEvent(pathname: string, db: D1Database, waits: Promise<unknown>[], locals: App.Locals = {}) {
+// envExtra defaults to the enabled flag so the existing 5xx-accounting tests
+// exercise the write path; the off-flag test passes {} to leave it disabled.
+function metricsEvent(
+	pathname: string,
+	db: D1Database,
+	waits: Promise<unknown>[],
+	locals: App.Locals = {},
+	envExtra: Record<string, string> = { OBSERVABILITY_ENABLED: 'true' }
+) {
 	return {
 		cookies: { get: () => undefined },
 		url: new URL(`https://taro.surf${pathname}`),
 		locals,
-		platform: { env: { DB: db }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
+		platform: { env: { DB: db, ...envExtra }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
 	} as never;
 }
 
@@ -150,7 +158,7 @@ describe('handleError — rich 5xx sample (issue #6)', () => {
 		const event = {
 			url: new URL('https://taro.surf/admin/images'),
 			locals,
-			platform: { env: { DB: db }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
+			platform: { env: { DB: db, OBSERVABILITY_ENABLED: 'true' }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
 		} as never;
 
 		handleError({ error: new Error('D1_ERROR: boom'), event, status: 500, message: 'Internal Error' } as never);
@@ -213,6 +221,19 @@ describe('authHandle — 5xx counts toward the error rate (issue #6)', () => {
 		// Rollup still lands exactly once (rate stays correct)...
 		expect(sqlite.prepare("SELECT SUM(count) c FROM metric_rollup WHERE metric='error'").get().c).toBe(1);
 		// ...but no generic fallback sample is added on top of the detailed one.
+		expect(sqlite.prepare('SELECT COUNT(*) c FROM error_sample').get().c).toBe(0);
+	});
+
+	it('writes NOTHING when the observability flag is off (feature dormant)', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		// Empty envExtra => OBSERVABILITY_ENABLED unset => feature disabled.
+		await authHandle({ event: metricsEvent('/gallery', db, waits, {}, {}), resolve: resolve500 } as never);
+		await Promise.all(waits);
+
+		// No request/error rollups and no error samples: the same 5xx that writes
+		// rows when enabled must leave both tables empty when the flag is off.
+		expect(sqlite.prepare('SELECT COUNT(*) c FROM metric_rollup').get().c).toBe(0);
 		expect(sqlite.prepare('SELECT COUNT(*) c FROM error_sample').get().c).toBe(0);
 	});
 });
