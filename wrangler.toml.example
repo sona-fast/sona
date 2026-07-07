@@ -6,7 +6,7 @@
 # upstream Sona updates.
 
 # Your Cloudflare Pages project name (lowercase, hyphenated). Also used as the
-# wrangler-action --project-name and the GitHub Actions CF_PAGES_PROJECT var.
+# wrangler-action --project-name and the GitHub Actions CLOUDFLARE_PAGES_PROJECT var.
 name = "sona"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]

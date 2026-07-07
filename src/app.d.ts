@@ -89,13 +89,13 @@ declare global {
 				 * All three must be present for the "Cloudflare edge" panel to appear;
 				 * absence just hides it. The token needs exactly one scope —
 				 * Account · Account Analytics · Read (read-only, this account only). Set
-				 * via `wrangler pages secret put CF_ANALYTICS_TOKEN` (+ CF_ACCOUNT_ID,
-				 * CF_ZONE_ID). Zone analytics need a custom domain; a bare pages.dev has
+				 * via `wrangler pages secret put CLOUDFLARE_ANALYTICS_TOKEN` (+ CLOUDFLARE_ACCOUNT_ID,
+				 * CLOUDFLARE_ZONE_ID). Zone analytics need a custom domain; a bare pages.dev has
 				 * no zone. Never stored in the DB; disconnect by deleting the secret.
 				 */
-				CF_ANALYTICS_TOKEN?: string;
-				CF_ACCOUNT_ID?: string;
-				CF_ZONE_ID?: string;
+				CLOUDFLARE_ANALYTICS_TOKEN?: string;
+				CLOUDFLARE_ACCOUNT_ID?: string;
+				CLOUDFLARE_ZONE_ID?: string;
 			};
 			/**
 			 * Cloudflare execution context. `waitUntil` lets fire-and-forget work

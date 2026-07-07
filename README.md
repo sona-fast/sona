@@ -67,7 +67,7 @@ original deployment it grew out of). The project home is
 3. **Deploy.** Pushing to `main` runs the GitHub Actions workflow
    ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)): it applies
    D1 migrations and deploys to Pages. Set repo secrets `CLOUDFLARE_ACCOUNT_ID` +
-   `CLOUDFLARE_API_TOKEN`, and (optionally) repo variables `CF_PAGES_PROJECT` /
+   `CLOUDFLARE_API_TOKEN`, and (optionally) repo variables `CLOUDFLARE_PAGES_PROJECT` /
    `D1_DATABASE_NAME` / `SITE_URL` / `FURTRACK_MODE` (`npm run setup` can set
    these for you). (Or deploy directly:
    `npx wrangler pages deploy .svelte-kit/cloudflare`.)
