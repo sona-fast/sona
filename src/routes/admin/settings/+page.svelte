@@ -7,7 +7,7 @@
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
-	import { mergeSuggestions } from '$lib/palette-merge';
+	import { MAX_SONA_COLORS, mergeSuggestions, paletteHas } from '$lib/palette-merge';
 	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X, Pipette } from 'lucide-svelte';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
@@ -55,7 +55,10 @@
 	let newColorHex = $state('#888888');
 	let showRefPicker = $state(false);
 
+	// The cap (MAX_SONA_COLORS) is also enforced server-side on save.
+	const paletteFull = $derived(colors.length >= MAX_SONA_COLORS);
 	function addColor() {
+		if (paletteFull) return;
 		const hex = newColorHex.trim();
 		if (!/^#[0-9a-fA-F]{3,8}$/.test(hex)) return;
 		colors = [...colors, { name: newColorName.trim() || 'Color', hex }];
@@ -78,16 +81,21 @@
 		input.value = hex ?? newColorHex;
 	}
 	// The ref-sheet picker commits into either an existing swatch or the
-	// pending "new color" slot (named + added via the Add color button).
+	// pending "new color" slot (named + added via the Add color button). A
+	// "new" pick of a hex already in the palette is dropped — same dedupe as
+	// Add all (the picker shows the "already in your palette" cue); explicit
+	// overwrites of an existing slot stay unrestricted.
 	function applyPickedColor(slot: number | 'new', hex: string) {
-		if (slot === 'new') newColorHex = hex;
-		else colors = colors.map((c, i) => (i === slot ? { ...c, hex } : c));
+		if (slot === 'new') {
+			if (paletteHas(colors.map((c) => c.hex), hex)) return;
+			newColorHex = hex;
+		} else colors = colors.map((c, i) => (i === slot ? { ...c, hex } : c));
 	}
 	// "Add all" in the picker: append every suggestion not already in the
 	// palette (case-insensitive, deduped) with the same default name the
-	// Add color button gives an unnamed color.
+	// Add color button gives an unnamed color — up to the palette cap.
 	function addAllSuggestions(hexes: string[]) {
-		const toAdd = mergeSuggestions(colors.map((c) => c.hex), hexes);
+		const toAdd = mergeSuggestions(colors.map((c) => c.hex), hexes, MAX_SONA_COLORS - colors.length);
 		colors = [...colors, ...toAdd.map((hex) => ({ name: 'Color', hex }))];
 	}
 
@@ -382,8 +390,11 @@
 						onchange={(e) => setNewColorHex(e.currentTarget)}
 					/>
 					<input type="text" class="input" bind:value={newColorName} aria-label={m.admin_settings_sona_color_name_placeholder()} placeholder={m.admin_settings_sona_color_name_placeholder()} />
-					<button type="button" class="btn btn-secondary" onclick={addColor}>{m.admin_settings_sona_add_color()}</button>
+					<button type="button" class="btn btn-secondary" disabled={paletteFull} onclick={addColor}>{m.admin_settings_sona_add_color()}</button>
 				</div>
+				{#if paletteFull}
+					<p class="hint" role="status">{m.admin_settings_sona_palette_full({ max: MAX_SONA_COLORS })}</p>
+				{/if}
 				{#if data.refImageSrc}
 					<div>
 						<button type="button" class="btn btn-secondary" onclick={() => (showRefPicker = true)}>

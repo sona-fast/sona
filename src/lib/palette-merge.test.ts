@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeSuggestions } from './palette-merge';
+import { mergeSuggestions, paletteHas } from './palette-merge';
 
 describe('mergeSuggestions', () => {
 	it('returns every suggestion when none are in the palette yet', () => {
@@ -23,5 +23,29 @@ describe('mergeSuggestions', () => {
 		expect(mergeSuggestions([], [])).toEqual([]);
 		expect(mergeSuggestions(['#AABBCC'], [])).toEqual([]);
 		expect(mergeSuggestions([], ['#AABBCC'])).toEqual(['#AABBCC']);
+	});
+
+	it('caps the additions at the remaining capacity', () => {
+		expect(mergeSuggestions([], ['#111111', '#222222', '#333333'], 2)).toEqual([
+			'#111111',
+			'#222222'
+		]);
+		expect(mergeSuggestions(['#111111'], ['#111111', '#222222', '#333333'], 0)).toEqual([]);
+		// The limit counts only fresh additions, not skipped duplicates.
+		expect(mergeSuggestions(['#111111'], ['#111111', '#222222', '#333333'], 1)).toEqual([
+			'#222222'
+		]);
+	});
+});
+
+describe('paletteHas', () => {
+	it('matches case-insensitively', () => {
+		expect(paletteHas(['#AABBCC'], '#aabbcc')).toBe(true);
+		expect(paletteHas(['#aabbcc'], '#AABBCC')).toBe(true);
+	});
+
+	it('is false when the hex is absent or the palette is empty', () => {
+		expect(paletteHas(['#AABBCC'], '#123456')).toBe(false);
+		expect(paletteHas([], '#AABBCC')).toBe(false);
 	});
 });

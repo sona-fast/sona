@@ -8,6 +8,7 @@ import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import { getRawSetting, setRawSetting, parseLines } from '$lib/server/settings';
+import { MAX_SONA_COLORS } from '$lib/palette-merge';
 import { actions, load } from './+page.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses
@@ -143,6 +144,20 @@ describe('settings saveSite — three-path profile fields', () => {
 		expect(JSON.parse((await getRawSetting(db, 'sonaColors'))!)).toEqual([
 			{ name: 'Blue', hex: '#3A6EA5' }
 		]);
+	});
+
+	it('clamps the saved swatches to the palette cap', async () => {
+		const { db, platform } = makeDb();
+		const swatches = Array.from({ length: MAX_SONA_COLORS + 4 }, (_, i) => ({
+			name: `c${i}`,
+			hex: `#${i.toString(16).padStart(2, '0').repeat(3)}`
+		}));
+
+		await actions.saveSite(saveSiteEvent(platform, { sonaColors: JSON.stringify(swatches) }));
+
+		const saved = JSON.parse((await getRawSetting(db, 'sonaColors'))!);
+		expect(saved).toHaveLength(MAX_SONA_COLORS);
+		expect(saved).toEqual(swatches.slice(0, MAX_SONA_COLORS));
 	});
 });
 

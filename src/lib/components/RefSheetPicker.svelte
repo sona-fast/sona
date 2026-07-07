@@ -2,6 +2,7 @@
 	import { Check, Pipette, X } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { extractPalette } from '$lib/palette-extract';
+	import { MAX_SONA_COLORS, paletteHas } from '$lib/palette-merge';
 	import { rgbToHex } from '$lib/color-hex';
 	import { focusTrap } from '$lib/focus-trap';
 	import { loupeCenterX } from '$lib/loupe-position';
@@ -30,6 +31,35 @@
 	let suggestions = $state<string[]>([]);
 	let loadError = $state(false);
 	let hover = $state<{ hex: string; r: number; g: number; b: number; x: number; y: number; touch: boolean; below: boolean } | null>(null);
+
+	// Palette-aware pick state: slots ARE the live palette (the parent passes
+	// its colors), so duplicate/full checks derive straight from them.
+	const paletteHexes = $derived(slots.map((s) => s.hex));
+	const paletteFull = $derived(slots.length >= MAX_SONA_COLORS);
+	// Transient "Already in your palette" cue for a duplicate New-color pick.
+	let dupHint = $state(false);
+	let dupHintTimer: ReturnType<typeof setTimeout> | undefined;
+	function showDupHint() {
+		dupHint = true;
+		clearTimeout(dupHintTimer);
+		dupHintTimer = setTimeout(() => (dupHint = false), 2500);
+	}
+	$effect(() => () => clearTimeout(dupHintTimer));
+
+	// All picks (loupe commit + suggestion pills) route through here: a pick
+	// aimed at the "New color" slot is dropped when the hex is already in the
+	// palette (dedupe cue) or the palette is full (the persistent full hint
+	// explains why); overwriting an existing slot stays unrestricted.
+	function pick(hex: string) {
+		if (activeSlot === 'new') {
+			if (paletteFull) return;
+			if (paletteHas(paletteHexes, hex)) {
+				showDupHint();
+				return;
+			}
+		}
+		onpick(activeSlot, hex);
+	}
 
 	const LOUPE = 120; // loupe canvas CSS size
 	const ZOOM = 8; // CSS px shown per working-image pixel in the loupe
@@ -187,7 +217,7 @@
 
 	function commit(e: PointerEvent) {
 		sample(e);
-		if (hover) onpick(activeSlot, hover.hex);
+		if (hover) pick(hover.hex);
 	}
 </script>
 
@@ -210,9 +240,14 @@
 						{#if activeSlot === i}<Check size={13} />{/if}<span class="dot" style="background:{slot.hex}"></span>{slot.name}
 					</button>
 				{/each}
-				<button type="button" class="slot-chip" class:active={activeSlot === 'new'} aria-pressed={activeSlot === 'new'} onclick={() => (activeSlot = 'new')}>
+				<button type="button" class="slot-chip" class:active={activeSlot === 'new'} aria-pressed={activeSlot === 'new'} disabled={paletteFull} onclick={() => (activeSlot = 'new')}>
 					{#if activeSlot === 'new'}<Check size={13} />{/if}{m.admin_ref_picker_slot_new()}
 				</button>
+				<!-- Live feedback: the persistent full hint, or the transient duplicate
+				     cue after a New-color pick that's already in the palette. -->
+				<span class="slot-hint" role="status">
+					{#if paletteFull}{m.admin_settings_sona_palette_full({ max: MAX_SONA_COLORS })}{:else if dupHint}{m.admin_ref_picker_already_in_palette()}{/if}
+				</span>
 			</div>
 
 			{#if loadError}
@@ -259,6 +294,7 @@
 								type="button"
 								class="add-all"
 								aria-label={m.admin_ref_picker_add_all_label()}
+								disabled={paletteFull}
 								onclick={() => onaddall(suggestions)}
 							>
 								{m.admin_ref_picker_add_all()}
@@ -266,13 +302,21 @@
 						</div>
 						<div class="suggestion-row">
 							{#each suggestions as hex (hex)}
+								<!-- Already-in-palette pills stay focusable (the aria-label says why;
+								     they can still overwrite an existing slot) but read as done: dimmed
+								     with the same check glyph as the slot chips. -->
+								{@const added = paletteHas(paletteHexes, hex)}
 								<button
 									type="button"
 									class="suggestion"
+									class:added
 									title={hex}
-									aria-label={m.admin_ref_picker_suggestion_label({ hex })}
-									onclick={() => onpick(activeSlot, hex)}
+									aria-label={added
+										? m.admin_ref_picker_suggestion_added_label({ hex })
+										: m.admin_ref_picker_suggestion_label({ hex })}
+									onclick={() => pick(hex)}
 								>
+									{#if added}<Check size={13} />{/if}
 									<span class="suggestion-fill" style="background:{hex}"></span>
 									<code>{hex}</code>
 								</button>
@@ -393,6 +437,15 @@
 		flex: none;
 		color: var(--primary, var(--foreground));
 	}
+	.slot-chip:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	/* Palette-full / already-in-palette feedback (also an aria-live region). */
+	.slot-hint {
+		font-size: 12.5px;
+		color: var(--muted-foreground);
+	}
 	.dot {
 		width: 14px;
 		height: 14px;
@@ -503,6 +556,10 @@
 	.add-all:hover {
 		border-color: var(--primary, var(--foreground));
 	}
+	.add-all:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
 	.suggestion-row {
 		display: flex;
 		flex-wrap: wrap;
@@ -522,6 +579,14 @@
 	}
 	.suggestion:hover {
 		border-color: var(--primary, var(--foreground));
+	}
+	/* Same check treatment as the active slot chip; dimmed = already added. */
+	.suggestion.added {
+		opacity: 0.55;
+	}
+	.suggestion :global(svg) {
+		flex: none;
+		color: var(--primary, var(--foreground));
 	}
 	.suggestion-fill {
 		width: 22px;
