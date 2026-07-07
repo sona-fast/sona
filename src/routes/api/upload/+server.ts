@@ -2,6 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
+import { recordUpload, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
 // POST /api/upload  (admin-only via hooks)
@@ -30,7 +31,21 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	const ext = extFromContentType(contentType);
 	const key = `${folder}/${crypto.randomUUID()}.${ext}`;
 
-	const { url } = await storage.put({ suggestedKey: key, body: file.stream(), contentType, filename: file.name });
+	// Observability (issue #6): record upload health (provider-agnostic — works for
+	// R2 and UploadThing alike). Fire-and-forget so it adds no latency; a failure
+	// re-throws unchanged after being sampled.
+	let putResult;
+	try {
+		putResult = await storage.put({ suggestedKey: key, body: file.stream(), contentType, filename: file.name });
+	} catch (e) {
+		schedule(platform, recordUpload(db, false, {
+			status: 500,
+			message: e instanceof Error ? e.message : 'storage put failed'
+		}));
+		throw e;
+	}
+	schedule(platform, recordUpload(db, true));
+	const { url } = putResult;
 	// R2 in dev returns a root-relative '/img/...' URL; store it absolute so it
 	// survives sanitizeUrl and renders the same as prod (the R2 custom domain).
 	const absoluteUrl = url.startsWith('/') ? new URL(url, request.url).href : url;

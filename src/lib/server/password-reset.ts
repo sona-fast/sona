@@ -13,6 +13,7 @@
 
 import { hashToken, constantTimeEqual } from './admin-auth';
 import { getRawSetting, setRawSetting } from './settings';
+import { recordEmail } from './metrics';
 import { APP_NAME } from '$lib/config';
 import type { Database } from './db';
 
@@ -104,12 +105,24 @@ export async function requestPasswordReset(
 	await setRawSetting(db, PASSWORD_RESET_SETTING, JSON.stringify(record));
 
 	const siteName = (await getRawSetting(db, 'siteName'))?.trim() || APP_NAME;
-	await sendResetEmail(env, apiKey, origin, adminEmail, token, siteName);
+	const outcome = await sendResetEmail(env, apiKey, origin, adminEmail, token, siteName);
+	// Observability (issue #6): record the transactional-email outcome (sent/failed)
+	// in-app. Rare, human-triggered path, so the extra small write is inline; wrapped
+	// so a metrics failure can't break the (best-effort) reset. "sent" means Resend
+	// ACCEPTED the request; delivered/bounced/complaint outcomes are webhook-only (no
+	// Resend stats API) and are shown as unavailable on the dashboard until a Resend
+	// webhook is wired up.
+	try {
+		await recordEmail(db, outcome.ok, outcome.ok ? undefined : { status: outcome.status, message: outcome.message });
+	} catch {
+		/* metrics are best-effort — never surface to the caller */
+	}
 }
 
 /** Build the reset link + transactional copy and POST it to Resend. Best-effort:
  * a send failure (or timeout) is logged and swallowed so the caller's response
- * stays generic. */
+ * stays generic. Returns the outcome (accepted vs. failed, plus status/message on
+ * failure) purely for in-app observability — the caller still responds generically. */
 async function sendResetEmail(
 	env: Env | undefined,
 	apiKey: string,
@@ -117,7 +130,7 @@ async function sendResetEmail(
 	to: string,
 	token: string,
 	siteName: string
-): Promise<void> {
+): Promise<{ ok: boolean; status: number; message: string }> {
 	const link = new URL('/admin/reset', origin);
 	link.searchParams.set('token', token);
 	// Header fields can't carry CR/LF; strip them once for both the From name and subject.
@@ -166,9 +179,12 @@ async function sendResetEmail(
 		});
 		if (!resp.ok) {
 			console.error(`Resend password-reset send failed: ${resp.status}`);
+			return { ok: false, status: resp.status, message: `Resend ${resp.status}` };
 		}
+		return { ok: true, status: resp.status, message: '' };
 	} catch (e) {
 		console.error('Resend password-reset send error:', e instanceof Error ? e.message : e);
+		return { ok: false, status: 0, message: e instanceof Error ? e.message : 'send error' };
 	}
 }
 

@@ -92,6 +92,8 @@ describe('authHandle — password-recovery route exemption', () => {
 
 		expect(await redirectFor('/admin/images', db)).toEqual({ status: 302, location: '/admin/login' });
 		expect(await redirectFor('/admin/settings', db)).toEqual({ status: 302, location: '/admin/login' });
+		// Observability (issue #6) is a normal admin route — no session, no access.
+		expect(await redirectFor('/admin/observability', db)).toEqual({ status: 302, location: '/admin/login' });
 	});
 
 	it('sends /admin/forgot to /admin/setup when setup is incomplete (setup gate wins)', async () => {

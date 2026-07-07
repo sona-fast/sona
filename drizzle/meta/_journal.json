@@ -162,6 +162,13 @@
       "when": 1783368704573,
       "tag": "0022_add_images_artist_id_index",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1783417152935,
+      "tag": "0023_observability",
+      "breakpoints": true
     }
   ]
 }

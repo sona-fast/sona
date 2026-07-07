@@ -1,10 +1,11 @@
-import type { Handle } from '@sveltejs/kit';
+import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
 import { isSetupComplete, hashToken } from '$lib/server/admin-auth';
 import { getSettings } from '$lib/server/settings';
+import { recordMetric, recordError, routeClass, isAssetPath, schedule } from '$lib/server/metrics';
 import { THEME_MODE_COOKIE, SESSION_COOKIE } from '$lib/config';
 import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
@@ -119,6 +120,21 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 		transformPageChunk: ({ html }) => html.replace('%theme%', themeId).replace('%mode%', mode)
 	});
 
+	// Observability (issue #6): count one in-app request per non-asset path, keyed
+	// by coarse route class only (never the raw path). Fire-and-forget via
+	// waitUntil so it adds no latency and a metrics failure can't break the
+	// response. Writes to THIS fork's own DB — tenant-isolated by construction.
+	// Note: this counts app/SSR requests that reach the Function; edge-cached hits
+	// and static assets are invisible here (the "app requests" label reflects that,
+	// and the optional Cloudflare edge panel fills the gap). 5xx error samples are
+	// captured in handleError below, where the real error message is available.
+	if (event.platform?.env.DB && !isAssetPath(path)) {
+		schedule(
+			event.platform,
+			recordMetric(getDb(event.platform.env.DB), 'request', routeClass(path))
+		);
+	}
+
 	// Security headers
 	response.headers.set('X-Frame-Options', 'DENY');
 	response.headers.set('X-Content-Type-Options', 'nosniff');
@@ -149,3 +165,26 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 };
 
 export const handle: Handle = sequence(paraglideHandle, authHandle);
+
+// Observability (issue #6): sample unexpected 5xx errors for the dashboard's
+// "Recent errors" table. handleError fires only for genuine exceptions (not
+// deliberate `error(4xx/5xx, …)` HttpErrors), so this is exactly the broken-500
+// set worth surfacing — and it's the one place the real error message
+// ("D1_ERROR: …") is available. Records the error counter (dim = status) plus one
+// capped-ring sample with route + status + a trimmed, PII-free message; the
+// request counter itself is incremented in authHandle above. Fire-and-forget so
+// error handling never depends on the metrics write; returns undefined to keep
+// SvelteKit's default error response unchanged.
+export const handleError: HandleServerError = ({ error, event, status, message }) => {
+	if (event.platform?.env.DB && status >= 500) {
+		const db = getDb(event.platform.env.DB);
+		const detail = error instanceof Error ? error.message : message;
+		schedule(
+			event.platform,
+			(async () => {
+				await recordMetric(db, 'error', String(status));
+				await recordError(db, { route: event.url.pathname, status, message: detail });
+			})()
+		);
+	}
+};

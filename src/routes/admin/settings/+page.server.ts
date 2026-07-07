@@ -127,7 +127,15 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// Presence-only flags for the password-reset setup guide. The secret VALUES
 		// are deploy-time env and must never reach the client — only whether they exist.
 		resendKeySet: !!platform?.env?.RESEND_API_KEY,
-		resendFromSet: !!platform?.env?.RESEND_FROM
+		resendFromSet: !!platform?.env?.RESEND_FROM,
+		// Presence-only flag for the Observability tab's Cloudflare edge entry (issue
+		// #6). All three secrets are needed for the edge panel; the values never
+		// reach the client — only whether the connection is complete.
+		cfAnalyticsConnected: !!(
+			platform?.env?.CF_ANALYTICS_TOKEN &&
+			platform?.env?.CF_ACCOUNT_ID &&
+			platform?.env?.CF_ZONE_ID
+		)
 	};
 };
 

@@ -4,6 +4,7 @@ import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { deleteOrphansAll, collectReferencedUrls } from '$lib/server/storage';
 import { requireCronSecret } from '$lib/server/cron-auth';
+import { recordJobRun, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
 // POST /api/cron/cleanup-orphans[?dryRun=1]
@@ -46,6 +47,12 @@ export const POST: RequestHandler = async ({ request, url, platform }) => {
 		abortOnEmptyKeepSet: true
 	});
 	const ok = result.errors.length === 0;
+	// Observability (issue #6): heartbeat for the background-jobs panel. Skip dry
+	// runs (a probe, not a real sweep). Fire-and-forget so it never delays the run.
+	if (!dryRun) {
+		schedule(platform, recordJobRun(db, 'cleanup-orphans', ok ? 'ok' : 'failed',
+			ok ? `deleted ${result.deleted}` : result.errors.join('; ')));
+	}
 	// A configured provider failing must fail the workflow run, which only
 	// checks the HTTP status — so real errors return 500, not a green ok:true.
 	return json(

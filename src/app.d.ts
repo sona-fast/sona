@@ -68,6 +68,26 @@ declare global {
 				 * account first.
 				 */
 				RESEND_FROM?: string;
+				/**
+				 * Optional Cloudflare edge-analytics enrichment (issue #6, Observability).
+				 * All three must be present for the "Cloudflare edge" panel to appear;
+				 * absence just hides it. The token needs exactly one scope —
+				 * Account · Account Analytics · Read (read-only, this account only). Set
+				 * via `wrangler pages secret put CF_ANALYTICS_TOKEN` (+ CF_ACCOUNT_ID,
+				 * CF_ZONE_ID). Zone analytics need a custom domain; a bare pages.dev has
+				 * no zone. Never stored in the DB; disconnect by deleting the secret.
+				 */
+				CF_ANALYTICS_TOKEN?: string;
+				CF_ACCOUNT_ID?: string;
+				CF_ZONE_ID?: string;
+			};
+			/**
+			 * Cloudflare execution context. `waitUntil` lets fire-and-forget work
+			 * (e.g. the observability metric writes) outlive the response without
+			 * adding latency to it. Optional so non-CF runtimes / tests still type.
+			 */
+			context?: {
+				waitUntil(promise: Promise<unknown>): void;
 			};
 		}
 	}

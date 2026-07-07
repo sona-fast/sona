@@ -4,6 +4,7 @@ import { getSettings } from '$lib/server/settings';
 import { isTelegramEnabled } from '$lib/server/telegram';
 import { resyncTelegramPacks } from '$lib/server/sticker-import';
 import { requireCronSecret } from '$lib/server/cron-auth';
+import { recordJobRun, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
 // POST /api/cron/resync-telegram
@@ -43,6 +44,8 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	// until an admin turns on auto re-sync in Settings. Return early (200) so the
 	// scheduler sees success rather than retrying.
 	if (!settings.autoResyncEnabled) {
+		// Still a live heartbeat (proves the scheduler reached us), just a no-op run.
+		schedule(platform, recordJobRun(db, 'resync-telegram', 'ok', 'skipped (disabled)'));
 		return json({ skipped: true, reason: 'auto re-sync disabled' });
 	}
 
@@ -50,6 +53,16 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	// as the admin import actions.
 	const absolutize = (u: string) => (u.startsWith('/') ? new URL(u, url.origin).href : u);
 
-	const result = await resyncTelegramPacks({ env, settings, db, absolutize });
+	// Observability (issue #6): heartbeat for the background-jobs panel. A thrown
+	// error records a failed run before propagating, so the dashboard reflects it.
+	let result;
+	try {
+		result = await resyncTelegramPacks({ env, settings, db, absolutize });
+	} catch (e) {
+		schedule(platform, recordJobRun(db, 'resync-telegram', 'failed',
+			e instanceof Error ? e.message : 'resync failed'));
+		throw e;
+	}
+	schedule(platform, recordJobRun(db, 'resync-telegram', 'ok', `imported ${result.imported}`));
 	return json(result);
 };
