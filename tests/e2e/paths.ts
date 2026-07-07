@@ -21,3 +21,18 @@ export const E2E_WRANGLER_CONFIG = path.join(here, 'wrangler.e2e.toml');
 // meet the CLI's /v3 subdir.
 export const E2E_PERSIST_TO = path.join(repoRoot, '.wrangler-e2e');
 export const E2E_PLATFORM_PERSIST = path.join(E2E_PERSIST_TO, 'v3');
+
+// The password-recovery spec mutates shared admin state (sets adminPasswordHash,
+// deletes every session), which would break the read-only specs' legacy-password
+// login if it ran against the same DB under fullyParallel. So it gets its OWN
+// throwaway DB + dev server (a second webServer + the "recovery" project in
+// playwright.config.ts); seed.ts targets this dir via SONA_E2E_SEED_PERSIST_TO.
+export const E2E_PERSIST_TO_RECOVERY = path.join(repoRoot, '.wrangler-e2e-recovery');
+export const E2E_PLATFORM_PERSIST_RECOVERY = path.join(E2E_PERSIST_TO_RECOVERY, 'v3');
+
+// The recovery spec's Resend interceptor (tests/e2e/resend-mock.mjs, preloaded
+// into its dev server) appends captured reset links here; the spec polls it.
+// Lives under the recovery persist dir so seed.ts's wipe clears stale links
+// before each run. Absolute path resolved here so config + preload + spec agree.
+export const E2E_RESEND_MOCK = path.join(here, 'resend-mock.mjs');
+export const E2E_RESEND_CAPTURE = path.join(E2E_PERSIST_TO_RECOVERY, 'resend-capture.jsonl');
