@@ -19,6 +19,11 @@ import {
 	imageTags,
 	characters,
 	imageCharacters,
+	conventions,
+	fursuitPhotos,
+	stickerPacks,
+	stickers,
+	stickerEmojis,
 	sessions,
 	siteSettings
 } from '$lib/server/db/schema';
@@ -204,6 +209,10 @@ export const actions = {
 			splashSubtitle: text('splashSubtitle', 100),
 			// Three-path profile fields — feed the /art, /connect and /share pages.
 			contactEmail: text('contactEmail', 200),
+			// Legal overrides — blank falls back to the code-accurate defaults from
+			// $lib/legal on /privacy and /terms. Generous cap for full policy text.
+			privacyPolicy: text('privacyPolicy', 20000),
+			termsOfService: text('termsOfService', 20000),
 			sonaSpecies: text('sonaSpecies', 200),
 			sonaBuild: text('sonaBuild', 200),
 			sonaKeyFeatures: text('sonaKeyFeatures', 500),
@@ -407,20 +416,44 @@ export const actions = {
 	export: async ({ platform }) => {
 		const db = getDb(platform!.env.DB);
 
-		const [allImages, allArtists, allCollections, allTags, allCharacters, allImageTags, allImageCharacters, settings] =
-			await Promise.all([
-				db.select().from(images),
-				db.select().from(artists),
-				db.select().from(collections),
-				db.select().from(tags),
-				db.select().from(characters),
-				db.select().from(imageTags),
-				db.select().from(imageCharacters),
-				getSettings(db)
-			]);
+		// Every content table lives here so the operator's backup is complete.
+		// Excluded on purpose: sessions (auth tokens), and the observability
+		// tables (job_run / metric_rollup / error_sample), which are regenerable
+		// telemetry, not site content.
+		const [
+			allImages,
+			allArtists,
+			allCollections,
+			allTags,
+			allCharacters,
+			allImageTags,
+			allImageCharacters,
+			allConventions,
+			allFursuitPhotos,
+			allStickerPacks,
+			allStickers,
+			allStickerEmojis,
+			settings
+		] = await Promise.all([
+			db.select().from(images),
+			db.select().from(artists),
+			db.select().from(collections),
+			db.select().from(tags),
+			db.select().from(characters),
+			db.select().from(imageTags),
+			db.select().from(imageCharacters),
+			db.select().from(conventions),
+			db.select().from(fursuitPhotos),
+			db.select().from(stickerPacks),
+			db.select().from(stickers),
+			db.select().from(stickerEmojis),
+			getSettings(db)
+		]);
 
 		const backup = {
-			version: 1,
+			// v2 added conventions, fursuit photos, and the stickers tables (packs,
+			// stickers, emojis) — v1 silently omitted them.
+			version: 2,
 			exportedAt: new Date().toISOString(),
 			settings,
 			images: allImages,
@@ -429,7 +462,12 @@ export const actions = {
 			tags: allTags,
 			characters: allCharacters,
 			imageTags: allImageTags,
-			imageCharacters: allImageCharacters
+			imageCharacters: allImageCharacters,
+			conventions: allConventions,
+			fursuitPhotos: allFursuitPhotos,
+			stickerPacks: allStickerPacks,
+			stickers: allStickers,
+			stickerEmojis: allStickerEmojis
 		};
 
 		return { success: true, export: JSON.stringify(backup, null, 2) };

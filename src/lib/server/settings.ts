@@ -14,6 +14,12 @@ export interface SiteSettings {
 	aboutText: string;
 	/** Contact email shown on /share for larger photo batches. */
 	contactEmail: string;
+	/** Owner-editable override for the /privacy page body (plain text). Empty →
+	 * the code-accurate default policy from `$lib/legal` is shown instead. */
+	privacyPolicy: string;
+	/** Owner-editable override for the /terms page body (plain text). Empty →
+	 * the default terms from `$lib/legal` are shown instead. */
+	termsOfService: string;
 
 	// --- Sona / reference profile (shown on /art, part of the threePath landing) ---
 	// The reference sheet itself is the most recent published gallery image
@@ -98,6 +104,9 @@ const DEFAULTS: SiteSettings = {
 	// The three-path pages (/art, /connect, /share) render gracefully with these
 	// empty — sections that have no data simply don't show.
 	contactEmail: '',
+	// Empty → /privacy and /terms render the code-accurate defaults from $lib/legal.
+	privacyPolicy: '',
+	termsOfService: '',
 	sonaSpecies: '',
 	sonaBuild: '',
 	sonaKeyFeatures: '',
@@ -162,6 +171,8 @@ export async function getSettings(
 			ownerName: map.ownerName ?? DEFAULTS.ownerName,
 			aboutText: map.aboutText ?? DEFAULTS.aboutText,
 			contactEmail: map.contactEmail ?? DEFAULTS.contactEmail,
+			privacyPolicy: map.privacyPolicy ?? DEFAULTS.privacyPolicy,
+			termsOfService: map.termsOfService ?? DEFAULTS.termsOfService,
 			sonaSpecies: map.sonaSpecies ?? DEFAULTS.sonaSpecies,
 			sonaBuild: map.sonaBuild ?? DEFAULTS.sonaBuild,
 			sonaKeyFeatures: map.sonaKeyFeatures ?? DEFAULTS.sonaKeyFeatures,
