@@ -21,7 +21,7 @@
 	// Meta description: first paragraph of the override, else the first default
 	// section's first paragraph. Trimmed to a sane length for social cards.
 	let description = $derived(
-		(override.trim() || sections[0]?.body[0] || title).slice(0, 200)
+		(override.trim() || sections[0]?.body[0]).slice(0, 200)
 	);
 </script>
 
@@ -31,8 +31,11 @@
 	<h1>{title}</h1>
 
 	{#if override.trim()}
-		<!-- Auto-escaped plain text; whitespace preserved via CSS (no {@html}). -->
-		<p class="legal-override">{override}</p>
+		<!-- Auto-escaped plain text split into paragraphs on blank lines; single
+		     newlines within a paragraph are preserved via CSS (no {@html}). -->
+		{#each override.trim().split(/\n{2,}/) as paragraph}
+			<p class="legal-override">{paragraph}</p>
+		{/each}
 	{:else}
 		{#each sections as section}
 			<section>
@@ -61,12 +64,12 @@
 	}
 
 	.legal-page h2 {
-		font-size: 1.15rem;
+		font-size: 1.25rem;
 		margin-bottom: 10px;
 	}
 
 	.legal-page p {
-		color: var(--muted-foreground);
+		color: var(--foreground);
 		line-height: 1.7;
 		margin-bottom: 10px;
 	}

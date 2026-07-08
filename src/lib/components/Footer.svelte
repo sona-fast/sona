@@ -76,7 +76,7 @@
 
 	.legal-links a {
 		color: var(--muted-foreground);
-		text-decoration: none;
+		text-decoration: underline;
 		transition: color 0.15s;
 	}
 

@@ -2,11 +2,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
-import { getTableColumns, getTableName } from 'drizzle-orm';
+import { readFileSync, readdirSync } from 'node:fs';
+import { getTableColumns, getTableName, is } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import type { D1Database } from '@cloudflare/workers-types';
 import { clearSettingsCache } from '$lib/server/settings';
 import { URL_COLUMNS } from '$lib/server/storage/referenced-urls';
+import * as schema from '$lib/server/db/schema';
 import { actions } from './+page.server';
 
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses
@@ -132,5 +135,59 @@ describe('settings clearCache action', () => {
 		expect(result).toMatchObject({ status: 500 });
 		expect((result as { data: { error: string } }).data.error).toContain('r2: R2 list timed out');
 		expect(bucket.delete).not.toHaveBeenCalled();
+	});
+});
+
+// REGRESSION: the backup export once silently omitted content tables (v1 lacked
+// conventions, fursuit photos, and the stickers tables). Pin the export at v2 AND
+// derive the expected content-table set from the live schema minus the tables we
+// deliberately exclude — so a future table someone forgets to export makes this
+// fail rather than shipping an incomplete backup.
+describe('settings export action', () => {
+	// Auth tokens (sessions) and regenerable telemetry (observability tables) are
+	// intentionally not part of a content backup; site_settings is exported as the
+	// mapped `settings` object, not a raw table dump.
+	const EXCLUDED_TABLES = new Set([
+		'site_settings',
+		'sessions',
+		'metric_rollup',
+		'error_sample',
+		'job_run'
+	]);
+	const snakeToCamel = (s: string) => s.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
+
+	// Build the full schema by replaying every migration, so `db.select().from(t)`
+	// finds real columns for each content table (empty rows are fine here).
+	function buildFullDb() {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const sqlite: any = new Database(':memory:');
+		const dir = new URL('../../../../drizzle/', import.meta.url);
+		for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+			const sql = readFileSync(new URL(file, dir), 'utf8');
+			for (const stmt of sql.split('--> statement-breakpoint')) sqlite.exec(stmt);
+		}
+		return sqlite;
+	}
+
+	it('exports version 2 with every content table (minus the deliberate exclusions)', async () => {
+		const sqlite = buildFullDb();
+		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
+
+		const result = await actions.export({ platform } as never);
+		const backup = JSON.parse((result as { export: string }).export);
+
+		expect(backup.version).toBe(2);
+
+		const expectedContentKeys = Object.values(schema)
+			.filter((v) => is(v, SQLiteTable))
+			.map((t) => getTableName(t as SQLiteTable))
+			.filter((name) => !EXCLUDED_TABLES.has(name))
+			.map(snakeToCamel)
+			.sort();
+		const contentKeys = Object.keys(backup)
+			.filter((k) => !['version', 'exportedAt', 'settings'].includes(k))
+			.sort();
+
+		expect(contentKeys).toEqual(expectedContentKeys);
 	});
 });

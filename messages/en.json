@@ -14,7 +14,7 @@
 	"footer_rights": "© {year} {siteName} — All artwork belongs to their respective artists.",
 	"footer_made_with": "made with",
 	"admin_settings_legal_heading": "Legal pages",
-	"admin_settings_legal_hint": "Your site publishes a Privacy Policy at /privacy and Terms at /terms. Leave these blank to use the sensible built-in defaults, or paste your own text to override them.",
+	"admin_settings_legal_hint": "Your site publishes a Privacy Policy at /privacy and Terms at /terms. Leave these blank to use the built-in defaults, or paste your own text to override them.",
 	"admin_settings_legal_placeholder": "Leave blank to use the built-in default.",
 	"admin_settings_privacy_label": "Privacy Policy override",
 	"admin_settings_terms_label": "Terms of Service override",

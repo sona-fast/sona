@@ -211,8 +211,8 @@ export const actions = {
 			contactEmail: text('contactEmail', 200),
 			// Legal overrides — blank falls back to the code-accurate defaults from
 			// $lib/legal on /privacy and /terms. Generous cap for full policy text.
-			privacyPolicy: text('privacyPolicy', 20000),
-			termsOfService: text('termsOfService', 20000),
+			privacyPolicy: text('privacyPolicy', 100000),
+			termsOfService: text('termsOfService', 100000),
 			sonaSpecies: text('sonaSpecies', 200),
 			sonaBuild: text('sonaBuild', 200),
 			sonaKeyFeatures: text('sonaKeyFeatures', 500),
