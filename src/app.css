@@ -321,10 +321,11 @@ input, select, textarea {
 	font-weight: 500;
 	line-height: 1.4286;
 	border: none;
-	/* Fades the hover fill. Also briefly fades the fill on a theme/mode switch —
-	   the fill animates while the rest of the page recolors instantly — a 150ms
-	   cosmetic desync we accept rather than gate transitions from JS. */
-	transition: background-color 0.15s;
+	/* Eases the hover fill and (for .btn-outline) its border together. Also
+	   briefly fades them on a theme/mode switch — they animate while the rest of
+	   the page recolors instantly — a 150ms cosmetic desync we accept rather than
+	   gate transitions from JS. */
+	transition: background-color 0.15s, border-color 0.15s;
 }
 
 /* Hover shifts only the fill, never the label. A blanket opacity fade composited
