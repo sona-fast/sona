@@ -39,6 +39,38 @@ function contrast(a: string, b: string): number {
 	return (hi + 0.05) / (lo + 0.05);
 }
 
+function comps(hex: string): [number, number, number] {
+	const n = parseInt(hex.slice(1), 16);
+	return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function toHex(rgb: number[]): string {
+	const c = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+	return `#${c(rgb[0])}${c(rgb[1])}${c(rgb[2])}`;
+}
+
+// color-mix(in srgb, <hex> pct%, black|white) for opaque operands: interpolate the
+// gamma-encoded channels toward 0 (black) or 255 (white).
+function mixSrgb(hex: string, pct: number, toward: 'black' | 'white'): string {
+	const p = pct / 100;
+	const end = toward === 'black' ? 0 : 255;
+	return toHex(comps(hex).map((v) => v * p + end * (1 - p)));
+}
+
+// Pulls the color-mix percentage + endpoint out of the hover rule's fill. Throws
+// if the rule is missing or isn't a srgb color-mix (e.g. an opacity-dim hover),
+// so #103 can't silently regress.
+function hoverMix(selector: string): { pct: number; toward: 'black' | 'white' } {
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const rule = css.match(new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
+	if (!rule) throw new Error(`${selector} rule not found in app.css`);
+	const m = rule.match(
+		/background-color:\s*color-mix\(in srgb,\s*var\(--[\w-]+\)\s*(\d+)%,\s*(black|white)\)/
+	);
+	if (!m) throw new Error(`${selector} has no srgb color-mix hover fill (opacity-dim hover reintroduced?)`);
+	return { pct: Number(m[1]), toward: m[2] as 'black' | 'white' };
+}
+
 describe('destructive button WCAG AA contrast, every theme × mode', () => {
 	// The default theme lives on :root / [data-theme='light']; alternate themes
 	// on [data-theme-id='<id>'] and its [data-theme='light'] variant.
@@ -137,5 +169,59 @@ describe('terracotta dark theme WCAG AA contrast', () => {
 
 	it('focus ring against the page background meets 3:1 (non-text UI)', () => {
 		expect(contrast(ring, background)).toBeGreaterThanOrEqual(3);
+	});
+});
+
+// The .btn hover shifts only the fill (color-mix), never the label opacity: a
+// blanket `opacity` hover composited the label over the page and dropped its
+// contrast below AA in several themes (#103). Here we parse the actual color-mix
+// out of app.css, apply it to each theme's fill token, and assert the (unchanged)
+// label token still clears 4.5:1. Fails if the hover reverts to an opacity dim
+// (no color-mix to parse) or if someone picks an AA-failing mix.
+describe('.btn hover-state WCAG AA contrast, every theme × variant (#103)', () => {
+	// name → { fill token, label token }. Selector for the fill depends on mode.
+	const variants = [
+		{ name: 'primary', fill: 'primary', label: 'primary-foreground' },
+		{ name: 'secondary', fill: 'secondary', label: 'secondary-foreground' },
+		{ name: 'outline', fill: 'background', label: 'foreground' },
+		{ name: 'destructive', fill: 'destructive', label: 'destructive-foreground' }
+	];
+
+	// Dark modes use the base `.btn-*:hover` rule; light modes the
+	// `[data-theme='light'] .btn-*:hover` override (every light theme carries that
+	// attribute, so one override branch serves them all).
+	const themeBlocks = THEMES.flatMap(({ id }) =>
+		id === 'default'
+			? [
+					{ name: 'default dark', block: ':root', mode: 'dark' as const },
+					{ name: 'default light', block: "[data-theme='light']", mode: 'light' as const }
+				]
+			: [
+					{ name: `${id} dark`, block: `[data-theme-id='${id}']`, mode: 'dark' as const },
+					{
+						name: `${id} light`,
+						block: `[data-theme-id='${id}'][data-theme='light']`,
+						mode: 'light' as const
+					}
+				]
+	);
+
+	for (const { name, block, mode } of themeBlocks) {
+		for (const v of variants) {
+			it(`${name}: hovered .btn-${v.name} label meets 4.5:1`, () => {
+				const hoverSel =
+					mode === 'light' ? `[data-theme='light'] .btn-${v.name}:hover` : `.btn-${v.name}:hover`;
+				const { pct, toward } = hoverMix(hoverSel);
+				const fill = blockToken(block, v.fill);
+				const label = blockToken(block, v.label);
+				const hovered = mixSrgb(fill, pct, toward);
+				expect(contrast(label, hovered)).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+
+	it('no .btn hover dims the label with opacity', () => {
+		// The regression that caused #103.
+		expect(css).not.toMatch(/\.btn[\w-]*:hover\s*\{[^}]*opacity/);
 	});
 });

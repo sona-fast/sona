@@ -321,11 +321,45 @@ input, select, textarea {
 	font-weight: 500;
 	line-height: 1.4286;
 	border: none;
-	transition: opacity 0.15s;
+	transition: background-color 0.15s;
 }
 
-.btn:hover {
-	opacity: 0.85;
+/* Hover shifts only the fill, never the label. A blanket opacity fade composited
+   the whole button (text included) over the page and dropped label↔fill contrast
+   below WCAG AA in several themes (#103). Dark modes lighten the fill, light mode
+   darkens it; every theme × variant keeps the label ≥ 4.5:1 on the hovered fill
+   (guarded by theme-contrast.test.ts). Every light variant carries
+   data-theme='light', so the one override branch covers all light themes. */
+.btn-primary:hover {
+	background-color: color-mix(in srgb, var(--primary) 88%, white);
+}
+
+.btn-secondary:hover {
+	background-color: color-mix(in srgb, var(--secondary) 88%, white);
+}
+
+.btn-outline:hover {
+	background-color: color-mix(in srgb, var(--background) 88%, white);
+}
+
+.btn-destructive:hover {
+	background-color: color-mix(in srgb, var(--destructive) 88%, white);
+}
+
+[data-theme='light'] .btn-primary:hover {
+	background-color: color-mix(in srgb, var(--primary) 88%, black);
+}
+
+[data-theme='light'] .btn-secondary:hover {
+	background-color: color-mix(in srgb, var(--secondary) 88%, black);
+}
+
+[data-theme='light'] .btn-outline:hover {
+	background-color: color-mix(in srgb, var(--background) 88%, black);
+}
+
+[data-theme='light'] .btn-destructive:hover {
+	background-color: color-mix(in srgb, var(--destructive) 88%, black);
 }
 
 .btn-primary {
