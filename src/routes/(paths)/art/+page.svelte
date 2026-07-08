@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Image as ImageIcon, Palette, CircleCheck, CircleAlert, ArrowRight } from 'lucide-svelte';
+	import { Image as ImageIcon, Palette, CircleCheck, CircleAlert, ArrowRight, Star } from 'lucide-svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Meta from '$lib/components/Meta.svelte';
+	import { cdnImage, rawFallback } from '$lib';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
@@ -18,6 +19,10 @@
 
 	// Pad to 3 slots so the existing-art grid keeps its shape when sparse.
 	const artSlots = $derived([...data.recentArt, null, null, null].slice(0, 3));
+
+	// Featured (#58): the first curated image is the hero, the rest the supporting row.
+	const featuredHero = $derived(data.featuredArt[0] ?? null);
+	const featuredRest = $derived(data.featuredArt.slice(1));
 </script>
 
 <Meta
@@ -101,23 +106,64 @@
 	<hr class="divider" />
 {/if}
 
-<section class="section">
-	<h2 class="section-label">{m.art_existing()}</h2>
-	<div class="art-grid">
-		{#each artSlots as art}
-			{#if art}
-				<a class="art-thumb" href={`/gallery/${art.slug}`}>
-					<img src={art.thumbnailUrl || art.imageUrl} alt={art.title} />
+{#if data.featuredArt.length > 0}
+	<section class="section">
+		<div class="featured">
+			<h2 class="section-label featured-label">
+				<Star size={13} fill="currentColor" /> {m.art_featured()}
+			</h2>
+			{#if featuredHero}
+				{@const heroSrc = featuredHero.thumbnailUrl || featuredHero.imageUrl}
+				<a class="tile hero" href={`/gallery/${featuredHero.slug}`}>
+					<img src={cdnImage(heroSrc, 1200)} use:rawFallback={heroSrc} loading="lazy" alt={featuredHero.title} />
+					<span class="tile-cap">
+						{featuredHero.title}
+						{#if featuredHero.artistName}
+							<span class="tile-by">{m.art_featured_by({ artist: featuredHero.artistName })}</span>
+						{/if}
+					</span>
 				</a>
-			{:else}
-				<div class="art-thumb placeholder"><Palette size={16} /></div>
 			{/if}
-		{/each}
-	</div>
-	<a class="gallery-link" href="/gallery">
-		{m.art_view_gallery()}<ArrowRight size={14} />
-	</a>
-</section>
+			{#if featuredRest.length}
+				<div class="featured-row">
+					{#each featuredRest as art}
+						{@const src = art.thumbnailUrl || art.imageUrl}
+						<a class="tile" href={`/gallery/${art.slug}`}>
+							<img src={cdnImage(src, 400)} use:rawFallback={src} loading="lazy" alt={art.title} />
+							<span class="tile-cap">
+								{art.title}
+								{#if art.artistName}
+									<span class="tile-by">{m.art_featured_by({ artist: art.artistName })}</span>
+								{/if}
+							</span>
+						</a>
+					{/each}
+				</div>
+			{/if}
+			<a class="gallery-link" href="/gallery">
+				{m.art_view_gallery()}<ArrowRight size={14} />
+			</a>
+		</div>
+	</section>
+{:else}
+	<section class="section">
+		<h2 class="section-label">{m.art_existing()}</h2>
+		<div class="art-grid">
+			{#each artSlots as art}
+				{#if art}
+					<a class="art-thumb" href={`/gallery/${art.slug}`}>
+						<img src={art.thumbnailUrl || art.imageUrl} alt={art.title} />
+					</a>
+				{:else}
+					<div class="art-thumb placeholder"><Palette size={16} /></div>
+				{/if}
+			{/each}
+		</div>
+		<a class="gallery-link" href="/gallery">
+			{m.art_view_gallery()}<ArrowRight size={14} />
+		</a>
+	</section>
+{/if}
 
 <style>
 	.ref-sheet {
@@ -227,5 +273,82 @@
 		letter-spacing: 1px;
 		color: var(--primary);
 		text-decoration: none;
+	}
+
+	/* Featured (#58): a subtly primary-tinted frame that takes over the art
+	   section when the operator has curated images. */
+	.featured {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		padding: 16px;
+		border-radius: var(--radius-m);
+		border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+		background:
+			linear-gradient(180deg, color-mix(in srgb, var(--primary) 7%, transparent), transparent 70%),
+			var(--card);
+	}
+
+	.featured-label {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		margin: 0;
+	}
+
+	.featured-label :global(svg) {
+		color: var(--primary);
+	}
+
+	.tile {
+		position: relative;
+		display: block;
+		border-radius: var(--radius-s);
+		overflow: hidden;
+		border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+		background: var(--secondary);
+		text-decoration: none;
+		color: inherit;
+	}
+
+	.tile.hero {
+		aspect-ratio: 16 / 10;
+	}
+
+	.tile img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.tile-cap {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		padding: 9px 10px;
+		font-family: var(--font-secondary);
+		font-size: 12px;
+		line-height: 1.3;
+		color: #fff;
+		background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+	}
+
+	.tile-by {
+		display: block;
+		margin-top: 1px;
+		font-size: 10.5px;
+		color: rgba(255, 255, 255, 0.72);
+	}
+
+	.featured-row {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 10px;
+	}
+
+	.featured-row .tile {
+		aspect-ratio: 1;
 	}
 </style>

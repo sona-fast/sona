@@ -87,6 +87,11 @@ export const actions = {
 		const characterIds = (data.get('characters') as string)?.trim();
 		const nsfw = data.get('nsfw') === 'on';
 		const published = data.get('published') !== 'on';
+		const featured = data.get('featured') === 'on';
+		// Empty input = no explicit order (NULL → sorts last); otherwise a plain int.
+		const featuredOrderRaw = (data.get('featuredOrder') as string)?.trim();
+		const featuredOrder =
+			featuredOrderRaw && Number.isInteger(Number(featuredOrderRaw)) ? Number(featuredOrderRaw) : null;
 		const sourcePostUrl = sanitizeUrl(data.get('sourcePostUrl') as string);
 		const commissionedAt = (data.get('commissionedAt') as string)?.trim();
 		const parentImageIdRaw = (data.get('parentImageId') as string)?.trim();
@@ -166,6 +171,8 @@ export const actions = {
 				collectionId: collectionId ? Number(collectionId) : null,
 				nsfw,
 				published,
+				featured,
+				featuredOrder,
 				sourcePostUrl: sourcePostUrl || null,
 				commissionedAt: commissionedAt || null,
 				parentImageId,

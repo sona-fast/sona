@@ -220,6 +220,17 @@
 			<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
 		</label>
 
+		<label class="checkbox-label">
+			<input type="checkbox" name="featured" checked={data.image.featured} />
+			<span>{m.admin_field_featured()}</span>
+		</label>
+
+		<label>
+			<span>{m.admin_field_featured_order()}</span>
+			<input type="number" class="input" name="featuredOrder" value={data.image.featuredOrder ?? ''} />
+			<small class="hint">{m.admin_field_featured_order_hint()}</small>
+		</label>
+
 		<label>
 			<span>{m.admin_field_source_url()}</span>
 			<input type="url" class="input" name="sourcePostUrl" value={data.image.sourcePostUrl || ''} />

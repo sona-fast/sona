@@ -43,7 +43,8 @@ function makeDb() {
 		slug TEXT NOT NULL, image_url TEXT NOT NULL, thumbnail_url TEXT, width INTEGER, height INTEGER,
 		file_size INTEGER, md5hash TEXT, nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1,
 		source_post_url TEXT, artist_id INTEGER NOT NULL, collection_id INTEGER, commissioned_at TEXT,
-		parent_image_id INTEGER, variant_label TEXT, created_at TEXT NOT NULL);`);
+		parent_image_id INTEGER, variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0,
+		featured_order INTEGER, created_at TEXT NOT NULL);`);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }

@@ -169,6 +169,13 @@
       "when": 1783417152935,
       "tag": "0023_observability",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1783492965570,
+      "tag": "0024_image_featured",
+      "breakpoints": true
     }
   ]
 }
