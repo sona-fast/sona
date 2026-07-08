@@ -40,6 +40,14 @@ There are no manual post-update steps in the normal case.
 > `*.pages.dev`, updates deploy the same way — the domain is attached to the Pages
 > project once and is unaffected by updates.
 
+## Seeing what changed
+
+The template is versioned with semver tags. To see what you're pulling in before
+you sync — or to catch up on what shipped since you last did — read the
+[Releases page](https://github.com/sona-fast/sona/releases); each release lists
+the merged changes since the previous one. `git log --oneline <last-tag>..upstream/main`
+after a fetch gives the same view from a clone.
+
 ## First sync only: check the Actions tab
 
 There is exactly one gotcha, and it only bites the **first time** you ever sync a
