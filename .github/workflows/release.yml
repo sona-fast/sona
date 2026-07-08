@@ -1,0 +1,29 @@
+name: Release
+
+# Cut a GitHub Release when a semver tag is pushed. This marks a template
+# *version* so forks can see what they're on and what changed since — there are
+# no build artifacts to attach (a Sona site is deployed from source by
+# deploy.yml), so the release is just the tag plus auto-generated notes.
+#
+# To cut one (canonical repo only):
+#   npm version patch   # or minor / major → bumps package.json, commits, tags vX.Y.Z
+#   git push --follow-tags
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Releases live on the canonical template; forks pull *from* it and must not
+    # mint their own template versions. Gated like ci.yml (== canonical repo).
+    if: github.repository == 'sona-fast/sona'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
