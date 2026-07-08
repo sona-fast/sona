@@ -7,7 +7,7 @@
 	import ArtworkCard from '$lib/components/ArtworkCard.svelte';
 	import FursuitPhotoCard from '$lib/components/FursuitPhotoCard.svelte';
 	import Meta from '$lib/components/Meta.svelte';
-	import { formatDate, cdnImage } from '$lib';
+	import { formatDate, cdnImage, rawFallback } from '$lib';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
@@ -325,7 +325,7 @@
 			{:else}
 				<a href="/gallery/{image.slug}" class="list-item">
 					<div class="list-thumb" class:nsfw-thumb={image.nsfw}>
-						<img src={cdnImage(image.thumbnailUrl || image.imageUrl, 200)} alt={image.title} loading="lazy" />
+						<img src={cdnImage(image.thumbnailUrl || image.imageUrl, 200)} alt={image.title} loading="lazy" use:rawFallback={image.thumbnailUrl || image.imageUrl} />
 					</div>
 					<div class="list-info">
 						<h3 class="list-title">
