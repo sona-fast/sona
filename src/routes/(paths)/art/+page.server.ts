@@ -28,7 +28,11 @@ export const load: PageServerLoad = async ({ platform }) => {
 						slug: images.slug,
 						imageUrl: images.imageUrl,
 						title: images.title,
-						artistName: artists.name
+						artistName: artists.name,
+						// width/height reserve the img box (no CLS) — the ref sheet is the
+						// page's LCP element.
+						width: images.width,
+						height: images.height
 					})
 					.from(images)
 					.leftJoin(artists, eq(artists.id, images.artistId))
@@ -42,7 +46,9 @@ export const load: PageServerLoad = async ({ platform }) => {
 				slug: images.slug,
 				imageUrl: images.imageUrl,
 				title: images.title,
-				artistName: artists.name
+				artistName: artists.name,
+				width: images.width,
+				height: images.height
 			})
 			.from(images)
 			.innerJoin(imageTags, eq(imageTags.imageId, images.id))

@@ -111,6 +111,29 @@ describe('art load — refSheet precedence', () => {
 		const data = (await load({ platform } as never)) as { refSheet: { slug: string } | null };
 		expect(data.refSheet?.slug).toBe('art-6');
 	});
+
+	// The ref sheet is /art's LCP element; the load must carry intrinsic
+	// width/height so the template can reserve its box (no CLS).
+	it('returns intrinsic width/height via the designated path', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(images).values({ id: 5, title: 'Ref', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', width: 1200, height: 1600, artistId: 1, published: true, createdAt: '2026-01-01T00:00:00.000Z' });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 5 });
+
+		const data = (await load({ platform } as never)) as { refSheet: { width: number; height: number } | null };
+		expect(data.refSheet).toMatchObject({ width: 1200, height: 1600 });
+	});
+
+	it('returns intrinsic width/height via the tagged-fallback path', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+		await db.insert(images).values({ id: 6, title: 'Tagged', slug: 'art-6', imageUrl: 'https://cdn.example.com/6.png', width: 900, height: 1200, artistId: 1, published: true, createdAt: '2026-06-01T00:00:00.000Z' });
+		await db.insert(imageTags).values({ imageId: 6, tagId: 1 });
+
+		const data = (await load({ platform } as never)) as { refSheet: { width: number; height: number } | null };
+		expect(data.refSheet).toMatchObject({ width: 900, height: 1200 });
+	});
 });
 
 describe('art load — content-presence gate (#42)', () => {

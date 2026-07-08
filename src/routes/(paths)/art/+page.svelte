@@ -40,7 +40,19 @@
 	<h2 class="section-label">{m.art_ref_sheet()}</h2>
 	{#if data.refSheet}
 		<a class="ref-sheet" href={`/gallery/${data.refSheet.slug}`}>
-			<img src={data.refSheet.imageUrl} alt={data.refSheet.title} />
+			<!-- The ref sheet is /art's LCP element: transform it (not the raw
+			     multi-MB original), reserve its box with intrinsic width/height, and
+			     prioritize its fetch. rawFallback swaps in the original if the
+			     transform 403s off-zone. -->
+			<img
+				src={cdnImage(data.refSheet.imageUrl, 1200)}
+				use:rawFallback={data.refSheet.imageUrl}
+				alt={data.refSheet.title}
+				width={data.refSheet.width}
+				height={data.refSheet.height}
+				fetchpriority="high"
+				decoding="async"
+			/>
 		</a>
 		<p class="caption">
 			{m.art_ref_caption()}
