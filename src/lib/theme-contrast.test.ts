@@ -3,23 +3,31 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { THEMES } from './themes';
 
-// Guards WCAG AA contrast for the terracotta theme: the terracotta accent is
-// used as small-text foreground on the page background and on cards, and as
-// the button background under --primary-foreground text. A future accent
-// tweak that drops any of the asserted pairings below threshold fails here.
+// Guards WCAG AA contrast for the resting theme tokens (#76): the terracotta
+// accent used as small-text foreground on the page background and on cards, and
+// as the button background under --primary-foreground text, plus the destructive
+// button (fill vs --destructive-foreground) for EVERY theme × mode. A future
+// accent tweak that drops any asserted pairing below threshold fails here.
 //
-// Scope: the full terracotta pairings, both variants, plus the destructive
-// button (fill vs --destructive-foreground) for EVERY theme × mode (#76). The
-// remaining Ember/Aurora pairings predate the AA work and are not asserted.
+// Scope note: these #76 asserts cover the terracotta pairings in full and
+// destructive everywhere; the other resting default/aurora pairings predate the
+// AA work and are not asserted. The .btn hover states are asserted separately in
+// the #103 describe block below (which DOES cover default/aurora hover).
 
 const css = readFileSync(fileURLToPath(new URL('../app.css', import.meta.url)), 'utf8');
 
-function blockToken(selector: string, name: string): string {
+// Extracts a rule's body (the text between its braces). Anchored to a line start
+// so a plain selector (e.g. [data-theme='light']) can't match the tail of a
+// compound one ([data-theme-id='aurora'][data-theme='light']).
+function blockBody(selector: string): string {
 	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	// Anchored to a line start so a plain selector (e.g. [data-theme='light'])
-	// can't match the tail of a compound one ([data-theme-id='aurora'][data-theme='light']).
-	const block = css.match(new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
-	if (!block) throw new Error(`${selector} block not found in app.css`);
+	const body = css.match(new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
+	if (!body) throw new Error(`${selector} block not found in app.css`);
+	return body;
+}
+
+function blockToken(selector: string, name: string): string {
+	const block = blockBody(selector);
 	const value = block.match(new RegExp(`--${name}:\\s*(#[0-9A-Fa-f]{6})\\s*;`))?.[1];
 	if (!value) throw new Error(`--${name} not found as a 6-digit hex in the ${selector} block`);
 	return value;
@@ -57,18 +65,36 @@ function mixSrgb(hex: string, pct: number, toward: 'black' | 'white'): string {
 	return toHex(comps(hex).map((v) => v * p + end * (1 - p)));
 }
 
+// color-mix(in srgb, <hex> pct%, <other hex>) for opaque operands: interpolate
+// the gamma-encoded channels toward the other color.
+function mix2(hex: string, pct: number, other: string): string {
+	const p = pct / 100;
+	const o = comps(other);
+	return toHex(comps(hex).map((v, i) => v * p + o[i] * (1 - p)));
+}
+
 // Pulls the color-mix percentage + endpoint out of the hover rule's fill. Throws
 // if the rule is missing or isn't a srgb color-mix (e.g. an opacity-dim hover),
 // so #103 can't silently regress.
 function hoverMix(selector: string): { pct: number; toward: 'black' | 'white' } {
-	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const rule = css.match(new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
-	if (!rule) throw new Error(`${selector} rule not found in app.css`);
+	const rule = blockBody(selector);
 	const m = rule.match(
 		/background-color:\s*color-mix\(in srgb,\s*var\(--[\w-]+\)\s*(\d+)%,\s*(black|white)\)/
 	);
 	if (!m) throw new Error(`${selector} has no srgb color-mix hover fill (opacity-dim hover reintroduced?)`);
 	return { pct: Number(m[1]), toward: m[2] as 'black' | 'white' };
+}
+
+// Pulls the border-color color-mix out of the outline hover rule (border pct +
+// the token it mixes toward). Throws if the rule stops shifting the border, so
+// the #103 outline-dissolve fix can't silently regress.
+function hoverBorderMix(selector: string): { pct: number; token: string } {
+	const rule = blockBody(selector);
+	const m = rule.match(
+		/border-color:\s*color-mix\(in srgb,\s*var\(--border\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/
+	);
+	if (!m) throw new Error(`${selector} has no border-color color-mix (outline-dissolve fix reverted?)`);
+	return { pct: Number(m[1]), token: m[2] };
 }
 
 describe('destructive button WCAG AA contrast, every theme × mode', () => {
@@ -218,6 +244,24 @@ describe('.btn hover-state WCAG AA contrast, every theme × variant (#103)', () 
 				expect(contrast(label, hovered)).toBeGreaterThanOrEqual(4.5);
 			});
 		}
+	}
+
+	// The outline hover fill lands next to --border, so the hover also pulls the
+	// border toward --foreground to keep the 1px outline from dissolving into a
+	// solid fill (#103 designer finding). Assert the hovered border stays visibly
+	// distinct from the hovered fill in every theme × mode — a plain dissolve sits
+	// near 1:1, so 1.5:1 is a comfortable floor above it.
+	for (const { name, block, mode } of themeBlocks) {
+		it(`${name}: hovered .btn-outline border stays distinct from the fill`, () => {
+			const hoverSel =
+				mode === 'light' ? "[data-theme='light'] .btn-outline:hover" : '.btn-outline:hover';
+			const { pct: fillPct, toward } = hoverMix(hoverSel);
+			const fill = mixSrgb(blockToken(block, 'background'), fillPct, toward);
+			// The border-color shift lives on the base rule and cascades to both modes.
+			const { pct: borderPct, token } = hoverBorderMix('.btn-outline:hover');
+			const border = mix2(blockToken(block, 'border'), borderPct, blockToken(block, token));
+			expect(contrast(border, fill)).toBeGreaterThanOrEqual(1.5);
+		});
 	}
 
 	it('no .btn hover dims the label with opacity', () => {

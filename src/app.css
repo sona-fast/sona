@@ -321,6 +321,9 @@ input, select, textarea {
 	font-weight: 500;
 	line-height: 1.4286;
 	border: none;
+	/* Fades the hover fill. Also briefly fades the fill on a theme/mode switch —
+	   the fill animates while the rest of the page recolors instantly — a 150ms
+	   cosmetic desync we accept rather than gate transitions from JS. */
 	transition: background-color 0.15s;
 }
 
@@ -340,6 +343,13 @@ input, select, textarea {
 
 .btn-outline:hover {
 	background-color: color-mix(in srgb, var(--background) 88%, white);
+	/* The hover fill lands right next to --border (both are --background nudged
+	   slightly), which dissolves the 1px outline into a solid fill and shifts the
+	   button's character. Pull the border toward --foreground so it stays a
+	   visibly distinct outline on hover. One rule serves both modes: --border and
+	   --foreground are theme-scoped, and the light-mode override below only
+	   restyles the fill. Guarded by theme-contrast.test.ts. */
+	border-color: color-mix(in srgb, var(--border) 60%, var(--foreground));
 }
 
 .btn-destructive:hover {
