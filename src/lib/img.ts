@@ -1,15 +1,15 @@
 /**
- * Animated sources must bypass the CDN transform: cdnImage hardcodes
- * anim=false, which would freeze the artwork to its first frame. Same rule as
- * StickerMedia, which keeps animated formats out of cdnImage entirely. GIF is
- * the only allowed upload type whose animation is detectable from the URL
- * (animated WebP/AVIF can't be told apart from static without the bytes).
+ * True for animated sources we can identify from the URL alone — today just
+ * GIF. Such sources are served raw (bypassing the CDN transform) and skip
+ * srcset: GIFs are large and off-zone GIFs 403 the transform anyway. Animated
+ * WebP/AVIF can't be told apart from static without the bytes, so they ride the
+ * transform instead — which now preserves animation (cdnImage no longer forces
+ * anim=false) and resizes them, so they animate without needing detection here.
  *
  * Known gap: UploadThing URLs (`ufs.sh/f/<key>`, legacy `utfs.io`) carry no
- * extension, so GIFs hosted there are never detected. Today they still animate
- * because the transform 403s on those off-zone sources and rawFallback swaps
- * in the original; on a zone configured to "resize from any origin" the
- * transform would succeed and freeze them.
+ * extension, so GIFs hosted there aren't detected — but the transform 403s on
+ * those off-zone sources and rawFallback swaps in the original, so they still
+ * animate.
  */
 export function isAnimatedSource(url: string): boolean {
 	return /\.gif($|[?#])/i.test(url);
