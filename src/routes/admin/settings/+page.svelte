@@ -582,6 +582,7 @@
 		await update({ reset: false });
 		savingRecoveryEmail = false;
 		if (result.type === 'success') toast.success(m.admin_settings_recovery_email_saved());
+		else if (result.type === 'failure' && result.data?.error) toast.error(result.data.error as string);
 	};
 }}>
 	<section class="security-section" data-tab="account">

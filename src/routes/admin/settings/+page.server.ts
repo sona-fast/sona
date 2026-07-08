@@ -24,7 +24,7 @@ import {
 } from '$lib/server/db/schema';
 import { sql, inArray } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
-import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import { sanitizeText, sanitizeUrl, isValidEmail } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
 import { resolveAvatarUrl } from '$lib/server/avatar';
@@ -346,8 +346,13 @@ export const actions = {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
 		// adminEmail is a raw site_settings row, never mapped into SiteSettings.
-		// Writing an empty value clears the recovery address (disables email reset).
+		// Writing an empty value clears the recovery address (disables email reset);
+		// a non-empty value must at least look like an email, so a typo doesn't
+		// silently break recovery at send time.
 		const adminEmail = sanitizeText(data.get('adminEmail') as string, 200);
+		if (adminEmail && !isValidEmail(adminEmail)) {
+			return fail(400, { error: 'Enter a valid email address, like you@example.com.' });
+		}
 		await setRawSetting(db, 'adminEmail', adminEmail);
 		return { recoveryEmailSaved: true };
 	},

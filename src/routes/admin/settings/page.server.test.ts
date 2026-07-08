@@ -246,6 +246,16 @@ describe('settings saveSecurityEmail — admin recovery address', () => {
 		expect(result).toEqual({ recoveryEmailSaved: true });
 		expect(await getRawSetting(db, 'adminEmail')).toBe('');
 	});
+
+	it('rejects a value that does not look like an email and leaves the stored address untouched', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'adminEmail', 'old@x.y');
+
+		const result = await actions.saveSecurityEmail(saveSecurityEmailEvent(platform, 'not-an-email'));
+
+		expect(result).toMatchObject({ status: 400 });
+		expect(await getRawSetting(db, 'adminEmail')).toBe('old@x.y');
+	});
 });
 
 // Schema for tests that drive the full load (which also resolves the ref-sheet

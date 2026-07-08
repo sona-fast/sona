@@ -36,7 +36,6 @@
 					submitting = false;
 				};
 			}}>
-				<input type="hidden" name="token" value={data.token} />
 				<label>
 					<span>{m.admin_reset_new_password()}</span>
 					<input type="password" name="password" class="input" required minlength="8" autocomplete="new-password" autofocus />

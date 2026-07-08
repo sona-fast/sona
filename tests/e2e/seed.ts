@@ -28,7 +28,11 @@ function wrangler(args: string[]): void {
  * boots against exactly this DB — never the developer's real dev database.
  */
 function seed(): void {
-	rmSync(E2E_PERSIST_TO, { recursive: true, force: true });
+	// Which throwaway persist dir to build. Defaults to the shared read-only DB;
+	// the recovery webServer overrides it (SONA_E2E_SEED_PERSIST_TO) so its
+	// session-mutating spec runs against an isolated DB. See paths.ts.
+	const persistTo = process.env.SONA_E2E_SEED_PERSIST_TO ?? E2E_PERSIST_TO;
+	rmSync(persistTo, { recursive: true, force: true });
 
 	// Concatenate drizzle/*.sql (sorted) into one schema script and apply it in a
 	// single d1 execute. Mirrors scripts/setup.ts; no migration tracking table is
@@ -46,7 +50,7 @@ function seed(): void {
 		E2E_DB_NAME,
 		'--local',
 		`--config=${E2E_WRANGLER_CONFIG}`,
-		`--persist-to=${E2E_PERSIST_TO}`
+		`--persist-to=${persistTo}`
 	];
 	try {
 		wrangler(['d1', 'execute', ...target, `--file=${schemaPath}`]);

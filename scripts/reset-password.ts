@@ -12,7 +12,7 @@
  * `wrangler login` (or CLOUDFLARE_API_TOKEN), like the rest of the CLI tooling.
  */
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +56,42 @@ export function readDbName(toml: string): string {
 	return match[1];
 }
 
+/**
+ * Prompt `query` and read a line WITHOUT echoing it to the terminal (password
+ * entry). Node's readline has no built-in hidden-input mode; this is the
+ * standard workaround — mute the Interface's per-keystroke echo for the
+ * duration of the question, writing the prompt (and the newline the terminal
+ * would otherwise have echoed on Enter) ourselves.
+ */
+export async function askHidden(
+	rl: Pick<ReturnType<typeof createInterface>, 'question'>,
+	query: string
+): Promise<string> {
+	const rlAny = rl as unknown as { _writeToOutput: (s: string) => void; output: NodeJS.WritableStream };
+	const original = rlAny._writeToOutput;
+	rlAny.output.write(query);
+	rlAny._writeToOutput = () => {};
+	try {
+		return await rl.question('');
+	} finally {
+		rlAny._writeToOutput = original;
+		rlAny.output.write('\n');
+	}
+}
+
+/**
+ * Write SQL to a private temp file — `mkdtemp` gives a directory only the
+ * current user can read (0700), so the password hash doesn't sit in a
+ * predictable, world-readable path under the shared /tmp. Caller is
+ * responsible for removing the returned directory once done.
+ */
+export function writePrivateTempSql(sql: string): { dir: string; path: string } {
+	const dir = mkdtempSync(join(tmpdir(), 'sona-reset-'));
+	const path = join(dir, 'reset.sql');
+	writeFileSync(path, sql, { mode: 0o600 });
+	return { dir, path };
+}
+
 async function main() {
 	if (!existsSync('wrangler.toml')) {
 		throw new Error('wrangler.toml not found — run this from the project root after `npm run setup`.');
@@ -63,14 +99,13 @@ async function main() {
 	const dbName = readDbName(readFileSync('wrangler.toml', 'utf8'));
 
 	const rl = createInterface({ input: stdin, output: stdout });
-	let sqlPath = '';
+	let sqlDir = '';
 	try {
-		// Note: the terminal echoes what you type here. Run this on a trusted machine.
-		const pw = await rl.question(`New admin password (min ${MIN_PASSWORD_LENGTH} chars): `);
+		const pw = await askHidden(rl, `New admin password (min ${MIN_PASSWORD_LENGTH} chars): `);
 		if (pw.length < MIN_PASSWORD_LENGTH) {
 			throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
 		}
-		const confirm = await rl.question('Confirm new password: ');
+		const confirm = await askHidden(rl, 'Confirm new password: ');
 		if (pw !== confirm) throw new Error('Passwords do not match.');
 
 		const hash = await hashPasswordPbkdf2(pw);
@@ -79,20 +114,20 @@ async function main() {
 		// it to a temp .sql file and use `--file`, the same way setup.ts applies SQL.
 		const esc = (s: string) => s.replace(/'/g, "''");
 		const sql = `INSERT OR REPLACE INTO site_settings (key,value) VALUES ('adminPasswordHash','${esc(hash)}');\nDELETE FROM sessions;\n`;
-		sqlPath = join(tmpdir(), `sona-reset-${Date.now()}.sql`);
-		writeFileSync(sqlPath, sql);
+		const written = writePrivateTempSql(sql);
+		sqlDir = written.dir;
 
 		console.log(`\nWriting new password hash to D1 "${dbName}" (remote) and clearing sessions…`);
 		// stdin ignored → wrangler's non-TTY path skips the "Ok to proceed?" prompt.
-		execSync(`npx wrangler d1 execute ${dbName} --remote --file="${sqlPath}"`, {
+		execSync(`npx wrangler d1 execute ${dbName} --remote --file="${written.path}"`, {
 			stdio: ['ignore', 'inherit', 'inherit']
 		});
 		console.log('\n✔ Admin password reset. Sign in at /admin/login with the new password.');
 	} finally {
 		rl.close();
-		if (sqlPath) {
+		if (sqlDir) {
 			try {
-				unlinkSync(sqlPath);
+				rmSync(sqlDir, { recursive: true, force: true });
 			} catch {
 				/* best-effort temp cleanup */
 			}

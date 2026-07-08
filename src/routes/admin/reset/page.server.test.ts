@@ -10,7 +10,8 @@ import { sessions } from '$lib/server/db/schema';
 import { getRawSetting, setRawSetting } from '$lib/server/settings';
 import { hashPassword, hashToken, verifyAdminPassword } from '$lib/server/admin-auth';
 import { PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
-import { actions } from './+page.server';
+import { RESET_TOKEN_COOKIE } from '$lib/config';
+import { actions, load } from './+page.server';
 
 // Shim that also implements batch() in a transaction (all-or-nothing, like D1),
 // which the reset action relies on. Same approach as sticker-import.test.ts.
@@ -56,11 +57,37 @@ function makeDb() {
 	return { db: drizzle(d1, { schema }), platform };
 }
 
-function resetEvent(platform: App.Platform, fields: Record<string, string>) {
+/** Minimal in-memory stand-in for SvelteKit's Cookies, enough for the reset
+ * route: it reads/writes/deletes the one cookie it cares about. */
+function makeCookies(initial: Record<string, string> = {}) {
+	const store = { ...initial };
+	// Capture the options passed to set() per key so tests can assert the cookie
+	// hardening attributes (httpOnly / sameSite / secure / path / maxAge).
+	const opts: Record<string, Record<string, unknown>> = {};
+	return {
+		store,
+		opts,
+		get: (name: string) => store[name],
+		set: (name: string, value: string, options: Record<string, unknown> = {}) => {
+			store[name] = value;
+			opts[name] = options;
+		},
+		delete: (name: string) => {
+			delete store[name];
+		}
+	};
+}
+
+function resetEvent(
+	platform: App.Platform,
+	cookies: ReturnType<typeof makeCookies>,
+	fields: Record<string, string>
+) {
 	const body = new FormData();
 	for (const [k, v] of Object.entries(fields)) body.append(k, v);
 	return {
 		platform,
+		cookies,
 		url: new URL('https://taro.surf/admin/reset'),
 		request: new Request('https://taro.surf/admin/reset', { method: 'POST', body })
 	} as never;
@@ -87,12 +114,13 @@ async function seed(db: ReturnType<typeof makeDb>['db'], tokenExpiresInMs: numbe
 }
 
 describe('reset action', () => {
-	it('sets the new password, clears every session, and consumes the token', async () => {
+	it('sets the new password, clears every session, consumes the token, and clears the cookie', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, 30 * 60 * 1000);
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
 
 		try {
-			await actions.default(resetEvent(platform, { token: TOKEN, password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD }));
+			await actions.default(resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD }));
 			expect.unreachable('reset should redirect on success');
 		} catch (e) {
 			if (!isRedirect(e)) throw e;
@@ -106,14 +134,17 @@ describe('reset action', () => {
 		expect(await db.select().from(sessions)).toHaveLength(0);
 		// Token single-use: the row is gone.
 		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeNull();
+		// The cookie carrying the (now-spent) token is cleared.
+		expect(cookies.get(RESET_TOKEN_COOKIE)).toBeUndefined();
 	});
 
 	it('rejects an expired token and leaves the password unchanged', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, -1000); // already expired
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
 
 		const result = await actions.default(
-			resetEvent(platform, { token: TOKEN, password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
+			resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
 		);
 
 		expect(result).toMatchObject({ status: 400, data: { invalidToken: true } });
@@ -124,22 +155,34 @@ describe('reset action', () => {
 	it('rejects a wrong token', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, 30 * 60 * 1000);
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: 'not-the-token' });
 
 		const result = await actions.default(
-			resetEvent(platform, { token: 'not-the-token', password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
+			resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
 		);
 
 		expect(result).toMatchObject({ status: 400, data: { invalidToken: true } });
 		expect(await verifyAdminPassword(db, undefined, OLD_PASSWORD)).toBe(true);
 	});
 
+	it('rejects a missing cookie (e.g. a query-string token that never went through the load exchange)', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 30 * 60 * 1000);
+		const cookies = makeCookies();
+
+		const result = await actions.default(
+			resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD })
+		);
+
+		expect(result).toMatchObject({ status: 400, data: { invalidToken: true } });
+	});
+
 	it('rejects a too-short password with a valid token (same rule as the wizard)', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, 30 * 60 * 1000);
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
 
-		const result = await actions.default(
-			resetEvent(platform, { token: TOKEN, password: 'short', confirmPassword: 'short' })
-		);
+		const result = await actions.default(resetEvent(platform, cookies, { password: 'short', confirmPassword: 'short' }));
 
 		expect(result).toMatchObject({ status: 400 });
 		expect((result as { data: { invalidToken?: boolean } }).data.invalidToken).toBeUndefined();
@@ -149,19 +192,78 @@ describe('reset action', () => {
 	it('rejects reuse of a token after a successful reset', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, 30 * 60 * 1000);
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
 
 		try {
-			await actions.default(resetEvent(platform, { token: TOKEN, password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD }));
+			await actions.default(resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: NEW_PASSWORD }));
 			expect.unreachable('first reset should redirect');
 		} catch (e) {
 			if (!isRedirect(e)) throw e;
 		}
 
-		// Second attempt with the same (now consumed) token fails.
+		// Second attempt re-presents the same (now consumed, and already-cleared)
+		// token cookie and fails.
+		cookies.set(RESET_TOKEN_COOKIE, TOKEN);
 		const result = await actions.default(
-			resetEvent(platform, { token: TOKEN, password: 'another-password-789', confirmPassword: 'another-password-789' })
+			resetEvent(platform, cookies, { password: 'another-password-789', confirmPassword: 'another-password-789' })
 		);
 		expect(result).toMatchObject({ status: 400, data: { invalidToken: true } });
 		expect(await verifyAdminPassword(db, undefined, NEW_PASSWORD)).toBe(true);
+	});
+});
+
+describe('reset load', () => {
+	function loadEvent(
+		platform: App.Platform,
+		cookies: ReturnType<typeof makeCookies>,
+		url: string
+	) {
+		return { platform, cookies, url: new URL(url) } as never;
+	}
+
+	it('moves a query-string token into a cookie and redirects to the clean URL', async () => {
+		const { platform } = makeDb();
+		const cookies = makeCookies();
+
+		try {
+			await load(loadEvent(platform, cookies, `https://taro.surf/admin/reset?token=${TOKEN}`));
+			expect.unreachable('load should redirect once it has captured the token');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+			expect(e.status).toBe(303);
+			expect(e.location).toBe('/admin/reset');
+		}
+
+		expect(cookies.get(RESET_TOKEN_COOKIE)).toBe(TOKEN);
+		// The token cookie is hardened: httpOnly, scoped path, 10-minute TTL, and
+		// SameSite=Lax (NOT Strict — Strict is withheld on the cross-site webmail
+		// click-through and silently locks the admin out). secure is off only under
+		// the dev flag, which is unset in tests.
+		expect(cookies.opts[RESET_TOKEN_COOKIE]).toMatchObject({
+			httpOnly: true,
+			sameSite: 'lax',
+			secure: true,
+			path: '/admin/reset',
+			maxAge: 10 * 60
+		});
+	});
+
+	it('validates against the cookie once the query string is gone', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 30 * 60 * 1000);
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
+
+		const result = await load(loadEvent(platform, cookies, 'https://taro.surf/admin/reset'));
+
+		expect(result).toEqual({ valid: true });
+	});
+
+	it('reports invalid when there is no token cookie at all', async () => {
+		const { platform } = makeDb();
+		const cookies = makeCookies();
+
+		const result = await load(loadEvent(platform, cookies, 'https://taro.surf/admin/reset'));
+
+		expect(result).toEqual({ valid: false });
 	});
 });

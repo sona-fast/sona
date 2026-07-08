@@ -16,6 +16,10 @@ FURTRACK_MODE = "off"
 # Legacy env credential path: lets specs log in to /admin without seeding a
 # PBKDF2 hash. Throwaway local value — never a real secret.
 ADMIN_PASSWORD = "e2e-admin-password"
+# Gates the password-recovery feature on (requestPasswordReset is inert without a
+# key). Throwaway local value — the forgot-reset spec intercepts the Resend send
+# (tests/e2e/resend-mock.mjs), so this key never reaches api.resend.com.
+RESEND_API_KEY = "e2e-resend-key"
 
 [[d1_databases]]
 binding = "DB"

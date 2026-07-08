@@ -192,4 +192,172 @@ describe('forgot action', () => {
 		// The existing token row is left intact (link the operator may be following).
 		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBe(existing);
 	});
+
+	it('does not overwrite an existing valid token when the Resend send fails', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		// Outside the 2-minute cooldown, so this submission attempts a fresh send
+		// rather than being suppressed — and that send is about to fail.
+		const existing = JSON.stringify({
+			tokenHash: 'a'.repeat(64),
+			expiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+			requestedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString()
+		});
+		await setRawSetting(db, PASSWORD_RESET_SETTING, existing);
+		fetchMock.mockImplementation(async () => new Response('Internal error', { status: 500 }));
+
+		const result = await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		expect(result).toEqual({ sent: true });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		// A failed send must not burn the prior valid link or start a new cooldown —
+		// the operator couldn't have received a new link to use instead.
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBe(existing);
+	});
+
+	it('logs the Resend response body (not just the status) on a non-2xx response', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		fetchMock.mockImplementation(
+			async () => new Response(JSON.stringify({ message: 'domain not verified' }), { status: 422 })
+		);
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('422'));
+		expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('domain not verified'));
+		errorSpy.mockRestore();
+	});
+
+	it('redacts an email address echoed in the Resend error body before logging it', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		fetchMock.mockImplementation(
+			async () =>
+				new Response(JSON.stringify({ message: 'admin@taro.surf is not a verified sender' }), { status: 403 })
+		);
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const logged = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+		// Status + reason kept for diagnosis; the recovery address stripped (PII).
+		expect(logged).toContain('403');
+		expect(logged).toContain('[redacted]');
+		expect(logged).not.toContain('admin@taro.surf');
+		errorSpy.mockRestore();
+	});
+
+	it('strips other C0 control chars (not just CR/LF) from the siteName in the From name and subject', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await db.insert(siteSettings).values({ key: 'siteName', value: 'Aki\x07Serval\x1f!' });
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const email = sentEmail();
+		expect(email.from).toBe('"Aki Serval !" <onboarding@resend.dev>');
+		expect(email.subject).toBe('Reset your Aki Serval ! admin password');
+	});
+
+	it('pins the reset link to the request origin', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+
+		const result = await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		expect(result).toEqual({ sent: true });
+		const email = sentEmail();
+		expect(email.text).toMatch(/https:\/\/taro\.surf\/admin\/reset\?token=/);
+		expect(email.html).toMatch(/https:\/\/taro\.surf\/admin\/reset\?token=/);
+	});
+
+	it('renders the reset email in the base locale (English)', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const email = sentEmail();
+		expect(email.html).toContain('lang="en"');
+	});
+
+	it('defers the mint+send work via platform.ctx.waitUntil instead of awaiting it inline', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		// A real delay — long enough that it's still in flight once the action call
+		// below has resolved, proving the response didn't wait on it.
+		fetchMock.mockImplementation(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			return new Response(JSON.stringify({ id: 'email-1' }), { status: 200 });
+		});
+		let captured: Promise<unknown> | undefined;
+		const platformWithCtx = {
+			...platform,
+			ctx: { waitUntil: (p: Promise<unknown>) => (captured = p) }
+		} as unknown as App.Platform;
+
+		const result = await actions.default(forgotEvent(platformWithCtx, 'admin@taro.surf'));
+
+		expect(result).toEqual({ sent: true });
+		expect(captured).toBeDefined();
+		// The response returned before the deferred work (still delayed above) had
+		// a chance to persist anything — a match and a non-match both return this
+		// fast, which is the point (no timing oracle).
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeNull();
+
+		await captured;
+		// Once the deferred work has actually run, the token is there.
+		expect(await getRawSetting(db, PASSWORD_RESET_SETTING)).toBeTruthy();
+	});
+
+	it('redacts a reset-link token echoed in the Resend error body before logging it', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		fetchMock.mockImplementation(
+			async () =>
+				new Response(
+					JSON.stringify({ message: 'bad link https://taro.surf/admin/reset?token=SECRETTOKEN123 rejected' }),
+					{ status: 422 }
+				)
+		);
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const logged = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+		// Status + reason kept; the reset token stripped so it can't be replayed from logs.
+		expect(logged).toContain('422');
+		expect(logged).toContain('token=[redacted]');
+		expect(logged).not.toContain('SECRETTOKEN123');
+		errorSpy.mockRestore();
+	});
+
+	it('logs a deferred-task failure distinctly and still returns the generic response', async () => {
+		// A DB that throws on use forces the deferred mint+send task to reject after
+		// the response has already returned — the "2xx send then D1 write fails"
+		// dead-link case the failure log exists to surface.
+		const brokenDb = {
+			prepare: () => {
+				throw new Error('D1 unavailable');
+			}
+		};
+		let captured: Promise<unknown> | undefined;
+		const platform = {
+			env: { DB: brokenDb, RESEND_API_KEY: 'rk_test' },
+			ctx: { waitUntil: (p: Promise<unknown>) => (captured = p) }
+		} as unknown as App.Platform;
+		const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		const result = await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		// Generic response regardless of the deferred failure (no enumeration).
+		expect(result).toEqual({ sent: true });
+		await captured; // let the deferred .catch run
+		const logged = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+		expect(logged).toContain('password-reset deferred task failed:');
+		expect(logged).toContain('D1 unavailable');
+		errorSpy.mockRestore();
+	});
 });
