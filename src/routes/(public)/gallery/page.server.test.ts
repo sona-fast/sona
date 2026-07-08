@@ -57,7 +57,8 @@ function makeDb() {
 			file_size INTEGER, md5hash TEXT, nsfw INTEGER NOT NULL DEFAULT 0,
 			published INTEGER NOT NULL DEFAULT 1, source_post_url TEXT, artist_id INTEGER NOT NULL,
 			collection_id INTEGER, commissioned_at TEXT, parent_image_id INTEGER,
-			variant_label TEXT, created_at TEXT NOT NULL
+			variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0, featured_order INTEGER,
+			created_at TEXT NOT NULL
 		);
 		CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
 		CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);

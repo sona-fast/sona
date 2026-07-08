@@ -62,6 +62,12 @@ export const images = sqliteTable('images', {
 		onDelete: 'cascade'
 	}),
 	variantLabel: text('variant_label'),
+	// Operator-curated "Featured" section on /art (#58). `featured` marks an image
+	// for the section; `featuredOrder` (nullable) sets its position — ordered
+	// ASC NULLS LAST, then createdAt DESC, so the first is the hero and the next
+	// few are the supporting row.
+	featured: integer('featured', { mode: 'boolean' }).notNull().default(false),
+	featuredOrder: integer('featured_order'),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 }, (table) => [
 	// Public gallery filters and admin views join/filter on artist_id constantly;

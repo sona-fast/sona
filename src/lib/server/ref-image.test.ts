@@ -44,7 +44,8 @@ function makeDb() {
 			image_url TEXT NOT NULL, thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER,
 			md5hash TEXT, nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1,
 			source_post_url TEXT, artist_id INTEGER NOT NULL, collection_id INTEGER, commissioned_at TEXT,
-			parent_image_id INTEGER, variant_label TEXT, created_at TEXT NOT NULL);
+			parent_image_id INTEGER, variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0,
+			featured_order INTEGER, created_at TEXT NOT NULL);
 		CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, owner_name TEXT,
 			url TEXT, twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
 			deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT, avatar_url TEXT,

@@ -33,10 +33,13 @@ export function sonaDetails(
 
 /**
  * Content-presence predicate for /art (#42): present unless every content
- * source the page renders is absent — no ref sheet, no recent art, and no
- * sona details at all. Pure function over already-loaded data so the /art
- * load can reuse the rows it fetches for rendering without re-querying;
- * callers without those rows use probeArtContent instead.
+ * source the page renders is absent — no ref sheet, no recent art, and no sona
+ * details at all. Featured art (#58) needs no separate check: a featured image
+ * is by construction published + non-NSFW, i.e. a strict subset of recentArt's
+ * pool, so whenever featured art exists recentArt is non-empty too. Pure
+ * function over already-loaded data so the /art load can reuse the rows it
+ * fetches for rendering without re-querying; callers without those rows use
+ * probeArtContent instead.
  */
 export function artHasContent(
 	sona: ReturnType<typeof sonaDetails>,

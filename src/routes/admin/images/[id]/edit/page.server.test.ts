@@ -62,7 +62,8 @@ function makeDb() {
 			thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER, md5hash TEXT,
 			nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1, source_post_url TEXT,
 			artist_id INTEGER, collection_id INTEGER, commissioned_at TEXT, parent_image_id INTEGER,
-			variant_label TEXT, created_at TEXT NOT NULL DEFAULT ''
+			variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0, featured_order INTEGER,
+			created_at TEXT NOT NULL DEFAULT ''
 		);
 	`);
 	const d1 = makeD1(sqlite);
@@ -148,6 +149,30 @@ describe('admin image edit — save action', () => {
 		expect((result as { status: number }).status).toBe(302);
 		const row = await db.select({ title: images.title }).from(images).where(eq(images.id, 5)).get();
 		expect(row?.title).toBe('Renamed');
+	});
+
+	it('persists featured and featuredOrder (#58)', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', featured: 'on', featuredOrder: '2' }), platform } as never)
+		);
+		const row = await db.select({ featured: images.featured, featuredOrder: images.featuredOrder }).from(images).where(eq(images.id, 5)).get();
+		expect(row?.featured).toBe(true);
+		expect(row?.featuredOrder).toBe(2);
+	});
+
+	it('clears featured and nulls featuredOrder when unchecked / blank', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(images).values({ id: 5, title: 'Art', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, published: true, featured: true, featuredOrder: 3 });
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', featuredOrder: '' }), platform } as never)
+		);
+		const row = await db.select({ featured: images.featured, featuredOrder: images.featuredOrder }).from(images).where(eq(images.id, 5)).get();
+		expect(row?.featured).toBe(false);
+		expect(row?.featuredOrder).toBe(null);
 	});
 });
 

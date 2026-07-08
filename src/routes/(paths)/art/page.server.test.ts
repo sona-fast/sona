@@ -61,7 +61,8 @@ function makeDb() {
 			thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER, md5hash TEXT,
 			nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1, source_post_url TEXT,
 			artist_id INTEGER, collection_id INTEGER, commissioned_at TEXT, parent_image_id INTEGER,
-			variant_label TEXT, created_at TEXT NOT NULL DEFAULT ''
+			variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0, featured_order INTEGER,
+			created_at TEXT NOT NULL DEFAULT ''
 		);
 	`);
 	const d1 = makeD1(sqlite);
@@ -228,5 +229,81 @@ describe('art load — content-presence gate (#42)', () => {
 		expect(data.recentArt).toHaveLength(1);
 		expect(data.sona.species).toBe('Dragon');
 		expect(data.sona.dos).toEqual(['Big wings']);
+	});
+});
+
+describe('art load — featured selection (#58)', () => {
+	type FeaturedRow = { slug: string; artistName: string | null };
+
+	async function loadFeatured(platform: App.Platform) {
+		return (await load({ platform } as never)) as { featuredArt: FeaturedRow[] };
+	}
+
+	it('is empty and keeps the recent-art page when nothing is featured', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, createdAt: '2026-01-01T00:00:00.000Z' });
+
+		const data = await loadFeatured(platform);
+		expect(data.featuredArt).toHaveLength(0);
+	});
+
+	it('orders by featuredOrder ASC NULLS LAST, then createdAt DESC — first is the hero', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		// order 2, order 1, no order (newer), no order (older)
+		await db.insert(images).values([
+			{ id: 1, title: 'B', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, featured: true, featuredOrder: 2, createdAt: '2026-01-01T00:00:00.000Z' },
+			{ id: 2, title: 'A', slug: 'art-2', imageUrl: 'https://cdn.example.com/2.png', artistId: 1, published: true, featured: true, featuredOrder: 1, createdAt: '2026-01-01T00:00:00.000Z' },
+			{ id: 3, title: 'C-new', slug: 'art-3', imageUrl: 'https://cdn.example.com/3.png', artistId: 1, published: true, featured: true, featuredOrder: null, createdAt: '2026-06-01T00:00:00.000Z' },
+			{ id: 4, title: 'D-old', slug: 'art-4', imageUrl: 'https://cdn.example.com/4.png', artistId: 1, published: true, featured: true, featuredOrder: null, createdAt: '2026-05-01T00:00:00.000Z' }
+		]);
+
+		const data = await loadFeatured(platform);
+		expect(data.featuredArt.map((r) => r.slug)).toEqual(['art-2', 'art-1', 'art-3', 'art-4']);
+	});
+
+	it('caps the pool at 5 (one hero + four supporting)', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(images).values(
+			Array.from({ length: 7 }, (_, i) => ({
+				id: i + 1,
+				title: `F${i}`,
+				slug: `art-${i + 1}`,
+				imageUrl: `https://cdn.example.com/${i + 1}.png`,
+				artistId: 1,
+				published: true,
+				featured: true,
+				featuredOrder: i + 1,
+				createdAt: '2026-01-01T00:00:00.000Z'
+			}))
+		);
+
+		const data = await loadFeatured(platform);
+		expect(data.featuredArt).toHaveLength(5);
+	});
+
+	it('excludes unpublished, NSFW, and non-featured images', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(images).values([
+			{ id: 1, title: 'Shown', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, featured: true, createdAt: '2026-01-01T00:00:00.000Z' },
+			{ id: 2, title: 'Unpublished', slug: 'art-2', imageUrl: 'https://cdn.example.com/2.png', artistId: 1, published: false, featured: true, createdAt: '2026-01-01T00:00:00.000Z' },
+			{ id: 3, title: 'NSFW', slug: 'art-3', imageUrl: 'https://cdn.example.com/3.png', artistId: 1, published: true, nsfw: true, featured: true, createdAt: '2026-01-01T00:00:00.000Z' },
+			{ id: 4, title: 'Not featured', slug: 'art-4', imageUrl: 'https://cdn.example.com/4.png', artistId: 1, published: true, featured: false, createdAt: '2026-01-01T00:00:00.000Z' }
+		]);
+
+		const data = await loadFeatured(platform);
+		expect(data.featuredArt.map((r) => r.slug)).toEqual(['art-1']);
+	});
+
+	it('joins the artist name for the caption (null when no artist row)', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Kutto' });
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art-1', imageUrl: 'https://cdn.example.com/1.png', artistId: 1, published: true, featured: true, createdAt: '2026-01-01T00:00:00.000Z' });
+
+		const data = await loadFeatured(platform);
+		expect(data.featuredArt[0].artistName).toBe('Kutto');
 	});
 });

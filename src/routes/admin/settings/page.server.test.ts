@@ -265,7 +265,8 @@ const LOAD_DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT N
 		image_url TEXT, thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER,
 		md5hash TEXT, nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1,
 		source_post_url TEXT, artist_id INTEGER, collection_id INTEGER, commissioned_at TEXT,
-		parent_image_id INTEGER, variant_label TEXT, created_at TEXT);
+		parent_image_id INTEGER, variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0,
+		featured_order INTEGER, created_at TEXT);
 	CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
 		is_owner INTEGER NOT NULL DEFAULT 0, reference_image_id INTEGER, created_at TEXT);
 	CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at TEXT);

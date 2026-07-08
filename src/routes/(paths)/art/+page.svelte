@@ -1,11 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Image as ImageIcon, Palette, CircleCheck, CircleAlert, ArrowRight } from 'lucide-svelte';
+	import { Image as ImageIcon, Palette, CircleCheck, CircleAlert, ArrowRight, Star } from 'lucide-svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Meta from '$lib/components/Meta.svelte';
+	import { cdnImage, rawFallback } from '$lib';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
+
+	type FeaturedItem = (typeof data.featuredArt)[number];
 
 	// Only rows the admin actually filled in — a fresh fork has none.
 	const details = $derived(
@@ -18,6 +21,10 @@
 
 	// Pad to 3 slots so the existing-art grid keeps its shape when sparse.
 	const artSlots = $derived([...data.recentArt, null, null, null].slice(0, 3));
+
+	// Featured (#58): the first curated image is the hero, the rest the supporting row.
+	const featuredHero = $derived(data.featuredArt[0] ?? null);
+	const featuredRest = $derived(data.featuredArt.slice(1));
 </script>
 
 <Meta
@@ -101,23 +108,59 @@
 	<hr class="divider" />
 {/if}
 
-<section class="section">
-	<h2 class="section-label">{m.art_existing()}</h2>
-	<div class="art-grid">
-		{#each artSlots as art}
-			{#if art}
-				<a class="art-thumb" href={`/gallery/${art.slug}`}>
-					<img src={art.thumbnailUrl || art.imageUrl} alt={art.title} />
-				</a>
-			{:else}
-				<div class="art-thumb placeholder"><Palette size={16} /></div>
+{#snippet featuredTile(art: FeaturedItem, size: number, extra: string)}
+	{@const src = art.thumbnailUrl || art.imageUrl}
+	<a class="tile {extra}" href={`/gallery/${art.slug}`}>
+		<img src={cdnImage(src, size)} use:rawFallback={src} loading="lazy" alt={art.title} />
+		<span class="tile-cap">
+			{art.title}
+			{#if art.artistName}
+				<span class="tile-by">{m.art_featured_by({ artist: art.artistName })}</span>
 			{/if}
-		{/each}
-	</div>
-	<a class="gallery-link" href="/gallery">
-		{m.art_view_gallery()}<ArrowRight size={14} />
+		</span>
 	</a>
-</section>
+{/snippet}
+
+{#if data.featuredArt.length > 0}
+	<section class="section">
+		<div class="featured">
+			<h2 class="section-label featured-label">
+				<Star size={13} fill="currentColor" /> {m.art_featured()}
+			</h2>
+			{#if featuredHero}
+				{@render featuredTile(featuredHero, 1200, 'featured-hero')}
+			{/if}
+			{#if featuredRest.length}
+				<div class="featured-row">
+					{#each featuredRest as art}
+						{@render featuredTile(art, 400, '')}
+					{/each}
+				</div>
+			{/if}
+			<a class="gallery-link" href="/gallery">
+				{m.art_view_gallery()}<ArrowRight size={14} />
+			</a>
+		</div>
+	</section>
+{:else}
+	<section class="section">
+		<h2 class="section-label">{m.art_existing()}</h2>
+		<div class="art-grid">
+			{#each artSlots as art}
+				{#if art}
+					<a class="art-thumb" href={`/gallery/${art.slug}`}>
+						<img src={art.thumbnailUrl || art.imageUrl} alt={art.title} />
+					</a>
+				{:else}
+					<div class="art-thumb placeholder"><Palette size={16} /></div>
+				{/if}
+			{/each}
+		</div>
+		<a class="gallery-link" href="/gallery">
+			{m.art_view_gallery()}<ArrowRight size={14} />
+		</a>
+	</section>
+{/if}
 
 <style>
 	.ref-sheet {
@@ -227,5 +270,90 @@
 		letter-spacing: 1px;
 		color: var(--primary);
 		text-decoration: none;
+	}
+
+	/* Featured (#58): a subtly primary-tinted frame that takes over the art
+	   section when the operator has curated images. */
+	.featured {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		padding: 16px;
+		border-radius: var(--radius-m);
+		border: 1px solid color-mix(in srgb, var(--primary) 50%, var(--border));
+		background:
+			linear-gradient(180deg, color-mix(in srgb, var(--primary) 9%, transparent), transparent 70%),
+			var(--card);
+	}
+
+	.featured-label {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		margin: 0;
+	}
+
+	.featured-label :global(svg) {
+		color: var(--primary);
+	}
+
+	.tile {
+		position: relative;
+		display: block;
+		border-radius: var(--radius-s);
+		overflow: hidden;
+		border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
+		background: var(--secondary);
+		text-decoration: none;
+		color: inherit;
+	}
+
+	.tile.featured-hero {
+		aspect-ratio: 16 / 10;
+	}
+
+	.tile img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+
+	.tile-cap {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		padding: 16px 10px 9px;
+		font-family: var(--font-secondary);
+		font-size: 12px;
+		line-height: 1.3;
+		color: #fff;
+		text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+		background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+	}
+
+	.tile-by {
+		display: block;
+		margin-top: 1px;
+		font-size: 10.5px;
+		color: rgba(255, 255, 255, 0.72);
+	}
+
+	.featured-row {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 10px;
+	}
+
+	.featured-row .tile {
+		aspect-ratio: 1;
+	}
+
+	/* A lone or odd trailing tile spans both columns as a short banner so the
+	   2-col row never leaves a conspicuous empty cell. */
+	.featured-row .tile:last-child:nth-child(odd) {
+		grid-column: 1 / -1;
+		aspect-ratio: 2 / 1;
 	}
 </style>
