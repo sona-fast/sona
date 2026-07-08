@@ -1,3 +1,5 @@
+import { dev } from '$app/environment';
+
 // Build/deploy-time configuration constants.
 //
 // Unlike SiteSettings (runtime, CMS-editable, stored in D1 — see
@@ -16,8 +18,16 @@ export const APP_NAME = 'Sona';
 /**
  * Admin session cookie name. Read in `hooks.server.ts` / `auth.ts` before any
  * DB access, so it must be a build-time constant rather than a setting.
+ *
+ * In production the `__Host-` prefix makes the browser enforce that the cookie
+ * is Secure, `path=/`, and has NO `Domain` attribute (host-only) — so one host
+ * can never receive another host's session (defense-in-depth for any future
+ * subdomain-per-tenant deployment; harmless for single-host self-hosts, which
+ * already set the cookie host-only). The prefix REQUIRES Secure, which we only
+ * set when `!dev`, so dev keeps the bare name over plain-HTTP localhost.
+ * Upgrading forces a one-time admin re-login (the old cookie name is dropped).
  */
-export const SESSION_COOKIE = 'sona_admin_session';
+export const SESSION_COOKIE = dev ? 'sona_admin_session' : '__Host-sona_admin_session';
 
 /**
  * Cookie holding the visitor's dark/light *mode* preference. A cookie (not

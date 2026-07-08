@@ -35,6 +35,8 @@
 	let furtrackUrl = $state(data.settings.furtrackUrl);
 	let autoResyncEnabled = $state(data.settings.autoResyncEnabled);
 	let contactEmail = $state(data.settings.contactEmail);
+	let privacyPolicy = $state(data.settings.privacyPolicy);
+	let termsOfService = $state(data.settings.termsOfService);
 
 	// Sona / character profile — feeds the /art page of the threePath landing.
 	type SonaColor = { name: string; hex: string };
@@ -191,6 +193,8 @@
 		storageProvider = data.settings.storageProvider;
 		r2PublicUrl = data.settings.r2PublicUrl;
 		contactEmail = data.settings.contactEmail;
+		privacyPolicy = data.settings.privacyPolicy;
+		termsOfService = data.settings.termsOfService;
 		adminEmail = data.adminEmail;
 		sonaSpecies = data.settings.sonaSpecies;
 		sonaBuild = data.settings.sonaBuild;
@@ -283,6 +287,19 @@
 			<label>
 				<span>{m.admin_settings_contact_email()}</span>
 				<input type="text" class="input" bind:value={contactEmail} name="contactEmail" placeholder="hello@example.com" />
+			</label>
+		</section>
+
+		<section data-tab="site">
+			<h2>{m.admin_settings_legal_heading()}</h2>
+			<p class="section-desc">{m.admin_settings_legal_hint()}</p>
+			<label>
+				<span>{m.admin_settings_privacy_label()}</span>
+				<textarea class="input" rows="4" name="privacyPolicy" bind:value={privacyPolicy} placeholder={m.admin_settings_legal_placeholder()}></textarea>
+			</label>
+			<label>
+				<span>{m.admin_settings_terms_label()}</span>
+				<textarea class="input" rows="4" name="termsOfService" bind:value={termsOfService} placeholder={m.admin_settings_legal_placeholder()}></textarea>
 			</label>
 		</section>
 

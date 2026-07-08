@@ -15,6 +15,10 @@
 	<div class="footer-inner container">
 		<div class="footer-cred">
 			<p class="copyright">{m.footer_rights({ year: new Date().getFullYear(), siteName: settings.siteName })}</p>
+			<nav class="legal-links" aria-label={m.footer_legal_label()}>
+				<a href="/privacy">{m.footer_privacy()}</a>
+				<a href="/terms">{m.footer_terms()}</a>
+			</nav>
 			<SonaBadge {host} />
 		</div>
 		<div class="social-links">
@@ -62,6 +66,22 @@
 	.copyright {
 		font-size: 12px;
 		color: var(--muted-foreground);
+	}
+
+	.legal-links {
+		display: flex;
+		gap: 12px;
+		font-size: 12px;
+	}
+
+	.legal-links a {
+		color: var(--muted-foreground);
+		text-decoration: none;
+		transition: color 0.15s;
+	}
+
+	.legal-links a:hover {
+		color: var(--foreground);
 	}
 
 	.social-links {
