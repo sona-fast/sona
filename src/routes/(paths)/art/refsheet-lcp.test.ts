@@ -16,6 +16,7 @@ describe('/art ref-sheet LCP markup', () => {
 	it('prioritizes the LCP fetch, reserves its box, and keeps a raw-URL fallback', () => {
 		const img = pageSrc.match(/<img[\s\S]*?cdnImage\(data\.refSheet[\s\S]*?\/>/)?.[0] ?? '';
 		expect(img).toContain('fetchpriority="high"');
+		expect(img).toContain('decoding="async"');
 		expect(img).toContain('width={data.refSheet.width}');
 		expect(img).toContain('height={data.refSheet.height}');
 		expect(img).toContain('use:rawFallback={data.refSheet.imageUrl}');
