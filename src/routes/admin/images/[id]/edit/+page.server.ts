@@ -88,10 +88,14 @@ export const actions = {
 		const nsfw = data.get('nsfw') === 'on';
 		const published = data.get('published') !== 'on';
 		const featured = data.get('featured') === 'on';
-		// Empty input = no explicit order (NULL → sorts last); otherwise a plain int.
+		// Empty input = no explicit order (NULL → sorts last). Otherwise coerce to a
+		// non-negative integer, clamped to a sane range so a stray decimal, negative,
+		// or absurdly large value can't silently vanish or break the D1 write / sort.
 		const featuredOrderRaw = (data.get('featuredOrder') as string)?.trim();
-		const featuredOrder =
-			featuredOrderRaw && Number.isInteger(Number(featuredOrderRaw)) ? Number(featuredOrderRaw) : null;
+		const featuredOrderNum = featuredOrderRaw ? Number(featuredOrderRaw) : NaN;
+		const featuredOrder = Number.isFinite(featuredOrderNum)
+			? Math.min(Math.max(Math.trunc(featuredOrderNum), 0), 100000)
+			: null;
 		const sourcePostUrl = sanitizeUrl(data.get('sourcePostUrl') as string);
 		const commissionedAt = (data.get('commissionedAt') as string)?.trim();
 		const parentImageIdRaw = (data.get('parentImageId') as string)?.trim();

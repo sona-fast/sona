@@ -67,7 +67,9 @@ export const load: PageServerLoad = async ({ platform }) => {
 		.from(images)
 		.leftJoin(artists, eq(artists.id, images.artistId))
 		.where(and(eq(images.published, true), eq(images.nsfw, false), eq(images.featured, true)))
-		.orderBy(sql`${images.featuredOrder} asc nulls last`, desc(images.createdAt))
+		// id DESC is the final tiebreaker so order is deterministic when featuredOrder
+		// AND createdAt collide.
+		.orderBy(sql`${images.featuredOrder} asc nulls last`, desc(images.createdAt), desc(images.id))
 		.limit(5);
 
 	const sona = sonaDetails(settings);
@@ -76,7 +78,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 	// renders is absent (see artHasContent, a pure predicate over the rows this
 	// load already fetched — no extra queries). Any single source keeps the page
 	// URL-reachable (deep-link use case: mosaic forks sharing their ref sheet).
-	if (!artHasContent(sona, refSheet, recentArt, featuredArt)) error(404, 'Not found');
+	if (!artHasContent(sona, refSheet, recentArt)) error(404, 'Not found');
 
 	return { refSheet, recentArt, featuredArt, sona };
 };

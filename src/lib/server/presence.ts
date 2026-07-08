@@ -33,20 +33,21 @@ export function sonaDetails(
 
 /**
  * Content-presence predicate for /art (#42): present unless every content
- * source the page renders is absent — no ref sheet, no featured art, no recent
- * art, and no sona details at all. Pure function over already-loaded data so
- * the /art load can reuse the rows it fetches for rendering without re-querying;
- * callers without those rows use probeArtContent instead.
+ * source the page renders is absent — no ref sheet, no recent art, and no sona
+ * details at all. Featured art (#58) needs no separate check: a featured image
+ * is by construction published + non-NSFW, i.e. a strict subset of recentArt's
+ * pool, so whenever featured art exists recentArt is non-empty too. Pure
+ * function over already-loaded data so the /art load can reuse the rows it
+ * fetches for rendering without re-querying; callers without those rows use
+ * probeArtContent instead.
  */
 export function artHasContent(
 	sona: ReturnType<typeof sonaDetails>,
 	refSheet: unknown | null,
-	recentArt: unknown[],
-	featuredArt: unknown[]
+	recentArt: unknown[]
 ): boolean {
 	return (
 		refSheet !== null ||
-		featuredArt.length > 0 ||
 		recentArt.length > 0 ||
 		Boolean(sona.species || sona.build || sona.keyFeatures) ||
 		sona.colors.length > 0 ||
@@ -91,9 +92,7 @@ export async function probeArtContent(db: Database): Promise<boolean> {
 		sonaDos: sonaMap.sonaDos ?? '',
 		sonaDonts: sonaMap.sonaDonts ?? ''
 	});
-	// featuredArt is omitted ([]) here: a featured image is by construction also a
-	// published, non-NSFW image, so the recent-art probe below already covers it.
-	if (artHasContent(sona, null, [], [])) return true;
+	if (artHasContent(sona, null, [])) return true;
 
 	// Designated ref sheet: the first owner character by name — must match the
 	// /art load's precedence query.

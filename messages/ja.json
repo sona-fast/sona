@@ -281,7 +281,7 @@
 	"admin_field_private_hint": "（ギャラリーには表示されません）",
 	"admin_field_featured": "アートページの注目に表示",
 	"admin_field_featured_order": "注目の並び順",
-	"admin_field_featured_order_hint": "小さいほど先に表示（最小がヒーロー）。空欄で新しい順。",
+	"admin_field_featured_order_hint": "小さいほど先に表示（最小が一番大きく表示されます）。空欄で新しい順。",
 	"admin_field_source_url": "元投稿のURL",
 	"admin_social_handle_placeholder": "@ハンドル名 または URL",
 	"admin_upload_title": "新しい作品をアップロード",

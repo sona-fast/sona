@@ -24,22 +24,22 @@ describe('art page Featured block markup (#58)', () => {
 		expect(pageSrc).toMatch(/<Star[^>]*\/>/);
 	});
 
-	it('routes the hero and supporting tiles through cdnImage with a raw-URL fallback', () => {
-		expect(pageSrc).toContain('src={cdnImage(heroSrc, 1200)}');
-		expect(pageSrc).toContain('use:rawFallback={heroSrc}');
-		expect(pageSrc).toContain('src={cdnImage(src, 400)}');
+	it('routes hero and supporting tiles through one cdnImage+rawFallback snippet, hero at 1200 and supporting at 400', () => {
+		// Hero and supporting tiles share a single {#snippet featuredTile(art, size, extra)}.
+		expect(pageSrc).toContain('src={cdnImage(src, size)}');
 		expect(pageSrc).toContain('use:rawFallback={src}');
+		expect(pageSrc).toContain("{@render featuredTile(featuredHero, 1200, 'featured-hero')}");
+		expect(pageSrc).toContain("{@render featuredTile(art, 400, '')}");
 		// Never the untransformed original as a featured <img> src.
-		expect(pageSrc).not.toMatch(/<img[^>]*src=\{cdnImage\(featuredHero/);
+		expect(pageSrc).not.toContain('src={src}');
 	});
 
 	it('captions each tile with the title and the by-artist credit', () => {
-		expect(pageSrc).toContain('m.art_featured_by({ artist: featuredHero.artistName })');
 		expect(pageSrc).toContain('m.art_featured_by({ artist: art.artistName })');
 	});
 
 	it('links tiles to the gallery detail page and keeps the full-gallery link', () => {
-		expect(pageSrc).toContain('href={`/gallery/${featuredHero.slug}`}');
+		expect(pageSrc).toContain('href={`/gallery/${art.slug}`}');
 		expect(pageSrc).toContain('m.art_view_gallery()');
 	});
 });

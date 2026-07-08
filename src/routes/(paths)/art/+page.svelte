@@ -8,6 +8,8 @@
 
 	let { data } = $props();
 
+	type FeaturedItem = (typeof data.featuredArt)[number];
+
 	// Only rows the admin actually filled in — a fresh fork has none.
 	const details = $derived(
 		[
@@ -106,6 +108,19 @@
 	<hr class="divider" />
 {/if}
 
+{#snippet featuredTile(art: FeaturedItem, size: number, extra: string)}
+	{@const src = art.thumbnailUrl || art.imageUrl}
+	<a class="tile {extra}" href={`/gallery/${art.slug}`}>
+		<img src={cdnImage(src, size)} use:rawFallback={src} loading="lazy" alt={art.title} />
+		<span class="tile-cap">
+			{art.title}
+			{#if art.artistName}
+				<span class="tile-by">{m.art_featured_by({ artist: art.artistName })}</span>
+			{/if}
+		</span>
+	</a>
+{/snippet}
+
 {#if data.featuredArt.length > 0}
 	<section class="section">
 		<div class="featured">
@@ -113,30 +128,12 @@
 				<Star size={13} fill="currentColor" /> {m.art_featured()}
 			</h2>
 			{#if featuredHero}
-				{@const heroSrc = featuredHero.thumbnailUrl || featuredHero.imageUrl}
-				<a class="tile hero" href={`/gallery/${featuredHero.slug}`}>
-					<img src={cdnImage(heroSrc, 1200)} use:rawFallback={heroSrc} loading="lazy" alt={featuredHero.title} />
-					<span class="tile-cap">
-						{featuredHero.title}
-						{#if featuredHero.artistName}
-							<span class="tile-by">{m.art_featured_by({ artist: featuredHero.artistName })}</span>
-						{/if}
-					</span>
-				</a>
+				{@render featuredTile(featuredHero, 1200, 'featured-hero')}
 			{/if}
 			{#if featuredRest.length}
 				<div class="featured-row">
 					{#each featuredRest as art}
-						{@const src = art.thumbnailUrl || art.imageUrl}
-						<a class="tile" href={`/gallery/${art.slug}`}>
-							<img src={cdnImage(src, 400)} use:rawFallback={src} loading="lazy" alt={art.title} />
-							<span class="tile-cap">
-								{art.title}
-								{#if art.artistName}
-									<span class="tile-by">{m.art_featured_by({ artist: art.artistName })}</span>
-								{/if}
-							</span>
-						</a>
+						{@render featuredTile(art, 400, '')}
 					{/each}
 				</div>
 			{/if}
@@ -283,9 +280,9 @@
 		gap: 12px;
 		padding: 16px;
 		border-radius: var(--radius-m);
-		border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+		border: 1px solid color-mix(in srgb, var(--primary) 50%, var(--border));
 		background:
-			linear-gradient(180deg, color-mix(in srgb, var(--primary) 7%, transparent), transparent 70%),
+			linear-gradient(180deg, color-mix(in srgb, var(--primary) 9%, transparent), transparent 70%),
 			var(--card);
 	}
 
@@ -311,7 +308,7 @@
 		color: inherit;
 	}
 
-	.tile.hero {
+	.tile.featured-hero {
 		aspect-ratio: 16 / 10;
 	}
 
@@ -327,12 +324,13 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
-		padding: 9px 10px;
+		padding: 16px 10px 9px;
 		font-family: var(--font-secondary);
 		font-size: 12px;
 		line-height: 1.3;
 		color: #fff;
-		background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+		text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+		background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
 	}
 
 	.tile-by {
@@ -350,5 +348,12 @@
 
 	.featured-row .tile {
 		aspect-ratio: 1;
+	}
+
+	/* A lone or odd trailing tile spans both columns as a short banner so the
+	   2-col row never leaves a conspicuous empty cell. */
+	.featured-row .tile:last-child:nth-child(odd) {
+		grid-column: 1 / -1;
+		aspect-ratio: 2 / 1;
 	}
 </style>
