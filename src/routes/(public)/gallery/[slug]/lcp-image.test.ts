@@ -7,9 +7,9 @@ import { heroSrc, heroSrcset, heroSizes, isAnimatedSource, variantThumbSrc, rawF
 // transform — never the raw multi-MB original — as its DEFAULT preview src,
 // with intrinsic width/height (no CLS) and fetchpriority on whichever hero img
 // renders (on NSFW pages the blurred one IS the LCP element). The raw URL is
-// legitimate only as (a) the animated-GIF bypass (anim=false would freeze the
-// artwork) and (b) the runtime fallback when the transform 403s on off-zone
-// sources. Template guarantees are asserted against the page source, in the
+// legitimate only as (a) the animated-GIF bypass (GIFs are served raw — off-zone
+// GIFs 403 the transform) and (b) the runtime fallback when the transform 403s
+// on off-zone sources. Template guarantees are asserted against the page source, in the
 // same spirit as reactivity-guard.test.ts; the src selection and fallback
 // logic are unit-tested via hero-image.ts.
 
@@ -75,7 +75,7 @@ describe('hero src selection', () => {
 		);
 	});
 
-	it('animated GIFs bypass the transform entirely (anim=false would freeze them)', () => {
+	it('animated GIFs bypass the transform entirely (served raw — off-zone GIFs 403)', () => {
 		expect(isAnimatedSource(gif)).toBe(true);
 		expect(isAnimatedSource(`${gif}?v=2`)).toBe(true);
 		expect(isAnimatedSource(png)).toBe(false);
@@ -118,7 +118,7 @@ describe('rawFallback action (off-zone 403 → raw original)', () => {
 	}
 
 	const raw = 'https://app.ufs.sh/f/abc';
-	const transformed = `/cdn-cgi/image/width=1200,quality=80,fit=scale-down,format=auto,anim=false/${raw}`;
+	const transformed = `/cdn-cgi/image/width=1200,quality=80,fit=scale-down,format=auto/${raw}`;
 
 	it('swaps a failing transformed src to the raw URL and drops srcset', () => {
 		const img = stubImg({ src: transformed, srcset: `${transformed} 1200w` });

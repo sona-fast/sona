@@ -41,8 +41,13 @@ export function formatDateRange(start: string, end: string | null | undefined): 
 export function cdnImage(src: string | null | undefined, width = 800, quality = 75): string {
 	if (!src) return '';
 	if (import.meta.env.DEV) return src;
-	// Animated GIFs bypass the transform: anim=false freezes them to frame 1,
-	// and off-zone sources (UploadThing, non-resize R2) 403 the transform → broken img.
+	// GIFs bypass the transform and serve their raw original: they're the one
+	// animated upload type detectable by extension, and off-zone GIFs
+	// (UploadThing, non-resize R2) 403 the transform anyway. Animated WebP/AVIF
+	// can't be told from static via URL, so they ride the transform — which
+	// preserves animation (no anim=false) and still resizes to `width`. CF caps
+	// animated resizing at 50 MP (bigger animations are delivered un-resized but
+	// still animated; >100 MP errors → rawFallback swaps in the raw original).
 	if (isAnimatedSource(src)) return src;
-	return `/cdn-cgi/image/width=${width},quality=${quality},fit=scale-down,format=auto,anim=false/${src}`;
+	return `/cdn-cgi/image/width=${width},quality=${quality},fit=scale-down,format=auto/${src}`;
 }

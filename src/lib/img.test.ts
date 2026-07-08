@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cdnImage, isAnimatedSource } from '$lib';
 
-// Guards the GIF regression (sona#97 follow-up): cdnImage hardcodes anim=false
-// and points off-zone sources at /cdn-cgi/image/, which either freezes animated
-// GIFs to frame 1 or 403s → broken img. Animated GIFs must be served raw
-// everywhere cdnImage is used (grid, cards, collections, admin, detail), while
-// static formats still get the transform. cdnImage short-circuits to the raw
-// src in DEV, so these stub DEV=false to exercise the production path.
+// Guards the GIF regression (sona#97 follow-up): GIFs are served raw everywhere
+// cdnImage is used (grid, cards, collections, admin, detail) because off-zone
+// GIFs 403 the transform. Static formats still get the transform. cdnImage must
+// NOT force anim=false — that froze animated WebP/AVIF (which can't be detected
+// by URL) to their first frame; they now animate via the transform. cdnImage
+// short-circuits to the raw src in DEV, so these stub DEV=false to exercise the
+// production path.
 
 describe('cdnImage animated-GIF bypass', () => {
 	beforeEach(() => vi.stubEnv('DEV', false));
@@ -20,12 +21,20 @@ describe('cdnImage animated-GIF bypass', () => {
 
 	it('still routes static formats through the CDN transform with width/quality', () => {
 		expect(cdnImage('https://x/a.png', 200)).toBe(
-			'/cdn-cgi/image/width=200,quality=75,fit=scale-down,format=auto,anim=false/https://x/a.png'
+			'/cdn-cgi/image/width=200,quality=75,fit=scale-down,format=auto/https://x/a.png'
 		);
 		expect(cdnImage('https://x/a.jpg', 200)).toContain('/cdn-cgi/image/width=200');
 		expect(cdnImage('https://x/a.webp', 400, 90)).toContain(
 			'/cdn-cgi/image/width=400,quality=90'
 		);
+	});
+
+	it('never forces anim=false — animated WebP/AVIF must keep their frames', () => {
+		// WebP/AVIF animation isn't URL-detectable, so it rides the transform;
+		// anim=false would freeze it to frame 1 (the bug this guards against).
+		expect(cdnImage('https://x/a.webp', 200)).not.toContain('anim=false');
+		expect(cdnImage('https://x/a.png', 200)).not.toContain('anim=false');
+		expect(cdnImage('https://x/a.webp', 200)).toContain('/cdn-cgi/image/width=200');
 	});
 
 	it('returns empty string for a missing src', () => {
