@@ -1,4 +1,4 @@
-import { json, error } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { isTelegramEnabled } from '$lib/server/telegram';
@@ -32,9 +32,13 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	// run open.
 	requireCronSecret(request, env);
 
-	// Honor the same feature gate as the admin importer — no token, no Telegram.
+	// No bot token → this fork doesn't mirror Telegram sticker packs. Treat it as
+	// a graceful no-op skip (like the auto-resync-disabled case below) so the
+	// scheduler sees success rather than a hard 503: a fork can set CRON_SECRET
+	// for cron in general without opting into Telegram stickers, and shouldn't
+	// get a perpetually-failing scheduled job for it.
 	if (!isTelegramEnabled(env)) {
-		error(503, 'Telegram is not configured (no bot token).');
+		return json({ skipped: true, reason: 'telegram not configured' });
 	}
 
 	const db = getDb(env!.DB);
