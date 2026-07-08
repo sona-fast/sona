@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { cdnImage } from '$lib';
+	import { cdnImage, rawFallback } from '$lib';
 	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
@@ -18,7 +18,7 @@
 
 <a href="/gallery/{slug}" class="card">
 	<div class="image-wrapper">
-		<img src={cdnImage(imageUrl, 800)} alt={title} loading="lazy" class:blurred={nsfw && !revealed} />
+		<img src={cdnImage(imageUrl, 800)} alt={title} loading="lazy" class:blurred={nsfw && !revealed} use:rawFallback={imageUrl} />
 		{#if nsfw && !revealed}
 			<button
 				class="nsfw-overlay"
