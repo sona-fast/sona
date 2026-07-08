@@ -110,10 +110,14 @@ describe('getSettings — mapping & defaults', () => {
 		// These feed the /art, /connect and /share pages of the threePath landing.
 		const { db } = fakeReadDb([
 			{ key: 'contactEmail', value: 'paws@example.com' },
+			{ key: 'privacyPolicy', value: 'Our custom privacy policy.' },
+			{ key: 'termsOfService', value: 'Our custom terms.' },
 			{ key: 'sonaSpecies', value: 'Wolf' }
 		]);
 		const s = await getSettings(db);
 		expect(s.contactEmail).toBe('paws@example.com');
+		expect(s.privacyPolicy).toBe('Our custom privacy policy.');
+		expect(s.termsOfService).toBe('Our custom terms.');
 		expect(s.sonaSpecies).toBe('Wolf');
 		// Unset profile keys fall back to neutral empties — a fresh fork's /art
 		// page renders without any placeholder character data.
