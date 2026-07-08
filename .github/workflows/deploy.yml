@@ -48,18 +48,18 @@ jobs:
             echo "::error::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set — run 'npm run setup' or add both in Settings → Secrets and variables → Actions to enable deploys"; exit 1
           fi
 
-      # Per-deployment names. Set repo variables CF_PAGES_PROJECT and
+      # Per-deployment names. Set repo variables CLOUDFLARE_PAGES_PROJECT and
       # D1_DATABASE_NAME (Settings → Secrets and variables → Actions → Variables);
       # they default to the Sona template names when unset.
       - name: Create Pages project if needed
         env:
-          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona' }}
         run: |
           curl -s -X POST \
             "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects" \
             -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d "{\"name\":\"${CF_PAGES_PROJECT}\",\"production_branch\":\"main\"}" \
+            -d "{\"name\":\"${CLOUDFLARE_PAGES_PROJECT}\",\"production_branch\":\"main\"}" \
             | jq '.success // .errors'
 
       # Apply migrations with tracking: a schema_migrations table records which files
@@ -108,7 +108,7 @@ jobs:
       - name: Sync FURTRACK_MODE to Pages project
         env:
           FURTRACK_MODE: ${{ vars.FURTRACK_MODE }}
-          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona' }}
         run: |
           set -euo pipefail
           if [ -z "$FURTRACK_MODE" ]; then
@@ -118,16 +118,46 @@ jobs:
           payload=$(jq -n --arg v "$FURTRACK_MODE" \
             '{deployment_configs: {production: {env_vars: {FURTRACK_MODE: {type: "plain_text", value: $v}}}}}')
           resp=$(curl -s -X PATCH \
-            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/${CF_PAGES_PROJECT}" \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}" \
             -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "$payload")
           if ! echo "$resp" | jq -e '.success' >/dev/null; then
-            echo "::error::Failed to set FURTRACK_MODE on Pages project ${CF_PAGES_PROJECT}"
+            echo "::error::Failed to set FURTRACK_MODE on Pages project ${CLOUDFLARE_PAGES_PROJECT}"
             echo "$resp" | jq '.errors'
             exit 1
           fi
-          echo "FURTRACK_MODE=${FURTRACK_MODE} set on Pages project ${CF_PAGES_PROJECT}"
+          echo "FURTRACK_MODE=${FURTRACK_MODE} set on Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+
+      # Optional feature: observability (issue #6). Set the repo Actions VARIABLE
+      # `OBSERVABILITY_ENABLED` (Settings → Secrets and variables → Actions →
+      # Variables) to `true` and the next deploy turns the in-app metrics
+      # dashboard on for this fork. Same per-key PATCH as FURTRACK_MODE above, so
+      # nothing else on the project is touched. Unset = logged skip, feature stays
+      # dormant (default off) — this is what keeps it a selective, per-fork opt-in.
+      - name: Sync OBSERVABILITY_ENABLED to Pages project
+        env:
+          OBSERVABILITY_ENABLED: ${{ vars.OBSERVABILITY_ENABLED }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$OBSERVABILITY_ENABLED" ]; then
+            echo "OBSERVABILITY_ENABLED repo variable not set — skipping env var sync (observability stays off)"
+            exit 0
+          fi
+          payload=$(jq -n --arg v "$OBSERVABILITY_ENABLED" \
+            '{deployment_configs: {production: {env_vars: {OBSERVABILITY_ENABLED: {type: "plain_text", value: $v}}}}}')
+          resp=$(curl -s -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CLOUDFLARE_ACCOUNT_ID }}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          if ! echo "$resp" | jq -e '.success' >/dev/null; then
+            echo "::error::Failed to set OBSERVABILITY_ENABLED on Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+            echo "$resp" | jq '.errors'
+            exit 1
+          fi
+          echo "OBSERVABILITY_ENABLED=${OBSERVABILITY_ENABLED} set on Pages project ${CLOUDFLARE_PAGES_PROJECT}"
 
       # Optional feature: Telegram sticker import. Add the repo Actions SECRET
       # `TELEGRAM_BOT_TOKEN` and it's synced to the Pages project here. Pages
@@ -141,7 +171,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona' }}
         run: |
           set -euo pipefail
           if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
@@ -149,8 +179,8 @@ jobs:
             exit 0
           fi
           printf '%s' "$TELEGRAM_BOT_TOKEN" | \
-            npx wrangler pages secret put TELEGRAM_BOT_TOKEN --project-name "$CF_PAGES_PROJECT"
-          echo "TELEGRAM_BOT_TOKEN synced to Pages project ${CF_PAGES_PROJECT} (binds on the deploy below)"
+            npx wrangler pages secret put TELEGRAM_BOT_TOKEN --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          echo "TELEGRAM_BOT_TOKEN synced to Pages project ${CLOUDFLARE_PAGES_PROJECT} (binds on the deploy below)"
 
       # Optional feature: admin password recovery ("Forgot password") email. Add
       # the repo Actions secrets `RESEND_API_KEY` (required to enable) and,
@@ -164,7 +194,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_FROM: ${{ secrets.RESEND_FROM }}
-          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona' }}
         run: |
           set -euo pipefail
           if [ -z "$RESEND_API_KEY" ]; then
@@ -172,12 +202,12 @@ jobs:
             exit 0
           fi
           printf '%s' "$RESEND_API_KEY" | \
-            npx wrangler pages secret put RESEND_API_KEY --project-name "$CF_PAGES_PROJECT"
-          echo "RESEND_API_KEY synced to Pages project ${CF_PAGES_PROJECT}"
+            npx wrangler pages secret put RESEND_API_KEY --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          echo "RESEND_API_KEY synced to Pages project ${CLOUDFLARE_PAGES_PROJECT}"
           if [ -n "$RESEND_FROM" ]; then
             printf '%s' "$RESEND_FROM" | \
-              npx wrangler pages secret put RESEND_FROM --project-name "$CF_PAGES_PROJECT"
-            echo "RESEND_FROM synced to Pages project ${CF_PAGES_PROJECT}"
+              npx wrangler pages secret put RESEND_FROM --project-name "$CLOUDFLARE_PAGES_PROJECT"
+            echo "RESEND_FROM synced to Pages project ${CLOUDFLARE_PAGES_PROJECT}"
           fi
 
       # Bootstrap + cron secrets. setup.ts sets SETUP_TOKEN (first-run wizard
@@ -195,20 +225,20 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'sona' }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona' }}
         run: |
           set -euo pipefail
           if [ -n "$SETUP_TOKEN" ]; then
             printf '%s' "$SETUP_TOKEN" | \
-              npx wrangler pages secret put SETUP_TOKEN --project-name "$CF_PAGES_PROJECT"
-            echo "SETUP_TOKEN synced to Pages project ${CF_PAGES_PROJECT} (binds on the deploy below)"
+              npx wrangler pages secret put SETUP_TOKEN --project-name "$CLOUDFLARE_PAGES_PROJECT"
+            echo "SETUP_TOKEN synced to Pages project ${CLOUDFLARE_PAGES_PROJECT} (binds on the deploy below)"
           else
             echo "SETUP_TOKEN repo secret not set — skipping (older fork, or wizard already completed)"
           fi
           if [ -n "$CRON_SECRET" ]; then
             printf '%s' "$CRON_SECRET" | \
-              npx wrangler pages secret put CRON_SECRET --project-name "$CF_PAGES_PROJECT"
-            echo "CRON_SECRET synced to Pages project ${CF_PAGES_PROJECT} (binds on the deploy below)"
+              npx wrangler pages secret put CRON_SECRET --project-name "$CLOUDFLARE_PAGES_PROJECT"
+            echo "CRON_SECRET synced to Pages project ${CLOUDFLARE_PAGES_PROJECT} (binds on the deploy below)"
           else
             echo "CRON_SECRET repo secret not set — skipping"
           fi
@@ -217,4 +247,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .svelte-kit/cloudflare --project-name=${{ vars.CF_PAGES_PROJECT || 'sona' }}
+          command: pages deploy .svelte-kit/cloudflare --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona' }}

@@ -38,6 +38,7 @@ import {
 } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
 import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
+import { isObservabilityEnabled } from '$lib/server/metrics';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { isValidGallerySort, DEFAULT_GALLERY_SORT, type GallerySort } from '$lib/gallery';
@@ -127,7 +128,17 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// Presence-only flags for the password-reset setup guide. The secret VALUES
 		// are deploy-time env and must never reach the client — only whether they exist.
 		resendKeySet: !!platform?.env?.RESEND_API_KEY,
-		resendFromSet: !!platform?.env?.RESEND_FROM
+		resendFromSet: !!platform?.env?.RESEND_FROM,
+		// Presence-only flag for the Observability tab's Cloudflare edge entry (issue
+		// #6). All three secrets are needed for the edge panel; the values never
+		// reach the client — only whether the connection is complete.
+		cfAnalyticsConnected: !!(
+			platform?.env?.CLOUDFLARE_ANALYTICS_TOKEN &&
+			platform?.env?.CLOUDFLARE_ACCOUNT_ID &&
+			platform?.env?.CLOUDFLARE_ZONE_ID
+		),
+		// Opt-in gate (issue #6): hides the Observability settings tab + section when off.
+		observabilityEnabled: isObservabilityEnabled(platform?.env)
 	};
 };
 

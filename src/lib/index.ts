@@ -1,3 +1,7 @@
+import { isAnimatedSource } from './img';
+
+export { isAnimatedSource, rawFallback } from './img';
+
 export function plural(count: number, singular: string, pluralForm?: string): string {
 	const word = count === 1 ? singular : (pluralForm ?? singular + 's');
 	return `${count} ${word}`;
@@ -37,5 +41,8 @@ export function formatDateRange(start: string, end: string | null | undefined): 
 export function cdnImage(src: string | null | undefined, width = 800, quality = 75): string {
 	if (!src) return '';
 	if (import.meta.env.DEV) return src;
+	// Animated GIFs bypass the transform: anim=false freezes them to frame 1,
+	// and off-zone sources (UploadThing, non-resize R2) 403 the transform → broken img.
+	if (isAnimatedSource(src)) return src;
 	return `/cdn-cgi/image/width=${width},quality=${quality},fit=scale-down,format=auto,anim=false/${src}`;
 }

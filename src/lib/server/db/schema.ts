@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, uniqueIndex, primaryKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
 export const artists = sqliteTable('artists', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
@@ -198,6 +198,43 @@ export const stickers = sqliteTable('stickers', {
 export const stickerEmojis = sqliteTable('sticker_emojis', {
 	stickerId: integer('sticker_id').notNull().references(() => stickers.id, { onDelete: 'cascade' }),
 	emoji: text('emoji').notNull()
+});
+
+// --- Observability (issue #6, Phase 1: Tier-B operational telemetry) ---
+// Everything here is measured IN-APP and written to this fork's OWN database,
+// so it is tenant-isolated by construction — one fork can never read another's
+// numbers (see src/lib/server/observability.ts for the isolation note). Rolled-up
+// counters, never a row per request: cheap, contention-safe writes.
+
+// One row per (day, metric, dim). Incremented with a bounded UPSERT
+// (ON CONFLICT DO UPDATE count = count + n), so write cost is O(1) and the table
+// stays small regardless of traffic. `dim` is a low-cardinality label (route
+// class, status bucket, ok/fail) — never a raw path, id, IP or UA.
+export const metricRollup = sqliteTable('metric_rollup', {
+	day: text('day').notNull(), // 'YYYY-MM-DD' (UTC)
+	metric: text('metric').notNull(), // 'request' | 'error' | 'upload' | 'email'
+	dim: text('dim').notNull().default(''), // '' when N/A
+	count: integer('count').notNull().default(0)
+}, (table) => [primaryKey({ columns: [table.day, table.metric, table.dim] })]);
+
+// Tier-B error detail — a capped ring. Holds route + status + a PII-free message
+// only; NO IP, UA, headers, body or stack. Pruned to a bounded row count so it
+// can't grow without limit (see recordError in observability.ts).
+export const errorSample = sqliteTable('error_sample', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	ts: text('ts').notNull(), // ISO timestamp
+	route: text('route').notNull(),
+	status: integer('status').notNull(),
+	message: text('message').notNull()
+});
+
+// Background-job heartbeat — one row per named cron, overwritten each run. Lets
+// the dashboard show "last ran / ok|failed" without a per-run log table.
+export const jobRun = sqliteTable('job_run', {
+	name: text('name').primaryKey(), // 'cleanup-orphans' | 'resync-telegram' | 'sync-artists'
+	status: text('status').notNull(), // 'ok' | 'failed'
+	ranAt: text('ran_at').notNull(), // ISO timestamp of the last run
+	detail: text('detail') // short, PII-free summary (e.g. 'refreshed 3, linked 1')
 });
 
 // Convention appearances, shown publicly on /about ("Upcoming conventions").

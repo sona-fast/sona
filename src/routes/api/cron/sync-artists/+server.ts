@@ -4,6 +4,7 @@ import { getSettings } from '$lib/server/settings';
 import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
 import { requireCronSecret } from '$lib/server/cron-auth';
+import { recordJobRun, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
 // POST /api/cron/sync-artists
@@ -23,6 +24,17 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		error(503, 'Registry is not configured (set the REGISTRY_API_KEY secret or connect in admin Settings).');
 
 	const settings = await getSettings(db);
-	const summary = await syncArtists(db, renv, settings);
+	// Observability (issue #6): heartbeat for the background-jobs panel. A thrown
+	// error records a failed run before propagating, so the dashboard reflects it.
+	let summary;
+	try {
+		summary = await syncArtists(db, renv, settings);
+	} catch (e) {
+		schedule(platform, recordJobRun(db, 'sync-artists', 'failed',
+			e instanceof Error ? e.message : 'sync failed'));
+		throw e;
+	}
+	schedule(platform, recordJobRun(db, 'sync-artists', 'ok',
+		`refreshed ${summary.refreshed}, linked ${summary.linked}`));
 	return json({ ok: true, ...summary });
 };

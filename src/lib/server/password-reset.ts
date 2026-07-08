@@ -13,6 +13,7 @@
 
 import { hashToken, constantTimeEqual } from './admin-auth';
 import { getRawSetting, setRawSetting } from './settings';
+import { recordEmail } from './metrics';
 import { APP_NAME } from '$lib/config';
 import * as m from '$lib/paraglide/messages';
 import { baseLocale } from '$lib/paraglide/runtime';
@@ -103,7 +104,18 @@ export async function requestPasswordReset(
 	const token = generateToken();
 	const siteName = (await getRawSetting(db, 'siteName'))?.trim() || APP_NAME;
 
-	const sent = await sendResetEmail(env, apiKey, origin, adminEmail, token, siteName);
+	const outcome = await sendResetEmail(env, apiKey, origin, adminEmail, token, siteName);
+	// Observability (issue #6): record the transactional-email outcome (sent/failed)
+	// in-app. Rare, human-triggered path, so the extra small write is inline; wrapped
+	// so a metrics failure can't break the (best-effort) reset. "sent" means Resend
+	// ACCEPTED the request; delivered/bounced/complaint outcomes are webhook-only (no
+	// Resend stats API) and are shown as unavailable on the dashboard until a Resend
+	// webhook is wired up.
+	try {
+		await recordEmail(db, outcome.ok, outcome.ok ? undefined : { status: outcome.status, message: outcome.message });
+	} catch {
+		/* metrics are best-effort — never surface to the caller */
+	}
 	// Persist the token hash ONLY once Resend has confirmed the send. Writing it
 	// first (the old order) meant a failed/timed-out send invalidated a prior
 	// valid link and started the resend cooldown, locking an operator out during
@@ -116,7 +128,7 @@ export async function requestPasswordReset(
 	// fail (rather than locking them out mid-outage), it's bounded by Resend's own
 	// rate limits, and enumeration stays closed (the caller's response is generic
 	// either way).
-	if (!sent) return;
+	if (!outcome.ok) return;
 	const record: StoredReset = {
 		tokenHash: await hashToken(token),
 		expiresAt: new Date(now + RESET_TTL_MS).toISOString(),
@@ -126,9 +138,10 @@ export async function requestPasswordReset(
 }
 
 /** Build the reset link + transactional copy and POST it to Resend. Best-effort:
- * a send failure (or timeout) is logged and swallowed (the caller's response
- * stays generic) — it returns whether the send succeeded so the caller can
- * decide whether the token is safe to persist. */
+ * a send failure (or timeout) is logged and swallowed so the caller's response
+ * stays generic. Returns the outcome (accepted vs. failed, plus status/message on
+ * failure) for in-app observability and so the caller can decide whether the token
+ * is safe to persist. */
 async function sendResetEmail(
 	env: Env | undefined,
 	apiKey: string,
@@ -136,7 +149,7 @@ async function sendResetEmail(
 	to: string,
 	token: string,
 	siteName: string
-): Promise<boolean> {
+): Promise<{ ok: boolean; status: number; message: string }> {
 	// No configurable site locale exists (nothing writes one), so the email always
 	// renders in the base locale — passed explicitly since this runs off the
 	// request path (via waitUntil), where the ambient request locale isn't reliable.
@@ -200,12 +213,14 @@ async function sendResetEmail(
 				.replace(/token=[^\s&"']+/gi, 'token=[redacted]')
 				.slice(0, 300);
 			console.error(`Resend password-reset send failed: ${resp.status} ${body}`);
-			return false;
+			// The redacted body is the real failure reason (unverified domain, etc.) with
+			// PII/token stripped, so it's safe to surface to the in-app metrics dashboard.
+			return { ok: false, status: resp.status, message: body };
 		}
-		return true;
+		return { ok: true, status: resp.status, message: '' };
 	} catch (e) {
 		console.error('Resend password-reset send error:', e instanceof Error ? e.message : e);
-		return false;
+		return { ok: false, status: 0, message: e instanceof Error ? e.message : 'send error' };
 	}
 }
 

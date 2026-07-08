@@ -7,6 +7,12 @@ declare global {
 		// interface Error {}
 		interface Locals {
 			admin?: boolean;
+			/**
+			 * Set by handleError when it records a detailed 5xx error sample, so the
+			 * request `handle` skips its generic fallback sample for the same 5xx and
+			 * avoids a duplicate row in the error ring (see hooks.server.ts).
+			 */
+			errorSampled?: boolean;
 		}
 		// interface PageData {}
 		// interface PageState {}
@@ -38,6 +44,16 @@ declare global {
 				UPLOADTHING_TOKEN: string;
 				/** Fursuit photos feature gate: 'off' (default) | 'mock' | 'live'. */
 				FURTRACK_MODE?: string;
+				/**
+				 * Opt-in gate for the issue #6 observability feature. DEFAULT OFF:
+				 * enable with 'true'/'1'/'on'/'yes' (case-insensitive); anything else
+				 * (unset, 'false', '0', 'off', 'no') keeps it dormant. Gates the in-app
+				 * instrumentation (no metric/error rows written), the
+				 * /admin/observability dashboard (nav hidden + route redirects to
+				 * /admin when off), and the Settings → Observability entry. Set via
+				 * `wrangler pages secret put OBSERVABILITY_ENABLED` or `[vars]`.
+				 */
+				OBSERVABILITY_ENABLED?: string;
 				/**
 				 * Telegram Bot API token (from @BotFather). Gates the sticker
 				 * importer: when unset, Telegram import is hidden and only manual
@@ -79,6 +95,26 @@ declare global {
 				 * account first.
 				 */
 				RESEND_FROM?: string;
+				/**
+				 * Optional Cloudflare edge-analytics enrichment (issue #6, Observability).
+				 * All three must be present for the "Cloudflare edge" panel to appear;
+				 * absence just hides it. The token needs exactly one scope —
+				 * Account · Account Analytics · Read (read-only, this account only). Set
+				 * via `wrangler pages secret put CLOUDFLARE_ANALYTICS_TOKEN` (+ CLOUDFLARE_ACCOUNT_ID,
+				 * CLOUDFLARE_ZONE_ID). Zone analytics need a custom domain; a bare pages.dev has
+				 * no zone. Never stored in the DB; disconnect by deleting the secret.
+				 */
+				CLOUDFLARE_ANALYTICS_TOKEN?: string;
+				CLOUDFLARE_ACCOUNT_ID?: string;
+				CLOUDFLARE_ZONE_ID?: string;
+			};
+			/**
+			 * Cloudflare execution context. `waitUntil` lets fire-and-forget work
+			 * (e.g. the observability metric writes) outlive the response without
+			 * adding latency to it. Optional so non-CF runtimes / tests still type.
+			 */
+			context?: {
+				waitUntil(promise: Promise<unknown>): void;
 			};
 		}
 	}

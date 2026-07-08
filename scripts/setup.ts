@@ -488,7 +488,7 @@ async function main() {
 				// /admin/setup wizard reports "SETUP_TOKEN is not configured" on a
 				// fresh CI-first onboarding until a second deploy happens.
 				ghSet('secret', 'SETUP_TOKEN', setupToken, repoSlug),
-				ghSet('variable', 'CF_PAGES_PROJECT', project, repoSlug),
+				ghSet('variable', 'CLOUDFLARE_PAGES_PROJECT', project, repoSlug),
 				ghSet('variable', 'D1_DATABASE_NAME', dbName, repoSlug),
 				ghSet('variable', 'SITE_URL', siteUrl, repoSlug)
 			];
@@ -497,7 +497,7 @@ async function main() {
 			ciSecretsSet = ok;
 			if (ok)
 				console.log(
-					`\n✔ CI secrets/variables set (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CRON_SECRET, SETUP_TOKEN, CF_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL${furtrackMode !== 'off' ? ', FURTRACK_MODE' : ''}).`
+					`\n✔ CI secrets/variables set (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CRON_SECRET, SETUP_TOKEN, CLOUDFLARE_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL${furtrackMode !== 'off' ? ', FURTRACK_MODE' : ''}).`
 				);
 			else
 				console.warn(
@@ -510,7 +510,7 @@ async function main() {
 			'  CI deploys need CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID + CRON_SECRET secrets and'
 		);
 		console.log(
-			`  CF_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL${furtrackMode !== 'off' ? ', FURTRACK_MODE' : ''} variables (Settings → Secrets and variables → Actions).`
+			`  CLOUDFLARE_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL${furtrackMode !== 'off' ? ', FURTRACK_MODE' : ''} variables (Settings → Secrets and variables → Actions).`
 		);
 	}
 

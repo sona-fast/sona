@@ -49,11 +49,20 @@ function makeDb() {
 		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT,
 		global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
 		aliases TEXT, created_at TEXT NOT NULL
-	);`);
+	);
+	CREATE TABLE job_run (name TEXT PRIMARY KEY, status TEXT NOT NULL, ran_at TEXT NOT NULL, detail TEXT);`);
 	const d1 = makeD1(sqlite);
+	// Capture the fire-and-forget observability writes (recordJobRun) so a test can
+	// await them before asserting the heartbeat row.
+	const waits: Promise<unknown>[] = [];
 	return {
+		sqlite,
+		waits,
 		db: drizzle(d1, { schema }),
-		platform: { env: { DB: d1, CRON_SECRET } } as unknown as App.Platform
+		platform: {
+			env: { DB: d1, CRON_SECRET },
+			context: { waitUntil: (p: Promise<unknown>) => waits.push(p) }
+		} as unknown as App.Platform
 	};
 }
 
@@ -90,5 +99,21 @@ describe('POST /api/cron/sync-artists — registry enablement gate', () => {
 		const { platform } = makeDb();
 
 		await expect(POST(postEvent(platform))).rejects.toMatchObject({ status: 503 });
+	});
+});
+
+describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', () => {
+	it('records a job_run "ok" row on a successful run', async () => {
+		const { db, platform, waits, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(200);
+		// The heartbeat write is scheduled fire-and-forget; drain it before asserting.
+		await Promise.all(waits);
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const row = (sqlite as any).prepare("SELECT status FROM job_run WHERE name='sync-artists'").get();
+		expect(row?.status).toBe('ok');
 	});
 });
