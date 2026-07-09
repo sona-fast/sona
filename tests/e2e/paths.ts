@@ -36,3 +36,14 @@ export const E2E_PLATFORM_PERSIST_RECOVERY = path.join(E2E_PERSIST_TO_RECOVERY, 
 // before each run. Absolute path resolved here so config + preload + spec agree.
 export const E2E_RESEND_MOCK = path.join(here, 'resend-mock.mjs');
 export const E2E_RESEND_CAPTURE = path.join(E2E_PERSIST_TO_RECOVERY, 'resend-capture.jsonl');
+
+// The ut-stat spec drives /admin/settings with UPLOADTHING_TOKEN set so the load
+// fetches live UT usage — which fires a server-side getUsageInfo() call. That
+// token can't go in the shared config (it would make the other specs' settings
+// loads hit the network), so this spec gets its OWN wrangler config (adds the
+// token) + throwaway DB + dev server, with the UT interceptor preloaded. See
+// playwright.config.ts and wrangler.e2e-uploadthing.toml.
+export const E2E_WRANGLER_CONFIG_UT = path.join(here, 'wrangler.e2e-uploadthing.toml');
+export const E2E_PERSIST_TO_UT = path.join(repoRoot, '.wrangler-e2e-uploadthing');
+export const E2E_PLATFORM_PERSIST_UT = path.join(E2E_PERSIST_TO_UT, 'v3');
+export const E2E_UPLOADTHING_MOCK = path.join(here, 'uploadthing-mock.mjs');

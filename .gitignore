@@ -31,6 +31,7 @@ vite.config.ts.timestamp-*
 # Throwaway local D1 built by the E2E harness (tests/e2e/seed.ts)
 .wrangler-e2e
 .wrangler-e2e-recovery
+.wrangler-e2e-uploadthing
 
 # Playwright
 /test-results

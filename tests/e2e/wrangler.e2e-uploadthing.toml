@@ -1,0 +1,36 @@
+# Wrangler config used ONLY by the ut-stat E2E spec's dedicated dev server.
+#
+# Identical to wrangler.e2e.toml EXCEPT it also sets UPLOADTHING_TOKEN, which the
+# settings load reads to fetch live UploadThing usage. That token can't live in the
+# shared wrangler.e2e.toml: every settings-page load with it present fires a
+# server-side getUsageInfo() call, and the shared server doesn't preload the
+# UploadThing mock — so the other specs (palette-settings) would make a real,
+# non-hermetic network attempt on each load and see storageStatus/UT stat flip.
+# Hence this spec gets its own server + seeded DB (see playwright.config.ts), the
+# uploadthing-mock.mjs preload, and this config. Keep the bindings in sync with
+# wrangler.e2e.toml. Everything here is a throwaway local value — no real account.
+
+name = "sona-e2e"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".svelte-kit/cloudflare"
+
+[vars]
+FURTRACK_MODE = "off"
+ADMIN_PASSWORD = "e2e-admin-password"
+RESEND_API_KEY = "e2e-resend-key"
+# Presence gates the live-usage fetch on; the uploadthing-mock.mjs preload answers
+# the getUsageInfo() call, so this token never reaches api.uploadthing.com. Valid
+# UploadThing token shape (base64 JSON { apiKey: "sk_…", appId, regions }) so the
+# SDK parses it instead of failing config validation. Throwaway local value.
+UPLOADTHING_TOKEN = "eyJhcGlLZXkiOiJza19lMmVfdGVzdF9rZXkiLCJhcHBJZCI6ImUyZS1hcHAtaWQiLCJyZWdpb25zIjpbInNlYTEiXX0="
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sona-e2e-db"
+database_id = "e2e-local-placeholder"
+migrations_dir = "drizzle"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "sona-e2e-images"

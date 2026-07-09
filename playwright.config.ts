@@ -5,13 +5,20 @@ import {
 	E2E_PERSIST_TO_RECOVERY,
 	E2E_WRANGLER_CONFIG,
 	E2E_RESEND_CAPTURE,
-	E2E_RESEND_MOCK
+	E2E_RESEND_MOCK,
+	E2E_PLATFORM_PERSIST_UT,
+	E2E_PERSIST_TO_UT,
+	E2E_WRANGLER_CONFIG_UT,
+	E2E_UPLOADTHING_MOCK
 } from './tests/e2e/paths';
 
-// The shared read-only DB/server (gallery, palette) and an isolated one for the
-// session-mutating password-recovery spec — see below.
+// The shared read-only DB/server (gallery, palette), an isolated one for the
+// session-mutating password-recovery spec, and an isolated one for the ut-stat
+// spec (needs UPLOADTHING_TOKEN + the UT interceptor, which would perturb the
+// shared specs) — see below.
 const PORT = 4179;
 const RECOVERY_PORT = 4180;
+const UT_PORT = 4181;
 
 // Point `vite dev` at the E2E-only wrangler config + throwaway persist dir (see
 // svelte.config.js, which honours these envs) so tests run against the DB the
@@ -37,7 +44,22 @@ const recoveryServerEnv = {
 	NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${E2E_RESEND_MOCK}`.trim()
 };
 
+// The ut-stat spec sets UPLOADTHING_TOKEN so the load fetches live UT usage, and
+// mutates the active storage provider (uploadthing -> r2) to prove the file-count
+// stat is hidden by the PROVIDER guard, not a null-usage check. Both would leak
+// into the shared specs (extra network + flipped storageStatus, and a raced
+// provider setting) — so it gets its own seeded DB + server, and its own wrangler
+// config that adds the token. NODE_OPTIONS preloads the UT interceptor
+// (tests/e2e/uploadthing-mock.mjs) so getUsageInfo() never hits the network.
+const utServerEnv = {
+	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG_UT,
+	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_UT,
+	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_UT,
+	NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${E2E_UPLOADTHING_MOCK}`.trim()
+};
+
 const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
+const UT_SPEC = '**/ut-stat.spec.ts';
 
 // Seed a fresh throwaway D1 first, then boot the dev server against it. Seeding
 // here (not in globalSetup) guarantees it finishes before the server reads the
@@ -66,14 +88,23 @@ export default defineConfig({
 	projects: [
 		{
 			name: 'chromium',
-			testIgnore: RECOVERY_SPEC,
+			testIgnore: [RECOVERY_SPEC, UT_SPEC],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
 		},
 		{
 			name: 'recovery',
 			testMatch: RECOVERY_SPEC,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${RECOVERY_PORT}` }
+		},
+		{
+			name: 'ut-stat',
+			testMatch: UT_SPEC,
+			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${UT_PORT}` }
 		}
 	],
-	webServer: [webServer(PORT, sharedServerEnv), webServer(RECOVERY_PORT, recoveryServerEnv)]
+	webServer: [
+		webServer(PORT, sharedServerEnv),
+		webServer(RECOVERY_PORT, recoveryServerEnv),
+		webServer(UT_PORT, utServerEnv)
+	]
 });
