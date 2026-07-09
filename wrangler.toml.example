@@ -12,10 +12,12 @@ compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = ".svelte-kit/cloudflare"
 
-# Fursuit-photos feature gate. 'off' disables it, 'mock' serves bundled demo
-# data for local dev, 'live' calls the real FurTrack API (requires approval).
-[vars]
-FURTRACK_MODE = "off"
+# Keep dashboard-managed variables and secrets on deploy. Without this, a local
+# `wrangler pages deploy` deletes any production var/secret this file doesn't
+# declare — e.g. it would reset FURTRACK_MODE (managed via the GitHub Actions
+# repo variable) back to unset. FURTRACK_MODE is intentionally NOT pinned here;
+# local dev reads it from `.dev.vars`.
+keep_vars = true
 
 # Secrets (NOT defined here — set with `wrangler pages secret put <NAME>`; the
 # `npm run setup` CLI sets SETUP_TOKEN + CRON_SECRET for you):
