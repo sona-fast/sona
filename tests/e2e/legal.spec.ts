@@ -62,11 +62,21 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	// The seed sets no contactEmail, so the "set a monitored contact email" nudge
 	// shows next to the field — the CCPA rights channel prompt (item 2).
 	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
-	// The nudge toggles purely on the client via {#if !contactEmail?.trim()} — it
-	// hides once a value is typed and returns when cleared, without persisting.
-	await page.fill('input[name="contactEmail"]', 'owner@example.com');
-	await expect(page.getByText(/Set a monitored contact email/)).toBeHidden();
-	await page.fill('input[name="contactEmail"]', ''); // restore empty so the save below doesn't persist it
+	// Re-drive the input until the reactive nudge responds. Filling as the first
+	// post-load interaction races Svelte hydration: before the bound input's
+	// oninput handler is wired, a keystroke sets the DOM value but not the
+	// `contactEmail` $state, so the nudge — {#if !contactEmail?.trim()}, purely
+	// client-side — never hides (and Svelte, seeing $state unchanged from its
+	// initial empty value, never re-renders the input to clobber the DOM either).
+	// toPass keeps re-filling until hydration lands and the binding is live, which
+	// makes this deterministic instead of flaky. Nothing is persisted here.
+	const contactEmail = page.locator('input[name="contactEmail"]');
+	await expect(async () => {
+		await contactEmail.fill('owner@example.com');
+		await expect(page.getByText(/Set a monitored contact email/)).toBeHidden({ timeout: 500 });
+	}).toPass();
+	await contactEmail.fill(''); // restore empty so the save below doesn't persist it
+	await expect(contactEmail).toHaveValue('');
 	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
 	await page.fill('textarea[name="privacyPolicy"]', override);
 	// The action writes the setting server-side before returning, so once the POST
