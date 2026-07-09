@@ -939,7 +939,7 @@
 		{#if data.cfAnalyticsConnected}
 			{m.admin_settings_obs_hint_set_a()}<code>wrangler pages secret delete CLOUDFLARE_ANALYTICS_TOKEN</code>{m.admin_settings_obs_hint_set_b()}
 		{:else}
-			{m.admin_settings_obs_hint_unset_a()}<code>Account Analytics: Read</code>{m.admin_settings_obs_hint_unset_b()}<code>pages.dev</code>{m.admin_settings_obs_hint_unset_c()}
+			{m.admin_settings_obs_hint_unset_a()}<code>Zone Analytics: Read</code>{m.admin_settings_obs_hint_unset_b()}<code>pages.dev</code>{m.admin_settings_obs_hint_unset_c()}
 		{/if}
 	</p>
 </section>

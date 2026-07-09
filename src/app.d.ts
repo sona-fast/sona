@@ -99,7 +99,9 @@ declare global {
 				 * Optional Cloudflare edge-analytics enrichment (issue #6, Observability).
 				 * All three must be present for the "Cloudflare edge" panel to appear;
 				 * absence just hides it. The token needs exactly one scope —
-				 * Account · Account Analytics · Read (read-only, this account only). Set
+				 * Zone · Analytics · Read, with Zone Resources scoped to your zone. The
+				 * query below is zone-scoped (viewer.zones), so Account Analytics · Read
+				 * authenticates but is refused with a `zone.analytics.read` authz error. Set
 				 * via `wrangler pages secret put CLOUDFLARE_ANALYTICS_TOKEN` (+ CLOUDFLARE_ACCOUNT_ID,
 				 * CLOUDFLARE_ZONE_ID). Zone analytics need a custom domain; a bare pages.dev has
 				 * no zone. Never stored in the DB; disconnect by deleting the secret.
