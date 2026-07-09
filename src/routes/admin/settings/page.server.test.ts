@@ -493,4 +493,16 @@ describe('settings saveSite — legal "last updated" stamps', () => {
 
 		expect(await getRawSetting(db, 'privacyUpdatedAt')).toBe(new Date().toISOString().slice(0, 10));
 	});
+
+	it('does not stamp when an override is cleared to empty', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'privacyPolicy', 'X');
+		await setRawSetting(db, 'privacyUpdatedAt', '2026-01-01');
+
+		// Present-but-blank clears the override back to the built-in defaults; the
+		// stamp is left untouched (and unread) rather than advanced to today.
+		await actions.saveSite(saveSiteEvent(platform, { privacyPolicy: '' }));
+
+		expect(await getRawSetting(db, 'privacyUpdatedAt')).toBe('2026-01-01');
+	});
 });
