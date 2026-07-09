@@ -1,36 +1,38 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { showUtFileStat } from './ut-stat';
 
-// Guards the UploadThing file-count stat gate against the page source (same
-// spirit as lcp-image.test.ts / featured-markup.test.ts). +page.server.ts
-// populates `utUsage` whenever UPLOADTHING_TOKEN exists REGARDLESS of provider,
-// so the `storageProvider === 'uploadthing'` clause is the only thing hiding a
-// stale UT file count on a site that has migrated UT -> R2 (the real sparky.ink
-// situation). Drop that clause and the count reappears on R2, with no other test
-// noticing — so it is pinned here.
-const pageSrc = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+// Value test for the UploadThing file-count stat gate.
+//
+// +page.server.ts populates `utUsage` whenever UPLOADTHING_TOKEN exists,
+// REGARDLESS of the active storage provider. So `utUsage` being truthy does NOT
+// mean UploadThing is the live store — on a site that migrated UT -> R2 (the
+// real sparky.ink situation) `utUsage` is still truthy but the file count is
+// stale. The provider clause is the only thing hiding that stale count, which is
+// why this test asserts on the returned boolean rather than the page source: a
+// value test rejects equivalent-looking lies (drop/negate the provider clause)
+// while accepting equivalent spellings.
 
-describe('settings UploadThing file-count stat gate', () => {
-	// The {#if ...} that immediately precedes the file-count value is its guard.
-	const statIdx = pageSrc.indexOf('data.utUsage.filesUploaded');
-	const guards = [...pageSrc.slice(0, statIdx).matchAll(/\{#if ([^}]*)\}/g)];
-	const guard = guards.at(-1)?.[1];
+describe('showUtFileStat', () => {
+	const utUsage = { usedBytes: 1, limitBytes: 10, filesUploaded: 42 };
 
-	it('gates the count on utUsage AND the uploadthing provider (conjunction is load-bearing)', () => {
-		expect(statIdx).toBeGreaterThan(-1);
-		expect(guard).toBeDefined();
-		const joined = guard!.replace(/\s+/g, ' ');
+	it('shows the stat when utUsage is present and provider is uploadthing', () => {
+		expect(showUtFileStat({ utUsage, settings: { storageProvider: 'uploadthing' } })).toBe(true);
+	});
 
-		// Both clauses must be present...
-		expect(joined).toContain('data.utUsage');
-		expect(joined).toContain("data.settings.storageProvider === 'uploadthing'");
+	it('hides the stat on a migrated R2 site even though utUsage is still present', () => {
+		expect(showUtFileStat({ utUsage, settings: { storageProvider: 'r2' } })).toBe(false);
+	});
 
-		// ...and joined by `&&`. The conjunction is the load-bearing part: on a
-		// migrated R2 site utUsage is still truthy, so a `||` or `??` join would
-		// short-circuit true and show the stale UT file count again. Asserted by
-		// operator rather than by a fixed clause order, so reordering the two
-		// clauses — which changes nothing — does not fail this test.
-		expect(joined).toContain('&&');
-		expect(joined).not.toMatch(/\|\||\?\?/);
+	it('hides the stat when utUsage is null even on the uploadthing provider', () => {
+		expect(showUtFileStat({ utUsage: null, settings: { storageProvider: 'uploadthing' } })).toBe(
+			false
+		);
+		expect(
+			showUtFileStat({ utUsage: undefined, settings: { storageProvider: 'uploadthing' } })
+		).toBe(false);
+	});
+
+	it('hides the stat when utUsage is null and provider is r2', () => {
+		expect(showUtFileStat({ utUsage: null, settings: { storageProvider: 'r2' } })).toBe(false);
 	});
 });
