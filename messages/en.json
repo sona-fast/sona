@@ -1066,14 +1066,14 @@
 	"admin_cf_setup_lede": "Your in-app counters miss anything Cloudflare serves from cache. Connect a read-only token and this page gains an edge-traffic panel: cached hits, bandwidth, threats blocked. It's optional, and it never reads any account but yours.",
 	"admin_cf_setup_s1_title": "Create a scoped, read-only token",
 	"admin_cf_setup_s1_text": "In the Cloudflare dashboard, open My Profile, then API Tokens, Create Token, Custom token. Add exactly one permission. Nothing can write:",
-	"admin_cf_setup_s1_scope": "Account · Account Analytics · Read",
+	"admin_cf_setup_s1_scope": "Zone · Analytics · Read",
 	"admin_cf_setup_s1_zone": "Then set Zone Resources to include your custom domain's zone, or the query returns nothing.",
 	"admin_cf_setup_s2_title": "Store the token, account id and zone id as secrets",
 	"admin_cf_setup_s2_text": "None of these touch the database. They're stored as Pages secrets:",
 	"admin_cf_setup_s3_title": "Reload Observability",
 	"admin_cf_setup_s3_text": "The Cloudflare edge panel appears next to your in-app metrics. It reads zone analytics, so it needs your custom domain connected; a bare pages.dev URL has no zone data.",
 	"admin_cf_setup_callout_strong": "Read-only, and only your account.",
-	"admin_cf_setup_callout": " Give the token Account Analytics Read and nothing else, so a leaked token can't change anything. It only ever reads your own account's numbers, so it never becomes the boundary between two forks.",
+	"admin_cf_setup_callout": " Give the token Zone Analytics Read and nothing else, so a leaked token can't change anything. It only ever reads your own zone's numbers, so it never becomes the boundary between two forks.",
 	"admin_cf_setup_unlocks_label": "Unlocks:",
 	"admin_cf_setup_unlocks": " a Cloudflare edge panel: cached versus origin requests, total bandwidth, threats blocked. Disconnect anytime by deleting the secret; nothing else on this page depends on it."
 }
