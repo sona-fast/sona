@@ -61,9 +61,12 @@ function migrateLocalD1(repoRoot: string, schemaSql: string): void {
 	const schemaPath = path.join(tmp, 'schema.sql');
 	writeFileSync(schemaPath, schemaSql);
 	try {
+		// stdout ignored (wrangler prints a per-statement JSON success array we don't
+		// want in the predev output); stderr inherited so real migration errors still
+		// surface. A non-zero exit still throws — the caller rolls back wrangler.toml.
 		execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', `--file=${schemaPath}`], {
 			cwd: repoRoot,
-			stdio: 'inherit',
+			stdio: ['ignore', 'ignore', 'inherit'],
 			env: { ...process.env, CI: '1' }
 		});
 	} finally {
@@ -96,10 +99,9 @@ export function bootstrapDevConfig(deps: BootstrapDeps): BootstrapResult {
 	// existing/half-migrated DB would error. Scoped to the D1 dir (getPlatformProxy's
 	// default persist, .wrangler/state/v3/d1) so local R2/KV state is left alone.
 	// Mirrors the e2e seed's wipe (tests/e2e/seed.ts).
-	rmSync(path.join(deps.repoRoot, '.wrangler', 'state', 'v3', 'd1'), {
-		recursive: true,
-		force: true
-	});
+	const d1Dir = path.join(deps.repoRoot, '.wrangler', 'state', 'v3', 'd1');
+	if (existsSync(d1Dir)) log('… wiping the existing local D1 for a clean re-migrate');
+	rmSync(d1Dir, { recursive: true, force: true });
 
 	copyFileSync(path.join(deps.repoRoot, 'wrangler.toml.example'), configPath);
 	log('✔ wrote wrangler.toml from wrangler.toml.example (placeholder IDs — local dev only; run `npm run setup` before deploying)');
