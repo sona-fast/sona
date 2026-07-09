@@ -32,8 +32,10 @@
 
 	{#if override.trim()}
 		<!-- Auto-escaped plain text split into paragraphs on blank lines; single
-		     newlines within a paragraph are preserved via CSS (no {@html}). -->
-		{#each override.trim().split(/\n{2,}/) as paragraph}
+		     newlines within a paragraph are preserved via CSS (no {@html}).
+		     Normalize CRLF first — browsers submit <textarea> line breaks as \r\n,
+		     so a blank line arrives as \r\n\r\n and would otherwise never split. -->
+		{#each override.replace(/\r\n?/g, '\n').trim().split(/\n\s*\n/) as paragraph}
 			<p class="legal-override">{paragraph}</p>
 		{/each}
 	{:else}
