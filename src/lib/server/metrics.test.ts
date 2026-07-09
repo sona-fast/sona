@@ -7,7 +7,6 @@ import { getDb } from './db';
 import {
 	recordMetric,
 	recordError,
-	recordDownload,
 	recordUpload,
 	recordEmail,
 	recordJobRun,
@@ -176,14 +175,14 @@ describe('recordError — capped ring', () => {
 	});
 });
 
-describe('recordDownload — aggregate, no per-image dimension', () => {
+describe("recordMetric(db, 'download') — aggregate, no per-image dimension", () => {
 	it('accumulates into a single dim-less row rather than one row per press', async () => {
 		const sqlite = makeSqlite();
 		const db = getDb(makeD1(sqlite));
 
-		await recordDownload(db);
-		await recordDownload(db);
-		await recordDownload(db);
+		await recordMetric(db, 'download');
+		await recordMetric(db, 'download');
+		await recordMetric(db, 'download');
 
 		const rows = sqlite.prepare("SELECT dim, count FROM metric_rollup WHERE metric='download'").all();
 		// One bounded UPSERT row — a flood of presses cannot grow the table.
@@ -194,7 +193,7 @@ describe('recordDownload — aggregate, no per-image dimension', () => {
 		const sqlite = makeSqlite();
 		const db = getDb(makeD1(sqlite));
 
-		await recordDownload(db);
+		await recordMetric(db, 'download');
 
 		const dims = sqlite.prepare("SELECT DISTINCT dim FROM metric_rollup WHERE metric='download'").all();
 		expect(dims).toEqual([{ dim: '' }]);

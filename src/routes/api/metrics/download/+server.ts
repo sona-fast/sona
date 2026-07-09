@@ -1,5 +1,5 @@
 import { getDb } from '$lib/server/db';
-import { recordDownload, isObservabilityEnabled } from '$lib/server/metrics';
+import { recordMetric, isObservabilityEnabled } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
 // POST /api/metrics/download — beacon fired when a visitor presses an image's
@@ -14,10 +14,12 @@ import type { RequestHandler } from './$types';
 //   - stores no ip, user-agent, image id or timestamp beyond the UTC day bucket,
 //   - is a no-op when observability is off (most forks), touching no DB at all.
 //
-// It increments one bounded UPSERT row per day (`metric='download'`), so a flood
-// costs D1 writes but cannot grow the table. The count is inflatable by anyone
-// willing to POST in a loop; it is a popularity hint, never an authoritative
-// figure. See recordDownload().
+// It records ONE aggregate `metric='download'` counter — no image id, no dim.
+// Per-image counts would need a raw id in `dim`, which metric_rollup forbids, so
+// this is a count of button presses, never of a specific image. It's a bounded
+// UPSERT row per day, so a flood costs D1 writes but cannot grow the table, and
+// the count is inflatable by anyone willing to POST in a loop: a popularity hint
+// on the admin dashboard, never an authoritative or billable figure.
 export const POST: RequestHandler = async ({ request, url, platform }) => {
 	const origin = request.headers.get('origin');
 	if (origin !== url.origin) {
@@ -28,11 +30,11 @@ export const POST: RequestHandler = async ({ request, url, platform }) => {
 		return new Response(null, { status: 204 });
 	}
 
-	// Awaited, not fire-and-forget: the browser may tear the request down the moment
-	// navigation to the file begins, and waitUntil is unavailable for a response we
-	// have not returned yet. The write is a single UPSERT, so this stays sub-ms.
+	// Awaited, not fire-and-forget: this is a single sub-ms bounded UPSERT, so
+	// awaiting is cheap and guarantees the write actually lands before we answer
+	// (the browser may tear the request down the moment file navigation begins).
 	try {
-		await recordDownload(getDb(platform.env.DB));
+		await recordMetric(getDb(platform.env.DB), 'download');
 	} catch {
 		// Counting must never break downloading. The <a download> navigation is
 		// already underway regardless of what we answer here.

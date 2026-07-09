@@ -114,7 +114,7 @@ export interface ObservabilityData {
 	errorRate: number; // 0..1
 	uploads: { ok: number; fail: number };
 	emails: { sent: number; failed: number };
-	/** Download-button presses over the window. Aggregate; see recordDownload(). */
+	/** Download-button presses over the window. Aggregate `metric='download'`; no image id. */
 	downloads: number;
 	/** Per-day request totals over the window, oldest first (length WINDOW_DAYS). */
 	sparkline: number[];

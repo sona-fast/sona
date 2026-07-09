@@ -129,22 +129,6 @@ export async function recordUpload(
 	}
 }
 
-/**
- * Record one press of an image's download button.
- *
- * The button is a direct <a href> to the storage provider's public URL, so the
- * bytes never pass through us — a client beacon is the only place this can be
- * counted. That makes it a count of *clicks*, not completed downloads, and an
- * unauthenticated caller can inflate it. Deliberate: the number is a rough
- * popularity signal on the admin dashboard, never a billing or quota input.
- *
- * Aggregate only — no image id, no dim. Per-image counts would need a raw id in
- * `dim`, which metric_rollup explicitly forbids.
- */
-export async function recordDownload(db: Database): Promise<void> {
-	await recordMetric(db, 'download');
-}
-
 /** Record a transactional-email send outcome. A failure also drops an error sample. */
 export async function recordEmail(
 	db: Database,
