@@ -11,8 +11,12 @@ const pageSrc = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8')
 
 describe('gallery download beacon wiring', () => {
 	it('wires countDownload onto the <a download> button', () => {
-		// The download anchor must carry the onclick handler.
-		const anchor = pageSrc.match(/<a[^>]*\bdownload\b[^>]*>/)?.[0];
+		// Bind to the anchor that carries BOTH the `download` attribute AND
+		// href={image.imageUrl} in the same tag (order-independent lookaheads), so
+		// the match can never latch onto an unrelated anchor added to the page later.
+		const anchor = pageSrc.match(
+			/<a(?=[^>]*\bdownload\b)(?=[^>]*href=\{image\.imageUrl\})[^>]*>/
+		)?.[0];
 		expect(anchor).toBeDefined();
 		expect(anchor).toContain('onclick={countDownload}');
 		expect(anchor).toContain('href={image.imageUrl}');

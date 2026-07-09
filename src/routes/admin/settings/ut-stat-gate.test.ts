@@ -16,18 +16,21 @@ describe('settings UploadThing file-count stat gate', () => {
 	const guards = [...pageSrc.slice(0, statIdx).matchAll(/\{#if ([^}]*)\}/g)];
 	const guard = guards.at(-1)?.[1];
 
-	it('renders the UT file count only, and never without the provider clause', () => {
+	it('gates the count on utUsage AND the uploadthing provider (conjunction is load-bearing)', () => {
 		expect(statIdx).toBeGreaterThan(-1);
 		expect(guard).toBeDefined();
-		// Gated on BOTH utUsage presence AND the provider being uploadthing.
-		expect(guard).toContain('data.utUsage');
-		expect(guard).toContain("data.settings.storageProvider === 'uploadthing'");
-	});
+		const joined = guard!.replace(/\s+/g, ' ');
 
-	it('hides the count on R2 even when utUsage is non-null (utUsage alone must not gate it)', () => {
-		// A bare `{#if data.utUsage}` would show the stale count on a migrated R2
-		// site — the provider clause is what prevents that.
-		expect(guard).not.toBe('data.utUsage');
-		expect(guard).toMatch(/storageProvider === 'uploadthing'/);
+		// Both clauses must be present...
+		expect(joined).toContain('data.utUsage');
+		expect(joined).toContain("data.settings.storageProvider === 'uploadthing'");
+
+		// ...and joined by `&&`. The conjunction is the load-bearing part: on a
+		// migrated R2 site utUsage is still truthy, so a `||` or `??` join would
+		// short-circuit true and show the stale UT file count again. Asserted by
+		// operator rather than by a fixed clause order, so reordering the two
+		// clauses — which changes nothing — does not fail this test.
+		expect(joined).toContain('&&');
+		expect(joined).not.toMatch(/\|\||\?\?/);
 	});
 });
