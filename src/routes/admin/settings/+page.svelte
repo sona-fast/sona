@@ -525,9 +525,7 @@
 					<span class="stat-label">{m.admin_tab_images()}</span>
 					<span class="stat-value">{data.imageCount}</span>
 				</div>
-				<!-- UploadThing's file count only describes UploadThing. On R2 it is a stale
-				     number for a store nothing writes to any more, so it is hidden — the
-				     leftover-bytes prompt above already covers "you still have data there". -->
+				<!-- Hidden on R2 (stale UT count); see showUtFileStat in ./ut-stat. -->
 				{#if showUtFileStat(data)}
 					<div class="storage-stat">
 						<span class="stat-label">{m.admin_settings_stat_ut_files()}</span>

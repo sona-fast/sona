@@ -2,27 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { showUtFileStat } from './ut-stat';
 
-// Two layers, two tools, on purpose:
-//  - The PREDICATE (showUtFileStat) is guarded by VALUE below, so it is immune
-//    to equivalent rewrites and cannot be quietly weakened (drop/negate a clause).
-//  - Its WIRING in +page.svelte is guarded by SPELLING here: the template just
-//    calls the helper, there is nothing to evaluate. A value test cannot see
-//    whether the `{#if}` actually IS the helper call, so the only thing that
-//    catches "someone inlined the condition again" (which silently removes the
-//    value-tested layer) is asserting on the source text of the guard itself.
-// Do NOT reintroduce any assertion about the predicate's *contents* in the
-// template — that was the hopeless source-scrape the value test replaced.
-
-// Value test for the UploadThing file-count stat gate.
-//
-// +page.server.ts populates `utUsage` whenever UPLOADTHING_TOKEN exists,
-// REGARDLESS of the active storage provider. So `utUsage` being truthy does NOT
-// mean UploadThing is the live store — on a site that migrated UT -> R2 (the
-// real sparky.ink situation) `utUsage` is still truthy but the file count is
-// stale. The provider clause is the only thing hiding that stale count, which is
-// why this test asserts on the returned boolean rather than the page source: a
-// value test rejects equivalent-looking lies (drop/negate the provider clause)
-// while accepting equivalent spellings.
+// The predicate is tested by value; the template is checked only to confirm it
+// delegates to the helper (that the file-count render sits inside the helper's
+// own {#if} block), since source text is all a wiring test can observe.
 
 describe('showUtFileStat', () => {
 	const utUsage = { usedBytes: 1, limitBytes: 10, filesUploaded: 42 };
@@ -57,17 +39,34 @@ describe('showUtFileStat wiring in +page.svelte', () => {
 		expect(script).toMatch(/import\s*\{[^}]*\bshowUtFileStat\b[^}]*\}\s*from\s*['"]\.\/ut-stat['"]/);
 	});
 
-	it('guards data.utUsage.filesUploaded with the helper call, not an inline expression', () => {
-		const target = source.indexOf('data.utUsage.filesUploaded');
-		expect(target).toBeGreaterThan(-1);
+	it('renders data.utUsage.filesUploaded exactly once, inside the showUtFileStat block', () => {
+		// Exactly one render, so a second unguarded copy elsewhere can't hide.
+		const renders = [...source.matchAll(/data\.utUsage\.filesUploaded/g)];
+		expect(renders).toHaveLength(1);
+		const renderAt = renders[0].index;
 
-		// The nearest preceding `{#if ...}` before the render of filesUploaded must
-		// be exactly the helper call. An inlined condition here is a real regression:
-		// it renders correctly but silently bypasses the value-tested predicate.
-		const before = source.slice(0, target);
-		const conditions = [...before.matchAll(/\{#if\s+([\s\S]*?)\}/g)];
-		expect(conditions.length).toBeGreaterThan(0);
-		const nearest = conditions[conditions.length - 1][1].trim();
-		expect(nearest).toBe('showUtFileStat(data)');
+		const openTag = '{#if showUtFileStat(data)}';
+		const openAt = source.indexOf(openTag);
+		expect(openAt).toBeGreaterThan(-1);
+		const bodyStart = openAt + openTag.length;
+
+		// Walk {#if}/{/if} depth from the helper's opening tag to find its MATCHING
+		// {/if}, tracking nesting so a render moved past the block (or into a sibling
+		// branch) is not mistaken for a guarded one.
+		let depth = 1;
+		let closeAt = -1;
+		for (const tag of source.matchAll(/\{#if\b|\{\/if\}/g)) {
+			if (tag.index < bodyStart) continue;
+			depth += tag[0] === '{/if}' ? -1 : 1;
+			if (depth === 0) {
+				closeAt = tag.index;
+				break;
+			}
+		}
+		expect(closeAt).toBeGreaterThan(-1);
+
+		// The single render must sit strictly inside the helper's own block.
+		expect(renderAt).toBeGreaterThan(bodyStart);
+		expect(renderAt).toBeLessThan(closeAt);
 	});
 });
