@@ -82,18 +82,21 @@ describe('bootstrapDevConfig', () => {
 		writeFileSync(path.join(d1Dir, 'old.sqlite'), 'stale');
 
 		let staleStillPresentWhenMigrateRan = true;
+		const logs: string[] = [];
 		const result = bootstrapDevConfig({
 			repoRoot: root,
 			env: {},
 			migrate: () => {
 				staleStillPresentWhenMigrateRan = existsSync(path.join(d1Dir, 'old.sqlite'));
 			},
-			log: noopLog
+			log: (m) => logs.push(m)
 		});
 
 		expect(result).toBe('created');
 		// The stale D1 was wiped BEFORE the migrate ran (reproducible clean apply).
 		expect(staleStillPresentWhenMigrateRan).toBe(false);
+		// The wipe of an existing local D1 is announced so it is never silent.
+		expect(logs.some((l) => /wiping the existing local D1/.test(l))).toBe(true);
 	});
 
 	it('skips entirely under the E2E harness (SONA_E2E_WRANGLER_CONFIG set)', () => {
