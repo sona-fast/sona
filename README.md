@@ -152,6 +152,21 @@ npm run check    # paraglide compile + svelte-check
 npm test         # vitest
 ```
 
+On a fresh clone this just works — no `npm run setup` needed to develop locally.
+A `predev` step (`scripts/dev-bootstrap.ts`) runs before `vite dev`: when there's
+no `wrangler.toml` yet, it copies `wrangler.toml.example` (placeholder IDs are
+fine — local dev uses a local SQLite keyed by binding name, so no real Cloudflare
+resources are provisioned) and applies the `drizzle/` migrations to the local D1.
+It's a no-op once a `wrangler.toml` exists, so it never touches a real config from
+`npm run setup`. To reset the local database, delete the `.wrangler` state dir
+(and the generated `wrangler.toml` if you want the config regenerated too) and run
+`npm run dev` again:
+
+```sh
+rm -rf .wrangler wrangler.toml   # placeholder config only — keep a real one from `npm run setup`
+npm run dev                      # re-copies the template and re-migrates a clean local D1
+```
+
 Local secrets go in `.dev.vars` (gitignored). `FURTRACK_MODE=mock` serves bundled
 demo fursuit data without calling FurTrack.
 
