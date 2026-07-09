@@ -23,7 +23,7 @@
 					{m.admin_setup_secret_ci_pre()}
 				</p>
 				<CopyCommand text="gh secret set SETUP_TOKEN" />
-				<p>{m.admin_setup_secret_ci_post()}</p>
+				<p>{m.admin_setup_secret_ci_post_a()}<strong>{m.admin_setup_secret_ci_ui_path()}</strong>{m.admin_setup_secret_ci_post_b()}</p>
 				<p>
 					{m.admin_setup_blocked_set_pre()}<code>wrangler pages secret put SETUP_TOKEN</code>{m.admin_setup_blocked_set_post()}
 				</p>

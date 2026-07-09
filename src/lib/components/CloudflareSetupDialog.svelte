@@ -41,7 +41,7 @@ npx wrangler pages secret put CLOUDFLARE_ZONE_ID       --project-name <your-proj
 				<div class="step-title">{m.admin_cf_setup_s2_title()}</div>
 				<div class="step-text">{m.admin_cf_setup_s2_ci()}</div>
 				<CopyCommand text={GH_SECRETS} />
-				<div class="step-text">{m.admin_cf_setup_s2_ci_post()}</div>
+				<div class="step-text">{m.admin_cf_setup_s2_ci_post_a()}<strong>{m.admin_setup_secret_ci_ui_path()}</strong>{m.admin_setup_secret_ci_post_b()}</div>
 				<div class="step-text">{m.admin_cf_setup_s2_text()}</div>
 				<CopyCommand text={SECRETS} />
 			</div>

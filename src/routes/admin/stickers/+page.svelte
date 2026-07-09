@@ -102,7 +102,7 @@
 					<div class="step-title">{m.admin_stickers_setup_step2_title()}</div>
 					<div class="step-text">{m.admin_setup_secret_ci_pre()}</div>
 					<CopyCommand text="gh secret set TELEGRAM_BOT_TOKEN" />
-					<div class="step-text">{m.admin_setup_secret_ci_post()}</div>
+					<div class="step-text">{m.admin_setup_secret_ci_post_a()}<strong>{m.admin_setup_secret_ci_ui_path()}</strong>{m.admin_setup_secret_ci_post_b()}</div>
 					<div class="step-text">{m.admin_stickers_setup_step2_a()}<code>&lt;your-project&gt;</code>{m.admin_stickers_setup_step2_b()}</div>
 					<CopyCommand text="npx wrangler pages secret put TELEGRAM_BOT_TOKEN --project-name <your-project>" />
 				</div>

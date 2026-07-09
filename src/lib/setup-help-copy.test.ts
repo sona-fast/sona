@@ -90,17 +90,18 @@ describe('setup dialogs lead with the GitHub Actions secret path (bug 3)', () =>
 		expect(en.admin_cf_setup_s2_ci).toContain('origin');
 	});
 
-	it('en CI trailing copy keeps the auto-deploy reason and the web-UI fallback', () => {
-		expect(en.admin_setup_secret_ci_post).toMatch(/deploy/i);
-		expect(en.admin_setup_secret_ci_post).toContain('Secrets and variables');
-		expect(en.admin_setup_secret_ci_post).toContain('Actions');
-		expect(en.admin_cf_setup_s2_ci_post).toContain('Secrets and variables');
+	it('en CI trailing copy keeps the auto-deploy reason and leads into the web-UI path', () => {
+		expect(en.admin_setup_secret_ci_post_a).toMatch(/deploy/i);
+		expect(en.admin_setup_secret_ci_post_a).toContain('GitHub UI');
+		expect(en.admin_cf_setup_s2_ci_post_a).toContain('GitHub UI');
+		// the web-UI path now lives in its own key (bolded at render)
+		expect(en.admin_setup_secret_ci_ui_path).toBe('Settings → Secrets and variables → Actions');
 	});
 
-	it('ja CI trailing copy keeps the GitHub UI path and mentions デプロイ', () => {
-		expect(ja.admin_setup_secret_ci_post).toContain('Secrets and variables');
-		expect(ja.admin_setup_secret_ci_post).toContain('デプロイ');
-		expect(ja.admin_cf_setup_s2_ci_post).toContain('Secrets and variables');
+	it('ja CI trailing copy keeps the UI path (untranslated) and mentions デプロイ', () => {
+		expect(ja.admin_setup_secret_ci_post_a).toContain('デプロイ');
+		expect(ja.admin_cf_setup_s2_ci_post_a).toContain('デプロイ');
+		expect(ja.admin_setup_secret_ci_ui_path).toContain('Secrets and variables');
 	});
 
 	// In every dialog: the CI lead precedes the escape-hatch marker, AND the
@@ -145,6 +146,8 @@ describe('setup dialogs lead with the GitHub Actions secret path (bug 3)', () =>
 			const wranglerAt = src.indexOf('wrangler pages secret put');
 			expect(ghAt).toBeGreaterThanOrEqual(0);
 			expect(wranglerAt).toBeGreaterThan(ghAt);
+			// the web-UI fallback path renders bolded
+			expect(src).toContain('<strong>{m.admin_setup_secret_ci_ui_path()}</strong>');
 		});
 	}
 });
