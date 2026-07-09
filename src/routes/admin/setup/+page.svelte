@@ -19,6 +19,9 @@
 			<div class="blocked">
 				<p>
 					{m.admin_setup_blocked_locked_pre()}<code>SETUP_TOKEN</code>{m.admin_setup_blocked_locked_post()}
+					{m.admin_setup_secret_ci_pre()}<code>SETUP_TOKEN</code>{m.admin_setup_secret_ci_post()}
+				</p>
+				<p>
 					{m.admin_setup_blocked_set_pre()}<code>wrangler pages secret put SETUP_TOKEN</code>{m.admin_setup_blocked_set_post()}
 				</p>
 			</div>
@@ -207,6 +210,9 @@
 		font-size: 14px;
 		line-height: 1.6;
 		color: var(--muted-foreground);
+	}
+	.blocked p + p {
+		margin-top: 10px;
 	}
 	code {
 		font-family: var(--font-primary);

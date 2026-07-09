@@ -53,3 +53,82 @@ describe('featured-character deep link (sona#35)', () => {
 		);
 	});
 });
+
+// bug 1: Pages secrets bind at the NEXT DEPLOY, not on reload, so the
+// observability setup dialog's post-`secret put` step must say redeploy (like
+// the stickers/Resend modals), never "reload".
+describe('observability dialog redeploy copy (bug 1)', () => {
+	const en = messages('en');
+	const ja = messages('ja');
+
+	it('en step 3 says redeploy, never reload', () => {
+		expect(en.admin_cf_setup_s3_title).toMatch(/redeploy/i);
+		expect(en.admin_cf_setup_s3_title).not.toMatch(/reload/i);
+		expect(en.admin_cf_setup_s3_text).not.toMatch(/reload/i);
+	});
+
+	it('ja step 3 says 再デプロイ, never 再読み込み', () => {
+		expect(ja.admin_cf_setup_s3_title).toContain('再デプロイ');
+		expect(ja.admin_cf_setup_s3_title).not.toContain('再読み込み');
+		expect(ja.admin_cf_setup_s3_text).not.toContain('再読み込み');
+	});
+});
+
+// bug 3: every dialog that instructs `wrangler pages secret put` must LEAD with
+// the GitHub-Actions repo-secret path (deploy.yml re-puts repo secrets before
+// each deploy, so the next deploy binds it automatically), keeping the wrangler
+// command as a clearly-secondary escape hatch.
+describe('setup dialogs lead with the GitHub Actions secret path (bug 3)', () => {
+	const en = messages('en');
+	const ja = messages('ja');
+
+	it('en CI copy names the GitHub Actions repo-secret path and the auto-deploy', () => {
+		expect(en.admin_setup_secret_ci_post).toContain('Secrets and variables');
+		expect(en.admin_setup_secret_ci_post).toContain('Actions');
+		expect(en.admin_setup_secret_ci_post).toMatch(/deploy/i);
+		expect(en.admin_cf_setup_s2_ci).toContain('Secrets and variables');
+	});
+
+	it('ja CI copy keeps the GitHub path and mentions デプロイ', () => {
+		expect(ja.admin_setup_secret_ci_post).toContain('Secrets and variables');
+		expect(ja.admin_setup_secret_ci_post).toContain('デプロイ');
+		expect(ja.admin_cf_setup_s2_ci).toContain('Secrets and variables');
+	});
+
+	// The GitHub Actions marker must render before the escape-hatch marker that
+	// introduces the wrangler command, in every dialog.
+	const DIALOGS = [
+		{
+			file: 'src/lib/components/CloudflareSetupDialog.svelte',
+			ci: 'admin_cf_setup_s2_ci',
+			escape: 'admin_cf_setup_s2_text'
+		},
+		{
+			file: 'src/routes/admin/stickers/+page.svelte',
+			ci: 'admin_setup_secret_ci_pre',
+			escape: 'admin_stickers_setup_step2_a'
+		},
+		{
+			file: 'src/routes/admin/settings/+page.svelte',
+			ci: 'admin_setup_secret_ci_pre',
+			escape: 'admin_resend_setup_s2_cli'
+		},
+		{
+			file: 'src/routes/admin/setup/+page.svelte',
+			ci: 'admin_setup_secret_ci_pre',
+			escape: 'admin_setup_blocked_set_pre'
+		}
+	];
+
+	for (const d of DIALOGS) {
+		it(`${d.file} shows the GitHub Actions path before the wrangler escape hatch`, () => {
+			const src = source(d.file);
+			const ciAt = src.indexOf(d.ci);
+			const escAt = src.indexOf(d.escape);
+			expect(ciAt).toBeGreaterThanOrEqual(0);
+			expect(escAt).toBeGreaterThan(ciAt);
+			// escape hatch is retained, not removed
+			expect(src).toContain('wrangler pages secret put');
+		});
+	}
+});

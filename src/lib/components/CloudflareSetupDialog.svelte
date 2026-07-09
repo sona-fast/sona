@@ -35,6 +35,7 @@ npx wrangler pages secret put CLOUDFLARE_ZONE_ID       --project-name <your-proj
 			<span class="step-num">2</span>
 			<div class="step-body">
 				<div class="step-title">{m.admin_cf_setup_s2_title()}</div>
+				<div class="step-text">{m.admin_cf_setup_s2_ci()}</div>
 				<div class="step-text">{m.admin_cf_setup_s2_text()}</div>
 				<CopyCommand text={SECRETS} />
 			</div>
@@ -103,6 +104,9 @@ npx wrangler pages secret put CLOUDFLARE_ZONE_ID       --project-name <your-proj
 		line-height: 1.55;
 	}
 	.step-text.zone {
+		margin-top: 8px;
+	}
+	.step-text + .step-text {
 		margin-top: 8px;
 	}
 	.scope {
