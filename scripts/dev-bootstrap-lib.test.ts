@@ -59,6 +59,43 @@ describe('bootstrapDevConfig', () => {
 		expect(migrated).toHaveLength(0);
 	});
 
+	it('rolls back the wrangler.toml sentinel when the migration fails', () => {
+		// A failed migrate must not leave a config behind — otherwise every future
+		// `npm run dev` would skip the bootstrap and boot an unmigrated DB.
+		expect(() =>
+			bootstrapDevConfig({
+				repoRoot: root,
+				env: {},
+				migrate: () => {
+					throw new Error('wrangler blew up');
+				},
+				log: noopLog
+			})
+		).toThrow('wrangler blew up');
+		expect(existsSync(path.join(root, 'wrangler.toml'))).toBe(false);
+	});
+
+	it('wipes a stale local D1 before migrating so a re-bootstrap is reproducible', () => {
+		// Simulate leftover local D1 state (e.g. user deleted only wrangler.toml).
+		const d1Dir = path.join(root, '.wrangler', 'state', 'v3', 'd1');
+		mkdirSync(d1Dir, { recursive: true });
+		writeFileSync(path.join(d1Dir, 'old.sqlite'), 'stale');
+
+		let staleStillPresentWhenMigrateRan = true;
+		const result = bootstrapDevConfig({
+			repoRoot: root,
+			env: {},
+			migrate: () => {
+				staleStillPresentWhenMigrateRan = existsSync(path.join(d1Dir, 'old.sqlite'));
+			},
+			log: noopLog
+		});
+
+		expect(result).toBe('created');
+		// The stale D1 was wiped BEFORE the migrate ran (reproducible clean apply).
+		expect(staleStillPresentWhenMigrateRan).toBe(false);
+	});
+
 	it('skips entirely under the E2E harness (SONA_E2E_WRANGLER_CONFIG set)', () => {
 		const result = bootstrapDevConfig({
 			repoRoot: root,

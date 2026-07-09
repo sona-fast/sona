@@ -91,11 +91,29 @@ export function bootstrapDevConfig(deps: BootstrapDeps): BootstrapResult {
 	// Never clobber a real, filled-in config (e.g. one written by `npm run setup`).
 	if (existsSync(configPath)) return 'config-exists';
 
-	copyFileSync(path.join(deps.repoRoot, 'wrangler.toml.example'), configPath);
-	log('✔ wrote wrangler.toml from wrangler.toml.example (placeholder IDs — local dev only)');
+	// Start from a clean local D1 so the migrate below is reproducible: the drizzle
+	// migrations are plain CREATE TABLE (no IF NOT EXISTS), so re-applying over an
+	// existing/half-migrated DB would error. Scoped to the D1 dir (getPlatformProxy's
+	// default persist, .wrangler/state/v3/d1) so local R2/KV state is left alone.
+	// Mirrors the e2e seed's wipe (tests/e2e/seed.ts).
+	rmSync(path.join(deps.repoRoot, '.wrangler', 'state', 'v3', 'd1'), {
+		recursive: true,
+		force: true
+	});
 
+	copyFileSync(path.join(deps.repoRoot, 'wrangler.toml.example'), configPath);
+	log('✔ wrote wrangler.toml from wrangler.toml.example (placeholder IDs — local dev only; run `npm run setup` before deploying)');
+
+	// Roll back the wrangler.toml sentinel if the migration fails, so a transient
+	// wrangler error doesn't leave a config that makes every future `npm run dev`
+	// skip the bootstrap and boot against an unmigrated DB — the next run retries clean.
 	const migrate = deps.migrate ?? ((sql: string) => migrateLocalD1(deps.repoRoot, sql));
-	migrate(readMigrations(deps.repoRoot));
+	try {
+		migrate(readMigrations(deps.repoRoot));
+	} catch (err) {
+		rmSync(configPath, { force: true });
+		throw err;
+	}
 	log('✔ applied drizzle migrations to the local D1 (.wrangler)');
 	return 'created';
 }
