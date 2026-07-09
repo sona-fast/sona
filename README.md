@@ -158,13 +158,14 @@ no `wrangler.toml` yet, it copies `wrangler.toml.example` (placeholder IDs are
 fine — local dev uses a local SQLite keyed by binding name, so no real Cloudflare
 resources are provisioned) and applies the `drizzle/` migrations to the local D1.
 It's a no-op once a `wrangler.toml` exists, so it never touches a real config from
-`npm run setup`. To reset the local database, delete the `.wrangler` state dir
-(and the generated `wrangler.toml` if you want the config regenerated too) and run
-`npm run dev` again:
+`npm run setup`. To reset the local database, delete the generated `wrangler.toml`
+and run `npm run dev` again — the bootstrap re-copies the template and re-wipes +
+re-migrates a clean local D1. (Keep a real `wrangler.toml` from `npm run setup`;
+this only applies to the auto-generated placeholder one.)
 
 ```sh
-rm -rf .wrangler wrangler.toml   # placeholder config only — keep a real one from `npm run setup`
-npm run dev                      # re-copies the template and re-migrates a clean local D1
+rm -f wrangler.toml    # placeholder config only — keep a real one from `npm run setup`
+npm run dev            # re-bootstraps: fresh wrangler.toml + a clean, migrated local D1
 ```
 
 Local secrets go in `.dev.vars` (gitignored). `FURTRACK_MODE=mock` serves bundled
