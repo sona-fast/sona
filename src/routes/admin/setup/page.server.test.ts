@@ -198,3 +198,19 @@ describe('setup wizard — creates the site character as is_owner (excluded from
 		expect(row).toEqual({ name: 'Sparky', isOwner: true });
 	});
 });
+
+describe('setup wizard — missing SETUP_TOKEN error is gh-first (#140 follow-up)', () => {
+	it('fails 503 and leads with gh secret set, keeping wrangler as the fallback', async () => {
+		const { platform } = makeDb();
+		delete (platform as { env: Record<string, unknown> }).env.SETUP_TOKEN;
+
+		const result = await actions.default(setupEvent(platform, {}));
+
+		expect(result).toMatchObject({ status: 503 });
+		const error = (result as { data: { error: string } }).data.error;
+		const ghAt = error.indexOf('gh secret set SETUP_TOKEN');
+		const wranglerAt = error.indexOf('wrangler pages secret put SETUP_TOKEN');
+		expect(ghAt).toBeGreaterThanOrEqual(0);
+		expect(wranglerAt).toBeGreaterThan(ghAt);
+	});
+});

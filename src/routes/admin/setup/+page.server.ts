@@ -62,7 +62,7 @@ export const actions = {
 		if (!dev && !hasToken) {
 			return fail(503, {
 				error:
-					'SETUP_TOKEN is not configured. Set it with `wrangler pages secret put SETUP_TOKEN` (the setup CLI does this) and redeploy before running setup.'
+					"SETUP_TOKEN is not configured. Fastest path: run `gh secret set SETUP_TOKEN` from the fork's directory — the deploy workflow applies repo secrets on the next deploy. Or set it by hand with `wrangler pages secret put SETUP_TOKEN` (the setup CLI does this) and redeploy."
 			});
 		}
 
