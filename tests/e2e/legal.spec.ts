@@ -74,7 +74,7 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	await expect(async () => {
 		await contactEmail.fill('owner@example.com');
 		await expect(page.getByText(/Set a monitored contact email/)).toBeHidden({ timeout: 500 });
-	}).toPass();
+	}).toPass({ timeout: 5000 });
 	await contactEmail.fill(''); // restore empty so the save below doesn't persist it
 	await expect(contactEmail).toHaveValue('');
 	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
