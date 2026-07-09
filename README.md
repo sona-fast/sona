@@ -184,6 +184,19 @@ migrates and seeds it (`tests/e2e/fixtures/seed.sql`) in an isolated persist dir
 so your real dev database is untouched. CI runs them on the canonical repo (a
 separate `e2e` job in `.github/workflows/ci.yml`); forks skip them.
 
+#### Integration tests
+
+```sh
+npm run test:integration   # needs real wrangler + a local D1 (miniflare)
+```
+
+Heavier than the unit suite (they run the real dev-bootstrap and boot miniflare),
+so they live under `tests/integration/` — outside `npm test`'s scope — and run in
+their own canonical-repo-gated CI job. `tests/integration/dev-bootstrap.integration.test.ts`
+proves the fresh-clone bootstrap (#137) migrates the local D1 into the exact
+persist dir `getPlatformProxy` reads at `vite dev` boot; it runs entirely in a
+throwaway temp repo, so your real dev database is untouched.
+
 #### Terminology (ja)
 
 日本語UIでは、Telegram/チャットのステッカー系コンテンツは常に「ステッカー」と表記する（「スタンプ」は使わない）。物理的なダイカットグッズは「シール」で区別する。
