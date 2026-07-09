@@ -24,10 +24,14 @@ test('default legal pages render and are reachable from the footer', async ({ pa
 	await expect(page.getByRole('heading', { name: 'Your privacy rights' })).toBeVisible();
 	// CCPA/CPRA notice is part of the default baseline.
 	await expect(page.getByText(/California Consumer Privacy Act/)).toBeVisible();
+	// "Last updated" renders from a stable source (the per-release defaults date),
+	// not `new Date()` — so it's a fixed dotted date, present on the stock page.
+	await expect(page.locator('.legal-updated')).toHaveText(/Last updated \d{4}\.\d{2}\.\d{2}/);
 
 	await page.goto('/terms');
 	await expect(page.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Acceptance of these terms' })).toBeVisible();
+	await expect(page.locator('.legal-updated')).toHaveText(/Last updated \d{4}\.\d{2}\.\d{2}/);
 
 	// Desktop footer links navigate.
 	await page.goto('/');
@@ -55,6 +59,9 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 
 	await login(page);
 	await page.goto('/admin/settings'); // opens on the "site" tab
+	// The seed sets no contactEmail, so the "set a monitored contact email" nudge
+	// shows next to the field — the CCPA rights channel prompt (item 2).
+	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
 	await page.fill('textarea[name="privacyPolicy"]', override);
 	// The action writes the setting server-side before returning, so once the POST
 	// resolves the override is persisted — more robust than racing the toast.
@@ -83,4 +90,9 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	expect(await page.evaluate(() => (window as unknown as { __xssRan?: boolean }).__xssRan)).toBeUndefined();
 	// Split on the blank line into two paragraphs.
 	await expect(page.locator('.legal-page .legal-override')).toHaveCount(2);
+
+	// Saving the override stamps legalUpdatedAt, so the "Last updated" line now
+	// reflects the save date (today) rather than the built-in defaults' date.
+	const today = new Date().toISOString().slice(0, 10).replaceAll('-', '.');
+	await expect(page.locator('.legal-updated')).toHaveText(`Last updated ${today}`);
 });

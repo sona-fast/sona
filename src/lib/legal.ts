@@ -19,6 +19,27 @@ export interface LegalSection {
 	body: string[];
 }
 
+// Date (YYYY-MM-DD) the built-in default Privacy Policy / Terms text below last
+// changed materially. This is the "Last updated" date shown on a stock fork that
+// hasn't overridden the legal pages — a per-release constant, so it stays honest
+// on every fork by construction (a build/deploy date would falsely advance on a
+// redeploy that didn't touch the text). Bump this whenever you edit
+// defaultPrivacyPolicy or defaultTerms.
+export const LEGAL_DEFAULTS_UPDATED = '2026-07-08';
+
+/**
+ * Resolve the "Last updated" date to show on a legal page from a *stable* source
+ * — never `new Date()` at render time, which would always read "today".
+ *
+ * An owner override shows `legalUpdatedAt`, the date it was last saved (stamped
+ * server-side on save). The built-in defaults show `LEGAL_DEFAULTS_UPDATED`. An
+ * override that carries no stamp (e.g. seeded via config, not the admin editor)
+ * also falls back to the defaults date, so the page is always datable.
+ */
+export function legalUpdatedDate(override: string, legalUpdatedAt: string): string {
+	return override.trim() && legalUpdatedAt ? legalUpdatedAt : LEGAL_DEFAULTS_UPDATED;
+}
+
 export interface LegalOptions {
 	siteName: string;
 	/** From the `contactEmail` setting; empty falls back to a generic phrase. */

@@ -20,6 +20,10 @@ export interface SiteSettings {
 	/** Owner-editable override for the /terms page body (plain text). Empty →
 	 * the default terms from `$lib/legal` are shown instead. */
 	termsOfService: string;
+	/** Date (YYYY-MM-DD) an owner last changed a legal override, stamped on save.
+	 * Drives the "Last updated" line on /privacy and /terms when an override is
+	 * set. Empty → the pages show the built-in defaults' date instead. */
+	legalUpdatedAt: string;
 
 	// --- Sona / reference profile (shown on /art, part of the threePath landing) ---
 	// The reference sheet itself is the most recent published gallery image
@@ -107,6 +111,8 @@ const DEFAULTS: SiteSettings = {
 	// Empty → /privacy and /terms render the code-accurate defaults from $lib/legal.
 	privacyPolicy: '',
 	termsOfService: '',
+	// Empty → the legal pages show the built-in defaults' date (LEGAL_DEFAULTS_UPDATED).
+	legalUpdatedAt: '',
 	sonaSpecies: '',
 	sonaBuild: '',
 	sonaKeyFeatures: '',
@@ -173,6 +179,7 @@ export async function getSettings(
 			contactEmail: map.contactEmail ?? DEFAULTS.contactEmail,
 			privacyPolicy: map.privacyPolicy ?? DEFAULTS.privacyPolicy,
 			termsOfService: map.termsOfService ?? DEFAULTS.termsOfService,
+			legalUpdatedAt: map.legalUpdatedAt ?? DEFAULTS.legalUpdatedAt,
 			sonaSpecies: map.sonaSpecies ?? DEFAULTS.sonaSpecies,
 			sonaBuild: map.sonaBuild ?? DEFAULTS.sonaBuild,
 			sonaKeyFeatures: map.sonaKeyFeatures ?? DEFAULTS.sonaKeyFeatures,
