@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { showUtFileStat } from './ut-stat';
+
+// Two layers, two tools, on purpose:
+//  - The PREDICATE (showUtFileStat) is guarded by VALUE below, so it is immune
+//    to equivalent rewrites and cannot be quietly weakened (drop/negate a clause).
+//  - Its WIRING in +page.svelte is guarded by SPELLING here: the template just
+//    calls the helper, there is nothing to evaluate. A value test cannot see
+//    whether the `{#if}` actually IS the helper call, so the only thing that
+//    catches "someone inlined the condition again" (which silently removes the
+//    value-tested layer) is asserting on the source text of the guard itself.
+// Do NOT reintroduce any assertion about the predicate's *contents* in the
+// template — that was the hopeless source-scrape the value test replaced.
 
 // Value test for the UploadThing file-count stat gate.
 //
@@ -34,5 +46,28 @@ describe('showUtFileStat', () => {
 
 	it('hides the stat when utUsage is null and provider is r2', () => {
 		expect(showUtFileStat({ utUsage: null, settings: { storageProvider: 'r2' } })).toBe(false);
+	});
+});
+
+describe('showUtFileStat wiring in +page.svelte', () => {
+	const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+
+	it('imports showUtFileStat in the <script> block', () => {
+		const script = source.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? '';
+		expect(script).toMatch(/import\s*\{[^}]*\bshowUtFileStat\b[^}]*\}\s*from\s*['"]\.\/ut-stat['"]/);
+	});
+
+	it('guards data.utUsage.filesUploaded with the helper call, not an inline expression', () => {
+		const target = source.indexOf('data.utUsage.filesUploaded');
+		expect(target).toBeGreaterThan(-1);
+
+		// The nearest preceding `{#if ...}` before the render of filesUploaded must
+		// be exactly the helper call. An inlined condition here is a real regression:
+		// it renders correctly but silently bypasses the value-tested predicate.
+		const before = source.slice(0, target);
+		const conditions = [...before.matchAll(/\{#if\s+([\s\S]*?)\}/g)];
+		expect(conditions.length).toBeGreaterThan(0);
+		const nearest = conditions[conditions.length - 1][1].trim();
+		expect(nearest).toBe('showUtFileStat(data)');
 	});
 });
