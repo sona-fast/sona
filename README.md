@@ -237,6 +237,21 @@ Generalization is phased (full plan tracked separately):
 - ✅ **Phase 4** — central artist registry service ([`sona-registry`](https://github.com/sona-fast/sona-registry)).
 - ✅ **Phase 5** — fork ↔ registry integration (opt-in via `REGISTRY_API_KEY`; search/pull/submit + background sync).
 
+## License
+
+Sona is open source under the [Apache License 2.0](./LICENSE) — fork it, modify it,
+run your own instance, no strings beyond keeping the license + attribution notices.
+See [`NOTICE`](./NOTICE) for the attribution that carries with redistributions.
+
+## Support the project
+
+Sona is built and maintained by one person for the community. If it's useful to you,
+you can [sponsor its development](https://github.com/sponsors/sparkyfen) — sponsorship
+covers hosting/domain costs and funds new features. Not required, always appreciated.
+
+Want a fork set up or hosted for you? That's offered as an optional paid convenience —
+reach out. The code itself is and stays free.
+
 ## References
 
 - **AfterDark.art** — the platform this lineage replaced.
