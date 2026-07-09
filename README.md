@@ -190,7 +190,7 @@ separate `e2e` job in `.github/workflows/ci.yml`); forks skip them.
 npm run test:integration   # needs real wrangler + a local D1 (miniflare)
 ```
 
-Heavier than the unit suite (they run the real dev-bootstrap and boot miniflare),
+These are heavier than the unit suite (they run the real dev-bootstrap and boot miniflare),
 so they live under `tests/integration/` — outside `npm test`'s scope — and run in
 their own canonical-repo-gated CI job. `tests/integration/dev-bootstrap.integration.test.ts`
 proves the fresh-clone bootstrap (#137) migrates the local D1 into the exact
