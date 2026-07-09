@@ -192,6 +192,22 @@ export const actions = {
 			galleryDefaultSort = isValidGallerySort(sortRaw) ? sortRaw : DEFAULT_GALLERY_SORT;
 		}
 
+		// Stamp the legal "last updated" date only when the policy text actually
+		// changes — this tab also saves theme, about text, etc., and editing one of
+		// those must not advance the date shown on /privacy and /terms. Date-only
+		// (no time), the stable source the pages render (never `new Date()` at
+		// render time).
+		const privacyPolicy = text('privacyPolicy', 100000);
+		const termsOfService = text('termsOfService', 100000);
+		let legalUpdatedAt: string | undefined;
+		if (privacyPolicy !== undefined || termsOfService !== undefined) {
+			const current = await getSettings(db, { fresh: true });
+			const changed =
+				(privacyPolicy !== undefined && privacyPolicy !== current.privacyPolicy) ||
+				(termsOfService !== undefined && termsOfService !== current.termsOfService);
+			if (changed) legalUpdatedAt = new Date().toISOString().slice(0, 10);
+		}
+
 		await saveSettings(db, {
 			siteName: text('siteName', 100),
 			ownerName: text('ownerName', 100),
@@ -211,8 +227,10 @@ export const actions = {
 			contactEmail: text('contactEmail', 200),
 			// Legal overrides — blank falls back to the code-accurate defaults from
 			// $lib/legal on /privacy and /terms. Generous cap for full policy text.
-			privacyPolicy: text('privacyPolicy', 100000),
-			termsOfService: text('termsOfService', 100000),
+			privacyPolicy,
+			termsOfService,
+			// Undefined unless the override text changed above, so it's only written then.
+			legalUpdatedAt,
 			sonaSpecies: text('sonaSpecies', 200),
 			sonaBuild: text('sonaBuild', 200),
 			sonaKeyFeatures: text('sonaKeyFeatures', 500),

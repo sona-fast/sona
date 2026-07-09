@@ -18,6 +18,8 @@
 	"admin_settings_legal_placeholder": "Leave blank to use the built-in default.",
 	"admin_settings_privacy_label": "Privacy Policy override",
 	"admin_settings_terms_label": "Terms of Service override",
+	"admin_settings_contact_email_nudge": "Set a monitored contact email so your Privacy Policy can list a real address for privacy requests and takedowns. Until then, it points visitors to the generic contact options on your site.",
+	"legal_last_updated": "Last updated {date}",
 	"footer_legal_label": "Legal",
 	"footer_privacy": "Privacy",
 	"footer_terms": "Terms",

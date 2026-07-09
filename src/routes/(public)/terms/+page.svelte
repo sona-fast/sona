@@ -16,5 +16,6 @@
 	metaTitle={m.terms_meta_title({ siteName: settings.siteName })}
 	siteName={settings.siteName}
 	override={settings.termsOfService}
+	legalUpdatedAt={settings.legalUpdatedAt}
 	{sections}
 />
