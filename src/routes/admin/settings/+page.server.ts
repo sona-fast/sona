@@ -204,8 +204,10 @@ export const actions = {
 		if (privacyPolicy !== undefined || termsOfService !== undefined) {
 			const current = await getSettings(db, { fresh: true });
 			const today = new Date().toISOString().slice(0, 10);
-			if (privacyPolicy !== undefined && privacyPolicy !== current.privacyPolicy) privacyUpdatedAt = today;
-			if (termsOfService !== undefined && termsOfService !== current.termsOfService) termsUpdatedAt = today;
+			// Stamp only when a NON-EMPTY override changed. Clearing an override back to the
+			// built-in defaults writes no stamp — the defaults' date is shown instead.
+			if (privacyPolicy && privacyPolicy !== current.privacyPolicy) privacyUpdatedAt = today;
+			if (termsOfService && termsOfService !== current.termsOfService) termsUpdatedAt = today;
 		}
 
 		await saveSettings(db, {
