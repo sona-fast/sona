@@ -53,3 +53,101 @@ describe('featured-character deep link (sona#35)', () => {
 		);
 	});
 });
+
+// bug 1: Pages secrets bind at the NEXT DEPLOY, not on reload, so the
+// observability setup dialog's post-`secret put` step must say redeploy (like
+// the stickers/Resend modals), never "reload".
+describe('observability dialog redeploy copy (bug 1)', () => {
+	const en = messages('en');
+	const ja = messages('ja');
+
+	it('en step 3 says redeploy, never reload', () => {
+		expect(en.admin_cf_setup_s3_title).toMatch(/redeploy/i);
+		expect(en.admin_cf_setup_s3_title).not.toMatch(/reload/i);
+		expect(en.admin_cf_setup_s3_text).not.toMatch(/reload/i);
+	});
+
+	it('ja step 3 says 再デプロイ, never 再読み込み', () => {
+		expect(ja.admin_cf_setup_s3_title).toContain('再デプロイ');
+		expect(ja.admin_cf_setup_s3_title).not.toContain('再読み込み');
+		expect(ja.admin_cf_setup_s3_text).not.toContain('再読み込み');
+	});
+});
+
+// bug 3: every dialog that instructs `wrangler pages secret put` must LEAD with
+// the GitHub-Actions repo-secret path (deploy.yml re-puts repo secrets before
+// each deploy, so the next deploy binds it automatically), keeping the wrangler
+// command as a clearly-secondary escape hatch.
+describe('setup dialogs lead with the GitHub Actions secret path (bug 3)', () => {
+	const en = messages('en');
+	const ja = messages('ja');
+
+	it('en CI copy introduces the gh command (run from the fork, gh reads origin)', () => {
+		// Lead sentence introduces the copyable command and explains why no
+		// placeholder is needed (gh infers the repo from the origin remote).
+		expect(en.admin_setup_secret_ci_pre).toMatch(/\bgh\b/);
+		expect(en.admin_setup_secret_ci_pre).toContain('origin');
+		expect(en.admin_cf_setup_s2_ci).toContain('origin');
+	});
+
+	it('en CI trailing copy keeps the auto-deploy reason and leads into the web-UI path', () => {
+		expect(en.admin_setup_secret_ci_post_a).toMatch(/deploy/i);
+		expect(en.admin_setup_secret_ci_post_a).toContain('GitHub UI');
+		expect(en.admin_cf_setup_s2_ci_post_a).toContain('GitHub UI');
+		// the web-UI path now lives in its own key (bolded at render)
+		expect(en.admin_setup_secret_ci_ui_path).toBe('Settings → Secrets and variables → Actions');
+	});
+
+	it('ja CI trailing copy keeps the UI path (untranslated) and mentions デプロイ', () => {
+		expect(ja.admin_setup_secret_ci_post_a).toContain('デプロイ');
+		expect(ja.admin_cf_setup_s2_ci_post_a).toContain('デプロイ');
+		expect(ja.admin_setup_secret_ci_ui_path).toContain('Secrets and variables');
+	});
+
+	// In every dialog: the CI lead precedes the escape-hatch marker, AND the
+	// copyable `gh secret set` block is the FIRST code block — above the
+	// `wrangler pages secret put` one.
+	const DIALOGS = [
+		{
+			file: 'src/lib/components/CloudflareSetupDialog.svelte',
+			ci: 'admin_cf_setup_s2_ci',
+			escape: 'admin_cf_setup_s2_text',
+			gh: 'gh secret set CLOUDFLARE_ANALYTICS_TOKEN'
+		},
+		{
+			file: 'src/routes/admin/stickers/+page.svelte',
+			ci: 'admin_setup_secret_ci_pre',
+			escape: 'admin_stickers_setup_step2_a',
+			gh: 'gh secret set TELEGRAM_BOT_TOKEN'
+		},
+		{
+			file: 'src/routes/admin/settings/+page.svelte',
+			ci: 'admin_setup_secret_ci_pre',
+			escape: 'admin_resend_setup_s2_cli',
+			gh: 'gh secret set RESEND_API_KEY'
+		},
+		{
+			file: 'src/routes/admin/setup/+page.svelte',
+			ci: 'admin_setup_secret_ci_pre',
+			escape: 'admin_setup_blocked_set_pre',
+			gh: 'gh secret set SETUP_TOKEN'
+		}
+	];
+
+	for (const d of DIALOGS) {
+		it(`${d.file} puts the gh command block before the wrangler one`, () => {
+			const src = source(d.file);
+			const ciAt = src.indexOf(d.ci);
+			const escAt = src.indexOf(d.escape);
+			expect(ciAt).toBeGreaterThanOrEqual(0);
+			expect(escAt).toBeGreaterThan(ciAt);
+			// gh secret set block exists and sits above the wrangler escape hatch
+			const ghAt = src.indexOf(d.gh);
+			const wranglerAt = src.indexOf('wrangler pages secret put');
+			expect(ghAt).toBeGreaterThanOrEqual(0);
+			expect(wranglerAt).toBeGreaterThan(ghAt);
+			// the web-UI fallback path renders bolded
+			expect(src).toContain('<strong>{m.admin_setup_secret_ci_ui_path()}</strong>');
+		});
+	}
+});
