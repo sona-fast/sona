@@ -66,9 +66,11 @@ describe('legalUpdatedDate', () => {
 		expect(legalUpdatedDate('Our custom policy.', '2026-05-01')).toBe('2026-05-01');
 	});
 
-	it('falls back to the defaults date for an override with no save stamp', () => {
-		// e.g. a config-seeded override that never went through the admin editor.
-		expect(legalUpdatedDate('Seeded policy.', '')).toBe(LEGAL_DEFAULTS_UPDATED);
+	it("returns '' (hides the line) for an override with no save stamp", () => {
+		// e.g. a config-seeded override that never went through the admin editor: its
+		// true edit date is unknown, so we hide the line rather than claim the
+		// built-in defaults' date for custom text.
+		expect(legalUpdatedDate('Seeded policy.', '')).toBe('');
 	});
 
 	it('exposes a valid YYYY-MM-DD defaults date', () => {

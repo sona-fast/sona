@@ -20,10 +20,14 @@ export interface SiteSettings {
 	/** Owner-editable override for the /terms page body (plain text). Empty →
 	 * the default terms from `$lib/legal` are shown instead. */
 	termsOfService: string;
-	/** Date (YYYY-MM-DD) an owner last changed a legal override, stamped on save.
-	 * Drives the "Last updated" line on /privacy and /terms when an override is
-	 * set. Empty → the pages show the built-in defaults' date instead. */
-	legalUpdatedAt: string;
+	/** Date (YYYY-MM-DD) the /privacy override text was last changed, stamped when
+	 * that page's override is saved. Drives its "Last updated" line when an
+	 * override is set. Empty → the page shows the built-in defaults' date instead. */
+	privacyUpdatedAt: string;
+	/** Date (YYYY-MM-DD) the /terms override text was last changed, stamped when
+	 * that page's override is saved. Drives its "Last updated" line when an
+	 * override is set. Empty → the page shows the built-in defaults' date instead. */
+	termsUpdatedAt: string;
 
 	// --- Sona / reference profile (shown on /art, part of the threePath landing) ---
 	// The reference sheet itself is the most recent published gallery image
@@ -112,7 +116,8 @@ const DEFAULTS: SiteSettings = {
 	privacyPolicy: '',
 	termsOfService: '',
 	// Empty → the legal pages show the built-in defaults' date (LEGAL_DEFAULTS_UPDATED).
-	legalUpdatedAt: '',
+	privacyUpdatedAt: '',
+	termsUpdatedAt: '',
 	sonaSpecies: '',
 	sonaBuild: '',
 	sonaKeyFeatures: '',
@@ -179,7 +184,8 @@ export async function getSettings(
 			contactEmail: map.contactEmail ?? DEFAULTS.contactEmail,
 			privacyPolicy: map.privacyPolicy ?? DEFAULTS.privacyPolicy,
 			termsOfService: map.termsOfService ?? DEFAULTS.termsOfService,
-			legalUpdatedAt: map.legalUpdatedAt ?? DEFAULTS.legalUpdatedAt,
+			privacyUpdatedAt: map.privacyUpdatedAt ?? DEFAULTS.privacyUpdatedAt,
+			termsUpdatedAt: map.termsUpdatedAt ?? DEFAULTS.termsUpdatedAt,
 			sonaSpecies: map.sonaSpecies ?? DEFAULTS.sonaSpecies,
 			sonaBuild: map.sonaBuild ?? DEFAULTS.sonaBuild,
 			sonaKeyFeatures: map.sonaKeyFeatures ?? DEFAULTS.sonaKeyFeatures,

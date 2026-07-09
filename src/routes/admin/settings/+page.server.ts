@@ -199,13 +199,13 @@ export const actions = {
 		// render time).
 		const privacyPolicy = text('privacyPolicy', 100000);
 		const termsOfService = text('termsOfService', 100000);
-		let legalUpdatedAt: string | undefined;
+		let privacyUpdatedAt: string | undefined;
+		let termsUpdatedAt: string | undefined;
 		if (privacyPolicy !== undefined || termsOfService !== undefined) {
 			const current = await getSettings(db, { fresh: true });
-			const changed =
-				(privacyPolicy !== undefined && privacyPolicy !== current.privacyPolicy) ||
-				(termsOfService !== undefined && termsOfService !== current.termsOfService);
-			if (changed) legalUpdatedAt = new Date().toISOString().slice(0, 10);
+			const today = new Date().toISOString().slice(0, 10);
+			if (privacyPolicy !== undefined && privacyPolicy !== current.privacyPolicy) privacyUpdatedAt = today;
+			if (termsOfService !== undefined && termsOfService !== current.termsOfService) termsUpdatedAt = today;
 		}
 
 		await saveSettings(db, {
@@ -229,8 +229,10 @@ export const actions = {
 			// $lib/legal on /privacy and /terms. Generous cap for full policy text.
 			privacyPolicy,
 			termsOfService,
-			// Undefined unless the override text changed above, so it's only written then.
-			legalUpdatedAt,
+			// Undefined unless the matching override text changed above, so each is
+			// only written when that page's policy actually changed.
+			privacyUpdatedAt,
+			termsUpdatedAt,
 			sonaSpecies: text('sonaSpecies', 200),
 			sonaBuild: text('sonaBuild', 200),
 			sonaKeyFeatures: text('sonaKeyFeatures', 500),

@@ -119,17 +119,23 @@ describe('getSettings — mapping & defaults', () => {
 		expect(s.privacyPolicy).toBe('Our custom privacy policy.');
 		expect(s.termsOfService).toBe('Our custom terms.');
 		expect(s.sonaSpecies).toBe('Wolf');
-		// legalUpdatedAt is unset here → empty, so the pages show the defaults' date.
-		expect(s.legalUpdatedAt).toBe('');
+		// Both stamps are unset here → empty, so the pages show the defaults' date.
+		expect(s.privacyUpdatedAt).toBe('');
+		expect(s.termsUpdatedAt).toBe('');
 		// Unset profile keys fall back to neutral empties — a fresh fork's /art
 		// page renders without any placeholder character data.
 		expect(parseSonaColors(s.sonaColors)).toEqual([]);
 		expect(s.sonaDos).toBe('');
 	});
 
-	it('maps a stored legalUpdatedAt (the legal-pages "last updated" stamp)', async () => {
-		const { db } = fakeReadDb([{ key: 'legalUpdatedAt', value: '2026-05-01' }]);
-		expect((await getSettings(db)).legalUpdatedAt).toBe('2026-05-01');
+	it('maps a stored privacyUpdatedAt/termsUpdatedAt (the legal-pages "last updated" stamps)', async () => {
+		const { db } = fakeReadDb([
+			{ key: 'privacyUpdatedAt', value: '2026-05-01' },
+			{ key: 'termsUpdatedAt', value: '2026-06-02' }
+		]);
+		const s = await getSettings(db);
+		expect(s.privacyUpdatedAt).toBe('2026-05-01');
+		expect(s.termsUpdatedAt).toBe('2026-06-02');
 	});
 
 	it('returns defaults (and does NOT cache) when the read throws', async () => {
