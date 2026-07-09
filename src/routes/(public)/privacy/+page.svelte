@@ -16,6 +16,6 @@
 	metaTitle={m.privacy_meta_title({ siteName: settings.siteName })}
 	siteName={settings.siteName}
 	override={settings.privacyPolicy}
-	legalUpdatedAt={settings.legalUpdatedAt}
+	legalUpdatedAt={settings.privacyUpdatedAt}
 	{sections}
 />

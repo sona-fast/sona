@@ -62,6 +62,12 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	// The seed sets no contactEmail, so the "set a monitored contact email" nudge
 	// shows next to the field — the CCPA rights channel prompt (item 2).
 	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
+	// The nudge toggles purely on the client via {#if !contactEmail?.trim()} — it
+	// hides once a value is typed and returns when cleared, without persisting.
+	await page.fill('input[name="contactEmail"]', 'owner@example.com');
+	await expect(page.getByText(/Set a monitored contact email/)).toBeHidden();
+	await page.fill('input[name="contactEmail"]', ''); // restore empty so the save below doesn't persist it
+	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
 	await page.fill('textarea[name="privacyPolicy"]', override);
 	// The action writes the setting server-side before returning, so once the POST
 	// resolves the override is persisted — more robust than racing the toast.
@@ -91,8 +97,8 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	// Split on the blank line into two paragraphs.
 	await expect(page.locator('.legal-page .legal-override')).toHaveCount(2);
 
-	// Saving the override stamps legalUpdatedAt, so the "Last updated" line now
-	// reflects the save date (today) rather than the built-in defaults' date.
+	// Saving the privacy override stamps privacyUpdatedAt, so the "Last updated"
+	// line now reflects the save date (today) rather than the built-in defaults' date.
 	const today = new Date().toISOString().slice(0, 10).replaceAll('-', '.');
 	await expect(page.locator('.legal-updated')).toHaveText(`Last updated ${today}`);
 });

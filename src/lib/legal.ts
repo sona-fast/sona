@@ -32,12 +32,14 @@ export const LEGAL_DEFAULTS_UPDATED = '2026-07-08';
  * — never `new Date()` at render time, which would always read "today".
  *
  * An owner override shows `legalUpdatedAt`, the date it was last saved (stamped
- * server-side on save). The built-in defaults show `LEGAL_DEFAULTS_UPDATED`. An
- * override that carries no stamp (e.g. seeded via config, not the admin editor)
- * also falls back to the defaults date, so the page is always datable.
+ * server-side on save). The built-in defaults show `LEGAL_DEFAULTS_UPDATED`.
  */
 export function legalUpdatedDate(override: string, legalUpdatedAt: string): string {
-	return override.trim() && legalUpdatedAt ? legalUpdatedAt : LEGAL_DEFAULTS_UPDATED;
+	// Override with no save stamp (config-seeded, or a pre-existing install not yet
+	// re-saved): its true edit date is unknown, so return '' and let LegalPage hide
+	// the line rather than claim the built-in defaults' date for custom text.
+	if (override.trim()) return legalUpdatedAt;
+	return LEGAL_DEFAULTS_UPDATED;
 }
 
 export interface LegalOptions {
