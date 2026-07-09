@@ -27,8 +27,13 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 /** A throwaway "repo" holding only the two things the bootstrap reads. */
 function makeThrowawayRepo(): string {
 	const root = mkdtempSync(path.join(tmpdir(), 'sona-dev-bootstrap-int-'));
-	cpSync(path.join(repoRoot, 'wrangler.toml.example'), path.join(root, 'wrangler.toml.example'));
-	cpSync(path.join(repoRoot, 'drizzle'), path.join(root, 'drizzle'), { recursive: true });
+	try {
+		cpSync(path.join(repoRoot, 'wrangler.toml.example'), path.join(root, 'wrangler.toml.example'));
+		cpSync(path.join(repoRoot, 'drizzle'), path.join(root, 'drizzle'), { recursive: true });
+	} catch (err) {
+		rmSync(root, { recursive: true, force: true });
+		throw err;
+	}
 	return root;
 }
 
@@ -72,8 +77,9 @@ describe('dev-bootstrap integration (real wrangler + local D1)', () => {
 		root = makeThrowawayRepo();
 
 		// Before the bootstrap there is no wrangler.toml — platformProxy can't read
-		// the config to wire the DB binding. This IS the fresh-clone 500.
-		await expect(tableExistsViaDevProxy('site_settings')).rejects.toThrow();
+		// the config to wire the DB binding. This IS the fresh-clone 500; pin the
+		// assertion to that cause.
+		await expect(tableExistsViaDevProxy('site_settings')).rejects.toThrow(/wrangler\.toml/i);
 
 		// Run the REAL bootstrap: no injected migrate, so migrateLocalD1 actually
 		// shells out to `wrangler d1 execute DB --local` against this throwaway repo.
@@ -86,5 +92,5 @@ describe('dev-bootstrap integration (real wrangler + local D1)', () => {
 		// getPlatformProxy's read path coincide (a --persist-to drift or binding
 		// change would land the DB elsewhere and fail this).
 		expect(await tableExistsViaDevProxy('site_settings')).toBe(true);
-	}, 180_000);
+	});
 });
