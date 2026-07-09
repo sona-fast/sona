@@ -13,6 +13,7 @@
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
 	import { resendSetupProgress } from '$lib/resend-setup';
+	import { showUtFileStat } from './ut-stat';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
@@ -527,7 +528,8 @@
 					<span class="stat-label">{m.admin_tab_images()}</span>
 					<span class="stat-value">{data.imageCount}</span>
 				</div>
-				{#if data.utUsage}
+				<!-- Hidden on R2 (stale UT count); see showUtFileStat in ./ut-stat. -->
+				{#if showUtFileStat(data)}
 					<div class="storage-stat">
 						<span class="stat-label">{m.admin_settings_stat_ut_files()}</span>
 						<span class="stat-value">{data.utUsage.filesUploaded}</span>

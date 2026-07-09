@@ -39,6 +39,14 @@
 		return m.gallery_variant_n({ n });
 	}
 
+	// Fire-and-forget beacon so the admin dashboard can count download presses. The
+	// anchor's own navigation starts the file transfer; `keepalive` lets this POST
+	// outlive that. Never awaited and never surfaced — a failed count must not cost
+	// the visitor their download, and an offline visitor should see no error.
+	function countDownload() {
+		void fetch('/api/metrics/download', { method: 'POST', keepalive: true }).catch(() => {});
+	}
+
 	async function share() {
 		const url = window.location.href;
 		const title = `${image.title} — ${siteName}`;
@@ -253,7 +261,7 @@
 			{/if}
 
 			<div class="actions">
-				<a href={image.imageUrl} download class="btn btn-primary"><Download size={16} /> {m.gallery_download()}</a>
+				<a href={image.imageUrl} download class="btn btn-primary" onclick={countDownload}><Download size={16} /> {m.gallery_download()}</a>
 				<button class="btn btn-outline" onclick={share}>
 					<Share2 size={16} /> {copied ? m.gallery_copied() : m.gallery_share()}
 				</button>

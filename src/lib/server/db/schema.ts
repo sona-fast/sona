@@ -218,7 +218,7 @@ export const stickerEmojis = sqliteTable('sticker_emojis', {
 // class, status bucket, ok/fail) — never a raw path, id, IP or UA.
 export const metricRollup = sqliteTable('metric_rollup', {
 	day: text('day').notNull(), // 'YYYY-MM-DD' (UTC)
-	metric: text('metric').notNull(), // 'request' | 'error' | 'upload' | 'email'
+	metric: text('metric').notNull(), // 'request' | 'error' | 'upload' | 'email' | 'download'
 	dim: text('dim').notNull().default(''), // '' when N/A
 	count: integer('count').notNull().default(0)
 }, (table) => [primaryKey({ columns: [table.day, table.metric, table.dim] })]);

@@ -29,7 +29,7 @@ export function isObservabilityEnabled(env: Env | undefined): boolean {
 	return v === 'true' || v === '1' || v === 'on' || v === 'yes';
 }
 
-export type Metric = 'request' | 'error' | 'upload' | 'email';
+export type Metric = 'request' | 'error' | 'upload' | 'email' | 'download';
 /** Coarse request bucket — the only `dim` used for metric='request'. */
 export type RouteClass = 'public' | 'admin' | 'api';
 

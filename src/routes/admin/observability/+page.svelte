@@ -116,6 +116,10 @@
 				</div>
 				<div class="vlbl">{m.admin_obs_vital_emails()}</div>
 			</div>
+			<div class="vital">
+				<div class="vnum">{fmtInt(o.downloads)}</div>
+				<div class="vlbl">{m.admin_obs_vital_downloads()}</div>
+			</div>
 		</div>
 	</section>
 

@@ -114,6 +114,8 @@ export interface ObservabilityData {
 	errorRate: number; // 0..1
 	uploads: { ok: number; fail: number };
 	emails: { sent: number; failed: number };
+	/** Download-button presses over the window. Aggregate `metric='download'`; no image id. */
+	downloads: number;
 	/** Per-day request totals over the window, oldest first (length WINDOW_DAYS). */
 	sparkline: number[];
 	recentErrors: ErrorSampleRow[];
@@ -184,10 +186,12 @@ export async function getObservability(
 	let errors5xx = 0;
 	const uploads = { ok: 0, fail: 0 };
 	const emails = { sent: 0, failed: 0 };
+	let downloads = 0;
 	for (const r of rows) {
 		const total = Number(r.total) || 0;
 		if (r.metric === 'request') appRequests += total;
 		else if (r.metric === 'error') errors5xx += total;
+		else if (r.metric === 'download') downloads += total;
 		else if (r.metric === 'upload') {
 			if (r.dim === 'ok') uploads.ok += total;
 			else if (r.dim === 'fail') uploads.fail += total;
@@ -251,6 +255,7 @@ export async function getObservability(
 		errorRate,
 		uploads,
 		emails,
+		downloads,
 		sparkline,
 		recentErrors,
 		jobs,

@@ -59,6 +59,21 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 
 	await login(page);
 	await page.goto('/admin/settings'); // opens on the "site" tab
+
+	// Submit only once the page has hydrated. Before hydration the form is a plain
+	// POST, so the browser navigates to /admin/settings?/saveSite and the goto below
+	// aborts with "interrupted by another navigation" — awaiting the POST response
+	// does not help, because the response arrives mid-navigation. Hydrated, SvelteKit
+	// submits via fetch and no navigation happens at all. The tab switch is a client
+	// handler, so it only works once hydrated; retry it as the hydration gate (same
+	// idiom as palette-settings.spec.ts). This branch's third e2e webServer widens
+	// the hydration window past the nudge loop's 5s cap below, so gate first.
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Storage', exact: true }).click();
+		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
+	}).toPass();
+	await page.getByRole('button', { name: 'Site', exact: true }).click();
+
 	// The seed sets no contactEmail, so the "set a monitored contact email" nudge
 	// shows next to the field — the CCPA rights channel prompt (item 2).
 	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
@@ -80,7 +95,7 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
 	await page.fill('textarea[name="privacyPolicy"]', override);
 	// The action writes the setting server-side before returning, so once the POST
-	// resolves the override is persisted — more robust than racing the toast.
+	// resolves the override is persisted.
 	const [resp] = await Promise.all([
 		page.waitForResponse(
 			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')

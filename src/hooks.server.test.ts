@@ -118,6 +118,33 @@ describe('authHandle — /api/admin/ref-image stays behind the admin gate', () =
 	});
 });
 
+describe('authHandle — /api/metrics/download is the only other public /api route', () => {
+	it('reaches the endpoint without a session (an anonymous visitor pressed download)', async () => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+
+		const res = (await authHandle({
+			event: makeEvent('/api/metrics/download', makeDb()),
+			resolve
+		} as never)) as Response;
+
+		// Not 401: the gate let it through to the endpoint, which does its own
+		// same-origin check. Anything but 401 proves the exemption is wired.
+		expect(res.status).not.toBe(401);
+	});
+
+	it('does not exempt sibling paths — a prefix match would open the whole namespace', async () => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+
+		for (const path of ['/api/metrics', '/api/metrics/download/extra', '/api/metrics/other']) {
+			const res = (await authHandle({
+				event: makeEvent(path, makeDb()),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must stay behind the admin gate`).toBe(401);
+		}
+	});
+});
+
 // Observability 5xx accounting (issue #6). A metrics-capable DB plus a waitUntil
 // that captures the fire-and-forget writes so a test can await them.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
