@@ -100,7 +100,9 @@
 				<span class="step-num">2</span>
 				<div class="step-body">
 					<div class="step-title">{m.admin_stickers_setup_step2_title()}</div>
-					<div class="step-text">{m.admin_setup_secret_ci_pre()}<code>TELEGRAM_BOT_TOKEN</code>{m.admin_setup_secret_ci_post()}</div>
+					<div class="step-text">{m.admin_setup_secret_ci_pre()}</div>
+					<CopyCommand text="gh secret set TELEGRAM_BOT_TOKEN" />
+					<div class="step-text">{m.admin_setup_secret_ci_post()}</div>
 					<div class="step-text">{m.admin_stickers_setup_step2_a()}<code>&lt;your-project&gt;</code>{m.admin_stickers_setup_step2_b()}</div>
 					<CopyCommand text="npx wrangler pages secret put TELEGRAM_BOT_TOKEN --project-name <your-project>" />
 				</div>
@@ -324,6 +326,7 @@
 	.step-title { font-size: 13.5px; font-weight: 600; margin-bottom: 4px; color: var(--foreground); }
 	.step-text { font-size: 12.5px; color: var(--muted-foreground); line-height: 1.6; }
 	.step-text + .step-text { margin-top: 8px; }
+	:global(.cmd) + .step-text { margin-top: 8px; }
 	.step-text code { background: var(--secondary); }
 	.unlocks {
 		margin-top: 18px; padding: 12px 14px; border-left: 2px solid var(--primary);

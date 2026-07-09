@@ -3,6 +3,7 @@
 	import { APP_NAME } from '$lib/config';
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
+	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
@@ -19,8 +20,10 @@
 			<div class="blocked">
 				<p>
 					{m.admin_setup_blocked_locked_pre()}<code>SETUP_TOKEN</code>{m.admin_setup_blocked_locked_post()}
-					{m.admin_setup_secret_ci_pre()}<code>SETUP_TOKEN</code>{m.admin_setup_secret_ci_post()}
+					{m.admin_setup_secret_ci_pre()}
 				</p>
+				<CopyCommand text="gh secret set SETUP_TOKEN" />
+				<p>{m.admin_setup_secret_ci_post()}</p>
 				<p>
 					{m.admin_setup_blocked_set_pre()}<code>wrangler pages secret put SETUP_TOKEN</code>{m.admin_setup_blocked_set_post()}
 				</p>
@@ -211,7 +214,7 @@
 		line-height: 1.6;
 		color: var(--muted-foreground);
 	}
-	.blocked p + p {
+	.blocked p:not(:first-child) {
 		margin-top: 10px;
 	}
 	code {

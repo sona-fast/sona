@@ -82,53 +82,69 @@ describe('setup dialogs lead with the GitHub Actions secret path (bug 3)', () =>
 	const en = messages('en');
 	const ja = messages('ja');
 
-	it('en CI copy names the GitHub Actions repo-secret path and the auto-deploy', () => {
+	it('en CI copy introduces the gh command (run from the fork, gh reads origin)', () => {
+		// Lead sentence introduces the copyable command and explains why no
+		// placeholder is needed (gh infers the repo from the origin remote).
+		expect(en.admin_setup_secret_ci_pre).toMatch(/\bgh\b/);
+		expect(en.admin_setup_secret_ci_pre).toContain('origin');
+		expect(en.admin_cf_setup_s2_ci).toContain('origin');
+	});
+
+	it('en CI trailing copy keeps the auto-deploy reason and the web-UI fallback', () => {
+		expect(en.admin_setup_secret_ci_post).toMatch(/deploy/i);
 		expect(en.admin_setup_secret_ci_post).toContain('Secrets and variables');
 		expect(en.admin_setup_secret_ci_post).toContain('Actions');
-		expect(en.admin_setup_secret_ci_post).toMatch(/deploy/i);
-		expect(en.admin_cf_setup_s2_ci).toContain('Secrets and variables');
+		expect(en.admin_cf_setup_s2_ci_post).toContain('Secrets and variables');
 	});
 
-	it('ja CI copy keeps the GitHub path and mentions デプロイ', () => {
+	it('ja CI trailing copy keeps the GitHub UI path and mentions デプロイ', () => {
 		expect(ja.admin_setup_secret_ci_post).toContain('Secrets and variables');
 		expect(ja.admin_setup_secret_ci_post).toContain('デプロイ');
-		expect(ja.admin_cf_setup_s2_ci).toContain('Secrets and variables');
+		expect(ja.admin_cf_setup_s2_ci_post).toContain('Secrets and variables');
 	});
 
-	// The GitHub Actions marker must render before the escape-hatch marker that
-	// introduces the wrangler command, in every dialog.
+	// In every dialog: the CI lead precedes the escape-hatch marker, AND the
+	// copyable `gh secret set` block is the FIRST code block — above the
+	// `wrangler pages secret put` one.
 	const DIALOGS = [
 		{
 			file: 'src/lib/components/CloudflareSetupDialog.svelte',
 			ci: 'admin_cf_setup_s2_ci',
-			escape: 'admin_cf_setup_s2_text'
+			escape: 'admin_cf_setup_s2_text',
+			gh: 'gh secret set CLOUDFLARE_ANALYTICS_TOKEN'
 		},
 		{
 			file: 'src/routes/admin/stickers/+page.svelte',
 			ci: 'admin_setup_secret_ci_pre',
-			escape: 'admin_stickers_setup_step2_a'
+			escape: 'admin_stickers_setup_step2_a',
+			gh: 'gh secret set TELEGRAM_BOT_TOKEN'
 		},
 		{
 			file: 'src/routes/admin/settings/+page.svelte',
 			ci: 'admin_setup_secret_ci_pre',
-			escape: 'admin_resend_setup_s2_cli'
+			escape: 'admin_resend_setup_s2_cli',
+			gh: 'gh secret set RESEND_API_KEY'
 		},
 		{
 			file: 'src/routes/admin/setup/+page.svelte',
 			ci: 'admin_setup_secret_ci_pre',
-			escape: 'admin_setup_blocked_set_pre'
+			escape: 'admin_setup_blocked_set_pre',
+			gh: 'gh secret set SETUP_TOKEN'
 		}
 	];
 
 	for (const d of DIALOGS) {
-		it(`${d.file} shows the GitHub Actions path before the wrangler escape hatch`, () => {
+		it(`${d.file} puts the gh command block before the wrangler one`, () => {
 			const src = source(d.file);
 			const ciAt = src.indexOf(d.ci);
 			const escAt = src.indexOf(d.escape);
 			expect(ciAt).toBeGreaterThanOrEqual(0);
 			expect(escAt).toBeGreaterThan(ciAt);
-			// escape hatch is retained, not removed
-			expect(src).toContain('wrangler pages secret put');
+			// gh secret set block exists and sits above the wrangler escape hatch
+			const ghAt = src.indexOf(d.gh);
+			const wranglerAt = src.indexOf('wrangler pages secret put');
+			expect(ghAt).toBeGreaterThanOrEqual(0);
+			expect(wranglerAt).toBeGreaterThan(ghAt);
 		});
 	}
 });

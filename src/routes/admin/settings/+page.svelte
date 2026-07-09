@@ -679,7 +679,9 @@
 				<div class="body">
 					<div class="title">{m.admin_resend_setup_s2_title()}</div>
 					<div class="text">{m.admin_resend_setup_s2_text_a()}<strong>{m.admin_resend_setup_s2_create()}</strong>{m.admin_resend_setup_s2_text_b()}<code>re_</code>{m.admin_resend_setup_s2_text_c()}</div>
-					<div class="text">{m.admin_setup_secret_ci_pre()}<code>RESEND_API_KEY</code>{m.admin_setup_secret_ci_post()}</div>
+					<div class="text">{m.admin_setup_secret_ci_pre()}</div>
+					<CopyCommand text="gh secret set RESEND_API_KEY" />
+					<div class="text">{m.admin_setup_secret_ci_post()}</div>
 					<div class="text">{m.admin_resend_setup_s2_cli()}</div>
 					<CopyCommand text="npx wrangler pages secret put RESEND_API_KEY --project-name <your-project>" />
 					<div class="text note">{m.admin_resend_setup_s2_note()}</div>
