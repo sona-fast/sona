@@ -7,6 +7,7 @@ import { getDb } from './db';
 import {
 	recordMetric,
 	recordError,
+	recordDownload,
 	recordUpload,
 	recordEmail,
 	recordJobRun,
@@ -172,6 +173,33 @@ describe('recordError — capped ring', () => {
 		expect(row.message).toContain('[redacted]');
 		// Ordinary words are left intact.
 		expect(row.message).toContain('failed');
+	});
+});
+
+describe('recordDownload — aggregate, no per-image dimension', () => {
+	it('accumulates into a single dim-less row rather than one row per press', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordDownload(db);
+		await recordDownload(db);
+		await recordDownload(db);
+
+		const rows = sqlite.prepare("SELECT dim, count FROM metric_rollup WHERE metric='download'").all();
+		// One bounded UPSERT row — a flood of presses cannot grow the table.
+		expect(rows).toEqual([{ dim: '', count: 3 }]);
+	});
+
+	it('records no image id, so the rollup cannot identify what was downloaded', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordDownload(db);
+
+		const dims = sqlite.prepare("SELECT DISTINCT dim FROM metric_rollup WHERE metric='download'").all();
+		expect(dims).toEqual([{ dim: '' }]);
+		// And it must not leave an error sample behind — a download is not a failure.
+		expect(sqlite.prepare('SELECT COUNT(*) AS n FROM error_sample').get()).toEqual({ n: 0 });
 	});
 });
 

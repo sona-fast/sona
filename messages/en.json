@@ -1002,6 +1002,7 @@
 	"admin_obs_vital_error_rate": "5xx error rate",
 	"admin_obs_vital_uploads": "uploads · 7d",
 	"admin_obs_vital_emails": "emails · 7d",
+	"admin_obs_vital_downloads": "downloads · 7d",
 	"admin_obs_failed_suffix": "failed",
 	"admin_obs_spark_caption": "requests · 7d",
 	"admin_obs_errors_title": "Recent errors",

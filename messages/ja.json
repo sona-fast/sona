@@ -966,6 +966,7 @@
 	"admin_obs_vital_error_rate": "5xxエラー率",
 	"admin_obs_vital_uploads": "アップロード · 7日",
 	"admin_obs_vital_emails": "メール · 7日",
+	"admin_obs_vital_downloads": "ダウンロード · 7日",
 	"admin_obs_failed_suffix": "失敗",
 	"admin_obs_spark_caption": "リクエスト · 7日",
 	"admin_obs_errors_title": "最近のエラー",

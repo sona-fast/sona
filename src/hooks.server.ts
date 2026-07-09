@@ -92,9 +92,15 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// session) and enforces its own `Authorization: Bearer <CRON_SECRET>` inside the
 	// endpoint, so it's exempted from the admin gate here. Everything else still
 	// requires the admin session.
+	//
+	// /api/metrics/download is the second exemption: it is a beacon fired by anonymous
+	// visitors pressing an image's download button, so it cannot require a session. It
+	// enforces same-origin itself, accepts no body, and only ever bumps one aggregate
+	// counter. Keep this list short and each entry justified.
 	if (
 		event.url.pathname.startsWith('/api') &&
 		!event.url.pathname.startsWith('/api/cron/') &&
+		event.url.pathname !== '/api/metrics/download' &&
 		!event.locals.admin
 	) {
 		return new Response('Unauthorized', { status: 401 });

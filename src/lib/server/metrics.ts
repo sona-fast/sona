@@ -29,7 +29,7 @@ export function isObservabilityEnabled(env: Env | undefined): boolean {
 	return v === 'true' || v === '1' || v === 'on' || v === 'yes';
 }
 
-export type Metric = 'request' | 'error' | 'upload' | 'email';
+export type Metric = 'request' | 'error' | 'upload' | 'email' | 'download';
 /** Coarse request bucket — the only `dim` used for metric='request'. */
 export type RouteClass = 'public' | 'admin' | 'api';
 
@@ -127,6 +127,22 @@ export async function recordUpload(
 			message: failure?.message ?? 'upload failed'
 		});
 	}
+}
+
+/**
+ * Record one press of an image's download button.
+ *
+ * The button is a direct <a href> to the storage provider's public URL, so the
+ * bytes never pass through us — a client beacon is the only place this can be
+ * counted. That makes it a count of *clicks*, not completed downloads, and an
+ * unauthenticated caller can inflate it. Deliberate: the number is a rough
+ * popularity signal on the admin dashboard, never a billing or quota input.
+ *
+ * Aggregate only — no image id, no dim. Per-image counts would need a raw id in
+ * `dim`, which metric_rollup explicitly forbids.
+ */
+export async function recordDownload(db: Database): Promise<void> {
+	await recordMetric(db, 'download');
 }
 
 /** Record a transactional-email send outcome. A failure also drops an error sample. */

@@ -79,6 +79,28 @@ describe('getObservability — aggregation over the 7-day window', () => {
 		expect(o.sparkline.reduce((a, b) => a + b, 0)).toBe(150);
 	});
 
+	it('sums downloads over the window and never counts them as requests', async () => {
+		const sqlite = makeSqlite();
+		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');
+		seed.run(daysAgo(0), 'download', '', 7);
+		seed.run(daysAgo(6), 'download', '', 3);
+		seed.run(daysAgo(10), 'download', '', 500); // outside 7d — must be excluded
+		seed.run(daysAgo(0), 'request', 'public', 20);
+
+		const db = getDb(makeD1(sqlite));
+		const o = await getObservability(db, SETTINGS_R2, undefined);
+
+		expect(o.downloads).toBe(10);
+		// A download must not inflate the request total or the error-rate denominator.
+		expect(o.appRequests).toBe(20);
+	});
+
+	it('reports zero downloads when nobody has pressed the button', async () => {
+		const db = getDb(makeD1(makeSqlite()));
+		const o = await getObservability(db, SETTINGS_R2, undefined);
+		expect(o.downloads).toBe(0);
+	});
+
 	it('reports a zero error rate when there is no traffic (no divide-by-zero)', async () => {
 		const db = getDb(makeD1(makeSqlite()));
 		const o = await getObservability(db, SETTINGS_R2, undefined);
