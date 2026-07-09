@@ -24,10 +24,14 @@ test('default legal pages render and are reachable from the footer', async ({ pa
 	await expect(page.getByRole('heading', { name: 'Your privacy rights' })).toBeVisible();
 	// CCPA/CPRA notice is part of the default baseline.
 	await expect(page.getByText(/California Consumer Privacy Act/)).toBeVisible();
+	// "Last updated" renders from a stable source (the per-release defaults date),
+	// not `new Date()` — so it's a fixed dotted date, present on the stock page.
+	await expect(page.locator('.legal-updated')).toHaveText(/Last updated \d{4}\.\d{2}\.\d{2}/);
 
 	await page.goto('/terms');
 	await expect(page.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Acceptance of these terms' })).toBeVisible();
+	await expect(page.locator('.legal-updated')).toHaveText(/Last updated \d{4}\.\d{2}\.\d{2}/);
 
 	// Desktop footer links navigate.
 	await page.goto('/');
@@ -62,13 +66,33 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	// does not help, because the response arrives mid-navigation. Hydrated, SvelteKit
 	// submits via fetch and no navigation happens at all. The tab switch is a client
 	// handler, so it only works once hydrated; retry it as the hydration gate (same
-	// idiom as palette-settings.spec.ts).
+	// idiom as palette-settings.spec.ts). This branch's third e2e webServer widens
+	// the hydration window past the nudge loop's 5s cap below, so gate first.
 	await expect(async () => {
 		await page.getByRole('button', { name: 'Storage', exact: true }).click();
 		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
 	}).toPass();
 	await page.getByRole('button', { name: 'Site', exact: true }).click();
 
+	// The seed sets no contactEmail, so the "set a monitored contact email" nudge
+	// shows next to the field — the CCPA rights channel prompt (item 2).
+	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
+	// Re-drive the input until the reactive nudge responds. Filling as the first
+	// post-load interaction races Svelte hydration: before the bound input's
+	// oninput handler is wired, a keystroke sets the DOM value but not the
+	// `contactEmail` $state, so the nudge — {#if !contactEmail?.trim()}, purely
+	// client-side — never hides (and Svelte, seeing $state unchanged from its
+	// initial empty value, never re-renders the input to clobber the DOM either).
+	// toPass keeps re-filling until hydration lands and the binding is live, which
+	// makes this deterministic instead of flaky. Nothing is persisted here.
+	const contactEmail = page.locator('input[name="contactEmail"]');
+	await expect(async () => {
+		await contactEmail.fill('owner@example.com');
+		await expect(page.getByText(/Set a monitored contact email/)).toBeHidden({ timeout: 500 });
+	}).toPass({ timeout: 5000 });
+	await contactEmail.fill(''); // restore empty so the save below doesn't persist it
+	await expect(contactEmail).toHaveValue('');
+	await expect(page.getByText(/Set a monitored contact email/)).toBeVisible();
 	await page.fill('textarea[name="privacyPolicy"]', override);
 	// The action writes the setting server-side before returning, so once the POST
 	// resolves the override is persisted.
@@ -97,4 +121,9 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	expect(await page.evaluate(() => (window as unknown as { __xssRan?: boolean }).__xssRan)).toBeUndefined();
 	// Split on the blank line into two paragraphs.
 	await expect(page.locator('.legal-page .legal-override')).toHaveCount(2);
+
+	// Saving the privacy override stamps privacyUpdatedAt, so the "Last updated"
+	// line now reflects the save date (today) rather than the built-in defaults' date.
+	const today = new Date().toISOString().slice(0, 10).replaceAll('-', '.');
+	await expect(page.locator('.legal-updated')).toHaveText(`Last updated ${today}`);
 });

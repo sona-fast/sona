@@ -450,3 +450,59 @@ describe('saveSite — absent fields are skipped, blank fields clear (#60)', () 
 		expect(await getRawSetting(db, 'sonaColors')).toBe('[{"name":"fur","hex":"#DD5131"}]');
 	});
 });
+
+describe('settings saveSite — legal "last updated" stamps', () => {
+	it('does not stamp when a non-legal field changes', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'New' }));
+
+		// No legal field in the POST → neither page's stamp is written.
+		expect(await getRawSetting(db, 'privacyUpdatedAt')).toBeNull();
+		expect(await getRawSetting(db, 'termsUpdatedAt')).toBeNull();
+	});
+
+	it('does not re-stamp when the policy text is unchanged', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'privacyPolicy', 'X');
+		await setRawSetting(db, 'privacyUpdatedAt', '2026-01-01');
+
+		await actions.saveSite(saveSiteEvent(platform, { privacyPolicy: 'X', siteName: 'New' }));
+
+		expect(await getRawSetting(db, 'privacyUpdatedAt')).toBe('2026-01-01');
+	});
+
+	it('stamps only the page whose text changed', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'privacyPolicy', 'X');
+		await setRawSetting(db, 'privacyUpdatedAt', '2026-01-01');
+
+		await actions.saveSite(
+			saveSiteEvent(platform, { privacyPolicy: 'X', termsOfService: 'Brand new terms' })
+		);
+
+		// Privacy text unchanged → its stamp stays; terms changed → stamped today.
+		expect(await getRawSetting(db, 'privacyUpdatedAt')).toBe('2026-01-01');
+		expect(await getRawSetting(db, 'termsUpdatedAt')).toBe(new Date().toISOString().slice(0, 10));
+	});
+
+	it('stamps the changed policy with today\'s date', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(saveSiteEvent(platform, { privacyPolicy: 'A fresh custom policy' }));
+
+		expect(await getRawSetting(db, 'privacyUpdatedAt')).toBe(new Date().toISOString().slice(0, 10));
+	});
+
+	it('does not stamp when an override is cleared to empty', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'privacyPolicy', 'X');
+		await setRawSetting(db, 'privacyUpdatedAt', '2026-01-01');
+
+		// Present-but-blank clears the override back to the built-in defaults; the
+		// stamp is left untouched (and unread) rather than advanced to today.
+		await actions.saveSite(saveSiteEvent(platform, { privacyPolicy: '' }));
+
+		expect(await getRawSetting(db, 'privacyUpdatedAt')).toBe('2026-01-01');
+	});
+});

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import Meta from '$lib/components/Meta.svelte';
-	import type { LegalSection } from '$lib/legal';
+	import { formatDate } from '$lib';
+	import { legalUpdatedDate, type LegalSection } from '$lib/legal';
+	import * as m from '$lib/paraglide/messages';
 
 	let {
 		title,
@@ -9,12 +11,15 @@
 		siteName,
 		/** Owner override (plain text). When non-empty, replaces the sections. */
 		override,
+		/** Date (YYYY-MM-DD) an override was last saved; '' when none is set. */
+		legalUpdatedAt,
 		sections
 	}: {
 		title: string;
 		metaTitle: string;
 		siteName: string;
 		override: string;
+		legalUpdatedAt: string;
 		sections: LegalSection[];
 	} = $props();
 
@@ -23,12 +28,19 @@
 	let description = $derived(
 		(override.trim() || sections[0]?.body[0]).slice(0, 200)
 	);
+
+	// "Last updated" date from a stable source (the owner's save stamp, or the
+	// per-release defaults date) — never `new Date()`, which would always be today.
+	let updatedAt = $derived(legalUpdatedDate(override, legalUpdatedAt));
 </script>
 
 <Meta title={metaTitle} description={description} url={`${page.url.origin}${page.url.pathname}`} {siteName} />
 
 <div class="container legal-page">
 	<h1>{title}</h1>
+	{#if updatedAt}
+		<p class="legal-updated">{m.legal_last_updated({ date: formatDate(updatedAt) })}</p>
+	{/if}
 
 	{#if override.trim()}
 		<!-- Auto-escaped plain text split into paragraphs on blank lines; single
@@ -58,6 +70,12 @@
 	}
 
 	.legal-page h1 {
+		margin-bottom: 6px;
+	}
+
+	.legal-updated {
+		color: var(--muted-foreground);
+		font-size: 0.875rem;
 		margin-bottom: 24px;
 	}
 

@@ -18,6 +18,8 @@
 	"admin_settings_legal_placeholder": "空欄の場合は組み込みの既定文が使われます。",
 	"admin_settings_privacy_label": "プライバシーポリシーの上書き",
 	"admin_settings_terms_label": "利用規約の上書き",
+	"admin_settings_contact_email_nudge": "定期的に確認できる連絡先メールアドレスを設定すると、プライバシーポリシーにプライバシーに関する請求や削除依頼のための実際のアドレスを記載できます。設定するまでは、サイト上の一般的な連絡手段が案内されます。",
+	"legal_last_updated": "最終更新 {date}",
 	"footer_legal_label": "法的情報",
 	"footer_privacy": "プライバシー",
 	"footer_terms": "利用規約",

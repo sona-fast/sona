@@ -289,6 +289,9 @@
 				<span>{m.admin_settings_contact_email()}</span>
 				<input type="text" class="input" bind:value={contactEmail} name="contactEmail" placeholder="hello@example.com" />
 			</label>
+			{#if !contactEmail?.trim()}
+				<p class="hint">{m.admin_settings_contact_email_nudge()}</p>
+			{/if}
 		</section>
 
 		<section data-tab="site">

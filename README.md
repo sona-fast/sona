@@ -152,6 +152,22 @@ npm run check    # paraglide compile + svelte-check
 npm test         # vitest
 ```
 
+On a fresh clone this just works — no `npm run setup` needed to develop locally.
+A `predev` step (`scripts/dev-bootstrap.ts`) runs before `vite dev`: when there's
+no `wrangler.toml` yet, it copies `wrangler.toml.example` (placeholder IDs are
+fine — local dev uses a local SQLite keyed by binding name, so no real Cloudflare
+resources are provisioned) and applies the `drizzle/` migrations to the local D1.
+It's a no-op once a `wrangler.toml` exists, so it never touches a real config from
+`npm run setup`. To reset the local database, delete the generated `wrangler.toml`
+and run `npm run dev` again — the bootstrap re-copies the template and re-wipes +
+re-migrates a clean local D1. (Keep a real `wrangler.toml` from `npm run setup`;
+this only applies to the auto-generated placeholder one.)
+
+```sh
+rm -f wrangler.toml    # placeholder config only — keep a real one from `npm run setup`
+npm run dev            # re-bootstraps: fresh wrangler.toml + a clean, migrated local D1
+```
+
 Local secrets go in `.dev.vars` (gitignored). `FURTRACK_MODE=mock` serves bundled
 demo fursuit data without calling FurTrack.
 
@@ -167,6 +183,19 @@ They boot `npm run dev` against a **throwaway local D1** — a seed step wipes,
 migrates and seeds it (`tests/e2e/fixtures/seed.sql`) in an isolated persist dir,
 so your real dev database is untouched. CI runs them on the canonical repo (a
 separate `e2e` job in `.github/workflows/ci.yml`); forks skip them.
+
+#### Integration tests
+
+```sh
+npm run test:integration   # needs real wrangler + a local D1 (miniflare)
+```
+
+These are heavier than the unit suite (they run the real dev-bootstrap and boot miniflare),
+so they live under `tests/integration/` — outside `npm test`'s scope — and run in
+their own canonical-repo-gated CI job. `tests/integration/dev-bootstrap.integration.test.ts`
+proves the fresh-clone bootstrap (#137) migrates the local D1 into the exact
+persist dir `getPlatformProxy` reads at `vite dev` boot; it runs entirely in a
+throwaway temp repo, so your real dev database is untouched.
 
 #### Terminology (ja)
 

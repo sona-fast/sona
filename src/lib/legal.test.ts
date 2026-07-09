@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { defaultPrivacyPolicy, defaultTerms } from './legal';
+import {
+	defaultPrivacyPolicy,
+	defaultTerms,
+	legalUpdatedDate,
+	LEGAL_DEFAULTS_UPDATED
+} from './legal';
 
 const withEmail = { siteName: 'Testsona', contactEmail: 'hi@test.example' };
 const noEmail = { siteName: 'Testsona', contactEmail: '' };
@@ -45,5 +50,30 @@ describe('defaultTerms', () => {
 		expect(sections.length).toBeGreaterThan(0);
 		const text = sections.flatMap((s) => s.body).join('\n');
 		expect(text).toContain('Testsona');
+	});
+});
+
+describe('legalUpdatedDate', () => {
+	// The "Last updated" line must come from a STABLE source, not `new Date()` at
+	// render time — so a stock page (no override) always resolves to the fixed
+	// per-release constant, never today's date.
+	it('is the per-release defaults date when no override is set', () => {
+		expect(legalUpdatedDate('', '2026-05-01')).toBe(LEGAL_DEFAULTS_UPDATED);
+		expect(legalUpdatedDate('   ', '2026-05-01')).toBe(LEGAL_DEFAULTS_UPDATED);
+	});
+
+	it("is the owner's save stamp when an override is set", () => {
+		expect(legalUpdatedDate('Our custom policy.', '2026-05-01')).toBe('2026-05-01');
+	});
+
+	it("returns '' (hides the line) for an override with no save stamp", () => {
+		// e.g. a config-seeded override that never went through the admin editor: its
+		// true edit date is unknown, so we hide the line rather than claim the
+		// built-in defaults' date for custom text.
+		expect(legalUpdatedDate('Seeded policy.', '')).toBe('');
+	});
+
+	it('exposes a valid YYYY-MM-DD defaults date', () => {
+		expect(LEGAL_DEFAULTS_UPDATED).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 	});
 });

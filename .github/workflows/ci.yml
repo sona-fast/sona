@@ -32,6 +32,28 @@ jobs:
 
       - run: npm run build
 
+  # Integration test for the local-dev self-bootstrap (#137): needs real wrangler
+  # + a local D1 (miniflare), so it's out of the fast unit suite and run here.
+  # Gated to the canonical repo like `check`/`e2e`; forks skip it (their deploy.yml
+  # already runs check/test/build).
+  integration:
+    runs-on: ubuntu-latest
+    if: github.repository == 'sona-fast/sona'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # match deploy.yml
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run test:integration
+
   # Browser E2E (playwright). Separate from the unit suite so `npm test` stays
   # fast; gated to the canonical repo like `check`, and skipped on forks (their
   # deploy.yml already runs check/test/build).
