@@ -180,7 +180,11 @@ async function sendResetEmail(
 	const html =
 		`<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"></head><body style="margin:0;background-color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">` +
 		`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f4f5" style="background-color:#f4f4f5;"><tr><td align="center" style="padding:32px 16px;">` +
-		`<table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;">` +
+		// Fluid-hybrid: an MSO-only ghost table pins the card to 520px in classic
+		// Outlook (which ignores max-width and would otherwise stretch it full-bleed);
+		// every other client uses the fluid table's width:100%;max-width:520px.
+		`<!--[if mso]><table role="presentation" align="center" width="520" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->` +
+		`<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:520px;">` +
 		`<tr><td style="padding:8px 8px 18px 8px;font-size:18px;font-weight:bold;color:#18181b;">${safeName}</td></tr>` +
 		`<tr><td bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid #e4e4e7;border-radius:12px;padding:32px;">` +
 		`<div style="font-size:20px;line-height:1.3;font-weight:bold;color:#18181b;padding-bottom:16px;">${m.password_reset_email_heading({}, { locale })}</div>` +
@@ -190,7 +194,7 @@ async function sendResetEmail(
 		`<div style="font-size:14px;line-height:1.6;padding-bottom:20px;word-break:break-all;"><a href="${safeUrl}" style="color:#3f3f46;">${safeUrl}</a></div>` +
 		`<div style="font-size:14px;line-height:1.6;color:#52525b;padding-bottom:8px;">${m.password_reset_email_expires({}, { locale })}</div>` +
 		`<div style="font-size:14px;line-height:1.6;color:#52525b;">${m.password_reset_email_ignore({}, { locale })}</div>` +
-		`</td></tr></table></td></tr></table></body></html>`;
+		`</td></tr></table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>`;
 
 	try {
 		const resp = await fetch(RESEND_ENDPOINT, {

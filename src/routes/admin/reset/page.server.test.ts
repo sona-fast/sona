@@ -10,6 +10,8 @@ import { getRawSetting, setRawSetting } from '$lib/server/settings';
 import { hashPassword, hashToken, verifyAdminPassword } from '$lib/server/admin-auth';
 import { PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
 import { RESET_TOKEN_COOKIE } from '$lib/config';
+import * as m from '$lib/paraglide/messages';
+import { setLocale, baseLocale } from '$lib/paraglide/runtime';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -148,11 +150,45 @@ describe('reset action', () => {
 		await seed(db, 30 * 60 * 1000);
 		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
 
-		const result = await actions.default(resetEvent(platform, cookies, { password: 'short', confirmPassword: 'short' }));
+		// Drive the action under a non-English ambient locale (ja): the error must come
+		// back as the ja message, which is byte-different from the removed English
+		// literal — so reverting the action to a hardcoded string fails this. (In en
+		// the message renders identically to the old literal, so an en assertion would
+		// pass either way and prove nothing.)
+		setLocale('ja', { reload: false });
+		try {
+			const result = await actions.default(resetEvent(platform, cookies, { password: 'short', confirmPassword: 'short' }));
 
-		expect(result).toMatchObject({ status: 400 });
-		expect((result as { data: { invalidToken?: boolean } }).data.invalidToken).toBeUndefined();
-		expect(await verifyAdminPassword(db, undefined, OLD_PASSWORD)).toBe(true);
+			expect(result).toMatchObject({ status: 400 });
+			expect((result as { data: { invalidToken?: boolean } }).data.invalidToken).toBeUndefined();
+			expect((result as { data: { error?: string } }).data.error).toBe(
+				m.admin_reset_error_too_short({ min: 8 }, { locale: 'ja' })
+			);
+			expect(await verifyAdminPassword(db, undefined, OLD_PASSWORD)).toBe(true);
+		} finally {
+			setLocale(baseLocale, { reload: false });
+		}
+	});
+
+	it('renders the mismatch error in the request locale (ja), not a hardcoded literal', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 30 * 60 * 1000);
+		const cookies = makeCookies({ [RESET_TOKEN_COOKIE]: TOKEN });
+
+		setLocale('ja', { reload: false });
+		try {
+			const result = await actions.default(
+				resetEvent(platform, cookies, { password: NEW_PASSWORD, confirmPassword: 'different-password-000' })
+			);
+
+			expect(result).toMatchObject({ status: 400 });
+			expect((result as { data: { error?: string } }).data.error).toBe(
+				m.admin_reset_error_mismatch({}, { locale: 'ja' })
+			);
+			expect(await verifyAdminPassword(db, undefined, OLD_PASSWORD)).toBe(true);
+		} finally {
+			setLocale(baseLocale, { reload: false });
+		}
 	});
 
 	it('rejects reuse of a token after a successful reset', async () => {

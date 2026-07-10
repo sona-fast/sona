@@ -198,6 +198,21 @@ describe('terracotta dark theme WCAG AA contrast', () => {
 	});
 });
 
+describe('aurora light theme WCAG AA contrast', () => {
+	const sel = "[data-theme-id='aurora'][data-theme='light']";
+	const card = blockToken(sel, 'card');
+	const destructive = blockToken(sel, 'destructive');
+	const destructiveForeground = blockToken(sel, 'destructive-foreground');
+
+	it('destructive text on cards meets 4.5:1', () => {
+		expect(contrast(destructive, card)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('destructive-foreground text on destructive buttons meets 4.5:1', () => {
+		expect(contrast(destructiveForeground, destructive)).toBeGreaterThanOrEqual(4.5);
+	});
+});
+
 // The .btn hover shifts only the fill (color-mix), never the label opacity: a
 // blanket `opacity` hover composited the label over the page and dropped its
 // contrast below AA in several themes (#103). Here we parse the actual color-mix

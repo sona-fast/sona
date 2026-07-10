@@ -38,8 +38,9 @@
 			}}>
 				<label>
 					<span>{m.admin_reset_new_password()}</span>
-					<input type="password" name="password" class="input" required minlength="8" autocomplete="new-password" autofocus />
+					<input type="password" name="password" class="input" required minlength="8" autocomplete="new-password" aria-describedby="reset-pw-hint" autofocus />
 				</label>
+				<p class="hint" id="reset-pw-hint">{m.admin_reset_password_hint()}</p>
 				<label>
 					<span>{m.admin_reset_confirm_password()}</span>
 					<input type="password" name="confirmPassword" class="input" required minlength="8" autocomplete="new-password" />
@@ -89,6 +90,20 @@
 		color: var(--destructive);
 		font-size: 14px;
 		margin-bottom: 16px;
+	}
+
+	/* The invalid-token paragraph is focused programmatically (tabindex="-1") to
+	   announce itself to screen readers; it isn't keyboard-reachable, so suppress
+	   the browser-default focus outline rather than flashing one on load. */
+	.error:focus {
+		outline: none;
+	}
+
+	.hint {
+		font-size: 13px;
+		color: var(--muted-foreground);
+		text-align: left;
+		margin: -8px 0 0;
 	}
 
 	form {
