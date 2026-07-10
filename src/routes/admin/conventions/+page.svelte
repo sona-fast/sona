@@ -363,6 +363,7 @@
 		margin-left: 6px;
 		color: var(--muted-foreground);
 		vertical-align: middle;
+		text-decoration: none;
 	}
 
 	.status {

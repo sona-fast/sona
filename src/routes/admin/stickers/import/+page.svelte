@@ -577,9 +577,9 @@
 <style>
 	.back-link {
 		display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
-		color: var(--muted-foreground); margin-bottom: 16px;
+		color: var(--muted-foreground); margin-bottom: 16px; text-decoration: none;
 	}
-	.back-link:hover { color: var(--foreground); text-decoration: none; }
+	.back-link:hover { color: var(--foreground); }
 	.page-header { margin-bottom: 20px; }
 	.page-header h1 { font-size: 22px; margin: 0 0 4px; }
 	.subtitle { font-size: 13px; color: var(--muted-foreground); max-width: 70ch; margin: 0; }

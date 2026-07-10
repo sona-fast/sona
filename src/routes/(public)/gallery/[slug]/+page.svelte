@@ -402,11 +402,11 @@
 		color: var(--muted-foreground);
 		display: flex;
 		transition: color 0.15s;
+		text-decoration: none;
 	}
 
 	.social-icon:hover {
 		color: var(--foreground);
-		text-decoration: none;
 	}
 
 	.meta-section h3 {
