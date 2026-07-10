@@ -277,6 +277,12 @@ Sona is open source under the [Apache License 2.0](./LICENSE) — fork it, modif
 run your own instance, no strings beyond keeping the license + attribution notices.
 See [`NOTICE`](./NOTICE) for the attribution that carries with redistributions.
 
+"Sona", "sona.fast", and the "made with sona." lockup are trade names of the Sona
+project. The code is yours to fork under Apache-2.0; the names identify this
+project and its official builds, so please brand meaningfully different forks as
+their own thing (the "made with sona." badge is the intended way to credit the
+platform).
+
 ## Support the project
 
 Sona is built and maintained by one person for the community. If it's useful to you,
