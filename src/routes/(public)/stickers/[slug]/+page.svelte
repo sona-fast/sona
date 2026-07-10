@@ -5,6 +5,7 @@
 	import { page as pageState } from '$app/state';
 	import { Send, Server, ArrowLeft, X } from 'lucide-svelte';
 	import StickerCard from '$lib/components/StickerCard.svelte';
+	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
@@ -136,9 +137,7 @@
 			<!-- Single-artist credit: avatar, name + role, social links -->
 			{#if pack.shape === 'single' && pack.soleArtist}
 				<div class="artist-credit">
-					{#if pack.soleArtist.avatarUrl}
-						<img src={pack.soleArtist.avatarUrl} alt={pack.soleArtist.name} class="artist-avatar" />
-					{/if}
+					<ArtistAvatar name={pack.soleArtist.name} avatarUrl={pack.soleArtist.avatarUrl} size={44} />
 					<div class="artist-namecol">
 						<span class="artist-name-text">{pack.soleArtist.name}</span>
 						<span class="artist-role">{m.stickers_artist_role()}</span>
@@ -193,15 +192,13 @@
 				{#each distinctArtists as artist}
 					<button
 						type="button"
-						class="contrib-chip"
+						class="contrib-chip has-avatar"
 						class:active={selectedArtists.has(String(artist.id))}
 						aria-pressed={selectedArtists.has(String(artist.id))}
 						title={artist.name}
 						onclick={() => toggleArtist(String(artist.id))}
 					>
-						{#if artist.avatarUrl}
-							<img src={artist.avatarUrl} alt="" class="contrib-avatar" />
-						{/if}
+						<ArtistAvatar name={artist.name} avatarUrl={artist.avatarUrl} size={26} />
 						{artist.name}
 					</button>
 				{/each}
@@ -340,14 +337,6 @@
 		align-items: center;
 		gap: 12px;
 		padding-top: 4px;
-	}
-
-	.artist-avatar {
-		width: 44px;
-		height: 44px;
-		border-radius: 50%;
-		object-fit: cover;
-		flex-shrink: 0;
 	}
 
 	.artist-namecol {
@@ -524,7 +513,7 @@
 	}
 
 	/* Tighter left padding when the badge leads with an avatar. */
-	.contrib-chip:has(.contrib-avatar) {
+	.contrib-chip.has-avatar {
 		padding-left: 4px;
 	}
 
@@ -536,14 +525,6 @@
 		background: var(--primary);
 		color: var(--primary-foreground);
 		border-color: var(--primary);
-	}
-
-	.contrib-avatar {
-		width: 26px;
-		height: 26px;
-		border-radius: 50%;
-		object-fit: cover;
-		flex-shrink: 0;
 	}
 
 	/* Sticker grid section */

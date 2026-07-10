@@ -3,6 +3,7 @@
 	import { page as pageState } from '$app/state';
 	import { Download, ArrowLeft, ChevronRight } from 'lucide-svelte';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
+	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
@@ -108,8 +109,8 @@
 			<!-- Artist -->
 			<div class="artist-row">
 				<div class="artist-left">
-					{#if sticker.artist?.avatarUrl}
-						<img src={sticker.artist.avatarUrl} alt={sticker.artist.name} class="artist-avatar" />
+					{#if sticker.artist}
+						<ArtistAvatar name={sticker.artist.name} avatarUrl={sticker.artist.avatarUrl} size={40} />
 					{/if}
 					<div class="artist-namecol">
 						<span class="artist-name" title={sticker.artist?.name}>{sticker.artist?.name ?? m.stickers_unattributed()}</span>
@@ -305,14 +306,6 @@
 		align-items: center;
 		gap: 10px;
 		min-width: 0;
-	}
-
-	.artist-avatar {
-		width: 40px;
-		height: 40px;
-		border-radius: 50%;
-		object-fit: cover;
-		flex-shrink: 0;
 	}
 
 	.artist-namecol {

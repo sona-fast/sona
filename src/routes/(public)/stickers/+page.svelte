@@ -5,6 +5,7 @@
 	import { page as pageState } from '$app/state';
 	import { Search, Send, Server, Sticker, X, RotateCcw, ChevronDown } from 'lucide-svelte';
 	import StickerCard from '$lib/components/StickerCard.svelte';
+	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
@@ -190,9 +191,7 @@
 							<!-- Credit line: single-artist vs. multi-artist -->
 							<p class="pack-credit">
 								{#if pack.shape === 'single' && pack.soleArtist}
-									{#if pack.soleArtist.avatarUrl}
-										<img src={pack.soleArtist.avatarUrl} alt="" class="credit-avatar" />
-									{/if}
+									<ArtistAvatar name={pack.soleArtist.name} avatarUrl={pack.soleArtist.avatarUrl} size={20} />
 									{m.stickers_by_artist({ artist: pack.soleArtist.name })}
 								{:else}
 									{m.stickers_managed_by_owner({ ownerName, n: pack.artists.length })}
@@ -570,14 +569,6 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-	}
-
-	.credit-avatar {
-		width: 20px;
-		height: 20px;
-		border-radius: 50%;
-		object-fit: cover;
-		flex-shrink: 0;
 	}
 
 	.pack-meta {

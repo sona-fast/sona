@@ -6,6 +6,7 @@
 	import { formatDate } from '$lib';
 	import { heroSrc, heroSrcset, heroSizes, variantThumbSrc, rawFallback } from './hero-image';
 	import Meta from '$lib/components/Meta.svelte';
+	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
@@ -135,11 +136,7 @@
 			</p>
 
 			<div class="artist-card">
-				<div class="avatar">
-					{#if image.artistAvatar}
-						<img src={image.artistAvatar} alt={image.artistName} />
-					{/if}
-				</div>
+				<ArtistAvatar name={image.artistName ?? ''} avatarUrl={image.artistAvatar} size={40} />
 				<div>
 					<a class="artist-name" href="/gallery?artist={encodeURIComponent(image.artistName ?? '')}">{image.artistName}</a>
 					{#if data.formerNames.length > 0}
@@ -370,20 +367,6 @@
 
 	.aka .cmt {
 		opacity: 0.65;
-	}
-
-	.avatar {
-		width: 40px;
-		height: 40px;
-		border-radius: 50%;
-		background: var(--secondary);
-		overflow: hidden;
-	}
-
-	.avatar img {
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
 	}
 
 	.artist-name {
