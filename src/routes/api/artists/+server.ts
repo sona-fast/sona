@@ -49,13 +49,21 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		// present fields are applied; same never-overwrite-with-nothing rule the
 		// avatar refreshes follow).
 		const registryAvatar = sanitizeUrl(body.avatarUrl ?? '') || null;
+		// `name` is the dialog's field, but for a registry-linked create it always
+		// equals the registry's canonical displayName: NewArtistDialog drops the
+		// globalId link the moment the operator edits the name (onNameInput), so a
+		// globalId-bearing request can't carry a name that has diverged from
+		// displayName. The pull payload intentionally doesn't send displayName
+		// separately — name follows the dialog by design.
 		const registryFields: Record<string, string | number | null> = {
 			name,
-			registryVersion,
 			registrySyncedAt: new Date().toISOString()
 		};
 		for (const [k, v] of Object.entries(socials)) if (v) registryFields[k] = v;
 		if (registryAvatar) registryFields.avatarUrl = registryAvatar;
+		// Guard registryVersion like socials/avatar: a missing/non-finite version must
+		// not blank an existing local registry_version (the block's never-blank rule).
+		if (registryVersion !== null) registryFields.registryVersion = registryVersion;
 
 		// 1. Already linked locally → refresh it from the registry copy.
 		const byGid = await db

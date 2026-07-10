@@ -196,7 +196,27 @@ describe('registrySubmit', () => {
 			siteLabel: 'sparky.ink',
 			payload: { displayName: 'Ghost', socials: { twitterUrl: 'https://x.com/ghostpaws' } }
 		});
-		expect(result?.error).toMatch(/removed from the registry/i);
+		expect(result).toMatchObject({
+			error: expect.stringMatching(/removed from the registry/i),
+			httpStatus: 409
+		});
+	});
+
+	it('passes the refusal HTTP status through (429 rate-limit, not a blanket 409)', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ error: 'Too many submissions — slow down.' }), {
+					status: 429
+				})
+			)
+		);
+		const result = await registrySubmit(env, {
+			kind: 'create',
+			siteLabel: 'sparky.ink',
+			payload: { displayName: 'Rapid', socials: {} }
+		});
+		expect(result).toMatchObject({ error: expect.any(String), httpStatus: 429 });
 	});
 
 	it('still fails soft (null) on a 5xx', async () => {

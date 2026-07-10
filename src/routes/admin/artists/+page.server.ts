@@ -299,8 +299,10 @@ export const actions = {
 		});
 		if (!result) return fail(502, { error: 'Registry submission failed (registry unreachable?).' });
 		// A refusal (e.g. the artist was removed from the registry and can't be
-		// resubmitted) — show the registry's own reason, not a generic failure.
-		if (result.error) return fail(409, { error: result.error });
+		// resubmitted) — show the registry's own reason and pass its status through
+		// (409 conflict vs 429 rate-limit vs 400 validation), truncated so a long
+		// registry message can't blow out the form error.
+		if ('httpStatus' in result) return fail(result.httpStatus, { error: result.error.slice(0, 300) });
 		return { success: true, submitted: true };
 	},
 

@@ -404,11 +404,30 @@ describe('submitToRegistry action — surfaces the registry outcome', () => {
 	it('returns fail(409) carrying the registry’s own reason when the submission is refused', async () => {
 		const { db, platform } = makeDb();
 		const id = await seedEnabledArtist(db);
-		mockRegistrySubmit.mockResolvedValue({ error: 'This artist was removed from the registry and cannot be resubmitted.' });
+		mockRegistrySubmit.mockResolvedValue({ error: 'This artist was removed from the registry and cannot be resubmitted.', httpStatus: 409 });
 
 		const result = await actions.submitToRegistry(submitEvent(platform, id));
 		expect(result).toMatchObject({ status: 409 });
 		expect((result as { data: { error: string } }).data.error).toMatch(/removed from the registry/i);
+	});
+
+	it('passes a non-conflict refusal status through (429 rate-limit, not a blanket 409)', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db);
+		mockRegistrySubmit.mockResolvedValue({ error: 'Too many submissions — slow down.', httpStatus: 429 });
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect(result).toMatchObject({ status: 429 });
+		expect((result as { data: { error: string } }).data.error).toMatch(/too many/i);
+	});
+
+	it('truncates an over-long registry refusal message before surfacing it', async () => {
+		const { db, platform } = makeDb();
+		const id = await seedEnabledArtist(db);
+		mockRegistrySubmit.mockResolvedValue({ error: 'x'.repeat(500), httpStatus: 400 });
+
+		const result = await actions.submitToRegistry(submitEvent(platform, id));
+		expect((result as { data: { error: string } }).data.error).toHaveLength(300);
 	});
 
 	it('returns fail(502) when the registry is unreachable (null result)', async () => {
