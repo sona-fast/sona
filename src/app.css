@@ -119,7 +119,9 @@
 	--card: #16172a;
 	--card-foreground: #f4f4ff;
 	--primary: #7c5cff;
-	--primary-foreground: #0e0f1a;
+	/* Near-black button label; darkened from the page bg (#0e0f1a) so the resting
+	   label-on-fill clears WCAG AA (4.60:1 vs 4.39 before; hover stays 5.60). */
+	--primary-foreground: #07080d;
 	/* --primary is too light on this dark card for AA text (4.06:1). Status
 	   attention gets a lighter violet that clears 4.5:1 on --card and --background. */
 	--status-attention: #a48bff;
@@ -326,6 +328,15 @@ input, select, textarea {
 	   the page recolors instantly — a 150ms cosmetic desync we accept rather than
 	   gate transitions from JS. */
 	transition: background-color 0.15s, border-color 0.15s;
+}
+
+/* Keyboard-focus ring, offset clear of the pill edge. Uses --ring, not --primary:
+   the ring sits on the page background, and --primary fails the 3:1 non-text bar
+   there on Ember light (2.20:1) while --ring clears 3:1 in every theme × mode
+   (min 3.29). Guarded by theme-contrast.test.ts. */
+.btn:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
 }
 
 /* Hover shifts only the fill, never the label. A blanket opacity fade composited
