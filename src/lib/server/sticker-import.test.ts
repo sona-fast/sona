@@ -481,6 +481,32 @@ describe('updateManualPack', () => {
 	});
 });
 
+describe('saveManualPack', () => {
+	it('suffixes the slug when a manual pack name derives an existing slug (both persist)', async () => {
+		// Two manual packs with the same name slugify to the same base. The second must
+		// get a deterministic -2 suffix rather than failing the atomic batch on the
+		// UNIQUE slug constraint. (Slug pinned via Math.random for determinism.)
+		const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		const input = (imageKey: string) => ({
+			name: 'Dupe Name',
+			managerArtistId: null,
+			stickerInputs: [
+				{ imageUrl: ufs(imageKey), artistId: null, emojis: ['😀'], nsfw: false, position: 0, format: 'webp' as const }
+			]
+		});
+
+		const first = await saveManualPack({ env: testEnv, settings: testSettings, db, input: input('a') });
+		const second = await saveManualPack({ env: testEnv, settings: testSettings, db, input: input('b') });
+
+		expect(second.slug).not.toBe(first.slug);
+		expect(second.slug).toBe(`${first.slug}-2`);
+		expect(await db.select().from(stickerPacks)).toHaveLength(2);
+		rnd.mockRestore();
+	});
+});
+
 describe('importTelegramPack', () => {
 	it('leaves no empty pack when every download fails', async () => {
 		const { db } = makeDb();
@@ -798,28 +824,35 @@ describe('importStickerBatch', () => {
 		rnd.mockRestore();
 	});
 
-	it('throws a clear error when the slug collides with a DIFFERENT set', async () => {
-		// A pre-existing pack with the SAME slug but a DIFFERENT telegramUrl (two sets
-		// whose titles happen to slugify identically). getOrCreatePack's insert conflicts
-		// and the re-select by telegramUrl finds nothing → a named error naming the slug,
-		// not the raw constraint 500. (Slug pinned via Math.random for determinism.)
+	it('suffixes the slug when it derives the same value as a DIFFERENT set (both packs persist)', async () => {
+		// A pre-existing pack with the SAME base slug but a DIFFERENT telegramUrl (two sets
+		// whose titles slugify identically). getOrCreatePack derives a deterministic -2
+		// suffix instead of failing, so the import succeeds and both packs coexist with
+		// distinct slugs. (Slug pinned via Math.random for determinism.)
 		const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
-		const collidingSlug = slugify('Mega Pack');
+		const baseSlug = slugify('Mega Pack');
 		const { db } = makeDb();
 		await seedCharacterAndArtist(db);
 		await db.insert(stickerPacks).values({
-			name: 'Mega Pack', slug: collidingSlug, characterId: 1, source: 'telegram',
+			name: 'Mega Pack', slug: baseSlug, characterId: 1, source: 'telegram',
 			telegramUrl: 'https://t.me/addstickers/someotherset', managerArtistId: null,
 			published: false, createdAt: new Date().toISOString()
 		});
 		mockDownloadOk();
 
-		await expect(
-			importStickerBatch({
-				env: r2Env, settings: r2Settings, db, nameOrUrl: 'megapack', managerArtistId: null,
-				items: [item('a')]
-			})
-		).rejects.toThrow(collidingSlug);
+		const r = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: 'megapack', managerArtistId: null,
+			items: [item('a')]
+		});
+		expect(r).toMatchObject({ created: true, imported: 1 });
+		expect(r.failed).toHaveLength(0);
+
+		// Both packs persist; the newly-imported one carries the -2 suffix + megapack's URL.
+		const packs = await db.select().from(stickerPacks);
+		expect(packs).toHaveLength(2);
+		const imported = packs.find((p) => p.telegramUrl === 'https://t.me/addstickers/megapack')!;
+		expect(imported.slug).toBe(`${baseSlug}-2`);
+		expect(imported.slug).not.toBe(baseSlug);
 		rnd.mockRestore();
 	});
 });

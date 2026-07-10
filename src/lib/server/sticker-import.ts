@@ -124,15 +124,32 @@ async function packForSet(db: Database, setName: string): Promise<{ id: number; 
 }
 
 /**
+ * Return `base`, or the first of `base-2`, `base-3`, … not already used as a pack
+ * slug. slugify() already appends a random suffix so a clash is rare, but two packs
+ * whose titles slugify to the same base (or a manual pack reusing a name) still can —
+ * this makes the fallback a deterministic numeric suffix instead of failing the insert
+ * on the UNIQUE slug constraint.
+ */
+async function uniqueSlug(db: Database, base: string): Promise<string> {
+	let candidate = base;
+	for (let n = 2; ; n++) {
+		const taken = await db.select({ id: stickerPacks.id }).from(stickerPacks).where(eq(stickerPacks.slug, candidate)).get();
+		if (!taken) return candidate;
+		candidate = `${base}-${n}`;
+	}
+}
+
+/**
  * Get the pack for a Telegram set (keyed by its t.me URL), creating it if absent.
  * `created` is true only when THIS call inserted the row; a caller uses it to decide
  * whether to append (continue positions after the current max) and whether to drop
  * the pack if the whole import fails.
  *
- * The create INSERT uses onConflictDoNothing against sticker_packs.slug (the only
- * UNIQUE key here) + re-SELECT so a slug collision surfaces as a clear, named error
- * rather than a raw constraint 500 mid-import. slugify() appends a random suffix, so
- * that collision is rare in practice.
+ * The create INSERT derives a collision-free slug up front (uniqueSlug appends a
+ * deterministic -2/-3 suffix when the base is already taken by a DIFFERENT set), so a
+ * slug clash no longer fails the import. onConflictDoNothing + re-SELECT still handle
+ * the remaining race where a concurrent import grabbed the slug between the check and
+ * the insert.
  *
  * NOTE: because slugs are randomly suffixed, two simultaneous imports of the SAME set
  * compute DIFFERENT slugs and so BOTH inserts succeed — this does NOT dedupe the pack
@@ -152,7 +169,7 @@ async function getOrCreatePack(
 		.get();
 	if (existing) return { packId: existing.id, packSlug: existing.slug, created: false };
 
-	const slug = slugify(opts.title);
+	const slug = await uniqueSlug(db, slugify(opts.title));
 	const inserted = await db
 		.insert(stickerPacks)
 		.values({
@@ -177,8 +194,10 @@ async function getOrCreatePack(
 		.get();
 	if (raced) return { packId: raced.id, packSlug: raced.slug, created: false };
 
-	// No pack with this telegramUrl → the slug belongs to a DIFFERENT set. Surface it
-	// clearly instead of letting the raw constraint error escape.
+	// No pack with this telegramUrl, yet our (checked-free) slug was taken between
+	// uniqueSlug and this insert — a rare TOCTOU race with a concurrent import of a
+	// DIFFERENT set. Surface it clearly (the caller can retry) instead of letting the
+	// raw constraint error escape.
 	throw new Error(`sticker pack slug "${slug}" is already taken by a different set`);
 }
 
@@ -1051,7 +1070,9 @@ export async function saveManualPack(opts: {
 	assertSelfHosted(env, settings, input);
 
 	const characterId = await resolveSiteCharacterId(db, settings);
-	const slug = input.slug ?? slugify(input.name);
+	// Derive a collision-free slug (deterministic -2/-3 suffix) so a name that slugifies
+	// to an existing pack's slug doesn't fail the atomic batch on the UNIQUE constraint.
+	const slug = input.slug ?? (await uniqueSlug(db, slugify(input.name)));
 
 	// Enforce the single-artist invariant on the per-sticker artist ids.
 	const resolvedArtistIds = resolveStickerArtistIds(input.managerArtistId, input.stickerInputs.map((s) => s.artistId));
