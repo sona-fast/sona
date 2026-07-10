@@ -14,6 +14,13 @@ export interface SiteSettings {
 	aboutText: string;
 	/** Contact email shown on /share for larger photo batches. */
 	contactEmail: string;
+	/** Canonical https origin (no trailing slash) used to build links in outgoing
+	 * emails (e.g. the password-reset link), so an alias/preview host hitting the
+	 * form doesn't mail a link to itself. Empty → the request origin is used. */
+	siteUrl: string;
+	/** Locale for automated emails (e.g. password resets). One of the site's
+	 * available locales; empty/invalid → the base locale. */
+	emailLanguage: string;
 	/** Owner-editable override for the /privacy page body (plain text). Empty →
 	 * the code-accurate default policy from `$lib/legal` is shown instead. */
 	privacyPolicy: string;
@@ -112,6 +119,9 @@ const DEFAULTS: SiteSettings = {
 	// The three-path pages (/art, /connect, /share) render gracefully with these
 	// empty — sections that have no data simply don't show.
 	contactEmail: '',
+	// Empty → outgoing-email links use the request origin; emails render in baseLocale.
+	siteUrl: '',
+	emailLanguage: '',
 	// Empty → /privacy and /terms render the code-accurate defaults from $lib/legal.
 	privacyPolicy: '',
 	termsOfService: '',
@@ -182,6 +192,8 @@ export async function getSettings(
 			ownerName: map.ownerName ?? DEFAULTS.ownerName,
 			aboutText: map.aboutText ?? DEFAULTS.aboutText,
 			contactEmail: map.contactEmail ?? DEFAULTS.contactEmail,
+			siteUrl: map.siteUrl ?? DEFAULTS.siteUrl,
+			emailLanguage: map.emailLanguage ?? DEFAULTS.emailLanguage,
 			privacyPolicy: map.privacyPolicy ?? DEFAULTS.privacyPolicy,
 			termsOfService: map.termsOfService ?? DEFAULTS.termsOfService,
 			privacyUpdatedAt: map.privacyUpdatedAt ?? DEFAULTS.privacyUpdatedAt,

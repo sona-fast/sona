@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { normalizeHttpsUrl } from '../src/lib/server/validate';
 import {
 	buildMigrationSql,
+	buildSeedSql,
 	sanitizeProjectName,
 	isR2NotEnabled,
 	ensureUrlScheme,
@@ -56,6 +58,60 @@ describe('buildMigrationSql', () => {
 	it('escapes single quotes in a basename', () => {
 		const sql = buildMigrationSql([{ name: "0000_o'brien.sql", sql: 'SELECT 1;' }]);
 		expect(sql).toContain("VALUES ('0000_o''brien.sql'");
+	});
+});
+
+describe('buildSeedSql', () => {
+	it('always seeds storageProvider', () => {
+		expect(buildSeedSql({ provider: 'uploadthing' })).toBe(
+			"INSERT OR REPLACE INTO site_settings (key,value) VALUES ('storageProvider','uploadthing');"
+		);
+	});
+
+	it('seeds siteUrl from the domain answer alongside storageProvider', () => {
+		const sql = buildSeedSql({ provider: 'r2', siteUrl: 'https://taro.surf' });
+		expect(sql).toContain("('storageProvider','r2')");
+		expect(sql).toContain("('siteUrl','https://taro.surf')");
+	});
+
+	it('omits siteUrl when blank (left unset → app falls back to request origin)', () => {
+		const sql = buildSeedSql({ provider: 'r2', siteUrl: '' });
+		expect(sql).not.toContain('siteUrl');
+	});
+
+	it('seeds all provided values in order (provider, siteUrl, r2PublicUrl, primaryCharacter)', () => {
+		const sql = buildSeedSql({
+			provider: 'r2',
+			siteUrl: 'https://taro.surf',
+			r2PublicUrl: 'https://cdn.taro.surf',
+			primaryCharacter: 'taro'
+		});
+		expect(sql).toBe(
+			"INSERT OR REPLACE INTO site_settings (key,value) VALUES " +
+				"('storageProvider','r2'), ('siteUrl','https://taro.surf'), " +
+				"('r2PublicUrl','https://cdn.taro.surf'), ('primaryCharacter','taro');"
+		);
+	});
+
+	it('escapes single quotes in seeded values', () => {
+		const sql = buildSeedSql({ provider: 'r2', primaryCharacter: "o'brien" });
+		expect(sql).toContain("('primaryCharacter','o''brien')");
+	});
+
+	// The CLI seed computes siteUrl as normalizeHttpsUrl(ensureUrlScheme(domain)) ?? ''
+	// (setup.ts). A malformed or non-https domain must normalize to null so the seed
+	// drops siteUrl entirely — rather than storing a value new URL() throws on later.
+	it('omits siteUrl when the domain answer does not normalize to a valid https URL', () => {
+		const malformed = normalizeHttpsUrl(ensureUrlScheme('bad domain!!'));
+		expect(malformed).toBeNull();
+		expect(buildSeedSql({ provider: 'r2', siteUrl: malformed ?? '' })).not.toContain('siteUrl');
+
+		// A good domain normalizes and is seeded.
+		const good = normalizeHttpsUrl(ensureUrlScheme('taro.surf'));
+		expect(good).toBe('https://taro.surf');
+		expect(buildSeedSql({ provider: 'r2', siteUrl: good ?? '' })).toContain(
+			"('siteUrl','https://taro.surf')"
+		);
 	});
 });
 

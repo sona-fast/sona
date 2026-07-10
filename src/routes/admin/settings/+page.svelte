@@ -14,7 +14,13 @@
 	import { LANDING_LAYOUTS } from '$lib/landing';
 	import { resendSetupProgress } from '$lib/resend-setup';
 	import { showUtFileStat } from './ut-stat';
+	import { baseLocale, locales } from '$lib/paraglide/runtime';
 	import * as m from '$lib/paraglide/messages';
+
+	// Endonyms for the email-language options — a language name reads the same
+	// regardless of the admin's UI locale, so it's a small in-component map (same
+	// pattern as LanguageToggle), not a translated message key.
+	const localeLabels: Record<string, string> = { en: 'English', ja: '日本語' };
 
 	let { data, form } = $props();
 
@@ -36,6 +42,20 @@
 	let furtrackUrl = $state(data.settings.furtrackUrl);
 	let autoResyncEnabled = $state(data.settings.autoResyncEnabled);
 	let contactEmail = $state(data.settings.contactEmail);
+	let siteUrl = $state(data.settings.siteUrl);
+	// Empty setting shows the base locale (the effective default at send time).
+	let emailLanguage = $state(data.settings.emailLanguage || baseLocale);
+	// When no R2 public URL is set, suggest cdn.<site-host> as the field placeholder —
+	// derived from Site URL but still fully editable (never hard-computed into the value).
+	let cdnPlaceholder = $derived.by(() => {
+		const raw = siteUrl?.trim();
+		if (!raw) return 'https://cdn.example.com';
+		try {
+			return `https://cdn.${new URL(raw).host}`;
+		} catch {
+			return 'https://cdn.example.com';
+		}
+	});
 	let privacyPolicy = $state(data.settings.privacyPolicy);
 	let termsOfService = $state(data.settings.termsOfService);
 
@@ -194,6 +214,8 @@
 		storageProvider = data.settings.storageProvider;
 		r2PublicUrl = data.settings.r2PublicUrl;
 		contactEmail = data.settings.contactEmail;
+		siteUrl = data.settings.siteUrl;
+		emailLanguage = data.settings.emailLanguage || baseLocale;
 		privacyPolicy = data.settings.privacyPolicy;
 		termsOfService = data.settings.termsOfService;
 		adminEmail = data.adminEmail;
@@ -292,6 +314,20 @@
 			{#if !contactEmail?.trim()}
 				<p class="hint">{m.admin_settings_contact_email_nudge()}</p>
 			{/if}
+			<label>
+				<span>{m.admin_settings_site_url()}</span>
+				<input type="url" class="input" bind:value={siteUrl} name="siteUrl" placeholder="https://example.com" />
+			</label>
+			<p class="hint">{m.admin_settings_site_url_hint()}</p>
+			<label>
+				<span>{m.admin_settings_email_language()}</span>
+				<select class="input" name="emailLanguage" bind:value={emailLanguage}>
+					{#each locales as loc}
+						<option value={loc}>{localeLabels[loc] ?? loc}</option>
+					{/each}
+				</select>
+			</label>
+			<p class="hint">{m.admin_settings_email_language_hint()}</p>
 		</section>
 
 		<section data-tab="site">
@@ -581,7 +617,7 @@
 		{#if storageProvider === 'r2'}
 			<label>
 				<span>{m.admin_settings_r2_domain()}</span>
-				<input type="text" class="input" name="r2PublicUrl" bind:value={r2PublicUrl} placeholder="https://cdn.example.com" />
+				<input type="text" class="input" name="r2PublicUrl" bind:value={r2PublicUrl} placeholder={cdnPlaceholder} />
 			</label>
 			{#if !r2PublicUrl?.trim()}
 				<p class="hint">{m.admin_settings_r2_no_url_hint()}</p>

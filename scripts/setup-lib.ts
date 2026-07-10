@@ -39,6 +39,33 @@ export function buildMigrationSql(migrations: Migration[]): string {
 	return parts.join('\n') + '\n';
 }
 
+export interface SeedSettingsInput {
+	/** Active image store: 'r2' | 'uploadthing'. */
+	provider: string;
+	/** Canonical https origin for outgoing-email links; '' to leave unset. */
+	siteUrl?: string;
+	/** R2 public base URL; '' when UploadThing or unset. */
+	r2PublicUrl?: string;
+	/** FurTrack character/tag; '' when the fursuit feature is off. */
+	primaryCharacter?: string;
+}
+
+/**
+ * Builds the `INSERT OR REPLACE INTO site_settings` statement the setup CLI runs
+ * to seed the values it collected (mirrors the wizard-less defaults). Only
+ * non-empty optional values are seeded — an absent row means "unset", which the
+ * app reads as its own fallback (e.g. an empty siteUrl falls back to the request
+ * origin). storageProvider is always written so the app boots with a backend.
+ */
+export function buildSeedSql(input: SeedSettingsInput): string {
+	const rows: [string, string][] = [['storageProvider', input.provider]];
+	if (input.siteUrl) rows.push(['siteUrl', input.siteUrl]);
+	if (input.r2PublicUrl) rows.push(['r2PublicUrl', input.r2PublicUrl]);
+	if (input.primaryCharacter) rows.push(['primaryCharacter', input.primaryCharacter]);
+	const values = rows.map(([k, v]) => `('${sqlStr(k)}','${sqlStr(v)}')`).join(', ');
+	return `INSERT OR REPLACE INTO site_settings (key,value) VALUES ${values};`;
+}
+
 /**
  * Turns a repo/directory name into a valid Cloudflare Pages project name:
  * lowercase, dots/underscores/whitespace → hyphens, other chars dropped,
