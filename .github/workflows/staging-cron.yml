@@ -1,0 +1,115 @@
+name: Staging cron (beta.sona.fast)
+
+# Scheduled cron for the STAGING site only. Cloudflare Pages can't run native
+# cron, so GitHub Actions is the scheduler: it POSTs the app's cron endpoints
+# with a Bearer CRON_SECRET. This mirrors the three fork cron workflows
+# (sticker-resync.yml, artist-sync.yml, cleanup-orphans.yml) but targets the
+# fixed staging base URL and is gated to the canonical repo only.
+#
+# The three schedules keep each fork workflow's cadence. A single workflow_dispatch
+# runs all three on demand from the Actions tab.
+#
+# Required: repo secret CRON_SECRET matching the sona-staging Pages secret of the
+# same name. Unset = each job warns and skips (optional opt-in, same as forks).
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # sticker re-sync — daily 06:00 UTC
+    - cron: '30 6 * * *'  # artist registry sync — daily 06:30 UTC
+    - cron: '0 7 * * 1'   # storage orphan cleanup — weekly, Mondays 07:00 UTC
+  workflow_dispatch: {}
+
+# The staging base URL is fixed (not a repo var like the forks) because this
+# workflow only ever runs against beta.sona.fast.
+env:
+  STAGING_URL: https://beta.sona.fast
+
+jobs:
+  sticker-resync:
+    runs-on: ubuntu-latest
+    # Canonical repo only; on schedule, only the 06:00 cron. workflow_dispatch
+    # runs every job.
+    if: >-
+      github.repository == 'sona-fast/sona' &&
+      (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *')
+    concurrency:
+      group: staging-sticker-resync
+      cancel-in-progress: false
+    steps:
+      - name: Trigger re-sync endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::CRON_SECRET not set — skipping staging sticker re-sync (set the repo secret to opt in)"; exit 0
+          fi
+          code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${STAGING_URL%/}/api/cron/resync-telegram")
+          echo "HTTP $code"; cat response.json || true; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::Re-sync endpoint returned HTTP $code"; exit 1
+          fi
+
+  artist-sync:
+    runs-on: ubuntu-latest
+    if: >-
+      github.repository == 'sona-fast/sona' &&
+      (github.event_name == 'workflow_dispatch' || github.event.schedule == '30 6 * * *')
+    concurrency:
+      group: staging-artist-sync
+      cancel-in-progress: false
+    steps:
+      - name: Trigger artist-sync endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::CRON_SECRET not set — skipping staging artist sync (set the repo secret to opt in)"; exit 0
+          fi
+          code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${STAGING_URL%/}/api/cron/sync-artists")
+          echo "HTTP $code"; cat response.json || true; echo
+          if [ "$code" = "503" ]; then
+            echo "Registry not configured on the site — skipping."; exit 0
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::error::Sync endpoint returned HTTP $code"; exit 1
+          fi
+
+  cleanup-orphans:
+    runs-on: ubuntu-latest
+    if: >-
+      github.repository == 'sona-fast/sona' &&
+      (github.event_name == 'workflow_dispatch' || github.event.schedule == '0 7 * * 1')
+    concurrency:
+      group: staging-cleanup-orphans
+      cancel-in-progress: false
+    steps:
+      - name: Trigger cleanup-orphans endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::CRON_SECRET not set — skipping staging cleanup (set the repo secret to opt in)"; exit 0
+          fi
+          code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${STAGING_URL%/}/api/cron/cleanup-orphans")
+          echo "HTTP $code"; cat response.json || true; echo
+          if [ "$code" = "503" ]; then
+            echo "Cron is not configured on the site (no CRON_SECRET Pages secret) — skipping."; exit 0
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::error::Cleanup endpoint returned HTTP $code"; exit 1
+          fi
+          # A provider can SKIP itself (zero-keep safety belt) while the run stays
+          # HTTP 200. Surface that as a warning without failing the run.
+          skipped=$(jq -r '(.skipped // []) | join("; ")' response.json 2>/dev/null || true)
+          if [ -n "$skipped" ]; then
+            echo "::warning::Cleanup skipped a provider: $skipped"
+          fi
