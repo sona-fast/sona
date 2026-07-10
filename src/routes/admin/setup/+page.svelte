@@ -182,7 +182,9 @@
 		display: block;
 		margin-bottom: 14px;
 	}
-	label span {
+	/* Direct child only: a nested inline <span class="optional"> (e.g. on the
+	   recovery-email label) must stay inline, not be forced onto its own line. */
+	label > span {
 		display: block;
 		font-size: 14px;
 		font-weight: 500;

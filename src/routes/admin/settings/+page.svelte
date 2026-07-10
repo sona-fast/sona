@@ -610,8 +610,8 @@
 	<section class="security-section" data-tab="account">
 		<h2>{m.admin_settings_recovery_email()}</h2>
 		<label>
-			<span>{m.admin_settings_recovery_email()}</span>
-			<input type="email" name="adminEmail" class="input" bind:value={adminEmail} autocomplete="email" placeholder="you@example.com" />
+			<span>{m.admin_settings_recovery_email_label()}</span>
+			<input type="email" name="adminEmail" class="input" bind:value={adminEmail} autocomplete="email" placeholder="you@example.com" aria-describedby="recovery-email-hint" />
 		</label>
 		<div class="reset-status" aria-live="polite">
 			{#if resendProgress.ready}
@@ -622,7 +622,7 @@
 				<button type="button" class="hint-link" onclick={() => (showResendSetup = true)}>{m.admin_resend_setup_link_unset()}</button>
 			{/if}
 		</div>
-		<p class="field-hint">
+		<p class="field-hint" id="recovery-email-hint">
 			{#if resendProgress.ready}
 				{m.admin_resend_hint_active_a()}<code>{m.admin_login_forgot_password()}</code>{m.admin_resend_hint_active_b()}<code>RESEND_FROM</code>{m.admin_resend_hint_active_c()}
 			{:else}

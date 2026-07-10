@@ -22,7 +22,7 @@
 			<p class="notice" role="status" tabindex="-1" bind:this={noticeEl}>{m.admin_forgot_sent()}</p>
 			<a href="/admin/login" class="back">{m.admin_forgot_back_to_login()}</a>
 		{:else}
-			<p class="hint">{m.admin_forgot_hint()}</p>
+			<p class="hint" id="forgot-hint">{m.admin_forgot_hint()}</p>
 			<form method="POST" use:enhance={() => {
 				submitting = true;
 				return async ({ update }) => {
@@ -32,7 +32,7 @@
 			}}>
 				<label>
 					<span>{m.admin_forgot_email_label()}</span>
-					<input type="email" name="email" class="input" required autofocus autocomplete="email" />
+					<input type="email" name="email" class="input" required autocomplete="email" aria-describedby="forgot-hint" />
 				</label>
 				<button type="submit" class="btn btn-primary full-width" disabled={submitting}>
 					{submitting ? m.admin_forgot_sending() : m.admin_forgot_send()}
@@ -80,9 +80,23 @@
 		text-align: left;
 	}
 
+	/* Light success treatment, shared with the ?reset=1 login notice: a subtle
+	   green-tinted card. Text stays --foreground so contrast holds in every theme. */
 	.notice {
 		font-size: 14px;
 		margin-bottom: 20px;
+		text-align: left;
+		color: var(--foreground);
+		background: color-mix(in srgb, #16a34a 12%, var(--card));
+		border: 1px solid color-mix(in srgb, #16a34a 35%, transparent);
+		border-radius: var(--radius-s);
+		padding: 10px 12px;
+	}
+
+	/* Focused programmatically (tabindex="-1") to announce the confirmation to
+	   screen readers; not keyboard-reachable, so suppress the default outline. */
+	.notice:focus {
+		outline: none;
 	}
 
 	form {

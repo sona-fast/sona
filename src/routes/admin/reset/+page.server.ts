@@ -6,6 +6,7 @@ import { hashPassword } from '$lib/server/admin-auth';
 import { validateResetToken, PASSWORD_RESET_SETTING } from '$lib/server/password-reset';
 import { siteSettings, sessions } from '$lib/server/db/schema';
 import { RESET_TOKEN_COOKIE } from '$lib/config';
+import * as m from '$lib/paraglide/messages';
 import type { Actions, PageServerLoad } from './$types';
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -52,13 +53,13 @@ export const actions = {
 
 		// Re-validate on submit — the token may have expired since the page loaded.
 		if (!(await validateResetToken(db, token))) {
-			return fail(400, { invalidToken: true, error: 'This reset link is invalid or has expired.' });
+			return fail(400, { invalidToken: true, error: m.admin_reset_invalid() });
 		}
 		if (password.length < MIN_PASSWORD_LENGTH) {
-			return fail(400, { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+			return fail(400, { error: m.admin_reset_error_too_short({ min: MIN_PASSWORD_LENGTH }) });
 		}
 		if (password !== confirm) {
-			return fail(400, { error: 'Passwords do not match.' });
+			return fail(400, { error: m.admin_reset_error_mismatch() });
 		}
 
 		// One atomic batch (D1 has no interactive transactions): set the new hash,

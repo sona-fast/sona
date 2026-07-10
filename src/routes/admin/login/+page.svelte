@@ -76,9 +76,18 @@
 		margin-bottom: 16px;
 	}
 
+	/* Light success treatment, shared with the forgot-password confirmation: a
+	   subtle green-tinted card. Text stays --foreground so contrast holds in every
+	   theme. */
 	.notice {
 		font-size: 14px;
 		margin-bottom: 16px;
+		text-align: left;
+		color: var(--foreground);
+		background: color-mix(in srgb, #16a34a 12%, var(--card));
+		border: 1px solid color-mix(in srgb, #16a34a 35%, transparent);
+		border-radius: var(--radius-s);
+		padding: 10px 12px;
 	}
 
 	.forgot {
