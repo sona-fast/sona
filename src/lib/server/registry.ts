@@ -133,12 +133,21 @@ function baseUrl(env: Env): string {
 	return (env.REGISTRY_URL || REGISTRY_DEFAULT_URL).replace(/\/+$/, '');
 }
 
-async function call<T>(
+/** A registry refusal: a 4xx whose body carries the registry's own reason. Distinct
+ *  from a fail-soft fallback (5xx/network) so callers can surface the message and map
+ *  the status (409 conflict, 429 rate-limit, 400 validation) rather than a generic
+ *  code. Only the `errorBody` call path can produce one (R defaults to `never`). */
+export interface RegistryRefusal {
+	error: string;
+	httpStatus: number;
+}
+
+async function call<T, R = never>(
 	env: Env | undefined,
 	path: string,
 	init: RequestInit & { auth?: boolean; errorBody?: boolean },
 	fallback: T
-): Promise<T> {
+): Promise<T | R> {
 	if (!env || !isRegistryEnabled(env)) return fallback;
 	const headers: Record<string, string> = { 'content-type': 'application/json' };
 	if (init.auth) headers['authorization'] = `Bearer ${env.REGISTRY_API_KEY}`;
@@ -151,11 +160,15 @@ async function call<T>(
 		if (!res) return fallback;
 		if (!res.ok) {
 			// Opt-in: surface a 4xx refusal's body (it carries the registry's reason,
-			// e.g. "artist was removed from the registry") instead of collapsing it
-			// into the fail-soft fallback. 5xx/network errors still fail soft.
+			// e.g. "artist was removed from the registry") as a typed RegistryRefusal
+			// instead of collapsing it into the fail-soft fallback. The status rides
+			// along so the caller can distinguish a conflict from a rate-limit/validation
+			// error. 5xx/network errors still fail soft.
 			if (init.errorBody && res.status >= 400 && res.status < 500) {
 				const body = (await res.json().catch(() => null)) as { error?: string } | null;
-				if (body && typeof body.error === 'string') return body as T;
+				if (body && typeof body.error === 'string') {
+					return { error: body.error, httpStatus: res.status } as R;
+				}
 			}
 			return fallback;
 		}
@@ -212,9 +225,6 @@ export interface RegistrySubmitResult {
 	status: string;
 	matchedGlobalId: string | null;
 	multipleMatches?: boolean;
-	/** Set when the registry refused the submission (e.g. the matched artist is
-	 * tombstoned) — carries the registry's own message for the admin UI. */
-	error?: string;
 }
 
 export async function registrySubmit(
@@ -234,8 +244,8 @@ export async function registrySubmit(
 			socials: Record<string, string>;
 		};
 	}
-): Promise<RegistrySubmitResult | null> {
-	return call<RegistrySubmitResult | null>(
+): Promise<RegistrySubmitResult | RegistryRefusal | null> {
+	return call<RegistrySubmitResult | null, RegistryRefusal>(
 		env,
 		`/v1/submissions`,
 		// errorBody: a 4xx here is a meaningful refusal (e.g. "artist was removed

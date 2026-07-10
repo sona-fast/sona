@@ -111,6 +111,22 @@ describe('POST /api/artists — explicit registry import overrides the local cop
 		expect(row!.avatarUrl).toBe('https://cdn.example/local.png'); // no registry avatar → kept
 	});
 
+	it('reused: a missing/non-finite registryVersion never blanks the local version', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({
+			name: 'Versioned',
+			globalId: GID,
+			registryVersion: 7,
+			createdAt: '2026-07-01'
+		});
+
+		// A refresh call that omits registryVersion must leave the stored one intact.
+		await post(platform, { name: 'Versioned', globalId: GID });
+
+		const row = await db.select().from(artists).where(eq(artists.globalId, GID)).get();
+		expect(row!.registryVersion).toBe(7);
+	});
+
 	it('linked: an unlinked handle-match gets linked AND refreshed', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(artists).values({
