@@ -283,7 +283,7 @@ async function main() {
 			const zoneId = ((zoneRes.result as { id: string }[] | undefined) ?? [])[0]?.id;
 			if (!zoneId) {
 				console.warn(
-					`\nℹ No Cloudflare zone found for ${host} — skipping the DNS / image-transform preflight.`
+					`\n⚠ No Cloudflare zone found for ${host} — skipping the DNS / image-transform preflight.`
 				);
 				console.warn('  Add the domain to this Cloudflare account first if you want setup to check it.');
 			} else {

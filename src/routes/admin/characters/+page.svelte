@@ -233,10 +233,13 @@
 					</div>
 				</div>
 
-				<label class="checkbox-label">
-					<input type="checkbox" name="isOwner" checked={editingChar.isOwner} />
-					<span>{m.admin_characters_owner_label()} <span class="checkbox-helper">{m.admin_characters_owner_hint()}</span></span>
-				</label>
+				<div class="checkbox-field">
+					<label class="checkbox-label">
+						<input type="checkbox" name="isOwner" checked={editingChar.isOwner} aria-describedby="owner-character-hint" />
+						<span>{m.admin_characters_owner_label()}</span>
+					</label>
+					<span id="owner-character-hint" class="checkbox-helper">{m.admin_characters_owner_hint()}</span>
+				</div>
 
 				<div class="modal-actions">
 					<button type="button" class="btn btn-secondary" onclick={() => (editingChar = null)}>{m.admin_cancel()}</button>
@@ -456,6 +459,12 @@
 		font-weight: 500;
 	}
 
+	.checkbox-field {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
 	.checkbox-label {
 		flex-direction: row !important;
 		align-items: flex-start;
@@ -470,6 +479,7 @@
 
 	.checkbox-helper {
 		display: block;
+		padding-left: 24px;
 		color: var(--muted-foreground);
 		font-size: 12px;
 		font-weight: 400;

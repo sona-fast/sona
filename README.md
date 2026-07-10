@@ -57,6 +57,11 @@ original deployment it grew out of). The project home is
    applies migrations; and generates + sets the `SETUP_TOKEN` and `CRON_SECRET`
    secrets. It prints your one-time `SETUP_TOKEN` — keep it for step 4.
 
+   > **Setting up a custom domain?** Export `CLOUDFLARE_API_TOKEN` +
+   > `CLOUDFLARE_ACCOUNT_ID` (the same token as step 3, under **API token
+   > scopes** below) before running setup so it can preflight your DNS /
+   > image-transform config.
+
    > **Run it in a real terminal.** `npm run setup` is interactive; piping input
    > through `npm run` (e.g. `printf ... | npm run setup`) truncates stdin. If you
    > must script it, run the script directly: `npx tsx scripts/setup.ts < answers`.
