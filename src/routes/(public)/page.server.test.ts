@@ -10,35 +10,7 @@ import { clearSettingsCache } from '$lib/server/settings';
 import { load } from './+page.server';
 import { load as artLoad } from '../(paths)/art/+page.server';
 
-// Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses,
-// same approach as art/page.server.test.ts. (No `batch` — these tests exercise
-// the threePath splash branch only, which never batches.)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeD1(sqlite: any): D1Database {
-	function exec(sql: string, params: unknown[], mode: 'run' | 'all' | 'raw') {
-		const stmt = sqlite.prepare(sql);
-		if (mode === 'raw') {
-			try {
-				return stmt.raw(true).all(...params) as unknown[];
-			} finally {
-				stmt.raw(false);
-			}
-		}
-		if (stmt.reader) return { results: stmt.all(...params), success: true, meta: {} };
-		const info = stmt.run(...params);
-		return { results: [], success: true, meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid) } };
-	}
-	function prepare(sql: string) {
-		return {
-			bind: (...params: unknown[]) => ({
-				run: () => exec(sql, params, 'run'),
-				all: () => exec(sql, params, 'all'),
-				raw: () => exec(sql, params, 'raw')
-			})
-		};
-	}
-	return { prepare } as unknown as D1Database;
-}
+import { makeD1 } from '$lib/server/test/d1';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');

@@ -192,47 +192,7 @@ describe('parseStickerFormInputs', () => {
 	});
 });
 
-// --- DB-backed tests (manual save/edit + Telegram import) -------------------
-//
-// drizzle's d1 driver only touches client.prepare()/client.batch(), so a thin
-// shim over better-sqlite3 stands in for a D1Database (mirroring getReadDb's note
-// in db/index.ts). batch() runs inside a better-sqlite3 transaction so it is
-// all-or-nothing exactly like a real D1 batch — which is what the atomicity test
-// below relies on.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeD1(sqlite: any): D1Database {
-	function exec(sql: string, params: unknown[], mode: 'run' | 'all' | 'raw') {
-		const stmt = sqlite.prepare(sql);
-		if (mode === 'raw') {
-			try {
-				return stmt.raw(true).all(...params) as unknown[];
-			} finally {
-				stmt.raw(false);
-			}
-		}
-		if (stmt.reader) {
-			return { results: stmt.all(...params), success: true, meta: {} };
-		}
-		const info = stmt.run(...params);
-		return { results: [], success: true, meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid) } };
-	}
-	function prepare(sql: string) {
-		return {
-			bind(...params: unknown[]) {
-				return {
-					run: () => exec(sql, params, 'run'),
-					all: () => exec(sql, params, 'all'),
-					raw: () => exec(sql, params, 'raw'),
-					_run: () => exec(sql, params, 'run')
-				};
-			}
-		};
-	}
-	async function batch(statements: Array<{ _run: () => unknown }>) {
-		return sqlite.transaction((stmts: Array<{ _run: () => unknown }>) => stmts.map((s) => s._run()))(statements);
-	}
-	return { prepare, batch } as unknown as D1Database;
-}
+import { makeD1 } from '$lib/server/test/d1';
 
 const DDL = `
 CREATE TABLE characters (
