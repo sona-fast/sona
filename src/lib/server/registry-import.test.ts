@@ -5,7 +5,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
-import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
 import { artists } from '$lib/server/db/schema';
 import type { RegistryArtist } from './registry';
@@ -28,48 +27,7 @@ vi.mock('./registry', async (importOriginal) => {
 	};
 });
 
-// drizzle's d1 driver only touches client.prepare()/client.batch() — thin shim
-// over better-sqlite3 (mirrors sticker-import.test.ts).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeD1(sqlite: any): D1Database {
-	function exec(sql: string, params: unknown[], mode: 'run' | 'all' | 'raw') {
-		const stmt = sqlite.prepare(sql);
-		if (mode === 'raw') {
-			try {
-				return stmt.raw(true).all(...params) as unknown[];
-			} finally {
-				stmt.raw(false);
-			}
-		}
-		if (stmt.reader) {
-			return { results: stmt.all(...params), success: true, meta: {} };
-		}
-		const info = stmt.run(...params);
-		return {
-			results: [],
-			success: true,
-			meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid) }
-		};
-	}
-	function prepare(sql: string) {
-		return {
-			bind(...params: unknown[]) {
-				return {
-					run: () => exec(sql, params, 'run'),
-					all: () => exec(sql, params, 'all'),
-					raw: () => exec(sql, params, 'raw'),
-					_run: () => exec(sql, params, 'run')
-				};
-			}
-		};
-	}
-	async function batch(statements: Array<{ _run: () => unknown }>) {
-		return sqlite.transaction((stmts: Array<{ _run: () => unknown }>) =>
-			stmts.map((s) => s._run())
-		)(statements);
-	}
-	return { prepare, batch } as unknown as D1Database;
-}
+import { makeD1 } from '$lib/server/test/d1';
 
 const DDL = `
 CREATE TABLE artists (
