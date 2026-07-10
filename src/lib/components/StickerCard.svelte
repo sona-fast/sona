@@ -1,5 +1,6 @@
 <script lang="ts">
 	import StickerMedia from './StickerMedia.svelte';
+	import ArtistAvatar from './ArtistAvatar.svelte';
 	import type { StickerView } from '$lib/server/stickers';
 	import * as m from '$lib/paraglide/messages';
 
@@ -46,9 +47,7 @@
 			{#if showArtist}
 				<div class="artist-credit">
 					{#if sticker.artist}
-						{#if sticker.artist.avatarUrl}
-							<img src={sticker.artist.avatarUrl} alt="" class="artist-avatar" />
-						{/if}
+						<ArtistAvatar name={sticker.artist.name} avatarUrl={sticker.artist.avatarUrl} size={18} />
 						<span class="artist-name">{m.stickers_by_artist({ artist: sticker.artist.name })}</span>
 					{:else}
 						<span class="artist-name unattributed">{m.stickers_unattributed()}</span>
@@ -179,14 +178,6 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-	}
-
-	.artist-avatar {
-		width: 18px;
-		height: 18px;
-		border-radius: 50%;
-		object-fit: cover;
-		flex-shrink: 0;
 	}
 
 	.artist-name {

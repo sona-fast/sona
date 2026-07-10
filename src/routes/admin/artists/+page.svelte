@@ -4,6 +4,7 @@
 	import { Search, Plus, Pencil, Trash2, X, Share2, Loader2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
+	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { formatDate } from '$lib';
 	import * as m from '$lib/paraglide/messages';
@@ -38,10 +39,6 @@
 		}, 250);
 	}
 
-
-	function getInitials(name: string): string {
-		return name.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2);
-	}
 
 	// Why the Share button is disabled (or what it does): an AKA-linked row (#71)
 	// explains itself via the registry artist's name; an up-to-date row says so;
@@ -93,13 +90,7 @@
 			{#each data.artists as artist}
 				<tr>
 					<td class="col-avatar">
-						<div class="avatar">
-							{#if artist.avatarUrl}
-								<img src={artist.avatarUrl} alt={artist.name} />
-							{:else}
-								<span class="initials">{getInitials(artist.name)}</span>
-							{/if}
-						</div>
+						<ArtistAvatar name={artist.name} avatarUrl={artist.avatarUrl} size={36} />
 					</td>
 					<td class="artist-name">
 						{artist.name}
@@ -190,13 +181,7 @@
 <div class="mobile-list">
 	{#each data.artists as artist}
 		<div class="mobile-artist-item">
-			<div class="avatar">
-				{#if artist.avatarUrl}
-					<img src={artist.avatarUrl} alt={artist.name} />
-				{:else}
-					<span class="initials">{getInitials(artist.name)}</span>
-				{/if}
-			</div>
+			<ArtistAvatar name={artist.name} avatarUrl={artist.avatarUrl} size={36} />
 			<div class="mobile-artist-info">
 				<p class="mobile-artist-name">{artist.name}</p>
 				{#if artist.formerly.length}<p class="aka-hint">{m.admin_artists_formerly({ names: artist.formerly.join(', ') })}</p>{/if}
@@ -304,13 +289,7 @@
 			</div>
 
 			<div class="modal-artist-info">
-				<div class="avatar avatar-lg">
-					{#if editingArtist.avatarUrl}
-						<img src={editingArtist.avatarUrl} alt={editingArtist.name} />
-					{:else}
-						<span class="initials">{getInitials(editingArtist.name)}</span>
-					{/if}
-				</div>
+				<ArtistAvatar name={editingArtist.name} avatarUrl={editingArtist.avatarUrl} size={48} />
 				<div>
 					<p class="modal-artist-name">{editingArtist.name}</p>
 					<p class="modal-artist-meta">{worksLabel(editingArtist)} &bull; {m.admin_artists_added({ date: formatDate(editingArtist.createdAt) })}</p>
@@ -501,30 +480,6 @@
 		color: var(--destructive);
 	}
 
-	.avatar {
-		width: 36px;
-		height: 36px;
-		border-radius: 50%;
-		background: var(--secondary);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		overflow: hidden;
-	}
-
-	.avatar img {
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-	}
-
-	.initials {
-		font-family: var(--font-primary);
-		font-size: 12px;
-		font-weight: 600;
-		color: var(--muted-foreground);
-	}
-
 	.artist-name {
 		font-weight: 500;
 	}
@@ -638,15 +593,6 @@
 		display: flex;
 		align-items: center;
 		gap: 12px;
-	}
-
-	.avatar-lg {
-		width: 48px;
-		height: 48px;
-	}
-
-	.avatar-lg .initials {
-		font-size: 20px;
 	}
 
 	.modal-artist-name {

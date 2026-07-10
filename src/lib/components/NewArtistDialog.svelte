@@ -5,6 +5,7 @@
 	import * as m from '$lib/paraglide/messages';
 	import { shouldSearch, resultToPrefill, type RegResult } from '$lib/registry-search';
 	import { classifyQuery } from '$lib/handle-classify';
+	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
@@ -26,10 +27,6 @@
 		registryEnabled?: boolean;
 	}
 	let { oncreated, oncancel, title = m.admin_new_artist_title(), onimportedall, registryEnabled = false }: Props = $props();
-
-	function initials(n: string): string {
-		return n.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2);
-	}
 
 	// Mirrors the Edit Artist modal on /admin/artists, but creates via the
 	// /api/artists endpoint (AJAX) so the caller gets the new id back immediately
@@ -409,13 +406,7 @@
 									onmouseenter={() => (activeIndex = i)}
 									onmousedown={(e) => { if (e.button !== 0) return; e.preventDefault(); applyResult(r); }}
 								>
-									<span class="reg-avatar">
-										<span class="reg-initials" aria-hidden="true">{initials(r.name)}</span>
-										<!-- Overlays the monogram; if the registry has no avatar (or the
-										     URL fails to load) the initials show through instead of an
-										     empty circle. -->
-										{#if r.avatarUrl}<img src={r.avatarUrl} alt="" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />{/if}
-									</span>
+									<ArtistAvatar name={r.name} avatarUrl={r.avatarUrl} size={22} />
 									<span class="reg-id">
 										<span class="reg-name">{r.name}</span>
 										{#if handle}<span class="reg-handle">{handle}</span>{/if}
@@ -555,9 +546,6 @@
 	   outline in light mode for a ≥3:1 non-text indicator (1.4.11). Dark themes
 	   keep the passing --primary border. */
 	:global([data-theme='light']) .reg-results li.active { outline: 2px solid var(--ring); outline-offset: -2px; }
-	.reg-avatar { position: relative; flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; overflow: hidden; background: var(--secondary); }
-	.reg-initials { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-primary); font-size: 9px; font-weight: 600; color: var(--muted-foreground); }
-	.reg-results img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 	.linked-row { display: flex; align-items: center; gap: 8px; }
 	.linked { color: var(--primary); font-size: 12px; }
 	.unlink { background: none; border: none; padding: 0; cursor: pointer; color: var(--muted-foreground); font-size: 12px; font-family: inherit; text-decoration: underline; }

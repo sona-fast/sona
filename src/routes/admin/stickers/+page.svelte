@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { Smile, Plus, ExternalLink, Pencil, Trash2, Send, Search, Loader2, RefreshCw, AlertTriangle } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import SetupDialog from '$lib/components/SetupDialog.svelte';
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import { toast } from '$lib/toast.svelte';
@@ -34,10 +35,6 @@
 	function creditText(pack: (typeof data.packs)[number]): string {
 		if (pack.shape === 'single' && pack.soleArtist) return m.stickers_by_artist({ artist: pack.soleArtist.name });
 		return m.stickers_managed_by_owner({ ownerName, n: pack.artists.length });
-	}
-	function creditInitial(pack: (typeof data.packs)[number]): string {
-		const name = pack.shape === 'single' && pack.soleArtist ? pack.soleArtist.name : ownerName;
-		return name.charAt(0).toUpperCase();
 	}
 	function creditAvatarUrl(pack: (typeof data.packs)[number]): string {
 		if (pack.shape === 'single' && pack.soleArtist) return pack.soleArtist.avatarUrl ?? '';
@@ -160,14 +157,10 @@
 						</td>
 						<td class="col-credit" data-label="Credit">
 							<div class="credit">
-								{#if creditAvatarUrl(pack)}
-									<!-- Avatars can be off-zone (e.g. a Bluesky CDN URL), which
-									     Cloudflare Image Transformations refuse (403). They're tiny,
-									     so serve the original directly instead of via cdnImage(). -->
-									<img src={creditAvatarUrl(pack)} class="credit-avatar-img" alt={creditAvatarAlt(pack)} />
-								{:else}
-									<span class="credit-avatar">{creditInitial(pack)}</span>
-								{/if}
+								<!-- Avatars can be off-zone (e.g. a Bluesky CDN URL), which
+								     Cloudflare Image Transformations refuse (403). They're tiny,
+								     so ArtistAvatar serves the original directly (no cdnImage()). -->
+								<ArtistAvatar name={creditAvatarAlt(pack)} avatarUrl={creditAvatarUrl(pack)} size={20} />
 								<span class="credit-text">{creditText(pack)}</span>
 							</div>
 						</td>
@@ -357,16 +350,6 @@
 	.pack-slug { font: 11px var(--font-primary); color: var(--muted-foreground); }
 	.col-count { font: 13px var(--font-primary); color: var(--foreground); }
 	.credit { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-	.credit-avatar {
-		display: inline-flex; align-items: center; justify-content: center;
-		width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%;
-		background: var(--secondary); color: var(--muted-foreground);
-		font: 600 10px var(--font-secondary);
-	}
-	.credit-avatar-img {
-		width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%;
-		object-fit: cover; background: var(--secondary);
-	}
 	.credit-text { color: var(--muted-foreground); }
 	.source-chip {
 		display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill);
