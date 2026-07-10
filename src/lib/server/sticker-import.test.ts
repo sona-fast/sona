@@ -481,6 +481,32 @@ describe('updateManualPack', () => {
 	});
 });
 
+describe('saveManualPack', () => {
+	it('suffixes the slug when a manual pack name derives an existing slug (both persist)', async () => {
+		// Two manual packs with the same name slugify to the same base. The second must
+		// get a deterministic -2 suffix rather than failing the atomic batch on the
+		// UNIQUE slug constraint. (Slug pinned via Math.random for determinism.)
+		const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		const input = (imageKey: string) => ({
+			name: 'Dupe Name',
+			managerArtistId: null,
+			stickerInputs: [
+				{ imageUrl: ufs(imageKey), artistId: null, emojis: ['😀'], nsfw: false, position: 0, format: 'webp' as const }
+			]
+		});
+
+		const first = await saveManualPack({ env: testEnv, settings: testSettings, db, input: input('a') });
+		const second = await saveManualPack({ env: testEnv, settings: testSettings, db, input: input('b') });
+
+		expect(second.slug).not.toBe(first.slug);
+		expect(second.slug).toBe(`${first.slug}-2`);
+		expect(await db.select().from(stickerPacks)).toHaveLength(2);
+		rnd.mockRestore();
+	});
+});
+
 describe('importTelegramPack', () => {
 	it('leaves no empty pack when every download fails', async () => {
 		const { db } = makeDb();
@@ -798,29 +824,265 @@ describe('importStickerBatch', () => {
 		rnd.mockRestore();
 	});
 
-	it('throws a clear error when the slug collides with a DIFFERENT set', async () => {
-		// A pre-existing pack with the SAME slug but a DIFFERENT telegramUrl (two sets
-		// whose titles happen to slugify identically). getOrCreatePack's insert conflicts
-		// and the re-select by telegramUrl finds nothing → a named error naming the slug,
-		// not the raw constraint 500. (Slug pinned via Math.random for determinism.)
+	it('suffixes the slug when it derives the same value as a DIFFERENT set (both packs persist)', async () => {
+		// A pre-existing pack with the SAME base slug but a DIFFERENT telegramUrl (two sets
+		// whose titles slugify identically). getOrCreatePack derives a deterministic -2
+		// suffix instead of failing, so the import succeeds and both packs coexist with
+		// distinct slugs. (Slug pinned via Math.random for determinism.)
 		const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
-		const collidingSlug = slugify('Mega Pack');
+		const baseSlug = slugify('Mega Pack');
 		const { db } = makeDb();
 		await seedCharacterAndArtist(db);
 		await db.insert(stickerPacks).values({
-			name: 'Mega Pack', slug: collidingSlug, characterId: 1, source: 'telegram',
+			name: 'Mega Pack', slug: baseSlug, characterId: 1, source: 'telegram',
 			telegramUrl: 'https://t.me/addstickers/someotherset', managerArtistId: null,
 			published: false, createdAt: new Date().toISOString()
 		});
 		mockDownloadOk();
 
-		await expect(
-			importStickerBatch({
-				env: r2Env, settings: r2Settings, db, nameOrUrl: 'megapack', managerArtistId: null,
-				items: [item('a')]
-			})
-		).rejects.toThrow(collidingSlug);
+		const r = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: 'megapack', managerArtistId: null,
+			items: [item('a')]
+		});
+		expect(r).toMatchObject({ created: true, imported: 1 });
+		expect(r.failed).toHaveLength(0);
+
+		// Both packs persist; the newly-imported one carries the -2 suffix + megapack's URL.
+		const packs = await db.select().from(stickerPacks);
+		expect(packs).toHaveLength(2);
+		const imported = packs.find((p) => p.telegramUrl === 'https://t.me/addstickers/megapack')!;
+		expect(imported.slug).toBe(`${baseSlug}-2`);
+		expect(imported.slug).not.toBe(baseSlug);
 		rnd.mockRestore();
+	});
+});
+
+// --- Cross-pack shared-file safety (importStickerBatch) ---------------------
+//
+// Two DIFFERENT Telegram packs (distinct names → distinct telegramUrls) can share
+// source art. Telegram's dedupe key is file_unique_id, and cross-pack dedupe is
+// GLOBAL (existingFileUniqueIds selects the whole column, sticker-import.ts). These
+// tests pin that importing/re-syncing one pack never loses stickers from the other:
+//  - a file_unique_id already stored in pack A is SKIPPED in pack B (not moved,
+//    not re-downloaded, not duplicated) — sticker-import.ts skip branch ~L759;
+//  - re-importing pack A never deletes or mutates pack B's rows (and the drop-empty
+//    cleanup at ~L799 only fires for a pack THIS call created), and vice versa;
+//  - the realistic case where the SAME art carries DIFFERENT file_unique_ids in the
+//    two sets — both import fully and each pack keeps its own copy.
+// Named after the owner's real packs (t.me/addstickers/SparkyFen + /Sparky84453).
+describe('importStickerBatch cross-pack shared-file safety', () => {
+	const PACK_A = 'sparkyfen';
+	const PACK_B = 'sparky84453';
+	const A_URL = 'https://t.me/addstickers/sparkyfen';
+	const B_URL = 'https://t.me/addstickers/sparky84453';
+
+	const fakeBucket = {
+		put: vi.fn(async () => {}),
+		delete: vi.fn(async () => {}),
+		list: vi.fn(async () => ({ objects: [], truncated: false }))
+	};
+	const r2Env = { IMAGES: fakeBucket, TELEGRAM_BOT_TOKEN: 'x' } as unknown as SaveOpts['env'];
+	const r2Settings = {
+		primaryCharacter: '',
+		storageProvider: 'r2',
+		r2PublicUrl: 'https://cdn.test'
+	} as unknown as SiteSettings;
+
+	// getStickerSet returns a different set per pack name; downloadFile always succeeds.
+	// Keyed by the raw nameOrUrl the batch importer passes through.
+	function mockSets(sets: Record<string, Awaited<ReturnType<typeof getStickerSet>>>) {
+		vi.mocked(getStickerSet).mockImplementation(async (_env, nameOrUrl) => {
+			const s = sets[nameOrUrl as string];
+			if (!s) throw new Error(`unexpected set: ${String(nameOrUrl)}`);
+			return s;
+		});
+		vi.mocked(downloadFile).mockResolvedValue({
+			bytes: new ArrayBuffer(8),
+			contentType: 'application/octet-stream',
+			filePath: 'stickers/file_0.webp'
+		});
+	}
+
+	afterEach(() => {
+		vi.mocked(getStickerSet).mockReset();
+		vi.mocked(getStickerSet).mockResolvedValue({
+			name: 'failset',
+			title: 'Fail Set',
+			stickers: [{ fileId: 'f1', fileUniqueId: 'u1', emoji: '😀', format: 'webp', width: 512, height: 512 }]
+		});
+		vi.mocked(downloadFile).mockReset();
+		vi.mocked(downloadFile).mockImplementation(async () => {
+			throw new Error('download boom');
+		});
+	});
+
+	function item(fileId: string, over: { emojis?: string[]; artistId?: number | null; nsfw?: boolean } = {}) {
+		return { fileId, emojis: over.emojis ?? [], artistId: over.artistId ?? null, nsfw: over.nsfw ?? false };
+	}
+
+	async function packByUrl(db: ReturnType<typeof makeDb>['db'], url: string) {
+		return db.select().from(stickerPacks).where(eq(stickerPacks.telegramUrl, url)).get();
+	}
+	async function stickersOfPack(db: ReturnType<typeof makeDb>['db'], packId: number) {
+		return db.select().from(stickers).where(eq(stickers.packId, packId));
+	}
+
+	it('skips a shared file_unique_id in pack B, keeping the row in pack A untouched', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		// Pack A owns 'shared-1'. Pack B's set re-uses that exact file_unique_id (a sticker
+		// whose fileId is B's own, but Telegram issued the same unique id) plus a B-only one.
+		mockSets({
+			[PACK_A]: {
+				name: PACK_A,
+				title: 'SparkyFen',
+				stickers: [{ fileId: 'a-shared', fileUniqueId: 'shared-1', emoji: '😀', format: 'webp' as const, width: 512, height: 512 }]
+			},
+			[PACK_B]: {
+				name: PACK_B,
+				title: 'Sparky84453',
+				stickers: [
+					{ fileId: 'b-shared', fileUniqueId: 'shared-1', emoji: '😀', format: 'webp' as const, width: 512, height: 512 },
+					{ fileId: 'b-only', fileUniqueId: 'b-only-1', emoji: '🔥', format: 'webp' as const, width: 512, height: 512 }
+				]
+			}
+		});
+
+		const a = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: PACK_A, managerArtistId: null,
+			items: [item('a-shared')]
+		});
+		expect(a).toMatchObject({ created: true, imported: 1, skipped: 0 });
+
+		const packA = (await packByUrl(db, A_URL))!;
+		const aRowBefore = (await stickersOfPack(db, packA.id))[0];
+		expect(aRowBefore.telegramFileUniqueId).toBe('shared-1');
+
+		const b = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: PACK_B, managerArtistId: null,
+			items: [item('b-shared'), item('b-only')]
+		});
+		// 'shared-1' already lives in pack A → skipped in B; only 'b-only-1' imported.
+		expect(b).toMatchObject({ created: true, imported: 1, updated: 0, skipped: 1 });
+		expect(b.failed).toHaveLength(0);
+
+		// Pack A's row is byte-for-byte the same row (same id, same packId) — not moved.
+		const aRowAfter = (await stickersOfPack(db, packA.id))[0];
+		expect(aRowAfter.id).toBe(aRowBefore.id);
+		expect(aRowAfter.packId).toBe(packA.id);
+		expect(aRowAfter.telegramFileUniqueId).toBe('shared-1');
+
+		// Pack B holds ONLY its exclusive sticker — the shared id was never copied in.
+		const packB = (await packByUrl(db, B_URL))!;
+		const bRows = await stickersOfPack(db, packB.id);
+		expect(bRows.map((r) => r.telegramFileUniqueId)).toEqual(['b-only-1']);
+
+		// 'shared-1' exists exactly once across the whole DB, and it belongs to pack A.
+		const shared = await db.select().from(stickers).where(eq(stickers.telegramFileUniqueId, 'shared-1'));
+		expect(shared).toHaveLength(1);
+		expect(shared[0].packId).toBe(packA.id);
+	});
+
+	it('re-importing either pack never deletes or mutates the other pack (no cross-pack deletion)', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		mockSets({
+			[PACK_A]: {
+				name: PACK_A,
+				title: 'SparkyFen',
+				stickers: [{ fileId: 'a-shared', fileUniqueId: 'shared-1', emoji: '😀', format: 'webp' as const, width: 512, height: 512 }]
+			},
+			[PACK_B]: {
+				name: PACK_B,
+				title: 'Sparky84453',
+				stickers: [
+					{ fileId: 'b-shared', fileUniqueId: 'shared-1', emoji: '😀', format: 'webp' as const, width: 512, height: 512 },
+					{ fileId: 'b-only', fileUniqueId: 'b-only-1', emoji: '🔥', format: 'webp' as const, width: 512, height: 512 }
+				]
+			}
+		});
+
+		await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: PACK_A, managerArtistId: null,
+			items: [item('a-shared')]
+		});
+		await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: PACK_B, managerArtistId: null,
+			items: [item('b-shared'), item('b-only')]
+		});
+		const packA = (await packByUrl(db, A_URL))!;
+		const packB = (await packByUrl(db, B_URL))!;
+		const bRowBefore = (await stickersOfPack(db, packB.id))[0];
+
+		// Re-import pack A with its original item. 'shared-1' is already in THIS pack →
+		// unchanged → skipped. Nothing about pack B may change, and B (with a real sticker)
+		// must NOT be dropped by the empty-pack cleanup (that only fires for created packs).
+		const aResync = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: PACK_A, managerArtistId: null,
+			items: [item('a-shared')]
+		});
+		expect(aResync).toMatchObject({ created: false, imported: 0, updated: 0, skipped: 1 });
+
+		const packBStillThere = await packByUrl(db, B_URL);
+		expect(packBStillThere?.id).toBe(packB.id);
+		const bRowsAfterA = await stickersOfPack(db, packB.id);
+		expect(bRowsAfterA).toHaveLength(1);
+		expect(bRowsAfterA[0].id).toBe(bRowBefore.id);
+		expect(bRowsAfterA[0].telegramFileUniqueId).toBe('b-only-1');
+
+		// Re-import pack B with its original items. 'shared-1' → skipped (in A), 'b-only-1'
+		// → unchanged in B → skipped. Pack A must be untouched.
+		const bResync = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: PACK_B, managerArtistId: null,
+			items: [item('b-shared'), item('b-only')]
+		});
+		expect(bResync).toMatchObject({ created: false, imported: 0, updated: 0, skipped: 2 });
+
+		const aRows = await stickersOfPack(db, packA.id);
+		expect(aRows).toHaveLength(1);
+		expect(aRows[0].telegramFileUniqueId).toBe('shared-1');
+		// Two packs, two stickers total — nothing gained, nothing lost across the re-syncs.
+		expect(await db.select().from(stickerPacks)).toHaveLength(2);
+		expect(await db.select().from(stickers)).toHaveLength(2);
+	});
+
+	it('keeps both copies when the same art carries DIFFERENT file_unique_ids in each set', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		// The realistic Telegram case: uploading one PNG to two sets makes each set's
+		// sticker its own file object, so the unique ids differ. Nothing is shared, so
+		// both packs import fully and each keeps its own copy.
+		mockSets({
+			[PACK_A]: {
+				name: PACK_A,
+				title: 'SparkyFen',
+				stickers: [{ fileId: 'a-png', fileUniqueId: 'png-copy-a', emoji: '😀', format: 'webp' as const, width: 512, height: 512 }]
+			},
+			[PACK_B]: {
+				name: PACK_B,
+				title: 'Sparky84453',
+				stickers: [{ fileId: 'b-png', fileUniqueId: 'png-copy-b', emoji: '😀', format: 'webp' as const, width: 512, height: 512 }]
+			}
+		});
+
+		const a = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: PACK_A, managerArtistId: null,
+			items: [item('a-png')]
+		});
+		const b = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: PACK_B, managerArtistId: null,
+			items: [item('b-png')]
+		});
+		expect(a).toMatchObject({ created: true, imported: 1, skipped: 0 });
+		expect(b).toMatchObject({ created: true, imported: 1, skipped: 0 });
+
+		const packA = (await packByUrl(db, A_URL))!;
+		const packB = (await packByUrl(db, B_URL))!;
+		expect((await stickersOfPack(db, packA.id)).map((r) => r.telegramFileUniqueId)).toEqual(['png-copy-a']);
+		expect((await stickersOfPack(db, packB.id)).map((r) => r.telegramFileUniqueId)).toEqual(['png-copy-b']);
+		// Identical artwork in two packs is fine — Telegram's distinct ids are the only
+		// sharing constraint, and neither is a duplicate of the other.
+		expect(await db.select().from(stickers)).toHaveLength(2);
 	});
 });
 
