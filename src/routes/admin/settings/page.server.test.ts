@@ -8,9 +8,18 @@ import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import { getRawSetting, setRawSetting, parseLines } from '$lib/server/settings';
 import { MAX_SONA_COLORS } from '$lib/palette-merge';
+import { DEFAULT_THEME_ID } from '$lib/themes';
+import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
+import { resolveAvatarUrl } from '$lib/server/avatar';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
+
+// The avatar re-resolve on the bluesky present-branch would otherwise hit the
+// Bluesky API; stub it so the save is deterministic and offline.
+vi.mock('$lib/server/avatar', () => ({
+	resolveAvatarUrl: vi.fn(async () => 'https://cdn.bsky.app/img/avatar/plain/derived')
+}));
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -476,5 +485,98 @@ describe('settings saveSite — legal "last updated" stamps', () => {
 		await actions.saveSite(saveSiteEvent(platform, { privacyPolicy: '' }));
 
 		expect(await getRawSetting(db, 'privacyUpdatedAt')).toBe('2026-01-01');
+	});
+});
+
+// The social() helper is absent → skip, present-blank → clear, present-value →
+// save. normalizeSocialUrl is unit-tested on its own; these pin the three
+// directions at the action level (twitter stands in for the non-bluesky
+// socials, which share the exact same code path).
+describe('settings saveSite — social() field directions', () => {
+	it('a POST omitting a social leaves the stored value intact', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'twitterUrl', 'https://twitter.com/taro');
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'sheeb.net' }));
+
+		expect(await getRawSetting(db, 'twitterUrl')).toBe('https://twitter.com/taro');
+	});
+
+	it('a POST with a social present-but-blank clears it', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'twitterUrl', 'https://twitter.com/taro');
+
+		await actions.saveSite(saveSiteEvent(platform, { twitter: '' }));
+
+		expect(await getRawSetting(db, 'twitterUrl')).toBe('');
+	});
+
+	it('a POST with a social present-value normalizes and saves it', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(saveSiteEvent(platform, { twitter: 'taro' }));
+
+		// A bare handle is normalized to the canonical profile URL before storage.
+		expect(await getRawSetting(db, 'twitterUrl')).toBe('https://twitter.com/taro');
+	});
+});
+
+// The absent-bluesky branch is covered above; these pin the present branch,
+// where the derived avatar is paired to the bluesky field.
+describe('settings saveSite — bluesky present-branch re-resolves the avatar', () => {
+	it('a present bluesky updates both blueskyUrl and the derived avatar', async () => {
+		const { db, platform } = makeDb();
+		vi.mocked(resolveAvatarUrl).mockClear();
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+
+		expect(await getRawSetting(db, 'blueskyUrl')).toBe(
+			'https://bsky.app/profile/sunday.bsky.social'
+		);
+		expect(resolveAvatarUrl).toHaveBeenCalledWith({
+			blueskyUrl: 'https://bsky.app/profile/sunday.bsky.social'
+		});
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(
+			'https://cdn.bsky.app/img/avatar/plain/derived'
+		);
+	});
+
+	it('a present-but-blank bluesky clears both blueskyUrl and the avatar', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'adminAvatarUrl', 'https://cdn.bsky.app/img/avatar/plain/x');
+		vi.mocked(resolveAvatarUrl).mockClear();
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: '' }));
+
+		expect(await getRawSetting(db, 'blueskyUrl')).toBe('');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
+		// No avatar lookup when bluesky is cleared — the avatar clears with it.
+		expect(resolveAvatarUrl).not.toHaveBeenCalled();
+	});
+});
+
+// The omit case is covered above. Settings COERCES an invalid enum to the
+// default (unlike the wizard, which fail(400)s per #34); asserted only in the
+// wizard's separate copy before now, so a settings-only regression would pass.
+describe('settings saveSite — themeId/landingLayout present-branch', () => {
+	it('saves a valid themeId and landingLayout as submitted', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(
+			saveSiteEvent(platform, { themeId: 'terracotta', landingLayout: 'threePath' })
+		);
+
+		expect(await getRawSetting(db, 'themeId')).toBe('terracotta');
+		expect(await getRawSetting(db, 'landingLayout')).toBe('threePath');
+	});
+
+	it('coerces an unrecognized themeId and landingLayout to their defaults', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(saveSiteEvent(platform, { themeId: 'neon', landingLayout: 'hero' }));
+
+		expect(await getRawSetting(db, 'themeId')).toBe(DEFAULT_THEME_ID);
+		expect(await getRawSetting(db, 'landingLayout')).toBe(DEFAULT_LANDING_LAYOUT);
 	});
 });
