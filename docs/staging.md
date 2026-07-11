@@ -26,7 +26,7 @@ is `sona-staging-images`.
 Do these **in order**. The Access policy + app (step 3) must exist **before the
 first deploy** (step 6) so the site is never briefly public.
 
-### Manual — needs Sparky's Cloudflare token / dashboard
+### Manual — needs the account owner's Cloudflare token / dashboard
 
 These require account-level credentials and can't be scripted from CI.
 
@@ -40,7 +40,11 @@ Variables:
 | `D1_DATABASE_NAME` | `sona-staging-db` |
 | `OBSERVABILITY_ENABLED` | `true` (optional — exercise the metrics dashboard) |
 
-Secrets (same names `deploy.yml` consumes, so the shared steps work unmodified):
+Secrets (same names `deploy.yml` consumes, so the shared steps work unmodified).
+GitHub Actions secrets are **per repository**: production forks read the values
+set in their own repos, and nothing here is visible to them. On this repo the
+fork-facing workflows (`deploy.yml`, the cron workflows) are gated off, so these
+values feed the staging workflows only:
 
 | Secret | Notes |
 | --- | --- |
