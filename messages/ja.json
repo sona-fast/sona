@@ -1023,7 +1023,7 @@
 	"admin_obs_cf_card_desc": "アプリが計測しないエッジキャッシュのトラフィックです。範囲を限定した読み取り専用のCloudflareトークンが必要です。任意であり、他のフォークのデータを読み取ることはありません。",
 	"admin_obs_cf_connect": "Cloudflareを接続",
 	"admin_obs_cf_error_prefix": "エッジ分析を読み込めませんでした：",
-	"admin_obs_privacy_footer": "訪問者の集計と運用状況はこのフォーク自身のデータベースに保存され、外部に出ることはありません。他のサイトと共有されることは一切ありません。",
+	"admin_obs_privacy_footer": "訪問者の集計と運用状況はこのフォーク自身のデータベースに保存され、他のサイトやサービスと共有されることはありません。",
 	"admin_obs_visitors_eyebrow": "訪問者 · ティアA",
 	"admin_obs_visitors_sub": "トラフィックを日次の合計として集計します。訪問者ごとの行なし、Cookieなし、サイト横断の識別なし。",
 	"admin_obs_pageviews_label": "ページビュー",
