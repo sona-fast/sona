@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { getDb } from './db';
-import { getObservability, getCloudflareEdge, deriveVerdict, type JobStatus, type StorageHealth } from './observability';
+import { getObservability, getCloudflareEdge, deriveVerdict, readTopDims, type JobStatus, type StorageHealth } from './observability';
 import { dayKey } from './metrics';
 import type { SiteSettings } from './settings';
 
@@ -81,6 +81,100 @@ describe('getObservability — aggregation over the 7-day window', () => {
 		expect(o.appRequests).toBe(0);
 		expect(o.errorRate).toBe(0);
 		expect(o.verdict.level).toBe('ok');
+	});
+});
+
+describe('getObservability — Tier-A visitor aggregates (issue #149)', () => {
+	it('sums page views, ranks top pages/referrers/countries, splits devices, and excludes older rows', async () => {
+		const sqlite = makeSqlite();
+		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');
+		// Page views across two days in-window, plus one outside the window.
+		seed.run(daysAgo(0), 'pageview', '/', 60);
+		seed.run(daysAgo(3), 'pageview', '/', 40); // same path, different day → 100 total
+		seed.run(daysAgo(0), 'pageview', '/gallery', 30);
+		seed.run(daysAgo(0), 'pageview', '/about', 10);
+		seed.run(daysAgo(10), 'pageview', '/old', 999); // outside 7d — excluded
+		// Referrers (host only).
+		seed.run(daysAgo(0), 'referrer', 't.co', 30);
+		seed.run(daysAgo(0), 'referrer', 'bsky.app', 10);
+		// Countries.
+		seed.run(daysAgo(0), 'country', 'US', 44);
+		seed.run(daysAgo(0), 'country', 'GB', 6);
+		// Devices.
+		seed.run(daysAgo(0), 'device', 'desktop', 58);
+		seed.run(daysAgo(0), 'device', 'mobile', 37);
+		seed.run(daysAgo(0), 'device', 'tablet', 5);
+
+		const db = getDb(makeD1(sqlite));
+		const o = await getObservability(db, SETTINGS_R2, undefined);
+		const v = o.visitors;
+
+		// Totals + distinct counts (the /old row is outside the window).
+		expect(v.pageViews).toBe(140);
+		expect(v.countries).toBe(2);
+		expect(v.referrerHosts).toBe(2);
+
+		// Top pages ranked by count with share of total page views.
+		expect(v.topPages.map((p) => p.label)).toEqual(['/', '/gallery', '/about']);
+		expect(v.topPages[0]).toMatchObject({ count: 100 });
+		expect(v.topPages[0].share).toBeCloseTo(100 / 140);
+
+		// Referrers/countries ranked by their own axis total.
+		expect(v.topReferrers[0]).toMatchObject({ label: 't.co' });
+		expect(v.topReferrers[0].share).toBeCloseTo(30 / 40);
+		expect(v.topCountries[0]).toMatchObject({ label: 'US' });
+		expect(v.topCountries[0].share).toBeCloseTo(44 / 50);
+
+		// Device split as shares of classified page views.
+		expect(v.devices.desktop).toBeCloseTo(0.58);
+		expect(v.devices.mobile).toBeCloseTo(0.37);
+		expect(v.devices.tablet).toBeCloseTo(0.05);
+
+		// Page-view sparkline spans the window, newest last, gaps zero-filled.
+		expect(v.sparkline).toHaveLength(o.windowDays);
+		expect(v.sparkline[o.windowDays - 1]).toBe(100); // today: 60 (/) + 30 (/gallery) + 10 (/about)
+		expect(v.sparkline.reduce((a, b) => a + b, 0)).toBe(140);
+	});
+
+	it('bounds the read to the top rows even with a huge referrer dim space, but counts all distinct hosts', async () => {
+		const sqlite = makeSqlite();
+		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');
+		// 80 distinct referrer hosts, descending counts, all in-window.
+		let referredTotal = 0;
+		for (let i = 0; i < 80; i++) {
+			const count = 80 - i;
+			referredTotal += count;
+			seed.run(daysAgo(0), 'referrer', `host${String(i).padStart(3, '0')}.example`, count);
+		}
+		seed.run(daysAgo(0), 'pageview', '/', 500);
+
+		const db = getDb(makeD1(sqlite));
+
+		// The read itself is LIMITed: with 80 distinct hosts it returns at most the
+		// read cap, not the whole dim space (this is what protects the D1 read).
+		const raw = await readTopDims(db, 'referrer', daysAgo(6));
+		expect(raw.length).toBeLessThanOrEqual(50);
+		expect(raw.length).toBe(50);
+		expect(raw[0].dim).toBe('host000.example'); // highest count first (ORDER BY DESC)
+
+		const o = await getObservability(db, SETTINGS_R2, undefined);
+		// The dashboard trims to 5 for display.
+		expect(o.visitors.topReferrers).toHaveLength(5);
+		expect(o.visitors.topReferrers[0].label).toBe('host000.example');
+		// The distinct-host count (single-row aggregate) still reflects ALL 80 hosts,
+		// and the top row's share is against the TRUE total, not the top-5 sum.
+		expect(o.visitors.referrerHosts).toBe(80);
+		expect(o.visitors.topReferrers[0].share).toBeCloseTo(80 / referredTotal);
+	});
+
+	it('reports empty visitor aggregates with no divide-by-zero on a fresh fork', async () => {
+		const db = getDb(makeD1(makeSqlite()));
+		const o = await getObservability(db, SETTINGS_R2, undefined);
+		expect(o.visitors.pageViews).toBe(0);
+		expect(o.visitors.countries).toBe(0);
+		expect(o.visitors.topPages).toEqual([]);
+		expect(o.visitors.devices).toEqual({ desktop: 0, mobile: 0, tablet: 0 });
+		expect(o.visitors.sparkline.reduce((a, b) => a + b, 0)).toBe(0);
 	});
 });
 

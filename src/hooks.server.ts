@@ -5,7 +5,19 @@ import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
 import { isSetupComplete, hashToken } from '$lib/server/admin-auth';
 import { getSettings } from '$lib/server/settings';
-import { recordMetric, recordError, routeClass, isAssetPath, schedule, isObservabilityEnabled } from '$lib/server/metrics';
+import {
+	metricUpsert,
+	recordError,
+	pageViewStatements,
+	routeClass,
+	isAssetPath,
+	deviceClass,
+	referrerHost,
+	countryCode,
+	schedule,
+	isObservabilityEnabled
+} from '$lib/server/metrics';
+import type { BatchItem } from 'drizzle-orm/batch';
 import { THEME_MODE_COOKIE, SESSION_COOKIE } from '$lib/config';
 import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
@@ -146,14 +158,42 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// here, so it is never double-counted in the rate.
 	if (event.platform?.env.DB && !isAssetPath(path) && isObservabilityEnabled(event.platform?.env)) {
 		const db = getDb(event.platform.env.DB);
-		const work: Promise<unknown>[] = [recordMetric(db, 'request', routeClass(path))];
+		// All rolled-up counters for this request go into ONE db.batch — the request
+		// counter, the 5xx error rollup, and (below) the Tier-A page-view counters —
+		// so a single request never fans out into five separate D1 writes.
+		const counters: BatchItem<'sqlite'>[] = [metricUpsert(db, 'request', routeClass(path))];
 		if (response.status >= 500) {
-			work.push(recordMetric(db, 'error', String(response.status)));
-			if (!event.locals.errorSampled) {
-				work.push(
-					recordError(db, { route: path, status: response.status, message: `HTTP ${response.status}` })
+			counters.push(metricUpsert(db, 'error', String(response.status)));
+		}
+
+		// Tier-A visitor aggregate (issue #149). Count ONE page view for a successful
+		// PUBLIC HTML response only: admin/api paths, non-HTML responses (feeds,
+		// sitemaps, robots), non-200s and known bots are all excluded. Everything is
+		// reduced to a PII-free label before storage — country from the edge header,
+		// referrer to its bare host, the UA to a coarse device class then discarded.
+		// No cookie, no IP, no per-visitor row.
+		const isHtmlResp = response.headers.get('content-type')?.includes('text/html') ?? false;
+		if (routeClass(path) === 'public' && response.status === 200 && isHtmlResp) {
+			const device = deviceClass(event.request.headers.get('user-agent'));
+			if (device) {
+				counters.push(
+					...pageViewStatements(db, {
+						path,
+						device,
+						referrerHost: referrerHost(event.request.headers.get('referer'), event.url.hostname),
+						country: countryCode(event.request.headers.get('cf-ipcountry'))
+					})
 				);
 			}
+		}
+
+		// The capped-ring error sample (a delete + insert with its own prune) stays
+		// separate from the counter batch. Fire-and-forget so visitors never wait.
+		const work: Promise<unknown>[] = [
+			db.batch(counters as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]])
+		];
+		if (response.status >= 500 && !event.locals.errorSampled) {
+			work.push(recordError(db, { route: path, status: response.status, message: `HTTP ${response.status}` }));
 		}
 		schedule(event.platform, Promise.all(work));
 	}
