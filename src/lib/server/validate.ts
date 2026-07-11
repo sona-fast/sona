@@ -31,6 +31,26 @@ export function sanitizeUrl(url: string | null | undefined): string | null {
 }
 
 /**
+ * Normalize a site URL used to build links in outgoing email (e.g. the password
+ * reset): require an absolute https URL and strip any trailing slash. Returns
+ * null for empty input or anything that isn't a valid absolute https URL — so a
+ * value `new URL()` would later throw on never gets stored, then swallowed at
+ * send time. Shared by the admin Settings save and the setup-CLI seed so both
+ * accept/reject identically.
+ */
+export function normalizeHttpsUrl(value: string | null | undefined): string | null {
+	if (!value) return null;
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+	try {
+		if (new URL(trimmed).protocol !== 'https:') return null;
+	} catch {
+		return null;
+	}
+	return trimmed.replace(/\/+$/, '');
+}
+
+/**
  * Minimal email shape check (not full RFC 5322) — just enough to catch a typo
  * before it silently breaks password-recovery delivery at send time.
  */

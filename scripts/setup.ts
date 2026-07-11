@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
 	buildMigrationSql,
+	buildSeedSql,
 	sanitizeProjectName,
 	isR2NotEnabled,
 	ensureUrlScheme,
@@ -38,6 +39,9 @@ import {
 	imageResizingOutcome,
 	cfApi
 } from './setup-lib.ts';
+// Shared with the admin Settings save so the seeded siteUrl passes the same
+// https-URL validation (validate.ts has no imports, so tsx loads it directly).
+import { normalizeHttpsUrl } from '../src/lib/server/validate.ts';
 
 const rl = createInterface({ input: stdin, output: stdout });
 const ask = async (q: string, def: string) => {
@@ -100,7 +104,6 @@ function ghSet(kind: 'secret' | 'variable', name: string, value: string, repo: s
 }
 
 const token = (bytes = 32) => randomBytes(bytes).toString('hex');
-const sqlStr = (s: string) => s.replace(/'/g, "''");
 
 // The friend-facing API-token recipe, printed whenever a scope preflight fails so
 // the operator knows exactly what to (re)create. Kept in one place so the CLI and
@@ -416,12 +419,21 @@ async function main() {
 	}
 
 	// 6. Seed the storage provider so the app boots with the chosen backend (the
-	//    wizard no longer asks; switching later is a migration in Settings).
-	let seed = `INSERT OR REPLACE INTO site_settings (key,value) VALUES ('storageProvider','${provider}')`;
-	if (useR2 && r2PublicUrl) seed += `, ('r2PublicUrl','${sqlStr(r2PublicUrl)}')`;
-	// Seed the FurTrack character/tag the fursuit feature queries (mirrors storageProvider).
-	if (primaryCharacter) seed += `, ('primaryCharacter','${sqlStr(primaryCharacter)}')`;
-	seed += ';';
+	//    wizard no longer asks; switching later is a migration in Settings). Also
+	//    seed siteUrl (the canonical origin for outgoing-email links) from the same
+	//    domain answer — only when a custom domain was given AND it normalizes to a
+	//    valid https URL (same rule the admin Settings save enforces, so a bad value
+	//    can't be stored here and then throw at email-send time). Blank/invalid leaves
+	//    it unset so the app falls back to the request origin (the Pages URL) on its own.
+	const siteUrlSeed = domain ? (normalizeHttpsUrl(ensureUrlScheme(domain)) ?? '') : '';
+	const seed = buildSeedSql({
+		provider,
+		siteUrl: siteUrlSeed,
+		// r2PublicUrl is '' unless R2 was chosen and a public URL was given.
+		r2PublicUrl,
+		// Seed the FurTrack character/tag the fursuit feature queries.
+		primaryCharacter
+	});
 	run(`npx wrangler d1 execute ${dbName} --remote --command "${seed}"`, {
 		allowFail: true,
 		stdin: 'ignore'

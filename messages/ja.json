@@ -900,6 +900,10 @@
 	"admin_ref_picker_title": "リファレンスシートから色を選択",
 
 	"admin_settings_contact_email": "連絡先メールアドレス（シェアページに表示されます）",
+	"admin_settings_site_url": "サイトURL",
+	"admin_settings_site_url_hint": "パスワードリセットなど、送信メール内のリンクの生成に使用されます。空欄の場合は、各リクエストのアクセス先アドレスが使用されます。",
+	"admin_settings_email_language": "メールの言語",
+	"admin_settings_email_language_hint": "パスワードリセットなど、自動送信メールで使用される言語です。",
 	"admin_settings_sona_add_color": "色を追加",
 	"admin_settings_sona_build": "体型",
 	"admin_settings_sona_build_placeholder": "標準的で親しみやすい姿勢",

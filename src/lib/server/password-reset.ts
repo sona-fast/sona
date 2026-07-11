@@ -16,7 +16,8 @@ import { getRawSetting, setRawSetting } from './settings';
 import { recordEmail } from './metrics';
 import { APP_NAME } from '$lib/config';
 import * as m from '$lib/paraglide/messages';
-import { baseLocale } from '$lib/paraglide/runtime';
+import { baseLocale, isLocale } from '$lib/paraglide/runtime';
+import type { Locale } from '$lib/paraglide/runtime';
 import type { Database } from './db';
 
 type Env = App.Platform['env'];
@@ -104,7 +105,15 @@ export async function requestPasswordReset(
 	const token = generateToken();
 	const siteName = (await getRawSetting(db, 'siteName'))?.trim() || APP_NAME;
 
-	const outcome = await sendResetEmail(env, apiKey, origin, adminEmail, token, siteName);
+	// Pin the link to the site's own canonical URL when one is configured, rather
+	// than whatever Host the request came in on — an alias/preview domain hitting
+	// /admin/forgot would otherwise mail out a link to itself. Empty → request origin.
+	const siteUrl = (await getRawSetting(db, 'siteUrl'))?.trim() || origin;
+	// Render the email in the configured email language; empty/invalid → base locale.
+	const rawLocale = (await getRawSetting(db, 'emailLanguage'))?.trim();
+	const locale = isLocale(rawLocale) ? rawLocale : baseLocale;
+
+	const outcome = await sendResetEmail(env, apiKey, siteUrl, adminEmail, token, siteName, locale);
 	// Observability (issue #6): record the transactional-email outcome (sent/failed)
 	// in-app. Rare, human-triggered path, so the extra small write is inline; wrapped
 	// so a metrics failure can't break the (best-effort) reset. "sent" means Resend
@@ -148,12 +157,11 @@ async function sendResetEmail(
 	origin: string,
 	to: string,
 	token: string,
-	siteName: string
+	siteName: string,
+	locale: Locale
 ): Promise<{ ok: boolean; status: number; message: string }> {
-	// No configurable site locale exists (nothing writes one), so the email always
-	// renders in the base locale — passed explicitly since this runs off the
-	// request path (via waitUntil), where the ambient request locale isn't reliable.
-	const locale = baseLocale;
+	// locale is passed explicitly since this runs off the request path (via
+	// waitUntil), where the ambient request locale isn't reliable.
 	const link = new URL('/admin/reset', origin);
 	link.searchParams.set('token', token);
 	// Header fields can't carry CR/LF or other control chars; strip them once for

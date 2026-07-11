@@ -256,6 +256,46 @@ describe('forgot action', () => {
 		expect(email.html).toContain('lang="en"');
 	});
 
+	it('pins the reset link to the configured siteUrl, not the request Host', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		// The request arrives on taro.surf (see forgotEvent), but the site's canonical
+		// URL is configured differently — an alias/preview host must not leak into the
+		// emailed link.
+		await db.insert(siteSettings).values({ key: 'siteUrl', value: 'https://canonical.example' });
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const email = sentEmail();
+		expect(email.text).toMatch(/https:\/\/canonical\.example\/admin\/reset\?token=/);
+		expect(email.html).toMatch(/https:\/\/canonical\.example\/admin\/reset\?token=/);
+		expect(email.text).not.toContain('taro.surf');
+	});
+
+	it('renders the reset email in the configured email language (ja)', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await db.insert(siteSettings).values({ key: 'emailLanguage', value: 'ja' });
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const email = sentEmail();
+		expect(email.html).toContain('lang="ja"');
+		// The ja password-reset heading — proves the body uses the ja catalog.
+		expect(email.html).toContain('管理者パスワードのリセット');
+	});
+
+	it('falls back to the base locale when emailLanguage is invalid', async () => {
+		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
+		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });
+		await db.insert(siteSettings).values({ key: 'emailLanguage', value: 'zz' });
+
+		await actions.default(forgotEvent(platform, 'admin@taro.surf'));
+
+		const email = sentEmail();
+		expect(email.html).toContain('lang="en"');
+	});
+
 	it('defers the mint+send work via platform.ctx.waitUntil instead of awaiting it inline', async () => {
 		const { db, platform } = makeDb({ RESEND_API_KEY: 'rk_test' });
 		await db.insert(siteSettings).values({ key: 'adminEmail', value: 'admin@taro.surf' });

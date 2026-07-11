@@ -29,7 +29,7 @@ import {
 } from '$lib/server/db/schema';
 import { sql, inArray } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
-import { sanitizeText, sanitizeUrl, isValidEmail } from '$lib/server/validate';
+import { sanitizeText, sanitizeUrl, isValidEmail, normalizeHttpsUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
 import { resolveAvatarUrl } from '$lib/server/avatar';
@@ -47,6 +47,7 @@ import { isObservabilityEnabled } from '$lib/server/metrics';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { isValidGallerySort, DEFAULT_GALLERY_SORT, type GallerySort } from '$lib/gallery';
+import { baseLocale, isLocale } from '$lib/paraglide/runtime';
 import type { Actions, PageServerLoad } from './$types';
 
 const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days in seconds
@@ -192,6 +193,34 @@ export const actions = {
 			galleryDefaultSort = isValidGallerySort(sortRaw) ? sortRaw : DEFAULT_GALLERY_SORT;
 		}
 
+		// Canonical site URL for outgoing-email links. Empty is allowed (falls back to
+		// the request origin); a non-empty value must be an absolute https URL, so a
+		// typo can't silently mail links to a broken host. normalizeHttpsUrl (shared
+		// with the setup-CLI seed) validates and strips any trailing slash.
+		let siteUrl: string | undefined;
+		if (data.has('siteUrl')) {
+			const raw = (data.get('siteUrl') as string).trim();
+			if (raw) {
+				const normalized = normalizeHttpsUrl(raw);
+				if (!normalized) {
+					return fail(400, {
+						error: 'Site URL must be an absolute https URL, like https://example.com.'
+					});
+				}
+				siteUrl = normalized;
+			} else {
+				siteUrl = '';
+			}
+		}
+
+		// Email language for automated emails (e.g. password resets). Coerce to a known
+		// locale, falling back to the base locale — mirrors the themeId/gallery-sort guards.
+		let emailLanguage: string | undefined;
+		if (data.has('emailLanguage')) {
+			const langRaw = (data.get('emailLanguage') as string) ?? '';
+			emailLanguage = isLocale(langRaw) ? langRaw : baseLocale;
+		}
+
 		// Stamp the legal "last updated" date only when the policy text actually
 		// changes — this tab also saves theme, about text, etc., and editing one of
 		// those must not advance the date shown on /privacy and /terms. Date-only
@@ -225,6 +254,8 @@ export const actions = {
 			landingLayout,
 			galleryDefaultSort,
 			splashSubtitle: text('splashSubtitle', 100),
+			siteUrl,
+			emailLanguage,
 			// Three-path profile fields — feed the /art, /connect and /share pages.
 			contactEmail: text('contactEmail', 200),
 			// Legal overrides — blank falls back to the code-accurate defaults from

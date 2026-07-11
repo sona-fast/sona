@@ -161,6 +161,55 @@ describe('settings saveSite — three-path profile fields', () => {
 	});
 });
 
+describe('settings saveSite — siteUrl + emailLanguage', () => {
+	it('saves a valid absolute https URL, normalizing away a trailing slash', async () => {
+		const { db, platform } = makeDb();
+
+		const result = await actions.saveSite(
+			saveSiteEvent(platform, { siteUrl: 'https://taro.surf/' })
+		);
+
+		expect(result).toMatchObject({ success: true });
+		expect(await getRawSetting(db, 'siteUrl')).toBe('https://taro.surf');
+	});
+
+	it('rejects a non-https / non-absolute URL and persists nothing', async () => {
+		const { db, platform } = makeDb();
+
+		const result = await actions.saveSite(saveSiteEvent(platform, { siteUrl: 'taro.surf' }));
+
+		expect(result).toMatchObject({ status: 400 });
+		expect(await getRawSetting(db, 'siteUrl')).toBeNull();
+
+		// http (non-https) is also rejected.
+		const httpResult = await actions.saveSite(
+			saveSiteEvent(platform, { siteUrl: 'http://taro.surf' })
+		);
+		expect(httpResult).toMatchObject({ status: 400 });
+		expect(await getRawSetting(db, 'siteUrl')).toBeNull();
+	});
+
+	it('allows an empty siteUrl (falls back to the request origin at send time)', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'siteUrl', 'https://old.example');
+
+		const result = await actions.saveSite(saveSiteEvent(platform, { siteUrl: '' }));
+
+		expect(result).toMatchObject({ success: true });
+		expect(await getRawSetting(db, 'siteUrl')).toBe('');
+	});
+
+	it('coerces an unknown emailLanguage to the base locale', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(saveSiteEvent(platform, { emailLanguage: 'zz' }));
+		expect(await getRawSetting(db, 'emailLanguage')).toBe('en');
+
+		await actions.saveSite(saveSiteEvent(platform, { emailLanguage: 'ja' }));
+		expect(await getRawSetting(db, 'emailLanguage')).toBe('ja');
+	});
+});
+
 function saveStorageEvent(platform: App.Platform, fields: Record<string, string>) {
 	const body = new FormData();
 	for (const [k, v] of Object.entries(fields)) body.append(k, v);

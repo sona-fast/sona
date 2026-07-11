@@ -936,6 +936,10 @@
 	"admin_ref_picker_title": "Pick from your reference sheet",
 
 	"admin_settings_contact_email": "Contact email (shown on the Share page)",
+	"admin_settings_site_url": "Site URL",
+	"admin_settings_site_url_hint": "Used to build links in outgoing emails, like password resets. Leave blank to use the address each request arrives on.",
+	"admin_settings_email_language": "Email language",
+	"admin_settings_email_language_hint": "The language used for automated emails, like password resets.",
 	"admin_settings_sona_add_color": "Add color",
 	"admin_settings_sona_build": "Build",
 	"admin_settings_sona_build_placeholder": "Average, friendly posture",
