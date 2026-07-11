@@ -45,8 +45,7 @@
 	// Sparkline: map the per-day request totals onto a 196x46 viewBox, newest right.
 	const SPARK_W = 196;
 	const SPARK_H = 46;
-	const sparkPoints = $derived.by(() => {
-		const values = o.sparkline;
+	function sparkFor(values: number[]): string {
 		const max = Math.max(1, ...values);
 		const n = values.length;
 		if (n <= 1) return `0,${SPARK_H - 4} ${SPARK_W},${SPARK_H - 4}`;
@@ -57,7 +56,26 @@
 				return `${x.toFixed(1)},${y.toFixed(1)}`;
 			})
 			.join(' ');
+	}
+	const sparkPoints = $derived(sparkFor(o.sparkline));
+	const pvSparkPoints = $derived(sparkFor(o.visitors.sparkline));
+
+	// Country codes are stored ISO alpha-2 (CF-IPCountry); render the localized region
+	// name, falling back to the raw code if the runtime can't resolve it.
+	const regionNames = $derived.by(() => {
+		try {
+			return new Intl.DisplayNames([getLocale()], { type: 'region' });
+		} catch {
+			return null;
+		}
 	});
+	function countryName(code: string): string {
+		try {
+			return regionNames?.of(code) ?? code;
+		} catch {
+			return code;
+		}
+	}
 
 	/** Colour class for an error/status badge. */
 	function statusClass(status: number): 'red' | 'amber' | 'muted' {
@@ -122,6 +140,126 @@
 			</div>
 		</div>
 	</section>
+
+	<!-- Visitors · Tier A (issue #149) -->
+	<div class="section-lead">
+		<div class="eyebrow tier-a">{m.admin_obs_visitors_eyebrow()}</div>
+		<p class="cap">{m.admin_obs_visitors_sub()}</p>
+	</div>
+
+	<!-- Page-views hero -->
+	<section class="card vhero">
+		<div class="vhero-top">
+			<div>
+				<div class="vhero-num">{fmtInt(o.visitors.pageViews)}</div>
+				<div class="vhero-lbl">
+					<b>{m.admin_obs_pageviews_label()}</b> · 7d &nbsp;·&nbsp;
+					{fmtInt(o.visitors.countries)} {m.admin_obs_meta_countries()} &nbsp;·&nbsp;
+					{fmtInt(o.visitors.referrerHosts)} {m.admin_obs_meta_hosts()}
+				</div>
+			</div>
+			<div class="hero-spark">
+				<svg width={SPARK_W} height={SPARK_H} viewBox="0 0 {SPARK_W} {SPARK_H}" fill="none" aria-hidden="true">
+					<polyline points={pvSparkPoints} stroke="var(--primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+				</svg>
+				<div class="mut spark-cap">{m.admin_obs_spark_pageviews()}</div>
+			</div>
+		</div>
+	</section>
+
+	{#if o.visitors.pageViews === 0}
+		<p class="empty">{m.admin_obs_visitors_empty()}</p>
+	{:else}
+		<!-- Top pages + devices -->
+		<div class="grid grid-3">
+			<section class="card span-2">
+				<div class="row-between">
+					<h2 class="h2 flush">{m.admin_obs_top_pages_title()}</h2>
+					<span class="mut">{m.admin_obs_top_pages_sub()}</span>
+				</div>
+				<div class="barlist">
+					{#each o.visitors.topPages as p (p.label)}
+						<div class="barrow">
+							<span class="lab">{p.label}</span>
+							<span class="val">{fmtInt(p.count)} · {pct(p.share, 0)}</span>
+							<span class="bartrack"><span class="barfill" style="width:{(p.share * 100).toFixed(1)}%"></span></span>
+						</div>
+					{/each}
+				</div>
+			</section>
+
+			<section class="card">
+				<div class="row-between">
+					<h2 class="h2 flush">{m.admin_obs_devices_title()}</h2>
+					<span class="mut">{m.admin_obs_devices_sub()}</span>
+				</div>
+				<div class="devsplit">
+					<div class="devrow">
+						<span class="dlab">{m.admin_obs_device_desktop()}</span>
+						<span class="dtrack"><span class="dfill" style="width:{(o.visitors.devices.desktop * 100).toFixed(1)}%"></span></span>
+						<span class="dval">{pct(o.visitors.devices.desktop, 0)}</span>
+					</div>
+					<div class="devrow">
+						<span class="dlab">{m.admin_obs_device_mobile()}</span>
+						<span class="dtrack"><span class="dfill" style="width:{(o.visitors.devices.mobile * 100).toFixed(1)}%"></span></span>
+						<span class="dval">{pct(o.visitors.devices.mobile, 0)}</span>
+					</div>
+					<div class="devrow">
+						<span class="dlab">{m.admin_obs_device_tablet()}</span>
+						<span class="dtrack"><span class="dfill" style="width:{(o.visitors.devices.tablet * 100).toFixed(1)}%"></span></span>
+						<span class="dval">{pct(o.visitors.devices.tablet, 0)}</span>
+					</div>
+				</div>
+				<p class="botnote">{m.admin_obs_bot_note()}</p>
+			</section>
+		</div>
+
+		<!-- Referrers + countries -->
+		<div class="grid grid-2 visitors-grid">
+			<section class="card">
+				<div class="row-between">
+					<h2 class="h2 flush">{m.admin_obs_referrers_title()}</h2>
+					<span class="mut">{m.admin_obs_referrers_sub()}</span>
+				</div>
+				<div class="barlist">
+					{#each o.visitors.topReferrers as r (r.label)}
+						<div class="barrow">
+							<span class="lab">{r.label}</span>
+							<span class="val">{pct(r.share, 0)}</span>
+							<span class="bartrack"><span class="barfill" style="width:{(r.share * 100).toFixed(1)}%"></span></span>
+						</div>
+					{/each}
+				</div>
+			</section>
+
+			<section class="card">
+				<div class="row-between">
+					<h2 class="h2 flush">{m.admin_obs_countries_title()}</h2>
+					<span class="mut">{m.admin_obs_countries_sub()}</span>
+				</div>
+				<div class="barlist">
+					{#each o.visitors.topCountries as c (c.label)}
+						<div class="barrow">
+							<span class="lab">{countryName(c.label)}</span>
+							<span class="val">{pct(c.share, 0)}</span>
+							<span class="bartrack"><span class="barfill" style="width:{(c.share * 100).toFixed(1)}%"></span></span>
+						</div>
+					{/each}
+				</div>
+			</section>
+		</div>
+	{/if}
+
+	<div class="aggnote">
+		<span class="dot green mt"></span>
+		<span>{m.admin_obs_visitors_aggnote()}</span>
+	</div>
+
+	<!-- Operational · Tier B -->
+	<div class="section-lead">
+		<div class="eyebrow muted-eyebrow">{m.admin_obs_operational_eyebrow()}</div>
+		<p class="cap">{m.admin_obs_operational_sub()}</p>
+	</div>
 
 	<!-- Recent errors + background jobs -->
 	<div class="grid grid-3">
@@ -708,6 +846,126 @@
 		max-width: 90ch;
 	}
 
+	/* Visitors · Tier A (issue #149) */
+	.eyebrow.tier-a {
+		color: var(--primary);
+	}
+	.vhero {
+		padding: 24px 26px;
+		margin-bottom: 16px;
+	}
+	.vhero-top {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 32px;
+	}
+	.vhero-num {
+		font-family: var(--font-primary);
+		font-size: 40px;
+		font-weight: 700;
+		line-height: 1;
+		letter-spacing: -0.02em;
+	}
+	.vhero-lbl {
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin-top: 8px;
+	}
+	.vhero-lbl b {
+		color: var(--foreground);
+		font-weight: 600;
+	}
+	.visitors-grid {
+		margin-top: 16px;
+	}
+	.barlist {
+		margin-top: 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 11px;
+	}
+	.barrow {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: 4px 12px;
+		align-items: baseline;
+	}
+	.barrow .lab {
+		font-family: var(--font-primary);
+		font-size: 12px;
+		color: var(--card-foreground);
+		word-break: break-all;
+	}
+	.barrow .val {
+		font-family: var(--font-primary);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		text-align: right;
+	}
+	.bartrack {
+		grid-column: 1 / -1;
+		height: 6px;
+		border-radius: var(--radius-pill);
+		background: var(--secondary);
+		overflow: hidden;
+	}
+	.barfill {
+		height: 100%;
+		border-radius: var(--radius-pill);
+		background: var(--primary);
+	}
+	.devsplit {
+		margin-top: 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+	.devrow {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	.devrow .dlab {
+		font-family: var(--font-primary);
+		font-size: 12px;
+		width: 62px;
+		flex: none;
+	}
+	.devrow .dtrack {
+		flex: 1;
+		height: 8px;
+		border-radius: var(--radius-pill);
+		background: var(--secondary);
+		overflow: hidden;
+	}
+	.devrow .dfill {
+		height: 100%;
+		background: var(--primary);
+		border-radius: var(--radius-pill);
+	}
+	.devrow .dval {
+		font-family: var(--font-primary);
+		font-size: 12px;
+		color: var(--muted-foreground);
+		width: 44px;
+		text-align: right;
+		flex: none;
+	}
+	.botnote {
+		font-size: 11px;
+		color: var(--muted-foreground);
+		margin: 14px 0 0;
+	}
+	.aggnote {
+		display: flex;
+		gap: 8px;
+		align-items: flex-start;
+		margin-top: 14px;
+		font-size: 11px;
+		color: var(--muted-foreground);
+	}
+
 	@media (max-width: 900px) {
 		.grid-3,
 		.grid-2 {
@@ -716,7 +974,8 @@
 		.span-2 {
 			grid-column: span 1;
 		}
-		.hero-top {
+		.hero-top,
+		.vhero-top {
 			flex-direction: column;
 			gap: 16px;
 		}

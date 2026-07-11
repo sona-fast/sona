@@ -9,10 +9,15 @@ import {
 	recordUpload,
 	recordEmail,
 	recordJobRun,
+	pageViewStatements,
+	pruneVisitorRollups,
 	dayKey,
 	routeClass,
 	isAssetPath,
 	isObservabilityEnabled,
+	deviceClass,
+	referrerHost,
+	countryCode,
 	ERROR_SAMPLE_CAP
 } from './metrics';
 
@@ -178,6 +183,159 @@ describe('recordUpload / recordEmail — outcome + failure sample', () => {
 		]);
 		const samples = sqlite.prepare('SELECT route, status, message FROM error_sample').all();
 		expect(samples).toEqual([{ route: 'email', status: 422, message: 'invalid from domain' }]);
+	});
+});
+
+describe('visitor capture helpers (issue #149) — reduce to PII-free labels', () => {
+	it('deviceClass does NOT exclude legit UAs that merely contain a broad word', () => {
+		// The generic substrings 'preview', 'monitor', 'scan', 'uptime' were tightened
+		// out so a real browser carrying one isn't silently dropped.
+		expect(deviceClass('Mozilla/5.0 (Windows NT 10.0) MonitorApp/1 Chrome/120')).toBe('desktop');
+		expect(deviceClass('Mozilla/5.0 (iPhone) PreviewBrowser Mobile/15E148')).toBe('mobile');
+		// But specific bot forms of those words are still excluded.
+		expect(deviceClass('Mozilla/5.0 (compatible; UptimeRobot/2.0)')).toBeNull();
+		expect(deviceClass('Mozilla/5.0 (compatible; bingpreview/1.0b)')).toBeNull();
+	});
+
+	it('deviceClass splits desktop / mobile / tablet and drops known bots + empty UA', () => {
+		// Desktop.
+		expect(deviceClass('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120')).toBe('desktop');
+		expect(deviceClass('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605')).toBe('desktop');
+		// Mobile: an Android *phone* UA carries "Mobile".
+		expect(deviceClass('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Mobile/15E148')).toBe('mobile');
+		expect(deviceClass('Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537')).toBe('mobile');
+		// Tablet: iPad and an Android *tablet* UA (no "Mobile" token).
+		expect(deviceClass('Mozilla/5.0 (iPad; CPU OS 17_0) Safari/605')).toBe('tablet');
+		expect(deviceClass('Mozilla/5.0 (Linux; Android 14; SM-X710) Safari/537')).toBe('tablet');
+		// Bots / crawlers / automation → null (excluded, never counted or stored).
+		for (const ua of [
+			'Googlebot/2.1 (+http://www.google.com/bot.html)',
+			'Mozilla/5.0 (compatible; bingbot/2.0)',
+			'facebookexternalhit/1.1',
+			'curl/8.4.0',
+			'python-requests/2.31',
+			'Mozilla/5.0 ... HeadlessChrome/120'
+		]) {
+			expect(deviceClass(ua), ua).toBeNull();
+		}
+		// No UA at all is treated as non-human.
+		expect(deviceClass('')).toBeNull();
+		expect(deviceClass(null)).toBeNull();
+	});
+
+	it('referrerHost keeps ONLY the host and drops same-site + junk (no path/query stored)', () => {
+		// Full URL with a path + query reduces to the bare host — the query, which can
+		// carry personal data, is never returned. Leading www. is stripped.
+		expect(referrerHost('https://t.co/abc?utm_source=x&uid=secret', 'taro.surf')).toBe('t.co');
+		expect(referrerHost('https://www.Google.com/search?q=me', 'taro.surf')).toBe('google.com');
+		// Same-site navigation is not a referring host — including a www-vs-apex self
+		// referral either way round.
+		expect(referrerHost('https://taro.surf/gallery', 'taro.surf')).toBeNull();
+		expect(referrerHost('https://www.taro.surf/gallery', 'taro.surf')).toBeNull();
+		expect(referrerHost('https://taro.surf/gallery', 'www.taro.surf')).toBeNull();
+		// Empty / unparseable.
+		expect(referrerHost(null, 'taro.surf')).toBeNull();
+		expect(referrerHost('not a url', 'taro.surf')).toBeNull();
+	});
+
+	it('referrerHost drops oversized/malformed hosts (attacker-controlled Referer)', () => {
+		// A host past the 253-char DNS limit can't bloat a counter key: dropped.
+		const huge = 'https://' + 'a'.repeat(300) + '.com/';
+		expect(referrerHost(huge, 'taro.surf')).toBeNull();
+		// A host at the limit is still accepted.
+		const ok = 'a'.repeat(245) + '.com'; // 249 chars
+		expect(referrerHost(`https://${ok}/x`, 'taro.surf')).toBe(ok);
+		// An IPv6 literal (brackets) isn't a plausible DNS name: dropped.
+		expect(referrerHost('https://[2001:db8::1]/x', 'taro.surf')).toBeNull();
+	});
+
+	it('countryCode accepts a real 2-letter code and rejects placeholders', () => {
+		expect(countryCode('US')).toBe('US');
+		expect(countryCode('gb')).toBe('GB');
+		expect(countryCode('XX')).toBeNull(); // CF "unknown"
+		expect(countryCode('T1')).toBeNull(); // Tor
+		expect(countryCode('')).toBeNull();
+		expect(countryCode(null)).toBeNull();
+	});
+});
+
+describe('pageViewStatements — Tier-A counters in one batch, no per-visitor row', () => {
+	it('bumps pageview/device and, when present, referrer/country — nothing else', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await db.batch(
+			pageViewStatements(db, { path: '/gallery', device: 'mobile', referrerHost: 't.co', country: 'US' }) as [
+				never,
+				...never[]
+			]
+		);
+
+		const rows = sqlite.prepare('SELECT metric, dim, count FROM metric_rollup ORDER BY metric, dim').all();
+		expect(rows).toEqual([
+			{ metric: 'country', dim: 'US', count: 1 },
+			{ metric: 'device', dim: 'mobile', count: 1 },
+			{ metric: 'pageview', dim: '/gallery', count: 1 },
+			{ metric: 'referrer', dim: 't.co', count: 1 }
+		]);
+	});
+
+	it('omits the referrer and country counters when they are absent (direct hit)', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		const stmts = pageViewStatements(db, { path: '/', device: 'desktop', referrerHost: null, country: null });
+		expect(stmts).toHaveLength(2); // pageview + device only
+		await db.batch(stmts as [never, ...never[]]);
+
+		const metrics = sqlite.prepare('SELECT DISTINCT metric FROM metric_rollup ORDER BY metric').all();
+		expect(metrics).toEqual([{ metric: 'device' }, { metric: 'pageview' }]);
+	});
+
+	it('stores ONLY counter keys — never a raw UA or IP string anywhere in the row', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await db.batch(
+			pageViewStatements(db, { path: '/about', device: 'desktop', referrerHost: 'bsky.app', country: 'DE' }) as [
+				never,
+				...never[]
+			]
+		);
+
+		// Every stored dim is a reduced label; none is a UA/IP-shaped string.
+		const dims = sqlite.prepare('SELECT dim FROM metric_rollup').all().map((r: { dim: string }) => r.dim);
+		expect(dims.sort()).toEqual(['/about', 'DE', 'bsky.app', 'desktop']);
+		for (const d of dims) {
+			expect(d).not.toMatch(/Mozilla|\d+\.\d+\.\d+\.\d+/); // no user-agent, no dotted-quad IP
+		}
+	});
+});
+
+describe('pruneVisitorRollups — Tier-A retention, operational metrics untouched', () => {
+	it('deletes visitor rows older than the window and leaves recent + operational rows', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+		const seed = sqlite.prepare('INSERT INTO metric_rollup (day, metric, dim, count) VALUES (?, ?, ?, ?)');
+		const day = (n: number) => dayKey(new Date(Date.now() - n * 86400000));
+
+		// Old Tier-A rows (past retention) — must be pruned.
+		seed.run(day(40), 'pageview', '/old', 5);
+		seed.run(day(40), 'referrer', 'spam.example', 9);
+		// Recent Tier-A rows (inside retention) — must survive.
+		seed.run(day(3), 'pageview', '/', 20);
+		// Old OPERATIONAL rows — must survive (health metrics keep their history).
+		seed.run(day(40), 'request', 'public', 100);
+		seed.run(day(40), 'error', '500', 2);
+
+		await pruneVisitorRollups(db, 35);
+
+		const rows = sqlite.prepare('SELECT metric, dim FROM metric_rollup ORDER BY metric, dim').all();
+		expect(rows).toEqual([
+			{ metric: 'error', dim: '500' }, // operational, old, kept
+			{ metric: 'pageview', dim: '/' }, // Tier-A, recent, kept
+			{ metric: 'request', dim: 'public' } // operational, old, kept
+		]);
 	});
 });
 

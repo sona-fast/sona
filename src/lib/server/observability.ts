@@ -27,9 +27,9 @@
 //      sprinkled per call site.
 // Do not build (2) now; it is documented so the isolation boundary is explicit.
 
-import { sql, gte, and, eq, desc } from 'drizzle-orm';
+import { sql, gte, and, eq, desc, inArray } from 'drizzle-orm';
 import { metricRollup, errorSample, jobRun } from './db/schema';
-import { dayKey } from './metrics';
+import { dayKey, VISITOR_METRICS } from './metrics';
 import type { Database } from './db';
 import type { SiteSettings } from './settings';
 
@@ -37,6 +37,16 @@ import type { SiteSettings } from './settings';
 export const WINDOW_DAYS = 7;
 /** Recent-errors table depth. */
 const RECENT_ERRORS_LIMIT = 8;
+/** Operational metrics — bounded dims, safe to read in one grouped query. */
+const OPERATIONAL_METRICS = ['request', 'error', 'upload', 'email', 'download'] as const;
+/**
+ * Cap on rows read per Tier-A dim. The referrer host is attacker-controllable and
+ * unbounded, so the top-N reads use ORDER BY SUM DESC LIMIT this — the dashboard
+ * only ever shows the top 5, so it never needs the full dim space in memory.
+ */
+const VISITOR_READ_LIMIT = 50;
+/** Rows shown per Tier-A list. */
+const VISITOR_TOP_N = 5;
 const CF_GRAPHQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql';
 // Kept short: the CF query is streamed (see the page load), so this only bounds how
 // long the deferred panel waits before degrading to an error state — never TTFB.
@@ -107,6 +117,29 @@ export type CfEdge =
 			threats: number;
 	  };
 
+/** A ranked visitor row (top page / referrer host / country) with its share 0..1. */
+export interface VisitorTop {
+	label: string;
+	count: number;
+	share: number;
+}
+
+/** Tier-A visitor aggregates (issue #149): counts only, no per-visitor records. */
+export interface VisitorAggregates {
+	pageViews: number;
+	/** Distinct countries seen over the window. */
+	countries: number;
+	/** Distinct referring hosts seen over the window. */
+	referrerHosts: number;
+	/** Per-day page-view totals over the window, oldest first (length WINDOW_DAYS). */
+	sparkline: number[];
+	topPages: VisitorTop[];
+	topReferrers: VisitorTop[];
+	topCountries: VisitorTop[];
+	/** Device split as shares (0..1) of classified page views. */
+	devices: { desktop: number; mobile: number; tablet: number };
+}
+
 export interface ObservabilityData {
 	windowDays: number;
 	appRequests: number;
@@ -122,6 +155,8 @@ export interface ObservabilityData {
 	jobs: JobStatus[];
 	verdict: Verdict;
 	providers: { storage: StorageHealth; email: EmailHealth };
+	/** Tier-A visitor aggregates from the same rolled-up counters. */
+	visitors: VisitorAggregates;
 }
 
 /** The background jobs we know about, in display order. There is deliberately no
@@ -144,6 +179,28 @@ function windowDays(n: number): string[] {
 }
 
 /**
+ * Bounded top-N read of one Tier-A dim over the window: the highest-count `dim`s for
+ * a metric, capped at VISITOR_READ_LIMIT. The referrer host is attacker-controlled
+ * and unbounded, so the dashboard must never SELECT the whole dim space — this is
+ * the read leg of the retention/limit defense (the prune bounds writes; this bounds
+ * reads). Exported so the LIMIT is directly testable.
+ */
+export function readTopDims(
+	db: Database,
+	metric: string,
+	since: string,
+	limit: number = VISITOR_READ_LIMIT
+): Promise<{ dim: string; total: number }[]> {
+	return db
+		.select({ dim: metricRollup.dim, total: sql<number>`SUM(${metricRollup.count})` })
+		.from(metricRollup)
+		.where(and(eq(metricRollup.metric, metric), gte(metricRollup.day, since)))
+		.groupBy(metricRollup.dim)
+		.orderBy(desc(sql`SUM(${metricRollup.count})`))
+		.limit(limit) as Promise<{ dim: string; total: number }[]>;
+}
+
+/**
  * Gather the full Tier-B operational view for /admin/observability. Reads only
  * this fork's own DB (tenant-isolated by construction — see the note above), plus
  * an optional Cloudflare edge query when its three secrets are present.
@@ -156,10 +213,34 @@ export async function getObservability(
 	const days = windowDays(WINDOW_DAYS);
 	const since = days[0];
 
-	// The four in-app reads are independent, so fire them together to shave TTFB:
-	// grouped counters, per-day request totals (sparkline), the recent-error ring,
-	// and job heartbeats. Each reduces in JS below.
-	const [rows, perDay, recentErrors, jobRows] = await Promise.all([
+	const topN = (metric: string) => readTopDims(db, metric, since);
+	// True total + distinct count for a dim — single-row aggregates, so they stay
+	// cheap even when the dim space is large (the share denominator + hero counts).
+	const agg = (metric: string) =>
+		db
+			.select({
+				total: sql<number>`COALESCE(SUM(${metricRollup.count}), 0)`,
+				distinct: sql<number>`COUNT(DISTINCT ${metricRollup.dim})`
+			})
+			.from(metricRollup)
+			.where(and(eq(metricRollup.metric, metric), gte(metricRollup.day, since)));
+
+	// Independent reads fired together to shave TTFB. The operational grouped query
+	// is filtered to OPERATIONAL_METRICS (bounded dims); every Tier-A read is bounded
+	// too — top-N with a LIMIT, single-row aggregates, or the 3-value device split.
+	const [
+		rows,
+		perDay,
+		perDayPageviews,
+		topPages,
+		referrerAgg,
+		topReferrers,
+		countryAgg,
+		topCountries,
+		deviceRows,
+		recentErrors,
+		jobRows
+	] = await Promise.all([
 		db
 			.select({
 				metric: metricRollup.metric,
@@ -167,13 +248,28 @@ export async function getObservability(
 				total: sql<number>`SUM(${metricRollup.count})`
 			})
 			.from(metricRollup)
-			.where(gte(metricRollup.day, since))
+			.where(and(gte(metricRollup.day, since), inArray(metricRollup.metric, [...OPERATIONAL_METRICS])))
 			.groupBy(metricRollup.metric, metricRollup.dim),
 		db
 			.select({ day: metricRollup.day, total: sql<number>`SUM(${metricRollup.count})` })
 			.from(metricRollup)
 			.where(and(eq(metricRollup.metric, 'request'), gte(metricRollup.day, since)))
 			.groupBy(metricRollup.day),
+		db
+			.select({ day: metricRollup.day, total: sql<number>`SUM(${metricRollup.count})` })
+			.from(metricRollup)
+			.where(and(eq(metricRollup.metric, 'pageview'), gte(metricRollup.day, since)))
+			.groupBy(metricRollup.day),
+		topN('pageview'),
+		agg('referrer'),
+		topN('referrer'),
+		agg('country'),
+		topN('country'),
+		db
+			.select({ dim: metricRollup.dim, total: sql<number>`SUM(${metricRollup.count})` })
+			.from(metricRollup)
+			.where(and(eq(metricRollup.metric, 'device'), gte(metricRollup.day, since)))
+			.groupBy(metricRollup.dim),
 		db
 			.select()
 			.from(errorSample)
@@ -206,6 +302,23 @@ export async function getObservability(
 	// so gaps render as zero rather than collapsing the x-axis.
 	const perDayMap = new Map(perDay.map((d) => [d.day, Number(d.total) || 0]));
 	const sparkline = days.map((d) => perDayMap.get(d) ?? 0);
+
+	// Tier-A page-view sparkline (page views per day) + total from the same per-day
+	// read, so the hero total and the sparkline can never disagree.
+	const perDayPvMap = new Map(perDayPageviews.map((d) => [d.day, Number(d.total) || 0]));
+	const pvSparkline = days.map((d) => perDayPvMap.get(d) ?? 0);
+	const visitors = shapeVisitors({
+		pageViews: pvSparkline.reduce((a, b) => a + b, 0),
+		sparkline: pvSparkline,
+		topPages,
+		referrerTotal: Number(referrerAgg[0]?.total) || 0,
+		referrerHosts: Number(referrerAgg[0]?.distinct) || 0,
+		topReferrers,
+		countryTotal: Number(countryAgg[0]?.total) || 0,
+		countries: Number(countryAgg[0]?.distinct) || 0,
+		topCountries,
+		deviceRows
+	});
 
 	const jobMap = new Map(jobRows.map((j) => [j.name, j]));
 	const jobs: JobStatus[] = KNOWN_JOBS.map(({ name, label }) => {
@@ -260,7 +373,65 @@ export async function getObservability(
 		recentErrors,
 		jobs,
 		verdict,
-		providers: { storage, email }
+		providers: { storage, email },
+		visitors
+	};
+}
+
+interface RankedRow {
+	dim: string;
+	total: number;
+}
+interface ShapeVisitorsInput {
+	pageViews: number;
+	sparkline: number[];
+	topPages: RankedRow[];
+	referrerTotal: number;
+	referrerHosts: number;
+	topReferrers: RankedRow[];
+	countryTotal: number;
+	countries: number;
+	topCountries: RankedRow[];
+	deviceRows: RankedRow[];
+}
+
+/**
+ * Shape the Tier-A visitor aggregates from the bounded reads: already-ranked top-N
+ * lists (trimmed to the display count here), true totals + distinct counts from the
+ * single-row aggregates, and the device split. Pure — no DB — so it is unit-testable.
+ * Shares are computed against the relevant TRUE total (page views for pages; the
+ * classified referrer/country/device totals for those), so a top list reads as its
+ * share of its own axis even though only the top rows are loaded.
+ */
+export function shapeVisitors(input: ShapeVisitorsInput): VisitorAggregates {
+	const rank = (rows: RankedRow[], denom: number): VisitorTop[] =>
+		rows.slice(0, VISITOR_TOP_N).map((r) => {
+			const count = Number(r.total) || 0;
+			return { label: r.dim, count, share: denom > 0 ? count / denom : 0 };
+		});
+
+	const devices = { desktop: 0, mobile: 0, tablet: 0 };
+	for (const r of input.deviceRows) {
+		const total = Number(r.total) || 0;
+		if (r.dim === 'desktop') devices.desktop += total;
+		else if (r.dim === 'mobile') devices.mobile += total;
+		else if (r.dim === 'tablet') devices.tablet += total;
+	}
+	const deviceTotal = devices.desktop + devices.mobile + devices.tablet;
+
+	return {
+		pageViews: input.pageViews,
+		countries: input.countries,
+		referrerHosts: input.referrerHosts,
+		sparkline: input.sparkline,
+		topPages: rank(input.topPages, input.pageViews),
+		topReferrers: rank(input.topReferrers, input.referrerTotal),
+		topCountries: rank(input.topCountries, input.countryTotal),
+		devices: {
+			desktop: deviceTotal > 0 ? devices.desktop / deviceTotal : 0,
+			mobile: deviceTotal > 0 ? devices.mobile / deviceTotal : 0,
+			tablet: deviceTotal > 0 ? devices.tablet / deviceTotal : 0
+		}
 	};
 }
 

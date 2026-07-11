@@ -4,7 +4,7 @@ import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { deleteOrphansAll, collectReferencedUrls } from '$lib/server/storage';
 import { requireCronSecret } from '$lib/server/cron-auth';
-import { recordJobRun, schedule } from '$lib/server/metrics';
+import { recordJobRun, pruneVisitorRollups, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
 // POST /api/cron/cleanup-orphans[?dryRun=1]
@@ -52,6 +52,10 @@ export const POST: RequestHandler = async ({ request, url, platform }) => {
 	if (!dryRun) {
 		schedule(platform, recordJobRun(db, 'cleanup-orphans', ok ? 'ok' : 'failed',
 			ok ? `deleted ${result.deleted}` : result.errors.join('; ')));
+		// Tier-A retention (issue #149): drop visitor rollups older than the window
+		// this weekly sweep already runs. Fire-and-forget; a prune failure must not
+		// fail the orphan run. Only VISITOR_METRICS rows are touched (see metrics.ts).
+		schedule(platform, pruneVisitorRollups(db));
 	}
 	// A configured provider failing must fail the workflow run, which only
 	// checks the HTTP status — so real errors return 500, not a green ok:true.

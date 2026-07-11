@@ -191,6 +191,128 @@ describe('handleError — rich 5xx sample (issue #6)', () => {
 	});
 });
 
+// Tier-A page-view capture (issue #149). A header bag with a case-insensitive get,
+// so a test can hand authHandle a User-Agent / Referer / CF-IPCountry without a real
+// Request (which forbids setting some of these header names).
+function headers(map: Record<string, string>) {
+	return { get: (k: string) => map[k.toLowerCase()] ?? null };
+}
+
+function pageviewEvent(
+	pathname: string,
+	db: D1Database,
+	waits: Promise<unknown>[],
+	hdrs: Record<string, string> = {},
+	envExtra: Record<string, string> = { OBSERVABILITY_ENABLED: 'true' }
+) {
+	return {
+		cookies: { get: () => undefined },
+		url: new URL(`https://taro.surf${pathname}`),
+		request: { headers: headers(hdrs) },
+		locals: {} as App.Locals,
+		platform: { env: { DB: db, ...envExtra }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
+	} as never;
+}
+
+describe('authHandle — Tier-A page-view capture (issue #149)', () => {
+	beforeEach(() => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+	});
+
+	const resolveHtml = async () =>
+		new Response('<!doctype html>ok', { status: 200, headers: { 'content-type': 'text/html' } });
+	const resolveXml = async () =>
+		new Response('<rss/>', { status: 200, headers: { 'content-type': 'application/xml' } });
+
+	const REAL_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Mobile/15E148';
+
+	it('records reduced counters for a public HTML view — referrer kept to host only', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: pageviewEvent('/gallery', db, waits, {
+				'user-agent': REAL_UA,
+				referer: 'https://t.co/xyz?utm=1&uid=personal',
+				'cf-ipcountry': 'us'
+			}),
+			resolve: resolveHtml
+		} as never);
+		await Promise.all(waits);
+
+		const rows = sqlite.prepare('SELECT metric, dim, count FROM metric_rollup ORDER BY metric, dim').all();
+		expect(rows).toEqual([
+			{ metric: 'country', dim: 'US', count: 1 },
+			{ metric: 'device', dim: 'mobile', count: 1 },
+			{ metric: 'pageview', dim: '/gallery', count: 1 },
+			{ metric: 'referrer', dim: 't.co', count: 1 }, // host only — the path+query are gone
+			{ metric: 'request', dim: 'public', count: 1 }
+		]);
+	});
+
+	it('does NOT count admin routes or cron endpoints as page views', async () => {
+		// /admin/login is admin-class but reachable (exempt from the login redirect);
+		// /api/cron/* is machine-to-machine and reaches resolve. Neither is a page view.
+		for (const path of ['/admin/login', '/api/cron/refresh']) {
+			const { db, sqlite } = makeMetricsDb();
+			const waits: Promise<unknown>[] = [];
+			await authHandle({
+				event: pageviewEvent(path, db, waits, { 'user-agent': REAL_UA, 'cf-ipcountry': 'US' }),
+				resolve: resolveHtml
+			} as never);
+			await Promise.all(waits);
+
+			expect(sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE metric='pageview'").get().c, path).toBe(0);
+			expect(sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE metric='device'").get().c, path).toBe(0);
+		}
+	});
+
+	it('excludes known bots at capture time and stores no user-agent string', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: pageviewEvent('/gallery', db, waits, {
+				'user-agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
+				'cf-ipcountry': 'US'
+			}),
+			resolve: resolveHtml
+		} as never);
+		await Promise.all(waits);
+
+		// The request is still counted, but NO visitor rows exist for the bot.
+		expect(sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE metric='request'").get().c).toBe(1);
+		expect(
+			sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE metric IN ('pageview','device','referrer','country')").get().c
+		).toBe(0);
+		// And nothing that looks like a UA was persisted anywhere.
+		const dims = sqlite.prepare('SELECT dim FROM metric_rollup').all().map((r: { dim: string }) => r.dim);
+		for (const d of dims) expect(d).not.toContain('Googlebot');
+	});
+
+	it('does not count a non-HTML public response (feeds, sitemaps)', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: pageviewEvent('/rss.xml', db, waits, { 'user-agent': REAL_UA }),
+			resolve: resolveXml
+		} as never);
+		await Promise.all(waits);
+
+		expect(sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE metric='pageview'").get().c).toBe(0);
+	});
+
+	it('writes NOTHING when the observability flag is off (capture dormant)', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: pageviewEvent('/gallery', db, waits, { 'user-agent': REAL_UA, 'cf-ipcountry': 'US' }, {}),
+			resolve: resolveHtml
+		} as never);
+		await Promise.all(waits);
+
+		expect(sqlite.prepare('SELECT COUNT(*) c FROM metric_rollup').get().c).toBe(0);
+	});
+});
+
 describe('authHandle — 5xx counts toward the error rate (issue #6)', () => {
 	beforeEach(() => {
 		vi.mocked(isSetupComplete).mockResolvedValue(true);
