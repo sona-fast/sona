@@ -113,10 +113,12 @@ export function ensureUrlScheme(value: string): string {
  * wrangler prints a JSONC binding block (`"database_id": "..."`); older versions
  * printed a TOML one (`database_id = "..."`). Match both so auto-detect keeps
  * working across wrangler versions instead of falling back to the paste prompt.
- * Returns '' when no id is found.
+ * The `(?<![\w])` guard anchors the key so a future `preview_database_id` line
+ * can't be mis-grabbed (`\b` won't do it — `_` is a word char, so `\bdatabase_id`
+ * still matches inside `preview_database_id`). Returns '' when no id is found.
  */
 export function parseDatabaseId(output: string): string {
-	return (output.match(/"?database_id"?\s*[:=]\s*"([0-9a-fA-F-]+)"/) || [])[1] ?? '';
+	return (output.match(/(?<![\w])database_id"?\s*[:=]\s*"([0-9a-fA-F-]+)"/) || [])[1] ?? '';
 }
 
 /**
@@ -129,18 +131,20 @@ export function parseDatabaseId(output: string): string {
 export function deriveRepoSlug(originUrl: string): string | null {
 	const url = originUrl.trim();
 	if (!url) return null;
-	// Matches both git@github.com:owner/repo(.git), ssh://git@github.com/owner/repo,
+	// Matches git@github.com:owner/repo(.git), ssh://git@github.com/owner/repo,
 	// and https://github.com/owner/repo(.git), with or without a trailing slash.
-	const m = url.match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+	// The `(?:^|\/\/|@)` anchor requires `github.com` to sit right after a scheme
+	// `//`, an ssh `@`, or the string start — so neither lookalike hosts
+	// (evilgithub.com, evil.github.com) nor a github.com in the PATH of another
+	// host (https://evil.com/github.com/a/b) derive a slug and mis-target `gh`.
+	const m = url.match(/(?:^|\/\/|@)github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
 	return m ? `${m[1]}/${m[2]}` : null;
 }
 
 export interface PagesConfigInput {
-	/** D1 binding name (DB) and the created database's id. */
-	dbBinding: string;
+	/** The created D1 database's id (bound as `DB`). */
 	dbId: string;
-	/** R2 binding name (IMAGES) and bucket; omit `bucket` to skip the R2 binding. */
-	r2Binding: string;
+	/** R2 bucket bound as `IMAGES`; omit to skip the R2 binding (R2 not enabled). */
 	bucket?: string;
 	/** Plain-text environment variables to attach (e.g. FURTRACK_MODE). */
 	envVars: Record<string, string>;
@@ -161,6 +165,8 @@ const PAGES_COMPAT = {
  * SvelteKit adapter's build can't resolve node built-ins (async_hooks) and the
  * first CI deploy dies. The PATCH merges per key, so unrelated project config is
  * untouched. The R2 binding is omitted when no bucket exists (R2 not enabled).
+ * The `DB`/`IMAGES` binding names are fixed by wrangler.toml.example, so they are
+ * hardcoded here rather than passed in (single call site).
  */
 export function buildPagesConfigPayload(input: PagesConfigInput): Record<string, unknown> {
 	const env_vars: Record<string, { type: string; value: string }> = {};
@@ -169,10 +175,10 @@ export function buildPagesConfigPayload(input: PagesConfigInput): Record<string,
 	}
 	const production: Record<string, unknown> = {
 		...PAGES_COMPAT,
-		d1_databases: { [input.dbBinding]: { id: input.dbId } },
+		d1_databases: { DB: { id: input.dbId } },
 		env_vars
 	};
-	if (input.bucket) production.r2_buckets = { [input.r2Binding]: { name: input.bucket } };
+	if (input.bucket) production.r2_buckets = { IMAGES: { name: input.bucket } };
 	return { deployment_configs: { production, preview: { ...PAGES_COMPAT } } };
 }
 
@@ -206,6 +212,24 @@ export function hostFromDomain(domain: string): string {
 }
 
 /**
+ * Zone-name candidates to try when looking up the Cloudflare zone for a host,
+ * most specific first. A subdomain like `sona.example.com` is served by the
+ * `example.com` zone, but `GET /zones?name=sona.example.com` finds nothing — so
+ * strip leading labels progressively (`sona.example.com`, then `example.com`)
+ * and try each until one matches a zone on the account. Stops at two labels (the
+ * shortest a registrable domain can be) to avoid an absurd bare-TLD query. A
+ * host that is already two labels yields just itself; empty input yields [].
+ */
+export function zoneNameCandidates(host: string): string[] {
+	const labels = host.split('.').filter(Boolean);
+	const out: string[] = [];
+	for (let i = 0; i + 2 <= labels.length; i++) {
+		out.push(labels.slice(i).join('.'));
+	}
+	return out.length ? out : host ? [host] : [];
+}
+
+/**
  * True when the custom-domain DNS-scope probe means setup must abort: the token
  * can't list DNS records for the zone (401/403), so it can't write the apex
  * CNAME later and the domain would stick pending with a 522. Any other outcome
@@ -227,8 +251,19 @@ export function imageResizingOutcome(
 	patchOk: boolean
 ): boolean | null {
 	if (!getRes.ok) return null;
-	if ((getRes.result as { value?: string } | undefined)?.value === 'on') return true;
+	if (imageResizingIsOn(getRes)) return true;
 	return patchOk;
+}
+
+/**
+ * True when the Image Transformations GET succeeded and reported the setting as
+ * ON. Keeps the `value === 'on'` parse in this file only — setup.ts used to
+ * duplicate it inline to decide whether to PATCH, a drift trap with
+ * imageResizingOutcome. setup.ts now derives its "should I enable?" gate from
+ * `getRes.ok && !imageResizingIsOn(getRes)`.
+ */
+export function imageResizingIsOn(getRes: { result?: unknown }): boolean {
+	return (getRes.result as { value?: string } | undefined)?.value === 'on';
 }
 
 export interface CfApiResult {
@@ -303,4 +338,49 @@ export function ghSecretEligibility(input: GhEligibilityInput): { eligible: bool
 				'CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not in the environment (you likely used `wrangler login`)'
 		};
 	return { eligible: true };
+}
+
+export interface CiWiringInput {
+	apiToken: string;
+	accountId: string;
+	cronSecret: string;
+	setupToken: string;
+	project: string;
+	dbName: string;
+	siteUrl: string;
+	/** Resolved FurTrack mode ('off' | 'mock' | 'live'). */
+	furtrackMode: string;
+}
+
+export interface CiEntry {
+	kind: 'secret' | 'variable';
+	name: string;
+	value: string;
+}
+
+/**
+ * The exact set of GitHub Actions secrets/variables setup wires for CI deploys,
+ * as an ordered list so setup.ts just maps `ghSet` over it and a contract test
+ * can assert every NAME is consumed by a workflow YAML (a rename on either side
+ * would otherwise no-op silently — the #51 bug class).
+ *
+ * FURTRACK_MODE is ALWAYS included (including the value 'off'), not gated on
+ * "enabled". deploy.yml re-PATCHes this variable onto the Pages project every
+ * deploy; if setup skipped it on a live→off re-run the stale 'live' would keep
+ * being re-applied forever. Writing 'off' explicitly neutralizes it — the app
+ * maps any non-live/mock value to disabled (src/lib/server/furtrack.ts) — and
+ * `gh variable set` is idempotent, so this is safe on a fresh fork too (unlike a
+ * delete, which 404s when the variable was never set).
+ */
+export function ciWiringEntries(input: CiWiringInput): CiEntry[] {
+	return [
+		{ kind: 'secret', name: 'CLOUDFLARE_API_TOKEN', value: input.apiToken },
+		{ kind: 'secret', name: 'CLOUDFLARE_ACCOUNT_ID', value: input.accountId },
+		{ kind: 'secret', name: 'CRON_SECRET', value: input.cronSecret },
+		{ kind: 'secret', name: 'SETUP_TOKEN', value: input.setupToken },
+		{ kind: 'variable', name: 'CLOUDFLARE_PAGES_PROJECT', value: input.project },
+		{ kind: 'variable', name: 'D1_DATABASE_NAME', value: input.dbName },
+		{ kind: 'variable', name: 'SITE_URL', value: input.siteUrl },
+		{ kind: 'variable', name: 'FURTRACK_MODE', value: input.furtrackMode }
+	];
 }

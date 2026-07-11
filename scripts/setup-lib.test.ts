@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { normalizeHttpsUrl } from '../src/lib/server/validate';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
 	buildMigrationSql,
 	buildSeedSql,
@@ -12,8 +15,11 @@ import {
 	buildPagesConfigPayload,
 	tokenResolves,
 	hostFromDomain,
+	zoneNameCandidates,
 	dnsProbeBlocksSetup,
 	imageResizingOutcome,
+	imageResizingIsOn,
+	ciWiringEntries,
 	cfApi
 } from './setup-lib.ts';
 
@@ -220,9 +226,20 @@ describe('ghSecretEligibility', () => {
 describe('parseDatabaseId', () => {
 	const id = '1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d';
 
-	it('matches the current wrangler JSONC output shape', () => {
-		// Captured from `wrangler d1 create` on current wrangler.
-		const out = `✅ Successfully created DB 'my-db'
+	it('matches the current wrangler JSONC output shape (verbatim transcript)', () => {
+		// Verbatim `wrangler d1 create` transcript: the ✅ preamble carries a region
+		// suffix and the JSONC block advises pasting into wrangler.toml. Kept literal
+		// so a future wrangler formatting tweak that breaks the parse shows up here.
+		const out = `🌀 Creating DB 'my-db'
+✅ Successfully created DB 'my-db' in region ENAM
+Created your new D1 database.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "my-db"
+database_id = "${id}"
+
+Configure this D1 database in your Worker's wrangler.toml as a binding:
 
 {
   "d1_databases": [
@@ -234,6 +251,19 @@ describe('parseDatabaseId', () => {
   ]
 }`;
 		expect(parseDatabaseId(out)).toBe(id);
+	});
+
+	it('does not mis-grab a preview_database_id key (boundary guard)', () => {
+		// A future wrangler line pairing preview_database_id BEFORE database_id must
+		// not shadow the real id: the `_` boundary guard skips the preview key.
+		const previewId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+		const out = `[[d1_databases]]
+binding = "DB"
+preview_database_id = "${previewId}"
+database_id = "${id}"`;
+		expect(parseDatabaseId(out)).toBe(id);
+		// And a block with ONLY a preview key yields nothing (no false positive).
+		expect(parseDatabaseId(`preview_database_id = "${previewId}"`)).toBe('');
 	});
 
 	it('matches the legacy wrangler TOML output shape', () => {
@@ -275,14 +305,26 @@ describe('deriveRepoSlug', () => {
 		expect(deriveRepoSlug('https://gitlab.com/owner/repo.git')).toBeNull();
 		expect(deriveRepoSlug('')).toBeNull();
 	});
+
+	it('returns null for lookalike hosts (anchored github.com match)', () => {
+		// The host must be exactly github.com, sitting right after a scheme `//`,
+		// an ssh @, or the string start — not a substring of another hostname.
+		expect(deriveRepoSlug('https://evilgithub.com/owner/repo.git')).toBeNull();
+		expect(deriveRepoSlug('https://github.com.evil.com/owner/repo')).toBeNull();
+		expect(deriveRepoSlug('git@notgithub.com:owner/repo.git')).toBeNull();
+	});
+
+	it('returns null when github.com is only in the PATH of another host', () => {
+		// A single path slash must NOT satisfy the anchor, or a hostile origin
+		// (github.com as a path segment) would mis-target the derived gh command.
+		expect(deriveRepoSlug('https://evil.com/github.com/a/b')).toBeNull();
+	});
 });
 
 describe('buildPagesConfigPayload', () => {
 	it('wires bindings, vars, and the nodejs_compat flag onto production + preview', () => {
 		const payload = buildPagesConfigPayload({
-			dbBinding: 'DB',
 			dbId: 'db-123',
-			r2Binding: 'IMAGES',
 			bucket: 'my-images',
 			envVars: { FURTRACK_MODE: 'mock' }
 		});
@@ -308,9 +350,7 @@ describe('buildPagesConfigPayload', () => {
 
 	it('omits the R2 binding when no bucket exists (R2 not enabled) but keeps nodejs_compat', () => {
 		const payload = buildPagesConfigPayload({
-			dbBinding: 'DB',
 			dbId: 'db-123',
-			r2Binding: 'IMAGES',
 			bucket: '',
 			envVars: {}
 		});
@@ -451,5 +491,109 @@ describe('hostFromDomain', () => {
 		expect(hostFromDomain('https://Taro.Surf/gallery')).toBe('taro.surf');
 		expect(hostFromDomain('taro.surf')).toBe('taro.surf');
 		expect(hostFromDomain('  cdn.taro.surf  ')).toBe('cdn.taro.surf');
+	});
+});
+
+describe('zoneNameCandidates', () => {
+	it('yields a subdomain then its registrable parent, most specific first', () => {
+		expect(zoneNameCandidates('sona.example.com')).toEqual(['sona.example.com', 'example.com']);
+		expect(zoneNameCandidates('a.b.example.com')).toEqual([
+			'a.b.example.com',
+			'b.example.com',
+			'example.com'
+		]);
+	});
+
+	it('yields just the host when it is already two labels', () => {
+		expect(zoneNameCandidates('example.com')).toEqual(['example.com']);
+	});
+
+	it('stops at two labels (never queries a bare TLD)', () => {
+		expect(zoneNameCandidates('sona.example.com')).not.toContain('com');
+	});
+
+	it('handles a single label and empty input', () => {
+		expect(zoneNameCandidates('localhost')).toEqual(['localhost']);
+		expect(zoneNameCandidates('')).toEqual([]);
+	});
+});
+
+describe('imageResizingIsOn', () => {
+	it('is true only when the zone setting value is "on"', () => {
+		expect(imageResizingIsOn({ result: { value: 'on' } })).toBe(true);
+		expect(imageResizingIsOn({ result: { value: 'off' } })).toBe(false);
+		expect(imageResizingIsOn({ result: undefined })).toBe(false);
+		expect(imageResizingIsOn({})).toBe(false);
+	});
+});
+
+describe('ciWiringEntries', () => {
+	const input = {
+		apiToken: 'tok',
+		accountId: 'acct',
+		cronSecret: 'cron',
+		setupToken: 'setup',
+		project: 'my-proj',
+		dbName: 'my-db',
+		siteUrl: 'https://my.site',
+		furtrackMode: 'off'
+	};
+
+	it('ALWAYS includes FURTRACK_MODE as a variable, even when off (stale-value guard)', () => {
+		// The live→off re-run bug: if FURTRACK_MODE is skipped when off, deploy.yml
+		// keeps re-PATCHing a stale 'live'. Writing 'off' explicitly neutralizes it.
+		const furtrack = ciWiringEntries(input).find((e) => e.name === 'FURTRACK_MODE');
+		expect(furtrack).toEqual({ kind: 'variable', name: 'FURTRACK_MODE', value: 'off' });
+	});
+
+	it('carries the live/mock mode through when enabled', () => {
+		expect(
+			ciWiringEntries({ ...input, furtrackMode: 'live' }).find((e) => e.name === 'FURTRACK_MODE')
+				?.value
+		).toBe('live');
+	});
+
+	it('wires four secrets and four variables with their values', () => {
+		const entries = ciWiringEntries(input);
+		const byName = Object.fromEntries(entries.map((e) => [e.name, e]));
+		expect(byName['CLOUDFLARE_API_TOKEN']).toEqual({
+			kind: 'secret',
+			name: 'CLOUDFLARE_API_TOKEN',
+			value: 'tok'
+		});
+		expect(byName['SETUP_TOKEN']).toEqual({ kind: 'secret', name: 'SETUP_TOKEN', value: 'setup' });
+		expect(byName['SITE_URL']).toEqual({
+			kind: 'variable',
+			name: 'SITE_URL',
+			value: 'https://my.site'
+		});
+		expect(entries.filter((e) => e.kind === 'secret')).toHaveLength(4);
+		expect(entries.filter((e) => e.kind === 'variable')).toHaveLength(4);
+	});
+});
+
+describe('ciWiringEntries ↔ workflow YAML contract', () => {
+	// Every secret/variable setup wires must be consumed by a workflow as
+	// secrets.<NAME> / vars.<NAME>. A rename on either side would otherwise no-op
+	// silently — the exact #51 bug class this test exists to catch.
+	const workflowsDir = join(dirname(fileURLToPath(import.meta.url)), '..', '.github', 'workflows');
+	const yaml = readdirSync(workflowsDir)
+		.filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
+		.map((f) => readFileSync(join(workflowsDir, f), 'utf8'))
+		.join('\n');
+	const entries = ciWiringEntries({
+		apiToken: 'x',
+		accountId: 'x',
+		cronSecret: 'x',
+		setupToken: 'x',
+		project: 'x',
+		dbName: 'x',
+		siteUrl: 'x',
+		furtrackMode: 'off'
+	});
+
+	it.each(entries)('$name is referenced as a workflow $kind', ({ kind, name }) => {
+		const ref = kind === 'secret' ? `secrets.${name}` : `vars.${name}`;
+		expect(yaml).toContain(ref);
 	});
 });

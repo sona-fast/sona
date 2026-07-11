@@ -16,7 +16,7 @@
  *
  * Prerequisites: `wrangler login` (or CLOUDFLARE_API_TOKEN) must be set up first.
  */
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
@@ -35,8 +35,11 @@ import {
 	buildPagesConfigPayload,
 	tokenResolves,
 	hostFromDomain,
+	zoneNameCandidates,
 	dnsProbeBlocksSetup,
 	imageResizingOutcome,
+	imageResizingIsOn,
+	ciWiringEntries,
 	cfApi
 } from './setup-lib.ts';
 // Shared with the admin Settings save so the seeded siteUrl passes the same
@@ -54,14 +57,19 @@ const askYesNo = async (q: string, def = true) => {
 	return a === 'y' || a === 'yes';
 };
 
-type RunOpts = { capture?: boolean; allowFail?: boolean; stdin?: 'inherit' | 'ignore' };
+type RunOpts = {
+	capture?: boolean;
+	allowFail?: boolean;
+	stdin?: 'inherit' | 'ignore';
+	env?: NodeJS.ProcessEnv;
+};
 function run(cmd: string, opts: RunOpts = {}): string {
 	console.log(`\n$ ${cmd}`);
 	try {
 		const stdio: import('node:child_process').StdioOptions = opts.capture
 			? 'pipe'
 			: [opts.stdin ?? 'inherit', 'inherit', 'inherit'];
-		const out = execSync(cmd, { stdio, encoding: 'utf8' });
+		const out = execSync(cmd, { stdio, encoding: 'utf8', env: opts.env });
 		return out ?? '';
 	} catch (err) {
 		if (opts.allowFail) {
@@ -93,7 +101,9 @@ function commandSucceeds(cmd: string): boolean {
 function ghSet(kind: 'secret' | 'variable', name: string, value: string, repo: string): boolean {
 	console.log(`\n$ gh ${kind} set ${name} -R ${repo}`);
 	try {
-		execSync(`gh ${kind} set ${name} -R ${repo}`, {
+		// execFileSync (no shell) so `repo`, derived from the git origin URL, is a
+		// single argv element and can never be interpreted as a shell command.
+		execFileSync('gh', [kind, 'set', name, '-R', repo], {
 			input: value,
 			stdio: ['pipe', 'inherit', 'inherit']
 		});
@@ -130,7 +140,13 @@ async function main() {
 	// expired token fails here with an actionable message instead of midway
 	// through creating resources. `wrangler whoami` works for both `wrangler
 	// login` and a CLOUDFLARE_API_TOKEN.
-	const whoami = run('npx wrangler whoami', { capture: true, allowFail: true });
+	// WRANGLER_LOG=warn|error|none in the operator's env suppresses wrangler's
+	// info-level "You are logged in" banner, which tokenResolves keys off — that
+	// would fail-closed on VALID creds. Drop it for this one invocation so the
+	// banner always prints.
+	const whoamiEnv = { ...env };
+	delete whoamiEnv.WRANGLER_LOG;
+	const whoami = run('npx wrangler whoami', { capture: true, allowFail: true, env: whoamiEnv });
 	process.stdout.write(whoami);
 	if (!tokenResolves(whoami)) {
 		console.error('\n✖ Cloudflare credentials did not resolve (`wrangler whoami` failed).');
@@ -138,6 +154,9 @@ async function main() {
 			'  Run `npx wrangler login`, or export CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID, then re-run setup.\n'
 		);
 		console.error(TOKEN_RECIPE);
+		// Non-zero so a wrapper/CI can detect the aborted setup (a bare `return`
+		// from main() leaves exit 0, which reads as success).
+		process.exitCode = 1;
 		rl.close();
 		return;
 	}
@@ -154,6 +173,8 @@ async function main() {
 		const overwrite = await askYesNo('wrangler.toml already exists. Overwrite it?', false);
 		if (!overwrite) {
 			console.log('Aborting so your existing wrangler.toml is preserved.');
+			// Exit 0 (unlike the credential/DNS aborts): declining to overwrite is a
+			// deliberate, successful no-op — not a failure a wrapper should flag.
 			rl.close();
 			return;
 		}
@@ -271,41 +292,59 @@ async function main() {
 		resendFrom = await ask('Resend sender (RESEND_FROM)', '');
 	}
 
-	// 0. Custom-domain preflight (only when a domain was given). Verifies the token
-	//    can write DNS for the zone — the Pages apex CNAME needs Zone·DNS·Edit, and
-	//    without it the domain sticks `pending` with a confusing 522 — and, while we
-	//    have the zone, checks/enables Image Transformations (thumbnails/OG images
-	//    are built via /cdn-cgi/image, which is off by default and per-zone). Runs
-	//    before provisioning so a missing DNS scope fails early. `imageResizingOn`:
-	//    true = on, false = off (couldn't enable), null = unknown/not checked.
+	// 0. Custom-domain preflight (only when a domain was given). Checks (does not
+	//    guarantee) DNS access for the zone — the Pages apex CNAME needs
+	//    Zone·DNS·Edit, and without it the domain sticks `pending` with a confusing
+	//    522 — and, while we have the zone, checks/enables Image Transformations
+	//    (thumbnails/OG images are built via /cdn-cgi/image, which is off by default
+	//    and per-zone). Runs before provisioning so a missing DNS scope surfaces
+	//    early (as a warning the operator can override, since setup never writes DNS
+	//    itself). `imageResizingOn`: true = on, false = off (couldn't enable),
+	//    null = unknown/not checked.
 	let imageResizingOn: boolean | null = null;
 	if (domain) {
 		const host = hostFromDomain(domain);
 		if (cfToken && cfAccount) {
-			const zoneRes = await cfApi(cfToken, `/zones?name=${encodeURIComponent(host)}`);
-			const zoneId = ((zoneRes.result as { id: string }[] | undefined) ?? [])[0]?.id;
+			// A subdomain (sona.example.com) is served by the registrable zone
+			// (example.com); an exact-name lookup finds nothing, so try the host then
+			// strip leading labels until a zone on the account matches.
+			let zoneId: string | undefined;
+			for (const candidate of zoneNameCandidates(host)) {
+				const zoneRes = await cfApi(cfToken, `/zones?name=${encodeURIComponent(candidate)}`);
+				zoneId = ((zoneRes.result as { id: string }[] | undefined) ?? [])[0]?.id;
+				if (zoneId) break;
+			}
 			if (!zoneId) {
 				console.warn(
 					`\n⚠ No Cloudflare zone found for ${host} — skipping the DNS / image-transform preflight.`
 				);
 				console.warn('  Add the domain to this Cloudflare account first if you want setup to check it.');
 			} else {
-				// DNS scope probe: listing records needs DNS access; a 401/403 means the
-				// token can't write the apex CNAME later, so fail early with the recipe.
+				// DNS scope probe: listing records needs DNS access. A 401/403 means the
+				// token can't even read DNS (and so can't write the apex CNAME later) —
+				// but setup never writes DNS itself, and an operator attaching the domain
+				// from the dashboard is fine, so warn + offer to continue rather than abort.
 				const dnsProbe = await cfApi(cfToken, `/zones/${zoneId}/dns_records?per_page=1`);
 				if (dnsProbeBlocksSetup(dnsProbe)) {
-					console.error(`\n✖ The API token cannot manage DNS for ${host} (needs Zone · DNS · Edit).`);
-					console.error('  Attaching the custom apex domain would leave it stuck pending with a 522.\n');
-					console.error(TOKEN_RECIPE);
-					rl.close();
-					return;
+					console.warn(
+						`\n⚠ Could not verify DNS access for ${host} (token lacks Zone · DNS · Read; attaching the apex CNAME later needs Zone · DNS · Edit).`
+					);
+					console.warn('  Setup only checks access — it never writes DNS itself. If you plan to attach');
+					console.warn('  the domain from the Cloudflare dashboard, you can continue.');
+					const proceed = await askYesNo('Continue setup anyway?', true);
+					if (!proceed) {
+						console.error(`\n${TOKEN_RECIPE}`);
+						process.exitCode = 1;
+						rl.close();
+						return;
+					}
 				}
 				// Image Transformations. Off by default, per-zone, and NOT grantable by
 				// the deploy token — enable it if the token carries Zone Settings·Edit,
 				// else leave imageResizingOn=null (unknown) and warn in Next steps.
 				const ir = await cfApi(cfToken, `/zones/${zoneId}/settings/image_resizing`);
 				let patchOk = false;
-				if (ir.ok && (ir.result as { value?: string } | undefined)?.value !== 'on') {
+				if (ir.ok && !imageResizingIsOn(ir)) {
 					const enabled = await cfApi(cfToken, `/zones/${zoneId}/settings/image_resizing`, {
 						method: 'PATCH',
 						body: { value: 'on' }
@@ -316,7 +355,7 @@ async function main() {
 			}
 		} else {
 			console.warn(
-				'\nℹ A custom domain was given but CLOUDFLARE_API_TOKEN/ACCOUNT_ID are not in the env,'
+				'\n⚠ A custom domain was given but CLOUDFLARE_API_TOKEN/ACCOUNT_ID are not in the env,'
 			);
 			console.warn('  so setup cannot preflight DNS access. Attaching the apex domain needs a token');
 			console.warn('  with Zone · DNS · Edit (see README → custom domain).');
@@ -365,9 +404,7 @@ async function main() {
 	//     back to a one-time local deploy that reads wrangler.toml.
 	if (cfToken && cfAccount) {
 		const payload = buildPagesConfigPayload({
-			dbBinding: 'DB',
 			dbId,
-			r2Binding: 'IMAGES',
 			bucket: r2Missing ? '' : bucket,
 			envVars: { FURTRACK_MODE: furtrackMode }
 		});
@@ -465,52 +502,44 @@ async function main() {
 	//    there is a GitHub origin, and the CLOUDFLARE_* values are in the env (if
 	//    the operator used `wrangler login` there is no token value to pass on).
 	const originUrl = run('git remote get-url origin', { capture: true, allowFail: true }).trim();
+	// One GitHub-origin parser: deriveRepoSlug is the source of truth, and
+	// "has a GitHub origin" is simply "we could derive owner/repo from it". This
+	// drops the old second regex (`/github\.com/`) and the defensive branch that
+	// existed only for when the two disagreed.
 	const repoSlug = deriveRepoSlug(originUrl);
 	const gh = ghSecretEligibility({
 		ghInstalled: commandSucceeds('gh --version'),
 		ghAuthenticated: commandSucceeds('gh auth status'),
-		hasGithubOrigin: /github\.com/i.test(originUrl),
+		hasGithubOrigin: repoSlug !== null,
 		apiToken: env.CLOUDFLARE_API_TOKEN,
 		accountId: env.CLOUDFLARE_ACCOUNT_ID
 	});
 	let ciSecretsSet = false;
-	if (gh.eligible && !repoSlug) {
-		// eligible means the origin matched github.com, so this is defensive.
-		console.warn('\n⚠ Could not derive owner/repo from the origin URL — set the CI secrets/vars by hand.');
-	} else if (gh.eligible && repoSlug) {
+	if (gh.eligible && repoSlug) {
 		const doIt = await askYesNo(
-			'Set this repo\'s GitHub Actions secrets/vars for CI deploys (from your CLOUDFLARE_* env)?',
+			`Set ${repoSlug}'s GitHub Actions secrets/vars for CI deploys (from your CLOUDFLARE_* env)?`,
 			false
 		);
 		if (doIt) {
 			// -R repoSlug on every call: a fork has two remotes (origin + upstream
 			// sona), so a bare `gh secret set` errors "multiple remotes detected".
-			// CRON_SECRET is set as a REPO secret too (matching the Pages secret above)
-			// so artist-sync.yml / sticker-resync.yml authenticate instead of skipping.
-			// FURTRACK_MODE is set as a repo VARIABLE (when on) so deploy.yml carries
-			// the chosen mode into CI deploys.
-			const calls = [
-				ghSet('secret', 'CLOUDFLARE_API_TOKEN', env.CLOUDFLARE_API_TOKEN!, repoSlug),
-				ghSet('secret', 'CLOUDFLARE_ACCOUNT_ID', env.CLOUDFLARE_ACCOUNT_ID!, repoSlug),
-				ghSet('secret', 'CRON_SECRET', cronSecret, repoSlug),
-				// SETUP_TOKEN as a repo secret so deploy.yml can re-sync it onto the
-				// Pages project right before deploying. Pages secrets bind at DEPLOY
-				// TIME, and a secret merely `put` by this CLI (before any deploy) is
-				// NOT bound by the fork's first CI deploy — so without this the
-				// /admin/setup wizard reports "SETUP_TOKEN is not configured" on a
-				// fresh CI-first onboarding until a second deploy happens.
-				ghSet('secret', 'SETUP_TOKEN', setupToken, repoSlug),
-				ghSet('variable', 'CLOUDFLARE_PAGES_PROJECT', project, repoSlug),
-				ghSet('variable', 'D1_DATABASE_NAME', dbName, repoSlug),
-				ghSet('variable', 'SITE_URL', siteUrl, repoSlug)
-			];
-			if (furtrackMode !== 'off') calls.push(ghSet('variable', 'FURTRACK_MODE', furtrackMode, repoSlug));
-			const ok = calls.every(Boolean);
+			// The exact set (incl. CRON_SECRET as a repo secret so artist-sync.yml /
+			// sticker-resync.yml authenticate, and FURTRACK_MODE — always, even 'off',
+			// so a live→off re-run neutralizes a stale 'live') lives in ciWiringEntries.
+			const entries = ciWiringEntries({
+				apiToken: env.CLOUDFLARE_API_TOKEN!,
+				accountId: env.CLOUDFLARE_ACCOUNT_ID!,
+				cronSecret,
+				setupToken,
+				project,
+				dbName,
+				siteUrl,
+				furtrackMode
+			});
+			const ok = entries.map((e) => ghSet(e.kind, e.name, e.value, repoSlug)).every(Boolean);
 			ciSecretsSet = ok;
 			if (ok)
-				console.log(
-					`\n✔ CI secrets/variables set (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CRON_SECRET, SETUP_TOKEN, CLOUDFLARE_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL${furtrackMode !== 'off' ? ', FURTRACK_MODE' : ''}).`
-				);
+				console.log(`\n✔ CI secrets/variables set (${entries.map((e) => e.name).join(', ')}).`);
 			else
 				console.warn(
 					'\n⚠ Some `gh` secret/variable commands failed — check `gh` auth/permissions and set them manually.'
@@ -519,11 +548,12 @@ async function main() {
 	} else {
 		console.log(`\nℹ Skipping GitHub Actions secret setup: ${gh.reason}.`);
 		console.log(
-			'  CI deploys need CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID + CRON_SECRET secrets and'
+			'  CI deploys need CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID + CRON_SECRET + SETUP_TOKEN'
 		);
 		console.log(
-			`  CLOUDFLARE_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL${furtrackMode !== 'off' ? ', FURTRACK_MODE' : ''} variables (Settings → Secrets and variables → Actions).`
+			'  secrets and CLOUDFLARE_PAGES_PROJECT, D1_DATABASE_NAME, SITE_URL, FURTRACK_MODE variables'
 		);
+		console.log('  (Settings → Secrets and variables → Actions).');
 	}
 
 	rl.close();
@@ -560,6 +590,10 @@ async function main() {
 		// null (couldn't check — token lacks Zone Settings:Read).
 		if (imageResizingOn === true) {
 			console.log(`  • Image Transformations: enabled on the ${host} zone (thumbnails will resize).`);
+			// Enabling the zone setting does NOT enable "Resize images from any origin",
+			// which a cross-zone source (e.g. an R2 public URL on another zone) needs.
+			console.log('     If images load from another zone/origin (e.g. an R2 public URL), also turn on');
+			console.log(`     "Resize images from any origin":  dashboard → ${host} → Images → Transformations.`);
 		} else {
 			console.log('  • Image Transformations (thumbnails/OG images) is OFF or unverified. Enable it:');
 			console.log(`     dashboard → ${host} → Images → Transformations → "Enable for zone" +`);
