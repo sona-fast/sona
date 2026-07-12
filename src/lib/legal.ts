@@ -1,11 +1,13 @@
 // Default Privacy Policy and Terms of Service content for a Sona site.
 //
 // These defaults describe what the Sona application *actually* does with data
-// (see below), so they are accurate for any unmodified fork by construction —
-// every fork runs this same code. An owner who changes their site's data
-// practices (e.g. adds third-party analytics) should override the text via the
-// admin Settings → Legal fields, which replace these defaults on /privacy and
-// /terms.
+// (see below). The one data practice a fork can toggle — the optional built-in
+// visitor analytics (issue #6/#149, off unless OBSERVABILITY_ENABLED is set) —
+// is disclosed conditionally in the "Information we collect" section, so the
+// text stays accurate whether or not a given fork enables it. An owner who
+// changes their site's data practices beyond that (e.g. adds third-party
+// analytics) should override the text via the admin Settings → Legal fields,
+// which replace these defaults on /privacy and /terms.
 //
 // Kept as English content constants (not paraglide UI messages) because this is
 // long-form, jurisdiction-sensitive prose an owner edits/localizes per site,
@@ -25,7 +27,7 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
-export const LEGAL_DEFAULTS_UPDATED = '2026-07-08';
+export const LEGAL_DEFAULTS_UPDATED = '2026-07-12';
 
 /**
  * Resolve the "Last updated" date to show on a legal page from a *stable* source
@@ -67,9 +69,10 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'Information we collect',
 			body: [
-				'From visitors, we do not require an account and do not collect personal information to browse. The site stores a small preference cookie for your light/dark theme and a browser-local setting for your preferred gallery layout. It does not set advertising or third-party analytics cookies by default.',
+				'From visitors, we do not require an account and do not require you to provide personal information to browse. The site stores a small preference cookie for your light/dark theme and a browser-local setting for your preferred gallery layout. It does not set advertising or third-party analytics cookies by default.',
 				'When the site owner signs in to manage the site, an administrative session cookie is set for the owner only.',
-				'Our hosting and content-delivery provider (Cloudflare) may process limited technical data such as IP address and request metadata to serve and secure the site. This is standard server operation, not tracking by us.'
+				'Our hosting and content-delivery provider (Cloudflare) may process limited technical data such as IP address and request metadata to serve and secure the site. This is standard server operation, not tracking by us.',
+				'Some sites turn on an optional built-in analytics feature. If this site has visitor analytics enabled, it keeps aggregate counters in its own database to understand how the site is used: how often pages are viewed, which site referred a visit, visitor country, device type (desktop, mobile, or tablet), and how often the download button is pressed. These are counters, not profiles: they use no cookies, store no IP addresses, and keep no records tied to an individual visitor, and none of it is shared with any other site or service. The page-view, referrer, country, and device counters are deleted by a weekly cleanup once they are about 35 days old. The download count is kept as a simple running total.'
 			]
 		},
 		{
@@ -89,7 +92,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'Service providers',
 			body: [
-				'We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, image storage) and, on some sites, an image-upload provider. They process data only to provide these services.'
+				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, image storage), on some sites an image-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services."
 			]
 		},
 		{

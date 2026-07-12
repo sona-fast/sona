@@ -42,6 +42,36 @@ describe('defaultPrivacyPolicy', () => {
 			.join('\n');
 		expect(text).toMatch(/CPRA|California Consumer Privacy Act/);
 	});
+
+	// Guards against the policy drifting out of sync with the optional built-in
+	// visitor analytics (issue #6/#149): if the feature ships but the disclosure
+	// is dropped, this fails.
+	it('conditionally discloses the built-in visitor analytics in "Information we collect"', () => {
+		// Scope to the section, and match wording unique to the visitor-analytics
+		// paragraph — not the pre-existing "third-party analytics cookies" line in
+		// the same section, which also contains the word "analytics".
+		const collect = defaultPrivacyPolicy(withEmail).find(
+			(s) => s.heading === 'Information we collect'
+		);
+		expect(collect).toBeDefined();
+		const text = (collect?.body ?? []).join('\n');
+		// Framed as conditional, not something every site does.
+		expect(text).toMatch(/If this site has visitor analytics enabled|Some sites/);
+		// The four visitor counters are pruned after ~35 days (pruneVisitorRollups
+		// in metrics.ts)...
+		expect(text).toMatch(/35 days/);
+		// ...while the download count is honestly a running total, not deleted.
+		expect(text).toContain('running total');
+	});
+
+	// Guards against the service-providers list drifting from the email feature:
+	// password resets go through Resend, which must be named as a processor.
+	it('names Resend as the email delivery provider', () => {
+		const text = defaultPrivacyPolicy(withEmail)
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(text).toContain('Resend');
+	});
 });
 
 describe('defaultTerms', () => {
