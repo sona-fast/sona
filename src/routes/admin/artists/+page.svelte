@@ -507,6 +507,7 @@
 		color: var(--muted-foreground);
 		display: flex;
 		transition: color 0.15s;
+		text-decoration: none;
 	}
 
 	.social-icon:hover {

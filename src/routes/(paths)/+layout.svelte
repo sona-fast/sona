@@ -74,6 +74,7 @@
 	.back {
 		display: flex;
 		color: var(--muted-foreground);
+		text-decoration: none;
 	}
 
 	.back:hover {

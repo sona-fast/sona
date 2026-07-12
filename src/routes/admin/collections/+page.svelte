@@ -257,6 +257,7 @@
 		display: block;
 		aspect-ratio: 16 / 9;
 		background: var(--secondary);
+		text-decoration: none;
 	}
 
 	.collection-cover img {
@@ -496,6 +497,7 @@
 			background: var(--secondary);
 			flex-shrink: 0;
 			display: block;
+			text-decoration: none;
 		}
 
 		.mobile-collection-thumb img {

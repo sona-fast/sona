@@ -277,13 +277,17 @@ h1, h2, h3, h4, h5, h6 {
 	font-weight: 600;
 }
 
+/* SONA-81 (Treatment A): inline text links carry a resting underline so they're
+   distinguishable without relying on colour alone (WCAG 1.4.1). This is the
+   global default; UI-chrome anchors (buttons, nav, cards, tiles, badges, list
+   rows) opt out via their own `text-decoration: none` (`.btn` below; the rest
+   component-scoped), which outranks this rule — so only genuine text links get
+   underlined: breadcrumbs, the artwork "Commission by <artist>" credit, home
+   "see more", admin "forgot password", and any future prose links. */
 a {
 	color: var(--primary);
-	text-decoration: none;
-}
-
-a:hover {
 	text-decoration: underline;
+	text-underline-offset: 2px;
 }
 
 img {
@@ -323,6 +327,9 @@ input, select, textarea {
 	font-weight: 500;
 	line-height: 1.4286;
 	border: none;
+	/* Anchor-styled buttons (<a class="btn">, e.g. Download, pagination, error
+	   page) must never inherit the SONA-81 resting link underline. */
+	text-decoration: none;
 	/* Eases the hover fill and (for .btn-outline) its border together. Also
 	   briefly fades them on a theme/mode switch — they animate while the rest of
 	   the page recolors instantly — a 150ms cosmetic desync we accept rather than
@@ -537,5 +544,44 @@ select.input {
 	::view-transition-old(root),
 	::view-transition-new(root) {
 		animation: none;
+	}
+}
+
+/* ── SONA-81: prefers-contrast: more (modest pass) ────────────────────────────
+   Full-opacity text where it was muted, and stronger borders, for users who ask
+   the OS for more contrast. */
+@media (prefers-contrast: more) {
+	:root,
+	[data-theme='light'],
+	[data-theme-id] {
+		--muted-foreground: var(--foreground);
+		--border: color-mix(in srgb, var(--foreground) 55%, var(--border));
+	}
+}
+
+/* ── SONA-81: forced-colors: active (Windows High Contrast) ───────────────────
+   In forced-colors, custom colours are replaced by the user's system palette, so
+   colour-only cues vanish. Re-assert shape with system-colour borders and a
+   visible focus ring; keep the NSFW badge legible as a bordered chip. */
+@media (forced-colors: active) {
+	.btn {
+		border: 1px solid ButtonText;
+	}
+
+	:focus-visible {
+		outline: 2px solid Highlight;
+		outline-offset: 2px;
+	}
+
+	.card,
+	.panel {
+		border: 1px solid CanvasText;
+	}
+
+	.nsfw-badge {
+		border: 1px solid CanvasText;
+		padding: 0 4px;
+		forced-color-adjust: none;
+		color: CanvasText;
 	}
 }
