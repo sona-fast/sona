@@ -198,7 +198,13 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 		schedule(event.platform, Promise.all(work));
 	}
 
-	// Security headers
+	// Security headers. Content-Security-Policy is set separately by SvelteKit's
+	// native CSP (kit.csp in svelte.config.js), which hashes its own inline scripts
+	// — do not also set it here. HSTS is a plain header (no framework machinery):
+	// force HTTPS for a year including subdomains. No `preload` — that opts every
+	// fork's apex into the browser preload list irreversibly, which we can't assume
+	// is safe for a fork that isn't HTTPS-only end to end.
+	response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 	response.headers.set('X-Frame-Options', 'DENY');
 	response.headers.set('X-Content-Type-Options', 'nosniff');
 	response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');

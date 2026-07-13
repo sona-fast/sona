@@ -360,3 +360,27 @@ describe('authHandle — 5xx counts toward the error rate (issue #6)', () => {
 		expect(sqlite.prepare('SELECT COUNT(*) c FROM error_sample').get().c).toBe(0);
 	});
 });
+
+describe('authHandle — security response headers (F3)', () => {
+	beforeEach(() => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+	});
+
+	it('sets HSTS (and the existing hardening headers) on a public response', async () => {
+		const db = makeDb();
+		const res = (await authHandle({
+			event: makeEvent('/gallery', db),
+			resolve
+		} as never)) as Response;
+
+		// HSTS: one year, subdomains, no preload (forks aren't all HTTPS-only).
+		expect(res.headers.get('Strict-Transport-Security')).toBe(
+			'max-age=31536000; includeSubDomains'
+		);
+		expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+		expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+		expect(res.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
+		// CSP is emitted by SvelteKit's kit.csp during page render, not this hook, so
+		// it is asserted end-to-end in tests/e2e/csp-check.spec.ts, not here.
+	});
+});
