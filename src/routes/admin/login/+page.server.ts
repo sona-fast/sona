@@ -10,17 +10,22 @@ import {
 import { SESSION_COOKIE } from '$lib/config';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
+import { verifyTurnstile } from '$lib/server/turnstile';
 import { lt } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 
 const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days in seconds
 
-export const load: PageServerLoad = async ({ locals, url }) => {
+export const load: PageServerLoad = async ({ locals, url, platform }) => {
 	if (locals.admin) {
 		redirect(302, '/admin/images');
 	}
-	// Set by the /admin/reset redirect after a successful password reset.
-	return { resetSuccess: url.searchParams.get('reset') === '1' };
+	// The public Turnstile site key, when the fork has configured one — the page
+	// renders the widget only when it's present. The secret stays server-side.
+	return {
+		resetSuccess: url.searchParams.get('reset') === '1',
+		turnstileSitekey: platform?.env.TURNSTILE_SITEKEY ?? null
+	};
 };
 
 export const actions = {
@@ -40,6 +45,21 @@ export const actions = {
 			return fail(429, {
 				error: `Too many attempts. Try again in ${Math.ceil(wait / 60)} minute(s).`
 			});
+		}
+
+		// Turnstile bot check — enforced ONLY when the fork has configured BOTH keys
+		// (opt-in), matching the widget-render condition on the page (which needs the
+		// sitekey). Gating on both avoids a half-config lockout: a fork that set only
+		// the secret renders no widget, so enforcing would reject every login forever.
+		// The decision is server-side and can't be flipped by client input. When
+		// enforced, a missing/invalid token or a siteverify failure rejects the login
+		// (fail closed), and it runs BEFORE the password verify so a bad token never
+		// spends a PBKDF2 hash. Either key absent → skip entirely (throttle+password).
+		if (platform?.env.TURNSTILE_SECRET && platform?.env.TURNSTILE_SITEKEY) {
+			const token = (data.get('cf-turnstile-response') as string) || '';
+			if (!(await verifyTurnstile(platform.env.TURNSTILE_SECRET, token, ip))) {
+				return fail(403, { error: 'Verification failed. Please try again.' });
+			}
 		}
 
 		const db = getDb(platform!.env.DB);

@@ -20,6 +20,12 @@ ADMIN_PASSWORD = "e2e-admin-password"
 # key). Throwaway local value — the forgot-reset spec intercepts the Resend send
 # (tests/e2e/resend-mock.mjs), so this key never reaches api.resend.com.
 RESEND_API_KEY = "e2e-resend-key"
+# Cloudflare's official Turnstile TEST keys: the site key auto-solves the widget
+# and the secret verifies ANY token as success — so admin login runs enforced
+# (TURNSTILE_SECRET present) yet passes deterministically under Playwright. Not
+# real secrets; safe to commit.
+TURNSTILE_SITEKEY = "1x00000000000000000000AA"
+TURNSTILE_SECRET = "1x0000000000000000000000000000000AA"
 
 [[d1_databases]]
 binding = "DB"

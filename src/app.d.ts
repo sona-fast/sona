@@ -109,6 +109,19 @@ declare global {
 				CLOUDFLARE_ANALYTICS_TOKEN?: string;
 				CLOUDFLARE_ACCOUNT_ID?: string;
 				CLOUDFLARE_ZONE_ID?: string;
+				/**
+				 * Cloudflare Turnstile keys for the admin-login bot check (opt-in per
+				 * fork). TURNSTILE_SITEKEY is public (rendered into the login page so the
+				 * widget loads); TURNSTILE_SECRET is server-only (used for siteverify).
+				 * Enforcement is gated on BOTH being set (matching the widget-render
+				 * condition): both present → the login action requires a valid token (fail
+				 * closed); either absent → Turnstile is skipped and login runs on the
+				 * throttle + password alone, so a half-config never locks the admin out.
+				 * Set both together via `wrangler pages secret put TURNSTILE_SECRET` and a
+				 * TURNSTILE_SITEKEY var.
+				 */
+				TURNSTILE_SITEKEY?: string;
+				TURNSTILE_SECRET?: string;
 			};
 			/**
 			 * Cloudflare execution context. `waitUntil` lets fire-and-forget work

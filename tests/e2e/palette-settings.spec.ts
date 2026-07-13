@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { adminLogin } from './admin-login';
 
 // Admin-settings palette flow (#55): the hex inputs normalize/revert, and the
 // ref-sheet picker dialog opens (and closes on Escape — the shared focus-trap
@@ -10,11 +11,7 @@ import { test, expect, type Page } from '@playwright/test';
 const PASSWORD = 'e2e-admin-password';
 
 async function login(page: Page) {
-	await page.goto('/admin/login');
-	await page.fill('input[name="password"]', PASSWORD);
-	// Plain form POST — works pre-hydration, then redirects to /admin/images.
-	await page.click('button[type="submit"]');
-	await page.waitForURL(/\/admin\/images/);
+	await adminLogin(page, PASSWORD);
 }
 
 // The "new color" hex input in the palette editor (Sona section, Site tab).

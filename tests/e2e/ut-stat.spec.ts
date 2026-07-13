@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { adminLogin } from './admin-login';
 
 // The UploadThing file-count stat ("UT Files") in the admin storage panel is
 // guarded by `{#if showUtFileStat(data)}` — and the load populates data.utUsage
@@ -18,11 +19,7 @@ import { test, expect, type Page } from '@playwright/test';
 const PASSWORD = 'e2e-admin-password';
 
 async function login(page: Page) {
-	await page.goto('/admin/login');
-	await page.fill('input[name="password"]', PASSWORD);
-	// Plain form POST — works pre-hydration, then redirects to /admin/images.
-	await page.click('button[type="submit"]');
-	await page.waitForURL(/\/admin\/images/);
+	await adminLogin(page, PASSWORD);
 }
 
 // The storage panel is gated behind a client-side tab (display:none until the

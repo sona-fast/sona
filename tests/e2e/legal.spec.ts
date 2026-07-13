@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { adminLogin } from './admin-login';
 
 // E2E coverage for the /privacy + /terms legal pages (and their footer / mobile
 // discoverability). Runs against the shared read-only seed (siteName
@@ -11,10 +12,7 @@ test.describe.configure({ mode: 'serial' });
 const PASSWORD = 'e2e-admin-password'; // legacy ADMIN_PASSWORD login path (see seed.sql)
 
 async function login(page: Page) {
-	await page.goto('/admin/login');
-	await page.fill('input[name="password"]', PASSWORD);
-	await page.locator('input[name="password"]').press('Enter');
-	await page.waitForURL(/\/admin\/images/);
+	await adminLogin(page, PASSWORD);
 }
 
 test('default legal pages render and are reachable from the footer', async ({ page }) => {

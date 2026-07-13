@@ -1,10 +1,65 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { onMount } from 'svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { form, data } = $props();
 
 	let signingIn = $state(false);
+
+	// Cloudflare Turnstile: rendered only when the fork configured a site key. We
+	// render explicitly (rather than the implicit class scan) so it also appears on
+	// client-side navigations to this page, and so we hold a widget id to reset the
+	// single-use token after a failed submit — siteverify consumes the token, so a
+	// retry needs a fresh one.
+	let widgetEl = $state<HTMLDivElement>();
+	let widgetId: string | undefined;
+	// Holds the solved token so we can keep the submit button disabled until the
+	// widget solves — a click before then just 403s (recoverable, but confusing).
+	let turnstileToken = $state('');
+
+	onMount(() => {
+		const sitekey = data.turnstileSitekey;
+		if (!sitekey) return;
+		const render = () => {
+			const ts = (window as unknown as { turnstile?: TurnstileApi }).turnstile;
+			if (!ts || !widgetEl) return;
+			widgetId = ts.render(widgetEl, {
+				sitekey,
+				theme: 'auto',
+				callback: (t: string) => (turnstileToken = t),
+				'expired-callback': () => (turnstileToken = '')
+			});
+		};
+		if ((window as unknown as { turnstile?: TurnstileApi }).turnstile) {
+			render();
+			return;
+		}
+		const s = document.createElement('script');
+		s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+		s.async = true;
+		s.onload = render;
+		document.head.appendChild(s);
+	});
+
+	function resetTurnstile() {
+		turnstileToken = '';
+		const ts = (window as unknown as { turnstile?: TurnstileApi }).turnstile;
+		if (ts && widgetId !== undefined) ts.reset(widgetId);
+	}
+
+	interface TurnstileApi {
+		render(
+			el: HTMLElement,
+			opts: {
+				sitekey: string;
+				theme?: string;
+				callback?: (token: string) => void;
+				'expired-callback'?: () => void;
+			}
+		): string;
+		reset(id?: string): void;
+	}
 </script>
 
 <div class="login-page">
@@ -25,13 +80,23 @@
 			return async ({ update }) => {
 				await update();
 				signingIn = false;
+				// The submitted token was redeemed by siteverify (single-use); clear the
+				// widget so a retry after a wrong password gets a fresh one.
+				resetTurnstile();
 			};
 		}}>
 			<label>
 				<span>{m.admin_field_password()}</span>
 				<input type="password" name="password" class="input" required autofocus />
 			</label>
-			<button type="submit" class="btn btn-primary full-width" disabled={signingIn}>
+			{#if data.turnstileSitekey}
+				<div bind:this={widgetEl} class="turnstile"></div>
+			{/if}
+			<button
+				type="submit"
+				class="btn btn-primary full-width"
+				disabled={signingIn || (!!data.turnstileSitekey && !turnstileToken)}
+			>
 				{signingIn ? m.admin_login_signing_in() : m.admin_login_sign_in()}
 			</button>
 		</form>

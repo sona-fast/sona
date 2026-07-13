@@ -24,6 +24,10 @@ RESEND_API_KEY = "e2e-resend-key"
 # UploadThing token shape (base64 JSON { apiKey: "sk_…", appId, regions }) so the
 # SDK parses it instead of failing config validation. Throwaway local value.
 UPLOADTHING_TOKEN = "eyJhcGlLZXkiOiJza19lMmVfdGVzdF9rZXkiLCJhcHBJZCI6ImUyZS1hcHAtaWQiLCJyZWdpb25zIjpbInNlYTEiXX0="
+# Turnstile TEST keys — keep in sync with wrangler.e2e.toml so admin login works
+# on this spec's dedicated server too (widget auto-solves, secret verifies).
+TURNSTILE_SITEKEY = "1x00000000000000000000AA"
+TURNSTILE_SECRET = "1x0000000000000000000000000000000AA"
 
 [[d1_databases]]
 binding = "DB"
