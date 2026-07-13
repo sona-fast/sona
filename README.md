@@ -86,6 +86,7 @@ original deployment it grew out of). The project home is
    | Account · D1 · Edit | create + migrate the database |
    | Account · Workers R2 Storage · Edit | create the image bucket |
    | Zone · DNS · Edit | **only if** attaching a custom domain (writes the apex record) |
+   | Zone · Firewall Services · Edit | **only if** attaching a custom domain — adds a WAF rate limit on the public download beacon (`POST /api/metrics/download`) |
    | Zone · Zone Settings · Edit | *optional* — lets setup enable image resizing for you |
 
    Without **DNS · Edit**, registering the Pages apex domain succeeds but the DNS

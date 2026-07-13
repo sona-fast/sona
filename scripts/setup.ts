@@ -39,6 +39,7 @@ import {
 	imageResizingOutcome,
 	cfApi
 } from './setup-lib.ts';
+import { applyDownloadRateLimit, type RateLimitStatus } from './waf-lib.ts';
 // Shared with the admin Settings save so the seeded siteUrl passes the same
 // https-URL validation (validate.ts has no imports, so tsx loads it directly).
 import { normalizeHttpsUrl } from '../src/lib/server/validate.ts';
@@ -113,8 +114,9 @@ const TOKEN_RECIPE =
 	'    • Account · Cloudflare Pages · Edit\n' +
 	'    • Account · D1 · Edit\n' +
 	'    • Account · Workers R2 Storage · Edit\n' +
-	'    • Zone · DNS · Edit            (only if you are attaching a custom domain)\n' +
-	'    • Zone · Zone Settings · Edit  (optional; lets setup enable image resizing for you)';
+	'    • Zone · DNS · Edit               (only if you are attaching a custom domain)\n' +
+	'    • Zone · Firewall Services · Edit (only with a custom domain; adds the download-beacon rate limit)\n' +
+	'    • Zone · Zone Settings · Edit     (optional; lets setup enable image resizing for you)';
 
 async function main() {
 	console.log('— Sona setup —\n');
@@ -279,6 +281,10 @@ async function main() {
 	//    before provisioning so a missing DNS scope fails early. `imageResizingOn`:
 	//    true = on, false = off (couldn't enable), null = unknown/not checked.
 	let imageResizingOn: boolean | null = null;
+	// Download-beacon WAF rate limit (finding F5). Only meaningful when the fork
+	// runs on a zone the operator controls — a *.pages.dev-only fork has no zone to
+	// attach it to. Null = not attempted (no domain / no zone / no token).
+	let downloadRateLimit: RateLimitStatus | null = null;
 	if (domain) {
 		const host = hostFromDomain(domain);
 		if (cfToken && cfAccount) {
@@ -313,6 +319,17 @@ async function main() {
 					patchOk = enabled.ok;
 				}
 				imageResizingOn = imageResizingOutcome(ir, patchOk);
+
+				// WAF rate limit for the public download beacon (finding F5). Non-fatal:
+				// a token without Zone · Firewall Services · Edit just yields an 'error'
+				// result we warn about in Next steps — setup keeps going regardless.
+				const rl = await applyDownloadRateLimit(cfToken, host);
+				downloadRateLimit = rl.status;
+				if (rl.status === 'error') {
+					console.warn(`\n⚠ Could not attach the download-beacon rate-limit rule: ${rl.detail}`);
+				} else {
+					console.log(`✔ Download-beacon rate limit: ${rl.detail}`);
+				}
 			}
 		} else {
 			console.warn(
@@ -565,6 +582,15 @@ async function main() {
 			console.log(`     dashboard → ${host} → Images → Transformations → "Enable for zone" +`);
 			console.log('     "Resize images from any origin". Free tier: 5,000 transformations/month.');
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
+		}
+		// Download-beacon rate limit (finding F5). null = not attempted (no zone);
+		// 'error' = token lacked Zone · Firewall Services · Edit — tell them to add it.
+		if (downloadRateLimit === 'error') {
+			console.log('  • Download-beacon rate limit: NOT set (token lacks Zone · Firewall Services · Edit).');
+			console.log('     Add that permission to the token, then run:');
+			console.log(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
+		} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
+			console.log(`  • Download-beacon rate limit: applied to the ${host} zone (blocks POST floods).`);
 		}
 	}
 	console.log('\n  Your one-time setup token (enter it in the wizard):\n');
