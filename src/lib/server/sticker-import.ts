@@ -16,7 +16,7 @@ import type { SiteSettings } from '$lib/server/settings';
 import { getStorage, isAllowedStickerType, extFromContentType, deleteFile, isOwnedUrl } from '$lib/server/storage';
 import { getStickerSet, downloadFile, stickerSetUrl, parseStickerSetName, stickerMediaType } from '$lib/server/telegram';
 import type { TelegramSticker } from '$lib/server/telegram';
-import { resolveStickerArtistIds } from '$lib/server/stickers';
+import { resolveStickerArtistIds, inferAppendedArtistId } from '$lib/server/stickers';
 import type { AvatarRehostContext } from '$lib/server/avatar';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeUrl } from '$lib/server/validate';
@@ -902,6 +902,22 @@ export async function resyncTelegramPacks(opts: {
 					(await db.select({ m: sql<number>`COALESCE(MAX(${stickers.position}), -1)` }).from(stickers).where(eq(stickers.packId, pack.id)).get())?.m ?? -1;
 				let position = maxPos + 1;
 
+				// Managed pack → its manager. Unmanaged pack → its single attributed
+				// artist when the existing stickers are effectively single-artist
+				// (#184); otherwise unattributed, as before. One grouped query per
+				// pack, and only when there is something to append.
+				let appendArtistId: number | null = pack.managerArtistId;
+				if (appendArtistId == null) {
+					const distinct = await db
+						.select({ artistId: stickers.artistId })
+						.from(stickers)
+						.where(and(eq(stickers.packId, pack.id), isNotNull(stickers.artistId)))
+						.groupBy(stickers.artistId);
+					appendArtistId = inferAppendedArtistId(
+						distinct.map((d) => d.artistId).filter((id): id is number => id != null)
+					);
+				}
+
 				for (const sticker of newStickers) {
 					if (budget <= 0) {
 						result.capReached = true;
@@ -913,8 +929,7 @@ export async function resyncTelegramPacks(opts: {
 							db,
 							{
 								packId: pack.id,
-								// Managed pack → its manager artist; unmanaged → unattributed.
-								artistId: pack.managerArtistId ?? null,
+								artistId: appendArtistId,
 								imageUrl: storedUrl,
 								width: sticker.width,
 								height: sticker.height,

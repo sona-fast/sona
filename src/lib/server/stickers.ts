@@ -97,6 +97,19 @@ export function derivePackShape(managerArtistId: number | null, distinctArtistId
 }
 
 /**
+ * Artist to credit for a sticker APPENDED to an existing unmanaged pack (the
+ * cron re-sync path — managed packs never reach here: the call site credits
+ * the manager first). The pack inherits its single attributed artist when the
+ * existing stickers carry exactly one distinct non-null artistId — the same
+ * "effectively single-artist" notion as derivePackShape, and unambiguous even
+ * when some stickers are unattributed (decided in #184). Zero attributed
+ * artists or a mix keeps the append unattributed.
+ */
+export function inferAppendedArtistId(distinctArtistIds: number[]): number | null {
+	return distinctArtistIds.length === 1 ? distinctArtistIds[0] : null;
+}
+
+/**
  * Enforce the single-artist invariant on a set of per-sticker artist ids before
  * insert/update: when a pack has a managerArtistId, every sticker MUST be credited
  * to that artist, so we override any per-sticker value. With no manager, the

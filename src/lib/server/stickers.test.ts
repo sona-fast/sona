@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error -- no type declarations for better-sqlite3
 import BetterSqlite3 from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { derivePackShape, resolveStickerArtistIds, findStickers, listPacks } from './stickers';
+import { derivePackShape, inferAppendedArtistId, resolveStickerArtistIds, findStickers, listPacks } from './stickers';
 import * as schema from './db/schema';
 import type { Database as Db } from './db';
 
@@ -53,6 +53,19 @@ describe('derivePackShape', () => {
 	it('is multi when self-managed with more than one distinct artist', () => {
 		expect(derivePackShape(null, [4, 5])).toBe('multi');
 		expect(derivePackShape(null, [1, 2, 3])).toBe('multi');
+	});
+});
+
+describe('inferAppendedArtistId (cron append attribution, #184)', () => {
+	it('inherits the single attributed artist on an unmanaged pack', () => {
+		// One distinct non-null artist is unambiguous even when some existing
+		// stickers are unattributed (the nulls are filtered before the call).
+		expect(inferAppendedArtistId([4])).toBe(4);
+	});
+
+	it('stays unattributed with zero attributed or mixed artists', () => {
+		expect(inferAppendedArtistId([])).toBeNull();
+		expect(inferAppendedArtistId([4, 5])).toBeNull();
 	});
 });
 
