@@ -115,7 +115,7 @@ const TOKEN_RECIPE =
 	'    • Account · D1 · Edit\n' +
 	'    • Account · Workers R2 Storage · Edit\n' +
 	'    • Zone · DNS · Edit               (only if you are attaching a custom domain)\n' +
-	'    • Zone · Firewall Services · Edit (only with a custom domain; adds the download-beacon rate limit)\n' +
+	'    • Zone · WAF · Edit               (only with a custom domain; adds the download-beacon rate limit)\n' +
 	'    • Zone · Zone Settings · Edit     (optional; lets setup enable image resizing for you)';
 
 async function main() {
@@ -321,7 +321,7 @@ async function main() {
 				imageResizingOn = imageResizingOutcome(ir, patchOk);
 
 				// WAF rate limit for the public download beacon (finding F5). Non-fatal:
-				// a token without Zone · Firewall Services · Edit just yields an 'error'
+				// a token without Zone · WAF · Edit just yields an 'error'
 				// result we warn about in Next steps — setup keeps going regardless.
 				const rl = await applyDownloadRateLimit(cfToken, host);
 				downloadRateLimit = rl.status;
@@ -584,9 +584,9 @@ async function main() {
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
 		// Download-beacon rate limit (finding F5). null = not attempted (no zone);
-		// 'error' = token lacked Zone · Firewall Services · Edit — tell them to add it.
+		// 'error' = token lacked Zone · WAF · Edit — tell them to add it.
 		if (downloadRateLimit === 'error') {
-			console.log('  • Download-beacon rate limit: NOT set (token lacks Zone · Firewall Services · Edit).');
+			console.log('  • Download-beacon rate limit: NOT set (token lacks Zone · WAF · Edit).');
 			console.log('     Add that permission to the token, then run:');
 			console.log(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
 		} else if (downloadRateLimit && downloadRateLimit !== 'exists') {

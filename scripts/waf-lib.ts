@@ -98,7 +98,7 @@ export interface RateLimitResult {
 }
 
 /** The token permission a fork operator must add, quoted verbatim in errors. */
-const SCOPE_HINT = 'Zone → Firewall Services: Edit (plus a Zone resource covering the domain)';
+const SCOPE_HINT = 'Zone → WAF: Edit (plus a Zone resource covering the domain)';
 
 /**
  * Idempotently apply the download-beacon rate-limit rule to `domain`'s zone.
@@ -109,7 +109,7 @@ const SCOPE_HINT = 'Zone → Firewall Services: Edit (plus a Zone resource cover
  *      token can't see it, → a clear error naming the missing scope. No mutation.
  *   2. GET /zones/<id>/rulesets/phases/http_ratelimit/entrypoint → the zone's
  *      rate-limit ruleset. 404 = no ruleset yet (fine — we create it). 401/403 or
- *      other non-ok = token lacks Firewall scope → clear error, no mutation.
+ *      other non-ok = token lacks WAF scope → clear error, no mutation.
  *   3. Reconcile by `ref`/`description`:
  *        - found & identical            → no-op, status 'exists'.
  *        - found & differs (param bump) → PATCH that one rule, status 'updated'.
@@ -154,7 +154,7 @@ export async function applyDownloadRateLimit(
 		rulesetId = r?.id;
 		existing = r?.rules ?? [];
 	} else if (entry.status !== 404) {
-		// 401/403 (no Firewall scope) or a transient error — do NOT mutate.
+		// 401/403 (no WAF scope) or a transient error — do NOT mutate.
 		return {
 			status: 'error',
 			detail: `could not read the rate-limit ruleset for ${host} (HTTP ${entry.status}); token needs ${SCOPE_HINT}`

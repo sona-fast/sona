@@ -173,14 +173,14 @@ describe('applyDownloadRateLimit — idempotent no-op', () => {
 });
 
 describe('applyDownloadRateLimit — clear errors, no mutation', () => {
-	it('token has no access to the zone (empty result) → error naming Firewall scope, no ruleset touched', async () => {
+	it('token has no access to the zone (empty result) → error naming WAF scope, no ruleset touched', async () => {
 		const { api, calls } = fakeApi({
 			[zonePath]: { ok: true, status: 200, result: [] }
 		});
 		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
 		expect(res.status).toBe('error');
 		expect(res.detail).toContain('no access to zone akito.dog');
-		expect(res.detail).toContain('Firewall Services: Edit');
+		expect(res.detail).toContain('WAF: Edit');
 		// Never proceeded to the ruleset endpoint.
 		expect(calls).toHaveLength(1);
 	});
@@ -195,14 +195,14 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		expect(calls).toHaveLength(1);
 	});
 
-	it('token lacks Firewall scope (entrypoint 403) → error, no write attempted', async () => {
+	it('token lacks WAF scope (entrypoint 403) → error, no write attempted', async () => {
 		const { api, calls } = fakeApi({
 			[zonePath]: zoneOk,
 			[entryPath]: { ok: false, status: 403 }
 		});
 		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
 		expect(res.status).toBe('error');
-		expect(res.detail).toContain('Firewall Services: Edit');
+		expect(res.detail).toContain('WAF: Edit');
 		// GET zone + GET entrypoint only — no mutation on a scope failure.
 		expect(calls.every((c) => c.method === 'GET')).toBe(true);
 	});

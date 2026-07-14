@@ -13,9 +13,9 @@
  * stripped. The operation is idempotent — re-running on an already-protected zone
  * is a no-op. Exit 0 on created/updated/exists, 1 on error.
  *
- * Token scope required: Zone → Firewall Services: Edit, on a token whose Zone
- * Resources include the fork's domain. (Read-only Zone·Read is enough to resolve
- * the zone, but writing the rule needs Firewall Services: Edit.)
+ * Token scope required: Zone → WAF: Edit, on a token whose Zone Resources
+ * include the fork's domain. (Read-only Zone·Read is enough to resolve the
+ * zone, but writing the rule needs WAF: Edit.)
  */
 import { env, argv, exit } from 'node:process';
 import { applyDownloadRateLimit } from './waf-lib.ts';
@@ -23,7 +23,7 @@ import { applyDownloadRateLimit } from './waf-lib.ts';
 const TOKEN_RECIPE =
 	'Set CLOUDFLARE_API_TOKEN to a Cloudflare API token (dash → My Profile → API Tokens →\n' +
 	'Create Token → Custom token) with:\n' +
-	'    • Zone · Firewall Services · Edit\n' +
+	'    • Zone · WAF · Edit\n' +
 	'  and a Zone Resource that includes the fork domain, then re-run:\n' +
 	'    CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- <domain>';
 
