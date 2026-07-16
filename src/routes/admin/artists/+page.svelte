@@ -26,6 +26,7 @@
 	let saving = $state(false);
 	let deletingId = $state<number | null>(null);
 	let submittingId = $state<number | null>(null);
+	let refreshingAvatars = $state(false);
 
 	// Search runs SERVER-SIDE across all artists (not just the current page).
 	// Debounce keystrokes into a ?q= navigation; keepFocus so typing isn't interrupted.
@@ -61,11 +62,43 @@
 
 <div class="page-header">
 	<h1>{m.admin_nav_artists()} <span class="count">{m.admin_count_artists({ count: data.total })}</span></h1>
-	<button class="btn btn-primary" onclick={() => (showAdd = true)}><Plus size={16} /> {m.admin_artists_add()}</button>
+	<div class="header-actions">
+		<form
+			method="POST"
+			action="?/refreshAvatars"
+			use:enhance={() => {
+				refreshingAvatars = true;
+				return async ({ update }) => {
+					await update({ reset: false });
+					refreshingAvatars = false;
+				};
+			}}
+		>
+			<button class="btn btn-secondary" type="submit" disabled={refreshingAvatars}>
+				{#if refreshingAvatars}<Loader2 size={16} class="spin" />{/if}
+				{refreshingAvatars ? m.admin_artists_refresh_avatars_busy() : m.admin_artists_refresh_avatars()}
+			</button>
+		</form>
+		<button class="btn btn-primary" onclick={() => (showAdd = true)}><Plus size={16} /> {m.admin_artists_add()}</button>
+	</div>
 </div>
 
 {#if form?.error}
 	<p class="error">{form.error}</p>
+{/if}
+
+{#if form?.avatarRefresh}
+	<p class="notice">
+		{#if form.avatarRefresh.processed === 0}
+			{m.admin_artists_refresh_avatars_none()}
+		{:else}
+			{m.admin_artists_refresh_avatars_result({
+				refreshed: form.avatarRefresh.refreshed,
+				processed: form.avatarRefresh.processed,
+				remaining: form.avatarRefresh.remaining
+			})}
+		{/if}
+	</p>
 {/if}
 
 <div class="toolbar">
@@ -387,8 +420,20 @@
 		font-family: var(--font-secondary);
 	}
 
+	.header-actions {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+
 	.error {
 		color: var(--destructive);
+		font-size: 14px;
+		margin-bottom: 16px;
+	}
+
+	.notice {
+		color: var(--muted-foreground);
 		font-size: 14px;
 		margin-bottom: 16px;
 	}

@@ -32,7 +32,7 @@ import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl, isValidEmail, normalizeHttpsUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
-import { resolveAvatarUrl } from '$lib/server/avatar';
+import { resolveAvatarUrl, isOurAvatarUrl } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
 import {
 	isRegistryEnabled,
@@ -152,7 +152,7 @@ export const actions = {
 	// One save per tab: each action persists ONLY its tab's fields (saveSettings
 	// writes just the keys it's given), so saving one tab can never clobber
 	// another tab's pending edits.
-	saveSite: async ({ request, platform }) => {
+	saveSite: async ({ request, platform, url }) => {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
 
@@ -172,7 +172,30 @@ export const actions = {
 		let adminAvatarUrl: string | undefined;
 		if (data.has('bluesky')) {
 			blueskyUrl = normalizeSocialUrl('bluesky', data.get('bluesky') as string);
-			adminAvatarUrl = blueskyUrl ? ((await resolveAvatarUrl({ blueskyUrl })) ?? '') : '';
+			if (blueskyUrl) {
+				// Re-host to our own CDN (same as artist avatars) so the owner avatar can't
+				// rot if the source changes. Uses the current storage config.
+				const current = await getSettings(db, { fresh: true });
+				const resolved = await resolveAvatarUrl(
+					{ blueskyUrl },
+					{ env: platform?.env, settings: current, origin: url.origin, keyHint: 'owner' }
+				);
+				// Downgrade guard (mirrors refreshArtistAvatars): the site tab posts
+				// bluesky on EVERY save, and on a transient failure resolveAvatarUrl
+				// falls back to the SOURCE hotlink (or null). Writing that would re-rot
+				// — or clear — a re-hosted owner avatar, which no cron ever heals. So a
+				// not-ours/null result is written only when there's no owned avatar to
+				// lose; otherwise the key is left out and saveSettings keeps the row.
+				const ours = (u: string) => isOurAvatarUrl(platform?.env, current, url.origin, u);
+				const currentOwned = !!current.adminAvatarUrl && ours(current.adminAvatarUrl);
+				if (resolved && (ours(resolved) || !currentOwned)) {
+					adminAvatarUrl = resolved;
+				} else if (!currentOwned) {
+					adminAvatarUrl = '';
+				}
+			} else {
+				adminAvatarUrl = '';
+			}
 		}
 
 		let themeId: string | undefined;

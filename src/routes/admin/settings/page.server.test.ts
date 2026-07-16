@@ -16,8 +16,10 @@ import { actions, load } from './+page.server';
 import { makeD1 } from '$lib/server/test/d1';
 
 // The avatar re-resolve on the bluesky present-branch would otherwise hit the
-// Bluesky API; stub it so the save is deterministic and offline.
-vi.mock('$lib/server/avatar', () => ({
+// Bluesky API; stub just that export so the save is deterministic and offline
+// (the real isOurAvatarUrl stays so the downgrade guard is exercised for real).
+vi.mock('$lib/server/avatar', async (importActual) => ({
+	...(await importActual<typeof import('$lib/server/avatar')>()),
 	resolveAvatarUrl: vi.fn(async () => 'https://cdn.bsky.app/img/avatar/plain/derived')
 }));
 
@@ -86,6 +88,7 @@ function saveSiteEvent(platform: App.Platform, fields: Record<string, string>) {
 	for (const [k, v] of Object.entries(fields)) body.append(k, v);
 	return {
 		platform,
+		url: new URL('https://taro.surf/admin/settings'),
 		request: new Request('https://taro.surf/admin/settings?/saveSite', { method: 'POST', body })
 	} as never;
 }
@@ -582,9 +585,10 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(await getRawSetting(db, 'blueskyUrl')).toBe(
 			'https://bsky.app/profile/sunday.bsky.social'
 		);
-		expect(resolveAvatarUrl).toHaveBeenCalledWith({
-			blueskyUrl: 'https://bsky.app/profile/sunday.bsky.social'
-		});
+		expect(resolveAvatarUrl).toHaveBeenCalledWith(
+			{ blueskyUrl: 'https://bsky.app/profile/sunday.bsky.social' },
+			expect.objectContaining({ keyHint: 'owner', origin: 'https://taro.surf' })
+		);
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(
 			'https://cdn.bsky.app/img/avatar/plain/derived'
 		);
@@ -602,6 +606,33 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
 		// No avatar lookup when bluesky is cleared — the avatar clears with it.
 		expect(resolveAvatarUrl).not.toHaveBeenCalled();
+	});
+
+	// Downgrade guard (#187): the site tab posts bluesky on EVERY save, and no cron
+	// heals the owner avatar — a transient failure must not degrade a re-hosted copy.
+	it('keeps an owned re-hosted avatar when re-resolve falls back to a source hotlink', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		// Root-relative '/img/…' is ours by definition (no-CDN R2 shape).
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
+		vi.mocked(resolveAvatarUrl).mockResolvedValueOnce(
+			'https://cdn.bsky.app/img/avatar/plain/hotlink'
+		);
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/owned.jpg');
+	});
+
+	it('keeps an owned re-hosted avatar when re-resolve returns null (not cleared to "")', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
+		vi.mocked(resolveAvatarUrl).mockResolvedValueOnce(null);
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/owned.jpg');
 	});
 });
 

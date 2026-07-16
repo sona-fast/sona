@@ -3,6 +3,7 @@ import { getDb } from '$lib/server/db';
 import { images, artists, collections, tags, imageTags, characters, imageCharacters } from '$lib/server/db/schema';
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
+import { getSettings } from '$lib/server/settings';
 import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import { variantAssignmentError } from '$lib/server/variants';
@@ -74,7 +75,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 };
 
 export const actions = {
-	save: async ({ params, request, platform }) => {
+	save: async ({ params, request, platform, url }) => {
 		const db = getDb(platform!.env.DB);
 		const id = Number(params.id);
 		const data = await request.formData();
@@ -145,12 +146,18 @@ export const actions = {
 		if (artistId && artistId !== 'new') {
 			resolvedArtistId = Number(artistId);
 		} else if (artistName) {
-			const avatarUrl = await resolveAvatarUrl({ blueskyUrl, twitterUrl, furAffinityUrl, patreonUrl });
+			// Resolve + re-host to our own CDN so the avatar can't rot to a 404.
+			const settings = await getSettings(db);
+			const avatarUrl = await resolveAvatarUrl(
+				{ blueskyUrl, twitterUrl, furAffinityUrl, patreonUrl },
+				{ env: platform?.env, settings, origin: url.origin, keyHint: artistName }
+			);
 			const newArtist = await db
 				.insert(artists)
 				.values({
 					name: artistName,
 					avatarUrl,
+					avatarResolvedAt: avatarUrl ? new Date().toISOString() : null,
 					twitterUrl,
 					blueskyUrl,
 					telegramUrl,
