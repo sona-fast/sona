@@ -172,6 +172,27 @@ describe('applyDownloadRateLimit — idempotent no-op', () => {
 	});
 });
 
+describe('applyDownloadRateLimit — subdomain host resolves via the registrable zone', () => {
+	it('strips leading labels until a zone matches (sub.example.com → example.com)', async () => {
+		const { api, calls } = fakeApi({
+			// Exact-name lookup for the subdomain finds nothing (Cloudflare only
+			// registers the registrable zone), so it must fall back to example.com.
+			'GET /zones?name=sub.example.com': { ok: true, status: 200, result: [] },
+			'GET /zones?name=example.com': zoneOk,
+			[entryPath]: { ok: true, status: 200, result: { id: RULESET, rules: [] } },
+			[`POST /zones/${ZONE}/rulesets/${RULESET}/rules`]: { ok: true, status: 200 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'sub.example.com', api);
+		expect(res.status).toBe('created');
+		// Tried the subdomain first, then the registrable zone.
+		const zoneQueries = calls.filter((c) => c.path.startsWith('/zones?name='));
+		expect(zoneQueries.map((c) => c.path)).toEqual([
+			'/zones?name=sub.example.com',
+			'/zones?name=example.com'
+		]);
+	});
+});
+
 describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 	it('token has no access to the zone (empty result) → error naming WAF scope, no ruleset touched', async () => {
 		const { api, calls } = fakeApi({
