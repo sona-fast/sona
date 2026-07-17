@@ -911,6 +911,7 @@
 		overflow: hidden;
 	}
 	.barfill {
+		display: block;
 		height: 100%;
 		border-radius: var(--radius-pill);
 		background: var(--primary);
@@ -940,6 +941,7 @@
 		overflow: hidden;
 	}
 	.devrow .dfill {
+		display: block;
 		height: 100%;
 		background: var(--primary);
 		border-radius: var(--radius-pill);

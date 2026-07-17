@@ -20,6 +20,13 @@ ADMIN_PASSWORD = "e2e-admin-password"
 # key). Throwaway local value — the forgot-reset spec intercepts the Resend send
 # (tests/e2e/resend-mock.mjs), so this key never reaches api.resend.com.
 RESEND_API_KEY = "e2e-resend-key"
+# Turns the /admin/observability dashboard on (it 302s to /admin when off) so
+# the observability spec can assert the seeded visitor bars actually paint.
+# Intentional side effects on the shared e2e server: every spec's page loads
+# also write metric_rollup counters, and the admin gains an Observability nav
+# item/settings tab — checked against the other shared-server specs (name-based
+# selectors, isolated tables) and harmless.
+OBSERVABILITY_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
