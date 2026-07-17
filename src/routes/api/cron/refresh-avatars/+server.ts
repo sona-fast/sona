@@ -17,11 +17,19 @@ import type { RequestHandler } from './$types';
 // from the admin gate in hooks.server.ts and authenticates with a shared secret:
 //   Authorization: Bearer <CRON_SECRET>
 // See resync-telegram for the pattern. The batch size comes from ?batch=<N> (set
-// by the workflow from the AVATAR_REFRESH_BATCH repo var); it's clamped to a sane
-// ceiling so a single run stays under Cloudflare's ~100s request limit. When a
-// backlog remains (result.remaining > 0) the next scheduled run continues.
+// by the workflow from the AVATAR_REFRESH_BATCH repo var); it's clamped to a
+// ceiling sized against the REAL bound on this request: the workflow's curl
+// --max-time. When curl gives up, the client disconnect cancels the request
+// mid-run AND silently skips both recordJobRun heartbeats below — the dashboard
+// never hears the run happened. Sizing: a typical artist takes ~1-2s (profile
+// lookup + image download + store), so 50 finishes in a couple of minutes; the
+// worst case is ~28s/artist (the Twitter guest-token flow timing out through
+// every fallback), which is why the workflow's ceiling is a generous 900s — a
+// pathological all-timeout batch can still exceed it, and the clamp keeps that
+// window small. When a backlog remains (result.remaining > 0) the next
+// scheduled run continues.
 const DEFAULT_BATCH = 25;
-const MAX_BATCH = 100;
+const MAX_BATCH = 50;
 
 export const POST: RequestHandler = async ({ request, platform, url }) => {
 	const env = platform?.env;

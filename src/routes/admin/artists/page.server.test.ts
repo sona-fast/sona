@@ -584,6 +584,54 @@ describe('update action — avatar clobber guard (#187)', () => {
 		expect(after!.avatarUrl).toBe('/img/avatars/nyx/owned.jpg'); // not downgraded to the hotlink
 		expect(after!.avatarResolvedAt).toBeNull(); // not stamped — the cron may still retry it
 	});
+
+	// Clearing every avatar-capable social is a deliberate removal — with nothing
+	// left to resolve from, the guard must not pin a wrong avatar forever.
+	it('clears the avatar when every avatar-capable social is posted empty', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(schema.artists)
+			.values({ name: 'Nyx', avatarUrl: '/img/avatars/nyx/owned.jpg', blueskyUrl: 'https://bsky.app/profile/nyx.bsky.social' })
+			.returning({ id: schema.artists.id })
+			.get();
+
+		const result = await actions.update(updateEvent(platform, { id: String(row.id), name: 'Nyx', bluesky: '' }));
+		expect(result).toEqual({ success: true });
+
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.avatarUrl).toBeNull(); // deliberate removal, not kept
+		expect(after!.blueskyUrl).toBeNull();
+		expect(after!.avatarResolvedAt).toBeNull(); // nothing was resolved
+	});
+
+	// Efficiency: identical avatar socials + an already-ours avatar → nothing the
+	// resolve could change, so the action must not re-fetch/re-host at all.
+	it('skips re-resolution when avatar socials are unchanged and the avatar is already ours', async () => {
+		const { db, platform } = makeDb();
+		const fetchSpy = vi.fn(() => Promise.reject(new Error('offline')));
+		vi.stubGlobal('fetch', fetchSpy);
+		const row = await db
+			.insert(schema.artists)
+			.values({
+				name: 'Nyx',
+				avatarUrl: '/img/avatars/nyx/owned.jpg',
+				// Stored in normalized form, as the action itself would have written it.
+				blueskyUrl: 'https://bsky.app/profile/nyx.bsky.social'
+			})
+			.returning({ id: schema.artists.id })
+			.get();
+
+		const result = await actions.update(
+			updateEvent(platform, { id: String(row.id), name: 'Nyx Prime', bluesky: 'nyx.bsky.social' })
+		);
+		expect(result).toEqual({ success: true });
+		expect(fetchSpy).not.toHaveBeenCalled(); // no profile lookup, no re-host
+
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.name).toBe('Nyx Prime');
+		expect(after!.avatarUrl).toBe('/img/avatars/nyx/owned.jpg');
+		expect(after!.avatarResolvedAt).toBeNull(); // untouched — nothing was written
+	});
 });
 
 describe('refreshAvatars action — backfill (#187)', () => {

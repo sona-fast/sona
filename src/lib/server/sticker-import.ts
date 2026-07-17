@@ -1329,9 +1329,11 @@ export async function resolveOrCreateArtist(
 		.values({
 			name: artistName,
 			avatarUrl,
-			// Stamp when we resolved+re-hosted here so the refresh cron doesn't
-			// immediately re-do a just-created row. A registry-provided avatar isn't
-			// stamped — it's re-refreshed by the registry sync, not this loop.
+			// Stamp when we resolved an avatar here (re-hosted when a rehost context
+			// was given and the store succeeded; a source hotlink otherwise) so the
+			// refresh cron doesn't immediately re-do a just-created row. A
+			// registry-provided avatar isn't stamped — it's re-refreshed by the
+			// registry sync, not this loop.
 			avatarResolvedAt: resolvedNow ? new Date().toISOString() : null,
 			...socials,
 			globalId: globalId ?? null,

@@ -17,10 +17,12 @@ import { makeD1 } from '$lib/server/test/d1';
 
 // The avatar re-resolve on the bluesky present-branch would otherwise hit the
 // Bluesky API; stub just that export so the save is deterministic and offline
-// (the real isOurAvatarUrl stays so the downgrade guard is exercised for real).
+// (the real isOurAvatarUrl/shouldWriteAvatar stay so the guards are exercised
+// for real). The default return is an OWNED URL — root-relative '/img/…' is
+// ours by definition (no-CDN R2 shape) — i.e. a successful re-host.
 vi.mock('$lib/server/avatar', async (importActual) => ({
 	...(await importActual<typeof import('$lib/server/avatar')>()),
-	resolveAvatarUrl: vi.fn(async () => 'https://cdn.bsky.app/img/avatar/plain/derived')
+	resolveAvatarUrl: vi.fn(async () => '/img/avatars/owner/derived.jpg')
 }));
 
 function makeDb() {
@@ -589,9 +591,7 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 			{ blueskyUrl: 'https://bsky.app/profile/sunday.bsky.social' },
 			expect.objectContaining({ keyHint: 'owner', origin: 'https://taro.surf' })
 		);
-		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(
-			'https://cdn.bsky.app/img/avatar/plain/derived'
-		);
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/derived.jpg');
 	});
 
 	it('a present-but-blank bluesky clears both blueskyUrl and the avatar', async () => {
@@ -608,31 +608,64 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(resolveAvatarUrl).not.toHaveBeenCalled();
 	});
 
-	// Downgrade guard (#187): the site tab posts bluesky on EVERY save, and no cron
-	// heals the owner avatar — a transient failure must not degrade a re-hosted copy.
-	it('keeps an owned re-hosted avatar when re-resolve falls back to a source hotlink', async () => {
+	// Unchanged-handle guard (#187): the site tab posts bluesky on EVERY save, and
+	// no cron heals the owner avatar — an unrelated save (a transient resolve
+	// failure included) must not degrade an owned re-hosted copy. With the handle
+	// unchanged AND the avatar already ours, nothing could change, so the resolve
+	// is skipped entirely (which is also what keeps a transient failure harmless).
+	it('an UNCHANGED handle with an owned avatar skips re-resolution and keeps the avatar', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
 		// Root-relative '/img/…' is ours by definition (no-CDN R2 shape).
 		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
+		vi.mocked(resolveAvatarUrl).mockClear();
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+
+		expect(resolveAvatarUrl).not.toHaveBeenCalled(); // no profile lookup, no re-host
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/owned.jpg');
+	});
+
+	it('an unchanged handle still re-hosts when the stored avatar is a hotlink (skip is ownership-gated)', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'adminAvatarUrl', 'https://cdn.bsky.app/img/avatar/plain/rot.jpg');
+		vi.mocked(resolveAvatarUrl).mockClear();
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+
+		expect(resolveAvatarUrl).toHaveBeenCalledTimes(1);
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/derived.jpg');
+	});
+
+	// A handle CHANGE is authoritative (#197 review): when the new handle can't be
+	// resolved+re-hosted, the OLD account's face must not persist under it.
+	it('a CHANGED handle clears the owner avatar when resolution fails (null)', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/old.bsky.social');
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
+		vi.mocked(resolveAvatarUrl).mockResolvedValueOnce(null);
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'new.bsky.social' }));
+
+		expect(await getRawSetting(db, 'blueskyUrl')).toBe('https://bsky.app/profile/new.bsky.social');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
+	});
+
+	it('a CHANGED handle clears instead of writing a hotlink fallback', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/old.bsky.social');
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
+		// Re-host failed → resolveAvatarUrl falls back to the new account's hotlink;
+		// storing a rot-prone hotlink for the owner (no cron heals it) is worse than
+		// clearing and re-saving once storage recovers.
 		vi.mocked(resolveAvatarUrl).mockResolvedValueOnce(
 			'https://cdn.bsky.app/img/avatar/plain/hotlink'
 		);
 
-		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'new.bsky.social' }));
 
-		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/owned.jpg');
-	});
-
-	it('keeps an owned re-hosted avatar when re-resolve returns null (not cleared to "")', async () => {
-		const { db, platform } = makeDb();
-		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
-		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
-		vi.mocked(resolveAvatarUrl).mockResolvedValueOnce(null);
-
-		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
-
-		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/owned.jpg');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
 	});
 });
 

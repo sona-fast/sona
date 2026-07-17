@@ -32,7 +32,7 @@ import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl, isValidEmail, normalizeHttpsUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
-import { resolveAvatarUrl, isOurAvatarUrl } from '$lib/server/avatar';
+import { resolveAvatarUrl, isOurAvatarUrl, shouldWriteAvatar } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
 import {
 	isRegistryEnabled,
@@ -176,22 +176,34 @@ export const actions = {
 				// Re-host to our own CDN (same as artist avatars) so the owner avatar can't
 				// rot if the source changes. Uses the current storage config.
 				const current = await getSettings(db, { fresh: true });
-				const resolved = await resolveAvatarUrl(
-					{ blueskyUrl },
-					{ env: platform?.env, settings: current, origin: url.origin, keyHint: 'owner' }
-				);
-				// Downgrade guard (mirrors refreshArtistAvatars): the site tab posts
-				// bluesky on EVERY save, and on a transient failure resolveAvatarUrl
-				// falls back to the SOURCE hotlink (or null). Writing that would re-rot
-				// — or clear — a re-hosted owner avatar, which no cron ever heals. So a
-				// not-ours/null result is written only when there's no owned avatar to
-				// lose; otherwise the key is left out and saveSettings keeps the row.
 				const ours = (u: string) => isOurAvatarUrl(platform?.env, current, url.origin, u);
 				const currentOwned = !!current.adminAvatarUrl && ours(current.adminAvatarUrl);
-				if (resolved && (ours(resolved) || !currentOwned)) {
-					adminAvatarUrl = resolved;
-				} else if (!currentOwned) {
-					adminAvatarUrl = '';
+				const handleChanged = blueskyUrl !== current.blueskyUrl;
+				// Skip the resolve entirely when the handle is UNCHANGED and the stored
+				// avatar is already ours — re-hosting the same profile again can't
+				// change anything, so don't re-fetch on every unrelated site-tab save.
+				if (handleChanged || !currentOwned) {
+					const resolved = await resolveAvatarUrl(
+						{ blueskyUrl },
+						{ env: platform?.env, settings: current, origin: url.origin, keyHint: 'owner' }
+					);
+					if (handleChanged) {
+						// A handle CHANGE is authoritative: write the re-hosted copy, and
+						// when resolution failed (null) or re-hosting fell back to a source
+						// hotlink, clear instead — the OLD account's face must never
+						// persist under a new handle.
+						adminAvatarUrl = resolved && ours(resolved) ? resolved : '';
+					} else if (
+						shouldWriteAvatar(platform?.env, current, url.origin, current.adminAvatarUrl, resolved)
+					) {
+						// Unchanged handle: the site tab posts bluesky on EVERY save and no
+						// cron heals the owner avatar, so a transient failure must not
+						// degrade it (rationale on shouldWriteAvatar).
+						adminAvatarUrl = resolved!;
+					} else if (!currentOwned) {
+						// Nothing owned to keep and nothing resolvable — clear.
+						adminAvatarUrl = '';
+					}
 				}
 			} else {
 				adminAvatarUrl = '';
