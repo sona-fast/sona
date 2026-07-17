@@ -51,4 +51,20 @@ test.describe('admin observability visitor bars', () => {
 	test('device-split fills paint with a visible width', async ({ page }) => {
 		await expectFillPaints(page, '.devrow .dfill', '.devrow .dtrack');
 	});
+
+	// Guards the OPPOSITE regression of #193: if the inline style="width:{share}%"
+	// binding is ever lost, a display:block fill defaults to 100% of its track and
+	// the paint checks above stay green while every bar renders full. The device
+	// split gives a drift-proof inequality: the suite only ever browses with
+	// Desktop Chrome, so live traffic can only grow the desktop counter — the
+	// seeded desktop(20) > tablet(5) gap widens, never closes. Both regression
+	// directions fail this: all-100% makes the widths equal; 0×0 makes both zero.
+	test('device-split fill widths track their shares (desktop > tablet)', async ({ page }) => {
+		const fills = page.locator('.devrow .dfill');
+		const desktopBox = await fills.nth(0).boundingBox();
+		const tabletBox = await fills.nth(2).boundingBox();
+		expect(desktopBox).not.toBeNull();
+		expect(tabletBox).not.toBeNull();
+		expect(desktopBox!.width).toBeGreaterThan(tabletBox!.width + 2);
+	});
 });
