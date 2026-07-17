@@ -58,4 +58,18 @@ describe('POST /api/cron/refresh-avatars', () => {
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({ processed: 0, refreshed: 0, remaining: 0 });
 	});
+
+	it('clamps an oversized batch to MAX_BATCH (50) so a run fits the workflow curl ceiling', async () => {
+		// Every resolve fails fast offline; only the clamp arithmetic is under test.
+		vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+		const sqlite = new Database(':memory:');
+		sqlite.exec(DDL);
+		const rows = Array.from({ length: 60 }, (_, i) => `('a${i}', 'a${i}.bsky.social', 'x')`).join(',');
+		sqlite.exec(`INSERT INTO artists (name, bluesky_url, created_at) VALUES ${rows};`);
+		const env = { CRON_SECRET, DB: makeD1(sqlite) } as unknown as App.Platform['env'];
+
+		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '999' }));
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ processed: 50, refreshed: 0, remaining: 10 });
+	});
 });

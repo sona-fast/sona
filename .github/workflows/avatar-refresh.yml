@@ -54,7 +54,11 @@ jobs:
           if [ -z "$CRON_SECRET" ]; then
             echo "::error::CRON_SECRET not set but AVATAR_REFRESH_BATCH is - set the repo secret (matching the Pages secret) to run the refresh"; exit 1
           fi
-          code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
+          # --max-time is the REAL bound on the refresh run: when curl gives up,
+          # the server request is cancelled mid-batch and its job-run heartbeat
+          # is lost. 900s pairs with the endpoint's MAX_BATCH=50 clamp: typical
+          # runs take ~1-2s per artist, worst-case resolver timeouts ~28s each.
+          code=$(curl -sS --max-time 900 -o response.json -w '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
             "${SITE_URL%/}/api/cron/refresh-avatars?batch=${AVATAR_REFRESH_BATCH}")

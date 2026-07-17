@@ -123,9 +123,13 @@ export async function resolveAvatarUrl(
  * additionally accept:
  *  - a root-relative URL ('/img/…' — ours by definition; NOT protocol-relative
  *    '//host/…', which is a different origin), and
- *  - an absolute URL on EXACTLY our origin whose pathname would be owned if
- *    taken root-relative — the no-CDN absolutized case above.
- * A same path on a different origin stays not-ours, preserving the SSRF
+ *  - an absolute URL on EXACTLY one of our known-self origins whose pathname
+ *    would be owned if taken root-relative — the no-CDN absolutized case above.
+ *    Known-self origins are the current request origin PLUS the configured
+ *    Site URL (settings.siteUrl) when one is set, so an avatar absolutized
+ *    under the canonical host is still ours when a later request arrives on
+ *    another of our hosts (preview deploy, apex vs www).
+ * A same path on ANY other origin stays not-ours, preserving the SSRF
  * rationale in owns().
  */
 export function isOurAvatarUrl(
@@ -138,10 +142,40 @@ export function isOurAvatarUrl(
 	if (url.startsWith('/') && !url.startsWith('//')) return true;
 	try {
 		const parsed = new URL(url);
-		return parsed.origin === new URL(origin).origin && isOwnedUrl(env, settings, parsed.pathname);
+		const selfOrigins = [new URL(origin).origin];
+		if (settings.siteUrl) {
+			try {
+				selfOrigins.push(new URL(settings.siteUrl).origin);
+			} catch {
+				// a malformed configured Site URL must not widen (or break) the check
+			}
+		}
+		return selfOrigins.includes(parsed.origin) && isOwnedUrl(env, settings, parsed.pathname);
 	} catch {
 		return false; // not absolute and not root-relative — can't be ours
 	}
+}
+
+/**
+ * The single write-gate for avatar updates, shared by the refresh loop, the
+ * admin artists update action, and settings saveSite. Rationale (written once,
+ * here): resolveAvatarUrl falls back to the SOURCE hotlink when re-hosting
+ * fails, and returns null when resolution fails entirely — writing either over
+ * an avatar we host would re-rot (or wipe) a good stored copy on a transient
+ * failure. So a resolved URL is written only when it's ours, or when the row
+ * has no owned avatar to lose (a fresh hotlink still beats null or a stale
+ * hotlink). What a refused write means per call site ('' vs null vs omit,
+ * stamping) stays local to that site.
+ */
+export function shouldWriteAvatar(
+	env: Env | undefined,
+	settings: SiteSettings,
+	origin: string,
+	currentUrl: string | null | undefined,
+	resolved: string | null
+): boolean {
+	const ours = (u: string) => isOurAvatarUrl(env, settings, origin, u);
+	return !!resolved && (ours(resolved) || !currentUrl || !ours(currentUrl));
 }
 
 /**
@@ -155,11 +189,8 @@ export function isOurAvatarUrl(
  * work for at most `limit` rows, updating one row at a time. `remaining` lets a
  * caller (or the next cron run) see there's more to do.
  *
- * Clobber-safe: a row's avatar is overwritten only when re-resolution succeeds
- * AND the write wouldn't downgrade it — resolveAvatarUrl falls back to the
- * SOURCE hotlink when re-hosting fails, and writing that over a stored/owned
- * avatar would re-rot a good copy. So a non-ours result is written only over a
- * row that has no owned avatar to lose (null or an existing hotlink). Every
+ * Clobber-safe: a row's avatar is overwritten only when shouldWriteAvatar
+ * allows it (downgrade-guard rationale lives on that predicate). Every
  * processed row gets its `avatarResolvedAt` stamped either way, so a
  * permanently unresolvable artist can't starve the rotation.
  */
@@ -221,11 +252,9 @@ export async function refreshArtistAvatars(
 		const set: { avatarResolvedAt: string; avatarUrl?: string } = {
 			avatarResolvedAt: new Date().toISOString()
 		};
-		// Downgrade guard: resolveAvatarUrl returns the SOURCE hotlink when
-		// re-hosting fails, and writing that over an avatar we host would re-rot
-		// a good stored copy. Write a non-ours result only when the row has no
-		// ours avatar to lose (a fresh hotlink still beats null or a stale one).
-		if (resolved && (ours(resolved) || !a.avatarUrl || !ours(a.avatarUrl))) {
+		// Downgrade guard: see shouldWriteAvatar. (`resolved &&` repeats its null
+		// check only so TypeScript narrows the assignment below.)
+		if (resolved && shouldWriteAvatar(env, settings, origin, a.avatarUrl, resolved)) {
 			set.avatarUrl = resolved;
 			refreshed++;
 		}

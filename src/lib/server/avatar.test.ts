@@ -11,6 +11,7 @@ import {
 	resolveAvatarUrl,
 	refreshArtistAvatars,
 	isOurAvatarUrl,
+	shouldWriteAvatar,
 	type AvatarRehostContext
 } from './avatar';
 import type { SiteSettings } from './settings';
@@ -146,6 +147,50 @@ describe('isOurAvatarUrl', () => {
 
 	it('rejects a protocol-relative URL (different origin, not root-relative)', () => {
 		expect(isOurAvatarUrl(env, noCdn, origin, '//evil.test/img/avatars/a/x.jpg')).toBe(false);
+	});
+
+	// The configured Site URL is a known-self origin: an avatar absolutized under
+	// the canonical host must stay ours when the request arrives on another host.
+	const noCdnWithSiteUrl = {
+		storageProvider: 'r2',
+		siteUrl: 'https://taro.surf'
+	} as unknown as SiteSettings;
+
+	it('accepts an absolute URL on the configured Site URL origin from another request host', () => {
+		expect(
+			isOurAvatarUrl(env, noCdnWithSiteUrl, 'https://preview.pages.dev', 'https://taro.surf/img/avatars/a/x.jpg')
+		).toBe(true);
+	});
+
+	it('still rejects a foreign origin when a Site URL is configured (exact-origin equality)', () => {
+		expect(
+			isOurAvatarUrl(env, noCdnWithSiteUrl, 'https://preview.pages.dev', 'https://evil.test/img/avatars/a/x.jpg')
+		).toBe(false);
+	});
+});
+
+describe('shouldWriteAvatar (shared write gate)', () => {
+	const env = { IMAGES: fakeBucket() } as unknown as App.Platform['env'];
+	const settings = { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings;
+	const origin = 'https://site.test';
+	const gate = (currentUrl: string | null, resolved: string | null) =>
+		shouldWriteAvatar(env, settings, origin, currentUrl, resolved);
+
+	it('never writes a null resolve (transient failure keeps whatever is stored)', () => {
+		expect(gate(null, null)).toBe(false);
+		expect(gate('https://cdn.test/avatars/a/x.jpg', null)).toBe(false);
+	});
+
+	it('writes an owned resolve over anything', () => {
+		expect(gate(null, 'https://cdn.test/avatars/a/new.jpg')).toBe(true);
+		expect(gate('https://cdn.test/avatars/a/old.jpg', 'https://cdn.test/avatars/a/new.jpg')).toBe(true);
+		expect(gate('https://pbs.twimg.com/a_400x400.jpg', 'https://cdn.test/avatars/a/new.jpg')).toBe(true);
+	});
+
+	it('writes a hotlink fallback only where there is no owned avatar to lose', () => {
+		expect(gate(null, BSKY_AVATAR)).toBe(true); // hotlink beats nothing
+		expect(gate('https://pbs.twimg.com/stale_400x400.jpg', BSKY_AVATAR)).toBe(true); // fresh beats stale
+		expect(gate('https://cdn.test/avatars/a/x.jpg', BSKY_AVATAR)).toBe(false); // never downgrade
 	});
 });
 
