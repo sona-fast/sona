@@ -1218,12 +1218,14 @@ describe('resyncTelegramPacks', () => {
 		expect(fresh.every((s) => s.artistId === 1)).toBe(true);
 	});
 
-	it('unmanaged pack mixing one credited and one unattributed sticker: appends inherit the credited artist (#184)', async () => {
+	it('unmanaged pack mixing one credited and one unattributed sticker: appends stay unattributed (strict, PR #195 review)', async () => {
 		const { db } = makeDb();
 		await seedCharacterAndArtist(db); // artist id 1
 		const packId = await seedTelegramPack(db, null, 1); // no manager; existing sticker credited to 1
-		// An unattributed pre-existing sibling → still exactly one distinct
-		// non-null artist, so inference must pick artist 1 (decided in #184).
+		// An unattributed pre-existing sibling means the pack could be a collab
+		// where only the first sticker has been credited so far — inferring here
+		// would publicly misattribute the new stickers, so strict inference
+		// refuses (revised 2026-07-17 from #184's original relaxation).
 		await db.insert(stickers).values({
 			packId,
 			artistId: null,
@@ -1245,7 +1247,7 @@ describe('resyncTelegramPacks', () => {
 			(s) => s.telegramFileUniqueId === 'ub' || s.telegramFileUniqueId === 'uc'
 		);
 		expect(fresh).toHaveLength(2);
-		expect(fresh.every((s) => s.artistId === 1)).toBe(true);
+		expect(fresh.every((s) => s.artistId === null)).toBe(true);
 	});
 
 	it('unmanaged mixed-artist pack: appends stay unattributed', async () => {

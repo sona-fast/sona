@@ -56,14 +56,19 @@ describe('derivePackShape', () => {
 	});
 });
 
-describe('inferAppendedArtistId (cron append attribution, #184)', () => {
-	it('inherits the single attributed artist on an unmanaged pack', () => {
-		// One distinct non-null artist is unambiguous even when some existing
-		// stickers are unattributed (the nulls are filtered before the call).
+describe('inferAppendedArtistId (cron append attribution, #184 — strict per PR #195 review)', () => {
+	it('inherits only when every existing sticker shares one artist', () => {
 		expect(inferAppendedArtistId([4])).toBe(4);
 	});
 
-	it('stays unattributed with zero attributed or mixed artists', () => {
+	it('stays unattributed when ANY existing sticker is unattributed', () => {
+		// The distinct set includes null on purpose: one credited sticker in an
+		// otherwise-unattributed pack is NOT evidence the whole pack is theirs.
+		expect(inferAppendedArtistId([4, null])).toBeNull();
+		expect(inferAppendedArtistId([null])).toBeNull();
+	});
+
+	it('stays unattributed with zero stickers or mixed artists', () => {
 		expect(inferAppendedArtistId([])).toBeNull();
 		expect(inferAppendedArtistId([4, 5])).toBeNull();
 	});

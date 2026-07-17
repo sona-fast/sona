@@ -908,14 +908,15 @@ export async function resyncTelegramPacks(opts: {
 				// pack, and only when there is something to append.
 				let appendArtistId: number | null = pack.managerArtistId;
 				if (appendArtistId == null) {
+					// STRICT inference: nulls are included in the distinct set on purpose,
+					// so any unattributed existing sticker blocks inference — see
+					// inferAppendedArtistId for the rationale (PR #195 review).
 					const distinct = await db
 						.select({ artistId: stickers.artistId })
 						.from(stickers)
-						.where(and(eq(stickers.packId, pack.id), isNotNull(stickers.artistId)))
+						.where(eq(stickers.packId, pack.id))
 						.groupBy(stickers.artistId);
-					appendArtistId = inferAppendedArtistId(
-						distinct.map((d) => d.artistId).filter((id): id is number => id != null)
-					);
+					appendArtistId = inferAppendedArtistId(distinct.map((d) => d.artistId));
 				}
 
 				for (const sticker of newStickers) {
