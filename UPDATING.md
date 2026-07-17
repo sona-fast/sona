@@ -116,6 +116,24 @@ Setting the secret manually with `wrangler pages secret put TELEGRAM_BOT_TOKEN`
 (as the in-app setup help describes) still works — that's the path if you'd
 rather not store the token in GitHub.
 
+## Marking a feature early-access
+
+New features can ship in an *early-access window*: supporters (anyone with a
+valid supporter key from `sona.fast/supporter-key`) get the feature the day it
+lands, and everyone else gets it automatically on its GA date, one week later.
+
+This is driven by one file, `src/lib/early-access.ts`:
+
+- **At release**, add an entry to `EARLY_ACCESS` mapping the feature's flag to
+  its GA date (`'YYYY-MM-DD'`, the release date + 7 days), and gate the feature
+  on `isFeatureEnabled(flag, { supporterKeyValid, now })`.
+- **At the next release**, delete that entry — its GA date has passed, so the
+  feature is now on for everyone — and remove the gate. The registry only ever
+  holds the handful of features still inside their window.
+
+The registry ships empty; nothing is gated until a feature is added. The
+owner's supporter key is managed under **Settings → Account → Supporter key**.
+
 ## Pre-pipeline forks: seed the migration baseline once
 
 The tracked-migration step assumes `schema_migrations` reflects reality. A fork
