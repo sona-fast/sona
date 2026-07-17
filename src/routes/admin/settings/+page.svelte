@@ -815,14 +815,14 @@
      VALID / EXPIRED / INVALID states are one dynamic section driven by
      data.supporterKey (verified server-side in load). -->
 <section class="security-section supporter-explainer" data-tab="account">
-	<div class="key-eyebrow"><span class="slash">//</span> {m.admin_settings_supporter_early_eyebrow()}</div>
+	<div class="key-eyebrow"><span class="slash" aria-hidden="true">//</span> {m.admin_settings_supporter_early_eyebrow()}</div>
 	<p class="explainer-body">{m.admin_settings_supporter_explainer()}</p>
 </section>
 
 {#if data.supporterKey?.state === 'valid'}
 	<section class="security-section" data-tab="account">
 		<h2>{m.admin_settings_supporter_heading()}</h2>
-		<div class="key-eyebrow"><span class="slash">//</span> {m.admin_settings_supporter_valid_until({ date: data.supporterKey.validUntil })}</div>
+		<div class="key-eyebrow"><span class="slash" aria-hidden="true">//</span> {m.admin_settings_supporter_valid_until({ date: data.supporterKey.validUntil })}</div>
 		{#if data.earlyAccess.length}
 			<p class="status-line">{m.admin_settings_supporter_early_active({ features: earlyActiveText })}</p>
 		{:else}
@@ -854,7 +854,7 @@
 		<section class="security-section" data-tab="account">
 			<h2>{m.admin_settings_supporter_heading()}</h2>
 			{#if data.supporterKey?.state === 'expired'}
-				<div class="key-eyebrow"><span class="slash">//</span> {m.admin_settings_supporter_expired_eyebrow({ date: data.supporterKey.validUntil })}</div>
+				<div class="key-eyebrow"><span class="slash" aria-hidden="true">//</span> {m.admin_settings_supporter_expired_eyebrow({ date: data.supporterKey.validUntil })}</div>
 				<p class="lapsed-line">{m.admin_settings_supporter_lapsed_pre()}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener">sona.fast/supporter-key</a>{m.admin_settings_supporter_lapsed_post()}</p>
 			{/if}
 			<label>
@@ -869,7 +869,7 @@
 				/>
 			</label>
 			{#if form?.supporterKeyError}
-				<p class="field-error" id="supporter-key-error">
+				<p class="field-error" id="supporter-key-error" role="alert">
 					{#if form.supporterKeyError === 'expired'}
 						{m.admin_settings_supporter_error_expired({ date: form.supporterKeyExpiredDate ?? '' })}
 					{:else}

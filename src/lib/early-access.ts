@@ -13,6 +13,11 @@
  *    one or few features currently inside their early-access window.
  *
  * Ships EMPTY — no feature is gated yet; the first pilot lands later.
+ *
+ * Label story (do before the first real entry): the settings status line
+ * interpolates the flag KEY directly, but keys are slugs (e.g. `bulk-export`),
+ * not human-readable. Before piloting, either key this registry by display label
+ * or add a `label` field per entry and interpolate that instead.
  */
 export const EARLY_ACCESS: Record<string, string> = {};
 

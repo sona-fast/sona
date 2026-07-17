@@ -132,4 +132,22 @@ describe('verifySupporterKey', () => {
 		const res = await verifySupporterKey('abc.def', NOW);
 		expect(res.valid).toBe(false);
 	});
+
+	// Key-rotation tripwire. This token was signed by the REAL production private
+	// key (which lives only on sona.fast) and is verified here against the
+	// baked-in PRODUCTION_PUBLIC_KEY_SPKI_B64 (no override). Reaching 'expired'
+	// (not 'bad-signature') proves the signature validated against the baked key —
+	// i.e. the baked public key still matches the deployed private key. If the two
+	// ever diverge (rotation without updating the baked key, or vice versa), the
+	// signature check fails first and this asserts 'bad-signature' instead.
+	//
+	// The token is exp 1752710400 (already in the past), so it unlocks nothing for
+	// a freeloader — its only job is to bind the keypair. Minted once, offline,
+	// with the private key; the private key is NOT in this repo.
+	it('an expired token signed by the real key reaches expired against the baked key', async () => {
+		const knownAnswer =
+			'eyJ2IjoxLCJsb2dpbiI6Imtub3duLWFuc3dlciIsInRpZXIiOjgsImV4cCI6MTc1MjcxMDQwMH0.fr25p4GX1PXoTdqBTBTYQImZGdGKo13I5GDil_KXNi2dDVxBQaNiLQ5sGoVcapBmjPxV-0ADYAKCaFP-_CDTDA';
+		const res = await verifySupporterKey(knownAnswer, new Date('2026-08-01T00:00:00Z'));
+		expect(res).toMatchObject({ valid: false, reason: 'expired', login: 'known-answer' });
+	});
 });
