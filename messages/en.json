@@ -333,6 +333,7 @@
 	"admin_field_collection": "Collection",
 	"admin_field_tags": "Tags",
 	"admin_field_commissioned_date": "Commissioned Date",
+	"admin_hint_commissioned_date": "Any date that's meaningful to you works here, like the day you requested the piece or the day it was finished. It's used to sort your gallery.",
 	"admin_field_mark_nsfw": "Mark as NSFW",
 	"admin_field_private": "Private",
 	"admin_field_private_hint": "(not shown in gallery)",

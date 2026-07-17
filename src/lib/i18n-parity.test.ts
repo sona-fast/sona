@@ -44,6 +44,31 @@ describe('ja terminology', () => {
 	});
 });
 
+// The Commissioned Date hint (#182) must exist in both locales (the parity
+// check above covers that) AND actually render under the date input on both
+// forms that set the field — a hint dropped from one form regresses silently
+// otherwise.
+describe('commissioned date hint wiring (#182)', () => {
+	const pages = [
+		'../routes/admin/upload/+page.svelte',
+		'../routes/admin/images/[id]/edit/+page.svelte'
+	];
+
+	it('both locales carry the hint key', () => {
+		for (const locale of ['en', 'ja']) {
+			const json = JSON.parse(rawOf(locale)) as Record<string, string>;
+			expect(json.admin_hint_commissioned_date, `${locale} hint`).toBeTruthy();
+		}
+	});
+
+	it('upload and edit forms render the hint under the date field', () => {
+		for (const rel of pages) {
+			const src = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+			expect(src, rel).toContain('m.admin_hint_commissioned_date()');
+		}
+	});
+});
+
 // The sticker download caption is assembled from three keys around an inline
 // link; the "_before" part ends with a load-bearing trailing space. Formatters
 // and translation tools silently trim trailing whitespace, which would render
