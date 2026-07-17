@@ -176,6 +176,13 @@
       "when": 1783492965570,
       "tag": "0024_image_featured",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1783907400473,
+      "tag": "0025_add_avatar_resolved_at",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { artists, images, stickers, stickerPacks } from '$lib/server/db/schema';
 import { eq, sql, like, or } from 'drizzle-orm';
-import { resolveAvatarUrl } from '$lib/server/avatar';
+import { resolveAvatarUrl, refreshArtistAvatars, isOurAvatarUrl } from '$lib/server/avatar';
 import { sanitizeText } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
@@ -18,7 +18,7 @@ import {
 import { fetchRegistryCatalog } from '$lib/server/registry-import';
 import { artistDiffersFromRegistry } from '$lib/server/registry-diff';
 import { approvedSubmissionGlobalId, artistInCatalog } from '$lib/server/registry-submissions';
-import { getRawSetting, setRawSetting } from '$lib/server/settings';
+import { getRawSetting, setRawSetting, getSettings } from '$lib/server/settings';
 import { parseDismissed, addDismissed } from '$lib/server/registry-dismissals';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -205,7 +205,7 @@ export const actions = {
 		return { success: true };
 	},
 
-	update: async ({ request, platform }) => {
+	update: async ({ request, platform, url }) => {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
 		const id = Number(data.get('id'));
@@ -221,15 +221,58 @@ export const actions = {
 		if (!id) return fail(400, { error: 'Artist ID is required' });
 		if (!name) return fail(400, { error: 'Artist name is required' });
 
-		// Try to resolve avatar from social links
-		const avatarUrl = await resolveAvatarUrl({ blueskyUrl, twitterUrl, furAffinityUrl, patreonUrl });
+		const existing = await db
+			.select({ avatarUrl: artists.avatarUrl })
+			.from(artists)
+			.where(eq(artists.id, id))
+			.get();
+
+		// Resolve + re-host the avatar from social links (stored on our own CDN so it
+		// can't rot to a 404). Clobber guard: a transient resolve failure returns null,
+		// and blindly writing that would wipe a good stored avatar during an unrelated
+		// edit — so keep the existing one when re-resolution comes back empty.
+		// Downgrade guard (mirrors refreshArtistAvatars): resolveAvatarUrl falls back
+		// to the SOURCE hotlink when re-hosting fails, and writing that over an avatar
+		// we host would re-rot a good stored copy — so a not-ours result is written
+		// only when there's no owned avatar to lose.
+		const settings = await getSettings(db);
+		const resolved = await resolveAvatarUrl(
+			{ blueskyUrl, twitterUrl, furAffinityUrl, patreonUrl },
+			{ env: platform?.env, settings, origin: url.origin, keyHint: name }
+		);
+		const ours = (u: string) => isOurAvatarUrl(platform?.env, settings, url.origin, u);
+		const writeResolved =
+			!!resolved && (ours(resolved) || !existing?.avatarUrl || !ours(existing.avatarUrl));
+		const avatarUrl = writeResolved ? resolved : (existing?.avatarUrl ?? null);
 
 		await db
 			.update(artists)
-			.set({ name, twitterUrl, blueskyUrl, telegramUrl, furAffinityUrl, deviantArtUrl, patreonUrl, instagramUrl, avatarUrl })
+			.set({
+				name, twitterUrl, blueskyUrl, telegramUrl, furAffinityUrl, deviantArtUrl, patreonUrl, instagramUrl, avatarUrl,
+				// Stamp only on an actually-written resolve so the refresh cron can still
+				// pick up a row we failed (or refused) to refresh here.
+				...(writeResolved ? { avatarResolvedAt: new Date().toISOString() } : {})
+			})
 			.where(eq(artists.id, id));
 
 		return { success: true };
+	},
+
+	// One-time repair + on-demand top-up: re-resolve and re-host avatars that are
+	// missing or still hotlinked (a twimg/bsky URL that can 404). Bounded per click
+	// so it fits a Worker request; the result line reports how many are left so an
+	// admin can click again to work through a large backlog.
+	refreshAvatars: async ({ platform, url }) => {
+		const db = getDb(platform!.env.DB);
+		const settings = await getSettings(db);
+		const result = await refreshArtistAvatars(db, {
+			env: platform?.env,
+			settings,
+			origin: url.origin,
+			limit: 20,
+			mode: 'rotted'
+		});
+		return { success: true, avatarRefresh: result };
 	},
 
 	submitToRegistry: async ({ request, platform, url }) => {

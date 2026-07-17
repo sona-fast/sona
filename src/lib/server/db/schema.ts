@@ -23,6 +23,11 @@ export const artists = sqliteTable('artists', {
 	// NULL = none. Sourced from the registry (an artist who renamed keeps their old
 	// handles here) so old ?artist=<OldName> links still resolve. See artist-sync.ts.
 	aliases: text('aliases'),
+	// Last time we successfully resolved + re-hosted this artist's avatar. NULL =
+	// never (rows predating avatar re-hosting, or a resolve that never succeeded).
+	// The refresh cron rotates oldest-first (NULLs first) so re-hosted copies stay
+	// current as artists change their pictures. See avatar.ts / api/cron/refresh-avatars.
+	avatarResolvedAt: text('avatar_resolved_at'),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
 

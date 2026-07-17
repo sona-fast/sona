@@ -17,6 +17,7 @@ import { getStorage, isAllowedStickerType, extFromContentType, deleteFile, isOwn
 import { getStickerSet, downloadFile, stickerSetUrl, parseStickerSetName, stickerMediaType } from '$lib/server/telegram';
 import type { TelegramSticker } from '$lib/server/telegram';
 import { resolveStickerArtistIds } from '$lib/server/stickers';
+import type { AvatarRehostContext } from '$lib/server/avatar';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeUrl } from '$lib/server/validate';
 
@@ -1284,6 +1285,9 @@ export async function resolveOrCreateArtist(
 		globalId?: string | null;
 		registryVersion?: number | null;
 		avatarUrl?: string | null;
+		/** Storage context so a freshly-resolved avatar is re-hosted to our own CDN
+		 * (can't rot to a 404) instead of stored as a hotlink. */
+		rehost?: AvatarRehostContext;
 	}
 ): Promise<number | null> {
 	const {
@@ -1292,6 +1296,7 @@ export async function resolveOrCreateArtist(
 		globalId,
 		registryVersion,
 		avatarUrl: providedAvatar,
+		rehost,
 		...socials
 	} = opts;
 	if (artistId && artistId !== 'new') return Number(artistId);
@@ -1300,15 +1305,20 @@ export async function resolveOrCreateArtist(
 	// Use the registry-provided avatar when present; else resolve from social
 	// links (best-effort — ignore errors).
 	let avatarUrl: string | null = providedAvatar ?? null;
+	let resolvedNow = false;
 	if (!avatarUrl) {
 		try {
 			const { resolveAvatarUrl } = await import('$lib/server/avatar');
-			avatarUrl = await resolveAvatarUrl({
-				blueskyUrl: socials.blueskyUrl,
-				twitterUrl: socials.twitterUrl,
-				furAffinityUrl: socials.furAffinityUrl,
-				patreonUrl: socials.patreonUrl
-			});
+			avatarUrl = await resolveAvatarUrl(
+				{
+					blueskyUrl: socials.blueskyUrl,
+					twitterUrl: socials.twitterUrl,
+					furAffinityUrl: socials.furAffinityUrl,
+					patreonUrl: socials.patreonUrl
+				},
+				rehost
+			);
+			resolvedNow = !!avatarUrl;
 		} catch {
 			// avatar resolution is non-critical
 		}
@@ -1319,6 +1329,10 @@ export async function resolveOrCreateArtist(
 		.values({
 			name: artistName,
 			avatarUrl,
+			// Stamp when we resolved+re-hosted here so the refresh cron doesn't
+			// immediately re-do a just-created row. A registry-provided avatar isn't
+			// stamped — it's re-refreshed by the registry sync, not this loop.
+			avatarResolvedAt: resolvedNow ? new Date().toISOString() : null,
 			...socials,
 			globalId: globalId ?? null,
 			registryVersion: registryVersion ?? null,
