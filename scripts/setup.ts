@@ -331,7 +331,10 @@ async function main() {
 					);
 					console.warn('  Setup only checks access — it never writes DNS itself. If you plan to attach');
 					console.warn('  the domain from the Cloudflare dashboard, you can continue.');
-					const proceed = await askYesNo('Continue setup anyway?', true);
+					// Default to NO: pressing Enter (or a non-interactive run) aborts, so a
+					// missing DNS scope fails fast instead of silently leaving the apex domain
+					// stuck `pending` with a 522 after setup reports success.
+					const proceed = await askYesNo('Continue setup anyway?', false);
 					if (!proceed) {
 						console.error(`\n${TOKEN_RECIPE}`);
 						process.exitCode = 1;

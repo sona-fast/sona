@@ -131,13 +131,19 @@ export function parseDatabaseId(output: string): string {
 export function deriveRepoSlug(originUrl: string): string | null {
 	const url = originUrl.trim();
 	if (!url) return null;
-	// Matches git@github.com:owner/repo(.git), ssh://git@github.com/owner/repo,
-	// and https://github.com/owner/repo(.git), with or without a trailing slash.
-	// The `(?:^|\/\/|@)` anchor requires `github.com` to sit right after a scheme
-	// `//`, an ssh `@`, or the string start — so neither lookalike hosts
-	// (evilgithub.com, evil.github.com) nor a github.com in the PATH of another
-	// host (https://evil.com/github.com/a/b) derive a slug and mis-target `gh`.
-	const m = url.match(/(?:^|\/\/|@)github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+	// github.com must be the URL *authority* (host), never a path segment or
+	// smuggled userinfo — otherwise a hostile origin like
+	// https://evil.com/x@github.com/a/b or https://evil.com//github.com/a/b
+	// would derive an attacker-chosen slug and mis-target `gh`. Two accepted
+	// shapes, both anchored at the string start:
+	//   scp-like:  [user@]github.com:owner/repo(.git)
+	//   URL:       scheme://[user@]github.com/owner/repo(.git)
+	// `[^@/]+@` (optional userinfo) can't cross a `/`, so github.com in a path
+	// can never be reached; lookalikes (evilgithub.com, github.com.evil.com)
+	// fail because the host is matched right up to its `:`/`/` delimiter.
+	const scp = url.match(/^(?:[^@/]+@)?github\.com:([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+	const web = url.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]+@)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+	const m = scp ?? web;
 	return m ? `${m[1]}/${m[2]}` : null;
 }
 

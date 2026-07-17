@@ -319,6 +319,15 @@ describe('deriveRepoSlug', () => {
 		// (github.com as a path segment) would mis-target the derived gh command.
 		expect(deriveRepoSlug('https://evil.com/github.com/a/b')).toBeNull();
 	});
+
+	it('returns null when github.com is smuggled into a path via // or @', () => {
+		// The host is anchored at the URL authority, so github.com appearing later
+		// in the path — even right after a `//` or an `@` — is not the host and
+		// must not derive an attacker-controlled slug.
+		expect(deriveRepoSlug('https://mirror.example.com/x@github.com/attacker/sona')).toBeNull();
+		expect(deriveRepoSlug('https://evil.com//github.com/attacker/sona')).toBeNull();
+		expect(deriveRepoSlug('git@evil.com/x@github.com:attacker/sona')).toBeNull();
+	});
 });
 
 describe('buildPagesConfigPayload', () => {
