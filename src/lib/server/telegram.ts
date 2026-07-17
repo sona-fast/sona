@@ -9,6 +9,8 @@
 // fetched from the file CDN and self-hosted, so there are no Telegram calls at
 // public request time.
 
+import { bufferStream } from './storage/buffer';
+
 const API_BASE = 'https://api.telegram.org';
 /** Per-request timeout so a slow/hanging Telegram can't tie up the worker. */
 const FETCH_TIMEOUT_MS = 8000;
@@ -162,9 +164,12 @@ export async function downloadFile(
 	const res = await fetch(`${API_BASE}/file/bot${token}/${file.file_path}`, {
 		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
 	});
-	if (!res.ok) throw new Error(`Telegram file download failed (${res.status}).`);
+	if (!res.ok || !res.body) throw new Error(`Telegram file download failed (${res.status}).`);
+	// Byte-cap the buffered download (M8) so an oversized file CDN response can't
+	// OOM the isolate. .buffer is exact — bufferStream allocates to the byte total.
+	const bytes = await bufferStream(res.body);
 	return {
-		bytes: await res.arrayBuffer(),
+		bytes: bytes.buffer as ArrayBuffer,
 		contentType: res.headers.get('content-type') ?? 'application/octet-stream',
 		filePath: file.file_path
 	};
