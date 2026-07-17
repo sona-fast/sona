@@ -54,6 +54,11 @@ test.describe('admin settings supporter key', () => {
 	test('the empty state renders the explainer and the Key field', async ({ page }) => {
 		await expect(page.getByText(/New features ship in an early-access window/)).toBeVisible();
 		await expect(keyInput(page)).toBeVisible();
+		// The eyebrow follows the fork's theme conventions, not sona.fast marketing
+		// chrome: no "//" slash prefix (that device belongs to the marketing site).
+		const eyebrow = page.locator('.key-eyebrow').first();
+		await expect(eyebrow).toBeVisible();
+		await expect(eyebrow).not.toContainText('//');
 	});
 
 	test('a garbage key shows the invalid error with the correct aria wiring', async ({ page }) => {

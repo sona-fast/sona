@@ -815,14 +815,14 @@
      VALID / EXPIRED / INVALID states are one dynamic section driven by
      data.supporterKey (verified server-side in load). -->
 <section class="security-section supporter-explainer" data-tab="account">
-	<div class="key-eyebrow"><span class="slash" aria-hidden="true">//</span> {m.admin_settings_supporter_early_eyebrow()}</div>
+	<div class="key-eyebrow">{m.admin_settings_supporter_early_eyebrow()}</div>
 	<p class="explainer-body">{m.admin_settings_supporter_explainer()}</p>
 </section>
 
 {#if data.supporterKey?.state === 'valid'}
 	<section class="security-section" data-tab="account">
 		<h2>{m.admin_settings_supporter_heading()}</h2>
-		<div class="key-eyebrow"><span class="slash" aria-hidden="true">//</span> {m.admin_settings_supporter_valid_until({ date: data.supporterKey.validUntil })}</div>
+		<div class="key-eyebrow">{m.admin_settings_supporter_valid_until({ date: data.supporterKey.validUntil })}</div>
 		{#if data.earlyAccess.length}
 			<p class="status-line">{m.admin_settings_supporter_early_active({ features: earlyActiveText })}</p>
 		{:else}
@@ -854,7 +854,7 @@
 		<section class="security-section" data-tab="account">
 			<h2>{m.admin_settings_supporter_heading()}</h2>
 			{#if data.supporterKey?.state === 'expired'}
-				<div class="key-eyebrow"><span class="slash" aria-hidden="true">//</span> {m.admin_settings_supporter_expired_eyebrow({ date: data.supporterKey.validUntil })}</div>
+				<div class="key-eyebrow">{m.admin_settings_supporter_expired_eyebrow({ date: data.supporterKey.validUntil })}</div>
 				<p class="lapsed-line">{m.admin_settings_supporter_lapsed_pre()}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener">sona.fast/supporter-key</a>{m.admin_settings_supporter_lapsed_post()}</p>
 			{/if}
 			<label>
@@ -1561,15 +1561,18 @@
 
 	/* ── Supporter key (SONA-105) ─────────────────────────────── */
 	/* Mono `//` eyebrow carries the state (valid / expired). */
+	/* Theme-native section eyebrow (matches the observability dashboard's
+	   convention) — the mock's marketing-brand "//" slash device is deliberately
+	   NOT used here: fork admin surfaces follow the fork's theme, not sona.fast
+	   chrome. */
 	.key-eyebrow {
 		font-family: var(--font-primary);
-		font-size: 13px;
+		font-size: 11px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		font-weight: 600;
 		color: var(--muted-foreground);
 		margin-bottom: 14px;
-	}
-	.key-eyebrow .slash {
-		color: var(--primary);
-		margin-right: 5px;
 	}
 	.explainer-body {
 		font-size: 14px;
