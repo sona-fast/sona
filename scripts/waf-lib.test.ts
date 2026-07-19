@@ -51,7 +51,7 @@ describe('buildRule', () => {
 		expect(rule.ref).toBe(RULE_REF);
 		expect(rule.description).toBe(RULE_DESCRIPTION);
 		expect(rule.ratelimit).toEqual({
-			characteristics: ['ip.src'],
+			characteristics: ['ip.src', 'cf.colo.id'],
 			period: 10,
 			requests_per_period: 20,
 			mitigation_timeout: 60

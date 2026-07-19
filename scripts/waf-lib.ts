@@ -49,9 +49,14 @@ export const RULE_EXPRESSION =
  * Rate-limit knobs: at most 20 POSTs per 10s from one IP, then that IP is blocked
  * for 60s. Generous enough that a real visitor mashing download never trips it,
  * tight enough that a scripted loop is throttled to a trickle.
+ *
+ * `cf.colo.id` is REQUIRED alongside `ip.src`: outside Enterprise, Cloudflare
+ * counts rate-limit rules per data center, and the Rulesets API rejects the rule
+ * (HTTP 400, code 20155) when the colo characteristic is absent. Counting is
+ * therefore per-IP-per-colo — the standard non-Enterprise behavior. Do not drop it.
  */
 export const RULE_RATELIMIT = {
-	characteristics: ['ip.src'],
+	characteristics: ['ip.src', 'cf.colo.id'],
 	period: 10,
 	requests_per_period: 20,
 	mitigation_timeout: 60
