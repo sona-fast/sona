@@ -39,6 +39,7 @@ import {
 	imageResizingOutcome,
 	cfApi
 } from './setup-lib.ts';
+import { provisionTurnstileWidget, type TurnstileStatus } from './turnstile-lib.ts';
 // Shared with the admin Settings save so the seeded siteUrl passes the same
 // https-URL validation (validate.ts has no imports, so tsx loads it directly).
 import { normalizeHttpsUrl } from '../src/lib/server/validate.ts';
@@ -108,13 +109,16 @@ const token = (bytes = 32) => randomBytes(bytes).toString('hex');
 // The friend-facing API-token recipe, printed whenever a scope preflight fails so
 // the operator knows exactly what to (re)create. Kept in one place so the CLI and
 // the message stay in sync with README's "API token" section.
+// NOTE: `Zone · WAF · Edit` (the download-beacon rate limit, finding F5) is added
+// to this recipe by the fix/download-waf-ratelimit change — do NOT re-add it here.
 const TOKEN_RECIPE =
 	'Create a Cloudflare API token (dash → My Profile → API Tokens → Create Token → Custom token) with:\n' +
 	'    • Account · Cloudflare Pages · Edit\n' +
 	'    • Account · D1 · Edit\n' +
 	'    • Account · Workers R2 Storage · Edit\n' +
-	'    • Zone · DNS · Edit            (only if you are attaching a custom domain)\n' +
-	'    • Zone · Zone Settings · Edit  (optional; lets setup enable image resizing for you)';
+	'    • Account · Turnstile · Edit    (only with a custom domain; adds the admin-login bot check)\n' +
+	'    • Zone · DNS · Edit             (only if you are attaching a custom domain)\n' +
+	'    • Zone · Zone Settings · Edit   (optional; lets setup enable image resizing for you)';
 
 async function main() {
 	console.log('— Sona setup —\n');
@@ -279,6 +283,14 @@ async function main() {
 	//    before provisioning so a missing DNS scope fails early. `imageResizingOn`:
 	//    true = on, false = off (couldn't enable), null = unknown/not checked.
 	let imageResizingOn: boolean | null = null;
+	// Admin-login Turnstile widget (finding F1). Only meaningful with a custom
+	// domain — a *.pages.dev-only fork isn't provisioned one. Its sitekey (public)
+	// is set as a Pages var below and its secret as a Pages secret; the login page
+	// enforces the challenge only when BOTH are present. null = not attempted
+	// (no domain / no token); 'error' = token lacked Account · Turnstile · Edit.
+	let turnstileStatus: TurnstileStatus | null = null;
+	let turnstileSitekey = '';
+	let turnstileSecret = '';
 	if (domain) {
 		const host = hostFromDomain(domain);
 		if (cfToken && cfAccount) {
@@ -313,6 +325,21 @@ async function main() {
 					patchOk = enabled.ok;
 				}
 				imageResizingOn = imageResizingOutcome(ir, patchOk);
+			}
+
+			// Turnstile widget for the admin-login bot check (finding F1). Account-
+			// scoped, so — unlike the DNS / image-resizing checks above — it does NOT
+			// need a resolved zone and runs even when the domain's DNS lives elsewhere.
+			// Non-fatal: a token without Account · Turnstile · Edit just yields an
+			// 'error' result we warn about in Next steps — setup keeps going regardless.
+			const ts = await provisionTurnstileWidget(cfToken, cfAccount, host);
+			turnstileStatus = ts.status;
+			turnstileSitekey = ts.sitekey ?? '';
+			turnstileSecret = ts.secret ?? '';
+			if (ts.status === 'error') {
+				console.warn(`\n⚠ Admin-login protection NOT set — ${ts.detail}`);
+			} else {
+				console.log(`✔ Admin-login Turnstile: ${ts.detail}`);
 			}
 		} else {
 			console.warn(
@@ -369,7 +396,13 @@ async function main() {
 			dbId,
 			r2Binding: 'IMAGES',
 			bucket: r2Missing ? '' : bucket,
-			envVars: { FURTRACK_MODE: furtrackMode }
+			// TURNSTILE_SITEKEY is public (rendered into the login page), so it rides
+			// as a plain Pages var alongside FURTRACK_MODE. Its secret is set separately
+			// as a Pages secret below. Absent when Turnstile wasn't provisioned.
+			envVars: {
+				FURTRACK_MODE: furtrackMode,
+				...(turnstileSitekey ? { TURNSTILE_SITEKEY: turnstileSitekey } : {})
+			}
 		});
 		const res = await cfApi(cfToken, `/accounts/${cfAccount}/pages/projects/${project}`, {
 			method: 'PATCH',
@@ -459,6 +492,9 @@ async function main() {
 	if (telegramBotToken) putSecret('TELEGRAM_BOT_TOKEN', telegramBotToken);
 	if (resendApiKey) putSecret('RESEND_API_KEY', resendApiKey);
 	if (resendFrom) putSecret('RESEND_FROM', resendFrom);
+	// Turnstile secret for the admin-login siteverify (finding F1). Server-only, so
+	// it's a Pages secret (never a plain var); the public sitekey was set above.
+	if (turnstileSecret) putSecret('TURNSTILE_SECRET', turnstileSecret);
 
 	// 8. Offer to wire the fork's GitHub Actions secrets/vars so CI deploys work
 	//    with no separate manual step. Only when gh is installed + authenticated,
@@ -565,6 +601,15 @@ async function main() {
 			console.log(`     dashboard → ${host} → Images → Transformations → "Enable for zone" +`);
 			console.log('     "Resize images from any origin". Free tier: 5,000 transformations/month.');
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
+		}
+		// Admin-login Turnstile (finding F1). 'error' = token lacked the scope, so the
+		// login has no bot check; otherwise the sitekey/secret are wired and enforced.
+		if (turnstileStatus === 'error') {
+			console.log('  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).');
+			console.log('     Add that permission to the token and re-run setup to protect /admin/login.');
+		} else if (turnstileStatus) {
+			console.log(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}`);
+			console.log('     (TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret set; enforced once deployed).');
 		}
 	}
 	console.log('\n  Your one-time setup token (enter it in the wizard):\n');

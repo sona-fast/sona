@@ -85,6 +85,7 @@ original deployment it grew out of). The project home is
    | Account · Cloudflare Pages · Edit | create/deploy the Pages project |
    | Account · D1 · Edit | create + migrate the database |
    | Account · Workers R2 Storage · Edit | create the image bucket |
+   | Account · Turnstile · Edit | **only if** attaching a custom domain — provisions the admin-login bot check |
    | Zone · DNS · Edit | **only if** attaching a custom domain (writes the apex record) |
    | Zone · Zone Settings · Edit | *optional* — lets setup enable image resizing for you |
 
