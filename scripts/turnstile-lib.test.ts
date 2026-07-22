@@ -89,12 +89,12 @@ describe('provisionTurnstileWidget — creates when absent', () => {
 });
 
 describe('provisionTurnstileWidget — reuses when present (idempotent)', () => {
-	it('finds our widget by name and reads its secret via the single-widget GET', async () => {
+	it('finds our widget by name + host and reads its secret via the single-widget GET', async () => {
 		const { api, calls } = fakeApi({
 			[listPath]: {
 				ok: true,
 				status: 200,
-				result: [{ name: WIDGET_NAME, sitekey: SITEKEY }]
+				result: [{ name: WIDGET_NAME, sitekey: SITEKEY, domains: ['akito.dog'] }]
 			},
 			[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
 		});
@@ -108,12 +108,68 @@ describe('provisionTurnstileWidget — reuses when present (idempotent)', () => 
 		expect(get?.method).toBe('GET');
 	});
 
+	// One Cloudflare account can hold several forks, and every fork's widget carries
+	// the same stable name — so the host, not the name alone, is what identifies ours.
+	// Reusing a sibling fork's widget would hand this fork a sitekey scoped to the
+	// wrong domain: every Turnstile verify then fails and, F1 being fail-closed, the
+	// admin login locks. A duplicate widget is the acceptable failure; this is not.
+	it('ignores a same-name widget issued for a SIBLING fork and creates ours', async () => {
+		const { api, calls } = fakeApi({
+			[listPath]: {
+				ok: true,
+				status: 200,
+				result: [{ name: WIDGET_NAME, sitekey: 'sibling-fork-key', domains: ['sparky.ink'] }]
+			},
+			[createPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('created');
+		expect(res.sitekey).toBe(SITEKEY);
+		// Never adopted the sibling's sitekey, and never read its secret.
+		expect(res.sitekey).not.toBe('sibling-fork-key');
+		expect(calls.some((c) => c.path.includes('sibling-fork-key'))).toBe(false);
+		const post = calls.find((c) => c.method === 'POST');
+		expect(post?.body).toEqual({ name: WIDGET_NAME, domains: ['akito.dog'], mode: WIDGET_MODE });
+	});
+
+	it('picks OUR host out of a multi-fork account listing several of our widgets', async () => {
+		const { api } = fakeApi({
+			[listPath]: {
+				ok: true,
+				status: 200,
+				result: [
+					{ name: WIDGET_NAME, sitekey: 'sparky-key', domains: ['sparky.ink'] },
+					{ name: WIDGET_NAME, sitekey: SITEKEY, domains: ['akito.dog'] }
+				]
+			},
+			[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('exists');
+		// The FIRST listed widget is a sibling's — order must not decide the match.
+		expect(res.sitekey).toBe(SITEKEY);
+	});
+
+	it('treats a widget with no domains field as not ours (creates rather than reuses)', async () => {
+		const { api } = fakeApi({
+			[listPath]: {
+				ok: true,
+				status: 200,
+				result: [{ name: WIDGET_NAME, sitekey: 'domainless-key' }]
+			},
+			[createPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('created');
+		expect(res.sitekey).toBe(SITEKEY);
+	});
+
 	it('errors (no mutation) when the existing widget’s secret cannot be read', async () => {
 		const { api, calls } = fakeApi({
 			[listPath]: {
 				ok: true,
 				status: 200,
-				result: [{ name: WIDGET_NAME, sitekey: SITEKEY }]
+				result: [{ name: WIDGET_NAME, sitekey: SITEKEY, domains: ['akito.dog'] }]
 			},
 			// GET succeeds but returns no secret (e.g. a partial/blank body).
 			[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY } }
@@ -192,7 +248,11 @@ describe('provisionTurnstileWidget — never leaks the token or the widget secre
 			},
 			// reused
 			{
-				[listPath]: { ok: true, status: 200, result: [{ name: WIDGET_NAME, sitekey: SITEKEY }] },
+				[listPath]: {
+					ok: true,
+					status: 200,
+					result: [{ name: WIDGET_NAME, sitekey: SITEKEY, domains: ['akito.dog'] }]
+				},
 				[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
 			}
 		];

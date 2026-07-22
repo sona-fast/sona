@@ -27,8 +27,14 @@ import { cfApi, hostFromDomain } from './setup-lib.ts';
 /**
  * Stable widget name we match on so re-runs find-and-reuse our widget (idempotent)
  * instead of appending a duplicate. Turnstile has no unique key or get-by-name, so
- * the name is our reconciliation key — do not change it or old forks' widgets
- * become unmatched and a fresh one is created alongside.
+ * the reconciliation key is this name PLUS the fork's host — do not change the name
+ * or old forks' widgets become unmatched and a fresh one is created alongside.
+ *
+ * The host half is not optional: one Cloudflare account can hold several forks (a
+ * multi-fork operator), and every fork's widget carries this same name. Matching on
+ * the name alone hands the SECOND fork the FIRST fork's sitekey — a widget scoped to
+ * the wrong domain, so every Turnstile verify fails and (F1 being fail-closed) the
+ * admin login locks. Wrong-domain reuse is strictly worse than a duplicate widget.
  */
 export const WIDGET_NAME = 'sona-admin-login';
 
@@ -47,6 +53,7 @@ interface Widget {
 	sitekey?: string;
 	secret?: string;
 	name?: string;
+	domains?: string[];
 }
 
 /** The create-widget body sent to POST .../challenges/widgets. */
@@ -73,7 +80,8 @@ export interface TurnstileResult {
  *   1. GET /accounts/<acct>/challenges/widgets → list the account's widgets. A
  *      non-ok response (401/403 = no Turnstile scope, or a transient error) → a
  *      clear error naming the missing scope. No mutation.
- *   2. Match our widget by its stable `name` (WIDGET_NAME):
+ *   2. Match our widget by its stable `name` (WIDGET_NAME) AND `domains` containing
+ *      this fork's host — see WIDGET_NAME on why the host half is required:
  *        - found → GET .../widgets/<sitekey> to read its secret authoritatively
  *          (the single-widget GET returns the secret; the reuse is a no-op create),
  *          status 'exists'.
@@ -86,7 +94,9 @@ export interface TurnstileResult {
  *
  * Note on matching: the list is read with a generous page size, not paginated. A
  * fresh fork's account has at most a handful of widgets, so a single page finds
- * ours; the cost of the rare miss is a duplicate widget, never a crash.
+ * ours; the cost of the rare miss is a duplicate widget, never a crash. A miss is
+ * the only acceptable failure direction here — see WIDGET_NAME on why matching must
+ * never reuse a widget issued for a different host.
  */
 export async function provisionTurnstileWidget(
 	cfToken: string,
@@ -106,7 +116,9 @@ export async function provisionTurnstileWidget(
 		};
 	}
 	const widgets = (listRes.result as Widget[] | undefined) ?? [];
-	const mine = widgets.find((w) => w.name === WIDGET_NAME && w.sitekey);
+	const mine = widgets.find(
+		(w) => w.name === WIDGET_NAME && w.sitekey && w.domains?.includes(host)
+	);
 
 	// 2a. Reuse: fetch the single widget so we read its secret from the authoritative
 	// GET (matching `wrangler turnstile widget get`, which returns the secret).
