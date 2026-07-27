@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error -- no type declarations for better-sqlite3
 import BetterSqlite3 from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { derivePackShape, resolveStickerArtistIds, findStickers, listPacks } from './stickers';
+import { derivePackShape, inferAppendedArtistId, resolveStickerArtistIds, findStickers, listPacks } from './stickers';
 import * as schema from './db/schema';
 import type { Database as Db } from './db';
 
@@ -53,6 +53,24 @@ describe('derivePackShape', () => {
 	it('is multi when self-managed with more than one distinct artist', () => {
 		expect(derivePackShape(null, [4, 5])).toBe('multi');
 		expect(derivePackShape(null, [1, 2, 3])).toBe('multi');
+	});
+});
+
+describe('inferAppendedArtistId (cron append attribution, #184 — strict per PR #195 review)', () => {
+	it('inherits only when every existing sticker shares one artist', () => {
+		expect(inferAppendedArtistId([4])).toBe(4);
+	});
+
+	it('stays unattributed when ANY existing sticker is unattributed', () => {
+		// The distinct set includes null on purpose: one credited sticker in an
+		// otherwise-unattributed pack is NOT evidence the whole pack is theirs.
+		expect(inferAppendedArtistId([4, null])).toBeNull();
+		expect(inferAppendedArtistId([null])).toBeNull();
+	});
+
+	it('stays unattributed with zero stickers or mixed artists', () => {
+		expect(inferAppendedArtistId([])).toBeNull();
+		expect(inferAppendedArtistId([4, 5])).toBeNull();
 	});
 });
 
@@ -110,7 +128,7 @@ function makeDb(): Db {
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT,
 			twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
 			deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT, global_id TEXT,
-			registry_version INTEGER, registry_synced_at TEXT, created_at TEXT NOT NULL
+			registry_version INTEGER, registry_synced_at TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 		);
 		CREATE TABLE characters (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, owner_name TEXT, url TEXT,

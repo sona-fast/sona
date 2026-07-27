@@ -205,7 +205,7 @@ CREATE TABLE artists (
 	id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT, twitter_url TEXT,
 	bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT, deviantart_url TEXT,
 	patreon_url TEXT, instagram_url TEXT, global_id TEXT, registry_version INTEGER,
-	registry_synced_at TEXT, aliases TEXT, created_at TEXT NOT NULL
+	registry_synced_at TEXT, aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 );
 CREATE TABLE sticker_packs (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -869,12 +869,12 @@ describe('importStickerBatch', () => {
 //    cleanup at ~L799 only fires for a pack THIS call created), and vice versa;
 //  - the realistic case where the SAME art carries DIFFERENT file_unique_ids in the
 //    two sets — both import fully and each pack keeps its own copy.
-// Named after the owner's real packs (t.me/addstickers/SparkyFen + /Sparky84453).
+// Two example packs used purely as distinct identifiers for the cross-pack safety tests.
 describe('importStickerBatch cross-pack shared-file safety', () => {
-	const PACK_A = 'sparkyfen';
-	const PACK_B = 'sparky84453';
-	const A_URL = 'https://t.me/addstickers/sparkyfen';
-	const B_URL = 'https://t.me/addstickers/sparky84453';
+	const PACK_A = 'examplefox';
+	const PACK_B = 'examplepack99';
+	const A_URL = 'https://t.me/addstickers/examplefox';
+	const B_URL = 'https://t.me/addstickers/examplepack99';
 
 	const fakeBucket = {
 		put: vi.fn(async () => {}),
@@ -935,12 +935,12 @@ describe('importStickerBatch cross-pack shared-file safety', () => {
 		mockSets({
 			[PACK_A]: {
 				name: PACK_A,
-				title: 'SparkyFen',
+				title: 'ExampleFox',
 				stickers: [{ fileId: 'a-shared', fileUniqueId: 'shared-1', emoji: '😀', format: 'webp' as const, width: 512, height: 512 }]
 			},
 			[PACK_B]: {
 				name: PACK_B,
-				title: 'Sparky84453',
+				title: 'ExamplePack99',
 				stickers: [
 					{ fileId: 'b-shared', fileUniqueId: 'shared-1', emoji: '😀', format: 'webp' as const, width: 512, height: 512 },
 					{ fileId: 'b-only', fileUniqueId: 'b-only-1', emoji: '🔥', format: 'webp' as const, width: 512, height: 512 }
@@ -989,12 +989,12 @@ describe('importStickerBatch cross-pack shared-file safety', () => {
 		mockSets({
 			[PACK_A]: {
 				name: PACK_A,
-				title: 'SparkyFen',
+				title: 'ExampleFox',
 				stickers: [{ fileId: 'a-shared', fileUniqueId: 'shared-1', emoji: '😀', format: 'webp' as const, width: 512, height: 512 }]
 			},
 			[PACK_B]: {
 				name: PACK_B,
-				title: 'Sparky84453',
+				title: 'ExamplePack99',
 				stickers: [
 					{ fileId: 'b-shared', fileUniqueId: 'shared-1', emoji: '😀', format: 'webp' as const, width: 512, height: 512 },
 					{ fileId: 'b-only', fileUniqueId: 'b-only-1', emoji: '🔥', format: 'webp' as const, width: 512, height: 512 }
@@ -1055,12 +1055,12 @@ describe('importStickerBatch cross-pack shared-file safety', () => {
 		mockSets({
 			[PACK_A]: {
 				name: PACK_A,
-				title: 'SparkyFen',
+				title: 'ExampleFox',
 				stickers: [{ fileId: 'a-png', fileUniqueId: 'png-copy-a', emoji: '😀', format: 'webp' as const, width: 512, height: 512 }]
 			},
 			[PACK_B]: {
 				name: PACK_B,
-				title: 'Sparky84453',
+				title: 'ExamplePack99',
 				stickers: [{ fileId: 'b-png', fileUniqueId: 'png-copy-b', emoji: '😀', format: 'webp' as const, width: 512, height: 512 }]
 			}
 		});
@@ -1138,8 +1138,16 @@ describe('resyncTelegramPacks', () => {
 		});
 	});
 
-	/** Seed a telegram-sourced pack already holding sticker 'a' (fileUniqueId 'ua'). */
-	async function seedTelegramPack(db: ReturnType<typeof makeDb>['db'], managerArtistId: number | null = null) {
+	/**
+	 * Seed a telegram-sourced pack already holding sticker 'a' (fileUniqueId 'ua').
+	 * seedArtistId sets that existing sticker's credit independently of the
+	 * manager (defaults to the manager, matching the pre-#184 seeds).
+	 */
+	async function seedTelegramPack(
+		db: ReturnType<typeof makeDb>['db'],
+		managerArtistId: number | null = null,
+		seedArtistId: number | null = managerArtistId
+	) {
 		const [pack] = await db
 			.insert(stickerPacks)
 			.values({
@@ -1155,7 +1163,7 @@ describe('resyncTelegramPacks', () => {
 			.returning({ id: stickerPacks.id });
 		await db.insert(stickers).values({
 			packId: pack.id,
-			artistId: managerArtistId,
+			artistId: seedArtistId,
 			imageUrl: 'https://cdn.test/seed.webp',
 			width: 512,
 			height: 512,
@@ -1192,6 +1200,101 @@ describe('resyncTelegramPacks', () => {
 		const ub = rows.find((s) => s.telegramFileUniqueId === 'ub')!;
 		const ubEmojis = await db.select().from(stickerEmojis).where(eq(stickerEmojis.stickerId, ub.id));
 		expect(ubEmojis.map((e) => e.emoji)).toEqual(['🔥']);
+	});
+
+	it('unmanaged single-artist pack: appends inherit the one attributed artist (#184)', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db); // artist id 1
+		const packId = await seedTelegramPack(db, null, 1); // no manager; existing sticker credited to 1
+		mockDownloadOk();
+
+		const r = await resyncTelegramPacks({ env: r2Env, settings: r2Settings, db });
+
+		expect(r).toMatchObject({ imported: 2 });
+		const fresh = (await db.select().from(stickers).where(eq(stickers.packId, packId))).filter(
+			(s) => s.telegramFileUniqueId !== 'ua'
+		);
+		expect(fresh).toHaveLength(2);
+		expect(fresh.every((s) => s.artistId === 1)).toBe(true);
+	});
+
+	it('unmanaged pack mixing one credited and one unattributed sticker: appends stay unattributed (strict, PR #195 review)', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db); // artist id 1
+		const packId = await seedTelegramPack(db, null, 1); // no manager; existing sticker credited to 1
+		// An unattributed pre-existing sibling means the pack could be a collab
+		// where only the first sticker has been credited so far — inferring here
+		// would publicly misattribute the new stickers, so strict inference
+		// refuses (revised 2026-07-17 from #184's original relaxation).
+		await db.insert(stickers).values({
+			packId,
+			artistId: null,
+			imageUrl: 'https://cdn.test/seed2.webp',
+			width: 512,
+			height: 512,
+			format: 'webp',
+			position: 1,
+			nsfw: false,
+			telegramFileUniqueId: 'uy',
+			createdAt: new Date().toISOString()
+		});
+		mockDownloadOk();
+
+		const r = await resyncTelegramPacks({ env: r2Env, settings: r2Settings, db });
+
+		expect(r).toMatchObject({ imported: 2 });
+		const fresh = (await db.select().from(stickers).where(eq(stickers.packId, packId))).filter(
+			(s) => s.telegramFileUniqueId === 'ub' || s.telegramFileUniqueId === 'uc'
+		);
+		expect(fresh).toHaveLength(2);
+		expect(fresh.every((s) => s.artistId === null)).toBe(true);
+	});
+
+	it('unmanaged mixed-artist pack: appends stay unattributed', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db); // artist id 1
+		await db.insert(artists).values({ name: 'Artist B', createdAt: new Date().toISOString() }); // artist id 2
+		const packId = await seedTelegramPack(db, null, 1);
+		// A second pre-existing sticker credited to a different artist → 2 distinct
+		// non-null artists, so inference must not pick either.
+		await db.insert(stickers).values({
+			packId,
+			artistId: 2,
+			imageUrl: 'https://cdn.test/seed2.webp',
+			width: 512,
+			height: 512,
+			format: 'webp',
+			position: 1,
+			nsfw: false,
+			telegramFileUniqueId: 'ux',
+			createdAt: new Date().toISOString()
+		});
+		mockDownloadOk();
+
+		const r = await resyncTelegramPacks({ env: r2Env, settings: r2Settings, db });
+
+		expect(r).toMatchObject({ imported: 2 });
+		const fresh = (await db.select().from(stickers).where(eq(stickers.packId, packId))).filter(
+			(s) => s.telegramFileUniqueId === 'ub' || s.telegramFileUniqueId === 'uc'
+		);
+		expect(fresh).toHaveLength(2);
+		expect(fresh.every((s) => s.artistId === null)).toBe(true);
+	});
+
+	it('unmanaged pack with zero attributed stickers: appends stay unattributed', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		const packId = await seedTelegramPack(db); // no manager; existing sticker unattributed
+		mockDownloadOk();
+
+		const r = await resyncTelegramPacks({ env: r2Env, settings: r2Settings, db });
+
+		expect(r).toMatchObject({ imported: 2 });
+		const fresh = (await db.select().from(stickers).where(eq(stickers.packId, packId))).filter(
+			(s) => s.telegramFileUniqueId !== 'ua'
+		);
+		expect(fresh).toHaveLength(2);
+		expect(fresh.every((s) => s.artistId === null)).toBe(true);
 	});
 
 	it('honors the CRON_MAX_NEW cap and reports capReached', async () => {

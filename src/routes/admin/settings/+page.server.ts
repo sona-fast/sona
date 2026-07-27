@@ -32,7 +32,7 @@ import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl, isValidEmail, normalizeHttpsUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
-import { resolveAvatarUrl } from '$lib/server/avatar';
+import { resolveAvatarUrl, isOurAvatarUrl, shouldWriteAvatar } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
 import {
 	isRegistryEnabled,
@@ -44,6 +44,9 @@ import {
 import { syncArtists } from '$lib/server/artist-sync';
 import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
 import { isObservabilityEnabled } from '$lib/server/metrics';
+import { verifySupporterKey, supporterKeyDisplayDate } from '$lib/server/supporter-key';
+import { earlyAccessActive } from '$lib/early-access';
+import { formatDate } from '$lib/index';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
 import { LANDING_LAYOUTS, DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { isValidGallerySort, DEFAULT_GALLERY_SORT, type GallerySort } from '$lib/gallery';
@@ -121,10 +124,33 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// Raw setting (never part of the client-exposed SiteSettings) — surfaced only
 	// to the admin Security form so the recovery address can be edited.
 	const adminEmail = (await getRawSetting(db, 'adminEmail')) ?? '';
+
+	// Supporter key (SONA-105) — a raw setting like adminEmail, so the owner's key
+	// never rides along in the public SiteSettings client payload. Verify it here
+	// (signature + expiry) so the page renders the valid / expired state without
+	// doing any crypto client-side. A stored key that no longer verifies at all
+	// (issuer key rotated, corruption) falls through to the empty state.
+	const now = new Date();
+	const supporterToken = (await getRawSetting(db, 'supporterKey')) ?? '';
+	let supporterKey: { token: string; state: 'valid' | 'expired'; validUntil: string } | null = null;
+	if (supporterToken) {
+		const res = await verifySupporterKey(supporterToken, now);
+		if (res.valid) {
+			supporterKey = { token: supporterToken, state: 'valid', validUntil: supporterKeyDisplayDate(res.expiresAt) };
+		} else if (res.reason === 'expired') {
+			supporterKey = { token: supporterToken, state: 'expired', validUntil: supporterKeyDisplayDate(res.expiresAt) };
+		}
+	}
+	// Features still inside their early-access window, with GA dates pre-formatted
+	// for display. Empty until the first pilot feature is registered.
+	const earlyAccess = earlyAccessActive(now).map((e) => ({ flag: e.flag, gaDate: formatDate(e.gaDate) }));
+
 	return {
 		settings,
 		refImageSrc,
 		adminEmail,
+		supporterKey,
+		earlyAccess,
 		imageCount: stats?.count || 0,
 		totalSize: stats?.totalSize || 0,
 		utUsage,
@@ -152,7 +178,7 @@ export const actions = {
 	// One save per tab: each action persists ONLY its tab's fields (saveSettings
 	// writes just the keys it's given), so saving one tab can never clobber
 	// another tab's pending edits.
-	saveSite: async ({ request, platform }) => {
+	saveSite: async ({ request, platform, url }) => {
 		const db = getDb(platform!.env.DB);
 		const data = await request.formData();
 
@@ -172,7 +198,42 @@ export const actions = {
 		let adminAvatarUrl: string | undefined;
 		if (data.has('bluesky')) {
 			blueskyUrl = normalizeSocialUrl('bluesky', data.get('bluesky') as string);
-			adminAvatarUrl = blueskyUrl ? ((await resolveAvatarUrl({ blueskyUrl })) ?? '') : '';
+			if (blueskyUrl) {
+				// Re-host to our own CDN (same as artist avatars) so the owner avatar can't
+				// rot if the source changes. Uses the current storage config.
+				const current = await getSettings(db, { fresh: true });
+				const ours = (u: string) => isOurAvatarUrl(platform?.env, current, url.origin, u);
+				const currentOwned = !!current.adminAvatarUrl && ours(current.adminAvatarUrl);
+				const handleChanged = blueskyUrl !== current.blueskyUrl;
+				// Skip the resolve entirely when the handle is UNCHANGED and the stored
+				// avatar is already ours — re-hosting the same profile again can't
+				// change anything, so don't re-fetch on every unrelated site-tab save.
+				if (handleChanged || !currentOwned) {
+					const resolved = await resolveAvatarUrl(
+						{ blueskyUrl },
+						{ env: platform?.env, settings: current, origin: url.origin, keyHint: 'owner' }
+					);
+					if (handleChanged) {
+						// A handle CHANGE is authoritative: write the re-hosted copy, and
+						// when resolution failed (null) or re-hosting fell back to a source
+						// hotlink, clear instead — the OLD account's face must never
+						// persist under a new handle.
+						adminAvatarUrl = resolved && ours(resolved) ? resolved : '';
+					} else if (
+						shouldWriteAvatar(platform?.env, current, url.origin, current.adminAvatarUrl, resolved)
+					) {
+						// Unchanged handle: the site tab posts bluesky on EVERY save and no
+						// cron heals the owner avatar, so a transient failure must not
+						// degrade it (rationale on shouldWriteAvatar).
+						adminAvatarUrl = resolved!;
+					} else if (!currentOwned) {
+						// Nothing owned to keep and nothing resolvable — clear.
+						adminAvatarUrl = '';
+					}
+				}
+			} else {
+				adminAvatarUrl = '';
+			}
 		}
 
 		let themeId: string | undefined;
@@ -417,6 +478,42 @@ export const actions = {
 		}
 		await setRawSetting(db, 'adminEmail', adminEmail);
 		return { recoveryEmailSaved: true };
+	},
+
+	// Supporter key (SONA-105). Stored as a raw setting (not in SiteSettings), so
+	// the owner's key stays out of the public client payload. Only a key that
+	// verifies AND isn't expired is stored — an invalid or expired paste fails
+	// with a field error and persists nothing. The component localizes the error
+	// from the returned code (server action errors aren't locale-aware here).
+	saveSupporterKey: async ({ request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const data = await request.formData();
+		// Strip ALL whitespace: the stored key is displayed wrapped, and a paste
+		// round-trip through that display injects newlines/spaces.
+		const raw = typeof data.get('supporterKey') === 'string' ? (data.get('supporterKey') as string) : '';
+		const token = raw.replace(/\s+/g, '');
+		// supporterKeyExpiredDate is present on every failure shape (undefined for
+		// non-expired) so the union stays accessible to the page's error rendering.
+		if (!token) return fail(400, { supporterKeyError: 'invalid', supporterKeyExpiredDate: undefined });
+
+		const res = await verifySupporterKey(token, new Date());
+		if (!res.valid) {
+			if (res.reason === 'expired') {
+				return fail(400, {
+					supporterKeyError: 'expired',
+					supporterKeyExpiredDate: supporterKeyDisplayDate(res.expiresAt)
+				});
+			}
+			return fail(400, { supporterKeyError: 'invalid', supporterKeyExpiredDate: undefined });
+		}
+		await setRawSetting(db, 'supporterKey', token);
+		return { supporterKeySaved: true };
+	},
+
+	removeSupporterKey: async ({ platform }) => {
+		const db = getDb(platform!.env.DB);
+		await setRawSetting(db, 'supporterKey', '');
+		return { supporterKeyRemoved: true };
 	},
 
 	changePassword: async ({ request, platform, cookies }) => {

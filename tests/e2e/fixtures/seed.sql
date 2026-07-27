@@ -46,3 +46,16 @@ VALUES
    1200, 900, 0, 1, 1, NULL, NULL, '2026-07-03T00:00:00.000Z');
 INSERT OR REPLACE INTO tags (id, name, created_at) VALUES (1, 'reference', '2026-07-01T00:00:00.000Z');
 INSERT OR REPLACE INTO image_tags (image_id, tag_id) VALUES (3, 1);
+
+-- Tier-A visitor rollups for the observability spec (#193): enough pageview /
+-- device / referrer / country counters (dated today, inside the dashboard
+-- window) that /admin/observability renders every percentage-bar list with a
+-- non-zero share. Counters only — no per-visitor rows, mirroring production.
+INSERT OR REPLACE INTO metric_rollup (day, metric, dim, count) VALUES
+  (date('now'), 'pageview', '/', 30),
+  (date('now'), 'pageview', '/art', 10),
+  (date('now'), 'device', 'desktop', 20),
+  (date('now'), 'device', 'mobile', 15),
+  (date('now'), 'device', 'tablet', 5),
+  (date('now'), 'referrer', 'example.com', 8),
+  (date('now'), 'country', 'US', 25);

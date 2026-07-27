@@ -18,7 +18,7 @@ const X_USER_BY_SCREEN_NAME = 'https://api.x.com/graphql/IGgvgiOx4QZndDHuD3x9TQ/
 const FETCH_TIMEOUT_MS = 5000;
 
 /** Extract a bare handle from the stored twitter URL formats
- * ("https://x.com/@SparkyFen/", "twitter.com/sparkyfen", "@sparkyfen"). */
+ * ("https://x.com/@ExampleFox/", "twitter.com/examplefox", "@examplefox"). */
 export function twitterHandleFromUrl(twitterUrl: string): string {
 	return twitterUrl
 		.replace(/^https?:\/\//, '')
@@ -54,10 +54,16 @@ async function activateGuestToken(): Promise<string | null> {
 			headers: { Authorization: X_BEARER },
 			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
 		});
-		if (!res.ok) return null;
+		if (!res.ok) {
+			// A non-2xx here (esp. 403) is the signal that X is blocking Workers egress —
+			// the one failure we most need to be able to see. No token/PII in the log.
+			console.warn(`[avatar] twitter guest-token activation failed: status=${res.status}`);
+			return null;
+		}
 		const body = (await res.json()) as { guest_token?: unknown };
 		return typeof body.guest_token === 'string' ? body.guest_token : null;
-	} catch {
+	} catch (e) {
+		console.warn(`[avatar] twitter guest-token activation error: ${e instanceof Error ? e.message : String(e)}`);
 		return null;
 	}
 }
@@ -93,10 +99,20 @@ export async function fetchTwitterAvatar(twitterUrl: string): Promise<string | n
 			if (!token) return null;
 			res = await userLookup(handle, token);
 		}
-		if (!res.ok) return null;
+		if (!res.ok) {
+			console.warn(`[avatar] twitter lookup failed: handle=${handle} status=${res.status}`);
+			return null;
+		}
 		const avatar = parseUserAvatar(await res.json());
-		return avatar ? to400x400(avatar) : null;
-	} catch {
+		if (!avatar) {
+			// 200 but no avatar in the payload — suspended/renamed handle, or the
+			// undocumented GraphQL shape rotated (see the file header).
+			console.warn(`[avatar] twitter lookup had no avatar: handle=${handle}`);
+			return null;
+		}
+		return to400x400(avatar);
+	} catch (e) {
+		console.warn(`[avatar] twitter lookup error: handle=${handle} ${e instanceof Error ? e.message : String(e)}`);
 		return null;
 	}
 }

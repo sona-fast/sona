@@ -17,7 +17,7 @@ function makeDb() {
 		twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
 		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT,
 		global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
-		aliases TEXT, created_at TEXT NOT NULL
+		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 	);`);
 	const d1 = makeD1(sqlite);
 	const platform = { env: { DB: d1 } } as unknown as App.Platform;
@@ -27,6 +27,7 @@ function makeDb() {
 function post(platform: App.Platform, body: Record<string, unknown>) {
 	return POST({
 		platform,
+		url: new URL('https://sparky.ink/api/artists'),
 		request: new Request('https://sparky.ink/api/artists', {
 			method: 'POST',
 			body: JSON.stringify(body)

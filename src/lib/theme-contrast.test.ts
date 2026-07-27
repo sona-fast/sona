@@ -213,6 +213,24 @@ describe('aurora light theme WCAG AA contrast', () => {
 	});
 });
 
+// Ember light --destructive is used as field-error text on the page background
+// (e.g. the supporter-key error, SONA-105). The mock #D93C15 was 4.09:1 there and
+// failed AA; #BE320E clears it. Guards a revert to the failing color.
+describe('ember light theme WCAG AA contrast', () => {
+	const sel = "[data-theme='light']";
+	const destructive = blockToken(sel, 'destructive');
+	const background = blockToken(sel, 'background');
+	const card = blockToken(sel, 'card');
+
+	it('destructive text on the page background meets 4.5:1', () => {
+		expect(contrast(destructive, background)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('destructive text on cards meets 4.5:1', () => {
+		expect(contrast(destructive, card)).toBeGreaterThanOrEqual(4.5);
+	});
+});
+
 // Resting-state AA for every theme × mode: the #76 asserts above cover the primary
 // pairing only for terracotta, and via the button label. Each .btn variant's label
 // must clear 4.5:1 on its un-hovered fill: primary/secondary use their own fg token,

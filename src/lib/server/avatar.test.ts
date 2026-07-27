@@ -1,0 +1,318 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// better-sqlite3 ships no bundled types and is a dev-only test dependency here.
+// @ts-expect-error - no declaration file for 'better-sqlite3'
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { eq } from 'drizzle-orm';
+import * as schema from './db/schema';
+import { artists } from './db/schema';
+import { makeD1 } from './test/d1';
+import {
+	resolveAvatarUrl,
+	refreshArtistAvatars,
+	isOurAvatarUrl,
+	shouldWriteAvatar,
+	type AvatarRehostContext
+} from './avatar';
+import type { SiteSettings } from './settings';
+
+const DDL = `
+CREATE TABLE artists (
+	id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT, twitter_url TEXT,
+	bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT, deviantart_url TEXT,
+	patreon_url TEXT, instagram_url TEXT, global_id TEXT, registry_version INTEGER,
+	registry_synced_at TEXT, aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
+);
+`;
+
+function makeDb() {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(DDL);
+	const db = drizzle(makeD1(sqlite), { schema });
+	return { db, sqlite };
+}
+
+// A fake R2 bucket: put/list/delete all succeed without touching the network.
+function fakeBucket() {
+	return {
+		put: vi.fn(async (_key: string, _body?: unknown, _opts?: unknown) => {}),
+		delete: vi.fn(async () => {}),
+		list: vi.fn(async () => ({ objects: [], truncated: false }))
+	};
+}
+
+// getStorage('r2') needs env.IMAGES + a public base; cdn.test makes stored URLs owned.
+function r2Ctx(bucket: ReturnType<typeof fakeBucket>, keyHint = 'nova'): AvatarRehostContext {
+	return {
+		env: { IMAGES: bucket } as unknown as App.Platform['env'],
+		settings: { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings,
+		origin: 'https://site.test',
+		keyHint
+	};
+}
+
+const BSKY_AVATAR = 'https://cdn.bsky.app/img/avatar/plain/did/abc@jpeg';
+
+/**
+ * Route fetch by URL: the Bluesky getProfile lookup returns a profile with an
+ * avatar, and the avatar download returns image bytes. `override` lets a test
+ * change the download response (non-2xx, wrong content-type, or no profile).
+ */
+function stubFetch(override?: {
+	profile?: { avatar?: string } | null;
+	imageStatus?: number;
+	imageType?: string;
+}) {
+	const fetchMock = vi.fn(async (input: string | URL) => {
+		const url = String(input);
+		if (url.includes('getProfile')) {
+			const profile = override?.profile === undefined ? { avatar: BSKY_AVATAR } : override.profile;
+			if (!profile) return new Response('not found', { status: 404 });
+			return new Response(JSON.stringify(profile), { status: 200 });
+		}
+		// The avatar image download.
+		const status = override?.imageStatus ?? 200;
+		const type = override?.imageType ?? 'image/jpeg';
+		return new Response(new Uint8Array([1, 2, 3, 4]), { status, headers: { 'content-type': type } });
+	});
+	vi.stubGlobal('fetch', fetchMock);
+	return fetchMock;
+}
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
+describe('resolveAvatarUrl re-hosting', () => {
+	beforeEach(() => stubFetch());
+
+	it('downloads the resolved avatar and stores it on our own CDN', async () => {
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+		// Stored, not hotlinked: our key scheme, and the source URL is gone.
+		expect(bucket.put).toHaveBeenCalledTimes(1);
+		expect(bucket.put.mock.calls[0][0]).toMatch(/^avatars\/nova\/[0-9a-f-]+\.jpg$/);
+		expect(url).toContain('/avatars/nova/');
+		expect(url).not.toBe(BSKY_AVATAR);
+	});
+
+	it('falls back to the source URL when the download fails (fail-soft)', async () => {
+		stubFetch({ imageStatus: 500 });
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(url).toBe(BSKY_AVATAR);
+	});
+
+	it('refuses a non-raster content-type and keeps the source URL', async () => {
+		stubFetch({ imageType: 'text/html' });
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(url).toBe(BSKY_AVATAR);
+	});
+
+	it('returns the raw source URL when no re-host context is given', async () => {
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' });
+		expect(url).toBe(BSKY_AVATAR);
+	});
+});
+
+describe('isOurAvatarUrl', () => {
+	const env = { IMAGES: fakeBucket() } as unknown as App.Platform['env'];
+	// No r2PublicUrl → the R2 base is root-relative '/img' (the no-CDN fork case).
+	const noCdn = { storageProvider: 'r2' } as unknown as SiteSettings;
+	const withCdn = { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings;
+	const origin = 'https://fork.test';
+
+	it('accepts a URL owned by the configured CDN base', () => {
+		expect(isOurAvatarUrl(env, withCdn, origin, 'https://cdn.test/avatars/a/x.jpg')).toBe(true);
+	});
+
+	it('accepts a root-relative URL', () => {
+		expect(isOurAvatarUrl(env, noCdn, origin, '/img/avatars/a/x.jpg')).toBe(true);
+	});
+
+	it('accepts a same-origin absolute URL whose path would be owned (no-CDN absolutized)', () => {
+		expect(isOurAvatarUrl(env, noCdn, origin, 'https://fork.test/img/avatars/a/x.jpg')).toBe(true);
+	});
+
+	it('rejects a foreign hotlink', () => {
+		expect(isOurAvatarUrl(env, noCdn, origin, 'https://pbs.twimg.com/a_400x400.jpg')).toBe(false);
+	});
+
+	it('rejects a different-origin URL even with an owned-looking path (SSRF rationale)', () => {
+		expect(isOurAvatarUrl(env, noCdn, origin, 'https://evil.test/img/avatars/a/x.jpg')).toBe(false);
+	});
+
+	it('rejects a protocol-relative URL (different origin, not root-relative)', () => {
+		expect(isOurAvatarUrl(env, noCdn, origin, '//evil.test/img/avatars/a/x.jpg')).toBe(false);
+	});
+
+	// The configured Site URL is a known-self origin: an avatar absolutized under
+	// the canonical host must stay ours when the request arrives on another host.
+	const noCdnWithSiteUrl = {
+		storageProvider: 'r2',
+		siteUrl: 'https://taro.surf'
+	} as unknown as SiteSettings;
+
+	it('accepts an absolute URL on the configured Site URL origin from another request host', () => {
+		expect(
+			isOurAvatarUrl(env, noCdnWithSiteUrl, 'https://preview.pages.dev', 'https://taro.surf/img/avatars/a/x.jpg')
+		).toBe(true);
+	});
+
+	it('still rejects a foreign origin when a Site URL is configured (exact-origin equality)', () => {
+		expect(
+			isOurAvatarUrl(env, noCdnWithSiteUrl, 'https://preview.pages.dev', 'https://evil.test/img/avatars/a/x.jpg')
+		).toBe(false);
+	});
+});
+
+describe('shouldWriteAvatar (shared write gate)', () => {
+	const env = { IMAGES: fakeBucket() } as unknown as App.Platform['env'];
+	const settings = { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings;
+	const origin = 'https://site.test';
+	const gate = (currentUrl: string | null, resolved: string | null) =>
+		shouldWriteAvatar(env, settings, origin, currentUrl, resolved);
+
+	it('never writes a null resolve (transient failure keeps whatever is stored)', () => {
+		expect(gate(null, null)).toBe(false);
+		expect(gate('https://cdn.test/avatars/a/x.jpg', null)).toBe(false);
+	});
+
+	it('writes an owned resolve over anything', () => {
+		expect(gate(null, 'https://cdn.test/avatars/a/new.jpg')).toBe(true);
+		expect(gate('https://cdn.test/avatars/a/old.jpg', 'https://cdn.test/avatars/a/new.jpg')).toBe(true);
+		expect(gate('https://pbs.twimg.com/a_400x400.jpg', 'https://cdn.test/avatars/a/new.jpg')).toBe(true);
+	});
+
+	it('writes a hotlink fallback only where there is no owned avatar to lose', () => {
+		expect(gate(null, BSKY_AVATAR)).toBe(true); // hotlink beats nothing
+		expect(gate('https://pbs.twimg.com/stale_400x400.jpg', BSKY_AVATAR)).toBe(true); // fresh beats stale
+		expect(gate('https://cdn.test/avatars/a/x.jpg', BSKY_AVATAR)).toBe(false); // never downgrade
+	});
+});
+
+describe('refreshArtistAvatars', () => {
+	beforeEach(() => stubFetch());
+
+	it("mode 'rotted' only touches null/hotlinked avatars, bounded by limit", async () => {
+		const { db } = makeDb();
+		await db.insert(artists).values([
+			{ name: 'Hotlinked', blueskyUrl: 'a.bsky.social', avatarUrl: 'https://pbs.twimg.com/x_400x400.jpg', createdAt: 'x' },
+			{ name: 'Owned', blueskyUrl: 'b.bsky.social', avatarUrl: 'https://cdn.test/avatars/b/old.jpg', createdAt: 'x' },
+			{ name: 'Missing', blueskyUrl: 'c.bsky.social', avatarUrl: null, createdAt: 'x' },
+			{ name: 'NoSocial', avatarUrl: null, createdAt: 'x' }
+		]);
+		const bucket = fakeBucket();
+		const r = await refreshArtistAvatars(db, {
+			env: { IMAGES: bucket } as unknown as App.Platform['env'],
+			settings: { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings,
+			origin: 'https://site.test',
+			limit: 1,
+			mode: 'rotted'
+		});
+		// Candidates are Hotlinked + Missing (Owned is self-hosted, NoSocial unresolvable).
+		expect(r).toEqual({ processed: 1, refreshed: 1, remaining: 1 });
+
+		const owned = await db.select().from(artists).where(eq(artists.name, 'Owned')).get();
+		expect(owned!.avatarUrl).toBe('https://cdn.test/avatars/b/old.jpg'); // untouched
+		expect(owned!.avatarResolvedAt).toBeNull();
+	});
+
+	it("mode 'rotted' on a no-CDN fork skips its own absolutized avatars (no re-host churn)", async () => {
+		const { db } = makeDb();
+		await db.insert(artists).values([
+			// Stored by a previous re-host on a fork with no CDN: '/img/…' absolutized
+			// against the request origin. owns() alone calls this foreign (SSRF guard).
+			{ name: 'SelfHosted', blueskyUrl: 's.bsky.social', avatarUrl: 'https://fork.test/img/avatars/s/x.jpg', createdAt: 'x' },
+			{ name: 'Hotlinked', blueskyUrl: 'h.bsky.social', avatarUrl: 'https://pbs.twimg.com/h_400x400.jpg', createdAt: 'x' }
+		]);
+		const bucket = fakeBucket();
+		const r = await refreshArtistAvatars(db, {
+			env: { IMAGES: bucket } as unknown as App.Platform['env'],
+			settings: { storageProvider: 'r2' } as unknown as SiteSettings, // no r2PublicUrl
+			origin: 'https://fork.test',
+			limit: 10,
+			mode: 'rotted'
+		});
+		// Only Hotlinked is a candidate — SelfHosted is ours despite failing owns().
+		expect(r).toEqual({ processed: 1, refreshed: 1, remaining: 0 });
+		const self = await db.select().from(artists).where(eq(artists.name, 'SelfHosted')).get();
+		expect(self!.avatarUrl).toBe('https://fork.test/img/avatars/s/x.jpg'); // untouched
+		expect(self!.avatarResolvedAt).toBeNull();
+	});
+
+	it('never downgrades an owned avatar to the source-hotlink fallback, but still stamps', async () => {
+		stubFetch({ imageStatus: 500 }); // rehost fails → resolveAvatarUrl returns the SOURCE hotlink
+		const { db } = makeDb();
+		await db.insert(artists).values([
+			{ name: 'Owned', blueskyUrl: 'o.bsky.social', avatarUrl: 'https://cdn.test/avatars/o/x.jpg', createdAt: 'x' },
+			{ name: 'Bare', blueskyUrl: 'b.bsky.social', avatarUrl: null, createdAt: 'x' },
+			{ name: 'Stale', blueskyUrl: 's.bsky.social', avatarUrl: 'https://pbs.twimg.com/old_400x400.jpg', createdAt: 'x' }
+		]);
+		const bucket = fakeBucket();
+		const r = await refreshArtistAvatars(db, {
+			env: { IMAGES: bucket } as unknown as App.Platform['env'],
+			settings: { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings,
+			origin: 'https://site.test',
+			limit: 10,
+			mode: 'oldest'
+		});
+		// The hotlink is written only where there's no owned avatar to lose.
+		expect(r).toEqual({ processed: 3, refreshed: 2, remaining: 0 });
+		const owned = await db.select().from(artists).where(eq(artists.name, 'Owned')).get();
+		expect(owned!.avatarUrl).toBe('https://cdn.test/avatars/o/x.jpg'); // not downgraded
+		expect(owned!.avatarResolvedAt).toBeTruthy(); // stamped anyway (starvation guard)
+		const bare = await db.select().from(artists).where(eq(artists.name, 'Bare')).get();
+		expect(bare!.avatarUrl).toBe(BSKY_AVATAR); // hotlink beats nothing
+		expect(bare!.avatarResolvedAt).toBeTruthy();
+		const stale = await db.select().from(artists).where(eq(artists.name, 'Stale')).get();
+		expect(stale!.avatarUrl).toBe(BSKY_AVATAR); // fresh hotlink beats a stale one
+	});
+
+	it('keeps the existing avatar when re-resolution fails, but still stamps (clobber guard)', async () => {
+		stubFetch({ profile: null }); // getProfile 404 → resolveAvatarUrl returns null
+		const { db } = makeDb();
+		await db.insert(artists).values({
+			name: 'Rotted',
+			blueskyUrl: 'r.bsky.social',
+			avatarUrl: 'https://pbs.twimg.com/keep_400x400.jpg',
+			createdAt: 'x'
+		});
+		const bucket = fakeBucket();
+		const r = await refreshArtistAvatars(db, {
+			env: { IMAGES: bucket } as unknown as App.Platform['env'],
+			settings: { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings,
+			origin: 'https://site.test',
+			limit: 10,
+			mode: 'rotted'
+		});
+		expect(r).toEqual({ processed: 1, refreshed: 0, remaining: 0 });
+		const row = await db.select().from(artists).where(eq(artists.name, 'Rotted')).get();
+		expect(row!.avatarUrl).toBe('https://pbs.twimg.com/keep_400x400.jpg'); // not clobbered to null
+		expect(row!.avatarResolvedAt).toBeTruthy(); // stamped so it can't starve the rotation
+	});
+
+	it("mode 'oldest' rotates oldest-first (nulls first) and leaves the rest for next run", async () => {
+		const { db } = makeDb();
+		await db.insert(artists).values([
+			{ name: 'Newest', blueskyUrl: 'n.bsky.social', avatarUrl: 'https://cdn.test/avatars/n/x.jpg', avatarResolvedAt: '2026-06-01T00:00:00Z', createdAt: 'x' },
+			{ name: 'Never', blueskyUrl: 'z.bsky.social', avatarUrl: 'https://cdn.test/avatars/z/x.jpg', avatarResolvedAt: null, createdAt: 'x' },
+			{ name: 'Old', blueskyUrl: 'o.bsky.social', avatarUrl: 'https://cdn.test/avatars/o/x.jpg', avatarResolvedAt: '2026-01-01T00:00:00Z', createdAt: 'x' }
+		]);
+		const bucket = fakeBucket();
+		const r = await refreshArtistAvatars(db, {
+			env: { IMAGES: bucket } as unknown as App.Platform['env'],
+			settings: { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings,
+			origin: 'https://site.test',
+			limit: 2,
+			mode: 'oldest'
+		});
+		expect(r).toEqual({ processed: 2, refreshed: 2, remaining: 1 });
+		// Newest was skipped this run — its timestamp is unchanged.
+		const newest = await db.select().from(artists).where(eq(artists.name, 'Newest')).get();
+		expect(newest!.avatarResolvedAt).toBe('2026-06-01T00:00:00Z');
+	});
+});

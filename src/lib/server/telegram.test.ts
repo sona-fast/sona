@@ -7,7 +7,7 @@ import { parseStickerSetName, stickerSetUrl, isTelegramEnabled } from './telegra
 
 describe('parseStickerSetName', () => {
 	it('extracts the name from a full addstickers URL', () => {
-		expect(parseStickerSetName('https://t.me/addstickers/Sparky84453')).toBe('Sparky84453');
+		expect(parseStickerSetName('https://t.me/addstickers/ExamplePack99')).toBe('ExamplePack99');
 	});
 
 	it('extracts from a scheme-less t.me link', () => {
@@ -31,7 +31,7 @@ describe('parseStickerSetName', () => {
 
 describe('stickerSetUrl', () => {
 	it('builds the canonical addstickers link', () => {
-		expect(stickerSetUrl('Sparky84453')).toBe('https://t.me/addstickers/Sparky84453');
+		expect(stickerSetUrl('ExamplePack99')).toBe('https://t.me/addstickers/ExamplePack99');
 	});
 });
 

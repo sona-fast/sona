@@ -208,6 +208,7 @@
 		<label>
 			<span>{m.admin_field_commissioned_date()}</span>
 			<input type="date" class="input" name="commissionedAt" value={data.image.commissionedAt || ''} />
+			<small class="hint">{m.admin_hint_commissioned_date()}</small>
 		</label>
 
 		<label class="checkbox-label">

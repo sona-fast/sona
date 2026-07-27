@@ -8,11 +8,11 @@ import {
 
 describe('twitterHandleFromUrl', () => {
 	it('handles the stored URL shapes', () => {
-		expect(twitterHandleFromUrl('https://x.com/@SparkyFen/')).toBe('sparkyfen');
-		expect(twitterHandleFromUrl('https://twitter.com/sparkyfen')).toBe('sparkyfen');
-		expect(twitterHandleFromUrl('https://mobile.twitter.com/sparkyfen?s=21')).toBe('sparkyfen');
-		expect(twitterHandleFromUrl('@sparkyfen')).toBe('sparkyfen');
-		expect(twitterHandleFromUrl('x.com/sparkyfen/status/123')).toBe('sparkyfen');
+		expect(twitterHandleFromUrl('https://x.com/@ExampleFox/')).toBe('examplefox');
+		expect(twitterHandleFromUrl('https://twitter.com/examplefox')).toBe('examplefox');
+		expect(twitterHandleFromUrl('https://mobile.twitter.com/examplefox?s=21')).toBe('examplefox');
+		expect(twitterHandleFromUrl('@examplefox')).toBe('examplefox');
+		expect(twitterHandleFromUrl('x.com/examplefox/status/123')).toBe('examplefox');
 	});
 
 	it('returns empty for junk', () => {
@@ -75,7 +75,7 @@ describe('fetchTwitterAvatar', () => {
 				return new Response(JSON.stringify(userBody), { status: 200 });
 			})
 		);
-		expect(await fetchTwitterAvatar('https://x.com/sparkyfen')).toBe(
+		expect(await fetchTwitterAvatar('https://x.com/examplefox')).toBe(
 			'https://pbs.twimg.com/profile_images/9/pic_400x400.jpg'
 		);
 	});
@@ -95,13 +95,13 @@ describe('fetchTwitterAvatar', () => {
 				return new Response(JSON.stringify(userBody), { status: 200 });
 			})
 		);
-		expect(await fetchTwitterAvatar('https://x.com/sparkyfen')).toContain('_400x400');
+		expect(await fetchTwitterAvatar('https://x.com/examplefox')).toContain('_400x400');
 		expect(activations).toBe(2);
 	});
 
 	it('fails soft to null on activation failure, refusal, or network errors', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => new Response('no', { status: 403 })));
-		expect(await fetchTwitterAvatar('https://x.com/sparkyfen')).toBeNull();
+		expect(await fetchTwitterAvatar('https://x.com/examplefox')).toBeNull();
 
 		vi.stubGlobal(
 			'fetch',
@@ -109,6 +109,6 @@ describe('fetchTwitterAvatar', () => {
 				throw new Error('down');
 			})
 		);
-		expect(await fetchTwitterAvatar('https://x.com/sparkyfen')).toBeNull();
+		expect(await fetchTwitterAvatar('https://x.com/examplefox')).toBeNull();
 	});
 });

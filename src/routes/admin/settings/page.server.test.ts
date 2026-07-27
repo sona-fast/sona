@@ -11,14 +11,29 @@ import { MAX_SONA_COLORS } from '$lib/palette-merge';
 import { DEFAULT_THEME_ID } from '$lib/themes';
 import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { resolveAvatarUrl } from '$lib/server/avatar';
+import { verifySupporterKey } from '$lib/server/supporter-key';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
 
 // The avatar re-resolve on the bluesky present-branch would otherwise hit the
-// Bluesky API; stub it so the save is deterministic and offline.
-vi.mock('$lib/server/avatar', () => ({
-	resolveAvatarUrl: vi.fn(async () => 'https://cdn.bsky.app/img/avatar/plain/derived')
+// Bluesky API; stub just that export so the save is deterministic and offline
+// (the real isOurAvatarUrl/shouldWriteAvatar stay so the guards are exercised
+// for real). The default return is an OWNED URL — root-relative '/img/…' is
+// ours by definition (no-CDN R2 shape) — i.e. a successful re-host.
+vi.mock('$lib/server/avatar', async (importActual) => ({
+	...(await importActual<typeof import('$lib/server/avatar')>()),
+	resolveAvatarUrl: vi.fn(async () => '/img/avatars/owner/derived.jpg')
+}));
+
+// Supporter-key verification needs the sona.fast PRIVATE key to mint a passing
+// token, which tests can't have — so stub verify and drive the save/remove/load
+// branches by its result. The signature crypto itself is covered in
+// supporter-key.test.ts with a real in-test keypair. supporterKeyDisplayDate
+// stays real so the formatted dates are exercised.
+vi.mock('$lib/server/supporter-key', async (importActual) => ({
+	...(await importActual<typeof import('$lib/server/supporter-key')>()),
+	verifySupporterKey: vi.fn()
 }));
 
 function makeDb() {
@@ -86,6 +101,7 @@ function saveSiteEvent(platform: App.Platform, fields: Record<string, string>) {
 	for (const [k, v] of Object.entries(fields)) body.append(k, v);
 	return {
 		platform,
+		url: new URL('https://taro.surf/admin/settings'),
 		request: new Request('https://taro.surf/admin/settings?/saveSite', { method: 'POST', body })
 	} as never;
 }
@@ -582,12 +598,11 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(await getRawSetting(db, 'blueskyUrl')).toBe(
 			'https://bsky.app/profile/sunday.bsky.social'
 		);
-		expect(resolveAvatarUrl).toHaveBeenCalledWith({
-			blueskyUrl: 'https://bsky.app/profile/sunday.bsky.social'
-		});
-		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(
-			'https://cdn.bsky.app/img/avatar/plain/derived'
+		expect(resolveAvatarUrl).toHaveBeenCalledWith(
+			{ blueskyUrl: 'https://bsky.app/profile/sunday.bsky.social' },
+			expect.objectContaining({ keyHint: 'owner', origin: 'https://taro.surf' })
 		);
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/derived.jpg');
 	});
 
 	it('a present-but-blank bluesky clears both blueskyUrl and the avatar', async () => {
@@ -602,6 +617,66 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
 		// No avatar lookup when bluesky is cleared — the avatar clears with it.
 		expect(resolveAvatarUrl).not.toHaveBeenCalled();
+	});
+
+	// Unchanged-handle guard (#187): the site tab posts bluesky on EVERY save, and
+	// no cron heals the owner avatar — an unrelated save (a transient resolve
+	// failure included) must not degrade an owned re-hosted copy. With the handle
+	// unchanged AND the avatar already ours, nothing could change, so the resolve
+	// is skipped entirely (which is also what keeps a transient failure harmless).
+	it('an UNCHANGED handle with an owned avatar skips re-resolution and keeps the avatar', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		// Root-relative '/img/…' is ours by definition (no-CDN R2 shape).
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
+		vi.mocked(resolveAvatarUrl).mockClear();
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+
+		expect(resolveAvatarUrl).not.toHaveBeenCalled(); // no profile lookup, no re-host
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/owned.jpg');
+	});
+
+	it('an unchanged handle still re-hosts when the stored avatar is a hotlink (skip is ownership-gated)', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/sunday.bsky.social');
+		await seed(db, 'adminAvatarUrl', 'https://cdn.bsky.app/img/avatar/plain/rot.jpg');
+		vi.mocked(resolveAvatarUrl).mockClear();
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+
+		expect(resolveAvatarUrl).toHaveBeenCalledTimes(1);
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('/img/avatars/owner/derived.jpg');
+	});
+
+	// A handle CHANGE is authoritative (#197 review): when the new handle can't be
+	// resolved+re-hosted, the OLD account's face must not persist under it.
+	it('a CHANGED handle clears the owner avatar when resolution fails (null)', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/old.bsky.social');
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
+		vi.mocked(resolveAvatarUrl).mockResolvedValueOnce(null);
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'new.bsky.social' }));
+
+		expect(await getRawSetting(db, 'blueskyUrl')).toBe('https://bsky.app/profile/new.bsky.social');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
+	});
+
+	it('a CHANGED handle clears instead of writing a hotlink fallback', async () => {
+		const { db, platform } = makeDb();
+		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/old.bsky.social');
+		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
+		// Re-host failed → resolveAvatarUrl falls back to the new account's hotlink;
+		// storing a rot-prone hotlink for the owner (no cron heals it) is worse than
+		// clearing and re-saving once storage recovers.
+		vi.mocked(resolveAvatarUrl).mockResolvedValueOnce(
+			'https://cdn.bsky.app/img/avatar/plain/hotlink'
+		);
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'new.bsky.social' }));
+
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
 	});
 });
 
@@ -627,5 +702,148 @@ describe('settings saveSite — themeId/landingLayout present-branch', () => {
 
 		expect(await getRawSetting(db, 'themeId')).toBe(DEFAULT_THEME_ID);
 		expect(await getRawSetting(db, 'landingLayout')).toBe(DEFAULT_LANDING_LAYOUT);
+	});
+});
+
+function saveSupporterKeyEvent(platform: App.Platform, key: string) {
+	const body = new FormData();
+	body.append('supporterKey', key);
+	return {
+		platform,
+		request: new Request('https://taro.surf/admin/settings?/saveSupporterKey', { method: 'POST', body })
+	} as never;
+}
+
+function removeSupporterKeyEvent(platform: App.Platform) {
+	return {
+		platform,
+		request: new Request('https://taro.surf/admin/settings?/removeSupporterKey', {
+			method: 'POST',
+			body: new FormData()
+		})
+	} as never;
+}
+
+describe('settings saveSupporterKey — store only verified, in-date keys (SONA-105)', () => {
+	it('stores a key that verifies and is not expired, whitespace stripped', async () => {
+		const { db, platform } = makeDb();
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date('2026-09-01T00:00:00Z')
+		});
+
+		// Paste carries display-wrap whitespace; the stored value is stripped.
+		const result = await actions.saveSupporterKey(saveSupporterKeyEvent(platform, 'head.\n tail '));
+
+		expect(result).toEqual({ supporterKeySaved: true });
+		expect(await getRawSetting(db, 'supporterKey')).toBe('head.tail');
+	});
+
+	it('rejects an unverifiable key with the invalid error and stores nothing', async () => {
+		const { db, platform } = makeDb();
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({ valid: false, reason: 'bad-signature' });
+
+		const result = await actions.saveSupporterKey(saveSupporterKeyEvent(platform, 'bogus.token'));
+
+		expect(result).toMatchObject({ status: 400, data: { supporterKeyError: 'invalid' } });
+		expect(await getRawSetting(db, 'supporterKey')).toBeNull();
+	});
+
+	it('rejects an expired paste with the dated expired error and stores nothing', async () => {
+		const { db, platform } = makeDb();
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+			valid: false,
+			reason: 'expired',
+			login: 'sparky',
+			tier: 1,
+			expiresAt: new Date('2026-07-11T00:00:00Z')
+		});
+
+		const result = await actions.saveSupporterKey(saveSupporterKeyEvent(platform, 'old.token'));
+
+		expect(result).toMatchObject({
+			status: 400,
+			data: { supporterKeyError: 'expired', supporterKeyExpiredDate: '2026.07.10' }
+		});
+		expect(await getRawSetting(db, 'supporterKey')).toBeNull();
+	});
+
+	it('rejects an empty submission as invalid', async () => {
+		const { platform } = makeDb();
+		vi.mocked(verifySupporterKey).mockClear();
+
+		const result = await actions.saveSupporterKey(saveSupporterKeyEvent(platform, '   '));
+
+		expect(result).toMatchObject({ status: 400, data: { supporterKeyError: 'invalid' } });
+		expect(verifySupporterKey).not.toHaveBeenCalled();
+	});
+});
+
+describe('settings removeSupporterKey — clears the stored key', () => {
+	it('clears a stored supporter key', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+
+		const result = await actions.removeSupporterKey(removeSupporterKeyEvent(platform));
+
+		expect(result).toEqual({ supporterKeyRemoved: true });
+		expect(await getRawSetting(db, 'supporterKey')).toBe('');
+	});
+});
+
+describe('settings load — supporter key is raw + verified, never in public settings', () => {
+	it('surfaces a verified key as valid and keeps the token out of settings', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date('2026-09-01T00:00:00Z')
+		});
+
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+			supporterKey: { token: string; state: string; validUntil: string } | null;
+			earlyAccess: unknown[];
+			settings: Record<string, unknown>;
+		};
+
+		expect(result.supporterKey).toEqual({ token: 'head.tail', state: 'valid', validUntil: '2026.08.31' });
+		// The registry ships empty, so nothing is in an early-access window.
+		expect(result.earlyAccess).toEqual([]);
+		// The token must never leak into the client-exposed SiteSettings.
+		expect(result.settings.supporterKey).toBeUndefined();
+	});
+
+	it('surfaces an expired key as expired (still shown, with its date)', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'supporterKey', 'old.token');
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+			valid: false,
+			reason: 'expired',
+			login: 'sparky',
+			tier: 1,
+			expiresAt: new Date('2026-07-11T00:00:00Z')
+		});
+
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+			supporterKey: { state: string; validUntil: string } | null;
+		};
+
+		expect(result.supporterKey).toMatchObject({ state: 'expired', validUntil: '2026.07.10' });
+	});
+
+	it('falls through to no key when a stored token no longer verifies', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'supporterKey', 'corrupt');
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({ valid: false, reason: 'malformed' });
+
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+			supporterKey: unknown;
+		};
+
+		expect(result.supporterKey).toBeNull();
 	});
 });

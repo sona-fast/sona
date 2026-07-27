@@ -1,0 +1,70 @@
+# Scheduled refresh of artist avatars.
+#
+# Cloudflare Pages can't run native cron, so GitHub Actions is the scheduler: it
+# POSTs to the app's refresh endpoint, which re-resolves + re-hosts a bounded
+# batch of artist avatars (oldest-first) so re-hosted copies track each artist's
+# current picture. See issue #187.
+#
+# Required:
+#   - repo secret CRON_SECRET (Settings -> Secrets and variables -> Actions)
+#     matching the Pages secret of the same name (`wrangler pages secret put
+#     CRON_SECRET`). Without it the endpoint returns 401/503 and this job fails.
+#   - repo variable SITE_URL (Actions -> Variables) = your site's base URL,
+#     e.g. https://example.com.
+#   - repo variable AVATAR_REFRESH_BATCH (Actions -> Variables) = how many
+#     avatars to refresh per run. Unset or 0 means "not opted in" and the run is
+#     skipped with a log line (never a silent no-op). Start small, e.g. 25.
+name: Avatar refresh
+
+on:
+  schedule:
+    # Daily at 07:00 UTC (low-traffic), an hour after the sticker re-sync so the
+    # two scheduled jobs don't overlap. GitHub may delay scheduled runs.
+    - cron: '0 7 * * *'
+  # Allow running it on demand from the Actions tab.
+  workflow_dispatch: {}
+
+# Don't pile up overlapping runs.
+concurrency:
+  group: avatar-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # The canonical template is intentionally unconfigured, so it must not run
+    # fork workflows. Every fork (any other repo) runs this normally.
+    if: github.repository != 'sona-fast/sona'
+    steps:
+      - name: Trigger avatar refresh endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          AVATAR_REFRESH_BATCH: ${{ vars.AVATAR_REFRESH_BATCH }}
+        run: |
+          if [ -z "$SITE_URL" ]; then
+            echo "::error::SITE_URL repo variable is not set (Settings -> Secrets and variables -> Actions -> Variables) - set it to your site's base URL, e.g. https://example.com"; exit 1
+          fi
+          # Avatar refresh is OPT-IN via the batch dial. Unset or 0 = not opted in
+          # -> skip with a visible log line (not a silent no-op), don't fail.
+          if [ -z "$AVATAR_REFRESH_BATCH" ] || [ "$AVATAR_REFRESH_BATCH" = "0" ]; then
+            echo "::warning::AVATAR_REFRESH_BATCH not set (or 0) - skipping avatar refresh (set the repo variable to a batch size, e.g. 25, to opt in)"; exit 0
+          fi
+          # Avatar refresh needs cron auth like the other cron jobs.
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET not set but AVATAR_REFRESH_BATCH is - set the repo secret (matching the Pages secret) to run the refresh"; exit 1
+          fi
+          # --max-time is the REAL bound on the refresh run: when curl gives up,
+          # the server request is cancelled mid-batch and its job-run heartbeat
+          # is lost. 900s pairs with the endpoint's MAX_BATCH=50 clamp: typical
+          # runs take ~1-2s per artist, worst-case resolver timeouts ~28s each.
+          code=$(curl -sS --max-time 900 -o response.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${SITE_URL%/}/api/cron/refresh-avatars?batch=${AVATAR_REFRESH_BATCH}")
+          echo "HTTP $code"
+          cat response.json || true
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::Avatar refresh endpoint returned HTTP $code"; exit 1
+          fi

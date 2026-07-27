@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
+import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
@@ -28,7 +29,7 @@ function makeDb() {
 		twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
 		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT,
 		global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
-		aliases TEXT, created_at TEXT NOT NULL
+		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 	);
 	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);
 	CREATE TABLE stickers (id INTEGER PRIMARY KEY AUTOINCREMENT, artist_id INTEGER NOT NULL);`);
@@ -528,5 +529,140 @@ describe('submitToRegistry action — surfaces the registry outcome', () => {
 		expect(result).toMatchObject({ status: 502 });
 		expect((result as { data: { error: string } }).data.error).toMatch(/registry version/i);
 		expect(mockRegistrySubmit).not.toHaveBeenCalled();
+	});
+});
+
+describe('update action — avatar clobber guard (#187)', () => {
+	function updateEvent(platform: App.Platform, fields: Record<string, string>) {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) body.append(k, v);
+		return {
+			platform,
+			url: new URL('http://localhost/admin/artists'),
+			request: new Request('http://localhost/admin/artists', { method: 'POST', body })
+		} as never;
+	}
+
+	// The default beforeEach stub fails every fetch, so re-resolution comes back null.
+	it('keeps the existing avatar when re-resolution fails during an edit', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(schema.artists)
+			.values({ name: 'Nyx', avatarUrl: 'https://cdn.test/avatars/nyx/good.jpg', blueskyUrl: 'nyx.bsky.social' })
+			.returning({ id: schema.artists.id })
+			.get();
+
+		// Edit just the name; the bluesky field is still present so resolve runs (and fails).
+		const result = await actions.update(updateEvent(platform, { id: String(row.id), name: 'Nyx Prime', bluesky: 'nyx.bsky.social' }));
+		expect(result).toEqual({ success: true });
+
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.name).toBe('Nyx Prime');
+		expect(after!.avatarUrl).toBe('https://cdn.test/avatars/nyx/good.jpg'); // not clobbered to null
+	});
+
+	// Downgrade guard: the profile resolves but the re-host download fails, so
+	// resolveAvatarUrl falls back to the SOURCE hotlink — writing that over an
+	// avatar we host would re-rot a good stored copy.
+	it('keeps an owned re-hosted avatar when re-resolution falls back to a source hotlink', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(schema.artists)
+			// Root-relative '/img/…' is ours by definition (no-CDN R2 shape).
+			.values({ name: 'Nyx', avatarUrl: '/img/avatars/nyx/owned.jpg', blueskyUrl: 'nyx.bsky.social' })
+			.returning({ id: schema.artists.id })
+			.get();
+		// Profile lookup succeeds; the CDN download stays offline → hotlink fallback.
+		stubRegistryFetch({
+			'public.api.bsky.app': { avatar: 'https://cdn.bsky.app/img/avatar/plain/rot.jpg' }
+		});
+
+		const result = await actions.update(updateEvent(platform, { id: String(row.id), name: 'Nyx', bluesky: 'nyx.bsky.social' }));
+		expect(result).toEqual({ success: true });
+
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.avatarUrl).toBe('/img/avatars/nyx/owned.jpg'); // not downgraded to the hotlink
+		expect(after!.avatarResolvedAt).toBeNull(); // not stamped — the cron may still retry it
+	});
+
+	// Clearing every avatar-capable social is a deliberate removal — with nothing
+	// left to resolve from, the guard must not pin a wrong avatar forever.
+	it('clears the avatar when every avatar-capable social is posted empty', async () => {
+		const { db, platform } = makeDb();
+		const row = await db
+			.insert(schema.artists)
+			.values({ name: 'Nyx', avatarUrl: '/img/avatars/nyx/owned.jpg', blueskyUrl: 'https://bsky.app/profile/nyx.bsky.social' })
+			.returning({ id: schema.artists.id })
+			.get();
+
+		const result = await actions.update(updateEvent(platform, { id: String(row.id), name: 'Nyx', bluesky: '' }));
+		expect(result).toEqual({ success: true });
+
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.avatarUrl).toBeNull(); // deliberate removal, not kept
+		expect(after!.blueskyUrl).toBeNull();
+		expect(after!.avatarResolvedAt).toBeNull(); // nothing was resolved
+	});
+
+	// Efficiency: identical avatar socials + an already-ours avatar → nothing the
+	// resolve could change, so the action must not re-fetch/re-host at all.
+	it('skips re-resolution when avatar socials are unchanged and the avatar is already ours', async () => {
+		const { db, platform } = makeDb();
+		const fetchSpy = vi.fn(() => Promise.reject(new Error('offline')));
+		vi.stubGlobal('fetch', fetchSpy);
+		const row = await db
+			.insert(schema.artists)
+			.values({
+				name: 'Nyx',
+				avatarUrl: '/img/avatars/nyx/owned.jpg',
+				// Stored in normalized form, as the action itself would have written it.
+				blueskyUrl: 'https://bsky.app/profile/nyx.bsky.social'
+			})
+			.returning({ id: schema.artists.id })
+			.get();
+
+		const result = await actions.update(
+			updateEvent(platform, { id: String(row.id), name: 'Nyx Prime', bluesky: 'nyx.bsky.social' })
+		);
+		expect(result).toEqual({ success: true });
+		expect(fetchSpy).not.toHaveBeenCalled(); // no profile lookup, no re-host
+
+		const after = await db.select().from(schema.artists).get();
+		expect(after!.name).toBe('Nyx Prime');
+		expect(after!.avatarUrl).toBe('/img/avatars/nyx/owned.jpg');
+		expect(after!.avatarResolvedAt).toBeNull(); // untouched — nothing was written
+	});
+});
+
+describe('refreshAvatars action — backfill (#187)', () => {
+	function refreshEvent(platform: App.Platform) {
+		return {
+			platform,
+			url: new URL('http://localhost/admin/artists'),
+			request: new Request('http://localhost/admin/artists', { method: 'POST' })
+		} as never;
+	}
+
+	// Offline stub → resolution fails, so this exercises the bounded scan + stamping
+	// + clobber-safety without hitting the network. (Owned-vs-hotlinked filtering and
+	// successful re-hosting are covered in avatar.test.ts against a fake bucket.)
+	it('processes social rows, skips social-less ones, and reports counts', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(schema.artists).values([
+			{ name: 'Hotlinked', blueskyUrl: 'a.bsky.social', avatarUrl: 'https://pbs.twimg.com/x_400x400.jpg' },
+			{ name: 'NoSocial', avatarUrl: null }
+		]);
+
+		const result = await actions.refreshAvatars(refreshEvent(platform));
+		// NoSocial can never resolve, so it's left out of the queue entirely. Hotlinked
+		// resolves to null offline, so it's not re-hosted, but it's still processed (and
+		// stamped) so it won't churn every run.
+		expect(result).toEqual({ success: true, avatarRefresh: { processed: 1, refreshed: 0, remaining: 0 } });
+
+		const hot = await db.select().from(schema.artists).where(eq(schema.artists.name, 'Hotlinked')).get();
+		expect(hot!.avatarUrl).toBe('https://pbs.twimg.com/x_400x400.jpg'); // preserved (clobber-safe)
+		expect(hot!.avatarResolvedAt).toBeTruthy();
+		const noSocial = await db.select().from(schema.artists).where(eq(schema.artists.name, 'NoSocial')).get();
+		expect(noSocial!.avatarResolvedAt).toBeNull(); // untouched
 	});
 });

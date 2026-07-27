@@ -140,6 +140,21 @@
 	let changingPassword = $state(false);
 	let adminEmail = $state(data.adminEmail);
 	let savingRecoveryEmail = $state(false);
+	let savingSupporterKey = $state(false);
+	let removingSupporterKey = $state(false);
+
+	// Truncated middle for the stored key record — enough head to recognize it,
+	// enough tail to spot-check the paste, never the whole (long) token.
+	function truncateKey(token: string): string {
+		return token.length <= 34 ? token : `${token.slice(0, 24)}…${token.slice(-7)}`;
+	}
+	// Localized "in early access right now" list, joined for the status line. Empty
+	// until a pilot feature is registered, in which case the "nothing" line shows.
+	const earlyActiveText = $derived(
+		data.earlyAccess
+			.map((e) => m.admin_settings_supporter_early_item({ feature: e.flag, date: e.gaDate }))
+			.join(m.admin_settings_supporter_early_join())
+	);
 	let showResendSetup = $state(false);
 	let showCfSetup = $state(false);
 
@@ -795,6 +810,84 @@
 		</button>
 	</section>
 </form>
+
+<!-- Supporter key (SONA-105): unlocks early-access features. The mock's EMPTY /
+     VALID / EXPIRED / INVALID states are one dynamic section driven by
+     data.supporterKey (verified server-side in load). -->
+<section class="security-section supporter-explainer" data-tab="account">
+	<div class="key-eyebrow">{m.admin_settings_supporter_early_eyebrow()}</div>
+	<p class="explainer-body">{m.admin_settings_supporter_explainer()}</p>
+</section>
+
+{#if data.supporterKey?.state === 'valid'}
+	<section class="security-section" data-tab="account">
+		<h2>{m.admin_settings_supporter_heading()}</h2>
+		<div class="key-eyebrow">{m.admin_settings_supporter_valid_until({ date: data.supporterKey.validUntil })}</div>
+		{#if data.earlyAccess.length}
+			<p class="status-line">{m.admin_settings_supporter_early_active({ features: earlyActiveText })}</p>
+		{:else}
+			<p class="status-line">{m.admin_settings_supporter_early_none()}</p>
+		{/if}
+		<div class="key-record">{truncateKey(data.supporterKey.token)}</div>
+		<form method="POST" action="?/removeSupporterKey" use:enhance={() => {
+			removingSupporterKey = true;
+			return async ({ result, update }) => {
+				await update({ reset: false });
+				removingSupporterKey = false;
+				if (result.type === 'success') toast.success(m.admin_settings_supporter_removed());
+			};
+		}}>
+			<div class="key-actions">
+				<button type="submit" class="link" disabled={removingSupporterKey}>{m.admin_settings_supporter_remove()}</button>
+			</div>
+		</form>
+	</section>
+{:else}
+	<form method="POST" action="?/saveSupporterKey" class="contents" use:enhance={() => {
+		savingSupporterKey = true;
+		return async ({ result, update }) => {
+			await update({ reset: false });
+			savingSupporterKey = false;
+			if (result.type === 'success') toast.success(m.admin_settings_supporter_saved());
+		};
+	}}>
+		<section class="security-section" data-tab="account">
+			<h2>{m.admin_settings_supporter_heading()}</h2>
+			{#if data.supporterKey?.state === 'expired'}
+				<div class="key-eyebrow">{m.admin_settings_supporter_expired_eyebrow({ date: data.supporterKey.validUntil })}</div>
+				<p class="lapsed-line">{m.admin_settings_supporter_lapsed_pre()}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener">sona.fast/supporter-key</a>{m.admin_settings_supporter_lapsed_post()}</p>
+			{/if}
+			<label>
+				<span>{m.admin_settings_supporter_key_label()}</span>
+				<input
+					type="text"
+					class="input"
+					name="supporterKey"
+					placeholder={data.supporterKey?.state === 'expired' ? m.admin_settings_supporter_placeholder_new() : m.admin_settings_supporter_placeholder()}
+					aria-invalid={form?.supporterKeyError ? 'true' : undefined}
+					aria-describedby={form?.supporterKeyError ? 'supporter-key-error' : undefined}
+				/>
+			</label>
+			{#if form?.supporterKeyError}
+				<p class="field-error" id="supporter-key-error" role="alert">
+					{#if form.supporterKeyError === 'expired'}
+						{m.admin_settings_supporter_error_expired({ date: form.supporterKeyExpiredDate ?? '' })}
+					{:else}
+						{m.admin_settings_supporter_error_invalid()}
+					{/if}
+				</p>
+			{/if}
+			<div class="save-row">
+				<button type="submit" class="btn btn-primary" disabled={savingSupporterKey}>
+					{savingSupporterKey ? m.admin_saving() : m.admin_settings_supporter_save()}
+				</button>
+			</div>
+			{#if !data.supporterKey}
+				<p class="hint">{m.admin_settings_supporter_hint_pre()}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener">sona.fast/supporter-key</a>{m.admin_settings_supporter_hint_post()}</p>
+			{/if}
+		</section>
+	</form>
+{/if}
 
 {#if data.registryEnabled}
 	<form method="POST" action="?/syncNow" class="contents" use:enhance={() => {
@@ -1465,6 +1558,94 @@
 		margin: 8px 0 0;
 		line-height: 1.5;
 	}
+
+	/* ── Supporter key (SONA-105) ─────────────────────────────── */
+	/* Mono `//` eyebrow carries the state (valid / expired). */
+	/* Theme-native section eyebrow (matches the observability dashboard's
+	   convention) — the mock's marketing-brand "//" slash device is deliberately
+	   NOT used here: fork admin surfaces follow the fork's theme, not sona.fast
+	   chrome. */
+	.key-eyebrow {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		font-weight: 600;
+		color: var(--muted-foreground);
+		margin-bottom: 14px;
+	}
+	.explainer-body {
+		font-size: 14px;
+		color: var(--muted-foreground);
+		line-height: 1.6;
+		max-width: 62ch;
+	}
+	.status-line {
+		font-size: 13px;
+		color: var(--muted-foreground);
+		line-height: 1.55;
+		margin-bottom: 14px;
+		max-width: 62ch;
+	}
+	.lapsed-line {
+		font-size: 14px;
+		color: var(--foreground);
+		line-height: 1.55;
+		margin-bottom: 16px;
+		max-width: 62ch;
+	}
+	/* Stored key on a raised, higher-contrast panel (var(--secondary) stands in
+	   for the mock's --raised, which isn't a shared token). */
+	.key-record {
+		background: var(--secondary);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-s);
+		padding: 12px 16px;
+		font-family: var(--font-primary);
+		font-size: 13px;
+		color: var(--foreground);
+		word-break: break-all;
+		line-height: 1.5;
+	}
+	.key-actions {
+		margin-top: 14px;
+	}
+	.save-row {
+		margin-top: 20px;
+	}
+	/* Remove-key: a text button that reads as a link. */
+	.link {
+		color: var(--muted-foreground);
+		font-size: 13px;
+		font-family: var(--font-secondary);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+	}
+	.link:hover {
+		color: var(--foreground);
+	}
+	.link-inline {
+		color: var(--foreground);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+	.link:focus-visible,
+	.link-inline:focus-visible {
+		outline: 2px solid var(--foreground);
+		outline-offset: 2px;
+	}
+	/* Destructive on text only — matches the app's form errors. */
+	.field-error {
+		color: var(--destructive);
+		font-size: 13px;
+		margin-top: 8px;
+		line-height: 1.5;
+	}
+
 	:global(.spin) {
 		animation: spin 1s linear infinite;
 	}
