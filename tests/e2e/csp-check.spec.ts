@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { adminLogin } from './admin-login';
 
 // F3: the CSP set via kit.csp must contain XSS blast radius WITHOUT breaking the
 // app. This drives public + admin pages and asserts the browser reports ZERO
@@ -54,7 +55,9 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	expect(scriptSrc).toContain("'self'");
 	expect(scriptSrc).not.toContain('unsafe-inline');
 	expect(scriptSrc).toContain('sha256-');
-	expect(csp).toContain("img-src 'self' https: data:");
+	// Full directive, blob: included — a prefix match would still pass if blob: were
+	// dropped, which is exactly the regression this spec now covers below.
+	expect(csp).toContain("img-src 'self' https: data: blob:");
 	expect(csp).toContain("frame-ancestors 'none'");
 	expect(csp).toContain("object-src 'none'");
 	// This host only — no includeSubDomains (an operator's apex may serve unrelated
@@ -68,27 +71,32 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 		all.push(...(await drain(page)));
 	}
 
-	// Admin: login form, then the dashboard.
+	// Admin: login form, then the dashboard. Both halves of the Turnstile change are
+	// on main now, so this uses the shared helper rather than its own inlined wait.
 	await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
 	all.push(...(await drain(page)));
-	await page.fill('input[name="password"]', PASSWORD);
-	// If the fork configured Turnstile, the submit button stays disabled until the
-	// widget solves — click without waiting and this races it. Gate on the
-	// SSR-rendered `.turnstile` container (present in the initial HTML whenever a
-	// sitekey is set), NOT on the hidden response input, which turnstile.render()
-	// injects only after api.js loads; a count() on that can run before it exists
-	// and wrongly skip the wait. toHaveValue then auto-waits for it to populate.
-	//
-	// Deliberately inlined rather than importing tests/e2e/admin-login.ts: that
-	// helper arrives with the Turnstile branch, and this spec has to pass on its
-	// own branch too. Collapse the two onto the shared helper once both are on main.
-	if (await page.locator('.turnstile').count()) {
-		await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveValue(/.+/, {
-			timeout: 15_000
-		});
-	}
-	await page.click('button[type="submit"]');
-	await page.waitForURL(/\/admin\/images/);
+	await adminLogin(page, PASSWORD);
+	all.push(...(await drain(page)));
+
+	// /admin/upload is where CSP can do real damage rather than cosmetic damage, and
+	// it is invisible to a plain page visit: the blob: URLs only exist once a file is
+	// picked. So pick one. getImageDimensions() reads naturalWidth/naturalHeight off
+	// an <img src=blob:…>; if img-src blocks blob: that <img> fires onerror, the
+	// dimensions resolve to 0x0, and the form posts values the server stores as NULL.
+	// Asserting the rendered dimensions — not just the violation count — is what makes
+	// this a regression test for the metadata loss rather than for the missing preview.
+	await page.goto('/admin/upload', { waitUntil: 'domcontentloaded' });
+	all.push(...(await drain(page)));
+	const onePixelPng = Buffer.from(
+		'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+		'base64'
+	);
+	await page
+		.locator('input[type="file"]')
+		.first()
+		.setInputFiles({ name: 'csp-probe.png', mimeType: 'image/png', buffer: onePixelPng });
+	// 1x1 source, so real dimensions read back as "1 x 1"; a blocked blob: reads "0 x 0".
+	await expect(page.locator('.tile-meta').first()).toContainText('1 x 1', { timeout: 10_000 });
 	all.push(...(await drain(page)));
 
 	// Confirm the client actually hydrated (so the hydration script-src path was

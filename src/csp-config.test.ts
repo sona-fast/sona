@@ -36,9 +36,21 @@ describe('kit.csp directives (F3)', () => {
 
 	it('covers the image + media origins the app actually loads', () => {
 		// Same-origin (/cdn-cgi/image, /img), any https host (per-fork R2 domain,
-		// external artist avatars, UploadThing), and data: (CSS chevron / inline SVG).
-		expect(d['img-src']).toEqual(['self', 'https:', 'data:']);
+		// external artist avatars, UploadThing), data: (CSS chevron / inline SVG),
+		// and blob: (see below).
+		expect(d['img-src']).toEqual(['self', 'https:', 'data:', 'blob:']);
 		expect(d['media-src']).toEqual(['self', 'https:']);
+	});
+
+	it('allows blob: images, or the upload page silently stores NULL dimensions', () => {
+		// Regression guard. admin/upload renders each picked file via
+		// URL.createObjectURL(file) twice: the preview thumbnail, and an <img> that
+		// getImageDimensions() reads naturalWidth/naturalHeight from. Drop blob: and
+		// that <img> fires onerror, dimensions resolve to 0x0, the form posts
+		// width_N=0/height_N=0, and +page.server.ts stores `Number(0) || null` — NULL.
+		// The visible symptom is a missing thumbnail; the real damage is metadata loss
+		// on every upload, which is why this gets its own named test.
+		expect(d['img-src']).toContain('blob:');
 	});
 
 	it('permits the Turnstile widget (script + iframe) on admin login', () => {

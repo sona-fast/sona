@@ -51,7 +51,16 @@ const config = {
 				'script-src-attr': ['unsafe-hashes', 'sha256-7dQwUgLau1NFCCGjfn9FsYptB6ZtWxJin6VohGIu20I='],
 				'style-src': ['self', 'unsafe-inline', 'https://fonts.googleapis.com'],
 				'font-src': ['self', 'https://fonts.gstatic.com'],
-				'img-src': ['self', 'https:', 'data:'],
+				// blob: is required, not a loosening: the admin upload page renders each
+				// picked file through URL.createObjectURL(file) — both the preview
+				// thumbnail AND getImageDimensions(), which reads naturalWidth/Height off
+				// an image element. Without blob: that element fires onerror, dimensions
+				// resolve to 0x0, and the form posts width/height the server stores as
+				// NULL. So omitting it silently corrupts upload metadata, it doesn't
+				// merely hide a thumbnail. A blob: URL is minted by this origin's own
+				// script and is unguessable, so allowing it grants an attacker nothing
+				// they couldn't already do with script execution.
+				'img-src': ['self', 'https:', 'data:', 'blob:'],
 				'media-src': ['self', 'https:'],
 				'connect-src': ['self'],
 				'frame-src': ['self', 'https://challenges.cloudflare.com'],
