@@ -28,7 +28,13 @@ async function installCollector(page: Page) {
 
 async function drain(page: Page): Promise<Violation[]> {
 	// Give hydration + async font/image loads a beat to fire any violation.
-	await page.waitForLoadState('networkidle').catch(() => {});
+	//
+	// The timeout is load-bearing, not defensive. On /admin/login the Turnstile widget
+	// keeps talking to challenges.cloudflare.com, so the page NEVER reaches networkidle
+	// and an unbounded wait here hangs until the whole test times out. That is what
+	// turned main's e2e red the moment the Turnstile keys landed in the e2e config
+	// alongside this spec. Settling is a nice-to-have; not hanging is not.
+	await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
 	await page.waitForTimeout(400);
 	return page.evaluate(() => (window as unknown as { __csp: Violation[] }).__csp ?? []);
 }
@@ -36,6 +42,9 @@ async function drain(page: Page): Promise<Violation[]> {
 test('no CSP violations across public + admin pages; CSP + HSTS headers present', async ({
 	page
 }) => {
+	// Six navigations, two of them through a Turnstile solve that fetches api.js from
+	// challenges.cloudflare.com. That overruns the default 30s budget on CI.
+	test.slow();
 	await installCollector(page);
 	const all: Violation[] = [];
 	const pageErrors: string[] = [];
@@ -71,32 +80,15 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 		all.push(...(await drain(page)));
 	}
 
-	// Admin: login form, then the dashboard. Both halves of the Turnstile change are
-	// on main now, so this uses the shared helper rather than its own inlined wait.
+	// Admin: the login form itself, then the dashboard. Violations are collected per
+	// page (window resets on navigation), so the login page must be drained BEFORE
+	// logging in — the Turnstile widget lives there and is the most likely thing to
+	// trip CSP. adminLogin navigates to /admin/login itself, so this loads that page
+	// twice on purpose: once to inspect, once to log in through. Two widget solves,
+	// each pulling api.js over the network, is most of why this test needs test.slow().
 	await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
 	all.push(...(await drain(page)));
 	await adminLogin(page, PASSWORD);
-	all.push(...(await drain(page)));
-
-	// /admin/upload is where CSP can do real damage rather than cosmetic damage, and
-	// it is invisible to a plain page visit: the blob: URLs only exist once a file is
-	// picked. So pick one. getImageDimensions() reads naturalWidth/naturalHeight off
-	// an <img src=blob:…>; if img-src blocks blob: that <img> fires onerror, the
-	// dimensions resolve to 0x0, and the form posts values the server stores as NULL.
-	// Asserting the rendered dimensions — not just the violation count — is what makes
-	// this a regression test for the metadata loss rather than for the missing preview.
-	await page.goto('/admin/upload', { waitUntil: 'domcontentloaded' });
-	all.push(...(await drain(page)));
-	const onePixelPng = Buffer.from(
-		'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-		'base64'
-	);
-	await page
-		.locator('input[type="file"]')
-		.first()
-		.setInputFiles({ name: 'csp-probe.png', mimeType: 'image/png', buffer: onePixelPng });
-	// 1x1 source, so real dimensions read back as "1 x 1"; a blocked blob: reads "0 x 0".
-	await expect(page.locator('.tile-meta').first()).toContainText('1 x 1', { timeout: 10_000 });
 	all.push(...(await drain(page)));
 
 	// Confirm the client actually hydrated (so the hydration script-src path was
@@ -112,4 +104,58 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	expect(badAssets, 'client asset failed to load').toEqual([]);
 	expect(pageErrors, 'uncaught page errors').toEqual([]);
 	expect(hydrated, 'SvelteKit client hydrated').toBe(true);
+});
+
+// Separate test, separate timeout budget: needs its own login, and asserts a runtime
+// capability rather than counting violations.
+test('/admin/upload can load a blob: image, so picked files keep their dimensions', async ({
+	page
+}) => {
+	// One login through a Turnstile solve.
+	test.slow();
+
+	// admin/upload mints blob: URLs from every picked file (+page.svelte:63 and :115):
+	// the preview thumbnail, and an image element that getImageDimensions() reads
+	// naturalWidth/naturalHeight from. When img-src omitted blob: — as it did on the
+	// first CSP release — that element fired onerror, dimensions resolved to 0x0, and
+	// the form posted width/height that +page.server.ts stored as NULL. The missing
+	// thumbnail was cosmetic; the metadata loss was the real damage.
+	//
+	// This drives the capability directly instead of picking a file through the hidden
+	// <input type=file>. It is deliberately narrower than a full upload: it proves the
+	// CSP on this exact page permits the blob: image load that getImageDimensions
+	// depends on, with no coupling to the upload page's internal markup or to the R2
+	// binding. Drop blob: from img-src and this fails with 'onerror (blocked)'.
+	await adminLogin(page, PASSWORD);
+	const resp = await page.goto('/admin/upload', { waitUntil: 'domcontentloaded' });
+
+	const imgSrc = (resp?.headers()['content-security-policy'] ?? '')
+		.split(';')
+		.find((d) => d.trim().startsWith('img-src'));
+	expect(imgSrc, 'img-src on /admin/upload').toContain('blob:');
+
+	const outcome = await page.evaluate(async () => {
+		// 1x1 PNG, so a successful load reports 1x1 and a blocked one cannot fake it.
+		const bytes = Uint8Array.from(
+			atob(
+				'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+			),
+			(c) => c.charCodeAt(0)
+		);
+		const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+		try {
+			return await new Promise<string>((resolve) => {
+				const img = new Image();
+				img.onload = () => resolve(`${img.naturalWidth}x${img.naturalHeight}`);
+				img.onerror = () => resolve('onerror (blocked)');
+				setTimeout(() => resolve('timeout — neither handler fired'), 5000);
+				img.src = url;
+			});
+		} finally {
+			URL.revokeObjectURL(url);
+		}
+	});
+
+	// Exactly what getImageDimensions() would read. '0x0' is what the bug produced.
+	expect(outcome, 'blob: image load on /admin/upload').toBe('1x1');
 });
