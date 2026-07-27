@@ -201,10 +201,17 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// Security headers. Content-Security-Policy is set separately by SvelteKit's
 	// native CSP (kit.csp in svelte.config.js), which hashes its own inline scripts
 	// — do not also set it here. HSTS is a plain header (no framework machinery):
-	// force HTTPS for a year including subdomains. No `preload` — that opts every
-	// fork's apex into the browser preload list irreversibly, which we can't assume
-	// is safe for a fork that isn't HTTPS-only end to end.
-	response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+	// force HTTPS for a year on THIS host only.
+	//
+	// Deliberately neither `includeSubDomains` nor `preload`. A fork runs on its
+	// operator's own domain, often a personal apex with unrelated subdomains we
+	// know nothing about — `includeSubDomains` would force HTTPS across all of
+	// them for a year, browser-cached with no server-side undo, breaking any
+	// plain-HTTP service the operator runs alongside their Sona site. The header
+	// protects the Sona host, which is the host it is served from; widening it to
+	// an operator's whole domain is their call to make at the edge, not ours to
+	// make for them from inside the app.
+	response.headers.set('Strict-Transport-Security', 'max-age=31536000');
 	response.headers.set('X-Frame-Options', 'DENY');
 	response.headers.set('X-Content-Type-Options', 'nosniff');
 	response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');

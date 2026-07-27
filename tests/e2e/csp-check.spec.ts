@@ -57,7 +57,9 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	expect(csp).toContain("img-src 'self' https: data:");
 	expect(csp).toContain("frame-ancestors 'none'");
 	expect(csp).toContain("object-src 'none'");
-	expect(hsts).toBe('max-age=31536000; includeSubDomains');
+	// This host only — no includeSubDomains (an operator's apex may serve unrelated
+	// plain-HTTP subdomains) and no preload (irreversible). See hooks.server.ts.
+	expect(hsts).toBe('max-age=31536000');
 
 	all.push(...(await drain(page)));
 
@@ -70,6 +72,21 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
 	all.push(...(await drain(page)));
 	await page.fill('input[name="password"]', PASSWORD);
+	// If the fork configured Turnstile, the submit button stays disabled until the
+	// widget solves — click without waiting and this races it. Gate on the
+	// SSR-rendered `.turnstile` container (present in the initial HTML whenever a
+	// sitekey is set), NOT on the hidden response input, which turnstile.render()
+	// injects only after api.js loads; a count() on that can run before it exists
+	// and wrongly skip the wait. toHaveValue then auto-waits for it to populate.
+	//
+	// Deliberately inlined rather than importing tests/e2e/admin-login.ts: that
+	// helper arrives with the Turnstile branch, and this spec has to pass on its
+	// own branch too. Collapse the two onto the shared helper once both are on main.
+	if (await page.locator('.turnstile').count()) {
+		await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveValue(/.+/, {
+			timeout: 15_000
+		});
+	}
 	await page.click('button[type="submit"]');
 	await page.waitForURL(/\/admin\/images/);
 	all.push(...(await drain(page)));

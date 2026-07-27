@@ -373,10 +373,14 @@ describe('authHandle — security response headers (F3)', () => {
 			resolve
 		} as never)) as Response;
 
-		// HSTS: one year, subdomains, no preload (forks aren't all HTTPS-only).
-		expect(res.headers.get('Strict-Transport-Security')).toBe(
-			'max-age=31536000; includeSubDomains'
-		);
+		// HSTS: one year, this host only. Neither directive is an oversight —
+		// `includeSubDomains` would force HTTPS across an operator's whole personal
+		// apex for a year (browser-cached, no server-side undo), and `preload` is
+		// irreversible. Both are the operator's call at the edge, not ours.
+		const hsts = res.headers.get('Strict-Transport-Security');
+		expect(hsts).toBe('max-age=31536000');
+		expect(hsts).not.toContain('includeSubDomains');
+		expect(hsts).not.toContain('preload');
 		expect(res.headers.get('X-Frame-Options')).toBe('DENY');
 		expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
 		expect(res.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
