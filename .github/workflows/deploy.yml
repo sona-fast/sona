@@ -272,6 +272,58 @@ jobs:
             npx wrangler pages secret put CLOUDFLARE_ACCOUNT_ID --project-name "$CLOUDFLARE_PAGES_PROJECT"
           echo "Cloudflare analytics secrets synced to Pages project ${CLOUDFLARE_PAGES_PROJECT} (bind on the deploy below)"
 
+      # Admin-login Turnstile bot check. The login action enforces the challenge
+      # only when BOTH keys reach the Worker, so both are synced here: the sitekey
+      # as a plain Pages var (it is public — it renders into the login page) and
+      # the secret via `pages secret put`. `npm run setup` writes these straight to
+      # Pages, which covers only NEW forks; an already-deployed fork sets the repo
+      # VARIABLE TURNSTILE_SITEKEY + repo SECRET TURNSTILE_SECRET and this step
+      # binds them on the next deploy — same reason CRON_SECRET/SETUP_TOKEN have a
+      # sync step, since Pages secrets bind at deploy time.
+      #
+      # Half a config is the dangerous state: with only one of the two set the app
+      # runs SILENTLY WITHOUT the bot check, indistinguishable from a fork that
+      # deliberately opted out. So neither-set is a quiet skip, but exactly-one-set
+      # FAILS the deploy rather than shipping a security control that isn't there.
+      #
+      # Turning it back OFF (e.g. a widget scoped to the wrong domain is rejecting
+      # a valid login) takes more than clearing the repo settings — the values are
+      # already on Pages and this step only ever writes. Delete TURNSTILE_SITEKEY
+      # and TURNSTILE_SECRET from the Pages project (dashboard → Settings →
+      # Environment variables) and redeploy; login falls back to throttle+password.
+      - name: Sync TURNSTILE keys to Pages project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TURNSTILE_SITEKEY: ${{ vars.TURNSTILE_SITEKEY }}
+          TURNSTILE_SECRET: ${{ secrets.TURNSTILE_SECRET }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'sona' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TURNSTILE_SITEKEY" ] && [ -z "$TURNSTILE_SECRET" ]; then
+            echo "TURNSTILE_SITEKEY / TURNSTILE_SECRET not set — skipping (admin login runs on the throttle + password alone)"
+            exit 0
+          fi
+          if [ -z "$TURNSTILE_SITEKEY" ] || [ -z "$TURNSTILE_SECRET" ]; then
+            echo "::error::Turnstile is half-configured — set BOTH the TURNSTILE_SITEKEY repo variable and the TURNSTILE_SECRET repo secret, or neither. With only one set the admin-login bot check is silently OFF."
+            exit 1
+          fi
+          payload=$(jq -n --arg v "$TURNSTILE_SITEKEY" \
+            '{deployment_configs: {production: {env_vars: {TURNSTILE_SITEKEY: {type: "plain_text", value: $v}}}}}')
+          resp=$(curl -s -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          if ! echo "$resp" | jq -e '.success' >/dev/null; then
+            echo "::error::Failed to set TURNSTILE_SITEKEY on Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+            echo "$resp" | jq '.errors'
+            exit 1
+          fi
+          printf '%s' "$TURNSTILE_SECRET" | \
+            npx wrangler pages secret put TURNSTILE_SECRET --project-name "$CLOUDFLARE_PAGES_PROJECT"
+          echo "TURNSTILE_SITEKEY + TURNSTILE_SECRET synced to Pages project ${CLOUDFLARE_PAGES_PROJECT} (bind on the deploy below)"
+
       - uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
