@@ -87,6 +87,7 @@ original deployment it grew out of). The project home is
    | Account · Workers R2 Storage · Edit | create the image bucket |
    | Account · Turnstile · Edit | **only if** attaching a custom domain — provisions the admin-login bot check |
    | Zone · DNS · Edit | **only if** attaching a custom domain (writes the apex record) |
+   | Zone · WAF · Edit | **only if** attaching a custom domain — adds a WAF rate limit on the public download beacon (`POST /api/metrics/download`) |
    | Zone · Zone Settings · Edit | *optional* — lets setup enable image resizing for you |
 
    Without **DNS · Edit**, registering the Pages apex domain succeeds but the DNS

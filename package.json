@@ -8,6 +8,7 @@
 		"setup": "tsx scripts/setup.ts",
 		"reset-password": "tsx scripts/reset-password.ts",
 		"connect-domains": "tsx scripts/connect-domains.ts",
+		"apply-download-ratelimit": "tsx scripts/apply-download-ratelimit.ts",
 		"predev": "tsx scripts/dev-bootstrap.ts",
 		"dev": "vite dev",
 		"build": "vite build",

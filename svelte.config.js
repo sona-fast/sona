@@ -20,7 +20,14 @@ const config = {
 					? { path: process.env.SONA_E2E_PERSIST_TO }
 					: undefined
 			}
-		})
+		}),
+		// Origin check is the real CSRF control for admin form POSTs (SameSite=Lax
+		// alone is not enough). An empty trustedOrigins list is SvelteKit's strict
+		// default (same-origin only), pinned explicitly so a later `['*']` — which
+		// disables CSRF protection on every admin action — can't slip in silently.
+		// (The deprecated `checkOrigin: true` expresses the same thing but warns on
+		// every build and is slated for removal; trustedOrigins is its replacement.)
+		csrf: { trustedOrigins: [] }
 	}
 };
 
