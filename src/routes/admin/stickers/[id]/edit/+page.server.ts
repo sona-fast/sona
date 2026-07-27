@@ -50,7 +50,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 };
 
 export const actions = {
-	default: async ({ params, request, platform }) => {
+	default: async ({ params, request, platform, url }) => {
 		const db = getDb(platform!.env.DB);
 		const settings = await getSettings(db);
 		const packId = Number(params.id);
@@ -78,7 +78,8 @@ export const actions = {
 			furAffinityUrl: normalizeSocialUrl('furaffinity', data.get('furaffinity') as string) || null,
 			deviantArtUrl: normalizeSocialUrl('deviantart', data.get('deviantart') as string) || null,
 			patreonUrl: normalizeSocialUrl('patreon', data.get('patreon') as string) || null,
-			instagramUrl: normalizeSocialUrl('instagram', data.get('instagram') as string) || null
+			instagramUrl: normalizeSocialUrl('instagram', data.get('instagram') as string) || null,
+			rehost: { env: platform?.env, settings, origin: url.origin, keyHint: newArtistName }
 		});
 		// Default artist is optional — stickers with none stay "unattributed".
 		const stickerInputs = parseStickerFormInputs(data, defaultArtistId);

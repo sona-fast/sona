@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { artists } from '$lib/server/db/schema';
 import { resolveOrCreateArtist } from '$lib/server/sticker-import';
+import { getSettings } from '$lib/server/settings';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { normalizeSocialUrl, socialsToHandles } from '$lib/server/handle-normalize';
 import type { RequestHandler } from './$types';
@@ -19,7 +20,7 @@ import type { RequestHandler } from './$types';
 //   - status 'linked'  → an unlinked local artist matched by handle — linked,
 //                        and refreshed the same way
 //   - status 'created' → a new local artist was created
-export const POST: RequestHandler = async ({ request, platform }) => {
+export const POST: RequestHandler = async ({ request, platform, url }) => {
 	const db = getDb(platform!.env.DB);
 	const body = (await request.json().catch(() => null)) as Record<string, string> | null;
 	if (!body) error(400, 'Invalid request body');
@@ -95,14 +96,17 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		}
 	}
 
-	// 3. No existing match → create.
+	// 3. No existing match → create. Re-host a socially-resolved avatar to our CDN
+	// (a registry-provided avatarUrl is used as-is and isn't re-resolved).
+	const settings = await getSettings(db);
 	const id = await resolveOrCreateArtist(db, {
 		artistId: null,
 		artistName: name,
 		...socials,
 		globalId,
 		registryVersion,
-		avatarUrl: globalId ? sanitizeUrl(body.avatarUrl ?? '') || null : null
+		avatarUrl: globalId ? sanitizeUrl(body.avatarUrl ?? '') || null : null,
+		rehost: { env: platform?.env, settings, origin: url.origin, keyHint: name }
 	});
 	if (!id) error(400, 'Could not create artist');
 

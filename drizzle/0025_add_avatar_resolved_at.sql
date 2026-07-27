@@ -1,0 +1,1 @@
+ALTER TABLE `artists` ADD `avatar_resolved_at` text;

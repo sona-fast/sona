@@ -1,5 +1,6 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { ZeroKeepError } from './types';
+import { bufferStream } from './buffer';
 import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
 
 export interface R2Options {
@@ -27,9 +28,10 @@ export class R2Storage implements StorageProvider {
 	async put({ suggestedKey, body, contentType }: PutInput): Promise<PutResult> {
 		const key = suggestedKey.replace(/^\/+/, '');
 		// R2 requires a known content length; a raw ReadableStream (download/upload
-		// body) doesn't have one, so buffer streams before storing. ArrayBuffer /
+		// body) doesn't have one, so buffer streams before storing. The buffer is
+		// byte-capped (M8) so a large source can't OOM the isolate. ArrayBuffer /
 		// Uint8Array already have a length and pass through.
-		const data = body instanceof ReadableStream ? await new Response(body).arrayBuffer() : body;
+		const data = body instanceof ReadableStream ? await bufferStream(body) : body;
 		// Stored images are immutable (content-addressed by a random-uuid key), so
 		// give them an explicit 1-day cache instead of relying on Cloudflare's 4h
 		// zone default. CF Image Transformations inherit this, so resized thumbnails

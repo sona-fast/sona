@@ -86,6 +86,7 @@ original deployment it grew out of). The project home is
    | Account · D1 · Edit | create + migrate the database |
    | Account · Workers R2 Storage · Edit | create the image bucket |
    | Zone · DNS · Edit | **only if** attaching a custom domain (writes the apex record) |
+   | Zone · WAF · Edit | **only if** attaching a custom domain — adds a WAF rate limit on the public download beacon (`POST /api/metrics/download`) |
    | Zone · Zone Settings · Edit | *optional* — lets setup enable image resizing for you |
 
    Without **DNS · Edit**, registering the Pages apex domain succeeds but the DNS
@@ -286,7 +287,7 @@ platform).
 ## Support the project
 
 Sona is built and maintained by one person for the community. If it's useful to you,
-you can [sponsor its development](https://github.com/sponsors/sparkyfen) — sponsorship
+you can [sponsor its development](https://github.com/sponsors/sona-fast) — sponsorship
 covers hosting/domain costs and funds new features. Not required, always appreciated.
 
 Want a fork set up or hosted for you? That's offered as an optional paid convenience —

@@ -2,6 +2,8 @@ import { json, error } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
+import { sniffImageType } from '$lib/server/storage/sniff';
+import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
 import { recordUpload, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
@@ -22,11 +24,24 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	const settings = await getSettings(db, { fresh: true });
 	const storage = getStorage(platform?.env, settings);
 
+	// Cap the stored size (M8) so a huge upload can't OOM the isolate while buffering.
+	if (file.size > MAX_BUFFER_BYTES) {
+		error(413, `File too large: ${file.size} bytes. Max ${MAX_BUFFER_BYTES}.`);
+	}
+
 	const contentType = file.type || 'application/octet-stream';
 	// Only store safe raster images. SVG/HTML/other types could execute as active
 	// content when served straight from the R2 custom-domain origin.
 	if (!isAllowedImageType(contentType)) {
 		error(415, `Unsupported image type: ${contentType}. Allowed: JPEG, PNG, GIF, WebP, AVIF.`);
+	}
+	// Verify the actual leading bytes match an allowed raster type (M7) — the
+	// client-supplied content-type above can be spoofed. Sniff a cheap 64-byte
+	// head rather than buffering the whole file — big enough that an AVIF ftyp
+	// box's compatible_brands (which start at offset 16) are visible.
+	const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+	if (!isAllowedImageType(sniffImageType(head))) {
+		error(415, 'File contents do not match an allowed image type.');
 	}
 	const ext = extFromContentType(contentType);
 	const key = `${folder}/${crypto.randomUUID()}.${ext}`;

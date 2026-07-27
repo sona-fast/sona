@@ -73,7 +73,8 @@ describe('Cloudflare edge analytics — deploy binds every secret the code reads
 		const lastPut = Math.max(
 			...required.map((n) => deployWorkflow.indexOf(`npx wrangler pages secret put ${n}`))
 		);
-		const deployStep = deployWorkflow.indexOf('cloudflare/wrangler-action@v3');
+		// Match the action prefix, not a specific ref — the action is SHA-pinned (M2).
+		const deployStep = deployWorkflow.indexOf('cloudflare/wrangler-action@');
 		expect(lastPut).toBeGreaterThan(-1);
 		expect(lastPut).toBeLessThan(deployStep);
 	});

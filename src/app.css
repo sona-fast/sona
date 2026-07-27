@@ -84,7 +84,10 @@
 	--muted-foreground: #666666;
 	--accent: #F2F3F0;
 	--accent-foreground: #111111;
-	--destructive: #D93C15;
+	/* #BE320E is 5.16:1 on the #F2F3F0 page background; the mock #D93C15 was 4.09:1
+	   and failed AA as field-error text. Darkening only raises white-on-fill
+	   contrast for the destructive button, so the fill uses stay safe. */
+	--destructive: #BE320E;
 	--destructive-foreground: #FFFFFF;
 	/* Darkened for the white card (the mock values fail on white): #166534 is
 	   7.1:1 on white and 6.2:1 on the 14% tint the badges use; #92400E is 7.1:1 /
@@ -453,8 +456,10 @@ input, select, textarea {
 	color: var(--muted-foreground);
 }
 
+/* Uses --ring, not --primary: --primary drops to 2.20:1 on Ember light and fails
+   the 3:1 non-text bar (same rationale as .btn:focus-visible above). */
 .input:focus {
-	outline: 2px solid var(--primary);
+	outline: 2px solid var(--ring);
 	outline-offset: -1px;
 }
 

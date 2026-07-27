@@ -2,7 +2,20 @@ import { error } from '@sveltejs/kit';
 import { getReadDb } from '$lib/server/db';
 import { stickers, stickerPacks } from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
+import { RateLimiter } from '$lib/server/rate-limit';
 import type { RequestHandler } from './$types';
+
+// Throttle the unauthenticated download proxy (M10). Each GET makes the worker
+// fetch+stream the whole file, so an unthrottled loop amplifies bandwidth/cost.
+// A cross-origin redirect to the R2 domain would drop the <a download> forced
+// download (and R2 custom domains can't attach Content-Disposition without
+// re-storing objects), so we keep the same-origin proxy and cap it per-IP.
+// Best-effort/per-isolate — see RateLimiter; a hard global cap is a CF rule.
+// Cap sized to fit saving one full imported pack in a burst: Telegram packs run
+// up to ~120 stickers, each saved via its own per-sticker download link, so a
+// legit "save whole pack" (or a few users behind one NAT) stays under the cap
+// while a sustained flood is still bounded.
+const downloadLimiter = new RateLimiter(200, 60_000); // 200 downloads / min / IP
 
 // Map a file extension to the Content-Type we serve it with. Anything unknown
 // falls back to a generic octet-stream so the browser still saves the bytes.
@@ -21,7 +34,11 @@ const CONTENT_TYPES: Record<string, string> = {
 // stored bytes: routing static stickers through a Cloudflare Image transform to
 // PNG would flatten animated WebP/GIF down to a single frame. The original is
 // already high-res, so there's nothing to gain from the transform.
-export const GET: RequestHandler = async ({ params, platform, fetch }) => {
+export const GET: RequestHandler = async ({ params, platform, fetch, getClientAddress }) => {
+	if (!downloadLimiter.check(getClientAddress(), Date.now())) {
+		error(429, 'Too many downloads, please slow down.');
+	}
+
 	const db = getReadDb(platform!.env.DB);
 	const row = await db
 		.select({ imageUrl: stickers.imageUrl, format: stickers.format })
