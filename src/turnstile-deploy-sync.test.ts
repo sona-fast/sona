@@ -25,7 +25,7 @@ const step = (() => {
 	return end === -1 ? rest : rest.slice(0, end);
 })();
 
-describe('deploy.yml — Turnstile keys are bound onto Pages (F1)', () => {
+describe('deploy.yml — Turnstile keys are bound onto Pages', () => {
 	it('has the sync step at all', () => {
 		expect(step).not.toBe('');
 		expect(step).toContain('Sync TURNSTILE keys to Pages project');

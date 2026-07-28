@@ -111,7 +111,8 @@ describe('provisionTurnstileWidget — reuses when present (idempotent)', () => 
 	// One Cloudflare account can hold several forks, and every fork's widget carries
 	// the same stable name — so the host, not the name alone, is what identifies ours.
 	// Reusing a sibling fork's widget would hand this fork a sitekey scoped to the
-	// wrong domain: every Turnstile verify then fails and, F1 being fail-closed, the
+	// wrong domain: every Turnstile verify then fails and, the check being
+	// fail-closed, the
 	// admin login locks. A duplicate widget is the acceptable failure; this is not.
 	it('ignores a same-name widget issued for a SIBLING fork and creates ours', async () => {
 		const { api, calls } = fakeApi({

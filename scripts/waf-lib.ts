@@ -1,10 +1,8 @@
 /**
  * Cloudflare WAF rate-limit provisioning for the download-metrics beacon
- * (security finding F5). The public POST /api/metrics/download endpoint is an
- * open, unauthenticated write: harmless per hit (one bounded UPSERT), but it can
- * be looped to run up requests and D1 writes. This applies a zone-level rate-limit
- * rule that blocks a single IP that pounds the beacon, without touching any other
- * WAF rule on the zone.
+ * (POST /api/metrics/download). Applies a zone-level rate-limit rule capping how
+ * often a single IP can hit the beacon, so the counter stays cheap to run,
+ * without touching any other WAF rule on the zone.
  *
  * The core `applyDownloadRateLimit` is shared by two callers: the fork setup CLI
  * (scripts/setup.ts, for future forks) and the standalone runner

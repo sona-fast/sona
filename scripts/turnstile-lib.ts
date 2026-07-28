@@ -1,13 +1,10 @@
 /**
- * Cloudflare Turnstile widget provisioning for the admin-login bot check
- * (security finding F1). The public /admin/login POST is the one unauthenticated
- * write that guesses a password; a Turnstile challenge in front of it raises the
- * cost of a brute-force loop. This creates (or reuses) an account-level Turnstile
- * widget for the fork's domain and hands back its sitekey + secret so setup can
- * wire TURNSTILE_SITEKEY (a Pages var, public) and TURNSTILE_SECRET (a Pages
- * secret, server-only). The app side — the login form + `verifyTurnstile` — is a
- * separate change; enforcement is gated on BOTH keys being set, so a fork with no
- * Turnstile scope simply runs on the throttle + password alone.
+ * Cloudflare Turnstile widget provisioning for the optional admin-login bot
+ * check. This creates (or reuses) an account-level Turnstile widget for the
+ * fork's domain and hands back its sitekey + secret so setup can wire
+ * TURNSTILE_SITEKEY (a Pages var, public) and TURNSTILE_SECRET (a Pages secret,
+ * server-only). The app side — the login form + `verifyTurnstile` — is a separate
+ * change; the check is enforced only when BOTH keys are set.
  *
  * The core `provisionTurnstileWidget` mirrors `applyDownloadRateLimit` in
  * waf-lib.ts: it reuses `cfApi` from setup-lib for token handling + fetch style,
@@ -33,7 +30,8 @@ import { cfApi, hostFromDomain } from './setup-lib.ts';
  * The host half is not optional: one Cloudflare account can hold several forks (a
  * multi-fork operator), and every fork's widget carries this same name. Matching on
  * the name alone hands the SECOND fork the FIRST fork's sitekey — a widget scoped to
- * the wrong domain, so every Turnstile verify fails and (F1 being fail-closed) the
+ * the wrong domain, so every Turnstile verify fails and (the check being
+ * fail-closed) the
  * admin login locks. Wrong-domain reuse is strictly worse than a duplicate widget.
  */
 export const WIDGET_NAME = 'sona-admin-login';

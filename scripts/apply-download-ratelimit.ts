@@ -2,7 +2,7 @@
 /**
  * Sona apply-download-ratelimit — standalone runner that applies the WAF
  * rate-limit rule protecting POST /api/metrics/download to an EXISTING fork's
- * zone (finding F5). New forks get the rule automatically during `npm run setup`;
+ * zone. New forks get the rule automatically during `npm run setup`;
  * this is the one-off for forks that were already deployed.
  *
  *   CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- <domain>

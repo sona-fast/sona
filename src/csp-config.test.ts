@@ -5,7 +5,7 @@ import config from '../svelte.config.js';
 // can't silently gut it. The real emitted header + zero-violation rendering is
 // covered end-to-end in tests/e2e/csp-check.spec.ts; this is the cheap unit gate
 // on the directives that matter for XSS containment.
-describe('kit.csp directives (F3)', () => {
+describe('kit.csp directives', () => {
 	const csp = config.kit?.csp;
 	const d = csp?.directives ?? {};
 
@@ -54,7 +54,7 @@ describe('kit.csp directives (F3)', () => {
 	});
 
 	it('permits the Turnstile widget (script + iframe) on admin login', () => {
-		// challenges.cloudflare.com must be reachable or /admin/login breaks (F1).
+		// challenges.cloudflare.com must be reachable or /admin/login breaks.
 		expect(d['script-src']).toContain('https://challenges.cloudflare.com');
 		expect(d['frame-src']).toContain('https://challenges.cloudflare.com');
 	});

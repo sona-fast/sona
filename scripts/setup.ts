@@ -283,11 +283,11 @@ async function main() {
 	//    before provisioning so a missing DNS scope fails early. `imageResizingOn`:
 	//    true = on, false = off (couldn't enable), null = unknown/not checked.
 	let imageResizingOn: boolean | null = null;
-	// Download-beacon WAF rate limit (finding F5). Only meaningful when the fork
+	// Download-beacon WAF rate limit. Only meaningful when the fork
 	// runs on a zone the operator controls — a *.pages.dev-only fork has no zone to
 	// attach it to. Null = not attempted (no domain / no zone / no token).
 	let downloadRateLimit: RateLimitStatus | null = null;
-	// Admin-login Turnstile widget (finding F1). Only meaningful with a custom
+	// Admin-login Turnstile widget. Only meaningful with a custom
 	// domain — a *.pages.dev-only fork isn't provisioned one. Its sitekey (public)
 	// is set as a Pages var below and its secret as a Pages secret; the login page
 	// enforces the challenge only when BOTH are present. null = not attempted
@@ -330,7 +330,7 @@ async function main() {
 				}
 				imageResizingOn = imageResizingOutcome(ir, patchOk);
 
-				// WAF rate limit for the public download beacon (finding F5). Non-fatal:
+				// WAF rate limit for the public download beacon. Non-fatal:
 				// a token without Zone · WAF · Edit just yields an 'error'
 				// result we warn about in Next steps — setup keeps going regardless.
 				const rl = await applyDownloadRateLimit(cfToken, host);
@@ -342,7 +342,7 @@ async function main() {
 				}
 			}
 
-			// Turnstile widget for the admin-login bot check (finding F1). Account-
+			// Turnstile widget for the admin-login bot check. Account-
 			// scoped, so — unlike the DNS / image-resizing checks above — it does NOT
 			// need a resolved zone and runs even when the domain's DNS lives elsewhere.
 			// Non-fatal: a token without Account · Turnstile · Edit just yields an
@@ -507,7 +507,7 @@ async function main() {
 	if (telegramBotToken) putSecret('TELEGRAM_BOT_TOKEN', telegramBotToken);
 	if (resendApiKey) putSecret('RESEND_API_KEY', resendApiKey);
 	if (resendFrom) putSecret('RESEND_FROM', resendFrom);
-	// Turnstile secret for the admin-login siteverify (finding F1). Server-only, so
+	// Turnstile secret for the admin-login siteverify. Server-only, so
 	// it's a Pages secret (never a plain var); the public sitekey was set above.
 	if (turnstileSecret) putSecret('TURNSTILE_SECRET', turnstileSecret);
 
@@ -617,7 +617,7 @@ async function main() {
 			console.log('     "Resize images from any origin". Free tier: 5,000 transformations/month.');
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
-		// Download-beacon rate limit (finding F5). null = not attempted (no zone);
+		// Download-beacon rate limit. null = not attempted (no zone);
 		// 'error' = token lacked Zone · WAF · Edit — tell them to add it.
 		if (downloadRateLimit === 'error') {
 			console.log('  • Download-beacon rate limit: NOT set (token lacks Zone · WAF · Edit).');
@@ -625,7 +625,7 @@ async function main() {
 			console.log(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
 		} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
 			console.log(`  • Download-beacon rate limit: applied to the ${host} zone (blocks POST floods).`);
-		// Admin-login Turnstile (finding F1). 'error' = token lacked the scope, so the
+		// Admin-login Turnstile. 'error' = token lacked the scope, so the
 		// login has no bot check; otherwise the sitekey/secret are wired and enforced.
 		if (turnstileStatus === 'error') {
 			console.log('  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).');

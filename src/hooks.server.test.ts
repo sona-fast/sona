@@ -361,7 +361,7 @@ describe('authHandle — 5xx counts toward the error rate (issue #6)', () => {
 	});
 });
 
-describe('authHandle — security response headers (F3)', () => {
+describe('authHandle — security response headers', () => {
 	beforeEach(() => {
 		vi.mocked(isSetupComplete).mockResolvedValue(true);
 	});
