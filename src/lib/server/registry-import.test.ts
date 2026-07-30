@@ -60,8 +60,10 @@ function ra(overrides: Partial<RegistryArtist> & { globalId: string }): Registry
 	};
 }
 
-// What registryDelta returns when the registry refuses the fork key (a 4xx).
+// What registryDelta returns when the registry refuses the fork key (a fatal 4xx).
 const REFUSAL = { error: 'invalid fork key', httpStatus: 401 };
+// A transient refusal — the read limiter, not a key problem.
+const RATE_LIMITED = { error: 'rate limited — slow down', httpStatus: 429 };
 
 beforeEach(() => {
 	catalogPages = [];
@@ -104,6 +106,17 @@ describe('fetchRegistryCatalog', () => {
 		// silent failure a 401 on the delta feed would otherwise cause.
 		catalogPages = [REFUSAL as unknown as (typeof catalogPages)[number]];
 		expect(await fetchRegistryCatalog(env)).toEqual(REFUSAL);
+	});
+
+	// A rate-limit mid-walk is transient: importing the pages already fetched beats
+	// importing nothing, and the next run finishes the walk.
+	it('keeps the pages already fetched when a later page is rate-limited (429)', async () => {
+		catalogPages = [
+			{ artists: [ra({ globalId: 'g1' })], nextCursor: 'c1' },
+			RATE_LIMITED as unknown as (typeof catalogPages)[number]
+		];
+		const catalog = (await fetchRegistryCatalog(env)) as RegistryArtist[];
+		expect(catalog.map((a) => a.globalId)).toEqual(['g1']);
 	});
 });
 

@@ -38,7 +38,15 @@ vi.mock('$lib/server/supporter-key', async (importActual) => ({
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
-	sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+	// artists: the syncNow action runs the real artist-sync against this table.
+	sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+	CREATE TABLE artists (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT,
+		twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
+		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT,
+		global_id TEXT UNIQUE, registry_version INTEGER, registry_synced_at TEXT,
+		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
+	);`);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
@@ -433,6 +441,66 @@ describe('settings connectRegistry — reconnect guard', () => {
 		// No registration request went out, and the stored key is untouched.
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(await getRawSetting(db, REGISTRY_API_KEY_SETTING)).toBe('existing-key');
+	});
+});
+
+describe('settings syncNow — a refusal is a localizable reason, not a raw message', () => {
+	function syncEvent(platform: App.Platform) {
+		return { platform } as never;
+	}
+
+	// The action must hand back a REASON, not the thrown message: the page wraps it in
+	// m.admin_settings_sync_refused so a Japanese operator doesn't get English internals.
+	it('502s with the registry reason (and no raw message) when the fork key is refused', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'revoked-key' });
+		vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
+			Promise.resolve(
+				String(input).includes('/v1/artists?')
+					? new Response(JSON.stringify({ error: 'invalid fork key' }), {
+							status: 401,
+							headers: { 'content-type': 'application/json' }
+						})
+					: new Response(JSON.stringify({ artists: [] }), { status: 200 })
+			)
+		);
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			status: number;
+			data: { syncRefusedReason?: string; error?: string };
+		};
+
+		expect(result.status).toBe(502);
+		expect(result.data.syncRefusedReason).toBe('invalid fork key');
+		// No untranslated internals ("registry delta refused: HTTP 401 …") in the payload.
+		expect(result.data.error).toBeUndefined();
+	});
+
+	it('400s when the shared registry is not configured', async () => {
+		const { platform } = makeDb();
+
+		const result = await actions.syncNow(syncEvent(platform));
+		expect(result).toMatchObject({ status: 400 });
+	});
+
+	it('succeeds with a summary on a healthy sync', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'good-key' });
+		vi.mocked(fetch).mockImplementation(() =>
+			Promise.resolve(
+				new Response(JSON.stringify({ artists: [], nextCursor: null }), {
+					status: 200,
+					headers: { 'content-type': 'application/json' }
+				})
+			)
+		);
+
+		const result = (await actions.syncNow(syncEvent(platform))) as {
+			success: boolean;
+			syncMessage: string;
+		};
+		expect(result.success).toBe(true);
+		expect(result.syncMessage).toMatch(/Sync complete/);
 	});
 });
 

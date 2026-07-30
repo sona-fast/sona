@@ -88,4 +88,64 @@ describe('POST /api/cron/sync-artists — observability heartbeat (issue #6)', (
 		const row = (sqlite as any).prepare("SELECT status FROM job_run WHERE name='sync-artists'").get();
 		expect(row?.status).toBe('ok');
 	});
+
+	// The reachable-today shape: the registry's read limiter is keyed on the eyeball IP,
+	// which a cron subrequest doesn't have, so every fork shares one bucket. A 429 is
+	// transient — it must stay a no-op run, not a failed job.
+	it('stays "ok" when the delta feed rate-limits (429), not "failed"', async () => {
+		const { db, platform, waits, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'stored-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				String(input).includes('/v1/artists?')
+					? Promise.resolve(
+							new Response(JSON.stringify({ error: 'rate limited — slow down' }), {
+								status: 429,
+								headers: { 'content-type': 'application/json' }
+							})
+						)
+					: Promise.reject(new Error('offline'))
+			)
+		);
+
+		const res = await POST(postEvent(platform));
+		expect(res.status).toBe(200);
+		await Promise.all(waits);
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const row = (sqlite as any).prepare("SELECT status FROM job_run WHERE name='sync-artists'").get();
+		expect(row?.status).toBe('ok');
+	});
+
+	// A refused fork key must not read as a healthy zero-artist run: the panel would
+	// show "ok" forever while nothing ever imported again. The regression is `ok`.
+	it('records "failed" (not "ok") with the status when the delta feed refuses the key', async () => {
+		const { db, platform, waits, sqlite } = makeDb();
+		await db.insert(siteSettings).values({ key: REGISTRY_API_KEY_SETTING, value: 'revoked-key' });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((input: RequestInfo | URL) =>
+				String(input).includes('/v1/artists?')
+					? Promise.resolve(
+							new Response(JSON.stringify({ error: 'invalid fork key' }), {
+								status: 401,
+								headers: { 'content-type': 'application/json' }
+							})
+						)
+					: Promise.reject(new Error('offline'))
+			)
+		);
+
+		await expect(POST(postEvent(platform))).rejects.toThrow(/401.*invalid fork key/);
+		await Promise.all(waits);
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const row = (sqlite as any)
+			.prepare("SELECT status, detail FROM job_run WHERE name='sync-artists'")
+			.get();
+		expect(row?.status).toBe('failed');
+		expect(row?.status).not.toBe('ok');
+		expect(row?.detail).toMatch(/401/);
+	});
 });

@@ -16,13 +16,16 @@ import type { SiteSettings } from './settings';
 import { sanitizeUrl } from './validate';
 import { handlesOverlap } from './handle-normalize';
 import {
+	isFatalRefusal,
 	isRegistryEnabled,
 	isRegistryRefusal,
 	registryDelta,
 	registrySearch,
 	firstHandle,
+	RegistryRefusalError,
 	SOCIAL_URL_KEYS,
-	type RegistryArtist
+	type RegistryArtist,
+	type RegistryRefusal
 } from './registry';
 import type { Database } from './db';
 
@@ -104,6 +107,8 @@ export async function syncArtists(
 	const lastSync = (await getRawSetting(db, LAST_SYNC_KEY)) ?? undefined;
 	let cursor: string | undefined;
 	let maxUpdatedAt = lastSync ?? '';
+	// A refusal stops paging but is NOT thrown here — see below.
+	let refusal: RegistryRefusal | null = null;
 	for (let page = 0; page < MAX_PAGES; page++) {
 		const feed = await registryDelta(
 			env,
@@ -111,10 +116,21 @@ export async function syncArtists(
 		);
 		// A 4xx refusal (e.g. 401 from a bad/missing fork key) is NOT "no new artists".
 		// Swallowing it would report a successful sync of zero artists on every run,
-		// forever, with nothing surfaced. Throw: /api/cron/sync-artists records a failed
-		// job run for the background-jobs panel and returns non-2xx.
+		// forever, with nothing surfaced. But throwing here would discard the pages that
+		// already succeeded: the cursor write below and the (unauthenticated, healthy)
+		// backfill would both be skipped, so every run would re-walk the same pages and
+		// no artist would ever get linked. Record it, stop paging, and decide after the
+		// rest of the run — see the throw just before the return.
 		if (isRegistryRefusal(feed)) {
-			throw new Error(`registry delta refused: HTTP ${feed.httpStatus} — ${feed.error}`);
+			refusal = feed;
+			if (!isFatalRefusal(feed.httpStatus)) {
+				// Transient (429/408/400): degrade to a no-op like an outage, but leave a
+				// trace — a silently short sync is what this whole path exists to prevent.
+				console.warn(
+					`registry delta refused: HTTP ${feed.httpStatus} — ${feed.error} (failing soft)`
+				);
+			}
+			break;
 		}
 		const { artists: batch, nextCursor }: { artists: RegistryArtist[]; nextCursor: string | null } =
 			feed;
@@ -222,6 +238,14 @@ export async function syncArtists(
 			})
 			.where(eq(artists.id, a.id));
 		linked++;
+	}
+
+	// Fail loud, but only after the work above persisted: /api/cron/sync-artists records
+	// a failed job run for the background-jobs panel and returns non-2xx, and the admin
+	// "Sync now" action turns this into a form error. Only 401/403 gets here (see
+	// isFatalRefusal) — a rate-limit must not fail an otherwise healthy run.
+	if (refusal && isFatalRefusal(refusal.httpStatus)) {
+		throw new RegistryRefusalError(refusal.httpStatus, refusal.error);
 	}
 
 	return { refreshed, linked, scanned };

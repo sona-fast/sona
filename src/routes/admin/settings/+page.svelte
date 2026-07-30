@@ -896,7 +896,14 @@
 			await update();
 			syncing = false;
 			if (result.type === 'success') toast.success((result.data?.syncMessage as string) ?? m.admin_settings_sync_complete());
-			else if (result.type === 'failure') toast.error((result.data?.error as string) ?? m.admin_settings_sync_failed());
+			else if (result.type === 'failure')
+				// A registry refusal comes back as a reason, not a message: the wording is
+				// localized here and only the registry's own text is interpolated.
+				toast.error(
+					result.data?.syncRefusedReason
+						? m.admin_settings_sync_refused({ reason: result.data.syncRefusedReason as string })
+						: ((result.data?.error as string) ?? m.admin_settings_sync_failed())
+				);
 		};
 	}}>
 		<section data-tab="connections">

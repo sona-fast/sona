@@ -156,9 +156,21 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ keepUpdated })
 			});
-			const data = res.ok ? ((await res.json()) as { enabled?: boolean; created?: number }) : null;
-			if (!data?.enabled) {
-				toast.error(m.admin_import_failed());
+			// Read the body even on a non-ok response: a 502 carries the registry's own
+			// refusal reason ("this site's key was refused"), which is the actionable part
+			// — dropping it would leave the operator with a bare "Import failed".
+			const data = (await res.json().catch(() => null)) as {
+				enabled?: boolean;
+				created?: number;
+				error?: string;
+			} | null;
+			if (!res.ok || !data?.enabled) {
+				// Registry text is untrusted input — same 300-char cap the server applies.
+				toast.error(
+					data?.error
+						? m.admin_import_refused({ reason: data.error.slice(0, 300) })
+						: m.admin_import_failed()
+				);
 				return;
 			}
 			toast.success(m.admin_registry_imported_toast({ count: data.created ?? 0 }));

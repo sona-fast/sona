@@ -23,6 +23,7 @@ import { artists } from './db/schema';
 import { sanitizeText, sanitizeUrl } from './validate';
 import { handlesOverlap } from './handle-normalize';
 import {
+	isFatalRefusal,
 	isRegistryEnabled,
 	isRegistryRefusal,
 	registryDelta,
@@ -43,7 +44,8 @@ const MAX_PAGES = 10;
  * `updated_since`, so it walks the catalog from the beginning). Deduped by
  * global_id in case a record moves between pages mid-walk. Returns [] when the
  * registry is disabled or unreachable, and a RegistryRefusal when the registry
- * turned us away (4xx) — callers must show that rather than an empty catalog.
+ * turned this fork's key away (401/403) — callers must show that rather than an
+ * empty catalog.
  */
 export async function fetchRegistryCatalog(
 	env: Env | undefined
@@ -53,9 +55,14 @@ export async function fetchRegistryCatalog(
 	let cursor: string | undefined;
 	for (let page = 0; page < MAX_PAGES; page++) {
 		const result = await registryDelta(env, cursor ? { cursor } : { limit: 100 });
-		// A 4xx refusal (e.g. 401 from a bad/missing fork key) must not read as an
-		// empty catalog — "0 artists to import" would hide a broken connection.
-		if (isRegistryRefusal(result)) return result;
+		// A fatal 4xx refusal (401/403 from a bad/revoked fork key) must not read as an
+		// empty catalog — "0 artists to import" would hide a broken connection. A
+		// transient one (429 rate-limit mid-walk) keeps the pages already fetched:
+		// importing 700 of 1000 artists beats importing none, and the next run finishes.
+		if (isRegistryRefusal(result)) {
+			if (isFatalRefusal(result.httpStatus)) return result;
+			break;
+		}
 		const { artists: batch, nextCursor } = result;
 		// A 200 with a malformed body (schema drift, an error page served as 200)
 		// must degrade like an unreachable registry — not throw and 500 the caller.

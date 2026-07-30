@@ -105,9 +105,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// Maps artist id → the registry artist's current display name (for the hint).
 	// Fails open like upToDate: no catalog → {} (the submit action re-checks).
 	const aliasLinked: Record<number, string> = {};
-	// The registry turned us away (4xx — e.g. a bad/revoked fork key). Surfaced to the
+	// The registry turned this fork's key away (401/403). Surfaced to the
 	// operator, because the fail-open state below is indistinguishable from "nothing is
-	// shared yet". Null on an outage: that still degrades silently as it always has.
+	// shared yet". Null on an outage or a transient refusal (429): those still degrade
+	// silently as they always have — see isFatalRefusal.
 	let registryError: string | null = null;
 	if (registryEnabled) {
 		const dismissed = parseDismissed(await getRawSetting(db, DISMISSED_KEY));
@@ -119,8 +120,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		const catalogResult = await fetchRegistryCatalog(renv);
 		if (isRegistryRefusal(catalogResult)) {
 			// Registry text is untrusted input — cap it so a long message can't blow out
-			// the page's error line.
-			registryError = `HTTP ${catalogResult.httpStatus} — ${catalogResult.error.slice(0, 300)}`;
+			// the page's error line. The registry's own words lead and the protocol status
+			// trails in parens (same shape as admin_artists_rejected_note).
+			registryError = `${catalogResult.error.slice(0, 300)} (HTTP ${catalogResult.httpStatus})`;
 		}
 		const catalog = isRegistryRefusal(catalogResult) ? [] : catalogResult;
 		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));

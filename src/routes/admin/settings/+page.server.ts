@@ -38,6 +38,7 @@ import {
 	isRegistryEnabled,
 	resolveRegistryEnv,
 	registryRegisterFork,
+	RegistryRefusalError,
 	REGISTRY_API_KEY_SETTING,
 	REGISTRY_URL_SETTING
 } from '$lib/server/registry';
@@ -409,11 +410,14 @@ export const actions = {
 		try {
 			summary = await syncArtists(db, renv, settings);
 		} catch (e) {
-			// A registry refusal (e.g. 401 on a bad/revoked fork key) throws — show the
-			// reason on the form instead of a bare 500 error page.
-			return fail(502, {
-				error: e instanceof Error ? e.message.slice(0, 300) : 'Artist sync failed.'
-			});
+			// A registry refusal (401/403 on a bad/revoked fork key) throws — hand the
+			// registry's own reason back as data so the page renders a LOCALIZED message
+			// around it, instead of a bare 500 page or an untranslated internal string.
+			// Any other exception (a D1 error, say) must not be echoed verbatim to the
+			// operator: return no payload so the page shows its generic sync-failed toast.
+			if (e instanceof RegistryRefusalError)
+				return fail(502, { syncRefusedReason: e.reason.slice(0, 300) });
+			return fail(500, {});
 		}
 		return {
 			success: true,
