@@ -35,6 +35,11 @@ export const GET: RequestHandler = async ({ platform }) => {
 	]);
 	// The registry refused us (e.g. 401 on a bad fork key): report the failure rather
 	// than a plan of 0 artists, which would read as "the registry is empty".
+	// slice(): a length cap on untrusted input, NOT redaction — nothing of ours is in
+	// here. The string is either the registry's own message or our synthesised
+	// `HTTP <status>`; a local exception throws and 500s instead of landing here. But
+	// the registry sets it and could return megabytes, and it renders in an admin
+	// toast, so bound it. Same reasoning on the POST below.
 	if (isRegistryRefusal(catalog))
 		return json({ error: catalog.error.slice(0, 300) }, { status: 502 });
 	const plan = planImport(catalog, locals);
