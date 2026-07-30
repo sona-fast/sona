@@ -150,7 +150,7 @@ describe('syncArtists delta feed — authentication', () => {
 		);
 		expect(deltaCall).toBeDefined();
 		const init = deltaCall![1] as RequestInit;
-		expect((init.headers as Record<string, string>).authorization).toBe('Bearer test-key');
+		expect(new Headers(init.headers).get('authorization')).toBe('Bearer test-key');
 	});
 
 	// The whole point of the change: a 401 must NOT come back as a successful sync of

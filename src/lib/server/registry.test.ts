@@ -247,7 +247,9 @@ describe('registryDelta', () => {
 	// fallback — the silent empty catalogue this whole path exists to remove.
 	it.each([
 		['an HTML body', 403, 'error 1020: Access denied', 'HTTP 403'],
-		['a JSON body with no `error` field', 401, JSON.stringify({ message: 'unauthorized' }), 'HTTP 401']
+		['a JSON body with no `error` field', 401, JSON.stringify({ message: 'unauthorized' }), 'HTTP 401'],
+		['an empty `error` string', 401, JSON.stringify({ error: '' }), 'HTTP 401'],
+		['a whitespace-only `error` string', 429, JSON.stringify({ error: '  \n' }), 'HTTP 429']
 	])('still reports a refusal for a 4xx with %s', async (_label, status, body, expected) => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status })));
 		expect(await registryDelta(env, {})).toEqual({ error: expected, httpStatus: status });

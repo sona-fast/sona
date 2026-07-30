@@ -204,7 +204,10 @@ async function call<T, R = never>(
 				// An unparseable/message-less 4xx body (an HTML error page from a WAF in
 				// front of the registry, say) is still a refusal — falling through to the
 				// fallback here would restore the silent empty-catalogue this guards against.
-				const error = body && typeof body.error === 'string' ? body.error : `HTTP ${res.status}`;
+				// Blank counts as absent: `{"error":""}` would otherwise reach the operator
+				// as a refusal with nothing in it, which reads as a bug in our own UI.
+				const reason = typeof body?.error === 'string' ? body.error.trim() : '';
+				const error = reason || `HTTP ${res.status}`;
 				return { error, httpStatus: res.status } as R;
 			}
 			return fallback;
