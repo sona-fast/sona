@@ -617,8 +617,9 @@ async function main() {
 			console.log('     "Resize images from any origin". Free tier: 5,000 transformations/month.');
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
-		// Download-beacon rate limit. null = not attempted (no zone);
-		// 'error' = token lacked Zone · WAF · Edit — tell them to add it.
+		// Download-beacon rate limit. null = not attempted (no domain / no zone / no
+		// token — same contract as the declaration above); 'error' = the token lacked
+		// Zone · WAF · Edit, which is the one case worth telling them how to fix.
 		if (downloadRateLimit === 'error') {
 			console.log('  • Download-beacon rate limit: NOT set (token lacks Zone · WAF · Edit).');
 			console.log('     Add that permission to the token, then run:');
