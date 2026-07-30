@@ -75,8 +75,113 @@ function stubRegistry(searchArtists: unknown[]) {
 	);
 }
 
+// Route the delta feed to a single canned response (status + body) so the client's
+// refusal/fail-soft split is exercised for real; the handle search stays healthy so
+// a failure can only come from the delta feed.
+function stubDeltaResponse(status: number, body: unknown) {
+	vi.stubGlobal(
+		'fetch',
+		vi.fn((url: string) =>
+			Promise.resolve(
+				url.includes('/v1/artists/search')
+					? new Response(JSON.stringify({ artists: [] }), { status: 200 })
+					: new Response(JSON.stringify(body), {
+							status,
+							headers: { 'content-type': 'application/json' }
+						})
+			)
+		)
+	);
+}
+
 afterEach(() => {
 	vi.unstubAllGlobals();
+});
+
+describe('syncArtists delta feed — authentication', () => {
+	it('sends the fork key as a bearer token on the delta request', async () => {
+		const db = makeDb();
+		stubDeltaResponse(200, { artists: [], nextCursor: null });
+
+		await syncArtists(db, ENV, SETTINGS);
+
+		const fetchMock = vi.mocked(fetch);
+		const deltaCall = fetchMock.mock.calls.find(([url]) =>
+			String(url).includes('/v1/artists?')
+		);
+		expect(deltaCall).toBeDefined();
+		const init = deltaCall![1] as RequestInit;
+		expect((init.headers as Record<string, string>).authorization).toBe('Bearer test-key');
+	});
+
+	// The whole point of the change: a 401 must NOT come back as a successful sync of
+	// zero artists (the pre-fix behaviour), because that is indistinguishable from
+	// "no new artists" and would silently stop imports forever.
+	it('throws on a 401 refusal instead of reporting a zero-artist success', async () => {
+		const db = makeDb();
+		stubDeltaResponse(401, { error: 'invalid fork key' });
+
+		await expect(syncArtists(db, ENV, SETTINGS)).rejects.toThrow(/401.*invalid fork key/);
+	});
+
+	it('throws on a 403 refusal too, naming the status and the registry reason', async () => {
+		const db = makeDb();
+		stubDeltaResponse(403, { error: 'fork key revoked' });
+
+		await expect(syncArtists(db, ENV, SETTINGS)).rejects.toThrow(/403.*fork key revoked/);
+	});
+
+	// A transient outage must stay soft: turning it into a hard cron failure would
+	// page us for every registry blip.
+	it('still fails soft on a 5xx (no throw, empty delta, backfill continues)', async () => {
+		const db = makeDb();
+		const now = new Date().toISOString();
+		await db
+			.insert(artists)
+			.values({ name: 'mlyeko', twitterUrl: 'https://twitter.com/mlyeko', createdAt: now });
+		stubDeltaResponse(503, { error: 'registry down' });
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ refreshed: 0, scanned: 1 });
+	});
+
+	it('still fails soft when the delta request rejects (network error)', async () => {
+		const db = makeDb();
+		vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary).toMatchObject({ refreshed: 0, linked: 0 });
+	});
+
+	it('refreshes linked artists as before when the key works', async () => {
+		const db = makeDb();
+		const now = new Date().toISOString();
+		await db
+			.insert(artists)
+			.values({ name: 'mlyeko', globalId: 'g-mlyeko', createdAt: now });
+		stubDeltaResponse(200, {
+			artists: [
+				{
+					globalId: 'g-mlyeko',
+					displayName: 'mlyeko',
+					avatarUrl: BSKY_NEW,
+					bio: null,
+					socials: {},
+					status: 'active',
+					mergedInto: null,
+					version: 9,
+					updatedAt: now
+				}
+			],
+			nextCursor: null
+		});
+
+		const summary = await syncArtists(db, ENV, SETTINGS);
+		expect(summary.refreshed).toBe(1);
+		const row = await db.select().from(artists).where(eq(artists.globalId, 'g-mlyeko')).get();
+		expect(row?.registryVersion).toBe(9);
+		expect(row?.avatarUrl).toBe(BSKY_NEW);
+	});
 });
 
 describe('syncArtists backfill — identity verification', () => {

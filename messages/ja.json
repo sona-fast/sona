@@ -439,6 +439,7 @@
 	"admin_artists_registry_update_submitted": "更新内容をレジストリに送信しました",
 	"admin_artists_registry_submitted": "レジストリに審査を申請しました",
 	"admin_artists_registry_failed": "レジストリへの送信に失敗しました",
+	"admin_artists_registry_unavailable": "共有レジストリがこのサイトのキーを拒否したため、以下の共有状況は不完全な可能性があります。設定でレジストリ接続を確認してください。({reason})",
 	"admin_artists_submit_registry": "共有レジストリに申請",
 	"admin_artists_up_to_date": "すでに共有レジストリに反映済みです",
 	"admin_artists_alias_linked": "この項目はレジストリの「{name}」の旧名（AKA）です — そのアーティストの改名申請になってしまうため、共有は無効になっています。",

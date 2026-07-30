@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { artists } from '$lib/server/db/schema';
-import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
+import { isRegistryEnabled, isRegistryRefusal, resolveRegistryEnv } from '$lib/server/registry';
 import {
 	fetchRegistryCatalog,
 	planImport,
@@ -14,8 +14,8 @@ import type { RequestHandler } from './$types';
 //   Import plan for the New Artist dialog: how many artists the shared registry
 //   holds, how many an "Import all" would create, and how many it would skip
 //   (already linked, or handle-matched to an existing local artist). The count
-//   comes from the registry's public delta endpoint, proxied server-side — the
-//   registry worker itself is untouched.
+//   comes from the registry's delta endpoint (authenticated with this fork's key),
+//   proxied server-side — the registry worker itself is untouched.
 //
 // POST /api/registry/import  { keepUpdated?: boolean }
 //   Runs the catalog import (see registry-import.ts for the skip/no-overwrite
@@ -33,6 +33,10 @@ export const GET: RequestHandler = async ({ platform }) => {
 		db.select().from(artists),
 		getSettings(db)
 	]);
+	// The registry refused us (e.g. 401 on a bad fork key): report the failure rather
+	// than a plan of 0 artists, which would read as "the registry is empty".
+	if (isRegistryRefusal(catalog))
+		return json({ error: catalog.error.slice(0, 300) }, { status: 502 });
 	const plan = planImport(catalog, locals);
 	return json({
 		enabled: true,
@@ -55,5 +59,9 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	const result = await importRegistryCatalog(db, renv);
 	if (!result) return json({ enabled: false }, { status: 400 });
+	// A refusal imported nothing — fail the request so the dialog shows its import
+	// error instead of an "imported 0 artists" success toast.
+	if (isRegistryRefusal(result))
+		return json({ error: result.error.slice(0, 300) }, { status: 502 });
 	return json({ enabled: true, ...result });
 };

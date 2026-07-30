@@ -17,6 +17,7 @@ import { sanitizeUrl } from './validate';
 import { handlesOverlap } from './handle-normalize';
 import {
 	isRegistryEnabled,
+	isRegistryRefusal,
 	registryDelta,
 	registrySearch,
 	firstHandle,
@@ -104,8 +105,19 @@ export async function syncArtists(
 	let cursor: string | undefined;
 	let maxUpdatedAt = lastSync ?? '';
 	for (let page = 0; page < MAX_PAGES; page++) {
+		const feed = await registryDelta(
+			env,
+			cursor ? { cursor } : { updatedSince: lastSync, limit: 100 }
+		);
+		// A 4xx refusal (e.g. 401 from a bad/missing fork key) is NOT "no new artists".
+		// Swallowing it would report a successful sync of zero artists on every run,
+		// forever, with nothing surfaced. Throw: /api/cron/sync-artists records a failed
+		// job run for the background-jobs panel and returns non-2xx.
+		if (isRegistryRefusal(feed)) {
+			throw new Error(`registry delta refused: HTTP ${feed.httpStatus} — ${feed.error}`);
+		}
 		const { artists: batch, nextCursor }: { artists: RegistryArtist[]; nextCursor: string | null } =
-			await registryDelta(env, cursor ? { cursor } : { updatedSince: lastSync, limit: 100 });
+			feed;
 		if (batch.length === 0) break;
 
 		for (const ra of batch) {

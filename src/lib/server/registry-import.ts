@@ -2,7 +2,7 @@
 //
 // Complements artist-sync, which is enrichment-only: sync refreshes/links artists
 // the fork already has but can never CREATE one. This module fetches the full
-// active catalog from the public delta endpoint and creates local rows for the
+// active catalog from the delta endpoint (fork-key authenticated) and creates local rows for the
 // registry artists this site doesn't have yet.
 //
 // Hard invariants (relied on by the admin "Import all" flow and its copy):
@@ -22,7 +22,13 @@
 import { artists } from './db/schema';
 import { sanitizeText, sanitizeUrl } from './validate';
 import { handlesOverlap } from './handle-normalize';
-import { isRegistryEnabled, registryDelta, type RegistryArtist } from './registry';
+import {
+	isRegistryEnabled,
+	isRegistryRefusal,
+	registryDelta,
+	type RegistryArtist,
+	type RegistryRefusal
+} from './registry';
 import { socialsToColumns, aliasesToColumn } from './artist-sync';
 import type { Database } from './db';
 
@@ -33,20 +39,24 @@ type Env = App.Platform['env'];
 const MAX_PAGES = 10;
 
 /**
- * The full ACTIVE registry catalog, paged from the public delta endpoint (no
+ * The full ACTIVE registry catalog, paged from the delta endpoint (no
  * `updated_since`, so it walks the catalog from the beginning). Deduped by
  * global_id in case a record moves between pages mid-walk. Returns [] when the
- * registry is disabled or unreachable.
+ * registry is disabled or unreachable, and a RegistryRefusal when the registry
+ * turned us away (4xx) — callers must show that rather than an empty catalog.
  */
-export async function fetchRegistryCatalog(env: Env | undefined): Promise<RegistryArtist[]> {
+export async function fetchRegistryCatalog(
+	env: Env | undefined
+): Promise<RegistryArtist[] | RegistryRefusal> {
 	if (!isRegistryEnabled(env)) return [];
 	const byId = new Map<string, RegistryArtist>();
 	let cursor: string | undefined;
 	for (let page = 0; page < MAX_PAGES; page++) {
-		const { artists: batch, nextCursor } = await registryDelta(
-			env,
-			cursor ? { cursor } : { limit: 100 }
-		);
+		const result = await registryDelta(env, cursor ? { cursor } : { limit: 100 });
+		// A 4xx refusal (e.g. 401 from a bad/missing fork key) must not read as an
+		// empty catalog — "0 artists to import" would hide a broken connection.
+		if (isRegistryRefusal(result)) return result;
+		const { artists: batch, nextCursor } = result;
 		// A 200 with a malformed body (schema drift, an error page served as 200)
 		// must degrade like an unreachable registry — not throw and 500 the caller.
 		if (!Array.isArray(batch) || batch.length === 0) break;
@@ -114,15 +124,17 @@ export interface ImportResult extends Omit<ImportPlan, 'toCreate'> {
  * Fetch the catalog and create every registry artist this site doesn't have
  * yet, stamping global_id/registry_version so artist-sync enriches them from
  * then on. INSERT-only — see the module invariants. Returns null when the
- * registry is disabled.
+ * registry is disabled, or the RegistryRefusal when the registry turned us away
+ * (importing nothing and reporting success would hide that).
  */
 export async function importRegistryCatalog(
 	db: Database,
 	env: Env | undefined
-): Promise<ImportResult | null> {
+): Promise<ImportResult | RegistryRefusal | null> {
 	if (!isRegistryEnabled(env)) return null;
 
 	const catalog = await fetchRegistryCatalog(env);
+	if (isRegistryRefusal(catalog)) return catalog;
 	const locals = await db.select().from(artists);
 	const plan = planImport(catalog, locals);
 

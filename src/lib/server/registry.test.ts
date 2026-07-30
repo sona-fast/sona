@@ -5,6 +5,7 @@ import {
 	firstHandle,
 	isLocalNameAliasOf,
 	parseAliases,
+	registryDelta,
 	registryRegisterFork,
 	registrySubmit,
 	resolveRegistryEnv,
@@ -149,6 +150,50 @@ describe('registryRegisterFork', () => {
 		expect(result).toEqual({
 			error: 'the registry did not respond — check the URL and try again'
 		});
+	});
+});
+
+describe('registryDelta', () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const env = { REGISTRY_API_KEY: 'fork-key' } as App.Platform['env'];
+
+	it('GETs the delta feed with the auth header', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(new Response(JSON.stringify({ artists: [], nextCursor: null })));
+		vi.stubGlobal('fetch', fetchMock);
+
+		const result = await registryDelta(env, { updatedSince: '2026-01-01T00:00:00Z', limit: 100 });
+		expect(result).toEqual({ artists: [], nextCursor: null });
+
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toContain('/v1/artists?updated_since=');
+		expect((init.headers as Record<string, string>).authorization).toBe('Bearer fork-key');
+	});
+
+	it('surfaces a 401 as a typed refusal instead of an empty page', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				new Response(JSON.stringify({ error: 'invalid fork key' }), { status: 401 })
+			)
+		);
+		expect(await registryDelta(env, {})).toEqual({ error: 'invalid fork key', httpStatus: 401 });
+	});
+
+	it('still fails soft (empty page) on a 5xx', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(new Response('gateway broke', { status: 502 }))
+		);
+		expect(await registryDelta(env, {})).toEqual({ artists: [], nextCursor: null });
+	});
+
+	it('returns an empty page (and sends nothing) when the registry is not configured', async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+		expect(await registryDelta(undefined, {})).toEqual({ artists: [], nextCursor: null });
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });
 

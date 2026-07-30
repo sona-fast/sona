@@ -87,6 +87,12 @@
 	<p class="error">{form.error}</p>
 {/if}
 
+<!-- The registry refused this fork's key: the sharing badges below are stale/blank,
+     which would otherwise look like "nothing is shared yet". -->
+{#if data.registryError}
+	<p class="error">{m.admin_artists_registry_unavailable({ reason: data.registryError })}</p>
+{/if}
+
 {#if form?.avatarRefresh}
 	<p class="notice">
 		{#if form.avatarRefresh.processed === 0}

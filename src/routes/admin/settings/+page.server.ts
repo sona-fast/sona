@@ -405,7 +405,16 @@ export const actions = {
 		const renv = await resolveRegistryEnv(db, env);
 		if (!isRegistryEnabled(renv)) return fail(400, { error: 'Shared registry is not configured.' });
 		const settings = await getSettings(db, { fresh: true });
-		const summary = await syncArtists(db, renv, settings);
+		let summary;
+		try {
+			summary = await syncArtists(db, renv, settings);
+		} catch (e) {
+			// A registry refusal (e.g. 401 on a bad/revoked fork key) throws — show the
+			// reason on the form instead of a bare 500 error page.
+			return fail(502, {
+				error: e instanceof Error ? e.message.slice(0, 300) : 'Artist sync failed.'
+			});
+		}
 		return {
 			success: true,
 			syncMessage: `Sync complete — ${summary.refreshed} refreshed, ${summary.linked} newly linked.`

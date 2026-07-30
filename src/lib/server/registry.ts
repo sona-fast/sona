@@ -142,6 +142,12 @@ export interface RegistryRefusal {
 	httpStatus: number;
 }
 
+/** Narrow a registry result to a refusal. Only `errorBody` call paths can return one,
+ *  so a plain success shape (object or array) never matches. */
+export function isRegistryRefusal(value: unknown): value is RegistryRefusal {
+	return !!value && typeof value === 'object' && 'httpStatus' in value && 'error' in value;
+}
+
 async function call<T, R = never>(
 	env: Env | undefined,
 	path: string,
@@ -209,15 +215,22 @@ export async function registryGetArtist(
 export async function registryDelta(
 	env: Env | undefined,
 	params: { updatedSince?: string; cursor?: string; limit?: number }
-): Promise<{ artists: RegistryArtist[]; nextCursor: string | null }> {
+): Promise<{ artists: RegistryArtist[]; nextCursor: string | null } | RegistryRefusal> {
 	const qs = new URLSearchParams();
 	if (params.cursor) qs.set('cursor', params.cursor);
 	else if (params.updatedSince) qs.set('updated_since', params.updatedSince);
 	if (params.limit) qs.set('limit', String(params.limit));
-	return call(env, `/v1/artists?${qs.toString()}`, { method: 'GET' }, {
-		artists: [],
-		nextCursor: null
-	});
+	return call<{ artists: RegistryArtist[]; nextCursor: string | null }, RegistryRefusal>(
+		env,
+		`/v1/artists?${qs.toString()}`,
+		// auth: the delta feed is not public — paging it reveals the whole catalogue
+		// (and what was removed, and when), so the registry requires a fork key.
+		// errorBody: a 4xx here (e.g. 401 from a bad/missing key) must NOT collapse
+		// into an empty page — that's indistinguishable from "no new artists" and
+		// would silently stop imports forever. 5xx/network still fail soft.
+		{ method: 'GET', auth: true, errorBody: true },
+		{ artists: [], nextCursor: null }
+	);
 }
 
 export interface RegistrySubmitResult {

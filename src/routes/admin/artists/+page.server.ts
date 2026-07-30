@@ -12,6 +12,7 @@ import { sanitizeText } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
 	isRegistryEnabled,
+	isRegistryRefusal,
 	resolveRegistryEnv,
 	registrySubmit,
 	registrySubmissionsMine,
@@ -104,6 +105,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// Maps artist id → the registry artist's current display name (for the hint).
 	// Fails open like upToDate: no catalog → {} (the submit action re-checks).
 	const aliasLinked: Record<number, string> = {};
+	// The registry turned us away (4xx — e.g. a bad/revoked fork key). Surfaced to the
+	// operator, because the fail-open state below is indistinguishable from "nothing is
+	// shared yet". Null on an outage: that still degrades silently as it always has.
+	let registryError: string | null = null;
 	if (registryEnabled) {
 		const dismissed = parseDismissed(await getRawSetting(db, DISMISSED_KEY));
 		// A dismissed rejection is acknowledged locally — drop it so it stops showing.
@@ -111,7 +116,13 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 
 		// One catalog fetch, reused twice: to stamp registry_version at link time
 		// (just below) and to compute per-artist up-to-date state (further down).
-		const catalog = await fetchRegistryCatalog(renv);
+		const catalogResult = await fetchRegistryCatalog(renv);
+		if (isRegistryRefusal(catalogResult)) {
+			// Registry text is untrusted input — cap it so a long message can't blow out
+			// the page's error line.
+			registryError = `HTTP ${catalogResult.httpStatus} — ${catalogResult.error.slice(0, 300)}`;
+		}
+		const catalog = isRegistryRefusal(catalogResult) ? [] : catalogResult;
 		const byGlobalId = new Map(catalog.map((r) => [r.globalId, r]));
 
 		// An APPROVED submission means the maintainer linked this artist into the
@@ -192,6 +203,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		totalPages: Math.ceil(total / perPage),
 		q,
 		registryEnabled,
+		registryError,
 		registryStatus,
 		upToDate,
 		aliasLinked
