@@ -291,8 +291,15 @@ Sona is built and maintained by one person for the community. If it's useful to 
 you can [sponsor its development](https://github.com/sponsors/sona-fast) — sponsorship
 covers hosting/domain costs and funds new features. Not required, always appreciated.
 
+Sponsors are credited in [`SUPPORTERS.md`](./SUPPORTERS.md), and sponsoring privately
+keeps you off that list entirely.
+
 Want a fork set up or hosted for you? That's offered as an optional paid convenience —
 reach out. The code itself is and stays free.
+
+### Named sponsors
+
+Sponsors at $75/month are named and linked here. No one yet.
 
 ## References
 
