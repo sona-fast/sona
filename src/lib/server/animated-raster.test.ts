@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { isAnimatedRaster, sniffAnimatedFromUrl } from './animated-raster';
-import { ascii, webp, vp8x } from './test/raster-fixtures';
+import { ascii, webp, vp8x, paddedMultiFrameGif } from './test/raster-fixtures';
 
 // --- byte builders (shared with the import/backfill suites) ------------------
 
@@ -50,6 +50,13 @@ describe('isAnimatedRaster', () => {
 		expect(isAnimatedRaster(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBe(false); // PNG magic
 		expect(isAnimatedRaster(new Uint8Array([]))).toBe(false);
 		expect(isAnimatedRaster(new Uint8Array(ascii('GIF89a')))).toBe(false); // shorter than any GIF
+	});
+
+	it('errs toward animated on an unknown block marker (padded stream)', () => {
+		// A stray 0x00 between frames (some encoders pad) hits the unknown-marker
+		// branch before the second frame — the walk can't rule out more frames, so
+		// the safe answer is animated (matches the truncation policy below).
+		expect(isAnimatedRaster(paddedMultiFrameGif())).toBe(true);
 	});
 
 	it('errs toward animated when a GIF walk runs off a truncated buffer', () => {

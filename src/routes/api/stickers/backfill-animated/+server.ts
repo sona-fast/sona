@@ -28,17 +28,20 @@ const DEFAULT_LIMIT = 200;
 export const POST: RequestHandler = async ({ platform, url, fetch }) => {
 	const db = getDb(platform!.env.DB);
 
+	// Clamp ?limit to 500: each raster costs a subrequest, so an oversized value
+	// (typo'd or hand-crafted) must not blow the invocation's subrequest budget.
 	const limitRaw = Number(url.searchParams.get('limit'));
-	const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? limitRaw : DEFAULT_LIMIT;
+	const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : DEFAULT_LIMIT;
 	const afterRaw = Number(url.searchParams.get('afterId'));
 	const afterId = Number.isInteger(afterRaw) && afterRaw > 0 ? afterRaw : 0;
 
-	// Lottie/video rows: always animated, one bulk statement each run (no-op after
-	// the first).
+	// Lottie/video rows: always animated, one bulk statement each run. The
+	// is_animated=0 guard makes it a true no-op after the first run (cheap enough
+	// to keep issuing every page).
 	await db
 		.update(stickers)
 		.set({ isAnimated: true })
-		.where(inArray(stickers.format, ['animated', 'video']));
+		.where(and(inArray(stickers.format, ['animated', 'video']), eq(stickers.isAnimated, false)));
 
 	const rasters = await db
 		.select({ id: stickers.id, imageUrl: stickers.imageUrl, isAnimated: stickers.isAnimated })
@@ -49,22 +52,31 @@ export const POST: RequestHandler = async ({ platform, url, fetch }) => {
 
 	let updated = 0;
 	let unchanged = 0;
+	let lastId: number | null = null;
 	const failed: Array<{ id: number; error: string }> = [];
 
 	for (const row of rasters) {
+		// The EVENT fetch on purpose: it resolves root-relative /img/<key> stored
+		// URLs through the app router, and this endpoint is admin-only (hooks
+		// gate), so the cookie-carrying fetch is fine here.
 		const sniffed = await sniffAnimatedFromUrl(row.imageUrl, fetch, url.origin);
 		if (sniffed === null) {
 			failed.push({ id: row.id, error: 'could not fetch stored file' });
-			continue;
-		}
-		if (sniffed === row.isAnimated) {
+		} else if (sniffed === row.isAnimated) {
 			unchanged++;
-			continue;
+		} else {
+			try {
+				await db.update(stickers).set({ isAnimated: sniffed }).where(eq(stickers.id, row.id));
+				updated++;
+			} catch (e) {
+				// A mid-run D1 error must not throw away the progress report — record
+				// the row as failed and keep going; the operator re-runs (idempotent)
+				// or resumes from lastId.
+				failed.push({ id: row.id, error: e instanceof Error ? e.message : String(e) });
+			}
 		}
-		await db.update(stickers).set({ isAnimated: sniffed }).where(eq(stickers.id, row.id));
-		updated++;
+		lastId = row.id;
 	}
 
-	const lastId = rasters.length > 0 ? rasters[rasters.length - 1].id : null;
 	return json({ rasters: rasters.length, updated, unchanged, failed, lastId });
 };

@@ -26,3 +26,16 @@ export function animatedWebp(): Uint8Array {
 export function staticWebp(): Uint8Array {
 	return webp('VP8 ', [0, 0, 0, 0]);
 }
+
+/**
+ * A two-frame GIF with a stray 0x00 pad byte between the frames. Some encoders
+ * emit padding between blocks; the walker hits the unknown marker before the
+ * second frame and must err toward "animated" (frames past it are unknowable).
+ */
+export function paddedMultiFrameGif(): Uint8Array {
+	const header = [...ascii('GIF89a'), 2, 0, 2, 0, 0x00, 0, 0]; // no global color table
+	// Image descriptor (2×2, no local color table) + LZW min-code byte + one
+	// empty-terminated data sub-block chain.
+	const frame = [0x2c, 0, 0, 0, 0, 2, 0, 2, 0, 0x00, 0x02, 1, 0x4c, 0x00];
+	return new Uint8Array([...header, ...frame, 0x00, ...frame, 0x3b]);
+}

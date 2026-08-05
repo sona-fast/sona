@@ -21,6 +21,7 @@ import type { AvatarRehostContext } from '$lib/server/avatar';
 import { slugify } from '$lib/server/slugify';
 import { isAnimatedRaster, sniffAnimatedFromUrl } from '$lib/server/animated-raster';
 import { isRasterFormat } from '$lib/sticker-download';
+import { mapWithConcurrency } from '$lib/server/concurrency';
 import { sanitizeUrl } from '$lib/server/validate';
 
 type Env = App.Platform['env'];
@@ -1057,29 +1058,22 @@ export function parseStickerFormInputs(data: FormData, defaultArtistId: number |
 const SNIFF_CONCURRENCY = 4;
 
 /**
- * Animation flags for manual-save inputs: rasters are sniffed by URL (null =
- * undetermined — callers pick the default), video/Lottie are always animated,
- * and skipped rows (kept across an edit; their prior flag wins) aren't fetched.
- * At most SNIFF_CONCURRENCY fetches run at a time.
+ * Animation flag for ONE manual-save input: rasters are sniffed by URL (null =
+ * undetermined — callers pick the default), video/Lottie are always animated.
+ * Callers fan this out via mapWithConcurrency (at most SNIFF_CONCURRENCY
+ * fetches at a time) and short-circuit rows they don't want fetched there.
+ * fetchFn is deliberately the EVENT fetch (unlike the download transform path):
+ * it resolves root-relative /img/<key> stored URLs through the app router, and
+ * these are admin-only save flows, so the cookie-carrying fetch is fine here.
  */
-async function sniffManualInputs(
-	inputs: ManualStickerInput[],
-	opts: { fetchFn: typeof fetch; origin?: string; skip?: (s: ManualStickerInput) => boolean }
-): Promise<(boolean | null)[]> {
-	const results: (boolean | null)[] = new Array(inputs.length).fill(null);
-	let next = 0;
-	const worker = async () => {
-		while (next < inputs.length) {
-			const i = next++;
-			const s = inputs[i];
-			if (opts.skip?.(s)) continue;
-			results[i] = isRasterFormat(s.format)
-				? await sniffAnimatedFromUrl(s.imageUrl, opts.fetchFn, opts.origin)
-				: true;
-		}
-	};
-	await Promise.all(Array.from({ length: Math.min(SNIFF_CONCURRENCY, inputs.length) }, worker));
-	return results;
+function sniffManualInput(
+	s: ManualStickerInput,
+	fetchFn: typeof fetch,
+	origin?: string
+): Promise<boolean | null> {
+	return isRasterFormat(s.format)
+		? sniffAnimatedFromUrl(s.imageUrl, fetchFn, origin)
+		: Promise.resolve(true);
 }
 
 /**
@@ -1147,7 +1141,9 @@ export async function saveManualPack(opts: {
 	// Best-effort animation sniff for the freshly uploaded rasters (see
 	// sniffAnimatedFromUrl); an undetermined sniff (null) defaults to static,
 	// which the backfill endpoint can correct later.
-	const sniffed = await sniffManualInputs(input.stickerInputs, { fetchFn, origin });
+	const sniffed = await mapWithConcurrency(input.stickerInputs, SNIFF_CONCURRENCY, (s) =>
+		sniffManualInput(s, fetchFn, origin)
+	);
 
 	const rows = input.stickerInputs.map((s, i) => ({
 		packId,
@@ -1235,13 +1231,12 @@ export async function updateManualPack(opts: {
 	const resolvedArtistIds = resolveStickerArtistIds(input.managerArtistId, input.stickerInputs.map((s) => s.artistId));
 
 	// Animation flags: a row kept across the edit (same imageUrl) carries its prior
-	// flag; a NEW raster upload gets a best-effort sniff. Kept rows were already
-	// sniffed (or backfilled), so this only fetches the handful of new files.
-	const sniffed = await sniffManualInputs(input.stickerInputs, {
-		fetchFn,
-		origin,
-		skip: (s) => preserved.has(s.imageUrl)
-	});
+	// flag — short-circuited here so it is never fetched; a NEW raster upload gets
+	// a best-effort sniff. Kept rows were already sniffed (or backfilled), so this
+	// only fetches the handful of new files.
+	const sniffed = await mapWithConcurrency(input.stickerInputs, SNIFF_CONCURRENCY, async (s) =>
+		preserved.has(s.imageUrl) ? null : sniffManualInput(s, fetchFn, origin)
+	);
 
 	const rows = input.stickerInputs.map((s, i) => {
 		const prior = preserved.get(s.imageUrl);

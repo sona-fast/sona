@@ -229,10 +229,11 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	const isPublic = !event.url.pathname.startsWith('/admin') && !event.url.pathname.startsWith('/api');
 	const isHtml = response.headers.get('content-type')?.includes('text/html') ?? false;
 	if (isPublic && response.status === 200 && !isHtml) {
-		// Honor a handler's explicit Cache-Control (e.g. the sticker download
-		// fallback's no-store — a transient transform failure must not be
-		// edge-cached under its ?format URL); only stamp the shared default when
-		// the handler set nothing.
+		// Honor a handler's explicit Cache-Control; only stamp the shared default
+		// when the handler set nothing. Two intentional opt-outs exist today: the
+		// sticker download fallback's no-store (a transient transform failure must
+		// not be edge-cached under its ?format URL) and /img/[...key]'s
+		// max-age=31536000+immutable (UUID-keyed R2 objects never change).
 		if (!response.headers.has('Cache-Control')) {
 			response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
 		}

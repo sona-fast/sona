@@ -12,6 +12,7 @@ import type { SiteSettings } from '$lib/server/settings';
 import { resolveLicense } from '$lib/furtrack/license';
 import { MOCK_PHOTOS } from '$lib/furtrack/mock';
 import { USER_AGENT } from '$lib/config';
+import { mapWithConcurrency } from '$lib/server/concurrency';
 
 const SOLAR = 'https://solar.furtrack.com';
 const ORCA = 'https://orca2.furtrack.com';
@@ -208,21 +209,4 @@ function formatTag(tag: string | undefined): string | undefined {
 		.split('_')
 		.map((w) => (/^\d/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
 		.join(' ');
-}
-
-async function mapWithConcurrency<T, R>(
-	items: T[],
-	limit: number,
-	fn: (item: T) => Promise<R>
-): Promise<R[]> {
-	const results: R[] = new Array(items.length);
-	let next = 0;
-	const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-		while (next < items.length) {
-			const i = next++;
-			results[i] = await fn(items[i]);
-		}
-	});
-	await Promise.all(workers);
-	return results;
 }

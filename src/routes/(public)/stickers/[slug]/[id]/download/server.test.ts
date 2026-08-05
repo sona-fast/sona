@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { makeD1 } from '$lib/server/test/d1';
+import { animatedWebp } from '$lib/server/test/raster-fixtures';
 import { GET } from './+server';
 
 const ORIGIN = 'https://site.example';
@@ -62,6 +63,14 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
 	});
 
+	it('caches a plain download briefly at the edge only (s-maxage, not a browser hour)', async () => {
+		// Takedowns must propagate promptly: the pre-menu hooks stamp gave downloads
+		// s-maxage=300 + SWR, and the handler default must keep that — a
+		// max-age=3600 default would pin removed files in browsers for an hour.
+		const res = await GET(makeEvent(seedDb({ format: 'webp' })));
+		expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=300, stale-while-revalidate=3600');
+	});
+
 	it('?format=png proxies through the zone image transform via globalThis.fetch', async () => {
 		const transformFetch = stubTransformFetch(async () =>
 			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
@@ -69,11 +78,30 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		const eventFetch = vi.fn(async () => new Response('orig')) as typeof fetch;
 		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
 		expect(transformFetch).toHaveBeenCalledWith(`${ORIGIN}/cdn-cgi/image/format=png/${FILE}`);
-		// The event fetch (app-router-resolving, cookie-carrying) must NOT be used
-		// for the transform request.
-		expect(eventFetch).not.toHaveBeenCalled();
+		// The event fetch buffers the original for the animation sniff, but must
+		// NOT be used for the transform request (app-router-resolving,
+		// cookie-carrying — the /cdn-cgi request would never leave the isolate).
+		expect(eventFetch).toHaveBeenCalledWith(FILE);
+		expect(eventFetch).not.toHaveBeenCalledWith(expect.stringContaining('/cdn-cgi/'));
 		expect(res.headers.get('Content-Type')).toBe('image/png');
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.png"');
+	});
+
+	it('serves the original (no-store) when a stale-flagged "static" row actually animates', async () => {
+		// Pre-backfill hole: is_animated=0 lies, the stored bytes are an animated
+		// WebP. The endpoint must sniff the buffered original and refuse the
+		// flattening transform entirely — the transform fetch never happens.
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const eventFetch = vi.fn(async () =>
+			new Response(animatedWebp().buffer as ArrayBuffer, { headers: { 'content-type': 'image/webp' } })
+		) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp', isAnimated: 0 }), { search: '?format=png', fetch: eventFetch }));
+		expect(transformFetch).not.toHaveBeenCalled();
+		expect(res.headers.get('Content-Type')).toBe('image/webp');
+		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
+		expect(res.headers.get('Cache-Control')).toBe('private, no-store');
 	});
 
 	it('keeps the query string of an absolute source URL on the transform request', async () => {
@@ -105,6 +133,8 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
 		expect(res.headers.get('Content-Type')).toBe('image/webp');
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
+		// The fallback reuses the buffered original — no second origin fetch.
+		expect(eventFetch).toHaveBeenCalledTimes(1);
 	});
 
 	it('marks a fallback-from-png response uncacheable (no edge-cached webp under the png URL)', async () => {

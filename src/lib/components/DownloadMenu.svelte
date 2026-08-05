@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { Download, ChevronUp } from 'lucide-svelte';
 
 	interface DownloadMenuOption {
@@ -34,11 +35,13 @@
 	// disclosure machinery below only exists when there's a real choice.
 	const hasMenu = $derived(options.length > 1);
 
-	function toggle() {
+	async function toggle() {
 		open = !open;
 		if (open) {
-			// Focus the first link once it renders (disclosure-menu convenience).
-			queueMicrotask(() => list?.querySelector('a')?.focus());
+			// Focus the first link after Svelte flushes the `hidden` flip (a bare
+			// microtask ran before the DOM update, so focus stayed on the caret).
+			await tick();
+			list?.querySelector('a')?.focus();
 		}
 	}
 
@@ -62,6 +65,13 @@
 		}
 	}
 
+	// Close when keyboard focus leaves the whole widget (Tab past the last row) —
+	// pointer dismissal is the window listener above. relatedTarget is null when
+	// focus leaves the document; treat that as leaving too.
+	function onRootFocusout(e: FocusEvent) {
+		if (open && root && !root.contains(e.relatedTarget as Node)) close();
+	}
+
 	function picked() {
 		onDownload?.();
 		// Downloads don't navigate, so the focused link is about to unmount —
@@ -73,7 +83,7 @@
 <svelte:window onpointerdown={onWindowPointerdown} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions (Escape-to-close convenience; not the element's only affordance) -->
-<div class="dl-menu" bind:this={root} onkeydown={onRootKeydown}>
+<div class="dl-menu" bind:this={root} onkeydown={onRootKeydown} onfocusout={onRootFocusout}>
 	<div class="dl-split">
 		<a
 			href={options[0].href}
@@ -100,13 +110,15 @@
 		{/if}
 	</div>
 
-	{#if hasMenu && open}
+	{#if hasMenu}
 		<!-- Opens UPWARD by design (CSS only — the list follows the button in DOM so
 		     a virtual cursor meets the trigger first): the button sits at the bottom
 		     of the detail card, which is overflow:hidden — a downward menu would
 		     clip. See the direction decision on SONA-123. Plain links in a plain
-		     list (ARIA disclosure pattern), natively tabbable — no menu roles. -->
-		<ul class="dl-list" id={listId}>
+		     list (ARIA disclosure pattern), natively tabbable — no menu roles.
+		     Rendered persistently (hidden when closed) so the caret's aria-controls
+		     always points at a real element. -->
+		<ul class="dl-list" id={listId} hidden={!open}>
 			{#each options as option, i}
 				<li>
 					<a href={option.href} download onclick={picked}>
@@ -145,13 +157,10 @@
 	.dl-caret {
 		border-top-left-radius: 0;
 		border-bottom-left-radius: 0;
-		/* 16px + 14px icon + 16px = 46px hit width (≥44px touch target). */
+		/* 16px + 14px icon + 16px = 46px hit WIDTH (≥44px). Height is the shared
+		   .btn pill's 40px — widening only, so the split halves stay aligned. */
 		padding-inline: 16px;
 		border-inline-start: 1px solid color-mix(in srgb, var(--primary-foreground) 25%, transparent);
-	}
-
-	.dl-caret :global(svg) {
-		transition: rotate 0.15s ease-out;
 	}
 
 	.dl-caret :global(.caret-open) {
@@ -160,12 +169,20 @@
 
 	.dl-list {
 		position: absolute;
-		inset-inline: 0;
+		/* Start-anchored with a width cap (not full-width): keeps each row's
+		   label + hint visually paired on desktop where the card is wide. */
+		inset-inline-start: 0;
+		min-width: 220px;
+		width: max-content;
 		bottom: calc(100% + 8px);
 		margin: 0;
 		padding: 6px;
 		list-style: none;
-		background: var(--card);
+		/* Lifted a step above the card it floats over, so the surface itself
+		   reads as elevated in dark themes (the shadow alone doesn't); in light
+		   themes the 12% white mix is a no-op-ish brightening of an already-light
+		   card. */
+		background: color-mix(in srgb, var(--card) 88%, white);
 		border: 1px solid var(--border);
 		border-radius: 10px;
 		/* Layered shadow: the menu floats over the artist row, so it needs real
@@ -179,6 +196,10 @@
 	@media (prefers-reduced-motion: no-preference) {
 		.dl-list {
 			animation: dl-rise 0.13s ease-out;
+		}
+
+		.dl-caret :global(svg) {
+			transition: rotate 0.15s ease-out;
 		}
 	}
 
@@ -209,7 +230,10 @@
 	}
 
 	.dl-list a:hover {
-		background: var(--secondary);
+		/* Same secondary→foreground mix family as the emoji chips' hover, kept
+		   subtle (15%) so the row label's AA contrast holds — a plain
+		   var(--secondary) fill was indistinguishable from --border here. */
+		background: color-mix(in srgb, var(--secondary) 85%, var(--foreground));
 	}
 
 	.dl-list a:focus-visible {

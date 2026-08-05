@@ -54,23 +54,29 @@ The release that adds the per-sticker download-format menu also adds a
 `stickers.is_animated` column. The migration applies automatically, but it can't
 inspect your stored files — animated GIF/WebP stickers **imported before this
 release** start out flagged static. Until the backfill runs, those stickers may
-show a PNG download option; picking it is harmless (the conversion refuses to
-run and the original file downloads instead), but the option shouldn't be there.
+show a PNG download option; picking it is safe — the download endpoint sniffs
+the file's actual bytes and serves the original file instead of a flattened
+conversion — but the option shouldn't be there, and the backfill removes it.
 
-After this release deploys, run the backfill **once**, signed in as admin:
+After this release deploys, run the backfill **once**: open your site signed in
+as admin, open the browser devtools console, and run:
 
-```sh
-curl -X POST -H "Cookie: <your admin session cookie>" \
-  https://<your-site>/api/stickers/backfill-animated
+```js
+fetch('/api/stickers/backfill-animated', { method: 'POST' })
+  .then((r) => r.json())
+  .then(console.log);
 ```
 
-(or POST to `/api/stickers/backfill-animated` from the browser console while
-signed in). It fetches each stored raster, sniffs it for animation, and fixes
+(`curl -X POST -H "Cookie: <your admin session cookie>" https://<your-site>/api/stickers/backfill-animated`
+also works, but pastes your session cookie into shell history — prefer the
+console.) It fetches each stored raster, sniffs it for animation, and fixes
 wrong flags in either direction. It's idempotent — re-running it changes
 nothing — and it reports any rows it couldn't read. Libraries with more than
 ~200 raster stickers are paged: pass `?afterId=<lastId>` from the previous
-response until `rasters` comes back below the limit. Stickers imported after
-the upgrade are sniffed at import time and need nothing.
+response until `rasters` comes back below the limit. On a Workers **free-plan**
+fork, add `?limit=25` (and page with `?afterId=`) to stay well inside the
+tighter per-request subrequest budget. Stickers imported after the upgrade are
+sniffed at import time and need nothing.
 
 ## First sync only: check the Actions tab
 

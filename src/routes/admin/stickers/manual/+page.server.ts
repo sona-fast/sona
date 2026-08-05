@@ -54,8 +54,10 @@ export const actions = {
 				settings,
 				db,
 				input: { name, description, coverImageUrl, managerArtistId, telegramUrl, published, stickerInputs },
-				// Origin + event fetch so root-relative /img/<key> stored URLs can be
-				// animation-sniffed (a bare sniff would record every one as static).
+				// Origin + EVENT fetch, deliberately: SvelteKit's fetch resolves
+				// root-relative /img/<key> stored URLs through the app router so the
+				// sniff can read them (a bare fetch would record every one as
+				// static). Admin-only action, so the cookie-carrying fetch is fine.
 				origin: url.origin,
 				fetchFn: fetch
 			});

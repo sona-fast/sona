@@ -54,7 +54,8 @@ const chromeOptOuts: Array<{ label: string; file: string; selector: string }> = 
 	{ label: 'paths layout back arrow', file: 'routes/(paths)/+layout.svelte', selector: '.back' },
 	{ label: 'admin collections cover (desktop)', file: 'routes/admin/collections/+page.svelte', selector: '.collection-cover' },
 	{ label: 'admin collections thumb (mobile)', file: 'routes/admin/collections/+page.svelte', selector: '.mobile-collection-thumb' },
-	{ label: 'admin conventions external-link icon', file: 'routes/admin/conventions/+page.svelte', selector: '.con-link' }
+	{ label: 'admin conventions external-link icon', file: 'routes/admin/conventions/+page.svelte', selector: '.con-link' },
+	{ label: 'sticker download-menu row', file: 'lib/components/DownloadMenu.svelte', selector: '.dl-list a' }
 ];
 
 describe('SONA-81 chrome anchors opt out of the resting underline', () => {

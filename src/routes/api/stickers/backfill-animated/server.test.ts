@@ -90,4 +90,23 @@ describe('POST /api/stickers/backfill-animated', () => {
 		expect(page3).toMatchObject({ rasters: 1, updated: 0, lastId: 5 });
 		expect(page3.failed).toHaveLength(1);
 	});
+
+	it('reports a row whose DB update throws and keeps going (crash-safe progress)', async () => {
+		const { db, sqlite } = seedDb();
+		// Make the flag-correcting UPDATE for row 3 blow up mid-run — the endpoint
+		// must still return the JSON progress report (later rows processed, paging
+		// cursor intact) instead of a 500 that loses everything.
+		sqlite.exec(`
+			CREATE TRIGGER boom BEFORE UPDATE OF is_animated ON stickers
+			WHEN NEW.id = 3
+			BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END;
+		`);
+
+		const out = await (await POST(makeEvent(db))).json();
+		expect(out).toMatchObject({ rasters: 3, updated: 1, unchanged: 0, lastId: 5 });
+		expect(out.failed).toEqual(
+			expect.arrayContaining([expect.objectContaining({ id: 3 }), expect.objectContaining({ id: 5 })])
+		);
+		expect(flags(sqlite)[4]).toBe(0); // the row AFTER the crash was still corrected
+	});
 });

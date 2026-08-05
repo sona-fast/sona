@@ -238,22 +238,25 @@ describe('ember light theme WCAG AA contrast', () => {
 // dark primary drop (#121) fails here; terracotta light primary (4.68:1) sits
 // closest to the floor. Scope: assert only; do not tune colors to pass — a new
 // failure is a finding to report, not to silence.
+// Every theme × mode block in app.css, shared by the resting-state and
+// focus-ring describes below (was copy-pasted three times).
+const THEME_BLOCKS = [
+	{ name: 'ember dark', sel: ':root' },
+	{ name: 'ember light', sel: "[data-theme='light']" },
+	{ name: 'aurora dark', sel: "[data-theme-id='aurora']" },
+	{ name: 'aurora light', sel: "[data-theme-id='aurora'][data-theme='light']" },
+	{ name: 'terracotta dark', sel: "[data-theme-id='terracotta']" },
+	{ name: 'terracotta light', sel: "[data-theme-id='terracotta'][data-theme='light']" }
+];
+
 describe('resting .btn WCAG AA contrast — every theme × variant × mode (#121)', () => {
-	const themeBlocks = [
-		{ name: 'ember dark', sel: ':root' },
-		{ name: 'ember light', sel: "[data-theme='light']" },
-		{ name: 'aurora dark', sel: "[data-theme-id='aurora']" },
-		{ name: 'aurora light', sel: "[data-theme-id='aurora'][data-theme='light']" },
-		{ name: 'terracotta dark', sel: "[data-theme-id='terracotta']" },
-		{ name: 'terracotta light', sel: "[data-theme-id='terracotta'][data-theme='light']" }
-	];
 	const variants = [
 		{ name: 'primary', fill: 'primary', label: 'primary-foreground' },
 		{ name: 'secondary', fill: 'secondary', label: 'secondary-foreground' },
 		{ name: 'outline', fill: 'background', label: 'foreground' }
 	];
 
-	for (const { name, sel } of themeBlocks) {
+	for (const { name, sel } of THEME_BLOCKS) {
 		for (const v of variants) {
 			it(`${name}: resting .btn-${v.name} label meets 4.5:1`, () => {
 				const fill = blockToken(sel, v.fill);
@@ -268,45 +271,24 @@ describe('resting .btn WCAG AA contrast — every theme × variant × mode (#121
 // it's non-text UI held to 3:1. It must use --ring, not --primary: --primary drops
 // to 2.20:1 on Ember light. Assert the rule keeps the --ring token and that --ring
 // clears 3:1 on --background in every theme × mode (#121).
-describe('.btn:focus-visible ring WCAG AA contrast, every theme × mode (#121)', () => {
+// The ring must clear 3:1 on BOTH resting surfaces it appears over: the page
+// background (.btn:focus-visible, 2px outline-offset — #121) and the card
+// (the DownloadMenu row ring sits INSIDE the menu, outline-offset -2px, on a
+// var(--card) surface — SONA-123; --primary failed it on the default light
+// card at 2.46:1, which is why the component uses --ring).
+describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SONA-123)', () => {
 	it('the ring uses var(--ring) (not var(--primary), which fails 3:1 on Ember light)', () => {
 		const rule = css.match(/^\.btn:focus-visible\s*\{([^}]*)\}/m)?.[1];
 		if (!rule) throw new Error('.btn:focus-visible rule not found in app.css');
 		expect(rule).toMatch(/outline:[^;]*var\(--ring\)/);
 	});
 
-	const blocks = [
-		{ name: 'ember dark', sel: ':root' },
-		{ name: 'ember light', sel: "[data-theme='light']" },
-		{ name: 'aurora dark', sel: "[data-theme-id='aurora']" },
-		{ name: 'aurora light', sel: "[data-theme-id='aurora'][data-theme='light']" },
-		{ name: 'terracotta dark', sel: "[data-theme-id='terracotta']" },
-		{ name: 'terracotta light', sel: "[data-theme-id='terracotta'][data-theme='light']" }
-	];
-	for (const { name, sel } of blocks) {
-		it(`${name}: focus ring against the page background meets 3:1`, () => {
-			expect(contrast(blockToken(sel, 'ring'), blockToken(sel, 'background'))).toBeGreaterThanOrEqual(3);
-		});
-	}
-});
-
-// The DownloadMenu row focus ring sits INSIDE the menu card (outline-offset
-// -2px on a var(--card) surface), so --ring must also clear the 3:1 non-text
-// bar against --card in every theme × mode — --primary failed it on the default
-// light card (2.46:1), which is why the component uses --ring (SONA-123).
-describe('focus ring on cards WCAG AA contrast, every theme × mode (SONA-123)', () => {
-	const blocks = [
-		{ name: 'ember dark', sel: ':root' },
-		{ name: 'ember light', sel: "[data-theme='light']" },
-		{ name: 'aurora dark', sel: "[data-theme-id='aurora']" },
-		{ name: 'aurora light', sel: "[data-theme-id='aurora'][data-theme='light']" },
-		{ name: 'terracotta dark', sel: "[data-theme-id='terracotta']" },
-		{ name: 'terracotta light', sel: "[data-theme-id='terracotta'][data-theme='light']" }
-	];
-	for (const { name, sel } of blocks) {
-		it(`${name}: focus ring against the card surface meets 3:1`, () => {
-			expect(contrast(blockToken(sel, 'ring'), blockToken(sel, 'card'))).toBeGreaterThanOrEqual(3);
-		});
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: focus ring against the ${surface} surface meets 3:1`, () => {
+				expect(contrast(blockToken(sel, 'ring'), blockToken(sel, surface))).toBeGreaterThanOrEqual(3);
+			});
+		}
 	}
 });
 

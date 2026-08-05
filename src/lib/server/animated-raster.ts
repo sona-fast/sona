@@ -61,8 +61,9 @@ function isAnimatedWebp(bytes: Uint8Array): boolean {
  * global color table → blocks) counting image separators (0x2C), short-circuiting
  * as soon as a second frame is seen. A walk that runs OFF the buffer (truncated
  * file) errs toward "animated" — the safe direction: a wrong true only hides the
- * PNG option, while a wrong false would offer a flattening conversion. A stream
- * with an unknown block marker stops and reports whatever was counted so far.
+ * PNG option, while a wrong false would offer a flattening conversion. An
+ * unknown block marker (malformed or padded stream) errs the same way: frames
+ * past it are unknowable.
  */
 function isAnimatedGif(bytes: Uint8Array): boolean {
 	if (bytes.length < 13) return false;
@@ -95,8 +96,10 @@ function isAnimatedGif(bytes: Uint8Array): boolean {
 			pos = skipSubBlocks(bytes, pos);
 			if (pos < 0) return true; // truncated — err toward animated (see above)
 		} else {
-			// Unknown block marker — malformed; stop walking.
-			break;
+			// Unknown block marker — a malformed or padded stream (some encoders
+			// leave stray 0x00 bytes between blocks). Frames past it are unknowable,
+			// so err toward animated, matching the truncation policy above.
+			return true;
 		}
 	}
 	return frames > 1;

@@ -3,6 +3,7 @@ import { getReadDb } from '$lib/server/db';
 import { stickers, stickerPacks } from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { RateLimiter } from '$lib/server/rate-limit';
+import { isAnimatedRaster } from '$lib/server/animated-raster';
 import { originalExt, stickerDownloadOptions } from '$lib/sticker-download';
 import type { RequestHandler } from './$types';
 
@@ -16,8 +17,8 @@ import type { RequestHandler } from './$types';
 // up to ~120 stickers, each saved via its own per-sticker download link, so a
 // legit "save whole pack" (or a few users behind one NAT) stays under the cap
 // while a sustained flood is still bounded. Note the ?format=png path costs TWO
-// subrequests when the transform fails (transform attempt + original fallback);
-// the cap's headroom absorbs that without charging extra tokens.
+// subrequests (the buffered original for the animation sniff + the transform
+// attempt); the cap's headroom absorbs that without charging extra tokens.
 const downloadLimiter = new RateLimiter(200, 60_000); // 200 downloads / min / IP
 
 // Map a file extension to the Content-Type we serve it with. Anything unknown
@@ -37,8 +38,14 @@ const CONTENT_TYPES: Record<string, string> = {
  * not transformable. Root-relative stored URLs (/img/<key>) and same-origin
  * absolutes become a bare path segment (no leading slash — naive string concat
  * doubled it and leaked query strings into the transform path); off-origin
- * absolutes ride along whole, query included. Anything unparseable, non-http(s),
- * or path-traversing ('..') is refused.
+ * absolutes ride along whole, query included. Anything unparseable or
+ * non-http(s) is refused.
+ *
+ * Dropping the query on same-origin sources is safe by construction: stored
+ * same-origin URLs are /img/<uuid-keyed paths> minted by our own storage
+ * (assertSelfHosted rejects anything else at save time), which carry no
+ * meaningful query. No '..' check is needed either — new URL() normalizes dot
+ * segments, so pathname can never contain a literal '..' segment.
  */
 function transformSource(imageUrl: string, origin: string): string | null {
 	let parsed: URL;
@@ -48,7 +55,6 @@ function transformSource(imageUrl: string, origin: string): string | null {
 		return null;
 	}
 	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-	if (parsed.pathname.split('/').includes('..')) return null;
 	return parsed.origin === origin ? parsed.pathname.slice(1) : parsed.href;
 }
 
@@ -60,10 +66,12 @@ function transformSource(imageUrl: string, origin: string): string | null {
 // Without ?format we serve the ORIGINAL stored bytes untouched, so animated
 // WebP/GIF keep their animation. With ?format=png — offered by the UI only for
 // static rasters that don't animate (see stickerDownloadOptions, the shared
-// source of truth this handler validates against) — we proxy through the zone's
-// Cloudflare image transform. When the transform can't run (dev server, a zone
-// without transforms enabled, off-zone storage 403s — see SONA-21) we fall back
-// to the original bytes under the original filename: correct bytes beat a 5xx.
+// source of truth this handler validates against) — we first buffer + sniff the
+// original (a stale pre-backfill is_animated flag must never let the transform
+// flatten an animated file), then proxy through the zone's Cloudflare image
+// transform. When the transform can't run (dev server, a zone without
+// transforms enabled, off-zone storage 403s — see SONA-21) we fall back to the
+// buffered original bytes under the original filename: correct bytes beat a 5xx.
 export const GET: RequestHandler = async ({ params, url, platform, fetch, getClientAddress }) => {
 	if (!downloadLimiter.check(getClientAddress(), Date.now())) {
 		error(429, 'Too many downloads, please slow down.');
@@ -95,13 +103,30 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 	const converting = requested === 'png';
 
 	if (converting) {
+		// Buffer the original FIRST and sniff its bytes: a pre-backfill row can
+		// carry a stale is_animated=0 while the stored file actually animates, and
+		// the transform would "succeed" by flattening it to its first frame.
+		// Buffering the whole file is fine — stickers are ≤~512KB (Telegram's
+		// size cap) — and it doubles as the transform-failure fallback below
+		// without a second fetch.
+		const orig = await fetch(row.imageUrl);
+		if (!orig.ok) error(502, 'Could not fetch sticker file');
+		const origBytes = new Uint8Array(await orig.arrayBuffer());
+		const origType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+		if (isAnimatedRaster(origBytes)) {
+			// Stale flag: refuse to flatten. Serve the original bytes under the
+			// original filename, uncacheable (same semantics as the fallback
+			// below) — the backfill corrects the flag and removes the PNG option.
+			return fileResponse(origBytes, originalName, origType, 'private, no-store');
+		}
+
 		// Same-zone image transform; the source rides along as the transform path.
 		// globalThis.fetch, NOT the event fetch: SvelteKit's fetch resolves
 		// same-origin URLs through the app router, so the /cdn-cgi/image request
 		// would never leave the isolate (no transform runs) and would carry the
 		// caller's cookies. Reject anything that didn't produce a PNG (an error
 		// page, an HTML challenge, a transform-disabled zone passing bytes
-		// through) and fall back to the original.
+		// through) and fall back to the buffered original.
 		const source = transformSource(row.imageUrl, url.origin);
 		if (source) {
 			try {
@@ -109,30 +134,33 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 				if (res.ok && res.body && res.headers.get('content-type')?.startsWith('image/png')) {
 					return fileResponse(res.body, `${params.slug}-${id}.png`, 'image/png');
 				}
-				// Drain the rejected body so the connection is released before the
-				// fallback fetch below.
+				// Drain the rejected body so the connection is released.
 				await res.body?.cancel();
 			} catch {
-				// fall through to the original
+				// fall through to the buffered original
 			}
 		}
+
+		// Transform couldn't run — serve the already-buffered original bytes. Must
+		// not be edge-cached: the failure may be transient, and caching it would
+		// pin webp bytes to the png URL for everyone (hooks.server.ts honors an
+		// explicit Cache-Control instead of stamping its public s-maxage default).
+		return fileResponse(origBytes, originalName, origType, 'private, no-store');
 	}
 
 	const res = await fetch(row.imageUrl);
 	if (!res.ok || !res.body) error(502, 'Could not fetch sticker file');
-	// A fallback under ?format=png must not be edge-cached: the failure may be
-	// transient, and caching it would pin webp bytes to the png URL for everyone
-	// (hooks.server.ts honors an explicit Cache-Control instead of stamping its
-	// public s-maxage default).
-	const cacheControl = converting ? 'private, no-store' : undefined;
-	return fileResponse(res.body, originalName, CONTENT_TYPES[ext] ?? 'application/octet-stream', cacheControl);
+	return fileResponse(res.body, originalName, CONTENT_TYPES[ext] ?? 'application/octet-stream');
 };
 
 function fileResponse(
-	body: ReadableStream,
+	body: BodyInit,
 	filename: string,
 	contentType: string,
-	cacheControl = 'public, max-age=3600'
+	// Match the caching the hooks stamp gives public non-HTML responses: a short
+	// shared-cache TTL (5 min) + SWR, NOT a browser-cached hour — a takedown
+	// must propagate promptly, so downloads never get a long max-age.
+	cacheControl = 'public, s-maxage=300, stale-while-revalidate=3600'
 ): Response {
 	return new Response(body, {
 		headers: {
