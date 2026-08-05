@@ -122,3 +122,70 @@ export function supporterKeyDisplayDate(expiresAt: Date): string {
 	const da = String(d.getUTCDate()).padStart(2, '0');
 	return formatDate(`${d.getUTCFullYear()}-${mo}-${da}`);
 }
+
+/** A valid key within this many days of expiry gets the "expiring soon"
+ * treatment (SONA-114): countdown on the settings card plus the admin-wide
+ * re-mint notice. Fixed rather than scaled — at the issuer's 45-day window,
+ * 7 days is a comfortable re-mint margin. */
+export const EXPIRY_WARN_DAYS = 7;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Whole days until the key stops working, rounded up. `exp` is end-of-day UTC,
+ * so 1 means the key expires today (its last covered day) and 0 or less means
+ * it has already expired.
+ */
+export function supporterKeyDaysRemaining(expiresAt: Date, now: Date): number {
+	return Math.ceil((expiresAt.getTime() - now.getTime()) / DAY_MS);
+}
+
+/** Client-facing supporter-key status shared by the settings page and the
+ * admin layout. Never contains the decoded payload beyond what the UI shows. */
+export interface SupporterKeyStatus {
+	token: string;
+	state: 'valid' | 'expired';
+	validUntil: string;
+	/** Days until expiry (1 = expires today); 0 for the expired state. */
+	daysRemaining: number;
+	/** True when valid and within EXPIRY_WARN_DAYS of expiry. */
+	expiringSoon: boolean;
+}
+
+/**
+ * Shape a verification result for display. Null for a token that no longer
+ * verifies at all (issuer key rotated, corruption) — callers fall through to
+ * their empty state. Pure, so tests can drive it with a synthetic result.
+ */
+export function supporterKeyStatusFromResult(
+	token: string,
+	res: SupporterKeyResult,
+	now: Date
+): SupporterKeyStatus | null {
+	if (res.valid) {
+		const daysRemaining = supporterKeyDaysRemaining(res.expiresAt, now);
+		return {
+			token,
+			state: 'valid',
+			validUntil: supporterKeyDisplayDate(res.expiresAt),
+			daysRemaining,
+			expiringSoon: daysRemaining <= EXPIRY_WARN_DAYS
+		};
+	}
+	if (res.reason === 'expired') {
+		return {
+			token,
+			state: 'expired',
+			validUntil: supporterKeyDisplayDate(res.expiresAt),
+			daysRemaining: 0,
+			expiringSoon: false
+		};
+	}
+	return null;
+}
+
+/** Verify a stored token and shape the result for display (empty token → null). */
+export async function resolveSupporterKeyStatus(token: string, now: Date): Promise<SupporterKeyStatus | null> {
+	if (!token) return null;
+	return supporterKeyStatusFromResult(token, await verifySupporterKey(token, now), now);
+}

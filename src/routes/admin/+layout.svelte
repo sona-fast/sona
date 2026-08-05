@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { enhance } from '$app/forms';
-	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Sun, Moon, Camera, Sticker, CalendarDays, Activity } from 'lucide-svelte';
+	import { Upload, Images, Folder, User, PawPrint, Tags, Settings, LogOut, Sun, Moon, Camera, Sticker, CalendarDays, Activity, X } from 'lucide-svelte';
 	import { getTheme } from '$lib/theme.svelte';
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import AdminTabs from '$lib/components/AdminTabs.svelte';
@@ -11,6 +11,23 @@
 	let { children, data } = $props();
 
 	const theme = getTheme();
+
+	// Supporter-key expiry notice (SONA-114): shown on every admin page while
+	// the key is inside its warning window. Dismissal is per key — keyed on the
+	// key's validUntil in localStorage, so a re-minted key gets its own
+	// final-week warning. Starts hidden (SSR has no localStorage); the $effect
+	// reveals it client-side, which also keeps hydration consistent.
+	const NOTICE_DISMISS_KEY = 'supporterNoticeDismissed';
+	let noticeDismissed = $state(true);
+	$effect(() => {
+		noticeDismissed = data.supporterKeyNotice
+			? localStorage.getItem(NOTICE_DISMISS_KEY) === data.supporterKeyNotice.validUntil
+			: true;
+	});
+	function dismissNotice() {
+		if (data.supporterKeyNotice) localStorage.setItem(NOTICE_DISMISS_KEY, data.supporterKeyNotice.validUntil);
+		noticeDismissed = true;
+	}
 
 	// Opt-in gate (issue #6): the Observability item only appears when the feature
 	// is enabled (data.observabilityEnabled from the admin layout load).
@@ -81,6 +98,26 @@
 			</header>
 
 			<main class="admin-content">
+				{#if data.supporterKeyNotice && !noticeDismissed}
+					<div class="supporter-notice" role="status">
+						<span class="notice-eyebrow">{m.admin_settings_supporter_early_eyebrow()}</span>
+						<p>
+							{data.supporterKeyNotice.daysRemaining <= 1
+								? m.admin_notice_supporter_today_pre()
+								: m.admin_notice_supporter_expiring_pre({ days: data.supporterKeyNotice.daysRemaining })}<a
+								class="notice-link"
+								href="https://sona.fast/supporter-key"
+								target="_blank"
+								rel="noopener">sona.fast/supporter-key</a
+							>{m.admin_notice_supporter_mid()}<a class="notice-link" href="/admin/settings?tab=account"
+								>{m.admin_notice_supporter_settings_link()}</a
+							>{m.admin_notice_supporter_post()}
+						</p>
+						<button class="notice-dismiss" onclick={dismissNotice} aria-label={m.admin_notice_supporter_dismiss()}>
+							<X size={14} />
+						</button>
+					</div>
+				{/if}
 				{@render children()}
 				<AdminTabs />
 			</main>
@@ -222,6 +259,70 @@
 	.admin-content {
 		flex: 1;
 		padding: 32px;
+	}
+
+	/* Supporter-key expiry notice (SONA-114) — slim card above page content.
+	   The uppercase eyebrow carries state, matching the settings card. */
+	.supporter-notice {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		background: var(--card);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-s);
+		padding: 10px 10px 10px 16px;
+		margin-bottom: 20px;
+		max-width: 720px;
+	}
+
+	.notice-eyebrow {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		font-weight: 600;
+		color: var(--status-attention);
+		flex: none;
+	}
+
+	.supporter-notice p {
+		font-size: 13px;
+		color: var(--foreground);
+		line-height: 1.55;
+		flex: 1;
+		margin: 0;
+	}
+
+	.notice-link {
+		color: var(--foreground);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	.notice-dismiss {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		flex: none;
+		background: none;
+		border: none;
+		border-radius: var(--radius-pill);
+		color: var(--muted-foreground);
+		cursor: pointer;
+		transition: background 0.15s, color 0.15s;
+	}
+
+	.notice-dismiss:hover {
+		color: var(--foreground);
+		background: var(--secondary);
+	}
+
+	.notice-dismiss:focus-visible,
+	.notice-link:focus-visible {
+		outline: 2px solid var(--foreground);
+		outline-offset: 2px;
 	}
 
 	.mobile-only {

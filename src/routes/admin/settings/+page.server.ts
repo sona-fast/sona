@@ -45,7 +45,7 @@ import {
 import { syncArtists } from '$lib/server/artist-sync';
 import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
 import { isObservabilityEnabled } from '$lib/server/metrics';
-import { verifySupporterKey, supporterKeyDisplayDate } from '$lib/server/supporter-key';
+import { verifySupporterKey, supporterKeyDisplayDate, resolveSupporterKeyStatus } from '$lib/server/supporter-key';
 import { earlyAccessActive } from '$lib/early-access';
 import { formatDate } from '$lib/index';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
@@ -127,21 +127,14 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const adminEmail = (await getRawSetting(db, 'adminEmail')) ?? '';
 
 	// Supporter key (SONA-105) — a raw setting like adminEmail, so the owner's key
-	// never rides along in the public SiteSettings client payload. Verify it here
-	// (signature + expiry) so the page renders the valid / expired state without
-	// doing any crypto client-side. A stored key that no longer verifies at all
-	// (issuer key rotated, corruption) falls through to the empty state.
+	// never rides along in the public SiteSettings client payload. Verified
+	// server-side (signature + expiry) so the page renders the valid / expiring /
+	// expired state without doing any crypto client-side. A stored key that no
+	// longer verifies at all (issuer key rotated, corruption) resolves to null
+	// and falls through to the empty state.
 	const now = new Date();
 	const supporterToken = (await getRawSetting(db, 'supporterKey')) ?? '';
-	let supporterKey: { token: string; state: 'valid' | 'expired'; validUntil: string } | null = null;
-	if (supporterToken) {
-		const res = await verifySupporterKey(supporterToken, now);
-		if (res.valid) {
-			supporterKey = { token: supporterToken, state: 'valid', validUntil: supporterKeyDisplayDate(res.expiresAt) };
-		} else if (res.reason === 'expired') {
-			supporterKey = { token: supporterToken, state: 'expired', validUntil: supporterKeyDisplayDate(res.expiresAt) };
-		}
-	}
+	const supporterKey = await resolveSupporterKeyStatus(supporterToken, now);
 	// Features still inside their early-access window, with GA dates pre-formatted
 	// for display. Empty until the first pilot feature is registered.
 	const earlyAccess = earlyAccessActive(now).map((e) => ({ flag: e.flag, gaDate: formatDate(e.gaDate) }));

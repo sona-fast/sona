@@ -31,10 +31,19 @@ vi.mock('$lib/server/avatar', async (importActual) => ({
 // branches by its result. The signature crypto itself is covered in
 // supporter-key.test.ts with a real in-test keypair. supporterKeyDisplayDate
 // stays real so the formatted dates are exercised.
-vi.mock('$lib/server/supporter-key', async (importActual) => ({
-	...(await importActual<typeof import('$lib/server/supporter-key')>()),
-	verifySupporterKey: vi.fn()
-}));
+vi.mock('$lib/server/supporter-key', async (importActual) => {
+	const actual = await importActual<typeof import('$lib/server/supporter-key')>();
+	const verifySupporterKey = vi.fn();
+	return {
+		...actual,
+		verifySupporterKey,
+		// Loads resolve the stored key through the resolver; route its verify
+		// through the same mock (real shaping stays exercised) so a single
+		// mockResolvedValueOnce drives both the actions and the load.
+		resolveSupporterKeyStatus: async (token: string, now: Date) =>
+			token ? actual.supporterKeyStatusFromResult(token, await verifySupporterKey(token, now), now) : null
+	};
+});
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -878,7 +887,7 @@ describe('settings load — supporter key is raw + verified, never in public set
 			settings: Record<string, unknown>;
 		};
 
-		expect(result.supporterKey).toEqual({ token: 'head.tail', state: 'valid', validUntil: '2026.08.31' });
+		expect(result.supporterKey).toMatchObject({ token: 'head.tail', state: 'valid', validUntil: '2026.08.31' });
 		// The registry ships empty, so nothing is in an early-access window.
 		expect(result.earlyAccess).toEqual([]);
 		// The token must never leak into the client-exposed SiteSettings.
@@ -913,5 +922,61 @@ describe('settings load — supporter key is raw + verified, never in public set
 		};
 
 		expect(result.supporterKey).toBeNull();
+	});
+});
+
+describe('settings load — expiring-soon boundary (SONA-114)', () => {
+	// The load verifies against the real clock, so boundaries are expressed
+	// relative to Date.now(). exp is end-of-day UTC in the real keys; only the
+	// distance from now matters for the boundary.
+	const DAY_MS = 86_400_000;
+
+	async function loadWithExpiry(expiresAt: Date) {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt
+		});
+		return (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+			supporterKey: { state: string; daysRemaining: number; expiringSoon: boolean } | null;
+		};
+	}
+
+	it('flags a key just inside the 7-day window', async () => {
+		// 6.5 days out → ceil → 7, the last value inside the window.
+		const result = await loadWithExpiry(new Date(Date.now() + 6.5 * DAY_MS));
+		expect(result.supporterKey).toMatchObject({ state: 'valid', daysRemaining: 7, expiringSoon: true });
+	});
+
+	it('does not flag a key just outside the window', async () => {
+		// 7.5 days out → ceil → 8, the first value outside.
+		const result = await loadWithExpiry(new Date(Date.now() + 7.5 * DAY_MS));
+		expect(result.supporterKey).toMatchObject({ state: 'valid', daysRemaining: 8, expiringSoon: false });
+	});
+
+	it('reports 1 day remaining on the key\'s last covered day', async () => {
+		const result = await loadWithExpiry(new Date(Date.now() + 0.5 * DAY_MS));
+		expect(result.supporterKey).toMatchObject({ state: 'valid', daysRemaining: 1, expiringSoon: true });
+	});
+
+	it('an expired key is expired, never expiring-soon', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'supporterKey', 'old.token');
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+			valid: false,
+			reason: 'expired',
+			login: 'sparky',
+			tier: 1,
+			expiresAt: new Date(Date.now() - DAY_MS)
+		});
+
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+			supporterKey: { state: string; daysRemaining: number; expiringSoon: boolean } | null;
+		};
+
+		expect(result.supporterKey).toMatchObject({ state: 'expired', daysRemaining: 0, expiringSoon: false });
 	});
 });

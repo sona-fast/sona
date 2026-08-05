@@ -1145,5 +1145,16 @@
 	"admin_settings_supporter_error_invalid": "That key didn't validate — make sure you copied the whole thing.",
 	"admin_settings_supporter_error_expired": "That key expired {date} — re-mint at sona.fast/supporter-key.",
 	"admin_settings_supporter_saved": "Supporter key saved.",
-	"admin_settings_supporter_removed": "Supporter key removed."
+	"admin_settings_supporter_removed": "Supporter key removed.",
+	"admin_settings_supporter_days_left": "{days} days left",
+	"admin_settings_supporter_expires_today": "expires today",
+	"admin_settings_supporter_expiring_pre": "This key expires in {days} days. Re-mint it at ",
+	"admin_settings_supporter_expiring_today_pre": "This key expires today. Re-mint it at ",
+	"admin_settings_supporter_expiring_post": " while your sponsorship is active, then paste the new key here.",
+	"admin_notice_supporter_expiring_pre": "Your supporter key expires in {days} days. Re-mint it at ",
+	"admin_notice_supporter_today_pre": "Your supporter key expires today. Re-mint it at ",
+	"admin_notice_supporter_mid": ", then paste the new key in ",
+	"admin_notice_supporter_settings_link": "Settings → Account",
+	"admin_notice_supporter_post": ".",
+	"admin_notice_supporter_dismiss": "Dismiss this notice"
 }

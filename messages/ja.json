@@ -1109,5 +1109,16 @@
 	"admin_settings_supporter_error_invalid": "キーを確認できませんでした。全体をコピーしたか確認してください。",
 	"admin_settings_supporter_error_expired": "このキーは{date}に期限切れです。sona.fast/supporter-key で再発行してください。",
 	"admin_settings_supporter_saved": "サポーターキーを保存しました。",
-	"admin_settings_supporter_removed": "サポーターキーを削除しました。"
+	"admin_settings_supporter_removed": "サポーターキーを削除しました。",
+	"admin_settings_supporter_days_left": "残り{days}日",
+	"admin_settings_supporter_expires_today": "本日期限切れ",
+	"admin_settings_supporter_expiring_pre": "このキーはあと{days}日で期限切れになります。スポンサー契約が有効なうちに ",
+	"admin_settings_supporter_expiring_today_pre": "このキーは本日で期限切れになります。スポンサー契約が有効なうちに ",
+	"admin_settings_supporter_expiring_post": " で再発行し、新しいキーをここに貼り付けてください。",
+	"admin_notice_supporter_expiring_pre": "サポーターキーはあと{days}日で期限切れになります。再発行は ",
+	"admin_notice_supporter_today_pre": "サポーターキーは本日で期限切れになります。再発行は ",
+	"admin_notice_supporter_mid": " から。新しいキーは ",
+	"admin_notice_supporter_settings_link": "設定 → アカウント",
+	"admin_notice_supporter_post": " に貼り付けてください。",
+	"admin_notice_supporter_dismiss": "この通知を閉じる"
 }

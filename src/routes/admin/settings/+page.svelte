@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/stores';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import SetupDialog from '$lib/components/SetupDialog.svelte';
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
@@ -172,7 +173,17 @@
 	const RESEND_RING_C = 113.1;
 	const resendRingOffset = $derived(RESEND_RING_C * (1 - resendProgress.done / resendProgress.total));
 
-	let activeTab = $state<'site' | 'connections' | 'storage' | 'account' | 'observability'>('site');
+	// Tabs are client-side state, but ?tab= deep-links land on the right one —
+	// the admin-wide key-expiry notice (SONA-114) links to ?tab=account.
+	const TAB_IDS = ['site', 'connections', 'storage', 'account', 'observability'] as const;
+	type TabId = (typeof TAB_IDS)[number];
+	const requestedTab = $page.url.searchParams.get('tab');
+	const isTabId = (t: string | null): t is TabId => TAB_IDS.includes(t as TabId);
+	let activeTab = $state<TabId>(
+		isTabId(requestedTab) && (requestedTab !== 'observability' || data.observabilityEnabled)
+			? requestedTab
+			: 'site'
+	);
 
 	// Usage bar reflects the ACTIVE provider. R2 has no simple usage API, so we use
 	// the DB-tracked total (every image is on the active store) against the 10GB free tier.
@@ -822,7 +833,19 @@
 {#if data.supporterKey?.state === 'valid'}
 	<section class="security-section" data-tab="account">
 		<h2>{m.admin_settings_supporter_heading()}</h2>
-		<div class="key-eyebrow">{m.admin_settings_supporter_valid_until({ date: data.supporterKey.validUntil })}</div>
+		<div class="key-eyebrow">
+			{m.admin_settings_supporter_valid_until({ date: data.supporterKey.validUntil })}
+			{#if data.supporterKey.expiringSoon}
+				· <span class="days-left">{data.supporterKey.daysRemaining <= 1
+					? m.admin_settings_supporter_expires_today()
+					: m.admin_settings_supporter_days_left({ days: data.supporterKey.daysRemaining })}</span>
+			{/if}
+		</div>
+		{#if data.supporterKey.expiringSoon}
+			<p class="nudge-line">{data.supporterKey.daysRemaining <= 1
+				? m.admin_settings_supporter_expiring_today_pre()
+				: m.admin_settings_supporter_expiring_pre({ days: data.supporterKey.daysRemaining })}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener">sona.fast/supporter-key</a>{m.admin_settings_supporter_expiring_post()}</p>
+		{/if}
 		{#if data.earlyAccess.length}
 			<p class="status-line">{m.admin_settings_supporter_early_active({ features: earlyActiveText })}</p>
 		{:else}
@@ -1594,12 +1617,20 @@
 		margin-bottom: 14px;
 		max-width: 62ch;
 	}
-	.lapsed-line {
+	/* nudge-line (expiring soon, SONA-114) shares the lapsed-line voice: same
+	   weight so "act on this" reads consistently across the two states. */
+	.lapsed-line,
+	.nudge-line {
 		font-size: 14px;
 		color: var(--foreground);
 		line-height: 1.55;
 		margin-bottom: 16px;
 		max-width: 62ch;
+	}
+	/* Countdown on the eyebrow — attention, not destructive: the key still
+	   works. --status-attention tracks --primary and stays AA per theme. */
+	.days-left {
+		color: var(--status-attention);
 	}
 	/* Stored key on a raised, higher-contrast panel (var(--secondary) stands in
 	   for the mock's --raised, which isn't a shared token). */
