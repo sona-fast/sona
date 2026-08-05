@@ -656,9 +656,9 @@ describe('settings saveSite — social() field directions', () => {
 	it('saves the instagram field under the instagramUrl key', async () => {
 		const { db, platform } = makeDb();
 
-		await actions.saveSite(saveSiteEvent(platform, { instagram: 'sparky' }));
+		await actions.saveSite(saveSiteEvent(platform, { instagram: 'taro' }));
 
-		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://www.instagram.com/sparky');
+		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://www.instagram.com/taro');
 	});
 });
 

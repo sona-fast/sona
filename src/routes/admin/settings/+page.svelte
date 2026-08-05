@@ -414,7 +414,7 @@
 				</label>
 				<label>
 					<span>Instagram</span>
-					<input type="text" class="input" bind:value={instagramUrl} name="instagram" placeholder="https://instagram.com/yourname" />
+					<input type="text" class="input" bind:value={instagramUrl} name="instagram" placeholder="https://www.instagram.com/yourname" />
 				</label>
 				<label>
 					<span>FurTrack</span>

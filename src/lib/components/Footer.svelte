@@ -4,6 +4,7 @@
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
 	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
 	import FurTrackIcon from '$lib/components/icons/FurTrackIcon.svelte';
+	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import SonaBadge from '$lib/components/SonaBadge.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import type { SiteSettings } from '$lib/server/settings';
@@ -36,6 +37,9 @@
 			{/if}
 			{#if settings.furtrackUrl}
 				<a href={settings.furtrackUrl} aria-label="FurTrack"><FurTrackIcon size={18} /></a>
+			{/if}
+			{#if settings.instagramUrl}
+				<a href={settings.instagramUrl} aria-label="Instagram"><InstagramIcon size={18} /></a>
 			{/if}
 		</div>
 	</div>

@@ -24,6 +24,13 @@
 		}
 	}
 
+	// Only prefix @ when a real handle was derived — a pathless URL falls back to
+	// the platform name, which shouldn't render as "@Twitter".
+	function atHandleFromUrl(url: string | undefined, fallback: string): string {
+		const handle = handleFromUrl(url, fallback);
+		return handle === fallback ? fallback : `@${handle}`;
+	}
+
 	const ownerName = $derived(settings.ownerName || settings.siteName);
 
 	// 2026-09-12 → 2026.09.12; same-year ranges trim the end date (→ 09.14).
@@ -37,12 +44,12 @@
 	}
 
 	const socialLinks = $derived([
-		{ url: settings.twitterUrl, icon: TwitterIcon, label: settings.twitterUrl ? `@${handleFromUrl(settings.twitterUrl, 'Twitter')}` : 'Twitter' },
+		{ url: settings.twitterUrl, icon: TwitterIcon, label: atHandleFromUrl(settings.twitterUrl, 'Twitter') },
 		{ url: settings.telegramUrl, icon: TelegramIcon, label: handleFromUrl(settings.telegramUrl, 'Telegram') },
 		{ url: settings.blueskyUrl, icon: BlueskyIcon, label: handleFromUrl(settings.blueskyUrl, 'Bluesky') },
 		{ url: settings.furAffinityUrl, icon: FurAffinityIcon, label: handleFromUrl(settings.furAffinityUrl, 'FurAffinity') },
 		{ url: settings.furtrackUrl, icon: FurTrackIcon, label: handleFromUrl(settings.furtrackUrl, 'FurTrack') },
-		{ url: settings.instagramUrl, icon: InstagramIcon, label: settings.instagramUrl ? `@${handleFromUrl(settings.instagramUrl, 'Instagram')}` : 'Instagram' }
+		{ url: settings.instagramUrl, icon: InstagramIcon, label: atHandleFromUrl(settings.instagramUrl, 'Instagram') }
 	].filter((l) => l.url));
 </script>
 
@@ -83,7 +90,7 @@
 			<h3>{m.about_find_elsewhere()}</h3>
 			<div class="social-list">
 				{#each socialLinks as link}
-					<a href={link.url} class="social-item" target="_blank" rel="noopener">
+					<a href={link.url} class="social-item" target="_blank" rel="noopener noreferrer">
 						<link.icon size={18} />
 						<span>{link.label}</span>
 					</a>
