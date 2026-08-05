@@ -24,6 +24,12 @@ test.describe('admin settings ?tab= deep links', () => {
 		await page.goto('/admin/settings?tab=account');
 
 		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'account');
+		// The Account tab button itself is marked current for assistive tech…
+		await expect(
+			page.getByRole('button', { name: 'Account', exact: true })
+		).toHaveAttribute('aria-current', 'true');
+		// …and it's the only tab button carrying aria-current.
+		await expect(activeTab(page).locator('button[aria-current]')).toHaveCount(1);
 		// The Account panel's supporter-key field is actually visible, not just marked.
 		await expect(page.locator('input[name="supporterKey"]')).toBeVisible();
 	});

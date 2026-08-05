@@ -28,11 +28,8 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 		// the authenticated session: this load also runs for the auth-exempt
 		// routes (/admin/login etc., see hooks.server.ts), which must not spend a
 		// D1 read + Ed25519 verify per anonymous hit nor leak key metadata.
-		// The key read is guarded on its own (before joining Promise.all, so its
-		// rejection can never reject the combined await): unlike getSettings, which
-		// self-catches, getRawSetting propagates D1 errors — and a transient failure
-		// on this one nice-to-have row must degrade only the notice to null, not
-		// drop every admin page's chrome to EMPTY via the outer catch.
+		// getRawSetting propagates D1 errors (getSettings self-catches); a failed
+		// read must degrade only the notice, not drop the chrome to EMPTY.
 		const [renv, supporterToken] = await Promise.all([
 			resolveRegistryEnv(db, platform.env),
 			locals.admin ? getRawSetting(db, 'supporterKey').catch(() => null) : null
@@ -50,8 +47,7 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 		// request lands a phase earlier), while an early dismissal never covers
 		// the final phase.
 		const cookie = cookies.get('supporterNoticeDismissed');
-		const dismissed =
-			!!supporterKey && (cookie === dismissValue || cookie === `${supporterKey.validUntil}:final`);
+		const dismissed = cookie === dismissValue || cookie === `${supporterKey?.validUntil}:final`;
 		return {
 			adminAvatarUrl: settings.adminAvatarUrl || null,
 			siteName: settings.siteName,

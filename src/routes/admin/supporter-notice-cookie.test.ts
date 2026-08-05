@@ -30,6 +30,7 @@ describe('supporter-notice dismissal cookie — client/server contract', () => {
 	});
 
 	it('the cookie is scoped to the admin area', () => {
-		expect(layoutSvelte).toContain('path=/admin');
+		// Boundary-safe: narrowing the path to e.g. /admin/settings must fail this.
+		expect(layoutSvelte).toMatch(/path=\/admin(?![\w/])/);
 	});
 });
