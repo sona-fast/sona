@@ -92,3 +92,19 @@ test.describe('admin settings UploadThing file-count stat', () => {
 		await expect(page.getByText(/UploadThing still holds/)).toBeVisible();
 	});
 });
+
+// This server is the only e2e env WITHOUT OBSERVABILITY_ENABLED (see
+// wrangler.e2e-uploadthing.toml), so the gate-off half of the ?tab= deep-link
+// fallback (SONA-114) is asserted here; the gate-on cases live in
+// settings-tabs.spec.ts. Read-only, so serial mode just appends it after the
+// provider tests.
+test.describe('admin settings ?tab=observability with the gate off', () => {
+	test('falls back to the Site tab', async ({ page }) => {
+		await login(page);
+		await page.goto('/admin/settings?tab=observability');
+
+		await expect(page.locator('.settings-tabs')).toHaveAttribute('data-active-tab', 'site');
+		// The gated tab button isn't offered either.
+		await expect(page.getByRole('button', { name: 'Observability' })).toHaveCount(0);
+	});
+});

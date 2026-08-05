@@ -141,9 +141,11 @@ export function supporterKeyDaysRemaining(expiresAt: Date, now: Date): number {
 }
 
 /** Client-facing supporter-key status shared by the settings page and the
- * admin layout. Never contains the decoded payload beyond what the UI shows. */
+ * admin layout. Never contains the decoded payload beyond what the UI shows,
+ * and never the token itself — the settings load (which alone needs it for the
+ * truncated key record) attaches it separately, so a spread of this status in
+ * the layout payload structurally cannot leak the key. */
 export interface SupporterKeyStatus {
-	token: string;
 	state: 'valid' | 'expired';
 	validUntil: string;
 	/** Days until expiry (1 = expires today); 0 for the expired state. */
@@ -158,14 +160,12 @@ export interface SupporterKeyStatus {
  * their empty state. Pure, so tests can drive it with a synthetic result.
  */
 export function supporterKeyStatusFromResult(
-	token: string,
 	res: SupporterKeyResult,
 	now: Date
 ): SupporterKeyStatus | null {
 	if (res.valid) {
 		const daysRemaining = supporterKeyDaysRemaining(res.expiresAt, now);
 		return {
-			token,
 			state: 'valid',
 			validUntil: supporterKeyDisplayDate(res.expiresAt),
 			daysRemaining,
@@ -174,7 +174,6 @@ export function supporterKeyStatusFromResult(
 	}
 	if (res.reason === 'expired') {
 		return {
-			token,
 			state: 'expired',
 			validUntil: supporterKeyDisplayDate(res.expiresAt),
 			daysRemaining: 0,
@@ -187,5 +186,5 @@ export function supporterKeyStatusFromResult(
 /** Verify a stored token and shape the result for display (empty token → null). */
 export async function resolveSupporterKeyStatus(token: string, now: Date): Promise<SupporterKeyStatus | null> {
 	if (!token) return null;
-	return supporterKeyStatusFromResult(token, await verifySupporterKey(token, now), now);
+	return supporterKeyStatusFromResult(await verifySupporterKey(token, now), now);
 }

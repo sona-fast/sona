@@ -13,20 +13,21 @@
 	const theme = getTheme();
 
 	// Supporter-key expiry notice (SONA-114): shown on every admin page while
-	// the key is inside its warning window. Dismissal is per key — keyed on the
-	// key's validUntil in localStorage, so a re-minted key gets its own
-	// final-week warning. Starts hidden (SSR has no localStorage); the $effect
-	// reveals it client-side, which also keeps hydration consistent.
-	const NOTICE_DISMISS_KEY = 'supporterNoticeDismissed';
-	let noticeDismissed = $state(true);
-	$effect(() => {
-		noticeDismissed = data.supporterKeyNotice
-			? localStorage.getItem(NOTICE_DISMISS_KEY) === data.supporterKeyNotice.validUntil
-			: true;
-	});
+	// the key is inside its warning window. Dismissal is a cookie keyed on the
+	// key's validUntil + warning phase (built server-side as dismissValue, see
+	// +layout.server.ts) so the server load renders the final state on SSR — no
+	// post-hydration layout shift — and an early-phase dismissal re-warns in the
+	// final days. dismissedValue only bridges until the next server load.
+	let dismissedValue = $state<string | null>(null);
+	let mainEl: HTMLElement | undefined = $state();
 	function dismissNotice() {
-		if (data.supporterKeyNotice) localStorage.setItem(NOTICE_DISMISS_KEY, data.supporterKeyNotice.validUntil);
-		noticeDismissed = true;
+		if (!data.supporterKeyNotice) return;
+		// 60 days comfortably outlives any warning window; scoped to the admin area.
+		document.cookie = `supporterNoticeDismissed=${data.supporterKeyNotice.dismissValue}; path=/admin; SameSite=Lax; max-age=5184000`;
+		dismissedValue = data.supporterKeyNotice.dismissValue;
+		// The dismiss button disappears with the banner — anchor keyboard/SR focus
+		// on the page content instead of dropping it to <body>.
+		mainEl?.focus();
 	}
 
 	// Opt-in gate (issue #6): the Observability item only appears when the feature
@@ -97,10 +98,10 @@
 				</div>
 			</header>
 
-			<main class="admin-content">
-				{#if data.supporterKeyNotice && !noticeDismissed}
-					<div class="supporter-notice" role="status">
-						<span class="notice-eyebrow">{m.admin_settings_supporter_early_eyebrow()}</span>
+			<main class="admin-content" tabindex="-1" bind:this={mainEl}>
+				{#if data.supporterKeyNotice && data.supporterKeyNotice.dismissValue !== dismissedValue}
+					<div class="supporter-notice">
+						<span class="notice-eyebrow">{m.admin_notice_supporter_eyebrow()}</span>
 						<p>
 							{data.supporterKeyNotice.daysRemaining <= 1
 								? m.admin_notice_supporter_today_pre()
@@ -108,7 +109,7 @@
 								class="notice-link"
 								href="https://sona.fast/supporter-key"
 								target="_blank"
-								rel="noopener">sona.fast/supporter-key</a
+								rel="noopener noreferrer">sona.fast/supporter-key<span class="sr-only"> {m.link_opens_new_tab()}</span></a
 							>{m.admin_notice_supporter_mid()}<a class="notice-link" href="/admin/settings?tab=account"
 								>{m.admin_notice_supporter_settings_link()}</a
 							>{m.admin_notice_supporter_post()}
@@ -261,11 +262,16 @@
 		padding: 32px;
 	}
 
+	/* Programmatic focus target after dismissing the notice — no visible ring. */
+	.admin-content:focus {
+		outline: none;
+	}
+
 	/* Supporter-key expiry notice (SONA-114) — slim card above page content.
 	   The uppercase eyebrow carries state, matching the settings card. */
 	.supporter-notice {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 12px;
 		background: var(--card);
 		border: 1px solid var(--border);
@@ -291,6 +297,23 @@
 		line-height: 1.55;
 		flex: 1;
 		margin: 0;
+		/* WCAG reflow at 320px: let the flex item shrink and the unbroken
+		   sona.fast/supporter-key URL wrap instead of forcing horizontal scroll. */
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+
+	/* Screen-reader-only "(opens in a new tab)" on the external link. */
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	.notice-link {
@@ -343,6 +366,30 @@
 			flex-direction: column;
 			padding: 16px;
 			padding-bottom: 88px;
+		}
+
+		/* Narrow screens: stack the eyebrow above the body so neither cramps the
+		   other; the dismiss control keeps its top-right slot. */
+		.supporter-notice {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-areas:
+				'eyebrow dismiss'
+				'body body';
+			row-gap: 4px;
+		}
+
+		.notice-eyebrow {
+			grid-area: eyebrow;
+			align-self: center;
+		}
+
+		.supporter-notice p {
+			grid-area: body;
+		}
+
+		.notice-dismiss {
+			grid-area: dismiss;
 		}
 
 		.mobile-only {

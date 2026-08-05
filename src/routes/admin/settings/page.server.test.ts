@@ -31,19 +31,11 @@ vi.mock('$lib/server/avatar', async (importActual) => ({
 // branches by its result. The signature crypto itself is covered in
 // supporter-key.test.ts with a real in-test keypair. supporterKeyDisplayDate
 // stays real so the formatted dates are exercised.
-vi.mock('$lib/server/supporter-key', async (importActual) => {
-	const actual = await importActual<typeof import('$lib/server/supporter-key')>();
-	const verifySupporterKey = vi.fn();
-	return {
-		...actual,
-		verifySupporterKey,
-		// Loads resolve the stored key through the resolver; route its verify
-		// through the same mock (real shaping stays exercised) so a single
-		// mockResolvedValueOnce drives both the actions and the load.
-		resolveSupporterKeyStatus: async (token: string, now: Date) =>
-			token ? actual.supporterKeyStatusFromResult(token, await verifySupporterKey(token, now), now) : null
-	};
-});
+vi.mock('$lib/server/supporter-key', async (importActual) =>
+	(await import('$lib/server/test/supporter-key-mock')).supporterKeyMockModule(
+		importActual as () => Promise<typeof import('$lib/server/supporter-key')>
+	)
+);
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -887,7 +879,15 @@ describe('settings load — supporter key is raw + verified, never in public set
 			settings: Record<string, unknown>;
 		};
 
-		expect(result.supporterKey).toMatchObject({ token: 'head.tail', state: 'valid', validUntil: '2026.08.31' });
+		// Exact shape on purpose: any NEW field added to the payload must be
+		// re-reviewed here before it rides to the client alongside the token.
+		expect(result.supporterKey).toEqual({
+			token: 'head.tail',
+			state: 'valid',
+			validUntil: '2026.08.31',
+			daysRemaining: expect.any(Number),
+			expiringSoon: expect.any(Boolean)
+		});
 		// The registry ships empty, so nothing is in an early-access window.
 		expect(result.earlyAccess).toEqual([]);
 		// The token must never leak into the client-exposed SiteSettings.

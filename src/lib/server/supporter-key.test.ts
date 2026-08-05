@@ -4,6 +4,7 @@ import {
 	supporterKeyDisplayDate,
 	supporterKeyDaysRemaining,
 	supporterKeyStatusFromResult,
+	resolveSupporterKeyStatus,
 	EXPIRY_WARN_DAYS
 } from './supporter-key';
 
@@ -184,10 +185,9 @@ describe('supporterKeyStatusFromResult', () => {
 	const exp = new Date('2026-09-01T00:00:00Z');
 	const base = { login: 'sparky', tier: 2, expiresAt: exp };
 
-	it('marks a valid key inside the warning window as expiringSoon', () => {
-		const status = supporterKeyStatusFromResult('t', { valid: true, ...base }, new Date('2026-08-25T00:00:00Z'));
+	it('marks a valid key inside the warning window as expiringSoon (and never carries the token)', () => {
+		const status = supporterKeyStatusFromResult({ valid: true, ...base }, new Date('2026-08-25T00:00:00Z'));
 		expect(status).toEqual({
-			token: 't',
 			state: 'valid',
 			validUntil: '2026.08.31',
 			daysRemaining: 7,
@@ -196,13 +196,12 @@ describe('supporterKeyStatusFromResult', () => {
 	});
 
 	it('leaves a valid key outside the window unflagged', () => {
-		const status = supporterKeyStatusFromResult('t', { valid: true, ...base }, new Date('2026-08-15T12:00:00Z'));
+		const status = supporterKeyStatusFromResult({ valid: true, ...base }, new Date('2026-08-15T12:00:00Z'));
 		expect(status).toMatchObject({ state: 'valid', daysRemaining: 17, expiringSoon: false });
 	});
 
 	it('maps expired to daysRemaining 0 and never expiringSoon', () => {
 		const status = supporterKeyStatusFromResult(
-			't',
 			{ valid: false, reason: 'expired', ...base },
 			new Date('2026-09-02T00:00:00Z')
 		);
@@ -210,7 +209,20 @@ describe('supporterKeyStatusFromResult', () => {
 	});
 
 	it('returns null for results with no trustworthy payload', () => {
-		expect(supporterKeyStatusFromResult('t', { valid: false, reason: 'malformed' }, exp)).toBeNull();
-		expect(supporterKeyStatusFromResult('t', { valid: false, reason: 'bad-signature' }, exp)).toBeNull();
+		expect(supporterKeyStatusFromResult({ valid: false, reason: 'malformed' }, exp)).toBeNull();
+		expect(supporterKeyStatusFromResult({ valid: false, reason: 'bad-signature' }, exp)).toBeNull();
+	});
+});
+
+// The REAL resolver end to end (no mocks) — the loads' entry point. A passing
+// token would need the sona.fast private key, so only the null paths are
+// reachable here; the shaping of passing results is covered above.
+describe('resolveSupporterKeyStatus (real, unmocked)', () => {
+	it('resolves an empty token to null without touching crypto', async () => {
+		expect(await resolveSupporterKeyStatus('', new Date())).toBeNull();
+	});
+
+	it('resolves a garbage token to null (malformed falls through)', async () => {
+		expect(await resolveSupporterKeyStatus('not-a-real-key', new Date())).toBeNull();
 	});
 });

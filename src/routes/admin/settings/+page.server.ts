@@ -134,7 +134,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// and falls through to the empty state.
 	const now = new Date();
 	const supporterToken = (await getRawSetting(db, 'supporterKey')) ?? '';
-	const supporterKey = await resolveSupporterKeyStatus(supporterToken, now);
+	const status = await resolveSupporterKeyStatus(supporterToken, now);
+	// The token rides only on THIS page's payload (for the truncated key record);
+	// the shared SupporterKeyStatus deliberately never carries it.
+	const supporterKey = status ? { ...status, token: supporterToken } : null;
 	// Features still inside their early-access window, with GA dates pre-formatted
 	// for display. Empty until the first pilot feature is registered.
 	const earlyAccess = earlyAccessActive(now).map((e) => ({ flag: e.flag, gaDate: formatDate(e.gaDate) }));

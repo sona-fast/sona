@@ -1151,10 +1151,12 @@
 	"admin_settings_supporter_expiring_pre": "This key expires in {days} days. Re-mint it at ",
 	"admin_settings_supporter_expiring_today_pre": "This key expires today. Re-mint it at ",
 	"admin_settings_supporter_expiring_post": " while your sponsorship is active, then paste the new key here.",
+	"admin_notice_supporter_eyebrow": "expiring soon",
 	"admin_notice_supporter_expiring_pre": "Your supporter key expires in {days} days. Re-mint it at ",
 	"admin_notice_supporter_today_pre": "Your supporter key expires today. Re-mint it at ",
 	"admin_notice_supporter_mid": ", then paste the new key in ",
 	"admin_notice_supporter_settings_link": "Settings → Account",
 	"admin_notice_supporter_post": ".",
-	"admin_notice_supporter_dismiss": "Dismiss this notice"
+	"admin_notice_supporter_dismiss": "Dismiss this notice",
+	"link_opens_new_tab": "(opens in a new tab)"
 }
