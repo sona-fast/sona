@@ -1,51 +1,39 @@
-import { test, expect, type Page } from '@playwright/test';
-import { adminLogin } from './admin-login';
+import { test, expect } from '@playwright/test';
 
-// Instagram site-social flow (SONA-117): a bare handle typed into the admin
-// settings Instagram field is normalized server-side to the canonical
-// https://www.instagram.com/<handle> URL and shows up as a /connect link row.
-// Mutates the shared DB's instagramUrl (unset in the seed) — no other spec
-// asserts on the social links, so this doesn't race them.
-
-// Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
-const PASSWORD = 'e2e-admin-password';
-
-async function login(page: Page) {
-	await adminLogin(page, PASSWORD);
-}
+// Instagram site-social rendering (SONA-117): the seed fixture sets
+// instagramUrl (https://www.instagram.com/taro), and these read-only assertions
+// verify it surfaces on the public pages — the /connect link row, the /about
+// social chip, and the footer icon. The admin save path (input name → action
+// FormData key → normalization) is unit-covered by
+// src/routes/admin/settings/page.server.test.ts, so this spec never submits
+// ?/saveSite — which would race legal.spec.ts, since saveSite treats a
+// present-but-blank field as a clear and each save would wipe the other
+// spec's setting under fullyParallel.
 
 test.describe('instagram site social', () => {
-	test.beforeEach(async ({ page }) => {
-		await login(page);
-		await page.goto('/admin/settings'); // opens on the "site" tab
-	});
-
-	test('a bare handle saved in settings renders an Instagram row on /connect', async ({ page }) => {
-		// Submit only once the page has hydrated: before hydration the form is a
-		// plain POST and the browser navigates away. The tab switch is a client
-		// handler, so it only works once hydrated — retry it as the hydration gate
-		// (same idiom as palette-settings.spec.ts / legal.spec.ts).
-		await expect(async () => {
-			await page.getByRole('button', { name: 'Storage', exact: true }).click();
-			await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
-		}).toPass();
-		await page.getByRole('button', { name: 'Site', exact: true }).click();
-
-		await page.fill('input[name="instagram"]', 'taro');
-		// The action normalizes and writes the setting server-side before
-		// returning, so once the POST resolves the URL is persisted.
-		const [resp] = await Promise.all([
-			page.waitForResponse(
-				(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
-			),
-			page.getByRole('button', { name: 'Save site settings' }).click()
-		]);
-		expect(resp.ok()).toBeTruthy();
-
+	test('the seeded Instagram URL renders a /connect link row', async ({ page }) => {
 		await page.goto('/connect');
 		const row = page.locator('a.link-row[href="https://www.instagram.com/taro"]');
 		await expect(row).toBeVisible();
 		await expect(row).toContainText('Instagram');
 		await expect(row).toContainText('@taro');
+	});
+
+	test('the seeded Instagram URL renders an /about social chip', async ({ page }) => {
+		await page.goto('/about');
+		const chip = page.locator('a.social-item[href="https://www.instagram.com/taro"]');
+		await expect(chip).toBeVisible();
+		await expect(chip).toContainText('@taro');
+		await expect(chip).toHaveAttribute('rel', 'noopener noreferrer');
+	});
+
+	test('the public footer renders an Instagram icon link', async ({ page }) => {
+		// The footer lives in the (public) layout and is hidden below 768px; the
+		// project's default Desktop Chrome viewport (1280x720) keeps it visible.
+		// /about's social chip carries no aria-label, so this selector is unique.
+		await page.goto('/about');
+		const icon = page.locator('a[aria-label="Instagram"]');
+		await expect(icon).toBeVisible();
+		await expect(icon).toHaveAttribute('href', 'https://www.instagram.com/taro');
 	});
 });

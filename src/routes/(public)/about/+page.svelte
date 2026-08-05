@@ -8,28 +8,11 @@
 	import FurTrackIcon from '$lib/components/icons/FurTrackIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
+	import { atHandleFromUrl, handleFromUrl } from '$lib/social-label';
 
 	let { data } = $props();
 	let settings = $derived(data.settings);
 	let stats = $derived(data.stats);
-
-	// FurTrack and FurAffinity profile URLs are .../user/<handle> — show the handle
-	// like the other socials do, rather than the platform name.
-	function handleFromUrl(url: string | undefined, fallback: string): string {
-		if (!url) return fallback;
-		try {
-			return new URL(url).pathname.split('/').filter(Boolean).pop() ?? fallback;
-		} catch {
-			return fallback;
-		}
-	}
-
-	// Only prefix @ when a real handle was derived — a pathless URL falls back to
-	// the platform name, which shouldn't render as "@Twitter".
-	function atHandleFromUrl(url: string | undefined, fallback: string): string {
-		const handle = handleFromUrl(url, fallback);
-		return handle === fallback ? fallback : `@${handle}`;
-	}
 
 	const ownerName = $derived(settings.ownerName || settings.siteName);
 

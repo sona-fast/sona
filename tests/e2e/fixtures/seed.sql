@@ -12,7 +12,10 @@ INSERT OR REPLACE INTO site_settings (key, value) VALUES
   -- Recovery address for the forgot-reset spec. Inert for the other specs
   -- (nothing reads it); no adminPasswordHash is seeded, so the legacy
   -- ADMIN_PASSWORD login path other specs rely on stays authoritative.
-  ('adminEmail',    'admin@e2e.test');
+  ('adminEmail',    'admin@e2e.test'),
+  -- Seeded Instagram URL for the read-only instagram-social spec; no spec
+  -- asserts on a blank social state, so this is inert for the others.
+  ('instagramUrl',  'https://www.instagram.com/taro');
 
 -- One artist for the images to credit.
 INSERT OR REPLACE INTO artists (id, name, created_at)
