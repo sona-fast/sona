@@ -41,4 +41,47 @@ test.describe('admin settings ?tab= deep links', () => {
 
 		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'observability');
 	});
+
+	test('clicking a tab overrides ?tab=, drops it from the URL, and the pick holds', async ({ page }) => {
+		await page.goto('/admin/settings?tab=account');
+		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'account');
+
+		// The tab buttons are client JS, so the click only "takes" once hydrated —
+		// retry click-until-active like supporter-key.spec.ts's openAccountTab.
+		await expect(async () => {
+			await page.getByRole('button', { name: 'Site', exact: true }).click();
+			await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'site', { timeout: 1500 });
+		}).toPass();
+		// The manual pick shallow-drops the now-stale param (replaceState).
+		await expect(page).not.toHaveURL(/[?&]tab=/);
+
+		// A second click: manual control persists, still no ?tab= in the URL.
+		await page.getByRole('button', { name: 'Storage', exact: true }).click();
+		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'storage');
+		await expect(page).not.toHaveURL(/[?&]tab=/);
+	});
+
+	test('a same-route client-side navigation to ?tab=account switches tabs', async ({ page }) => {
+		await page.goto('/admin/settings');
+		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'site');
+
+		// The admin-wide expiry notice links to ?tab=account from anywhere in the
+		// admin area — including from /admin/settings itself, where SvelteKit
+		// intercepts the anchor as a same-route client-side navigation. activeTab
+		// derives reactively from the URL, so the tab must switch without a reload.
+		// (The retry covers hydration: before it, the anchor is a full navigation,
+		// which this test would also pass — the toPass loop settles on the
+		// hydrated case.)
+		await expect(async () => {
+			await page.evaluate(() => {
+				const a = document.createElement('a');
+				a.href = '/admin/settings?tab=account';
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+			});
+			await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'account', { timeout: 1500 });
+		}).toPass();
+		await expect(page.locator('input[name="supporterKey"]')).toBeVisible();
+	});
 });

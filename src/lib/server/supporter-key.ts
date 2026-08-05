@@ -129,6 +129,11 @@ export function supporterKeyDisplayDate(expiresAt: Date): string {
  * 7 days is a comfortable re-mint margin. */
 export const EXPIRY_WARN_DAYS = 7;
 
+/** Within this many days of expiry the warning enters its 'final' phase: an
+ * early-phase dismissal stops matching and the admin-wide notice re-shows for
+ * a last-chance warning (see the admin layout load's dismissal cookie). */
+export const EXPIRY_FINAL_DAYS = 3;
+
 const DAY_MS = 86_400_000;
 
 /**

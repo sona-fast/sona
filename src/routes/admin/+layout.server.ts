@@ -2,7 +2,7 @@ import { getDb } from '$lib/server/db';
 import { getSettings, getRawSetting } from '$lib/server/settings';
 import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
 import { isObservabilityEnabled } from '$lib/server/metrics';
-import { resolveSupporterKeyStatus } from '$lib/server/supporter-key';
+import { resolveSupporterKeyStatus, EXPIRY_FINAL_DAYS } from '$lib/server/supporter-key';
 import { APP_NAME } from '$lib/config';
 import type { LayoutServerLoad } from './$types';
 
@@ -28,9 +28,14 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 		// the authenticated session: this load also runs for the auth-exempt
 		// routes (/admin/login etc., see hooks.server.ts), which must not spend a
 		// D1 read + Ed25519 verify per anonymous hit nor leak key metadata.
+		// The key read is guarded on its own (before joining Promise.all, so its
+		// rejection can never reject the combined await): unlike getSettings, which
+		// self-catches, getRawSetting propagates D1 errors — and a transient failure
+		// on this one nice-to-have row must degrade only the notice to null, not
+		// drop every admin page's chrome to EMPTY via the outer catch.
 		const [renv, supporterToken] = await Promise.all([
 			resolveRegistryEnv(db, platform.env),
-			locals.admin ? getRawSetting(db, 'supporterKey') : null
+			locals.admin ? getRawSetting(db, 'supporterKey').catch(() => null) : null
 		]);
 		const supporterKey = await resolveSupporterKeyStatus(supporterToken ?? '', new Date());
 		// Dismissal is a cookie keyed on validUntil PLUS a phase ('early' = days
@@ -38,9 +43,15 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 		// the notice once the final days start, and a re-minted key (new
 		// validUntil) always warns afresh. SSR reads the cookie so the banner
 		// renders in its final state — no post-hydration layout shift.
-		const phase = supporterKey && supporterKey.daysRemaining <= 3 ? 'final' : 'early';
+		const phase = supporterKey && supporterKey.daysRemaining <= EXPIRY_FINAL_DAYS ? 'final' : 'early';
 		const dismissValue = supporterKey ? `${supporterKey.validUntil}:${phase}` : '';
-		const dismissed = cookies.get('supporterNoticeDismissed') === dismissValue;
+		// Phases are ordered: a 'final' dismissal for the same validUntil also
+		// suppresses the early phase (a stale final cookie must not re-warn if a
+		// request lands a phase earlier), while an early dismissal never covers
+		// the final phase.
+		const cookie = cookies.get('supporterNoticeDismissed');
+		const dismissed =
+			!!supporterKey && (cookie === dismissValue || cookie === `${supporterKey.validUntil}:final`);
 		return {
 			adminAvatarUrl: settings.adminAvatarUrl || null,
 			siteName: settings.siteName,

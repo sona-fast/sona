@@ -23,7 +23,10 @@
 	function dismissNotice() {
 		if (!data.supporterKeyNotice) return;
 		// 60 days comfortably outlives any warning window; scoped to the admin area.
-		document.cookie = `supporterNoticeDismissed=${data.supporterKeyNotice.dismissValue}; path=/admin; SameSite=Lax; max-age=5184000`;
+		// The value is URI-encoded (SvelteKit's cookies.get decodes, so it
+		// round-trips); Secure only over https so local HTTP dev keeps working.
+		const secure = location.protocol === 'https:' ? '; Secure' : '';
+		document.cookie = `supporterNoticeDismissed=${encodeURIComponent(data.supporterKeyNotice.dismissValue)}; path=/admin; SameSite=Lax; max-age=5184000${secure}`;
 		dismissedValue = data.supporterKeyNotice.dismissValue;
 		// The dismiss button disappears with the banner — anchor keyboard/SR focus
 		// on the page content instead of dropping it to <body>.
@@ -114,7 +117,7 @@
 								>{m.admin_notice_supporter_settings_link()}</a
 							>{m.admin_notice_supporter_post()}
 						</p>
-						<button class="notice-dismiss" onclick={dismissNotice} aria-label={m.admin_notice_supporter_dismiss()}>
+						<button type="button" class="notice-dismiss" onclick={dismissNotice} aria-label={m.admin_notice_supporter_dismiss()}>
 							<X size={14} />
 						</button>
 					</div>
@@ -297,6 +300,8 @@
 		line-height: 1.55;
 		flex: 1;
 		margin: 0;
+		/* Same measure cap as the settings card's nudge/lapsed lines. */
+		max-width: 62ch;
 		/* WCAG reflow at 320px: let the flex item shrink and the unbroken
 		   sona.fast/supporter-key URL wrap instead of forcing horizontal scroll. */
 		min-width: 0;
@@ -329,6 +334,8 @@
 		width: 32px;
 		height: 32px;
 		flex: none;
+		/* Optically center the icon against the first text line. */
+		margin-block-start: -2px;
 		background: none;
 		border: none;
 		border-radius: var(--radius-pill);

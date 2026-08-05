@@ -4,8 +4,9 @@ import { describe, it, expect, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
-import { setRawSetting } from '$lib/server/settings';
+import { setRawSetting, getRawSetting, clearSettingsCache } from '$lib/server/settings';
 import { verifySupporterKey } from '$lib/server/supporter-key';
+import { APP_NAME } from '$lib/config';
 import { load } from './+layout.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -19,6 +20,14 @@ vi.mock('$lib/server/supporter-key', async (importActual) =>
 		importActual as () => Promise<typeof import('$lib/server/supporter-key')>
 	)
 );
+
+// getRawSetting is wrapped (default impl = the real one, so every other test is
+// unaffected) so the D1-failure test below can make JUST the supporter-key read
+// reject. mockReset() restores the wrapped original.
+vi.mock('$lib/server/settings', async (importActual) => {
+	const actual = await (importActual as () => Promise<typeof import('$lib/server/settings')>)();
+	return { ...actual, getRawSetting: vi.fn(actual.getRawSetting) };
+});
 
 const DAY_MS = 86_400_000;
 
@@ -72,6 +81,8 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 
 	it('surfaces days remaining inside the window and keeps the token out of the payload', async () => {
 		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'siteName', 'Sparky Site');
+		clearSettingsCache();
 		await setRawSetting(db, 'supporterKey', 'head.tail');
 		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
 			valid: true,
@@ -80,9 +91,15 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 			expiresAt: new Date(Date.now() + 6.5 * DAY_MS)
 		});
 
-		const result = (await load(loadEvent(platform))) as NoticeResult;
+		const result = (await load(loadEvent(platform))) as NoticeResult & Record<string, unknown>;
 
 		expect(result.supporterKeyNotice).toMatchObject({ daysRemaining: 7 });
+		// The successful load carries the real chrome fields, not EMPTY fallbacks.
+		expect(result).toMatchObject({
+			siteName: 'Sparky Site',
+			registryEnabled: false,
+			observabilityEnabled: false
+		});
 		// 7 days out is the early phase (final = last 3 days).
 		expect(result.supporterKeyNotice?.dismissValue).toMatch(/^\d{4}\.\d{2}\.\d{2}:early$/);
 		// The layout payload rides along on every admin page — the token must not.
@@ -116,6 +133,33 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 
 		expect(result.supporterKeyNotice).toBeNull();
 		expect(verifySupporterKey).not.toHaveBeenCalled();
+	});
+
+	it('degrades only the notice when the supporter-key read itself fails', async () => {
+		// getRawSetting propagates D1 errors (getSettings self-catches) — a transient
+		// failure on that one row must yield a null notice, never reject the shared
+		// Promise.all and drop the whole layout to EMPTY (siteName, flags intact).
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'siteName', 'Sparky Site');
+		clearSettingsCache();
+		const real = vi.mocked(getRawSetting).getMockImplementation()!;
+		vi.mocked(getRawSetting).mockImplementation(async (dbArg, key) => {
+			if (key === 'supporterKey') throw new Error('D1 unavailable');
+			return real(dbArg, key);
+		});
+		try {
+			const result = (await load(loadEvent(platform))) as NoticeResult & Record<string, unknown>;
+
+			expect(result.supporterKeyNotice).toBeNull();
+			expect(result).toMatchObject({
+				siteName: 'Sparky Site',
+				registryEnabled: false,
+				observabilityEnabled: false
+			});
+		} finally {
+			// Restores the wrapped original implementation for the other tests.
+			vi.mocked(getRawSetting).mockReset();
+		}
 	});
 });
 
@@ -158,23 +202,51 @@ describe('admin layout load — cookie dismissal with phase re-warn (SONA-114)',
 
 		expect(result.supporterKeyNotice).not.toBeNull();
 	});
-});
 
-describe('admin layout load — fallback to EMPTY', () => {
-	it('returns a null notice when the platform has no DB binding', async () => {
-		const result = (await load(loadEvent(undefined))) as NoticeResult;
+	it("a 'final' dismissal also suppresses the early phase (phase order, not string equality)", async () => {
+		// Phases are ordered: a final-phase dismissal covers the whole warning
+		// window for that validUntil, so a request landing a phase earlier (clock
+		// skew, stale edge cache) must not resurrect an already-dismissed notice.
+		const expiresAt = new Date(Date.now() + 6.5 * DAY_MS);
+		const first = await loadWithNotice(expiresAt);
+		const earlyDismiss = first.supporterKeyNotice!.dismissValue;
+		expect(earlyDismiss).toMatch(/:early$/);
+		const finalCookie = earlyDismiss.replace(/:early$/, ':final');
+
+		const result = await loadWithNotice(expiresAt, finalCookie);
 
 		expect(result.supporterKeyNotice).toBeNull();
 	});
+});
 
-	it('returns a null notice when the settings reads throw (missing table)', async () => {
-		// No site_settings table at all: the raw supporter-key read throws and the
-		// load's catch falls back to EMPTY.
+describe('admin layout load — fallback to EMPTY', () => {
+	// Mirrors the load's EMPTY constant — the full shape, so a fallback can never
+	// silently drop or grow a field without this test noticing.
+	const EMPTY_SHAPE = {
+		adminAvatarUrl: null,
+		siteName: APP_NAME,
+		ownerName: '',
+		registryEnabled: false,
+		observabilityEnabled: false,
+		supporterKeyNotice: null
+	};
+
+	it('returns the full EMPTY shape when the platform has no DB binding', async () => {
+		const result = await load(loadEvent(undefined));
+
+		expect(result).toEqual(EMPTY_SHAPE);
+	});
+
+	it('returns the full EMPTY shape when the settings reads throw (missing table)', async () => {
+		// No site_settings table at all: the registry read throws and the load's
+		// catch falls back to EMPTY. (getSettings self-catches to defaults, and the
+		// guarded supporter-key read degrades to null on its own.)
 		const sqlite = new Database(':memory:');
 		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
+		clearSettingsCache();
 
-		const result = (await load(loadEvent(platform))) as NoticeResult;
+		const result = await load(loadEvent(platform));
 
-		expect(result.supporterKeyNotice).toBeNull();
+		expect(result).toEqual(EMPTY_SHAPE);
 	});
 });

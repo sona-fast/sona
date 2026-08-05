@@ -305,12 +305,12 @@
 			<h1>{m.admin_nav_settings()}</h1>
 		</div>
 		<nav class="settings-tabnav">
-			<button type="button" class:active={activeTab === 'site'} onclick={() => selectTab('site')}>{m.admin_settings_tab_site()}</button>
-			<button type="button" class:active={activeTab === 'connections'} onclick={() => selectTab('connections')}>{m.admin_settings_tab_connections()}</button>
-			<button type="button" class:active={activeTab === 'storage'} onclick={() => selectTab('storage')}>{m.admin_settings_tab_storage()}</button>
-			<button type="button" class:active={activeTab === 'account'} onclick={() => selectTab('account')}>{m.admin_settings_tab_account()}</button>
+			<button type="button" class:active={activeTab === 'site'} aria-current={activeTab === 'site' ? 'true' : undefined} onclick={() => selectTab('site')}>{m.admin_settings_tab_site()}</button>
+			<button type="button" class:active={activeTab === 'connections'} aria-current={activeTab === 'connections' ? 'true' : undefined} onclick={() => selectTab('connections')}>{m.admin_settings_tab_connections()}</button>
+			<button type="button" class:active={activeTab === 'storage'} aria-current={activeTab === 'storage' ? 'true' : undefined} onclick={() => selectTab('storage')}>{m.admin_settings_tab_storage()}</button>
+			<button type="button" class:active={activeTab === 'account'} aria-current={activeTab === 'account' ? 'true' : undefined} onclick={() => selectTab('account')}>{m.admin_settings_tab_account()}</button>
 			{#if data.observabilityEnabled}
-				<button type="button" class:active={activeTab === 'observability'} onclick={() => selectTab('observability')}>{m.admin_settings_tab_observability()}</button>
+				<button type="button" class:active={activeTab === 'observability'} aria-current={activeTab === 'observability' ? 'true' : undefined} onclick={() => selectTab('observability')}>{m.admin_settings_tab_observability()}</button>
 			{/if}
 		</nav>
 	</div>
