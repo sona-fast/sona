@@ -145,7 +145,8 @@ function makeDb(): Db {
 		CREATE TABLE stickers (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, pack_id INTEGER NOT NULL, artist_id INTEGER,
 			image_url TEXT NOT NULL, thumbnail_url TEXT, width INTEGER, height INTEGER,
-			format TEXT NOT NULL DEFAULT 'webp', position INTEGER NOT NULL DEFAULT 0,
+			format TEXT NOT NULL DEFAULT 'webp', is_animated INTEGER NOT NULL DEFAULT 0,
+			position INTEGER NOT NULL DEFAULT 0,
 			nsfw INTEGER NOT NULL DEFAULT 0, telegram_file_unique_id TEXT, created_at TEXT NOT NULL
 		);
 		CREATE TABLE sticker_emojis (sticker_id INTEGER NOT NULL, emoji TEXT NOT NULL);

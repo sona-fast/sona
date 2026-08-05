@@ -183,6 +183,13 @@
       "when": 1783907400473,
       "tag": "0025_add_avatar_resolved_at",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1785963245260,
+      "tag": "0026_add_sticker_is_animated",
+      "breakpoints": true
     }
   ]
 }

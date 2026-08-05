@@ -35,6 +35,9 @@ export interface StickerView {
 	width: number | null;
 	height: number | null;
 	format: 'png' | 'webp' | 'animated' | 'video';
+	/** True when the stored file animates (video/Lottie, or a sniffed animated
+	 * WebP/GIF stored as a "static" raster) — gates the PNG download option. */
+	isAnimated: boolean;
 	position: number;
 	nsfw: boolean;
 	emojis: string[];
@@ -346,6 +349,7 @@ async function loadStickerViews(db: Database, conditions: SQL[]): Promise<Sticke
 		width: r.width,
 		height: r.height,
 		format: r.format,
+		isAnimated: r.isAnimated,
 		position: r.position,
 		nsfw: r.nsfw,
 		emojis: emojisBySticker.get(r.id) ?? [],

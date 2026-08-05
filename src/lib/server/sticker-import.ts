@@ -19,6 +19,7 @@ import type { TelegramSticker } from '$lib/server/telegram';
 import { resolveStickerArtistIds, inferAppendedArtistId } from '$lib/server/stickers';
 import type { AvatarRehostContext } from '$lib/server/avatar';
 import { slugify } from '$lib/server/slugify';
+import { isAnimatedRaster, sniffAnimatedFromUrl } from '$lib/server/animated-raster';
 import { sanitizeUrl } from '$lib/server/validate';
 
 type Env = App.Platform['env'];
@@ -310,6 +311,7 @@ type StickerRowValues = {
 	width?: number | null;
 	height?: number | null;
 	format: 'png' | 'webp' | 'animated' | 'video';
+	isAnimated?: boolean;
 	nsfw: boolean;
 	telegramFileUniqueId?: string | null;
 };
@@ -459,7 +461,7 @@ async function downloadAndStoreSticker(opts: {
 	packSlug: string;
 	sticker: TelegramSticker;
 	absolutize: (url: string) => string;
-}): Promise<{ storedUrl: string; format: 'png' | 'webp' | 'animated' | 'video' }> {
+}): Promise<{ storedUrl: string; format: 'png' | 'webp' | 'animated' | 'video'; isAnimated: boolean }> {
 	const { env, storage, packSlug, sticker, absolutize } = opts;
 	const { bytes, filePath } = await downloadFile(env, sticker.fileId);
 	const uuid = crypto.randomUUID();
@@ -473,7 +475,7 @@ async function downloadAndStoreSticker(opts: {
 			contentType: 'application/json',
 			filename: `${uuid}.json`
 		});
-		return { storedUrl: absolutize(url), format: 'animated' };
+		return { storedUrl: absolutize(url), format: 'animated', isAnimated: true };
 	}
 
 	// Static raster or video. Telegram serves these as octet-stream, so derive the
@@ -487,7 +489,11 @@ async function downloadAndStoreSticker(opts: {
 		contentType: ct,
 		filename: `${uuid}.${ext}`
 	});
-	return { storedUrl: absolutize(url), format: formatFromContentType(ct, sticker.format) };
+	const format = formatFromContentType(ct, sticker.format);
+	// Videos always animate; "static" rasters are sniffed for animated WebP/GIF
+	// so the download endpoint never offers a flattening PNG conversion.
+	const isAnimated = format === 'video' || isAnimatedRaster(new Uint8Array(bytes));
+	return { storedUrl: absolutize(url), format, isAnimated };
 }
 
 export async function importTelegramPack(opts: {
@@ -575,7 +581,7 @@ export async function importTelegramPack(opts: {
 	for (const { sticker, index } of toImport) {
 		try {
 			const override = perSticker[index];
-			const { storedUrl, format } = await downloadAndStoreSticker({ env, storage, packSlug, sticker, absolutize });
+			const { storedUrl, format, isAnimated } = await downloadAndStoreSticker({ env, storage, packSlug, sticker, absolutize });
 
 			const didInsert = await insertStickerWithEmojis(
 				db,
@@ -586,6 +592,7 @@ export async function importTelegramPack(opts: {
 					width: sticker.width,
 					height: sticker.height,
 					format,
+					isAnimated,
 					position,
 					nsfw: override?.nsfw ?? false,
 					telegramFileUniqueId: sticker.fileUniqueId
@@ -764,7 +771,7 @@ export async function importStickerBatch(opts: {
 
 		// New sticker → download + store + insert.
 		try {
-			const { storedUrl, format } = await downloadAndStoreSticker({ env, storage, packSlug, sticker, absolutize });
+			const { storedUrl, format, isAnimated } = await downloadAndStoreSticker({ env, storage, packSlug, sticker, absolutize });
 			const didInsert = await insertStickerWithEmojis(
 				db,
 				{
@@ -774,6 +781,7 @@ export async function importStickerBatch(opts: {
 					width: sticker.width,
 					height: sticker.height,
 					format,
+					isAnimated,
 					position,
 					nsfw: item.nsfw,
 					telegramFileUniqueId: sticker.fileUniqueId
@@ -925,7 +933,7 @@ export async function resyncTelegramPacks(opts: {
 						break;
 					}
 					try {
-						const { storedUrl, format } = await downloadAndStoreSticker({ env, storage, packSlug: pack.slug, sticker, absolutize });
+						const { storedUrl, format, isAnimated } = await downloadAndStoreSticker({ env, storage, packSlug: pack.slug, sticker, absolutize });
 						const didInsert = await insertStickerWithEmojis(
 							db,
 							{
@@ -935,6 +943,7 @@ export async function resyncTelegramPacks(opts: {
 								width: sticker.width,
 								height: sticker.height,
 								format,
+								isAnimated,
 								position,
 								nsfw: false,
 								telegramFileUniqueId: sticker.fileUniqueId
@@ -1100,6 +1109,13 @@ export async function saveManualPack(opts: {
 	const packId = await nextPackId(db);
 	const startId = await nextStickerId(db);
 
+	// Best-effort animation sniff for the freshly uploaded rasters (see
+	// sniffAnimatedFromUrl); a failed fetch leaves false, which the backfill
+	// endpoint can correct later.
+	const sniffed = await Promise.all(
+		input.stickerInputs.map((s) => (s.format === 'png' || s.format === 'webp' ? sniffAnimatedFromUrl(s.imageUrl) : Promise.resolve(true)))
+	);
+
 	const rows = input.stickerInputs.map((s, i) => ({
 		packId,
 		artistId: resolvedArtistIds[i],
@@ -1107,6 +1123,7 @@ export async function saveManualPack(opts: {
 		width: s.width ?? null,
 		height: s.height ?? null,
 		format: s.format,
+		isAnimated: sniffed[i],
 		position: s.position,
 		nsfw: s.nsfw,
 		emojis: s.emojis
@@ -1158,6 +1175,7 @@ export async function updateManualPack(opts: {
 			imageUrl: stickers.imageUrl,
 			width: stickers.width,
 			height: stickers.height,
+			isAnimated: stickers.isAnimated,
 			telegramFileUniqueId: stickers.telegramFileUniqueId
 		})
 		.from(stickers)
@@ -1179,6 +1197,17 @@ export async function updateManualPack(opts: {
 
 	const resolvedArtistIds = resolveStickerArtistIds(input.managerArtistId, input.stickerInputs.map((s) => s.artistId));
 
+	// Animation flags: a row kept across the edit (same imageUrl) carries its prior
+	// flag; a NEW raster upload gets a best-effort sniff. Kept rows were already
+	// sniffed (or backfilled), so this only fetches the handful of new files.
+	const sniffed = await Promise.all(
+		input.stickerInputs.map((s) => {
+			if (preserved.has(s.imageUrl)) return Promise.resolve(false); // unused; prior wins below
+			if (s.format === 'png' || s.format === 'webp') return sniffAnimatedFromUrl(s.imageUrl);
+			return Promise.resolve(true);
+		})
+	);
+
 	const rows = input.stickerInputs.map((s, i) => {
 		const prior = preserved.get(s.imageUrl);
 		return {
@@ -1190,6 +1219,7 @@ export async function updateManualPack(opts: {
 			width: s.width ?? prior?.width ?? null,
 			height: s.height ?? prior?.height ?? null,
 			format: s.format,
+			isAnimated: prior?.isAnimated ?? sniffed[i],
 			position: s.position,
 			nsfw: s.nsfw,
 			telegramFileUniqueId: prior?.telegramFileUniqueId ?? null,

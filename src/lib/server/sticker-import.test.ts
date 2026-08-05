@@ -229,6 +229,7 @@ CREATE TABLE stickers (
 	width INTEGER,
 	height INTEGER,
 	format TEXT NOT NULL DEFAULT 'webp',
+	is_animated INTEGER NOT NULL DEFAULT 0,
 	position INTEGER NOT NULL DEFAULT 0,
 	nsfw INTEGER NOT NULL DEFAULT 0,
 	telegram_file_unique_id TEXT,

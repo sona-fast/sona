@@ -1,0 +1,1 @@
+ALTER TABLE `stickers` ADD `is_animated` integer DEFAULT false NOT NULL;

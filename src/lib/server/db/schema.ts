@@ -191,6 +191,12 @@ export const stickers = sqliteTable('stickers', {
 	width: integer('width'),
 	height: integer('height'),
 	format: text('format', { enum: ['png', 'webp', 'animated', 'video'] }).notNull().default('webp'),
+	// True when the stored file actually animates. Always true for 'animated'
+	// (Lottie) and 'video'; for static-raster rows it marks animated WebP/GIF
+	// (sniffed from the bytes at import — see isAnimatedRaster) so the download
+	// endpoint never offers a PNG conversion that would flatten the animation.
+	// Backfilled for pre-existing rows by POST /api/stickers/backfill-animated.
+	isAnimated: integer('is_animated', { mode: 'boolean' }).notNull().default(false),
 	position: integer('position').notNull().default(0),
 	nsfw: integer('nsfw', { mode: 'boolean' }).notNull().default(false),
 	telegramFileUniqueId: text('telegram_file_unique_id'),

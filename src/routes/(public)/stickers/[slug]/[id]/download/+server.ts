@@ -3,6 +3,7 @@ import { getReadDb } from '$lib/server/db';
 import { stickers, stickerPacks } from '$lib/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { RateLimiter } from '$lib/server/rate-limit';
+import { originalExt, stickerDownloadOptions } from '$lib/sticker-download';
 import type { RequestHandler } from './$types';
 
 // Throttle the unauthenticated download proxy (M10). Each GET makes the worker
@@ -24,24 +25,31 @@ const CONTENT_TYPES: Record<string, string> = {
 	webp: 'image/webp',
 	gif: 'image/gif',
 	jpg: 'image/jpeg',
-	jpeg: 'image/jpeg'
+	jpeg: 'image/jpeg',
+	webm: 'video/webm',
+	json: 'application/json'
 };
 
-// GET /stickers/[slug]/[id]/download
+// GET /stickers/[slug]/[id]/download[?format=png]
 // Streams a sticker's high-res file as a forced download (Content-Disposition).
 // A plain <a download> to the R2 custom domain wouldn't work (cross-origin downloads are
-// ignored by browsers), so we proxy same-origin. We always serve the ORIGINAL
-// stored bytes: routing static stickers through a Cloudflare Image transform to
-// PNG would flatten animated WebP/GIF down to a single frame. The original is
-// already high-res, so there's nothing to gain from the transform.
-export const GET: RequestHandler = async ({ params, platform, fetch, getClientAddress }) => {
+// ignored by browsers), so we proxy same-origin.
+//
+// Without ?format we serve the ORIGINAL stored bytes untouched, so animated
+// WebP/GIF keep their animation. With ?format=png — offered by the UI only for
+// static rasters that don't animate (see stickerDownloadOptions, the shared
+// source of truth this handler validates against) — we proxy through the zone's
+// Cloudflare image transform. When the transform can't run (dev server, a zone
+// without transforms enabled, off-zone storage 403s — see SONA-21) we fall back
+// to the original bytes under the original filename: correct bytes beat a 5xx.
+export const GET: RequestHandler = async ({ params, url, platform, fetch, getClientAddress }) => {
 	if (!downloadLimiter.check(getClientAddress(), Date.now())) {
 		error(429, 'Too many downloads, please slow down.');
 	}
 
 	const db = getReadDb(platform!.env.DB);
 	const row = await db
-		.select({ imageUrl: stickers.imageUrl, format: stickers.format })
+		.select({ imageUrl: stickers.imageUrl, format: stickers.format, isAnimated: stickers.isAnimated })
 		.from(stickers)
 		.innerJoin(stickerPacks, eq(stickers.packId, stickerPacks.id))
 		.where(
@@ -50,40 +58,42 @@ export const GET: RequestHandler = async ({ params, platform, fetch, getClientAd
 		.get();
 	if (!row) error(404, 'Sticker not found');
 
-	const fetchUrl = row.imageUrl;
-	let ext: string;
-	let contentType: string;
+	// Validate ?format against what this sticker can actually offer. The UI never
+	// generates an invalid link, so any mismatch is a hand-crafted URL → 400.
+	const requested = url.searchParams.get('format');
+	const option = requested
+		? stickerDownloadOptions(row).find((o) => o.kind === requested)
+		: { kind: 'original' as const, ext: originalExt(row) };
+	if (!option) error(400, 'This sticker cannot be converted to that format.');
 
-	if (row.format === 'video') {
-		ext = 'webm';
-		contentType = 'video/webm';
-	} else if (row.format === 'animated') {
-		ext = 'json';
-		contentType = 'application/json';
-	} else {
-		// Static raster (png/webp, possibly an animated WebP or a GIF). Serve the
-		// original file untouched so animation survives, picking the extension and
-		// Content-Type from the stored file rather than forcing PNG.
-		const path = (() => {
-			try {
-				return new URL(row.imageUrl).pathname;
-			} catch {
-				return row.imageUrl;
+	const originalName = `${params.slug}-${params.id}.${originalExt(row)}`;
+
+	if (option.kind === 'png') {
+		// Same-zone image transform; the source URL rides along as the transform
+		// path. Reject anything that didn't produce a PNG (an error page, an HTML
+		// challenge, a transform-disabled zone passing bytes through) and fall back.
+		const transformUrl = `${url.origin}/cdn-cgi/image/format=png/${row.imageUrl}`;
+		try {
+			const res = await fetch(transformUrl);
+			if (res.ok && res.body && res.headers.get('content-type')?.startsWith('image/png')) {
+				return fileResponse(res.body, `${params.slug}-${params.id}.png`, 'image/png');
 			}
-		})();
-		const match = path.toLowerCase().match(/\.([a-z0-9]+)$/);
-		ext = match?.[1] ?? (row.format === 'png' ? 'png' : 'webp');
-		contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+		} catch {
+			// fall through to the original
+		}
 	}
 
-	const res = await fetch(fetchUrl);
+	const res = await fetch(row.imageUrl);
 	if (!res.ok || !res.body) error(502, 'Could not fetch sticker file');
+	return fileResponse(res.body, originalName, CONTENT_TYPES[originalExt(row)] ?? 'application/octet-stream');
+};
 
-	return new Response(res.body, {
+function fileResponse(body: ReadableStream, filename: string, contentType: string): Response {
+	return new Response(body, {
 		headers: {
 			'Content-Type': contentType,
-			'Content-Disposition': `attachment; filename="${params.slug}-${params.id}.${ext}"`,
+			'Content-Disposition': `attachment; filename="${filename}"`,
 			'Cache-Control': 'public, max-age=3600'
 		}
 	});
-};
+}
