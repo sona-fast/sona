@@ -15,7 +15,9 @@ import type { RequestHandler } from './$types';
 // Cap sized to fit saving one full imported pack in a burst: Telegram packs run
 // up to ~120 stickers, each saved via its own per-sticker download link, so a
 // legit "save whole pack" (or a few users behind one NAT) stays under the cap
-// while a sustained flood is still bounded.
+// while a sustained flood is still bounded. Note the ?format=png path costs TWO
+// subrequests when the transform fails (transform attempt + original fallback);
+// the cap's headroom absorbs that without charging extra tokens.
 const downloadLimiter = new RateLimiter(200, 60_000); // 200 downloads / min / IP
 
 // Map a file extension to the Content-Type we serve it with. Anything unknown
@@ -29,6 +31,26 @@ const CONTENT_TYPES: Record<string, string> = {
 	webm: 'video/webm',
 	json: 'application/json'
 };
+
+/**
+ * The source segment for the zone image transform, or null when row.imageUrl is
+ * not transformable. Root-relative stored URLs (/img/<key>) and same-origin
+ * absolutes become a bare path segment (no leading slash — naive string concat
+ * doubled it and leaked query strings into the transform path); off-origin
+ * absolutes ride along whole, query included. Anything unparseable, non-http(s),
+ * or path-traversing ('..') is refused.
+ */
+function transformSource(imageUrl: string, origin: string): string | null {
+	let parsed: URL;
+	try {
+		parsed = new URL(imageUrl, origin);
+	} catch {
+		return null;
+	}
+	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+	if (parsed.pathname.split('/').includes('..')) return null;
+	return parsed.origin === origin ? parsed.pathname.slice(1) : parsed.href;
+}
 
 // GET /stickers/[slug]/[id]/download[?format=png]
 // Streams a sticker's high-res file as a forced download (Content-Disposition).
@@ -47,13 +69,16 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 		error(429, 'Too many downloads, please slow down.');
 	}
 
+	const id = Number(params.id);
+	if (!Number.isInteger(id) || id <= 0) error(404, 'Sticker not found');
+
 	const db = getReadDb(platform!.env.DB);
 	const row = await db
 		.select({ imageUrl: stickers.imageUrl, format: stickers.format, isAnimated: stickers.isAnimated })
 		.from(stickers)
 		.innerJoin(stickerPacks, eq(stickers.packId, stickerPacks.id))
 		.where(
-			and(eq(stickers.id, Number(params.id)), eq(stickerPacks.slug, params.slug), eq(stickerPacks.published, true))
+			and(eq(stickers.id, id), eq(stickerPacks.slug, params.slug), eq(stickerPacks.published, true))
 		)
 		.get();
 	if (!row) error(404, 'Sticker not found');
@@ -61,39 +86,59 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 	// Validate ?format against what this sticker can actually offer. The UI never
 	// generates an invalid link, so any mismatch is a hand-crafted URL → 400.
 	const requested = url.searchParams.get('format');
-	const option = requested
-		? stickerDownloadOptions(row).find((o) => o.kind === requested)
-		: { kind: 'original' as const, ext: originalExt(row) };
-	if (!option) error(400, 'This sticker cannot be converted to that format.');
+	if (requested && !stickerDownloadOptions(row).some((o) => o.kind === requested)) {
+		error(400, 'This sticker cannot be converted to that format.');
+	}
 
-	const originalName = `${params.slug}-${params.id}.${originalExt(row)}`;
+	const ext = originalExt(row);
+	const originalName = `${params.slug}-${id}.${ext}`;
+	const converting = requested === 'png';
 
-	if (option.kind === 'png') {
-		// Same-zone image transform; the source URL rides along as the transform
-		// path. Reject anything that didn't produce a PNG (an error page, an HTML
-		// challenge, a transform-disabled zone passing bytes through) and fall back.
-		const transformUrl = `${url.origin}/cdn-cgi/image/format=png/${row.imageUrl}`;
-		try {
-			const res = await fetch(transformUrl);
-			if (res.ok && res.body && res.headers.get('content-type')?.startsWith('image/png')) {
-				return fileResponse(res.body, `${params.slug}-${params.id}.png`, 'image/png');
+	if (converting) {
+		// Same-zone image transform; the source rides along as the transform path.
+		// globalThis.fetch, NOT the event fetch: SvelteKit's fetch resolves
+		// same-origin URLs through the app router, so the /cdn-cgi/image request
+		// would never leave the isolate (no transform runs) and would carry the
+		// caller's cookies. Reject anything that didn't produce a PNG (an error
+		// page, an HTML challenge, a transform-disabled zone passing bytes
+		// through) and fall back to the original.
+		const source = transformSource(row.imageUrl, url.origin);
+		if (source) {
+			try {
+				const res = await globalThis.fetch(`${url.origin}/cdn-cgi/image/format=png/${source}`);
+				if (res.ok && res.body && res.headers.get('content-type')?.startsWith('image/png')) {
+					return fileResponse(res.body, `${params.slug}-${id}.png`, 'image/png');
+				}
+				// Drain the rejected body so the connection is released before the
+				// fallback fetch below.
+				await res.body?.cancel();
+			} catch {
+				// fall through to the original
 			}
-		} catch {
-			// fall through to the original
 		}
 	}
 
 	const res = await fetch(row.imageUrl);
 	if (!res.ok || !res.body) error(502, 'Could not fetch sticker file');
-	return fileResponse(res.body, originalName, CONTENT_TYPES[originalExt(row)] ?? 'application/octet-stream');
+	// A fallback under ?format=png must not be edge-cached: the failure may be
+	// transient, and caching it would pin webp bytes to the png URL for everyone
+	// (hooks.server.ts honors an explicit Cache-Control instead of stamping its
+	// public s-maxage default).
+	const cacheControl = converting ? 'private, no-store' : undefined;
+	return fileResponse(res.body, originalName, CONTENT_TYPES[ext] ?? 'application/octet-stream', cacheControl);
 };
 
-function fileResponse(body: ReadableStream, filename: string, contentType: string): Response {
+function fileResponse(
+	body: ReadableStream,
+	filename: string,
+	contentType: string,
+	cacheControl = 'public, max-age=3600'
+): Response {
 	return new Response(body, {
 		headers: {
 			'Content-Type': contentType,
 			'Content-Disposition': `attachment; filename="${filename}"`,
-			'Cache-Control': 'public, max-age=3600'
+			'Cache-Control': cacheControl
 		}
 	});
 }

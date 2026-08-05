@@ -189,6 +189,22 @@ describe('findStickers (emoji IN-list chunking past D1 param cap)', () => {
 		expect(found).toHaveLength(2);
 	});
 
+	it('carries is_animated through to the sticker views (drives the PNG download option)', async () => {
+		const db = makeDb();
+		await db.insert(schema.characters).values({ name: 'Sparky' });
+		await db.insert(schema.stickerPacks).values({ name: 'Pack', slug: 'pack', characterId: 1, source: 'self-hosted', published: true });
+		await db.insert(schema.stickers).values([
+			{ packId: 1, imageUrl: 'anim.webp', position: 0, isAnimated: true },
+			{ packId: 1, imageUrl: 'still.webp', position: 1, isAnimated: false }
+		]);
+
+		const views = await findStickers(db, { publishedOnly: true });
+		expect(views.map((s) => [s.imageUrl, s.isAnimated])).toEqual([
+			['anim.webp', true],
+			['still.webp', false]
+		]);
+	});
+
 	it('still returns matches when publishedOnly is false', async () => {
 		const db = makeDb();
 		await db.insert(schema.characters).values({ name: 'Sparky' });

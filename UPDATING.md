@@ -48,6 +48,30 @@ you sync — or to catch up on what shipped since you last did — read the
 the merged changes since the previous one. `git log --oneline <last-tag>..upstream/main`
 after a fetch gives the same view from a clone.
 
+## One-time backfill: sticker animation flags (SONA-123)
+
+The release that adds the per-sticker download-format menu also adds a
+`stickers.is_animated` column. The migration applies automatically, but it can't
+inspect your stored files — animated GIF/WebP stickers **imported before this
+release** start out flagged static. Until the backfill runs, those stickers may
+show a PNG download option; picking it is harmless (the conversion refuses to
+run and the original file downloads instead), but the option shouldn't be there.
+
+After this release deploys, run the backfill **once**, signed in as admin:
+
+```sh
+curl -X POST -H "Cookie: <your admin session cookie>" \
+  https://<your-site>/api/stickers/backfill-animated
+```
+
+(or POST to `/api/stickers/backfill-animated` from the browser console while
+signed in). It fetches each stored raster, sniffs it for animation, and fixes
+wrong flags in either direction. It's idempotent — re-running it changes
+nothing — and it reports any rows it couldn't read. Libraries with more than
+~200 raster stickers are paged: pass `?afterId=<lastId>` from the previous
+response until `rasters` comes back below the limit. Stickers imported after
+the upgrade are sniffed at import time and need nothing.
+
 ## First sync only: check the Actions tab
 
 There is exactly one gotcha, and it only bites the **first time** you ever sync a

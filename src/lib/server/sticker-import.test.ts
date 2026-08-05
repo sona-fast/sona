@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest';
 import { gzipSync } from 'node:zlib';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here, so
 // it's used untyped (the shim below only touches prepare/exec/pragma/transaction).
@@ -44,8 +44,20 @@ vi.mock('$lib/server/telegram', () => ({
 	}),
 	stickerSetUrl: (name: string) => `https://t.me/addstickers/${name}`,
 	parseStickerSetName: (s: string) => s,
-	stickerMediaType: () => 'image/webp'
+	stickerMediaType: (filePath: string) => (filePath.endsWith('.webm') ? 'video/webm' : 'image/webp')
 }));
+
+import { animatedWebp, staticWebp } from './test/raster-fixtures';
+
+// The manual save paths animation-sniff raster URLs by fetch. Nothing in this
+// suite may hit the real network, so pin global fetch to a static-WebP
+// responder; tests that care about sniff results inject their own fetchFn.
+beforeAll(() => {
+	vi.stubGlobal('fetch', vi.fn(async () => new Response(staticWebp().buffer as ArrayBuffer)));
+});
+afterAll(() => {
+	vi.unstubAllGlobals();
+});
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -437,6 +449,70 @@ describe('updateManualPack', () => {
 		).rejects.toThrow(/uploaded here/);
 	});
 
+	it('preserves a kept sticker’s is_animated flag across an edit without re-sniffing it', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		const url = ufs('anim-kept');
+		const [pack] = await db
+			.insert(stickerPacks)
+			.values({ name: 'Anim Pack', slug: 'anim-pack', characterId: 1, source: 'self-hosted', managerArtistId: null, published: false, createdAt: new Date().toISOString() })
+			.returning({ id: stickerPacks.id });
+		await db.insert(stickers).values({
+			packId: pack.id, artistId: null, imageUrl: url, format: 'webp', isAnimated: true,
+			position: 0, nsfw: false, createdAt: new Date().toISOString()
+		});
+
+		const fetchFn = vi.fn(async () => new Response(staticWebp().buffer as ArrayBuffer));
+		await updateManualPack({
+			env: testEnv, settings: testSettings, db, packId: pack.id, fetchFn: fetchFn as typeof fetch,
+			input: {
+				name: 'Anim Pack',
+				managerArtistId: null,
+				stickerInputs: [{ imageUrl: url, artistId: null, emojis: [], nsfw: false, position: 0, format: 'webp' }]
+			}
+		});
+
+		const row = await db.select().from(stickers).where(eq(stickers.packId, pack.id)).get();
+		// The prior flag wins — a re-sniff (which here would say static) must not run.
+		expect(row?.isAnimated).toBe(true);
+		expect(fetchFn).not.toHaveBeenCalled();
+	});
+
+	it('sniffs a newly added raster during an edit (animated WebP → is_animated=1)', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		const keptUrl = ufs('kept-static');
+		const { packId } = await saveManualPack({
+			env: testEnv, settings: testSettings, db,
+			fetchFn: vi.fn(async () => new Response(staticWebp().buffer as ArrayBuffer)) as typeof fetch,
+			input: {
+				name: 'Grow Pack',
+				managerArtistId: null,
+				stickerInputs: [{ imageUrl: keptUrl, artistId: null, emojis: [], nsfw: false, position: 0, format: 'webp' }]
+			}
+		});
+
+		const addedUrl = ufs('new-animated');
+		const fetchFn = vi.fn(async () => new Response(animatedWebp().buffer as ArrayBuffer));
+		await updateManualPack({
+			env: testEnv, settings: testSettings, db, packId, fetchFn: fetchFn as typeof fetch,
+			input: {
+				name: 'Grow Pack',
+				managerArtistId: null,
+				stickerInputs: [
+					{ imageUrl: keptUrl, artistId: null, emojis: [], nsfw: false, position: 0, format: 'webp' },
+					{ imageUrl: addedUrl, artistId: null, emojis: [], nsfw: false, position: 1, format: 'webp' }
+				]
+			}
+		});
+
+		// Only the NEW raster was fetched, and its sniffed flag was stored.
+		expect(fetchFn).toHaveBeenCalledTimes(1);
+		const rows = await db.select().from(stickers).where(eq(stickers.packId, packId));
+		expect(rows.find((r) => r.imageUrl === keptUrl)?.isAnimated).toBe(false);
+		expect(rows.find((r) => r.imageUrl === addedUrl)?.isAnimated).toBe(true);
+	});
+
 	it('is atomic: a failed re-insert leaves the existing rows intact', async () => {
 		const { db } = makeDb();
 		await seedCharacterAndArtist(db);
@@ -606,6 +682,42 @@ describe('importStickerBatch', () => {
 		expect(rows).toHaveLength(2);
 		expect(rows.map((s) => s.telegramFileUniqueId).sort()).toEqual(['ua', 'ub']);
 		expect(rows.map((s) => s.position).sort()).toEqual([0, 1]);
+	});
+
+	it('records is_animated per media: video and animated WebP true, static WebP false', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		vi.mocked(getStickerSet).mockResolvedValue({
+			name: 'megapack',
+			title: 'Mega Pack',
+			stickers: [
+				{ fileId: 's', fileUniqueId: 'us', emoji: '😀', format: 'webp' as const, width: 512, height: 512 },
+				{ fileId: 'aw', fileUniqueId: 'uaw', emoji: '🔥', format: 'webp' as const, width: 512, height: 512 },
+				{ fileId: 'v', fileUniqueId: 'uv', emoji: '🎉', format: 'video' as const, width: 512, height: 512 }
+			]
+		});
+		// Real container bytes per file: the animated-WebP flag comes from the
+		// actual VP8X ANIM bit, not the set metadata.
+		vi.mocked(downloadFile).mockImplementation(async (_env, fileId) => {
+			if (fileId === 'v') {
+				return { bytes: new ArrayBuffer(8), contentType: 'application/octet-stream', filePath: 'stickers/file_v.webm' };
+			}
+			const bytes = fileId === 'aw' ? animatedWebp() : staticWebp();
+			return { bytes: bytes.buffer as ArrayBuffer, contentType: 'application/octet-stream', filePath: `stickers/file_${fileId}.webp` };
+		});
+
+		const r = await importStickerBatch({
+			env: r2Env, settings: r2Settings, db, nameOrUrl: 'megapack', managerArtistId: null,
+			items: [item('s'), item('aw'), item('v')]
+		});
+
+		expect(r).toMatchObject({ imported: 3 });
+		expect(r.failed).toHaveLength(0);
+		const byFuid = new Map((await db.select().from(stickers)).map((s) => [s.telegramFileUniqueId, s]));
+		expect(byFuid.get('us')?.isAnimated).toBe(false);
+		expect(byFuid.get('uaw')?.isAnimated).toBe(true);
+		expect(byFuid.get('uv')?.isAnimated).toBe(true);
+		expect(byFuid.get('uv')?.format).toBe('video');
 	});
 
 	it('is idempotent: re-sending a batch skips already-stored items', async () => {

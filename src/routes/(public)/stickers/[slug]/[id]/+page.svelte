@@ -4,7 +4,7 @@
 	import { ArrowLeft, ChevronRight } from 'lucide-svelte';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import DownloadMenu from '$lib/components/DownloadMenu.svelte';
-	import { stickerDownloadOptions } from '$lib/sticker-download';
+	import { isRasterFormat, stickerDownloadOptions } from '$lib/sticker-download';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
@@ -58,6 +58,7 @@
 	};
 	const downloadOptions = $derived(
 		stickerDownloadOptions(sticker).map((o, i) => ({
+			ext: o.ext,
 			label: (formatLabels[o.ext] ?? (() => o.ext.toUpperCase()))(),
 			href:
 				o.kind === 'original'
@@ -66,7 +67,7 @@
 			hint: i === 0 ? m.stickers_dl_original() : m.stickers_dl_converted()
 		}))
 	);
-	const downloadLabel = $derived((primaryLabels[stickerDownloadOptions(sticker)[0].ext] ?? m.stickers_download)());
+	const downloadLabel = $derived((primaryLabels[downloadOptions[0].ext] ?? m.stickers_download)());
 
 	// Fire-and-forget beacon so the admin dashboard can count download presses
 	// (same aggregate counter the gallery download button feeds). Failures must
@@ -79,7 +80,7 @@
 	// sticker's own imageUrl when it's a static format, else fall back to a static
 	// pack preview or the sticker's thumbnail.
 	const metaImage = $derived(
-		sticker.format === 'png' || sticker.format === 'webp'
+		isRasterFormat(sticker.format)
 			? sticker.imageUrl
 			: pack.previewImages?.[0] ?? sticker.thumbnailUrl ?? null
 	);
@@ -167,8 +168,8 @@
 					menuLabel={m.stickers_dl_choose_format()}
 					onDownload={countDownload}
 				/>
-				{#if (sticker.format === 'png' || sticker.format === 'webp') && sticker.isAnimated}
-					<p class="dl-caption">{m.stickers_dl_animated_note()}</p>
+				{#if isRasterFormat(sticker.format) && sticker.isAnimated}
+					<p class="dl-caption dl-note-animated">{m.stickers_dl_animated_note()}</p>
 				{/if}
 				<p class="dl-caption">{m.stickers_dl_caption_before()}<a href="/stickers/{pack.slug}">{m.stickers_dl_caption_link()}</a>{m.stickers_dl_caption_after()}</p>
 			</div>
@@ -406,6 +407,14 @@
 
 	.dl-caption a {
 		color: var(--primary);
+	}
+
+	/* The "PNG isn't offered" note explains the button directly above it — pull
+	   it closer (4px effective gap) and weight it above the boilerplate caption. */
+	.dl-note-animated {
+		margin-top: -4px;
+		color: var(--foreground);
+		font-weight: 500;
 	}
 
 	@media (max-width: 768px) {

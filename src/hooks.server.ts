@@ -229,7 +229,13 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	const isPublic = !event.url.pathname.startsWith('/admin') && !event.url.pathname.startsWith('/api');
 	const isHtml = response.headers.get('content-type')?.includes('text/html') ?? false;
 	if (isPublic && response.status === 200 && !isHtml) {
-		response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
+		// Honor a handler's explicit Cache-Control (e.g. the sticker download
+		// fallback's no-store — a transient transform failure must not be
+		// edge-cached under its ?format URL); only stamp the shared default when
+		// the handler set nothing.
+		if (!response.headers.has('Cache-Control')) {
+			response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
+		}
 	} else if (isPublic && response.status === 200 && isHtml) {
 		response.headers.set('Cache-Control', 'private, no-cache');
 		response.headers.set('Vary', 'Cookie, Accept-Language');

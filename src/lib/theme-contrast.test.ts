@@ -290,6 +290,26 @@ describe('.btn:focus-visible ring WCAG AA contrast, every theme × mode (#121)',
 	}
 });
 
+// The DownloadMenu row focus ring sits INSIDE the menu card (outline-offset
+// -2px on a var(--card) surface), so --ring must also clear the 3:1 non-text
+// bar against --card in every theme × mode — --primary failed it on the default
+// light card (2.46:1), which is why the component uses --ring (SONA-123).
+describe('focus ring on cards WCAG AA contrast, every theme × mode (SONA-123)', () => {
+	const blocks = [
+		{ name: 'ember dark', sel: ':root' },
+		{ name: 'ember light', sel: "[data-theme='light']" },
+		{ name: 'aurora dark', sel: "[data-theme-id='aurora']" },
+		{ name: 'aurora light', sel: "[data-theme-id='aurora'][data-theme='light']" },
+		{ name: 'terracotta dark', sel: "[data-theme-id='terracotta']" },
+		{ name: 'terracotta light', sel: "[data-theme-id='terracotta'][data-theme='light']" }
+	];
+	for (const { name, sel } of blocks) {
+		it(`${name}: focus ring against the card surface meets 3:1`, () => {
+			expect(contrast(blockToken(sel, 'ring'), blockToken(sel, 'card'))).toBeGreaterThanOrEqual(3);
+		});
+	}
+});
+
 // The .btn hover shifts only the fill (color-mix), never the label opacity: a
 // blanket `opacity` hover composited the label over the page and dropped its
 // contrast below AA in several themes (#103). Here we parse the actual color-mix

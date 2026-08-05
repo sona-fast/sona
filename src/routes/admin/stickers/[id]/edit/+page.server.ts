@@ -50,7 +50,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 };
 
 export const actions = {
-	default: async ({ params, request, platform, url }) => {
+	default: async ({ params, request, platform, url, fetch }) => {
 		const db = getDb(platform!.env.DB);
 		const settings = await getSettings(db);
 		const packId = Number(params.id);
@@ -90,7 +90,11 @@ export const actions = {
 				settings,
 				db,
 				packId,
-				input: { name, description, coverImageUrl, managerArtistId, telegramUrl, published, stickerInputs }
+				input: { name, description, coverImageUrl, managerArtistId, telegramUrl, published, stickerInputs },
+				// Origin + event fetch so root-relative /img/<key> stored URLs can be
+				// animation-sniffed (a bare sniff would record every one as static).
+				origin: url.origin,
+				fetchFn: fetch
 			});
 		} catch (e) {
 			return fail(400, { error: e instanceof Error ? e.message : 'Could not save pack.' });

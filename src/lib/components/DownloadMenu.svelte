@@ -6,7 +6,7 @@
 		label: string;
 		href: string;
 		/** Small fidelity hint ("original" / "converted") — i18n'd by the caller. */
-		hint?: string;
+		hint: string;
 	}
 
 	interface Props {
@@ -22,20 +22,23 @@
 
 	let { options, label, menuLabel, onDownload }: Props = $props();
 
+	const uid = $props.id();
+	const listId = `${uid}-list`;
+
 	let open = $state(false);
 	let root: HTMLDivElement | undefined = $state();
 	let caret: HTMLButtonElement | undefined = $state();
-	let itemEls: HTMLAnchorElement[] = $state([]);
+	let list: HTMLUListElement | undefined = $state();
 
 	// One option ⇒ the component collapses to the plain pill button, so the
-	// menu machinery below only exists when there's a real choice.
+	// disclosure machinery below only exists when there's a real choice.
 	const hasMenu = $derived(options.length > 1);
 
 	function toggle() {
 		open = !open;
 		if (open) {
-			// Focus the first menu item once it renders (APG menu-button pattern).
-			queueMicrotask(() => itemEls[0]?.focus());
+			// Focus the first link once it renders (disclosure-menu convenience).
+			queueMicrotask(() => list?.querySelector('a')?.focus());
 		}
 	}
 
@@ -46,55 +49,31 @@
 	}
 
 	function onWindowPointerdown(e: PointerEvent) {
+		// Guarded on open so the listener is a no-op for the 99% of page life the
+		// menu is closed (and for the single-option collapse, which never opens).
 		if (open && root && !root.contains(e.target as Node)) close();
 	}
 
-	function onMenuKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
+	// On the wrapper so it works whether focus sits on the caret or in the list.
+	function onRootKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && open) {
 			e.preventDefault();
 			close(true);
-			return;
-		}
-		if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-			e.preventDefault();
-			const current = itemEls.indexOf(document.activeElement as HTMLAnchorElement);
-			const delta = e.key === 'ArrowDown' ? 1 : -1;
-			const next = (current + delta + itemEls.length) % itemEls.length;
-			itemEls[next]?.focus();
 		}
 	}
 
 	function picked() {
 		onDownload?.();
-		close();
+		// Downloads don't navigate, so the focused link is about to unmount —
+		// hand focus back to the caret rather than letting it fall to <body>.
+		close(true);
 	}
 </script>
 
 <svelte:window onpointerdown={onWindowPointerdown} />
 
-<div class="dl-menu" bind:this={root}>
-	{#if hasMenu && open}
-		<!-- Opens UPWARD by design: the button sits at the bottom of the detail
-		     card, which is overflow:hidden — a downward menu would clip. See the
-		     direction decision on SONA-123. -->
-		<ul class="dl-list" role="menu" aria-label={menuLabel} onkeydown={onMenuKeydown}>
-			{#each options as option, i}
-				<li role="none">
-					<a
-						role="menuitem"
-						href={option.href}
-						download
-						bind:this={itemEls[i]}
-						onclick={picked}
-					>
-						{option.label}
-						{#if option.hint}<span class="hint" class:primary={i === 0}>{option.hint}</span>{/if}
-					</a>
-				</li>
-			{/each}
-		</ul>
-	{/if}
-
+<!-- svelte-ignore a11y_no_static_element_interactions (Escape-to-close convenience; not the element's only affordance) -->
+<div class="dl-menu" bind:this={root} onkeydown={onRootKeydown}>
 	<div class="dl-split">
 		<a
 			href={options[0].href}
@@ -111,8 +90,8 @@
 				type="button"
 				class="btn btn-primary dl-caret"
 				bind:this={caret}
-				aria-haspopup="menu"
 				aria-expanded={open}
+				aria-controls={listId}
 				aria-label={menuLabel}
 				onclick={toggle}
 			>
@@ -120,6 +99,24 @@
 			</button>
 		{/if}
 	</div>
+
+	{#if hasMenu && open}
+		<!-- Opens UPWARD by design (CSS only — the list follows the button in DOM so
+		     a virtual cursor meets the trigger first): the button sits at the bottom
+		     of the detail card, which is overflow:hidden — a downward menu would
+		     clip. See the direction decision on SONA-123. Plain links in a plain
+		     list (ARIA disclosure pattern), natively tabbable — no menu roles. -->
+		<ul class="dl-list" id={listId}>
+			{#each options as option, i}
+				<li>
+					<a href={option.href} download onclick={picked}>
+						{option.label}
+						<span class="hint" class:primary={i === 0}>{option.hint}</span>
+					</a>
+				</li>
+			{/each}
+		</ul>
+	{/if}
 </div>
 
 <style>
@@ -148,7 +145,8 @@
 	.dl-caret {
 		border-top-left-radius: 0;
 		border-bottom-left-radius: 0;
-		padding-inline: 14px;
+		/* 16px + 14px icon + 16px = 46px hit width (≥44px touch target). */
+		padding-inline: 16px;
 		border-inline-start: 1px solid color-mix(in srgb, var(--primary-foreground) 25%, transparent);
 	}
 
@@ -201,19 +199,24 @@
 		justify-content: space-between;
 		gap: 12px;
 		padding: 9px 12px;
-		border-radius: 7px;
+		/* 4px: concentric with the 10px container radius minus its 6px padding. */
+		border-radius: 4px;
 		font-size: 14px;
 		font-weight: 500;
 		color: var(--foreground);
+		/* Menu rows read as controls, not prose links — no resting underline. */
+		text-decoration: none;
 	}
 
 	.dl-list a:hover {
 		background: var(--secondary);
-		text-decoration: none;
 	}
 
 	.dl-list a:focus-visible {
-		outline: 2px solid var(--primary);
+		/* --ring, not --primary: the ring sits on the card and --primary fails the
+		   3:1 non-text bar there on the default light theme (2.46:1). Guarded by
+		   theme-contrast.test.ts. */
+		outline: 2px solid var(--ring);
 		outline-offset: -2px;
 	}
 
@@ -223,11 +226,16 @@
 	}
 
 	/* Mark the default (original) entry so the two rows read as
-	   original-vs-converted at a glance, not two equal formats. */
+	   original-vs-converted at a glance, not two equal formats. Drawn as an empty
+	   pseudo-element box (not text content) so it stays out of accessible names. */
 	.hint.primary::before {
-		content: '● ';
-		color: var(--primary);
-		font-size: 8px;
+		content: '';
+		display: inline-block;
+		width: 6px;
+		height: 6px;
+		margin-inline-end: 5px;
+		border-radius: 50%;
+		background: var(--primary);
 		vertical-align: 1px;
 	}
 </style>

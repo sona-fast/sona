@@ -25,6 +25,12 @@ export interface StickerDownloadOption {
 	ext: string;
 }
 
+/** True for the static-raster storage formats ('png' | 'webp') — the rows whose
+ * files may be .webp/.png/.gif and whose animation needs the is_animated flag. */
+export function isRasterFormat(format: StickerDownloadInfo['format']): boolean {
+	return format === 'png' || format === 'webp';
+}
+
 /** Extension of the stored original file, from the storage rules above. */
 export function originalExt(sticker: StickerDownloadInfo): string {
 	if (sticker.format === 'video') return 'webm';
@@ -44,8 +50,7 @@ export function originalExt(sticker: StickerDownloadInfo): string {
 export function stickerDownloadOptions(sticker: StickerDownloadInfo): StickerDownloadOption[] {
 	const ext = originalExt(sticker);
 	const options: StickerDownloadOption[] = [{ kind: 'original', ext }];
-	const isRaster = sticker.format === 'png' || sticker.format === 'webp';
-	if (isRaster && !sticker.isAnimated && ext !== 'png') {
+	if (isRasterFormat(sticker.format) && !sticker.isAnimated && ext !== 'png') {
 		options.push({ kind: 'png', ext: 'png' });
 	}
 	return options;

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { makeD1 } from '$lib/server/test/d1';
@@ -42,6 +42,19 @@ async function status(promise: Response | Promise<Response>): Promise<number> {
 	}
 }
 
+/** Stub globalThis.fetch (the transform path uses it, NOT the event fetch, so
+ * the /cdn-cgi/image request leaves the isolate instead of re-entering the app
+ * router with the caller's cookies). */
+function stubTransformFetch(impl: (input: RequestInfo | URL) => Promise<Response>) {
+	const fn = vi.fn(impl);
+	vi.stubGlobal('fetch', fn as typeof fetch);
+	return fn;
+}
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
 describe('GET /stickers/[slug]/[id]/download', () => {
 	it('serves the original bytes with the original filename by default', async () => {
 		const res = await GET(makeEvent(seedDb({ format: 'webp' })));
@@ -49,39 +62,67 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
 	});
 
-	it('?format=png proxies through the zone image transform', async () => {
-		const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
-			if (String(input).includes('/cdn-cgi/image/')) {
-				return new Response('png-bytes', { headers: { 'content-type': 'image/png' } });
-			}
-			return new Response('orig');
-		}) as typeof fetch;
-		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: fetchFn }));
-		expect(fetchFn).toHaveBeenCalledWith(`${ORIGIN}/cdn-cgi/image/format=png/${FILE}`);
+	it('?format=png proxies through the zone image transform via globalThis.fetch', async () => {
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const eventFetch = vi.fn(async () => new Response('orig')) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
+		expect(transformFetch).toHaveBeenCalledWith(`${ORIGIN}/cdn-cgi/image/format=png/${FILE}`);
+		// The event fetch (app-router-resolving, cookie-carrying) must NOT be used
+		// for the transform request.
+		expect(eventFetch).not.toHaveBeenCalled();
 		expect(res.headers.get('Content-Type')).toBe('image/png');
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.png"');
 	});
 
+	it('keeps the query string of an absolute source URL on the transform request', async () => {
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const db = seedDb({ format: 'webp', imageUrl: `${FILE}?v=2` });
+		await GET(makeEvent(db, { search: '?format=png' }));
+		// Naive concat used to leak the query onto the transform path incorrectly;
+		// for an off-origin absolute the WHOLE URL (query included) is the source.
+		expect(transformFetch).toHaveBeenCalledWith(`${ORIGIN}/cdn-cgi/image/format=png/${FILE}?v=2`);
+	});
+
+	it('builds a clean transform path for a root-relative /img stored URL', async () => {
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const db = seedDb({ format: 'webp', imageUrl: '/img/stickers/pack/key.webp' });
+		await GET(makeEvent(db, { search: '?format=png' }));
+		// No doubled slash: the same-origin source rides along as a bare path.
+		expect(transformFetch).toHaveBeenCalledWith(`${ORIGIN}/cdn-cgi/image/format=png/img/stickers/pack/key.webp`);
+	});
+
 	it('falls back to the original bytes when the transform cannot run (SONA-21 off-zone)', async () => {
-		const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
-			if (String(input).includes('/cdn-cgi/image/')) return new Response('forbidden', { status: 403 });
-			return new Response('orig-bytes', { headers: { 'content-type': 'image/webp' } });
-		}) as typeof fetch;
-		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: fetchFn }));
+		stubTransformFetch(async () => new Response('forbidden', { status: 403 }));
+		const eventFetch = vi.fn(async () =>
+			new Response('orig-bytes', { headers: { 'content-type': 'image/webp' } })
+		) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
 		expect(res.headers.get('Content-Type')).toBe('image/webp');
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
+	});
+
+	it('marks a fallback-from-png response uncacheable (no edge-cached webp under the png URL)', async () => {
+		stubTransformFetch(async () => new Response('forbidden', { status: 403 }));
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png' }));
+		// A transient transform failure must not be pinned to ?format=png by the
+		// edge (hooks.server.ts honors this explicit header instead of stamping
+		// its public s-maxage default).
+		expect(res.headers.get('Cache-Control')).toBe('private, no-store');
 	});
 
 	it('rejects a transform response that is not actually a PNG', async () => {
 		// A transform-less zone can pass the source through, or an error page can
 		// come back 200 — neither must be served under a .png name.
-		const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
-			if (String(input).includes('/cdn-cgi/image/')) {
-				return new Response('<html>challenge</html>', { headers: { 'content-type': 'text/html' } });
-			}
-			return new Response('orig-bytes', { headers: { 'content-type': 'image/webp' } });
-		}) as typeof fetch;
-		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: fetchFn }));
+		stubTransformFetch(async () =>
+			new Response('<html>challenge</html>', { headers: { 'content-type': 'text/html' } })
+		);
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png' }));
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
 	});
 

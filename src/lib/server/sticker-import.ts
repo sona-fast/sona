@@ -20,6 +20,7 @@ import { resolveStickerArtistIds, inferAppendedArtistId } from '$lib/server/stic
 import type { AvatarRehostContext } from '$lib/server/avatar';
 import { slugify } from '$lib/server/slugify';
 import { isAnimatedRaster, sniffAnimatedFromUrl } from '$lib/server/animated-raster';
+import { isRasterFormat } from '$lib/sticker-download';
 import { sanitizeUrl } from '$lib/server/validate';
 
 type Env = App.Platform['env'];
@@ -1051,6 +1052,36 @@ export function parseStickerFormInputs(data: FormData, defaultArtistId: number |
 	return inputs;
 }
 
+// Sniff cap: a manual pack can hold 100+ stickers; fetching every raster at
+// once would blow the Workers subrequest/connection budget.
+const SNIFF_CONCURRENCY = 4;
+
+/**
+ * Animation flags for manual-save inputs: rasters are sniffed by URL (null =
+ * undetermined — callers pick the default), video/Lottie are always animated,
+ * and skipped rows (kept across an edit; their prior flag wins) aren't fetched.
+ * At most SNIFF_CONCURRENCY fetches run at a time.
+ */
+async function sniffManualInputs(
+	inputs: ManualStickerInput[],
+	opts: { fetchFn: typeof fetch; origin?: string; skip?: (s: ManualStickerInput) => boolean }
+): Promise<(boolean | null)[]> {
+	const results: (boolean | null)[] = new Array(inputs.length).fill(null);
+	let next = 0;
+	const worker = async () => {
+		while (next < inputs.length) {
+			const i = next++;
+			const s = inputs[i];
+			if (opts.skip?.(s)) continue;
+			results[i] = isRasterFormat(s.format)
+				? await sniffAnimatedFromUrl(s.imageUrl, opts.fetchFn, opts.origin)
+				: true;
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(SNIFF_CONCURRENCY, inputs.length) }, worker));
+	return results;
+}
+
 /**
  * Reject any sticker/cover URL we don't host ourselves. The manual form only ever
  * submits URLs returned by /api/upload (our storage), so a URL we don't own means
@@ -1091,8 +1122,12 @@ export async function saveManualPack(opts: {
 	settings: SiteSettings;
 	db: Database;
 	input: ManualPackInput;
+	/** Request origin so root-relative stored URLs (/img/<key>) can be sniffed. */
+	origin?: string;
+	/** Fetch used for the animation sniff (event fetch / test seam). */
+	fetchFn?: typeof fetch;
 }): Promise<{ packId: number; slug: string }> {
-	const { env, settings, db, input } = opts;
+	const { env, settings, db, input, origin, fetchFn = fetch } = opts;
 	assertSelfHosted(env, settings, input);
 
 	const characterId = await resolveSiteCharacterId(db, settings);
@@ -1110,11 +1145,9 @@ export async function saveManualPack(opts: {
 	const startId = await nextStickerId(db);
 
 	// Best-effort animation sniff for the freshly uploaded rasters (see
-	// sniffAnimatedFromUrl); a failed fetch leaves false, which the backfill
-	// endpoint can correct later.
-	const sniffed = await Promise.all(
-		input.stickerInputs.map((s) => (s.format === 'png' || s.format === 'webp' ? sniffAnimatedFromUrl(s.imageUrl) : Promise.resolve(true)))
-	);
+	// sniffAnimatedFromUrl); an undetermined sniff (null) defaults to static,
+	// which the backfill endpoint can correct later.
+	const sniffed = await sniffManualInputs(input.stickerInputs, { fetchFn, origin });
 
 	const rows = input.stickerInputs.map((s, i) => ({
 		packId,
@@ -1123,7 +1156,7 @@ export async function saveManualPack(opts: {
 		width: s.width ?? null,
 		height: s.height ?? null,
 		format: s.format,
-		isAnimated: sniffed[i],
+		isAnimated: sniffed[i] ?? false,
 		position: s.position,
 		nsfw: s.nsfw,
 		emojis: s.emojis
@@ -1160,8 +1193,12 @@ export async function updateManualPack(opts: {
 	db: Database;
 	packId: number;
 	input: ManualPackInput;
+	/** Request origin so root-relative stored URLs (/img/<key>) can be sniffed. */
+	origin?: string;
+	/** Fetch used for the animation sniff (event fetch / test seam). */
+	fetchFn?: typeof fetch;
 }): Promise<void> {
-	const { env, settings, db, packId, input } = opts;
+	const { env, settings, db, packId, input, origin, fetchFn = fetch } = opts;
 
 	// Snapshot existing stickers before we mutate. We need imageUrl for storage
 	// cleanup AND width/height/telegramFileUniqueId so the edit PRESERVES the columns
@@ -1200,13 +1237,11 @@ export async function updateManualPack(opts: {
 	// Animation flags: a row kept across the edit (same imageUrl) carries its prior
 	// flag; a NEW raster upload gets a best-effort sniff. Kept rows were already
 	// sniffed (or backfilled), so this only fetches the handful of new files.
-	const sniffed = await Promise.all(
-		input.stickerInputs.map((s) => {
-			if (preserved.has(s.imageUrl)) return Promise.resolve(false); // unused; prior wins below
-			if (s.format === 'png' || s.format === 'webp') return sniffAnimatedFromUrl(s.imageUrl);
-			return Promise.resolve(true);
-		})
-	);
+	const sniffed = await sniffManualInputs(input.stickerInputs, {
+		fetchFn,
+		origin,
+		skip: (s) => preserved.has(s.imageUrl)
+	});
 
 	const rows = input.stickerInputs.map((s, i) => {
 		const prior = preserved.get(s.imageUrl);
@@ -1219,7 +1254,7 @@ export async function updateManualPack(opts: {
 			width: s.width ?? prior?.width ?? null,
 			height: s.height ?? prior?.height ?? null,
 			format: s.format,
-			isAnimated: prior?.isAnimated ?? sniffed[i],
+			isAnimated: prior?.isAnimated ?? sniffed[i] ?? false,
 			position: s.position,
 			nsfw: s.nsfw,
 			telegramFileUniqueId: prior?.telegramFileUniqueId ?? null,

@@ -16,23 +16,26 @@ export function isAnimatedRaster(bytes: Uint8Array): boolean {
 
 /**
  * Best-effort sniff of an already-stored raster by URL, for save paths that
- * only hold the URL (manual pack create/edit). Any failure — relative URL with
- * no origin to resolve against, network error, non-2xx — returns false: the
- * safe default is "static", and POST /api/stickers/backfill-animated (which
- * runs with a request origin) can correct it later.
+ * only hold the URL (manual pack create/edit) and for the backfill endpoint.
+ * Returns null when the sniff was UNDETERMINED — relative URL with no origin to
+ * resolve against, network error/timeout, non-2xx — so callers choose their own
+ * default: the save paths treat null as "static" (`?? false`, correctable later
+ * by POST /api/stickers/backfill-animated), while the backfill reports the row
+ * as failed rather than stamping a possibly-animated file static.
  */
 export async function sniffAnimatedFromUrl(
 	url: string,
 	fetchFn: typeof fetch = fetch,
 	origin?: string
-): Promise<boolean> {
+): Promise<boolean | null> {
 	try {
 		const absolute = new URL(url, origin).href;
-		const res = await fetchFn(absolute);
-		if (!res.ok) return false;
+		// Bounded: a hung storage fetch must not stall a pack save indefinitely.
+		const res = await fetchFn(absolute, { signal: AbortSignal.timeout(10_000) });
+		if (!res.ok) return null;
 		return isAnimatedRaster(new Uint8Array(await res.arrayBuffer()));
 	} catch {
-		return false;
+		return null;
 	}
 }
 
@@ -56,9 +59,10 @@ function isAnimatedWebp(bytes: Uint8Array): boolean {
  * Animated GIF: more than one image descriptor in the block stream. Walks the
  * GIF89a/87a block structure (header → logical screen descriptor → optional
  * global color table → blocks) counting image separators (0x2C), short-circuiting
- * as soon as a second frame is seen. A malformed stream stops the walk and
- * reports whatever was counted so far — corrupt files degrade to "static",
- * which only costs a PNG option that would fail anyway, never a flattened file.
+ * as soon as a second frame is seen. A walk that runs OFF the buffer (truncated
+ * file) errs toward "animated" — the safe direction: a wrong true only hides the
+ * PNG option, while a wrong false would offer a flattening conversion. A stream
+ * with an unknown block marker stops and reports whatever was counted so far.
  */
 function isAnimatedGif(bytes: Uint8Array): boolean {
 	if (bytes.length < 13) return false;
@@ -78,18 +82,18 @@ function isAnimatedGif(bytes: Uint8Array): boolean {
 			// Extension: label byte, then data sub-blocks until a 0 terminator.
 			pos++;
 			pos = skipSubBlocks(bytes, pos);
-			if (pos < 0) return frames > 1;
+			if (pos < 0) return true; // truncated — err toward animated (see above)
 		} else if (marker === 0x2c) {
 			// Image descriptor: 9 bytes (position/size + packed), optional local
 			// color table, LZW minimum-code byte, then data sub-blocks.
 			if (++frames > 1) return true;
-			if (pos + 9 > bytes.length) return false;
+			if (pos + 9 > bytes.length) return true; // truncated — err toward animated
 			const localPacked = bytes[pos + 8];
 			pos += 9;
 			if (localPacked & 0x80) pos += 3 * (1 << ((localPacked & 0x07) + 1));
 			pos++; // LZW minimum code size
 			pos = skipSubBlocks(bytes, pos);
-			if (pos < 0) return frames > 1;
+			if (pos < 0) return true; // truncated — err toward animated (see above)
 		} else {
 			// Unknown block marker — malformed; stop walking.
 			break;
