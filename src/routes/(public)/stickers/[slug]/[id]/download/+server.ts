@@ -21,6 +21,14 @@ import type { RequestHandler } from './$types';
 // attempt); the cap's headroom absorbs that without charging extra tokens.
 const downloadLimiter = new RateLimiter(200, 60_000); // 200 downloads / min / IP
 
+// Cap on what the converting path will buffer for the animation sniff. Telegram
+// static stickers are ≤~512KB, but MANUAL uploads can reach MAX_BUFFER_BYTES
+// (10MB — see $lib/server/storage/buffer.ts), and buffering that unboundedly on
+// a public, only-rate-limited endpoint is a memory-amplification risk. Anything
+// declaring more than this streams through untouched — a >1MB static raster
+// then simply never converts, which is acceptable.
+const MAX_CONVERT_BYTES = 1_000_000;
+
 // Map a file extension to the Content-Type we serve it with. Anything unknown
 // falls back to a generic octet-stream so the browser still saves the bytes.
 const CONTENT_TYPES: Record<string, string> = {
@@ -105,14 +113,22 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 	if (converting) {
 		// Buffer the original FIRST and sniff its bytes: a pre-backfill row can
 		// carry a stale is_animated=0 while the stored file actually animates, and
-		// the transform would "succeed" by flattening it to its first frame.
-		// Buffering the whole file is fine — stickers are ≤~512KB (Telegram's
-		// size cap) — and it doubles as the transform-failure fallback below
-		// without a second fetch.
+		// the transform would "succeed" by flattening it to its first frame. The
+		// buffer doubles as the transform-failure fallback below without a second
+		// fetch — but it's bounded by MAX_CONVERT_BYTES: anything declaring more
+		// streams through untouched like the plain path.
 		const orig = await fetch(row.imageUrl);
-		if (!orig.ok) error(502, 'Could not fetch sticker file');
-		const origBytes = new Uint8Array(await orig.arrayBuffer());
+		if (!orig.ok || !orig.body) error(502, 'Could not fetch sticker file');
 		const origType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+		if (Number(orig.headers.get('content-length')) > MAX_CONVERT_BYTES) {
+			return fileResponse(orig.body, originalName, origType);
+		}
+		let origBytes: Uint8Array<ArrayBuffer>;
+		try {
+			origBytes = new Uint8Array(await orig.arrayBuffer());
+		} catch {
+			error(502, 'Could not fetch sticker file');
+		}
 		if (isAnimatedRaster(origBytes)) {
 			// Stale flag: refuse to flatten. Serve the original bytes under the
 			// original filename, uncacheable (same semantics as the fallback

@@ -272,10 +272,10 @@ describe('resting .btn WCAG AA contrast — every theme × variant × mode (#121
 // to 2.20:1 on Ember light. Assert the rule keeps the --ring token and that --ring
 // clears 3:1 on --background in every theme × mode (#121).
 // The ring must clear 3:1 on BOTH resting surfaces it appears over: the page
-// background (.btn:focus-visible, 2px outline-offset — #121) and the card
-// (the DownloadMenu row ring sits INSIDE the menu, outline-offset -2px, on a
-// var(--card) surface — SONA-123; --primary failed it on the default light
-// card at 2.46:1, which is why the component uses --ring).
+// background (.btn:focus-visible, 2px outline-offset — #121) and the card.
+// (The DownloadMenu row ring is NOT covered here: it sits on the menu's LIFTED
+// card-toward-white surface, where --ring fails on ember dark — it uses
+// --foreground instead, asserted in the SONA-123 describe at the bottom.)
 describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SONA-123)', () => {
 	it('the ring uses var(--ring) (not var(--primary), which fails 3:1 on Ember light)', () => {
 		const rule = css.match(/^\.btn:focus-visible\s*\{([^}]*)\}/m)?.[1];
@@ -362,4 +362,62 @@ describe('.btn hover-state WCAG AA contrast, every theme × variant (#103)', () 
 		// The regression that caused #103.
 		expect(css).not.toMatch(/\.btn[\w-]*:hover\s*\{[^}]*opacity/);
 	});
+});
+
+// The DownloadMenu list floats on a LIFTED surface — color-mix of --card toward
+// white — not raw --card, and its rows hover with a secondary→foreground mix
+// (SONA-123). The card-surface ring checks above miss both: --ring sat at
+// ~2.1:1 on ember dark's lifted surface, and --muted-foreground hint text
+// failed 4.5:1 on the hover fill in all six theme × mode blocks. Parse the
+// actual mixes and color tokens out of the component's CSS (so changing either
+// side incompatibly fails here) and assert: (a) the row focus ring clears 3:1
+// on the lifted surface; (b) the row label AND the hint clear 4.5:1 on both the
+// lifted surface and the hover fill.
+describe('DownloadMenu lifted-surface WCAG AA contrast, every theme × mode (SONA-123)', () => {
+	const menuCss = readFileSync(
+		fileURLToPath(new URL('./components/DownloadMenu.svelte', import.meta.url)),
+		'utf8'
+	);
+
+	function extract(re: RegExp, what: string): string {
+		const m = menuCss.match(re)?.[1];
+		if (!m) throw new Error(`${what} not found in DownloadMenu.svelte (mix or token changed?)`);
+		return m;
+	}
+
+	// The lifted surface: color-mix(in srgb, var(--card) <pct>%, white).
+	const surfacePct = Number(
+		extract(
+			/background:\s*color-mix\(in srgb,\s*var\(--card\)\s*(\d+)%,\s*white\)/,
+			'lifted menu-surface card→white color-mix'
+		)
+	);
+	// The row hover fill: color-mix(in srgb, var(--secondary) <pct>%, var(--foreground)).
+	const hoverPct = Number(
+		extract(
+			/background:\s*color-mix\(in srgb,\s*var\(--secondary\)\s*(\d+)%,\s*var\(--foreground\)\)/,
+			'row hover secondary→foreground color-mix'
+		)
+	);
+	const ringToken = extract(
+		/\.dl-list a:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--([\w-]+)\)/,
+		'row focus-ring outline token'
+	);
+	const hintToken = extract(/\.hint\s*\{[^}]*color:\s*var\(--([\w-]+)\)/, '.hint color token');
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		const lifted = () => mixSrgb(blockToken(sel, 'card'), surfacePct, 'white');
+		const hovered = () => mix2(blockToken(sel, 'secondary'), hoverPct, blockToken(sel, 'foreground'));
+
+		it(`${name}: row focus ring meets 3:1 on the lifted menu surface`, () => {
+			expect(contrast(blockToken(sel, ringToken), lifted())).toBeGreaterThanOrEqual(3);
+		});
+
+		it(`${name}: row label and hint meet 4.5:1 on the lifted surface AND the hover fill`, () => {
+			for (const surface of [lifted(), hovered()]) {
+				expect(contrast(blockToken(sel, 'foreground'), surface)).toBeGreaterThanOrEqual(4.5);
+				expect(contrast(blockToken(sel, hintToken), surface)).toBeGreaterThanOrEqual(4.5);
+			}
+		});
+	}
 });

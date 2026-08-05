@@ -36,13 +36,18 @@
 	const hasMenu = $derived(options.length > 1);
 
 	async function toggle() {
-		open = !open;
 		if (open) {
-			// Focus the first link after Svelte flushes the `hidden` flip (a bare
-			// microtask ran before the DOM update, so focus stayed on the caret).
-			await tick();
-			list?.querySelector('a')?.focus();
+			// Route the closing press through close(true) so focus returns to the
+			// caret even on browsers that don't focus buttons on click (Safari) —
+			// parity with Escape and picked().
+			close(true);
+			return;
 		}
+		open = true;
+		// Focus the first link after Svelte flushes the `hidden` flip (a bare
+		// microtask ran before the DOM update, so focus stayed on the caret).
+		await tick();
+		list?.querySelector('a')?.focus();
 	}
 
 	function close(refocus = false) {
@@ -72,6 +77,14 @@
 		if (open && root && !root.contains(e.relatedTarget as Node)) close();
 	}
 
+	function primaryPicked() {
+		onDownload?.();
+		// The menu may be open (opened, then the primary half pressed) — dismiss
+		// it so it doesn't linger over the card. Focus stays on the anchor itself
+		// (downloads don't navigate and the anchor doesn't unmount), no refocus.
+		close();
+	}
+
 	function picked() {
 		onDownload?.();
 		// Downloads don't navigate, so the focused link is about to unmount —
@@ -90,7 +103,7 @@
 			class="btn btn-primary dl-primary"
 			class:solo={!hasMenu}
 			download
-			onclick={() => onDownload?.()}
+			onclick={primaryPicked}
 		>
 			<Download size={16} />
 			{label}
@@ -118,7 +131,7 @@
 		     list (ARIA disclosure pattern), natively tabbable — no menu roles.
 		     Rendered persistently (hidden when closed) so the caret's aria-controls
 		     always points at a real element. -->
-		<ul class="dl-list" id={listId} hidden={!open}>
+		<ul class="dl-list" id={listId} bind:this={list} hidden={!open}>
 			{#each options as option, i}
 				<li>
 					<a href={option.href} download onclick={picked}>
@@ -237,16 +250,21 @@
 	}
 
 	.dl-list a:focus-visible {
-		/* --ring, not --primary: the ring sits on the card and --primary fails the
-		   3:1 non-text bar there on the default light theme (2.46:1). Guarded by
-		   theme-contrast.test.ts. */
-		outline: 2px solid var(--ring);
+		/* --foreground, not --ring: the ring sits on the LIFTED menu surface (the
+		   card-toward-white mix above), where --ring drops to ~2.1:1 on ember
+		   dark. --foreground clears the 3:1 non-text bar on it in every theme ×
+		   mode. Guarded by theme-contrast.test.ts. */
+		outline: 2px solid var(--foreground);
 		outline-offset: -2px;
 	}
 
 	.hint {
 		font-size: 11px;
-		color: var(--muted-foreground);
+		/* --foreground, not --muted-foreground: the hint must clear 4.5:1 on the
+		   hover fill too, which --muted-foreground missed in every theme × mode.
+		   Hierarchy holds via the 11px size against the 14px label. Guarded by
+		   theme-contrast.test.ts. */
+		color: var(--foreground);
 	}
 
 	/* Mark the default (original) entry so the two rows read as

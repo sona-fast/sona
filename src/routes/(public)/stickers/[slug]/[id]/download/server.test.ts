@@ -104,6 +104,37 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		expect(res.headers.get('Cache-Control')).toBe('private, no-store');
 	});
 
+	it('502s a ?format=png request when the original cannot be fetched', async () => {
+		// The converting path's buffered read must fail like the plain path does,
+		// not throw an unhandled error out of arrayBuffer()/a bodyless response.
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const eventFetch = vi.fn(async () => new Response('gone', { status: 404 })) as typeof fetch;
+		await expect(
+			status(GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch })))
+		).resolves.toBe(502);
+		expect(transformFetch).not.toHaveBeenCalled();
+	});
+
+	it('streams the original untouched when content-length exceeds the 1MB convert cap', async () => {
+		// Manual uploads can reach 10MB (MAX_BUFFER_BYTES); the public converting
+		// path must not buffer that — it skips sniff-and-convert entirely and
+		// serves the original like the plain path (memory-amplification guard).
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const eventFetch = vi.fn(async () =>
+			new Response('big-bytes', {
+				headers: { 'content-type': 'image/webp', 'content-length': '5000000' }
+			})
+		) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
+		expect(transformFetch).not.toHaveBeenCalled();
+		expect(res.headers.get('Content-Type')).toBe('image/webp');
+		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
+	});
+
 	it('keeps the query string of an absolute source URL on the transform request', async () => {
 		const transformFetch = stubTransformFetch(async () =>
 			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
@@ -123,6 +154,21 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		await GET(makeEvent(db, { search: '?format=png' }));
 		// No doubled slash: the same-origin source rides along as a bare path.
 		expect(transformFetch).toHaveBeenCalledWith(`${ORIGIN}/cdn-cgi/image/format=png/img/stickers/pack/key.webp`);
+	});
+
+	it('normalizes dot segments out of a stored path before it reaches the transform', async () => {
+		// transformSource relies on new URL() dot-segment normalization; pin it so
+		// a refactor to naive string handling can't leak '..' into the transform
+		// path.
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const db = seedDb({ format: 'webp', imageUrl: '/img/a/../../etc/x.webp' });
+		await GET(makeEvent(db, { search: '?format=png' }));
+		expect(transformFetch).toHaveBeenCalledTimes(1);
+		const called = String(transformFetch.mock.calls[0][0]);
+		expect(called).not.toContain('..');
+		expect(called).toBe(`${ORIGIN}/cdn-cgi/image/format=png/etc/x.webp`);
 	});
 
 	it('falls back to the original bytes when the transform cannot run (SONA-21 off-zone)', async () => {

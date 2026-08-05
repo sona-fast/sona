@@ -23,14 +23,20 @@ describe('DownloadMenu wiring (SONA-123)', () => {
 	});
 
 	it('every download press reaches the onDownload metrics hook', () => {
-		// The primary anchor's inline handler contains '=>' which terminates the
-		// tag-regex above early, so pin it on the whole source: the only inline
-		// onDownload arrow in the file is the primary anchor's onclick.
-		expect(src).toContain('onclick={() => onDownload?.()}');
+		expect(primaryAnchor).toContain('onclick={primaryPicked}');
 		expect(rowAnchor).toContain('onclick={picked}');
 		const picked = src.match(/function picked\(\)\s*\{[\s\S]*?\n\t\}/)?.[0];
 		expect(picked).toBeDefined();
 		expect(picked).toContain('onDownload?.()');
+	});
+
+	it('a primary-half press also dismisses an open menu (close in primaryPicked)', () => {
+		// Without close(), downloading via the split button's primary half leaves
+		// the open list hovering over the card.
+		const primaryPicked = src.match(/function primaryPicked\(\)\s*\{[\s\S]*?\n\t\}/)?.[0];
+		expect(primaryPicked).toBeDefined();
+		expect(primaryPicked).toContain('onDownload?.()');
+		expect(primaryPicked).toContain('close()');
 	});
 
 	it('hasMenu derives from options.length > 1 and gates the caret and the list', () => {
@@ -58,6 +64,9 @@ describe('DownloadMenu wiring (SONA-123)', () => {
 		const list = src.match(/<ul(?=[^>]*id=\{listId\})[^>]*>/)?.[0];
 		expect(list).toBeDefined();
 		expect(list).toContain('hidden={!open}');
+		// Without bind:this the `list` state stays undefined and toggle()'s
+		// focus-first-on-open silently never runs.
+		expect(list).toContain('bind:this={list}');
 	});
 
 	it('open waits for the DOM flush (tick) before focusing the first row', () => {
@@ -67,6 +76,9 @@ describe('DownloadMenu wiring (SONA-123)', () => {
 		expect(toggle).toBeDefined();
 		expect(toggle).toContain('await tick()');
 		expect(toggle).toContain("querySelector('a')?.focus()");
+		// The closing press routes through close(true) so focus returns to the
+		// caret even on browsers that don't focus buttons on click.
+		expect(toggle).toContain('close(true)');
 	});
 
 	it('closes when focus leaves the widget (focusout on the wrapper)', () => {

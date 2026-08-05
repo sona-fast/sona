@@ -74,9 +74,11 @@ wrong flags in either direction. It's idempotent — re-running it changes
 nothing — and it reports any rows it couldn't read. Libraries with more than
 ~200 raster stickers are paged: pass `?afterId=<lastId>` from the previous
 response until `rasters` comes back below the limit. On a Workers **free-plan**
-fork, add `?limit=25` (and page with `?afterId=`) to stay well inside the
-tighter per-request subrequest budget. Stickers imported after the upgrade are
-sniffed at import time and need nothing.
+fork, add `?limit=15` (and page with `?afterId=`) to stay well inside the
+tighter per-request subrequest budget. If a free-plan run reports failed rows,
+it usually just hit that subrequest cap — re-run with `?afterId=` from the last
+successful id and they clear. Stickers imported after the upgrade are sniffed
+at import time and need nothing.
 
 ## First sync only: check the Actions tab
 
