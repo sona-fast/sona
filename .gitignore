@@ -72,3 +72,6 @@ sticker-assets/
 # Pencil design files — kept local only (Pencil deprecated; source of truth is Claude Design)
 *.pen
 .ship/
+
+# local sniff-verification scratch images — never publish
+static/__verify/

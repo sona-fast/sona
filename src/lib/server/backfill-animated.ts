@@ -1,0 +1,101 @@
+import { and, asc, eq, gt, inArray } from 'drizzle-orm';
+import { stickers } from '$lib/server/db/schema';
+import { sniffAnimatedFromUrl } from '$lib/server/animated-raster';
+import type { Database } from '$lib/server/db';
+
+// One-off, idempotent backfill of stickers.is_animated for rows imported before
+// the column existed (SONA-123). New imports sniff at download time; this walks
+// static-raster rows ('png'/'webp' format — the only formats whose flag isn't
+// knowable without the bytes), fetches the stored file via sniffAnimatedFromUrl
+// (WebP ANIM / multi-frame GIF walk), and updates rows whose flag is wrong in
+// either direction. 'animated' (Lottie) and 'video' rows are stamped true in
+// bulk — no fetch needed.
+//
+// Idempotent and re-runnable: a second run finds nothing to change. A row whose
+// file can't be read (sniff null: fetch error/non-2xx) is reported as failed and
+// KEEPS its current flag — stamping it static could flip a correct true off.
+// Paging: rows are walked in id order; the response's lastId feeds the next
+// run's ?afterId until rasters < limit.
+//
+// Shared by two endpoints with different auth:
+//   POST /api/stickers/backfill-animated      — admin session (hooks gate)
+//   POST /api/cron/backfill-animated          — Bearer CRON_SECRET (workflow)
+
+// Default per-run raster cap: each raster costs one subrequest, and a Workers
+// invocation has a subrequest ceiling (~1000 on paid plans). 200 leaves ample
+// headroom; huge libraries page with ?afterId=<lastId> across runs.
+const DEFAULT_LIMIT = 200;
+
+export interface BackfillAnimatedResult {
+	rasters: number;
+	updated: number;
+	unchanged: number;
+	failed: Array<{ id: number; error: string }>;
+	lastId: number | null;
+}
+
+/** Parse ?limit / ?afterId with the same clamping both endpoints need: limit
+ * capped at 500 (an oversized value must not blow the subrequest budget). */
+export function parseBackfillParams(url: URL): { limit: number; afterId: number } {
+	const limitRaw = Number(url.searchParams.get('limit'));
+	const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : DEFAULT_LIMIT;
+	const afterRaw = Number(url.searchParams.get('afterId'));
+	const afterId = Number.isInteger(afterRaw) && afterRaw > 0 ? afterRaw : 0;
+	return { limit, afterId };
+}
+
+export async function runAnimatedBackfill(opts: {
+	db: Database;
+	/** The EVENT fetch on purpose: it resolves root-relative /img/<key> stored
+	 * URLs through the app router. Both callers are authenticated server-side
+	 * surfaces (admin session / cron secret), so the cookie-carrying fetch is
+	 * acceptable. */
+	fetchFn: typeof fetch;
+	origin: string;
+	limit: number;
+	afterId: number;
+}): Promise<BackfillAnimatedResult> {
+	const { db, fetchFn, origin, limit, afterId } = opts;
+
+	// Lottie/video rows: always animated, one bulk statement each run. The
+	// is_animated=0 guard makes it a true no-op after the first run (cheap enough
+	// to keep issuing every page).
+	await db
+		.update(stickers)
+		.set({ isAnimated: true })
+		.where(and(inArray(stickers.format, ['animated', 'video']), eq(stickers.isAnimated, false)));
+
+	const rasters = await db
+		.select({ id: stickers.id, imageUrl: stickers.imageUrl, isAnimated: stickers.isAnimated })
+		.from(stickers)
+		.where(and(inArray(stickers.format, ['png', 'webp']), gt(stickers.id, afterId)))
+		.orderBy(asc(stickers.id))
+		.limit(limit);
+
+	let updated = 0;
+	let unchanged = 0;
+	let lastId: number | null = null;
+	const failed: Array<{ id: number; error: string }> = [];
+
+	for (const row of rasters) {
+		const sniffed = await sniffAnimatedFromUrl(row.imageUrl, fetchFn, origin);
+		if (sniffed === null) {
+			failed.push({ id: row.id, error: 'could not fetch stored file' });
+		} else if (sniffed === row.isAnimated) {
+			unchanged++;
+		} else {
+			try {
+				await db.update(stickers).set({ isAnimated: sniffed }).where(eq(stickers.id, row.id));
+				updated++;
+			} catch (e) {
+				// A mid-run D1 error must not throw away the progress report — record
+				// the row as failed and keep going; the operator re-runs (idempotent)
+				// or resumes from lastId.
+				failed.push({ id: row.id, error: e instanceof Error ? e.message : String(e) });
+			}
+		}
+		lastId = row.id;
+	}
+
+	return { rasters: rasters.length, updated, unchanged, failed, lastId };
+}

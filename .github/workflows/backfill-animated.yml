@@ -1,0 +1,86 @@
+# One-time sticker animation-flag backfill (SONA-123).
+#
+# Runs the paged, idempotent is_animated backfill against the deployed site by
+# POSTing /api/cron/backfill-animated until every static-raster sticker has been
+# sniffed. Trigger it ONCE from the Actions tab (or `gh workflow run
+# backfill-animated.yml`) after deploying the release that adds the column —
+# see UPDATING.md. Re-running is safe: a second pass finds nothing to change.
+#
+# Required (same pair the other cron workflows use):
+#   - repo secret CRON_SECRET matching the Pages secret of the same name
+#   - repo variable SITE_URL = the site's base URL, e.g. https://example.com
+name: Sticker animation backfill
+
+on:
+  # Deliberately dispatch-only: this is a one-shot data backfill, not a
+  # recurring job — each page re-fetches every remaining raster, so scheduling
+  # it would burn subrequests for no benefit.
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Rasters per request (lower on Workers free plan, e.g. 15)
+        default: '200'
+        required: false
+
+concurrency:
+  group: backfill-animated
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    # The canonical template is intentionally unconfigured, so it must not run
+    # fork workflows. Every fork (any other repo) runs this normally.
+    if: github.repository != 'sona-fast/sona'
+    steps:
+      - name: Run paged backfill
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          if [ -z "$SITE_URL" ]; then
+            echo "::error::SITE_URL repo variable is not set (Settings → Secrets and variables → Actions → Variables)"; exit 1
+          fi
+          # Unlike the optional scheduled crons, this workflow only ever runs
+          # because someone dispatched it — a missing secret is a real
+          # misconfiguration, so fail loudly rather than skip.
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET repo secret is not set — set it to match the Pages secret of the same name"; exit 1
+          fi
+          case "$LIMIT" in (''|*[!0-9]*) echo "::warning::non-numeric limit '$LIMIT' — using 200"; LIMIT=200;; esac
+          # Clamp to the server's own 1..500 range so the loop's accounting can
+          # never disagree with what the endpoint actually does.
+          if [ "$LIMIT" -lt 1 ] || [ "$LIMIT" -gt 500 ]; then
+            echo "::warning::limit $LIMIT out of range — using 200"; LIMIT=200
+          fi
+          after=0
+          total_updated=0
+          total_failed=0
+          # Page until the server returns an empty page. The page-count backstop
+          # (200 pages x limit) only trips on a runaway loop, not a real library.
+          for i in $(seq 1 200); do
+            code=$(curl -sS --max-time 300 -o response.json -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "${SITE_URL%/}/api/cron/backfill-animated?limit=${LIMIT}&afterId=${after}")
+            echo "page $i (afterId=$after): HTTP $code"
+            cat response.json; echo
+            if [ "$code" != "200" ]; then
+              echo "::error::Backfill endpoint returned HTTP $code"; exit 1
+            fi
+            rasters=$(jq -r '.rasters' response.json)
+            total_updated=$(( total_updated + $(jq -r '.updated' response.json) ))
+            total_failed=$(( total_failed + $(jq -r '.failed | length' response.json) ))
+            # Terminate on the server's own signal — an empty page — rather than
+            # comparing against the requested limit (the server clamps limits, so
+            # the two can disagree). Costs one extra request per run.
+            if [ "$rasters" -eq 0 ]; then
+              break
+            fi
+            after=$(jq -r '.lastId // 0' response.json)
+          done
+          echo "Backfill complete: $total_updated flags updated, $total_failed rows failed."
+          if [ "$total_failed" -gt 0 ]; then
+            echo "::warning::$total_failed rows could not be read — re-run the workflow to retry them (idempotent)."
+          fi

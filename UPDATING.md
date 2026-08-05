@@ -58,8 +58,17 @@ show a PNG download option; picking it is safe — the download endpoint sniffs
 the file's actual bytes and serves the original file instead of a flattened
 conversion — but the option shouldn't be there, and the backfill removes it.
 
-After this release deploys, run the backfill **once**: open your site signed in
-as admin, open the browser devtools console, and run:
+After this release deploys, run the backfill **once** from your fork repo's
+Actions tab: **Sticker animation backfill** → Run workflow (or
+`gh workflow run backfill-animated.yml`). It uses the same `CRON_SECRET` +
+`SITE_URL` pair as the other scheduled workflows — no admin login needed — and
+pages through your whole library automatically, retry-safely (it's idempotent;
+re-running changes nothing). On a Workers **free-plan** fork, dispatch it with
+the `limit` input set to `15` to stay inside the tighter per-request subrequest
+budget; if a run still reports failed rows, dispatch it again — they clear.
+
+If you'd rather not use the workflow, the same job is available signed in as
+admin from the browser devtools console:
 
 ```js
 fetch('/api/stickers/backfill-animated', { method: 'POST' })
@@ -67,18 +76,9 @@ fetch('/api/stickers/backfill-animated', { method: 'POST' })
   .then(console.log);
 ```
 
-(`curl -X POST -H "Cookie: <your admin session cookie>" https://<your-site>/api/stickers/backfill-animated`
-also works, but pastes your session cookie into shell history — prefer the
-console.) It fetches each stored raster, sniffs it for animation, and fixes
-wrong flags in either direction. It's idempotent — re-running it changes
-nothing — and it reports any rows it couldn't read. Libraries with more than
-~200 raster stickers are paged: pass `?afterId=<lastId>` from the previous
-response until `rasters` comes back below the limit. On a Workers **free-plan**
-fork, add `?limit=15` (and page with `?afterId=`) to stay well inside the
-tighter per-request subrequest budget. If a free-plan run reports failed rows,
-it usually just hit that subrequest cap — re-run with `?afterId=` from the last
-successful id and they clear. Stickers imported after the upgrade are sniffed
-at import time and need nothing.
+Page manually with `?afterId=<lastId>` from each response until `rasters` comes
+back below the limit. Stickers imported after the upgrade are sniffed at import
+time and need nothing.
 
 ## First sync only: check the Actions tab
 
