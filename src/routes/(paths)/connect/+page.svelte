@@ -8,6 +8,7 @@
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
 	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
+	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
@@ -27,7 +28,8 @@
 			{ icon: BlueskyIcon, title: 'Bluesky', url: data.settings.blueskyUrl, at: true },
 			{ icon: TelegramIcon, title: 'Telegram', url: data.settings.telegramUrl, at: true },
 			{ icon: FurAffinityIcon, title: 'FurAffinity', url: data.settings.furAffinityUrl, at: false },
-			{ icon: TwitterIcon, title: 'Twitter', url: data.settings.twitterUrl, at: true }
+			{ icon: TwitterIcon, title: 'Twitter', url: data.settings.twitterUrl, at: true },
+			{ icon: InstagramIcon, title: 'Instagram', url: data.settings.instagramUrl, at: true }
 		].filter((s) => s.url)
 	);
 

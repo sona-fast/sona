@@ -53,6 +53,7 @@ export interface SiteSettings {
 	blueskyUrl: string;
 	telegramUrl: string;
 	furAffinityUrl: string;
+	instagramUrl: string;
 	furtrackUrl: string;
 	adminAvatarUrl: string;
 	/** The site's main character / FurTrack tag — who the site is for. Used to
@@ -138,6 +139,7 @@ const DEFAULTS: SiteSettings = {
 	blueskyUrl: '',
 	telegramUrl: '',
 	furAffinityUrl: '',
+	instagramUrl: '',
 	furtrackUrl: '',
 	adminAvatarUrl: '',
 	primaryCharacter: '',
@@ -208,6 +210,7 @@ export async function getSettings(
 			blueskyUrl: map.blueskyUrl ?? DEFAULTS.blueskyUrl,
 			telegramUrl: map.telegramUrl ?? DEFAULTS.telegramUrl,
 			furAffinityUrl: map.furAffinityUrl ?? DEFAULTS.furAffinityUrl,
+			instagramUrl: map.instagramUrl ?? DEFAULTS.instagramUrl,
 			furtrackUrl: map.furtrackUrl ?? DEFAULTS.furtrackUrl,
 			adminAvatarUrl: map.adminAvatarUrl ?? DEFAULTS.adminAvatarUrl,
 			primaryCharacter: map.primaryCharacter ?? DEFAULTS.primaryCharacter,

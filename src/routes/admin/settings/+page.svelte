@@ -39,6 +39,7 @@
 	let blueskyUrl = $state(data.settings.blueskyUrl);
 	let telegramUrl = $state(data.settings.telegramUrl);
 	let furAffinityUrl = $state(data.settings.furAffinityUrl);
+	let instagramUrl = $state(data.settings.instagramUrl);
 	let furtrackUrl = $state(data.settings.furtrackUrl);
 	let autoResyncEnabled = $state(data.settings.autoResyncEnabled);
 	let contactEmail = $state(data.settings.contactEmail);
@@ -224,6 +225,7 @@
 		blueskyUrl = data.settings.blueskyUrl;
 		telegramUrl = data.settings.telegramUrl;
 		furAffinityUrl = data.settings.furAffinityUrl;
+		instagramUrl = data.settings.instagramUrl;
 		furtrackUrl = data.settings.furtrackUrl;
 		autoResyncEnabled = data.settings.autoResyncEnabled;
 		storageProvider = data.settings.storageProvider;
@@ -409,6 +411,10 @@
 				<label>
 					<span>FurAffinity</span>
 					<input type="text" class="input" bind:value={furAffinityUrl} name="furaffinity" placeholder="https://www.furaffinity.net/user/yourname" />
+				</label>
+				<label>
+					<span>Instagram</span>
+					<input type="text" class="input" bind:value={instagramUrl} name="instagram" placeholder="https://instagram.com/yourname" />
 				</label>
 				<label>
 					<span>FurTrack</span>

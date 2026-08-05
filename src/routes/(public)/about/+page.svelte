@@ -6,6 +6,7 @@
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
 	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
 	import FurTrackIcon from '$lib/components/icons/FurTrackIcon.svelte';
+	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
@@ -40,7 +41,8 @@
 		{ url: settings.telegramUrl, icon: TelegramIcon, label: handleFromUrl(settings.telegramUrl, 'Telegram') },
 		{ url: settings.blueskyUrl, icon: BlueskyIcon, label: handleFromUrl(settings.blueskyUrl, 'Bluesky') },
 		{ url: settings.furAffinityUrl, icon: FurAffinityIcon, label: handleFromUrl(settings.furAffinityUrl, 'FurAffinity') },
-		{ url: settings.furtrackUrl, icon: FurTrackIcon, label: handleFromUrl(settings.furtrackUrl, 'FurTrack') }
+		{ url: settings.furtrackUrl, icon: FurTrackIcon, label: handleFromUrl(settings.furtrackUrl, 'FurTrack') },
+		{ url: settings.instagramUrl, icon: InstagramIcon, label: settings.instagramUrl ? `@${handleFromUrl(settings.instagramUrl, 'Instagram')}` : 'Instagram' }
 	].filter((l) => l.url));
 </script>
 

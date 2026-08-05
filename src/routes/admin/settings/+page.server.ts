@@ -310,6 +310,7 @@ export const actions = {
 			blueskyUrl,
 			telegramUrl: social('telegram', 'telegram'),
 			furAffinityUrl: social('furaffinity', 'furaffinity'),
+			instagramUrl: social('instagram', 'instagram'),
 			furtrackUrl: social('furtrack', 'furtrack'),
 			adminAvatarUrl,
 			themeId,

@@ -63,6 +63,19 @@ describe('getSettings — mapping & defaults', () => {
 		expect(s.r2PublicUrl).toBe('');
 	});
 
+	it('maps instagramUrl from a stored row and defaults it to blank', async () => {
+		const { db } = fakeReadDb([
+			{ key: 'instagramUrl', value: 'https://www.instagram.com/sparky' }
+		]);
+		const s = await getSettings(db);
+		expect(s.instagramUrl).toBe('https://www.instagram.com/sparky');
+
+		clearSettingsCache();
+		const { db: empty } = fakeReadDb([]);
+		// Blank default keeps the row hidden on /connect and /about until set.
+		expect((await getSettings(empty)).instagramUrl).toBe('');
+	});
+
 	it('defaults autoResyncEnabled to false when unset', async () => {
 		// Opt-in: an absent key must read as off so the cron stays a no-op.
 		const { db } = fakeReadDb([]);

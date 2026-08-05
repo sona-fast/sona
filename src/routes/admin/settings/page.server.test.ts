@@ -652,6 +652,14 @@ describe('settings saveSite — social() field directions', () => {
 		// A bare handle is normalized to the canonical profile URL before storage.
 		expect(await getRawSetting(db, 'twitterUrl')).toBe('https://twitter.com/taro');
 	});
+
+	it('saves the instagram field under the instagramUrl key', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(saveSiteEvent(platform, { instagram: 'sparky' }));
+
+		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://www.instagram.com/sparky');
+	});
 });
 
 // The absent-bluesky branch is covered above; these pin the present branch,
