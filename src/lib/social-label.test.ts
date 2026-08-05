@@ -21,6 +21,14 @@ describe('handleSegment', () => {
 	it('returns null for undefined', () => {
 		expect(handleSegment(undefined)).toBeNull();
 	});
+
+	it('decodes a percent-encoded handle', () => {
+		expect(handleSegment('https://www.instagram.com/tar%C3%B6')).toBe('tarö');
+	});
+
+	it('keeps the raw segment on a malformed escape', () => {
+		expect(handleSegment('https://www.instagram.com/tar%ZZ')).toBe('tar%ZZ');
+	});
 });
 
 describe('handleFromUrl', () => {
@@ -47,6 +55,10 @@ describe('atHandleFromUrl', () => {
 		// Regression: the old fallback comparison (handle === fallback) stripped
 		// the @ from a real handle that collides with the platform name.
 		expect(atHandleFromUrl('https://www.instagram.com/Instagram', 'Instagram')).toBe('@Instagram');
+	});
+
+	it('decodes a percent-encoded handle before prefixing', () => {
+		expect(atHandleFromUrl('https://www.instagram.com/tar%C3%B6', 'Instagram')).toBe('@tarö');
 	});
 
 	it('falls back for an unparseable string', () => {

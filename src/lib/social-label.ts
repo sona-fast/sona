@@ -21,7 +21,16 @@
 export function handleSegment(url: string | undefined): string | null {
 	if (!url) return null;
 	try {
-		return new URL(url).pathname.split('/').filter(Boolean).pop() ?? null;
+		const segment = new URL(url).pathname.split('/').filter(Boolean).pop() ?? null;
+		if (segment === null) return null;
+		// Non-ASCII handles arrive percent-encoded in the pathname; decode so the
+		// chip shows the handle, not its escapes. Malformed escapes keep the raw
+		// segment rather than throwing.
+		try {
+			return decodeURIComponent(segment);
+		} catch {
+			return segment;
+		}
 	} catch {
 		return null;
 	}
