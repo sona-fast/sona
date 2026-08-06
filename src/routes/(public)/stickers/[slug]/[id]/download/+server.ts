@@ -42,20 +42,12 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 /**
- * The source segment for the zone image transform, or null when row.imageUrl is
- * not transformable. Root-relative stored URLs (/img/<key>) and same-origin
- * absolutes become a bare path segment (no leading slash — naive string concat
- * doubled it and leaked query strings into the transform path); off-origin
- * absolutes ride along whole, query included. Anything unparseable or
- * non-http(s) is refused.
- *
- * Dropping the query on same-origin sources is safe by construction: stored
- * same-origin URLs are /img/<uuid-keyed paths> minted by our own storage
- * (assertSelfHosted rejects anything else at save time), which carry no
- * meaningful query. No '..' check is needed either — new URL() normalizes dot
- * segments, so pathname can never contain a literal '..' segment.
+ * The absolute http(s) URL to fetch-with-transform, or null when row.imageUrl
+ * isn't transformable. Root-relative stored URLs (/img/<key>) resolve against
+ * the request origin; anything unparseable or non-http(s) is refused. (No '..'
+ * concern — new URL() normalizes dot segments.)
  */
-function transformSource(imageUrl: string, origin: string): string | null {
+function transformableUrl(imageUrl: string, origin: string): string | null {
 	let parsed: URL;
 	try {
 		parsed = new URL(imageUrl, origin);
@@ -63,7 +55,7 @@ function transformSource(imageUrl: string, origin: string): string | null {
 		return null;
 	}
 	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-	return parsed.origin === origin ? parsed.pathname.slice(1) : parsed.href;
+	return parsed.href;
 }
 
 // GET /stickers/[slug]/[id]/download[?format=png]
@@ -136,17 +128,22 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 			return fileResponse(origBytes, originalName, origType, 'private, no-store');
 		}
 
-		// Same-zone image transform; the source rides along as the transform path.
-		// globalThis.fetch, NOT the event fetch: SvelteKit's fetch resolves
-		// same-origin URLs through the app router, so the /cdn-cgi/image request
-		// would never leave the isolate (no transform runs) and would carry the
-		// caller's cookies. Reject anything that didn't produce a PNG (an error
-		// page, an HTML challenge, a transform-disabled zone passing bytes
-		// through) and fall back to the buffered original.
-		const source = transformSource(row.imageUrl, url.origin);
+		// Zone image transform via fetch options (`cf.image`), the documented
+		// in-Worker mechanism. The /cdn-cgi/image/<url> form CANNOT work from
+		// inside the Worker: a subrequest to the Worker's own zone goes straight
+		// to the origin, where that path doesn't exist — verified live on
+		// sparky.ink, where an external /cdn-cgi/image request converts fine but
+		// the in-Worker one 404s and fell back. globalThis.fetch, NOT the event
+		// fetch, so the request leaves the isolate without the caller's cookies.
+		// Reject anything that didn't produce a PNG (transforms disabled on the
+		// zone → cf.image is ignored and the original passes through, an error
+		// page, an HTML challenge) and fall back to the buffered original.
+		const source = transformableUrl(row.imageUrl, url.origin);
 		if (source) {
 			try {
-				const res = await globalThis.fetch(`${url.origin}/cdn-cgi/image/format=png/${source}`);
+				const res = await globalThis.fetch(source, {
+					cf: { image: { format: 'png' } }
+				} as RequestInit);
 				if (res.ok && res.body && res.headers.get('content-type')?.startsWith('image/png')) {
 					return fileResponse(res.body, `${params.slug}-${id}.png`, 'image/png');
 				}

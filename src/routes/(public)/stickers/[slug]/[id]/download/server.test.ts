@@ -71,13 +71,16 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=300, stale-while-revalidate=3600');
 	});
 
-	it('?format=png proxies through the zone image transform via globalThis.fetch', async () => {
+	it('?format=png transforms via globalThis.fetch with cf.image options', async () => {
 		const transformFetch = stubTransformFetch(async () =>
 			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
 		);
 		const eventFetch = vi.fn(async () => new Response('orig')) as typeof fetch;
 		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
-		expect(transformFetch).toHaveBeenCalledWith(`${ORIGIN}/cdn-cgi/image/format=png/${FILE}`);
+		// The documented in-Worker mechanism: fetch the image URL itself with
+		// cf.image options. The /cdn-cgi/image/<url> form 404s from inside the
+		// Worker (own-zone subrequests skip the edge and hit the origin).
+		expect(transformFetch).toHaveBeenCalledWith(FILE, { cf: { image: { format: 'png' } } });
 		// The event fetch buffers the original for the animation sniff, but must
 		// NOT be used for the transform request (app-router-resolving,
 		// cookie-carrying — the /cdn-cgi request would never leave the isolate).
@@ -141,25 +144,24 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		);
 		const db = seedDb({ format: 'webp', imageUrl: `${FILE}?v=2` });
 		await GET(makeEvent(db, { search: '?format=png' }));
-		// Naive concat used to leak the query onto the transform path incorrectly;
-		// for an off-origin absolute the WHOLE URL (query included) is the source.
-		expect(transformFetch).toHaveBeenCalledWith(`${ORIGIN}/cdn-cgi/image/format=png/${FILE}?v=2`);
+		// The whole URL (query included) is fetched — a signed/versioned source
+		// must not lose its query.
+		expect(transformFetch).toHaveBeenCalledWith(`${FILE}?v=2`, { cf: { image: { format: 'png' } } });
 	});
 
-	it('builds a clean transform path for a root-relative /img stored URL', async () => {
+	it('resolves a root-relative /img stored URL against the request origin', async () => {
 		const transformFetch = stubTransformFetch(async () =>
 			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
 		);
 		const db = seedDb({ format: 'webp', imageUrl: '/img/stickers/pack/key.webp' });
 		await GET(makeEvent(db, { search: '?format=png' }));
-		// No doubled slash: the same-origin source rides along as a bare path.
-		expect(transformFetch).toHaveBeenCalledWith(`${ORIGIN}/cdn-cgi/image/format=png/img/stickers/pack/key.webp`);
+		expect(transformFetch).toHaveBeenCalledWith(`${ORIGIN}/img/stickers/pack/key.webp`, { cf: { image: { format: 'png' } } });
 	});
 
 	it('normalizes dot segments out of a stored path before it reaches the transform', async () => {
-		// transformSource relies on new URL() dot-segment normalization; pin it so
-		// a refactor to naive string handling can't leak '..' into the transform
-		// path.
+		// transformableUrl relies on new URL() dot-segment normalization; pin it
+		// so a refactor to naive string handling can't leak '..' into the fetched
+		// URL.
 		const transformFetch = stubTransformFetch(async () =>
 			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
 		);
@@ -168,7 +170,7 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		expect(transformFetch).toHaveBeenCalledTimes(1);
 		const called = String(transformFetch.mock.calls[0][0]);
 		expect(called).not.toContain('..');
-		expect(called).toBe(`${ORIGIN}/cdn-cgi/image/format=png/etc/x.webp`);
+		expect(called).toBe(`${ORIGIN}/etc/x.webp`);
 	});
 
 	it('falls back to the original bytes when the transform cannot run (SONA-21 off-zone)', async () => {
