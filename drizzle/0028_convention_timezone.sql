@@ -1,0 +1,13 @@
+-- The IANA zone of the convention itself (e.g. 'America/Denver'), taken from the
+-- cons.fyi feed, which has always published it.
+--
+-- start_date/end_date are bare calendar dates rather than instants, so "is this
+-- convention happening right now" can only be answered in the event's own zone.
+-- Asking in UTC is wrong at both ends of the event: a UTC-7 convention's final
+-- day ends at 17:00 local, which is most of an afternoon of a two-day con.
+--
+-- Nullable on purpose. Existing rows have no zone until the operator next runs
+-- the cons.fyi sync, and manually entered conventions may never have one, so the
+-- running check falls back to UTC with a one-day margin either side rather than
+-- refusing to show the state at all.
+ALTER TABLE `conventions` ADD `timezone` text;

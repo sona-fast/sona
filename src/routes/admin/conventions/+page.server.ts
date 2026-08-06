@@ -1,7 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { conventions } from '$lib/server/db/schema';
-import { eq, asc } from 'drizzle-orm';
+import { eq, asc, and, isNull } from 'drizzle-orm';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { fetchConsFyiEvents, findConsFyiEvent, fetchAttendingEvents, blueskyHandle } from '$lib/server/consfyi';
 import { getSettings } from '$lib/server/settings';
@@ -48,7 +48,8 @@ export const actions = {
 			endDate: event.endDate || null,
 			url: event.url || null,
 			status: normStatus(data.get('status')),
-			sourceId
+			sourceId,
+			timezone: event.timezone || null
 		});
 		return { success: true };
 	},
@@ -105,15 +106,30 @@ export const actions = {
 			};
 		}
 
-		const existing = new Set(
-			(await db.select({ sourceId: conventions.sourceId }).from(conventions))
-				.map((r) => r.sourceId)
-				.filter(Boolean)
-		);
+		const rows = await db
+			.select({ sourceId: conventions.sourceId, timezone: conventions.timezone })
+			.from(conventions);
+		const existing = new Set(rows.map((r) => r.sourceId).filter(Boolean));
+		// Rows already on the schedule that have no zone yet: either they were added
+		// before the column existed, or the feed had no zone at the time. Filling
+		// these in here is what keeps the timezone rollout free of a manual backfill.
+		const needsZone = new Set(rows.filter((r) => r.sourceId && !r.timezone).map((r) => r.sourceId));
 
 		let added = 0;
+		let backfilled = 0;
 		for (const e of events) {
-			if (existing.has(e.id)) continue;
+			if (existing.has(e.id)) {
+				// Already on the schedule, but with no zone. Never overwrites a zone
+				// that is already set.
+				if (e.timezone && needsZone.has(e.id)) {
+					await db
+						.update(conventions)
+						.set({ timezone: e.timezone })
+						.where(and(eq(conventions.sourceId, e.id), isNull(conventions.timezone)));
+					backfilled++;
+				}
+				continue;
+			}
 			await db.insert(conventions).values({
 				name: e.name,
 				location: e.location || null,
@@ -121,17 +137,24 @@ export const actions = {
 				endDate: e.endDate || null,
 				url: e.url || null,
 				status: 'confirmed',
-				sourceId: e.id
+				sourceId: e.id,
+				timezone: e.timezone || null
 			});
 			added++;
 		}
 
+		const parts: string[] = [];
+		if (added > 0) parts.push(`Synced ${added} convention${added === 1 ? '' : 's'} from cons.fyi.`);
+		if (backfilled > 0)
+			parts.push(
+				`Filled in the timezone for ${backfilled} convention${backfilled === 1 ? '' : 's'} already on your schedule.`
+			);
 		return {
 			success: true,
 			message:
-				added === 0
-					? `Already in sync — all ${events.length} con(s) you're going to are on your schedule.`
-					: `Synced ${added} convention${added === 1 ? '' : 's'} from cons.fyi.`
+				parts.length > 0
+					? parts.join(' ')
+					: `Already in sync — all ${events.length} con(s) you're going to are on your schedule.`
 		};
 	}
 } satisfies Actions;

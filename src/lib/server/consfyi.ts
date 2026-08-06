@@ -12,6 +12,9 @@ export interface ConsFyiEvent {
 	venue?: string;
 	/** Best-effort "City, ST" derived from the event's full address. */
 	location: string;
+	/** IANA zone of the event, e.g. 'America/Denver'. Present on every row of the
+	 * feed we have seen, but treated as optional so a row missing it still parses. */
+	timezone?: string;
 }
 
 const FEED_URL = 'https://data.cons.fyi/current.jsonl';
@@ -78,7 +81,8 @@ export async function fetchConsFyiEvents(): Promise<ConsFyiEvent[]> {
 					startDate: String(e.startDate),
 					endDate: typeof e.endDate === 'string' ? e.endDate : String(e.startDate),
 					venue: typeof e.venue === 'string' ? e.venue : undefined,
-					location: deriveLocation(e.address, e.venue)
+					location: deriveLocation(e.address, e.venue),
+					timezone: typeof e.timezone === 'string' ? e.timezone : undefined
 				});
 			} catch {
 				// Skip malformed lines.
