@@ -83,8 +83,13 @@
 	"gallery_meta_description": "Browse {count} commissioned artworks from the {siteName} collection.",
 	"gallery_count_artwork": [
 		{
-			"declarations": ["input count", "local countPlural = count: plural"],
-			"selectors": ["countPlural"],
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
 			"match": {
 				"countPlural=one": "{count} artwork",
 				"countPlural=other": "{count} artworks"
@@ -93,8 +98,13 @@
 	],
 	"gallery_count_fursuit": [
 		{
-			"declarations": ["input count", "local countPlural = count: plural"],
-			"selectors": ["countPlural"],
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
 			"match": {
 				"countPlural=one": "{count} fursuit photo",
 				"countPlural=other": "{count} fursuit photos"
@@ -148,8 +158,13 @@
 	"collections_meta_description": "Curated collections of commissioned artwork on {siteName}.",
 	"collections_count": [
 		{
-			"declarations": ["input count", "local countPlural = count: plural"],
-			"selectors": ["countPlural"],
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
 			"match": {
 				"countPlural=one": "{count} collection",
 				"countPlural=other": "{count} collections"
@@ -200,8 +215,13 @@
 	"stickers_by_label": "Art by",
 	"stickers_count": [
 		{
-			"declarations": ["input count", "local countPlural = count: plural"],
-			"selectors": ["countPlural"],
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
 			"match": {
 				"countPlural=one": "{count} sticker",
 				"countPlural=other": "{count} stickers"
@@ -425,7 +445,21 @@
 	"admin_upload_existing_tags": "Existing: {tags}",
 	"admin_upload_source_placeholder": "https://twitter.com/artist/status/... or furaffinity.net/view/...",
 	"admin_upload_submit": "Upload Artwork",
-	"admin_count_items": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} item", "countPlural=other": "{count} items"}}],
+	"admin_count_items": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} item",
+				"countPlural=other": "{count} items"
+			}
+		}
+	],
 	"admin_images_upload_new": "Upload New",
 	"admin_col_thumbnail": "Thumbnail",
 	"admin_col_commissioned": "Commissioned",
@@ -460,13 +494,111 @@
 	"admin_close": "Close",
 	"admin_remove": "Remove",
 	"admin_optional_placeholder": "Optional",
-	"admin_count_tags": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} tag", "countPlural=other": "{count} tags"}}],
-	"admin_count_images": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} image", "countPlural=other": "{count} images"}}],
-	"admin_count_collections": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} collection", "countPlural=other": "{count} collections"}}],
-	"admin_count_artworks": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} artwork", "countPlural=other": "{count} artworks"}}],
-	"admin_count_artists": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} artist", "countPlural=other": "{count} artists"}}],
-	"admin_count_stickers": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} sticker", "countPlural=other": "{count} stickers"}}],
-	"admin_count_characters": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} character", "countPlural=other": "{count} characters"}}],
+	"admin_count_tags": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} tag",
+				"countPlural=other": "{count} tags"
+			}
+		}
+	],
+	"admin_count_images": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} image",
+				"countPlural=other": "{count} images"
+			}
+		}
+	],
+	"admin_count_collections": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} collection",
+				"countPlural=other": "{count} collections"
+			}
+		}
+	],
+	"admin_count_artworks": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} artwork",
+				"countPlural=other": "{count} artworks"
+			}
+		}
+	],
+	"admin_count_artists": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} artist",
+				"countPlural=other": "{count} artists"
+			}
+		}
+	],
+	"admin_count_stickers": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} sticker",
+				"countPlural=other": "{count} stickers"
+			}
+		}
+	],
+	"admin_count_characters": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} character",
+				"countPlural=other": "{count} characters"
+			}
+		}
+	],
 	"admin_tags_add": "Add Tag",
 	"admin_tags_new": "New Tag",
 	"admin_tags_name_placeholder": "Tag name...",
@@ -534,7 +666,21 @@
 	"admin_new_manager_title": "New Manager",
 	"admin_new_artist_registry_search_hint": "Start typing to search the shared registry, or keep typing to add a new artist.",
 	"admin_new_artist_registry_results_label": "Matching registry artists",
-	"admin_new_artist_registry_results_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} registry match", "countPlural=other": "{count} registry matches"}}],
+	"admin_new_artist_registry_results_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} registry match",
+				"countPlural=other": "{count} registry matches"
+			}
+		}
+	],
 	"admin_new_artist_registry_no_matches": "No registry match — a new artist will be created.",
 	"admin_new_artist_registry_handle_hint": "Looks like a social link — searching the registry by handle “{handle}”. Pick a match, or type a name to add a new artist.",
 	"admin_new_artist_registry_handle_no_match": "No registry artist has that handle. Clear it or type a name to add a new artist.",
@@ -587,7 +733,21 @@
 	"admin_fursuit_setup_char_primary": "primary character",
 	"admin_fursuit_setup_char_a": " which photos are pulled is driven by your ",
 	"admin_fursuit_setup_char_b": " (a site setting). FurTrack is queried for that character's tag; you can also pick a different character at import time on this page.",
-	"admin_fursuit_import_summary": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Imported {count} photo", "countPlural=other": "Imported {count} photos"}}],
+	"admin_fursuit_import_summary": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Imported {count} photo",
+				"countPlural=other": "Imported {count} photos"
+			}
+		}
+	],
 	"admin_fursuit_import_skipped": " · {count} already imported",
 	"admin_fursuit_import_failed": " · {count} failed",
 	"admin_fursuit_view_gallery": "View in gallery",
@@ -624,7 +784,21 @@
 	"admin_something_wrong": "Something went wrong",
 	"admin_saving": "Saving…",
 	"admin_stickers_site_owner": "the site owner",
-	"admin_stickers_subtitle": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Sticker packs for Telegram & self-hosted — {count} pack", "countPlural=other": "Sticker packs for Telegram & self-hosted — {count} packs"}}],
+	"admin_stickers_subtitle": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Sticker packs for Telegram & self-hosted — {count} pack",
+				"countPlural=other": "Sticker packs for Telegram & self-hosted — {count} packs"
+			}
+		}
+	],
 	"admin_stickers_add_manual": "Add pack manually",
 	"admin_stickers_import_telegram": "Import from Telegram",
 	"admin_stickers_import_disabled_title": "Set TELEGRAM_BOT_TOKEN to enable Telegram import",
@@ -716,7 +890,21 @@
 	"admin_import_reach_toast": "Couldn't reach Telegram or pack not found",
 	"admin_import_toast_imported": "Imported {count}",
 	"admin_import_toast_updated": "updated {count}",
-	"admin_import_toast_failed": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} sticker failed to import", "countPlural=other": "{count} stickers failed to import"}}],
+	"admin_import_toast_failed": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} sticker failed to import",
+				"countPlural=other": "{count} stickers failed to import"
+			}
+		}
+	],
 	"admin_import_failed": "Import failed",
 	"admin_import_refused": "The shared registry refused this site's key, so nothing was imported. Registry said: {reason}",
 	"admin_import_resync": "Re-sync",
@@ -726,7 +914,21 @@
 	"admin_import_intro": "Paste a pack link and we'll fetch every sticker and its emoji.",
 	"admin_import_disabled_pre": "Telegram import isn't set up yet. Set ",
 	"admin_import_disabled_post": " to enable it.",
-	"admin_import_result_main": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Imported {count} sticker", "countPlural=other": "Imported {count} stickers"}}],
+	"admin_import_result_main": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Imported {count} sticker",
+				"countPlural=other": "Imported {count} stickers"
+			}
+		}
+	],
 	"admin_import_result_updated": " · {count} updated",
 	"admin_import_result_skipped": " · {count} skipped",
 	"admin_import_result_failed": " · {count} failed",
@@ -757,8 +959,36 @@
 	"admin_import_summary": "{eligible} of {total} selected · {artists} artists · {nsfw} NSFW",
 	"admin_import_unattributed_note": "{count} will import unattributed — assign artists now or later in the pack editor. Images hosted on your own storage.",
 	"admin_import_hosted_note": "Images will be downloaded and hosted on your own storage, crediting each artist.",
-	"admin_import_resync_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Re-sync {count} sticker", "countPlural=other": "Re-sync {count} stickers"}}],
-	"admin_import_import_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Import {count} sticker", "countPlural=other": "Import {count} stickers"}}],
+	"admin_import_resync_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Re-sync {count} sticker",
+				"countPlural=other": "Re-sync {count} stickers"
+			}
+		}
+	],
+	"admin_import_import_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Import {count} sticker",
+				"countPlural=other": "Import {count} stickers"
+			}
+		}
+	],
 	"admin_import_none_found": "No stickers found in \"{pack}\".",
 	"admin_import_pack_link": "Telegram pack link",
 	"admin_import_managed_label": "Managed by",
@@ -979,16 +1209,57 @@
 	"admin_registry_import_pill": "Import",
 	"admin_registry_import_artist": "Import Artist",
 	"admin_registry_importing": "Importing…",
-	"admin_registry_footer_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} artist in the shared registry", "countPlural=other": "{count} artists in the shared registry"}}],
+	"admin_registry_footer_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} artist in the shared registry",
+				"countPlural=other": "{count} artists in the shared registry"
+			}
+		}
+	],
 	"admin_registry_import_all": "Import all…",
 	"admin_registry_import_all_title": "Import all registry artists",
 	"admin_registry_import_all_message": "This creates {count} new artists on your site. {skipped} registry artists already linked to your existing artists are skipped — nothing local is ever overwritten.",
 	"admin_registry_keep_updated": "Keep imported artists updated from the registry",
 	"admin_registry_editable_note": "Imported artists remain fully editable and deletable on your site.",
-	"admin_registry_import_n": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Import {count} artist", "countPlural=other": "Import {count} artists"}}],
-	"admin_registry_imported_toast": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Imported {count} artist from the registry", "countPlural=other": "Imported {count} artists from the registry"}}],
+	"admin_registry_import_n": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Import {count} artist",
+				"countPlural=other": "Import {count} artists"
+			}
+		}
+	],
+	"admin_registry_imported_toast": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Imported {count} artist from the registry",
+				"countPlural=other": "Imported {count} artists from the registry"
+			}
+		}
+	],
 	"admin_characters_profile_hint": "Linked from the character on public pages. The site's icon (favicon) also becomes this character's avatar, replacing any avatar derived from their social links.",
-
 	"admin_ref_picker_add_all": "Add all",
 	"admin_ref_picker_add_all_label": "Add all suggested colors to the palette",
 	"admin_ref_picker_already_in_palette": "Already in your palette",
@@ -1002,7 +1273,6 @@
 	"admin_ref_picker_suggestion_label": "Use {hex}",
 	"admin_ref_picker_suggestions": "Suggested colors",
 	"admin_ref_picker_title": "Pick from your reference sheet",
-
 	"admin_settings_contact_email": "Contact email (shown on the Share page)",
 	"admin_settings_site_url": "Site URL",
 	"admin_settings_site_url_hint": "Used to build links in outgoing emails, like password resets. Leave blank to use the address each request arrives on.",
@@ -1052,6 +1322,8 @@
 	"connect_about": "About {name}",
 	"connect_cons": "Upcoming cons",
 	"connect_next_up": "Next up",
+	"connect_here_now": "Here now",
+	"connect_here_through": "Through {date}",
 	"connect_no_cons": "No cons on the calendar right now — check back soon.",
 	"connect_online": "Find me online",
 	"connect_subtitle": "Thanks for saying hi! Here's how to find me online and at future cons.",

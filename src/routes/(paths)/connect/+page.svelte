@@ -36,6 +36,12 @@
 		return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
 	}
 
+	// The convention the operator is at right now, if any. Resolved server-side in
+	// the event's own timezone; see $lib/convention-window.
+	const liveCon = $derived(data.liveConvention);
+
+	// The live convention is already excluded from data.conventions server-side, so
+	// it never shows up twice.
 	const nextCon = $derived(data.conventions[0]);
 	const laterCons = $derived(data.conventions.slice(1));
 
@@ -55,6 +61,34 @@
 	<h1>{m.connect_title()}</h1>
 	<p>{m.connect_subtitle()}</p>
 </section>
+
+<!-- Promoted above the socials on the few days a year it is live. This page is
+     normally read at leisure; during a con it is read in a hallway by someone
+     who met the operator minutes ago, so the live state leads. -->
+{#if liveCon}
+	<hr class="divider" />
+
+	<section class="section">
+		<div class="here-now">
+			<span class="live-pill"><span class="live-dot"></span>{m.connect_here_now()}</span>
+
+			<div class="here-ident">
+				{#if data.settings.adminAvatarUrl}
+					<img class="here-avatar" src={data.settings.adminAvatarUrl} alt="" width="60" height="60" />
+				{/if}
+				<span class="here-who">{personaName}</span>
+			</div>
+
+			<span class="here-event">
+				<span class="here-name">{liveCon.name}</span>
+				{#if liveCon.location}<span class="here-loc">{liveCon.location}</span>{/if}
+			</span>
+			<span class="here-through">
+				{m.connect_here_through({ date: formatDate(liveCon.endDate || liveCon.startDate) })}
+			</span>
+		</div>
+	</section>
+{/if}
 
 <hr class="divider" />
 
@@ -116,6 +150,119 @@
 </section>
 
 <style>
+	/* The live state. Deliberately a step up from .next-con rather than a new
+	   colour: it reuses the primary-mixed border and wash that /art already uses
+	   for its featured section, so it reads as "elevated" in every fork theme
+	   instead of introducing a signal colour that only works in some of them. */
+	.here-now {
+		display: flex;
+		flex-direction: column;
+		gap: 13px;
+		padding: 16px;
+		border-radius: var(--radius-m);
+		border: 1px solid color-mix(in srgb, var(--primary) 55%, var(--border));
+		background:
+			linear-gradient(180deg, color-mix(in srgb, var(--primary) 12%, transparent), transparent 72%),
+			var(--card);
+	}
+
+	.live-pill {
+		align-self: flex-start;
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		font-family: var(--font-primary);
+		font-weight: 700;
+		font-size: 10px;
+		letter-spacing: 2px;
+		text-transform: uppercase;
+		color: var(--primary-foreground);
+		background: var(--primary);
+		padding: 4px 10px;
+		border-radius: var(--radius-pill);
+	}
+
+	.live-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--primary-foreground);
+	}
+
+	/* Motion is a second cue here, never the only one: the pill's label carries
+	   the state on its own for anyone who suppresses animation. */
+	@media (prefers-reduced-motion: no-preference) {
+		.live-dot {
+			animation: blip 2.4s ease-in-out infinite;
+		}
+		@keyframes blip {
+			0%,
+			72%,
+			100% {
+				opacity: 1;
+			}
+			84% {
+				opacity: 0.35;
+			}
+		}
+	}
+
+	.here-ident {
+		display: flex;
+		align-items: center;
+		gap: 13px;
+		min-width: 0;
+	}
+
+	.here-avatar {
+		width: 60px;
+		height: 60px;
+		border-radius: var(--radius-s);
+		flex: none;
+		object-fit: cover;
+		outline: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+		outline-offset: -1px;
+	}
+
+	.here-who {
+		font-family: var(--font-primary);
+		font-weight: 700;
+		font-size: 22px;
+		letter-spacing: 0.5px;
+		line-height: 1.15;
+		min-width: 0;
+		overflow-wrap: break-word;
+	}
+
+	.here-event {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+	}
+
+	.here-name {
+		font-family: var(--font-primary);
+		font-weight: 700;
+		font-size: 15px;
+		letter-spacing: 0.5px;
+		text-wrap: balance;
+	}
+
+	.here-loc {
+		font-family: var(--font-secondary);
+		font-size: 13px;
+		color: var(--muted-foreground);
+	}
+
+	.here-through {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		letter-spacing: 1px;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+		font-variant-numeric: tabular-nums;
+	}
+
 	.next-con {
 		display: flex;
 		flex-direction: column;

@@ -71,3 +71,25 @@ export function isLiveNow(
 ): boolean {
 	return con.status === 'confirmed' && isConventionRunning(con, now);
 }
+
+/**
+ * Whether the convention is over, asked in its own zone.
+ *
+ * Needed because the upcoming list is selected in SQL against a UTC date, which
+ * drops a convention whose final day is still running further west. The query
+ * therefore takes a day of slack and this decides what actually still counts as
+ * upcoming.
+ */
+export function hasEnded(con: ConventionWindow, now: Date): boolean {
+	const end = con.endDate || con.startDate;
+	const zoned = con.timezone ? dateInZone(now, con.timezone) : null;
+	if (zoned) return zoned > end;
+	return now.toISOString().slice(0, 10) > shiftDate(end, GRACE_DAYS);
+}
+
+/** The UTC date to select the upcoming list from: a day behind today, so a
+ * convention still running in a western zone survives the SQL filter and can be
+ * judged properly by isLiveNow / hasEnded. */
+export function upcomingCutoff(now: Date): string {
+	return shiftDate(now.toISOString().slice(0, 10), -GRACE_DAYS);
+}
