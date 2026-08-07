@@ -6,7 +6,7 @@
 // `$lib/handle-classify` (the New Artist combobox needs them too); re-exported
 // here so existing server importers keep their `handle-normalize` import path.
 
-import { sanitizeUrl } from './validate';
+import { sanitizeUrl, stripControlChars } from './validate';
 import {
 	HOST_PREFIXES,
 	SOCIAL_KEY_TO_PLATFORM,
@@ -84,7 +84,11 @@ export function normalizeSocialUrl(
 	input: string | null | undefined
 ): string {
 	if (!input) return '';
-	const trimmed = input.trim();
+	// Same C0+DEL strip, in the same place, as sanitizeUrl — this function repeats
+	// that protocol denylist locally, so it has to run on the same string or the
+	// two drift: a leading control character is not whitespace, survives trim(),
+	// and walks '<NUL>javascript:…' past the check below.
+	const trimmed = stripControlChars(input).trim();
 	if (!trimmed) return '';
 
 	const lower = trimmed.toLowerCase();

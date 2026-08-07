@@ -63,6 +63,19 @@ describe('normalizeSocialUrl', () => {
 		expect(normalizeSocialUrl('twitter', 'data:text/html,x')).toBe('');
 		expect(normalizeSocialUrl('twitter', 'JavaScript:alert(1)')).toBe('');
 	});
+
+	it('rejects a scheme hidden behind a leading control character', () => {
+		// The denylist above is a local copy of sanitizeUrl's, so it has to run on the
+		// same stripped string: a C0 character is not whitespace and survives trim(),
+		// which is how '<NUL>javascript:' walks past a check that only sees 'j'.
+		expect(normalizeSocialUrl('twitter', '\u0000javascript:alert(1)')).toBe('');
+		expect(normalizeSocialUrl('twitter', '\u0000  javascript:alert(1)')).toBe('');
+		expect(normalizeSocialUrl('twitter', 'java\u0000script:alert(1)')).toBe('');
+		// Strips before deciding, exactly as sanitizeUrl does — this is the visible
+		// half of the change, since the three rejections above were already reached
+		// (by a longer route) through the bare-handle character check.
+		expect(normalizeSocialUrl('twitter', 'ta\u0000ro')).toBe('https://twitter.com/taro');
+	});
 });
 
 // The regression this guards: Patreon's newer creator URLs are 'patreon.com/c/<user>'.

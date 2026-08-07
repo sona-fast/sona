@@ -1,10 +1,32 @@
 /**
+ * Remove C0 controls and DEL. Shared by every guard that runs a protocol
+ * denylist against a user-supplied URL, so the guards cannot strip different
+ * character sets and disagree about what they are inspecting.
+ */
+export function stripControlChars(s: string): string {
+	return s.replace(/[\u0000-\u001F\u007F]/g, '');
+}
+
+/**
  * Sanitize a URL — reject javascript: and data: protocols, enforce max length.
  * Returns the URL if valid, null if not.
  */
 export function sanitizeUrl(url: string | null | undefined): string | null {
 	if (!url) return null;
-	const trimmed = url.trim();
+	// Strip C0 controls and DEL before any check below. Browsers remove tab, LF
+	// and CR from a URL at parse time, so every guard here has to run on the
+	// string the browser will end up with, not the one we were handed: `/\t/host`
+	// passes the protocol-relative check as root-relative and is then read as
+	// `//host`, pointing at an external origin. That was the live bypass; the same
+	// split against `javascript:` only ever produced a value the URL parser
+	// rejects, so it is covered here as hardening rather than as a fix.
+	//
+	// Strip BEFORE the trim, not after: most C0 characters are not whitespace, so
+	// a leading one survives trim() and leaves the spaces behind it in place —
+	// enough to walk '<NUL>   javascript:alert(1)' past the protocol check too.
+	// These characters are never legal unescaped in a URL, so removing them
+	// cannot damage a legitimate value.
+	const trimmed = stripControlChars(url).trim();
 	if (!trimmed) return null;
 	if (trimmed.length > 2048) return null;
 
