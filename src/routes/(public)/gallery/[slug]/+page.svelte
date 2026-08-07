@@ -356,17 +356,13 @@
 		gap: 12px;
 	}
 
-	/* AKA — a quiet mono annotation under the name, like a code comment. */
+	/* AKA — a quiet mono annotation under the name. */
 	.aka {
 		font-family: var(--font-primary);
 		font-size: 12px;
 		color: var(--muted-foreground);
 		margin-top: 2px;
 		letter-spacing: -0.01em;
-	}
-
-	.aka .cmt {
-		opacity: 0.65;
 	}
 
 	.artist-name {
