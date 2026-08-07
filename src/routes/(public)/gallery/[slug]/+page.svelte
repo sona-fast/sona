@@ -140,7 +140,7 @@
 				<div>
 					<a class="artist-name" href="/gallery?artist={encodeURIComponent(image.artistName ?? '')}">{image.artistName}</a>
 					{#if data.formerNames.length > 0}
-						<div class="aka"><span class="cmt">// {m.gallery_aka_formerly()}</span> {data.formerNames.join(', ')}</div>
+						<div class="aka"><span class="cmt">{m.gallery_aka_formerly()}</span> {data.formerNames.join(', ')}</div>
 					{/if}
 					{#if image.commissionedAt}
 						<p class="commission-date">{m.gallery_commissioned_date({ date: formatDate(image.commissionedAt) })}</p>

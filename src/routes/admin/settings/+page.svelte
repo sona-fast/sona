@@ -1573,7 +1573,6 @@
 	}
 
 	/* ── Supporter key (SONA-105) ─────────────────────────────── */
-	/* Mono `//` eyebrow carries the state (valid / expired). */
 	/* Theme-native section eyebrow (matches the observability dashboard's
 	   convention) — the mock's marketing-brand "//" slash device is deliberately
 	   NOT used here: fork admin surfaces follow the fork's theme, not sona.fast
