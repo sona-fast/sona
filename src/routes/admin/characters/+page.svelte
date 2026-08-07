@@ -92,13 +92,13 @@
 					<td>{m.admin_count_images({ count: char.imageCount })}</td>
 					<td>
 						<div class="social-icons">
-							{#if char.twitterUrl}<a href={char.twitterUrl} target="_blank" rel="noopener" aria-label="Twitter" class="social-icon"><TwitterIcon size={14} /></a>{/if}
-							{#if char.blueskyUrl}<a href={char.blueskyUrl} target="_blank" rel="noopener" aria-label="Bluesky" class="social-icon"><BlueskyIcon size={14} /></a>{/if}
-							{#if char.telegramUrl}<a href={char.telegramUrl} target="_blank" rel="noopener" aria-label="Telegram" class="social-icon"><TelegramIcon size={14} /></a>{/if}
-							{#if char.furAffinityUrl}<a href={char.furAffinityUrl} target="_blank" rel="noopener" aria-label="FurAffinity" class="social-icon"><FurAffinityIcon size={14} /></a>{/if}
-							{#if char.deviantArtUrl}<a href={char.deviantArtUrl} target="_blank" rel="noopener" aria-label="DeviantArt" class="social-icon"><DeviantArtIcon size={14} /></a>{/if}
-							{#if char.patreonUrl}<a href={char.patreonUrl} target="_blank" rel="noopener" aria-label="Patreon" class="social-icon"><PatreonIcon size={14} /></a>{/if}
-							{#if char.instagramUrl}<a href={char.instagramUrl} target="_blank" rel="noopener" aria-label="Instagram" class="social-icon"><InstagramIcon size={14} /></a>{/if}
+							{#if char.twitterUrl}<a href={char.twitterUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: char.name, platform: 'Twitter' })} class="social-icon"><TwitterIcon size={14} /></a>{/if}
+							{#if char.blueskyUrl}<a href={char.blueskyUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: char.name, platform: 'Bluesky' })} class="social-icon"><BlueskyIcon size={14} /></a>{/if}
+							{#if char.telegramUrl}<a href={char.telegramUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: char.name, platform: 'Telegram' })} class="social-icon"><TelegramIcon size={14} /></a>{/if}
+							{#if char.furAffinityUrl}<a href={char.furAffinityUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: char.name, platform: 'FurAffinity' })} class="social-icon"><FurAffinityIcon size={14} /></a>{/if}
+							{#if char.deviantArtUrl}<a href={char.deviantArtUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: char.name, platform: 'DeviantArt' })} class="social-icon"><DeviantArtIcon size={14} /></a>{/if}
+							{#if char.patreonUrl}<a href={char.patreonUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: char.name, platform: 'Patreon' })} class="social-icon"><PatreonIcon size={14} /></a>{/if}
+							{#if char.instagramUrl}<a href={char.instagramUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: char.name, platform: 'Instagram' })} class="social-icon"><InstagramIcon size={14} /></a>{/if}
 						</div>
 					</td>
 					<td>
@@ -353,18 +353,6 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 10px;
-	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
 	}
 
 	.social-field {

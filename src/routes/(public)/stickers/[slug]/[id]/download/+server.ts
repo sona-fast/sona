@@ -58,6 +58,16 @@ function transformableUrl(imageUrl: string, origin: string): string | null {
 	return parsed.href;
 }
 
+/** The host row.imageUrl points at, for logging. Host only — the path can carry
+ * a signed query and has no diagnostic value here. */
+function sourceHost(imageUrl: string, origin: string): string {
+	try {
+		return new URL(imageUrl, origin).host;
+	} catch {
+		return 'unparseable';
+	}
+}
+
 // GET /stickers/[slug]/[id]/download[?format=png]
 // Streams a sticker's high-res file as a forced download (Content-Disposition).
 // A plain <a download> to the R2 custom domain wouldn't work (cross-origin downloads are
@@ -118,11 +128,21 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 		// the guard exactly when the size was unknown. Same for an unparseable
 		// header (NaN, and every comparison against NaN is false).
 		const declaredBytes = Number(orig.headers.get('content-length'));
-		if (!Number.isFinite(declaredBytes) || declaredBytes <= 0 || declaredBytes > MAX_CONVERT_BYTES) {
+		const undeclared = !Number.isFinite(declaredBytes) || declaredBytes <= 0;
+		if (undeclared || declaredBytes > MAX_CONVERT_BYTES) {
+			// An over-cap file is a deliberate decision; a missing or unparseable
+			// length is a storage backend behaving differently than assumed, and the
+			// user just silently got webp bytes from a ?format=png link. Say so in the
+			// Workers logs so the downgrade is diagnosable.
+			if (undeclared) {
+				console.warn(
+					`sticker download: ${sourceHost(row.imageUrl, url.origin)} declared no usable content-length, skipped png conversion`
+				);
+			}
 			// Original bytes under a ?format=png URL, exactly like the two fallbacks
 			// below — so it gets their no-store treatment, or the edge would pin webp
 			// bytes to the png URL for everyone.
-			return fileResponse(orig.body, originalName, origType, orig.headers, 'private, no-store');
+			return fileResponse(orig.body, originalName, origType, orig.headers.get('etag'), 'private, no-store');
 		}
 		let origBytes: Uint8Array<ArrayBuffer>;
 		try {
@@ -134,7 +154,7 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 			// Stale flag: refuse to flatten. Serve the original bytes under the
 			// original filename, uncacheable (same semantics as the fallback
 			// below) — the backfill corrects the flag and removes the PNG option.
-			return fileResponse(origBytes, originalName, origType, orig.headers, 'private, no-store');
+			return fileResponse(origBytes, originalName, origType, orig.headers.get('etag'), 'private, no-store');
 		}
 
 		// Zone image transform via fetch options (`cf.image`), the documented
@@ -154,7 +174,7 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 					cf: { image: { format: 'png' } }
 				} as RequestInit);
 				if (res.ok && res.body && res.headers.get('content-type')?.startsWith('image/png')) {
-					return fileResponse(res.body, `${params.slug}-${id}.png`, 'image/png', res.headers);
+					return fileResponse(res.body, `${params.slug}-${id}.png`, 'image/png', res.headers.get('etag'));
 				}
 				// Drain the rejected body so the connection is released.
 				await res.body?.cancel();
@@ -167,12 +187,17 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 		// not be edge-cached: the failure may be transient, and caching it would
 		// pin webp bytes to the png URL for everyone (hooks.server.ts honors an
 		// explicit Cache-Control instead of stamping its public s-maxage default).
-		return fileResponse(origBytes, originalName, origType, orig.headers, 'private, no-store');
+		return fileResponse(origBytes, originalName, origType, orig.headers.get('etag'), 'private, no-store');
 	}
 
 	const res = await fetch(row.imageUrl);
 	if (!res.ok || !res.body) error(502, 'Could not fetch sticker file');
-	return fileResponse(res.body, originalName, CONTENT_TYPES[ext] ?? 'application/octet-stream', res.headers);
+	return fileResponse(
+		res.body,
+		originalName,
+		CONTENT_TYPES[ext] ?? 'application/octet-stream',
+		res.headers.get('etag')
+	);
 };
 
 /**
@@ -210,18 +235,14 @@ async function readCapped(
 }
 
 /**
- * @param sourceHeaders Headers of the upstream response these bytes came from.
- * Its ETag is forwarded as this response's validator; every caller passes the
- * response it is serving, so the validator always describes the bytes actually
- * going out. This handler never answers a conditional request itself — nothing
- * here reads If-None-Match — so the validator is for the Cloudflare edge, which
- * can revalidate a cached public response instead of pulling the file again.
- *
- * Last-Modified is deliberately NOT forwarded. The Cache-Control below gives the
- * browser no freshness lifetime of its own (s-maxage binds shared caches only),
- * so a Last-Modified turns on heuristic caching — Chrome then treats the file as
- * fresh for a tenth of its age and stops revalidating at all, which is the
- * opposite of what the validator was added for.
+ * @param etag The upstream ETag for these exact bytes, forwarded as this
+ * response's validator. This handler never answers a conditional request itself
+ * — nothing here reads If-None-Match — so the validator is for the Cloudflare
+ * edge, which can revalidate a cached public response instead of pulling the
+ * file again. Last-Modified is deliberately not forwarded: the Cache-Control
+ * below gives the browser no freshness lifetime of its own (s-maxage binds
+ * shared caches only), so a Last-Modified turns on heuristic caching and Chrome
+ * stops revalidating altogether.
  *
  * @param cacheControl Match the caching the hooks stamp gives public non-HTML
  * responses: a short shared-cache TTL (5 min) + SWR, NOT a browser-cached hour —
@@ -231,7 +252,7 @@ function fileResponse(
 	body: BodyInit,
 	filename: string,
 	contentType: string,
-	sourceHeaders: Headers,
+	etag: string | null,
 	cacheControl = 'public, s-maxage=300, stale-while-revalidate=3600'
 ): Response {
 	const headers = new Headers({
@@ -239,7 +260,6 @@ function fileResponse(
 		'Content-Disposition': `attachment; filename="${filename}"`,
 		'Cache-Control': cacheControl
 	});
-	const etag = sourceHeaders.get('etag');
 	if (etag) headers.set('etag', etag);
 	return new Response(body, { headers });
 }

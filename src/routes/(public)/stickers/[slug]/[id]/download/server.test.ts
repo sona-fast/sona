@@ -66,6 +66,9 @@ function stubTransformFetch(impl: (input: RequestInfo | URL) => Promise<Response
 
 afterEach(() => {
 	vi.unstubAllGlobals();
+	// The console.warn spy below is a real spy on a global; without this it stays
+	// installed for the rest of the file.
+	vi.restoreAllMocks();
 });
 
 describe('GET /stickers/[slug]/[id]/download', () => {
@@ -144,6 +147,7 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		const transformFetch = stubTransformFetch(async () =>
 			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
 		);
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const eventFetch = vi.fn(async () =>
 			new Response('big-bytes', {
 				headers: { 'content-type': 'image/webp', 'content-length': '5000000' }
@@ -151,6 +155,10 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		) as typeof fetch;
 		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
 		expect(transformFetch).not.toHaveBeenCalled();
+		// Over-cap is the guard working as designed, not a surprise — it must not
+		// warn, or the log fills with noise and the undeclared-length case (which
+		// does warn) stops standing out.
+		expect(warn).not.toHaveBeenCalled();
 		expect(res.headers.get('Content-Type')).toBe('image/webp');
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
 	});
@@ -163,6 +171,7 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		const transformFetch = stubTransformFetch(async () =>
 			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
 		);
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const eventFetch = vi.fn(async () =>
 			// A ReadableStream body, mirroring a chunked origin — the shape this
 			// branch exists for. (A string body sets no content-length either; the
@@ -180,6 +189,11 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
 
 		expect(transformFetch).not.toHaveBeenCalled();
+		// The user asked for PNG and got webp. Without a log line that downgrade is
+		// invisible, so the branch has to say so — naming the host that behaved
+		// unexpectedly, since that is what a fork operator has to go look at.
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('cdn.example.com'));
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('skipped png conversion'));
 		expect(res.headers.get('Content-Type')).toBe('image/webp');
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
 		// Original bytes under a ?format=png URL, so the same no-store the other

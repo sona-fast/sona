@@ -32,6 +32,7 @@
 	"home_empty": "No artwork uploaded yet.",
 	"nav_fursuit": "Fursuit",
 	"common_unknown": "Unknown",
+	"common_social_link": "{name} on {platform}",
 	"gallery_view_artwork": "Artwork",
 	"gallery_view_fursuit": "Fursuit Photos",
 	"browse_gallery": "Browse Gallery",

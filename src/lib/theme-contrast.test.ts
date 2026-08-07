@@ -179,17 +179,24 @@ describe('component CSS: destructive fills carry the destructive-foreground toke
 		.filter((p) => p.endsWith('.svelte'))
 		.sort();
 
+	// Both declarations are matched loosely on purpose: `background` or
+	// `background-color`, any whitespace (a prettier wrap puts the value on its
+	// own line), and an omitted final semicolon. A stricter pattern doesn't fail —
+	// it stops matching, and the rule drops out of the scan unnoticed.
+	const DESTRUCTIVE_FILL = /background(?:-color)?:\s*var\(\s*--destructive\s*\)\s*(?:;|$)/;
+	const TEXT_COLOR = /(?:^|[;{]\s*)color:\s*([^;]+?)\s*(?:;|$)/;
+
 	const filled = components.flatMap((rel) => {
 		const source = readFileSync(new URL(rel, srcDir), 'utf8');
 		return [...source.matchAll(/^([^\n{]*)\{([^}]*)\}/gm)]
-			.filter(([, , body]) => /background(-color)?:\s*var\(--destructive\)\s*;/.test(body))
+			.filter(([, , body]) => DESTRUCTIVE_FILL.test(body))
 			.map(([, selector, body]) => ({ file: rel, selector: selector.trim(), body }));
 	});
 
 	// Accepted gap: a destructive fill that sets NO color at all inherits its text
 	// color and is invisible to this scan.
 	for (const { file, selector, body } of filled) {
-		const color = body.match(/(?:^|[;{]\s*)color:\s*([^;]+);/)?.[1]?.trim();
+		const color = body.match(TEXT_COLOR)?.[1];
 		if (color === undefined) continue;
 		it(`${file} ${selector} colors its text with the token`, () => {
 			expect(color).toBe('var(--destructive-foreground)');
@@ -354,6 +361,25 @@ describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SON
 		for (const { name, sel } of THEME_BLOCKS) {
 			it(`${name}: focus ring against the ${surface} surface meets 3:1`, () => {
 				expect(contrast(blockToken(sel, 'ring'), blockToken(sel, surface))).toBeGreaterThanOrEqual(3);
+			});
+		}
+	}
+});
+
+// --muted-foreground is not only hint TEXT: it's the resting color of the social
+// icons, the copy button, the select chevron and other icon-only affordances,
+// which WCAG 1.4.11 (non-text contrast) holds to 3:1 against their background.
+// Every pairing currently clears it with room to spare — the tightest is
+// terracotta light on --background at 4.53:1 — so this is a pin against a future
+// token tweak, not a fix. A failure here is a finding to report, not to silence
+// by tuning the assertion.
+describe('muted-foreground non-text contrast, every theme × surface × mode (WCAG 1.4.11)', () => {
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: icons colored --muted-foreground meet 3:1 on the ${surface} surface`, () => {
+				expect(
+					contrast(blockToken(sel, 'muted-foreground'), blockToken(sel, surface))
+				).toBeGreaterThanOrEqual(3);
 			});
 		}
 	}

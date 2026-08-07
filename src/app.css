@@ -316,6 +316,22 @@ input, select, textarea {
 	padding: 0 24px;
 }
 
+/* Visually hidden, still announced. Lives here rather than per-component:
+   Svelte scopes component styles, so seven copies of this rule had drifted into
+   the files that use the class, and a new component using it without pasting the
+   rule rendered the text visibly. */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
 /* Buttons — matches Lunaris Button/Default, Secondary, Outline, Destructive */
 .btn {
 	display: inline-flex;

@@ -32,6 +32,7 @@
 	"home_empty": "まだ作品がアップロードされていません。",
 	"nav_fursuit": "ファースーツ",
 	"common_unknown": "不明",
+	"common_social_link": "{name}の{platform}",
 	"gallery_view_artwork": "イラスト",
 	"gallery_view_fursuit": "着ぐるみ写真",
 	"browse_gallery": "ギャラリーを見る",

@@ -42,14 +42,33 @@ const SR_ONLY_SPAN = new RegExp(`${SR_ONLY_SPAN_OPEN.source}[^>]*>[\\s\\S]*?</sp
 // What a screen reader is left with inside a wrapper: drop the icons (aria-hidden)
 // and any visually-hidden text (which IS the name, checked for separately). An
 // empty remainder means the wrapper has nothing to announce on its own.
+//
+// Both icon spellings are stripped: self-closing `<TwitterIcon />` and the
+// paired `<TwitterIcon></TwitterIcon>`. Matching only the first left the second
+// as leftover text, which reads as "this wrapper announces something" and
+// silently excused a genuinely unlabelled anchor.
 function announceableText(inner: string): string {
 	return componentNames
-		.reduce((acc, name) => acc.replaceAll(new RegExp(`<${name}\\b[^>]*/>`, 'g'), ''), inner)
+		.reduce(
+			(acc, name) => acc.replaceAll(new RegExp(`<${name}\\b[^>]*(?:/>|>\\s*</${name}>)`, 'g'), ''),
+			inner
+		)
 		.replaceAll(SR_ONLY_SPAN, '')
 		.trim();
 }
 
 const hasSrOnly = (inner: string) => SR_ONLY_SPAN_OPEN.test(inner);
+
+describe('the .sr-only class actually hides its text', () => {
+	// Everything above treats visually-hidden text as an accessible name, which
+	// only holds while the rule exists. It lives once in the global stylesheet
+	// (component copies were removed), so this is the single place it can go
+	// missing — and losing it renders every platform name as visible clutter.
+	it('src/app.css defines it', () => {
+		const appCss = readFileSync(new URL('../../../app.css', import.meta.url), 'utf8');
+		expect(appCss).toMatch(/\.sr-only\s*\{[^}]*position:\s*absolute/);
+	});
+});
 
 // A wrapper is named either by aria-label/aria-labelledby on it or by
 // visually-hidden text inside it. Returns the ones with neither.
@@ -147,21 +166,5 @@ describe('nothing renders a social icon as a bare mobile badge', () => {
 
 	it('labels every one of them', () => {
 		expect(unnamedIn(matched)).toEqual([]);
-	});
-});
-
-describe('every component that uses .sr-only defines it', () => {
-	// Svelte scopes styles per component, so a .sr-only class with no rule in the
-	// same file is not hidden — the platform name renders as visible text next to
-	// the icon. Cheaper to catch here than in a screenshot.
-	it('has no component using the class without the rule', () => {
-		// Element-agnostic: the class is also used on a <p> and a <div>, not only
-		// on the icon-label spans SR_ONLY_SPAN_OPEN matches.
-		const users = [...sources].filter(([, source]) => /class=["'][^"']*\bsr-only\b/.test(source));
-		expect(users.length).toBeGreaterThanOrEqual(7);
-		const undefinedRule = users
-			.filter(([, source]) => !/\.sr-only\s*\{[^}]*position:\s*absolute/.test(source))
-			.map(([rel]) => rel);
-		expect(undefinedRule).toEqual([]);
 	});
 });

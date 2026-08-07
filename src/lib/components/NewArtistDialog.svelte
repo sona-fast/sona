@@ -467,9 +467,9 @@
 					<label class="social-field"><BlueskyIcon size={14} /><span class="sr-only">Bluesky</span><input type="text" class="input" bind:value={bluesky} placeholder="lunarpaws.bsky.social" /></label>
 					<label class="social-field"><TelegramIcon size={14} /><span class="sr-only">Telegram</span><input type="text" class="input" bind:value={telegram} placeholder="t.me/lunarpaws" /></label>
 					<label class="social-field"><FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span><input type="text" class="input" bind:value={furaffinity} placeholder="furaffinity.net/user/lunarpaws" /></label>
-					<label class="social-field"><DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span><input type="text" class="input" bind:value={deviantart} placeholder="deviantart.com/…" /></label>
+					<label class="social-field"><DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span><input type="text" class="input" bind:value={deviantart} placeholder="deviantart.com/..." /></label>
 					<label class="social-field"><PatreonIcon size={14} /><span class="sr-only">Patreon</span><input type="text" class="input" bind:value={patreon} placeholder="patreon.com/lunarpaws" /></label>
-					<label class="social-field"><InstagramIcon size={14} /><span class="sr-only">Instagram</span><input type="text" class="input" bind:value={instagram} placeholder="instagram.com/…" /></label>
+					<label class="social-field"><InstagramIcon size={14} /><span class="sr-only">Instagram</span><input type="text" class="input" bind:value={instagram} placeholder="instagram.com/..." /></label>
 				</div>
 			</div>
 
@@ -562,7 +562,6 @@
 	.linked { color: var(--primary); font-size: 12px; }
 	.unlink { background: none; border: none; padding: 0; cursor: pointer; color: var(--muted-foreground); font-size: 12px; font-family: inherit; text-decoration: underline; }
 	.unlink:hover { color: var(--foreground); }
-	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 	.reg-id { display: flex; flex-direction: column; min-width: 0; }
 	.reg-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.reg-handle { font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

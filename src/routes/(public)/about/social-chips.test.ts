@@ -39,8 +39,7 @@ describe('/about social chips carry their platform name', () => {
 
 	it('renders the platform as visually-hidden text inside the chip', () => {
 		expect(source).toMatch(/<span class="sr-only">\{link\.platform\}<\/span>/);
-		// That the class actually hides it is the repo-wide check in
-		// src/lib/components/icons/icons.test.ts, which covers this file too.
+		// The rule that actually hides it is global, in src/app.css.
 	});
 
 	it('does not double the name when the handle could not be derived', () => {

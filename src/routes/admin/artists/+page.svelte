@@ -40,7 +40,6 @@
 		}, 250);
 	}
 
-
 	// Why the Share button is disabled (or what it does): an AKA-linked row (#71)
 	// explains itself via the registry artist's name; an up-to-date row says so;
 	// otherwise it's the plain submit label. Used for both title and aria-label.
@@ -147,25 +146,25 @@
 					<td>
 						<div class="social-icons">
 							{#if artist.twitterUrl}
-								<a href={artist.twitterUrl} target="_blank" rel="noopener" aria-label="Twitter" class="social-icon"><TwitterIcon size={14} /></a>
+								<a href={artist.twitterUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: artist.name, platform: 'Twitter' })} class="social-icon"><TwitterIcon size={14} /></a>
 							{/if}
 							{#if artist.blueskyUrl}
-								<a href={artist.blueskyUrl} target="_blank" rel="noopener" aria-label="Bluesky" class="social-icon"><BlueskyIcon size={14} /></a>
+								<a href={artist.blueskyUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: artist.name, platform: 'Bluesky' })} class="social-icon"><BlueskyIcon size={14} /></a>
 							{/if}
 							{#if artist.telegramUrl}
-								<a href={artist.telegramUrl} target="_blank" rel="noopener" aria-label="Telegram" class="social-icon"><TelegramIcon size={14} /></a>
+								<a href={artist.telegramUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: artist.name, platform: 'Telegram' })} class="social-icon"><TelegramIcon size={14} /></a>
 							{/if}
 							{#if artist.furAffinityUrl}
-								<a href={artist.furAffinityUrl} target="_blank" rel="noopener" aria-label="FurAffinity" class="social-icon"><FurAffinityIcon size={14} /></a>
+								<a href={artist.furAffinityUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: artist.name, platform: 'FurAffinity' })} class="social-icon"><FurAffinityIcon size={14} /></a>
 							{/if}
 							{#if artist.deviantArtUrl}
-								<a href={artist.deviantArtUrl} target="_blank" rel="noopener" aria-label="DeviantArt" class="social-icon"><DeviantArtIcon size={14} /></a>
+								<a href={artist.deviantArtUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: artist.name, platform: 'DeviantArt' })} class="social-icon"><DeviantArtIcon size={14} /></a>
 							{/if}
 							{#if artist.patreonUrl}
-								<a href={artist.patreonUrl} target="_blank" rel="noopener" aria-label="Patreon" class="social-icon"><PatreonIcon size={14} /></a>
+								<a href={artist.patreonUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: artist.name, platform: 'Patreon' })} class="social-icon"><PatreonIcon size={14} /></a>
 							{/if}
 							{#if artist.instagramUrl}
-								<a href={artist.instagramUrl} target="_blank" rel="noopener" aria-label="Instagram" class="social-icon"><InstagramIcon size={14} /></a>
+								<a href={artist.instagramUrl} target="_blank" rel="noopener" aria-label={m.common_social_link({ name: artist.name, platform: 'Instagram' })} class="social-icon"><InstagramIcon size={14} /></a>
 							{/if}
 						</div>
 					</td>
@@ -688,18 +687,6 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 10px;
-	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
 	}
 
 	.social-field {
