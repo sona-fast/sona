@@ -20,8 +20,12 @@ test('default legal pages render and are reachable from the footer', async ({ pa
 	await page.goto('/privacy');
 	await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Your privacy rights' })).toBeVisible();
-	// CCPA/CPRA notice is part of the default baseline.
-	await expect(page.getByText(/California Consumer Privacy Act/)).toBeVisible();
+	// CCPA/CPRA notice is part of the default baseline. Scoped to the rights
+	// paragraph: the DNT/GPC section names the Act too, so a bare match on it
+	// resolves to two paragraphs and trips strict mode.
+	await expect(
+		page.getByText(/Depending on where you live.*California Consumer Privacy Act/)
+	).toBeVisible();
 	// "Last updated" renders from a stable source (the per-release defaults date),
 	// not `new Date()` — so it's a fixed dotted date, present on the stock page.
 	await expect(page.locator('.legal-updated')).toHaveText(/Last updated \d{4}\.\d{2}\.\d{2}/);

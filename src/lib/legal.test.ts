@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { createHash } from 'node:crypto';
 import {
 	defaultPrivacyPolicy,
 	defaultTerms,
@@ -64,6 +65,21 @@ describe('defaultPrivacyPolicy', () => {
 		expect(text).toContain('running total');
 	});
 
+	// CalOPPA requires the policy to say how the site answers Do Not Track. Saying
+	// nothing is a violation, and saying "we ignore it" is only defensible with the
+	// reason attached — so both halves are pinned, not just the heading.
+	it('discloses how DNT and GPC signals are handled, and why', () => {
+		const section = defaultPrivacyPolicy(withEmail).find((s) => /Do Not Track/.test(s.heading));
+		expect(section).toBeDefined();
+		const text = (section?.body ?? []).join('\n');
+		// Named signals, and the non-response stated plainly.
+		expect(text).toContain('Global Privacy Control');
+		expect(text).toMatch(/does not act on them/);
+		// The rationale that makes the non-response lawful: nothing to opt out of.
+		expect(text).toMatch(/do not sell or share personal information/);
+		expect(text).toMatch(/cross-context behavioral advertising/);
+	});
+
 	// Guards against the service-providers list drifting from the email feature:
 	// password resets go through Resend, which must be named as a processor.
 	it('names Resend as the email delivery provider', () => {
@@ -105,5 +121,36 @@ describe('legalUpdatedDate', () => {
 
 	it('exposes a valid YYYY-MM-DD defaults date', () => {
 		expect(LEGAL_DEFAULTS_UPDATED).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+	});
+});
+
+describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
+	// LEGAL_DEFAULTS_UPDATED is the "Last updated" date every stock fork shows, so
+	// it is only honest if it moves whenever the text does. Nothing enforced that
+	// — the constant is hand-maintained and an edit that forgot it would ship a
+	// stale date to every fork at once.
+	//
+	// So: pin a hash of the default text. Editing defaultPrivacyPolicy or
+	// defaultTerms fails this test, and the fix is to bump the date constant AND
+	// this hash in the same commit. Deliberately one assertion, not a diff — the
+	// point is to force the date bump, not to review the prose.
+	const RECORDED_TEXT_HASH = 'e7fa690d76c6df3a8106112d54856fc282bc640fde1feabf64c22c9b28f935c5';
+
+	function defaultsText(): string {
+		// Fixed opts so the hash depends on the prose alone, not the caller. Both
+		// variants, so an edit to the no-email contact fallback moves the hash too.
+		return [withEmail, noEmail]
+			.flatMap((opts) => [...defaultPrivacyPolicy(opts), ...defaultTerms(opts)])
+			.flatMap((s) => [s.heading, ...s.body])
+			.join('\n');
+	}
+
+	it('has not changed without a date bump', () => {
+		const actual = createHash('sha256').update(defaultsText()).digest('hex');
+		expect(
+			actual,
+			'The default legal text changed. Bump LEGAL_DEFAULTS_UPDATED in src/lib/legal.ts ' +
+				'and update RECORDED_TEXT_HASH here in the same commit.'
+		).toBe(RECORDED_TEXT_HASH);
 	});
 });

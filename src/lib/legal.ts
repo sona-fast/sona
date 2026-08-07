@@ -27,7 +27,7 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
-export const LEGAL_DEFAULTS_UPDATED = '2026-07-12';
+export const LEGAL_DEFAULTS_UPDATED = '2026-08-07';
 
 /**
  * Resolve the "Last updated" date to show on a legal page from a *stable* source
@@ -100,6 +100,15 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 			body: [
 				'Depending on where you live (for example, under the California Consumer Privacy Act, as amended by the CPRA), you may have the right to know what personal information is held about you, to request its deletion or correction, and to not be discriminated against for exercising these rights. Because we do not sell or share personal information, there is no "opt out of sale/sharing" to exercise.',
 				`To make a request, contact us. ${contactLine(opts)} We will respond within the time frame required by applicable law.`
+			]
+		},
+		// Not acting on DNT/GPC is only defensible because this text is true. A fork
+		// that adds advertising or third-party analytics must both honor GPC as an
+		// opt-out of sale/sharing and rewrite this section via Settings → Legal.
+		{
+			heading: 'Do Not Track and Global Privacy Control',
+			body: [
+				'Some browsers and extensions send a "Do Not Track" (DNT) or Global Privacy Control (GPC) signal. This site does not act on them. We do not sell or share personal information as the California Consumer Privacy Act defines those terms, and we do not use it for cross-context behavioral advertising, so these signals have no opt-out to carry here. The theme cookie described above remembers your display choice. It does not follow you to other sites.'
 			]
 		},
 		{
