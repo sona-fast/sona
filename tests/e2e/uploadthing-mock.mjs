@@ -30,6 +30,14 @@ const USAGE = {
 	limitBytes: 2 * 1024 * 1024 * 1024 // 2 GB
 };
 
+// The streaming put (SONA-136) signs an ingest URL locally and PUTs the
+// multipart body SERVER-SIDE — same reason as getUsageInfo above: only this
+// process-global patch can intercept it. The host derives from the token in
+// wrangler.e2e-uploadthing.toml ({ appId: 'e2e-app-id', regions: ['sea1'], no
+// ingestHost }) → https://sea1.ingest.uploadthing.com/<key>. Answer with the
+// real endpoint's success shape: { ufsUrl } on the app's ufs.sh domain.
+const INGEST_RE = /^https:\/\/[a-z0-9-]+\.ingest\.uploadthing\.com\//;
+
 const realFetch = globalThis.fetch;
 
 function urlOf(input) {
@@ -40,10 +48,23 @@ function urlOf(input) {
 }
 
 globalThis.fetch = async function patchedFetch(input, init) {
-	if (urlOf(input).startsWith(USAGE_INFO_URL)) {
+	const url = urlOf(input);
+	if (url.startsWith(USAGE_INFO_URL)) {
 		// Mimic UploadThing's 2xx usage response so UTApi.getUsageInfo() resolves
 		// and the load populates data.utUsage. Fields match GetUsageInfoResponse.
 		return new Response(JSON.stringify(USAGE), {
+			status: 200,
+			headers: { 'content-type': 'application/json' }
+		});
+	}
+	if (INGEST_RE.test(url) && (init?.method ?? input?.method) === 'PUT') {
+		// Drain the streamed body so the upload path's pump settles cleanly.
+		if (init?.body && typeof init.body.getReader === 'function') {
+			const reader = init.body.getReader();
+			while (!(await reader.read()).done);
+		}
+		const key = new URL(url).pathname.slice(1);
+		return new Response(JSON.stringify({ ufsUrl: `https://e2e-app-id.ufs.sh/f/${key}` }), {
 			status: 200,
 			headers: { 'content-type': 'application/json' }
 		});

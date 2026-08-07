@@ -32,6 +32,7 @@ vite.config.ts.timestamp-*
 .wrangler-e2e
 .wrangler-e2e-recovery
 .wrangler-e2e-uploadthing
+.wrangler-e2e-upload
 
 # Playwright
 /test-results

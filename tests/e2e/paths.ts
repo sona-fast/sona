@@ -47,3 +47,12 @@ export const E2E_WRANGLER_CONFIG_UT = path.join(here, 'wrangler.e2e-uploadthing.
 export const E2E_PERSIST_TO_UT = path.join(repoRoot, '.wrangler-e2e-uploadthing');
 export const E2E_PLATFORM_PERSIST_UT = path.join(E2E_PERSIST_TO_UT, 'v3');
 export const E2E_UPLOADTHING_MOCK = path.join(here, 'uploadthing-mock.mjs');
+
+// The upload spec drives a real admin upload through the UploadThing streaming
+// put (SONA-136): server-side ingest PUT answered by the uploadthing-mock.mjs
+// preload. It needs UPLOADTHING_TOKEN (so it reuses the UT wrangler config +
+// preload) but its OWN DB + server: it inserts images, and it relies on the
+// active provider staying 'uploadthing' — which the ut-stat spec flips on ITS
+// server. Sharing a server would race under fullyParallel.
+export const E2E_PERSIST_TO_UPLOAD = path.join(repoRoot, '.wrangler-e2e-upload');
+export const E2E_PLATFORM_PERSIST_UPLOAD = path.join(E2E_PERSIST_TO_UPLOAD, 'v3');

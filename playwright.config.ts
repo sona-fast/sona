@@ -9,16 +9,19 @@ import {
 	E2E_PLATFORM_PERSIST_UT,
 	E2E_PERSIST_TO_UT,
 	E2E_WRANGLER_CONFIG_UT,
-	E2E_UPLOADTHING_MOCK
+	E2E_UPLOADTHING_MOCK,
+	E2E_PLATFORM_PERSIST_UPLOAD,
+	E2E_PERSIST_TO_UPLOAD
 } from './tests/e2e/paths';
 
 // The shared read-only DB/server (gallery, palette), an isolated one for the
-// session-mutating password-recovery spec, and an isolated one for the ut-stat
+// session-mutating password-recovery spec, an isolated one for the ut-stat
 // spec (needs UPLOADTHING_TOKEN + the UT interceptor, which would perturb the
-// shared specs) — see below.
+// shared specs), and an isolated one for the upload spec — see below.
 const PORT = 4179;
 const RECOVERY_PORT = 4180;
 const UT_PORT = 4181;
+const UPLOAD_PORT = 4182;
 
 // Point `vite dev` at the E2E-only wrangler config + throwaway persist dir (see
 // svelte.config.js, which honours these envs) so tests run against the DB the
@@ -58,8 +61,21 @@ const utServerEnv = {
 	NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${E2E_UPLOADTHING_MOCK}`.trim()
 };
 
+// The upload spec exercises the streaming admin upload against the (mocked)
+// UploadThing ingest endpoint: same wrangler config + preload as ut-stat (the
+// preload also answers the ingest PUT), but its own DB + server — it inserts
+// image rows and depends on the seeded default provider ('uploadthing'), which
+// ut-stat flips on its own server. See tests/e2e/paths.ts.
+const uploadServerEnv = {
+	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG_UT,
+	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_UPLOAD,
+	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_UPLOAD,
+	NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${E2E_UPLOADTHING_MOCK}`.trim()
+};
+
 const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
 const UT_SPEC = '**/ut-stat.spec.ts';
+const UPLOAD_SPEC = '**/upload.spec.ts';
 
 // Seed a fresh throwaway D1 first, then boot the dev server against it. Seeding
 // here (not in globalSetup) guarantees it finishes before the server reads the
@@ -88,7 +104,7 @@ export default defineConfig({
 	projects: [
 		{
 			name: 'chromium',
-			testIgnore: [RECOVERY_SPEC, UT_SPEC],
+			testIgnore: [RECOVERY_SPEC, UT_SPEC, UPLOAD_SPEC],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
 		},
 		{
@@ -100,11 +116,17 @@ export default defineConfig({
 			name: 'ut-stat',
 			testMatch: UT_SPEC,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${UT_PORT}` }
+		},
+		{
+			name: 'upload',
+			testMatch: UPLOAD_SPEC,
+			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${UPLOAD_PORT}` }
 		}
 	],
 	webServer: [
 		webServer(PORT, sharedServerEnv),
 		webServer(RECOVERY_PORT, recoveryServerEnv),
-		webServer(UT_PORT, utServerEnv)
+		webServer(UT_PORT, utServerEnv),
+		webServer(UPLOAD_PORT, uploadServerEnv)
 	]
 });
