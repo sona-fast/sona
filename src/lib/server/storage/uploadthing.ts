@@ -33,6 +33,12 @@ interface IngestUploadResponse {
 // upload to a host the token author chose.
 const HOST_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/i;
 
+// Ceiling on the whole ingest PUT. Without it, a stalled UploadThing endpoint
+// holds the caller's request open until the platform kills the isolate.
+// Generous on purpose: worker-to-ingest moves a 50 MB model in well under a
+// minute on any sane path, so five minutes only ever fires on a genuine stall.
+const INGEST_TIMEOUT_MS = 5 * 60 * 1000;
+
 export class UploadThingStorage implements StorageProvider {
 	readonly id = 'uploadthing' as const;
 	#api: UTApi;
@@ -137,6 +143,9 @@ export class UploadThingStorage implements StorageProvider {
 					'x-uploadthing-version': UT_SDK_VERSION
 				},
 				body: fixed ? fixed.readable : framed,
+				// Aborting the fetch also cancels its body stream, which unwinds the
+				// pump — so one signal bounds the whole transfer.
+				signal: AbortSignal.timeout(INGEST_TIMEOUT_MS),
 				// Node (dev/tests) requires half-duplex for stream bodies; workerd
 				// streams uploads natively and ignores the flag.
 				...({ duplex: 'half' } as RequestInit)

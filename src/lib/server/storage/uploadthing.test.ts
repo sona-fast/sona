@@ -122,6 +122,9 @@ describe('UploadThing streaming put', () => {
 		// resumable-protocol range for a fresh upload.
 		expect(headers.get('x-uploadthing-version')).toBe(UT_SDK_VERSION);
 		expect(headers.get('range')).toBe('bytes=0-');
+		// The transfer is deadline-bounded: a stalled ingest endpoint must not
+		// hold the caller's request open until the platform kills the isolate.
+		expect(requestInit?.signal).toBeInstanceOf(AbortSignal);
 
 		// Round-trip: the stored URL is one the provider recognizes as its own.
 		expect(storage.owns(url)).toBe(true);
