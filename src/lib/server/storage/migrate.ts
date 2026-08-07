@@ -200,8 +200,10 @@ async function copyOne(
 	// is re-prepended, so the provider still sees the full body.
 	let body: ReadableStream<Uint8Array> | Uint8Array;
 	let head: Uint8Array;
+	let sourceReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 	if (streamable) {
 		const reader = res.body!.getReader();
+		sourceReader = reader;
 		const { chunks, bytes } = await readAtLeast(reader, SNIFF_BYTES);
 		head = bytes;
 		body = prependChunks(chunks, reader);
@@ -212,6 +214,9 @@ async function copyOne(
 	}
 	const sniffed = sniffImageType(head.slice(0, SNIFF_BYTES));
 	if (!isAllowedImageType(sniffed)) {
+		// Release the source on the streaming path — without the cancel the
+		// locked, undrained body keeps the connection open past the throw.
+		await sourceReader?.cancel().catch(() => {});
 		throw new Error(
 			`source is not an allowed raster image (sniffed ${sniffed ?? 'no known signature'}) for ${url}`
 		);

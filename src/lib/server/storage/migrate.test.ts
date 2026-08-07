@@ -177,11 +177,21 @@ describe('migrate copyOne content sniffing (SONA-141)', () => {
 		// onto the CDN origin would serve active content. The row must fail and
 		// stay pending, and the provider must never see the bytes.
 		const html = new TextEncoder().encode('<html><script>alert(1)</script></html>'.padEnd(128, ' '));
+		// The body arrives in two chunks so the source is still mid-stream when
+		// the sniff rejects — the reader must be cancelled, not abandoned locked.
+		const cancelled = vi.fn();
 		const fetchFn = vi.fn(
 			async () =>
-				new Response(streamOf(html), {
-					headers: { 'content-type': 'image/png', 'content-length': String(html.length) }
-				})
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start(c) {
+							c.enqueue(html.slice(0, 100));
+							c.enqueue(html.slice(100));
+						},
+						cancel: cancelled
+					}),
+					{ headers: { 'content-type': 'image/png', 'content-length': String(html.length) } }
+				)
 		) as unknown as typeof fetch;
 
 		const target = fakeTarget(async () => ({ url: 'https://cdn.example.com/never.png' }));
@@ -192,6 +202,8 @@ describe('migrate copyOne content sniffing (SONA-141)', () => {
 		expect(result.items[0]).toMatchObject({ status: 'failed' });
 		expect(result.items[0].error).toMatch(/not an allowed raster image/);
 		expect(target.put).not.toHaveBeenCalled();
+		// The source stream was released, not left locked and undrained.
+		expect(cancelled).toHaveBeenCalled();
 		// The DB still points at the old URL — nothing was repointed.
 		const row = sqlite.prepare('SELECT image_url FROM images').get() as { image_url: string };
 		expect(row.image_url).toBe('https://old.example/f/evil');
