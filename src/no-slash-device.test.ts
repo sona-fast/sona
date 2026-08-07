@@ -38,7 +38,7 @@ describe('the "//" slash device stays out of rendered markup', () => {
 		}
 	});
 
-	it('no message catalog value starts with "// "', () => {
+	it('no message catalog value starts with "//"', () => {
 		// Locale list comes from the inlang settings (the source of truth), and
 		// the sweep recurses into plural/variant objects so every string leaf is
 		// covered, not just top-level values.
@@ -47,7 +47,7 @@ describe('the "//" slash device stays out of rendered markup', () => {
 		) as { locales: string[] };
 		const sweep = (value: unknown, where: string) => {
 			if (typeof value === 'string') {
-				expect(value, `${where} carries the // device`).not.toMatch(/^\/\/ /);
+				expect(value, `${where} carries the // device`).not.toMatch(/^\/\//);
 			} else if (Array.isArray(value)) {
 				value.forEach((v, i) => sweep(v, `${where}[${i}]`));
 			} else if (value && typeof value === 'object') {
