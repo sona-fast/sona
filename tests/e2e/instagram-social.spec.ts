@@ -29,6 +29,10 @@ test.describe('instagram site social', () => {
 		await expect(chip).toBeVisible();
 		await expect(chip).toContainText('@taro');
 		await expect(chip).toHaveAttribute('rel', 'noopener noreferrer');
+		// The icon is aria-hidden, so the platform has to reach the accessible
+		// name through the visually-hidden span — "@taro" alone would be
+		// indistinguishable from the owner's other chips.
+		await expect(page.getByRole('link', { name: /Instagram.*@taro/ })).toBeVisible();
 	});
 
 	test('the public footer renders an Instagram icon link', async ({ page }) => {

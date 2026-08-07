@@ -463,13 +463,13 @@
 			<div class="social-section">
 				<h3>{m.admin_artists_col_social()}</h3>
 				<div class="social-grid">
-					<label class="social-field"><TwitterIcon size={14} /><input type="text" class="input" bind:value={twitter} placeholder="@handle" /></label>
-					<label class="social-field"><BlueskyIcon size={14} /><input type="text" class="input" bind:value={bluesky} placeholder="lunarpaws.bsky.social" /></label>
-					<label class="social-field"><TelegramIcon size={14} /><input type="text" class="input" bind:value={telegram} placeholder="t.me/lunarpaws" /></label>
-					<label class="social-field"><FurAffinityIcon size={14} /><input type="text" class="input" bind:value={furaffinity} placeholder="furaffinity.net/user/lunarpaws" /></label>
-					<label class="social-field"><DeviantArtIcon size={14} /><input type="text" class="input" bind:value={deviantart} placeholder="deviantart.com/…" /></label>
-					<label class="social-field"><PatreonIcon size={14} /><input type="text" class="input" bind:value={patreon} placeholder="patreon.com/lunarpaws" /></label>
-					<label class="social-field"><InstagramIcon size={14} /><input type="text" class="input" bind:value={instagram} placeholder="instagram.com/…" /></label>
+					<label class="social-field"><TwitterIcon size={14} /><span class="sr-only">Twitter</span><input type="text" class="input" bind:value={twitter} placeholder="@handle" /></label>
+					<label class="social-field"><BlueskyIcon size={14} /><span class="sr-only">Bluesky</span><input type="text" class="input" bind:value={bluesky} placeholder="lunarpaws.bsky.social" /></label>
+					<label class="social-field"><TelegramIcon size={14} /><span class="sr-only">Telegram</span><input type="text" class="input" bind:value={telegram} placeholder="t.me/lunarpaws" /></label>
+					<label class="social-field"><FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span><input type="text" class="input" bind:value={furaffinity} placeholder="furaffinity.net/user/lunarpaws" /></label>
+					<label class="social-field"><DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span><input type="text" class="input" bind:value={deviantart} placeholder="deviantart.com/…" /></label>
+					<label class="social-field"><PatreonIcon size={14} /><span class="sr-only">Patreon</span><input type="text" class="input" bind:value={patreon} placeholder="patreon.com/lunarpaws" /></label>
+					<label class="social-field"><InstagramIcon size={14} /><span class="sr-only">Instagram</span><input type="text" class="input" bind:value={instagram} placeholder="instagram.com/…" /></label>
 				</div>
 			</div>
 

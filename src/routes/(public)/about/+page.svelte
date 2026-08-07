@@ -8,7 +8,7 @@
 	import FurTrackIcon from '$lib/components/icons/FurTrackIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import { atHandleFromUrl, handleFromUrl } from '$lib/social-label';
+	import { atHandleFromUrl, handleFromUrl, handleSegment } from '$lib/social-label';
 
 	let { data } = $props();
 	let settings = $derived(data.settings);
@@ -26,14 +26,29 @@
 		return `${fmt(start)} → ${same ? fmt(end).slice(5) : fmt(end)}`;
 	}
 
-	const socialLinks = $derived([
-		{ url: settings.twitterUrl, icon: TwitterIcon, label: atHandleFromUrl(settings.twitterUrl, 'Twitter') },
-		{ url: settings.telegramUrl, icon: TelegramIcon, label: handleFromUrl(settings.telegramUrl, 'Telegram') },
-		{ url: settings.blueskyUrl, icon: BlueskyIcon, label: handleFromUrl(settings.blueskyUrl, 'Bluesky') },
-		{ url: settings.furAffinityUrl, icon: FurAffinityIcon, label: handleFromUrl(settings.furAffinityUrl, 'FurAffinity') },
-		{ url: settings.furtrackUrl, icon: FurTrackIcon, label: handleFromUrl(settings.furtrackUrl, 'FurTrack') },
-		{ url: settings.instagramUrl, icon: InstagramIcon, label: atHandleFromUrl(settings.instagramUrl, 'Instagram') }
-	].filter((l) => l.url));
+	// `platform` is the accessible half of each chip. The visible label is the
+	// handle, so an owner using one handle everywhere renders several chips
+	// reading just "@taro" — indistinguishable to a screen reader, which
+	// announces links out of context. The icon carries the platform visually and
+	// is aria-hidden, so the name has to come from the markup instead. hasHandle
+	// records whether the visible label is a handle at all, since the fallback is
+	// the platform name and repeating it would announce "Twitter Twitter".
+	const socialLinks = $derived(
+		[
+			{ url: settings.twitterUrl, icon: TwitterIcon, platform: 'Twitter', at: true },
+			{ url: settings.telegramUrl, icon: TelegramIcon, platform: 'Telegram', at: false },
+			{ url: settings.blueskyUrl, icon: BlueskyIcon, platform: 'Bluesky', at: false },
+			{ url: settings.furAffinityUrl, icon: FurAffinityIcon, platform: 'FurAffinity', at: false },
+			{ url: settings.furtrackUrl, icon: FurTrackIcon, platform: 'FurTrack', at: false },
+			{ url: settings.instagramUrl, icon: InstagramIcon, platform: 'Instagram', at: true }
+		]
+			.filter((l) => l.url)
+			.map((l) => ({
+				...l,
+				hasHandle: handleSegment(l.url) !== null,
+				label: (l.at ? atHandleFromUrl : handleFromUrl)(l.url, l.platform)
+			}))
+	);
 </script>
 
 <Meta
@@ -75,6 +90,9 @@
 				{#each socialLinks as link}
 					<a href={link.url} class="social-item" target="_blank" rel="noopener noreferrer">
 						<link.icon size={18} />
+						<!-- Skipped when no handle could be derived: the label is then already
+						     the platform name, and this would double it. -->
+						{#if link.hasHandle}<span class="sr-only">{link.platform}</span>{/if}
 						<span>{link.label}</span>
 					</a>
 				{/each}
@@ -197,6 +215,18 @@
 		flex-direction: column;
 		gap: 4px;
 		width: 100%;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	.social-item {

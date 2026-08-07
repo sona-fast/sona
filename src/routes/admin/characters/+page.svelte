@@ -92,13 +92,13 @@
 					<td>{m.admin_count_images({ count: char.imageCount })}</td>
 					<td>
 						<div class="social-icons">
-							{#if char.twitterUrl}<a href={char.twitterUrl} target="_blank" rel="noopener" class="social-icon"><TwitterIcon size={14} /></a>{/if}
-							{#if char.blueskyUrl}<a href={char.blueskyUrl} target="_blank" rel="noopener" class="social-icon"><BlueskyIcon size={14} /></a>{/if}
-							{#if char.telegramUrl}<a href={char.telegramUrl} target="_blank" rel="noopener" class="social-icon"><TelegramIcon size={14} /></a>{/if}
-							{#if char.furAffinityUrl}<a href={char.furAffinityUrl} target="_blank" rel="noopener" class="social-icon"><FurAffinityIcon size={14} /></a>{/if}
-							{#if char.deviantArtUrl}<a href={char.deviantArtUrl} target="_blank" rel="noopener" class="social-icon"><DeviantArtIcon size={14} /></a>{/if}
-							{#if char.patreonUrl}<a href={char.patreonUrl} target="_blank" rel="noopener" class="social-icon"><PatreonIcon size={14} /></a>{/if}
-							{#if char.instagramUrl}<a href={char.instagramUrl} target="_blank" rel="noopener" class="social-icon"><InstagramIcon size={14} /></a>{/if}
+							{#if char.twitterUrl}<a href={char.twitterUrl} target="_blank" rel="noopener" aria-label="Twitter" class="social-icon"><TwitterIcon size={14} /></a>{/if}
+							{#if char.blueskyUrl}<a href={char.blueskyUrl} target="_blank" rel="noopener" aria-label="Bluesky" class="social-icon"><BlueskyIcon size={14} /></a>{/if}
+							{#if char.telegramUrl}<a href={char.telegramUrl} target="_blank" rel="noopener" aria-label="Telegram" class="social-icon"><TelegramIcon size={14} /></a>{/if}
+							{#if char.furAffinityUrl}<a href={char.furAffinityUrl} target="_blank" rel="noopener" aria-label="FurAffinity" class="social-icon"><FurAffinityIcon size={14} /></a>{/if}
+							{#if char.deviantArtUrl}<a href={char.deviantArtUrl} target="_blank" rel="noopener" aria-label="DeviantArt" class="social-icon"><DeviantArtIcon size={14} /></a>{/if}
+							{#if char.patreonUrl}<a href={char.patreonUrl} target="_blank" rel="noopener" aria-label="Patreon" class="social-icon"><PatreonIcon size={14} /></a>{/if}
+							{#if char.instagramUrl}<a href={char.instagramUrl} target="_blank" rel="noopener" aria-label="Instagram" class="social-icon"><InstagramIcon size={14} /></a>{/if}
 						</div>
 					</td>
 					<td>
@@ -203,31 +203,31 @@
 					<h3>{m.admin_artists_col_social()}</h3>
 					<div class="social-grid">
 						<label class="social-field">
-							<TwitterIcon size={14} />
+							<TwitterIcon size={14} /><span class="sr-only">Twitter</span>
 							<input type="text" class="input" name="twitter" value={editingChar.twitterUrl || ''} placeholder="@handle" />
 						</label>
 						<label class="social-field">
-							<BlueskyIcon size={14} />
+							<BlueskyIcon size={14} /><span class="sr-only">Bluesky</span>
 							<input type="text" class="input" name="bluesky" value={editingChar.blueskyUrl || ''} placeholder="bsky.app/profile/..." />
 						</label>
 						<label class="social-field">
-							<TelegramIcon size={14} />
+							<TelegramIcon size={14} /><span class="sr-only">Telegram</span>
 							<input type="text" class="input" name="telegram" value={editingChar.telegramUrl || ''} placeholder="t.me/..." />
 						</label>
 						<label class="social-field">
-							<FurAffinityIcon size={14} />
+							<FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span>
 							<input type="text" class="input" name="furaffinity" value={editingChar.furAffinityUrl || ''} placeholder="furaffinity.net/user/..." />
 						</label>
 						<label class="social-field">
-							<DeviantArtIcon size={14} />
+							<DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span>
 							<input type="text" class="input" name="deviantart" value={editingChar.deviantArtUrl || ''} placeholder="deviantart.com/..." />
 						</label>
 						<label class="social-field">
-							<PatreonIcon size={14} />
+							<PatreonIcon size={14} /><span class="sr-only">Patreon</span>
 							<input type="text" class="input" name="patreon" value={editingChar.patreonUrl || ''} placeholder="patreon.com/..." />
 						</label>
 						<label class="social-field">
-							<InstagramIcon size={14} />
+							<InstagramIcon size={14} /><span class="sr-only">Instagram</span>
 							<input type="text" class="input" name="instagram" value={editingChar.instagramUrl || ''} placeholder="instagram.com/..." />
 						</label>
 					</div>
@@ -353,6 +353,18 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 10px;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	.social-field {

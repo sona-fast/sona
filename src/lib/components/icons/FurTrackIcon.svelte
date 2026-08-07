@@ -5,7 +5,7 @@
 <!-- FurTrack logo, monochrome: a bold italic "F" with a trail of paw prints
 ascending to the upper-right. Recreated from furtrack.com's favicon, dropping
 the brand purple; uses currentColor so it inherits the surrounding text color. -->
-<svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+<svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
 	<!-- italic "F": slanted stem + top and middle bars -->
 	<path d="M6.5 3 L9.7 3 L6.7 20 L3.5 20 Z" />
 	<path d="M6.5 3 L14 3 L13.4 6.2 L5.9 6.2 Z" />

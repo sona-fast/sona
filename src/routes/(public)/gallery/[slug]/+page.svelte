@@ -195,13 +195,13 @@
 									</a>
 								{/if}
 								<div class="char-socials">
-									{#if char.twitterUrl}<a href={char.twitterUrl} target="_blank" rel="noopener" class="char-social"><TwitterIcon size={14} /></a>{/if}
-									{#if char.blueskyUrl}<a href={char.blueskyUrl} target="_blank" rel="noopener" class="char-social"><BlueskyIcon size={14} /></a>{/if}
-									{#if char.telegramUrl}<a href={char.telegramUrl} target="_blank" rel="noopener" class="char-social"><TelegramIcon size={14} /></a>{/if}
-									{#if char.furAffinityUrl}<a href={char.furAffinityUrl} target="_blank" rel="noopener" class="char-social"><FurAffinityIcon size={14} /></a>{/if}
-									{#if char.deviantArtUrl}<a href={char.deviantArtUrl} target="_blank" rel="noopener" class="char-social"><DeviantArtIcon size={14} /></a>{/if}
-									{#if char.patreonUrl}<a href={char.patreonUrl} target="_blank" rel="noopener" class="char-social"><PatreonIcon size={14} /></a>{/if}
-									{#if char.instagramUrl}<a href={char.instagramUrl} target="_blank" rel="noopener" class="char-social"><InstagramIcon size={14} /></a>{/if}
+									{#if char.twitterUrl}<a href={char.twitterUrl} target="_blank" rel="noopener" aria-label="Twitter" class="char-social"><TwitterIcon size={14} /></a>{/if}
+									{#if char.blueskyUrl}<a href={char.blueskyUrl} target="_blank" rel="noopener" aria-label="Bluesky" class="char-social"><BlueskyIcon size={14} /></a>{/if}
+									{#if char.telegramUrl}<a href={char.telegramUrl} target="_blank" rel="noopener" aria-label="Telegram" class="char-social"><TelegramIcon size={14} /></a>{/if}
+									{#if char.furAffinityUrl}<a href={char.furAffinityUrl} target="_blank" rel="noopener" aria-label="FurAffinity" class="char-social"><FurAffinityIcon size={14} /></a>{/if}
+									{#if char.deviantArtUrl}<a href={char.deviantArtUrl} target="_blank" rel="noopener" aria-label="DeviantArt" class="char-social"><DeviantArtIcon size={14} /></a>{/if}
+									{#if char.patreonUrl}<a href={char.patreonUrl} target="_blank" rel="noopener" aria-label="Patreon" class="char-social"><PatreonIcon size={14} /></a>{/if}
+									{#if char.instagramUrl}<a href={char.instagramUrl} target="_blank" rel="noopener" aria-label="Instagram" class="char-social"><InstagramIcon size={14} /></a>{/if}
 								</div>
 							</div>
 						{/each}
