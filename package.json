@@ -17,9 +17,13 @@
 		"prepare": "npm run paraglide || echo '' && svelte-kit sync || echo ''",
 		"check": "npm run paraglide && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"pretest": "npm run paraglide",
 		"test": "vitest run",
+		"pretest:watch": "npm run paraglide",
 		"test:watch": "vitest",
+		"pretest:integration": "npm run paraglide",
 		"test:integration": "vitest run --config vitest.integration.config.ts",
+		"pretest:e2e": "npm run paraglide",
 		"test:e2e": "playwright test",
 		"test:e2e:seed": "tsx tests/e2e/seed.ts"
 	},
