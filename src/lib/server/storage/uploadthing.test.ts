@@ -194,6 +194,29 @@ describe('UploadThing streaming put', () => {
 		}
 	);
 
+	it('rejects a source that yields fewer bytes than declared', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stream } = countingSource(1, 8); // 8 bytes actual
+		const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			// Drain like a real fetch; swallow the readable's error — the pump's
+			// rejection must carry frameMultipart's undershoot cause, not a
+			// transport-level length error.
+			await new Response(init?.body as ReadableStream).arrayBuffer().catch(() => {});
+			return ingestOk(url);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const storage = new UploadThingStorage({ token: TOKEN });
+		await expect(
+			storage.put({
+				suggestedKey: 'artwork/x',
+				body: stream,
+				size: 16, // lies: declares more bytes than the stream holds
+				contentType: 'image/png',
+				filename: 'x.png'
+			})
+		).rejects.toThrow(/body was 8 bytes but 16 were declared/);
+	});
+
 	it('rejects when the source stream errors mid-body (workerd pump path)', async () => {
 		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
 		const stream = new ReadableStream<Uint8Array>({

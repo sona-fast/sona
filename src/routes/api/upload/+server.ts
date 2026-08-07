@@ -50,8 +50,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	}
 	const ext = extFromContentType(contentType);
 	// Store the normalized value the allowlist actually matched (parameters
-	// stripped) so what was validated is what is used downstream.
-	const storedType = contentType.split(';')[0].trim();
+	// stripped, lowercased) so what was validated is what is used downstream.
+	const storedType = contentType.split(';')[0].trim().toLowerCase();
 	const key = `${folder}/${crypto.randomUUID()}.${ext}`;
 
 	// Observability (issue #6): record upload health (provider-agnostic — works for

@@ -235,7 +235,9 @@ export class UploadThingStorage implements StorageProvider {
  * through the TransformStream), then `tail`. Errors the stream as soon as the
  * source yields more than `size` bytes — in Node an over-long body would
  * otherwise stall the fetch forever once content-length bytes have been sent
- * (workerd's FixedLengthStream catches the mismatch on its own).
+ * (workerd's FixedLengthStream catches the mismatch on its own) — and on
+ * flush when it yielded fewer, so an undershoot rejects with the real cause
+ * instead of a transport-level length error.
  */
 function frameMultipart(
 	head: Uint8Array,
@@ -254,7 +256,12 @@ function frameMultipart(
 				}
 				c.enqueue(chunk);
 			},
-			flush: (c) => c.enqueue(tail)
+			flush(c) {
+				if (seen !== size) {
+					throw new Error(`uploadthing: body was ${seen} bytes but ${size} were declared`);
+				}
+				c.enqueue(tail);
+			}
 		})
 	);
 }

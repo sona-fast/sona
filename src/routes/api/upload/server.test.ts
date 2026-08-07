@@ -97,9 +97,17 @@ describe('POST /api/upload', () => {
 		expect(put).not.toHaveBeenCalled();
 	});
 
-	it('passes the allowlist-matched content type (parameters stripped) to the provider', async () => {
-		const file = pngFile(1024, 'a.png', 'image/png; charset=UTF-8');
-		await POST(postEvent(makePlatform(), file));
+	it('passes the allowlist-matched content type (parameters stripped, lowercased) to the provider', async () => {
+		// new File() lowercases `type` per the Blob spec and the multipart
+		// round-trip re-normalizes too, so shadow the getter and hand the route
+		// the in-memory FormData — proving the endpoint normalizes on its own.
+		const file = pngFile(1024);
+		Object.defineProperty(file, 'type', { value: 'IMAGE/PNG; charset=UTF-8' });
+		const event = postEvent(makePlatform(), file) as { request: Request };
+		const form = new FormData();
+		form.append('file', file);
+		vi.spyOn(event.request, 'formData').mockResolvedValue(form);
+		await POST(event as never);
 		expect(put).toHaveBeenCalledTimes(1);
 		expect((put.mock.calls[0][0] as unknown as { contentType: string }).contentType).toBe(
 			'image/png'
