@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { verifySignature } from '@uploadthing/shared';
+import { version as UT_SDK_VERSION } from 'uploadthing/package.json';
 import * as Micro from 'effect/Micro';
 import * as Redacted from 'effect/Redacted';
+import { countingSource, FakeFixedLengthStream } from '$lib/server/test/streams';
 import { UploadThingStorage } from './uploadthing';
 import { MAX_BUFFER_BYTES } from './buffer';
 import { ZeroKeepError } from './types';
@@ -33,23 +35,6 @@ const TOKEN = btoa(
 );
 
 const MiB = 1024 * 1024;
-
-/** A pull-based source of `chunks` chunks of `chunkSize` bytes that counts how
- * many have been handed out — the probe for "consumed incrementally". */
-function countingSource(chunks: number, chunkSize: number) {
-	const state = { produced: 0 };
-	const stream = new ReadableStream<Uint8Array>({
-		pull(controller) {
-			if (state.produced === chunks) {
-				controller.close();
-				return;
-			}
-			state.produced++;
-			controller.enqueue(new Uint8Array(chunkSize));
-		}
-	});
-	return { stream, state };
-}
 
 describe('UploadThing streaming put', () => {
 	afterEach(() => {
@@ -115,6 +100,8 @@ describe('UploadThing streaming put', () => {
 		expect(parsed.host).toBe('sea1.ingest.uploadthing.com');
 		expect(parsed.searchParams.get('x-ut-identifier')).toBe('app123');
 		expect(parsed.searchParams.get('x-ut-file-size')).toBe(String(size));
+		// No explicit ACL: the app default applies, matching UTApi.uploadFiles.
+		expect(parsed.searchParams.get('x-ut-acl')).toBeNull();
 		expect(parsed.searchParams.get('expires')).toBeTruthy();
 		const signature = parsed.searchParams.get('signature');
 		expect(signature).toBeTruthy();
@@ -133,9 +120,150 @@ describe('UploadThing streaming put', () => {
 		expect(contentLength).toBeGreaterThan(size);
 		expect(bytesSeen).toBe(contentLength);
 		expect(headers.get('content-type')).toMatch(/^multipart\/form-data; boundary=/);
+		// Protocol parity with the SDK's own ingest PUT.
+		expect(headers.get('x-uploadthing-version')).toBe(UT_SDK_VERSION);
 
 		// Round-trip: the stored URL is one the provider recognizes as its own.
 		expect(storage.owns(url)).toBe(true);
+	});
+
+	it('sends the framed body through FixedLengthStream when workerd provides it', async () => {
+		// workerd drops a manually-set content-length on a plain-stream body and
+		// falls back to chunked encoding — the fetch body must be the readable of
+		// a FixedLengthStream sized to the exact framed total.
+		const created: FakeFixedLengthStream[] = [];
+		class RecordingFixedLengthStream extends FakeFixedLengthStream {
+			constructor(byteLength: number) {
+				super(byteLength);
+				created.push(this);
+			}
+		}
+		vi.stubGlobal('FixedLengthStream', RecordingFixedLengthStream);
+
+		const size = 4 * 1024;
+		const { stream } = countingSource(4, 1024);
+		let requestInit: RequestInit | undefined;
+		const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			requestInit = init;
+			// Drain so the pipeTo pump settles.
+			await new Response(init?.body as ReadableStream).arrayBuffer();
+			const key = new URL(String(url)).pathname.slice(1);
+			return new Response(JSON.stringify({ ufsUrl: `https://app123.ufs.sh/f/${key}` }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			});
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const storage = new UploadThingStorage({ token: TOKEN });
+		await storage.put({
+			suggestedKey: 'artwork/x',
+			body: stream,
+			size,
+			contentType: 'image/png',
+			filename: 'x.png'
+		});
+
+		expect(created).toHaveLength(1);
+		const headers = new Headers(requestInit?.headers);
+		expect(created[0].byteLength).toBe(Number(headers.get('content-length')));
+		expect(requestInit?.body).toBe(created[0].readable);
+	});
+
+	it('rejects a source that yields more bytes than declared', async () => {
+		const { stream } = countingSource(3, 8); // 24 bytes actual
+		const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+			// Drain like a real fetch would; the framed stream errors mid-body.
+			await new Response(init?.body as ReadableStream).arrayBuffer();
+			return new Response(JSON.stringify({ ufsUrl: 'https://app123.ufs.sh/f/x' }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			});
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const storage = new UploadThingStorage({ token: TOKEN });
+		await expect(
+			storage.put({
+				suggestedKey: 'artwork/x',
+				body: stream,
+				size: 16, // lies: declares fewer bytes than the stream holds
+				contentType: 'image/png',
+				filename: 'x.png'
+			})
+		).rejects.toThrow(/exceeded the declared 16 bytes/);
+	});
+
+	it('strips CR/LF and quotes from the filename in the multipart head', async () => {
+		let bodyText = '';
+		const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			bodyText = await new Response(init?.body as ReadableStream).text();
+			const key = new URL(String(url)).pathname.slice(1);
+			return new Response(JSON.stringify({ ufsUrl: `https://app123.ufs.sh/f/${key}` }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			});
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const storage = new UploadThingStorage({ token: TOKEN });
+		const { stream } = countingSource(1, 4);
+		await storage.put({
+			suggestedKey: 'artwork/x',
+			body: stream,
+			size: 4,
+			contentType: 'image/png',
+			filename: 'evil"name\r\n.png'
+		});
+
+		const head = bodyText.slice(0, bodyText.indexOf('\r\n\r\n'));
+		const lines = head.split('\r\n');
+		// Exactly boundary + disposition + content-type: a smuggled CR/LF would
+		// add a line, an unescaped quote would break the filename token.
+		expect(lines).toHaveLength(3);
+		expect(lines[1]).toBe(
+			'Content-Disposition: form-data; name="file"; filename="evil_name__.png"'
+		);
+	});
+
+	it('rejects a content type with unsafe characters before touching the network', async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+		const storage = new UploadThingStorage({ token: TOKEN });
+		const { stream } = countingSource(1, 4);
+		await expect(
+			storage.put({
+				suggestedKey: 'artwork/x',
+				body: stream,
+				size: 4,
+				contentType: 'image/png\r\nx-injected: 1',
+				filename: 'x.png'
+			})
+		).rejects.toThrow(/unsafe characters/);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('rejects a token whose ingestHost is not a plain DNS name', async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+		const hostileToken = btoa(
+			JSON.stringify({
+				apiKey: 'sk_test_0123456789abcdef',
+				appId: 'app123',
+				regions: ['sea1'],
+				ingestHost: 'x@evil.example'
+			})
+		);
+		const storage = new UploadThingStorage({ token: hostileToken });
+		await expect(
+			storage.put({
+				suggestedKey: 'artwork/x',
+				body: countingSource(1, 4).stream,
+				size: 4,
+				contentType: 'image/png',
+				filename: 'x.png'
+			})
+		).rejects.toThrow(/UPLOADTHING_TOKEN/);
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it('rejects a failed ingest response with the status detail', async () => {
@@ -185,6 +313,36 @@ describe('UploadThing streaming put', () => {
 			})
 		).rejects.toThrow(/UPLOADTHING_TOKEN/);
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('round-trips: a URL returned by the streaming put survives an orphan sweep', async () => {
+		const fetchMock = vi.fn(async (url: string | URL | Request) => {
+			const key = new URL(String(url)).pathname.slice(1);
+			return new Response(JSON.stringify({ ufsUrl: `https://app123.ufs.sh/f/${key}` }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			});
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const storage = new UploadThingStorage({ token: TOKEN });
+		const { stream } = countingSource(1, 8);
+		const { url } = await storage.put({
+			suggestedKey: 'artwork/x',
+			body: stream,
+			size: 8,
+			contentType: 'image/png',
+			filename: 'x.png'
+		});
+
+		// The store lists exactly the generated key the put uploaded to; sweeping
+		// with the stored URL as the reference set must keep it.
+		deleteFiles.mockClear();
+		listFiles.mockResolvedValue({
+			files: [{ key: new URL(url).pathname.split('/').pop(), uploadedAt: 0 }]
+		});
+		const deleted = await storage.deleteOrphans([url]);
+		expect(deleted).toBe(0);
+		expect(deleteFiles).not.toHaveBeenCalled();
 	});
 });
 

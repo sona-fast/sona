@@ -177,16 +177,24 @@ async function copyOne(
 	if (!res.ok) throw new Error(`fetch ${res.status} for ${url}`);
 	const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
 	const ext = (contentType.split('/')[1] ?? 'bin').split(';')[0];
-	// Stream when the source declares its length (both providers upload without
-	// materializing given a size) — large objects must not be buffered whole
-	// here for the same isolate-memory reason as /api/upload (M8). A response
-	// without Content-Length (chunked) falls back to buffering, as before.
+	// Stream when the source declares its usable length (both providers upload
+	// without materializing given a size). Content-Encoding responses can't
+	// stream: their Content-Length counts compressed bytes while res.body
+	// yields decoded ones, so the declared size would be wrong. A response
+	// without a usable length falls back to buffering the whole body — uncapped,
+	// the pre-existing behavior of this path.
 	const declaredSize = Number(res.headers.get('content-length'));
-	const streamable = res.body && Number.isFinite(declaredSize) && declaredSize > 0;
+	const stream =
+		res.body &&
+		Number.isFinite(declaredSize) &&
+		declaredSize > 0 &&
+		!res.headers.get('content-encoding')
+			? res.body
+			: null;
 	const { url: newUrl } = await target.put({
 		suggestedKey: `${baseKey}.${ext}`,
-		body: streamable ? res.body! : new Uint8Array(await res.arrayBuffer()),
-		size: streamable ? declaredSize : undefined,
+		body: stream ?? new Uint8Array(await res.arrayBuffer()),
+		size: stream ? declaredSize : undefined,
 		contentType,
 		filename: `${baseKey.split('/').pop()}.${ext}`
 	});

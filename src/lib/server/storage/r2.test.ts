@@ -1,41 +1,20 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { R2Bucket } from '@cloudflare/workers-types';
+import { countingSource, FakeFixedLengthStream } from '$lib/server/test/streams';
 import { R2Storage } from './r2';
 import { MAX_BUFFER_BYTES, MaxBytesExceededError } from './buffer';
 
 const MiB = 1024 * 1024;
 
-/** Minimal stand-in for workerd's FixedLengthStream: an identity transform that
- * records the declared length (the length *enforcement* is workerd's job; these
- * tests only assert we route through it instead of buffering). */
-class FakeFixedLengthStream {
-	readable: ReadableStream<Uint8Array>;
-	writable: WritableStream<Uint8Array>;
-	constructor(public byteLength: number) {
-		const t = new TransformStream<Uint8Array, Uint8Array>();
-		this.readable = t.readable;
-		this.writable = t.writable;
-	}
-}
-
-/** Pull-based source producing `chunks` × `chunkSize` bytes, counting pulls. */
-function countingSource(chunks: number, chunkSize: number) {
-	const state = { produced: 0 };
-	const stream = new ReadableStream<Uint8Array>({
-		pull(controller) {
-			if (state.produced === chunks) {
-				controller.close();
-				return;
-			}
-			state.produced++;
-			controller.enqueue(new Uint8Array(chunkSize));
-		}
-	});
-	return { stream, state };
-}
-
 function makeStorage(put: (key: string, value: unknown, opts?: unknown) => Promise<unknown>) {
-	const bucket = { put: vi.fn(put) };
+	const bucket = {
+		put: vi.fn(put),
+		delete: vi.fn(async () => {}),
+		list: vi.fn(async () => ({
+			objects: [] as { key: string; uploaded: Date }[],
+			truncated: false
+		}))
+	};
 	const storage = new R2Storage({
 		bucket: bucket as unknown as R2Bucket,
 		publicBase: 'https://cdn.example.com'
@@ -85,6 +64,58 @@ describe('R2 streaming put', () => {
 		// materialized. (TransformStream keeps a chunk or two in flight.)
 		expect(maxOutstanding).toBeLessThanOrEqual(4);
 		expect(url).toBe('https://cdn.example.com/models/big.vrm');
+	});
+
+	it('rejects the put when the source stream errors mid-body, deleting the partial key', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const boom = new Error('source died mid-body');
+		const stream = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.enqueue(new Uint8Array(8));
+				c.error(boom);
+			}
+		});
+		const { bucket, storage } = makeStorage(async (_key, value) => {
+			// Drain like the real bucket; swallow the readable's error — the pump's
+			// rejection is the one the Promise.all([put, pump]) contract guards.
+			await new Response(value as ReadableStream).arrayBuffer().catch(() => {});
+		});
+		await expect(
+			storage.put({
+				suggestedKey: 'a/b.png',
+				body: stream,
+				size: 16,
+				contentType: 'image/png',
+				filename: 'b.png'
+			})
+		).rejects.toThrow('source died mid-body');
+		// A failed pump may have committed a truncated object at the declared
+		// length — the key must be best-effort deleted, not left orphaned.
+		expect(bucket.delete).toHaveBeenCalledWith('a/b.png');
+	});
+
+	it('round-trips: a URL returned by the streaming put survives an orphan sweep', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stream } = countingSource(2, 8);
+		const { bucket, storage } = makeStorage(async (_key, value) => {
+			await new Response(value as ReadableStream).arrayBuffer();
+		});
+		const { url } = await storage.put({
+			suggestedKey: 'artwork/pic.png',
+			body: stream,
+			size: 16,
+			contentType: 'image/png',
+			filename: 'pic.png'
+		});
+		// The bucket now lists exactly the uploaded key; sweeping with the stored
+		// URL as the reference set must keep it.
+		bucket.list.mockResolvedValue({
+			objects: [{ key: 'artwork/pic.png', uploaded: new Date() }],
+			truncated: false
+		});
+		const deleted = await storage.deleteOrphans([url]);
+		expect(deleted).toBe(0);
+		expect(bucket.delete).not.toHaveBeenCalled();
 	});
 
 	it('without FixedLengthStream (Node dev/tests) buffers up to the declared size', async () => {

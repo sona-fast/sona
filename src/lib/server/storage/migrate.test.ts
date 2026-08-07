@@ -97,4 +97,46 @@ describe('migrate copyOne streaming', () => {
 		expect(result.migrated).toBe(1);
 		expect(result.failed).toBe(0);
 	});
+
+	it('falls back to a buffered body when the source response is content-encoded', async () => {
+		const { sqlite, db } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+			.run('t', 'pic3', 'https://old.example/f/ghi');
+
+		// A compressed response's Content-Length counts COMPRESSED bytes while
+		// res.body yields decoded ones — streaming with that size would fail the
+		// providers' length checks and brick this image's migration. Simulate the
+		// mismatch: declared 512, decoded body 1024.
+		const bytes = new Uint8Array(1024);
+		const fetchFn = vi.fn(
+			async () =>
+				new Response(
+					new ReadableStream<Uint8Array>({
+						start(c) {
+							c.enqueue(bytes);
+							c.close();
+						}
+					}),
+					{
+						headers: {
+							'content-type': 'image/png',
+							'content-length': '512',
+							'content-encoding': 'gzip'
+						}
+					}
+				)
+		) as unknown as typeof fetch;
+
+		const target = fakeTarget(async ({ body, size }) => {
+			expect(body).toBeInstanceOf(Uint8Array);
+			expect((body as Uint8Array).length).toBe(bytes.length);
+			expect(size).toBeUndefined();
+			return { url: 'https://cdn.example.com/artwork/pic3.png' };
+		});
+
+		const result = await migrateImages({ db, fetchFn, target });
+		expect(result.migrated).toBe(1);
+		expect(result.failed).toBe(0);
+	});
 });

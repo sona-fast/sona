@@ -1,17 +1,8 @@
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { ZeroKeepError } from './types';
 import { bufferStream } from './buffer';
+import { fixedLengthStreamCtor } from './fixed-length';
 import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
-
-// workerd's FixedLengthStream global (absent in Node, where vite dev and vitest
-// run this code). Looked up via globalThis because @cloudflare/workers-types is
-// consumed as a module in this repo, so its globals aren't ambient.
-type FixedLengthStreamCtor = new (
-	byteLength: number
-) => { readable: ReadableStream<Uint8Array>; writable: WritableStream<Uint8Array> };
-function fixedLengthStreamCtor(): FixedLengthStreamCtor | undefined {
-	return (globalThis as { FixedLengthStream?: FixedLengthStreamCtor }).FixedLengthStream;
-}
 
 export interface R2Options {
 	/** The R2 bucket binding (platform.env.IMAGES). */
@@ -45,11 +36,11 @@ export class R2Storage implements StorageProvider {
 
 		// R2 requires a known content length. With a declared `size`, pipe the
 		// stream through FixedLengthStream so nothing is materialized and a body
-		// that doesn't match the declaration fails the put. Without a size (or in
-		// Node, where FixedLengthStream doesn't exist — vite dev / vitest run the
-		// server code outside workerd), fall back to bounded buffering: capped at
-		// the declared size when given, else MAX_BUFFER_BYTES (M8), so a large or
-		// lying source can't OOM the isolate.
+		// that doesn't match the declaration fails the put. The buffering branch
+		// below is workerd-unreachable (FixedLengthStream always exists there):
+		// it serves Node dev/tests, and for a sized stream it buffers up to the
+		// caller-declared size — a lying source is caught by the length check.
+		// A stream with NO size buffers under MAX_BUFFER_BYTES (M8) instead.
 		const FixedLengthStream = fixedLengthStreamCtor();
 		if (body instanceof ReadableStream && size !== undefined && FixedLengthStream) {
 			const fixed = new FixedLengthStream(size);
@@ -58,12 +49,20 @@ export class R2Storage implements StorageProvider {
 			// (size mismatch, source error) must reject the call, not float.
 			// The cast bridges the DOM ReadableStream type to workers-types' (the
 			// same object at runtime; only the .d.ts lineages differ).
-			await Promise.all([
-				this.#bucket.put(key, fixed.readable as unknown as Parameters<R2Bucket['put']>[1], {
-					httpMetadata
-				}),
-				pump
-			]);
+			try {
+				await Promise.all([
+					this.#bucket.put(key, fixed.readable as unknown as Parameters<R2Bucket['put']>[1], {
+						httpMetadata
+					}),
+					pump
+				]);
+			} catch (e) {
+				// An over-long source can leave a truncated object committed at the
+				// declared length — best-effort delete so the key isn't orphaned
+				// until the next sweep, then surface the original failure.
+				await this.#bucket.delete(key).catch(() => {});
+				throw e;
+			}
 			return { url: `${this.#base}/${key}` };
 		}
 		let data: ArrayBuffer | Uint8Array;

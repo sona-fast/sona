@@ -1,8 +1,13 @@
 import { UTApi } from 'uploadthing/server';
+// The SDK's own version, sent as x-uploadthing-version on the ingest PUT to
+// match what UTApi.uploadFiles sends (uploadthing/server re-imports this same
+// value but doesn't re-export it).
+import { version as UT_SDK_VERSION } from 'uploadthing/package.json';
 import { generateKey, generateSignedURL } from '@uploadthing/shared';
 import * as Micro from 'effect/Micro';
 import * as Redacted from 'effect/Redacted';
 import { ZeroKeepError } from './types';
+import { fixedLengthStreamCtor } from './fixed-length';
 import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
 
 /**
@@ -22,11 +27,18 @@ interface IngestUploadResponse {
 	error?: unknown;
 }
 
+// Token-derived values that end up inside the ingest URL must be plain DNS-name
+// shapes — anything else (credentials, ports, paths) could redirect the signed
+// upload to a host the token author chose.
+const HOST_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/i;
+
+const UNUSABLE_TOKEN =
+	'UPLOADTHING_TOKEN is missing or malformed (apiKey/appId/regions/ingestHost); cannot construct a presigned upload URL';
+
 export class UploadThingStorage implements StorageProvider {
 	readonly id = 'uploadthing' as const;
 	#api: UTApi;
 	#rawToken: string;
-	#parsedToken: ParsedToken | null = null;
 
 	constructor(opts: { token: string }) {
 		this.#api = new UTApi({ token: opts.token });
@@ -63,23 +75,37 @@ export class UploadThingStorage implements StorageProvider {
 		contentType: string,
 		filename: string
 	): Promise<PutResult> {
+		// The content type is interpolated into a multipart header line below;
+		// only printable ASCII can't smuggle CR/LF (or raw bytes) into the framing.
+		if (!/^[\x20-\x7e]+$/.test(contentType)) {
+			throw new Error(`uploadthing: content type contains unsafe characters: ${JSON.stringify(contentType)}`);
+		}
 		const { apiKey, appId, regions, ingestHost } = this.#token();
 		const key = await Micro.runPromise(
 			generateKey({ name: filename, size, type: contentType, lastModified: Date.now() }, appId)
 		);
 		const url = await Micro.runPromise(
 			generateSignedURL(`https://${regions[0]}.${ingestHost}/${key}`, Redacted.make(apiKey), {
-				// x-ut-slug is only for client route uploads; server-side uploads omit it.
+				// x-ut-slug is only for client route uploads; server-side uploads omit
+				// it. x-ut-acl is deliberately undefined (generateSignedURL skips
+				// null/undefined data values): the app's default ACL then applies,
+				// matching what UTApi.uploadFiles sends.
 				data: {
 					'x-ut-identifier': appId,
 					'x-ut-file-name': filename,
 					'x-ut-file-size': size,
 					'x-ut-file-type': contentType,
 					'x-ut-content-disposition': 'inline',
-					'x-ut-acl': 'public-read'
+					'x-ut-acl': undefined
 				}
 			})
 		);
+		// #token() validates the host shape, so the signed URL can never carry
+		// credentials — assert it anyway (defense in depth, same generic error).
+		const signed = new URL(url);
+		if (signed.username !== '' || signed.password !== '') {
+			throw new Error(UNUSABLE_TOKEN);
+		}
 
 		// Multipart framing around the raw stream, mirroring the SDK's
 		// `formData.append('file', file)` — built by hand so the file bytes stay
@@ -94,22 +120,38 @@ export class UploadThingStorage implements StorageProvider {
 				`Content-Type: ${contentType}\r\n\r\n`
 		);
 		const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
+		const total = head.length + size + tail.length;
 
-		const res = await fetch(url, {
-			method: 'PUT',
-			headers: {
-				'content-type': `multipart/form-data; boundary=${boundary}`,
-				// Exact total: declared file size plus the fixed framing. A body
-				// that doesn't match fails the request instead of storing garbage.
-				'content-length': String(head.length + size + tail.length),
-				// The ingest protocol is resumable; a fresh upload starts at 0.
-				range: 'bytes=0-'
-			},
-			body: wrapMultipart(head, body, tail),
-			// Node (dev/tests) requires half-duplex for stream bodies; workerd
-			// streams uploads natively and ignores the flag.
-			...({ duplex: 'half' } as RequestInit)
-		});
+		const framed = frameMultipart(head, body, size, tail);
+		// workerd silently drops a manually-set content-length header on a plain
+		// ReadableStream body and sends chunked encoding instead — only a
+		// FixedLengthStream body carries a real Content-Length there. Node
+		// (dev/tests) has no FixedLengthStream but honours the header below.
+		const FixedLengthStream = fixedLengthStreamCtor();
+		const fixed = FixedLengthStream ? new FixedLengthStream(total) : undefined;
+		const pump = fixed ? framed.pipeTo(fixed.writable) : undefined;
+
+		// Await both: fetch consumes the readable side, and a pump failure (source
+		// error, wrong length) must reject the call, not float.
+		const [res] = await Promise.all([
+			fetch(url, {
+				method: 'PUT',
+				headers: {
+					'content-type': `multipart/form-data; boundary=${boundary}`,
+					// Exact total: declared file size plus the fixed framing. A body
+					// that doesn't match fails the request instead of storing garbage.
+					'content-length': String(total),
+					// The ingest protocol is resumable; a fresh upload starts at 0.
+					range: 'bytes=0-',
+					'x-uploadthing-version': UT_SDK_VERSION
+				},
+				body: fixed ? fixed.readable : framed,
+				// Node (dev/tests) requires half-duplex for stream bodies; workerd
+				// streams uploads natively and ignores the flag.
+				...({ duplex: 'half' } as RequestInit)
+			}),
+			pump
+		]);
 		if (!res.ok) {
 			const detail = await res.text().catch(() => '');
 			throw new Error(`UploadThing ingest PUT failed: ${res.status} ${detail}`.trim());
@@ -125,7 +167,6 @@ export class UploadThingStorage implements StorageProvider {
 
 	/** Parse UPLOADTHING_TOKEN lazily (only the streaming path needs it). */
 	#token(): ParsedToken {
-		if (this.#parsedToken) return this.#parsedToken;
 		let parsed: Partial<ParsedToken> & { regions?: unknown };
 		try {
 			parsed = JSON.parse(
@@ -140,18 +181,18 @@ export class UploadThingStorage implements StorageProvider {
 		const regions = Array.isArray(parsed.regions)
 			? parsed.regions.filter((r): r is string => typeof r === 'string')
 			: [];
-		if (typeof apiKey !== 'string' || typeof appId !== 'string' || regions.length === 0) {
-			throw new Error(
-				'UPLOADTHING_TOKEN is missing apiKey/appId/regions; cannot construct a presigned upload URL'
-			);
+		const ingestHost =
+			typeof parsed.ingestHost === 'string' ? parsed.ingestHost : 'ingest.uploadthing.com';
+		if (
+			typeof apiKey !== 'string' ||
+			typeof appId !== 'string' ||
+			regions.length === 0 ||
+			!HOST_RE.test(regions[0]) ||
+			!HOST_RE.test(ingestHost)
+		) {
+			throw new Error(UNUSABLE_TOKEN);
 		}
-		this.#parsedToken = {
-			apiKey,
-			appId,
-			regions,
-			ingestHost: typeof parsed.ingestHost === 'string' ? parsed.ingestHost : 'ingest.uploadthing.com'
-		};
-		return this.#parsedToken;
+		return { apiKey, appId, regions, ingestHost };
 	}
 
 	async deleteByUrl(url: string): Promise<void> {
@@ -199,36 +240,30 @@ export class UploadThingStorage implements StorageProvider {
 
 /**
  * Frame a byte stream as a single multipart/form-data part without buffering:
- * emits `head`, then the source chunks one pull at a time (backpressure
- * intact), then `tail`.
+ * `head`, then the source chunks (backpressure and cancellation propagate
+ * through the TransformStream), then `tail`. Errors the stream as soon as the
+ * source yields more than `size` bytes — in Node an over-long body would
+ * otherwise stall the fetch forever once content-length bytes have been sent
+ * (workerd's FixedLengthStream catches the mismatch on its own).
  */
-function wrapMultipart(
+function frameMultipart(
 	head: Uint8Array,
 	body: ReadableStream<Uint8Array>,
+	size: number,
 	tail: Uint8Array
 ): ReadableStream<Uint8Array> {
-	const reader = body.getReader();
-	let stage: 'head' | 'body' | 'done' = 'head';
-	return new ReadableStream<Uint8Array>({
-		async pull(controller) {
-			if (stage === 'head') {
-				controller.enqueue(head);
-				stage = 'body';
-				return;
-			}
-			if (stage === 'body') {
-				const { done, value } = await reader.read();
-				if (done) {
-					controller.enqueue(tail);
-					stage = 'done';
-					controller.close();
-					return;
+	let seen = 0;
+	return body.pipeThrough(
+		new TransformStream<Uint8Array, Uint8Array>({
+			start: (c) => c.enqueue(head),
+			transform(chunk, c) {
+				seen += chunk.length;
+				if (seen > size) {
+					throw new Error(`uploadthing: body exceeded the declared ${size} bytes`);
 				}
-				controller.enqueue(value);
-			}
-		},
-		cancel(reason) {
-			return reader.cancel(reason);
-		}
-	});
+				c.enqueue(chunk);
+			},
+			flush: (c) => c.enqueue(tail)
+		})
+	);
 }
