@@ -1491,6 +1491,15 @@
 		border-radius: var(--radius-s);
 	}
 
+	/* Both cards are space-between rows, so the button is free to shrink until
+	   its label wraps ("Clear Cache" breaking over two lines, and the localized
+	   "Exporting…" is longer still). Keep it on one line and let the description
+	   text take the squeeze instead. */
+	.export-card .btn,
+	.danger-card .btn {
+		white-space: nowrap;
+	}
+
 	.danger-text {
 		display: flex;
 		flex-direction: column;

@@ -665,7 +665,7 @@
 	.sticker-card.excluded { opacity: 0.55; }
 	.sticker-card.already { border-color: var(--primary); }
 	.sticker-img { position: relative; aspect-ratio: 16 / 9; background: var(--secondary); display: flex; align-items: center; justify-content: center; overflow: hidden; border-bottom: 1px solid var(--border); }
-	.nsfw-badge { position: absolute; top: 8px; left: 8px; z-index: 1; background: var(--destructive); color: #fff; font: 700 10px var(--font-secondary); padding: 3px 8px; border-radius: var(--radius-pill); }
+	.nsfw-badge { position: absolute; top: 8px; left: 8px; z-index: 1; background: var(--destructive); color: var(--destructive-foreground); font: 700 10px var(--font-secondary); padding: 3px 8px; border-radius: var(--radius-pill); }
 
 	/* Bulk selection */
 	.bulk-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-s); }

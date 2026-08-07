@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { THEMES } from './themes';
 
@@ -120,14 +120,81 @@ describe('destructive button WCAG AA contrast, every theme × mode', () => {
 		});
 	}
 
-	it('.btn-destructive colors its text with var(--destructive-foreground)', () => {
-		// The token assertions above are only meaningful if the rule actually
-		// uses the token; a refactor back to var(--foreground) reintroduces #76.
-		// No fallback either: every theme block must define the token itself.
-		const rule = css.match(/^\.btn-destructive\s*\{([^}]*)\}/m)?.[1];
-		if (!rule) throw new Error('.btn-destructive rule not found in app.css');
-		expect(rule).toMatch(/color:\s*var\(--destructive-foreground\)\s*;/);
+	// Every rule block whose selector mentions .btn-destructive, base and hover
+	// and theme-scoped alike. The old assertion used a non-global regex anchored
+	// to the bare selector, so it only ever saw the base rule — a second block
+	// setting color: #fff would have sailed through.
+	const destructiveRules = [...css.matchAll(/^([^\n{]*\.btn-destructive[^\n{]*)\{([^}]*)\}/gm)].map(
+		([, selector, body]) => ({ selector: selector.trim(), body })
+	);
+
+	it('finds every .btn-destructive rule block in app.css', () => {
+		// Coverage pin: the base rule plus the two hover fills. A new block bumps
+		// this and fails, forcing the color assertion below to be looked at.
+		// Compared as a sorted set — reordering app.css is not a regression.
+		expect(destructiveRules.map((r) => r.selector).sort()).toEqual(
+			[
+				'.btn-destructive',
+				'.btn-destructive:hover',
+				"[data-theme='light'] .btn-destructive:hover"
+			].sort()
+		);
 	});
+
+	it('every .btn-destructive block that sets a text color uses the token', () => {
+		// The token assertions above are only meaningful if the rules actually
+		// use the token; a refactor back to var(--foreground) reintroduces #76.
+		// No fallback either: every theme block must define the token itself.
+		// The hover blocks restyle only the fill and inherit the base color, so
+		// they are checked for absence of a competing color rather than presence.
+		for (const { selector, body } of destructiveRules) {
+			const color = body.match(/(?:^|[;{]\s*)color:\s*([^;]+);/)?.[1]?.trim();
+			if (color === undefined) continue;
+			expect(`${selector} -> ${color}`).toBe(`${selector} -> var(--destructive-foreground)`);
+		}
+	});
+
+	it('the base .btn-destructive rule does set the token', () => {
+		// Guards the other direction: dropping the declaration entirely would make
+		// the loop above vacuously pass.
+		const base = destructiveRules.find((r) => r.selector === '.btn-destructive');
+		expect(base?.body).toMatch(/color:\s*var\(--destructive-foreground\)\s*;/);
+	});
+});
+
+describe('component CSS: destructive fills carry the destructive-foreground token', () => {
+	// app.css is guarded above, but the same pairing is written by hand in route
+	// components, where a literal (color: #fff / white) reads as correct against
+	// the default red and then breaks on a theme whose --destructive is light.
+	// Scans every .svelte file for a rule that fills with --destructive and also
+	// sets a text color, and requires that color to be the token.
+	//
+	// SOLID fills only. A color-mix tint over transparent (the .sbadge soft-badge
+	// pattern) is a different pairing: its text is --destructive itself against
+	// the page background, and the token would be the wrong answer there.
+	const srcDir = new URL('../', import.meta.url);
+	// readdirSync recursive rather than fs.globSync, matching reactivity-guard.test.ts.
+	const components = readdirSync(fileURLToPath(srcDir), { recursive: true })
+		.map((p) => String(p))
+		.filter((p) => p.endsWith('.svelte'))
+		.sort();
+
+	const filled = components.flatMap((rel) => {
+		const source = readFileSync(new URL(rel, srcDir), 'utf8');
+		return [...source.matchAll(/^([^\n{]*)\{([^}]*)\}/gm)]
+			.filter(([, , body]) => /background(-color)?:\s*var\(--destructive\)\s*;/.test(body))
+			.map(([, selector, body]) => ({ file: rel, selector: selector.trim(), body }));
+	});
+
+	// Accepted gap: a destructive fill that sets NO color at all inherits its text
+	// color and is invisible to this scan.
+	for (const { file, selector, body } of filled) {
+		const color = body.match(/(?:^|[;{]\s*)color:\s*([^;]+);/)?.[1]?.trim();
+		if (color === undefined) continue;
+		it(`${file} ${selector} colors its text with the token`, () => {
+			expect(color).toBe('var(--destructive-foreground)');
+		});
+	}
 });
 
 describe('terracotta light theme WCAG AA contrast', () => {

@@ -571,6 +571,7 @@
 
 	.tile-remove:hover {
 		background: var(--destructive);
+		color: var(--destructive-foreground);
 	}
 
 	.tile-meta {
