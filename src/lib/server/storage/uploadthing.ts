@@ -33,9 +33,6 @@ interface IngestUploadResponse {
 // upload to a host the token author chose.
 const HOST_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/i;
 
-const UNUSABLE_TOKEN =
-	'UPLOADTHING_TOKEN is missing or malformed (apiKey/appId/regions/ingestHost); cannot construct a presigned upload URL';
-
 export class UploadThingStorage implements StorageProvider {
 	readonly id = 'uploadthing' as const;
 	#api: UTApi;
@@ -182,7 +179,9 @@ export class UploadThingStorage implements StorageProvider {
 			!HOST_RE.test(region) ||
 			!HOST_RE.test(ingestHost)
 		) {
-			throw new Error(UNUSABLE_TOKEN);
+			throw new Error(
+				'UPLOADTHING_TOKEN is missing or malformed (apiKey/appId/regions/ingestHost); cannot construct a presigned upload URL'
+			);
 		}
 		return { apiKey, appId, region, ingestHost };
 	}

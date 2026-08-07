@@ -166,47 +166,33 @@ describe('UploadThing streaming put', () => {
 		expect(requestInit?.body).toBe(created[0].readable);
 	});
 
-	it('rejects a source that yields more bytes than declared', async () => {
-		const { stream } = countingSource(3, 8); // 24 bytes actual
-		const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-			// Drain like a real fetch would; the framed stream errors mid-body.
-			await new Response(init?.body as ReadableStream).arrayBuffer();
-			return ingestOk(url);
-		});
-		vi.stubGlobal('fetch', fetchMock);
-		const storage = new UploadThingStorage({ token: TOKEN });
-		await expect(
-			storage.put({
-				suggestedKey: 'artwork/x',
-				body: stream,
-				size: 16, // lies: declares fewer bytes than the stream holds
-				contentType: 'image/png',
-				filename: 'x.png'
-			})
-		).rejects.toThrow(/exceeded the declared 16 bytes/);
-	});
-
-	it('rejects an over-long source when routed through FixedLengthStream too', async () => {
-		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
-		const { stream } = countingSource(3, 8); // 24 bytes actual
-		const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-			// The fixed stream errors mid-drain; the pump's rejection is the one
-			// the Promise.all([fetch, pump]) contract guards.
-			await new Response(init?.body as ReadableStream).arrayBuffer().catch(() => {});
-			return ingestOk(url);
-		});
-		vi.stubGlobal('fetch', fetchMock);
-		const storage = new UploadThingStorage({ token: TOKEN });
-		await expect(
-			storage.put({
-				suggestedKey: 'artwork/x',
-				body: stream,
-				size: 16, // lies: declares fewer bytes than the stream holds
-				contentType: 'image/png',
-				filename: 'x.png'
-			})
-		).rejects.toThrow(/exceeded the declared/);
-	});
+	it.each([{ name: 'without FixedLengthStream' }, { name: 'through FixedLengthStream', stub: true }])(
+		'rejects a source that yields more bytes than declared, $name',
+		async ({ stub }) => {
+			if (stub) vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+			const { stream } = countingSource(3, 8); // 24 bytes actual
+			const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+				// Drain like a real fetch would; the framed stream errors mid-body.
+				// On the fixed path swallow the drain error — there the pump's
+				// rejection is the one the Promise.all([fetch, pump]) contract
+				// guards; on the plain path the fetch rejection itself is the signal.
+				const drain = new Response(init?.body as ReadableStream).arrayBuffer();
+				await (stub ? drain.catch(() => {}) : drain);
+				return ingestOk(url);
+			});
+			vi.stubGlobal('fetch', fetchMock);
+			const storage = new UploadThingStorage({ token: TOKEN });
+			await expect(
+				storage.put({
+					suggestedKey: 'artwork/x',
+					body: stream,
+					size: 16, // lies: declares fewer bytes than the stream holds
+					contentType: 'image/png',
+					filename: 'x.png'
+				})
+			).rejects.toThrow(/exceeded the declared 16 bytes/);
+		}
+	);
 
 	it('rejects when the source stream errors mid-body (workerd pump path)', async () => {
 		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);

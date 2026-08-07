@@ -95,9 +95,9 @@ describe('R2 streaming put', () => {
 				filename: 'b.png'
 			})
 		).rejects.toThrow('source died mid-body');
-		// R2 puts are atomic — a failed streamed put commits nothing, so no
-		// truncated object exists and no cleanup delete may run: it could only
-		// destroy a PRE-EXISTING object at the same key.
+		// An errored source leaves the key absent — nothing to clean up. The
+		// assertion guards the real hazard: a cleanup delete could destroy a
+		// pre-existing live object at the same key.
 		expect(bucket.delete).not.toHaveBeenCalled();
 	});
 
