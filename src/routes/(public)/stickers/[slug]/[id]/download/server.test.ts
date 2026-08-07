@@ -23,12 +23,24 @@ function seedDb(row: { format: string; isAnimated?: number; imageUrl?: string; p
 
 let nextIp = 0;
 
+/**
+ * An origin response that declares its length, like R2 and UploadThing do.
+ * The converting path only buffers a body whose size it knows, so a fixture
+ * without content-length exercises the stream-through branch instead of the
+ * sniff-and-convert one — `new Response(body)` alone sets no such header.
+ */
+function originResponse(body: string, headers: Record<string, string> = {}) {
+	return new Response(body, {
+		headers: { 'content-length': String(new TextEncoder().encode(body).length), ...headers }
+	});
+}
+
 function makeEvent(db: ReturnType<typeof makeD1>, opts: { search?: string; fetch?: typeof fetch } = {}) {
 	return {
 		params: { slug: 'pack', id: '7' },
 		url: new URL(`${ORIGIN}/stickers/pack/7/download${opts.search ?? ''}`),
 		platform: { env: { DB: db } },
-		fetch: opts.fetch ?? (vi.fn(async () => new Response('bytes')) as typeof fetch),
+		fetch: opts.fetch ?? (vi.fn(async () => originResponse('bytes')) as typeof fetch),
 		// Unique per event so the module-level rate limiter never trips across tests.
 		getClientAddress: () => `10.0.0.${nextIp++}`
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,7 +87,7 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		const transformFetch = stubTransformFetch(async () =>
 			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
 		);
-		const eventFetch = vi.fn(async () => new Response('orig')) as typeof fetch;
+		const eventFetch = vi.fn(async () => originResponse('orig')) as typeof fetch;
 		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
 		// The documented in-Worker mechanism: fetch the image URL itself with
 		// cf.image options. The /cdn-cgi/image/<url> form 404s from inside the
@@ -98,7 +110,12 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
 		);
 		const eventFetch = vi.fn(async () =>
-			new Response(animatedWebp().buffer as ArrayBuffer, { headers: { 'content-type': 'image/webp' } })
+			new Response(animatedWebp().buffer as ArrayBuffer, {
+				headers: {
+					'content-type': 'image/webp',
+					'content-length': String(animatedWebp().byteLength)
+				}
+			})
 		) as typeof fetch;
 		const res = await GET(makeEvent(seedDb({ format: 'webp', isAnimated: 0 }), { search: '?format=png', fetch: eventFetch }));
 		expect(transformFetch).not.toHaveBeenCalled();
@@ -136,6 +153,142 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 		expect(transformFetch).not.toHaveBeenCalled();
 		expect(res.headers.get('Content-Type')).toBe('image/webp');
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
+	});
+
+	it('streams through when the origin declares no content-length at all', async () => {
+		// The cap read a missing header as Number(null) === 0, which is not > the
+		// cap, so an undeclared body — a chunked response, exactly the case where
+		// the size is unknown — fell through to an unbounded arrayBuffer(). No
+		// declared length now means the non-buffering path.
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const eventFetch = vi.fn(async () =>
+			// A ReadableStream body, mirroring a chunked origin — the shape this
+			// branch exists for. (A string body sets no content-length either; the
+			// fixtures that need one declare it explicitly, via originResponse.)
+			new Response(
+				new ReadableStream({
+					start(c) {
+						c.enqueue(new TextEncoder().encode('streamed-bytes'));
+						c.close();
+					}
+				}),
+				{ headers: { 'content-type': 'image/webp' } }
+			)
+		) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
+
+		expect(transformFetch).not.toHaveBeenCalled();
+		expect(res.headers.get('Content-Type')).toBe('image/webp');
+		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
+		// Original bytes under a ?format=png URL, so the same no-store the other
+		// two fallbacks carry — otherwise the edge pins webp to the png URL.
+		expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+		// And the original bytes reach the client untouched.
+		expect(await res.text()).toBe('streamed-bytes');
+	});
+
+	it('streams through when content-length is not a number', async () => {
+		// NaN loses every comparison, so a malformed header slipped under the cap
+		// the same way a missing one did.
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const eventFetch = vi.fn(async () =>
+			new Response('orig-bytes', {
+				headers: { 'content-type': 'image/webp', 'content-length': 'banana' }
+			})
+		) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
+
+		expect(transformFetch).not.toHaveBeenCalled();
+		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
+	});
+
+	it('still converts when the declared length is within the cap', async () => {
+		// The guard must not have swallowed the normal path along with the holes.
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const eventFetch = vi.fn(async () =>
+			originResponse('orig', { 'content-type': 'image/webp' })
+		) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
+
+		expect(transformFetch).toHaveBeenCalled();
+		expect(res.headers.get('Content-Type')).toBe('image/png');
+	});
+
+	it('forwards the origin ETag, and drops Last-Modified', async () => {
+		// The ETag lets a repeat download revalidate to a 304 instead of pulling the
+		// whole file again. Last-Modified does the opposite here: Cache-Control
+		// gives the browser no freshness lifetime of its own (s-maxage binds shared
+		// caches only), so a Last-Modified switches on heuristic freshness and
+		// Chrome stops revalidating altogether — measured, not theoretical.
+		const eventFetch = vi.fn(async () =>
+			new Response('bytes', {
+				headers: {
+					'content-type': 'image/webp',
+					etag: '"abc123"',
+					'last-modified': 'Wed, 06 Aug 2026 10:00:00 GMT'
+				}
+			})
+		) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { fetch: eventFetch }));
+
+		expect(res.headers.get('ETag')).toBe('"abc123"');
+		expect(res.headers.get('Last-Modified')).toBeNull();
+	});
+
+	it('omits the validator when the origin sends none', async () => {
+		const eventFetch = vi.fn(async () =>
+			new Response('bytes', { headers: { 'content-type': 'image/webp' } })
+		) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { fetch: eventFetch }));
+
+		expect(res.headers.get('ETag')).toBeNull();
+		expect(res.headers.get('Last-Modified')).toBeNull();
+	});
+
+	it('502s when the origin sends more bytes than it declared', async () => {
+		// content-length is the origin's claim, and it is what selects the buffering
+		// path. A response declaring 4 bytes and then streaming megabytes would
+		// otherwise walk straight past the cap the declared-size check enforces.
+		const transformFetch = stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const eventFetch = vi.fn(async () =>
+			new Response(
+				new ReadableStream({
+					start(c) {
+						for (let i = 0; i < 12; i++) c.enqueue(new Uint8Array(100_000));
+						c.close();
+					}
+				}),
+				{ headers: { 'content-type': 'image/webp', 'content-length': '4' } }
+			)
+		) as typeof fetch;
+		await expect(
+			status(GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch })))
+		).resolves.toBe(502);
+		expect(transformFetch).not.toHaveBeenCalled();
+	});
+
+	it('forwards the transformed response validators on the png path', async () => {
+		// Not the original's — these must describe the PNG actually being sent.
+		stubTransformFetch(async () =>
+			new Response('png-bytes', {
+				headers: { 'content-type': 'image/png', etag: '"png-etag"' }
+			})
+		);
+		const eventFetch = vi.fn(async () =>
+			originResponse('orig', { 'content-type': 'image/webp', etag: '"orig-etag"' })
+		) as typeof fetch;
+		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
+
+		expect(res.headers.get('Content-Type')).toBe('image/png');
+		expect(res.headers.get('ETag')).toBe('"png-etag"');
 	});
 
 	it('keeps the query string of an absolute source URL on the transform request', async () => {
@@ -176,7 +329,7 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 	it('falls back to the original bytes when the transform cannot run (SONA-21 off-zone)', async () => {
 		stubTransformFetch(async () => new Response('forbidden', { status: 403 }));
 		const eventFetch = vi.fn(async () =>
-			new Response('orig-bytes', { headers: { 'content-type': 'image/webp' } })
+			originResponse('orig-bytes', { 'content-type': 'image/webp' })
 		) as typeof fetch;
 		const res = await GET(makeEvent(seedDb({ format: 'webp' }), { search: '?format=png', fetch: eventFetch }));
 		expect(res.headers.get('Content-Type')).toBe('image/webp');

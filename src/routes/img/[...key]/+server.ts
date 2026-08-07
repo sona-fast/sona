@@ -16,6 +16,12 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 	// it can't serialize a Headers across the dev getPlatformProxy boundary.)
 	const headers = new Headers();
 	if (object.httpMetadata?.contentType) headers.set('content-type', object.httpMetadata.contentType);
+	// R2 knows the size, so declare it. A fork with no public CDN URL stores
+	// /img/<key> URLs, and the sticker download's convert path only buffers a
+	// body whose length the origin declares — without this it silently stops
+	// offering PNG conversion on exactly those forks. Honest because the get()
+	// above is unconditional and unranged: the body is always the whole object.
+	headers.set('content-length', String(object.size));
 	headers.set('etag', object.httpEtag);
 	headers.set('cache-control', 'public, max-age=31536000, immutable');
 	return new Response(object.body, { headers });

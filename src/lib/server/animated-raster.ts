@@ -5,9 +5,12 @@
 // Cloudflare image transform flattens it to its first frame. Sniffing the bytes
 // at import time (and in the backfill endpoint) is the only reliable signal.
 //
-// Deliberately format-narrow: WebP and GIF are the only raster formats the
-// sticker importer stores (PNG/JPEG can't animate; APNG is not an accepted
-// sticker type — see isAllowedStickerType). Unknown containers return false.
+// Deliberately format-narrow: animated WebP and multi-frame GIF are the only
+// containers sniffed. APNG is NOT ruled out by the type allowlist — an APNG is
+// served as image/png, which isAllowedStickerType accepts, so a manual upload
+// can store one. It is simply not detected here, so an animated PNG reads as
+// static and keeps the PNG download option. Telegram, the only bulk importer,
+// does not serve APNG. Unknown containers return false.
 
 /** True when `bytes` are an animated WebP or an animated (multi-frame) GIF. */
 export function isAnimatedRaster(bytes: Uint8Array): boolean {
