@@ -11,8 +11,8 @@ import { fileURLToPath } from 'node:url';
 // scanned text, which is why the pattern must stay anchored to a tag boundary
 // (">") rather than line start.
 const srcDir = fileURLToPath(new URL('.', import.meta.url));
-// readdirSync recursive (Node 20.1+) rather than fs.globSync (Node 22+) — the
-// fork deploy CI runs the suite on Node 20.
+// readdirSync recursive rather than fs.globSync: available since Node 20.1,
+// so it holds across every toolchain the forks run.
 const files = readdirSync(srcDir, { recursive: true })
 	.map((p) => String(p))
 	.filter((p) => p.endsWith('.svelte'))
@@ -39,13 +39,28 @@ describe('the "//" slash device stays out of rendered markup', () => {
 	});
 
 	it('no message catalog value starts with "// "', () => {
-		for (const locale of ['en', 'ja']) {
+		// Locale list comes from the inlang settings (the source of truth), and
+		// the sweep recurses into plural/variant objects so every string leaf is
+		// covered, not just top-level values.
+		const settings = JSON.parse(
+			readFileSync(fileURLToPath(new URL('../project.inlang/settings.json', import.meta.url)), 'utf8')
+		) as { locales: string[] };
+		const sweep = (value: unknown, where: string) => {
+			if (typeof value === 'string') {
+				expect(value, `${where} carries the // device`).not.toMatch(/^\/\/ /);
+			} else if (Array.isArray(value)) {
+				value.forEach((v, i) => sweep(v, `${where}[${i}]`));
+			} else if (value && typeof value === 'object') {
+				for (const [k, v] of Object.entries(value)) sweep(v, `${where}.${k}`);
+			}
+		};
+		expect(settings.locales.length).toBeGreaterThanOrEqual(2);
+		for (const locale of settings.locales) {
 			const catalog = JSON.parse(
 				readFileSync(fileURLToPath(new URL(`../messages/${locale}.json`, import.meta.url)), 'utf8')
 			) as Record<string, unknown>;
 			for (const [key, value] of Object.entries(catalog)) {
-				if (typeof value !== 'string') continue;
-				expect(value, `messages/${locale}.json ${key} carries the // device`).not.toMatch(/^\/\/ /);
+				sweep(value, `messages/${locale}.json ${key}`);
 			}
 		}
 	});

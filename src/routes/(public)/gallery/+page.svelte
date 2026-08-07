@@ -596,7 +596,6 @@
 		font-family: var(--font-primary);
 		font-size: 12px;
 		color: var(--muted-foreground);
-		margin-right: 6px;
 	}
 
 	.aka-pointer .spacer {
