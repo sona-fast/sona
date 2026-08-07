@@ -1148,8 +1148,7 @@
 	"admin_settings_supporter_removed": "Supporter key removed.",
 	"admin_settings_supporter_days_left": "{days} days left",
 	"admin_settings_supporter_expires_today": "expires today",
-	"admin_settings_supporter_expiring_pre": "This key has {days} days left. Re-mint it at ",
-	"admin_settings_supporter_expiring_today_pre": "This key expires today. Re-mint it at ",
+	"admin_settings_supporter_expiring_pre": "Re-mint it at ",
 	"admin_settings_supporter_expiring_post": " while your sponsorship is active, then paste the new key here.",
 	"admin_notice_supporter_eyebrow": "expiring soon",
 	"admin_notice_supporter_expiring_pre": "Your supporter key has {days} days left. Re-mint it at ",
@@ -1158,5 +1157,6 @@
 	"admin_notice_supporter_settings_link": "Settings → Account",
 	"admin_notice_supporter_post": ".",
 	"admin_notice_supporter_dismiss": "Dismiss this notice",
+	"admin_notice_supporter_dismissed_announce": "Notice dismissed.",
 	"link_opens_new_tab": "(opens in a new tab)"
 }

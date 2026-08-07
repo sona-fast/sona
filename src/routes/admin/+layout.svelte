@@ -20,6 +20,9 @@
 	// final days. dismissedValue only bridges until the next server load.
 	let dismissedValue = $state<string | null>(null);
 	let mainEl: HTMLElement | undefined = $state();
+	// Populated on dismiss; lives in a persistent polite live region so screen
+	// readers hear a confirmation instead of silence when the banner vanishes.
+	let noticeAnnouncement = $state('');
 	function dismissNotice() {
 		if (!data.supporterKeyNotice) return;
 		// 60 days comfortably outlives any warning window; scoped to the admin area.
@@ -28,6 +31,7 @@
 		const secure = location.protocol === 'https:' ? '; Secure' : '';
 		document.cookie = `supporterNoticeDismissed=${encodeURIComponent(data.supporterKeyNotice.dismissValue)}; path=/admin; SameSite=Lax; max-age=5184000${secure}`;
 		dismissedValue = data.supporterKeyNotice.dismissValue;
+		noticeAnnouncement = m.admin_notice_supporter_dismissed_announce();
 		// The dismiss button disappears with the banner — anchor keyboard/SR focus
 		// on the page content instead of dropping it to <body>.
 		mainEl?.focus();
@@ -102,6 +106,9 @@
 			</header>
 
 			<main class="admin-content" tabindex="-1" bind:this={mainEl}>
+				<!-- Pre-exists any announcement (a live region injected together with
+				     its content is ignored by most screen readers). -->
+				<p class="sr-only" aria-live="polite">{noticeAnnouncement}</p>
 				{#if data.supporterKeyNotice && data.supporterKeyNotice.dismissValue !== dismissedValue}
 					<div class="supporter-notice">
 						<span class="notice-eyebrow">{m.admin_notice_supporter_eyebrow()}</span>
@@ -290,7 +297,11 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		font-weight: 600;
-		color: var(--status-attention);
+		/* Warn, not attention: --status-attention tracks --primary, which in the
+		   default dark theme makes the warning the same orange as every brand
+		   accent. --status-warn is family-stable amber in all themes and AA on
+		   the card. */
+		color: var(--status-warn);
 		flex: none;
 	}
 
@@ -375,8 +386,15 @@
 			padding-bottom: 88px;
 		}
 
-		/* Narrow screens: stack the eyebrow above the body so neither cramps the
-		   other; the dismiss control keeps its top-right slot. */
+		.mobile-only {
+			display: contents;
+		}
+	}
+
+	/* Content-driven breakpoint, not the device one: below ~900px the notice
+	   body wraps to 3+ lines beside a one-line eyebrow, so stack the eyebrow
+	   above the body; the dismiss control keeps its top-right slot. */
+	@media (max-width: 900px) {
 		.supporter-notice {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
@@ -397,10 +415,6 @@
 
 		.notice-dismiss {
 			grid-area: dismiss;
-		}
-
-		.mobile-only {
-			display: contents;
 		}
 	}
 </style>

@@ -1112,8 +1112,7 @@
 	"admin_settings_supporter_removed": "サポーターキーを削除しました。",
 	"admin_settings_supporter_days_left": "残り{days}日",
 	"admin_settings_supporter_expires_today": "本日で期限切れ",
-	"admin_settings_supporter_expiring_pre": "このキーは残り{days}日です。スポンサー契約が有効なうちに ",
-	"admin_settings_supporter_expiring_today_pre": "このキーは本日で期限切れになります。スポンサー契約が有効なうちに ",
+	"admin_settings_supporter_expiring_pre": "スポンサー契約が有効なうちに ",
 	"admin_settings_supporter_expiring_post": " で再発行し、新しいキーをここに貼り付けてください。",
 	"admin_notice_supporter_eyebrow": "まもなく期限切れ",
 	"admin_notice_supporter_expiring_pre": "サポーターキーは残り{days}日です。再発行は ",
@@ -1122,5 +1121,6 @@
 	"admin_notice_supporter_settings_link": "設定 → アカウント",
 	"admin_notice_supporter_post": "に貼り付けてください。",
 	"admin_notice_supporter_dismiss": "この通知を閉じる",
+	"admin_notice_supporter_dismissed_announce": "通知を閉じました。",
 	"link_opens_new_tab": "（新しいタブで開きます）"
 }

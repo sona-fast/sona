@@ -853,9 +853,9 @@
 			{/if}
 		</div>
 		{#if data.supporterKey.expiringSoon}
-			<p class="nudge-line">{data.supporterKey.daysRemaining <= 1
-				? m.admin_settings_supporter_expiring_today_pre()
-				: m.admin_settings_supporter_expiring_pre({ days: data.supporterKey.daysRemaining })}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener noreferrer">sona.fast/supporter-key<span class="sr-only"> {m.link_opens_new_tab()}</span></a>{m.admin_settings_supporter_expiring_post()}</p>
+			<!-- Action only — the eyebrow above already carries the countdown, so the
+			     nudge doesn't repeat it. -->
+			<p class="nudge-line">{m.admin_settings_supporter_expiring_pre()}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener noreferrer">sona.fast/supporter-key<span class="sr-only"> {m.link_opens_new_tab()}</span></a>{m.admin_settings_supporter_expiring_post()}</p>
 		{/if}
 		{#if data.earlyAccess.length}
 			<p class="status-line">{m.admin_settings_supporter_early_active({ features: earlyActiveText })}</p>
@@ -1638,10 +1638,12 @@
 		margin-bottom: 16px;
 		max-width: 62ch;
 	}
-	/* Countdown on the eyebrow — attention, not destructive: the key still
-	   works. --status-attention tracks --primary and stays AA per theme. */
+	/* Countdown on the eyebrow — warn, not destructive (the key still works)
+	   and not attention (that tracks --primary, which would make the warning
+	   read as brand accent in the default dark theme). --status-warn is
+	   family-stable amber in all themes and AA on the card. */
 	.days-left {
-		color: var(--status-attention);
+		color: var(--status-warn);
 	}
 	/* Stored key on a raised, higher-contrast panel (var(--secondary) stands in
 	   for the mock's --raised, which isn't a shared token). */
