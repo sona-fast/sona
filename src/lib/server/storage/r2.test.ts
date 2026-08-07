@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { R2Bucket } from '@cloudflare/workers-types';
-import { countingSource, FakeFixedLengthStream } from '$lib/server/test/streams';
+import { countingSource, drainTracking, FakeFixedLengthStream } from '$lib/server/test/streams';
 import { R2Storage } from './r2';
 import { MAX_BUFFER_BYTES, MaxBytesExceededError } from './buffer';
 
@@ -40,13 +40,11 @@ describe('R2 streaming put', () => {
 		let maxOutstanding = 0;
 		const { bucket, storage } = makeStorage(async (_key, value) => {
 			received = value;
-			const reader = (value as ReadableStream<Uint8Array>).getReader();
-			for (;;) {
-				const { done, value: chunk } = await reader.read();
-				if (done) break;
-				drained += chunk.length;
-				maxOutstanding = Math.max(maxOutstanding, state.produced - Math.floor(drained / chunkSize));
-			}
+			({ bytes: drained, maxOutstanding } = await drainTracking(
+				value as ReadableStream<Uint8Array>,
+				state,
+				chunkSize
+			));
 		});
 
 		const { url } = await storage.put({
@@ -63,10 +61,18 @@ describe('R2 streaming put', () => {
 		// The source is pulled in lockstep with the bucket's read — never
 		// materialized. (TransformStream keeps a chunk or two in flight.)
 		expect(maxOutstanding).toBeLessThanOrEqual(4);
+		// Stored images are immutable: the put must carry the type and the 1-day
+		// cache policy, or R2 serves application/octet-stream on the 4h default.
+		expect(bucket.put.mock.calls[0][2]).toEqual({
+			httpMetadata: {
+				contentType: 'application/octet-stream',
+				cacheControl: 'public, max-age=86400'
+			}
+		});
 		expect(url).toBe('https://cdn.example.com/models/big.vrm');
 	});
 
-	it('rejects the put when the source stream errors mid-body, deleting the partial key', async () => {
+	it('rejects the put when the source stream errors mid-body, without deleting the key', async () => {
 		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
 		const boom = new Error('source died mid-body');
 		const stream = new ReadableStream<Uint8Array>({
@@ -89,9 +95,10 @@ describe('R2 streaming put', () => {
 				filename: 'b.png'
 			})
 		).rejects.toThrow('source died mid-body');
-		// A failed pump may have committed a truncated object at the declared
-		// length — the key must be best-effort deleted, not left orphaned.
-		expect(bucket.delete).toHaveBeenCalledWith('a/b.png');
+		// R2 puts are atomic — a failed streamed put commits nothing, so no
+		// truncated object exists and no cleanup delete may run: it could only
+		// destroy a PRE-EXISTING object at the same key.
+		expect(bucket.delete).not.toHaveBeenCalled();
 	});
 
 	it('round-trips: a URL returned by the streaming put survives an orphan sweep', async () => {
@@ -121,7 +128,7 @@ describe('R2 streaming put', () => {
 	it('without FixedLengthStream (Node dev/tests) buffers up to the declared size', async () => {
 		const { stream } = countingSource(4, 8); // 32 bytes
 		let received: unknown;
-		const { storage } = makeStorage(async (_key, value) => {
+		const { bucket, storage } = makeStorage(async (_key, value) => {
 			received = value;
 		});
 		await storage.put({
@@ -133,6 +140,10 @@ describe('R2 streaming put', () => {
 		});
 		expect(received).toBeInstanceOf(Uint8Array);
 		expect((received as Uint8Array).length).toBe(32);
+		// The buffered branch must carry the same metadata as the streaming one.
+		expect(bucket.put.mock.calls[0][2]).toEqual({
+			httpMetadata: { contentType: 'image/png', cacheControl: 'public, max-age=86400' }
+		});
 	});
 
 	it('without FixedLengthStream, a body that overruns its declared size fails', async () => {

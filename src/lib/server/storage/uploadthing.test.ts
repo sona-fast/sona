@@ -3,7 +3,7 @@ import { verifySignature } from '@uploadthing/shared';
 import { version as UT_SDK_VERSION } from 'uploadthing/package.json';
 import * as Micro from 'effect/Micro';
 import * as Redacted from 'effect/Redacted';
-import { countingSource, FakeFixedLengthStream } from '$lib/server/test/streams';
+import { countingSource, drainTracking, FakeFixedLengthStream } from '$lib/server/test/streams';
 import { UploadThingStorage } from './uploadthing';
 import { MAX_BUFFER_BYTES } from './buffer';
 import { ZeroKeepError } from './types';
@@ -36,6 +36,15 @@ const TOKEN = btoa(
 
 const MiB = 1024 * 1024;
 
+/** The success response a real ingest PUT returns: the key echoed as a ufsUrl. */
+function ingestOk(url: string | URL | Request): Response {
+	const key = new URL(String(url)).pathname.slice(1);
+	return new Response(JSON.stringify({ ufsUrl: `https://app123.ufs.sh/f/${key}` }), {
+		status: 200,
+		headers: { 'content-type': 'application/json' }
+	});
+}
+
 describe('UploadThing streaming put', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
@@ -62,21 +71,8 @@ describe('UploadThing streaming put', () => {
 			// Drain the multipart body chunk-by-chunk, tracking how far ahead the
 			// source has been pulled. If put() had buffered the file, all 11 chunks
 			// would already be produced before the first read.
-			const reader = reqBody.getReader();
-			for (;;) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				bytesSeen += value.length;
-				maxOutstanding = Math.max(
-					maxOutstanding,
-					state.produced - Math.floor(bytesSeen / chunkSize)
-				);
-			}
-			const key = new URL(String(url)).pathname.slice(1);
-			return new Response(JSON.stringify({ ufsUrl: `https://app123.ufs.sh/f/${key}` }), {
-				status: 200,
-				headers: { 'content-type': 'application/json' }
-			});
+			({ bytes: bytesSeen, maxOutstanding } = await drainTracking(reqBody, state, chunkSize));
+			return ingestOk(url);
 		});
 		vi.stubGlobal('fetch', fetchMock);
 
@@ -100,6 +96,8 @@ describe('UploadThing streaming put', () => {
 		expect(parsed.host).toBe('sea1.ingest.uploadthing.com');
 		expect(parsed.searchParams.get('x-ut-identifier')).toBe('app123');
 		expect(parsed.searchParams.get('x-ut-file-size')).toBe(String(size));
+		expect(parsed.searchParams.get('x-ut-file-name')).toBe('avatar.vrm');
+		expect(parsed.searchParams.get('x-ut-content-disposition')).toBe('inline');
 		// No explicit ACL: the app default applies, matching UTApi.uploadFiles.
 		expect(parsed.searchParams.get('x-ut-acl')).toBeNull();
 		expect(parsed.searchParams.get('expires')).toBeTruthy();
@@ -120,8 +118,10 @@ describe('UploadThing streaming put', () => {
 		expect(contentLength).toBeGreaterThan(size);
 		expect(bytesSeen).toBe(contentLength);
 		expect(headers.get('content-type')).toMatch(/^multipart\/form-data; boundary=/);
-		// Protocol parity with the SDK's own ingest PUT.
+		// Protocol parity with the SDK's own ingest PUT: version header and the
+		// resumable-protocol range for a fresh upload.
 		expect(headers.get('x-uploadthing-version')).toBe(UT_SDK_VERSION);
+		expect(headers.get('range')).toBe('bytes=0-');
 
 		// Round-trip: the stored URL is one the provider recognizes as its own.
 		expect(storage.owns(url)).toBe(true);
@@ -147,11 +147,7 @@ describe('UploadThing streaming put', () => {
 			requestInit = init;
 			// Drain so the pipeTo pump settles.
 			await new Response(init?.body as ReadableStream).arrayBuffer();
-			const key = new URL(String(url)).pathname.slice(1);
-			return new Response(JSON.stringify({ ufsUrl: `https://app123.ufs.sh/f/${key}` }), {
-				status: 200,
-				headers: { 'content-type': 'application/json' }
-			});
+			return ingestOk(url);
 		});
 		vi.stubGlobal('fetch', fetchMock);
 
@@ -172,13 +168,10 @@ describe('UploadThing streaming put', () => {
 
 	it('rejects a source that yields more bytes than declared', async () => {
 		const { stream } = countingSource(3, 8); // 24 bytes actual
-		const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+		const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
 			// Drain like a real fetch would; the framed stream errors mid-body.
 			await new Response(init?.body as ReadableStream).arrayBuffer();
-			return new Response(JSON.stringify({ ufsUrl: 'https://app123.ufs.sh/f/x' }), {
-				status: 200,
-				headers: { 'content-type': 'application/json' }
-			});
+			return ingestOk(url);
 		});
 		vi.stubGlobal('fetch', fetchMock);
 		const storage = new UploadThingStorage({ token: TOKEN });
@@ -193,15 +186,60 @@ describe('UploadThing streaming put', () => {
 		).rejects.toThrow(/exceeded the declared 16 bytes/);
 	});
 
-	it('strips CR/LF and quotes from the filename in the multipart head', async () => {
+	it('rejects an over-long source when routed through FixedLengthStream too', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const { stream } = countingSource(3, 8); // 24 bytes actual
+		const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			// The fixed stream errors mid-drain; the pump's rejection is the one
+			// the Promise.all([fetch, pump]) contract guards.
+			await new Response(init?.body as ReadableStream).arrayBuffer().catch(() => {});
+			return ingestOk(url);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const storage = new UploadThingStorage({ token: TOKEN });
+		await expect(
+			storage.put({
+				suggestedKey: 'artwork/x',
+				body: stream,
+				size: 16, // lies: declares fewer bytes than the stream holds
+				contentType: 'image/png',
+				filename: 'x.png'
+			})
+		).rejects.toThrow(/exceeded the declared/);
+	});
+
+	it('rejects when the source stream errors mid-body (workerd pump path)', async () => {
+		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
+		const stream = new ReadableStream<Uint8Array>({
+			start(c) {
+				c.enqueue(new Uint8Array(8));
+				c.error(new Error('source died mid-body'));
+			}
+		});
+		const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			// Drain like a real fetch; swallow the readable's error — the pump's
+			// rejection must surface through Promise.all, not float.
+			await new Response(init?.body as ReadableStream).arrayBuffer().catch(() => {});
+			return ingestOk(url);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		const storage = new UploadThingStorage({ token: TOKEN });
+		await expect(
+			storage.put({
+				suggestedKey: 'artwork/x',
+				body: stream,
+				size: 16,
+				contentType: 'image/png',
+				filename: 'x.png'
+			})
+		).rejects.toThrow('source died mid-body');
+	});
+
+	it('strips CR/LF, quotes and backslashes from the filename in the multipart head', async () => {
 		let bodyText = '';
 		const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
 			bodyText = await new Response(init?.body as ReadableStream).text();
-			const key = new URL(String(url)).pathname.slice(1);
-			return new Response(JSON.stringify({ ufsUrl: `https://app123.ufs.sh/f/${key}` }), {
-				status: 200,
-				headers: { 'content-type': 'application/json' }
-			});
+			return ingestOk(url);
 		});
 		vi.stubGlobal('fetch', fetchMock);
 
@@ -212,17 +250,19 @@ describe('UploadThing streaming put', () => {
 			body: stream,
 			size: 4,
 			contentType: 'image/png',
-			filename: 'evil"name\r\n.png'
+			filename: 'evil"name\r\n.png\\'
 		});
 
 		const head = bodyText.slice(0, bodyText.indexOf('\r\n\r\n'));
 		const lines = head.split('\r\n');
 		// Exactly boundary + disposition + content-type: a smuggled CR/LF would
-		// add a line, an unescaped quote would break the filename token.
+		// add a line, an unescaped quote would break the filename token, and a
+		// trailing backslash would escape the closing quote.
 		expect(lines).toHaveLength(3);
 		expect(lines[1]).toBe(
-			'Content-Disposition: form-data; name="file"; filename="evil_name__.png"'
+			'Content-Disposition: form-data; name="file"; filename="evil_name__.png_"'
 		);
+		expect(lines[2]).toBe('Content-Type: image/png');
 	});
 
 	it('rejects a content type with unsafe characters before touching the network', async () => {
@@ -266,6 +306,31 @@ describe('UploadThing streaming put', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	// Shapes that ONLY the HOST_RE gate rejects (a path suffix and a port pass
+	// both base64-JSON parsing and the string-type checks): the guard must be
+	// what stops the token author from steering the signed upload elsewhere.
+	it.each([
+		['a region carrying a path', { regions: ['evil.example/'] }],
+		['an ingestHost carrying a port', { regions: ['sea1'], ingestHost: 'evil.example:1337' }]
+	])('rejects a token with %s', async (_shape, fields) => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+		const hostileToken = btoa(
+			JSON.stringify({ apiKey: 'sk_test_0123456789abcdef', appId: 'app123', ...fields })
+		);
+		const storage = new UploadThingStorage({ token: hostileToken });
+		await expect(
+			storage.put({
+				suggestedKey: 'artwork/x',
+				body: countingSource(1, 4).stream,
+				size: 4,
+				contentType: 'image/png',
+				filename: 'x.png'
+			})
+		).rejects.toThrow(/UPLOADTHING_TOKEN/);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	it('rejects a failed ingest response with the status detail', async () => {
 		vi.stubGlobal(
 			'fetch',
@@ -281,6 +346,29 @@ describe('UploadThing streaming put', () => {
 				filename: 'empty.bin'
 			})
 		).rejects.toThrow(/403.*quota exceeded/s);
+	});
+
+	it('rejects a 200 response that carries no ufsUrl, surfacing the detail', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(
+				async () =>
+					new Response(JSON.stringify({ error: 'no slot' }), {
+						status: 200,
+						headers: { 'content-type': 'application/json' }
+					})
+			)
+		);
+		const storage = new UploadThingStorage({ token: TOKEN });
+		await expect(
+			storage.put({
+				suggestedKey: 'models/x',
+				body: new ReadableStream({ start: (c) => c.close() }),
+				size: 0,
+				contentType: 'application/octet-stream',
+				filename: 'empty.bin'
+			})
+		).rejects.toThrow(/returned no ufsUrl: no slot/);
 	});
 
 	it('falls back to the buffered uploadFiles path for a stream without a size', async () => {
@@ -316,13 +404,7 @@ describe('UploadThing streaming put', () => {
 	});
 
 	it('round-trips: a URL returned by the streaming put survives an orphan sweep', async () => {
-		const fetchMock = vi.fn(async (url: string | URL | Request) => {
-			const key = new URL(String(url)).pathname.slice(1);
-			return new Response(JSON.stringify({ ufsUrl: `https://app123.ufs.sh/f/${key}` }), {
-				status: 200,
-				headers: { 'content-type': 'application/json' }
-			});
-		});
+		const fetchMock = vi.fn(async (url: string | URL | Request) => ingestOk(url));
 		vi.stubGlobal('fetch', fetchMock);
 		const storage = new UploadThingStorage({ token: TOKEN });
 		const { stream } = countingSource(1, 8);

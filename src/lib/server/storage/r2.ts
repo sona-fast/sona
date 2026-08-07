@@ -40,29 +40,29 @@ export class R2Storage implements StorageProvider {
 		// below is workerd-unreachable (FixedLengthStream always exists there):
 		// it serves Node dev/tests, and for a sized stream it buffers up to the
 		// caller-declared size — a lying source is caught by the length check.
+		// That bound comes from the caller's declared size, which for migrate is
+		// the remote Content-Length — acceptable because this branch only runs in
+		// Node dev, which has no isolate memory ceiling (and pre-streaming migrate
+		// buffered uncapped via arrayBuffer() in the same environment).
 		// A stream with NO size buffers under MAX_BUFFER_BYTES (M8) instead.
 		const FixedLengthStream = fixedLengthStreamCtor();
 		if (body instanceof ReadableStream && size !== undefined && FixedLengthStream) {
 			const fixed = new FixedLengthStream(size);
 			const pump = body.pipeTo(fixed.writable);
 			// Await both: the put consumes the readable side, and a pump failure
-			// (size mismatch, source error) must reject the call, not float.
+			// (size mismatch, source error) must reject the call, not float. R2
+			// puts are atomic — a failed streamed put commits NOTHING (verified on
+			// real R2 and miniflare for both over- and under-length sources: the
+			// key is left absent), so no cleanup delete belongs here; one could
+			// only ever destroy a pre-existing object at the same key.
 			// The cast bridges the DOM ReadableStream type to workers-types' (the
 			// same object at runtime; only the .d.ts lineages differ).
-			try {
-				await Promise.all([
-					this.#bucket.put(key, fixed.readable as unknown as Parameters<R2Bucket['put']>[1], {
-						httpMetadata
-					}),
-					pump
-				]);
-			} catch (e) {
-				// An over-long source can leave a truncated object committed at the
-				// declared length — best-effort delete so the key isn't orphaned
-				// until the next sweep, then surface the original failure.
-				await this.#bucket.delete(key).catch(() => {});
-				throw e;
-			}
+			await Promise.all([
+				this.#bucket.put(key, fixed.readable as unknown as Parameters<R2Bucket['put']>[1], {
+					httpMetadata
+				}),
+				pump
+			]);
 			return { url: `${this.#base}/${key}` };
 		}
 		let data: ArrayBuffer | Uint8Array;

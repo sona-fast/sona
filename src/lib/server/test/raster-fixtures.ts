@@ -5,6 +5,9 @@ export function ascii(text: string): number[] {
 	return [...text].map((c) => c.charCodeAt(0));
 }
 
+/** The 8-byte PNG file signature. */
+export const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
 /** Minimal RIFF/WEBP file whose first chunk is `fourcc` with `payload`. */
 export function webp(fourcc: string, payload: number[]): Uint8Array {
 	const chunk = [...ascii(fourcc), payload.length, 0, 0, 0, ...payload];

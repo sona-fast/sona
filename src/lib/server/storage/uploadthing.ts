@@ -11,13 +11,14 @@ import { fixedLengthStreamCtor } from './fixed-length';
 import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
 
 /**
- * The relevant fields of the UPLOADTHING_TOKEN payload (base64 JSON) — the same
- * shape the SDK's own token schema parses: { apiKey, appId, regions, ingestHost? }.
+ * The relevant fields of the UPLOADTHING_TOKEN payload (base64 JSON). The wire
+ * token carries { apiKey, appId, regions: string[], ingestHost? } — the SDK's
+ * own schema — but only the first region is ever used, so parsing keeps just it.
  */
 interface ParsedToken {
 	apiKey: string;
 	appId: string;
-	regions: string[];
+	region: string;
 	ingestHost: string;
 }
 
@@ -80,12 +81,12 @@ export class UploadThingStorage implements StorageProvider {
 		if (!/^[\x20-\x7e]+$/.test(contentType)) {
 			throw new Error(`uploadthing: content type contains unsafe characters: ${JSON.stringify(contentType)}`);
 		}
-		const { apiKey, appId, regions, ingestHost } = this.#token();
+		const { apiKey, appId, region, ingestHost } = this.#token();
 		const key = await Micro.runPromise(
 			generateKey({ name: filename, size, type: contentType, lastModified: Date.now() }, appId)
 		);
 		const url = await Micro.runPromise(
-			generateSignedURL(`https://${regions[0]}.${ingestHost}/${key}`, Redacted.make(apiKey), {
+			generateSignedURL(`https://${region}.${ingestHost}/${key}`, Redacted.make(apiKey), {
 				// x-ut-slug is only for client route uploads; server-side uploads omit
 				// it. x-ut-acl is deliberately undefined (generateSignedURL skips
 				// null/undefined data values): the app's default ACL then applies,
@@ -100,20 +101,13 @@ export class UploadThingStorage implements StorageProvider {
 				}
 			})
 		);
-		// #token() validates the host shape, so the signed URL can never carry
-		// credentials — assert it anyway (defense in depth, same generic error).
-		const signed = new URL(url);
-		if (signed.username !== '' || signed.password !== '') {
-			throw new Error(UNUSABLE_TOKEN);
-		}
-
 		// Multipart framing around the raw stream, mirroring the SDK's
 		// `formData.append('file', file)` — built by hand so the file bytes stay
-		// a stream. Quotes/CR/LF are stripped from the filename to keep the
-		// Content-Disposition header well-formed (the stored name comes from
-		// x-ut-file-name above, which is signed and percent-encoded separately).
+		// a stream. Quotes, backslashes and CR/LF are stripped from the filename
+		// to keep the Content-Disposition header well-formed (the stored name
+		// comes from x-ut-file-name above, signed and percent-encoded separately).
 		const boundary = `----sona-${crypto.randomUUID()}`;
-		const safeName = filename.replace(/["\r\n]/g, '_');
+		const safeName = filename.replace(/["\\\r\n]/g, '_');
 		const encoder = new TextEncoder();
 		const head = encoder.encode(
 			`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safeName}"\r\n` +
@@ -178,21 +172,19 @@ export class UploadThingStorage implements StorageProvider {
 			);
 		}
 		const { apiKey, appId } = parsed;
-		const regions = Array.isArray(parsed.regions)
-			? parsed.regions.filter((r): r is string => typeof r === 'string')
-			: [];
+		const region = Array.isArray(parsed.regions) ? parsed.regions[0] : undefined;
 		const ingestHost =
 			typeof parsed.ingestHost === 'string' ? parsed.ingestHost : 'ingest.uploadthing.com';
 		if (
 			typeof apiKey !== 'string' ||
 			typeof appId !== 'string' ||
-			regions.length === 0 ||
-			!HOST_RE.test(regions[0]) ||
+			typeof region !== 'string' ||
+			!HOST_RE.test(region) ||
 			!HOST_RE.test(ingestHost)
 		) {
 			throw new Error(UNUSABLE_TOKEN);
 		}
-		return { apiKey, appId, regions, ingestHost };
+		return { apiKey, appId, region, ingestHost };
 	}
 
 	async deleteByUrl(url: string): Promise<void> {

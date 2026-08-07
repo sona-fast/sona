@@ -2,14 +2,34 @@
 
 /**
  * Minimal stand-in for workerd's FixedLengthStream: an identity transform that
- * records the declared length (the length *enforcement* is workerd's job; the
- * suites only assert the providers route through it instead of buffering).
+ * records the declared length and fails the way workerd does — the writable
+ * errors when writes exceed byteLength, and errors on close before byteLength.
+ * Consumer-abort semantics (a reader cancelling the readable side) remain
+ * unmodelled.
  */
 export class FakeFixedLengthStream {
 	readable: ReadableStream<Uint8Array>;
 	writable: WritableStream<Uint8Array>;
 	constructor(public byteLength: number) {
-		const t = new TransformStream<Uint8Array, Uint8Array>();
+		let written = 0;
+		const t = new TransformStream<Uint8Array, Uint8Array>({
+			transform(chunk, c) {
+				written += chunk.length;
+				if (written > byteLength) {
+					throw new TypeError(
+						`FakeFixedLengthStream: wrote ${written} bytes but expected ${byteLength}`
+					);
+				}
+				c.enqueue(chunk);
+			},
+			flush() {
+				if (written < byteLength) {
+					throw new TypeError(
+						`FakeFixedLengthStream: closed after ${written} bytes but expected ${byteLength}`
+					);
+				}
+			}
+		});
 		this.readable = t.readable;
 		this.writable = t.writable;
 	}
@@ -34,4 +54,27 @@ export function countingSource(chunks: number, chunkSize: number) {
 		}
 	});
 	return { stream, state };
+}
+
+/**
+ * Drain `stream` chunk by chunk, tracking how far ahead a countingSource's
+ * production ran of the consumption — the other half of the "consumed
+ * incrementally" probe. A producer that buffered would show every chunk
+ * outstanding before the first read.
+ */
+export async function drainTracking(
+	stream: ReadableStream<Uint8Array>,
+	state: { produced: number },
+	chunkSize: number
+): Promise<{ bytes: number; maxOutstanding: number }> {
+	let bytes = 0;
+	let maxOutstanding = 0;
+	const reader = stream.getReader();
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		bytes += value.length;
+		maxOutstanding = Math.max(maxOutstanding, state.produced - Math.floor(bytes / chunkSize));
+	}
+	return { bytes, maxOutstanding };
 }

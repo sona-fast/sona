@@ -5,10 +5,10 @@ import Database from 'better-sqlite3';
 import { isHttpError } from '@sveltejs/kit';
 import { clearSettingsCache } from '$lib/server/settings';
 import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
-import { getStorage } from '$lib/server/storage';
 import { POST } from './+server';
 
 import { makeD1 } from '$lib/server/test/d1';
+import { PNG_MAGIC } from '$lib/server/test/raster-fixtures';
 
 // Stub only the provider resolution — the endpoint's own validation
 // (allowlist, sniff, size cap) stays real. `put` is what the assertions probe:
@@ -26,8 +26,6 @@ function makePlatform() {
 	sqlite.exec('CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
 	return { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
 }
-
-const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 function pngFile(size: number, name = 'a.png', type = 'image/png') {
 	const bytes = new Uint8Array(size);
@@ -56,7 +54,6 @@ beforeEach(() => {
 	// getSettings caches per-isolate; each test uses a fresh in-memory DB.
 	clearSettingsCache();
 	put.mockClear();
-	vi.mocked(getStorage).mockClear();
 });
 
 describe('POST /api/upload', () => {
