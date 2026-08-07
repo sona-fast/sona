@@ -30,7 +30,9 @@
 			</div>
 		{:else}
 			{#if form?.error}
-				<p class="error">{form.error}</p>
+				<!-- The form submits without navigating, so the message appears with no
+				     focus change; role="alert" is what announces it. -->
+				<p class="error" role="alert">{form.error}</p>
 			{/if}
 
 			<form
@@ -101,8 +103,11 @@
 					<div class="grid">
 						<label><span>Twitter / X</span><input type="text" name="twitter" class="input" /></label>
 						<label><span>Bluesky</span><input type="text" name="bluesky" class="input" /></label>
+						<label><span>Instagram</span><input type="text" name="instagram" class="input" /></label>
 						<label><span>Telegram</span><input type="text" name="telegram" class="input" /></label>
 						<label><span>FurAffinity</span><input type="text" name="furaffinity" class="input" /></label>
+						<!-- FurTrack sits last of the socials so it stays next to the
+						     primary-character field, which is labelled as the FurTrack tag. -->
 						<label><span>FurTrack</span><input type="text" name="furtrack" class="input" /></label>
 						<label><span>{m.admin_setup_primary_character()}</span><input type="text" name="primaryCharacter" class="input" /></label>
 					</div>

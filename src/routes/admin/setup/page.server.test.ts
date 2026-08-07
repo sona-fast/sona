@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
+import { readFileSync } from 'node:fs';
 import { isRedirect } from '@sveltejs/kit';
 import * as schema from '$lib/server/db/schema';
 import { getRawSetting } from '$lib/server/settings';
@@ -149,6 +150,75 @@ describe('setup wizard — blank optional fields never clobber CLI-seeded settin
 			if (!isRedirect(e)) throw e;
 		}
 		expect(await getRawSetting(db, 'primaryCharacter')).toBe('Taro');
+	});
+});
+
+describe('setup wizard — collects Instagram alongside the other socials (SONA-130)', () => {
+	it('normalizes and saves a submitted Instagram handle', async () => {
+		const { db, platform } = makeDb();
+
+		try {
+			await actions.default(setupEvent(platform, { instagram: 'taro' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		// Bare handle in, full profile URL out — same normalizeSocialUrl treatment
+		// the other social fields get, not a raw passthrough.
+		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://www.instagram.com/taro');
+	});
+
+	it('accepts a full profile URL unchanged', async () => {
+		const { db, platform } = makeDb();
+
+		try {
+			await actions.default(setupEvent(platform, { instagram: 'https://instagram.com/taro' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://instagram.com/taro');
+	});
+
+	it('a blank Instagram writes nothing, per the #60 rule', async () => {
+		const { db, platform } = makeDb();
+
+		try {
+			await actions.default(setupEvent(platform, { instagram: '' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		expect(await getRawSetting(db, 'instagramUrl')).toBeNull();
+	});
+
+	it('keeps FurTrack last, next to the primary-character field', () => {
+		// Also the proof that the form posts the field at all — the server mapping is
+		// useless if it does not, and the two live in different files.
+		//
+		// The primary-character label reads "(FurTrack tag)", so appending Instagram
+		// to the end of the grid would have split the pair. Instagram goes after
+		// Bluesky instead.
+		const form = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		const order = [...form.matchAll(/name="(\w+)" class="input" \/><\/label>/g)].map(([, n]) => n);
+		expect(order).toEqual([
+			'twitter',
+			'bluesky',
+			'instagram',
+			'telegram',
+			'furaffinity',
+			'furtrack',
+			'primaryCharacter'
+		]);
+	});
+});
+
+describe('setup wizard — the submit error is announced', () => {
+	it('marks the error paragraph as an alert', () => {
+		// enhance() submits without navigating, so a failed setup changes nothing a
+		// screen reader would otherwise notice.
+		const form = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(form).toMatch(/<p class="error" role="alert">\{form\.error\}<\/p>/);
 	});
 });
 

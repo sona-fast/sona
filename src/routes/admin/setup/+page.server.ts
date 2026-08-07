@@ -131,6 +131,7 @@ export const actions = {
 			telegramUrl: normalizeSocialUrl('telegram', data.get('telegram') as string),
 			furAffinityUrl: normalizeSocialUrl('furaffinity', data.get('furaffinity') as string),
 			furtrackUrl: normalizeSocialUrl('furtrack', data.get('furtrack') as string),
+			instagramUrl: normalizeSocialUrl('instagram', data.get('instagram') as string),
 			primaryCharacter: sanitizeText(data.get('primaryCharacter') as string, 100)
 		};
 		for (const key of Object.keys(optional)) if (!optional[key]) delete optional[key];
