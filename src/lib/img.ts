@@ -16,6 +16,67 @@ export function isAnimatedSource(url: string): boolean {
 }
 
 /**
+ * Route an image URL through Cloudflare Image Transformations so grids
+ * and thumbnails don't download multi-MB originals. In dev the CF edge
+ * isn't available, so fall through to the raw URL.
+ *
+ * Lives here rather than in $lib/index.ts (which re-exports it, so callers are
+ * unaffected) because the responsive builders below need it and importing back
+ * from the barrel would make the two modules circular.
+ */
+export function cdnImage(src: string | null | undefined, width = 800, quality = 75): string {
+	if (!src) return '';
+	if (import.meta.env.DEV) return src;
+	// GIFs bypass the transform and serve their raw original: they're the one
+	// animated upload type detectable by extension, and off-zone GIFs
+	// (UploadThing, non-resize R2) 403 the transform anyway. Animated WebP/AVIF
+	// can't be told from static via URL, so they ride the transform — which
+	// preserves animation (no anim=false) and still resizes to `width`. CF caps
+	// animated resizing at 50 MP (bigger animations are delivered un-resized but
+	// still animated; >100 MP errors → rawFallback swaps in the raw original).
+	if (isAnimatedSource(src)) return src;
+	return `/cdn-cgi/image/width=${width},quality=${quality},fit=scale-down,format=auto/${src}`;
+}
+
+/**
+ * Everything that differs between one responsive image and the next: the CDN
+ * width ladder to offer, the `sizes` describing the slot those widths land in,
+ * the transform quality, and the width the plain `src` fallback uses. The slot
+ * measurements are the only route knowledge; the builders below are shared.
+ */
+export interface ResponsiveImage {
+	widths: number[];
+	sizes: string;
+	quality: number;
+	srcWidth: number;
+}
+
+/** Default `src`: one CDN transform, or the raw original when animated. */
+export function responsiveSrc(url: string, spec: ResponsiveImage): string {
+	return isAnimatedSource(url) ? url : cdnImage(url, spec.srcWidth, spec.quality);
+}
+
+/**
+ * The width variants, or undefined for an animated source: cdnImage returns a
+ * GIF unchanged, so a ladder built from one would list the identical URL under
+ * every width descriptor and let the browser pick a descriptor that describes
+ * nothing.
+ *
+ * In dev the candidates ARE all identical for every source, animated or not —
+ * cdnImage returns the raw URL under import.meta.env.DEV, since there is no CF
+ * edge to transform. Expected; it is the GIF case above that needs the branch.
+ */
+export function responsiveSrcset(url: string, spec: ResponsiveImage): string | undefined {
+	if (isAnimatedSource(url)) return undefined;
+	return spec.widths.map((w) => `${cdnImage(url, w, spec.quality)} ${w}w`).join(', ');
+}
+
+/** `sizes` for the srcset; omitted when animated (there is no srcset to size). */
+export function responsiveSizes(url: string, spec: ResponsiveImage): string | undefined {
+	return isAnimatedSource(url) ? undefined : spec.sizes;
+}
+
+/**
  * Svelte action: fall back to the raw original when the (transformed) src
  * fails to load. Cloudflare Image Transformations refuse off-zone source URLs
  * with 403 (see the admin/stickers avatar note), so on providers like
@@ -29,8 +90,11 @@ export function rawFallback(img: HTMLImageElement, raw: string) {
 	let rawUrl = raw;
 	const onError = () => {
 		if (!rawUrl || img.getAttribute('src') === rawUrl) return;
-		// srcset would override a swapped src, so it goes too.
+		// srcset would override a swapped src, so it goes too — and `sizes` with
+		// it, since a sizes without a srcset describes a slot for candidates that
+		// no longer exist.
 		img.removeAttribute('srcset');
+		img.removeAttribute('sizes');
 		img.setAttribute('src', rawUrl);
 	};
 	img.addEventListener('error', onError);

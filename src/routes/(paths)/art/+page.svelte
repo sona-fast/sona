@@ -4,6 +4,7 @@
 	import Callout from '$lib/components/Callout.svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import { cdnImage, rawFallback } from '$lib';
+	import { refSheetSrc, refSheetSrcset, refSheetSizes } from './ref-sheet-image';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
@@ -45,7 +46,9 @@
 			     prioritize its fetch. rawFallback swaps in the original if the
 			     transform 403s off-zone. -->
 			<img
-				src={cdnImage(data.refSheet.imageUrl, 1200)}
+				src={refSheetSrc(data.refSheet.imageUrl)}
+				srcset={refSheetSrcset(data.refSheet.imageUrl)}
+				sizes={refSheetSizes(data.refSheet.imageUrl)}
 				use:rawFallback={data.refSheet.imageUrl}
 				alt={data.refSheet.title}
 				width={data.refSheet.width}

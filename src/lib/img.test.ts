@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cdnImage, isAnimatedSource } from '$lib';
+import { cdnImage, isAnimatedSource, rawFallback } from '$lib';
 
 // Guards the GIF regression (sona#97 follow-up): GIFs are served raw everywhere
 // cdnImage is used (grid, cards, collections, admin, detail) because off-zone
@@ -55,5 +55,57 @@ describe('isAnimatedSource', () => {
 		expect(isAnimatedSource('https://x/a.png')).toBe(false);
 		expect(isAnimatedSource('https://x/a.webp')).toBe(false);
 		expect(isAnimatedSource('https://app.ufs.sh/f/abc')).toBe(false);
+	});
+});
+
+describe('rawFallback', () => {
+	// vitest runs in node with no DOM, and rawFallback only ever touches these
+	// four methods — enough to drive it for real rather than scanning the source.
+	function fakeImg(attrs: Record<string, string>) {
+		const listeners: Record<string, (() => void)[]> = {};
+		return {
+			complete: false,
+			naturalWidth: 1,
+			attrs,
+			getAttribute: (n: string) => attrs[n] ?? null,
+			setAttribute: (n: string, v: string) => {
+				attrs[n] = v;
+			},
+			removeAttribute: (n: string) => {
+				delete attrs[n];
+			},
+			addEventListener: (n: string, fn: () => void) => {
+				(listeners[n] ??= []).push(fn);
+			},
+			removeEventListener: () => {},
+			fire: (n: string) => listeners[n]?.forEach((fn) => fn())
+		};
+	}
+
+	const RAW = 'https://cdn.example.com/a.png';
+
+	it('swaps in the raw URL and drops srcset AND sizes', () => {
+		// A leftover `sizes` describes a slot for candidates that no longer exist;
+		// keeping it while removing srcset is the half-fix.
+		const img = fakeImg({
+			src: '/cdn-cgi/image/width=1100,quality=75,fit=scale-down,format=auto/' + RAW,
+			srcset: 'a 600w, b 1100w',
+			sizes: '(max-width: 600px) calc(100vw - 56px), 544px'
+		});
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		rawFallback(img as any, RAW);
+		img.fire('error');
+
+		expect(img.attrs.src).toBe(RAW);
+		expect(img.attrs.srcset).toBeUndefined();
+		expect(img.attrs.sizes).toBeUndefined();
+	});
+
+	it('does not re-swap once src is already the raw URL', () => {
+		const img = fakeImg({ src: RAW });
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		rawFallback(img as any, RAW);
+		img.fire('error');
+		expect(img.attrs.src).toBe(RAW);
 	});
 });

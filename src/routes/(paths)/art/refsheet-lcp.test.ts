@@ -8,13 +8,23 @@ import { readFileSync } from 'node:fs';
 const pageSrc = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
 
 describe('/art ref-sheet LCP markup', () => {
-	it('transforms the ref-sheet image through cdnImage, never the raw original', () => {
-		expect(pageSrc).toContain('src={cdnImage(data.refSheet.imageUrl, 1200)}');
+	const img = pageSrc.match(/<img[\s\S]*?refSheetSrc\(data\.refSheet[\s\S]*?\/>/)?.[0] ?? '';
+
+	it('transforms the ref-sheet image through the CDN, never the raw original', () => {
+		// The transform now comes from refSheetSrc (see ref-sheet-image.ts, which
+		// unit-tests it down to the cdnImage call) rather than an inline width.
+		expect(img).toContain('src={refSheetSrc(data.refSheet.imageUrl)}');
 		expect(pageSrc).not.toMatch(/<img[^>]*\ssrc=\{data\.refSheet\.imageUrl\}/);
 	});
 
+	it('offers the responsive variants rather than one fixed width', () => {
+		expect(img).toContain('srcset={refSheetSrcset(data.refSheet.imageUrl)}');
+		expect(img).toContain('sizes={refSheetSizes(data.refSheet.imageUrl)}');
+		// A bare fixed-width transform sends every viewport the same pixels.
+		expect(pageSrc).not.toMatch(/src=\{cdnImage\(data\.refSheet\.imageUrl[^)]*\)\}/);
+	});
+
 	it('prioritizes the LCP fetch, reserves its box, and keeps a raw-URL fallback', () => {
-		const img = pageSrc.match(/<img[\s\S]*?cdnImage\(data\.refSheet[\s\S]*?\/>/)?.[0] ?? '';
 		expect(img).toContain('fetchpriority="high"');
 		expect(img).toContain('decoding="async"');
 		expect(img).toContain('width={data.refSheet.width}');
