@@ -1,6 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { images } from '$lib/server/db/schema';
 import type { Database } from '$lib/server/db';
+import { extFromContentType, isAllowedImageType } from './index';
+import { sniffImageType } from './sniff';
 import type { StorageProvider } from './types';
 
 export interface MigrationItemResult {
@@ -175,8 +177,6 @@ async function copyOne(
 ): Promise<string> {
 	const res = await fetchFn(url);
 	if (!res.ok) throw new Error(`fetch ${res.status} for ${url}`);
-	const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
-	const ext = (contentType.split('/')[1] ?? 'bin').split(';')[0];
 	// Stream when the source declares its usable length (both providers upload
 	// without materializing given a size). Content-Encoding responses can't
 	// stream: their Content-Length counts compressed bytes while res.body
@@ -184,19 +184,96 @@ async function copyOne(
 	// without a usable length falls back to buffering the whole body — uncapped,
 	// the pre-existing behavior of this path.
 	const declaredSize = Number(res.headers.get('content-length'));
-	const stream =
+	const streamable =
 		res.body &&
 		Number.isFinite(declaredSize) &&
 		declaredSize > 0 &&
-		!res.headers.get('content-encoding')
-			? res.body
-			: null;
+		!res.headers.get('content-encoding');
+
+	// Verify the LEADING BYTES are an allowed raster image (M7, the same defense
+	// as /api/upload) rather than trusting the source's Content-Type header:
+	// migrate re-hosts onto the CDN origin, which serves the stored type past
+	// the worker's security headers, so text/html or SVG must never be copied.
+	// The sniffed type is also what gets STORED — a source serving honest bytes
+	// under a generic header (application/octet-stream) migrates with a
+	// corrected type instead of failing. On the streaming path the sniffed head
+	// is re-prepended, so the provider still sees the full body.
+	let body: ReadableStream<Uint8Array> | Uint8Array;
+	let head: Uint8Array;
+	if (streamable) {
+		const reader = res.body!.getReader();
+		const { chunks, bytes } = await readAtLeast(reader, SNIFF_BYTES);
+		head = bytes;
+		body = prependChunks(chunks, reader);
+	} else {
+		const buffered = new Uint8Array(await res.arrayBuffer());
+		head = buffered;
+		body = buffered;
+	}
+	const sniffed = sniffImageType(head.slice(0, SNIFF_BYTES));
+	if (!isAllowedImageType(sniffed)) {
+		throw new Error(
+			`source is not an allowed raster image (sniffed ${sniffed ?? 'no known signature'}) for ${url}`
+		);
+	}
+	const contentType = sniffed!;
+	const ext = extFromContentType(contentType);
 	const { url: newUrl } = await target.put({
 		suggestedKey: `${baseKey}.${ext}`,
-		body: stream ?? new Uint8Array(await res.arrayBuffer()),
-		size: stream ? declaredSize : undefined,
+		body,
+		size: streamable ? declaredSize : undefined,
 		contentType,
 		filename: `${baseKey.split('/').pop()}.${ext}`
 	});
 	return newUrl;
+}
+
+/** 64 bytes: enough for every raster signature, incl. AVIF ftyp compatible_brands. */
+const SNIFF_BYTES = 64;
+
+/** Read chunks off `reader` until at least `n` bytes have arrived (or EOF). */
+async function readAtLeast(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+	n: number
+): Promise<{ chunks: Uint8Array[]; bytes: Uint8Array }> {
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	while (total < n) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		chunks.push(value);
+		total += value.length;
+	}
+	const bytes = new Uint8Array(total);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.length;
+	}
+	return { chunks, bytes };
+}
+
+/** A stream that replays the already-read `chunks`, then drains `reader`. */
+function prependChunks(
+	chunks: Uint8Array[],
+	reader: ReadableStreamDefaultReader<Uint8Array>
+): ReadableStream<Uint8Array> {
+	let i = 0;
+	return new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			if (i < chunks.length) {
+				controller.enqueue(chunks[i++]);
+				return;
+			}
+			const { done, value } = await reader.read();
+			if (done) {
+				controller.close();
+				return;
+			}
+			controller.enqueue(value);
+		},
+		cancel(reason) {
+			return reader.cancel(reason);
+		}
+	});
 }
