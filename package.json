@@ -33,6 +33,8 @@
 		"@types/node": "^25.9.1",
 		"better-sqlite3": "^12.9.0",
 		"drizzle-kit": "^0.31.10",
+		"esbuild": "^0.27.3",
+		"miniflare": "^4.20260409.0",
 		"svelte": "^5.55.2",
 		"svelte-check": "^4.4.6",
 		"tsx": "^4.21.0",

@@ -48,9 +48,12 @@ export class R2Storage implements StorageProvider {
 			// Await both: the put consumes the readable side, and a pump failure
 			// (size mismatch, source error) must reject the call, not float.
 			// Failure modes: an under-length or errored source leaves the key
-			// absent, but an OVER-length source — put() still rejects — leaves a
-			// truncated object of exactly the declared size at the key, replacing
-			// whatever was there. No cleanup delete, deliberately: every caller
+			// absent, but an OVER-length source — put() still rejects — CAN leave
+			// a truncated object of exactly the declared size at the key,
+			// replacing whatever was there (timing-dependent: the store's write
+			// completes only if it finishes before the pump's rejection; both
+			// outcomes observed under workerd — see the SONA-140 harness).
+			// No cleanup delete, deliberately: every caller
 			// passes an authoritative size (File.size or a fetch-bounded
 			// Content-Length), so an over-length source is unreachable today; if
 			// it ever happened the leftover is an unreferenced orphan the sweep

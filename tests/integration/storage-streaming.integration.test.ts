@@ -1,0 +1,162 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { build } from 'esbuild';
+import { Miniflare } from 'miniflare';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Workerd-parity harness for the storage streaming paths (SONA-140).
+//
+// The SONA-136 review found its two worst bugs ONLY under real workerd — the
+// Node unit suite was green through both:
+//  1. workerd drops a manually-set content-length header on a plain
+//     ReadableStream fetch body and sends chunked encoding; only a
+//     FixedLengthStream body carries a real Content-Length.
+//  2. An over-length source through FixedLengthStream leaves a truncated R2
+//     object of exactly the declared size even though put() rejects.
+// This suite pins both behaviors (and the happy paths) by bundling the REAL
+// provider code into a worker (tests/integration/worker-fixtures/
+// storage-worker.ts) and running it under Miniflare's workerd. Outbound
+// fetches from the worker are routed to `outboundService` below, so nothing
+// leaves the process and the ingest PUT can be captured as workerd sent it.
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+// Same shape the SDK's token schema parses; fake but sk_-shaped key.
+const TOKEN = Buffer.from(
+	JSON.stringify({ apiKey: 'sk_test_0123456789abcdef', appId: 'testapp', regions: ['sea1'] })
+).toString('base64');
+
+interface CapturedRequest {
+	url: string;
+	method: string;
+	contentLength: string | null;
+	transferEncoding: string | null;
+	bodyBytes: number;
+	bodySha256: string;
+	headText: string;
+}
+
+let mf: Miniflare;
+let workerOrigin: string;
+const captured: CapturedRequest[] = [];
+
+beforeAll(async () => {
+	const bundle = await build({
+		entryPoints: [path.join(repoRoot, 'tests/integration/worker-fixtures/storage-worker.ts')],
+		bundle: true,
+		write: false,
+		format: 'esm',
+		// Resolve workerd-flavored entry points where packages offer them.
+		conditions: ['workerd', 'worker', 'browser'],
+		platform: 'browser',
+		target: 'es2022'
+	});
+	mf = new Miniflare({
+		modules: true,
+		script: bundle.outputFiles[0].text,
+		// Matches wrangler.toml.example — and must stay within what the pinned
+		// miniflare's workerd binary supports.
+		compatibilityDate: '2025-04-01',
+		r2Buckets: ['IMAGES'],
+		bindings: { UPLOADTHING_TOKEN: TOKEN },
+		// Every fetch the worker makes lands here instead of the network. The
+		// Request arrives as workerd dispatched it, so the content-length /
+		// transfer-encoding split is observable.
+		outboundService: async (request: Request) => {
+			const body = request.body ? Buffer.from(await request.arrayBuffer()) : Buffer.alloc(0);
+			captured.push({
+				url: request.url,
+				method: request.method,
+				contentLength: request.headers.get('content-length'),
+				transferEncoding: request.headers.get('transfer-encoding'),
+				bodyBytes: body.length,
+				bodySha256: createHash('sha256').update(body).digest('hex'),
+				headText: body.subarray(0, 512).toString('latin1')
+			});
+			const key = new URL(request.url).pathname.slice(1);
+			return new Response(JSON.stringify({ ufsUrl: `https://testapp.ufs.sh/f/${key}` }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			});
+		}
+	});
+	workerOrigin = String(await mf.ready);
+}, 120_000);
+
+afterAll(async () => {
+	await mf?.dispose();
+});
+
+async function run(scenario: string): Promise<Record<string, unknown>> {
+	const res = await fetch(new URL(`/?scenario=${scenario}`, workerOrigin));
+	const text = await res.text();
+	if (!res.ok) throw new Error(`scenario ${scenario} failed: ${res.status} ${text}`);
+	return JSON.parse(text);
+}
+
+describe('storage streaming under real workerd', () => {
+	it('CONTROL: workerd drops a manual content-length on a plain stream body', async () => {
+		captured.length = 0;
+		await run('control-manual-header');
+		expect(captured).toHaveLength(1);
+		// If this ever starts carrying a content-length, workerd's behavior
+		// changed and the FixedLengthStream wrapping may no longer be needed —
+		// but more importantly the harness would stop discriminating, so every
+		// other assertion here would need re-validating.
+		expect(captured[0].contentLength).toBeNull();
+		expect(captured[0].bodyBytes).toBe(4 * 1024 * 1024);
+	});
+
+	it('the ingest PUT carries an exact Content-Length and well-formed framing', async () => {
+		captured.length = 0;
+		const result = await run('uploadthing-streaming-put');
+		expect(captured).toHaveLength(1);
+		const put = captured[0];
+		expect(put.method).toBe('PUT');
+		expect(put.url).toMatch(/^https:\/\/sea1\.ingest\.uploadthing\.com\//);
+
+		// The load-bearing assertion: a REAL length, exactly the bytes sent, no
+		// chunked encoding — the bug the FixedLengthStream wrapping fixes.
+		expect(put.contentLength).not.toBeNull();
+		expect(Number(put.contentLength)).toBe(put.bodyBytes);
+		expect(put.transferEncoding).toBeNull();
+
+		// Framing: multipart head, then the declared payload, then the closing
+		// boundary — total = head + size + tail.
+		expect(put.headText).toMatch(/^--[^\r\n]+\r\ncontent-disposition: form-data; name="file"/i);
+		expect(put.bodyBytes).toBeGreaterThan(8 * 1024 * 1024);
+		expect(put.bodyBytes).toBeLessThan(8 * 1024 * 1024 + 1024);
+
+		// And the provider surfaced the ingest response's ufsUrl.
+		expect(String(result.url)).toMatch(/^https:\/\/testapp\.ufs\.sh\/f\//);
+	});
+
+	it('R2 stores a streamed body byte-exact with intact httpMetadata', async () => {
+		const result = await run('r2-streaming-put');
+		expect(result.storedSize).toBe(8 * 1024 * 1024);
+		expect(result.contentType).toBe('application/octet-stream');
+		expect(result.cacheControl).toBe('public, max-age=86400');
+		expect(result.url).toBe('/img/it/exact.bin');
+	});
+
+	it('an over-length source rejects the put; any leftover is exactly the declared size', async () => {
+		const result = await run('r2-over-length');
+		expect(String(result.rejected)).toMatch(/too many bytes/i);
+		// NOT reliably atomic: whether a truncated object commits is a race
+		// between the store completing its write (FixedLengthStream ends its
+		// readable at exactly byteLength) and the pump's rejection. Both
+		// outcomes have been observed on this stack. What must hold: the call
+		// rejected, and anything left behind is exactly the declared size —
+		// never a partial of some other length.
+		if (result.leftoverSize != null) {
+			expect(result.leftoverSize).toBe(2 * 1024 * 1024);
+		}
+	});
+
+	it('an under-length source rejects the put and leaves the key absent', async () => {
+		const result = await run('r2-under-length');
+		expect(String(result.rejected)).toMatch(/did not see all expected bytes/i);
+		expect(result.keyAbsent).toBe(true);
+	});
+});
