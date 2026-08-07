@@ -24,7 +24,10 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	const settings = await getSettings(db, { fresh: true });
 	const storage = getStorage(platform?.env, settings);
 
-	// Cap the stored size (M8) so a huge upload can't OOM the isolate while buffering.
+	// Size-policy cap for this image endpoint. Since providers stream when given
+	// a size (SONA-136) this no longer guards isolate memory here — but >10 MB
+	// raster images have no product use, and the cap keeps fork storage bills
+	// predictable. Large-file endpoints (e.g. VR avatar models) set their own.
 	if (file.size > MAX_BUFFER_BYTES) {
 		error(413, `File too large: ${file.size} bytes. Max ${MAX_BUFFER_BYTES}.`);
 	}
@@ -51,7 +54,13 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	// re-throws unchanged after being sampled.
 	let putResult;
 	try {
-		putResult = await storage.put({ suggestedKey: key, body: file.stream(), contentType, filename: file.name });
+		putResult = await storage.put({
+			suggestedKey: key,
+			body: file.stream(),
+			size: file.size,
+			contentType,
+			filename: file.name
+		});
 	} catch (e) {
 		schedule(platform, recordUpload(db, false, {
 			status: 500,

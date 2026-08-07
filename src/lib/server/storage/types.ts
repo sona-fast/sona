@@ -6,10 +6,20 @@ export interface PutInput {
 	/** Suggested object key (used by R2; UploadThing generates its own key). */
 	suggestedKey: string;
 	/**
-	 * The bytes. A ReadableStream lets R2 stream straight to the bucket without
-	 * buffering the whole file; UploadThing buffers internally since it needs a File.
+	 * The bytes. A ReadableStream uploads without materializing the whole body
+	 * ONLY when `size` is also given — both providers need the total length up
+	 * front (R2 for the object length, UploadThing for the presigned ingest
+	 * URL). A stream without a size falls back to bounded in-memory buffering
+	 * under MAX_BUFFER_BYTES.
 	 */
 	body: ReadableStream | Uint8Array | ArrayBuffer;
+	/**
+	 * Total byte length of `body` when it is a ReadableStream. Callers always
+	 * know it (File.size, Content-Length) — pass it so large bodies stream
+	 * instead of buffering. If the stream turns out longer than declared, the
+	 * put fails rather than silently storing a truncated or oversized object.
+	 */
+	size?: number;
 	contentType: string;
 	filename: string;
 }

@@ -177,10 +177,16 @@ async function copyOne(
 	if (!res.ok) throw new Error(`fetch ${res.status} for ${url}`);
 	const contentType = res.headers.get('content-type') ?? 'application/octet-stream';
 	const ext = (contentType.split('/')[1] ?? 'bin').split(';')[0];
-	const body = new Uint8Array(await res.arrayBuffer());
+	// Stream when the source declares its length (both providers upload without
+	// materializing given a size) — large objects must not be buffered whole
+	// here for the same isolate-memory reason as /api/upload (M8). A response
+	// without Content-Length (chunked) falls back to buffering, as before.
+	const declaredSize = Number(res.headers.get('content-length'));
+	const streamable = res.body && Number.isFinite(declaredSize) && declaredSize > 0;
 	const { url: newUrl } = await target.put({
 		suggestedKey: `${baseKey}.${ext}`,
-		body,
+		body: streamable ? res.body! : new Uint8Array(await res.arrayBuffer()),
+		size: streamable ? declaredSize : undefined,
 		contentType,
 		filename: `${baseKey.split('/').pop()}.${ext}`
 	});
