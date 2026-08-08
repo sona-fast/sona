@@ -483,7 +483,8 @@
 	}
 
 	.col-avatar {
-		width: 48px;
+		/* 36px avatar + 12px cell padding each side (.data-table td, app.css). */
+		width: 60px;
 	}
 
 	.col-actions {
