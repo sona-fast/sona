@@ -46,6 +46,11 @@
 	.avatar {
 		width: var(--avatar-size);
 		height: var(--avatar-size);
+		/* Opt out of the global `img { max-width: 100% }` (app.css): in the admin
+		   tables the 48px border-box avatar cell leaves a 24px content box, and
+		   the clamp squishes the image to 24x36 whenever no monogram row props
+		   the column open (SONA-148). */
+		max-width: none;
 		border-radius: 50%;
 		flex-shrink: 0;
 		object-fit: cover;
