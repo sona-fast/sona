@@ -23,11 +23,12 @@ VALUES (1, 'Test Artist', '2026-07-01T00:00:00.000Z');
 
 -- Artist WITH an avatar image for the admin avatar-geometry spec (SONA-148).
 -- The URL must actually load (a 404 flips ArtistAvatar to its monogram
--- fallback), so it points at a real same-origin static asset. The name is
--- disjoint from 'Test Artist' so ?q=Avatar renders a list with no monogram
--- rows — the geometry bug only reproduces then.
+-- fallback), so it points at a committed static asset dedicated to this seed
+-- (static/e2e-avatar.svg) rather than a branding asset forks may rename. The
+-- name is disjoint from 'Test Artist' so ?q=Avatar renders a list with no
+-- monogram rows — the geometry bug only reproduces then.
 INSERT OR REPLACE INTO artists (id, name, avatar_url, created_at)
-VALUES (2, 'Avatar Artist', '/favicon.svg', '2026-07-01T00:00:00.000Z');
+VALUES (2, 'Avatar Artist', '/e2e-avatar.svg', '2026-07-01T00:00:00.000Z');
 
 -- Variant group: a published SFW parent + a published NSFW variant that points
 -- at it via parent_image_id. The gallery variant strip renders both, and the
