@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import type { SupporterKeyResult } from '$lib/server/supporter-key';
 
 // Shared vi.mock factory body for '$lib/server/supporter-key', used by the
 // settings page and admin layout server tests. Verification is stubbed (a
@@ -10,7 +11,11 @@ export async function supporterKeyMockModule(
 	importActual: () => Promise<typeof import('$lib/server/supporter-key')>
 ) {
 	const actual = await importActual();
-	const verifySupporterKey = vi.fn();
+	// Default to a malformed result so a test that forgets mockResolvedValueOnce
+	// fails on its own assertion instead of a TypeError inside the resolver.
+	const verifySupporterKey = vi.fn(
+		async (_token: string, _now: Date): Promise<SupporterKeyResult> => ({ valid: false, reason: 'malformed' })
+	);
 	return {
 		...actual,
 		verifySupporterKey,

@@ -47,7 +47,12 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 		// request lands a phase earlier), while an early dismissal never covers
 		// the final phase.
 		const cookie = cookies.get('supporterNoticeDismissed');
-		const dismissed = cookie === dismissValue || cookie === `${supporterKey?.validUntil}:final`;
+		// The !!supporterKey guard is redundant today (a null status never renders
+		// the notice) but deliberate: without it a cookie of "undefined:final"
+		// would satisfy the comparison, an attacker-suppliable value that a later
+		// change to the notice condition could make meaningful. Keep it.
+		const dismissed =
+			!!supporterKey && (cookie === dismissValue || cookie === `${supporterKey.validUntil}:final`);
 		return {
 			adminAvatarUrl: settings.adminAvatarUrl || null,
 			siteName: settings.siteName,
