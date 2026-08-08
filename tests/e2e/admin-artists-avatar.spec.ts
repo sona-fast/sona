@@ -16,6 +16,7 @@ test('artist avatars stay square in a monogram-free admin table', async ({ page 
 	await page.goto('/admin/artists?q=Avatar');
 
 	const row = page.getByRole('row', { name: /Avatar Artist/ });
+	await expect(row).toBeVisible();
 
 	// The bug only reproduces in a monogram-free table (a monogram span props
 	// the column open) — assert that precondition so a seed change can't turn
@@ -29,6 +30,8 @@ test('artist avatars stay square in a monogram-free admin table', async ({ page 
 	await expect(avatar).toBeVisible();
 
 	const box = await avatar.boundingBox();
+	// Not dead: the img can swap to the monogram on error between checks.
+	expect(box).not.toBeNull();
 	// Rendered at size={36}; the bug squishes width to 24 while height stays 36.
 	expect(box!.width).toBe(36);
 	expect(box!.height).toBe(36);

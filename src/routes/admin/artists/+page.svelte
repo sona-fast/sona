@@ -483,8 +483,11 @@
 	}
 
 	.col-avatar {
-		/* 36px avatar + 12px cell padding each side (.data-table td, app.css). */
-		width: 60px;
+		/* Deliberately narrower than the rendered 60px (36px avatar + 12px padding
+		   per side; auto table layout treats this as a floor). Keeping the declared
+		   width under 60px is what lets the SONA-148 regression spec fail if the
+		   avatar's max-width opt-out is ever removed — do not "fix" this to 60px. */
+		width: 48px;
 	}
 
 	.col-actions {
