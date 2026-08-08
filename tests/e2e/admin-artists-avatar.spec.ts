@@ -29,8 +29,12 @@ test('artist avatars stay square in a monogram-free admin table', async ({ page 
 	const avatar = row.locator('img.avatar');
 	await expect(avatar).toBeVisible();
 
+	// Geometry-independent guard: fails if the max-width opt-out is removed, even
+	// if the column width or cell padding change the squish arithmetic later.
+	await expect(avatar).toHaveCSS('max-width', 'none');
+
 	const box = await avatar.boundingBox();
-	// Not dead: the img can swap to the monogram on error between checks.
+	// Not dead: boundingBox() returns null for an attached-but-hidden element.
 	expect(box).not.toBeNull();
 	// Rendered at size={36}; the bug squishes width to 24 while height stays 36.
 	expect(box!.width).toBe(36);
