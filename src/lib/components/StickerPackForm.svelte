@@ -3,6 +3,7 @@
 	import { flip } from 'svelte/animate';
 	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
+	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
@@ -202,55 +203,23 @@
 		for (const i of selected) if (stickerEntries[i]) stickerEntries[i].nsfw = v;
 	}
 
-	// --- Drag-to-reorder. Reordering the array directly is all that's needed: the
-	// hidden inputs are emitted in array order and the server assigns `position` from
-	// that order. animate:flip (keyed by uid) slides the other rows into place.
-	// Implemented with pointer events (not HTML5 drag-and-drop, which never fires on
-	// touch) so it works on mobile too: the handle captures the pointer, its
-	// touch-action: none stops the page from scrolling mid-drag, and the row under
-	// the pointer is resolved via elementFromPoint. dragIndex = the row being
-	// dragged; overIndex = where it would drop (for the insertion highlight). The
-	// drag only ever starts from the GripVertical handle, so it doesn't fight the
-	// thumbnail's click-to-select or the inputs' text selection.
-	let dragIndex = $state<number | null>(null);
-	let overIndex = $state<number | null>(null);
-
-	function onHandlePointerDown(i: number, ev: PointerEvent) {
-		if (ev.button !== 0) return; // primary button / touch only
-		ev.preventDefault();
-		(ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-		dragIndex = i;
-		overIndex = i;
-	}
-
-	function onHandlePointerMove(ev: PointerEvent) {
-		if (dragIndex === null) return;
-		// The handle holds pointer capture, so events target it regardless of what's
-		// under the finger — hit-test the rows by coordinates instead.
-		const row = document
-			.elementFromPoint(ev.clientX, ev.clientY)
-			?.closest<HTMLElement>('[data-row-index]');
-		if (row) overIndex = Number(row.dataset.rowIndex);
-	}
-
-	function onHandlePointerUp() {
-		const from = dragIndex;
-		const to = overIndex;
-		resetDrag();
-		if (from === null || to === null || from === to) return;
-		const next = [...stickerEntries];
-		const [moved] = next.splice(from, 1);
-		next.splice(to, 0, moved);
-		stickerEntries = next;
-		// Reordering shifts every index, so the index-keyed selection now points at the
-		// wrong rows — drop it (same reasoning as removeSticker).
-		clearSelection();
-	}
-
-	function resetDrag() {
-		dragIndex = null;
-		overIndex = null;
-	}
+	// --- Drag-to-reorder (shared DragReorder helper: pointer drag + arrow-key
+	// path + live announcement). Reordering the array directly is all that's
+	// needed: the hidden inputs are emitted in array order and the server
+	// assigns `position` from that order. animate:flip (keyed by uid) slides
+	// the other rows into place. onMoved clears the selection: reordering
+	// shifts every index, so the index-keyed selection would point at the wrong
+	// rows (same reasoning as removeSticker).
+	const reorder = new DragReorder({
+		count: () => stickerEntries.length,
+		move: (from, to) => {
+			const next = [...stickerEntries];
+			const [moved] = next.splice(from, 1);
+			next.splice(to, 0, moved);
+			stickerEntries = next;
+		},
+		onMoved: clearSelection
+	});
 </script>
 
 <a class="back-link" href="/admin/stickers"><ArrowLeft size={16} /> {m.admin_pack_back()}</a>
@@ -381,6 +350,9 @@
 				{/if}
 			</div>
 
+			<!-- Always-mounted live region for the reorder announcements (arrow-key
+			     moves have no visual cue a screen-reader user can follow). -->
+			<span class="sr-only" aria-live="polite">{reorder.announcement}</span>
 			<div class="sticker-list">
 				{#each stickerEntries as sticker, i (sticker.uid)}
 					{@const isSel = selected.has(i)}
@@ -388,23 +360,24 @@
 					<div
 						class="sticker-row"
 						class:selected={isSel}
-						class:dragging={dragIndex === i}
-						class:drop-target={overIndex === i && dragIndex !== null && dragIndex !== i}
+						class:dragging={reorder.dragIndex === i}
+						class:drop-target={reorder.overIndex === i && reorder.dragIndex !== null && reorder.dragIndex !== i}
 						animate:flip={{ duration: 200 }}
-						data-row-index={i}
+						data-reorder-index={i}
 					>
 						<!-- Dedicated drag handle: the pointer-event reorder only ever starts here,
 						     so it can't be triggered by a stray drag elsewhere on the row and never
-						     fires the thumbnail's click-to-select. -->
+						     fires the thumbnail's click-to-select. Arrow keys move the row too. -->
 						<button
 							type="button"
 							class="drag-handle"
 							aria-label={m.admin_pack_drag_reorder()}
 							title={m.admin_pack_drag_reorder()}
-							onpointerdown={(e) => onHandlePointerDown(i, e)}
-							onpointermove={onHandlePointerMove}
-							onpointerup={onHandlePointerUp}
-							onpointercancel={resetDrag}
+							onpointerdown={(e) => reorder.handlePointerDown(i, e)}
+							onpointermove={(e) => reorder.handlePointerMove(e)}
+							onpointerup={() => reorder.handlePointerUp()}
+							onpointercancel={() => reorder.reset()}
+							onkeydown={(e) => reorder.handleKeydown(i, e)}
 						>
 							<GripVertical size={16} />
 						</button>
@@ -607,4 +580,9 @@
 	.save-actions { display: flex; gap: 12px; }
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
+
+	.sr-only {
+		position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+		overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+	}
 </style>

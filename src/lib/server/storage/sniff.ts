@@ -49,3 +49,13 @@ export function sniffImageType(bytes: Uint8Array): string | null {
 	}
 	return null;
 }
+
+/**
+ * WebM detection (SONA-124 showcase clips): WebM is an EBML/Matroska container
+ * opening with the fixed EBML magic 1A 45 DF A3. Separate from sniffImageType
+ * on purpose — only the /api/upload webm branch consults it, so image call
+ * sites can't accidentally start accepting video.
+ */
+export function isWebmHead(bytes: Uint8Array): boolean {
+	return startsWith(bytes, [0x1a, 0x45, 0xdf, 0xa3]);
+}

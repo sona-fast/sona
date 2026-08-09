@@ -1,35 +1,30 @@
 <script lang="ts">
 	import { Box, Plus, Pencil, ExternalLink } from 'lucide-svelte';
-	import { externalSiteName, formatBytes } from '$lib/vr';
+	import {
+		externalSiteName,
+		formatBytes,
+		isPermissiveVrLicense,
+		licenseLabel,
+		modelFormatDetailLabel
+	} from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 
-	// Format chip text — product/format names, not translatable copy (same
-	// reasoning as PLATFORM_LABELS in $lib/vr). Uploads record generic 'vrm';
-	// 'vrm0' only appears if set deliberately.
-	const FORMAT_CHIP: Record<string, string> = { vrm: 'VRM 1.0', vrm0: 'VRM 0.x', fbx: 'FBX' };
-
-	function licenseLabel(license: string | null): string {
-		switch (license) {
-			case 'personal-use':
-				return m.vr_license_personal_use();
-			case 'cc-by':
-				return m.vr_license_cc_by();
-			case 'base-tos':
-				return m.vr_license_base_tos();
-			case 'all-rights-reserved':
-				return m.vr_license_all_rights_reserved();
-			default:
-				return '';
-		}
-	}
-
-	function formatGb(bytes: number): string {
-		return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-	}
-
 	const gated = $derived(!data.publishingEnabled);
+
+	// The Download column shows the EFFECTIVE state the route enforces, not the
+	// raw flag: downloadable=true still 403s under a restrictive license or with
+	// no recorded permission, and "On · All rights reserved" would read as live.
+	function downloadState(avatar: (typeof data.avatars)[number]): string {
+		if (!avatar.downloadable) return m.admin_vr_download_off();
+		if (!isPermissiveVrLicense(avatar.license)) return m.admin_vr_download_blocked_license();
+		if (!avatar.permissionSource) return m.admin_vr_download_blocked_permission();
+		return `${m.admin_vr_download_on()} · ${licenseLabel(avatar.license)}`;
+	}
+	function downloadActive(avatar: (typeof data.avatars)[number]): boolean {
+		return avatar.downloadable && isPermissiveVrLicense(avatar.license) && !!avatar.permissionSource;
+	}
 </script>
 
 {#if gated && data.avatars.length === 0}
@@ -62,13 +57,15 @@
 
 	{#if gated}
 		<!-- Existing avatars stay readable while gated; only creating/publishing is
-		     locked, so the Add button gives way to the gate banner. -->
+		     locked, so the Add button gives way to the gate banner. One dedicated
+		     message — component-side "title — body" concatenation is
+		     untranslatable and repeated "VR avatars" twice. -->
 		<div class="gate-banner">
 			<Box size={18} />
 			<span class="gate-banner-msg">
-				{m.admin_vr_gate_title()}{data.gaDateDisplay
-					? ` — ${m.admin_vr_gate_body({ date: data.gaDateDisplay })}`
-					: ''}
+				{data.gaDateDisplay
+					? m.admin_vr_gate_banner({ date: data.gaDateDisplay })
+					: m.admin_vr_gate_title()}
 			</span>
 			<a href="/admin/settings?tab=account" class="gate-banner-link">{m.admin_vr_gate_cta()}</a>
 		</div>
@@ -96,24 +93,30 @@
 				</thead>
 				<tbody>
 					{#each data.avatars as avatar (avatar.id)}
+						<!-- data-label feeds the mobile card layout's ::before column
+						     labels — localized like the <th>s (the label-suppressing CSS
+						     hooks below select by class, never by label text). -->
 						<tr>
-							<td class="col-poster" data-label="Poster">
-								<div class="poster-thumb">
+							<td class="col-poster" data-label={m.vr_media_poster()}>
+								<div class="poster-thumb" class:has-poster={!!avatar.posterUrl}>
 									{#if avatar.posterUrl}
 										<img src={avatar.posterUrl} alt="" loading="lazy" />
+									{:else}
+										<!-- Box glyph, not a bare grey square (reads as broken). -->
+										<Box size={16} aria-hidden="true" />
 									{/if}
 								</div>
 							</td>
-							<td data-label="Avatar">
+							<td class="col-avatar" data-label={m.admin_vr_col_avatar()}>
 								<div class="avatar-cell">
 									<span class="avatar-name">{avatar.name}</span>
 									<span class="avatar-slug">/vr/{avatar.slug}</span>
 								</div>
 							</td>
-							<td class="col-character" data-label="Character">{avatar.characterName}</td>
-							<td class="col-model" data-label="Model">
+							<td class="col-character" data-label={m.admin_vr_col_character()}>{avatar.characterName}</td>
+							<td class="col-model" data-label={m.admin_vr_col_model()}>
 								{#if avatar.hasModel}
-									<span class="model-chip">{FORMAT_CHIP[avatar.modelFormat ?? ''] ?? 'VRM'} · {formatBytes(avatar.modelSizeBytes)}</span>
+									<span class="model-chip">{modelFormatDetailLabel(avatar.modelFormat)} · {formatBytes(avatar.modelSizeBytes)}</span>
 								{:else if avatar.externalUrl}
 									<a href={avatar.externalUrl} target="_blank" rel="noopener" class="model-chip external">
 										{externalSiteName(avatar.externalUrl)}
@@ -123,24 +126,18 @@
 									<span class="model-none">—</span>
 								{/if}
 							</td>
-							<td class="col-platforms" data-label="Platforms">{avatar.platformCount}</td>
-							<td class="col-visibility" data-label="Visibility">
+							<td class="col-platforms" data-label={m.admin_vr_col_platforms()}>{avatar.platformCount}</td>
+							<td class="col-visibility" data-label={m.admin_vr_col_visibility()}>
 								<span class="vis-chip" class:published={avatar.published}>
 									{avatar.published ? m.admin_vr_chip_published() : m.admin_vr_chip_draft()}{avatar.nsfw
 										? ` · ${m.admin_vr_chip_mature()}`
 										: ''}
 								</span>
 							</td>
-							<td class="col-download" data-label="Download">
-								{#if avatar.downloadable && licenseLabel(avatar.license)}
-									<span class="dl-text">{m.admin_vr_download_on()} · {licenseLabel(avatar.license)}</span>
-								{:else if avatar.downloadable}
-									<span class="dl-text">{m.admin_vr_download_on()}</span>
-								{:else}
-									<span class="dl-text off">{m.admin_vr_download_off()}</span>
-								{/if}
+							<td class="col-download" data-label={m.admin_vr_col_download()}>
+								<span class="dl-text" class:off={!downloadActive(avatar)}>{downloadState(avatar)}</span>
 							</td>
-							<td class="col-actions" data-label="Actions">
+							<td class="col-actions" data-label={m.admin_col_actions()}>
 								<a href="/admin/vr/{avatar.id}/edit" class="icon-btn" aria-label={m.admin_vr_edit_aria()}>
 									<Pencil size={15} />
 								</a>
@@ -152,7 +149,7 @@
 		</div>
 
 		<p class="storage-line">
-			{m.admin_vr_storage_line({ used: formatBytes(data.storage.usedBytes), limit: formatGb(data.storage.limitBytes) })}
+			{m.admin_vr_storage_line({ used: formatBytes(data.storage.usedBytes), limit: formatBytes(data.storage.limitBytes) })}
 		</p>
 	{/if}
 {/if}
@@ -180,7 +177,9 @@
 		text-align: center;
 		color: var(--muted-foreground);
 	}
-	.gate-empty h1 { font-size: 18px; color: var(--foreground); margin: 0; }
+	/* Same size as the list state's h1 — the page shouldn't retitle itself
+	   smaller just because it's empty. */
+	.gate-empty h1 { font-size: 22px; color: var(--foreground); margin: 0; }
 	.gate-body { font-size: 13px; line-height: 1.6; max-width: 48ch; margin: 0; }
 	.gate-hint { font-size: 12px; color: var(--muted-foreground); margin: 0; }
 
@@ -218,6 +217,8 @@
 	.poster-thumb {
 		width: 40px; height: 40px; border-radius: var(--radius-xs);
 		background: var(--secondary); overflow: hidden;
+		display: flex; align-items: center; justify-content: center;
+		color: var(--muted-foreground);
 	}
 	.poster-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
@@ -246,7 +247,12 @@
 		background: var(--secondary); color: var(--muted-foreground);
 		white-space: nowrap;
 	}
-	.vis-chip.published { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
+	/* --status-ok, not a hardcoded dark-green: the raw #4ade80 was 1.45:1 on the
+	   light themes — invisible, and this chip is the only Published/Draft signal. */
+	.vis-chip.published {
+		background: color-mix(in srgb, var(--status-ok) 15%, transparent);
+		color: var(--status-ok);
+	}
 
 	.dl-text { font-size: 12px; white-space: nowrap; }
 	.dl-text.off { color: var(--muted-foreground); }
@@ -296,10 +302,11 @@
 			letter-spacing: 0.04em;
 			flex-shrink: 0;
 		}
-		.data-table td[data-label='Avatar'] { display: block; padding-top: 0; }
-		.data-table td[data-label='Avatar']::before { display: none; }
-		.data-table td[data-label='Poster'] { display: block; padding-top: 0; }
-		.data-table td[data-label='Poster']::before { display: none; }
+		/* Class hooks, NOT [data-label='…'] — the labels are localized. */
+		.data-table td.col-avatar { display: block; padding-top: 0; }
+		.data-table td.col-avatar::before { display: none; }
+		.data-table td.col-poster { display: block; padding-top: 0; }
+		.data-table td.col-poster::before { display: none; }
 		.avatar-name { font-size: 15px; }
 		.col-actions { justify-content: flex-end; }
 		.col-actions .icon-btn { padding: 8px; }

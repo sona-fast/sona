@@ -9,6 +9,12 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 	const key = params.key;
 	if (!key) error(404, 'Not found');
 
+	// VR model files are NOT images and must not be servable through this
+	// route's immutable 1-year cache: their availability is revocable
+	// (unpublish/removal must propagate). They are served exclusively by
+	// /vr/[slug]/model, which carries a short shared-cache TTL.
+	if (key.startsWith('vr-models/')) error(404, 'Not found');
+
 	const object = await platform?.env.IMAGES?.get(key);
 	if (!object) error(404, 'Not found');
 

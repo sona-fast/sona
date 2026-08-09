@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
 import { adminLogin } from './admin-login';
-import { EARLY_ACCESS } from '../../src/lib/early-access';
 
 // VR avatar showcase (SONA-124): public visibility of the seeded avatars, the
 // download route's server-side license enforcement, the click-to-load viewer
@@ -55,31 +54,25 @@ test('detail page offers View in 3D as a real button and no download button', as
 	await expect(page.getByRole('link', { name: 'Download model' })).toHaveCount(0);
 });
 
-test('admin /admin/vr reflects the early-access gate state', async ({ page }) => {
+test('detail page renders the seeded showcase media strip (SP1)', async ({ page }) => {
+	await page.goto('/vr/e2e-avatar');
+
+	// Poster thumb + the two seeded media rows, named per thumb button.
+	await expect(page.getByRole('button', { name: 'Poster' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'E2E VR Avatar — media 1' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'E2E VR Avatar — media 2' })).toBeVisible();
+});
+
+test('admin /admin/vr lists everything ungated (E2E_VR_GATE override active)', async ({ page }) => {
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/vr');
 
-	// The seeded DB stores no supporter key, so the gate state tracks the
-	// registry's GA date — which is a real calendar date that will pass while
-	// this spec keeps running (the registry entry is deleted at the next
-	// release). Derive the expected state from the same registry the server
-	// reads instead of hardcoding either branch.
-	const gaDate = EARLY_ACCESS['vr-avatars'];
-	const preGa = gaDate !== undefined && Date.now() < Date.parse(`${gaDate}T00:00:00Z`);
-
-	// Reading is never gated: the seeded avatars stay listed either way.
+	// The e2e harness sets E2E_VR_GATE=open (see wrangler.e2e.toml): the gate is
+	// pre-GA on the calendar but forced open here so the form specs can run.
+	// Gate PRESENTATION (banner/locked states) is covered by the registry-driven
+	// unit matrices in admin/vr/*/page.server.test.ts.
 	await expect(page.getByText('E2E VR Avatar')).toBeVisible();
 	await expect(page.getByText('E2E VR Draft')).toBeVisible();
-
-	if (preGa) {
-		// Pre-GA with no key: creating is locked — the gate banner shows and the
-		// Add-avatar affordance is gone.
-		await expect(page.getByText('VR avatars is in early access')).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Add supporter key' })).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Add avatar' })).toHaveCount(0);
-	} else {
-		// GA reached: the section is ungated.
-		await expect(page.getByRole('link', { name: 'Add avatar' })).toBeVisible();
-		await expect(page.getByText('VR avatars is in early access')).toHaveCount(0);
-	}
+	await expect(page.getByRole('link', { name: 'Add avatar' })).toBeVisible();
+	await expect(page.getByText('VR avatars are in early access')).toHaveCount(0);
 });

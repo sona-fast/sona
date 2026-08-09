@@ -7,7 +7,7 @@
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import CloudflareSetupDialog from '$lib/components/CloudflareSetupDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
-	import { BACKUP_FILENAME_BASE } from '$lib/config';
+	import { BACKUP_FILENAME_BASE, R2_FREE_TIER_BYTES } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
 	import { MAX_SONA_COLORS, mergeSuggestions, paletteHas } from '$lib/palette-merge';
 	import { RefreshCw, Loader2, Mail, AlertTriangle, Check, X, Pipette } from 'lucide-svelte';
@@ -202,10 +202,9 @@
 
 	// Usage bar reflects the ACTIVE provider. R2 has no simple usage API, so we use
 	// the DB-tracked total (every image is on the active store) against the 10GB free tier.
-	const R2_FREE_LIMIT = 10 * 1024 * 1024 * 1024;
 	const activeUsage = $derived(
 		data.settings.storageProvider === 'r2'
-			? { label: 'Cloudflare R2', used: data.totalSize, limit: R2_FREE_LIMIT }
+			? { label: 'Cloudflare R2', used: data.totalSize, limit: R2_FREE_TIER_BYTES }
 			: data.utUsage
 				? { label: 'UploadThing', used: data.utUsage.usedBytes, limit: data.utUsage.limitBytes }
 				: null

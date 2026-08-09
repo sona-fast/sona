@@ -50,6 +50,13 @@ export const GALLERY_VIEW_STORAGE_KEY = 'sona-gallery-view';
 export const BACKUP_FILENAME_BASE = 'sona-backup';
 
 /**
+ * Cloudflare R2's free-tier storage allowance, shown against the DB-tracked
+ * usage total by the settings Storage tab and the admin VR storage line (R2
+ * has no simple usage API). One constant so the two gauges can't drift.
+ */
+export const R2_FREE_TIER_BYTES = 10 * 1024 * 1024 * 1024;
+
+/**
  * User-Agent sent on outbound third-party fetches (e.g. the FurTrack importer).
  * Identifies the software; FurTrack itself gates on Origin/Referer, not this.
  */

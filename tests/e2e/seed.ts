@@ -55,6 +55,21 @@ function seed(): void {
 	try {
 		wrangler(['d1', 'execute', ...target, `--file=${schemaPath}`]);
 		wrangler(['d1', 'execute', ...target, `--file=${path.join(repoRoot, 'tests/e2e/fixtures/seed.sql')}`]);
+		// The seeded VR avatar's model must LOOK servable to the /vr/[slug] load
+		// (modelBytesServable HEADs the bucket key) so the View-in-3D control
+		// renders. Stub bytes only — the specs never enter the 3D view.
+		const modelStub = path.join(tmp, 'e2e-avatar.vrm');
+		writeFileSync(modelStub, 'glTF e2e stub — head-probe only, never parsed');
+		wrangler([
+			'r2',
+			'object',
+			'put',
+			'sona-e2e-images/vr-models/e2e-avatar.vrm',
+			`--file=${modelStub}`,
+			'--local',
+			`--config=${E2E_WRANGLER_CONFIG}`,
+			`--persist-to=${persistTo}`
+		]);
 	} finally {
 		rmSync(tmp, { recursive: true, force: true });
 	}

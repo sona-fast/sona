@@ -1,0 +1,59 @@
+import { test, expect } from '@playwright/test';
+import { adminLogin } from './admin-login';
+
+// VR avatar admin form smoke (SONA-124, T1): VrAvatarForm and the /admin/vr/new
+// page never executed in any test before this. The e2e harness forces the
+// early-access gate open (E2E_VR_GATE=open in wrangler.e2e.toml) — pre-GA there
+// is no mintable supporter key, so the ungated form is unreachable otherwise.
+//
+// Runs on the SHARED read-only DB/server under fullyParallel: everything here
+// READS and types into the client-side form without ever submitting it, so it
+// cannot perturb the other specs.
+
+// Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
+const PASSWORD = 'e2e-admin-password';
+
+test('the ungated create form renders its fields, dropzones and credit control', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/vr/new');
+
+	await expect(page.getByRole('heading', { name: 'Add avatar' })).toBeVisible();
+	await expect(page.locator('input[name="name"]')).toBeVisible();
+	await expect(page.locator('input[name="slug"]')).toBeVisible();
+	await expect(page.locator('select[name="characterId"]')).toBeVisible();
+
+	// Model dropzone, unlocked (the override opens the gate).
+	await expect(page.getByText(/Choose a \.vrm or \.fbx file to upload/)).toBeVisible();
+
+	// Showcase media manager (SP1) with its own dropzone.
+	await expect(page.getByRole('heading', { name: 'Showcase media' })).toBeVisible();
+	await expect(page.getByText(/Add screenshots or short \.webm clips/)).toBeVisible();
+
+	// Credits editor entry point.
+	await expect(page.getByRole('button', { name: 'Add credit' })).toBeVisible();
+
+	// Visibility switches are named (a11y wiring, not just visuals).
+	await expect(page.getByRole('checkbox', { name: 'Offer model download' })).toBeAttached();
+	await expect(page.getByRole('checkbox', { name: 'Mark as mature' })).toBeAttached();
+	await expect(page.getByRole('checkbox', { name: 'Published' })).toBeAttached();
+});
+
+test('typing a name auto-suggests the slug until the slug is touched', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/vr/new');
+
+	// Hydration-retry shape (see upload.spec.ts): typing before Svelte attaches
+	// its delegated listeners silently does nothing, so retype until the
+	// suggestion appears. Client-side only — the form is never submitted.
+	await expect(async () => {
+		await page.fill('input[name="name"]', '');
+		await page.fill('input[name="name"]', 'Taro VRChat!');
+		await expect(page.locator('input[name="slug"]')).toHaveValue('taro-vrchat', {
+			timeout: 2000
+		});
+	}).toPass({ timeout: 20_000 });
+
+	// Adding a credit row exercises the credits editor client path.
+	await page.getByRole('button', { name: 'Add credit' }).click();
+	await expect(page.locator('select[name="credit[0][artistId]"]')).toBeVisible();
+});

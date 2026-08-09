@@ -57,10 +57,10 @@ export function isFeatureEnabled(
 }
 
 /** Flags still inside their early-access window (GA date not yet reached), with
- * their GA dates — what a supporter key is unlocking right now. `labelKey` is
- * the message id of the flag's localized display label (see earlyAccessLabelKey). */
-export function earlyAccessActive(now: Date): Array<{ flag: string; gaDate: string; labelKey: string }> {
+ * their GA dates — what a supporter key is unlocking right now. Render-time
+ * code resolves each flag's display label via earlyAccessLabel(flag). */
+export function earlyAccessActive(now: Date): Array<{ flag: string; gaDate: string }> {
 	return Object.entries(EARLY_ACCESS)
 		.filter(([, gaDate]) => !gaReached(gaDate, now))
-		.map(([flag, gaDate]) => ({ flag, gaDate, labelKey: earlyAccessLabelKey(flag) }));
+		.map(([flag, gaDate]) => ({ flag, gaDate }));
 }

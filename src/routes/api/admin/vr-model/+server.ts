@@ -4,7 +4,6 @@ import { getSettings } from '$lib/server/settings';
 import { getStorage } from '$lib/server/storage';
 import {
 	MAX_VR_MODEL_BYTES,
-	MODEL_FORMAT_BY_EXT,
 	MODEL_SNIFF_BYTES,
 	isAllowedModelContentType,
 	modelExtFromFilename,
@@ -34,8 +33,8 @@ export const POST: RequestHandler = async ({ request, url, platform }) => {
 	// Gate enforcement (SONA-124): uploading a model is part of creating/
 	// publishing, which is supporter-only until the flag GAs. The disabled
 	// dropzone is presentation; this is the enforcement.
-	if (!(await vrPublishingEnabled(db))) {
-		error(403, 'VR avatars is in early access — uploading models needs a valid supporter key until it opens for everyone.');
+	if (!(await vrPublishingEnabled(db, platform?.env))) {
+		error(403, 'VR avatars are in early access — uploading models needs a valid supporter key until it opens for everyone.');
 	}
 
 	const lengthHeader = request.headers.get('content-length');
@@ -66,7 +65,10 @@ export const POST: RequestHandler = async ({ request, url, platform }) => {
 	// streams (SONA-136 contract: ReadableStream + declared size).
 	const { head, stream } = await peekStream(request.body, MODEL_SNIFF_BYTES);
 	const sniffed = sniffModelFormat(head);
-	if (sniffed !== MODEL_FORMAT_BY_EXT[ext]) {
+	// The extension doubles as the stored format ('vrm' | 'fbx'): VRM 0.x and
+	// 1.0 share the .vrm container and the head sniff can't cheaply tell them
+	// apart, so uploads record the generic 'vrm' (the viewer supports both).
+	if (sniffed !== ext) {
 		error(415, 'File contents do not match a VRM or FBX model.');
 	}
 
@@ -86,5 +88,5 @@ export const POST: RequestHandler = async ({ request, url, platform }) => {
 	// R2 in dev returns a root-relative '/img/...' URL; store it absolute so it
 	// survives sanitizeUrl and renders the same as prod (same as /api/upload).
 	const absoluteUrl = storedUrl.startsWith('/') ? new URL(storedUrl, request.url).href : storedUrl;
-	return json({ url: absoluteUrl, size, format: MODEL_FORMAT_BY_EXT[ext] });
+	return json({ url: absoluteUrl, size, format: ext });
 };

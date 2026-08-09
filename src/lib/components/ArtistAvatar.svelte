@@ -1,21 +1,40 @@
 <script lang="ts">
 	import { avatarColor, avatarInitials } from '$lib/avatar-color';
+	import { cdnImage } from '$lib/img';
 
 	interface Props {
 		name: string;
 		avatarUrl?: string | null;
 		/** Rendered diameter in px. */
 		size?: number;
+		/** Route through the CDN transform at 2x the rendered size — opt-in per
+		 * call site (some avatar sources are off-zone and 403 the transform; see
+		 * the admin/stickers note). A failed transform retries the raw URL before
+		 * falling back to the monogram. */
+		cdn?: boolean;
+		/** loading="lazy" for below-the-fold lists. */
+		lazy?: boolean;
 	}
-	let { name, avatarUrl = null, size = 36 }: Props = $props();
+	let { name, avatarUrl = null, size = 36, cdn = false, lazy = false }: Props = $props();
 
-	// A broken avatar URL falls back to the monogram rather than a broken image.
-	// Reset when the URL changes so list rows that reuse this instance re-try.
+	// A broken avatar URL falls back to the monogram rather than a broken image
+	// (with cdn, first to the untransformed original — off-zone sources 403 the
+	// transform). Reset when the URL changes so list rows that reuse this
+	// instance re-try.
 	let failed = $state(false);
+	let useRaw = $state(false);
 	$effect(() => {
 		void avatarUrl;
 		failed = false;
+		useRaw = false;
 	});
+	const displaySrc = $derived(
+		cdn && !useRaw && avatarUrl ? cdnImage(avatarUrl, size * 2) : avatarUrl
+	);
+	function onError() {
+		if (cdn && !useRaw) useRaw = true;
+		else failed = true;
+	}
 
 	let chip = $derived(avatarColor(name));
 	// The name always sits as adjacent text at every call site, so the avatar
@@ -25,12 +44,13 @@
 {#if avatarUrl && !failed}
 	<img
 		class="avatar"
-		src={avatarUrl}
+		src={displaySrc}
 		alt=""
 		width={size}
 		height={size}
+		loading={lazy ? 'lazy' : undefined}
 		style="--avatar-size: {size}px"
-		onerror={() => (failed = true)}
+		onerror={onError}
 	/>
 {:else}
 	<span

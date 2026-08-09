@@ -53,4 +53,11 @@ describe('GET /img/[...key]', () => {
 	it('404s when no bucket is bound', async () => {
 		await expect(status(GET(event('a.webp', undefined)))).resolves.toBe(404);
 	});
+
+	it('refuses vr-models/* keys even when the object exists (SONA-124)', async () => {
+		// Model bytes are served only by /vr/[slug]/model with a short TTL — this
+		// route's immutable 1y cache would immortalize a revoked model.
+		const images = bucket({ 'vr-models/abc.vrm': { body: 'MODEL' } });
+		await expect(status(GET(event('vr-models/abc.vrm', images)))).resolves.toBe(404);
+	});
 });

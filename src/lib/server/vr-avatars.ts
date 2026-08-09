@@ -1,7 +1,7 @@
 import { eq, and, ne } from 'drizzle-orm';
 import { vrAvatars, avatarCredits, avatarMedia, avatarPlatforms, characters, images } from '$lib/server/db/schema';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
-import { deleteFile } from '$lib/server/storage';
+import { deleteFile, isOwnedUrl } from '$lib/server/storage';
 import type { SiteSettings } from '$lib/server/settings';
 import type { Database } from '$lib/server/db';
 
@@ -16,6 +16,14 @@ export interface AvatarCreditInput {
 	artistId: number;
 	role: string;
 	roleLabel: string | null;
+	position: number;
+}
+
+export interface AvatarMediaInput {
+	url: string;
+	kind: 'image' | 'video';
+	width: number | null;
+	height: number | null;
 	position: number;
 }
 
@@ -36,6 +44,7 @@ export interface AvatarFormInput {
 	modelSizeBytes: number | null;
 	platforms: string[];
 	credits: AvatarCreditInput[];
+	media: AvatarMediaInput[];
 }
 
 export type ParseResult = { ok: true; input: AvatarFormInput } | { ok: false; error: string };
@@ -96,6 +105,37 @@ export function parseAvatarForm(data: FormData): ParseResult {
 		credits.push({ artistId, role, roleLabel: role === 'other' ? roleLabel : null, position: i });
 	}
 
+	// Showcase media rows arrive as `media[i][url|kind|width|height]` in display
+	// order — the index becomes the stored position, like credits.
+	const media: AvatarMediaInput[] = [];
+	for (let i = 0; data.has(`media[${i}][url]`); i++) {
+		const mediaUrl = sanitizeUrl(data.get(`media[${i}][url]`) as string);
+		if (!mediaUrl) return { ok: false, error: 'Invalid showcase media.' };
+		const kind = data.get(`media[${i}][kind]`) === 'video' ? 'video' : 'image';
+		const w = Number(data.get(`media[${i}][width]`));
+		const h = Number(data.get(`media[${i}][height]`));
+		media.push({
+			url: mediaUrl,
+			kind,
+			width: Number.isInteger(w) && w > 0 ? w : null,
+			height: Number.isInteger(h) && h > 0 ? h : null,
+			position: i
+		});
+	}
+
+	const downloadable = data.get('downloadable') === '1';
+	const permissionSource = sanitizeText(data.get('permissionSource') as string, 500) || null;
+	// The fursuit rule, applied to redistribution: offering the file requires a
+	// RECORDED permission grant (the download route 403s without one — this is
+	// the usability half so the admin learns at save time, not from a silent
+	// dead button).
+	if (downloadable && !permissionSource) {
+		return {
+			ok: false,
+			error: 'Offering the model for download needs a recorded permission source — note where and when the artists allowed redistribution.'
+		};
+	}
+
 	return {
 		ok: true,
 		input: {
@@ -105,8 +145,8 @@ export function parseAvatarForm(data: FormData): ParseResult {
 			description: sanitizeText(data.get('description') as string, 2000) || null,
 			externalUrl: sanitizeUrl(data.get('externalUrl') as string),
 			license,
-			permissionSource: sanitizeText(data.get('permissionSource') as string, 500) || null,
-			downloadable: data.get('downloadable') === '1',
+			permissionSource,
+			downloadable,
 			nsfw: data.get('nsfw') === '1',
 			published: data.get('published') === '1',
 			posterImageId,
@@ -114,9 +154,39 @@ export function parseAvatarForm(data: FormData): ParseResult {
 			modelFormat,
 			modelSizeBytes,
 			platforms,
-			credits
+			credits,
+			media
 		}
 	};
+}
+
+/**
+ * Showcase media must be SELF-HOSTED (uploaded through /api/upload), never a
+ * hot-linked foreign URL — same rule saveManualPack applies to sticker media.
+ * Checked here (not in parseAvatarForm) because ownership needs env/settings.
+ * A same-origin absolute URL is accepted via its pathname too: on a no-CDN R2
+ * fork /api/upload returns absolutized '/img/…' URLs that bare isOwnedUrl
+ * doesn't match (the isOurAvatarUrl precedent in avatar.ts).
+ */
+export function validateAvatarMedia(
+	env: Env | undefined,
+	settings: SiteSettings,
+	origin: string,
+	input: AvatarFormInput
+): string | null {
+	for (const item of input.media) {
+		if (isOwnedUrl(env, settings, item.url)) continue;
+		try {
+			const parsed = new URL(item.url, origin);
+			if (parsed.origin === new URL(origin).origin && isOwnedUrl(env, settings, parsed.pathname)) {
+				continue;
+			}
+		} catch {
+			// fall through to the error
+		}
+		return 'Showcase media must be uploaded here — external URLs cannot be used.';
+	}
+	return null;
 }
 
 /** DB-level checks shared by create and update: slug uniqueness (excluding the
@@ -176,10 +246,11 @@ function avatarRow(input: AvatarFormInput) {
 }
 
 async function replaceChildren(db: Database, avatarId: number, input: AvatarFormInput): Promise<void> {
-	// Child rows are few (credits, platform badges) — replace wholesale, ordered
-	// inserts carrying the display position.
+	// Child rows are few (credits, platform badges, showcase media) — replace
+	// wholesale, ordered inserts carrying the display position.
 	await db.delete(avatarCredits).where(eq(avatarCredits.avatarId, avatarId));
 	await db.delete(avatarPlatforms).where(eq(avatarPlatforms.avatarId, avatarId));
+	await db.delete(avatarMedia).where(eq(avatarMedia.avatarId, avatarId));
 	if (input.credits.length > 0) {
 		await db.insert(avatarCredits).values(
 			input.credits.map((c) => ({
@@ -199,6 +270,18 @@ async function replaceChildren(db: Database, avatarId: number, input: AvatarForm
 			}))
 		);
 	}
+	if (input.media.length > 0) {
+		await db.insert(avatarMedia).values(
+			input.media.map((item) => ({
+				avatarId,
+				kind: item.kind,
+				url: item.url,
+				width: item.width,
+				height: item.height,
+				position: item.position
+			}))
+		);
+	}
 }
 
 /** Insert a new avatar with its credits/platforms; returns the new row id. */
@@ -213,10 +296,10 @@ export async function insertAvatar(db: Database, input: AvatarFormInput): Promis
 }
 
 /**
- * Update an existing avatar. When a previously stored self-hosted model file is
- * replaced or removed, the old object is deleted eagerly (best-effort, like
- * deletePack / the fursuit + images admin deletes — the orphan sweep backstops
- * a failed delete).
+ * Update an existing avatar. When a previously stored self-hosted model file
+ * or showcase media item is replaced or removed, the old object is deleted
+ * eagerly (best-effort, like deletePack / the fursuit + images admin deletes —
+ * the orphan sweep backstops a failed delete).
  */
 export async function updateAvatar(opts: {
 	env: Env | undefined;
@@ -227,12 +310,21 @@ export async function updateAvatar(opts: {
 	previousModelUrl: string | null;
 }): Promise<void> {
 	const { env, settings, db, id, input, previousModelUrl } = opts;
+	const previousMedia = await db
+		.select({ url: avatarMedia.url })
+		.from(avatarMedia)
+		.where(eq(avatarMedia.avatarId, id));
 	await db.update(vrAvatars).set(avatarRow(input)).where(eq(vrAvatars.id, id));
 	await replaceChildren(db, id, input);
 
-	if (previousModelUrl && previousModelUrl !== input.modelUrl) {
+	const keptUrls = new Set(input.media.map((item) => item.url));
+	const removed = [
+		...(previousModelUrl && previousModelUrl !== input.modelUrl ? [previousModelUrl] : []),
+		...previousMedia.map((item) => item.url).filter((u) => !keptUrls.has(u))
+	];
+	for (const url of removed) {
 		try {
-			await deleteFile(env, settings, previousModelUrl);
+			await deleteFile(env, settings, url);
 		} catch {
 			// Best-effort — the orphan sweep cleans up stragglers.
 		}

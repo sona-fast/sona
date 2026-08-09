@@ -3,18 +3,17 @@ import { getDb } from '$lib/server/db';
 import { vrAvatars, avatarPlatforms, characters, images } from '$lib/server/db/schema';
 import { vrPublishingEnabled, vrGaDate } from '$lib/server/vr-gate';
 import { formatDate } from '$lib/index';
+import { R2_FREE_TIER_BYTES } from '$lib/config';
 import type { PageServerLoad } from './$types';
 
-// Same DB-tracked usage mechanism as the settings Storage tab (which computes
-// SUM(images.file_size) against the R2 free tier inline in its own load/page —
-// there's no shared module to import). Models live in the same bucket, so the
-// line under the table adds SUM(model_size_bytes) to that image total.
-const R2_FREE_LIMIT = 10 * 1024 * 1024 * 1024;
+// Same DB-tracked usage mechanism as the settings Storage tab, against the
+// shared R2_FREE_TIER_BYTES constant. Models live in the same bucket, so the
+// line under the table adds SUM(model_size_bytes) to the image total.
 
 export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
 
-	const publishingEnabled = await vrPublishingEnabled(db);
+	const publishingEnabled = await vrPublishingEnabled(db, platform?.env);
 	const gaDate = vrGaDate();
 
 	const rows = await db
@@ -27,6 +26,8 @@ export const load: PageServerLoad = async ({ platform }) => {
 			modelSizeBytes: vrAvatars.modelSizeBytes,
 			externalUrl: vrAvatars.externalUrl,
 			license: vrAvatars.license,
+			// Presence only feeds the effective Download state (admin-only page).
+			permissionSource: vrAvatars.permissionSource,
 			downloadable: vrAvatars.downloadable,
 			nsfw: vrAvatars.nsfw,
 			published: vrAvatars.published,
@@ -75,11 +76,12 @@ export const load: PageServerLoad = async ({ platform }) => {
 			modelSizeBytes: r.modelSizeBytes,
 			externalUrl: r.externalUrl,
 			license: r.license,
+			permissionSource: r.permissionSource,
 			downloadable: r.downloadable,
 			nsfw: r.nsfw,
 			published: r.published,
 			platformCount: platformCounts.get(r.id) ?? 0
 		})),
-		storage: { usedBytes: imageBytes + modelBytes, limitBytes: R2_FREE_LIMIT }
+		storage: { usedBytes: imageBytes + modelBytes, limitBytes: R2_FREE_TIER_BYTES }
 	};
 };

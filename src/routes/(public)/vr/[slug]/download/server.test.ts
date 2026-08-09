@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -15,9 +15,11 @@ function seedDb(row: {
 	published?: number;
 	downloadable?: number;
 	license?: string | null;
+	permissionSource?: string | null;
 	modelUrl?: string | null;
 	modelFormat?: string | null;
 	r2PublicUrl?: string;
+	storageProvider?: string;
 }) {
 	const sqlite = new Database(':memory:');
 	sqlite.exec(`
@@ -31,18 +33,21 @@ function seedDb(row: {
 			description TEXT, created_at TEXT NOT NULL
 		);
 	`);
-	sqlite
-		.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)')
-		.run('r2PublicUrl', row.r2PublicUrl ?? CDN);
+	const setSetting = sqlite.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)');
+	setSetting.run('r2PublicUrl', row.r2PublicUrl ?? CDN);
+	if (row.storageProvider) setSetting.run('storageProvider', row.storageProvider);
 	sqlite
 		.prepare(
-			`INSERT INTO vr_avatars (slug, name, character_id, model_url, model_format, license, downloadable, published, created_at)
-			 VALUES ('foxo', 'Foxo VR', 1, ?, ?, ?, ?, ?, ?)`
+			`INSERT INTO vr_avatars (slug, name, character_id, model_url, model_format, license, permission_source, downloadable, published, created_at)
+			 VALUES ('foxo', 'Foxo VR', 1, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			row.modelUrl === undefined ? `${CDN}/models/foxo.vrm` : row.modelUrl,
 			row.modelFormat === undefined ? 'vrm' : row.modelFormat,
 			row.license === undefined ? 'personal-use' : row.license,
+			// A recorded permission grant is part of the default HAPPY path now —
+			// the download 403s without one (compliance C1).
+			row.permissionSource === undefined ? 'Telegram DM 2026-08-01' : row.permissionSource,
 			row.downloadable ?? 1,
 			row.published ?? 1,
 			NOW
@@ -69,16 +74,27 @@ function makeImages(keys: Record<string, string> = { 'models/foxo.vrm': 'MODEL B
 let nextIp = 0;
 
 function makeEvent(
-	db: ReturnType<typeof makeD1>,
-	opts: { slug?: string; images?: ReturnType<typeof makeImages> } = {}
+	db: ReturnType<typeof seedDb>,
+	opts: {
+		slug?: string;
+		images?: ReturnType<typeof makeImages>;
+		uploadthingToken?: string;
+		ip?: string;
+	} = {}
 ) {
 	const slug = opts.slug ?? 'foxo';
 	return {
 		params: { slug },
 		url: new URL(`${ORIGIN}/vr/${slug}/download`),
-		platform: { env: { DB: db, IMAGES: opts.images ?? makeImages() } },
+		platform: {
+			env: {
+				DB: db,
+				IMAGES: opts.images ?? makeImages(),
+				...(opts.uploadthingToken ? { UPLOADTHING_TOKEN: opts.uploadthingToken } : {})
+			}
+		},
 		// Unique per event so the module-level rate limiter never trips across tests.
-		getClientAddress: () => `10.0.0.${nextIp++}`
+		getClientAddress: () => opts.ip ?? `10.0.0.${nextIp++}`
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	} as any;
 }
@@ -93,9 +109,10 @@ async function status(promise: Response | Promise<Response>): Promise<number> {
 
 // getSettings caches per isolate; each test seeds its own r2PublicUrl.
 beforeEach(() => clearSettingsCache());
+afterEach(() => vi.unstubAllGlobals());
 
 describe('GET /vr/[slug]/download — enforcement matrix', () => {
-	it('serves a published, downloadable, permissively-licensed model', async () => {
+	it('serves a published, downloadable, permissively-licensed model with recorded permission', async () => {
 		const res = await GET(makeEvent(seedDb({ license: 'personal-use' })));
 		expect(res.status).toBe(200);
 		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="foxo.vrm"');
@@ -129,21 +146,24 @@ describe('GET /vr/[slug]/download — enforcement matrix', () => {
 		await expect(status(GET(makeEvent(seedDb({ license: null }))))).resolves.toBe(403);
 	});
 
-	it('404s a foreign-host model URL instead of streaming a key it spells', async () => {
-		const images = makeImages({ 'models/foxo.vrm': 'MODEL BYTES' });
-		const db = seedDb({ modelUrl: 'https://elsewhere.example/models/foxo.vrm' });
-		await expect(status(GET(makeEvent(db, { images })))).resolves.toBe(404);
-		expect(images.get).not.toHaveBeenCalled();
+	it('403s without a recorded permission source, even when everything else allows (C1)', async () => {
+		// No permission record, no redistribution — the fursuit rule. The flag +
+		// license can't override a missing grant.
+		await expect(status(GET(makeEvent(seedDb({ permissionSource: null }))))).resolves.toBe(403);
 	});
 
 	it('404s when the object is missing from the bucket', async () => {
 		const db = seedDb({});
 		await expect(status(GET(makeEvent(db, { images: makeImages({}) })))).resolves.toBe(404);
 	});
+
+	// NOTE the enforcement above guards the OFFER (the forced-download
+	// affordance), not byte secrecy: the viewer endpoint /vr/[slug]/model serves
+	// the same bytes for any published VRM regardless of license, by design.
 });
 
-describe('GET /vr/[slug]/download — serving details', () => {
-	it('maps the stored URL through the deleteOrphans key rule to the bucket key', async () => {
+describe('GET /vr/[slug]/download — byte resolution (resolveModelBytes)', () => {
+	it('maps the stored URL through the base-agnostic deleteOrphans key rule to the bucket key', async () => {
 		const images = makeImages();
 		await GET(makeEvent(seedDb({}), { images }));
 		expect(images.get).toHaveBeenCalledWith('models/foxo.vrm');
@@ -155,6 +175,52 @@ describe('GET /vr/[slug]/download — serving details', () => {
 		expect(images.get).toHaveBeenCalledWith('models/foxo.vrm');
 	});
 
+	it('still serves a model stored under a FORMER r2PublicUrl (base changed after upload)', async () => {
+		// The D5 case: r2PublicUrl was changed after the upload, so the stored URL
+		// no longer matches the current base — the pathname key must still hit.
+		const db = seedDb({ modelUrl: 'https://old-cdn.example/models/foxo.vrm', r2PublicUrl: CDN });
+		const res = await GET(makeEvent(db));
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('MODEL BYTES');
+	});
+
+	it('404s a URL whose path maps to no stored object and no provider owns', async () => {
+		const images = makeImages({});
+		const db = seedDb({ modelUrl: 'https://elsewhere.example/other/nope.vrm' });
+		await expect(status(GET(makeEvent(db, { images })))).resolves.toBe(404);
+		expect(images.get).toHaveBeenCalledWith('other/nope.vrm');
+	});
+
+	it('proxies an UploadThing-owned model URL through an outbound fetch (D1)', async () => {
+		// UploadThing fork: bytes live at utfs.io, not in R2 — the route must
+		// stream them through rather than 404ing forever.
+		const fetchMock = vi.fn(async () => new Response('UT BYTES', { headers: { 'content-length': '8' } }));
+		vi.stubGlobal('fetch', fetchMock);
+		const db = seedDb({
+			modelUrl: 'https://utfs.io/f/abc123',
+			storageProvider: 'uploadthing'
+		});
+		const res = await GET(makeEvent(db, { images: makeImages({}), uploadthingToken: 'tkn' }));
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('UT BYTES');
+		expect(fetchMock).toHaveBeenCalledWith('https://utfs.io/f/abc123');
+	});
+
+	it('does NOT proxy a foreign URL the provider does not own (no SSRF)', async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal('fetch', fetchMock);
+		const db = seedDb({
+			modelUrl: 'https://elsewhere.example/other/nope.vrm',
+			storageProvider: 'uploadthing'
+		});
+		await expect(
+			status(GET(makeEvent(db, { images: makeImages({}), uploadthingToken: 'tkn' })))
+		).resolves.toBe(404);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe('GET /vr/[slug]/download — serving details', () => {
 	it('names an fbx download foxo.fbx and a vrm0 one foxo.vrm', async () => {
 		const fbx = await GET(makeEvent(seedDb({ modelFormat: 'fbx' })));
 		expect(fbx.headers.get('Content-Disposition')).toBe('attachment; filename="foxo.fbx"');
@@ -167,5 +233,14 @@ describe('GET /vr/[slug]/download — serving details', () => {
 		expect(res.headers.get('content-length')).toBe(String('MODEL BYTES'.length));
 		expect(res.headers.get('etag')).toBe('"model-etag"');
 		expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=300, stale-while-revalidate=3600');
+	});
+
+	it('429s the 21st download from one IP inside the window (rate limiter wired)', async () => {
+		const ip = '203.0.113.77';
+		const db = seedDb({});
+		for (let i = 0; i < 20; i++) {
+			await expect(status(GET(makeEvent(db, { ip })))).resolves.toBe(200);
+		}
+		await expect(status(GET(makeEvent(db, { ip })))).resolves.toBe(429);
 	});
 });

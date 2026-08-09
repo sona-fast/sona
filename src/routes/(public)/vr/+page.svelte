@@ -14,7 +14,7 @@
 
 <Meta
 	title={m.vr_meta_title({ siteName })}
-	description={m.vr_meta_description({ count: data.total, siteName })}
+	description={m.vr_meta_description({ countLabel: m.vr_count({ count: data.total }), siteName })}
 	url={`${pageState.url.origin}${pageState.url.pathname}`}
 	image={data.avatars[0]?.posterUrl ?? null}
 	{siteName}
@@ -23,7 +23,10 @@
 <div class="container vr-page">
 	<div class="page-header">
 		<h1>{m.vr_title()}</h1>
-		<p class="count">{m.vr_count({ count: data.total })}</p>
+		{#if data.total > 0}
+			<!-- Suppressed at zero: "0 avatars" above the empty state says it twice. -->
+			<p class="count">{m.vr_count({ count: data.total })}</p>
+		{/if}
 	</div>
 
 	<!-- Tab bar — pill segmented control; VR avatars is active here -->
@@ -42,9 +45,12 @@
 				<a href="/vr/{avatar.slug}" class="card">
 					<div class="poster">
 						{#if avatar.posterUrl}
+							<!-- alt="" — the card's title already names the avatar; a named
+							     poster would double the card's accessible name. 440 ≈ 2x the
+							     ~220px slot (same budget as the gallery grid). -->
 							<img
-								src={cdnImage(avatar.posterUrl, 800)}
-								alt={avatar.name}
+								src={cdnImage(avatar.posterUrl, 440)}
+								alt=""
 								loading="lazy"
 								class:blurred={avatar.nsfw}
 								use:rawFallback={avatar.posterUrl}
@@ -62,7 +68,8 @@
 						{/if}
 					</div>
 					<div class="card-body">
-						<h3 class="card-title">{avatar.name}</h3>
+						<!-- h2: the page's only other heading is the h1. -->
+						<h2 class="card-title">{avatar.name}</h2>
 						{#if avatar.platforms.length > 0}
 							<div class="platforms">
 								{#each avatar.platforms as platform}
@@ -241,7 +248,9 @@
 		padding: 2px 8px;
 		border-radius: var(--radius-pill);
 		background: var(--secondary);
-		color: var(--muted-foreground);
+		/* --foreground, not --muted-foreground: muted on --secondary sits below
+		   4.5:1 on the Ember light theme (see theme-contrast.test.ts). */
+		color: var(--foreground);
 	}
 
 	.empty-state {

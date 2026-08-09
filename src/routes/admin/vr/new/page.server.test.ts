@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { isRedirect } from '@sveltejs/kit';
 import { makeD1 } from '$lib/server/test/d1';
+import { clearSettingsCache } from '$lib/server/settings';
 import { EARLY_ACCESS } from '$lib/early-access';
 
 import { actions } from './+page.server';
@@ -32,7 +33,11 @@ function restoreRegistry() {
 	for (const k of Object.keys(EARLY_ACCESS)) delete EARLY_ACCESS[k];
 	Object.assign(EARLY_ACCESS, SHIPPED);
 }
-beforeEach(restoreRegistry);
+beforeEach(() => {
+	restoreRegistry();
+	// getSettings caches per isolate and every test builds a fresh DB.
+	clearSettingsCache();
+});
 afterEach(restoreRegistry);
 
 function makeDb() {
@@ -59,10 +64,18 @@ function makeDb() {
 			title TEXT, file_size INTEGER, created_at TEXT
 		);
 	`);
+	sqlite.exec(`
+		CREATE TABLE avatar_media (
+			avatar_id INTEGER NOT NULL, kind TEXT NOT NULL, url TEXT NOT NULL,
+			width INTEGER, height INTEGER, position INTEGER NOT NULL DEFAULT 0
+		);
+	`);
 	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
 	sqlite.prepare('INSERT INTO artists (id, name) VALUES (1, ?)').run('Test Artist');
 	const d1 = makeD1(sqlite);
-	return { sqlite, platform: { env: { DB: d1 } } as unknown as App.Platform };
+	// IMAGES makes the R2 provider constructible so validateAvatarMedia can
+	// recognise self-hosted /img/… media URLs as owned.
+	return { sqlite, platform: { env: { DB: d1, IMAGES: {} } } as unknown as App.Platform };
 }
 
 function setKey(sqlite: ReturnType<typeof makeDb>['sqlite'], token: string) {
@@ -83,7 +96,8 @@ function baseForm(overrides: Record<string, string | string[]> = {}): FormData {
 
 async function create(platform: App.Platform, form: FormData) {
 	const request = new Request('http://localhost/admin/vr/new', { method: 'POST', body: form });
-	return actions.default({ request, platform } as never);
+	const url = new URL('http://localhost/admin/vr/new');
+	return actions.default({ request, platform, url } as never);
 }
 
 /** Runs the action and reports the outcome: a redirect (created) or a fail status. */
@@ -178,5 +192,59 @@ describe('create action validation', () => {
 			platform: string;
 		}>;
 		expect(rows.map((r) => r.platform)).toEqual(['resonite', 'vrchat']);
+	});
+
+	it('rejects downloadable=true without a recorded permission source (C1)', async () => {
+		const { sqlite, platform } = makeDb();
+		expect(await outcomeOf(platform, baseForm({ downloadable: '1' }))).toBe(400);
+		expect((sqlite.prepare('SELECT COUNT(*) AS n FROM vr_avatars').get() as { n: number }).n).toBe(0);
+	});
+
+	it('accepts downloadable=true once a permission source is recorded', async () => {
+		const { platform } = makeDb();
+		const form = baseForm({ downloadable: '1', permissionSource: 'Telegram DM 2026-08-01' });
+		expect(await outcomeOf(platform, form)).toBe('created');
+	});
+
+	it('400s when the referenced character does not exist', async () => {
+		const { platform } = makeDb();
+		expect(await outcomeOf(platform, baseForm({ characterId: '999' }))).toBe(400);
+	});
+
+	it('400s when the referenced poster image does not exist', async () => {
+		const { platform } = makeDb();
+		expect(await outcomeOf(platform, baseForm({ posterImageId: '999' }))).toBe(400);
+	});
+
+	it('persists showcase media rows in display order with kind and dimensions', async () => {
+		const { sqlite, platform } = makeDb();
+		const form = baseForm({
+			'media[0][url]': '/img/vr-media/shot.png',
+			'media[0][kind]': 'image',
+			'media[0][width]': '1920',
+			'media[0][height]': '1080',
+			'media[1][url]': '/img/vr-media/clip.webm',
+			'media[1][kind]': 'video',
+			'media[1][width]': '',
+			'media[1][height]': ''
+		});
+		expect(await outcomeOf(platform, form)).toBe('created');
+		const rows = sqlite
+			.prepare('SELECT kind, url, width, height, position FROM avatar_media ORDER BY position')
+			.all() as Array<{ kind: string; url: string; width: number | null; height: number | null; position: number }>;
+		expect(rows).toEqual([
+			{ kind: 'image', url: '/img/vr-media/shot.png', width: 1920, height: 1080, position: 0 },
+			{ kind: 'video', url: '/img/vr-media/clip.webm', width: null, height: null, position: 1 }
+		]);
+	});
+
+	it('rejects hot-linked (non-self-hosted) showcase media URLs', async () => {
+		const { sqlite, platform } = makeDb();
+		const form = baseForm({
+			'media[0][url]': 'https://elsewhere.example/steal.png',
+			'media[0][kind]': 'image'
+		});
+		expect(await outcomeOf(platform, form)).toBe(400);
+		expect((sqlite.prepare('SELECT COUNT(*) AS n FROM vr_avatars').get() as { n: number }).n).toBe(0);
 	});
 });

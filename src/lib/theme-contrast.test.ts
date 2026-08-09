@@ -514,3 +514,15 @@ describe('DownloadMenu lifted-surface WCAG AA contrast, every theme × mode (SON
 		});
 	}
 });
+
+describe('public chip text (foreground on secondary) WCAG AA contrast (SONA-124)', () => {
+	// The VR pages' chips (platform/format/role) render --foreground on
+	// --secondary: the --muted-foreground pairing they replaced was 3.96:1 on
+	// ember light. Guard the replacement pairing in every theme × mode so a
+	// token tweak can't quietly sink the chips again.
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: foreground on secondary meets 4.5:1`, () => {
+			expect(contrast(blockToken(sel, 'foreground'), blockToken(sel, 'secondary'))).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});

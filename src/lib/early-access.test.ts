@@ -50,17 +50,13 @@ describe('earlyAccessActive', () => {
 		expect(earlyAccessActive(BEFORE)).toEqual([]);
 	});
 
-	it('lists only flags still inside their early-access window, with label keys', () => {
+	it('lists only flags still inside their early-access window', () => {
 		EARLY_ACCESS.pilot = '2026-08-10';
 		EARLY_ACCESS['multi-word-flag'] = '2026-08-05';
 
 		expect(earlyAccessActive(BEFORE)).toEqual([
-			{ flag: 'pilot', gaDate: '2026-08-10', labelKey: 'early_access_label_pilot' },
-			{
-				flag: 'multi-word-flag',
-				gaDate: '2026-08-05',
-				labelKey: 'early_access_label_multi_word_flag'
-			}
+			{ flag: 'pilot', gaDate: '2026-08-10' },
+			{ flag: 'multi-word-flag', gaDate: '2026-08-05' }
 		]);
 		// Past its GA date → no longer "active" (it's on for everyone).
 		expect(earlyAccessActive(AFTER)).toEqual([]);

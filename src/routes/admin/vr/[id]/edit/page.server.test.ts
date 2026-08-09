@@ -65,7 +65,9 @@ function makeDb() {
 	`);
 	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
 	const d1 = makeD1(sqlite);
-	return { sqlite, platform: { env: { DB: d1 } } as unknown as App.Platform };
+	// IMAGES makes the R2 provider constructible so validateAvatarMedia can
+	// recognise self-hosted /img/… media URLs as owned.
+	return { sqlite, platform: { env: { DB: d1, IMAGES: {} } } as unknown as App.Platform };
 }
 
 function addAvatar(
@@ -107,8 +109,9 @@ async function run(
 		method: 'POST',
 		body: form ?? new FormData()
 	});
+	const url = new URL(`http://localhost/admin/vr/${id}/edit`);
 	try {
-		const result = await actions[action]({ request, platform, params: { id: String(id) } } as never);
+		const result = await actions[action]({ request, platform, params: { id: String(id) }, url } as never);
 		return result && 'status' in (result as object) ? (result as { status: number }).status : 'redirected';
 	} catch (e) {
 		if (isRedirect(e)) return 'redirected';
@@ -198,6 +201,40 @@ describe('model file disposal', () => {
 		const { sqlite, platform } = makeDb();
 		const id = addAvatar(sqlite, { modelUrl: MODEL_URL });
 		const form = saveForm({ modelUrl: MODEL_URL, modelFormat: 'vrm', modelSizeBytes: '1000' });
+		expect(await run('save', platform, id, form)).toBe('redirected');
+		expect(deleteFileSpy).not.toHaveBeenCalled();
+	});
+
+	it('replaces showcase media rows on save and disposes of the removed files', async () => {
+		const { sqlite, platform } = makeDb();
+		const id = addAvatar(sqlite);
+		sqlite
+			.prepare('INSERT INTO avatar_media (avatar_id, kind, url, position) VALUES (?, ?, ?, 0)')
+			.run(id, 'image', '/img/vr-media/old.png');
+		const form = saveForm({
+			'media[0][url]': '/img/vr-media/new.png',
+			'media[0][kind]': 'image'
+		});
+		expect(await run('save', platform, id, form)).toBe('redirected');
+		const rows = sqlite
+			.prepare('SELECT url, position FROM avatar_media ORDER BY position')
+			.all() as Array<{ url: string; position: number }>;
+		expect(rows).toEqual([{ url: '/img/vr-media/new.png', position: 0 }]);
+		// The dropped row's stored file goes with it (eager best-effort delete).
+		expect(deleteFileSpy).toHaveBeenCalledTimes(1);
+		expect(deleteFileSpy.mock.calls[0][2]).toBe('/img/vr-media/old.png');
+	});
+
+	it('keeps a media file that stays referenced across a save', async () => {
+		const { sqlite, platform } = makeDb();
+		const id = addAvatar(sqlite);
+		sqlite
+			.prepare('INSERT INTO avatar_media (avatar_id, kind, url, position) VALUES (?, ?, ?, 0)')
+			.run(id, 'image', '/img/vr-media/keep.png');
+		const form = saveForm({
+			'media[0][url]': '/img/vr-media/keep.png',
+			'media[0][kind]': 'image'
+		});
 		expect(await run('save', platform, id, form)).toBe('redirected');
 		expect(deleteFileSpy).not.toHaveBeenCalled();
 	});

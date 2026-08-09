@@ -6,16 +6,33 @@
 	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
-		/** SAME-ORIGIN path of the model file (see deriveModelPath). The raw
-		 * model_url must never reach this component — connect-src is 'self'. */
+		/** SAME-ORIGIN path of the model-serving endpoint (/vr/[slug]/model). The
+		 * raw model_url must never reach this component — connect-src is 'self'. */
 		modelPath: string;
 		modelSizeBytes: number | null;
 		name: string;
+		/** NSFW gate: while nsfw && !revealed the 3D entry point is hidden — the
+		 * viewer must not bypass the poster's blur/reveal. */
+		nsfw?: boolean;
+		revealed?: boolean;
+		/** Poster dimensions; the stage/loading panel keep the poster's aspect so
+		 * entering 3D doesn't shift the layout (falls back to 4:3). */
+		posterWidth?: number | null;
+		posterHeight?: number | null;
 		/** The poster markup shown until (and after) the 3D view is active. */
 		children: Snippet;
 	}
 
-	let { modelPath, modelSizeBytes, name, children }: Props = $props();
+	let {
+		modelPath,
+		modelSizeBytes,
+		name,
+		nsfw = false,
+		revealed = false,
+		posterWidth = null,
+		posterHeight = null,
+		children
+	}: Props = $props();
 
 	let active = $state(false);
 	let loading = $state(false);
@@ -23,13 +40,43 @@
 	let failed = $state(false);
 	let webglUnavailable = $state(false);
 
+	let viewer = $state<HTMLDivElement>();
 	let stage = $state<HTMLDivElement>();
 	let viewButton = $state<HTMLButtonElement>();
+	let exitButton = $state<HTMLButtonElement>();
+	let fallbackMessage = $state<HTMLParagraphElement>();
 	let disposeScene: (() => void) | null = null;
+	// Keyboard camera control, wired up once the scene exists (see enter3d).
+	let stageKeydown: ((e: KeyboardEvent) => void) | null = null;
+
+	// Exit-during-load guard: every enter3d run takes a generation number, and
+	// exit3d bumps it — a run that awakes from an await into a stale generation
+	// abandons silently instead of throwing into the "failed to load" state.
+	let generation = 0;
+
+	const aspect = $derived(
+		posterWidth && posterHeight ? `${posterWidth} / ${posterHeight}` : '4 / 3'
+	);
 
 	const progressPercent = $derived(
 		modelSizeBytes ? Math.min(100, Math.round((loadedBytes / modelSizeBytes) * 100)) : 0
 	);
+	// Live-region text, throttled to 10% steps (or whole MB without a total) so a
+	// screen reader isn't flooded with a per-chunk announcement stream. The
+	// region itself is ALWAYS mounted — live regions inserted together with
+	// their first content are often not announced at all.
+	const loadingAnnouncement = $derived.by(() => {
+		if (!loading) return '';
+		if (modelSizeBytes) {
+			const stepped = Math.floor(progressPercent / 10) * 10;
+			return m.vr_loading_model({
+				loaded: formatBytes(Math.round((stepped / 100) * modelSizeBytes)),
+				total: formatBytes(modelSizeBytes)
+			});
+		}
+		const wholeMb = Math.floor(loadedBytes / (1024 * 1024)) * 1024 * 1024;
+		return m.vr_loading_model_nototal({ loaded: formatBytes(wholeMb) });
+	});
 
 	// Click-to-load: three + three-vrm are heavyweight and must NEVER ride the
 	// initial bundle — they are dynamically imported here, on activation only
@@ -40,9 +87,14 @@
 		const probe = document.createElement('canvas');
 		if (!probe.getContext('webgl2') && !probe.getContext('webgl')) {
 			webglUnavailable = true;
+			// The button this click came from unmounts — move focus to the fallback
+			// message rather than dropping it on <body>.
+			await tick();
+			fallbackMessage?.focus();
 			return;
 		}
 
+		const gen = ++generation;
 		active = true;
 		loading = true;
 		failed = false;
@@ -55,34 +107,45 @@
 					import('three/addons/loaders/GLTFLoader.js'),
 					import('@pixiv/three-vrm')
 				]);
+			if (gen !== generation) return;
 
 			// Fetch the model ourselves (same-origin) so byte progress can be
 			// reported against the known modelSizeBytes; GLTFLoader then parses the
 			// buffer directly. No Draco/KTX2 decoders: CSP allows no wasm or workers.
 			const res = await fetch(modelPath);
 			if (!res.ok || !res.body) throw new Error(`model fetch failed: ${res.status}`);
-			const reader = res.body.getReader();
-			const chunks: Uint8Array[] = [];
+			// Single buffer: preallocate from the declared length (grow only if the
+			// origin lied) instead of collecting chunks and copying them again.
+			const declared = Number(res.headers.get('content-length')) || modelSizeBytes || 0;
+			let buffer = new Uint8Array(declared > 0 ? declared : 1024 * 1024);
 			let total = 0;
+			const reader = res.body.getReader();
 			for (;;) {
 				const { done, value } = await reader.read();
 				if (done) break;
-				chunks.push(value);
+				if (gen !== generation) {
+					void reader.cancel();
+					return;
+				}
+				if (total + value.byteLength > buffer.length) {
+					const grown = new Uint8Array(Math.max(buffer.length * 2, total + value.byteLength));
+					grown.set(buffer.subarray(0, total));
+					buffer = grown;
+				}
+				buffer.set(value, total);
 				total += value.byteLength;
 				loadedBytes = total;
 			}
-			const buffer = new Uint8Array(total);
-			let at = 0;
-			for (const chunk of chunks) {
-				buffer.set(chunk, at);
-				at += chunk.byteLength;
-			}
+			if (gen !== generation) return;
+			const data =
+				total === buffer.length ? buffer.buffer : (buffer.slice(0, total).buffer as ArrayBuffer);
 
 			const loader = new GLTFLoader();
 			loader.register((parser) => new VRMLoaderPlugin(parser));
 			const gltf = await new Promise<{ userData: { vrm?: unknown } }>((resolve, reject) =>
-				loader.parse(buffer.buffer, '', resolve, reject)
+				loader.parse(data, '', resolve, reject)
 			);
+			if (gen !== generation) return;
 			const vrm = gltf.userData.vrm as {
 				scene: import('three').Group;
 				update(delta: number): void;
@@ -93,6 +156,7 @@
 
 			loading = false;
 			await tick(); // stage <div> renders once loading flips off
+			if (gen !== generation) return;
 
 			const host = stage;
 			if (!host) throw new Error('viewer stage missing');
@@ -125,6 +189,44 @@
 			controls.autoRotate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 			controls.autoRotateSpeed = 1.5;
 
+			// Keyboard camera path (OrbitControls is pointer-only): arrows orbit,
+			// +/- zoom — reduced-motion users with auto-rotate off would otherwise
+			// have a frozen camera and no way to move it without a pointer.
+			stageKeydown = (e: KeyboardEvent) => {
+				const offset = camera.position.clone().sub(controls.target);
+				const spherical = new THREE.Spherical().setFromVector3(offset);
+				const step = Math.PI / 24;
+				switch (e.key) {
+					case 'ArrowLeft':
+						spherical.theta -= step;
+						break;
+					case 'ArrowRight':
+						spherical.theta += step;
+						break;
+					case 'ArrowUp':
+						spherical.phi -= step;
+						break;
+					case 'ArrowDown':
+						spherical.phi += step;
+						break;
+					case '+':
+					case '=':
+						spherical.radius = Math.max(0.2, spherical.radius * 0.9);
+						break;
+					case '-':
+					case '_':
+						spherical.radius = Math.min(40, spherical.radius / 0.9);
+						break;
+					default:
+						return;
+				}
+				e.preventDefault();
+				spherical.makeSafe();
+				offset.setFromSpherical(spherical);
+				camera.position.copy(controls.target).add(offset);
+				camera.lookAt(controls.target);
+			};
+
 			const clock = new THREE.Clock();
 			let raf = 0;
 			const animate = () => {
@@ -153,8 +255,15 @@
 				VRMUtils.deepDispose(vrm.scene);
 				renderer.dispose();
 				renderer.domElement.remove();
+				stageKeydown = null;
 			};
+
+			// Entering 3D unmounts the "View in 3D" button this click came from —
+			// hand focus to Exit 3D instead of letting it fall to <body> (mirrors
+			// exit3d's tick-then-focus in the other direction).
+			exitButton?.focus();
 		} catch {
+			if (gen !== generation) return;
 			// Failed chunk, failed fetch, or a file that doesn't parse — show the
 			// poster again with a quiet error; the rest of the page still works.
 			disposeScene?.();
@@ -169,9 +278,11 @@
 		if (document.fullscreenElement) {
 			await document.exitFullscreen().catch(() => {});
 		}
+		generation++;
 		disposeScene?.();
 		disposeScene = null;
 		active = false;
+		loading = false;
 		failed = false;
 		await tick(); // poster + button re-render before focus moves
 		viewButton?.focus();
@@ -181,7 +292,10 @@
 		if (document.fullscreenElement) {
 			void document.exitFullscreen().catch(() => {});
 		} else {
-			void stage?.requestFullscreen().catch(() => {});
+			// Fullscreen the WRAPPER, not the bare stage: the controls (Exit 3D,
+			// Fullscreen) must stay reachable inside the fullscreen element, or a
+			// keyboard user is stuck with only the Esc escape hatch.
+			void viewer?.requestFullscreen().catch(() => {});
 		}
 	}
 
@@ -191,12 +305,12 @@
 	});
 </script>
 
-<div class="viewer">
+<div class="viewer" bind:this={viewer}>
 	{#if !active}
 		{@render children()}
 	{:else if loading}
-		<div class="loading-panel">
-			<p role="status">
+		<div class="loading-panel" style="aspect-ratio: {aspect}">
+			<p aria-hidden="true">
 				{modelSizeBytes
 					? m.vr_loading_model({ loaded: formatBytes(loadedBytes), total: formatBytes(modelSizeBytes) })
 					: m.vr_loading_model_nototal({ loaded: formatBytes(loadedBytes) })}
@@ -208,26 +322,50 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="stage" bind:this={stage} aria-label={name}></div>
+		<!-- role="img": the stage is a rendered picture of the model; a generic
+		     div would leave the aria-label unexposed. tabindex puts it in the tab
+		     order for the keyboard camera bindings above — deliberately on the
+		     "image" itself (OrbitControls is pointer-only; reduced-motion users
+		     get a frozen camera with no other way to move it), hence the ignores. -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+		<div
+			class="stage"
+			bind:this={stage}
+			role="img"
+			aria-label={name}
+			tabindex="0"
+			style="aspect-ratio: {aspect}"
+			onkeydown={(e) => stageKeydown?.(e)}
+		></div>
 	{/if}
 
+	<!-- Always-mounted live region (inserting one with content skips the
+	     announcement); text updates in 10% steps. -->
+	<p class="sr-only" role="status">{loadingAnnouncement}</p>
+
 	{#if webglUnavailable}
-		<p class="webgl-fallback" role="status">{m.vr_webgl_unavailable()}</p>
+		<p class="webgl-fallback" role="status" tabindex="-1" bind:this={fallbackMessage}>
+			{m.vr_webgl_unavailable()}
+		</p>
 	{:else if !active}
-		<div class="controls">
-			<button bind:this={viewButton} class="btn btn-primary" onclick={enter3d}>
-				<Box size={16} /> {m.vr_view_in_3d()}
-			</button>
-			{#if failed}
-				<p class="load-error" role="status">{m.vr_load_failed()}</p>
-			{/if}
-		</div>
+		{#if !nsfw || revealed}
+			<div class="controls">
+				<button bind:this={viewButton} class="btn btn-primary" onclick={enter3d}>
+					<Box size={16} /> {m.vr_view_in_3d()}
+				</button>
+			</div>
+		{/if}
+		{#if failed}
+			<!-- Its own row below the actions (not inline beside the orange primary
+			     button) and role=alert like the admin upload errors. -->
+			<p class="load-error" role="alert">{m.vr_load_failed()}</p>
+		{/if}
 	{:else}
 		<div class="controls">
 			<button class="btn btn-secondary" onclick={toggleFullscreen} disabled={loading}>
 				<Maximize size={16} /> {m.vr_fullscreen()}
 			</button>
-			<button class="btn btn-secondary" onclick={exit3d}>
+			<button bind:this={exitButton} class="btn btn-secondary" onclick={exit3d}>
 				<X size={16} /> {m.vr_exit_3d()}
 			</button>
 		</div>
@@ -241,16 +379,27 @@
 		gap: 12px;
 	}
 
+	.viewer:fullscreen {
+		background: var(--background);
+		padding: 12px;
+	}
+
+	.viewer:fullscreen .stage {
+		aspect-ratio: auto !important;
+		flex: 1;
+		min-height: 0;
+		border-radius: 0;
+	}
+
 	.stage {
-		aspect-ratio: 4 / 3;
 		border-radius: var(--radius-s);
 		overflow: hidden;
 		background: var(--secondary);
 	}
 
-	.stage:fullscreen {
-		aspect-ratio: auto;
-		border-radius: 0;
+	.stage:focus-visible {
+		outline: 2px solid var(--primary);
+		outline-offset: -2px;
 	}
 
 	.stage :global(canvas) {
@@ -260,7 +409,6 @@
 	}
 
 	.loading-panel {
-		aspect-ratio: 4 / 3;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -304,8 +452,24 @@
 		color: var(--muted-foreground);
 	}
 
+	.webgl-fallback:focus {
+		outline: none;
+	}
+
 	.load-error {
 		font-size: 13px;
 		color: var(--destructive);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 </style>

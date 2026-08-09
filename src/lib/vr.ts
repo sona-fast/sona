@@ -1,8 +1,10 @@
 /**
  * VR avatar showcase helpers (SONA-124), shared by the public /vr pages and the
- * model download endpoint so the two can never disagree about what is
- * downloadable or where the model bytes are fetched from.
+ * model-serving endpoints so they can never disagree about what is downloadable
+ * or where the model bytes are fetched from.
  */
+
+import * as m from '$lib/paraglide/messages';
 
 /** Licenses under which the raw model file may be offered for download. The
  * download endpoint enforces this server-side; the detail page uses the same
@@ -12,69 +14,39 @@ export function isPermissiveVrLicense(license: string | null | undefined): boole
 }
 
 /**
- * The R2 object key behind a stored model URL, or null when the URL isn't ours.
+ * The R2 object key a stored model URL's PATH spells, or null when the URL
+ * carries none. Deliberately BASE-AGNOSTIC, mirroring the deleteOrphans keep-set
+ * rule in $lib/server/storage/r2.ts: a pathname starting with '/img/' keeps its
+ * key, anything else is the path minus its leading slash.
  *
- * Stored model URLs are full PUBLIC URLs (see vr_avatars.model_url), absolutized
- * against whatever base was active at upload time — the R2 custom domain
- * (r2PublicUrl), or the same-origin /img route when no CDN URL was set. The key
- * derivation mirrors deleteOrphans in $lib/server/storage/r2.ts: a pathname
- * starting with '/img/' keeps its key, anything else is the path minus its
- * leading slash.
- *
- * Ownership is checked FIRST: only a root-relative URL or one on the request
- * origin / the configured r2PublicUrl yields a key. A foreign host must return
- * null — the viewer would try to fetch it same-origin (and 404), and the
- * download route would otherwise stream whatever key a foreign URL's path
- * happens to spell (an off-origin reference is not ours to serve).
+ * Base-agnostic because stored model URLs are full PUBLIC URLs absolutized
+ * against whatever base was active AT UPLOAD TIME — the R2 custom domain
+ * (r2PublicUrl) or the same-origin /img route — and r2PublicUrl can change
+ * after upload. Requiring the CURRENT base to match would orphan every model
+ * stored under the old one. Deriving a key from a URL we never stored is
+ * harmless: model_url is admin-written only, the derived key either misses the
+ * bucket (get() → null → 404) or names an object that is public anyway, and the
+ * bytes are only ever served through our own endpoints, never fetched from the
+ * foreign host by this path.
  */
-export function deriveModelKey(
+export function modelKeyFromUrl(
 	modelUrl: string | null | undefined,
-	opts: { origin: string; r2PublicUrl?: string | null }
+	origin: string
 ): string | null {
 	if (!modelUrl) return null;
 	let parsed: URL;
 	try {
 		// Resolving against the request origin makes root-relative URLs absolute
 		// and normalizes dot segments, so '..' can never leak into a key.
-		parsed = new URL(modelUrl, opts.origin);
+		parsed = new URL(modelUrl, origin);
 	} catch {
 		return null;
 	}
 	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
 
-	const owned =
-		isSameOrigin(parsed, opts.origin) ||
-		(!!opts.r2PublicUrl && isSameOrigin(parsed, opts.r2PublicUrl)) ||
-		// A root-relative stored URL resolves to the request origin above, so this
-		// branch only matters when modelUrl was absolute to begin with.
-		modelUrl.startsWith('/');
-	if (!owned) return null;
-
 	const path = parsed.pathname;
 	const key = path.startsWith('/img/') ? path.slice('/img/'.length) : path.replace(/^\//, '');
 	return key || null;
-}
-
-function isSameOrigin(url: URL, base: string): boolean {
-	try {
-		return url.origin === new URL(base).origin;
-	} catch {
-		return false;
-	}
-}
-
-/**
- * The SAME-ORIGIN path the 3D viewer fetches the model from. The app CSP sends
- * connect-src 'self', so the viewer must never be handed the raw (possibly
- * cross-origin) model_url — this routes it through the /img serving route
- * instead. Null = no self-hosted model reachable → no viewer.
- */
-export function deriveModelPath(
-	modelUrl: string | null | undefined,
-	opts: { origin: string; r2PublicUrl?: string | null }
-): string | null {
-	const key = deriveModelKey(modelUrl, opts);
-	return key ? `/img/${key}` : null;
 }
 
 /** File extension a model download carries, by stored model_format.
@@ -86,6 +58,53 @@ export function modelExt(format: string | null | undefined): 'vrm' | 'fbx' {
 /** Short format label for badges/chips ("3D · VRM"). */
 export function modelFormatLabel(format: string | null | undefined): string {
 	return format === 'fbx' ? 'FBX' : 'VRM';
+}
+
+/** Fine-grained format label for the admin table ("VRM 1.0" / "VRM 0.x").
+ * Product/format names, not translatable copy (same reasoning as
+ * PLATFORM_LABELS). Uploads record generic 'vrm'; 'vrm0' only appears if set
+ * deliberately. The public badge uses the coarser modelFormatLabel above. */
+export function modelFormatDetailLabel(format: string | null | undefined): string {
+	if (format === 'fbx') return 'FBX';
+	if (format === 'vrm0') return 'VRM 0.x';
+	return 'VRM 1.0';
+}
+
+/** Localized license label ("Personal use"), or null for no/unknown license.
+ * Shared by the public detail page and the admin table so the two can't drift. */
+export function licenseLabel(license: string | null | undefined): string | null {
+	switch (license) {
+		case 'personal-use':
+			return m.vr_license_personal_use();
+		case 'cc-by':
+			return m.vr_license_cc_by();
+		case 'base-tos':
+			return m.vr_license_base_tos();
+		case 'all-rights-reserved':
+			return m.vr_license_all_rights_reserved();
+		default:
+			return null;
+	}
+}
+
+/** Localized credit-role label. role='other' names itself via roleLabel
+ * (required in admin forms); falls back to the generic label if a row slipped
+ * through without one. Shared by the public credits list and the admin form. */
+export function creditRoleLabel(role: string, roleLabel?: string | null): string {
+	switch (role) {
+		case 'base':
+			return m.vr_role_base();
+		case 'modeler':
+			return m.vr_role_modeler();
+		case 'rigger':
+			return m.vr_role_rigger();
+		case 'texture':
+			return m.vr_role_texture();
+		case 'shader':
+			return m.vr_role_shader();
+		default:
+			return roleLabel || m.vr_role_other();
+	}
 }
 
 /** Whether the in-page viewer can load this format (three-vrm handles VRM 0.x
@@ -143,10 +162,28 @@ export function platformLabel(platform: string): string | null {
  * server endpoint enforcing the same number against Content-Length. */
 export const MAX_VR_MODEL_BYTES = 50 * 1024 * 1024; // 50 MB
 
-/** "12.3 MB"-style size for the format/size chip and download progress. */
+/** "12.3 MB"-style size for the format/size chip, download progress and the
+ * admin storage line (which needs the GB step for the 10 GB free-tier limit). */
 export function formatBytes(bytes: number | null | undefined): string {
 	if (!bytes || bytes <= 0) return '—';
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+/**
+ * Client-side validation of a picked model file, extracted from the admin
+ * form's onModelPicked so it is unit-testable: mirrors the server guards
+ * (extension allowlist, MAX_VR_MODEL_BYTES) for instant feedback — the
+ * /api/admin/vr-model endpoint re-checks all of it.
+ */
+export function modelFileError(file: { name: string; size: number }): 'bad-type' | 'too-large' | null {
+	// Same extension rule as the server's modelExtFromFilename: the LAST dot
+	// segment, and a leading dot ('.vrm') carries no extension.
+	const dot = file.name.lastIndexOf('.');
+	const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : null;
+	if (ext !== 'vrm' && ext !== 'fbx') return 'bad-type';
+	if (file.size > MAX_VR_MODEL_BYTES) return 'too-large';
+	return null;
 }

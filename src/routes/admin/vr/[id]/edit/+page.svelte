@@ -13,6 +13,7 @@
 	images={data.images}
 	avatar={data.avatar}
 	credits={data.credits}
+	media={data.media}
 	platforms={data.platforms}
 	{form}
 	publishingEnabled={data.publishingEnabled}

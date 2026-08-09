@@ -69,6 +69,13 @@ VALUES
    NULL, NULL, NULL, 0, 0, 0, NULL, '2026-07-02T00:00:00.000Z');
 INSERT OR REPLACE INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat');
 
+-- Showcase media for avatar 1 (SONA-124 SP1): one image + one clip so the
+-- public detail page's media strip renders (poster thumb + these two). URLs
+-- are same-origin placeholders that 404 harmlessly, like the image fixtures.
+INSERT OR REPLACE INTO avatar_media (avatar_id, kind, url, width, height, position) VALUES
+  (1, 'image', '/e2e/vr-media-shot.png', 900, 700, 0),
+  (1, 'video', '/e2e/vr-media-clip.webm', 640, 360, 1);
+
 -- Tier-A visitor rollups for the observability spec (#193): enough pageview /
 -- device / referrer / country counters (dated today, inside the dashboard
 -- window) that /admin/observability renders every percentage-bar list with a

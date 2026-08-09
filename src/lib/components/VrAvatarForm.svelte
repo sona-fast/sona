@@ -1,10 +1,12 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { flip } from 'svelte/animate';
-	import { ArrowLeft, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2 } from 'lucide-svelte';
+	import { ArrowLeft, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
-	import { MAX_VR_MODEL_BYTES, formatBytes, modelFormatLabel, platformLabel } from '$lib/vr';
+	import { DragReorder } from '$lib/drag-reorder.svelte';
+	import { MAX_VR_MODEL_BYTES, creditRoleLabel, formatBytes, modelFileError, modelFormatLabel, platformLabel } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
 	interface AvatarInit {
@@ -28,6 +30,12 @@
 		role: string;
 		roleLabel: string | null;
 	}
+	interface MediaInit {
+		url: string;
+		kind: string;
+		width: number | null;
+		height: number | null;
+	}
 	interface Props {
 		heading: string;
 		submitLabel: string;
@@ -39,6 +47,8 @@
 		/** Existing avatar for edit mode; omit for create. */
 		avatar?: AvatarInit | null;
 		credits?: CreditInit[];
+		/** Existing showcase media rows for edit mode, in display order. */
+		media?: MediaInit[];
 		platforms?: string[];
 		form?: { error?: string } | null;
 		/** Gate state (SONA-124): while false, creating and publishing are locked
@@ -46,7 +56,7 @@
 		publishingEnabled: boolean;
 	}
 
-	let { heading, submitLabel, artists, characters, images, avatar = null, credits = [], platforms = [], form = null, publishingEnabled }: Props = $props();
+	let { heading, submitLabel, artists, characters, images, avatar = null, credits = [], media = [], platforms = [], form = null, publishingEnabled }: Props = $props();
 
 	const isEdit = avatar !== null;
 
@@ -106,22 +116,6 @@
 		}))
 	);
 	const ROLES = ['base', 'modeler', 'rigger', 'texture', 'shader', 'other'];
-	function roleLabelFor(role: string): string {
-		switch (role) {
-			case 'base':
-				return m.vr_role_base();
-			case 'modeler':
-				return m.vr_role_modeler();
-			case 'rigger':
-				return m.vr_role_rigger();
-			case 'texture':
-				return m.vr_role_texture();
-			case 'shader':
-				return m.vr_role_shader();
-			default:
-				return m.vr_role_other();
-		}
-	}
 	function addCredit() {
 		creditEntries = [...creditEntries, { uid: nextUid++, artistId: '', role: 'base', roleLabel: '' }];
 	}
@@ -129,35 +123,126 @@
 		creditEntries = creditEntries.filter((_, idx) => idx !== i);
 	}
 
-	let dragIndex = $state<number | null>(null);
-	let overIndex = $state<number | null>(null);
-	function onHandlePointerDown(i: number, ev: PointerEvent) {
-		if (ev.button !== 0) return; // primary button / touch only
-		ev.preventDefault();
-		(ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-		dragIndex = i;
-		overIndex = i;
+	// Shared reorder behavior (pointer drag + arrow keys + live announcement) —
+	// same helper as the sticker pack form's row reorder.
+	const creditReorder = new DragReorder({
+		count: () => creditEntries.length,
+		move: (from, to) => {
+			const next = [...creditEntries];
+			const [moved] = next.splice(from, 1);
+			next.splice(to, 0, moved);
+			creditEntries = next;
+		}
+	});
+
+	// --- Showcase media (mock vr-avatar detail's media strip): ordered images +
+	// short clips, uploaded through /api/upload (buffered — its 10 MB cap is the
+	// intended bound for showcase stills and short clips) into the vr-media/
+	// partition. Kind derives from the file's content type; dimensions are
+	// probed client-side like the existing image flows.
+	interface MediaEntry {
+		uid: number;
+		url: string;
+		kind: 'image' | 'video';
+		width: number | null;
+		height: number | null;
 	}
-	function onHandlePointerMove(ev: PointerEvent) {
-		if (dragIndex === null) return;
-		const row = document
-			.elementFromPoint(ev.clientX, ev.clientY)
-			?.closest<HTMLElement>('[data-credit-index]');
-		if (row) overIndex = Number(row.dataset.creditIndex);
+	let mediaEntries = $state<MediaEntry[]>(
+		media.map((item) => ({
+			uid: nextUid++,
+			url: item.url,
+			kind: item.kind === 'video' ? 'video' : 'image',
+			width: item.width,
+			height: item.height
+		}))
+	);
+	let mediaUploading = $state(false);
+	let mediaError = $state<'too-large' | 'bad-type' | 'failed' | null>(null);
+
+	const mediaReorder = new DragReorder({
+		count: () => mediaEntries.length,
+		move: (from, to) => {
+			const next = [...mediaEntries];
+			const [moved] = next.splice(from, 1);
+			next.splice(to, 0, moved);
+			mediaEntries = next;
+		}
+	});
+
+	function removeMedia(i: number) {
+		// Row removal only; the save action disposes of the stored file.
+		mediaEntries = mediaEntries.filter((_, idx) => idx !== i);
 	}
-	function onHandlePointerUp() {
-		const from = dragIndex;
-		const to = overIndex;
-		resetDrag();
-		if (from === null || to === null || from === to) return;
-		const next = [...creditEntries];
-		const [moved] = next.splice(from, 1);
-		next.splice(to, 0, moved);
-		creditEntries = next;
+
+	const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/avif,video/webm';
+	const MAX_MEDIA_BYTES = 10 * 1024 * 1024; // /api/upload's buffered cap
+
+	/** Intrinsic dimensions, probed from the picked file (Image / video metadata). */
+	function probeDimensions(file: File): Promise<{ width: number | null; height: number | null }> {
+		return new Promise((resolve) => {
+			const objectUrl = URL.createObjectURL(file);
+			const done = (width: number | null, height: number | null) => {
+				URL.revokeObjectURL(objectUrl);
+				resolve({ width, height });
+			};
+			if (file.type.startsWith('video/')) {
+				const probe = document.createElement('video');
+				probe.preload = 'metadata';
+				probe.onloadedmetadata = () => done(probe.videoWidth || null, probe.videoHeight || null);
+				probe.onerror = () => done(null, null);
+				probe.src = objectUrl;
+			} else {
+				const probe = new Image();
+				probe.onload = () => done(probe.naturalWidth || null, probe.naturalHeight || null);
+				probe.onerror = () => done(null, null);
+				probe.src = objectUrl;
+			}
+		});
 	}
-	function resetDrag() {
-		dragIndex = null;
-		overIndex = null;
+
+	async function onMediaPicked(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const files = [...(input.files ?? [])];
+		input.value = '';
+		if (!files.length) return;
+		mediaError = null;
+		mediaUploading = true;
+		try {
+			for (const file of files) {
+				if (file.size > MAX_MEDIA_BYTES) {
+					mediaError = 'too-large';
+					continue;
+				}
+				const fd = new FormData();
+				fd.append('file', file);
+				fd.append('folder', 'vr-media');
+				let res: Response;
+				try {
+					res = await fetch('/api/upload', { method: 'POST', body: fd });
+				} catch {
+					mediaError = 'failed';
+					continue;
+				}
+				if (!res.ok) {
+					mediaError = res.status === 413 ? 'too-large' : res.status === 415 ? 'bad-type' : 'failed';
+					continue;
+				}
+				const { url } = (await res.json()) as { url: string };
+				const { width, height } = await probeDimensions(file);
+				mediaEntries = [
+					...mediaEntries,
+					{
+						uid: nextUid++,
+						url,
+						kind: file.type.startsWith('video/') ? 'video' : 'image',
+						width,
+						height
+					}
+				];
+			}
+		} finally {
+			mediaUploading = false;
+		}
 	}
 
 	// --- Poster picker: pick from the gallery, like the collections cover grid
@@ -165,6 +250,14 @@
 	// delete — rather than the URL).
 	let posterImageId = $state<number | null>(avatar?.posterImageId ?? null);
 	const posterImage = $derived(images.find((img) => img.id === posterImageId) ?? null);
+	let removePosterButton = $state<HTMLButtonElement>();
+	async function pickPoster(id: number) {
+		posterImageId = id;
+		// Picking swaps the grid for the preview, unmounting the focused option —
+		// hand focus to the Remove button instead of dropping it on <body>.
+		await tick();
+		removePosterButton?.focus();
+	}
 
 	// --- Model upload (mock vr-model-upload): dropzone → progress → stored card,
 	// plus the two error states. The endpoint streams the raw body, so the file
@@ -186,16 +279,12 @@
 		input.value = '';
 		if (!file) return;
 		uploadError = null;
-		const ext = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
-		// Client-side mirrors of the server guards, for instant feedback — the
-		// endpoint re-checks all of it.
-		if (!file.name.includes('.') || (ext !== 'vrm' && ext !== 'fbx')) {
-			uploadError = 'bad-type';
-			return;
-		}
-		if (file.size > MAX_VR_MODEL_BYTES) {
-			errorFileSize = file.size;
-			uploadError = 'too-large';
+		// Client-side mirror of the server guards ($lib/vr modelFileError), for
+		// instant feedback — the endpoint re-checks all of it.
+		const fileError = modelFileError(file);
+		if (fileError) {
+			if (fileError === 'too-large') errorFileSize = file.size;
+			uploadError = fileError;
 			return;
 		}
 		uploading = true;
@@ -311,8 +400,10 @@
 				<span>{m.admin_vr_field_description()}</span>
 				<textarea class="input" name="description" rows="3">{avatar?.description ?? ''}</textarea>
 			</label>
-			<div class="chip-field">
-				<span class="field-label">{m.admin_vr_field_platforms()}</span>
+			<!-- fieldset/legend: the checkboxes are one programmatic group, so a
+			     screen reader announces "Platforms" with each chip. -->
+			<fieldset class="chip-field">
+				<legend class="field-label">{m.admin_vr_field_platforms()}</legend>
 				<div class="platform-chips">
 					{#each PLATFORMS as p}
 						<label class="platform-chip" class:on={selectedPlatforms.has(p)}>
@@ -327,7 +418,7 @@
 						</label>
 					{/each}
 				</div>
-			</div>
+			</fieldset>
 		</div>
 	</section>
 
@@ -336,24 +427,27 @@
 		{#if creditEntries.length === 0}
 			<p class="muted">{m.admin_vr_no_credits()}</p>
 		{/if}
+		<!-- Always-mounted live region for the reorder announcements. -->
+		<span class="sr-only" aria-live="polite">{creditReorder.announcement}</span>
 		<div class="credit-list">
 			{#each creditEntries as credit, i (credit.uid)}
 				<div
 					class="credit-row"
-					class:dragging={dragIndex === i}
-					class:drop-target={overIndex === i && dragIndex !== null && dragIndex !== i}
+					class:dragging={creditReorder.dragIndex === i}
+					class:drop-target={creditReorder.overIndex === i && creditReorder.dragIndex !== null && creditReorder.dragIndex !== i}
 					animate:flip={{ duration: 200 }}
-					data-credit-index={i}
+					data-reorder-index={i}
 				>
 					<button
 						type="button"
 						class="drag-handle"
 						aria-label={m.admin_pack_drag_reorder()}
 						title={m.admin_pack_drag_reorder()}
-						onpointerdown={(e) => onHandlePointerDown(i, e)}
-						onpointermove={onHandlePointerMove}
-						onpointerup={onHandlePointerUp}
-						onpointercancel={resetDrag}
+						onpointerdown={(e) => creditReorder.handlePointerDown(i, e)}
+						onpointermove={(e) => creditReorder.handlePointerMove(e)}
+						onpointerup={() => creditReorder.handlePointerUp()}
+						onpointercancel={() => creditReorder.reset()}
+						onkeydown={(e) => creditReorder.handleKeydown(i, e)}
 					>
 						<GripVertical size={16} />
 					</button>
@@ -371,7 +465,7 @@
 							<span>{m.admin_vr_field_role()}</span>
 							<select class="input sm" name="credit[{i}][role]" bind:value={credit.role}>
 								{#each ROLES as role}
-									<option value={role}>{roleLabelFor(role)}</option>
+									<option value={role}>{creditRoleLabel(role)}</option>
 								{/each}
 							</select>
 						</label>
@@ -424,11 +518,16 @@
 					<button type="button" class="btn-sm" onclick={removeModel}>{m.admin_vr_upload_remove()}</button>
 				</div>
 			</div>
+			{#if modelUrl !== (avatar?.modelUrl ?? '')}
+				<!-- The orphan sweep reclaims files no row references after ~1h — a
+				     form left open unsaved for hours would lose the upload. -->
+				<p class="field-hint">{m.admin_vr_upload_unsaved()}</p>
+			{/if}
 		{:else}
 			<!-- The whole zone is the label for the hidden file input. -->
 			<label class="upload-zone" class:disabled={!publishingEnabled}>
 				<UploadCloud size={22} />
-				<span>{m.admin_vr_dropzone()}</span>
+				<span>{m.admin_vr_dropzone({ max: formatBytes(MAX_VR_MODEL_BYTES) })}</span>
 				<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} disabled={!publishingEnabled} class="sr-file" />
 			</label>
 			{#if !publishingEnabled}
@@ -473,13 +572,91 @@
 	</section>
 
 	<section class="section">
+		<h2>{m.admin_vr_section_media()}</h2>
+		<p class="field-hint">{m.admin_vr_media_hint()}</p>
+		<!-- Always-mounted live region for the reorder announcements. -->
+		<span class="sr-only" aria-live="polite">{mediaReorder.announcement}</span>
+		{#if mediaEntries.length > 0}
+			<div class="media-list">
+				{#each mediaEntries as item, i (item.uid)}
+					<div
+						class="media-row"
+						class:dragging={mediaReorder.dragIndex === i}
+						class:drop-target={mediaReorder.overIndex === i && mediaReorder.dragIndex !== null && mediaReorder.dragIndex !== i}
+						animate:flip={{ duration: 200 }}
+						data-reorder-index={i}
+					>
+						<button
+							type="button"
+							class="drag-handle"
+							aria-label={m.admin_pack_drag_reorder()}
+							title={m.admin_pack_drag_reorder()}
+							onpointerdown={(e) => mediaReorder.handlePointerDown(i, e)}
+							onpointermove={(e) => mediaReorder.handlePointerMove(e)}
+							onpointerup={() => mediaReorder.handlePointerUp()}
+							onpointercancel={() => mediaReorder.reset()}
+							onkeydown={(e) => mediaReorder.handleKeydown(i, e)}
+						>
+							<GripVertical size={16} />
+						</button>
+						<div class="media-thumb">
+							{#if item.kind === 'video'}
+								<video src={item.url} muted playsinline preload="metadata"></video>
+							{:else}
+								<img src={item.url} alt="" loading="lazy" />
+							{/if}
+						</div>
+						<span class="media-meta">
+							{item.kind === 'video' ? m.admin_vr_media_kind_video() : m.admin_vr_media_kind_image()}{item.width && item.height
+								? ` · ${item.width}×${item.height}`
+								: ''}
+						</span>
+						<input type="hidden" name="media[{i}][url]" value={item.url} />
+						<input type="hidden" name="media[{i}][kind]" value={item.kind} />
+						<input type="hidden" name="media[{i}][width]" value={item.width ?? ''} />
+						<input type="hidden" name="media[{i}][height]" value={item.height ?? ''} />
+						<button type="button" class="remove-btn" onclick={() => removeMedia(i)} aria-label={m.admin_vr_media_remove()}>
+							<X size={16} />
+						</button>
+					</div>
+				{/each}
+			</div>
+		{/if}
+		<!-- Same publishing gate as the model upload: adding showcase files is
+		     part of creating/publishing (the server rejects hot-linked URLs). -->
+		<label class="upload-zone media-zone" class:disabled={!publishingEnabled || mediaUploading}>
+			<ImagePlus size={20} />
+			<span>{mediaUploading ? m.admin_upload_uploading() : m.admin_vr_media_dropzone({ max: formatBytes(MAX_MEDIA_BYTES) })}</span>
+			<input
+				type="file"
+				accept={MEDIA_ACCEPT}
+				multiple
+				onchange={onMediaPicked}
+				disabled={!publishingEnabled || mediaUploading}
+				class="sr-file"
+			/>
+		</label>
+		{#if mediaError}
+			<div class="banner err" role="alert">
+				{#if mediaError === 'too-large'}
+					{m.admin_vr_media_error_too_large({ max: formatBytes(MAX_MEDIA_BYTES) })}
+				{:else if mediaError === 'bad-type'}
+					{m.admin_vr_media_error_bad_type()}
+				{:else}
+					{m.admin_vr_media_error_failed()}
+				{/if}
+			</div>
+		{/if}
+	</section>
+
+	<section class="section">
 		<h2>{m.admin_vr_field_poster()}</h2>
 		<div class="poster-section">
 			<input type="hidden" name="posterImageId" value={posterImageId ?? ''} />
 			{#if posterImage}
 				<div class="poster-preview">
 					<img src={posterImage.thumbnailUrl || posterImage.imageUrl} alt={posterImage.title} />
-					<button type="button" class="remove-poster" onclick={() => (posterImageId = null)}>
+					<button type="button" class="remove-poster" bind:this={removePosterButton} onclick={() => (posterImageId = null)}>
 						<X size={14} /> {m.admin_vr_poster_remove()}
 					</button>
 				</div>
@@ -491,7 +668,7 @@
 							type="button"
 							class="poster-option"
 							class:selected={posterImageId === img.id}
-							onclick={() => (posterImageId = img.id)}
+							onclick={() => pickPoster(img.id)}
 						>
 							<img src={img.thumbnailUrl || img.imageUrl} alt={img.title} loading="lazy" />
 						</button>
@@ -505,35 +682,63 @@
 
 	<section class="section">
 		<h2>{m.admin_vr_section_visibility()}</h2>
+		<!-- The switch text sits OUTSIDE the label element, so each checkbox names
+		     itself via aria-labelledby/-describedby — without it the switches are
+		     announced as unnamed checkboxes. -->
 		<div class="switch-rows">
 			<div class="switch-row">
 				<label class="switch-label">
-					<input type="checkbox" name="downloadable" value="1" bind:checked={downloadable} class="sr-checkbox" />
+					<input
+						type="checkbox"
+						name="downloadable"
+						value="1"
+						bind:checked={downloadable}
+						class="sr-checkbox"
+						aria-labelledby="vr-switch-downloadable"
+						aria-describedby="vr-switch-downloadable-state"
+					/>
 					<span class="switch-visual"></span>
 				</label>
 				<div class="switch-text">
-					<strong>{m.admin_vr_switch_downloadable()}</strong>
-					<span>{downloadable ? m.admin_vr_switch_downloadable_on() : m.admin_vr_switch_downloadable_off()}</span>
+					<strong id="vr-switch-downloadable">{m.admin_vr_switch_downloadable()}</strong>
+					<span id="vr-switch-downloadable-state">{downloadable ? m.admin_vr_switch_downloadable_on() : m.admin_vr_switch_downloadable_off()}</span>
 				</div>
 			</div>
 			<div class="switch-row">
 				<label class="switch-label">
-					<input type="checkbox" name="nsfw" value="1" bind:checked={nsfw} class="sr-checkbox" />
+					<input
+						type="checkbox"
+						name="nsfw"
+						value="1"
+						bind:checked={nsfw}
+						class="sr-checkbox"
+						aria-labelledby="vr-switch-nsfw"
+						aria-describedby="vr-switch-nsfw-state"
+					/>
 					<span class="switch-visual"></span>
 				</label>
 				<div class="switch-text">
-					<strong>{m.admin_vr_switch_nsfw()}</strong>
-					<span>{nsfw ? m.admin_vr_switch_nsfw_on() : m.admin_vr_switch_nsfw_off()}</span>
+					<strong id="vr-switch-nsfw">{m.admin_vr_switch_nsfw()}</strong>
+					<span id="vr-switch-nsfw-state">{nsfw ? m.admin_vr_switch_nsfw_on() : m.admin_vr_switch_nsfw_off()}</span>
 				</div>
 			</div>
 			<div class="switch-row">
 				<label class="switch-label">
-					<input type="checkbox" name="published" value="1" bind:checked={published} class="sr-checkbox" disabled={publishLocked} />
+					<input
+						type="checkbox"
+						name="published"
+						value="1"
+						bind:checked={published}
+						class="sr-checkbox"
+						disabled={publishLocked}
+						aria-labelledby="vr-switch-published"
+						aria-describedby="vr-switch-published-state"
+					/>
 					<span class="switch-visual"></span>
 				</label>
 				<div class="switch-text">
-					<strong>{m.admin_vr_switch_published()}</strong>
-					<span>
+					<strong id="vr-switch-published">{m.admin_vr_switch_published()}</strong>
+					<span id="vr-switch-published-state">
 						{#if publishLocked}
 							{m.admin_vr_publish_locked()}
 						{:else}
@@ -610,7 +815,8 @@
 	.muted { color: var(--muted-foreground); font-size: 13px; }
 	.input.sm { font-size: 12px; padding: 5px 8px; }
 
-	.chip-field { display: flex; flex-direction: column; gap: 6px; }
+	.chip-field { display: flex; flex-direction: column; gap: 6px; border: none; padding: 0; margin: 0; }
+	.chip-field legend { padding: 0; margin-bottom: 6px; }
 	.platform-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 	.platform-chip {
 		flex-direction: row; align-items: center; gap: 6px;
@@ -665,6 +871,10 @@
 	.upload-zone:hover { border-color: var(--primary); }
 	.upload-zone.disabled { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
 	.sr-file { position: absolute; opacity: 0; width: 0; height: 0; }
+	/* The hidden file inputs stay keyboard-focusable — surface focus on their
+	   visible hosts (same :has pattern as .platform-chip). */
+	.upload-zone:has(.sr-file:focus-visible),
+	.btn-sm:has(.sr-file:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 	.upload-progress { display: flex; flex-direction: column; gap: 6px; }
 	.progress-bar { height: 6px; border-radius: var(--radius-pill); background: var(--secondary); overflow: hidden; }
@@ -692,6 +902,32 @@
 		background: var(--secondary); color: var(--foreground); cursor: pointer; flex-direction: row;
 	}
 	.btn-sm:hover { border-color: var(--primary); }
+
+	/* Showcase media rows (same row chrome as the credit list). */
+	.media-list { display: flex; flex-direction: column; gap: 10px; }
+	.media-row {
+		display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+		border: 1px solid var(--border); border-radius: var(--radius-s);
+		background: var(--background);
+		transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
+	}
+	.media-row.dragging { opacity: 0.4; }
+	.media-row.drop-target { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--background)); }
+	.media-thumb {
+		width: 56px; height: 56px; border-radius: var(--radius-xs); overflow: hidden;
+		background: var(--secondary); flex-shrink: 0;
+	}
+	.media-thumb img, .media-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+	.media-meta {
+		flex: 1; font-size: 12px; color: var(--muted-foreground);
+		font-family: var(--font-primary); font-variant-numeric: tabular-nums;
+	}
+	.media-zone { min-height: 72px; padding: 20px; }
+
+	.sr-only {
+		position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+		overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+	}
 
 	.poster-section { display: flex; flex-direction: column; gap: 8px; }
 	.poster-preview { position: relative; width: 160px; }

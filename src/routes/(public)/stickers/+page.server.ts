@@ -2,8 +2,9 @@ import { getReadDb } from '$lib/server/db';
 import { listPacks, findStickers, topEmojis, listStickerArtists } from '$lib/server/stickers';
 import { emojiForKeyword, containsEmoji } from '$lib/server/emoji-keywords';
 import { getMode } from '$lib/server/furtrack';
-import { stickerPacks, fursuitPhotos, vrAvatars } from '$lib/server/db/schema';
-import { inArray, sql, eq } from 'drizzle-orm';
+import { stickerPacks, fursuitPhotos } from '$lib/server/db/schema';
+import { inArray, sql } from 'drizzle-orm';
+import { vrTabEnabled } from '$lib/server/vr-gate';
 import type { PageServerLoad } from './$types';
 
 // Cap free-text length before keyword expansion (cheap DoS guard).
@@ -25,14 +26,13 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		getMode(platform!.env) !== 'off' &&
 		((await db.select({ n: sql<number>`COUNT(*)` }).from(fursuitPhotos).get())?.n ?? 0) > 0;
 
-	// VR Avatars pill mirrors the gallery's rule: visible only once a published
-	// avatar exists, so the three tab bars never disagree.
-	const vrEnabled =
-		((await db.select({ n: sql<number>`COUNT(*)` }).from(vrAvatars).where(eq(vrAvatars.published, true)).get())?.n ?? 0) > 0;
-
-	const [topEmojiList, stickerArtists] = await Promise.all([
+	// VR Avatars pill mirrors the gallery's rule (shared vrTabEnabled probe):
+	// visible only once a published avatar exists, so the tab bars never
+	// disagree. Rides the Promise.all — this is a hot public page.
+	const [topEmojiList, stickerArtists, vrEnabled] = await Promise.all([
 		topEmojis(db),
-		listStickerArtists(db)
+		listStickerArtists(db),
+		vrTabEnabled(db)
 	]);
 
 	if (hasFilter) {

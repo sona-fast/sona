@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
-	deriveModelKey,
-	deriveModelPath,
+	MAX_VR_MODEL_BYTES,
 	externalSiteName,
+	formatBytes,
 	isPermissiveVrLicense,
+	licenseLabel,
+	creditRoleLabel,
 	modelExt,
+	modelFileError,
+	modelFormatDetailLabel,
 	modelFormatLabel,
+	modelKeyFromUrl,
 	viewerSupports
 } from './vr';
 
@@ -27,62 +32,93 @@ describe('isPermissiveVrLicense', () => {
 	});
 });
 
-describe('deriveModelPath / deriveModelKey', () => {
-	it('maps a custom-domain (r2PublicUrl) model URL to /img/<key>', () => {
-		expect(
-			deriveModelPath(`${CDN}/models/abc.vrm`, { origin: ORIGIN, r2PublicUrl: CDN })
-		).toBe('/img/models/abc.vrm');
+describe('modelKeyFromUrl (base-agnostic deleteOrphans rule)', () => {
+	it('derives a bare key from a custom-domain (r2PublicUrl-era) model URL', () => {
+		// Mirrors deleteOrphans: pathname minus its leading slash.
+		expect(modelKeyFromUrl(`${CDN}/models/abc.vrm`, ORIGIN)).toBe('models/abc.vrm');
 	});
 
-	it('keeps the key of an /img-pathed URL instead of nesting it (deleteOrphans rule)', () => {
+	it('keeps the key of an /img-pathed URL instead of nesting it', () => {
 		// A URL stored while serving via the /img route already carries the key
-		// after '/img/' — it must not become /img/img/<key>.
-		expect(
-			deriveModelPath(`${ORIGIN}/img/models/abc.vrm`, { origin: ORIGIN, r2PublicUrl: '' })
-		).toBe('/img/models/abc.vrm');
+		// after '/img/' — it must not become img/<key>.
+		expect(modelKeyFromUrl(`${ORIGIN}/img/models/abc.vrm`, ORIGIN)).toBe('models/abc.vrm');
 	});
 
 	it('maps a root-relative /img URL', () => {
-		expect(deriveModelPath('/img/models/abc.vrm', { origin: ORIGIN })).toBe('/img/models/abc.vrm');
+		expect(modelKeyFromUrl('/img/models/abc.vrm', ORIGIN)).toBe('models/abc.vrm');
 	});
 
-	it('returns null for a foreign host — the viewer gets no path to fetch', () => {
-		// connect-src 'self': a cross-origin model URL can never be fetched by the
-		// viewer, and the download route must not stream a key a foreign URL spells.
-		expect(
-			deriveModelPath('https://evil.example/img/models/abc.vrm', {
-				origin: ORIGIN,
-				r2PublicUrl: CDN
-			})
-		).toBeNull();
-	});
-
-	it('does not treat a foreign /img path as owned when no r2PublicUrl is set', () => {
-		expect(
-			deriveModelPath('https://evil.example/img/models/abc.vrm', { origin: ORIGIN, r2PublicUrl: '' })
-		).toBeNull();
-	});
-
-	it('returns null for null/empty/unparseable/non-http URLs', () => {
-		expect(deriveModelPath(null, { origin: ORIGIN })).toBeNull();
-		expect(deriveModelPath('', { origin: ORIGIN })).toBeNull();
-		expect(deriveModelPath('ftp://cdn.example.com/x.vrm', { origin: ORIGIN })).toBeNull();
-		expect(deriveModelPath('data:text/plain,hi', { origin: ORIGIN })).toBeNull();
-	});
-
-	it('normalizes dot segments so ".." never reaches a key', () => {
-		expect(deriveModelKey('/img/a/../models/abc.vrm', { origin: ORIGIN })).toBe('models/abc.vrm');
-	});
-
-	it('derives a bare key from a same-origin URL without the /img prefix', () => {
-		// Mirrors deleteOrphans: pathname minus its leading slash.
-		expect(deriveModelKey(`${CDN}/models/abc.vrm`, { origin: ORIGIN, r2PublicUrl: CDN })).toBe(
+	it('is base-agnostic: a URL under a DIFFERENT (e.g. former r2PublicUrl) host still yields its key', () => {
+		// The r2PublicUrl-change case: stored URLs keep the base active at upload
+		// time. Whether the key actually serves is the bucket get()'s decision —
+		// a key we never stored just misses (see resolveModelBytes).
+		expect(modelKeyFromUrl('https://old-cdn.example/models/abc.vrm', ORIGIN)).toBe(
 			'models/abc.vrm'
 		);
 	});
 
+	it('returns null for null/empty/unparseable/non-http URLs', () => {
+		expect(modelKeyFromUrl(null, ORIGIN)).toBeNull();
+		expect(modelKeyFromUrl('', ORIGIN)).toBeNull();
+		expect(modelKeyFromUrl('ftp://cdn.example.com/x.vrm', ORIGIN)).toBeNull();
+		expect(modelKeyFromUrl('data:text/plain,hi', ORIGIN)).toBeNull();
+	});
+
+	it('normalizes dot segments so ".." never reaches a key', () => {
+		expect(modelKeyFromUrl('/img/a/../models/abc.vrm', ORIGIN)).toBe('models/abc.vrm');
+	});
+
 	it('returns null for an origin-only URL (empty key)', () => {
-		expect(deriveModelPath(`${CDN}/`, { origin: ORIGIN, r2PublicUrl: CDN })).toBeNull();
+		expect(modelKeyFromUrl(`${CDN}/`, ORIGIN)).toBeNull();
+	});
+});
+
+describe('modelFileError (client mirror of the upload guards)', () => {
+	it('accepts .vrm and .fbx, case-insensitively', () => {
+		expect(modelFileError({ name: 'taro.vrm', size: 1000 })).toBeNull();
+		expect(modelFileError({ name: 'TARO.FBX', size: 1000 })).toBeNull();
+	});
+
+	it('rejects other extensions and extensionless names', () => {
+		expect(modelFileError({ name: 'taro.glb', size: 1000 })).toBe('bad-type');
+		expect(modelFileError({ name: 'taro', size: 1000 })).toBe('bad-type');
+		expect(modelFileError({ name: '.vrm', size: 1000 })).toBe('bad-type');
+	});
+
+	it('rejects files over MAX_VR_MODEL_BYTES', () => {
+		expect(modelFileError({ name: 'taro.vrm', size: MAX_VR_MODEL_BYTES })).toBeNull();
+		expect(modelFileError({ name: 'taro.vrm', size: MAX_VR_MODEL_BYTES + 1 })).toBe('too-large');
+	});
+});
+
+describe('formatBytes', () => {
+	it('steps through B / KB / MB / GB', () => {
+		expect(formatBytes(512)).toBe('512 B');
+		expect(formatBytes(2048)).toBe('2.0 KB');
+		expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 MB');
+		expect(formatBytes(10 * 1024 * 1024 * 1024)).toBe('10.0 GB');
+	});
+});
+
+describe('label helpers shared by public pages and admin', () => {
+	it('labels licenses and returns null for none/unknown', () => {
+		expect(licenseLabel('personal-use')).toBe('Personal use');
+		expect(licenseLabel('cc-by')).toBe('CC BY');
+		expect(licenseLabel(null)).toBeNull();
+		expect(licenseLabel('made-up')).toBeNull();
+	});
+
+	it("labels credit roles, with role='other' named by its roleLabel", () => {
+		expect(creditRoleLabel('base')).toBe('Base model');
+		expect(creditRoleLabel('other', 'Blendshapes')).toBe('Blendshapes');
+		// A row that slipped through without one degrades to the generic label.
+		expect(creditRoleLabel('other', null)).toBe('Other');
+	});
+
+	it('details VRM versions for the admin table only', () => {
+		expect(modelFormatDetailLabel('vrm')).toBe('VRM 1.0');
+		expect(modelFormatDetailLabel('vrm0')).toBe('VRM 0.x');
+		expect(modelFormatDetailLabel('fbx')).toBe('FBX');
 	});
 });
 

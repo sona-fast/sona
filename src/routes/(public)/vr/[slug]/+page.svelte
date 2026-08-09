@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
-	import { Download, ExternalLink } from 'lucide-svelte';
+	import { Box, Download, ExternalLink } from 'lucide-svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import VrViewer from '$lib/components/VrViewer.svelte';
@@ -12,12 +12,24 @@
 	import DeviantArtIcon from '$lib/components/icons/DeviantArtIcon.svelte';
 	import PatreonIcon from '$lib/components/icons/PatreonIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
-	import { cdnImage, rawFallback } from '$lib';
-	import { formatBytes, modelFormatLabel, platformLabel, viewerSupports } from '$lib/vr';
+	import { cdnImage, rawFallback, responsiveSrc, responsiveSrcset, responsiveSizes } from '$lib/img';
+	import type { ResponsiveImage } from '$lib/img';
+	import { creditRoleLabel, formatBytes, licenseLabel, modelFormatLabel, platformLabel } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data } = $props();
 	const avatar = $derived(data.avatar);
+
+	// Responsive poster spec, mirroring the gallery hero (hero-image.ts): the
+	// poster fills the 1fr column beside the 380px meta panel — full-width on
+	// mobile, then calc(100vw - 468px) (380px meta + 40px gap + 48px padding)
+	// until the container cap, where it settles at ~810 CSS px.
+	const POSTER: ResponsiveImage = {
+		widths: [800, 1200, 1600],
+		sizes: '(max-width: 768px) 100vw, (max-width: 1280px) calc(100vw - 468px), 810px',
+		quality: 80,
+		srcWidth: 1200
+	};
 
 	// NSFW poster reveal — client state only, deliberately not persisted.
 	let revealed = $state(false);
@@ -36,39 +48,16 @@
 		return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 	}
 
-	function licenseLabel(license: string | null): string | null {
-		switch (license) {
-			case 'personal-use':
-				return m.vr_license_personal_use();
-			case 'cc-by':
-				return m.vr_license_cc_by();
-			case 'base-tos':
-				return m.vr_license_base_tos();
-			case 'all-rights-reserved':
-				return m.vr_license_all_rights_reserved();
-			default:
-				return null;
-		}
-	}
-
-	function roleChip(credit: (typeof data.credits)[number]): string {
-		switch (credit.role) {
-			case 'base':
-				return m.vr_role_base();
-			case 'modeler':
-				return m.vr_role_modeler();
-			case 'rigger':
-				return m.vr_role_rigger();
-			case 'texture':
-				return m.vr_role_texture();
-			case 'shader':
-				return m.vr_role_shader();
-			default:
-				// role='other' names itself via roleLabel (required in admin forms);
-				// fall back to the generic label if a row slipped through without one.
-				return credit.roleLabel || m.vr_role_other();
-		}
-	}
+	// CC BY 4.0 §3(a)(1): redistribution must carry attribution — keep the full
+	// credit string right next to the download button so it travels with the
+	// decision to save the file. Credited artists, else the character's name.
+	const ccByAttribution = $derived(
+		avatar.license === 'cc-by' && data.downloadAllowed
+			? m.vr_ccby_attribution({
+					names: data.credits.map((c) => c.artistName).join(', ') || avatar.characterName
+				})
+			: null
+	);
 
 	// Per-row social icons — the gallery's credited-artist treatment (see
 	// gallery/[slug] socialLinks), named per row ("Kestrel on Twitter") because
@@ -104,18 +93,16 @@
 />
 
 {#snippet mainMedia()}
-	{#if current}
-		{#if current.kind === 'video'}
-			<!-- svelte-ignore a11y_media_has_caption -- showcase clips carry no dialogue -->
-			<video src={current.url} controls playsinline width={current.width} height={current.height}></video>
-		{:else}
-			<img src={cdnImage(current.url, 1200)} alt={avatar.name} width={current.width} height={current.height} use:rawFallback={current.url} />
-		{/if}
-	{:else if avatar.posterUrl}
-		{#if avatar.nsfw && !revealed}
-			<div class="nsfw-overlay">
+	{#if avatar.nsfw && !revealed}
+		<!-- Mature gate covers the WHOLE main frame (poster or a selected media
+		     item alike) until revealed — the strip thumbs blur under the same
+		     condition and the 3D entry point stays hidden (VrViewer nsfw prop). -->
+		<div class="nsfw-overlay">
+			{#if avatar.posterUrl}
 				<img
-					src={cdnImage(avatar.posterUrl, 1200)}
+					src={responsiveSrc(avatar.posterUrl, POSTER)}
+					srcset={responsiveSrcset(avatar.posterUrl, POSTER)}
+					sizes={responsiveSizes(avatar.posterUrl, POSTER)}
 					alt={avatar.name}
 					width={avatar.posterWidth}
 					height={avatar.posterHeight}
@@ -123,28 +110,41 @@
 					use:rawFallback={avatar.posterUrl}
 					class="blurred"
 				/>
-				<button class="reveal-btn" onclick={() => (revealed = true)}>
-					<span class="mature-label">{m.vr_mature_chip()}</span>
-					<span>{m.vr_show_avatar()}</span>
-				</button>
-			</div>
+			{:else}
+				<div class="poster-placeholder"><Box size={40} aria-hidden="true" /></div>
+			{/if}
+			<button class="reveal-btn" onclick={() => (revealed = true)}>
+				<span class="mature-label">{m.vr_mature_chip()}</span>
+				<span>{m.vr_show_avatar()}</span>
+			</button>
+		</div>
+	{:else if current}
+		{#if current.kind === 'video'}
+			<!-- svelte-ignore a11y_media_has_caption -- showcase clips carry no dialogue -->
+			<video src={current.url} controls playsinline width={current.width} height={current.height}></video>
 		{:else}
-			<img
-				src={cdnImage(avatar.posterUrl, 1200)}
-				alt={avatar.name}
-				width={avatar.posterWidth}
-				height={avatar.posterHeight}
-				fetchpriority="high"
-				use:rawFallback={avatar.posterUrl}
-			/>
+			<img src={cdnImage(current.url, 1200)} alt={avatar.name} width={current.width} height={current.height} use:rawFallback={current.url} />
 		{/if}
+	{:else if avatar.posterUrl}
+		<img
+			src={responsiveSrc(avatar.posterUrl, POSTER)}
+			srcset={responsiveSrcset(avatar.posterUrl, POSTER)}
+			sizes={responsiveSizes(avatar.posterUrl, POSTER)}
+			alt={avatar.name}
+			width={avatar.posterWidth}
+			height={avatar.posterHeight}
+			fetchpriority="high"
+			use:rawFallback={avatar.posterUrl}
+		/>
 	{:else}
-		<div class="poster-placeholder"></div>
+		<!-- Box glyph like the index grid's placeholder — a bare grey slab reads
+		     as a broken image. -->
+		<div class="poster-placeholder"><Box size={40} aria-hidden="true" /></div>
 	{/if}
 {/snippet}
 
 <div class="container avatar-page">
-	<nav class="breadcrumb">
+	<nav class="breadcrumb" aria-label={m.vr_breadcrumb_label()}>
 		<a href="/vr">{m.vr_title()}</a>
 		<span>/</span>
 		<span>{avatar.name}</span>
@@ -152,8 +152,16 @@
 
 	<div class="avatar-layout">
 		<div class="avatar-media">
-			{#if data.modelPath && viewerSupports(avatar.modelFormat)}
-				<VrViewer modelPath={data.modelPath} modelSizeBytes={avatar.modelSizeBytes} name={avatar.name}>
+			{#if data.viewerPath}
+				<VrViewer
+					modelPath={data.viewerPath}
+					modelSizeBytes={avatar.modelSizeBytes}
+					name={avatar.name}
+					nsfw={avatar.nsfw}
+					{revealed}
+					posterWidth={avatar.posterWidth}
+					posterHeight={avatar.posterHeight}
+				>
 					<div class="media-frame">{@render mainMedia()}</div>
 				</VrViewer>
 			{:else}
@@ -162,14 +170,17 @@
 
 			{#if data.media.length > 0}
 				<div class="media-strip">
+					<!-- Thumb buttons carry the accessible names: the video thumbs have
+					     no text at all, and an image alt would double-announce. -->
 					<button
 						class="media-thumb"
 						class:current={selected === null}
 						aria-current={selected === null}
+						aria-label={m.vr_media_poster()}
 						onclick={() => (selected = null)}
 					>
 						{#if avatar.posterUrl}
-							<img src={cdnImage(avatar.posterUrl, 200)} alt={m.vr_media_poster()} loading="lazy" class:blurred-thumb={avatar.nsfw && !revealed} use:rawFallback={avatar.posterUrl} />
+							<img src={cdnImage(avatar.posterUrl, 200)} alt="" loading="lazy" class:blurred-thumb={avatar.nsfw && !revealed} use:rawFallback={avatar.posterUrl} />
 						{/if}
 					</button>
 					{#each data.media as item, i}
@@ -177,6 +188,7 @@
 							class="media-thumb"
 							class:current={selected === i}
 							aria-current={selected === i}
+							aria-label={m.vr_media_item({ name: avatar.name, n: i + 1 })}
 							onclick={() => (selected = i)}
 						>
 							{#if item.kind === 'video'}
@@ -185,13 +197,14 @@
 									muted
 									playsinline
 									preload="metadata"
+									class:blurred-thumb={avatar.nsfw && !revealed}
 									onloadedmetadata={(e) => (durations = { ...durations, [i]: e.currentTarget.duration })}
 								></video>
 								{#if durations[i]}
 									<span class="duration-badge">{formatDuration(durations[i])}</span>
 								{/if}
 							{:else}
-								<img src={cdnImage(item.url, 200)} alt={m.vr_media_item({ name: avatar.name, n: i + 1 })} loading="lazy" use:rawFallback={item.url} />
+								<img src={cdnImage(item.url, 200)} alt="" loading="lazy" class:blurred-thumb={avatar.nsfw && !revealed} use:rawFallback={item.url} />
 							{/if}
 						</button>
 					{/each}
@@ -214,14 +227,14 @@
 				{#each data.platforms as platform}
 					<span class="chip">{platformLabel(platform) ?? m.vr_platform_other()}</span>
 				{/each}
-				{#if data.modelPath || avatar.modelSizeBytes}
+				{#if data.viewerPath || avatar.modelSizeBytes}
 					<span class="chip format-chip">{modelFormatLabel(avatar.modelFormat)} · {formatBytes(avatar.modelSizeBytes)}</span>
 				{/if}
 			</div>
 
 			{#if data.credits.length > 0}
 				<div class="meta-section">
-					<h3>{m.vr_credits()}</h3>
+					<h2>{m.vr_credits()}</h2>
 					<ul class="credits">
 						{#each data.credits as credit}
 							<li class="credit-row">
@@ -230,8 +243,8 @@
 									class="credit-artist"
 									title={credit.artistName}
 								>
-									<ArtistAvatar name={credit.artistName} avatarUrl={credit.artistAvatar} size={24} />
-									{credit.artistName}
+									<ArtistAvatar name={credit.artistName} avatarUrl={credit.artistAvatar} size={24} cdn lazy />
+									<span class="credit-name">{credit.artistName}</span>
 								</a>
 								{#if creditSocials(credit).length > 0}
 									<span class="credit-socials">
@@ -248,7 +261,7 @@
 										{/each}
 									</span>
 								{/if}
-								<span class="role-chip">{roleChip(credit)}</span>
+								<span class="role-chip">{creditRoleLabel(credit.role, credit.roleLabel)}</span>
 							</li>
 						{/each}
 					</ul>
@@ -257,7 +270,7 @@
 
 			{#if licenseLabel(avatar.license)}
 				<div class="meta-section">
-					<h3>{m.vr_license()}</h3>
+					<h2>{m.vr_license()}</h2>
 					<span class="license-badge">{licenseLabel(avatar.license)}</span>
 				</div>
 			{/if}
@@ -268,6 +281,9 @@
 						<Download size={16} /> {m.vr_download_model()}
 					</a>
 				</div>
+				{#if ccByAttribution}
+					<p class="attribution-note">{ccByAttribution}</p>
+				{/if}
 			{/if}
 
 			{#if avatar.externalUrl && avatar.externalName}
@@ -325,6 +341,10 @@
 
 	.poster-placeholder {
 		aspect-ratio: 4 / 3;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--muted-foreground);
 	}
 
 	.nsfw-overlay {
@@ -449,7 +469,9 @@
 		padding: 3px 10px;
 		border-radius: var(--radius-pill);
 		background: var(--secondary);
-		color: var(--muted-foreground);
+		/* --foreground, not --muted-foreground: muted on --secondary sits below
+		   4.5:1 on the Ember light theme (see theme-contrast.test.ts). */
+		color: var(--foreground);
 	}
 
 	.format-chip {
@@ -457,8 +479,10 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.meta-section h3 {
+	/* h2s (visually small labels): h1 → h3 would skip a heading level. */
+	.meta-section h2 {
 		font-size: 12px;
+		font-weight: 600;
 		color: var(--muted-foreground);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
@@ -477,11 +501,21 @@
 	.credit-row {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: 8px 12px;
+		/* min-width:0 lets the name column actually shrink — without it a long
+		   name makes the whole page scroll sideways at 390px. */
+		min-width: 0;
+		/* Socials + chip wrap under the name instead of clipping at narrow widths. */
+		flex-wrap: wrap;
 	}
 
-	/* The chip hugs the trailing edge; socials sit beside the name. */
-	.credit-row .role-chip {
+	/* Socials + chip group at the trailing edge, so the icons start at one
+	   consistent x position instead of ragged per-row offsets. */
+	.credit-row .credit-socials {
+		margin-left: auto;
+	}
+
+	.credit-row:not(:has(.credit-socials)) .role-chip {
 		margin-left: auto;
 	}
 
@@ -493,10 +527,15 @@
 		font-weight: 500;
 		color: inherit;
 		text-decoration: none;
-		/* A long artist name shrinks and truncates instead of pushing the
-		   socials/chip off the row (title carries the full name). */
+		/* A long artist name shrinks instead of pushing the socials/chip off the
+		   row (title carries the full name). */
 		flex: 0 1 auto;
 		min-width: 0;
+	}
+
+	/* Truncation lives on a plain span, NOT the inline-flex anchor: text-overflow
+	   can't ellipsize an anonymous flex item, which clipped mid-glyph at 1440. */
+	.credit-name {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -533,7 +572,8 @@
 		padding: 2px 8px;
 		border-radius: var(--radius-pill);
 		background: var(--secondary);
-		color: var(--muted-foreground);
+		/* --foreground for AA contrast on --secondary (see .chip note). */
+		color: var(--foreground);
 		white-space: nowrap;
 	}
 
@@ -550,6 +590,14 @@
 	.actions {
 		display: flex;
 		gap: 12px;
+	}
+
+	/* CC BY attribution string kept with the download button (license terms). */
+	.attribution-note {
+		font-size: 12px;
+		color: var(--muted-foreground);
+		line-height: 1.5;
+		margin-top: -8px;
 	}
 
 	.external-card {

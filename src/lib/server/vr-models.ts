@@ -10,16 +10,11 @@
 // checks it against Content-Length BEFORE any body byte is read.
 export { MAX_VR_MODEL_BYTES } from '$lib/vr';
 
-/** Stored model format for an accepted file extension. VRM 0.x and 1.0 share
- * the .vrm container; the head sniff can't cheaply tell them apart, so
- * uploads record the generic 'vrm' (the viewer supports both). */
-export const MODEL_FORMAT_BY_EXT: Record<string, 'vrm' | 'fbx'> = {
-	vrm: 'vrm',
-	fbx: 'fbx'
-};
-
 /** The .vrm/.fbx extension of an uploaded filename, or null when it carries
- * none we accept. Case-insensitive; the extension is the LAST dot segment. */
+ * none we accept. Case-insensitive; the extension is the LAST dot segment.
+ * The extension doubles as the stored model format: VRM 0.x and 1.0 share the
+ * .vrm container and the head sniff can't cheaply tell them apart, so uploads
+ * record the generic 'vrm' (the viewer supports both). */
 export function modelExtFromFilename(filename: string | null | undefined): 'vrm' | 'fbx' | null {
 	if (!filename) return null;
 	const dot = filename.lastIndexOf('.');

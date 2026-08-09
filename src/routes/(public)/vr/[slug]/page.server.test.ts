@@ -45,7 +45,16 @@ function makeDb() {
 	`);
 	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Foxo');
 	const d1 = makeD1(sqlite);
-	return { sqlite, platform: { env: { DB: d1 } } as unknown as App.Platform };
+	// head() is the load's cheap servability probe (modelBytesServable); the
+	// stub answers for the one key the fixtures store.
+	const storedKeys = new Set(['models/foxo.vrm']);
+	const platform = {
+		env: {
+			DB: d1,
+			IMAGES: { head: async (key: string) => (storedKeys.has(key) ? {} : null) }
+		}
+	} as unknown as App.Platform;
+	return { sqlite, platform, storedKeys };
 }
 
 function addAvatar(
@@ -54,20 +63,24 @@ function addAvatar(
 		slug?: string;
 		published?: number;
 		modelUrl?: string | null;
+		modelFormat?: string | null;
 		license?: string | null;
+		permissionSource?: string | null;
 		downloadable?: number;
 	} = {}
 ) {
 	return sqlite
 		.prepare(
-			`INSERT INTO vr_avatars (slug, name, character_id, model_url, model_format, license, downloadable, published, created_at)
-			 VALUES (?, ?, 1, ?, 'vrm', ?, ?, ?, ?)`
+			`INSERT INTO vr_avatars (slug, name, character_id, model_url, model_format, license, permission_source, downloadable, published, created_at)
+			 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			opts.slug ?? 'foxo',
 			'Foxo VR',
 			opts.modelUrl ?? null,
+			opts.modelFormat === undefined ? 'vrm' : opts.modelFormat,
 			opts.license ?? null,
+			opts.permissionSource ?? null,
 			opts.downloadable ?? 0,
 			opts.published ?? 1,
 			NOW
@@ -83,8 +96,8 @@ function loadEvent(platform: App.Platform, slug = 'foxo') {
 }
 
 type DetailData = {
-	avatar: { name: string; characterName: string };
-	modelPath: string | null;
+	avatar: { name: string; characterName: string; permissionSource?: unknown };
+	viewerPath: string | null;
 	downloadAllowed: boolean;
 	credits: Array<{ artistName: string; role: string; roleLabel: string | null }>;
 	media: Array<{ kind: string; url: string }>;
@@ -128,42 +141,65 @@ describe('/vr/[slug] load — visibility', () => {
 	});
 });
 
-describe('/vr/[slug] load — modelPath derivation', () => {
-	it('maps a custom-domain model URL to the same-origin /img path', async () => {
+describe('/vr/[slug] load — viewerPath (the /vr/[slug]/model endpoint)', () => {
+	it('returns the viewer endpoint path when a stored VRM resolves in the bucket', async () => {
 		const { sqlite, platform } = makeDb();
 		setR2PublicUrl(sqlite, 'https://cdn.example.com');
 		addAvatar(sqlite, { modelUrl: 'https://cdn.example.com/models/foxo.vrm' });
 		const data = await loadData(platform);
-		expect(data.modelPath).toBe('/img/models/foxo.vrm');
+		expect(data.viewerPath).toBe('/vr/foxo/model');
 	});
 
-	it('keeps an /img-relative stored URL as-is', async () => {
+	it('survives an r2PublicUrl change after upload (base-agnostic key probe)', async () => {
+		const { sqlite, platform } = makeDb();
+		setR2PublicUrl(sqlite, 'https://new-cdn.example');
+		addAvatar(sqlite, { modelUrl: 'https://old-cdn.example/models/foxo.vrm' });
+		const data = await loadData(platform);
+		expect(data.viewerPath).toBe('/vr/foxo/model');
+	});
+
+	it('NEVER exposes an /img path or the raw model_url to the client', async () => {
 		const { sqlite, platform } = makeDb();
 		addAvatar(sqlite, { modelUrl: '/img/models/foxo.vrm' });
 		const data = await loadData(platform);
-		expect(data.modelPath).toBe('/img/models/foxo.vrm');
+		expect(data.viewerPath).toBe('/vr/foxo/model');
+		expect(JSON.stringify(data)).not.toContain('/img/models/foxo.vrm');
 	});
 
-	it('yields no viewer path for a foreign-host model URL', async () => {
-		const { sqlite, platform } = makeDb();
-		setR2PublicUrl(sqlite, 'https://cdn.example.com');
-		addAvatar(sqlite, { modelUrl: 'https://elsewhere.example/models/foxo.vrm' });
+	it('yields no viewer path for an FBX model (nothing renders it in-page)', async () => {
+		const { sqlite, platform, storedKeys } = makeDb();
+		storedKeys.add('models/foxo.fbx');
+		addAvatar(sqlite, { modelUrl: '/img/models/foxo.fbx', modelFormat: 'fbx' });
 		const data = await loadData(platform);
-		expect(data.modelPath).toBeNull();
+		expect(data.viewerPath).toBeNull();
+	});
+
+	it('yields no viewer path when nothing serves the stored URL', async () => {
+		const { sqlite, platform } = makeDb();
+		addAvatar(sqlite, { modelUrl: '/img/models/missing.vrm' });
+		const data = await loadData(platform);
+		expect(data.viewerPath).toBeNull();
 	});
 
 	it('yields no viewer path when there is no self-hosted model', async () => {
 		const { sqlite, platform } = makeDb();
 		addAvatar(sqlite, { modelUrl: null });
 		const data = await loadData(platform);
-		expect(data.modelPath).toBeNull();
+		expect(data.viewerPath).toBeNull();
 	});
 });
 
 describe('/vr/[slug] load — downloadAllowed mirrors the endpoint', () => {
-	it('allows only permissive license + downloadable + reachable model', async () => {
+	const PERMITTED = 'Telegram DM 2026-08-01';
+
+	it('allows only permissive license + downloadable + recorded permission + reachable model', async () => {
 		const { sqlite, platform } = makeDb();
-		addAvatar(sqlite, { modelUrl: '/img/models/foxo.vrm', license: 'cc-by', downloadable: 1 });
+		addAvatar(sqlite, {
+			modelUrl: '/img/models/foxo.vrm',
+			license: 'cc-by',
+			permissionSource: PERMITTED,
+			downloadable: 1
+		});
 		const data = await loadData(platform);
 		expect(data.downloadAllowed).toBe(true);
 	});
@@ -173,6 +209,7 @@ describe('/vr/[slug] load — downloadAllowed mirrors the endpoint', () => {
 		addAvatar(sqlite, {
 			modelUrl: '/img/models/foxo.vrm',
 			license: 'all-rights-reserved',
+			permissionSource: PERMITTED,
 			downloadable: 1
 		});
 		const data = await loadData(platform);
@@ -181,9 +218,29 @@ describe('/vr/[slug] load — downloadAllowed mirrors the endpoint', () => {
 
 	it('refuses when downloadable is off', async () => {
 		const { sqlite, platform } = makeDb();
-		addAvatar(sqlite, { modelUrl: '/img/models/foxo.vrm', license: 'cc-by', downloadable: 0 });
+		addAvatar(sqlite, {
+			modelUrl: '/img/models/foxo.vrm',
+			license: 'cc-by',
+			permissionSource: PERMITTED,
+			downloadable: 0
+		});
 		const data = await loadData(platform);
 		expect(data.downloadAllowed).toBe(false);
+	});
+
+	it('refuses without a recorded permission source (C1), and never leaks the record itself', async () => {
+		const { sqlite, platform } = makeDb();
+		addAvatar(sqlite, {
+			modelUrl: '/img/models/foxo.vrm',
+			license: 'cc-by',
+			permissionSource: null,
+			downloadable: 1
+		});
+		const data = await loadData(platform);
+		expect(data.downloadAllowed).toBe(false);
+		// The permission record is server-side input only — asserted against the
+		// WHOLE payload, so no future field can smuggle it out.
+		expect(JSON.stringify(data)).not.toContain('permissionSource');
 	});
 });
 

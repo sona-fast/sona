@@ -11,7 +11,8 @@ import {
 } from '$lib/server/db/schema';
 import { eq, and, asc } from 'drizzle-orm';
 import { getSettings } from '$lib/server/settings';
-import { deriveModelPath, externalSiteName, isPermissiveVrLicense } from '$lib/vr';
+import { modelBytesServable } from '$lib/server/vr-model-bytes';
+import { externalSiteName, isPermissiveVrLicense, viewerSupports } from '$lib/vr';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform, url }) => {
@@ -29,6 +30,9 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			modelSizeBytes: vrAvatars.modelSizeBytes,
 			externalUrl: vrAvatars.externalUrl,
 			license: vrAvatars.license,
+			// Server-side only (the downloadAllowed predicate below) — the recorded
+			// permission source itself is deliberately never sent to the client.
+			permissionSource: vrAvatars.permissionSource,
 			downloadable: vrAvatars.downloadable,
 			nsfw: vrAvatars.nsfw,
 			createdAt: vrAvatars.createdAt,
@@ -85,14 +89,23 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			.where(eq(avatarPlatforms.avatarId, avatar.id))
 	]);
 
-	// SAME-ORIGIN model path for the viewer/download (CSP connect-src 'self':
-	// the raw, possibly cross-origin model_url must never reach the client-side
-	// fetch). Null when the model is off-origin or absent → no viewer.
+	// Whether anything server-side can actually produce the model's bytes
+	// (R2 head / provider ownership — see modelBytesServable). Feeds both the
+	// viewer path and the download button; the raw (possibly cross-origin)
+	// model_url itself is NEVER sent to the client — the viewer fetches the
+	// same-origin /vr/[slug]/model endpoint (CSP connect-src 'self').
 	const settings = await getSettings(db);
-	const modelPath = deriveModelPath(avatar.modelUrl, {
-		origin: url.origin,
-		r2PublicUrl: settings.r2PublicUrl
-	});
+	const servable = avatar.modelUrl
+		? await modelBytesServable({
+				modelUrl: avatar.modelUrl,
+				origin: url.origin,
+				env: platform?.env,
+				settings
+			})
+		: false;
+	// Viewer only for formats it consumes (no FBX path leak — nothing renders it).
+	const viewerPath =
+		servable && viewerSupports(avatar.modelFormat) ? `/vr/${avatar.slug}/model` : null;
 
 	return {
 		avatar: {
@@ -111,10 +124,15 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			posterWidth: avatar.posterWidth,
 			posterHeight: avatar.posterHeight
 		},
-		modelPath,
+		viewerPath,
 		// Server-decided, mirroring the download endpoint's own enforcement — the
-		// button renders only when the endpoint would say yes.
-		downloadAllowed: avatar.downloadable && isPermissiveVrLicense(avatar.license) && !!modelPath,
+		// button renders only when the endpoint would say yes (downloadable +
+		// permissive license + recorded permission + resolvable bytes).
+		downloadAllowed:
+			avatar.downloadable &&
+			isPermissiveVrLicense(avatar.license) &&
+			!!avatar.permissionSource &&
+			servable,
 		credits,
 		media,
 		platforms: platforms.map((p) => p.platform)

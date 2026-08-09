@@ -33,6 +33,12 @@ OBSERVABILITY_ENABLED = "true"
 # real secrets; safe to commit.
 TURNSTILE_SITEKEY = "1x00000000000000000000AA"
 TURNSTILE_SECRET = "1x0000000000000000000000000000000AA"
+# TEST-ONLY early-access bypass (SONA-124, see app.d.ts): the vr-admin-form
+# spec must reach the ungated /admin/vr/new form, the flag is pre-GA until its
+# registry entry retires, and a real supporter key cannot be minted in CI (the
+# issuer key is baked in). Honored only when exactly 'open'; never set this in
+# a production wrangler.toml.
+E2E_VR_GATE = "open"
 
 [[d1_databases]]
 binding = "DB"
