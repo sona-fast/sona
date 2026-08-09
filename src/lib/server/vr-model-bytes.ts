@@ -83,11 +83,14 @@ export async function resolveModelBytes(opts: ModelBytesOpts): Promise<ResolvedM
 /** Whether an If-None-Match header names `etag` (comma-separated list or *).
  * Shared by the model + download routes so both answer conditional
  * revalidation with a 304 instead of re-streaming a multi-MB body. W/ prefixes
- * are tolerated on the request side; R2 httpEtag values are strong. */
+ * are stripped from BOTH sides: R2 httpEtag values are strong, but the
+ * provider-proxy branch echoes upstream etags, which are commonly weak — a
+ * one-sided strip would make those never revalidate (RFC 9110 weak compare). */
 export function etagMatches(ifNoneMatch: string | null, etag: string): boolean {
 	if (!ifNoneMatch) return false;
 	if (ifNoneMatch.trim() === '*') return true;
-	return ifNoneMatch.split(',').some((t) => t.trim().replace(/^W\//, '') === etag);
+	const strong = etag.replace(/^W\//, '');
+	return ifNoneMatch.split(',').some((t) => t.trim().replace(/^W\//, '') === strong);
 }
 
 /**

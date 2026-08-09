@@ -1,11 +1,12 @@
-import { eq, and, ne } from 'drizzle-orm';
-import { vrAvatars, avatarCredits, avatarMedia, avatarPlatforms, characters, images } from '$lib/server/db/schema';
+import { eq, and, ne, inArray } from 'drizzle-orm';
+import { vrAvatars, avatarCredits, avatarMedia, avatarPlatforms, artists, characters, images } from '$lib/server/db/schema';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { deleteFile } from '$lib/server/storage';
 import { isOurAvatarUrl } from '$lib/server/avatar';
 import { modelKeyFromUrl } from '$lib/vr';
 import type { SiteSettings } from '$lib/server/settings';
 import type { Database } from '$lib/server/db';
+import type { BatchItem } from 'drizzle-orm/batch';
 
 type Env = App.Platform['env'];
 
@@ -252,6 +253,17 @@ export async function validateAvatarRefs(
 			.get();
 		if (!poster) return 'Poster image not found.';
 	}
+
+	// Credit artists are references too: a since-deleted artist must fail(400)
+	// like every other missing reference, not throw an FK 500 mid-batch.
+	if (input.credits.length > 0) {
+		const ids = [...new Set(input.credits.map((c) => c.artistId))];
+		const found = await db
+			.select({ id: artists.id })
+			.from(artists)
+			.where(inArray(artists.id, ids));
+		if (found.length !== ids.length) return 'Credited artist not found.';
+	}
 	return null;
 }
 
@@ -276,41 +288,55 @@ function avatarRow(input: AvatarFormInput) {
 
 async function replaceChildren(db: Database, avatarId: number, input: AvatarFormInput): Promise<void> {
 	// Child rows are few (credits, platform badges, showcase media) — replace
-	// wholesale, ordered inserts carrying the display position.
-	await db.delete(avatarCredits).where(eq(avatarCredits.avatarId, avatarId));
-	await db.delete(avatarPlatforms).where(eq(avatarPlatforms.avatarId, avatarId));
-	await db.delete(avatarMedia).where(eq(avatarMedia.avatarId, avatarId));
+	// wholesale, ordered inserts carrying the display position. The whole
+	// delete-then-reinsert goes through ONE db.batch(): D1 has no interactive
+	// transactions, so sequential awaits would let a mid-write failure leave the
+	// old rows gone with only some new ones in place (updateManualPack
+	// precedent) — and avatar_media.url is the only reference keeping uploaded
+	// files from the orphan sweep.
+	const statements: BatchItem<'sqlite'>[] = [
+		db.delete(avatarCredits).where(eq(avatarCredits.avatarId, avatarId)),
+		db.delete(avatarPlatforms).where(eq(avatarPlatforms.avatarId, avatarId)),
+		db.delete(avatarMedia).where(eq(avatarMedia.avatarId, avatarId))
+	];
 	if (input.credits.length > 0) {
-		await db.insert(avatarCredits).values(
-			input.credits.map((c) => ({
-				avatarId,
-				artistId: c.artistId,
-				role: c.role as typeof avatarCredits.$inferInsert.role,
-				roleLabel: c.roleLabel,
-				position: c.position
-			}))
+		statements.push(
+			db.insert(avatarCredits).values(
+				input.credits.map((c) => ({
+					avatarId,
+					artistId: c.artistId,
+					role: c.role as typeof avatarCredits.$inferInsert.role,
+					roleLabel: c.roleLabel,
+					position: c.position
+				}))
+			)
 		);
 	}
 	if (input.platforms.length > 0) {
-		await db.insert(avatarPlatforms).values(
-			input.platforms.map((p) => ({
-				avatarId,
-				platform: p as typeof avatarPlatforms.$inferInsert.platform
-			}))
+		statements.push(
+			db.insert(avatarPlatforms).values(
+				input.platforms.map((p) => ({
+					avatarId,
+					platform: p as typeof avatarPlatforms.$inferInsert.platform
+				}))
+			)
 		);
 	}
 	if (input.media.length > 0) {
-		await db.insert(avatarMedia).values(
-			input.media.map((item) => ({
-				avatarId,
-				kind: item.kind,
-				url: item.url,
-				width: item.width,
-				height: item.height,
-				position: item.position
-			}))
+		statements.push(
+			db.insert(avatarMedia).values(
+				input.media.map((item) => ({
+					avatarId,
+					kind: item.kind,
+					url: item.url,
+					width: item.width,
+					height: item.height,
+					position: item.position
+				}))
+			)
 		);
 	}
+	await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
 }
 
 /** Insert a new avatar with its credits/platforms; returns the new row id. */

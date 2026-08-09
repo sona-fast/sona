@@ -39,7 +39,12 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	// active content when served straight from the R2 custom-domain origin —
 	// plus video/webm for VR showcase clips (SONA-124): inert in that origin,
 	// same reasoning as the sticker media allowlist (ALLOWED_STICKER_TYPES).
-	const isWebm = contentType.split(';')[0].trim().toLowerCase() === 'video/webm';
+	// The webm allowance is SCOPED to the vr-media folder: every other caller
+	// of this shared endpoint writes the URL into raster-only columns whose
+	// consumers (cdnImage/srcset/<img>) would render a stored video as a
+	// permanently broken image.
+	const isWebm =
+		folder === 'vr-media' && contentType.split(';')[0].trim().toLowerCase() === 'video/webm';
 	if (!isAllowedImageType(contentType) && !isWebm) {
 		error(415, `Unsupported image type: ${contentType}. Allowed: JPEG, PNG, GIF, WebP, AVIF, WebM.`);
 	}

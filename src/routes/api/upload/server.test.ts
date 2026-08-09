@@ -33,9 +33,10 @@ function pngFile(size: number, name = 'a.png', type = 'image/png') {
 	return new File([bytes], name, { type });
 }
 
-function postEvent(platform: App.Platform, file: File) {
+function postEvent(platform: App.Platform, file: File, folder?: string) {
 	const form = new FormData();
 	form.append('file', file);
+	if (folder) form.append('folder', folder);
 	const request = new Request('http://localhost/api/upload', { method: 'POST', body: form });
 	return { request, platform } as never;
 }
@@ -103,7 +104,8 @@ describe('POST /api/upload', () => {
 		const bytes = new Uint8Array(2048);
 		bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
 		const file = new File([bytes], 'clip.webm', { type: 'video/webm' });
-		const res = (await POST(postEvent(makePlatform(), file))) as Response;
+		// The widening is scoped to the vr-media folder — other folders stay raster-only.
+		const res = (await POST(postEvent(makePlatform(), file, 'vr-media'))) as Response;
 		expect(res.status).toBe(200);
 		expect(put).toHaveBeenCalledTimes(1);
 		expect((put.mock.calls[0][0] as unknown as { contentType: string }).contentType).toBe('video/webm');
@@ -113,6 +115,14 @@ describe('POST /api/upload', () => {
 		const file = new File([new TextEncoder().encode('<!DOCTYPE html><script>alert(1)</script>')], 'clip.webm', {
 			type: 'video/webm'
 		});
+		expect(await statusOf(() => POST(postEvent(makePlatform(), file, 'vr-media')))).toBe(415);
+		expect(put).not.toHaveBeenCalled();
+	});
+
+	it('415s a valid webm outside the vr-media folder (raster-only callers stay raster-only)', async () => {
+		const bytes = new Uint8Array(2048);
+		bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
+		const file = new File([bytes], 'clip.webm', { type: 'video/webm' });
 		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(415);
 		expect(put).not.toHaveBeenCalled();
 	});
