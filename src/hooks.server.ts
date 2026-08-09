@@ -228,12 +228,14 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// cache key that includes the PARAGLIDE_LOCALE cookie (infra, not code).
 	const isPublic = !event.url.pathname.startsWith('/admin') && !event.url.pathname.startsWith('/api');
 	const isHtml = response.headers.get('content-type')?.includes('text/html') ?? false;
-	if (isPublic && response.status === 200 && !isHtml) {
+	if (isPublic && (response.status === 200 || response.status === 304) && !isHtml) {
 		// Honor a handler's explicit Cache-Control; only stamp the shared default
 		// when the handler set nothing. Two intentional opt-outs exist today: the
 		// sticker download fallback's no-store (a transient transform failure must
 		// not be edge-cached under its ?format URL) and /img/[...key]'s
 		// max-age=31536000+immutable (UUID-keyed R2 objects never change).
+		// 304 rides this branch too: a conditional revalidation carries the
+		// handler's Cache-Control and must not be clobbered with no-store below.
 		if (!response.headers.has('Cache-Control')) {
 			response.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
 		}

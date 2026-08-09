@@ -170,8 +170,12 @@ describe('component CSS: destructive fills carry the destructive-foreground toke
 	// sets a text color, and requires that color to be the token.
 	//
 	// SOLID fills only. A color-mix tint over transparent (the .sbadge soft-badge
-	// pattern) is a different pairing: its text is --destructive itself against
-	// the page background, and the token would be the wrong answer there.
+	// pattern) is a different pairing: its text sits on the COMPOSITE of the tint
+	// over the surface underneath (tint% of --destructive blended into the page
+	// background or card), not on the bare page background, and
+	// --destructive-foreground would be the wrong answer there. Tinted-banner
+	// text is asserted against that real composite surface in the SONA-124
+	// destructive-tint describe below (R3-A2).
 	const srcDir = new URL('../', import.meta.url);
 	// readdirSync recursive rather than fs.globSync, matching reactivity-guard.test.ts.
 	const components = readdirSync(fileURLToPath(srcDir), { recursive: true })
@@ -549,5 +553,49 @@ describe('SONA-124 chip CSS keeps the --foreground token (R2-A3)', () => {
 			if (!body) throw new Error(`${selector} rule not found in ${file}`);
 			expect(body).toMatch(/color:\s*var\(--foreground\)\s*;/);
 		});
+	}
+});
+
+// The SONA-124 destructive-tint banners (.banner.err in VrAvatarForm,
+// .load-error in VrViewer) paint text over color-mix(--destructive N%,
+// transparent). The REAL text surface is that tint composited over whatever
+// sits underneath (page background or card) — --destructive text on it fell
+// below 4.5:1 on three light themes (R3-A2), so the text is --foreground and
+// only the tint + icon stay destructive. Parse the actual tint percentage and
+// text token out of each component (a revert to color: var(--destructive)
+// fails the token pin; a tint-percentage change re-runs the math) and assert
+// the composite pairing for every theme × mode.
+describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)', () => {
+	const banners: Array<{ file: string; selector: string }> = [
+		{ file: './components/VrAvatarForm.svelte', selector: '.banner.err' },
+		{ file: './components/VrViewer.svelte', selector: '.load-error' }
+	];
+
+	for (const { file, selector } of banners) {
+		const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
+		if (!body) throw new Error(`${selector} rule not found in ${file}`);
+		const tintPct = Number(
+			body.match(
+				/background:\s*color-mix\(in srgb,\s*var\(--destructive\)\s*(\d+)%,\s*transparent\)/
+			)?.[1]
+		);
+		const textToken = body.match(/color:\s*var\(--([\w-]+)\)/)?.[1];
+
+		it(`${file} ${selector} keeps the destructive tint and --foreground text`, () => {
+			if (!Number.isFinite(tintPct)) throw new Error(`${selector} lost its destructive tint`);
+			expect(textToken).toBe('foreground');
+		});
+
+		for (const surface of ['background', 'card'] as const) {
+			for (const { name, sel } of THEME_BLOCKS) {
+				it(`${name}: ${selector} text meets 4.5:1 on the tint over the ${surface}`, () => {
+					if (!textToken) throw new Error(`${selector} sets no text color token`);
+					const composite = mix2(blockToken(sel, 'destructive'), tintPct, blockToken(sel, surface));
+					expect(contrast(blockToken(sel, textToken), composite)).toBeGreaterThanOrEqual(4.5);
+				});
+			}
+		}
 	}
 });

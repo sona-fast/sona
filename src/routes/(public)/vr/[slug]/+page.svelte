@@ -77,8 +77,12 @@
 		thumbObserver ??= new IntersectionObserver((entries) => {
 			for (const entry of entries) {
 				if (!entry.isIntersecting) continue;
-				(entry.target as HTMLVideoElement).preload = 'metadata';
-				thumbObserver?.unobserve(entry.target);
+				const video = entry.target as HTMLVideoElement;
+				video.preload = 'metadata';
+				// Flipping preload after the element settled on none doesn't
+				// reliably start the metadata fetch — load() forces it.
+				video.load();
+				thumbObserver?.unobserve(video);
 			}
 		});
 		thumbObserver.observe(el);
@@ -404,11 +408,12 @@
 
 	.avatar-layout {
 		display: grid;
-		/* The sidebar yields below its 380px ideal instead of outweighing the
-		   media column in the 769–900px band, where a fixed 380px left the media
-		   narrower than the meta panel (DS2). min 0 on the media track so long
-		   content can't force sideways scroll. */
-		grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+		/* The sidebar yields below its ideal instead of outweighing the media
+		   column in the 769–900px band (DS2): a percentage max actually shrinks
+		   with the container, where the earlier minmax(300px, 380px) never left
+		   its bounds in that band and was inert. min 0 on the media track so
+		   long content can't force sideways scroll. */
+		grid-template-columns: minmax(0, 1fr) minmax(260px, 32%);
 		gap: 40px;
 		align-items: start;
 	}
@@ -439,15 +444,17 @@
 	}
 
 	.media-frame:focus-visible {
-		outline: 2px solid var(--primary);
+		outline: 2px solid var(--ring);
 		outline-offset: -2px;
 	}
 
 	.poster-placeholder {
 		/* Wide and capped: a posterless avatar renders an affordance, not a
-		   full-height empty slab (DS4). */
+		   full-height empty slab (DS4). max-height narrows the box below the
+		   full column width, so centre it optically. */
 		aspect-ratio: 16 / 9;
 		max-height: 360px;
+		margin-inline: auto;
 		display: flex;
 		align-items: center;
 		justify-content: center;

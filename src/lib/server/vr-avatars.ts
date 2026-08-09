@@ -3,6 +3,7 @@ import { vrAvatars, avatarCredits, avatarMedia, avatarPlatforms, characters, ima
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { deleteFile } from '$lib/server/storage';
 import { isOurAvatarUrl } from '$lib/server/avatar';
+import { modelKeyFromUrl } from '$lib/vr';
 import type { SiteSettings } from '$lib/server/settings';
 import type { Database } from '$lib/server/db';
 
@@ -185,15 +186,10 @@ function isStoredUploadUrl(
 	partition: 'vr-media/' | 'vr-models/'
 ): boolean {
 	if (isOurAvatarUrl(env, settings, origin, url)) return true;
-	try {
-		const parsed = new URL(url, origin);
-		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-		const path = parsed.pathname;
-		const key = path.startsWith('/img/') ? path.slice('/img/'.length) : path.replace(/^\//, '');
-		return key.startsWith(partition);
-	} catch {
-		return false;
-	}
+	// Acceptance here does NOT imply fetchability: this branch only vouches for
+	// the URL's SHAPE (a key in our upload partition). Any future server-side
+	// fetch of these URLs must re-check origin ownership first.
+	return modelKeyFromUrl(url, origin)?.startsWith(partition) ?? false;
 }
 
 /**

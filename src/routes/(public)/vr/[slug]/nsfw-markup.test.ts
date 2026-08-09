@@ -64,3 +64,43 @@ describe('VR detail poster responsive contract (P2)', () => {
 		expect(pageSrc).not.toMatch(/<img[^>]*src=\{\s*avatar\.posterUrl\s*\}/);
 	});
 });
+
+// R3-T1 source-pins: five behaviors of the detail page that nothing executed.
+// Same precedent as the NSFW pins above — each is a one-line condition whose
+// silent loss degrades the page without failing any other test.
+describe('VR detail media-strip and license wiring (SONA-124 R3-T1)', () => {
+	it('video thumbs load lazily: preload="none" until the observer upgrades AND load()s', () => {
+		// The strip <video> mounts fetch-free…
+		expect(pageSrc).toMatch(/<video[^>]*\bpreload="none"[^>]*use:videoThumb=\{i\}/s);
+		// …and the IntersectionObserver upgrade must ALSO call load(): flipping
+		// preload after the element settled on none doesn't reliably start the
+		// metadata fetch on its own.
+		expect(pageSrc).toContain("video.preload = 'metadata';");
+		expect(pageSrc).toContain('video.load();');
+		expect(pageSrc).toContain('thumbObserver?.unobserve(video);');
+	});
+
+	it('the strip is disabled while the 3D stage is up (R2-D12)', () => {
+		// Both thumb buttons share the condition, fed by the viewer's bound state.
+		expect(pageSrc).toContain('bind:active={viewerActive}');
+		const disabled = pageSrc.match(/disabled=\{viewerActive\}/g) ?? [];
+		expect(disabled).toHaveLength(2);
+	});
+
+	it('duration badges skip non-finite durations and unknown entries (R2-D4)', () => {
+		// MediaRecorder WebMs declare Infinity — an "Infinity:NaN" badge is worse
+		// than none, so the note guard and the render condition must both hold.
+		expect(pageSrc).toContain('if (Number.isFinite(el.duration))');
+		expect(pageSrc).toContain('{#if durations[i] !== undefined}');
+	});
+
+	it('the main video player is default-silent (muted, like the thumbs)', () => {
+		expect(pageSrc).toMatch(/<video src=\{current\.url\}[^>]*\bcontrols\b[^>]*\bmuted\b/);
+	});
+
+	it('the CC BY badge links the deed (CC BY 4.0 §3(a)(1)(C))', () => {
+		expect(pageSrc).toContain("{#if avatar.license === 'cc-by'}");
+		expect(pageSrc).toContain('href="https://creativecommons.org/licenses/by/4.0/"');
+		expect(pageSrc).toContain('rel="license noopener"');
+	});
+});

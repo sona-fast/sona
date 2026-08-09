@@ -425,7 +425,7 @@
 	}
 
 	.stage:focus-visible {
-		outline: 2px solid var(--primary);
+		outline: 2px solid var(--ring);
 		outline-offset: -2px;
 	}
 
@@ -490,14 +490,18 @@
 		font-size: 13px;
 		padding: 10px 12px;
 		border-radius: var(--radius-s);
-		/* Soft-badge pairing (.sbadge pattern): --destructive text over its own
-		   tint — banner treatment so the failure doesn't read as a caption. */
+		/* Destructive 12% tint carries the severity; the TEXT is --foreground:
+		   --destructive over its own tint composites below 4.5:1 on three light
+		   themes (R3-A2 — asserted in theme-contrast.test.ts against the real
+		   composite surface, not the bare page background). */
 		background: color-mix(in srgb, var(--destructive) 12%, transparent);
-		color: var(--destructive);
+		color: var(--foreground);
 	}
 
 	.load-error :global(svg) {
 		flex-shrink: 0;
+		/* The icon keeps the destructive color (non-text, 3:1 floor). */
+		color: var(--destructive);
 	}
 
 	/* .sr-only comes from the global rule in app.css — no local copy. */

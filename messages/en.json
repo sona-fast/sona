@@ -1231,7 +1231,7 @@
 	"admin_vr_field_permission_source": "Permission source",
 	"admin_vr_permission_placeholder": "e.g. Telegram DM 2026-08-01 — required to offer downloads",
 	"admin_vr_section_media": "Showcase media",
-	"admin_vr_media_hint": "Screenshots and short clips shown under the poster on the public page. Clips can't carry captions, so don't put anything important in speech or audio. They start muted, but visitors can turn the sound on — you need consent from anyone recorded in the clip.",
+	"admin_vr_media_hint": "Screenshots and short clips shown under the poster on the public page. Clips can't carry captions, so don't put anything important in speech or audio. They start muted, but visitors can turn the sound on, so you need consent from anyone recorded in the clip.",
 	"admin_vr_media_locked": "Adding media unlocks with a supporter key or when VR avatars open for everyone.",
 	"admin_vr_media_dropzone": "Add screenshots or short .webm clips (max {max} each)",
 	"admin_vr_media_kind_image": "Image",
@@ -1309,6 +1309,6 @@
 	"vr_loading_model_nototal": "Loading model — {loaded}",
 	"vr_load_failed": "Couldn't load the 3D model. Try again in a moment.",
 	"vr_webgl_unavailable": "3D view isn't available in this browser. Photos and video on this page still work.",
-	"vr_stage_keys_hint": "Arrow keys orbit the camera; plus and minus zoom.",
+	"vr_stage_keys_hint": "Arrow keys orbit the camera; plus and minus keys zoom.",
 	"mature_revealed": "Mature content shown."
 }

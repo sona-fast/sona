@@ -161,8 +161,13 @@
 	let mediaUploading = $state(false);
 	// Per-file failure reporting (R2-D10): a multi-file pick may partially
 	// succeed, and one collapsed error beside freshly-added rows read as if
-	// everything failed — each failure names its file instead.
-	let mediaErrors = $state<{ name: string; reason: 'too-large' | 'bad-type' | 'failed' }[]>([]);
+	// everything failed — each failure names its file instead. uid keys the
+	// {#each}: two same-named files failing for the same reason are distinct
+	// rows, so a name+reason key would collide.
+	let mediaErrorUid = 0;
+	let mediaErrors = $state<
+		{ uid: number; name: string; reason: 'too-large' | 'bad-type' | 'failed' }[]
+	>([]);
 	// Upload start/done announcements for the media section's live region
 	// (R2-A10) — visually the dropzone label + rows already show both.
 	let mediaStatus = $state('');
@@ -197,7 +202,7 @@
 		try {
 			for (const file of files) {
 				if (file.size > MAX_MEDIA_BYTES) {
-					mediaErrors = [...mediaErrors, { name: file.name, reason: 'too-large' }];
+					mediaErrors = [...mediaErrors, { uid: mediaErrorUid++, name: file.name, reason: 'too-large' }];
 					continue;
 				}
 				const fd = new FormData();
@@ -207,13 +212,14 @@
 				try {
 					res = await fetch('/api/upload', { method: 'POST', body: fd });
 				} catch {
-					mediaErrors = [...mediaErrors, { name: file.name, reason: 'failed' }];
+					mediaErrors = [...mediaErrors, { uid: mediaErrorUid++, name: file.name, reason: 'failed' }];
 					continue;
 				}
 				if (!res.ok) {
 					mediaErrors = [
 						...mediaErrors,
 						{
+							uid: mediaErrorUid++,
 							name: file.name,
 							reason: res.status === 413 ? 'too-large' : res.status === 415 ? 'bad-type' : 'failed'
 						}
@@ -702,7 +708,7 @@
 			<div class="banner err" role="alert">
 				<!-- One line per failed file: a multi-pick can partially succeed, and
 				     an unnamed error beside fresh rows misreads as total failure. -->
-				{#each mediaErrors as err (err.name + err.reason)}
+				{#each mediaErrors as err (err.uid)}
 					<p class="banner-line">
 						<strong>{err.name}</strong> —
 						{#if err.reason === 'too-large'}
@@ -841,10 +847,11 @@
 	.page-header { margin-bottom: 24px; }
 	.page-header h1 { font-size: 22px; margin: 0 0 4px; }
 	.banner { padding: 12px 16px; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
-	/* Token pairing (.sbadge pattern), not a hardcoded #f87171 — the literal red
-	   was 1.92:1 on light themes and these banners are the ONLY surfacing of
-	   upload errors (R2-A5). */
-	.banner.err { background: color-mix(in srgb, var(--destructive) 12%, transparent); color: var(--destructive); }
+	/* Destructive 12% tint carries the severity, --foreground carries the text:
+	   a hardcoded #f87171 was 1.92:1 on light themes (R2-A5), and --destructive
+	   over its own tint composites below 4.5:1 on three light themes (R3-A2 —
+	   asserted in theme-contrast.test.ts against the composite surface). */
+	.banner.err { background: color-mix(in srgb, var(--destructive) 12%, transparent); color: var(--foreground); }
 	.banner-line { margin: 0; overflow-wrap: anywhere; }
 	.banner-line + .banner-line { margin-top: 6px; }
 	.form { display: flex; flex-direction: column; gap: 32px; max-width: 700px; }
@@ -872,7 +879,7 @@
 		border-color: var(--primary); color: var(--primary);
 		background: color-mix(in srgb, var(--primary) 8%, transparent);
 	}
-	.platform-chip:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+	.platform-chip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 	.credit-list { display: flex; flex-direction: column; gap: 10px; }
 	.credit-row {
@@ -890,7 +897,7 @@
 	}
 	.drag-handle:hover { color: var(--foreground); }
 	.drag-handle:active { cursor: grabbing; }
-	.drag-handle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius-xs); }
+	.drag-handle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.credit-fields { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; align-items: end; }
 	.remove-btn {
 		display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
@@ -917,7 +924,7 @@
 	/* The hidden file inputs stay keyboard-focusable — surface focus on their
 	   visible hosts (same :has pattern as .platform-chip). */
 	.upload-zone:has(.sr-file:focus-visible),
-	.btn-sm:has(.sr-file:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+	.btn-sm:has(.sr-file:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 	.upload-progress { display: flex; flex-direction: column; gap: 6px; }
 	.progress-bar { height: 6px; border-radius: var(--radius-pill); background: var(--secondary); overflow: hidden; }
@@ -1006,7 +1013,7 @@
 	.sr-checkbox:checked + .switch-visual { background: var(--primary); }
 	.sr-checkbox:checked + .switch-visual::after { transform: translateX(16px); }
 	.sr-checkbox:disabled + .switch-visual { opacity: 0.5; cursor: not-allowed; }
-	.sr-checkbox:focus-visible + .switch-visual { outline: 2px solid var(--primary); outline-offset: 2px; }
+	.sr-checkbox:focus-visible + .switch-visual { outline: 2px solid var(--ring); outline-offset: 2px; }
 	.switch-text { display: flex; flex-direction: column; gap: 1px; }
 	.switch-text strong { font-size: 13px; font-weight: 500; }
 	.switch-text span { font-size: 11px; color: var(--muted-foreground); }

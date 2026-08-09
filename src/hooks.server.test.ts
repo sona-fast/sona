@@ -403,6 +403,22 @@ describe('authHandle — cache-control stamping honors handler opt-outs (SONA-12
 		} as never)) as Response;
 		expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
 	});
+
+	it('keeps a handler-set Cache-Control on a 304 revalidation (not clobbered to no-store)', async () => {
+		// A conditional GET that revalidates answers 304 with the same
+		// Cache-Control as the 200 — the fallthrough stamp must not tell caches
+		// to drop the object they just successfully revalidated.
+		const db = makeDb();
+		const res = (await authHandle({
+			event: makeEvent('/img/stickers/pack/key.webp', db),
+			resolve: async () =>
+				new Response(null, {
+					status: 304,
+					headers: { 'cache-control': 'public, max-age=31536000, immutable' }
+				})
+		} as never)) as Response;
+		expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+	});
 });
 
 describe('authHandle — security response headers', () => {

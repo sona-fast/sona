@@ -506,4 +506,11 @@ describe('UploadThingStorage.owns — anchored URL matching (R2-S2)', () => {
 		expect(storage.owns('/f/abc')).toBe(false);
 		expect(storage.owns('not a url')).toBe(false);
 	});
+
+	it('refuses an explicit port — UT only ever serves on the default (R3 port pin)', () => {
+		expect(storage.owns('https://utfs.io:8443/f/abc')).toBe(false);
+		expect(storage.owns('https://app123.ufs.sh:444/f/abc')).toBe(false);
+		// The default port spelled explicitly normalizes to '' and stays owned.
+		expect(storage.owns('https://utfs.io:443/f/abc')).toBe(true);
+	});
 });

@@ -213,6 +213,9 @@ export class UploadThingStorage implements StorageProvider {
 			return false;
 		}
 		if (parsed.protocol !== 'https:') return false;
+		// UploadThing serves on the default port only — an explicit port
+		// (utfs.io:8443) is not a URL it ever hands out.
+		if (parsed.port !== '') return false;
 		const host = parsed.hostname.toLowerCase();
 		if (host !== 'utfs.io' && !host.endsWith('.ufs.sh')) return false;
 		return parsed.pathname.startsWith('/f/');

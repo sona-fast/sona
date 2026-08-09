@@ -39,9 +39,18 @@ export const GET: RequestHandler = async ({ params, request, platform }) => {
 	if (key.startsWith('vr-models/')) error(404, 'Not found');
 
 	const range = parseRange(request.headers.get('range'));
-	const object = range
-		? await platform?.env.IMAGES?.get(key, { range })
-		: await platform?.env.IMAGES?.get(key);
+	let object;
+	try {
+		object = range
+			? await platform?.env.IMAGES?.get(key, { range })
+			: await platform?.env.IMAGES?.get(key);
+	} catch {
+		// R2 THROWS on an unsatisfiable range (offset at/past the end, bytes=-0)
+		// rather than returning null — unguarded, that surfaced as an anonymous
+		// 500 (R3-D1). RFC 9110 lets a server ignore Range, so fall back to the
+		// unranged full body; the object.range check below then serves a 200.
+		object = await platform?.env.IMAGES?.get(key);
+	}
 	if (!object) error(404, 'Not found');
 
 	// Set headers from the object's metadata directly. (Avoid writeHttpMetadata():
@@ -53,10 +62,17 @@ export const GET: RequestHandler = async ({ params, request, platform }) => {
 	headers.set('accept-ranges', 'bytes');
 	// Ranged read (object.range is only set when the get above was ranged): a
 	// 206 with Content-Range, sized to the returned slice — Safari probes media
-	// with bytes=0-1 and refuses the clip if the origin ignores it.
+	// with bytes=0-1 and refuses the clip if the origin ignores it. Offset and
+	// length are clamped from object.size/object.range (what R2 actually
+	// served), never taken from the client's numbers: a suffix longer than the
+	// object or a length running past the end must not produce a Content-Range
+	// that lies about the body.
 	if (range && object.range) {
-		const offset = 'offset' in object.range ? (object.range.offset ?? 0) : object.size - object.range.suffix;
-		const length = ('length' in object.range ? object.range.length : undefined) ?? object.size - offset;
+		const rawOffset =
+			'offset' in object.range ? (object.range.offset ?? 0) : object.size - object.range.suffix;
+		const offset = Math.max(0, rawOffset);
+		const rawLength = ('length' in object.range ? object.range.length : undefined) ?? object.size - offset;
+		const length = Math.min(rawLength, object.size - offset);
 		headers.set('content-length', String(length));
 		headers.set('content-range', `bytes ${offset}-${offset + length - 1}/${object.size}`);
 		return new Response(object.body, { status: 206, headers });

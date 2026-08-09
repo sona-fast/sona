@@ -51,6 +51,27 @@ describe('gallery detail hero markup (sona#97)', () => {
 	});
 });
 
+describe('gallery NSFW reveal wiring (R2-A7 twin of the VR detail page, R3-T3)', () => {
+	// The reveal button unmounts itself, so the announcement + focus landing are
+	// the only evidence the reveal happened for AT users. Pinned here like the
+	// VR page's identical wiring in nsfw-markup.test.ts — losing either half
+	// fails silently.
+	it('the blur overlay carries the reveal handler', () => {
+		expect(pageSrc).toMatch(/onclick=\{reveal\}/);
+	});
+
+	it('the status region is always mounted (a region inserted with its first content is often not announced)', () => {
+		expect(pageSrc).toContain('<p class="sr-only" role="status">{revealAnnouncement}</p>');
+	});
+
+	it('the revealed hero is focusable-but-not-tabbable and bound for the focus landing', () => {
+		const visibleHero = heroImgs.find((img) => img.includes('bind:this={revealedHero}'));
+		expect(visibleHero).toBeDefined();
+		expect(visibleHero).toContain('tabindex="-1"');
+		expect(pageSrc).toContain('revealedHero?.focus()');
+	});
+});
+
 describe('hero src selection', () => {
 	beforeEach(() => vi.stubEnv('DEV', false));
 	afterEach(() => vi.unstubAllEnvs());

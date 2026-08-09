@@ -30,7 +30,11 @@ function event(
 }
 
 // A range-aware bucket: honours R2's { range } get option and reports the
-// served slice back via object.range, like the real binding.
+// served slice back via object.range, like the real binding. Faithful to R2's
+// sharp edges on purpose (R3-D1): an unsatisfiable range (offset at/past the
+// end, zero suffix) THROWS instead of returning null, and object.range echoes
+// the REQUESTED numbers unclamped — the route must derive its headers from
+// object.size, not trust them.
 function rangedBucket(objects: Record<string, { body: string; contentType?: string }>) {
 	return {
 		get: async (key: string, opts?: { range?: { offset?: number; length?: number; suffix?: number } }) => {
@@ -38,13 +42,19 @@ function rangedBucket(objects: Record<string, { body: string; contentType?: stri
 			if (!o) return null;
 			const bytes = new TextEncoder().encode(o.body);
 			let slice = bytes;
-			let range: { offset: number; length: number } | undefined;
+			let range: { offset?: number; length?: number; suffix?: number } | undefined;
 			if (opts?.range) {
-				const offset =
-					opts.range.suffix !== undefined ? bytes.byteLength - opts.range.suffix : (opts.range.offset ?? 0);
+				let offset: number;
+				if (opts.range.suffix !== undefined) {
+					if (opts.range.suffix === 0) throw new Error('get: The requested range is not satisfiable (10039)');
+					offset = Math.max(0, bytes.byteLength - opts.range.suffix);
+				} else {
+					offset = opts.range.offset ?? 0;
+					if (offset >= bytes.byteLength) throw new Error('get: The requested range is not satisfiable (10039)');
+				}
 				const length = opts.range.length ?? bytes.byteLength - offset;
 				slice = bytes.slice(offset, offset + length);
-				range = { offset, length };
+				range = opts.range;
 			}
 			return {
 				body: new Blob([slice]).stream(),
@@ -126,5 +136,36 @@ describe('GET /img/[...key] — Range requests (R2-D7)', () => {
 		const absent = await GET(event('vr-media/clip.webm', rangedBucket(objects)));
 		expect(absent.status).toBe(200);
 		expect(absent.headers.get('content-length')).toBe('15');
+	});
+
+	// R2 THROWS on unsatisfiable ranges instead of returning null; unguarded,
+	// each of these was an anonymous 500 — a regression against the pre-range
+	// route, which answered 200 (R3-D1). RFC 9110 lets a server ignore Range.
+	for (const header of ['bytes=99-', 'bytes=15-', 'bytes=-0']) {
+		it(`falls back to the full 200 body when R2 rejects the range (${header})`, async () => {
+			const res = await GET(event('vr-media/clip.webm', rangedBucket(objects), { range: header }));
+			expect(res.status).toBe(200);
+			expect(await res.text()).toBe('WEBM-CLIP-BYTES');
+			expect(res.headers.get('content-length')).toBe('15');
+			expect(res.headers.get('content-range')).toBeNull();
+		});
+	}
+
+	it('clamps Content-Range/Content-Length from object.size, not the client numbers', async () => {
+		// object.range echoes the request unclamped (see rangedBucket): a length
+		// running past the end must not produce a Content-Range that lies.
+		const overlong = await GET(
+			event('vr-media/clip.webm', rangedBucket(objects), { range: 'bytes=5-9999' })
+		);
+		expect(overlong.status).toBe(206);
+		expect(overlong.headers.get('content-range')).toBe('bytes 5-14/15');
+		expect(overlong.headers.get('content-length')).toBe('10');
+		// A suffix longer than the object serves the whole body from offset 0.
+		const suffix = await GET(
+			event('vr-media/clip.webm', rangedBucket(objects), { range: 'bytes=-9999' })
+		);
+		expect(suffix.status).toBe(206);
+		expect(suffix.headers.get('content-range')).toBe('bytes 0-14/15');
+		expect(suffix.headers.get('content-length')).toBe('15');
 	});
 });
