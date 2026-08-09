@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "48c6d408-15a7-4904-aace-b28015d61023",
+  "id": "529c2ef9-4b94-49a3-a593-ebe99877da41",
   "prevId": "0943f354-538d-40d4-b497-aaba0171661a",
   "tables": {
     "artists": {
@@ -174,7 +174,15 @@
           "default": 0
         }
       },
-      "indexes": {},
+      "indexes": {
+        "avatar_credits_avatar_id_idx": {
+          "name": "avatar_credits_avatar_id_idx",
+          "columns": [
+            "avatar_id"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "avatar_credits_avatar_id_vr_avatars_id_fk": {
           "name": "avatar_credits_avatar_id_vr_avatars_id_fk",
@@ -254,7 +262,15 @@
           "default": 0
         }
       },
-      "indexes": {},
+      "indexes": {
+        "avatar_media_avatar_id_idx": {
+          "name": "avatar_media_avatar_id_idx",
+          "columns": [
+            "avatar_id"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "avatar_media_avatar_id_vr_avatars_id_fk": {
           "name": "avatar_media_avatar_id_vr_avatars_id_fk",
@@ -292,7 +308,15 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "avatar_platforms_avatar_id_idx": {
+          "name": "avatar_platforms_avatar_id_idx",
+          "columns": [
+            "avatar_id"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "avatar_platforms_avatar_id_vr_avatars_id_fk": {
           "name": "avatar_platforms_avatar_id_vr_avatars_id_fk",

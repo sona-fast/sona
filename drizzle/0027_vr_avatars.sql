@@ -8,6 +8,7 @@ CREATE TABLE `avatar_credits` (
 	FOREIGN KEY (`artist_id`) REFERENCES `artists`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
+CREATE INDEX `avatar_credits_avatar_id_idx` ON `avatar_credits` (`avatar_id`);--> statement-breakpoint
 CREATE TABLE `avatar_media` (
 	`avatar_id` integer NOT NULL,
 	`kind` text NOT NULL,
@@ -18,12 +19,14 @@ CREATE TABLE `avatar_media` (
 	FOREIGN KEY (`avatar_id`) REFERENCES `vr_avatars`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE INDEX `avatar_media_avatar_id_idx` ON `avatar_media` (`avatar_id`);--> statement-breakpoint
 CREATE TABLE `avatar_platforms` (
 	`avatar_id` integer NOT NULL,
 	`platform` text NOT NULL,
 	FOREIGN KEY (`avatar_id`) REFERENCES `vr_avatars`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE INDEX `avatar_platforms_avatar_id_idx` ON `avatar_platforms` (`avatar_id`);--> statement-breakpoint
 CREATE TABLE `vr_avatars` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`slug` text NOT NULL,

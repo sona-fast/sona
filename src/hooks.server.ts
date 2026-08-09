@@ -228,7 +228,7 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// cache key that includes the PARAGLIDE_LOCALE cookie (infra, not code).
 	const isPublic = !event.url.pathname.startsWith('/admin') && !event.url.pathname.startsWith('/api');
 	const isHtml = response.headers.get('content-type')?.includes('text/html') ?? false;
-	if (isPublic && (response.status === 200 || response.status === 304) && !isHtml) {
+	if (isPublic && (response.status === 200 || response.status === 304 || response.status === 206) && !isHtml) {
 		// Honor a handler's explicit Cache-Control; only stamp the shared default
 		// when the handler set nothing. Two intentional opt-outs exist today: the
 		// sticker download fallback's no-store (a transient transform failure must

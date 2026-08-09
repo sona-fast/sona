@@ -419,6 +419,24 @@ describe('authHandle — cache-control stamping honors handler opt-outs (SONA-12
 		} as never)) as Response;
 		expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
 	});
+
+	it('keeps a handler-set Cache-Control on a 206 partial response (ranged media)', async () => {
+		// /img serves ranged video (SONA-124 showcase clips) as 206 with the same
+		// immutable Cache-Control as the 200 — a seek must not become uncacheable.
+		const db = makeDb();
+		const res = (await authHandle({
+			event: makeEvent('/img/vr-media/clip.webm', db),
+			resolve: async () =>
+				new Response('xx', {
+					status: 206,
+					headers: {
+						'cache-control': 'public, max-age=31536000, immutable',
+						'content-range': 'bytes 0-1/100'
+					}
+				})
+		} as never)) as Response;
+		expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+	});
 });
 
 describe('authHandle — security response headers', () => {

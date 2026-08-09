@@ -312,7 +312,10 @@ export const avatarCredits = sqliteTable('avatar_credits', {
 	role: text('role', { enum: ['base', 'modeler', 'rigger', 'texture', 'shader', 'other'] }).notNull(),
 	roleLabel: text('role_label'),
 	position: integer('position').notNull().default(0)
-});
+}, (table) => [
+	// The public detail load fetches credits per page view by avatar_id.
+	index('avatar_credits_avatar_id_idx').on(table.avatarId)
+]);
 
 // Showcase media (screenshots / clips) for an avatar, ordered by `position`.
 // `url` points at our storage, so it MUST be listed in referenced-urls.ts.
@@ -323,7 +326,10 @@ export const avatarMedia = sqliteTable('avatar_media', {
 	width: integer('width'),
 	height: integer('height'),
 	position: integer('position').notNull().default(0)
-});
+}, (table) => [
+	// Fetched per detail-page view by avatar_id (ordered media strip).
+	index('avatar_media_avatar_id_idx').on(table.avatarId)
+]);
 
 // Platforms an avatar is set up for, shown as badges. No PK, mirroring
 // image_tags/sticker_emojis; (avatarId, platform) uniqueness is kept in app code.
@@ -332,4 +338,7 @@ export const avatarPlatforms = sqliteTable('avatar_platforms', {
 	platform: text('platform', {
 		enum: ['vrchat', 'resonite', 'chilloutvr', 'neosvr', 'vseeface', 'warudo', 'other']
 	}).notNull()
-});
+}, (table) => [
+	// /vr does an inArray over avatar_id for platform chips; detail fetches by it.
+	index('avatar_platforms_avatar_id_idx').on(table.avatarId)
+]);
