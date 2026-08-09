@@ -29,6 +29,13 @@ test('artist avatars stay square in a monogram-free admin table', async ({ page 
 	const avatar = row.locator('img.avatar');
 	await expect(avatar).toBeVisible();
 
+	// loading="lazy" means visibility alone doesn't prove the image LOADED — a
+	// 404ing fixture could still measure 36x36 before onerror swaps in the
+	// monogram. complete alone isn't enough either (true for failed loads), so
+	// also require real decoded pixels.
+	await expect(avatar).toHaveJSProperty('complete', true);
+	expect(await avatar.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+
 	// Geometry-independent guard: fails if the max-width opt-out is removed, even
 	// if the column width or cell padding change the squish arithmetic later.
 	await expect(avatar).toHaveCSS('max-width', 'none');
