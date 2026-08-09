@@ -1,4 +1,5 @@
 import adapter from '@sveltejs/adapter-cloudflare';
+import { existsSync } from 'node:fs';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
@@ -74,6 +75,14 @@ const config = {
 		// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
 		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
 		adapter: adapter({
+			// Pin the adapter's wrangler-config lookup to THIS project. Left unset,
+			// wrangler's discovery walks up parent directories, so a checkout without
+			// its own wrangler.toml (git worktrees; fresh clones) adopts a parent
+			// checkout's config and writes the build output THERE. The tracked
+			// .example template is a valid Pages config with the same
+			// pages_build_output_dir, so builds land in ./.svelte-kit/cloudflare
+			// either way.
+			config: existsSync('wrangler.toml') ? 'wrangler.toml' : 'wrangler.toml.example',
 			platformProxy: {
 				// E2E tests override these (see playwright.config.ts) to run the dev
 				// server against a throwaway local D1 in an isolated persist dir. The
