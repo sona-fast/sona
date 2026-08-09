@@ -29,6 +29,8 @@
 		alt=""
 		width={size}
 		height={size}
+		loading="lazy"
+		decoding="async"
 		style="--avatar-size: {size}px"
 		onerror={() => (failed = true)}
 	/>
@@ -52,6 +54,14 @@
 		border-radius: 50%;
 		flex-shrink: 0;
 		object-fit: cover;
+	}
+	img.avatar {
+		/* Hairline ring so the circular silhouette survives when the avatar's
+		   edge pixels match the page background (dark mode especially). An
+		   outline, not an inset box-shadow — replaced elements paint over inner
+		   shadows. Monograms need no ring: they paint their own background. */
+		outline: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+		outline-offset: -1px;
 	}
 	.monogram {
 		display: inline-flex;

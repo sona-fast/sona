@@ -39,4 +39,12 @@ test('artist avatars stay square in a monogram-free admin table', async ({ page 
 	// Rendered at size={36}; the bug squishes width to 24 while height stays 36.
 	expect(box!.width).toBe(36);
 	expect(box!.height).toBe(36);
+
+	// Rider changes on the same component: deferred loading attributes (avatars
+	// are never LCP) and the hairline silhouette ring (an outline — an inset
+	// box-shadow would be painted over by the image).
+	await expect(avatar).toHaveAttribute('loading', 'lazy');
+	await expect(avatar).toHaveAttribute('decoding', 'async');
+	await expect(avatar).toHaveCSS('outline-width', '1px');
+	await expect(avatar).toHaveCSS('outline-offset', '-1px');
 });
