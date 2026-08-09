@@ -15,7 +15,7 @@ INSERT OR REPLACE INTO site_settings (key, value) VALUES
   ('adminEmail',    'admin@e2e.test'),
   -- Seeded Instagram URL for the read-only instagram-social spec; no spec
   -- asserts on a blank social state, so this is inert for the others.
-  ('instagramUrl',  'https://www.instagram.com/taro');
+  ('instagramUrl',  'https://www.instagram.com/sona.e2e.example');
 
 -- One artist for the images to credit.
 INSERT OR REPLACE INTO artists (id, name, created_at)

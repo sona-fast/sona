@@ -3,38 +3,38 @@ import { normalizeHandle, normalizeSocialUrl } from './handle-normalize';
 
 describe('normalizeSocialUrl', () => {
 	it('builds the canonical profile URL from a bare handle per platform', () => {
-		expect(normalizeSocialUrl('twitter', 'taro')).toBe('https://twitter.com/taro');
-		expect(normalizeSocialUrl('bluesky', 'taro')).toBe('https://bsky.app/profile/taro');
-		expect(normalizeSocialUrl('telegram', 'taro')).toBe('https://t.me/taro');
-		expect(normalizeSocialUrl('furaffinity', 'taro')).toBe('https://www.furaffinity.net/user/taro');
-		expect(normalizeSocialUrl('furtrack', 'taro')).toBe('https://www.furtrack.com/user/taro');
-		expect(normalizeSocialUrl('deviantart', 'taro')).toBe('https://www.deviantart.com/taro');
-		expect(normalizeSocialUrl('patreon', 'taro')).toBe('https://www.patreon.com/taro');
-		expect(normalizeSocialUrl('instagram', 'taro')).toBe('https://www.instagram.com/taro');
+		expect(normalizeSocialUrl('twitter', 'sona.e2e.example')).toBe('https://twitter.com/sona.e2e.example');
+		expect(normalizeSocialUrl('bluesky', 'sona.e2e.example')).toBe('https://bsky.app/profile/sona.e2e.example');
+		expect(normalizeSocialUrl('telegram', 'sona.e2e.example')).toBe('https://t.me/sona.e2e.example');
+		expect(normalizeSocialUrl('furaffinity', 'sona.e2e.example')).toBe('https://www.furaffinity.net/user/sona.e2e.example');
+		expect(normalizeSocialUrl('furtrack', 'sona.e2e.example')).toBe('https://www.furtrack.com/user/sona.e2e.example');
+		expect(normalizeSocialUrl('deviantart', 'sona.e2e.example')).toBe('https://www.deviantart.com/sona.e2e.example');
+		expect(normalizeSocialUrl('patreon', 'sona.e2e.example')).toBe('https://www.patreon.com/sona.e2e.example');
+		expect(normalizeSocialUrl('instagram', 'sona.e2e.example')).toBe('https://www.instagram.com/sona.e2e.example');
 	});
 
 	it('strips a leading @ from a bare handle', () => {
-		expect(normalizeSocialUrl('twitter', '@taro')).toBe('https://twitter.com/taro');
-		expect(normalizeSocialUrl('instagram', '@@taro')).toBe('https://www.instagram.com/taro');
+		expect(normalizeSocialUrl('twitter', '@sona.e2e.example')).toBe('https://twitter.com/sona.e2e.example');
+		expect(normalizeSocialUrl('instagram', '@@sona.e2e.example')).toBe('https://www.instagram.com/sona.e2e.example');
 	});
 
 	it('trims surrounding whitespace before deciding', () => {
-		expect(normalizeSocialUrl('twitter', '  taro  ')).toBe('https://twitter.com/taro');
+		expect(normalizeSocialUrl('twitter', '  sona.e2e.example  ')).toBe('https://twitter.com/sona.e2e.example');
 	});
 
 	it('passes a full profile URL through unchanged', () => {
-		expect(normalizeSocialUrl('twitter', 'https://twitter.com/taro')).toBe(
-			'https://twitter.com/taro'
+		expect(normalizeSocialUrl('twitter', 'https://twitter.com/sona.e2e.example')).toBe(
+			'https://twitter.com/sona.e2e.example'
 		);
-		expect(normalizeSocialUrl('bluesky', 'https://bsky.app/profile/taro.bsky.social')).toBe(
-			'https://bsky.app/profile/taro.bsky.social'
+		expect(normalizeSocialUrl('bluesky', 'https://bsky.app/profile/sona.e2e.example.bsky.social')).toBe(
+			'https://bsky.app/profile/sona.e2e.example.bsky.social'
 		);
 	});
 
 	it('treats a scheme-less domain / path input as a URL, not a handle', () => {
-		expect(normalizeSocialUrl('twitter', 'twitter.com/taro')).toBe('https://twitter.com/taro');
-		expect(normalizeSocialUrl('twitter', 'x.com/taro')).toBe('https://x.com/taro');
-		expect(normalizeSocialUrl('telegram', 't.me/taro')).toBe('https://t.me/taro');
+		expect(normalizeSocialUrl('twitter', 'twitter.com/sona.e2e.example')).toBe('https://twitter.com/sona.e2e.example');
+		expect(normalizeSocialUrl('twitter', 'x.com/sona.e2e.example')).toBe('https://x.com/sona.e2e.example');
+		expect(normalizeSocialUrl('telegram', 't.me/sona.e2e.example')).toBe('https://t.me/sona.e2e.example');
 	});
 
 	it('treats a bare Bluesky handle (name.bsky.social) as a handle, not a URL', () => {
@@ -74,7 +74,7 @@ describe('normalizeSocialUrl', () => {
 		// Strips before deciding, exactly as sanitizeUrl does — this is the visible
 		// half of the change, since the three rejections above were already reached
 		// (by a longer route) through the bare-handle character check.
-		expect(normalizeSocialUrl('twitter', 'ta\u0000ro')).toBe('https://twitter.com/taro');
+		expect(normalizeSocialUrl('twitter', 'sona\u0000.e2e.example')).toBe('https://twitter.com/sona.e2e.example');
 	});
 });
 

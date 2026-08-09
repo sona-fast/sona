@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { adminLogin } from './admin-login';
 
 // Instagram site-social rendering (SONA-117): the seed fixture sets
-// instagramUrl (https://www.instagram.com/taro), and these read-only assertions
+// instagramUrl (https://www.instagram.com/sona.e2e.example), and these read-only assertions
 // verify it surfaces on the public pages — the /connect link row, the /about
 // social chip, and the footer icon. The unit test
 // (src/routes/admin/settings/page.server.test.ts) covers the ACTION's FormData
@@ -17,22 +17,22 @@ const PASSWORD = 'e2e-admin-password'; // legacy ADMIN_PASSWORD login path (see 
 test.describe('instagram site social', () => {
 	test('the seeded Instagram URL renders a /connect link row', async ({ page }) => {
 		await page.goto('/connect');
-		const row = page.locator('a.link-row[href="https://www.instagram.com/taro"]');
+		const row = page.locator('a.link-row[href="https://www.instagram.com/sona.e2e.example"]');
 		await expect(row).toBeVisible();
 		await expect(row).toContainText('Instagram');
-		await expect(row).toContainText('@taro');
+		await expect(row).toContainText('@sona.e2e.example');
 	});
 
 	test('the seeded Instagram URL renders an /about social chip', async ({ page }) => {
 		await page.goto('/about');
-		const chip = page.locator('a.social-item[href="https://www.instagram.com/taro"]');
+		const chip = page.locator('a.social-item[href="https://www.instagram.com/sona.e2e.example"]');
 		await expect(chip).toBeVisible();
-		await expect(chip).toContainText('@taro');
+		await expect(chip).toContainText('@sona.e2e.example');
 		await expect(chip).toHaveAttribute('rel', 'noopener noreferrer');
 		// The icon is aria-hidden, so the platform has to reach the accessible
-		// name through the visually-hidden span — "@taro" alone would be
+		// name through the visually-hidden span — "@sona.e2e.example" alone would be
 		// indistinguishable from the owner's other chips.
-		await expect(page.getByRole('link', { name: /Instagram.*@taro/ })).toBeVisible();
+		await expect(page.getByRole('link', { name: /Instagram.*@sona.e2e.example/ })).toBeVisible();
 	});
 
 	test('the public footer renders an Instagram icon link', async ({ page }) => {
@@ -42,7 +42,7 @@ test.describe('instagram site social', () => {
 		await page.goto('/about');
 		const icon = page.locator('a[aria-label="Instagram"]');
 		await expect(icon).toBeVisible();
-		await expect(icon).toHaveAttribute('href', 'https://www.instagram.com/taro');
+		await expect(icon).toHaveAttribute('href', 'https://www.instagram.com/sona.e2e.example');
 	});
 
 	test('the admin settings form prefills the seeded value into input[name="instagram"]', async ({
@@ -56,7 +56,7 @@ test.describe('instagram site social', () => {
 		await adminLogin(page, PASSWORD);
 		await page.goto('/admin/settings');
 		await expect(page.locator('input[name="instagram"]')).toHaveValue(
-			'https://www.instagram.com/taro'
+			'https://www.instagram.com/sona.e2e.example'
 		);
 	});
 });
