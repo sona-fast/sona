@@ -138,6 +138,11 @@ export function platformLabel(platform: string): string | null {
 	return PLATFORM_LABELS[platform] ?? null;
 }
 
+/** Hard cap for a self-hosted model upload. Shared (not $lib/server) so the
+ * admin upload UI can refuse oversized files before sending a byte, with the
+ * server endpoint enforcing the same number against Content-Length. */
+export const MAX_VR_MODEL_BYTES = 50 * 1024 * 1024; // 50 MB
+
 /** "12.3 MB"-style size for the format/size chip and download progress. */
 export function formatBytes(bytes: number | null | undefined): string {
 	if (!bytes || bytes <= 0) return '—';
