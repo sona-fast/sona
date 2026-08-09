@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
 	import { onNavigate } from '$app/navigation';
@@ -30,6 +31,18 @@
 		revealedId = null;
 	});
 	let copied = $state(false);
+
+	// The reveal button unmounts itself: announce the change politely and land
+	// focus on the revealed hero instead of letting it fall to <body> (R2-A7 —
+	// same fix as the VR detail page).
+	let revealedHero = $state<HTMLImageElement>();
+	let revealAnnouncement = $state('');
+	async function reveal() {
+		revealedId = image.id;
+		revealAnnouncement = m.mature_revealed();
+		await tick();
+		revealedHero?.focus();
+	}
 
 	// Strip tile caption: the group parent reads "Original"; unlabeled variants
 	// fall back to "Variant N", numbering variants only (the parent isn't one).
@@ -116,16 +129,22 @@
 
 	<div class="image-layout">
 		<div class="image-preview">
+			<!-- Always-mounted status region for the reveal announcement (a region
+			     inserted with its first content is often not announced). -->
+			<p class="sr-only" role="status">{revealAnnouncement}</p>
 			{#if image.nsfw && !revealed}
 				<div class="nsfw-overlay">
 					<img src={heroSrc(image.imageUrl)} srcset={heroSrcset(image.imageUrl)} sizes={heroSizes(image.imageUrl)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" use:rawFallback={image.imageUrl} class="blurred" />
-					<button class="reveal-btn" onclick={() => (revealedId = image.id)}>
+					<button class="reveal-btn" onclick={reveal}>
 						<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
 						<span>{m.gallery_click_reveal()}</span>
 					</button>
 				</div>
 			{:else}
-				<img src={heroSrc(image.imageUrl)} srcset={heroSrcset(image.imageUrl)} sizes={heroSizes(image.imageUrl)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" use:rawFallback={image.imageUrl} />
+				<!-- tabindex="-1": the reveal handler lands focus here after its
+				     button unmounts — never a tab stop. -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<img src={heroSrc(image.imageUrl)} srcset={heroSrcset(image.imageUrl)} sizes={heroSizes(image.imageUrl)} alt={image.title} width={image.width} height={image.height} fetchpriority="high" use:rawFallback={image.imageUrl} tabindex="-1" bind:this={revealedHero} />
 			{/if}
 		</div>
 

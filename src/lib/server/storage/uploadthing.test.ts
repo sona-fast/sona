@@ -482,3 +482,28 @@ describe('UploadThing deleteOrphans', () => {
 		expect(deleteFiles).not.toHaveBeenCalled();
 	});
 });
+
+describe('UploadThingStorage.owns — anchored URL matching (R2-S2)', () => {
+	const storage = new UploadThingStorage({ token: 'test-token' });
+
+	it('owns real UploadThing file URLs (ufs.sh subdomain and legacy utfs.io)', () => {
+		expect(storage.owns('https://app123.ufs.sh/f/abc')).toBe(true);
+		expect(storage.owns('https://utfs.io/f/abc')).toBe(true);
+	});
+
+	it('refuses a foreign host that merely CONTAINS the UT host in its path or name', () => {
+		// The pre-anchor substring regex matched all of these — which let foreign
+		// URLs into avatar_media and made the model proxy an open relay.
+		expect(storage.owns('https://attacker.example/utfs.io/f/x')).toBe(false);
+		expect(storage.owns('https://attacker.example/a.ufs.sh/f/x')).toBe(false);
+		expect(storage.owns('https://evilufs.sh/f/x')).toBe(false);
+		expect(storage.owns('https://utfs.io.attacker.example/f/x')).toBe(false);
+	});
+
+	it('requires https, the /f/ path, and a parseable URL', () => {
+		expect(storage.owns('http://utfs.io/f/abc')).toBe(false);
+		expect(storage.owns('https://utfs.io/other/abc')).toBe(false);
+		expect(storage.owns('/f/abc')).toBe(false);
+		expect(storage.owns('not a url')).toBe(false);
+	});
+});

@@ -19,11 +19,16 @@
 	function downloadState(avatar: (typeof data.avatars)[number]): string {
 		if (!avatar.downloadable) return m.admin_vr_download_off();
 		if (!isPermissiveVrLicense(avatar.license)) return m.admin_vr_download_blocked_license();
-		if (!avatar.permissionSource) return m.admin_vr_download_blocked_permission();
+		if (!avatar.hasPermission) return m.admin_vr_download_blocked_permission();
 		return `${m.admin_vr_download_on()} · ${licenseLabel(avatar.license)}`;
 	}
 	function downloadActive(avatar: (typeof data.avatars)[number]): boolean {
-		return avatar.downloadable && isPermissiveVrLicense(avatar.license) && !!avatar.permissionSource;
+		return avatar.downloadable && isPermissiveVrLicense(avatar.license) && avatar.hasPermission;
+	}
+	// A BLOCKED download (flag on, but license/permission refuses it) is a
+	// conflict the owner should notice — distinct from a deliberate "Off".
+	function downloadBlocked(avatar: (typeof data.avatars)[number]): boolean {
+		return avatar.downloadable && !downloadActive(avatar);
 	}
 </script>
 
@@ -128,14 +133,21 @@
 							</td>
 							<td class="col-platforms" data-label={m.admin_vr_col_platforms()}>{avatar.platformCount}</td>
 							<td class="col-visibility" data-label={m.admin_vr_col_visibility()}>
+								<!-- Two chips, not one: Mature is a content warning and must not
+								     inherit the Published chip's success green (DS8). -->
 								<span class="vis-chip" class:published={avatar.published}>
-									{avatar.published ? m.admin_vr_chip_published() : m.admin_vr_chip_draft()}{avatar.nsfw
-										? ` · ${m.admin_vr_chip_mature()}`
-										: ''}
+									{avatar.published ? m.admin_vr_chip_published() : m.admin_vr_chip_draft()}
 								</span>
+								{#if avatar.nsfw}
+									<span class="vis-chip mature">{m.admin_vr_chip_mature()}</span>
+								{/if}
 							</td>
 							<td class="col-download" data-label={m.admin_vr_col_download()}>
-								<span class="dl-text" class:off={!downloadActive(avatar)}>{downloadState(avatar)}</span>
+								<span
+									class="dl-text"
+									class:off={!downloadActive(avatar)}
+									class:blocked={downloadBlocked(avatar)}>{downloadState(avatar)}</span
+								>
 							</td>
 							<td class="col-actions" data-label={m.admin_col_actions()}>
 								<a href="/admin/vr/{avatar.id}/edit" class="icon-btn" aria-label={m.admin_vr_edit_aria()}>
@@ -231,7 +243,9 @@
 	.model-chip {
 		display: inline-flex; align-items: center; gap: 4px;
 		padding: 2px 8px; border-radius: var(--radius-pill);
-		background: var(--secondary); color: var(--muted-foreground);
+		/* --foreground, not --muted-foreground: muted on --secondary is 3.96:1 on
+		   the terracotta light theme (see theme-contrast.test.ts SONA-124 block). */
+		background: var(--secondary); color: var(--foreground);
 		font-size: 11px; font-weight: 500;
 		font-family: var(--font-primary);
 		font-variant-numeric: tabular-nums;
@@ -244,7 +258,8 @@
 	.vis-chip {
 		display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill);
 		font-size: 11px; font-weight: 500;
-		background: var(--secondary); color: var(--muted-foreground);
+		/* --foreground on --secondary — see the .model-chip contrast note. */
+		background: var(--secondary); color: var(--foreground);
 		white-space: nowrap;
 	}
 	/* --status-ok, not a hardcoded dark-green: the raw #4ade80 was 1.45:1 on the
@@ -253,9 +268,18 @@
 		background: color-mix(in srgb, var(--status-ok) 15%, transparent);
 		color: var(--status-ok);
 	}
+	/* Mature is a content warning, not a success state — its own chip keeps it
+	   off the Published green (DS8). */
+	.vis-chip.mature {
+		background: color-mix(in srgb, var(--status-warn) 15%, transparent);
+		color: var(--status-warn);
+	}
 
 	.dl-text { font-size: 12px; white-space: nowrap; }
 	.dl-text.off { color: var(--muted-foreground); }
+	/* Downloadable is ON but license/permission refuses it: a conflict worth
+	   noticing, not the same muted grey as a deliberate "Off" (DS5). */
+	.dl-text.blocked { color: var(--status-warn); }
 
 	.icon-btn {
 		background: none; border: none; color: var(--muted-foreground); cursor: pointer;
@@ -265,10 +289,7 @@
 
 	.storage-line { font-size: 12px; color: var(--muted-foreground); margin: 10px 2px 0; }
 
-	.sr-only {
-		position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-		overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
-	}
+	/* .sr-only comes from the global rule in app.css — no local copy. */
 
 	/* Mobile: collapse into stacked cards (same shape as /admin/stickers). */
 	@media (max-width: 640px) {

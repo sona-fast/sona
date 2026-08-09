@@ -76,7 +76,7 @@ export const actions = {
 		// feature is pre-GA without a valid supporter key. Keeping an
 		// already-published avatar published is not a publish.
 		if (parsed.input.published && !existing.published && !(await vrPublishingEnabled(db, platform?.env))) {
-			return fail(403, { error: 'VR avatars are in early access — publishing needs a valid supporter key until it opens for everyone.' });
+			return fail(403, { error: 'VR avatars are in early access — publishing needs a valid supporter key until they open for everyone.' });
 		}
 
 		const refError = await validateAvatarRefs(db, parsed.input, avatarId);

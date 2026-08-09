@@ -6,6 +6,8 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
+	import { probeDimensions } from '$lib/probe-dimensions';
+	import { MAX_BUFFER_BYTES } from '$lib/config';
 	import { MAX_VR_MODEL_BYTES, creditRoleLabel, formatBytes, modelFileError, modelFormatLabel, platformLabel } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
@@ -157,7 +159,13 @@
 		}))
 	);
 	let mediaUploading = $state(false);
-	let mediaError = $state<'too-large' | 'bad-type' | 'failed' | null>(null);
+	// Per-file failure reporting (R2-D10): a multi-file pick may partially
+	// succeed, and one collapsed error beside freshly-added rows read as if
+	// everything failed — each failure names its file instead.
+	let mediaErrors = $state<{ name: string; reason: 'too-large' | 'bad-type' | 'failed' }[]>([]);
+	// Upload start/done announcements for the media section's live region
+	// (R2-A10) — visually the dropzone label + rows already show both.
+	let mediaStatus = $state('');
 
 	const mediaReorder = new DragReorder({
 		count: () => mediaEntries.length,
@@ -175,42 +183,21 @@
 	}
 
 	const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/avif,video/webm';
-	const MAX_MEDIA_BYTES = 10 * 1024 * 1024; // /api/upload's buffered cap
-
-	/** Intrinsic dimensions, probed from the picked file (Image / video metadata). */
-	function probeDimensions(file: File): Promise<{ width: number | null; height: number | null }> {
-		return new Promise((resolve) => {
-			const objectUrl = URL.createObjectURL(file);
-			const done = (width: number | null, height: number | null) => {
-				URL.revokeObjectURL(objectUrl);
-				resolve({ width, height });
-			};
-			if (file.type.startsWith('video/')) {
-				const probe = document.createElement('video');
-				probe.preload = 'metadata';
-				probe.onloadedmetadata = () => done(probe.videoWidth || null, probe.videoHeight || null);
-				probe.onerror = () => done(null, null);
-				probe.src = objectUrl;
-			} else {
-				const probe = new Image();
-				probe.onload = () => done(probe.naturalWidth || null, probe.naturalHeight || null);
-				probe.onerror = () => done(null, null);
-				probe.src = objectUrl;
-			}
-		});
-	}
+	// /api/upload's buffered cap — the shared constant, not a hardcoded twin.
+	const MAX_MEDIA_BYTES = MAX_BUFFER_BYTES;
 
 	async function onMediaPicked(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
 		input.value = '';
 		if (!files.length) return;
-		mediaError = null;
+		mediaErrors = [];
 		mediaUploading = true;
+		mediaStatus = m.admin_upload_uploading();
 		try {
 			for (const file of files) {
 				if (file.size > MAX_MEDIA_BYTES) {
-					mediaError = 'too-large';
+					mediaErrors = [...mediaErrors, { name: file.name, reason: 'too-large' }];
 					continue;
 				}
 				const fd = new FormData();
@@ -220,11 +207,17 @@
 				try {
 					res = await fetch('/api/upload', { method: 'POST', body: fd });
 				} catch {
-					mediaError = 'failed';
+					mediaErrors = [...mediaErrors, { name: file.name, reason: 'failed' }];
 					continue;
 				}
 				if (!res.ok) {
-					mediaError = res.status === 413 ? 'too-large' : res.status === 415 ? 'bad-type' : 'failed';
+					mediaErrors = [
+						...mediaErrors,
+						{
+							name: file.name,
+							reason: res.status === 413 ? 'too-large' : res.status === 415 ? 'bad-type' : 'failed'
+						}
+					];
 					continue;
 				}
 				const { url } = (await res.json()) as { url: string };
@@ -242,6 +235,8 @@
 			}
 		} finally {
 			mediaUploading = false;
+			mediaStatus =
+				mediaErrors.length > 0 ? m.admin_vr_media_upload_issues() : m.admin_vr_media_upload_done();
 		}
 	}
 
@@ -251,12 +246,21 @@
 	let posterImageId = $state<number | null>(avatar?.posterImageId ?? null);
 	const posterImage = $derived(images.find((img) => img.id === posterImageId) ?? null);
 	let removePosterButton = $state<HTMLButtonElement>();
+	let posterGrid = $state<HTMLDivElement>();
 	async function pickPoster(id: number) {
 		posterImageId = id;
 		// Picking swaps the grid for the preview, unmounting the focused option —
 		// hand focus to the Remove button instead of dropping it on <body>.
 		await tick();
 		removePosterButton?.focus();
+	}
+	async function removePoster() {
+		posterImageId = null;
+		// Same class of bug in the other direction (R2-A8): removing unmounts the
+		// preview + this button — hand focus to the first option in the returning
+		// grid.
+		await tick();
+		posterGrid?.querySelector<HTMLButtonElement>('.poster-option')?.focus();
 	}
 
 	// --- Model upload (mock vr-model-upload): dropzone → progress → stored card,
@@ -272,6 +276,19 @@
 	let uploadTotal = $state(0);
 	let uploadError = $state<'too-large' | 'bad-type' | 'failed' | null>(null);
 	let errorFileSize = $state(0);
+
+	// Live-region text for the model upload, throttled to 10% steps so a screen
+	// reader isn't flooded per progress event; the region below stays ALWAYS
+	// mounted (mirrors the viewer's loading announcement, R2-A6).
+	const uploadAnnouncement = $derived.by(() => {
+		if (!uploading) return '';
+		const stepped =
+			uploadTotal > 0 ? Math.floor(((uploadLoaded / uploadTotal) * 100) / 10) * 10 : 0;
+		return m.admin_vr_upload_progress({
+			loaded: formatBytes(Math.round((stepped / 100) * uploadTotal)),
+			total: formatBytes(uploadTotal)
+		});
+	});
 
 	function onModelPicked(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
@@ -483,7 +500,9 @@
 							</label>
 						{/if}
 					</div>
-					<button type="button" class="remove-btn" onclick={() => removeCredit(i)} aria-label={m.admin_vr_remove_credit()}>
+					<!-- Position in the name: several rows would otherwise all announce
+					     the identical "Remove credit" (R2-A9). -->
+					<button type="button" class="remove-btn" onclick={() => removeCredit(i)} aria-label={m.admin_vr_remove_credit({ position: i + 1 })}>
 						<X size={16} />
 					</button>
 				</div>
@@ -494,12 +513,15 @@
 
 	<section class="section">
 		<h2>{m.admin_vr_field_model()}</h2>
+		<!-- Always-mounted live region (a region inserted together with its first
+		     content is often not announced); text updates in 10% steps. -->
+		<span class="sr-only" role="status">{uploadAnnouncement}</span>
 		{#if uploading}
 			<div class="upload-progress">
 				<div class="progress-bar">
 					<div class="progress-fill" style="width: {uploadTotal > 0 ? (uploadLoaded / uploadTotal) * 100 : 0}%"></div>
 				</div>
-				<span class="progress-text" role="status">
+				<span class="progress-text" aria-hidden="true">
 					{m.admin_vr_upload_progress({ loaded: formatBytes(uploadLoaded), total: formatBytes(uploadTotal) })}
 				</span>
 			</div>
@@ -571,11 +593,46 @@
 		</div>
 	</section>
 
+	<!-- Poster BEFORE showcase media, matching the public page's hierarchy: the
+	     poster is the primary render, the strip sits under it (DS6). -->
+	<section class="section">
+		<h2>{m.admin_vr_field_poster()}</h2>
+		<div class="poster-section">
+			<input type="hidden" name="posterImageId" value={posterImageId ?? ''} />
+			{#if posterImage}
+				<div class="poster-preview">
+					<img src={posterImage.thumbnailUrl || posterImage.imageUrl} alt={posterImage.title} />
+					<button type="button" class="remove-poster" bind:this={removePosterButton} onclick={removePoster}>
+						<X size={14} /> {m.admin_vr_poster_remove()}
+					</button>
+				</div>
+			{:else if images.length > 0}
+				<p class="field-hint">{m.admin_vr_poster_hint()}</p>
+				<div class="poster-grid" bind:this={posterGrid}>
+					{#each images as img (img.id)}
+						<button
+							type="button"
+							class="poster-option"
+							class:selected={posterImageId === img.id}
+							onclick={() => pickPoster(img.id)}
+						>
+							<img src={img.thumbnailUrl || img.imageUrl} alt={img.title} loading="lazy" />
+						</button>
+					{/each}
+				</div>
+			{:else}
+				<p class="field-hint">{m.admin_vr_poster_empty()}</p>
+			{/if}
+		</div>
+	</section>
+
 	<section class="section">
 		<h2>{m.admin_vr_section_media()}</h2>
 		<p class="field-hint">{m.admin_vr_media_hint()}</p>
-		<!-- Always-mounted live region for the reorder announcements. -->
+		<!-- Always-mounted live regions: reorder announcements, and the upload
+		     start/done status (R2-A10). -->
 		<span class="sr-only" aria-live="polite">{mediaReorder.announcement}</span>
+		<span class="sr-only" role="status">{mediaStatus}</span>
 		{#if mediaEntries.length > 0}
 			<div class="media-list">
 				{#each mediaEntries as item, i (item.uid)}
@@ -615,7 +672,7 @@
 						<input type="hidden" name="media[{i}][kind]" value={item.kind} />
 						<input type="hidden" name="media[{i}][width]" value={item.width ?? ''} />
 						<input type="hidden" name="media[{i}][height]" value={item.height ?? ''} />
-						<button type="button" class="remove-btn" onclick={() => removeMedia(i)} aria-label={m.admin_vr_media_remove()}>
+						<button type="button" class="remove-btn" onclick={() => removeMedia(i)} aria-label={m.admin_vr_media_remove({ position: i + 1 })}>
 							<X size={16} />
 						</button>
 					</div>
@@ -636,48 +693,29 @@
 				class="sr-file"
 			/>
 		</label>
-		{#if mediaError}
+		{#if !publishingEnabled}
+			<!-- Both neighbouring sections explain their locked state — this zone
+			     shouldn't be the one silently-disabled control (R2-CP4). -->
+			<p class="field-hint">{m.admin_vr_media_locked()}</p>
+		{/if}
+		{#if mediaErrors.length > 0}
 			<div class="banner err" role="alert">
-				{#if mediaError === 'too-large'}
-					{m.admin_vr_media_error_too_large({ max: formatBytes(MAX_MEDIA_BYTES) })}
-				{:else if mediaError === 'bad-type'}
-					{m.admin_vr_media_error_bad_type()}
-				{:else}
-					{m.admin_vr_media_error_failed()}
-				{/if}
+				<!-- One line per failed file: a multi-pick can partially succeed, and
+				     an unnamed error beside fresh rows misreads as total failure. -->
+				{#each mediaErrors as err (err.name + err.reason)}
+					<p class="banner-line">
+						<strong>{err.name}</strong> —
+						{#if err.reason === 'too-large'}
+							{m.admin_vr_media_error_too_large({ max: formatBytes(MAX_MEDIA_BYTES) })}
+						{:else if err.reason === 'bad-type'}
+							{m.admin_vr_media_error_bad_type()}
+						{:else}
+							{m.admin_vr_media_error_failed()}
+						{/if}
+					</p>
+				{/each}
 			</div>
 		{/if}
-	</section>
-
-	<section class="section">
-		<h2>{m.admin_vr_field_poster()}</h2>
-		<div class="poster-section">
-			<input type="hidden" name="posterImageId" value={posterImageId ?? ''} />
-			{#if posterImage}
-				<div class="poster-preview">
-					<img src={posterImage.thumbnailUrl || posterImage.imageUrl} alt={posterImage.title} />
-					<button type="button" class="remove-poster" bind:this={removePosterButton} onclick={() => (posterImageId = null)}>
-						<X size={14} /> {m.admin_vr_poster_remove()}
-					</button>
-				</div>
-			{:else if images.length > 0}
-				<p class="field-hint">{m.admin_vr_poster_hint()}</p>
-				<div class="poster-grid">
-					{#each images as img (img.id)}
-						<button
-							type="button"
-							class="poster-option"
-							class:selected={posterImageId === img.id}
-							onclick={() => pickPoster(img.id)}
-						>
-							<img src={img.thumbnailUrl || img.imageUrl} alt={img.title} loading="lazy" />
-						</button>
-					{/each}
-				</div>
-			{:else}
-				<p class="field-hint">{m.admin_vr_poster_empty()}</p>
-			{/if}
-		</div>
 	</section>
 
 	<section class="section">
@@ -803,7 +841,12 @@
 	.page-header { margin-bottom: 24px; }
 	.page-header h1 { font-size: 22px; margin: 0 0 4px; }
 	.banner { padding: 12px 16px; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
-	.banner.err { background: rgba(248,113,113,0.12); color: #f87171; }
+	/* Token pairing (.sbadge pattern), not a hardcoded #f87171 — the literal red
+	   was 1.92:1 on light themes and these banners are the ONLY surfacing of
+	   upload errors (R2-A5). */
+	.banner.err { background: color-mix(in srgb, var(--destructive) 12%, transparent); color: var(--destructive); }
+	.banner-line { margin: 0; overflow-wrap: anywhere; }
+	.banner-line + .banner-line { margin-top: 6px; }
 	.form { display: flex; flex-direction: column; gap: 32px; max-width: 700px; }
 	.section { display: flex; flex-direction: column; gap: 16px; }
 	h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
@@ -924,10 +967,7 @@
 	}
 	.media-zone { min-height: 72px; padding: 20px; }
 
-	.sr-only {
-		position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-		overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
-	}
+	/* .sr-only comes from the global rule in app.css — no local copy. */
 
 	.poster-section { display: flex; flex-direction: column; gap: 8px; }
 	.poster-preview { position: relative; width: 160px; }

@@ -247,4 +247,64 @@ describe('create action validation', () => {
 		expect(await outcomeOf(platform, form)).toBe(400);
 		expect((sqlite.prepare('SELECT COUNT(*) AS n FROM vr_avatars').get() as { n: number }).n).toBe(0);
 	});
+
+	it('accepts media stored under a FORMER r2PublicUrl via the pathname-key branch (R2-D2)', async () => {
+		// Changing the CDN base must not lock every save of an avatar with media:
+		// the URL was absolutized at upload time, but its path still spells our
+		// vr-media/ partition (the modelKeyFromUrl rule serving/disposal use).
+		const { platform } = makeDb();
+		const form = baseForm({
+			'media[0][url]': 'https://old-cdn.example/vr-media/shot.png',
+			'media[0][kind]': 'image'
+		});
+		expect(await outcomeOf(platform, form)).toBe('created');
+	});
+
+	it('rejects a foreign modelUrl submitted through the hidden field (SSRF, R2-S1)', async () => {
+		// modelUrl is client-editable; on a provider-fetch fork resolveModelBytes
+		// would relay whatever host it names to anonymous visitors.
+		const { sqlite, platform } = makeDb();
+		const form = baseForm({
+			modelUrl: 'https://attacker.example/exfil.vrm',
+			modelFormat: 'vrm',
+			modelSizeBytes: '1234'
+		});
+		expect(await outcomeOf(platform, form)).toBe(400);
+		expect((sqlite.prepare('SELECT COUNT(*) AS n FROM vr_avatars').get() as { n: number }).n).toBe(0);
+	});
+
+	it('accepts our own model URLs: /img-relative and former-base vr-models/ paths', async () => {
+		const { platform } = makeDb();
+		expect(
+			await outcomeOf(
+				platform,
+				baseForm({ modelUrl: '/img/vr-models/a.vrm', modelFormat: 'vrm', modelSizeBytes: '10' })
+			)
+		).toBe('created');
+		const { platform: p2 } = makeDb();
+		expect(
+			await outcomeOf(
+				p2,
+				baseForm({
+					slug: 'taro-vrchat-2',
+					modelUrl: 'https://old-cdn.example/vr-models/a.vrm',
+					modelFormat: 'vrm',
+					modelSizeBytes: '10'
+				})
+			)
+		).toBe('created');
+	});
+});
+
+describe('create action E2E_VR_GATE override (test-only bypass)', () => {
+	it("only the exact value 'open' opens the gate; 'false' (or any other value) stays closed", async () => {
+		EARLY_ACCESS['vr-avatars'] = FUTURE_GA;
+		const open = makeDb();
+		(open.platform as unknown as { env: Record<string, unknown> }).env.E2E_VR_GATE = 'open';
+		expect(await outcomeOf(open.platform, baseForm())).toBe('created');
+
+		const closed = makeDb();
+		(closed.platform as unknown as { env: Record<string, unknown> }).env.E2E_VR_GATE = 'false';
+		expect(await outcomeOf(closed.platform, baseForm())).toBe(403);
+	});
 });

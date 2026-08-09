@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { APP_NAME } from '$lib/config';
 	import { page } from '$app/state';
-	import { Box, Download, ExternalLink } from 'lucide-svelte';
+	import { Box, Download, ExternalLink, Play } from 'lucide-svelte';
 	import Meta from '$lib/components/Meta.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import VrViewer from '$lib/components/VrViewer.svelte';
@@ -33,15 +34,61 @@
 
 	// NSFW poster reveal — client state only, deliberately not persisted.
 	let revealed = $state(false);
+	let mediaFrame = $state<HTMLDivElement>();
+	let revealAnnouncement = $state('');
+	async function reveal() {
+		revealed = true;
+		// The reveal button unmounts itself: announce the change politely and
+		// land focus on the revealed frame instead of letting it fall to <body>
+		// (the gallery detail twin got the same fix, R2-A7).
+		revealAnnouncement = m.mature_revealed();
+		await tick();
+		mediaFrame?.focus();
+	}
 
 	// Media strip selection: null = the poster. Selecting a thumbnail swaps the
 	// main display; the poster stays the initial render (and the page's LCP).
 	let selected = $state<number | null>(null);
 	const current = $derived(selected === null ? null : data.media[selected]);
 
+	// While the 3D stage covers the poster, selecting a strip thumb has no
+	// visible effect — the strip is disabled for the duration (R2-D12).
+	let viewerActive = $state(false);
+
 	// Durations read client-side from each video thumb's metadata (the schema
-	// stores no duration), keyed by media index.
+	// stores no duration), keyed by media index. Non-finite durations are
+	// skipped — MediaRecorder-produced WebMs declare Infinity, and an
+	// "Infinity:NaN" badge is worse than none (R2-D4).
 	let durations = $state<Record<number, number>>({});
+	function noteDuration(i: number, el: HTMLVideoElement) {
+		if (Number.isFinite(el.duration)) durations = { ...durations, [i]: el.duration };
+	}
+
+	// Video-thumb action: metadata is fetched only once the thumb scrolls into
+	// view (the observer upgrades preload none→metadata) — a strip of clips
+	// below the fold must not cost one metadata request per <video> at page
+	// load. The mount-time readyState check covers a cached hard load, where
+	// loadedmetadata fires before any listener attaches (DS1).
+	let thumbObserver: IntersectionObserver | undefined;
+	function videoThumb(el: HTMLVideoElement, i: number) {
+		const onMeta = () => noteDuration(i, el);
+		el.addEventListener('loadedmetadata', onMeta);
+		if (el.readyState >= 1) noteDuration(i, el);
+		thumbObserver ??= new IntersectionObserver((entries) => {
+			for (const entry of entries) {
+				if (!entry.isIntersecting) continue;
+				(entry.target as HTMLVideoElement).preload = 'metadata';
+				thumbObserver?.unobserve(entry.target);
+			}
+		});
+		thumbObserver.observe(el);
+		return {
+			destroy() {
+				el.removeEventListener('loadedmetadata', onMeta);
+				thumbObserver?.unobserve(el);
+			}
+		};
+	}
 
 	function formatDuration(seconds: number): string {
 		const s = Math.round(seconds);
@@ -113,15 +160,19 @@
 			{:else}
 				<div class="poster-placeholder"><Box size={40} aria-hidden="true" /></div>
 			{/if}
-			<button class="reveal-btn" onclick={() => (revealed = true)}>
+			<button class="reveal-btn" onclick={reveal}>
 				<span class="mature-label">{m.vr_mature_chip()}</span>
 				<span>{m.vr_show_avatar()}</span>
 			</button>
 		</div>
 	{:else if current}
 		{#if current.kind === 'video'}
-			<!-- svelte-ignore a11y_media_has_caption -- showcase clips carry no dialogue -->
-			<video src={current.url} controls playsinline width={current.width} height={current.height}></video>
+			<!-- svelte-ignore a11y_media_has_caption -- muted on purpose: showcase
+			     clips can't carry a captions track, so the player enforces
+			     default-silent (matching the strip thumbs and the admin preview);
+			     admin_vr_media_hint tells admins nothing important may live in
+			     speech/audio, and the visible controls still allow unmuting. -->
+			<video src={current.url} controls muted playsinline width={current.width} height={current.height}></video>
 		{:else}
 			<img src={cdnImage(current.url, 1200)} alt={avatar.name} width={current.width} height={current.height} use:rawFallback={current.url} />
 		{/if}
@@ -152,6 +203,9 @@
 
 	<div class="avatar-layout">
 		<div class="avatar-media">
+			<!-- Always-mounted status region for the reveal announcement (a region
+			     inserted with its first content is often not announced). -->
+			<p class="sr-only" role="status">{revealAnnouncement}</p>
 			{#if data.viewerPath}
 				<VrViewer
 					modelPath={data.viewerPath}
@@ -161,14 +215,21 @@
 					{revealed}
 					posterWidth={avatar.posterWidth}
 					posterHeight={avatar.posterHeight}
+					bind:active={viewerActive}
 				>
-					<div class="media-frame">{@render mainMedia()}</div>
+					<!-- tabindex="-1": the reveal handler lands focus here after its
+					     button unmounts — never a tab stop. -->
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<div class="media-frame" tabindex="-1" bind:this={mediaFrame}>{@render mainMedia()}</div>
 				</VrViewer>
 			{:else}
-				<div class="media-frame">{@render mainMedia()}</div>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<div class="media-frame" tabindex="-1" bind:this={mediaFrame}>{@render mainMedia()}</div>
 			{/if}
 
 			{#if data.media.length > 0}
+				<!-- Disabled while the 3D stage is up: selecting a thumb would have
+				     no visible effect until Exit 3D (R2-D12). -->
 				<div class="media-strip">
 					<!-- Thumb buttons carry the accessible names: the video thumbs have
 					     no text at all, and an image alt would double-announce. -->
@@ -177,6 +238,7 @@
 						class:current={selected === null}
 						aria-current={selected === null}
 						aria-label={m.vr_media_poster()}
+						disabled={viewerActive}
 						onclick={() => (selected = null)}
 					>
 						{#if avatar.posterUrl}
@@ -189,6 +251,7 @@
 							class:current={selected === i}
 							aria-current={selected === i}
 							aria-label={m.vr_media_item({ name: avatar.name, n: i + 1 })}
+							disabled={viewerActive}
 							onclick={() => (selected = i)}
 						>
 							{#if item.kind === 'video'}
@@ -196,11 +259,14 @@
 									src={item.url}
 									muted
 									playsinline
-									preload="metadata"
+									preload="none"
 									class:blurred-thumb={avatar.nsfw && !revealed}
-									onloadedmetadata={(e) => (durations = { ...durations, [i]: e.currentTarget.duration })}
+									use:videoThumb={i}
 								></video>
-								{#if durations[i]}
+								<!-- Static play glyph: the clip affordance must not depend on
+								     metadata timing (DS1); the duration joins it when known. -->
+								<span class="play-glyph" aria-hidden="true"><Play size={16} /></span>
+								{#if durations[i] !== undefined}
 									<span class="duration-badge">{formatDuration(durations[i])}</span>
 								{/if}
 							{:else}
@@ -271,18 +337,41 @@
 			{#if licenseLabel(avatar.license)}
 				<div class="meta-section">
 					<h2>{m.vr_license()}</h2>
-					<span class="license-badge">{licenseLabel(avatar.license)}</span>
+					{#if avatar.license === 'cc-by'}
+						<!-- CC BY 4.0 §3(a)(1)(C): reusers must be pointed at the license
+						     text, so the badge links the deed wherever it renders —
+						     display counts, not just download. -->
+						<a
+							href="https://creativecommons.org/licenses/by/4.0/"
+							target="_blank"
+							rel="license noopener"
+							class="license-badge"
+						>
+							{licenseLabel(avatar.license)}
+							<ExternalLink size={11} aria-hidden="true" />
+							<span class="sr-only">{m.link_opens_new_tab()}</span>
+						</a>
+					{:else}
+						<span class="license-badge">{licenseLabel(avatar.license)}</span>
+					{/if}
 				</div>
 			{/if}
 
 			{#if data.downloadAllowed}
 				<div class="actions">
-					<a href="/vr/{avatar.slug}/download" class="btn btn-outline" download>
+					<!-- aria-describedby ties the CC BY attribution terms to the action
+					     they govern (R2-A12). -->
+					<a
+						href="/vr/{avatar.slug}/download"
+						class="btn btn-outline"
+						download
+						aria-describedby={ccByAttribution ? 'ccby-attribution' : undefined}
+					>
 						<Download size={16} /> {m.vr_download_model()}
 					</a>
 				</div>
 				{#if ccByAttribution}
-					<p class="attribution-note">{ccByAttribution}</p>
+					<p class="attribution-note" id="ccby-attribution">{ccByAttribution}</p>
 				{/if}
 			{/if}
 
@@ -315,7 +404,11 @@
 
 	.avatar-layout {
 		display: grid;
-		grid-template-columns: 1fr 380px;
+		/* The sidebar yields below its 380px ideal instead of outweighing the
+		   media column in the 769–900px band, where a fixed 380px left the media
+		   narrower than the meta panel (DS2). min 0 on the media track so long
+		   content can't force sideways scroll. */
+		grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
 		gap: 40px;
 		align-items: start;
 	}
@@ -336,11 +429,25 @@
 	.media-frame video {
 		width: 100%;
 		height: auto;
+		/* Cap the frame so a tall/square poster can't push the primary content
+		   (title, credits, download) off the first viewport — a 1128px-tall
+		   hero was measured at 1128px wide (DS3). contain keeps the full image
+		   visible inside the cap. */
+		max-height: min(70vh, 720px);
+		object-fit: contain;
 		display: block;
 	}
 
+	.media-frame:focus-visible {
+		outline: 2px solid var(--primary);
+		outline-offset: -2px;
+	}
+
 	.poster-placeholder {
-		aspect-ratio: 4 / 3;
+		/* Wide and capped: a posterless avatar renders an affordance, not a
+		   full-height empty slab (DS4). */
+		aspect-ratio: 16 / 9;
+		max-height: 360px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -403,6 +510,27 @@
 		border-color: var(--primary);
 	}
 
+	/* Disabled while the 3D stage is active (R2-D12). */
+	.media-thumb:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+
+	.media-thumb:disabled:hover {
+		border-color: transparent;
+	}
+
+	.play-glyph {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: #fff;
+		filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+		pointer-events: none;
+	}
+
 	.media-thumb img,
 	.media-thumb video {
 		width: 100%;
@@ -433,6 +561,9 @@
 		display: flex;
 		flex-direction: column;
 		gap: 20px;
+		/* Grid items default to min-width:auto — without 0 a long unbroken
+		   avatar name overflows the 390px viewport sideways (R2-B3). */
+		min-width: 0;
 	}
 
 	.avatar-meta h1 {
@@ -469,8 +600,9 @@
 		padding: 3px 10px;
 		border-radius: var(--radius-pill);
 		background: var(--secondary);
-		/* --foreground, not --muted-foreground: muted on --secondary sits below
-		   4.5:1 on the Ember light theme (see theme-contrast.test.ts). */
+		/* --foreground, not --muted-foreground: muted on --secondary is 3.96:1
+		   on the terracotta light theme (Ember light passes at 4.67:1 — see the
+		   SONA-124 block in theme-contrast.test.ts). */
 		color: var(--foreground);
 	}
 
@@ -579,12 +711,23 @@
 
 	.license-badge {
 		display: inline-flex;
+		align-items: center;
+		gap: 4px;
 		font-size: 12px;
 		font-weight: 500;
 		padding: 3px 10px;
 		border-radius: var(--radius-pill);
 		border: 1px solid var(--border);
 		color: var(--foreground);
+	}
+
+	a.license-badge {
+		text-decoration: none;
+		transition: border-color 0.15s;
+	}
+
+	a.license-badge:hover {
+		border-color: var(--muted-foreground);
 	}
 
 	.actions {

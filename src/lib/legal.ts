@@ -27,6 +27,8 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
+// SET AT MERGE: re-derive to the merge date (the default text changed in this
+// change set — same checklist item as the early-access gaDate).
 export const LEGAL_DEFAULTS_UPDATED = '2026-08-09';
 
 /**
@@ -92,7 +94,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'Service providers',
 			body: [
-				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, image storage), on some sites an image-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services."
+				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, and storage for images, video clips, and 3D avatar model files), on some sites a file-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services."
 			]
 		},
 		{

@@ -10,14 +10,15 @@
  *  1. R2 by the key the stored URL's path spells (modelKeyFromUrl — the
  *     base-agnostic deleteOrphans rule), so a changed r2PublicUrl can't orphan
  *     a stored object.
- *  2. If the ACTIVE provider owns the URL and isn't R2 (UploadThing), an
- *     outbound fetch of the provider URL, streamed through — the visitor's own
- *     fetch stays same-origin (CSP connect-src 'self' intact). R2 is excluded
- *     here because step 1 already probed the bucket: owns() succeeding for R2
+ *  2. If ANY configured non-R2 provider owns the URL (UploadThing — active or
+ *     not, so a provider switch can't orphan an earlier upload), an outbound
+ *     fetch of the provider URL, streamed through — the visitor's own fetch
+ *     stays same-origin (CSP connect-src 'self' intact). R2 is excluded here
+ *     because step 1 already probed the bucket: owns() succeeding for R2
  *     would just spell the same missing key again (or loop through /img).
  */
 import { modelKeyFromUrl } from '$lib/vr';
-import { getStorage } from '$lib/server/storage';
+import { ALL_PROVIDERS, getStorage } from '$lib/server/storage';
 import type { SiteSettings } from '$lib/server/settings';
 
 type Env = App.Platform['env'];
@@ -37,13 +38,20 @@ export interface ResolvedModelBytes {
 }
 
 function providerFetchable(opts: ModelBytesOpts): boolean {
-	try {
-		const storage = getStorage(opts.env, opts.settings);
-		return storage.id !== 'r2' && storage.owns(opts.modelUrl);
-	} catch {
-		// Provider not configured — nothing to fetch from.
-		return false;
+	// EVERY configured provider, not just the active one (the isOwnedUrl /
+	// deleteFile precedent in storage/index.ts): a model uploaded while
+	// UploadThing was active must stay servable after the fork switches to R2 —
+	// the migrate tool never repoints vr model URLs. R2 is skipped because step
+	// 1 of resolveModelBytes already probed the bucket by key.
+	for (const id of ALL_PROVIDERS) {
+		if (id === 'r2') continue;
+		try {
+			if (getStorage(opts.env, opts.settings, id).owns(opts.modelUrl)) return true;
+		} catch {
+			// Provider not configured — nothing to fetch from.
+		}
 	}
+	return false;
 }
 
 /** Open the model's bytes for streaming, or null when nothing serves this URL. */
@@ -56,7 +64,10 @@ export async function resolveModelBytes(opts: ModelBytesOpts): Promise<ResolvedM
 		}
 	}
 	if (providerFetchable(opts)) {
-		const res = await fetch(opts.modelUrl);
+		// redirect: 'manual' — owns() anchored this URL to a provider host we
+		// trust; following a redirect would let that host bounce the stream to an
+		// arbitrary origin (SSRF via redirect). A 3xx is treated as unresolvable.
+		const res = await fetch(opts.modelUrl, { redirect: 'manual' });
 		if (res.ok && res.body) {
 			const len = res.headers.get('content-length');
 			return {
@@ -67,6 +78,16 @@ export async function resolveModelBytes(opts: ModelBytesOpts): Promise<ResolvedM
 		}
 	}
 	return null;
+}
+
+/** Whether an If-None-Match header names `etag` (comma-separated list or *).
+ * Shared by the model + download routes so both answer conditional
+ * revalidation with a 304 instead of re-streaming a multi-MB body. W/ prefixes
+ * are tolerated on the request side; R2 httpEtag values are strong. */
+export function etagMatches(ifNoneMatch: string | null, etag: string): boolean {
+	if (!ifNoneMatch) return false;
+	if (ifNoneMatch.trim() === '*') return true;
+	return ifNoneMatch.split(',').some((t) => t.trim().replace(/^W\//, '') === etag);
 }
 
 /**

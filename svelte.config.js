@@ -61,7 +61,13 @@ const config = {
 				// script and is unguessable, so allowing it grants an attacker nothing
 				// they couldn't already do with script execution.
 				'img-src': ['self', 'https:', 'data:', 'blob:'],
-				'media-src': ['self', 'https:'],
+				// blob: for the same reason as img-src: the admin VR media picker
+				// probes each picked .webm clip through URL.createObjectURL(file) +
+				// <video> metadata (probeDimensions). Without it the probe fires
+				// onerror, dimensions resolve to null, the row stores no width/height
+				// and the public strip takes a measured ~459px layout shift — silent
+				// metadata corruption, not just a missing preview.
+				'media-src': ['self', 'https:', 'blob:'],
 				'connect-src': ['self'],
 				'frame-src': ['self', 'https://challenges.cloudflare.com'],
 				'frame-ancestors': ['none'],

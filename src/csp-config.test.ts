@@ -38,8 +38,17 @@ describe('kit.csp directives', () => {
 		// Same-origin (/cdn-cgi/image, /img), any https host (per-fork R2 domain,
 		// external artist avatars, UploadThing), data: (CSS chevron / inline SVG),
 		// and blob: (see below).
+		// DELIBERATE change (SONA-124 R2-B1): media-src gained blob: for the VR
+		// media picker's client-side clip probe — the same rationale as img-src's
+		// blob: (see the next test). The load-bearing containment invariants are
+		// untouched: connect-src stays 'self' and script-src still carries no
+		// unsafe-inline/unsafe-eval (asserted above).
 		expect(d['img-src']).toEqual(['self', 'https:', 'data:', 'blob:']);
-		expect(d['media-src']).toEqual(['self', 'https:']);
+		expect(d['media-src']).toEqual(['self', 'https:', 'blob:']);
+	});
+
+	it('keeps connect-src locked to self (the viewer must fetch models same-origin)', () => {
+		expect(d['connect-src']).toEqual(['self']);
 	});
 
 	it('allows blob: images, or the upload page silently stores NULL dimensions', () => {

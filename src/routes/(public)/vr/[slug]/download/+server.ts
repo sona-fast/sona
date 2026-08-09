@@ -4,7 +4,7 @@ import { vrAvatars } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { getSettings } from '$lib/server/settings';
 import { RateLimiter } from '$lib/server/rate-limit';
-import { resolveModelBytes } from '$lib/server/vr-model-bytes';
+import { etagMatches, resolveModelBytes } from '$lib/server/vr-model-bytes';
 import { isPermissiveVrLicense, modelExt } from '$lib/vr';
 import type { RequestHandler } from './$types';
 
@@ -30,7 +30,7 @@ const downloadLimiter = new RateLimiter(20, 60_000); // 20 downloads / min / IP
 // base-agnostic key rule, else the active non-R2 provider's own URL streamed
 // through. Never buffered: models are far beyond what a worker should hold in
 // memory.
-export const GET: RequestHandler = async ({ params, url, platform, getClientAddress }) => {
+export const GET: RequestHandler = async ({ params, request, url, platform, getClientAddress }) => {
 	if (!downloadLimiter.check(getClientAddress(), Date.now())) {
 		error(429, 'Too many downloads, please slow down.');
 	}
@@ -81,11 +81,18 @@ export const GET: RequestHandler = async ({ params, url, platform, getClientAddr
 		// Stored models are immutable objects, but the download URL's offer can be
 		// revoked (unpublish, license change, downloadable off) — match the sticker
 		// download's short shared-cache TTL so a takedown propagates promptly.
-		'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=3600'
+		// A short browser max-age spares an immediate re-download the transfer.
+		'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=3600'
 	});
+	if (resolved.etag) headers.set('etag', resolved.etag);
+	// Conditional revalidation: a matching If-None-Match answers 304 instead of
+	// re-streaming the whole file (shared etagMatches with the model route).
+	if (resolved.etag && etagMatches(request.headers.get('if-none-match'), resolved.etag)) {
+		void resolved.body.cancel();
+		return new Response(null, { status: 304, headers });
+	}
 	// Declared when the source knows it (R2 always does; a proxied provider
 	// should) so the browser can show download progress.
 	if (resolved.size !== null) headers.set('content-length', String(resolved.size));
-	if (resolved.etag) headers.set('etag', resolved.etag);
 	return new Response(resolved.body, { headers });
 };

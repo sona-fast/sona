@@ -518,11 +518,36 @@ describe('DownloadMenu lifted-surface WCAG AA contrast, every theme × mode (SON
 describe('public chip text (foreground on secondary) WCAG AA contrast (SONA-124)', () => {
 	// The VR pages' chips (platform/format/role) render --foreground on
 	// --secondary: the --muted-foreground pairing they replaced was 3.96:1 on
-	// ember light. Guard the replacement pairing in every theme × mode so a
-	// token tweak can't quietly sink the chips again.
+	// TERRACOTTA light (Ember light passes at 4.67:1). Guard the replacement
+	// pairing in every theme × mode so a token tweak can't quietly sink the
+	// chips again.
 	for (const { name, sel } of THEME_BLOCKS) {
 		it(`${name}: foreground on secondary meets 4.5:1`, () => {
 			expect(contrast(blockToken(sel, 'foreground'), blockToken(sel, 'secondary'))).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
+
+describe('SONA-124 chip CSS keeps the --foreground token (R2-A3)', () => {
+	// The token pairing above only matters while the components actually USE
+	// the token: a revert to color: var(--muted-foreground) in any chip rule
+	// would pass every token assertion and still ship the 3.96:1 terracotta
+	// failure. Parse the component source like the DownloadMenu describe.
+	const chipRules: Array<{ file: string; selector: string }> = [
+		{ file: '../routes/(public)/vr/+page.svelte', selector: '.platform-chip' },
+		{ file: '../routes/(public)/vr/[slug]/+page.svelte', selector: '.chip' },
+		{ file: '../routes/(public)/vr/[slug]/+page.svelte', selector: '.role-chip' },
+		{ file: '../routes/admin/vr/+page.svelte', selector: '.model-chip' },
+		{ file: '../routes/admin/vr/+page.svelte', selector: '.vis-chip' }
+	];
+
+	for (const { file, selector } of chipRules) {
+		it(`${file} ${selector} colors its text with var(--foreground)`, () => {
+			const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+			const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
+			if (!body) throw new Error(`${selector} rule not found in ${file}`);
+			expect(body).toMatch(/color:\s*var\(--foreground\)\s*;/);
 		});
 	}
 });

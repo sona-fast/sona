@@ -4,7 +4,7 @@ import { vrAvatars } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { getSettings } from '$lib/server/settings';
 import { RateLimiter } from '$lib/server/rate-limit';
-import { resolveModelBytes } from '$lib/server/vr-model-bytes';
+import { etagMatches, resolveModelBytes } from '$lib/server/vr-model-bytes';
 import { viewerSupports } from '$lib/vr';
 import type { RequestHandler } from './$types';
 
@@ -24,7 +24,7 @@ const viewerLimiter = new RateLimiter(20, 60_000); // 20 fetches / min / IP
 // viewer consumes (nothing else has a reason to fetch this route).
 //   404 — unknown slug, unpublished, no self-hosted model, non-viewer format,
 //         or nothing resolves the stored URL (all indistinguishable on purpose)
-export const GET: RequestHandler = async ({ params, url, platform, getClientAddress }) => {
+export const GET: RequestHandler = async ({ params, request, url, platform, getClientAddress }) => {
 	if (!viewerLimiter.check(getClientAddress(), Date.now())) {
 		error(429, 'Too many requests, please slow down.');
 	}
@@ -61,10 +61,18 @@ export const GET: RequestHandler = async ({ params, url, platform, getClientAddr
 		// NOT immutable, unlike /img: the model URL's availability can be revoked
 		// (unpublish, model removed) and that must propagate instead of being
 		// immortalized in shared caches — same short TTL as the download route.
-		'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=3600'
+		// A short browser max-age spares repeat views the multi-MB re-transfer.
+		'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=3600'
 	});
+	if (resolved.etag) headers.set('etag', resolved.etag);
+	// Conditional revalidation: past max-age the browser revalidates with
+	// If-None-Match; matching the R2 httpEtag turns a multi-MB re-stream into a
+	// 304. Simple exact/list match — R2 etags are strong.
+	if (resolved.etag && etagMatches(request.headers.get('if-none-match'), resolved.etag)) {
+		void resolved.body.cancel();
+		return new Response(null, { status: 304, headers });
+	}
 	// Declared when known so the viewer can report byte progress.
 	if (resolved.size !== null) headers.set('content-length', String(resolved.size));
-	if (resolved.etag) headers.set('etag', resolved.etag);
 	return new Response(resolved.body, { headers });
 };

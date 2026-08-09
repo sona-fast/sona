@@ -6,9 +6,13 @@
 // and abort the moment the total exceeds the cap, rather than fully buffering
 // first and checking the size after.
 
+import { MAX_BUFFER_BYTES } from '$lib/config';
+
 /** 10 MB: comfortably above any real artwork/fursuit photo or Telegram sticker
- * (Telegram caps stickers ~512 KB), while far below the isolate memory ceiling. */
-export const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+ * (Telegram caps stickers ~512 KB), while far below the isolate memory ceiling.
+ * The value lives in $lib/config (client-safe — the admin media picker
+ * pre-checks it); this re-export keeps the server call sites unchanged. */
+export { MAX_BUFFER_BYTES };
 
 /** Thrown when a buffered body exceeds the byte cap. */
 export class MaxBytesExceededError extends Error {

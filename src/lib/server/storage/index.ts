@@ -98,7 +98,11 @@ export function isAllowedStickerType(contentType: string | null | undefined): bo
 	return ALLOWED_STICKER_TYPES.has(contentType.split(';')[0].trim().toLowerCase());
 }
 
-const ALL_PROVIDERS: StorageProviderId[] = ['r2', 'uploadthing'];
+/** Every provider id, for callers that must consult ALL providers (not just
+ * the active one): isOwnedUrl, deleteFile, orphan sweeps, and the VR model
+ * byte resolution (a file uploaded under one provider must stay resolvable
+ * after a switch). */
+export const ALL_PROVIDERS: StorageProviderId[] = ['r2', 'uploadthing'];
 
 /**
  * True if `url` is served by any configured provider (i.e. we host it). Used to

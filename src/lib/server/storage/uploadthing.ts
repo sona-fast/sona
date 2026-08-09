@@ -202,7 +202,20 @@ export class UploadThingStorage implements StorageProvider {
 
 	owns(url: string): boolean {
 		// UploadThing serves from <appId>.ufs.sh/f/<key> (and legacy utfs.io/f/<key>).
-		return /\.ufs\.sh\/f\/|utfs\.io\/f\//.test(url);
+		// Anchored via URL parsing, mirroring R2Storage.owns(): the old substring
+		// regex matched https://attacker.example/utfs.io/f/x, which let foreign
+		// URLs count as ours anywhere owns() gates (media validation, the model
+		// byte proxy — an SSRF relay on forks with UPLOADTHING_TOKEN set).
+		let parsed: URL;
+		try {
+			parsed = new URL(url);
+		} catch {
+			return false;
+		}
+		if (parsed.protocol !== 'https:') return false;
+		const host = parsed.hostname.toLowerCase();
+		if (host !== 'utfs.io' && !host.endsWith('.ufs.sh')) return false;
+		return parsed.pathname.startsWith('/f/');
 	}
 
 	async deleteOrphans(referencedUrls: string[], opts?: DeleteOrphansOptions): Promise<number> {

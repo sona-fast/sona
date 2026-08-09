@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sniffImageType } from './sniff';
+import { sniffImageType, isWebmHead } from './sniff';
 import { isAllowedImageType } from './index';
 
 const enc = new TextEncoder();
@@ -64,5 +64,26 @@ describe('sniffImageType', () => {
 	it('accepts real raster bytes through the same allowlist gate', () => {
 		expect(isAllowedImageType(sniffImageType(PNG))).toBe(true);
 		expect(isAllowedImageType(sniffImageType(WEBP))).toBe(true);
+	});
+});
+
+describe('isWebmHead (SONA-124 showcase clips)', () => {
+	// EBML/Matroska magic: 1A 45 DF A3.
+	const WEBM = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81]);
+
+	it('detects the EBML magic', () => {
+		expect(isWebmHead(WEBM)).toBe(true);
+	});
+
+	it('rejects HTML, raster bytes, truncated heads, and empty input', () => {
+		expect(isWebmHead(enc.encode('<!DOCTYPE html><script>alert(1)</script>'))).toBe(false);
+		expect(isWebmHead(PNG)).toBe(false);
+		expect(isWebmHead(new Uint8Array([0x1a, 0x45]))).toBe(false);
+		expect(isWebmHead(new Uint8Array([]))).toBe(false);
+	});
+
+	it('is NOT consulted by sniffImageType — image call sites cannot start accepting video', () => {
+		expect(sniffImageType(WEBM)).toBeNull();
+		expect(isAllowedImageType(sniffImageType(WEBM))).toBe(false);
 	});
 });

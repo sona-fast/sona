@@ -5,23 +5,13 @@
  * declared metadata plus a small PEEKED head — never the materialized body.
  */
 
-// The size cap itself lives in $lib/vr (shared with the admin upload UI, which
-// refuses oversized files client-side before sending a byte); the endpoint
-// checks it against Content-Length BEFORE any body byte is read.
-export { MAX_VR_MODEL_BYTES } from '$lib/vr';
-
-/** The .vrm/.fbx extension of an uploaded filename, or null when it carries
- * none we accept. Case-insensitive; the extension is the LAST dot segment.
- * The extension doubles as the stored model format: VRM 0.x and 1.0 share the
- * .vrm container and the head sniff can't cheaply tell them apart, so uploads
- * record the generic 'vrm' (the viewer supports both). */
-export function modelExtFromFilename(filename: string | null | undefined): 'vrm' | 'fbx' | null {
-	if (!filename) return null;
-	const dot = filename.lastIndexOf('.');
-	if (dot <= 0) return null;
-	const ext = filename.slice(dot + 1).toLowerCase();
-	return ext === 'vrm' || ext === 'fbx' ? ext : null;
-}
+// The size cap and the extension parser live in $lib/vr (shared with the admin
+// upload UI, which refuses bad/oversized files client-side before sending a
+// byte); the endpoint checks the cap against Content-Length BEFORE any body
+// byte is read. The extension doubles as the stored model format: VRM 0.x and
+// 1.0 share the .vrm container and the head sniff can't cheaply tell them
+// apart, so uploads record the generic 'vrm' (the viewer supports both).
+export { MAX_VR_MODEL_BYTES, modelExtFromFilename } from '$lib/vr';
 
 // Model files have no registered media type — browsers and our own uploader
 // send them as octet-stream; model/gltf-binary shows up for VRM from tools

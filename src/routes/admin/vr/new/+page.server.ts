@@ -35,7 +35,7 @@ export const actions = {
 		// Server-side gate enforcement (SONA-124): the gated UI is presentation;
 		// creating an avatar is refused here regardless of what was submitted.
 		if (!(await vrPublishingEnabled(db, platform?.env))) {
-			return fail(403, { error: 'VR avatars are in early access — creating avatars needs a valid supporter key until it opens for everyone.' });
+			return fail(403, { error: 'VR avatars are in early access — creating avatars needs a valid supporter key until they open for everyone.' });
 		}
 
 		const data = await request.formData();

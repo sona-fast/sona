@@ -76,7 +76,9 @@ export const load: PageServerLoad = async ({ platform }) => {
 			modelSizeBytes: r.modelSizeBytes,
 			externalUrl: r.externalUrl,
 			license: r.license,
-			permissionSource: r.permissionSource,
+			// Boolean only: the page needs presence, and the recorded grant text
+			// (names, dates, DM references) has no reason to ship to the client.
+			hasPermission: !!r.permissionSource,
 			downloadable: r.downloadable,
 			nsfw: r.nsfw,
 			published: r.published,

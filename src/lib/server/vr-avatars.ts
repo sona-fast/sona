@@ -1,7 +1,8 @@
 import { eq, and, ne } from 'drizzle-orm';
 import { vrAvatars, avatarCredits, avatarMedia, avatarPlatforms, characters, images } from '$lib/server/db/schema';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
-import { deleteFile, isOwnedUrl } from '$lib/server/storage';
+import { deleteFile } from '$lib/server/storage';
+import { isOurAvatarUrl } from '$lib/server/avatar';
 import type { SiteSettings } from '$lib/server/settings';
 import type { Database } from '$lib/server/db';
 
@@ -161,12 +162,48 @@ export function parseAvatarForm(data: FormData): ParseResult {
 }
 
 /**
- * Showcase media must be SELF-HOSTED (uploaded through /api/upload), never a
- * hot-linked foreign URL — same rule saveManualPack applies to sticker media.
- * Checked here (not in parseAvatarForm) because ownership needs env/settings.
- * A same-origin absolute URL is accepted via its pathname too: on a no-CDN R2
- * fork /api/upload returns absolutized '/img/…' URLs that bare isOwnedUrl
- * doesn't match (the isOurAvatarUrl precedent in avatar.ts).
+ * Whether a stored-file URL submitted through the avatar form is one of OURS.
+ * Two accepting branches:
+ *  1. isOurAvatarUrl — owned by any configured provider, root-relative, or a
+ *     known-self origin (request origin + settings.siteUrl) whose pathname is
+ *     owned. Covers the no-CDN '/img/…' absolutized case.
+ *  2. Base-agnostic pathname key (the modelKeyFromUrl / deleteOrphans rule),
+ *     restricted to OUR upload partition for the field: stored URLs are
+ *     absolutized against whatever base was active AT UPLOAD TIME, so after an
+ *     r2PublicUrl change branch 1 stops matching and every save of an avatar
+ *     with media (even a publish flip) would lock with a misleading
+ *     "external URLs" error. Serving and disposal already resolve these URLs
+ *     by pathname key, so acceptance mirrors that rule. The partition check
+ *     keeps arbitrary foreign URLs out — only a URL shaped like one of our own
+ *     uploads passes without a matching base.
+ */
+function isStoredUploadUrl(
+	env: Env | undefined,
+	settings: SiteSettings,
+	origin: string,
+	url: string,
+	partition: 'vr-media/' | 'vr-models/'
+): boolean {
+	if (isOurAvatarUrl(env, settings, origin, url)) return true;
+	try {
+		const parsed = new URL(url, origin);
+		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+		const path = parsed.pathname;
+		const key = path.startsWith('/img/') ? path.slice('/img/'.length) : path.replace(/^\//, '');
+		return key.startsWith(partition);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Showcase media AND the model file must be SELF-HOSTED (uploaded through
+ * /api/upload / /api/admin/vr-model), never a foreign URL — same rule
+ * saveManualPack applies to sticker media. Checked here (not in
+ * parseAvatarForm) because ownership needs env/settings. The model check is
+ * also the SSRF gate: modelUrl arrives from a client-editable hidden field,
+ * and on a provider-fetch fork resolveModelBytes would relay whatever host it
+ * names to anonymous visitors (defense-in-depth on top of the anchored owns()).
  */
 export function validateAvatarMedia(
 	env: Env | undefined,
@@ -175,16 +212,12 @@ export function validateAvatarMedia(
 	input: AvatarFormInput
 ): string | null {
 	for (const item of input.media) {
-		if (isOwnedUrl(env, settings, item.url)) continue;
-		try {
-			const parsed = new URL(item.url, origin);
-			if (parsed.origin === new URL(origin).origin && isOwnedUrl(env, settings, parsed.pathname)) {
-				continue;
-			}
-		} catch {
-			// fall through to the error
+		if (!isStoredUploadUrl(env, settings, origin, item.url, 'vr-media/')) {
+			return 'Showcase media must be uploaded here — external URLs cannot be used.';
 		}
-		return 'Showcase media must be uploaded here — external URLs cannot be used.';
+	}
+	if (input.modelUrl && !isStoredUploadUrl(env, settings, origin, input.modelUrl, 'vr-models/')) {
+		return 'The model file must be uploaded here — external model URLs cannot be used.';
 	}
 	return null;
 }

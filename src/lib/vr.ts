@@ -172,18 +172,28 @@ export function formatBytes(bytes: number | null | undefined): string {
 	return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+/** The .vrm/.fbx extension of an uploaded filename, or null when it carries
+ * none we accept. Case-insensitive; the extension is the LAST dot segment, and
+ * a leading dot ('.vrm') carries no extension. Lives here (not $lib/server)
+ * because the client-side mirror below uses the same rule — one parser instead
+ * of two mirror-commented copies (the MAX_VR_MODEL_BYTES precedent);
+ * $lib/server/vr-models re-exports it for the endpoint. */
+export function modelExtFromFilename(filename: string | null | undefined): 'vrm' | 'fbx' | null {
+	if (!filename) return null;
+	const dot = filename.lastIndexOf('.');
+	if (dot <= 0) return null;
+	const ext = filename.slice(dot + 1).toLowerCase();
+	return ext === 'vrm' || ext === 'fbx' ? ext : null;
+}
+
 /**
  * Client-side validation of a picked model file, extracted from the admin
  * form's onModelPicked so it is unit-testable: mirrors the server guards
- * (extension allowlist, MAX_VR_MODEL_BYTES) for instant feedback — the
+ * (shared modelExtFromFilename, MAX_VR_MODEL_BYTES) for instant feedback — the
  * /api/admin/vr-model endpoint re-checks all of it.
  */
 export function modelFileError(file: { name: string; size: number }): 'bad-type' | 'too-large' | null {
-	// Same extension rule as the server's modelExtFromFilename: the LAST dot
-	// segment, and a leading dot ('.vrm') carries no extension.
-	const dot = file.name.lastIndexOf('.');
-	const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase() : null;
-	if (ext !== 'vrm' && ext !== 'fbx') return 'bad-type';
+	if (!modelExtFromFilename(file.name)) return 'bad-type';
 	if (file.size > MAX_VR_MODEL_BYTES) return 'too-large';
 	return null;
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { avatarColor, avatarInitials } from '$lib/avatar-color';
-	import { cdnImage } from '$lib/img';
+	import { cdnImage, rawFallback } from '$lib/img';
 
 	interface Props {
 		name: string;
@@ -42,6 +42,12 @@
 </script>
 
 {#if avatarUrl && !failed}
+	<!-- use:rawFallback backstops the SSR gap (R2-D3): a cdn-transformed
+	     off-zone avatar (e.g. Bluesky CDN) can 403 BEFORE hydration, when
+	     onerror isn't wired yet — the action's mount-time complete/naturalWidth
+	     check swaps the already-failed img to the raw URL, per the documented
+	     admin/stickers precedent. Runtime errors still walk the cdn→raw→monogram
+	     ladder via onError. -->
 	<img
 		class="avatar"
 		src={displaySrc}
@@ -50,6 +56,7 @@
 		height={size}
 		loading={lazy ? 'lazy' : undefined}
 		style="--avatar-size: {size}px"
+		use:rawFallback={avatarUrl}
 		onerror={onError}
 	/>
 {:else}

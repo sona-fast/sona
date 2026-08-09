@@ -248,8 +248,9 @@
 		padding: 2px 8px;
 		border-radius: var(--radius-pill);
 		background: var(--secondary);
-		/* --foreground, not --muted-foreground: muted on --secondary sits below
-		   4.5:1 on the Ember light theme (see theme-contrast.test.ts). */
+		/* --foreground, not --muted-foreground: muted on --secondary is 3.96:1
+		   on the terracotta light theme (Ember light passes at 4.67:1 — see the
+		   SONA-124 block in theme-contrast.test.ts). */
 		color: var(--foreground);
 	}
 

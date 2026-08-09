@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import type { Snippet } from 'svelte';
-	import { Box, Maximize, X } from 'lucide-svelte';
+	import { AlertTriangle, Box, Maximize, X } from 'lucide-svelte';
 	import { formatBytes } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
@@ -19,6 +19,10 @@
 		 * entering 3D doesn't shift the layout (falls back to 4:3). */
 		posterWidth?: number | null;
 		posterHeight?: number | null;
+		/** Whether the 3D view is active/loading — bindable so the page can
+		 * disable controls that have no visible effect while the stage covers the
+		 * poster (the media strip, R2-D12). */
+		active?: boolean;
 		/** The poster markup shown until (and after) the 3D view is active. */
 		children: Snippet;
 	}
@@ -31,14 +35,16 @@
 		revealed = false,
 		posterWidth = null,
 		posterHeight = null,
+		active = $bindable(false),
 		children
 	}: Props = $props();
-
-	let active = $state(false);
 	let loading = $state(false);
 	let loadedBytes = $state(0);
 	let failed = $state(false);
 	let webglUnavailable = $state(false);
+	// Mirrors document.fullscreenElement so the toggle can expose its state
+	// (aria-pressed) — the visual gives no other cue which mode is active.
+	let isFullscreen = $state(false);
 
 	let viewer = $state<HTMLDivElement>();
 	let stage = $state<HTMLDivElement>();
@@ -271,6 +277,11 @@
 			active = false;
 			loading = false;
 			failed = true;
+			// The loading panel this failure unmounts held no focus, but the View
+			// in 3D button the click came from did — re-land focus there instead
+			// of letting it fall to <body> (mirrors exit3d).
+			await tick();
+			viewButton?.focus();
 		}
 	}
 
@@ -305,6 +316,8 @@
 	});
 </script>
 
+<svelte:document onfullscreenchange={() => (isFullscreen = !!document.fullscreenElement)} />
+
 <div class="viewer" bind:this={viewer}>
 	{#if !active}
 		{@render children()}
@@ -333,10 +346,14 @@
 			bind:this={stage}
 			role="img"
 			aria-label={name}
+			aria-describedby="vr-stage-keys"
 			tabindex="0"
 			style="aspect-ratio: {aspect}"
 			onkeydown={(e) => stageKeydown?.(e)}
 		></div>
+		<!-- The keyboard camera bindings are invisible; describe them where a
+		     screen reader lands (the focusable stage). -->
+		<span class="sr-only" id="vr-stage-keys">{m.vr_stage_keys_hint()}</span>
 	{/if}
 
 	<!-- Always-mounted live region (inserting one with content skips the
@@ -357,12 +374,22 @@
 		{/if}
 		{#if failed}
 			<!-- Its own row below the actions (not inline beside the orange primary
-			     button) and role=alert like the admin upload errors. -->
-			<p class="load-error" role="alert">{m.vr_load_failed()}</p>
+			     button) and role=alert like the admin upload errors. Banner
+			     treatment (destructive tint + icon), not bare caption text that
+			     reads like a strip label (DS7, pairs with the R2-A5 token fix). -->
+			<p class="load-error" role="alert">
+				<AlertTriangle size={14} aria-hidden="true" />
+				{m.vr_load_failed()}
+			</p>
 		{/if}
 	{:else}
 		<div class="controls">
-			<button class="btn btn-secondary" onclick={toggleFullscreen} disabled={loading}>
+			<button
+				class="btn btn-secondary"
+				onclick={toggleFullscreen}
+				disabled={loading}
+				aria-pressed={isFullscreen}
+			>
 				<Maximize size={16} /> {m.vr_fullscreen()}
 			</button>
 			<button bind:this={exitButton} class="btn btn-secondary" onclick={exit3d}>
@@ -457,19 +484,21 @@
 	}
 
 	.load-error {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 		font-size: 13px;
+		padding: 10px 12px;
+		border-radius: var(--radius-s);
+		/* Soft-badge pairing (.sbadge pattern): --destructive text over its own
+		   tint — banner treatment so the failure doesn't read as a caption. */
+		background: color-mix(in srgb, var(--destructive) 12%, transparent);
 		color: var(--destructive);
 	}
 
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
+	.load-error :global(svg) {
+		flex-shrink: 0;
 	}
+
+	/* .sr-only comes from the global rule in app.css — no local copy. */
 </style>

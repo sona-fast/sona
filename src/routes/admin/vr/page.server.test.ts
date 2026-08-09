@@ -148,4 +148,21 @@ describe('/admin/vr list load', () => {
 		const data = await loadData(platform);
 		expect(data.publishingEnabled).toBe(true);
 	});
+
+	it('ships hasPermission as a boolean, never the recorded grant text (R2-S3)', async () => {
+		// Only presence feeds the Download column; the permission_source prose
+		// (names, dates, DM references) has no reason to reach the client.
+		const { sqlite, platform } = makeDb();
+		const id = addAvatar(sqlite, { slug: 'granted' });
+		sqlite
+			.prepare('UPDATE vr_avatars SET permission_source = ? WHERE id = ?')
+			.run('Telegram DM 2026-08-01 with @artist', id);
+		addAvatar(sqlite, { slug: 'ungranted' });
+
+		const data = await loadData(platform);
+		const bySlug = Object.fromEntries(data.avatars.map((a) => [a.slug, a]));
+		expect((bySlug.granted as { hasPermission?: unknown }).hasPermission).toBe(true);
+		expect((bySlug.ungranted as { hasPermission?: unknown }).hasPermission).toBe(false);
+		expect(JSON.stringify(data.avatars)).not.toContain('Telegram DM');
+	});
 });

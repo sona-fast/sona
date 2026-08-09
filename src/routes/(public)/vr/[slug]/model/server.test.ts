@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -67,13 +67,26 @@ let nextIp = 0;
 
 function makeEvent(
 	db: ReturnType<typeof seedDb>,
-	opts: { slug?: string; images?: ReturnType<typeof makeImages>; ip?: string } = {}
+	opts: {
+		slug?: string;
+		images?: ReturnType<typeof makeImages>;
+		ip?: string;
+		headers?: Record<string, string>;
+		uploadthingToken?: string;
+	} = {}
 ) {
 	const slug = opts.slug ?? 'foxo';
 	return {
 		params: { slug },
+		request: new Request(`${ORIGIN}/vr/${slug}/model`, { headers: opts.headers }),
 		url: new URL(`${ORIGIN}/vr/${slug}/model`),
-		platform: { env: { DB: db, IMAGES: opts.images ?? makeImages() } },
+		platform: {
+			env: {
+				DB: db,
+				IMAGES: opts.images ?? makeImages(),
+				...(opts.uploadthingToken ? { UPLOADTHING_TOKEN: opts.uploadthingToken } : {})
+			}
+		},
 		getClientAddress: () => opts.ip ?? `10.1.0.${nextIp++}`
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	} as any;
@@ -101,12 +114,31 @@ describe('GET /vr/[slug]/model — viewer bytes', () => {
 
 	it('sends octet-stream + nosniff and a SHORT, non-immutable shared-cache TTL', async () => {
 		// NOT the /img route's immutable 1y: revocation (unpublish/removal) must
-		// propagate through shared caches.
+		// propagate through shared caches; the short browser max-age just spares
+		// repeat views the multi-MB re-transfer.
 		const res = await GET(makeEvent(seedDb({})));
 		expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
 		expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
-		expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=300, stale-while-revalidate=3600');
+		expect(res.headers.get('Cache-Control')).toBe(
+			'public, max-age=60, s-maxage=300, stale-while-revalidate=3600'
+		);
 		expect(res.headers.get('content-length')).toBe(String('MODEL BYTES'.length));
+		expect(res.headers.get('etag')).toBe('"model-etag"');
+	});
+
+	it('answers 304 (no body) to a matching If-None-Match revalidation', async () => {
+		const res = await GET(
+			makeEvent(seedDb({}), { headers: { 'if-none-match': '"model-etag"' } })
+		);
+		expect(res.status).toBe(304);
+		expect(res.headers.get('etag')).toBe('"model-etag"');
+		expect(await res.text()).toBe('');
+	});
+
+	it('re-streams the body when If-None-Match does not match', async () => {
+		const res = await GET(makeEvent(seedDb({}), { headers: { 'if-none-match': '"stale"' } }));
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('MODEL BYTES');
 	});
 
 	it('404s unknown, unpublished, model-less and FBX avatars alike', async () => {
@@ -138,5 +170,35 @@ describe('GET /vr/[slug]/model — viewer bytes', () => {
 			await expect(status(GET(makeEvent(db, { ip })))).resolves.toBe(200);
 		}
 		await expect(status(GET(makeEvent(db, { ip })))).resolves.toBe(429);
+	});
+});
+
+describe('GET /vr/[slug]/model — provider-fetch resolution (R2-D1/R2-D6)', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('proxies an UploadThing-owned URL even when UT is NOT the active provider', async () => {
+		// The D1 case: model uploaded while UploadThing was active, provider later
+		// switched to R2 (the default here) — the bytes must still resolve, or
+		// viewer AND download 404 forever.
+		const fetchMock = vi.fn(
+			async () => new Response('UT BYTES', { headers: { 'content-length': '8' } })
+		);
+		vi.stubGlobal('fetch', fetchMock);
+		const db = seedDb({ modelUrl: 'https://utfs.io/f/abc123' });
+		const res = await GET(makeEvent(db, { images: makeImages({}), uploadthingToken: 'tkn' }));
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('UT BYTES');
+		expect(res.headers.get('content-length')).toBe('8');
+		// redirect: 'manual' — a provider 3xx must not bounce the stream off-host.
+		expect(fetchMock).toHaveBeenCalledWith('https://utfs.io/f/abc123', { redirect: 'manual' });
+	});
+
+	it('omits content-length when the provider declares no size (progress degrades, stream works)', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => new Response('UT BYTES')));
+		const db = seedDb({ modelUrl: 'https://utfs.io/f/abc123' });
+		const res = await GET(makeEvent(db, { images: makeImages({}), uploadthingToken: 'tkn' }));
+		expect(res.status).toBe(200);
+		expect(res.headers.get('content-length')).toBeNull();
+		expect(await res.text()).toBe('UT BYTES');
 	});
 });

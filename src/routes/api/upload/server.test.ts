@@ -97,6 +97,35 @@ describe('POST /api/upload', () => {
 		expect(put).not.toHaveBeenCalled();
 	});
 
+	it('accepts a video/webm clip whose head carries the EBML magic (SONA-124)', async () => {
+		// The VR showcase widening: webm rides the image endpoint but is verified
+		// against its own signature, not the raster sniff.
+		const bytes = new Uint8Array(2048);
+		bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
+		const file = new File([bytes], 'clip.webm', { type: 'video/webm' });
+		const res = (await POST(postEvent(makePlatform(), file))) as Response;
+		expect(res.status).toBe(200);
+		expect(put).toHaveBeenCalledTimes(1);
+		expect((put.mock.calls[0][0] as unknown as { contentType: string }).contentType).toBe('video/webm');
+	});
+
+	it('415s a video/webm upload whose bytes are actually HTML (spoofed type)', async () => {
+		const file = new File([new TextEncoder().encode('<!DOCTYPE html><script>alert(1)</script>')], 'clip.webm', {
+			type: 'video/webm'
+		});
+		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(415);
+		expect(put).not.toHaveBeenCalled();
+	});
+
+	it('415s other video types (mp4 is not in the allowlist)', async () => {
+		// ftyp box — a plausible real mp4 head; the declared type alone must sink it.
+		const bytes = new Uint8Array(64);
+		bytes.set([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d], 0);
+		const file = new File([bytes], 'clip.mp4', { type: 'video/mp4' });
+		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(415);
+		expect(put).not.toHaveBeenCalled();
+	});
+
 	it('passes the allowlist-matched content type (parameters stripped, lowercased) to the provider', async () => {
 		// new File() lowercases `type` per the Blob spec and the multipart
 		// round-trip re-normalizes too, so shadow the getter and hand the route

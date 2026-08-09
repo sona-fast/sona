@@ -34,7 +34,7 @@ export const POST: RequestHandler = async ({ request, url, platform }) => {
 	// publishing, which is supporter-only until the flag GAs. The disabled
 	// dropzone is presentation; this is the enforcement.
 	if (!(await vrPublishingEnabled(db, platform?.env))) {
-		error(403, 'VR avatars are in early access — uploading models needs a valid supporter key until it opens for everyone.');
+		error(403, 'VR avatars are in early access — uploading models needs a valid supporter key until they open for everyone.');
 	}
 
 	const lengthHeader = request.headers.get('content-length');

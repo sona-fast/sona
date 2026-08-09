@@ -80,11 +80,13 @@ function makeEvent(
 		images?: ReturnType<typeof makeImages>;
 		uploadthingToken?: string;
 		ip?: string;
+		headers?: Record<string, string>;
 	} = {}
 ) {
 	const slug = opts.slug ?? 'foxo';
 	return {
 		params: { slug },
+		request: new Request(`${ORIGIN}/vr/${slug}/download`, { headers: opts.headers }),
 		url: new URL(`${ORIGIN}/vr/${slug}/download`),
 		platform: {
 			env: {
@@ -203,7 +205,9 @@ describe('GET /vr/[slug]/download — byte resolution (resolveModelBytes)', () =
 		const res = await GET(makeEvent(db, { images: makeImages({}), uploadthingToken: 'tkn' }));
 		expect(res.status).toBe(200);
 		expect(await res.text()).toBe('UT BYTES');
-		expect(fetchMock).toHaveBeenCalledWith('https://utfs.io/f/abc123');
+		// redirect: 'manual' (R2-S1) — a provider 3xx must not bounce the stream
+		// to an attacker-chosen origin.
+		expect(fetchMock).toHaveBeenCalledWith('https://utfs.io/f/abc123', { redirect: 'manual' });
 	});
 
 	it('does NOT proxy a foreign URL the provider does not own (no SSRF)', async () => {
@@ -232,7 +236,18 @@ describe('GET /vr/[slug]/download — serving details', () => {
 		const res = await GET(makeEvent(seedDb({})));
 		expect(res.headers.get('content-length')).toBe(String('MODEL BYTES'.length));
 		expect(res.headers.get('etag')).toBe('"model-etag"');
-		expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=300, stale-while-revalidate=3600');
+		expect(res.headers.get('Cache-Control')).toBe(
+			'public, max-age=60, s-maxage=300, stale-while-revalidate=3600'
+		);
+	});
+
+	it('answers 304 (no body) to a matching If-None-Match revalidation', async () => {
+		const res = await GET(makeEvent(seedDb({}), { headers: { 'if-none-match': '"model-etag"' } }));
+		expect(res.status).toBe(304);
+		expect(await res.text()).toBe('');
+		const stale = await GET(makeEvent(seedDb({}), { headers: { 'if-none-match': '"other"' } }));
+		expect(stale.status).toBe(200);
+		expect(await stale.text()).toBe('MODEL BYTES');
 	});
 
 	it('429s the 21st download from one IP inside the window (rate limiter wired)', async () => {

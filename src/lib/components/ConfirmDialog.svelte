@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { AlertTriangle } from 'lucide-svelte';
+	import { focusTrap } from '$lib/focus-trap';
 	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
@@ -12,41 +13,18 @@
 
 	let { title, message, confirmLabel = m.admin_delete(), onconfirm, oncancel }: Props = $props();
 
-	let dialog = $state<HTMLDivElement>();
 	let cancelButton = $state<HTMLButtonElement>();
 
-	// Modal a11y: initial focus lands on the safe action, Esc closes from
-	// anywhere (window-level — the old handler sat on a non-focusable div and
-	// never fired), and Tab is trapped inside the dialog.
+	// Modal a11y rides the shared focus-trap action (SetupDialog/RefSheetPicker
+	// precedent): Tab cycles inside the panel (skipping [disabled] controls),
+	// Esc closes from anywhere, and focus RETURNS TO THE INVOKER on destroy —
+	// the bespoke handler this replaced dropped focus on <body> after Esc/Cancel
+	// (~15 stops back on /admin/images). Initial focus still lands on the safe
+	// action rather than the panel itself.
 	$effect(() => {
 		cancelButton?.focus();
 	});
-
-	function onWindowKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			e.preventDefault();
-			oncancel();
-			return;
-		}
-		if (e.key !== 'Tab' || !dialog) return;
-		const focusables = dialog.querySelectorAll<HTMLElement>(
-			'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-		);
-		if (focusables.length === 0) return;
-		const first = focusables[0];
-		const last = focusables[focusables.length - 1];
-		const active = document.activeElement;
-		if (e.shiftKey && (active === first || !dialog.contains(active))) {
-			e.preventDefault();
-			last.focus();
-		} else if (!e.shiftKey && (active === last || !dialog.contains(active))) {
-			e.preventDefault();
-			first.focus();
-		}
-	}
 </script>
-
-<svelte:window onkeydown={onWindowKeydown} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -- backdrop click-to-dismiss duplicates the Esc/Cancel paths -->
 <div class="backdrop" onclick={oncancel}>
@@ -58,7 +36,7 @@
 		aria-labelledby="confirm-dialog-title"
 		aria-describedby="confirm-dialog-message"
 		tabindex="-1"
-		bind:this={dialog}
+		use:focusTrap={oncancel}
 		onclick={(e) => e.stopPropagation()}
 	>
 		<div class="dialog-icon">
