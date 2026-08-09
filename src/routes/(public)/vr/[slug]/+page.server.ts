@@ -53,6 +53,15 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 				artistId: avatarCredits.artistId,
 				artistName: artists.name,
 				artistAvatar: artists.avatarUrl,
+				// Socials render inline per credit row, the gallery's credited-artist
+				// treatment (see gallery/[slug] socialLinks).
+				artistTwitter: artists.twitterUrl,
+				artistBluesky: artists.blueskyUrl,
+				artistTelegram: artists.telegramUrl,
+				artistFurAffinity: artists.furAffinityUrl,
+				artistDeviantArt: artists.deviantArtUrl,
+				artistPatreon: artists.patreonUrl,
+				artistInstagram: artists.instagramUrl,
 				role: avatarCredits.role,
 				roleLabel: avatarCredits.roleLabel
 			})

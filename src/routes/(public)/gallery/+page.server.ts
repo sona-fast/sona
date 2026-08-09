@@ -1,5 +1,5 @@
 import { getReadDb } from '$lib/server/db';
-import { images, artists, imageTags, tags, fursuitPhotos as fursuitPhotosTable } from '$lib/server/db/schema';
+import { images, artists, imageTags, tags, fursuitPhotos as fursuitPhotosTable, vrAvatars } from '$lib/server/db/schema';
 import { eq, desc, asc, like, sql, and, inArray, isNull, type SQL } from 'drizzle-orm';
 import { listPublicCharacterNames } from '$lib/server/characters';
 import { fursuitPhotoFromRow } from '$lib/server/fursuit-import';
@@ -207,6 +207,10 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// is turned on, even if rows exist in the table.
 		const fursuitCount = (await db.select({ n: sql<number>`COUNT(*)` }).from(fursuitPhotosTable).get())?.n ?? 0;
 		const fursuitEnabled = getMode(platform!.env) !== 'off' && fursuitCount > 0;
+		// VR Avatars tab: only rendered once at least one published avatar exists —
+		// with zero, the tab (and the empty /vr grid behind it) stays undiscoverable.
+		const vrEnabled =
+			((await db.select({ n: sql<number>`COUNT(*)` }).from(vrAvatars).where(eq(vrAvatars.published, true)).get())?.n ?? 0) > 0;
 		const view = fursuitEnabled && url.searchParams.get('view') === 'fursuit' ? 'fursuit' : 'artwork';
 
 		let fursuitPhotos: FursuitPhoto[] = [];
@@ -232,6 +236,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		return {
 			view,
 			fursuitEnabled,
+			vrEnabled,
 			fursuitPhotos,
 			fursuitPhotographers,
 			fursuitEvents,

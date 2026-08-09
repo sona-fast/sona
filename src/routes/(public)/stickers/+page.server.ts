@@ -2,8 +2,8 @@ import { getReadDb } from '$lib/server/db';
 import { listPacks, findStickers, topEmojis, listStickerArtists } from '$lib/server/stickers';
 import { emojiForKeyword, containsEmoji } from '$lib/server/emoji-keywords';
 import { getMode } from '$lib/server/furtrack';
-import { stickerPacks, fursuitPhotos } from '$lib/server/db/schema';
-import { inArray, sql } from 'drizzle-orm';
+import { stickerPacks, fursuitPhotos, vrAvatars } from '$lib/server/db/schema';
+import { inArray, sql, eq } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 
 // Cap free-text length before keyword expansion (cheap DoS guard).
@@ -24,6 +24,11 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const fursuitEnabled =
 		getMode(platform!.env) !== 'off' &&
 		((await db.select({ n: sql<number>`COUNT(*)` }).from(fursuitPhotos).get())?.n ?? 0) > 0;
+
+	// VR Avatars pill mirrors the gallery's rule: visible only once a published
+	// avatar exists, so the three tab bars never disagree.
+	const vrEnabled =
+		((await db.select({ n: sql<number>`COUNT(*)` }).from(vrAvatars).where(eq(vrAvatars.published, true)).get())?.n ?? 0) > 0;
 
 	const [topEmojiList, stickerArtists] = await Promise.all([
 		topEmojis(db),
@@ -71,6 +76,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			topEmojis: topEmojiList,
 			artists: stickerArtists,
 			fursuitEnabled,
+			vrEnabled,
 			filters: { emoji: emojiParam, artist: artistParam, q }
 		};
 	}
@@ -83,6 +89,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		topEmojis: topEmojiList,
 		artists: stickerArtists,
 		fursuitEnabled,
+		vrEnabled,
 		filters: { emoji: '', artist: '', q: '' }
 	};
 };

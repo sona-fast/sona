@@ -67,6 +67,9 @@
 			<a href="/gallery?view=fursuit" class="tab">{m.gallery_view_fursuit()}</a>
 		{/if}
 		<span class="tab active" aria-current="page">{m.gallery_view_stickers()}</span>
+		{#if data.vrEnabled}
+			<a href="/vr" class="tab">{m.gallery_view_vr()}</a>
+		{/if}
 	</div>
 
 	<!-- Filter bar: emoji rail on the left, search + artist on the right -->

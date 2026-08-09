@@ -132,7 +132,9 @@
 			</button>
 		{/if}
 		<a href="/stickers" class="tab">{m.gallery_view_stickers()}</a>
-		<a href="/vr" class="tab">{m.gallery_view_vr()}</a>
+		{#if data.vrEnabled}
+			<a href="/vr" class="tab">{m.gallery_view_vr()}</a>
+		{/if}
 	</div>
 
 	{#if isFursuit}

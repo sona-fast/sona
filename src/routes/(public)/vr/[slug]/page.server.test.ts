@@ -34,7 +34,9 @@ function makeDb() {
 		);
 		CREATE TABLE avatar_platforms (avatar_id INTEGER NOT NULL, platform TEXT NOT NULL);
 		CREATE TABLE artists (
-			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT,
+			twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
+			deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT
 		);
 		CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
 		CREATE TABLE images (
@@ -201,6 +203,24 @@ describe('/vr/[slug] load — credits, media, platforms', () => {
 		const data = await loadData(platform);
 		expect(data.credits.map((c) => c.artistName)).toEqual(['Zeta', 'Alba', 'Miko']);
 		expect(data.credits[2]).toMatchObject({ role: 'other', roleLabel: 'Physics bones' });
+	});
+
+	it('carries each artist\'s socials for the per-row icons (gallery treatment)', async () => {
+		const { sqlite, platform } = makeDb();
+		const id = addAvatar(sqlite);
+		sqlite
+			.prepare('INSERT INTO artists (id, name, twitter_url, bluesky_url) VALUES (1, ?, ?, ?)')
+			.run('Kestrel', 'https://twitter.com/kestrelworks', 'https://bsky.app/profile/kestrelworks');
+		sqlite
+			.prepare('INSERT INTO avatar_credits (avatar_id, artist_id, role, role_label, position) VALUES (?, 1, ?, NULL, 0)')
+			.run(id, 'base');
+
+		const data = await loadData(platform);
+		expect(data.credits[0]).toMatchObject({
+			artistTwitter: 'https://twitter.com/kestrelworks',
+			artistBluesky: 'https://bsky.app/profile/kestrelworks',
+			artistPatreon: null
+		});
 	});
 
 	it('orders media by position and returns platforms', async () => {

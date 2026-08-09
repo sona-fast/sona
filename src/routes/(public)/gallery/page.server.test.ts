@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
+import { sql as sqlq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { artists, images } from '$lib/server/db/schema';
 
@@ -37,6 +38,7 @@ function makeDb() {
 		CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, is_owner INTEGER NOT NULL DEFAULT 0);
 		CREATE TABLE image_characters (image_id INTEGER NOT NULL, character_id INTEGER NOT NULL);
 		CREATE TABLE fursuit_photos (id INTEGER PRIMARY KEY AUTOINCREMENT);
+		CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 	`);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
@@ -75,6 +77,7 @@ type GalleryData = {
 	filters: { artist: string };
 	images: unknown[];
 	degraded: boolean;
+	vrEnabled: boolean;
 };
 
 async function loadData(platform: App.Platform, query = ''): Promise<GalleryData> {
@@ -200,5 +203,23 @@ describe('gallery load — former-name (alias) resolution', () => {
 		expect(data.filters.artist).toBe('OldGhost');
 		expect(data.images).toHaveLength(0);
 		expect(data.degraded).toBe(false);
+	});
+});
+
+describe('gallery load — VR Avatars tab visibility', () => {
+	it('hides the tab with zero published avatars', async () => {
+		const { platform } = makeDb();
+		const data = await loadData(platform);
+		expect(data.vrEnabled).toBe(false);
+	});
+
+	it('shows the tab once a published avatar exists, but not for drafts', async () => {
+		const { db, platform } = makeDb();
+		// draft only -> still hidden
+		await db.run(sqlq`INSERT INTO vr_avatars (published) VALUES (0)`);
+		expect((await loadData(platform)).vrEnabled).toBe(false);
+		// published -> shown
+		await db.run(sqlq`INSERT INTO vr_avatars (published) VALUES (1)`);
+		expect((await loadData(platform)).vrEnabled).toBe(true);
 	});
 });

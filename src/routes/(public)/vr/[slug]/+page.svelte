@@ -5,6 +5,13 @@
 	import Meta from '$lib/components/Meta.svelte';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import VrViewer from '$lib/components/VrViewer.svelte';
+	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
+	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
+	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
+	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
+	import DeviantArtIcon from '$lib/components/icons/DeviantArtIcon.svelte';
+	import PatreonIcon from '$lib/components/icons/PatreonIcon.svelte';
+	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import { cdnImage, rawFallback } from '$lib';
 	import { formatBytes, modelFormatLabel, platformLabel, viewerSupports } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
@@ -61,6 +68,21 @@
 				// fall back to the generic label if a row slipped through without one.
 				return credit.roleLabel || m.vr_role_other();
 		}
+	}
+
+	// Per-row social icons — the gallery's credited-artist treatment (see
+	// gallery/[slug] socialLinks), named per row ("Kestrel on Twitter") because
+	// several credit rows can carry identically-platformed links.
+	function creditSocials(credit: (typeof data.credits)[number]) {
+		return [
+			{ url: credit.artistTwitter, icon: TwitterIcon, label: 'Twitter' },
+			{ url: credit.artistBluesky, icon: BlueskyIcon, label: 'Bluesky' },
+			{ url: credit.artistTelegram, icon: TelegramIcon, label: 'Telegram' },
+			{ url: credit.artistFurAffinity, icon: FurAffinityIcon, label: 'FurAffinity' },
+			{ url: credit.artistDeviantArt, icon: DeviantArtIcon, label: 'DeviantArt' },
+			{ url: credit.artistPatreon, icon: PatreonIcon, label: 'Patreon' },
+			{ url: credit.artistInstagram, icon: InstagramIcon, label: 'Instagram' }
+		].filter((l) => l.url);
 	}
 
 	const siteName = $derived(data.settings?.siteName ?? APP_NAME);
@@ -203,10 +225,29 @@
 					<ul class="credits">
 						{#each data.credits as credit}
 							<li class="credit-row">
-								<a href="/gallery?artist={encodeURIComponent(credit.artistName)}" class="credit-artist">
+								<a
+									href="/gallery?artist={encodeURIComponent(credit.artistName)}"
+									class="credit-artist"
+									title={credit.artistName}
+								>
 									<ArtistAvatar name={credit.artistName} avatarUrl={credit.artistAvatar} size={24} />
 									{credit.artistName}
 								</a>
+								{#if creditSocials(credit).length > 0}
+									<span class="credit-socials">
+										{#each creditSocials(credit) as link}
+											<a
+												href={link.url}
+												target="_blank"
+												rel="noopener"
+												aria-label={m.common_social_link({ name: credit.artistName, platform: link.label })}
+												class="social-icon"
+											>
+												<link.icon size={14} />
+											</a>
+										{/each}
+									</span>
+								{/if}
 								<span class="role-chip">{roleChip(credit)}</span>
 							</li>
 						{/each}
@@ -436,8 +477,12 @@
 	.credit-row {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
 		gap: 12px;
+	}
+
+	/* The chip hugs the trailing edge; socials sit beside the name. */
+	.credit-row .role-chip {
+		margin-left: auto;
 	}
 
 	.credit-artist {
@@ -448,6 +493,34 @@
 		font-weight: 500;
 		color: inherit;
 		text-decoration: none;
+		/* A long artist name shrinks and truncates instead of pushing the
+		   socials/chip off the row (title carries the full name). */
+		flex: 0 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.credit-socials {
+		display: flex;
+		gap: 2px;
+		flex: none;
+	}
+
+	.credit-socials .social-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border-radius: var(--radius-xs);
+		color: var(--muted-foreground);
+		transition: color 0.15s;
+	}
+
+	.credit-socials .social-icon:hover {
+		color: var(--foreground);
 	}
 
 	.credit-artist:hover {
