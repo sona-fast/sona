@@ -2,13 +2,15 @@ import { getTableColumns } from 'drizzle-orm';
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import {
 	artists,
+	avatarMedia,
 	characters,
 	collections,
 	conventions,
 	fursuitPhotos,
 	images,
 	stickerPacks,
-	stickers
+	stickers,
+	vrAvatars
 } from '$lib/server/db/schema';
 import type { Database } from '$lib/server/db';
 import type { SiteSettings } from '$lib/server/settings';
@@ -61,7 +63,11 @@ export const URL_COLUMNS: ReadonlyArray<{ table: SQLiteTable; columns: readonly 
 	{ table: fursuitPhotos, columns: ['imageUrl', 'photographerUrl', 'furtrackUrl'] },
 	{ table: stickerPacks, columns: ['coverImageUrl', 'telegramUrl'] },
 	{ table: stickers, columns: ['imageUrl', 'thumbnailUrl'] },
-	{ table: conventions, columns: ['url'] }
+	{ table: conventions, columns: ['url'] },
+	// modelUrl is self-hosted (the load-bearing one); externalUrl is off-site
+	// and inert — included per the over-collect rule above.
+	{ table: vrAvatars, columns: ['modelUrl', 'externalUrl'] },
+	{ table: avatarMedia, columns: ['url'] }
 ];
 
 /**

@@ -269,3 +269,67 @@ export const conventions = sqliteTable('conventions', {
 	sourceId: text('source_id'),
 	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
 });
+
+// --- VR avatar showcase (SONA-124) ---
+
+// One 3D avatar of a character. The model file may be self-hosted (`modelUrl`)
+// or live off-site (`externalUrl`, e.g. a Gumroad/Booth listing) — or both.
+export const vrAvatars = sqliteTable('vr_avatars', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	slug: text('slug').notNull().unique(),
+	name: text('name').notNull(),
+	characterId: integer('character_id').notNull().references(() => characters.id),
+	// Full PUBLIC URL of the self-hosted model file — never a bare storage key.
+	// The orphan sweep compares stored URLs verbatim (see referenced-urls.ts), so
+	// a bare key would never match and cleanup would delete the model file as an
+	// orphan. NULL = no self-hosted file (external-only entry).
+	modelUrl: text('model_url'),
+	modelFormat: text('model_format', { enum: ['vrm', 'vrm0', 'fbx'] }),
+	modelSizeBytes: integer('model_size_bytes'),
+	// Gallery image used as the showcase poster. Deleting the image just nulls
+	// this out (SET NULL) rather than blocking the delete.
+	posterImageId: integer('poster_image_id').references(() => images.id, { onDelete: 'set null' }),
+	// Off-site home of the avatar (store page, repo, …). Inert for orphan
+	// cleanup, but collected anyway per the over-collect rule.
+	externalUrl: text('external_url'),
+	license: text('license', { enum: ['personal-use', 'cc-by', 'base-tos', 'all-rights-reserved'] }),
+	// Like fursuit_photos.permission_source: where/when permission to host the
+	// model was granted (e.g. "Telegram DM 2026-08-01"). NULL = not recorded.
+	permissionSource: text('permission_source'),
+	downloadable: integer('downloadable', { mode: 'boolean' }).notNull().default(false),
+	nsfw: integer('nsfw', { mode: 'boolean' }).notNull().default(false),
+	published: integer('published', { mode: 'boolean' }).notNull().default(true),
+	description: text('description'),
+	createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString())
+});
+
+// Per-avatar artist credits, one row per (artist, role). `roleLabel` names the
+// role when role='other' — required then, but enforced in form actions, not SQL
+// (mirrors the variant one-level rule on images.parent_image_id).
+export const avatarCredits = sqliteTable('avatar_credits', {
+	avatarId: integer('avatar_id').notNull().references(() => vrAvatars.id, { onDelete: 'cascade' }),
+	artistId: integer('artist_id').notNull().references(() => artists.id),
+	role: text('role', { enum: ['base', 'modeler', 'rigger', 'texture', 'shader', 'other'] }).notNull(),
+	roleLabel: text('role_label'),
+	position: integer('position').notNull().default(0)
+});
+
+// Showcase media (screenshots / clips) for an avatar, ordered by `position`.
+// `url` points at our storage, so it MUST be listed in referenced-urls.ts.
+export const avatarMedia = sqliteTable('avatar_media', {
+	avatarId: integer('avatar_id').notNull().references(() => vrAvatars.id, { onDelete: 'cascade' }),
+	kind: text('kind', { enum: ['image', 'video'] }).notNull(),
+	url: text('url').notNull(),
+	width: integer('width'),
+	height: integer('height'),
+	position: integer('position').notNull().default(0)
+});
+
+// Platforms an avatar is set up for, shown as badges. No PK, mirroring
+// image_tags/sticker_emojis; (avatarId, platform) uniqueness is kept in app code.
+export const avatarPlatforms = sqliteTable('avatar_platforms', {
+	avatarId: integer('avatar_id').notNull().references(() => vrAvatars.id, { onDelete: 'cascade' }),
+	platform: text('platform', {
+		enum: ['vrchat', 'resonite', 'chilloutvr', 'neosvr', 'vseeface', 'warudo', 'other']
+	}).notNull()
+});

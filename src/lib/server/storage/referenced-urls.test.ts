@@ -107,4 +107,24 @@ describe('collectReferencedUrls', () => {
 		expect(urls).not.toContain('');
 		expect([...urls].some((u) => u == null)).toBe(false);
 	});
+
+	// Deliberate coverage on a destructive path: the name-based guard above only
+	// proves the columns are LISTED — this proves stored VR-avatar URLs actually
+	// come back from the collector, so orphan cleanup can never delete a hosted
+	// model file or showcase media as unreferenced.
+	it('collects vr_avatars model/external URLs and avatar_media URLs', async () => {
+		const { sqlite, db } = makeDb();
+		sqlite
+			.prepare('INSERT INTO vr_avatars (model_url, external_url) VALUES (?, ?)')
+			.run('https://cdn.example.com/avatars/sparky.vrm', 'https://booth.example.com/items/1');
+		sqlite
+			.prepare('INSERT INTO avatar_media (url) VALUES (?)')
+			.run('https://cdn.example.com/avatar-media/sparky-1.webp');
+
+		const urls = new Set(await collectReferencedUrls(db, {} as unknown as SiteSettings));
+		expect(urls).toContain('https://cdn.example.com/avatars/sparky.vrm');
+		expect(urls).toContain('https://cdn.example.com/avatar-media/sparky-1.webp');
+		// externalUrl is off-site and inert, but over-collected on purpose.
+		expect(urls).toContain('https://booth.example.com/items/1');
+	});
 });

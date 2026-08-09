@@ -1149,6 +1149,7 @@
 	"admin_settings_supporter_early_item": "{feature} (opens to everyone {date})",
 	"admin_settings_supporter_early_join": ", ",
 	"admin_settings_supporter_early_none": "Nothing is in early access right now — your key will unlock the next feature the day it lands.",
+	"early_access_label_vr_avatars": "VR avatars",
 	"admin_settings_supporter_remove": "Remove key",
 	"admin_settings_supporter_expired_eyebrow": "expired {date}",
 	"admin_settings_supporter_lapsed_pre": "Your supporter key lapsed — re-mint at ",

@@ -24,6 +24,10 @@ import {
 	stickerPacks,
 	stickers,
 	stickerEmojis,
+	vrAvatars,
+	avatarCredits,
+	avatarMedia,
+	avatarPlatforms,
 	sessions,
 	siteSettings
 } from '$lib/server/db/schema';
@@ -593,6 +597,10 @@ export const actions = {
 			allStickerPacks,
 			allStickers,
 			allStickerEmojis,
+			allVrAvatars,
+			allAvatarCredits,
+			allAvatarMedia,
+			allAvatarPlatforms,
 			settings
 		] = await Promise.all([
 			db.select().from(images),
@@ -607,6 +615,10 @@ export const actions = {
 			db.select().from(stickerPacks),
 			db.select().from(stickers),
 			db.select().from(stickerEmojis),
+			db.select().from(vrAvatars),
+			db.select().from(avatarCredits),
+			db.select().from(avatarMedia),
+			db.select().from(avatarPlatforms),
 			getSettings(db)
 		]);
 
@@ -627,7 +639,11 @@ export const actions = {
 			fursuitPhotos: allFursuitPhotos,
 			stickerPacks: allStickerPacks,
 			stickers: allStickers,
-			stickerEmojis: allStickerEmojis
+			stickerEmojis: allStickerEmojis,
+			vrAvatars: allVrAvatars,
+			avatarCredits: allAvatarCredits,
+			avatarMedia: allAvatarMedia,
+			avatarPlatforms: allAvatarPlatforms
 		};
 
 		return { success: true, export: JSON.stringify(backup, null, 2) };

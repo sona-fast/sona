@@ -12,6 +12,8 @@ import { DEFAULT_THEME_ID } from '$lib/themes';
 import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifySupporterKey } from '$lib/server/supporter-key';
+import { earlyAccessActive } from '$lib/early-access';
+import { formatDate } from '$lib/index';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -896,8 +898,13 @@ describe('settings load — supporter key is raw + verified, never in public set
 			daysRemaining: expect.any(Number),
 			expiringSoon: expect.any(Boolean)
 		});
-		// The registry ships empty, so nothing is in an early-access window.
-		expect(result.earlyAccess).toEqual([]);
+		// The registry no longer ships empty (vr-avatars is the first entry), so
+		// derive the expectation from it: any flag inside its window at load time
+		// surfaces as flag + display-formatted GA date — and nothing else rides
+		// along (a NEW field in the mapping must be re-reviewed here first).
+		expect(result.earlyAccess).toEqual(
+			earlyAccessActive(new Date()).map((e) => ({ flag: e.flag, gaDate: formatDate(e.gaDate) }))
+		);
 		// The token must never leak into the client-exposed SiteSettings.
 		expect(result.settings.supporterKey).toBeUndefined();
 	});

@@ -1113,6 +1113,7 @@
 	"admin_settings_supporter_early_item": "{feature}（全員公開は{date}）",
 	"admin_settings_supporter_early_join": "、",
 	"admin_settings_supporter_early_none": "現在、早期アクセス中の機能はありません。次の機能が公開された初日に、キーがそれを解除します。",
+	"early_access_label_vr_avatars": "VRアバター",
 	"admin_settings_supporter_remove": "キーを削除",
 	"admin_settings_supporter_expired_eyebrow": "{date} に期限切れ",
 	"admin_settings_supporter_lapsed_pre": "サポーターキーの有効期限が切れました。スポンサー契約が有効なうちに ",
