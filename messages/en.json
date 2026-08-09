@@ -1179,7 +1179,7 @@
 	"admin_vr_create": "Create avatar",
 	"admin_vr_save": "Save changes",
 	"admin_vr_edit_title": "Edit avatar",
-	"admin_vr_edit_aria": "Edit avatar",
+	"admin_vr_edit_aria": "Edit {name}",
 	"admin_vr_back": "Back to VR avatars",
 	"admin_vr_empty": "No VR avatars yet. Add your first avatar to showcase it here.",
 	"admin_vr_gate_title": "VR avatars are in early access",

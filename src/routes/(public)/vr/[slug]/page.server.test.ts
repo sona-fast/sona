@@ -242,6 +242,21 @@ describe('/vr/[slug] load — downloadAllowed mirrors the endpoint', () => {
 		// WHOLE payload, so no future field can smuggle it out.
 		expect(JSON.stringify(data)).not.toContain('permissionSource');
 	});
+
+	it('never ships the recorded grant text on the allowed path either', async () => {
+		const { sqlite, platform } = makeDb();
+		addAvatar(sqlite, {
+			modelUrl: '/img/vr-models/foxo.vrm',
+			license: 'cc-by',
+			permissionSource: PERMITTED,
+			downloadable: 1
+		});
+		const data = await loadData(platform);
+		// The grant's PROSE must be absent too, not just the field name — it
+		// holds third-party contact context (names, dates, DM references).
+		expect(JSON.stringify(data)).not.toContain('permissionSource');
+		expect(JSON.stringify(data)).not.toContain(PERMITTED);
+	});
 });
 
 describe('/vr/[slug] load — credits, media, platforms', () => {

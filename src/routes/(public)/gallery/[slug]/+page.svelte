@@ -29,6 +29,7 @@
 	const revealed = $derived(revealedId === image.id);
 	onNavigate(() => {
 		revealedId = null;
+		revealAnnouncement = '';
 	});
 	let copied = $state(false);
 

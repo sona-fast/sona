@@ -1143,7 +1143,7 @@
 	"admin_vr_create": "アバターを作成",
 	"admin_vr_save": "変更を保存",
 	"admin_vr_edit_title": "アバターを編集",
-	"admin_vr_edit_aria": "アバターを編集",
+	"admin_vr_edit_aria": "{name}を編集",
 	"admin_vr_back": "VRアバター一覧へ戻る",
 	"admin_vr_empty": "VRアバターはまだありません。最初のアバターを追加しましょう。",
 	"admin_vr_gate_title": "VRアバターは早期アクセス中です",

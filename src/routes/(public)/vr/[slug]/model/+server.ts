@@ -62,14 +62,16 @@ export const GET: RequestHandler = async ({ params, request, url, platform, getC
 		// (unpublish, model removed) and that must propagate instead of being
 		// immortalized in shared caches — same short TTL as the download route.
 		// A short browser max-age spares repeat views the multi-MB re-transfer.
-		'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=3600'
+		// No stale-while-revalidate: a revoked model must not be servable from a
+		// shared cache's stale window — revocation propagates within s-maxage.
+		'Cache-Control': 'public, max-age=60, s-maxage=300'
 	});
 	if (resolved.etag) headers.set('etag', resolved.etag);
 	// Conditional revalidation: past max-age the browser revalidates with
 	// If-None-Match; matching the R2 httpEtag turns a multi-MB re-stream into a
 	// 304. Simple exact/list match — R2 etags are strong.
 	if (resolved.etag && etagMatches(request.headers.get('if-none-match'), resolved.etag)) {
-		void resolved.body.cancel();
+		void resolved.body.cancel().catch(() => {});
 		return new Response(null, { status: 304, headers });
 	}
 	// Declared when known so the viewer can report byte progress.

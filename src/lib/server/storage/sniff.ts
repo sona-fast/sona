@@ -57,5 +57,16 @@ export function sniffImageType(bytes: Uint8Array): string | null {
  * sites can't accidentally start accepting video.
  */
 export function isWebmHead(bytes: Uint8Array): boolean {
-	return startsWith(bytes, [0x1a, 0x45, 0xdf, 0xa3]);
+	if (!startsWith(bytes, [0x1a, 0x45, 0xdf, 0xa3])) return false;
+	// EBML covers Matroska too (.mkv) — require the 'webm' DocType, which sits
+	// in the EBML header and is always inside our 64-byte sniff window. Cheap
+	// byte scan rather than a full EBML parse, matching this file's style.
+	const doctype = [0x77, 0x65, 0x62, 0x6d]; // 'webm'
+	outer: for (let i = 4; i <= bytes.length - doctype.length; i++) {
+		for (let j = 0; j < doctype.length; j++) {
+			if (bytes[i + j] !== doctype[j]) continue outer;
+		}
+		return true;
+	}
+	return false;
 }

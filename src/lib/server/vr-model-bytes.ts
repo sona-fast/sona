@@ -23,6 +23,10 @@ import type { SiteSettings } from '$lib/server/settings';
 
 type Env = App.Platform['env'];
 
+/** Upper bound on the provider-proxy fetch — a hung upstream must not hold
+ * the visitor's request open indefinitely. */
+const PROVIDER_FETCH_TIMEOUT_MS = 10_000;
+
 export interface ModelBytesOpts {
 	modelUrl: string;
 	origin: string;
@@ -67,7 +71,18 @@ export async function resolveModelBytes(opts: ModelBytesOpts): Promise<ResolvedM
 		// redirect: 'manual' — owns() anchored this URL to a provider host we
 		// trust; following a redirect would let that host bounce the stream to an
 		// arbitrary origin (SSRF via redirect). A 3xx is treated as unresolvable.
-		const res = await fetch(opts.modelUrl, { redirect: 'manual' });
+		// Timeout + transport-failure catch: an unresponsive or unresolvable
+		// provider must resolve to null (404 upstream) rather than hanging the
+		// worker request or escaping as a 500.
+		let res: Response;
+		try {
+			res = await fetch(opts.modelUrl, {
+				redirect: 'manual',
+				signal: AbortSignal.timeout(PROVIDER_FETCH_TIMEOUT_MS)
+			});
+		} catch {
+			return null;
+		}
 		if (res.ok && res.body) {
 			const len = res.headers.get('content-length');
 			return {

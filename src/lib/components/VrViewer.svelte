@@ -59,6 +59,7 @@
 	// exit3d bumps it — a run that awakes from an await into a stale generation
 	// abandons silently instead of throwing into the "failed to load" state.
 	let generation = 0;
+	let abort: AbortController | null = null;
 
 	const aspect = $derived(
 		posterWidth && posterHeight ? `${posterWidth} / ${posterHeight}` : '4 / 3'
@@ -101,6 +102,12 @@
 		}
 
 		const gen = ++generation;
+		// Abort the byte stream when exit3d bumps the generation — the stale-gen
+		// guards stop WORK, but without an abort the download itself would keep
+		// running to completion in the background.
+		abort?.abort();
+		abort = new AbortController();
+		const signal = abort.signal;
 		active = true;
 		loading = true;
 		failed = false;
@@ -118,7 +125,7 @@
 			// Fetch the model ourselves (same-origin) so byte progress can be
 			// reported against the known modelSizeBytes; GLTFLoader then parses the
 			// buffer directly. No Draco/KTX2 decoders: CSP allows no wasm or workers.
-			const res = await fetch(modelPath);
+			const res = await fetch(modelPath, { signal });
 			if (!res.ok || !res.body) throw new Error(`model fetch failed: ${res.status}`);
 			// Single buffer: preallocate from the declared length (grow only if the
 			// origin lied) instead of collecting chunks and copying them again.
@@ -151,7 +158,13 @@
 			const gltf = await new Promise<{ userData: { vrm?: unknown } }>((resolve, reject) =>
 				loader.parse(data, '', resolve, reject)
 			);
-			if (gen !== generation) return;
+			if (gen !== generation) {
+				// The user exited while parsing — free the parsed scene rather than
+				// leaking its geometries/materials/textures.
+				const stale = gltf.userData.vrm as { scene?: import('three').Object3D } | undefined;
+				if (stale?.scene) VRMUtils.deepDispose(stale.scene);
+				return;
+			}
 			const vrm = gltf.userData.vrm as {
 				scene: import('three').Group;
 				update(delta: number): void;
@@ -286,6 +299,8 @@
 	}
 
 	async function exit3d() {
+		abort?.abort();
+		abort = null;
 		if (document.fullscreenElement) {
 			await document.exitFullscreen().catch(() => {});
 		}

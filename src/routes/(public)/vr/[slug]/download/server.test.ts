@@ -207,7 +207,10 @@ describe('GET /vr/[slug]/download — byte resolution (resolveModelBytes)', () =
 		expect(await res.text()).toBe('UT BYTES');
 		// redirect: 'manual' (R2-S1) — a provider 3xx must not bounce the stream
 		// to an attacker-chosen origin.
-		expect(fetchMock).toHaveBeenCalledWith('https://utfs.io/f/abc123', { redirect: 'manual' });
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://utfs.io/f/abc123',
+			expect.objectContaining({ redirect: 'manual', signal: expect.any(AbortSignal) })
+		);
 	});
 
 	it('does NOT proxy a foreign URL the provider does not own (no SSRF)', async () => {
@@ -237,7 +240,7 @@ describe('GET /vr/[slug]/download — serving details', () => {
 		expect(res.headers.get('content-length')).toBe(String('MODEL BYTES'.length));
 		expect(res.headers.get('etag')).toBe('"model-etag"');
 		expect(res.headers.get('Cache-Control')).toBe(
-			'public, max-age=60, s-maxage=300, stale-while-revalidate=3600'
+			'public, max-age=60, s-maxage=300'
 		);
 	});
 

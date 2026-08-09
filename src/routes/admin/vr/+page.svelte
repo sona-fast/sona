@@ -150,7 +150,7 @@
 								>
 							</td>
 							<td class="col-actions" data-label={m.admin_col_actions()}>
-								<a href="/admin/vr/{avatar.id}/edit" class="icon-btn" aria-label={m.admin_vr_edit_aria()}>
+								<a href="/admin/vr/{avatar.id}/edit" class="icon-btn" aria-label={m.admin_vr_edit_aria({ name: avatar.name })}>
 									<Pencil size={15} />
 								</a>
 							</td>

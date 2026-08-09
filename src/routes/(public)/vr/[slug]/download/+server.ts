@@ -82,13 +82,14 @@ export const GET: RequestHandler = async ({ params, request, url, platform, getC
 		// revoked (unpublish, license change, downloadable off) — match the sticker
 		// download's short shared-cache TTL so a takedown propagates promptly.
 		// A short browser max-age spares an immediate re-download the transfer.
-		'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=3600'
+		// No stale-while-revalidate — same revocation reasoning as the model route.
+		'Cache-Control': 'public, max-age=60, s-maxage=300'
 	});
 	if (resolved.etag) headers.set('etag', resolved.etag);
 	// Conditional revalidation: a matching If-None-Match answers 304 instead of
 	// re-streaming the whole file (shared etagMatches with the model route).
 	if (resolved.etag && etagMatches(request.headers.get('if-none-match'), resolved.etag)) {
-		void resolved.body.cancel();
+		void resolved.body.cancel().catch(() => {});
 		return new Response(null, { status: 304, headers });
 	}
 	// Declared when the source knows it (R2 always does; a proxied provider

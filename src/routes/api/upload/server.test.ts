@@ -102,7 +102,8 @@ describe('POST /api/upload', () => {
 		// The VR showcase widening: webm rides the image endpoint but is verified
 		// against its own signature, not the raster sniff.
 		const bytes = new Uint8Array(2048);
-		bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
+		// EBML magic + webm DocType (magic alone is Matroska-family, rejected).
+		bytes.set([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0x82, 0x84, 0x77, 0x65, 0x62, 0x6d]);
 		const file = new File([bytes], 'clip.webm', { type: 'video/webm' });
 		// The widening is scoped to the vr-media folder — other folders stay raster-only.
 		const res = (await POST(postEvent(makePlatform(), file, 'vr-media'))) as Response;
@@ -121,7 +122,8 @@ describe('POST /api/upload', () => {
 
 	it('415s a valid webm outside the vr-media folder (raster-only callers stay raster-only)', async () => {
 		const bytes = new Uint8Array(2048);
-		bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
+		// EBML magic + webm DocType (magic alone is Matroska-family, rejected).
+		bytes.set([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0x82, 0x84, 0x77, 0x65, 0x62, 0x6d]);
 		const file = new File([bytes], 'clip.webm', { type: 'video/webm' });
 		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(415);
 		expect(put).not.toHaveBeenCalled();

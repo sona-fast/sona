@@ -226,18 +226,24 @@
 					];
 					continue;
 				}
-				const { url } = (await res.json()) as { url: string };
-				const { width, height } = await probeDimensions(file);
-				mediaEntries = [
-					...mediaEntries,
-					{
-						uid: nextUid++,
-						url,
-						kind: file.type.startsWith('video/') ? 'video' : 'image',
-						width,
-						height
-					}
-				];
+				// Per-file guard: a malformed response body or probe failure records
+				// that file's error and lets the rest of the batch continue.
+				try {
+					const { url } = (await res.json()) as { url: string };
+					const { width, height } = await probeDimensions(file);
+					mediaEntries = [
+						...mediaEntries,
+						{
+							uid: nextUid++,
+							url,
+							kind: file.type.startsWith('video/') ? 'video' : 'image',
+							width,
+							height
+						}
+					];
+				} catch {
+					mediaErrors = [...mediaErrors, { uid: mediaErrorUid++, name: file.name, reason: 'failed' }];
+				}
 			}
 		} finally {
 			mediaUploading = false;

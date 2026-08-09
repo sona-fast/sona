@@ -69,9 +69,13 @@ describe('sniffImageType', () => {
 
 describe('isWebmHead (SONA-124 showcase clips)', () => {
 	// EBML/Matroska magic: 1A 45 DF A3.
-	const WEBM = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81]);
+	// EBML magic + a DocType of 'webm' — the magic alone is Matroska-family,
+	// not webm-specific (see the DocType discrimination describe below).
+	const WEBM = new Uint8Array([
+		0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0x82, 0x84, 0x77, 0x65, 0x62, 0x6d
+	]);
 
-	it('detects the EBML magic', () => {
+	it('detects the EBML magic with a webm DocType', () => {
 		expect(isWebmHead(WEBM)).toBe(true);
 	});
 
@@ -85,5 +89,22 @@ describe('isWebmHead (SONA-124 showcase clips)', () => {
 	it('is NOT consulted by sniffImageType — image call sites cannot start accepting video', () => {
 		expect(sniffImageType(WEBM)).toBeNull();
 		expect(isAllowedImageType(sniffImageType(WEBM))).toBe(false);
+	});
+});
+
+describe('isWebmHead — DocType discrimination (SONA-124)', () => {
+	function ebmlHead(doctype: string): Uint8Array {
+		const bytes = new Uint8Array(64);
+		bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
+		bytes.set(new TextEncoder().encode(doctype), 12);
+		return bytes;
+	}
+
+	it('accepts an EBML head whose DocType is webm', () => {
+		expect(isWebmHead(ebmlHead('webm'))).toBe(true);
+	});
+
+	it('rejects a Matroska head — EBML magic alone is not webm', () => {
+		expect(isWebmHead(ebmlHead('matroska'))).toBe(false);
 	});
 });

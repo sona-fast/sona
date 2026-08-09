@@ -120,7 +120,7 @@ describe('GET /vr/[slug]/model — viewer bytes', () => {
 		expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
 		expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
 		expect(res.headers.get('Cache-Control')).toBe(
-			'public, max-age=60, s-maxage=300, stale-while-revalidate=3600'
+			'public, max-age=60, s-maxage=300'
 		);
 		expect(res.headers.get('content-length')).toBe(String('MODEL BYTES'.length));
 		expect(res.headers.get('etag')).toBe('"model-etag"');
@@ -190,7 +190,10 @@ describe('GET /vr/[slug]/model — provider-fetch resolution (R2-D1/R2-D6)', () 
 		expect(await res.text()).toBe('UT BYTES');
 		expect(res.headers.get('content-length')).toBe('8');
 		// redirect: 'manual' — a provider 3xx must not bounce the stream off-host.
-		expect(fetchMock).toHaveBeenCalledWith('https://utfs.io/f/abc123', { redirect: 'manual' });
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://utfs.io/f/abc123',
+			expect.objectContaining({ redirect: 'manual', signal: expect.any(AbortSignal) })
+		);
 	});
 
 	it('omits content-length when the provider declares no size (progress degrades, stream works)', async () => {
