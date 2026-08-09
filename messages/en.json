@@ -1170,5 +1170,50 @@
 	"admin_notice_supporter_post": ".",
 	"admin_notice_supporter_dismiss": "Dismiss this notice",
 	"admin_notice_supporter_dismissed_announce": "Notice dismissed.",
-	"link_opens_new_tab": "(opens in a new tab)"
+	"link_opens_new_tab": "(opens in a new tab)",
+	"gallery_view_vr": "VR Avatars",
+	"vr_title": "VR Avatars",
+	"vr_meta_title": "VR Avatars — {siteName}",
+	"vr_meta_description": "Browse {count} VR avatars from the {siteName} collection.",
+	"vr_meta_description_detail": "{name}, a VR avatar on {siteName}.",
+	"vr_count": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "{count} avatar",
+				"countPlural=other": "{count} avatars"
+			}
+		}
+	],
+	"vr_empty_title": "No VR avatars yet",
+	"vr_empty_sub": "Avatars will show up here once they're added.",
+	"vr_mature_chip": "Mature",
+	"vr_badge_model": "3D · {format}",
+	"vr_platform_other": "Other",
+	"vr_avatar_of": "Avatar of",
+	"vr_show_avatar": "Show avatar",
+	"vr_media_poster": "Poster",
+	"vr_media_item": "{name} — media {n}",
+	"vr_credits": "Credits",
+	"vr_license": "License",
+	"vr_license_personal_use": "Personal use",
+	"vr_license_cc_by": "CC BY",
+	"vr_license_base_tos": "Base model ToS",
+	"vr_license_all_rights_reserved": "All rights reserved",
+	"vr_role_base": "Base model",
+	"vr_role_modeler": "Modeler",
+	"vr_role_rigger": "Rigger",
+	"vr_role_texture": "Textures",
+	"vr_role_shader": "Shaders",
+	"vr_role_other": "Other",
+	"vr_download_model": "Download model",
+	"vr_external_view": "View this avatar on {site}",
+	"vr_view_in_3d": "View in 3D",
+	"vr_exit_3d": "Exit 3D",
+	"vr_fullscreen": "Fullscreen",
+	"vr_loading_model": "Loading model — {loaded} of {total}",
+	"vr_loading_model_nototal": "Loading model — {loaded}",
+	"vr_load_failed": "Couldn't load the 3D model. Try again in a moment.",
+	"vr_webgl_unavailable": "3D view isn't available in this browser. Photos and video on this page still work."
 }

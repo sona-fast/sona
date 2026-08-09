@@ -35,6 +35,7 @@
 		"@sveltejs/kit": "^2.57.0",
 		"@sveltejs/vite-plugin-svelte": "^7.0.0",
 		"@types/node": "^25.9.1",
+		"@types/three": "^0.185.4",
 		"better-sqlite3": "^12.9.0",
 		"drizzle-kit": "^0.31.10",
 		"esbuild": "^0.27.3",
@@ -47,6 +48,7 @@
 		"vitest": "^4.1.7"
 	},
 	"dependencies": {
+		"@pixiv/three-vrm": "^3.5.5",
 		"@sveltejs/adapter-cloudflare": "^7.2.8",
 		"@uploadthing/shared": "^7.1.10",
 		"@uploadthing/svelte": "^7.3.3",
@@ -55,6 +57,7 @@
 		"emojilib": "^4.0.3",
 		"lottie-web": "^5.13.0",
 		"lucide-svelte": "^0.468.0",
+		"three": "^0.185.1",
 		"uploadthing": "^7.7.4",
 		"wrangler": "^4.119.0"
 	}
