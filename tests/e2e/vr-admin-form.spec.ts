@@ -44,7 +44,7 @@ test('the ungated create form renders its fields, dropzones and credit control',
 
 	// Visibility switches are named (a11y wiring, not just visuals).
 	await expect(page.getByRole('checkbox', { name: 'Offer model download' })).toBeAttached();
-	await expect(page.getByRole('checkbox', { name: 'Mark as mature' })).toBeAttached();
+	await expect(page.getByRole('checkbox', { name: 'Mark as NSFW' })).toBeAttached();
 	await expect(page.getByRole('checkbox', { name: 'Published' })).toBeAttached();
 });
 
