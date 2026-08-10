@@ -33,9 +33,14 @@ test('the ungated create form renders its fields, dropzones and credit control',
 	await expect(page.getByRole('button', { name: 'Add credit' })).toBeVisible();
 	// The gallery/sticker artist affordance is reused here: each credit row's
 	// select carries a New-artist button (registry search lives inside the
-	// dialog when connected). Rows start empty on /new, so add one first.
-	await page.getByRole('button', { name: 'Add credit' }).click();
-	await expect(page.getByRole('button', { name: 'New artist for credit 1' })).toBeVisible();
+	// dialog when connected). Rows start empty on /new, so add one first —
+	// with the hydration-retry shape: a pre-hydration click silently no-ops.
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Add credit' }).click();
+		await expect(page.getByRole('button', { name: 'New artist for credit 1' })).toBeVisible({
+			timeout: 2000
+		});
+	}).toPass({ timeout: 20_000 });
 
 	// Visibility switches are named (a11y wiring, not just visuals).
 	await expect(page.getByRole('checkbox', { name: 'Offer model download' })).toBeAttached();
