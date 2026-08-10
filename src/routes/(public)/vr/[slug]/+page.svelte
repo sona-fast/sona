@@ -365,9 +365,12 @@
 				<div class="actions">
 					<!-- aria-describedby ties the CC BY attribution terms to the action
 					     they govern (R2-A12). -->
+					<!-- One filled primary per view: beside "View in 3D" the download is
+					     the outlined secondary; on viewer-less pages (FBX, or a model the
+					     viewer can't render) it IS the view's primary and takes the fill. -->
 					<a
 						href="/vr/{avatar.slug}/download"
-						class="btn btn-outline"
+						class="btn {data.viewerPath ? 'btn-outline' : ''}"
 						download
 						aria-describedby={ccByAttribution ? 'ccby-attribution' : undefined}
 					>
