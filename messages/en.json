@@ -1211,6 +1211,7 @@
 	"admin_vr_field_description": "Description",
 	"admin_vr_field_platforms": "Platforms",
 	"admin_vr_no_credits": "No credits yet — add who made the base, rig, and textures.",
+	"admin_vr_new_artist_aria": "New artist for credit {position}",
 	"admin_vr_add_credit": "Add credit",
 	"admin_vr_remove_credit": "Remove credit {position}",
 	"admin_vr_field_role": "Role",

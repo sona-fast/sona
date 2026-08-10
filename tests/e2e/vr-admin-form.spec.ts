@@ -31,9 +31,11 @@ test('the ungated create form renders its fields, dropzones and credit control',
 
 	// Credits editor entry point.
 	await expect(page.getByRole('button', { name: 'Add credit' })).toBeVisible();
-	// The gallery/sticker artist affordance is reused here: plain select PLUS
-	// the New-artist dialog (registry search lives inside it when connected).
-	await expect(page.getByRole('button', { name: 'New artist' })).toBeVisible();
+	// The gallery/sticker artist affordance is reused here: each credit row's
+	// select carries a New-artist button (registry search lives inside the
+	// dialog when connected). Rows start empty on /new, so add one first.
+	await page.getByRole('button', { name: 'Add credit' }).click();
+	await expect(page.getByRole('button', { name: 'New artist for credit 1' })).toBeVisible();
 
 	// Visibility switches are named (a11y wiring, not just visuals).
 	await expect(page.getByRole('checkbox', { name: 'Offer model download' })).toBeAttached();

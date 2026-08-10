@@ -1175,6 +1175,7 @@
 	"admin_vr_field_description": "説明",
 	"admin_vr_field_platforms": "プラットフォーム",
 	"admin_vr_no_credits": "クレジットはまだありません — ベース・リグ・テクスチャの制作者を追加しましょう。",
+	"admin_vr_new_artist_aria": "クレジット{position}の新しいアーティストを作成",
 	"admin_vr_add_credit": "クレジットを追加",
 	"admin_vr_remove_credit": "クレジット{position}を削除",
 	"admin_vr_field_role": "役割",

@@ -72,11 +72,20 @@
 	// the registry is connected.
 	let artistList = $state([...artists].sort((a, b) => a.name.localeCompare(b.name)));
 	let showNewArtist = $state(false);
+	// The row whose select prompted the dialog — the created artist fills THAT
+	// row (no surprise appended rows; the affordance lives at the point of need,
+	// beside each select, per the upload page's add-artist precedent).
+	let newArtistTargetUid = $state<number | null>(null);
+	function openNewArtist(uid: number) {
+		newArtistTargetUid = uid;
+		showNewArtist = true;
+	}
 	function onArtistCreated(artist: { id: number; name: string }) {
 		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
-		// The created artist lands in a fresh credit row, pre-selected.
-		creditEntries = [...creditEntries, { uid: nextUid++, artistId: String(artist.id), role: 'base', roleLabel: '' }];
+		const target = creditEntries.find((c) => c.uid === newArtistTargetUid);
+		if (target) target.artistId = String(artist.id);
 		showNewArtist = false;
+		newArtistTargetUid = null;
 	}
 
 	const isEdit = avatar !== null;
@@ -502,12 +511,23 @@
 					<div class="credit-fields">
 						<label>
 							<span>{m.admin_field_artist()}</span>
-							<select class="input sm" name="credit[{i}][artistId]" bind:value={credit.artistId} required>
-								<option value="">{m.admin_upload_select_artist()}</option>
-								{#each artistList as a}
-									<option value={String(a.id)}>{a.name}</option>
-								{/each}
-							</select>
+							<div class="artist-pick">
+								<select class="input sm" name="credit[{i}][artistId]" bind:value={credit.artistId} required>
+									<option value="">{m.admin_upload_select_artist()}</option>
+									{#each artistList as a}
+										<option value={String(a.id)}>{a.name}</option>
+									{/each}
+								</select>
+								<button
+									type="button"
+									class="new-artist-btn"
+									aria-label={m.admin_vr_new_artist_aria({ position: i + 1 })}
+									title={m.admin_pack_new_artist()}
+									onclick={() => openNewArtist(credit.uid)}
+								>
+									<UserPlus size={14} aria-hidden="true" />
+								</button>
+							</div>
 						</label>
 						<label>
 							<span>{m.admin_vr_field_role()}</span>
@@ -540,7 +560,6 @@
 			{/each}
 		</div>
 		<button type="button" class="add-credit-btn" onclick={addCredit}><Plus size={14} /> {m.admin_vr_add_credit()}</button>
-		<button type="button" class="add-credit-btn" onclick={() => (showNewArtist = true)}><UserPlus size={14} /> {m.admin_pack_new_artist()}</button>
 	</section>
 
 	<section class="section">
@@ -873,6 +892,42 @@
 {/if}
 
 <style>
+	.artist-pick {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.artist-pick select {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.new-artist-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 34px;
+		height: 34px;
+		flex: none;
+		border-radius: var(--radius-s);
+		border: 1px solid var(--input);
+		background: none;
+		color: var(--muted-foreground);
+		cursor: pointer;
+		transition: color 0.15s, border-color 0.15s;
+	}
+
+	.new-artist-btn:hover {
+		color: var(--foreground);
+		border-color: var(--ring);
+	}
+
+	.new-artist-btn:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 1px;
+	}
+
 	.back-link {
 		display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
 		color: var(--muted-foreground); margin-bottom: 16px; text-decoration: none;
