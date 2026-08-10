@@ -27,9 +27,7 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
-// SET AT MERGE: re-derive to the merge date (the default text changed in this
-// change set — same checklist item as the early-access gaDate).
-export const LEGAL_DEFAULTS_UPDATED = '2026-08-09';
+export const LEGAL_DEFAULTS_UPDATED = '2026-08-10';
 
 /**
  * Resolve the "Last updated" date to show on a legal page from a *stable* source

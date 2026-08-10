@@ -20,8 +20,10 @@
  * entries fails early-access.test.ts.
  */
 export const EARLY_ACCESS: Record<string, string> = {
-	// SET AT MERGE: must be merge date + 7 (release process above)
-	'vr-avatars': '2026-08-15'
+	// Merged 2026-08-10 → GA a week later (release process above). Delete this
+	// entry (and the vrPublishingEnabled gate's reason to exist) at the next
+	// release after GA.
+	'vr-avatars': '2026-08-17'
 };
 
 /**
