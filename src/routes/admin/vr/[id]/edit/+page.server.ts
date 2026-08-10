@@ -7,9 +7,18 @@ import { parseAvatarForm, validateAvatarRefs, validateAvatarMedia, updateAvatar,
 import { vrPublishingEnabled } from '$lib/server/vr-gate';
 import type { Actions, PageServerLoad } from './$types';
 
+/** The [id] segment as a positive integer, or null for anything else — a
+ * non-numeric id must 404 like an unknown one, not bind NaN into D1 (which
+ * errors as a 500). */
+function parseAvatarId(id: string): number | null {
+	const n = Number(id);
+	return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 export const load: PageServerLoad = async ({ params, platform }) => {
 	const db = getDb(platform!.env.DB);
-	const avatarId = Number(params.id);
+	const avatarId = parseAvatarId(params.id);
+	if (avatarId === null) error(404, 'Avatar not found');
 
 	const avatar = await db.select().from(vrAvatars).where(eq(vrAvatars.id, avatarId)).get();
 	if (!avatar) error(404, 'Avatar not found');
@@ -59,7 +68,8 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 export const actions = {
 	save: async ({ params, request, platform, url }) => {
 		const db = getDb(platform!.env.DB);
-		const avatarId = Number(params.id);
+		const avatarId = parseAvatarId(params.id);
+		if (avatarId === null) return fail(404, { error: 'Avatar not found.' });
 		const existing = await db
 			.select({ id: vrAvatars.id, published: vrAvatars.published, modelUrl: vrAvatars.modelUrl })
 			.from(vrAvatars)
@@ -100,7 +110,8 @@ export const actions = {
 
 	delete: async ({ params, platform }) => {
 		const db = getDb(platform!.env.DB);
-		const avatarId = Number(params.id);
+		const avatarId = parseAvatarId(params.id);
+		if (avatarId === null) return fail(404, { error: 'Avatar not found.' });
 		const existing = await db
 			.select({ id: vrAvatars.id })
 			.from(vrAvatars)

@@ -175,10 +175,16 @@
 
 			loading = false;
 			await tick(); // stage <div> renders once loading flips off
-			if (gen !== generation) return;
-
+			// Same reasoning as the parse-time guard above: an exit (or unmount)
+			// during the tick must free the parsed scene, not abandon it — and the
+			// missing-stage throw lands in a catch where disposeScene is still
+			// null, so that path disposes here too.
+			if (gen !== generation || !stage) {
+				VRMUtils.deepDispose(vrm.scene);
+				if (gen === generation) throw new Error('viewer stage missing');
+				return;
+			}
 			const host = stage;
-			if (!host) throw new Error('viewer stage missing');
 			const width = host.clientWidth;
 			const height = host.clientHeight;
 
@@ -326,6 +332,12 @@
 	}
 
 	$effect(() => () => {
+		// Unmount is an exit: abort an in-flight model download (it would run to
+		// completion in the background otherwise) and bump the generation so an
+		// awaited stage of enter3d abandons instead of touching a dead DOM.
+		abort?.abort();
+		abort = null;
+		generation++;
 		disposeScene?.();
 		disposeScene = null;
 	});

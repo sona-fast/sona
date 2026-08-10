@@ -842,7 +842,10 @@
 	<div class="save-bar">
 		<div class="save-actions">
 			<a href="/admin/vr" class="btn btn-outline">{m.admin_cancel()}</a>
-			<button type="submit" class="btn btn-primary" disabled={saving}>
+			<!-- Also locked while an upload is in flight: submitting then would
+			     save without the pending modelUrl/media row, and the just-stored
+			     file — referenced by nothing — gets reaped by the orphan sweep. -->
+			<button type="submit" class="btn btn-primary" disabled={saving || uploading || mediaUploading}>
 				{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}<Check size={16} /> {submitLabel}{/if}
 			</button>
 		</div>

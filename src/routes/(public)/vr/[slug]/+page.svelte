@@ -60,6 +60,20 @@
 	// skipped — MediaRecorder-produced WebMs declare Infinity, and an
 	// "Infinity:NaN" badge is worse than none (R2-D4).
 	let durations = $state<Record<number, number>>({});
+
+	// Same-route navigation (/vr/a → /vr/b, e.g. browser back/forward) reuses
+	// this component, so per-avatar state must not survive the slug change: a
+	// stale `revealed` would render the next NSFW avatar pre-revealed, a stale
+	// `selected` can index past a shorter media list, and `durations` keys
+	// would label the wrong clips. Gallery precedent: the fursuitPage reset.
+	$effect(() => {
+		void avatar.slug;
+		revealed = false;
+		revealAnnouncement = '';
+		selected = null;
+		viewerActive = false;
+		durations = {};
+	});
 	function noteDuration(i: number, el: HTMLVideoElement) {
 		if (Number.isFinite(el.duration)) durations = { ...durations, [i]: el.duration };
 	}
@@ -211,21 +225,26 @@
 			     inserted with its first content is often not announced). -->
 			<p class="sr-only" role="status">{revealAnnouncement}</p>
 			{#if data.viewerPath}
-				<VrViewer
-					modelPath={data.viewerPath}
-					modelSizeBytes={avatar.modelSizeBytes}
-					name={avatar.name}
-					nsfw={avatar.nsfw}
-					{revealed}
-					posterWidth={avatar.posterWidth}
-					posterHeight={avatar.posterHeight}
-					bind:active={viewerActive}
-				>
-					<!-- tabindex="-1": the reveal handler lands focus here after its
-					     button unmounts — never a tab stop. -->
-					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div class="media-frame" tabindex="-1" bind:this={mediaFrame}>{@render mainMedia()}</div>
-				</VrViewer>
+				<!-- Keyed on the slug: a live 3D scene (or in-flight model download)
+				     must not carry over to another avatar on client-side navigation —
+				     remounting runs the viewer's teardown (abort + dispose). -->
+				{#key avatar.slug}
+					<VrViewer
+						modelPath={data.viewerPath}
+						modelSizeBytes={avatar.modelSizeBytes}
+						name={avatar.name}
+						nsfw={avatar.nsfw}
+						{revealed}
+						posterWidth={avatar.posterWidth}
+						posterHeight={avatar.posterHeight}
+						bind:active={viewerActive}
+					>
+						<!-- tabindex="-1": the reveal handler lands focus here after its
+						     button unmounts — never a tab stop. -->
+						<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+						<div class="media-frame" tabindex="-1" bind:this={mediaFrame}>{@render mainMedia()}</div>
+					</VrViewer>
+				{/key}
 			{:else}
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<div class="media-frame" tabindex="-1" bind:this={mediaFrame}>{@render mainMedia()}</div>

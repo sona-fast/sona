@@ -297,11 +297,17 @@ describe('create action validation', () => {
 });
 
 describe('create action E2E_VR_GATE override (test-only bypass)', () => {
-	it("only the exact value 'open' opens the gate; 'false' (or any other value) stays closed", async () => {
+	it("is inert outside dev builds — even the exact value 'open' stays closed", async () => {
+		// The bypass is guarded on $app/environment's `dev`, which the vitest
+		// stub pins to false (vitest-stubs/app-environment.ts) — exactly what a
+		// production build compiles to. A dashboard var set on a production
+		// deployment must NOT open the pre-GA gate; the dev-build behavior
+		// (bypass honored) is covered by the e2e suite, which runs `vite dev`
+		// with E2E_VR_GATE=open in wrangler.e2e.toml.
 		EARLY_ACCESS['vr-avatars'] = FUTURE_GA;
 		const open = makeDb();
 		(open.platform as unknown as { env: Record<string, unknown> }).env.E2E_VR_GATE = 'open';
-		expect(await outcomeOf(open.platform, baseForm())).toBe('created');
+		expect(await outcomeOf(open.platform, baseForm())).toBe(403);
 
 		const closed = makeDb();
 		(closed.platform as unknown as { env: Record<string, unknown> }).env.E2E_VR_GATE = 'false';

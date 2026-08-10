@@ -332,7 +332,11 @@ export const avatarMedia = sqliteTable('avatar_media', {
 ]);
 
 // Platforms an avatar is set up for, shown as badges. No PK, mirroring
-// image_tags/sticker_emojis; (avatarId, platform) uniqueness is kept in app code.
+// image_tags/sticker_emojis; form parsing dedupes and the unique index is the
+// database-boundary backstop. (avatar_credits carries NO such index on
+// purpose: one artist may hold several 'other' roles, distinguished only by
+// role_label, and SQLite's NULL-distinct unique semantics would let every
+// NULL-label duplicate through anyway — credits dedupe in parseAvatarForm.)
 export const avatarPlatforms = sqliteTable('avatar_platforms', {
 	avatarId: integer('avatar_id').notNull().references(() => vrAvatars.id, { onDelete: 'cascade' }),
 	platform: text('platform', {
@@ -340,5 +344,6 @@ export const avatarPlatforms = sqliteTable('avatar_platforms', {
 	}).notNull()
 }, (table) => [
 	// /vr does an inArray over avatar_id for platform chips; detail fetches by it.
-	index('avatar_platforms_avatar_id_idx').on(table.avatarId)
+	index('avatar_platforms_avatar_id_idx').on(table.avatarId),
+	uniqueIndex('avatar_platforms_avatar_platform_uq').on(table.avatarId, table.platform)
 ]);

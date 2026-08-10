@@ -315,6 +315,14 @@
             "avatar_id"
           ],
           "isUnique": false
+        },
+        "avatar_platforms_avatar_platform_uq": {
+          "name": "avatar_platforms_avatar_platform_uq",
+          "columns": [
+            "avatar_id",
+            "platform"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {

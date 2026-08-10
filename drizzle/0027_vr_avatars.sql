@@ -27,6 +27,7 @@ CREATE TABLE `avatar_platforms` (
 );
 --> statement-breakpoint
 CREATE INDEX `avatar_platforms_avatar_id_idx` ON `avatar_platforms` (`avatar_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `avatar_platforms_avatar_platform_uq` ON `avatar_platforms` (`avatar_id`,`platform`);--> statement-breakpoint
 CREATE TABLE `vr_avatars` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`slug` text NOT NULL,

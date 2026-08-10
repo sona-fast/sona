@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
+import { dev } from '$app/environment';
 import { getRawSetting } from '$lib/server/settings';
 import { verifySupporterKey } from '$lib/server/supporter-key';
 import { isFeatureEnabled, EARLY_ACCESS } from '$lib/early-access';
@@ -23,15 +24,18 @@ const VR_FEATURE_FLAG = 'vr-avatars';
  * presentation on top of it, never a substitute.
  *
  * `env` carries the TEST-ONLY E2E_VR_GATE bypass (see app.d.ts): honored only
- * when set to exactly 'open', which only the e2e harness config does — prod
- * behavior is unchanged with the var unset.
+ * when set to exactly 'open' AND the build is a dev build (the e2e harness
+ * runs `vite dev` — see playwright.config.ts webServer). The `dev` guard
+ * compiles the bypass out of production entirely: deploy.yml keeps dashboard
+ * vars (keep_vars), so without it a var set on a production deployment would
+ * open the pre-GA gate.
  */
 export async function vrPublishingEnabled(
 	db: Database,
 	env?: Env,
 	now: Date = new Date()
 ): Promise<boolean> {
-	if (env?.E2E_VR_GATE === 'open') return true;
+	if (dev && env?.E2E_VR_GATE === 'open') return true;
 	// A failed settings read degrades to "no key" rather than throwing the whole
 	// page — the GA branch of isFeatureEnabled still opens the gate on time.
 	const token = await getRawSetting(db, 'supporterKey').catch(() => null);

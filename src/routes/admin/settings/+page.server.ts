@@ -707,7 +707,12 @@ export const actions = {
 		const settings = await getSettings(db);
 		const imageCount = (await db.select({ imageUrl: images.imageUrl }).from(images)).length;
 
-		// Delete from D1
+		// Delete from D1. VR avatars go FIRST: vr_avatars.character_id and
+		// avatar_credits.artist_id reference characters/artists without cascade,
+		// so with a VR row present the characters/artists deletes below would
+		// fail their FK checks. The avatar delete cascades its child tables
+		// (credits, media, platforms).
+		await db.delete(vrAvatars);
 		await db.delete(imageTags);
 		await db.delete(imageCharacters);
 		await db.delete(images);

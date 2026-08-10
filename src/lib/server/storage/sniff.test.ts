@@ -93,11 +93,12 @@ describe('isWebmHead (SONA-124 showcase clips)', () => {
 });
 
 describe('isWebmHead — DocType discrimination (SONA-124)', () => {
-	function ebmlHead(doctype: string): Uint8Array {
-		const bytes = new Uint8Array(64);
-		bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
-		bytes.set(new TextEncoder().encode(doctype), 12);
-		return bytes;
+	// Structurally valid EBML header, as real muxers write it: magic, header
+	// size VINT, EBMLVersion child, then the DocType element (id 42 82).
+	function ebmlHead(doctype: string, trailer: number[] = []): Uint8Array {
+		const dt = [...new TextEncoder().encode(doctype)];
+		const body = [0x42, 0x86, 0x81, 0x01, 0x42, 0x82, 0x80 | dt.length, ...dt, ...trailer];
+		return new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x80 | body.length, ...body]);
 	}
 
 	it('accepts an EBML head whose DocType is webm', () => {
@@ -106,5 +107,16 @@ describe('isWebmHead — DocType discrimination (SONA-124)', () => {
 
 	it('rejects a Matroska head — EBML magic alone is not webm', () => {
 		expect(isWebmHead(ebmlHead('matroska'))).toBe(false);
+	});
+
+	it("rejects 'webm' bytes that sit OUTSIDE the DocType element", () => {
+		// A Matroska DocType with the ASCII bytes 'webm' parked in a trailing
+		// Void element (id EC) — the old byte scan accepted exactly this shape.
+		const smuggled = ebmlHead('matroska', [0xec, 0x84, 0x77, 0x65, 0x62, 0x6d]);
+		expect(isWebmHead(smuggled)).toBe(false);
+	});
+
+	it('rejects a header whose DocType element is truncated by the sniff window', () => {
+		expect(isWebmHead(ebmlHead('webm').slice(0, 10))).toBe(false);
 	});
 });

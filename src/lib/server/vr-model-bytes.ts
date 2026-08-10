@@ -23,8 +23,9 @@ import type { SiteSettings } from '$lib/server/settings';
 
 type Env = App.Platform['env'];
 
-/** Upper bound on the provider-proxy fetch — a hung upstream must not hold
- * the visitor's request open indefinitely. */
+/** Upper bound on the provider-proxy fetch's time-to-headers — a hung
+ * upstream must not hold the visitor's request open indefinitely. The body
+ * transfer is deliberately unbounded (see resolveModelBytes). */
 const PROVIDER_FETCH_TIMEOUT_MS = 10_000;
 
 export interface ModelBytesOpts {
@@ -73,15 +74,20 @@ export async function resolveModelBytes(opts: ModelBytesOpts): Promise<ResolvedM
 		// arbitrary origin (SSRF via redirect). A 3xx is treated as unresolvable.
 		// Timeout + transport-failure catch: an unresponsive or unresolvable
 		// provider must resolve to null (404 upstream) rather than hanging the
-		// worker request or escaping as a 500.
+		// worker request or escaping as a 500. The timer is cleared once headers
+		// arrive — the signal stays associated with res.body, so a still-armed
+		// timeout would error the stream mid-transfer, and the transfer is paced
+		// by the VISITOR's bandwidth (a multi-MB model on a slow link
+		// legitimately outlives any sane header timeout).
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), PROVIDER_FETCH_TIMEOUT_MS);
 		let res: Response;
 		try {
-			res = await fetch(opts.modelUrl, {
-				redirect: 'manual',
-				signal: AbortSignal.timeout(PROVIDER_FETCH_TIMEOUT_MS)
-			});
+			res = await fetch(opts.modelUrl, { redirect: 'manual', signal: controller.signal });
 		} catch {
 			return null;
+		} finally {
+			clearTimeout(timer);
 		}
 		if (res.ok && res.body) {
 			const len = res.headers.get('content-length');

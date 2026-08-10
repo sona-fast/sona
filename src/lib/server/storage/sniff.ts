@@ -58,15 +58,42 @@ export function sniffImageType(bytes: Uint8Array): string | null {
  */
 export function isWebmHead(bytes: Uint8Array): boolean {
 	if (!startsWith(bytes, [0x1a, 0x45, 0xdf, 0xa3])) return false;
-	// EBML covers Matroska too (.mkv) — require the 'webm' DocType, which sits
-	// in the EBML header and is always inside our 64-byte sniff window. Cheap
-	// byte scan rather than a full EBML parse, matching this file's style.
-	const doctype = [0x77, 0x65, 0x62, 0x6d]; // 'webm'
-	outer: for (let i = 4; i <= bytes.length - doctype.length; i++) {
-		for (let j = 0; j < doctype.length; j++) {
-			if (bytes[i + j] !== doctype[j]) continue outer;
+	// EBML covers Matroska too (.mkv) — require the DocType ELEMENT (id 42 82)
+	// to spell exactly 'webm'. A plain byte scan would accept 'webm' appearing
+	// anywhere in the header (e.g. inside a Matroska file's metadata), so this
+	// walks the EBML header's child elements instead. DocType sits within the
+	// first handful of header elements, well inside the 64-byte sniff window;
+	// a header odd enough to push it out is rejected rather than trusted.
+	let i = 4;
+	const headSize = vintLength(bytes[i]);
+	if (!headSize) return false;
+	i += headSize; // skip the header's own size VINT; its children follow
+	while (i < bytes.length) {
+		const idLen = vintLength(bytes[i]);
+		if (!idLen || i + idLen >= bytes.length) return false;
+		const isDocType = idLen === 2 && bytes[i] === 0x42 && bytes[i + 1] === 0x82;
+		const sizeAt = i + idLen;
+		const sizeLen = vintLength(bytes[sizeAt]);
+		if (!sizeLen || sizeAt + sizeLen > bytes.length) return false;
+		let size = bytes[sizeAt] & (0xff >> sizeLen);
+		for (let j = 1; j < sizeLen; j++) size = size * 256 + bytes[sizeAt + j];
+		const payload = sizeAt + sizeLen;
+		if (isDocType) {
+			// DocType is the ASCII string 'webm', nothing longer or shorter.
+			if (size !== 4 || payload + 4 > bytes.length) return false;
+			return startsWith(bytes, ascii('webm'), payload);
 		}
-		return true;
+		i = payload + size;
 	}
 	return false;
+}
+
+/** Length in bytes of an EBML VINT whose first byte is `first` (the leading
+ * 1-bit's position), or 0 for the invalid all-zero marker. */
+function vintLength(first: number | undefined): number {
+	if (!first) return 0;
+	for (let len = 1, mask = 0x80; len <= 8; len++, mask >>= 1) {
+		if (first & mask) return len;
+	}
+	return 0;
 }

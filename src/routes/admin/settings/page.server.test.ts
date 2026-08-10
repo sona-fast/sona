@@ -995,3 +995,71 @@ describe('settings load — expiring-soon boundary (SONA-114)', () => {
 		expect(result.supporterKey).toMatchObject({ state: 'expired', daysRemaining: 0, expiringSoon: false });
 	});
 });
+
+describe('deleteAll — VR avatars are wiped too (SONA-124)', () => {
+	it('removes vr_avatars (cascading credits/media/platforms) before the characters/artists deletes', async () => {
+		// Full-schema in-memory DB with REAL foreign keys: vr_avatars.character_id
+		// and avatar_credits.artist_id reference characters/artists WITHOUT
+		// cascade, so if deleteAll ordered the characters/artists deletes first,
+		// this test fails with a FOREIGN KEY constraint error — the regression it
+		// exists to catch. The child tables prove the ON DELETE cascade instead.
+		const sqlite = new Database(':memory:');
+		sqlite.pragma('foreign_keys = ON');
+		sqlite.exec(`
+			CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+			CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT);
+			CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT);
+			CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL);
+			CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+			CREATE TABLE collections (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+			CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+			CREATE TABLE image_characters (image_id INTEGER NOT NULL, character_id INTEGER NOT NULL);
+			CREATE TABLE vr_avatars (
+				id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL, name TEXT NOT NULL,
+				character_id INTEGER NOT NULL REFERENCES characters(id),
+				model_url TEXT, downloadable INTEGER NOT NULL DEFAULT 0, nsfw INTEGER NOT NULL DEFAULT 0,
+				published INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
+			);
+			CREATE TABLE avatar_credits (
+				avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
+				artist_id INTEGER NOT NULL REFERENCES artists(id),
+				role TEXT NOT NULL, role_label TEXT, position INTEGER NOT NULL DEFAULT 0
+			);
+			CREATE TABLE avatar_media (
+				avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
+				kind TEXT NOT NULL, url TEXT NOT NULL, width INTEGER, height INTEGER,
+				position INTEGER NOT NULL DEFAULT 0
+			);
+			CREATE TABLE avatar_platforms (
+				avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
+				platform TEXT NOT NULL
+			);
+		`);
+		sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
+		sqlite.prepare('INSERT INTO artists (id, name) VALUES (1, ?)').run('Alba');
+		sqlite
+			.prepare(
+				"INSERT INTO vr_avatars (id, slug, name, character_id, model_url, created_at) VALUES (1, 'taro', 'Taro', 1, '/img/vr-models/taro.vrm', '2026-08-01')"
+			)
+			.run();
+		sqlite.prepare("INSERT INTO avatar_credits (avatar_id, artist_id, role) VALUES (1, 1, 'modeler')").run();
+		sqlite.prepare("INSERT INTO avatar_media (avatar_id, kind, url) VALUES (1, 'image', '/img/vr-media/a.png')").run();
+		sqlite.prepare("INSERT INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat')").run();
+
+		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
+		const result = (await actions.deleteAll({ platform } as never)) as { success?: boolean };
+		expect(result).toMatchObject({ success: true });
+
+		for (const table of [
+			'vr_avatars',
+			'avatar_credits',
+			'avatar_media',
+			'avatar_platforms',
+			'characters',
+			'artists'
+		]) {
+			const row = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
+			expect(row.n, `${table} should be empty after deleteAll`).toBe(0);
+		}
+	});
+});
