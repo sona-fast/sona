@@ -50,7 +50,14 @@ beforeAll(async () => {
 		// Resolve workerd-flavored entry points where packages offer them.
 		conditions: ['workerd', 'worker', 'browser'],
 		platform: 'browser',
-		target: 'es2022'
+		target: 'es2022',
+		// $app/environment is a SvelteKit virtual module ($lib resolves via
+		// tsconfig paths, this doesn't) — alias it to the same stub vitest
+		// uses, since #289 routed buffer.ts → $lib/config → $app/environment
+		// into this bundle. The stub pins dev=false, matching a prod build.
+		alias: {
+			'$app/environment': path.join(repoRoot, 'vitest-stubs/app-environment.ts')
+		}
 	});
 	mf = new Miniflare({
 		modules: true,
