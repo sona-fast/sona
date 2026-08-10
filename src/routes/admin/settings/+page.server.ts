@@ -707,12 +707,15 @@ export const actions = {
 		const settings = await getSettings(db);
 		const imageCount = (await db.select({ imageUrl: images.imageUrl }).from(images)).length;
 
-		// Delete from D1. VR avatars go FIRST: vr_avatars.character_id and
-		// avatar_credits.artist_id reference characters/artists without cascade,
-		// so with a VR row present the characters/artists deletes below would
-		// fail their FK checks. The avatar delete cascades its child tables
-		// (credits, media, platforms).
+		// Delete from D1 — every content table the backup exports, so "delete all"
+		// means all. Order matters: vr_avatars and sticker_packs reference
+		// characters/artists WITHOUT cascade, so they go before those deletes or
+		// the FK checks refuse the wipe. Each cascades its own children
+		// (credits/media/platforms; stickers → sticker_emojis).
 		await db.delete(vrAvatars);
+		await db.delete(stickerPacks);
+		await db.delete(fursuitPhotos);
+		await db.delete(conventions);
 		await db.delete(imageTags);
 		await db.delete(imageCharacters);
 		await db.delete(images);

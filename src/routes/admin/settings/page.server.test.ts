@@ -996,13 +996,14 @@ describe('settings load — expiring-soon boundary (SONA-114)', () => {
 	});
 });
 
-describe('deleteAll — VR avatars are wiped too (SONA-124)', () => {
-	it('removes vr_avatars (cascading credits/media/platforms) before the characters/artists deletes', async () => {
-		// Full-schema in-memory DB with REAL foreign keys: vr_avatars.character_id
-		// and avatar_credits.artist_id reference characters/artists WITHOUT
-		// cascade, so if deleteAll ordered the characters/artists deletes first,
-		// this test fails with a FOREIGN KEY constraint error — the regression it
-		// exists to catch. The child tables prove the ON DELETE cascade instead.
+describe('deleteAll — every content table in the backup is wiped', () => {
+	it('removes VR avatars, sticker packs, fursuit photos and conventions (FK order + cascades)', async () => {
+		// Full-schema in-memory DB with REAL foreign keys: vr_avatars.character_id,
+		// sticker_packs.character_id and *.artist_id reference characters/artists
+		// WITHOUT cascade, so if deleteAll ordered the characters/artists deletes
+		// first, this test fails with a FOREIGN KEY constraint error — the
+		// regression it exists to catch. The child tables prove the ON DELETE
+		// cascades instead (credits/media/platforms; stickers → sticker_emojis).
 		const sqlite = new Database(':memory:');
 		sqlite.pragma('foreign_keys = ON');
 		sqlite.exec(`
@@ -1034,6 +1035,31 @@ describe('deleteAll — VR avatars are wiped too (SONA-124)', () => {
 				avatar_id INTEGER NOT NULL REFERENCES vr_avatars(id) ON DELETE CASCADE,
 				platform TEXT NOT NULL
 			);
+			CREATE TABLE sticker_packs (
+				id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, slug TEXT NOT NULL,
+				character_id INTEGER NOT NULL REFERENCES characters(id),
+				manager_artist_id INTEGER REFERENCES artists(id),
+				source TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 1, created_at TEXT
+			);
+			CREATE TABLE stickers (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				pack_id INTEGER NOT NULL REFERENCES sticker_packs(id) ON DELETE CASCADE,
+				artist_id INTEGER REFERENCES artists(id),
+				image_url TEXT NOT NULL
+			);
+			CREATE TABLE sticker_emojis (
+				sticker_id INTEGER NOT NULL REFERENCES stickers(id) ON DELETE CASCADE,
+				emoji TEXT NOT NULL
+			);
+			CREATE TABLE fursuit_photos (
+				id INTEGER PRIMARY KEY AUTOINCREMENT, furtrack_post_id INTEGER NOT NULL,
+				character TEXT NOT NULL, image_url TEXT NOT NULL, photographer TEXT NOT NULL,
+				license TEXT NOT NULL, furtrack_url TEXT NOT NULL, created_at TEXT NOT NULL
+			);
+			CREATE TABLE conventions (
+				id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+				start_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'confirmed', created_at TEXT NOT NULL
+			);
 		`);
 		sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
 		sqlite.prepare('INSERT INTO artists (id, name) VALUES (1, ?)').run('Alba');
@@ -1045,6 +1071,19 @@ describe('deleteAll — VR avatars are wiped too (SONA-124)', () => {
 		sqlite.prepare("INSERT INTO avatar_credits (avatar_id, artist_id, role) VALUES (1, 1, 'modeler')").run();
 		sqlite.prepare("INSERT INTO avatar_media (avatar_id, kind, url) VALUES (1, 'image', '/img/vr-media/a.png')").run();
 		sqlite.prepare("INSERT INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat')").run();
+		sqlite
+			.prepare(
+				"INSERT INTO sticker_packs (id, name, slug, character_id, manager_artist_id, source) VALUES (1, 'Taro Pack', 'taro-pack', 1, 1, 'self-hosted')"
+			)
+			.run();
+		sqlite.prepare("INSERT INTO stickers (id, pack_id, artist_id, image_url) VALUES (1, 1, 1, '/img/stickers/a.webp')").run();
+		sqlite.prepare("INSERT INTO sticker_emojis (sticker_id, emoji) VALUES (1, '🦊')").run();
+		sqlite
+			.prepare(
+				"INSERT INTO fursuit_photos (furtrack_post_id, character, image_url, photographer, license, furtrack_url, created_at) VALUES (7, 'Taro', '/f.jpg', 'Cam', 'cc-by', 'https://furtrack.example/7', '2026-08-01')"
+			)
+			.run();
+		sqlite.prepare("INSERT INTO conventions (name, start_date, created_at) VALUES ('FC', '2027-01-14', '2026-08-01')").run();
 
 		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
 		const result = (await actions.deleteAll({ platform } as never)) as { success?: boolean };
@@ -1055,6 +1094,11 @@ describe('deleteAll — VR avatars are wiped too (SONA-124)', () => {
 			'avatar_credits',
 			'avatar_media',
 			'avatar_platforms',
+			'sticker_packs',
+			'stickers',
+			'sticker_emojis',
+			'fursuit_photos',
+			'conventions',
 			'characters',
 			'artists'
 		]) {
