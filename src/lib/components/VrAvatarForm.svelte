@@ -2,8 +2,9 @@
 	import { tick } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { flip } from 'svelte/animate';
-	import { ArrowLeft, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus } from 'lucide-svelte';
+	import { ArrowLeft, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus, UserPlus } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import { probeDimensions } from '$lib/probe-dimensions';
@@ -53,12 +54,30 @@
 		media?: MediaInit[];
 		platforms?: string[];
 		form?: { error?: string } | null;
+		/** Whether the shared registry is connected (admin layout load) — enables
+		 * the registry search inside NewArtistDialog, matching the gallery and
+		 * sticker flows. */
+		registryEnabled?: boolean;
 		/** Gate state (SONA-124): while false, creating and publishing are locked
 		 * server-side; the form mirrors that in its controls. */
 		publishingEnabled: boolean;
 	}
 
-	let { heading, submitLabel, artists, characters, images, avatar = null, credits = [], media = [], platforms = [], form = null, publishingEnabled }: Props = $props();
+	let { heading, submitLabel, artists, characters, images, avatar = null, credits = [], media = [], platforms = [], form = null, publishingEnabled, registryEnabled = false }: Props = $props();
+
+
+	// Same select + NewArtistDialog pairing the gallery upload and sticker forms
+	// use: a locally-sorted copy of the artist list so a just-created artist
+	// appears without a reload, and the dialog carries the registry search when
+	// the registry is connected.
+	let artistList = $state([...artists].sort((a, b) => a.name.localeCompare(b.name)));
+	let showNewArtist = $state(false);
+	function onArtistCreated(artist: { id: number; name: string }) {
+		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
+		// The created artist lands in a fresh credit row, pre-selected.
+		creditEntries = [...creditEntries, { uid: nextUid++, artistId: String(artist.id), role: 'base', roleLabel: '' }];
+		showNewArtist = false;
+	}
 
 	const isEdit = avatar !== null;
 
@@ -485,7 +504,7 @@
 							<span>{m.admin_field_artist()}</span>
 							<select class="input sm" name="credit[{i}][artistId]" bind:value={credit.artistId} required>
 								<option value="">{m.admin_upload_select_artist()}</option>
-								{#each artists as a}
+								{#each artistList as a}
 									<option value={String(a.id)}>{a.name}</option>
 								{/each}
 							</select>
@@ -521,6 +540,7 @@
 			{/each}
 		</div>
 		<button type="button" class="add-credit-btn" onclick={addCredit}><Plus size={14} /> {m.admin_vr_add_credit()}</button>
+		<button type="button" class="add-credit-btn" onclick={() => (showNewArtist = true)}><UserPlus size={14} /> {m.admin_pack_new_artist()}</button>
 	</section>
 
 	<section class="section">
@@ -842,6 +862,14 @@
 			oncancel={() => (confirmingDelete = false)}
 		/>
 	{/if}
+{/if}
+
+{#if showNewArtist}
+	<NewArtistDialog
+		registryEnabled={registryEnabled}
+		oncreated={onArtistCreated}
+		oncancel={() => (showNewArtist = false)}
+	/>
 {/if}
 
 <style>

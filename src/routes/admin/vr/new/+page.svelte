@@ -26,6 +26,7 @@
 		heading={m.admin_vr_add()}
 		submitLabel={m.admin_vr_create()}
 		artists={data.artists}
+		registryEnabled={data.registryEnabled}
 		characters={data.characters}
 		images={data.images}
 		{form}

@@ -9,6 +9,7 @@
 	heading={m.admin_vr_edit_title()}
 	submitLabel={m.admin_vr_save()}
 	artists={data.artists}
+		registryEnabled={data.registryEnabled}
 	characters={data.characters}
 	images={data.images}
 	avatar={data.avatar}
