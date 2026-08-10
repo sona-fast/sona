@@ -1160,7 +1160,7 @@
 	"admin_vr_col_download": "ダウンロード",
 	"admin_vr_chip_published": "公開中",
 	"admin_vr_chip_draft": "下書き",
-	"admin_vr_chip_mature": "成人向け",
+	"admin_vr_chip_mature": "NSFW",
 	"admin_vr_download_on": "許可",
 	"admin_vr_download_off": "不可",
 	"admin_vr_download_blocked_license": "ライセンスにより不可",
@@ -1215,7 +1215,7 @@
 	"admin_vr_switch_downloadable": "モデルのダウンロードを提供",
 	"admin_vr_switch_downloadable_on": "オン — ライセンスが許す場合、訪問者はモデルファイルをダウンロードできます",
 	"admin_vr_switch_downloadable_off": "オフ — 訪問者にはダウンロードボタンが表示されません",
-	"admin_vr_switch_nsfw": "成人向けとしてマーク",
+	"admin_vr_switch_nsfw": "NSFWとしてマーク",
 	"admin_vr_switch_nsfw_on": "オン — ポスターは表示するまでぼかされます",
 	"admin_vr_switch_nsfw_off": "オフ — ポスターは注意表示なしで表示されます",
 	"admin_vr_switch_published": "公開",
@@ -1235,7 +1235,7 @@
 	"vr_count": "アバター {count}体",
 	"vr_empty_title": "VRアバターはまだありません",
 	"vr_empty_sub": "アバターが追加されるとここに表示されます。",
-	"vr_mature_chip": "成人向け",
+	"vr_mature_chip": "NSFW",
 	"vr_badge_model": "3D · {format}",
 	"vr_platform_other": "その他",
 	"vr_avatar_of": "アバター:",
@@ -1266,5 +1266,5 @@
 	"vr_load_failed": "3Dモデルを読み込めませんでした。しばらくしてからもう一度お試しください。",
 	"vr_webgl_unavailable": "このブラウザでは3D表示を利用できません。ページ内の写真と動画は引き続きご覧いただけます。",
 	"vr_stage_keys_hint": "矢印キーでカメラを回転、＋／−でズームできます。",
-	"mature_revealed": "成人向けコンテンツを表示しました。"
+	"mature_revealed": "NSFWコンテンツを表示しました。"
 }

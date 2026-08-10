@@ -1196,7 +1196,7 @@
 	"admin_vr_col_download": "Download",
 	"admin_vr_chip_published": "Published",
 	"admin_vr_chip_draft": "Draft",
-	"admin_vr_chip_mature": "Mature",
+	"admin_vr_chip_mature": "NSFW",
 	"admin_vr_download_on": "On",
 	"admin_vr_download_off": "Off",
 	"admin_vr_download_blocked_license": "Blocked by license",
@@ -1251,7 +1251,7 @@
 	"admin_vr_switch_downloadable": "Offer model download",
 	"admin_vr_switch_downloadable_on": "On — visitors can download the model file (license permitting)",
 	"admin_vr_switch_downloadable_off": "Off — visitors see no download button",
-	"admin_vr_switch_nsfw": "Mark as mature",
+	"admin_vr_switch_nsfw": "Mark as NSFW",
 	"admin_vr_switch_nsfw_on": "On — the poster is blurred until revealed",
 	"admin_vr_switch_nsfw_off": "Off — the poster is shown without a content warning",
 	"admin_vr_switch_published": "Published",
@@ -1280,7 +1280,7 @@
 	],
 	"vr_empty_title": "No VR avatars yet",
 	"vr_empty_sub": "Avatars will show up here once they're added.",
-	"vr_mature_chip": "Mature",
+	"vr_mature_chip": "NSFW",
 	"vr_badge_model": "3D · {format}",
 	"vr_platform_other": "Other",
 	"vr_avatar_of": "Avatar of",
@@ -1311,5 +1311,5 @@
 	"vr_load_failed": "Couldn't load the 3D model. Try again in a moment.",
 	"vr_webgl_unavailable": "3D view isn't available in this browser. Photos and video on this page still work.",
 	"vr_stage_keys_hint": "Arrow keys orbit the camera; plus and minus keys zoom.",
-	"mature_revealed": "Mature content shown."
+	"mature_revealed": "NSFW content shown."
 }
