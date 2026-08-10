@@ -158,26 +158,26 @@ describe('setup wizard — collects Instagram alongside the other socials (SONA-
 		const { db, platform } = makeDb();
 
 		try {
-			await actions.default(setupEvent(platform, { instagram: 'taro' }));
+			await actions.default(setupEvent(platform, { instagram: 'sona.e2e.example' }));
 			expect.unreachable('setup should redirect on success');
 		} catch (e) {
 			if (!isRedirect(e)) throw e;
 		}
 		// Bare handle in, full profile URL out — same normalizeSocialUrl treatment
 		// the other social fields get, not a raw passthrough.
-		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://www.instagram.com/taro');
+		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://www.instagram.com/sona.e2e.example');
 	});
 
 	it('accepts a full profile URL unchanged', async () => {
 		const { db, platform } = makeDb();
 
 		try {
-			await actions.default(setupEvent(platform, { instagram: 'https://instagram.com/taro' }));
+			await actions.default(setupEvent(platform, { instagram: 'https://instagram.com/sona.e2e.example' }));
 			expect.unreachable('setup should redirect on success');
 		} catch (e) {
 			if (!isRedirect(e)) throw e;
 		}
-		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://instagram.com/taro');
+		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://instagram.com/sona.e2e.example');
 	});
 
 	it('a blank Instagram writes nothing, per the #60 rule', async () => {

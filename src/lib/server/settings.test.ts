@@ -65,10 +65,10 @@ describe('getSettings — mapping & defaults', () => {
 
 	it('maps instagramUrl from a stored row and defaults it to blank', async () => {
 		const { db } = fakeReadDb([
-			{ key: 'instagramUrl', value: 'https://www.instagram.com/taro' }
+			{ key: 'instagramUrl', value: 'https://www.instagram.com/sona.e2e.example' }
 		]);
 		const s = await getSettings(db);
-		expect(s.instagramUrl).toBe('https://www.instagram.com/taro');
+		expect(s.instagramUrl).toBe('https://www.instagram.com/sona.e2e.example');
 
 		clearSettingsCache();
 		const { db: empty } = fakeReadDb([]);

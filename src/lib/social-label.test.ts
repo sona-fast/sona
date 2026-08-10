@@ -3,11 +3,11 @@ import { atHandleFromUrl, handleFromUrl, handleSegment } from './social-label';
 
 describe('handleSegment', () => {
 	it('returns the last non-empty path segment', () => {
-		expect(handleSegment('https://www.instagram.com/taro')).toBe('taro');
+		expect(handleSegment('https://www.instagram.com/sona.e2e.example')).toBe('sona.e2e.example');
 	});
 
 	it('ignores a trailing slash', () => {
-		expect(handleSegment('https://www.instagram.com/taro/')).toBe('taro');
+		expect(handleSegment('https://www.instagram.com/sona.e2e.example/')).toBe('sona.e2e.example');
 	});
 
 	it('returns null for a pathless URL', () => {
@@ -33,7 +33,7 @@ describe('handleSegment', () => {
 
 describe('handleFromUrl', () => {
 	it('returns the handle when present', () => {
-		expect(handleFromUrl('https://t.me/taro', 'Telegram')).toBe('taro');
+		expect(handleFromUrl('https://t.me/sona.e2e.example', 'Telegram')).toBe('sona.e2e.example');
 	});
 
 	it('falls back to the platform name when no handle exists', () => {
@@ -44,7 +44,7 @@ describe('handleFromUrl', () => {
 
 describe('atHandleFromUrl', () => {
 	it('prefixes @ when a handle is present', () => {
-		expect(atHandleFromUrl('https://www.instagram.com/taro', 'Instagram')).toBe('@taro');
+		expect(atHandleFromUrl('https://www.instagram.com/sona.e2e.example', 'Instagram')).toBe('@sona.e2e.example');
 	});
 
 	it('falls back to the bare platform name for a pathless URL', () => {

@@ -1,4 +1,13 @@
 import adapter from '@sveltejs/adapter-cloudflare';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+// Anchor wrangler-config paths to this file, not process.cwd() — a build
+// started from another directory must not resolve them against that cwd.
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const wranglerToml = path.join(projectRoot, 'wrangler.toml');
+const wranglerExample = path.join(projectRoot, 'wrangler.toml.example');
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
@@ -80,11 +89,23 @@ const config = {
 		// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
 		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
 		adapter: adapter({
+			// Pin the adapter's wrangler-config lookup to THIS project. Left unset,
+			// wrangler's discovery walks up parent directories, so a checkout without
+			// its own wrangler.toml (git worktrees; fresh clones) adopts a parent
+			// checkout's config and writes the build output THERE. The tracked
+			// .example template is a valid Pages config with the same
+			// pages_build_output_dir, so builds land in ./.svelte-kit/cloudflare
+			// either way.
+			config: existsSync(wranglerToml) ? wranglerToml : wranglerExample,
 			platformProxy: {
 				// E2E tests override these (see playwright.config.ts) to run the dev
 				// server against a throwaway local D1 in an isolated persist dir. The
 				// SONA_E2E_ prefix keeps them from colliding with any real wrangler env.
-				configPath: process.env.SONA_E2E_WRANGLER_CONFIG ?? 'wrangler.toml',
+				// Absolute only when the file exists; a missing wrangler.toml keeps the
+				// historical relative value so dev-proxy behavior is unchanged there.
+				configPath:
+					process.env.SONA_E2E_WRANGLER_CONFIG ??
+					(existsSync(wranglerToml) ? wranglerToml : 'wrangler.toml'),
 				persist: process.env.SONA_E2E_PERSIST_TO
 					? { path: process.env.SONA_E2E_PERSIST_TO }
 					: undefined

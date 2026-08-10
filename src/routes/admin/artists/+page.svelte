@@ -483,6 +483,11 @@
 	}
 
 	.col-avatar {
+		/* Deliberately narrower than the rendered 60px (36px avatar + 12px padding
+		   per side; auto table layout treats this as a floor). Keeping the declared
+		   width under 60px lets the SONA-148 spec's geometry assertions tell a
+		   squished avatar from a healthy one; the spec's max-width assertion guards
+		   the opt-out itself independently. Do not "fix" this to 60px. */
 		width: 48px;
 	}
 

@@ -332,7 +332,7 @@
 									class="credit-artist"
 									title={credit.artistName}
 								>
-									<ArtistAvatar name={credit.artistName} avatarUrl={credit.artistAvatar} size={24} cdn lazy />
+									<ArtistAvatar name={credit.artistName} avatarUrl={credit.artistAvatar} size={24} cdn />
 									<span class="credit-name">{credit.artistName}</span>
 								</a>
 								{#if creditSocials(credit).length > 0}

@@ -15,6 +15,10 @@ export default defineConfig({
 	},
 	test: {
 		include: ['src/**/*.{test,spec}.ts', 'scripts/**/*.{test,spec}.ts'],
-		environment: 'node'
+		environment: 'node',
+		// Recompiles paraglide via the CLI so direct `npx vitest run` invocations
+		// (which skip the npm pretest script) never inherit a vite-plugin-compiled
+		// runtime that breaks the setLocale()-driven tests. See the setup file.
+		globalSetup: './tests/vitest-global-setup.ts'
 	}
 });

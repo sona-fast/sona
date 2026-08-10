@@ -28,12 +28,18 @@ describe('ArtistAvatar fallback ladder (R2-T6)', () => {
 	});
 });
 
-describe('VR detail credit rows opt in to cdn + lazy', () => {
+describe('VR detail credit rows opt in to cdn', () => {
 	const page = readFileSync(
 		new URL('../../routes/(public)/vr/[slug]/+page.svelte', import.meta.url),
 		'utf8'
 	);
-	it('passes cdn + lazy on the credit-row ArtistAvatar', () => {
-		expect(page).toMatch(/<ArtistAvatar[^>]*avatarUrl=\{credit\.artistAvatar\}[^>]*cdn lazy/);
+	it('passes cdn on the credit-row ArtistAvatar (lazy is the component default)', () => {
+		expect(page).toMatch(/<ArtistAvatar[^>]*avatarUrl=\{credit\.artistAvatar\}[^>]*cdn/);
+	});
+});
+
+describe('lazy-by-default (the admin-artists squish spec pins the rendered attribute)', () => {
+	it('defaults lazy to true so pre-existing call sites keep loading="lazy"', () => {
+		expect(src).toContain('lazy = true');
 	});
 });

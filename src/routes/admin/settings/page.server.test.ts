@@ -631,16 +631,16 @@ describe('settings saveSite — legal "last updated" stamps', () => {
 describe('settings saveSite — social() field directions', () => {
 	it('a POST omitting a social leaves the stored value intact', async () => {
 		const { db, platform } = makeDb();
-		await seed(db, 'twitterUrl', 'https://twitter.com/taro');
+		await seed(db, 'twitterUrl', 'https://twitter.com/sona.e2e.example');
 
 		await actions.saveSite(saveSiteEvent(platform, { siteName: 'sheeb.net' }));
 
-		expect(await getRawSetting(db, 'twitterUrl')).toBe('https://twitter.com/taro');
+		expect(await getRawSetting(db, 'twitterUrl')).toBe('https://twitter.com/sona.e2e.example');
 	});
 
 	it('a POST with a social present-but-blank clears it', async () => {
 		const { db, platform } = makeDb();
-		await seed(db, 'twitterUrl', 'https://twitter.com/taro');
+		await seed(db, 'twitterUrl', 'https://twitter.com/sona.e2e.example');
 
 		await actions.saveSite(saveSiteEvent(platform, { twitter: '' }));
 
@@ -650,18 +650,18 @@ describe('settings saveSite — social() field directions', () => {
 	it('a POST with a social present-value normalizes and saves it', async () => {
 		const { db, platform } = makeDb();
 
-		await actions.saveSite(saveSiteEvent(platform, { twitter: 'taro' }));
+		await actions.saveSite(saveSiteEvent(platform, { twitter: 'sona.e2e.example' }));
 
 		// A bare handle is normalized to the canonical profile URL before storage.
-		expect(await getRawSetting(db, 'twitterUrl')).toBe('https://twitter.com/taro');
+		expect(await getRawSetting(db, 'twitterUrl')).toBe('https://twitter.com/sona.e2e.example');
 	});
 
 	it('saves the instagram field under the instagramUrl key', async () => {
 		const { db, platform } = makeDb();
 
-		await actions.saveSite(saveSiteEvent(platform, { instagram: 'taro' }));
+		await actions.saveSite(saveSiteEvent(platform, { instagram: 'sona.e2e.example' }));
 
-		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://www.instagram.com/taro');
+		expect(await getRawSetting(db, 'instagramUrl')).toBe('https://www.instagram.com/sona.e2e.example');
 	});
 });
 

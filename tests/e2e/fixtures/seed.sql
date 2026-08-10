@@ -15,11 +15,20 @@ INSERT OR REPLACE INTO site_settings (key, value) VALUES
   ('adminEmail',    'admin@e2e.test'),
   -- Seeded Instagram URL for the read-only instagram-social spec; no spec
   -- asserts on a blank social state, so this is inert for the others.
-  ('instagramUrl',  'https://www.instagram.com/taro');
+  ('instagramUrl',  'https://www.instagram.com/sona.e2e.example');
 
 -- One artist for the images to credit.
 INSERT OR REPLACE INTO artists (id, name, created_at)
 VALUES (1, 'Test Artist', '2026-07-01T00:00:00.000Z');
+
+-- Artist WITH an avatar image for the admin avatar-geometry spec (SONA-148).
+-- The URL must actually load (a 404 flips ArtistAvatar to its monogram
+-- fallback), so it points at a committed static asset dedicated to this seed
+-- (static/e2e-avatar.svg) rather than a branding asset forks may rename. The
+-- name is disjoint from 'Test Artist' so ?q=Avatar renders a list with no
+-- monogram rows — the geometry bug only reproduces then.
+INSERT OR REPLACE INTO artists (id, name, avatar_url, created_at)
+VALUES (2, 'Avatar Artist', '/e2e-avatar.svg', '2026-07-01T00:00:00.000Z');
 
 -- Variant group: a published SFW parent + a published NSFW variant that points
 -- at it via parent_image_id. The gallery variant strip renders both, and the
