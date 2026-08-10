@@ -1084,6 +1084,11 @@ describe('deleteAll — every content table in the backup is wiped', () => {
 			)
 			.run();
 		sqlite.prepare("INSERT INTO conventions (name, start_date, created_at) VALUES ('FC', '2027-01-14', '2026-08-01')").run();
+		sqlite.prepare("INSERT INTO images (id, image_url) VALUES (1, '/img/uploads/a.png')").run();
+		sqlite.prepare("INSERT INTO tags (id, name) VALUES (1, 'fox')").run();
+		sqlite.prepare("INSERT INTO collections (id, name) VALUES (1, 'Faves')").run();
+		sqlite.prepare('INSERT INTO image_tags (image_id, tag_id) VALUES (1, 1)').run();
+		sqlite.prepare('INSERT INTO image_characters (image_id, character_id) VALUES (1, 1)').run();
 
 		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
 		const result = (await actions.deleteAll({ platform } as never)) as { success?: boolean };
@@ -1099,6 +1104,11 @@ describe('deleteAll — every content table in the backup is wiped', () => {
 			'sticker_emojis',
 			'fursuit_photos',
 			'conventions',
+			'images',
+			'image_tags',
+			'image_characters',
+			'tags',
+			'collections',
 			'characters',
 			'artists'
 		]) {
