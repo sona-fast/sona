@@ -105,6 +105,21 @@ describe('/vr index load', () => {
 		expect((await loadData(platform)).stickersEnabled).toBe(true);
 	});
 
+	it('fails OPEN (pill shown) when the stickers probe hits a D1 failure', async () => {
+		// Same posture as the (paths) layout's D1-error case: the probe is
+		// wrapped fail-open AT CREATION, so a rejecting stickers read can neither
+		// hide the pill, crash the load, nor float as an unhandled rejection
+		// while the fursuit COUNT is in flight.
+		const { sqlite, platform } = makeDb();
+		sqlite.exec('DROP TABLE sticker_packs'); // the probe's read now rejects
+		addAvatar(sqlite, { slug: 'live' });
+
+		const data = await loadData(platform);
+		expect(data.stickersEnabled).toBe(true);
+		// The rest of the page still loads normally.
+		expect(data.avatars.map((a) => a.slug)).toEqual(['live']);
+	});
+
 	it('joins the poster image and groups platform badges per avatar', async () => {
 		const { sqlite, platform } = makeDb();
 		sqlite

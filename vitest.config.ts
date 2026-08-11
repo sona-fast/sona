@@ -16,6 +16,9 @@ export default defineConfig({
 	test: {
 		include: ['src/**/*.{test,spec}.ts', 'scripts/**/*.{test,spec}.ts'],
 		environment: 'node',
+		// The per-isolate module caches (settings.ts, stickers.ts, collections.ts)
+		// rely on Vitest's default per-file isolation; setting isolate:false would
+		// require a global cache reset between test files.
 		// Recompiles paraglide via the CLI so direct `npx vitest run` invocations
 		// (which skip the npm pretest script) never inherit a vite-plugin-compiled
 		// runtime that breaks the setLocale()-driven tests. See the setup file.

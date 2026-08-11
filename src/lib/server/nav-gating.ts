@@ -11,6 +11,11 @@ import { collectionsNavEnabled } from '$lib/server/collections';
 import { withTimeout } from '$lib/server/timeout';
 import type { Database } from '$lib/server/db';
 
+/** Cap for a single nav-content probe on a hot public page. Shared by every
+ * load that wraps a probe itself ((paths) layout, /vr) so the bound can't
+ * drift between call sites. */
+export const PROBE_TIMEOUT_MS = 3000;
+
 /** [stickersEnabled, collectionsEnabled], each bounded by `timeoutMs`. */
 export function navGateFlags(db: Database, timeoutMs: number): Promise<[boolean, boolean]> {
 	return Promise.all([

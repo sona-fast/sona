@@ -39,8 +39,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const fursuitFilters = { photographer: photographerFilter, event: eventFilter };
 
 	// The VR/Stickers pill probes run OUTSIDE the gallery cap (started here, so
-	// they overlap build()'s reads): cheap cached SELECT-1s, each fail-open like
-	// the nav's, so even the degraded fallback below keeps the REAL tab bar of a
+	// they overlap build()'s reads): cheap SELECT-1s (the stickers one cached
+	// per-isolate; vrTabEnabled queries every time), each fail-open like the
+	// nav's, so even the degraded fallback below keeps the REAL tab bar of a
 	// healthy-content fork — the .tabs suppression then only fires on genuine
 	// zero-content forks. fursuitEnabled has no bounded probe of its own (its
 	// COUNT rides build()), so the degraded shape keeps it fail-closed.
@@ -251,36 +252,38 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		};
 	};
 
-	const built = await withTimeout(
-		build(),
-		GALLERY_TIMEOUT_MS,
-		null as Awaited<ReturnType<typeof build>> | null
-	);
-	if (built) return built;
-
 	// Degraded result served if D1 is too slow — an empty gallery that still
 	// renders the page shell, the user's active filters, and (via the bounded
-	// navProbes above) the real content-gated pills.
-	const [vrEnabled, stickersEnabled] = await navProbes;
-	return {
+	// navProbes above) the real content-gated pills. A plain literal on purpose
+	// (no cast): withTimeout's fallback parameter type-checks it against
+	// build()'s shape, so any drift is a compile error. Accepted tradeoff: on a
+	// fursuit-only fork a degraded load suppresses the whole tab bar —
+	// fursuitEnabled has no bounded probe, so it stays fail-closed here
+	// (deliberate).
+	const degraded = {
 		view: 'artwork' as const,
 		fursuitEnabled: false,
-		stickersEnabled,
-		vrEnabled,
-		fursuitPhotos: [] as FursuitPhoto[],
-		fursuitPhotographers: [] as string[],
-		fursuitEvents: [] as string[],
+		stickersEnabled: false,
+		vrEnabled: false,
+		fursuitPhotos: [],
+		fursuitPhotographers: [],
+		fursuitEvents: [],
 		fursuitCapped: false,
 		fursuitFilters,
-		images: [] as Array<Record<string, unknown>>,
+		images: [],
 		total: 0,
 		page,
 		totalPages: 0,
-		tags: [] as Array<{ name: string }>,
-		artists: [] as Array<{ name: string; formerly?: string[] }>,
-		characters: [] as Array<{ name: string }>,
+		tags: [],
+		artists: [],
+		characters: [],
 		filters,
-		formerName: null as { searched: string; current: string } | null,
+		formerName: null,
 		degraded: true
-	} as Awaited<ReturnType<typeof build>>;
+	};
+	const result = await withTimeout(build(), GALLERY_TIMEOUT_MS, degraded);
+	if (!result.degraded) return result;
+	// Degraded path: swap in the real (bounded, fail-open) pill probe results.
+	const [vrEnabled, stickersEnabled] = await navProbes;
+	return { ...result, vrEnabled, stickersEnabled };
 };

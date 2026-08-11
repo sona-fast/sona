@@ -3,6 +3,8 @@ import { vrAvatars, avatarPlatforms, images, fursuitPhotos } from '$lib/server/d
 import { eq, desc, inArray, sql } from 'drizzle-orm';
 import { getMode } from '$lib/server/furtrack';
 import { stickerTabEnabled } from '$lib/server/stickers';
+import { PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
+import { withTimeout } from '$lib/server/timeout';
 import { externalSiteName, modelFormatLabel } from '$lib/vr';
 import type { PageServerLoad } from './$types';
 
@@ -43,8 +45,10 @@ export const load: PageServerLoad = async ({ platform }) => {
 	// Whether to show the Fursuit pill — gated on the FurTrack flag the same way
 	// the gallery and stickers pages are, so all tab bars agree. The Stickers
 	// pill follows the shared stickerTabEnabled probe for the same reason;
-	// started before the fursuit await so the two round-trips overlap.
-	const stickersProbe = stickerTabEnabled(db);
+	// started before the fursuit await so the two round-trips overlap, and
+	// wrapped fail-open AT CREATION (like every other nav probe) so a probe
+	// rejection can never float unhandled while the fursuit COUNT is in flight.
+	const stickersProbe = withTimeout(stickerTabEnabled(db), PROBE_TIMEOUT_MS, true);
 	const fursuitEnabled =
 		getMode(platform!.env) !== 'off' &&
 		((await db.select({ n: sql<number>`COUNT(*)` }).from(fursuitPhotos).get())?.n ?? 0) > 0;

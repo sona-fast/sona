@@ -6,11 +6,7 @@ import { sql } from 'drizzle-orm';
 import { collections } from '$lib/server/db/schema';
 import type { Database } from '$lib/server/db';
 
-// Short-TTL in-memory cache, same pattern as the settings cache (settings.ts):
-// the probe runs on every public request via the layout loads, and "does a
-// collection exist" changes rarely. Isolates converge within the TTL after a
-// create/delete. Errors are never cached — the caller's fail-open fallback
-// handles them and the next request retries.
+// Short-TTL per-isolate cache — same pattern, TTL, and rationale as stickerTabCache (stickers.ts).
 const COLLECTIONS_NAV_TTL_MS = 60_000;
 let collectionsNavCache: { value: boolean; expires: number } | null = null;
 

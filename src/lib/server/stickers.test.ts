@@ -1,10 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // better-sqlite3 ships no bundled types and @types/better-sqlite3 isn't a dep,
 // so import it untyped — it's only the runtime backend for the in-memory test DB.
 // @ts-expect-error -- no type declarations for better-sqlite3
 import BetterSqlite3 from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { derivePackShape, inferAppendedArtistId, resolveStickerArtistIds, findStickers, listPacks } from './stickers';
+import {
+	derivePackShape,
+	inferAppendedArtistId,
+	resolveStickerArtistIds,
+	findStickers,
+	listPacks,
+	stickerTabEnabled,
+	clearStickerTabCache
+} from './stickers';
 import * as schema from './db/schema';
 import type { Database as Db } from './db';
 
@@ -216,6 +224,60 @@ describe('findStickers (emoji IN-list chunking past D1 param cap)', () => {
 		expect((await findStickers(db, { emojis: glyphs, publishedOnly: false })).map((x) => x.id)).toEqual([s]);
 		// In a published-only view the draft pack's sticker is hidden.
 		expect(await findStickers(db, { emojis: glyphs, publishedOnly: true })).toEqual([]);
+	});
+});
+
+// stickerTabEnabled caches per-isolate with a short TTL. TTL expiry is the ONLY
+// mechanism that re-runs the probe after a fork publishes its first pack
+// (nothing invalidates this cache on publish), so it gets its own pin — same
+// precedent as settings.test.ts's 're-queries after the TTL expires'.
+
+/** Query-counting fake of the Drizzle chain stickerTabEnabled uses
+ * (select→from→where→limit→get). */
+function fakeProbeDb(row: { one: number } | undefined) {
+	const calls = { count: 0 };
+	const db = {
+		select: () => ({
+			from: () => ({
+				where: () => ({
+					limit: () => ({
+						get: async () => {
+							calls.count += 1;
+							return row;
+						}
+					})
+				})
+			})
+		})
+	} as unknown as Db;
+	return { db, calls };
+}
+
+describe('stickerTabEnabled — cache TTL', () => {
+	beforeEach(() => clearStickerTabCache());
+	afterEach(() => {
+		vi.useRealTimers();
+		clearStickerTabCache();
+	});
+
+	it('re-queries after the TTL expires', async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(0);
+		const { db, calls } = fakeProbeDb({ one: 1 });
+
+		expect(await stickerTabEnabled(db)).toBe(true);
+		expect(calls.count).toBe(1);
+
+		// Still inside the 60s TTL → cache hit.
+		vi.setSystemTime(59_000);
+		await stickerTabEnabled(db);
+		expect(calls.count).toBe(1);
+
+		// Past the TTL → fresh read. This is how a fork's first published pack
+		// eventually shows the pill without a redeploy.
+		vi.setSystemTime(61_000);
+		await stickerTabEnabled(db);
+		expect(calls.count).toBe(2);
 	});
 });
 
