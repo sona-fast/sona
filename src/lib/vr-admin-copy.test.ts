@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 // blendshapes (never "strip them" wholesale — that would delete the VRM's
 // expressions and visemes), and the downloadable hint must keep its honesty
 // clause: for VRM the viewer fetches the same file, so the toggle only hides
-// the button.
+// the button. The model-format hint is pinned here too, in both locales;
+// the rendered EN string is additionally asserted in
+// tests/e2e/vr-admin-form.spec.ts.
 function messages(locale: string): Record<string, string> {
 	const path = fileURLToPath(new URL(`../../messages/${locale}.json`, import.meta.url));
 	return JSON.parse(readFileSync(path, 'utf8'));
@@ -43,6 +45,12 @@ describe('VR downloadable-switch hint copy', () => {
 });
 
 describe('VR model-format hint copy', () => {
+	it('en names both VRM versions and keeps the FBX viewer caveat', () => {
+		const hint = messages('en').admin_vr_model_hint;
+		expect(hint).toContain('VRM 0.x and 1.0');
+		expect(hint).toContain("viewer won't display them");
+	});
+
 	it('ja names the VRM versions and keeps the FBX viewer caveat', () => {
 		const hint = messages('ja').admin_vr_model_hint;
 		expect(hint).toContain('VRM 0.x');

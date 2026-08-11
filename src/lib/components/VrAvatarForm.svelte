@@ -803,6 +803,9 @@
 					<span id="vr-switch-downloadable-state">{downloadable ? m.admin_vr_switch_downloadable_on() : m.admin_vr_switch_downloadable_off()}</span>
 				</div>
 			</div>
+			<!-- Keep this hint immediately after the downloadable switch-row: its
+			     aria-describedby binds it to that checkbox, and a row inserted
+			     between them would visually attach it to the wrong switch. -->
 			<p class="field-hint switch-hint" id="vr-switch-downloadable-hint">{m.admin_vr_downloadable_hint()}</p>
 			<div class="switch-row">
 				<label class="switch-label">
