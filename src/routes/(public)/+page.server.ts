@@ -3,7 +3,7 @@ import { images, artists, imageTags, tags } from '$lib/server/db/schema';
 import { eq, desc, and, notInArray, inArray, isNull, sql } from 'drizzle-orm';
 import { getSettings, settingsFallback } from '$lib/server/settings';
 import { probeArtContent, shareHasContent } from '$lib/server/presence';
-import { navGateFlags } from '$lib/server/nav-gating';
+import { navGateFlags, PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
 import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
 
@@ -15,16 +15,17 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// Read-only path: route to a D1 read replica when replication is enabled.
 	const db = getReadDb(platform!.env.DB);
 
+	// Nav gating for the Header/MobileNav this page renders itself (+page@
+	// escapes the (public) layout, so that layout's probes never run here).
+	// Same fail-open posture as the path-card probes below; started BEFORE the
+	// settings await (and on the shared probe bound) so a degraded settings
+	// read doesn't stack its timeout window on top of the probes'.
+	const navFlags = navGateFlags(db, PROBE_TIMEOUT_MS);
+
 	// The homepage escapes the (public) layout (+page@), so that layout's
 	// settings load doesn't run here — read settings directly (cached
 	// per-isolate, usually zero round-trips).
 	const settings = await withTimeout(getSettings(db), READ_TIMEOUT_MS, settingsFallback());
-
-	// Nav gating for the Header/MobileNav this page renders itself (+page@
-	// escapes the (public) layout, so that layout's probes never run here).
-	// Same fail-open posture as the path-card probes below; started before the
-	// branch so both branches overlap it with their own reads.
-	const navFlags = navGateFlags(db, READ_TIMEOUT_MS);
 
 	// The threePath splash is a standalone hub page — no image queries needed.
 	if (settings.landingLayout === 'threePath') {

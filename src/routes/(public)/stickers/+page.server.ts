@@ -2,9 +2,12 @@ import { getReadDb } from '$lib/server/db';
 import { listPacks, findStickers, topEmojis, listStickerArtists } from '$lib/server/stickers';
 import { emojiForKeyword, containsEmoji } from '$lib/server/emoji-keywords';
 import { getMode } from '$lib/server/furtrack';
-import { stickerPacks, fursuitPhotos } from '$lib/server/db/schema';
-import { inArray, sql } from 'drizzle-orm';
+import { stickerPacks } from '$lib/server/db/schema';
+import { inArray } from 'drizzle-orm';
 import { vrTabEnabled } from '$lib/server/vr-gate';
+import { fursuitPhotosExist } from '$lib/server/fursuit-import';
+import { PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
+import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
 
 // Cap free-text length before keyword expansion (cheap DoS guard).
@@ -20,19 +23,20 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const hasFilter = !!(emojiParam || artistParam || q);
 
 	// Whether to show the Fursuit pill — gated on the FurTrack flag the same way
-	// the gallery is, so both pages agree. `&&` short-circuits the COUNT when the
-	// feature is off (the prod default), keeping this off the D1 hot path.
-	const fursuitEnabled =
-		getMode(platform!.env) !== 'off' &&
-		((await db.select({ n: sql<number>`COUNT(*)` }).from(fursuitPhotos).get())?.n ?? 0) > 0;
-
+	// the gallery is, so both pages agree. The shared cached probe (bounded,
+	// fail-closed like the gallery's — a false-open pill links to a view that
+	// silently falls back) replaces the old per-request COUNT; the ternary
+	// keeps it off the D1 hot path when the feature is off (the prod default).
 	// VR Avatars pill mirrors the gallery's rule (shared vrTabEnabled probe):
 	// visible only once a published avatar exists, so the tab bars never
-	// disagree. Rides the Promise.all — this is a hot public page.
-	const [topEmojiList, stickerArtists, vrEnabled] = await Promise.all([
+	// disagree. Everything rides one Promise.all — this is a hot public page.
+	const [topEmojiList, stickerArtists, vrEnabled, fursuitEnabled] = await Promise.all([
 		topEmojis(db),
 		listStickerArtists(db),
-		vrTabEnabled(db)
+		vrTabEnabled(db),
+		getMode(platform!.env) !== 'off'
+			? withTimeout(fursuitPhotosExist(db), PROBE_TIMEOUT_MS, false)
+			: Promise.resolve(false)
 	]);
 
 	if (hasFilter) {

@@ -2,6 +2,7 @@ import { getReadDb } from '$lib/server/db';
 import { images, artists, imageTags, tags, fursuitPhotos as fursuitPhotosTable } from '$lib/server/db/schema';
 import { vrTabEnabled } from '$lib/server/vr-gate';
 import { stickerTabEnabled } from '$lib/server/stickers';
+import { PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
 import { eq, desc, asc, like, sql, and, inArray, isNull, type SQL } from 'drizzle-orm';
 import { listPublicCharacterNames } from '$lib/server/characters';
 import { fursuitPhotoFromRow, fursuitPhotosExist } from '$lib/server/fursuit-import';
@@ -47,10 +48,13 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// would show a Fursuit tab pointing at a view the degraded page can't
 	// populate (its photos load inside build()), whereas a dead /vr or
 	// /stickers link still lands on a page that renders its own data.
+	// PROBE_TIMEOUT_MS (not the gallery cap): if build() REJECTS early,
+	// withTimeout serves the degraded fallback immediately — the trailing
+	// `await navProbes` must stay independently and tightly bounded.
 	const navProbes = Promise.all([
-		withTimeout(vrTabEnabled(db), GALLERY_TIMEOUT_MS, true),
-		withTimeout(stickerTabEnabled(db), GALLERY_TIMEOUT_MS, true),
-		withTimeout(fursuitPhotosExist(db), GALLERY_TIMEOUT_MS, false)
+		withTimeout(vrTabEnabled(db), PROBE_TIMEOUT_MS, true),
+		withTimeout(stickerTabEnabled(db), PROBE_TIMEOUT_MS, true),
+		withTimeout(fursuitPhotosExist(db), PROBE_TIMEOUT_MS, false)
 	]);
 
 	const build = async () => {
