@@ -26,6 +26,11 @@ import { expect, type Page } from '@playwright/test';
 // count() on it can run before it exists and wrongly skip the wait). toHaveValue
 // then auto-waits for that input to appear and populate.
 
+// The one place the stub token shape is defined — the stub mints tokens with
+// this prefix, and the assertions in adminLogin and login-retry.spec.ts match
+// against it.
+export const STUB_TOKEN_PREFIX = 'e2e-stub-token-';
+
 // Serves in place of turnstile/v0/api.js. Mirrors the real widget's contract as
 // the login page uses it (src/routes/admin/login/+page.svelte): render() injects
 // the hidden response input into the container and fires `callback`; reset()
@@ -38,7 +43,7 @@ const TURNSTILE_STUB = `window.turnstile = (() => {
 	let widget;
 	let tokenSeq = 0;
 	const issue = (w) => {
-		w.input.value = 'e2e-stub-token-' + ++tokenSeq;
+		w.input.value = '${STUB_TOKEN_PREFIX}' + ++tokenSeq;
 		if (w.opts && w.opts.callback) w.opts.callback(w.input.value);
 	};
 	return {
@@ -97,7 +102,7 @@ export async function adminLogin(
 		// or a dropped stubTurnstile() call fails loudly here instead of silently
 		// reverting to the flaky real widget.
 		await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveValue(
-			opts.realTurnstile ? /.+/ : /^e2e-stub-token-/,
+			opts.realTurnstile ? /.+/ : new RegExp('^' + STUB_TOKEN_PREFIX),
 			{ timeout: 15_000 }
 		);
 	}
