@@ -139,7 +139,14 @@
 									{avatar.published ? m.admin_vr_chip_published() : m.admin_vr_chip_draft()}
 								</span>
 								{#if avatar.nsfw}
-									<span class="vis-chip mature">{m.admin_vr_chip_mature()}</span>
+									<!-- Poster-inherited Mature gets its own label + tooltip (SONA-159):
+									     the edit form's "Mark as NSFW" toggle is off in that case, and an
+									     unlabelled chip reads as a broken toggle. -->
+									{#if avatar.nsfwFromPoster}
+										<span class="vis-chip mature" title={m.admin_vr_chip_mature_poster_title()}>{m.admin_vr_chip_mature_poster()}</span>
+									{:else}
+										<span class="vis-chip mature">{m.admin_vr_chip_mature()}</span>
+									{/if}
 								{/if}
 							</td>
 							<td class="col-download" data-label={m.admin_vr_col_download()}>

@@ -60,7 +60,7 @@ function makeDb() {
 		CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, thumbnail_url TEXT,
-			title TEXT, file_size INTEGER, created_at TEXT
+			title TEXT, file_size INTEGER, nsfw INTEGER NOT NULL DEFAULT 0, created_at TEXT
 		);
 	`);
 	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');

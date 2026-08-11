@@ -157,14 +157,38 @@ describe('/admin/vr list load', () => {
 			.prepare('INSERT INTO images (id, image_url, nsfw) VALUES (1, ?, 1)')
 			.run('/img/mature-poster.png');
 		addAvatar(sqlite, { slug: 'mature-poster-only', posterImageId: 1 });
+		addAvatar(sqlite, { slug: 'own-flag', nsfw: 1 });
 		addAvatar(sqlite, { slug: 'clean' });
 
 		const data = await loadData(platform);
 		const bySlug = Object.fromEntries(data.avatars.map((a) => [a.slug, a]));
 		expect((bySlug['mature-poster-only'] as { nsfw?: unknown }).nsfw).toBe(true);
+		expect((bySlug['own-flag'] as { nsfw?: unknown }).nsfw).toBe(true);
 		expect((bySlug.clean as { nsfw?: unknown }).nsfw).toBe(false);
 		// The join column is server-side input only — the list ships the merged flag.
 		expect(JSON.stringify(data.avatars)).not.toContain('posterNsfw');
+	});
+
+	it('flags nsfwFromPoster ONLY when the Mature state is poster-inherited (SONA-159)', async () => {
+		// Truth table for the chip label: the poster-only case names the source so
+		// the edit form's unchecked "Mark as NSFW" toggle doesn't read as broken.
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, nsfw) VALUES (1, ?, 1)')
+			.run('/img/mature-poster.png');
+		addAvatar(sqlite, { slug: 'poster-only', posterImageId: 1 });
+		addAvatar(sqlite, { slug: 'own-flag', nsfw: 1 });
+		addAvatar(sqlite, { slug: 'both', nsfw: 1, posterImageId: 1 });
+		addAvatar(sqlite, { slug: 'clean' });
+
+		const data = await loadData(platform);
+		const bySlug = Object.fromEntries(data.avatars.map((a) => [a.slug, a]));
+		const flag = (slug: string) => (bySlug[slug] as { nsfwFromPoster?: unknown }).nsfwFromPoster;
+		expect(flag('poster-only')).toBe(true);
+		// Own flag set: the toggle explains the chip, no poster label needed.
+		expect(flag('own-flag')).toBe(false);
+		expect(flag('both')).toBe(false);
+		expect(flag('clean')).toBe(false);
 	});
 
 	it('ships hasPermission as a boolean, never the recorded grant text (R2-S3)', async () => {

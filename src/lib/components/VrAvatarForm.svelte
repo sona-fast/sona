@@ -45,8 +45,9 @@
 		artists: { id: number; name: string }[];
 		characters: { id: number; name: string }[];
 		/** Gallery images for the poster picker (same source as the collections
-		 * cover picker). */
-		images: { id: number; imageUrl: string; thumbnailUrl: string | null; title: string }[];
+		 * cover picker). nsfw feeds the inherited-NSFW hint under the preview
+		 * (SONA-159). */
+		images: { id: number; imageUrl: string; thumbnailUrl: string | null; title: string; nsfw: boolean }[];
 		/** Existing avatar for edit mode; omit for create. */
 		avatar?: AvatarInit | null;
 		credits?: CreditInit[];
@@ -657,6 +658,12 @@
 						<X size={14} /> {m.admin_vr_poster_remove()}
 					</button>
 				</div>
+				{#if posterImage.nsfw}
+					<!-- The public pages inherit the poster's NSFW flag (see /vr loaders);
+					     without this line the operator only finds out from the list chip
+					     (SONA-159). -->
+					<p class="field-hint">{m.admin_vr_poster_nsfw_hint()}</p>
+				{/if}
 			{:else if images.length > 0}
 				<p class="field-hint">{m.admin_vr_poster_hint()}</p>
 				<div class="poster-grid" bind:this={posterGrid}>

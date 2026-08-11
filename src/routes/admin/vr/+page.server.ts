@@ -84,6 +84,10 @@ export const load: PageServerLoad = async ({ platform }) => {
 			// Effective public flag (avatar OR poster) — see the /vr/[slug] loader;
 			// the Mature chip must reflect the public state.
 			nsfw: r.nsfw || (r.posterNsfw ?? false),
+			// True only when the flag comes from the poster image alone (SONA-159):
+			// the chip labels this case so an unchecked "Mark as NSFW" toggle doesn't
+			// read as broken.
+			nsfwFromPoster: !r.nsfw && (r.posterNsfw ?? false),
 			published: r.published,
 			platformCount: platformCounts.get(r.id) ?? 0
 		})),
