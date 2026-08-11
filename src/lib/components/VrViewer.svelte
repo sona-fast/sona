@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import type { Snippet } from 'svelte';
-	import { AlertTriangle, Box, Maximize, X } from 'lucide-svelte';
-	import { formatBytes, frameHumanoid } from '$lib/vr';
+	import { AlertTriangle, Box, Maximize, Minimize, X } from 'lucide-svelte';
+	import { VR_CAMERA_FAR, VR_FRAME_DISTANCE_CAP, formatBytes, frameHumanoid } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
@@ -50,6 +50,12 @@
 	// prefixed one) — when neither exists, fullscreen is a fixed-position
 	// overlay instead (SONA-165); this drives the .fs-fallback class.
 	let fallbackFullscreen = $state(false);
+	// Mode-change announcement for screen readers: entering/exiting fullscreen
+	// has no other non-visual cue. Own region, not the loading one.
+	let fsAnnouncement = $state('');
+	// Elements WE set inert while the overlay fallback is up, so exit restores
+	// exactly those and never clears an inert some other code owns.
+	let inerted: HTMLElement[] = [];
 
 	let viewer = $state<HTMLDivElement>();
 	let stage = $state<HTMLDivElement>();
@@ -59,6 +65,9 @@
 	let disposeScene: (() => void) | null = null;
 	// Keyboard camera control, wired up once the scene exists (see enter3d).
 	let stageKeydown: ((e: KeyboardEvent) => void) | null = null;
+	// Fullscreen enter/exit refit, wired up once the scene exists (see enter3d):
+	// until the user takes the camera, the framing distance follows the aspect.
+	let reframe: (() => void) | null = null;
 
 	// Exit-during-load guard: every enter3d run takes a generation number, and
 	// exit3d bumps it — a run that awakes from an await into a stale generation
@@ -215,7 +224,7 @@
 			// positions are where the model actually stands, and the anatomical
 			// forward is convention-free (the normalized rig inherits rotateVRM0's
 			// yaw, which would frame VRM 0.x models from behind).
-			const camera = new THREE.PerspectiveCamera(30, width / height, 0.1, 50);
+			const camera = new THREE.PerspectiveCamera(30, width / height, 0.1, VR_CAMERA_FAR);
 			vrm.scene.updateMatrixWorld(true);
 			const bonePos = (name: string) => {
 				const node = vrm.humanoid?.getRawBoneNode(name);
@@ -223,13 +232,15 @@
 			};
 			const hips = bonePos('hips');
 			const head = bonePos('head');
+			const leftUpperArm = bonePos('leftUpperArm');
+			const rightUpperArm = bonePos('rightUpperArm');
 			const framing =
 				hips && head
 					? frameHumanoid({
 							hips,
 							head,
-							leftUpperArm: bonePos('leftUpperArm'),
-							rightUpperArm: bonePos('rightUpperArm'),
+							leftUpperArm,
+							rightUpperArm,
 							aspect: width / height,
 							fovDeg: camera.fov
 						})
@@ -257,6 +268,39 @@
 			controls.autoRotate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 			controls.autoRotateSpeed = 1.5;
 
+			// Fullscreen enter/exit changes the stage aspect enough to spoil the
+			// skeleton framing — refit the DISTANCE from the cached bones for the
+			// new aspect, keeping the current target and direction (so auto-rotate
+			// isn't snapped back), but only until the user takes the camera.
+			if (framing && hips && head) {
+				let userAdjusted = false;
+				const markAdjusted = () => {
+					userAdjusted = true;
+					controls.removeEventListener('start', markAdjusted);
+				};
+				controls.addEventListener('start', markAdjusted);
+				reframe = () => {
+					const w = host.clientWidth;
+					const h = host.clientHeight;
+					if (userAdjusted || !w || !h) return;
+					const next = frameHumanoid({
+						hips,
+						head,
+						leftUpperArm,
+						rightUpperArm,
+						aspect: w / h,
+						fovDeg: camera.fov
+					});
+					if (!next) return;
+					const dist = Math.hypot(
+						next.position.x - next.target.x,
+						next.position.y - next.target.y,
+						next.position.z - next.target.z
+					);
+					camera.position.sub(controls.target).setLength(dist).add(controls.target);
+				};
+			}
+
 			// Keyboard camera path (OrbitControls is pointer-only): arrows orbit,
 			// +/- zoom — reduced-motion users with auto-rotate off would otherwise
 			// have a frozen camera and no way to move it without a pointer.
@@ -283,7 +327,7 @@
 						break;
 					case '-':
 					case '_':
-						spherical.radius = Math.min(40, spherical.radius / 0.9);
+						spherical.radius = Math.min(VR_FRAME_DISTANCE_CAP, spherical.radius / 0.9);
 						break;
 					default:
 						return;
@@ -324,6 +368,7 @@
 				renderer.dispose();
 				renderer.domElement.remove();
 				stageKeydown = null;
+				reframe = null;
 			};
 
 			// Entering 3D unmounts the "View in 3D" button this click came from —
@@ -350,11 +395,7 @@
 	async function exit3d() {
 		abort?.abort();
 		abort = null;
-		if (document.fullscreenElement) {
-			await document.exitFullscreen().catch(() => {});
-		} else if (webkitDocument().webkitFullscreenElement) {
-			webkitDocument().webkitExitFullscreen?.();
-		}
+		exitAnyFullscreen();
 		setFallbackFullscreen(false);
 		generation++;
 		disposeScene?.();
@@ -378,39 +419,92 @@
 	}
 
 	function syncFullscreen() {
-		isFullscreen = !!(document.fullscreenElement ?? webkitDocument().webkitFullscreenElement);
+		const now = !!(document.fullscreenElement ?? webkitDocument().webkitFullscreenElement);
+		if (now === isFullscreen) return;
+		isFullscreen = now;
+		fsAnnouncement = now ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen();
+		reframe?.();
+	}
+
+	/** Leaves native fullscreen (standard or webkit-prefixed) if one is
+	 * active; true when there was one to leave. Shared by the toggle and
+	 * Exit 3D so the feature-detect chain exists once. */
+	function exitAnyFullscreen(): boolean {
+		if (document.fullscreenElement) {
+			void document.exitFullscreen().catch(() => {});
+			return true;
+		}
+		const doc = webkitDocument();
+		if (doc.webkitFullscreenElement) {
+			doc.webkitExitFullscreen?.();
+			return true;
+		}
+		return false;
 	}
 
 	// Safari fires only the PREFIXED fullscreenchange, which Svelte's typed
-	// svelte:document attributes don't know — wire that one by hand.
+	// svelte:document attributes don't know — wire that one by hand. A refused
+	// webkitRequestFullscreen surfaces as an error EVENT, not a rejected
+	// promise — fall through to the overlay fallback there too.
 	$effect(() => {
+		const onWebkitError = () => setFallbackFullscreen(true);
 		document.addEventListener('webkitfullscreenchange', syncFullscreen);
-		return () => document.removeEventListener('webkitfullscreenchange', syncFullscreen);
+		document.addEventListener('webkitfullscreenerror', onWebkitError);
+		return () => {
+			document.removeEventListener('webkitfullscreenchange', syncFullscreen);
+			document.removeEventListener('webkitfullscreenerror', onWebkitError);
+		};
 	});
 
-	// The overlay fallback covers the page — lock scroll behind it, and always
-	// restore through here (toggle, exit3d, unmount) so the lock can't leak.
+	// The overlay fallback covers the page — lock scroll behind it, take the
+	// covered page out of the tab and screen-reader order (inert), and always
+	// restore through here (toggle, Escape, exit3d, unmount) so neither can
+	// leak.
 	function setFallbackFullscreen(on: boolean) {
 		if (fallbackFullscreen === on) return;
 		fallbackFullscreen = on;
 		document.documentElement.style.overflow = on ? 'hidden' : '';
+		if (on) {
+			// Inert every sibling on the path from the viewer up to <body>: the
+			// overlay only covers them visually. Skip anything already inert —
+			// it isn't ours to restore.
+			for (
+				let el: HTMLElement | null = viewer ?? null;
+				el && el !== document.body;
+				el = el.parentElement
+			) {
+				for (const sibling of el.parentElement?.children ?? []) {
+					if (sibling !== el && sibling instanceof HTMLElement && !sibling.inert) {
+						sibling.inert = true;
+						inerted.push(sibling);
+					}
+				}
+			}
+		} else {
+			for (const el of inerted) el.inert = false;
+			inerted = [];
+		}
+		fsAnnouncement = on ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen();
+		// The overlay class lands on the DOM after this flush — refit then.
+		void tick().then(() => reframe?.());
 	}
 
 	function toggleFullscreen() {
+		if (fallbackFullscreen) {
+			setFallbackFullscreen(false);
+			return;
+		}
+		if (exitAnyFullscreen()) return;
 		// Fullscreen the WRAPPER, not the bare stage: the controls (Exit 3D,
 		// Fullscreen) must stay reachable inside the fullscreen element, or a
 		// keyboard user is stuck with only the Esc escape hatch.
 		const el = viewer as
 			| (HTMLElement & { webkitRequestFullscreen?: () => void })
 			| undefined;
-		if (fallbackFullscreen) {
-			setFallbackFullscreen(false);
-		} else if (document.fullscreenElement) {
-			void document.exitFullscreen().catch(() => {});
-		} else if (webkitDocument().webkitFullscreenElement) {
-			webkitDocument().webkitExitFullscreen?.();
-		} else if (el?.requestFullscreen) {
-			void el.requestFullscreen().catch(() => {});
+		if (el?.requestFullscreen) {
+			// A refused request (e.g. an iframe without allow=fullscreen) falls
+			// through to the overlay instead of a silent no-op.
+			void el.requestFullscreen().catch(() => setFallbackFullscreen(true));
 		} else if (el?.webkitRequestFullscreen) {
 			el.webkitRequestFullscreen();
 		} else if (el) {
@@ -482,6 +576,9 @@
 	<!-- Always-mounted live region (inserting one with content skips the
 	     announcement); text updates in 10% steps. -->
 	<p class="sr-only" role="status">{loadingAnnouncement}</p>
+	<!-- Fullscreen mode changes have no non-visual cue — announce them from
+	     their own always-mounted region (same mounted-empty rule as above). -->
+	<p class="sr-only" role="status">{fsAnnouncement}</p>
 
 	{#if webglUnavailable}
 		<p class="webgl-fallback" role="status" tabindex="-1" bind:this={fallbackMessage}>
@@ -513,7 +610,13 @@
 				disabled={loading}
 				aria-pressed={isFullscreen || fallbackFullscreen}
 			>
-				<Maximize size={16} /> {m.vr_fullscreen()}
+				<!-- In fullscreen (either kind) the toggle is the only visible way
+				     back — label it as the exit it is. -->
+				{#if isFullscreen || fallbackFullscreen}
+					<Minimize size={16} /> {m.vr_exit_fullscreen()}
+				{:else}
+					<Maximize size={16} /> {m.vr_fullscreen()}
+				{/if}
 			</button>
 			<button bind:this={exitButton} class="btn btn-secondary" onclick={exit3d}>
 				<X size={16} /> {m.vr_exit_3d()}
@@ -551,6 +654,27 @@
 		z-index: 100;
 		background: var(--background);
 		padding: 12px;
+		/* Keep an edge-of-scroll flick inside the overlay from chaining to the
+		   page behind it (iOS scroll lock is best-effort otherwise). */
+		overscroll-behavior: contain;
+	}
+
+	/* Short enter fade so the overlay doesn't pop in. Media-wrapped, so old
+	   browsers that can't parse it (and reduced-motion users) skip straight
+	   to the final state — it's decoration. */
+	@media (prefers-reduced-motion: no-preference) {
+		.viewer.fs-fallback {
+			animation: vr-fs-fade 150ms ease-out;
+		}
+	}
+
+	@keyframes vr-fs-fade {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
 	}
 
 	.viewer.fs-fallback .stage {

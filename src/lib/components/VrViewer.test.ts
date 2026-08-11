@@ -46,9 +46,11 @@ describe('VrViewer wiring (SONA-124)', () => {
 	});
 
 	it('fullscreens the wrapper (controls included), not the bare stage (A4)', () => {
-		// The fullscreen root is the viewer wrapper (via the `el` local) —
-		// nothing ever fullscreens the bare stage.
-		expect(src).toContain('const el = viewer as');
+		// The element the toggle hands to the fullscreen APIs is the viewer
+		// wrapper — nothing ever fullscreens the bare stage.
+		const toggle = src.match(/function toggleFullscreen\(\)[\s\S]*?\n\t\}/)?.[0];
+		expect(toggle).toBeDefined();
+		expect(toggle).toMatch(/=\s*viewer as[\s\S]*el\?\.requestFullscreen/);
 		expect(src).not.toContain('stage?.requestFullscreen()');
 		expect(src).not.toContain('stage.requestFullscreen()');
 	});
@@ -57,23 +59,46 @@ describe('VrViewer wiring (SONA-124)', () => {
 		// iPhone Safari has no element fullscreen API and iPadOS only the
 		// prefixed one — a bare requestFullscreen() call throws synchronously
 		// there, so the toggle must detect before calling, then fall back to the
-		// fixed-overlay mode.
+		// fixed-overlay mode. Safari's prefixed events (change AND error) are
+		// wired by hand, symmetrically added and removed.
 		expect(src).toContain('el?.requestFullscreen');
 		expect(src).toContain('el?.webkitRequestFullscreen');
 		expect(src).toContain('setFallbackFullscreen(true)');
+		expect(src).toContain("document.addEventListener('webkitfullscreenchange', syncFullscreen)");
+		expect(src).toContain("document.removeEventListener('webkitfullscreenchange', syncFullscreen)");
+		// A REFUSED fullscreen request also lands on the overlay: the standard
+		// promise rejection (iframe without allow=fullscreen) and the webkit
+		// error event (iPadOS).
+		expect(src).toContain('.catch(() => setFallbackFullscreen(true))');
+		expect(src).toContain("document.addEventListener('webkitfullscreenerror', onWebkitError)");
+		expect(src).toContain("document.removeEventListener('webkitfullscreenerror', onWebkitError)");
 		// The overlay honors Escape like native fullscreen does…
 		expect(src).toMatch(/fallbackFullscreen && e\.key === 'Escape'/);
-		// …styles via its own class, whose rules never share a selector group
-		// with :fullscreen (one unknown selector drops a whole CSS rule on the
-		// old Safari that needs the fallback)…
+		// …styles via its own class (the stylesheet documents why its rules
+		// never share a selector group with :fullscreen)…
 		expect(src).toContain('class:fs-fallback={fallbackFullscreen}');
-		const fallbackSelectors = src.match(/^\s*[^\n{}/]*\.fs-fallback[^\n{}]*\{/gm) ?? [];
-		expect(fallbackSelectors.length).toBeGreaterThanOrEqual(2);
-		for (const selector of fallbackSelectors) {
-			expect(selector).not.toContain(':fullscreen');
-		}
-		// …and every exit path clears it: the toggle, Exit 3D, and unmount.
+		// …and every exit path clears it: the toggle, Escape, Exit 3D, unmount.
 		expect((src.match(/setFallbackFullscreen\(false\)/g) ?? []).length).toBeGreaterThanOrEqual(4);
+	});
+
+	it('locks page scroll behind the overlay and RESTORES it on exit (R1 MF6)', () => {
+		expect(src).toContain("documentElement.style.overflow = on ? 'hidden' : ''");
+	});
+
+	it('inerts the page behind the overlay and restores exactly what it set (R1 MF1)', () => {
+		// While the fallback overlay is up, the covered page must leave the tab
+		// and screen-reader order; on exit only OUR inerts are cleared.
+		expect(src).toContain('sibling.inert = true');
+		expect(src).toContain('inerted.push(sibling)');
+		expect(src).toMatch(/for \(const el of inerted\) el\.inert = false/);
+	});
+
+	it('mirrors fullscreen state on the toggle and announces mode changes (aria-pressed, exit label)', () => {
+		expect(src).toContain('aria-pressed={isFullscreen || fallbackFullscreen}');
+		// In fullscreen the toggle relabels as the exit it is (only visible cue
+		// in the overlay), and a status region announces the mode change.
+		expect(src).toMatch(/\{#if isFullscreen \|\| fallbackFullscreen\}[\s\S]*?vr_exit_fullscreen/);
+		expect(src).toMatch(/<p class="sr-only" role="status">\{fsAnnouncement\}<\/p>/);
 	});
 
 	it('frames from the humanoid skeleton, bounding box only as fallback (SONA-165)', () => {
@@ -82,7 +107,12 @@ describe('VrViewer wiring (SONA-124)', () => {
 		// RAW bone world positions; Box3 survives only in the no-humanoid branch.
 		expect(src).toMatch(/import \{[^}]*frameHumanoid[^}]*\} from '\$lib\/vr'/);
 		expect(src).toContain('getRawBoneNode');
+		// World matrices refresh BEFORE any bone is sampled — stale matrices
+		// frame from wherever the loader left the nodes (R1 MF5).
+		expect(src).toMatch(/updateMatrixWorld\(true\)[\s\S]*getRawBoneNode/);
 		expect(src).toMatch(/frameHumanoid\(\{/);
+		// The far plane and framing cap come from one shared constant (R1 N3).
+		expect(src).toMatch(/PerspectiveCamera\(30, width \/ height, 0\.1, VR_CAMERA_FAR\)/);
 		const fallback = src.match(/const framing =[\s\S]*?controls\.target\.copy\(target\)/)?.[0];
 		expect(fallback).toBeDefined();
 		expect(fallback).toContain('new THREE.Box3().setFromObject(vrm.scene)');

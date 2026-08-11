@@ -192,6 +192,15 @@ export interface Vec3Like {
 	z: number;
 }
 
+/** Far plane of the viewer's PerspectiveCamera. Lives here so the framing
+ * distance cap below and the camera construction in VrViewer can never
+ * drift apart. */
+export const VR_CAMERA_FAR = 50;
+
+/** Hard cap on any camera distance the framing (or keyboard zoom) produces —
+ * comfortably inside the far plane so the model can't clip out of view. */
+export const VR_FRAME_DISTANCE_CAP = 0.8 * VR_CAMERA_FAR;
+
 /**
  * Camera framing for a humanoid model from its skeleton, not its bounding box
  * (SONA-165). The bounding box of a T-posed humanoid is dominated by arm span,
@@ -209,12 +218,21 @@ export interface Vec3Like {
  * positions sidestep all of it. Arms need not be in a perfect T-pose: any
  * laterally separated pair gives the cross product the right direction.
  *
- * Distance constants come from humanoid proportions: hips sit near half the
- * body height and the head bone near 0.85 of it, so height ≈ 2.9 × span. The
- * pivot-to-floor drop is then ≈ 2 × span (fit vertically, with margin, as
- * 2.2 × span) and the T-pose half arm span ≈ 1.45 × span (fit horizontally
- * as 1.65 × span). Whichever needs the greater distance at this fov/aspect
- * wins, capped inside the viewer camera's far plane.
+ * Composition constants come from humanoid proportions: hips sit near half
+ * the body height, the head bone near 0.85 of it, and the head-to-hips span
+ * near 0.35 of it (height ≈ 2.9 × span). A pivot at the hips/head MIDPOINT
+ * (chest height, ≈ 0.68 of height) mirrors the pivot-to-floor drop as empty
+ * headroom, so the pivot sits lower: a quarter of the way up from the hips,
+ * hips + 0.25 × (head − hips), ≈ 0.57 of height. The vertical fit is then
+ * 1.8 × span of half-height and the T-pose half arm span ≈ 1.45 × span fits
+ * horizontally as 1.65 × span. Whichever needs the greater distance at this
+ * fov/aspect wins, capped inside the viewer camera's far plane.
+ *
+ * Worked for the canonical skeleton (hips y 0.9, head y 1.6 → span 0.7,
+ * height ≈ 1.6 / 0.85 ≈ 1.88): pivot y = 0.9 + 0.25 × 0.7 = 1.075, frame
+ * half-height 1.8 × 0.7 = 1.26, so the frame spans y −0.185…2.335 (2.52
+ * tall) — body fill ≈ 1.88 / 2.52 ≈ 75%, headroom ≈ (2.335 − 1.88) / 2.52 ≈
+ * 18%, feet margin ≈ 0.185 / 2.52 ≈ 7%. Asserted in vr.test.ts.
  */
 export function frameHumanoid(input: {
 	hips: Vec3Like;
@@ -226,15 +244,20 @@ export function frameHumanoid(input: {
 	/** Vertical field of view, in degrees. */
 	fovDeg: number;
 }): { target: Vec3Like; position: Vec3Like } | null {
-	const { hips, head } = input;
+	const { hips, head, aspect, fovDeg } = input;
+	if (!Number.isFinite(aspect) || aspect <= 0) return null;
+	if (!Number.isFinite(fovDeg) || fovDeg <= 0 || fovDeg >= 180) return null;
 	const up = { x: head.x - hips.x, y: head.y - hips.y, z: head.z - hips.z };
 	const span = Math.hypot(up.x, up.y, up.z);
 	if (!Number.isFinite(span) || span < 1e-4) return null;
+	// Unit spine, so every direction threshold below is scale-free (a 5 cm
+	// model and a 5 m one hit the same guards).
+	const upN = { x: up.x / span, y: up.y / span, z: up.z / span };
 
 	const target = {
-		x: (hips.x + head.x) / 2,
-		y: (hips.y + head.y) / 2,
-		z: (hips.z + head.z) / 2
+		x: hips.x + 0.25 * up.x,
+		y: hips.y + 0.25 * up.y,
+		z: hips.z + 0.25 * up.z
 	};
 
 	let forward = { x: 0, y: 0, z: 1 };
@@ -244,31 +267,44 @@ export function frameHumanoid(input: {
 			y: input.leftUpperArm.y - input.rightUpperArm.y,
 			z: input.leftUpperArm.z - input.rightUpperArm.z
 		};
-		const cross = {
-			x: lateral.y * up.z - lateral.z * up.y,
-			y: lateral.z * up.x - lateral.x * up.z,
-			z: lateral.x * up.y - lateral.y * up.x
-		};
-		if (Math.hypot(cross.x, cross.y, cross.z) > 1e-6) forward = cross;
+		const lateralLen = Math.hypot(lateral.x, lateral.y, lateral.z);
+		if (lateralLen > 1e-12) {
+			const latN = { x: lateral.x / lateralLen, y: lateral.y / lateralLen, z: lateral.z / lateralLen };
+			const cross = {
+				x: latN.y * upN.z - latN.z * upN.y,
+				y: latN.z * upN.x - latN.x * upN.z,
+				z: latN.x * upN.y - latN.y * upN.x
+			};
+			if (Math.hypot(cross.x, cross.y, cross.z) > 1e-4) forward = cross;
+		}
 	}
 	// Level the camera: keep only the horizontal part of forward so a leaning
-	// model doesn't tilt the orbit start point above or below the pivot.
+	// model doesn't tilt the orbit start point above or below the pivot — but
+	// only when that part is a real share of forward. A near-vertical forward
+	// (a quadruped rig's near-horizontal spine) leaves the horizontal part
+	// pure numerical residue, and a camera direction made of noise points
+	// anywhere; hand those rigs to the caller's bounding-box fallback.
 	const flat = Math.hypot(forward.x, forward.z);
-	const dir = flat > 1e-6 ? { x: forward.x / flat, z: forward.z / flat } : { x: 0, z: 1 };
+	if (flat <= 0.2 * Math.hypot(forward.x, forward.y, forward.z)) return null;
+	const dir = { x: forward.x / flat, z: forward.z / flat };
 
-	const halfFovTan = Math.tan((input.fovDeg * Math.PI) / 360);
-	const fitHeight = (2.2 * span) / halfFovTan;
-	const fitWidth = (1.65 * span) / (halfFovTan * input.aspect);
-	const distance = Math.min(Math.max(fitHeight, fitWidth), 40);
+	const halfFovTan = Math.tan((fovDeg * Math.PI) / 360);
+	const fitHeight = (1.8 * span) / halfFovTan;
+	const fitWidth = (1.65 * span) / (halfFovTan * aspect);
+	const distance = Math.min(Math.max(fitHeight, fitWidth), VR_FRAME_DISTANCE_CAP);
 
-	return {
-		target,
-		position: {
-			x: target.x + dir.x * distance,
-			y: target.y,
-			z: target.z + dir.z * distance
-		}
+	const position = {
+		x: target.x + dir.x * distance,
+		y: target.y,
+		z: target.z + dir.z * distance
 	};
+	// Belt and braces for hostile bone positions: huge-but-finite coordinates
+	// can overflow the arithmetic above into Infinity/NaN — never hand the
+	// caller a camera it can't render from.
+	for (const v of [target.x, target.y, target.z, position.x, position.y, position.z]) {
+		if (!Number.isFinite(v)) return null;
+	}
+	return { target, position };
 }
 
 /**

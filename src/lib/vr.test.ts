@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
 	MAX_VR_MODEL_BYTES,
+	VR_CAMERA_FAR,
+	VR_FRAME_DISTANCE_CAP,
 	externalSiteName,
 	formatBytes,
 	frameHumanoid,
@@ -174,15 +176,17 @@ describe('frameHumanoid (SONA-165)', () => {
 		fovDeg: 30
 	};
 
-	it('pivots between the hips and head bones', () => {
+	it('pivots a quarter of the way up from the hips toward the head', () => {
 		const framing = frameHumanoid(upright)!;
-		expect(framing.target).toEqual({ x: 0, y: 1.25, z: 0 });
+		// hips.y 0.9 + 0.25 × span 0.7 = 1.075 — low enough that the frame's
+		// symmetric halves don't mirror the pivot-to-floor drop as headroom.
+		expect(framing.target).toEqual({ x: 0, y: 1.075, z: 0 });
 	});
 
-	it('derives distance from the head-to-hips span (2.2 spans of half-height at this fov)', () => {
+	it('derives distance from the head-to-hips span (1.8 spans of half-height at this fov)', () => {
 		const framing = frameHumanoid(upright)!;
 		const span = 0.7;
-		const expected = (2.2 * span) / Math.tan((30 * Math.PI) / 360);
+		const expected = (1.8 * span) / Math.tan((30 * Math.PI) / 360);
 		expect(framing.position.z).toBeCloseTo(expected, 5);
 		// Doubling the skeleton doubles the distance — nothing else feeds it.
 		const doubled = frameHumanoid({
@@ -221,12 +225,66 @@ describe('frameHumanoid (SONA-165)', () => {
 		expect(facingBack.position.z).toBeLessThan(-1);
 	});
 
-	it('stays level for a leaning model (forward is flattened to the horizon)', () => {
+	it('composes the canonical skeleton: ≥70% body fill, ≤18% headroom, ≥4% feet margin', () => {
+		// The MF3 acceptance numbers, from the worked arithmetic in the
+		// frameHumanoid doc comment: height governs at this aspect, so the
+		// world-space frame half-height at the pivot plane is exactly
+		// distance × tan(fov/2) = 1.8 × span.
+		const framing = frameHumanoid(upright)!;
+		const span = 0.7;
+		const frameHeight = 2 * 1.8 * span; // 2.52
+		const frameTop = framing.target.y + 1.8 * span; // 2.335
+		const frameBottom = framing.target.y - 1.8 * span; // −0.185
+		const crown = 1.6 / 0.85; // head bone ≈ 0.85 × height → crown ≈ 1.88
+		const feet = 0;
+		expect((crown - feet) / frameHeight).toBeGreaterThanOrEqual(0.7);
+		expect((frameTop - crown) / frameHeight).toBeLessThanOrEqual(0.18);
+		expect((feet - frameBottom) / frameHeight).toBeGreaterThanOrEqual(0.04);
+	});
+
+	it('flattens forward to the horizon for a leaning model (full fitted distance stays horizontal)', () => {
 		const leaning = frameHumanoid({
 			...upright,
 			head: { x: 0, y: 1.55, z: 0.25 }
 		})!;
+		// The fit formula runs on the ACTUAL 3D span; the flattened direction
+		// then spends all of that distance horizontally. A regression that
+		// normalizes the full 3D forward instead of flattening it would leave
+		// only distance × (flat ∕ ‖forward‖) in the horizontal plane.
+		const span = Math.hypot(0, 0.65, 0.25);
+		const expected = (1.8 * span) / Math.tan((30 * Math.PI) / 360);
+		expect(
+			Math.hypot(leaning.position.x - leaning.target.x, leaning.position.z - leaning.target.z)
+		).toBeCloseTo(expected, 5);
 		expect(leaning.position.y).toBe(leaning.target.y);
+	});
+
+	it('returns null for a near-horizontal spine (quadruped rig) instead of framing from noise', () => {
+		// A feral/quadruped rig: spine nearly along the ground, front-leg bones
+		// split laterally. The anatomical forward points near-vertical, so its
+		// horizontal part is numerical residue — the caller's bounding-box
+		// branch must take over.
+		expect(
+			frameHumanoid({
+				...upright,
+				hips: { x: 0, y: 0.6, z: -0.4 },
+				head: { x: 0, y: 0.7, z: 0.5 },
+				leftUpperArm: { x: 0.1, y: 0.3, z: 0.5 },
+				rightUpperArm: { x: -0.1, y: 0.3, z: 0.5 }
+			})
+		).toBeNull();
+	});
+
+	it('returns null for a lying-on-back rig (forward is pure vertical after MF2)', () => {
+		expect(
+			frameHumanoid({
+				...upright,
+				hips: { x: 0, y: 1, z: 0 },
+				head: { x: 0, y: 1, z: 0.7 },
+				leftUpperArm: { x: 0.15, y: 1, z: 0.35 },
+				rightUpperArm: { x: -0.15, y: 1, z: 0.35 }
+			})
+		).toBeNull();
 	});
 
 	it('falls back to +Z forward when the arm bones are missing or degenerate', () => {
@@ -259,11 +317,31 @@ describe('frameHumanoid (SONA-165)', () => {
 			hips: { x: 0, y: 9, z: 0 },
 			head: { x: 0, y: 16, z: 0 }
 		})!;
-		expect(giant.position.z - giant.target.z).toBe(40);
+		expect(giant.position.z - giant.target.z).toBe(VR_FRAME_DISTANCE_CAP);
+		expect(VR_FRAME_DISTANCE_CAP).toBeLessThan(VR_CAMERA_FAR);
 	});
 
 	it('returns null for a degenerate skeleton (caller falls back to the bounding box)', () => {
 		expect(frameHumanoid({ ...upright, head: { ...upright.hips } })).toBeNull();
 		expect(frameHumanoid({ ...upright, head: { x: 0, y: NaN, z: 0 } })).toBeNull();
+	});
+
+	it('returns null for hostile viewport numbers instead of NaN framing', () => {
+		expect(frameHumanoid({ ...upright, aspect: NaN })).toBeNull();
+		expect(frameHumanoid({ ...upright, aspect: 0 })).toBeNull();
+		expect(frameHumanoid({ ...upright, aspect: -1 })).toBeNull();
+		expect(frameHumanoid({ ...upright, fovDeg: 0 })).toBeNull();
+		expect(frameHumanoid({ ...upright, fovDeg: 180 })).toBeNull();
+		expect(frameHumanoid({ ...upright, fovDeg: NaN })).toBeNull();
+	});
+
+	it('returns null when huge bone coordinates overflow the arithmetic', () => {
+		expect(
+			frameHumanoid({
+				...upright,
+				hips: { x: -Number.MAX_VALUE, y: 0.9, z: 0 },
+				head: { x: Number.MAX_VALUE, y: 1.6, z: 0 }
+			})
+		).toBeNull();
 	});
 });
