@@ -27,7 +27,13 @@ test('the ungated create form renders its fields, dropzones and credit control',
 	// Format expectations under the dropzone (VR feedback round): which VRM
 	// versions the viewer takes, and that FBX is download-only.
 	await expect(page.getByText(/VRM 0\.x and 1\.0 both work in the 3D viewer/)).toBeVisible();
-	await expect(page.getByText(/FBX files can be offered as a download/)).toBeVisible();
+	await expect(page.getByText(/offer FBX files as a download/)).toBeVisible();
+	// The hint is wired to the file input, not just placed near it (a11y): on
+	// the create form only the dropzone branch renders, so this is unambiguous.
+	await expect(page.locator('input.sr-file[accept=".vrm,.fbx"]')).toHaveAttribute(
+		'aria-describedby',
+		'vr-model-hint'
+	);
 
 	// Showcase media manager (SP1) with its own dropzone.
 	await expect(page.getByRole('heading', { name: 'Showcase media' })).toBeVisible();
@@ -52,6 +58,11 @@ test('the ungated create form renders its fields, dropzones and credit control',
 	// button is not access control, because for VRM the viewer fetches the
 	// same file anyway.
 	await expect(page.getByText(/hides the download button without preventing access/)).toBeVisible();
+	// …and the note is wired to the checkbox via aria-describedby (partial
+	// match: the accessible description concatenates the state text and hint).
+	await expect(page.getByRole('checkbox', { name: 'Offer model download' })).toHaveAccessibleDescription(
+		/hides the download button without preventing access/
+	);
 	await expect(page.getByRole('checkbox', { name: 'Mark as NSFW' })).toBeAttached();
 	await expect(page.getByRole('checkbox', { name: 'Published' })).toBeAttached();
 });

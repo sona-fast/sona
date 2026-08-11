@@ -955,6 +955,10 @@
 	   over its own tint composites below 4.5:1 on three light themes (R3-A2 —
 	   asserted in theme-contrast.test.ts against the composite surface). */
 	.banner.err { background: color-mix(in srgb, var(--destructive) 12%, transparent); color: var(--foreground); }
+	/* Inside a section the flex gap already spaces siblings; the banner's own
+	   margin would stack on it (32px above the model hint reads as a section
+	   boundary). The form-level banner above the form keeps its margin. */
+	.section > .banner { margin-bottom: 0; }
 	.banner-line { margin: 0; overflow-wrap: anywhere; }
 	.banner-line + .banner-line { margin-top: 6px; }
 	.form { display: flex; flex-direction: column; gap: 32px; max-width: 700px; }

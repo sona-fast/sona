@@ -18,7 +18,7 @@ describe('VR too-large error copy', () => {
 
 	it('en blames blendshapes and advises removing only unused ones', () => {
 		expect(en.admin_vr_error_too_large).toContain('Blendshapes');
-		expect(en.admin_vr_error_too_large).toContain("Remove the ones you aren't using");
+		expect(en.admin_vr_error_too_large).toContain("Remove the blendshapes you aren't using");
 		expect(en.admin_vr_error_too_large).not.toContain('reducing texture sizes');
 	});
 
@@ -39,5 +39,13 @@ describe('VR downloadable-switch hint copy', () => {
 	it('keeps the honesty clause: hiding the button does not prevent access', () => {
 		expect(messages('en').admin_vr_downloadable_hint).toContain('without preventing access');
 		expect(messages('ja').admin_vr_downloadable_hint).toContain('アクセスは防げません');
+	});
+});
+
+describe('VR model-format hint copy', () => {
+	it('ja names the VRM versions and keeps the FBX viewer caveat', () => {
+		const hint = messages('ja').admin_vr_model_hint;
+		expect(hint).toContain('VRM 0.x');
+		expect(hint).toContain('ビューアには表示されません');
 	});
 });
