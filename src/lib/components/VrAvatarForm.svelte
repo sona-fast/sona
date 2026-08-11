@@ -604,6 +604,7 @@
 				<span>{m.admin_vr_dropzone({ max: formatBytes(MAX_VR_MODEL_BYTES) })}</span>
 				<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} disabled={!publishingEnabled} class="sr-file" />
 			</label>
+			<p class="field-hint">{m.admin_vr_model_hint()}</p>
 			{#if !publishingEnabled}
 				<p class="field-hint">{m.admin_vr_upload_locked()}</p>
 			{/if}
@@ -800,6 +801,7 @@
 				<div class="switch-text">
 					<strong id="vr-switch-downloadable">{m.admin_vr_switch_downloadable()}</strong>
 					<span id="vr-switch-downloadable-state">{downloadable ? m.admin_vr_switch_downloadable_on() : m.admin_vr_switch_downloadable_off()}</span>
+					<span class="field-hint">{m.admin_vr_downloadable_hint()}</span>
 				</div>
 			</div>
 			<div class="switch-row">
