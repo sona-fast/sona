@@ -63,35 +63,30 @@ test('the guide renders its heading and the measured blendshape numbers', async 
 	await expect(page.locator('.guide')).not.toContainText('**');
 });
 
-test('the guide does not force horizontal scroll on a 320px viewport', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
-	await page.setViewportSize({ width: 320, height: 800 });
-	await page.goto('/admin/vr/guide');
+// One 320px overflow check per locale: the EN risk is the step-2 menu-path
+// chip (once nowrap, it pushed scrollWidth to ~404px at this width), the JA
+// risk is line-wrapping (kinsoku, long katakana runs) — the whole document
+// must fit either way. The paraglide locale cookie
+// (src/lib/paraglide/runtime.js cookieName) switches the SSR locale for ja.
+for (const [locale, expectedHeading] of [
+	['en', 'Export your VRChat avatar as a VRM'],
+	['ja', 'VRChatアバターをVRMとして書き出す']
+] as const) {
+	test(`the ${locale} guide does not force horizontal scroll on a 320px viewport`, async ({ page }) => {
+		await adminLogin(page, PASSWORD);
+		if (locale === 'ja') {
+			await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+		}
+		await page.setViewportSize({ width: 320, height: 800 });
+		await page.goto('/admin/vr/guide');
 
-	// The step-2 menu-path chip used to be nowrap and pushed scrollWidth to
-	// ~404px at this width — the whole document must fit.
-	await expect(page.getByRole('heading', { name: 'Export your VRChat avatar as a VRM' })).toBeVisible();
-	const fits = await page.evaluate(
-		() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth
-	);
-	expect(fits).toBe(true);
-});
-
-test('the JA guide does not force horizontal scroll on a 320px viewport either', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
-	// The paraglide locale cookie (src/lib/paraglide/runtime.js cookieName)
-	// switches the SSR locale — JA line-wrapping (kinsoku, long katakana runs)
-	// is a separate overflow risk from the EN chip case above.
-	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
-	await page.setViewportSize({ width: 320, height: 800 });
-	await page.goto('/admin/vr/guide');
-
-	await expect(page.getByRole('heading', { name: 'VRChatアバターをVRMとして書き出す' })).toBeVisible();
-	const fits = await page.evaluate(
-		() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth
-	);
-	expect(fits).toBe(true);
-});
+		await expect(page.getByRole('heading', { name: expectedHeading })).toBeVisible();
+		const fits = await page.evaluate(
+			() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth
+		);
+		expect(fits).toBe(true);
+	});
+}
 
 test('a troubleshooting row is a native details element that toggles open', async ({ page }) => {
 	await adminLogin(page, PASSWORD);

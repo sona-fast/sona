@@ -175,8 +175,7 @@
 
 	/* --status-attention, not --primary: small text in --primary computes 2.20:1
 	   on the default light background; --status-attention passes 4.5:1 in every
-	   theme/mode and tracks --primary in dark. Same for .numbers .hl .v and the
-	   info callout's icon below. */
+	   theme/mode and tracks --primary in dark. */
 	.eyebrow {
 		font-family: var(--font-primary); font-size: 11.5px; letter-spacing: 0.14em;
 		text-transform: uppercase; color: var(--status-attention); margin-bottom: 10px;
@@ -260,9 +259,17 @@
 		list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px;
 	}
 	.trouble summary::-webkit-details-marker { display: none; }
-	/* Empty alt-text: the marker is decorative, so AT must not announce "plus". */
-	.trouble summary::after { content: '+' / ''; font-family: var(--font-primary); color: var(--muted-foreground); }
-	.trouble details[open] summary::after { content: '–' / ''; }
+	/* Base rule without alt-text: Safari before 17.4 drops the whole
+	   declaration when it carries the `/ ''` form, which would leave no expand
+	   affordance at all. */
+	.trouble summary::after { content: '+'; font-family: var(--font-primary); color: var(--muted-foreground); }
+	.trouble details[open] summary::after { content: '–'; }
+	/* Empty alt-text where supported: the marker is decorative, so AT must not
+	   announce "plus". */
+	@supports (content: 'x' / '') {
+		.trouble summary::after { content: '+' / ''; }
+		.trouble details[open] summary::after { content: '–' / ''; }
+	}
 	.trouble summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.trouble .a { padding: 0 2px 16px; font-size: 14px; color: var(--muted-foreground); max-width: 60ch; line-break: strict; }
 
