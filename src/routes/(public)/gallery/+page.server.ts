@@ -38,32 +38,16 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const filters = { search, tag: tagFilter, artist: artistFilter, character: characterFilter, sort };
 	const fursuitFilters = { photographer: photographerFilter, event: eventFilter };
 
-	// Degraded result served if D1 is too slow — an empty gallery that still
-	// renders the page shell and the user's active filters.
-	const degraded = {
-		view: 'artwork' as const,
-		fursuitEnabled: false,
-		// Fail-closed like fursuitEnabled above — deliberately diverging from the
-		// nav probes' fail-open rule: the degraded gallery hides the content-gated
-		// pills while the header keeps the sections reachable.
-		stickersEnabled: false,
-		vrEnabled: false,
-		fursuitPhotos: [] as FursuitPhoto[],
-		fursuitPhotographers: [] as string[],
-		fursuitEvents: [] as string[],
-		fursuitCapped: false,
-		fursuitFilters,
-		images: [] as Array<Record<string, unknown>>,
-		total: 0,
-		page,
-		totalPages: 0,
-		tags: [] as Array<{ name: string }>,
-		artists: [] as Array<{ name: string; formerly?: string[] }>,
-		characters: [] as Array<{ name: string }>,
-		filters,
-		formerName: null as { searched: string; current: string } | null,
-		degraded: true
-	};
+	// The VR/Stickers pill probes run OUTSIDE the gallery cap (started here, so
+	// they overlap build()'s reads): cheap cached SELECT-1s, each fail-open like
+	// the nav's, so even the degraded fallback below keeps the REAL tab bar of a
+	// healthy-content fork — the .tabs suppression then only fires on genuine
+	// zero-content forks. fursuitEnabled has no bounded probe of its own (its
+	// COUNT rides build()), so the degraded shape keeps it fail-closed.
+	const navProbes = Promise.all([
+		withTimeout(vrTabEnabled(db), GALLERY_TIMEOUT_MS, true),
+		withTimeout(stickerTabEnabled(db), GALLERY_TIMEOUT_MS, true)
+	]);
 
 	const build = async () => {
 		// Load artists (with former names) up front — used both to resolve the artist
@@ -194,16 +178,16 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		// Get all tags and characters for filters (artists already loaded above).
 		// Owner/site characters are excluded from the public character filter — see
 		// listPublicCharacterNames.
-		// VR Avatars and Stickers tabs ride this Promise.all (shared vrTabEnabled /
-		// stickerTabEnabled probes): each is only rendered once at least one
-		// published row exists — with zero, the tab stays out of the bar while the
-		// section URL keeps rendering its honest empty state.
-		const [allTags, allCharacters, vrEnabled, stickersEnabled] = await Promise.all([
+		// VR Avatars and Stickers tabs reuse the navProbes started before this
+		// build (shared vrTabEnabled / stickerTabEnabled probes): each is only
+		// rendered once at least one published row exists — with zero, the tab
+		// stays out of the bar while the section URL keeps rendering its honest
+		// empty state.
+		const [allTags, allCharacters] = await Promise.all([
 			db.select({ name: tags.name }).from(tags).orderBy(tags.name),
-			listPublicCharacterNames(db),
-			vrTabEnabled(db),
-			stickerTabEnabled(db)
+			listPublicCharacterNames(db)
 		]);
+		const [vrEnabled, stickersEnabled] = await navProbes;
 
 		// Carry each artist's former names so the combobox can offer an old name
 		// ("Kestrel · formerly KesForge") and stay reachable in-app.
@@ -267,5 +251,36 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		};
 	};
 
-	return withTimeout(build(), GALLERY_TIMEOUT_MS, degraded as Awaited<ReturnType<typeof build>>);
+	const built = await withTimeout(
+		build(),
+		GALLERY_TIMEOUT_MS,
+		null as Awaited<ReturnType<typeof build>> | null
+	);
+	if (built) return built;
+
+	// Degraded result served if D1 is too slow — an empty gallery that still
+	// renders the page shell, the user's active filters, and (via the bounded
+	// navProbes above) the real content-gated pills.
+	const [vrEnabled, stickersEnabled] = await navProbes;
+	return {
+		view: 'artwork' as const,
+		fursuitEnabled: false,
+		stickersEnabled,
+		vrEnabled,
+		fursuitPhotos: [] as FursuitPhoto[],
+		fursuitPhotographers: [] as string[],
+		fursuitEvents: [] as string[],
+		fursuitCapped: false,
+		fursuitFilters,
+		images: [] as Array<Record<string, unknown>>,
+		total: 0,
+		page,
+		totalPages: 0,
+		tags: [] as Array<{ name: string }>,
+		artists: [] as Array<{ name: string; formerly?: string[] }>,
+		characters: [] as Array<{ name: string }>,
+		filters,
+		formerName: null as { searched: string; current: string } | null,
+		degraded: true
+	} as Awaited<ReturnType<typeof build>>;
 };

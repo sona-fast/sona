@@ -42,11 +42,13 @@ export const load: PageServerLoad = async ({ platform }) => {
 
 	// Whether to show the Fursuit pill — gated on the FurTrack flag the same way
 	// the gallery and stickers pages are, so all tab bars agree. The Stickers
-	// pill follows the shared stickerTabEnabled probe for the same reason.
+	// pill follows the shared stickerTabEnabled probe for the same reason;
+	// started before the fursuit await so the two round-trips overlap.
+	const stickersProbe = stickerTabEnabled(db);
 	const fursuitEnabled =
 		getMode(platform!.env) !== 'off' &&
 		((await db.select({ n: sql<number>`COUNT(*)` }).from(fursuitPhotos).get())?.n ?? 0) > 0;
-	const stickersEnabled = await stickerTabEnabled(db);
+	const stickersEnabled = await stickersProbe;
 
 	const avatars = rows.map((r) => {
 		const hasModel = !!r.modelUrl;

@@ -4,6 +4,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import type { D1Database } from '@cloudflare/workers-types';
 import { clearSettingsCache } from '$lib/server/settings';
+import { clearStickerTabCache } from '$lib/server/stickers';
+import { clearCollectionsNavCache } from '$lib/server/collections';
 import { makeD1 } from '$lib/server/test/d1';
 
 import { load } from './+layout.server';
@@ -26,6 +28,11 @@ function makeDb() {
 type LayoutData = { stickersEnabled: boolean; collectionsEnabled: boolean; host: string };
 
 async function loadData(platform: App.Platform): Promise<LayoutData> {
+	// The probe caches are per-isolate; clear them so each load sees the current
+	// DB (the matrices below re-query after seeding). The caching behavior
+	// itself is pinned by the dedicated test at the bottom.
+	clearStickerTabCache();
+	clearCollectionsNavCache();
 	return (await load({ platform, url: new URL('http://example.ink/gallery') } as never)) as LayoutData;
 }
 
@@ -66,5 +73,30 @@ describe('(public) layout load — nav content gating', () => {
 		const data = await loadData(platform);
 		expect(data.stickersEnabled).toBe(true);
 		expect(data.collectionsEnabled).toBe(true);
+	});
+
+	it('caches the probe results per-isolate (stale until cleared, like the settings cache)', async () => {
+		// These probes run on EVERY public request — a repeat load must not
+		// re-query D1. Prove it via staleness: seed content AFTER a load and the
+		// flags stay false until the caches are cleared.
+		const { sqlite, platform } = makeDb();
+		expect(await loadData(platform)).toMatchObject({
+			stickersEnabled: false,
+			collectionsEnabled: false
+		});
+
+		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (1)').run();
+		sqlite.prepare("INSERT INTO collections (name, slug) VALUES ('C', 'c')").run();
+		const stale = (await load({
+			platform,
+			url: new URL('http://example.ink/gallery')
+		} as never)) as LayoutData;
+		expect(stale.stickersEnabled).toBe(false);
+		expect(stale.collectionsEnabled).toBe(false);
+
+		expect(await loadData(platform)).toMatchObject({
+			stickersEnabled: true,
+			collectionsEnabled: true
+		});
 	});
 });

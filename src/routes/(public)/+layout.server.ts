@@ -1,7 +1,6 @@
 import { getReadDb } from '$lib/server/db';
 import { getSettings, settingsFallback } from '$lib/server/settings';
-import { stickerTabEnabled } from '$lib/server/stickers';
-import { collectionsNavEnabled } from '$lib/server/collections';
+import { navGateFlags } from '$lib/server/nav-gating';
 import { withTimeout } from '$lib/server/timeout';
 import type { LayoutServerLoad } from './$types';
 
@@ -10,19 +9,19 @@ import type { LayoutServerLoad } from './$types';
 const SETTINGS_TIMEOUT_MS = 3000;
 
 export const load: LayoutServerLoad = async ({ platform, url }) => {
-	// Read-only public path: serve from a read replica (when enabled) and from the
-	// per-isolate settings cache, so this is usually a zero-round-trip load.
+	// Read-only public path: serve from a read replica (when enabled) and from
+	// the per-isolate settings + nav-probe caches, so a warm isolate does this
+	// load with zero round-trips.
 	const db = getReadDb(platform!.env.DB);
 	// Nav gating: the header and mobile nav hide the Stickers/Collections links
 	// while those sections have no published content (same probes as the tab-bar
-	// pills; About/Gallery always show). Each probe rides the settings cap and
+	// pills; About/Gallery always show). navGateFlags rides the settings cap and
 	// fails OPEN (link shown) on timeout or error — a dead link during a
 	// transient D1 blip beats hiding sections of a healthy site (same rule as
 	// the homepage's path-card probes).
-	const [settings, stickersEnabled, collectionsEnabled] = await Promise.all([
+	const [settings, [stickersEnabled, collectionsEnabled]] = await Promise.all([
 		withTimeout(getSettings(db), SETTINGS_TIMEOUT_MS, settingsFallback()),
-		withTimeout(stickerTabEnabled(db), SETTINGS_TIMEOUT_MS, true),
-		withTimeout(collectionsNavEnabled(db), SETTINGS_TIMEOUT_MS, true)
+		navGateFlags(db, SETTINGS_TIMEOUT_MS)
 	]);
 	// The site's own public host, used to attribute the "made with sona" footer
 	// badge back to this fork (sona.fast/?ref=<host>). Derived per-request so each

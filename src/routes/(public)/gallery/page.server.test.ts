@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { sql as sqlq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { artists, images } from '$lib/server/db/schema';
+import { clearStickerTabCache } from '$lib/server/stickers';
 
 import { load } from './+page.server';
 
@@ -84,6 +85,9 @@ type GalleryData = {
 };
 
 async function loadData(platform: App.Platform, query = ''): Promise<GalleryData> {
+	// The stickers probe caches per-isolate; clear it so each load sees the
+	// current DB (the matrices below re-query after seeding).
+	clearStickerTabCache();
 	return (await load(loadEvent(platform, query))) as GalleryData;
 }
 
@@ -228,11 +232,26 @@ describe('gallery load — VR Avatars tab visibility', () => {
 });
 
 describe('gallery load — degraded fallback', () => {
-	it('fails CLOSED on every content-gated pill (deliberately diverging from the nav probes)', async () => {
+	it('keeps the REAL vr/stickers flags on a healthy-content fork (only fursuitEnabled fails closed)', async () => {
 		const { db, platform } = makeDb();
+		// The vr/stickers probes run OUTSIDE the gallery cap, so a degraded build
+		// on a fork with published content keeps its tab bar.
+		await db.run(sqlq`INSERT INTO vr_avatars (published) VALUES (1)`);
+		await db.run(sqlq`INSERT INTO sticker_packs (published) VALUES (1)`);
 		// Force build() to reject (withTimeout falls back on rejection as well as
 		// timeout): its first query reads artists, so dropping that table degrades
 		// the load without waiting out the 9s cap.
+		await db.run(sqlq`DROP TABLE artists`);
+
+		const data = await loadData(platform);
+		expect(data.degraded).toBe(true);
+		expect(data.fursuitEnabled).toBe(false);
+		expect(data.stickersEnabled).toBe(true);
+		expect(data.vrEnabled).toBe(true);
+	});
+
+	it('still suppresses every pill on a genuine zero-content fork', async () => {
+		const { db, platform } = makeDb();
 		await db.run(sqlq`DROP TABLE artists`);
 
 		const data = await loadData(platform);

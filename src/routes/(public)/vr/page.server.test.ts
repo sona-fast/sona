@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
+import { clearStickerTabCache } from '$lib/server/stickers';
 import { makeD1 } from '$lib/server/test/d1';
 
 import { load } from './+page.server';
@@ -76,6 +77,9 @@ type IndexData = {
 };
 
 async function loadData(platform: App.Platform): Promise<IndexData> {
+	// The stickers probe caches per-isolate; clear it so each load sees the
+	// current DB (the pill matrix below re-queries after seeding).
+	clearStickerTabCache();
 	return (await load({ platform } as never)) as IndexData;
 }
 

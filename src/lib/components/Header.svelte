@@ -30,7 +30,7 @@
 	<div class="header-inner container">
 		<a href="/" class="logo">{siteName}</a>
 		<nav>
-			{#each navItems as item}
+			{#each navItems as item (item.href)}
 				<a href={item.href} class="nav-link" class:active={$page.url.pathname.startsWith(item.href)}>
 					{item.label()}
 				</a>

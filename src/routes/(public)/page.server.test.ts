@@ -7,6 +7,8 @@ import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '$lib/server/db/schema';
 import { characters, images, artists, tags, imageTags, siteSettings } from '$lib/server/db/schema';
 import { clearSettingsCache } from '$lib/server/settings';
+import { clearStickerTabCache } from '$lib/server/stickers';
+import { clearCollectionsNavCache } from '$lib/server/collections';
 import { load } from './+page.server';
 import { load as artLoad } from '../(paths)/art/+page.server';
 
@@ -48,6 +50,10 @@ function makeDb() {
 }
 
 function loadSplash(platform: App.Platform) {
+	// The nav-probe caches are per-isolate; clear them so each load sees the
+	// current DB (the flag tests below re-query after seeding).
+	clearStickerTabCache();
+	clearCollectionsNavCache();
 	return load({ platform, url: new URL('http://example.ink/') } as never) as Promise<{
 		settings: { landingLayout: string };
 		pathPresence: { art: boolean; share: boolean };
@@ -165,6 +171,23 @@ describe('splash load — pathPresence card flags (#42)', () => {
 		await db.insert(siteSettings).values({ key: 'landingLayout', value: 'threePath' });
 
 		let data = await loadSplash(platform);
+		expect(data.stickersEnabled).toBe(false);
+		expect(data.collectionsEnabled).toBe(false);
+
+		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (1)').run();
+		sqlite.prepare("INSERT INTO collections (name, slug) VALUES ('C', 'c')").run();
+		data = await loadSplash(platform);
+		expect(data.stickersEnabled).toBe(true);
+		expect(data.collectionsEnabled).toBe(true);
+	});
+
+	it('returns the nav-gating flags on the mosaic branch too (landingLayout at its default)', async () => {
+		// No landingLayout row → the default 'mosaic' branch, whose Header/
+		// MobileNav renders take the same flags as the splash branch's.
+		const { sqlite, platform } = makeDb();
+
+		let data = await loadSplash(platform);
+		expect(data.settings.landingLayout).toBe('mosaic');
 		expect(data.stickersEnabled).toBe(false);
 		expect(data.collectionsEnabled).toBe(false);
 

@@ -25,7 +25,7 @@
 </script>
 
 <nav class="mobile-nav">
-	{#each tabs as tab}
+	{#each tabs as tab (tab.href)}
 		<a
 			href={tab.href}
 			class="tab"

@@ -152,21 +152,39 @@ async function artistMap(db: Database, ids: number[]): Promise<Map<number, Artis
 	return new Map(rows.map((r) => [r.id, artistView(r)]));
 }
 
+// Short-TTL in-memory cache, same pattern as the settings cache (settings.ts):
+// the probe runs on every public request via the layout loads, and "does a
+// published pack exist" changes rarely. Isolates converge within the TTL after
+// a publish/unpublish. Errors are never cached — the caller's fail-open
+// fallback handles them and the next request retries.
+const STICKER_TAB_TTL_MS = 60_000;
+let stickerTabCache: { value: boolean; expires: number } | null = null;
+
+export function clearStickerTabCache() {
+	stickerTabCache = null;
+}
+
 /**
  * Whether the public Stickers tab shows: at least one PUBLISHED pack exists
  * (with zero, the pill stays out of every tab bar while /stickers itself keeps
  * rendering its honest empty state). Mirrors vrTabEnabled — shared by the
  * gallery and VR loads so the tab bars can never disagree. SELECT 1 … LIMIT 1
- * existence probe; run it inside the callers' Promise.all (hot public pages).
+ * existence probe, cached per-isolate; run it inside the callers' Promise.all
+ * (hot public pages).
  */
 export async function stickerTabEnabled(db: Database): Promise<boolean> {
+	if (stickerTabCache && stickerTabCache.expires > Date.now()) {
+		return stickerTabCache.value;
+	}
 	const row = await db
 		.select({ one: sql<number>`1` })
 		.from(stickerPacks)
 		.where(eq(stickerPacks.published, true))
 		.limit(1)
 		.get();
-	return row !== undefined;
+	const value = row !== undefined;
+	stickerTabCache = { value, expires: Date.now() + STICKER_TAB_TTL_MS };
+	return value;
 }
 
 /**
