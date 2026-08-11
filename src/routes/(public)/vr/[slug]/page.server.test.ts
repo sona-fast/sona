@@ -41,7 +41,7 @@ function makeDb() {
 		CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, width INTEGER, height INTEGER,
-			nsfw INTEGER NOT NULL DEFAULT 0
+			nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1
 		);
 	`);
 	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Foxo');
@@ -101,7 +101,13 @@ function loadEvent(platform: App.Platform, slug = 'foxo') {
 }
 
 type DetailData = {
-	avatar: { name: string; characterName: string; nsfw: boolean; permissionSource?: unknown };
+	avatar: {
+		name: string;
+		characterName: string;
+		nsfw: boolean;
+		posterUrl: string | null;
+		permissionSource?: unknown;
+	};
 	viewerPath: string | null;
 	downloadAllowed: boolean;
 	credits: Array<{ artistName: string; role: string; roleLabel: string | null }>;
@@ -167,6 +173,22 @@ describe('/vr/[slug] load — NSFW gating', () => {
 			.run('https://cdn.example.com/poster.png');
 		addAvatar(sqlite, { posterImageId: 1, nsfw: 1 });
 		const data = await loadData(platform);
+		expect(data.avatar.nsfw).toBe(true);
+	});
+
+	it('serves an UNPUBLISHED poster and inherits its NSFW flag (join ignores published)', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, nsfw, published) VALUES (1, ?, 1, 0)')
+			.run('https://cdn.example.com/unlisted-poster.png');
+		addAvatar(sqlite, { posterImageId: 1 });
+		const data = await loadData(platform);
+		// Intended behavior: the poster leftJoin deliberately ignores
+		// images.published — a poster needn't be in the public gallery to serve
+		// here, and its NSFW flag still gates the page. If someone adds a
+		// published filter to the join, this fails by name instead of surfacing
+		// as a misleading e2e blur failure.
+		expect(data.avatar.posterUrl).toBe('https://cdn.example.com/unlisted-poster.png');
 		expect(data.avatar.nsfw).toBe(true);
 	});
 

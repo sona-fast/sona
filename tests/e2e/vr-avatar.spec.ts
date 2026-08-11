@@ -46,6 +46,12 @@ test('NSFW poster mature-gates the detail page and hides the 3D entry', async ({
 
 	// Gate up: the overlay covers the frame with its reveal button, and the
 	// 3D entry point does not exist yet (VrViewer nsfw prop).
+	//
+	// Fixture coupling: the toHaveCount(0) below is meaningful only because
+	// avatar 3 shares avatar 1's model key (seed.sql) — a viewer WOULD mount
+	// here if the gate were off, so its absence proves the gate, not an
+	// unservable model. That key's servability is pinned by the "View in 3D"
+	// test on /vr/e2e-avatar later in this file.
 	const overlay = page.locator('.nsfw-overlay');
 	await expect(overlay).toBeVisible();
 	await expect(overlay.getByRole('button', { name: /Show avatar/ })).toBeVisible();
