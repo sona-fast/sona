@@ -116,6 +116,9 @@ describe('/vr index load', () => {
 		expect(bySlug['mature-poster-only'].nsfw).toBe(true);
 		expect(bySlug['flagged-avatar'].nsfw).toBe(true);
 		expect(bySlug.clean.nsfw).toBe(false);
+		// The join column is server-side input only — the payload ships the merged
+		// flag, never the raw posterNsfw (same pin as the detail loader's test).
+		expect(JSON.stringify(data)).not.toContain('posterNsfw');
 	});
 
 	it('flags a hosted model with its format label, and external-only entries with their destination', async () => {

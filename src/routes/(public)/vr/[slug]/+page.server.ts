@@ -120,8 +120,7 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			license: avatar.license,
 			// Effective flag: an NSFW-flagged gallery image used as the poster gates
 			// the page even when the avatar itself isn't marked NSFW (poster is null
-			// on a leftJoin miss). Everything downstream — mature gate, strip-thumb
-			// blur, VrViewer entry — keys off this one value.
+			// on a leftJoin miss).
 			nsfw: avatar.nsfw || (avatar.posterNsfw ?? false),
 			createdAt: avatar.createdAt,
 			characterName: avatar.characterName,

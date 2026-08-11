@@ -6,7 +6,7 @@ import { adminLogin } from './admin-login';
 // button, and the admin section's early-access gate state.
 //
 // Runs on the SHARED read-only DB/server under fullyParallel: everything here
-// only READS the seeded rows (tests/e2e/fixtures/seed.sql — avatars 1 and 2)
+// only READS the seeded rows (tests/e2e/fixtures/seed.sql — avatars 1–3)
 // and never submits a form, so it cannot perturb the other specs.
 //
 // WebGL is deliberately out of scope: the viewer is click-to-load, so the spec
@@ -23,6 +23,44 @@ test('public /vr lists the seeded published avatar', async ({ page }) => {
 	await expect(page.getByRole('link', { name: /E2E VR Avatar/ })).toBeVisible();
 	// …the unpublished draft is not.
 	await expect(page.getByText('E2E VR Draft')).toHaveCount(0);
+});
+
+test('NSFW poster blurs its card on /vr while the clean card stays sharp', async ({ page }) => {
+	await page.goto('/vr');
+
+	// Avatar 3's own nsfw=0 but its poster (image 4) is NSFW: the inherited
+	// flag must blur the poster and pin the mature chip on it…
+	const matureCard = page.getByRole('link', { name: /E2E Mature Poster/ });
+	await expect(matureCard.locator('img.blurred')).toBeVisible();
+	await expect(matureCard.locator('.mature-chip')).toBeVisible();
+
+	// …without leaking onto the clean avatar's card.
+	const cleanCard = page.getByRole('link', { name: /E2E VR Avatar/ });
+	await expect(cleanCard.locator('img')).toBeVisible();
+	await expect(cleanCard.locator('img.blurred')).toHaveCount(0);
+	await expect(cleanCard.locator('.mature-chip')).toHaveCount(0);
+});
+
+test('NSFW poster mature-gates the detail page and hides the 3D entry until revealed', async ({
+	page
+}) => {
+	await page.goto('/vr/e2e-mature-poster');
+
+	// Gate up: the overlay covers the frame with its reveal button, and the
+	// 3D entry point does not exist yet (VrViewer nsfw prop).
+	const overlay = page.locator('.nsfw-overlay');
+	await expect(overlay).toBeVisible();
+	const reveal = overlay.getByRole('button', { name: /Show avatar/ });
+	await expect(reveal).toBeVisible();
+	await expect(page.getByRole('button', { name: 'View in 3D' })).toHaveCount(0);
+
+	// Reveal drops the gate and surfaces the 3D entry. Hydration-retry shape
+	// (see upload.spec.ts): a pre-hydration click silently no-ops.
+	await expect(async () => {
+		await reveal.click();
+		await expect(overlay).toHaveCount(0, { timeout: 2000 });
+	}).toPass({ timeout: 20_000 });
+	await expect(page.getByRole('button', { name: 'View in 3D' })).toBeVisible();
 });
 
 test('unpublished avatar detail page is indistinguishable from unknown', async ({ page }) => {

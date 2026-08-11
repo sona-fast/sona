@@ -155,6 +155,9 @@ describe('/vr/[slug] load — NSFW gating', () => {
 		addAvatar(sqlite, { posterImageId: 1 });
 		const data = await loadData(platform);
 		expect(data.avatar.nsfw).toBe(true);
+		// The join column is server-side input only — the payload ships the merged
+		// flag, never the raw posterNsfw (pinned like permissionSource below).
+		expect(JSON.stringify(data)).not.toContain('posterNsfw');
 	});
 
 	it('keeps the avatar flag authoritative when the poster is clean', async () => {

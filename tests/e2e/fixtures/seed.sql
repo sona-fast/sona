@@ -59,6 +59,17 @@ VALUES
 INSERT OR REPLACE INTO tags (id, name, created_at) VALUES (1, 'reference', '2026-07-01T00:00:00.000Z');
 INSERT OR REPLACE INTO image_tags (image_id, tag_id) VALUES (3, 1);
 
+-- NSFW poster source for VR avatar 3 (the inherited-flag spec). UNPUBLISHED so
+-- it never appears in the gallery grid or variant strips (the gallery specs'
+-- counts stay untouched); the VR poster join deliberately ignores published,
+-- so it still renders — blurred — as the avatar's poster.
+INSERT OR REPLACE INTO images
+  (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
+VALUES
+  (4, 'Mature Poster Source', 'mature-poster-source',
+   '/e2e/matureposter.png', '/e2e/matureposter-thumb.png',
+   900, 700, 1, 0, 1, NULL, NULL, '2026-07-04T00:00:00.000Z');
+
 -- VR avatar fixtures for the vr-avatar spec (SONA-124). One character to
 -- satisfy the FK, one PUBLISHED avatar with a self-hosted model whose license
 -- is restrictive (all-rights-reserved: the download route must 403 even with
@@ -68,7 +79,10 @@ INSERT OR REPLACE INTO image_tags (image_id, tag_id) VALUES (3, 1);
 -- the admin edit form, which 400s on downloadable-without-source), and one
 -- UNPUBLISHED draft that must stay invisible publicly. The model URL is a
 -- same-origin placeholder path, like the image fixtures — the spec never
--- loads the 3D view.
+-- loads the 3D view. Avatar 3 is a PUBLISHED avatar whose own nsfw=0 but
+-- whose poster (image 4) is NSFW: the loaders' inherited flag must blur its
+-- card and mature-gate its detail page. It shares avatar 1's model key (one
+-- R2 stub serves both HEAD probes) so the 3D entry point exists to gate.
 INSERT OR REPLACE INTO characters (id, name, created_at)
 VALUES (1, 'Taro', '2026-07-01T00:00:00.000Z');
 INSERT OR REPLACE INTO vr_avatars
@@ -78,7 +92,9 @@ VALUES
   (1, 'e2e-avatar', 'E2E VR Avatar', 1, '/img/vr-models/e2e-avatar.vrm', 'vrm', 1234567, 1,
    NULL, 'all-rights-reserved', 'e2e fixture grant', 1, 0, 1, NULL, '2026-07-01T00:00:00.000Z'),
   (2, 'e2e-draft', 'E2E VR Draft', 1, NULL, NULL, NULL, NULL,
-   NULL, NULL, NULL, 0, 0, 0, NULL, '2026-07-02T00:00:00.000Z');
+   NULL, NULL, NULL, 0, 0, 0, NULL, '2026-07-02T00:00:00.000Z'),
+  (3, 'e2e-mature-poster', 'E2E Mature Poster', 1, '/img/vr-models/e2e-avatar.vrm', 'vrm', 1234567, 4,
+   NULL, NULL, NULL, 0, 0, 1, NULL, '2026-06-30T00:00:00.000Z');
 INSERT OR REPLACE INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat');
 
 -- Showcase media for avatar 1 (SONA-124 SP1): one image + one clip so the

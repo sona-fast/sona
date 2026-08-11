@@ -41,7 +41,7 @@ function makeDb() {
 		);
 		CREATE TABLE images (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, thumbnail_url TEXT,
-			file_size INTEGER
+			file_size INTEGER, nsfw INTEGER NOT NULL DEFAULT 0
 		);
 	`);
 	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Taro');
@@ -58,12 +58,13 @@ function addAvatar(
 		modelSizeBytes?: number | null;
 		published?: number;
 		nsfw?: number;
+		posterImageId?: number | null;
 	}
 ) {
 	return sqlite
 		.prepare(
-			`INSERT INTO vr_avatars (slug, name, character_id, model_url, model_format, model_size_bytes, published, nsfw, created_at)
-			 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)`
+			`INSERT INTO vr_avatars (slug, name, character_id, model_url, model_format, model_size_bytes, poster_image_id, published, nsfw, created_at)
+			 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			opts.slug,
@@ -71,6 +72,7 @@ function addAvatar(
 			opts.modelUrl ?? null,
 			opts.modelFormat ?? null,
 			opts.modelSizeBytes ?? null,
+			opts.posterImageId ?? null,
 			opts.published ?? 1,
 			opts.nsfw ?? 0,
 			NOW
@@ -147,6 +149,22 @@ describe('/admin/vr list load', () => {
 		const { platform } = makeDb();
 		const data = await loadData(platform);
 		expect(data.publishingEnabled).toBe(true);
+	});
+
+	it('marks a clean avatar Mature when its poster image is NSFW (effective public flag)', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, nsfw) VALUES (1, ?, 1)')
+			.run('/img/mature-poster.png');
+		addAvatar(sqlite, { slug: 'mature-poster-only', posterImageId: 1 });
+		addAvatar(sqlite, { slug: 'clean' });
+
+		const data = await loadData(platform);
+		const bySlug = Object.fromEntries(data.avatars.map((a) => [a.slug, a]));
+		expect((bySlug['mature-poster-only'] as { nsfw?: unknown }).nsfw).toBe(true);
+		expect((bySlug.clean as { nsfw?: unknown }).nsfw).toBe(false);
+		// The join column is server-side input only — the list ships the merged flag.
+		expect(JSON.stringify(data.avatars)).not.toContain('posterNsfw');
 	});
 
 	it('ships hasPermission as a boolean, never the recorded grant text (R2-S3)', async () => {
