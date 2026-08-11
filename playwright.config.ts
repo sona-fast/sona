@@ -91,6 +91,11 @@ const webServer = (port: number, env: Record<string, string>) => ({
 
 export default defineConfig({
 	testDir: 'tests/e2e',
+	// Convention: playwright e2e specs are *.spec.ts; *.test.ts is vitest
+	// (fixture-integrity.test.ts lives beside the fixture it guards). Without
+	// this, playwright's default testMatch also collects .test.ts and explodes
+	// importing vitest's describe/it outside vitest's runtime.
+	testMatch: '**/*.spec.ts',
 	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 1 : 0,
