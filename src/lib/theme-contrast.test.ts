@@ -599,3 +599,26 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 		}
 	}
 });
+
+// The VR export guide and the avatar form's guide link color small text with
+// --status-attention precisely BECAUSE --primary fails AA on ember light
+// (2.20:1) — the SONA-162 CSS comments assert the token passes 4.5:1 in every
+// theme × mode, and until here nothing pinned that. The token resolves lazily:
+// a block either declares a hex or falls through (var(--primary) or no
+// declaration at all) to its own --primary, so re-pointing any theme's
+// attention color at an AA-failing value sinks the guide's eyebrow, its
+// highlighted table value, and the form's guide link silently.
+describe('status-attention small-text WCAG AA contrast, every theme × surface × mode (SONA-162)', () => {
+	function statusAttention(sel: string): string {
+		const body = blockBody(sel);
+		const hex = body.match(/--status-attention:\s*(#[0-9A-Fa-f]{6})\s*;/)?.[1];
+		return hex ?? blockToken(sel, 'primary');
+	}
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: --status-attention text meets 4.5:1 on the ${surface} surface`, () => {
+				expect(contrast(statusAttention(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+});
