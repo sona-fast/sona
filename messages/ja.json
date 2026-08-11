@@ -1266,7 +1266,7 @@
 	"vr_view_in_3d": "3Dで表示",
 	"vr_exit_3d": "3D表示を終了",
 	"vr_fullscreen": "全画面",
-	"vr_exit_fullscreen": "全画面を終了",
+	"vr_exit_fullscreen": "全画面表示を終了",
 	"vr_entered_fullscreen": "全画面表示になりました",
 	"vr_exited_fullscreen": "全画面表示を終了しました",
 	"vr_loading_model": "モデルを読み込み中 — {total}中{loaded}",

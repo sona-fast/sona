@@ -43,8 +43,9 @@
 	let loadedBytes = $state(0);
 	let failed = $state(false);
 	let webglUnavailable = $state(false);
-	// Mirrors document.fullscreenElement so the toggle can expose its state
-	// (aria-pressed) — the visual gives no other cue which mode is active.
+	// Mirrors whether OUR viewer is the fullscreen element so the toggle can
+	// swap its accessible name — the visual gives no other cue which mode is
+	// active.
 	let isFullscreen = $state(false);
 	// iPhone Safari has NO element fullscreen API (and iPadOS only the webkit-
 	// prefixed one) — when neither exists, fullscreen is a fixed-position
@@ -65,9 +66,17 @@
 	let disposeScene: (() => void) | null = null;
 	// Keyboard camera control, wired up once the scene exists (see enter3d).
 	let stageKeydown: ((e: KeyboardEvent) => void) | null = null;
-	// Fullscreen enter/exit refit, wired up once the scene exists (see enter3d):
-	// until the user takes the camera, the framing distance follows the aspect.
-	let reframe: (() => void) | null = null;
+	// Whether the user has taken the camera (pointer orbit or keyboard) — the
+	// aspect refit in the ResizeObserver stops the moment they do. Reset by
+	// every enter3d run.
+	let userAdjusted = false;
+	// True only between OUR webkitRequestFullscreen call and its change/error
+	// event — the document-level webkit error listener must ignore failures it
+	// didn't cause (another element's fullscreen attempt).
+	let pendingWebkitFs = false;
+	// The page's own inline overflow style, captured when the overlay locks
+	// scroll so exit restores it instead of clobbering it with ''.
+	let prevOverflow = '';
 
 	// Exit-during-load guard: every enter3d run takes a generation number, and
 	// exit3d bumps it — a run that awakes from an await into a stale generation
@@ -78,6 +87,9 @@
 	const aspect = $derived(
 		posterWidth && posterHeight ? `${posterWidth} / ${posterHeight}` : '4 / 3'
 	);
+	// Either fullscreen mode (native or overlay fallback) — drives the toggle's
+	// label swap.
+	const fsActive = $derived(isFullscreen || fallbackFullscreen);
 
 	const progressPercent = $derived(
 		modelSizeBytes ? Math.min(100, Math.round((loadedBytes / modelSizeBytes) * 100)) : 0
@@ -126,6 +138,13 @@
 		loading = true;
 		failed = false;
 		loadedBytes = 0;
+		userAdjusted = false;
+		// Entering 3D unmounts the "View in 3D" button this click came from —
+		// hand focus to Exit 3D NOW, before the download, or it sits on <body>
+		// for the whole load (mirrors exit3d's tick-then-focus).
+		await tick();
+		if (gen !== generation) return;
+		exitButton?.focus();
 		try {
 			const [THREE, { OrbitControls }, { GLTFLoader }, { VRMLoaderPlugin, VRMUtils }] =
 				await Promise.all([
@@ -254,6 +273,18 @@
 				const box = new THREE.Box3().setFromObject(vrm.scene);
 				const size = box.getSize(new THREE.Vector3());
 				box.getCenter(target);
+				// An empty or hostile geometry yields ±Infinity/NaN here — throw
+				// into the load-failed path instead of rendering a blank canvas
+				// from an unrenderable camera. disposeScene isn't wired yet, so
+				// free what already exists by hand.
+				for (const v of [size.x, size.y, size.z, target.x, target.y, target.z]) {
+					if (!Number.isFinite(v)) {
+						VRMUtils.deepDispose(vrm.scene);
+						renderer.dispose();
+						renderer.domElement.remove();
+						throw new Error('degenerate model geometry');
+					}
+				}
 				camera.position.set(
 					target.x,
 					target.y + size.y * 0.1,
@@ -268,38 +299,14 @@
 			controls.autoRotate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 			controls.autoRotateSpeed = 1.5;
 
-			// Fullscreen enter/exit changes the stage aspect enough to spoil the
-			// skeleton framing — refit the DISTANCE from the cached bones for the
-			// new aspect, keeping the current target and direction (so auto-rotate
-			// isn't snapped back), but only until the user takes the camera.
-			if (framing && hips && head) {
-				let userAdjusted = false;
-				const markAdjusted = () => {
-					userAdjusted = true;
-					controls.removeEventListener('start', markAdjusted);
-				};
-				controls.addEventListener('start', markAdjusted);
-				reframe = () => {
-					const w = host.clientWidth;
-					const h = host.clientHeight;
-					if (userAdjusted || !w || !h) return;
-					const next = frameHumanoid({
-						hips,
-						head,
-						leftUpperArm,
-						rightUpperArm,
-						aspect: w / h,
-						fovDeg: camera.fov
-					});
-					if (!next) return;
-					const dist = Math.hypot(
-						next.position.x - next.target.x,
-						next.position.y - next.target.y,
-						next.position.z - next.target.z
-					);
-					camera.position.sub(controls.target).setLength(dist).add(controls.target);
-				};
-			}
+			// A pointer grab marks the camera as user-taken (the keyboard path in
+			// stageKeydown marks it too) — the aspect refit in the ResizeObserver
+			// below stops the moment either happens.
+			const markAdjusted = () => {
+				userAdjusted = true;
+				controls.removeEventListener('start', markAdjusted);
+			};
+			controls.addEventListener('start', markAdjusted);
 
 			// Keyboard camera path (OrbitControls is pointer-only): arrows orbit,
 			// +/- zoom — reduced-motion users with auto-rotate off would otherwise
@@ -333,6 +340,7 @@
 						return;
 				}
 				e.preventDefault();
+				userAdjusted = true;
 				spherical.makeSafe();
 				offset.setFromSpherical(spherical);
 				camera.position.copy(controls.target).add(offset);
@@ -357,6 +365,27 @@
 				camera.aspect = w / h;
 				camera.updateProjectionMatrix();
 				renderer.setSize(w, h);
+				// Any resize (fullscreen enter/exit, orientation change) shifts the
+				// aspect enough to spoil the skeleton framing — refit the DISTANCE
+				// from the cached bones for the new aspect, keeping the current
+				// target and direction (so auto-rotate isn't snapped back), but
+				// only until the user takes the camera.
+				if (!framing || !hips || !head || userAdjusted) return;
+				const next = frameHumanoid({
+					hips,
+					head,
+					leftUpperArm,
+					rightUpperArm,
+					aspect: w / h,
+					fovDeg: camera.fov
+				});
+				if (!next) return;
+				const dist = Math.hypot(
+					next.position.x - next.target.x,
+					next.position.y - next.target.y,
+					next.position.z - next.target.z
+				);
+				camera.position.sub(controls.target).setLength(dist).add(controls.target);
 			});
 			ro.observe(host);
 
@@ -368,13 +397,7 @@
 				renderer.dispose();
 				renderer.domElement.remove();
 				stageKeydown = null;
-				reframe = null;
 			};
-
-			// Entering 3D unmounts the "View in 3D" button this click came from —
-			// hand focus to Exit 3D instead of letting it fall to <body> (mirrors
-			// exit3d's tick-then-focus in the other direction).
-			exitButton?.focus();
 		} catch {
 			if (gen !== generation) return;
 			// Failed chunk, failed fetch, or a file that doesn't parse — show the
@@ -395,7 +418,9 @@
 	async function exit3d() {
 		abort?.abort();
 		abort = null;
-		exitAnyFullscreen();
+		// Await the native exit transition (~200ms) so the poster doesn't render
+		// fullscreen-sized mid-transition.
+		await exitAnyFullscreen();
 		setFallbackFullscreen(false);
 		generation++;
 		disposeScene?.();
@@ -419,35 +444,45 @@
 	}
 
 	function syncFullscreen() {
-		const now = !!(document.fullscreenElement ?? webkitDocument().webkitFullscreenElement);
+		// Identity, not truthiness: fullscreening some OTHER element on the page
+		// (a <video>, another viewer) must not flip this component's state.
+		const el = document.fullscreenElement ?? webkitDocument().webkitFullscreenElement;
+		const now = !!el && el === viewer;
+		pendingWebkitFs = false;
 		if (now === isFullscreen) return;
 		isFullscreen = now;
 		fsAnnouncement = now ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen();
-		reframe?.();
 	}
 
 	/** Leaves native fullscreen (standard or webkit-prefixed) if one is
-	 * active; true when there was one to leave. Shared by the toggle and
-	 * Exit 3D so the feature-detect chain exists once. */
-	function exitAnyFullscreen(): boolean {
+	 * active; the standard path returns the exit promise so callers can await
+	 * the transition, the webkit path an already-resolved one, and null when
+	 * there was none to leave. Shared by the toggle and Exit 3D so the
+	 * feature-detect chain exists once. */
+	function exitAnyFullscreen(): Promise<void> | null {
 		if (document.fullscreenElement) {
-			void document.exitFullscreen().catch(() => {});
-			return true;
+			return document.exitFullscreen().catch(() => {});
 		}
 		const doc = webkitDocument();
 		if (doc.webkitFullscreenElement) {
 			doc.webkitExitFullscreen?.();
-			return true;
+			return Promise.resolve();
 		}
-		return false;
+		return null;
 	}
 
 	// Safari fires only the PREFIXED fullscreenchange, which Svelte's typed
 	// svelte:document attributes don't know — wire that one by hand. A refused
 	// webkitRequestFullscreen surfaces as an error EVENT, not a rejected
-	// promise — fall through to the overlay fallback there too.
+	// promise — fall through to the overlay fallback there, but only for a
+	// request WE made (pendingWebkitFs): the listener is document-level and
+	// hears every element's failures.
 	$effect(() => {
-		const onWebkitError = () => setFallbackFullscreen(true);
+		const onWebkitError = () => {
+			if (!pendingWebkitFs) return;
+			pendingWebkitFs = false;
+			setFallbackFullscreen(true);
+		};
 		document.addEventListener('webkitfullscreenchange', syncFullscreen);
 		document.addEventListener('webkitfullscreenerror', onWebkitError);
 		return () => {
@@ -463,11 +498,21 @@
 	function setFallbackFullscreen(on: boolean) {
 		if (fallbackFullscreen === on) return;
 		fallbackFullscreen = on;
-		document.documentElement.style.overflow = on ? 'hidden' : '';
+		if (on) {
+			// Capture any pre-existing inline overflow so exit restores it
+			// instead of clobbering it with ''.
+			prevOverflow = document.documentElement.style.overflow;
+			document.documentElement.style.overflow = 'hidden';
+		} else {
+			document.documentElement.style.overflow = prevOverflow;
+		}
 		if (on) {
 			// Inert every sibling on the path from the viewer up to <body>: the
 			// overlay only covers them visually. Skip anything already inert —
-			// it isn't ours to restore.
+			// it isn't ours to restore. ('inert' needs iOS/Safari ≥ 15.5 /
+			// Chrome 102 / Firefox 112 — on older browsers this walk is a silent
+			// no-op and the overlay still works visually, an accepted
+			// degradation.)
 			for (
 				let el: HTMLElement | null = viewer ?? null;
 				el && el !== document.body;
@@ -485,8 +530,6 @@
 			inerted = [];
 		}
 		fsAnnouncement = on ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen();
-		// The overlay class lands on the DOM after this flush — refit then.
-		void tick().then(() => reframe?.());
 	}
 
 	function toggleFullscreen() {
@@ -506,6 +549,9 @@
 			// through to the overlay instead of a silent no-op.
 			void el.requestFullscreen().catch(() => setFallbackFullscreen(true));
 		} else if (el?.webkitRequestFullscreen) {
+			// Arm the document-level error listener for exactly this request;
+			// syncFullscreen (change) and onWebkitError both disarm it.
+			pendingWebkitFs = true;
 			el.webkitRequestFullscreen();
 		} else if (el) {
 			setFallbackFullscreen(true);
@@ -604,19 +650,21 @@
 		{/if}
 	{:else}
 		<div class="controls">
-			<button
-				class="btn btn-secondary"
-				onclick={toggleFullscreen}
-				disabled={loading}
-				aria-pressed={isFullscreen || fallbackFullscreen}
-			>
+			<button class="btn btn-secondary fs-toggle" onclick={toggleFullscreen} disabled={loading}>
 				<!-- In fullscreen (either kind) the toggle is the only visible way
-				     back — label it as the exit it is. -->
-				{#if isFullscreen || fallbackFullscreen}
-					<Minimize size={16} /> {m.vr_exit_fullscreen()}
-				{:else}
+				     back — the swapped accessible name carries the state (no
+				     pressed-state attribute needed). Both label variants share one
+				     grid cell so the pill always sizes to the longest label in the
+				     active locale and the swap can't shove Exit 3D sideways
+				     mid-tap; the inactive variant is visibility-hidden AND
+				     aria-hidden, keeping the accessible name to the active label
+				     only. -->
+				<span class="fs-label" class:inactive={fsActive} aria-hidden={fsActive}>
 					<Maximize size={16} /> {m.vr_fullscreen()}
-				{/if}
+				</span>
+				<span class="fs-label" class:inactive={!fsActive} aria-hidden={!fsActive}>
+					<Minimize size={16} /> {m.vr_exit_fullscreen()}
+				</span>
 			</button>
 			<button bind:this={exitButton} class="btn btn-secondary" onclick={exit3d}>
 				<X size={16} /> {m.vr_exit_3d()}
@@ -634,7 +682,9 @@
 
 	.viewer:fullscreen {
 		background: var(--background);
-		padding: 12px;
+		/* The stage bleeds to the top and side edges (an inline-card frame reads
+		   wrong at screen size); only the controls row keeps a bottom inset. */
+		padding: 0 0 12px;
 	}
 
 	.viewer:fullscreen .stage {
@@ -653,9 +703,14 @@
 		inset: 0;
 		z-index: 100;
 		background: var(--background);
-		padding: 12px;
-		/* Keep an edge-of-scroll flick inside the overlay from chaining to the
-		   page behind it (iOS scroll lock is best-effort otherwise). */
+		/* Same edge bleed as :fullscreen above: stage to the edges, bottom
+		   inset for the controls row. */
+		padding: 0 0 12px;
+		/* overflow makes the overlay its own (never-scrolling) scroll container,
+		   so overscroll-behavior has something to act on and an edge-of-scroll
+		   flick inside it can't chain to the page behind (iOS scroll lock is
+		   best-effort otherwise). */
+		overflow: hidden;
 		overscroll-behavior: contain;
 	}
 
@@ -738,6 +793,26 @@
 		align-items: center;
 		gap: 12px;
 		flex-wrap: wrap;
+	}
+
+	/* The toggle's two label variants stack in one grid cell so the pill sizes
+	   to the longest label in the active locale — the enter/exit label swap
+	   never resizes the button (a growing pill shoved Exit 3D sideways
+	   mid-tap). */
+	.fs-toggle {
+		display: grid;
+	}
+
+	.fs-toggle .fs-label {
+		grid-area: 1 / 1;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+	}
+
+	.fs-toggle .fs-label.inactive {
+		visibility: hidden;
 	}
 
 	.webgl-fallback {

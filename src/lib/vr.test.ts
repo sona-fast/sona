@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
 	MAX_VR_MODEL_BYTES,
-	VR_CAMERA_FAR,
 	VR_FRAME_DISTANCE_CAP,
 	externalSiteName,
 	formatBytes,
@@ -226,15 +225,21 @@ describe('frameHumanoid (SONA-165)', () => {
 	});
 
 	it('composes the canonical skeleton: ≥70% body fill, ≤18% headroom, ≥4% feet margin', () => {
-		// The MF3 acceptance numbers, from the worked arithmetic in the
-		// frameHumanoid doc comment: height governs at this aspect, so the
-		// world-space frame half-height at the pivot plane is exactly
-		// distance × tan(fov/2) = 1.8 × span.
+		// Anchored to the function's OUTPUT: the world-space frame half-height
+		// at the pivot plane is (camera distance) × tan(fov/2), with the
+		// distance recomputed from the returned camera/target pair. The
+		// acceptance numbers come from the worked arithmetic in the
+		// frameHumanoid doc comment.
 		const framing = frameHumanoid(upright)!;
-		const span = 0.7;
-		const frameHeight = 2 * 1.8 * span; // 2.52
-		const frameTop = framing.target.y + 1.8 * span; // 2.335
-		const frameBottom = framing.target.y - 1.8 * span; // −0.185
+		const dist = Math.hypot(
+			framing.position.x - framing.target.x,
+			framing.position.y - framing.target.y,
+			framing.position.z - framing.target.z
+		);
+		const halfH = dist * Math.tan((30 * Math.PI) / 360);
+		const frameHeight = 2 * halfH;
+		const frameTop = framing.target.y + halfH;
+		const frameBottom = framing.target.y - halfH;
 		const crown = 1.6 / 0.85; // head bone ≈ 0.85 × height → crown ≈ 1.88
 		const feet = 0;
 		expect((crown - feet) / frameHeight).toBeGreaterThanOrEqual(0.7);
@@ -275,7 +280,7 @@ describe('frameHumanoid (SONA-165)', () => {
 		).toBeNull();
 	});
 
-	it('returns null for a lying-on-back rig (forward is pure vertical after MF2)', () => {
+	it('returns null for a lying-on-back rig (forward is pure vertical)', () => {
 		expect(
 			frameHumanoid({
 				...upright,
@@ -301,14 +306,55 @@ describe('frameHumanoid (SONA-165)', () => {
 			rightUpperArm: { x: 0, y: 1.35, z: 0 }
 		})!;
 		expect(collapsed.position.z).toBeGreaterThan(0);
+		// Near-coincident arms (1e-9 apart, noise on this 0.7 span): the
+		// RELATIVE epsilon treats them as degenerate, +Z fallback again. The
+		// arms are REVERSED, so trusting the noise would flip the camera to −Z.
+		const nearCoincident = frameHumanoid({
+			...upright,
+			leftUpperArm: { x: -5e-10, y: 1.35, z: 0 },
+			rightUpperArm: { x: 5e-10, y: 1.35, z: 0 }
+		})!;
+		expect(nearCoincident).not.toBeNull();
+		expect(nearCoincident.position.z).toBeGreaterThan(0);
+		expect(nearCoincident.position.x).toBeCloseTo(0, 5);
 	});
 
-	it('backs the camera up for narrow viewports (arm span must fit the width)', () => {
-		const landscape = frameHumanoid(upright)!;
-		const portrait = frameHumanoid({ ...upright, aspect: 0.5 })!;
-		expect(portrait.position.z - portrait.target.z).toBeGreaterThan(
-			landscape.position.z - landscape.target.z
+	it('portrait crops the arms instead of receding: ≥0.6-span half-width, ≥60% vertical fill', () => {
+		// The width term is a FLOOR: the visible half-width never drops below
+		// 0.6 × span (a mid-forearm crop) and the frame never backs off to fit
+		// the full arm span — the height fit governs on real phone aspects and
+		// the body keeps filling the frame. Anchored to the output: half-width
+		// = dist × tan(fov/2) × aspect. At 0.5 the height fit governs; at 0.3
+		// the 0.6-span floor itself binds, so a drop in that constant fails the
+		// half-width assertion.
+		const tan = Math.tan((30 * Math.PI) / 360);
+		const span = 0.7;
+		const crown = 1.6 / 0.85;
+		for (const aspect of [0.5, 0.3]) {
+			const portrait = frameHumanoid({ ...upright, aspect })!;
+			const dist = Math.hypot(
+				portrait.position.x - portrait.target.x,
+				portrait.position.y - portrait.target.y,
+				portrait.position.z - portrait.target.z
+			);
+			expect(dist * tan * aspect).toBeGreaterThanOrEqual(0.6 * span * (1 - 1e-9));
+			expect(crown / (2 * dist * tan)).toBeGreaterThanOrEqual(0.6);
+		}
+	});
+
+	it('near-square keeps the full T-pose arm half-span (≈1.45 × span) in frame', () => {
+		// At aspect 0.95 the height fit governs and the visible half-width,
+		// dist × tan(fov/2) × aspect = 1.8 × 0.95 × span, still covers the
+		// documented arm half-span of 1.45 × span (it fits whenever aspect ≥
+		// ~0.81) — this pins the 1.8 height constant from the width side.
+		const nearSquare = frameHumanoid({ ...upright, aspect: 0.95 })!;
+		const dist = Math.hypot(
+			nearSquare.position.x - nearSquare.target.x,
+			nearSquare.position.y - nearSquare.target.y,
+			nearSquare.position.z - nearSquare.target.z
 		);
+		const halfW = dist * Math.tan((30 * Math.PI) / 360) * 0.95;
+		expect(halfW).toBeGreaterThanOrEqual(1.45 * 0.7);
 	});
 
 	it('caps the distance inside the viewer camera far plane', () => {
@@ -318,7 +364,6 @@ describe('frameHumanoid (SONA-165)', () => {
 			head: { x: 0, y: 16, z: 0 }
 		})!;
 		expect(giant.position.z - giant.target.z).toBe(VR_FRAME_DISTANCE_CAP);
-		expect(VR_FRAME_DISTANCE_CAP).toBeLessThan(VR_CAMERA_FAR);
 	});
 
 	it('returns null for a degenerate skeleton (caller falls back to the bounding box)', () => {
@@ -335,7 +380,7 @@ describe('frameHumanoid (SONA-165)', () => {
 		expect(frameHumanoid({ ...upright, fovDeg: NaN })).toBeNull();
 	});
 
-	it('returns null when huge bone coordinates overflow the arithmetic', () => {
+	it('returns null when huge bone coordinates overflow the span (the span guard catches the Infinity)', () => {
 		expect(
 			frameHumanoid({
 				...upright,

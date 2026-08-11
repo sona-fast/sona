@@ -50,7 +50,7 @@ describe('VrViewer wiring (SONA-124)', () => {
 		// wrapper — nothing ever fullscreens the bare stage.
 		const toggle = src.match(/function toggleFullscreen\(\)[\s\S]*?\n\t\}/)?.[0];
 		expect(toggle).toBeDefined();
-		expect(toggle).toMatch(/=\s*viewer as[\s\S]*el\?\.requestFullscreen/);
+		expect(toggle).toMatch(/=\s*viewer\b[\s\S]*el\?\.requestFullscreen/);
 		expect(src).not.toContain('stage?.requestFullscreen()');
 		expect(src).not.toContain('stage.requestFullscreen()');
 	});
@@ -72,6 +72,16 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect(src).toContain('.catch(() => setFallbackFullscreen(true))');
 		expect(src).toContain("document.addEventListener('webkitfullscreenerror', onWebkitError)");
 		expect(src).toContain("document.removeEventListener('webkitfullscreenerror', onWebkitError)");
+		// The document-level error listener only acts on a request THIS component
+		// made — armed right before webkitRequestFullscreen, ignored otherwise —
+		// so another element's failed attempt can't flip us to the overlay…
+		expect(src).toMatch(/pendingWebkitFs = true;\s*\n\s*el\.webkitRequestFullscreen\(\)/);
+		expect(src).toMatch(/if \(!pendingWebkitFs\) return/);
+		// …and fullscreen state tracks OUR element by identity, so fullscreening
+		// the page's <video> can't flip this component's state or label.
+		expect(src).toContain('el === viewer');
+		// Leaving webkit fullscreen goes through the prefixed exit call.
+		expect(src).toContain('doc.webkitExitFullscreen?.()');
 		// The overlay honors Escape like native fullscreen does…
 		expect(src).toMatch(/fallbackFullscreen && e\.key === 'Escape'/);
 		// …styles via its own class (the stylesheet documents why its rules
@@ -81,24 +91,38 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect((src.match(/setFallbackFullscreen\(false\)/g) ?? []).length).toBeGreaterThanOrEqual(4);
 	});
 
-	it('locks page scroll behind the overlay and RESTORES it on exit (R1 MF6)', () => {
-		expect(src).toContain("documentElement.style.overflow = on ? 'hidden' : ''");
+	it('locks page scroll behind the overlay and restores the PREVIOUS inline value on exit', () => {
+		expect(src).toContain('prevOverflow = document.documentElement.style.overflow');
+		expect(src).toContain("document.documentElement.style.overflow = 'hidden'");
+		expect(src).toContain('document.documentElement.style.overflow = prevOverflow');
 	});
 
-	it('inerts the page behind the overlay and restores exactly what it set (R1 MF1)', () => {
+	it('inerts the page behind the overlay and restores exactly what it set', () => {
 		// While the fallback overlay is up, the covered page must leave the tab
-		// and screen-reader order; on exit only OUR inerts are cleared.
+		// and screen-reader order; on exit only OUR inerts are cleared — anything
+		// already inert is skipped on the way in and left alone on the way out.
+		expect(src).toContain('&& !sibling.inert');
 		expect(src).toContain('sibling.inert = true');
 		expect(src).toContain('inerted.push(sibling)');
 		expect(src).toMatch(/for \(const el of inerted\) el\.inert = false/);
+		expect(src).toContain('inerted = []');
 	});
 
-	it('mirrors fullscreen state on the toggle and announces mode changes (aria-pressed, exit label)', () => {
-		expect(src).toContain('aria-pressed={isFullscreen || fallbackFullscreen}');
-		// In fullscreen the toggle relabels as the exit it is (only visible cue
-		// in the overlay), and a status region announces the mode change.
-		expect(src).toMatch(/\{#if isFullscreen \|\| fallbackFullscreen\}[\s\S]*?vr_exit_fullscreen/);
+	it('carries fullscreen state in the toggle NAME and announces mode changes', () => {
+		// No aria-pressed: the swapped accessible name (Exit fullscreen +
+		// Minimize icon) carries the state. The inactive label variant leaves
+		// the accessibility tree so the name is only the active label, and a
+		// status region announces both native and overlay mode changes.
+		expect(src).not.toContain('aria-pressed');
+		expect(src).toMatch(/class:inactive=\{!fsActive\}[\s\S]*?vr_exit_fullscreen/);
+		expect(src).toMatch(/aria-hidden=\{fsActive\}/);
 		expect(src).toMatch(/<p class="sr-only" role="status">\{fsAnnouncement\}<\/p>/);
+		expect(src).toContain(
+			'fsAnnouncement = now ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen()'
+		);
+		expect(src).toContain(
+			'fsAnnouncement = on ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen()'
+		);
 	});
 
 	it('frames from the humanoid skeleton, bounding box only as fallback (SONA-165)', () => {
@@ -108,14 +132,43 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect(src).toMatch(/import \{[^}]*frameHumanoid[^}]*\} from '\$lib\/vr'/);
 		expect(src).toContain('getRawBoneNode');
 		// World matrices refresh BEFORE any bone is sampled — stale matrices
-		// frame from wherever the loader left the nodes (R1 MF5).
+		// frame from wherever the loader left the nodes.
 		expect(src).toMatch(/updateMatrixWorld\(true\)[\s\S]*getRawBoneNode/);
 		expect(src).toMatch(/frameHumanoid\(\{/);
-		// The far plane and framing cap come from one shared constant (R1 N3).
+		// The far plane and framing cap come from one shared constant.
 		expect(src).toMatch(/PerspectiveCamera\(30, width \/ height, 0\.1, VR_CAMERA_FAR\)/);
 		const fallback = src.match(/const framing =[\s\S]*?controls\.target\.copy\(target\)/)?.[0];
 		expect(fallback).toBeDefined();
 		expect(fallback).toContain('new THREE.Box3().setFromObject(vrm.scene)');
+		// A degenerate box (±Infinity/NaN) throws into the load-failed path
+		// instead of rendering a blank canvas from an unrenderable camera.
+		expect(fallback).toContain("throw new Error('degenerate model geometry')");
+	});
+
+	it('refits the framing distance inside the ResizeObserver, until the user takes the camera', () => {
+		const ro = src.match(/new ResizeObserver\(\(\) => \{[\s\S]*?\n\t\t\t\}\);/)?.[0];
+		expect(ro).toBeDefined();
+		// The canvas/aspect sizing stays…
+		expect(ro).toContain('camera.aspect = w / h');
+		expect(ro).toContain('renderer.setSize(w, h)');
+		// …the refit is ADDITIVE in the same callback (fires after layout on
+		// fullscreen enter/exit, orientation changes, window resizes), stopping
+		// the moment the user takes the camera…
+		expect(ro).toMatch(/\|\| userAdjusted\) return/);
+		expect(ro).toContain('frameHumanoid({');
+		// …and rescales the CURRENT camera offset, preserving direction and
+		// target so auto-rotate isn't snapped back.
+		expect(ro).toContain(
+			'camera.position.sub(controls.target).setLength(dist).add(controls.target)'
+		);
+		// The keyboard camera path marks the camera user-taken too — the
+		// pointer-only OrbitControls 'start' event would miss it and the refit
+		// would erase a keyboard zoom.
+		const keydown = src.match(/stageKeydown = \(e: KeyboardEvent\) => \{[\s\S]*?\n\t\t\t\};/)?.[0];
+		expect(keydown).toBeDefined();
+		expect(keydown).toContain('userAdjusted = true');
+		// No refit path survives outside the observer.
+		expect(src).not.toContain('reframe');
 	});
 
 	it('guards every await against a stale generation (exit-during-load race, D6)', () => {
