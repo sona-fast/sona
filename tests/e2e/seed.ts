@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, rmSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -74,12 +74,19 @@ function seed(): void {
 		// an embedded texture (see fixtures/generate-vr-fixture.mjs), so the
 		// vr-render spec can enter the 3D view and exercise the actual
 		// GLTFLoader + three-vrm parse/texture path the stub can't.
+		const texturedModel = path.join(repoRoot, 'tests/e2e/fixtures/e2e-textured.vrm');
+		if (!existsSync(texturedModel)) {
+			throw new Error(
+				`${texturedModel} is missing — the committed VR fixture the vr-render spec ` +
+					'depends on. Regenerate it with: node tests/e2e/fixtures/generate-vr-fixture.mjs'
+			);
+		}
 		wrangler([
 			'r2',
 			'object',
 			'put',
 			'sona-e2e-images/vr-models/e2e-textured.vrm',
-			`--file=${path.join(repoRoot, 'tests/e2e/fixtures/e2e-textured.vrm')}`,
+			`--file=${texturedModel}`,
 			'--local',
 			`--config=${E2E_WRANGLER_CONFIG}`,
 			`--persist-to=${persistTo}`

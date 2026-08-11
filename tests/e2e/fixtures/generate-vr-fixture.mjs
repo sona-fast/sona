@@ -21,7 +21,15 @@
 // Regenerate with: node tests/e2e/fixtures/generate-vr-fixture.mjs
 // (then update model_size_bytes for e2e-textured in seed.sql if the size
 // changed — it only drives the loading-progress display).
-import { writeFileSync } from 'node:fs';
+//
+// Verify with: node tests/e2e/fixtures/generate-vr-fixture.mjs --check
+// (regenerates in memory and byte-compares against the committed file). The
+// byte-compare is for humans on a known-good Node: the PNG's deflate stream is
+// whatever this Node's zlib emits, which is NOT pinned across zlib
+// implementations (a Node that swaps in zlib-ng would produce a different but
+// equally valid stream) — that's why CI guards the committed binary with the
+// structural fixture-integrity.test.ts instead of regenerating it there.
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import path from 'node:path';
@@ -252,5 +260,22 @@ o = glb.writeUInt32LE(0x004e4942, o); // 'BIN\0'
 binChunk.copy(glb, o);
 
 const out = path.join(path.dirname(fileURLToPath(import.meta.url)), 'e2e-textured.vrm');
-writeFileSync(out, glb);
-console.log(`wrote ${out} (${glb.length} bytes)`);
+if (process.argv.includes('--check')) {
+	let committed = null;
+	try {
+		committed = readFileSync(out);
+	} catch {
+		// Missing file falls through to the mismatch report below.
+	}
+	if (!committed || !committed.equals(glb)) {
+		console.error(
+			`${out} is ${committed ? 'stale (differs from what this script generates)' : 'missing'} — ` +
+				'regenerate with: node tests/e2e/fixtures/generate-vr-fixture.mjs'
+		);
+		process.exit(1);
+	}
+	console.log(`ok: ${out} matches this script's output (${glb.length} bytes)`);
+} else {
+	writeFileSync(out, glb);
+	console.log(`wrote ${out} (${glb.length} bytes)`);
+}

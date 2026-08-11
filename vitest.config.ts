@@ -14,7 +14,13 @@ export default defineConfig({
 		}
 	},
 	test: {
-		include: ['src/**/*.{test,spec}.ts', 'scripts/**/*.{test,spec}.ts'],
+		include: [
+			'src/**/*.{test,spec}.ts',
+			'scripts/**/*.{test,spec}.ts',
+			// Committed-fixture guards only — .test.ts precisely, so the playwright
+			// *.spec.ts files in tests/e2e/ never leak into the unit suite.
+			'tests/e2e/fixtures/*.test.ts'
+		],
 		environment: 'node',
 		// The per-isolate module caches (settings.ts, stickers.ts, collections.ts)
 		// rely on Vitest's default per-file isolation; setting isolate:false would
