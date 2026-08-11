@@ -86,7 +86,7 @@
 		<li class="step">
 			<div class="step-num" aria-hidden="true">1</div>
 			<div>
-				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 1 })} </span>{m.admin_vr_guide_step1_title()}</h3>
+				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 1 })}{' '}</span>{m.admin_vr_guide_step1_title()}</h3>
 				<p>{@render rich(m.admin_vr_guide_step1_body())}</p>
 			</div>
 		</li>
@@ -94,7 +94,7 @@
 		<li class="step">
 			<div class="step-num" aria-hidden="true">2</div>
 			<div>
-				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 2 })} </span>{m.admin_vr_guide_step2_title()}</h3>
+				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 2 })}{' '}</span>{m.admin_vr_guide_step2_title()}</h3>
 				<p>{@render rich(m.admin_vr_guide_step2_body())}</p>
 			</div>
 		</li>
@@ -102,7 +102,7 @@
 		<li class="step">
 			<div class="step-num" aria-hidden="true">3</div>
 			<div>
-				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 3 })} </span>{m.admin_vr_guide_step3_title()}</h3>
+				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 3 })}{' '}</span>{m.admin_vr_guide_step3_title()}</h3>
 				<p>{m.admin_vr_guide_step3_p1()}</p>
 				<p>{m.admin_vr_guide_step3_p2()}</p>
 			</div>
@@ -111,7 +111,7 @@
 		<li class="step">
 			<div class="step-num" aria-hidden="true">4</div>
 			<div>
-				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 4 })} </span>{m.admin_vr_guide_step4_title()}</h3>
+				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 4 })}{' '}</span>{m.admin_vr_guide_step4_title()}</h3>
 				<p>{m.admin_vr_guide_step4_p1()}</p>
 				<!-- The measured export sizes from the verified end-to-end run.
 				     Locale-identical, so they live inline rather than as per-locale
@@ -128,7 +128,7 @@
 		<li class="step">
 			<div class="step-num" aria-hidden="true">5</div>
 			<div>
-				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 5 })} </span>{m.admin_vr_guide_step5_title()}</h3>
+				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 5 })}{' '}</span>{m.admin_vr_guide_step5_title()}</h3>
 				<p>{@render rich(m.admin_vr_guide_step5_p1())}</p>
 				<p>{@render rich(m.admin_vr_guide_step5_p2())}</p>
 				<p class="muted">{m.admin_vr_guide_step5_p3()}</p>
@@ -138,7 +138,7 @@
 		<li class="step">
 			<div class="step-num" aria-hidden="true">6</div>
 			<div>
-				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 6 })} </span>{m.admin_vr_guide_step6_title()}</h3>
+				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 6 })}{' '}</span>{m.admin_vr_guide_step6_title()}</h3>
 				<p>{@render rich(m.admin_vr_guide_step6_p1())}</p>
 				<p>{m.admin_vr_guide_step6_p2()}</p>
 			</div>
