@@ -27,6 +27,7 @@ test('the ungated create form renders its fields, dropzones and credit control',
 	// Format expectations under the dropzone (VR feedback round): which VRM
 	// versions the viewer takes, and that FBX is download-only.
 	await expect(page.getByText(/VRM 0\.x and 1\.0 both work in the 3D viewer/)).toBeVisible();
+	await expect(page.getByText(/FBX files can be offered as a download/)).toBeVisible();
 
 	// Showcase media manager (SP1) with its own dropzone.
 	await expect(page.getByRole('heading', { name: 'Showcase media' })).toBeVisible();
@@ -48,8 +49,9 @@ test('the ungated create form renders its fields, dropzones and credit control',
 	// Visibility switches are named (a11y wiring, not just visuals).
 	await expect(page.getByRole('checkbox', { name: 'Offer model download' })).toBeAttached();
 	// The honesty note on the download toggle (VR feedback round): hiding the
-	// button is not access control, because the viewer serves the bytes anyway.
-	await expect(page.getByText(/turning this off hides the button/)).toBeVisible();
+	// button is not access control, because for VRM the viewer fetches the
+	// same file anyway.
+	await expect(page.getByText(/hides the download button without preventing access/)).toBeVisible();
 	await expect(page.getByRole('checkbox', { name: 'Mark as NSFW' })).toBeAttached();
 	await expect(page.getByRole('checkbox', { name: 'Published' })).toBeAttached();
 });
