@@ -23,7 +23,8 @@ function makeDb() {
 		);
 		CREATE TABLE avatar_platforms (avatar_id INTEGER NOT NULL, platform TEXT NOT NULL);
 		CREATE TABLE images (
-			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, thumbnail_url TEXT
+			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, thumbnail_url TEXT,
+			nsfw INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE TABLE fursuit_photos (id INTEGER PRIMARY KEY AUTOINCREMENT);
 	`);
@@ -62,6 +63,7 @@ function addAvatar(
 type IndexData = {
 	avatars: Array<{
 		slug: string;
+		nsfw: boolean;
 		posterUrl: string | null;
 		platforms: string[];
 		hasModel: boolean;
@@ -98,6 +100,22 @@ describe('/vr index load', () => {
 		const data = await loadData(platform);
 		expect(data.avatars[0].posterUrl).toBe('https://cdn.example.com/poster-thumb.png');
 		expect(data.avatars[0].platforms).toEqual(['vrchat', 'resonite']);
+	});
+
+	it('inherits NSFW from the poster image, not just the avatar flag', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, nsfw) VALUES (1, ?, 1)')
+			.run('https://cdn.example.com/mature-poster.png');
+		addAvatar(sqlite, { slug: 'mature-poster-only', posterImageId: 1 });
+		addAvatar(sqlite, { slug: 'flagged-avatar', nsfw: 1 });
+		addAvatar(sqlite, { slug: 'clean' });
+
+		const data = await loadData(platform);
+		const bySlug = Object.fromEntries(data.avatars.map((a) => [a.slug, a]));
+		expect(bySlug['mature-poster-only'].nsfw).toBe(true);
+		expect(bySlug['flagged-avatar'].nsfw).toBe(true);
+		expect(bySlug.clean.nsfw).toBe(false);
 	});
 
 	it('flags a hosted model with its format label, and external-only entries with their destination', async () => {

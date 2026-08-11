@@ -40,7 +40,8 @@ function makeDb() {
 		);
 		CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
 		CREATE TABLE images (
-			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, width INTEGER, height INTEGER
+			id INTEGER PRIMARY KEY AUTOINCREMENT, image_url TEXT NOT NULL, width INTEGER, height INTEGER,
+			nsfw INTEGER NOT NULL DEFAULT 0
 		);
 	`);
 	sqlite.prepare('INSERT INTO characters (id, name) VALUES (1, ?)').run('Foxo');
@@ -67,12 +68,14 @@ function addAvatar(
 		license?: string | null;
 		permissionSource?: string | null;
 		downloadable?: number;
+		posterImageId?: number | null;
+		nsfw?: number;
 	} = {}
 ) {
 	return sqlite
 		.prepare(
-			`INSERT INTO vr_avatars (slug, name, character_id, model_url, model_format, license, permission_source, downloadable, published, created_at)
-			 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`
+			`INSERT INTO vr_avatars (slug, name, character_id, model_url, model_format, license, permission_source, downloadable, poster_image_id, nsfw, published, created_at)
+			 VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.run(
 			opts.slug ?? 'foxo',
@@ -82,6 +85,8 @@ function addAvatar(
 			opts.license ?? null,
 			opts.permissionSource ?? null,
 			opts.downloadable ?? 0,
+			opts.posterImageId ?? null,
+			opts.nsfw ?? 0,
 			opts.published ?? 1,
 			NOW
 		).lastInsertRowid as number;
@@ -96,7 +101,7 @@ function loadEvent(platform: App.Platform, slug = 'foxo') {
 }
 
 type DetailData = {
-	avatar: { name: string; characterName: string; permissionSource?: unknown };
+	avatar: { name: string; characterName: string; nsfw: boolean; permissionSource?: unknown };
 	viewerPath: string | null;
 	downloadAllowed: boolean;
 	credits: Array<{ artistName: string; role: string; roleLabel: string | null }>;
@@ -138,6 +143,39 @@ describe('/vr/[slug] load — visibility', () => {
 		const data = await loadData(platform);
 		expect(data.avatar.name).toBe('Foxo VR');
 		expect(data.avatar.characterName).toBe('Foxo');
+	});
+});
+
+describe('/vr/[slug] load — NSFW gating', () => {
+	it('inherits NSFW from the poster image when the avatar itself is not flagged', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, nsfw) VALUES (1, ?, 1)')
+			.run('https://cdn.example.com/mature-poster.png');
+		addAvatar(sqlite, { posterImageId: 1 });
+		const data = await loadData(platform);
+		expect(data.avatar.nsfw).toBe(true);
+	});
+
+	it('keeps the avatar flag authoritative when the poster is clean', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, nsfw) VALUES (1, ?, 0)')
+			.run('https://cdn.example.com/poster.png');
+		addAvatar(sqlite, { posterImageId: 1, nsfw: 1 });
+		const data = await loadData(platform);
+		expect(data.avatar.nsfw).toBe(true);
+	});
+
+	it('stays SFW with a clean poster and no avatar flag (and posterless)', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (id, image_url, nsfw) VALUES (1, ?, 0)')
+			.run('https://cdn.example.com/poster.png');
+		addAvatar(sqlite, { posterImageId: 1 });
+		addAvatar(sqlite, { slug: 'posterless' });
+		expect((await loadData(platform)).avatar.nsfw).toBe(false);
+		expect((await loadData(platform, 'posterless')).avatar.nsfw).toBe(false);
 	});
 });
 

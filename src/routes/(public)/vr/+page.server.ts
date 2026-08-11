@@ -15,6 +15,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 			slug: vrAvatars.slug,
 			name: vrAvatars.name,
 			nsfw: vrAvatars.nsfw,
+			posterNsfw: images.nsfw,
 			modelUrl: vrAvatars.modelUrl,
 			modelFormat: vrAvatars.modelFormat,
 			externalUrl: vrAvatars.externalUrl,
@@ -49,7 +50,10 @@ export const load: PageServerLoad = async ({ platform }) => {
 		return {
 			slug: r.slug,
 			name: r.name,
-			nsfw: r.nsfw,
+			// Effective flag: an NSFW-flagged gallery image used as the poster blurs
+			// the card even when the avatar itself isn't marked NSFW (poster is null
+			// on a leftJoin miss). Mirrors the detail loader.
+			nsfw: r.nsfw || (r.posterNsfw ?? false),
 			posterUrl: r.posterThumbUrl || r.posterUrl,
 			platforms: platformsByAvatar[r.id] ?? [],
 			hasModel,

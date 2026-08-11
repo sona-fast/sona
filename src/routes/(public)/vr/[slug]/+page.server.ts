@@ -35,6 +35,7 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			permissionSource: vrAvatars.permissionSource,
 			downloadable: vrAvatars.downloadable,
 			nsfw: vrAvatars.nsfw,
+			posterNsfw: images.nsfw,
 			createdAt: vrAvatars.createdAt,
 			characterName: characters.name,
 			posterUrl: images.imageUrl,
@@ -117,7 +118,11 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 			externalUrl: avatar.externalUrl,
 			externalName: externalSiteName(avatar.externalUrl),
 			license: avatar.license,
-			nsfw: avatar.nsfw,
+			// Effective flag: an NSFW-flagged gallery image used as the poster gates
+			// the page even when the avatar itself isn't marked NSFW (poster is null
+			// on a leftJoin miss). Everything downstream — mature gate, strip-thumb
+			// blur, VrViewer entry — keys off this one value.
+			nsfw: avatar.nsfw || (avatar.posterNsfw ?? false),
 			createdAt: avatar.createdAt,
 			characterName: avatar.characterName,
 			posterUrl: avatar.posterUrl,
