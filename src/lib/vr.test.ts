@@ -3,6 +3,7 @@ import {
 	MAX_VR_MODEL_BYTES,
 	externalSiteName,
 	formatBytes,
+	frameHumanoid,
 	isPermissiveVrLicense,
 	licenseLabel,
 	creditRoleLabel,
@@ -158,5 +159,111 @@ describe('externalSiteName', () => {
 	it('returns null for missing or unparseable URLs', () => {
 		expect(externalSiteName(null)).toBeNull();
 		expect(externalSiteName('not a url')).toBeNull();
+	});
+});
+
+describe('frameHumanoid (SONA-165)', () => {
+	// The e2e fixture's proportions: hips at y 0.9, head at 1.6, arms split
+	// laterally — a plausible stand-in for a real upload.
+	const upright = {
+		hips: { x: 0, y: 0.9, z: 0 },
+		head: { x: 0, y: 1.6, z: 0 },
+		leftUpperArm: { x: 0.15, y: 1.35, z: 0 },
+		rightUpperArm: { x: -0.15, y: 1.35, z: 0 },
+		aspect: 4 / 3,
+		fovDeg: 30
+	};
+
+	it('pivots between the hips and head bones', () => {
+		const framing = frameHumanoid(upright)!;
+		expect(framing.target).toEqual({ x: 0, y: 1.25, z: 0 });
+	});
+
+	it('derives distance from the head-to-hips span (2.2 spans of half-height at this fov)', () => {
+		const framing = frameHumanoid(upright)!;
+		const span = 0.7;
+		const expected = (2.2 * span) / Math.tan((30 * Math.PI) / 360);
+		expect(framing.position.z).toBeCloseTo(expected, 5);
+		// Doubling the skeleton doubles the distance — nothing else feeds it.
+		const doubled = frameHumanoid({
+			...upright,
+			hips: { x: 0, y: 1.8, z: 0 },
+			head: { x: 0, y: 3.2, z: 0 }
+		})!;
+		expect(doubled.position.z - doubled.target.z).toBeCloseTo(
+			2 * (framing.position.z - framing.target.z),
+			5
+		);
+	});
+
+	it('keeps the camera level with the pivot', () => {
+		const framing = frameHumanoid(upright)!;
+		expect(framing.position.y).toBe(framing.target.y);
+	});
+
+	it('orients from the model forward axis, not a world constant', () => {
+		// Same skeleton yawed 90°: facing +X (left arm swings to -Z).
+		const facingX = frameHumanoid({
+			...upright,
+			leftUpperArm: { x: 0, y: 1.35, z: -0.15 },
+			rightUpperArm: { x: 0, y: 1.35, z: 0.15 }
+		})!;
+		expect(facingX.position.x).toBeGreaterThan(1);
+		expect(facingX.position.z).toBeCloseTo(0, 5);
+
+		// Yawed 180° (a VRM 0.x-style flip): camera must follow to -Z, which is
+		// exactly what a +Z world constant gets wrong.
+		const facingBack = frameHumanoid({
+			...upright,
+			leftUpperArm: { x: -0.15, y: 1.35, z: 0 },
+			rightUpperArm: { x: 0.15, y: 1.35, z: 0 }
+		})!;
+		expect(facingBack.position.z).toBeLessThan(-1);
+	});
+
+	it('stays level for a leaning model (forward is flattened to the horizon)', () => {
+		const leaning = frameHumanoid({
+			...upright,
+			head: { x: 0, y: 1.55, z: 0.25 }
+		})!;
+		expect(leaning.position.y).toBe(leaning.target.y);
+	});
+
+	it('falls back to +Z forward when the arm bones are missing or degenerate', () => {
+		const armless = frameHumanoid({
+			...upright,
+			leftUpperArm: null,
+			rightUpperArm: null
+		})!;
+		expect(armless.position.z).toBeGreaterThan(0);
+		expect(armless.position.x).toBeCloseTo(0, 5);
+		const collapsed = frameHumanoid({
+			...upright,
+			leftUpperArm: { x: 0, y: 1.35, z: 0 },
+			rightUpperArm: { x: 0, y: 1.35, z: 0 }
+		})!;
+		expect(collapsed.position.z).toBeGreaterThan(0);
+	});
+
+	it('backs the camera up for narrow viewports (arm span must fit the width)', () => {
+		const landscape = frameHumanoid(upright)!;
+		const portrait = frameHumanoid({ ...upright, aspect: 0.5 })!;
+		expect(portrait.position.z - portrait.target.z).toBeGreaterThan(
+			landscape.position.z - landscape.target.z
+		);
+	});
+
+	it('caps the distance inside the viewer camera far plane', () => {
+		const giant = frameHumanoid({
+			...upright,
+			hips: { x: 0, y: 9, z: 0 },
+			head: { x: 0, y: 16, z: 0 }
+		})!;
+		expect(giant.position.z - giant.target.z).toBe(40);
+	});
+
+	it('returns null for a degenerate skeleton (caller falls back to the bounding box)', () => {
+		expect(frameHumanoid({ ...upright, head: { ...upright.hips } })).toBeNull();
+		expect(frameHumanoid({ ...upright, head: { x: 0, y: NaN, z: 0 } })).toBeNull();
 	});
 });

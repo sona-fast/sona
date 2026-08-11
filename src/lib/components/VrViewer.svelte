@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { AlertTriangle, Box, Maximize, X } from 'lucide-svelte';
-	import { formatBytes } from '$lib/vr';
+	import { formatBytes, frameHumanoid } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
 	interface Props {
@@ -46,6 +46,10 @@
 	// Mirrors document.fullscreenElement so the toggle can expose its state
 	// (aria-pressed) — the visual gives no other cue which mode is active.
 	let isFullscreen = $state(false);
+	// iPhone Safari has NO element fullscreen API (and iPadOS only the webkit-
+	// prefixed one) — when neither exists, fullscreen is a fixed-position
+	// overlay instead (SONA-165); this drives the .fs-fallback class.
+	let fallbackFullscreen = $state(false);
 
 	let viewer = $state<HTMLDivElement>();
 	let stage = $state<HTMLDivElement>();
@@ -168,6 +172,9 @@
 			}
 			const vrm = gltf.userData.vrm as {
 				scene: import('three').Group;
+				humanoid?: {
+					getRawBoneNode(name: string): import('three').Object3D | null;
+				} | null;
 				update(delta: number): void;
 			};
 			if (!vrm) throw new Error('not a VRM model');
@@ -201,15 +208,50 @@
 			key.position.set(1, 2, 2);
 			scene.add(key);
 
-			// Frame the model from its bounding box, eye-level-ish.
-			const box = new THREE.Box3().setFromObject(vrm.scene);
-			const size = box.getSize(new THREE.Vector3());
-			const center = box.getCenter(new THREE.Vector3());
+			// Frame from the humanoid skeleton (frameHumanoid in $lib/vr, where the
+			// math and its rationale live): pivot between the hips and head bones,
+			// oriented to the model's own forward axis, distance from the
+			// head-to-hips span. Raw bones, not normalized ones — raw world
+			// positions are where the model actually stands, and the anatomical
+			// forward is convention-free (the normalized rig inherits rotateVRM0's
+			// yaw, which would frame VRM 0.x models from behind).
 			const camera = new THREE.PerspectiveCamera(30, width / height, 0.1, 50);
-			camera.position.set(center.x, center.y + size.y * 0.1, center.z + Math.max(size.y, size.x) * 1.7);
+			vrm.scene.updateMatrixWorld(true);
+			const bonePos = (name: string) => {
+				const node = vrm.humanoid?.getRawBoneNode(name);
+				return node ? node.getWorldPosition(new THREE.Vector3()) : null;
+			};
+			const hips = bonePos('hips');
+			const head = bonePos('head');
+			const framing =
+				hips && head
+					? frameHumanoid({
+							hips,
+							head,
+							leftUpperArm: bonePos('leftUpperArm'),
+							rightUpperArm: bonePos('rightUpperArm'),
+							aspect: width / height,
+							fovDeg: camera.fov
+						})
+					: null;
+			const target = new THREE.Vector3();
+			if (framing) {
+				target.set(framing.target.x, framing.target.y, framing.target.z);
+				camera.position.set(framing.position.x, framing.position.y, framing.position.z);
+			} else {
+				// No humanoid or a degenerate skeleton: bounding-box framing.
+				const box = new THREE.Box3().setFromObject(vrm.scene);
+				const size = box.getSize(new THREE.Vector3());
+				box.getCenter(target);
+				camera.position.set(
+					target.x,
+					target.y + size.y * 0.1,
+					target.z + Math.max(size.y, size.x) * 1.7
+				);
+			}
 
 			const controls = new OrbitControls(camera, renderer.domElement);
-			controls.target.copy(center);
+			controls.target.copy(target);
 			controls.enableDamping = true;
 			// Auto-rotate is motion for motion's sake — honor the OS setting.
 			controls.autoRotate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -310,7 +352,10 @@
 		abort = null;
 		if (document.fullscreenElement) {
 			await document.exitFullscreen().catch(() => {});
+		} else if (webkitDocument().webkitFullscreenElement) {
+			webkitDocument().webkitExitFullscreen?.();
 		}
+		setFallbackFullscreen(false);
 		generation++;
 		disposeScene?.();
 		disposeScene = null;
@@ -321,14 +366,55 @@
 		viewButton?.focus();
 	}
 
+	// Safari never shipped the unprefixed element fullscreen API on iOS: iPadOS
+	// has only webkitRequestFullscreen, iPhone has nothing at all — the old
+	// bare requestFullscreen() call threw synchronously there and the button
+	// was a silent no-op (SONA-165).
+	function webkitDocument() {
+		return document as Document & {
+			webkitFullscreenElement?: Element | null;
+			webkitExitFullscreen?: () => void;
+		};
+	}
+
+	function syncFullscreen() {
+		isFullscreen = !!(document.fullscreenElement ?? webkitDocument().webkitFullscreenElement);
+	}
+
+	// Safari fires only the PREFIXED fullscreenchange, which Svelte's typed
+	// svelte:document attributes don't know — wire that one by hand.
+	$effect(() => {
+		document.addEventListener('webkitfullscreenchange', syncFullscreen);
+		return () => document.removeEventListener('webkitfullscreenchange', syncFullscreen);
+	});
+
+	// The overlay fallback covers the page — lock scroll behind it, and always
+	// restore through here (toggle, exit3d, unmount) so the lock can't leak.
+	function setFallbackFullscreen(on: boolean) {
+		if (fallbackFullscreen === on) return;
+		fallbackFullscreen = on;
+		document.documentElement.style.overflow = on ? 'hidden' : '';
+	}
+
 	function toggleFullscreen() {
-		if (document.fullscreenElement) {
+		// Fullscreen the WRAPPER, not the bare stage: the controls (Exit 3D,
+		// Fullscreen) must stay reachable inside the fullscreen element, or a
+		// keyboard user is stuck with only the Esc escape hatch.
+		const el = viewer as
+			| (HTMLElement & { webkitRequestFullscreen?: () => void })
+			| undefined;
+		if (fallbackFullscreen) {
+			setFallbackFullscreen(false);
+		} else if (document.fullscreenElement) {
 			void document.exitFullscreen().catch(() => {});
-		} else {
-			// Fullscreen the WRAPPER, not the bare stage: the controls (Exit 3D,
-			// Fullscreen) must stay reachable inside the fullscreen element, or a
-			// keyboard user is stuck with only the Esc escape hatch.
-			void viewer?.requestFullscreen().catch(() => {});
+		} else if (webkitDocument().webkitFullscreenElement) {
+			webkitDocument().webkitExitFullscreen?.();
+		} else if (el?.requestFullscreen) {
+			void el.requestFullscreen().catch(() => {});
+		} else if (el?.webkitRequestFullscreen) {
+			el.webkitRequestFullscreen();
+		} else if (el) {
+			setFallbackFullscreen(true);
 		}
 	}
 
@@ -341,12 +427,21 @@
 		generation++;
 		disposeScene?.();
 		disposeScene = null;
+		// Unlock the page scroll if we unmount mid-overlay (navigation).
+		setFallbackFullscreen(false);
 	});
 </script>
 
-<svelte:document onfullscreenchange={() => (isFullscreen = !!document.fullscreenElement)} />
+<svelte:document onfullscreenchange={syncFullscreen} />
+<!-- Native fullscreen exits on Esc by itself; the overlay fallback needs the
+     same escape hatch wired by hand. -->
+<svelte:window
+	onkeydown={(e) => {
+		if (fallbackFullscreen && e.key === 'Escape') setFallbackFullscreen(false);
+	}}
+/>
 
-<div class="viewer" bind:this={viewer}>
+<div class="viewer" class:fs-fallback={fallbackFullscreen} bind:this={viewer}>
 	{#if !active}
 		{@render children()}
 	{:else if loading}
@@ -416,7 +511,7 @@
 				class="btn btn-secondary"
 				onclick={toggleFullscreen}
 				disabled={loading}
-				aria-pressed={isFullscreen}
+				aria-pressed={isFullscreen || fallbackFullscreen}
 			>
 				<Maximize size={16} /> {m.vr_fullscreen()}
 			</button>
@@ -440,6 +535,25 @@
 	}
 
 	.viewer:fullscreen .stage {
+		aspect-ratio: auto !important;
+		flex: 1;
+		min-height: 0;
+		border-radius: 0;
+	}
+
+	/* iPhone's no-fullscreen-API fallback: a fixed overlay above the nav
+	   (MobileNav sits at 50), mirroring the :fullscreen rules above. Kept as
+	   SEPARATE rules on purpose — a browser old enough to need the fallback may
+	   not parse :fullscreen, and one unknown selector drops a whole rule. */
+	.viewer.fs-fallback {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		background: var(--background);
+		padding: 12px;
+	}
+
+	.viewer.fs-fallback .stage {
 		aspect-ratio: auto !important;
 		flex: 1;
 		min-height: 0;

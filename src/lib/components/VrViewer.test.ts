@@ -46,8 +46,46 @@ describe('VrViewer wiring (SONA-124)', () => {
 	});
 
 	it('fullscreens the wrapper (controls included), not the bare stage (A4)', () => {
-		expect(src).toContain('viewer?.requestFullscreen()');
+		// The fullscreen root is the viewer wrapper (via the `el` local) —
+		// nothing ever fullscreens the bare stage.
+		expect(src).toContain('const el = viewer as');
 		expect(src).not.toContain('stage?.requestFullscreen()');
+		expect(src).not.toContain('stage.requestFullscreen()');
+	});
+
+	it('feature-detects fullscreen with webkit + overlay fallbacks (iPhone, SONA-165)', () => {
+		// iPhone Safari has no element fullscreen API and iPadOS only the
+		// prefixed one — a bare requestFullscreen() call throws synchronously
+		// there, so the toggle must detect before calling, then fall back to the
+		// fixed-overlay mode.
+		expect(src).toContain('el?.requestFullscreen');
+		expect(src).toContain('el?.webkitRequestFullscreen');
+		expect(src).toContain('setFallbackFullscreen(true)');
+		// The overlay honors Escape like native fullscreen does…
+		expect(src).toMatch(/fallbackFullscreen && e\.key === 'Escape'/);
+		// …styles via its own class, whose rules never share a selector group
+		// with :fullscreen (one unknown selector drops a whole CSS rule on the
+		// old Safari that needs the fallback)…
+		expect(src).toContain('class:fs-fallback={fallbackFullscreen}');
+		const fallbackSelectors = src.match(/^\s*[^\n{}/]*\.fs-fallback[^\n{}]*\{/gm) ?? [];
+		expect(fallbackSelectors.length).toBeGreaterThanOrEqual(2);
+		for (const selector of fallbackSelectors) {
+			expect(selector).not.toContain(':fullscreen');
+		}
+		// …and every exit path clears it: the toggle, Exit 3D, and unmount.
+		expect((src.match(/setFallbackFullscreen\(false\)/g) ?? []).length).toBeGreaterThanOrEqual(4);
+	});
+
+	it('frames from the humanoid skeleton, bounding box only as fallback (SONA-165)', () => {
+		// Camera framing goes through the unit-tested frameHumanoid (pivot
+		// between hips and head, model-forward axis, distance from span) fed by
+		// RAW bone world positions; Box3 survives only in the no-humanoid branch.
+		expect(src).toMatch(/import \{[^}]*frameHumanoid[^}]*\} from '\$lib\/vr'/);
+		expect(src).toContain('getRawBoneNode');
+		expect(src).toMatch(/frameHumanoid\(\{/);
+		const fallback = src.match(/const framing =[\s\S]*?controls\.target\.copy\(target\)/)?.[0];
+		expect(fallback).toBeDefined();
+		expect(fallback).toContain('new THREE.Box3().setFromObject(vrm.scene)');
 	});
 
 	it('guards every await against a stale generation (exit-during-load race, D6)', () => {

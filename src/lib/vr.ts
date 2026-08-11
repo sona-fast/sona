@@ -186,6 +186,91 @@ export function modelExtFromFilename(filename: string | null | undefined): 'vrm'
 	return ext === 'vrm' || ext === 'fbx' ? ext : null;
 }
 
+export interface Vec3Like {
+	x: number;
+	y: number;
+	z: number;
+}
+
+/**
+ * Camera framing for a humanoid model from its skeleton, not its bounding box
+ * (SONA-165). The bounding box of a T-posed humanoid is dominated by arm span,
+ * so its centre sits low and any fixed camera angle lands badly on real
+ * uploads. Instead: pivot between the hips and head bones, orient from the
+ * model's own forward axis, and derive camera distance from the head-to-hips
+ * span. Pure math over world positions (no three.js dependency) so the
+ * framing is unit-testable; VrViewer feeds it bone positions and falls back
+ * to bounding-box framing when it returns null.
+ *
+ * The forward axis is anatomical — (leftUpperArm − rightUpperArm) × (head −
+ * hips) — because no world constant survives contact with real files: VRM 0.x
+ * and 1.0 differ in native facing (three-vrm's rotateVRM0 yaws 0.x scenes π
+ * to compensate), and uploads can carry baked rotations on any node. Bone
+ * positions sidestep all of it. Arms need not be in a perfect T-pose: any
+ * laterally separated pair gives the cross product the right direction.
+ *
+ * Distance constants come from humanoid proportions: hips sit near half the
+ * body height and the head bone near 0.85 of it, so height ≈ 2.9 × span. The
+ * pivot-to-floor drop is then ≈ 2 × span (fit vertically, with margin, as
+ * 2.2 × span) and the T-pose half arm span ≈ 1.45 × span (fit horizontally
+ * as 1.65 × span). Whichever needs the greater distance at this fov/aspect
+ * wins, capped inside the viewer camera's far plane.
+ */
+export function frameHumanoid(input: {
+	hips: Vec3Like;
+	head: Vec3Like;
+	leftUpperArm?: Vec3Like | null;
+	rightUpperArm?: Vec3Like | null;
+	/** Viewport aspect ratio, width / height. */
+	aspect: number;
+	/** Vertical field of view, in degrees. */
+	fovDeg: number;
+}): { target: Vec3Like; position: Vec3Like } | null {
+	const { hips, head } = input;
+	const up = { x: head.x - hips.x, y: head.y - hips.y, z: head.z - hips.z };
+	const span = Math.hypot(up.x, up.y, up.z);
+	if (!Number.isFinite(span) || span < 1e-4) return null;
+
+	const target = {
+		x: (hips.x + head.x) / 2,
+		y: (hips.y + head.y) / 2,
+		z: (hips.z + head.z) / 2
+	};
+
+	let forward = { x: 0, y: 0, z: 1 };
+	if (input.leftUpperArm && input.rightUpperArm) {
+		const lateral = {
+			x: input.leftUpperArm.x - input.rightUpperArm.x,
+			y: input.leftUpperArm.y - input.rightUpperArm.y,
+			z: input.leftUpperArm.z - input.rightUpperArm.z
+		};
+		const cross = {
+			x: lateral.y * up.z - lateral.z * up.y,
+			y: lateral.z * up.x - lateral.x * up.z,
+			z: lateral.x * up.y - lateral.y * up.x
+		};
+		if (Math.hypot(cross.x, cross.y, cross.z) > 1e-6) forward = cross;
+	}
+	// Level the camera: keep only the horizontal part of forward so a leaning
+	// model doesn't tilt the orbit start point above or below the pivot.
+	const flat = Math.hypot(forward.x, forward.z);
+	const dir = flat > 1e-6 ? { x: forward.x / flat, z: forward.z / flat } : { x: 0, z: 1 };
+
+	const halfFovTan = Math.tan((input.fovDeg * Math.PI) / 360);
+	const fitHeight = (2.2 * span) / halfFovTan;
+	const fitWidth = (1.65 * span) / (halfFovTan * input.aspect);
+	const distance = Math.min(Math.max(fitHeight, fitWidth), 40);
+
+	return {
+		target,
+		position: {
+			x: target.x + dir.x * distance,
+			y: target.y,
+			z: target.z + dir.z * distance
+		}
+	};
+}
+
 /**
  * Client-side validation of a picked model file, extracted from the admin
  * form's onModelPicked so it is unit-testable: mirrors the server guards
