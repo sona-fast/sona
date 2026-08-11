@@ -176,14 +176,15 @@ test('/vr pages can fetch() blob: and data: URLs, so GLTFLoader textures load', 
 	expect(resp?.status(), '/vr/e2e-avatar seeded and published').toBe(200);
 
 	const directives = (resp?.headers()['content-security-policy'] ?? '').split(';');
+	// Exact directive values, not substrings: a contains-check would still pass
+	// with an extra network source appended, which is the regression the unit
+	// gate's toEqual blocks at the config level — this pins the served header.
+	// It also proves SvelteKit actually serializes worker-src (the unit gate
+	// can only see the config object, not the emitted header).
 	const connectSrc = directives.find((d) => d.trim().startsWith('connect-src'));
-	expect(connectSrc, 'connect-src on /vr/[slug]').toContain('blob:');
-	expect(connectSrc, 'connect-src on /vr/[slug]').toContain('data:');
-	// The unit gate only reads the config object; this pins that SvelteKit
-	// actually serializes the directive — a typo'd directive name would pass
-	// unit CI while silently restoring the script-src fallback for workers.
+	expect(connectSrc?.trim(), 'connect-src on /vr/[slug]').toBe("connect-src 'self' blob: data:");
 	const workerSrc = directives.find((d) => d.trim().startsWith('worker-src'));
-	expect(workerSrc, 'worker-src on /vr/[slug]').toContain("'none'");
+	expect(workerSrc?.trim(), 'worker-src on /vr/[slug]').toBe("worker-src 'none'");
 
 	const outcome = await page.evaluate(async () => {
 		const url = URL.createObjectURL(new Blob([new Uint8Array([1, 2, 3])]));
