@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { isTelegramEnabled } from '$lib/server/telegram';
-import { listPacks } from '$lib/server/stickers';
+import { listPacks, clearStickerTabCache } from '$lib/server/stickers';
 import { deletePack } from '$lib/server/sticker-import';
 import { stickerPacks } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
@@ -26,6 +26,8 @@ export const actions = {
 		if (!row) return fail(404, { error: 'Pack not found.' });
 
 		await db.update(stickerPacks).set({ published: !row.published }).where(eq(stickerPacks.id, id));
+		// Same-isolate immediacy for the nav/tab probe; other isolates converge by TTL.
+		clearStickerTabCache();
 		return { toggled: true };
 	},
 

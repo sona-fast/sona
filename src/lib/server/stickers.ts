@@ -9,6 +9,7 @@
 
 import { inArray, eq, asc, and, sql, type SQL } from 'drizzle-orm';
 import { stickerPacks, stickers, stickerEmojis, artists, characters } from '$lib/server/db/schema';
+import { cachedProbe } from '$lib/server/nav-gating';
 import type { Database } from '$lib/server/db';
 
 export type PackShape = 'single' | 'multi';
@@ -152,16 +153,21 @@ async function artistMap(db: Database, ids: number[]): Promise<Map<number, Artis
 	return new Map(rows.map((r) => [r.id, artistView(r)]));
 }
 
-// Short-TTL in-memory cache, same pattern as the settings cache (settings.ts):
-// the probe runs on every public request via the layout loads, and "does a
-// published pack exist" changes rarely. Isolates converge within the TTL after
-// a publish/unpublish. Errors are never cached — the caller's fail-open
-// fallback handles them and the next request retries.
-const STICKER_TAB_TTL_MS = 60_000;
-let stickerTabCache: { value: boolean; expires: number } | null = null;
+// Short-TTL per-isolate cache — see cachedProbe (nav-gating.ts) for the
+// rationale; the pack write paths (sticker-import.ts, the admin publish
+// toggle) clear it.
+const stickerTabProbe = cachedProbe(async (db) => {
+	const row = await db
+		.select({ one: sql<number>`1` })
+		.from(stickerPacks)
+		.where(eq(stickerPacks.published, true))
+		.limit(1)
+		.get();
+	return row !== undefined;
+}, 60_000);
 
 export function clearStickerTabCache() {
-	stickerTabCache = null;
+	stickerTabProbe.clear();
 }
 
 /**
@@ -173,18 +179,7 @@ export function clearStickerTabCache() {
  * (hot public pages).
  */
 export async function stickerTabEnabled(db: Database): Promise<boolean> {
-	if (stickerTabCache && stickerTabCache.expires > Date.now()) {
-		return stickerTabCache.value;
-	}
-	const row = await db
-		.select({ one: sql<number>`1` })
-		.from(stickerPacks)
-		.where(eq(stickerPacks.published, true))
-		.limit(1)
-		.get();
-	const value = row !== undefined;
-	stickerTabCache = { value, expires: Date.now() + STICKER_TAB_TTL_MS };
-	return value;
+	return stickerTabProbe.probe(db);
 }
 
 /**

@@ -4,14 +4,18 @@
 
 import { sql } from 'drizzle-orm';
 import { collections } from '$lib/server/db/schema';
+import { cachedProbe } from '$lib/server/nav-gating';
 import type { Database } from '$lib/server/db';
 
-// Short-TTL per-isolate cache — same pattern, TTL, and rationale as stickerTabCache (stickers.ts).
-const COLLECTIONS_NAV_TTL_MS = 60_000;
-let collectionsNavCache: { value: boolean; expires: number } | null = null;
+// Short-TTL per-isolate cache — see cachedProbe (nav-gating.ts) for the
+// rationale; the admin collections actions clear it.
+const collectionsNavProbe = cachedProbe(async (db) => {
+	const row = await db.select({ one: sql<number>`1` }).from(collections).limit(1).get();
+	return row !== undefined;
+}, 60_000);
 
 export function clearCollectionsNavCache() {
-	collectionsNavCache = null;
+	collectionsNavProbe.clear();
 }
 
 /**
@@ -24,11 +28,5 @@ export function clearCollectionsNavCache() {
  * vrTabEnabled / stickerTabEnabled.
  */
 export async function collectionsNavEnabled(db: Database): Promise<boolean> {
-	if (collectionsNavCache && collectionsNavCache.expires > Date.now()) {
-		return collectionsNavCache.value;
-	}
-	const row = await db.select({ one: sql<number>`1` }).from(collections).limit(1).get();
-	const value = row !== undefined;
-	collectionsNavCache = { value, expires: Date.now() + COLLECTIONS_NAV_TTL_MS };
-	return value;
+	return collectionsNavProbe.probe(db);
 }

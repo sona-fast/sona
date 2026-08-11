@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { makeD1 } from '$lib/server/test/d1';
+import { clearVrTabCache } from '$lib/server/vr-gate';
 
 import { load } from './+page.server';
 
@@ -41,6 +42,9 @@ function loadEvent(platform: App.Platform) {
 type StickersData = { vrEnabled: boolean };
 
 async function loadData(platform: App.Platform): Promise<StickersData> {
+	// The vr probe caches per-isolate; clear it so each load sees the current
+	// DB (the matrix below re-queries after seeding).
+	clearVrTabCache();
 	return (await load(loadEvent(platform))) as StickersData;
 }
 

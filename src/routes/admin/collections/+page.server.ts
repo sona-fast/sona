@@ -3,6 +3,7 @@ import { getDb } from '$lib/server/db';
 import { collections, images } from '$lib/server/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import { clearCollectionsNavCache } from '$lib/server/collections';
 import type { Actions, PageServerLoad } from './$types';
 
 function slugify(name: string): string {
@@ -51,6 +52,8 @@ export const actions = {
 		}
 
 		await db.insert(collections).values({ name, slug });
+		// Same-isolate immediacy for the nav probe; other isolates converge by TTL.
+		clearCollectionsNavCache();
 		return { success: true };
 	},
 
@@ -77,6 +80,7 @@ export const actions = {
 			.set({ name, slug, coverImageUrl })
 			.where(eq(collections.id, id));
 
+		clearCollectionsNavCache();
 		return { success: true };
 	},
 
@@ -92,6 +96,7 @@ export const actions = {
 		// Unlink images from this collection
 		await db.update(images).set({ collectionId: null }).where(eq(images.collectionId, id));
 		await db.delete(collections).where(eq(collections.id, id));
+		clearCollectionsNavCache();
 		return { success: true };
 	}
 } satisfies Actions;

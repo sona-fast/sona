@@ -16,7 +16,7 @@ import type { SiteSettings } from '$lib/server/settings';
 import { getStorage, isAllowedStickerType, extFromContentType, deleteFile, isOwnedUrl } from '$lib/server/storage';
 import { getStickerSet, downloadFile, stickerSetUrl, parseStickerSetName, stickerMediaType } from '$lib/server/telegram';
 import type { TelegramSticker } from '$lib/server/telegram';
-import { resolveStickerArtistIds, inferAppendedArtistId } from '$lib/server/stickers';
+import { resolveStickerArtistIds, inferAppendedArtistId, clearStickerTabCache } from '$lib/server/stickers';
 import type { AvatarRehostContext } from '$lib/server/avatar';
 import { slugify } from '$lib/server/slugify';
 import { isAnimatedRaster, sniffAnimatedFromUrl } from '$lib/server/animated-raster';
@@ -1174,6 +1174,8 @@ export async function saveManualPack(opts: {
 		...stickerWriteStatements(db, startId, rows)
 	];
 	await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
+	// Same-isolate immediacy for the nav/tab probe; other isolates converge by TTL.
+	clearStickerTabCache();
 
 	return { packId, slug };
 }
@@ -1281,6 +1283,9 @@ export async function updateManualPack(opts: {
 		...stickerWriteStatements(db, startId, rows)
 	];
 	await db.batch(statements as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
+	// Same-isolate immediacy for the nav/tab probe (the edit form can flip
+	// `published`); other isolates converge by TTL.
+	clearStickerTabCache();
 
 	// Best-effort storage cleanup: delete objects no longer referenced by the pack.
 	const keep = new Set([
@@ -1325,6 +1330,8 @@ export async function deletePack(opts: {
 
 	// Delete the pack row — sticker + stickerEmojis cascade via FK.
 	await db.delete(stickerPacks).where(eq(stickerPacks.id, packId));
+	// Same-isolate immediacy for the nav/tab probe; other isolates converge by TTL.
+	clearStickerTabCache();
 
 	// Best-effort storage cleanup — don't fail if individual deletes error.
 	const urlsToDelete = [

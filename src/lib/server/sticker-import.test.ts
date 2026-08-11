@@ -24,6 +24,7 @@ import {
 	CRON_MAX_NEW
 } from './sticker-import';
 import { listPublicCharacterNames } from '$lib/server/characters';
+import { stickerTabEnabled, clearStickerTabCache } from '$lib/server/stickers';
 import { slugify } from '$lib/server/slugify';
 import { getStickerSet, downloadFile } from '$lib/server/telegram';
 import { readFileSync } from 'node:fs';
@@ -581,6 +582,32 @@ describe('saveManualPack', () => {
 		expect(second.slug).toBe(`${first.slug}-2`);
 		expect(await db.select().from(stickerPacks)).toHaveLength(2);
 		rnd.mockRestore();
+	});
+
+	it('clears the sticker tab probe cache so the pill can flip in this isolate', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		// Prime the cached probe with "no published pack exists".
+		clearStickerTabCache();
+		expect(await stickerTabEnabled(db)).toBe(false);
+
+		await saveManualPack({
+			env: testEnv,
+			settings: testSettings,
+			db,
+			input: {
+				name: 'Fresh Pack',
+				managerArtistId: null,
+				published: true,
+				stickerInputs: [
+					{ imageUrl: ufs('c'), artistId: null, emojis: ['😀'], nsfw: false, position: 0, format: 'webp' as const }
+				]
+			}
+		});
+
+		// No manual clear here — the save path itself must have invalidated the
+		// cache, or this still reads the primed `false` for up to the TTL.
+		expect(await stickerTabEnabled(db)).toBe(true);
 	});
 });
 

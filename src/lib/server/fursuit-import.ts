@@ -3,7 +3,9 @@
 // StorageProvider (R2/UploadThing), and insert a fursuit_photos row. Photos are
 // served from the DB afterwards — no FurTrack calls at request time.
 
+import { sql } from 'drizzle-orm';
 import { fursuitPhotos } from '$lib/server/db/schema';
+import { cachedProbe } from '$lib/server/nav-gating';
 import type { Database } from '$lib/server/db';
 import type { SiteSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
@@ -15,6 +17,28 @@ import type { FursuitPhoto } from '$lib/furtrack/types';
 
 /** A row from the fursuit_photos table. */
 type FursuitPhotoRow = typeof fursuitPhotos.$inferSelect;
+
+// Short-TTL per-isolate cache — see cachedProbe (nav-gating.ts) for the
+// rationale. No write-side clear: photos only arrive through the rare admin
+// import flow, so isolates just converge within the TTL.
+const fursuitPhotosProbe = cachedProbe(async (db) => {
+	const row = await db.select({ one: sql<number>`1` }).from(fursuitPhotos).limit(1).get();
+	return row !== undefined;
+}, 60_000);
+
+export function clearFursuitPhotosCache() {
+	fursuitPhotosProbe.clear();
+}
+
+/**
+ * Whether ANY fursuit photo is stored — the DB half of the Fursuit tab
+ * predicate. The other half (`getMode(env) !== 'off'`) is env config, not DB
+ * state, and stays at the call site. SELECT 1 … LIMIT 1 existence probe,
+ * cached per-isolate, same shape as vrTabEnabled / stickerTabEnabled.
+ */
+export async function fursuitPhotosExist(db: Database): Promise<boolean> {
+	return fursuitPhotosProbe.probe(db);
+}
 
 /**
  * Map a stored fursuit_photos row to the FursuitPhoto shape the UI renders.

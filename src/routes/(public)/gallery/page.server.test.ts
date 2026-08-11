@@ -7,14 +7,17 @@ import { sql as sqlq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { artists, images } from '$lib/server/db/schema';
 import { clearStickerTabCache } from '$lib/server/stickers';
+import { clearVrTabCache } from '$lib/server/vr-gate';
+import { clearFursuitPhotosCache } from '$lib/server/fursuit-import';
 
 import { load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
 
 // Only the tables the gallery load reads. Columns limited to what the load's
-// queries reference.
-function makeDb() {
+// queries reference. `envExtra` layers extra env vars (e.g. FURTRACK_MODE)
+// onto the platform for the fursuit-gating cases.
+function makeDb(envExtra: Record<string, string> = {}) {
 	const sqlite = new Database(':memory:');
 	sqlite.exec(`
 		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -43,7 +46,10 @@ function makeDb() {
 		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 	`);
 	const d1 = makeD1(sqlite);
-	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
+	return {
+		db: drizzle(d1, { schema }),
+		platform: { env: { DB: d1, ...envExtra } } as unknown as App.Platform
+	};
 }
 
 const NOW = '2026-01-01T00:00:00.000Z';
@@ -85,9 +91,11 @@ type GalleryData = {
 };
 
 async function loadData(platform: App.Platform, query = ''): Promise<GalleryData> {
-	// The stickers probe caches per-isolate; clear it so each load sees the
+	// The tab probes cache per-isolate; clear them so each load sees the
 	// current DB (the matrices below re-query after seeding).
 	clearStickerTabCache();
+	clearVrTabCache();
+	clearFursuitPhotosCache();
 	return (await load(loadEvent(platform, query))) as GalleryData;
 }
 
@@ -232,10 +240,11 @@ describe('gallery load — VR Avatars tab visibility', () => {
 });
 
 describe('gallery load — degraded fallback', () => {
-	it('keeps the REAL vr/stickers flags on a healthy-content fork (only fursuitEnabled fails closed)', async () => {
+	it('keeps the REAL vr/stickers flags on a healthy-content fork', async () => {
 		const { db, platform } = makeDb();
-		// The vr/stickers probes run OUTSIDE the gallery cap, so a degraded build
-		// on a fork with published content keeps its tab bar.
+		// The tab probes run OUTSIDE the gallery cap, so a degraded build on a
+		// fork with published content keeps its tab bar. (No FURTRACK_MODE here,
+		// so fursuitEnabled stays false via its env half, not the probe.)
 		await db.run(sqlq`INSERT INTO vr_avatars (published) VALUES (1)`);
 		await db.run(sqlq`INSERT INTO sticker_packs (published) VALUES (1)`);
 		// Force build() to reject (withTimeout falls back on rejection as well as
@@ -250,6 +259,26 @@ describe('gallery load — degraded fallback', () => {
 		expect(data.vrEnabled).toBe(true);
 	});
 
+	it('keeps the Fursuit tab on a degraded fursuit-only fork (bounded probe, not build())', async () => {
+		const { db, platform } = makeDb({ FURTRACK_MODE: 'mock' });
+		await db.run(sqlq`INSERT INTO fursuit_photos (id) VALUES (1)`);
+		await db.run(sqlq`DROP TABLE artists`);
+
+		const data = await loadData(platform);
+		expect(data.degraded).toBe(true);
+		expect(data.fursuitEnabled).toBe(true);
+	});
+
+	it('fails CLOSED when the fursuit probe itself errors (a dead Fursuit tab has no page behind it)', async () => {
+		const { db, platform } = makeDb({ FURTRACK_MODE: 'mock' });
+		await db.run(sqlq`DROP TABLE fursuit_photos`); // the probe's read now rejects
+		await db.run(sqlq`DROP TABLE artists`);
+
+		const data = await loadData(platform);
+		expect(data.degraded).toBe(true);
+		expect(data.fursuitEnabled).toBe(false);
+	});
+
 	it('still suppresses every pill on a genuine zero-content fork', async () => {
 		const { db, platform } = makeDb();
 		await db.run(sqlq`DROP TABLE artists`);
@@ -259,6 +288,26 @@ describe('gallery load — degraded fallback', () => {
 		expect(data.fursuitEnabled).toBe(false);
 		expect(data.stickersEnabled).toBe(false);
 		expect(data.vrEnabled).toBe(false);
+	});
+});
+
+describe('gallery load — Fursuit tab visibility (healthy path reuses the bounded probe)', () => {
+	it('shows the tab only when the feature is on AND photos exist', async () => {
+		// Feature off (no FURTRACK_MODE) hides the tab even with photos stored.
+		const off = makeDb();
+		await off.db.run(sqlq`INSERT INTO fursuit_photos (id) VALUES (1)`);
+		expect((await loadData(off.platform)).fursuitEnabled).toBe(false);
+
+		// Feature on but no photos: still hidden.
+		const empty = makeDb({ FURTRACK_MODE: 'mock' });
+		expect((await loadData(empty.platform)).fursuitEnabled).toBe(false);
+
+		// Feature on and a photo exists: shown (and the load stays healthy).
+		const on = makeDb({ FURTRACK_MODE: 'mock' });
+		await on.db.run(sqlq`INSERT INTO fursuit_photos (id) VALUES (1)`);
+		const data = await loadData(on.platform);
+		expect(data.degraded).toBe(false);
+		expect(data.fursuitEnabled).toBe(true);
 	});
 });
 

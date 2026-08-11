@@ -4,7 +4,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { isRedirect } from '@sveltejs/kit';
 import { makeD1 } from '$lib/server/test/d1';
+import { getDb } from '$lib/server/db';
 import { clearSettingsCache } from '$lib/server/settings';
+import { vrTabEnabled, clearVrTabCache } from '$lib/server/vr-gate';
 import { EARLY_ACCESS } from '$lib/early-access';
 
 import { actions } from './+page.server';
@@ -237,6 +239,33 @@ describe('model file disposal', () => {
 		});
 		expect(await run('save', platform, id, form)).toBe('redirected');
 		expect(deleteFileSpy).not.toHaveBeenCalled();
+	});
+
+	it('clears the cached vr tab probe on save (a publish flip must show the tab immediately)', async () => {
+		const { sqlite, platform } = makeDb();
+		const id = addAvatar(sqlite, { published: 0 });
+		const db = getDb(platform.env.DB);
+		// Prime the cached probe with "no published avatar exists".
+		clearVrTabCache();
+		expect(await vrTabEnabled(db)).toBe(false);
+
+		expect(await run('save', platform, id, saveForm({ published: '1' }))).toBe('redirected');
+
+		// No manual clear here — updateAvatar itself must have invalidated the
+		// cache, or this still reads the primed `false` for up to the TTL.
+		expect(await vrTabEnabled(db)).toBe(true);
+	});
+
+	it('clears the cached vr tab probe on delete (the tab must drop immediately)', async () => {
+		const { sqlite, platform } = makeDb();
+		const id = addAvatar(sqlite, { published: 1 });
+		const db = getDb(platform.env.DB);
+		clearVrTabCache();
+		expect(await vrTabEnabled(db)).toBe(true);
+
+		expect(await run('delete', platform, id)).toBe('redirected');
+
+		expect(await vrTabEnabled(db)).toBe(false);
 	});
 
 	it('on delete, disposes of the model and showcase media but never the poster image', async () => {

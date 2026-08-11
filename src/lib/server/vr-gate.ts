@@ -4,6 +4,7 @@ import { getRawSetting } from '$lib/server/settings';
 import { verifySupporterKey } from '$lib/server/supporter-key';
 import { isFeatureEnabled, EARLY_ACCESS } from '$lib/early-access';
 import { vrAvatars } from '$lib/server/db/schema';
+import { cachedProbe } from '$lib/server/nav-gating';
 import type { Database } from '$lib/server/db';
 
 type Env = App.Platform['env'];
@@ -52,15 +53,9 @@ export function vrGaDate(): string | null {
 	return EARLY_ACCESS[VR_FEATURE_FLAG] ?? null;
 }
 
-/**
- * Whether the public VR Avatars tab shows: at least one PUBLISHED avatar
- * exists (with zero, the tab and the empty /vr grid behind it stay
- * undiscoverable). Shared by the gallery and stickers loads so the tab bars
- * can never disagree. SELECT 1 … LIMIT 1 — an existence probe, not a COUNT
- * over the table; run it inside the callers' Promise.all (these are hot
- * public pages).
- */
-export async function vrTabEnabled(db: Database): Promise<boolean> {
+// Short-TTL per-isolate cache — see cachedProbe (nav-gating.ts) for the
+// rationale; the avatar write paths (vr-avatars.ts) clear it.
+const vrTabProbe = cachedProbe(async (db) => {
 	const row = await db
 		.select({ one: sql<number>`1` })
 		.from(vrAvatars)
@@ -68,4 +63,20 @@ export async function vrTabEnabled(db: Database): Promise<boolean> {
 		.limit(1)
 		.get();
 	return row !== undefined;
+}, 60_000);
+
+export function clearVrTabCache() {
+	vrTabProbe.clear();
+}
+
+/**
+ * Whether the public VR Avatars tab shows: at least one PUBLISHED avatar
+ * exists (with zero, the tab and the empty /vr grid behind it stay
+ * undiscoverable). Shared by the gallery and stickers loads so the tab bars
+ * can never disagree. SELECT 1 … LIMIT 1 — an existence probe, not a COUNT
+ * over the table; cached per-isolate, run inside the callers' Promise.all
+ * (these are hot public pages).
+ */
+export async function vrTabEnabled(db: Database): Promise<boolean> {
+	return vrTabProbe.probe(db);
 }
