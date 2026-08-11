@@ -25,7 +25,7 @@ describe('VR too-large error copy', () => {
 	});
 
 	it('ja blames ブレンドシェイプ and never suggests shrinking textures', () => {
-		expect(ja.admin_vr_error_too_large).toContain('ブレンドシェイプ');
+		expect(ja.admin_vr_error_too_large).toContain('使っていないブレンドシェイプ');
 		expect(ja.admin_vr_error_too_large).not.toContain('テクスチャサイズを下げ');
 	});
 
@@ -54,6 +54,7 @@ describe('VR model-format hint copy', () => {
 	it('ja names the VRM versions and keeps the FBX viewer caveat', () => {
 		const hint = messages('ja').admin_vr_model_hint;
 		expect(hint).toContain('VRM 0.x');
+		expect(hint).toContain('1.0');
 		expect(hint).toContain('ビューアには表示されません');
 	});
 });
