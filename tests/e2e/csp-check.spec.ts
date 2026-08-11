@@ -93,12 +93,25 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	// The challenge iframe must actually attach — otherwise the frame-src runtime
 	// coverage passes vacuously when the widget silently fails to load. Checked via
 	// page.frames(), not a DOM locator: the widget mounts its iframe inside a
-	// CLOSED shadow root, which locators can't pierce.
+	// CLOSED shadow root, which locators can't pierce. This poll deliberately ADDS
+	// a real-network requirement to the FIRST login-page load (previously only the
+	// second load had to solve) — an accepted cost: it is the anti-vacuity
+	// guarantee for the one test that keeps the real widget.
 	await expect
-		.poll(() => page.frames().some((f) => f.url().includes('challenges.cloudflare.com')), {
-			timeout: 15_000,
-			message: 'real Turnstile challenge iframe never attached'
-		})
+		.poll(
+			() =>
+				page.frames().some((f) => {
+					try {
+						return new URL(f.url()).hostname === 'challenges.cloudflare.com';
+					} catch {
+						return false;
+					}
+				}),
+			{
+				timeout: 15_000,
+				message: 'real Turnstile challenge iframe never attached'
+			}
+		)
 		.toBe(true);
 	all.push(...(await drain(page)));
 	await adminLogin(page, PASSWORD, { realTurnstile: true });

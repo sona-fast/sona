@@ -57,7 +57,10 @@ const TURNSTILE_STUB = `window.turnstile = (() => {
 			// No sitekey, no token: leave the input empty so adminLogin's toHaveValue
 			// wait fails legibly instead of masking broken sitekey wiring in
 			// +page.server.ts. Presence-only on purpose — no hardcoded key here.
+			// A reused input is cleared explicitly — a stale token left over from a
+			// previous render would otherwise satisfy that wait anyway.
 			if (opts && opts.sitekey) issue(widget);
+			else widget.input.value = '';
 			return 'stub';
 		},
 		reset() {
@@ -75,7 +78,7 @@ const TURNSTILE_STUB = `window.turnstile = (() => {
 // path runs unchanged. Pre-defining window.turnstile would take the login page's
 // early-return branch and quietly skip both.
 export async function stubTurnstile(page: Page) {
-	await page.route('**/challenges.cloudflare.com/turnstile/v0/api.js*', (route) =>
+	await page.route('https://challenges.cloudflare.com/turnstile/v0/api.js*', (route) =>
 		route.fulfill({ contentType: 'application/javascript', body: TURNSTILE_STUB })
 	);
 }
