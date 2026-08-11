@@ -94,7 +94,8 @@ export const load: PageServerLoad = async ({ params, platform, url }) => {
 	// (R2 head / provider ownership — see modelBytesServable). Feeds both the
 	// viewer path and the download button; the raw (possibly cross-origin)
 	// model_url itself is NEVER sent to the client — the viewer fetches the
-	// same-origin /vr/[slug]/model endpoint (CSP connect-src 'self').
+	// same-origin /vr/[slug]/model endpoint (connect-src permits no network
+	// origin beyond 'self').
 	const settings = await getSettings(db);
 	const servable = avatar.modelUrl
 		? await modelBytesServable({

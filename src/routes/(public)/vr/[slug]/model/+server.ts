@@ -13,9 +13,10 @@ import type { RequestHandler } from './$types';
 const viewerLimiter = new RateLimiter(20, 60_000); // 20 fetches / min / IP
 
 // GET /vr/[slug]/model
-// The SAME-ORIGIN bytes the in-page 3D viewer fetches (CSP connect-src 'self':
-// the raw, possibly cross-origin model_url never reaches the client). Bytes are
-// resolved server-side and provider-aware — see resolveModelBytes.
+// The SAME-ORIGIN bytes the in-page 3D viewer fetches (connect-src permits no
+// network origin beyond 'self', so the raw, possibly cross-origin model_url
+// never reaches the client). Bytes are resolved server-side and
+// provider-aware — see resolveModelBytes.
 //
 // Deliberately NO license/downloadable check here: per the design doc, viewing
 // is not gated by license — a viewable model is a fetchable model, and the

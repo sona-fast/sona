@@ -7,7 +7,8 @@
 
 	interface Props {
 		/** SAME-ORIGIN path of the model-serving endpoint (/vr/[slug]/model). The
-		 * raw model_url must never reach this component — connect-src is 'self'. */
+		 * raw model_url must never reach this component — connect-src permits no
+		 * network origin beyond 'self'. */
 		modelPath: string;
 		modelSizeBytes: number | null;
 		name: string;

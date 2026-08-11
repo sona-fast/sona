@@ -18,8 +18,9 @@ describe('VrViewer wiring (SONA-124)', () => {
 	});
 
 	it('fetches ONLY the same-origin viewer endpoint path (never a raw model URL)', () => {
-		// modelPath is /vr/[slug]/model; CSP connect-src is 'self', and the raw
-		// (possibly cross-origin) model_url must never reach this component.
+		// modelPath is /vr/[slug]/model; connect-src permits no network origin
+		// beyond 'self', and the raw (possibly cross-origin) model_url must never
+		// reach this component.
 		expect(src).toContain('await fetch(modelPath, { signal })');
 		expect(src.match(/\bfetch\(/g)?.length).toBe(1);
 		expect(src).not.toContain('modelUrl');

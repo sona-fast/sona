@@ -77,7 +77,20 @@ const config = {
 				// and the public strip takes a measured ~459px layout shift — silent
 				// metadata corruption, not just a missing preview.
 				'media-src': ['self', 'https:', 'blob:'],
-				'connect-src': ['self'],
+				// blob: + data: are for the VR viewer's textures, and 'self' alone breaks
+				// them: three.js GLTFLoader extracts a GLB's embedded textures into blob:
+				// URLs and loads them through ImageBitmapLoader, which uses fetch() — a
+				// connect-src load, not img-src. Without blob: every embedded texture is
+				// refused ("Couldn't load texture blob:") and models render untextured.
+				// data: covers exporters that embed textures as data URIs instead of
+				// bufferViews. Neither loosens exfiltration containment: blob:/data: are
+				// in-document objects, not network destinations.
+				'connect-src': ['self', 'blob:', 'data:'],
+				// Nothing in the app enables workers (lottie-web ships a blob:-worker
+				// path, inert only while useWebWorker stays off — nobody calls
+				// lottie.useWebWorker(true)); left unset, worker sourcing would
+				// silently inherit script-src.
+				'worker-src': ['none'],
 				'frame-src': ['self', 'https://challenges.cloudflare.com'],
 				'frame-ancestors': ['none'],
 				'base-uri': ['self'],

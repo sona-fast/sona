@@ -18,11 +18,22 @@ describe('kit.csp directives', () => {
 		expect(script).toContain('self');
 		expect(script).not.toContain('unsafe-inline');
 		expect(script).not.toContain('unsafe-eval');
+		// connect-src legitimately carries blob:/data:; script-src must not — either
+		// would let injected script bytes execute from attacker-minted URLs.
+		expect(script).not.toContain('blob:');
+		expect(script).not.toContain('data:');
 		// The app.html theme resolver is pinned by hash (SvelteKit won't hash it).
 		// Assert the EXACT app.html theme-script hash, not just "some hash" — if that
 		// inline script's bytes drift, its hash changes and CSP would block it; failing
 		// here in unit CI catches the drift fast instead of only at e2e.
 		expect(script).toContain('sha256-b+LZKZWtSdZmsS5XuXKlgFQg8sQ4LLl7/HzIR8xtLMo=');
+		// Exact match blocks additions the not-contains lines can't anticipate
+		// ('https:', '*', 'strict-dynamic').
+		expect(script).toEqual([
+			'self',
+			'sha256-b+LZKZWtSdZmsS5XuXKlgFQg8sQ4LLl7/HzIR8xtLMo=',
+			'https://challenges.cloudflare.com'
+		]);
 	});
 
 	it('scopes inline event handlers to Svelte’s replay shim only', () => {
@@ -41,14 +52,20 @@ describe('kit.csp directives', () => {
 		// DELIBERATE change (SONA-124 R2-B1): media-src gained blob: for the VR
 		// media picker's client-side clip probe — the same rationale as img-src's
 		// blob: (see the next test). The load-bearing containment invariants are
-		// untouched: connect-src stays 'self' and script-src still carries no
-		// unsafe-inline/unsafe-eval (asserted above).
+		// untouched: connect-src carries no network origin beyond 'self'
+		// (blob:/data: are in-document schemes — see its own test) and script-src
+		// still carries no unsafe-inline/unsafe-eval (asserted above).
 		expect(d['img-src']).toEqual(['self', 'https:', 'data:', 'blob:']);
 		expect(d['media-src']).toEqual(['self', 'https:', 'blob:']);
 	});
 
-	it('keeps connect-src locked to self (the viewer must fetch models same-origin)', () => {
-		expect(d['connect-src']).toEqual(['self']);
+	it('connect-src: self for models, blob:/data: for their textures, nothing else', () => {
+		// Regression guard, both directions: blob:/data: must stay or VR models
+		// render untextured (the GLTFLoader fetch() mechanism is documented on
+		// connect-src in svelte.config.js), and the exact match keeps network
+		// origins OUT — blob:/data: are in-document objects with no exfiltration
+		// value, but any ADDED https: host here would be.
+		expect(d['connect-src']).toEqual(['self', 'blob:', 'data:']);
 	});
 
 	it('allows blob: images, or the upload page silently stores NULL dimensions', () => {
@@ -77,5 +94,11 @@ describe('kit.csp directives', () => {
 		expect(d['frame-ancestors']).toEqual(['none']);
 		expect(d['object-src']).toEqual(['none']);
 		expect(d['base-uri']).toEqual(['self']);
+	});
+
+	it('denies worker sourcing, which would otherwise inherit script-src', () => {
+		// Nothing in the app spawns workers; left unset, worker-src falls back to
+		// script-src and workers become a quiet script-execution surface.
+		expect(d['worker-src']).toEqual(['none']);
 	});
 });

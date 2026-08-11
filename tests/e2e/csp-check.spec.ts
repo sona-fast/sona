@@ -75,7 +75,7 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 
 	all.push(...(await drain(page)));
 
-	for (const url of ['/gallery/parent-piece', '/stickers', '/about']) {
+	for (const url of ['/gallery/parent-piece', '/stickers', '/about', '/vr/e2e-avatar']) {
 		await page.goto(url, { waitUntil: 'domcontentloaded' });
 		all.push(...(await drain(page)));
 	}
@@ -158,4 +158,48 @@ test('/admin/upload can load a blob: image, so picked files keep their dimension
 
 	// Exactly what getImageDimensions() would read. '0x0' is what the bug produced.
 	expect(outcome, 'blob: image load on /admin/upload').toBe('1x1');
+});
+
+// Same shape as the blob:-image test above, for the OTHER blob: consumer: the VR
+// viewer's textures load through fetch(), not <img>.
+test('/vr pages can fetch() blob: and data: URLs, so GLTFLoader textures load', async ({
+	page
+}) => {
+	// Proves the CSP served on the viewer page permits the fetch() loads that
+	// GLTFLoader's texture pipeline depends on — blob: extraction and data:-URI
+	// embeds (mechanism documented on connect-src in svelte.config.js) — with no
+	// coupling to three.js internals or GPU availability in CI. When connect-src
+	// was just 'self', these fetches failed and models rendered untextured.
+	const resp = await page.goto('/vr/e2e-avatar', { waitUntil: 'domcontentloaded' });
+	// SvelteKit serves the same CSP on its 404 page, so without this the fetch
+	// probes below would still pass if the seed drifted and the page vanished.
+	expect(resp?.status(), '/vr/e2e-avatar seeded and published').toBe(200);
+
+	const directives = (resp?.headers()['content-security-policy'] ?? '').split(';');
+	const connectSrc = directives.find((d) => d.trim().startsWith('connect-src'));
+	expect(connectSrc, 'connect-src on /vr/[slug]').toContain('blob:');
+	expect(connectSrc, 'connect-src on /vr/[slug]').toContain('data:');
+	// The unit gate only reads the config object; this pins that SvelteKit
+	// actually serializes the directive — a typo'd directive name would pass
+	// unit CI while silently restoring the script-src fallback for workers.
+	const workerSrc = directives.find((d) => d.trim().startsWith('worker-src'));
+	expect(workerSrc, 'worker-src on /vr/[slug]').toContain("'none'");
+
+	const outcome = await page.evaluate(async () => {
+		const url = URL.createObjectURL(new Blob([new Uint8Array([1, 2, 3])]));
+		try {
+			const blobBuf = await (await fetch(url)).arrayBuffer();
+			const dataBuf = await (
+				await fetch('data:application/octet-stream;base64,AQID')
+			).arrayBuffer();
+			return `fetched ${blobBuf.byteLength}+${dataBuf.byteLength} bytes`;
+		} catch (e) {
+			return `blocked: ${e instanceof Error ? e.message : String(e)}`;
+		} finally {
+			URL.revokeObjectURL(url);
+		}
+	});
+
+	// 'blocked: Failed to fetch' is what connect-src 'self' produced.
+	expect(outcome, 'fetch(blob:) + fetch(data:) on the VR viewer page').toBe('fetched 3+3 bytes');
 });

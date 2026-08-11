@@ -13,7 +13,8 @@
  *  2. If ANY configured non-R2 provider owns the URL (UploadThing — active or
  *     not, so a provider switch can't orphan an earlier upload), an outbound
  *     fetch of the provider URL, streamed through — the visitor's own fetch
- *     stays same-origin (CSP connect-src 'self' intact). R2 is excluded here
+ *     stays same-origin (connect-src permits no network origin beyond
+ *     'self'). R2 is excluded here
  *     because step 1 already probed the bucket: owns() succeeding for R2
  *     would just spell the same missing key again (or loop through /img).
  */
