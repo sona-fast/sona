@@ -458,7 +458,6 @@
 		height: auto;
 		aspect-ratio: 1;
 		object-fit: cover;
-		display: block;
 	}
 
 	.modal-actions {
