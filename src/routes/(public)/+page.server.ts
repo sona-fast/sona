@@ -3,6 +3,8 @@ import { images, artists, imageTags, tags } from '$lib/server/db/schema';
 import { eq, desc, and, notInArray, inArray, isNull, sql } from 'drizzle-orm';
 import { getSettings, settingsFallback } from '$lib/server/settings';
 import { probeArtContent, shareHasContent } from '$lib/server/presence';
+import { stickerTabEnabled } from '$lib/server/stickers';
+import { collectionsNavEnabled } from '$lib/server/collections';
 import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
 
@@ -19,6 +21,15 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// per-isolate, usually zero round-trips).
 	const settings = await withTimeout(getSettings(db), READ_TIMEOUT_MS, settingsFallback());
 
+	// Nav gating for the Header/MobileNav this page renders itself (+page@
+	// escapes the (public) layout, so that layout's probes never run here).
+	// Same fail-open posture as the path-card probes below; started before the
+	// branch so both branches overlap it with their own reads.
+	const navFlags = Promise.all([
+		withTimeout(stickerTabEnabled(db), READ_TIMEOUT_MS, true),
+		withTimeout(collectionsNavEnabled(db), READ_TIMEOUT_MS, true)
+	]);
+
 	// The threePath splash is a standalone hub page — no image queries needed.
 	if (settings.landingLayout === 'threePath') {
 		// Presence flags for the /art and /share cards (#42): hide a card whose
@@ -32,12 +43,15 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 			withTimeout(probeArtContent(db), READ_TIMEOUT_MS, true),
 			withTimeout(shareHasContent(db), READ_TIMEOUT_MS, true)
 		]);
+		const [stickersEnabled, collectionsEnabled] = await navFlags;
 		return {
 			settings,
 			recentImages: [],
 			mosaicImageUrls: [],
 			host: url.host,
-			pathPresence: { art, share }
+			pathPresence: { art, share },
+			stickersEnabled,
+			collectionsEnabled
 		};
 	}
 
@@ -133,12 +147,16 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		...randomMosaic.map((img) => img.imageUrl)
 	];
 
+	const [stickersEnabled, collectionsEnabled] = await navFlags;
+
 	return {
 		recentImages: imagesWithTags,
 		mosaicImageUrls,
 		settings,
 		host: url.host,
 		// The mosaic branch renders no path cards; true keeps the type uniform.
-		pathPresence: { art: true, share: true }
+		pathPresence: { art: true, share: true },
+		stickersEnabled,
+		collectionsEnabled
 	};
 };

@@ -65,7 +65,11 @@
 {#if splash}
 	<div class="landing">
 		<div class="desktop-header">
-			<Header siteName={data.settings.siteName} />
+			<Header
+				siteName={data.settings.siteName}
+				stickersEnabled={data.stickersEnabled}
+				collectionsEnabled={data.collectionsEnabled}
+			/>
 		</div>
 
 		<main class="splash">
@@ -103,11 +107,15 @@
 		</main>
 	</div>
 
-	<MobileNav />
+	<MobileNav stickersEnabled={data.stickersEnabled} />
 {:else}
 	<div class="public-layout">
 		<div class="desktop-header">
-			<Header siteName={data.settings.siteName} />
+			<Header
+				siteName={data.settings.siteName}
+				stickersEnabled={data.stickersEnabled}
+				collectionsEnabled={data.collectionsEnabled}
+			/>
 		</div>
 		<main>
 			<MosaicBanner
@@ -141,7 +149,7 @@
 			<Footer settings={data.settings} host={data.host} />
 		</div>
 		<MobileCredit host={data.host} />
-		<MobileNav />
+		<MobileNav stickersEnabled={data.stickersEnabled} />
 	</div>
 {/if}
 

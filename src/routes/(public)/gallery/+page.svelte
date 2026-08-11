@@ -110,34 +110,39 @@
 		</p>
 	</div>
 
-	<div class="tabs" role="tablist">
-		<button
-			class="tab"
-			class:active={!isFursuit}
-			role="tab"
-			aria-selected={!isFursuit}
-			onclick={() => updateFilter('view', '')}
-		>
-			{m.gallery_view_artwork()}
-		</button>
-		{#if data.fursuitEnabled}
+	<!-- Suppressed when only Artwork would show (fresh fork, every other section
+	     gated off): a lone-pill segmented control reads as broken, and there is
+	     nothing to switch to. -->
+	{#if data.fursuitEnabled || data.stickersEnabled || data.vrEnabled}
+		<div class="tabs" role="tablist">
 			<button
 				class="tab"
-				class:active={isFursuit}
+				class:active={!isFursuit}
 				role="tab"
-				aria-selected={isFursuit}
-				onclick={() => updateFilter('view', 'fursuit')}
+				aria-selected={!isFursuit}
+				onclick={() => updateFilter('view', '')}
 			>
-				{m.gallery_view_fursuit()}
+				{m.gallery_view_artwork()}
 			</button>
-		{/if}
-		{#if data.stickersEnabled}
-			<a href="/stickers" class="tab">{m.gallery_view_stickers()}</a>
-		{/if}
-		{#if data.vrEnabled}
-			<a href="/vr" class="tab">{m.gallery_view_vr()}</a>
-		{/if}
-	</div>
+			{#if data.fursuitEnabled}
+				<button
+					class="tab"
+					class:active={isFursuit}
+					role="tab"
+					aria-selected={isFursuit}
+					onclick={() => updateFilter('view', 'fursuit')}
+				>
+					{m.gallery_view_fursuit()}
+				</button>
+			{/if}
+			{#if data.stickersEnabled}
+				<a href="/stickers" class="tab">{m.gallery_view_stickers()}</a>
+			{/if}
+			{#if data.vrEnabled}
+				<a href="/vr" class="tab">{m.gallery_view_vr()}</a>
+			{/if}
+		</div>
+	{/if}
 
 	{#if isFursuit}
 		{#if data.fursuitPhotographers.length > 0 || data.fursuitEvents.length > 0}

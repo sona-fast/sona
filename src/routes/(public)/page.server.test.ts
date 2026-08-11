@@ -37,15 +37,22 @@ function makeDb() {
 			artist_id INTEGER, collection_id INTEGER, commissioned_at TEXT, parent_image_id INTEGER,
 			variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0, featured_order INTEGER, created_at TEXT NOT NULL DEFAULT ''
 		);
+		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
+		CREATE TABLE collections (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, slug TEXT NOT NULL,
+			cover_image_url TEXT, created_at TEXT NOT NULL DEFAULT ''
+		);
 	`);
 	const d1 = makeD1(sqlite);
-	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
+	return { sqlite, db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
 }
 
 function loadSplash(platform: App.Platform) {
 	return load({ platform, url: new URL('http://example.ink/') } as never) as Promise<{
 		settings: { landingLayout: string };
 		pathPresence: { art: boolean; share: boolean };
+		stickersEnabled: boolean;
+		collectionsEnabled: boolean;
 	}>;
 }
 
@@ -149,6 +156,23 @@ describe('splash load — pathPresence card flags (#42)', () => {
 
 		const data = await loadSplash(platform);
 		expect(data.pathPresence).toEqual({ art: true, share: false });
+	});
+
+	it('returns the nav-gating flags for the Header/MobileNav this page renders itself', async () => {
+		// +page@ escapes the (public) layout, so ITS load must carry the same
+		// flags that layout plumbs on every other public page.
+		const { sqlite, db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'landingLayout', value: 'threePath' });
+
+		let data = await loadSplash(platform);
+		expect(data.stickersEnabled).toBe(false);
+		expect(data.collectionsEnabled).toBe(false);
+
+		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (1)').run();
+		sqlite.prepare("INSERT INTO collections (name, slug) VALUES ('C', 'c')").run();
+		data = await loadSplash(platform);
+		expect(data.stickersEnabled).toBe(true);
+		expect(data.collectionsEnabled).toBe(true);
 	});
 
 	it('shows the /share card with only a contact email', async () => {

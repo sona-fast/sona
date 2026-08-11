@@ -78,6 +78,7 @@ type GalleryData = {
 	filters: { artist: string };
 	images: unknown[];
 	degraded: boolean;
+	fursuitEnabled: boolean;
 	vrEnabled: boolean;
 	stickersEnabled: boolean;
 };
@@ -223,6 +224,22 @@ describe('gallery load — VR Avatars tab visibility', () => {
 		// published -> shown
 		await db.run(sqlq`INSERT INTO vr_avatars (published) VALUES (1)`);
 		expect((await loadData(platform)).vrEnabled).toBe(true);
+	});
+});
+
+describe('gallery load — degraded fallback', () => {
+	it('fails CLOSED on every content-gated pill (deliberately diverging from the nav probes)', async () => {
+		const { db, platform } = makeDb();
+		// Force build() to reject (withTimeout falls back on rejection as well as
+		// timeout): its first query reads artists, so dropping that table degrades
+		// the load without waiting out the 9s cap.
+		await db.run(sqlq`DROP TABLE artists`);
+
+		const data = await loadData(platform);
+		expect(data.degraded).toBe(true);
+		expect(data.fursuitEnabled).toBe(false);
+		expect(data.stickersEnabled).toBe(false);
+		expect(data.vrEnabled).toBe(false);
 	});
 });
 

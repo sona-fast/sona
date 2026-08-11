@@ -43,6 +43,11 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const degraded = {
 		view: 'artwork' as const,
 		fursuitEnabled: false,
+		// Fail-closed like fursuitEnabled above — deliberately diverging from the
+		// nav probes' fail-open rule: the degraded gallery hides the content-gated
+		// pills while the header keeps the sections reachable.
+		stickersEnabled: false,
+		vrEnabled: false,
 		fursuitPhotos: [] as FursuitPhoto[],
 		fursuitPhotographers: [] as string[],
 		fursuitEvents: [] as string[],

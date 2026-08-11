@@ -9,7 +9,11 @@
 
 <div class="public-layout">
 	<div class="desktop-header">
-		<Header siteName={data.settings.siteName} />
+		<Header
+			siteName={data.settings.siteName}
+			stickersEnabled={data.stickersEnabled}
+			collectionsEnabled={data.collectionsEnabled}
+		/>
 	</div>
 	<main>
 		{@render children()}
@@ -18,7 +22,7 @@
 		<Footer settings={data.settings} host={data.host} />
 	</div>
 	<MobileCredit host={data.host} />
-	<MobileNav />
+	<MobileNav stickersEnabled={data.stickersEnabled} />
 </div>
 
 <style>

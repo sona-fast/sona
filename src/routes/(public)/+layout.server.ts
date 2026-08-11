@@ -1,5 +1,7 @@
 import { getReadDb } from '$lib/server/db';
 import { getSettings, settingsFallback } from '$lib/server/settings';
+import { stickerTabEnabled } from '$lib/server/stickers';
+import { collectionsNavEnabled } from '$lib/server/collections';
 import { withTimeout } from '$lib/server/timeout';
 import type { LayoutServerLoad } from './$types';
 
@@ -11,9 +13,19 @@ export const load: LayoutServerLoad = async ({ platform, url }) => {
 	// Read-only public path: serve from a read replica (when enabled) and from the
 	// per-isolate settings cache, so this is usually a zero-round-trip load.
 	const db = getReadDb(platform!.env.DB);
-	const settings = await withTimeout(getSettings(db), SETTINGS_TIMEOUT_MS, settingsFallback());
+	// Nav gating: the header and mobile nav hide the Stickers/Collections links
+	// while those sections have no published content (same probes as the tab-bar
+	// pills; About/Gallery always show). Each probe rides the settings cap and
+	// fails OPEN (link shown) on timeout or error — a dead link during a
+	// transient D1 blip beats hiding sections of a healthy site (same rule as
+	// the homepage's path-card probes).
+	const [settings, stickersEnabled, collectionsEnabled] = await Promise.all([
+		withTimeout(getSettings(db), SETTINGS_TIMEOUT_MS, settingsFallback()),
+		withTimeout(stickerTabEnabled(db), SETTINGS_TIMEOUT_MS, true),
+		withTimeout(collectionsNavEnabled(db), SETTINGS_TIMEOUT_MS, true)
+	]);
 	// The site's own public host, used to attribute the "made with sona" footer
 	// badge back to this fork (sona.fast/?ref=<host>). Derived per-request so each
 	// fork sends its own domain with no extra config.
-	return { settings, host: url.host };
+	return { settings, host: url.host, stickersEnabled, collectionsEnabled };
 };

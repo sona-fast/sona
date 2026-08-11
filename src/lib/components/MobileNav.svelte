@@ -4,14 +4,19 @@
 	import { getTheme } from '$lib/theme.svelte';
 	import * as m from '$lib/paraglide/messages';
 
+	let { stickersEnabled = true }: { stickersEnabled?: boolean } = $props();
+
 	const theme = getTheme();
 
-	const tabs = [
+	// The Stickers tab is content-gated like the header's link: hidden while no
+	// published pack exists. The default fails OPEN so a caller passing no flag
+	// (e.g. the admin shell) keeps every tab.
+	const tabs = $derived([
 		{ href: '/', label: m.nav_home, icon: Home },
 		{ href: '/gallery', label: m.nav_gallery, icon: LayoutGrid },
-		{ href: '/stickers', label: m.nav_stickers, icon: Sticker },
+		...(stickersEnabled ? [{ href: '/stickers', label: m.nav_stickers, icon: Sticker }] : []),
 		{ href: '/about', label: m.nav_about, icon: User }
-	];
+	]);
 
 	function isActive(href: string, pathname: string): boolean {
 		if (href === '/') return pathname === '/';
