@@ -73,7 +73,9 @@ test('the model section links to the export guide', async ({ page }) => {
 
 	// Entry point to /admin/vr/guide (SONA-162): sits right below the
 	// model-format hint, on both /new and /[id]/edit via the shared form.
-	const link = page.getByRole('link', { name: 'How to export a VRM from VRChat' });
+	// Partial match: the accessible name carries the sr-only "(opens in a new
+	// tab)" suffix.
+	const link = page.getByRole('link', { name: /How to export a VRM from VRChat/ });
 	await expect(link).toBeVisible();
 	await expect(link).toHaveAttribute('href', '/admin/vr/guide');
 	// New tab: a docs link must not navigate away from a half-filled form.

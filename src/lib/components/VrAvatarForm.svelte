@@ -631,7 +631,7 @@
 			     half-filled form. -->
 			<a class="guide-link" href="/admin/vr/guide" target="_blank" rel="noopener">
 				<BookOpen size={15} aria-hidden="true" />
-				{m.admin_vr_guide_link()}
+				{m.admin_vr_guide_link()}<span class="sr-only"> {m.link_opens_new_tab()}</span>
 			</a>
 		</div>
 		<input type="hidden" name="modelUrl" value={modelUrl} />

@@ -19,7 +19,23 @@ test('the guide renders its heading and the measured blendshape numbers', async 
 		page.getByRole('heading', { name: 'Export your VRChat avatar as a VRM' })
 	).toBeVisible();
 
-	// The verified measurement pair from the blendshape step — the guide's core
+	// The document title composes the guide title with the site name, like the
+	// public routes — not the root layout's bare site name.
+	await expect(page).toHaveTitle(/Export your VRChat avatar as a VRM/);
+
+	// The round-1 a11y remediation, pinned: each step heading's accessible name
+	// carries the sr-only "Step {n}." prefix, and the steps list keeps list
+	// semantics (explicit role="list" — list-style:none strips the implicit
+	// role in Safari/VoiceOver).
+	await expect(
+		page.getByRole('heading', { name: /Step 1\. Work in a copy of your project/ })
+	).toBeVisible();
+	await expect(page.getByRole('heading', { name: /Step 4\./ })).toBeVisible();
+	await expect(
+		page.getByRole('list').filter({ has: page.locator('.step') }).getByRole('listitem')
+	).toHaveCount(6);
+
+	// The verified measurements from the blendshape step — the guide's core
 	// claim (the values are pinned in src/lib/vr-guide-copy.test.ts; this
 	// asserts each number renders IN ITS OWN row, not merely somewhere on the
 	// page).
@@ -29,6 +45,9 @@ test('the guide renders its heading and the measured blendshape numbers', async 
 	await expect(
 		page.locator('.numbers > div', { hasText: 'Export, all blendshapes' })
 	).toContainText('147.85 MB');
+	await expect(
+		page.locator('.numbers > div', { hasText: 'Textures (3 × 2048²), either way' })
+	).toContainText('~5 MB');
 
 	// The step-4 size limit interpolates the real cap from $lib/vr — the page
 	// must show the formatted number, never the raw {max} token.
@@ -52,6 +71,22 @@ test('the guide does not force horizontal scroll on a 320px viewport', async ({ 
 	// The step-2 menu-path chip used to be nowrap and pushed scrollWidth to
 	// ~404px at this width — the whole document must fit.
 	await expect(page.getByRole('heading', { name: 'Export your VRChat avatar as a VRM' })).toBeVisible();
+	const fits = await page.evaluate(
+		() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth
+	);
+	expect(fits).toBe(true);
+});
+
+test('the JA guide does not force horizontal scroll on a 320px viewport either', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	// The paraglide locale cookie (src/lib/paraglide/runtime.js cookieName)
+	// switches the SSR locale — JA line-wrapping (kinsoku, long katakana runs)
+	// is a separate overflow risk from the EN chip case above.
+	await page.context().addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+	await page.setViewportSize({ width: 320, height: 800 });
+	await page.goto('/admin/vr/guide');
+
+	await expect(page.getByRole('heading', { name: 'VRChatアバターをVRMとして書き出す' })).toBeVisible();
 	const fits = await page.evaluate(
 		() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth
 	);

@@ -31,6 +31,7 @@ describe('VR guide blendshape step', () => {
 	it('the component keeps the measured before/after sizes', () => {
 		expect(pageSource).toContain('147.85 MB');
 		expect(pageSource).toContain('7.28 MB');
+		expect(pageSource).toContain('~5 MB');
 	});
 });
 

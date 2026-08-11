@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ArrowLeft, Info, AlertTriangle } from 'lucide-svelte';
+	import { page as pageState } from '$app/state';
 	import { MAX_VR_MODEL_BYTES, formatBytes } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
@@ -7,13 +8,6 @@
 	// what the upload endpoint actually enforces. Renders as "50.0 MB" —
 	// formatBytes' one-decimal form, matching the dropzone.
 	const maxModel = formatBytes(MAX_VR_MODEL_BYTES);
-
-	// The measured export sizes from the verified end-to-end run (step 4's
-	// table). Locale-identical constants, so they live here rather than as
-	// per-locale catalogue entries; the row LABELS stay translated.
-	const sizeAllBlendshapes = '147.85 MB';
-	const sizeStripped = '7.28 MB';
-	const sizeTextures = '~5 MB';
 
 	// Localized paragraphs carry two inline markers the catalogue can't express
 	// as plain strings: `…` for Unity paths/shader names (mono chip, untranslated
@@ -50,6 +44,12 @@
 	];
 </script>
 
+<svelte:head>
+	<!-- Same title composition as the public routes ((public)/vr/+page.svelte):
+	     page title — site name, overriding the root layout's bare site name. -->
+	<title>{m.admin_vr_guide_title()} — {pageState.data.siteName}</title>
+</svelte:head>
+
 {#snippet rich(text: string)}{#each segments(text) as seg}{#if seg.type === 'kbd'}<span class="kbd-path">{seg.text}</span>{:else if seg.type === 'strong'}<strong>{seg.text}</strong>{:else}{seg.text}{/if}{/each}{/snippet}
 
 <div class="guide">
@@ -80,7 +80,9 @@
 	<p class="muted">{m.admin_vr_guide_wont_work()}</p>
 
 	<h2>{m.admin_vr_guide_steps_title()}</h2>
-	<ol class="steps">
+	<!-- Explicit role: list-style:none strips the implicit list semantics in
+	     Safari/VoiceOver. -->
+	<ol class="steps" role="list">
 		<li class="step">
 			<div class="step-num" aria-hidden="true">1</div>
 			<div>
@@ -111,10 +113,13 @@
 			<div>
 				<h3><span class="sr-only">{m.admin_vr_guide_step_prefix({ n: 4 })} </span>{m.admin_vr_guide_step4_title()}</h3>
 				<p>{m.admin_vr_guide_step4_p1()}</p>
+				<!-- The measured export sizes from the verified end-to-end run.
+				     Locale-identical, so they live inline rather than as per-locale
+				     catalogue entries; the row LABELS stay translated. -->
 				<div class="numbers">
-					<div><span>{m.admin_vr_guide_step4_row_all()}</span><span class="v">{sizeAllBlendshapes}</span></div>
-					<div class="hl"><span>{m.admin_vr_guide_step4_row_stripped()}</span><span class="v">{sizeStripped}</span></div>
-					<div><span>{m.admin_vr_guide_step4_row_textures()}</span><span class="v">{sizeTextures}</span></div>
+					<div><span>{m.admin_vr_guide_step4_row_all()}</span><span class="v">147.85 MB</span></div>
+					<div class="hl"><span>{m.admin_vr_guide_step4_row_stripped()}</span><span class="v">7.28 MB</span></div>
+					<div><span>{m.admin_vr_guide_step4_row_textures()}</span><span class="v">~5 MB</span></div>
 				</div>
 				<p>{m.admin_vr_guide_step4_p2({ max: maxModel })}</p>
 			</div>
@@ -190,7 +195,7 @@
 
 	.callout {
 		display: flex; gap: 12px; background: var(--card); border: 1px solid var(--border);
-		border-left: 3px solid var(--primary); border-radius: var(--radius-s);
+		border-left: 3px solid var(--status-attention); border-radius: var(--radius-s);
 		padding: 16px 18px; margin: 0 0 34px; font-size: 14.5px;
 	}
 	.callout.warn { border-left-color: var(--destructive); }
@@ -203,7 +208,7 @@
 	p { max-width: 62ch; margin: 0 0 12px; line-height: 1.55; line-break: strict; }
 	ul { padding-left: 20px; margin: 0 0 12px; display: grid; gap: 7px; max-width: 60ch; }
 	li { line-height: 1.55; line-break: strict; }
-	li::marker { color: var(--primary); }
+	li::marker { color: var(--status-attention); }
 	.muted { color: var(--muted-foreground); }
 
 	/* CJK body text needs more leading than Latin at the same size. Scoped on
@@ -214,7 +219,7 @@
 
 	.kbd-path {
 		font-family: var(--font-primary); font-size: 0.86em; background: var(--secondary);
-		border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 2px 7px;
+		border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 2px 5px;
 		/* Wraps instead of nowrap: the step-2 menu path forced horizontal
 		   scroll at 320-390px viewports. */
 		white-space: normal; overflow-wrap: anywhere;
@@ -243,7 +248,9 @@
 	.numbers > div { display: flex; justify-content: space-between; gap: 24px; padding: 10px 16px; }
 	.numbers > div + div { border-top: 1px solid var(--border); }
 	.numbers span:first-child { color: var(--muted-foreground); }
-	.numbers .v { font-variant-numeric: tabular-nums; color: var(--foreground); }
+	/* nowrap: a value must never split number from unit — the label column
+	   absorbs any wrapping. */
+	.numbers .v { font-variant-numeric: tabular-nums; color: var(--foreground); white-space: nowrap; }
 	.numbers .hl .v { color: var(--status-attention); }
 
 	.trouble { border-top: 1px solid var(--border); margin-top: 8px; }
@@ -253,8 +260,9 @@
 		list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px;
 	}
 	.trouble summary::-webkit-details-marker { display: none; }
-	.trouble summary::after { content: '+'; font-family: var(--font-primary); color: var(--muted-foreground); }
-	.trouble details[open] summary::after { content: '–'; }
+	/* Empty alt-text: the marker is decorative, so AT must not announce "plus". */
+	.trouble summary::after { content: '+' / ''; font-family: var(--font-primary); color: var(--muted-foreground); }
+	.trouble details[open] summary::after { content: '–' / ''; }
 	.trouble summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.trouble .a { padding: 0 2px 16px; font-size: 14px; color: var(--muted-foreground); max-width: 60ch; line-break: strict; }
 
