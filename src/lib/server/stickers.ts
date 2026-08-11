@@ -153,6 +153,23 @@ async function artistMap(db: Database, ids: number[]): Promise<Map<number, Artis
 }
 
 /**
+ * Whether the public Stickers tab shows: at least one PUBLISHED pack exists
+ * (with zero, the pill stays out of every tab bar while /stickers itself keeps
+ * rendering its honest empty state). Mirrors vrTabEnabled — shared by the
+ * gallery and VR loads so the tab bars can never disagree. SELECT 1 … LIMIT 1
+ * existence probe; run it inside the callers' Promise.all (hot public pages).
+ */
+export async function stickerTabEnabled(db: Database): Promise<boolean> {
+	const row = await db
+		.select({ one: sql<number>`1` })
+		.from(stickerPacks)
+		.where(eq(stickerPacks.published, true))
+		.limit(1)
+		.get();
+	return row !== undefined;
+}
+
+/**
  * List packs as summaries (cover, character, credit, counts), newest first.
  * `publishedOnly` for the public section; admin passes false to see drafts.
  */

@@ -2,6 +2,7 @@ import { getReadDb } from '$lib/server/db';
 import { vrAvatars, avatarPlatforms, images, fursuitPhotos } from '$lib/server/db/schema';
 import { eq, desc, inArray, sql } from 'drizzle-orm';
 import { getMode } from '$lib/server/furtrack';
+import { stickerTabEnabled } from '$lib/server/stickers';
 import { externalSiteName, modelFormatLabel } from '$lib/vr';
 import type { PageServerLoad } from './$types';
 
@@ -40,10 +41,14 @@ export const load: PageServerLoad = async ({ platform }) => {
 	}
 
 	// Whether to show the Fursuit pill — gated on the FurTrack flag the same way
-	// the gallery and stickers pages are, so all tab bars agree.
-	const fursuitEnabled =
-		getMode(platform!.env) !== 'off' &&
-		((await db.select({ n: sql<number>`COUNT(*)` }).from(fursuitPhotos).get())?.n ?? 0) > 0;
+	// the gallery and stickers pages are, so all tab bars agree. The Stickers
+	// pill follows the shared stickerTabEnabled probe for the same reason.
+	const [fursuitEnabled, stickersEnabled] = await Promise.all([
+		(async () =>
+			getMode(platform!.env) !== 'off' &&
+			((await db.select({ n: sql<number>`COUNT(*)` }).from(fursuitPhotos).get())?.n ?? 0) > 0)(),
+		stickerTabEnabled(db)
+	]);
 
 	const avatars = rows.map((r) => {
 		const hasModel = !!r.modelUrl;
@@ -62,5 +67,5 @@ export const load: PageServerLoad = async ({ platform }) => {
 		};
 	});
 
-	return { avatars, total: avatars.length, fursuitEnabled };
+	return { avatars, total: avatars.length, fursuitEnabled, stickersEnabled };
 };

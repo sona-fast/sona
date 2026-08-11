@@ -27,6 +27,7 @@ function makeDb() {
 			nsfw INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE TABLE fursuit_photos (id INTEGER PRIMARY KEY AUTOINCREMENT);
+		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 	`);
 	const d1 = makeD1(sqlite);
 	return { sqlite, platform: { env: { DB: d1 } } as unknown as App.Platform };
@@ -71,6 +72,7 @@ type IndexData = {
 		externalName: string | null;
 	}>;
 	total: number;
+	stickersEnabled: boolean;
 };
 
 async function loadData(platform: App.Platform): Promise<IndexData> {
@@ -86,6 +88,17 @@ describe('/vr index load', () => {
 		const data = await loadData(platform);
 		expect(data.avatars.map((a) => a.slug)).toEqual(['live']);
 		expect(data.total).toBe(1);
+	});
+
+	it('gates the Stickers pill on a published pack existing (shared probe)', async () => {
+		const { sqlite, platform } = makeDb();
+		addAvatar(sqlite, { slug: 'live' });
+		// zero packs, then a draft -> hidden; a published pack -> shown
+		expect((await loadData(platform)).stickersEnabled).toBe(false);
+		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (0)').run();
+		expect((await loadData(platform)).stickersEnabled).toBe(false);
+		sqlite.prepare('INSERT INTO sticker_packs (published) VALUES (1)').run();
+		expect((await loadData(platform)).stickersEnabled).toBe(true);
 	});
 
 	it('joins the poster image and groups platform badges per avatar', async () => {

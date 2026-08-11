@@ -131,7 +131,9 @@
 				{m.gallery_view_fursuit()}
 			</button>
 		{/if}
-		<a href="/stickers" class="tab">{m.gallery_view_stickers()}</a>
+		{#if data.stickersEnabled}
+			<a href="/stickers" class="tab">{m.gallery_view_stickers()}</a>
+		{/if}
 		{#if data.vrEnabled}
 			<a href="/vr" class="tab">{m.gallery_view_vr()}</a>
 		{/if}

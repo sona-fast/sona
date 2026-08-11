@@ -39,6 +39,7 @@ function makeDb() {
 		CREATE TABLE image_characters (image_id INTEGER NOT NULL, character_id INTEGER NOT NULL);
 		CREATE TABLE fursuit_photos (id INTEGER PRIMARY KEY AUTOINCREMENT);
 		CREATE TABLE vr_avatars (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
+		CREATE TABLE sticker_packs (id INTEGER PRIMARY KEY AUTOINCREMENT, published INTEGER NOT NULL DEFAULT 1);
 	`);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
@@ -78,6 +79,7 @@ type GalleryData = {
 	images: unknown[];
 	degraded: boolean;
 	vrEnabled: boolean;
+	stickersEnabled: boolean;
 };
 
 async function loadData(platform: App.Platform, query = ''): Promise<GalleryData> {
@@ -221,5 +223,23 @@ describe('gallery load — VR Avatars tab visibility', () => {
 		// published -> shown
 		await db.run(sqlq`INSERT INTO vr_avatars (published) VALUES (1)`);
 		expect((await loadData(platform)).vrEnabled).toBe(true);
+	});
+});
+
+describe('gallery load — Stickers tab visibility', () => {
+	it('hides the tab with zero published packs', async () => {
+		const { platform } = makeDb();
+		const data = await loadData(platform);
+		expect(data.stickersEnabled).toBe(false);
+	});
+
+	it('shows the tab once a published pack exists, but not for drafts', async () => {
+		const { db, platform } = makeDb();
+		// draft only -> still hidden
+		await db.run(sqlq`INSERT INTO sticker_packs (published) VALUES (0)`);
+		expect((await loadData(platform)).stickersEnabled).toBe(false);
+		// published -> shown
+		await db.run(sqlq`INSERT INTO sticker_packs (published) VALUES (1)`);
+		expect((await loadData(platform)).stickersEnabled).toBe(true);
 	});
 });

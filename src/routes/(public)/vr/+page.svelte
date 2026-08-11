@@ -35,7 +35,9 @@
 		{#if data.fursuitEnabled}
 			<a href="/gallery?view=fursuit" class="tab">{m.gallery_view_fursuit()}</a>
 		{/if}
-		<a href="/stickers" class="tab">{m.gallery_view_stickers()}</a>
+		{#if data.stickersEnabled}
+			<a href="/stickers" class="tab">{m.gallery_view_stickers()}</a>
+		{/if}
 		<span class="tab active" aria-current="page">{m.gallery_view_vr()}</span>
 	</div>
 
