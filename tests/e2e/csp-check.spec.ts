@@ -86,9 +86,12 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	// trip CSP. adminLogin navigates to /admin/login itself, so this loads that page
 	// twice on purpose: once to inspect, once to log in through. Two widget solves,
 	// each pulling api.js over the network, is most of why this test needs test.slow().
+	// realTurnstile: this spec is the ONE place the genuine widget still runs — its
+	// challenge iframe is the only thing exercising `frame-src
+	// challenges.cloudflare.com`; every other spec gets the network-free stub.
 	await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
 	all.push(...(await drain(page)));
-	await adminLogin(page, PASSWORD);
+	await adminLogin(page, PASSWORD, { realTurnstile: true });
 	all.push(...(await drain(page)));
 
 	// Confirm the client actually hydrated (so the hydration script-src path was
@@ -111,7 +114,7 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 test('/admin/upload can load a blob: image, so picked files keep their dimensions', async ({
 	page
 }) => {
-	// One login through a Turnstile solve.
+	// One login through a real Turnstile solve (realTurnstile — see above).
 	test.slow();
 
 	// admin/upload mints blob: URLs from every picked file (+page.svelte:63 and :115):
@@ -126,7 +129,7 @@ test('/admin/upload can load a blob: image, so picked files keep their dimension
 	// CSP on this exact page permits the blob: image load that getImageDimensions
 	// depends on, with no coupling to the upload page's internal markup or to the R2
 	// binding. Drop blob: from img-src and this fails with 'onerror (blocked)'.
-	await adminLogin(page, PASSWORD);
+	await adminLogin(page, PASSWORD, { realTurnstile: true });
 	const resp = await page.goto('/admin/upload', { waitUntil: 'domcontentloaded' });
 
 	const imgSrc = (resp?.headers()['content-security-policy'] ?? '')
