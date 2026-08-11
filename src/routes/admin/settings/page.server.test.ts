@@ -7,6 +7,7 @@ import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import { getRawSetting, setRawSetting, parseLines } from '$lib/server/settings';
+import { stickerTabEnabled, clearStickerTabCache } from '$lib/server/stickers';
 import { MAX_SONA_COLORS } from '$lib/palette-merge';
 import { DEFAULT_THEME_ID } from '$lib/themes';
 import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
@@ -1090,9 +1091,19 @@ describe('deleteAll — every content table in the backup is wiped', () => {
 		sqlite.prepare('INSERT INTO image_tags (image_id, tag_id) VALUES (1, 1)').run();
 		sqlite.prepare('INSERT INTO image_characters (image_id, character_id) VALUES (1, 1)').run();
 
-		const platform = { env: { DB: makeD1(sqlite) } } as unknown as App.Platform;
+		const d1 = makeD1(sqlite);
+		const platform = { env: { DB: d1 } } as unknown as App.Platform;
+		// Prime a nav-probe cache with pre-wipe truth: a published pack exists.
+		const probeDb = drizzle(d1, { schema });
+		clearStickerTabCache();
+		expect(await stickerTabEnabled(probeDb)).toBe(true);
+
 		const result = (await actions.deleteAll({ platform } as never)) as { success?: boolean };
 		expect(result).toMatchObject({ success: true });
+
+		// deleteAll must clear the per-isolate probe caches — without it, this
+		// still serves the primed `true` (a ghost Stickers pill) for up to the TTL.
+		expect(await stickerTabEnabled(probeDb)).toBe(false);
 
 		for (const table of [
 			'vr_avatars',

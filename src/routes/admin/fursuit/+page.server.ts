@@ -4,7 +4,12 @@ import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { characters, fursuitPhotos } from '$lib/server/db/schema';
 import { getMode } from '$lib/server/furtrack';
-import { getImportCandidates, importFursuitPhotos, fursuitPhotoFromRow } from '$lib/server/fursuit-import';
+import {
+	getImportCandidates,
+	importFursuitPhotos,
+	fursuitPhotoFromRow,
+	clearFursuitPhotosCache
+} from '$lib/server/fursuit-import';
 import type { ImportCandidate } from '$lib/server/fursuit-import';
 import { deleteFile } from '$lib/server/storage';
 import type { Actions, PageServerLoad } from './$types';
@@ -112,6 +117,9 @@ export const actions = {
 		// later and its license is still excluded, the admin will need to record
 		// permission again — intentional friction, matches "delete = revoke".
 		await db.delete(fursuitPhotos).where(eq(fursuitPhotos.id, id));
+		// Deleting the last photo must drop the Fursuit tab in this isolate now,
+		// not after the probe TTL.
+		clearFursuitPhotosCache();
 
 		try {
 			const settings = await getSettings(db);

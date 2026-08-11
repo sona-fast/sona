@@ -11,6 +11,10 @@ import {
 	parseSonaColors
 } from '$lib/server/settings';
 import { deleteOrphansAll, collectReferencedUrls } from '$lib/server/storage';
+import { clearVrTabCache } from '$lib/server/vr-gate';
+import { clearStickerTabCache } from '$lib/server/stickers';
+import { clearCollectionsNavCache } from '$lib/server/collections';
+import { clearFursuitPhotosCache } from '$lib/server/fursuit-import';
 import {
 	images,
 	artists,
@@ -723,6 +727,14 @@ export const actions = {
 		await db.delete(characters);
 		await db.delete(collections);
 		await db.delete(artists);
+
+		// The wiped tables feed the per-isolate nav/tab probe caches — clear them
+		// all so this isolate's nav drops the sections immediately (same convention
+		// as clearSettingsCache after a settings write).
+		clearVrTabCache();
+		clearStickerTabCache();
+		clearCollectionsNavCache();
+		clearFursuitPhotosCache();
 
 		// With no DB rows left, every stored object is an orphan — wipe both stores.
 		// Deliberately fail-soft: don't fail the wipe if storage cleanup errors

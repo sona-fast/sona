@@ -284,12 +284,17 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const result = await withTimeout(build(), GALLERY_TIMEOUT_MS, degraded);
 	if (!result.degraded) return result;
 	// Degraded path: swap in the real (bounded) pill probe results — the same
-	// predicate build() uses, so a fursuit-only fork keeps its tab bar too.
+	// predicate build() uses, so a fursuit-only fork keeps its tab bar too. And
+	// derive `view` exactly like build() does: with fursuitEnabled true, a
+	// degraded /gallery?view=fursuit must keep the Fursuit tab active (over the
+	// empty photo arrays above) rather than render a mismatched Artwork state.
 	const [vrEnabled, stickersEnabled, fursuitHasPhotos] = await navProbes;
+	const fursuitEnabled = getMode(platform!.env) !== 'off' && fursuitHasPhotos;
 	return {
 		...result,
+		view: fursuitEnabled && url.searchParams.get('view') === 'fursuit' ? ('fursuit' as const) : ('artwork' as const),
 		vrEnabled,
 		stickersEnabled,
-		fursuitEnabled: getMode(platform!.env) !== 'off' && fursuitHasPhotos
+		fursuitEnabled
 	};
 };

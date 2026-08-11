@@ -84,6 +84,7 @@ type GalleryData = {
 	formerName: { searched: string; current: string } | null;
 	filters: { artist: string };
 	images: unknown[];
+	view: 'artwork' | 'fursuit';
 	degraded: boolean;
 	fursuitEnabled: boolean;
 	vrEnabled: boolean;
@@ -267,6 +268,27 @@ describe('gallery load — degraded fallback', () => {
 		const data = await loadData(platform);
 		expect(data.degraded).toBe(true);
 		expect(data.fursuitEnabled).toBe(true);
+	});
+
+	it('derives view like build() — a degraded ?view=fursuit keeps the Fursuit tab active', async () => {
+		// With fursuitEnabled true, hardcoding view:'artwork' would render the
+		// Artwork grid under a highlighted Fursuit pill. Same derivation as the
+		// healthy path; without the enabled half, the view falls back to artwork.
+		const { db, platform } = makeDb({ FURTRACK_MODE: 'mock' });
+		await db.run(sqlq`INSERT INTO fursuit_photos (id) VALUES (1)`);
+		await db.run(sqlq`DROP TABLE artists`);
+
+		const data = await loadData(platform, '?view=fursuit');
+		expect(data.degraded).toBe(true);
+		expect(data.view).toBe('fursuit');
+
+		// Feature off: same query string must NOT select a tab that isn't shown.
+		const off = makeDb();
+		await off.db.run(sqlq`INSERT INTO fursuit_photos (id) VALUES (1)`);
+		await off.db.run(sqlq`DROP TABLE artists`);
+		const offData = await loadData(off.platform, '?view=fursuit');
+		expect(offData.degraded).toBe(true);
+		expect(offData.view).toBe('artwork');
 	});
 
 	it('fails CLOSED when the fursuit probe itself errors (a dead Fursuit tab has no page behind it)', async () => {

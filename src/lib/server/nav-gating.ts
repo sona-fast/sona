@@ -20,22 +20,30 @@ export const PROBE_TIMEOUT_MS = 3000;
  * Short-TTL per-isolate cache scaffold for the nav-content probes, same
  * pattern as the settings cache (settings.ts): each probe runs on every
  * public request via the layout/tab-bar loads, and "does published content
- * exist" changes rarely. Write paths call clear() so the SAME isolate updates
- * immediately; other isolates converge within the TTL. Errors are never
- * cached — a rejection propagates to the caller's fallback and the next
- * request retries.
+ * exist" changes rarely. Write paths call clear() so this isolate drops the
+ * stale value immediately; other isolates converge within the TTL. One caveat:
+ * public loads probe via getReadDb (first-unconstrained session) while admin
+ * writes hit the primary, so on a fork with read replication the post-clear
+ * re-probe can read replica-lagged truth and cache it for a TTL — accepted,
+ * it self-heals on expiry. Errors are never cached — a rejection propagates
+ * to the caller's fallback and the next request retries.
  */
 export function cachedProbe(fn: (db: Database) => Promise<boolean>, ttlMs: number) {
 	let cache: { value: boolean; expires: number } | null = null;
+	// Bumped by clear(): a probe that was already awaiting fn(db) when a write
+	// cleared the cache must not re-cache its (pre-write) result on resolve.
+	let generation = 0;
 	return {
 		async probe(db: Database): Promise<boolean> {
 			if (cache && cache.expires > Date.now()) return cache.value;
+			const startedIn = generation;
 			const value = await fn(db);
-			cache = { value, expires: Date.now() + ttlMs };
+			if (generation === startedIn) cache = { value, expires: Date.now() + ttlMs };
 			return value;
 		},
 		clear() {
 			cache = null;
+			generation++;
 		}
 	};
 }

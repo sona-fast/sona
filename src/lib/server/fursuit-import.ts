@@ -19,8 +19,8 @@ import type { FursuitPhoto } from '$lib/furtrack/types';
 type FursuitPhotoRow = typeof fursuitPhotos.$inferSelect;
 
 // Short-TTL per-isolate cache — see cachedProbe (nav-gating.ts) for the
-// rationale. No write-side clear: photos only arrive through the rare admin
-// import flow, so isolates just converge within the TTL.
+// rationale; the write paths (importFursuitPhotos below, the admin delete
+// action, deleteAll) clear it.
 const fursuitPhotosProbe = cachedProbe(async (db) => {
 	const row = await db.select({ one: sql<number>`1` }).from(fursuitPhotos).limit(1).get();
 	return row !== undefined;
@@ -229,6 +229,9 @@ export async function importFursuitPhotos(opts: {
 			result.items.push({ postId: photo.id, status: 'failed', error: e instanceof Error ? e.message : String(e) });
 		}
 	}
+
+	// Same-isolate immediacy for the Fursuit tab probe; other isolates converge by TTL.
+	if (result.imported > 0) clearFursuitPhotosCache();
 
 	return result;
 }
