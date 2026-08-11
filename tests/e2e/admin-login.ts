@@ -6,17 +6,19 @@ import { expect, type Page } from '@playwright/test';
 // stubTurnstile() intercepts api.js and serves a tiny stand-in that injects the
 // hidden `cf-turnstile-response` input (the real widget owns that input — the
 // app only renders the empty `.turnstile` container) and fires the callback
-// synchronously. The TEST secret verifies ANY token as success, so the login
-// action still runs the full enforced path — real server-side siteverify
-// included — without the flaky browser round-trip to challenges.cloudflare.com
-// that used to time this wait out on CI runners.
+// synchronously. The stub removes only the BROWSER-side widget round-trip — the
+// api.js load + challenge solve that used to time this wait out on CI runners.
+// The login action still runs the full enforced path: the server-side siteverify
+// POST to challenges.cloudflare.com happens on EVERY login, stubbed or not, so
+// outbound access is still required. The TEST secret verifies ANY token as
+// success.
 //
-// csp-check.spec.ts opts OUT via `{ realTurnstile: true }`: the challenge
-// iframe of the real widget is the only thing exercising the
-// `frame-src challenges.cloudflare.com` CSP directive, so that one spec keeps
-// the genuine script. Everything under `realTurnstile` still depends on
-// outbound access to challenges.cloudflare.com — a network-restricted CI hangs
-// there, which is exactly why the stub is the default everywhere else.
+// csp-check.spec.ts's first test opts OUT via `{ realTurnstile: true }`: the
+// real widget's challenge iframe is the only RUNTIME coverage of the
+// `frame-src challenges.cloudflare.com` CSP directive (src/csp-config.test.ts:68
+// already guards the directive declaratively). That one test therefore keeps the
+// genuine script — and its dependence on a reachable challenges.cloudflare.com,
+// which is exactly why the stub is the default everywhere else.
 //
 // We gate on the SSR-rendered `.turnstile` container div, which is in the initial
 // HTML whenever a sitekey is configured — NOT on the `cf-turnstile-response` input,
@@ -27,13 +29,13 @@ import { expect, type Page } from '@playwright/test';
 // Serves in place of turnstile/v0/api.js. Mirrors the real widget's contract as
 // the login page uses it (src/routes/admin/login/+page.svelte): render() injects
 // the hidden response input into the container and fires `callback`; reset()
-// re-issues a fresh token (the page calls it after every submit via use:enhance,
-// so a no-op here would strand a retrying spec with a disabled submit button).
+// re-issues a fresh token (the page calls it after every submit via use:enhance —
+// siteverify consumes the single-use token, so the wrong-password retry in
+// login-retry.spec.ts needs a fresh one to re-enable the submit button).
 // Tokens are unique per issue so nothing ever hinges on the TEST secret
 // tolerating token reuse.
 const TURNSTILE_STUB = `window.turnstile = (() => {
-	const widgets = {};
-	let widgetSeq = 0;
+	let widget;
 	let tokenSeq = 0;
 	const issue = (w) => {
 		w.input.value = 'e2e-stub-token-' + ++tokenSeq;
@@ -41,6 +43,9 @@ const TURNSTILE_STUB = `window.turnstile = (() => {
 	};
 	return {
 		render(el, opts) {
+			// Reuse an existing input rather than appending a duplicate: paraglide HMR
+			// has been observed remounting the login page repeatedly with the container
+			// element persisting, and stacked hidden inputs would shadow each other.
 			let input = el.querySelector('input[name="cf-turnstile-response"]');
 			if (!input) {
 				input = document.createElement('input');
@@ -48,17 +53,17 @@ const TURNSTILE_STUB = `window.turnstile = (() => {
 				input.name = 'cf-turnstile-response';
 				el.appendChild(input);
 			}
-			const id = 'stub-' + widgetSeq++;
-			widgets[id] = { input, opts };
-			issue(widgets[id]);
-			return id;
+			widget = { input, opts };
+			// No sitekey, no token: leave the input empty so adminLogin's toHaveValue
+			// wait fails legibly instead of masking broken sitekey wiring in
+			// +page.server.ts. Presence-only on purpose — no hardcoded key here.
+			if (opts && opts.sitekey) issue(widget);
+			return 'stub';
 		},
-		reset(id) {
-			const w = id === undefined ? Object.values(widgets)[0] : widgets[id];
-			if (w) issue(w);
-		},
-		remove(id) {
-			delete widgets[id];
+		reset() {
+			// Ignores its id argument and targets the latest render() — matching the
+			// real widget's no-arg reset, which acts on the most recent widget.
+			if (widget) issue(widget);
 		}
 	};
 })();`;
@@ -84,9 +89,14 @@ export async function adminLogin(
 	await page.goto('/admin/login');
 	await page.fill('input[name="password"]', password);
 	if (await page.locator('.turnstile').count()) {
-		await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveValue(/.+/, {
-			timeout: 15_000
-		});
+		// The stub prefix doubles as proof the stub is actually in effect: the real
+		// widget can never mint an `e2e-stub-token-` value, so a broken route glob
+		// or a dropped stubTurnstile() call fails loudly here instead of silently
+		// reverting to the flaky real widget.
+		await expect(page.locator('input[name="cf-turnstile-response"]')).toHaveValue(
+			opts.realTurnstile ? /.+/ : /^e2e-stub-token-/,
+			{ timeout: 15_000 }
+		);
 	}
 	await page.click('button[type="submit"]');
 	await page.waitForURL(/\/admin\/images/);

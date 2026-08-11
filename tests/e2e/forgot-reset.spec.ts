@@ -86,8 +86,8 @@ test('forgot → reset cookie-exchange → login with new password, no token reu
 	expect((await context.cookies()).find((c) => c.name === RESET_COOKIE)).toBeUndefined();
 
 	// The new password actually works (the reset wrote adminPasswordHash). The
-	// shared helper loads the login page cold and waits for the Turnstile widget to
-	// auto-solve before submitting.
+	// shared helper stubs the Turnstile widget and waits for the injected
+	// cf-turnstile-response value before submitting.
 	await adminLogin(page, NEW_PASSWORD);
 
 	// 5. The link can't be reused — the token row was consumed on success, so a

@@ -86,10 +86,20 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	// trip CSP. adminLogin navigates to /admin/login itself, so this loads that page
 	// twice on purpose: once to inspect, once to log in through. Two widget solves,
 	// each pulling api.js over the network, is most of why this test needs test.slow().
-	// realTurnstile: this spec is the ONE place the genuine widget still runs — its
-	// challenge iframe is the only thing exercising `frame-src
-	// challenges.cloudflare.com`; every other spec gets the network-free stub.
+	// realTurnstile: this test is the ONE place the genuine widget runs — its
+	// challenge iframe is the only RUNTIME coverage of the frame-src directive
+	// (full rationale in admin-login.ts).
 	await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
+	// The challenge iframe must actually attach — otherwise the frame-src runtime
+	// coverage passes vacuously when the widget silently fails to load. Checked via
+	// page.frames(), not a DOM locator: the widget mounts its iframe inside a
+	// CLOSED shadow root, which locators can't pierce.
+	await expect
+		.poll(() => page.frames().some((f) => f.url().includes('challenges.cloudflare.com')), {
+			timeout: 15_000,
+			message: 'real Turnstile challenge iframe never attached'
+		})
+		.toBe(true);
 	all.push(...(await drain(page)));
 	await adminLogin(page, PASSWORD, { realTurnstile: true });
 	all.push(...(await drain(page)));
@@ -114,7 +124,8 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 test('/admin/upload can load a blob: image, so picked files keep their dimensions', async ({
 	page
 }) => {
-	// One login through a real Turnstile solve (realTurnstile — see above).
+	// Logs in through the Turnstile stub like every other spec (see admin-login.ts):
+	// this test collects no CSP violations, so the real widget would buy nothing here.
 	test.slow();
 
 	// admin/upload mints blob: URLs from every picked file (+page.svelte:63 and :115):
@@ -129,7 +140,7 @@ test('/admin/upload can load a blob: image, so picked files keep their dimension
 	// CSP on this exact page permits the blob: image load that getImageDimensions
 	// depends on, with no coupling to the upload page's internal markup or to the R2
 	// binding. Drop blob: from img-src and this fails with 'onerror (blocked)'.
-	await adminLogin(page, PASSWORD, { realTurnstile: true });
+	await adminLogin(page, PASSWORD);
 	const resp = await page.goto('/admin/upload', { waitUntil: 'domcontentloaded' });
 
 	const imgSrc = (resp?.headers()['content-security-policy'] ?? '')
