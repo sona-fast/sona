@@ -20,6 +20,9 @@ const PASSWORD = 'e2e-admin-password';
 test('wrong password shows the error, re-issues the token, and a retry logs in', async ({
 	page
 }) => {
+	// Two 15s waits (token issue, error render) plus two siteverify+PBKDF2 round
+	// trips can outgrow the default 30s budget on a cold runner.
+	test.slow();
 	await stubTurnstile(page);
 	await page.goto('/admin/login');
 
