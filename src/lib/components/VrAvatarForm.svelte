@@ -619,14 +619,21 @@
 				{/if}
 			</div>
 		{/if}
-		<p class="field-hint" id="vr-model-hint">{m.admin_vr_model_hint()}</p>
-		<!-- Entry point to the export walkthrough (SONA-162). A separate element
-		     after the hint — deliberately NOT part of the vr-model-hint
-		     aria-describedby wiring: it's navigation, not a description. -->
-		<a class="guide-link" href="/admin/vr/guide">
-			<BookOpen size={15} aria-hidden="true" />
-			{m.admin_vr_guide_link()}
-		</a>
+		<!-- One container for the hint + guide link so the pair reads as a unit
+		     against the section's 16px gap. The hint keeps its id — the file
+		     inputs' aria-describedby wiring points at it. -->
+		<div class="model-hint-group">
+			<p class="field-hint" id="vr-model-hint">{m.admin_vr_model_hint()}</p>
+			<!-- Entry point to the export walkthrough (SONA-162). A separate element
+			     after the hint — deliberately NOT part of the vr-model-hint
+			     aria-describedby wiring: it's navigation, not a description.
+			     Opens in a new tab: a docs link must not navigate away from a
+			     half-filled form. -->
+			<a class="guide-link" href="/admin/vr/guide" target="_blank" rel="noopener">
+				<BookOpen size={15} aria-hidden="true" />
+				{m.admin_vr_guide_link()}
+			</a>
+		</div>
 		<input type="hidden" name="modelUrl" value={modelUrl} />
 		<input type="hidden" name="modelFormat" value={modelFormat} />
 		<input type="hidden" name="modelSizeBytes" value={modelSizeBytes ?? ''} />
@@ -1043,10 +1050,14 @@
 	.upload-zone:has(.sr-file:focus-visible),
 	.btn-sm:has(.sr-file:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 
-	/* Guide link under the model-format hint (mock frame 1, SONA-162). */
+	/* Guide link under the model-format hint (mock frame 1, SONA-162). Grouped
+	   with the hint; 12px so it doesn't outrank the field labels.
+	   --status-attention, not --primary: small text in --primary computes
+	   2.20:1 on the default light background (tracks --primary in dark). */
+	.model-hint-group { display: flex; flex-direction: column; gap: 6px; }
 	.guide-link {
 		display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
-		font-size: 13px; color: var(--primary); text-decoration: none;
+		font-size: 12px; color: var(--status-attention); text-decoration: none;
 	}
 	.guide-link:hover { text-decoration: underline; }
 	.guide-link :global(svg) { flex: none; }

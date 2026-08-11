@@ -76,6 +76,9 @@ test('the model section links to the export guide', async ({ page }) => {
 	const link = page.getByRole('link', { name: 'How to export a VRM from VRChat' });
 	await expect(link).toBeVisible();
 	await expect(link).toHaveAttribute('href', '/admin/vr/guide');
+	// New tab: a docs link must not navigate away from a half-filled form.
+	await expect(link).toHaveAttribute('target', '_blank');
+	await expect(link).toHaveAttribute('rel', 'noopener');
 });
 
 test("poster picker cells stay square even when the button's aspect-ratio is ignored", async ({ page }) => {

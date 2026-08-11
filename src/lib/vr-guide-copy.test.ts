@@ -19,13 +19,57 @@ function guideEntries(locale: string): [string, string][] {
 	);
 }
 
+// The guide page component itself: the locale-identical measured sizes live
+// there as constants (not catalogue entries), and its markup decides which
+// messages go through the marker-rendering snippet.
+const pageSource = readFileSync(
+	fileURLToPath(new URL('../routes/admin/vr/guide/+page.svelte', import.meta.url)),
+	'utf8'
+);
+
 describe('VR guide blendshape step', () => {
-	it.each(['en', 'ja'])('%s keeps the measured before/after sizes', (locale) => {
-		const all = guideEntries(locale)
-			.map(([, value]) => value)
-			.join('\n');
-		expect(all).toContain('147.85');
-		expect(all).toContain('7.28');
+	it('the component keeps the measured before/after sizes', () => {
+		expect(pageSource).toContain('147.85 MB');
+		expect(pageSource).toContain('7.28 MB');
+	});
+});
+
+describe('VR guide size-limit interpolation', () => {
+	// The step-4 limit is interpolated from MAX_VR_MODEL_BYTES at render time —
+	// a locale string that loses its {max} placeholder would silently hardcode
+	// (or drop) the cap.
+	it.each(['en', 'ja'])('%s step4_p2 carries the {max} placeholder', (locale) => {
+		expect(messages(locale).admin_vr_guide_step4_p2).toContain('{max}');
+	});
+});
+
+describe('VR guide inline markers reach the rich renderer', () => {
+	// Any message carrying `…` or **…** markers must be rendered through the
+	// rich() snippet — plain {m.key()} would print the markers literally.
+	const rendered = new Set(
+		[...pageSource.matchAll(/@render rich\(m\.(\w+)\(\)\)/g)].map((match) => match[1])
+	);
+	it.each(['en', 'ja'])('%s marker-carrying keys are in the rich() set', (locale) => {
+		for (const [key, value] of guideEntries(locale)) {
+			if (value.includes('`') || value.includes('**')) {
+				expect(rendered.has(key), key).toBe(true);
+			}
+		}
+	});
+});
+
+describe('VR guide placeholder parity', () => {
+	// A {placeholder} present in one locale but not the other renders the raw
+	// token (or drops the value) for that locale's readers.
+	function tokens(value: string): string[] {
+		return [...value.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
+	}
+	it('en and ja agree on every guide key', () => {
+		const en = messages('en');
+		const ja = messages('ja');
+		for (const [key, value] of guideEntries('en')) {
+			expect(tokens(ja[key] ?? ''), key).toEqual(tokens(value));
+		}
 	});
 });
 
