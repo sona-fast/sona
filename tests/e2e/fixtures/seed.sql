@@ -95,6 +95,21 @@ VALUES
    NULL, NULL, NULL, 0, 0, 0, NULL, '2026-07-02T00:00:00.000Z'),
   (3, 'e2e-mature-poster', 'E2E Mature Poster', 1, '/img/vr-models/e2e-avatar.vrm', 'vrm', 1234567, 4,
    NULL, NULL, NULL, 0, 0, 1, NULL, '2026-06-30T00:00:00.000Z');
+
+-- Avatar 4 backs the vr-render spec: unlike avatar 1's 47-byte text stub, its
+-- model key serves the committed REAL fixture (tests/e2e/fixtures/
+-- e2e-textured.vrm, seeded into R2 by seed.ts) so the spec can click through
+-- "View in 3D" and drive the actual GLTFLoader + three-vrm texture path.
+-- Kept separate from e2e-avatar on purpose — the other specs depend on that
+-- slug's exact stub behavior. model_size_bytes matches the committed fixture;
+-- it only drives the loading-progress display, so drift is cosmetic. Poster
+-- reuses image 1 (SFW, published); no download fields so no download button.
+INSERT OR REPLACE INTO vr_avatars
+  (id, slug, name, character_id, model_url, model_format, model_size_bytes, poster_image_id,
+   external_url, license, permission_source, downloadable, nsfw, published, description, created_at)
+VALUES
+  (4, 'e2e-textured', 'E2E Textured Avatar', 1, '/img/vr-models/e2e-textured.vrm', 'vrm', 3224, 1,
+   NULL, NULL, NULL, 0, 0, 1, NULL, '2026-06-29T00:00:00.000Z');
 INSERT OR REPLACE INTO avatar_platforms (avatar_id, platform) VALUES (1, 'vrchat');
 
 -- Showcase media for avatar 1 (SONA-124 SP1): one image + one clip so the

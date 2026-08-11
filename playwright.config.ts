@@ -99,7 +99,14 @@ export default defineConfig({
 		// View Transitions animate the variant swap; reduce motion so assertions
 		// aren't racing a transition.
 		reducedMotion: 'reduce',
-		trace: 'on-first-retry'
+		trace: 'on-first-retry',
+		// WebGL for the vr-render spec: the GitHub Actions runner has no GPU, and
+		// headless chromium refuses software WebGL without an explicit opt-in.
+		// --use-angle=swiftshader routes ANGLE onto the bundled SwiftShader CPU
+		// rasterizer; --enable-unsafe-swiftshader is the opt-in newer Chromium
+		// builds additionally require (older builds ignore unknown flags, so the
+		// pair is safe across versions). Harmless for the non-WebGL specs.
+		launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
 	},
 	projects: [
 		{

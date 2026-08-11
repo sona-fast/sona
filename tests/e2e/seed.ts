@@ -70,6 +70,20 @@ function seed(): void {
 			`--config=${E2E_WRANGLER_CONFIG}`,
 			`--persist-to=${persistTo}`
 		]);
+		// Avatar 4 (e2e-textured) gets a REAL model: the committed minimal VRM with
+		// an embedded texture (see fixtures/generate-vr-fixture.mjs), so the
+		// vr-render spec can enter the 3D view and exercise the actual
+		// GLTFLoader + three-vrm parse/texture path the stub can't.
+		wrangler([
+			'r2',
+			'object',
+			'put',
+			'sona-e2e-images/vr-models/e2e-textured.vrm',
+			`--file=${path.join(repoRoot, 'tests/e2e/fixtures/e2e-textured.vrm')}`,
+			'--local',
+			`--config=${E2E_WRANGLER_CONFIG}`,
+			`--persist-to=${persistTo}`
+		]);
 	} finally {
 		rmSync(tmp, { recursive: true, force: true });
 	}
