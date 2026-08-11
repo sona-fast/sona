@@ -50,9 +50,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 		return {
 			slug: r.slug,
 			name: r.name,
-			// Effective flag: an NSFW-flagged gallery image used as the poster blurs
-			// the card even when the avatar itself isn't marked NSFW (poster is null
-			// on a leftJoin miss). Mirrors the detail loader.
+			// Effective public flag (avatar OR poster) — see the /vr/[slug] loader.
 			nsfw: r.nsfw || (r.posterNsfw ?? false),
 			posterUrl: r.posterThumbUrl || r.posterUrl,
 			platforms: platformsByAvatar[r.id] ?? [],

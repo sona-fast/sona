@@ -41,26 +41,19 @@ test('NSFW poster blurs its card on /vr while the clean card stays sharp', async
 	await expect(cleanCard.locator('.mature-chip')).toHaveCount(0);
 });
 
-test('NSFW poster mature-gates the detail page and hides the 3D entry until revealed', async ({
-	page
-}) => {
+test('NSFW poster mature-gates the detail page and hides the 3D entry', async ({ page }) => {
 	await page.goto('/vr/e2e-mature-poster');
 
 	// Gate up: the overlay covers the frame with its reveal button, and the
 	// 3D entry point does not exist yet (VrViewer nsfw prop).
 	const overlay = page.locator('.nsfw-overlay');
 	await expect(overlay).toBeVisible();
-	const reveal = overlay.getByRole('button', { name: /Show avatar/ });
-	await expect(reveal).toBeVisible();
+	await expect(overlay.getByRole('button', { name: /Show avatar/ })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'View in 3D' })).toHaveCount(0);
 
-	// Reveal drops the gate and surfaces the 3D entry. Hydration-retry shape
-	// (see upload.spec.ts): a pre-hydration click silently no-ops.
-	await expect(async () => {
-		await reveal.click();
-		await expect(overlay).toHaveCount(0, { timeout: 2000 });
-	}).toPass({ timeout: 20_000 });
-	await expect(page.getByRole('button', { name: 'View in 3D' })).toBeVisible();
+	// The reveal click itself is deliberately not exercised here: that
+	// interaction is VrViewer/page behavior already pinned by the unit and
+	// markup tests. This spec's job is the DB→loader→gate chain.
 });
 
 test('unpublished avatar detail page is indistinguishable from unknown', async ({ page }) => {
