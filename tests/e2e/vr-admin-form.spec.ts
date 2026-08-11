@@ -52,24 +52,15 @@ test('poster picker thumbnails render square, not cover-cropped slivers', async 
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/vr/new');
 
-	// Regression guard for the sliver bug: the cell's square shape must come
-	// from the IMG's aspect-ratio (replaced-element support), because browsers
-	// that ignore aspect-ratio on <button> collapsed the old height:100% img
-	// into a wide strip. Chromium honors both paths, so this pins the sizing
-	// chain staying intact rather than the cross-engine behavior itself — the
-	// engine half was verified manually in Firefox + Chromium at fix time.
+	// CI simulates an engine that ignores aspect-ratio on form controls (the
+	// override below) so the IMG's own aspect-ratio must hold the cell square;
+	// the sizing rationale lives on the .poster-option img rule in VrAvatarForm.
 	await page.waitForSelector('.poster-option img');
-	const boxes = await page.locator('.poster-option').evaluateAll((btns) =>
-		btns.slice(0, 4).map((b) => {
-			const r = b.getBoundingClientRect();
-			return { w: r.width, h: r.height };
-		})
-	);
-	expect(boxes.length).toBeGreaterThan(0);
-	for (const { w, h } of boxes) {
-		expect(w).toBeGreaterThan(40);
-		expect(Math.abs(w - h)).toBeLessThan(3);
-	}
+	await page.addStyleTag({ content: '.poster-option { aspect-ratio: auto !important; }' });
+	const box = await page.locator('.poster-option').first().boundingBox();
+	expect(box).not.toBeNull();
+	expect(box!.width).toBeGreaterThan(40);
+	expect(Math.abs(box!.width - box!.height)).toBeLessThan(1);
 });
 
 test('typing a name auto-suggests the slug until the slug is touched', async ({ page }) => {

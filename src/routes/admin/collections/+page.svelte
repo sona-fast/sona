@@ -452,9 +452,13 @@
 	}
 
 	.cover-option img {
+		/* Square via the img's own aspect-ratio, not height:100% — see the
+		   .poster-option img comment in VrAvatarForm.svelte. */
 		width: 100%;
-		height: 100%;
+		height: auto;
+		aspect-ratio: 1;
 		object-fit: cover;
+		display: block;
 	}
 
 	.modal-actions {
