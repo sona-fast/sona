@@ -1097,7 +1097,13 @@
 	}
 	.poster-option:hover { border-color: var(--border); }
 	.poster-option.selected { border-color: var(--primary); }
-	.poster-option img { width: 100%; height: 100%; object-fit: cover; display: block; }
+	/* The square comes from the IMG's aspect-ratio, not the button's alone:
+	   aspect-ratio on form controls shipped later than on replaced elements,
+	   and Firefox builds that ignore it on <button> collapsed the cell to a
+	   cover-cropped sliver (the img's old height:100% had nothing to resolve
+	   against). The button keeps its own aspect-ratio as a backstop for a
+	   broken/zero-size img; each rule covers the other's failure mode. */
+	.poster-option img { width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; display: block; }
 
 	.switch-rows { display: flex; flex-direction: column; gap: 14px; }
 	.switch-row { display: flex; align-items: center; gap: 12px; }
