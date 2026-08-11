@@ -9,21 +9,23 @@
 	// formatBytes' one-decimal form, matching the dropzone.
 	const maxModel = formatBytes(MAX_VR_MODEL_BYTES);
 
-	// Localized paragraphs carry two inline markers the catalogue can't express
+	// Localized paragraphs carry three inline markers the catalogue can't express
 	// as plain strings: `…` for Unity paths/shader names (mono chip, untranslated
-	// tokens) and **…** for the mock's bold runs. Splitting at render time keeps
-	// each paragraph ONE translatable message instead of brittle text fragments
+	// tokens), **…** for the mock's bold runs, and [text](https://…) for the one
+	// external link (UniVRM releases). Splitting at render time keeps each
+	// paragraph ONE translatable message instead of brittle text fragments
 	// interleaved with markup in locale-specific order. Markers do not nest.
-	type Segment = { type: 'text' | 'kbd' | 'strong'; text: string };
+	type Segment = { type: 'text' | 'kbd' | 'strong'; text: string } | { type: 'link'; text: string; href: string };
 	function segments(text: string): Segment[] {
 		const out: Segment[] = [];
-		const re = /`([^`]+)`|\*\*([^*]+)\*\*/g;
+		const re = /`([^`]+)`|\*\*([^*]+)\*\*|\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g;
 		let last = 0;
 		let match: RegExpExecArray | null;
 		while ((match = re.exec(text))) {
 			if (match.index > last) out.push({ type: 'text', text: text.slice(last, match.index) });
 			if (match[1] !== undefined) out.push({ type: 'kbd', text: match[1] });
-			else out.push({ type: 'strong', text: match[2] });
+			else if (match[2] !== undefined) out.push({ type: 'strong', text: match[2] });
+			else out.push({ type: 'link', text: match[3], href: match[4] });
 			last = re.lastIndex;
 		}
 		if (last < text.length) out.push({ type: 'text', text: text.slice(last) });
@@ -50,7 +52,7 @@
 	<title>{m.admin_vr_guide_title()} — {pageState.data.siteName}</title>
 </svelte:head>
 
-{#snippet rich(text: string)}{#each segments(text) as seg}{#if seg.type === 'kbd'}<span class="kbd-path">{seg.text}</span>{:else if seg.type === 'strong'}<strong>{seg.text}</strong>{:else}{seg.text}{/if}{/each}{/snippet}
+{#snippet rich(text: string)}{#each segments(text) as seg}{#if seg.type === 'kbd'}<span class="kbd-path">{seg.text}</span>{:else if seg.type === 'strong'}<strong>{seg.text}</strong>{:else if seg.type === 'link'}<a href={seg.href} target="_blank" rel="noopener">{seg.text}<span class="sr-only">{' '}{m.link_opens_new_tab()}</span></a>{:else}{seg.text}{/if}{/each}{/snippet}
 
 <div class="guide">
 	<a class="back-link" href="/admin/vr"><ArrowLeft size={15} aria-hidden="true" /> {m.admin_vr_back()}</a>

@@ -19,6 +19,15 @@ test('the guide renders its heading and the measured blendshape numbers', async 
 		page.getByRole('heading', { name: 'Export your VRChat avatar as a VRM' })
 	).toBeVisible();
 
+	// The one external link (rendered from the [text](https://…) marker): the
+	// UniVRM releases page, new-tab with the sr-only suffix in its name.
+	const univrm = page.getByRole('link', {
+		name: /the UniVRM releases page on GitHub \(opens in a new tab\)/
+	});
+	await expect(univrm).toBeVisible();
+	await expect(univrm).toHaveAttribute('href', 'https://github.com/vrm-c/UniVRM/releases');
+	await expect(univrm).toHaveAttribute('rel', 'noopener');
+
 	// The document title composes the guide title with the site name, like the
 	// public routes — not the root layout's bare site name.
 	await expect(page).toHaveTitle(/Export your VRChat avatar as a VRM/);

@@ -1282,7 +1282,7 @@
 	"admin_vr_guide_before_intro": "You need three things. Blender isn't one of them, and there's no modeling or code involved.",
 	"admin_vr_guide_before_project": "**The Unity project your avatar lives in.** If you bought a base and set it up yourself, this is what you have; your materials and textures are already assigned.",
 	"admin_vr_guide_before_unity": "**Unity 2022.3 LTS.** VRChat pins 2022.3.22f1 and UniVRM needs 2022.3 or later, so the two agree.",
-	"admin_vr_guide_before_univrm": "**UniVRM** (free). Download the .unitypackage from the UniVRM releases page on GitHub.",
+	"admin_vr_guide_before_univrm": "**UniVRM** (free). Download the .unitypackage from [the UniVRM releases page on GitHub](https://github.com/vrm-c/UniVRM/releases).",
 	"admin_vr_guide_wont_work": "What won't work: an FBX without its textures embedded (it renders untextured grey), and a .glb exported from another platform (it carries that platform's materials, not yours).",
 	"admin_vr_guide_steps_title": "The export, step by step",
 	"admin_vr_guide_step_prefix": "Step {n}.",

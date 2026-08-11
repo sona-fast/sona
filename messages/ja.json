@@ -1246,7 +1246,7 @@
 	"admin_vr_guide_before_intro": "必要なものは3つです。Blenderは含まれず、モデリングもコードも必要ありません。",
 	"admin_vr_guide_before_project": "**アバターが入っているUnityプロジェクト。**ベースを購入して自分でセットアップしたなら、それが手元にあるはずです。マテリアルとテクスチャはすでに割り当て済みです。",
 	"admin_vr_guide_before_unity": "**Unity 2022.3 LTS。**VRChatは2022.3.22f1を指定しており、UniVRMには2022.3以降が必要なので、両方の条件を同時に満たせます。",
-	"admin_vr_guide_before_univrm": "**UniVRM**（無料）。GitHubのUniVRMリリースページから.unitypackageをダウンロードしてください。",
+	"admin_vr_guide_before_univrm": "**UniVRM**（無料）。[GitHubのUniVRMリリースページ](https://github.com/vrm-c/UniVRM/releases)から.unitypackageをダウンロードしてください。",
 	"admin_vr_guide_wont_work": "うまくいかないもの: テクスチャが埋め込まれていないFBX（テクスチャなしのグレーで表示されます）と、別のプラットフォームから書き出した.glb（そのプラットフォームのマテリアルを引き継いでいて、あなたのものではありません）。",
 	"admin_vr_guide_steps_title": "書き出しの手順",
 	"admin_vr_guide_step_prefix": "ステップ{n}。",

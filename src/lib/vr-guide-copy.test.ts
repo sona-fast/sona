@@ -52,9 +52,16 @@ describe('VR guide inline markers reach the rich renderer', () => {
 	);
 	it.each(['en', 'ja'])('%s marker-carrying keys are in the rich() set', (locale) => {
 		for (const [key, value] of guideEntries(locale)) {
-			if (value.includes('`') || value.includes('**')) {
+			if (value.includes('`') || value.includes('**') || /\[[^\]]+\]\(https:/.test(value)) {
 				expect(rendered.has(key), key).toBe(true);
 			}
+		}
+	});
+
+	it('the UniVRM releases link survives in both locales', () => {
+		for (const locale of ['en', 'ja']) {
+			const value = Object.fromEntries(guideEntries(locale)).admin_vr_guide_before_univrm;
+			expect(value).toContain('](https://github.com/vrm-c/UniVRM/releases)');
 		}
 	});
 });

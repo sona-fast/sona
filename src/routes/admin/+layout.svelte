@@ -120,7 +120,7 @@
 								class="notice-link"
 								href="https://sona.fast/supporter-key"
 								target="_blank"
-								rel="noopener noreferrer">sona.fast/supporter-key<span class="sr-only"> {m.link_opens_new_tab()}</span></a
+								rel="noopener noreferrer">sona.fast/supporter-key<span class="sr-only">{' '}{m.link_opens_new_tab()}</span></a
 							>{m.admin_notice_supporter_mid()}<a class="notice-link" href="/admin/settings?tab=account"
 								>{m.admin_notice_supporter_settings_link()}</a
 							>{m.admin_notice_supporter_post()}
