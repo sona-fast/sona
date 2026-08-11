@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { flip } from 'svelte/animate';
-	import { ArrowLeft, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus, UserPlus } from 'lucide-svelte';
+	import { ArrowLeft, BookOpen, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus, UserPlus } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
@@ -620,6 +620,13 @@
 			</div>
 		{/if}
 		<p class="field-hint" id="vr-model-hint">{m.admin_vr_model_hint()}</p>
+		<!-- Entry point to the export walkthrough (SONA-162). A separate element
+		     after the hint — deliberately NOT part of the vr-model-hint
+		     aria-describedby wiring: it's navigation, not a description. -->
+		<a class="guide-link" href="/admin/vr/guide">
+			<BookOpen size={15} aria-hidden="true" />
+			{m.admin_vr_guide_link()}
+		</a>
 		<input type="hidden" name="modelUrl" value={modelUrl} />
 		<input type="hidden" name="modelFormat" value={modelFormat} />
 		<input type="hidden" name="modelSizeBytes" value={modelSizeBytes ?? ''} />
@@ -1035,6 +1042,14 @@
 	   visible hosts (same :has pattern as .platform-chip). */
 	.upload-zone:has(.sr-file:focus-visible),
 	.btn-sm:has(.sr-file:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+	/* Guide link under the model-format hint (mock frame 1, SONA-162). */
+	.guide-link {
+		display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+		font-size: 13px; color: var(--primary); text-decoration: none;
+	}
+	.guide-link:hover { text-decoration: underline; }
+	.guide-link :global(svg) { flex: none; }
 
 	.upload-progress { display: flex; flex-direction: column; gap: 6px; }
 	.progress-bar { height: 6px; border-radius: var(--radius-pill); background: var(--secondary); overflow: hidden; }

@@ -67,6 +67,17 @@ test('the ungated create form renders its fields, dropzones and credit control',
 	await expect(page.getByRole('checkbox', { name: 'Published' })).toBeAttached();
 });
 
+test('the model section links to the export guide', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/vr/new');
+
+	// Entry point to /admin/vr/guide (SONA-162): sits right below the
+	// model-format hint, on both /new and /[id]/edit via the shared form.
+	const link = page.getByRole('link', { name: 'How to export a VRM from VRChat' });
+	await expect(link).toBeVisible();
+	await expect(link).toHaveAttribute('href', '/admin/vr/guide');
+});
+
 test("poster picker cells stay square even when the button's aspect-ratio is ignored", async ({ page }) => {
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/vr/new');
