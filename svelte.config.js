@@ -47,10 +47,20 @@ const config = {
 				// (frame-src). The widget's own styles are injected inline, already
 				// covered by style-src 'unsafe-inline'; it needs no connect-src (its
 				// network runs inside the challenges.cloudflare.com frame).
+				// static.cloudflareinsights.com: the Web Analytics beacon Cloudflare
+				// auto-injects into proxied responses (SRI-pinned by the injected tag).
+				// Its RUM submission goes SAME-ORIGIN to /cdn-cgi/rum whenever the
+				// injected config carries a version field — which the auto-inject tag
+				// always does — so connect-src needs nothing. Do NOT "finish the job"
+				// by adding cloudflareinsights.com to connect-src: the beacon honors
+				// attacker-settable send.to/forward.url fields bounded only by
+				// connect-src, so that addition would hand injected content an
+				// exfiltration sink the 'self'-only policy exists to deny.
 				'script-src': [
 					'self',
 					'sha256-b+LZKZWtSdZmsS5XuXKlgFQg8sQ4LLl7/HzIR8xtLMo=',
-					'https://challenges.cloudflare.com'
+					'https://challenges.cloudflare.com',
+					'https://static.cloudflareinsights.com'
 				],
 				// Svelte's SSR emits a constant inline `onerror="this.__e=event"` /
 				// `onload="this.__e=event"` shim on <img> etc. to capture events firing

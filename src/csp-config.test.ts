@@ -32,8 +32,21 @@ describe('kit.csp directives', () => {
 		expect(script).toEqual([
 			'self',
 			'sha256-b+LZKZWtSdZmsS5XuXKlgFQg8sQ4LLl7/HzIR8xtLMo=',
-			'https://challenges.cloudflare.com'
+			'https://challenges.cloudflare.com',
+			'https://static.cloudflareinsights.com'
 		]);
+	});
+
+	it('allows the analytics beacon script WITHOUT widening connect-src', () => {
+		// The two travel together in the obvious-but-wrong version of this change:
+		// the beacon's cross-origin RUM fallback tempts a connect-src addition.
+		// The auto-injected tag always posts same-origin /cdn-cgi/rum ('self'
+		// covers it), and the beacon honors attacker-settable send.to/forward.url
+		// destinations bounded only by connect-src — so the origin must appear in
+		// script-src ONLY. See the connect-src comment in svelte.config.js.
+		expect(d['script-src']).toContain('https://static.cloudflareinsights.com');
+		expect(d['connect-src']).toEqual(['self', 'blob:', 'data:']);
+		expect(d['connect-src']).not.toContain('https://cloudflareinsights.com');
 	});
 
 	it('scopes inline event handlers to Svelte’s replay shim only', () => {
