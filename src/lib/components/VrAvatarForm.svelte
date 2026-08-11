@@ -658,10 +658,12 @@
 						<X size={14} /> {m.admin_vr_poster_remove()}
 					</button>
 				</div>
-				{#if posterImage.nsfw}
+				{#if posterImage.nsfw && !nsfw}
 					<!-- The public pages inherit the poster's NSFW flag (see /vr loaders);
 					     without this line the operator only finds out from the list chip
-					     (SONA-159). -->
+					     (SONA-159). Only for poster-ONLY inheritance — with the switch
+					     below on, the hint's "switch is off" claim would be wrong
+					     (matches the list's nsfwFromPoster). -->
 					<p class="field-hint">{m.admin_vr_poster_nsfw_hint()}</p>
 				{/if}
 			{:else if images.length > 0}
