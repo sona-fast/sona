@@ -44,8 +44,8 @@ project:
 
 ## What AI is never used for
 
-No artwork, images, audio, or video in this repository or on sites running
-it are AI-generated as a matter of policy. The software ships almost no
+No artwork, images, audio, or video in this repository is AI-generated, and
+the upstream project's own sites hold none either. The software ships almost no
 media of its own (a favicon and a test fixture, both hand-drawn SVG), and
 the content each site displays is chosen by its operator. The upstream
 project's stance: AI writes code and text here; it does not make art.

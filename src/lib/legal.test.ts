@@ -115,6 +115,9 @@ describe('defaultPrivacyPolicy', () => {
 			.flatMap((s) => s.body)
 			.join('\n');
 		expect(text).toMatch(/Web Analytics script/);
+		// app.css imports web fonts from Google on every public page, so Google
+		// is a recipient of visitor IPs whether or not we mention the beacon.
+		expect(text).toMatch(/Google Fonts/);
 		expect(text).toContain('Turnstile');
 		expect(text).toContain('Telegram');
 		expect(text).toContain('cons.fyi');
@@ -186,7 +189,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = 'b066c581225ae746999255599c319944902968d2fd688897cebf239f5f91fab8';
+	const RECORDED_TEXT_HASH = '6daa19684cf59f6756cc97bab4729b213b8e3f7cdcb9323b62aa963bf5b1a470';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

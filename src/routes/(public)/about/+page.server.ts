@@ -1,5 +1,5 @@
 import { getReadDb } from '$lib/server/db';
-import { getSettings } from '$lib/server/settings';
+import { getSettings, toPublicSettings } from '$lib/server/settings';
 import { images, artists, collections, conventions } from '$lib/server/db/schema';
 import { asc, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
@@ -53,7 +53,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 	}
 
 	return {
-		settings,
+		settings: toPublicSettings(settings),
 		avatarUrl,
 		conventions: upcomingCons,
 		stats: {

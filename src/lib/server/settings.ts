@@ -137,6 +137,20 @@ export function parseLines(raw: string): string[] {
  */
 export type PublicSiteSettings = Omit<SiteSettings, 'aiPageText'>;
 
+/**
+ * Strip the settings that must not ride a public page's client payload.
+ *
+ * Today that is `aiPageText`: the layout load runs on EVERY public page, so
+ * shipping the override there would keep publishing a fork's /ai copy after
+ * the owner turned the page off. /ai's own load returns it, behind that
+ * route's 404 gate. Every public load returns settings through this helper so
+ * a new one cannot forget the strip.
+ */
+export function toPublicSettings(settings: SiteSettings): PublicSiteSettings {
+	const { aiPageText: _aiPageText, ...publicSettings } = settings;
+	return publicSettings;
+}
+
 // Neutral, brand-agnostic defaults. A real deployment overrides these via the
 // first-run setup wizard / admin Settings (stored as site_settings rows); the
 // example sparky.ink config seeds its own values. Keep these generic so a fresh

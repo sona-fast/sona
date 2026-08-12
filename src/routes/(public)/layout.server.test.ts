@@ -56,6 +56,24 @@ describe('(public) layout load — settings payload', () => {
 		expect(data.settings.aiPageEnabled).toBe(true);
 		expect(JSON.stringify(data)).not.toContain('Owner override copy.');
 	});
+
+	// The strip lives in toPublicSettings so no public load can forget it — the
+	// first version stripped only here, and the homepage, /about and the whole
+	// (paths) group kept shipping the override to every visitor.
+	it('is applied by toPublicSettings, which every public load returns through', async () => {
+		const { toPublicSettings } = await import('$lib/server/settings');
+		const full = { aiPageEnabled: false, aiPageText: 'Retired copy.', siteName: 'X' };
+		const pub = toPublicSettings(full as never) as Record<string, unknown>;
+		expect(pub).not.toHaveProperty('aiPageText');
+		expect(pub.aiPageEnabled).toBe(false);
+
+		const sources = ['(public)/+layout.server.ts', '(public)/+page.server.ts', '(public)/about/+page.server.ts', '(paths)/+layout.server.ts'];
+		const { readFileSync } = await import('node:fs');
+		for (const rel of sources) {
+			const src = readFileSync(new URL(`../../routes/${rel}`, import.meta.url), 'utf8');
+			expect(src, `${rel} must return settings through toPublicSettings`).toContain('toPublicSettings');
+		}
+	});
 });
 
 describe('(public) layout load — nav content gating', () => {
