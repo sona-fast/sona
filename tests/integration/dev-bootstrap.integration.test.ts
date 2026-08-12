@@ -45,16 +45,23 @@ function makeThrowawayRepo(): string {
 		// real pin guarantee: the wrangler npx resolves from this repo must be the
 		// checkout's own install (costs ~1s, fine for an integration test).
 		const nodeModules = path.join(repoRoot, 'node_modules');
-		if (!existsSync(path.join(nodeModules, '.bin', 'wrangler'))) {
-			throw new Error(`no wrangler binary under ${nodeModules} — run \`npm ci\` first`);
+		const wranglerPkg = path.join(nodeModules, 'wrangler', 'package.json');
+		if (!existsSync(path.join(nodeModules, '.bin', 'wrangler')) || !existsSync(wranglerPkg)) {
+			throw new Error(`no wrangler install under ${nodeModules} — run \`npm ci\` first`);
 		}
 		symlinkSync(nodeModules, path.join(root, 'node_modules'), 'dir');
-		const pinnedVersion = JSON.parse(
-			readFileSync(path.join(nodeModules, 'wrangler', 'package.json'), 'utf8')
-		).version;
-		expect(
-			execFileSync('npx', ['wrangler', '--version'], { cwd: root, encoding: 'utf8' })
-		).toContain(pinnedVersion);
+		const pinnedVersion = JSON.parse(readFileSync(wranglerPkg, 'utf8')).version;
+		const probeOutput = execFileSync('npx', ['wrangler', '--version'], {
+			cwd: root,
+			encoding: 'utf8',
+			// Same env shape as migrateLocalD1's real shell-out (CI=1 suppresses TTY
+			// prompts), so the probe certifies the exact invocation it stands in for.
+			env: { ...process.env, CI: '1' }
+		});
+		// Match the version as a whole whitespace-delimited token, not a substring —
+		// a resolved prerelease like `${pinnedVersion}-beta.1` must NOT pass.
+		const escaped = pinnedVersion.replace(/\./g, '\\.');
+		expect(probeOutput.trim()).toMatch(new RegExp(`(^|\\s)${escaped}($|\\s)`));
 	} catch (err) {
 		rmSync(root, { recursive: true, force: true });
 		throw err;
@@ -115,9 +122,10 @@ describe('dev-bootstrap integration (real wrangler + local D1)', () => {
 
 		// Run the REAL bootstrap: no injected migrate, so migrateLocalD1 actually
 		// shells out to `wrangler d1 execute DB --local` against this throwaway repo.
-		// The offline flag reaches that npx child via migrateLocalD1's process.env
-		// spread — deps.env is not threaded through to the child today, which is why
-		// it's set both there (the beforeEach stub) and here in deps.env.
+		// The offline flag is set in two places on purpose: the beforeEach stub is
+		// what actually reaches the npx child today (migrateLocalD1 spreads
+		// process.env), and deps.env carries it too so the guard survives if deps.env
+		// is ever threaded through to the child. Keep both.
 		const result = bootstrapDevConfig({
 			repoRoot: root,
 			env: { npm_config_offline: 'true' },
