@@ -127,7 +127,7 @@ const TOKEN_RECIPE =
 	'    • Account · Workers R2 Storage · Edit\n' +
 	'    • Account · Turnstile · Edit      (only with a custom domain; adds the admin-login bot check)\n' +
 	'    • Zone · DNS · Edit               (only if you are attaching a custom domain)\n' +
-	'    • Zone · WAF · Edit               (only with a custom domain; adds the download-beacon rate limit)\n' +
+	'    • Zone · WAF · Edit               (only with a custom domain; adds the public rate limit)\n' +
 	'    • Zone · Zone Settings · Edit     (optional; lets setup enable image resizing for you)';
 
 async function main() {
@@ -372,7 +372,8 @@ async function main() {
 				}
 				imageResizingOn = imageResizingOutcome(ir, patchOk);
 
-				// WAF rate limit for the public download beacon. Non-fatal:
+				// WAF rate limit for the anonymously-reachable /api paths (download
+				// beacon + oEmbed provider — one rule, Free-plan cap). Non-fatal:
 				// a token without Zone · WAF · Edit just yields an 'error'
 				// result we warn about in Next steps — setup keeps going regardless.
 				const rl = await applyDownloadRateLimit(cfToken, host);

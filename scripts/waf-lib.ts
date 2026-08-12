@@ -1,8 +1,9 @@
 /**
- * Cloudflare WAF rate-limit provisioning for the download-metrics beacon
- * (POST /api/metrics/download). Applies a zone-level rate-limit rule capping how
- * often a single IP can hit the beacon, so the counter stays cheap to run,
- * without touching any other WAF rule on the zone.
+ * Cloudflare WAF rate-limit provisioning for the anonymously-reachable /api paths
+ * (POST /api/metrics/download, GET /api/oembed). Applies ONE zone-level rate-limit
+ * rule capping how often a single IP can hit them — one, because the Free plan every
+ * fork runs on allows exactly one such rule per zone — without touching any other
+ * WAF rule on the zone.
  *
  * The core `applyDownloadRateLimit` is shared by two callers: the fork setup CLI
  * (scripts/setup.ts, for future forks) and the standalone runner
@@ -37,16 +38,30 @@ function zoneNameCandidates(host: string): string[] {
  * dashboard. Both are stable — do not change `ref` or old rules become orphans.
  */
 export const RULE_REF = 'sona_download_beacon_ratelimit';
-export const RULE_DESCRIPTION = 'sona: download beacon rate limit';
-
-/** Matches exactly the beacon route: POST /api/metrics/download (see +server.ts). */
-export const RULE_EXPRESSION =
-	'(http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download")';
+export const RULE_DESCRIPTION = 'sona: public endpoint rate limit';
 
 /**
- * Rate-limit knobs: at most 20 POSTs per 10s from one IP, then that IP is blocked
- * for 10s. Generous enough that a real visitor mashing download never trips it,
- * tight enough that a scripted loop is throttled to a trickle.
+ * Matches every /api path that is exempt from the admin gate in hooks.server.ts and
+ * therefore reachable anonymously:
+ *   - POST /api/metrics/download — the download beacon (see its +server.ts).
+ *   - GET  /api/oembed           — the oEmbed provider (SONA-168).
+ *
+ * ONE rule covers both because the Free plan allows exactly ONE rate-limiting rule
+ * per zone, and every fork runs on Free. A second rule is not "extra config" there
+ * — the API rejects it. So when a new /api path is exempted from the gate, extend
+ * this expression; do NOT add a rule. The counter is shared across the paths, which
+ * is fine: they are matched per-IP and no real client hits both in the same window.
+ */
+export const RULE_EXPRESSION =
+	'((http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download") or (http.request.method eq "GET" and http.request.uri.path eq "/api/oembed"))';
+
+/**
+ * Rate-limit knobs: at most 20 matching requests per 10s from one IP, then that IP
+ * is blocked for 10s. Generous enough that a real visitor mashing download never
+ * trips it, tight enough that a scripted loop is throttled to a trickle. Kept at 20
+ * when /api/oembed joined the rule: unfurl services fetch from shared egress pools
+ * so a looser cap was tempting, but oEmbed traffic is near zero and weakening the
+ * beacon's existing protection to pre-empt a hypothetical burst is the worse trade.
  *
  * `cf.colo.id` is REQUIRED alongside `ip.src`: outside Enterprise, Cloudflare
  * counts rate-limit rules per data center, and the Rulesets API rejects the rule
@@ -125,7 +140,7 @@ export interface RateLimitResult {
 const SCOPE_HINT = 'Zone → WAF: Edit (plus a Zone resource covering the domain)';
 
 /**
- * Idempotently apply the download-beacon rate-limit rule to `domain`'s zone.
+ * Idempotently apply the public-endpoint rate-limit rule to `domain`'s zone.
  *
  * Sequence (all via `cfApi`, Bearer `cfToken`):
  *   1. GET /zones?name=<host>            → resolve the zone id (host derived from

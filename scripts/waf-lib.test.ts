@@ -58,10 +58,36 @@ describe('buildRule', () => {
 		});
 	});
 
-	it('targets exactly POST /api/metrics/download', () => {
+	// ONE rule covers every anonymously-reachable /api path, because the Free plan
+	// each fork runs on allows exactly one rate-limiting rule per zone. These pin
+	// that shape: extending the expression is the supported way to add a path, and
+	// splitting it into a second rule would be rejected by the API in production.
+	it('targets exactly the two gate-exempt public paths, in one rule', () => {
 		expect(RULE_EXPRESSION).toBe(
-			'(http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download")'
+			'((http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download") or (http.request.method eq "GET" and http.request.uri.path eq "/api/oembed"))'
 		);
+	});
+
+	it('covers the download beacon and the oEmbed provider, each method-scoped', () => {
+		// Method-scoped so the rule cannot be tripped by a different verb on the same
+		// path (the endpoints expose one verb each; anything else 405s in the app).
+		expect(RULE_EXPRESSION).toContain('http.request.uri.path eq "/api/metrics/download"');
+		expect(RULE_EXPRESSION).toContain('http.request.uri.path eq "/api/oembed"');
+		expect(RULE_EXPRESSION).toContain('http.request.method eq "POST"');
+		expect(RULE_EXPRESSION).toContain('http.request.method eq "GET"');
+	});
+
+	it('stays within the Free plan: one rule, 10s period, matching mitigation timeout', () => {
+		// Free allows a single rule per zone with a 10s period and a mitigation
+		// timeout equal to it; cf.colo.id is required outside Enterprise. Drifting
+		// from any of these makes the rule unappliable on every fork.
+		expect(RULE_RATELIMIT.period).toBe(10);
+		expect(RULE_RATELIMIT.mitigation_timeout).toBe(RULE_RATELIMIT.period);
+		expect(RULE_RATELIMIT.characteristics).toContain('cf.colo.id');
+	});
+
+	it('keeps the beacon threshold unchanged now that oEmbed shares the rule', () => {
+		expect(RULE_RATELIMIT.requests_per_period).toBe(20);
 	});
 });
 
