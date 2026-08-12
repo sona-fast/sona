@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { getReadDb } from '$lib/server/db';
-import { getSettings, getRawSetting } from '$lib/server/settings';
+import { getRawSetting } from '$lib/server/settings';
 import type { PageServerLoad } from './$types';
 
 // The /ai disclosure page is a per-fork toggle (SONA-167). Like every other
@@ -33,8 +33,14 @@ export const load: PageServerLoad = async ({ parent, platform }) => {
 		// Absent means ON only for installs that pre-date the feature; an
 		// explicit 'false' is an owner who opted out, in the wizard or Settings.
 		if (stored === 'false') error(404, 'Not found');
-		const { aiPageText, aiPageUpdatedAt } = await getSettings(db);
-		return { aiPageText, aiPageUpdatedAt };
+		// Raw reads here too: getSettings self-catches D1 errors and returns
+		// DEFAULTS, which would render the built-in copy for an owner who
+		// overrode it precisely because a default claim is wrong for them.
+		const [aiPageText, aiPageUpdatedAt] = await Promise.all([
+			getRawSetting(db, 'aiPageText'),
+			getRawSetting(db, 'aiPageUpdatedAt')
+		]);
+		return { aiPageText: aiPageText ?? '', aiPageUpdatedAt: aiPageUpdatedAt ?? '' };
 	} catch (e) {
 		// Rethrow our own 404 unchanged; any read failure becomes one too, so a
 		// blip can neither publish a declined page nor substitute the default

@@ -116,6 +116,11 @@ describe('defaultPrivacyPolicy', () => {
 			.join('\n');
 		expect(declined).not.toContain('CodeRabbit');
 		expect(declined).not.toMatch(/Anthropic/);
+		// ...but the CATEGORY disclosure stays: a declining owner may still use
+		// such tools, and the visitor-facing fact (diagnostic logs carry IPs)
+		// must not disappear with the vendor names.
+		expect(declined).toMatch(/development or code-review tools/);
+		expect(declined).toMatch(/IP addresses, page URLs, and browser user-agent strings/);
 		// The rest of the policy is unchanged.
 		expect(declined).toContain('Resend');
 		expect(declined).toMatch(/Google Fonts/);
@@ -204,7 +209,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = 'fb52ccc6ff8b6d9a5e141b7bc78594307757fcafe44b49de0e0274d915e166db';
+	const RECORDED_TEXT_HASH = 'aa60dcb85c8993caf82ede16f450654f094f889ca24a99424a69f84e0aeeb568';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both
