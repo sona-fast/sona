@@ -93,7 +93,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 			heading: 'Artwork and third-party attribution',
 			body: [
 				`${site} displays artwork and attributes it to the artists who created it, which may include their names, handles, and links to their profiles. Fursuit photographs may be attributed to their photographers, and 3D avatar models to the artists who modeled, rigged, or textured them.`,
-				'Artist profile pictures are normally copied to our own storage, but when that copy is unavailable your browser loads the image from the artist\'s own host (for example X, Bluesky or our upload provider), which receives your IP address and the page you are viewing.',
+				'Artist profile pictures are normally copied to our own storage, but when that copy is unavailable your browser loads the image from the artist\'s own host (for example X, Bluesky, or our upload provider), which receives your IP address and the page you are viewing.',
 				'If you are an artist, photographer, or other rights holder featured here and want your attribution corrected or your work removed, contact us and we will act promptly.'
 			]
 		},
@@ -108,8 +108,8 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 			heading: 'Service providers',
 			body: [
 				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, Web Analytics, and storage for images, video clips, and 3D avatar model files), on some sites a file-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services.",
-				"This site's software is built and maintained with AI development tools: Anthropic's Claude writes and debugs code under the developer's direction, and CodeRabbit, a code review service, reads proposed changes. Code passes through both. Neither tool runs as part of this site, so nothing you do while browsing is sent to them as you browse. When the developer is diagnosing a problem, the operational data they share can include server logs and database records, and those logs can contain request data such as IP addresses, page URLs, and browser user-agent strings.",
-				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X, formerly Twitter, and Bluesky (fetching artist avatars), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
+				"This site's software is built and maintained with AI development tools: Anthropic's Claude writes and debugs code under the developer's direction, and CodeRabbit, a code review service, reads proposed changes. Neither tool runs as part of this site, so nothing you do here is sent to them. When the developer is diagnosing a problem, the operational data they share can include server logs and database records, and those logs can contain request data such as IP addresses, page URLs, and browser user-agent strings.",
+				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) and Bluesky (fetching artist avatars), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
 			]
 		},
 		{

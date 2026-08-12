@@ -102,7 +102,7 @@ describe('defaultPrivacyPolicy', () => {
 		// The runtime boundary, honestly scoped: nothing browsing-time goes to the
 		// tools, but shared diagnostic logs can carry request data — both halves
 		// must stay, or the paragraph overclaims again.
-		expect(text).toMatch(/nothing you do while browsing is sent to them/);
+		expect(text).toMatch(/nothing you do here is sent to them/);
 		expect(text).toMatch(/can contain request data such as IP addresses/);
 	});
 
@@ -176,21 +176,6 @@ describe('legalUpdatedDate', () => {
 	});
 });
 
-describe('splitParagraphs', () => {
-	// Shared by LegalPage and /ai for owner-override text (SONA-167 round 1).
-	it('splits on blank lines and trims the ends', () => {
-		expect(splitParagraphs('\nFirst.\n\nSecond.\n')).toEqual(['First.', 'Second.']);
-	});
-
-	it('normalizes CRLF so textarea-submitted blank lines still split', () => {
-		expect(splitParagraphs('First.\r\n\r\nSecond.')).toEqual(['First.', 'Second.']);
-	});
-
-	it('keeps single newlines inside a paragraph', () => {
-		expect(splitParagraphs('line one\nline two')).toEqual(['line one\nline two']);
-	});
-});
-
 describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// LEGAL_DEFAULTS_UPDATED is the "Last updated" date every stock fork shows, so
 	// it is only honest if it moves whenever the text does. Nothing enforced that
@@ -201,7 +186,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = 'b648f14907f8fb6455378c534b596df0a4503f351fff65c837f3c560fa94665c';
+	const RECORDED_TEXT_HASH = '8191f877335cf94f954967b4e1dc336fee60683e3fa823a2656769575bb83fde';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

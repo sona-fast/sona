@@ -126,6 +126,14 @@ export function parseLines(raw: string): string[] {
 		.filter(Boolean);
 }
 
+/**
+ * The settings shape public pages receive. `aiPageText` is stripped by the
+ * (public) layout load: that load rides every public page, and a fork that
+ * turned /ai off must not keep shipping its retired copy to every visitor —
+ * /ai's own load returns the override, behind its 404 gate.
+ */
+export type PublicSiteSettings = Omit<SiteSettings, 'aiPageText'>;
+
 // Neutral, brand-agnostic defaults. A real deployment overrides these via the
 // first-run setup wizard / admin Settings (stored as site_settings rows); the
 // example sparky.ink config seeds its own values. Keep these generic so a fresh

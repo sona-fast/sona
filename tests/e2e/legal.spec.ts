@@ -15,6 +15,28 @@ async function login(page: Page) {
 	await adminLogin(page, PASSWORD);
 }
 
+// The three saveSite-submitting tests in this file share one dance: wait for
+// hydration (a client-only tab switch is the gate), return to the Site tab,
+// then POST and assert the response. Hydration matters because an unhydrated
+// form does a real navigation, which aborts the goto that follows.
+async function openSiteTab(page: Page) {
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Storage', exact: true }).click();
+		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
+	}).toPass();
+	await page.getByRole('button', { name: 'Site', exact: true }).click();
+}
+
+async function saveSiteSettings(page: Page) {
+	const [resp] = await Promise.all([
+		page.waitForResponse(
+			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
+		),
+		page.getByRole('button', { name: 'Save site settings' }).click()
+	]);
+	expect(resp.ok()).toBeTruthy();
+}
+
 test('default legal pages render and are reachable from the footer', async ({ page }) => {
 	// Defaults render (no override seeded).
 	await page.goto('/privacy');
@@ -170,21 +192,9 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	await login(page);
 	await page.goto('/admin/settings');
 
-	// Hydration gate, same idiom as the privacy override test above.
-	await expect(async () => {
-		await page.getByRole('button', { name: 'Storage', exact: true }).click();
-		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
-	}).toPass();
-	await page.getByRole('button', { name: 'Site', exact: true }).click();
-
+	await openSiteTab(page);
 	await page.fill('textarea[name="aiPageText"]', override);
-	const [resp] = await Promise.all([
-		page.waitForResponse(
-			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
-		),
-		page.getByRole('button', { name: 'Save site settings' }).click()
-	]);
-	expect(resp.ok()).toBeTruthy();
+	await saveSiteSettings(page);
 
 	page.on('dialog', async (d) => {
 		await d.dismiss();
@@ -207,19 +217,9 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	// Turning the page off removes BOTH the footer link and the route itself —
 	// the disclosure never lingers as an unlinked page.
 	await page.goto('/admin/settings');
-	await expect(async () => {
-		await page.getByRole('button', { name: 'Storage', exact: true }).click();
-		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
-	}).toPass();
-	await page.getByRole('button', { name: 'Site', exact: true }).click();
+	await openSiteTab(page);
 	await page.uncheck('input[name="aiPageEnabled"]');
-	const [offResp] = await Promise.all([
-		page.waitForResponse(
-			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
-		),
-		page.getByRole('button', { name: 'Save site settings' }).click()
-	]);
-	expect(offResp.ok()).toBeTruthy();
+	await saveSiteSettings(page);
 
 	await page.goto('/');
 	await expect(page.locator('.footer .legal-links a[href="/ai"]')).toHaveCount(0);

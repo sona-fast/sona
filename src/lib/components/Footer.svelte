@@ -7,17 +7,11 @@
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import SonaBadge from '$lib/components/SonaBadge.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import { buildReceipt } from '$lib/build-info';
-	import type { SiteSettings } from '$lib/server/settings';
+	import BuildReceipt from '$lib/components/BuildReceipt.svelte';
+	import type { PublicSiteSettings } from '$lib/server/settings';
 
-	// The layout strips aiPageText from the public payload (it belongs to /ai's
-	// own load), so the footer types against the stripped shape.
-	let { settings, host }: { settings: Omit<SiteSettings, 'aiPageText'>; host: string } = $props();
+	let { settings, host }: { settings: PublicSiteSettings; host: string } = $props();
 
-	// Build receipt (SONA-167): the commit this deployment was built from, baked
-	// in by vite define from the deploying fork's own Actions env. Null in dev
-	// and tests, so the line only renders on real deployed builds.
-	const receipt = buildReceipt(__BUILD_COMMIT_SHA__, __BUILD_REPO_URL__);
 </script>
 
 <footer class="footer">
@@ -32,23 +26,7 @@
 				{/if}
 			</nav>
 			<SonaBadge {host} />
-			{#if receipt}
-				<!-- "The source for this exact build": linked when the building repo is
-				     known, plain text otherwise (see build-info.ts for why never a
-				     hardcoded upstream URL). -->
-				<span class="build">
-					{#if receipt.url}
-						<a
-							href={receipt.url}
-							target="_blank"
-							rel="noopener"
-							aria-label={m.footer_build_link_label({ sha: receipt.short })}
-						>{m.footer_build({ sha: receipt.short })}</a>
-					{:else}
-						{m.footer_build({ sha: receipt.short })}
-					{/if}
-				</span>
-			{/if}
+			<BuildReceipt />
 		</div>
 		<div class="social-links">
 			{#if settings.twitterUrl}
@@ -120,21 +98,6 @@
 		color: var(--foreground);
 	}
 
-	.build {
-		font-family: var(--font-primary);
-		font-size: 12px;
-		color: var(--muted-foreground);
-	}
-
-	.build a {
-		color: var(--muted-foreground);
-		text-decoration: underline;
-		transition: color 0.15s;
-	}
-
-	.build a:hover {
-		color: var(--foreground);
-	}
 
 	.social-links {
 		display: flex;

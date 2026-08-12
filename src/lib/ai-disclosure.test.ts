@@ -39,7 +39,7 @@ describe('defaultAiDisclosure', () => {
 	});
 
 	it('scopes the no-training claim to the plan terms, not a warranty', () => {
-		expect(all).toMatch(/plans set not to train on my data/);
+		expect(all).toMatch(/under plans configured not to train on my data/);
 	});
 
 	it('concedes the training-data provenance without arguing it', () => {
