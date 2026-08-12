@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 import type { D1Database } from '@cloudflare/workers-types';
-import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,12 +24,27 @@ import { bootstrapDevConfig } from '../../scripts/dev-bootstrap-lib.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-/** A throwaway "repo" holding only the two things the bootstrap reads. */
+/** A throwaway "repo" holding the two things the bootstrap reads, plus a
+ *  node_modules symlink so npx resolves the checkout's pinned wrangler. */
 function makeThrowawayRepo(): string {
 	const root = mkdtempSync(path.join(tmpdir(), 'sona-dev-bootstrap-int-'));
 	try {
 		cpSync(path.join(repoRoot, 'wrangler.toml.example'), path.join(root, 'wrangler.toml.example'));
 		cpSync(path.join(repoRoot, 'drizzle'), path.join(root, 'drizzle'), { recursive: true });
+		// Symlink the checkout's node_modules in so migrateLocalD1's `npx wrangler`
+		// resolves the version package.json pins (issue #310): npx finds a command by
+		// walking up from cwd looking for node_modules/.bin, and with none anywhere
+		// above the OS temp dir it downloads whatever wrangler is LATEST at run time —
+		// which made this test flake on every broken/half-propagated wrangler release.
+		// The existence check matters: symlinkSync happily creates a dangling link to
+		// a missing target, and npx would then quietly fall back to the registry.
+		const nodeModules = path.join(repoRoot, 'node_modules');
+		if (!existsSync(path.join(nodeModules, '.bin', 'wrangler'))) {
+			throw new Error(
+				`no wrangler binary under ${nodeModules} — run \`npm ci\` first; this test resolves wrangler from the main checkout so it never runs an unpinned latest release`
+			);
+		}
+		symlinkSync(nodeModules, path.join(root, 'node_modules'), 'dir');
 	} catch (err) {
 		rmSync(root, { recursive: true, force: true });
 		throw err;
@@ -40,10 +55,15 @@ function makeThrowawayRepo(): string {
 describe('dev-bootstrap integration (real wrangler + local D1)', () => {
 	let root: string | undefined;
 	const origCwd = process.cwd();
+	const origOffline = process.env.npm_config_offline;
 
 	afterEach(() => {
-		// Always restore CWD and remove the throwaway repo (with its .wrangler state).
+		// Always restore CWD, the offline flag, and remove the throwaway repo (with
+		// its .wrangler state). rmSync unlinks the node_modules symlink without
+		// recursing into it, so the checkout's real install is never touched.
 		process.chdir(origCwd);
+		if (origOffline === undefined) delete process.env.npm_config_offline;
+		else process.env.npm_config_offline = origOffline;
 		if (root) {
 			rmSync(root, { recursive: true, force: true });
 			root = undefined;
@@ -83,6 +103,11 @@ describe('dev-bootstrap integration (real wrangler + local D1)', () => {
 
 		// Run the REAL bootstrap: no injected migrate, so migrateLocalD1 actually
 		// shells out to `wrangler d1 execute DB --local` against this throwaway repo.
+		// npm_config_offline rides process.env into that npx child (migrateLocalD1
+		// spreads process.env — deps.env is only read for the E2E check), so if the
+		// node_modules symlink ever stops resolving wrangler, npx fails loudly with
+		// ENOTCACHED instead of quietly downloading latest from the registry.
+		process.env.npm_config_offline = 'true';
 		const result = bootstrapDevConfig({ repoRoot: root, env: {}, log: () => {} });
 		expect(result).toBe('created');
 		expect(existsSync(path.join(root, 'wrangler.toml'))).toBe(true);
