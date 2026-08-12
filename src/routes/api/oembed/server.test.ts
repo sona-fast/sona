@@ -189,15 +189,25 @@ describe('GET /api/oembed — the image it advertises', () => {
 		expect(payload.height).toBe(900);
 	});
 
-	it('keeps the axis it does have when the other column is NULL', async () => {
-		// socialImage() advertises neither dimension unless it has both, but both
-		// columns are nullable and the real value must survive per axis — only the
-		// missing one falls back to a placeholder (SONA-22 owns backfilling these).
+	// socialImage() advertises neither dimension unless it has both, but both columns
+	// are nullable and the real value must survive per axis — only the missing one
+	// falls back to a placeholder (SONA-22 owns backfilling these). Both directions
+	// are covered: with only one seeded, dropping either `?? row.<axis>` from the
+	// chain in +server.ts must fail a test.
+	it.each([
+		{ name: 'width', width: 800, height: null, expected: { width: 800, height: 800 } },
+		{ name: 'height', width: null, height: 700, expected: { width: 1200, height: 700 } }
+	])('keeps the $name it does have when the other column is NULL', async (c) => {
 		const { db, platform } = makeDb();
-		await addImage(db, { slug: 'half', imageUrl: '/img/half.png', width: 800, height: null });
+		await addImage(db, {
+			slug: `half-${c.name}`,
+			imageUrl: `/img/half-${c.name}.png`,
+			width: c.width,
+			height: c.height
+		});
 
-		const { body } = await call(platform, `${ORIGIN}/gallery/half`);
-		expect(body).toMatchObject({ width: 800, height: 800 });
+		const { body } = await call(platform, `${ORIGIN}/gallery/half-${c.name}`);
+		expect(body).toMatchObject(c.expected);
 	});
 
 	it('advertises an off-zone (UploadThing) original raw, at its real size', async () => {
