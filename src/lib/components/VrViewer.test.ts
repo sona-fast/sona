@@ -75,7 +75,12 @@ describe('VrViewer wiring (SONA-124)', () => {
 		// The document-level error listener only acts on a request THIS component
 		// made — armed right before webkitRequestFullscreen, ignored otherwise —
 		// so another element's failed attempt can't flip us to the overlay…
-		expect(src).toMatch(/pendingWebkitFs = true;\s*\n\s*el\.webkitRequestFullscreen\(\)/);
+		// Armed right before the request, disarmed by change/error AND by a
+		// timeout backstop (a request that fires neither event must not leave
+		// the flag armed for an unrelated later error).
+		expect(src).toMatch(
+			/pendingWebkitFs = true;[\s\S]{0,300}?pendingWebkitFs = false\), 2000\);\s*\n\s*el\.webkitRequestFullscreen\(\)/
+		);
 		expect(src).toMatch(/if \(!pendingWebkitFs\) return/);
 		// …and fullscreen state tracks OUR element by identity, so fullscreening
 		// the page's <video> can't flip this component's state or label.
@@ -124,11 +129,14 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect(src).toMatch(/aria-hidden=\{fsActive\}/);
 		expect(src).toMatch(/<p class="sr-only" role="status">\{fsAnnouncement\}<\/p>/);
 		expect(src).toContain(
-			'fsAnnouncement = now ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen()'
+			'fsAnnouncement = entered ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen()'
 		);
-		expect(src).toContain(
-			'fsAnnouncement = on ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen()'
-		);
+		// Both the native (syncFullscreen) and overlay (setFallbackFullscreen)
+		// flips announce, and the announcement CLEARS afterwards so stale mode
+		// text doesn't linger in the accessibility tree.
+		expect(src).toContain('announceFs(now)');
+		expect(src).toContain('announceFs(on)');
+		expect(src).toMatch(/fsAnnouncement = ''/);
 		// fsActive covers BOTH modes — collapsing it to isFullscreen alone would
 		// leave the iPhone overlay showing "Fullscreen" while the overlay is up.
 		expect(src).toContain('$derived(isFullscreen || fallbackFullscreen)');

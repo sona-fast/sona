@@ -54,6 +54,15 @@
 	// Mode-change announcement for screen readers: entering/exiting fullscreen
 	// has no other non-visual cue. Own region, not the loading one.
 	let fsAnnouncement = $state('');
+	let fsAnnounceTimer = 0;
+
+	function announceFs(entered: boolean) {
+		fsAnnouncement = entered ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen();
+		// The live region announces on CHANGE; clear shortly after so the stale
+		// mode text doesn't linger in the accessibility tree as page content.
+		clearTimeout(fsAnnounceTimer);
+		fsAnnounceTimer = window.setTimeout(() => (fsAnnouncement = ''), 2000);
+	}
 	// Elements WE set inert while the overlay fallback is up, so exit restores
 	// exactly those and never clears an inert some other code owns.
 	let inerted: HTMLElement[] = [];
@@ -455,7 +464,7 @@
 		pendingWebkitFs = false;
 		if (now === isFullscreen) return;
 		isFullscreen = now;
-		fsAnnouncement = now ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen();
+		announceFs(now);
 	}
 
 	/** Leaves native fullscreen (standard or webkit-prefixed) if one is
@@ -464,11 +473,13 @@
 	 * there was none to leave. Shared by the toggle and Exit 3D so the
 	 * feature-detect chain exists once. */
 	function exitAnyFullscreen(): Promise<void> | null {
-		if (document.fullscreenElement) {
+		// Identity, like syncFullscreen: only exit a fullscreen WE own — if some
+		// other element holds it, fall through so the toggle requests ours.
+		if (document.fullscreenElement === viewer) {
 			return document.exitFullscreen().catch(() => {});
 		}
 		const doc = webkitDocument();
-		if (doc.webkitFullscreenElement) {
+		if (doc.webkitFullscreenElement === viewer) {
 			doc.webkitExitFullscreen?.();
 			return Promise.resolve();
 		}
@@ -530,7 +541,7 @@
 			for (const el of inerted) el.inert = false;
 			inerted = [];
 		}
-		fsAnnouncement = on ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen();
+		announceFs(on);
 	}
 
 	function toggleFullscreen() {
@@ -551,8 +562,11 @@
 			void el.requestFullscreen().catch(() => setFallbackFullscreen(true));
 		} else if (el?.webkitRequestFullscreen) {
 			// Arm the document-level error listener for exactly this request;
-			// syncFullscreen (change) and onWebkitError both disarm it.
+			// syncFullscreen (change) and onWebkitError both disarm it — and a
+			// timeout backstops a request that fires neither event, so a LATER
+			// unrelated element's error can't flip the overlay on.
 			pendingWebkitFs = true;
+			window.setTimeout(() => (pendingWebkitFs = false), 2000);
 			el.webkitRequestFullscreen();
 		} else if (el) {
 			setFallbackFullscreen(true);
@@ -570,6 +584,7 @@
 		disposeScene = null;
 		// Unlock the page scroll if we unmount mid-overlay (navigation).
 		setFallbackFullscreen(false);
+		clearTimeout(fsAnnounceTimer);
 	});
 </script>
 
@@ -711,8 +726,10 @@
 		z-index: 100;
 		background: var(--background);
 		/* Same edge bleed as :fullscreen above: stage to the edges, bottom
-		   inset for the controls row. */
-		padding: 0 0 12px;
+		   inset for the controls row. The env() terms are 0 as configured
+		   (app.html sets no viewport-fit=cover) — they only activate if that
+		   ever changes, keeping the exit controls clear of the home indicator. */
+		padding: 0 0 calc(12px + env(safe-area-inset-bottom, 0px));
 		/* overflow makes the overlay its own (never-scrolling) scroll container,
 		   so overscroll-behavior has something to act on and an edge-of-scroll
 		   flick inside it can't chain to the page behind (iOS scroll lock is
@@ -747,9 +764,10 @@
 	}
 
 	/* Same side inset as the :fullscreen rule above (kept separate on purpose,
-	   like every .fs-fallback rule). */
+	   like every .fs-fallback rule); env() inert until viewport-fit=cover. */
 	.viewer.fs-fallback .controls {
-		padding-inline: 12px;
+		padding-inline: calc(12px + env(safe-area-inset-left, 0px))
+			calc(12px + env(safe-area-inset-right, 0px));
 	}
 
 	.stage {
