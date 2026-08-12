@@ -11,22 +11,40 @@ const PASSWORD = 'e2e-admin-password';
 
 type Violation = { directive: string; blocked: string; source: string };
 
-// Register a securitypolicyviolation listener that survives each navigation, and
-// read+clear it after each page settles (window resets on navigation).
-async function installCollector(page: Page) {
+// Register a securitypolicyviolation listener that survives each navigation and
+// forwards every violation to NODE as it fires, returning the array it fills.
+//
+// Collecting outside the page is what makes this reliable. The previous version
+// buffered violations in `window.__csp` and read them back with page.evaluate,
+// which throws "Execution context was destroyed, most likely because of a
+// navigation" whenever anything navigates during the read — a live flake on CI
+// for a spec that performs six navigations and two logins (SONA-164). A Node
+// array cannot be destroyed by a navigation, and nothing has to survive in page
+// memory between the violation firing and the test reading it.
+async function installCollector(page: Page): Promise<Violation[]> {
+	const collected: Violation[] = [];
+	await page.exposeFunction('__cspReport', (v: Violation) => {
+		collected.push(v);
+	});
 	await page.addInitScript(() => {
-		(window as unknown as { __csp: Violation[] }).__csp = [];
+		// Top document only. addInitScript runs in every frame, and the real
+		// Turnstile widget renders a cross-origin challenge iframe whose own CSP
+		// violations are Cloudflare's business, not this app's — the old
+		// window-scoped collector ignored them for free because drain() only ever
+		// evaluated in the main frame.
+		if (window.top !== window) return;
 		document.addEventListener('securitypolicyviolation', (e) => {
-			(window as unknown as { __csp: Violation[] }).__csp.push({
+			(window as unknown as { __cspReport: (v: Violation) => void }).__cspReport({
 				directive: e.violatedDirective,
 				blocked: e.blockedURI,
 				source: `${e.sourceFile}:${e.lineNumber}`
 			});
 		});
 	});
+	return collected;
 }
 
-async function drain(page: Page): Promise<Violation[]> {
+async function drain(page: Page, collected: Violation[]): Promise<Violation[]> {
 	// Give hydration + async font/image loads a beat to fire any violation.
 	//
 	// The timeout is load-bearing, not defensive. On /admin/login the Turnstile widget
@@ -36,7 +54,9 @@ async function drain(page: Page): Promise<Violation[]> {
 	// alongside this spec. Settling is a nice-to-have; not hanging is not.
 	await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
 	await page.waitForTimeout(400);
-	return page.evaluate(() => (window as unknown as { __csp: Violation[] }).__csp ?? []);
+	// Take and clear: the Node array accumulates across navigations, where the old
+	// per-window buffer was wiped by each one. Callers still get only what is new.
+	return collected.splice(0);
 }
 
 test('no CSP violations across public + admin pages; CSP + HSTS headers present', async ({
@@ -45,7 +65,7 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	// Six navigations, two of them through a Turnstile solve that fetches api.js from
 	// challenges.cloudflare.com. That overruns the default 30s budget on CI.
 	test.slow();
-	await installCollector(page);
+	const collected = await installCollector(page);
 	const all: Violation[] = [];
 	const pageErrors: string[] = [];
 	const badAssets: string[] = [];
@@ -73,11 +93,11 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	// plain-HTTP subdomains) and no preload (irreversible). See hooks.server.ts.
 	expect(hsts).toBe('max-age=31536000');
 
-	all.push(...(await drain(page)));
+	all.push(...(await drain(page, collected)));
 
 	for (const url of ['/gallery/parent-piece', '/stickers', '/about', '/vr/e2e-avatar']) {
 		await page.goto(url, { waitUntil: 'domcontentloaded' });
-		all.push(...(await drain(page)));
+		all.push(...(await drain(page, collected)));
 	}
 
 	// Admin: the login form itself, then the dashboard. Violations are collected per
@@ -123,9 +143,9 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 			}
 		)
 		.toBe(true);
-	all.push(...(await drain(page)));
+	all.push(...(await drain(page, collected)));
 	await adminLogin(page, PASSWORD, { realTurnstile: true });
-	all.push(...(await drain(page)));
+	all.push(...(await drain(page, collected)));
 
 	// Confirm the client actually hydrated (so the hydration script-src path was
 	// really exercised, not skipped): SvelteKit sets a __sveltekit_* global.
