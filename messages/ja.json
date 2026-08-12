@@ -23,6 +23,7 @@
 	"footer_legal_label": "法的情報",
 	"footer_privacy": "プライバシー",
 	"footer_terms": "利用規約",
+	"footer_build": "ビルド {sha}",
 	"privacy_meta_title": "プライバシーポリシー — {siteName}",
 	"terms_meta_title": "利用規約 — {siteName}",
 	"privacy_page_title": "プライバシーポリシー",

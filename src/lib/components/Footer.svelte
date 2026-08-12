@@ -7,9 +7,15 @@
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import SonaBadge from '$lib/components/SonaBadge.svelte';
 	import * as m from '$lib/paraglide/messages';
+	import { buildReceipt } from '$lib/build-info';
 	import type { SiteSettings } from '$lib/server/settings';
 
 	let { settings, host }: { settings: SiteSettings; host: string } = $props();
+
+	// Build receipt (SONA-167): the commit this deployment was built from, baked
+	// in by vite define from the deploying fork's own Actions env. Null in dev
+	// and tests, so the line only renders on real deployed builds.
+	const receipt = buildReceipt(__BUILD_COMMIT_SHA__, __BUILD_REPO_URL__);
 </script>
 
 <footer class="footer">
@@ -21,6 +27,18 @@
 				<a href="/terms">{m.footer_terms()}</a>
 			</nav>
 			<SonaBadge {host} />
+			{#if receipt}
+				<!-- "The source for this exact build": linked when the building repo is
+				     known, plain text otherwise (see build-info.ts for why never a
+				     hardcoded upstream URL). -->
+				<span class="build">
+					{#if receipt.url}
+						<a href={receipt.url} target="_blank" rel="noopener">{m.footer_build({ sha: receipt.short })}</a>
+					{:else}
+						{m.footer_build({ sha: receipt.short })}
+					{/if}
+				</span>
+			{/if}
 		</div>
 		<div class="social-links">
 			{#if settings.twitterUrl}
@@ -85,6 +103,22 @@
 	}
 
 	.legal-links a:hover {
+		color: var(--foreground);
+	}
+
+	.build {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		color: var(--muted-foreground);
+	}
+
+	.build a {
+		color: var(--muted-foreground);
+		text-decoration: underline;
+		transition: color 0.15s;
+	}
+
+	.build a:hover {
 		color: var(--foreground);
 	}
 

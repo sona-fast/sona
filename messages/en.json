@@ -23,6 +23,7 @@
 	"footer_legal_label": "Legal",
 	"footer_privacy": "Privacy",
 	"footer_terms": "Terms",
+	"footer_build": "build {sha}",
 	"privacy_meta_title": "Privacy Policy — {siteName}",
 	"terms_meta_title": "Terms of Service — {siteName}",
 	"privacy_page_title": "Privacy Policy",
