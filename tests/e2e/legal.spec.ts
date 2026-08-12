@@ -219,6 +219,11 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	await page.goto('/admin/settings');
 	await openSiteTab(page);
 	await page.uncheck('input[name="aiPageEnabled"]');
+	// Clear the privacy override the earlier case in this serial file left
+	// behind, so the /privacy assertions below read the DEFAULT policy — which
+	// is the only place the gated paragraph exists. Without this the page
+	// renders that override and the assertions describe the wrong document.
+	await page.fill('textarea[name="privacyPolicy"]', '');
 	await saveSiteSettings(page);
 
 	await page.goto('/');
