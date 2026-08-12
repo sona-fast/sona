@@ -32,6 +32,12 @@ async function stayedClientSide(page: Page) {
 // nav. Retrying the whole nav until the marker survives is the deterministic
 // fix; once the first client-side nav lands, the app stays hydrated for the rest
 // of the test. Returns with the page on `to`, hydrated.
+//
+// The retry is bounded BELOW the test budget (callers are test.slow(), 90s) so
+// a slow-hydration run fails here with the loop's last real assertion error
+// instead of racing the test clock into a generic "Test timeout of 30000ms
+// exceeded" — under load this loop was measured at 29.3s against that default
+// budget (SONA-164).
 async function navFromParentClientSide(page: Page, to: string, expectedH1: string) {
 	await expect(async () => {
 		await page.goto(PARENT);
@@ -39,7 +45,7 @@ async function navFromParentClientSide(page: Page, to: string, expectedH1: strin
 		await page.locator(tileFor(to)).click();
 		await expect(h1(page)).toHaveText(expectedH1);
 		expect(await stayedClientSide(page)).toBe(true);
-	}).toPass();
+	}).toPass({ timeout: 45_000 });
 }
 
 test.describe('gallery variant strip', () => {
@@ -56,6 +62,8 @@ test.describe('gallery variant strip', () => {
 	test('clicking the NSFW variant tile swaps content client-side and arrives blurred', async ({
 		page
 	}) => {
+		// Hydration-retry headroom for navFromParentClientSide (SONA-164).
+		test.slow();
 		await navFromParentClientSide(page, VARIANT, 'Variant Piece NSFW');
 
 		await expect(page).toHaveURL(new RegExp(`${VARIANT}$`));
@@ -68,15 +76,20 @@ test.describe('gallery variant strip', () => {
 	});
 
 	test('reveal clears the blur, and returning to the variant re-blurs it', async ({ page }) => {
-		await page.goto(VARIANT);
-		await expect(overlay(page)).toHaveCount(1);
-		await expect(mainImg(page)).toHaveClass(/blurred/);
-
-		// Reveal is a client action; retry the click until it lands post-hydration.
+		// Hydration-retry headroom for the reveal-click loop below (SONA-164).
+		test.slow();
+		// Reveal is a client action; retry until the click lands post-hydration.
+		// Each attempt restarts from a fresh pre-reveal page: if a click landed
+		// but the overlay outlived the inner wait, the button is already gone and
+		// a click-only retry would wedge on it. Bounded below the slow-test
+		// budget so a dead loop fails with the real error.
 		await expect(async () => {
+			await page.goto(VARIANT);
+			await expect(overlay(page)).toHaveCount(1);
+			await expect(mainImg(page)).toHaveClass(/blurred/);
 			await page.locator('.reveal-btn').click();
 			await expect(overlay(page)).toHaveCount(0, { timeout: 1500 });
-		}).toPass();
+		}).toPass({ timeout: 45_000 });
 		await expect(mainImg(page)).not.toHaveClass(/blurred/);
 
 		// Strip back to the parent, then back to the variant: the reveal must reset.
@@ -92,6 +105,8 @@ test.describe('gallery variant strip', () => {
 	});
 
 	test('browser back/forward follow the URL and re-blur the NSFW variant', async ({ page }) => {
+		// Hydration-retry headroom for navFromParentClientSide (SONA-164).
+		test.slow();
 		// Build history client-side: parent -> variant -> parent.
 		await navFromParentClientSide(page, VARIANT, 'Variant Piece NSFW');
 		await page.locator(tileFor(PARENT)).click();
