@@ -131,6 +131,36 @@ describe('GET /api/oembed — anonymous provider endpoint', () => {
 		expect((await call(platform, 'https://evil.test/gallery/parent-piece')).status).toBe(404);
 	});
 
+	it('answers a url that differs only in scheme (host, not origin — http on local dev)', async () => {
+		// The check compares HOST deliberately, so a dev/preview fetch over http for
+		// the same host still resolves. An origin comparison would 404 this.
+		const { db, platform } = makeDb();
+		await addImage(db);
+
+		expect((await call(platform, 'http://taro.surf/gallery/parent-piece')).status).toBe(200);
+	});
+
+	it('drops the trailing slash the slug regex allows from author_url', async () => {
+		// trailingSlash: 'never' answers a trailing-slash gallery URL with a 308, so
+		// the fallback author_url must not advertise one.
+		const { db, platform } = makeDb();
+		await addImage(db, { artistId: 99 });
+
+		const { body } = await call(platform, `${ORIGIN}/gallery/parent-piece/`);
+		expect(body).toMatchObject({ author_url: `${ORIGIN}/gallery/parent-piece` });
+	});
+
+	it('keeps a percent-encoded slug encoded in the fallback author_url', async () => {
+		// The pathname is passed through as matched — no decode/re-encode round trip,
+		// so a consumer gets a URL it can fetch as-is.
+		const { db, platform } = makeDb();
+		await addImage(db, { slug: 'caf\u00e9-piece', artistId: 99 });
+
+		const { status, body } = await call(platform, `${ORIGIN}/gallery/caf%C3%A9-piece`);
+		expect(status).toBe(200);
+		expect(body).toMatchObject({ author_url: `${ORIGIN}/gallery/caf%C3%A9-piece` });
+	});
+
 	it('still answers when the artist join is empty (author_name falls back)', async () => {
 		const { db, platform } = makeDb();
 		await addImage(db, { title: 'Orphan', slug: 'orphan', imageUrl: '/img/orphan.png', artistId: 99 });
@@ -157,6 +187,17 @@ describe('GET /api/oembed — the image it advertises', () => {
 		// ...and the dimensions describe THAT image, not the 2400px original.
 		expect(payload.width).toBe(1200);
 		expect(payload.height).toBe(900);
+	});
+
+	it('keeps the axis it does have when the other column is NULL', async () => {
+		// socialImage() advertises neither dimension unless it has both, but both
+		// columns are nullable and the real value must survive per axis — only the
+		// missing one falls back to a placeholder (SONA-22 owns backfilling these).
+		const { db, platform } = makeDb();
+		await addImage(db, { slug: 'half', imageUrl: '/img/half.png', width: 800, height: null });
+
+		const { body } = await call(platform, `${ORIGIN}/gallery/half`);
+		expect(body).toMatchObject({ width: 800, height: 800 });
 	});
 
 	it('advertises an off-zone (UploadThing) original raw, at its real size', async () => {

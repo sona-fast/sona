@@ -233,22 +233,8 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// To recover edge caching for HTML, add a Cloudflare Cache Rule with a custom
 	// cache key that includes the PARAGLIDE_LOCALE cookie (infra, not code).
 	const isPublic = !event.url.pathname.startsWith('/admin') && !event.url.pathname.startsWith('/api');
-	// /api is private by default because it is the admin surface. One exception is
-	// share-cacheable: the oEmbed provider is anonymous (exempt from the gate in
-	// authHandle above), GET-only, and its body varies on nothing per-visitor — no
-	// cookie, no locale, and the ?url= it does vary on is already part of the edge
-	// cache key. Third-party embedders re-fetch the same few popular slugs, so
-	// without this every unfurl re-runs the handler and its two D1 reads.
-	// Only add a path here that is ALSO exempt in authHandle; a gated path would
-	// never be publicly fetched, and share-caching one would be a data leak.
-	const CACHEABLE_API_PATHS = new Set(['/api/oembed']);
-	const isCacheableApi = CACHEABLE_API_PATHS.has(event.url.pathname);
 	const isHtml = response.headers.get('content-type')?.includes('text/html') ?? false;
-	if (
-		(isPublic || isCacheableApi) &&
-		(response.status === 200 || response.status === 304 || response.status === 206) &&
-		!isHtml
-	) {
+	if (isPublic && (response.status === 200 || response.status === 304 || response.status === 206) && !isHtml) {
 		// Honor a handler's explicit Cache-Control; only stamp the shared default
 		// when the handler set nothing. Two intentional opt-outs exist today: the
 		// sticker download fallback's no-store (a transient transform failure must

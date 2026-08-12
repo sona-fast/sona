@@ -79,15 +79,21 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 		title: row.title,
 		author_name: row.artistName ? `Commission by ${row.artistName}` : 'Commission',
 		// The already-validated path we matched on — no decode/re-encode round trip.
-		author_url: authorUrl ?? `${url.origin}${parsed.pathname}`,
+		// The slug regex allows a trailing slash, which `trailingSlash: 'never'`
+		// answers with a 308, so strip it rather than advertise a redirect.
+		author_url: authorUrl ?? `${url.origin}${parsed.pathname.replace(/\/$/, '')}`,
 		provider_name: settings.siteName,
 		provider_url: url.origin,
 		url: image.url,
-		width: image.width ?? 1200,
-		height: image.height ?? 800,
-		// Matches the s-maxage the response actually carries (hooks.server.ts shares
-		// this path at the edge), so the payload doesn't promise a lifetime the
-		// headers deny.
-		cache_age: 300
+		// Per axis: socialImage() returns neither dimension unless it has both, but a
+		// published row can have one column set and the other NULL, and the real value
+		// must survive that. Placeholders only when no axis value exists at all —
+		// oEmbed requires width/height for type=photo (SONA-22 owns backfilling them).
+		width: image.width ?? row.width ?? 1200,
+		height: image.height ?? row.height ?? 800,
+		// oEmbed's cache_age is a hint for the CONSUMER's own cache, unrelated to this
+		// response's Cache-Control, so there is no mismatch to reconcile; lowering it
+		// would only multiply consumer refetches.
+		cache_age: 3600
 	});
 };

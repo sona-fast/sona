@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cdnImage, isAnimatedSource, rawFallback } from '$lib';
+import { isUploadThingHost, isOffZoneImageHost } from '$lib/img';
 
 // Guards the GIF regression (sona#97 follow-up): GIFs are served raw everywhere
 // cdnImage is used (grid, cards, collections, admin, detail) because off-zone
@@ -107,5 +108,29 @@ describe('rawFallback', () => {
 		rawFallback(img as any, RAW);
 		img.fire('error');
 		expect(img.attrs.src).toBe(RAW);
+	});
+});
+
+// Both predicates decide whether a source rides the /cdn-cgi/image/ transform or is
+// advertised raw, so every clause needs its own case: the bare-host ones (`ufs.sh`,
+// `utfs.io`, `r2.dev`) are not covered by the suffix clauses, and the suffix clauses
+// must keep the leading dot so a lookalike registration can't impersonate a host.
+describe('isUploadThingHost / isOffZoneImageHost', () => {
+	it('matches UploadThing hosts and their subdomains only', () => {
+		for (const host of ['ufs.sh', 'utfs.io', 'app12.ufs.sh', 'x.utfs.io']) {
+			expect(isUploadThingHost(host), host).toBe(true);
+		}
+		for (const host of ['evilufs.sh', 'notutfs.io', 'cdn.example.com', 'r2.dev']) {
+			expect(isUploadThingHost(host), host).toBe(false);
+		}
+	});
+
+	it('treats UploadThing and the public R2 dev bucket as off-zone', () => {
+		for (const host of ['ufs.sh', 'utfs.io', 'app12.ufs.sh', 'x.utfs.io', 'r2.dev', 'pub-abc.r2.dev']) {
+			expect(isOffZoneImageHost(host), host).toBe(true);
+		}
+		for (const host of ['evilufs.sh', 'notutfs.io', 'cdn.example.com', 'myr2.dev']) {
+			expect(isOffZoneImageHost(host), host).toBe(false);
+		}
 	});
 });

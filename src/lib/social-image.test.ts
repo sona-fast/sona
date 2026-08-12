@@ -44,6 +44,30 @@ describe('socialImage — the url it advertises', () => {
 		expect(socialImage('https://evilufs.sh/f/key', PAGE, 900, 700).url).toContain('/cdn-cgi/image/');
 	});
 
+	it('does not build a transform URL for a src the transform cannot express', () => {
+		// Each of these produced a URL the edge can't serve: no source at all, a
+		// trailing space, a protocol-relative host that also escaped the off-zone
+		// check (new URL() throws on it), and a nested transform CF rejects.
+		for (const src of [
+			'',
+			'   ',
+			'//app.ufs.sh/f/k',
+			'https://taro.surf/cdn-cgi/image/width=1200,format=auto//img/a.png'
+		]) {
+			expect(socialImage(src, PAGE, 900, 700), src).toEqual({
+				url: src.trim(),
+				width: 900,
+				height: 700
+			});
+		}
+	});
+
+	it('leaves real sources byte-identical (the degenerate guards are inert)', () => {
+		expect(socialImage(' /img/parent.png ', PAGE, 900, 700).url).toBe(
+			'https://taro.surf/cdn-cgi/image/width=1200,quality=85,fit=scale-down,format=auto//img/parent.png'
+		);
+	});
+
 	it('returns the source verbatim when the page URL is unparseable', () => {
 		expect(socialImage('/img/parent.png', 'not-a-url', 2400, 1800)).toEqual({
 			url: '/img/parent.png',

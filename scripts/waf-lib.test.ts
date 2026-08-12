@@ -50,6 +50,10 @@ describe('buildRule', () => {
 		expect(rule.expression).toBe(RULE_EXPRESSION);
 		expect(rule.ref).toBe(RULE_REF);
 		expect(rule.description).toBe(RULE_DESCRIPTION);
+		// Free requires a 10s period and a mitigation timeout equal to it (and one
+		// rule per zone — see RULE_EXPRESSION); cf.colo.id is required outside
+		// Enterprise. Drifting from any of these makes the rule unappliable. The
+		// beacon threshold is unchanged now that oEmbed shares the rule.
 		expect(rule.ratelimit).toEqual({
 			characteristics: ['ip.src', 'cf.colo.id'],
 			period: 10,
@@ -66,19 +70,6 @@ describe('buildRule', () => {
 		expect(RULE_EXPRESSION).toBe(
 			'((http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download") or ((http.request.method eq "GET" or http.request.method eq "HEAD") and http.request.uri.path eq "/api/oembed"))'
 		);
-	});
-
-	it('stays within the Free plan: one rule, 10s period, matching mitigation timeout', () => {
-		// Free requires a 10s period and a mitigation timeout equal to it (and one
-		// rule per zone — see RULE_EXPRESSION); cf.colo.id is required outside
-		// Enterprise. Drifting from any of these makes the rule unappliable.
-		expect(RULE_RATELIMIT.period).toBe(10);
-		expect(RULE_RATELIMIT.mitigation_timeout).toBe(RULE_RATELIMIT.period);
-		expect(RULE_RATELIMIT.characteristics).toContain('cf.colo.id');
-	});
-
-	it('keeps the beacon threshold unchanged now that oEmbed shares the rule', () => {
-		expect(RULE_RATELIMIT.requests_per_period).toBe(20);
 	});
 });
 

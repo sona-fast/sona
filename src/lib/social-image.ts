@@ -48,6 +48,11 @@ function rawDimensions(
  * (favicon.svg: 200 either way; a non-image source: 415 either way), and the tests
  * below pin the current string, so "fixing" it would change og:image output on
  * every fork storing relative URLs for no gain.
+ *
+ * PRECONDITION: the transformed URL only resolves on a zone with Cloudflare Image
+ * Transformations enabled. `scripts/setup.ts` enables it best-effort (optional), and
+ * a fork served on `*.pages.dev` cannot enable it at all — on such a fork the URL
+ * advertised here 404s and link previews show no image.
  */
 export function socialImage(
 	src: string,
@@ -57,20 +62,29 @@ export function socialImage(
 ): SocialImage {
 	const raw = rawDimensions(width, height);
 
+	// Shapes the transform cannot express, advertised unchanged: an empty/whitespace
+	// src (a transform URL with no source), a protocol-relative one (`new URL()`
+	// throws on it, so the off-zone check below would wrongly read it as same-zone —
+	// cf. the same guard in $lib/server/ref-image.ts), and one that is already a
+	// transform URL (Cloudflare rejects a nested /cdn-cgi/image/).
+	const source = src.trim();
+	if (!source || source.startsWith('//') || source.includes('/cdn-cgi/image/'))
+		return { url: source, ...raw };
+
 	let page: URL;
 	try {
 		page = new URL(pageUrl);
 	} catch {
-		return { url: src, ...raw };
+		return { url: source, ...raw };
 	}
 
 	let srcHost = '';
 	try {
-		srcHost = new URL(src).hostname;
+		srcHost = new URL(source).hostname;
 	} catch {
 		// Not an absolute URL — relative sources are same-zone by definition.
 	}
-	if (srcHost && isOffZoneImageHost(srcHost)) return { url: src, ...raw };
+	if (srcHost && isOffZoneImageHost(srcHost)) return { url: source, ...raw };
 
 	const capped =
 		raw.width && raw.height && raw.width > OG_MAX_WIDTH
@@ -81,7 +95,7 @@ export function socialImage(
 			: raw;
 
 	return {
-		url: `${page.origin}/cdn-cgi/image/width=${OG_MAX_WIDTH},quality=85,fit=scale-down,format=auto/${src}`,
+		url: `${page.origin}/cdn-cgi/image/width=${OG_MAX_WIDTH},quality=85,fit=scale-down,format=auto/${source}`,
 		...capped
 	};
 }
