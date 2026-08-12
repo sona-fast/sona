@@ -40,8 +40,14 @@ describe('socialImage — the url it advertises', () => {
 		});
 	});
 
-	it('does not treat a lookalike host as off-zone', () => {
-		expect(socialImage('https://evilufs.sh/f/key', PAGE, 900, 700).url).toContain('/cdn-cgi/image/');
+	it('advertises an off-zone host nobody enumerated raw, at its original size', () => {
+		// The allow-list case: an R2 custom domain on a DIFFERENT Cloudflare zone. A
+		// deny-list of known off-zone hosts handed this a transform URL that 403s.
+		expect(socialImage('https://cdn.otherdomain.net/a.webp', PAGE, 2400, 1800)).toEqual({
+			url: 'https://cdn.otherdomain.net/a.webp',
+			width: 2400,
+			height: 1800
+		});
 	});
 
 	it('does not build a transform URL for a src the transform cannot express', () => {
@@ -88,21 +94,67 @@ describe('socialImage — the dimensions it advertises', () => {
 		expect({ width, height }).toEqual({ width: 900, height: 700 });
 	});
 
-	it('advertises neither dimension unless BOTH are known', () => {
-		// A lone side would let a consumer infer the wrong aspect ratio, so the
-		// guard drops both — for every missing/zero combination.
+	it('advertises no dimension at all when neither axis is known', () => {
 		for (const [w, h] of [
-			[null, 700],
-			[900, null],
-			[undefined, 700],
-			[900, undefined],
 			[null, null],
 			[undefined, undefined],
-			[0, 700],
-			[900, 0]
+			[0, 0]
 		] as [number | null | undefined, number | null | undefined][]) {
 			const { width, height } = socialImage('/img/x.png', PAGE, w, h);
 			expect({ width, height }).toEqual({ width: null, height: null });
 		}
+	});
+
+	// One column set and the other NULL is possible on a published row (SONA-22 owns
+	// backfilling), and the axis we DO advertise must describe the URL we advertise.
+	// Each direction has its own branch, so each gets its own case.
+	it('caps a lone oversized width to match the transform and invents no height', () => {
+		// The bug this pins: a 2400 width on a TRANSFORMED source used to be advertised
+		// as 2400 beside a URL capped at 1200. Over the cap, so a 900-wide case cannot
+		// catch it. The height the transform scaled to is unknowable without the ratio.
+		expect(socialImage('/img/half.png', PAGE, 2400, null)).toEqual({
+			url: 'https://taro.surf/cdn-cgi/image/width=1200,quality=85,fit=scale-down,format=auto//img/half.png',
+			width: OG_MAX_WIDTH,
+			height: null
+		});
+	});
+
+	it('keeps a lone width the transform leaves alone', () => {
+		const { width, height } = socialImage('/img/half.png', PAGE, 800, null);
+		expect({ width, height }).toEqual({ width: 800, height: null });
+	});
+
+	it('keeps a lone height as stored and invents no width', () => {
+		// The mirror: scale-down only shrinks by the width, which we do not have, so
+		// the stored height stands and no width is guessed from it.
+		const { width, height } = socialImage('/img/half.png', PAGE, null, 1600);
+		expect({ width, height }).toEqual({ width: null, height: 1600 });
+	});
+
+	it('treats a stored 0 as missing on the transformed path', () => {
+		// 0 is not a dimension any consumer can use (and is invalid for oEmbed
+		// type=photo), so it must not survive as a value.
+		expect(socialImage('/img/half.png', PAGE, 0, 700)).toMatchObject({
+			width: null,
+			height: 700
+		});
+		expect(socialImage('/img/half.png', PAGE, 2400, 0)).toMatchObject({
+			width: OG_MAX_WIDTH,
+			height: null
+		});
+	});
+
+	it('advertises a raw source per axis, untouched', () => {
+		// Nothing transformed it, so each axis it has is the real one — no cap.
+		expect(socialImage('https://app12.ufs.sh/f/key', PAGE, 2400, null)).toEqual({
+			url: 'https://app12.ufs.sh/f/key',
+			width: 2400,
+			height: null
+		});
+		expect(socialImage('https://app12.ufs.sh/f/key', PAGE, 0, 1800)).toEqual({
+			url: 'https://app12.ufs.sh/f/key',
+			width: null,
+			height: 1800
+		});
 	});
 });

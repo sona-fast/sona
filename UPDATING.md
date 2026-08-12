@@ -80,6 +80,30 @@ Page manually with `?afterId=<lastId>` from each response until `rasters` comes
 back below the limit. Stickers imported after the upgrade are sniffed at import
 time and need nothing.
 
+## One-time per fork: re-apply the WAF rate-limit rule (oEmbed)
+
+The release that adds the oEmbed provider (`/api/oembed`) makes a second `/api`
+path reachable without an admin session, and widens the WAF rate-limit rule to
+cover it. New forks get the widened rule from `npm run setup`; a fork that was
+**already deployed** still has the older download-only rule, so until you re-apply
+it the oEmbed endpoint is anonymous with no rate limit.
+
+Run this once per fork, from a clone:
+
+```sh
+CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- <domain>
+```
+
+`<domain>` is your site domain (e.g. `akito.dog`). The token needs one permission,
+**Zone · WAF · Edit**, on a token whose Zone Resources include that domain; it is
+read from the environment and never printed. The command is idempotent — the first
+run reports `updated`, any re-run reports `exists` — so it is safe to repeat if
+you're unsure whether it already ran.
+
+> **Serving on `*.pages.dev`?** Then your site has no Cloudflare zone, and a
+> rate-limiting rule cannot be applied at all. Nothing to run; the endpoint is
+> unprotected until the site moves to a custom domain.
+
 ## First sync only: check the Actions tab
 
 There is exactly one gotcha, and it only bites the **first time** you ever sync a

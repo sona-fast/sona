@@ -7,11 +7,11 @@
 //
 // Deliberately unlike cdnImage() in $lib/img: no dev bypass. Social consumers
 // fetch from the public edge, not from the dev server. No animated-source bypass
-// either — considered and declined: the off-zone bypass below already covers the
+// either — considered and declined: the same-zone check below already covers the
 // 403 case (off-zone GIFs 403 the transform anyway, per img.ts), and on-zone
 // animated sources ride the transform successfully (see cdnImage's docblock).
 
-import { isOffZoneImageHost } from '$lib/img';
+import { isSameZoneImageHost } from '$lib/img';
 
 export const OG_MAX_WIDTH = 1200;
 
@@ -23,25 +23,45 @@ export interface SocialImage {
 	height: number | null;
 }
 
-/** Raw dimensions, normalised: a missing side means we advertise neither. */
-function rawDimensions(
-	width: number | null | undefined,
-	height: number | null | undefined
-): { width: number | null; height: number | null } {
-	if (!width || !height) return { width: null, height: null };
-	return { width, height };
+/** One axis, normalised: a stored 0 is as good as missing (and invalid to advertise). */
+function axis(value: number | null | undefined): number | null {
+	return value ? value : null;
+}
+
+/**
+ * The dimensions of the TRANSFORMED image (`width=1200,fit=scale-down`), per axis
+ * so a row with only one column set still describes the URL we advertise:
+ *  - both known → the scaled pair, ratio preserved;
+ *  - width only → the width the transform yields (capped), while the height it
+ *    scaled to is unknowable without the original ratio, so it stays null;
+ *  - height only → the stored height, and no width; scale-down caps the WIDTH, so
+ *    the height only moves when the unknown original width was over the cap, and
+ *    the real stored value beats the endpoint's placeholder either way.
+ * No ratio is invented from a single axis on any path.
+ */
+function transformedDimensions(raw: { width: number | null; height: number | null }): {
+	width: number | null;
+	height: number | null;
+} {
+	if (raw.width === null || raw.width <= OG_MAX_WIDTH) return raw;
+	if (raw.height === null) return { width: OG_MAX_WIDTH, height: null };
+	return {
+		width: OG_MAX_WIDTH,
+		height: Math.round(raw.height * (OG_MAX_WIDTH / raw.width))
+	};
 }
 
 /**
  * The image URL and matching dimensions to advertise for `src` on the page at
- * `pageUrl`. Transforms by default — relative sources and absolute ones on the
- * fork's own zone (including its r2PublicUrl subdomain) — capped to OG_MAX_WIDTH.
- * A source on a KNOWN off-zone host (UploadThing, `*.r2.dev`) is advertised
- * untouched at its original size instead: the transform 403s those (see
- * $lib/img) and a JSON payload has no rawFallback to swap the original back in.
- * `storageProvider` defaults to uploadthing, so that is the common case. Verified
- * live 2026-08-12: transforming an off-zone source returns 403 even on a zone whose
- * image_resizing setting is "open".
+ * `pageUrl`. Transforms only what the edge can serve — relative sources, and
+ * absolute ones on the page's own zone per isSameZoneImageHost (including the
+ * fork's r2PublicUrl subdomain) — capped to OG_MAX_WIDTH. Every other host
+ * (UploadThing, `*.r2.dev`, an R2 custom domain on a different zone, any non-CF
+ * CDN) is advertised untouched at its original size instead: the transform 403s
+ * off-zone sources (see $lib/img) and a JSON payload has no rawFallback to swap
+ * the original back in. `storageProvider` defaults to uploadthing, so that is the
+ * common case. Verified live 2026-08-12: transforming an off-zone source returns
+ * 403 even on a zone whose image_resizing setting is "open".
  *
  * A root-relative `src` yields a double slash after `format=auto/`. That is
  * deliberate — verified live that Cloudflare resolves both forms identically
@@ -60,7 +80,7 @@ export function socialImage(
 	width?: number | null,
 	height?: number | null
 ): SocialImage {
-	const raw = rawDimensions(width, height);
+	const raw = { width: axis(width), height: axis(height) };
 
 	// Shapes the transform cannot express, advertised unchanged: an empty/whitespace
 	// src (a transform URL with no source), a protocol-relative one (`new URL()`
@@ -84,18 +104,10 @@ export function socialImage(
 	} catch {
 		// Not an absolute URL — relative sources are same-zone by definition.
 	}
-	if (srcHost && isOffZoneImageHost(srcHost)) return { url: source, ...raw };
-
-	const capped =
-		raw.width && raw.height && raw.width > OG_MAX_WIDTH
-			? {
-					width: OG_MAX_WIDTH,
-					height: Math.round(raw.height * (OG_MAX_WIDTH / raw.width))
-				}
-			: raw;
+	if (srcHost && !isSameZoneImageHost(srcHost, page.hostname)) return { url: source, ...raw };
 
 	return {
 		url: `${page.origin}/cdn-cgi/image/width=${OG_MAX_WIDTH},quality=85,fit=scale-down,format=auto/${source}`,
-		...capped
+		...transformedDimensions(raw)
 	};
 }

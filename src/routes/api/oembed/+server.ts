@@ -85,14 +85,17 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 		provider_name: settings.siteName,
 		provider_url: url.origin,
 		url: image.url,
-		// Per axis: socialImage() returns neither dimension unless it has both, but a
-		// published row can have one column set and the other NULL, and the real value
-		// must survive that. Placeholders only when no axis value exists at all —
-		// oEmbed requires width/height for type=photo (SONA-22 owns backfilling them).
-		width: image.width ?? row.width ?? 1200,
-		height: image.height ?? row.height ?? 800,
+		// socialImage() returns each axis it can vouch for AS THE URL ABOVE describes
+		// it — per axis, so a row with one column NULL keeps the real value, and never
+		// the stored value when the transform changed it. Placeholders are a last
+		// resort for an axis it has no value for: oEmbed requires width/height for
+		// type=photo (SONA-22 owns backfilling the columns).
+		width: image.width ?? 1200,
+		height: image.height ?? 800,
 		// oEmbed's cache_age is a hint for the CONSUMER's own cache, unrelated to this
-		// response's Cache-Control, so there is no mismatch to reconcile; lowering it
+		// response's Cache-Control — Cloudflare does not treat a JSON API response as
+		// cache-eligible without a per-zone Cache Rule, so this response is not
+		// edge-cached at all and there is no mismatch to reconcile; lowering it
 		// would only multiply consumer refetches.
 		cache_age: 3600
 	});

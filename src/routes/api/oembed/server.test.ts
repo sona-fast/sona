@@ -189,15 +189,28 @@ describe('GET /api/oembed — the image it advertises', () => {
 		expect(payload.height).toBe(900);
 	});
 
-	// socialImage() advertises neither dimension unless it has both, but both columns
-	// are nullable and the real value must survive per axis — only the missing one
-	// falls back to a placeholder (SONA-22 owns backfilling these). Both directions
-	// are covered: with only one seeded, dropping either `?? row.<axis>` from the
-	// chain in +server.ts must fail a test.
+	// Both columns are nullable, and socialImage() answers per axis: the axis it can
+	// vouch for FOR THE URL IT RETURNS survives, the other falls back to a placeholder
+	// (SONA-22 owns backfilling these). Every branch gets a row, so each fails
+	// independently — notably `over-cap-width`, where the stored 2400 contradicts the
+	// 1200-capped URL, and `zero-width`, where a stored 0 is not a dimension at all.
 	it.each([
 		{ name: 'width', width: 800, height: null, expected: { width: 800, height: 800 } },
-		{ name: 'height', width: null, height: 700, expected: { width: 1200, height: 700 } }
-	])('keeps the $name it does have when the other column is NULL', async (c) => {
+		{ name: 'height', width: null, height: 700, expected: { width: 1200, height: 700 } },
+		{
+			name: 'over-cap-width',
+			width: 2400,
+			height: null,
+			expected: { width: 1200, height: 800 }
+		},
+		{
+			name: 'over-cap-height',
+			width: null,
+			height: 1600,
+			expected: { width: 1200, height: 1600 }
+		},
+		{ name: 'zero-width', width: 0, height: 700, expected: { width: 1200, height: 700 } }
+	])('advertises dimensions describing the url — $name column half-filled', async (c) => {
 		const { db, platform } = makeDb();
 		await addImage(db, {
 			slug: `half-${c.name}`,

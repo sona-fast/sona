@@ -114,6 +114,11 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// it anonymously by definition — behind the gate it 401s and every link preview
 	// breaks. It is GET-only, describes only its own host's URLs, and filters on
 	// `published`. Keep this list short and each entry justified.
+	//
+	// The WAF rate-limit rule (scripts/waf-lib.ts) covers only GET/HEAD on /api/oembed,
+	// not the other methods: with no other handler exported, SvelteKit answers those
+	// with a 405 before any of this endpoint's code runs, so they cost no D1 reads and
+	// are deliberately outside the rule — the asymmetry is not an oversight.
 	if (
 		event.url.pathname.startsWith('/api') &&
 		!event.url.pathname.startsWith('/api/cron/') &&

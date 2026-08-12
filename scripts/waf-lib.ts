@@ -63,7 +63,9 @@ export const RULE_EXPRESSION =
  * Rate-limit knobs: at most 20 matching requests per 10s from one IP, then that IP
  * is blocked for 10s. Generous enough that a real visitor mashing download never
  * trips it, tight enough that a scripted loop is throttled to a trickle. Kept at 20
- * when /api/oembed joined the rule — oEmbed traffic is near zero.
+ * when /api/oembed joined the rule, with the failure mode that buys: unfurl services
+ * share egress IPs, so ~21 links pasted into one channel within 10s from a single
+ * colo trip the block, and the consumer silently caches the failed preview.
  *
  * `cf.colo.id` is REQUIRED alongside `ip.src`: outside Enterprise, Cloudflare
  * counts rate-limit rules per data center, and the Rulesets API rejects the rule
