@@ -49,6 +49,9 @@ describe('VR avatar-name placeholder copy', () => {
 			const msg = messages(locale).admin_vr_name_placeholder;
 			expect(msg, locale).not.toContain('Taro');
 			expect(msg, locale).not.toContain('タロ');
+			// Emptying the stand-in passes every other guard — key parity sees the
+			// key, parameter parity sees [] on both sides — and renders "例:  (VRChat)".
+			expect(messages(locale).admin_vr_name_placeholder_fallback, locale).toBeTruthy();
 		}
 	});
 });

@@ -116,8 +116,11 @@ test('the edit form seeds the placeholder from the avatar\'s own character', asy
 	await page.goto('/admin/vr/1/edit');
 
 	// Avatar 1 belongs to 'Taro' (id 1), so the selected character must win over
-	// the site's own 'Thistle' — the edit loader has its own characters query,
-	// which could regress to the first row by name independently of /new.
+	// the site's own 'Thistle'. Scope honestly: 'Taro' is ALSO first by name, so
+	// this cannot discriminate a first-row-by-name regression (mutation-checked)
+	// — it pins the selected-character arm on a real edit load, and that the page
+	// no longer shows the old hardcoded example. The owner arm is unreachable
+	// here anyway: vr_avatars.character_id is NOT NULL, so one is always selected.
 	await expect(page.locator('input[name="name"]')).toHaveAttribute(
 		'placeholder',
 		'e.g. Taro (VRChat)'
