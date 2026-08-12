@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
 import { getReadDb } from '$lib/server/db';
-import { getRawSetting } from '$lib/server/settings';
+import { getRawSettings } from '$lib/server/settings';
 import type { PageServerLoad } from './$types';
 
 // The /ai disclosure page is a per-fork toggle (SONA-167). Like every other
@@ -21,26 +21,26 @@ import type { PageServerLoad } from './$types';
 //
 // The override text is returned HERE, not by the (public) layout: the layout
 // payload rides every public page, and a disabled page's text must not keep
-// shipping to every visitor. Same cached settings read the layout uses, so
-// this adds no D1 round-trip on a warm isolate.
+// shipping to every visitor.
+//
+// These reads deliberately bypass the settings cache, so this route costs one
+// D1 round-trip that a cached read would not. That is the price of failing
+// closed: the cache is populated by getSettings, which swallows read errors
+// and hands back DEFAULTS.
 export const load: PageServerLoad = async ({ parent, platform }) => {
 	const { settings } = await parent();
 	if (!settings.aiPageEnabled) error(404, 'Not found');
 
 	const db = getReadDb(platform!.env.DB);
 	try {
-		const stored = await getRawSetting(db, 'aiPageEnabled');
+		const raw = await getRawSettings(db, ['aiPageEnabled', 'aiPageText', 'aiPageUpdatedAt']);
 		// Absent means ON only for installs that pre-date the feature; an
 		// explicit 'false' is an owner who opted out, in the wizard or Settings.
-		if (stored === 'false') error(404, 'Not found');
-		// Raw reads here too: getSettings self-catches D1 errors and returns
-		// DEFAULTS, which would render the built-in copy for an owner who
-		// overrode it precisely because a default claim is wrong for them.
-		const [aiPageText, aiPageUpdatedAt] = await Promise.all([
-			getRawSetting(db, 'aiPageText'),
-			getRawSetting(db, 'aiPageUpdatedAt')
-		]);
-		return { aiPageText: aiPageText ?? '', aiPageUpdatedAt: aiPageUpdatedAt ?? '' };
+		if (raw.aiPageEnabled === 'false') error(404, 'Not found');
+		return {
+			aiPageText: raw.aiPageText ?? '',
+			aiPageUpdatedAt: raw.aiPageUpdatedAt ?? ''
+		};
 	} catch (e) {
 		// Rethrow our own 404 unchanged; any read failure becomes one too, so a
 		// blip can neither publish a declined page nor substitute the default

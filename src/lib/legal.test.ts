@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
+	metaDescription,
 	defaultPrivacyPolicy,
 	defaultTerms,
 	legalUpdatedDate,
@@ -170,6 +171,24 @@ describe('privacy page wiring', () => {
 			'utf8'
 		);
 		expect(src).toMatch(/aiToolsDisclosed:\s*settings\.aiPageEnabled/);
+	});
+});
+
+describe('metaDescription', () => {
+	it('returns short text unchanged', () => {
+		expect(metaDescription('Short enough.')).toBe('Short enough.');
+	});
+
+	it('cuts at a word boundary and marks the truncation', () => {
+		const long = 'word '.repeat(60).trim();
+		const out = metaDescription(long);
+		expect(out.length).toBeLessThanOrEqual(201);
+		expect(out.endsWith('\u2026')).toBe(true);
+		expect(out).not.toMatch(/wor\u2026$/);
+	});
+
+	it('adds no ellipsis when nothing was removed', () => {
+		expect(metaDescription('a'.repeat(200))).not.toContain('\u2026');
 	});
 });
 

@@ -57,6 +57,19 @@ export function splitParagraphs(text: string): string[] {
 		.split(/\n\s*\n/);
 }
 
+/**
+ * Meta description for a legal-style page: cut at a word boundary and add an
+ * ellipsis only when something was actually removed, so a share card never
+ * ends mid-word. Shared by /privacy, /terms and /ai.
+ */
+export function metaDescription(text: string, limit = 200): string {
+	const trimmed = text.trim();
+	if (trimmed.length <= limit) return trimmed;
+	const cut = trimmed.slice(0, limit);
+	const lastSpace = cut.lastIndexOf(' ');
+	return `${lastSpace > 0 ? cut.slice(0, lastSpace) : cut}\u2026`;
+}
+
 export interface LegalOptions {
 	siteName: string;
 	/** From the `contactEmail` setting; empty falls back to a generic phrase. */

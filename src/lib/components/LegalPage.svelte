@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import Meta from '$lib/components/Meta.svelte';
 	import { formatDate } from '$lib';
-	import { legalUpdatedDate, splitParagraphs, type LegalSection } from '$lib/legal';
+	import { legalUpdatedDate, splitParagraphs, metaDescription, type LegalSection } from '$lib/legal';
 	import * as m from '$lib/paraglide/messages';
 
 	let {
@@ -25,9 +25,7 @@
 
 	// Meta description: first paragraph of the override, else the first default
 	// section's first paragraph. Trimmed to a sane length for social cards.
-	let description = $derived(
-		(override.trim() || sections[0]?.body[0]).slice(0, 200)
-	);
+	let description = $derived(metaDescription(override.trim() || sections[0]?.body[0] || ''));
 
 	// "Last updated" date from a stable source (the owner's save stamp, or the
 	// per-release defaults date) — never `new Date()`, which would always be today.

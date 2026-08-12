@@ -74,8 +74,10 @@ describe('(public) layout load — settings payload', () => {
 		const { readFileSync } = await import('node:fs');
 		for (const rel of sources) {
 			const src = readFileSync(new URL(`../../routes/${rel}`, import.meta.url), 'utf8');
+			// Match the RETURN site: a bare `const publicSettings = toPublicSettings(...)`
+			// would stay green if the return reverted to the unstripped object.
 			expect(src, `${rel} must RETURN settings through toPublicSettings`).toMatch(
-				/settings: toPublicSettings\(|const publicSettings = toPublicSettings\(/
+				/settings: toPublicSettings\(|settings: publicSettings/
 			);
 		}
 	});

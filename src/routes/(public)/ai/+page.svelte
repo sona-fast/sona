@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import Meta from '$lib/components/Meta.svelte';
 	import { defaultAiDisclosure } from '$lib/ai-disclosure';
-	import { splitParagraphs } from '$lib/legal';
+	import { splitParagraphs, metaDescription } from '$lib/legal';
 	import { formatDate } from '$lib';
 	import * as m from '$lib/paraglide/messages';
 
@@ -21,14 +21,7 @@
 	// date constant of its own.
 	let updatedAt = $derived(override.trim() ? data.aiPageUpdatedAt : '');
 
-	// Meta description: cut at a word boundary, ellipsis only when truncated.
-	let description = $derived.by(() => {
-		const text = override.trim() || disclosure.intro;
-		if (text.length <= 200) return text;
-		const cut = text.slice(0, 200);
-		const lastSpace = cut.lastIndexOf(' ');
-		return `${lastSpace > 0 ? cut.slice(0, lastSpace) : cut}…`;
-	});
+	let description = $derived(metaDescription(override.trim() || disclosure.intro));
 </script>
 
 <Meta

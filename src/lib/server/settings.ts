@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { siteSettings } from './db/schema';
 import { APP_NAME } from '$lib/config';
 import { DEFAULT_GALLERY_SORT, isValidGallerySort, type GallerySort } from '$lib/gallery';
@@ -301,6 +301,20 @@ export async function getSettings(
 export async function getRawSetting(db: Database, key: string): Promise<string | null> {
 	const row = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).get();
 	return row?.value ?? null;
+}
+
+/**
+ * Read several raw rows in ONE query. Like getRawSetting this bypasses the
+ * settings cache and lets D1 errors propagate, which is what callers that must
+ * fail closed need — they just should not pay a round-trip per key to get it.
+ */
+export async function getRawSettings(
+	db: Database,
+	keys: string[]
+): Promise<Record<string, string | null>> {
+	const rows = await db.select().from(siteSettings).where(inArray(siteSettings.key, keys));
+	const found = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+	return Object.fromEntries(keys.map((k) => [k, found[k] ?? null]));
 }
 
 /** Upsert a single raw site_settings row. */
