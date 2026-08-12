@@ -225,14 +225,15 @@ export const VR_FRAME_DISTANCE_CAP = 0.8 * VR_CAMERA_FAR;
  * headroom, so the pivot sits lower: a quarter of the way up from the hips,
  * hips + 0.25 × (head − hips), ≈ 0.57 of height. The vertical fit is then
  * 1.8 × span of half-height. The width term is a portrait FLOOR, not a fit:
- * it never lets the visible half-width drop below 0.6 × span (≈ elbow
- * level), and only governs below aspect ≈ 0.333 (0.6 ∕ 1.8). At
- * height-governed distances the visible half-width is 1.8 × span × aspect,
- * so the T-pose arm half-span ≈ 1.45 × span fits whenever aspect ≥ ~0.81
- * and crops progressively below that — deliberate: fitting the full arm
- * span on a portrait viewport backed the camera so far off the body receded
- * (fill dropped to ≈ 0.33 on a phone), while the crop lands mid-forearm on
- * a phone aspect, never at the shoulders, keeping ≈ 0.65 body fill.
+ * it never lets the visible half-width drop below 0.6 × span (just outside
+ * shoulder half-breadth, ≈ 0.46 × span), and only governs below aspect
+ * ≈ 0.333 (0.6 ∕ 1.8). At height-governed distances the visible half-width
+ * is 1.8 × span × aspect, so the T-pose arm half-span ≈ 1.45 × span fits
+ * whenever aspect ≥ ~0.81 and crops progressively below that — deliberate:
+ * fitting the full arm span on a portrait viewport backed the camera so far
+ * off the body receded (fill dropped to ≈ 0.33 on a phone), while at a real
+ * phone aspect the crop lands on the upper arm (visible half-width ≈ 0.83 ×
+ * span), never inside the shoulders, keeping ≈ 0.65 body fill.
  * Whichever fit needs the greater distance at this fov/aspect wins, capped
  * inside the viewer camera's far plane.
  *
@@ -302,9 +303,9 @@ export function frameHumanoid(input: {
 	const halfFovTan = Math.tan((fovDeg * Math.PI) / 360);
 	const fitHeight = (1.8 * span) / halfFovTan;
 	// Width FLOOR, not a fit: never let the visible half-width drop below
-	// 0.6 × span (≈ elbow level). It only governs below aspect ≈ 0.333 —
-	// wider viewports crop the arms progressively instead of backing the
-	// camera off; the doc comment above carries the rationale.
+	// 0.6 × span (just outside the shoulders). It only governs below aspect
+	// ≈ 0.333 — wider viewports crop the arms progressively instead of
+	// backing the camera off; the doc comment above carries the rationale.
 	const fitWidth = (0.6 * span) / (halfFovTan * aspect);
 	const distance = Math.min(Math.max(fitHeight, fitWidth), VR_FRAME_DISTANCE_CAP);
 

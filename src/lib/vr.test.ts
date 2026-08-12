@@ -317,11 +317,25 @@ describe('frameHumanoid (SONA-165)', () => {
 		expect(nearCoincident).not.toBeNull();
 		expect(nearCoincident.position.z).toBeGreaterThan(0);
 		expect(nearCoincident.position.x).toBeCloseTo(0, 5);
+		// Same judgment must SCALE: on a 100× skeleton (span 70), reversed arms
+		// 0.05 apart are still noise relative to the body. The relative epsilon
+		// (1e-3 × span = 0.07) rejects them and keeps the +Z fallback; an
+		// absolute 1e-3 would trust the noise and flip the camera to −Z.
+		const scaledNoise = frameHumanoid({
+			...upright,
+			hips: { x: 0, y: 90, z: 0 },
+			head: { x: 0, y: 160, z: 0 },
+			leftUpperArm: { x: -0.025, y: 135, z: 0 },
+			rightUpperArm: { x: 0.025, y: 135, z: 0 }
+		})!;
+		expect(scaledNoise).not.toBeNull();
+		expect(scaledNoise.position.z).toBeGreaterThan(0);
 	});
 
 	it('portrait crops the arms instead of receding: ≥0.6-span half-width, ≥60% vertical fill', () => {
 		// The width term is a FLOOR: the visible half-width never drops below
-		// 0.6 × span (a mid-forearm crop) and the frame never backs off to fit
+		// 0.6 × span (an arm crop just outside the shoulders) and the frame
+		// never backs off to fit
 		// the full arm span — the height fit governs on real phone aspects and
 		// the body keeps filling the frame. Anchored to the output: half-width
 		// = dist × tan(fov/2) × aspect. At 0.5 the height fit governs; at 0.3

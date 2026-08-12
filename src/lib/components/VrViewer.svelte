@@ -418,11 +418,15 @@
 	async function exit3d() {
 		abort?.abort();
 		abort = null;
-		// Await the native exit transition (~200ms) so the poster doesn't render
+		// Bump the generation BEFORE awaiting the exit transition: the aborted
+		// download rejects into enter3d's catch during the ~200ms native exit,
+		// and a stale generation makes it bail silently instead of painting a
+		// fullscreen-sized "couldn't load" flash the user didn't cause.
+		generation++;
+		// Await the native exit transition so the poster doesn't render
 		// fullscreen-sized mid-transition.
 		await exitAnyFullscreen();
 		setFallbackFullscreen(false);
-		generation++;
 		disposeScene?.();
 		disposeScene = null;
 		active = false;
@@ -503,10 +507,6 @@
 			// instead of clobbering it with ''.
 			prevOverflow = document.documentElement.style.overflow;
 			document.documentElement.style.overflow = 'hidden';
-		} else {
-			document.documentElement.style.overflow = prevOverflow;
-		}
-		if (on) {
 			// Inert every sibling on the path from the viewer up to <body>: the
 			// overlay only covers them visually. Skip anything already inert —
 			// it isn't ours to restore. ('inert' needs iOS/Safari ≥ 15.5 /
@@ -526,6 +526,7 @@
 				}
 			}
 		} else {
+			document.documentElement.style.overflow = prevOverflow;
 			for (const el of inerted) el.inert = false;
 			inerted = [];
 		}
@@ -660,10 +661,10 @@
 				     aria-hidden, keeping the accessible name to the active label
 				     only. -->
 				<span class="fs-label" class:inactive={fsActive} aria-hidden={fsActive}>
-					<Maximize size={16} /> {m.vr_fullscreen()}
+					<Maximize size={16} aria-hidden="true" /> {m.vr_fullscreen()}
 				</span>
 				<span class="fs-label" class:inactive={!fsActive} aria-hidden={!fsActive}>
-					<Minimize size={16} /> {m.vr_exit_fullscreen()}
+					<Minimize size={16} aria-hidden="true" /> {m.vr_exit_fullscreen()}
 				</span>
 			</button>
 			<button bind:this={exitButton} class="btn btn-secondary" onclick={exit3d}>
@@ -692,6 +693,12 @@
 		flex: 1;
 		min-height: 0;
 		border-radius: 0;
+	}
+
+	/* The stage bleeds, but the controls keep a side inset — at x=0 the first
+	   pill's focus ring (2px outline, 2px offset) would clip at the edge. */
+	.viewer:fullscreen .controls {
+		padding-inline: 12px;
 	}
 
 	/* iPhone's no-fullscreen-API fallback: a fixed overlay above the nav
@@ -737,6 +744,12 @@
 		flex: 1;
 		min-height: 0;
 		border-radius: 0;
+	}
+
+	/* Same side inset as the :fullscreen rule above (kept separate on purpose,
+	   like every .fs-fallback rule). */
+	.viewer.fs-fallback .controls {
+		padding-inline: 12px;
 	}
 
 	.stage {

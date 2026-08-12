@@ -82,6 +82,9 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect(src).toContain('el === viewer');
 		// Leaving webkit fullscreen goes through the prefixed exit call.
 		expect(src).toContain('doc.webkitExitFullscreen?.()');
+		// A toggle press while ANY native fullscreen is active exits it rather
+		// than stacking a second request.
+		expect(src).toMatch(/if \(exitAnyFullscreen\(\)\) return/);
 		// The overlay honors Escape like native fullscreen does…
 		expect(src).toMatch(/fallbackFullscreen && e\.key === 'Escape'/);
 		// …styles via its own class (the stylesheet documents why its rules
@@ -95,6 +98,9 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect(src).toContain('prevOverflow = document.documentElement.style.overflow');
 		expect(src).toContain("document.documentElement.style.overflow = 'hidden'");
 		expect(src).toContain('document.documentElement.style.overflow = prevOverflow');
+		// Idempotence guard: a repeat call (e.g. unmount after exit3d already
+		// cleared the overlay) is a no-op, not a spurious exit announcement.
+		expect(src).toMatch(/if \(fallbackFullscreen === on\) return/);
 	});
 
 	it('inerts the page behind the overlay and restores exactly what it set', () => {
@@ -123,6 +129,9 @@ describe('VrViewer wiring (SONA-124)', () => {
 		expect(src).toContain(
 			'fsAnnouncement = on ? m.vr_entered_fullscreen() : m.vr_exited_fullscreen()'
 		);
+		// fsActive covers BOTH modes — collapsing it to isFullscreen alone would
+		// leave the iPhone overlay showing "Fullscreen" while the overlay is up.
+		expect(src).toContain('$derived(isFullscreen || fallbackFullscreen)');
 	});
 
 	it('frames from the humanoid skeleton, bounding box only as fallback (SONA-165)', () => {
@@ -156,6 +165,8 @@ describe('VrViewer wiring (SONA-124)', () => {
 		// the moment the user takes the camera…
 		expect(ro).toMatch(/\|\| userAdjusted\) return/);
 		expect(ro).toContain('frameHumanoid({');
+		// …recomputed for the LIVE aspect (a constant would defeat the refit).
+		expect(ro).toContain('aspect: w / h');
 		// …and rescales the CURRENT camera offset, preserving direction and
 		// target so auto-rotate isn't snapped back.
 		expect(ro).toContain(
@@ -174,6 +185,22 @@ describe('VrViewer wiring (SONA-124)', () => {
 	it('guards every await against a stale generation (exit-during-load race, D6)', () => {
 		expect(src).toContain('const gen = ++generation');
 		expect((src.match(/gen !== generation/g) ?? []).length).toBeGreaterThanOrEqual(4);
+		// Exit 3D bumps the generation BEFORE awaiting the native fullscreen
+		// exit, so the aborted download's rejection bails silently instead of
+		// painting a fullscreen-sized failure the user didn't cause — and the
+		// await itself keeps the poster from rendering mid-transition.
+		expect(src).toMatch(/generation\+\+;[\s\S]{0,400}?await exitAnyFullscreen\(\)/);
+	});
+
+	it('hands focus to Exit 3D at load START and keeps the zoom clamp on the shared cap', () => {
+		// Activation unmounts the View in 3D button the click came from; focus
+		// must move to Exit 3D before the download, not after the scene builds,
+		// or it sits on <body> for the whole load. Stale-generation guarded.
+		const beforeImport = src.split("import('three')")[0];
+		expect(beforeImport).toMatch(/gen !== generation\) return;\s*\n\s*exitButton\?\.focus\(\)/);
+		// The keyboard zoom-out clamp shares the framing cap constant — a bare
+		// numeric literal would silently detach it from the camera far plane.
+		expect(src).toContain('Math.min(VR_FRAME_DISTANCE_CAP, spherical.radius / 0.9)');
 	});
 
 	it('keeps the progress live region always mounted and the failure as an alert (A8/A9)', () => {
