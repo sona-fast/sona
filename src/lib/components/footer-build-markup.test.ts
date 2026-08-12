@@ -20,3 +20,11 @@ describe('footer build receipt markup', () => {
 		expect(footerSrc).toMatch(/\{:else\}\s*\{m\.footer_build\(\{ sha: receipt\.short \}\)\}/);
 	});
 });
+
+describe('footer AI-page link gating markup', () => {
+	// The /ai footer link must disappear with the toggle (SONA-167): a fork
+	// that turned the page off gets neither the link nor the route, together.
+	it('wraps the AI link in the aiPageEnabled conditional', () => {
+		expect(footerSrc).toMatch(/\{#if settings\.aiPageEnabled\}\s*<a href="\/ai"/);
+	});
+});

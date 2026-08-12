@@ -25,6 +25,9 @@
 			<nav class="legal-links" aria-label={m.footer_legal_label()}>
 				<a href="/privacy">{m.footer_privacy()}</a>
 				<a href="/terms">{m.footer_terms()}</a>
+				{#if settings.aiPageEnabled}
+					<a href="/ai">{m.footer_ai()}</a>
+				{/if}
 			</nav>
 			<SonaBadge {host} />
 			{#if receipt}

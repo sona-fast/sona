@@ -35,6 +35,13 @@ export interface SiteSettings {
 	 * that page's override is saved. Drives its "Last updated" line when an
 	 * override is set. Empty → the page shows the built-in defaults' date instead. */
 	termsUpdatedAt: string;
+	/** Whether the /ai disclosure page (and its footer link) is served. Stored
+	 * as 'true'/'false'; ABSENT MEANS ON — the fleet default is to disclose,
+	 * and a fork owner opts out in Settings (SONA-167). */
+	aiPageEnabled: boolean;
+	/** Owner-editable override for the /ai page body (plain text). Empty → the
+	 * default disclosure copy from `$lib/ai-disclosure` is shown instead. */
+	aiPageText: string;
 
 	// --- Sona / reference profile (shown on /art, part of the threePath landing) ---
 	// The reference sheet itself is the most recent published gallery image
@@ -129,6 +136,10 @@ const DEFAULTS: SiteSettings = {
 	// Empty → the legal pages show the built-in defaults' date (LEGAL_DEFAULTS_UPDATED).
 	privacyUpdatedAt: '',
 	termsUpdatedAt: '',
+	// The /ai disclosure page defaults ON fleet-wide; '' override → the default
+	// copy from $lib/ai-disclosure.
+	aiPageEnabled: true,
+	aiPageText: '',
 	sonaSpecies: '',
 	sonaBuild: '',
 	sonaKeyFeatures: '',
@@ -200,6 +211,10 @@ export async function getSettings(
 			termsOfService: map.termsOfService ?? DEFAULTS.termsOfService,
 			privacyUpdatedAt: map.privacyUpdatedAt ?? DEFAULTS.privacyUpdatedAt,
 			termsUpdatedAt: map.termsUpdatedAt ?? DEFAULTS.termsUpdatedAt,
+			// Default-ON boolean: only an explicit stored 'false' turns the /ai
+			// page off (unlike the default-off toggles below, which require 'true').
+			aiPageEnabled: map.aiPageEnabled !== 'false',
+			aiPageText: map.aiPageText ?? DEFAULTS.aiPageText,
 			sonaSpecies: map.sonaSpecies ?? DEFAULTS.sonaSpecies,
 			sonaBuild: map.sonaBuild ?? DEFAULTS.sonaBuild,
 			sonaKeyFeatures: map.sonaKeyFeatures ?? DEFAULTS.sonaKeyFeatures,

@@ -329,6 +329,11 @@ export const actions = {
 			// $lib/legal on /privacy and /terms. Generous cap for full policy text.
 			privacyPolicy,
 			termsOfService,
+			// /ai disclosure page (SONA-167): the toggle posts from the same form as
+			// the legal overrides, so an unchecked box is a deliberate off. Blank
+			// text falls back to the default copy from $lib/ai-disclosure.
+			aiPageEnabled: data.get('aiPageEnabled') === 'on',
+			aiPageText: text('aiPageText', 100000),
 			// Undefined unless the matching override text changed above, so each is
 			// only written when that page's policy actually changed.
 			privacyUpdatedAt,
