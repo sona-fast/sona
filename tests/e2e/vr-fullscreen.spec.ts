@@ -62,6 +62,11 @@ test('native fullscreen: the wrapper goes fullscreen, the toggle relabels, and e
 	const toggle = page.getByRole('button', { name: 'Fullscreen', exact: true });
 	await expect(toggle).toBeVisible();
 
+	// Inline height first: every size assertion below is relative to it, so the
+	// spec carries no magic pixel numbers that a layout tweak would invalidate.
+	const stage = page.locator('.stage');
+	const inlineHeight = (await stage.boundingBox())!.height;
+
 	await toggle.click();
 
 	// The fullscreen element is the WRAPPER, not the bare stage — the controls
@@ -84,14 +89,29 @@ test('native fullscreen: the wrapper goes fullscreen, the toggle relabels, and e
 	await expect(exitFullscreen).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Exit 3D' })).toBeVisible();
 	// The name carries the state, so there is no pressed-state attribute to
-	// contradict it (dropping aria-pressed was the a11y resolution).
-	await expect(exitFullscreen).not.toHaveAttribute('aria-pressed', /.*/);
+	// contradict it (dropping aria-pressed was the a11y resolution). The
+	// single-argument form asserts ABSENCE — a value form would also pass on an
+	// attribute that merely fails to match.
+	await expect(exitFullscreen).not.toHaveAttribute('aria-pressed');
 
-	// The stage fills the fullscreen wrapper: taller than the inline 4:3-ish
-	// stage was, and the renderer's canvas follows it.
-	const stage = page.locator('.stage');
+	// The stage fills the fullscreen wrapper, and the renderer's canvas follows
+	// it. POLLED, not read once: Chromium sets document.fullscreenElement before
+	// the element has actually resized, so an immediate measurement can still
+	// return the inline height and make the shrink comparison below flake.
+	await expect
+		.poll(async () => (await stage.boundingBox())?.height ?? 0, {
+			message: 'stage grows into the fullscreen wrapper',
+			timeout: 10_000
+		})
+		.toBeGreaterThan(inlineHeight);
 	const fullscreenBox = await stage.boundingBox();
 	expect(fullscreenBox, 'stage measured in fullscreen').not.toBeNull();
+	// The ResizeObserver keeps the canvas sized to the stage.
+	const canvasBox = await page.locator('.stage canvas').boundingBox();
+	expect(canvasBox, 'canvas measured in fullscreen').not.toBeNull();
+	expect(canvasBox!.height, 'canvas follows the fullscreen stage').toBeGreaterThan(
+		fullscreenBox!.height * 0.9
+	);
 
 	await exitFullscreen.click();
 
@@ -101,12 +121,16 @@ test('native fullscreen: the wrapper goes fullscreen, the toggle relabels, and e
 			timeout: 10_000
 		})
 		.toBe(false);
-	// Back to the enter label, and the stage shrinks to its inline size again.
+	// Back to the enter label, and the stage shrinks to its inline size again
+	// (polled for the same reason as the growth above — the exit transition
+	// finishes after fullscreenElement clears).
 	await expect(page.getByRole('button', { name: 'Fullscreen', exact: true })).toBeVisible();
-	const inlineBox = await stage.boundingBox();
-	expect(inlineBox!.height, 'stage shrinks back out of fullscreen').toBeLessThan(
-		fullscreenBox!.height
-	);
+	await expect
+		.poll(async () => (await stage.boundingBox())?.height ?? 0, {
+			message: 'stage shrinks back out of fullscreen',
+			timeout: 10_000
+		})
+		.toBeLessThan(fullscreenBox!.height);
 });
 
 test('overlay fallback (iPhone): covers the page, inerts and locks it, and Escape restores everything', async ({
@@ -131,6 +155,10 @@ test('overlay fallback (iPhone): covers the page, inerts and locks it, and Escap
 	const viewer = page.locator('.viewer');
 	await expect(viewer).not.toHaveClass(/fs-fallback/);
 	const scrollLockBefore = await page.evaluate(() => document.documentElement.style.overflow);
+	// Baseline, like the scroll lock above: the walk deliberately SKIPS anything
+	// already inert and never clears it, so the after-Escape assertion has to be
+	// relative or a pre-existing inert element elsewhere would fail it.
+	const inertBefore = await page.evaluate(() => document.querySelectorAll('[inert]').length);
 
 	await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
 
@@ -138,8 +166,16 @@ test('overlay fallback (iPhone): covers the page, inerts and locks it, and Escap
 	await expect(viewer).toHaveClass(/fs-fallback/);
 	await expect(viewer).toHaveCSS('position', 'fixed');
 	const box = await viewer.boundingBox();
-	expect(box!.width, 'overlay spans the viewport width').toBe(390);
-	expect(box!.height, 'overlay spans the viewport height').toBe(844);
+	expect(box, 'overlay measured').not.toBeNull();
+	// Measured against the live viewport rather than the numbers passed to
+	// setViewportSize: boundingBox can return fractional values under device
+	// pixel ratio scaling.
+	const viewport = await page.evaluate(() => ({
+		width: window.innerWidth,
+		height: window.innerHeight
+	}));
+	expect(box!.width, 'overlay spans the viewport width').toBeCloseTo(viewport.width, 0);
+	expect(box!.height, 'overlay spans the viewport height').toBeCloseTo(viewport.height, 0);
 
 	// It must sit above every page layer — the toaster is the highest at 1000
 	// (a toast painting over the exit controls would strand the user).
@@ -155,7 +191,7 @@ test('overlay fallback (iPhone): covers the page, inerts and locks it, and Escap
 	// the path from the viewer up to <body> are inert, while the viewer itself
 	// (controls, live regions) never is.
 	const inertCount = await page.evaluate(() => document.querySelectorAll('[inert]').length);
-	expect(inertCount, 'page behind the overlay is inert').toBeGreaterThan(0);
+	expect(inertCount, 'page behind the overlay is inert').toBeGreaterThan(inertBefore);
 	expect(
 		await page.evaluate(() => document.querySelector('.viewer')!.closest('[inert]') !== null),
 		'the viewer itself is never inert'
@@ -177,7 +213,7 @@ test('overlay fallback (iPhone): covers the page, inerts and locks it, and Escap
 	expect(
 		await page.evaluate(() => document.querySelectorAll('[inert]').length),
 		'no inert left behind'
-	).toBe(0);
+	).toBe(inertBefore);
 	await expect(page.getByRole('button', { name: 'Fullscreen', exact: true })).toBeVisible();
 	// The 3D view itself survives the overlay round trip.
 	await expect(page.locator('.stage canvas')).toBeVisible();
