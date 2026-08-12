@@ -13,6 +13,7 @@ import {
 	modelFormatDetailLabel,
 	modelFormatLabel,
 	modelKeyFromUrl,
+	namePlaceholderCharacter,
 	viewerSupports
 } from './vr';
 
@@ -160,6 +161,35 @@ describe('externalSiteName', () => {
 	it('returns null for missing or unparseable URLs', () => {
 		expect(externalSiteName(null)).toBeNull();
 		expect(externalSiteName('not a url')).toBeNull();
+	});
+});
+
+describe('namePlaceholderCharacter', () => {
+	// Name-ordered, as both VR loaders return them: the friend's featured sona
+	// sorts first, the site's own character second.
+	const characters = [
+		{ id: 1, name: 'Nettle', isOwner: false },
+		{ id: 2, name: 'Pike', isOwner: true }
+	];
+
+	it('uses the character selected in the form', () => {
+		expect(namePlaceholderCharacter(characters, '1')).toBe('Nettle');
+	});
+
+	it("falls back to the site's own character, not the alphabetically first", () => {
+		expect(namePlaceholderCharacter(characters, '')).toBe('Pike');
+		expect(namePlaceholderCharacter(characters, '99')).toBe('Pike');
+	});
+
+	it('falls back to the first character when no character is flagged as the owner', () => {
+		const noOwner = characters.map((c) => ({ ...c, isOwner: false }));
+		expect(namePlaceholderCharacter(noOwner, '')).toBe('Nettle');
+	});
+
+	it('falls back to the translated stand-in on a site with no characters', () => {
+		// The stand-in comes from the message catalogue (en under test), never a
+		// hardcoded English literal in vr.ts.
+		expect(namePlaceholderCharacter([], '')).toBe('your sona');
 	});
 });
 

@@ -27,6 +27,42 @@ describe('message catalogue parity', () => {
 	});
 });
 
+// Parameter parity: matching KEYS are not enough. If a translation pass drops a
+// {placeholder} from a ja value, paraglide compiles a zero-parameter ja variant
+// and the interpolated value silently disappears from the JA UI, with no build
+// error and no failing key-parity check. The catalogue starts at zero
+// mismatches, so this is enforced across every key rather than a watch-list.
+//
+// Covers plain strings AND paraglide variant/plural values, whose en side is an
+// array of { declarations, selectors, match } objects while the ja side is
+// usually a plain string. Both are flattened to their string leaves (the match
+// values; selector/declaration metadata carries no user-facing text) and the
+// UNION of each locale's placeholders is compared — the en 'one'/'other'
+// variants use the same {count} the single ja string must keep.
+describe('message parameter parity', () => {
+	function leaves(value: unknown): string[] {
+		if (typeof value === 'string') return [value];
+		if (Array.isArray(value)) return value.flatMap(leaves);
+		if (value && typeof value === 'object') {
+			const match = (value as { match?: unknown }).match;
+			return match && typeof match === 'object' ? Object.values(match).flatMap(leaves) : [];
+		}
+		return [];
+	}
+	const params = (value: unknown) =>
+		[...new Set(leaves(value).flatMap((leaf) => leaf.match(/\{[^{}]+\}/g) ?? []))].sort();
+
+	it('every key uses the same {placeholders} in en and ja', () => {
+		const en = JSON.parse(rawOf('en')) as Record<string, unknown>;
+		const ja = JSON.parse(rawOf('ja')) as Record<string, unknown>;
+		for (const [key, enValue] of Object.entries(en)) {
+			// Missing keys are the key-parity test's job, not this one's.
+			if (key === '$schema' || !(key in ja)) continue;
+			expect(params(ja[key]), key).toEqual(params(enValue));
+		}
+	});
+});
+
 // Terminology guard (sona#45): the JA UI always calls Telegram/chat sticker
 // content ステッカー, never スタンプ. Every スタンプ occurrence in the catalogue was
 // sticker-domain, so the whole file must stay free of it. If a non-sticker

@@ -101,6 +101,48 @@ test("poster picker cells stay square even when the button's aspect-ratio is ign
 	expect(Math.abs(box!.width - box!.height)).toBeLessThan(1);
 });
 
+test("the name placeholder names the site's own character and follows the select", async ({
+	page
+}) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/vr/new');
+
+	// Seeded characters: 'Taro' (id 1, sorts first) and 'Thistle' (id 2, is_owner).
+	// With nothing selected the example must be the SITE'S sona, so neither the
+	// old hardcoded 'Taro' nor a first-row-by-name fallback can satisfy this.
+	await expect(page.locator('input[name="name"]')).toHaveAttribute(
+		'placeholder',
+		'e.g. Thistle (VRChat)'
+	);
+
+	// Picking a character re-derives the example (hydration-retry shape: a
+	// pre-hydration selection does not re-render the placeholder).
+	await expect(async () => {
+		await page.selectOption('select[name="characterId"]', { label: 'Taro' });
+		await expect(page.locator('input[name="name"]')).toHaveAttribute(
+			'placeholder',
+			'e.g. Taro (VRChat)',
+			{ timeout: 2000 }
+		);
+	}).toPass({ timeout: 20_000 });
+});
+
+test('the edit form seeds the placeholder from the avatar\'s own character', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/vr/1/edit');
+
+	// Avatar 1 belongs to 'Taro' (id 1), so the selected character must win over
+	// the site's own 'Thistle'. Scope honestly: 'Taro' is ALSO first by name, so
+	// this cannot discriminate a first-row-by-name regression (mutation-checked)
+	// — it pins the selected-character arm on a real edit load, and that the page
+	// no longer shows the old hardcoded example. The owner arm is unreachable
+	// here anyway: vr_avatars.character_id is NOT NULL, so one is always selected.
+	await expect(page.locator('input[name="name"]')).toHaveAttribute(
+		'placeholder',
+		'e.g. Taro (VRChat)'
+	);
+});
+
 test('typing a name auto-suggests the slug until the slug is touched', async ({ page }) => {
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/vr/new');

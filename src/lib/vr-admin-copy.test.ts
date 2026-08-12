@@ -37,6 +37,25 @@ describe('VR too-large error copy', () => {
 	});
 });
 
+// The name placeholder names the site's OWN character (sona#317 follow-up), so
+// it must stay parameterised. Reverting either locale to a stock name still
+// compiles, passes i18n parity and passes the whole unit suite otherwise.
+describe('VR avatar-name placeholder copy', () => {
+	// {name} presence in ja follows from en via the parameter-parity guard in
+	// i18n-parity.test.ts, so only the stock-name check runs per locale.
+	it('keeps the {name} placeholder and names no stock character', () => {
+		expect(messages('en').admin_vr_name_placeholder).toContain('{name}');
+		for (const locale of ['en', 'ja']) {
+			const msg = messages(locale).admin_vr_name_placeholder;
+			expect(msg, locale).not.toContain('Taro');
+			expect(msg, locale).not.toContain('タロ');
+			// Emptying the stand-in passes every other guard — key parity sees the
+			// key, parameter parity sees [] on both sides — and renders "例:  (VRChat)".
+			expect(messages(locale).admin_vr_name_placeholder_fallback, locale).toBeTruthy();
+		}
+	});
+});
+
 describe('VR downloadable-switch hint copy', () => {
 	it('keeps the honesty clause: hiding the button does not prevent access', () => {
 		expect(messages('en').admin_vr_downloadable_hint).toContain('without preventing access');

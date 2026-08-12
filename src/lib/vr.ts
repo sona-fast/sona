@@ -157,6 +157,24 @@ export function platformLabel(platform: string): string | null {
 	return PLATFORM_LABELS[platform] ?? null;
 }
 
+/** Name shown in the avatar-name placeholder: the character selected in the
+ * form, else the site's own character (isOwner, matching every other admin
+ * surface — the list is name-ordered, so a friend's featured sona can sort
+ * first), else the first character, so the example reads as this site's own
+ * sona instead of a stock one. A site with no characters yet gets the
+ * translated stand-in. */
+export function namePlaceholderCharacter(
+	characters: { id: number; name: string; isOwner: boolean }[],
+	selectedId: string
+): string {
+	return (
+		characters.find((c) => String(c.id) === selectedId)?.name ??
+		characters.find((c) => c.isOwner)?.name ??
+		characters[0]?.name ??
+		m.admin_vr_name_placeholder_fallback()
+	);
+}
+
 /** Hard cap for a self-hosted model upload. Shared (not $lib/server) so the
  * admin upload UI can refuse oversized files before sending a byte, with the
  * server endpoint enforcing the same number against Content-Length. */
