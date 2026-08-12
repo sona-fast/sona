@@ -39,6 +39,18 @@ export function cdnImage(src: string | null | undefined, width = 800, quality = 
 }
 
 /**
+ * The width every gallery-row thumbnail is transformed at — the public gallery
+ * grid, the admin image list, and the VR/collections pickers all request it.
+ *
+ * Sharing ONE width is what keeps this affordable: a transform URL is its own
+ * cache key, so every surface asking for 200 reuses the variant the first one
+ * generated. A surface that picks its own width spends a fresh Image
+ * Transformation per image (the plan allows 5000 unique ones), which is why new
+ * thumbnail call sites should use this rather than a hand-picked number.
+ */
+export const THUMB_WIDTH = 200;
+
+/**
  * Everything that differs between one responsive image and the next: the CDN
  * width ladder to offer, the `sizes` describing the slot those widths land in,
  * the transform quality, and the width the plain `src` fallback uses. The slot

@@ -5,6 +5,7 @@
 	import { ArrowLeft, BookOpen, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus, UserPlus } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
+	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import { probeDimensions } from '$lib/probe-dimensions';
@@ -663,7 +664,17 @@
 			<input type="hidden" name="posterImageId" value={posterImageId ?? ''} />
 			{#if posterImage}
 				<div class="poster-preview">
-					<img src={posterImage.thumbnailUrl || posterImage.imageUrl} alt={posterImage.title} />
+					<!-- Width 200 everywhere a gallery row is thumbnailed (the public
+					     gallery grid and the admin image list both use it): the same
+					     width is the same transform URL, so these reuse variants those
+					     pages already generated instead of spending new Image
+					     Transformations. rawFallback covers off-zone sources, whose
+					     transform 403s (UploadThing forks). -->
+					<img
+						src={cdnImage(posterImage.thumbnailUrl || posterImage.imageUrl, THUMB_WIDTH)}
+						use:rawFallback={posterImage.thumbnailUrl || posterImage.imageUrl}
+						alt={posterImage.title}
+					/>
 					<button type="button" class="remove-poster" bind:this={removePosterButton} onclick={removePoster}>
 						<X size={14} /> {m.admin_vr_poster_remove()}
 					</button>
@@ -686,7 +697,16 @@
 							class:selected={posterImageId === img.id}
 							onclick={() => pickPoster(img.id)}
 						>
-							<img src={img.thumbnailUrl || img.imageUrl} alt={img.title} loading="lazy" />
+							<!-- Same shared width as the preview above. Raw originals here
+							     meant 100+ multi-MB files per page: Firefox paints a
+							     partially-downloaded image as its decoded top rows, so the
+							     cells showed image tops for as long as the download ran. -->
+							<img
+								src={cdnImage(img.thumbnailUrl || img.imageUrl, THUMB_WIDTH)}
+								use:rawFallback={img.thumbnailUrl || img.imageUrl}
+								alt={img.title}
+								loading="lazy"
+							/>
 						</button>
 					{/each}
 				</div>

@@ -1,4 +1,4 @@
-export { isAnimatedSource, rawFallback, cdnImage } from './img';
+export { isAnimatedSource, rawFallback, cdnImage, THUMB_WIDTH } from './img';
 
 export function plural(count: number, singular: string, pluralForm?: string): string {
 	const word = count === 1 ? singular : (pluralForm ?? singular + 's');

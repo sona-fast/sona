@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { Plus, Pencil, Trash2, X, Loader2 } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
@@ -162,7 +163,13 @@
 
 					{#if editCoverUrl}
 						<div class="cover-preview">
-							<img src={editCoverUrl} alt={m.admin_collections_cover_preview_alt()} />
+							<!-- Shared THUMB_WIDTH so these reuse the gallery/admin-list
+							     variants rather than spending new transformations. -->
+							<img
+								src={cdnImage(editCoverUrl, THUMB_WIDTH)}
+								use:rawFallback={editCoverUrl}
+								alt={m.admin_collections_cover_preview_alt()}
+							/>
 							<button type="button" class="remove-cover" onclick={() => (editCoverUrl = '')}>
 								<X size={14} /> {m.admin_remove()}
 							</button>
@@ -179,7 +186,11 @@
 									class:selected={editCoverUrl === img.imageUrl}
 									onclick={() => (editCoverUrl = img.imageUrl)}
 								>
-									<img src={img.imageUrl} alt={img.title} />
+									<img
+										src={cdnImage(img.imageUrl, THUMB_WIDTH)}
+										use:rawFallback={img.imageUrl}
+										alt={img.title}
+									/>
 								</button>
 							{/each}
 						</div>
