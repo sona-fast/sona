@@ -89,7 +89,17 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	// realTurnstile: this test is the ONE place the genuine widget runs — its
 	// challenge iframe is the only RUNTIME coverage of the frame-src directive
 	// (full rationale in admin-login.ts).
-	await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
+	// This navigation can abort under dev-server churn (net::ERR_ABORTED, seen as
+	// a first-attempt CI flake on this exact goto). Retry that specific abort once
+	// and confirm the page actually arrived, so a transient abort doesn't kill the
+	// test before any CSP coverage has run.
+	try {
+		await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
+	} catch (e) {
+		if (!(e instanceof Error) || !e.message.includes('net::ERR_ABORTED')) throw e;
+		await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
+	}
+	await expect(page).toHaveURL(/\/admin\/login/);
 	// The challenge iframe must actually attach — otherwise the frame-src runtime
 	// coverage passes vacuously when the widget silently fails to load. Checked via
 	// page.frames(), not a DOM locator: the widget mounts its iframe inside a
