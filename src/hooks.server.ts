@@ -251,6 +251,36 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 
 export const handle: Handle = sequence(paraglideHandle, authHandle);
 
+// Root-cause-first error segments. ORM wrappers (drizzle's DrizzleQueryError)
+// put the SQL echo in .message and the actual platform failure ("D1_ERROR: …")
+// on .cause — reading only .message stored 300 chars of column list and dropped
+// the one string that mattered. Deepest cause leads so the storage clamp spends
+// its budget there; wrapper text follows for query context. Cycle-safe via a
+// Set of visited Errors. Returned as an ARRAY so recordError's redaction knows
+// the real segment boundaries — it never trusts a ' ← ' inside a segment.
+function causeChainMessage(error: unknown, fallback: string): string[] {
+	// Segments go out RAW: a literal '←' inside one is neutralized by
+	// recordError's per-segment cleaner, which every storage path shares.
+	const parts: string[] = [];
+	const seen = new Set<Error>();
+	let cur: unknown = error;
+	while (cur instanceof Error && !seen.has(cur)) {
+		seen.add(cur);
+		if (cur.message) parts.push(cur.message);
+		cur = cur.cause;
+	}
+	// A walked chain can END on a non-Error STRING cause (`cause: 'socket
+	// closed'`) — often the true root, so keep it. A BARE non-Error throw
+	// (nothing walked) stays on the fallback: SvelteKit's own `message`
+	// describes it better than an arbitrary stringification.
+	if (seen.size > 0 && typeof cur === 'string' && cur) {
+		parts.push(cur);
+	}
+	if (parts.length === 0) return [fallback];
+	// parts is wrapper→root order: flip to root-first.
+	return parts.reverse();
+}
+
 // Observability (issue #6): add the RICH error sample for genuine exceptions.
 // handleError fires only for real thrown errors (not deliberate `error(4xx/5xx, …)`
 // HttpErrors), and it's the one place the real message ("D1_ERROR: …") is
@@ -265,7 +295,7 @@ export const handleError: HandleServerError = ({ error, event, status, message }
 	if (event.platform?.env.DB && status >= 500 && isObservabilityEnabled(event.platform?.env)) {
 		event.locals.errorSampled = true;
 		const db = getDb(event.platform.env.DB);
-		const detail = error instanceof Error ? error.message : message;
+		const detail = causeChainMessage(error, message);
 		schedule(
 			event.platform,
 			recordError(db, { route: event.url.pathname, status, message: detail })

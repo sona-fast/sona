@@ -150,6 +150,262 @@ describe('recordError — capped ring', () => {
 		// Ordinary words are left intact.
 		expect(row.message).toContain('failed');
 	});
+
+	it('redacts IPv4 and IPv6 literals (connection errors embed peer addresses)', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, {
+			route: 'x',
+			status: 502,
+			message: 'connect to 203.0.113.7 and [2001:db8::1] and ::1 refused'
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).not.toContain('203.0.113.7');
+		expect(row.message).not.toContain('2001:db8::1');
+		expect(row.message).toContain('[redacted]');
+		expect(row.message).toContain('refused');
+	});
+
+	it('leaves code punctuation alone — "::" in identifiers is not an IPv6 literal', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, {
+			route: 'x',
+			status: 500,
+			message: 'std::bad_alloc in .card::before handler threw Error::Timeout'
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		// Hex-letter neighbours of code punctuation must survive unredacted.
+		expect(row.message).toBe('std::bad_alloc in .card::before handler threw Error::Timeout');
+	});
+
+	it('still redacts real compressed IPv6 literals (a hex group must touch the "::")', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, {
+			route: 'x',
+			status: 502,
+			message: 'peers fe80::1 and ::1 and 2001:db8::8a2e:370:7334 unreachable'
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).not.toContain('fe80::1');
+		expect(row.message).not.toContain('::1');
+		expect(row.message).not.toContain('2001:db8::8a2e:370:7334');
+		expect(row.message).toBe('peers [redacted] and [redacted] and [redacted] unreachable');
+	});
+
+	it('redacts the bound-params tail of a drizzle-shaped message, keeping the query', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		// DrizzleQueryError.message embeds the bound params after the SQL echo —
+		// real names/emails land there. The \n becomes a space after collapse.
+		await recordError(db, {
+			route: '/admin/images',
+			status: 500,
+			message: 'Failed query: insert into "artists" ("name") values (?)\nparams: Jane Q. Artist'
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('Failed query: insert into "artists" ("name") values (?) params: [redacted]');
+	});
+
+	it('redacts a punctuation-preceded params marker — "(params: …" fires the rule', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		// A whitespace-only anchor misses a marker glued to '(' — the bound
+		// values (real names) would be stored verbatim. The rule redacts to the
+		// segment's end, so the closing ')' goes with the tail.
+		await recordError(db, {
+			route: '/admin/images',
+			status: 500,
+			message: 'Invalid arguments (params: Jane Doe)'
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).not.toContain('Jane');
+		expect(row.message).toBe('Invalid arguments (params: [redacted]');
+	});
+
+	it('still redacts an email-shaped segment in the route — and ONLY that segment', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, {
+			route: '/unsubscribe/user@example.com',
+			status: 500,
+			message: 'boom'
+		});
+		// Exact value: the leading path segment must survive — a \S+@\S+ rule
+		// would swallow the WHOLE route (a path has no whitespace).
+		const row = sqlite.prepare('SELECT route FROM error_sample').get();
+		expect(row.route).toBe('/unsubscribe/[redacted]');
+	});
+
+	it('redacts only the @-carrying segment, keeping the rest of the path', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, {
+			route: '/stickers/winter-pack/@kira',
+			status: 500,
+			message: 'boom'
+		});
+		const row = sqlite.prepare('SELECT route FROM error_sample').get();
+		expect(row.route).toBe('/stickers/winter-pack/[redacted]');
+	});
+
+	it('treats a percent-encoded at-sign (%40) as an email marker in the route', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, {
+			route: '/unsubscribe/user%40example.com',
+			status: 500,
+			message: 'boom'
+		});
+		const row = sqlite.prepare('SELECT route FROM error_sample').get();
+		expect(row.route).toBe('/unsubscribe/[redacted]');
+	});
+
+	it('redacts an IP literal in the route', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, {
+			route: '/proxy/203.0.113.7',
+			status: 502,
+			message: 'boom'
+		});
+		const row = sqlite.prepare('SELECT route FROM error_sample').get();
+		expect(row.route).not.toContain('203.0.113.7');
+		expect(row.route).toBe('/proxy/[redacted]');
+	});
+
+	it('keeps a long ordinary slug route VERBATIM, only stripping its query string', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		// The route is the sample's primary diagnostic key: the message-side
+		// long-token rule must NOT apply to it ("/stickers/winter-holiday-pack-a1b2"
+		// once stored as "/stickers/[redacted]", destroying the sample's value).
+		await recordError(db, {
+			route: '/stickers/winter-holiday-pack-a1b2?ref=home',
+			status: 500,
+			message: 'boom'
+		});
+		const row = sqlite.prepare('SELECT route FROM error_sample').get();
+		expect(row.route).toBe('/stickers/winter-holiday-pack-a1b2');
+	});
+
+	it('stores no fragment of a secret cut in half by the pre-clamp', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		// A 40-char key straddling the 1200-char pre-clamp boundary: the cut
+		// strands a sub-20-char prefix ('sk_live_ZZ') that the 20+-token rule
+		// would miss — the trailing-run trim must drop it entirely.
+		const key = 'sk_live_' + 'Z'.repeat(32);
+		await recordError(db, {
+			route: 'x',
+			status: 500,
+			message: 'A'.repeat(1189) + ' ' + key
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).not.toContain('sk_live');
+		expect(row.message).not.toContain('Z');
+		expect(row.message).toBe('[redacted]');
+	});
+
+	it('lets nothing beyond the pre-clamp survive (giant single run)', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		// The pre-clamp cuts inside the giant run; the trailing-run trim then
+		// drops the truncated run itself — so neither a run fragment nor the
+		// ' tail' beyond the clamp reaches storage. The emptied segment stores
+		// the '[redacted]' marker, not '' — the sample should say something
+		// was cut.
+		await recordError(db, { route: 'x', status: 500, message: 'A'.repeat(5000) + ' tail' });
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('[redacted]');
+	});
+
+	it('drops whitespace-only segments — no dangling " ← " separator is stored', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		// A wrapper whose message is pure whitespace (Error(' ') in a chain)
+		// cleans to '' and must vanish, not leave 'root ← ← outer' litter.
+		await recordError(db, {
+			route: '/stickers/pack/1',
+			status: 500,
+			message: ['D1_ERROR: boom', '   ', 'outer wrapper']
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('D1_ERROR: boom ← outer wrapper');
+	});
+
+	it("a ' ← ' inside a bound value of a RAW message cannot stop the params redaction early", async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		// recordJobRun/recordUpload/recordEmail pass raw e.message: a raw string
+		// is ONE segment, so a user-controlled bound value containing ' ← '
+		// (artist name "Kira ← Nyx" in a failed cron-sync insert) must not fake
+		// a chain boundary and leak the later bound params.
+		await recordError(db, {
+			route: '/api/cron/sync-artists',
+			status: 500,
+			message:
+				'Failed query: insert into "artists" ("name", "email", "address") values (?, ?, ?)\nparams: Kira ← Nyx, victim2@example.com, 42 Elm St'
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).not.toContain('Nyx');
+		expect(row.message).not.toContain('Elm');
+		expect(row.message).toBe(
+			'Failed query: insert into "artists" ("name", "email", "address") values (?, ?, ?) params: [redacted]'
+		);
+	});
+
+	it('params redaction stops at a SEGMENT-ARRAY boundary — later wrapper segments survive', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		// causeChainMessage passes the chain as an array (root first): the
+		// drizzle segment's params redaction runs to that segment's end only,
+		// keeping the wrapper segments after it readable.
+		await recordError(db, {
+			route: '/admin/images',
+			status: 500,
+			message: [
+				'Failed query: insert into "artists" ("name") values (?) params: Jane Q. Artist',
+				'Failed to save artist'
+			]
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe(
+			'Failed query: insert into "artists" ("name") values (?) params: [redacted] ← Failed to save artist'
+		);
+	});
+
+	it('strips query strings from URLs but keeps the URL itself', async () => {
+		const sqlite = makeSqlite();
+		const db = getDb(makeD1(sqlite));
+
+		await recordError(db, {
+			route: 'x',
+			status: 500,
+			message: 'fetch https://example.com/cb?code=s3cret&uid=42 failed'
+		});
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toContain('https://example.com/cb');
+		expect(row.message).not.toContain('code=s3cret');
+		expect(row.message).not.toContain('uid=42');
+		expect(row.message).toContain('failed');
+	});
 });
 
 describe('recordUpload / recordEmail — outcome + failure sample', () => {

@@ -67,6 +67,12 @@ export const VISITOR_RETENTION_DAYS = 35;
 export const ERROR_SAMPLE_CAP = 200;
 /** Error messages are trimmed to this length before storage (defensive; no PII). */
 const ERROR_MESSAGE_MAX = 300;
+/**
+ * Pre-clamp applied BEFORE the redaction regexes run, so a maliciously huge
+ * message can't burn CPU in them. 4× the storage clamp leaves room for the
+ * redactions to SHRINK text without eating into what would have been stored.
+ */
+const REDACT_INPUT_MAX = 4 * ERROR_MESSAGE_MAX;
 
 /** UTC day key ('YYYY-MM-DD') for a Date (defaults to now). */
 export function dayKey(d: Date = new Date()): string {
@@ -198,18 +204,97 @@ export async function pruneVisitorRollups(
 }
 
 /**
+ * IP-literal redaction shared by cleanMessage and cleanRoute — connection errors
+ * love embedding peer addresses. IPv4 dotted quads; IPv6: the full 8-group form,
+ * plus '::'-compressed forms that have at least one hex group touching the '::'
+ * AND a hard boundary on both ends — so code punctuation ("std::bad_alloc",
+ * ".card::before", "Error::Timeout") survives while "fe80::1", "::1" and
+ * "2001:db8::1" are redacted.
+ */
+function redactIps(s: string): string {
+	return s
+		.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[redacted]')
+		.replace(/\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b/gi, '[redacted]')
+		.replace(
+			/(?<![\w.])[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6}::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?(?![\w.])|(?<![\w.:])::[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6}(?![\w.])/gi,
+			'[redacted]'
+		);
+}
+
+/**
  * One PII-free line: collapse whitespace, redact anything that could carry PII or a
  * secret, then clamp length. Masks email-like addresses and long token-like runs
  * (API keys, bearer tokens) so error_sample.message and job_run.detail can't leak
  * them — keeping the dashboard's "no PII" claim true even when a raw error embeds
  * them.
+ *
+ * Accepts one raw string OR an array of cause-chain segments (root first, from
+ * hooks' causeChainMessage — the only caller that knows where real segment
+ * boundaries are). The bound-params redaction runs to the END of each segment,
+ * and a raw string is always ONE segment: a ' ← ' inside a user-controlled
+ * bound value (raw e.message from recordJobRun/recordUpload/recordEmail) can't
+ * fake a boundary and stop the redaction early, while a genuine chain keeps its
+ * wrapper segments readable after the redacted one.
  */
-function cleanMessage(message: string): string {
-	return (message ?? '')
-		.replace(/\s+/g, ' ')
-		.trim()
-		.replace(/\S+@\S+/g, '[redacted]')
-		.replace(/[A-Za-z0-9_\-+=]{20,}/g, '[redacted]')
+function cleanMessage(message: string | string[]): string {
+	// Empty segments (a whitespace-only wrapper message) are dropped so the
+	// stored text never carries a dangling ' ← ' separator.
+	const segments = Array.isArray(message) ? message : [message];
+	return segments.map(cleanSegment).filter(Boolean).join(' ← ').trim().slice(0, ERROR_MESSAGE_MAX);
+}
+
+/** Redact ONE segment (see cleanMessage). The params redaction runs to its end. */
+function cleanSegment(segment: string): string {
+	// Neutralize a literal '←' inside ONE segment so the stored text can't
+	// RENDER a fake chain boundary. Defense-in-depth for readability only —
+	// redaction never keys on the arrow (boundaries travel as array elements)
+	// — and lossy: a genuine '←' in an error message becomes '<-'.
+	let s = (segment ?? '').replace(/←/g, '<-').replace(/\s+/g, ' ').trim();
+	// Pre-clamp (see REDACT_INPUT_MAX); also drop the partial trailing run the
+	// cut can strand (a sub-20-char secret/email fragment the rules below miss).
+	if (s.length > REDACT_INPUT_MAX) {
+		s = s.slice(0, REDACT_INPUT_MAX).replace(/[A-Za-z0-9_\-+=@.:]+$/, '');
+		// A single mega-token can be the WHOLE segment: the strip then empties
+		// it. Store a marker, not '' — the sample should say something was cut.
+		if (!s.trim()) return '[redacted]';
+	}
+	// Drizzle's DrizzleQueryError echoes the bound params after the query
+	// text ("… params: <values>") — real names/emails land there, so drop
+	// everything from the marker to the segment's end. Runs FIRST so no other
+	// rule can consume or glue the marker, and anchored on start-of-segment or
+	// any non-word char (kept via $1) — unlike a whitespace-only anchor, this
+	// also fires on punctuation-preceded markers like "(params: …".
+	s = s.replace(/(^|[^\w])params\s*:[\s\S]*$/i, '$1params: [redacted]');
+	return redactIps(
+		s.replace(/\S+@\S+/g, '[redacted]').replace(/[A-Za-z0-9_\-+=]{20,}/g, '[redacted]')
+	)
+		// URL query strings can carry tokens/PII — keep the URL, drop the query.
+		.replace(/(https?:\/\/[^\s?]*)\?\S*/gi, '$1')
+		.trim();
+}
+
+/**
+ * Route-scoped cleaner for error_sample.route. Deliberately NARROWER than
+ * cleanMessage: the route is the sample's primary diagnostic key, and the
+ * long-token rule would eat ordinary slugs ("/stickers/winter-holiday-pack-a1b2"
+ * → "/stickers/[redacted]"). So: collapse whitespace, redact email-shaped
+ * segments and IP literals (same patterns as cleanMessage), drop any query
+ * string, clamp length — NO long-token redaction.
+ */
+function cleanRoute(route: string): string {
+	return redactIps(
+		(route ?? '')
+			.replace(/\s+/g, ' ')
+			.trim()
+			// Same CPU-bounding pre-clamp as cleanSegment. No trailing-run trim
+			// needed: with no long-token rule there is no fragment to strand.
+			.slice(0, REDACT_INPUT_MAX)
+			// Email-shaped path SEGMENTS only — a \S+@\S+ rule would swallow the
+			// whole (whitespace-free) route on any '@'. '%40' counts as the at-sign.
+			.replace(/[^\s/]*(?:@|%40)[^\s/]+/gi, '[redacted]')
+	)
+		// Query strings can carry tokens/PII — keep the path, drop the query.
+		.replace(/\?\S*/g, '')
 		.slice(0, ERROR_MESSAGE_MAX);
 }
 
@@ -254,11 +339,13 @@ export async function recordMetric(
  */
 export async function recordError(
 	db: Database,
-	sample: { route: string; status: number; message: string }
+	sample: { route: string; status: number; message: string | string[] }
 ): Promise<void> {
 	await db.insert(errorSample).values({
 		ts: new Date().toISOString(),
-		route: sample.route,
+		// The route gets its own narrower redaction — emails/IPs and query
+		// strings are still masked, but ordinary slugs survive (see cleanRoute).
+		route: cleanRoute(sample.route),
 		status: sample.status,
 		message: cleanMessage(sample.message)
 	});
