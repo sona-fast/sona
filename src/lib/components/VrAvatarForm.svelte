@@ -109,9 +109,7 @@
 	}
 
 	let characterId = $state(avatar ? String(avatar.characterId) : '');
-	const placeholderCharacter = $derived(
-		namePlaceholderCharacter(characters, characterId, m.admin_vr_name_placeholder_fallback())
-	);
+	const placeholderCharacter = $derived(namePlaceholderCharacter(characters, characterId));
 	let license = $state(avatar?.license ?? '');
 	let downloadable = $state(avatar?.downloadable ?? false);
 	let nsfw = $state(avatar?.nsfw ?? false);

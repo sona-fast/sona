@@ -171,21 +171,22 @@ describe('namePlaceholderCharacter', () => {
 	];
 
 	it('uses the character selected in the form', () => {
-		expect(namePlaceholderCharacter(characters, '1', 'your sona')).toBe('Nettle');
+		expect(namePlaceholderCharacter(characters, '1')).toBe('Nettle');
 	});
 
 	it("falls back to the site's own character, not the alphabetically first", () => {
-		expect(namePlaceholderCharacter(characters, '', 'your sona')).toBe('Pike');
-		expect(namePlaceholderCharacter(characters, '99', 'your sona')).toBe('Pike');
+		expect(namePlaceholderCharacter(characters, '')).toBe('Pike');
+		expect(namePlaceholderCharacter(characters, '99')).toBe('Pike');
 	});
 
 	it('falls back to the first character when no character is flagged as the owner', () => {
 		const noOwner = characters.map((c) => ({ ...c, isOwner: false }));
-		expect(namePlaceholderCharacter(noOwner, '', 'your sona')).toBe('Nettle');
+		expect(namePlaceholderCharacter(noOwner, '')).toBe('Nettle');
 	});
 
-	it('falls back to the caller\'s translated stand-in on a site with no characters', () => {
-		expect(namePlaceholderCharacter([], '', 'your sona')).toBe('your sona');
-		expect(namePlaceholderCharacter([], '', 'あなたのソナ')).toBe('あなたのソナ');
+	it('falls back to the translated stand-in on a site with no characters', () => {
+		// The stand-in comes from the message catalogue (en under test), never a
+		// hardcoded English literal in vr.ts.
+		expect(namePlaceholderCharacter([], '')).toBe('your sona');
 	});
 });

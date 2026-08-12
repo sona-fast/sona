@@ -111,6 +111,19 @@ test("the name placeholder names the site's own character and follows the select
 	}).toPass({ timeout: 20_000 });
 });
 
+test('the edit form seeds the placeholder from the avatar\'s own character', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/vr/1/edit');
+
+	// Avatar 1 belongs to 'Taro' (id 1), so the selected character must win over
+	// the site's own 'Thistle' — the edit loader has its own characters query,
+	// which could regress to the first row by name independently of /new.
+	await expect(page.locator('input[name="name"]')).toHaveAttribute(
+		'placeholder',
+		'e.g. Taro (VRChat)'
+	);
+});
+
 test('typing a name auto-suggests the slug until the slug is touched', async ({ page }) => {
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/vr/new');

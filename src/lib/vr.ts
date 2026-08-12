@@ -162,17 +162,16 @@ export function platformLabel(platform: string): string | null {
  * surface — the list is name-ordered, so a friend's featured sona can sort
  * first), else the first character, so the example reads as this site's own
  * sona instead of a stock one. A site with no characters yet gets the
- * caller's translated stand-in. */
+ * translated stand-in. */
 export function namePlaceholderCharacter(
 	characters: { id: number; name: string; isOwner: boolean }[],
-	selectedId: string,
-	fallback: string
+	selectedId: string
 ): string {
 	return (
 		characters.find((c) => String(c.id) === selectedId)?.name ??
 		characters.find((c) => c.isOwner)?.name ??
 		characters[0]?.name ??
-		fallback
+		m.admin_vr_name_placeholder_fallback()
 	);
 }
 

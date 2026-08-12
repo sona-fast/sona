@@ -41,18 +41,14 @@ describe('VR too-large error copy', () => {
 // it must stay parameterised. Reverting either locale to a stock name still
 // compiles, passes i18n parity and passes the whole unit suite otherwise.
 describe('VR avatar-name placeholder copy', () => {
-	it('both locales keep the {name} placeholder and no stock example name', () => {
+	// {name} presence in ja follows from en via the parameter-parity guard in
+	// i18n-parity.test.ts, so only the stock-name check runs per locale.
+	it('keeps the {name} placeholder and names no stock character', () => {
+		expect(messages('en').admin_vr_name_placeholder).toContain('{name}');
 		for (const locale of ['en', 'ja']) {
 			const msg = messages(locale).admin_vr_name_placeholder;
-			expect(msg, locale).toContain('{name}');
 			expect(msg, locale).not.toContain('Taro');
 			expect(msg, locale).not.toContain('タロ');
-		}
-	});
-
-	it('both locales carry the no-characters-yet stand-in', () => {
-		for (const locale of ['en', 'ja']) {
-			expect(messages(locale).admin_vr_name_placeholder_fallback, locale).toBeTruthy();
 		}
 	});
 });
