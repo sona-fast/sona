@@ -60,8 +60,7 @@ function makeThrowawayRepo(): string {
 		});
 		// Match the version as a whole whitespace-delimited token, not a substring —
 		// a resolved prerelease like `${pinnedVersion}-beta.1` must NOT pass.
-		const escaped = pinnedVersion.replace(/\./g, '\\.');
-		expect(probeOutput.trim()).toMatch(new RegExp(`(^|\\s)${escaped}($|\\s)`));
+		expect(probeOutput.trim().split(/\s+/)).toContain(pinnedVersion);
 	} catch (err) {
 		rmSync(root, { recursive: true, force: true });
 		throw err;
