@@ -13,7 +13,11 @@ const repoRoot = path.resolve(here, '../..');
 // and a seed landing while another run's workerd holds the DB surfaces as a
 // fatal SQLITE_BUSY. SONA_E2E_PERSIST_ROOT gives such a run a private root
 // (pair it with SONA_E2E_BASE_PORT in playwright.config.ts) — SONA-164.
-const persistRoot = process.env.SONA_E2E_PERSIST_ROOT ?? repoRoot;
+//
+// `||`, not `??`: an env var that is present but EMPTY has to mean "unset". With
+// `??` an empty value wins, every persist path silently turns relative, and the
+// DB then lands wherever the process happened to be started from.
+const persistRoot = process.env.SONA_E2E_PERSIST_ROOT || repoRoot;
 
 export const E2E_DB_NAME = 'sona-e2e-db';
 export const E2E_WRANGLER_CONFIG = path.join(here, 'wrangler.e2e.toml');

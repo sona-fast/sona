@@ -24,7 +24,11 @@ import {
 // of 4179-4182. Without it, every checkout and every agent binds the same four
 // ports, and a second run either dies on --strictPort or (worse) gets its
 // servers killed by whoever assumes the listener is their own stray (SONA-164).
-const BASE_PORT = Number(process.env.SONA_E2E_BASE_PORT ?? 4179);
+// `||`, not `??`, for the same reason as persistRoot in tests/e2e/paths.ts: a
+// present-but-empty value means "unset". ('0' stays truthy as a string, so an
+// explicitly invalid port still trips the check below rather than silently
+// falling back.)
+const BASE_PORT = Number(process.env.SONA_E2E_BASE_PORT || 4179);
 if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_532) {
 	throw new Error(
 		`SONA_E2E_BASE_PORT must be an integer in 1024-65532 (needs 4 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
