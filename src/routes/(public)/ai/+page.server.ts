@@ -1,6 +1,7 @@
-import { error } from '@sveltejs/kit';
+import { error, isHttpError } from '@sveltejs/kit';
 import { getReadDb } from '$lib/server/db';
 import { getRawSettings } from '$lib/server/settings';
+import { withTimeout } from '$lib/server/timeout';
 import type { PageServerLoad } from './$types';
 
 // The /ai disclosure page is a per-fork toggle (SONA-167). Like every other
@@ -27,13 +28,24 @@ import type { PageServerLoad } from './$types';
 // D1 round-trip that a cached read would not. That is the price of failing
 // closed: the cache is populated by getSettings, which swallows read errors
 // and hands back DEFAULTS.
+// Matches the settings timeout every other public load uses: a hung read must
+// resolve to the documented 404, not hang until the Worker's own limit.
+const SETTINGS_TIMEOUT_MS = 3000;
+
 export const load: PageServerLoad = async ({ parent, platform }) => {
 	const { settings } = await parent();
 	if (!settings.aiPageEnabled) error(404, 'Not found');
 
 	const db = getReadDb(platform!.env.DB);
 	try {
-		const raw = await getRawSettings(db, ['aiPageEnabled', 'aiPageText', 'aiPageUpdatedAt']);
+		// null fallback on timeout, which the check below treats as a failure —
+		// the fail-closed policy applies to a slow read as much as a throwing one.
+		const raw = await withTimeout(
+			getRawSettings(db, ['aiPageEnabled', 'aiPageText', 'aiPageUpdatedAt']),
+			SETTINGS_TIMEOUT_MS,
+			null
+		);
+		if (!raw) error(404, 'Not found');
 		// Absent means ON only for installs that pre-date the feature; an
 		// explicit 'false' is an owner who opted out, in the wizard or Settings.
 		if (raw.aiPageEnabled === 'false') error(404, 'Not found');
@@ -45,7 +57,7 @@ export const load: PageServerLoad = async ({ parent, platform }) => {
 		// Rethrow our own 404 unchanged; any read failure becomes one too, so a
 		// blip can neither publish a declined page nor substitute the default
 		// copy for an owner who overrode it precisely because it is wrong.
-		if (e && typeof e === 'object' && 'status' in e) throw e;
+		if (isHttpError(e)) throw e;
 		error(404, 'Not found');
 	}
 };

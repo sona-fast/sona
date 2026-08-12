@@ -49,8 +49,9 @@ export interface SiteSettings {
 	 * the default copy are owner-affirmed there. One path skips that — a fork
 	 * bootstrapped with the ADMIN_PASSWORD env var counts as setup-complete
 	 * (see isSetupComplete) and never runs the wizard, so it lands on the
-	 * absent default like a pre-existing install. Those owners are told what
-	 * their site publishes, and how to turn it off, in the release notes. */
+	 * absent default like a pre-existing install. Both cases are covered by the
+	 * SONA-167 section in UPDATING.md, which names the claims the page makes in
+	 * the owner's voice and where to turn it off. */
 	aiPageEnabled: boolean;
 	/** Owner-editable override for the /ai page body (plain text). Empty → the
 	 * default disclosure copy from `$lib/ai-disclosure` is shown instead.

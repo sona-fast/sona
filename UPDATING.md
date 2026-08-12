@@ -80,6 +80,40 @@ Page manually with `?afterId=<lastId>` from each response until `rasters` comes
 back below the limit. Stickers imported after the upgrade are sniffed at import
 time and need nothing.
 
+## Read before upgrading: your site gains an AI disclosure page (SONA-167)
+
+This release adds a public page at `/ai`, linked from your footer. **Sites that
+already exist get it switched on**, because turning it on for everyone is how
+the fleet discloses by default; only sites set up after this release are asked
+during the setup wizard. Forks bootstrapped with the `ADMIN_PASSWORD`
+environment variable skip that wizard, so they get the page without being
+asked too.
+
+The page speaks in your first person. Its built-in text says, as you:
+
+- that you direct your site's development and approve every change and deploy;
+- that the artwork on your site is commissioned from human artists rather than
+  AI-generated;
+- that your AI tool accounts are on plans configured not to train on your data.
+
+**If any of that is not true for your site, edit or disable the page.** Both
+controls are in Settings, under "Serve the AI disclosure page (/ai)" and the
+text override beneath it. Turning it off makes `/ai` return a plain 404 and
+removes the footer link.
+
+Two knock-on effects worth knowing:
+
+- Turning the page off also stops your privacy policy naming Anthropic's Claude
+  and CodeRabbit specifically. The general disclosure stays, because diagnostic
+  logs can still reach development tools on any site. If you do use those tools
+  and want them named, write your own privacy text in Settings, Legal.
+- The built-in privacy policy gained disclosures for the AI development tools,
+  Cloudflare's Web Analytics beacon, Google Fonts, and the feature integrations
+  (Turnstile, Telegram, cons.fyi, X, Bluesky, FurTrack, and the shared artist
+  registry). **If you pasted your own privacy text, none of that was added to
+  your site** and the third-party recipients your deployment actually contacts
+  are yours to list.
+
 ## First sync only: check the Actions tab
 
 There is exactly one gotcha, and it only bites the **first time** you ever sync a
