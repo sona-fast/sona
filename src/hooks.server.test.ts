@@ -92,7 +92,7 @@ describe('authHandle — /api/admin/ref-image stays behind the admin gate', () =
 	});
 });
 
-describe('authHandle — /api/metrics/download is the only other public /api route', () => {
+describe('authHandle — /api/metrics/download is public', () => {
 	it('reaches the endpoint without a session (an anonymous visitor pressed download)', async () => {
 		vi.mocked(isSetupComplete).mockResolvedValue(true);
 
@@ -110,6 +110,39 @@ describe('authHandle — /api/metrics/download is the only other public /api rou
 		vi.mocked(isSetupComplete).mockResolvedValue(true);
 
 		for (const path of ['/api/metrics', '/api/metrics/download/extra', '/api/metrics/other']) {
+			const res = (await authHandle({
+				event: makeEvent(path, makeDb()),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must stay behind the admin gate`).toBe(401);
+		}
+	});
+});
+
+describe('authHandle — /api/oembed is public (third-party embedders have no session)', () => {
+	it('reaches the endpoint without a session (a link preview is fetched anonymously)', async () => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+
+		const res = (await authHandle({
+			event: makeEvent('/api/oembed', makeDb()),
+			resolve
+		} as never)) as Response;
+
+		// Not 401: the gate let it through to the endpoint, which validates the url
+		// param and filters on `published` itself.
+		expect(res.status).not.toBe(401);
+	});
+
+	it('does not exempt sibling paths — a prefix match would open the whole namespace', async () => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+
+		// '/api/%6Fembed' pins the encoding case as DEFENSE IN DEPTH, not as production
+		// behaviour: the hook compares the RAW pathname while SvelteKit's router decodes
+		// per-segment. In production, Cloudflare URL normalization (scope `incoming`,
+		// enabled on every fork zone) decodes the path before the Worker sees it, so a
+		// real request spelled this way arrives as '/api/oembed' and is served. This
+		// asserts the hook still fails closed on a zone with normalization turned off.
+		for (const path of ['/api/oembed/extra', '/api/oembedx', '/api/%6Fembed']) {
 			const res = (await authHandle({
 				event: makeEvent(path, makeDb()),
 				resolve

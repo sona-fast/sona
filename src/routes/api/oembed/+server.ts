@@ -1,8 +1,9 @@
 import { json, error } from '@sveltejs/kit';
 import { eq, and } from 'drizzle-orm';
-import { getDb } from '$lib/server/db';
+import { getReadDb } from '$lib/server/db';
 import { images, artists } from '$lib/server/db/schema';
 import { getSettings } from '$lib/server/settings';
+import { socialImageUrl, socialImageDimensions } from '$lib/social-image';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, platform }) => {
@@ -16,11 +17,23 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 		error(400, 'Invalid url');
 	}
 
+	// Only answer for our own host: an oEmbed provider that describes any URL it
+	// is handed lets a third-party page advertise this endpoint as its own
+	// discovery link. Host, not origin, so http on local dev still resolves.
+	if (parsed.host !== url.host) error(404, 'Not an image URL');
+
 	const match = parsed.pathname.match(/^\/gallery\/([^/]+)\/?$/);
 	if (!match) error(404, 'Not an image URL');
-	const slug = decodeURIComponent(match[1]);
+	let slug: string;
+	try {
+		slug = decodeURIComponent(match[1]);
+	} catch {
+		// A malformed percent-escape throws URIError — a 400, not a 500.
+		error(400, 'Invalid url');
+	}
 
-	const db = getDb(platform!.env.DB);
+	// read replica (eventually consistent) — this is an unauthenticated public read
+	const db = getReadDb(platform!.env.DB);
 
 	const row = await db
 		.select({
@@ -56,17 +69,22 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 
 	const settings = await getSettings(db);
 
+	// Same transformed image (and therefore same dimensions) og:image advertises:
+	// oEmbed must not hand consumers a larger original than the page itself does.
+	const imageUrl = socialImageUrl(row.imageUrl, url.origin);
+	const dimensions = socialImageDimensions(row.width, row.height);
+
 	return json({
 		version: '1.0',
 		type: 'photo',
 		title: row.title,
 		author_name: row.artistName ? `Commission by ${row.artistName}` : 'Commission',
-		author_url: authorUrl ?? `${url.origin}/gallery/${slug}`,
+		author_url: authorUrl ?? `${url.origin}/gallery/${encodeURIComponent(slug)}`,
 		provider_name: settings.siteName,
 		provider_url: url.origin,
-		url: row.imageUrl,
-		width: row.width ?? 1200,
-		height: row.height ?? 800,
+		url: imageUrl,
+		width: dimensions.width ?? 1200,
+		height: dimensions.height ?? 800,
 		cache_age: 3600
 	});
 };

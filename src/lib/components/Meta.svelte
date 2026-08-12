@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { APP_NAME } from '$lib/config';
+	import { socialImageUrl, socialImageDimensions } from '$lib/social-image';
 
 	interface Props {
 		title: string;
@@ -25,28 +26,13 @@
 		oembedUrl = null
 	}: Props = $props();
 
-	const OG_MAX_WIDTH = 1200;
-
-	function transformedImage(src: string, pageUrl: string): string {
-		try {
-			const origin = new URL(pageUrl).origin;
-			return `${origin}/cdn-cgi/image/width=${OG_MAX_WIDTH},quality=85,fit=scale-down,format=auto/${src}`;
-		} catch {
-			return src;
-		}
-	}
-
 	// $derived so the tags track prop changes on a same-route nav (e.g. the gallery
 	// detail page swapping images), not just the initial value.
-	const ogImage = $derived(image ? transformedImage(image, url) : null);
+	const ogImage = $derived(image ? socialImageUrl(image, url) : null);
 
-	const ogDimensions = $derived.by(() => {
-		if (!(image && imageWidth && imageHeight)) return { width: null, height: null };
-		if (imageWidth > OG_MAX_WIDTH) {
-			return { width: OG_MAX_WIDTH, height: Math.round(imageHeight * (OG_MAX_WIDTH / imageWidth)) };
-		}
-		return { width: imageWidth, height: imageHeight };
-	});
+	const ogDimensions = $derived(
+		image ? socialImageDimensions(imageWidth, imageHeight) : { width: null, height: null }
+	);
 	const ogWidth = $derived(ogDimensions.width);
 	const ogHeight = $derived(ogDimensions.height);
 </script>

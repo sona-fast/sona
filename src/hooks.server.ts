@@ -108,11 +108,17 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// /api/metrics/download is the second exemption: it is a beacon fired by anonymous
 	// visitors pressing an image's download button, so it cannot require a session. It
 	// enforces same-origin itself, accepts no body, and only ever bumps one aggregate
-	// counter. Keep this list short and each entry justified.
+	// counter.
+	//
+	// /api/oembed is the third: third-party embedders (Discord, Slack, Telegram) fetch
+	// it anonymously by definition — behind the gate it 401s and every link preview
+	// breaks. It is GET-only, describes only its own host's URLs, and filters on
+	// `published`. Keep this list short and each entry justified.
 	if (
 		event.url.pathname.startsWith('/api') &&
 		!event.url.pathname.startsWith('/api/cron/') &&
 		event.url.pathname !== '/api/metrics/download' &&
+		event.url.pathname !== '/api/oembed' &&
 		!event.locals.admin
 	) {
 		return new Response('Unauthorized', { status: 401 });
