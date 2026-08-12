@@ -23,8 +23,12 @@ export const load: LayoutServerLoad = async ({ platform, url }) => {
 		withTimeout(getSettings(db), SETTINGS_TIMEOUT_MS, settingsFallback()),
 		navGateFlags(db, PROBE_TIMEOUT_MS)
 	]);
+	// aiPageText stays out of the layout payload: this load rides EVERY public
+	// page, and a fork that turned /ai off must not still ship its retired text
+	// to every visitor. /ai's own server load returns the override.
+	const { aiPageText: _aiPageText, ...publicSettings } = settings;
 	// The site's own public host, used to attribute the "made with sona" footer
 	// badge back to this fork (sona.fast/?ref=<host>). Derived per-request so each
 	// fork sends its own domain with no extra config.
-	return { settings, host: url.host, stickersEnabled, collectionsEnabled };
+	return { settings: publicSettings, host: url.host, stickersEnabled, collectionsEnabled };
 };

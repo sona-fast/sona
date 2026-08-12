@@ -67,11 +67,14 @@ describe('/collections/[slug] load', () => {
 			.values({ name: 'Con badges', slug: 'con-badges', createdAt: NOW })
 			.returning({ id: collections.id });
 		const base = { imageUrl: 'https://example.com/i.png', artistId, collectionId, createdAt: NOW };
+		const [{ id: parentId }] = await db
+			.insert(images)
+			.values({ ...base, title: 'pub', slug: 'pub', published: true })
+			.returning({ id: images.id });
 		await db.insert(images).values([
-			{ ...base, title: 'pub', slug: 'pub', published: true },
 			{ ...base, title: 'draft', slug: 'draft', published: false },
 			// A published VARIANT stays out of the collection grid (top-level only).
-			{ ...base, title: 'variant', slug: 'variant', published: true, parentImageId: 1 }
+			{ ...base, title: 'variant', slug: 'variant', published: true, parentImageId: parentId }
 		]);
 		const data = (await load(loadEvent(platform, 'con-badges'))) as {
 			images: { slug: string }[];

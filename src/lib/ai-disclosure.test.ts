@@ -10,7 +10,7 @@ describe('defaultAiDisclosure', () => {
 	const all = [d.intro, ...d.topics.flatMap((t) => [t.lead, t.body]), d.closer].join('\n');
 
 	it('opens by disclosing, not persuading', () => {
-		expect(d.intro).toBe("This site is built and written with AI. Here's what that means.");
+		expect(d.intro).toMatch(/built and written with AI/);
 	});
 
 	it('names the coding tool and the human gate', () => {
@@ -33,6 +33,13 @@ describe('defaultAiDisclosure', () => {
 		expect(all).toMatch(/never calls an AI service/);
 		expect(all).toMatch(/logs and database/);
 		expect(all).toContain('CodeRabbit');
+		// Honesty about what dev-time log access can expose: no "your data never
+		// touches AI" overclaim while the logs those tools read carry visitor IPs.
+		expect(all).toMatch(/logs can include visitors' IP addresses and the pages they requested/);
+	});
+
+	it('scopes the no-training claim to the plan terms, not a warranty', () => {
+		expect(all).toMatch(/plans set not to train on my data/);
 	});
 
 	it('concedes the training-data provenance without arguing it', () => {
@@ -41,6 +48,9 @@ describe('defaultAiDisclosure', () => {
 
 	it('commits to keeping the page current and points at the build receipt', () => {
 		expect(d.closer).toMatch(/this page changes with it/);
-		expect(d.closer).toMatch(/linked in the footer/);
+		// Conditional on purpose: the receipt only renders on real Actions builds,
+		// so the closer must not promise a footer link every deployment shows.
+		expect(d.closer).toMatch(/When the footer shows a build number/);
+		expect(d.closer).toMatch(/links to the source this exact build came from/);
 	});
 });

@@ -118,6 +118,49 @@ function saveSiteEvent(platform: App.Platform, fields: Record<string, string>) {
 	} as never;
 }
 
+describe('settings saveSite — /ai disclosure page (SONA-167)', () => {
+	it('stores the toggle and the override text, stamping the override date', async () => {
+		const { db, platform } = makeDb();
+
+		const result = await actions.saveSite(
+			saveSiteEvent(platform, {
+				siteName: 'Taro Surf',
+				aiPageEnabledPresent: '1',
+				aiPageEnabled: 'on',
+				aiPageText: 'My own words about AI.'
+			})
+		);
+
+		expect(result).toMatchObject({ success: true });
+		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('true');
+		expect(await getRawSetting(db, 'aiPageText')).toBe('My own words about AI.');
+		// Stamped like the privacy/terms overrides, so /ai can date owner text.
+		expect(await getRawSetting(db, 'aiPageUpdatedAt')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+	});
+
+	it('turns the page off when the form carries the marker but no checkbox', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(
+			saveSiteEvent(platform, { siteName: 'Taro Surf', aiPageEnabledPresent: '1' })
+		);
+
+		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('false');
+	});
+
+	// The #60 absent-means-unmanaged rule: a checkbox posts nothing when
+	// unchecked, so without the marker field a partial save would silently
+	// disable a page the owner never touched.
+	it('leaves the stored toggle alone when the form does not carry it', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'aiPageEnabled', 'true');
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'Taro Surf' }));
+
+		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('true');
+	});
+});
+
 describe('settings saveSite — three-path profile fields', () => {
 	it('persists the sona profile + contact email and drops malformed swatches', async () => {
 		const { db, platform } = makeDb();

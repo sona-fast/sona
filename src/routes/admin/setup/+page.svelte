@@ -134,6 +134,17 @@
 					</label>
 				</section>
 
+				<section>
+					<h2>{m.admin_setup_ai_heading()}</h2>
+					<label class="affirm">
+						<input type="checkbox" name="aiPageAffirmed" />
+						<span>
+							<span class="affirm-title">{m.admin_setup_ai_affirm()}</span>
+							<small>{m.admin_setup_ai_hint()}</small>
+						</span>
+					</label>
+				</section>
+
 				<button type="submit" class="btn btn-primary btn-lg full-width" disabled={submitting}>
 					{submitting ? m.admin_setup_submitting() : m.admin_setup_finish()}
 				</button>
@@ -200,6 +211,20 @@
 		font-size: 12px;
 		color: var(--muted-foreground);
 		margin-top: 4px;
+	}
+	/* The AI-disclosure affirmation: checkbox beside its text rather than above
+	   it, so the statement being agreed to reads as one sentence with the box. */
+	label.affirm {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+	}
+	label.affirm > span {
+		display: block;
+		margin-bottom: 0;
+	}
+	.affirm-title {
+		font-weight: 500;
 	}
 	.grid {
 		display: grid;

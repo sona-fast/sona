@@ -38,6 +38,26 @@ async function loadData(platform: App.Platform): Promise<LayoutData> {
 
 beforeEach(() => clearSettingsCache());
 
+describe('(public) layout load — settings payload', () => {
+	// The /ai override text must NOT ride the layout payload: this load runs on
+	// every public page, and a fork that turned the page off would otherwise keep
+	// shipping its retired copy to every visitor (/ai's own load returns it).
+	it('strips aiPageText while keeping the toggle the footer needs', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare("INSERT INTO site_settings (key, value) VALUES ('aiPageText', ?)")
+			.run('Owner override copy.');
+
+		const data = (await loadData(platform)) as unknown as {
+			settings: Record<string, unknown>;
+		};
+
+		expect(data.settings).not.toHaveProperty('aiPageText');
+		expect(data.settings.aiPageEnabled).toBe(true);
+		expect(JSON.stringify(data)).not.toContain('Owner override copy.');
+	});
+});
+
 describe('(public) layout load — nav content gating', () => {
 	it('hides both gated links on an empty fork', async () => {
 		const { platform } = makeDb();

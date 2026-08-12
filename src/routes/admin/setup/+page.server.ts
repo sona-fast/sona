@@ -136,10 +136,19 @@ export const actions = {
 		};
 		for (const key of Object.keys(optional)) if (!optional[key]) delete optional[key];
 
+		// The /ai disclosure page speaks in the owner's first person and states
+		// that their gallery holds no AI-generated art (SONA-167). A new install
+		// only publishes it once the owner has affirmed that here, so the wizard
+		// writes the row explicitly either way — it never relies on the
+		// absent-means-ON default, which exists for installs that pre-date the
+		// feature and is announced to those owners in the release notes.
+		const aiPageEnabled = data.get('aiPageAffirmed') === 'on';
+
 		await saveSettings(db, {
 			siteName,
 			themeId,
 			landingLayout,
+			aiPageEnabled,
 			...optional
 		});
 

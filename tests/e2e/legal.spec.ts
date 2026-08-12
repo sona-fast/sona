@@ -129,3 +129,100 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	const today = new Date().toISOString().slice(0, 10).replaceAll('-', '.');
 	await expect(page.locator('.legal-updated')).toHaveText(`Last updated ${today}`);
 });
+
+// --- /ai disclosure page (SONA-167) -----------------------------------------
+// Same shape as the legal cases above: it lives in this spec because it also
+// submits the saveSite form, and this is the only spec permitted to do that
+// (serial mode; a parallel spec would clobber the shared seeded DB).
+
+test('the AI disclosure page renders and is reachable from the footer', async ({ page }) => {
+	await page.goto('/ai');
+	await expect(page.getByRole('heading', { level: 1, name: 'AI and this site' })).toBeVisible();
+	// The five disclosure topics are real headings, so the outline is navigable.
+	await expect(page.getByRole('heading', { name: 'The code.' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'The art.' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Your data.' })).toBeVisible();
+
+	// Reachable from any public page's footer.
+	await page.goto('/');
+	await page.locator('.footer .legal-links a[href="/ai"]').click();
+	await expect(page).toHaveURL(/\/ai$/);
+});
+
+test('the AI page is reachable on mobile (desktop footer hidden < 768px)', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto('/');
+	// Below the breakpoint the desktop footer is display:none and MobileCredit
+	// carries the legal links — including /ai, or phone visitors could never
+	// reach the disclosure at all.
+	await expect(page.locator('.footer')).toBeHidden();
+	const aiLink = page.locator('.mobile-credit .legal-links a[href="/ai"]');
+	await expect(aiLink).toBeVisible();
+	await aiLink.click();
+	await expect(page.getByRole('heading', { level: 1, name: 'AI and this site' })).toBeVisible();
+});
+
+test('an owner override replaces the AI page defaults and the toggle removes the page', async ({
+	page
+}) => {
+	const override = "My own words.\n\nSecond paragraph <script>window.__aiXssRan = true</script>";
+
+	await login(page);
+	await page.goto('/admin/settings');
+
+	// Hydration gate, same idiom as the privacy override test above.
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Storage', exact: true }).click();
+		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
+	}).toPass();
+	await page.getByRole('button', { name: 'Site', exact: true }).click();
+
+	await page.fill('textarea[name="aiPageText"]', override);
+	const [resp] = await Promise.all([
+		page.waitForResponse(
+			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
+		),
+		page.getByRole('button', { name: 'Save site settings' }).click()
+	]);
+	expect(resp.ok()).toBeTruthy();
+
+	page.on('dialog', async (d) => {
+		await d.dismiss();
+		throw new Error('AI page override executed as HTML — XSS');
+	});
+
+	await page.goto('/ai');
+	await expect(page.getByText('My own words.')).toBeVisible();
+	// The default copy is gone.
+	await expect(page.getByRole('heading', { name: 'The code.' })).toHaveCount(0);
+	// The <script> renders as literal text and never runs.
+	await expect(
+		page.getByText('<script>window.__aiXssRan = true</script>', { exact: false })
+	).toBeVisible();
+	expect(
+		await page.evaluate(() => (window as unknown as { __aiXssRan?: boolean }).__aiXssRan)
+	).toBeUndefined();
+	await expect(page.locator('.ai-page .ai-override')).toHaveCount(2);
+
+	// Turning the page off removes BOTH the footer link and the route itself —
+	// the disclosure never lingers as an unlinked page.
+	await page.goto('/admin/settings');
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Storage', exact: true }).click();
+		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
+	}).toPass();
+	await page.getByRole('button', { name: 'Site', exact: true }).click();
+	await page.uncheck('input[name="aiPageEnabled"]');
+	const [offResp] = await Promise.all([
+		page.waitForResponse(
+			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
+		),
+		page.getByRole('button', { name: 'Save site settings' }).click()
+	]);
+	expect(offResp.ok()).toBeTruthy();
+
+	await page.goto('/');
+	await expect(page.locator('.footer .legal-links a[href="/ai"]')).toHaveCount(0);
+	const gone = await page.goto('/ai');
+	expect(gone?.status()).toBe(404);
+});

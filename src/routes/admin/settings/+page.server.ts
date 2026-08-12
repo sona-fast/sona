@@ -294,15 +294,18 @@ export const actions = {
 		// render time).
 		const privacyPolicy = text('privacyPolicy', 100000);
 		const termsOfService = text('termsOfService', 100000);
+		const aiPageText = text('aiPageText', 100000);
 		let privacyUpdatedAt: string | undefined;
 		let termsUpdatedAt: string | undefined;
-		if (privacyPolicy !== undefined || termsOfService !== undefined) {
+		let aiPageUpdatedAt: string | undefined;
+		if (privacyPolicy !== undefined || termsOfService !== undefined || aiPageText !== undefined) {
 			const current = await getSettings(db, { fresh: true });
 			const today = new Date().toISOString().slice(0, 10);
 			// Stamp only when a NON-EMPTY override changed. Clearing an override back to the
 			// built-in defaults writes no stamp — the defaults' date is shown instead.
 			if (privacyPolicy && privacyPolicy !== current.privacyPolicy) privacyUpdatedAt = today;
 			if (termsOfService && termsOfService !== current.termsOfService) termsUpdatedAt = today;
+			if (aiPageText && aiPageText !== current.aiPageText) aiPageUpdatedAt = today;
 		}
 
 		await saveSettings(db, {
@@ -329,15 +332,21 @@ export const actions = {
 			// $lib/legal on /privacy and /terms. Generous cap for full policy text.
 			privacyPolicy,
 			termsOfService,
-			// /ai disclosure page (SONA-167): the toggle posts from the same form as
-			// the legal overrides, so an unchecked box is a deliberate off. Blank
-			// text falls back to the default copy from $lib/ai-disclosure.
-			aiPageEnabled: data.get('aiPageEnabled') === 'on',
-			aiPageText: text('aiPageText', 100000),
+			// /ai disclosure page (SONA-167): a checkbox posts nothing when
+			// unchecked, so the paired hidden aiPageEnabledPresent field is what
+			// distinguishes "this form manages the toggle, and it's off" from "this
+			// form doesn't carry the toggle at all" (the #60 absent-means-unmanaged
+			// rule the text() helper applies to every other field). Blank text falls
+			// back to the default copy from $lib/ai-disclosure.
+			aiPageEnabled: data.has('aiPageEnabledPresent')
+				? data.get('aiPageEnabled') === 'on'
+				: undefined,
+			aiPageText,
 			// Undefined unless the matching override text changed above, so each is
 			// only written when that page's policy actually changed.
 			privacyUpdatedAt,
 			termsUpdatedAt,
+			aiPageUpdatedAt,
 			sonaSpecies: text('sonaSpecies', 200),
 			sonaBuild: text('sonaBuild', 200),
 			sonaKeyFeatures: text('sonaKeyFeatures', 500),

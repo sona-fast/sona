@@ -29,7 +29,7 @@ export function defaultAiDisclosure(): AiDisclosure {
 		topics: [
 			{
 				lead: 'The code.',
-				body: 'Most of it is written by Claude Code, an AI coding agent, working from my designs and decisions. I review and approve every change, and every deploy happens because I pressed the button. The longer version, including how changes are tested and reviewed, is in AI_POLICY.md in the public repo.'
+				body: "Most of it is written by Claude Code, an AI coding agent, working from my designs and decisions. I review and approve every change, and every deploy happens because I pressed the button. The longer version, including how changes are tested and reviewed, is in the AI_POLICY.md file that ships with this site's source."
 			},
 			{
 				lead: 'The text.',
@@ -41,7 +41,7 @@ export function defaultAiDisclosure(): AiDisclosure {
 			},
 			{
 				lead: 'Your data.',
-				body: "The running site never calls an AI service. Nothing you do here is sent to one, and nothing here is used to train one. While developing, my tools can read the site's logs and database the way any developer would, and code goes to Anthropic and to CodeRabbit, a review service. The privacy policy has the details."
+				body: "The running site never calls an AI service, so nothing you do while browsing is sent to one. While developing, my tools can read the site's logs and database the way any developer would, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service, on plans set not to train on my data. The privacy policy has the details."
 			},
 			{
 				lead: 'The model.',
@@ -49,6 +49,6 @@ export function defaultAiDisclosure(): AiDisclosure {
 			}
 		],
 		closer:
-			'If any of this changes, this page changes with it. The source for this exact build is linked in the footer.'
+			'If any of this changes, this page changes with it. When the footer shows a build number, it links to the source this exact build came from.'
 	};
 }

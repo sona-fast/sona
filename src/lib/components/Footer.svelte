@@ -10,7 +10,9 @@
 	import { buildReceipt } from '$lib/build-info';
 	import type { SiteSettings } from '$lib/server/settings';
 
-	let { settings, host }: { settings: SiteSettings; host: string } = $props();
+	// The layout strips aiPageText from the public payload (it belongs to /ai's
+	// own load), so the footer types against the stripped shape.
+	let { settings, host }: { settings: Omit<SiteSettings, 'aiPageText'>; host: string } = $props();
 
 	// Build receipt (SONA-167): the commit this deployment was built from, baked
 	// in by vite define from the deploying fork's own Actions env. Null in dev
@@ -36,7 +38,12 @@
 				     hardcoded upstream URL). -->
 				<span class="build">
 					{#if receipt.url}
-						<a href={receipt.url} target="_blank" rel="noopener">{m.footer_build({ sha: receipt.short })}</a>
+						<a
+							href={receipt.url}
+							target="_blank"
+							rel="noopener"
+							aria-label={m.footer_build_link_label({ sha: receipt.short })}
+						>{m.footer_build({ sha: receipt.short })}</a>
 					{:else}
 						{m.footer_build({ sha: receipt.short })}
 					{/if}
@@ -81,8 +88,12 @@
 
 	.footer-cred {
 		display: flex;
+		/* With the build receipt the cluster outgrows mid widths (~769-1024px);
+		 * wrapping onto a second row beats crushing the gap to zero. The badge
+		 * itself is an atomic inline-flex, so its phrase never breaks mid-way. */
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 14px;
+		gap: 6px 14px;
 		/* The badge is bare/inherit: its text takes this muted color so only the
 		 * ember stays orange. */
 		color: var(--muted-foreground);
@@ -111,7 +122,7 @@
 
 	.build {
 		font-family: var(--font-primary);
-		font-size: 11px;
+		font-size: 12px;
 		color: var(--muted-foreground);
 	}
 

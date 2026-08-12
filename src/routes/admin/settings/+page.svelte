@@ -387,6 +387,9 @@
 				<textarea class="input" rows="4" name="termsOfService" bind:value={termsOfService} placeholder={m.admin_settings_legal_placeholder()}></textarea>
 			</label>
 			<label class="checkbox-row">
+				<!-- An unchecked checkbox posts nothing; this marker is how the action
+				     tells "toggle off" from "form without the toggle" (#60). -->
+				<input type="hidden" name="aiPageEnabledPresent" value="1" />
 				<input type="checkbox" name="aiPageEnabled" bind:checked={aiPageEnabled} />
 				<span class="checkbox-text">
 					<span class="checkbox-title">{m.admin_settings_ai_page_label()}</span>

@@ -19,10 +19,12 @@ describe('buildReceipt', () => {
 		expect(buildReceipt(SHA, '')).toEqual({ short: '6ff8a8a', url: '' });
 	});
 
-	it('strips a trailing slash from the repo URL', () => {
-		expect(buildReceipt(SHA, 'https://github.com/someone/sona/')?.url).toBe(
-			`https://github.com/someone/sona/tree/${SHA}`
-		);
+	// The repo URL is env-injected at build time; only absolute https may become
+	// an href — anything else renders the stamp unlinked, never a footer-wide link.
+	it('renders unlinked when the repo URL is not an absolute https URL', () => {
+		expect(buildReceipt(SHA, 'http://github.com/someone/sona')?.url).toBe('');
+		expect(buildReceipt(SHA, 'javascript:alert(1)')?.url).toBe('');
+		expect(buildReceipt(SHA, 'github.com/someone/sona')?.url).toBe('');
 	});
 
 	// Local dev and test builds bake in '' — no stamp at all rather than a

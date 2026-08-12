@@ -16,7 +16,15 @@ export interface BuildReceipt {
 export function buildReceipt(sha: string, repoUrl: string): BuildReceipt | null {
 	const cleanSha = sha.trim();
 	if (!/^[0-9a-f]{7,40}$/i.test(cleanSha)) return null;
-	const cleanRepo = repoUrl.trim().replace(/\/+$/, '');
+	// Only an absolute https URL may be linked: the repo URL is env-injected at
+	// build time, and anything else (http, javascript:, a bare path) renders the
+	// stamp unlinked instead of an attacker-shaped href in every page's footer.
+	let cleanRepo = repoUrl.trim();
+	try {
+		if (new URL(cleanRepo).protocol !== 'https:') cleanRepo = '';
+	} catch {
+		cleanRepo = '';
+	}
 	return {
 		short: cleanSha.slice(0, 7),
 		// /tree/<sha> works for any commit, unlike /commit/<sha> which shows a

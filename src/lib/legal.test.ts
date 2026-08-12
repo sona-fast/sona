@@ -4,6 +4,7 @@ import {
 	defaultPrivacyPolicy,
 	defaultTerms,
 	legalUpdatedDate,
+	splitParagraphs,
 	LEGAL_DEFAULTS_UPDATED
 } from './legal';
 
@@ -98,7 +99,11 @@ describe('defaultPrivacyPolicy', () => {
 			.join('\n');
 		expect(text).toContain('Claude');
 		expect(text).toContain('CodeRabbit');
-		expect(text).toMatch(/nothing you do as a visitor is sent to either one/);
+		// The runtime boundary, honestly scoped: nothing browsing-time goes to the
+		// tools, but shared diagnostic logs can carry request data — both halves
+		// must stay, or the paragraph overclaims again.
+		expect(text).toMatch(/nothing you do while browsing is sent to them/);
+		expect(text).toMatch(/can contain request data such as IP addresses/);
 	});
 
 	// Cloudflare injects its Web Analytics beacon into proxied responses on
@@ -113,6 +118,11 @@ describe('defaultPrivacyPolicy', () => {
 		expect(text).toContain('Turnstile');
 		expect(text).toContain('Telegram');
 		expect(text).toContain('cons.fyi');
+		// The integrations list reads exhaustive, so it must actually be: every
+		// remote service a feature calls out to is named (SONA-167 round 1).
+		expect(text).toContain('Bluesky');
+		expect(text).toContain('FurTrack');
+		expect(text).toMatch(/shared artist registry/);
 	});
 });
 
@@ -122,6 +132,22 @@ describe('defaultTerms', () => {
 		expect(sections.length).toBeGreaterThan(0);
 		const text = sections.flatMap((s) => s.body).join('\n');
 		expect(text).toContain('Testsona');
+	});
+});
+
+describe('splitParagraphs', () => {
+	// Shared by the /privacy, /terms and /ai override paths, so a fix here (or a
+	// regression) reaches all three at once.
+	it('splits on blank lines and normalizes CRLF from textarea submissions', () => {
+		expect(splitParagraphs('One.\r\n\r\nTwo.')).toEqual(['One.', 'Two.']);
+	});
+
+	it('keeps single newlines inside a paragraph (CSS renders them)', () => {
+		expect(splitParagraphs('One.\nStill one.')).toEqual(['One.\nStill one.']);
+	});
+
+	it('trims surrounding blank space', () => {
+		expect(splitParagraphs('\n\n  Only.  \n\n')).toEqual(['Only.']);
 	});
 });
 
@@ -150,6 +176,21 @@ describe('legalUpdatedDate', () => {
 	});
 });
 
+describe('splitParagraphs', () => {
+	// Shared by LegalPage and /ai for owner-override text (SONA-167 round 1).
+	it('splits on blank lines and trims the ends', () => {
+		expect(splitParagraphs('\nFirst.\n\nSecond.\n')).toEqual(['First.', 'Second.']);
+	});
+
+	it('normalizes CRLF so textarea-submitted blank lines still split', () => {
+		expect(splitParagraphs('First.\r\n\r\nSecond.')).toEqual(['First.', 'Second.']);
+	});
+
+	it('keeps single newlines inside a paragraph', () => {
+		expect(splitParagraphs('line one\nline two')).toEqual(['line one\nline two']);
+	});
+});
+
 describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// LEGAL_DEFAULTS_UPDATED is the "Last updated" date every stock fork shows, so
 	// it is only honest if it moves whenever the text does. Nothing enforced that
@@ -160,7 +201,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '74261b6c10b94178157424355e55be3080c22bb54d01ec549773b5a7d7c3a6fe';
+	const RECORDED_TEXT_HASH = 'b648f14907f8fb6455378c534b596df0a4503f351fff65c837f3c560fa94665c';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

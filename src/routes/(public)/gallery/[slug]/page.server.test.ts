@@ -98,12 +98,9 @@ describe('/gallery/[slug] load', () => {
 	it('excludes unpublished variants from the variant strip', async () => {
 		const { db, platform } = makeDb();
 		await seed(db, [{ slug: 'parent', published: true }]);
-		await seed(db, []); // no-op keeps helper shape; variants attach below
 		const parent = (await load(loadEvent(platform, 'parent'))) as { image: { id: number } };
-		const [{ id: artistId }] = await db
-			.insert(artists)
-			.values({ name: 'Arty2', createdAt: NOW })
-			.returning({ id: artists.id });
+		const artist = await db.select({ id: artists.id }).from(artists).get();
+		const artistId = artist!.id;
 		await db.insert(images).values([
 			{
 				title: 'v1', slug: 'v1', imageUrl: 'https://example.com/v1.png',
