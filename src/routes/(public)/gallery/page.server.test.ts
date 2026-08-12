@@ -107,11 +107,16 @@ describe('gallery load — grid excludes unpublished images', () => {
 	it('lists a published image and omits an unpublished one', async () => {
 		const { db, platform } = makeDb();
 		const [{ id }] = await addArtist(db, 'Kestrel');
-		await addImage(db, { artistId: id, published: true });
+		const [{ slug: publishedSlug }] = await addImage(db, {
+			artistId: id,
+			published: true
+		}).returning({ slug: images.slug });
 		await addImage(db, { artistId: id, published: false });
 
 		const data = await loadData(platform);
-		expect(data.images).toHaveLength(1);
+		// Identity, not just count: a bare length check passes just as happily if
+		// the filter inverted and returned the unpublished image instead.
+		expect(data.images).toEqual([expect.objectContaining({ slug: publishedSlug })]);
 	});
 });
 
