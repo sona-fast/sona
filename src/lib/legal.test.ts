@@ -102,7 +102,7 @@ describe('defaultPrivacyPolicy', () => {
 		// The runtime boundary, honestly scoped: nothing browsing-time goes to the
 		// tools, but shared diagnostic logs can carry request data — both halves
 		// must stay, or the paragraph overclaims again.
-		expect(text).toMatch(/nothing you do here is sent to them/);
+		expect(text).toMatch(/nothing you do here is sent to them as you browse/);
 		expect(text).toMatch(/can contain request data such as IP addresses/);
 	});
 
@@ -186,7 +186,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '8191f877335cf94f954967b4e1dc336fee60683e3fa823a2656769575bb83fde';
+	const RECORDED_TEXT_HASH = 'b066c581225ae746999255599c319944902968d2fd688897cebf239f5f91fab8';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

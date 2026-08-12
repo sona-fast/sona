@@ -1,8 +1,8 @@
 # AI policy
 
 This repository's code is written with AI assistance, and this file is the
-honest record of what that means. It is linked from the /ai page that every
-site running Sona serves.
+honest record of what that means. It is the longer version of the /ai
+disclosure page that sites running Sona can publish.
 
 ## The blanket rule
 

@@ -41,7 +41,10 @@ export interface SiteSettings {
 	 * default is to disclose (announced in the release notes) — the owner opts
 	 * out in Settings. New installs never rely on the absent default: the setup
 	 * wizard writes the row explicitly ('true'/'false') from its affirmation
-	 * checkbox, so the default copy's claims are operator-affirmed there. */
+	 * checkbox, so the default copy's claims are operator-affirmed there. One
+	 * legacy exception: a fork bootstrapped with the ADMIN_PASSWORD env var
+	 * counts as setup-complete (see isSetupComplete), skips the wizard, and so
+	 * lands on the absent default like a pre-existing install. */
 	aiPageEnabled: boolean;
 	/** Owner-editable override for the /ai page body (plain text). Empty → the
 	 * default disclosure copy from `$lib/ai-disclosure` is shown instead.

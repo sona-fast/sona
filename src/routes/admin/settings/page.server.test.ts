@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -119,6 +120,15 @@ function saveSiteEvent(platform: App.Platform, fields: Record<string, string>) {
 }
 
 describe('settings saveSite — /ai disclosure page (SONA-167)', () => {
+	// Source pin: the action distinguishes "toggle off" from "form without the
+	// toggle" by this hidden marker. Drop it and unchecking the box becomes a
+	// silent no-op (absent means unmanaged), with the unit suite still green.
+	it('the settings form pairs the toggle with its present-marker', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(src).toMatch(/<input type="hidden" name="aiPageEnabledPresent"/);
+		expect(src).toMatch(/<input type="checkbox" name="aiPageEnabled"/);
+	});
+
 	it('stores the toggle and the override text, stamping the override date', async () => {
 		const { db, platform } = makeDb();
 

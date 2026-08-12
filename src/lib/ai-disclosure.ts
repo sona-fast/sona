@@ -41,7 +41,7 @@ export function defaultAiDisclosure(): AiDisclosure {
 			},
 			{
 				lead: 'Your data.',
-				body: "The running site never calls an AI service, so nothing you do while browsing is sent to one. When I'm working on the site, my tools can read its logs and database the way any developer would, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service, under plans configured not to train on my data. The privacy policy has the details."
+				body: "The running site never calls an AI service, so nothing you do is sent to one as you browse. When I'm working on the site, my tools can read its logs and database the way any developer would, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service, under plans configured not to train on my data. The privacy policy has the details."
 			},
 			{
 				lead: 'The model.',

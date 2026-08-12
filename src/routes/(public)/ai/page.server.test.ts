@@ -55,4 +55,31 @@ describe('/ai load', () => {
 			loadWith(false, [{ key: 'aiPageText', value: 'Retired copy.' }])
 		).rejects.toMatchObject({ status: 404 });
 	});
+
+	// The gate re-reads the raw row instead of trusting the parent's flag,
+	// because getSettings swallows D1 errors and returns DEFAULTS — where this
+	// is the one default-ON boolean. Trusting it would publish an owner's
+	// first-person claims on a site that declined them, on any read blip.
+	it('fails CLOSED when the settings read throws', async () => {
+		const brokenDb = {
+			prepare() {
+				throw new Error('D1_ERROR: no such table: site_settings');
+			}
+		} as unknown as App.Platform['env']['DB'];
+
+		await expect(
+			load({
+				parent: async () => ({ settings: { aiPageEnabled: true } }),
+				platform: { env: { DB: brokenDb } } as unknown as App.Platform
+			} as never)
+		).rejects.toMatchObject({ status: 404 });
+	});
+
+	// An explicit stored 'false' outranks the parent flag even when the cached
+	// settings object disagrees (a stale isolate, or a fallback to DEFAULTS).
+	it('404s on an explicit stored false even if the parent flag says on', async () => {
+		await expect(loadWith(true, [{ key: 'aiPageEnabled', value: 'false' }])).rejects.toMatchObject(
+			{ status: 404 }
+		);
+	});
 });

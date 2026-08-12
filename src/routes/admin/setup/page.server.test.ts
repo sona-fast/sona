@@ -127,6 +127,14 @@ describe('setup wizard — unrecognized enum values fail instead of silently def
 });
 
 describe('setup wizard — AI disclosure affirmation (SONA-167)', () => {
+	// Source pin: the action reads data.get('aiPageAffirmed'), so renaming or
+	// dropping the checkbox would leave every test green while each new install
+	// silently stored aiPageEnabled='false' and never published /ai.
+	it('the wizard form posts the affirmation checkbox', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(src).toMatch(/<input type="checkbox" name="aiPageAffirmed"/);
+	});
+
 	// The /ai page speaks in the owner's first person and states their gallery
 	// holds no AI-generated art. A NEW install must never publish that on the
 	// absent-means-ON default, so the wizard writes the row explicitly from the

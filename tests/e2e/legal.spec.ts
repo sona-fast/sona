@@ -226,3 +226,21 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	const gone = await page.goto('/ai');
 	expect(gone?.status()).toBe(404);
 });
+
+// The override/toggle cases above mutate settings on the shared seeded DB.
+// Serial retries restart at the first test, which would then hit a 404 /ai and
+// fail for the wrong reason, so put the fork back the way this file found it.
+test.afterAll(async ({ browser }) => {
+	const page = await browser.newPage();
+	try {
+		await login(page);
+		await page.goto('/admin/settings');
+		await openSiteTab(page);
+		await page.fill('textarea[name="aiPageText"]', '');
+		await page.fill('textarea[name="privacyPolicy"]', '');
+		await page.check('input[name="aiPageEnabled"]');
+		await saveSiteSettings(page);
+	} finally {
+		await page.close();
+	}
+});

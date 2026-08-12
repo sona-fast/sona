@@ -30,7 +30,7 @@ describe('defaultAiDisclosure', () => {
 	});
 
 	it('states the runtime boundary and the dev-time access plainly', () => {
-		expect(all).toMatch(/never calls an AI service/);
+		expect(all).toMatch(/never calls an AI service, so nothing you do is sent to one as you browse/);
 		expect(all).toMatch(/logs and database/);
 		expect(all).toContain('CodeRabbit');
 		// Honesty about what dev-time log access can expose: no "your data never
