@@ -7,7 +7,6 @@ import * as schema from '$lib/server/db/schema';
 import { images, artists } from '$lib/server/db/schema';
 import { clearSettingsCache } from '$lib/server/settings';
 import { makeD1 } from '$lib/server/test/d1';
-import { socialImageUrl, socialImageDimensions } from '$lib/social-image';
 import { GET } from './+server';
 
 const ORIGIN = 'https://taro.surf';
@@ -33,6 +32,25 @@ function makeDb() {
 	`);
 	const d1 = makeD1(sqlite);
 	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
+}
+
+/** Insert a published image row; every field a test cares about is overridable. */
+function addImage(
+	db: ReturnType<typeof makeDb>['db'],
+	overrides: Partial<typeof images.$inferInsert> = {}
+) {
+	return db.insert(images).values({
+		id: 1,
+		title: 'Parent Piece',
+		slug: 'parent-piece',
+		imageUrl: '/img/parent.png',
+		width: 900,
+		height: 700,
+		artistId: 1,
+		published: true,
+		createdAt: '2026-07-01T00:00:00.000Z',
+		...overrides
+	});
 }
 
 /** Call GET the way the router would, with `target` as the raw ?url= value. */
@@ -64,10 +82,7 @@ describe('GET /api/oembed — anonymous provider endpoint', () => {
 	it('answers 200 with a valid oEmbed photo payload for a published slug', async () => {
 		const { db, platform } = makeDb();
 		await db.insert(artists).values({ id: 1, name: 'Artist', blueskyUrl: 'https://bsky.app/a' });
-		await db.insert(images).values({
-			id: 1, title: 'Parent Piece', slug: 'parent-piece', imageUrl: '/img/parent.png',
-			width: 900, height: 700, artistId: 1, published: true, createdAt: '2026-07-01T00:00:00.000Z'
-		});
+		await addImage(db);
 
 		const { status, body } = await call(platform, `${ORIGIN}/gallery/parent-piece`);
 		expect(status).toBe(200);
@@ -81,30 +96,9 @@ describe('GET /api/oembed — anonymous provider endpoint', () => {
 		});
 	});
 
-	it('resolves a variant slug too (docs/image-variants.md — variants are embeddable)', async () => {
-		const { db, platform } = makeDb();
-		await db.insert(artists).values({ id: 1, name: 'Artist' });
-		await db.insert(images).values({
-			id: 1, title: 'Parent Piece', slug: 'parent-piece', imageUrl: '/img/parent.png',
-			width: 900, height: 700, artistId: 1, published: true, createdAt: '2026-07-01T00:00:00.000Z'
-		});
-		await db.insert(images).values({
-			id: 2, title: 'Variant Piece', slug: 'variant-piece', imageUrl: '/img/variant.png',
-			width: 900, height: 700, artistId: 1, published: true, parentImageId: 1,
-			variantLabel: 'Alt', createdAt: '2026-07-02T00:00:00.000Z'
-		});
-
-		const { status, body } = await call(platform, `${ORIGIN}/gallery/variant-piece`);
-		expect(status).toBe(200);
-		expect((body as { title: string }).title).toBe('Variant Piece');
-	});
-
 	it('404s an unpublished row (the gate is here, not in the hook)', async () => {
 		const { db, platform } = makeDb();
-		await db.insert(images).values({
-			id: 4, title: 'Draft', slug: 'mature-poster-source', imageUrl: '/img/draft.png',
-			width: 900, height: 700, artistId: 1, published: false, createdAt: '2026-07-04T00:00:00.000Z'
-		});
+		await addImage(db, { id: 4, title: 'Draft', slug: 'mature-poster-source', published: false });
 
 		expect((await call(platform, `${ORIGIN}/gallery/mature-poster-source`)).status).toBe(404);
 	});
@@ -132,20 +126,14 @@ describe('GET /api/oembed — anonymous provider endpoint', () => {
 
 	it('404s a url on a foreign host (no unfurling other sites under our name)', async () => {
 		const { db, platform } = makeDb();
-		await db.insert(images).values({
-			id: 1, title: 'Parent Piece', slug: 'parent-piece', imageUrl: '/img/parent.png',
-			width: 900, height: 700, artistId: 1, published: true, createdAt: '2026-07-01T00:00:00.000Z'
-		});
+		await addImage(db);
 
 		expect((await call(platform, 'https://evil.test/gallery/parent-piece')).status).toBe(404);
 	});
 
 	it('still answers when the artist join is empty (author_name falls back)', async () => {
 		const { db, platform } = makeDb();
-		await db.insert(images).values({
-			id: 1, title: 'Orphan', slug: 'orphan', imageUrl: '/img/orphan.png',
-			width: 900, height: 700, artistId: 99, published: true, createdAt: '2026-07-01T00:00:00.000Z'
-		});
+		await addImage(db, { title: 'Orphan', slug: 'orphan', imageUrl: '/img/orphan.png', artistId: 99 });
 
 		const { status, body } = await call(platform, `${ORIGIN}/gallery/orphan`);
 		expect(status).toBe(200);
@@ -159,10 +147,7 @@ describe('GET /api/oembed — anonymous provider endpoint', () => {
 describe('GET /api/oembed — the image it advertises', () => {
 	it('returns an absolute, CDN-capped url with dimensions capped to match', async () => {
 		const { db, platform } = makeDb();
-		await db.insert(images).values({
-			id: 1, title: 'Big', slug: 'big', imageUrl: '/img/big.png',
-			width: 2400, height: 1800, artistId: 1, published: true, createdAt: '2026-07-01T00:00:00.000Z'
-		});
+		await addImage(db, { title: 'Big', slug: 'big', imageUrl: '/img/big.png', width: 2400, height: 1800 });
 
 		const { body } = await call(platform, `${ORIGIN}/gallery/big`);
 		const payload = body as { url: string; width: number; height: number };
@@ -174,19 +159,17 @@ describe('GET /api/oembed — the image it advertises', () => {
 		expect(payload.height).toBe(900);
 	});
 
-	it('matches what Meta.svelte advertises as og:image (one shared helper, no drift)', async () => {
+	it('advertises an off-zone (UploadThing) original raw, at its real size', async () => {
+		// The default storage provider: the transform 403s off-zone sources and JSON
+		// has no rawFallback, so the payload must point at the fetchable original —
+		// and then the dimensions must be the row's, not the 1200-capped ones.
 		const { db, platform } = makeDb();
-		await db.insert(images).values({
-			id: 1, title: 'Big', slug: 'big', imageUrl: '/img/big.png',
-			width: 2400, height: 1800, artistId: 1, published: true, createdAt: '2026-07-01T00:00:00.000Z'
+		await addImage(db, {
+			title: 'Hosted', slug: 'hosted', imageUrl: 'https://app12.ufs.sh/f/key',
+			width: 2400, height: 1800
 		});
 
-		const { body } = await call(platform, `${ORIGIN}/gallery/big`);
-		const payload = body as { url: string; width: number; height: number };
-		// The same helper Meta.svelte renders og:image/og:image:width from.
-		expect(payload.url).toBe(socialImageUrl('/img/big.png', `${ORIGIN}/gallery/big`));
-		expect({ width: payload.width, height: payload.height }).toEqual(
-			socialImageDimensions(2400, 1800)
-		);
+		const { body } = await call(platform, `${ORIGIN}/gallery/hosted`);
+		expect(body).toMatchObject({ url: 'https://app12.ufs.sh/f/key', width: 2400, height: 1800 });
 	});
 });

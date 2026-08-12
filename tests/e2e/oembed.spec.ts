@@ -19,9 +19,13 @@ test('anonymous GET of the provider endpoint returns the oEmbed payload', async 
 	expect(body.version).toBe('1.0');
 	expect(body.type).toBe('photo');
 	expect(body.title).toBe('Parent Piece SFW');
-	// The url must be resolvable by a third-party embedder. The exact string is a
-	// CDN transform of the seeded relative path, so assert shape, not equality.
-	expect(new URL(body.url).host).toBeTruthy();
+	// The url must be resolvable by a third-party embedder: absolute, on our own
+	// origin, and exactly the CDN transform of the seeded relative path. (That
+	// transform only *renders* on the real edge, not against the dev server — this
+	// asserts the advertised string, not that it fetches.)
+	expect(body.url).toBe(
+		`${baseURL}/cdn-cgi/image/width=1200,quality=85,fit=scale-down,format=auto//e2e/parentpiece.png`
+	);
 });
 
 test('the discovery link the gallery page advertises resolves to that same payload', async ({
@@ -39,7 +43,17 @@ test('the discovery link the gallery page advertises resolves to that same paylo
 	// is what an embedder will actually fetch.
 	const res = await request.get(href!);
 	expect(res.status()).toBe(200);
-	expect((await res.json()).title).toBe('Parent Piece SFW');
+	const body = await res.json();
+	expect(body.title).toBe('Parent Piece SFW');
+
+	// ...and the image the page itself advertises must be the SAME image, at the
+	// same size: an embedder that reads og:image and one that reads the oEmbed
+	// payload have to end up with one picture, not two.
+	const meta = async (property: string) =>
+		page.locator(`meta[property="${property}"]`).getAttribute('content');
+	expect(await meta('og:image')).toBe(body.url);
+	expect(await meta('og:image:width')).toBe(String(body.width));
+	expect(await meta('og:image:height')).toBe(String(body.height));
 });
 
 test('an unpublished slug is 404 to an anonymous embedder', async ({ request, baseURL }) => {

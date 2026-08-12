@@ -1,9 +1,8 @@
 /**
  * Cloudflare WAF rate-limit provisioning for the anonymously-reachable /api paths
- * (POST /api/metrics/download, GET /api/oembed). Applies ONE zone-level rate-limit
- * rule capping how often a single IP can hit them — one, because the Free plan every
- * fork runs on allows exactly one such rule per zone — without touching any other
- * WAF rule on the zone.
+ * (POST /api/metrics/download, GET/HEAD /api/oembed). Applies ONE zone-level
+ * rate-limit rule capping how often a single IP can hit them — one, for the reason
+ * documented on RULE_EXPRESSION — without touching any other WAF rule on the zone.
  *
  * The core `applyDownloadRateLimit` is shared by two callers: the fork setup CLI
  * (scripts/setup.ts, for future forks) and the standalone runner
@@ -43,8 +42,13 @@ export const RULE_DESCRIPTION = 'sona: public endpoint rate limit';
 /**
  * Matches every /api path that is exempt from the admin gate in hooks.server.ts and
  * therefore reachable anonymously:
- *   - POST /api/metrics/download — the download beacon (see its +server.ts).
- *   - GET  /api/oembed           — the oEmbed provider (SONA-168).
+ *   - POST     /api/metrics/download — the download beacon (see its +server.ts).
+ *   - GET/HEAD /api/oembed           — the oEmbed provider (SONA-168). HEAD is in
+ *     because SvelteKit runs the GET handler for HEAD when no HEAD is exported, so
+ *     a HEAD does the same two D1 reads a GET does. Written as two `eq`s joined by
+ *     `or` rather than `in {"GET" "HEAD"}`: the docs confirm space-separated set
+ *     literals but not the quoted-string form, and this rule is applied unattended
+ *     across the fleet — `eq`/`or` is syntax the deployed rule already proves.
  *
  * ONE rule covers both because the Free plan allows exactly ONE rate-limiting rule
  * per zone, and every fork runs on Free. A second rule is not "extra config" there
@@ -53,15 +57,13 @@ export const RULE_DESCRIPTION = 'sona: public endpoint rate limit';
  * is fine: they are matched per-IP and no real client hits both in the same window.
  */
 export const RULE_EXPRESSION =
-	'((http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download") or (http.request.method eq "GET" and http.request.uri.path eq "/api/oembed"))';
+	'((http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download") or ((http.request.method eq "GET" or http.request.method eq "HEAD") and http.request.uri.path eq "/api/oembed"))';
 
 /**
  * Rate-limit knobs: at most 20 matching requests per 10s from one IP, then that IP
  * is blocked for 10s. Generous enough that a real visitor mashing download never
  * trips it, tight enough that a scripted loop is throttled to a trickle. Kept at 20
- * when /api/oembed joined the rule: unfurl services fetch from shared egress pools
- * so a looser cap was tempting, but oEmbed traffic is near zero and weakening the
- * beacon's existing protection to pre-empt a hypothetical burst is the worse trade.
+ * when /api/oembed joined the rule — oEmbed traffic is near zero.
  *
  * `cf.colo.id` is REQUIRED alongside `ip.src`: outside Enterprise, Cloudflare
  * counts rate-limit rules per data center, and the Rulesets API rejects the rule
@@ -245,9 +247,9 @@ export async function applyDownloadRateLimit(
 		};
 	}
 	return mine
-		? { status: 'updated', detail: `updated the download-beacon rate-limit rule on ${host}` }
+		? { status: 'updated', detail: `updated the public-endpoint rate-limit rule on ${host}` }
 		: {
 				status: 'created',
-				detail: `created the download-beacon rate-limit rule on ${host} (POST /api/metrics/download: max ${RULE_RATELIMIT.requests_per_period} / ${RULE_RATELIMIT.period}s per IP, ${RULE_RATELIMIT.mitigation_timeout}s block)`
+				detail: `created the public-endpoint rate-limit rule on ${host} (POST /api/metrics/download + GET/HEAD /api/oembed: max ${RULE_RATELIMIT.requests_per_period} / ${RULE_RATELIMIT.period}s per IP, ${RULE_RATELIMIT.mitigation_timeout}s block)`
 			};
 }

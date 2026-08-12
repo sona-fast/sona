@@ -16,9 +16,39 @@ export function isAnimatedSource(url: string): boolean {
 }
 
 /**
+ * True for UploadThing's image hosts (`ufs.sh` / `utfs.io`, incl. subdomains).
+ * The one place that list lives, so the callers that special-case UploadThing
+ * (ref-image.ts's crossorigin branch, isOffZoneImageHost below) cannot drift.
+ */
+export function isUploadThingHost(host: string): boolean {
+	return (
+		host === 'ufs.sh' ||
+		host === 'utfs.io' ||
+		host.endsWith('.ufs.sh') ||
+		host.endsWith('.utfs.io')
+	);
+}
+
+/**
+ * True for image hosts that are NOT on the fork's Cloudflare zone, so a
+ * `/cdn-cgi/image/...` transform of them 403s: UploadThing, and the public R2
+ * dev bucket (`*.r2.dev`, Cloudflare-served but outside the zone). A fork's own
+ * r2PublicUrl subdomain (`cdn.example.com`) is NOT off-zone — it's a different
+ * host on the same zone and transforms fine, which is why this is a host list
+ * rather than a host-inequality test.
+ */
+export function isOffZoneImageHost(host: string): boolean {
+	return isUploadThingHost(host) || host === 'r2.dev' || host.endsWith('.r2.dev');
+}
+
+/**
  * Route an image URL through Cloudflare Image Transformations so grids
  * and thumbnails don't download multi-MB originals. In dev the CF edge
  * isn't available, so fall through to the raw URL.
+ *
+ * Link-preview images do NOT come through here: $lib/social-image has its own
+ * transform (no dev bypass, no animated bypass) because social consumers fetch
+ * from the public edge and a JSON payload has no rawFallback.
  *
  * Lives here rather than in $lib/index.ts (which re-exports it, so callers are
  * unaffected) because the responsive builders below need it and importing back

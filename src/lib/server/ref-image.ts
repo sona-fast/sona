@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { images, imageTags, tags, characters } from '$lib/server/db/schema';
+import { isUploadThingHost } from '$lib/img';
 import type { getDb } from '$lib/server/db';
 
 type Db = ReturnType<typeof getDb>;
@@ -93,7 +94,7 @@ export function refImageSource(
 	} catch {
 		// not an absolute URL — fall through to the proxy
 	}
-	if (host === 'ufs.sh' || host === 'utfs.io' || host.endsWith('.ufs.sh') || host.endsWith('.utfs.io')) {
+	if (isUploadThingHost(host)) {
 		return { src: imageUrl, crossorigin: true };
 	}
 

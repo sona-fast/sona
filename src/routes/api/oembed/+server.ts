@@ -3,7 +3,7 @@ import { eq, and } from 'drizzle-orm';
 import { getReadDb } from '$lib/server/db';
 import { images, artists } from '$lib/server/db/schema';
 import { getSettings } from '$lib/server/settings';
-import { socialImageUrl, socialImageDimensions } from '$lib/social-image';
+import { socialImage } from '$lib/social-image';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, platform }) => {
@@ -69,22 +69,22 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 
 	const settings = await getSettings(db);
 
-	// Same transformed image (and therefore same dimensions) og:image advertises:
-	// oEmbed must not hand consumers a larger original than the page itself does.
-	const imageUrl = socialImageUrl(row.imageUrl, url.origin);
-	const dimensions = socialImageDimensions(row.width, row.height);
+	// Same image (and therefore same dimensions) og:image advertises: oEmbed must
+	// not hand consumers a larger original than the page itself does.
+	const image = socialImage(row.imageUrl, url.origin, row.width, row.height);
 
 	return json({
 		version: '1.0',
 		type: 'photo',
 		title: row.title,
 		author_name: row.artistName ? `Commission by ${row.artistName}` : 'Commission',
-		author_url: authorUrl ?? `${url.origin}/gallery/${encodeURIComponent(slug)}`,
+		// The already-validated path we matched on — no decode/re-encode round trip.
+		author_url: authorUrl ?? `${url.origin}${parsed.pathname}`,
 		provider_name: settings.siteName,
 		provider_url: url.origin,
-		url: imageUrl,
-		width: dimensions.width ?? 1200,
-		height: dimensions.height ?? 800,
+		url: image.url,
+		width: image.width ?? 1200,
+		height: image.height ?? 800,
 		cache_age: 3600
 	});
 };

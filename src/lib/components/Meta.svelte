@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { APP_NAME } from '$lib/config';
-	import { socialImageUrl, socialImageDimensions } from '$lib/social-image';
+	import { socialImage } from '$lib/social-image';
 
 	interface Props {
 		title: string;
@@ -27,14 +27,12 @@
 	}: Props = $props();
 
 	// $derived so the tags track prop changes on a same-route nav (e.g. the gallery
-	// detail page swapping images), not just the initial value.
-	const ogImage = $derived(image ? socialImageUrl(image, url) : null);
-
-	const ogDimensions = $derived(
-		image ? socialImageDimensions(imageWidth, imageHeight) : { width: null, height: null }
-	);
-	const ogWidth = $derived(ogDimensions.width);
-	const ogHeight = $derived(ogDimensions.height);
+	// detail page swapping images), not just the initial value. One helper call, so
+	// the advertised url and its dimensions always describe the same image.
+	const social = $derived(image ? socialImage(image, url, imageWidth, imageHeight) : null);
+	const ogImage = $derived(social?.url ?? null);
+	const ogWidth = $derived(social?.width ?? null);
+	const ogHeight = $derived(social?.height ?? null);
 </script>
 
 <svelte:head>
