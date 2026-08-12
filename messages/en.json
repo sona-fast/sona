@@ -377,6 +377,7 @@
 	"admin_upload_dropzone_multi": "Drag & drop up to {max} images here, click to browse, or paste from clipboard",
 	"admin_upload_images_added": "{count} image(s) added",
 	"admin_upload_over_limit": "{count} image(s) skipped — max {max}",
+	"admin_upload_error_too_large": "This file is over {max}. Try a smaller image.",
 	"admin_field_variant_of": "Variant of",
 	"admin_field_variant_label": "Variant label",
 	"admin_variant_none": "Not a variant",

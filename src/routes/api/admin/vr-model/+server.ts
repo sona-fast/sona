@@ -18,12 +18,14 @@ import type { RequestHandler } from './$types';
 // admin session).
 //
 // Streaming counterpart of /api/upload for VR avatar model files (SONA-124).
-// Models are far beyond MAX_BUFFER_BYTES, so the RAW body is streamed — never
-// request.formData() (which materializes the file) and never bufferStream. The
-// declared Content-Length is REQUIRED: it is checked against the size cap
-// before a single body byte is read, and passed to storage.put() as `size` so
-// the landed SONA-136 contract streams end-to-end and fails the put on a
-// length mismatch (a lying header can't store a truncated/oversized object).
+// Model bodies must never be materialized in isolate memory — regardless of
+// how MAX_VR_MODEL_BYTES compares to MAX_BUFFER_BYTES — so the RAW body is
+// streamed: never request.formData() (which materializes the file) and never
+// bufferStream. The declared Content-Length is REQUIRED: it is checked
+// against the size cap before a single body byte is read, and passed to
+// storage.put() as `size` so the landed SONA-136 contract streams end-to-end
+// and fails the put on a length mismatch (a lying header can't store a
+// truncated/oversized object).
 //
 // The caller stores the returned { url, size, format } on the avatar row via
 // the create/edit form.

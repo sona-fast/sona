@@ -35,6 +35,8 @@ const TOKEN = btoa(
 );
 
 const MiB = 1024 * 1024;
+// One MiB-chunk past the buffer cap — derived, so a cap change can't strand it.
+const OVER_CAP_CHUNKS = Math.ceil(MAX_BUFFER_BYTES / MiB) + 1;
 
 /** The success response a real ingest PUT returns: the key echoed as a ufsUrl. */
 function ingestOk(url: string | URL | Request): Response {
@@ -53,7 +55,7 @@ describe('UploadThing streaming put', () => {
 
 	it('uploads a body larger than MAX_BUFFER_BYTES without materializing it', async () => {
 		const chunkSize = MiB;
-		const chunks = 11; // 11 MiB — over the 10 MiB buffer cap the old path used
+		const chunks = OVER_CAP_CHUNKS;
 		const size = chunks * chunkSize;
 		expect(size).toBeGreaterThan(MAX_BUFFER_BYTES);
 
