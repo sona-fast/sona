@@ -88,6 +88,32 @@ describe('defaultPrivacyPolicy', () => {
 			.join('\n');
 		expect(text).toContain('Resend');
 	});
+
+	// SONA-167: the /ai disclosure page names Anthropic and CodeRabbit as
+	// dev-time processors; /privacy must say the same or the two pages publicly
+	// contradict each other on the trust question.
+	it('names the AI development tools as dev-time processors', () => {
+		const text = defaultPrivacyPolicy(withEmail)
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(text).toContain('Claude');
+		expect(text).toContain('CodeRabbit');
+		expect(text).toMatch(/nothing you do as a visitor is sent to either one/);
+	});
+
+	// Cloudflare injects its Web Analytics beacon into proxied responses on
+	// every fork (see the CSP allowance for static.cloudflareinsights.com);
+	// "no third-party analytics cookies" alone reads as weasel wording to
+	// anyone with a network tab open, so the script itself must be disclosed.
+	it('discloses the Cloudflare Web Analytics script and the feature integrations', () => {
+		const text = defaultPrivacyPolicy(withEmail)
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(text).toMatch(/Web Analytics script/);
+		expect(text).toContain('Turnstile');
+		expect(text).toContain('Telegram');
+		expect(text).toContain('cons.fyi');
+	});
 });
 
 describe('defaultTerms', () => {
@@ -134,7 +160,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '29e991d6a419e3d7cfe8a8b2101abc29b919fcf054dc1ea7c8be4b5af3c6a8b4';
+	const RECORDED_TEXT_HASH = '74261b6c10b94178157424355e55be3080c22bb54d01ec549773b5a7d7c3a6fe';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

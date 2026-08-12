@@ -27,7 +27,7 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
-export const LEGAL_DEFAULTS_UPDATED = '2026-08-10';
+export const LEGAL_DEFAULTS_UPDATED = '2026-08-12';
 
 /**
  * Resolve the "Last updated" date to show on a legal page from a *stable* source
@@ -72,7 +72,8 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 				'From visitors, we do not require an account and do not require you to provide personal information to browse. The site stores a small preference cookie for your light/dark theme and a browser-local setting for your preferred gallery layout. It does not set advertising or third-party analytics cookies by default.',
 				'When the site owner signs in to manage the site, an administrative session cookie is set for the owner only.',
 				'Our hosting and content-delivery provider (Cloudflare) may process limited technical data such as IP address and request metadata to serve and secure the site. This is standard server operation, not tracking by us.',
-				'Some sites turn on an optional built-in analytics feature. If this site has visitor analytics enabled, it keeps aggregate counters in its own database to understand how the site is used: how often pages are viewed, which site referred a visit, visitor country, device type (desktop, mobile, or tablet), and how often the download button is pressed. These are counters, not profiles: they use no cookies, store no IP addresses, and keep no records tied to an individual visitor, and none of it is shared with any other site or service. The page-view, referrer, country, and device counters are deleted by a weekly cleanup once they are about 35 days old. The download count is kept as a simple running total.'
+				'Some sites turn on an optional built-in analytics feature. If this site has visitor analytics enabled, it keeps aggregate counters in its own database to understand how the site is used: how often pages are viewed, which site referred a visit, visitor country, device type (desktop, mobile, or tablet), and how often the download button is pressed. These are counters, not profiles: they use no cookies, store no IP addresses, and keep no records tied to an individual visitor, and none of it is shared with any other site or service. The page-view, referrer, country, and device counters are deleted by a weekly cleanup once they are about 35 days old. The download count is kept as a simple running total.',
+				'When the site is served through Cloudflare, Cloudflare may add its own Web Analytics script to pages. It measures page views and performance for the site owner without cookies, and it does not identify you or follow you to other sites.'
 			]
 		},
 		{
@@ -92,7 +93,9 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'Service providers',
 			body: [
-				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, and storage for images, video clips, and 3D avatar model files), on some sites a file-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services."
+				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, and storage for images, video clips, and 3D avatar model files), on some sites a file-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services.",
+				"This site's software is built and maintained with AI development tools: Anthropic's Claude writes and debugs code under the developer's direction, and CodeRabbit, a code review service, reads proposed changes. Code passes through both. When the developer is diagnosing a problem, operational data such as server logs can too. Neither tool is part of the running site, and nothing you do as a visitor is sent to either one.",
+				'For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), and X (fetching artist avatars). The site contacts these services to run the feature; they are not used to track visitors.'
 			]
 		},
 		{
