@@ -25,7 +25,7 @@
 	"footer_terms": "Terms",
 	"footer_build": "build {sha}",
 	"footer_build_link_label": "build {sha}, opens this build's source in a new tab",
-	"footer_ai": "AI",
+	"footer_ai": "AI disclosure",
 	"ai_page_title": "AI and this site",
 	"ai_meta_title": "AI and this site — {siteName}",
 	"admin_setup_ai_heading": "AI disclosure",

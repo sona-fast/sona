@@ -25,7 +25,7 @@
 	"footer_terms": "利用規約",
 	"footer_build": "ビルド {sha}",
 	"footer_build_link_label": "ビルド {sha}、このビルドのソースを新しいタブで開きます",
-	"footer_ai": "AI",
+	"footer_ai": "AIについて",
 	"ai_page_title": "AIとこのサイト",
 	"ai_meta_title": "AIとこのサイト — {siteName}",
 	"admin_setup_ai_heading": "AI開示",
