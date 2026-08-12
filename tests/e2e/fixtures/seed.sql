@@ -70,8 +70,9 @@ VALUES
    '/e2e/matureposter.png', '/e2e/matureposter-thumb.png',
    900, 700, 1, 0, 1, NULL, NULL, '2026-07-04T00:00:00.000Z');
 
--- VR avatar fixtures for the vr-avatar spec (SONA-124). One character to
--- satisfy the FK, one PUBLISHED avatar with a self-hosted model whose license
+-- VR avatar fixtures for the vr-avatar spec (SONA-124). Characters to satisfy
+-- the FK (see the note on their names below), one PUBLISHED avatar with a
+-- self-hosted model whose license
 -- is restrictive (all-rights-reserved: the download route must 403 even with
 -- downloadable=1 AND a recorded permission source — the flag and the grant
 -- can't override the license, and the model bytes are never fetched so no R2
