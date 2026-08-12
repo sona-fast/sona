@@ -161,9 +161,25 @@ describe('isSameZoneImageHost', () => {
 		}
 	});
 
+	it('allows a same-host source when the PAGE host has three labels', () => {
+		// The `srcHost === pageHost` clause is redundant for a two-label page host
+		// (registrableDomain('taro.surf') === 'taro.surf'), so every case above passes
+		// without it. It only earns its place here: on a fork served at a subdomain,
+		// registrableDomain('sona.example.com') is 'example.com', which does NOT equal
+		// the page host — so without the identity clause a page's own images would be
+		// advertised raw and lose the transform.
+		expect(isSameZoneImageHost('sona.example.com', 'sona.example.com')).toBe(true);
+		// And the documented fail-safe for that same fork shape: a sibling host is not
+		// assumed to share the zone.
+		expect(isSameZoneImageHost('cdn.sona.example.com', 'sona.example.com')).toBe(false);
+	});
+
 	it('refuses when either host is missing', () => {
 		expect(isSameZoneImageHost('', PAGE)).toBe(false);
 		expect(isSameZoneImageHost('cdn.example.com', '')).toBe(false);
+		// Both empty: unreachable via socialImage (it only calls with a truthy
+		// srcHost), so this pins the guard as deliberate defense in depth.
+		expect(isSameZoneImageHost('', '')).toBe(false);
 	});
 
 	it('falls to raw for a multi-part TLD rather than guessing the zone', () => {

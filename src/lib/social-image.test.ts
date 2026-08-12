@@ -22,6 +22,25 @@ describe('socialImage — the url it advertises', () => {
 		});
 	});
 
+	it('transforms a same-host source when the fork is served at a subdomain', () => {
+		// A fork on a three-label host, images on that same host. The registrable
+		// domain of the source ('example.com') is NOT the page host, so only the
+		// same-host identity check keeps the transform — without it this fork's own
+		// images would be advertised raw and silently lose the CDN cap.
+		expect(
+			socialImage(
+				'https://sona.example.com/img/a.png',
+				'https://sona.example.com/gallery/x',
+				2400,
+				1800
+			)
+		).toEqual({
+			url: 'https://sona.example.com/cdn-cgi/image/width=1200,quality=85,fit=scale-down,format=auto/https://sona.example.com/img/a.png',
+			width: 1200,
+			height: 900
+		});
+	});
+
 	it('advertises an UploadThing source raw, at its original size', () => {
 		// The default storageProvider. Off-zone, so the transform 403s and a JSON
 		// payload has no rawFallback — and the dimensions must then be the raw ones.
