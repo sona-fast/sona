@@ -10,6 +10,7 @@ import {
 	modelFileError,
 	modelFormatDetailLabel,
 	modelFormatLabel,
+	namePlaceholderCharacter,
 	modelKeyFromUrl,
 	viewerSupports
 } from './vr';
@@ -158,5 +159,25 @@ describe('externalSiteName', () => {
 	it('returns null for missing or unparseable URLs', () => {
 		expect(externalSiteName(null)).toBeNull();
 		expect(externalSiteName('not a url')).toBeNull();
+	});
+});
+
+describe('namePlaceholderCharacter', () => {
+	const characters = [
+		{ id: 1, name: 'Nettle' },
+		{ id: 2, name: 'Pike' }
+	];
+
+	it('uses the character selected in the form', () => {
+		expect(namePlaceholderCharacter(characters, '2')).toBe('Pike');
+	});
+
+	it("falls back to the site's first character when nothing is selected", () => {
+		expect(namePlaceholderCharacter(characters, '')).toBe('Nettle');
+		expect(namePlaceholderCharacter(characters, '99')).toBe('Nettle');
+	});
+
+	it('falls back to a neutral stand-in on a site with no characters', () => {
+		expect(namePlaceholderCharacter([], '')).toBe('MySona');
 	});
 });

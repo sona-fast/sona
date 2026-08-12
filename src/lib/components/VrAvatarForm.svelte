@@ -9,7 +9,7 @@
 	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import { probeDimensions } from '$lib/probe-dimensions';
 	import { MAX_BUFFER_BYTES } from '$lib/config';
-	import { MAX_VR_MODEL_BYTES, creditRoleLabel, formatBytes, modelFileError, modelFormatLabel, platformLabel } from '$lib/vr';
+	import { MAX_VR_MODEL_BYTES, creditRoleLabel, formatBytes, modelFileError, modelFormatLabel, namePlaceholderCharacter, platformLabel } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
 	interface AvatarInit {
@@ -109,6 +109,7 @@
 	}
 
 	let characterId = $state(avatar ? String(avatar.characterId) : '');
+	const placeholderCharacter = $derived(namePlaceholderCharacter(characters, characterId));
 	let license = $state(avatar?.license ?? '');
 	let downloadable = $state(avatar?.downloadable ?? false);
 	let nsfw = $state(avatar?.nsfw ?? false);
@@ -438,7 +439,7 @@
 		<div class="fields">
 			<label>
 				<span>{m.admin_vr_field_name()}</span>
-				<input type="text" class="input" name="name" bind:value={name} oninput={onNameInput} required placeholder={m.admin_vr_name_placeholder()} />
+				<input type="text" class="input" name="name" bind:value={name} oninput={onNameInput} required placeholder={m.admin_vr_name_placeholder({ name: placeholderCharacter })} />
 			</label>
 			<label>
 				<span>{m.admin_vr_field_slug()}</span>
