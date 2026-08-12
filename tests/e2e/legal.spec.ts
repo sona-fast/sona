@@ -225,6 +225,15 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	await expect(page.locator('.footer .legal-links a[href="/ai"]')).toHaveCount(0);
 	const gone = await page.goto('/ai');
 	expect(gone?.status()).toBe(404);
+
+	// Declining the disclosure also drops the vendor names from the default
+	// privacy policy, so the owner is not left publishing processors they may
+	// not use. The category disclosure stays, because it still might be true.
+	await page.goto('/privacy');
+	await expect(page.getByText('CodeRabbit')).toHaveCount(0);
+	await expect(page.getByText('Anthropic')).toHaveCount(0);
+	await expect(page.getByText(/development or code-review tools/)).toBeVisible();
+	await expect(page.getByText(/Resend/)).toBeVisible();
 });
 
 // The override/toggle cases above mutate settings on the shared seeded DB.

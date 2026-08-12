@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import {
 	defaultPrivacyPolicy,
 	defaultTerms,
@@ -155,6 +156,20 @@ describe('defaultTerms', () => {
 		expect(sections.length).toBeGreaterThan(0);
 		const text = sections.flatMap((s) => s.body).join('\n');
 		expect(text).toContain('Testsona');
+	});
+});
+
+describe('privacy page wiring', () => {
+	// The aiToolsDisclosed gating is exercised above at the pure-function level,
+	// but /privacy is its ONLY caller — deleting the prop leaves the value
+	// undefined, the === false branch never fires, and a declining owner's
+	// policy names the vendors anyway. Pin the call form, not the identifier.
+	it('passes the disclosure flag from settings into the default policy', () => {
+		const src = readFileSync(
+			new URL('../routes/(public)/privacy/+page.svelte', import.meta.url),
+			'utf8'
+		);
+		expect(src).toMatch(/aiToolsDisclosed:\s*settings\.aiPageEnabled/);
 	});
 });
 
