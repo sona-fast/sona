@@ -40,6 +40,7 @@
 		{ q: m.admin_vr_guide_trouble_eyes_q, a: m.admin_vr_guide_trouble_eyes_a },
 		{ q: m.admin_vr_guide_trouble_colors_q, a: m.admin_vr_guide_trouble_colors_a },
 		{ q: m.admin_vr_guide_trouble_size_q, a: m.admin_vr_guide_trouble_size_a },
+		{ q: m.admin_vr_guide_trouble_proxy_q, a: m.admin_vr_guide_trouble_proxy_a },
 		{ q: m.admin_vr_guide_trouble_menu_q, a: m.admin_vr_guide_trouble_menu_a },
 		{ q: m.admin_vr_guide_trouble_pose_q, a: m.admin_vr_guide_trouble_pose_a },
 		{ q: m.admin_vr_guide_trouble_missing_q, a: m.admin_vr_guide_trouble_missing_a }
@@ -123,6 +124,7 @@
 					<div class="hl"><span>{m.admin_vr_guide_step4_row_stripped()}</span><span class="v">7.28 MB</span></div>
 					<div><span>{m.admin_vr_guide_step4_row_textures()}</span><span class="v">~5 MB</span></div>
 				</div>
+				<p>{@render rich(m.admin_vr_guide_step4_options())}</p>
 				<p>{m.admin_vr_guide_step4_p2({ max: maxModel })}</p>
 			</div>
 		</li>
