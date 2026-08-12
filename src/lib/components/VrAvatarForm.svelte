@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { enhance } from '$app/forms';
 	import { flip } from 'svelte/animate';
-	import { ArrowLeft, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus, UserPlus } from 'lucide-svelte';
+	import { ArrowLeft, BookOpen, Check, Loader2, GripVertical, Plus, X, UploadCloud, FileBox, Trash2, ImagePlus, UserPlus } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { toast } from '$lib/toast.svelte';
@@ -620,7 +620,15 @@
 				{/if}
 			</div>
 		{/if}
-		<p class="field-hint" id="vr-model-hint">{m.admin_vr_model_hint()}</p>
+		<!-- The hint keeps its id — the file inputs' aria-describedby points at
+		     it. The guide link opens a new tab so a half-filled form isn't lost. -->
+		<div class="model-hint-group">
+			<p class="field-hint" id="vr-model-hint">{m.admin_vr_model_hint()}</p>
+			<a class="guide-link" href="/admin/vr/guide" target="_blank" rel="noopener">
+				<BookOpen size={15} aria-hidden="true" />
+				{m.admin_vr_guide_link()}<span class="sr-only">{' '}{m.link_opens_new_tab()}</span>
+			</a>
+		</div>
 		<input type="hidden" name="modelUrl" value={modelUrl} />
 		<input type="hidden" name="modelFormat" value={modelFormat} />
 		<input type="hidden" name="modelSizeBytes" value={modelSizeBytes ?? ''} />
@@ -1036,6 +1044,17 @@
 	   visible hosts (same :has pattern as .platform-chip). */
 	.upload-zone:has(.sr-file:focus-visible),
 	.btn-sm:has(.sr-file:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+	/* Guide link under the model-format hint (mock frame 1, SONA-162). Grouped
+	   with the hint; 12px so it doesn't outrank the field labels. The
+	   --status-attention contrast rationale lives in /admin/vr/guide's CSS. */
+	.model-hint-group { display: flex; flex-direction: column; gap: 6px; }
+	.guide-link {
+		display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+		font-size: 12px; color: var(--status-attention); text-decoration: none;
+	}
+	.guide-link:hover { text-decoration: underline; }
+	.guide-link :global(svg) { flex: none; }
 
 	.upload-progress { display: flex; flex-direction: column; gap: 6px; }
 	.progress-bar { height: 6px; border-radius: var(--radius-pill); background: var(--secondary); overflow: hidden; }

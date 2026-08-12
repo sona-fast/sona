@@ -86,9 +86,45 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 	// trip CSP. adminLogin navigates to /admin/login itself, so this loads that page
 	// twice on purpose: once to inspect, once to log in through. Two widget solves,
 	// each pulling api.js over the network, is most of why this test needs test.slow().
-	await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
+	// realTurnstile: this test is the ONE place the genuine widget runs — its
+	// challenge iframe is the only RUNTIME coverage of the frame-src directive
+	// (full rationale in admin-login.ts).
+	// This navigation can abort under dev-server churn (net::ERR_ABORTED, seen as
+	// a first-attempt CI flake on this exact goto). Retry that specific abort once
+	// and confirm the page actually arrived, so a transient abort doesn't kill the
+	// test before any CSP coverage has run.
+	try {
+		await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
+	} catch (e) {
+		if (!(e instanceof Error) || !e.message.includes('net::ERR_ABORTED')) throw e;
+		await page.goto('/admin/login', { waitUntil: 'domcontentloaded' });
+	}
+	await expect(page).toHaveURL(/\/admin\/login/);
+	// The challenge iframe must actually attach — otherwise the frame-src runtime
+	// coverage passes vacuously when the widget silently fails to load. Checked via
+	// page.frames(), not a DOM locator: the widget mounts its iframe inside a
+	// CLOSED shadow root, which locators can't pierce. This poll deliberately ADDS
+	// a real-network requirement to the FIRST login-page load (previously only the
+	// second load had to solve) — an accepted cost: it is the anti-vacuity
+	// guarantee for the one test that keeps the real widget.
+	await expect
+		.poll(
+			() =>
+				page.frames().some((f) => {
+					try {
+						return new URL(f.url()).hostname === 'challenges.cloudflare.com';
+					} catch {
+						return false;
+					}
+				}),
+			{
+				timeout: 15_000,
+				message: 'real Turnstile challenge iframe never attached'
+			}
+		)
+		.toBe(true);
 	all.push(...(await drain(page)));
-	await adminLogin(page, PASSWORD);
+	await adminLogin(page, PASSWORD, { realTurnstile: true });
 	all.push(...(await drain(page)));
 
 	// Confirm the client actually hydrated (so the hydration script-src path was
@@ -111,7 +147,8 @@ test('no CSP violations across public + admin pages; CSP + HSTS headers present'
 test('/admin/upload can load a blob: image, so picked files keep their dimensions', async ({
 	page
 }) => {
-	// One login through a Turnstile solve.
+	// Logs in through the Turnstile stub like every other spec (see admin-login.ts):
+	// this test collects no CSP violations, so the real widget would buy nothing here.
 	test.slow();
 
 	// admin/upload mints blob: URLs from every picked file (+page.svelte:63 and :115):

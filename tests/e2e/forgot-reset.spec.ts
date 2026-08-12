@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { existsSync, readFileSync } from 'node:fs';
 import { E2E_RESEND_CAPTURE } from './paths';
-import { adminLogin } from './admin-login';
+import { adminLogin, stubTurnstile } from './admin-login';
 
 // End-to-end password recovery: the hardened forgot → reset cookie-exchange
 // flow (#74). The Resend send happens SERVER-SIDE, so Playwright's page.route
@@ -32,6 +32,10 @@ test('forgot → reset cookie-exchange → login with new password, no token reu
 	page,
 	context
 }) => {
+	// Register the stub before ANY navigation: the reset submission redirects to
+	// /admin/login?reset=1, which would otherwise load the genuine api.js (the
+	// stub adminLogin registers later would come too late for that load).
+	await stubTurnstile(page);
 	const before = capturedLinks().length;
 
 	// 1–2. Request a reset for the seeded admin email → generic confirmation
@@ -86,8 +90,8 @@ test('forgot → reset cookie-exchange → login with new password, no token reu
 	expect((await context.cookies()).find((c) => c.name === RESET_COOKIE)).toBeUndefined();
 
 	// The new password actually works (the reset wrote adminPasswordHash). The
-	// shared helper loads the login page cold and waits for the Turnstile widget to
-	// auto-solve before submitting.
+	// shared helper stubs the Turnstile widget and waits for the injected
+	// cf-turnstile-response value before submitting.
 	await adminLogin(page, NEW_PASSWORD);
 
 	// 5. The link can't be reused — the token row was consumed on success, so a

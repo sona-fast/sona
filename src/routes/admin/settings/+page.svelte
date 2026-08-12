@@ -863,7 +863,7 @@
 		{#if data.supporterKey.expiringSoon}
 			<!-- Action only — the eyebrow above already carries the countdown, so the
 			     nudge doesn't repeat it. -->
-			<p class="nudge-line">{m.admin_settings_supporter_expiring_pre()}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener noreferrer">sona.fast/supporter-key<span class="sr-only"> {m.link_opens_new_tab()}</span></a>{m.admin_settings_supporter_expiring_post()}</p>
+			<p class="nudge-line">{m.admin_settings_supporter_expiring_pre()}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener noreferrer">sona.fast/supporter-key<span class="sr-only">{' '}{m.link_opens_new_tab()}</span></a>{m.admin_settings_supporter_expiring_post()}</p>
 		{/if}
 		{#if data.earlyAccess.length}
 			<p class="status-line">{m.admin_settings_supporter_early_active({ features: earlyActiveText })}</p>
