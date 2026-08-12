@@ -43,7 +43,7 @@
 		heading: string;
 		submitLabel: string;
 		artists: { id: number; name: string }[];
-		characters: { id: number; name: string }[];
+		characters: { id: number; name: string; isOwner: boolean }[];
 		/** Gallery images for the poster picker (same source as the collections
 		 * cover picker). nsfw feeds the inherited-NSFW hint under the preview
 		 * (SONA-159). */
@@ -109,7 +109,9 @@
 	}
 
 	let characterId = $state(avatar ? String(avatar.characterId) : '');
-	const placeholderCharacter = $derived(namePlaceholderCharacter(characters, characterId));
+	const placeholderCharacter = $derived(
+		namePlaceholderCharacter(characters, characterId, m.admin_vr_name_placeholder_fallback())
+	);
 	let license = $state(avatar?.license ?? '');
 	let downloadable = $state(avatar?.downloadable ?? false);
 	let nsfw = $state(avatar?.nsfw ?? false);

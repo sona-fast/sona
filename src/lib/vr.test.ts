@@ -10,8 +10,8 @@ import {
 	modelFileError,
 	modelFormatDetailLabel,
 	modelFormatLabel,
-	namePlaceholderCharacter,
 	modelKeyFromUrl,
+	namePlaceholderCharacter,
 	viewerSupports
 } from './vr';
 
@@ -163,21 +163,29 @@ describe('externalSiteName', () => {
 });
 
 describe('namePlaceholderCharacter', () => {
+	// Name-ordered, as both VR loaders return them: the friend's featured sona
+	// sorts first, the site's own character second.
 	const characters = [
-		{ id: 1, name: 'Nettle' },
-		{ id: 2, name: 'Pike' }
+		{ id: 1, name: 'Nettle', isOwner: false },
+		{ id: 2, name: 'Pike', isOwner: true }
 	];
 
 	it('uses the character selected in the form', () => {
-		expect(namePlaceholderCharacter(characters, '2')).toBe('Pike');
+		expect(namePlaceholderCharacter(characters, '1', 'your sona')).toBe('Nettle');
 	});
 
-	it("falls back to the site's first character when nothing is selected", () => {
-		expect(namePlaceholderCharacter(characters, '')).toBe('Nettle');
-		expect(namePlaceholderCharacter(characters, '99')).toBe('Nettle');
+	it("falls back to the site's own character, not the alphabetically first", () => {
+		expect(namePlaceholderCharacter(characters, '', 'your sona')).toBe('Pike');
+		expect(namePlaceholderCharacter(characters, '99', 'your sona')).toBe('Pike');
 	});
 
-	it('falls back to a neutral stand-in on a site with no characters', () => {
-		expect(namePlaceholderCharacter([], '')).toBe('MySona');
+	it('falls back to the first character when no character is flagged as the owner', () => {
+		const noOwner = characters.map((c) => ({ ...c, isOwner: false }));
+		expect(namePlaceholderCharacter(noOwner, '', 'your sona')).toBe('Nettle');
+	});
+
+	it('falls back to the caller\'s translated stand-in on a site with no characters', () => {
+		expect(namePlaceholderCharacter([], '', 'your sona')).toBe('your sona');
+		expect(namePlaceholderCharacter([], '', 'あなたのソナ')).toBe('あなたのソナ');
 	});
 });

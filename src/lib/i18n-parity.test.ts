@@ -27,6 +27,26 @@ describe('message catalogue parity', () => {
 	});
 });
 
+// Parameter parity: matching KEYS are not enough. If a translation pass drops a
+// {placeholder} from a ja value, paraglide compiles a zero-parameter ja variant
+// and the interpolated value silently disappears from the JA UI, with no build
+// error and no failing key-parity check. The catalogue starts at zero
+// mismatches, so this is enforced across every key rather than a watch-list.
+describe('message parameter parity', () => {
+	const params = (value: string) => new Set(value.match(/\{[^{}]+\}/g) ?? []);
+	const sorted = (s: Set<string>) => [...s].sort();
+
+	it('every key uses the same {placeholders} in en and ja', () => {
+		const en = JSON.parse(rawOf('en')) as Record<string, unknown>;
+		const ja = JSON.parse(rawOf('ja')) as Record<string, unknown>;
+		for (const [key, enValue] of Object.entries(en)) {
+			const jaValue = ja[key];
+			if (key === '$schema' || typeof enValue !== 'string' || typeof jaValue !== 'string') continue;
+			expect(sorted(params(jaValue)), key).toEqual(sorted(params(enValue)));
+		}
+	});
+});
+
 // Terminology guard (sona#45): the JA UI always calls Telegram/chat sticker
 // content ステッカー, never スタンプ. Every スタンプ occurrence in the catalogue was
 // sticker-domain, so the whole file must stay free of it. If a non-sticker

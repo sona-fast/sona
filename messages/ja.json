@@ -1171,6 +1171,7 @@
 	"admin_vr_section_details": "基本情報",
 	"admin_vr_field_name": "名前",
 	"admin_vr_name_placeholder": "例: {name} (VRChat)",
+	"admin_vr_name_placeholder_fallback": "あなたのソナ",
 	"admin_vr_field_slug": "スラッグ",
 	"admin_vr_field_character": "キャラクター",
 	"admin_vr_select_character": "キャラクターを選択…",

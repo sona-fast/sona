@@ -83,8 +83,18 @@ VALUES
 -- whose poster (image 4) is NSFW: the loaders' inherited flag must blur its
 -- card and mature-gate its detail page. It shares avatar 1's model key (one
 -- R2 stub serves both HEAD probes) so the 3D entry point exists to gate.
-INSERT OR REPLACE INTO characters (id, name, created_at)
-VALUES (1, 'Taro', '2026-07-01T00:00:00.000Z');
+-- Two characters, because one named 'Taro' was byte-identical to the avatar
+-- name placeholder's old hardcoded example: any assertion on it passed against
+-- pre-change code. Character 2 is the SITE'S OWN sona (is_owner) and sorts
+-- AFTER Taro by name, so the placeholder can only read 'Thistle' if the form
+-- resolves the owner rather than the stock name or the first row by name.
+-- Both carry no reference_image_id, so the owner flag changes nothing for the
+-- /art ref-sheet precedence or the presence gates (they fall through to the
+-- REFERENCE_TAG query exactly as before).
+INSERT OR REPLACE INTO characters (id, name, is_owner, created_at)
+VALUES
+  (1, 'Taro', 0, '2026-07-01T00:00:00.000Z'),
+  (2, 'Thistle', 1, '2026-07-01T00:00:00.000Z');
 INSERT OR REPLACE INTO vr_avatars
   (id, slug, name, character_id, model_url, model_format, model_size_bytes, poster_image_id,
    external_url, license, permission_source, downloadable, nsfw, published, description, created_at)

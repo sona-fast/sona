@@ -45,7 +45,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 				.from(avatarPlatforms)
 				.where(eq(avatarPlatforms.avatarId, avatarId)),
 			db.select({ id: artists.id, name: artists.name }).from(artists).orderBy(artists.name),
-			db.select({ id: characters.id, name: characters.name }).from(characters).orderBy(characters.name),
+			db.select({ id: characters.id, name: characters.name, isOwner: characters.isOwner }).from(characters).orderBy(characters.name),
 			db
 				.select({ id: images.id, imageUrl: images.imageUrl, thumbnailUrl: images.thumbnailUrl, title: images.title, nsfw: images.nsfw })
 				.from(images)

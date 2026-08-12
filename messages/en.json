@@ -1207,6 +1207,7 @@
 	"admin_vr_section_details": "Details",
 	"admin_vr_field_name": "Name",
 	"admin_vr_name_placeholder": "e.g. {name} (VRChat)",
+	"admin_vr_name_placeholder_fallback": "your sona",
 	"admin_vr_field_slug": "Slug",
 	"admin_vr_field_character": "Character",
 	"admin_vr_select_character": "Select a character…",

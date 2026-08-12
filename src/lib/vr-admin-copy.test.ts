@@ -37,6 +37,26 @@ describe('VR too-large error copy', () => {
 	});
 });
 
+// The name placeholder names the site's OWN character (sona#317 follow-up), so
+// it must stay parameterised. Reverting either locale to a stock name still
+// compiles, passes i18n parity and passes the whole unit suite otherwise.
+describe('VR avatar-name placeholder copy', () => {
+	it('both locales keep the {name} placeholder and no stock example name', () => {
+		for (const locale of ['en', 'ja']) {
+			const msg = messages(locale).admin_vr_name_placeholder;
+			expect(msg, locale).toContain('{name}');
+			expect(msg, locale).not.toContain('Taro');
+			expect(msg, locale).not.toContain('タロ');
+		}
+	});
+
+	it('both locales carry the no-characters-yet stand-in', () => {
+		for (const locale of ['en', 'ja']) {
+			expect(messages(locale).admin_vr_name_placeholder_fallback, locale).toBeTruthy();
+		}
+	});
+});
+
 describe('VR downloadable-switch hint copy', () => {
 	it('keeps the honesty clause: hiding the button does not prevent access', () => {
 		expect(messages('en').admin_vr_downloadable_hint).toContain('without preventing access');

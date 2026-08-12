@@ -85,6 +85,32 @@ test("poster picker cells stay square even when the button's aspect-ratio is ign
 	expect(Math.abs(box!.width - box!.height)).toBeLessThan(1);
 });
 
+test("the name placeholder names the site's own character and follows the select", async ({
+	page
+}) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/vr/new');
+
+	// Seeded characters: 'Taro' (id 1, sorts first) and 'Thistle' (id 2, is_owner).
+	// With nothing selected the example must be the SITE'S sona, so neither the
+	// old hardcoded 'Taro' nor a first-row-by-name fallback can satisfy this.
+	await expect(page.locator('input[name="name"]')).toHaveAttribute(
+		'placeholder',
+		'e.g. Thistle (VRChat)'
+	);
+
+	// Picking a character re-derives the example (hydration-retry shape: a
+	// pre-hydration selection does not re-render the placeholder).
+	await expect(async () => {
+		await page.selectOption('select[name="characterId"]', { label: 'Taro' });
+		await expect(page.locator('input[name="name"]')).toHaveAttribute(
+			'placeholder',
+			'e.g. Taro (VRChat)',
+			{ timeout: 2000 }
+		);
+	}).toPass({ timeout: 20_000 });
+});
+
 test('typing a name auto-suggests the slug until the slug is touched', async ({ page }) => {
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/vr/new');

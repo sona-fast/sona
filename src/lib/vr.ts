@@ -158,14 +158,22 @@ export function platformLabel(platform: string): string | null {
 }
 
 /** Name shown in the avatar-name placeholder: the character selected in the
- * form, else the first character on the site, so the example reads as this
- * site's own sona instead of a stock one. A site with no characters yet gets a
- * neutral stand-in. */
+ * form, else the site's own character (isOwner, matching every other admin
+ * surface — the list is name-ordered, so a friend's featured sona can sort
+ * first), else the first character, so the example reads as this site's own
+ * sona instead of a stock one. A site with no characters yet gets the
+ * caller's translated stand-in. */
 export function namePlaceholderCharacter(
-	characters: { id: number; name: string }[],
-	selectedId: string
+	characters: { id: number; name: string; isOwner: boolean }[],
+	selectedId: string,
+	fallback: string
 ): string {
-	return characters.find((c) => String(c.id) === selectedId)?.name ?? characters[0]?.name ?? 'MySona';
+	return (
+		characters.find((c) => String(c.id) === selectedId)?.name ??
+		characters.find((c) => c.isOwner)?.name ??
+		characters[0]?.name ??
+		fallback
+	);
 }
 
 /** Hard cap for a self-hosted model upload. Shared (not $lib/server) so the
