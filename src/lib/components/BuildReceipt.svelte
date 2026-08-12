@@ -6,12 +6,20 @@
 	// render it: Footer above 768px, MobileCredit below. Returns null outside an
 	// Actions build (the define is empty), so dev and tests show no line. See
 	// build-info.ts for why the link targets the deploying fork's own repo.
+	//
+	// `linked` follows the /ai toggle. Actions sets GITHUB_REPOSITORY whether or
+	// not the repository is public, so a fork that has not opted into publishing
+	// its source pointer shows the SHA as plain text: no repo path in the markup
+	// and no link for a visitor to hit a login wall on. A reader only ever sees
+	// the /ai page's promise that this links to the source when the page is on,
+	// which is exactly when it does.
+	let { linked = true }: { linked?: boolean } = $props();
 	const receipt = buildReceipt(__BUILD_COMMIT_SHA__, __BUILD_REPO_URL__);
 </script>
 
 {#if receipt}
 	<span class="build">
-		{#if receipt.url}
+		{#if receipt.url && linked}
 			<a
 				href={receipt.url}
 				target="_blank"

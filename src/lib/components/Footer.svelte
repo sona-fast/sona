@@ -25,7 +25,7 @@
 				{/if}
 			</nav>
 			<SonaBadge {host} />
-			<BuildReceipt />
+			<BuildReceipt linked={settings.aiPageEnabled} />
 		</div>
 		<div class="social-links">
 			{#if settings.twitterUrl}

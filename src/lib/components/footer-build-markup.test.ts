@@ -19,7 +19,7 @@ describe('build receipt markup', () => {
 	});
 
 	it('links the SHA only when the building repo is known, plain text otherwise', () => {
-		expect(receiptSrc).toMatch(/\{#if receipt\.url\}\s*<a\b[\s\S]*?href=\{receipt\.url\}/);
+		expect(receiptSrc).toMatch(/\{#if receipt\.url && linked\}\s*<a\b[\s\S]*?href=\{receipt\.url\}/);
 		// The unlinked fallback stays a bare message, not a dead link: pin the
 		// discriminator (an else branch with no anchor), not the exact call.
 		const elseBranch = receiptSrc.split('{:else}')[1]?.split('{/if}')[0] ?? '';
@@ -29,9 +29,19 @@ describe('build receipt markup', () => {
 
 	// One atom, both chromes: Footer above 768px, MobileCredit below — so the
 	// stamp the /ai page points at exists at every viewport.
-	it('is rendered by both footer chromes', () => {
-		expect(footerSrc).toContain('<BuildReceipt />');
-		expect(mobileCreditSrc).toContain('<BuildReceipt />');
+	it('is rendered by both footer chromes, each passing the link gate', () => {
+		expect(footerSrc).toContain('<BuildReceipt linked={settings.aiPageEnabled} />');
+		expect(mobileCreditSrc).toContain('<BuildReceipt linked={settings.aiPageEnabled} />');
+	});
+
+	// Actions sets GITHUB_REPOSITORY regardless of repository visibility, so a
+	// fork that declined the disclosure must not publish its repo path in the
+	// footer markup or hand visitors a link into a private repo.
+	it('shows the SHA unlinked when the disclosure is off', () => {
+		expect(receiptSrc).toMatch(/let \{ linked = true \}/);
+		const elseBranch = receiptSrc.split('{:else}')[1]?.split('{/if}')[0] ?? '';
+		expect(elseBranch).toMatch(/m\.footer_build\(/);
+		expect(elseBranch).not.toMatch(/<a\b/);
 	});
 });
 

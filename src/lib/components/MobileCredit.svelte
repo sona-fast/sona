@@ -22,7 +22,7 @@
 		{/if}
 	</nav>
 	<SonaBadge {host} />
-	<BuildReceipt />
+	<BuildReceipt linked={settings.aiPageEnabled} />
 </footer>
 
 <style>
