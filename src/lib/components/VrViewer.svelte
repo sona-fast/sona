@@ -716,14 +716,16 @@
 		padding-inline: 12px;
 	}
 
-	/* iPhone's no-fullscreen-API fallback: a fixed overlay above the nav
-	   (MobileNav sits at 50), mirroring the :fullscreen rules above. Kept as
-	   SEPARATE rules on purpose — a browser old enough to need the fallback may
-	   not parse :fullscreen, and one unknown selector drops a whole rule. */
+	/* iPhone's no-fullscreen-API fallback: a fixed overlay mirroring the
+	   :fullscreen rules above. Kept as SEPARATE rules on purpose — a browser
+	   old enough to need the fallback may not parse :fullscreen, and one
+	   unknown selector drops a whole rule. z-index clears EVERY page layer,
+	   toasts included (Toaster is 1000; nav 50) — native fullscreen sits in
+	   the browser's top layer above all of them, and the fallback must match. */
 	.viewer.fs-fallback {
 		position: fixed;
 		inset: 0;
-		z-index: 100;
+		z-index: 1100;
 		background: var(--background);
 		/* Same edge bleed as :fullscreen above: stage to the edges, bottom
 		   inset for the controls row. The env() terms are 0 as configured
