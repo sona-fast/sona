@@ -1135,8 +1135,20 @@
 		border: 1px solid var(--border); background: none; color: var(--muted-foreground); cursor: pointer;
 	}
 	.remove-poster:hover { color: var(--destructive); border-color: var(--destructive); }
+	/* Fixed tracks on BOTH axes, deliberately: with 1fr columns the cell's height
+	   came only from its aspect-ratio, and Firefox does not feed an
+	   aspect-ratio-derived height back into row track sizing — the rows were
+	   sized from content (~17px while the lazy images had no intrinsic size)
+	   while each cell painted at its derived ~77px, so every cell overflowed its
+	   row and was overlapped by the next one, leaving a sliver of each image.
+	   Layout APIs report the correct height throughout (reading one forces the
+	   reflow that fixes it), so this is pinned in picker-grid-tracks.test.ts
+	   rather than measured. Fixed 72px tracks are square by construction.
+	   Verified against stock Firefox 153; Chromium and Playwright's patched
+	   Firefox never showed the bug. */
 	.poster-grid {
-		display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px;
+		display: grid; grid-template-columns: repeat(auto-fill, 72px); grid-auto-rows: 72px;
+		justify-content: space-between; gap: 8px;
 		max-height: 260px; overflow-y: auto; padding: 2px;
 	}
 	.poster-option {

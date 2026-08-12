@@ -441,9 +441,16 @@
 		color: var(--muted-foreground);
 	}
 
+	/* Fixed tracks on both axes — same reason as the VR poster grid (see the
+	   .poster-grid comment in VrAvatarForm.svelte): a cell whose height comes
+	   only from aspect-ratio does not feed that height back into row track
+	   sizing in Firefox, so the rows collapse to content and every cell
+	   overflows into the row below. */
 	.cover-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+		grid-template-columns: repeat(auto-fill, 64px);
+		grid-auto-rows: 64px;
+		justify-content: space-between;
 		gap: 8px;
 	}
 
