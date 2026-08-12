@@ -408,6 +408,46 @@ describe('authHandle — cache-control stamping honors handler opt-outs (SONA-12
 		expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=300, stale-while-revalidate=3600');
 	});
 
+	// /api is private by default; /api/oembed is the one share-cacheable exception
+	// (anonymous, GET-only, no per-visitor variance). These pin both halves: the
+	// exception works, and it did not open the rest of /api.
+	it('share-caches /api/oembed — an unfurl must not re-run the handler every time', async () => {
+		const res = (await authHandle({
+			event: makeEvent('/api/oembed', makeDb()),
+			resolve: async () =>
+				new Response('{}', { headers: { 'content-type': 'application/json' } })
+		} as never)) as Response;
+		expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=300, stale-while-revalidate=3600');
+	});
+
+	it('does not share-cache a non-200 from /api/oembed (a 404 must not be pinned at the edge)', async () => {
+		for (const status of [400, 404]) {
+			const res = (await authHandle({
+				event: makeEvent('/api/oembed', makeDb()),
+				resolve: async () =>
+					new Response('err', { status, headers: { 'content-type': 'application/json' } })
+			} as never)) as Response;
+			expect(res.headers.get('Cache-Control'), `${status} must not be shared`).toBe(
+				'private, no-store, no-cache'
+			);
+		}
+	});
+
+	it('leaves the other public /api path private — the carve-out is one path, not a prefix', async () => {
+		// /api/metrics/download is the only other gate-exempt path, so it is the only
+		// other one that reaches this block anonymously. It must stay private: it is a
+		// write beacon, and sharing it at the edge would drop counts.
+		// Sibling paths like /api/oembed/extra never get here at all — authHandle 401s
+		// them before any cache stamping (pinned by the gate tests above), which is why
+		// they are not asserted here.
+		const res = (await authHandle({
+			event: makeEvent('/api/metrics/download', makeDb()),
+			resolve: async () =>
+				new Response('{}', { headers: { 'content-type': 'application/json' } })
+		} as never)) as Response;
+		expect(res.headers.get('Cache-Control')).toBe('private, no-store, no-cache');
+	});
+
 	it('keeps a handler-set Cache-Control (the download fallback must stay no-store)', async () => {
 		const db = makeDb();
 		const res = (await authHandle({

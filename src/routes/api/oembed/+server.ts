@@ -85,6 +85,9 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 		url: image.url,
 		width: image.width ?? 1200,
 		height: image.height ?? 800,
-		cache_age: 3600
+		// Matches the s-maxage the response actually carries (hooks.server.ts shares
+		// this path at the edge), so the payload doesn't promise a lifetime the
+		// headers deny.
+		cache_age: 300
 	});
 };

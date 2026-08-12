@@ -39,7 +39,15 @@ function rawDimensions(
  * A source on a KNOWN off-zone host (UploadThing, `*.r2.dev`) is advertised
  * untouched at its original size instead: the transform 403s those (see
  * $lib/img) and a JSON payload has no rawFallback to swap the original back in.
- * `storageProvider` defaults to uploadthing, so that is the common case.
+ * `storageProvider` defaults to uploadthing, so that is the common case. Verified
+ * live 2026-08-12: transforming an off-zone source returns 403 even on a zone whose
+ * image_resizing setting is "open".
+ *
+ * A root-relative `src` yields a double slash after `format=auto/`. That is
+ * deliberate — verified live that Cloudflare resolves both forms identically
+ * (favicon.svg: 200 either way; a non-image source: 415 either way), and the tests
+ * below pin the current string, so "fixing" it would change og:image output on
+ * every fork storing relative URLs for no gain.
  */
 export function socialImage(
 	src: string,
