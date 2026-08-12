@@ -1,7 +1,7 @@
 # AI policy
 
-This repository's code is written with AI assistance, and this file is the
-honest record of what that means. It is the longer version of the /ai
+This repository's code is written with AI assistance, and this file records
+what that means. It is the longer version of the /ai
 disclosure page that sites running Sona can publish.
 
 ## The blanket rule
@@ -45,7 +45,7 @@ project:
 ## What AI is never used for
 
 No artwork, images, audio, or video in this repository is AI-generated, and
-the upstream project's own sites hold none either. The software ships almost no
+none appears on the upstream project's own sites. The software ships almost no
 media of its own (a favicon and a test fixture, both hand-drawn SVG), and
 the content each site displays is chosen by its operator. The upstream
 project's stance: AI writes code and text here; it does not make art.

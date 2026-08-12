@@ -106,6 +106,21 @@ describe('defaultPrivacyPolicy', () => {
 		expect(text).toMatch(/can contain request data such as IP addresses/);
 	});
 
+	// An owner who declined the /ai affirmation has said they do not stand
+	// behind its claims, so the policy must not keep naming AI processors on
+	// their behalf — the opt-out would otherwise hide the page while the legal
+	// document carried the same assertions.
+	it('omits the AI-tools processor paragraph when the owner declined the disclosure', () => {
+		const declined = defaultPrivacyPolicy({ ...withEmail, aiToolsDisclosed: false })
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(declined).not.toContain('CodeRabbit');
+		expect(declined).not.toMatch(/Anthropic/);
+		// The rest of the policy is unchanged.
+		expect(declined).toContain('Resend');
+		expect(declined).toMatch(/Google Fonts/);
+	});
+
 	// Cloudflare injects its Web Analytics beacon into proxied responses on
 	// every fork (see the CSP allowance for static.cloudflareinsights.com);
 	// "no third-party analytics cookies" alone reads as weasel wording to
@@ -189,7 +204,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '6daa19684cf59f6756cc97bab4729b213b8e3f7cdcb9323b62aa963bf5b1a470';
+	const RECORDED_TEXT_HASH = 'fb52ccc6ff8b6d9a5e141b7bc78594307757fcafe44b49de0e0274d915e166db';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

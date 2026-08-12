@@ -11,10 +11,9 @@
 	// Carries the same legal nav (incl. the gated /ai link) and build receipt as
 	// Footer — below 768px this is the ONLY place they exist.
 	let { settings, host }: { settings: PublicSiteSettings; host: string } = $props();
-
 </script>
 
-<div class="mobile-credit">
+<footer class="mobile-credit">
 	<nav class="legal-links" aria-label={m.footer_legal_label()}>
 		<a href="/privacy">{m.footer_privacy()}</a>
 		<a href="/terms">{m.footer_terms()}</a>
@@ -24,7 +23,7 @@
 	</nav>
 	<SonaBadge {host} />
 	<BuildReceipt />
-</div>
+</footer>
 
 <style>
 	.mobile-credit {
@@ -61,5 +60,4 @@
 	.legal-links a:hover {
 		color: var(--foreground);
 	}
-
 </style>

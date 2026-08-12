@@ -11,7 +11,6 @@
 	import type { PublicSiteSettings } from '$lib/server/settings';
 
 	let { settings, host }: { settings: PublicSiteSettings; host: string } = $props();
-
 </script>
 
 <footer class="footer">
@@ -97,7 +96,6 @@
 	.legal-links a:hover {
 		color: var(--foreground);
 	}
-
 
 	.social-links {
 		display: flex;

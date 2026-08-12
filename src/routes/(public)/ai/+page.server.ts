@@ -28,16 +28,18 @@ export const load: PageServerLoad = async ({ parent, platform }) => {
 	if (!settings.aiPageEnabled) error(404, 'Not found');
 
 	const db = getReadDb(platform!.env.DB);
-	let stored: string | null;
 	try {
-		stored = await getRawSetting(db, 'aiPageEnabled');
-	} catch {
+		const stored = await getRawSetting(db, 'aiPageEnabled');
+		// Absent means ON only for installs that pre-date the feature; an
+		// explicit 'false' is an owner who opted out, in the wizard or Settings.
+		if (stored === 'false') error(404, 'Not found');
+		const { aiPageText, aiPageUpdatedAt } = await getSettings(db);
+		return { aiPageText, aiPageUpdatedAt };
+	} catch (e) {
+		// Rethrow our own 404 unchanged; any read failure becomes one too, so a
+		// blip can neither publish a declined page nor substitute the default
+		// copy for an owner who overrode it precisely because it is wrong.
+		if (e && typeof e === 'object' && 'status' in e) throw e;
 		error(404, 'Not found');
 	}
-	// Absent means ON only for installs that pre-date the feature; an explicit
-	// 'false' is an owner who opted out, in the wizard or in Settings.
-	if (stored === 'false') error(404, 'Not found');
-
-	const { aiPageText, aiPageUpdatedAt } = await getSettings(db);
-	return { aiPageText, aiPageUpdatedAt };
 };

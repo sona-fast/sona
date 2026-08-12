@@ -64,6 +64,25 @@ function loadSplash(platform: App.Platform) {
 
 beforeEach(() => clearSettingsCache());
 
+describe('homepage load — settings payload', () => {
+	// Behavioral twin of the layout's strip test: the homepage returns settings
+	// independently of the layout, so it needs its own proof that a fork's /ai
+	// override never rides the busiest page on the site.
+	it('never ships the /ai override text', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare("INSERT INTO site_settings (key, value) VALUES ('aiPageText', ?)")
+			.run('Retired override copy.');
+
+		const data = (await loadSplash(platform)) as unknown as {
+			settings: Record<string, unknown>;
+		};
+
+		expect(data.settings).not.toHaveProperty('aiPageText');
+		expect(JSON.stringify(data)).not.toContain('Retired override copy.');
+	});
+});
+
 describe('splash load — pathPresence card flags (#42)', () => {
 	it('hides both gated cards on an empty fork', async () => {
 		const { db, platform } = makeDb();

@@ -2,15 +2,10 @@
 	import * as m from '$lib/paraglide/messages';
 	import { buildReceipt } from '$lib/build-info';
 
-	// The footer's build stamp (SONA-167): the commit this deployment was built
-	// from, baked in by vite define from the deploying fork's own Actions env.
-	// A self-contained atom like SonaBadge, because it renders in both footer
-	// chromes — Footer above 768px, MobileCredit below — and the /ai page points
-	// at it as "the source this exact build came from".
-	//
-	// Null in dev and tests (the define is '' outside Actions), so the line only
-	// appears on real deployed builds. Linked only when the building repo is
-	// known; see build-info.ts for why it is never a hardcoded upstream URL.
+	// The footer's build stamp (SONA-167). An atom because both footer chromes
+	// render it: Footer above 768px, MobileCredit below. Returns null outside an
+	// Actions build (the define is empty), so dev and tests show no line. See
+	// build-info.ts for why the link targets the deploying fork's own repo.
 	const receipt = buildReceipt(__BUILD_COMMIT_SHA__, __BUILD_REPO_URL__);
 </script>
 

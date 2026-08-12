@@ -67,11 +67,16 @@ describe('(public) layout load — settings payload', () => {
 		expect(pub).not.toHaveProperty('aiPageText');
 		expect(pub.aiPageEnabled).toBe(false);
 
+		// Pin the CALL, not the identifier: a leftover import satisfies a bare
+		// substring scan, so reverting `settings: toPublicSettings(settings)` to
+		// `settings` would leave this green while the override leaked again.
 		const sources = ['(public)/+layout.server.ts', '(public)/+page.server.ts', '(public)/about/+page.server.ts', '(paths)/+layout.server.ts'];
 		const { readFileSync } = await import('node:fs');
 		for (const rel of sources) {
 			const src = readFileSync(new URL(`../../routes/${rel}`, import.meta.url), 'utf8');
-			expect(src, `${rel} must return settings through toPublicSettings`).toContain('toPublicSettings');
+			expect(src, `${rel} must RETURN settings through toPublicSettings`).toMatch(
+				/settings: toPublicSettings\(|const publicSettings = toPublicSettings\(/
+			);
 		}
 	});
 });
