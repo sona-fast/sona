@@ -36,15 +36,21 @@ export interface SiteSettings {
 	 * override is set. Empty → the page shows the built-in defaults' date instead. */
 	termsUpdatedAt: string;
 	/** Whether the /ai disclosure page (and its footer link) is served. Stored
-	 * as 'true'/'false'; ABSENT MEANS ON (SONA-167). The polarity story: rows
-	 * are absent on installs that pre-date the feature, and for those the fleet
-	 * default is to disclose (announced in the release notes) — the owner opts
-	 * out in Settings. New installs never rely on the absent default: the setup
-	 * wizard writes the row explicitly ('true'/'false') from its affirmation
-	 * checkbox, so the default copy's claims are operator-affirmed there. One
-	 * legacy exception: a fork bootstrapped with the ADMIN_PASSWORD env var
-	 * counts as setup-complete (see isSetupComplete), skips the wizard, and so
-	 * lands on the absent default like a pre-existing install. */
+	 * as 'true'/'false'; ABSENT MEANS ON (SONA-167).
+	 *
+	 * The polarity is a deliberate operator decision, not an oversight. Every
+	 * site that is already live keeps the page on, and the Settings toggle is
+	 * how an owner turns it off; the marketing site carries a platform-level
+	 * version of the same disclosure (SONA-178), so the software's use of AI is
+	 * explained for every fork whether or not that fork publishes its own page.
+	 *
+	 * New installs do not rely on the default: the setup wizard writes the row
+	 * explicitly from its affirmation checkbox, so the first-person claims in
+	 * the default copy are owner-affirmed there. One path skips that — a fork
+	 * bootstrapped with the ADMIN_PASSWORD env var counts as setup-complete
+	 * (see isSetupComplete) and never runs the wizard, so it lands on the
+	 * absent default like a pre-existing install. Those owners are told what
+	 * their site publishes, and how to turn it off, in the release notes. */
 	aiPageEnabled: boolean;
 	/** Owner-editable override for the /ai page body (plain text). Empty → the
 	 * default disclosure copy from `$lib/ai-disclosure` is shown instead.
