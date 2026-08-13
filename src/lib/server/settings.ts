@@ -399,6 +399,13 @@ export async function setRawSetting(db: Database, key: string, value: string): P
 // is end-of-day UTC, so `daysRemaining` holds steady all day and a key expires
 // as the day rolls; without the day key an entry written at 23:59:50 would keep
 // saying "expires today" for a key that has already stopped working.
+//
+// One entry is shared by every request in the isolate, which is only sound while
+// the resolved status is the same for all of them. It is today: every field is
+// derived in UTC. Anything that makes the resolution depend on who is asking —
+// SONA-119 renders validUntil and counts daysRemaining in the viewer's zone —
+// has to either join the cache key or be applied to a zone-independent cached
+// value outside this memo, or one operator's dates get served to another.
 let supporterKeyStatusCache:
 	| { day: string; value: SupporterKeyStatus | null; expires: number }
 	| null = null;
