@@ -304,20 +304,22 @@ describe('getSupporterKeyStatus — caching', () => {
 		expect(verifySupporterKey).toHaveBeenCalledTimes(1);
 	});
 
-	it('re-resolves once the UTC day ticks over, so the countdown keeps ticking', async () => {
+	it('re-resolves across midnight UTC even well inside the TTL', async () => {
+		// The day key's whole job: the 60s TTL would otherwise carry a status over
+		// the boundary where it changes. An entry written at 23:59:50 on the last
+		// covered day would keep saying "expires today" for a key that has already
+		// stopped working — so these two calls are 20 seconds apart.
 		vi.useFakeTimers();
 		stubValidKey();
 		const { db, state } = fakeKeyDb('head.tail');
 
-		// 23:00 UTC on the 25th: 7 days left of a key that expires end-of-day 31st.
-		vi.setSystemTime(new Date('2026-08-25T23:00:00Z'));
-		const before = await getSupporterKeyStatus(db, new Date('2026-08-25T23:00:00Z'));
+		// 6 days + 10s left of a key that expires end-of-day on the 31st → 7.
+		vi.setSystemTime(new Date('2026-08-25T23:59:50Z'));
+		const before = await getSupporterKeyStatus(db, new Date('2026-08-25T23:59:50Z'));
 		expect(before).toMatchObject({ daysRemaining: 7 });
 
-		// Two hours later it is the 26th — inside the TTL by wall clock, but a new
-		// day, so the entry must not be reused.
-		vi.setSystemTime(new Date('2026-08-26T01:00:00Z'));
-		const after = await getSupporterKeyStatus(db, new Date('2026-08-26T01:00:00Z'));
+		vi.setSystemTime(new Date('2026-08-26T00:00:10Z'));
+		const after = await getSupporterKeyStatus(db, new Date('2026-08-26T00:00:10Z'));
 
 		expect(after).toMatchObject({ daysRemaining: 6 });
 		expect(state.reads).toBe(2);

@@ -136,14 +136,42 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 	it('is null for an unauthenticated request even with a near-expiry key stored', async () => {
 		// The layout load also runs for the auth-exempt routes (/admin/login etc.):
 		// no session means no D1 key read, no Ed25519 verify, no notice metadata.
+		// Asserting on getSupporterKeyStatus, not just on the verify: a warm memo
+		// would serve an anonymous request without verifying anything, so the verify
+		// spy alone would no longer catch the gate coming off.
 		const { db, platform } = makeLoadDb();
 		await setRawSetting(db, 'supporterKey', 'head.tail');
 		vi.mocked(verifySupporterKey).mockClear();
+		vi.mocked(getSupporterKeyStatus).mockClear();
 
 		const result = (await load(loadEvent(platform, { admin: false }))) as NoticeResult;
 
 		expect(result.supporterKeyNotice).toBeNull();
+		expect(getSupporterKeyStatus).not.toHaveBeenCalled();
 		expect(verifySupporterKey).not.toHaveBeenCalled();
+	});
+
+	it('shares one resolution across admin requests instead of re-verifying (SONA-118)', async () => {
+		// The point of the memo: the second admin page request in the same isolate
+		// pays neither the key read nor the Ed25519 verify, and sees the same notice.
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+		vi.mocked(verifySupporterKey).mockClear();
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date(Date.now() + 6.5 * DAY_MS)
+		});
+		try {
+			const first = (await load(loadEvent(platform))) as NoticeResult;
+			const second = (await load(loadEvent(platform))) as NoticeResult;
+
+			expect(second.supporterKeyNotice).toEqual(first.supporterKeyNotice);
+			expect(verifySupporterKey).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.mocked(verifySupporterKey).mockReset();
+		}
 	});
 
 	it('degrades only the notice when the supporter-key read itself fails', async () => {
@@ -164,9 +192,9 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 				observabilityEnabled: false
 			});
 		} finally {
-			// mockRejectedValueOnce is consumed by the load above; clear any leftover
-			// queued behaviour so the wrapped original serves the other tests.
-			vi.mocked(getSupporterKeyStatus).mockClear();
+			// Restores the wrapped original implementation (and drains any unconsumed
+			// once-rejection) for the other tests.
+			vi.mocked(getSupporterKeyStatus).mockReset();
 		}
 	});
 });

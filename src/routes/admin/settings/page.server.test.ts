@@ -964,6 +964,30 @@ describe('supporter-key actions — invalidate the memoized status (SONA-118)', 
 		expect(await getSupporterKeyStatus(db, now)).toMatchObject({ state: 'valid' });
 	});
 
+	it('the settings page load reads past the memo, so it stays loud on D1 errors', async () => {
+		// The page must never render a transient D1 error as "no key" (decision of
+		// 2026-08-07), which is why it keeps its own read + verify. Prime the memo
+		// with "no key stored", then store one: a page load that had been switched
+		// over to the memo would answer from that stale null.
+		const { db, platform } = makeLoadDb();
+		const now = new Date();
+		expect(await getSupporterKeyStatus(db, now)).toBeNull();
+
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date(now.getTime() + 30 * 86_400_000)
+		});
+
+		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+			supporterKey: { state: string } | null;
+		};
+
+		expect(result.supporterKey).toMatchObject({ state: 'valid' });
+	});
+
 	it('removeSupporterKey makes the next status resolution see no key', async () => {
 		const { db, platform } = makeDb();
 		const now = new Date();

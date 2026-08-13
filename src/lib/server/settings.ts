@@ -390,16 +390,15 @@ export async function setRawSetting(db: Database, key: string, value: string): P
 // page request; uncached it costs a D1 read of the `supporterKey` row plus an
 // Ed25519 verify each time.
 //
-// The entry is keyed on the UTC day the status was resolved for, because that is
-// what `daysRemaining` is a function of: `exp` is end-of-day UTC, so the
-// countdown holds steady all day and ticks over at midnight UTC. Keying on the
-// caller's `now` (rather than only on the wall clock) also keeps a caller that
-// passes an explicit date from reading a status resolved for another day.
+// SETTINGS_TTL_MS bounds the same staleness it bounds for settings: the key row
+// can be written by another isolate, whose clearSupporterKeyStatusCache this one
+// never sees.
 //
-// SETTINGS_TTL_MS bounds a different staleness: the key row can be written by
-// another isolate, whose `clearSupporterKeyStatusCache` this isolate never sees.
-// Without the TTL an operator who saved or removed a key could keep seeing the
-// old expiry notice here until midnight UTC.
+// The UTC day is part of the key because the TTL alone would carry a status
+// across midnight — and midnight UTC is exactly when this status changes. `exp`
+// is end-of-day UTC, so `daysRemaining` holds steady all day and a key expires
+// as the day rolls; without the day key an entry written at 23:59:50 would keep
+// saying "expires today" for a key that has already stopped working.
 let supporterKeyStatusCache:
 	| { day: string; value: SupporterKeyStatus | null; expires: number }
 	| null = null;
