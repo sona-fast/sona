@@ -49,10 +49,14 @@ export async function vrPublishingEnabled(
 	// for one on every VR request on every fork for the rest of the product's life.
 	if (isFeatureEnabled(VR_FEATURE_FLAG, { supporterKeyValid: false, now })) return true;
 	// A failed read or verify degrades to "no key" rather than throwing the whole
-	// page; pre-GA that denies, which is the safe direction.
-	const key = await getVerifiedSupporterKey(db).catch(() => NO_SUPPORTER_KEY);
-	const supporterKeyValid =
-		key.signatureValid && key.expiresAt !== null && now.getTime() < key.expiresAt;
+	// page; pre-GA that denies, which is the safe direction. Logged because the
+	// operator sees the same gated copy either way — without this, a D1 blip is
+	// indistinguishable from a key they never installed.
+	const key = await getVerifiedSupporterKey(db).catch((e) => {
+		console.error('supporter-key gate read failed:', e instanceof Error ? e.message : e);
+		return NO_SUPPORTER_KEY;
+	});
+	const supporterKeyValid = key.signatureValid && now.getTime() < key.expiresAt;
 	return isFeatureEnabled(VR_FEATURE_FLAG, { supporterKeyValid, now });
 }
 

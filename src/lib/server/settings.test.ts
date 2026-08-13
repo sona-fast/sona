@@ -591,12 +591,20 @@ describe('getVerifiedSupporterKey — caching & fail-closed', () => {
 
 		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
 
-		stubValidKey();
+		// A DIFFERENT expiry from the lapsed entry, so serving the stale one fails on
+		// the value and not only on the read count.
+		const renewedUntil = new Date('2026-10-15T00:00:00Z');
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: renewedUntil
+		});
 		state.value = 'renewed.token';
 		vi.setSystemTime(new Date('2026-09-05T09:00:06Z'));
 
 		expect(await getVerifiedSupporterKey(db)).toMatchObject({
-			expiresAt: VALID_UNTIL.getTime()
+			expiresAt: renewedUntil.getTime()
 		});
 		expect(state.reads).toBe(2);
 	});

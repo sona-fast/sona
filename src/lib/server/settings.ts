@@ -422,14 +422,14 @@ let supporterKeyStatusGeneration = 0;
 
 /**
  * What verifying the stored key established about it: whether the issuer's
- * signature checks out, and the instant the key stops working (null when
- * nothing verified). Frozen — callers share one instance.
+ * signature checks out, and — when it does — the unix ms instant the key stops
+ * working. A union rather than two loose fields, so the two can't drift apart
+ * and a caller that checks the signature needs no null check after it. Frozen:
+ * callers share one instance.
  */
-export interface VerifiedSupporterKey {
-	readonly signatureValid: boolean;
-	/** Unix ms the key expires; null when no key verified. */
-	readonly expiresAt: number | null;
-}
+export type VerifiedSupporterKey =
+	| { readonly signatureValid: true; readonly expiresAt: number }
+	| { readonly signatureValid: false; readonly expiresAt: null };
 
 /** The fail-closed answer: no key, or nothing that verified as one. Exported so
  * callers that degrade to "no key" name the same thing the memo does. */
@@ -449,12 +449,9 @@ export const NO_SUPPORTER_KEY: VerifiedSupporterKey = Object.freeze({
 // the status memo above does, and why SONA-119's viewer-zone rendering of the
 // STATUS fields cannot collide with it.
 //
-// Two entries could be merged into one: every SupporterKeyStatus field is
-// derivable from these two facts plus `now`, so the status memo could be
-// rebuilt on this one and its day key deleted. Deliberately NOT done here —
-// that memo is what the PR under this one adds, and SONA-119 is in flight over
-// the same fields. Left as a follow-up rather than a rewrite from a stacked
-// change.
+// The two memos could become one — every SupporterKeyStatus field is derivable
+// from these facts plus `now` — but that memo belongs to the change this one is
+// stacked on, so merging them is not this change's business.
 //
 // Staleness: the isolate running the save/remove clears immediately, others
 // converge on the TTL. A key that currently entitles is held for the full
@@ -509,7 +506,7 @@ export async function getVerifiedSupporterKey(db: Database): Promise<VerifiedSup
 	if (supporterKeyStatusGeneration === startedIn) {
 		// Only the entry's LIFETIME is time-relative; the value it holds still is
 		// not, so the invariant above is intact.
-		const entitlesNow = value.expiresAt !== null && value.expiresAt > Date.now();
+		const entitlesNow = value.signatureValid && value.expiresAt > Date.now();
 		verifiedSupporterKeyCache = {
 			value,
 			expires: Date.now() + (entitlesNow ? SETTINGS_TTL_MS : NO_KEY_TTL_MS)
