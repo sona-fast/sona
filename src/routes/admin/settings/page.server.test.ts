@@ -386,14 +386,12 @@ const LOAD_DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT N
 
 const LOAD_URL = new URL('https://taro.surf/admin/settings');
 
-// The load and the supporter-key action read the tz cookie (SONA-119) to render
-// the expiry date and its countdown in the operator's zone; absent means UTC,
-// which is what these fixed-date assertions expect.
-function cookieJar(tz?: string) {
-	return { get: (name: string) => (name === 'tz' ? tz : undefined) };
-}
-function loadEvent(platform: App.Platform, tz?: string) {
-	return { platform, url: LOAD_URL, cookies: cookieJar(tz) } as never;
+// The load and the supporter-key action render the expiry date and its countdown
+// in the operator's zone, which hooks resolves onto locals (SONA-119). 'UTC' is
+// what an absent or unusable cookie yields, and what the fixed-date assertions
+// below expect.
+function loadEvent(platform: App.Platform, tz = 'UTC') {
+	return { platform, url: LOAD_URL, locals: { timeZone: tz } } as never;
 }
 
 describe('settings load — adminEmail is raw, never in public settings', () => {
@@ -849,12 +847,12 @@ describe('settings saveSite — themeId/landingLayout present-branch', () => {
 	});
 });
 
-function saveSupporterKeyEvent(platform: App.Platform, key: string, tz?: string) {
+function saveSupporterKeyEvent(platform: App.Platform, key: string, tz = 'UTC') {
 	const body = new FormData();
 	body.append('supporterKey', key);
 	return {
 		platform,
-		cookies: cookieJar(tz),
+		locals: { timeZone: tz },
 		request: new Request('https://taro.surf/admin/settings?/saveSupporterKey', { method: 'POST', body })
 	} as never;
 }

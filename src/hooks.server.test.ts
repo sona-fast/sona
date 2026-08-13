@@ -17,6 +17,7 @@ import { authHandle, handleError } from './hooks.server';
 
 import { makeD1 } from '$lib/server/test/d1';
 import { ADMIN_AUTH_EXEMPT, isAdminAuthExempt } from '$lib/admin-routes';
+import { VIEWER_TZ_COOKIE } from '$lib/config';
 
 function makeDb(): D1Database {
 	const sqlite = new Database(':memory:');
@@ -97,6 +98,50 @@ describe('authHandle — password-recovery route exemption', () => {
 		const db = makeDb();
 
 		expect(await redirectFor('/admin/setup', db)).toBeNull();
+	});
+});
+
+// SONA-119: the operator's zone is resolved once here so the admin loads and
+// actions all read one value. The cookie is attacker-suppliable and an unknown
+// zone makes Intl throw, so an unguarded value would 500 every admin page.
+describe('authHandle — viewer timezone on locals', () => {
+	function tzEvent(pathname: string, tz?: string) {
+		return {
+			cookies: { get: (name: string) => (name === VIEWER_TZ_COOKIE ? tz : undefined) },
+			url: new URL(`https://taro.surf${pathname}`),
+			locals: {} as App.Locals,
+			platform: { env: {} }
+		};
+	}
+	const resolveTz = async (pathname: string, tz?: string) => {
+		const event = tzEvent(pathname, tz);
+		// The zone is set before the session check, so an unauthenticated admin
+		// path still resolves it and then throws its redirect — swallow that.
+		try {
+			await authHandle({ event, resolve: async () => new Response('ok') } as never);
+		} catch {
+			// The redirect; the zone is already on locals.
+		}
+		return event.locals.timeZone;
+	};
+
+	it('resolves a real zone from the cookie on admin requests', async () => {
+		expect(await resolveTz('/admin/settings', 'Asia/Tokyo')).toBe('Asia/Tokyo');
+	});
+
+	it('falls back to UTC with no cookie', async () => {
+		expect(await resolveTz('/admin/settings')).toBe('UTC');
+	});
+
+	it('falls back to UTC on a hostile cookie rather than throwing', async () => {
+		expect(await resolveTz('/admin/settings', 'Not/AZone')).toBe('UTC');
+		expect(await resolveTz('/admin/settings', '../../etc/passwd')).toBe('UTC');
+	});
+
+	it('does not pay for zone validation on public requests', async () => {
+		// Only the admin area displays dates in the operator's zone; a public hit
+		// should not spend an Intl construction per request.
+		expect(await resolveTz('/gallery', 'Asia/Tokyo')).toBe('UTC');
 	});
 });
 
@@ -182,7 +227,7 @@ function metricsEvent(
 	pathname: string,
 	db: D1Database,
 	waits: Promise<unknown>[],
-	locals: App.Locals = {},
+	locals: App.Locals = { timeZone: 'UTC' },
 	envExtra: Record<string, string> = { OBSERVABILITY_ENABLED: 'true' }
 ) {
 	return {
@@ -380,7 +425,7 @@ describe('authHandle — 5xx counts toward the error rate (issue #6)', () => {
 		const { db, sqlite } = makeMetricsDb();
 		const waits: Promise<unknown>[] = [];
 		// errorSampled preset: a thrown exception already logged the detailed row.
-		await authHandle({ event: metricsEvent('/gallery', db, waits, { errorSampled: true }), resolve: resolve500 } as never);
+		await authHandle({ event: metricsEvent('/gallery', db, waits, { errorSampled: true, timeZone: 'UTC' }), resolve: resolve500 } as never);
 		await Promise.all(waits);
 
 		// Rollup still lands exactly once (rate stays correct)...
@@ -393,7 +438,7 @@ describe('authHandle — 5xx counts toward the error rate (issue #6)', () => {
 		const { db, sqlite } = makeMetricsDb();
 		const waits: Promise<unknown>[] = [];
 		// Empty envExtra => OBSERVABILITY_ENABLED unset => feature disabled.
-		await authHandle({ event: metricsEvent('/gallery', db, waits, {}, {}), resolve: resolve500 } as never);
+		await authHandle({ event: metricsEvent('/gallery', db, waits, { timeZone: 'UTC' }, {}), resolve: resolve500 } as never);
 		await Promise.all(waits);
 
 		// No request/error rollups and no error samples: the same 5xx that writes

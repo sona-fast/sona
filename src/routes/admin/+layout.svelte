@@ -8,6 +8,7 @@
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { isAdminAuthExempt } from '$lib/admin-routes';
+	import { VIEWER_TZ_COOKIE } from '$lib/config';
 
 	let { children, data } = $props();
 
@@ -34,7 +35,7 @@
 		const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		if (!zone) return;
 		const secure = location.protocol === 'https:' ? '; Secure' : '';
-		document.cookie = `tz=${encodeURIComponent(zone)}; path=/admin; SameSite=Lax; max-age=31536000${secure}`;
+		document.cookie = `${VIEWER_TZ_COOKIE}=${encodeURIComponent(zone)}; path=/admin; SameSite=Lax; max-age=31536000${secure}`;
 	});
 
 	// Supporter-key expiry notice (SONA-114): shown on every admin page while

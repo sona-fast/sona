@@ -39,6 +39,17 @@ export const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 export const SESSION_COOKIE = dev ? 'sona_admin_session' : '__Host-sona_admin_session';
 
 /**
+ * Cookie carrying the operator's IANA timezone, written by the admin layout and
+ * read in hooks (SONA-119). Prefixed like every other cookie we own, so a fork
+ * sharing a hostname with something else can't collide. Client-safe because the
+ * writer is the browser; the reader is `locals.timeZone`.
+ *
+ * Not `__Host-` like the session: that prefix forbids a Path, and this one is
+ * deliberately scoped to /admin so it never rides a public request.
+ */
+export const VIEWER_TZ_COOKIE = 'sona_tz';
+
+/**
  * Cookie holding the visitor's dark/light *mode* preference. A cookie (not
  * localStorage) so the server can read it and emit the correct `data-theme` at
  * SSR — avoiding a flash of the wrong mode on first paint.

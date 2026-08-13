@@ -18,11 +18,12 @@ import {
 	isObservabilityEnabled
 } from '$lib/server/metrics';
 import type { BatchItem } from 'drizzle-orm/batch';
-import { THEME_MODE_COOKIE, SESSION_COOKIE } from '$lib/config';
+import { THEME_MODE_COOKIE, SESSION_COOKIE, VIEWER_TZ_COOKIE } from '$lib/config';
 import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { getTextDirection } from '$lib/paraglide/runtime';
 import { isAdminAuthExempt } from '$lib/admin-routes';
+import { viewerTimeZone } from '$lib/server/supporter-key-expiry';
 
 // Resolve the request locale (cookie override → browser Accept-Language → en)
 // and expose it to SSR by filling %lang% / %dir% in app.html.
@@ -39,6 +40,14 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 // composed `handle` would also run paraglideMiddleware, which needs a full
 // request pipeline).
 export const authHandle: Handle = async ({ event, resolve }) => {
+	// The operator's zone, resolved once here so the admin loads and actions all
+	// read the same value rather than each re-deriving it (SONA-119). Only the
+	// admin area displays dates in it, and validating costs an Intl construction,
+	// so public requests keep the UTC default rather than paying for it.
+	event.locals.timeZone = event.url.pathname.startsWith('/admin')
+		? viewerTimeZone(event.cookies.get(VIEWER_TZ_COOKIE))
+		: 'UTC';
+
 	const token = event.cookies.get(SESSION_COOKIE);
 
 	// Validate session against D1

@@ -3,7 +3,6 @@ import { getSettings, getRawSetting } from '$lib/server/settings';
 import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
 import { isObservabilityEnabled } from '$lib/server/metrics';
 import { resolveSupporterKeyStatus, EXPIRY_FINAL_DAYS } from '$lib/server/supporter-key';
-import { viewerTimeZone } from '$lib/server/supporter-key-expiry';
 import { APP_NAME } from '$lib/config';
 import type { LayoutServerLoad } from './$types';
 
@@ -35,13 +34,16 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 			resolveRegistryEnv(db, platform.env),
 			locals.admin ? getRawSetting(db, 'supporterKey').catch(() => null) : null
 		]);
-		// The operator's own zone (SONA-119), from the tz cookie the admin layout
-		// writes on every signed-in navigation. Resolving it here rather than in the
-		// browser is what keeps the date and the countdown identical before and
-		// after hydration. Absent (no JS, or before the first signed-in page of a
-		// browser) means UTC.
-		const timeZone = viewerTimeZone(cookies.get('tz'));
-		const supporterKey = await resolveSupporterKeyStatus(supporterToken ?? '', new Date(), timeZone);
+		// The operator's own zone (SONA-119), resolved in hooks from the cookie the
+		// admin layout writes on every signed-in navigation. Rendering the dates
+		// server-side rather than in the browser is what keeps them identical before
+		// and after hydration; absent (no JS, or before the first signed-in page of
+		// a browser) it is UTC.
+		const supporterKey = await resolveSupporterKeyStatus(
+			supporterToken ?? '',
+			new Date(),
+			locals.timeZone
+		);
 		// Dismissal is a cookie keyed on the key's UTC-pinned dismissKey PLUS a
 		// phase ('early' = days 7..4, 'final' = last 3 days): dismissing during the
 		// early phase re-shows the notice once the final days start, and a re-minted

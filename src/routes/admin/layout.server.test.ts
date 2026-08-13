@@ -49,14 +49,10 @@ function loadEvent(
 ) {
 	return {
 		platform,
-		locals: { admin },
-		cookies: {
-			get: (name: string) => {
-				if (name === 'supporterNoticeDismissed') return cookie;
-				if (name === 'tz') return tz;
-				return undefined;
-			}
-		}
+		// timeZone is resolved in hooks (SONA-119), so the load reads it off locals
+		// rather than the cookie; 'UTC' is what an absent/unusable cookie yields.
+		locals: { admin, timeZone: tz ?? 'UTC' },
+		cookies: { get: (name: string) => (name === 'supporterNoticeDismissed' ? cookie : undefined) }
 	} as never;
 }
 
@@ -154,17 +150,6 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 		// notice dismissed before the tz cookie arrived (or before the operator
 		// travelled) stays dismissed rather than springing back.
 		expect(tokyo.supporterKeyNotice?.dismissValue).toBe(utc.supporterKeyNotice?.dismissValue);
-	});
-
-	it('falls back to UTC on a hostile tz cookie instead of failing the load', async () => {
-		// The cookie is attacker-suppliable and an unknown zone makes Intl throw;
-		// unguarded, the catch would drop the whole admin chrome to EMPTY.
-		const expiresAt = expInDays(5);
-		const junk = await loadWithZone(expiresAt, 'Not/AZone');
-
-		expect(junk.supporterKeyNotice?.dismissValue).toBe(
-			(await loadWithZone(expiresAt)).supporterKeyNotice?.dismissValue
-		);
 	});
 
 	it('is null for an expired key (the settings page owns that state)', async () => {

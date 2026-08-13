@@ -25,13 +25,16 @@ describe('admin layout — tz cookie (SONA-119)', () => {
 		// skipped. A mount-only write meant the cookie never appeared for the rest
 		// of the session and every date silently stayed on UTC.
 		expect(source).not.toMatch(/onMount\(/);
-		expect(source).toMatch(/\$effect\(\(\) => \{[\s\S]*?document\.cookie = `tz=/);
+		expect(source).toMatch(/\$effect\(\(\) => \{[\s\S]*?document\.cookie = `\$\{VIEWER_TZ_COOKIE\}=/);
 	});
 
 	it('scopes the cookie to the signed-in admin area', () => {
 		// path=/admin keeps it off every public request; the exempt-route guard
 		// keeps it off browsers that only ever reached the sign-in screen.
-		expect(source).toMatch(/document\.cookie = `tz=\$\{encodeURIComponent\(zone\)\}; path=\/admin;/);
+		// The name comes from the shared constant, never a bare literal.
+		expect(source).toMatch(
+			/document\.cookie = `\$\{VIEWER_TZ_COOKIE\}=\$\{encodeURIComponent\(zone\)\}; path=\/admin;/
+		);
 		expect(source).toMatch(/if \(isAdminAuthExempt\(\$page\.url\.pathname\)\) return;/);
 	});
 });

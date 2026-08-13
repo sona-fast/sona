@@ -17,6 +17,12 @@ declare global {
 		interface Locals {
 			admin?: boolean;
 			/**
+			 * The operator's IANA timezone, resolved once per admin request from the
+			 * tz cookie (SONA-119). Always a zone this runtime accepts — 'UTC' when
+			 * the cookie is absent or unusable — so consumers never handle a throw.
+			 */
+			timeZone: string;
+			/**
 			 * Set by handleError when it records a detailed 5xx error sample, so the
 			 * request `handle` skips its generic fallback sample for the same 5xx and
 			 * avoids a duplicate row in the error ring (see hooks.server.ts).

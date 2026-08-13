@@ -1,6 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
 import { adminLogin } from './admin-login';
 
+// The wire name of the tz cookie, kept as a literal rather than imported from
+// $lib/config: Playwright runs these specs outside Vite, so anything reaching
+// $app/environment (as config.ts does) fails to resolve and the whole file
+// collects zero tests. Asserting the literal is also what a black-box check
+// should do — a rename of VIEWER_TZ_COOKIE is a visible change here, not a
+// silently-following one.
+const VIEWER_TZ_COOKIE = 'sona_tz';
+
 // Supporter-key settings flow (SONA-105): the Account tab's empty state renders
 // (explainer + Key field), a garbage key is rejected with the invalid error AND
 // the correct aria wiring (aria-invalid + aria-describedby → the error's id), and
@@ -118,7 +126,7 @@ test.describe('admin settings supporter key — viewer timezone', () => {
 		await page.goto('/admin/login');
 		await expect(page.locator('input[type="password"]')).toBeVisible();
 
-		expect((await context.cookies()).find((c) => c.name === 'tz')).toBeUndefined();
+		expect((await context.cookies()).find((c) => c.name === VIEWER_TZ_COOKIE)).toBeUndefined();
 	});
 
 	test('the browser publishes its zone and the server dates the key in it', async ({
@@ -137,7 +145,7 @@ test.describe('admin settings supporter key — viewer timezone', () => {
 		// pages. The raw value is URI-encoded (the slash in an IANA zone);
 		// SvelteKit's cookies.get decodes it, which the date below then proves.
 		await expect(async () => {
-			const tz = (await context.cookies()).find((c) => c.name === 'tz');
+			const tz = (await context.cookies()).find((c) => c.name === VIEWER_TZ_COOKIE);
 			expect(tz).toMatchObject({ value: 'Asia%2FTokyo', path: '/admin' });
 		}).toPass();
 
