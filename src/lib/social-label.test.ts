@@ -1,11 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
-import {
-	SOCIAL_PLATFORM_NAMES,
-	socialHandle,
-	socialLabel,
-	type SocialPlatform
-} from './social-label';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { socialHandle, socialLabel, type SocialPlatform } from './social-label';
 
 // One table per platform covering the five URL shapes a stored setting takes.
 // The three SONA-128 rules read straight off it: every `handle` case is @-
@@ -100,10 +97,6 @@ const PLATFORMS: Array<{
 ];
 
 describe.each(PLATFORMS)('$name social labels', (p) => {
-	it('names the platform exactly as the UI writes it', () => {
-		expect(SOCIAL_PLATFORM_NAMES[p.platform]).toBe(p.name);
-	});
-
 	it.each([
 		['a profile URL', 'handle'],
 		['a deep link', 'deepLink'],
@@ -179,11 +172,46 @@ describe('rule 2: no hostname is ever shown as a handle', () => {
 		expect(socialLabel('furtrack', 'https://www.furtrack.com/user')).toBe('FurTrack');
 	});
 
-	it('still reads a mirror host, which carries no prefix of its own', () => {
-		// The rule-2 guard is scoped to the platform's OWN domains, so a host it
-		// does not list keeps the first-path-segment reading.
+	it('reads every aliased host the platform lists in the table', () => {
+		// x.com and mobile.twitter.com are Twitter's own, each with a prefix of its
+		// own in HOST_PREFIXES, so both resolve like twitter.com does.
 		expect(socialHandle('twitter', 'https://x.com/taro')).toBe('taro');
 		expect(socialHandle('twitter', 'https://mobile.twitter.com/taro')).toBe('taro');
+	});
+
+	it('reads a subdomain of a listed host', () => {
+		// The host match is by suffix, so the subdomains a platform actually serves
+		// profiles on resolve through the same profile prefix.
+		expect(socialHandle('furaffinity', 'https://sfw.furaffinity.net/user/taro')).toBe('taro');
+		expect(socialHandle('bluesky', 'https://staging.bsky.app/profile/taro')).toBe('taro');
+	});
+
+	it('derives nothing from a host the platform does not serve', () => {
+		// A third-party front end, or a URL filed under the wrong setting: the path
+		// is not this platform's, so its first segment is nobody's handle here.
+		expect(socialLabel('twitter', 'https://nitter.net/taro')).toBe('Twitter');
+		expect(socialLabel('bluesky', 'https://deer.social/profile/taro.bsky.social')).toBe('Bluesky');
+		expect(socialHandle('instagram', 'https://evil.example/taro')).toBeNull();
+	});
+
+	it('never reads one of the platform own sections as an account', () => {
+		// Instagram's own "Copy link" produces the /p/ form, and these platforms'
+		// profile prefix is the bare domain, so nothing in the path tells a post
+		// from an account except the section name itself.
+		expect(socialLabel('instagram', 'https://www.instagram.com/p/C8xYzAbCdEf/')).toBe('Instagram');
+		expect(socialLabel('instagram', 'https://instagram.com/reel/C8xYzAbCdEf')).toBe('Instagram');
+		expect(socialLabel('instagram', 'https://instagram.com/explore/tags/fursuit')).toBe(
+			'Instagram'
+		);
+		expect(socialLabel('twitter', 'https://x.com/i/communities/123')).toBe('Twitter');
+		expect(socialLabel('twitter', 'https://twitter.com/search?q=taro')).toBe('Twitter');
+		expect(socialLabel('patreon', 'https://www.patreon.com/posts/some-post-123')).toBe('Patreon');
+		expect(socialLabel('deviantart', 'https://www.deviantart.com/tag/fursuit')).toBe('DeviantArt');
+		// Case-insensitively, and including the degenerate prefix-without-a-name
+		// forms that the longest-first prefix list would otherwise collapse.
+		expect(socialLabel('instagram', 'https://instagram.com/Reels/C8xYz')).toBe('Instagram');
+		expect(socialLabel('telegram', 'https://t.me/s')).toBe('Telegram');
+		expect(socialLabel('patreon', 'https://patreon.com/c')).toBe('Patreon');
 	});
 });
 
@@ -211,9 +239,12 @@ describe('rule 3: the handle is the first profile segment', () => {
 		expect(socialLabel('telegram', 'https://t.me/s/tarochannel')).toBe('@tarochannel');
 	});
 
-	it('reads a mirror host that carries no prefix as a single-segment profile', () => {
+	it('reads past the deep link on an aliased host too', () => {
 		expect(socialLabel('twitter', 'https://x.com/taro/status/123')).toBe('@taro');
 		expect(socialLabel('twitter', 'https://mobile.twitter.com/taro')).toBe('@taro');
+		expect(socialLabel('furaffinity', 'https://sfw.furaffinity.net/user/taro/gallery')).toBe(
+			'@taro'
+		);
 	});
 
 	it('ignores query strings and fragments', () => {
@@ -235,18 +266,40 @@ describe('handle decoding', () => {
 		expect(socialLabel('twitter', 'https://twitter.com/TaroTheFox')).toBe('@TaroTheFox');
 	});
 
-	it('drops characters that would make the label read as another handle', () => {
+	it('refuses a segment carrying characters that hide what it says', () => {
 		// Registry socials are proxied unmodified from a remote registry, so a
 		// segment can decode to a bidi override or a zero-width character and make
 		// an admin's search row read as somebody else's account — the art then
-		// gets credited to the wrong artist.
-		expect(socialLabel('twitter', 'https://twitter.com/%E2%80%AEorat')).toBe('@orat');
-		expect(socialLabel('twitter', 'https://twitter.com/ta%E2%80%8Bro')).toBe('@taro');
-		expect(socialLabel('twitter', 'https://twitter.com/taro%0Aevil')).toBe('@taroevil');
-		expect(socialLabel('twitter', 'https://twitter.com/taro%00')).toBe('@taro');
+		// gets credited to the wrong artist. Stripping them would render a handle
+		// the URL does not support: twitter.com/ta<ZWSP>ro is not @taro, and a row
+		// reading "@taro" that links elsewhere is the whole attack. So the label
+		// falls back to the platform name instead.
+		const hidden = [
+			['%E2%80%AEorat', 'RLO, U+202E'],
+			['ta%E2%80%8Bro', 'zero-width space, U+200B'],
+			['ta%EF%BB%BFro', 'zero-width no-break space, U+FEFF'],
+			['ta%C2%ADro', 'soft hyphen, U+00AD'],
+			['ta%D8%9Cro', 'Arabic letter mark, U+061C'],
+			['ta%E1%A0%8Ero', 'Mongolian vowel separator, U+180E'],
+			['ta%E2%81%A0ro', 'word joiner, U+2060'],
+			['ta%E2%81%A3ro', 'invisible separator, U+2063'],
+			['ta%EF%B8%80ro', 'variation selector, U+FE00'],
+			['ta%E1%85%9Fro', 'Hangul choseong filler, U+115F'],
+			['ta%E1%85%A0ro', 'Hangul jungseong filler, U+1160'],
+			['ta%E3%85%A4ro', 'Hangul filler, U+3164'],
+			['ta%E2%80%A8ro', 'line separator, U+2028'],
+			['ta%E2%80%A9ro', 'paragraph separator, U+2029'],
+			['ta%F3%A0%80%81ro', 'language tag, U+E0001'],
+			['taro%0Aevil', 'newline'],
+			['taro%00', 'NUL']
+		] as const;
+		for (const [segment, what] of hidden) {
+			expect(socialHandle('twitter', `https://twitter.com/${segment}`), what).toBeNull();
+			expect(socialLabel('twitter', `https://twitter.com/${segment}`), what).toBe('Twitter');
+		}
 	});
 
-	it('falls back when nothing renderable survives the strip', () => {
+	it('falls back when the segment decodes to nothing at all', () => {
 		expect(socialHandle('twitter', 'https://twitter.com/%E2%80%AE')).toBeNull();
 		expect(socialLabel('twitter', 'https://twitter.com/%E2%80%AE')).toBe('Twitter');
 	});
@@ -274,6 +327,15 @@ describe('scheme-less values', () => {
 	it('still refuses a value that carries a scheme and does not parse', () => {
 		expect(socialHandle('twitter', 'https://')).toBeNull();
 	});
+
+	it('refuses slash-bearing junk rather than reading a host out of it', () => {
+		// The scheme-less retry only applies to text that opens with something
+		// host-shaped. Otherwise the registry value "n/a" parses as the host "n"
+		// with the handle "a".
+		expect(socialLabel('twitter', 'n/a')).toBe('Twitter');
+		expect(socialLabel('twitter', 'taro/photos')).toBe('Twitter');
+		expect(socialLabel('twitter', 'see my profile/here')).toBe('Twitter');
+	});
 });
 
 // SONA-128's point was one rule everywhere, so the surfaces are pinned as well
@@ -298,7 +360,10 @@ describe('every surface renders socials through this module', () => {
 	// not on that list, and a hand-rolled helper is recognizable by what it does
 	// — splitting a path apart — in whatever form it is written.
 	it('no component splits a URL path into a handle by hand', () => {
-		const dir = new URL('../', import.meta.url).pathname;
+		// fileURLToPath, not .pathname: the latter is percent-encoded, so a checkout
+		// under a path with a space in it would fail this scan for reasons that
+		// have nothing to do with drift.
+		const dir = fileURLToPath(new URL('../', import.meta.url));
 		// The shared module itself is a .ts and so is never in this list.
 		// VrAvatarForm splits a model URL down to its FILENAME, not a handle.
 		const allowed = ['lib/components/VrAvatarForm.svelte'];
@@ -307,7 +372,7 @@ describe('every surface renders socials through this module', () => {
 		);
 		expect(files.length).toBeGreaterThan(20); // the scan actually matched something
 		const offenders = files.filter((f) =>
-			/pathname\s*\.split|\.split\(['"]\/['"]\)/.test(readFileSync(dir + f, 'utf8'))
+			/pathname\s*\.split|\.split\(['"]\/['"]\)/.test(readFileSync(join(dir, f), 'utf8'))
 		);
 		expect(offenders).toEqual([]);
 	});

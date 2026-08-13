@@ -1,22 +1,13 @@
 // Pure, dependency-free handle classification/normalization shared by the client
 // (the New Artist combobox, to decide name-search vs handle-search and to gate
-// create) and the server (handle-normalize.ts re-exports these). No $lib/server
-// imports so it is safe to bundle into a Svelte component. Mirrors the registry's
-// normalize rules so the two agree on what counts as "the same handle".
-
-import { HOST_PREFIXES, extractHandle, type Platform } from './social-platforms';
+// create) and the server (handle-normalize.ts re-exports normalizeHandle). No
+// $lib/server imports so it is safe to bundle into a Svelte component. Mirrors
+// the registry's normalize rules so the two agree on what counts as "the same
+// handle".
 
 // The platform tables and the extraction itself live in ./social-platforms, so
 // the public pages can bundle them without this module's search classifier.
-// Re-exported here so existing importers keep their import path.
-export {
-	HOST_PREFIXES,
-	SOCIAL_HOST_PREFIXES,
-	platformDomains,
-	extractHandle,
-	type Platform,
-	type SocialPlatform
-} from './social-platforms';
+import { HOST_PREFIXES, extractHandle, type Platform } from './social-platforms';
 
 /** Maps the artist *Url column / payload keys to platforms. */
 export const SOCIAL_KEY_TO_PLATFORM: Record<string, Platform> = {

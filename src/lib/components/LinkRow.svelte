@@ -14,9 +14,8 @@
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		icon: any;
 		title: string;
-		/** Optional: a row with nothing to say below the title omits it rather
-		 *  than repeating the title or inventing filler. The 36px badge plus the
-		 *  row padding keep the height either way. */
+		/** Optional. A row with no handle or detail to show leaves the subtitle
+		 *  out; the 36px badge plus the row padding keep the height either way. */
 		subtitle?: string;
 		href?: string;
 		external?: boolean;
@@ -115,6 +114,9 @@
 			-webkit-box-orient: vertical;
 			-webkit-line-clamp: 2;
 			line-clamp: 2;
+			/* At 320px the column is ~150px, narrower than an unbreakable token
+			   such as a long email address, which would otherwise be clipped. */
+			overflow-wrap: anywhere;
 		}
 	}
 

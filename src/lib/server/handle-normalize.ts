@@ -3,17 +3,13 @@
 // counts as "the same handle". Pure — no DB.
 //
 // The platform table + bare-handle normalizer live in the client-safe
-// `$lib/handle-classify` (the New Artist combobox needs them too); re-exported
-// here so existing server importers keep their `handle-normalize` import path.
+// `$lib/handle-classify` and `$lib/social-platforms` (the New Artist combobox
+// and the public pages need them too); re-exported here so existing server
+// importers keep their `handle-normalize` import path.
 
 import { sanitizeUrl, stripControlChars } from './validate';
-import {
-	SOCIAL_KEY_TO_PLATFORM,
-	normalizeHandle,
-	platformDomains,
-	type Platform,
-	type SocialPlatform
-} from '../handle-classify';
+import { SOCIAL_KEY_TO_PLATFORM, normalizeHandle } from '../handle-classify';
+import { platformDomains, type Platform, type SocialPlatform } from '../social-platforms';
 
 export { SOCIAL_KEY_TO_PLATFORM, normalizeHandle, type Platform };
 

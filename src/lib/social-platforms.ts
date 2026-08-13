@@ -52,6 +52,51 @@ export function platformDomains(platform: SocialPlatform): string[] {
 }
 
 /**
+ * The platform's own domain that `host` belongs to, or null when the host is
+ * not the platform's at all.
+ *
+ * Matched by suffix, not equality, so the subdomains a platform actually serves
+ * profiles on come along: `sfw.furaffinity.net/user/taro` is FurAffinity's own
+ * host and yields the same handle as the bare domain would. A host the platform
+ * does not serve — a third-party front end, or a URL filed under the wrong
+ * setting — belongs to nobody here and gets null; its first path segment is not
+ * this platform's handle.
+ *
+ * Listed hosts are checked exactly first: 'mobile.twitter.com' carries a prefix
+ * of its own and must not collapse into 'twitter.com'.
+ */
+export function platformDomain(platform: SocialPlatform, host: string): string | null {
+	const bare = host.toLowerCase().replace(/^www\./, '');
+	const domains = platformDomains(platform);
+	return domains.find((d) => bare === d) ?? domains.find((d) => bare.endsWith(`.${d}`)) ?? null;
+}
+
+/**
+ * First path segments that name one of a platform's own sections rather than an
+ * account, for the platforms whose profile prefix is the bare domain and so have
+ * nothing else to tell the two apart. Instagram's "Copy link" hands out
+ * instagram.com/p/<id>; x.com/i/communities/<id> is a community, not a user.
+ * Consulted after extraction — a hit is rule 2, a URL with no handle in it.
+ */
+export const RESERVED_SEGMENTS: Partial<Record<SocialPlatform, string[]>> = {
+	instagram: ['p', 'reel', 'reels', 'tv', 'stories', 'explore', 'accounts', 'direct'],
+	twitter: [
+		'i',
+		'home',
+		'search',
+		'explore',
+		'hashtag',
+		'messages',
+		'notifications',
+		'settings',
+		'intent'
+	],
+	patreon: ['posts', 'c'],
+	deviantart: ['tag', 'art', 'journal'],
+	telegram: ['s', 'joinchat']
+};
+
+/**
  * The handle in `raw`, with the owner's casing kept, or '' when there is none.
  *
  * Accepts a profile URL, a scheme-less one, or a bare handle: strip the scheme

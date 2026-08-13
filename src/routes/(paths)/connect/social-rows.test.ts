@@ -31,6 +31,11 @@ describe('/connect social rows', () => {
 	it('leaves the subtitle off when no handle could be derived', () => {
 		// The title is already the platform name, so socialLabel's fallback would
 		// stack "Twitter" over "Twitter" — the row must show the title alone.
-		expect(source).toMatch(/subtitle: handle \? `@\$\{handle\}` : undefined/);
+		// Pin the SHAPE, not the formatting: a conditional subtitle, derived from
+		// socialHandle (which can say "no handle") rather than socialLabel (which
+		// always returns a string, so the row could never drop its subtitle).
+		expect(source).toMatch(/subtitle:[^\n]*\?[^\n]*:\s*undefined/);
+		expect(source).toMatch(/socialHandle\s*\(/);
+		expect(source).not.toMatch(/socialLabel\s*\(/);
 	});
 });
