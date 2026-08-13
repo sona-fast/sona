@@ -2,10 +2,10 @@ import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { deleteFile } from '$lib/server/storage';
-import { images, artists, imageTags, tags } from '$lib/server/db/schema';
+import { images, artists, imageTags, tags, characters } from '$lib/server/db/schema';
 import { eq, desc, asc, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
-import { variantAssignmentError } from '$lib/server/variants';
+import { variantAssignmentError, REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform, url }) => {
@@ -157,6 +157,16 @@ export const actions = {
 			if (variantError === 'has_variants')
 				return fail(400, { error: 'One of the selected images has variants of its own' });
 		}
+
+		const owner = await db
+			.select({ referenceImageId: characters.referenceImageId })
+			.from(characters)
+			.where(eq(characters.isOwner, true))
+			// first owner by name — must match the loads' find() over name-ordered characters
+			.orderBy(characters.name)
+			.get();
+		if (owner?.referenceImageId != null && childIds.includes(owner.referenceImageId))
+			return fail(400, { error: REFERENCE_BECOMES_VARIANT_ERROR });
 
 		await db.update(images).set({ parentImageId: parentId }).where(inArray(images.id, childIds));
 

@@ -12,6 +12,11 @@
 	// The reference button swaps between set/clear on toggle; move focus back to it
 	// so keyboard/screen-reader users hear the new state instead of losing focus.
 	let referenceButton = $state<HTMLButtonElement | null>(null);
+	// Clearing a variant's designation leaves no button to return to (the variant
+	// hint replaces it), so focus lands on the hint and the live region carries an
+	// explicit message — an emptied region announces nothing.
+	let referenceHint = $state<HTMLElement | null>(null);
+	let referenceCleared = $state(false);
 </script>
 
 <div class="page-header">
@@ -31,15 +36,16 @@
 		{#if data.ownerCharacter}
 			<form method="POST" action="?/reference" use:enhance={() => {
 				return async ({ update, result }) => {
+					if (result.type === 'success') referenceCleared = true;
 					await update();
 					await tick();
-					if (result.type === 'success') referenceButton?.focus();
+					if (result.type === 'success') (referenceButton ?? referenceHint)?.focus();
 				};
 			}} class="reference-control">
 				<!-- Persistent live region: text toggles in place (rather than the node
 				     being inserted/removed) so NVDA/JAWS announce the state change reliably. -->
 				<p class="reference-current" role="status">
-					{#if data.ownerCharacter.isReference}✓ {m.admin_image_reference_current({ name: data.ownerCharacter.name })}{/if}
+					{#if data.ownerCharacter.isReference}✓ {m.admin_image_reference_current({ name: data.ownerCharacter.name })}{:else if referenceCleared}{m.admin_image_reference_cleared()}{/if}
 				</p>
 				{#if data.ownerCharacter.isReference}
 					<input type="hidden" name="clear" value="on" />
@@ -48,8 +54,10 @@
 					<!-- /art excludes variants from both ref-sheet paths (SONA-18), so
 					     offering the control here would promise something the public
 					     page ignores. The clear branch above stays reachable for a
-					     variant designated before that rule existed. -->
-					<small class="hint">{m.admin_image_reference_variant()}</small>
+					     variant designated before that rule existed. tabindex="-1": the
+					     focus target when clearing removes the button, never a tab stop. -->
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<small bind:this={referenceHint} tabindex="-1" class="hint">{m.admin_image_reference_variant()}</small>
 				{:else}
 					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_set({ name: data.ownerCharacter.name })}</button>
 					{#if data.ownerCharacter.replacesOther}

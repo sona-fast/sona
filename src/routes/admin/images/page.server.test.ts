@@ -61,3 +61,35 @@ describe('admin images — delete action with a referenced image', () => {
 		expect(char?.ref).toBe(null);
 	});
 });
+
+// SONA-18: /art excludes variants from its ref-sheet paths, so letting the
+// designated sheet become a variant would void the reference sheet silently —
+// and 404 /art outright on a fork whose only content is that sheet.
+describe('admin images — grouping the designated reference sheet as a variant', () => {
+	it('refuses the group and writes nothing', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(images).values([
+			{ id: 5, title: 'Ref', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1 },
+			{ id: 9, title: 'Parent', slug: 'art-9', imageUrl: 'https://cdn.example.com/9.png', artistId: 1 }
+		]);
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 5 });
+
+		const result = await actions.groupVariants({ request: form({ parentId: '9', ids: '5,9' }), platform } as never);
+		expect((result as { status: number }).status).toBe(400);
+		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 5)).get())?.p).toBe(null);
+	});
+
+	it('still groups images that are not the reference sheet', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(images).values([
+			{ id: 5, title: 'Ref', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1 },
+			{ id: 8, title: 'Other', slug: 'art-8', imageUrl: 'https://cdn.example.com/8.png', artistId: 1 },
+			{ id: 9, title: 'Parent', slug: 'art-9', imageUrl: 'https://cdn.example.com/9.png', artistId: 1 }
+		]);
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 5 });
+
+		const result = await actions.groupVariants({ request: form({ parentId: '9', ids: '8,9' }), platform } as never);
+		expect(result).toEqual({ success: true });
+		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 8)).get())?.p).toBe(9);
+	});
+});

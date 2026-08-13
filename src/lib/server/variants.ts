@@ -4,6 +4,16 @@
 
 export const MAX_VARIANT_SET = 8; // parent + 7 variants per one-flow upload
 
+/**
+ * Refused when an image that is the owner character's designated reference
+ * sheet is about to become a variant. /art excludes variants from both
+ * ref-sheet paths (SONA-18), so allowing the write would void the reference
+ * sheet without saying so — and on a fork whose only content is that sheet,
+ * /art would start 404ing. Callers clear the designation first.
+ */
+export const REFERENCE_BECOMES_VARIANT_ERROR =
+	'This image is the reference sheet, so it cannot become a variant. Clear the reference sheet first.';
+
 export type VariantAssignmentError = 'self' | 'missing' | 'nested' | 'has_variants';
 
 /**

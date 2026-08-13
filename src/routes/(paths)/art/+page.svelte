@@ -100,16 +100,15 @@
 			</a>
 		{/if}
 		<p class="caption">
-			{m.art_ref_caption()}
-			{#if data.refSheet.nsfw && !revealed}
-				<!-- Shielded, the frame is a button rather than the gallery link, so
-				     "view full size" moves into the caption as a real link. That also
-				     keeps the ref sheet reachable without JS, where the reveal button
-				     does nothing. -->
-				<a href={`/gallery/${data.refSheet.slug}`}>{m.art_ref_view_full()}</a>
-			{:else}
-				{m.art_ref_view_full()}
-			{/if}
+			<!-- No whitespace between the sentence and what follows: ja takes no space
+			     after 。, and the en strings carry their own trailing space below. -->
+			{m.art_ref_caption()}{#if data.refSheet.nsfw && !revealed}<!--
+			     Shielded, the frame is a button rather than the gallery link, so the
+			     caption carries the route onward — which is also the only one that
+			     works without JS, where the reveal button does nothing. It says
+			     "open in the gallery" rather than "view full size" because the
+			     gallery page shields the same image again.
+			--><a class="next-sentence" href={`/gallery/${data.refSheet.slug}`}>{m.art_ref_open_gallery()}</a>{:else}<span class="next-sentence">{m.art_ref_view_full()}</span>{/if}
 			{#if data.refSheet.artistName}
 				<span class="credit"> · {m.art_ref_by({ artist: data.refSheet.artistName })}</span>
 			{/if}
@@ -270,6 +269,13 @@
 		font-size: 14px;
 	}
 
+	/* .ref-sheet clips overflow, so an outset ring on this inset:0 button survives
+	   only as slivers — draw it inside the clip region instead. */
+	.reveal-btn:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: -4px;
+	}
+
 	.nsfw-label {
 		font-weight: 600;
 		font-size: 16px;
@@ -286,6 +292,22 @@
 		font-size: 13px;
 		line-height: 1.5;
 		color: var(--muted-foreground);
+	}
+
+	/* Sentence separator, rather than markup whitespace: Japanese takes no space
+	   after 。 */
+	.next-sentence {
+		margin-left: 0.3em;
+	}
+
+	:global(html[lang='ja']) .next-sentence {
+		margin-left: 0;
+	}
+
+	/* --primary fails AA on small text in ember light (2.20:1); --status-attention
+	   is the token that tracks it and passes 4.5:1 everywhere (SONA-162). */
+	.caption a {
+		color: var(--status-attention);
 	}
 
 	.details {

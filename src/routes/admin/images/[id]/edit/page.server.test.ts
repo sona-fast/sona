@@ -150,6 +150,38 @@ describe('admin image edit — save action', () => {
 		expect(row?.title).toBe('Renamed');
 	});
 
+	// SONA-18: the other ordering of the same conflict — the guard in the
+	// reference action stops a variant becoming the sheet, this stops the sheet
+	// becoming a variant. Without it /art loses its ref sheet with nothing said.
+	it('refuses to make the designated reference sheet a variant', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await seedImage(db, 9);
+		const [c] = await db
+			.insert(characters)
+			.values({ name: 'Owner', isOwner: true, referenceImageId: 5 })
+			.returning({ id: characters.id });
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', parentImageId: '9' }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(400);
+		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 5)).get())?.p).toBe(null);
+		expect(await refOf(db, c.id)).toBe(5);
+	});
+
+	it('still allows a non-designated image to become a variant', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await seedImage(db, 9);
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 9 });
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', parentImageId: '9' }), platform } as never)
+		);
+		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 5)).get())?.p).toBe(9);
+	});
+
 	it('persists featured and featuredOrder (#58)', async () => {
 		const { db, platform } = makeDb();
 		await seedImage(db, 5);

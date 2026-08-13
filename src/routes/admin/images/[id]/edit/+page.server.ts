@@ -6,7 +6,7 @@ import { resolveAvatarUrl } from '$lib/server/avatar';
 import { getSettings } from '$lib/server/settings';
 import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
-import { variantAssignmentError } from '$lib/server/variants';
+import { variantAssignmentError, REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -139,6 +139,16 @@ export const actions = {
 				return fail(400, { error: 'Variants cannot be nested — the chosen parent is itself a variant' });
 			if (variantError === 'has_variants')
 				return fail(400, { error: 'This image has variants of its own and cannot become a variant' });
+
+			const owner = await db
+				.select({ referenceImageId: characters.referenceImageId })
+				.from(characters)
+				.where(eq(characters.isOwner, true))
+				// first owner by name — must match the loads' find() over name-ordered characters
+				.orderBy(characters.name)
+				.get();
+			if (owner?.referenceImageId === id)
+				return fail(400, { error: REFERENCE_BECOMES_VARIANT_ERROR });
 		}
 
 		// Resolve or create artist
