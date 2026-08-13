@@ -4,6 +4,7 @@ import {
 	saveSettings,
 	clearSettingsCache,
 	getSupporterKeyStatus,
+	getVerifiedSupporterKey,
 	clearSupporterKeyStatusCache,
 	parseSonaColors,
 	parseLines
@@ -487,5 +488,130 @@ describe('parseSonaColors / parseLines', () => {
 
 	it('splits newline lists into trimmed, non-empty lines', () => {
 		expect(parseLines(' one \n\n two\n')).toEqual(['one', 'two']);
+	});
+});
+
+// The gate's memo (SONA-118 extension). Where the status cache above needs a UTC
+// day key, this one caches only what is true of the token itself, so the pin is
+// different: prove it never caches an ANSWER that time could change, and that
+// every uncertain outcome comes back as "no key" — this feeds an enforcement
+// path, so a wrong answer here grants a feature rather than mis-styling a notice.
+describe('getVerifiedSupporterKey — caching & fail-closed', () => {
+	beforeEach(() => {
+		vi.mocked(verifySupporterKey).mockReset();
+	});
+
+	it('serves a second call without re-reading or re-verifying', async () => {
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		const first = await getVerifiedSupporterKey(db);
+		const second = await getVerifiedSupporterKey(db);
+
+		expect(first).toEqual({ signatureValid: true, expiresAt: VALID_UNTIL.getTime() });
+		expect(second).toEqual(first);
+		expect(state.reads).toBe(1);
+		expect(verifySupporterKey).toHaveBeenCalledTimes(1);
+	});
+
+	it('caches the expiry INSTANT, not a validity verdict', async () => {
+		// The reason no day key is needed: nothing cached here changes as time
+		// passes, so callers can decide validity against their own `now` (see
+		// vr-gate.test.ts, which drives that decision across the expiry).
+		stubValidKey();
+		const { db } = fakeKeyDb('head.tail');
+
+		const value = await getVerifiedSupporterKey(db);
+
+		expect(value.expiresAt).toBe(VALID_UNTIL.getTime());
+		expect(Object.keys(value).sort()).toEqual(['expiresAt', 'signatureValid']);
+	});
+
+	it('keeps the expiry of a signed-but-expired key', async () => {
+		// The signature is what was verified; whether it has lapsed is the caller's
+		// comparison. Dropping the expiry here would force a re-verify per request.
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: false,
+			reason: 'expired',
+			login: 'sparky',
+			tier: 1,
+			expiresAt: VALID_UNTIL
+		});
+		const { db } = fakeKeyDb('head.tail');
+
+		expect(await getVerifiedSupporterKey(db)).toEqual({
+			signatureValid: true,
+			expiresAt: VALID_UNTIL.getTime()
+		});
+	});
+
+	it('fails closed on a token that does not verify', async () => {
+		vi.mocked(verifySupporterKey).mockResolvedValue({ valid: false, reason: 'bad-signature' });
+		const { db } = fakeKeyDb('forged.token');
+
+		expect(await getVerifiedSupporterKey(db)).toEqual({ signatureValid: false, expiresAt: null });
+	});
+
+	it('fails closed on an absent key without verifying', async () => {
+		const { db } = fakeKeyDb(null);
+
+		expect(await getVerifiedSupporterKey(db)).toEqual({ signatureValid: false, expiresAt: null });
+		expect(verifySupporterKey).not.toHaveBeenCalled();
+	});
+
+	it('clearSupporterKeyStatusCache() drops THIS memo too, not just the status', async () => {
+		// One hook for both memos: a save/remove that cleared only the status would
+		// leave the gate honoring the old key for a full TTL.
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+		expect(await getVerifiedSupporterKey(db)).toEqual({ signatureValid: false, expiresAt: null });
+
+		state.value = 'head.tail';
+		clearSupporterKeyStatusCache();
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+		expect(state.reads).toBe(2);
+	});
+
+	it('re-reads after the TTL expires, so another isolate’s write lands', async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-25T09:00:00Z'));
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
+
+		state.value = 'head.tail';
+		vi.setSystemTime(new Date('2026-08-25T09:00:59Z'));
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
+
+		vi.setSystemTime(new Date('2026-08-25T09:01:01Z'));
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+		expect(state.reads).toBe(2);
+	});
+
+	it('an in-flight resolution does not re-cache its pre-write answer', async () => {
+		// The operator removes their key while a VR request is already awaiting the
+		// read. Caching that pre-write answer would keep the gate open for a TTL.
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		const inFlight = getVerifiedSupporterKey(db);
+		clearSupporterKeyStatusCache(); // what removeSupporterKey does mid-flight
+		expect(await inFlight).toMatchObject({ signatureValid: true });
+
+		state.value = null;
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
+		expect(state.reads).toBe(2);
+	});
+
+	it('propagates a D1 error and caches nothing, so the next call retries', async () => {
+		// The gate catches this and denies; caching it would deny for a full TTL.
+		stubValidKey();
+		await expect(getVerifiedSupporterKey(throwingKeyDb())).rejects.toThrow('D1 unavailable');
+
+		const { db, state } = fakeKeyDb('head.tail');
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+		expect(state.reads).toBe(1);
 	});
 });

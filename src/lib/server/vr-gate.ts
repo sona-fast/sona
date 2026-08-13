@@ -1,7 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { dev } from '$app/environment';
-import { getRawSetting } from '$lib/server/settings';
-import { verifySupporterKey } from '$lib/server/supporter-key';
+import { getVerifiedSupporterKey } from '$lib/server/settings';
 import { isFeatureEnabled, EARLY_ACCESS } from '$lib/early-access';
 import { vrAvatars } from '$lib/server/db/schema';
 import { cachedProbe } from '$lib/server/nav-gating';
@@ -24,6 +23,13 @@ const VR_FEATURE_FLAG = 'vr-avatars';
  * model-upload endpoint must refuse when it is false. The gated UI state is
  * presentation on top of it, never a substitute.
  *
+ * The key read is memoized per isolate (getVerifiedSupporterKey), so this costs
+ * a D1 read plus an Ed25519 verify once per TTL instead of once per request.
+ * Only the signature and the expiry instant are cached; whether the key is
+ * valid RIGHT NOW is re-decided from `now` on every call, so a key still lapses
+ * the moment it expires. Every failure — a D1 error, a key that doesn't verify,
+ * anything unexpected out of the memo — resolves to "no key", which denies.
+ *
  * `env` carries the TEST-ONLY E2E_VR_GATE bypass (see app.d.ts): honored only
  * when set to exactly 'open' AND the build is a dev build (the e2e harness
  * runs `vite dev` — see playwright.config.ts webServer). The `dev` guard
@@ -37,12 +43,15 @@ export async function vrPublishingEnabled(
 	now: Date = new Date()
 ): Promise<boolean> {
 	if (dev && env?.E2E_VR_GATE === 'open') return true;
-	// A failed settings read degrades to "no key" rather than throwing the whole
+	// A failed read or verify degrades to "no key" rather than throwing the whole
 	// page — the GA branch of isFeatureEnabled still opens the gate on time.
-	const token = await getRawSetting(db, 'supporterKey').catch(() => null);
 	let supporterKeyValid = false;
-	if (token) {
-		supporterKeyValid = (await verifySupporterKey(token, now)).valid;
+	try {
+		const key = await getVerifiedSupporterKey(db);
+		supporterKeyValid =
+			key.signatureValid && key.expiresAt !== null && now.getTime() < key.expiresAt;
+	} catch {
+		supporterKeyValid = false;
 	}
 	return isFeatureEnabled(VR_FEATURE_FLAG, { supporterKeyValid, now });
 }

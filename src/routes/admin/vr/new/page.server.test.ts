@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { isRedirect } from '@sveltejs/kit';
 import { makeD1 } from '$lib/server/test/d1';
-import { clearSettingsCache } from '$lib/server/settings';
+import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
 import { EARLY_ACCESS } from '$lib/early-access';
 
 import { actions } from './+page.server';
@@ -37,6 +37,9 @@ beforeEach(() => {
 	restoreRegistry();
 	// getSettings caches per isolate and every test builds a fresh DB.
 	clearSettingsCache();
+	// The gate memoizes the verified supporter key per isolate; every test builds
+	// a fresh DB, so the previous test's key would otherwise answer for this one.
+	clearSupporterKeyStatusCache();
 });
 afterEach(restoreRegistry);
 

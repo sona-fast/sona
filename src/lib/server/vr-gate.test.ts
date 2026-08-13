@@ -1,6 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { vrTabEnabled, clearVrTabCache } from './vr-gate';
+import { vrTabEnabled, clearVrTabCache, vrPublishingEnabled } from './vr-gate';
+import { clearSupporterKeyStatusCache } from './settings';
+import { verifySupporterKey } from './supporter-key';
+import { EARLY_ACCESS } from '$lib/early-access';
 import type { Database } from './db';
+
+// A real supporter key can't be minted in tests (the issuer's private key never
+// leaves sona.fast), so verification is stubbed; the gate logic on top of it,
+// including the expiry comparison these tests turn on, stays real.
+vi.mock('$lib/server/supporter-key', async (importActual) =>
+	(await import('$lib/server/test/supporter-key-mock')).supporterKeyMockModule(
+		importActual as () => Promise<typeof import('$lib/server/supporter-key')>
+	)
+);
 
 // vrTabEnabled caches per-isolate with a short TTL (cachedProbe). The avatar
 // write paths clear it in their own isolate; TTL expiry is what re-runs the
@@ -63,5 +75,121 @@ describe('vrTabEnabled — cache TTL', () => {
 		clearVrTabCache();
 		await vrTabEnabled(db);
 		expect(calls.count).toBe(2);
+	});
+});
+
+// vrPublishingEnabled is the ENFORCEMENT predicate — every mutating VR action
+// and the model-upload endpoint refuse when it is false — and it now answers
+// from a memo (SONA-118 extension). So these pin the two ways a memo can be
+// wrong on an enforcement path: answering after the key it came from stopped
+// working, and answering at all when something failed.
+describe('vrPublishingEnabled — memoized entitlement', () => {
+	const SHIPPED = { ...EARLY_ACCESS };
+	const FUTURE_GA = '2999-01-01';
+	const EXPIRES_AT = new Date('2026-09-01T00:00:00Z');
+
+	beforeEach(() => {
+		for (const k of Object.keys(EARLY_ACCESS)) delete EARLY_ACCESS[k];
+		Object.assign(EARLY_ACCESS, SHIPPED);
+		EARLY_ACCESS['vr-avatars'] = FUTURE_GA; // pre-GA, so only a key can open it
+		clearSupporterKeyStatusCache();
+		vi.mocked(verifySupporterKey).mockReset();
+	});
+	afterEach(() => {
+		for (const k of Object.keys(EARLY_ACCESS)) delete EARLY_ACCESS[k];
+		Object.assign(EARLY_ACCESS, SHIPPED);
+		clearSupporterKeyStatusCache();
+	});
+
+	/** Fake of the single-row read getRawSetting does, counting D1 round-trips. */
+	function fakeKeyDb(value: string | null) {
+		const state = { value, reads: 0 };
+		const db = {
+			select: () => ({
+				from: () => ({
+					where: () => ({
+						get: async () => {
+							state.reads += 1;
+							return state.value === null ? undefined : { key: 'supporterKey', value: state.value };
+						}
+					})
+				})
+			})
+		} as unknown as Database;
+		return { db, state };
+	}
+
+	function stubValidKey() {
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: EXPIRES_AT
+		});
+	}
+
+	it('opens the gate on a valid key and answers again without a second read or verify', async () => {
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+		const now = new Date('2026-08-25T09:00:00Z');
+
+		expect(await vrPublishingEnabled(db, undefined, now)).toBe(true);
+		expect(await vrPublishingEnabled(db, undefined, now)).toBe(true);
+		expect(state.reads).toBe(1);
+		expect(verifySupporterKey).toHaveBeenCalledTimes(1);
+	});
+
+	it('denies once the key expires, on the very same cache entry', async () => {
+		// The property that makes caching the pre-zone entitlement safe: only the
+		// signature and the expiry instant are memoized, so the verdict is re-made
+		// from `now` on every call. A cached BOOLEAN would still say yes here.
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		expect(await vrPublishingEnabled(db, undefined, new Date(EXPIRES_AT.getTime() - 1000))).toBe(true);
+		expect(await vrPublishingEnabled(db, undefined, EXPIRES_AT)).toBe(false);
+		expect(state.reads).toBe(1);
+	});
+
+	it('denies when the D1 read fails, warm cache or not', async () => {
+		// Fail closed: an enforcement path that can't establish entitlement has not
+		// established it. (Pre-GA — the GA branch opens the gate on its own date.)
+		const throwingDb = {
+			select: () => ({
+				from: () => ({ where: () => ({ get: async () => Promise.reject(new Error('D1 unavailable')) }) })
+			})
+		} as unknown as Database;
+
+		expect(await vrPublishingEnabled(throwingDb, undefined, new Date('2026-08-25T09:00:00Z'))).toBe(false);
+	});
+
+	it('denies on a token that does not verify', async () => {
+		vi.mocked(verifySupporterKey).mockResolvedValue({ valid: false, reason: 'bad-signature' });
+		const { db } = fakeKeyDb('forged.token');
+
+		expect(await vrPublishingEnabled(db, undefined, new Date('2026-08-25T09:00:00Z'))).toBe(false);
+	});
+
+	it('shuts the gate in the same isolate the moment the key is removed', async () => {
+		// What saveSupporterKey / removeSupporterKey rely on: they clear the memo,
+		// so the operator's next request sees the new state rather than a TTL of the
+		// old one.
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+		const now = new Date('2026-08-25T09:00:00Z');
+		expect(await vrPublishingEnabled(db, undefined, now)).toBe(true);
+
+		state.value = null; // removeSupporterKey blanks the row…
+		clearSupporterKeyStatusCache(); // …and clears the memo
+		expect(await vrPublishingEnabled(db, undefined, now)).toBe(false);
+	});
+
+	it('still opens the gate once the flag GAs, with no key at all', async () => {
+		EARLY_ACCESS['vr-avatars'] = '2000-01-01';
+		const { db, state } = fakeKeyDb(null);
+
+		expect(await vrPublishingEnabled(db, undefined, new Date('2026-08-25T09:00:00Z'))).toBe(true);
+		expect(verifySupporterKey).not.toHaveBeenCalled();
+		expect(state.reads).toBe(1);
 	});
 });

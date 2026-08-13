@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { isRedirect } from '@sveltejs/kit';
 import { makeD1 } from '$lib/server/test/d1';
 import { getDb } from '$lib/server/db';
-import { clearSettingsCache } from '$lib/server/settings';
+import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
 import { vrTabEnabled, clearVrTabCache } from '$lib/server/vr-gate';
 import { EARLY_ACCESS } from '$lib/early-access';
 
@@ -31,6 +31,9 @@ function restoreRegistry() {
 beforeEach(() => {
 	restoreRegistry();
 	clearSettingsCache();
+	// The gate memoizes the verified supporter key per isolate; every test builds
+	// a fresh DB, so the previous test's key would otherwise answer for this one.
+	clearSupporterKeyStatusCache();
 	deleteFileSpy.mockClear();
 });
 afterEach(restoreRegistry);
