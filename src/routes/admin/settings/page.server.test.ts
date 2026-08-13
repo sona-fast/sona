@@ -936,6 +936,12 @@ describe('settings removeSupporterKey — clears the stored key', () => {
 // actions write the key row, so both must drop that memo — otherwise the notice
 // keeps describing the previous key for up to a minute after the operator acted.
 describe('supporter-key actions — invalidate the memoized status (SONA-118)', () => {
+	// Unlike the other two suites this file has no file-level memo hook, and every
+	// test here opens by priming the memo — so clear it on both sides.
+	beforeEach(() => {
+		clearSupporterKeyStatusCache();
+	});
+
 	afterEach(() => {
 		// These stub verification for a whole test (not once), so undo both the
 		// standing stub and the memo they primed.

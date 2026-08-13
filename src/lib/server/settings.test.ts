@@ -361,6 +361,23 @@ describe('getSupporterKeyStatus — caching', () => {
 		expect(state.reads).toBe(2);
 	});
 
+	it('an in-flight resolution does not re-cache its pre-write status', async () => {
+		// The operator saves a key in one tab while another admin request is already
+		// awaiting the read. That request resolves the OLD row afterwards; caching it
+		// would hide the new key for a full TTL, so the clear must win.
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+		const now = new Date('2026-08-25T09:00:00Z');
+
+		const inFlight = getSupporterKeyStatus(db, now);
+		clearSupporterKeyStatusCache(); // what saveSupporterKey does mid-flight
+		expect(await inFlight).toBeNull();
+
+		state.value = 'head.tail';
+		expect(await getSupporterKeyStatus(db, now)).toMatchObject({ state: 'valid' });
+		expect(state.reads).toBe(2);
+	});
+
 	it('resolves an absent key to null without verifying', async () => {
 		const { db } = fakeKeyDb(null);
 

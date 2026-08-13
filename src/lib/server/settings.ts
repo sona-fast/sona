@@ -403,8 +403,14 @@ let supporterKeyStatusCache:
 	| { day: string; value: SupporterKeyStatus | null; expires: number }
 	| null = null;
 
+// Bumped by clearSupporterKeyStatusCache: a resolution that was already awaiting
+// the read when a save/remove cleared the entry must not re-cache its pre-write
+// status. Same guard as the nav probes (cachedProbe in nav-gating.ts).
+let supporterKeyStatusGeneration = 0;
+
 export function clearSupporterKeyStatusCache() {
 	supporterKeyStatusCache = null;
+	supporterKeyStatusGeneration++;
 }
 
 /**
@@ -424,9 +430,12 @@ export async function getSupporterKeyStatus(
 	if (cached && cached.day === day && cached.expires > Date.now()) {
 		return cached.value;
 	}
+	const startedIn = supporterKeyStatusGeneration;
 	const token = await getRawSetting(db, 'supporterKey');
 	const value = await resolveSupporterKeyStatus(token ?? '', now);
-	supporterKeyStatusCache = { day, value, expires: Date.now() + SETTINGS_TTL_MS };
+	if (supporterKeyStatusGeneration === startedIn) {
+		supporterKeyStatusCache = { day, value, expires: Date.now() + SETTINGS_TTL_MS };
+	}
 	return value;
 }
 
