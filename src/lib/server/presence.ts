@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { characters, images, imageTags, siteSettings, tags } from './db/schema';
 import { parseSonaColors, parseLines, type SiteSettings } from './settings';
 import type { Database } from './db';
@@ -95,7 +95,9 @@ export async function probeArtContent(db: Database): Promise<boolean> {
 	if (artHasContent(sona, null, [])) return true;
 
 	// Designated ref sheet: the first owner character by name — must match the
-	// /art load's precedence query.
+	// /art load's precedence query, variant exclusion included (SONA-18). A
+	// designated variant resolves to no ref sheet there, so counting it present
+	// here would point the splash card at a page that 404s.
 	const owner = await db
 		.select({ referenceImageId: characters.referenceImageId })
 		.from(characters)
@@ -106,7 +108,13 @@ export async function probeArtContent(db: Database): Promise<boolean> {
 		const designated = await db
 			.select({ id: images.id })
 			.from(images)
-			.where(and(eq(images.id, owner.referenceImageId), eq(images.published, true)))
+			.where(
+				and(
+					eq(images.id, owner.referenceImageId),
+					eq(images.published, true),
+					isNull(images.parentImageId)
+				)
+			)
 			.get();
 		if (designated) return true;
 	}
@@ -116,7 +124,9 @@ export async function probeArtContent(db: Database): Promise<boolean> {
 		.from(images)
 		.innerJoin(imageTags, eq(imageTags.imageId, images.id))
 		.innerJoin(tags, eq(tags.id, imageTags.tagId))
-		.where(and(eq(tags.name, REFERENCE_TAG), eq(images.published, true)))
+		.where(
+			and(eq(tags.name, REFERENCE_TAG), eq(images.published, true), isNull(images.parentImageId))
+		)
 		.limit(1)
 		.get();
 	if (taggedRef) return true;

@@ -3,7 +3,7 @@ import { getDb } from '$lib/server/db';
 import { images, artists, imageTags, tags, characters } from '$lib/server/db/schema';
 import { getSettings } from '$lib/server/settings';
 import { REFERENCE_TAG, sonaDetails, artHasContent } from '$lib/server/presence';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -13,6 +13,13 @@ export const load: PageServerLoad = async ({ platform }) => {
 	// refSheet precedence: an owner character's explicit reference_image_id wins
 	// (when that image is published); otherwise fall back to the most recent
 	// published image tagged REFERENCE_TAG.
+	//
+	// SONA-18: the operator's designation is honored even when the image is NSFW
+	// — the load carries the flag through so the page can render it behind the
+	// site's usual blur-and-reveal shield, rather than dropping the ref sheet.
+	// Variants (parent_image_id set) are excluded from both paths: they never
+	// stand alone anywhere else on the public surface, so a designated variant
+	// falls through as if it had never been designated.
 	const owner = await db
 		.select({ referenceImageId: characters.referenceImageId })
 		.from(characters)
@@ -29,6 +36,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 						imageUrl: images.imageUrl,
 						title: images.title,
 						artistName: artists.name,
+						nsfw: images.nsfw,
 						// width/height reserve the img box (no CLS) — the ref sheet is the
 						// page's LCP element.
 						width: images.width,
@@ -36,7 +44,13 @@ export const load: PageServerLoad = async ({ platform }) => {
 					})
 					.from(images)
 					.leftJoin(artists, eq(artists.id, images.artistId))
-					.where(and(eq(images.id, owner.referenceImageId), eq(images.published, true)))
+					.where(
+						and(
+							eq(images.id, owner.referenceImageId),
+							eq(images.published, true),
+							isNull(images.parentImageId)
+						)
+					)
 					.get()) ?? null
 			: null;
 
@@ -47,6 +61,7 @@ export const load: PageServerLoad = async ({ platform }) => {
 				imageUrl: images.imageUrl,
 				title: images.title,
 				artistName: artists.name,
+				nsfw: images.nsfw,
 				width: images.width,
 				height: images.height
 			})
@@ -54,7 +69,13 @@ export const load: PageServerLoad = async ({ platform }) => {
 			.innerJoin(imageTags, eq(imageTags.imageId, images.id))
 			.innerJoin(tags, eq(tags.id, imageTags.tagId))
 			.leftJoin(artists, eq(artists.id, images.artistId))
-			.where(and(eq(tags.name, REFERENCE_TAG), eq(images.published, true)))
+			.where(
+				and(
+					eq(tags.name, REFERENCE_TAG),
+					eq(images.published, true),
+					isNull(images.parentImageId)
+				)
+			)
 			.orderBy(desc(images.createdAt))
 			.get()) ?? null;
 

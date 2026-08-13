@@ -108,6 +108,91 @@ describe('art load — refSheet precedence', () => {
 	});
 });
 
+// SONA-18: the operator's designation (and the reference-tag fallback) is
+// honored for NSFW images — the load returns the row and carries the flag so
+// the page can shield it — while variants are excluded from both paths.
+describe('art load — refSheet NSFW flag and variant exclusion (SONA-18)', () => {
+	type RefSheet = { slug: string; nsfw: boolean } | null;
+
+	async function loadRefSheet(platform: App.Platform) {
+		return ((await load({ platform } as never)) as { refSheet: RefSheet }).refSheet;
+	}
+
+	it('returns an NSFW designated image, flagged so the page can shield it', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(images).values({ id: 5, title: 'Ref', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, published: true, nsfw: true, createdAt: '2026-01-01T00:00:00.000Z' });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 5 });
+
+		expect(await loadRefSheet(platform)).toMatchObject({ slug: 'art-5', nsfw: true });
+	});
+
+	it('returns an NSFW tagged image, flagged, via the fallback path', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+		await db.insert(images).values({ id: 6, title: 'Tagged', slug: 'art-6', imageUrl: 'https://cdn.example.com/6.png', artistId: 1, published: true, nsfw: true, createdAt: '2026-06-01T00:00:00.000Z' });
+		await db.insert(imageTags).values({ imageId: 6, tagId: 1 });
+
+		expect(await loadRefSheet(platform)).toMatchObject({ slug: 'art-6', nsfw: true });
+	});
+
+	it('flags an SFW ref sheet false — the shield stays off', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(images).values({ id: 5, title: 'Ref', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, published: true, createdAt: '2026-01-01T00:00:00.000Z' });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 5 });
+
+		expect(await loadRefSheet(platform)).toMatchObject({ slug: 'art-5', nsfw: false });
+	});
+
+	it('falls back to the tagged image when a variant is designated', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+		await db.insert(images).values([
+			{ id: 5, title: 'Parent', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, published: true, createdAt: '2026-01-01T00:00:00.000Z' },
+			// A variant of 5 — designatable from the edit page, never a standalone card.
+			{ id: 7, title: 'Variant', slug: 'art-7', imageUrl: 'https://cdn.example.com/7.png', artistId: 1, published: true, parentImageId: 5, variantLabel: 'Alt', createdAt: '2026-02-01T00:00:00.000Z' },
+			{ id: 6, title: 'Tagged', slug: 'art-6', imageUrl: 'https://cdn.example.com/6.png', artistId: 1, published: true, createdAt: '2026-06-01T00:00:00.000Z' }
+		]);
+		await db.insert(imageTags).values({ imageId: 6, tagId: 1 });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 7 });
+
+		expect(await loadRefSheet(platform)).toMatchObject({ slug: 'art-6' });
+	});
+
+	it('skips a tagged variant in favor of an older tagged parent', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+		await db.insert(images).values([
+			{ id: 5, title: 'Parent', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, published: true, createdAt: '2026-01-01T00:00:00.000Z' },
+			// Newer, so it would win the tag query's createdAt DESC ordering.
+			{ id: 7, title: 'Variant', slug: 'art-7', imageUrl: 'https://cdn.example.com/7.png', artistId: 1, published: true, parentImageId: 5, variantLabel: 'Alt', createdAt: '2026-06-01T00:00:00.000Z' }
+		]);
+		await db.insert(imageTags).values([{ imageId: 5, tagId: 1 }, { imageId: 7, tagId: 1 }]);
+
+		expect(await loadRefSheet(platform)).toMatchObject({ slug: 'art-5' });
+	});
+
+	it('has no ref sheet at all when the only candidate is a variant', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(artists).values({ id: 1, name: 'Artist' });
+		await db.insert(tags).values({ id: 1, name: 'reference' });
+		await db.insert(images).values([
+			{ id: 5, title: 'Parent', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, published: false, createdAt: '2026-01-01T00:00:00.000Z' },
+			{ id: 7, title: 'Variant', slug: 'art-7', imageUrl: 'https://cdn.example.com/7.png', artistId: 1, published: true, parentImageId: 5, variantLabel: 'Alt', createdAt: '2026-06-01T00:00:00.000Z' }
+		]);
+		await db.insert(imageTags).values({ imageId: 7, tagId: 1 });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 7 });
+
+		// The variant is still published art, so the page itself stays reachable
+		// through recentArt — only the ref-sheet slot is empty.
+		expect(await loadRefSheet(platform)).toBeNull();
+	});
+});
+
 describe('art load — content-presence gate (#42)', () => {
 	it('404s when every content source is absent', async () => {
 		const { platform } = makeDb();

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { page } from '$app/state';
 	import { Image as ImageIcon, Palette, CircleCheck, CircleAlert, ArrowRight, Star } from 'lucide-svelte';
 	import Callout from '$lib/components/Callout.svelte';
@@ -26,6 +27,23 @@
 	// Featured (#58): the first curated image is the hero, the rest the supporting row.
 	const featuredHero = $derived(data.featuredArt[0] ?? null);
 	const featuredRest = $derived(data.featuredArt.slice(1));
+
+	// SONA-18: an operator may designate (or tag) an NSFW image as the ref sheet.
+	// The designation is honored, but the image renders behind the same
+	// blur-and-reveal shield as the gallery hero. Shielded, the frame is the
+	// reveal button rather than a link — nesting a button inside the
+	// gallery <a> would leave two competing targets on one image.
+	let revealed = $state(false);
+	let revealAnnouncement = $state('');
+	// The button unmounts itself on reveal: announce the change and land focus on
+	// the now-linked ref sheet instead of dropping it to <body>.
+	let revealedRef = $state<HTMLAnchorElement>();
+	async function reveal() {
+		revealed = true;
+		revealAnnouncement = m.mature_revealed();
+		await tick();
+		revealedRef?.focus();
+	}
 </script>
 
 <Meta
@@ -40,23 +58,47 @@
 <section class="section">
 	<h2 class="section-label">{m.art_ref_sheet()}</h2>
 	{#if data.refSheet}
-		<a class="ref-sheet" href={`/gallery/${data.refSheet.slug}`}>
-			<!-- The ref sheet is /art's LCP element: transform it (not the raw
-			     multi-MB original), reserve its box with intrinsic width/height, and
-			     prioritize its fetch. rawFallback swaps in the original if the
-			     transform 403s off-zone. -->
-			<img
-				src={refSheetSrc(data.refSheet.imageUrl)}
-				srcset={refSheetSrcset(data.refSheet.imageUrl)}
-				sizes={refSheetSizes(data.refSheet.imageUrl)}
-				use:rawFallback={data.refSheet.imageUrl}
-				alt={data.refSheet.title}
-				width={data.refSheet.width}
-				height={data.refSheet.height}
-				fetchpriority="high"
-				decoding="async"
-			/>
-		</a>
+		<!-- Always-mounted status region: a live region inserted together with its
+		     first content is often not announced. -->
+		<p class="sr-only" role="status">{revealAnnouncement}</p>
+		<!-- Both branches render the same LCP contract on the <img>: transform it
+		     (not the raw multi-MB original), reserve its box with intrinsic
+		     width/height, and prioritize its fetch. rawFallback swaps in the
+		     original if the transform 403s off-zone. -->
+		{#if data.refSheet.nsfw && !revealed}
+			<div class="ref-sheet shielded">
+				<img
+					src={refSheetSrc(data.refSheet.imageUrl)}
+					srcset={refSheetSrcset(data.refSheet.imageUrl)}
+					sizes={refSheetSizes(data.refSheet.imageUrl)}
+					use:rawFallback={data.refSheet.imageUrl}
+					alt={data.refSheet.title}
+					width={data.refSheet.width}
+					height={data.refSheet.height}
+					fetchpriority="high"
+					decoding="async"
+					class="blurred"
+				/>
+				<button class="reveal-btn" onclick={reveal}>
+					<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
+					<span>{m.gallery_click_reveal()}</span>
+				</button>
+			</div>
+		{:else}
+			<a class="ref-sheet" href={`/gallery/${data.refSheet.slug}`} bind:this={revealedRef}>
+				<img
+					src={refSheetSrc(data.refSheet.imageUrl)}
+					srcset={refSheetSrcset(data.refSheet.imageUrl)}
+					sizes={refSheetSizes(data.refSheet.imageUrl)}
+					use:rawFallback={data.refSheet.imageUrl}
+					alt={data.refSheet.title}
+					width={data.refSheet.width}
+					height={data.refSheet.height}
+					fetchpriority="high"
+					decoding="async"
+				/>
+			</a>
+		{/if}
 		<p class="caption">
 			{m.art_ref_caption()}
 			{#if data.refSheet.artistName}
@@ -192,6 +234,36 @@
 
 	.ref-sheet.placeholder {
 		color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+	}
+
+	/* NSFW shield (SONA-18) — same blur radius and overlay as the gallery hero. */
+	.ref-sheet.shielded {
+		position: relative;
+	}
+
+	.ref-sheet img.blurred {
+		filter: blur(32px);
+	}
+
+	.reveal-btn {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		background: rgba(0, 0, 0, 0.6);
+		border: none;
+		color: white;
+		cursor: pointer;
+		font-family: var(--font-primary);
+		font-size: 14px;
+	}
+
+	.nsfw-label {
+		font-weight: 600;
+		font-size: 16px;
 	}
 
 	.ref-sheet img {
