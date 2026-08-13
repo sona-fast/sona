@@ -125,8 +125,12 @@ describe('settings saveSite — /ai disclosure page (SONA-167)', () => {
 	// silent no-op (absent means unmanaged), with the unit suite still green.
 	it('the settings form pairs the toggle with its present-marker', () => {
 		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		expect(src).toMatch(/<input type="hidden" name="aiPageEnabledPresent"/);
-		expect(src).toMatch(/<input type="checkbox" name="aiPageEnabled"/);
+		// Capture each tag by name, then look inside it: attribute order and extra
+		// attributes are harmless, the wrong type is not.
+		const marker = src.match(/<input[^>]*\bname="aiPageEnabledPresent"[^>]*>/)?.[0] ?? '';
+		expect(marker, 'present-marker input').toContain('type="hidden"');
+		const toggle = src.match(/<input[^>]*\bname="aiPageEnabled"[^>]*>/)?.[0] ?? '';
+		expect(toggle, 'toggle input').toContain('type="checkbox"');
 	});
 
 	it('stores the toggle and the override text, stamping the override date', async () => {
@@ -169,6 +173,36 @@ describe('settings saveSite — /ai disclosure page (SONA-167)', () => {
 
 		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('true');
 	});
+});
+
+// The rows this guards span three unrelated features (the /ai page, Telegram
+// auto-resync, registry overrides), so it lives at the page level rather than
+// inside any one feature's describe.
+describe('settings — checkbox hints are described, not named (SONA-183)', () => {
+	// Source pin (SONA-183): each checkbox hint lives OUTSIDE its <label> and
+	// reaches the input through aria-describedby, so the accessible name stays
+	// the short title instead of swallowing the whole description. Folding a hint
+	// back into a label would restore the old behaviour with the suite still green.
+	it('describes each checkbox from outside its label', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		for (const name of ['aiPageEnabled', 'autoResyncEnabled', 'registryOverridesLocal']) {
+			// Capture the whole tag, then look inside it: attribute order and extra
+			// attributes are harmless, a missing aria-describedby is not.
+			const input = src.match(new RegExp(`<input[^>]*\\bname="${name}"[^>]*>`))?.[0] ?? '';
+			expect(input, `${name} input`).toContain(`aria-describedby="${name}-desc"`);
+			// `>[^<]*</label>` is the containment assertion: the title label holds text
+			// and nothing else, so no hint can be folded back in to restore the
+			// ~450-character accessible name with every id still pointing where it does.
+			const title =
+				src.match(new RegExp(`<label[^>]*\\bfor="${name}"[^>]*>[^<]*</label>`))?.[0] ?? '';
+			expect(title, `${name} title label`).toMatch(/class="[^"]*\bcheckbox-title\b/);
+			const desc = src.match(new RegExp(`<span[^>]*\\bid="${name}-desc"[^>]*>`))?.[0] ?? '';
+			expect(desc, `${name} hint`).toMatch(/class="[^"]*\bcheckbox-desc\b/);
+		}
+		// The row is a <div>: a wrapping <label> would put every hint back inside
+		// the accessible name no matter where the ids point.
+		expect(src).not.toMatch(/<label[^>]*class="[^"]*\bcheckbox-row\b/);
+});
 });
 
 describe('settings saveSite — three-path profile fields', () => {

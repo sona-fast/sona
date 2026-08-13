@@ -241,6 +241,27 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	await expect(page.getByText(/Resend/)).toBeVisible();
 });
 
+// SONA-183: the source pins can only see markup, so this asserts the computed
+// accessible name and description, plus the for/id pairing that keeps the title
+// clickable. Reads state only (no save), so it leaves the shared settings
+// untouched — and it runs LAST because this file is serial: a flake here would
+// otherwise skip the mutating cases above.
+test('the AI toggle is named by its title and described by its hint', async ({ page }) => {
+	await login(page);
+	await page.goto('/admin/settings');
+	await openSiteTab(page);
+
+	const toggle = page.locator('input[name="aiPageEnabled"]');
+	await expect(toggle).toHaveAccessibleName('Serve the AI disclosure page (/ai)');
+	await expect(toggle).toHaveAccessibleDescription(/Read it before you leave this on/);
+
+	// The only guard on the new for/id pairing: every other test drives the input
+	// by selector, so a dropped `for` would go unnoticed.
+	const before = await toggle.isChecked();
+	await page.getByText('Serve the AI disclosure page (/ai)', { exact: true }).click();
+	expect(await toggle.isChecked()).toBe(!before);
+});
+
 // The override/toggle cases above mutate settings on the shared seeded DB.
 // Serial retries restart at the first test, which would then hit a 404 /ai and
 // fail for the wrong reason, so put the fork back the way this file found it.

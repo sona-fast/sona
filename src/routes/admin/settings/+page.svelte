@@ -386,16 +386,22 @@
 				<span>{m.admin_settings_terms_label()}</span>
 				<textarea class="input" rows="4" name="termsOfService" bind:value={termsOfService} placeholder={m.admin_settings_legal_placeholder()}></textarea>
 			</label>
-			<label class="checkbox-row">
+			<div class="checkbox-row">
 				<!-- An unchecked checkbox posts nothing; this marker is how the action
 				     tells "toggle off" from "form without the toggle" (#60). -->
 				<input type="hidden" name="aiPageEnabledPresent" value="1" />
-				<input type="checkbox" name="aiPageEnabled" bind:checked={aiPageEnabled} />
+				<input
+					type="checkbox"
+					id="aiPageEnabled"
+					name="aiPageEnabled"
+					aria-describedby="aiPageEnabled-desc"
+					bind:checked={aiPageEnabled}
+				/>
 				<span class="checkbox-text">
-					<span class="checkbox-title">{m.admin_settings_ai_page_label()}</span>
-					<span class="checkbox-desc">{m.admin_settings_ai_page_hint()}</span>
+					<label class="checkbox-title" for="aiPageEnabled">{m.admin_settings_ai_page_label()}</label>
+					<span class="checkbox-desc" id="aiPageEnabled-desc">{m.admin_settings_ai_page_hint()}</span>
 				</span>
-			</label>
+			</div>
 			<label>
 				<span>{m.admin_settings_ai_text_label()}</span>
 				<textarea class="input" rows="4" name="aiPageText" bind:value={aiPageText} placeholder={m.admin_settings_legal_placeholder()}></textarea>
@@ -563,26 +569,38 @@
 }}>
 		<section data-tab="connections">
 			<h2>Telegram</h2>
-			<label class="checkbox-row">
-				<input type="checkbox" name="autoResyncEnabled" bind:checked={autoResyncEnabled} />
+			<div class="checkbox-row">
+				<input
+					type="checkbox"
+					id="autoResyncEnabled"
+					name="autoResyncEnabled"
+					aria-describedby="autoResyncEnabled-desc"
+					bind:checked={autoResyncEnabled}
+				/>
 				<span class="checkbox-text">
-					<span class="checkbox-title">{m.admin_settings_auto_resync()}</span>
-					<span class="checkbox-desc">{m.admin_settings_auto_resync_desc()}</span>
+					<label class="checkbox-title" for="autoResyncEnabled">{m.admin_settings_auto_resync()}</label>
+					<span class="checkbox-desc" id="autoResyncEnabled-desc">{m.admin_settings_auto_resync_desc()}</span>
 				</span>
-			</label>
+			</div>
 		</section>
 
 		<section data-tab="connections">
 			<h2>{m.admin_settings_registry()}</h2>
 			{#if data.registryEnabled}
 				<p class="reg-status connected">{m.admin_settings_registry_connected()}</p>
-				<label class="checkbox-row">
-					<input type="checkbox" name="registryOverridesLocal" bind:checked={registryOverridesLocal} />
+				<div class="checkbox-row">
+					<input
+						type="checkbox"
+						id="registryOverridesLocal"
+						name="registryOverridesLocal"
+						aria-describedby="registryOverridesLocal-desc"
+						bind:checked={registryOverridesLocal}
+					/>
 					<span class="checkbox-text">
-						<span class="checkbox-title">{m.admin_settings_registry_overrides()}</span>
-						<span class="checkbox-desc">{m.admin_settings_registry_overrides_desc()}</span>
+						<label class="checkbox-title" for="registryOverridesLocal">{m.admin_settings_registry_overrides()}</label>
+						<span class="checkbox-desc" id="registryOverridesLocal-desc">{m.admin_settings_registry_overrides_desc()}</span>
 					</span>
-				</label>
+				</div>
 			{:else}
 				<p class="reg-status">{m.admin_settings_registry_not_connected()}</p>
 			{/if}
@@ -1372,8 +1390,9 @@
 	}
 
 	/* Breathing room between stacked fields within a section (the section gap only
-	   separates whole sections, not the fields inside one). */
-	section > label + label {
+	   separates whole sections, not the fields inside one). A .checkbox-row is a
+	   field too, even though it is a <div> rather than a <label> (SONA-183). */
+	section > :is(label, .checkbox-row) + :is(label, .checkbox-row) {
 		margin-top: 20px;
 	}
 
@@ -1393,26 +1412,39 @@
 		font-weight: 500;
 	}
 
+	/* The hint must stay OUTSIDE the label, reaching the input through
+	   aria-describedby, or it joins the checkbox's accessible name (SONA-183). That
+	   makes the row a <div>, so its layout and type styles are stated here rather
+	   than inherited from the base label rules. */
 	.checkbox-row {
-		flex-direction: row;
+		display: flex;
 		align-items: flex-start;
 		gap: 10px;
-		cursor: pointer;
 	}
 
 	.checkbox-row input {
 		margin-top: 2px;
+		cursor: pointer;
 	}
 
 	.checkbox-text {
 		display: flex;
 		flex-direction: column;
 		gap: 4px;
-	}
-
-	.checkbox-title {
 		font-size: 14px;
 		font-weight: 500;
+	}
+
+	/* Only the title is clickable, so it carries the pointer target: min-height
+	   plus padding put a 24px floor under it without depending on the resolved
+	   font's line box, and the equal negative margin cancels the padding so every
+	   rendered position is unchanged — the 4px .checkbox-text gap absorbs it. */
+	.checkbox-title {
+		display: block;
+		min-height: 24px;
+		padding-block: 4px;
+		margin-block: -4px;
+		cursor: pointer;
 	}
 
 	.checkbox-desc {

@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { defineConfig, searchForWorkspaceRoot } from 'vite';
+import { repoUrlFromEnv } from './src/lib/build-info.ts';
 
 // In a git worktree node_modules is a symlink into the main checkout, which
 // falls outside Vite's default allow list — dev-server requests for framework
@@ -23,12 +24,10 @@ function nodeModulesRealpath(): string {
 // Actions (deploy.yml), where these vars are always set — so every fork gets
 // its OWN repo URL, never a hardcoded upstream link that would 404 on commits
 // that only exist in the fork. Local/dev builds have neither var and the
-// footer omits the line.
+// footer omits the line. The composition lives in build-info so it can be
+// unit-tested; this file is only reachable through a real build.
 const buildSha = process.env.GITHUB_SHA ?? '';
-const buildRepoUrl =
-	process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY
-		? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`
-		: '';
+const buildRepoUrl = repoUrlFromEnv(process.env);
 
 export default defineConfig({
 	define: {
