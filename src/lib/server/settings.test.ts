@@ -3,10 +3,22 @@ import {
 	getSettings,
 	saveSettings,
 	clearSettingsCache,
+	getSupporterKeyStatus,
+	clearSupporterKeyStatusCache,
 	parseSonaColors,
 	parseLines
 } from './settings';
+import { verifySupporterKey } from './supporter-key';
 import type { Database } from './db';
+
+// Verification is stubbed (a passing token needs the sona.fast PRIVATE key); the
+// resolver keeps the real shaping, so the countdown these tests assert on is the
+// production one. The crypto itself is covered in supporter-key.test.ts.
+vi.mock('$lib/server/supporter-key', async (importActual) =>
+	(await import('$lib/server/test/supporter-key-mock')).supporterKeyMockModule(
+		importActual as () => Promise<typeof import('$lib/server/supporter-key')>
+	)
+);
 
 // These tests pin the per-isolate settings cache that sits on the hot path of
 // every request. The cache exists to avoid a D1 round-trip per page load; the
@@ -48,6 +60,7 @@ beforeEach(() => {
 afterEach(() => {
 	vi.useRealTimers();
 	clearSettingsCache();
+	clearSupporterKeyStatusCache();
 });
 
 describe('getSettings — mapping & defaults', () => {
@@ -221,6 +234,148 @@ describe('getSettings — caching', () => {
 		clearSettingsCache();
 		await getSettings(db);
 		expect(calls.count).toBe(2);
+	});
+});
+
+/**
+ * Minimal fake of the surface `getRawSetting` touches — `db.select().from(t)
+ * .where(...).get()` — resolving to the single stored row. Reads are counted so
+ * a cache hit is observable as "no D1 round-trip", and `value` is mutable so a
+ * test can simulate the row changing under the cache.
+ */
+function fakeKeyDb(value: string | null) {
+	const state = { value, reads: 0 };
+	const db = {
+		select: () => ({
+			from: () => ({
+				where: () => ({
+					get: async () => {
+						state.reads += 1;
+						return state.value === null ? undefined : { key: 'supporterKey', value: state.value };
+					}
+				})
+			})
+		})
+	} as unknown as Database;
+	return { db, state };
+}
+
+/** A DB whose single-row read rejects — a transient D1 failure. */
+function throwingKeyDb(): Database {
+	return {
+		select: () => ({
+			from: () => ({ where: () => ({ get: async () => Promise.reject(new Error('D1 unavailable')) }) })
+		})
+	} as unknown as Database;
+}
+
+const VALID_UNTIL = new Date('2026-09-01T00:00:00Z');
+
+/** Make every verify in a test resolve to the same in-date key. */
+function stubValidKey() {
+	vi.mocked(verifySupporterKey).mockResolvedValue({
+		valid: true,
+		login: 'sparky',
+		tier: 2,
+		expiresAt: VALID_UNTIL
+	});
+}
+
+// The admin layout runs this on every authenticated admin page request, so the
+// cache is what keeps a D1 read + an Ed25519 verify off that path (SONA-118).
+// The danger is the mirror image of the settings cache's: a status that outlives
+// either the key it was resolved from or the day it was resolved on.
+describe('getSupporterKeyStatus — caching', () => {
+	beforeEach(() => {
+		clearSupporterKeyStatusCache();
+		vi.mocked(verifySupporterKey).mockReset();
+	});
+
+	it('serves a second resolution for the same day without re-reading or re-verifying', async () => {
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+		const now = new Date('2026-08-25T09:00:00Z');
+
+		const first = await getSupporterKeyStatus(db, now);
+		const second = await getSupporterKeyStatus(db, new Date('2026-08-25T18:30:00Z'));
+
+		expect(second).toEqual(first);
+		expect(state.reads).toBe(1);
+		expect(verifySupporterKey).toHaveBeenCalledTimes(1);
+	});
+
+	it('re-resolves once the UTC day ticks over, so the countdown keeps ticking', async () => {
+		vi.useFakeTimers();
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		// 23:00 UTC on the 25th: 7 days left of a key that expires end-of-day 31st.
+		vi.setSystemTime(new Date('2026-08-25T23:00:00Z'));
+		const before = await getSupporterKeyStatus(db, new Date('2026-08-25T23:00:00Z'));
+		expect(before).toMatchObject({ daysRemaining: 7 });
+
+		// Two hours later it is the 26th — inside the TTL by wall clock, but a new
+		// day, so the entry must not be reused.
+		vi.setSystemTime(new Date('2026-08-26T01:00:00Z'));
+		const after = await getSupporterKeyStatus(db, new Date('2026-08-26T01:00:00Z'));
+
+		expect(after).toMatchObject({ daysRemaining: 6 });
+		expect(state.reads).toBe(2);
+	});
+
+	it('re-reads after the TTL expires, so a key written by another isolate lands', async () => {
+		// clearSupporterKeyStatusCache only reaches the isolate that ran the action;
+		// every other one converges on the settings TTL.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-25T09:00:00Z'));
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+
+		expect(await getSupporterKeyStatus(db, new Date('2026-08-25T09:00:00Z'))).toBeNull();
+
+		state.value = 'head.tail';
+		// Still inside the 60s TTL → the stale "no key" answer stands.
+		vi.setSystemTime(new Date('2026-08-25T09:00:59Z'));
+		expect(await getSupporterKeyStatus(db, new Date('2026-08-25T09:00:59Z'))).toBeNull();
+
+		vi.setSystemTime(new Date('2026-08-25T09:01:01Z'));
+		expect(await getSupporterKeyStatus(db, new Date('2026-08-25T09:01:01Z'))).toMatchObject({
+			state: 'valid'
+		});
+		expect(state.reads).toBe(2);
+	});
+
+	it('clearSupporterKeyStatusCache() forces the next call to re-read', async () => {
+		// What the saveSupporterKey / removeSupporterKey actions rely on.
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+		const now = new Date('2026-08-25T09:00:00Z');
+		expect(await getSupporterKeyStatus(db, now)).toBeNull();
+
+		state.value = 'head.tail';
+		clearSupporterKeyStatusCache();
+
+		expect(await getSupporterKeyStatus(db, now)).toMatchObject({ state: 'valid' });
+		expect(state.reads).toBe(2);
+	});
+
+	it('resolves an absent key to null without verifying', async () => {
+		const { db } = fakeKeyDb(null);
+
+		expect(await getSupporterKeyStatus(db, new Date('2026-08-25T09:00:00Z'))).toBeNull();
+		expect(verifySupporterKey).not.toHaveBeenCalled();
+	});
+
+	it('propagates a D1 error and caches nothing, so the next call retries', async () => {
+		// The admin layout catches this to degrade just its notice; caching the
+		// failure would turn one transient error into a minute of missing notice.
+		stubValidKey();
+		const now = new Date('2026-08-25T09:00:00Z');
+		await expect(getSupporterKeyStatus(throwingKeyDb(), now)).rejects.toThrow('D1 unavailable');
+
+		const { db, state } = fakeKeyDb('head.tail');
+		expect(await getSupporterKeyStatus(db, now)).toMatchObject({ state: 'valid' });
+		expect(state.reads).toBe(1);
 	});
 });
 

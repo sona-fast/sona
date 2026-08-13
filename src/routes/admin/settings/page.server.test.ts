@@ -7,7 +7,13 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
-import { getRawSetting, setRawSetting, parseLines } from '$lib/server/settings';
+import {
+	getRawSetting,
+	setRawSetting,
+	parseLines,
+	getSupporterKeyStatus,
+	clearSupporterKeyStatusCache
+} from '$lib/server/settings';
 import { stickerTabEnabled, clearStickerTabCache } from '$lib/server/stickers';
 import { MAX_SONA_COLORS } from '$lib/palette-merge';
 import { DEFAULT_THEME_ID } from '$lib/themes';
@@ -923,6 +929,56 @@ describe('settings removeSupporterKey — clears the stored key', () => {
 
 		expect(result).toEqual({ supporterKeyRemoved: true });
 		expect(await getRawSetting(db, 'supporterKey')).toBe('');
+	});
+});
+
+// The admin layout's expiry notice reads a memoized status (SONA-118). Both
+// actions write the key row, so both must drop that memo — otherwise the notice
+// keeps describing the previous key for up to a minute after the operator acted.
+describe('supporter-key actions — invalidate the memoized status (SONA-118)', () => {
+	beforeEach(() => {
+		clearSupporterKeyStatusCache();
+	});
+
+	afterEach(() => {
+		// These stub verification for a whole test (not once), so undo both the
+		// standing stub and the memo they primed.
+		vi.mocked(verifySupporterKey).mockReset();
+		clearSupporterKeyStatusCache();
+	});
+
+	it('saveSupporterKey makes the next status resolution see the new key', async () => {
+		const { db, platform } = makeDb();
+		const now = new Date();
+		// Prime the memo while no key is stored.
+		expect(await getSupporterKeyStatus(db, now)).toBeNull();
+
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date(now.getTime() + 30 * 86_400_000)
+		});
+		await actions.saveSupporterKey(saveSupporterKeyEvent(platform, 'head.tail'));
+
+		expect(await getSupporterKeyStatus(db, now)).toMatchObject({ state: 'valid' });
+	});
+
+	it('removeSupporterKey makes the next status resolution see no key', async () => {
+		const { db, platform } = makeDb();
+		const now = new Date();
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date(now.getTime() + 30 * 86_400_000)
+		});
+		expect(await getSupporterKeyStatus(db, now)).toMatchObject({ state: 'valid' });
+
+		await actions.removeSupporterKey(removeSupporterKeyEvent(platform));
+
+		expect(await getSupporterKeyStatus(db, now)).toBeNull();
 	});
 });
 

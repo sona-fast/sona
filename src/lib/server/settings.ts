@@ -2,6 +2,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { siteSettings } from './db/schema';
 import { APP_NAME } from '$lib/config';
 import { DEFAULT_GALLERY_SORT, isValidGallerySort, type GallerySort } from '$lib/gallery';
+import { resolveSupporterKeyStatus, type SupporterKeyStatus } from './supporter-key';
 import type { Database } from './db';
 
 export type StorageProviderId = 'uploadthing' | 'r2';
@@ -382,6 +383,58 @@ export async function setRawSetting(db: Database, key: string, value: string): P
 	} else {
 		await db.insert(siteSettings).values({ key, value });
 	}
+}
+
+// Resolved supporter-key status, memoized per isolate next to the settings cache
+// above (SONA-118). The admin layout load runs this on every authenticated admin
+// page request; uncached it costs a D1 read of the `supporterKey` row plus an
+// Ed25519 verify each time.
+//
+// The entry is keyed on the UTC day the status was resolved for, because that is
+// what `daysRemaining` is a function of: `exp` is end-of-day UTC, so the
+// countdown holds steady all day and ticks over at midnight UTC. Keying on the
+// caller's `now` (rather than only on the wall clock) also keeps a caller that
+// passes an explicit date from reading a status resolved for another day.
+//
+// SETTINGS_TTL_MS bounds a different staleness: the key row can be written by
+// another isolate, whose `clearSupporterKeyStatusCache` this isolate never sees.
+// Without the TTL an operator who saved or removed a key could keep seeing the
+// old expiry notice here until midnight UTC.
+let supporterKeyStatusCache:
+	| { day: string; value: SupporterKeyStatus | null; expires: number }
+	| null = null;
+
+export function clearSupporterKeyStatusCache() {
+	supporterKeyStatusCache = null;
+}
+
+/** The UTC calendar day (YYYY-MM-DD) a status was resolved for. */
+function utcDay(now: Date): string {
+	return now.toISOString().slice(0, 10);
+}
+
+/**
+ * Read and verify the stored supporter key, memoized as described above.
+ *
+ * D1 errors propagate (like `getRawSetting`, which this wraps) and are not
+ * cached, so a caller that must fail closed still can and a transient failure
+ * doesn't stick. The admin layout catches them to degrade just its notice; the
+ * settings page deliberately does NOT use this — it reads and verifies loudly
+ * on every request so a D1 error there can never render as "no key".
+ */
+export async function getSupporterKeyStatus(
+	db: Database,
+	now: Date
+): Promise<SupporterKeyStatus | null> {
+	const day = utcDay(now);
+	const cached = supporterKeyStatusCache;
+	if (cached && cached.day === day && cached.expires > Date.now()) {
+		return cached.value;
+	}
+	const token = await getRawSetting(db, 'supporterKey');
+	const value = await resolveSupporterKeyStatus(token ?? '', now);
+	supporterKeyStatusCache = { day, value, expires: Date.now() + SETTINGS_TTL_MS };
+	return value;
 }
 
 export async function saveSettings(db: Database, settings: Partial<SiteSettings>) {

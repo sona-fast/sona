@@ -1,8 +1,8 @@
 import { getDb } from '$lib/server/db';
-import { getSettings, getRawSetting } from '$lib/server/settings';
+import { getSettings, getSupporterKeyStatus } from '$lib/server/settings';
 import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
 import { isObservabilityEnabled } from '$lib/server/metrics';
-import { resolveSupporterKeyStatus, EXPIRY_FINAL_DAYS } from '$lib/server/supporter-key';
+import { EXPIRY_FINAL_DAYS } from '$lib/server/supporter-key';
 import { APP_NAME } from '$lib/config';
 import type { LayoutServerLoad } from './$types';
 
@@ -28,13 +28,14 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 		// the authenticated session: this load also runs for the auth-exempt
 		// routes (/admin/login etc., see hooks.server.ts), which must not spend a
 		// D1 read + Ed25519 verify per anonymous hit nor leak key metadata.
-		// getRawSetting propagates D1 errors (getSettings self-catches); a failed
-		// read must degrade only the notice, not drop the chrome to EMPTY.
-		const [renv, supporterToken] = await Promise.all([
+		// getSupporterKeyStatus propagates D1 errors (getSettings self-catches); a
+		// failed read must degrade only the notice, not drop the chrome to EMPTY.
+		// It memoizes the resolved status per UTC day (SONA-118), so neither the
+		// read nor the verify is paid on every admin page request.
+		const [renv, supporterKey] = await Promise.all([
 			resolveRegistryEnv(db, platform.env),
-			locals.admin ? getRawSetting(db, 'supporterKey').catch(() => null) : null
+			locals.admin ? getSupporterKeyStatus(db, new Date()).catch(() => null) : null
 		]);
-		const supporterKey = await resolveSupporterKeyStatus(supporterToken ?? '', new Date());
 		// Dismissal is a cookie keyed on validUntil PLUS a phase ('early' = days
 		// 7..4, 'final' = last 3 days): dismissing during the early phase re-shows
 		// the notice once the final days start, and a re-minted key (new

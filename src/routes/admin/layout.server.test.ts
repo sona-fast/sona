@@ -1,10 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
-import { setRawSetting, getRawSetting, clearSettingsCache } from '$lib/server/settings';
+import {
+	setRawSetting,
+	getSupporterKeyStatus,
+	clearSettingsCache,
+	clearSupporterKeyStatusCache
+} from '$lib/server/settings';
 import { verifySupporterKey } from '$lib/server/supporter-key';
 import { APP_NAME } from '$lib/config';
 import { load } from './+layout.server';
@@ -21,15 +26,21 @@ vi.mock('$lib/server/supporter-key', async (importActual) =>
 	)
 );
 
-// getRawSetting is wrapped (default impl = the real one, so every other test is
-// unaffected) so the D1-failure test below can make JUST the supporter-key read
-// reject. mockReset() restores the wrapped original.
+// getSupporterKeyStatus is wrapped (default impl = the real one, so every other
+// test is unaffected) so the D1-failure test below can make JUST the
+// supporter-key read reject. mockReset() restores the wrapped original.
 vi.mock('$lib/server/settings', async (importActual) => {
 	const actual = await (importActual as () => Promise<typeof import('$lib/server/settings')>)();
-	return { ...actual, getRawSetting: vi.fn(actual.getRawSetting) };
+	return { ...actual, getSupporterKeyStatus: vi.fn(actual.getSupporterKeyStatus) };
 });
 
 const DAY_MS = 86_400_000;
+
+// The resolved status is memoized per isolate (SONA-118). Each test builds its
+// own database, so the cache from the previous one would be a cross-test leak.
+beforeEach(() => {
+	clearSupporterKeyStatusCache();
+});
 
 function makeLoadDb() {
 	const sqlite = new Database(':memory:');
@@ -136,17 +147,13 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 	});
 
 	it('degrades only the notice when the supporter-key read itself fails', async () => {
-		// getRawSetting propagates D1 errors (getSettings self-catches) — a transient
-		// failure on that one row must yield a null notice, never reject the shared
-		// Promise.all and drop the whole layout to EMPTY (siteName, flags intact).
+		// getSupporterKeyStatus propagates D1 errors (getSettings self-catches) — a
+		// transient failure on that one row must yield a null notice, never reject the
+		// shared Promise.all and drop the whole layout to EMPTY (siteName, flags intact).
 		const { db, platform } = makeLoadDb();
 		await setRawSetting(db, 'siteName', 'Sparky Site');
 		clearSettingsCache();
-		const real = vi.mocked(getRawSetting).getMockImplementation()!;
-		vi.mocked(getRawSetting).mockImplementation(async (dbArg, key) => {
-			if (key === 'supporterKey') throw new Error('D1 unavailable');
-			return real(dbArg, key);
-		});
+		vi.mocked(getSupporterKeyStatus).mockRejectedValueOnce(new Error('D1 unavailable'));
 		try {
 			const result = (await load(loadEvent(platform))) as NoticeResult & Record<string, unknown>;
 
@@ -157,14 +164,18 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 				observabilityEnabled: false
 			});
 		} finally {
-			// Restores the wrapped original implementation for the other tests.
-			vi.mocked(getRawSetting).mockReset();
+			// mockRejectedValueOnce is consumed by the load above; clear any leftover
+			// queued behaviour so the wrapped original serves the other tests.
+			vi.mocked(getSupporterKeyStatus).mockClear();
 		}
 	});
 });
 
 describe('admin layout load — cookie dismissal with phase re-warn (SONA-114)', () => {
 	async function loadWithNotice(expiresAt: Date, cookie?: string) {
+		// Each call is a fresh world (new database, new verification result), so it
+		// must not inherit the status memoized by the previous one.
+		clearSupporterKeyStatusCache();
 		const { db, platform } = makeLoadDb();
 		await setRawSetting(db, 'supporterKey', 'head.tail');
 		vi.mocked(verifySupporterKey).mockResolvedValueOnce({

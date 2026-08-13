@@ -8,6 +8,7 @@ import {
 	getRawSetting,
 	setRawSetting,
 	clearSettingsCache,
+	clearSupporterKeyStatusCache,
 	parseSonaColors
 } from '$lib/server/settings';
 import { deleteOrphansAll, collectReferencedUrls } from '$lib/server/storage';
@@ -539,12 +540,16 @@ export const actions = {
 			return fail(400, { supporterKeyError: 'invalid', supporterKeyExpiredDate: undefined });
 		}
 		await setRawSetting(db, 'supporterKey', token);
+		// The admin layout's expiry notice reads a memoized status — invalidate it
+		// so this isolate reflects the new key on the very next request.
+		clearSupporterKeyStatusCache();
 		return { supporterKeySaved: true };
 	},
 
 	removeSupporterKey: async ({ platform }) => {
 		const db = getDb(platform!.env.DB);
 		await setRawSetting(db, 'supporterKey', '');
+		clearSupporterKeyStatusCache();
 		return { supporterKeyRemoved: true };
 	},
 
