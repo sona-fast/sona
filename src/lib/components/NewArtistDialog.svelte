@@ -4,7 +4,8 @@
 	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { shouldSearch, resultToPrefill, type RegResult } from '$lib/registry-search';
-	import { classifyQuery } from '$lib/handle-classify';
+	import { classifyQuery, SOCIAL_KEY_TO_PLATFORM } from '$lib/handle-classify';
+	import { socialHandle } from '$lib/social-label';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import BlueskyIcon from '$lib/components/icons/BlueskyIcon.svelte';
@@ -136,13 +137,16 @@
 		}
 	});
 
-	/** "@handle" for a result row, derived from its first social URL. */
+	/** "@handle" for a result row, derived from its first social URL. Empty when
+	 *  the row carries no social we can read a handle out of — unlike the public
+	 *  pages, a row with no handle shows nothing rather than a platform name,
+	 *  since the artist's name is already the line above it. */
 	function resultHandle(r: RegResult): string {
-		for (const v of Object.values(r.socials ?? {})) {
-			if (typeof v !== 'string' || !v) continue;
-			const seg = v.replace(/\/+$/, '').split('/').pop() ?? '';
-			const handle = seg.replace(/^@+/, '');
-			if (handle) return '@' + handle;
+		for (const [key, v] of Object.entries(r.socials ?? {})) {
+			const platform = SOCIAL_KEY_TO_PLATFORM[key];
+			if (!platform || typeof v !== 'string') continue;
+			const handle = socialHandle(platform, v);
+			if (handle) return `@${handle}`;
 		}
 		return '';
 	}

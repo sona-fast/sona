@@ -8,13 +8,14 @@
 
 import { sanitizeUrl, stripControlChars } from './validate';
 import {
-	HOST_PREFIXES,
+	SOCIAL_HOST_PREFIXES,
 	SOCIAL_KEY_TO_PLATFORM,
 	normalizeHandle,
-	type Platform
+	type Platform,
+	type SocialPlatform
 } from '../handle-classify';
 
-export { SOCIAL_KEY_TO_PLATFORM, normalizeHandle, type Platform };
+export { SOCIAL_KEY_TO_PLATFORM, normalizeHandle, type Platform, type SocialPlatform };
 
 export interface NormalizedHandle {
 	platform: Platform;
@@ -40,13 +41,6 @@ export function handlesOverlap(a: Record<string, unknown>, b: Record<string, unk
 	return socialsToHandles(a).some((h) => set.has(`${h.platform} ${h.handleNorm}`));
 }
 
-/**
- * Platforms we can build a canonical profile URL for. Adds `furtrack` to the
- * registry-matching {@link Platform} set (Furtrack plays no part in registry
- * handle-matching, so it stays out of SOCIAL_KEY_TO_PLATFORM / HOST_PREFIXES).
- */
-export type SocialPlatform = Platform | 'furtrack';
-
 /** Canonical profile-URL prefix, used to build a URL from a bare handle. */
 const PROFILE_URL_PREFIX: Record<SocialPlatform, string> = {
 	twitter: 'https://twitter.com/',
@@ -57,12 +51,6 @@ const PROFILE_URL_PREFIX: Record<SocialPlatform, string> = {
 	deviantart: 'https://www.deviantart.com/',
 	patreon: 'https://www.patreon.com/',
 	instagram: 'https://www.instagram.com/'
-};
-
-/** Host fragments that mark input as "already a profile URL" for a platform. */
-const SOCIAL_HOST_PREFIXES: Record<SocialPlatform, string[]> = {
-	...HOST_PREFIXES,
-	furtrack: ['furtrack.com/']
 };
 
 /**

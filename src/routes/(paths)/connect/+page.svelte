@@ -10,27 +10,24 @@
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
+	import { SOCIAL_PLATFORM_NAMES, socialLabel } from '$lib/social-label';
 
 	let { data } = $props();
 
-	function handle(url: string, at = true): string {
-		try {
-			const u = new URL(url);
-			const seg = u.pathname.split('/').filter(Boolean).pop() ?? u.hostname;
-			return (at ? '@' : '') + seg;
-		} catch {
-			return url;
-		}
-	}
-
 	const socials = $derived(
 		[
-			{ icon: BlueskyIcon, title: 'Bluesky', url: data.settings.blueskyUrl, at: true },
-			{ icon: TelegramIcon, title: 'Telegram', url: data.settings.telegramUrl, at: true },
-			{ icon: FurAffinityIcon, title: 'FurAffinity', url: data.settings.furAffinityUrl, at: false },
-			{ icon: TwitterIcon, title: 'Twitter', url: data.settings.twitterUrl, at: true },
-			{ icon: InstagramIcon, title: 'Instagram', url: data.settings.instagramUrl, at: true }
-		].filter((s) => s.url)
+			{ icon: BlueskyIcon, platform: 'bluesky' as const, url: data.settings.blueskyUrl },
+			{ icon: TelegramIcon, platform: 'telegram' as const, url: data.settings.telegramUrl },
+			{ icon: FurAffinityIcon, platform: 'furaffinity' as const, url: data.settings.furAffinityUrl },
+			{ icon: TwitterIcon, platform: 'twitter' as const, url: data.settings.twitterUrl },
+			{ icon: InstagramIcon, platform: 'instagram' as const, url: data.settings.instagramUrl }
+		]
+			.filter((s) => s.url)
+			.map((s) => ({
+				...s,
+				title: SOCIAL_PLATFORM_NAMES[s.platform],
+				subtitle: socialLabel(s.platform, s.url)
+			}))
 	);
 
 	function weekday(d: string): string {
@@ -63,7 +60,7 @@
 	<h2 class="section-label">{m.connect_online()}</h2>
 	<div class="stack">
 		{#each socials as s}
-			<LinkRow icon={s.icon} title={s.title} subtitle={handle(s.url, s.at)} href={s.url} />
+			<LinkRow icon={s.icon} title={s.title} subtitle={s.subtitle} href={s.url} />
 		{/each}
 	</div>
 </section>

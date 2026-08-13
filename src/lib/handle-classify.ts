@@ -25,6 +25,19 @@ export const HOST_PREFIXES: Record<Platform, string[]> = {
 	instagram: ['instagram.com/']
 };
 
+/**
+ * Platforms we render or build profile URLs for. Adds `furtrack` to the
+ * registry-matching {@link Platform} set (FurTrack plays no part in registry
+ * handle-matching, so it stays out of SOCIAL_KEY_TO_PLATFORM / HOST_PREFIXES).
+ */
+export type SocialPlatform = Platform | 'furtrack';
+
+/** {@link HOST_PREFIXES} widened to every platform we display a handle for. */
+export const SOCIAL_HOST_PREFIXES: Record<SocialPlatform, string[]> = {
+	...HOST_PREFIXES,
+	furtrack: ['furtrack.com/user/']
+};
+
 /** Maps the artist *Url column / payload keys to platforms. */
 export const SOCIAL_KEY_TO_PLATFORM: Record<string, Platform> = {
 	twitterUrl: 'twitter',

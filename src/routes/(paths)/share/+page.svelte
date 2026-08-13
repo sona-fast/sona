@@ -6,19 +6,11 @@
 	import Meta from '$lib/components/Meta.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
+	import { socialLabel } from '$lib/social-label';
 
 	let { data } = $props();
 
-	function handle(url: string): string {
-		try {
-			const u = new URL(url);
-			return '@' + (u.pathname.split('/').filter(Boolean).pop() ?? u.hostname);
-		} catch {
-			return url;
-		}
-	}
-
-	const tgHandle = $derived(handle(data.settings.telegramUrl));
+	const tgHandle = $derived(socialLabel('telegram', data.settings.telegramUrl));
 
 	// The persona's name for the "photos of {name}" copy.
 	const personaName = $derived(data.settings.ownerName || data.settings.siteName);

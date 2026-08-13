@@ -32,19 +32,26 @@ describe('/about social chips carry their platform name', () => {
 		]);
 	});
 
-	it('platform names are distinct, so no two chips can collide', () => {
+	it('platform keys are distinct, so no two chips can collide', () => {
 		const platforms = entries.map((e) => e.platform);
 		expect(new Set(platforms).size).toBe(platforms.length);
 	});
 
-	it('renders the platform as visually-hidden text inside the chip', () => {
-		expect(source).toMatch(/<span class="sr-only">\{link\.platform\}<\/span>/);
+	it('renders the platform name as visually-hidden text inside the chip', () => {
+		expect(source).toMatch(/<span class="sr-only">\{link\.name\}<\/span>/);
 		// The rule that actually hides it is global, in src/app.css.
 	});
 
 	it('does not double the name when the handle could not be derived', () => {
-		// atHandleFromUrl/handleFromUrl fall back to the platform name for a
-		// pathless URL, which would otherwise announce as "Twitter Twitter".
+		// socialLabel falls back to the platform name for a pathless URL, which
+		// would otherwise announce as "Twitter Twitter".
 		expect(source).toMatch(/\{#if link\.hasHandle\}/);
+	});
+
+	it('takes its labels from the shared helper, not a local one', () => {
+		// SONA-128: every surface that renders a social handle goes through
+		// $lib/social-label, so /about, /connect and /share cannot drift apart.
+		expect(source).toMatch(/from '\$lib\/social-label'/);
+		expect(source).not.toMatch(/function handle\s*\(/);
 	});
 });

@@ -1,51 +1,116 @@
-// Social-link label helpers for the /about page chips.
+// The one way a social account renders as text, everywhere in the app: /about's
+// chips, /connect's and /share's link rows, and the registry-search results in
+// NewArtistDialog. Three rules, applied uniformly (SONA-128):
 //
-// A profile URL's last path segment is the account handle for every platform we
-// render (twitter.com/<handle>, instagram.com/<handle>, furaffinity.net/user/
-// <handle>, …), so /about shows that segment rather than the platform name.
-// When no handle can be derived (pathless URL, unparseable string, unset
-// setting) the chip falls back to the platform name — bare, never "@Twitter".
+//  1. Every derived handle is shown with an @ prefix, on every platform and
+//     every surface. Bare handles on some platforms and @handles on others was
+//     the inconsistency this module retires.
+//  2. A URL with no handle in it (a bare `https://instagram.com`, an unset
+//     setting, an unparseable string) renders the platform name — "Instagram",
+//     never a hostname dressed up as a handle.
+//  3. The handle is the FIRST path segment after the platform's profile prefix,
+//     not the last, so deep links resolve to the account they belong to:
+//     `instagram.com/taro/reels/` → `@taro`, not `@reels`.
 //
-// NOTE: /connect's local handle() deliberately behaves differently (it falls
-// back to the URL's hostname, not a platform name) and is not merged into this
-// module — do not "unify" them.
+// Pure and client-safe: no $lib/server imports, so Svelte components can bundle
+// it. The prefix table is shared with handle-normalize.ts, which is what keeps
+// display agreeing with registry matching about where a handle starts.
 
-/**
- * The last non-empty path segment of `url`, or null when none can be derived
- * (undefined/unparseable URL, or a pathless URL like https://twitter.com/).
- *
- * Returning a null sentinel — rather than the fallback string — lets callers
- * distinguish "no handle" from a real handle that happens to equal the
- * platform name (e.g. instagram.com/Instagram).
- */
-export function handleSegment(url: string | undefined): string | null {
-	if (!url) return null;
+import { SOCIAL_HOST_PREFIXES, type SocialPlatform } from './handle-classify';
+
+export type { SocialPlatform };
+
+/** How each platform's name is written in the UI, including its own casing. */
+export const SOCIAL_PLATFORM_NAMES: Record<SocialPlatform, string> = {
+	twitter: 'Twitter',
+	bluesky: 'Bluesky',
+	telegram: 'Telegram',
+	furaffinity: 'FurAffinity',
+	furtrack: 'FurTrack',
+	deviantart: 'DeviantArt',
+	patreon: 'Patreon',
+	instagram: 'Instagram'
+};
+
+/** Percent-decoded, or the raw segment when the escapes are malformed. Non-ASCII
+ *  handles arrive encoded in a pathname and should render as themselves. */
+function decodeSegment(segment: string): string {
 	try {
-		const segment = new URL(url).pathname.split('/').filter(Boolean).pop() ?? null;
-		if (segment === null) return null;
-		// Non-ASCII handles arrive percent-encoded in the pathname; decode so the
-		// chip shows the handle, not its escapes. Malformed escapes keep the raw
-		// segment rather than throwing.
-		try {
-			return decodeURIComponent(segment);
-		} catch {
-			return segment;
-		}
+		return decodeURIComponent(segment);
 	} catch {
-		return null;
+		return segment;
 	}
 }
 
-/** The derived handle, or `fallback` (the platform name) when none exists. */
-export function handleFromUrl(url: string | undefined, fallback: string): string {
-	return handleSegment(url) ?? fallback;
+/**
+ * The account handle in `value`, or null when none can be derived.
+ *
+ * `value` is a stored social setting: normally a profile URL, but a bare handle
+ * (`taro`, `@taro`) is accepted too, since registry payloads carry those.
+ *
+ * Returning a null sentinel — rather than the platform name — lets callers tell
+ * "no handle" apart from a real handle that happens to equal the platform name
+ * (instagram.com/Instagram is somebody's account).
+ */
+export function socialHandle(
+	platform: SocialPlatform,
+	value: string | null | undefined
+): string | null {
+	if (!value) return null;
+	const trimmed = value.trim();
+	if (!trimmed) return null;
+
+	// A bare handle: no scheme and no path to walk. Anything containing a slash
+	// goes down the URL path below, so `taro/photos` is not mistaken for one.
+	if (!/[:/]/.test(trimmed)) {
+		const bare = trimmed.replace(/^@+/, '');
+		// Same charset normalizeSocialUrl accepts as a handle (dots included, for
+		// Bluesky). Junk that is neither a URL nor a username — "not a url" — is
+		// no handle, and rule 2 sends it to the platform name.
+		if (!bare || !/^[A-Za-z0-9._-]+$/.test(bare)) return null;
+		// …unless it is the platform's own naked domain. `instagram.com` is a
+		// scheme-less pathless URL, and rule 2 says that renders "Instagram".
+		const domains = (SOCIAL_HOST_PREFIXES[platform] ?? []).map((p) => p.replace(/\/.*$/, ''));
+		if (domains.includes(bare.toLowerCase().replace(/^www\./, ''))) return null;
+		return bare;
+	}
+
+	let url: URL;
+	try {
+		url = new URL(trimmed);
+	} catch {
+		return null;
+	}
+
+	// Match against host+path exactly as normalizeHandle does — an exact prefix
+	// match, longest-listed-first within a platform (patreon.com/c/ before
+	// patreon.com/), so the profile prefix is consumed and the handle is what
+	// follows it: furaffinity.net/user/taro → taro, bsky.app/profile/x → x.
+	const host = url.hostname.toLowerCase().replace(/^www\./, '');
+	const hostPath = host + url.pathname;
+	const lower = hostPath.toLowerCase();
+
+	// No prefix matched (a mirror domain, or a platform with no prefix listed):
+	// fall through to the path itself, whose first segment is the handle.
+	let rest = url.pathname;
+	for (const prefix of SOCIAL_HOST_PREFIXES[platform] ?? []) {
+		if (lower.startsWith(prefix)) {
+			rest = hostPath.slice(prefix.length);
+			break;
+		}
+	}
+
+	const segment = rest.split('/').filter(Boolean)[0];
+	if (!segment) return null;
+	const handle = decodeSegment(segment).replace(/^@+/, '');
+	return handle || null;
 }
 
 /**
- * The derived handle prefixed with @, or the bare `fallback` when none exists.
- * A real handle always gets the @ — even one equal to the platform name.
+ * What a social account reads as on screen: `@handle`, or the bare platform
+ * name when no handle could be derived.
  */
-export function atHandleFromUrl(url: string | undefined, fallback: string): string {
-	const handle = handleSegment(url);
-	return handle ? `@${handle}` : fallback;
+export function socialLabel(platform: SocialPlatform, value: string | null | undefined): string {
+	const handle = socialHandle(platform, value);
+	return handle ? `@${handle}` : SOCIAL_PLATFORM_NAMES[platform];
 }
