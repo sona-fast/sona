@@ -8,30 +8,42 @@
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
 	import * as m from '$lib/paraglide/messages';
 	import { onMount } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
 
 	let { children, data } = $props();
+
+	// Routes that render bare (no sidebar/chrome) because nobody is signed in yet
+	// — hooks.server.ts exempts the same set from the admin session check.
+	const AUTH_EXEMPT = ['/admin/login', '/admin/setup', '/admin/forgot', '/admin/reset'];
 
 	const theme = getTheme();
 
 	// Publish the operator's timezone to the server (SONA-119). The supporter-key
 	// expiry date and the countdown beside it are rendered server-side so SSR and
-	// hydration agree; the server can only read them in the operator's own zone if
-	// we tell it which one that is. Written once — a changed zone (travel, a fixed
-	// clock) rewrites it and reloads, so the dates follow the operator.
+	// hydration can't disagree; the server can only read them in the operator's own
+	// zone if we tell it which one that is. Scoped like the dismissal cookie below
+	// — path=/admin, and only from a signed-in page — so it never rides a public
+	// request and the privacy policy's "owner only" cookie clause still holds.
+	//
+	// Deliberately no invalidateAll(): re-running the loads mid-hydration would
+	// swap `data` under the settings page's form-resync effect and wipe whatever
+	// the operator had already typed. The zone lands on the next navigation
+	// instead, so at worst the very first signed-in page view of a browser reads
+	// its dates in UTC.
 	onMount(() => {
+		if (AUTH_EXEMPT.includes($page.url.pathname)) return;
 		const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		if (!zone || zone === readTzCookie()) return;
 		const secure = location.protocol === 'https:' ? '; Secure' : '';
-		document.cookie = `tz=${encodeURIComponent(zone)}; path=/; SameSite=Lax; max-age=31536000${secure}`;
-		// The page it was rendered with used UTC, so re-run the loads to pick the
-		// operator's dates up now instead of on their next navigation.
-		invalidateAll();
+		document.cookie = `tz=${encodeURIComponent(zone)}; path=/admin; SameSite=Lax; max-age=31536000${secure}`;
 	});
 
+	// The LAST match wins: a domain-scoped tz from a sibling subdomain sorts ahead
+	// of our host-only one, and reading that would make the guard above never
+	// match and the operator's own zone never stick.
 	function readTzCookie(): string | null {
-		const match = /(?:^|;\s*)tz=([^;]*)/.exec(document.cookie);
-		return match ? decodeURIComponent(match[1]) : null;
+		const matches = [...document.cookie.matchAll(/(?:^|;\s*)tz=([^;]*)/g)];
+		const last = matches.at(-1);
+		return last ? decodeURIComponent(last[1]) : null;
 	}
 
 	// Supporter-key expiry notice (SONA-114): shown on every admin page while
@@ -80,7 +92,7 @@
 
 </script>
 
-{#if ['/admin/login', '/admin/setup', '/admin/forgot', '/admin/reset'].includes($page.url.pathname)}
+{#if AUTH_EXEMPT.includes($page.url.pathname)}
 	{@render children()}
 {:else}
 	<div class="admin-layout">

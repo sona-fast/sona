@@ -80,4 +80,49 @@ test.describe('admin settings supporter key', () => {
 		await expect(fieldError(page)).toHaveText(/That key expired .* re-mint at sona\.fast\/supporter-key\./);
 		await expect(keyInput(page)).toHaveAttribute('aria-invalid', 'true');
 	});
+
+	test('the expiry date is dated in UTC while no tz cookie has been written', async ({ page }) => {
+		// The other half of the pair below: this browser reports UTC, so the token's
+		// last covered day reads 2025.07.16.
+		await keyInput(page).fill(EXPIRED_TOKEN);
+		await saveButton(page).click();
+
+		await expect(fieldError(page)).toContainText('2025.07.16');
+	});
+});
+
+// SONA-119: the operator's zone reaches the server through a cookie the admin
+// layout writes on mount, and the server renders every expiry date in it. This
+// drives the whole round trip in a real browser — the unit tests only ever feed
+// the server a hand-written cookie, so nothing else would catch the client half
+// silently breaking (wrong cookie name, wrong path, a throwing Intl call) and
+// leaving every operator on UTC, which is the bug SONA-119 exists to fix.
+//
+// The expired token's last covered instant is 2025-07-16T23:59:59Z: still the
+// 16th in UTC, already the 17th in Tokyo. One date tells the two apart.
+test.describe('admin settings supporter key — viewer timezone', () => {
+	test.use({ timezoneId: 'Asia/Tokyo' });
+
+	test('the browser publishes its zone and the server dates the key in it', async ({
+		page,
+		context
+	}) => {
+		await login(page);
+		await page.goto('/admin/settings');
+		await openAccountTab(page);
+
+		// Written on mount, scoped to the admin area — never to public pages. The
+		// raw value is URI-encoded (the slash in an IANA zone); SvelteKit's
+		// cookies.get decodes it server-side, which the date below then proves.
+		await expect(async () => {
+			const tz = (await context.cookies()).find((c) => c.name === 'tz');
+			expect(tz).toMatchObject({ value: 'Asia%2FTokyo', path: '/admin' });
+		}).toPass();
+
+		await keyInput(page).fill(EXPIRED_TOKEN);
+		await saveButton(page).click();
+
+		// The server read the cookie: Tokyo's calendar day, not UTC's.
+		await expect(fieldError(page)).toContainText('2025.07.17');
+	});
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -82,6 +82,10 @@ async function loadWithZone(expiresAt: Date, tz?: string) {
 	return (await load(loadEvent(platform, { tz }))) as NoticeResult;
 }
 
+afterEach(() => {
+	vi.useRealTimers();
+});
+
 describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 	it('is null with no stored key', async () => {
 		const { platform } = makeLoadDb();
@@ -137,10 +141,16 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 	// BOTH the date and the count are read in it. Computing them in the browser
 	// instead would make SSR print the UTC answer and hydration overwrite it.
 	it('reads the expiry date and the countdown in the tz cookie zone', async () => {
+		// Pinned clock: the load reads new Date(), and whether Tokyo is already on
+		// the next UTC calendar day is exactly what decides the numbers below. At
+		// 12:00 UTC it is not (21:00 JST, same date), so the offset is the key's
+		// own — from 15:00 UTC the two zones would agree and this would fail.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-13T12:00:00Z'));
 		// exp = midnight UTC, so its last covered instant (23:59:59Z) is already
 		// the next calendar day anywhere east of UTC. Five days out so both zones
 		// sit inside the warn window (which is itself now judged in that zone).
-		const expiresAt = expInDays(5);
+		const expiresAt = new Date('2026-08-18T00:00:00Z');
 		const utc = await loadWithZone(expiresAt);
 		const tokyo = await loadWithZone(expiresAt, 'Asia/Tokyo');
 
@@ -149,9 +159,8 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 		expect(dayOf(tokyo)).not.toBe(dayOf(utc));
 		// …and the count moved with it, so the pair still agrees: Tokyo's last
 		// covered day is one calendar day further out than UTC's.
-		expect(tokyo.supporterKeyNotice?.daysRemaining).toBe(
-			(utc.supporterKeyNotice?.daysRemaining ?? 0) + 1
-		);
+		expect(utc.supporterKeyNotice?.daysRemaining).toBe(5);
+		expect(tokyo.supporterKeyNotice?.daysRemaining).toBe(6);
 	});
 
 	it('falls back to UTC on a hostile tz cookie instead of failing the load', async () => {

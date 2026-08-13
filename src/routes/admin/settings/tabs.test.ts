@@ -47,7 +47,11 @@ describe('settings tab ids do not drift from the component', () => {
 	});
 
 	it('tags every section with a known tab id', () => {
-		const tagged = [...source.matchAll(/\bdata-tab="([a-z]+)"/g)].map((m) => m[1]);
+		// Split on whitespace: the hide rules use [data-tab~='x'], so a section is
+		// allowed to belong to several tabs and each token has to be a real id.
+		const tagged = [...source.matchAll(/\bdata-tab="([a-z ]+)"/g)].flatMap((m) =>
+			m[1].trim().split(/\s+/)
+		);
 		expect(tagged.length).toBeGreaterThan(0);
 		expect([...new Set(tagged)].filter((id) => !SETTINGS_TAB_IDS.includes(id as never))).toEqual([]);
 	});

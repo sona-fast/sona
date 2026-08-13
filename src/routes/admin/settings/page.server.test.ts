@@ -848,12 +848,12 @@ describe('settings saveSite — themeId/landingLayout present-branch', () => {
 	});
 });
 
-function saveSupporterKeyEvent(platform: App.Platform, key: string) {
+function saveSupporterKeyEvent(platform: App.Platform, key: string, tz?: string) {
 	const body = new FormData();
 	body.append('supporterKey', key);
 	return {
 		platform,
-		cookies: cookieJar(),
+		cookies: cookieJar(tz),
 		request: new Request('https://taro.surf/admin/settings?/saveSupporterKey', { method: 'POST', body })
 	} as never;
 }
@@ -883,6 +883,25 @@ describe('settings saveSupporterKey — store only verified, in-date keys (SONA-
 
 		expect(result).toEqual({ supporterKeySaved: true });
 		expect(await getRawSetting(db, 'supporterKey')).toBe('head.tail');
+	});
+
+	it('dates the expired-paste error in the tz cookie zone', async () => {
+		const { platform } = makeDb();
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+			valid: false,
+			reason: 'expired',
+			login: 'sparky',
+			tier: 1,
+			expiresAt: new Date('2026-08-18T00:00:00Z')
+		});
+
+		const result = await actions.saveSupporterKey(
+			saveSupporterKeyEvent(platform, 'head.tail', 'Asia/Tokyo')
+		);
+
+		expect(result).toMatchObject({
+			data: { supporterKeyError: 'expired', supporterKeyExpiredDate: '2026.08.18' }
+		});
 	});
 
 	it('rejects an unverifiable key with the invalid error and stores nothing', async () => {
@@ -1044,6 +1063,33 @@ describe('settings load — expiring-soon boundary (SONA-114)', () => {
 	it('reports 1 day remaining on the key\'s last covered day', async () => {
 		const result = await loadWithExpiry(expInDays(1));
 		expect(result.supporterKey).toMatchObject({ state: 'valid', daysRemaining: 1, expiringSoon: true });
+	});
+
+	// SONA-119: the load dates the card in the operator's zone, so the date and
+	// the countdown next to it are read off one instant in one zone. Without the
+	// cookie reaching resolveSupporterKeyStatus this stays on UTC for everyone.
+	it('dates the card in the tz cookie zone', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			// Last covered instant 2026-08-17T23:59:59Z — the 17th in UTC, already
+			// the 18th anywhere east of it.
+			expiresAt: new Date('2026-08-18T00:00:00Z')
+		});
+
+		const utc = (await load(loadEvent(platform))) as unknown as {
+			supporterKey: { validUntil: string };
+		};
+		const tokyo = (await load(loadEvent(platform, 'Asia/Tokyo'))) as unknown as {
+			supporterKey: { validUntil: string };
+		};
+
+		expect(utc.supporterKey.validUntil).toBe('2026.08.17');
+		expect(tokyo.supporterKey.validUntil).toBe('2026.08.18');
+		vi.mocked(verifySupporterKey).mockReset();
 	});
 
 	it('an expired key is expired, never expiring-soon', async () => {
