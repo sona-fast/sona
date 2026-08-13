@@ -85,6 +85,18 @@ describe('supporter-key expiry dates under real workerd', () => {
 		expect(la.daysRemaining).toBe(5);
 	});
 
+	it('knows a zone added in a recent tzdata release', async () => {
+		// Europe/Kyiv landed in tzdata 2022b. A runtime carrying an older database
+		// only knows Europe/Kiev, and the miss looks exactly like success: the
+		// fallback returns UTC and every date stays plausible. Browsers report the
+		// new name, so this is the realistic version of the silent failure the rest
+		// of this file guards — a junk zone is the easy case.
+		const kyiv = await resolve('Europe/Kyiv');
+
+		expect(kyiv.zone).toBe('Europe/Kyiv');
+		expect(kyiv.validUntil).toBe('2026.08.18');
+	});
+
 	it('agrees with UTC when the zone is UTC', async () => {
 		const utc = await resolve('UTC');
 

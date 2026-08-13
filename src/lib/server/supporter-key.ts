@@ -137,6 +137,12 @@ export interface SupporterKeyStatus {
 	 * changed — on the first page view that has the tz cookie, or on travel —
 	 * while still warning afresh for a genuinely re-minted key. */
 	dismissKey: string;
+	/** Which half of the warning window the key is in, counted in UTC for the
+	 * same reason dismissKey is: it is the other half of the dismissal cookie's
+	 * value, and a phase read in the viewer's zone would flip a day earlier east
+	 * of UTC — resurrecting a dismissed notice on travel, which pinning the key
+	 * alone does not prevent. Display never uses this; daysRemaining does that. */
+	dismissPhase: 'early' | 'final';
 	/** Days until expiry (1 = expires today); 0 for the expired state. Counted
 	 * in the same zone as validUntil — the pair is the point (SONA-119). */
 	daysRemaining: number;
@@ -158,10 +164,15 @@ export function supporterKeyStatusFromResult(
 		// Calendar days in the viewer's zone — the same zone validUntil is read in,
 		// which is what stops the number and the date naming different days.
 		const daysRemaining = supporterKeyDaysRemaining(res.expiresAt.getTime(), now.getTime(), timeZone);
+		// The phase rides on the dismissal cookie, so it is counted in UTC rather
+		// than reusing daysRemaining above — the two disagree by a day for part of
+		// each day east of UTC.
+		const utcDaysRemaining = supporterKeyDaysRemaining(res.expiresAt.getTime(), now.getTime(), 'UTC');
 		return {
 			state: 'valid',
 			validUntil: supporterKeyValidUntil(res.expiresAt.getTime(), timeZone),
 			dismissKey: supporterKeyValidUntil(res.expiresAt.getTime(), 'UTC'),
+			dismissPhase: utcDaysRemaining <= EXPIRY_FINAL_DAYS ? 'final' : 'early',
 			daysRemaining,
 			expiringSoon: daysRemaining <= EXPIRY_WARN_DAYS
 		};
@@ -171,6 +182,8 @@ export function supporterKeyStatusFromResult(
 			state: 'expired',
 			validUntil: supporterKeyValidUntil(res.expiresAt.getTime(), timeZone),
 			dismissKey: supporterKeyValidUntil(res.expiresAt.getTime(), 'UTC'),
+			// An expired key never renders the notice, so the phase is inert here.
+			dismissPhase: 'final',
 			daysRemaining: 0,
 			expiringSoon: false
 		};

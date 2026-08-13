@@ -152,6 +152,29 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 		expect(tokyo.supporterKeyNotice?.dismissValue).toBe(utc.supporterKeyNotice?.dismissValue);
 	});
 
+	it('keeps the dismissal value zone-free across the early/final phase boundary', async () => {
+		// The phase boundary, not just the date: the previous version appended a
+		// phase counted in the VIEWER's zone to a UTC-pinned key, so the two halves
+		// could disagree and a dismissal made in one zone stopped matching in the
+		// other. The zone test above never caught it — days 5 and 6 are both 'early',
+		// so its two dismissValues coincided for the wrong reason.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-29T15:00:00Z'));
+		// Straddles EXPIRY_FINAL_DAYS (3): UTC counts 3 ('final'), London — one hour
+		// ahead, so its "now" is still the 29th while its last covered day is the
+		// 1st — counts 4 ('early').
+		const expiresAt = new Date('2026-09-01T00:00:00Z');
+		const utc = await loadWithZone(expiresAt);
+		const london = await loadWithZone(expiresAt, 'Europe/London');
+
+		// The displayed countdown still moves with the viewer's zone...
+		expect(utc.supporterKeyNotice?.daysRemaining).toBe(3);
+		expect(london.supporterKeyNotice?.daysRemaining).toBe(4);
+		// ...but the dismissal value, phase included, does not.
+		expect(london.supporterKeyNotice?.dismissValue).toBe(utc.supporterKeyNotice?.dismissValue);
+		expect(utc.supporterKeyNotice?.dismissValue).toBe('2026.08.31:final');
+	});
+
 	it('is null for an expired key (the settings page owns that state)', async () => {
 		const { db, platform } = makeLoadDb();
 		await setRawSetting(db, 'supporterKey', 'old.token');

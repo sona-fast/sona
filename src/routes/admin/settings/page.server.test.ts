@@ -980,6 +980,10 @@ describe('settings load — supporter key is raw + verified, never in public set
 			validUntil: '2026.08.31',
 			// UTC-pinned twin of validUntil; keys the dismissal cookie (SONA-119).
 			dismissKey: '2026.08.31',
+			// Reviewed for this guard: which half of the warning window the key is
+			// in. Two values, derived from the expiry the payload already carries —
+			// it tells the client nothing the token or the dates don't.
+			dismissPhase: expect.stringMatching(/^(early|final)$/),
 			daysRemaining: expect.any(Number),
 			expiringSoon: expect.any(Boolean)
 		});

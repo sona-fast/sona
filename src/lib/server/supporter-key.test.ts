@@ -168,6 +168,9 @@ describe('supporterKeyStatusFromResult', () => {
 			validUntil: '2026.08.31',
 			// UTC-pinned twin of validUntil; keys the dismissal cookie (SONA-119).
 			dismissKey: '2026.08.31',
+			// The other half of that cookie's value, counted in UTC for the same
+			// reason — 7 days out is the early phase (final = last 3).
+			dismissPhase: 'early',
 			daysRemaining: 7,
 			expiringSoon: true
 		});

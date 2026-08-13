@@ -30,7 +30,14 @@ describe('supporter-notice dismissal cookie — client/server contract', () => {
 	});
 
 	it('the cookie is scoped to the admin area', () => {
-		// Boundary-safe: narrowing the path to e.g. /admin/settings must fail this.
-		expect(layoutSvelte).toMatch(/path=\/admin(?![\w/])/);
+		// Anchored to THIS cookie's own write, not just to a `path=/admin` somewhere
+		// in the file: the layout also writes the tz cookie (SONA-119) at that same
+		// path, so a free-floating match would keep passing while the dismissal
+		// cookie's path was narrowed. Boundary-safe: /admin/settings must fail.
+		expect(layoutSvelte).toMatch(
+			new RegExp(
+				`${COOKIE_NAME}=\\$\\{encodeURIComponent\\(data\\.supporterKeyNotice\\.dismissValue\\)\\}; path=/admin(?![\\w/])`
+			)
+		);
 	});
 });
