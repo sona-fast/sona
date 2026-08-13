@@ -8,20 +8,12 @@ import { EARLY_ACCESS } from '$lib/early-access';
 
 import { load } from './+page.server';
 
-// A real supporter key can't be minted in tests (the issuer's private key never
-// leaves sona.fast), so verification is faked exactly as in the sibling VR
-// suites: the literal token 'VALID' verifies, anything else is malformed.
-vi.mock('$lib/server/supporter-key', async (importOriginal) => {
-	const original = await importOriginal<typeof import('$lib/server/supporter-key')>();
-	return {
-		...original,
-		verifySupporterKey: vi.fn(async (token: string) =>
-			token === 'VALID'
-				? { valid: true, login: 'e2e', tier: 1, expiresAt: new Date('2999-01-01') }
-				: { valid: false, reason: 'malformed' }
-		)
-	};
-});
+// The gate logic stays real; only the signature check is faked (see the helper).
+vi.mock('$lib/server/supporter-key', async (importOriginal) =>
+	(await import('$lib/server/test/supporter-key-mock')).supporterKeyLiteralMockModule(
+		importOriginal as () => Promise<typeof import('$lib/server/supporter-key')>
+	)
+);
 
 const NOW = '2026-01-01T00:00:00.000Z';
 

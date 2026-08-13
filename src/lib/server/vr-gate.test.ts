@@ -172,12 +172,14 @@ describe('vrPublishingEnabled — memoized entitlement', () => {
 		expect(await vrPublishingEnabled(db, undefined, now)).toBe(false);
 	});
 
-	it('still opens the gate once the flag GAs, with no key at all', async () => {
+	it('opens the gate once the flag GAs without reading the key at all', async () => {
+		// After GA the key cannot change the answer, so the enforcement path stops
+		// touching D1 — otherwise every fork pays a read per VR request forever.
 		EARLY_ACCESS['vr-avatars'] = '2000-01-01';
 		const { db, state } = fakeKeyDb(null);
 
 		expect(await vrPublishingEnabled(db, undefined, new Date('2026-08-25T09:00:00Z'))).toBe(true);
 		expect(verifySupporterKey).not.toHaveBeenCalled();
-		expect(state.reads).toBe(1);
+		expect(state.reads).toBe(0);
 	});
 });

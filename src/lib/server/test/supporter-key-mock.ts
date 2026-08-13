@@ -23,3 +23,25 @@ export async function supporterKeyMockModule(
 			token ? actual.supporterKeyStatusFromResult(await verifySupporterKey(token, now), now) : null
 	};
 }
+
+/**
+ * Shared vi.mock factory body for the VR gate suites: the literal token 'VALID'
+ * verifies (far-future expiry), anything else is malformed. Same reason as
+ * above — a token that really verifies needs the sona.fast private key — but
+ * these suites drive the GATE rather than the status shaping, so they want a
+ * pass/fail switch on the token value instead of a per-call stub.
+ */
+export async function supporterKeyLiteralMockModule(
+	importOriginal: () => Promise<typeof import('$lib/server/supporter-key')>
+) {
+	const original = await importOriginal();
+	return {
+		...original,
+		verifySupporterKey: vi.fn(
+			async (token: string): Promise<SupporterKeyResult> =>
+				token === 'VALID'
+					? { valid: true, login: 'e2e', tier: 1, expiresAt: new Date('2999-01-01') }
+					: { valid: false, reason: 'malformed' }
+		)
+	};
+}

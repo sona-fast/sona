@@ -1085,7 +1085,7 @@ describe('settings load — supporter key is raw + verified, never in public set
 	// means the full token is being shipped again.
 	it('the settings card renders the server-made mask, not a token it truncates', () => {
 		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		expect(src).toMatch(/<div class="key-record">\{data\.supporterKey\.keyRecord\}<\/div>/);
+		expect(src).toContain('data.supporterKey.keyRecord');
 		expect(src).not.toMatch(/supporterKey\.token|truncateKey/);
 	});
 

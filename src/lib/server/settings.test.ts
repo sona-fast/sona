@@ -478,23 +478,13 @@ describe('getVerifiedSupporterKey — caching & fail-closed', () => {
 		const first = await getVerifiedSupporterKey(db);
 		const second = await getVerifiedSupporterKey(db);
 
+		// The cached facts and nothing else: an added field here would be a field
+		// that could carry a `now` dependence into the entry.
 		expect(first).toEqual({ signatureValid: true, expiresAt: VALID_UNTIL.getTime() });
-		expect(second).toEqual(first);
+		expect(Object.keys(first).sort()).toEqual(['expiresAt', 'signatureValid']);
+		expect(second).toBe(first);
 		expect(state.reads).toBe(1);
 		expect(verifySupporterKey).toHaveBeenCalledTimes(1);
-	});
-
-	it('caches the expiry INSTANT, not a validity verdict', async () => {
-		// The reason no day key is needed: nothing cached here changes as time
-		// passes, so callers can decide validity against their own `now` (see
-		// vr-gate.test.ts, which drives that decision across the expiry).
-		stubValidKey();
-		const { db } = fakeKeyDb('head.tail');
-
-		const value = await getVerifiedSupporterKey(db);
-
-		expect(value.expiresAt).toBe(VALID_UNTIL.getTime());
-		expect(Object.keys(value).sort()).toEqual(['expiresAt', 'signatureValid']);
 	});
 
 	it('keeps the expiry of a signed-but-expired key', async () => {
@@ -583,6 +573,34 @@ describe('getVerifiedSupporterKey — caching & fail-closed', () => {
 		expect(state.reads).toBe(2);
 	});
 
+	it('gives a LAPSED key the short TTL too, so a renewal lands fast', async () => {
+		// Renewal is the common install path (keys run ~45 days), and it replaces an
+		// expired entry — which still has signatureValid: true. Keying the long TTL
+		// off the signature rather than off entitlement would make exactly the
+		// common case the slow one.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-09-05T09:00:00Z'));
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: false,
+			reason: 'expired',
+			login: 'sparky',
+			tier: 1,
+			expiresAt: VALID_UNTIL
+		});
+		const { db, state } = fakeKeyDb('lapsed.token');
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+
+		stubValidKey();
+		state.value = 'renewed.token';
+		vi.setSystemTime(new Date('2026-09-05T09:00:06Z'));
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({
+			expiresAt: VALID_UNTIL.getTime()
+		});
+		expect(state.reads).toBe(2);
+	});
+
 	it('fails closed on the EMPTY row that removeSupporterKey actually writes', async () => {
 		// removeSupporterKey blanks the value rather than deleting the row, so this
 		// is the arm production hits after a removal — not the absent-row one.
@@ -600,6 +618,7 @@ describe('getVerifiedSupporterKey — caching & fail-closed', () => {
 
 		const value = await getVerifiedSupporterKey(db);
 
+		expect(value).toBe(await getVerifiedSupporterKey(db)); // the cached instance
 		expect(Object.isFrozen(value)).toBe(true);
 		expect(Object.isFrozen(NO_SUPPORTER_KEY)).toBe(true);
 	});

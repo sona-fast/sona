@@ -457,11 +457,18 @@ export const NO_SUPPORTER_KEY: VerifiedSupporterKey = Object.freeze({
 // change.
 //
 // Staleness: the isolate running the save/remove clears immediately, others
-// converge on the TTL. A REMOVED key therefore keeps publishing open elsewhere
-// for up to SETTINGS_TTL_MS — the same bound the settings and status caches
-// already accept, and only the owner revoking their own entitlement can reach
-// it. A newly SAVED key gets the short TTL below instead, because "I just paid
-// and it still says no" is the direction worth being quick about.
+// converge on the TTL. A key that currently entitles is held for the full
+// SETTINGS_TTL_MS, so REMOVING one keeps publishing open elsewhere for up to a
+// minute — the same bound the settings and status caches already accept, and
+// only the owner revoking their own entitlement can reach it.
+//
+// Everything that does NOT entitle right now — no row, nothing that verified,
+// and a lapsed key — is held for seconds instead. That is the direction where
+// staleness looks like a bug: the operator installs or renews a key, the
+// settings page (which reads uncached) says valid, and a warm isolate would
+// otherwise keep refusing uploads. Renewal is the common case, since keys run
+// ~45 days, and a renewal replaces a LAPSED entry — which is why the short TTL
+// keys off "usable now" rather than "signature ok".
 const NO_KEY_TTL_MS = 5_000;
 let verifiedSupporterKeyCache: { value: VerifiedSupporterKey; expires: number } | null = null;
 
@@ -478,7 +485,8 @@ export function clearSupporterKeyStatusCache() {
 }
 
 /**
- * Read and verify the stored supporter key, memoized under the invariant above.
+ * The verified FACTS about the stored key, for the enforcement gate — memoized
+ * under the invariant above.
  *
  * Fails closed on every uncertain outcome: a token that doesn't verify, a
  * missing row and an empty row all resolve to NO_SUPPORTER_KEY. D1 errors
@@ -499,8 +507,13 @@ export async function getVerifiedSupporterKey(db: Database): Promise<VerifiedSup
 	// A resolution that a save/remove overtook must not re-cache its pre-write
 	// answer — same guard, and the same counter, as the status memo.
 	if (supporterKeyStatusGeneration === startedIn) {
-		const ttl = value.signatureValid ? SETTINGS_TTL_MS : NO_KEY_TTL_MS;
-		verifiedSupporterKeyCache = { value, expires: Date.now() + ttl };
+		// Only the entry's LIFETIME is time-relative; the value it holds still is
+		// not, so the invariant above is intact.
+		const entitlesNow = value.expiresAt !== null && value.expiresAt > Date.now();
+		verifiedSupporterKeyCache = {
+			value,
+			expires: Date.now() + (entitlesNow ? SETTINGS_TTL_MS : NO_KEY_TTL_MS)
+		};
 	}
 	return value;
 }
@@ -516,7 +529,7 @@ function verifiedSupporterKeyFrom(res: SupporterKeyResult): VerifiedSupporterKey
 }
 
 /**
- * Read and verify the stored supporter key, memoized as described above.
+ * The stored key's DISPLAY status, for the admin layout's expiry notice.
  *
  * D1 errors propagate and are not cached, so a transient failure doesn't stick.
  * The admin layout catches them to degrade just its notice; the settings page

@@ -23,12 +23,13 @@ const VR_FEATURE_FLAG = 'vr-avatars';
  * model-upload endpoint must refuse when it is false. The gated UI state is
  * presentation on top of it, never a substitute.
  *
- * The key read is memoized per isolate (getVerifiedSupporterKey), so this costs
- * a D1 read plus an Ed25519 verify once per TTL instead of once per request.
- * Only the signature and the expiry instant are cached; whether the key is
- * valid RIGHT NOW is re-decided from `now` on every call, so a key still lapses
- * the moment it expires. Every failure — a D1 error, a key that doesn't verify,
- * anything unexpected out of the memo — resolves to "no key", which denies.
+ * Once the flag has GA'd no key can change the answer, so nothing is read at
+ * all. Before that the key is memoized per isolate (getVerifiedSupporterKey —
+ * see the invariant at its cache site), costing a D1 read plus an Ed25519
+ * verify once per TTL rather than once per request, and expiry is still
+ * compared against `now` here on every call. Every failure — a D1 error, a key
+ * that doesn't verify, anything unexpected out of the memo — is "no key",
+ * which denies.
  *
  * `env` carries the TEST-ONLY E2E_VR_GATE bypass (see app.d.ts): honored only
  * when set to exactly 'open' AND the build is a dev build (the e2e harness
@@ -43,8 +44,12 @@ export async function vrPublishingEnabled(
 	now: Date = new Date()
 ): Promise<boolean> {
 	if (dev && env?.E2E_VR_GATE === 'open') return true;
+	// Past GA (or once the registry entry retires) the flag is open to everyone,
+	// and the key cannot change that — so skip the read entirely rather than pay
+	// for one on every VR request on every fork for the rest of the product's life.
+	if (isFeatureEnabled(VR_FEATURE_FLAG, { supporterKeyValid: false, now })) return true;
 	// A failed read or verify degrades to "no key" rather than throwing the whole
-	// page — the GA branch of isFeatureEnabled still opens the gate on time.
+	// page; pre-GA that denies, which is the safe direction.
 	const key = await getVerifiedSupporterKey(db).catch(() => NO_SUPPORTER_KEY);
 	const supporterKeyValid =
 		key.signatureValid && key.expiresAt !== null && now.getTime() < key.expiresAt;
