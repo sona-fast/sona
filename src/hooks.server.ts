@@ -68,7 +68,7 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	}
 
 	// First-run setup gate, in three cases. Assets and the wizard itself are exempt
-	// (so the gate never sees /admin/setup — its own load is that route's guard).
+	// (so the gate never sees /admin/setup — that route guards itself; see below).
 	// getSetupState caches the positive, so this is a no-op (no query) once the
 	// site is configured.
 	//

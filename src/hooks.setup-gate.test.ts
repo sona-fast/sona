@@ -97,6 +97,15 @@ describe('setup gate — a failed settings read is not "no admin credential"', (
 		expect((await driveGate('/api/images', makeBrokenDb())).status).toBe(503);
 	});
 
+	// Load-bearing exemption, not an oversight. The case for letting public routes
+	// serve is that the wizard's own action refuses while the state is unreadable
+	// — which only holds while the wizard is still REACHABLE. A later edit that
+	// blanket-503s /admin, or moves the isSetupRoute exemption below the switch,
+	// would take away the operator's only diagnostic during an outage.
+	it('leaves /admin/setup reachable so the operator still gets its error', async () => {
+		expect((await driveGate('/admin/setup', makeBrokenDb())).status).toBe(200);
+	});
+
 	it('logs the failed read — a 200 leaves no other trace of a dead database', async () => {
 		await driveGate('/gallery', makeBrokenDb());
 
