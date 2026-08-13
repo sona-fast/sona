@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { characters, images } from '$lib/server/db/schema';
-import { REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
+import { REFERENCE_BECOMES_VARIANT_ERROR, VARIANT_BECOMES_REFERENCE_ERROR } from '$lib/server/variants';
 import { load, actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -110,6 +110,7 @@ describe('admin image edit — reference action', () => {
 
 		const result = await actions.reference({ params: { id: '7' }, request: form({}), platform } as never);
 		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe(VARIANT_BECOMES_REFERENCE_ERROR);
 		expect(await refOf(db, c.id)).toBe(null);
 	});
 

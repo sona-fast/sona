@@ -14,6 +14,15 @@ export const MAX_VARIANT_SET = 8; // parent + 7 variants per one-flow upload
 export const REFERENCE_BECOMES_VARIANT_ERROR =
 	'This image is the reference sheet, so it cannot become a variant. Clear the reference sheet first.';
 
+/**
+ * The same conflict in the other direction: refused when a variant is about to
+ * be designated as the reference sheet. Uncontracted, like its twin and the
+ * other server-action errors; the edit page shows the localized
+ * admin_image_reference_variant before the operator can get here.
+ */
+export const VARIANT_BECOMES_REFERENCE_ERROR =
+	'This image is a variant, so it cannot be the reference sheet. Use its parent image instead.';
+
 export type VariantAssignmentError = 'self' | 'missing' | 'nested' | 'has_variants';
 
 /**

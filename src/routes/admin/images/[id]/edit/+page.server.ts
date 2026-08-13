@@ -6,7 +6,11 @@ import { resolveAvatarUrl } from '$lib/server/avatar';
 import { getSettings } from '$lib/server/settings';
 import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
-import { variantAssignmentError, REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
+import {
+	variantAssignmentError,
+	REFERENCE_BECOMES_VARIANT_ERROR,
+	VARIANT_BECOMES_REFERENCE_ERROR
+} from '$lib/server/variants';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -257,10 +261,7 @@ export const actions = {
 			// /art excludes variants from both ref-sheet paths (SONA-18), so storing
 			// this would be a designation nothing ever honors. Refuse it here rather
 			// than let the admin report a reference sheet the public page ignores.
-			if (image.parentImageId != null)
-				return fail(400, {
-					error: 'This image is a variant, so it cannot be the reference sheet. Use its parent image instead.'
-				});
+			if (image.parentImageId != null) return fail(400, { error: VARIANT_BECOMES_REFERENCE_ERROR });
 		}
 
 		const owner = await db

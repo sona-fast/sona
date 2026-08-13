@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 // Source-pins for the /art ref-sheet NSFW shield (SONA-18), following the
 // nsfw-markup.test.ts precedent on the VR detail page: the shield is a pair of
@@ -79,20 +79,31 @@ describe('/art ref-sheet NSFW shield (SONA-18)', () => {
 	});
 });
 
-// The en separator is a leading space inside the second sentence's own string.
-// Nothing else renders these two keys, so a well-meaning trim would silently
-// glue the sentences together in en — or add a space ja must not have.
+// The caption's sentence separator is a leading space inside the second
+// sentence's own string, because the separator itself is locale-dependent: no
+// markup or CSS answer is right in both. Nothing else renders these keys, so a
+// well-meaning trim would silently glue the sentences together — or add a space
+// to a language that takes none after its full stop. Driven off the catalog
+// directory so a locale added later is covered the day it lands.
 describe('/art caption sentence separator (SONA-18)', () => {
-	const en = JSON.parse(readFileSync(new URL('../../../../messages/en.json', import.meta.url), 'utf8'));
-	const ja = JSON.parse(readFileSync(new URL('../../../../messages/ja.json', import.meta.url), 'utf8'));
+	const dir = new URL('../../../../messages/', import.meta.url);
+	const locales = readdirSync(dir)
+		.filter((f) => f.endsWith('.json'))
+		.map((f) => [f.replace(/\.json$/, ''), JSON.parse(readFileSync(new URL(f, dir), 'utf8'))] as const);
+	// Scripts that need no space between sentences. Everything else does.
+	const noSeparator = new Set(['ja', 'zh', 'ko', 'th']);
+	const keys = ['art_ref_view_full', 'art_ref_open_gallery'] as const;
 
-	it('leads the en second sentence with a space', () => {
-		expect(en.art_ref_view_full.startsWith(' ')).toBe(true);
-		expect(en.art_ref_open_gallery.startsWith(' ')).toBe(true);
+	it('covers every locale the repo ships', () => {
+		expect(locales.length).toBeGreaterThan(0);
 	});
 
-	it('leads the ja second sentence with none', () => {
-		expect(ja.art_ref_view_full.startsWith(' ')).toBe(false);
-		expect(ja.art_ref_open_gallery.startsWith(' ')).toBe(false);
-	});
+	for (const [locale, messages] of locales) {
+		it(`${locale}: separates the two caption sentences the way the script wants`, () => {
+			for (const key of keys) {
+				expect(messages[key]).toBeTypeOf('string');
+				expect(messages[key].startsWith(' ')).toBe(!noSeparator.has(locale));
+			}
+		});
+	}
 });

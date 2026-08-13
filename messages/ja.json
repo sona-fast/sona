@@ -399,7 +399,7 @@
 	"admin_image_reference_current": "これは{name}のリファレンスシートです",
 	"admin_image_reference_clear": "リファレンスシートを解除",
 	"admin_image_reference_replaces": "（現在の設定を置き換えます）",
-	"admin_image_reference_variant": "この画像はバリエーションのため、リファレンスシートに設定できません。親画像をリファレンスシートに設定してください。",
+	"admin_image_reference_variant": "この画像はバリエーションのため、リファレンスシートに設定できません。代わりに親画像を指定してください。",
 	"admin_image_reference_cleared": "リファレンスシートの設定を解除しました",
 	"admin_add": "追加",
 	"admin_adding": "追加中…",

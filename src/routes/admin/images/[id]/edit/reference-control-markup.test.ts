@@ -30,4 +30,11 @@ describe('admin image edit — reference control variant branch (SONA-18)', () =
 		expect(pageSrc).toContain('bind:this={referenceHint}');
 		expect(pageSrc).toContain('{m.admin_image_reference_cleared()}');
 	});
+
+	// Without this the announcement branch stays in the file and never fires —
+	// the flag is what enables it, and it is the only feedback on the variant
+	// path, where clearing removes the button focus would otherwise return to.
+	it('derives the announcement from what the action reports', () => {
+		expect(pageSrc).toMatch(/referenceCleared = result\.data\?\.referenceCleared === true/);
+	});
 });
