@@ -286,8 +286,8 @@ function stubValidKey() {
 // The danger is the mirror image of the settings cache's: a status that outlives
 // either the key it was resolved from or the day it was resolved on.
 describe('getSupporterKeyStatus — caching', () => {
+	// The memo itself is dropped by the file-level afterEach above.
 	beforeEach(() => {
-		clearSupporterKeyStatusCache();
 		vi.mocked(verifySupporterKey).mockReset();
 	});
 

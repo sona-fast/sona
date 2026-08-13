@@ -407,25 +407,19 @@ export function clearSupporterKeyStatusCache() {
 	supporterKeyStatusCache = null;
 }
 
-/** The UTC calendar day (YYYY-MM-DD) a status was resolved for. */
-function utcDay(now: Date): string {
-	return now.toISOString().slice(0, 10);
-}
-
 /**
  * Read and verify the stored supporter key, memoized as described above.
  *
- * D1 errors propagate (like `getRawSetting`, which this wraps) and are not
- * cached, so a caller that must fail closed still can and a transient failure
- * doesn't stick. The admin layout catches them to degrade just its notice; the
- * settings page deliberately does NOT use this — it reads and verifies loudly
- * on every request so a D1 error there can never render as "no key".
+ * D1 errors propagate and are not cached, so a transient failure doesn't stick.
+ * The admin layout catches them to degrade just its notice; the settings page
+ * deliberately does NOT use this — it reads and verifies loudly on every
+ * request so a D1 error there can never render as "no key".
  */
 export async function getSupporterKeyStatus(
 	db: Database,
 	now: Date
 ): Promise<SupporterKeyStatus | null> {
-	const day = utcDay(now);
+	const day = now.toISOString().slice(0, 10);
 	const cached = supporterKeyStatusCache;
 	if (cached && cached.day === day && cached.expires > Date.now()) {
 		return cached.value;

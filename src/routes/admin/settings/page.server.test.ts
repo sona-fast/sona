@@ -936,10 +936,6 @@ describe('settings removeSupporterKey — clears the stored key', () => {
 // actions write the key row, so both must drop that memo — otherwise the notice
 // keeps describing the previous key for up to a minute after the operator acted.
 describe('supporter-key actions — invalidate the memoized status (SONA-118)', () => {
-	beforeEach(() => {
-		clearSupporterKeyStatusCache();
-	});
-
 	afterEach(() => {
 		// These stub verification for a whole test (not once), so undo both the
 		// standing stub and the memo they primed.
@@ -964,11 +960,12 @@ describe('supporter-key actions — invalidate the memoized status (SONA-118)', 
 		expect(await getSupporterKeyStatus(db, now)).toMatchObject({ state: 'valid' });
 	});
 
-	it('the settings page load reads past the memo, so it stays loud on D1 errors', async () => {
-		// The page must never render a transient D1 error as "no key" (decision of
-		// 2026-08-07), which is why it keeps its own read + verify. Prime the memo
-		// with "no key stored", then store one: a page load that had been switched
-		// over to the memo would answer from that stale null.
+	it('the settings page load reads past the memo rather than answering from it', async () => {
+		// The page keeps its own read + verify so it can never render a transient D1
+		// error as "no key" (decision of 2026-08-07). Prime the memo with "no key
+		// stored", then store one: a page load switched over to the memo — the
+		// tempting edit now that this file imports the cache helpers — would answer
+		// from that stale null instead.
 		const { db, platform } = makeLoadDb();
 		const now = new Date();
 		expect(await getSupporterKeyStatus(db, now)).toBeNull();

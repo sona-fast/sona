@@ -28,10 +28,10 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 		// the authenticated session: this load also runs for the auth-exempt
 		// routes (/admin/login etc., see hooks.server.ts), which must not spend a
 		// D1 read + Ed25519 verify per anonymous hit nor leak key metadata.
-		// getSupporterKeyStatus propagates D1 errors (getSettings self-catches); a
-		// failed read must degrade only the notice, not drop the chrome to EMPTY.
-		// It memoizes the resolved status per UTC day (SONA-118), so neither the
-		// read nor the verify is paid on every admin page request.
+		// getSupporterKeyStatus memoizes the resolved status (SONA-118), so neither
+		// the read nor the verify is paid on every admin page request. It propagates
+		// D1 errors (getSettings self-catches); a failed read must degrade only the
+		// notice, not drop the chrome to EMPTY.
 		const [renv, supporterKey] = await Promise.all([
 			resolveRegistryEnv(db, platform.env),
 			locals.admin ? getSupporterKeyStatus(db, new Date()).catch(() => null) : null
