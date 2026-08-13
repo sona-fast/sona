@@ -41,11 +41,11 @@ export function defaultAiDisclosure(): AiDisclosure {
 			},
 			{
 				lead: 'Your data.',
-				body: "The running site never calls an AI service, so nothing you do is sent to one as you browse. When the software is being worked on, the developer's tools can read this site's logs and database the way any developer would, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service. Model training is switched off on the accounts used, and CodeRabbit states that the data from its reviews is never used for training. The privacy policy has the details."
+				body: "The running site never calls an AI service, so nothing you do is sent to one as you browse. When the software is being worked on, the developer's tools can read this site's logs and database, as any developer's could, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service. Model training is switched off on the accounts used, and CodeRabbit states that the data from its reviews is never used for training. The privacy policy has the details."
 			},
 			{
 				lead: 'The model.',
-				body: "Claude is trained on scraped text and code. That data isn't Sona's, and how it was gathered isn't something anyone here can vouch for."
+				body: "Claude is trained on scraped text and code. That data isn't Sona's, and nobody here can vouch for how it was gathered."
 			}
 		],
 		closer:

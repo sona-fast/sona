@@ -52,7 +52,7 @@ describe('defaultAiDisclosure', () => {
 	});
 
 	it('concedes the training-data provenance without arguing it', () => {
-		expect(all).toMatch(/how it was gathered isn't something anyone here can vouch for/);
+		expect(all).toMatch(/nobody here can vouch for how it was gathered/);
 	});
 
 	it('commits to keeping the page current and points at the build receipt', () => {
