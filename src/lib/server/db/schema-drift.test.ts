@@ -34,12 +34,17 @@ import drizzleConfig from '../../../../drizzle.config.ts';
 
 const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
 
-/** drizzle-kit's own `generate` prints this, and only this, when there is nothing to emit. */
+/**
+ * drizzle-kit's own `generate` prints this, and only this, when there is
+ * nothing to emit. It is the wording of the pinned drizzle-kit; should a
+ * version bump reword it, every run of this guard fails rather than passing
+ * quietly, which is the right direction to break in.
+ */
 const NOTHING_TO_MIGRATE = 'No schema changes, nothing to migrate';
 
 // Read from the real config so the guard cannot check a different schema,
 // dialect, or migrations directory than the one the project generates into.
-function required<K extends 'schema' | 'out' | 'dialect'>(key: K): string {
+function required(key: 'schema' | 'out' | 'dialect'): string {
 	const value = drizzleConfig[key];
 	if (typeof value !== 'string') {
 		throw new Error(`drizzle.config.ts must declare a single ${key} for the drift guard to check`);
@@ -50,21 +55,16 @@ const schemaPath = path.resolve(repoRoot, required('schema'));
 const migrationsDir = path.resolve(repoRoot, required('out'));
 const dialect = required('dialect');
 
-// Resolve the drizzle-kit the project actually depends on. Walking up for a
-// node_modules/.bin would bind to whichever install appears first above the
-// checkout — a different version than package.json pins, checking the schema
-// with the wrong generator.
+// Resolve the drizzle-kit the project depends on through node's own package
+// resolution and its declared `bin`, rather than scanning for a
+// node_modules/.bin — so the guard runs the version package.json pins and not
+// whichever executable happens to sit on a path above the checkout.
 // (Its package.json is not reachable through the package's `exports` map, so
 // the directory comes from the main entry instead.)
 const require_ = createRequire(import.meta.url);
 const drizzleKitDir = path.dirname(require_.resolve('drizzle-kit'));
-const drizzleKitBin = path.join(
-	drizzleKitDir,
-	(() => {
-		const { bin } = JSON.parse(readFileSync(path.join(drizzleKitDir, 'package.json'), 'utf8'));
-		return typeof bin === 'string' ? bin : bin['drizzle-kit'];
-	})()
-);
+const { bin } = JSON.parse(readFileSync(path.join(drizzleKitDir, 'package.json'), 'utf8'));
+const drizzleKitBin = path.join(drizzleKitDir, bin['drizzle-kit']);
 /** The install drizzle-kit came from, so a schema copy can resolve drizzle-orm. */
 const nodeModules = path.dirname(drizzleKitDir);
 
@@ -74,7 +74,10 @@ const nodeModules = path.dirname(drizzleKitDir);
  * source map, and drizzle-kit's bundle breaks that parser — which would replace
  * the real failure with an unrelated crash.
  */
-function diagnostic(output: string): string {
+function diagnostic(output: string | null): string {
+	// A child that never started (ENOENT, EAGAIN under a loaded runner) reports
+	// no output at all, so this has to tolerate its absence.
+	if (!output) return '';
 	return output
 		.split('\n')
 		.filter((line) => !/^\s+at\s/.test(line))
@@ -117,11 +120,13 @@ function pendingMigration(schema: string): string | null {
 		// when it wanted to ask about a rename — and CI never has a TTY to ask —
 		// so require the generator to say so before reporting the schema clean.
 		if (result.status === 0 && result.stdout.includes(NOTHING_TO_MIGRATE)) return null;
+		const said = diagnostic(result.stderr) || diagnostic(result.stdout) || '(no output)';
 		throw new Error(
-			`drizzle-kit generate did not report a usable result (exit ${result.status}).\n` +
-				`This usually means it needed an interactive answer, which CI cannot give: ` +
-				`run \`npx drizzle-kit generate\` locally and commit the migration.\n\n` +
-				`drizzle-kit said:\n${diagnostic(result.stderr) || diagnostic(result.stdout) || '(no output)'}`
+			`drizzle-kit generate produced neither a migration nor a clean result ` +
+				`(exit ${result.status}${result.error ? `, ${result.error.message}` : ''}).\n` +
+				`Usually that is a rename it wanted to ask about — which CI has no terminal to answer — ` +
+				`or a schema.ts that failed to load. Run \`npx drizzle-kit generate\` locally.\n\n` +
+				`drizzle-kit said:\n${said}`
 		);
 	} finally {
 		rmSync(workDir, { recursive: true, force: true });
