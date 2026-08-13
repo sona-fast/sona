@@ -99,11 +99,12 @@
 				/>
 			</a>
 		{/if}
-		<!-- The second caption sentence carries its own leading separator (a space in
-		     en, nothing in ja, which takes none after 。), so the markup emits no
+		<!-- The first caption sentence carries the separator (a trailing space in en,
+		     nothing in ja, which takes none after 。), so the markup emits no
 		     whitespace of its own. Keeping the separator in the text means it
 		     survives into the accessibility tree and the clipboard, which a CSS
-		     margin would not.
+		     margin would not; keeping it on the FIRST sentence keeps it out of the
+		     link text below, where it would sit under the underline.
 
 		     Shielded, the frame is a button rather than the gallery link, so that
 		     sentence is a real link — the only route onward, and the only one that

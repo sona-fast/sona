@@ -79,9 +79,10 @@ describe('/art ref-sheet NSFW shield (SONA-18)', () => {
 	});
 });
 
-// The caption's sentence separator is a leading space inside the second
-// sentence's own string, because the separator itself is locale-dependent: no
-// markup or CSS answer is right in both. Nothing else renders these keys, so a
+// The caption's sentence separator is a trailing space on the FIRST sentence,
+// because the separator itself is locale-dependent: no markup or CSS answer is
+// right in both, and putting it on the second sentence would drag it inside the
+// gallery link, underline and all. Nothing else renders these keys, so a
 // well-meaning trim would silently glue the sentences together — or add a space
 // to a language that takes none after its full stop. Driven off the catalog
 // directory so a locale added later is covered the day it lands.
@@ -92,7 +93,6 @@ describe('/art caption sentence separator (SONA-18)', () => {
 		.map((f) => [f.replace(/\.json$/, ''), JSON.parse(readFileSync(new URL(f, dir), 'utf8'))] as const);
 	// Scripts that need no space between sentences. Everything else does.
 	const noSeparator = new Set(['ja', 'zh', 'ko', 'th']);
-	const keys = ['art_ref_view_full', 'art_ref_open_gallery'] as const;
 
 	it('covers every locale the repo ships', () => {
 		expect(locales.length).toBeGreaterThan(0);
@@ -100,9 +100,13 @@ describe('/art caption sentence separator (SONA-18)', () => {
 
 	for (const [locale, messages] of locales) {
 		it(`${locale}: separates the two caption sentences the way the script wants`, () => {
-			for (const key of keys) {
+			expect(messages.art_ref_caption).toBeTypeOf('string');
+			expect(messages.art_ref_caption.endsWith(' ')).toBe(!noSeparator.has(locale));
+			// The second sentence never carries the separator: in the shielded
+			// branch it is the link text, and a leading space would underline.
+			for (const key of ['art_ref_view_full', 'art_ref_open_gallery'] as const) {
 				expect(messages[key]).toBeTypeOf('string');
-				expect(messages[key].startsWith(' ')).toBe(!noSeparator.has(locale));
+				expect(messages[key].startsWith(' ')).toBe(false);
 			}
 		});
 	}
