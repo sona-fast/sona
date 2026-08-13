@@ -55,8 +55,8 @@ export interface SiteSettings {
 	aiPageEnabled: boolean;
 	/** Owner-editable override for the /ai page body (plain text). Empty → the
 	 * default disclosure copy from `$lib/ai-disclosure` is shown instead.
-	 * Server-only beyond /ai itself: the (public) layout strips it from the
-	 * client payload, and /ai's own load returns it. */
+	 * Server-only beyond /ai itself: it is absent from the public allowlist
+	 * below, so no public payload carries it, and /ai's own load returns it. */
 	aiPageText: string;
 	/** Date (YYYY-MM-DD) the /ai override text was last changed, stamped when
 	 * that page's override is saved. Drives its "Last updated" line when an
@@ -137,32 +137,88 @@ export function parseLines(raw: string): string[] {
 }
 
 /**
- * The settings shape public pages receive. `aiPageText` is stripped by the
- * (public) layout load: that load rides every public page, and a fork that
- * turned /ai off must not keep shipping its retired copy to every visitor —
- * /ai's own load returns the override, behind its 404 gate.
+ * The settings that may ride a public page's client payload.
+ *
+ * An allowlist, not a denylist: a field added to `SiteSettings` stays
+ * server-only until it is named here, so nothing reaches every visitor by
+ * default. settings.classification.test.ts fails when a key is in neither this
+ * list nor SERVER_ONLY_SETTINGS_KEYS, which forces the call at review time.
  */
-export type PublicSiteSettings = Omit<SiteSettings, 'aiPageText'>;
+export const PUBLIC_SETTINGS_KEYS = [
+	'siteName',
+	'ownerName',
+	'aboutText',
+	'contactEmail',
+	'siteUrl',
+	'emailLanguage',
+	'privacyPolicy',
+	'termsOfService',
+	'privacyUpdatedAt',
+	'termsUpdatedAt',
+	'aiPageEnabled',
+	'aiPageUpdatedAt',
+	'sonaSpecies',
+	'sonaBuild',
+	'sonaKeyFeatures',
+	'sonaColors',
+	'sonaDos',
+	'sonaDonts',
+	'twitterUrl',
+	'blueskyUrl',
+	'telegramUrl',
+	'furAffinityUrl',
+	'instagramUrl',
+	'furtrackUrl',
+	'adminAvatarUrl',
+	'primaryCharacter',
+	'storageProvider',
+	'r2PublicUrl',
+	'autoResyncEnabled',
+	'themeId',
+	'landingLayout',
+	'splashSubtitle',
+	'registryOverridesLocal',
+	'galleryDefaultSort'
+] as const satisfies readonly (keyof SiteSettings)[];
 
 /**
- * Strip the settings that must not ride a public page's client payload.
+ * Settings deliberately withheld from public payloads. Naming a key here is
+ * what lets the classification test pass without publishing it.
  *
- * Today that is `aiPageText`: the layout load runs on EVERY public page, so
- * shipping the override there would keep publishing a fork's /ai copy after
- * the owner turned the page off. /ai's own load returns it, behind that
- * route's 404 gate. Every public load returns settings through this helper so
- * a new one cannot forget the strip.
+ * `aiPageText`: the (public) layout load rides every public page, so shipping
+ * the override there would keep publishing a fork's /ai copy after the owner
+ * turned the page off. /ai's own load returns it, behind that route's 404 gate.
+ */
+export const SERVER_ONLY_SETTINGS_KEYS = [
+	'aiPageText'
+] as const satisfies readonly (keyof SiteSettings)[];
+
+/** The settings shape public pages receive — exactly PUBLIC_SETTINGS_KEYS. */
+export type PublicSiteSettings = Pick<SiteSettings, (typeof PUBLIC_SETTINGS_KEYS)[number]>;
+
+/**
+ * Narrow full settings to the public allowlist. Every public load returns
+ * settings through this helper, so a new one cannot forget the narrowing.
+ *
+ * The input is a fully-populated `SiteSettings` (what getSettings and
+ * settingsFallback return): every allowlisted key is emitted, so a partial
+ * object would yield those keys with undefined values rather than absent.
  */
 export function toPublicSettings(settings: SiteSettings): PublicSiteSettings {
-	const { aiPageText: _aiPageText, ...publicSettings } = settings;
-	return publicSettings;
+	return Object.fromEntries(
+		PUBLIC_SETTINGS_KEYS.map((key) => [key, settings[key]])
+	) as PublicSiteSettings;
 }
 
 // Neutral, brand-agnostic defaults. A real deployment overrides these via the
 // first-run setup wizard / admin Settings (stored as site_settings rows); the
 // example sparky.ink config seeds its own values. Keep these generic so a fresh
 // fork starts unbranded rather than impersonating another site.
-const DEFAULTS: SiteSettings = {
+//
+// Exported because the compiler forces this literal to carry every
+// `SiteSettings` key, which makes it the runtime inventory of the interface —
+// what the classification test checks the public/server-only lists against.
+export const DEFAULTS: SiteSettings = {
 	siteName: APP_NAME,
 	ownerName: '',
 	aboutText: 'A personal gallery for collecting and showcasing furry artwork from talented artists.',

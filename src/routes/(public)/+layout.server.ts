@@ -23,9 +23,10 @@ export const load: LayoutServerLoad = async ({ platform, url }) => {
 		withTimeout(getSettings(db), SETTINGS_TIMEOUT_MS, settingsFallback()),
 		navGateFlags(db, PROBE_TIMEOUT_MS)
 	]);
-	// Every public load returns settings through toPublicSettings, which strips
-	// the /ai override text: this load rides EVERY public page, and a fork that
-	// turned /ai off must not still ship its retired copy to every visitor.
+	// Every public load returns settings through toPublicSettings, which narrows
+	// them to the public allowlist. That withholds the /ai override text: this
+	// load rides EVERY public page, and a fork that turned /ai off must not
+	// still ship its retired copy to every visitor.
 	const publicSettings = toPublicSettings(settings);
 	// The site's own public host, used to attribute the "made with sona" footer
 	// badge back to this fork (sona.fast/?ref=<host>). Derived per-request so each
