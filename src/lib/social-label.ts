@@ -156,6 +156,10 @@ export function socialHandle(
 	// to tell an account from a section, so their sections are listed by name:
 	// instagram.com/p/<id> is a post, not the account "p".
 	if (RESERVED_SEGMENTS[platform]?.includes(segment.toLowerCase())) return null;
+	// None of these platforms allows '+' in a username, so a segment opening with
+	// one is an opaque token rather than an account: t.me/+AbCdEf is a private
+	// invite hash, and rendering it as "@+AbCdEf" is rule 2's dressed-up marker.
+	if (segment.startsWith('+')) return null;
 	return segment;
 }
 

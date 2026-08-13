@@ -174,6 +174,18 @@ describe('rule 2: no hostname is ever shown as a handle', () => {
 		expect(socialLabel('instagram', 'www.instagram.com')).toBe('Instagram');
 	});
 
+	it('never renders an opaque token as a handle', () => {
+		// Neither names an account: the Patreon form carries the id in the query
+		// string, and '+' opens a Telegram invite hash — no platform here allows
+		// it in a username.
+		expect(socialLabel('patreon', 'https://www.patreon.com/user?u=12345')).toBe('Patreon');
+		expect(socialLabel('patreon', 'https://patreon.com/user')).toBe('Patreon');
+		expect(socialLabel('telegram', 'https://t.me/+AbCdEf')).toBe('Telegram');
+		// The ordinary forms still read, so neither rule swallowed a real handle.
+		expect(socialLabel('patreon', 'https://patreon.com/taro')).toBe('@taro');
+		expect(socialLabel('telegram', 'https://t.me/taro')).toBe('@taro');
+	});
+
 	it('never renders a section marker as a handle', () => {
 		// The platform's own host with a path that is not a profile: the prefix
 		// match fails and the first path segment is a section, not an account.

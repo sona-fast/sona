@@ -91,7 +91,9 @@ export const RESERVED_SEGMENTS: Partial<Record<SocialPlatform, string[]>> = {
 		'settings',
 		'intent'
 	],
-	patreon: ['posts', 'c'],
+	// 'user' is Patreon's legacy profile form, patreon.com/user?u=<id> — the
+	// account is in the query string, so the path segment names nobody.
+	patreon: ['posts', 'c', 'user'],
 	deviantart: ['tag', 'art', 'journal'],
 	telegram: ['s', 'joinchat']
 };
