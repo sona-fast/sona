@@ -55,6 +55,7 @@ function throwingDb(): Database {
 
 beforeEach(() => {
 	clearSettingsCache();
+	clearSupporterKeyStatusCache();
 });
 
 afterEach(() => {
