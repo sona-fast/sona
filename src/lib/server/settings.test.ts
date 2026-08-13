@@ -5,11 +5,13 @@ import {
 	clearSettingsCache,
 	getSupporterKeyStatus,
 	getVerifiedSupporterKey,
+	NO_SUPPORTER_KEY,
 	clearSupporterKeyStatusCache,
 	parseSonaColors,
 	parseLines
 } from './settings';
 import { verifySupporterKey } from './supporter-key';
+import { fakeKeyDb, throwingKeyDb } from './test/supporter-key-db';
 import type { Database } from './db';
 
 // Verification is stubbed (a passing token needs the sona.fast PRIVATE key); the
@@ -238,38 +240,6 @@ describe('getSettings — caching', () => {
 		expect(calls.count).toBe(2);
 	});
 });
-
-/**
- * Minimal fake of the surface `getRawSetting` touches — `db.select().from(t)
- * .where(...).get()` — resolving to the single stored row. Reads are counted so
- * a cache hit is observable as "no D1 round-trip", and `value` is mutable so a
- * test can simulate the row changing under the cache.
- */
-function fakeKeyDb(value: string | null) {
-	const state = { value, reads: 0 };
-	const db = {
-		select: () => ({
-			from: () => ({
-				where: () => ({
-					get: async () => {
-						state.reads += 1;
-						return state.value === null ? undefined : { key: 'supporterKey', value: state.value };
-					}
-				})
-			})
-		})
-	} as unknown as Database;
-	return { db, state };
-}
-
-/** A DB whose single-row read rejects — a transient D1 failure. */
-function throwingKeyDb(): Database {
-	return {
-		select: () => ({
-			from: () => ({ where: () => ({ get: async () => Promise.reject(new Error('D1 unavailable')) }) })
-		})
-	} as unknown as Database;
-}
 
 const VALID_UNTIL = new Date('2026-09-01T00:00:00Z');
 
@@ -573,7 +543,10 @@ describe('getVerifiedSupporterKey — caching & fail-closed', () => {
 		expect(state.reads).toBe(2);
 	});
 
-	it('re-reads after the TTL expires, so another isolate’s write lands', async () => {
+	it('drops a NO-KEY answer within seconds, so a key saved elsewhere lands fast', async () => {
+		// The asymmetry: a save in another isolate leaves this one denying, and
+		// "I just installed my key and it still says no" is the direction that
+		// looks broken. The negative entry is therefore short-lived.
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date('2026-08-25T09:00:00Z'));
 		stubValidKey();
@@ -582,12 +555,53 @@ describe('getVerifiedSupporterKey — caching & fail-closed', () => {
 		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
 
 		state.value = 'head.tail';
-		vi.setSystemTime(new Date('2026-08-25T09:00:59Z'));
+		vi.setSystemTime(new Date('2026-08-25T09:00:04Z'));
 		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
 
-		vi.setSystemTime(new Date('2026-08-25T09:01:01Z'));
+		vi.setSystemTime(new Date('2026-08-25T09:00:06Z'));
 		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
 		expect(state.reads).toBe(2);
+	});
+
+	it('holds a verified key for the full settings TTL', async () => {
+		// The other direction converges on the same bound as the settings and
+		// status caches: a key removed in another isolate keeps answering here
+		// until the TTL. Only the owner revoking their own entitlement reaches it.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-25T09:00:00Z'));
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+
+		state.value = null;
+		vi.setSystemTime(new Date('2026-08-25T09:00:59Z'));
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+
+		vi.setSystemTime(new Date('2026-08-25T09:01:01Z'));
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
+		expect(state.reads).toBe(2);
+	});
+
+	it('fails closed on the EMPTY row that removeSupporterKey actually writes', async () => {
+		// removeSupporterKey blanks the value rather than deleting the row, so this
+		// is the arm production hits after a removal — not the absent-row one.
+		const { db } = fakeKeyDb('');
+
+		expect(await getVerifiedSupporterKey(db)).toEqual({ signatureValid: false, expiresAt: null });
+		expect(verifySupporterKey).not.toHaveBeenCalled();
+	});
+
+	it('hands out a frozen record, so no caller can poison the memo', async () => {
+		// The returned object IS the cached one. A caller assigning to it would
+		// turn the fail-closed default into a permanent grant for the isolate.
+		stubValidKey();
+		const { db } = fakeKeyDb('head.tail');
+
+		const value = await getVerifiedSupporterKey(db);
+
+		expect(Object.isFrozen(value)).toBe(true);
+		expect(Object.isFrozen(NO_SUPPORTER_KEY)).toBe(true);
 	});
 
 	it('an in-flight resolution does not re-cache its pre-write answer', async () => {

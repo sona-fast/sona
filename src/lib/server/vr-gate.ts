@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { dev } from '$app/environment';
-import { getVerifiedSupporterKey } from '$lib/server/settings';
+import { getVerifiedSupporterKey, NO_SUPPORTER_KEY } from '$lib/server/settings';
 import { isFeatureEnabled, EARLY_ACCESS } from '$lib/early-access';
 import { vrAvatars } from '$lib/server/db/schema';
 import { cachedProbe } from '$lib/server/nav-gating';
@@ -45,14 +45,9 @@ export async function vrPublishingEnabled(
 	if (dev && env?.E2E_VR_GATE === 'open') return true;
 	// A failed read or verify degrades to "no key" rather than throwing the whole
 	// page — the GA branch of isFeatureEnabled still opens the gate on time.
-	let supporterKeyValid = false;
-	try {
-		const key = await getVerifiedSupporterKey(db);
-		supporterKeyValid =
-			key.signatureValid && key.expiresAt !== null && now.getTime() < key.expiresAt;
-	} catch {
-		supporterKeyValid = false;
-	}
+	const key = await getVerifiedSupporterKey(db).catch(() => NO_SUPPORTER_KEY);
+	const supporterKeyValid =
+		key.signatureValid && key.expiresAt !== null && now.getTime() < key.expiresAt;
 	return isFeatureEnabled(VR_FEATURE_FLAG, { supporterKeyValid, now });
 }
 

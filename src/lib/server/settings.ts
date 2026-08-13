@@ -421,37 +421,48 @@ let supporterKeyStatusCache:
 let supporterKeyStatusGeneration = 0;
 
 /**
- * What verifying the stored key established about it, independent of who is
- * asking and of when the question is asked: whether the issuer's signature
- * checks out, and the instant the key stops working (null when nothing
- * verified). Deliberately NOT a "valid" boolean — validity is that signature
- * plus a comparison against `now`, and only the signature half is worth
- * caching.
+ * What verifying the stored key established about it: whether the issuer's
+ * signature checks out, and the instant the key stops working (null when
+ * nothing verified). Frozen — callers share one instance.
  */
 export interface VerifiedSupporterKey {
-	signatureValid: boolean;
+	readonly signatureValid: boolean;
 	/** Unix ms the key expires; null when no key verified. */
-	expiresAt: number | null;
+	readonly expiresAt: number | null;
 }
 
-const NO_SUPPORTER_KEY: VerifiedSupporterKey = { signatureValid: false, expiresAt: null };
+/** The fail-closed answer: no key, or nothing that verified as one. Exported so
+ * callers that degrade to "no key" name the same thing the memo does. */
+export const NO_SUPPORTER_KEY: VerifiedSupporterKey = Object.freeze({
+	signatureValid: false,
+	expiresAt: null
+});
 
-// Memoized alongside the status cache above, and cleared by the same hook.
+// The second memo of the `supporterKey` row, for the ENFORCEMENT path
+// (vrPublishingEnabled), which runs on every VR admin load and every model
+// upload and otherwise pays a D1 read plus an Ed25519 verify each time.
 //
-// This one exists for the ENFORCEMENT path (vrPublishingEnabled), which runs on
-// every VR admin load and every model upload and otherwise pays a D1 read plus
-// an Ed25519 verify each time.
+// THE INVARIANT, stated once for everything below: nothing cached here depends
+// on `now` or on who is asking. Only the signature verdict and the expiry
+// instant are stored; validity is that pair compared against the caller's own
+// `now`, re-decided per call. That is why this memo needs no UTC-day key where
+// the status memo above does, and why SONA-119's viewer-zone rendering of the
+// STATUS fields cannot collide with it.
 //
-// Only the zone-independent half is cached, which is what makes it safe where
-// the status memo needs a UTC-day key: expiry is compared against the caller's
-// `now` on every call, so nothing here can serve one operator's dates — or a
-// lapsed key's entitlement — to anyone. SONA-119 makes the STATUS fields
-// viewer-dependent; these two facts are properties of the token itself and stay
-// out of that.
+// Two entries could be merged into one: every SupporterKeyStatus field is
+// derivable from these two facts plus `now`, so the status memo could be
+// rebuilt on this one and its day key deleted. Deliberately NOT done here —
+// that memo is what the PR under this one adds, and SONA-119 is in flight over
+// the same fields. Left as a follow-up rather than a rewrite from a stacked
+// change.
 //
-// Staleness is bounded by SETTINGS_TTL_MS exactly as the settings cache is: the
-// isolate that runs the save/remove clears immediately, others converge within
-// the TTL.
+// Staleness: the isolate running the save/remove clears immediately, others
+// converge on the TTL. A REMOVED key therefore keeps publishing open elsewhere
+// for up to SETTINGS_TTL_MS — the same bound the settings and status caches
+// already accept, and only the owner revoking their own entitlement can reach
+// it. A newly SAVED key gets the short TTL below instead, because "I just paid
+// and it still says no" is the direction worth being quick about.
+const NO_KEY_TTL_MS = 5_000;
 let verifiedSupporterKeyCache: { value: VerifiedSupporterKey; expires: number } | null = null;
 
 /**
@@ -467,40 +478,39 @@ export function clearSupporterKeyStatusCache() {
 }
 
 /**
- * Read and verify the stored supporter key, memoized as described above,
- * returning only what is true of the key itself. Callers decide entitlement by
- * comparing `expiresAt` against their own `now`.
+ * Read and verify the stored supporter key, memoized under the invariant above.
  *
  * Fails closed on every uncertain outcome: a token that doesn't verify, a
- * missing row and an empty row all resolve to "no key". D1 errors propagate
- * (and are not cached) so the caller can decide — the enforcement path catches
- * them and denies.
+ * missing row and an empty row all resolve to NO_SUPPORTER_KEY. D1 errors
+ * propagate (and are not cached) so the caller can decide — the enforcement
+ * path catches them and denies.
  */
 export async function getVerifiedSupporterKey(db: Database): Promise<VerifiedSupporterKey> {
 	const cached = verifiedSupporterKeyCache;
 	if (cached && cached.expires > Date.now()) return cached.value;
 	const startedIn = supporterKeyStatusGeneration;
 	const token = await getRawSetting(db, 'supporterKey');
-	// `now` here only picks which arm of the result carries the expiry, and both
-	// arms that carry one are folded to the same facts below — so what gets cached
-	// does not depend on when this ran.
+	// `now` only picks which arm of the result carries the expiry, and both arms
+	// that carry one fold to the same facts — so nothing about WHEN this ran
+	// reaches the cache.
 	const value = token
 		? verifiedSupporterKeyFrom(await verifySupporterKey(token, new Date()))
 		: NO_SUPPORTER_KEY;
 	// A resolution that a save/remove overtook must not re-cache its pre-write
 	// answer — same guard, and the same counter, as the status memo.
 	if (supporterKeyStatusGeneration === startedIn) {
-		verifiedSupporterKeyCache = { value, expires: Date.now() + SETTINGS_TTL_MS };
+		const ttl = value.signatureValid ? SETTINGS_TTL_MS : NO_KEY_TTL_MS;
+		verifiedSupporterKeyCache = { value, expires: Date.now() + ttl };
 	}
 	return value;
 }
 
-/** Keep the expiry of anything the issuer actually signed — `expired` carries a
- * trustworthy `expiresAt`, and re-deciding against the caller's `now` is what
- * lets one cached entry answer correctly across the moment a key lapses. */
+/** Keep the expiry of anything the issuer actually signed — the `expired` arm
+ * carries a trustworthy `expiresAt` too, and that is what lets one entry answer
+ * correctly on both sides of the moment a key lapses. */
 function verifiedSupporterKeyFrom(res: SupporterKeyResult): VerifiedSupporterKey {
 	if (res.valid || res.reason === 'expired') {
-		return { signatureValid: true, expiresAt: res.expiresAt.getTime() };
+		return Object.freeze({ signatureValid: true, expiresAt: res.expiresAt.getTime() });
 	}
 	return NO_SUPPORTER_KEY;
 }

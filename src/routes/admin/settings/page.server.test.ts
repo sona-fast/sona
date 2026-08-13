@@ -1078,6 +1078,17 @@ describe('settings load — supporter key is raw + verified, never in public set
 		expect(result.supporterKey).toBeNull();
 	});
 
+	// Source pin: the card is the only thing that ever displayed the key, and the
+	// unit tests above cover the load payload, not the rendered document. Rendering
+	// it for real needs a key signed by the sona.fast issuer, which tests can't
+	// have — so pin the template instead. Reintroducing any client-side truncation
+	// means the full token is being shipped again.
+	it('the settings card renders the server-made mask, not a token it truncates', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(src).toMatch(/<div class="key-record">\{data\.supporterKey\.keyRecord\}<\/div>/);
+		expect(src).not.toMatch(/supporterKey\.token|truncateKey/);
+	});
+
 	it('ships the mask and never the stored token, anywhere in the payload', async () => {
 		// The page used to send the whole signed key and truncate at render, which
 		// put a working key in the SSR payload and the client bundle. Scanning the

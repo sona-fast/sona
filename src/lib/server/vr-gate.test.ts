@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { vrTabEnabled, clearVrTabCache, vrPublishingEnabled } from './vr-gate';
 import { clearSupporterKeyStatusCache } from './settings';
 import { verifySupporterKey } from './supporter-key';
+import { fakeKeyDb, throwingKeyDb } from './test/supporter-key-db';
 import { EARLY_ACCESS } from '$lib/early-access';
 import type { Database } from './db';
 
@@ -101,24 +102,6 @@ describe('vrPublishingEnabled — memoized entitlement', () => {
 		clearSupporterKeyStatusCache();
 	});
 
-	/** Fake of the single-row read getRawSetting does, counting D1 round-trips. */
-	function fakeKeyDb(value: string | null) {
-		const state = { value, reads: 0 };
-		const db = {
-			select: () => ({
-				from: () => ({
-					where: () => ({
-						get: async () => {
-							state.reads += 1;
-							return state.value === null ? undefined : { key: 'supporterKey', value: state.value };
-						}
-					})
-				})
-			})
-		} as unknown as Database;
-		return { db, state };
-	}
-
 	function stubValidKey() {
 		vi.mocked(verifySupporterKey).mockResolvedValue({
 			valid: true,
@@ -154,13 +137,18 @@ describe('vrPublishingEnabled — memoized entitlement', () => {
 	it('denies when the D1 read fails, warm cache or not', async () => {
 		// Fail closed: an enforcement path that can't establish entitlement has not
 		// established it. (Pre-GA — the GA branch opens the gate on its own date.)
-		const throwingDb = {
-			select: () => ({
-				from: () => ({ where: () => ({ get: async () => Promise.reject(new Error('D1 unavailable')) }) })
-			})
-		} as unknown as Database;
+		expect(await vrPublishingEnabled(throwingKeyDb(), undefined, new Date('2026-08-25T09:00:00Z'))).toBe(
+			false
+		);
+	});
 
-		expect(await vrPublishingEnabled(throwingDb, undefined, new Date('2026-08-25T09:00:00Z'))).toBe(false);
+	it('denies when the verify itself throws', async () => {
+		// The other half of fail-closed: not just a failed read, but a verifier that
+		// blows up (bad key material, a WebCrypto that isn't there).
+		vi.mocked(verifySupporterKey).mockRejectedValue(new Error('crypto unavailable'));
+		const { db } = fakeKeyDb('head.tail');
+
+		expect(await vrPublishingEnabled(db, undefined, new Date('2026-08-25T09:00:00Z'))).toBe(false);
 	});
 
 	it('denies on a token that does not verify', async () => {
