@@ -127,4 +127,11 @@ describe('setup gate — a failed settings read is not "no admin credential"', (
 	it('lets a configured site through untouched', async () => {
 		expect((await driveGate('/gallery', makeHealthyDb())).redirect).toBeNull();
 	});
+
+	// Deliberate, and recorded so a later edit has to argue with a test: only
+	// /admin/setup is exempt, so login is shut during an outage too. Nothing is
+	// lost by that — login validates against the same unreachable database.
+	it('keeps /admin/login shut, unlike /admin/setup', async () => {
+		expect((await driveGate('/admin/login', makeBrokenDb())).status).toBe(503);
+	});
 });

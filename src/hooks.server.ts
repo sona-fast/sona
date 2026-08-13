@@ -108,9 +108,15 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 				// like, so name that — otherwise its owner gets a bare 503 with no
 				// way forward.
 				if (path.startsWith('/admin') || path.startsWith('/api')) {
+					// Retry-After says the state is transient rather than terminal. This
+					// branch returns early, so it never reaches the header block at the
+					// bottom of the handler — hence the explicit no-store.
 					return new Response(
 						'Setup state unavailable. If this is a new deployment, apply the D1 migrations.',
-						{ status: 503 }
+						{
+							status: 503,
+							headers: { 'Retry-After': '30', 'Cache-Control': 'private, no-store, no-cache' }
+						}
 					);
 				}
 				break;

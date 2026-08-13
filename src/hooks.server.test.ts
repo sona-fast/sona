@@ -50,6 +50,11 @@ async function redirectFor(pathname: string, db: D1Database): Promise<{ status: 
 describe('authHandle — password-recovery route exemption', () => {
 	beforeEach(() => {
 		vi.mocked(getSetupState).mockReset();
+		// mockReset leaves it resolving undefined, which the gate's exhaustive
+		// default turns into a thrown "unhandled setup state". Default to a
+		// configured site so a test that forgets to set the state fails on its own
+		// assertion instead. Cases that want 'incomplete' still override.
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 	});
 
 	it('lets /admin/forgot and /admin/reset through without a login redirect', async () => {

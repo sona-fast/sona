@@ -163,6 +163,22 @@ describe('getSetupState', () => {
 		expect(await getSetupState(empty(), undefined)).toBe('incomplete');
 	});
 
+	it('resumes warning once the interval has passed', async () => {
+		vi.useFakeTimers();
+		try {
+			await getSetupState(broken(), undefined);
+			expect(console.warn).toHaveBeenCalledTimes(1);
+
+			vi.advanceTimersByTime(60_001);
+			await getSetupState(broken(), undefined);
+
+			// A throttle that never reopens would hide a second outage entirely.
+			expect(console.warn).toHaveBeenCalledTimes(2);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('never caches unknown — the site recovers on the first read that works', async () => {
 		expect(await getSetupState(broken(), undefined)).toBe('unknown');
 		expect(await getSetupState(empty(), undefined)).toBe('incomplete');
