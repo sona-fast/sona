@@ -81,12 +81,21 @@ test.describe('admin settings supporter key', () => {
 		await expect(keyInput(page)).toHaveAttribute('aria-invalid', 'true');
 	});
 
-	test('the expiry date is dated in UTC while no tz cookie has been written', async ({ page }) => {
-		// The other half of the pair below: this browser reports UTC, so the token's
-		// last covered day reads 2025.07.16.
+});
+
+test.describe('admin settings supporter key — UTC viewer', () => {
+	// Pinned, not inherited: without this the runner's own zone decides the date
+	// and the test passes or fails by geography.
+	test.use({ timezoneId: 'UTC' });
+
+	test('a UTC browser gets the UTC calendar day', async ({ page }) => {
+		await login(page);
+		await page.goto('/admin/settings');
+		await openAccountTab(page);
 		await keyInput(page).fill(EXPIRED_TOKEN);
 		await saveButton(page).click();
 
+		// The token's last covered instant is 2025-07-16T23:59:59Z.
 		await expect(fieldError(page)).toContainText('2025.07.16');
 	});
 });
@@ -103,12 +112,25 @@ test.describe('admin settings supporter key', () => {
 test.describe('admin settings supporter key — viewer timezone', () => {
 	test.use({ timezoneId: 'Asia/Tokyo' });
 
+	test('the sign-in screen alone plants no operator cookie', async ({ page, context }) => {
+		// The cookie is the operator's, scoped to /admin — an anonymous visitor who
+		// only ever loads the sign-in screen must not get one.
+		await page.goto('/admin/login');
+		await expect(page.locator('input[type="password"]')).toBeVisible();
+
+		expect((await context.cookies()).find((c) => c.name === 'tz')).toBeUndefined();
+	});
+
 	test('the browser publishes its zone and the server dates the key in it', async ({
 		page,
 		context
 	}) => {
 		await login(page);
-		await page.goto('/admin/settings');
+		// Reached by clicking the sidebar, NOT page.goto: the admin layout is reused
+		// across client-side navigation, so a mount-only cookie write would run just
+		// once — on the sign-in page, where it is skipped — and this would catch it.
+		await page.getByRole('link', { name: 'Settings' }).click();
+		await expect(page).toHaveURL(/\/admin\/settings/);
 		await openAccountTab(page);
 
 		// Written on mount, scoped to the admin area — never to public pages. The

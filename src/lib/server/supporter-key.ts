@@ -131,16 +131,6 @@ export const EXPIRY_WARN_DAYS = 7;
  * a last-chance warning (see the admin layout load's dismissal cookie). */
 export const EXPIRY_FINAL_DAYS = 3;
 
-/**
- * Whole days until the key stops working, counted as calendar days in the
- * viewer's zone: 1 means the key expires today (its last covered day) and 0 or
- * less means it has already expired. Same zone as the display date, so the
- * number and the date can never name different days (SONA-119).
- */
-export function supporterKeyDaysRemainingFor(expiresAt: Date, now: Date, timeZone: string): number {
-	return supporterKeyDaysRemaining(expiresAt.getTime(), now.getTime(), timeZone);
-}
-
 /** Client-facing supporter-key status shared by the settings page and the
  * admin layout. Never contains the decoded payload beyond what the UI shows,
  * and never the token itself — the settings load (which alone needs it for the
@@ -169,7 +159,9 @@ export function supporterKeyStatusFromResult(
 	timeZone: string
 ): SupporterKeyStatus | null {
 	if (res.valid) {
-		const daysRemaining = supporterKeyDaysRemainingFor(res.expiresAt, now, timeZone);
+		// Calendar days in the viewer's zone — the same zone validUntil is read in,
+		// which is what stops the number and the date naming different days.
+		const daysRemaining = supporterKeyDaysRemaining(res.expiresAt.getTime(), now.getTime(), timeZone);
 		return {
 			state: 'valid',
 			validUntil: supporterKeyDisplayDate(res.expiresAt, timeZone),

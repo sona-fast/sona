@@ -10,6 +10,7 @@ import { APP_NAME } from '$lib/config';
 import { load } from './+layout.server';
 
 import { makeD1 } from '$lib/server/test/d1';
+import { expInDays } from '$lib/server/test/exp-in-days';
 
 // Same arrangement as the settings page tests, via the shared factory:
 // verification is stubbed (a passing token needs the sona.fast PRIVATE key),
@@ -30,15 +31,6 @@ vi.mock('$lib/server/settings', async (importActual) => {
 });
 
 const DAY_MS = 86_400_000;
-
-/** A realistically minted exp: midnight UTC `days` calendar days out, which is
- * what the issuer signs (end-of-day UTC) and what makes the countdown read
- * exactly `days`. A fractional-day offset would instead land mid-day and make
- * the calendar-day count depend on the wall clock the suite happens to run at. */
-function expInDays(days: number): Date {
-	const now = new Date();
-	return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days));
-}
 
 function makeLoadDb() {
 	const sqlite = new Database(':memory:');

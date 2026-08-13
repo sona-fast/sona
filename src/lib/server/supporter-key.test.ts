@@ -2,10 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
 	verifySupporterKey,
 	supporterKeyDisplayDate,
-	supporterKeyDaysRemainingFor,
 	supporterKeyStatusFromResult,
-	resolveSupporterKeyStatus,
-	EXPIRY_WARN_DAYS
+	resolveSupporterKeyStatus
 } from './supporter-key';
 
 // A test keypair minted in-test — NEVER the production private key (which lives
@@ -156,28 +154,6 @@ describe('verifySupporterKey', () => {
 			'eyJ2IjoxLCJsb2dpbiI6Imtub3duLWFuc3dlciIsInRpZXIiOjgsImV4cCI6MTc1MjcxMDQwMH0.fr25p4GX1PXoTdqBTBTYQImZGdGKo13I5GDil_KXNi2dDVxBQaNiLQ5sGoVcapBmjPxV-0ADYAKCaFP-_CDTDA';
 		const res = await verifySupporterKey(knownAnswer, new Date('2026-08-01T00:00:00Z'));
 		expect(res).toMatchObject({ valid: false, reason: 'expired', login: 'known-answer' });
-	});
-});
-
-describe('supporterKeyDaysRemainingFor', () => {
-	// exp end-of-day UTC: the key covers all of 2026-08-31.
-	const exp = new Date('2026-09-01T00:00:00Z');
-
-	it('counts whole days, rounding up', () => {
-		// Exactly 7 days out — the last instant inside the warning window.
-		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-08-25T00:00:00Z'), 'UTC')).toBe(EXPIRY_WARN_DAYS);
-		// One second earlier — just outside.
-		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-08-24T23:59:59Z'), 'UTC')).toBe(EXPIRY_WARN_DAYS + 1);
-	});
-
-	it('reports 1 across the whole last covered day', () => {
-		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-08-31T00:00:01Z'), 'UTC')).toBe(1);
-		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-08-31T23:59:59Z'), 'UTC')).toBe(1);
-	});
-
-	it('reports 0 or less at and past expiry', () => {
-		expect(supporterKeyDaysRemainingFor(exp, exp, 'UTC')).toBe(0);
-		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-09-02T00:00:00Z'), 'UTC')).toBeLessThan(0);
 	});
 });
 

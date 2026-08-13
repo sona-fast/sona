@@ -19,6 +19,7 @@ import { formatDate } from '$lib/index';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
+import { expInDays } from '$lib/server/test/exp-in-days';
 
 // The avatar re-resolve on the bluesky present-branch would otherwise hit the
 // Bluesky API; stub just that export so the save is deterministic and offline
@@ -1025,14 +1026,6 @@ describe('settings load — supporter key is raw + verified, never in public set
 });
 
 describe('settings load — expiring-soon boundary (SONA-114)', () => {
-	// The load verifies against the real clock, so boundaries are expressed
-	// relative to now. Days are counted as calendar days, so the expiry has to be
-	// the midnight-UTC instant the issuer actually signs — a fractional-day offset
-	// would land mid-day and make the count depend on the hour the suite runs at.
-	function expInDays(days: number): Date {
-		const now = new Date();
-		return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days));
-	}
 
 	async function loadWithExpiry(expiresAt: Date) {
 		const { db, platform } = makeLoadDb();
@@ -1071,14 +1064,17 @@ describe('settings load — expiring-soon boundary (SONA-114)', () => {
 	it('dates the card in the tz cookie zone', async () => {
 		const { db, platform } = makeLoadDb();
 		await setRawSetting(db, 'supporterKey', 'head.tail');
-		vi.mocked(verifySupporterKey).mockResolvedValue({
+		// Once per load below — a persistent mock would leak into later tests if an
+		// assertion here threw before the reset.
+		const verified = {
 			valid: true,
 			login: 'sparky',
 			tier: 2,
 			// Last covered instant 2026-08-17T23:59:59Z — the 17th in UTC, already
 			// the 18th anywhere east of it.
 			expiresAt: new Date('2026-08-18T00:00:00Z')
-		});
+		} as const;
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce(verified).mockResolvedValueOnce(verified);
 
 		const utc = (await load(loadEvent(platform))) as unknown as {
 			supporterKey: { validUntil: string };
@@ -1089,7 +1085,6 @@ describe('settings load — expiring-soon boundary (SONA-114)', () => {
 
 		expect(utc.supporterKey.validUntil).toBe('2026.08.17');
 		expect(tokyo.supporterKey.validUntil).toBe('2026.08.18');
-		vi.mocked(verifySupporterKey).mockReset();
 	});
 
 	it('an expired key is expired, never expiring-soon', async () => {

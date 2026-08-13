@@ -22,6 +22,7 @@ import { THEME_MODE_COOKIE, SESSION_COOKIE } from '$lib/config';
 import { eq } from 'drizzle-orm';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { getTextDirection } from '$lib/paraglide/runtime';
+import { isAdminAuthExempt } from '$lib/admin-routes';
 
 // Resolve the request locale (cookie override → browser Accept-Language → en)
 // and expose it to SSR by filling %lang% / %dir% in app.html.
@@ -87,13 +88,7 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// Protect admin routes (except login, the first-run setup wizard, and the
 	// password-recovery pages). /admin/forgot + /admin/reset are reachable without
 	// a session but stay behind the setup gate above, like /admin/login.
-	if (
-		event.url.pathname.startsWith('/admin') &&
-		!event.url.pathname.startsWith('/admin/login') &&
-		!event.url.pathname.startsWith('/admin/setup') &&
-		!event.url.pathname.startsWith('/admin/forgot') &&
-		!event.url.pathname.startsWith('/admin/reset')
-	) {
+	if (event.url.pathname.startsWith('/admin') && !isAdminAuthExempt(event.url.pathname)) {
 		if (!event.locals.admin) {
 			throw redirect(302, '/admin/login');
 		}

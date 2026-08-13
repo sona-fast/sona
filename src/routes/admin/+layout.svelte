@@ -7,13 +7,9 @@
 	import AdminTabs from '$lib/components/AdminTabs.svelte';
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import { onMount } from 'svelte';
+	import { isAdminAuthExempt } from '$lib/admin-routes';
 
 	let { children, data } = $props();
-
-	// Routes that render bare (no sidebar/chrome) because nobody is signed in yet
-	// — hooks.server.ts exempts the same set from the admin session check.
-	const AUTH_EXEMPT = ['/admin/login', '/admin/setup', '/admin/forgot', '/admin/reset'];
 
 	const theme = getTheme();
 
@@ -21,30 +17,25 @@
 	// expiry date and the countdown beside it are rendered server-side so SSR and
 	// hydration can't disagree; the server can only read them in the operator's own
 	// zone if we tell it which one that is. Scoped like the dismissal cookie below
-	// — path=/admin, and only from a signed-in page — so it never rides a public
-	// request and the privacy policy's "owner only" cookie clause still holds.
+	// — path=/admin, and never from a signed-out page — so it stays an operator
+	// cookie rather than one planted on anyone who loads the sign-in screen.
 	//
-	// Deliberately no invalidateAll(): re-running the loads mid-hydration would
-	// swap `data` under the settings page's form-resync effect and wipe whatever
-	// the operator had already typed. The zone lands on the next navigation
-	// instead, so at worst the very first signed-in page view of a browser reads
-	// its dates in UTC.
-	onMount(() => {
-		if (AUTH_EXEMPT.includes($page.url.pathname)) return;
+	// An effect, not onMount: this layout instance is reused across every admin
+	// navigation, so a mount-only write would run once on the sign-in page — the
+	// one place it is skipped — and the cookie would never appear for the rest of
+	// the session. Effects don't run during SSR, and re-writing the same value is
+	// free, so this needs no guard.
+	//
+	// Deliberately no invalidateAll(): re-running the loads would swap `data` out
+	// from under the settings page's form-resync effect and wipe whatever the
+	// operator had already typed. The zone takes effect on the next navigation.
+	$effect(() => {
+		if (isAdminAuthExempt($page.url.pathname)) return;
 		const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-		if (!zone || zone === readTzCookie()) return;
+		if (!zone) return;
 		const secure = location.protocol === 'https:' ? '; Secure' : '';
 		document.cookie = `tz=${encodeURIComponent(zone)}; path=/admin; SameSite=Lax; max-age=31536000${secure}`;
 	});
-
-	// The LAST match wins: a domain-scoped tz from a sibling subdomain sorts ahead
-	// of our host-only one, and reading that would make the guard above never
-	// match and the operator's own zone never stick.
-	function readTzCookie(): string | null {
-		const matches = [...document.cookie.matchAll(/(?:^|;\s*)tz=([^;]*)/g)];
-		const last = matches.at(-1);
-		return last ? decodeURIComponent(last[1]) : null;
-	}
 
 	// Supporter-key expiry notice (SONA-114): shown on every admin page while
 	// the key is inside its warning window. Dismissal is a cookie keyed on the
@@ -92,7 +83,7 @@
 
 </script>
 
-{#if AUTH_EXEMPT.includes($page.url.pathname)}
+{#if isAdminAuthExempt($page.url.pathname)}
 	{@render children()}
 {:else}
 	<div class="admin-layout">
