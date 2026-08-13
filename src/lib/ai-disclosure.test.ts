@@ -38,8 +38,14 @@ describe('defaultAiDisclosure', () => {
 		expect(all).toMatch(/logs can include visitors' IP addresses and the pages they requested/);
 	});
 
-	it('scopes the no-training claim to the plan terms, not a warranty', () => {
-		expect(all).toMatch(/under plans configured not to train on my data/);
+	it('rests the no-training claim on the account setting and the vendor’s own statement', () => {
+		// Not a warranty about what either company does in general, and not a
+		// property of a "plan" either: on Anthropic's side it is an account
+		// setting the owner switches off, and on CodeRabbit's it is what the
+		// service says about its own reviews. Naming the mechanism is what makes
+		// the claim one an owner can actually stand behind.
+		expect(all).toMatch(/Model training is switched off on the accounts I use/);
+		expect(all).toMatch(/CodeRabbit states that the data from its reviews is never used for training/);
 	});
 
 	it('concedes the training-data provenance without arguing it', () => {

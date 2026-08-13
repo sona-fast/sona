@@ -94,7 +94,7 @@ The page speaks in your first person. Its built-in text says, as you:
 - that you direct your site's development and approve every change and deploy;
 - that the artwork on your site is commissioned from human artists rather than
   AI-generated;
-- that your AI tool accounts are on plans configured not to train on your data.
+- that model training is switched off on the AI tool accounts you use.
 
 **If any of that is not true for your site, edit or disable the page.** Both
 controls are in Settings, under "Serve the AI disclosure page (/ai)" and the
