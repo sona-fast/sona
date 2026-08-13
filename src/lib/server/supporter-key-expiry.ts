@@ -12,15 +12,22 @@ import { formatDate } from '$lib/index';
 
 const DAY_MS = 86_400_000;
 
-/** The calendar day `ms` falls on in `timeZone`, as YYYY-MM-DD. en-CA is the
- * locale ICU renders in that order. */
+/** The calendar day `ms` falls on in `timeZone`, as YYYY-MM-DD.
+ *
+ * Assembled from formatToParts rather than read off format(): the pattern a
+ * locale renders is presentation, and ICU has changed en-CA's separators
+ * between versions. A pattern shift would leave every date here NaN — via
+ * epochDay's split — with nothing to distinguish it from a key that simply
+ * isn't expiring. Reading the fields by name can't drift that way. */
 function isoDayIn(ms: number, timeZone: string): string {
-	return new Intl.DateTimeFormat('en-CA', {
+	const parts = new Intl.DateTimeFormat('en-CA', {
 		timeZone,
 		year: 'numeric',
 		month: '2-digit',
 		day: '2-digit'
-	}).format(new Date(ms));
+	}).formatToParts(new Date(ms));
+	const field = (type: 'year' | 'month' | 'day') => parts.find((p) => p.type === type)!.value;
+	return `${field('year')}-${field('month')}-${field('day')}`;
 }
 
 /** Days since the epoch for a YYYY-MM-DD — a zone-free ordinal, so two days
