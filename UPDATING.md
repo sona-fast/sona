@@ -89,14 +89,12 @@ during the setup wizard. Forks bootstrapped with the `ADMIN_PASSWORD`
 environment variable skip that wizard, so they get the page without being
 asked too.
 
-The page speaks in your first person. Its built-in text says, as you:
+The page credits the Sona Team for building the software, so running it does
+not imply you wrote it. The one claim it makes about your site, in your own
+voice, is that the artwork here is commissioned from human artists rather than
+AI-generated.
 
-- that you direct your site's development and approve every change and deploy;
-- that the artwork on your site is commissioned from human artists rather than
-  AI-generated;
-- that model training is switched off on the AI tool accounts you use.
-
-**If any of that is not true for your site, edit or disable the page.** Both
+**If that is not true for your site, edit or disable the page.** Both
 controls are in Settings, under "Serve the AI disclosure page (/ai)" and the
 text override beneath it. Turning it off makes `/ai` return a plain 404 and
 removes the footer link.

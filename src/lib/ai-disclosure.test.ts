@@ -10,18 +10,21 @@ describe('defaultAiDisclosure', () => {
 	const all = [d.intro, ...d.topics.flatMap((t) => [t.lead, t.body]), d.closer].join('\n');
 
 	it('opens by disclosing, not persuading', () => {
-		expect(d.intro).toMatch(/built and written with AI/);
+		expect(d.intro).toMatch(/runs on Sona, which is built with AI coding tools/);
 	});
 
 	it('names the coding tool and the human gate', () => {
 		expect(all).toContain('Claude Code');
-		expect(all).toMatch(/I review and approve every change/);
+		// Third person, and naming the maker: on a fork the first-person version
+		// read as though the site's owner had built Sona (fork-owner feedback).
+		expect(all).toMatch(/made by the Sona Team, not by the person who runs this site/);
+		expect(all).toMatch(/They review and approve every change/);
 	});
 
 	it('discloses AI-drafted text, including the page itself', () => {
 		// The peer-review catch that reshaped this page: a disclosure written by
 		// AI may never claim the site has no generated text.
-		expect(all).toMatch(/including this page, were drafted with AI/);
+		expect(all).toMatch(/including this page, was drafted with AI and edited by the Sona Team/);
 	});
 
 	it('scopes the art claim to what the operator can vouch for', () => {
@@ -44,12 +47,12 @@ describe('defaultAiDisclosure', () => {
 		// setting the owner switches off, and on CodeRabbit's it is what the
 		// service says about its own reviews. Naming the mechanism is what makes
 		// the claim one an owner can actually stand behind.
-		expect(all).toMatch(/Model training is switched off on the accounts I use/);
+		expect(all).toMatch(/Model training is switched off on the accounts used/);
 		expect(all).toMatch(/CodeRabbit states that the data from its reviews is never used for training/);
 	});
 
 	it('concedes the training-data provenance without arguing it', () => {
-		expect(all).toMatch(/can't vouch for how it was gathered/);
+		expect(all).toMatch(/how it was gathered isn't something anyone here can vouch for/);
 	});
 
 	it('commits to keeping the page current and points at the build receipt', () => {

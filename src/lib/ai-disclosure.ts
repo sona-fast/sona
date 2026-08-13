@@ -25,15 +25,15 @@ export interface AiDisclosure {
 
 export function defaultAiDisclosure(): AiDisclosure {
 	return {
-		intro: "This site is built and written with AI. Here's what that means.",
+		intro: "This site runs on Sona, which is built with AI coding tools. Here's what that means.",
 		topics: [
 			{
-				lead: 'The code.',
-				body: "Most of it is written by Claude Code, an AI coding agent, working from my designs and decisions. I review and approve every change, and every deploy happens because I pressed the button. The longer version, including how changes are tested and reviewed, is in the AI_POLICY.md file that ships with this site's source."
+				lead: 'The software.',
+				body: "Sona is made by the Sona Team, not by the person who runs this site. Most of its code is written by Claude Code, an AI coding agent, working from their designs and decisions. They review and approve every change, and every deploy happens because a person pressed the button. The longer version, including how changes are tested and reviewed, is in the AI_POLICY.md file that ships with this site's source."
 			},
 			{
-				lead: 'The text.',
-				body: 'Most of the words on this site, including this page, were drafted with AI and edited and approved by me.'
+				lead: 'The words.',
+				body: 'Most of the wording built into Sona, including this page, was drafted with AI and edited by the Sona Team. Anything written for this site in particular is by whoever runs it.'
 			},
 			{
 				lead: 'The art.',
@@ -41,11 +41,11 @@ export function defaultAiDisclosure(): AiDisclosure {
 			},
 			{
 				lead: 'Your data.',
-				body: "The running site never calls an AI service, so nothing you do is sent to one as you browse. When I'm working on the site, my tools can read its logs and database the way any developer would, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service. Model training is switched off on the accounts I use, and CodeRabbit states that the data from its reviews is never used for training. The privacy policy has the details."
+				body: "The running site never calls an AI service, so nothing you do is sent to one as you browse. When the software is being worked on, the developer's tools can read this site's logs and database the way any developer would, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service. Model training is switched off on the accounts used, and CodeRabbit states that the data from its reviews is never used for training. The privacy policy has the details."
 			},
 			{
 				lead: 'The model.',
-				body: "Claude is trained on scraped text and code. That data isn't mine and I can't vouch for how it was gathered."
+				body: "Claude is trained on scraped text and code. That data isn't Sona's, and how it was gathered isn't something anyone here can vouch for."
 			}
 		],
 		closer:
