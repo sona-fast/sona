@@ -18,7 +18,23 @@ function nodeModulesRealpath(): string {
 	}
 }
 
+// Build receipt for the footer (SONA-167): the commit this build came from and
+// the repository it lives in. Deploys run through each fork's own GitHub
+// Actions (deploy.yml), where these vars are always set — so every fork gets
+// its OWN repo URL, never a hardcoded upstream link that would 404 on commits
+// that only exist in the fork. Local/dev builds have neither var and the
+// footer omits the line.
+const buildSha = process.env.GITHUB_SHA ?? '';
+const buildRepoUrl =
+	process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY
+		? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`
+		: '';
+
 export default defineConfig({
+	define: {
+		__BUILD_COMMIT_SHA__: JSON.stringify(buildSha),
+		__BUILD_REPO_URL__: JSON.stringify(buildRepoUrl)
+	},
 	server: {
 		fs: {
 			allow: [searchForWorkspaceRoot(process.cwd()), nodeModulesRealpath()]

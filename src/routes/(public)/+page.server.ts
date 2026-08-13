@@ -1,7 +1,7 @@
 import { getReadDb } from '$lib/server/db';
 import { images, artists, imageTags, tags } from '$lib/server/db/schema';
 import { eq, desc, and, notInArray, inArray, isNull, sql } from 'drizzle-orm';
-import { getSettings, settingsFallback } from '$lib/server/settings';
+import { getSettings, settingsFallback, toPublicSettings } from '$lib/server/settings';
 import { probeArtContent, shareHasContent } from '$lib/server/presence';
 import { navGateFlags, PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
 import { withTimeout } from '$lib/server/timeout';
@@ -42,7 +42,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		]);
 		const [stickersEnabled, collectionsEnabled] = await navFlags;
 		return {
-			settings,
+			settings: toPublicSettings(settings),
 			recentImages: [],
 			mosaicImageUrls: [],
 			host: url.host,
@@ -149,7 +149,7 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	return {
 		recentImages: imagesWithTags,
 		mosaicImageUrls,
-		settings,
+		settings: toPublicSettings(settings),
 		host: url.host,
 		// The mosaic branch renders no path cards; true keeps the type uniform.
 		pathPresence: { art: true, share: true },

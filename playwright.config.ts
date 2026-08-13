@@ -18,10 +18,26 @@ import {
 // session-mutating password-recovery spec, an isolated one for the ut-stat
 // spec (needs UPLOADTHING_TOKEN + the UT interceptor, which would perturb the
 // shared specs), and an isolated one for the upload spec — see below.
-const PORT = 4179;
-const RECOVERY_PORT = 4180;
-const UT_PORT = 4181;
-const UPLOAD_PORT = 4182;
+//
+// The four ports are derived from one base so a concurrent run can take a
+// private block: set SONA_E2E_BASE_PORT and this run binds base..base+3 instead
+// of 4179-4182. Without it, every checkout and every agent binds the same four
+// ports, and a second run either dies on --strictPort or (worse) gets its
+// servers killed by whoever assumes the listener is their own stray (SONA-164).
+// `||`, not `??`, for the same reason as persistRoot in tests/e2e/paths.ts: a
+// present-but-empty value means "unset". ('0' stays truthy as a string, so an
+// explicitly invalid port still trips the check below rather than silently
+// falling back.)
+const BASE_PORT = Number(process.env.SONA_E2E_BASE_PORT || 4179);
+if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_532) {
+	throw new Error(
+		`SONA_E2E_BASE_PORT must be an integer in 1024-65532 (needs 4 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
+	);
+}
+const PORT = BASE_PORT;
+const RECOVERY_PORT = BASE_PORT + 1;
+const UT_PORT = BASE_PORT + 2;
+const UPLOAD_PORT = BASE_PORT + 3;
 
 // Point `vite dev` at the E2E-only wrangler config + throwaway persist dir (see
 // svelte.config.js, which honours these envs) so tests run against the DB the

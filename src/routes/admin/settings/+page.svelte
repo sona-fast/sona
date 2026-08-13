@@ -61,6 +61,8 @@
 		}
 	});
 	let privacyPolicy = $state(data.settings.privacyPolicy);
+	let aiPageEnabled = $state(data.settings.aiPageEnabled);
+	let aiPageText = $state(data.settings.aiPageText);
 	let termsOfService = $state(data.settings.termsOfService);
 
 	// Sona / character profile — feeds the /art page of the threePath landing.
@@ -258,6 +260,8 @@
 		siteUrl = data.settings.siteUrl;
 		emailLanguage = data.settings.emailLanguage || baseLocale;
 		privacyPolicy = data.settings.privacyPolicy;
+		aiPageEnabled = data.settings.aiPageEnabled;
+		aiPageText = data.settings.aiPageText;
 		termsOfService = data.settings.termsOfService;
 		adminEmail = data.adminEmail;
 		sonaSpecies = data.settings.sonaSpecies;
@@ -381,6 +385,20 @@
 			<label>
 				<span>{m.admin_settings_terms_label()}</span>
 				<textarea class="input" rows="4" name="termsOfService" bind:value={termsOfService} placeholder={m.admin_settings_legal_placeholder()}></textarea>
+			</label>
+			<label class="checkbox-row">
+				<!-- An unchecked checkbox posts nothing; this marker is how the action
+				     tells "toggle off" from "form without the toggle" (#60). -->
+				<input type="hidden" name="aiPageEnabledPresent" value="1" />
+				<input type="checkbox" name="aiPageEnabled" bind:checked={aiPageEnabled} />
+				<span class="checkbox-text">
+					<span class="checkbox-title">{m.admin_settings_ai_page_label()}</span>
+					<span class="checkbox-desc">{m.admin_settings_ai_page_hint()}</span>
+				</span>
+			</label>
+			<label>
+				<span>{m.admin_settings_ai_text_label()}</span>
+				<textarea class="input" rows="4" name="aiPageText" bind:value={aiPageText} placeholder={m.admin_settings_legal_placeholder()}></textarea>
 			</label>
 		</section>
 

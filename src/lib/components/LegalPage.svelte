@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import Meta from '$lib/components/Meta.svelte';
 	import { formatDate } from '$lib';
-	import { legalUpdatedDate, type LegalSection } from '$lib/legal';
+	import { legalUpdatedDate, splitParagraphs, metaDescription, type LegalSection } from '$lib/legal';
 	import * as m from '$lib/paraglide/messages';
 
 	let {
@@ -25,9 +25,7 @@
 
 	// Meta description: first paragraph of the override, else the first default
 	// section's first paragraph. Trimmed to a sane length for social cards.
-	let description = $derived(
-		(override.trim() || sections[0]?.body[0]).slice(0, 200)
-	);
+	let description = $derived(metaDescription(override.trim() || sections[0]?.body[0] || ''));
 
 	// "Last updated" date from a stable source (the owner's save stamp, or the
 	// per-release defaults date) — never `new Date()`, which would always be today.
@@ -44,10 +42,8 @@
 
 	{#if override.trim()}
 		<!-- Auto-escaped plain text split into paragraphs on blank lines; single
-		     newlines within a paragraph are preserved via CSS (no {@html}).
-		     Normalize CRLF first — browsers submit <textarea> line breaks as \r\n,
-		     so a blank line arrives as \r\n\r\n and would otherwise never split. -->
-		{#each override.replace(/\r\n?/g, '\n').trim().split(/\n\s*\n/) as paragraph}
+		     newlines within a paragraph are preserved via CSS (no {@html}). -->
+		{#each splitParagraphs(override) as paragraph}
 			<p class="legal-override">{paragraph}</p>
 		{/each}
 	{:else}

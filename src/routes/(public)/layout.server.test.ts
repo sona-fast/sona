@@ -38,6 +38,51 @@ async function loadData(platform: App.Platform): Promise<LayoutData> {
 
 beforeEach(() => clearSettingsCache());
 
+describe('(public) layout load — settings payload', () => {
+	// The /ai override text must NOT ride the layout payload: this load runs on
+	// every public page, and a fork that turned the page off would otherwise keep
+	// shipping its retired copy to every visitor (/ai's own load returns it).
+	it('strips aiPageText while keeping the toggle the footer needs', async () => {
+		const { sqlite, platform } = makeDb();
+		sqlite
+			.prepare("INSERT INTO site_settings (key, value) VALUES ('aiPageText', ?)")
+			.run('Owner override copy.');
+
+		const data = (await loadData(platform)) as unknown as {
+			settings: Record<string, unknown>;
+		};
+
+		expect(data.settings).not.toHaveProperty('aiPageText');
+		expect(data.settings.aiPageEnabled).toBe(true);
+		expect(JSON.stringify(data)).not.toContain('Owner override copy.');
+	});
+
+	// The strip lives in toPublicSettings so no public load can forget it — the
+	// first version stripped only here, and the homepage, /about and the whole
+	// (paths) group kept shipping the override to every visitor.
+	it('is applied by toPublicSettings, which every public load returns through', async () => {
+		const { toPublicSettings } = await import('$lib/server/settings');
+		const full = { aiPageEnabled: false, aiPageText: 'Retired copy.', siteName: 'X' };
+		const pub = toPublicSettings(full as never) as Record<string, unknown>;
+		expect(pub).not.toHaveProperty('aiPageText');
+		expect(pub.aiPageEnabled).toBe(false);
+
+		// Pin the CALL, not the identifier: a leftover import satisfies a bare
+		// substring scan, so reverting `settings: toPublicSettings(settings)` to
+		// `settings` would leave this green while the override leaked again.
+		const sources = ['(public)/+layout.server.ts', '(public)/+page.server.ts', '(public)/about/+page.server.ts', '(paths)/+layout.server.ts'];
+		const { readFileSync } = await import('node:fs');
+		for (const rel of sources) {
+			const src = readFileSync(new URL(`../../routes/${rel}`, import.meta.url), 'utf8');
+			// Match the RETURN site: a bare `const publicSettings = toPublicSettings(...)`
+			// would stay green if the return reverted to the unstripped object.
+			expect(src, `${rel} must RETURN settings through toPublicSettings`).toMatch(
+				/settings: toPublicSettings\(|settings: publicSettings/
+			);
+		}
+	});
+});
+
 describe('(public) layout load — nav content gating', () => {
 	it('hides both gated links on an empty fork', async () => {
 		const { platform } = makeDb();

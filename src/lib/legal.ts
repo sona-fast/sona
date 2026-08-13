@@ -27,7 +27,7 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
-export const LEGAL_DEFAULTS_UPDATED = '2026-08-10';
+export const LEGAL_DEFAULTS_UPDATED = '2026-08-12';
 
 /**
  * Resolve the "Last updated" date to show on a legal page from a *stable* source
@@ -44,10 +44,45 @@ export function legalUpdatedDate(override: string, legalUpdatedAt: string): stri
 	return LEGAL_DEFAULTS_UPDATED;
 }
 
+/**
+ * Split owner-override plain text into paragraphs on blank lines, for rendering
+ * as separate auto-escaped <p> elements. CRLF is normalized first — browsers
+ * submit <textarea> line breaks as \r\n, so a blank line arrives as \r\n\r\n
+ * and would otherwise never split.
+ */
+export function splitParagraphs(text: string): string[] {
+	return text
+		.replace(/\r\n?/g, '\n')
+		.trim()
+		.split(/\n\s*\n/);
+}
+
+/**
+ * Meta description for a legal-style page: cut at a word boundary and add an
+ * ellipsis only when something was actually removed, so a share card never
+ * ends mid-word. Shared by /privacy, /terms and /ai.
+ */
+export function metaDescription(text: string, limit = 200): string {
+	const trimmed = text.trim();
+	if (trimmed.length <= limit) return trimmed;
+	const cut = trimmed.slice(0, limit);
+	const lastSpace = cut.lastIndexOf(' ');
+	return `${lastSpace > 0 ? cut.slice(0, lastSpace) : cut}\u2026`;
+}
+
 export interface LegalOptions {
 	siteName: string;
 	/** From the `contactEmail` setting; empty falls back to a generic phrase. */
 	contactEmail: string;
+	/**
+	 * Whether this site publishes the /ai disclosure (the `aiPageEnabled`
+	 * setting). An owner who declined that page has told us they do not stand
+	 * behind its claims, so the processor paragraph naming the AI development
+	 * tools is omitted here too — otherwise the opt-out would hide the page
+	 * while the legal document kept naming processors they may not use. Owners
+	 * whose practice differs either way set their own text in Settings → Legal.
+	 */
+	aiToolsDisclosed?: boolean;
 }
 
 function contactLine(opts: LegalOptions): string {
@@ -69,16 +104,18 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'Information we collect',
 			body: [
-				'From visitors, we do not require an account and do not require you to provide personal information to browse. The site stores a small preference cookie for your light/dark theme and a browser-local setting for your preferred gallery layout. It does not set advertising or third-party analytics cookies by default.',
+				"From visitors, we do not require an account and do not require you to provide personal information to browse. The site stores a small preference cookie for your light/dark theme and a browser-local setting for your preferred gallery layout. It sets no advertising or analytics cookies. On the public pages, the third-party scripts and files the site loads set no cookies for advertising or cross-site tracking.",
 				'When the site owner signs in to manage the site, an administrative session cookie is set for the owner only.',
 				'Our hosting and content-delivery provider (Cloudflare) may process limited technical data such as IP address and request metadata to serve and secure the site. This is standard server operation, not tracking by us.',
-				'Some sites turn on an optional built-in analytics feature. If this site has visitor analytics enabled, it keeps aggregate counters in its own database to understand how the site is used: how often pages are viewed, which site referred a visit, visitor country, device type (desktop, mobile, or tablet), and how often the download button is pressed. These are counters, not profiles: they use no cookies, store no IP addresses, and keep no records tied to an individual visitor, and none of it is shared with any other site or service. The page-view, referrer, country, and device counters are deleted by a weekly cleanup once they are about 35 days old. The download count is kept as a simple running total.'
+				'Some sites turn on an optional built-in analytics feature. If this site has visitor analytics enabled, it keeps aggregate counters in its own database to understand how the site is used: how often pages are viewed, which site referred a visit, visitor country, device type (desktop, mobile, or tablet), and how often the download button is pressed. These are counters, not profiles: they use no cookies, store no IP addresses, and keep no records tied to an individual visitor, and none of it is shared with any other site or service. The page-view, referrer, country, and device counters are deleted by a weekly cleanup once they are about 35 days old. The download count is kept as a simple running total.',
+				'When the site is served through Cloudflare, Cloudflare may add its own Web Analytics script to pages. It measures page views and performance for the site owner. Cloudflare states that this script uses no cookies, does not identify individual visitors, and does not track them across sites.'
 			]
 		},
 		{
 			heading: 'Artwork and third-party attribution',
 			body: [
 				`${site} displays artwork and attributes it to the artists who created it, which may include their names, handles, and links to their profiles. Fursuit photographs may be attributed to their photographers, and 3D avatar models to the artists who modeled, rigged, or textured them.`,
+				'Artist profile pictures are normally copied to our own storage, but when that copy is unavailable your browser loads the image from the artist\'s own host (for example X, Bluesky, or our upload provider), which receives your IP address and the page you are viewing.',
 				'If you are an artist, photographer, or other rights holder featured here and want your attribution corrected or your work removed, contact us and we will act promptly.'
 			]
 		},
@@ -92,7 +129,19 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 		{
 			heading: 'Service providers',
 			body: [
-				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, and storage for images, video clips, and 3D avatar model files), on some sites a file-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services."
+				"We rely on infrastructure providers to run the site, which may include Cloudflare (hosting, CDN, Web Analytics, and storage for images, video clips, and 3D avatar model files), on some sites a file-upload provider, and, where email is configured, an email delivery provider (Resend) that processes the site owner's account email for messages such as password resets. They process data only to provide these services. Public pages also load web fonts from Google Fonts, so Google receives your IP address, browser user-agent, and the page you are viewing when those files are fetched.",
+				// The CATEGORY is disclosed unconditionally: an owner who declines the
+				// /ai page may still use these tools, and dropping the whole
+				// paragraph with the toggle would delete a real processor
+				// disclosure. Only the vendor NAMES follow the affirmation, since
+				// those are the part a declining owner has not stood behind.
+				'Sites running this software are typically built and maintained with AI development tools, which do not run as part of the site itself, so nothing you do here is sent to them as you browse. When the site owner or their developer is diagnosing a problem, the operational data they share with development or code-review tools can include server logs and database records, and those logs can contain request data such as IP addresses, page URLs, and browser user-agent strings.',
+				...(opts.aiToolsDisclosed === false
+					? []
+					: [
+							"For this site those tools are Anthropic's Claude, which writes and debugs code under the developer's direction, and CodeRabbit, a code review service that reads proposed changes."
+						]),
+				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) and Bluesky (fetching artist avatars), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
 			]
 		},
 		{

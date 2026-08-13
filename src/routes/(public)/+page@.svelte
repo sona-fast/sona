@@ -148,7 +148,7 @@
 		<div class="desktop-footer">
 			<Footer settings={data.settings} host={data.host} />
 		</div>
-		<MobileCredit host={data.host} />
+		<MobileCredit settings={data.settings} host={data.host} />
 		<MobileNav stickersEnabled={data.stickersEnabled} />
 	</div>
 {/if}

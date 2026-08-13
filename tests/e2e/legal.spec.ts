@@ -15,6 +15,28 @@ async function login(page: Page) {
 	await adminLogin(page, PASSWORD);
 }
 
+// The three saveSite-submitting tests in this file share one dance: wait for
+// hydration (a client-only tab switch is the gate), return to the Site tab,
+// then POST and assert the response. Hydration matters because an unhydrated
+// form does a real navigation, which aborts the goto that follows.
+async function openSiteTab(page: Page) {
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Storage', exact: true }).click();
+		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
+	}).toPass();
+	await page.getByRole('button', { name: 'Site', exact: true }).click();
+}
+
+async function saveSiteSettings(page: Page) {
+	const [resp] = await Promise.all([
+		page.waitForResponse(
+			(r) => r.request().method() === 'POST' && r.url().includes('/admin/settings')
+		),
+		page.getByRole('button', { name: 'Save site settings' }).click()
+	]);
+	expect(resp.ok()).toBeTruthy();
+}
+
 test('default legal pages render and are reachable from the footer', async ({ page }) => {
 	// Defaults render (no override seeded).
 	await page.goto('/privacy');
@@ -128,4 +150,111 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	// line now reflects the save date (today) rather than the built-in defaults' date.
 	const today = new Date().toISOString().slice(0, 10).replaceAll('-', '.');
 	await expect(page.locator('.legal-updated')).toHaveText(`Last updated ${today}`);
+});
+
+// --- /ai disclosure page (SONA-167) -----------------------------------------
+// Same shape as the legal cases above: it lives in this spec because it also
+// submits the saveSite form, and this is the only spec permitted to do that
+// (serial mode; a parallel spec would clobber the shared seeded DB).
+
+test('the AI disclosure page renders and is reachable from the footer', async ({ page }) => {
+	await page.goto('/ai');
+	await expect(page.getByRole('heading', { level: 1, name: 'AI and this site' })).toBeVisible();
+	// The five disclosure topics are real headings, so the outline is navigable.
+	await expect(page.getByRole('heading', { name: 'The code.' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'The art.' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Your data.' })).toBeVisible();
+
+	// Reachable from any public page's footer.
+	await page.goto('/');
+	await page.locator('.footer .legal-links a[href="/ai"]').click();
+	await expect(page).toHaveURL(/\/ai$/);
+});
+
+test('the AI page is reachable on mobile (desktop footer hidden < 768px)', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto('/');
+	// Below the breakpoint the desktop footer is display:none and MobileCredit
+	// carries the legal links — including /ai, or phone visitors could never
+	// reach the disclosure at all.
+	await expect(page.locator('.footer')).toBeHidden();
+	const aiLink = page.locator('.mobile-credit .legal-links a[href="/ai"]');
+	await expect(aiLink).toBeVisible();
+	await aiLink.click();
+	await expect(page.getByRole('heading', { level: 1, name: 'AI and this site' })).toBeVisible();
+});
+
+test('an owner override replaces the AI page defaults and the toggle removes the page', async ({
+	page
+}) => {
+	const override = "My own words.\n\nSecond paragraph <script>window.__aiXssRan = true</script>";
+
+	await login(page);
+	await page.goto('/admin/settings');
+
+	await openSiteTab(page);
+	await page.fill('textarea[name="aiPageText"]', override);
+	await saveSiteSettings(page);
+
+	page.on('dialog', async (d) => {
+		await d.dismiss();
+		throw new Error('AI page override executed as HTML — XSS');
+	});
+
+	await page.goto('/ai');
+	await expect(page.getByText('My own words.')).toBeVisible();
+	// The default copy is gone.
+	await expect(page.getByRole('heading', { name: 'The code.' })).toHaveCount(0);
+	// The <script> renders as literal text and never runs.
+	await expect(
+		page.getByText('<script>window.__aiXssRan = true</script>', { exact: false })
+	).toBeVisible();
+	expect(
+		await page.evaluate(() => (window as unknown as { __aiXssRan?: boolean }).__aiXssRan)
+	).toBeUndefined();
+	await expect(page.locator('.ai-page .ai-override')).toHaveCount(2);
+
+	// Turning the page off removes BOTH the footer link and the route itself —
+	// the disclosure never lingers as an unlinked page.
+	await page.goto('/admin/settings');
+	await openSiteTab(page);
+	await page.uncheck('input[name="aiPageEnabled"]');
+	// Clear the privacy override the earlier case in this serial file left
+	// behind, so the /privacy assertions below read the DEFAULT policy — which
+	// is the only place the gated paragraph exists. Without this the page
+	// renders that override and the assertions describe the wrong document.
+	await page.fill('textarea[name="privacyPolicy"]', '');
+	await saveSiteSettings(page);
+
+	await page.goto('/');
+	await expect(page.locator('.footer .legal-links a[href="/ai"]')).toHaveCount(0);
+	const gone = await page.goto('/ai');
+	expect(gone?.status()).toBe(404);
+
+	// Declining the disclosure also drops the vendor names from the default
+	// privacy policy, so the owner is not left publishing processors they may
+	// not use. The category disclosure stays, because it still might be true.
+	await page.goto('/privacy');
+	await expect(page.getByText('CodeRabbit')).toHaveCount(0);
+	await expect(page.getByText('Anthropic')).toHaveCount(0);
+	await expect(page.getByText(/development or code-review tools/)).toBeVisible();
+	await expect(page.getByText(/Resend/)).toBeVisible();
+});
+
+// The override/toggle cases above mutate settings on the shared seeded DB.
+// Serial retries restart at the first test, which would then hit a 404 /ai and
+// fail for the wrong reason, so put the fork back the way this file found it.
+test.afterAll(async ({ browser }) => {
+	const page = await browser.newPage();
+	try {
+		await login(page);
+		await page.goto('/admin/settings');
+		await openSiteTab(page);
+		await page.fill('textarea[name="aiPageText"]', '');
+		await page.fill('textarea[name="privacyPolicy"]', '');
+		await page.check('input[name="aiPageEnabled"]');
+		await saveSiteSettings(page);
+	} finally {
+		await page.close();
+	}
 });

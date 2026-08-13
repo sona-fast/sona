@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import {
+	metaDescription,
 	defaultPrivacyPolicy,
 	defaultTerms,
 	legalUpdatedDate,
+	splitParagraphs,
 	LEGAL_DEFAULTS_UPDATED
 } from './legal';
 
@@ -88,6 +91,64 @@ describe('defaultPrivacyPolicy', () => {
 			.join('\n');
 		expect(text).toContain('Resend');
 	});
+
+	// SONA-167: the /ai disclosure page names Anthropic and CodeRabbit as
+	// dev-time processors; /privacy must say the same or the two pages publicly
+	// contradict each other on the trust question.
+	it('names the AI development tools as dev-time processors', () => {
+		const text = defaultPrivacyPolicy(withEmail)
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(text).toContain('Claude');
+		expect(text).toContain('CodeRabbit');
+		// The runtime boundary, honestly scoped: nothing browsing-time goes to the
+		// tools, but shared diagnostic logs can carry request data — both halves
+		// must stay, or the paragraph overclaims again.
+		expect(text).toMatch(/nothing you do here is sent to them as you browse/);
+		expect(text).toMatch(/can contain request data such as IP addresses/);
+	});
+
+	// An owner who declined the /ai affirmation has said they do not stand
+	// behind its claims, so the policy must not keep naming AI processors on
+	// their behalf — the opt-out would otherwise hide the page while the legal
+	// document carried the same assertions.
+	it('omits the AI-tools processor paragraph when the owner declined the disclosure', () => {
+		const declined = defaultPrivacyPolicy({ ...withEmail, aiToolsDisclosed: false })
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(declined).not.toContain('CodeRabbit');
+		expect(declined).not.toMatch(/Anthropic/);
+		// ...but the CATEGORY disclosure stays: a declining owner may still use
+		// such tools, and the visitor-facing fact (diagnostic logs carry IPs)
+		// must not disappear with the vendor names.
+		expect(declined).toMatch(/development or code-review tools/);
+		expect(declined).toMatch(/IP addresses, page URLs, and browser user-agent strings/);
+		// The rest of the policy is unchanged.
+		expect(declined).toContain('Resend');
+		expect(declined).toMatch(/Google Fonts/);
+	});
+
+	// Cloudflare injects its Web Analytics beacon into proxied responses on
+	// every fork (see the CSP allowance for static.cloudflareinsights.com);
+	// "no third-party analytics cookies" alone reads as weasel wording to
+	// anyone with a network tab open, so the script itself must be disclosed.
+	it('discloses the Cloudflare Web Analytics script and the feature integrations', () => {
+		const text = defaultPrivacyPolicy(withEmail)
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(text).toMatch(/Web Analytics script/);
+		// app.css imports web fonts from Google on every public page, so Google
+		// is a recipient of visitor IPs whether or not we mention the beacon.
+		expect(text).toMatch(/Google Fonts/);
+		expect(text).toContain('Turnstile');
+		expect(text).toContain('Telegram');
+		expect(text).toContain('cons.fyi');
+		// The integrations list reads exhaustive, so it must actually be: every
+		// remote service a feature calls out to is named (SONA-167 round 1).
+		expect(text).toContain('Bluesky');
+		expect(text).toContain('FurTrack');
+		expect(text).toMatch(/shared artist registry/);
+	});
 });
 
 describe('defaultTerms', () => {
@@ -96,6 +157,54 @@ describe('defaultTerms', () => {
 		expect(sections.length).toBeGreaterThan(0);
 		const text = sections.flatMap((s) => s.body).join('\n');
 		expect(text).toContain('Testsona');
+	});
+});
+
+describe('privacy page wiring', () => {
+	// The aiToolsDisclosed gating is exercised above at the pure-function level,
+	// but /privacy is its ONLY caller — deleting the prop leaves the value
+	// undefined, the === false branch never fires, and a declining owner's
+	// policy names the vendors anyway. Pin the call form, not the identifier.
+	it('passes the disclosure flag from settings into the default policy', () => {
+		const src = readFileSync(
+			new URL('../routes/(public)/privacy/+page.svelte', import.meta.url),
+			'utf8'
+		);
+		expect(src).toMatch(/aiToolsDisclosed:\s*settings\.aiPageEnabled/);
+	});
+});
+
+describe('metaDescription', () => {
+	it('returns short text unchanged', () => {
+		expect(metaDescription('Short enough.')).toBe('Short enough.');
+	});
+
+	it('cuts at a word boundary and marks the truncation', () => {
+		const long = 'word '.repeat(60).trim();
+		const out = metaDescription(long);
+		expect(out.length).toBeLessThanOrEqual(201);
+		expect(out.endsWith('\u2026')).toBe(true);
+		expect(out).not.toMatch(/wor\u2026$/);
+	});
+
+	it('adds no ellipsis when nothing was removed', () => {
+		expect(metaDescription('a'.repeat(200))).not.toContain('\u2026');
+	});
+});
+
+describe('splitParagraphs', () => {
+	// Shared by the /privacy, /terms and /ai override paths, so a fix here (or a
+	// regression) reaches all three at once.
+	it('splits on blank lines and normalizes CRLF from textarea submissions', () => {
+		expect(splitParagraphs('One.\r\n\r\nTwo.')).toEqual(['One.', 'Two.']);
+	});
+
+	it('keeps single newlines inside a paragraph (CSS renders them)', () => {
+		expect(splitParagraphs('One.\nStill one.')).toEqual(['One.\nStill one.']);
+	});
+
+	it('trims surrounding blank space', () => {
+		expect(splitParagraphs('\n\n  Only.  \n\n')).toEqual(['Only.']);
 	});
 });
 
@@ -134,7 +243,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '29e991d6a419e3d7cfe8a8b2101abc29b919fcf054dc1ea7c8be4b5af3c6a8b4';
+	const RECORDED_TEXT_HASH = 'aa60dcb85c8993caf82ede16f450654f094f889ca24a99424a69f84e0aeeb568';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

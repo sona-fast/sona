@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -117,6 +118,58 @@ function saveSiteEvent(platform: App.Platform, fields: Record<string, string>) {
 		request: new Request('https://taro.surf/admin/settings?/saveSite', { method: 'POST', body })
 	} as never;
 }
+
+describe('settings saveSite — /ai disclosure page (SONA-167)', () => {
+	// Source pin: the action distinguishes "toggle off" from "form without the
+	// toggle" by this hidden marker. Drop it and unchecking the box becomes a
+	// silent no-op (absent means unmanaged), with the unit suite still green.
+	it('the settings form pairs the toggle with its present-marker', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(src).toMatch(/<input type="hidden" name="aiPageEnabledPresent"/);
+		expect(src).toMatch(/<input type="checkbox" name="aiPageEnabled"/);
+	});
+
+	it('stores the toggle and the override text, stamping the override date', async () => {
+		const { db, platform } = makeDb();
+
+		const result = await actions.saveSite(
+			saveSiteEvent(platform, {
+				siteName: 'Taro Surf',
+				aiPageEnabledPresent: '1',
+				aiPageEnabled: 'on',
+				aiPageText: 'My own words about AI.'
+			})
+		);
+
+		expect(result).toMatchObject({ success: true });
+		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('true');
+		expect(await getRawSetting(db, 'aiPageText')).toBe('My own words about AI.');
+		// Stamped like the privacy/terms overrides, so /ai can date owner text.
+		expect(await getRawSetting(db, 'aiPageUpdatedAt')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+	});
+
+	it('turns the page off when the form carries the marker but no checkbox', async () => {
+		const { db, platform } = makeDb();
+
+		await actions.saveSite(
+			saveSiteEvent(platform, { siteName: 'Taro Surf', aiPageEnabledPresent: '1' })
+		);
+
+		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('false');
+	});
+
+	// The #60 absent-means-unmanaged rule: a checkbox posts nothing when
+	// unchecked, so without the marker field a partial save would silently
+	// disable a page the owner never touched.
+	it('leaves the stored toggle alone when the form does not carry it', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'aiPageEnabled', 'true');
+
+		await actions.saveSite(saveSiteEvent(platform, { siteName: 'Taro Surf' }));
+
+		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('true');
+	});
+});
 
 describe('settings saveSite — three-path profile fields', () => {
 	it('persists the sona profile + contact email and drops malformed swatches', async () => {

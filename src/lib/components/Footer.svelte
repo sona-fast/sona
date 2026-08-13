@@ -7,9 +7,10 @@
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import SonaBadge from '$lib/components/SonaBadge.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import type { SiteSettings } from '$lib/server/settings';
+	import BuildReceipt from '$lib/components/BuildReceipt.svelte';
+	import type { PublicSiteSettings } from '$lib/server/settings';
 
-	let { settings, host }: { settings: SiteSettings; host: string } = $props();
+	let { settings, host }: { settings: PublicSiteSettings; host: string } = $props();
 </script>
 
 <footer class="footer">
@@ -19,8 +20,12 @@
 			<nav class="legal-links" aria-label={m.footer_legal_label()}>
 				<a href="/privacy">{m.footer_privacy()}</a>
 				<a href="/terms">{m.footer_terms()}</a>
+				{#if settings.aiPageEnabled}
+					<a href="/ai">{m.footer_ai()}</a>
+				{/if}
 			</nav>
 			<SonaBadge {host} />
+			<BuildReceipt linked={settings.aiPageEnabled} />
 		</div>
 		<div class="social-links">
 			{#if settings.twitterUrl}
@@ -60,8 +65,12 @@
 
 	.footer-cred {
 		display: flex;
+		/* With the build receipt the cluster outgrows mid widths (~769-1024px);
+		 * wrapping onto a second row beats crushing the gap to zero. The badge
+		 * itself is an atomic inline-flex, so its phrase never breaks mid-way. */
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 14px;
+		gap: 6px 14px;
 		/* The badge is bare/inherit: its text takes this muted color so only the
 		 * ember stays orange. */
 		color: var(--muted-foreground);

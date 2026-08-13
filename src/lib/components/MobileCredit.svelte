@@ -1,21 +1,29 @@
 <script lang="ts">
 	import SonaBadge from '$lib/components/SonaBadge.svelte';
 	import * as m from '$lib/paraglide/messages';
+	import BuildReceipt from '$lib/components/BuildReceipt.svelte';
+	import type { PublicSiteSettings } from '$lib/server/settings';
 
 	// A slim "made with sona" credit shown only below the 768px breakpoint, where
 	// the desktop Footer is hidden and MobileNav (a fixed bottom bar) takes over.
 	// Rendered at the end of the scrollable content (not fixed); its bottom
 	// padding clears the fixed nav so the badge is fully visible when scrolled.
-	let { host }: { host: string } = $props();
+	// Carries the same legal nav (incl. the gated /ai link) and build receipt as
+	// Footer — below 768px this is the ONLY place they exist.
+	let { settings, host }: { settings: PublicSiteSettings; host: string } = $props();
 </script>
 
-<div class="mobile-credit">
+<footer class="mobile-credit">
 	<nav class="legal-links" aria-label={m.footer_legal_label()}>
 		<a href="/privacy">{m.footer_privacy()}</a>
 		<a href="/terms">{m.footer_terms()}</a>
+		{#if settings.aiPageEnabled}
+			<a href="/ai">{m.footer_ai()}</a>
+		{/if}
 	</nav>
 	<SonaBadge {host} />
-</div>
+	<BuildReceipt linked={settings.aiPageEnabled} />
+</footer>
 
 <style>
 	.mobile-credit {

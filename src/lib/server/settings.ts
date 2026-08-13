@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { siteSettings } from './db/schema';
 import { APP_NAME } from '$lib/config';
 import { DEFAULT_GALLERY_SORT, isValidGallerySort, type GallerySort } from '$lib/gallery';
@@ -35,6 +35,33 @@ export interface SiteSettings {
 	 * that page's override is saved. Drives its "Last updated" line when an
 	 * override is set. Empty → the page shows the built-in defaults' date instead. */
 	termsUpdatedAt: string;
+	/** Whether the /ai disclosure page (and its footer link) is served. Stored
+	 * as 'true'/'false'; ABSENT MEANS ON (SONA-167).
+	 *
+	 * The polarity is a deliberate operator decision, not an oversight. Every
+	 * site that is already live keeps the page on, and the Settings toggle is
+	 * how an owner turns it off; the marketing site carries a platform-level
+	 * version of the same disclosure (SONA-178), so the software's use of AI is
+	 * explained for every fork whether or not that fork publishes its own page.
+	 *
+	 * New installs do not rely on the default: the setup wizard writes the row
+	 * explicitly from its affirmation checkbox, so the first-person claims in
+	 * the default copy are owner-affirmed there. One path skips that — a fork
+	 * bootstrapped with the ADMIN_PASSWORD env var counts as setup-complete
+	 * (see isSetupComplete) and never runs the wizard, so it lands on the
+	 * absent default like a pre-existing install. Both cases are covered by the
+	 * SONA-167 section in UPDATING.md, which names the claims the page makes in
+	 * the owner's voice and where to turn it off. */
+	aiPageEnabled: boolean;
+	/** Owner-editable override for the /ai page body (plain text). Empty → the
+	 * default disclosure copy from `$lib/ai-disclosure` is shown instead.
+	 * Server-only beyond /ai itself: the (public) layout strips it from the
+	 * client payload, and /ai's own load returns it. */
+	aiPageText: string;
+	/** Date (YYYY-MM-DD) the /ai override text was last changed, stamped when
+	 * that page's override is saved. Drives its "Last updated" line when an
+	 * override is set. Empty → no line (the default copy shows none). */
+	aiPageUpdatedAt: string;
 
 	// --- Sona / reference profile (shown on /art, part of the threePath landing) ---
 	// The reference sheet itself is the most recent published gallery image
@@ -109,6 +136,28 @@ export function parseLines(raw: string): string[] {
 		.filter(Boolean);
 }
 
+/**
+ * The settings shape public pages receive. `aiPageText` is stripped by the
+ * (public) layout load: that load rides every public page, and a fork that
+ * turned /ai off must not keep shipping its retired copy to every visitor —
+ * /ai's own load returns the override, behind its 404 gate.
+ */
+export type PublicSiteSettings = Omit<SiteSettings, 'aiPageText'>;
+
+/**
+ * Strip the settings that must not ride a public page's client payload.
+ *
+ * Today that is `aiPageText`: the layout load runs on EVERY public page, so
+ * shipping the override there would keep publishing a fork's /ai copy after
+ * the owner turned the page off. /ai's own load returns it, behind that
+ * route's 404 gate. Every public load returns settings through this helper so
+ * a new one cannot forget the strip.
+ */
+export function toPublicSettings(settings: SiteSettings): PublicSiteSettings {
+	const { aiPageText: _aiPageText, ...publicSettings } = settings;
+	return publicSettings;
+}
+
 // Neutral, brand-agnostic defaults. A real deployment overrides these via the
 // first-run setup wizard / admin Settings (stored as site_settings rows); the
 // example sparky.ink config seeds its own values. Keep these generic so a fresh
@@ -129,6 +178,11 @@ const DEFAULTS: SiteSettings = {
 	// Empty → the legal pages show the built-in defaults' date (LEGAL_DEFAULTS_UPDATED).
 	privacyUpdatedAt: '',
 	termsUpdatedAt: '',
+	// The /ai disclosure page defaults ON fleet-wide; '' override → the default
+	// copy from $lib/ai-disclosure.
+	aiPageEnabled: true,
+	aiPageText: '',
+	aiPageUpdatedAt: '',
 	sonaSpecies: '',
 	sonaBuild: '',
 	sonaKeyFeatures: '',
@@ -200,6 +254,11 @@ export async function getSettings(
 			termsOfService: map.termsOfService ?? DEFAULTS.termsOfService,
 			privacyUpdatedAt: map.privacyUpdatedAt ?? DEFAULTS.privacyUpdatedAt,
 			termsUpdatedAt: map.termsUpdatedAt ?? DEFAULTS.termsUpdatedAt,
+			// Default-ON boolean: only an explicit stored 'false' turns the /ai
+			// page off (unlike the default-off toggles below, which require 'true').
+			aiPageEnabled: map.aiPageEnabled !== 'false',
+			aiPageText: map.aiPageText ?? DEFAULTS.aiPageText,
+			aiPageUpdatedAt: map.aiPageUpdatedAt ?? DEFAULTS.aiPageUpdatedAt,
 			sonaSpecies: map.sonaSpecies ?? DEFAULTS.sonaSpecies,
 			sonaBuild: map.sonaBuild ?? DEFAULTS.sonaBuild,
 			sonaKeyFeatures: map.sonaKeyFeatures ?? DEFAULTS.sonaKeyFeatures,
@@ -243,6 +302,20 @@ export async function getSettings(
 export async function getRawSetting(db: Database, key: string): Promise<string | null> {
 	const row = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).get();
 	return row?.value ?? null;
+}
+
+/**
+ * Read several raw rows in ONE query. Like getRawSetting this bypasses the
+ * settings cache and lets D1 errors propagate, which is what callers that must
+ * fail closed need — they just should not pay a round-trip per key to get it.
+ */
+export async function getRawSettings(
+	db: Database,
+	keys: string[]
+): Promise<Record<string, string | null>> {
+	const rows = await db.select().from(siteSettings).where(inArray(siteSettings.key, keys));
+	const found = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+	return Object.fromEntries(keys.map((k) => [k, found[k] ?? null]));
 }
 
 /** Upsert a single raw site_settings row. */

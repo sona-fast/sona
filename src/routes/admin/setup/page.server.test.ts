@@ -126,6 +126,46 @@ describe('setup wizard — unrecognized enum values fail instead of silently def
 	});
 });
 
+describe('setup wizard — AI disclosure affirmation (SONA-167)', () => {
+	// Source pin: the action reads data.get('aiPageAffirmed'), so renaming or
+	// dropping the checkbox would leave every test green while each new install
+	// silently stored aiPageEnabled='false' and never published /ai.
+	it('the wizard form posts the affirmation checkbox', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(src).toMatch(/<input type="checkbox" name="aiPageAffirmed"/);
+	});
+
+	// The /ai page speaks in the owner's first person and states their gallery
+	// holds no AI-generated art. A NEW install must never publish that on the
+	// absent-means-ON default, so the wizard writes the row explicitly from the
+	// affirmation checkbox — both ways.
+	it('publishes /ai only when the owner affirms it', async () => {
+		const { db, platform } = makeDb();
+
+		try {
+			await actions.default(setupEvent(platform, { aiPageAffirmed: 'on' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('true');
+	});
+
+	it('writes an explicit off when the affirmation is left unticked', async () => {
+		const { db, platform } = makeDb();
+
+		try {
+			await actions.default(setupEvent(platform, {}));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		// Explicitly 'false', not absent: absence means ON for installs that
+		// pre-date the feature, which a fresh install must not inherit.
+		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('false');
+	});
+});
+
 describe('setup wizard — blank optional fields never clobber CLI-seeded settings (#60)', () => {
 	it('a blank primaryCharacter leaves the CLI-seeded value intact', async () => {
 		const { db, platform } = makeDb();

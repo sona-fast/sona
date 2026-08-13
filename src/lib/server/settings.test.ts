@@ -96,6 +96,22 @@ describe('getSettings — mapping & defaults', () => {
 		expect(s.autoResyncEnabled).toBe(false);
 	});
 
+	// aiPageEnabled is the one DEFAULT-ON boolean (SONA-167): the fleet
+	// discloses unless a fork explicitly opts out, so absence means ON — the
+	// opposite polarity of autoResyncEnabled above, pinned so nobody
+	// "normalizes" it to === 'true' and silently turns the page off fleet-wide.
+	it('defaults aiPageEnabled ON when the row is absent', async () => {
+		const { db } = fakeReadDb([]);
+		const s = await getSettings(db);
+		expect(s.aiPageEnabled).toBe(true);
+	});
+
+	it("turns aiPageEnabled off only on an explicit stored 'false'", async () => {
+		const { db } = fakeReadDb([{ key: 'aiPageEnabled', value: 'false' }]);
+		const s = await getSettings(db);
+		expect(s.aiPageEnabled).toBe(false);
+	});
+
 	it('coerces an unknown storageProvider back to the safe default', async () => {
 		// storageProvider drives WHERE uploads are written — an unexpected value
 		// must not silently become a third "provider".

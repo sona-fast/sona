@@ -100,6 +100,26 @@ async function loadData(platform: App.Platform, query = ''): Promise<GalleryData
 	return (await load(loadEvent(platform, query))) as GalleryData;
 }
 
+describe('gallery load — grid excludes unpublished images', () => {
+	// SONA-167 receipts: the grid's own `published` filter had no named case —
+	// every data.images assertion lived inside the alias-resolution block, so
+	// deleting the constraint would have passed the suite green.
+	it('lists a published image and omits an unpublished one', async () => {
+		const { db, platform } = makeDb();
+		const [{ id }] = await addArtist(db, 'Kestrel');
+		const [{ slug: publishedSlug }] = await addImage(db, {
+			artistId: id,
+			published: true
+		}).returning({ slug: images.slug });
+		await addImage(db, { artistId: id, published: false });
+
+		const data = await loadData(platform);
+		// Identity, not just count: a bare length check passes just as happily if
+		// the filter inverted and returned the unpublished image instead.
+		expect(data.images).toEqual([expect.objectContaining({ slug: publishedSlug })]);
+	});
+});
+
 describe('gallery load — artist combobox lists only live artists', () => {
 	it('includes an artist with a published, non-variant image', async () => {
 		const { db, platform } = makeDb();

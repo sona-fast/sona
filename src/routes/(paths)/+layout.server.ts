@@ -1,5 +1,5 @@
 import { getDb } from '$lib/server/db';
-import { getSettings } from '$lib/server/settings';
+import { getSettings, toPublicSettings } from '$lib/server/settings';
 import { stickerTabEnabled } from '$lib/server/stickers';
 import { PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
 import { withTimeout } from '$lib/server/timeout';
@@ -17,5 +17,5 @@ export const load: LayoutServerLoad = async ({ platform }) => {
 		getSettings(db),
 		withTimeout(stickerTabEnabled(db), PROBE_TIMEOUT_MS, true)
 	]);
-	return { settings, stickersEnabled };
+	return { settings: toPublicSettings(settings), stickersEnabled };
 };

@@ -3,6 +3,15 @@
 import type { ExecutionContext } from '@cloudflare/workers-types';
 
 declare global {
+	/**
+	 * Build receipt constants baked in by vite define (see vite.config.ts):
+	 * the commit this build came from and the repository it lives in, taken
+	 * from the deploying fork's own GitHub Actions env. Both are '' outside
+	 * an Actions build (local dev, tests).
+	 */
+	const __BUILD_COMMIT_SHA__: string;
+	const __BUILD_REPO_URL__: string;
+
 	namespace App {
 		// interface Error {}
 		interface Locals {

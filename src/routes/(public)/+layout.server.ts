@@ -1,5 +1,5 @@
 import { getReadDb } from '$lib/server/db';
-import { getSettings, settingsFallback } from '$lib/server/settings';
+import { getSettings, settingsFallback, toPublicSettings } from '$lib/server/settings';
 import { navGateFlags, PROBE_TIMEOUT_MS } from '$lib/server/nav-gating';
 import { withTimeout } from '$lib/server/timeout';
 import type { LayoutServerLoad } from './$types';
@@ -23,8 +23,12 @@ export const load: LayoutServerLoad = async ({ platform, url }) => {
 		withTimeout(getSettings(db), SETTINGS_TIMEOUT_MS, settingsFallback()),
 		navGateFlags(db, PROBE_TIMEOUT_MS)
 	]);
+	// Every public load returns settings through toPublicSettings, which strips
+	// the /ai override text: this load rides EVERY public page, and a fork that
+	// turned /ai off must not still ship its retired copy to every visitor.
+	const publicSettings = toPublicSettings(settings);
 	// The site's own public host, used to attribute the "made with sona" footer
 	// badge back to this fork (sona.fast/?ref=<host>). Derived per-request so each
 	// fork sends its own domain with no extra config.
-	return { settings, host: url.host, stickersEnabled, collectionsEnabled };
+	return { settings: publicSettings, host: url.host, stickersEnabled, collectionsEnabled };
 };

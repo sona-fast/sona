@@ -7,7 +7,11 @@
 	let { data } = $props();
 	let settings = $derived(data.settings);
 	let sections = $derived(
-		defaultPrivacyPolicy({ siteName: settings.siteName, contactEmail: settings.contactEmail })
+		defaultPrivacyPolicy({
+			siteName: settings.siteName,
+			contactEmail: settings.contactEmail,
+			aiToolsDisclosed: settings.aiPageEnabled
+		})
 	);
 </script>
 
