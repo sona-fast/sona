@@ -37,13 +37,20 @@ export async function supporterKeyLiteralMockModule(
 	importOriginal: () => Promise<typeof import('$lib/server/supporter-key')>
 ) {
 	const original = await importOriginal();
+	const verifySupporterKey = vi.fn(
+		async (token: string): Promise<SupporterKeyResult> =>
+			token === 'VALID'
+				? { valid: true, login: 'e2e', tier: 1, expiresAt: new Date('2999-01-01') }
+				: { valid: false, reason: 'malformed' }
+	);
 	return {
 		...original,
-		verifySupporterKey: vi.fn(
-			async (token: string): Promise<SupporterKeyResult> =>
-				token === 'VALID'
-					? { valid: true, login: 'e2e', tier: 1, expiresAt: new Date('2999-01-01') }
-					: { valid: false, reason: 'malformed' }
-		)
+		verifySupporterKey,
+		// Rewired like the helper above rather than left to the spread: the real
+		// resolver calls the real verifier internally, so a spread copy would
+		// answer from production crypto no matter what this factory says. Every
+		// token fails that way, which is the shape a test passes vacuously in.
+		resolveSupporterKeyStatus: async (token: string, now: Date) =>
+			token ? original.supporterKeyStatusFromResult(await verifySupporterKey(token), now) : null
 	};
 }
