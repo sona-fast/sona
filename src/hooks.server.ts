@@ -115,15 +115,20 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// breaks. It is GET-only, describes only its own host's URLs, and filters on
 	// `published`. Keep this list short and each entry justified.
 	//
-	// The WAF rate-limit rule (scripts/waf-lib.ts) covers only GET/HEAD on /api/oembed,
-	// not the other methods: with no other handler exported, SvelteKit answers those
-	// with a 405 before any of this endpoint's code runs, so they cost no D1 reads and
-	// are deliberately outside the rule — the asymmetry is not an oversight.
+	// Scoped to the two read methods, matching the WAF rule in scripts/waf-lib.ts
+	// clause for clause. Today the route exports only GET, so SvelteKit already
+	// answers anything else with a 405 before endpoint code runs — but that safety
+	// lives in another file. Spelling the exemption as a path alone would silently
+	// open this route to writes the day someone adds a POST handler there; spelling
+	// it as a path AND a method cannot.
+	const isOembedRead =
+		event.url.pathname === '/api/oembed' &&
+		(event.request?.method === 'GET' || event.request?.method === 'HEAD');
 	if (
 		event.url.pathname.startsWith('/api') &&
 		!event.url.pathname.startsWith('/api/cron/') &&
 		event.url.pathname !== '/api/metrics/download' &&
-		event.url.pathname !== '/api/oembed' &&
+		!isOembedRead &&
 		!event.locals.admin
 	) {
 		return new Response('Unauthorized', { status: 401 });

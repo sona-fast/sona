@@ -25,10 +25,14 @@ function makeDb(): D1Database {
 
 // No session cookie — cookies.get returns undefined for every key, so the request
 // is unauthenticated (locals.admin = false).
-function makeEvent(pathname: string, db: D1Database) {
+function makeEvent(pathname: string, db: D1Database, method = 'GET') {
+	const url = new URL(`https://taro.surf${pathname}`);
 	return {
 		cookies: { get: () => undefined },
-		url: new URL(`https://taro.surf${pathname}`),
+		url,
+		// The gate reads the method for the /api/oembed exemption, so events carry a
+		// real Request. Defaults to GET, which is what every other case here implies.
+		request: new Request(url, { method }),
 		locals: {} as App.Locals,
 		platform: { env: { DB: db } } as unknown as App.Platform
 	} as never;
@@ -123,14 +127,35 @@ describe('authHandle — /api/oembed is public (third-party embedders have no se
 	it('reaches the endpoint without a session (a link preview is fetched anonymously)', async () => {
 		vi.mocked(isSetupComplete).mockResolvedValue(true);
 
-		const res = (await authHandle({
-			event: makeEvent('/api/oembed', makeDb()),
-			resolve
-		} as never)) as Response;
+		// HEAD as well as GET: SvelteKit runs the GET handler for HEAD when no HEAD is
+		// exported, so a HEAD does the same work and must be exempt for the same reason.
+		for (const method of ['GET', 'HEAD']) {
+			const res = (await authHandle({
+				event: makeEvent('/api/oembed', makeDb(), method),
+				resolve
+			} as never)) as Response;
 
-		// Not 401: the gate let it through to the endpoint, which validates the url
-		// param and filters on `published` itself.
-		expect(res.status).not.toBe(401);
+			// Not 401: the gate let it through to the endpoint, which validates the url
+			// param and filters on `published` itself.
+			expect(res.status, method).not.toBe(401);
+		}
+	});
+
+	it('does not exempt write methods — a POST handler added later must not be public', async () => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+
+		// The route exports only GET today, so SvelteKit answers these with a 405
+		// before endpoint code runs. That safety lives in another file, though: this
+		// asserts the GATE itself refuses them, so adding a POST handler to the
+		// endpoint cannot silently make it anonymously writable.
+		for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+			const res = (await authHandle({
+				event: makeEvent('/api/oembed', makeDb(), method),
+				resolve
+			} as never)) as Response;
+
+			expect(res.status, `${method} /api/oembed must stay behind the admin gate`).toBe(401);
+		}
 	});
 
 	it('does not exempt sibling paths — a prefix match would open the whole namespace', async () => {
