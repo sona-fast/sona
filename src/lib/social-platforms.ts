@@ -64,6 +64,12 @@ export function platformDomains(platform: SocialPlatform): string[] {
  *
  * Listed hosts are checked exactly first: 'mobile.twitter.com' carries a prefix
  * of its own and must not collapse into 'twitter.com'.
+ *
+ * Only display goes through here. normalizeHandle walks extractHandle over the
+ * raw string, so a subdomain URL matches nothing: sfw.furaffinity.net/user/taro
+ * DISPLAYS as @taro but MATCHES as 'sfw.furaffinity.net'. Registry-diff then
+ * reads such a value as perpetually changed. Fixing that changes what the fork
+ * considers a duplicate, so it is deliberately not folded in here.
  */
 export function platformDomain(platform: SocialPlatform, host: string): string | null {
 	const bare = host.toLowerCase().replace(/^www\./, '');
@@ -89,13 +95,17 @@ export const RESERVED_SEGMENTS: Partial<Record<SocialPlatform, string[]>> = {
 		'messages',
 		'notifications',
 		'settings',
-		'intent'
+		'intent',
+		'compose'
 	],
 	// 'user' is Patreon's legacy profile form, patreon.com/user?u=<id> — the
 	// account is in the query string, so the path segment names nobody.
 	patreon: ['posts', 'c', 'user'],
 	deviantart: ['tag', 'art', 'journal'],
-	telegram: ['s', 'joinchat']
+	// 'addstickers' matters here beyond tidiness: this repo imports sticker packs
+	// from t.me/addstickers/<pack> (see server/telegram.ts), so pasting one into
+	// the Telegram setting is a realistic slip, and it read as "@addstickers".
+	telegram: ['s', 'joinchat', 'addstickers', 'share', 'proxy']
 };
 
 /**

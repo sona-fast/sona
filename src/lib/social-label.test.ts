@@ -186,6 +186,15 @@ describe('rule 2: no hostname is ever shown as a handle', () => {
 		expect(socialLabel('telegram', 'https://t.me/taro')).toBe('@taro');
 	});
 
+	it('never renders one of the sections this app itself links to', () => {
+		// t.me/addstickers/<pack> is the URL the sticker importer consumes (see
+		// server/telegram.ts), so pasting one into the Telegram setting is a
+		// realistic slip — and it used to read as "@addstickers".
+		expect(socialLabel('telegram', 'https://t.me/addstickers/SonaPack')).toBe('Telegram');
+		expect(socialLabel('telegram', 'https://t.me/share/url?url=x')).toBe('Telegram');
+		expect(socialLabel('twitter', 'https://twitter.com/compose/tweet')).toBe('Twitter');
+	});
+
 	it('never renders a section marker as a handle', () => {
 		// The platform's own host with a path that is not a profile: the prefix
 		// match fails and the first path segment is a section, not an account.
@@ -327,7 +336,13 @@ describe('handle decoding', () => {
 			['ta%E3%80%80ro', 'ideographic space, U+3000'],
 			['ta%E2%80%89ro', 'thin space, U+2009'],
 			['taro%E2%A0%80', 'Braille pattern blank, U+2800'],
-			['%20', 'a space alone, which would render the bare label "@ "']
+			['%20', 'a space alone, which would render the bare label "@ "'],
+			// Default-ignorable but not \p{Cf}, and so missed by every hand-written
+			// list: these are why the check names a Unicode property instead.
+			['taro%F3%A0%84%80', 'variation selector supplement, U+E0100'],
+			['taro%EF%BE%A0', 'halfwidth Hangul filler, U+FFA0'],
+			['ta%E1%A0%8Bro', 'Mongolian free variation selector, U+180B'],
+			['ta%CD%8Fro', 'combining grapheme joiner, U+034F']
 		] as const;
 		for (const [segment, what] of hidden) {
 			expect(socialHandle('twitter', `https://twitter.com/${segment}`), what).toBeNull();
@@ -346,6 +361,16 @@ describe('handle decoding', () => {
 });
 
 describe('scheme-less values', () => {
+	it('reads a protocol-relative URL, as registry matching does', () => {
+		// normalizeHandle strips the leading '//' (see handle-classify's tests), so
+		// display has to as well — otherwise the module header's claim that the two
+		// agree about where a handle starts is false for a shape the registry hands
+		// us routinely, and the admin's search row silently shows no handle.
+		expect(socialHandle('twitter', '//twitter.com/taro')).toBe('taro');
+		expect(socialLabel('twitter', '//www.twitter.com/taro')).toBe('@taro');
+		expect(socialLabel('twitter', '//twitter.com')).toBe('Twitter');
+	});
+
 	// Registry socials are proxied unmodified and often arrive without a scheme.
 	it('reads a handle out of a scheme-less profile URL', () => {
 		expect(socialHandle('twitter', 'twitter.com/taro')).toBe('taro');

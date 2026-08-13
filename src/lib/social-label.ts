@@ -16,7 +16,9 @@
 // Pure and client-safe: no $lib/server imports, so Svelte components can bundle
 // it. The prefix table and the extraction itself come from social-platforms,
 // which registry matching reads too — that is what keeps display agreeing with
-// matching about where a handle starts.
+// matching about where a handle starts. They still part company on the HOST:
+// display canonicalizes it first (so sfw.furaffinity.net resolves), matching
+// takes the raw string. See social-platforms' note on platformDomain.
 
 import {
 	RESERVED_SEGMENTS,
@@ -49,16 +51,20 @@ function decodeSegment(segment: string): string {
 	}
 }
 
-/** The characters that make a label read as a handle other than the one it is:
- *  the C0/C1 controls, every Unicode format character (\p{Cf} - the bidi overrides
- *  and isolates, the zero-width marks, U+00AD, U+180E, U+2060-2064, U+FEFF, the
- *  U+E0000 tag block), and the invisibles outside that category: the Hangul
- *  fillers, the line/paragraph separators, the variation selectors.
+/** The characters that make a label read as a handle other than the one it is.
+ *  Named by property rather than enumerated, because the enumeration kept
+ *  missing things: \p{Default_Ignorable_Code_Point} is Unicode's own name for
+ *  "renders as nothing", and it carries the zero-width marks, the soft hyphen,
+ *  the Hangul fillers, the Mongolian free variation selectors, and all 256
+ *  variation selectors — a hand-written U+FE00-U+FE0F covered 16 of those and
+ *  let the U+E0100 supplement through. \p{Cf} adds the bidi overrides and
+ *  isolates, which reorder a label without hiding anything.
  *  Whitespace counts too, and for the same reason rather than as tidying: no
  *  platform here allows a space in a username, and `twitter.com/taro%20` decodes
  *  to a trailing space that an inline box collapses, so the row renders `@taro`
- *  while linking somewhere else. U+2800 (BRAILLE PATTERN BLANK) is blank on
- *  screen but is not whitespace to Unicode, so it is listed by hand.
+ *  while linking somewhere else. The C0/C1 controls and U+2800 (BRAILLE PATTERN
+ *  BLANK, blank on screen but not whitespace to Unicode) belong to none of those
+ *  properties, so they stay listed by hand.
  *  Registry socials are proxied unmodified from a remote registry, so a segment
  *  can decode to an RLO and make an admin's search row read as somebody else's
  *  account — art then gets credited to the wrong artist.
@@ -68,7 +74,7 @@ function decodeSegment(segment: string): string {
  *  honestly, so rule 2 sends it to the platform name. */
 const DECEPTIVE_CHARS =
 	// eslint-disable-next-line no-control-regex
-	/[\u0000-\u001F\u007F-\u009F\u115F\u1160\u2028\u2029\u2800\u3164\uFE00-\uFE0F]|\p{Cf}|\s/u;
+	/[\u0000-\u001F\u007F-\u009F\u2800]|\p{Default_Ignorable_Code_Point}|\p{Cf}|\s/u;
 
 /** A decoded segment made safe to render: escapes resolved and cut at any
  *  delimiter the decoding introduced (`a%2Fb` is not `a/b`), or null when it
@@ -113,20 +119,25 @@ export function socialHandle(
 		return bare;
 	}
 
+	// Protocol-relative ('//twitter.com/taro'), which registry payloads carry.
+	// extractHandle strips it for matching, so display has to read it too or the
+	// two disagree about a value the registry hands us routinely.
+	const withoutSlashes = trimmed.replace(/^\/\//, '');
+
 	let url: URL;
 	try {
-		url = new URL(trimmed);
+		url = new URL(withoutSlashes);
 	} catch {
 		// Registry socials are proxied unmodified and can arrive scheme-less with a
 		// path ("twitter.com/taro"), which only parses once a scheme is added. A
 		// value that already carries a scheme and still fails to parse is junk.
-		if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null;
+		if (/^[a-z][a-z0-9+.-]*:/i.test(withoutSlashes)) return null;
 		// Only text that opens with something host-shaped — dotted, unspaced — is
 		// worth a second parse. Retrying everything with a slash in it turns the
 		// registry value `n/a` into the host `n` and the handle `a`.
-		if (!/^[\w-]+(\.[\w-]+)+(\/|$)/.test(trimmed)) return null;
+		if (!/^[\w-]+(\.[\w-]+)+(\/|$)/.test(withoutSlashes)) return null;
 		try {
-			url = new URL(`https://${trimmed}`);
+			url = new URL(`https://${withoutSlashes}`);
 		} catch {
 			return null;
 		}
