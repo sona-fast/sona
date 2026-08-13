@@ -1,10 +1,16 @@
 import { error } from '@sveltejs/kit';
+import { r2ConditionalTag } from '$lib/server/etag';
 import type { RequestHandler } from './$types';
 
 // Serves objects from the R2 bucket binding. Primary use is local dev (the
 // the R2 custom domain fronts the real bucket, not miniflare's local one).
 // In production, R2 images are served directly by the R2 custom domain, so this route
 // is a fallback. Resized variants still go through cdnImage() / Image Transformations.
+
+// Immutable because the keys are content-addressed: a changed image is a new
+// key, never new bytes under the old one. Both halves of a revalidation carry
+// it, the 200 and the 304 alike.
+const IMG_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 /** A single-range Range header mapped to R2's get() range options, or null
  * for absent/malformed/multi-range headers (which fall back to the full body —
@@ -39,26 +45,58 @@ export const GET: RequestHandler = async ({ params, request, platform }) => {
 	if (key.startsWith('vr-models/')) error(404, 'Not found');
 
 	const range = parseRange(request.headers.get('range'));
+	// Ask R2 to skip reading the object when the client already has it. This has
+	// to be an R2Conditional POJO, NOT the Headers form the binding also accepts:
+	// in dev the binding is a miniflare stub behind getPlatformProxy, whose
+	// serializer only recognizes its own bundled Headers class, so a global
+	// Headers throws "Cannot stringify arbitrary non-POJOs" on every conditional
+	// request — the same boundary that keeps writeHttpMetadata() out of this
+	// route, below. r2ConditionalTag also screens the value: workerd throws on a
+	// QUOTED tag, compares strongly, and reads a bare `*` as the wildcard, so the
+	// quoted, weak and wildcard forms are all kept away from it — the first would
+	// be a 500, the second could never match, the third would 304 a client that
+	// holds nothing.
+	const onlyIf = r2ConditionalTag(request.headers.get('if-none-match'));
 	let object;
 	try {
-		object = range
-			? await platform?.env.IMAGES?.get(key, { range })
-			: await platform?.env.IMAGES?.get(key);
+		object = await platform?.env.IMAGES?.get(key, {
+			...(range ? { range } : {}),
+			...(onlyIf ? { onlyIf: { etagDoesNotMatch: onlyIf } } : {})
+		});
 	} catch {
 		// R2 THROWS on an unsatisfiable range (offset at/past the end, bytes=-0)
 		// rather than returning null — unguarded, that surfaced as an anonymous
 		// 500 (R3-D1). RFC 9110 lets a server ignore Range, so fall back to the
 		// unranged full body; the object.range check below then serves a 200.
+		// The fallback drops the conditional too, deliberately: whatever the
+		// options made R2 reject, a bare get still succeeds, and re-sending the
+		// option that just threw would turn this safety net into a repeat of the
+		// failure. It costs only the 304 on a conditional-plus-bad-range request.
 		object = await platform?.env.IMAGES?.get(key);
 	}
 	if (!object) error(404, 'Not found');
+
+	// A satisfied If-None-Match makes R2 withhold the body, which is the whole
+	// saving: the object is never read, only its metadata. Answer the
+	// revalidation bodyless, carrying the same validator and freshness the 200
+	// would have. This also fires ahead of any Range handling, as it must —
+	// RFC 9110 §13.2.2 evaluates If-None-Match first, so a matching validator
+	// means 304 and not 206. (`'body' in object` narrows the union; the second
+	// test is what actually decides, since the docs describe the withheld case
+	// as a body that is undefined rather than a property that is absent.)
+	if (!('body' in object) || !object.body) {
+		return new Response(null, {
+			status: 304,
+			headers: { etag: object.httpEtag, 'cache-control': IMG_CACHE_CONTROL }
+		});
+	}
 
 	// Set headers from the object's metadata directly. (Avoid writeHttpMetadata():
 	// it can't serialize a Headers across the dev getPlatformProxy boundary.)
 	const headers = new Headers();
 	if (object.httpMetadata?.contentType) headers.set('content-type', object.httpMetadata.contentType);
 	headers.set('etag', object.httpEtag);
-	headers.set('cache-control', 'public, max-age=31536000, immutable');
+	headers.set('cache-control', IMG_CACHE_CONTROL);
 	headers.set('accept-ranges', 'bytes');
 	// Ranged read (object.range is only set when the get above was ranged): a
 	// 206 with Content-Range, sized to the returned slice — Safari probes media
