@@ -46,10 +46,28 @@ function base64urlToBytes(segment: string): Uint8Array | null {
 	return base64ToBytes(b64 + pad);
 }
 
+/** ECMAScript's maximum time value is 8.64e15 ms either side of the epoch, so
+ * this is the largest `exp` (in seconds) that `new Date(exp * 1000)` can
+ * represent. Beyond it the Date is Invalid, and every Intl call we make on it
+ * throws a RangeError. */
+const MAX_EXP_SECONDS = 8.64e12;
+
 function isPayload(v: unknown): v is SupporterKeyPayload {
 	if (typeof v !== 'object' || v === null) return false;
 	const p = v as Record<string, unknown>;
-	return p.v === 1 && typeof p.login === 'string' && typeof p.tier === 'number' && typeof p.exp === 'number';
+	return (
+		p.v === 1 &&
+		typeof p.login === 'string' &&
+		typeof p.tier === 'number' &&
+		typeof p.exp === 'number' &&
+		// A nonsense exp is refused here, at the door, rather than downstream. It
+		// would otherwise pass: `now >= expiresAt` is false for an Invalid Date, so
+		// the key would be reported VALID and then throw a RangeError out of the
+		// first date we formatted — taking down /admin/settings, the one page an
+		// operator could use to remove the offending key.
+		Number.isFinite(p.exp) &&
+		Math.abs(p.exp) <= MAX_EXP_SECONDS
+	);
 }
 
 /**

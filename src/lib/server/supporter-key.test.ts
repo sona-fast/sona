@@ -115,6 +115,41 @@ describe('verifySupporterKey', () => {
 		expect(res).toMatchObject({ valid: false, reason: 'malformed' });
 	});
 
+	// An exp beyond the maximum time value makes `new Date(exp * 1000)` Invalid,
+	// and `now >= expiresAt` is false against NaN — so without the guard these
+	// keys verify as VALID and then throw a RangeError out of the first date the
+	// UI formats, taking down the one page that could remove the key. Refused at
+	// the door instead.
+	it.each([
+		['beyond the maximum time value', 8.64e12 + 1],
+		['absurdly large', 1e15],
+		['negative beyond the range', -8.64e12 - 1],
+		['infinite', Number.POSITIVE_INFINITY],
+		['NaN', Number.NaN]
+	])('rejects an exp that is %s as malformed, even signed', async (_label, exp) => {
+		const { kp, spki } = await makeIssuer();
+		// NaN and Infinity are not representable in JSON — they serialize to null,
+		// which the typeof check already refuses. The finite-range cases are the
+		// ones that would otherwise get through.
+		const token = await mint(kp.privateKey, { v: 1, login: 'sparky', tier: 2, exp });
+
+		const res = await verifySupporterKey(token, NOW, spki);
+
+		expect(res).toMatchObject({ valid: false, reason: 'malformed' });
+	});
+
+	it('still accepts an exp at the maximum representable boundary', async () => {
+		// The guard rejects what Date cannot represent, nothing narrower.
+		const { kp, spki } = await makeIssuer();
+		const token = await mint(kp.privateKey, { v: 1, login: 'sparky', tier: 2, exp: 8.64e12 });
+
+		const res = await verifySupporterKey(token, NOW, spki);
+
+		expect(res).toMatchObject({ valid: true });
+		// And the date it yields is formattable rather than a RangeError waiting.
+		if (res.valid) expect(() => supporterKeyValidUntil(res.expiresAt.getTime(), 'UTC')).not.toThrow();
+	});
+
 	it('accepts a key with whitespace/newlines injected by display wrapping', async () => {
 		const { kp, spki } = await makeIssuer();
 		const token = await mint(kp.privateKey, {
