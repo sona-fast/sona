@@ -110,9 +110,13 @@ const TEST_TIMEOUT_MS = 90_000;
 function pendingMigration(schema: string): string | null {
 	const workDir = mkdtempSync(path.join(tmpdir(), 'sona-schema-drift-'));
 	try {
+		const meta = path.join(migrationsDir, 'meta');
+		if (!existsSync(meta)) {
+			throw new Error(`${meta} is missing, so there are no committed snapshots to compare against`);
+		}
 		const outDir = path.join(workDir, 'out');
 		mkdirSync(outDir);
-		cpSync(path.join(migrationsDir, 'meta'), path.join(outDir, 'meta'), { recursive: true });
+		cpSync(meta, path.join(outDir, 'meta'), { recursive: true });
 
 		const result = spawnSync(
 			process.execPath,
