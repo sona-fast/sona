@@ -1,11 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+// better-sqlite3 ships no bundled types and is a dev-only test dependency here.
+// @ts-expect-error - no declaration file for 'better-sqlite3'
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import * as schema from './db/schema';
+import { makeD1 } from './test/d1';
 import {
 	hashPassword,
 	verifyPasswordHash,
 	constantTimeEqual,
 	loginThrottleCheck,
 	loginThrottleFailure,
-	loginThrottleReset
+	loginThrottleReset,
+	getSetupState,
+	__resetSetupCache
 } from './admin-auth';
 
 describe('password hashing (PBKDF2)', () => {
@@ -71,5 +79,82 @@ describe('login throttle', () => {
 		expect(loginThrottleCheck(ip, t0)).not.toBeNull();
 		// 16 minutes later (> 15 min window)
 		expect(loginThrottleCheck(ip, t0 + 16 * 60 * 1000)).toBeNull();
+	});
+});
+
+// SONA-186. The distinction these tests protect: a read that FAILED is not a
+// read that found nothing. Collapsing the two is what redirected a whole live
+// site to /admin/setup during a D1 blip.
+describe('getSetupState', () => {
+	// setupCompleteCache is module-level and latches permanently, and vitest
+	// isolates per FILE, not per test — without this reset the cases below run
+	// against a latch set by whichever test happened to go first, and pass while
+	// asserting nothing.
+	beforeEach(() => {
+		__resetSetupCache();
+		vi.spyOn(console, 'warn').mockImplementation(() => {});
+	});
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	function db(setup?: (sqlite: { exec(sql: string): void }) => void) {
+		const sqlite = new Database(':memory:');
+		setup?.(sqlite);
+		return drizzle(makeD1(sqlite), { schema });
+	}
+
+	function configured() {
+		return db((s) => {
+			s.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+			s.exec(`INSERT INTO site_settings (key, value) VALUES ('adminPasswordHash', 'x');`);
+		});
+	}
+
+	const empty = () =>
+		db((s) => s.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`));
+
+	// No site_settings table at all — the read throws inside drizzle, which is
+	// how a D1 outage presents to this code.
+	const broken = () => db();
+
+	it('reports complete when a password hash is stored', async () => {
+		expect(await getSetupState(configured(), undefined)).toBe('complete');
+	});
+
+	it('reports complete on the explicit setupComplete flag', async () => {
+		const d = db((s) => {
+			s.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+			s.exec(`INSERT INTO site_settings (key, value) VALUES ('setupComplete', 'true');`);
+		});
+		expect(await getSetupState(d, undefined)).toBe('complete');
+	});
+
+	it('reports complete on the legacy ADMIN_PASSWORD env without reading the DB', async () => {
+		expect(await getSetupState(broken(), { ADMIN_PASSWORD: 'legacy' } as never)).toBe('complete');
+	});
+
+	it('reports incomplete when the read SUCCEEDS and finds nothing', async () => {
+		expect(await getSetupState(empty(), undefined)).toBe('incomplete');
+	});
+
+	it('reports unknown when the read FAILS — not incomplete', async () => {
+		expect(await getSetupState(broken(), undefined)).toBe('unknown');
+	});
+
+	it('warns on unknown, since a degraded site logs nothing else', async () => {
+		await getSetupState(broken(), undefined);
+		expect(console.warn).toHaveBeenCalled();
+	});
+
+	it('never caches unknown — the site recovers on the first read that works', async () => {
+		expect(await getSetupState(broken(), undefined)).toBe('unknown');
+		expect(await getSetupState(empty(), undefined)).toBe('incomplete');
+		expect(await getSetupState(configured(), undefined)).toBe('complete');
+	});
+
+	it('caches complete, so a later broken read still answers complete', async () => {
+		expect(await getSetupState(configured(), undefined)).toBe('complete');
+		expect(await getSetupState(broken(), undefined)).toBe('complete');
 	});
 });

@@ -157,17 +157,34 @@ export async function verifyAdminPassword(
 let setupCompleteCache = false;
 
 /**
- * A site is "set up" once it has an admin credential. We treat the presence of a
- * stored hash, an explicit setupComplete flag, OR a legacy ADMIN_PASSWORD env as
- * complete — so existing deployments are never forced back through the wizard.
- * On a DB read error we report NOT complete (fail toward the wizard, never toward
- * an open/unauthenticated admin).
+ * Setup state, as three cases rather than two. The third one is the point: a
+ * failed read is NOT evidence that no credential exists.
+ *
+ * - 'complete'   — a stored hash, an explicit setupComplete flag, or a legacy
+ *                  ADMIN_PASSWORD env. Existing deployments are never forced
+ *                  back through the wizard.
+ * - 'incomplete' — the read SUCCEEDED and found neither. A genuinely unclaimed
+ *                  fork.
+ * - 'unknown'    — the read failed. We know nothing.
  */
-export async function isSetupComplete(db: Database, env: Env | undefined): Promise<boolean> {
-	if (setupCompleteCache) return true;
+export type SetupState = 'complete' | 'incomplete' | 'unknown';
+
+/**
+ * Read the setup state. Callers decide what to do with 'unknown' — see the gate
+ * in hooks.server.ts.
+ *
+ * This used to return a boolean and collapse 'unknown' into false, which meant a
+ * transient D1 error on a cold isolate was indistinguishable from "nobody has
+ * claimed this site yet" — and the gate redirected every route on a live public
+ * site to the setup wizard until one read succeeded (SONA-186, observed on a
+ * fork 2026-08-13). The three-way answer exists so that mistake can't be
+ * expressed here again.
+ */
+export async function getSetupState(db: Database, env: Env | undefined): Promise<SetupState> {
+	if (setupCompleteCache) return 'complete';
 	if (env?.ADMIN_PASSWORD) {
 		setupCompleteCache = true;
-		return true;
+		return 'complete';
 	}
 	try {
 		const rows = await db
@@ -176,10 +193,18 @@ export async function isSetupComplete(db: Database, env: Env | undefined): Promi
 			.where(inArray(siteSettings.key, ['setupComplete', 'adminPasswordHash']));
 		const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
 		const done = map.setupComplete === 'true' || !!map.adminPasswordHash;
+		// Latch on the way out of a SUCCESSFUL read only. Setup completion is
+		// monotonic, so a positive never needs re-querying; 'unknown' is never
+		// cached, so the site recovers on the first read that works.
 		if (done) setupCompleteCache = true;
-		return done;
-	} catch {
-		return false;
+		return done ? 'complete' : 'incomplete';
+	} catch (e) {
+		// The only trace this leaves. A degraded-but-serving site returns 200s, so
+		// the error-rate rollup (which counts 5xx) and the metrics batch (which
+		// writes to this same unreachable DB) both stay silent — Workers logs are
+		// the one channel that survives a D1 outage.
+		console.warn('setup-state read failed; serving public routes, gating /admin:', e);
+		return 'unknown';
 	}
 }
 

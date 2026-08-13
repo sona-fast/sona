@@ -9,10 +9,10 @@ import { isRedirect } from '@sveltejs/kit';
 // hook (unused here — no session cookie), so keep the rest of the module real.
 vi.mock('$lib/server/admin-auth', async (orig) => ({
 	...(await orig<typeof import('$lib/server/admin-auth')>()),
-	isSetupComplete: vi.fn()
+	getSetupState: vi.fn()
 }));
 
-import { isSetupComplete } from '$lib/server/admin-auth';
+import { getSetupState } from '$lib/server/admin-auth';
 import { authHandle, handleError } from './hooks.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -49,11 +49,11 @@ async function redirectFor(pathname: string, db: D1Database): Promise<{ status: 
 
 describe('authHandle — password-recovery route exemption', () => {
 	beforeEach(() => {
-		vi.mocked(isSetupComplete).mockReset();
+		vi.mocked(getSetupState).mockReset();
 	});
 
 	it('lets /admin/forgot and /admin/reset through without a login redirect', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 		const db = makeDb();
 
 		expect(await redirectFor('/admin/forgot', db)).toBeNull();
@@ -61,7 +61,7 @@ describe('authHandle — password-recovery route exemption', () => {
 	});
 
 	it('still redirects other admin routes to /admin/login without a session', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 		const db = makeDb();
 
 		expect(await redirectFor('/admin/images', db)).toEqual({ status: 302, location: '/admin/login' });
@@ -71,7 +71,7 @@ describe('authHandle — password-recovery route exemption', () => {
 	});
 
 	it('sends /admin/forgot to /admin/setup when setup is incomplete (setup gate wins)', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(false);
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
 		const db = makeDb();
 
 		expect(await redirectFor('/admin/forgot', db)).toEqual({ status: 302, location: '/admin/setup' });
@@ -80,7 +80,7 @@ describe('authHandle — password-recovery route exemption', () => {
 
 describe('authHandle — /api/admin/ref-image stays behind the admin gate', () => {
 	it('returns 401 without a session (not in the /api/cron/ exempt namespace)', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 		const db = makeDb();
 
 		const res = (await authHandle({
@@ -94,7 +94,7 @@ describe('authHandle — /api/admin/ref-image stays behind the admin gate', () =
 
 describe('authHandle — /api/metrics/download is the only other public /api route', () => {
 	it('reaches the endpoint without a session (an anonymous visitor pressed download)', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 
 		const res = (await authHandle({
 			event: makeEvent('/api/metrics/download', makeDb()),
@@ -107,7 +107,7 @@ describe('authHandle — /api/metrics/download is the only other public /api rou
 	});
 
 	it('does not exempt sibling paths — a prefix match would open the whole namespace', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 
 		for (const path of ['/api/metrics', '/api/metrics/download/extra', '/api/metrics/other']) {
 			const res = (await authHandle({
@@ -216,7 +216,7 @@ function pageviewEvent(
 
 describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 	beforeEach(() => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 	});
 
 	const resolveHtml = async () =>
@@ -315,7 +315,7 @@ describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 
 describe('authHandle — 5xx counts toward the error rate (issue #6)', () => {
 	beforeEach(() => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 	});
 
 	const resolve500 = async () =>
@@ -363,7 +363,7 @@ describe('authHandle — 5xx counts toward the error rate (issue #6)', () => {
 
 describe('authHandle — cache-control stamping honors handler opt-outs (SONA-123)', () => {
 	beforeEach(() => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 	});
 
 	it('stamps the public edge default on a public non-HTML 200 with no explicit header', async () => {
@@ -441,7 +441,7 @@ describe('authHandle — cache-control stamping honors handler opt-outs (SONA-12
 
 describe('authHandle — security response headers', () => {
 	beforeEach(() => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 	});
 
 	it('sets HSTS (and the existing hardening headers) on a public response', async () => {

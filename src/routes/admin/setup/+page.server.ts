@@ -7,7 +7,7 @@ import { saveSettings, getRawSetting, setRawSetting } from '$lib/server/settings
 import { sanitizeText, isValidEmail } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
-	isSetupComplete,
+	getSetupState,
 	setAdminPassword,
 	markSetupComplete,
 	constantTimeEqual,
@@ -24,8 +24,15 @@ const MIN_PASSWORD_LENGTH = 8;
 export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
 
-	// Already configured → the wizard is closed.
-	if (await isSetupComplete(db, platform?.env)) {
+	// Already configured → the wizard is closed. Only a CONFIRMED 'complete'
+	// redirects: on 'unknown' (the read failed) we deliberately still render the
+	// wizard rather than erroring. The action below is the real guard — it fails
+	// closed on an unreadable setup state and returns a message saying so, and
+	// SvelteKit re-runs this load to render that message. A load that threw here
+	// would replace the operator's one diagnostic with a bare error page, on the
+	// screen where a fork owner most needs it, and buy nothing: the action cannot
+	// be completed while the state is unreadable.
+	if ((await getSetupState(db, platform?.env)) === 'complete') {
 		redirect(302, '/admin/login');
 	}
 

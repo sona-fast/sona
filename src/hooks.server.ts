@@ -3,7 +3,7 @@ import { sequence } from '@sveltejs/kit/hooks';
 import { redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
-import { isSetupComplete, hashToken } from '$lib/server/admin-auth';
+import { getSetupState, hashToken } from '$lib/server/admin-auth';
 import { getSettings } from '$lib/server/settings';
 import {
 	metricUpsert,
@@ -67,20 +67,37 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 		event.locals.admin = false;
 	}
 
-	// First-run setup gate. Until an admin credential exists, force every request
-	// to the setup wizard — a freshly deployed fork must not be browsable or
-	// admin-able before its owner has claimed it. Assets and the wizard itself are
-	// exempt. isSetupComplete caches the positive result, so this is a no-op (no
-	// query) once the site is configured. Fails toward setup, never toward an open
-	// admin (see admin-auth.ts).
+	// First-run setup gate, in three cases. Assets and the wizard itself are exempt
+	// (so the gate never sees /admin/setup — its own load is that route's guard).
+	// getSetupState caches the positive, so this is a no-op (no query) once the
+	// site is configured.
+	//
+	//   complete   → through.
+	//   incomplete → the wizard, for everything. A freshly deployed fork must not
+	//                be browsable or admin-able before its owner has claimed it.
+	//   unknown    → the read FAILED, so we know nothing. Public routes serve;
+	//                /admin and /api stay shut.
+	//
+	// That last case is the one that changed (SONA-186). It used to collapse into
+	// 'incomplete', which meant one failed read on a cold isolate showed a setup
+	// wizard to every visitor of an established public gallery until a read
+	// succeeded. Fail-closed was right about WHERE the risk is and wrong about
+	// where the cost lands: keeping /admin shut is what stops anyone reaching the
+	// setup flow during a blip, while an unclaimed fork has no content to leak
+	// through its public routes anyway. Serving a degraded page beats redirecting
+	// a live site into someone else's setup screen.
 	const path = event.url.pathname;
 	const isSetupRoute = path === '/admin/setup' || path.startsWith('/admin/setup/');
 	const isAsset = path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png';
 	if (event.platform?.env.DB && !isSetupRoute && !isAsset) {
 		const db = getDb(event.platform.env.DB);
-		if (!(await isSetupComplete(db, event.platform.env))) {
+		const state = await getSetupState(db, event.platform.env);
+		if (state === 'incomplete') {
 			if (path.startsWith('/api')) return new Response('Setup required', { status: 503 });
 			throw redirect(302, '/admin/setup');
+		}
+		if (state === 'unknown' && (path.startsWith('/admin') || path.startsWith('/api'))) {
+			return new Response('Setup state unavailable', { status: 503 });
 		}
 	}
 
