@@ -16,6 +16,7 @@ import { isSetupComplete } from '$lib/server/admin-auth';
 import { authHandle, handleError } from './hooks.server';
 
 import { makeD1 } from '$lib/server/test/d1';
+import { ADMIN_AUTH_EXEMPT, isAdminAuthExempt } from '$lib/admin-routes';
 
 function makeDb(): D1Database {
 	const sqlite = new Database(':memory:');
@@ -75,6 +76,47 @@ describe('authHandle — password-recovery route exemption', () => {
 		const db = makeDb();
 
 		expect(await redirectFor('/admin/forgot', db)).toEqual({ status: 302, location: '/admin/setup' });
+	});
+
+	// The exempt list is one shared array now (SONA-119) — hooks.server.ts gates
+	// on it and the admin layout decides bare chrome and operator cookies from it.
+	// Drive every entry so a deletion can't slip through: dropping '/admin/setup'
+	// in particular would make first-run install redirect /admin/setup →
+	// /admin/login → /admin/setup forever, and nothing else in the suite notices.
+	it('lets every exempt route through with setup complete', async () => {
+		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		const db = makeDb();
+
+		for (const route of ADMIN_AUTH_EXEMPT) {
+			expect(await redirectFor(route, db)).toBeNull();
+		}
+	});
+
+	it('leaves /admin/setup reachable while setup is incomplete (no redirect loop)', async () => {
+		vi.mocked(isSetupComplete).mockResolvedValue(false);
+		const db = makeDb();
+
+		expect(await redirectFor('/admin/setup', db)).toBeNull();
+	});
+});
+
+describe('isAdminAuthExempt — segment matching', () => {
+	it('exempts an exempt route and its children', () => {
+		expect(isAdminAuthExempt('/admin/reset')).toBe(true);
+		// A recovery link carrying its token stays with its parent.
+		expect(isAdminAuthExempt('/admin/reset/abc123')).toBe(true);
+	});
+
+	it('does not exempt a sibling that merely shares the prefix', () => {
+		// A bare startsWith would hand these to anonymous visitors.
+		expect(isAdminAuthExempt('/admin/login-history')).toBe(false);
+		expect(isAdminAuthExempt('/admin/setup-audit')).toBe(false);
+		expect(isAdminAuthExempt('/admin/resets')).toBe(false);
+	});
+
+	it('does not exempt ordinary admin routes', () => {
+		expect(isAdminAuthExempt('/admin/settings')).toBe(false);
+		expect(isAdminAuthExempt('/admin/logout')).toBe(false);
 	});
 });
 

@@ -166,6 +166,8 @@ describe('supporterKeyStatusFromResult', () => {
 		expect(status).toEqual({
 			state: 'valid',
 			validUntil: '2026.08.31',
+			// UTC-pinned twin of validUntil; keys the dismissal cookie (SONA-119).
+			dismissKey: '2026.08.31',
 			daysRemaining: 7,
 			expiringSoon: true
 		});

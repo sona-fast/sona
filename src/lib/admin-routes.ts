@@ -13,8 +13,14 @@ export const ADMIN_AUTH_EXEMPT = [
 	'/admin/reset'
 ] as const;
 
-/** Prefix match, so a child route (/admin/reset/[token]) is exempt with its
- * parent rather than silently becoming a signed-in page. */
+/**
+ * Segment match, not a bare prefix: a child route (/admin/reset/[token]) is
+ * exempt with its parent, but a sibling that merely shares the prefix
+ * (/admin/login-history, /admin/setup-audit) is not. A bare startsWith — what
+ * the inlined checks used — would hand any such future route to anonymous
+ * visitors, and now that this is the single source of truth it reads as
+ * authoritative, so it should be exact.
+ */
 export function isAdminAuthExempt(pathname: string): boolean {
-	return ADMIN_AUTH_EXEMPT.some((route) => pathname.startsWith(route));
+	return ADMIN_AUTH_EXEMPT.some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }

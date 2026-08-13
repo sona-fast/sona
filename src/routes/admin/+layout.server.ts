@@ -36,18 +36,22 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 			locals.admin ? getRawSetting(db, 'supporterKey').catch(() => null) : null
 		]);
 		// The operator's own zone (SONA-119), from the tz cookie the admin layout
-		// sets on first mount. Resolving it here rather than in the browser is what
-		// keeps the date and the countdown identical before and after hydration.
+		// writes on every signed-in navigation. Resolving it here rather than in the
+		// browser is what keeps the date and the countdown identical before and
+		// after hydration. Absent (no JS, or before the first signed-in page of a
+		// browser) means UTC.
 		const timeZone = viewerTimeZone(cookies.get('tz'));
 		const supporterKey = await resolveSupporterKeyStatus(supporterToken ?? '', new Date(), timeZone);
-		// Dismissal is a cookie keyed on validUntil PLUS a phase ('early' = days
-		// 7..4, 'final' = last 3 days): dismissing during the early phase re-shows
-		// the notice once the final days start, and a re-minted key (new
-		// validUntil) always warns afresh. SSR reads the cookie so the banner
-		// renders in its final state — no post-hydration layout shift.
+		// Dismissal is a cookie keyed on the key's UTC-pinned dismissKey PLUS a
+		// phase ('early' = days 7..4, 'final' = last 3 days): dismissing during the
+		// early phase re-shows the notice once the final days start, and a re-minted
+		// key (new expiry) always warns afresh. SSR reads the cookie so the banner
+		// renders in its final state — no post-hydration layout shift. The key is
+		// UTC-pinned, not the displayed date, so acquiring the tz cookie (or
+		// travelling) cannot resurrect a notice the operator already dismissed.
 		const phase = supporterKey && supporterKey.daysRemaining <= EXPIRY_FINAL_DAYS ? 'final' : 'early';
-		const dismissValue = supporterKey ? `${supporterKey.validUntil}:${phase}` : '';
-		// Phases are ordered: a 'final' dismissal for the same validUntil also
+		const dismissValue = supporterKey ? `${supporterKey.dismissKey}:${phase}` : '';
+		// Phases are ordered: a 'final' dismissal for the same key also
 		// suppresses the early phase (a stale final cookie must not re-warn if a
 		// request lands a phase earlier), while an early dismissal never covers
 		// the final phase.
@@ -57,7 +61,7 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 		// would satisfy the comparison, an attacker-suppliable value that a later
 		// change to the notice condition could make meaningful. Keep it.
 		const dismissed =
-			!!supporterKey && (cookie === dismissValue || cookie === `${supporterKey.validUntil}:final`);
+			!!supporterKey && (cookie === dismissValue || cookie === `${supporterKey.dismissKey}:final`);
 		return {
 			adminAvatarUrl: settings.adminAvatarUrl || null,
 			siteName: settings.siteName,

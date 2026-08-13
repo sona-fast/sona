@@ -138,9 +138,14 @@ export const EXPIRY_FINAL_DAYS = 3;
  * the layout payload structurally cannot leak the key. */
 export interface SupporterKeyStatus {
 	state: 'valid' | 'expired';
-	/** Last covered day, read in the viewer's zone. Also what the notice's
-	 * dismissal cookie is keyed on, so a re-minted key always warns afresh. */
+	/** Last covered day, read in the viewer's zone — a display value only. */
 	validUntil: string;
+	/** The same day pinned to UTC, so it names one key regardless of where the
+	 * operator is. The notice's dismissal cookie is keyed on this: keying it on
+	 * the displayed date would resurrect a dismissed notice the moment the zone
+	 * changed — on the first page view that has the tz cookie, or on travel —
+	 * while still warning afresh for a genuinely re-minted key. */
+	dismissKey: string;
 	/** Days until expiry (1 = expires today); 0 for the expired state. Counted
 	 * in the same zone as validUntil — the pair is the point (SONA-119). */
 	daysRemaining: number;
@@ -165,6 +170,7 @@ export function supporterKeyStatusFromResult(
 		return {
 			state: 'valid',
 			validUntil: supporterKeyDisplayDate(res.expiresAt, timeZone),
+			dismissKey: supporterKeyDisplayDate(res.expiresAt, 'UTC'),
 			daysRemaining,
 			expiringSoon: daysRemaining <= EXPIRY_WARN_DAYS
 		};
@@ -173,6 +179,7 @@ export function supporterKeyStatusFromResult(
 		return {
 			state: 'expired',
 			validUntil: supporterKeyDisplayDate(res.expiresAt, timeZone),
+			dismissKey: supporterKeyDisplayDate(res.expiresAt, 'UTC'),
 			daysRemaining: 0,
 			expiringSoon: false
 		};

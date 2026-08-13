@@ -146,13 +146,14 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 		const utc = await loadWithZone(expiresAt);
 		const tokyo = await loadWithZone(expiresAt, 'Asia/Tokyo');
 
-		// dismissValue embeds validUntil, so it shows which day each load named.
-		const dayOf = (r: NoticeResult) => r.supporterKeyNotice?.dismissValue.split(':')[0];
-		expect(dayOf(tokyo)).not.toBe(dayOf(utc));
-		// …and the count moved with it, so the pair still agrees: Tokyo's last
-		// covered day is one calendar day further out than UTC's.
+		// Tokyo's last covered day is one calendar day further out than UTC's, and
+		// the displayed count moves with the displayed date.
 		expect(utc.supporterKeyNotice?.daysRemaining).toBe(5);
 		expect(tokyo.supporterKeyNotice?.daysRemaining).toBe(6);
+		// The dismissal key does NOT move with the zone: it is UTC-pinned, so a
+		// notice dismissed before the tz cookie arrived (or before the operator
+		// travelled) stays dismissed rather than springing back.
+		expect(tokyo.supporterKeyNotice?.dismissValue).toBe(utc.supporterKeyNotice?.dismissValue);
 	});
 
 	it('falls back to UTC on a hostile tz cookie instead of failing the load', async () => {
