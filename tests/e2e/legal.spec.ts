@@ -161,7 +161,7 @@ test('the AI disclosure page renders and is reachable from the footer', async ({
 	await page.goto('/ai');
 	await expect(page.getByRole('heading', { level: 1, name: 'AI and this site' })).toBeVisible();
 	// The five disclosure topics are real headings, so the outline is navigable.
-	await expect(page.getByRole('heading', { name: 'The code.' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'The software.' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'The art.' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Your data.' })).toBeVisible();
 
@@ -204,7 +204,7 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	await page.goto('/ai');
 	await expect(page.getByText('My own words.')).toBeVisible();
 	// The default copy is gone.
-	await expect(page.getByRole('heading', { name: 'The code.' })).toHaveCount(0);
+	await expect(page.getByRole('heading', { name: 'The software.' })).toHaveCount(0);
 	// The <script> renders as literal text and never runs.
 	await expect(
 		page.getByText('<script>window.__aiXssRan = true</script>', { exact: false })
