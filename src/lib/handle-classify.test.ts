@@ -109,4 +109,15 @@ describe('normalizeHandle', () => {
 	it('normalizes patreon creator URLs without collapsing to "c"', () => {
 		expect(normalizeHandle('patreon', 'https://patreon.com/c/kuttoya')).toBe('kuttoya');
 	});
+
+	it('normalizes a Telegram channel-preview URL without collapsing to "s"', () => {
+		// t.me/s/<channel> previews the same channel as t.me/<channel>; matching
+		// them apart would split one account into two.
+		expect(normalizeHandle('telegram', 'https://t.me/s/kuttoya')).toBe('kuttoya');
+		expect(normalizeHandle('telegram', 'https://t.me/kuttoya')).toBe('kuttoya');
+	});
+
+	it('folds case, as matching is case-insensitive', () => {
+		expect(normalizeHandle('twitter', 'https://twitter.com/Kuttoya')).toBe('kuttoya');
+	});
 });

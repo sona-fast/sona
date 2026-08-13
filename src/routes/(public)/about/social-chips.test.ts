@@ -19,16 +19,17 @@ const entries = [
 ].map(([, setting, platform]) => ({ setting, platform }));
 
 describe('/about social chips carry their platform name', () => {
-	it('every chip in the list declares a platform', () => {
-		// Six links: Twitter, Telegram, Bluesky, FurAffinity, FurTrack, Instagram.
-		// A new chip added without a platform drops out of this match and fails.
-		expect(entries.map((e) => e.setting)).toEqual([
-			'twitterUrl',
-			'telegramUrl',
-			'blueskyUrl',
-			'furAffinityUrl',
-			'furtrackUrl',
-			'instagramUrl'
+	it('pairs every setting with its own platform', () => {
+		// Six links, and the PAIRS matter as much as the list: swapping two
+		// platforms renders the FurAffinity URL under the Twitter rules — and
+		// announces it as Twitter — while every distinctness check stays green.
+		expect(entries).toEqual([
+			{ setting: 'twitterUrl', platform: 'twitter' },
+			{ setting: 'telegramUrl', platform: 'telegram' },
+			{ setting: 'blueskyUrl', platform: 'bluesky' },
+			{ setting: 'furAffinityUrl', platform: 'furaffinity' },
+			{ setting: 'furtrackUrl', platform: 'furtrack' },
+			{ setting: 'instagramUrl', platform: 'instagram' }
 		]);
 	});
 
@@ -48,10 +49,6 @@ describe('/about social chips carry their platform name', () => {
 		expect(source).toMatch(/\{#if link\.hasHandle\}/);
 	});
 
-	it('takes its labels from the shared helper, not a local one', () => {
-		// SONA-128: every surface that renders a social handle goes through
-		// $lib/social-label, so /about, /connect and /share cannot drift apart.
-		expect(source).toMatch(/from '\$lib\/social-label'/);
-		expect(source).not.toMatch(/function handle\s*\(/);
-	});
+	// That the page takes its labels from $lib/social-label rather than a local
+	// helper is pinned once, for all four surfaces, in src/lib/social-label.test.ts.
 });

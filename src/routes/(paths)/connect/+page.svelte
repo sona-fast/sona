@@ -10,10 +10,12 @@
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import { SOCIAL_PLATFORM_NAMES, socialLabel } from '$lib/social-label';
+	import { SOCIAL_PLATFORM_NAMES, socialHandle } from '$lib/social-label';
 
 	let { data } = $props();
 
+	// The title is the platform name, so the subtitle is the handle or nothing:
+	// socialLabel's platform-name fallback would stack "Twitter" over "Twitter".
 	const socials = $derived(
 		[
 			{ icon: BlueskyIcon, platform: 'bluesky' as const, url: data.settings.blueskyUrl },
@@ -23,11 +25,14 @@
 			{ icon: InstagramIcon, platform: 'instagram' as const, url: data.settings.instagramUrl }
 		]
 			.filter((s) => s.url)
-			.map((s) => ({
-				...s,
-				title: SOCIAL_PLATFORM_NAMES[s.platform],
-				subtitle: socialLabel(s.platform, s.url)
-			}))
+			.map((s) => {
+				const handle = socialHandle(s.platform, s.url);
+				return {
+					...s,
+					title: SOCIAL_PLATFORM_NAMES[s.platform],
+					subtitle: handle ? `@${handle}` : undefined
+				};
+			})
 	);
 
 	function weekday(d: string): string {

@@ -15,7 +15,11 @@ INSERT OR REPLACE INTO site_settings (key, value) VALUES
   ('adminEmail',    'admin@e2e.test'),
   -- Seeded Instagram URL for the read-only instagram-social spec; no spec
   -- asserts on a blank social state, so this is inert for the others.
-  ('instagramUrl',  'https://www.instagram.com/sona.e2e.example');
+  ('instagramUrl',  'https://www.instagram.com/sona.e2e.example'),
+  -- A deep link on a platform with a profile prefix, for the same spec: its
+  -- label is the account (@sona.e2e.example), not the last path segment
+  -- ("gallery") the old per-page helpers took (SONA-128).
+  ('furAffinityUrl', 'https://www.furaffinity.net/user/sona.e2e.example/gallery');
 
 -- One artist for the images to credit.
 INSERT OR REPLACE INTO artists (id, name, created_at)

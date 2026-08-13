@@ -6,11 +6,14 @@
 	import Meta from '$lib/components/Meta.svelte';
 	import TelegramIcon from '$lib/components/icons/TelegramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import { socialLabel } from '$lib/social-label';
+	import { socialHandle } from '$lib/social-label';
 
 	let { data } = $props();
 
-	const tgHandle = $derived(socialLabel('telegram', data.settings.telegramUrl));
+	// The row's title already says "Telegram", and the subtitle copy is built
+	// around a handle — with none derivable there is no sentence to write, so the
+	// row goes out with its title alone rather than "Send directly to Telegram".
+	const tgHandle = $derived(socialHandle('telegram', data.settings.telegramUrl));
 
 	// The persona's name for the "photos of {name}" copy.
 	const personaName = $derived(data.settings.ownerName || data.settings.siteName);
@@ -43,7 +46,7 @@
 			<LinkRow
 				icon={TelegramIcon}
 				title="Telegram"
-				subtitle={m.share_telegram_sub({ handle: tgHandle })}
+				subtitle={tgHandle ? m.share_telegram_sub({ handle: `@${tgHandle}` }) : undefined}
 				href={`${data.settings.telegramUrl}?text=${encodeURIComponent(m.share_telegram_prefill({ name: personaName }))}`}
 				highlight
 			/>

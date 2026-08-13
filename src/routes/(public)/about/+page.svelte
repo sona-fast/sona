@@ -8,7 +8,7 @@
 	import FurTrackIcon from '$lib/components/icons/FurTrackIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import { SOCIAL_PLATFORM_NAMES, socialHandle, socialLabel } from '$lib/social-label';
+	import { SOCIAL_PLATFORM_NAMES, socialLabel } from '$lib/social-label';
 
 	let { data } = $props();
 	let settings = $derived(data.settings);
@@ -43,12 +43,14 @@
 			{ url: settings.instagramUrl, icon: InstagramIcon, platform: 'instagram' as const }
 		]
 			.filter((l) => l.url)
-			.map((l) => ({
-				...l,
-				name: SOCIAL_PLATFORM_NAMES[l.platform],
-				hasHandle: socialHandle(l.platform, l.url) !== null,
-				label: socialLabel(l.platform, l.url)
-			}))
+			.map((l) => {
+				const name = SOCIAL_PLATFORM_NAMES[l.platform];
+				const label = socialLabel(l.platform, l.url);
+				// Rule 1 puts an @ on every derived handle and never on the fallback,
+				// so the label differing from the platform name IS "a handle was
+				// derived" — no second derivation needed to know it.
+				return { ...l, name, hasHandle: label !== name, label };
+			})
 	);
 </script>
 

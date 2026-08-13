@@ -8,14 +8,14 @@
 
 import { sanitizeUrl, stripControlChars } from './validate';
 import {
-	SOCIAL_HOST_PREFIXES,
 	SOCIAL_KEY_TO_PLATFORM,
 	normalizeHandle,
+	platformDomains,
 	type Platform,
 	type SocialPlatform
 } from '../handle-classify';
 
-export { SOCIAL_KEY_TO_PLATFORM, normalizeHandle, type Platform, type SocialPlatform };
+export { SOCIAL_KEY_TO_PLATFORM, normalizeHandle, type Platform };
 
 export interface NormalizedHandle {
 	platform: Platform;
@@ -88,7 +88,7 @@ export function normalizeSocialUrl(
 		return '';
 	}
 
-	const domains = (SOCIAL_HOST_PREFIXES[platform] ?? []).map((h) => h.replace(/\/.*$/, ''));
+	const domains = platformDomains(platform);
 	const looksLikeUrl =
 		lower.startsWith('http://') ||
 		lower.startsWith('https://') ||
