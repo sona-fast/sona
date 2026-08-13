@@ -306,7 +306,7 @@ async function main() {
 	//    itself). `imageResizingOn`: true = on, false = off (couldn't enable),
 	//    null = unknown/not checked.
 	let imageResizingOn: boolean | null = null;
-	// Download-beacon WAF rate limit. Only meaningful when the fork
+	// Public-endpoint WAF rate limit. Only meaningful when the fork
 	// runs on a zone the operator controls — a *.pages.dev-only fork has no zone to
 	// attach it to. Null = not attempted (no domain / no zone / no token).
 	let downloadRateLimit: RateLimitStatus | null = null;
@@ -379,9 +379,9 @@ async function main() {
 				const rl = await applyDownloadRateLimit(cfToken, host);
 				downloadRateLimit = rl.status;
 				if (rl.status === 'error') {
-					console.warn(`\n⚠ Could not attach the download-beacon rate-limit rule: ${rl.detail}`);
+					console.warn(`\n⚠ Could not attach the public-endpoint rate-limit rule: ${rl.detail}`);
 				} else {
-					console.log(`✔ Download-beacon rate limit: ${rl.detail}`);
+					console.log(`✔ Public-endpoint rate limit: ${rl.detail}`);
 				}
 			}
 
@@ -655,15 +655,15 @@ async function main() {
 			console.log('     "Resize images from any origin". Free tier: 5,000 transformations/month.');
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
-		// Download-beacon rate limit. null = not attempted (no domain / no zone / no
+		// Public-endpoint rate limit. null = not attempted (no domain / no zone / no
 		// token — same contract as the declaration above); 'error' = the token lacked
 		// Zone · WAF · Edit, which is the one case worth telling them how to fix.
 		if (downloadRateLimit === 'error') {
-			console.log('  • Download-beacon rate limit: NOT set (token lacks Zone · WAF · Edit).');
+			console.log('  • Public-endpoint rate limit: NOT set (token lacks Zone · WAF · Edit).');
 			console.log('     Add that permission to the token, then run:');
 			console.log(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
 		} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
-			console.log(`  • Download-beacon rate limit: applied to the ${host} zone (blocks POST floods).`);
+			console.log(`  • Public-endpoint rate limit: applied to the ${host} zone (download beacon + oEmbed).`);
 		// Admin-login Turnstile. 'error' = token lacked the scope, so the
 		// login has no bot check; otherwise the sitekey/secret are wired and enforced.
 		if (turnstileStatus === 'error') {

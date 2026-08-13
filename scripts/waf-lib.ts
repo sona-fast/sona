@@ -153,7 +153,7 @@ const SCOPE_HINT = 'Zone → WAF: Edit (plus a Zone resource covering the domain
  *   2. GET /zones/<id>/rulesets/phases/http_ratelimit/entrypoint → the zone's
  *      rate-limit ruleset. 404 = no ruleset yet (fine — we create it). 401/403 or
  *      other non-ok = token lacks WAF scope → clear error, no mutation.
- *   3. Reconcile by `ref`/`description`:
+ *   3. Reconcile by `ref` (never the description — see the note at the match):
  *        - found & identical            → no-op, status 'exists'.
  *        - found & differs (param bump) → PATCH that one rule, status 'updated'.
  *        - not found, ruleset exists    → POST add our rule only, status 'created'.

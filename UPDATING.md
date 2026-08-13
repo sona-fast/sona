@@ -103,6 +103,22 @@ you're unsure whether it already ran.
 > **Serving on `*.pages.dev`?** Then your site has no Cloudflare zone, and a
 > rate-limiting rule cannot be applied at all. Nothing to run; the endpoint is
 > unprotected until the site moves to a custom domain.
+
+The rule blocks an address for 10 seconds once it makes 20 matching requests in
+10 seconds, counted per Cloudflare data centre. Link-preview services fetch from
+shared addresses, so roughly twenty-odd of your links pasted into one chat
+channel at once can trip it. The previews that miss show no image rather than an
+error, and they come back on the next paste.
+
+**Your link previews also change on this release** if your images are hosted off
+your own Cloudflare zone — UploadThing (the default), a `*.r2.dev` bucket, or an
+R2 custom domain on a different zone. Those previews pointed at a resized URL
+your zone refuses to serve, so they showed no image at all; they now point at the
+original file, which does load. The tradeoff is that the original is full size,
+and some services cap how large a preview they will fetch. Sites whose images sit
+on their own zone (`cdn.yoursite.com`) are unaffected and keep the resized
+version.
+
 ## Read before upgrading: your site gains an AI disclosure page (SONA-167)
 
 This release adds a public page at `/ai`, linked from your footer. **Sites that

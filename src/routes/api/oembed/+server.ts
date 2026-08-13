@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import { eq, and } from 'drizzle-orm';
-import { getReadDb } from '$lib/server/db';
+import { getDb } from '$lib/server/db';
 import { images, artists } from '$lib/server/db/schema';
 import { getSettings } from '$lib/server/settings';
 import { socialImage } from '$lib/social-image';
@@ -32,8 +32,12 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 		error(400, 'Invalid url');
 	}
 
-	// read replica (eventually consistent) — this is an unauthenticated public read
-	const db = getReadDb(platform!.env.DB);
+	// The PRIMARY, deliberately, though this is an unauthenticated public read. A
+	// replica lagging behind a just-published image would 404 here, and the embedder
+	// caches that empty unfurl — unlike a page load, which a human simply reloads, a
+	// cached negative does not self-heal when the replica catches up. This endpoint
+	// is low-traffic, so offloading it to a replica buys nothing worth that.
+	const db = getDb(platform!.env.DB);
 
 	const row = await db
 		.select({

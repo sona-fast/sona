@@ -23,9 +23,13 @@ export interface SocialImage {
 	height: number | null;
 }
 
-/** One axis, normalised: a stored 0 is as good as missing (and invalid to advertise). */
+/**
+ * One axis, normalised. A stored 0, a negative, or a fraction is as good as
+ * missing: none is valid to advertise as an oEmbed `type=photo` dimension or an
+ * og:image:width. Same guard `vr-avatars.ts` already applies to its own inputs.
+ */
 function axis(value: number | null | undefined): number | null {
-	return value ? value : null;
+	return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
 }
 
 /**

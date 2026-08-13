@@ -150,9 +150,18 @@ describe('socialImage — the dimensions it advertises', () => {
 		expect({ width, height }).toEqual({ width: null, height: 1600 });
 	});
 
-	it('treats a stored 0 as missing on the transformed path', () => {
-		// 0 is not a dimension any consumer can use (and is invalid for oEmbed
-		// type=photo), so it must not survive as a value.
+	it('treats a stored 0, a negative, or a fraction as missing', () => {
+		// None is a dimension any consumer can use (all are invalid for oEmbed
+		// type=photo), so none may survive as a value. admin/upload writes
+		// `Number(...) || null`, which accepts -5 and 900.5, so this is the guard.
+		expect(socialImage('/img/half.png', PAGE, -5, 700)).toMatchObject({
+			width: null,
+			height: 700
+		});
+		expect(socialImage('/img/half.png', PAGE, 900.5, 700)).toMatchObject({
+			width: null,
+			height: 700
+		});
 		expect(socialImage('/img/half.png', PAGE, 0, 700)).toMatchObject({
 			width: null,
 			height: 700

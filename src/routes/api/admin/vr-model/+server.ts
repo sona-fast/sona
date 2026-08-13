@@ -14,8 +14,8 @@ import { vrPublishingEnabled } from '$lib/server/vr-gate';
 import type { RequestHandler } from './$types';
 
 // POST /api/admin/vr-model?filename=<name>.vrm|.fbx  (admin-only via hooks —
-// everything under /api except /api/cron/ and the download beacon requires the
-// admin session).
+// everything under /api requires the admin session except the short exempt list
+// in hooks.server.ts, which is the authoritative one).
 //
 // Streaming counterpart of /api/upload for VR avatar model files (SONA-124).
 // Models are far beyond MAX_BUFFER_BYTES, so the RAW body is streamed — never
