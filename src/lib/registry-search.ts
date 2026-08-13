@@ -4,7 +4,7 @@
 // browser-land / E2E).
 
 import { SOCIAL_KEY_TO_PLATFORM } from './handle-classify';
-import { socialHandle } from './social-label';
+import { socialAtHandle } from './social-label';
 
 /** A shared-registry search hit, as shaped by /api/registry/search. */
 export type RegResult = {
@@ -33,8 +33,8 @@ export function resultHandle(r: RegResult): string {
 	for (const [key, v] of Object.entries(r.socials ?? {})) {
 		const platform = SOCIAL_KEY_TO_PLATFORM[key];
 		if (!platform || typeof v !== 'string') continue;
-		const handle = socialHandle(platform, v);
-		if (handle) return `@${handle}`;
+		const atHandle = socialAtHandle(platform, v);
+		if (atHandle) return atHandle;
 	}
 	return '';
 }

@@ -120,4 +120,15 @@ describe('normalizeHandle', () => {
 	it('folds case, as matching is case-insensitive', () => {
 		expect(normalizeHandle('twitter', 'https://twitter.com/Kuttoya')).toBe('kuttoya');
 	});
+
+	it('reads a protocol-relative URL, which registry payloads carry', () => {
+		// Without the // stripped, the prefix never matches and the value is cut at
+		// its first slash: every such URL normalizes to '', and registry-diff's
+		// handleEqual then reads two DIFFERENT accounts as unchanged.
+		expect(normalizeHandle('twitter', '//twitter.com/kuttoya')).toBe('kuttoya');
+		expect(normalizeHandle('twitter', '//www.twitter.com/kuttoya')).toBe('kuttoya');
+		expect(normalizeHandle('twitter', '//twitter.com/kuttoya')).not.toBe(
+			normalizeHandle('twitter', '//twitter.com/someone-else')
+		);
+	});
 });

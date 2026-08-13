@@ -54,6 +54,11 @@ function decodeSegment(segment: string): string {
  *  and isolates, the zero-width marks, U+00AD, U+180E, U+2060-2064, U+FEFF, the
  *  U+E0000 tag block), and the invisibles outside that category: the Hangul
  *  fillers, the line/paragraph separators, the variation selectors.
+ *  Whitespace counts too, and for the same reason rather than as tidying: no
+ *  platform here allows a space in a username, and `twitter.com/taro%20` decodes
+ *  to a trailing space that an inline box collapses, so the row renders `@taro`
+ *  while linking somewhere else. U+2800 (BRAILLE PATTERN BLANK) is blank on
+ *  screen but is not whitespace to Unicode, so it is listed by hand.
  *  Registry socials are proxied unmodified from a remote registry, so a segment
  *  can decode to an RLO and make an admin's search row read as somebody else's
  *  account — art then gets credited to the wrong artist.
@@ -63,7 +68,7 @@ function decodeSegment(segment: string): string {
  *  honestly, so rule 2 sends it to the platform name. */
 const DECEPTIVE_CHARS =
 	// eslint-disable-next-line no-control-regex
-	/[\u0000-\u001F\u007F-\u009F\u115F\u1160\u2028\u2029\u3164\uFE00-\uFE0F]|\p{Cf}/u;
+	/[\u0000-\u001F\u007F-\u009F\u115F\u1160\u2028\u2029\u2800\u3164\uFE00-\uFE0F]|\p{Cf}|\s/u;
 
 /** A decoded segment made safe to render: escapes resolved and cut at any
  *  delimiter the decoding introduced (`a%2Fb` is not `a/b`), or null when it
@@ -155,10 +160,31 @@ export function socialHandle(
 }
 
 /**
+ * The account handle written the way rule 1 says it is shown — `@taro` — or
+ * null when none could be derived.
+ *
+ * Rule 1's "@ on every platform and every surface" is one character, which is
+ * exactly why it belongs here: a surface that prepends its own `@` keeps the
+ * rule only for as long as nobody edits that line, and each such line needs its
+ * own regression test. Every caller that renders a handle goes through this, so
+ * the tests below are the only place the rule has to be pinned.
+ */
+export function socialAtHandle(
+	platform: SocialPlatform,
+	value: string | null | undefined
+): string | null {
+	const handle = socialHandle(platform, value);
+	return handle ? `@${handle}` : null;
+}
+
+/**
  * What a social account reads as on screen: `@handle`, or the bare platform
  * name when no handle could be derived.
+ *
+ * For surfaces that already title the row with the platform name, take
+ * {@link socialAtHandle} instead — its null says "no handle" where this one
+ * would stack "Twitter" over "Twitter".
  */
 export function socialLabel(platform: SocialPlatform, value: string | null | undefined): string {
-	const handle = socialHandle(platform, value);
-	return handle ? `@${handle}` : SOCIAL_PLATFORM_NAMES[platform];
+	return socialAtHandle(platform, value) ?? SOCIAL_PLATFORM_NAMES[platform];
 }

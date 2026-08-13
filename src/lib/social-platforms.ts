@@ -109,6 +109,11 @@ export function extractHandle(platform: SocialPlatform, raw: string | null | und
 	if (!raw) return '';
 	let s = raw.trim();
 	s = s.replace(/^https?:\/\//i, '');
+	// Protocol-relative ('//twitter.com/taro'), which registry payloads carry.
+	// Left in place it survives the prefix match and the whole value is cut at
+	// the first slash, so every such URL normalizes to '' and registry-diff's
+	// handleEqual reads two different accounts as unchanged.
+	s = s.replace(/^\/\//, '');
 	s = s.replace(/^www\./i, '');
 	const lower = s.toLowerCase();
 	for (const prefix of SOCIAL_HOST_PREFIXES[platform] ?? []) {

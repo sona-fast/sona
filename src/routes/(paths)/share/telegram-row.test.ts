@@ -9,7 +9,8 @@ import { readFileSync } from 'node:fs';
 // Source scan, matching /connect's social-rows.test.ts: the row is inline in
 // +page.svelte and the page pulls in $app/state and paraglide, so rendering it
 // under this pure-TS vitest setup (see vitest.config.ts) would cost more than it
-// proves.
+// proves. What the @ itself looks like is pinned in $lib/social-label's tests,
+// which is the only place it is written.
 
 const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
 
@@ -20,10 +21,12 @@ describe('/share Telegram row', () => {
 		expect(source).toMatch(/subtitle=\{[^\n]*\?[^\n]*:\s*undefined\}/);
 	});
 
-	it('derives that handle through the shared module', () => {
-		// socialHandle, not socialLabel: only the former can say "no handle", which
-		// is what the conditional above turns on.
-		expect(source).toMatch(/socialHandle\(['"]telegram['"]/);
+	it('takes the @handle ready-made rather than composing one', () => {
+		// socialAtHandle, not socialHandle: it returns the handle already written
+		// the way rule 1 shows it, so the row cannot ship a bare "taro", and its
+		// null is what the conditional above turns on. socialLabel would always
+		// return a string, so the row could never drop its subtitle.
+		expect(source).toMatch(/socialAtHandle\(['"]telegram['"]/);
 		expect(source).not.toMatch(/socialLabel\s*\(/);
 	});
 });

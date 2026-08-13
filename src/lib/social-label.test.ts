@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { socialHandle, socialLabel, type SocialPlatform } from './social-label';
+import { socialAtHandle, socialHandle, socialLabel, type SocialPlatform } from './social-label';
 
 // One table per platform covering the five URL shapes a stored setting takes.
 // The three SONA-128 rules read straight off it: every `handle` case is @-
@@ -104,11 +104,13 @@ describe.each(PLATFORMS)('$name social labels', (p) => {
 		['a www. host', 'www']
 	] as const)('reads the handle from %s', (_desc, key) => {
 		expect(socialHandle(p.platform, p[key])).toBe('taro');
+		expect(socialAtHandle(p.platform, p[key])).toBe('@taro');
 		expect(socialLabel(p.platform, p[key])).toBe('@taro');
 	});
 
 	it('falls back to the platform name for a pathless URL', () => {
 		expect(socialHandle(p.platform, p.pathless)).toBeNull();
+		expect(socialAtHandle(p.platform, p.pathless)).toBeNull();
 		expect(socialLabel(p.platform, p.pathless)).toBe(p.name);
 		// …and for the same URL written with a trailing slash.
 		expect(socialLabel(p.platform, `${p.pathless}/`)).toBe(p.name);
@@ -126,6 +128,19 @@ describe('rule 1: the @ prefix is uniform', () => {
 	it('prefixes every platform, with no per-platform exceptions', () => {
 		const labels = PLATFORMS.map((p) => socialLabel(p.platform, p.handle));
 		expect(labels.every((l) => l.startsWith('@'))).toBe(true);
+	});
+
+	it('puts the @ on in one place, so no surface can render a bare handle', () => {
+		// Every surface that shows a handle calls socialAtHandle: /about's chips,
+		// /connect's and /share's rows, and registry-search's result rows. None of
+		// them writes its own '@', so this is the only assertion the rule needs —
+		// and socialLabel is built on the same call, which is why the two can no
+		// longer disagree about the prefix.
+		for (const p of PLATFORMS) {
+			const at = socialAtHandle(p.platform, p.handle);
+			expect(at).toBe(`@${socialHandle(p.platform, p.handle)}`);
+			expect(socialLabel(p.platform, p.handle)).toBe(at);
+		}
 	});
 
 	it('keeps the @ on a handle equal to the platform name', () => {
@@ -291,7 +306,16 @@ describe('handle decoding', () => {
 			['ta%E2%80%A9ro', 'paragraph separator, U+2029'],
 			['ta%F3%A0%80%81ro', 'language tag, U+E0001'],
 			['taro%0Aevil', 'newline'],
-			['taro%00', 'NUL']
+			['taro%00', 'NUL'],
+			// No platform here allows a space in a username, and a trailing one
+			// collapses in an inline box: the row would read "@taro" while linking
+			// to a different account.
+			['taro%20', 'trailing space, U+0020'],
+			['ta%C2%A0ro', 'no-break space, U+00A0'],
+			['ta%E3%80%80ro', 'ideographic space, U+3000'],
+			['ta%E2%80%89ro', 'thin space, U+2009'],
+			['taro%E2%A0%80', 'Braille pattern blank, U+2800'],
+			['%20', 'a space alone, which would render the bare label "@ "']
 		] as const;
 		for (const [segment, what] of hidden) {
 			expect(socialHandle('twitter', `https://twitter.com/${segment}`), what).toBeNull();
@@ -354,6 +378,10 @@ describe('every surface renders socials through this module', () => {
 		expect(source).toMatch(/from '\$lib\/(social-label|registry-search)'/);
 		// Both spellings: a `const handle = (url) => …` is the same helper.
 		expect(source).not.toMatch(/function handle\s*\(|(?:const|let)\s+handle\s*=\s*\(/);
+		// Rule 1's @ comes from socialAtHandle, never from the surface. A page that
+		// interpolates its own prefix carries the rule only until someone edits that
+		// line, and /share did exactly that until this scan went in.
+		expect(source).not.toMatch(/'@'\s*\+|`@\$\{/);
 	});
 
 	// Repo-wide rather than a list of four: the next page to render a social is

@@ -10,7 +10,7 @@
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import { SOCIAL_PLATFORM_NAMES, socialHandle } from '$lib/social-label';
+	import { SOCIAL_PLATFORM_NAMES, socialAtHandle } from '$lib/social-label';
 
 	let { data } = $props();
 
@@ -25,14 +25,11 @@
 			{ icon: InstagramIcon, platform: 'instagram' as const, url: data.settings.instagramUrl }
 		]
 			.filter((s) => s.url)
-			.map((s) => {
-				const handle = socialHandle(s.platform, s.url);
-				return {
-					...s,
-					title: SOCIAL_PLATFORM_NAMES[s.platform],
-					subtitle: handle ? `@${handle}` : undefined
-				};
-			})
+			.map((s) => ({
+				...s,
+				title: SOCIAL_PLATFORM_NAMES[s.platform],
+				subtitle: socialAtHandle(s.platform, s.url) ?? undefined
+			}))
 	);
 
 	function weekday(d: string): string {
