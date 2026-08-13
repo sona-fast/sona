@@ -50,12 +50,12 @@ const resolve = async () => new Response('ok', { headers: { 'content-type': 'tex
 async function driveGate(
 	pathname: string,
 	db: D1Database
-): Promise<{ redirect: string | null; status: number }> {
+): Promise<{ redirect: string | null; status: number; body: string }> {
 	try {
 		const res = (await authHandle({ event: makeEvent(pathname, db), resolve } as never)) as Response;
-		return { redirect: null, status: res.status };
+		return { redirect: null, status: res.status, body: await res.text() };
 	} catch (e) {
-		if (isRedirect(e)) return { redirect: e.location, status: e.status };
+		if (isRedirect(e)) return { redirect: e.location, status: e.status, body: '' };
 		throw e;
 	}
 }
@@ -70,7 +70,7 @@ describe('setup gate — a failed settings read is not "no admin credential"', (
 		vi.restoreAllMocks();
 	});
 
-	// THE regression test. On the code that shipped the yuja.ink incident this
+	// THE regression test. On the code that shipped the SONA-186 incident this
 	// fails with redirect === '/admin/setup'.
 	it('serves a public route instead of redirecting it to the setup wizard', async () => {
 		const { redirect, status } = await driveGate('/gallery', makeBrokenDb());
@@ -84,10 +84,13 @@ describe('setup gate — a failed settings read is not "no admin credential"', (
 	});
 
 	it('keeps /admin closed rather than letting anyone reach the wizard on a blip', async () => {
-		const { redirect, status } = await driveGate('/admin/images', makeBrokenDb());
+		const { redirect, status, body } = await driveGate('/admin/images', makeBrokenDb());
 
 		expect(redirect).toBeNull();
 		expect(status).toBe(503);
+		// 'unknown' is also what a fork whose migrations never ran looks like, so
+		// the body has to point its owner somewhere.
+		expect(body).toMatch(/apply the D1 migrations/i);
 	});
 
 	it('keeps /api closed', async () => {
@@ -97,7 +100,10 @@ describe('setup gate — a failed settings read is not "no admin credential"', (
 	it('logs the failed read — a 200 leaves no other trace of a dead database', async () => {
 		await driveGate('/gallery', makeBrokenDb());
 
-		expect(console.warn).toHaveBeenCalled();
+		expect(console.warn).toHaveBeenCalledWith(
+			expect.stringContaining('setup-state read failed'),
+			expect.anything()
+		);
 	});
 
 	// The fail-closed direction still has to work where it was meant to: a site

@@ -82,22 +82,41 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// 'incomplete', which meant one failed read on a cold isolate showed a setup
 	// wizard to every visitor of an established public gallery until a read
 	// succeeded. Fail-closed was right about WHERE the risk is and wrong about
-	// where the cost lands: keeping /admin shut is what stops anyone reaching the
-	// setup flow during a blip, while an unclaimed fork has no content to leak
-	// through its public routes anyway. Serving a degraded page beats redirecting
-	// a live site into someone else's setup screen.
+	// where the cost lands: an unclaimed fork has no content to leak through its
+	// public routes, so serving a degraded page beats redirecting a live site
+	// into someone else's setup screen.
+	//
+	// What actually stops a takeover during a blip is the setup ACTION, which
+	// refuses when it cannot read the setup state, plus the mandatory SETUP_TOKEN
+	// (see admin/setup/+page.server.ts). The 503 below is not that guard — note
+	// that /admin/setup is exempt here, so the wizard renders during an outage
+	// exactly as it did before. The 503 keeps the REST of the admin panel shut.
 	const path = event.url.pathname;
 	const isSetupRoute = path === '/admin/setup' || path.startsWith('/admin/setup/');
 	const isAsset = path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png';
 	if (event.platform?.env.DB && !isSetupRoute && !isAsset) {
 		const db = getDb(event.platform.env.DB);
 		const state = await getSetupState(db, event.platform.env);
-		if (state === 'incomplete') {
-			if (path.startsWith('/api')) return new Response('Setup required', { status: 503 });
-			throw redirect(302, '/admin/setup');
-		}
-		if (state === 'unknown' && (path.startsWith('/admin') || path.startsWith('/api'))) {
-			return new Response('Setup state unavailable', { status: 503 });
+		switch (state) {
+			case 'complete':
+				break;
+			case 'incomplete':
+				if (path.startsWith('/api')) return new Response('Setup required', { status: 503 });
+				throw redirect(302, '/admin/setup');
+			case 'unknown':
+				// 'unknown' is also what a fork whose D1 migrations never ran looks
+				// like, so name that — otherwise its owner gets a bare 503 with no
+				// way forward.
+				if (path.startsWith('/admin') || path.startsWith('/api')) {
+					return new Response(
+						'Setup state unavailable. If this is a new deployment, apply the D1 migrations.',
+						{ status: 503 }
+					);
+				}
+				break;
+			default:
+				// A new SetupState must not fall through into "serve everything".
+				throw new Error(`unhandled setup state: ${state satisfies never}`);
 		}
 	}
 

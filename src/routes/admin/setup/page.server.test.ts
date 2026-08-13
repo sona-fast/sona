@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -6,9 +6,10 @@ import { drizzle } from 'drizzle-orm/d1';
 import { readFileSync } from 'node:fs';
 import { isRedirect } from '@sveltejs/kit';
 import * as schema from '$lib/server/db/schema';
-import { getRawSetting } from '$lib/server/settings';
+import { getRawSetting, setRawSetting } from '$lib/server/settings';
+import { __resetSetupCache } from '$lib/server/admin-auth';
 import { DEFAULT_THEME_ID } from '$lib/themes';
-import { actions } from './+page.server';
+import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
 
@@ -294,5 +295,71 @@ describe('setup wizard — missing SETUP_TOKEN error is gh-first (#140 follow-up
 		const wranglerAt = error.indexOf('wrangler pages secret put SETUP_TOKEN');
 		expect(ghAt).toBeGreaterThanOrEqual(0);
 		expect(wranglerAt).toBeGreaterThan(ghAt);
+	});
+});
+
+// SONA-186. The wizard is the one route the setup gate exempts, so its own
+// load/action pair is the only thing standing on it during a D1 outage.
+describe('setup wizard — behaviour when the setup state cannot be read', () => {
+	beforeEach(() => {
+		__resetSetupCache();
+		vi.spyOn(console, 'warn').mockImplementation(() => {});
+	});
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	// No site_settings table — how a D1 outage presents to this code.
+	function brokenPlatform(): App.Platform {
+		const sqlite = new Database(':memory:');
+		return {
+			env: { DB: makeD1(sqlite), SETUP_TOKEN: 'boot-token' }
+		} as unknown as App.Platform;
+	}
+
+	function loadEvent(platform: App.Platform) {
+		return { platform } as never;
+	}
+
+	async function redirectFrom(fn: () => unknown): Promise<string | null> {
+		try {
+			await fn();
+			return null;
+		} catch (e) {
+			if (isRedirect(e)) return e.location;
+			throw e;
+		}
+	}
+
+	it('renders the wizard rather than erroring when the read fails', async () => {
+		// Deliberate: the load must survive 'unknown' so the action's own 503
+		// message has a page to render into. Erroring here would replace the
+		// operator's only diagnostic with a bare error page.
+		expect(await redirectFrom(() => load(loadEvent(brokenPlatform())))).toBeNull();
+	});
+
+	it('still closes the wizard on a configured site', async () => {
+		const { db, platform } = makeDb();
+		await setRawSetting(db, 'adminPasswordHash', 'x');
+
+		expect(await redirectFrom(() => load(loadEvent(platform)))).toBe('/admin/login');
+	});
+
+	it('renders the wizard on a genuinely unclaimed fork', async () => {
+		const { platform } = makeDb();
+
+		expect(await redirectFrom(() => load(loadEvent(platform)))).toBeNull();
+	});
+
+	// The load-bearing guard. Everything else in SONA-186 rests on the claim that
+	// a takeover cannot complete while the setup state is unreadable, so assert it
+	// end to end rather than trusting that getRawSetting still propagates.
+	it('REFUSES to run setup while the setup state is unreadable', async () => {
+		const platform = brokenPlatform();
+
+		const result = await actions.default(setupEvent(platform, {}));
+
+		expect(result).toMatchObject({ status: 503 });
+		expect((result as { data: { error: string } }).data.error).toMatch(/could not verify setup state/i);
 	});
 });

@@ -144,7 +144,23 @@ describe('getSetupState', () => {
 
 	it('warns on unknown, since a degraded site logs nothing else', async () => {
 		await getSetupState(broken(), undefined);
-		expect(console.warn).toHaveBeenCalled();
+		expect(console.warn).toHaveBeenCalledWith(
+			expect.stringContaining('setup-state read failed'),
+			expect.anything()
+		);
+	});
+
+	// The warn is throttled per isolate so a sustained outage can't drown the log
+	// budget — but the READ must still happen every time, or the site would stop
+	// self-healing the moment it went quiet.
+	it('throttles the warn without throttling the read', async () => {
+		expect(await getSetupState(broken(), undefined)).toBe('unknown');
+		expect(await getSetupState(broken(), undefined)).toBe('unknown');
+		expect(await getSetupState(broken(), undefined)).toBe('unknown');
+
+		expect(console.warn).toHaveBeenCalledTimes(1);
+		// Still recovers immediately once the DB answers.
+		expect(await getSetupState(empty(), undefined)).toBe('incomplete');
 	});
 
 	it('never caches unknown — the site recovers on the first read that works', async () => {

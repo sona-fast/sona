@@ -137,7 +137,7 @@ export async function verifyAdminPassword(
 		const ok = constantTimeEqual(password, legacy);
 		if (ok) {
 			// Auto-migrate: persist a hash so future logins don't depend on the env
-			// secret (and so isSetupComplete sees a stored credential).
+			// secret (and so getSetupState sees a stored credential).
 			try {
 				await setAdminPassword(db, password);
 			} catch {
@@ -155,6 +155,11 @@ export async function verifyAdminPassword(
 // monotonic, so we never need to re-query after the first positive. Before setup
 // (fresh install, no traffic) we query each request, which is fine.
 let setupCompleteCache = false;
+
+// Log throttle for the 'unknown' branch (see getSetupState). Per-isolate, like
+// every other module-level cache here.
+const UNKNOWN_WARN_INTERVAL_MS = 60_000;
+let lastUnknownWarnAt = 0;
 
 /**
  * Setup state, as three cases rather than two. The third one is the point: a
@@ -203,14 +208,29 @@ export async function getSetupState(db: Database, env: Env | undefined): Promise
 		// the error-rate rollup (which counts 5xx) and the metrics batch (which
 		// writes to this same unreachable DB) both stay silent — Workers logs are
 		// the one channel that survives a D1 outage.
-		console.warn('setup-state read failed; serving public routes, gating /admin:', e);
+		//
+		// Throttled per isolate: 'unknown' is deliberately never cached, so without
+		// this every request during an outage logs a line (a single gallery view
+		// pulls dozens of non-exempt paths). Drowning the log budget would cost the
+		// operator the one diagnostic this adds, exactly when they need it. The
+		// READ still happens every request, so recovery is unaffected.
+		if (Date.now() - lastUnknownWarnAt > UNKNOWN_WARN_INTERVAL_MS) {
+			lastUnknownWarnAt = Date.now();
+			console.warn('setup-state read failed; serving public routes, gating /admin:', e);
+		}
 		return 'unknown';
 	}
 }
 
-/** Test-only: reset the per-isolate setup cache. */
+/**
+ * Test-only: reset the per-isolate setup state — both the completion latch and
+ * the 'unknown' log throttle. Both are module-level, and vitest isolates per
+ * FILE rather than per test, so without this a case runs against whatever the
+ * previous one left behind and can pass while asserting nothing.
+ */
 export function __resetSetupCache(): void {
 	setupCompleteCache = false;
+	lastUnknownWarnAt = 0;
 }
 
 // --- login throttle (best-effort, per-isolate) ------------------------------
