@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { dev } from '$app/environment';
 import { getVerifiedSupporterKey, NO_SUPPORTER_KEY } from '$lib/server/settings';
-import { isFeatureEnabled, EARLY_ACCESS } from '$lib/early-access';
+import { isFeatureEnabled, featureOpenToEveryone, EARLY_ACCESS } from '$lib/early-access';
 import { vrAvatars } from '$lib/server/db/schema';
 import { cachedProbe } from '$lib/server/nav-gating';
 import type { Database } from '$lib/server/db';
@@ -47,7 +47,7 @@ export async function vrPublishingEnabled(
 	// Past GA (or once the registry entry retires) the flag is open to everyone,
 	// and the key cannot change that — so skip the read entirely rather than pay
 	// for one on every VR request on every fork for the rest of the product's life.
-	if (isFeatureEnabled(VR_FEATURE_FLAG, { supporterKeyValid: false, now })) return true;
+	if (featureOpenToEveryone(VR_FEATURE_FLAG, now)) return true;
 	// A failed read or verify degrades to "no key" rather than throwing the whole
 	// page; pre-GA that denies, which is the safe direction. Logged because the
 	// operator sees the same gated copy either way — without this, a D1 blip is
