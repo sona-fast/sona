@@ -228,8 +228,17 @@ export const actions = {
 		const clear = data.get('clear') === 'on';
 
 		if (!clear) {
-			const image = await db.select({ id: images.id }).from(images).where(eq(images.id, id)).get();
+			const image = await db
+				.select({ id: images.id, parentImageId: images.parentImageId })
+				.from(images)
+				.where(eq(images.id, id))
+				.get();
 			if (!image) return fail(404, { error: 'Image not found' });
+			// /art excludes variants from both ref-sheet paths (SONA-18), so storing
+			// this would be a designation nothing ever honors. Refuse it here rather
+			// than let the admin report a reference sheet the public page ignores.
+			if (image.parentImageId != null)
+				return fail(400, { error: 'A variant cannot be the reference sheet — use its parent image' });
 		}
 
 		const owner = await db

@@ -99,6 +99,33 @@ describe('admin image edit — reference action', () => {
 		expect(await refOf(db, c.id)).toBe(null);
 	});
 
+	// SONA-18: /art ignores variants in both ref-sheet paths, so storing one here
+	// would leave the admin claiming a reference sheet the public page discards.
+	it('fails 400 and writes nothing when the image is a variant', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await db.insert(images).values({ id: 7, title: 'Variant', slug: 'art-7', imageUrl: 'https://cdn.example.com/7.png', artistId: 1, published: true, parentImageId: 5 });
+		const [c] = await db.insert(characters).values({ name: 'Owner', isOwner: true }).returning({ id: characters.id });
+
+		const result = await actions.reference({ params: { id: '7' }, request: form({}), platform } as never);
+		expect((result as { status: number }).status).toBe(400);
+		expect(await refOf(db, c.id)).toBe(null);
+	});
+
+	// Clearing must stay reachable for a variant designated before that rule.
+	it('still clears when the current reference is a variant', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await db.insert(images).values({ id: 7, title: 'Variant', slug: 'art-7', imageUrl: 'https://cdn.example.com/7.png', artistId: 1, published: true, parentImageId: 5 });
+		const [c] = await db
+			.insert(characters)
+			.values({ name: 'Owner', isOwner: true, referenceImageId: 7 })
+			.returning({ id: characters.id });
+
+		await actions.reference({ params: { id: '7' }, request: form({ clear: 'on' }), platform } as never);
+		expect(await refOf(db, c.id)).toBe(null);
+	});
+
 	it('fails and writes nothing when there is no owner character', async () => {
 		const { db, platform } = makeDb();
 		await seedImage(db, 5);

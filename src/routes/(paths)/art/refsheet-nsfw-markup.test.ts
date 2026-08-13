@@ -33,8 +33,9 @@ describe('/art ref-sheet NSFW shield (SONA-18)', () => {
 		expect(shielded).not.toContain('<a ');
 	});
 
-	it('only the revealed branch links through to the gallery page', () => {
-		const links = pageSrc.match(/<a class="ref-sheet" href=/g) ?? [];
-		expect(links).toHaveLength(1);
+	// Shielded, the frame is a button, so the caption carries the gallery link —
+	// otherwise the ref sheet has no route onward at all without JS.
+	it('moves the full-size link into the caption while shielded', () => {
+		expect(pageSrc).toContain('<a href={`/gallery/${data.refSheet.slug}`}>{m.art_ref_view_full()}</a>');
 	});
 });

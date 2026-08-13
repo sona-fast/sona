@@ -101,6 +101,15 @@
 		{/if}
 		<p class="caption">
 			{m.art_ref_caption()}
+			{#if data.refSheet.nsfw && !revealed}
+				<!-- Shielded, the frame is a button rather than the gallery link, so
+				     "view full size" moves into the caption as a real link. That also
+				     keeps the ref sheet reachable without JS, where the reveal button
+				     does nothing. -->
+				<a href={`/gallery/${data.refSheet.slug}`}>{m.art_ref_view_full()}</a>
+			{:else}
+				{m.art_ref_view_full()}
+			{/if}
 			{#if data.refSheet.artistName}
 				<span class="credit"> · {m.art_ref_by({ artist: data.refSheet.artistName })}</span>
 			{/if}

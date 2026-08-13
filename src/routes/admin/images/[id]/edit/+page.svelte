@@ -44,6 +44,12 @@
 				{#if data.ownerCharacter.isReference}
 					<input type="hidden" name="clear" value="on" />
 					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_clear()}</button>
+				{:else if data.image.parentImageId != null}
+					<!-- /art excludes variants from both ref-sheet paths (SONA-18), so
+					     offering the control here would promise something the public
+					     page ignores. The clear branch above stays reachable for a
+					     variant designated before that rule existed. -->
+					<small class="hint">{m.admin_image_reference_variant()}</small>
 				{:else}
 					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_set({ name: data.ownerCharacter.name })}</button>
 					{#if data.ownerCharacter.replacesOther}
