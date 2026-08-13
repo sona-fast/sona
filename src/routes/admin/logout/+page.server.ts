@@ -1,5 +1,5 @@
 import { redirect, type Cookies } from '@sveltejs/kit';
-import { SESSION_COOKIE } from '$lib/config';
+import { SESSION_COOKIE, VIEWER_TZ_COOKIE } from '$lib/config';
 import { getDb } from '$lib/server/db';
 import { sessions } from '$lib/server/db/schema';
 import { hashToken } from '$lib/server/admin-auth';
@@ -19,6 +19,11 @@ async function performLogout(request: Request, platform: App.Platform | undefine
 	}
 
 	cookies.delete(SESSION_COOKIE, { path: '/' });
+	// The operator's timezone is a coarse location hint with a one-year max-age
+	// (SONA-119). Nothing needs it once signed out, and on a shared machine it
+	// would otherwise outlive the session it was collected for. Same path it was
+	// written at, or the delete misses.
+	cookies.delete(VIEWER_TZ_COOKIE, { path: '/admin' });
 }
 
 // Handle direct navigation to /admin/logout (GET) — log out and redirect.
