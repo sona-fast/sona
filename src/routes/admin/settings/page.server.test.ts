@@ -34,8 +34,8 @@ vi.mock('$lib/server/avatar', async (importActual) => ({
 // Supporter-key verification needs the sona.fast PRIVATE key to mint a passing
 // token, which tests can't have — so stub verify and drive the save/remove/load
 // branches by its result. The signature crypto itself is covered in
-// supporter-key.test.ts with a real in-test keypair. supporterKeyDisplayDate
-// stays real so the formatted dates are exercised.
+// supporter-key.test.ts with a real in-test keypair. The date formatting stays
+// real so the formatted dates are exercised.
 vi.mock('$lib/server/supporter-key', async (importActual) =>
 	(await import('$lib/server/test/supporter-key-mock')).supporterKeyMockModule(
 		importActual as () => Promise<typeof import('$lib/server/supporter-key')>

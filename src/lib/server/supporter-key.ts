@@ -111,15 +111,6 @@ export async function verifySupporterKey(
 	return { valid: true, login, tier, expiresAt };
 }
 
-/**
- * The "valid until" / "expired" display date (dotted YYYY.MM.DD, the repo
- * standard), read in the viewer's zone (SONA-119) — the same zone the countdown
- * beside it is counted in, which is what keeps the two from disagreeing.
- */
-export function supporterKeyDisplayDate(expiresAt: Date, timeZone: string): string {
-	return supporterKeyValidUntil(expiresAt.getTime(), timeZone);
-}
-
 /** A valid key within this many days of expiry gets the "expiring soon"
  * treatment (SONA-114): countdown on the settings card plus the admin-wide
  * re-mint notice. Fixed rather than scaled — at the issuer's 45-day window,
@@ -169,8 +160,8 @@ export function supporterKeyStatusFromResult(
 		const daysRemaining = supporterKeyDaysRemaining(res.expiresAt.getTime(), now.getTime(), timeZone);
 		return {
 			state: 'valid',
-			validUntil: supporterKeyDisplayDate(res.expiresAt, timeZone),
-			dismissKey: supporterKeyDisplayDate(res.expiresAt, 'UTC'),
+			validUntil: supporterKeyValidUntil(res.expiresAt.getTime(), timeZone),
+			dismissKey: supporterKeyValidUntil(res.expiresAt.getTime(), 'UTC'),
 			daysRemaining,
 			expiringSoon: daysRemaining <= EXPIRY_WARN_DAYS
 		};
@@ -178,8 +169,8 @@ export function supporterKeyStatusFromResult(
 	if (res.reason === 'expired') {
 		return {
 			state: 'expired',
-			validUntil: supporterKeyDisplayDate(res.expiresAt, timeZone),
-			dismissKey: supporterKeyDisplayDate(res.expiresAt, 'UTC'),
+			validUntil: supporterKeyValidUntil(res.expiresAt.getTime(), timeZone),
+			dismissKey: supporterKeyValidUntil(res.expiresAt.getTime(), 'UTC'),
 			daysRemaining: 0,
 			expiringSoon: false
 		};

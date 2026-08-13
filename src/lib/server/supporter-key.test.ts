@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { supporterKeyValidUntil } from './supporter-key-expiry';
 import {
 	verifySupporterKey,
-	supporterKeyDisplayDate,
 	supporterKeyStatusFromResult,
 	resolveSupporterKeyStatus
 } from './supporter-key';
@@ -55,7 +55,7 @@ describe('verifySupporterKey', () => {
 		expect(res).toMatchObject({ valid: true, login: 'sparky', tier: 2 });
 		if (res.valid) {
 			// The display date is the last covered day (exp - 1s, UTC), dotted.
-			expect(supporterKeyDisplayDate(res.expiresAt, 'UTC')).toBe('2026.08.31');
+			expect(supporterKeyValidUntil(res.expiresAt.getTime(), 'UTC')).toBe('2026.08.31');
 		}
 	});
 
@@ -72,7 +72,7 @@ describe('verifySupporterKey', () => {
 
 		expect(res).toMatchObject({ valid: false, reason: 'expired', login: 'sparky' });
 		if (!res.valid && res.reason === 'expired') {
-			expect(supporterKeyDisplayDate(res.expiresAt, 'UTC')).toBe('2026.07.10');
+			expect(supporterKeyValidUntil(res.expiresAt.getTime(), 'UTC')).toBe('2026.07.10');
 		}
 	});
 

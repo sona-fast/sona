@@ -53,8 +53,8 @@ import {
 import { syncArtists } from '$lib/server/artist-sync';
 import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
 import { isObservabilityEnabled } from '$lib/server/metrics';
-import { verifySupporterKey, supporterKeyDisplayDate, resolveSupporterKeyStatus } from '$lib/server/supporter-key';
-import { viewerTimeZone } from '$lib/server/supporter-key-expiry';
+import { verifySupporterKey, resolveSupporterKeyStatus } from '$lib/server/supporter-key';
+import { viewerTimeZone, supporterKeyValidUntil } from '$lib/server/supporter-key-expiry';
 import { earlyAccessActive } from '$lib/early-access';
 import { formatDate } from '$lib/index';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
@@ -536,7 +536,10 @@ export const actions = {
 			if (res.reason === 'expired') {
 				return fail(400, {
 					supporterKeyError: 'expired',
-					supporterKeyExpiredDate: supporterKeyDisplayDate(res.expiresAt, viewerTimeZone(cookies.get('tz')))
+					supporterKeyExpiredDate: supporterKeyValidUntil(
+						res.expiresAt.getTime(),
+						viewerTimeZone(cookies.get('tz'))
+					)
 				});
 			}
 			return fail(400, { supporterKeyError: 'invalid', supporterKeyExpiredDate: undefined });
