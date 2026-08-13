@@ -64,7 +64,10 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 			// nav item and the Settings → Observability entry.
 			observabilityEnabled: isObservabilityEnabled(platform.env),
 			supporterKeyNotice: supporterKey?.expiringSoon && !dismissed
-				? { daysRemaining: supporterKey.daysRemaining, dismissValue }
+				// Whether to warn is decided here, in UTC (expiringSoon); how many days
+				// the notice prints is recounted in the viewer's zone from this instant
+				// (SONA-119), so it can't contradict the settings card's countdown.
+				? { expiresAtMs: supporterKey.expiresAtMs, dismissValue }
 				: null
 		};
 	} catch {

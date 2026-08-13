@@ -190,6 +190,9 @@ describe('supporterKeyStatusFromResult', () => {
 		expect(status).toEqual({
 			state: 'valid',
 			validUntil: '2026.08.31',
+			// Shipped so the browser can re-render the date and the countdown in
+			// the viewer's own timezone (SONA-119).
+			expiresAtMs: exp.getTime(),
 			daysRemaining: 7,
 			expiringSoon: true
 		});

@@ -26,7 +26,7 @@ async function login(page: Page) {
 // onclick sets activeTab), so it only reveals once hydrated — retry the switch
 // until the panel shows, like palette-settings.spec.ts.
 async function openStorageTab(page: Page) {
-	const tab = page.getByRole('button', { name: 'Storage', exact: true });
+	const tab = page.getByRole('tab', { name: 'Storage', exact: true });
 	await expect(async () => {
 		await tab.click();
 		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
@@ -105,6 +105,6 @@ test.describe('admin settings ?tab=observability with the gate off', () => {
 
 		await expect(page.locator('.settings-tabs')).toHaveAttribute('data-active-tab', 'site');
 		// The gated tab button isn't offered either.
-		await expect(page.getByRole('button', { name: 'Observability' })).toHaveCount(0);
+		await expect(page.getByRole('tab', { name: 'Observability' })).toHaveCount(0);
 	});
 });

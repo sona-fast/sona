@@ -7,6 +7,7 @@
 	import AdminTabs from '$lib/components/AdminTabs.svelte';
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
 	import * as m from '$lib/paraglide/messages';
+	import { supporterKeyDaysRemaining } from '$lib/supporter-key-expiry';
 
 	let { children, data } = $props();
 
@@ -19,6 +20,14 @@
 	// post-hydration layout shift — and an early-phase dismissal re-warns in the
 	// final days. dismissedValue only bridges until the next server load.
 	let dismissedValue = $state<string | null>(null);
+	// Counted off the key's own expiry instant in whatever zone this runs in
+	// (SONA-119): UTC on SSR, the viewer's zone once hydrated — the same count
+	// the settings card shows, so the two can't disagree by a day.
+	const noticeDaysLeft = $derived(
+		data.supporterKeyNotice
+			? supporterKeyDaysRemaining(data.supporterKeyNotice.expiresAtMs, Date.now())
+			: 0
+	);
 	let mainEl: HTMLElement | undefined = $state();
 	// Populated on dismiss; lives in a persistent polite live region so screen
 	// readers hear a confirmation instead of silence when the banner vanishes.
@@ -114,9 +123,9 @@
 					<div class="supporter-notice">
 						<span class="notice-eyebrow">{m.admin_notice_supporter_eyebrow()}</span>
 						<p>
-							{data.supporterKeyNotice.daysRemaining <= 1
+							{noticeDaysLeft <= 1
 								? m.admin_notice_supporter_today_pre()
-								: m.admin_notice_supporter_expiring_pre({ days: data.supporterKeyNotice.daysRemaining })}<a
+								: m.admin_notice_supporter_expiring_pre({ days: noticeDaysLeft })}<a
 								class="notice-link"
 								href="https://sona.fast/supporter-key"
 								target="_blank"

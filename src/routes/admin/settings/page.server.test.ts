@@ -949,6 +949,10 @@ describe('settings load — supporter key is raw + verified, never in public set
 			token: 'head.tail',
 			state: 'valid',
 			validUntil: '2026.08.31',
+			// The key's own exp instant — no more than validUntil already reveals,
+			// and what the client re-renders both the date and the countdown from
+			// so they can't disagree by a day (SONA-119).
+			expiresAtMs: expect.any(Number),
 			daysRemaining: expect.any(Number),
 			expiringSoon: expect.any(Boolean)
 		});

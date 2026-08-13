@@ -31,6 +31,15 @@ vi.mock('$lib/server/settings', async (importActual) => {
 
 const DAY_MS = 86_400_000;
 
+/** A realistically minted exp: midnight UTC `days` calendar days out, which is
+ * what the issuer signs (end-of-day UTC) and what makes the countdown read
+ * exactly `days`. A fractional-day offset would instead land mid-day and make
+ * the calendar-day count depend on the wall clock the suite happens to run at. */
+function expInDays(days: number): Date {
+	const now = new Date();
+	return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days));
+}
+
 function makeLoadDb() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec('CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
@@ -53,7 +62,7 @@ function loadEvent(
 	} as never;
 }
 
-type NoticeResult = { supporterKeyNotice: { daysRemaining: number; dismissValue: string } | null };
+type NoticeResult = { supporterKeyNotice: { expiresAtMs: number; dismissValue: string } | null };
 
 describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 	it('is null with no stored key', async () => {
@@ -71,7 +80,7 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 			valid: true,
 			login: 'sparky',
 			tier: 2,
-			expiresAt: new Date(Date.now() + 40 * DAY_MS)
+			expiresAt: expInDays(40)
 		});
 
 		const result = (await load(loadEvent(platform))) as NoticeResult;
@@ -79,7 +88,7 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 		expect(result.supporterKeyNotice).toBeNull();
 	});
 
-	it('surfaces days remaining inside the window and keeps the token out of the payload', async () => {
+	it('surfaces the expiry instant inside the window and keeps the token out of the payload', async () => {
 		const { db, platform } = makeLoadDb();
 		await setRawSetting(db, 'siteName', 'Sparky Site');
 		clearSettingsCache();
@@ -88,12 +97,15 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 			valid: true,
 			login: 'sparky',
 			tier: 2,
-			expiresAt: new Date(Date.now() + 6.5 * DAY_MS)
+			expiresAt: expInDays(7)
 		});
 
 		const result = (await load(loadEvent(platform))) as NoticeResult & Record<string, unknown>;
 
-		expect(result.supporterKeyNotice).toMatchObject({ daysRemaining: 7 });
+		// The notice ships the instant, not a day count: the browser recounts the
+		// days in the viewer's own zone (SONA-119). Whether to warn at all is still
+		// decided here in UTC — 7 days out is inside the window.
+		expect(result.supporterKeyNotice).toMatchObject({ expiresAtMs: expInDays(7).getTime() });
 		// The successful load carries the real chrome fields, not EMPTY fallbacks.
 		expect(result).toMatchObject({
 			siteName: 'Sparky Site',
@@ -179,7 +191,7 @@ describe('admin layout load — cookie dismissal with phase re-warn (SONA-114)',
 	it('suppresses the notice when the cookie matches the current key + phase', async () => {
 		// First load learns the dismissValue; a second load of the SAME key with it
 		// as the cookie (same phase) renders no notice.
-		const expiresAt = new Date(Date.now() + 6.5 * DAY_MS);
+		const expiresAt = expInDays(7);
 		const first = await loadWithNotice(expiresAt);
 		const dismissValue = first.supporterKeyNotice!.dismissValue;
 
@@ -192,7 +204,7 @@ describe('admin layout load — cookie dismissal with phase re-warn (SONA-114)',
 		// Same key, now inside the final 3 days: its dismissValue carries ':final',
 		// so a cookie recorded during the early phase no longer matches and the
 		// notice comes back for the last-chance warning.
-		const expiresAt = new Date(Date.now() + 2.5 * DAY_MS);
+		const expiresAt = expInDays(3);
 		const first = await loadWithNotice(expiresAt);
 		const finalDismiss = first.supporterKeyNotice!.dismissValue;
 		expect(finalDismiss).toMatch(/:final$/);
@@ -207,7 +219,7 @@ describe('admin layout load — cookie dismissal with phase re-warn (SONA-114)',
 		// Phases are ordered: a final-phase dismissal covers the whole warning
 		// window for that validUntil, so a request landing a phase earlier (clock
 		// skew, stale edge cache) must not resurrect an already-dismissed notice.
-		const expiresAt = new Date(Date.now() + 6.5 * DAY_MS);
+		const expiresAt = expInDays(7);
 		const first = await loadWithNotice(expiresAt);
 		const earlyDismiss = first.supporterKeyNotice!.dismissValue;
 		expect(earlyDismiss).toMatch(/:early$/);

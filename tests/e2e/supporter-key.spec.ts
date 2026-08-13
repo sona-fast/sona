@@ -36,7 +36,7 @@ const fieldError = (page: Page) => page.locator('.field-error#supporter-key-erro
 // whole click-until-visible like the palette spec's hydration-sensitive steps.
 async function openAccountTab(page: Page) {
 	await expect(async () => {
-		await page.getByRole('button', { name: 'Account', exact: true }).click();
+		await page.getByRole('tab', { name: 'Account', exact: true }).click();
 		await expect(keyInput(page)).toBeVisible({ timeout: 1500 });
 	}).toPass();
 }

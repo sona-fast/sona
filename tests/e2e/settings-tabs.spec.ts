@@ -24,14 +24,57 @@ test.describe('admin settings ?tab= deep links', () => {
 		await page.goto('/admin/settings?tab=account');
 
 		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'account');
-		// The Account tab button itself is marked current for assistive tech…
+		// The Account tab button itself is marked selected for assistive tech…
 		await expect(
-			page.getByRole('button', { name: 'Account', exact: true })
-		).toHaveAttribute('aria-current', 'true');
-		// …and it's the only tab button carrying aria-current.
-		await expect(activeTab(page).locator('button[aria-current]')).toHaveCount(1);
+			page.getByRole('tab', { name: 'Account', exact: true })
+		).toHaveAttribute('aria-selected', 'true');
+		// …and it's the only selected tab.
+		await expect(activeTab(page).locator('button[aria-selected="true"]')).toHaveCount(1);
 		// The Account panel's supporter-key field is actually visible, not just marked.
 		await expect(page.locator('input[name="supporterKey"]')).toBeVisible();
+	});
+
+	test('the tabs are a real tablist: each controls the panel, which the active tab names', async ({
+		page
+	}) => {
+		// SONA-119: the buttons carry the full tab pattern, so assistive tech can
+		// get from a tab to the settings it reveals. The sections share one panel
+		// (CSS hides the inactive ones), which the selected tab relabels.
+		await page.goto('/admin/settings?tab=account');
+
+		const panel = page.locator('#settings-panels');
+		await expect(panel).toHaveAttribute('role', 'tabpanel');
+		await expect(panel).toHaveAttribute('aria-labelledby', 'settings-tab-account');
+		for (const tab of await page.getByRole('tab').all()) {
+			await expect(tab).toHaveAttribute('aria-controls', 'settings-panels');
+		}
+	});
+
+	test('the tablist is one tab stop and arrows move within it', async ({ page }) => {
+		// Roving tabindex: only the selected tab is reachable by Tab, and Left /
+		// Right / Home / End move (and select) inside the list.
+		await page.goto('/admin/settings?tab=account');
+
+		const account = page.getByRole('tab', { name: 'Account', exact: true });
+		await expect(account).toHaveAttribute('tabindex', '0');
+		await expect(page.getByRole('tab', { name: 'Site', exact: true })).toHaveAttribute(
+			'tabindex',
+			'-1'
+		);
+
+		// Hydration-dependent, like the click test above.
+		await expect(async () => {
+			await account.focus();
+			await page.keyboard.press('ArrowLeft');
+			await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'storage', {
+				timeout: 1500
+			});
+		}).toPass();
+		await expect(page.getByRole('tab', { name: 'Storage', exact: true })).toBeFocused();
+
+		await page.keyboard.press('Home');
+		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'site');
+		await expect(page.getByRole('tab', { name: 'Site', exact: true })).toBeFocused();
 	});
 
 	test('?tab=bogus falls back to the Site tab', async ({ page }) => {
@@ -55,14 +98,14 @@ test.describe('admin settings ?tab= deep links', () => {
 		// The tab buttons are client JS, so the click only "takes" once hydrated —
 		// retry click-until-active like supporter-key.spec.ts's openAccountTab.
 		await expect(async () => {
-			await page.getByRole('button', { name: 'Site', exact: true }).click();
+			await page.getByRole('tab', { name: 'Site', exact: true }).click();
 			await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'site', { timeout: 1500 });
 		}).toPass();
 		// The manual pick shallow-drops the now-stale param (replaceState).
 		await expect(page).not.toHaveURL(/[?&]tab=/);
 
 		// A second click: manual control persists, still no ?tab= in the URL.
-		await page.getByRole('button', { name: 'Storage', exact: true }).click();
+		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
 		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'storage');
 		await expect(page).not.toHaveURL(/[?&]tab=/);
 	});

@@ -21,10 +21,10 @@ async function login(page: Page) {
 // form does a real navigation, which aborts the goto that follows.
 async function openSiteTab(page: Page) {
 	await expect(async () => {
-		await page.getByRole('button', { name: 'Storage', exact: true }).click();
+		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
 		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
 	}).toPass();
-	await page.getByRole('button', { name: 'Site', exact: true }).click();
+	await page.getByRole('tab', { name: 'Site', exact: true }).click();
 }
 
 async function saveSiteSettings(page: Page) {
@@ -93,10 +93,10 @@ test('an owner override replaces the defaults and is rendered as escaped text', 
 	// idiom as palette-settings.spec.ts). This branch's third e2e webServer widens
 	// the hydration window past the nudge loop's 5s cap below, so gate first.
 	await expect(async () => {
-		await page.getByRole('button', { name: 'Storage', exact: true }).click();
+		await page.getByRole('tab', { name: 'Storage', exact: true }).click();
 		await expect(page.getByText('Provider', { exact: true })).toBeVisible({ timeout: 1500 });
 	}).toPass();
-	await page.getByRole('button', { name: 'Site', exact: true }).click();
+	await page.getByRole('tab', { name: 'Site', exact: true }).click();
 
 	// The seed sets no contactEmail, so the "set a monitored contact email" nudge
 	// shows next to the field — the CCPA rights channel prompt (item 2).

@@ -14,7 +14,8 @@
 	import { THEMES } from '$lib/themes';
 	import { LANDING_LAYOUTS } from '$lib/landing';
 	import { resendSetupProgress } from '$lib/resend-setup';
-	import { resolveTabId, type TabId } from './tabs';
+	import { resolveTabId, visibleTabIds, type TabId } from './tabs';
+	import { supporterKeyValidUntil, supporterKeyDaysRemaining } from '$lib/supporter-key-expiry';
 	import { showUtFileStat } from './ut-stat';
 	import { baseLocale, locales } from '$lib/paraglide/runtime';
 	import { earlyAccessLabel } from '$lib/early-access-label';
@@ -180,6 +181,18 @@
 	const RESEND_RING_C = 113.1;
 	const resendRingOffset = $derived(RESEND_RING_C * (1 - resendProgress.done / resendProgress.total));
 
+	// Expiry date + countdown, both read off the key's own `exp` instant in
+	// whatever zone this code runs in (SONA-119): UTC during SSR, the viewer's
+	// zone after hydration. Deriving them together is what stops "expires today"
+	// from appearing next to a date that reads as yesterday locally. Whether the
+	// countdown shows at all stays the server's UTC-pinned `expiringSoon` call.
+	const keyValidUntil = $derived(
+		data.supporterKey ? supporterKeyValidUntil(data.supporterKey.expiresAtMs) : ''
+	);
+	const keyDaysLeft = $derived(
+		data.supporterKey ? supporterKeyDaysRemaining(data.supporterKey.expiresAtMs, Date.now()) : 0
+	);
+
 	// Tabs: ?tab= deep-links resolve REACTIVELY (the admin-wide key-expiry
 	// notice, SONA-114, links to ?tab=account), so a same-route navigation to a
 	// ?tab= URL still switches tabs. Clicking a tab button takes manual control
@@ -200,6 +213,37 @@
 			url.searchParams.delete('tab');
 			replaceState(url, {});
 		}
+	}
+
+	// The tablist renders from SETTINGS_TAB_IDS rather than a hand-written row of
+	// buttons (SONA-119), so an added tab can't be missed here. Record<TabId, …>
+	// makes a tab with no label a type error rather than a blank button.
+	const TAB_LABELS: Record<TabId, () => string> = {
+		site: m.admin_settings_tab_site,
+		connections: m.admin_settings_tab_connections,
+		storage: m.admin_settings_tab_storage,
+		account: m.admin_settings_tab_account,
+		observability: m.admin_settings_tab_observability
+	};
+	const tabs = $derived(visibleTabIds(data.observabilityEnabled));
+	const tabButtonId = (tab: TabId) => `settings-tab-${tab}`;
+	let tabButtons = $state<(HTMLButtonElement | undefined)[]>([]);
+
+	// role="tab" comes with a keyboard contract: one tab stop for the whole
+	// tablist (roving tabindex, below) and arrows to move within it. Selection
+	// follows focus — every panel is already rendered, so activating on arrow
+	// costs nothing.
+	function onTabKeydown(e: KeyboardEvent) {
+		const from = tabs.indexOf(activeTab);
+		let next: number;
+		if (e.key === 'ArrowRight') next = (from + 1) % tabs.length;
+		else if (e.key === 'ArrowLeft') next = (from - 1 + tabs.length) % tabs.length;
+		else if (e.key === 'Home') next = 0;
+		else if (e.key === 'End') next = tabs.length - 1;
+		else return;
+		e.preventDefault();
+		selectTab(tabs[next]);
+		tabButtons[next]?.focus();
 	}
 
 	// Usage bar reflects the ACTIVE provider. R2 has no simple usage API, so we use
@@ -312,18 +356,28 @@
 		<div class="page-header">
 			<h1>{m.admin_nav_settings()}</h1>
 		</div>
-		<nav class="settings-tabnav">
-			<button type="button" class:active={activeTab === 'site'} aria-current={activeTab === 'site' ? 'true' : undefined} onclick={() => selectTab('site')}>{m.admin_settings_tab_site()}</button>
-			<button type="button" class:active={activeTab === 'connections'} aria-current={activeTab === 'connections' ? 'true' : undefined} onclick={() => selectTab('connections')}>{m.admin_settings_tab_connections()}</button>
-			<button type="button" class:active={activeTab === 'storage'} aria-current={activeTab === 'storage' ? 'true' : undefined} onclick={() => selectTab('storage')}>{m.admin_settings_tab_storage()}</button>
-			<button type="button" class:active={activeTab === 'account'} aria-current={activeTab === 'account' ? 'true' : undefined} onclick={() => selectTab('account')}>{m.admin_settings_tab_account()}</button>
-			{#if data.observabilityEnabled}
-				<button type="button" class:active={activeTab === 'observability'} aria-current={activeTab === 'observability' ? 'true' : undefined} onclick={() => selectTab('observability')}>{m.admin_settings_tab_observability()}</button>
-			{/if}
-		</nav>
+		<div class="settings-tabnav" role="tablist" aria-label={m.admin_nav_settings()}>
+			{#each tabs as tab, i (tab)}
+				<button
+					type="button"
+					role="tab"
+					id={tabButtonId(tab)}
+					aria-selected={activeTab === tab}
+					aria-controls="settings-panels"
+					tabindex={activeTab === tab ? 0 : -1}
+					bind:this={tabButtons[i]}
+					class:active={activeTab === tab}
+					onclick={() => selectTab(tab)}
+					onkeydown={onTabKeydown}>{TAB_LABELS[tab]()}</button
+				>
+			{/each}
+		</div>
 	</div>
 
-	<div class="settings-panels">
+	<!-- One panel for all tabs: the sections live in a single flow and the active
+	     tab hides the rest via CSS, so the panel is relabelled by whichever tab
+	     is selected rather than swapped out. -->
+	<div class="settings-panels" id="settings-panels" role="tabpanel" aria-labelledby={tabButtonId(activeTab)}>
 <form method="POST" action="?/saveSite" class="contents" use:enhance={() => {
 	savingSite = true;
 	return async ({ result, update }) => {
@@ -871,11 +925,11 @@
 	<section class="security-section" data-tab="account">
 		<h2>{m.admin_settings_supporter_heading()}</h2>
 		<div class="key-eyebrow">
-			{m.admin_settings_supporter_valid_until({ date: data.supporterKey.validUntil })}
+			{m.admin_settings_supporter_valid_until({ date: keyValidUntil })}
 			{#if data.supporterKey.expiringSoon}
-				· <span class="days-left">{data.supporterKey.daysRemaining <= 1
+				· <span class="days-left">{keyDaysLeft <= 1
 					? m.admin_settings_supporter_expires_today()
-					: m.admin_settings_supporter_days_left({ days: data.supporterKey.daysRemaining })}</span>
+					: m.admin_settings_supporter_days_left({ days: keyDaysLeft })}</span>
 			{/if}
 		</div>
 		{#if data.supporterKey.expiringSoon}
@@ -914,7 +968,7 @@
 		<section class="security-section" data-tab="account">
 			<h2>{m.admin_settings_supporter_heading()}</h2>
 			{#if data.supporterKey?.state === 'expired'}
-				<div class="key-eyebrow">{m.admin_settings_supporter_expired_eyebrow({ date: data.supporterKey.validUntil })}</div>
+				<div class="key-eyebrow">{m.admin_settings_supporter_expired_eyebrow({ date: keyValidUntil })}</div>
 				<p class="lapsed-line">{m.admin_settings_supporter_lapsed_pre()}<a class="link-inline" href="https://sona.fast/supporter-key" target="_blank" rel="noopener">sona.fast/supporter-key</a>{m.admin_settings_supporter_lapsed_post()}</p>
 			{/if}
 			<label>
