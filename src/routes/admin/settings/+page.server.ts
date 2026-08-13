@@ -54,7 +54,12 @@ import {
 import { syncArtists } from '$lib/server/artist-sync';
 import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
 import { isObservabilityEnabled } from '$lib/server/metrics';
-import { verifySupporterKey, supporterKeyDisplayDate, resolveSupporterKeyStatus } from '$lib/server/supporter-key';
+import {
+	verifySupporterKey,
+	supporterKeyDisplayDate,
+	supporterKeyDisplayRecord,
+	resolveSupporterKeyStatus
+} from '$lib/server/supporter-key';
 import { earlyAccessActive } from '$lib/early-access';
 import { formatDate } from '$lib/index';
 import { isValidThemeId, DEFAULT_THEME_ID } from '$lib/themes';
@@ -144,9 +149,13 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const now = new Date();
 	const supporterToken = (await getRawSetting(db, 'supporterKey')) ?? '';
 	const status = await resolveSupporterKeyStatus(supporterToken, now);
-	// The token rides only on THIS page's payload (for the truncated key record);
-	// the shared SupporterKeyStatus deliberately never carries it.
-	const supporterKey = status ? { ...status, token: supporterToken } : null;
+	// Only the MASKED record rides to the client — the full signed token stays on
+	// the server (the card renders the mask, and neither the save form nor the
+	// remove action sends the stored value back). The shared SupporterKeyStatus
+	// deliberately never carries the token either.
+	const supporterKey = status
+		? { ...status, keyRecord: supporterKeyDisplayRecord(supporterToken) }
+		: null;
 	// Features still inside their early-access window, with GA dates pre-formatted
 	// for display. Empty until the first pilot feature is registered.
 	const earlyAccess = earlyAccessActive(now).map((e) => ({ flag: e.flag, gaDate: formatDate(e.gaDate) }));

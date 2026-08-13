@@ -149,11 +149,6 @@
 	let savingSupporterKey = $state(false);
 	let removingSupporterKey = $state(false);
 
-	// Truncated middle for the stored key record — enough head to recognize it,
-	// enough tail to spot-check the paste, never the whole (long) token.
-	function truncateKey(token: string): string {
-		return token.length <= 34 ? token : `${token.slice(0, 24)}…${token.slice(-7)}`;
-	}
 	// Localized "in early access right now" list, joined for the status line. Empty
 	// until a pilot feature is registered, in which case the "nothing" line shows.
 	// Each flag renders its localized display label (earlyAccessLabel resolves the
@@ -888,7 +883,7 @@
 		{:else}
 			<p class="status-line">{m.admin_settings_supporter_early_none()}</p>
 		{/if}
-		<div class="key-record">{truncateKey(data.supporterKey.token)}</div>
+		<div class="key-record">{data.supporterKey.keyRecord}</div>
 		<form method="POST" action="?/removeSupporterKey" use:enhance={() => {
 			removingSupporterKey = true;
 			return async ({ result, update }) => {
