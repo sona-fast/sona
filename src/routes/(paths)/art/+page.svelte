@@ -252,6 +252,14 @@
 		position: relative;
 	}
 
+	/* Reveal moves focus here programmatically, where Safari's :focus-visible
+	   heuristic is unreliable — draw the ring rather than trust the UA default.
+	   Outset is safe: an element's own overflow does not clip its own outline. */
+	a.ref-sheet:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+
 	.ref-sheet img.blurred {
 		filter: blur(32px);
 	}

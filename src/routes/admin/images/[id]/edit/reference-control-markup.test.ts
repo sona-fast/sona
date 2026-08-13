@@ -22,6 +22,18 @@ describe('admin image edit — reference control variant branch (SONA-18)', () =
 		expect(variantAt).toBeGreaterThan(clearAt);
 	});
 
+	// A designation made before the variant rule keeps the clear branch, so the
+	// hint has to appear inside it too — otherwise the admin says "this is the
+	// reference sheet" about a row /art has already stopped showing.
+	it('shows the hint alongside clear when the designated image is a variant', () => {
+		const clearBranch = pageSrc.slice(
+			pageSrc.indexOf('{#if data.ownerCharacter.isReference}\n\t\t\t\t\t<input'),
+			pageSrc.indexOf('{:else if data.image.parentImageId != null}')
+		);
+		expect(clearBranch).toContain('{#if data.image.parentImageId != null}');
+		expect(clearBranch).toContain('{m.admin_image_reference_variant()}');
+	});
+
 	// Clearing on a variant removes the button entirely: focus has to land
 	// somewhere and the live region has to say something, or the operator gets
 	// silence and a lost place in the page.

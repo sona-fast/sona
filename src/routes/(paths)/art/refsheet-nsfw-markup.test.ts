@@ -92,7 +92,9 @@ describe('/art caption sentence separator (SONA-18)', () => {
 		.filter((f) => f.endsWith('.json'))
 		.map((f) => [f.replace(/\.json$/, ''), JSON.parse(readFileSync(new URL(f, dir), 'utf8'))] as const);
 	// Scripts that need no space between sentences. Everything else does.
-	const noSeparator = new Set(['ja', 'zh', 'ko', 'th']);
+	// Korean is deliberately absent: it spaces between sentences like the Latin
+	// locales do, so its caption needs the trailing separator too.
+	const noSeparator = new Set(['ja', 'zh', 'th']);
 
 	it('covers every locale the repo ships', () => {
 		expect(locales.length).toBeGreaterThan(0);

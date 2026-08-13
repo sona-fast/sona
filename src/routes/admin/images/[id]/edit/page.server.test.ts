@@ -75,8 +75,11 @@ describe('admin image edit — reference action', () => {
 		await seedImage(db, 5);
 		const [c] = await db.insert(characters).values({ name: 'Owner', isOwner: true }).returning({ id: characters.id });
 
-		await actions.reference({ params: { id: '5' }, request: form({}), platform } as never);
+		const result = await actions.reference({ params: { id: '5' }, request: form({}), platform } as never);
 		expect(await refOf(db, c.id)).toBe(5);
+		// The page derives its announcement from this flag rather than from the
+		// submit, so a set must report false as explicitly as a clear reports true.
+		expect(result).toEqual({ referenceCleared: false });
 	});
 
 	it('clears the reference image when clear is set', async () => {
@@ -87,8 +90,9 @@ describe('admin image edit — reference action', () => {
 			.values({ name: 'Owner', isOwner: true, referenceImageId: 5 })
 			.returning({ id: characters.id });
 
-		await actions.reference({ params: { id: '5' }, request: form({ clear: 'on' }), platform } as never);
+		const result = await actions.reference({ params: { id: '5' }, request: form({ clear: 'on' }), platform } as never);
 		expect(await refOf(db, c.id)).toBe(null);
+		expect(result).toEqual({ referenceCleared: true });
 	});
 
 	it('fails 404 and writes nothing when the image does not exist', async () => {

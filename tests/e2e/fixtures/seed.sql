@@ -89,13 +89,25 @@ VALUES
 -- pre-change code. Character 2 is the SITE'S OWN sona (is_owner) and sorts
 -- AFTER Taro by name, so the placeholder can only read 'Thistle' if the form
 -- resolves the owner rather than the stock name or the first row by name.
--- Both carry no reference_image_id, so the owner flag changes nothing for the
--- /art ref-sheet precedence or the presence gates (they fall through to the
--- REFERENCE_TAG query exactly as before).
 INSERT OR REPLACE INTO characters (id, name, is_owner, created_at)
 VALUES
   (1, 'Taro', 0, '2026-07-01T00:00:00.000Z'),
   (2, 'Thistle', 1, '2026-07-01T00:00:00.000Z');
+
+-- NSFW reference sheet for the /art shield spec (SONA-18): published,
+-- non-variant, and designated on the OWNER character, so it exercises the
+-- explicit reference_image_id path rather than the REFERENCE_TAG fallback.
+-- Same-origin placeholder URL like its siblings, so the spec makes no external
+-- request and asserts markup, never pixels. It outranks image 3 for every
+-- consumer of the designation — the palette picker included, which only needs
+-- SOME ref sheet to exist for its dialog to open.
+INSERT OR REPLACE INTO images
+  (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
+VALUES
+  (5, 'Mature Ref Sheet', 'mature-ref-sheet',
+   '/e2e/matureref.png', '/e2e/matureref-thumb.png',
+   1200, 900, 1, 1, 1, NULL, NULL, '2026-07-05T00:00:00.000Z');
+UPDATE characters SET reference_image_id = 5 WHERE id = 2;
 INSERT OR REPLACE INTO vr_avatars
   (id, slug, name, character_id, model_url, model_format, model_size_bytes, poster_image_id,
    external_url, license, permission_source, downloadable, nsfw, published, description, created_at)

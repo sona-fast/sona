@@ -52,6 +52,12 @@
 				{#if data.ownerCharacter.isReference}
 					<input type="hidden" name="clear" value="on" />
 					<button bind:this={referenceButton} type="submit" class="btn btn-secondary reference-btn">{m.admin_image_reference_clear()}</button>
+					{#if data.image.parentImageId != null}
+						<!-- A designation made before the variant rule existed: the row still
+						     says it is the reference sheet, but /art has stopped showing it.
+						     Say so here, or the admin claims a sheet the public page drops. -->
+						<small class="hint">{m.admin_image_reference_variant()}</small>
+					{/if}
 				{:else if data.image.parentImageId != null}
 					<!-- /art excludes variants from both ref-sheet paths (SONA-18), so
 					     offering the control here would promise something the public

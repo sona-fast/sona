@@ -17,9 +17,11 @@ export const load: PageServerLoad = async ({ platform }) => {
 	// SONA-18: the operator's designation is honored even when the image is NSFW
 	// — the load carries the flag through so the page can render it behind the
 	// site's usual blur-and-reveal shield, rather than dropping the ref sheet.
-	// Variants (parent_image_id set) are excluded from both paths: they never
-	// stand alone anywhere else on the public surface, so a designated variant
-	// falls through as if it had never been designated.
+	// Variants (parent_image_id set) are excluded from both paths: a variant is
+	// one angle of another image, not a sheet in its own right, so a designated
+	// variant falls through as if it had never been designated. (The recentArt
+	// strip below still lists variants as standalone cards, unlike the gallery
+	// and homepage queries — an older inconsistency this change doesn't touch.)
 	const owner = await db
 		.select({ referenceImageId: characters.referenceImageId })
 		.from(characters)
