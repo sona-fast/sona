@@ -99,16 +99,18 @@
 				/>
 			</a>
 		{/if}
+		<!-- The second caption sentence carries its own leading separator (a space in
+		     en, nothing in ja, which takes none after 。), so the markup emits no
+		     whitespace of its own. Keeping the separator in the text means it
+		     survives into the accessibility tree and the clipboard, which a CSS
+		     margin would not.
+
+		     Shielded, the frame is a button rather than the gallery link, so that
+		     sentence is a real link — the only route onward, and the only one that
+		     works without JS, where the reveal button does nothing. It says "open in
+		     the gallery" because that page shields the same image again. -->
 		<p class="caption">
-			<!-- No whitespace between the sentence and what follows: ja takes no space
-			     after 。, and the en strings carry their own trailing space below. -->
-			{m.art_ref_caption()}{#if data.refSheet.nsfw && !revealed}<!--
-			     Shielded, the frame is a button rather than the gallery link, so the
-			     caption carries the route onward — which is also the only one that
-			     works without JS, where the reveal button does nothing. It says
-			     "open in the gallery" rather than "view full size" because the
-			     gallery page shields the same image again.
-			--><a class="next-sentence" href={`/gallery/${data.refSheet.slug}`}>{m.art_ref_open_gallery()}</a>{:else}<span class="next-sentence">{m.art_ref_view_full()}</span>{/if}
+			{m.art_ref_caption()}{#if data.refSheet.nsfw && !revealed}<a href={`/gallery/${data.refSheet.slug}`}>{m.art_ref_open_gallery()}</a>{:else}{m.art_ref_view_full()}{/if}
 			{#if data.refSheet.artistName}
 				<span class="credit"> · {m.art_ref_by({ artist: data.refSheet.artistName })}</span>
 			{/if}
@@ -270,10 +272,14 @@
 	}
 
 	/* .ref-sheet clips overflow, so an outset ring on this inset:0 button survives
-	   only as slivers — draw it inside the clip region instead. */
+	   only as slivers — draw it inside the clip region instead. White rather than
+	   --ring: the ring sits on the dark shield scrim over arbitrary artwork, where
+	   --ring (tuned for page surfaces) measures ~1.7:1, under the 3:1 SC 1.4.11
+	   wants. The dark outer stroke keeps it visible if the scrim ever lightens. */
 	.reveal-btn:focus-visible {
-		outline: 2px solid var(--ring);
+		outline: 2px solid #fff;
 		outline-offset: -4px;
+		box-shadow: inset 0 0 0 6px rgba(0, 0, 0, 0.8);
 	}
 
 	.nsfw-label {
@@ -292,16 +298,6 @@
 		font-size: 13px;
 		line-height: 1.5;
 		color: var(--muted-foreground);
-	}
-
-	/* Sentence separator, rather than markup whitespace: Japanese takes no space
-	   after 。 */
-	.next-sentence {
-		margin-left: 0.3em;
-	}
-
-	:global(html[lang='ja']) .next-sentence {
-		margin-left: 0;
 	}
 
 	/* --primary fails AA on small text in ember light (2.20:1); --status-attention

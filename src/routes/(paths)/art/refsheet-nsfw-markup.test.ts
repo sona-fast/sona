@@ -33,19 +33,22 @@ describe('/art ref-sheet NSFW shield (SONA-18)', () => {
 		expect(shielded).not.toContain('<a ');
 	});
 
-	// Shielded, the frame is a button, so the caption carries the gallery link —
-	// otherwise the ref sheet has no route onward at all without JS. It says
-	// "open in the gallery" because that page shields the same image again.
-	it('moves the route onward into the caption while shielded', () => {
-		expect(pageSrc).toContain(
-			'<a class="next-sentence" href={`/gallery/${data.refSheet.slug}`}>{m.art_ref_open_gallery()}</a>'
-		);
+	// Matched on the message keys and the href rather than whole tags, so
+	// reformatting the (deliberately dense) caption line doesn't fail these.
+	// Shielded, the caption is the ref sheet's only route onward — including for
+	// visitors without JS, where the reveal button does nothing. It says "open in
+	// the gallery" because that page shields the same image again.
+	it('carries the route onward in the caption, and the full-size line otherwise', () => {
+		const caption = pageSrc.match(/<p class="caption">[\s\S]*?<\/p>/)?.[0] ?? '';
+		expect(caption).toMatch(/<a href=\{`\/gallery\/\$\{data\.refSheet\.slug\}`\}>\{m\.art_ref_open_gallery\(\)\}/);
+		expect(caption).toContain('{m.art_ref_view_full()}');
 	});
 
-	// The unshielded arm keeps the "view full size" half of the split caption;
-	// dropping it would quietly lose that line for every SFW visitor.
-	it('keeps the full-size line in the caption when not shielded', () => {
-		expect(pageSrc).toContain('<span class="next-sentence">{m.art_ref_view_full()}</span>');
+	// The separator between the two caption sentences lives in the en strings, not
+	// in markup or CSS, so it reaches the accessibility tree and the clipboard —
+	// and ja, which takes no space after 。, simply carries none.
+	it('emits no markup whitespace between the caption sentences', () => {
+		expect(pageSrc).toContain('{m.art_ref_caption()}{#if data.refSheet.nsfw && !revealed}');
 	});
 
 	// The overlay is only rgba(0,0,0,0.6) — the filter is what actually hides the
@@ -55,9 +58,41 @@ describe('/art ref-sheet NSFW shield (SONA-18)', () => {
 		expect(pageSrc).toMatch(/\.ref-sheet img\.blurred\s*\{[^}]*filter:\s*blur\(/);
 	});
 
+	// The reveal button is inset:0 absolute — without a positioned frame the
+	// overlay anchors to some outer ancestor and detaches from the image it hides.
+	it('positions the shielded frame so the overlay stays on the image', () => {
+		expect(pageSrc).toMatch(/\.ref-sheet\.shielded\s*\{[^}]*position:\s*relative/);
+	});
+
+	// .ref-sheet clips overflow, so the negative offset is what keeps the keyboard
+	// focus ring on screen at all.
+	it('draws the reveal button focus ring inside the clipped frame', () => {
+		const rule = pageSrc.match(/\.reveal-btn:focus-visible\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(rule).toMatch(/outline:\s*2px solid/);
+		expect(rule).toMatch(/outline-offset:\s*-\d/);
+	});
+
 	// The caption link is the only route onward while shielded, so it has to meet
 	// AA — --primary does not on small text in ember light (SONA-162).
 	it('gives the caption link the AA-safe token, not --primary', () => {
 		expect(pageSrc).toMatch(/\.caption a\s*\{[^}]*color:\s*var\(--status-attention\)/);
+	});
+});
+
+// The en separator is a leading space inside the second sentence's own string.
+// Nothing else renders these two keys, so a well-meaning trim would silently
+// glue the sentences together in en — or add a space ja must not have.
+describe('/art caption sentence separator (SONA-18)', () => {
+	const en = JSON.parse(readFileSync(new URL('../../../../messages/en.json', import.meta.url), 'utf8'));
+	const ja = JSON.parse(readFileSync(new URL('../../../../messages/ja.json', import.meta.url), 'utf8'));
+
+	it('leads the en second sentence with a space', () => {
+		expect(en.art_ref_view_full.startsWith(' ')).toBe(true);
+		expect(en.art_ref_open_gallery.startsWith(' ')).toBe(true);
+	});
+
+	it('leads the ja second sentence with none', () => {
+		expect(ja.art_ref_view_full.startsWith(' ')).toBe(false);
+		expect(ja.art_ref_open_gallery.startsWith(' ')).toBe(false);
 	});
 });

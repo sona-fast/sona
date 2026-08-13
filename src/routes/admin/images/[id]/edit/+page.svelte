@@ -36,7 +36,9 @@
 		{#if data.ownerCharacter}
 			<form method="POST" action="?/reference" use:enhance={() => {
 				return async ({ update, result }) => {
-					if (result.type === 'success') referenceCleared = true;
+					// The action already reports which way it went — deriving it here
+					// keeps the flag honest when the submit was a set, not a clear.
+					if (result.type === 'success') referenceCleared = result.data?.referenceCleared === true;
 					await update();
 					await tick();
 					if (result.type === 'success') (referenceButton ?? referenceHint)?.focus();

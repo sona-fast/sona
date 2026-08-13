@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { characters, images } from '$lib/server/db/schema';
+import { REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
 import { actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -76,6 +77,10 @@ describe('admin images — grouping the designated reference sheet as a variant'
 
 		const result = await actions.groupVariants({ request: form({ parentId: '9', ids: '5,9' }), platform } as never);
 		expect((result as { status: number }).status).toBe(400);
+		// Pin the message, not just the status: the neighbouring variant errors
+		// would keep a status-only assertion green while losing the one line that
+		// tells the operator how to proceed.
+		expect((result as { data: { error: string } }).data.error).toBe(REFERENCE_BECOMES_VARIANT_ERROR);
 		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 5)).get())?.p).toBe(null);
 	});
 

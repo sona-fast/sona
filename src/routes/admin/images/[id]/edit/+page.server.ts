@@ -120,13 +120,18 @@ export const actions = {
 			if (!Number.isInteger(parentImageId) || parentImageId <= 0) {
 				return fail(400, { error: 'Invalid parent image' });
 			}
-			const [parent, firstVariant] = await Promise.all([
+			const [parent, firstVariant, current] = await Promise.all([
 				db
 					.select({ id: images.id, parentImageId: images.parentImageId })
 					.from(images)
 					.where(eq(images.id, parentImageId))
 					.get(),
-				db.select({ id: images.id }).from(images).where(eq(images.parentImageId, id)).get()
+				db.select({ id: images.id }).from(images).where(eq(images.parentImageId, id)).get(),
+				db
+					.select({ parentImageId: images.parentImageId })
+					.from(images)
+					.where(eq(images.id, id))
+					.get()
 			]);
 			const variantError = variantAssignmentError({
 				selfId: id,
@@ -140,15 +145,20 @@ export const actions = {
 			if (variantError === 'has_variants')
 				return fail(400, { error: 'This image has variants of its own and cannot become a variant' });
 
-			const owner = await db
-				.select({ referenceImageId: characters.referenceImageId })
-				.from(characters)
-				.where(eq(characters.isOwner, true))
-				// first owner by name — must match the loads' find() over name-ordered characters
-				.orderBy(characters.name)
-				.get();
-			if (owner?.referenceImageId === id)
-				return fail(400, { error: REFERENCE_BECOMES_VARIANT_ERROR });
+			// Only a row that is BECOMING a variant is refused. A row designated
+			// before this rule can already be both, and it still has to be editable
+			// — resubmitting its unchanged parent must not lock the whole form.
+			if (current?.parentImageId == null) {
+				const owner = await db
+					.select({ referenceImageId: characters.referenceImageId })
+					.from(characters)
+					.where(eq(characters.isOwner, true))
+					// first owner by name — must match the loads' find() over name-ordered characters
+					.orderBy(characters.name)
+					.get();
+				if (owner?.referenceImageId === id)
+					return fail(400, { error: REFERENCE_BECOMES_VARIANT_ERROR });
+			}
 		}
 
 		// Resolve or create artist
@@ -248,7 +258,9 @@ export const actions = {
 			// this would be a designation nothing ever honors. Refuse it here rather
 			// than let the admin report a reference sheet the public page ignores.
 			if (image.parentImageId != null)
-				return fail(400, { error: 'A variant cannot be the reference sheet — use its parent image' });
+				return fail(400, {
+					error: 'This image is a variant, so it cannot be the reference sheet. Use its parent image instead.'
+				});
 		}
 
 		const owner = await db

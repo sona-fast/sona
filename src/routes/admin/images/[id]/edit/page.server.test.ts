@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { characters, images } from '$lib/server/db/schema';
+import { REFERENCE_BECOMES_VARIANT_ERROR } from '$lib/server/variants';
 import { load, actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -166,8 +167,27 @@ describe('admin image edit — save action', () => {
 			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', parentImageId: '9' }), platform } as never)
 		);
 		expect((result as { status: number }).status).toBe(400);
+		// The message names the unblocking step, so pin it — a neighbouring
+		// variant error would keep the status assertion green and strand the user.
+		expect((result as { data: { error: string } }).data.error).toBe(REFERENCE_BECOMES_VARIANT_ERROR);
 		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 5)).get())?.p).toBe(null);
 		expect(await refOf(db, c.id)).toBe(5);
+	});
+
+	// A row designated before the variant rule can be both at once. Refusing its
+	// unchanged parent on every save would make the row uneditable — title,
+	// artist, published and all — until the operator cleared the designation.
+	it('still saves a row that is already both a variant and the reference sheet', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 9);
+		await db.insert(images).values({ id: 5, title: 'Art', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, published: true, parentImageId: 9 });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 5 });
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Renamed', artistId: '1', parentImageId: '9' }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(302);
+		expect((await db.select({ title: images.title }).from(images).where(eq(images.id, 5)).get())?.title).toBe('Renamed');
 	});
 
 	it('still allows a non-designated image to become a variant', async () => {
