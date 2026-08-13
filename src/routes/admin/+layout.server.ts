@@ -3,6 +3,7 @@ import { getSettings, getRawSetting } from '$lib/server/settings';
 import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
 import { isObservabilityEnabled } from '$lib/server/metrics';
 import { resolveSupporterKeyStatus, EXPIRY_FINAL_DAYS } from '$lib/server/supporter-key';
+import { viewerTimeZone } from '$lib/server/supporter-key-expiry';
 import { APP_NAME } from '$lib/config';
 import type { LayoutServerLoad } from './$types';
 
@@ -34,7 +35,11 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 			resolveRegistryEnv(db, platform.env),
 			locals.admin ? getRawSetting(db, 'supporterKey').catch(() => null) : null
 		]);
-		const supporterKey = await resolveSupporterKeyStatus(supporterToken ?? '', new Date());
+		// The operator's own zone (SONA-119), from the tz cookie the admin layout
+		// sets on first mount. Resolving it here rather than in the browser is what
+		// keeps the date and the countdown identical before and after hydration.
+		const timeZone = viewerTimeZone(cookies.get('tz'));
+		const supporterKey = await resolveSupporterKeyStatus(supporterToken ?? '', new Date(), timeZone);
 		// Dismissal is a cookie keyed on validUntil PLUS a phase ('early' = days
 		// 7..4, 'final' = last 3 days): dismissing during the early phase re-shows
 		// the notice once the final days start, and a re-minted key (new
@@ -64,10 +69,7 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 			// nav item and the Settings → Observability entry.
 			observabilityEnabled: isObservabilityEnabled(platform.env),
 			supporterKeyNotice: supporterKey?.expiringSoon && !dismissed
-				// Whether to warn is decided here, in UTC (expiringSoon); how many days
-				// the notice prints is recounted in the viewer's zone from this instant
-				// (SONA-119), so it can't contradict the settings card's countdown.
-				? { expiresAtMs: supporterKey.expiresAtMs, dismissValue }
+				? { daysRemaining: supporterKey.daysRemaining, dismissValue }
 				: null
 		};
 	} catch {

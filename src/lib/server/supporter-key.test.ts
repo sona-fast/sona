@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	verifySupporterKey,
 	supporterKeyDisplayDate,
-	supporterKeyDaysRemaining,
+	supporterKeyDaysRemainingFor,
 	supporterKeyStatusFromResult,
 	resolveSupporterKeyStatus,
 	EXPIRY_WARN_DAYS
@@ -57,7 +57,7 @@ describe('verifySupporterKey', () => {
 		expect(res).toMatchObject({ valid: true, login: 'sparky', tier: 2 });
 		if (res.valid) {
 			// The display date is the last covered day (exp - 1s, UTC), dotted.
-			expect(supporterKeyDisplayDate(res.expiresAt)).toBe('2026.08.31');
+			expect(supporterKeyDisplayDate(res.expiresAt, 'UTC')).toBe('2026.08.31');
 		}
 	});
 
@@ -74,7 +74,7 @@ describe('verifySupporterKey', () => {
 
 		expect(res).toMatchObject({ valid: false, reason: 'expired', login: 'sparky' });
 		if (!res.valid && res.reason === 'expired') {
-			expect(supporterKeyDisplayDate(res.expiresAt)).toBe('2026.07.10');
+			expect(supporterKeyDisplayDate(res.expiresAt, 'UTC')).toBe('2026.07.10');
 		}
 	});
 
@@ -159,25 +159,25 @@ describe('verifySupporterKey', () => {
 	});
 });
 
-describe('supporterKeyDaysRemaining', () => {
+describe('supporterKeyDaysRemainingFor', () => {
 	// exp end-of-day UTC: the key covers all of 2026-08-31.
 	const exp = new Date('2026-09-01T00:00:00Z');
 
 	it('counts whole days, rounding up', () => {
 		// Exactly 7 days out — the last instant inside the warning window.
-		expect(supporterKeyDaysRemaining(exp, new Date('2026-08-25T00:00:00Z'))).toBe(EXPIRY_WARN_DAYS);
+		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-08-25T00:00:00Z'), 'UTC')).toBe(EXPIRY_WARN_DAYS);
 		// One second earlier — just outside.
-		expect(supporterKeyDaysRemaining(exp, new Date('2026-08-24T23:59:59Z'))).toBe(EXPIRY_WARN_DAYS + 1);
+		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-08-24T23:59:59Z'), 'UTC')).toBe(EXPIRY_WARN_DAYS + 1);
 	});
 
 	it('reports 1 across the whole last covered day', () => {
-		expect(supporterKeyDaysRemaining(exp, new Date('2026-08-31T00:00:01Z'))).toBe(1);
-		expect(supporterKeyDaysRemaining(exp, new Date('2026-08-31T23:59:59Z'))).toBe(1);
+		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-08-31T00:00:01Z'), 'UTC')).toBe(1);
+		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-08-31T23:59:59Z'), 'UTC')).toBe(1);
 	});
 
 	it('reports 0 or less at and past expiry', () => {
-		expect(supporterKeyDaysRemaining(exp, exp)).toBe(0);
-		expect(supporterKeyDaysRemaining(exp, new Date('2026-09-02T00:00:00Z'))).toBeLessThan(0);
+		expect(supporterKeyDaysRemainingFor(exp, exp, 'UTC')).toBe(0);
+		expect(supporterKeyDaysRemainingFor(exp, new Date('2026-09-02T00:00:00Z'), 'UTC')).toBeLessThan(0);
 	});
 });
 
@@ -186,34 +186,32 @@ describe('supporterKeyStatusFromResult', () => {
 	const base = { login: 'sparky', tier: 2, expiresAt: exp };
 
 	it('marks a valid key inside the warning window as expiringSoon (and never carries the token)', () => {
-		const status = supporterKeyStatusFromResult({ valid: true, ...base }, new Date('2026-08-25T00:00:00Z'));
+		const status = supporterKeyStatusFromResult({ valid: true, ...base }, new Date('2026-08-25T00:00:00Z'), 'UTC');
 		expect(status).toEqual({
 			state: 'valid',
 			validUntil: '2026.08.31',
-			// Shipped so the browser can re-render the date and the countdown in
-			// the viewer's own timezone (SONA-119).
-			expiresAtMs: exp.getTime(),
 			daysRemaining: 7,
 			expiringSoon: true
 		});
 	});
 
 	it('leaves a valid key outside the window unflagged', () => {
-		const status = supporterKeyStatusFromResult({ valid: true, ...base }, new Date('2026-08-15T12:00:00Z'));
+		const status = supporterKeyStatusFromResult({ valid: true, ...base }, new Date('2026-08-15T12:00:00Z'), 'UTC');
 		expect(status).toMatchObject({ state: 'valid', daysRemaining: 17, expiringSoon: false });
 	});
 
 	it('maps expired to daysRemaining 0 and never expiringSoon', () => {
 		const status = supporterKeyStatusFromResult(
 			{ valid: false, reason: 'expired', ...base },
-			new Date('2026-09-02T00:00:00Z')
+			new Date('2026-09-02T00:00:00Z'),
+			'UTC'
 		);
 		expect(status).toMatchObject({ state: 'expired', validUntil: '2026.08.31', daysRemaining: 0, expiringSoon: false });
 	});
 
 	it('returns null for results with no trustworthy payload', () => {
-		expect(supporterKeyStatusFromResult({ valid: false, reason: 'malformed' }, exp)).toBeNull();
-		expect(supporterKeyStatusFromResult({ valid: false, reason: 'bad-signature' }, exp)).toBeNull();
+		expect(supporterKeyStatusFromResult({ valid: false, reason: 'malformed' }, exp, 'UTC')).toBeNull();
+		expect(supporterKeyStatusFromResult({ valid: false, reason: 'bad-signature' }, exp, 'UTC')).toBeNull();
 	});
 });
 
@@ -222,10 +220,10 @@ describe('supporterKeyStatusFromResult', () => {
 // reachable here; the shaping of passing results is covered above.
 describe('resolveSupporterKeyStatus (real, unmocked)', () => {
 	it('resolves an empty token to null without touching crypto', async () => {
-		expect(await resolveSupporterKeyStatus('', new Date())).toBeNull();
+		expect(await resolveSupporterKeyStatus('', new Date(), 'UTC')).toBeNull();
 	});
 
 	it('resolves a garbage token to null (malformed falls through)', async () => {
-		expect(await resolveSupporterKeyStatus('not-a-real-key', new Date())).toBeNull();
+		expect(await resolveSupporterKeyStatus('not-a-real-key', new Date(), 'UTC')).toBeNull();
 	});
 });

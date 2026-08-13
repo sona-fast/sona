@@ -72,9 +72,21 @@ test.describe('admin settings ?tab= deep links', () => {
 		}).toPass();
 		await expect(page.getByRole('tab', { name: 'Storage', exact: true })).toBeFocused();
 
+		await page.keyboard.press('ArrowRight');
+		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'account');
+
+		await page.keyboard.press('End');
+		// This server runs with the observability gate on, so it is the last tab.
+		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'observability');
+		await expect(page.getByRole('tab', { name: 'Observability' })).toBeFocused();
+
 		await page.keyboard.press('Home');
 		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'site');
 		await expect(page.getByRole('tab', { name: 'Site', exact: true })).toBeFocused();
+
+		// Left from the first tab wraps to the last.
+		await page.keyboard.press('ArrowLeft');
+		await expect(activeTab(page)).toHaveAttribute('data-active-tab', 'observability');
 	});
 
 	test('?tab=bogus falls back to the Site tab', async ({ page }) => {

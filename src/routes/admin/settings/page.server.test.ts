@@ -385,6 +385,16 @@ const LOAD_DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT N
 
 const LOAD_URL = new URL('https://taro.surf/admin/settings');
 
+// The load and the supporter-key action read the tz cookie (SONA-119) to render
+// the expiry date and its countdown in the operator's zone; absent means UTC,
+// which is what these fixed-date assertions expect.
+function cookieJar(tz?: string) {
+	return { get: (name: string) => (name === 'tz' ? tz : undefined) };
+}
+function loadEvent(platform: App.Platform, tz?: string) {
+	return { platform, url: LOAD_URL, cookies: cookieJar(tz) } as never;
+}
+
 describe('settings load — adminEmail is raw, never in public settings', () => {
 	it('surfaces the raw adminEmail and keeps it out of the settings object', async () => {
 		const sqlite = new Database(':memory:');
@@ -394,7 +404,7 @@ describe('settings load — adminEmail is raw, never in public settings', () => 
 		const platform = { env: { DB: d1 } } as unknown as App.Platform;
 		await setRawSetting(db, 'adminEmail', 'recover@taro.surf');
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as {
+		const result = (await load(loadEvent(platform))) as {
 			adminEmail: string;
 			settings: Record<string, unknown>;
 		};
@@ -422,7 +432,7 @@ describe('settings load — Resend config exposes presence only', () => {
 			RESEND_FROM: 'Sona <hi@example.com>'
 		});
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as Record<string, unknown>;
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
 
 		expect(result.resendKeySet).toBe(true);
 		expect(result.resendFromSet).toBe(true);
@@ -434,7 +444,7 @@ describe('settings load — Resend config exposes presence only', () => {
 	it('reports both secrets as unset when the env vars are absent', async () => {
 		const { platform } = makeLoadDb({});
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as Record<string, unknown>;
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
 
 		expect(result.resendKeySet).toBe(false);
 		expect(result.resendFromSet).toBe(false);
@@ -443,7 +453,7 @@ describe('settings load — Resend config exposes presence only', () => {
 	it('treats an empty-string secret as unset (a blank binding is not configured)', async () => {
 		const { platform } = makeLoadDb({ RESEND_API_KEY: '', RESEND_FROM: '' });
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as Record<string, unknown>;
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
 
 		expect(result.resendKeySet).toBe(false);
 		expect(result.resendFromSet).toBe(false);
@@ -454,7 +464,7 @@ describe('settings load — ref-sheet picker source', () => {
 	it('is null when no reference sheet exists (the UI shows a designate-one hint)', async () => {
 		const { platform } = makeLoadDb();
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+		const result = (await load(loadEvent(platform))) as unknown as {
 			refImageSrc: unknown;
 		};
 
@@ -477,7 +487,7 @@ describe('settings load — ref-sheet picker source', () => {
 		const tag = await db.insert(schema.tags).values({ name: 'reference' }).returning({ id: schema.tags.id }).get();
 		await db.insert(schema.imageTags).values({ imageId: img.id, tagId: tag.id });
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+		const result = (await load(loadEvent(platform))) as unknown as {
 			refImageSrc: { src: string; crossorigin: boolean };
 		};
 
@@ -843,6 +853,7 @@ function saveSupporterKeyEvent(platform: App.Platform, key: string) {
 	body.append('supporterKey', key);
 	return {
 		platform,
+		cookies: cookieJar(),
 		request: new Request('https://taro.surf/admin/settings?/saveSupporterKey', { method: 'POST', body })
 	} as never;
 }
@@ -937,7 +948,7 @@ describe('settings load — supporter key is raw + verified, never in public set
 			expiresAt: new Date('2026-09-01T00:00:00Z')
 		});
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+		const result = (await load(loadEvent(platform))) as unknown as {
 			supporterKey: { token: string; state: string; validUntil: string } | null;
 			earlyAccess: unknown[];
 			settings: Record<string, unknown>;
@@ -949,10 +960,6 @@ describe('settings load — supporter key is raw + verified, never in public set
 			token: 'head.tail',
 			state: 'valid',
 			validUntil: '2026.08.31',
-			// The key's own exp instant — no more than validUntil already reveals,
-			// and what the client re-renders both the date and the countdown from
-			// so they can't disagree by a day (SONA-119).
-			expiresAtMs: expect.any(Number),
 			daysRemaining: expect.any(Number),
 			expiringSoon: expect.any(Boolean)
 		});
@@ -978,7 +985,7 @@ describe('settings load — supporter key is raw + verified, never in public set
 			expiresAt: new Date('2026-07-11T00:00:00Z')
 		});
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+		const result = (await load(loadEvent(platform))) as unknown as {
 			supporterKey: { state: string; validUntil: string } | null;
 		};
 
@@ -990,7 +997,7 @@ describe('settings load — supporter key is raw + verified, never in public set
 		await setRawSetting(db, 'supporterKey', 'corrupt');
 		vi.mocked(verifySupporterKey).mockResolvedValueOnce({ valid: false, reason: 'malformed' });
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+		const result = (await load(loadEvent(platform))) as unknown as {
 			supporterKey: unknown;
 		};
 
@@ -1000,9 +1007,13 @@ describe('settings load — supporter key is raw + verified, never in public set
 
 describe('settings load — expiring-soon boundary (SONA-114)', () => {
 	// The load verifies against the real clock, so boundaries are expressed
-	// relative to Date.now(). exp is end-of-day UTC in the real keys; only the
-	// distance from now matters for the boundary.
-	const DAY_MS = 86_400_000;
+	// relative to now. Days are counted as calendar days, so the expiry has to be
+	// the midnight-UTC instant the issuer actually signs — a fractional-day offset
+	// would land mid-day and make the count depend on the hour the suite runs at.
+	function expInDays(days: number): Date {
+		const now = new Date();
+		return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days));
+	}
 
 	async function loadWithExpiry(expiresAt: Date) {
 		const { db, platform } = makeLoadDb();
@@ -1013,25 +1024,25 @@ describe('settings load — expiring-soon boundary (SONA-114)', () => {
 			tier: 2,
 			expiresAt
 		});
-		return (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+		return (await load(loadEvent(platform))) as unknown as {
 			supporterKey: { state: string; daysRemaining: number; expiringSoon: boolean } | null;
 		};
 	}
 
 	it('flags a key just inside the 7-day window', async () => {
-		// 6.5 days out → ceil → 7, the last value inside the window.
-		const result = await loadWithExpiry(new Date(Date.now() + 6.5 * DAY_MS));
+		// 7 calendar days out — the last value inside the window.
+		const result = await loadWithExpiry(expInDays(7));
 		expect(result.supporterKey).toMatchObject({ state: 'valid', daysRemaining: 7, expiringSoon: true });
 	});
 
 	it('does not flag a key just outside the window', async () => {
-		// 7.5 days out → ceil → 8, the first value outside.
-		const result = await loadWithExpiry(new Date(Date.now() + 7.5 * DAY_MS));
+		// 8 calendar days out — the first value outside.
+		const result = await loadWithExpiry(expInDays(8));
 		expect(result.supporterKey).toMatchObject({ state: 'valid', daysRemaining: 8, expiringSoon: false });
 	});
 
 	it('reports 1 day remaining on the key\'s last covered day', async () => {
-		const result = await loadWithExpiry(new Date(Date.now() + 0.5 * DAY_MS));
+		const result = await loadWithExpiry(expInDays(1));
 		expect(result.supporterKey).toMatchObject({ state: 'valid', daysRemaining: 1, expiringSoon: true });
 	});
 
@@ -1043,10 +1054,10 @@ describe('settings load — expiring-soon boundary (SONA-114)', () => {
 			reason: 'expired',
 			login: 'sparky',
 			tier: 1,
-			expiresAt: new Date(Date.now() - DAY_MS)
+			expiresAt: expInDays(-1)
 		});
 
-		const result = (await load({ platform, url: LOAD_URL } as never)) as unknown as {
+		const result = (await load(loadEvent(platform))) as unknown as {
 			supporterKey: { state: string; daysRemaining: number; expiringSoon: boolean } | null;
 		};
 

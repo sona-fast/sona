@@ -7,11 +7,32 @@
 	import AdminTabs from '$lib/components/AdminTabs.svelte';
 	import LanguageToggle from '$lib/components/LanguageToggle.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import { supporterKeyDaysRemaining } from '$lib/supporter-key-expiry';
+	import { onMount } from 'svelte';
+	import { invalidateAll } from '$app/navigation';
 
 	let { children, data } = $props();
 
 	const theme = getTheme();
+
+	// Publish the operator's timezone to the server (SONA-119). The supporter-key
+	// expiry date and the countdown beside it are rendered server-side so SSR and
+	// hydration agree; the server can only read them in the operator's own zone if
+	// we tell it which one that is. Written once — a changed zone (travel, a fixed
+	// clock) rewrites it and reloads, so the dates follow the operator.
+	onMount(() => {
+		const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		if (!zone || zone === readTzCookie()) return;
+		const secure = location.protocol === 'https:' ? '; Secure' : '';
+		document.cookie = `tz=${encodeURIComponent(zone)}; path=/; SameSite=Lax; max-age=31536000${secure}`;
+		// The page it was rendered with used UTC, so re-run the loads to pick the
+		// operator's dates up now instead of on their next navigation.
+		invalidateAll();
+	});
+
+	function readTzCookie(): string | null {
+		const match = /(?:^|;\s*)tz=([^;]*)/.exec(document.cookie);
+		return match ? decodeURIComponent(match[1]) : null;
+	}
 
 	// Supporter-key expiry notice (SONA-114): shown on every admin page while
 	// the key is inside its warning window. Dismissal is a cookie keyed on the
@@ -20,14 +41,6 @@
 	// post-hydration layout shift — and an early-phase dismissal re-warns in the
 	// final days. dismissedValue only bridges until the next server load.
 	let dismissedValue = $state<string | null>(null);
-	// Counted off the key's own expiry instant in whatever zone this runs in
-	// (SONA-119): UTC on SSR, the viewer's zone once hydrated — the same count
-	// the settings card shows, so the two can't disagree by a day.
-	const noticeDaysLeft = $derived(
-		data.supporterKeyNotice
-			? supporterKeyDaysRemaining(data.supporterKeyNotice.expiresAtMs, Date.now())
-			: 0
-	);
 	let mainEl: HTMLElement | undefined = $state();
 	// Populated on dismiss; lives in a persistent polite live region so screen
 	// readers hear a confirmation instead of silence when the banner vanishes.
@@ -123,9 +136,9 @@
 					<div class="supporter-notice">
 						<span class="notice-eyebrow">{m.admin_notice_supporter_eyebrow()}</span>
 						<p>
-							{noticeDaysLeft <= 1
+							{data.supporterKeyNotice.daysRemaining <= 1
 								? m.admin_notice_supporter_today_pre()
-								: m.admin_notice_supporter_expiring_pre({ days: noticeDaysLeft })}<a
+								: m.admin_notice_supporter_expiring_pre({ days: data.supporterKeyNotice.daysRemaining })}<a
 								class="notice-link"
 								href="https://sona.fast/supporter-key"
 								target="_blank"

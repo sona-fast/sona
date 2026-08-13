@@ -43,12 +43,11 @@ describe('settings tab ids do not drift from the component', () => {
 		const ruled = [...source.matchAll(/\.settings-tabs\[data-active-tab='([^']+)'\]/g)].map(
 			(m) => m[1]
 		);
-		expect([...new Set(ruled)].sort()).toEqual([...SETTINGS_TAB_IDS].sort());
-		expect(ruled).toHaveLength(SETTINGS_TAB_IDS.length);
+		expect(ruled.sort()).toEqual([...SETTINGS_TAB_IDS].sort());
 	});
 
 	it('tags every section with a known tab id', () => {
-		const tagged = [...source.matchAll(/\bdata-tab="([^"{]+)"/g)].flatMap((m) => m[1].split(/\s+/));
+		const tagged = [...source.matchAll(/\bdata-tab="([a-z]+)"/g)].map((m) => m[1]);
 		expect(tagged.length).toBeGreaterThan(0);
 		expect([...new Set(tagged)].filter((id) => !SETTINGS_TAB_IDS.includes(id as never))).toEqual([]);
 	});

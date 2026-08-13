@@ -53,16 +53,34 @@ function makeLoadDb() {
 // The load reads locals.admin (set by hooks.server.ts) and the dismissal cookie.
 function loadEvent(
 	platform: App.Platform | undefined,
-	{ admin = true, cookie }: { admin?: boolean; cookie?: string } = {}
+	{ admin = true, cookie, tz }: { admin?: boolean; cookie?: string; tz?: string } = {}
 ) {
 	return {
 		platform,
 		locals: { admin },
-		cookies: { get: (name: string) => (name === 'supporterNoticeDismissed' ? cookie : undefined) }
+		cookies: {
+			get: (name: string) => {
+				if (name === 'supporterNoticeDismissed') return cookie;
+				if (name === 'tz') return tz;
+				return undefined;
+			}
+		}
 	} as never;
 }
 
-type NoticeResult = { supporterKeyNotice: { expiresAtMs: number; dismissValue: string } | null };
+type NoticeResult = { supporterKeyNotice: { daysRemaining: number; dismissValue: string } | null };
+
+async function loadWithZone(expiresAt: Date, tz?: string) {
+	const { db, platform } = makeLoadDb();
+	await setRawSetting(db, 'supporterKey', 'head.tail');
+	vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+		valid: true,
+		login: 'sparky',
+		tier: 2,
+		expiresAt
+	});
+	return (await load(loadEvent(platform, { tz }))) as NoticeResult;
+}
 
 describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 	it('is null with no stored key', async () => {
@@ -88,7 +106,7 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 		expect(result.supporterKeyNotice).toBeNull();
 	});
 
-	it('surfaces the expiry instant inside the window and keeps the token out of the payload', async () => {
+	it('surfaces days remaining inside the window and keeps the token out of the payload', async () => {
 		const { db, platform } = makeLoadDb();
 		await setRawSetting(db, 'siteName', 'Sparky Site');
 		clearSettingsCache();
@@ -102,10 +120,7 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 
 		const result = (await load(loadEvent(platform))) as NoticeResult & Record<string, unknown>;
 
-		// The notice ships the instant, not a day count: the browser recounts the
-		// days in the viewer's own zone (SONA-119). Whether to warn at all is still
-		// decided here in UTC — 7 days out is inside the window.
-		expect(result.supporterKeyNotice).toMatchObject({ expiresAtMs: expInDays(7).getTime() });
+		expect(result.supporterKeyNotice).toMatchObject({ daysRemaining: 7 });
 		// The successful load carries the real chrome fields, not EMPTY fallbacks.
 		expect(result).toMatchObject({
 			siteName: 'Sparky Site',
@@ -116,6 +131,38 @@ describe('admin layout load — supporter-key expiry notice (SONA-114)', () => {
 		expect(result.supporterKeyNotice?.dismissValue).toMatch(/^\d{4}\.\d{2}\.\d{2}:early$/);
 		// The layout payload rides along on every admin page — the token must not.
 		expect(JSON.stringify(result)).not.toContain('head.tail');
+	});
+
+	// SONA-119: the operator's zone reaches the load through the tz cookie, and
+	// BOTH the date and the count are read in it. Computing them in the browser
+	// instead would make SSR print the UTC answer and hydration overwrite it.
+	it('reads the expiry date and the countdown in the tz cookie zone', async () => {
+		// exp = midnight UTC, so its last covered instant (23:59:59Z) is already
+		// the next calendar day anywhere east of UTC. Five days out so both zones
+		// sit inside the warn window (which is itself now judged in that zone).
+		const expiresAt = expInDays(5);
+		const utc = await loadWithZone(expiresAt);
+		const tokyo = await loadWithZone(expiresAt, 'Asia/Tokyo');
+
+		// dismissValue embeds validUntil, so it shows which day each load named.
+		const dayOf = (r: NoticeResult) => r.supporterKeyNotice?.dismissValue.split(':')[0];
+		expect(dayOf(tokyo)).not.toBe(dayOf(utc));
+		// …and the count moved with it, so the pair still agrees: Tokyo's last
+		// covered day is one calendar day further out than UTC's.
+		expect(tokyo.supporterKeyNotice?.daysRemaining).toBe(
+			(utc.supporterKeyNotice?.daysRemaining ?? 0) + 1
+		);
+	});
+
+	it('falls back to UTC on a hostile tz cookie instead of failing the load', async () => {
+		// The cookie is attacker-suppliable and an unknown zone makes Intl throw;
+		// unguarded, the catch would drop the whole admin chrome to EMPTY.
+		const expiresAt = expInDays(5);
+		const junk = await loadWithZone(expiresAt, 'Not/AZone');
+
+		expect(junk.supporterKeyNotice?.dismissValue).toBe(
+			(await loadWithZone(expiresAt)).supporterKeyNotice?.dismissValue
+		);
 	});
 
 	it('is null for an expired key (the settings page owns that state)', async () => {

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { supporterKeyValidUntil, supporterKeyDaysRemaining } from './supporter-key-expiry';
+import {
+	supporterKeyValidUntil,
+	supporterKeyDaysRemaining,
+	viewerTimeZone
+} from './supporter-key-expiry';
 
 // Keys carry `exp` as end-of-day UTC, so this one covers through 2026-08-10 UTC.
 const EXP = Date.UTC(2026, 7, 11, 0, 0, 0);
@@ -62,6 +66,26 @@ describe('supporterKeyDaysRemaining', () => {
 		expect(supporterKeyValidUntil(EXP, TOKYO)).toBe('2026.08.11');
 		expect(supporterKeyDaysRemaining(EXP, now, LA)).toBe(1);
 		expect(supporterKeyValidUntil(EXP, LA)).toBe('2026.08.10');
+	});
+});
+
+describe('viewerTimeZone', () => {
+	it('takes a real IANA zone from the cookie', () => {
+		expect(viewerTimeZone(TOKYO)).toBe(TOKYO);
+	});
+
+	it('falls back to UTC when the cookie is absent', () => {
+		// No JS, or the operator's very first admin page view.
+		expect(viewerTimeZone(undefined)).toBe('UTC');
+		expect(viewerTimeZone('')).toBe('UTC');
+	});
+
+	it('falls back to UTC rather than throwing on a hostile cookie', () => {
+		// The value is attacker-suppliable and Intl throws RangeError on an
+		// unknown zone — unguarded, that would take down the whole admin layout.
+		for (const junk of ['Not/AZone', '../../etc', 'UTC; DROP', '\u0000']) {
+			expect(viewerTimeZone(junk)).toBe('UTC');
+		}
 	});
 });
 

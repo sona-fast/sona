@@ -1,7 +1,4 @@
-import {
-	supporterKeyValidUntil,
-	supporterKeyDaysRemaining as daysRemainingIn
-} from '$lib/supporter-key-expiry';
+import { supporterKeyValidUntil, supporterKeyDaysRemaining } from './supporter-key-expiry';
 
 // Ed25519 SPKI (DER) public key, base64, that the sona.fast issuer signs
 // supporter keys with. Baked in so verification needs no network and no config.
@@ -116,12 +113,11 @@ export async function verifySupporterKey(
 
 /**
  * The "valid until" / "expired" display date (dotted YYYY.MM.DD, the repo
- * standard), pinned to UTC. Server-side callers need it stable regardless of
- * where the request lands: it keys the notice-dismissal cookie, and it is the
- * SSR value the browser then re-renders in the viewer's own zone (SONA-119).
+ * standard), read in the viewer's zone (SONA-119) — the same zone the countdown
+ * beside it is counted in, which is what keeps the two from disagreeing.
  */
-export function supporterKeyDisplayDate(expiresAt: Date): string {
-	return supporterKeyValidUntil(expiresAt.getTime(), 'UTC');
+export function supporterKeyDisplayDate(expiresAt: Date, timeZone: string): string {
+	return supporterKeyValidUntil(expiresAt.getTime(), timeZone);
 }
 
 /** A valid key within this many days of expiry gets the "expiring soon"
@@ -136,14 +132,13 @@ export const EXPIRY_WARN_DAYS = 7;
 export const EXPIRY_FINAL_DAYS = 3;
 
 /**
- * Whole days until the key stops working, counted in UTC calendar days: 1
- * means the key expires today (its last covered day) and 0 or less means it
- * has already expired. Pinned to UTC for the same reason the display date is —
- * it gates the notice and its dismissal phase, which must not move with the
- * request. The browser recounts it in the viewer's zone for display.
+ * Whole days until the key stops working, counted as calendar days in the
+ * viewer's zone: 1 means the key expires today (its last covered day) and 0 or
+ * less means it has already expired. Same zone as the display date, so the
+ * number and the date can never name different days (SONA-119).
  */
-export function supporterKeyDaysRemaining(expiresAt: Date, now: Date): number {
-	return daysRemainingIn(expiresAt.getTime(), now.getTime(), 'UTC');
+export function supporterKeyDaysRemainingFor(expiresAt: Date, now: Date, timeZone: string): number {
+	return supporterKeyDaysRemaining(expiresAt.getTime(), now.getTime(), timeZone);
 }
 
 /** Client-facing supporter-key status shared by the settings page and the
@@ -153,14 +148,11 @@ export function supporterKeyDaysRemaining(expiresAt: Date, now: Date): number {
  * the layout payload structurally cannot leak the key. */
 export interface SupporterKeyStatus {
 	state: 'valid' | 'expired';
-	/** UTC-pinned display date. The SSR value, and what the dismissal cookie is
-	 * keyed on; the browser re-derives the shown date from expiresAtMs. */
+	/** Last covered day, read in the viewer's zone. Also what the notice's
+	 * dismissal cookie is keyed on, so a re-minted key always warns afresh. */
 	validUntil: string;
-	/** The key's `exp` instant in unix ms. Shipped so the client can render the
-	 * date and the countdown off one instant in the viewer's own timezone
-	 * (SONA-119) — reading them in different zones let them disagree by a day. */
-	expiresAtMs: number;
-	/** Days until expiry (1 = expires today); 0 for the expired state. */
+	/** Days until expiry (1 = expires today); 0 for the expired state. Counted
+	 * in the same zone as validUntil — the pair is the point (SONA-119). */
 	daysRemaining: number;
 	/** True when valid and within EXPIRY_WARN_DAYS of expiry. */
 	expiringSoon: boolean;
@@ -173,14 +165,14 @@ export interface SupporterKeyStatus {
  */
 export function supporterKeyStatusFromResult(
 	res: SupporterKeyResult,
-	now: Date
+	now: Date,
+	timeZone: string
 ): SupporterKeyStatus | null {
 	if (res.valid) {
-		const daysRemaining = supporterKeyDaysRemaining(res.expiresAt, now);
+		const daysRemaining = supporterKeyDaysRemainingFor(res.expiresAt, now, timeZone);
 		return {
 			state: 'valid',
-			validUntil: supporterKeyDisplayDate(res.expiresAt),
-			expiresAtMs: res.expiresAt.getTime(),
+			validUntil: supporterKeyDisplayDate(res.expiresAt, timeZone),
 			daysRemaining,
 			expiringSoon: daysRemaining <= EXPIRY_WARN_DAYS
 		};
@@ -188,8 +180,7 @@ export function supporterKeyStatusFromResult(
 	if (res.reason === 'expired') {
 		return {
 			state: 'expired',
-			validUntil: supporterKeyDisplayDate(res.expiresAt),
-			expiresAtMs: res.expiresAt.getTime(),
+			validUntil: supporterKeyDisplayDate(res.expiresAt, timeZone),
 			daysRemaining: 0,
 			expiringSoon: false
 		};
@@ -198,7 +189,11 @@ export function supporterKeyStatusFromResult(
 }
 
 /** Verify a stored token and shape the result for display (empty token → null). */
-export async function resolveSupporterKeyStatus(token: string, now: Date): Promise<SupporterKeyStatus | null> {
+export async function resolveSupporterKeyStatus(
+	token: string,
+	now: Date,
+	timeZone: string
+): Promise<SupporterKeyStatus | null> {
 	if (!token) return null;
-	return supporterKeyStatusFromResult(await verifySupporterKey(token, now), now);
+	return supporterKeyStatusFromResult(await verifySupporterKey(token, now), now, timeZone);
 }

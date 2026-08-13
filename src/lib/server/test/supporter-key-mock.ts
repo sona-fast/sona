@@ -19,7 +19,9 @@ export async function supporterKeyMockModule(
 	return {
 		...actual,
 		verifySupporterKey,
-		resolveSupporterKeyStatus: async (token: string, now: Date) =>
-			token ? actual.supporterKeyStatusFromResult(await verifySupporterKey(token, now), now) : null
+		resolveSupporterKeyStatus: async (token: string, now: Date, timeZone: string) =>
+			token
+				? actual.supporterKeyStatusFromResult(await verifySupporterKey(token, now), now, timeZone)
+				: null
 	};
 }
