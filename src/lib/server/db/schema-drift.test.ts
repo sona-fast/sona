@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import {
 	cpSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -60,11 +61,21 @@ const dialect = required('dialect');
 // node_modules/.bin — so the guard runs the version package.json pins and not
 // whichever executable happens to sit on a path above the checkout.
 // (Its package.json is not reachable through the package's `exports` map, so
-// the directory comes from the main entry instead.)
+// the package root is found from the resolved entry instead — which need not
+// sit at the root, hence the walk.)
 const require_ = createRequire(import.meta.url);
-const drizzleKitDir = path.dirname(require_.resolve('drizzle-kit'));
+function packageRootOf(entry: string): string {
+	for (let dir = path.dirname(entry); ; dir = path.dirname(dir)) {
+		if (existsSync(path.join(dir, 'package.json'))) return dir;
+		if (path.dirname(dir) === dir) throw new Error(`no package.json above ${entry}`);
+	}
+}
+const drizzleKitDir = packageRootOf(require_.resolve('drizzle-kit'));
 const { bin } = JSON.parse(readFileSync(path.join(drizzleKitDir, 'package.json'), 'utf8'));
-const drizzleKitBin = path.join(drizzleKitDir, bin['drizzle-kit']);
+const drizzleKitBin = path.resolve(
+	drizzleKitDir,
+	typeof bin === 'string' ? bin : bin['drizzle-kit']
+);
 /** The install drizzle-kit came from, so a schema copy can resolve drizzle-orm. */
 const nodeModules = path.dirname(drizzleKitDir);
 
