@@ -1,8 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { dev } from '$app/environment';
-import { getRawSetting } from '$lib/server/settings';
-import { verifySupporterKey } from '$lib/server/supporter-key';
-import { isFeatureEnabled, EARLY_ACCESS } from '$lib/early-access';
+import { getVerifiedSupporterKey, NO_SUPPORTER_KEY } from '$lib/server/settings';
+import { isFeatureEnabled, featureOpenToEveryone, EARLY_ACCESS } from '$lib/early-access';
 import { vrAvatars } from '$lib/server/db/schema';
 import { cachedProbe } from '$lib/server/nav-gating';
 import type { Database } from '$lib/server/db';
@@ -24,6 +23,14 @@ const VR_FEATURE_FLAG = 'vr-avatars';
  * model-upload endpoint must refuse when it is false. The gated UI state is
  * presentation on top of it, never a substitute.
  *
+ * Once the flag has GA'd no key can change the answer, so nothing is read at
+ * all. Before that the key is memoized per isolate (getVerifiedSupporterKey —
+ * see the invariant at its cache site), costing a D1 read plus an Ed25519
+ * verify once per TTL rather than once per request, and expiry is still
+ * compared against `now` here on every call. Every failure — a D1 error, a key
+ * that doesn't verify, anything unexpected out of the memo — is "no key",
+ * which denies.
+ *
  * `env` carries the TEST-ONLY E2E_VR_GATE bypass (see app.d.ts): honored only
  * when set to exactly 'open' AND the build is a dev build (the e2e harness
  * runs `vite dev` — see playwright.config.ts webServer). The `dev` guard
@@ -37,13 +44,19 @@ export async function vrPublishingEnabled(
 	now: Date = new Date()
 ): Promise<boolean> {
 	if (dev && env?.E2E_VR_GATE === 'open') return true;
-	// A failed settings read degrades to "no key" rather than throwing the whole
-	// page — the GA branch of isFeatureEnabled still opens the gate on time.
-	const token = await getRawSetting(db, 'supporterKey').catch(() => null);
-	let supporterKeyValid = false;
-	if (token) {
-		supporterKeyValid = (await verifySupporterKey(token, now)).valid;
-	}
+	// Past GA (or once the registry entry retires) the flag is open to everyone,
+	// and the key cannot change that — so skip the read entirely rather than pay
+	// for one on every VR request on every fork for the rest of the product's life.
+	if (featureOpenToEveryone(VR_FEATURE_FLAG, now)) return true;
+	// A failed read or verify degrades to "no key" rather than throwing the whole
+	// page; pre-GA that denies, which is the safe direction. Logged because the
+	// operator sees the same gated copy either way — without this, a D1 blip is
+	// indistinguishable from a key they never installed.
+	const key = await getVerifiedSupporterKey(db).catch((e) => {
+		console.error('supporter-key gate read failed:', e instanceof Error ? e.message : e);
+		return NO_SUPPORTER_KEY;
+	});
+	const supporterKeyValid = key.signatureValid && now.getTime() < key.expiresAt;
 	return isFeatureEnabled(VR_FEATURE_FLAG, { supporterKeyValid, now });
 }
 

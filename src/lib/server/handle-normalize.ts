@@ -3,16 +3,13 @@
 // counts as "the same handle". Pure — no DB.
 //
 // The platform table + bare-handle normalizer live in the client-safe
-// `$lib/handle-classify` (the New Artist combobox needs them too); re-exported
-// here so existing server importers keep their `handle-normalize` import path.
+// `$lib/handle-classify` and `$lib/social-platforms` (the New Artist combobox
+// and the public pages need them too); re-exported here so existing server
+// importers keep their `handle-normalize` import path.
 
 import { sanitizeUrl, stripControlChars } from './validate';
-import {
-	HOST_PREFIXES,
-	SOCIAL_KEY_TO_PLATFORM,
-	normalizeHandle,
-	type Platform
-} from '../handle-classify';
+import { SOCIAL_KEY_TO_PLATFORM, normalizeHandle } from '../handle-classify';
+import { platformDomains, type Platform, type SocialPlatform } from '../social-platforms';
 
 export { SOCIAL_KEY_TO_PLATFORM, normalizeHandle, type Platform };
 
@@ -40,13 +37,6 @@ export function handlesOverlap(a: Record<string, unknown>, b: Record<string, unk
 	return socialsToHandles(a).some((h) => set.has(`${h.platform} ${h.handleNorm}`));
 }
 
-/**
- * Platforms we can build a canonical profile URL for. Adds `furtrack` to the
- * registry-matching {@link Platform} set (Furtrack plays no part in registry
- * handle-matching, so it stays out of SOCIAL_KEY_TO_PLATFORM / HOST_PREFIXES).
- */
-export type SocialPlatform = Platform | 'furtrack';
-
 /** Canonical profile-URL prefix, used to build a URL from a bare handle. */
 const PROFILE_URL_PREFIX: Record<SocialPlatform, string> = {
 	twitter: 'https://twitter.com/',
@@ -57,12 +47,6 @@ const PROFILE_URL_PREFIX: Record<SocialPlatform, string> = {
 	deviantart: 'https://www.deviantart.com/',
 	patreon: 'https://www.patreon.com/',
 	instagram: 'https://www.instagram.com/'
-};
-
-/** Host fragments that mark input as "already a profile URL" for a platform. */
-const SOCIAL_HOST_PREFIXES: Record<SocialPlatform, string[]> = {
-	...HOST_PREFIXES,
-	furtrack: ['furtrack.com/']
 };
 
 /**
@@ -100,7 +84,7 @@ export function normalizeSocialUrl(
 		return '';
 	}
 
-	const domains = (SOCIAL_HOST_PREFIXES[platform] ?? []).map((h) => h.replace(/\/.*$/, ''));
+	const domains = platformDomains(platform);
 	const looksLikeUrl =
 		lower.startsWith('http://') ||
 		lower.startsWith('https://') ||

@@ -10,7 +10,7 @@ import type { Database } from '$lib/server/db';
 import type { SiteSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
 import { sniffImageType } from '$lib/server/storage/sniff';
-import { bufferStream } from '$lib/server/storage/buffer';
+import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from '$lib/server/storage/buffer';
 import { fetchCharacterPhotos, furtrackUserAgent } from '$lib/server/furtrack';
 import { LICENSES, type LicenseKey } from '$lib/furtrack/license';
 import type { FursuitPhoto } from '$lib/furtrack/types';
@@ -191,9 +191,10 @@ export async function importFursuitPhotos(opts: {
 			// Only self-host safe raster images. A non-image (or SVG) response would be
 			// served as active content from the R2 custom domain — refuse it.
 			if (!isAllowedImageType(contentType)) throw new Error(`unsupported image type: ${contentType}`);
-			// Buffer with a byte cap (M8), then verify the actual leading bytes match
-			// an allowed raster type (M7) - the remote Content-Type can lie.
-			const bytes = await bufferStream(res.body);
+			// Buffer with the remote byte cap (M8; rationale on the constant), then
+			// verify the actual leading bytes match an allowed raster type (M7) -
+			// the remote Content-Type can lie.
+			const bytes = await bufferStream(res.body, MAX_REMOTE_BUFFER_BYTES);
 			if (!isAllowedImageType(sniffImageType(bytes))) {
 				throw new Error('image contents do not match an allowed raster type');
 			}

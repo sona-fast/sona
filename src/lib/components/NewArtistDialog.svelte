@@ -3,7 +3,7 @@
 	import { X, Loader2 } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
-	import { shouldSearch, resultToPrefill, type RegResult } from '$lib/registry-search';
+	import { shouldSearch, resultToPrefill, resultHandle, type RegResult } from '$lib/registry-search';
 	import { classifyQuery } from '$lib/handle-classify';
 	import ArtistAvatar from '$lib/components/ArtistAvatar.svelte';
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
@@ -135,17 +135,6 @@
 			/* footer just stays hidden */
 		}
 	});
-
-	/** "@handle" for a result row, derived from its first social URL. */
-	function resultHandle(r: RegResult): string {
-		for (const v of Object.values(r.socials ?? {})) {
-			if (typeof v !== 'string' || !v) continue;
-			const seg = v.replace(/\/+$/, '').split('/').pop() ?? '';
-			const handle = seg.replace(/^@+/, '');
-			if (handle) return '@' + handle;
-		}
-		return '';
-	}
 
 	async function runImportAll() {
 		if (importingAll || !importPlan) return;

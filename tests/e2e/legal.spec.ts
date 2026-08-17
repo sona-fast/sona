@@ -161,7 +161,7 @@ test('the AI disclosure page renders and is reachable from the footer', async ({
 	await page.goto('/ai');
 	await expect(page.getByRole('heading', { level: 1, name: 'AI and this site' })).toBeVisible();
 	// The five disclosure topics are real headings, so the outline is navigable.
-	await expect(page.getByRole('heading', { name: 'The code.' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'The software.' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'The art.' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Your data.' })).toBeVisible();
 
@@ -204,7 +204,7 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	await page.goto('/ai');
 	await expect(page.getByText('My own words.')).toBeVisible();
 	// The default copy is gone.
-	await expect(page.getByRole('heading', { name: 'The code.' })).toHaveCount(0);
+	await expect(page.getByRole('heading', { name: 'The software.' })).toHaveCount(0);
 	// The <script> renders as literal text and never runs.
 	await expect(
 		page.getByText('<script>window.__aiXssRan = true</script>', { exact: false })
@@ -239,6 +239,27 @@ test('an owner override replaces the AI page defaults and the toggle removes the
 	await expect(page.getByText('Anthropic')).toHaveCount(0);
 	await expect(page.getByText(/development or code-review tools/)).toBeVisible();
 	await expect(page.getByText(/Resend/)).toBeVisible();
+});
+
+// SONA-183: the source pins can only see markup, so this asserts the computed
+// accessible name and description, plus the for/id pairing that keeps the title
+// clickable. Reads state only (no save), so it leaves the shared settings
+// untouched — and it runs LAST because this file is serial: a flake here would
+// otherwise skip the mutating cases above.
+test('the AI toggle is named by its title and described by its hint', async ({ page }) => {
+	await login(page);
+	await page.goto('/admin/settings');
+	await openSiteTab(page);
+
+	const toggle = page.locator('input[name="aiPageEnabled"]');
+	await expect(toggle).toHaveAccessibleName('Serve the AI disclosure page (/ai)');
+	await expect(toggle).toHaveAccessibleDescription(/Read it before you leave this on/);
+
+	// The only guard on the new for/id pairing: every other test drives the input
+	// by selector, so a dropped `for` would go unnoticed.
+	const before = await toggle.isChecked();
+	await page.getByText('Serve the AI disclosure page (/ai)', { exact: true }).click();
+	expect(await toggle.isChecked()).toBe(!before);
 });
 
 // The override/toggle cases above mutate settings on the shared seeded DB.

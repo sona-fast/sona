@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { images, imageTags, tags, characters } from '$lib/server/db/schema';
 import type { getDb } from '$lib/server/db';
 
@@ -15,8 +15,13 @@ export interface RefImage {
 /**
  * Resolve the operator's reference sheet with the SAME precedence as the /art
  * page: an owner character's explicitly designated reference_image_id wins
- * (when that image is published); otherwise the most recent published image
- * tagged 'reference'. Returns null when neither exists.
+ * (when that image is published and is not a variant); otherwise the most
+ * recent published non-variant image tagged 'reference'. Returns null when
+ * neither exists.
+ *
+ * The variant exclusion (SONA-18) has to be repeated here rather than inherited:
+ * the color picker samples whatever this returns, and a sheet the picker offers
+ * but /art refuses to show is worse than no picker at all.
  */
 export async function resolveRefImage(db: Db): Promise<RefImage | null> {
 	const owner = await db
@@ -31,7 +36,13 @@ export async function resolveRefImage(db: Db): Promise<RefImage | null> {
 		const designated = await db
 			.select({ id: images.id, imageUrl: images.imageUrl })
 			.from(images)
-			.where(and(eq(images.id, owner.referenceImageId), eq(images.published, true)))
+			.where(
+				and(
+					eq(images.id, owner.referenceImageId),
+					eq(images.published, true),
+					isNull(images.parentImageId)
+				)
+			)
 			.get();
 		if (designated) return designated;
 	}
@@ -42,7 +53,13 @@ export async function resolveRefImage(db: Db): Promise<RefImage | null> {
 			.from(images)
 			.innerJoin(imageTags, eq(imageTags.imageId, images.id))
 			.innerJoin(tags, eq(tags.id, imageTags.tagId))
-			.where(and(eq(tags.name, REFERENCE_TAG), eq(images.published, true)))
+			.where(
+				and(
+					eq(tags.name, REFERENCE_TAG),
+					eq(images.published, true),
+					isNull(images.parentImageId)
+				)
+			)
 			.orderBy(desc(images.createdAt))
 			.get()) ?? null
 	);

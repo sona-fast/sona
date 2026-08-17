@@ -169,7 +169,7 @@
 	});
 
 	// --- Showcase media (mock vr-avatar detail's media strip): ordered images +
-	// short clips, uploaded through /api/upload (buffered — its 10 MB cap is the
+	// short clips, uploaded through /api/upload (buffered — its 64 MB cap is the
 	// intended bound for showcase stills and short clips) into the vr-media/
 	// partition. Kind derives from the file's content type; dimensions are
 	// probed client-side like the existing image flows.

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { supporterKeyValidUntil } from './supporter-key-expiry';
 import {
 	verifySupporterKey,
+	supporterKeyDisplayRecord,
 	supporterKeyStatusFromResult,
 	resolveSupporterKeyStatus
 } from './supporter-key';
@@ -241,5 +242,27 @@ describe('resolveSupporterKeyStatus (real, unmocked)', () => {
 
 	it('resolves a garbage token to null (malformed falls through)', async () => {
 		expect(await resolveSupporterKeyStatus('not-a-real-key', new Date(), 'UTC')).toBeNull();
+	});
+});
+
+// The mask the settings card shows in place of the key. It lives on the server
+// so the full signed token never reaches the client (the card is the only thing
+// that ever displayed it, and it only ever displayed the mask).
+describe('supporterKeyDisplayRecord', () => {
+	it('keeps a recognisable head and tail and drops the middle', () => {
+		const token = `${'a'.repeat(60)}.${'b'.repeat(86)}`;
+
+		const masked = supporterKeyDisplayRecord(token);
+
+		expect(masked).toBe(`${'a'.repeat(24)}\u2026${'b'.repeat(7)}`);
+		expect(masked.length).toBeLessThan(token.length);
+		// The point of the whole change: what ships must not be the key.
+		expect(token.includes(masked)).toBe(false);
+	});
+
+	it('leaves a value too short to mask alone', () => {
+		// Unreachable for a key that verifies — the signature segment alone is 86
+		// base64url chars — so this branch only ever sees unusable values.
+		expect(supporterKeyDisplayRecord('head.tail')).toBe('head.tail');
 	});
 });

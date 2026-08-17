@@ -35,10 +35,15 @@ function originResponse(body: string, headers: Record<string, string> = {}) {
 	});
 }
 
-function makeEvent(db: ReturnType<typeof makeD1>, opts: { search?: string; fetch?: typeof fetch } = {}) {
+function makeEvent(
+	db: ReturnType<typeof makeD1>,
+	opts: { search?: string; fetch?: typeof fetch; headers?: Record<string, string> } = {}
+) {
+	const url = new URL(`${ORIGIN}/stickers/pack/7/download${opts.search ?? ''}`);
 	return {
 		params: { slug: 'pack', id: '7' },
-		url: new URL(`${ORIGIN}/stickers/pack/7/download${opts.search ?? ''}`),
+		url,
+		request: new Request(url, { headers: opts.headers ?? {} }),
 		platform: { env: { DB: db } },
 		fetch: opts.fetch ?? (vi.fn(async () => originResponse('bytes')) as typeof fetch),
 		// Unique per event so the module-level rate limiter never trips across tests.
@@ -141,7 +146,7 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 	});
 
 	it('streams the original untouched when content-length exceeds the 1MB convert cap', async () => {
-		// Manual uploads can reach 10MB (MAX_BUFFER_BYTES); the public converting
+		// Manual uploads can reach 64MB (MAX_BUFFER_BYTES); the public converting
 		// path must not buffer that — it skips sniff-and-convert entirely and
 		// serves the original like the plain path (memory-amplification guard).
 		const transformFetch = stubTransformFetch(async () =>
@@ -398,5 +403,189 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 	it('serves animated rasters as their original file (no flattening path exists)', async () => {
 		const res = await GET(makeEvent(seedDb({ format: 'webp', isAnimated: 1 })));
 		expect(res.headers.get('Content-Type')).toBe('image/webp');
+	});
+});
+
+describe('GET /stickers/[slug]/[id]/download — conditional requests', () => {
+	/**
+	 * An origin that answers 304 to any conditional request and 200 otherwise —
+	 * i.e. one that does the RFC 9110 comparison itself, which is the whole point
+	 * of passing a validator through instead of comparing etags here.
+	 * `etagOn304` is the tag it names on the 304; omitted, it names none.
+	 */
+	function conditionalOrigin(etagOn304?: string) {
+		return vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const sent = new Headers(init?.headers).get('if-none-match');
+			if (sent) {
+				return new Response(null, { status: 304, headers: etagOn304 ? { etag: etagOn304 } : {} });
+			}
+			return new Response('bytes', { headers: { 'content-type': 'image/webp', etag: '"v1"' } });
+		});
+	}
+
+	/** makeEvent with a mock upstream, keeping the mock's own type for assertions. */
+	function condEvent(
+		origin: ReturnType<typeof conditionalOrigin>,
+		opts: { search?: string; headers?: Record<string, string> } = {}
+	) {
+		return makeEvent(seedDb({ format: 'webp' }), {
+			...opts,
+			fetch: origin as unknown as typeof fetch
+		});
+	}
+
+	/** The If-None-Match the handler actually put on the upstream request. */
+	function sentValidator(origin: ReturnType<typeof conditionalOrigin>): string | null {
+		return new Headers(origin.mock.calls[0]?.[1]?.headers).get('if-none-match');
+	}
+
+	it('answers a matching If-None-Match with a bodyless 304', async () => {
+		const origin = conditionalOrigin('"v1"');
+		const res = await GET(condEvent(origin, { headers: { 'if-none-match': '"v1"' } }));
+
+		// The saving is upstream: the validator has to reach storage, or an edge
+		// MISS still pays for the whole file. (SvelteKit's respond() would already
+		// have dropped the BODY of a matching 200 — the read behind it is the waste
+		// this removes.)
+		expect(sentValidator(origin)).toBe('"v1"');
+		expect(res.status).toBe(304);
+		expect(res.body).toBeNull();
+		// A 304 whose validator or freshness disagreed with the 200's would make the
+		// NEXT revalidation run against a weaker copy, so both must match exactly.
+		expect(res.headers.get('ETag')).toBe('"v1"');
+		expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=300, stale-while-revalidate=3600');
+		// Content-Type/Content-Disposition describe a representation the 304 is not
+		// sending; the client already holds them with its cached copy, so the forced
+		// download still works.
+		expect(res.headers.get('Content-Type')).toBeNull();
+		expect(res.headers.get('Content-Disposition')).toBeNull();
+	});
+
+	it('serves the full 200 when the validator does not match', async () => {
+		// The origin owns the comparison: it answers 200 with the current bytes and
+		// the handler must serve them like any other download, not 502 on them.
+		const origin = vi.fn(async () =>
+			new Response('bytes', { headers: { 'content-type': 'image/webp', etag: '"v2"' } })
+		);
+		const res = await GET(condEvent(origin, { headers: { 'if-none-match': '"stale"' } }));
+
+		expect(sentValidator(origin)).toBe('"stale"');
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('bytes');
+		expect(res.headers.get('ETag')).toBe('"v2"');
+		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
+	});
+
+	it('sends no conditional header when the client sent none', async () => {
+		const origin = conditionalOrigin('"v1"');
+		const res = await GET(condEvent(origin));
+
+		expect(sentValidator(origin)).toBeNull();
+		expect(res.status).toBe(200);
+		expect(res.headers.get('Content-Disposition')).toBe('attachment; filename="pack-7.webp"');
+	});
+
+	it('names the entity it asked about, not whatever the 304 named', async () => {
+		// Only one tag was ever offered, so a 304 naming another is the origin
+		// contradicting itself. Adopting that tag would file the client's OLD bytes
+		// under it: every later revalidation would match and the client would never
+		// learn the file changed. Handing back what it already holds can't do that.
+		const origin = conditionalOrigin('"other"');
+		const res = await GET(condEvent(origin, { headers: { 'if-none-match': '"v1"' } }));
+
+		expect(origin).toHaveBeenCalledTimes(1);
+		expect(res.status).toBe(304);
+		expect(res.headers.get('ETag')).toBe('"v1"');
+	});
+
+	it('forwards a weak validator verbatim and hands it back', async () => {
+		// Weak comparison is the origin's business (RFC 9110 §8.8.3.2); re-deciding
+		// it here would only add a second, worse implementation. The client keeps
+		// the strength it offered, which is free on a route that serves whole files.
+		const origin = conditionalOrigin();
+		const res = await GET(condEvent(origin, { headers: { 'if-none-match': 'W/"weak-1"' } }));
+
+		expect(sentValidator(origin)).toBe('W/"weak-1"');
+		expect(res.status).toBe(304);
+		expect(res.headers.get('ETag')).toBe('W/"weak-1"');
+	});
+
+	it('treats an etag containing a comma as the single tag it is', async () => {
+		// An etag is not a comma-free token — %x21/%x23-7E includes ','. Splitting
+		// the header on commas to count tags would read this as two, so the grammar
+		// check has to be a real one.
+		const origin = conditionalOrigin();
+		const res = await GET(condEvent(origin, { headers: { 'if-none-match': '"a,b"' } }));
+
+		expect(sentValidator(origin)).toBe('"a,b"');
+		expect(res.status).toBe(304);
+		expect(res.headers.get('ETag')).toBe('"a,b"');
+	});
+
+	describe('validators the handler will not name', () => {
+		// Anything but a single entity-tag takes the ordinary unconditional path —
+		// see singleValidator for the reasoning. The space case is the one that
+		// pins the character class specifically: SP is a legal header byte but not
+		// a legal etagc, so a looser `"[^"]*"` pattern would accept it.
+		it.each([
+			['a comma-separated list', '"v1", W/"v2"'],
+			['a wildcard', '*'],
+			['a malformed validator', 'not-a-quoted-etag'],
+			['a quoted etag containing a space', '"a b"'],
+			['an over-long etag', `"${'x'.repeat(300)}"`]
+		])('does not forward %s', async (_label, value) => {
+			const origin = conditionalOrigin('"v1"');
+			const res = await GET(condEvent(origin, { headers: { 'if-none-match': value } }));
+
+			expect(sentValidator(origin)).toBeNull();
+			expect(res.status).toBe(200);
+		});
+
+		it('forwards a validator of exactly the maximum length', async () => {
+			// The bound is a cap on absurd reflected values, not a limit real tags
+			// run into — so the boundary itself has to stay on the allowed side.
+			const value = `"${'x'.repeat(254)}"`;
+			const origin = conditionalOrigin('"v1"');
+			const res = await GET(condEvent(origin, { headers: { 'if-none-match': value } }));
+
+			expect(value).toHaveLength(256);
+			expect(sentValidator(origin)).toBe(value);
+			expect(res.status).toBe(304);
+		});
+	});
+
+	it('502s a failed revalidation rather than confirming stale bytes', async () => {
+		// Only a 304 means "your copy is current". An origin error during a
+		// conditional request must not be answered with one, or the client marks
+		// bytes the origin never validated as freshly checked.
+		const origin = vi.fn(async () => new Response('upstream boom', { status: 500 }));
+		await expect(
+			status(GET(condEvent(origin, { headers: { 'if-none-match': '"v1"' } })))
+		).resolves.toBe(502);
+	});
+
+	it('502s an unprompted 304 instead of serving an empty download', async () => {
+		// Nothing was asked, so a 304 back is an origin misbehaving, not a
+		// revalidation — serving it on would hand the client a 0-byte file.
+		const origin = vi.fn(async () => new Response(null, { status: 304 }));
+		await expect(status(GET(condEvent(origin)))).resolves.toBe(502);
+	});
+
+	it('does not pass the validator through on the ?format=png path', async () => {
+		// That path has to buffer and sniff the ORIGINAL bytes before it may
+		// convert (a stale is_animated must never let the transform flatten an
+		// animated file), and a 304 would leave it nothing to sniff. The client's
+		// validator there describes the transformed PNG anyway, not the original.
+		stubTransformFetch(async () =>
+			new Response('png-bytes', { headers: { 'content-type': 'image/png' } })
+		);
+		const origin = vi.fn(async () => originResponse('orig', { 'content-type': 'image/webp' }));
+		const res = await GET(
+			condEvent(origin, { search: '?format=png', headers: { 'if-none-match': '"png-etag"' } })
+		);
+
+		expect(sentValidator(origin)).toBeNull();
+		expect(res.status).toBe(200);
+		expect(res.headers.get('Content-Type')).toBe('image/png');
 	});
 });

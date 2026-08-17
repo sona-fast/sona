@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { page } from '$app/state';
 	import { Image as ImageIcon, Palette, CircleCheck, CircleAlert, ArrowRight, Star } from 'lucide-svelte';
 	import Callout from '$lib/components/Callout.svelte';
@@ -26,6 +27,23 @@
 	// Featured (#58): the first curated image is the hero, the rest the supporting row.
 	const featuredHero = $derived(data.featuredArt[0] ?? null);
 	const featuredRest = $derived(data.featuredArt.slice(1));
+
+	// SONA-18: an operator may designate (or tag) an NSFW image as the ref sheet.
+	// The designation is honored, but the image renders behind the same
+	// blur-and-reveal shield as the gallery hero. Shielded, the frame is the
+	// reveal button rather than a link — nesting a button inside the
+	// gallery <a> would leave two competing targets on one image.
+	let revealed = $state(false);
+	let revealAnnouncement = $state('');
+	// The button unmounts itself on reveal: announce the change and land focus on
+	// the now-linked ref sheet instead of dropping it to <body>.
+	let revealedRef = $state<HTMLAnchorElement>();
+	async function reveal() {
+		revealed = true;
+		revealAnnouncement = m.mature_revealed();
+		await tick();
+		revealedRef?.focus();
+	}
 </script>
 
 <Meta
@@ -40,25 +58,60 @@
 <section class="section">
 	<h2 class="section-label">{m.art_ref_sheet()}</h2>
 	{#if data.refSheet}
-		<a class="ref-sheet" href={`/gallery/${data.refSheet.slug}`}>
-			<!-- The ref sheet is /art's LCP element: transform it (not the raw
-			     multi-MB original), reserve its box with intrinsic width/height, and
-			     prioritize its fetch. rawFallback swaps in the original if the
-			     transform 403s off-zone. -->
-			<img
-				src={refSheetSrc(data.refSheet.imageUrl)}
-				srcset={refSheetSrcset(data.refSheet.imageUrl)}
-				sizes={refSheetSizes(data.refSheet.imageUrl)}
-				use:rawFallback={data.refSheet.imageUrl}
-				alt={data.refSheet.title}
-				width={data.refSheet.width}
-				height={data.refSheet.height}
-				fetchpriority="high"
-				decoding="async"
-			/>
-		</a>
+		<!-- Always-mounted status region: a live region inserted together with its
+		     first content is often not announced. -->
+		<p class="sr-only" role="status">{revealAnnouncement}</p>
+		<!-- Both branches render the same LCP contract on the <img>: transform it
+		     (not the raw multi-MB original), reserve its box with intrinsic
+		     width/height, and prioritize its fetch. rawFallback swaps in the
+		     original if the transform 403s off-zone. -->
+		{#if data.refSheet.nsfw && !revealed}
+			<div class="ref-sheet shielded">
+				<img
+					src={refSheetSrc(data.refSheet.imageUrl)}
+					srcset={refSheetSrcset(data.refSheet.imageUrl)}
+					sizes={refSheetSizes(data.refSheet.imageUrl)}
+					use:rawFallback={data.refSheet.imageUrl}
+					alt={data.refSheet.title}
+					width={data.refSheet.width}
+					height={data.refSheet.height}
+					fetchpriority="high"
+					decoding="async"
+					class="blurred"
+				/>
+				<button class="reveal-btn" onclick={reveal}>
+					<span class="nsfw-label">{m.gallery_nsfw_content()}</span>
+					<span>{m.gallery_click_reveal()}</span>
+				</button>
+			</div>
+		{:else}
+			<a class="ref-sheet" href={`/gallery/${data.refSheet.slug}`} bind:this={revealedRef}>
+				<img
+					src={refSheetSrc(data.refSheet.imageUrl)}
+					srcset={refSheetSrcset(data.refSheet.imageUrl)}
+					sizes={refSheetSizes(data.refSheet.imageUrl)}
+					use:rawFallback={data.refSheet.imageUrl}
+					alt={data.refSheet.title}
+					width={data.refSheet.width}
+					height={data.refSheet.height}
+					fetchpriority="high"
+					decoding="async"
+				/>
+			</a>
+		{/if}
+		<!-- The first caption sentence carries the separator (a trailing space in en,
+		     nothing in ja, which takes none after 。), so the markup emits no
+		     whitespace of its own. Keeping the separator in the text means it
+		     survives into the accessibility tree and the clipboard, which a CSS
+		     margin would not; keeping it on the FIRST sentence keeps it out of the
+		     link text below, where it would sit under the underline.
+
+		     Shielded, the frame is a button rather than the gallery link, so that
+		     sentence is a real link — the only route onward, and the only one that
+		     works without JS, where the reveal button does nothing. It says "open in
+		     the gallery" because that page shields the same image again. -->
 		<p class="caption">
-			{m.art_ref_caption()}
+			{m.art_ref_caption()}{#if data.refSheet.nsfw && !revealed}<a href={`/gallery/${data.refSheet.slug}`}>{m.art_ref_open_gallery()}</a>{:else}{m.art_ref_view_full()}{/if}
 			{#if data.refSheet.artistName}
 				<span class="credit"> · {m.art_ref_by({ artist: data.refSheet.artistName })}</span>
 			{/if}
@@ -194,6 +247,55 @@
 		color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
 	}
 
+	/* NSFW shield (SONA-18) — same blur radius and overlay as the gallery hero. */
+	.ref-sheet.shielded {
+		position: relative;
+	}
+
+	/* Reveal moves focus here programmatically, where Safari's :focus-visible
+	   heuristic is unreliable — draw the ring rather than trust the UA default.
+	   Outset is safe: an element's own overflow does not clip its own outline. */
+	a.ref-sheet:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+
+	.ref-sheet img.blurred {
+		filter: blur(32px);
+	}
+
+	.reveal-btn {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		background: rgba(0, 0, 0, 0.6);
+		border: none;
+		color: white;
+		cursor: pointer;
+		font-family: var(--font-primary);
+		font-size: 14px;
+	}
+
+	/* .ref-sheet clips overflow, so an outset ring on this inset:0 button survives
+	   only as slivers — draw it inside the clip region instead. White rather than
+	   --ring: the ring sits on the dark shield scrim over arbitrary artwork, where
+	   --ring (tuned for page surfaces) measures ~1.7:1, under the 3:1 SC 1.4.11
+	   wants. The dark outer stroke keeps it visible if the scrim ever lightens. */
+	.reveal-btn:focus-visible {
+		outline: 2px solid #fff;
+		outline-offset: -4px;
+		box-shadow: inset 0 0 0 6px rgba(0, 0, 0, 0.8);
+	}
+
+	.nsfw-label {
+		font-weight: 600;
+		font-size: 16px;
+	}
+
 	.ref-sheet img {
 		width: 100%;
 		height: auto;
@@ -205,6 +307,12 @@
 		font-size: 13px;
 		line-height: 1.5;
 		color: var(--muted-foreground);
+	}
+
+	/* --primary fails AA on small text in ember light (2.20:1); --status-attention
+	   is the token that tracks it and passes 4.5:1 everywhere (SONA-162). */
+	.caption a {
+		color: var(--status-attention);
 	}
 
 	.details {

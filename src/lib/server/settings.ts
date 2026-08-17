@@ -2,6 +2,12 @@ import { eq, inArray } from 'drizzle-orm';
 import { siteSettings } from './db/schema';
 import { APP_NAME } from '$lib/config';
 import { DEFAULT_GALLERY_SORT, isValidGallerySort, type GallerySort } from '$lib/gallery';
+import {
+	supporterKeyStatusFromResult,
+	verifySupporterKey,
+	type SupporterKeyResult,
+	type SupporterKeyStatus
+} from './supporter-key';
 import type { Database } from './db';
 
 export type StorageProviderId = 'uploadthing' | 'r2';
@@ -55,8 +61,8 @@ export interface SiteSettings {
 	aiPageEnabled: boolean;
 	/** Owner-editable override for the /ai page body (plain text). Empty → the
 	 * default disclosure copy from `$lib/ai-disclosure` is shown instead.
-	 * Server-only beyond /ai itself: the (public) layout strips it from the
-	 * client payload, and /ai's own load returns it. */
+	 * Server-only beyond /ai itself: it is absent from the public allowlist
+	 * below, so no public payload carries it, and /ai's own load returns it. */
 	aiPageText: string;
 	/** Date (YYYY-MM-DD) the /ai override text was last changed, stamped when
 	 * that page's override is saved. Drives its "Last updated" line when an
@@ -137,32 +143,88 @@ export function parseLines(raw: string): string[] {
 }
 
 /**
- * The settings shape public pages receive. `aiPageText` is stripped by the
- * (public) layout load: that load rides every public page, and a fork that
- * turned /ai off must not keep shipping its retired copy to every visitor —
- * /ai's own load returns the override, behind its 404 gate.
+ * The settings that may ride a public page's client payload.
+ *
+ * An allowlist, not a denylist: a field added to `SiteSettings` stays
+ * server-only until it is named here, so nothing reaches every visitor by
+ * default. settings.classification.test.ts fails when a key is in neither this
+ * list nor SERVER_ONLY_SETTINGS_KEYS, which forces the call at review time.
  */
-export type PublicSiteSettings = Omit<SiteSettings, 'aiPageText'>;
+export const PUBLIC_SETTINGS_KEYS = [
+	'siteName',
+	'ownerName',
+	'aboutText',
+	'contactEmail',
+	'siteUrl',
+	'emailLanguage',
+	'privacyPolicy',
+	'termsOfService',
+	'privacyUpdatedAt',
+	'termsUpdatedAt',
+	'aiPageEnabled',
+	'aiPageUpdatedAt',
+	'sonaSpecies',
+	'sonaBuild',
+	'sonaKeyFeatures',
+	'sonaColors',
+	'sonaDos',
+	'sonaDonts',
+	'twitterUrl',
+	'blueskyUrl',
+	'telegramUrl',
+	'furAffinityUrl',
+	'instagramUrl',
+	'furtrackUrl',
+	'adminAvatarUrl',
+	'primaryCharacter',
+	'storageProvider',
+	'r2PublicUrl',
+	'autoResyncEnabled',
+	'themeId',
+	'landingLayout',
+	'splashSubtitle',
+	'registryOverridesLocal',
+	'galleryDefaultSort'
+] as const satisfies readonly (keyof SiteSettings)[];
 
 /**
- * Strip the settings that must not ride a public page's client payload.
+ * Settings deliberately withheld from public payloads. Naming a key here is
+ * what lets the classification test pass without publishing it.
  *
- * Today that is `aiPageText`: the layout load runs on EVERY public page, so
- * shipping the override there would keep publishing a fork's /ai copy after
- * the owner turned the page off. /ai's own load returns it, behind that
- * route's 404 gate. Every public load returns settings through this helper so
- * a new one cannot forget the strip.
+ * `aiPageText`: the (public) layout load rides every public page, so shipping
+ * the override there would keep publishing a fork's /ai copy after the owner
+ * turned the page off. /ai's own load returns it, behind that route's 404 gate.
+ */
+export const SERVER_ONLY_SETTINGS_KEYS = [
+	'aiPageText'
+] as const satisfies readonly (keyof SiteSettings)[];
+
+/** The settings shape public pages receive — exactly PUBLIC_SETTINGS_KEYS. */
+export type PublicSiteSettings = Pick<SiteSettings, (typeof PUBLIC_SETTINGS_KEYS)[number]>;
+
+/**
+ * Narrow full settings to the public allowlist. Every public load returns
+ * settings through this helper, so a new one cannot forget the narrowing.
+ *
+ * The input is a fully-populated `SiteSettings` (what getSettings and
+ * settingsFallback return): every allowlisted key is emitted, so a partial
+ * object would yield those keys with undefined values rather than absent.
  */
 export function toPublicSettings(settings: SiteSettings): PublicSiteSettings {
-	const { aiPageText: _aiPageText, ...publicSettings } = settings;
-	return publicSettings;
+	return Object.fromEntries(
+		PUBLIC_SETTINGS_KEYS.map((key) => [key, settings[key]])
+	) as PublicSiteSettings;
 }
 
 // Neutral, brand-agnostic defaults. A real deployment overrides these via the
 // first-run setup wizard / admin Settings (stored as site_settings rows); the
 // example sparky.ink config seeds its own values. Keep these generic so a fresh
 // fork starts unbranded rather than impersonating another site.
-const DEFAULTS: SiteSettings = {
+//
+// Exported because the compiler forces this literal to carry every
+// `SiteSettings` key, which makes it the runtime inventory of the interface —
+// what the classification test checks the public/server-only lists against.
+export const DEFAULTS: SiteSettings = {
 	siteName: APP_NAME,
 	ownerName: '',
 	aboutText: 'A personal gallery for collecting and showcasing furry artwork from talented artists.',
@@ -326,6 +388,157 @@ export async function setRawSetting(db: Database, key: string, value: string): P
 	} else {
 		await db.insert(siteSettings).values({ key, value });
 	}
+}
+
+// Resolved supporter-key status, memoized per isolate next to the settings cache
+// above (SONA-118). The admin layout load runs this on every authenticated admin
+// page request; uncached it costs a D1 read of the `supporterKey` row plus an
+// Ed25519 verify each time.
+//
+// SETTINGS_TTL_MS bounds the same staleness it bounds for settings: the key row
+// can be written by another isolate, whose clearSupporterKeyStatusCache this one
+// never sees.
+//
+// SONA-119 made the resolved status viewer-dependent (validUntil and
+// daysRemaining are rendered in the operator's zone), so the status itself is
+// no longer cacheable in a shared entry — one operator's dates would be served
+// to another. What IS cached are the zone-independent verified facts below
+// (getVerifiedSupporterKey); the status is derived from them per call, which
+// still spares the hot path the D1 read and the Ed25519 verify.
+
+// Bumped by clearSupporterKeyStatusCache: a resolution that was already awaiting
+// the read when a save/remove cleared the entry must not re-cache its pre-write
+// status. Same guard as the nav probes (cachedProbe in nav-gating.ts).
+let supporterKeyStatusGeneration = 0;
+
+/**
+ * What verifying the stored key established about it: whether the issuer's
+ * signature checks out, and — when it does — the unix ms instant the key stops
+ * working. A union rather than two loose fields, so the two can't drift apart
+ * and a caller that checks the signature needs no null check after it. Frozen:
+ * callers share one instance.
+ */
+export type VerifiedSupporterKey =
+	| { readonly signatureValid: true; readonly expiresAt: number }
+	| { readonly signatureValid: false; readonly expiresAt: null };
+
+/** The fail-closed answer: no key, or nothing that verified as one. Exported so
+ * callers that degrade to "no key" name the same thing the memo does. */
+export const NO_SUPPORTER_KEY: VerifiedSupporterKey = Object.freeze({
+	signatureValid: false,
+	expiresAt: null
+});
+
+// The second memo of the `supporterKey` row, for the ENFORCEMENT path
+// (vrPublishingEnabled), which runs on every VR admin load and every model
+// upload and otherwise pays a D1 read plus an Ed25519 verify each time.
+//
+// THE INVARIANT, stated once for everything below: nothing cached here depends
+// on `now` or on who is asking. Only the signature verdict and the expiry
+// instant are stored; validity is that pair compared against the caller's own
+// `now`, re-decided per call. That is why this memo needs no UTC-day key where
+// the status memo above does, and why SONA-119's viewer-zone rendering of the
+// STATUS fields cannot collide with it.
+//
+// This is the ONLY memo of the `supporterKey` row: the display status
+// (getSupporterKeyStatus below) is derived from these facts plus the caller's
+// `now` and zone on every call, exactly because those inputs are per-viewer
+// (SONA-119) while these facts are not.
+//
+// Staleness: the isolate running the save/remove clears immediately, others
+// converge on the TTL. A key that currently entitles is held for the full
+// SETTINGS_TTL_MS, so REMOVING one keeps publishing open elsewhere for up to a
+// minute — the same bound the settings and status caches already accept, and
+// only the owner revoking their own entitlement can reach it.
+//
+// Everything that does NOT entitle right now — no row, nothing that verified,
+// and a lapsed key — is held for seconds instead. That is the direction where
+// staleness looks like a bug: the operator installs or renews a key, the
+// settings page (which reads uncached) says valid, and a warm isolate would
+// otherwise keep refusing uploads. Renewal is the common case, since keys run
+// ~45 days, and a renewal replaces a LAPSED entry — which is why the short TTL
+// keys off "usable now" rather than "signature ok".
+const NO_KEY_TTL_MS = 5_000;
+let verifiedSupporterKeyCache: { value: VerifiedSupporterKey; expires: number } | null = null;
+
+/**
+ * The single invalidation hook for EVERY memo of the `supporterKey` row — the
+ * display status and the verified-key facts alike. Both save/remove actions
+ * call it once; a new memo of that row belongs here rather than in its own
+ * clear function, so an action can't invalidate one and miss the other.
+ */
+export function clearSupporterKeyStatusCache() {
+	verifiedSupporterKeyCache = null;
+	supporterKeyStatusGeneration++;
+}
+
+/**
+ * The verified FACTS about the stored key, for the enforcement gate — memoized
+ * under the invariant above.
+ *
+ * Fails closed on every uncertain outcome: a token that doesn't verify, a
+ * missing row and an empty row all resolve to NO_SUPPORTER_KEY. D1 errors
+ * propagate (and are not cached) so the caller can decide — the enforcement
+ * path catches them and denies.
+ */
+export async function getVerifiedSupporterKey(db: Database): Promise<VerifiedSupporterKey> {
+	const cached = verifiedSupporterKeyCache;
+	if (cached && cached.expires > Date.now()) return cached.value;
+	const startedIn = supporterKeyStatusGeneration;
+	const token = await getRawSetting(db, 'supporterKey');
+	// `now` only picks which arm of the result carries the expiry, and both arms
+	// that carry one fold to the same facts — so nothing about WHEN this ran
+	// reaches the cache.
+	const value = token
+		? verifiedSupporterKeyFrom(await verifySupporterKey(token, new Date()))
+		: NO_SUPPORTER_KEY;
+	// A resolution that a save/remove overtook must not re-cache its pre-write
+	// answer — same guard, and the same counter, as the status memo.
+	if (supporterKeyStatusGeneration === startedIn) {
+		// Only the entry's LIFETIME is time-relative; the value it holds still is
+		// not, so the invariant above is intact.
+		const entitlesNow = value.signatureValid && value.expiresAt > Date.now();
+		verifiedSupporterKeyCache = {
+			value,
+			expires: Date.now() + (entitlesNow ? SETTINGS_TTL_MS : NO_KEY_TTL_MS)
+		};
+	}
+	return value;
+}
+
+/** Keep the expiry of anything the issuer actually signed — the `expired` arm
+ * carries a trustworthy `expiresAt` too, and that is what lets one entry answer
+ * correctly on both sides of the moment a key lapses. */
+function verifiedSupporterKeyFrom(res: SupporterKeyResult): VerifiedSupporterKey {
+	if (res.valid || res.reason === 'expired') {
+		return Object.freeze({ signatureValid: true, expiresAt: res.expiresAt.getTime() });
+	}
+	return NO_SUPPORTER_KEY;
+}
+
+/**
+ * The stored key's DISPLAY status, for the admin layout's expiry notice.
+ *
+ * D1 errors propagate and are not cached, so a transient failure doesn't stick.
+ * The admin layout catches them to degrade just its notice; the settings page
+ * deliberately does NOT use this — it reads and verifies loudly on every
+ * request so a D1 error there can never render as "no key".
+ */
+export async function getSupporterKeyStatus(
+	db: Database,
+	now: Date,
+	timeZone: string
+): Promise<SupporterKeyStatus | null> {
+	const key = await getVerifiedSupporterKey(db);
+	if (!key.signatureValid) return null;
+	// Re-shape the cached facts as the verify result they came from; login/tier
+	// are not part of the facts and the status never renders them.
+	const expiresAt = new Date(key.expiresAt);
+	const res: SupporterKeyResult =
+		now.getTime() >= key.expiresAt
+			? { valid: false, reason: 'expired', login: '', tier: 0, expiresAt }
+			: { valid: true, login: '', tier: 0, expiresAt };
+	return supporterKeyStatusFromResult(res, now, timeZone);
 }
 
 export async function saveSettings(db: Database, settings: Partial<SiteSettings>) {

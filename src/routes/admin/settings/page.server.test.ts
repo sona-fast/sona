@@ -7,13 +7,19 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
-import { getRawSetting, setRawSetting, parseLines } from '$lib/server/settings';
+import {
+	getRawSetting,
+	setRawSetting,
+	parseLines,
+	getSupporterKeyStatus,
+	clearSupporterKeyStatusCache
+} from '$lib/server/settings';
 import { stickerTabEnabled, clearStickerTabCache } from '$lib/server/stickers';
 import { MAX_SONA_COLORS } from '$lib/palette-merge';
 import { DEFAULT_THEME_ID } from '$lib/themes';
 import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { resolveAvatarUrl } from '$lib/server/avatar';
-import { verifySupporterKey } from '$lib/server/supporter-key';
+import { verifySupporterKey, supporterKeyDisplayRecord } from '$lib/server/supporter-key';
 import { earlyAccessActive } from '$lib/early-access';
 import { formatDate } from '$lib/index';
 import { actions, load } from './+page.server';
@@ -126,8 +132,12 @@ describe('settings saveSite — /ai disclosure page (SONA-167)', () => {
 	// silent no-op (absent means unmanaged), with the unit suite still green.
 	it('the settings form pairs the toggle with its present-marker', () => {
 		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		expect(src).toMatch(/<input type="hidden" name="aiPageEnabledPresent"/);
-		expect(src).toMatch(/<input type="checkbox" name="aiPageEnabled"/);
+		// Capture each tag by name, then look inside it: attribute order and extra
+		// attributes are harmless, the wrong type is not.
+		const marker = src.match(/<input[^>]*\bname="aiPageEnabledPresent"[^>]*>/)?.[0] ?? '';
+		expect(marker, 'present-marker input').toContain('type="hidden"');
+		const toggle = src.match(/<input[^>]*\bname="aiPageEnabled"[^>]*>/)?.[0] ?? '';
+		expect(toggle, 'toggle input').toContain('type="checkbox"');
 	});
 
 	it('stores the toggle and the override text, stamping the override date', async () => {
@@ -170,6 +180,36 @@ describe('settings saveSite — /ai disclosure page (SONA-167)', () => {
 
 		expect(await getRawSetting(db, 'aiPageEnabled')).toBe('true');
 	});
+});
+
+// The rows this guards span three unrelated features (the /ai page, Telegram
+// auto-resync, registry overrides), so it lives at the page level rather than
+// inside any one feature's describe.
+describe('settings — checkbox hints are described, not named (SONA-183)', () => {
+	// Source pin (SONA-183): each checkbox hint lives OUTSIDE its <label> and
+	// reaches the input through aria-describedby, so the accessible name stays
+	// the short title instead of swallowing the whole description. Folding a hint
+	// back into a label would restore the old behaviour with the suite still green.
+	it('describes each checkbox from outside its label', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		for (const name of ['aiPageEnabled', 'autoResyncEnabled', 'registryOverridesLocal']) {
+			// Capture the whole tag, then look inside it: attribute order and extra
+			// attributes are harmless, a missing aria-describedby is not.
+			const input = src.match(new RegExp(`<input[^>]*\\bname="${name}"[^>]*>`))?.[0] ?? '';
+			expect(input, `${name} input`).toContain(`aria-describedby="${name}-desc"`);
+			// `>[^<]*</label>` is the containment assertion: the title label holds text
+			// and nothing else, so no hint can be folded back in to restore the
+			// ~450-character accessible name with every id still pointing where it does.
+			const title =
+				src.match(new RegExp(`<label[^>]*\\bfor="${name}"[^>]*>[^<]*</label>`))?.[0] ?? '';
+			expect(title, `${name} title label`).toMatch(/class="[^"]*\bcheckbox-title\b/);
+			const desc = src.match(new RegExp(`<span[^>]*\\bid="${name}-desc"[^>]*>`))?.[0] ?? '';
+			expect(desc, `${name} hint`).toMatch(/class="[^"]*\bcheckbox-desc\b/);
+		}
+		// The row is a <div>: a wrapping <label> would put every hint back inside
+		// the accessible name no matter where the ids point.
+		expect(src).not.toMatch(/<label[^>]*class="[^"]*\bcheckbox-row\b/);
+});
 });
 
 describe('settings saveSite — three-path profile fields', () => {
@@ -955,6 +995,83 @@ describe('settings removeSupporterKey — clears the stored key', () => {
 	});
 });
 
+// The admin layout's expiry notice reads a memoized status (SONA-118). Both
+// actions write the key row, so both must drop that memo — otherwise the notice
+// keeps describing the previous key for up to a minute after the operator acted.
+describe('supporter-key actions — invalidate the memoized status (SONA-118)', () => {
+	// Unlike the other two suites this file has no file-level memo hook, and every
+	// test here opens by priming the memo — so clear it on both sides.
+	beforeEach(() => {
+		clearSupporterKeyStatusCache();
+	});
+
+	afterEach(() => {
+		// These stub verification for a whole test (not once), so undo both the
+		// standing stub and the memo they primed.
+		vi.mocked(verifySupporterKey).mockReset();
+		clearSupporterKeyStatusCache();
+	});
+
+	it('saveSupporterKey makes the next status resolution see the new key', async () => {
+		const { db, platform } = makeDb();
+		const now = new Date();
+		// Prime the memo while no key is stored.
+		expect(await getSupporterKeyStatus(db, now, 'UTC')).toBeNull();
+
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date(now.getTime() + 30 * 86_400_000)
+		});
+		await actions.saveSupporterKey(saveSupporterKeyEvent(platform, 'head.tail'));
+
+		expect(await getSupporterKeyStatus(db, now, 'UTC')).toMatchObject({ state: 'valid' });
+	});
+
+	it('the settings page load reads past the memo rather than answering from it', async () => {
+		// The page keeps its own read + verify so it can never render a transient D1
+		// error as "no key" (decision of 2026-08-07). Prime the memo with "no key
+		// stored", then store one: a page load switched over to the memo — the
+		// tempting edit now that this file imports the cache helpers — would answer
+		// from that stale null instead.
+		const { db, platform } = makeLoadDb();
+		const now = new Date();
+		expect(await getSupporterKeyStatus(db, now, 'UTC')).toBeNull();
+
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date(now.getTime() + 30 * 86_400_000)
+		});
+
+		const result = (await load(loadEvent(platform))) as unknown as {
+			supporterKey: { state: string } | null;
+		};
+
+		expect(result.supporterKey).toMatchObject({ state: 'valid' });
+	});
+
+	it('removeSupporterKey makes the next status resolution see no key', async () => {
+		const { db, platform } = makeDb();
+		const now = new Date();
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date(now.getTime() + 30 * 86_400_000)
+		});
+		expect(await getSupporterKeyStatus(db, now, 'UTC')).toMatchObject({ state: 'valid' });
+
+		await actions.removeSupporterKey(removeSupporterKeyEvent(platform));
+
+		expect(await getSupporterKeyStatus(db, now, 'UTC')).toBeNull();
+	});
+});
+
 describe('settings load — supporter key is raw + verified, never in public settings', () => {
 	it('surfaces a verified key as valid and keeps the token out of settings', async () => {
 		const { db, platform } = makeLoadDb();
@@ -967,15 +1084,17 @@ describe('settings load — supporter key is raw + verified, never in public set
 		});
 
 		const result = (await load(loadEvent(platform))) as unknown as {
-			supporterKey: { token: string; state: string; validUntil: string } | null;
+			supporterKey: { keyRecord: string; state: string; validUntil: string } | null;
 			earlyAccess: unknown[];
 			settings: Record<string, unknown>;
 		};
 
 		// Exact shape on purpose: any NEW field added to the payload must be
-		// re-reviewed here before it rides to the client alongside the token.
+		// re-reviewed here before it rides to the client. 'head.tail' is under the
+		// masking threshold, so it passes through — the mask itself is covered in
+		// supporter-key.test.ts and the "never ships the full token" test below.
 		expect(result.supporterKey).toEqual({
-			token: 'head.tail',
+			keyRecord: 'head.tail',
 			state: 'valid',
 			validUntil: '2026.08.31',
 			// UTC-pinned twin of validUntil; keys the dismissal cookie (SONA-119).
@@ -1026,6 +1145,40 @@ describe('settings load — supporter key is raw + verified, never in public set
 		};
 
 		expect(result.supporterKey).toBeNull();
+	});
+
+	// Source pin: the card is the only thing that ever displayed the key, and the
+	// unit tests above cover the load payload, not the rendered document. Rendering
+	// it for real needs a key signed by the sona.fast issuer, which tests can't
+	// have — so pin the template instead. Reintroducing any client-side truncation
+	// means the full token is being shipped again.
+	it('the settings card renders the server-made mask, not a token it truncates', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(src).toContain('data.supporterKey.keyRecord');
+		expect(src).not.toMatch(/supporterKey\.token|truncateKey/);
+	});
+
+	it('ships the mask and never the stored token, anywhere in the payload', async () => {
+		// The page used to send the whole signed key and truncate at render, which
+		// put a working key in the SSR payload and the client bundle. Scanning the
+		// SERIALIZED payload is the check that survives a refactor: any field that
+		// carries the token back — under any name — fails here.
+		const token = `${'a'.repeat(60)}.${'b'.repeat(86)}`;
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'supporterKey', token);
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date('2026-09-01T00:00:00Z')
+		});
+
+		const result = (await load(loadEvent(platform))) as unknown as {
+			supporterKey: { keyRecord: string } | null;
+		};
+
+		expect(result.supporterKey?.keyRecord).toBe(supporterKeyDisplayRecord(token));
+		expect(JSON.stringify(result)).not.toContain(token);
 	});
 });
 

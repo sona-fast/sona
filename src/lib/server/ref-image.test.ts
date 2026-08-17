@@ -32,7 +32,14 @@ type Db = ReturnType<typeof makeDb>;
 
 async function addImage(
 	db: Db,
-	opts: { slug: string; url: string; published?: boolean; createdAt?: string; tagged?: boolean }
+	opts: {
+		slug: string;
+		url: string;
+		published?: boolean;
+		createdAt?: string;
+		tagged?: boolean;
+		parentId?: number;
+	}
 ) {
 	const row = await db
 		.insert(images)
@@ -42,6 +49,7 @@ async function addImage(
 			imageUrl: opts.url,
 			artistId: 1,
 			published: opts.published ?? true,
+			parentImageId: opts.parentId ?? null,
 			createdAt: opts.createdAt ?? '2026-01-01T00:00:00.000Z'
 		})
 		.returning({ id: images.id })
@@ -81,6 +89,27 @@ describe('resolveRefImage — same precedence as /art', () => {
 		const live = await addImage(db, { slug: 'live', url: 'https://cdn.x/live.png', createdAt: '2025-01-01', tagged: true });
 
 		expect(await resolveRefImage(db)).toEqual({ id: live, imageUrl: 'https://cdn.x/live.png' });
+	});
+
+	// SONA-18: /art excludes variants from both paths, and the color picker
+	// samples whatever this returns — a sheet the picker offers but /art refuses
+	// would send the operator hunting for a mismatch that isn't theirs.
+	it('falls through a designated variant to the tagged parent', async () => {
+		const db = makeDb();
+		const parent = await addImage(db, { slug: 'parent', url: 'https://cdn.x/parent.png', createdAt: '2025-01-01', tagged: true });
+		const variant = await addImage(db, { slug: 'variant', url: 'https://cdn.x/variant.png', createdAt: '2026-06-01', parentId: parent });
+		await db.insert(characters).values({ name: 'Taro', isOwner: true, referenceImageId: variant });
+
+		expect(await resolveRefImage(db)).toEqual({ id: parent, imageUrl: 'https://cdn.x/parent.png' });
+	});
+
+	it('ignores a reference-tagged variant in the fallback', async () => {
+		const db = makeDb();
+		const parent = await addImage(db, { slug: 'parent', url: 'https://cdn.x/parent.png', createdAt: '2025-01-01', tagged: true });
+		// Newer, so it would win createdAt DESC without the exclusion.
+		await addImage(db, { slug: 'variant', url: 'https://cdn.x/variant.png', createdAt: '2026-06-01', tagged: true, parentId: parent });
+
+		expect(await resolveRefImage(db)).toEqual({ id: parent, imageUrl: 'https://cdn.x/parent.png' });
 	});
 
 	it('returns null when no reference sheet exists at all', async () => {

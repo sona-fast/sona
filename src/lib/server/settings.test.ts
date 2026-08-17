@@ -3,10 +3,25 @@ import {
 	getSettings,
 	saveSettings,
 	clearSettingsCache,
+	getSupporterKeyStatus,
+	getVerifiedSupporterKey,
+	NO_SUPPORTER_KEY,
+	clearSupporterKeyStatusCache,
 	parseSonaColors,
 	parseLines
 } from './settings';
+import { verifySupporterKey } from './supporter-key';
+import { fakeKeyDb, throwingKeyDb } from './test/supporter-key-db';
 import type { Database } from './db';
+
+// Verification is stubbed (a passing token needs the sona.fast PRIVATE key); the
+// resolver keeps the real shaping, so the countdown these tests assert on is the
+// production one. The crypto itself is covered in supporter-key.test.ts.
+vi.mock('$lib/server/supporter-key', async (importActual) =>
+	(await import('$lib/server/test/supporter-key-mock')).supporterKeyMockModule(
+		importActual as () => Promise<typeof import('$lib/server/supporter-key')>
+	)
+);
 
 // These tests pin the per-isolate settings cache that sits on the hot path of
 // every request. The cache exists to avoid a D1 round-trip per page load; the
@@ -43,11 +58,13 @@ function throwingDb(): Database {
 
 beforeEach(() => {
 	clearSettingsCache();
+	clearSupporterKeyStatusCache();
 });
 
 afterEach(() => {
 	vi.useRealTimers();
 	clearSettingsCache();
+	clearSupporterKeyStatusCache();
 });
 
 describe('getSettings — mapping & defaults', () => {
@@ -224,6 +241,137 @@ describe('getSettings — caching', () => {
 	});
 });
 
+const VALID_UNTIL = new Date('2026-09-01T00:00:00Z');
+
+/** Make every verify in a test resolve to the same in-date key. */
+function stubValidKey() {
+	vi.mocked(verifySupporterKey).mockResolvedValue({
+		valid: true,
+		login: 'sparky',
+		tier: 2,
+		expiresAt: VALID_UNTIL
+	});
+}
+
+// The admin layout runs this on every authenticated admin page request, so the
+// cache is what keeps a D1 read + an Ed25519 verify off that path (SONA-118).
+// The danger is the mirror image of the settings cache's: a status that outlives
+// either the key it was resolved from or the day it was resolved on.
+describe('getSupporterKeyStatus — caching', () => {
+	// The memo itself is dropped by the file-level afterEach above.
+	beforeEach(() => {
+		vi.mocked(verifySupporterKey).mockReset();
+	});
+
+	it('serves a second resolution for the same day without re-reading or re-verifying', async () => {
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+		const now = new Date('2026-08-25T09:00:00Z');
+
+		const first = await getSupporterKeyStatus(db, now, 'UTC');
+		const second = await getSupporterKeyStatus(db, new Date('2026-08-25T18:30:00Z'), 'UTC');
+
+		expect(second).toEqual(first);
+		expect(state.reads).toBe(1);
+		expect(verifySupporterKey).toHaveBeenCalledTimes(1);
+	});
+
+	it('rolls the derived status across midnight without a re-read', async () => {
+		// The status is derived from the cached zone-independent facts on every
+		// call (SONA-119), so crossing midnight updates daysRemaining immediately —
+		// no day-keyed cache entry, and no extra D1 read, is needed for it.
+		vi.useFakeTimers();
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		// 6 days + 10s left of a key that expires end-of-day on the 31st → 7.
+		vi.setSystemTime(new Date('2026-08-25T23:59:50Z'));
+		const before = await getSupporterKeyStatus(db, new Date('2026-08-25T23:59:50Z'), 'UTC');
+		expect(before).toMatchObject({ daysRemaining: 7 });
+
+		vi.setSystemTime(new Date('2026-08-26T00:00:10Z'));
+		const after = await getSupporterKeyStatus(db, new Date('2026-08-26T00:00:10Z'), 'UTC');
+
+		expect(after).toMatchObject({ daysRemaining: 6 });
+		// One read: the verified-facts memo is still warm; only the derivation moved.
+		expect(state.reads).toBe(1);
+	});
+
+	it('re-reads after the TTL expires, so a key written by another isolate lands', async () => {
+		// clearSupporterKeyStatusCache only reaches the isolate that ran the action;
+		// every other one converges on the settings TTL.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-25T09:00:00Z'));
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+
+		expect(await getSupporterKeyStatus(db, new Date('2026-08-25T09:00:00Z'), 'UTC')).toBeNull();
+
+		state.value = 'head.tail';
+		// Still inside the short no-key TTL → the stale "no key" answer stands.
+		// (A non-entitling answer is held for seconds, not the full settings TTL,
+		// exactly so an installed or renewed key lands quickly on warm isolates.)
+		vi.setSystemTime(new Date('2026-08-25T09:00:04Z'));
+		expect(await getSupporterKeyStatus(db, new Date('2026-08-25T09:00:04Z'), 'UTC')).toBeNull();
+
+		vi.setSystemTime(new Date('2026-08-25T09:00:06Z'));
+		expect(await getSupporterKeyStatus(db, new Date('2026-08-25T09:00:06Z'), 'UTC')).toMatchObject({
+			state: 'valid'
+		});
+		expect(state.reads).toBe(2);
+	});
+
+	it('clearSupporterKeyStatusCache() forces the next call to re-read', async () => {
+		// What the saveSupporterKey / removeSupporterKey actions rely on.
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+		const now = new Date('2026-08-25T09:00:00Z');
+		expect(await getSupporterKeyStatus(db, now, 'UTC')).toBeNull();
+
+		state.value = 'head.tail';
+		clearSupporterKeyStatusCache();
+
+		expect(await getSupporterKeyStatus(db, now, 'UTC')).toMatchObject({ state: 'valid' });
+		expect(state.reads).toBe(2);
+	});
+
+	it('an in-flight resolution does not re-cache its pre-write status', async () => {
+		// The operator saves a key in one tab while another admin request is already
+		// awaiting the read. That request resolves the OLD row afterwards; caching it
+		// would hide the new key for a full TTL, so the clear must win.
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+		const now = new Date('2026-08-25T09:00:00Z');
+
+		const inFlight = getSupporterKeyStatus(db, now, 'UTC');
+		clearSupporterKeyStatusCache(); // what saveSupporterKey does mid-flight
+		expect(await inFlight).toBeNull();
+
+		state.value = 'head.tail';
+		expect(await getSupporterKeyStatus(db, now, 'UTC')).toMatchObject({ state: 'valid' });
+		expect(state.reads).toBe(2);
+	});
+
+	it('resolves an absent key to null without verifying', async () => {
+		const { db } = fakeKeyDb(null);
+
+		expect(await getSupporterKeyStatus(db, new Date('2026-08-25T09:00:00Z'), 'UTC')).toBeNull();
+		expect(verifySupporterKey).not.toHaveBeenCalled();
+	});
+
+	it('propagates a D1 error and caches nothing, so the next call retries', async () => {
+		// The admin layout catches this to degrade just its notice; caching the
+		// failure would turn one transient error into a minute of missing notice.
+		stubValidKey();
+		const now = new Date('2026-08-25T09:00:00Z');
+		await expect(getSupporterKeyStatus(throwingKeyDb(), now, 'UTC')).rejects.toThrow('D1 unavailable');
+
+		const { db, state } = fakeKeyDb('head.tail');
+		expect(await getSupporterKeyStatus(db, now, 'UTC')).toMatchObject({ state: 'valid' });
+		expect(state.reads).toBe(1);
+	});
+});
+
 describe('saveSettings — invalidation', () => {
 	it('clears the cache so a subsequent read reflects the write', async () => {
 		// Prime the cache with the "old" value.
@@ -312,5 +460,201 @@ describe('parseSonaColors / parseLines', () => {
 
 	it('splits newline lists into trimmed, non-empty lines', () => {
 		expect(parseLines(' one \n\n two\n')).toEqual(['one', 'two']);
+	});
+});
+
+// The gate's memo (SONA-118 extension). Where the status cache above needs a UTC
+// day key, this one caches only what is true of the token itself, so the pin is
+// different: prove it never caches an ANSWER that time could change, and that
+// every uncertain outcome comes back as "no key" — this feeds an enforcement
+// path, so a wrong answer here grants a feature rather than mis-styling a notice.
+describe('getVerifiedSupporterKey — caching & fail-closed', () => {
+	beforeEach(() => {
+		vi.mocked(verifySupporterKey).mockReset();
+	});
+
+	it('serves a second call without re-reading or re-verifying', async () => {
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		const first = await getVerifiedSupporterKey(db);
+		const second = await getVerifiedSupporterKey(db);
+
+		// The cached facts and nothing else: an added field here would be a field
+		// that could carry a `now` dependence into the entry.
+		expect(first).toEqual({ signatureValid: true, expiresAt: VALID_UNTIL.getTime() });
+		expect(Object.keys(first).sort()).toEqual(['expiresAt', 'signatureValid']);
+		expect(second).toBe(first);
+		expect(state.reads).toBe(1);
+		expect(verifySupporterKey).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps the expiry of a signed-but-expired key', async () => {
+		// The signature is what was verified; whether it has lapsed is the caller's
+		// comparison. Dropping the expiry here would force a re-verify per request.
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: false,
+			reason: 'expired',
+			login: 'sparky',
+			tier: 1,
+			expiresAt: VALID_UNTIL
+		});
+		const { db } = fakeKeyDb('head.tail');
+
+		expect(await getVerifiedSupporterKey(db)).toEqual({
+			signatureValid: true,
+			expiresAt: VALID_UNTIL.getTime()
+		});
+	});
+
+	it('fails closed on a token that does not verify', async () => {
+		vi.mocked(verifySupporterKey).mockResolvedValue({ valid: false, reason: 'bad-signature' });
+		const { db } = fakeKeyDb('forged.token');
+
+		expect(await getVerifiedSupporterKey(db)).toEqual({ signatureValid: false, expiresAt: null });
+	});
+
+	it('fails closed on an absent key without verifying', async () => {
+		const { db } = fakeKeyDb(null);
+
+		expect(await getVerifiedSupporterKey(db)).toEqual({ signatureValid: false, expiresAt: null });
+		expect(verifySupporterKey).not.toHaveBeenCalled();
+	});
+
+	it('clearSupporterKeyStatusCache() drops THIS memo too, not just the status', async () => {
+		// One hook for both memos: a save/remove that cleared only the status would
+		// leave the gate honoring the old key for a full TTL.
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+		expect(await getVerifiedSupporterKey(db)).toEqual({ signatureValid: false, expiresAt: null });
+
+		state.value = 'head.tail';
+		clearSupporterKeyStatusCache();
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+		expect(state.reads).toBe(2);
+	});
+
+	it('drops a NO-KEY answer within seconds, so a key saved elsewhere lands fast', async () => {
+		// The asymmetry: a save in another isolate leaves this one denying, and
+		// "I just installed my key and it still says no" is the direction that
+		// looks broken. The negative entry is therefore short-lived.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-25T09:00:00Z'));
+		stubValidKey();
+		const { db, state } = fakeKeyDb(null);
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
+
+		state.value = 'head.tail';
+		vi.setSystemTime(new Date('2026-08-25T09:00:04Z'));
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
+
+		vi.setSystemTime(new Date('2026-08-25T09:00:06Z'));
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+		expect(state.reads).toBe(2);
+	});
+
+	it('holds a verified key for the full settings TTL', async () => {
+		// The other direction converges on the same bound as the settings and
+		// status caches: a key removed in another isolate keeps answering here
+		// until the TTL. Only the owner revoking their own entitlement reaches it.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-25T09:00:00Z'));
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+
+		state.value = null;
+		vi.setSystemTime(new Date('2026-08-25T09:00:59Z'));
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+
+		vi.setSystemTime(new Date('2026-08-25T09:01:01Z'));
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
+		expect(state.reads).toBe(2);
+	});
+
+	it('gives a LAPSED key the short TTL too, so a renewal lands fast', async () => {
+		// Renewal is the common install path (keys run ~45 days), and it replaces an
+		// expired entry — which still has signatureValid: true. Keying the long TTL
+		// off the signature rather than off entitlement would make exactly the
+		// common case the slow one.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-09-05T09:00:00Z'));
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: false,
+			reason: 'expired',
+			login: 'sparky',
+			tier: 1,
+			expiresAt: VALID_UNTIL
+		});
+		const { db, state } = fakeKeyDb('lapsed.token');
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+
+		// A DIFFERENT expiry from the lapsed entry, so serving the stale one fails on
+		// the value and not only on the read count.
+		const renewedUntil = new Date('2026-10-15T00:00:00Z');
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: renewedUntil
+		});
+		state.value = 'renewed.token';
+		vi.setSystemTime(new Date('2026-09-05T09:00:06Z'));
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({
+			expiresAt: renewedUntil.getTime()
+		});
+		expect(state.reads).toBe(2);
+	});
+
+	it('fails closed on the EMPTY row that removeSupporterKey actually writes', async () => {
+		// removeSupporterKey blanks the value rather than deleting the row, so this
+		// is the arm production hits after a removal — not the absent-row one.
+		const { db } = fakeKeyDb('');
+
+		expect(await getVerifiedSupporterKey(db)).toEqual({ signatureValid: false, expiresAt: null });
+		expect(verifySupporterKey).not.toHaveBeenCalled();
+	});
+
+	it('hands out a frozen record, so no caller can poison the memo', async () => {
+		// The returned object IS the cached one. A caller assigning to it would
+		// turn the fail-closed default into a permanent grant for the isolate.
+		stubValidKey();
+		const { db } = fakeKeyDb('head.tail');
+
+		const value = await getVerifiedSupporterKey(db);
+
+		expect(value).toBe(await getVerifiedSupporterKey(db)); // the cached instance
+		expect(Object.isFrozen(value)).toBe(true);
+		expect(Object.isFrozen(NO_SUPPORTER_KEY)).toBe(true);
+	});
+
+	it('an in-flight resolution does not re-cache its pre-write answer', async () => {
+		// The operator removes their key while a VR request is already awaiting the
+		// read. Caching that pre-write answer would keep the gate open for a TTL.
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		const inFlight = getVerifiedSupporterKey(db);
+		clearSupporterKeyStatusCache(); // what removeSupporterKey does mid-flight
+		expect(await inFlight).toMatchObject({ signatureValid: true });
+
+		state.value = null;
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: false });
+		expect(state.reads).toBe(2);
+	});
+
+	it('propagates a D1 error and caches nothing, so the next call retries', async () => {
+		// The gate catches this and denies; caching it would deny for a full TTL.
+		stubValidKey();
+		await expect(getVerifiedSupporterKey(throwingKeyDb())).rejects.toThrow('D1 unavailable');
+
+		const { db, state } = fakeKeyDb('head.tail');
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+		expect(state.reads).toBe(1);
 	});
 });

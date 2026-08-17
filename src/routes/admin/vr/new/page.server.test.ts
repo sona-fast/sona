@@ -4,25 +4,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { isRedirect } from '@sveltejs/kit';
 import { makeD1 } from '$lib/server/test/d1';
-import { clearSettingsCache } from '$lib/server/settings';
+import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
 import { EARLY_ACCESS } from '$lib/early-access';
 
 import { actions } from './+page.server';
 
-// A real supporter key can't be minted in tests (the issuer key is baked in),
-// so verifySupporterKey is faked: the literal token 'VALID' verifies, anything
-// else is malformed. The gate logic on top of it stays real.
-vi.mock('$lib/server/supporter-key', async (importOriginal) => {
-	const original = await importOriginal<typeof import('$lib/server/supporter-key')>();
-	return {
-		...original,
-		verifySupporterKey: vi.fn(async (token: string) =>
-			token === 'VALID'
-				? { valid: true, login: 'e2e', tier: 1, expiresAt: new Date('2999-01-01') }
-				: { valid: false, reason: 'malformed' }
-		)
-	};
-});
+// The gate logic stays real; only the signature check is faked (see the helper).
+vi.mock('$lib/server/supporter-key', async (importOriginal) =>
+	(await import('$lib/server/test/supporter-key-mock')).supporterKeyLiteralMockModule(
+		importOriginal as () => Promise<typeof import('$lib/server/supporter-key')>
+	)
+);
 
 // Registry-driven gate control (same mutation pattern as early-access.test.ts)
 // so no test depends on the wall clock.
@@ -37,6 +29,9 @@ beforeEach(() => {
 	restoreRegistry();
 	// getSettings caches per isolate and every test builds a fresh DB.
 	clearSettingsCache();
+	// The gate memoizes the verified supporter key per isolate; every test builds
+	// a fresh DB, so the previous test's key would otherwise answer for this one.
+	clearSupporterKeyStatusCache();
 });
 afterEach(restoreRegistry);
 

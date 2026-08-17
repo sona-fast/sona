@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { characters, images } from '$lib/server/db/schema';
+import { REFERENCE_BECOMES_VARIANT_ERROR, VARIANT_BECOMES_REFERENCE_ERROR } from '$lib/server/variants';
 import { load, actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -74,8 +75,11 @@ describe('admin image edit — reference action', () => {
 		await seedImage(db, 5);
 		const [c] = await db.insert(characters).values({ name: 'Owner', isOwner: true }).returning({ id: characters.id });
 
-		await actions.reference({ params: { id: '5' }, request: form({}), platform } as never);
+		const result = await actions.reference({ params: { id: '5' }, request: form({}), platform } as never);
 		expect(await refOf(db, c.id)).toBe(5);
+		// The page derives its announcement from this flag rather than from the
+		// submit, so a set must report false as explicitly as a clear reports true.
+		expect(result).toEqual({ referenceCleared: false });
 	});
 
 	it('clears the reference image when clear is set', async () => {
@@ -86,8 +90,9 @@ describe('admin image edit — reference action', () => {
 			.values({ name: 'Owner', isOwner: true, referenceImageId: 5 })
 			.returning({ id: characters.id });
 
-		await actions.reference({ params: { id: '5' }, request: form({ clear: 'on' }), platform } as never);
+		const result = await actions.reference({ params: { id: '5' }, request: form({ clear: 'on' }), platform } as never);
 		expect(await refOf(db, c.id)).toBe(null);
+		expect(result).toEqual({ referenceCleared: true });
 	});
 
 	it('fails 404 and writes nothing when the image does not exist', async () => {
@@ -96,6 +101,34 @@ describe('admin image edit — reference action', () => {
 
 		const result = await actions.reference({ params: { id: '999' }, request: form({}), platform } as never);
 		expect((result as { status: number }).status).toBe(404);
+		expect(await refOf(db, c.id)).toBe(null);
+	});
+
+	// SONA-18: /art ignores variants in both ref-sheet paths, so storing one here
+	// would leave the admin claiming a reference sheet the public page discards.
+	it('fails 400 and writes nothing when the image is a variant', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await db.insert(images).values({ id: 7, title: 'Variant', slug: 'art-7', imageUrl: 'https://cdn.example.com/7.png', artistId: 1, published: true, parentImageId: 5 });
+		const [c] = await db.insert(characters).values({ name: 'Owner', isOwner: true }).returning({ id: characters.id });
+
+		const result = await actions.reference({ params: { id: '7' }, request: form({}), platform } as never);
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe(VARIANT_BECOMES_REFERENCE_ERROR);
+		expect(await refOf(db, c.id)).toBe(null);
+	});
+
+	// Clearing must stay reachable for a variant designated before that rule.
+	it('still clears when the current reference is a variant', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await db.insert(images).values({ id: 7, title: 'Variant', slug: 'art-7', imageUrl: 'https://cdn.example.com/7.png', artistId: 1, published: true, parentImageId: 5 });
+		const [c] = await db
+			.insert(characters)
+			.values({ name: 'Owner', isOwner: true, referenceImageId: 7 })
+			.returning({ id: characters.id });
+
+		await actions.reference({ params: { id: '7' }, request: form({ clear: 'on' }), platform } as never);
 		expect(await refOf(db, c.id)).toBe(null);
 	});
 
@@ -121,6 +154,57 @@ describe('admin image edit — save action', () => {
 		expect((result as { status: number }).status).toBe(302);
 		const row = await db.select({ title: images.title }).from(images).where(eq(images.id, 5)).get();
 		expect(row?.title).toBe('Renamed');
+	});
+
+	// SONA-18: the other ordering of the same conflict — the guard in the
+	// reference action stops a variant becoming the sheet, this stops the sheet
+	// becoming a variant. Without it /art loses its ref sheet with nothing said.
+	it('refuses to make the designated reference sheet a variant', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await seedImage(db, 9);
+		const [c] = await db
+			.insert(characters)
+			.values({ name: 'Owner', isOwner: true, referenceImageId: 5 })
+			.returning({ id: characters.id });
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', parentImageId: '9' }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(400);
+		// The message names the unblocking step, so pin it — a neighbouring
+		// variant error would keep the status assertion green and strand the user.
+		expect((result as { data: { error: string } }).data.error).toBe(REFERENCE_BECOMES_VARIANT_ERROR);
+		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 5)).get())?.p).toBe(null);
+		expect(await refOf(db, c.id)).toBe(5);
+	});
+
+	// A row designated before the variant rule can be both at once. Refusing its
+	// unchanged parent on every save would make the row uneditable — title,
+	// artist, published and all — until the operator cleared the designation.
+	it('still saves a row that is already both a variant and the reference sheet', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 9);
+		await db.insert(images).values({ id: 5, title: 'Art', slug: 'art-5', imageUrl: 'https://cdn.example.com/5.png', artistId: 1, published: true, parentImageId: 9 });
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 5 });
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Renamed', artistId: '1', parentImageId: '9' }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(302);
+		expect((await db.select({ title: images.title }).from(images).where(eq(images.id, 5)).get())?.title).toBe('Renamed');
+	});
+
+	it('still allows a non-designated image to become a variant', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await seedImage(db, 9);
+		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 9 });
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', parentImageId: '9' }), platform } as never)
+		);
+		expect((await db.select({ p: images.parentImageId }).from(images).where(eq(images.id, 5)).get())?.p).toBe(9);
 	});
 
 	it('persists featured and featuredOrder (#58)', async () => {

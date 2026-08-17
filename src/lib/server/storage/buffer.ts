@@ -8,11 +8,20 @@
 
 import { MAX_BUFFER_BYTES } from '$lib/config';
 
-/** 10 MB: comfortably above any real artwork/fursuit photo or Telegram sticker
- * (Telegram caps stickers ~512 KB), while far below the isolate memory ceiling.
- * The value lives in $lib/config (client-safe — the admin media picker
- * pre-checks it); this re-export keeps the server call sites unchanged. */
+/** The 64 MB buffered-upload cap — the full memory rationale lives with the
+ * value in $lib/config (client-safe: the admin media picker pre-checks it);
+ * this re-export keeps the server call sites unchanged. */
 export { MAX_BUFFER_BYTES };
+
+/**
+ * 10 MiB: the cap for REMOTE bodies we buffer (Telegram file downloads,
+ * FurTrack photo imports). Deliberately decoupled from — and far below — the
+ * 64 MiB local upload cap: nothing legitimate from those sources comes near it
+ * (Telegram's getFile tops out ~20 MB and stickers are ~512 KB; FurTrack
+ * photos are a few MB), and a hostile or misbehaving remote origin shouldn't
+ * get to fill isolate memory the way a trusted admin upload may.
+ */
+export const MAX_REMOTE_BUFFER_BYTES = 10 * 1024 * 1024;
 
 /** Thrown when a buffered body exceeds the byte cap. */
 export class MaxBytesExceededError extends Error {

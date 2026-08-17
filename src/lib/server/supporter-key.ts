@@ -129,6 +129,21 @@ export async function verifySupporterKey(
 	return { valid: true, login, tier, expiresAt };
 }
 
+/**
+ * The masked record of the stored key shown on the settings card: enough head
+ * to recognize which key is installed, enough tail to spot-check a paste.
+ *
+ * Server-side on purpose — the full signed token never leaves the server, so
+ * the settings payload cannot hand a working key to anything reading the
+ * client bundle or the SSR-serialized data. A key that verifies is always far
+ * longer than the threshold (the signature segment alone is 86 base64url
+ * chars), so the short-input branch only ever sees values that are not usable
+ * keys.
+ */
+export function supporterKeyDisplayRecord(token: string): string {
+	return token.length <= 34 ? token : `${token.slice(0, 24)}…${token.slice(-7)}`;
+}
+
 /** A valid key within this many days of expiry gets the "expiring soon"
  * treatment (SONA-114): countdown on the settings card plus the admin-wide
  * re-mint notice. Fixed rather than scaled — at the issuer's 45-day window,

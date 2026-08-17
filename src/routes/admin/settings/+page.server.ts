@@ -8,6 +8,7 @@ import {
 	getRawSetting,
 	setRawSetting,
 	clearSettingsCache,
+	clearSupporterKeyStatusCache,
 	parseSonaColors
 } from '$lib/server/settings';
 import { deleteOrphansAll, collectReferencedUrls } from '$lib/server/storage';
@@ -53,7 +54,11 @@ import {
 import { syncArtists } from '$lib/server/artist-sync';
 import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
 import { isObservabilityEnabled } from '$lib/server/metrics';
-import { verifySupporterKey, resolveSupporterKeyStatus } from '$lib/server/supporter-key';
+import {
+	verifySupporterKey,
+	supporterKeyDisplayRecord,
+	resolveSupporterKeyStatus
+} from '$lib/server/supporter-key';
 import { supporterKeyValidUntil } from '$lib/server/supporter-key-expiry';
 import { earlyAccessActive } from '$lib/early-access';
 import { formatDate } from '$lib/index';
@@ -146,9 +151,13 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	// Viewer's zone (SONA-119) so the card's date and the countdown beside it are
 	// read off one instant in one zone — and identically on SSR and after hydration.
 	const status = await resolveSupporterKeyStatus(supporterToken, now, locals.timeZone);
-	// The token rides only on THIS page's payload (for the truncated key record);
-	// the shared SupporterKeyStatus deliberately never carries it.
-	const supporterKey = status ? { ...status, token: supporterToken } : null;
+	// Only the MASKED record rides to the client — the full signed token stays on
+	// the server (the card renders the mask, and neither the save form nor the
+	// remove action sends the stored value back). The shared SupporterKeyStatus
+	// deliberately never carries the token either.
+	const supporterKey = status
+		? { ...status, keyRecord: supporterKeyDisplayRecord(supporterToken) }
+		: null;
 	// Features still inside their early-access window, with GA dates pre-formatted
 	// for display. Empty until the first pilot feature is registered.
 	const earlyAccess = earlyAccessActive(now).map((e) => ({ flag: e.flag, gaDate: formatDate(e.gaDate) }));
@@ -542,12 +551,16 @@ export const actions = {
 			return fail(400, { supporterKeyError: 'invalid', supporterKeyExpiredDate: undefined });
 		}
 		await setRawSetting(db, 'supporterKey', token);
+		// The admin layout's expiry notice reads a memoized status — invalidate it
+		// so this isolate reflects the new key on the very next request.
+		clearSupporterKeyStatusCache();
 		return { supporterKeySaved: true };
 	},
 
 	removeSupporterKey: async ({ platform }) => {
 		const db = getDb(platform!.env.DB);
 		await setRawSetting(db, 'supporterKey', '');
+		clearSupporterKeyStatusCache();
 		return { supporterKeyRemoved: true };
 	},
 

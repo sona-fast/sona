@@ -1,6 +1,10 @@
 // Pure helpers for the registry-search combobox in NewArtistDialog. Kept out of
-// the component so the query gating and result → form mapping are unit-testable
-// (the combobox interaction itself is browser-land / E2E).
+// the component so the query gating, a result row's handle and the result →
+// form mapping are unit-testable (the combobox interaction itself is
+// browser-land / E2E).
+
+import { SOCIAL_KEY_TO_PLATFORM } from './handle-classify';
+import { socialAtHandle } from './social-label';
 
 /** A shared-registry search hit, as shaped by /api/registry/search. */
 export type RegResult = {
@@ -18,6 +22,21 @@ export const MIN_QUERY_LENGTH = 2;
 /** Whether a typed name is long enough to search the registry for. */
 export function shouldSearch(query: string): boolean {
 	return query.trim().length >= MIN_QUERY_LENGTH;
+}
+
+/** "@handle" for a result row, derived from its first social carrying one.
+ *  Empty when the row has none — unlike the public pages, a row without a
+ *  handle shows nothing rather than a platform name, since the artist's name is
+ *  already the line above it. A social whose URL holds no handle falls through
+ *  to the next one rather than ending the search. */
+export function resultHandle(r: RegResult): string {
+	for (const [key, v] of Object.entries(r.socials ?? {})) {
+		const platform = SOCIAL_KEY_TO_PLATFORM[key];
+		if (!platform || typeof v !== 'string') continue;
+		const atHandle = socialAtHandle(platform, v);
+		if (atHandle) return atHandle;
+	}
+	return '';
 }
 
 /** Form prefill derived from a picked registry result: the social fields to fill

@@ -74,4 +74,30 @@ describe('importFursuitPhotos', () => {
 		// cache, or this still reads the primed `false` for up to the TTL.
 		expect(await fursuitPhotosExist(db)).toBe(true);
 	});
+
+	it('fails a photo whose remote body exceeds the 10 MiB import cap', async () => {
+		const { db } = makeDb();
+		// Remote import bodies keep the old 10 MiB bound, decoupled from the raised
+		// 64 MiB local upload cap. A valid WebP head so the content-type gate isn't
+		// what trips — the byte cap is.
+		const big = new Uint8Array(10 * 1024 * 1024 + 1);
+		big.set(staticWebp());
+		const bigFetch = vi.fn(
+			async () => new Response(big.buffer as ArrayBuffer, { headers: { 'content-type': 'image/webp' } })
+		) as unknown as typeof fetch;
+
+		const result = await importFursuitPhotos({
+			env: testEnv,
+			settings: testSettings,
+			db,
+			fetchFn: bigFetch,
+			character: 'Sparky',
+			postIds: [1918883]
+		});
+
+		expect(result.imported).toBe(0);
+		expect(result.failed).toBe(1);
+		expect(result.items[0]).toMatchObject({ postId: 1918883, status: 'failed' });
+		expect(result.items[0].error).toMatch(/buffer cap/);
+	});
 });

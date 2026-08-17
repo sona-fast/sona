@@ -44,6 +44,16 @@ function gaReached(gaDate: string, now: Date): boolean {
 }
 
 /**
+ * Whether the feature is open to EVERYONE right now: not in the registry, or
+ * its GA date has arrived. True here means no supporter key can change the
+ * answer — which is what lets an enforcement path skip reading one.
+ */
+export function featureOpenToEveryone(flag: string, now: Date): boolean {
+	const gaDate = EARLY_ACCESS[flag];
+	return gaDate === undefined || gaReached(gaDate, now);
+}
+
+/**
  * Whether a feature is on for this request. A feature not in the registry is
  * never gated (on for everyone); a registered feature is on once its GA date
  * arrives, or immediately for a holder of a valid supporter key.
@@ -52,10 +62,7 @@ export function isFeatureEnabled(
 	flag: string,
 	{ supporterKeyValid, now }: { supporterKeyValid: boolean; now: Date }
 ): boolean {
-	const gaDate = EARLY_ACCESS[flag];
-	if (gaDate === undefined) return true;
-	if (gaReached(gaDate, now)) return true;
-	return supporterKeyValid;
+	return featureOpenToEveryone(flag, now) || supporterKeyValid;
 }
 
 /** Flags still inside their early-access window (GA date not yet reached), with

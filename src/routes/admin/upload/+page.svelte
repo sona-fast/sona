@@ -4,6 +4,7 @@
 	import { tick } from 'svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { extractImageFiles, isTextEditable, shouldHandleImagePaste } from '$lib/clipboard';
+	import { MAX_BUFFER_BYTES } from '$lib/config';
 	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -101,30 +102,54 @@
 		}
 		if (fileArray.length === 0) return;
 
+		// Pass 1 (synchronous): create a tile for EVERY file before any await, so
+		// tiles.length reflects the whole batch at once — `room` above can't
+		// over-admit a second drop that lands while this batch is still
+		// uploading, and the announcement below counts tiles that really exist.
+		const batch: { key: number; file: File }[] = [];
+		for (const file of fileArray) {
+			// Pre-check the server's size cap client-side: a file over it can only
+			// come back as a 413, so fail the tile here instead of a doomed POST.
+			const oversized = file.size > MAX_BUFFER_BYTES;
+			const tile: Tile = {
+				key: tileKey++,
+				fileName: file.name,
+				previewUrl: URL.createObjectURL(file),
+				url: '',
+				width: 0,
+				height: 0,
+				fileSize: file.size,
+				status: oversized ? 'error' : 'uploading',
+				error: oversized ? m.admin_upload_error_too_large({ max: formatSize(MAX_BUFFER_BYTES) }) : '',
+				label: '',
+				nsfw: false
+			};
+			tiles = [...tiles, tile];
+			// Oversized files never enter the batch: no dimension probe (pass 2
+			// would decode a >64 MB image for a tile that already failed) and no
+			// doomed POST. Their tile keeps 0×0 dims — it can't be saved anyway.
+			if (!oversized) batch.push({ key: tile.key, file });
+		}
+
 		// Reset then set on the next tick so identical consecutive adds still
 		// re-announce to screen readers via the aria-live region.
 		announce = '';
 		await tick();
 		announce = m.admin_upload_images_added({ count: fileArray.length });
 
-		for (const file of fileArray) {
+		// Pass 2: probe dimensions and upload. Uploads run one at a time WITHIN
+		// this batch (matching VrAvatarForm's media flow) so a full batch can't
+		// fire eight concurrent POSTs; a second drop mid-batch starts its own
+		// loop, so the guarantee is per-invocation, not global. Each tile still
+		// shows its own status. Mutate the tile via the `tiles` state proxy
+		// (not the pass-1 local) so updates stay reactive.
+		for (const { key, file } of batch) {
 			const dims = await getImageDimensions(file);
-			const tile: Tile = {
-				key: tileKey++,
-				fileName: file.name,
-				previewUrl: URL.createObjectURL(file),
-				url: '',
-				width: dims.width,
-				height: dims.height,
-				fileSize: file.size,
-				status: 'uploading',
-				error: '',
-				label: '',
-				nsfw: false
-			};
-			tiles = [...tiles, tile];
-			// Uploads run concurrently; each tile tracks its own progress.
-			uploadOne(tiles[tiles.length - 1], file);
+			const tile = tiles.find((t) => t.key === key);
+			if (!tile) continue; // removed while the batch was still working
+			tile.width = dims.width;
+			tile.height = dims.height;
+			await uploadOne(tile, file);
 		}
 	}
 

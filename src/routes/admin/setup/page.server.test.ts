@@ -132,7 +132,31 @@ describe('setup wizard — AI disclosure affirmation (SONA-167)', () => {
 	// silently stored aiPageEnabled='false' and never published /ai.
 	it('the wizard form posts the affirmation checkbox', () => {
 		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
-		expect(src).toMatch(/<input type="checkbox" name="aiPageAffirmed"/);
+		// Capture the tag by name, then look inside it: attribute order and extra
+		// attributes are harmless, the wrong type is not.
+		const input = src.match(/<input[^>]*\bname="aiPageAffirmed"[^>]*>/)?.[0] ?? '';
+		expect(input, 'affirmation input').toContain('type="checkbox"');
+	});
+
+	// Source pin (SONA-183): the affirmation enumerates three claims, so wrapping
+	// its hint in the <label> made the checkbox's accessible name ~450 characters
+	// read out before the checked state. The hint stays outside, wired up by id.
+	it('describes the affirmation from outside its label', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		// Capture the whole tag, then look inside it: attribute order and extra
+		// attributes are harmless, a missing aria-describedby is not.
+		const input = src.match(/<input[^>]*\bname="aiPageAffirmed"[^>]*>/)?.[0] ?? '';
+		expect(input).toContain('aria-describedby="aiPageAffirmed-desc"');
+		// `>[^<]*</label>` is the containment assertion: the title label holds text and
+		// nothing else, so no hint can be folded back in to restore the ~450-character
+		// accessible name with every id still unchanged.
+		const title = src.match(/<label[^>]*\bfor="aiPageAffirmed"[^>]*>[^<]*<\/label>/)?.[0] ?? '';
+		expect(title, 'affirmation title label').toMatch(/class="[^"]*\baffirm-title\b/);
+		const hint = src.match(/<small[^>]*\bid="aiPageAffirmed-desc"[^>]*>/)?.[0] ?? '';
+		expect(hint, 'affirmation hint').toMatch(/class="[^"]*\baffirm-hint\b/);
+		// Whole class token, so `class="affirm wide"` is caught but `affirm-title`
+		// (a different class) is not.
+		expect(src).not.toMatch(/<label[^>]*class="(?:[^"]*\s)?affirm(?:\s[^"]*)?"/);
 	});
 
 	// The /ai page speaks in the owner's first person and states their gallery

@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { adminLogin } from './admin-login';
 
-// Instagram site-social rendering (SONA-117): the seed fixture sets
-// instagramUrl (https://www.instagram.com/sona.e2e.example), and these read-only assertions
+// Site-social rendering (SONA-117, extended by SONA-128): the seed fixture sets
+// instagramUrl (https://www.instagram.com/sona.e2e.example) and a FurAffinity
+// deep link, and these read-only assertions
 // verify it surfaces on the public pages — the /connect link row, the /about
 // social chip, and the footer icon. The unit test
 // (src/routes/admin/settings/page.server.test.ts) covers the ACTION's FormData
@@ -33,6 +34,31 @@ test.describe('instagram site social', () => {
 		// name through the visually-hidden span — "@sona.e2e.example" alone would be
 		// indistinguishable from the owner's other chips.
 		await expect(page.getByRole('link', { name: /Instagram.*@sona.e2e.example/ })).toBeVisible();
+	});
+
+	// SONA-128: the seed also carries a FurAffinity DEEP link
+	// (.../user/sona.e2e.example/gallery). Its rendering is what the shared label
+	// rules changed — /connect used to show "sona.e2e.example" with no @, and a
+	// last-segment reading says "@gallery" — so it catches a regression the
+	// Instagram URL, byte-identical before and after, cannot.
+	test('the seeded FurAffinity deep link renders the account, not the section', async ({
+		page
+	}) => {
+		await page.goto('/connect');
+		const row = page.locator(
+			'a.link-row[href="https://www.furaffinity.net/user/sona.e2e.example/gallery"]'
+		);
+		await expect(row).toBeVisible();
+		await expect(row).toContainText('FurAffinity');
+		await expect(row).toContainText('@sona.e2e.example');
+		await expect(row).not.toContainText('@gallery');
+	});
+
+	test('the seeded FurAffinity deep link names the account on its /about chip', async ({
+		page
+	}) => {
+		await page.goto('/about');
+		await expect(page.getByRole('link', { name: /FurAffinity.*@sona.e2e.example/ })).toBeVisible();
 	});
 
 	test('the public footer renders an Instagram icon link', async ({ page }) => {

@@ -1,8 +1,7 @@
 import { getDb } from '$lib/server/db';
-import { getSettings, getRawSetting } from '$lib/server/settings';
+import { getSettings, getSupporterKeyStatus } from '$lib/server/settings';
 import { isRegistryEnabled, resolveRegistryEnv } from '$lib/server/registry';
 import { isObservabilityEnabled } from '$lib/server/metrics';
-import { resolveSupporterKeyStatus } from '$lib/server/supporter-key';
 import { APP_NAME } from '$lib/config';
 import type { LayoutServerLoad } from './$types';
 
@@ -28,22 +27,20 @@ export const load: LayoutServerLoad = async ({ platform, locals, cookies }) => {
 		// the authenticated session: this load also runs for the auth-exempt
 		// routes (/admin/login etc., see hooks.server.ts), which must not spend a
 		// D1 read + Ed25519 verify per anonymous hit nor leak key metadata.
-		// getRawSetting propagates D1 errors (getSettings self-catches); a failed
-		// read must degrade only the notice, not drop the chrome to EMPTY.
-		const [renv, supporterToken] = await Promise.all([
+		// getSupporterKeyStatus memoizes the resolved status (SONA-118), so neither
+		// the read nor the verify is paid on every admin page request. It propagates
+		// D1 errors (getSettings self-catches); a failed read must degrade only the
+		// notice, not drop the chrome to EMPTY.
+		// The operator's own zone (SONA-119) rides in as the third argument,
+		// resolved in hooks from the cookie the admin layout writes on every
+		// signed-in navigation; absent (no JS, or before the first signed-in page
+		// of a browser) it is UTC. The memo underneath caches only zone-independent
+		// verified facts, so one operator's zone-rendered dates are never served
+		// to another.
+		const [renv, supporterKey] = await Promise.all([
 			resolveRegistryEnv(db, platform.env),
-			locals.admin ? getRawSetting(db, 'supporterKey').catch(() => null) : null
+			locals.admin ? getSupporterKeyStatus(db, new Date(), locals.timeZone).catch(() => null) : null
 		]);
-		// The operator's own zone (SONA-119), resolved in hooks from the cookie the
-		// admin layout writes on every signed-in navigation. Rendering the dates
-		// server-side rather than in the browser is what keeps them identical before
-		// and after hydration; absent (no JS, or before the first signed-in page of
-		// a browser) it is UTC.
-		const supporterKey = await resolveSupporterKeyStatus(
-			supporterToken ?? '',
-			new Date(),
-			locals.timeZone
-		);
 		// Dismissal is a cookie keyed on the key's UTC-pinned dismissKey PLUS a
 		// phase ('early' = days 7..4, 'final' = last 3 days): dismissing during the
 		// early phase re-shows the notice once the final days start, and a re-minted

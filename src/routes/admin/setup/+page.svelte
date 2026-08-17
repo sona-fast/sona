@@ -136,13 +136,18 @@
 
 				<section>
 					<h2>{m.admin_setup_ai_heading()}</h2>
-					<label class="affirm">
-						<input type="checkbox" name="aiPageAffirmed" />
+					<div class="affirm">
+						<input
+							type="checkbox"
+							id="aiPageAffirmed"
+							name="aiPageAffirmed"
+							aria-describedby="aiPageAffirmed-desc"
+						/>
 						<span>
-							<span class="affirm-title">{m.admin_setup_ai_affirm()}</span>
-							<small>{m.admin_setup_ai_hint()}</small>
+							<label class="affirm-title" for="aiPageAffirmed">{m.admin_setup_ai_affirm()}</label>
+							<small class="affirm-hint" id="aiPageAffirmed-desc">{m.admin_setup_ai_hint()}</small>
 						</span>
-					</label>
+					</div>
 				</section>
 
 				<button type="submit" class="btn btn-primary btn-lg full-width" disabled={submitting}>
@@ -213,18 +218,42 @@
 		margin-top: 4px;
 	}
 	/* The AI-disclosure affirmation: checkbox beside its text rather than above
-	   it, so the statement being agreed to reads as one sentence with the box. */
-	label.affirm {
+	   it, so the statement being agreed to reads as one sentence with the box.
+	   The hint must stay outside the <label>, reaching the input through
+	   aria-describedby, or it joins the checkbox's accessible name (SONA-183). That
+	   makes the row a <div>, so its spacing and type styles are stated here rather
+	   than inherited from the base label rules. */
+	.affirm {
 		display: flex;
 		align-items: flex-start;
 		gap: 10px;
+		margin-bottom: 14px;
 	}
-	label.affirm > span {
+	.affirm input {
+		cursor: pointer;
+	}
+	.affirm > span {
 		display: block;
-		margin-bottom: 0;
-	}
-	.affirm-title {
+		font-size: 14px;
 		font-weight: 500;
+	}
+	/* Only the title is clickable, so it carries the pointer target: min-height
+	   plus padding put a 24px floor under it without depending on the resolved
+	   font's line box, and the equal negative margin cancels the padding so nothing
+	   moves — it also overrides the base `label { margin-bottom: 14px }` the title
+	   picks up now that it is a <label>. */
+	.affirm-title {
+		display: block;
+		min-height: 24px;
+		padding-block: 4px;
+		margin-block: -4px;
+		cursor: pointer;
+	}
+	.affirm-hint {
+		display: block;
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin-top: 4px;
 	}
 	.grid {
 		display: grid;

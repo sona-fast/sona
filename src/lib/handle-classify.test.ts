@@ -109,4 +109,26 @@ describe('normalizeHandle', () => {
 	it('normalizes patreon creator URLs without collapsing to "c"', () => {
 		expect(normalizeHandle('patreon', 'https://patreon.com/c/kuttoya')).toBe('kuttoya');
 	});
+
+	it('normalizes a Telegram channel-preview URL without collapsing to "s"', () => {
+		// t.me/s/<channel> previews the same channel as t.me/<channel>; matching
+		// them apart would split one account into two.
+		expect(normalizeHandle('telegram', 'https://t.me/s/kuttoya')).toBe('kuttoya');
+		expect(normalizeHandle('telegram', 'https://t.me/kuttoya')).toBe('kuttoya');
+	});
+
+	it('folds case, as matching is case-insensitive', () => {
+		expect(normalizeHandle('twitter', 'https://twitter.com/Kuttoya')).toBe('kuttoya');
+	});
+
+	it('reads a protocol-relative URL, which registry payloads carry', () => {
+		// Without the // stripped, the prefix never matches and the value is cut at
+		// its first slash: every such URL normalizes to '', and registry-diff's
+		// handleEqual then reads two DIFFERENT accounts as unchanged.
+		expect(normalizeHandle('twitter', '//twitter.com/kuttoya')).toBe('kuttoya');
+		expect(normalizeHandle('twitter', '//www.twitter.com/kuttoya')).toBe('kuttoya');
+		expect(normalizeHandle('twitter', '//twitter.com/kuttoya')).not.toBe(
+			normalizeHandle('twitter', '//twitter.com/someone-else')
+		);
+	});
 });

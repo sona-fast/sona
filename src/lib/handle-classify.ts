@@ -1,29 +1,13 @@
 // Pure, dependency-free handle classification/normalization shared by the client
 // (the New Artist combobox, to decide name-search vs handle-search and to gate
-// create) and the server (handle-normalize.ts re-exports these). No $lib/server
-// imports so it is safe to bundle into a Svelte component. Mirrors the registry's
-// normalize rules so the two agree on what counts as "the same handle".
+// create) and the server (handle-normalize.ts re-exports normalizeHandle). No
+// $lib/server imports so it is safe to bundle into a Svelte component. Mirrors
+// the registry's normalize rules so the two agree on what counts as "the same
+// handle".
 
-export type Platform =
-	| 'twitter'
-	| 'bluesky'
-	| 'telegram'
-	| 'furaffinity'
-	| 'deviantart'
-	| 'patreon'
-	| 'instagram';
-
-export const HOST_PREFIXES: Record<Platform, string[]> = {
-	twitter: ['twitter.com/', 'x.com/', 'mobile.twitter.com/'],
-	bluesky: ['bsky.app/profile/', 'staging.bsky.app/profile/'],
-	telegram: ['t.me/', 'telegram.me/'],
-	furaffinity: ['furaffinity.net/user/'],
-	deviantart: ['deviantart.com/'],
-	// 'patreon.com/c/<user>' (newer creator pages) must be tried before the bare
-	// 'patreon.com/' prefix, else the username collapses to 'c'.
-	patreon: ['patreon.com/c/', 'patreon.com/'],
-	instagram: ['instagram.com/']
-};
+// The platform tables and the extraction itself live in ./social-platforms, so
+// the public pages can bundle them without this module's search classifier.
+import { HOST_PREFIXES, extractHandle, type Platform } from './social-platforms';
 
 /** Maps the artist *Url column / payload keys to platforms. */
 export const SOCIAL_KEY_TO_PLATFORM: Record<string, Platform> = {
@@ -36,21 +20,9 @@ export const SOCIAL_KEY_TO_PLATFORM: Record<string, Platform> = {
 	instagramUrl: 'instagram'
 };
 
+/** The matching form of a handle: {@link extractHandle}, case-folded. */
 export function normalizeHandle(platform: Platform, raw: string | null | undefined): string {
-	if (!raw) return '';
-	let s = raw.trim().toLowerCase();
-	s = s.replace(/^https?:\/\//, '');
-	s = s.replace(/^www\./, '');
-	for (const prefix of HOST_PREFIXES[platform] ?? []) {
-		if (s.startsWith(prefix)) {
-			s = s.slice(prefix.length);
-			break;
-		}
-	}
-	s = s.replace(/^@+/, '');
-	s = s.replace(/[/?#].*$/, '');
-	s = s.replace(/\/+$/, '');
-	return s;
+	return extractHandle(platform, raw).toLowerCase();
 }
 
 export type QueryKind = 'name' | 'handle';

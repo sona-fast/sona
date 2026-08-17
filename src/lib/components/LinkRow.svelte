@@ -4,7 +4,7 @@
 	let {
 		icon,
 		title,
-		subtitle,
+		subtitle = undefined,
 		href = undefined,
 		external = true,
 		highlight = false
@@ -14,7 +14,9 @@
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		icon: any;
 		title: string;
-		subtitle: string;
+		/** Optional. A row with no handle or detail to show leaves the subtitle
+		 *  out; the 36px badge plus the row padding keep the height either way. */
+		subtitle?: string;
 		href?: string;
 		external?: boolean;
 		highlight?: boolean;
@@ -34,7 +36,7 @@
 	<span class="badge"><Icon size={16} /></span>
 	<span class="text">
 		<span class="title">{title}</span>
-		<span class="sub">{subtitle}</span>
+		{#if subtitle}<span class="sub">{subtitle}</span>{/if}
 	</span>
 	{#if href}
 		<ArrowUpRight class="arrow" size={16} />
@@ -101,6 +103,21 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	/* On a phone a one-line subtitle clips mid-sentence — /share's "Send directly
+	   to @taro — fastest way" loses its tail. Give it a second line there. */
+	@media (max-width: 768px) {
+		.sub {
+			white-space: normal;
+			display: -webkit-box;
+			-webkit-box-orient: vertical;
+			-webkit-line-clamp: 2;
+			line-clamp: 2;
+			/* At 320px the column is ~150px, narrower than an unbreakable token
+			   such as a long email address, which would otherwise be clipped. */
+			overflow-wrap: anywhere;
+		}
 	}
 
 	.link-row :global(.arrow) {

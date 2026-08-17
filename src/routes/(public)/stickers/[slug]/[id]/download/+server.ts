@@ -5,6 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { RateLimiter } from '$lib/server/rate-limit';
 import { isAnimatedRaster } from '$lib/server/animated-raster';
 import { originalExt, stickerDownloadOptions } from '$lib/sticker-download';
+import { singleValidator } from '$lib/server/etag';
 import type { RequestHandler } from './$types';
 
 // Throttle the unauthenticated download proxy (M10). Each GET makes the worker
@@ -23,11 +24,17 @@ const downloadLimiter = new RateLimiter(200, 60_000); // 200 downloads / min / I
 
 // Cap on what the converting path will buffer for the animation sniff. Telegram
 // static stickers are ≤~512KB, but MANUAL uploads can reach MAX_BUFFER_BYTES
-// (10MB — see $lib/server/storage/buffer.ts), and buffering that unboundedly on
+// (64MB — see $lib/server/storage/buffer.ts), and buffering that unboundedly on
 // a public, only-rate-limited endpoint is a memory-amplification risk. Anything
 // declaring more than this streams through untouched — a >1MB static raster
 // then simply never converts, which is acceptable.
 const MAX_CONVERT_BYTES = 1_000_000;
+
+// Match the caching the hooks stamp gives public non-HTML responses: a short
+// shared-cache TTL (5 min) + SWR, NOT a browser-cached hour — a takedown must
+// propagate promptly, so downloads never get a long max-age. Both halves of a
+// revalidation carry it, the 200 and the 304 alike.
+const DOWNLOAD_CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=3600';
 
 // Map a file extension to the Content-Type we serve it with. Anything unknown
 // falls back to a generic octet-stream so the browser still saves the bytes.
@@ -82,7 +89,14 @@ function sourceHost(imageUrl: string, origin: string): string {
 // transform. When the transform can't run (dev server, a zone without
 // transforms enabled, off-zone storage 403s — see SONA-21) we fall back to the
 // buffered original bytes under the original filename: correct bytes beat a 5xx.
-export const GET: RequestHandler = async ({ params, url, platform, fetch, getClientAddress }) => {
+export const GET: RequestHandler = async ({
+	params,
+	url,
+	platform,
+	fetch,
+	request,
+	getClientAddress
+}) => {
 	if (!downloadLimiter.check(getClientAddress(), Date.now())) {
 		error(429, 'Too many downloads, please slow down.');
 	}
@@ -190,7 +204,40 @@ export const GET: RequestHandler = async ({ params, url, platform, fetch, getCli
 		return fileResponse(origBytes, originalName, origType, orig.headers.get('etag'), 'private, no-store');
 	}
 
-	const res = await fetch(row.imageUrl);
+	// Conditional revalidation, plain path only. What this saves is the read at
+	// the far end: SvelteKit's respond() already turns our own 200 into a 304
+	// when the client's validator matches the ETag we set, so the body was never
+	// the waste — fetching the whole file to produce it was, on every edge MISS.
+	// Forks with a CDN get that from the R2 custom domain; forks storing
+	// /img/<key> get it from that route, which honors the forwarded validator
+	// through R2's onlyIf and withholds the body the same way.
+	//
+	// Only a single entity-tag is forwarded — see singleValidator for why the
+	// other forms are refused rather than parsed. Not reached on ?format=png:
+	// that path must sniff the original bytes before converting, so a 304 would
+	// leave it nothing to sniff.
+	const conditional = singleValidator(request.headers.get('if-none-match'));
+	const res = await fetch(
+		row.imageUrl,
+		conditional ? { headers: { 'If-None-Match': conditional } } : undefined
+	);
+	if (conditional && res.status === 304) {
+		// Bodyless, and deliberately without Content-Type/Content-Disposition:
+		// those describe a representation we are not sending, and the client
+		// already holds them with its cached copy (so the forced download still
+		// happens). Cache-Control DOES have to match what the 200 carried, or the
+		// next revalidation runs against a weaker copy — hooks.server.ts honors
+		// this explicit Cache-Control rather than stamping its default.
+		//
+		// The validator is the tag we asked about, never the one the 304 names —
+		// see singleValidator. A client that offered the weak form keeps it until
+		// the entity itself changes; that costs only If-Range, which this handler
+		// never invites (it parses no Range and sends no Accept-Ranges).
+		return new Response(null, {
+			status: 304,
+			headers: { 'Cache-Control': DOWNLOAD_CACHE_CONTROL, etag: conditional }
+		});
+	}
 	if (!res.ok || !res.body) error(502, 'Could not fetch sticker file');
 	return fileResponse(
 		res.body,
@@ -236,24 +283,23 @@ async function readCapped(
 
 /**
  * @param etag The upstream ETag for these exact bytes, forwarded as this
- * response's validator. This handler never answers a conditional request itself
- * — nothing here reads If-None-Match — so the validator is for the Cloudflare
- * edge, which can revalidate a cached public response instead of pulling the
- * file again. Last-Modified is deliberately not forwarded: the Cache-Control
- * below gives the browser no freshness lifetime of its own (s-maxage binds
+ * response's validator — for the Cloudflare edge, which can revalidate a cached
+ * public response instead of pulling the file again, and for the browser, whose
+ * If-None-Match the plain path passes back upstream (see GET).
+ * Last-Modified is deliberately not forwarded: the Cache-Control this route
+ * sends gives the browser no freshness lifetime of its own (s-maxage binds
  * shared caches only), so a Last-Modified turns on heuristic caching and Chrome
  * stops revalidating altogether.
  *
- * @param cacheControl Match the caching the hooks stamp gives public non-HTML
- * responses: a short shared-cache TTL (5 min) + SWR, NOT a browser-cached hour —
- * a takedown must propagate promptly, so downloads never get a long max-age.
+ * @param cacheControl Defaults to DOWNLOAD_CACHE_CONTROL; the ?format=png
+ * fallbacks override it with no-store.
  */
 function fileResponse(
 	body: BodyInit,
 	filename: string,
 	contentType: string,
 	etag: string | null,
-	cacheControl = 'public, s-maxage=300, stale-while-revalidate=3600'
+	cacheControl = DOWNLOAD_CACHE_CONTROL
 ): Response {
 	const headers = new Headers({
 		'Content-Type': contentType,

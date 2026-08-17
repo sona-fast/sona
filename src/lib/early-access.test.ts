@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
 	EARLY_ACCESS,
 	isFeatureEnabled,
+	featureOpenToEveryone,
 	earlyAccessActive,
 	earlyAccessLabelKey
 } from './early-access';
@@ -105,5 +106,21 @@ describe('shipped registry', () => {
 			) as Record<string, string>;
 		expect(read('en')['early_access_label_vr_avatars']).toBe('VR avatars');
 		expect(read('ja')['early_access_label_vr_avatars']).toBe('VRアバター');
+	});
+});
+
+describe('featureOpenToEveryone', () => {
+	// The predicate an enforcement path uses to decide it needn't read a key at
+	// all, so it must agree with isFeatureEnabled's key-independent branches.
+	it('is true only when no supporter key could change the answer', () => {
+		EARLY_ACCESS['probe'] = '2026-08-17';
+		const before = new Date('2026-08-16T23:59:59Z');
+		const after = new Date('2026-08-17T00:00:00Z');
+
+		expect(featureOpenToEveryone('probe', before)).toBe(false);
+		expect(isFeatureEnabled('probe', { supporterKeyValid: true, now: before })).toBe(true);
+
+		expect(featureOpenToEveryone('probe', after)).toBe(true);
+		expect(featureOpenToEveryone('never-registered', before)).toBe(true);
 	});
 });

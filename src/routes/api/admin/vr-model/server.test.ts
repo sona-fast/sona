@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { isHttpError } from '@sveltejs/kit';
-import { clearSettingsCache } from '$lib/server/settings';
+import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
 import { MAX_VR_MODEL_BYTES } from '$lib/vr';
 import { EARLY_ACCESS } from '$lib/early-access';
 import { makeD1 } from '$lib/server/test/d1';
@@ -34,6 +34,9 @@ beforeEach(() => {
 	restoreRegistry();
 	EARLY_ACCESS['vr-avatars'] = PAST_GA; // ungated by default; gate tests override
 	clearSettingsCache();
+	// The gate memoizes the verified supporter key per isolate; every test builds
+	// a fresh DB, so the previous test's key would otherwise answer for this one.
+	clearSupporterKeyStatusCache();
 	put.mockClear();
 });
 afterEach(restoreRegistry);
