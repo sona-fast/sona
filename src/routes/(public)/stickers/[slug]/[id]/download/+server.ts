@@ -23,7 +23,7 @@ const downloadLimiter = new RateLimiter(200, 60_000); // 200 downloads / min / I
 
 // Cap on what the converting path will buffer for the animation sniff. Telegram
 // static stickers are ≤~512KB, but MANUAL uploads can reach MAX_BUFFER_BYTES
-// (10MB — see $lib/server/storage/buffer.ts), and buffering that unboundedly on
+// (64MB — see $lib/server/storage/buffer.ts), and buffering that unboundedly on
 // a public, only-rate-limited endpoint is a memory-amplification risk. Anything
 // declaring more than this streams through untouched — a >1MB static raster
 // then simply never converts, which is acceptable.

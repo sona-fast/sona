@@ -9,7 +9,7 @@
 // fetched from the file CDN and self-hosted, so there are no Telegram calls at
 // public request time.
 
-import { bufferStream } from './storage/buffer';
+import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 
 const API_BASE = 'https://api.telegram.org';
 /** Per-request timeout so a slow/hanging Telegram can't tie up the worker. */
@@ -165,9 +165,8 @@ export async function downloadFile(
 		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
 	});
 	if (!res.ok || !res.body) throw new Error(`Telegram file download failed (${res.status}).`);
-	// Byte-cap the buffered download (M8) so an oversized file CDN response can't
-	// OOM the isolate. .buffer is exact — bufferStream allocates to the byte total.
-	const bytes = await bufferStream(res.body);
+	// Byte-cap the buffered remote download (M8) — rationale on the constant.
+	const bytes = await bufferStream(res.body, MAX_REMOTE_BUFFER_BYTES);
 	return {
 		bytes: bytes.buffer as ArrayBuffer,
 		contentType: res.headers.get('content-type') ?? 'application/octet-stream',

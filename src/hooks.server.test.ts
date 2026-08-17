@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import type { D1Database } from '@cloudflare/workers-types';
 import { isRedirect } from '@sveltejs/kit';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 
 // Control the setup gate without touching D1. hashToken is also imported by the
 // hook (unused here — no session cookie), so keep the rest of the module real.
@@ -156,11 +157,7 @@ describe('handleError — rich 5xx sample (issue #6)', () => {
 		const { db, sqlite } = makeMetricsDb();
 		const waits: Promise<unknown>[] = [];
 		const locals = {} as App.Locals;
-		const event = {
-			url: new URL('https://taro.surf/admin/images'),
-			locals,
-			platform: { env: { DB: db, OBSERVABILITY_ENABLED: 'true' }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
-		} as never;
+		const event = metricsEvent('/admin/images', db, waits, locals);
 
 		handleError({ error: new Error('D1_ERROR: boom'), event, status: 500, message: 'Internal Error' } as never);
 		await Promise.all(waits);
@@ -173,15 +170,170 @@ describe('handleError — rich 5xx sample (issue #6)', () => {
 		expect(locals.errorSampled).toBe(true);
 	});
 
+	it('stores the root cause FIRST when the thrown error wraps one (drizzle-style)', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/stickers/pack/1', db, waits);
+
+		// DrizzleQueryError shape: SQL echo in .message, the real failure on .cause.
+		// The cause must lead so the 300-char storage clamp can't truncate it away
+		// behind a long column list (the 2026-08-12 sticker 500s stored only SQL).
+		const wrapper = new Error('Failed query: select "id", "pack_id" from "stickers" where …', {
+			cause: new Error('D1_ERROR: Network connection lost.')
+		});
+		handleError({ error: wrapper, event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toMatch(/^D1_ERROR: Network connection lost\./);
+		expect(row.message).toContain('Failed query');
+	});
+
+	it('terminates on a CYCLIC cause chain and stores no repeated segments', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/stickers/pack/1', db, waits);
+
+		// a.cause = b; b.cause = a — the walk must stop at the first revisit, not spin.
+		const a = new Error('outer failure');
+		const b = new Error('inner failure');
+		a.cause = b;
+		b.cause = a;
+		handleError({ error: a, event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('inner failure ← outer failure');
+	});
+
+	it('keeps the ROOT cause when the chain is deeper than the message bound', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/stickers/pack/1', db, waits);
+
+		// A 9-deep chain: root wrapped by wrappers 1..8 (wrapper 8 outermost).
+		// Root-first ordering means the storage clamp can only ever cut the
+		// shallow wrapper end — the root always leads.
+		let err = new Error('root cause');
+		for (let i = 1; i <= 8; i++) err = new Error(`wrapper ${i}`, { cause: err });
+		handleError({ error: err, event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toMatch(/^root cause/);
+	});
+
+	it('falls back to SvelteKit\'s message for an Error with an EMPTY message', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/stickers/pack/1', db, waits);
+
+		handleError({ error: new Error(''), event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('Internal Error');
+	});
+
+	it('falls back to SvelteKit\'s message for a thrown non-Error', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/stickers/pack/1', db, waits);
+
+		handleError({ error: 'a bare thrown string', event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('Internal Error');
+	});
+
+	it('keeps a NON-Error terminal cause — a string cause is often the true root', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/stickers/pack/1', db, waits);
+
+		handleError({
+			error: new Error('write failed', { cause: 'socket closed' }),
+			event,
+			status: 500,
+			message: 'Internal Error'
+		} as never);
+		await Promise.all(waits);
+
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('socket closed ← write failed');
+	});
+
+	it('a "←" inside a bound-params value cannot fake a chain separator', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/admin/images', db, waits);
+
+		// The params tail carries a literal '←': segment normalization must strip
+		// it so the params redaction can't stop early and leak the value's tail —
+		// while the REAL ' ← wrapper' separator after it still survives.
+		const drizzle = new Error(
+			'Failed query: insert into "artists" ("name") values (?)\nparams: evil ← Jane Q. Artist'
+		);
+		handleError({
+			error: new Error('Failed to save artist', { cause: drizzle }),
+			event,
+			status: 500,
+			message: 'Internal Error'
+		} as never);
+		await Promise.all(waits);
+
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).not.toContain('Jane');
+		expect(row.message).toBe(
+			'Failed query: insert into "artists" ("name") values (?) params: [redacted] ← Failed to save artist'
+		);
+	});
+
+	it('redacts the bound params of a REAL DrizzleQueryError (upstream format canary)', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/admin/images', db, waits);
+
+		// The genuine drizzle-orm class, not a hand-built message: if an upgrade
+		// changes the "…\nparams: …" message format, THIS test fails instead of
+		// the params redaction silently no-longer matching in production.
+		const err = new DrizzleQueryError(
+			'insert into "artists" ("name") values (?)',
+			['Jane Q. Artist'],
+			new Error('D1_ERROR: UNIQUE constraint failed')
+		);
+		handleError({ error: err, event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).not.toContain('Jane');
+		expect(row.message).toContain('params: [redacted]');
+		expect(row.message).toMatch(/^D1_ERROR: UNIQUE constraint failed/);
+	});
+
+	it('a whitespace-only wrapper message leaves no dangling " ← " separator', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/stickers/pack/1', db, waits);
+
+		// Error(' ') in the middle of a chain cleans to an empty segment, which
+		// must be dropped — not stored as 'boom ←  ← outer'.
+		const root = new Error('D1_ERROR: boom');
+		const blank = new Error(' ', { cause: root });
+		const outer = new Error('outer wrapper', { cause: blank });
+		handleError({ error: outer, event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		const row = sqlite.prepare('SELECT message FROM error_sample').get();
+		expect(row.message).toBe('D1_ERROR: boom ← outer wrapper');
+	});
+
 	it('does nothing for a sub-500 status', async () => {
 		const { db, sqlite } = makeMetricsDb();
 		const waits: Promise<unknown>[] = [];
 		const locals = {} as App.Locals;
-		const event = {
-			url: new URL('https://taro.surf/gallery'),
-			locals,
-			platform: { env: { DB: db }, context: { waitUntil: (p: Promise<unknown>) => waits.push(p) } }
-		} as never;
+		const event = metricsEvent('/gallery', db, waits, locals);
 
 		handleError({ error: new Error('not found'), event, status: 404, message: 'Not Found' } as never);
 		await Promise.all(waits);

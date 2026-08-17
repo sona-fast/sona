@@ -141,7 +141,7 @@ describe('GET /stickers/[slug]/[id]/download', () => {
 	});
 
 	it('streams the original untouched when content-length exceeds the 1MB convert cap', async () => {
-		// Manual uploads can reach 10MB (MAX_BUFFER_BYTES); the public converting
+		// Manual uploads can reach 64MB (MAX_BUFFER_BYTES); the public converting
 		// path must not buffer that — it skips sniff-and-convert entirely and
 		// serves the original like the plain path (memory-amplification guard).
 		const transformFetch = stubTransformFetch(async () =>

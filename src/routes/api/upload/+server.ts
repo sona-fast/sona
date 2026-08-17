@@ -12,6 +12,18 @@ import type { RequestHandler } from './$types';
 // (UploadThing or R2), returning the public URL. This replaces the previous
 // client-direct-to-UploadThing flow so uploads honor whichever provider is active.
 export const POST: RequestHandler = async ({ request, platform }) => {
+	// Layer 1 of the two-layer size cap (see the block below): reject a body
+	// the client DECLARES oversized before formData() materializes it — zero
+	// memory cost. 64 KiB of slack covers multipart framing overhead (boundary
+	// lines + part headers) so a file exactly at the cap still passes here and
+	// is judged precisely by the post-formData check. Absent/unparseable header
+	// falls through — no 411; the post-formData check stays the enforcement of
+	// record (test harnesses construct Requests without the header).
+	const declaredLength = Number(request.headers.get('content-length') ?? NaN);
+	if (Number.isFinite(declaredLength) && declaredLength > MAX_BUFFER_BYTES + 64 * 1024) {
+		error(413, `File too large: ~${declaredLength} bytes declared. Max ${MAX_BUFFER_BYTES}.`);
+	}
+
 	const form = await request.formData();
 	const file = form.get('file');
 	if (!(file instanceof File)) error(400, 'No file provided');
@@ -24,12 +36,17 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	const settings = await getSettings(db, { fresh: true });
 	const storage = getStorage(platform?.env, settings);
 
-	// Size cap for this image endpoint. It still bounds isolate memory here:
-	// request.formData() above fully materializes the File before put() runs —
-	// streaming (SONA-136) only avoids a second copy. A truly large-body
-	// endpoint (e.g. VR avatar models) must read request.body directly instead
-	// of formData(), and sets its own cap. >10 MB raster images also have no
-	// product use, and the cap keeps fork storage bills predictable.
+	// Layer 2 of the size cap (memory rationale lives with the value in
+	// $lib/config): the EXACT check, on the file's real size. The two layers:
+	// the Content-Length pre-check above rejects declared-oversized bodies at
+	// zero memory cost, before formData() materializes anything; this check is
+	// precise and catches bodies whose header was absent, unparseable, or
+	// understated. Residual exposure: concurrent legitimately-sized uploads
+	// each buffer up to the cap, bounded only by admin-gating and the client's
+	// sequential batching. What the cap bounds either way: the stored object's
+	// size and every downstream copy, keeping fork storage bills predictable.
+	// A truly large-body endpoint (e.g. VR avatar models) must read
+	// request.body directly instead of formData(), and sets its own cap.
 	if (file.size > MAX_BUFFER_BYTES) {
 		error(413, `File too large: ${file.size} bytes. Max ${MAX_BUFFER_BYTES}.`);
 	}

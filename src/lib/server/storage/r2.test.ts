@@ -5,6 +5,8 @@ import { R2Storage } from './r2';
 import { MAX_BUFFER_BYTES, MaxBytesExceededError } from './buffer';
 
 const MiB = 1024 * 1024;
+// One MiB-chunk past the buffer cap — derived, so a cap change can't strand it.
+const OVER_CAP_CHUNKS = Math.ceil(MAX_BUFFER_BYTES / MiB) + 1;
 
 function makeStorage(put: (key: string, value: unknown, opts?: unknown) => Promise<unknown>) {
 	const bucket = {
@@ -30,7 +32,7 @@ describe('R2 streaming put', () => {
 	it('streams a body larger than MAX_BUFFER_BYTES through FixedLengthStream', async () => {
 		vi.stubGlobal('FixedLengthStream', FakeFixedLengthStream);
 		const chunkSize = MiB;
-		const chunks = 11; // 11 MiB — the old buffered path threw at 10 MiB
+		const chunks = OVER_CAP_CHUNKS;
 		const size = chunks * chunkSize;
 		expect(size).toBeGreaterThan(MAX_BUFFER_BYTES);
 
@@ -177,7 +179,7 @@ describe('R2 streaming put', () => {
 	});
 
 	it('a stream without a size keeps the MAX_BUFFER_BYTES guard', async () => {
-		const { stream } = countingSource(11, MiB);
+		const { stream } = countingSource(OVER_CAP_CHUNKS, MiB);
 		const { bucket, storage } = makeStorage(async () => {});
 		await expect(
 			storage.put({

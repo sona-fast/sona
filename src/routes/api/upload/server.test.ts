@@ -92,10 +92,39 @@ describe('POST /api/upload', () => {
 		});
 	});
 
+	it('413s an oversized declared Content-Length BEFORE reading the body (pre-check layer)', async () => {
+		// Layer 1: an explicit oversized header must be rejected without ever
+		// materializing the multipart body — formData() must not be invoked.
+		const event = postEvent(makePlatform(), pngFile(1024)) as { request: Request };
+		Object.defineProperty(event.request, 'headers', {
+			value: new Headers({ 'content-length': String(70 * 1024 * 1024) })
+		});
+		const formData = vi.spyOn(event.request, 'formData');
+		expect(await statusOf(() => POST(event as never))).toBe(413);
+		expect(formData).not.toHaveBeenCalled();
+		expect(put).not.toHaveBeenCalled();
+	});
+
 	it('413s a file over MAX_BUFFER_BYTES without calling the provider', async () => {
 		const file = pngFile(MAX_BUFFER_BYTES + 1);
 		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(413);
 		expect(put).not.toHaveBeenCalled();
+	});
+
+	it('accepts an image over the old 10 MiB cap (LITERAL — pins the raise)', async () => {
+		// The cap was raised from 10 MiB: it rejected real uploads (an 11.8 MB
+		// photo) and sat below art already live on forks (a ~38 MB gif). A literal
+		// 12 MiB fixture pins the raise memory-cheaply so it can't silently regress.
+		const file = pngFile(12 * 1024 * 1024);
+		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(200);
+		expect(put).toHaveBeenCalledTimes(1);
+	});
+
+	it('pins the cap at 64 MiB (LITERAL — guards against silent upward drift)', () => {
+		// The 64 MiB cap exists for isolate memory safety (one buffered copy is
+		// half the 128 MB ceiling); a raise must trip this pin and be re-justified.
+		// The constant-driven 413 test above covers enforcement.
+		expect(MAX_BUFFER_BYTES).toBe(64 * 1024 * 1024);
 	});
 
 	it('accepts a video/webm clip whose head carries the EBML magic (SONA-124)', async () => {
