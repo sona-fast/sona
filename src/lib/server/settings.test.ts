@@ -611,6 +611,37 @@ describe('getVerifiedSupporterKey — caching & fail-closed', () => {
 		expect(state.reads).toBe(2);
 	});
 
+	it('never holds an entitling entry past the key’s own expiry', async () => {
+		// The long TTL is only sound while the entry still entitles. Cached ten
+		// seconds before the key lapses, a full-minute entry would keep answering
+		// "entitled" for fifty seconds after it did — and, worse, keep refusing to
+		// re-read, so a renewal installed at the lapse instant would not land until
+		// the minute was up. Capped at the expiry, the next call re-reads.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(VALID_UNTIL.getTime() - 10_000));
+		stubValidKey();
+		const { db, state } = fakeKeyDb('head.tail');
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({ signatureValid: true });
+		expect(state.reads).toBe(1);
+
+		// The renewal an operator installs the moment their key lapses.
+		const renewedUntil = new Date('2026-10-15T00:00:00Z');
+		vi.mocked(verifySupporterKey).mockResolvedValue({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: renewedUntil
+		});
+		state.value = 'renewed.token';
+		vi.setSystemTime(new Date(VALID_UNTIL.getTime() + 1_000));
+
+		expect(await getVerifiedSupporterKey(db)).toMatchObject({
+			expiresAt: renewedUntil.getTime()
+		});
+		expect(state.reads).toBe(2);
+	});
+
 	it('fails closed on the EMPTY row that removeSupporterKey actually writes', async () => {
 		// removeSupporterKey blanks the value rather than deleting the row, so this
 		// is the arm production hits after a removal — not the absent-row one.

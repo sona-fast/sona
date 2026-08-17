@@ -95,7 +95,7 @@ describe('authHandle — password-recovery route exemption', () => {
 	// in particular would make first-run install redirect /admin/setup →
 	// /admin/login → /admin/setup forever, and nothing else in the suite notices.
 	it('lets every exempt route through with setup complete', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 		const db = makeDb();
 
 		for (const route of ADMIN_AUTH_EXEMPT) {
@@ -104,7 +104,7 @@ describe('authHandle — password-recovery route exemption', () => {
 	});
 
 	it('leaves /admin/setup reachable while setup is incomplete (no redirect loop)', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(false);
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
 		const db = makeDb();
 
 		expect(await redirectFor('/admin/setup', db)).toBeNull();
@@ -218,7 +218,7 @@ describe('authHandle — /api/metrics/download is public', () => {
 
 describe('authHandle — /api/oembed is public (third-party embedders have no session)', () => {
 	it('reaches the endpoint without a session (a link preview is fetched anonymously)', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 
 		// HEAD as well as GET: SvelteKit runs the GET handler for HEAD when no HEAD is
 		// exported, so a HEAD does the same work and must be exempt for the same reason.
@@ -235,7 +235,7 @@ describe('authHandle — /api/oembed is public (third-party embedders have no se
 	});
 
 	it('does not exempt write methods — a POST handler added later must not be public', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 
 		// The route exports only GET today, so SvelteKit answers these with a 405
 		// before endpoint code runs. That safety lives in another file, though: this
@@ -252,7 +252,7 @@ describe('authHandle — /api/oembed is public (third-party embedders have no se
 	});
 
 	it('does not exempt sibling paths — a prefix match would open the whole namespace', async () => {
-		vi.mocked(isSetupComplete).mockResolvedValue(true);
+		vi.mocked(getSetupState).mockResolvedValue('complete');
 
 		// '/api/%6Fembed' pins the encoding case as DEFENSE IN DEPTH, not as production
 		// behaviour: the hook compares the RAW pathname while SvelteKit's router decodes

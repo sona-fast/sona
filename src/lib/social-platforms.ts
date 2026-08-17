@@ -78,6 +78,22 @@ export function platformDomain(platform: SocialPlatform, host: string): string |
 }
 
 /**
+ * True when `host` is one of the profile domains of ANY platform here, whoever
+ * it belongs to.
+ *
+ * The question display asks of a pathless bare token is "is this a hostname",
+ * not "is this MY hostname": `twitter.com` stored in the Telegram setting is
+ * still a scheme-less pathless URL, and rule 2 says that renders the platform
+ * name. Asking only about the current platform read it as the handle
+ * `@twitter.com` while the same value with a scheme rendered "Telegram".
+ */
+export function isSocialDomain(host: string): boolean {
+	return (Object.keys(SOCIAL_HOST_PREFIXES) as SocialPlatform[]).some(
+		(p) => platformDomain(p, host) !== null
+	);
+}
+
+/**
  * First path segments that name one of a platform's own sections rather than an
  * account, for the platforms whose profile prefix is the bare domain and so have
  * nothing else to tell the two apart. Instagram's "Copy link" hands out
@@ -100,8 +116,8 @@ export const RESERVED_SEGMENTS: Partial<Record<SocialPlatform, string[]>> = {
 	],
 	// 'user' is Patreon's legacy profile form, patreon.com/user?u=<id> — the
 	// account is in the query string, so the path segment names nobody.
-	patreon: ['posts', 'c', 'user'],
-	deviantart: ['tag', 'art', 'journal'],
+	patreon: ['posts', 'c', 'user', 'login', 'home', 'search', 'explore'],
+	deviantart: ['tag', 'art', 'journal', 'search', 'shop', 'daily-deviations'],
 	// 'addstickers' matters here beyond tidiness: this repo imports sticker packs
 	// from t.me/addstickers/<pack> (see server/telegram.ts), so pasting one into
 	// the Telegram setting is a realistic slip, and it read as "@addstickers".

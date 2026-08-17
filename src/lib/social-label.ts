@@ -23,6 +23,7 @@
 import {
 	RESERVED_SEGMENTS,
 	extractHandle,
+	isSocialDomain,
 	platformDomain,
 	type SocialPlatform
 } from './social-platforms';
@@ -113,9 +114,13 @@ export function socialHandle(
 		// Bluesky). Junk that is neither a URL nor a username — "not a url" — is
 		// no handle, and rule 2 sends it to the platform name.
 		if (!bare || !/^[A-Za-z0-9._-]+$/.test(bare)) return null;
-		// …unless it is one of the platform's own hosts. `instagram.com` is a
-		// scheme-less pathless URL, and rule 2 says that renders "Instagram".
-		if (platformDomain(platform, bare)) return null;
+		// …unless it is one of the hosts these platforms live on — ANY of them, not
+		// just this platform's. `instagram.com` is a scheme-less pathless URL, and
+		// rule 2 says that renders "Instagram"; so is `twitter.com` filed under the
+		// Telegram setting, which asking only about the current platform rendered as
+		// the handle "@twitter.com" while `https://twitter.com` rendered "Telegram".
+		// Other dotted tokens still read as handles — Bluesky's are domain-shaped.
+		if (isSocialDomain(bare)) return null;
 		return bare;
 	}
 
