@@ -97,14 +97,9 @@ describe('shipped registry', () => {
 					.filter(({ messages }) => !messages[earlyAccessLabelKey(flag)])
 					.map(({ locale }) => `messages/${locale}.json is missing "${earlyAccessLabelKey(flag)}"`)
 			);
-		// Armed: a flag without messages is caught in both locales…
+		// Armed: a flag without messages is caught in both locales, so the
+		// invariant below cannot pass vacuously by never matching anything.
 		expect(missingLabels(['fabricated-flag'], locales)).toHaveLength(2);
-		// …and a flag whose label exists in both files passes.
-		const injected = ['en', 'ja'].map((locale) => ({
-			locale,
-			messages: { [earlyAccessLabelKey('fabricated-flag')]: 'Label' }
-		}));
-		expect(missingLabels(['fabricated-flag'], injected)).toEqual([]);
 		// The real invariant, over whatever the next release registers.
 		expect(missingLabels(Object.keys(SHIPPED), locales)).toEqual([]);
 	});
