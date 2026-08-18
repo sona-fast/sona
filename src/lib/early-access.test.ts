@@ -73,10 +73,13 @@ describe('earlyAccessLabelKey', () => {
 
 describe('shipped registry', () => {
 	it('holds only well-formed GA dates', () => {
-		// Empty since vr-avatars retired (SONA-157). The shape check keeps
-		// guarding whatever the next release registers.
+		// Empty since vr-avatars retired (SONA-157). Armed against a fabricated
+		// malformed date so the shape check cannot rot while the registry is
+		// empty; the loop guards whatever the next release registers.
+		const shape = /^\d{4}-\d{2}-\d{2}$/;
+		expect('17-08-2026').not.toMatch(shape);
 		for (const gaDate of Object.values(SHIPPED)) {
-			expect(gaDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+			expect(gaDate).toMatch(shape);
 		}
 	});
 
