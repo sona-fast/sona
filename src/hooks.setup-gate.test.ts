@@ -36,12 +36,15 @@ function makeHealthyDb(): D1Database {
 	return makeD1(sqlite);
 }
 
-function makeEvent(pathname: string, db: D1Database) {
+function makeEvent(pathname: string, db: D1Database, env: Record<string, string> = {}) {
 	return {
 		cookies: { get: () => undefined },
 		url: new URL(`https://taro.surf${pathname}`),
+		// The observability block reads request headers for the device class;
+		// a bare Request keeps the DB-isolation spy's /gallery control honest.
+		request: new Request(`https://taro.surf${pathname}`),
 		locals: {} as App.Locals,
-		platform: { env: { DB: db } } as unknown as App.Platform
+		platform: { env: { DB: db, ...env } } as unknown as App.Platform
 	} as never;
 }
 
@@ -49,10 +52,14 @@ const resolve = async () => new Response('ok', { headers: { 'content-type': 'tex
 
 async function driveGate(
 	pathname: string,
-	db: D1Database
+	db: D1Database,
+	env: Record<string, string> = {}
 ): Promise<{ redirect: string | null; status: number; body: string }> {
 	try {
-		const res = (await authHandle({ event: makeEvent(pathname, db), resolve } as never)) as Response;
+		const res = (await authHandle({
+			event: makeEvent(pathname, db, env),
+			resolve
+		} as never)) as Response;
 		return { redirect: null, status: res.status, body: await res.text() };
 	} catch (e) {
 		if (isRedirect(e)) return { redirect: e.location, status: e.status, body: '' };
@@ -140,15 +147,18 @@ describe('setup gate — a failed settings read is not "no admin credential"', (
 	// further down (its skip is try/caught, so without this spy the exemption
 	// could silently regress with every other test green).
 	it('never touches the database for /.well-known/security.txt', async () => {
+		// Observability ON, so the metrics write path is under the spy too — the
+		// route must touch the DB in NO direction, reads and counters alike.
+		const observability = { OBSERVABILITY_ENABLED: 'true' };
 		const db = makeHealthyDb();
 		const prepare = vi.spyOn(db, 'prepare');
 
-		await driveGate('/.well-known/security.txt', db);
+		await driveGate('/.well-known/security.txt', db, observability);
 		expect(prepare).not.toHaveBeenCalled();
 
 		// Guard against a vacuous pass: the same drive on a public route does
-		// read the DB through this spy.
-		await driveGate('/gallery', db);
+		// hit the DB through this spy.
+		await driveGate('/gallery', db, observability);
 		expect(prepare).toHaveBeenCalled();
 	});
 

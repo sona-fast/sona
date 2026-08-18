@@ -224,7 +224,15 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// locals.errorSampled; we skip the generic fallback sample for those so a thrown
 	// error yields one detailed row, not a duplicate — but its rollup still lands
 	// here, so it is never double-counted in the rate.
-	if (event.platform?.env.DB && !isAssetPath(path) && isObservabilityEnabled(event.platform?.env)) {
+	// isSecurityTxt is exempt here too, completing the promise the exemptions
+	// above make: a security.txt request touches this fork's DB in NO direction,
+	// writes included (SONA-171). One skipped counter row is a fair trade.
+	if (
+		event.platform?.env.DB &&
+		!isAssetPath(path) &&
+		!isSecurityTxt &&
+		isObservabilityEnabled(event.platform?.env)
+	) {
 		const db = getDb(event.platform.env.DB);
 		// All rolled-up counters for this request go into ONE db.batch — the request
 		// counter, the 5xx error rollup, and (below) the Tier-A page-view counters —
