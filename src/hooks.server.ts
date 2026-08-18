@@ -53,14 +53,41 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// reserved characters (%2F and friends) encoded, and the %25 split keeps a
 	// literal %25 from ever double-decoding — so a double-encoded `/%2561dmin`
 	// stays `/%2561dmin` here just as it does in the router (where it 404s).
+	//
+	// Not gate-only: the observability block at the bottom stores the decoded
+	// path too (routeClass and the page-view path), so an encoded spelling rolls
+	// up under the route it actually served rather than fragmenting the counters.
 	let path: string;
 	try {
 		path = event.url.pathname.split('%25').map(decodeURI).join('%25');
 	} catch {
 		// Kit's own decode of this pathname throws too, so no route would ever
 		// match it. Answer the malformed sequence before any gate logic runs.
-		return new Response('Malformed URI', { status: 400 });
+		// This returns before the header block at the bottom of the handler, so
+		// stamp the same hardening headers (and an explicit no-store) here.
+		return new Response('Malformed URI', {
+			status: 400,
+			headers: {
+				'Cache-Control': 'private, no-store, no-cache',
+				'Strict-Transport-Security': 'max-age=31536000',
+				'X-Frame-Options': 'DENY',
+				'X-Content-Type-Options': 'nosniff',
+				'Referrer-Policy': 'strict-origin-when-cross-origin',
+				'Permissions-Policy': 'camera=(), microphone=(), geolocation=()'
+			}
+		});
 	}
+
+	// Gates apply to the decoded path; EXEMPTIONS apply only to the canonical
+	// spelling. A non-canonical spelling routes to the same handler in Kit, but
+	// other systems keyed on the LITERAL path do not recognize it: the zone
+	// rate-limit rule (scripts/waf-lib.ts) matches the raw path, and the admin
+	// layout reads isAdminAuthExempt($page.url.pathname). Letting `/api/%6Fembed`
+	// pick up the /api/oembed exemption would serve it unauthenticated but
+	// un-rate-limited, and an encoded /admin/login would render with the wrong
+	// chrome. So encoded spellings get the strictest treatment: gates yes,
+	// exemptions no — they 401/302 like any other protected path.
+	const canonical = event.url.pathname === path;
 
 	// The operator's zone, resolved once here so the admin loads and actions all
 	// read the same value rather than each re-deriving it (SONA-119). Only the
@@ -123,8 +150,9 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// (see admin/setup/+page.server.ts). The 503 below is not that guard — note
 	// that /admin/setup is exempt here, so the wizard renders during an outage
 	// exactly as it did before. The 503 keeps the REST of the admin panel shut.
-	const isSetupRoute = path === '/admin/setup' || path.startsWith('/admin/setup/');
-	const isAsset = path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png';
+	const isSetupRoute = canonical && (path === '/admin/setup' || path.startsWith('/admin/setup/'));
+	const isAsset =
+		canonical && (path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png');
 	if (event.platform?.env.DB && !isSetupRoute && !isAsset) {
 		const db = getDb(event.platform.env.DB);
 		const state = await getSetupState(db, event.platform.env);
@@ -160,7 +188,7 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// Protect admin routes (except login, the first-run setup wizard, and the
 	// password-recovery pages). /admin/forgot + /admin/reset are reachable without
 	// a session but stay behind the setup gate above, like /admin/login.
-	if (path.startsWith('/admin') && !isAdminAuthExempt(path)) {
+	if (path.startsWith('/admin') && !(canonical && isAdminAuthExempt(path))) {
 		if (!event.locals.admin) {
 			throw redirect(302, '/admin/login');
 		}
@@ -189,12 +217,13 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// open this route to writes the day someone adds a POST handler there; spelling
 	// it as a path AND a method cannot.
 	const isOembedRead =
+		canonical &&
 		path === '/api/oembed' &&
 		(event.request?.method === 'GET' || event.request?.method === 'HEAD');
 	if (
 		path.startsWith('/api') &&
-		!path.startsWith('/api/cron/') &&
-		path !== '/api/metrics/download' &&
+		!(canonical && path.startsWith('/api/cron/')) &&
+		!(canonical && path === '/api/metrics/download') &&
 		!isOembedRead &&
 		!event.locals.admin
 	) {

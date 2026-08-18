@@ -263,19 +263,28 @@ describe('authHandle — /api/oembed is public (third-party embedders have no se
 		}
 	});
 
-	it('treats an encoded spelling exactly as the route it resolves to (SONA-187)', async () => {
+	it('does not exempt a non-canonical spelling — exemptions are canonical-only (SONA-187)', async () => {
 		vi.mocked(getSetupState).mockResolvedValue('complete');
 
-		// '/api/%6Fembed' decodes to '/api/oembed', which is the route SvelteKit
-		// serves it as — so the gate must apply the same (exempt) treatment, not
-		// 401 a spelling the router considers identical. Before SONA-187 this case
-		// was pinned to 401 as defense in depth; now the gate decodes first, so
-		// gate and router agree by construction.
-		const res = (await authHandle({
-			event: makeEvent('/api/%6Fembed', makeDb()),
-			resolve
-		} as never)) as Response;
-		expect(res.status).not.toBe(401);
+		// '/api/%6Fembed' routes to /api/oembed in Kit, but the exemption must NOT
+		// follow it there: other systems keyed on the LITERAL path (the zone
+		// rate-limit rule in scripts/waf-lib.ts, the admin layout's
+		// isAdminAuthExempt($page.url.pathname) read) do not recognize the encoded
+		// spelling, so exempting it would serve it unauthenticated but
+		// un-rate-limited. Encoded spellings get gates, never exemptions.
+		for (const path of ['/api/%6Fembed', '/api/metrics/downloa%64']) {
+			const res = (await authHandle({
+				event: makeEvent(path, makeDb()),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must stay behind the admin gate`).toBe(401);
+		}
+
+		// Same for the admin-side exemptions: an encoded spelling of /admin/login
+		// is an ordinary admin path to the gate and redirects like one.
+		const db = makeDb();
+		expect(await redirectFor('/admin/lo%67in', db)).toEqual({ status: 302, location: '/admin/login' });
+		expect(await redirectFor('/%61dmin/login', db)).toEqual({ status: 302, location: '/admin/login' });
 	});
 });
 
@@ -339,11 +348,15 @@ describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187
 			resolve
 		} as never)) as Response;
 		expect(res.status).toBe(400);
+		// The 400 returns before the header block at the bottom of the handler, so
+		// it must carry its own hardening headers and an explicit no-store.
+		expect(res.headers.get('Cache-Control')).toBe('private, no-store, no-cache');
+		expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
 	});
 
 	it('does not double-decode: a %25-escaped spelling stays literal, like in the router', async () => {
-		// '/%2561dmin' decodes to the literal path '/%61dmin' in Kit's router too
-		// (the %25 split prevents a second decode), so no /admin route matches it.
+		// '/%2561dmin' stays '/%2561dmin' (the %25 split blocks the second decode),
+		// in Kit's router too, so no /admin route matches it.
 		// The gate must neither 400 it nor treat it as /admin.
 		const db = makeDb();
 		expect(await redirectFor('/%2561dmin/images', db)).toBeNull();
@@ -360,16 +373,39 @@ describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187
 		}
 	});
 
-	it('does not stamp the public shared-cache default on an encoded /api response', async () => {
-		// '/api/%6Fembed' is exempt from the 401 (it IS /api/oembed to the router),
-		// but it is still an /api path — its response must get the private
-		// no-store fallback, not the public s-maxage default an encoded spelling
-		// used to pick up.
+	it('answers an encoded /api spelling with a 401, never the public cache default', async () => {
+		// Exemptions are canonical-only, so '/api/%6Fembed' no longer reaches
+		// resolve at all — the 401 is the whole story. (No anonymous-reachable
+		// non-canonical /api vehicle survives to test the decoded-isPublic cache
+		// stamp directly; that decode is covered by the gate tests above plus the
+		// comment on `isPublic` in hooks.server.ts.)
 		const res = (await authHandle({
 			event: makeEvent('/api/%6Fembed', makeDb()),
 			resolve: async () => new Response('{}', { headers: { 'content-type': 'application/json' } })
 		} as never)) as Response;
-		expect(res.headers.get('cache-control')).toBe('private, no-store, no-cache');
+		expect(res.status).toBe(401);
+		expect(res.headers.get('cache-control')).not.toBe('public, s-maxage=300, stale-while-revalidate=3600');
+	});
+
+	it('keeps decodeURI (not decodeURIComponent): %2F stays a literal, not a slash', async () => {
+		// '/api%2Foembed' survives decodeURI unchanged (reserved chars stay
+		// encoded), so it is canonical but NOT '/api/oembed' — no exemption, 401.
+		// Under a wrong decodeURIComponent swap it would decode to '/api/oembed'
+		// and wrongly pick up the oembed exemption; this pins that mutation.
+		const res = (await authHandle({
+			event: makeEvent('/api%2Foembed', makeDb()),
+			resolve
+		} as never)) as Response;
+		expect(res.status).toBe(401);
+	});
+
+	it('treats an encoded /admin/setup spelling as an ordinary admin path in the setup gate', async () => {
+		// The setup-route exemption is canonical-only too: while setup is
+		// incomplete, an encoded spelling of the wizard redirects into the real one
+		// instead of rendering under the encoded URL.
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
+		const db = makeDb();
+		expect(await redirectFor('/admin/setu%70', db)).toEqual({ status: 302, location: '/admin/setup' });
 	});
 });
 
