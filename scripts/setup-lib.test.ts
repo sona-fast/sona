@@ -634,8 +634,11 @@ describe('securitySummaryLines', () => {
 		// provisioned widget with failed wiring must never read as enforced.
 		for (const status of ['created', 'exists'] as const) {
 			const text = securitySummaryLines('taro.surf', 'exists', status, false).join('\n');
-			expect(text).toContain('but the wiring FAILED');
+			expect(text).toContain('NOT confirm the TURNSTILE_SITEKEY');
 			expect(text).toContain('/admin/login has NO bot check');
+			// Honest on re-runs: the claim is scoped to this run / first runs.
+			expect(text).toContain('this run');
+			expect(text).toContain('first run');
 			expect(text).not.toContain('enforced once deployed');
 		}
 	});
@@ -650,5 +653,27 @@ describe('securitySummaryLines', () => {
 	it('stays silent about pre-existing rate limits and unattempted Turnstile', () => {
 		expect(securitySummaryLines('taro.surf', 'exists', null, false)).toEqual([]);
 		expect(securitySummaryLines('taro.surf', null, null, false)).toEqual([]);
+	});
+});
+
+describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
+	// main() is not importable (it drives live Cloudflare state), so pin the
+	// wiring at the source level: turnstileWired must be composed from the real
+	// PATCH result and the real secret-put result — forcing a literal here once
+	// survived the entire suite while reintroducing the very over-claim the
+	// helper exists to prevent.
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
+
+	it('passes pagesConfigOk && turnstileSecretSet, not a literal', () => {
+		expect(src).toMatch(/securitySummaryLines\(/);
+		expect(src).toMatch(/pagesConfigOk && turnstileSecretSet/);
+	});
+
+	it('assigns pagesConfigOk from the Pages PATCH result', () => {
+		expect(src).toMatch(/pagesConfigOk = res\.ok/);
+	});
+
+	it('putSecret reports failure instead of swallowing it', () => {
+		expect(src).toMatch(/catch\s*\{\s*\n?\s*return false/);
 	});
 });

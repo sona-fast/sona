@@ -429,12 +429,15 @@ export function securitySummaryLines(
 		lines.push('  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).');
 		lines.push('     Add that permission to the token and re-run setup to protect /admin/login.');
 	} else if (turnstileStatus && !turnstileWired) {
+		// Worded as an unverified-THIS-RUN claim: on a re-run, a previous run may
+		// have wired the project already, so "no bot check" would be false there —
+		// but on a first run it's exactly true, and that's the case that matters.
 		lines.push(
-			`  • Admin-login bot check: Turnstile widget ${turnstileStatus} for ${host}, but the wiring FAILED —`
+			`  • Admin-login bot check: Turnstile widget ${turnstileStatus} for ${host}, but this run could`
 		);
-		lines.push('     the TURNSTILE_SITEKEY var or TURNSTILE_SECRET secret did not attach, and the');
-		lines.push('     login check fails open, so /admin/login has NO bot check. Re-run setup, or set');
-		lines.push('     the var + secret on the Pages project yourself.');
+		lines.push('     NOT confirm the TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret attached. On a');
+		lines.push('     first run that means /admin/login has NO bot check (it fails open without both) —');
+		lines.push('     re-run setup, or set the var + secret on the Pages project yourself.');
 	} else if (turnstileStatus) {
 		lines.push(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}`);
 		lines.push('     (TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret set; enforced once deployed).');
