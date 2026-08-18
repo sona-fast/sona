@@ -403,11 +403,17 @@ export function ciWiringEntries(input: CiWiringInput): CiEntry[] {
  * Status contracts: null = not attempted (no domain / no zone / no token);
  * 'error' = the token lacked the scope, which is the one case worth telling
  * the operator how to fix; 'exists' rate limits are old news and stay silent.
+ *
+ * `turnstileWired` says whether BOTH halves of the wiring actually landed (the
+ * Pages PATCH carrying TURNSTILE_SITEKEY and the TURNSTILE_SECRET put). The
+ * login check fails open when either is missing, so a provisioned widget with
+ * failed wiring must read as NOT protected — never as enforced.
  */
 export function securitySummaryLines(
 	host: string,
 	downloadRateLimit: RateLimitStatus | null,
-	turnstileStatus: TurnstileStatus | null
+	turnstileStatus: TurnstileStatus | null,
+	turnstileWired: boolean
 ): string[] {
 	const lines: string[] = [];
 	if (downloadRateLimit === 'error') {
@@ -422,6 +428,13 @@ export function securitySummaryLines(
 	if (turnstileStatus === 'error') {
 		lines.push('  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).');
 		lines.push('     Add that permission to the token and re-run setup to protect /admin/login.');
+	} else if (turnstileStatus && !turnstileWired) {
+		lines.push(
+			`  • Admin-login bot check: Turnstile widget ${turnstileStatus} for ${host}, but the wiring FAILED —`
+		);
+		lines.push('     the TURNSTILE_SITEKEY var or TURNSTILE_SECRET secret did not attach, and the');
+		lines.push('     login check fails open, so /admin/login has NO bot check. Re-run setup, or set');
+		lines.push('     the var + secret on the Pages project yourself.');
 	} else if (turnstileStatus) {
 		lines.push(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}`);
 		lines.push('     (TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret set; enforced once deployed).');

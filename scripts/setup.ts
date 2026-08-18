@@ -319,6 +319,9 @@ async function main() {
 	let turnstileStatus: TurnstileStatus | null = null;
 	let turnstileSitekey = '';
 	let turnstileSecret = '';
+	// Whether the Pages-project PATCH (which carries TURNSTILE_SITEKEY) landed —
+	// the summary reports the bot check as wired only when it did.
+	let pagesConfigOk = false;
 	if (domain) {
 		const host = hostFromDomain(domain);
 		if (cfToken && cfAccount) {
@@ -465,6 +468,7 @@ async function main() {
 			method: 'PATCH',
 			body: payload
 		});
+		pagesConfigOk = res.ok;
 		if (res.ok) {
 			console.log(
 				'✔ attached D1/R2 bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).'
@@ -532,15 +536,18 @@ async function main() {
 	// 7. Generate + set secrets. SETUP_TOKEN gates the first-run wizard.
 	const setupToken = token();
 	const cronSecret = token();
-	const putSecret = (name: string, value: string) => {
+	const putSecret = (name: string, value: string): boolean => {
 		// Feed the value over stdin (never the command line or the log) so the
 		// secret is not echoed to the console or exposed in the process list.
+		// Returns whether the put succeeded — the summary must not claim a
+		// security control is wired when the write silently failed.
 		const cmd = `npx wrangler pages secret put ${name} --project-name ${project}`;
 		console.log(`\n$ ${cmd}`);
 		try {
 			execSync(cmd, { input: `${value}\n`, stdio: ['pipe', 'inherit', 'inherit'] });
+			return true;
 		} catch {
-			// allowFail
+			return false; // allowFail
 		}
 	};
 	putSecret('SETUP_TOKEN', setupToken);
@@ -551,7 +558,9 @@ async function main() {
 	if (resendFrom) putSecret('RESEND_FROM', resendFrom);
 	// Turnstile secret for the admin-login siteverify. Server-only, so
 	// it's a Pages secret (never a plain var); the public sitekey was set above.
-	if (turnstileSecret) putSecret('TURNSTILE_SECRET', turnstileSecret);
+	// The login check fails open without it, so remember whether the put landed.
+	let turnstileSecretSet = false;
+	if (turnstileSecret) turnstileSecretSet = putSecret('TURNSTILE_SECRET', turnstileSecret);
 
 	// 8. Offer to wire the fork's GitHub Actions secrets/vars so CI deploys work
 	//    with no separate manual step. Only when gh is installed + authenticated,
@@ -657,7 +666,12 @@ async function main() {
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
 		// Zone security: rate limit + admin-login Turnstile.
-		for (const line of securitySummaryLines(host, downloadRateLimit, turnstileStatus)) {
+		for (const line of securitySummaryLines(
+			host,
+			downloadRateLimit,
+			turnstileStatus,
+			pagesConfigOk && turnstileSecretSet
+		)) {
 			console.log(line);
 		}
 	}

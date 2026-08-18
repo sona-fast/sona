@@ -613,24 +613,42 @@ describe('securitySummaryLines', () => {
 
 	it('prints the Turnstile warning for EVERY rate-limit outcome (regression: a missing brace once nested it inside the applied branch)', () => {
 		for (const rl of [null, 'exists', 'error', 'created', 'updated'] as const) {
-			const lines = securitySummaryLines('taro.surf', rl, 'error');
+			const lines = securitySummaryLines('taro.surf', rl, 'error', true);
 			expect(lines, `downloadRateLimit=${rl}`).toContain(turnstileWarning);
 		}
 	});
 
 	it('reports an applied rate limit and a created Turnstile widget together', () => {
-		const lines = securitySummaryLines('taro.surf', 'created', 'created');
+		const lines = securitySummaryLines('taro.surf', 'created', 'created', true);
 		expect(lines.join('\n')).toContain('Public-endpoint rate limit: applied to the taro.surf zone');
 		expect(lines.join('\n')).toContain('Admin-login bot check: Turnstile created for taro.surf');
 	});
 
 	it('tells the operator how to fix a scope-starved token for the rate limit', () => {
-		const lines = securitySummaryLines('taro.surf', 'error', null);
+		const lines = securitySummaryLines('taro.surf', 'error', null, false);
 		expect(lines.join('\n')).toContain('npm run apply-download-ratelimit -- taro.surf');
 	});
 
+	it('reports NO bot check when the widget provisioned but the wiring failed', () => {
+		// The login check fails open without the sitekey var + secret, so a
+		// provisioned widget with failed wiring must never read as enforced.
+		for (const status of ['created', 'exists'] as const) {
+			const text = securitySummaryLines('taro.surf', 'exists', status, false).join('\n');
+			expect(text).toContain('but the wiring FAILED');
+			expect(text).toContain('/admin/login has NO bot check');
+			expect(text).not.toContain('enforced once deployed');
+		}
+	});
+
+	it('never prints the enforced claim unless the wiring landed', () => {
+		const wired = securitySummaryLines('taro.surf', null, 'created', true).join('\n');
+		expect(wired).toContain('enforced once deployed');
+		const unwired = securitySummaryLines('taro.surf', null, 'created', false).join('\n');
+		expect(unwired).not.toContain('enforced once deployed');
+	});
+
 	it('stays silent about pre-existing rate limits and unattempted Turnstile', () => {
-		expect(securitySummaryLines('taro.surf', 'exists', null)).toEqual([]);
-		expect(securitySummaryLines('taro.surf', null, null)).toEqual([]);
+		expect(securitySummaryLines('taro.surf', 'exists', null, false)).toEqual([]);
+		expect(securitySummaryLines('taro.surf', null, null, false)).toEqual([]);
 	});
 });
