@@ -381,8 +381,10 @@ describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187
 		// The cache branch reads the DECODED path too (isPublic in hooks.server.ts).
 		// An admin with a valid session passes the /api gate, so their encoded /api
 		// spelling DOES reach resolve — and the non-HTML 200 coming back must get
-		// the private default, not the public s-maxage stamp the raw (non-/api-
-		// looking) pathname would earn.
+		// the private default. The encoding sits in the FIRST segment ('/%61pi'),
+		// so the raw pathname does not start with '/api': an isPublic that read the
+		// raw pathname would stamp the public s-maxage default on this private
+		// JSON, which is exactly the regression this test discriminates.
 		const sqlite = new Database(':memory:');
 		sqlite.exec(`
 			CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -391,7 +393,7 @@ describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187
 		sqlite
 			.prepare('INSERT INTO sessions (token, created_at, expires_at) VALUES (?, ?, ?)')
 			.run(await hashToken('some-token'), new Date().toISOString(), new Date(Date.now() + 3_600_000).toISOString());
-		const url = new URL('https://taro.surf/api/%61rtists');
+		const url = new URL('https://taro.surf/%61pi/artists');
 		const res = (await authHandle({
 			event: {
 				cookies: { get: (name: string) => (name === SESSION_COOKIE ? 'some-token' : undefined) },
@@ -406,13 +408,11 @@ describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187
 		expect(res.headers.get('Cache-Control')).toBe('private, no-store, no-cache');
 	});
 
-	it('keeps decodeURI (not decodeURIComponent): %2F stays a literal, not a slash', async () => {
+	it('keeps an encoded-slash /api path behind the gate', async () => {
 		// '/api%2Foembed' survives decodeURI unchanged (reserved chars stay
 		// encoded), so it is canonical but NOT '/api/oembed' — no exemption, 401.
-		// NOTE: this alone does not discriminate the decodeURIComponent swap —
-		// under it the path decodes to '/api/oembed', canonicity breaks, and the
-		// exemption is refused for THAT reason instead, still 401. The asset test
-		// below is what actually pins the swap.
+		// (This does not discriminate the decodeURI/decodeURIComponent choice —
+		// it 401s under either; the asset test below is what pins the decoder.)
 		const res = (await authHandle({
 			event: makeEvent('/api%2Foembed', makeDb()),
 			resolve
@@ -751,6 +751,62 @@ describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 			{ metric: 'referrer', dim: 't.co', count: 1 }, // host only — the path+query are gone
 			{ metric: 'request', dim: 'public', count: 1 }
 		]);
+	});
+
+	it('stores the DECODED path as the pageview key for an encoded public URL', async () => {
+		// The pageview dim is deliberately the decoded path (see the comment at the
+		// pageViewStatements call site): '/tags/foo%20bar' and '/tags/foo bar' are
+		// one page to Kit's router, so they must roll up as one counter row.
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: pageviewEvent('/tags/foo%20bar', db, waits, {
+				'user-agent': REAL_UA,
+				'cf-ipcountry': 'US'
+			}),
+			resolve: resolveHtml
+		} as never);
+		await Promise.all(waits);
+
+		const rows = sqlite.prepare("SELECT dim FROM metric_rollup WHERE metric='pageview'").all();
+		expect(rows).toEqual([{ dim: '/tags/foo bar' }]);
+	});
+
+	it('classifies an encoded admin path by its DECODED route class — no visitor page view', async () => {
+		// routeClass and the pageview key read the decoded path (SONA-187). If a
+		// regression fed them the raw pathname, an admin loading '/%61dmin/images'
+		// would classify as 'public' and mint a visitor pageview row for an admin
+		// page. An admin session is needed so the request survives the gate.
+		const { db, sqlite } = makeMetricsDb();
+		sqlite.exec(
+			`CREATE TABLE sessions (token TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);`
+		);
+		sqlite
+			.prepare('INSERT INTO sessions (token, created_at, expires_at) VALUES (?, ?, ?)')
+			.run(
+				await hashToken('some-token'),
+				new Date().toISOString(),
+				new Date(Date.now() + 3_600_000).toISOString()
+			);
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: {
+				cookies: { get: (name: string) => (name === SESSION_COOKIE ? 'some-token' : undefined) },
+				url: new URL('https://taro.surf/%61dmin/images'),
+				request: { headers: headers({ 'user-agent': REAL_UA, 'cf-ipcountry': 'US' }) },
+				locals: {} as App.Locals,
+				platform: {
+					env: { DB: db, OBSERVABILITY_ENABLED: 'true' },
+					context: { waitUntil: (p: Promise<unknown>) => waits.push(p) }
+				}
+			} as never,
+			resolve: resolveHtml
+		} as never);
+		await Promise.all(waits);
+
+		const request = sqlite.prepare("SELECT dim FROM metric_rollup WHERE metric='request'").all();
+		expect(request).toEqual([{ dim: 'admin' }]);
+		expect(sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE metric='pageview'").get().c).toBe(0);
 	});
 
 	it('does NOT count admin routes or cron endpoints as page views', async () => {
