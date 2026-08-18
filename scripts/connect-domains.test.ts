@@ -162,4 +162,18 @@ describe('connect-domains.ts ↔ candidate-walk source contract', () => {
 	it('passes the candidates to zoneGuidance', () => {
 		expect(src).toMatch(/zoneGuidance\(\s*zone,\s*host,\s*candidates\s*\)/);
 	});
+
+	// Consent honesty: the confirm prompt covers a zone-wide mutation, so it must
+	// name the RESOLVED zone via zoneConsentLabel — reverting to `the ${host}
+	// zone` (the round-3 bug) would mislead subdomain operators with every
+	// behavioral test still green. The transforms bullet's whole-zone disclosure
+	// is pinned the same way.
+	it('derives the consent label via zoneConsentLabel and prints it', () => {
+		expect(src).toMatch(/zoneConsentLabel\(\s*host,\s*zoneName\s*\)/);
+		expect(src).toMatch(/changes to \$\{zoneLabel\}/);
+	});
+
+	it('keeps the whole-zone disclosure on the transforms bullet', () => {
+		expect(src).toMatch(/affects the whole zone, not just \$\{host\}/);
+	});
 });
