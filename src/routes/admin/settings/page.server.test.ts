@@ -1086,7 +1086,7 @@ describe('settings load — supporter key is raw + verified, never in public set
 		// seed a synthetic in-window flag for this test only (restored in the
 		// finally) — otherwise the earlyAccess assertion below would compare
 		// [] to [] and never exercise the flag + formatDate mapping.
-		EARLY_ACCESS['probe'] = '2999-01-01';
+		EARLY_ACCESS['probe'] = { gaDate: '2999-01-01', label: () => 'Probe' };
 		try {
 			const result = (await load(loadEvent(platform))) as unknown as {
 				supporterKey: { keyRecord: string; state: string; validUntil: string } | null;
