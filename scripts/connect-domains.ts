@@ -28,12 +28,19 @@ import { readFileSync, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout, env, argv, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { cfApi, hostFromDomain, imageResizingOutcome, type CfApiResult } from './setup-lib.ts';
+import {
+	cfApi,
+	hostFromDomain,
+	zoneNameCandidates,
+	imageResizingOutcome,
+	type CfApiResult
+} from './setup-lib.ts';
 import {
 	cdnHost,
 	parseWranglerConfig,
 	classifyZone,
 	zoneGuidance,
+	resolveZone,
 	cdnDomainState,
 	bucketDomainTlsIssued,
 	pagesDomainAttached,
@@ -54,9 +61,6 @@ const TOKEN_RECIPE =
 	'    • Account · Cloudflare Pages · Edit      (to attach the site domain)\n' +
 	'    • Zone · Zone Settings · Edit            (optional; lets it enable Image Transformations)\n' +
 	'Then export CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID and re-run.';
-
-const isAuthError = (r: { ok: boolean; status: number }) =>
-	!r.ok && (r.status === 401 || r.status === 403);
 
 /** Best-effort read of the deployed `siteUrl` site-setting (forward-compat with SONA-24). */
 function readSiteUrlSetting(dbName: string): string | null {
@@ -135,22 +139,26 @@ async function main(): Promise<number> {
 		}
 		const cdn = cdnHost(host);
 
-		// Zone lookup (account-scoped by the token). A 401/403 here is a hard token
-		// error; anything else is diagnostic state, not a crash.
-		const zoneRes = await cfApi(cfToken, `/zones?name=${encodeURIComponent(host)}`);
-		if (isAuthError(zoneRes)) {
-			console.error(`✖ The API token cannot read zones (HTTP ${zoneRes.status}).\n`);
+		// Zone lookup (account-scoped by the token). A subdomain like
+		// sona.example.com is served by the example.com zone, so walk the candidate
+		// zone names most-specific-first instead of one exact lookup. A 401/403 is
+		// a hard token error; anything else is diagnostic state, not a crash.
+		const candidates = zoneNameCandidates(host);
+		const { zone, authStatus } = await resolveZone(candidates, (name) =>
+			cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
+		);
+		if (authStatus !== null) {
+			console.error(`✖ The API token cannot read zones (HTTP ${authStatus}).\n`);
 			console.error(TOKEN_RECIPE);
 			return 1;
 		}
-		const zone = classifyZone(zoneRes.result);
 
 		if (check) {
 			return await runDoctor({ cfToken, cfAccount, bucket, host, cdn, zone, dbName });
 		}
 
 		// --- mutating mode -------------------------------------------------------
-		const guidance = zoneGuidance(zone, host);
+		const guidance = zoneGuidance(zone, host, candidates);
 		if (guidance) {
 			console.log(`ℹ ${guidance}`);
 			return 0; // fail soft — the registrar/propagation step is the operator's

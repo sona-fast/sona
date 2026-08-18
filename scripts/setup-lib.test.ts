@@ -725,15 +725,55 @@ describe('cdnAttachmentLines', () => {
 		const text = cdnAttachmentLines('https://cdn.taro.surf', 'taro-images', 'taro.surf').join('\n');
 		expect(text).toContain('npm run connect-domains -- taro.surf');
 		expect(text).toContain('npm run connect-domains -- --check taro.surf');
+		// connect-domains hard-requires BOTH env vars (it exits 1 otherwise), so
+		// both commands must name the pair.
+		expect(text.match(/CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id>/g)).toHaveLength(2);
 		// The dashboard route survives as the fallback for tokens without DNS scope.
 		expect(text).toContain('R2 → taro-images → Settings → Custom Domains → add https://cdn.taro.surf');
 		expect(text).toContain('Images 404 until this is done.');
 	});
 
+	it('normalizes a messy domain answer to the bare host itself', () => {
+		const text = cdnAttachmentLines(
+			'https://cdn.taro.surf',
+			'taro-images',
+			'https://Taro.Surf/gallery'
+		).join('\n');
+		expect(text).toContain('npm run connect-domains -- taro.surf');
+	});
+
+	it('falls back to the dashboard when the R2 public URL is not cdn.<domain>', () => {
+		// connect-domains always attaches cdn.<domain>; pointing an overridden
+		// public URL at it would wire the wrong host and leave images 404ing.
+		const text = cdnAttachmentLines('https://images.taro.surf', 'taro-images', 'taro.surf').join('\n');
+		expect(text).not.toContain('connect-domains');
+		expect(text).toContain('Cloudflare dashboard → R2 → taro-images → Settings → Custom Domains');
+		expect(text).toContain('add https://images.taro.surf');
+		expect(text).toContain('Images 404 until this is done.');
+	});
+
 	it('falls back to the dashboard walkthrough when no domain was given', () => {
-		const text = cdnAttachmentLines('https://cdn.taro.surf', 'taro-images', null).join('\n');
+		const text = cdnAttachmentLines('https://cdn.taro.surf', 'taro-images', '').join('\n');
 		expect(text).not.toContain('connect-domains');
 		expect(text).toContain('Cloudflare dashboard → R2 → taro-images → Settings → Custom Domains');
 		expect(text).toContain('Images 404 until this is done.');
+	});
+});
+
+describe('cdnAttachmentLines ↔ package.json contract', () => {
+	// The printed `npm run <script>` commands must exist in package.json — a
+	// script rename would otherwise point every fresh setup at a dead command.
+	const pkg = JSON.parse(
+		readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')
+	) as { scripts: Record<string, string> };
+	const text = cdnAttachmentLines('https://cdn.taro.surf', 'taro-images', 'taro.surf').join('\n');
+	const scripts = [...text.matchAll(/npm run (\S+)/g)].map((m) => m[1]);
+
+	it('prints at least one npm run command', () => {
+		expect(scripts).toContain('connect-domains');
+	});
+
+	it.each([...new Set(scripts)])('`npm run %s` exists in package.json scripts', (name) => {
+		expect(pkg.scripts).toHaveProperty(name);
 	});
 });

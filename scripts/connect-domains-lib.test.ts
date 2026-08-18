@@ -4,6 +4,7 @@ import {
 	parseWranglerConfig,
 	classifyZone,
 	zoneGuidance,
+	resolveZone,
 	findBucketDomain,
 	cdnDomainState,
 	bucketDomainTlsIssued,
@@ -74,8 +75,68 @@ describe('zoneGuidance (fail-soft messages)', () => {
 		expect(g).toContain('carter.ns.cf, fish.ns.cf');
 	});
 
+	it('names the candidates tried instead of telling them to add the subdomain as a site', () => {
+		const g = zoneGuidance({ exists: false, active: false }, 'sona.taro.surf', [
+			'sona.taro.surf',
+			'taro.surf'
+		]);
+		expect(g).toContain('tried sona.taro.surf, taro.surf');
+		expect(g).toContain('registrable domain');
+	});
+
 	it('returns null when the zone is active (proceed)', () => {
 		expect(zoneGuidance({ exists: true, active: true, id: 'z1' }, 'taro.surf')).toBeNull();
+	});
+});
+
+describe('resolveZone', () => {
+	const ok = (result: unknown) => ({ ok: true, status: 200, result });
+	const activeZone = [{ id: 'z1', status: 'active', name_servers: ['a.ns.cf'] }];
+
+	it('finds the registrable-domain zone for a subdomain (second candidate)', async () => {
+		const tried: string[] = [];
+		const { zone, zoneName, authStatus } = await resolveZone(
+			['sona.taro.surf', 'taro.surf'],
+			async (name) => {
+				tried.push(name);
+				return ok(name === 'taro.surf' ? activeZone : []);
+			}
+		);
+		expect(tried).toEqual(['sona.taro.surf', 'taro.surf']);
+		expect(zone).toEqual({ exists: true, active: true, id: 'z1', nameServers: ['a.ns.cf'] });
+		expect(zoneName).toBe('taro.surf');
+		expect(authStatus).toBeNull();
+	});
+
+	it('stops at the first candidate that matches (no extra lookups)', async () => {
+		const tried: string[] = [];
+		const { zoneName } = await resolveZone(['taro.surf'], async (name) => {
+			tried.push(name);
+			return ok(activeZone);
+		});
+		expect(tried).toEqual(['taro.surf']);
+		expect(zoneName).toBe('taro.surf');
+	});
+
+	it('reports no zone when no candidate matches', async () => {
+		const { zone, zoneName, authStatus } = await resolveZone(
+			['sona.taro.surf', 'taro.surf'],
+			async () => ok([])
+		);
+		expect(zone).toEqual({ exists: false, active: false });
+		expect(zoneName).toBeNull();
+		expect(authStatus).toBeNull();
+	});
+
+	it('aborts the walk on an auth error and surfaces the status', async () => {
+		const tried: string[] = [];
+		const { zone, authStatus } = await resolveZone(['sona.taro.surf', 'taro.surf'], async (name) => {
+			tried.push(name);
+			return { ok: false, status: 403 };
+		});
+		expect(tried).toEqual(['sona.taro.surf']);
+		expect(authStatus).toBe(403);
+		expect(zone).toEqual({ exists: false, active: false });
 	});
 });
 

@@ -62,17 +62,49 @@ export function classifyZone(result: unknown): ZoneStatus {
 }
 
 /**
+ * Resolves the Cloudflare zone serving `host` by trying each candidate zone
+ * name in order (most specific first — `sona.example.com`, then `example.com`),
+ * because a subdomain is served by its registrable domain's zone and an exact
+ * `GET /zones?name=<subdomain>` lookup finds nothing for it. Returns the first
+ * candidate that exists as a zone. An auth error (401/403) on any lookup aborts
+ * the walk — it would fail identically for every candidate — and is surfaced as
+ * `authStatus` for the caller's hard-error path.
+ */
+export async function resolveZone(
+	candidates: string[],
+	lookup: (name: string) => Promise<{ ok: boolean; status: number; result?: unknown }>
+): Promise<{ zone: ZoneStatus; zoneName: string | null; authStatus: number | null }> {
+	for (const name of candidates) {
+		const res = await lookup(name);
+		if (!res.ok && (res.status === 401 || res.status === 403))
+			return { zone: { exists: false, active: false }, zoneName: null, authStatus: res.status };
+		const zone = classifyZone(res.result);
+		if (zone.exists) return { zone, zoneName: name, authStatus: null };
+	}
+	return { zone: { exists: false, active: false }, zoneName: null, authStatus: null };
+}
+
+/**
  * Fail-soft precondition message for the zone, or null when it's active and we
  * can proceed. Not-a-zone and not-active are operator/registrar steps outside
  * any Cloudflare token, so connect-domains prints this and exits 0 rather than
- * erroring.
+ * erroring. `candidates` are the zone names the lookup tried (a subdomain's
+ * host is NOT one someone can add as a site, so the message names what was
+ * tried instead of telling them to add `host` itself).
  */
-export function zoneGuidance(zone: ZoneStatus, host: string): string | null {
-	if (!zone.exists)
+export function zoneGuidance(
+	zone: ZoneStatus,
+	host: string,
+	candidates: string[] = [host]
+): string | null {
+	if (!zone.exists) {
+		const tried = candidates.length > 1 ? ` (tried ${candidates.join(', ')})` : '';
 		return (
-			`No Cloudflare zone found for ${host}. Add ${host} to this Cloudflare account ` +
-			`(dashboard → Add a site), point your registrar's nameservers at Cloudflare, then re-run.`
+			`No Cloudflare zone found for ${host}${tried}. Add your registrable domain to this ` +
+			`Cloudflare account (dashboard → Add a site), point your registrar's nameservers at ` +
+			`Cloudflare, then re-run.`
 		);
+	}
 	if (!zone.active) {
 		const ns = zone.nameServers?.length ? ` Assigned nameservers: ${zone.nameServers.join(', ')}.` : '';
 		return (

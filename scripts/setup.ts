@@ -649,11 +649,7 @@ async function main() {
 	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');
 	console.log(`  2. Open  https://${project}.pages.dev/admin/setup  and finish in the wizard.`);
 	if (useR2 && r2PublicUrl) {
-		for (const line of cdnAttachmentLines(
-			r2PublicUrl,
-			bucket,
-			domain ? hostFromDomain(domain) : null
-		)) {
+		for (const line of cdnAttachmentLines(r2PublicUrl, bucket, domain)) {
 			console.log(line);
 		}
 	}

@@ -88,6 +88,7 @@ original deployment it grew out of). The project home is
    | Account · D1 · Edit | create + migrate the database |
    | Account · Workers R2 Storage · Edit | create the image bucket |
    | Account · Turnstile · Edit | **only if** attaching a custom domain — provisions the admin-login bot check |
+   | Zone · Zone · Read | **only if** attaching a custom domain — lets connect-domains resolve the zone |
    | Zone · DNS · Edit | **only if** attaching a custom domain (writes the apex record) |
    | Zone · WAF · Edit | **only if** attaching a custom domain — adds a WAF rate limit on the public API endpoints (the download beacon and the oEmbed provider) |
    | Zone · Zone Settings · Edit | *optional* — lets setup enable image resizing for you |
@@ -139,18 +140,21 @@ Sona is single-admin, so there's no second account to let you back in. Two paths
 nameservers point at Cloudflare and the zone is **active**:
 
 ```sh
+export CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id>   # same pair as setup
 npm run connect-domains -- yourdomain.com            # attach cdn.<domain> → bucket, <domain> → Pages
 npm run connect-domains -- --check yourdomain.com    # read-only doctor: which step is missing?
 ```
 
 It attaches the CDN host (`cdn.yourdomain.com`) to the images bucket and the
-site domain to the Pages project — **images 404 until the CDN host is
-attached** — and with *Zone · Zone Settings · Edit* on the token it also enables
-Image Transformations. It touches nothing else in the zone, and every step is
-idempotent, so re-running is safe.
+site domain to the Pages project. **Images 404 until the CDN host is attached.**
+With *Zone · Zone Settings · Edit* on the token it also enables Image
+Transformations. It adds no other DNS records, and it's safe to re-run. The
+token needs *Zone · Zone · Read*, *Zone · DNS · Edit*, *Account · Workers R2
+Storage · Edit*, and *Account · Cloudflare Pages · Edit* — all in the **API
+token scopes** table in step 3.
 
-Two things still need a manual step — setup and connect-domains preflight them
-when they can, but they need dashboard/DNS access:
+Two things can still need a manual step. Setup and connect-domains preflight
+them where they can, but finishing either may need dashboard or DNS access:
 
 - **Pages apex domain.** After adding your domain to the Pages project, the
   **apex** needs a manual **proxied CNAME** `yourdomain.com → <project>.pages.dev`

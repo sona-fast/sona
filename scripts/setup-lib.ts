@@ -471,26 +471,28 @@ export function pagesPatchConfirmsSitekey(result: unknown, sitekey: string): boo
  * Next-steps lines for wiring the R2 public URL (the CDN host) to the bucket.
  * connect-domains is the primary path when a domain was given — it can't run
  * inside setup because the zone must already be ACTIVE, and nameserver
- * propagation can lag by hours. Without a domain there is nothing to hand
- * connect-domains, so the dashboard walkthrough stands alone. Kept pure so a
- * test can pin that the connect-domains pointer doesn't rot out of the output
- * again (a real fork setup shipped broken images because nothing named it).
+ * propagation can lag by hours. But connect-domains always attaches
+ * `cdn.<domain>`, so when the operator overrode the R2 public URL to anything
+ * else (or gave no domain), pointing them at it would wire the WRONG host and
+ * leave images 404ing — those cases get the dashboard walkthrough instead.
+ * Takes the raw domain answer (may be empty) and normalizes it itself. Kept
+ * pure so a test can pin that the connect-domains pointer doesn't rot out of
+ * the output again (a real fork setup shipped broken images because nothing
+ * named it).
  */
-export function cdnAttachmentLines(
-	r2PublicUrl: string,
-	bucket: string,
-	domainHost: string | null
-): string[] {
-	if (domainHost) {
+export function cdnAttachmentLines(r2PublicUrl: string, bucket: string, domain: string): string[] {
+	const host = hostFromDomain(domain);
+	if (host && hostFromDomain(r2PublicUrl) === `cdn.${host}`) {
 		return [
 			`  3. Connect ${r2PublicUrl} to the bucket — setup did not touch DNS. Once the`,
 			'     zone is active in Cloudflare, run:',
-			`       CLOUDFLARE_API_TOKEN=<token> npm run connect-domains -- ${domainHost}`,
-			`     It attaches ${r2PublicUrl} to the bucket and the site domain to the Pages`,
-			'     project, and touches nothing else in the zone. Or add the CDN host by hand:',
-			`       dashboard → R2 → ${bucket} → Settings → Custom Domains → add ${r2PublicUrl}.`,
+			'       CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> \\',
+			`         npm run connect-domains -- ${host}`,
+			'     Or add the CDN host by hand:',
+			`       Cloudflare dashboard → R2 → ${bucket} → Settings → Custom Domains → add ${r2PublicUrl}.`,
 			'     Images 404 until this is done. Diagnose a half-finished domain setup with:',
-			`       npm run connect-domains -- --check ${domainHost}`
+			'       CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> \\',
+			`         npm run connect-domains -- --check ${host}`
 		];
 	}
 	return [
