@@ -20,8 +20,7 @@ import { DEFAULT_THEME_ID } from '$lib/themes';
 import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifySupporterKey, supporterKeyDisplayRecord } from '$lib/server/supporter-key';
-import { earlyAccessActive } from '$lib/early-access';
-import { formatDate } from '$lib/index';
+import { EARLY_ACCESS } from '$lib/early-access';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -1083,39 +1082,44 @@ describe('settings load — supporter key is raw + verified, never in public set
 			expiresAt: new Date('2026-09-01T00:00:00Z')
 		});
 
-		const result = (await load(loadEvent(platform))) as unknown as {
-			supporterKey: { keyRecord: string; state: string; validUntil: string } | null;
-			earlyAccess: unknown[];
-			settings: Record<string, unknown>;
-		};
+		// The shipped registry is empty since vr-avatars retired (SONA-157), so
+		// seed a synthetic in-window flag for this test only (restored in the
+		// finally) — otherwise the earlyAccess assertion below would compare
+		// [] to [] and never exercise the flag + formatDate mapping.
+		EARLY_ACCESS['probe'] = '2999-01-01';
+		try {
+			const result = (await load(loadEvent(platform))) as unknown as {
+				supporterKey: { keyRecord: string; state: string; validUntil: string } | null;
+				earlyAccess: unknown[];
+				settings: Record<string, unknown>;
+			};
 
-		// Exact shape on purpose: any NEW field added to the payload must be
-		// re-reviewed here before it rides to the client. 'head.tail' is under the
-		// masking threshold, so it passes through — the mask itself is covered in
-		// supporter-key.test.ts and the "never ships the full token" test below.
-		expect(result.supporterKey).toEqual({
-			keyRecord: 'head.tail',
-			state: 'valid',
-			validUntil: '2026.08.31',
-			// UTC-pinned twin of validUntil; keys the dismissal cookie (SONA-119).
-			dismissKey: '2026.08.31',
-			// Reviewed for this guard: which half of the warning window the key is
-			// in. Two values, derived from the expiry the payload already carries —
-			// it tells the client nothing the token or the dates don't.
-			dismissPhase: expect.stringMatching(/^(early|final)$/),
-			daysRemaining: expect.any(Number),
-			expiringSoon: expect.any(Boolean)
-		});
-		// The registry's contents are release-process-owned (empty since
-		// vr-avatars retired — SONA-157), so derive the expectation from it: any
-		// flag inside its window at load time
-		// surfaces as flag + display-formatted GA date — and nothing else rides
-		// along (a NEW field in the mapping must be re-reviewed here first).
-		expect(result.earlyAccess).toEqual(
-			earlyAccessActive(new Date()).map((e) => ({ flag: e.flag, gaDate: formatDate(e.gaDate) }))
-		);
-		// The token must never leak into the client-exposed SiteSettings.
-		expect(result.settings.supporterKey).toBeUndefined();
+			// Exact shape on purpose: any NEW field added to the payload must be
+			// re-reviewed here before it rides to the client. 'head.tail' is under the
+			// masking threshold, so it passes through — the mask itself is covered in
+			// supporter-key.test.ts and the "never ships the full token" test below.
+			expect(result.supporterKey).toEqual({
+				keyRecord: 'head.tail',
+				state: 'valid',
+				validUntil: '2026.08.31',
+				// UTC-pinned twin of validUntil; keys the dismissal cookie (SONA-119).
+				dismissKey: '2026.08.31',
+				// Reviewed for this guard: which half of the warning window the key is
+				// in. Two values, derived from the expiry the payload already carries —
+				// it tells the client nothing the token or the dates don't.
+				dismissPhase: expect.stringMatching(/^(early|final)$/),
+				daysRemaining: expect.any(Number),
+				expiringSoon: expect.any(Boolean)
+			});
+			// Each flag inside its window surfaces as flag + display-formatted GA
+			// date — and nothing else rides along (a NEW field in the mapping must
+			// be re-reviewed here first).
+			expect(result.earlyAccess).toEqual([{ flag: 'probe', gaDate: '2999.01.01' }]);
+			// The token must never leak into the client-exposed SiteSettings.
+			expect(result.settings.supporterKey).toBeUndefined();
+		} finally {
+			delete EARLY_ACCESS['probe'];
+		}
 	});
 
 	it('surfaces an expired key as expired (still shown, with its date)', async () => {

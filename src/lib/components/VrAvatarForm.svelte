@@ -1157,7 +1157,6 @@
 	}
 	.sr-checkbox:checked + .switch-visual { background: var(--primary); }
 	.sr-checkbox:checked + .switch-visual::after { transform: translateX(16px); }
-	.sr-checkbox:disabled + .switch-visual { opacity: 0.5; cursor: not-allowed; }
 	.sr-checkbox:focus-visible + .switch-visual { outline: 2px solid var(--ring); outline-offset: 2px; }
 	.switch-text { display: flex; flex-direction: column; gap: 1px; }
 	/* Aligns with the text column: 36px switch + 12px row gap. */

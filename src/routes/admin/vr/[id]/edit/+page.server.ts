@@ -68,7 +68,7 @@ export const actions = {
 		const avatarId = parseAvatarId(params.id);
 		if (avatarId === null) return fail(404, { error: 'Avatar not found.' });
 		const existing = await db
-			.select({ id: vrAvatars.id, published: vrAvatars.published, modelUrl: vrAvatars.modelUrl })
+			.select({ id: vrAvatars.id, modelUrl: vrAvatars.modelUrl })
 			.from(vrAvatars)
 			.where(eq(vrAvatars.id, avatarId))
 			.get();

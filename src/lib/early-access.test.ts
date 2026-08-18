@@ -89,15 +89,24 @@ describe('shipped registry', () => {
 				readFileSync(new URL(`../../messages/${locale}.json`, import.meta.url), 'utf-8')
 			) as Record<string, string>
 		}));
-		for (const flag of Object.keys(SHIPPED)) {
-			const key = earlyAccessLabelKey(flag);
-			for (const { locale, messages } of locales) {
-				expect(
-					messages[key],
-					`messages/${locale}.json is missing "${key}" — the settings page would fall back to the raw flag slug`
-				).toBeTruthy();
-			}
-		}
+		// The invariant as a predicate, so it can be proven armed against
+		// fabricated inputs even while SHIPPED is empty (SONA-157).
+		const missingLabels = (flags: string[], files: typeof locales) =>
+			flags.flatMap((flag) =>
+				files
+					.filter(({ messages }) => !messages[earlyAccessLabelKey(flag)])
+					.map(({ locale }) => `messages/${locale}.json is missing "${earlyAccessLabelKey(flag)}"`)
+			);
+		// Armed: a flag without messages is caught in both locales…
+		expect(missingLabels(['fabricated-flag'], locales)).toHaveLength(2);
+		// …and a flag whose label exists in both files passes.
+		const injected = ['en', 'ja'].map((locale) => ({
+			locale,
+			messages: { [earlyAccessLabelKey('fabricated-flag')]: 'Label' }
+		}));
+		expect(missingLabels(['fabricated-flag'], injected)).toEqual([]);
+		// The real invariant, over whatever the next release registers.
+		expect(missingLabels(Object.keys(SHIPPED), locales)).toEqual([]);
 	});
 });
 
