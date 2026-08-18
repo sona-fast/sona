@@ -233,8 +233,9 @@ This is driven by one file, `src/lib/early-access.ts`:
   computed lookup into the messages namespace, which re-pins the whole catalog
   into the route chunk (SONA-169; `scripts/check-catalog-pinning.mjs` fails CI
   on it). Add that message id to both `messages/en.json` and
-  `messages/ja.json`, then gate the feature on
-  `isFeatureEnabled(flag, { supporterKeyValid, now })`.
+  `messages/ja.json`, re-add `import * as m from '$lib/paraglide/messages';`
+  at the top of `early-access.ts` (the empty registry doesn't carry it), then
+  gate the feature on `isFeatureEnabled(flag, { supporterKeyValid, now })`.
 - **At the next release**, delete that entry — its GA date has passed, so the
   feature is now on for everyone — and remove the gate. The registry only ever
   holds the handful of features still inside their window.
