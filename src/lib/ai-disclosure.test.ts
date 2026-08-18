@@ -55,6 +55,23 @@ describe('defaultAiDisclosure', () => {
 		expect(all).toMatch(/nobody here can vouch for how it was gathered/);
 	});
 
+	it('routes vulnerability reports to the upstream private channels (SONA-171)', () => {
+		const segments = d.security.body;
+		const text = segments.map((s) => (typeof s === 'string' ? s : s.text)).join('');
+		const hrefs = segments.flatMap((s) => (typeof s === 'string' ? [] : [s.href]));
+
+		expect(d.security.lead).toBe('Security problems.');
+		expect(text).toMatch(/report it privately/);
+		// The same pair /.well-known/security.txt serves — never the public issue
+		// tracker (a vulnerability in a public issue is itself a disclosure), and
+		// never the fork operator (they can't fix a platform bug).
+		expect(hrefs).toEqual([
+			'https://github.com/sona-fast/sona/security',
+			'mailto:security@sona.fast'
+		]);
+		expect(text).toMatch(/posting details publicly exposes all of them before a fix exists/);
+	});
+
 	it('commits to keeping the page current and points at the build receipt', () => {
 		expect(d.closer).toMatch(/this page changes with it/);
 		// Conditional on purpose: the receipt only renders on real Actions builds,

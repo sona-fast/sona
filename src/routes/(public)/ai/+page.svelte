@@ -53,6 +53,14 @@
 				<p>{topic.body}</p>
 			</section>
 		{/each}
+		<section class="topic">
+			<h2 class="lead">{disclosure.security.lead}</h2>
+			<p>
+				{#each disclosure.security.body as segment (segment)}{#if typeof segment === 'string'}{segment}{:else}<a
+							href={segment.href}>{segment.text}</a
+						>{/if}{/each}
+			</p>
+		</section>
 		<p class="closer">{disclosure.closer}</p>
 	{/if}
 </div>
