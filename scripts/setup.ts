@@ -336,14 +336,23 @@ async function main() {
 			// (example.com); the shared candidate walk tries the host then strips
 			// leading labels, and aborts on a failed lookup so a 403 or transient
 			// error is reported as what it is — not as "no zone".
-			const { zone: preflightZone, errorStatus: zoneLookupError } = await resolveZone(
-				zoneNameCandidates(host),
-				(name) => cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
+			const {
+				zone: preflightZone,
+				errorStatus: zoneLookupError,
+				failedName: zoneLookupFailedName
+			} = await resolveZone(zoneNameCandidates(host), (name) =>
+				cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 			);
 			const zoneId = preflightZone.id;
 			if (zoneLookupError !== null) {
+				// status 0 = fetch threw (no network); a 2xx here means the API said
+				// success:false — neither reads sensibly as a bare "HTTP <n>".
+				const why =
+					zoneLookupError === 0
+						? 'could not reach the Cloudflare API'
+						: `Cloudflare API error, HTTP ${zoneLookupError}`;
 				console.warn(
-					`\n⚠ Could not look up the ${host} zone (HTTP ${zoneLookupError}) — skipping the DNS / image-transform preflight.`
+					`\n⚠ Zone lookup failed for ${zoneLookupFailedName ?? host} (${why}) — skipping the DNS / image-transform preflight.`
 				);
 				console.warn(
 					'  A 401/403 means the token lacks Zone · Zone · Read; otherwise re-run setup to retry.'

@@ -160,13 +160,13 @@ export async function applyDownloadRateLimit(
 	// 1. Resolve the zone id via the shared candidate walk (a subdomain is served
 	// by its registrable zone, and any failed lookup aborts rather than reading
 	// as "no zone" — see resolveZone in connect-domains-lib.ts).
-	const { zone, errorStatus } = await resolveZone(zoneNameCandidates(host), (name) =>
+	const { zone, errorStatus, failedName } = await resolveZone(zoneNameCandidates(host), (name) =>
 		api(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 	);
 	if (errorStatus !== null) {
 		return {
 			status: 'error',
-			detail: `could not query zones for ${host} (HTTP ${errorStatus}); token needs ${SCOPE_HINT}`
+			detail: `could not query zones for ${failedName ?? host} (HTTP ${errorStatus}); token needs ${SCOPE_HINT}`
 		};
 	}
 	const zoneId = zone.id;

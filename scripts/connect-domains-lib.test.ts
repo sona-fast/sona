@@ -175,18 +175,19 @@ describe('resolveZone', () => {
 
 	it('aborts the walk on an auth error and surfaces the status', async () => {
 		const tried: string[] = [];
-		const { zone, errorStatus } = await resolveZone(['sona.taro.surf', 'taro.surf'], async (name) => {
+		const { zone, errorStatus, failedName } = await resolveZone(['sona.taro.surf', 'taro.surf'], async (name) => {
 			tried.push(name);
 			return { ok: false, status: 403 };
 		});
 		expect(tried).toEqual(['sona.taro.surf']);
 		expect(errorStatus).toBe(403);
 		expect(zone).toEqual({ exists: false, active: false });
+		expect(failedName).toBe('sona.taro.surf');
 	});
 
 	it('aborts the walk on a transient error too (a 500 must not silently pick the parent zone)', async () => {
 		const tried: string[] = [];
-		const { zone, zoneName, errorStatus } = await resolveZone(
+		const { zone, zoneName, errorStatus, failedName } = await resolveZone(
 			['sona.taro.surf', 'taro.surf'],
 			async (name) => {
 				tried.push(name);
@@ -195,6 +196,7 @@ describe('resolveZone', () => {
 		);
 		expect(tried).toEqual(['sona.taro.surf']); // no further candidates tried
 		expect(errorStatus).toBe(500);
+		expect(failedName).toBe('sona.taro.surf');
 		expect(zoneName).toBeNull();
 		expect(zone).toEqual({ exists: false, active: false });
 	});

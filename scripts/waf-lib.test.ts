@@ -267,6 +267,9 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
 		expect(res.status).toBe('error');
 		expect(res.detail).toContain('akito.dog');
+		// Pin the abort semantics too: without this, a walk that stops aborting on
+		// failed lookups still passed this test (found by mutation).
+		expect(res.detail).toContain('HTTP 403');
 		expect(calls).toHaveLength(1);
 	});
 

@@ -779,3 +779,21 @@ describe('cdnAttachmentLines ↔ package.json contract', () => {
 		expect(pkg.scripts).toHaveProperty(name);
 	});
 });
+
+describe('setup.ts ↔ zone-preflight source contract', () => {
+	// main() isn't importable, so pin that the preflight uses the shared
+	// candidate walk and distinguishes a failed lookup from "no zone" — the old
+	// inline loop read a 403 as "No Cloudflare zone found".
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
+
+	it('resolves the zone via resolveZone over zoneNameCandidates(host)', () => {
+		expect(src).toMatch(/resolveZone\(\s*zoneNameCandidates\(\s*host\s*\)/s);
+	});
+
+	it('handles a failed lookup before the no-zone branch', () => {
+		const errIdx = src.indexOf('zoneLookupError !== null');
+		const noZoneIdx = src.indexOf('No Cloudflare zone found');
+		expect(errIdx).toBeGreaterThan(-1);
+		expect(noZoneIdx).toBeGreaterThan(errIdx);
+	});
+});

@@ -74,15 +74,26 @@ export function classifyZone(result: unknown): ZoneStatus {
 export async function resolveZone(
 	candidates: string[],
 	lookup: (name: string) => Promise<{ ok: boolean; status: number; result?: unknown }>
-): Promise<{ zone: ZoneStatus; zoneName: string | null; errorStatus: number | null }> {
+): Promise<{
+	zone: ZoneStatus;
+	zoneName: string | null;
+	errorStatus: number | null;
+	/** The candidate whose lookup failed — error messages must name IT, not the host. */
+	failedName: string | null;
+}> {
 	for (const name of candidates) {
 		const res = await lookup(name);
 		if (!res.ok)
-			return { zone: { exists: false, active: false }, zoneName: null, errorStatus: res.status };
+			return {
+				zone: { exists: false, active: false },
+				zoneName: null,
+				errorStatus: res.status,
+				failedName: name
+			};
 		const zone = classifyZone(res.result);
-		if (zone.exists) return { zone, zoneName: name, errorStatus: null };
+		if (zone.exists) return { zone, zoneName: name, errorStatus: null, failedName: null };
 	}
-	return { zone: { exists: false, active: false }, zoneName: null, errorStatus: null };
+	return { zone: { exists: false, active: false }, zoneName: null, errorStatus: null, failedName: null };
 }
 
 /**
