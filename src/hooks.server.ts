@@ -104,7 +104,11 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	const path = event.url.pathname;
 	const isSetupRoute = path === '/admin/setup' || path.startsWith('/admin/setup/');
 	const isAsset = path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png';
-	if (event.platform?.env.DB && !isSetupRoute && !isAsset) {
+	// security.txt stays reachable on an unclaimed or mid-setup fork — a
+	// deployment with no owner yet still needs a vulnerability-reporting path,
+	// and the route reads nothing from this fork's DB (SONA-171).
+	const isSecurityTxt = path === '/.well-known/security.txt';
+	if (event.platform?.env.DB && !isSetupRoute && !isAsset && !isSecurityTxt) {
 		const db = getDb(event.platform.env.DB);
 		const state = await getSetupState(db, event.platform.env);
 		switch (state) {

@@ -124,6 +124,17 @@ describe('setup gate — a failed settings read is not "no admin credential"', (
 		expect((await driveGate('/gallery', makeD1(sqlite))).redirect).toBe('/admin/setup');
 	});
 
+	// SONA-171: an unclaimed fork still serves its vulnerability-reporting path
+	// while everything else redirects to the wizard.
+	it('exempts /.well-known/security.txt from the wizard redirect', async () => {
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+
+		const gated = await driveGate('/.well-known/security.txt', makeD1(sqlite));
+		expect(gated.redirect).toBeNull();
+		expect(gated.status).toBe(200);
+	});
+
 	it('lets a configured site through untouched', async () => {
 		expect((await driveGate('/gallery', makeHealthyDb())).redirect).toBeNull();
 	});
