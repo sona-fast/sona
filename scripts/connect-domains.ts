@@ -172,7 +172,7 @@ async function main(): Promise<number> {
 		}
 
 		// --- mutating mode -------------------------------------------------------
-		const guidance = zoneGuidance(zone, host, candidates);
+		const guidance = zoneGuidance(zone, host, candidates, zoneName);
 		if (guidance) {
 			console.log(`ℹ ${guidance}`);
 			return 0; // fail soft — the registrar/propagation step is the operator's
@@ -225,7 +225,9 @@ async function main(): Promise<number> {
 		// name the RESOLVED zone (the parent zone for a subdomain host) because the
 		// Image Transformations toggle is zone-wide on it.
 		const zoneLabel = zoneConsentLabel(host, zoneName);
-		console.log(`This will make the following changes to ${zoneLabel} and nothing else:`);
+		console.log(
+			`This will make the following changes to your account and ${zoneLabel}, and nothing else:`
+		);
 		for (const m of plan) console.log(`  • ${m.label}`);
 		if (willEnableTransforms)
 			console.log(

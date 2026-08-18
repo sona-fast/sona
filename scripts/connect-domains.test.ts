@@ -160,7 +160,7 @@ describe('connect-domains.ts ↔ candidate-walk source contract', () => {
 	});
 
 	it('passes the candidates to zoneGuidance', () => {
-		expect(src).toMatch(/zoneGuidance\(\s*zone,\s*host,\s*candidates\s*\)/);
+		expect(src).toMatch(/zoneGuidance\(\s*zone,\s*host,\s*candidates,\s*zoneName\s*\)/);
 	});
 
 	// Consent honesty: the confirm prompt covers a zone-wide mutation, so it must
@@ -170,7 +170,7 @@ describe('connect-domains.ts ↔ candidate-walk source contract', () => {
 	// is pinned the same way.
 	it('derives the consent label via zoneConsentLabel and prints it', () => {
 		expect(src).toMatch(/zoneConsentLabel\(\s*host,\s*zoneName\s*\)/);
-		expect(src).toMatch(/changes to \$\{zoneLabel\}/);
+		expect(src).toMatch(/your account and \$\{zoneLabel\}/);
 	});
 
 	it('keeps the whole-zone disclosure on the transforms bullet', () => {

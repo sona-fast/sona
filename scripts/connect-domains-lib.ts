@@ -124,7 +124,8 @@ export function zoneConsentLabel(host: string, zoneName?: string | null): string
 export function zoneGuidance(
 	zone: ZoneStatus,
 	host: string,
-	candidates: string[] = [host]
+	candidates: string[] = [host],
+	zoneName?: string | null
 ): string | null {
 	if (!zone.exists) {
 		const { action, tried } = addZoneAction(candidates);
@@ -134,9 +135,13 @@ export function zoneGuidance(
 		);
 	}
 	if (!zone.active) {
+		// Name the RESOLVED zone — for a subdomain host the nameserver change
+		// belongs to the parent zone, and naming the host here would send the
+		// operator looking for a zone that doesn't exist.
+		const which = zoneName && zoneName !== host ? `${zoneName} (serving ${host})` : host;
 		const ns = zone.nameServers?.length ? ` Assigned nameservers: ${zone.nameServers.join(', ')}.` : '';
 		return (
-			`Zone for ${host} exists but is not active yet.${ns} Set those nameservers at your ` +
+			`Zone ${which} exists but is not active yet.${ns} Set those nameservers at your ` +
 			`registrar; propagation can take a few hours. Re-run once the zone shows Active.`
 		);
 	}

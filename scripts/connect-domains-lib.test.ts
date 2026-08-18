@@ -101,6 +101,17 @@ describe('zoneGuidance (fail-soft messages)', () => {
 		expect(g).not.toContain('Looked for zones named');
 	});
 
+	it('names the RESOLVED parent zone in the not-active message for a subdomain host', () => {
+		const g = zoneGuidance(
+			{ exists: true, active: false, nameServers: ['carter.ns.cf', 'fish.ns.cf'] },
+			'sona.taro.surf',
+			['sona.taro.surf', 'taro.surf'],
+			'taro.surf'
+		);
+		expect(g).toContain('Zone taro.surf (serving sona.taro.surf) exists but is not active');
+		expect(g).toContain('carter.ns.cf, fish.ns.cf');
+	});
+
 	it('returns null when the zone is active (proceed)', () => {
 		expect(zoneGuidance({ exists: true, active: true, id: 'z1' }, 'taro.surf')).toBeNull();
 	});
