@@ -403,7 +403,8 @@ async function main() {
 				// beacon + oEmbed provider — one rule, Free-plan cap). Non-fatal:
 				// a token without Zone · WAF · Edit just yields an 'error'
 				// result we warn about in Next steps — setup keeps going regardless.
-				const rateLimit = await applyDownloadRateLimit(cfToken, host);
+				// Reuse the zone the preflight just resolved — no second candidate walk.
+				const rateLimit = await applyDownloadRateLimit(cfToken, host, cfApi, zoneId);
 				downloadRateLimit = rateLimit.status;
 				downloadRateLimitDetail = rateLimit.detail;
 				if (rateLimit.status === 'error') {

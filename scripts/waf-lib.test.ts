@@ -249,6 +249,17 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		expect(calls).toHaveLength(1);
 	});
 
+	it('skips the zone lookup entirely when the caller provides a resolved zone id', async () => {
+		const { api, calls } = fakeApi({
+			[entryPath]: { ok: true, status: 200, result: { id: RULESET, rules: [] } },
+			[`POST /zones/${ZONE}/rulesets/${RULESET}/rules`]: { ok: true, status: 200 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api, ZONE);
+		expect(res.status).toBe('created');
+		// The setup CLI passes its preflight's zone id — no /zones?name= round trip.
+		expect(calls.some((c) => c.path.startsWith('/zones?name='))).toBe(false);
+	});
+
 	it('a transient failure mid-walk aborts — never falls through to the parent zone', async () => {
 		const { api, calls } = fakeApi({
 			'/zones?name=sub.example.com': { ok: false, status: 500 }
