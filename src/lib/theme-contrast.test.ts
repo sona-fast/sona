@@ -672,3 +672,43 @@ describe('prose-link WCAG AA contrast, every theme × surface × mode (SONA-171)
 		}
 	}
 });
+
+// SONA-193: component-scoped anchor rules must color with var(--link), never
+// raw var(--primary) — the token exists because --primary fails AA as link
+// text in Ember light (2.20:1) and aurora dark (4.38:1), and a local rule
+// bypasses the global fix in exactly the way the 13 rules this sweep repointed
+// used to. Scans every component/route style block so a new offender fails
+// here instead of shipping.
+describe('no component anchor rule colors with --primary (SONA-193)', () => {
+	const srcRoot = fileURLToPath(new URL('..', import.meta.url));
+	const svelteFiles = readdirSync(srcRoot, { recursive: true })
+		.map(String)
+		.filter((p) => p.endsWith('.svelte'))
+		.map((p) => `${srcRoot}/${p}`);
+	// A selector targets an anchor when `a` appears as its own compound start
+	// (" a", ".x a", "a.y", "a:hover"), not as a substring of another word.
+	const anchorSelector = /(^|[\s.,>+~)])a(\b|:|\.|\[)/;
+
+	it('scans a realistic file set', () => {
+		expect(svelteFiles.length).toBeGreaterThan(50);
+	});
+
+	it('every anchor text color goes through var(--link)', () => {
+		const offenders: string[] = [];
+		for (const file of svelteFiles) {
+			const source = readFileSync(file, 'utf8');
+			for (const rule of source.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+				const selectorLines = rule[1]
+					.trim()
+					.split('\n')
+					.map((l) => l.trim())
+					.filter(Boolean);
+				const selector = selectorLines[selectorLines.length - 1] ?? '';
+				if (anchorSelector.test(selector) && /color:\s*var\(--primary\)/.test(rule[2])) {
+					offenders.push(`${file.slice(srcRoot.length)} → ${selector}`);
+				}
+			}
+		}
+		expect(offenders).toEqual([]);
+	});
+});

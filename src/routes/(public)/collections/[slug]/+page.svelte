@@ -69,7 +69,7 @@
 	}
 
 	.breadcrumb a {
-		color: var(--primary);
+		color: var(--link);
 	}
 
 	.page-header {

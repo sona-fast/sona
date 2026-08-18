@@ -2066,7 +2066,7 @@
 		line-height: 1.55;
 		margin-top: 3px;
 	}
-	.item .text a { color: var(--primary); text-decoration: none; }
+	.item .text a { color: var(--link); text-decoration: none; }
 	.item .text a:hover { text-decoration: underline; }
 	.item .text code { background: var(--secondary); }
 	.item .text.note { font-size: 11.5px; margin-top: 8px; opacity: 0.9; }

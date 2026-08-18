@@ -301,7 +301,7 @@
 	}
 
 	.breadcrumb a {
-		color: var(--primary);
+		color: var(--link);
 	}
 
 	.image-layout {

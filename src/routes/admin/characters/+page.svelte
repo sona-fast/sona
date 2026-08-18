@@ -300,7 +300,7 @@
 	}
 
 	.char-name { font-weight: 500; }
-	.char-name a { color: var(--primary); }
+	.char-name a { color: var(--link); }
 
 	.name-cell {
 		display: flex;

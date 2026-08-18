@@ -425,7 +425,7 @@
 	}
 
 	.breadcrumb a {
-		color: var(--primary);
+		color: var(--link);
 	}
 
 	.avatar-layout {

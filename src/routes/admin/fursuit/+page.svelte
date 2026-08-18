@@ -309,7 +309,7 @@
 		line-height: 1.6; border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
 	}
 	.unlocks strong { color: var(--foreground); font-weight: 600; }
-	.unlocks a { color: var(--primary); font-weight: 600; text-decoration: underline; }
+	.unlocks a { color: var(--link); font-weight: 600; text-decoration: underline; }
 	/* Amber #FF8400 is ~2.1:1 on the light .unlocks panel; darken to #8A5A00
 	   for WCAG AA, matching the settings page's light-theme link fix. */
 	:global([data-theme='light']) .unlocks a { color: #8A5A00; }
@@ -349,10 +349,10 @@
 	.imp-row .cell.who { display: flex; align-items: center; gap: 5px; font-weight: 500; }
 	.imp-row .cell.lic { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-foreground); cursor: help; }
 	.badge.perm { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid var(--primary); border-radius: var(--radius-s); color: var(--primary); font-size: 11px; cursor: help; }
-	.imp-row .cell.link a { color: var(--primary); font-size: 12px; }
+	.imp-row .cell.link a { color: var(--link); font-size: 12px; }
 	.btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: var(--radius-s); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
 	.btn-icon:hover { color: #f87171; border-color: #f87171; }
-	.cell.link a { color: var(--primary); font-size: 12px; }
+	.cell.link a { color: var(--link); font-size: 12px; }
 	.actions { display: flex; gap: 12px; margin: 16px 0; }
 	.empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px; color: var(--muted-foreground); text-align: center; }
 	.error { color: #f87171; font-size: 14px; margin-top: 12px; }

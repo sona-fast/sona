@@ -406,7 +406,7 @@
 	}
 
 	.dl-caption a {
-		color: var(--primary);
+		color: var(--link);
 	}
 
 	/* The "PNG isn't offered" note explains the button directly above it — pull

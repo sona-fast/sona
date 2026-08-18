@@ -129,7 +129,7 @@
 	}
 
 	a.next-con:hover {
-		border-color: var(--primary);
+		border-color: var(--link);
 		text-decoration: none;
 	}
 
@@ -179,7 +179,7 @@
 	}
 
 	a.con-row:hover {
-		border-color: var(--primary);
+		border-color: var(--link);
 		text-decoration: none;
 	}
 
