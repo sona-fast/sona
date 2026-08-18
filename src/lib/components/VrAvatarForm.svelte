@@ -60,12 +60,9 @@
 		 * the registry search inside NewArtistDialog, matching the gallery and
 		 * sticker flows. */
 		registryEnabled?: boolean;
-		/** Gate state (SONA-124): while false, creating and publishing are locked
-		 * server-side; the form mirrors that in its controls. */
-		publishingEnabled: boolean;
 	}
 
-	let { heading, submitLabel, artists, characters, images, avatar = null, credits = [], media = [], platforms = [], form = null, publishingEnabled, registryEnabled = false }: Props = $props();
+	let { heading, submitLabel, artists, characters, images, avatar = null, credits = [], media = [], platforms = [], form = null, registryEnabled = false }: Props = $props();
 
 
 	// Same select + NewArtistDialog pairing the gallery upload and sticker forms
@@ -116,10 +113,6 @@
 	let nsfw = $state(avatar?.nsfw ?? false);
 	let published = $state(avatar?.published ?? false);
 	let saving = $state(false);
-
-	// Publishing is locked while gated UNLESS the avatar is already published
-	// (keeping it up is not a publish; the server enforces the same rule).
-	const publishLocked = $derived(!publishingEnabled && !(avatar?.published ?? false));
 
 	// --- Platforms: checkbox chips over the schema enum.
 	const PLATFORMS = ['vrchat', 'resonite', 'chilloutvr', 'neosvr', 'vseeface', 'warudo', 'other'];
@@ -589,7 +582,7 @@
 				<div class="model-actions">
 					<label class="btn-sm">
 						{m.admin_vr_upload_replace()}
-						<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} disabled={!publishingEnabled} class="sr-file" aria-describedby="vr-model-hint" />
+						<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
 					</label>
 					<button type="button" class="btn-sm" onclick={removeModel}>{m.admin_vr_upload_remove()}</button>
 				</div>
@@ -601,14 +594,11 @@
 			{/if}
 		{:else}
 			<!-- The whole zone is the label for the hidden file input. -->
-			<label class="upload-zone" class:disabled={!publishingEnabled}>
+			<label class="upload-zone">
 				<UploadCloud size={22} />
 				<span>{m.admin_vr_dropzone({ max: formatBytes(MAX_VR_MODEL_BYTES) })}</span>
-				<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} disabled={!publishingEnabled} class="sr-file" aria-describedby="vr-model-hint" />
+				<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
 			</label>
-			{#if !publishingEnabled}
-				<p class="field-hint">{m.admin_vr_upload_locked()}</p>
-			{/if}
 		{/if}
 		{#if uploadError}
 			<div class="banner err" role="alert">
@@ -769,9 +759,7 @@
 				{/each}
 			</div>
 		{/if}
-		<!-- Same publishing gate as the model upload: adding showcase files is
-		     part of creating/publishing (the server rejects hot-linked URLs). -->
-		<label class="upload-zone media-zone" class:disabled={!publishingEnabled || mediaUploading}>
+		<label class="upload-zone media-zone" class:disabled={mediaUploading}>
 			<ImagePlus size={20} />
 			<span>{mediaUploading ? m.admin_upload_uploading() : m.admin_vr_media_dropzone({ max: formatBytes(MAX_MEDIA_BYTES) })}</span>
 			<input
@@ -779,15 +767,10 @@
 				accept={MEDIA_ACCEPT}
 				multiple
 				onchange={onMediaPicked}
-				disabled={!publishingEnabled || mediaUploading}
+				disabled={mediaUploading}
 				class="sr-file"
 			/>
 		</label>
-		{#if !publishingEnabled}
-			<!-- Both neighbouring sections explain their locked state — this zone
-			     shouldn't be the one silently-disabled control (R2-CP4). -->
-			<p class="field-hint">{m.admin_vr_media_locked()}</p>
-		{/if}
 		{#if mediaErrors.length > 0}
 			<div class="banner err" role="alert">
 				<!-- One line per failed file: a multi-pick can partially succeed, and
@@ -862,7 +845,6 @@
 						value="1"
 						bind:checked={published}
 						class="sr-checkbox"
-						disabled={publishLocked}
 						aria-labelledby="vr-switch-published"
 						aria-describedby="vr-switch-published-state"
 					/>
@@ -870,13 +852,7 @@
 				</label>
 				<div class="switch-text">
 					<strong id="vr-switch-published">{m.admin_vr_switch_published()}</strong>
-					<span id="vr-switch-published-state">
-						{#if publishLocked}
-							{m.admin_vr_publish_locked()}
-						{:else}
-							{published ? m.admin_vr_switch_published_on() : m.admin_vr_switch_published_off()}
-						{/if}
-					</span>
+					<span id="vr-switch-published-state">{published ? m.admin_vr_switch_published_on() : m.admin_vr_switch_published_off()}</span>
 				</div>
 			</div>
 		</div>

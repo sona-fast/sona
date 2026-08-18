@@ -1106,8 +1106,9 @@ describe('settings load — supporter key is raw + verified, never in public set
 			daysRemaining: expect.any(Number),
 			expiringSoon: expect.any(Boolean)
 		});
-		// The registry no longer ships empty (vr-avatars is the first entry), so
-		// derive the expectation from it: any flag inside its window at load time
+		// The registry's contents are release-process-owned (empty since
+		// vr-avatars retired — SONA-157), so derive the expectation from it: any
+		// flag inside its window at load time
 		// surfaces as flag + display-formatted GA date — and nothing else rides
 		// along (a NEW field in the mapping must be re-reviewed here first).
 		expect(result.earlyAccess).toEqual(

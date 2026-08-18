@@ -5,9 +5,8 @@ import Database from 'better-sqlite3';
 import { isRedirect } from '@sveltejs/kit';
 import { makeD1 } from '$lib/server/test/d1';
 import { getDb } from '$lib/server/db';
-import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
+import { clearSettingsCache } from '$lib/server/settings';
 import { vrTabEnabled, clearVrTabCache } from '$lib/server/vr-gate';
-import { EARLY_ACCESS } from '$lib/early-access';
 
 import { actions } from './+page.server';
 
@@ -20,23 +19,10 @@ vi.mock('$lib/server/storage', async (importOriginal) => {
 	return { ...original, deleteFile: deleteFileSpy };
 });
 
-// Registry-driven gate control (same mutation pattern as early-access.test.ts).
-const SHIPPED = { ...EARLY_ACCESS };
-const FUTURE_GA = '2999-01-01';
-const PAST_GA = '2000-01-01';
-function restoreRegistry() {
-	for (const k of Object.keys(EARLY_ACCESS)) delete EARLY_ACCESS[k];
-	Object.assign(EARLY_ACCESS, SHIPPED);
-}
 beforeEach(() => {
-	restoreRegistry();
 	clearSettingsCache();
-	// The gate memoizes the verified supporter key per isolate; every test builds
-	// a fresh DB, so the previous test's key would otherwise answer for this one.
-	clearSupporterKeyStatusCache();
 	deleteFileSpy.mockClear();
 });
-afterEach(restoreRegistry);
 
 const NOW = '2026-01-01T00:00:00.000Z';
 const MODEL_URL = 'https://cdn.example.com/vr-models/old.vrm';
@@ -124,21 +110,7 @@ async function run(
 	}
 }
 
-describe('save action publish gate (pre-GA, no key)', () => {
-	beforeEach(() => {
-		EARLY_ACCESS['vr-avatars'] = FUTURE_GA;
-	});
-
-	it('refuses flipping a draft to published', async () => {
-		const { sqlite, platform } = makeDb();
-		const id = addAvatar(sqlite, { published: 0 });
-		expect(await run('save', platform, id, saveForm({ published: '1' }))).toBe(403);
-		const row = sqlite.prepare('SELECT published FROM vr_avatars WHERE id = ?').get(id) as {
-			published: number;
-		};
-		expect(row.published).toBe(0);
-	});
-
+describe('save action', () => {
 	it('allows editing a draft without publishing (data is the owner’s)', async () => {
 		const { sqlite, platform } = makeDb();
 		const id = addAvatar(sqlite, { published: 0 });
@@ -149,23 +121,20 @@ describe('save action publish gate (pre-GA, no key)', () => {
 		expect(row.description).toBe('updated');
 	});
 
-	it('allows keeping an already-published avatar published (not a publish)', async () => {
+	it('allows keeping an already-published avatar published', async () => {
 		const { sqlite, platform } = makeDb();
 		const id = addAvatar(sqlite, { published: 1 });
 		expect(await run('save', platform, id, saveForm({ published: '1' }))).toBe('redirected');
 	});
 
-	it('allows deleting while gated', async () => {
+	it('deletes a draft', async () => {
 		const { sqlite, platform } = makeDb();
 		const id = addAvatar(sqlite, { published: 0 });
 		expect(await run('delete', platform, id)).toBe('redirected');
 		expect((sqlite.prepare('SELECT COUNT(*) AS n FROM vr_avatars').get() as { n: number }).n).toBe(0);
 	});
-});
 
-describe('save action publish once GA is reached', () => {
-	it('publishes a draft without any key', async () => {
-		EARLY_ACCESS['vr-avatars'] = PAST_GA;
+	it('publishes a draft without any key (the SONA-124 gate retired at GA — SONA-157)', async () => {
 		const { sqlite, platform } = makeDb();
 		const id = addAvatar(sqlite, { published: 0 });
 		expect(await run('save', platform, id, saveForm({ published: '1' }))).toBe('redirected');
@@ -177,10 +146,6 @@ describe('save action publish once GA is reached', () => {
 });
 
 describe('model file disposal', () => {
-	beforeEach(() => {
-		EARLY_ACCESS['vr-avatars'] = PAST_GA; // ungated — disposal is what's under test
-	});
-
 	it('disposes of the previous model file when it is removed on save', async () => {
 		const { sqlite, platform } = makeDb();
 		const id = addAvatar(sqlite, { modelUrl: MODEL_URL });

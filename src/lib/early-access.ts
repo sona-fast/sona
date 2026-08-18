@@ -20,10 +20,9 @@
  * entries fails early-access.test.ts.
  */
 export const EARLY_ACCESS: Record<string, string> = {
-	// Merged 2026-08-10 → GA a week later (release process above). Delete this
-	// entry (and the vrPublishingEnabled gate's reason to exist) at the next
-	// release after GA.
-	'vr-avatars': '2026-08-17'
+	// Empty: no feature is currently inside its early-access window. The first
+	// entry was 'vr-avatars' (GA'd 2026-08-17, retired per the release process
+	// above — SONA-157).
 };
 
 /**

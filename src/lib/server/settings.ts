@@ -429,9 +429,9 @@ export const NO_SUPPORTER_KEY: VerifiedSupporterKey = Object.freeze({
 	expiresAt: null
 });
 
-// The second memo of the `supporterKey` row, for the ENFORCEMENT path
-// (vrPublishingEnabled), which runs on every VR admin load and every model
-// upload and otherwise pays a D1 read plus an Ed25519 verify each time.
+// The second memo of the `supporterKey` row, for enforcement paths (the next
+// early-access feature's gate — the retired SONA-124 VR gate was the first
+// consumer), which otherwise pay a D1 read plus an Ed25519 verify each time.
 //
 // THE INVARIANT, stated once for everything below: nothing cached here depends
 // on `now` or on who is asking. Only the signature verdict and the expiry

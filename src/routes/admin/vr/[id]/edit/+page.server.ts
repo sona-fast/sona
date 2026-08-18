@@ -4,7 +4,6 @@ import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { artists, characters, images, vrAvatars, avatarCredits, avatarMedia, avatarPlatforms } from '$lib/server/db/schema';
 import { parseAvatarForm, validateAvatarRefs, validateAvatarMedia, updateAvatar, deleteAvatar } from '$lib/server/vr-avatars';
-import { vrPublishingEnabled } from '$lib/server/vr-gate';
 import type { Actions, PageServerLoad } from './$types';
 
 /** The [id] segment as a positive integer, or null for anything else — a
@@ -23,7 +22,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 	const avatar = await db.select().from(vrAvatars).where(eq(vrAvatars.id, avatarId)).get();
 	if (!avatar) error(404, 'Avatar not found');
 
-	const [credits, media, platforms, allArtists, allCharacters, allImages, publishingEnabled] =
+	const [credits, media, platforms, allArtists, allCharacters, allImages] =
 		await Promise.all([
 			db
 				.select({ artistId: avatarCredits.artistId, role: avatarCredits.role, roleLabel: avatarCredits.roleLabel })
@@ -49,8 +48,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 			db
 				.select({ id: images.id, imageUrl: images.imageUrl, thumbnailUrl: images.thumbnailUrl, title: images.title, nsfw: images.nsfw })
 				.from(images)
-				.orderBy(desc(images.createdAt)),
-			vrPublishingEnabled(db, platform?.env)
+				.orderBy(desc(images.createdAt))
 		]);
 
 	return {
@@ -60,8 +58,7 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		platforms: platforms.map((p) => p.platform),
 		artists: allArtists,
 		characters: allCharacters,
-		images: allImages,
-		publishingEnabled
+		images: allImages
 	};
 };
 
@@ -80,14 +77,6 @@ export const actions = {
 		const data = await request.formData();
 		const parsed = parseAvatarForm(data);
 		if (!parsed.ok) return fail(400, { error: parsed.error });
-
-		// Gate enforcement (SONA-124): editing the owner's existing data is never
-		// gated, but PUBLISHING is — a draft can't flip to published while the
-		// feature is pre-GA without a valid supporter key. Keeping an
-		// already-published avatar published is not a publish.
-		if (parsed.input.published && !existing.published && !(await vrPublishingEnabled(db, platform?.env))) {
-			return fail(403, { error: 'VR avatars are in early access — publishing needs a valid supporter key until they open for everyone.' });
-		}
 
 		const refError = await validateAvatarRefs(db, parsed.input, avatarId);
 		if (refError) return fail(400, { error: refError });

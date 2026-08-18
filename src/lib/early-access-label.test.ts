@@ -7,14 +7,9 @@ import { earlyAccessLabel } from './early-access-label';
 // the dynamic-lookup path works for both locales — an explicit locale option
 // is passed so the test doesn't depend on paraglide's runtime locale state.
 describe('earlyAccessLabel', () => {
-	it('resolves the localized label for a registered flag (en)', () => {
-		expect(earlyAccessLabel('vr-avatars', { locale: 'en' })).toBe('VR avatars');
-	});
-
-	it('resolves the Japanese label through the same lookup', () => {
-		expect(earlyAccessLabel('vr-avatars', { locale: 'ja' })).toBe('VRアバター');
-	});
-
+	// The registry is empty since vr-avatars retired (SONA-157), so no real
+	// label message exists to resolve; the positive-resolution tests return with
+	// the next registered flag (early-access.test.ts forces its messages).
 	it('falls back to the flag slug when no label message exists', () => {
 		expect(earlyAccessLabel('flag-without-message', { locale: 'en' })).toBe('flag-without-message');
 	});

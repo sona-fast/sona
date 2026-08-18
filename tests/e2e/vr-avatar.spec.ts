@@ -3,7 +3,7 @@ import { adminLogin } from './admin-login';
 
 // VR avatar showcase (SONA-124): public visibility of the seeded avatars, the
 // download route's server-side license enforcement, the click-to-load viewer
-// button, and the admin section's early-access gate state.
+// button, and the admin list page.
 //
 // Runs on the SHARED read-only DB/server under fullyParallel: everything here
 // only READS the seeded rows (tests/e2e/fixtures/seed.sql — avatars 1–3)
@@ -100,16 +100,11 @@ test('detail page renders the seeded showcase media strip (SP1)', async ({ page 
 	await expect(page.getByRole('button', { name: 'E2E VR Avatar — media 2' })).toBeVisible();
 });
 
-test('admin /admin/vr lists everything ungated (E2E_VR_GATE override active)', async ({ page }) => {
+test('admin /admin/vr lists everything, drafts included', async ({ page }) => {
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/vr');
 
-	// The e2e harness sets E2E_VR_GATE=open (see wrangler.e2e.toml): the gate is
-	// pre-GA on the calendar but forced open here so the form specs can run.
-	// Gate PRESENTATION (banner/locked states) is covered by the registry-driven
-	// unit matrices in admin/vr/*/page.server.test.ts.
 	await expect(page.getByText('E2E VR Avatar')).toBeVisible();
 	await expect(page.getByText('E2E VR Draft')).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Add avatar' })).toBeVisible();
-	await expect(page.getByText('VR avatars are in early access')).toHaveCount(0);
 });

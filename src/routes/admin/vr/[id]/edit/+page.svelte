@@ -17,5 +17,4 @@
 	media={data.media}
 	platforms={data.platforms}
 	{form}
-	publishingEnabled={data.publishingEnabled}
 />
