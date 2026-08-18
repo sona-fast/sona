@@ -249,6 +249,17 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		expect(calls).toHaveLength(1);
 	});
 
+	it('a transient failure mid-walk aborts — never falls through to the parent zone', async () => {
+		const { api, calls } = fakeApi({
+			'/zones?name=sub.example.com': { ok: false, status: 500 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'sub.example.com', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('HTTP 500');
+		// The walk stopped at the failing candidate instead of trying example.com.
+		expect(calls.map((c) => c.path)).toEqual(['/zones?name=sub.example.com']);
+	});
+
 	it('domain is not a zone / zones query fails → error, no ruleset touched', async () => {
 		const { api, calls } = fakeApi({
 			[zonePath]: { ok: false, status: 403, errors: [{ message: 'not authorized' }] }

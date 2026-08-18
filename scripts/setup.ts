@@ -45,6 +45,7 @@ import {
 	pagesPatchConfirmsSitekey,
 	cdnAttachmentLines
 } from './setup-lib.ts';
+import { resolveZone } from './connect-domains-lib.ts';
 import { applyDownloadRateLimit, type RateLimitStatus } from './waf-lib.ts';
 import { provisionTurnstileWidget, type TurnstileStatus } from './turnstile-lib.ts';
 // Shared with the admin Settings save so the seeded siteUrl passes the same
@@ -332,15 +333,22 @@ async function main() {
 		const host = hostFromDomain(domain);
 		if (cfToken && cfAccount) {
 			// A subdomain (sona.example.com) is served by the registrable zone
-			// (example.com); an exact-name lookup finds nothing, so try the host then
-			// strip leading labels until a zone on the account matches.
-			let zoneId: string | undefined;
-			for (const candidate of zoneNameCandidates(host)) {
-				const zoneRes = await cfApi(cfToken, `/zones?name=${encodeURIComponent(candidate)}`);
-				zoneId = ((zoneRes.result as { id: string }[] | undefined) ?? [])[0]?.id;
-				if (zoneId) break;
-			}
-			if (!zoneId) {
+			// (example.com); the shared candidate walk tries the host then strips
+			// leading labels, and aborts on a failed lookup so a 403 or transient
+			// error is reported as what it is — not as "no zone".
+			const { zone: preflightZone, errorStatus: zoneLookupError } = await resolveZone(
+				zoneNameCandidates(host),
+				(name) => cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
+			);
+			const zoneId = preflightZone.id;
+			if (zoneLookupError !== null) {
+				console.warn(
+					`\n⚠ Could not look up the ${host} zone (HTTP ${zoneLookupError}) — skipping the DNS / image-transform preflight.`
+				);
+				console.warn(
+					'  A 401/403 means the token lacks Zone · Zone · Read; otherwise re-run setup to retry.'
+				);
+			} else if (!zoneId) {
 				console.warn(
 					`\n⚠ No Cloudflare zone found for ${host} — skipping the DNS / image-transform preflight.`
 				);
