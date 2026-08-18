@@ -40,7 +40,8 @@ import {
 	imageResizingOutcome,
 	imageResizingIsOn,
 	ciWiringEntries,
-	cfApi
+	cfApi,
+	securitySummaryLines
 } from './setup-lib.ts';
 import { applyDownloadRateLimit, type RateLimitStatus } from './waf-lib.ts';
 import { provisionTurnstileWidget, type TurnstileStatus } from './turnstile-lib.ts';
@@ -655,23 +656,10 @@ async function main() {
 			console.log('     "Resize images from any origin". Free tier: 5,000 transformations/month.');
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
-		// Public-endpoint rate limit. null = not attempted (no domain / no zone / no
-		// token — same contract as the declaration above); 'error' = the token lacked
-		// Zone · WAF · Edit, which is the one case worth telling them how to fix.
-		if (downloadRateLimit === 'error') {
-			console.log('  • Public-endpoint rate limit: NOT set (token lacks Zone · WAF · Edit).');
-			console.log('     Add that permission to the token, then run:');
-			console.log(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
-		} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
-			console.log(`  • Public-endpoint rate limit: applied to the ${host} zone (download beacon + oEmbed).`);
-		// Admin-login Turnstile. 'error' = token lacked the scope, so the
-		// login has no bot check; otherwise the sitekey/secret are wired and enforced.
-		if (turnstileStatus === 'error') {
-			console.log('  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).');
-			console.log('     Add that permission to the token and re-run setup to protect /admin/login.');
-		} else if (turnstileStatus) {
-			console.log(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}`);
-			console.log('     (TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret set; enforced once deployed).');
+		// Public-endpoint rate limit + admin-login Turnstile (status contracts and
+		// wording live with the helper so its test can pin them).
+		for (const line of securitySummaryLines(host, downloadRateLimit, turnstileStatus)) {
+			console.log(line);
 		}
 	}
 	console.log('\n  Your one-time setup token (enter it in the wizard):\n');

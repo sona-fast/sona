@@ -5,6 +5,9 @@
  * tested without a Cloudflare account or a live shell.
  */
 
+import type { RateLimitStatus } from './waf-lib.ts';
+import type { TurnstileStatus } from './turnstile-lib.ts';
+
 const sqlStr = (s: string) => s.replace(/'/g, "''");
 
 export interface Migration {
@@ -389,4 +392,39 @@ export function ciWiringEntries(input: CiWiringInput): CiEntry[] {
 		{ kind: 'variable', name: 'SITE_URL', value: input.siteUrl },
 		{ kind: 'variable', name: 'FURTRACK_MODE', value: input.furtrackMode }
 	];
+}
+
+/**
+ * End-of-run summary lines for the zone-security provisioning (public-endpoint
+ * rate limit + admin-login Turnstile). The two features are independent, so the
+ * Turnstile lines must print for every rate-limit outcome — kept pure so a test
+ * can pin that, and the wording, without running the CLI.
+ *
+ * Status contracts: null = not attempted (no domain / no zone / no token);
+ * 'error' = the token lacked the scope, which is the one case worth telling
+ * the operator how to fix; 'exists' rate limits are old news and stay silent.
+ */
+export function securitySummaryLines(
+	host: string,
+	downloadRateLimit: RateLimitStatus | null,
+	turnstileStatus: TurnstileStatus | null
+): string[] {
+	const lines: string[] = [];
+	if (downloadRateLimit === 'error') {
+		lines.push('  • Public-endpoint rate limit: NOT set (token lacks Zone · WAF · Edit).');
+		lines.push('     Add that permission to the token, then run:');
+		lines.push(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
+	} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
+		lines.push(
+			`  • Public-endpoint rate limit: applied to the ${host} zone (download beacon + oEmbed).`
+		);
+	}
+	if (turnstileStatus === 'error') {
+		lines.push('  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).');
+		lines.push('     Add that permission to the token and re-run setup to protect /admin/login.');
+	} else if (turnstileStatus) {
+		lines.push(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}`);
+		lines.push('     (TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret set; enforced once deployed).');
+	}
+	return lines;
 }

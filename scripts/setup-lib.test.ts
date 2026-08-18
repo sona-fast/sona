@@ -20,7 +20,8 @@ import {
 	imageResizingOutcome,
 	imageResizingIsOn,
 	ciWiringEntries,
-	cfApi
+	cfApi,
+	securitySummaryLines
 } from './setup-lib.ts';
 
 describe('buildMigrationSql', () => {
@@ -604,5 +605,32 @@ describe('ciWiringEntries ↔ workflow YAML contract', () => {
 	it.each(entries)('$name is referenced as a workflow $kind', ({ kind, name }) => {
 		const ref = kind === 'secret' ? `secrets.${name}` : `vars.${name}`;
 		expect(yaml).toContain(ref);
+	});
+});
+
+describe('securitySummaryLines', () => {
+	const turnstileWarning = '  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).';
+
+	it('prints the Turnstile warning for EVERY rate-limit outcome (regression: a missing brace once nested it inside the applied branch)', () => {
+		for (const rl of [null, 'exists', 'error', 'created', 'updated'] as const) {
+			const lines = securitySummaryLines('taro.surf', rl, 'error');
+			expect(lines, `downloadRateLimit=${rl}`).toContain(turnstileWarning);
+		}
+	});
+
+	it('reports an applied rate limit and a created Turnstile widget together', () => {
+		const lines = securitySummaryLines('taro.surf', 'created', 'created');
+		expect(lines.join('\n')).toContain('Public-endpoint rate limit: applied to the taro.surf zone');
+		expect(lines.join('\n')).toContain('Admin-login bot check: Turnstile created for taro.surf');
+	});
+
+	it('tells the operator how to fix a scope-starved token for the rate limit', () => {
+		const lines = securitySummaryLines('taro.surf', 'error', null);
+		expect(lines.join('\n')).toContain('npm run apply-download-ratelimit -- taro.surf');
+	});
+
+	it('stays silent about pre-existing rate limits and unattempted Turnstile', () => {
+		expect(securitySummaryLines('taro.surf', 'exists', null)).toEqual([]);
+		expect(securitySummaryLines('taro.surf', null, null)).toEqual([]);
 	});
 });
