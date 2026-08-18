@@ -40,11 +40,33 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 // composed `handle` would also run paraglideMiddleware, which needs a full
 // request pipeline).
 export const authHandle: Handle = async ({ event, resolve }) => {
+	// Every gate below compares the DECODED pathname, because that is what
+	// SvelteKit routes on: its respond.js runs decode_pathname over the raw path
+	// before matching, so `/%61dmin/images` and `/admin/images` reach the SAME
+	// route handler. Gating on the raw `event.url.pathname` let a percent-encoded
+	// first character skip the admin session gate, the /api 401 and the setup
+	// gate while still resolving to the protected route (SONA-187). Some fork
+	// zones normalize incoming URLs at the edge, which masked this — the app must
+	// not depend on an edge setting each fork's owner controls.
+	//
+	// The decoding mirrors Kit's decode_pathname exactly: decodeURI leaves
+	// reserved characters (%2F and friends) encoded, and the %25 split keeps a
+	// literal %25 from ever double-decoding — so a double-encoded `/%2561dmin`
+	// stays `/%2561dmin` here just as it does in the router (where it 404s).
+	let path: string;
+	try {
+		path = event.url.pathname.split('%25').map(decodeURI).join('%25');
+	} catch {
+		// Kit's own decode of this pathname throws too, so no route would ever
+		// match it. Answer the malformed sequence before any gate logic runs.
+		return new Response('Malformed URI', { status: 400 });
+	}
+
 	// The operator's zone, resolved once here so the admin loads and actions all
 	// read the same value rather than each re-deriving it (SONA-119). Only the
 	// admin area displays dates in it, and validating costs an Intl construction,
 	// so public requests keep the UTC default rather than paying for it.
-	event.locals.timeZone = event.url.pathname.startsWith('/admin')
+	event.locals.timeZone = path.startsWith('/admin')
 		? viewerTimeZone(event.cookies.get(VIEWER_TZ_COOKIE))
 		: 'UTC';
 
@@ -101,7 +123,6 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// (see admin/setup/+page.server.ts). The 503 below is not that guard — note
 	// that /admin/setup is exempt here, so the wizard renders during an outage
 	// exactly as it did before. The 503 keeps the REST of the admin panel shut.
-	const path = event.url.pathname;
 	const isSetupRoute = path === '/admin/setup' || path.startsWith('/admin/setup/');
 	const isAsset = path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png';
 	if (event.platform?.env.DB && !isSetupRoute && !isAsset) {
@@ -139,7 +160,7 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// Protect admin routes (except login, the first-run setup wizard, and the
 	// password-recovery pages). /admin/forgot + /admin/reset are reachable without
 	// a session but stay behind the setup gate above, like /admin/login.
-	if (event.url.pathname.startsWith('/admin') && !isAdminAuthExempt(event.url.pathname)) {
+	if (path.startsWith('/admin') && !isAdminAuthExempt(path)) {
 		if (!event.locals.admin) {
 			throw redirect(302, '/admin/login');
 		}
@@ -168,12 +189,12 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// open this route to writes the day someone adds a POST handler there; spelling
 	// it as a path AND a method cannot.
 	const isOembedRead =
-		event.url.pathname === '/api/oembed' &&
+		path === '/api/oembed' &&
 		(event.request?.method === 'GET' || event.request?.method === 'HEAD');
 	if (
-		event.url.pathname.startsWith('/api') &&
-		!event.url.pathname.startsWith('/api/cron/') &&
-		event.url.pathname !== '/api/metrics/download' &&
+		path.startsWith('/api') &&
+		!path.startsWith('/api/cron/') &&
+		path !== '/api/metrics/download' &&
 		!isOembedRead &&
 		!event.locals.admin
 	) {
@@ -288,7 +309,9 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// intermediary that does honor it. Non-HTML public responses still edge-cache.
 	// To recover edge caching for HTML, add a Cloudflare Cache Rule with a custom
 	// cache key that includes the PARAGLIDE_LOCALE cookie (infra, not code).
-	const isPublic = !event.url.pathname.startsWith('/admin') && !event.url.pathname.startsWith('/api');
+	// Decoded for the same reason as the gates: an encoded /api or /admin path
+	// must not pick up the public shared-cache default.
+	const isPublic = !path.startsWith('/admin') && !path.startsWith('/api');
 	const isHtml = response.headers.get('content-type')?.includes('text/html') ?? false;
 	if (isPublic && (response.status === 200 || response.status === 304 || response.status === 206) && !isHtml) {
 		// Honor a handler's explicit Cache-Control; only stamp the shared default

@@ -254,19 +254,122 @@ describe('authHandle — /api/oembed is public (third-party embedders have no se
 	it('does not exempt sibling paths — a prefix match would open the whole namespace', async () => {
 		vi.mocked(getSetupState).mockResolvedValue('complete');
 
-		// '/api/%6Fembed' pins the encoding case as DEFENSE IN DEPTH, not as production
-		// behaviour: the hook compares the RAW pathname while SvelteKit's router decodes
-		// per-segment. In production, Cloudflare URL normalization (scope `incoming`,
-		// enabled on every fork zone) decodes the path before the Worker sees it, so a
-		// real request spelled this way arrives as '/api/oembed' and is served. This
-		// asserts the hook still fails closed on a zone with normalization turned off.
-		for (const path of ['/api/oembed/extra', '/api/oembedx', '/api/%6Fembed']) {
+		for (const path of ['/api/oembed/extra', '/api/oembedx']) {
 			const res = (await authHandle({
 				event: makeEvent(path, makeDb()),
 				resolve
 			} as never)) as Response;
 			expect(res.status, `${path} must stay behind the admin gate`).toBe(401);
 		}
+	});
+
+	it('treats an encoded spelling exactly as the route it resolves to (SONA-187)', async () => {
+		vi.mocked(getSetupState).mockResolvedValue('complete');
+
+		// '/api/%6Fembed' decodes to '/api/oembed', which is the route SvelteKit
+		// serves it as — so the gate must apply the same (exempt) treatment, not
+		// 401 a spelling the router considers identical. Before SONA-187 this case
+		// was pinned to 401 as defense in depth; now the gate decodes first, so
+		// gate and router agree by construction.
+		const res = (await authHandle({
+			event: makeEvent('/api/%6Fembed', makeDb()),
+			resolve
+		} as never)) as Response;
+		expect(res.status).not.toBe(401);
+	});
+});
+
+// SONA-187: SvelteKit matches routes on the DECODED pathname, so every gate
+// must too — a percent-encoded first character ('/%61dmin' = '/admin') used to
+// skip the admin session gate, the /api 401 and the setup gate while still
+// resolving to the protected route.
+describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187)', () => {
+	beforeEach(() => {
+		vi.mocked(getSetupState).mockReset();
+		vi.mocked(getSetupState).mockResolvedValue('complete');
+	});
+
+	it('redirects an encoded admin path to /admin/login like its decoded twin', async () => {
+		const db = makeDb();
+		expect(await redirectFor('/%61dmin/images', db)).toEqual({ status: 302, location: '/admin/login' });
+		expect(await redirectFor('/admin/%69mages', db)).toEqual({ status: 302, location: '/admin/login' });
+	});
+
+	it('returns 401 for an encoded /api path without a session', async () => {
+		for (const path of ['/%61pi/artists', '/api/%61rtists']) {
+			const res = (await authHandle({
+				event: makeEvent(path, makeDb()),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must stay behind the admin gate`).toBe(401);
+		}
+	});
+
+	it('keeps the setup gate closed for encoded paths while setup is incomplete', async () => {
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
+		const db = makeDb();
+
+		// An encoded /api path takes the API branch (503), not the page redirect.
+		const res = (await authHandle({
+			event: makeEvent('/%61pi/artists', db),
+			resolve
+		} as never)) as Response;
+		expect(res.status).toBe(503);
+
+		expect(await redirectFor('/%61dmin/images', db)).toEqual({ status: 302, location: '/admin/setup' });
+	});
+
+	it('keeps admin and api shut for encoded paths while the setup state is unknown', async () => {
+		vi.mocked(getSetupState).mockResolvedValue('unknown');
+
+		for (const path of ['/%61dmin/images', '/%61pi/artists']) {
+			const res = (await authHandle({
+				event: makeEvent(path, makeDb()),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must 503 while the setup state is unknown`).toBe(503);
+		}
+	});
+
+	it('answers a malformed percent-sequence with a 400 before any gate runs', async () => {
+		// decodeURI throws on this, and so does Kit's own decode_pathname — no
+		// route could ever match it, so the hook refuses it outright.
+		const res = (await authHandle({
+			event: makeEvent('/%E0%A4%A', makeDb()),
+			resolve
+		} as never)) as Response;
+		expect(res.status).toBe(400);
+	});
+
+	it('does not double-decode: a %25-escaped spelling stays literal, like in the router', async () => {
+		// '/%2561dmin' decodes to the literal path '/%61dmin' in Kit's router too
+		// (the %25 split prevents a second decode), so no /admin route matches it.
+		// The gate must neither 400 it nor treat it as /admin.
+		const db = makeDb();
+		expect(await redirectFor('/%2561dmin/images', db)).toBeNull();
+	});
+
+	it('still serves legitimately encoded public routes', async () => {
+		const db = makeDb();
+		for (const path of ['/tags/foo%20bar', '/img/2024%2Fkey.png']) {
+			const res = (await authHandle({
+				event: makeEvent(path, db),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must resolve normally`).toBe(200);
+		}
+	});
+
+	it('does not stamp the public shared-cache default on an encoded /api response', async () => {
+		// '/api/%6Fembed' is exempt from the 401 (it IS /api/oembed to the router),
+		// but it is still an /api path — its response must get the private
+		// no-store fallback, not the public s-maxage default an encoded spelling
+		// used to pick up.
+		const res = (await authHandle({
+			event: makeEvent('/api/%6Fembed', makeDb()),
+			resolve: async () => new Response('{}', { headers: { 'content-type': 'application/json' } })
+		} as never)) as Response;
+		expect(res.headers.get('cache-control')).toBe('private, no-store, no-cache');
 	});
 });
 
