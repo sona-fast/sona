@@ -377,12 +377,12 @@ async function main() {
 				// beacon + oEmbed provider — one rule, Free-plan cap). Non-fatal:
 				// a token without Zone · WAF · Edit just yields an 'error'
 				// result we warn about in Next steps — setup keeps going regardless.
-				const rl = await applyDownloadRateLimit(cfToken, host);
-				downloadRateLimit = rl.status;
-				if (rl.status === 'error') {
-					console.warn(`\n⚠ Could not attach the public-endpoint rate-limit rule: ${rl.detail}`);
+				const rateLimit = await applyDownloadRateLimit(cfToken, host);
+				downloadRateLimit = rateLimit.status;
+				if (rateLimit.status === 'error') {
+					console.warn(`\n⚠ Could not attach the public-endpoint rate-limit rule: ${rateLimit.detail}`);
 				} else {
-					console.log(`✔ Public-endpoint rate limit: ${rl.detail}`);
+					console.log(`✔ Public-endpoint rate limit: ${rateLimit.detail}`);
 				}
 			}
 
@@ -656,8 +656,7 @@ async function main() {
 			console.log('     "Resize images from any origin". Free tier: 5,000 transformations/month.');
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
-		// Public-endpoint rate limit + admin-login Turnstile (status contracts and
-		// wording live with the helper so its test can pin them).
+		// Zone security: rate limit + admin-login Turnstile.
 		for (const line of securitySummaryLines(host, downloadRateLimit, turnstileStatus)) {
 			console.log(line);
 		}
