@@ -622,3 +622,46 @@ describe('status-attention small-text WCAG AA contrast, every theme × surface �
 		}
 	}
 });
+
+// Prose links (the global `a` rule) color with --link, which tracks each
+// theme's --primary like --status-attention but is overridden where the
+// primary fails AA as small text: Ember light (--primary was 2.20:1 on the
+// page background) and aurora dark (4.38:1) — SONA-171 r1-09/r1-18. The
+// resolution below mirrors the CSS: a block either declares a hex or falls
+// through (var(--primary)) to its own --primary. Every theme block must
+// declare --link itself: the default light block's darkened orange otherwise
+// bleeds into the other light themes through the plain [data-theme='light']
+// selector they all carry.
+describe('prose-link WCAG AA contrast, every theme × surface × mode (SONA-171)', () => {
+	function linkColor(sel: string): string {
+		const body = blockBody(sel);
+		const hex = body.match(/--link:\s*(#[0-9A-Fa-f]{6})\s*;/)?.[1];
+		return hex ?? blockToken(sel, 'primary');
+	}
+
+	it('the global anchor rule colors with var(--link), not var(--primary)', () => {
+		const rule = css.match(/^a\s*\{([^}]*)\}/m)?.[1];
+		if (!rule) throw new Error('global a rule not found in app.css');
+		expect(rule).toMatch(/color:\s*var\(--link\)\s*;/);
+	});
+
+	it('links get a visible keyboard-focus ring using var(--ring)', () => {
+		const rule = css.match(/^a:focus-visible\s*\{([^}]*)\}/m)?.[1];
+		if (!rule) throw new Error('a:focus-visible rule not found in app.css');
+		expect(rule).toMatch(/outline:[^;]*var\(--ring\)/);
+	});
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: declares --link in its own block`, () => {
+			expect(blockBody(sel)).toMatch(/--link:\s*(#[0-9A-Fa-f]{6}|var\(--primary\))\s*;/);
+		});
+	}
+
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: link text meets 4.5:1 on the ${surface} surface`, () => {
+				expect(contrast(linkColor(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+});

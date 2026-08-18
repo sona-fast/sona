@@ -19,6 +19,11 @@ export interface AiDisclosureTopic {
 export interface AiDisclosureLink {
 	text: string;
 	href: string;
+	/**
+	 * Screen-reader label where the visible text ("through GitHub") doesn't
+	 * name the action on its own. Omitted when the text is self-describing.
+	 */
+	ariaLabel?: string;
 }
 
 export interface AiDisclosureSecurity {
@@ -34,9 +39,13 @@ export interface AiDisclosure {
 	/**
 	 * The vulnerability-reporting line (SONA-171). Separate from `topics`
 	 * because its contacts must be clickable, and a plain-text body can't
-	 * carry an anchor. Points at the UPSTREAM channels, the same pair
-	 * /.well-known/security.txt serves — a fork operator can't fix a
-	 * platform bug, so their /ai page must not collect the reports.
+	 * carry an anchor. Points at the UPSTREAM channels — a fork operator
+	 * can't fix a platform bug, so their /ai page must not collect the
+	 * reports. The GitHub URL deliberately differs from the one in
+	 * /.well-known/security.txt: this page links the Security tab (a human
+	 * picks their path from there), while security.txt carries the
+	 * /security/advisories/new report form for tooling. Same channels,
+	 * different entry points.
 	 */
 	security: AiDisclosureSecurity;
 	/** Muted closing line. */
@@ -72,7 +81,11 @@ export function defaultAiDisclosure(): AiDisclosure {
 			lead: 'Security problems.',
 			body: [
 				'If you find a vulnerability, report it privately, either ',
-				{ text: 'through GitHub', href: 'https://github.com/sona-fast/sona/security' },
+				{
+					text: 'through GitHub',
+					href: 'https://github.com/sona-fast/sona/security',
+					ariaLabel: 'Report a vulnerability through GitHub'
+				},
 				' or by email to ',
 				{ text: 'security@sona.fast', href: 'mailto:security@sona.fast' },
 				'. Every Sona site runs this same code, so posting details publicly exposes all of them before a fix exists.'

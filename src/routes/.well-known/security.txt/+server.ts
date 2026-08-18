@@ -29,7 +29,9 @@ export const GET: RequestHandler = ({ url }) => {
 		`Expires: ${expires.toISOString()}`,
 		// Canonical names THIS deployment's copy, so a researcher probing a fork
 		// domain sees the file claims the domain it's served from (RFC 9116 §2.5.4).
-		`Canonical: ${url.origin}/.well-known/security.txt`,
+		// Scheme pinned to https: RFC 9116 §3 requires it, and url.origin would
+		// echo back http:// on a plain-HTTP request.
+		`Canonical: https://${url.host}/.well-known/security.txt`,
 		`Policy: ${POLICY}`,
 		'Preferred-Languages: en'
 	];

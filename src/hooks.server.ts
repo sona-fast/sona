@@ -187,13 +187,15 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// Apply the active theme + the visitor's dark/light mode at SSR so the first
 	// paint is correct (no flash). themeId comes from cached settings; mode from a
 	// cookie the client toggle sets. Both fill placeholders in app.html. Skip the
-	// settings read for assets/api (not HTML).
+	// settings read for assets/api (not HTML) and security.txt (text/plain —
+	// transformPageChunk never applies, and skipping keeps the route free of any
+	// read from this fork's DB, as its setup-gate exemption above promises).
 	// Explicit cookie wins; otherwise emit 'auto' and let a tiny head script resolve
 	// it to the visitor's OS preference before first paint (see app.html).
 	const modeCookie = event.cookies.get(THEME_MODE_COOKIE);
 	const mode = modeCookie === 'light' || modeCookie === 'dark' ? modeCookie : 'auto';
 	let themeId = 'default';
-	if (event.platform?.env.DB && !isAsset && !path.startsWith('/api')) {
+	if (event.platform?.env.DB && !isAsset && !isSecurityTxt && !path.startsWith('/api')) {
 		try {
 			themeId = (await getSettings(getDb(event.platform.env.DB))).themeId || 'default';
 		} catch {

@@ -29,6 +29,13 @@ describe('/.well-known/security.txt', () => {
 		expect(body).toContain('Canonical: https://rechner.solutions/.well-known/security.txt');
 	});
 
+	it('pins the Canonical scheme to https even on a plain-HTTP request', async () => {
+		// RFC 9116 §3: the file must be served (and claimed) over https. An
+		// origin-derived Canonical would echo http:// back here.
+		const { body } = await fetchTxt('http://rechner.solutions');
+		expect(body).toContain('Canonical: https://rechner.solutions/.well-known/security.txt');
+	});
+
 	it('carries a rolling Expires in the future but under the RFC year cap', async () => {
 		const { body } = await fetchTxt();
 		const expires = body.match(/^Expires: (.+)$/m)?.[1] ?? '';

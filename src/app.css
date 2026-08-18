@@ -52,6 +52,11 @@
 	--status-ok: #4ade80;
 	--status-warn: #f5a623;
 	--status-attention: var(--primary);
+	/* Prose-link text colour (SONA-171 r1-09/r1-18). Tracks each theme's
+	   --primary like --status-attention, overridden only where the primary
+	   fails WCAG AA (4.5:1) as small text on --background or --card. Guarded
+	   by theme-contrast.test.ts for every theme × surface × mode. */
+	--link: var(--primary);
 	--border: #2E2E2E;
 	--input: #2E2E2E;
 	--ring: #666666;
@@ -96,6 +101,9 @@
 	--status-ok: #166534;
 	--status-warn: #92400E;
 	--status-attention: #C2410C;
+	/* --primary (#FF8400) is 2.20:1 on this light background — far below AA for
+	   link text. Darkened orange: 5.26:1 on the page background, 5.86:1 on cards. */
+	--link: #A04E00;
 	--border: #CBCCC9;
 	--input: #CBCCC9;
 	--ring: #666666;
@@ -128,6 +136,9 @@
 	/* --primary is too light on this dark card for AA text (4.06:1). Status
 	   attention gets a lighter violet that clears 4.5:1 on --card and --background. */
 	--status-attention: #a48bff;
+	/* --primary is 4.38:1 on this dark background — below AA for link text.
+	   The same lighter violet: 7.00:1 on the background, 6.48:1 on cards. */
+	--link: #a48bff;
 	--secondary: #232544;
 	--secondary-foreground: #f4f4ff;
 	--muted: #232544;
@@ -165,6 +176,9 @@
 	/* status-ok/warn inherit the family-neutral light values; only re-point
 	   attention to this theme's primary (#6a4cf0 is 5.4:1 on white). */
 	--status-attention: var(--primary);
+	/* Back to this theme's primary (4.96:1 on the background, 5.38:1 on cards) —
+	   without this the default light block's darkened orange bleeds in. */
+	--link: var(--primary);
 	--border: #d8d8ee;
 	--input: #d8d8ee;
 	--ring: #6a4cf0;
@@ -201,6 +215,9 @@
 	/* The light foreground (#EADED6) was 2.33:1 on the destructive fill — the
 	   near-black foreground clears AA at 5.42:1, mirroring the primary button. */
 	--destructive-foreground: #1E1E1E;
+	/* This theme's primary already clears AA as link text (5.05:1 on the
+	   background, 4.57:1 on cards). */
+	--link: var(--primary);
 	--border: #3A3633;
 	--input: #3A3633;
 	--ring: #E2694D;
@@ -242,6 +259,9 @@
 	/* status-ok/warn inherit the family-neutral light values; only re-point
 	   attention to this theme's primary (#AD3A1E is 6.2:1 on white). */
 	--status-attention: var(--primary);
+	/* Back to this theme's primary (4.68:1 on the background, 6.17:1 on cards) —
+	   without this the default light block's darkened orange bleeds in. */
+	--link: var(--primary);
 	--border: #CBBEB3;
 	--input: #CBBEB3;
 	--ring: #AD3A1E;
@@ -288,9 +308,19 @@ h1, h2, h3, h4, h5, h6 {
    underlined: breadcrumbs, the artwork "Commission by <artist>" credit, home
    "see more", admin "forgot password", and any future prose links. */
 a {
-	color: var(--primary);
+	/* --link, not --primary: --primary fails AA as small text on Ember light
+	   (2.20:1) and aurora dark (4.38:1); the token overrides those two blocks
+	   (SONA-171). Guarded by theme-contrast.test.ts. */
+	color: var(--link);
 	text-decoration: underline;
 	text-underline-offset: 2px;
+}
+
+/* Keyboard-focus ring for text links, matching .btn:focus-visible below. Uses
+   --ring, not --primary, for the same 3:1 non-text reason (SONA-171). */
+a:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
 }
 
 img {

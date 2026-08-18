@@ -56,8 +56,11 @@
 		<section class="topic">
 			<h2 class="lead">{disclosure.security.lead}</h2>
 			<p>
-				{#each disclosure.security.body as segment (segment)}{#if typeof segment === 'string'}{segment}{:else}<a
-							href={segment.href}>{segment.text}</a
+				<!-- Unkeyed on purpose: keying by the segment value would throw
+				     each_key_duplicate if the copy ever repeats a string segment. -->
+				{#each disclosure.security.body as segment}{#if typeof segment === 'string'}{segment}{:else}<a
+							href={segment.href}
+							aria-label={segment.ariaLabel}>{segment.text}</a
 						>{/if}{/each}
 			</p>
 		</section>

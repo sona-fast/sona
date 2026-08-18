@@ -165,10 +165,27 @@ test('the AI disclosure page renders and is reachable from the footer', async ({
 	await expect(page.getByRole('heading', { name: 'The art.' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Your data.' })).toBeVisible();
 
+	// The security section renders too, with a clickable reporting contact
+	// (SONA-171): the section only exists in this route's template, so nothing
+	// else catches its deletion end to end.
+	await expect(page.getByRole('heading', { name: 'Security problems.' })).toBeVisible();
+	await expect(page.locator('a[href="mailto:security@sona.fast"]')).toBeVisible();
+
 	// Reachable from any public page's footer.
 	await page.goto('/');
 	await page.locator('.footer .legal-links a[href="/ai"]').click();
 	await expect(page).toHaveURL(/\/ai$/);
+});
+
+test('security.txt serves machine-readable contacts through the real app stack', async ({
+	request
+}) => {
+	// The unit test drives GET() directly; this proves the route survives the
+	// hooks chain (setup gate + theme-read exemptions, SONA-171 r1-07).
+	const res = await request.get('/.well-known/security.txt');
+	expect(res.status()).toBe(200);
+	expect(res.headers()['content-type']).toContain('text/plain');
+	expect(await res.text()).toMatch(/^Contact: /m);
 });
 
 test('the AI page is reachable on mobile (desktop footer hidden < 768px)', async ({ page }) => {
