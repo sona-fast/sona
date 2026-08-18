@@ -1,17 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { isHttpError } from '@sveltejs/kit';
-import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
+import { clearSettingsCache } from '$lib/server/settings';
 import { MAX_VR_MODEL_BYTES } from '$lib/vr';
-import { EARLY_ACCESS } from '$lib/early-access';
 import { makeD1 } from '$lib/server/test/d1';
 
 import { POST } from './+server';
 
-// Stub only the provider resolution — the endpoint's own validation (gate,
-// Content-Length, extension/content-type, magic-byte sniff) stays real. `put`
+// Stub only the provider resolution — the endpoint's own validation
+// (Content-Length, extension/content-type, magic-byte sniff) stays real. `put`
 // is what the assertions probe: the endpoint must hand the provider a STREAM
 // plus the declared size (SONA-136 contract), never a buffered body.
 const put = vi.hoisted(() =>
@@ -22,24 +21,10 @@ vi.mock('$lib/server/storage', async (importOriginal) => {
 	return { ...original, getStorage: vi.fn(() => ({ put })) };
 });
 
-// Registry-driven gate control (same mutation pattern as early-access.test.ts).
-const SHIPPED = { ...EARLY_ACCESS };
-const FUTURE_GA = '2999-01-01';
-const PAST_GA = '2000-01-01';
-function restoreRegistry() {
-	for (const k of Object.keys(EARLY_ACCESS)) delete EARLY_ACCESS[k];
-	Object.assign(EARLY_ACCESS, SHIPPED);
-}
 beforeEach(() => {
-	restoreRegistry();
-	EARLY_ACCESS['vr-avatars'] = PAST_GA; // ungated by default; gate tests override
 	clearSettingsCache();
-	// The gate memoizes the verified supporter key per isolate; every test builds
-	// a fresh DB, so the previous test's key would otherwise answer for this one.
-	clearSupporterKeyStatusCache();
 	put.mockClear();
 });
-afterEach(restoreRegistry);
 
 // Small fixtures — the guards must reject an oversized upload from its
 // DECLARED length alone, so no test ships a real 50 MB body.
@@ -125,13 +110,6 @@ describe('POST /api/admin/vr-model', () => {
 		)) as Response;
 		expect(res.status).toBe(200);
 		expect(((await res.json()) as { format: string }).format).toBe('fbx');
-	});
-
-	it('refuses while gated (pre-GA, no key) — 403 before anything else', async () => {
-		EARLY_ACCESS['vr-avatars'] = FUTURE_GA;
-		const platform = makePlatform();
-		expect(await statusOf(() => POST(postEvent(platform)))).toBe(403);
-		expect(put).not.toHaveBeenCalled();
 	});
 
 	it('requires Content-Length (411)', async () => {

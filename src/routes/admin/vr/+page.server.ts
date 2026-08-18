@@ -1,8 +1,6 @@
 import { sql, eq, desc } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { vrAvatars, avatarPlatforms, characters, images } from '$lib/server/db/schema';
-import { vrPublishingEnabled, vrGaDate } from '$lib/server/vr-gate';
-import { formatDate } from '$lib/index';
 import { R2_FREE_TIER_BYTES } from '$lib/config';
 import type { PageServerLoad } from './$types';
 
@@ -12,9 +10,6 @@ import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
-
-	const publishingEnabled = await vrPublishingEnabled(db, platform?.env);
-	const gaDate = vrGaDate();
 
 	const rows = await db
 		.select({
@@ -63,9 +58,6 @@ export const load: PageServerLoad = async ({ platform }) => {
 		)?.total ?? 0;
 
 	return {
-		publishingEnabled,
-		// Display-formatted GA date for the gate copy (null once the flag retires).
-		gaDateDisplay: gaDate ? formatDate(gaDate) : null,
 		avatars: rows.map((r) => ({
 			id: r.id,
 			slug: r.slug,

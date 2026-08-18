@@ -429,9 +429,9 @@ export const NO_SUPPORTER_KEY: VerifiedSupporterKey = Object.freeze({
 	expiresAt: null
 });
 
-// The second memo of the `supporterKey` row, for the ENFORCEMENT path
-// (vrPublishingEnabled), which runs on every VR admin load and every model
-// upload and otherwise pays a D1 read plus an Ed25519 verify each time.
+// The second memo of the `supporterKey` row, for enforcement paths (the next
+// early-access feature's gate — the retired SONA-124 VR gate was the first
+// consumer), which otherwise pay a D1 read plus an Ed25519 verify each time.
 //
 // THE INVARIANT, stated once for everything below: nothing cached here depends
 // on `now` or on who is asking. Only the signature verdict and the expiry
@@ -447,7 +447,7 @@ export const NO_SUPPORTER_KEY: VerifiedSupporterKey = Object.freeze({
 //
 // Staleness: the isolate running the save/remove clears immediately, others
 // converge on the TTL. A key that currently entitles is held for the full
-// SETTINGS_TTL_MS, so REMOVING one keeps publishing open elsewhere for up to a
+// SETTINGS_TTL_MS, so REMOVING one leaves other isolates entitled for up to a
 // minute — the same bound the settings and status caches already accept, and
 // only the owner revoking their own entitlement can reach it.
 //
@@ -455,9 +455,10 @@ export const NO_SUPPORTER_KEY: VerifiedSupporterKey = Object.freeze({
 // and a lapsed key — is held for seconds instead. That is the direction where
 // staleness looks like a bug: the operator installs or renews a key, the
 // settings page (which reads uncached) says valid, and a warm isolate would
-// otherwise keep refusing uploads. Renewal is the common case, since keys run
-// ~45 days, and a renewal replaces a LAPSED entry — which is why the short TTL
-// keys off "usable now" rather than "signature ok".
+// otherwise keep answering from the stale no-key facts (denying, when a gate
+// consumes them). Renewal is the common case, since keys run ~45 days, and a
+// renewal replaces a LAPSED entry — which is why the short TTL keys off
+// "usable now" rather than "signature ok".
 const NO_KEY_TTL_MS = 5_000;
 let verifiedSupporterKeyCache: { value: VerifiedSupporterKey; expires: number } | null = null;
 
@@ -473,13 +474,15 @@ export function clearSupporterKeyStatusCache() {
 }
 
 /**
- * The verified FACTS about the stored key, for the enforcement gate — memoized
- * under the invariant above.
+ * The verified FACTS about the stored key — memoized under the invariant
+ * above. Today's only consumer is the display-status path; an early-access
+ * enforcement gate (the retired SONA-124 VR gate was the first) consumes the
+ * same facts.
  *
  * Fails closed on every uncertain outcome: a token that doesn't verify, a
  * missing row and an empty row all resolve to NO_SUPPORTER_KEY. D1 errors
- * propagate (and are not cached) so the caller can decide — the enforcement
- * path catches them and denies.
+ * propagate (and are not cached) so the caller decides — a gate treats them
+ * as "no key" and denies.
  */
 export async function getVerifiedSupporterKey(db: Database): Promise<VerifiedSupporterKey> {
 	const cached = verifiedSupporterKeyCache;

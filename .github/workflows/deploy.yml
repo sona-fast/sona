@@ -36,6 +36,11 @@ jobs:
 
       - run: npm run build
 
+      # Same guard the template's ci.yml runs: a computed-key lookup into the
+      # paraglide messages namespace must never re-pin the catalog into a
+      # client chunk (SONA-169). Needs the build output above; costs ~1s.
+      - run: npm run check:catalog-pinning
+
       # Fail fast with a clear, actionable message if a fork runs this without
       # Cloudflare credentials (rather than a cryptic wrangler error three steps
       # later). The template never reaches here — the job is gated off above.

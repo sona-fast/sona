@@ -32,6 +32,11 @@ jobs:
 
       - run: npm run build
 
+      # Fails if a client chunk carries most of the message catalog — a
+      # computed-key lookup into the paraglide namespace re-pinning it
+      # (SONA-169). Needs the build output above.
+      - run: npm run check:catalog-pinning
+
   # Integration test for the local-dev self-bootstrap (#137): needs real wrangler
   # + a local D1 (miniflare), so it's out of the fast unit suite and run here.
   # Gated to the canonical repo like `check`/`e2e`; forks skip it (their deploy.yml

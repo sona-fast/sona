@@ -137,16 +137,6 @@ declare global {
 				 */
 				TURNSTILE_SITEKEY?: string;
 				TURNSTILE_SECRET?: string;
-				/**
-				 * TEST-ONLY early-access bypass (SONA-124): 'open' makes
-				 * vrPublishingEnabled return true regardless of GA date / supporter
-				 * key. Set ONLY in tests/e2e/wrangler.e2e*.toml — the e2e suite must
-				 * drive the ungated admin form while the flag is pre-GA, and a real
-				 * supporter key cannot be minted in CI (the issuer key is baked in).
-				 * Never set in a production wrangler.toml; unset means no behavior
-				 * change anywhere.
-				 */
-				E2E_VR_GATE?: string;
 			};
 			/**
 			 * Cloudflare execution context. `waitUntil` lets fire-and-forget work

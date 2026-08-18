@@ -10,7 +10,6 @@ import {
 	peekStream,
 	sniffModelFormat
 } from '$lib/server/vr-models';
-import { vrPublishingEnabled } from '$lib/server/vr-gate';
 import type { RequestHandler } from './$types';
 
 // POST /api/admin/vr-model?filename=<name>.vrm|.fbx  (admin-only via hooks —
@@ -31,13 +30,6 @@ import type { RequestHandler } from './$types';
 // the create/edit form.
 export const POST: RequestHandler = async ({ request, url, platform }) => {
 	const db = getDb(platform!.env.DB);
-
-	// Gate enforcement (SONA-124): uploading a model is part of creating/
-	// publishing, which is supporter-only until the flag GAs. The disabled
-	// dropzone is presentation; this is the enforcement.
-	if (!(await vrPublishingEnabled(db, platform?.env))) {
-		error(403, 'VR avatars are in early access — uploading models needs a valid supporter key until they open for everyone.');
-	}
 
 	const lengthHeader = request.headers.get('content-length');
 	const size = lengthHeader === null ? NaN : Number(lengthHeader);

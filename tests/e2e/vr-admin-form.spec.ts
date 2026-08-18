@@ -2,9 +2,8 @@ import { test, expect } from '@playwright/test';
 import { adminLogin } from './admin-login';
 
 // VR avatar admin form smoke (SONA-124, T1): VrAvatarForm and the /admin/vr/new
-// page never executed in any test before this. The e2e harness forces the
-// early-access gate open (E2E_VR_GATE=open in wrangler.e2e.toml) — pre-GA there
-// is no mintable supporter key, so the ungated form is unreachable otherwise.
+// page never executed in any test before this. (The SONA-124 early-access gate
+// retired at GA — SONA-157 — so the form needs no bypass to be reachable.)
 //
 // Runs on the SHARED read-only DB/server under fullyParallel: everything here
 // READS and types into the client-side form without ever submitting it, so it
@@ -13,7 +12,7 @@ import { adminLogin } from './admin-login';
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
 
-test('the ungated create form renders its fields, dropzones and credit control', async ({ page }) => {
+test('the create form renders its fields, dropzones and credit control', async ({ page }) => {
 	await adminLogin(page, PASSWORD);
 	await page.goto('/admin/vr/new');
 
@@ -22,7 +21,7 @@ test('the ungated create form renders its fields, dropzones and credit control',
 	await expect(page.locator('input[name="slug"]')).toBeVisible();
 	await expect(page.locator('select[name="characterId"]')).toBeVisible();
 
-	// Model dropzone, unlocked (the override opens the gate).
+	// Model dropzone.
 	await expect(page.getByText(/Choose a \.vrm or \.fbx file to upload/)).toBeVisible();
 	// Format expectations under the dropzone (VR feedback round): which VRM
 	// versions the viewer takes, and that FBX is download-only.

@@ -1,39 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { isRedirect } from '@sveltejs/kit';
 import { makeD1 } from '$lib/server/test/d1';
-import { clearSettingsCache, clearSupporterKeyStatusCache } from '$lib/server/settings';
-import { EARLY_ACCESS } from '$lib/early-access';
+import { clearSettingsCache } from '$lib/server/settings';
 
 import { actions } from './+page.server';
 
-// The gate logic stays real; only the signature check is faked (see the helper).
-vi.mock('$lib/server/supporter-key', async (importOriginal) =>
-	(await import('$lib/server/test/supporter-key-mock')).supporterKeyLiteralMockModule(
-		importOriginal as () => Promise<typeof import('$lib/server/supporter-key')>
-	)
-);
-
-// Registry-driven gate control (same mutation pattern as early-access.test.ts)
-// so no test depends on the wall clock.
-const SHIPPED = { ...EARLY_ACCESS };
-const FUTURE_GA = '2999-01-01';
-const PAST_GA = '2000-01-01';
-function restoreRegistry() {
-	for (const k of Object.keys(EARLY_ACCESS)) delete EARLY_ACCESS[k];
-	Object.assign(EARLY_ACCESS, SHIPPED);
-}
 beforeEach(() => {
-	restoreRegistry();
 	// getSettings caches per isolate and every test builds a fresh DB.
 	clearSettingsCache();
-	// The gate memoizes the verified supporter key per isolate; every test builds
-	// a fresh DB, so the previous test's key would otherwise answer for this one.
-	clearSupporterKeyStatusCache();
 });
-afterEach(restoreRegistry);
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -73,10 +51,6 @@ function makeDb() {
 	return { sqlite, platform: { env: { DB: d1, IMAGES: {} } } as unknown as App.Platform };
 }
 
-function setKey(sqlite: ReturnType<typeof makeDb>['sqlite'], token: string) {
-	sqlite.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)').run('supporterKey', token);
-}
-
 function baseForm(overrides: Record<string, string | string[]> = {}): FormData {
 	const form = new FormData();
 	form.set('name', 'Taro VRChat');
@@ -106,24 +80,8 @@ async function outcomeOf(platform: App.Platform, form: FormData): Promise<number
 	}
 }
 
-describe('create action gate matrix (pre-GA)', () => {
-	it.each([
-		['absent', null, 403],
-		['invalid', 'garbage-token', 403],
-		['valid', 'VALID', 'created']
-	] as const)('key %s → %s', async (_label, token, expected) => {
-		EARLY_ACCESS['vr-avatars'] = FUTURE_GA;
-		const { sqlite, platform } = makeDb();
-		if (token) setKey(sqlite, token);
-		expect(await outcomeOf(platform, baseForm())).toBe(expected);
-		const count = sqlite.prepare('SELECT COUNT(*) AS n FROM vr_avatars').get() as { n: number };
-		expect(count.n).toBe(expected === 'created' ? 1 : 0);
-	});
-});
-
-describe('create action once GA is reached', () => {
-	it('creates without any key (ungated)', async () => {
-		EARLY_ACCESS['vr-avatars'] = PAST_GA;
+describe('create action', () => {
+	it('creates without any key (the SONA-124 early-access gate retired at GA — SONA-157)', async () => {
 		const { sqlite, platform } = makeDb();
 		expect(await outcomeOf(platform, baseForm())).toBe('created');
 		const row = sqlite.prepare('SELECT slug, name FROM vr_avatars').get() as {
@@ -135,10 +93,6 @@ describe('create action once GA is reached', () => {
 });
 
 describe('create action validation', () => {
-	beforeEach(() => {
-		EARLY_ACCESS['vr-avatars'] = PAST_GA; // ungated — validation is what's under test
-	});
-
 	it("requires roleLabel for role='other' credits", async () => {
 		const { sqlite, platform } = makeDb();
 		const form = baseForm({
@@ -288,24 +242,5 @@ describe('create action validation', () => {
 				})
 			)
 		).toBe('created');
-	});
-});
-
-describe('create action E2E_VR_GATE override (test-only bypass)', () => {
-	it("is inert outside dev builds — even the exact value 'open' stays closed", async () => {
-		// The bypass is guarded on $app/environment's `dev`, which the vitest
-		// stub pins to false (vitest-stubs/app-environment.ts) — exactly what a
-		// production build compiles to. A dashboard var set on a production
-		// deployment must NOT open the pre-GA gate; the dev-build behavior
-		// (bypass honored) is covered by the e2e suite, which runs `vite dev`
-		// with E2E_VR_GATE=open in wrangler.e2e.toml.
-		EARLY_ACCESS['vr-avatars'] = FUTURE_GA;
-		const open = makeDb();
-		(open.platform as unknown as { env: Record<string, unknown> }).env.E2E_VR_GATE = 'open';
-		expect(await outcomeOf(open.platform, baseForm())).toBe(403);
-
-		const closed = makeDb();
-		(closed.platform as unknown as { env: Record<string, unknown> }).env.E2E_VR_GATE = 'false';
-		expect(await outcomeOf(closed.platform, baseForm())).toBe(403);
 	});
 });

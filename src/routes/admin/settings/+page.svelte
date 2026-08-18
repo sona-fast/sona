@@ -17,7 +17,7 @@
 	import { resolveTabId, visibleTabIds, type TabId } from './tabs';
 	import { showUtFileStat } from './ut-stat';
 	import { baseLocale, locales } from '$lib/paraglide/runtime';
-	import { earlyAccessLabel } from '$lib/early-access-label';
+	import { earlyAccessLabel } from '$lib/early-access';
 	import * as m from '$lib/paraglide/messages';
 
 	// Endonyms for the email-language options — a language name reads the same
@@ -151,8 +151,8 @@
 
 	// Localized "in early access right now" list, joined for the status line. Empty
 	// until a pilot feature is registered, in which case the "nothing" line shows.
-	// Each flag renders its localized display label (earlyAccessLabel resolves the
-	// by-convention message id through paraglide), never the raw flag slug.
+	// Each flag renders its localized display label (earlyAccessLabel reads the
+	// registry entry's statically referenced message), never the raw flag slug.
 	const earlyActiveText = $derived(
 		data.earlyAccess
 			.map((e) => m.admin_settings_supporter_early_item({ feature: earlyAccessLabel(e.flag), date: e.gaDate }))

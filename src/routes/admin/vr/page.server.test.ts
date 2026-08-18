@@ -1,38 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { makeD1 } from '$lib/server/test/d1';
-import { clearSupporterKeyStatusCache } from '$lib/server/settings';
-import { EARLY_ACCESS } from '$lib/early-access';
 
 import { load } from './+page.server';
 
-// The gate logic stays real; only the signature check is faked (see the helper).
-vi.mock('$lib/server/supporter-key', async (importOriginal) =>
-	(await import('$lib/server/test/supporter-key-mock')).supporterKeyLiteralMockModule(
-		importOriginal as () => Promise<typeof import('$lib/server/supporter-key')>
-	)
-);
-
 const NOW = '2026-01-01T00:00:00.000Z';
-
-// The gating tests below drive the gate through the registry (same mutation
-// pattern as early-access.test.ts) so they never depend on the wall clock.
-const SHIPPED = { ...EARLY_ACCESS };
-const FUTURE_GA = '2999-01-01';
-const PAST_GA = '2000-01-01';
-function restoreRegistry() {
-	for (const k of Object.keys(EARLY_ACCESS)) delete EARLY_ACCESS[k];
-	Object.assign(EARLY_ACCESS, SHIPPED);
-}
-beforeEach(() => {
-	restoreRegistry();
-	// The gate memoizes the verified supporter key per isolate; every test builds
-	// a fresh DB, so the previous test's key would otherwise answer for this one.
-	clearSupporterKeyStatusCache();
-});
-afterEach(restoreRegistry);
 
 // Only the tables the /admin/vr list load touches, columns limited to what its
 // queries reference (same shape as the public vr page.server.test.ts).
@@ -93,8 +67,6 @@ function addAvatar(
 }
 
 type ListData = {
-	publishingEnabled: boolean;
-	gaDateDisplay: string | null;
 	avatars: Array<{
 		slug: string;
 		published: boolean;
@@ -137,43 +109,6 @@ describe('/admin/vr list load', () => {
 		const data = await loadData(platform);
 		expect(data.storage.usedBytes).toBe(3500);
 		expect(data.storage.limitBytes).toBe(10 * 1024 * 1024 * 1024);
-	});
-
-	it('is gated pre-GA without a key, and reports the GA date for the gate copy', async () => {
-		EARLY_ACCESS['vr-avatars'] = FUTURE_GA;
-		const { platform } = makeDb();
-		const data = await loadData(platform);
-		expect(data.publishingEnabled).toBe(false);
-		expect(data.gaDateDisplay).toBe('2999.01.01');
-	});
-
-	it('a malformed stored supporter key does not open the gate', async () => {
-		EARLY_ACCESS['vr-avatars'] = FUTURE_GA;
-		const { sqlite, platform } = makeDb();
-		sqlite
-			.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)')
-			.run('supporterKey', 'not-a-real-key');
-		const data = await loadData(platform);
-		expect(data.publishingEnabled).toBe(false);
-	});
-
-	it('a valid key opens the gate for a DB the previous test never saw', async () => {
-		// Ordered after the two no-key cases on purpose: the gate memoizes the
-		// verified key per isolate, so this passes only because the beforeEach
-		// clears it. Drop that clear and this test reads the earlier "no key"
-		// answer — which is what made the malformed case above vacuous before.
-		EARLY_ACCESS['vr-avatars'] = FUTURE_GA;
-		const { sqlite, platform } = makeDb();
-		sqlite.prepare('INSERT INTO site_settings (key, value) VALUES (?, ?)').run('supporterKey', 'VALID');
-		const data = await loadData(platform);
-		expect(data.publishingEnabled).toBe(true);
-	});
-
-	it('is ungated once the GA date has passed', async () => {
-		EARLY_ACCESS['vr-avatars'] = PAST_GA;
-		const { platform } = makeDb();
-		const data = await loadData(platform);
-		expect(data.publishingEnabled).toBe(true);
 	});
 
 	it('marks a clean avatar Mature when its poster image is NSFW (effective public flag)', async () => {
