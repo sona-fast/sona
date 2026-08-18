@@ -36,6 +36,22 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 		});
 	});
 
+// The hardening headers, shared by BOTH response paths in authHandle: the
+// early-return 400 for a malformed URI and the header block at the bottom.
+// One record so a sixth header added later cannot land on one path and miss
+// the other. (Cache-Control is not in here — each path sets its own.)
+const SECURITY_HEADERS = {
+	'Strict-Transport-Security': 'max-age=31536000',
+	'X-Frame-Options': 'DENY',
+	'X-Content-Type-Options': 'nosniff',
+	'Referrer-Policy': 'strict-origin-when-cross-origin',
+	'Permissions-Policy': 'camera=(), microphone=(), geolocation=()'
+} as const;
+
+// Kit's decode_pathname, mirrored (see the comment in authHandle). Shared with
+// handleError so both record the SAME route identity for a 5xx.
+const decodePathname = (pathname: string) => pathname.split('%25').map(decodeURI).join('%25');
+
 // Exported for unit testing the auth/setup gate in isolation (driving the
 // composed `handle` would also run paraglideMiddleware, which needs a full
 // request pipeline).
@@ -59,21 +75,19 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// up under the route it actually served rather than fragmenting the counters.
 	let path: string;
 	try {
-		path = event.url.pathname.split('%25').map(decodeURI).join('%25');
+		path = decodePathname(event.url.pathname);
 	} catch {
 		// Kit's own decode of this pathname throws too, so no route would ever
 		// match it. Answer the malformed sequence before any gate logic runs.
 		// This returns before the header block at the bottom of the handler, so
-		// stamp the same hardening headers (and an explicit no-store) here.
+		// stamp the shared hardening headers (and an explicit no-store) here.
+		// Content-Type is this path's own: a plain-text body needs saying so.
 		return new Response('Malformed URI', {
 			status: 400,
 			headers: {
+				'Content-Type': 'text/plain; charset=utf-8',
 				'Cache-Control': 'private, no-store, no-cache',
-				'Strict-Transport-Security': 'max-age=31536000',
-				'X-Frame-Options': 'DENY',
-				'X-Content-Type-Options': 'nosniff',
-				'Referrer-Policy': 'strict-origin-when-cross-origin',
-				'Permissions-Policy': 'camera=(), microphone=(), geolocation=()'
+				...SECURITY_HEADERS
 			}
 		});
 	}
@@ -289,6 +303,9 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 			const device = deviceClass(event.request.headers.get('user-agent'));
 			if (device) {
 				counters.push(
+					// The pageview key is deliberately the DECODED path: if a non-canonical
+					// public URL ever ships (a non-ASCII slug), its counter splits at this
+					// deploy boundary — intended, decoded is the canonical identity.
 					...pageViewStatements(db, {
 						path,
 						device,
@@ -323,11 +340,9 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// protects the Sona host, which is the host it is served from; widening it to
 	// an operator's whole domain is their call to make at the edge, not ours to
 	// make for them from inside the app.
-	response.headers.set('Strict-Transport-Security', 'max-age=31536000');
-	response.headers.set('X-Frame-Options', 'DENY');
-	response.headers.set('X-Content-Type-Options', 'nosniff');
-	response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-	response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+	for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+		response.headers.set(name, value);
+	}
 
 	// Cache control. Page HTML is locale-dependent (chosen per-request from the
 	// PARAGLIDE_LOCALE cookie / Accept-Language). Cloudflare's edge cache key is the
@@ -410,9 +425,15 @@ export const handleError: HandleServerError = ({ error, event, status, message }
 		event.locals.errorSampled = true;
 		const db = getDb(event.platform.env.DB);
 		const detail = causeChainMessage(error, message);
-		schedule(
-			event.platform,
-			recordError(db, { route: event.url.pathname, status, message: detail })
-		);
+		// Same decoded route identity as authHandle's fallback sampler, so one 5xx
+		// class never lands under two route strings. A malformed pathname (which
+		// authHandle 400s before resolve, so it can't normally reach here) stays raw.
+		let route: string;
+		try {
+			route = decodePathname(event.url.pathname);
+		} catch {
+			route = event.url.pathname;
+		}
+		schedule(event.platform, recordError(db, { route, status, message: detail }));
 	}
 };

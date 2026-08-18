@@ -6,19 +6,20 @@ import type { D1Database } from '@cloudflare/workers-types';
 import { isRedirect } from '@sveltejs/kit';
 import { DrizzleQueryError } from 'drizzle-orm/errors';
 
-// Control the setup gate without touching D1. hashToken is also imported by the
-// hook (unused here — no session cookie), so keep the rest of the module real.
+// Control the setup gate without touching D1. The spread keeps the rest of the
+// module real — hashToken in particular, which the hook AND the authenticated
+// cache test below both need to agree on.
 vi.mock('$lib/server/admin-auth', async (orig) => ({
 	...(await orig<typeof import('$lib/server/admin-auth')>()),
 	getSetupState: vi.fn()
 }));
 
-import { getSetupState } from '$lib/server/admin-auth';
+import { getSetupState, hashToken } from '$lib/server/admin-auth';
 import { authHandle, handleError } from './hooks.server';
 
 import { makeD1 } from '$lib/server/test/d1';
 import { ADMIN_AUTH_EXEMPT, isAdminAuthExempt } from '$lib/admin-routes';
-import { VIEWER_TZ_COOKIE } from '$lib/config';
+import { SESSION_COOKIE, VIEWER_TZ_COOKIE } from '$lib/config';
 
 function makeDb(): D1Database {
 	const sqlite = new Database(':memory:');
@@ -271,8 +272,9 @@ describe('authHandle — /api/oembed is public (third-party embedders have no se
 		// rate-limit rule in scripts/waf-lib.ts, the admin layout's
 		// isAdminAuthExempt($page.url.pathname) read) do not recognize the encoded
 		// spelling, so exempting it would serve it unauthenticated but
-		// un-rate-limited. Encoded spellings get gates, never exemptions.
-		for (const path of ['/api/%6Fembed', '/api/metrics/downloa%64']) {
+		// un-rate-limited. Encoded spellings get gates, never exemptions — the
+		// /api/cron/ namespace included.
+		for (const path of ['/api/%6Fembed', '/api/metrics/downloa%64', '/api/cro%6E/purge']) {
 			const res = (await authHandle({
 				event: makeEvent(path, makeDb()),
 				resolve
@@ -352,6 +354,8 @@ describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187
 		// it must carry its own hardening headers and an explicit no-store.
 		expect(res.headers.get('Cache-Control')).toBe('private, no-store, no-cache');
 		expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+		// The plain-text body declares itself; nothing invites content sniffing.
+		expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
 	});
 
 	it('does not double-decode: a %25-escaped spelling stays literal, like in the router', async () => {
@@ -373,30 +377,64 @@ describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187
 		}
 	});
 
-	it('answers an encoded /api spelling with a 401, never the public cache default', async () => {
-		// Exemptions are canonical-only, so '/api/%6Fembed' no longer reaches
-		// resolve at all — the 401 is the whole story. (No anonymous-reachable
-		// non-canonical /api vehicle survives to test the decoded-isPublic cache
-		// stamp directly; that decode is covered by the gate tests above plus the
-		// comment on `isPublic` in hooks.server.ts.)
+	it('stamps the private no-store default on an authenticated encoded /api response, never the public one', async () => {
+		// The cache branch reads the DECODED path too (isPublic in hooks.server.ts).
+		// An admin with a valid session passes the /api gate, so their encoded /api
+		// spelling DOES reach resolve — and the non-HTML 200 coming back must get
+		// the private default, not the public s-maxage stamp the raw (non-/api-
+		// looking) pathname would earn.
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`
+			CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+			CREATE TABLE sessions (token TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+		`);
+		sqlite
+			.prepare('INSERT INTO sessions (token, created_at, expires_at) VALUES (?, ?, ?)')
+			.run(await hashToken('some-token'), new Date().toISOString(), new Date(Date.now() + 3_600_000).toISOString());
+		const url = new URL('https://taro.surf/api/%61rtists');
 		const res = (await authHandle({
-			event: makeEvent('/api/%6Fembed', makeDb()),
+			event: {
+				cookies: { get: (name: string) => (name === SESSION_COOKIE ? 'some-token' : undefined) },
+				url,
+				request: new Request(url),
+				locals: {} as App.Locals,
+				platform: { env: { DB: makeD1(sqlite) } } as unknown as App.Platform
+			} as never,
 			resolve: async () => new Response('{}', { headers: { 'content-type': 'application/json' } })
 		} as never)) as Response;
-		expect(res.status).toBe(401);
-		expect(res.headers.get('cache-control')).not.toBe('public, s-maxage=300, stale-while-revalidate=3600');
+		expect(res.status).toBe(200);
+		expect(res.headers.get('Cache-Control')).toBe('private, no-store, no-cache');
 	});
 
 	it('keeps decodeURI (not decodeURIComponent): %2F stays a literal, not a slash', async () => {
 		// '/api%2Foembed' survives decodeURI unchanged (reserved chars stay
 		// encoded), so it is canonical but NOT '/api/oembed' — no exemption, 401.
-		// Under a wrong decodeURIComponent swap it would decode to '/api/oembed'
-		// and wrongly pick up the oembed exemption; this pins that mutation.
+		// NOTE: this alone does not discriminate the decodeURIComponent swap —
+		// under it the path decodes to '/api/oembed', canonicity breaks, and the
+		// exemption is refused for THAT reason instead, still 401. The asset test
+		// below is what actually pins the swap.
 		const res = (await authHandle({
 			event: makeEvent('/api%2Foembed', makeDb()),
 			resolve
 		} as never)) as Response;
 		expect(res.status).toBe(401);
+	});
+
+	it('an encoded-slash asset path stays canonical under decodeURI and exempt from the setup gate', async () => {
+		// '/_app/immutable/chunk%2Fx.js' survives decodeURI unchanged, so it is
+		// canonical and isAsset exempts it from the setup gate — it must resolve.
+		// Under a decodeURIComponent swap the %2F becomes a slash, canonicity
+		// breaks, isAsset goes false and the incomplete-setup redirect fires: THIS
+		// is the observable difference between the two decoders.
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
+		expect(await redirectFor('/_app/immutable/chunk%2Fx.js', makeDb())).toBeNull();
+	});
+
+	it('does not exempt a non-canonical asset spelling from the setup gate', async () => {
+		// isAsset is canonical-only like every other exemption: '/_a%70p/…' routes
+		// to the asset path in Kit but must still hit the setup gate here.
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
+		expect(await redirectFor('/_a%70p/immutable/x.js', makeDb())).toEqual({ status: 302, location: '/admin/setup' });
 	});
 
 	it('treats an encoded /admin/setup spelling as an ordinary admin path in the setup gate', async () => {
@@ -616,6 +654,31 @@ describe('handleError — rich 5xx sample (issue #6)', () => {
 
 		const row = sqlite.prepare('SELECT message FROM error_sample').get();
 		expect(row.message).toBe('D1_ERROR: boom ← outer wrapper');
+	});
+
+	it('records the DECODED route, matching authHandle, so one 5xx class never splits across two route strings', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/%61dmin/images', db, waits);
+
+		handleError({ error: new Error('boom'), event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		expect(sqlite.prepare('SELECT route FROM error_sample').get().route).toBe('/admin/images');
+	});
+
+	it('falls back to the raw route when the pathname does not decode', async () => {
+		// authHandle 400s a malformed pathname before resolve, so this can't
+		// normally happen — but a decode throw inside handleError must not turn an
+		// error REPORT into a second error.
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/%E0%A4%A', db, waits);
+
+		handleError({ error: new Error('boom'), event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		expect(sqlite.prepare('SELECT route FROM error_sample').get().route).toBe('/%E0%A4%A');
 	});
 
 	it('does nothing for a sub-500 status', async () => {
