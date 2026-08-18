@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -15,7 +16,7 @@ vi.mock('$lib/server/admin-auth', async (orig) => ({
 }));
 
 import { getSetupState, hashToken } from '$lib/server/admin-auth';
-import { authHandle, handleError } from './hooks.server';
+import { authHandle, handleError, decodePathname } from './hooks.server';
 
 import { makeD1 } from '$lib/server/test/d1';
 import { ADMIN_AUTH_EXEMPT, isAdminAuthExempt } from '$lib/admin-routes';
@@ -287,6 +288,38 @@ describe('authHandle — /api/oembed is public (third-party embedders have no se
 		const db = makeDb();
 		expect(await redirectFor('/admin/lo%67in', db)).toEqual({ status: 302, location: '/admin/login' });
 		expect(await redirectFor('/%61dmin/login', db)).toEqual({ status: 302, location: '/admin/login' });
+	});
+});
+
+// The whole SONA-187 fix rests on decodePathname producing the SAME string Kit
+// routes on. Kit does not export decode_pathname, so pin it against Kit's own
+// source: read the function out of node_modules, reconstruct it, and compare
+// behaviour. A @sveltejs/kit upgrade that changes decode_pathname fails here and
+// forces decodePathname to be re-checked rather than silently diverging.
+describe('decodePathname stays a faithful mirror of Kit decode_pathname', () => {
+	const src = readFileSync('node_modules/@sveltejs/kit/src/utils/url.js', 'utf8');
+	const body = src.match(/export function decode_pathname\(pathname\)\s*\{([\s\S]*?)\n\}/)?.[1];
+	if (!body) throw new Error('decode_pathname not found in Kit source — update this drift guard');
+	const kitDecode = new Function('pathname', body) as (p: string) => string;
+
+	const cases = [
+		'/',
+		'/admin/images',
+		'/%61dmin/images',
+		'/%2561dmin/images',
+		'/api%2Foembed',
+		'/tags/foo%20bar',
+		'/tags/%E6%97%A5%E6%9C%AC',
+		'/%25',
+		'/%2525'
+	];
+	it.each(cases)('matches Kit for %s', (input) => {
+		expect(decodePathname(input)).toBe(kitDecode(input));
+	});
+
+	it('throws on the same malformed sequence Kit throws on', () => {
+		expect(() => decodePathname('/%E0%A4%A')).toThrow();
+		expect(() => kitDecode('/%E0%A4%A')).toThrow();
 	});
 });
 

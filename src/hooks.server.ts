@@ -50,8 +50,9 @@ const SECURITY_HEADERS = {
 const SECURITY_HEADER_ENTRIES = Object.entries(SECURITY_HEADERS);
 
 // Kit's decode_pathname, mirrored (see the comment in authHandle). Shared with
-// handleError so both record the SAME route identity for a 5xx.
-const decodePathname = (pathname: string) => pathname.split('%25').map(decodeURI).join('%25');
+// handleError so both record the SAME route identity for a 5xx. Exported so a
+// test can pin it against Kit's own source and fail if an upgrade diverges.
+export const decodePathname = (pathname: string) => pathname.split('%25').map(decodeURI).join('%25');
 
 // Exported for unit testing the auth/setup gate in isolation (driving the
 // composed `handle` would also run paraglideMiddleware, which needs a full
