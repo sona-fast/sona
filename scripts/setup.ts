@@ -41,7 +41,8 @@ import {
 	imageResizingIsOn,
 	ciWiringEntries,
 	cfApi,
-	securitySummaryLines
+	securitySummaryLines,
+	pagesPatchConfirmsSitekey
 } from './setup-lib.ts';
 import { applyDownloadRateLimit, type RateLimitStatus } from './waf-lib.ts';
 import { provisionTurnstileWidget, type TurnstileStatus } from './turnstile-lib.ts';
@@ -468,7 +469,10 @@ async function main() {
 			method: 'PATCH',
 			body: payload
 		});
-		pagesConfigOk = res.ok;
+		// A 200 whose body dropped the sitekey must not read as wired — confirm the
+		// PATCH persisted TURNSTILE_SITEKEY (skipped when no widget was provisioned).
+		pagesConfigOk =
+			res.ok && (!turnstileSitekey || pagesPatchConfirmsSitekey(res.result, turnstileSitekey));
 		if (res.ok) {
 			console.log(
 				'✔ attached D1/R2 bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).'

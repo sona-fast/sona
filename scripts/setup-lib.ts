@@ -444,3 +444,20 @@ export function securitySummaryLines(
 	}
 	return lines;
 }
+
+/**
+ * True when a Pages-project PATCH response confirms TURNSTILE_SITEKEY persisted
+ * with the value we sent. The PATCH returns the updated project; a 200 whose
+ * body silently dropped the var must not be reported as wired (the login check
+ * fails open without the sitekey), so the summary's turnstileWired flag keys
+ * off this read-back, not the HTTP status alone. Missing/malformed bodies read
+ * as unconfirmed — the safe, under-claiming direction.
+ */
+export function pagesPatchConfirmsSitekey(result: unknown, sitekey: string): boolean {
+	const envVars = (
+		result as {
+			deployment_configs?: { production?: { env_vars?: Record<string, { value?: string } | null> } };
+		} | null
+	)?.deployment_configs?.production?.env_vars;
+	return envVars?.TURNSTILE_SITEKEY?.value === sitekey;
+}

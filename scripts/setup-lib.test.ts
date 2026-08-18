@@ -21,7 +21,8 @@ import {
 	imageResizingIsOn,
 	ciWiringEntries,
 	cfApi,
-	securitySummaryLines
+	securitySummaryLines,
+	pagesPatchConfirmsSitekey
 } from './setup-lib.ts';
 
 describe('buildMigrationSql', () => {
@@ -669,11 +670,35 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 		expect(src).toMatch(/pagesConfigOk && turnstileSecretSet/);
 	});
 
-	it('assigns pagesConfigOk from the Pages PATCH result', () => {
-		expect(src).toMatch(/pagesConfigOk = res\.ok/);
+	it('assigns pagesConfigOk from the Pages PATCH result, read-back confirmed', () => {
+		expect(src).toMatch(/pagesConfigOk =\s*\n?\s*res\.ok/);
+		expect(src).toMatch(/pagesPatchConfirmsSitekey\(res\.result, turnstileSitekey\)/);
 	});
 
 	it('putSecret reports failure instead of swallowing it', () => {
 		expect(src).toMatch(/catch\s*\{\s*\n?\s*return false/);
+	});
+});
+
+describe('pagesPatchConfirmsSitekey', () => {
+	const body = (value?: string) => ({
+		deployment_configs: {
+			production: { env_vars: value === undefined ? {} : { TURNSTILE_SITEKEY: { value } } }
+		}
+	});
+
+	it('confirms when the response echoes the sitekey we sent', () => {
+		expect(pagesPatchConfirmsSitekey(body('0xKEY'), '0xKEY')).toBe(true);
+	});
+
+	it('rejects a response that dropped or changed the var', () => {
+		expect(pagesPatchConfirmsSitekey(body(), '0xKEY')).toBe(false);
+		expect(pagesPatchConfirmsSitekey(body('0xOTHER'), '0xKEY')).toBe(false);
+	});
+
+	it('reads a missing/malformed body as unconfirmed (the safe direction)', () => {
+		expect(pagesPatchConfirmsSitekey(undefined, '0xKEY')).toBe(false);
+		expect(pagesPatchConfirmsSitekey({}, '0xKEY')).toBe(false);
+		expect(pagesPatchConfirmsSitekey({ deployment_configs: null }, '0xKEY')).toBe(false);
 	});
 });
