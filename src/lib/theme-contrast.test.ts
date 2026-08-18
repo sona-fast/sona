@@ -686,8 +686,12 @@ describe('no component anchor rule colors with --primary (SONA-193)', () => {
 		.filter((p) => p.endsWith('.svelte'))
 		.map((p) => `${srcRoot}/${p}`);
 	// A selector targets an anchor when `a` appears as its own compound start
-	// (" a", ".x a", "a.y", "a:hover"), not as a substring of another word.
-	const anchorSelector = /(^|[\s.,>+~)])a(\b|:|\.|\[)/;
+	// (" a", ".x a", "a.y", "a:hover", ":global(a)"), not as a substring of
+	// another word.
+	const anchorSelector = /(^|[\s.,>+~)(])a(\b|:|\.|\[)/;
+	// Text color only, boundary-anchored: border-color/background-color on an
+	// anchor are legitimate --primary uses (brand accents), not link text.
+	const primaryTextColor = /(^|[;{\s])color:\s*var\(--primary\)/;
 
 	it('scans a realistic file set', () => {
 		expect(svelteFiles.length).toBeGreaterThan(50);
@@ -698,14 +702,20 @@ describe('no component anchor rule colors with --primary (SONA-193)', () => {
 		for (const file of svelteFiles) {
 			const source = readFileSync(file, 'utf8');
 			for (const rule of source.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-				const selectorLines = rule[1]
+				if (!primaryTextColor.test(rule[2])) continue;
+				// Every comma-separated selector in the list, not just the last
+				// line: `.foo a,\n.bar` must flag on the `.foo a` part. Each
+				// part's own last line drops any preceding-rule tail the loose
+				// head match swept in.
+				const parts = rule[1]
 					.trim()
-					.split('\n')
-					.map((l) => l.trim())
+					.split(',')
+					.map((part) => part.split('\n').pop()?.trim() ?? '')
 					.filter(Boolean);
-				const selector = selectorLines[selectorLines.length - 1] ?? '';
-				if (anchorSelector.test(selector) && /color:\s*var\(--primary\)/.test(rule[2])) {
-					offenders.push(`${file.slice(srcRoot.length)} → ${selector}`);
+				for (const selector of new Set(parts)) {
+					if (anchorSelector.test(selector)) {
+						offenders.push(`${file.slice(srcRoot.length)} → ${selector}`);
+					}
 				}
 			}
 		}

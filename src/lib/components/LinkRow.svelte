@@ -60,7 +60,7 @@
 	}
 
 	a.link-row:hover {
-		border-color: var(--link);
+		border-color: var(--primary);
 		text-decoration: none;
 	}
 

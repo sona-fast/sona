@@ -310,6 +310,10 @@
 	}
 	.unlocks strong { color: var(--foreground); font-weight: 600; }
 	.unlocks a { color: var(--link); font-weight: 600; text-decoration: underline; }
+	/* The 6% orange tint under this panel composites terracotta dark's --link
+	   (#E2694D) down to 4.15:1 — under AA. A lighter step of the same hue clears
+	   it (5.43:1 on the composited fill); light themes keep their #8A5A00 override. */
+	:global([data-theme-id='terracotta']:not([data-theme='light'])) .unlocks a { color: #EE8770; }
 	/* Amber #FF8400 is ~2.1:1 on the light .unlocks panel; darken to #8A5A00
 	   for WCAG AA, matching the settings page's light-theme link fix. */
 	:global([data-theme='light']) .unlocks a { color: #8A5A00; }
