@@ -36,10 +36,10 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 		});
 	});
 
-// The hardening headers, shared by BOTH response paths in authHandle: the
-// early-return 400 for a malformed URI and the header block at the bottom.
-// One record so a sixth header added later cannot land on one path and miss
-// the other. (Cache-Control is not in here — each path sets its own.)
+// The hardening headers, shared by EVERY response path in authHandle: the
+// early-return 400/401/503s and the header block at the bottom. One record so
+// a sixth header added later cannot land on one path and miss another.
+// (Cache-Control is not in here — each path sets its own.)
 const SECURITY_HEADERS = {
 	'Strict-Transport-Security': 'max-age=31536000',
 	'X-Frame-Options': 'DENY',
@@ -47,6 +47,7 @@ const SECURITY_HEADERS = {
 	'Referrer-Policy': 'strict-origin-when-cross-origin',
 	'Permissions-Policy': 'camera=(), microphone=(), geolocation=()'
 } as const;
+const SECURITY_HEADER_ENTRIES = Object.entries(SECURITY_HEADERS);
 
 // Kit's decode_pathname, mirrored (see the comment in authHandle). Shared with
 // handleError so both record the SAME route identity for a 5xx.
@@ -174,7 +175,12 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 			case 'complete':
 				break;
 			case 'incomplete':
-				if (path.startsWith('/api')) return new Response('Setup required', { status: 503 });
+				if (path.startsWith('/api')) {
+					return new Response('Setup required', {
+						status: 503,
+						headers: { 'Cache-Control': 'private, no-store, no-cache', ...SECURITY_HEADERS }
+					});
+				}
 				throw redirect(302, '/admin/setup');
 			case 'unknown':
 				// 'unknown' is also what a fork whose D1 migrations never ran looks
@@ -188,7 +194,11 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 						'Setup state unavailable. If this is a new deployment, apply the D1 migrations.',
 						{
 							status: 503,
-							headers: { 'Retry-After': '30', 'Cache-Control': 'private, no-store, no-cache' }
+							headers: {
+								'Retry-After': '30',
+								'Cache-Control': 'private, no-store, no-cache',
+								...SECURITY_HEADERS
+							}
 						}
 					);
 				}
@@ -241,7 +251,10 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 		!isOembedRead &&
 		!event.locals.admin
 	) {
-		return new Response('Unauthorized', { status: 401 });
+		return new Response('Unauthorized', {
+			status: 401,
+			headers: { 'Cache-Control': 'private, no-store, no-cache', ...SECURITY_HEADERS }
+		});
 	}
 
 	// Apply the active theme + the visitor's dark/light mode at SSR so the first
@@ -340,7 +353,7 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// protects the Sona host, which is the host it is served from; widening it to
 	// an operator's whole domain is their call to make at the edge, not ours to
 	// make for them from inside the app.
-	for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+	for (const [name, value] of SECURITY_HEADER_ENTRIES) {
 		response.headers.set(name, value);
 	}
 

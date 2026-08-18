@@ -313,6 +313,10 @@ describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187
 				resolve
 			} as never)) as Response;
 			expect(res.status, `${path} must stay behind the admin gate`).toBe(401);
+			// The 401 returns before the bottom header block, so it carries the
+			// shared hardening record itself.
+			expect(res.headers.get('X-Content-Type-Options'), path).toBe('nosniff');
+			expect(res.headers.get('Cache-Control'), path).toBe('private, no-store, no-cache');
 		}
 	});
 
@@ -339,6 +343,8 @@ describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187
 				resolve
 			} as never)) as Response;
 			expect(res.status, `${path} must 503 while the setup state is unknown`).toBe(503);
+			// Early return — the hardening headers ride the shared record here too.
+			expect(res.headers.get('X-Content-Type-Options'), path).toBe('nosniff');
 		}
 	});
 
