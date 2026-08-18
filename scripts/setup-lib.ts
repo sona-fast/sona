@@ -484,8 +484,8 @@ export function cdnAttachmentLines(r2PublicUrl: string, bucket: string, domain: 
 	const host = hostFromDomain(domain);
 	if (host && hostFromDomain(r2PublicUrl) === `cdn.${host}`) {
 		return [
-			`  3. Connect ${r2PublicUrl} to the bucket — setup did not touch DNS, so images 404`,
-			'     until you do. Once the zone is active in Cloudflare, run:',
+			`  3. Connect ${r2PublicUrl} to the bucket — setup did not touch DNS.`,
+			'     Images 404 until you connect it. Once the zone is active in Cloudflare, run:',
 			'       CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> \\',
 			`         npm run connect-domains -- ${host}`,
 			'     Or add the CDN host by hand:',

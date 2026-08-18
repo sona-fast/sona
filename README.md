@@ -149,8 +149,8 @@ npm run connect-domains -- --check yourdomain.com    # read-only doctor: which s
 bucket and the site domain to the Pages project. **Images 404 until the CDN
 host is attached.** With *Zone · Zone Settings · Edit* on the token it also
 enables Image Transformations. It adds no other DNS records, and it's safe to
-re-run. On top of the scopes in the **API token scopes** table in step 3, the
-token needs *Zone · Zone · Read*. If your site lives on a subdomain (like
+re-run. Its token scopes are all in the **API token scopes** table in step 3.
+If your site lives on a subdomain (like
 `sona.yourdomain.com`), the zone is the root domain — scope the token to that
 zone, and Image Transformations is enabled zone-wide on it.
 

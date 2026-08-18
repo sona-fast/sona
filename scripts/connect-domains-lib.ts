@@ -86,12 +86,40 @@ export async function resolveZone(
 }
 
 /**
+ * The no-zone next step shared by zoneGuidance and the doctor ladder: the
+ * action ("add the domain you registered") plus the zone-names-tried
+ * parenthetical (empty when only one name was looked up). Never names a
+ * computed "root domain" — for a multi-part TLD like example.co.uk the last
+ * candidate is a public suffix (co.uk) Cloudflare can't accept as a site.
+ */
+export function addZoneAction(candidates: string[]): { action: string; tried: string } {
+	const tried =
+		candidates.length > 1 ? ` (Looked for zones named ${candidates.join(', ')}.)` : '';
+	return {
+		action: 'Add the domain you registered to this Cloudflare account (dashboard → Add a site)',
+		tried
+	};
+}
+
+/**
+ * How consent/success lines name the zone the mutations touch: the RESOLVED
+ * zone (the parent zone for a subdomain host), naming the host it serves when
+ * the two differ. Falls back to the host itself when the lookup reported no
+ * zone name.
+ */
+export function zoneConsentLabel(host: string, zoneName?: string | null): string {
+	return zoneName && zoneName !== host
+		? `the ${zoneName} zone (which serves ${host})`
+		: `the ${zoneName ?? host} zone`;
+}
+
+/**
  * Fail-soft precondition message for the zone, or null when it's active and we
  * can proceed. Not-a-zone and not-active are operator/registrar steps outside
  * any Cloudflare token, so connect-domains prints this and exits 0 rather than
- * erroring. `candidates` are the zone names the lookup tried (a subdomain's
- * host is NOT one someone can add as a site, so the message names what was
- * tried instead of telling them to add `host` itself).
+ * erroring. The no-zone message tells the operator to add the domain THEY
+ * registered (never a name computed from `candidates` — see addZoneAction) and
+ * names the zone names the lookup tried.
  */
 export function zoneGuidance(
 	zone: ZoneStatus,
@@ -99,11 +127,9 @@ export function zoneGuidance(
 	candidates: string[] = [host]
 ): string | null {
 	if (!zone.exists) {
-		const tried =
-			candidates.length > 1 ? ` (Looked for zones named ${candidates.join(', ')}.)` : '';
+		const { action, tried } = addZoneAction(candidates);
 		return (
-			`No Cloudflare zone found for ${host}. Add the root domain ` +
-			`${candidates[candidates.length - 1]} to this Cloudflare account (dashboard → Add a site), ` +
+			`No Cloudflare zone found for ${host}. ${action}, ` +
 			`point your registrar's nameservers at Cloudflare, then re-run.${tried}`
 		);
 	}
@@ -290,9 +316,7 @@ export function buildLadder(i: LadderInputs): Rung[] {
 	// the host itself when the lookup found nothing (or the caller didn't say).
 	const zoneName = i.zoneName ?? i.host;
 	const candidates = i.candidates?.length ? i.candidates : [i.host];
-	const rootDomain = candidates[candidates.length - 1];
-	const tried =
-		candidates.length > 1 ? ` (Looked for zones named ${candidates.join(', ')}.)` : '';
+	const { action: addAction, tried } = addZoneAction(candidates);
 	const rungs: Rung[] = [];
 	let blocked = false;
 
@@ -306,10 +330,9 @@ export function buildLadder(i: LadderInputs): Rung[] {
 
 	step(
 		'zone-exists',
-		`a zone serving ${i.host} is in this Cloudflare account`,
+		`this Cloudflare account has a zone serving ${i.host}`,
 		i.zoneExists ? 'pass' : 'fail',
-		`Add the root domain ${rootDomain} to this Cloudflare account (dashboard → Add a site) ` +
-			`and point your registrar's nameservers at Cloudflare.${tried}`
+		`${addAction} and point your registrar's nameservers at Cloudflare.${tried}`
 	);
 	step(
 		'zone-active',

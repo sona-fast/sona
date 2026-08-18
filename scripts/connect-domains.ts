@@ -43,6 +43,7 @@ import {
 	classifyZone,
 	zoneGuidance,
 	resolveZone,
+	zoneConsentLabel,
 	cdnDomainState,
 	bucketDomainTlsIssued,
 	pagesDomainAttached,
@@ -154,16 +155,17 @@ async function main(): Promise<number> {
 			if (errorStatus === 401 || errorStatus === 403) {
 				console.error(`✖ The API token cannot read zones (HTTP ${errorStatus}).\n`);
 				console.error(TOKEN_RECIPE);
+			} else if (errorStatus === 0) {
+				console.error(
+					`✖ Could not reach the Cloudflare API while looking up the zone for ${host} — check your network and re-run.`
+				);
 			} else {
-				console.error(`✖ Cloudflare API error (HTTP ${errorStatus}) while resolving the zone — try again.`);
+				console.error(
+					`✖ Cloudflare API error (HTTP ${errorStatus}) while looking up the zone for ${host} — wait a moment and re-run.`
+				);
 			}
 			return 1;
 		}
-		// The RESOLVED zone's name — the parent zone for a subdomain host. Consent
-		// and success lines must name THIS zone, not the host, because the
-		// Image Transformations toggle is zone-wide on it.
-		const zoneLabel =
-			zoneName && zoneName !== host ? `the ${zoneName} zone (which serves ${host})` : `the ${host} zone`;
 
 		if (check) {
 			return await runDoctor({ cfToken, cfAccount, bucket, host, cdn, zone, zoneName, candidates, dbName });
@@ -219,12 +221,17 @@ async function main(): Promise<number> {
 		}
 
 		// Preview EVERY change the confirm covers (records AND the zone setting), so
-		// the one prompt is honest about what it does.
-		console.log(`This will make the following changes to ${zoneLabel} (and nothing else):`);
+		// the one prompt is honest about what it does. Consent and success lines
+		// name the RESOLVED zone (the parent zone for a subdomain host) because the
+		// Image Transformations toggle is zone-wide on it.
+		const zoneLabel = zoneConsentLabel(host, zoneName);
+		console.log(`This will make the following changes to ${zoneLabel} and nothing else:`);
 		for (const m of plan) console.log(`  • ${m.label}`);
 		if (willEnableTransforms)
 			console.log(
-				`  • enable Image Transformations on ${zoneLabel}${zoneName !== host ? ' — this is zone-wide' : ''}`
+				`  • enable Image Transformations on the ${zoneName ?? host} zone${
+					zoneName && zoneName !== host ? ` — this affects the whole zone, not just ${host}` : ''
+				}`
 			);
 
 		let proceed = yes;

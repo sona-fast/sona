@@ -85,6 +85,50 @@ describe('runDoctor', () => {
 		expect(text).not.toMatch(/Next action:/); // a warn is not a hard failure
 	});
 
+	it('names the RESOLVED (parent) zone in the transforms rung for a subdomain host', async () => {
+		const out: string[] = [];
+		const spy = vi.spyOn(console, 'log').mockImplementation((...x) => {
+			out.push(x.join(' '));
+		});
+		const { api } = recordingApi({ image_resizing: { ok: true, status: 200, result: { value: 'off' } } });
+		await runDoctor(
+			args({
+				host: 'sona.taro.surf',
+				cdn: 'cdn.sona.taro.surf',
+				zoneName: 'taro.surf',
+				candidates: ['sona.taro.surf', 'taro.surf']
+			}),
+			deps(api)
+		);
+		spy.mockRestore();
+		const text = out.join('\n');
+		expect(text).toContain('the taro.surf zone');
+	});
+
+	it('tells a no-zone operator to add the domain they registered, naming the zones tried', async () => {
+		const out: string[] = [];
+		const spy = vi.spyOn(console, 'log').mockImplementation((...x) => {
+			out.push(x.join(' '));
+		});
+		const { api, calls } = recordingApi();
+		await runDoctor(
+			args({
+				host: 'sona.taro.surf',
+				cdn: 'cdn.sona.taro.surf',
+				zone: { exists: false, active: false },
+				zoneName: null,
+				candidates: ['sona.taro.surf', 'taro.surf']
+			}),
+			deps(api)
+		);
+		spy.mockRestore();
+		expect(calls).toEqual([]); // no zone → nothing else to look up
+		const text = out.join('\n');
+		expect(text).toContain('Add the domain you registered to this Cloudflare account');
+		expect(text).toContain('Looked for zones named sona.taro.surf, taro.surf');
+		expect(text).not.toContain('Add the root domain');
+	});
+
 	it('always returns 0 (diagnostic), even when a rung hard-fails', async () => {
 		const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
 		// Domain unreachable → cdn-loads fails, but the command still exits 0.
@@ -100,21 +144,22 @@ describe('connect-domains.ts ↔ candidate-walk source contract', () => {
 	// wiring at the source level: the host's candidate list must be built via
 	// zoneNameCandidates and flow into BOTH resolveZone (the walk) and
 	// zoneGuidance (the no-zone message). Reverting to a bare [host] would
-	// silently break subdomain hosts again.
+	// silently break subdomain hosts again. Whitespace-tolerant, wiring-only
+	// assertions — message wording is covered behaviorally in the lib tests.
 	const src = readFileSync(
 		join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
 		'utf8'
 	);
 
 	it('builds the candidate list with zoneNameCandidates(host)', () => {
-		expect(src).toMatch(/const candidates = zoneNameCandidates\(host\)/);
+		expect(src).toMatch(/zoneNameCandidates\(\s*host\s*\)/);
 	});
 
-	it('passes the candidates to resolveZone (and keeps the resolved zoneName)', () => {
-		expect(src).toMatch(/\{ zone, zoneName, errorStatus \} = await resolveZone\(candidates,/);
+	it('passes the candidates to resolveZone', () => {
+		expect(src).toMatch(/resolveZone\(\s*candidates/);
 	});
 
 	it('passes the candidates to zoneGuidance', () => {
-		expect(src).toMatch(/zoneGuidance\(zone, host, candidates\)/);
+		expect(src).toMatch(/zoneGuidance\(\s*zone,\s*host,\s*candidates\s*\)/);
 	});
 });

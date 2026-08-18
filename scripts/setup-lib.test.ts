@@ -731,8 +731,8 @@ describe('cdnAttachmentLines', () => {
 		// The dashboard route survives as the fallback for tokens without DNS scope.
 		expect(text).toContain('R2 → taro-images → Settings → Custom Domains → add https://cdn.taro.surf');
 		// The images-404 consequence rides the connect instruction itself.
-		expect(text).toContain('setup did not touch DNS, so images 404');
-		expect(text).toContain('until you do.');
+		expect(text).toContain('setup did not touch DNS.');
+		expect(text).toContain('Images 404 until you connect it.');
 	});
 
 	it('normalizes a messy domain answer to the bare host itself', () => {
