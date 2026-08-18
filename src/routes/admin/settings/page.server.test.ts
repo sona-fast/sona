@@ -208,7 +208,7 @@ describe('settings — checkbox hints are described, not named (SONA-183)', () =
 		// The row is a <div>: a wrapping <label> would put every hint back inside
 		// the accessible name no matter where the ids point.
 		expect(src).not.toMatch(/<label[^>]*class="[^"]*\bcheckbox-row\b/);
-});
+	});
 });
 
 describe('settings saveSite — three-path profile fields', () => {

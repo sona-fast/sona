@@ -84,12 +84,21 @@ export const GET: RequestHandler = async ({ params, request, platform }) => {
 	// means 304 and not 206. (`'body' in object` narrows the union; the second
 	// test is what actually decides, since the docs describe the withheld case
 	// as a body that is undefined rather than a property that is absent.)
-	if (!('body' in object) || !object.body) {
+	// Gated on the conditional having been SENT: a 304 is only ever an answer to
+	// one, so a bodyless object on an unconditional request is not a revalidation
+	// hit — the client holds nothing, and 304 would strand it with no bytes and a
+	// year of freshness. R2 has no reason to withhold a body there, so that shape
+	// is an anomaly rather than a saving, and it fails loudly instead.
+	if (onlyIf && (!('body' in object) || !object.body)) {
 		return new Response(null, {
 			status: 304,
 			headers: { etag: object.httpEtag, 'cache-control': IMG_CACHE_CONTROL }
 		});
 	}
+	// The other half of that gate: an unconditional get with no body cannot be
+	// served as a 200 either — that declares a content-length over an empty body
+	// and caches it immutably for a year.
+	if (!('body' in object) || !object.body) error(500, 'Image body unavailable');
 
 	// Set headers from the object's metadata directly. (Avoid writeHttpMetadata():
 	// it can't serialize a Headers across the dev getPlatformProxy boundary.)

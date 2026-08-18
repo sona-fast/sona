@@ -66,7 +66,13 @@ function isPayload(v: unknown): v is SupporterKeyPayload {
 		// first date we formatted — taking down /admin/settings, the one page an
 		// operator could use to remove the offending key.
 		Number.isFinite(p.exp) &&
-		Math.abs(p.exp) <= MAX_EXP_SECONDS
+		// Bounded on both sides rather than by magnitude: |exp| let the whole
+		// negative range through, and an exp at the bottom of it multiplies by 1000
+		// to below the minimum time value — an Invalid Date that reaches the
+		// expired-display path and throws the very RangeError this guard exists to
+		// prevent. No key the issuer mints expires before the epoch anyway.
+		p.exp > 0 &&
+		p.exp <= MAX_EXP_SECONDS
 	);
 }
 

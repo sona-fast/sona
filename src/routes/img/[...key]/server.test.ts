@@ -225,6 +225,25 @@ describe('GET /img/[...key] — conditional requests', () => {
 		expect(res.headers.get('etag')).toBe(ETAG);
 	});
 
+	it.each([['absent'], ['undefined']] as const)(
+		'refuses a bodyless object on an unconditional request (%s body) rather than 304ing',
+		async (shape) => {
+			// A 304 is an answer to a conditional, and this client sent none — it holds
+			// nothing, so a 304 would strand it with no bytes and a year of freshness.
+			// A 200 is no better: content-length over an empty body, cached immutably.
+			// R2 has no reason to withhold a body here, so the shape is an anomaly.
+			const images = {
+				get: async () => ({
+					size: 12,
+					httpEtag: '"etag"',
+					...(shape === 'undefined' ? { body: undefined } : {})
+				})
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			} as any;
+			expect(await status(GET(event(KEY, images)))).toBe(500);
+		}
+	);
+
 	it('serves the full 200 when the validator does not match', async () => {
 		const images = bucket(objects);
 		const res = await GET(event(KEY, images, { 'if-none-match': '"stale"' }));

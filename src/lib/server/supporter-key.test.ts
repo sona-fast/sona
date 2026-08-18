@@ -125,6 +125,14 @@ describe('verifySupporterKey', () => {
 		['beyond the maximum time value', 8.64e12 + 1],
 		['absurdly large', 1e15],
 		['negative beyond the range', -8.64e12 - 1],
+		// The magnitude form of this guard (|exp| <= MAX) passed everything from
+		// -8.64e12 up to 0, and the bottom of that window is the case it was
+		// written to catch: exp * 1000 lands below the minimum time value, so the
+		// Date is Invalid, `now >= expiresAt` is false, and the key reports VALID
+		// and then throws a RangeError out of the first date the UI formats.
+		['negative at the old magnitude bound', -8.64e12],
+		['negative but representable', -1e6],
+		['zero', 0],
 		['infinite', Number.POSITIVE_INFINITY],
 		['NaN', Number.NaN]
 	])('rejects an exp that is %s as malformed, even signed', async (_label, exp) => {

@@ -503,7 +503,14 @@ export async function getVerifiedSupporterKey(db: Database): Promise<VerifiedSup
 		const entitlesNow = value.signatureValid && value.expiresAt > Date.now();
 		verifiedSupporterKeyCache = {
 			value,
-			expires: Date.now() + (entitlesNow ? SETTINGS_TTL_MS : NO_KEY_TTL_MS)
+			// An entitling entry is also capped at the key's OWN expiry: past that
+			// instant the same cached facts stop entitling, and a full-TTL entry
+			// would keep a warm isolate answering from them for up to a minute after
+			// a renewal was installed — the exact staleness NO_KEY_TTL_MS exists to
+			// avoid, reached from the other side.
+			expires:
+				Date.now() +
+				(entitlesNow ? Math.min(SETTINGS_TTL_MS, value.expiresAt - Date.now()) : NO_KEY_TTL_MS)
 		};
 	}
 	return value;

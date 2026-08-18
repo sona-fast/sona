@@ -249,6 +249,23 @@ describe('rule 2: no hostname is ever shown as a handle', () => {
 		expect(socialLabel('telegram', 'https://t.me/s')).toBe('Telegram');
 		expect(socialLabel('patreon', 'https://patreon.com/c')).toBe('Patreon');
 	});
+
+	it('covers the browse and account sections these two platforms also serve', () => {
+		// Same rule, sections that were missing from the table: both platforms put
+		// their own navigation on the bare domain, so a copied browse or sign-in URL
+		// read as an account.
+		expect(socialLabel('deviantart', 'https://www.deviantart.com/search?q=fursuit')).toBe(
+			'DeviantArt'
+		);
+		expect(socialLabel('deviantart', 'https://www.deviantart.com/shop/art')).toBe('DeviantArt');
+		expect(socialLabel('deviantart', 'https://www.deviantart.com/daily-deviations')).toBe(
+			'DeviantArt'
+		);
+		expect(socialLabel('patreon', 'https://www.patreon.com/login')).toBe('Patreon');
+		expect(socialLabel('patreon', 'https://www.patreon.com/home')).toBe('Patreon');
+		expect(socialLabel('patreon', 'https://www.patreon.com/search?q=fursuit')).toBe('Patreon');
+		expect(socialLabel('patreon', 'https://www.patreon.com/explore/anime')).toBe('Patreon');
+	});
 });
 
 describe('rule 3: the handle is the first profile segment', () => {
@@ -448,6 +465,25 @@ describe('bare handles', () => {
 		expect(socialHandle('twitter', 'taro')).toBe('taro');
 		expect(socialHandle('twitter', '@taro')).toBe('taro');
 		expect(socialHandle('bluesky', 'taro.bsky.social')).toBe('taro.bsky.social');
+	});
+
+	it('renders the platform name for another platform’s bare domain', () => {
+		// A pathless bare domain is a scheme-less URL whoever owns it, so rule 2
+		// applies whether or not it is this platform's own host. Filing a Twitter
+		// link under the Telegram setting is an ordinary slip, and the scheme-less
+		// spelling used to read as the handle "@twitter.com".
+		expect(socialHandle('telegram', 'twitter.com')).toBeNull();
+		expect(socialLabel('telegram', 'twitter.com')).toBe('Telegram');
+		// Both spellings of the same value have to agree; only the second one did.
+		expect(socialLabel('telegram', 'https://twitter.com')).toBe('Telegram');
+		expect(socialLabel('instagram', 'bsky.app')).toBe('Instagram');
+	});
+
+	it('still reads a domain-shaped handle as a handle', () => {
+		// The rejection is of hostnames these platforms live on, not of dots:
+		// Bluesky handles are domains, and most of them belong to nobody here.
+		expect(socialHandle('bluesky', 'taro.bsky.social')).toBe('taro.bsky.social');
+		expect(socialLabel('bluesky', 'taro.example.com')).toBe('@taro.example.com');
 	});
 
 	it('rejects an @ with nothing behind it', () => {
