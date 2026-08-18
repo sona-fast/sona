@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { GET } from './+server';
 
 // The per-fork security.txt (SONA-171). The properties that matter: it points
@@ -34,6 +35,16 @@ describe('/.well-known/security.txt', () => {
 		// origin-derived Canonical would echo http:// back here.
 		const { body } = await fetchTxt('http://rechner.solutions');
 		expect(body).toContain('Canonical: https://rechner.solutions/.well-known/security.txt');
+	});
+
+	it('points Policy at a file that actually exists in this repo', async () => {
+		// The Policy URL 404s on every deployed fork if SECURITY.md moves or is
+		// renamed, and nothing else would notice: URL-pinning tests keep passing.
+		const { body } = await fetchTxt();
+		const policyPath = body.match(/^Policy: .*\/blob\/main\/(.+)$/m)?.[1] ?? '';
+		expect(policyPath).toBe('SECURITY.md');
+		const repoRoot = new URL('../../../../SECURITY.md', import.meta.url);
+		expect(readFileSync(repoRoot, 'utf8')).toContain('Reporting a vulnerability');
 	});
 
 	it('carries a rolling Expires in the future but under the RFC year cap', async () => {

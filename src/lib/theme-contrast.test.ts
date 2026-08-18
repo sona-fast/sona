@@ -317,15 +317,22 @@ describe('ember light theme WCAG AA contrast', () => {
 // closest to the floor. Scope: assert only; do not tune colors to pass — a new
 // failure is a finding to report, not to silence.
 // Every theme × mode block in app.css, shared by the resting-state and
-// focus-ring describes below (was copy-pasted three times).
-const THEME_BLOCKS = [
-	{ name: 'ember dark', sel: ':root' },
-	{ name: 'ember light', sel: "[data-theme='light']" },
-	{ name: 'aurora dark', sel: "[data-theme-id='aurora']" },
-	{ name: 'aurora light', sel: "[data-theme-id='aurora'][data-theme='light']" },
-	{ name: 'terracotta dark', sel: "[data-theme-id='terracotta']" },
-	{ name: 'terracotta light', sel: "[data-theme-id='terracotta'][data-theme='light']" }
-];
+// focus-ring describes below (was copy-pasted three times). Derived from
+// THEMES rather than hardcoded so a new theme is enumerated automatically —
+// a hardcoded list would let it skip the per-block --link declaration guard
+// and inherit another theme's link color through the shared
+// [data-theme='light'] selector.
+const THEME_BLOCKS = THEMES.flatMap(({ id }) =>
+	id === 'default'
+		? [
+				{ name: 'ember dark', sel: ':root' },
+				{ name: 'ember light', sel: "[data-theme='light']" }
+			]
+		: [
+				{ name: `${id} dark`, sel: `[data-theme-id='${id}']` },
+				{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
+			]
+);
 
 describe('resting .btn WCAG AA contrast — every theme × variant × mode (#121)', () => {
 	const variants = [

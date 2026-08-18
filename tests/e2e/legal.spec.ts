@@ -170,6 +170,12 @@ test('the AI disclosure page renders and is reachable from the footer', async ({
 	// else catches its deletion end to end.
 	await expect(page.getByRole('heading', { name: 'Security problems.' })).toBeVisible();
 	await expect(page.locator('a[href="mailto:security@sona.fast"]')).toBeVisible();
+	// By role AND name: pins the rendered accessible name (the aria-label),
+	// which the source-pin test can't see — dropping ariaLabel from the data
+	// would otherwise leave every suite green.
+	await expect(
+		page.getByRole('link', { name: 'Report a vulnerability through GitHub' })
+	).toBeVisible();
 
 	// Reachable from any public page's footer.
 	await page.goto('/');

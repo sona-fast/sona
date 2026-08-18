@@ -135,6 +135,23 @@ describe('setup gate — a failed settings read is not "no admin credential"', (
 		expect(gated.status).toBe(200);
 	});
 
+	// The stronger promise the exemption comments make: the route performs NO
+	// read from this fork's DB — not the setup gate's, and not the theme read
+	// further down (its skip is try/caught, so without this spy the exemption
+	// could silently regress with every other test green).
+	it('never touches the database for /.well-known/security.txt', async () => {
+		const db = makeHealthyDb();
+		const prepare = vi.spyOn(db, 'prepare');
+
+		await driveGate('/.well-known/security.txt', db);
+		expect(prepare).not.toHaveBeenCalled();
+
+		// Guard against a vacuous pass: the same drive on a public route does
+		// read the DB through this spy.
+		await driveGate('/gallery', db);
+		expect(prepare).toHaveBeenCalled();
+	});
+
 	it('lets a configured site through untouched', async () => {
 		expect((await driveGate('/gallery', makeHealthyDb())).redirect).toBeNull();
 	});

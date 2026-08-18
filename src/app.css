@@ -176,8 +176,10 @@
 	/* status-ok/warn inherit the family-neutral light values; only re-point
 	   attention to this theme's primary (#6a4cf0 is 5.4:1 on white). */
 	--status-attention: var(--primary);
-	/* Back to this theme's primary (4.96:1 on the background, 5.38:1 on cards) —
-	   without this the default light block's darkened orange bleeds in. */
+	/* Back to this theme's primary (4.96:1 on the background, 5.38:1 on cards).
+	   Load-bearing: [data-theme='light'] and [data-theme-id='aurora'] tie on
+	   specificity and the aurora DARK block comes later in source order, so
+	   without this line its #a48bff wins here — 2.51:1 on this light background. */
 	--link: var(--primary);
 	--border: #d8d8ee;
 	--input: #d8d8ee;
@@ -259,8 +261,10 @@
 	/* status-ok/warn inherit the family-neutral light values; only re-point
 	   attention to this theme's primary (#AD3A1E is 6.2:1 on white). */
 	--status-attention: var(--primary);
-	/* Back to this theme's primary (4.68:1 on the background, 6.17:1 on cards) —
-	   without this the default light block's darkened orange bleeds in. */
+	/* Back to this theme's primary (4.68:1 on the background, 6.17:1 on cards).
+	   Same source-order tie as aurora light: without this line the terracotta
+	   DARK block's value would win here (it resolves to var(--primary), which
+	   lands on the right color — but only by luck, so declare it explicitly). */
 	--link: var(--primary);
 	--border: #CBBEB3;
 	--input: #CBBEB3;
