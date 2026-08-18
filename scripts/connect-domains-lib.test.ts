@@ -75,13 +75,19 @@ describe('zoneGuidance (fail-soft messages)', () => {
 		expect(g).toContain('carter.ns.cf, fish.ns.cf');
 	});
 
-	it('names the candidates tried instead of telling them to add the subdomain as a site', () => {
+	it('names the root domain to add instead of telling them to add the subdomain as a site', () => {
 		const g = zoneGuidance({ exists: false, active: false }, 'sona.taro.surf', [
 			'sona.taro.surf',
 			'taro.surf'
 		]);
-		expect(g).toContain('tried sona.taro.surf, taro.surf');
-		expect(g).toContain('registrable domain');
+		expect(g).toContain('Add the root domain taro.surf');
+		expect(g).toContain('Looked for zones named sona.taro.surf, taro.surf');
+	});
+
+	it('omits the names-tried parenthetical when only one zone name was looked up', () => {
+		const g = zoneGuidance({ exists: false, active: false }, 'taro.surf', ['taro.surf']);
+		expect(g).toContain('Add the root domain taro.surf');
+		expect(g).not.toContain('Looked for zones named');
 	});
 
 	it('returns null when the zone is active (proceed)', () => {
@@ -95,7 +101,7 @@ describe('resolveZone', () => {
 
 	it('finds the registrable-domain zone for a subdomain (second candidate)', async () => {
 		const tried: string[] = [];
-		const { zone, zoneName, authStatus } = await resolveZone(
+		const { zone, zoneName, errorStatus } = await resolveZone(
 			['sona.taro.surf', 'taro.surf'],
 			async (name) => {
 				tried.push(name);
@@ -105,7 +111,7 @@ describe('resolveZone', () => {
 		expect(tried).toEqual(['sona.taro.surf', 'taro.surf']);
 		expect(zone).toEqual({ exists: true, active: true, id: 'z1', nameServers: ['a.ns.cf'] });
 		expect(zoneName).toBe('taro.surf');
-		expect(authStatus).toBeNull();
+		expect(errorStatus).toBeNull();
 	});
 
 	it('stops at the first candidate that matches (no extra lookups)', async () => {
@@ -119,23 +125,38 @@ describe('resolveZone', () => {
 	});
 
 	it('reports no zone when no candidate matches', async () => {
-		const { zone, zoneName, authStatus } = await resolveZone(
+		const { zone, zoneName, errorStatus } = await resolveZone(
 			['sona.taro.surf', 'taro.surf'],
 			async () => ok([])
 		);
 		expect(zone).toEqual({ exists: false, active: false });
 		expect(zoneName).toBeNull();
-		expect(authStatus).toBeNull();
+		expect(errorStatus).toBeNull();
 	});
 
 	it('aborts the walk on an auth error and surfaces the status', async () => {
 		const tried: string[] = [];
-		const { zone, authStatus } = await resolveZone(['sona.taro.surf', 'taro.surf'], async (name) => {
+		const { zone, errorStatus } = await resolveZone(['sona.taro.surf', 'taro.surf'], async (name) => {
 			tried.push(name);
 			return { ok: false, status: 403 };
 		});
 		expect(tried).toEqual(['sona.taro.surf']);
-		expect(authStatus).toBe(403);
+		expect(errorStatus).toBe(403);
+		expect(zone).toEqual({ exists: false, active: false });
+	});
+
+	it('aborts the walk on a transient error too (a 500 must not silently pick the parent zone)', async () => {
+		const tried: string[] = [];
+		const { zone, zoneName, errorStatus } = await resolveZone(
+			['sona.taro.surf', 'taro.surf'],
+			async (name) => {
+				tried.push(name);
+				return name === 'sona.taro.surf' ? { ok: false, status: 500 } : ok(activeZone);
+			}
+		);
+		expect(tried).toEqual(['sona.taro.surf']); // no further candidates tried
+		expect(errorStatus).toBe(500);
+		expect(zoneName).toBeNull();
 		expect(zone).toEqual({ exists: false, active: false });
 	});
 });
@@ -306,6 +327,34 @@ describe('buildLadder + firstFailingRung', () => {
 		const ladder = buildLadder({ ...healthy, zoneExists: false });
 		expect(firstFailingRung(ladder)?.id).toBe('zone-exists');
 		expect(ladder.filter((r) => r.status === 'skip')).toHaveLength(5);
+	});
+
+	it('zone-exists tells a subdomain operator to add the root domain, naming the zones tried', () => {
+		const ladder = buildLadder({
+			...healthy,
+			host: 'sona.taro.surf',
+			zoneExists: false,
+			zoneName: null,
+			candidates: ['sona.taro.surf', 'taro.surf']
+		});
+		const rung = firstFailingRung(ladder)!;
+		expect(rung.id).toBe('zone-exists');
+		expect(rung.action).toContain('Add the root domain taro.surf');
+		expect(rung.action).toContain('Looked for zones named sona.taro.surf, taro.surf');
+		expect(rung.action).not.toContain('Add sona.taro.surf');
+	});
+
+	it('names the RESOLVED (parent) zone on the transforms rung for a subdomain host', () => {
+		const ladder = buildLadder({
+			...healthy,
+			host: 'sona.taro.surf',
+			imageTransforms: false,
+			zoneName: 'taro.surf',
+			candidates: ['sona.taro.surf', 'taro.surf']
+		});
+		const rung = ladder.find((r) => r.id === 'image-transforms')!;
+		expect(rung.label).toContain('the taro.surf zone');
+		expect(rung.action).toContain('dashboard → taro.surf → Images');
 	});
 
 	it('names zone-active as the first failure when the zone is pending', () => {

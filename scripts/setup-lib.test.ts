@@ -730,7 +730,9 @@ describe('cdnAttachmentLines', () => {
 		expect(text.match(/CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id>/g)).toHaveLength(2);
 		// The dashboard route survives as the fallback for tokens without DNS scope.
 		expect(text).toContain('R2 → taro-images → Settings → Custom Domains → add https://cdn.taro.surf');
-		expect(text).toContain('Images 404 until this is done.');
+		// The images-404 consequence rides the connect instruction itself.
+		expect(text).toContain('setup did not touch DNS, so images 404');
+		expect(text).toContain('until you do.');
 	});
 
 	it('normalizes a messy domain answer to the bare host itself', () => {

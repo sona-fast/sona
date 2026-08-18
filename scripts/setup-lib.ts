@@ -484,13 +484,13 @@ export function cdnAttachmentLines(r2PublicUrl: string, bucket: string, domain: 
 	const host = hostFromDomain(domain);
 	if (host && hostFromDomain(r2PublicUrl) === `cdn.${host}`) {
 		return [
-			`  3. Connect ${r2PublicUrl} to the bucket — setup did not touch DNS. Once the`,
-			'     zone is active in Cloudflare, run:',
+			`  3. Connect ${r2PublicUrl} to the bucket — setup did not touch DNS, so images 404`,
+			'     until you do. Once the zone is active in Cloudflare, run:',
 			'       CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> \\',
 			`         npm run connect-domains -- ${host}`,
 			'     Or add the CDN host by hand:',
 			`       Cloudflare dashboard → R2 → ${bucket} → Settings → Custom Domains → add ${r2PublicUrl}.`,
-			'     Images 404 until this is done. Diagnose a half-finished domain setup with:',
+			'     Diagnose a half-finished domain setup with:',
 			'       CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> \\',
 			`         npm run connect-domains -- --check ${host}`
 		];

@@ -145,15 +145,16 @@ npm run connect-domains -- yourdomain.com            # attach cdn.<domain> → b
 npm run connect-domains -- --check yourdomain.com    # read-only doctor: which step is missing?
 ```
 
-It attaches the CDN host (`cdn.yourdomain.com`) to the images bucket and the
-site domain to the Pages project. **Images 404 until the CDN host is attached.**
-With *Zone · Zone Settings · Edit* on the token it also enables Image
-Transformations. It adds no other DNS records, and it's safe to re-run. The
-token needs *Zone · Zone · Read*, *Zone · DNS · Edit*, *Account · Workers R2
-Storage · Edit*, and *Account · Cloudflare Pages · Edit* — all in the **API
-token scopes** table in step 3.
+`connect-domains` attaches the CDN host (`cdn.yourdomain.com`) to the images
+bucket and the site domain to the Pages project. **Images 404 until the CDN
+host is attached.** With *Zone · Zone Settings · Edit* on the token it also
+enables Image Transformations. It adds no other DNS records, and it's safe to
+re-run. On top of the scopes in the **API token scopes** table in step 3, the
+token needs *Zone · Zone · Read*. If your site lives on a subdomain (like
+`sona.yourdomain.com`), the zone is the root domain — scope the token to that
+zone, and Image Transformations is enabled zone-wide on it.
 
-Two things can still need a manual step. Setup and connect-domains preflight
+Two things might still need a manual step. Setup and connect-domains preflight
 them where they can, but finishing either may need dashboard or DNS access:
 
 - **Pages apex domain.** After adding your domain to the Pages project, the

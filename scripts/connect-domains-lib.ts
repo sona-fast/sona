@@ -66,22 +66,23 @@ export function classifyZone(result: unknown): ZoneStatus {
  * name in order (most specific first — `sona.example.com`, then `example.com`),
  * because a subdomain is served by its registrable domain's zone and an exact
  * `GET /zones?name=<subdomain>` lookup finds nothing for it. Returns the first
- * candidate that exists as a zone. An auth error (401/403) on any lookup aborts
- * the walk — it would fail identically for every candidate — and is surfaced as
- * `authStatus` for the caller's hard-error path.
+ * candidate that exists as a zone. ANY failed lookup aborts the walk and is
+ * surfaced as `errorStatus` for the caller's hard-error path — treating a
+ * transient error (500/429/status 0) as "no zone for this candidate" could
+ * silently pick a parent zone, or report "add your domain" for an API blip.
  */
 export async function resolveZone(
 	candidates: string[],
 	lookup: (name: string) => Promise<{ ok: boolean; status: number; result?: unknown }>
-): Promise<{ zone: ZoneStatus; zoneName: string | null; authStatus: number | null }> {
+): Promise<{ zone: ZoneStatus; zoneName: string | null; errorStatus: number | null }> {
 	for (const name of candidates) {
 		const res = await lookup(name);
-		if (!res.ok && (res.status === 401 || res.status === 403))
-			return { zone: { exists: false, active: false }, zoneName: null, authStatus: res.status };
+		if (!res.ok)
+			return { zone: { exists: false, active: false }, zoneName: null, errorStatus: res.status };
 		const zone = classifyZone(res.result);
-		if (zone.exists) return { zone, zoneName: name, authStatus: null };
+		if (zone.exists) return { zone, zoneName: name, errorStatus: null };
 	}
-	return { zone: { exists: false, active: false }, zoneName: null, authStatus: null };
+	return { zone: { exists: false, active: false }, zoneName: null, errorStatus: null };
 }
 
 /**
@@ -98,11 +99,12 @@ export function zoneGuidance(
 	candidates: string[] = [host]
 ): string | null {
 	if (!zone.exists) {
-		const tried = candidates.length > 1 ? ` (tried ${candidates.join(', ')})` : '';
+		const tried =
+			candidates.length > 1 ? ` (Looked for zones named ${candidates.join(', ')}.)` : '';
 		return (
-			`No Cloudflare zone found for ${host}${tried}. Add your registrable domain to this ` +
-			`Cloudflare account (dashboard → Add a site), point your registrar's nameservers at ` +
-			`Cloudflare, then re-run.`
+			`No Cloudflare zone found for ${host}. Add the root domain ` +
+			`${candidates[candidates.length - 1]} to this Cloudflare account (dashboard → Add a site), ` +
+			`point your registrar's nameservers at Cloudflare, then re-run.${tried}`
 		);
 	}
 	if (!zone.active) {
@@ -266,6 +268,10 @@ export interface LadderInputs {
 	/** true = on, false = off, null = couldn't verify (token lacks Zone Settings·Read). */
 	imageTransforms: boolean | null;
 	cdnLoad: CdnProbe;
+	/** The RESOLVED zone's name (the parent zone for a subdomain host); null/absent when no zone matched. */
+	zoneName?: string | null;
+	/** The zone names the lookup tried, most specific first (last one is the root domain). */
+	candidates?: string[];
 }
 
 /**
@@ -280,6 +286,13 @@ export interface LadderInputs {
  */
 export function buildLadder(i: LadderInputs): Rung[] {
 	const cdn = cdnHost(i.host);
+	// The zone serving the host — its parent zone for a subdomain. Falls back to
+	// the host itself when the lookup found nothing (or the caller didn't say).
+	const zoneName = i.zoneName ?? i.host;
+	const candidates = i.candidates?.length ? i.candidates : [i.host];
+	const rootDomain = candidates[candidates.length - 1];
+	const tried =
+		candidates.length > 1 ? ` (Looked for zones named ${candidates.join(', ')}.)` : '';
 	const rungs: Rung[] = [];
 	let blocked = false;
 
@@ -293,13 +306,14 @@ export function buildLadder(i: LadderInputs): Rung[] {
 
 	step(
 		'zone-exists',
-		`${i.host} is a zone in this Cloudflare account`,
+		`a zone serving ${i.host} is in this Cloudflare account`,
 		i.zoneExists ? 'pass' : 'fail',
-		`Add ${i.host} to this Cloudflare account and point your registrar's nameservers at Cloudflare.`
+		`Add the root domain ${rootDomain} to this Cloudflare account (dashboard → Add a site) ` +
+			`and point your registrar's nameservers at Cloudflare.${tried}`
 	);
 	step(
 		'zone-active',
-		`the ${i.host} zone is active`,
+		`the ${zoneName} zone is active`,
 		i.zoneActive ? 'pass' : 'fail',
 		`Set the Cloudflare-assigned nameservers at your registrar; propagation can take a few hours.`
 	);
@@ -324,11 +338,11 @@ export function buildLadder(i: LadderInputs): Rung[] {
 
 	step(
 		'image-transforms',
-		`Image Transformations are enabled on the ${i.host} zone`,
+		`Image Transformations are enabled on the ${zoneName} zone`,
 		i.imageTransforms === true ? 'pass' : 'warn',
 		i.imageTransforms === null
-			? `Couldn't verify Image Transformations (token lacks Zone Settings·Read); check dashboard → ${i.host} → Images → Transformations.`
-			: `Enable it: dashboard → ${i.host} → Images → Transformations → "Enable for zone". Until on, thumbnails serve the full-size original or 404.`
+			? `Couldn't verify Image Transformations (token lacks Zone Settings·Read); check dashboard → ${zoneName} → Images → Transformations.`
+			: `Enable it: dashboard → ${zoneName} → Images → Transformations → "Enable for zone". Until on, thumbnails serve the full-size original or 404.`
 	);
 
 	const cdnLoadAction =

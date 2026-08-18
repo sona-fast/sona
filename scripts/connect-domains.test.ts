@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runDoctor, type DoctorArgs, type DoctorDeps } from './connect-domains.ts';
 import type { CfApiResult } from './setup-lib.ts';
 
@@ -89,5 +92,29 @@ describe('runDoctor', () => {
 		const code = await runDoctor(args(), deps(api, 0));
 		spy.mockRestore();
 		expect(code).toBe(0);
+	});
+});
+
+describe('connect-domains.ts ↔ candidate-walk source contract', () => {
+	// main() isn't importable without running the CLI, so pin the subdomain zone
+	// wiring at the source level: the host's candidate list must be built via
+	// zoneNameCandidates and flow into BOTH resolveZone (the walk) and
+	// zoneGuidance (the no-zone message). Reverting to a bare [host] would
+	// silently break subdomain hosts again.
+	const src = readFileSync(
+		join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
+		'utf8'
+	);
+
+	it('builds the candidate list with zoneNameCandidates(host)', () => {
+		expect(src).toMatch(/const candidates = zoneNameCandidates\(host\)/);
+	});
+
+	it('passes the candidates to resolveZone (and keeps the resolved zoneName)', () => {
+		expect(src).toMatch(/\{ zone, zoneName, errorStatus \} = await resolveZone\(candidates,/);
+	});
+
+	it('passes the candidates to zoneGuidance', () => {
+		expect(src).toMatch(/zoneGuidance\(zone, host, candidates\)/);
 	});
 });

@@ -10,8 +10,10 @@
  * Split out of first-run `npm run setup` because zone activation can lag
  * nameserver propagation by hours — this must run AFTER the zone is active. It
  * makes exactly two mutations (the R2 custom domain + the Pages custom domain)
- * plus, with the scope, enabling Image Transformations; each is idempotent and
- * nothing else in the zone is touched. The API token comes from
+ * plus, with the scope, enabling Image Transformations — a ZONE-WIDE setting on
+ * the resolved zone (for a subdomain host that's the parent zone serving it);
+ * each is idempotent and beyond those nothing else in the zone is touched. The
+ * API token comes from
  * CLOUDFLARE_API_TOKEN (Zone·Read + DNS·Edit, plus Zone Settings·Edit to enable
  * Image Transformations for you); it is read from the env, never stored or
  * printed.
@@ -142,19 +144,29 @@ async function main(): Promise<number> {
 		// Zone lookup (account-scoped by the token). A subdomain like
 		// sona.example.com is served by the example.com zone, so walk the candidate
 		// zone names most-specific-first instead of one exact lookup. A 401/403 is
-		// a hard token error; anything else is diagnostic state, not a crash.
+		// a hard token error; any other failed lookup aborts too (a transient error
+		// must not silently pick the parent zone or read as "no zone").
 		const candidates = zoneNameCandidates(host);
-		const { zone, authStatus } = await resolveZone(candidates, (name) =>
+		const { zone, zoneName, errorStatus } = await resolveZone(candidates, (name) =>
 			cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 		);
-		if (authStatus !== null) {
-			console.error(`✖ The API token cannot read zones (HTTP ${authStatus}).\n`);
-			console.error(TOKEN_RECIPE);
+		if (errorStatus !== null) {
+			if (errorStatus === 401 || errorStatus === 403) {
+				console.error(`✖ The API token cannot read zones (HTTP ${errorStatus}).\n`);
+				console.error(TOKEN_RECIPE);
+			} else {
+				console.error(`✖ Cloudflare API error (HTTP ${errorStatus}) while resolving the zone — try again.`);
+			}
 			return 1;
 		}
+		// The RESOLVED zone's name — the parent zone for a subdomain host. Consent
+		// and success lines must name THIS zone, not the host, because the
+		// Image Transformations toggle is zone-wide on it.
+		const zoneLabel =
+			zoneName && zoneName !== host ? `the ${zoneName} zone (which serves ${host})` : `the ${host} zone`;
 
 		if (check) {
-			return await runDoctor({ cfToken, cfAccount, bucket, host, cdn, zone, dbName });
+			return await runDoctor({ cfToken, cfAccount, bucket, host, cdn, zone, zoneName, candidates, dbName });
 		}
 
 		// --- mutating mode -------------------------------------------------------
@@ -208,9 +220,12 @@ async function main(): Promise<number> {
 
 		// Preview EVERY change the confirm covers (records AND the zone setting), so
 		// the one prompt is honest about what it does.
-		console.log('This will make the following changes to your zone (and nothing else):');
+		console.log(`This will make the following changes to ${zoneLabel} (and nothing else):`);
 		for (const m of plan) console.log(`  • ${m.label}`);
-		if (willEnableTransforms) console.log(`  • enable Image Transformations on the ${host} zone`);
+		if (willEnableTransforms)
+			console.log(
+				`  • enable Image Transformations on ${zoneLabel}${zoneName !== host ? ' — this is zone-wide' : ''}`
+			);
 
 		let proceed = yes;
 		if (!proceed) {
@@ -239,7 +254,7 @@ async function main(): Promise<number> {
 				method: 'PATCH',
 				body: { value: 'on' }
 			});
-			if (patched.ok) console.log(`✔ Image Transformations enabled on the ${host} zone.`);
+			if (patched.ok) console.log(`✔ Image Transformations enabled on ${zoneLabel}.`);
 			else
 				console.warn(
 					`⚠ Could not enable Image Transformations (HTTP ${patched.status}) — enable it in the dashboard.`
@@ -267,6 +282,10 @@ export interface DoctorArgs {
 	host: string;
 	cdn: string;
 	zone: ReturnType<typeof classifyZone>;
+	/** The RESOLVED zone's name (the parent zone for a subdomain host); null when no zone matched. */
+	zoneName?: string | null;
+	/** The zone names the lookup tried, most specific first. */
+	candidates?: string[];
 	dbName: string;
 }
 
@@ -322,6 +341,8 @@ export async function runDoctor(a: DoctorArgs, deps: DoctorDeps = defaultDoctorD
 		host: a.host,
 		zoneExists: a.zone.exists,
 		zoneActive: a.zone.active,
+		zoneName: a.zoneName,
+		candidates: a.candidates,
 		cdnState,
 		tlsIssued,
 		imageTransforms: transforms,
