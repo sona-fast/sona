@@ -60,7 +60,9 @@ original deployment it grew out of). The project home is
    > **Setting up a custom domain?** Export `CLOUDFLARE_API_TOKEN` +
    > `CLOUDFLARE_ACCOUNT_ID` (the same token as step 3, under **API token
    > scopes** below) before running setup so it can preflight your DNS /
-   > image-transform config.
+   > image-transform config. Setup itself never touches DNS — once the zone is
+   > active, `npm run connect-domains` attaches the CDN and site domains (see
+   > **Custom domain + image thumbnails** below).
 
    > **Run it in a real terminal.** `npm run setup` is interactive; piping input
    > through `npm run` (e.g. `printf ... | npm run setup`) truncates stdin. If you
@@ -133,8 +135,22 @@ Sona is single-admin, so there's no second account to let you back in. Two paths
 
 ### Custom domain + image thumbnails (post-deploy)
 
-Two things need a manual step on a custom domain — setup preflights them when it
-can, but calls them out here because they need dashboard/DNS access:
+`npm run setup` does not touch DNS — the domain wiring runs after it, once your
+nameservers point at Cloudflare and the zone is **active**:
+
+```sh
+npm run connect-domains -- yourdomain.com            # attach cdn.<domain> → bucket, <domain> → Pages
+npm run connect-domains -- --check yourdomain.com    # read-only doctor: which step is missing?
+```
+
+It attaches the CDN host (`cdn.yourdomain.com`) to the images bucket and the
+site domain to the Pages project — **images 404 until the CDN host is
+attached** — and with *Zone · Zone Settings · Edit* on the token it also enables
+Image Transformations. It touches nothing else in the zone, and every step is
+idempotent, so re-running is safe.
+
+Two things still need a manual step — setup and connect-domains preflight them
+when they can, but they need dashboard/DNS access:
 
 - **Pages apex domain.** After adding your domain to the Pages project, the
   **apex** needs a manual **proxied CNAME** `yourdomain.com → <project>.pages.dev`

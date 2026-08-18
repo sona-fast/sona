@@ -42,7 +42,8 @@ import {
 	ciWiringEntries,
 	cfApi,
 	securitySummaryLines,
-	pagesPatchConfirmsSitekey
+	pagesPatchConfirmsSitekey,
+	cdnAttachmentLines
 } from './setup-lib.ts';
 import { applyDownloadRateLimit, type RateLimitStatus } from './waf-lib.ts';
 import { provisionTurnstileWidget, type TurnstileStatus } from './turnstile-lib.ts';
@@ -648,11 +649,13 @@ async function main() {
 	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');
 	console.log(`  2. Open  https://${project}.pages.dev/admin/setup  and finish in the wizard.`);
 	if (useR2 && r2PublicUrl) {
-		console.log(`  3. Point ${r2PublicUrl} at the bucket YOURSELF (setup did not touch DNS):`);
-		console.log(
-			`     Cloudflare dashboard → R2 → ${bucket} → Settings → Custom Domains → add ${r2PublicUrl},`
-		);
-		console.log('     then create the DNS record it prompts for. Images 404 until this is done.');
+		for (const line of cdnAttachmentLines(
+			r2PublicUrl,
+			bucket,
+			domain ? hostFromDomain(domain) : null
+		)) {
+			console.log(line);
+		}
 	}
 	if (domain) {
 		const host = hostFromDomain(domain);

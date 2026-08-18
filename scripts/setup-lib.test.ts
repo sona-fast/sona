@@ -22,7 +22,8 @@ import {
 	ciWiringEntries,
 	cfApi,
 	securitySummaryLines,
-	pagesPatchConfirmsSitekey
+	pagesPatchConfirmsSitekey,
+	cdnAttachmentLines
 } from './setup-lib.ts';
 
 describe('buildMigrationSql', () => {
@@ -716,5 +717,23 @@ describe('pagesPatchConfirmsSitekey', () => {
 		expect(pagesPatchConfirmsSitekey(undefined, '0xKEY')).toBe(false);
 		expect(pagesPatchConfirmsSitekey({}, '0xKEY')).toBe(false);
 		expect(pagesPatchConfirmsSitekey({ deployment_configs: null }, '0xKEY')).toBe(false);
+	});
+});
+
+describe('cdnAttachmentLines', () => {
+	it('points at connect-domains (attach + --check) when a domain was given', () => {
+		const text = cdnAttachmentLines('https://cdn.taro.surf', 'taro-images', 'taro.surf').join('\n');
+		expect(text).toContain('npm run connect-domains -- taro.surf');
+		expect(text).toContain('npm run connect-domains -- --check taro.surf');
+		// The dashboard route survives as the fallback for tokens without DNS scope.
+		expect(text).toContain('R2 → taro-images → Settings → Custom Domains → add https://cdn.taro.surf');
+		expect(text).toContain('Images 404 until this is done.');
+	});
+
+	it('falls back to the dashboard walkthrough when no domain was given', () => {
+		const text = cdnAttachmentLines('https://cdn.taro.surf', 'taro-images', null).join('\n');
+		expect(text).not.toContain('connect-domains');
+		expect(text).toContain('Cloudflare dashboard → R2 → taro-images → Settings → Custom Domains');
+		expect(text).toContain('Images 404 until this is done.');
 	});
 });
