@@ -66,12 +66,12 @@ reviews:
       instructions: >-
         Sona's operator is the commissioner of the artwork, not the artist. Flag
         attribution copy or data modeling that treats the operator as the creator.
-    - path: "docs/architecture.md"
+    - path: "**/*"
       instructions: >-
-        When a change adds or removes a dependency, binding, external service,
-        workflow, or cron endpoint, this document and its mermaid diagram must
-        change in the same pull request. Flag drift between the diagram and the
-        code in the diff.
+        Only when the change adds, removes, or rewires a dependency, binding,
+        external service, workflow, or cron endpoint: check that docs/architecture.md and its
+        mermaid diagram change in the same pull request, and flag the drift if
+        they do not. Ignore this rule for changes that do not touch those things.
     - path: "**/*.{test,spec}.{ts,js}"
       instructions: >-
         Check that the test would fail if the behavior it covers were reverted.
