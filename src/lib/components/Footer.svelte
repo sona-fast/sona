@@ -23,6 +23,9 @@
 				{#if settings.aiPageEnabled}
 					<a href="/ai">{m.footer_ai()}</a>
 				{/if}
+				{#if settings.rssFeedEnabled}
+					<a href="/feed.xml">{m.footer_rss()}</a>
+				{/if}
 			</nav>
 			<SonaBadge {host} />
 			<BuildReceipt linked={settings.aiPageEnabled} />

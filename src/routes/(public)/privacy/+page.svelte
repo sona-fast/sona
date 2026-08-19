@@ -10,7 +10,8 @@
 		defaultPrivacyPolicy({
 			siteName: settings.siteName,
 			contactEmail: settings.contactEmail,
-			aiToolsDisclosed: settings.aiPageEnabled
+			aiToolsDisclosed: settings.aiPageEnabled,
+			feedPublished: settings.rssFeedEnabled
 		})
 	);
 </script>

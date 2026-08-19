@@ -13,7 +13,7 @@ graph TB
         Hooks[🛡️ hooks.server — CSP, setup gate, sessions]
         Public[🖼️ Public routes — galleries, characters, VR, stickers]
         Admin[🛠️ Admin routes — setup wizard, uploads, settings]
-        API[⚙️ API routes — /api/*, /img, oEmbed, cron]
+        API[⚙️ API routes — /api/*, /img, oEmbed, RSS feed, cron]
 
         subgraph "Server lib"
             Auth[🔐 Admin auth + password reset]

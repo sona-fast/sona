@@ -27,7 +27,7 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
-export const LEGAL_DEFAULTS_UPDATED = '2026-08-12';
+export const LEGAL_DEFAULTS_UPDATED = '2026-08-19';
 
 /**
  * Resolve the "Last updated" date to show on a legal page from a *stable* source
@@ -83,6 +83,14 @@ export interface LegalOptions {
 	 * whose practice differs either way set their own text in Settings → Legal.
 	 */
 	aiToolsDisclosed?: boolean;
+	/**
+	 * Whether this site publishes the RSS feed (the `rssFeedEnabled` setting).
+	 * The feed paragraph below describes something a visitor can subscribe to and
+	 * a fact about it they cannot undo — that feed readers keep their own copies
+	 * — so a fork with the feed turned off must not carry it. Undefined means
+	 * published, matching the setting's own default-ON polarity.
+	 */
+	feedPublished?: boolean;
 }
 
 function contactLine(opts: LegalOptions): string {
@@ -116,7 +124,14 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 			body: [
 				`${site} displays artwork and attributes it to the artists who created it, which may include their names, handles, and links to their profiles. Fursuit photographs may be attributed to their photographers, and 3D avatar models to the artists who modeled, rigged, or textured them.`,
 				'Artist profile pictures are normally copied to our own storage, but when that copy is unavailable your browser loads the image from the artist\'s own host (for example X, Bluesky, or our upload provider), which receives your IP address and the page you are viewing.',
-				'If you are an artist, photographer, or other rights holder featured here and want your attribution corrected or your work removed, contact us and we will act promptly.'
+				...(opts.feedPublished === false
+					? []
+					: [
+							`${site} publishes a feed of new work at /feed.xml so you can follow the site in a feed reader. It lists the title, a thumbnail, and the artist or photographer credit for work that is already public here. Feed readers download and keep their own copy of what they read, and those copies sit on other people's computers and services, where this site cannot reach them.`
+						]),
+				`If you are an artist, photographer, or other rights holder featured here and want your attribution corrected or your work removed, contact us and we will act promptly.${
+					opts.feedPublished === false ? '' : ' Removal covers the copies this site itself hosts.'
+				}`
 			]
 		},
 		{

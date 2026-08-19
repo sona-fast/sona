@@ -64,6 +64,14 @@
 	let privacyPolicy = $state(data.settings.privacyPolicy);
 	let aiPageEnabled = $state(data.settings.aiPageEnabled);
 	let aiPageText = $state(data.settings.aiPageText);
+	let rssFeedEnabled = $state(data.settings.rssFeedEnabled);
+	let rssNsfwEnabled = $state(data.settings.rssNsfwEnabled);
+	let regeneratingFeedKey = $state(false);
+	// The private address is derived, never bound: the key is minted server-side
+	// and this page only ever displays what was stored.
+	const feedKeyUrl = $derived(
+		data.settings.rssNsfwKey ? `${$page.url.origin}/feed.xml?key=${data.settings.rssNsfwKey}` : ''
+	);
 	let termsOfService = $state(data.settings.termsOfService);
 
 	// Sona / character profile — feeds the /art page of the threePath landing.
@@ -303,6 +311,8 @@
 		privacyPolicy = data.settings.privacyPolicy;
 		aiPageEnabled = data.settings.aiPageEnabled;
 		aiPageText = data.settings.aiPageText;
+		rssFeedEnabled = data.settings.rssFeedEnabled;
+		rssNsfwEnabled = data.settings.rssNsfwEnabled;
 		termsOfService = data.settings.termsOfService;
 		adminEmail = data.adminEmail;
 		sonaSpecies = data.settings.sonaSpecies;
@@ -375,6 +385,21 @@
 	     tab hides the rest via CSS, so the panel is relabelled by whichever tab
 	     is selected rather than swapped out. -->
 	<div class="settings-panels" id="settings-panels" role="tabpanel" aria-labelledby={tabButtonId(selectedTab)}>
+<!-- Declared before the site form so the Regenerate button inside that form can
+     point at it by id. A `form` attribute associates the button with THIS form,
+     which is what keeps it from becoming the site form's default submit button
+     — otherwise Enter in any Site-tab text field would regenerate the feed key
+     instead of saving. Nested forms are not an option; this is what the
+     attribute exists for. -->
+<form id="regenerate-feed-key" method="POST" action="?/regenerateFeedKey" use:enhance={() => {
+	regeneratingFeedKey = true;
+	return async ({ result, update }) => {
+		await update({ reset: false });
+		regeneratingFeedKey = false;
+		if (result.type === 'success') toast.success(m.admin_settings_rss_regenerated());
+	};
+}}></form>
+
 <form method="POST" action="?/saveSite" class="contents" use:enhance={() => {
 	savingSite = true;
 	return async ({ result, update }) => {
@@ -457,6 +482,63 @@
 				<span>{m.admin_settings_ai_text_label()}</span>
 				<textarea class="input" rows="4" name="aiPageText" bind:value={aiPageText} placeholder={m.admin_settings_legal_placeholder()}></textarea>
 			</label>
+		</section>
+
+		<section data-tab="site">
+			<h2>{m.admin_settings_rss_heading()}</h2>
+			<div class="checkbox-row">
+				<!-- Same absent-means-unmanaged marker as the /ai toggle above (#60). -->
+				<input type="hidden" name="rssFeedEnabledPresent" value="1" />
+				<input
+					type="checkbox"
+					id="rssFeedEnabled"
+					name="rssFeedEnabled"
+					aria-describedby="rssFeedEnabled-desc"
+					bind:checked={rssFeedEnabled}
+				/>
+				<span class="checkbox-text">
+					<label class="checkbox-title" for="rssFeedEnabled">{m.admin_settings_rss_enabled_label()}</label>
+					<span class="checkbox-desc" id="rssFeedEnabled-desc">{m.admin_settings_rss_enabled_hint()}</span>
+				</span>
+			</div>
+			<!-- The NSFW row is meaningless with no feed to serve, so it disappears
+			     with the master toggle rather than sitting there disabled. Its
+			     Present marker goes with it: an absent marker means "this form did
+			     not manage the toggle", which is exactly the truth here. -->
+			{#if rssFeedEnabled}
+				<div class="checkbox-row">
+					<input type="hidden" name="rssNsfwEnabledPresent" value="1" />
+					<input
+						type="checkbox"
+						id="rssNsfwEnabled"
+						name="rssNsfwEnabled"
+						aria-describedby="rssNsfwEnabled-desc"
+						bind:checked={rssNsfwEnabled}
+					/>
+					<span class="checkbox-text">
+						<label class="checkbox-title" for="rssNsfwEnabled">{m.admin_settings_rss_nsfw_label()}</label>
+						<span class="checkbox-desc" id="rssNsfwEnabled-desc">{m.admin_settings_rss_nsfw_hint()}</span>
+					</span>
+				</div>
+				<!-- Gated on the STORED key, not the checkbox: the key is minted when
+				     the save lands, so there is nothing to show until the page
+				     reloads with one. -->
+				{#if data.settings.rssNsfwEnabled && feedKeyUrl}
+					<div class="feed-key">
+						<span class="feed-key-label">{m.admin_settings_rss_key_label()}</span>
+						<CopyCommand text={feedKeyUrl} label={m.admin_settings_rss_copy()} />
+						<p class="hint">{m.admin_settings_rss_key_hint()}</p>
+						<button
+							type="submit"
+							form="regenerate-feed-key"
+							class="btn btn-secondary"
+							disabled={regeneratingFeedKey}
+						>
+							{regeneratingFeedKey ? m.admin_settings_rss_regenerating() : m.admin_settings_rss_regenerate()}
+						</button>
+					</div>
+				{/if}
+			{/if}
 		</section>
 
 		<section data-tab="site">
@@ -1579,6 +1661,22 @@
 		font-size: 13px;
 		font-weight: 400;
 		color: var(--muted-foreground);
+	}
+
+	/* The private feed address: a field-shaped block rather than a .checkbox-row,
+	   since nothing in it is toggled. align-items: start keeps the Regenerate
+	   button its own width instead of stretching across the column. */
+	.feed-key {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 8px;
+		margin-top: 20px;
+	}
+
+	.feed-key-label {
+		font-size: 14px;
+		font-weight: 500;
 	}
 
 	.row {

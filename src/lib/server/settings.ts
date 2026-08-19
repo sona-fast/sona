@@ -68,6 +68,34 @@ export interface SiteSettings {
 	 * that page's override is saved. Drives its "Last updated" line when an
 	 * override is set. Empty → no line (the default copy shows none). */
 	aiPageUpdatedAt: string;
+	/** Whether /feed.xml (and its footer link and head autodiscovery) is served.
+	 * Stored as 'true'/'false'; ABSENT MEANS ON (SONA-172) — the same polarity,
+	 * for the same reason, as aiPageEnabled above.
+	 *
+	 * A feed of already-public pages publishes nothing a visitor could not
+	 * already read, so defaulting it on costs an existing fork nothing, and the
+	 * Settings toggle is how an owner who does not want their uploads
+	 * syndicated turns it off. Turning it off also removes the feed paragraph
+	 * from the default privacy policy, since that paragraph describes a feed
+	 * the site no longer publishes. */
+	rssFeedEnabled: boolean;
+	/** Whether the feed will serve NSFW work AT ALL, to anyone. Default OFF, and
+	 * off is a hard gate: with this off there is no address that returns adult
+	 * items, whatever key is presented.
+	 *
+	 * Server-only, like the key below. The public feed never reveals whether an
+	 * adult variant exists — a wrong or absent key returns the ordinary SFW
+	 * document rather than an error, so nothing distinguishes "no NSFW feed" from
+	 * "an NSFW feed you do not have the key for". */
+	rssNsfwEnabled: boolean;
+	/** The unguessable token that unlocks the adult feed: /feed.xml?key=<this>.
+	 * 128 bits of hex, minted server-side (see mintFeedKey) when the owner first
+	 * turns rssNsfwEnabled on, and replaced by the Regenerate control — which
+	 * kills the old address. Empty means no key has been minted yet.
+	 *
+	 * NEVER allowlisted for public payloads: it is a bearer credential, and the
+	 * (public) layout load rides every page on the site. */
+	rssNsfwKey: string;
 
 	// --- Sona / reference profile (shown on /art, part of the threePath landing) ---
 	// The reference sheet itself is the most recent published gallery image
@@ -163,6 +191,9 @@ export const PUBLIC_SETTINGS_KEYS = [
 	'termsUpdatedAt',
 	'aiPageEnabled',
 	'aiPageUpdatedAt',
+	// The footer link and the head autodiscovery tag are rendered from this, so
+	// it has to reach the client. It says nothing the feed itself does not.
+	'rssFeedEnabled',
 	'sonaSpecies',
 	'sonaBuild',
 	'sonaKeyFeatures',
@@ -196,7 +227,15 @@ export const PUBLIC_SETTINGS_KEYS = [
  * turned the page off. /ai's own load returns it, behind that route's 404 gate.
  */
 export const SERVER_ONLY_SETTINGS_KEYS = [
-	'aiPageText'
+	'aiPageText',
+	// A bearer credential. Publishing it in the layout payload would hand the
+	// adult feed's address to every visitor of every page, which is the whole
+	// thing the key exists to prevent.
+	'rssNsfwKey',
+	// Withheld so the public surface cannot answer "does an adult feed exist
+	// here?" — the same reason a wrong key returns the SFW document rather than
+	// an error.
+	'rssNsfwEnabled'
 ] as const satisfies readonly (keyof SiteSettings)[];
 
 /** The settings shape public pages receive — exactly PUBLIC_SETTINGS_KEYS. */
@@ -245,6 +284,12 @@ export const DEFAULTS: SiteSettings = {
 	aiPageEnabled: true,
 	aiPageText: '',
 	aiPageUpdatedAt: '',
+	// The feed defaults ON fleet-wide (it syndicates only already-public pages);
+	// serving NSFW work through it is strictly opt-in, and has no key until the
+	// owner opts in.
+	rssFeedEnabled: true,
+	rssNsfwEnabled: false,
+	rssNsfwKey: '',
 	sonaSpecies: '',
 	sonaBuild: '',
 	sonaKeyFeatures: '',
@@ -321,6 +366,11 @@ export async function getSettings(
 			aiPageEnabled: map.aiPageEnabled !== 'false',
 			aiPageText: map.aiPageText ?? DEFAULTS.aiPageText,
 			aiPageUpdatedAt: map.aiPageUpdatedAt ?? DEFAULTS.aiPageUpdatedAt,
+			// The second default-ON boolean, same polarity as aiPageEnabled: only an
+			// explicit stored 'false' turns the feed off.
+			rssFeedEnabled: map.rssFeedEnabled !== 'false',
+			rssNsfwEnabled: map.rssNsfwEnabled === 'true',
+			rssNsfwKey: map.rssNsfwKey ?? DEFAULTS.rssNsfwKey,
 			sonaSpecies: map.sonaSpecies ?? DEFAULTS.sonaSpecies,
 			sonaBuild: map.sonaBuild ?? DEFAULTS.sonaBuild,
 			sonaKeyFeatures: map.sonaKeyFeatures ?? DEFAULTS.sonaKeyFeatures,

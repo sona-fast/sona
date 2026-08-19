@@ -128,6 +128,41 @@ describe('defaultPrivacyPolicy', () => {
 		expect(declined).toMatch(/Google Fonts/);
 	});
 
+	// The feed (SONA-172) publishes titles, thumbnails and credits, and feed
+	// readers keep copies this site cannot reach. That is a data practice a
+	// visitor and a featured artist both need told, and it is only true of a fork
+	// that actually serves the feed.
+	it('discloses the feed, and what removal can and cannot reach, when it is published', () => {
+		const text = defaultPrivacyPolicy(withEmail)
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(text).toMatch(/feed of new work at \/feed\.xml/);
+		expect(text).toMatch(/keep their own copy/);
+		// The removal promise is scoped in the same breath, so it cannot be read as
+		// a promise to delete copies that are no longer ours to delete.
+		expect(text).toMatch(/Removal covers the copies this site itself hosts\./);
+	});
+
+	it('omits the feed paragraph — and the removal caveat with it — when the feed is off', () => {
+		const off = defaultPrivacyPolicy({ ...withEmail, feedPublished: false })
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(off).not.toMatch(/feed\.xml/);
+		expect(off).not.toMatch(/Removal covers the copies/);
+		// The removal paragraph itself stays — only its feed-specific caveat goes.
+		expect(off).toMatch(/want your attribution corrected or your work removed/);
+	});
+
+	it('publishes the feed paragraph by default, matching the setting’s polarity', () => {
+		// rssFeedEnabled is default-ON, so an options object that says nothing
+		// about the feed must produce the same policy a fork with it on gets.
+		const implicit = defaultPrivacyPolicy(withEmail).flatMap((s) => s.body).join('\n');
+		const explicit = defaultPrivacyPolicy({ ...withEmail, feedPublished: true })
+			.flatMap((s) => s.body)
+			.join('\n');
+		expect(implicit).toBe(explicit);
+	});
+
 	// Cloudflare injects its Web Analytics beacon into proxied responses on
 	// every fork (see the CSP allowance for static.cloudflareinsights.com);
 	// "no third-party analytics cookies" alone reads as weasel wording to
@@ -171,6 +206,17 @@ describe('privacy page wiring', () => {
 			'utf8'
 		);
 		expect(src).toMatch(/aiToolsDisclosed:\s*settings\.aiPageEnabled/);
+	});
+
+	// Same failure mode for the feed flag: drop the prop and feedPublished is
+	// undefined, the === false branch never fires, and a fork that turned the
+	// feed off keeps a privacy policy describing one.
+	it('passes the feed flag from settings into the default policy', () => {
+		const src = readFileSync(
+			new URL('../routes/(public)/privacy/+page.svelte', import.meta.url),
+			'utf8'
+		);
+		expect(src).toMatch(/feedPublished:\s*settings\.rssFeedEnabled/);
 	});
 });
 
@@ -243,7 +289,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '3c90edf2c7882521b77a9cf4bb40523fdbef42fe5ff4f769fc3e52dd0f8f69dd';
+	const RECORDED_TEXT_HASH = '2e212305f46d31a7c8b47680c0a649fd8c44535621eaa299fb4f6909615594f2';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

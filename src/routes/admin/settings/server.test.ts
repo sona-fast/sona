@@ -163,3 +163,109 @@ describe('settings export action', () => {
 		expect(contentKeys).toEqual(expectedContentKeys);
 	});
 });
+
+// Feed key lifecycle (SONA-172). The key is a bearer credential for the adult
+// feed, so when it is minted and when it is REPLACED are the whole security
+// story: a mint on every save would break every subscribed reader silently.
+describe('RSS feed key', () => {
+	function settingsDb() {
+		const sqlite = new Database(':memory:');
+		sqlite.exec('CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
+		return {
+			sqlite,
+			platform: { env: { DB: makeD1(sqlite) } } as unknown as App.Platform,
+			read: (key: string) =>
+				(sqlite.prepare('SELECT value FROM site_settings WHERE key = ?').get(key) as
+					| { value: string }
+					| undefined)?.value
+		};
+	}
+
+	/** Post the site form with only the RSS fields a real submission carries. */
+	async function saveSite(platform: App.Platform, fields: Record<string, string>) {
+		const data = new FormData();
+		for (const [k, v] of Object.entries(fields)) data.append(k, v);
+		return actions.saveSite({
+			platform,
+			request: new Request('https://taro.surf/admin/settings?/saveSite', {
+				method: 'POST',
+				body: data
+			}),
+			url: new URL('https://taro.surf/admin/settings')
+		} as never);
+	}
+
+	it('mints a key on the save that first enables the NSFW feed', async () => {
+		const { platform, read } = settingsDb();
+		await saveSite(platform, {
+			rssFeedEnabledPresent: '1',
+			rssFeedEnabled: 'on',
+			rssNsfwEnabledPresent: '1',
+			rssNsfwEnabled: 'on'
+		});
+		expect(read('rssNsfwEnabled')).toBe('true');
+		expect(read('rssNsfwKey')).toMatch(/^[0-9a-f]{32}$/);
+	});
+
+	it('keeps the same key across later saves', async () => {
+		// A re-mint per save would silently break every reader already subscribed.
+		const { platform, read } = settingsDb();
+		const on = { rssNsfwEnabledPresent: '1', rssNsfwEnabled: 'on' };
+		await saveSite(platform, on);
+		const first = read('rssNsfwKey');
+		await saveSite(platform, on);
+		expect(read('rssNsfwKey')).toBe(first);
+	});
+
+	it('mints nothing while the NSFW feed stays off', async () => {
+		const { platform, read } = settingsDb();
+		await saveSite(platform, { rssNsfwEnabledPresent: '1' });
+		expect(read('rssNsfwEnabled')).toBe('false');
+		expect(read('rssNsfwKey')).toBeUndefined();
+	});
+
+	it('keeps the key when the NSFW feed is turned back off', async () => {
+		// An owner who toggles it off and on again keeps the address they already
+		// gave their reader; only Regenerate replaces it.
+		const { platform, read } = settingsDb();
+		await saveSite(platform, { rssNsfwEnabledPresent: '1', rssNsfwEnabled: 'on' });
+		const minted = read('rssNsfwKey');
+		await saveSite(platform, { rssNsfwEnabledPresent: '1' });
+		expect(read('rssNsfwEnabled')).toBe('false');
+		expect(read('rssNsfwKey')).toBe(minted);
+	});
+
+	it('leaves the toggle alone when the form does not carry it', async () => {
+		// The absent-means-unmanaged rule (#60): the NSFW row is only rendered
+		// while the master toggle is on, so turning the feed off must not read as
+		// "the owner also revoked the NSFW opt-in".
+		const { platform, read } = settingsDb();
+		await saveSite(platform, { rssNsfwEnabledPresent: '1', rssNsfwEnabled: 'on' });
+		await saveSite(platform, { rssFeedEnabledPresent: '1' });
+		expect(read('rssFeedEnabled')).toBe('false');
+		expect(read('rssNsfwEnabled')).toBe('true');
+	});
+
+	it('replaces the key on regenerate, killing the old address', async () => {
+		const { platform, read } = settingsDb();
+		await saveSite(platform, { rssNsfwEnabledPresent: '1', rssNsfwEnabled: 'on' });
+		const before = read('rssNsfwKey');
+
+		await actions.regenerateFeedKey({ platform } as never);
+		const after = read('rssNsfwKey');
+		expect(after).toMatch(/^[0-9a-f]{32}$/);
+		expect(after).not.toBe(before);
+	});
+
+	// The Regenerate control destroys a working address, so it must never be what
+	// Enter in a Site-tab text field triggers. Associating it with a separate form
+	// by id is what keeps it out of the site form's default-submit position;
+	// switching it back to formaction would silently make it the default again.
+	it('keeps the regenerate button out of the site form default submit', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(src).toMatch(/<form id="regenerate-feed-key"[^>]*action="\?\/regenerateFeedKey"/);
+		expect(src).toMatch(/type="submit"\s+form="regenerate-feed-key"/);
+		// No formaction anywhere: that is the shape that would re-break it.
+		expect(src).not.toContain('formaction');
+	});
+});
