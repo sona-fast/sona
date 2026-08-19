@@ -127,7 +127,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 				...(opts.feedPublished === false
 					? []
 					: [
-							`${site} publishes a feed of new work at /feed.xml so you can follow the site in a feed reader. It lists the title, a thumbnail, and the artist or photographer credit for work that is already public here. Feed readers download and keep their own copy of what they read, and those copies sit on other people's computers and services, where this site cannot reach them.`
+							'The site also publishes a feed of newly added work at /feed.xml, listing titles, thumbnails, and artist credits. Feed readers and similar services fetch that feed and may keep their own copies, which this site cannot delete.'
 						]),
 				`If you are an artist, photographer, or other rights holder featured here and want your attribution corrected or your work removed, contact us and we will act promptly.${
 					opts.feedPublished === false ? '' : ' Removal covers the copies this site itself hosts.'

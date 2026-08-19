@@ -136,8 +136,8 @@ describe('defaultPrivacyPolicy', () => {
 		const text = defaultPrivacyPolicy(withEmail)
 			.flatMap((s) => s.body)
 			.join('\n');
-		expect(text).toMatch(/feed of new work at \/feed\.xml/);
-		expect(text).toMatch(/keep their own copy/);
+		expect(text).toMatch(/feed of newly added work at \/feed\.xml/);
+		expect(text).toMatch(/may keep their own copies, which this site cannot delete/);
 		// The removal promise is scoped in the same breath, so it cannot be read as
 		// a promise to delete copies that are no longer ours to delete.
 		expect(text).toMatch(/Removal covers the copies this site itself hosts\./);
@@ -289,7 +289,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '2e212305f46d31a7c8b47680c0a649fd8c44535621eaa299fb4f6909615594f2';
+	const RECORDED_TEXT_HASH = 'c92daba1c8d4aa61041a362c6b0e76713fe4cf86a91240fdb0ebdca4ddd47025';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both
