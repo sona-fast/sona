@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 // Guards the bug class where the setup instructions name a Cloudflare permission
 // that cannot run the query we actually send. getCloudflareEdge() queries
 // `viewer { zones { httpRequests1dGroups } }` — a ZONE-scoped dataset, which needs
-// `Zone · Analytics · Read`. The modal used to say `Account · Account Analytics ·
+// `Zone → Analytics: Read`. The modal used to say `Account · Account Analytics ·
 // Read`; that token authenticates fine and is then refused:
 //
 //   Actor '…' does not have permission 'com.cloudflare.api.account.zone.analytics.read'
@@ -30,7 +30,7 @@ const settingsPage = read('../../routes/admin/settings/+page.svelte');
 const deployWorkflow = read('../../../.github/workflows/deploy.yml');
 
 describe('Cloudflare edge analytics — documented scope matches the query', () => {
-	it('the query is zone-scoped, which is what makes Zone · Analytics · Read the right permission', () => {
+	it('the query is zone-scoped, which is what makes Zone → Analytics: Read the right permission', () => {
 		expect(source).toMatch(/viewer\s*\{\s*zones\(/);
 		expect(source).toContain('httpRequests1dGroups');
 	});
@@ -39,8 +39,8 @@ describe('Cloudflare edge analytics — documented scope matches the query', () 
 		['en', en],
 		['ja', ja]
 	])('%s setup copy names the zone permission, never the account one', (_locale, messages) => {
-		expect(messages.admin_cf_setup_s1_scope).toBe('Zone · Analytics · Read');
-		expect(messages.admin_cf_setup_callout).toContain('Zone Analytics Read');
+		expect(messages.admin_cf_setup_s1_scope).toBe('Zone → Analytics: Read');
+		expect(messages.admin_cf_setup_callout).toContain('Zone → Analytics: Read');
 
 		// The account-scoped permission cannot satisfy a zone-scoped query. If this
 		// string reappears anywhere in the setup flow, the instructions are wrong.
