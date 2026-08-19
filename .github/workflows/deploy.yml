@@ -29,7 +29,8 @@ jobs:
           cache: npm
 
       # Same guard the template's ci.yml runs: fails if the lockfile resolves
-      # cookie/esbuild/nanoid below their security floors. Reads
+      # a guarded package (FLOORS in scripts/check-lockfile-security-lib.mjs)
+      # below its security floor. Reads
       # package-lock.json only (no dependencies), so it runs BEFORE `npm ci`:
       # after it, a downgraded package's install scripts have already run.
       - run: npm run check:lockfile-security
