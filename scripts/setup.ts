@@ -312,6 +312,10 @@ async function main() {
 	// runs on a zone the operator controls — a *.pages.dev-only fork has no zone to
 	// attach it to. Null = not attempted (no domain / no zone / no token).
 	let downloadRateLimit: RateLimitStatus | null = null;
+	// The human-readable reason behind a rate-limit 'error' — waf-lib names the
+	// actual failure (scope, missing zone, HTTP error), and the summary should
+	// repeat that instead of guessing at a cause.
+	let downloadRateLimitDetail: string | null = null;
 	// Admin-login Turnstile widget. Only meaningful with a custom
 	// domain — a *.pages.dev-only fork isn't provisioned one. Its sitekey (public)
 	// is set as a Pages var below and its secret as a Pages secret; the login page
@@ -383,6 +387,7 @@ async function main() {
 				// result we warn about in Next steps — setup keeps going regardless.
 				const rateLimit = await applyDownloadRateLimit(cfToken, host);
 				downloadRateLimit = rateLimit.status;
+				downloadRateLimitDetail = rateLimit.detail;
 				if (rateLimit.status === 'error') {
 					console.warn(`\n⚠ Could not attach the public-endpoint rate-limit rule: ${rateLimit.detail}`);
 				} else {
@@ -673,6 +678,7 @@ async function main() {
 		for (const line of securitySummaryLines(
 			host,
 			downloadRateLimit,
+			downloadRateLimitDetail,
 			turnstileStatus,
 			pagesConfigOk && turnstileSecretSet
 		)) {

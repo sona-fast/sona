@@ -401,8 +401,10 @@ export function ciWiringEntries(input: CiWiringInput): CiEntry[] {
  * can pin that, and the wording, without running the CLI.
  *
  * Status contracts: null = not attempted (no domain / no zone / no token);
- * 'error' = the token lacked the scope, which is the one case worth telling
- * the operator how to fix; 'exists' rate limits are old news and stay silent.
+ * 'error' = provisioning failed — `downloadRateLimitDetail` carries waf-lib's
+ * reason (missing scope, absent zone, HTTP failure), which the summary repeats
+ * instead of assuming a cause; 'exists' rate limits are old news and stay
+ * silent.
  *
  * `turnstileWired` says whether BOTH halves of the wiring actually landed (the
  * Pages PATCH carrying TURNSTILE_SITEKEY and the TURNSTILE_SECRET put). The
@@ -412,13 +414,16 @@ export function ciWiringEntries(input: CiWiringInput): CiEntry[] {
 export function securitySummaryLines(
 	host: string,
 	downloadRateLimit: RateLimitStatus | null,
+	downloadRateLimitDetail: string | null,
 	turnstileStatus: TurnstileStatus | null,
 	turnstileWired: boolean
 ): string[] {
 	const lines: string[] = [];
 	if (downloadRateLimit === 'error') {
-		lines.push('  • Public-endpoint rate limit: NOT set (token lacks Zone · WAF · Edit).');
-		lines.push('     Add that permission to the token, then run:');
+		lines.push(
+			`  • Public-endpoint rate limit: NOT set (${downloadRateLimitDetail ?? 'provisioning failed'}).`
+		);
+		lines.push('     Fix that, then run:');
 		lines.push(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
 	} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
 		lines.push(

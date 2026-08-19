@@ -614,27 +614,43 @@ describe('securitySummaryLines', () => {
 
 	it('prints the Turnstile warning for EVERY rate-limit outcome (regression: a missing brace once nested it inside the applied branch)', () => {
 		for (const rl of [null, 'exists', 'error', 'created', 'updated'] as const) {
-			const lines = securitySummaryLines('taro.surf', rl, 'error', true);
+			const lines = securitySummaryLines('taro.surf', rl, null, 'error', true);
 			expect(lines, `downloadRateLimit=${rl}`).toContain(turnstileWarning);
 		}
 	});
 
 	it('reports an applied rate limit and a created Turnstile widget together', () => {
-		const lines = securitySummaryLines('taro.surf', 'created', 'created', true);
+		const lines = securitySummaryLines('taro.surf', 'created', null, 'created', true);
 		expect(lines.join('\n')).toContain('Public-endpoint rate limit: applied to the taro.surf zone');
 		expect(lines.join('\n')).toContain('Admin-login bot check: Turnstile created for taro.surf');
 	});
 
-	it('tells the operator how to fix a scope-starved token for the rate limit', () => {
-		const lines = securitySummaryLines('taro.surf', 'error', null, false);
-		expect(lines.join('\n')).toContain('npm run apply-download-ratelimit -- taro.surf');
+	it('repeats waf-lib’s failure reason and the retry command for a rate-limit error', () => {
+		const detail = 'token has no access to zone taro.surf: add Zone · WAF · Edit';
+		const text = securitySummaryLines('taro.surf', 'error', detail, null, false).join('\n');
+		expect(text).toContain(detail);
+		expect(text).toContain('npm run apply-download-ratelimit -- taro.surf');
+	});
+
+	it('does not blame token scope for a non-permission rate-limit failure', () => {
+		const detail = 'failed to write the rate-limit rule to taro.surf (HTTP 500)';
+		const text = securitySummaryLines('taro.surf', 'error', detail, null, false).join('\n');
+		expect(text).toContain(detail);
+		expect(text).not.toContain('token lacks Zone · WAF · Edit');
+		expect(text).toContain('npm run apply-download-ratelimit -- taro.surf');
+	});
+
+	it('falls back to a generic failure line when no detail survived', () => {
+		const text = securitySummaryLines('taro.surf', 'error', null, null, false).join('\n');
+		expect(text).toContain('NOT set (provisioning failed)');
+		expect(text).not.toContain('token lacks');
 	});
 
 	it('reports NO bot check when the widget provisioned but the wiring failed', () => {
 		// The login check fails open without the sitekey var + secret, so a
 		// provisioned widget with failed wiring must never read as enforced.
 		for (const status of ['created', 'exists'] as const) {
-			const text = securitySummaryLines('taro.surf', 'exists', status, false).join('\n');
+			const text = securitySummaryLines('taro.surf', 'exists', null, status, false).join('\n');
 			expect(text).toContain('NOT confirm the TURNSTILE_SITEKEY');
 			expect(text).toContain('/admin/login has NO bot check');
 			// Honest on re-runs: the claim is scoped to this run / first runs.
@@ -645,15 +661,15 @@ describe('securitySummaryLines', () => {
 	});
 
 	it('never prints the enforced claim unless the wiring landed', () => {
-		const wired = securitySummaryLines('taro.surf', null, 'created', true).join('\n');
+		const wired = securitySummaryLines('taro.surf', null, null, 'created', true).join('\n');
 		expect(wired).toContain('enforced once deployed');
-		const unwired = securitySummaryLines('taro.surf', null, 'created', false).join('\n');
+		const unwired = securitySummaryLines('taro.surf', null, null, 'created', false).join('\n');
 		expect(unwired).not.toContain('enforced once deployed');
 	});
 
 	it('stays silent about pre-existing rate limits and unattempted Turnstile', () => {
-		expect(securitySummaryLines('taro.surf', 'exists', null, false)).toEqual([]);
-		expect(securitySummaryLines('taro.surf', null, null, false)).toEqual([]);
+		expect(securitySummaryLines('taro.surf', 'exists', null, null, false)).toEqual([]);
+		expect(securitySummaryLines('taro.surf', null, null, null, false)).toEqual([]);
 	});
 });
 
