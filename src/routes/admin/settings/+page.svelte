@@ -425,8 +425,16 @@
 			// a new site name and then hit Regenerate would watch it revert. The
 			// action hands back the key it minted instead.
 			const key = result.data?.feedKey;
-			if (typeof key === 'string') regeneratedKey = key;
-			toast.success(m.admin_settings_rss_regenerated());
+			if (typeof key === 'string') {
+				regeneratedKey = key;
+				toast.success(m.admin_settings_rss_regenerated());
+			} else {
+				// The action always returns the key, so this is unreachable today. If
+				// it ever stops, fall back to a reload rather than announce success:
+				// the address on screen has to be the one the server stored, and a
+				// stale address that claims to be new is the worst of both.
+				await applyAction(result);
+			}
 		} else {
 			// Skipping the update helper also skips the applyAction it would run, so
 			// every other result has to be handed over by hand: a failed D1 write

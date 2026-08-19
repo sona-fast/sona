@@ -268,10 +268,14 @@ describe('RSS feed key', () => {
 		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
 		const handler = src.split('<form id="regenerate-feed-key"')[1]?.split('</form>')[0] ?? '';
 		expect(handler).toContain('use:enhance');
+		// The negative assertions below search raw source, so they run against a
+		// comment-stripped copy: a comment that merely NAMES update() describes the
+		// trap this test exists for, and must not fail a correct implementation.
+		const code = handler.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 		// Neither route back into the load: update() reruns it, invalidateAll is
 		// the same thing spelled out.
-		expect(handler).not.toContain('update(');
-		expect(handler).not.toContain('invalidateAll');
+		expect(code).not.toContain('update(');
+		expect(code).not.toContain('invalidateAll');
 		// The success arm takes the minted key from the result instead of reloading.
 		expect(handler).toMatch(/result\.type === 'success'/);
 		expect(handler).toContain('result.data?.feedKey');
