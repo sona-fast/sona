@@ -12,6 +12,7 @@ import {
 	parseSonaColors
 } from '$lib/server/settings';
 import { deleteOrphansAll, collectReferencedUrls } from '$lib/server/storage';
+import { collectUsageBreakdown, type StorageBreakdown } from '$lib/server/storage/usage-breakdown';
 import { clearVrTabCache } from '$lib/server/vr-gate';
 import { clearStickerTabCache } from '$lib/server/stickers';
 import { clearCollectionsNavCache } from '$lib/server/collections';
@@ -124,6 +125,20 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		}
 	}
 
+	// Per-content-type usage (SONA-192) — R2 only: derived from listing the
+	// bucket, so it also counts files D1 never tracked. Reduced to counts and
+	// sums here; raw object keys never leave the server or reach a log line.
+	// A list failure degrades to breakdown=null and the tab falls back to the
+	// aggregate D1 bar.
+	let breakdown: StorageBreakdown | null = null;
+	if (settings.storageProvider === 'r2' && platform?.env.IMAGES) {
+		try {
+			breakdown = await collectUsageBreakdown(platform.env.IMAGES);
+		} catch {
+			// R2 list unavailable — the aggregate bar still renders.
+		}
+	}
+
 	// Whether each provider's deploy-time config is present (secrets/bindings live
 	// in env, never in settings). utUsage succeeding also proves the UT token works.
 	const storageStatus = {
@@ -170,6 +185,7 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		earlyAccess,
 		imageCount: stats?.count || 0,
 		totalSize: stats?.totalSize || 0,
+		breakdown,
 		utUsage,
 		storageStatus,
 		registryEnabled: isRegistryEnabled(renv),

@@ -235,15 +235,40 @@
 		tabButtons[next]?.focus();
 	}
 
-	// Usage bar reflects the ACTIVE provider. R2 has no simple usage API, so we use
-	// the DB-tracked total (every image is on the active store) against the 10GB free tier.
+	// Usage bar reflects the ACTIVE provider. On R2 the bucket listing (SONA-192)
+	// is the truth when available — it counts files D1 never tracked; the
+	// DB-tracked total is the fallback when the list failed. UT keeps its own
+	// usage API numbers.
 	const activeUsage = $derived(
 		data.settings.storageProvider === 'r2'
-			? { label: 'Cloudflare R2', used: data.totalSize, limit: R2_FREE_TIER_BYTES }
+			? {
+					label: 'Cloudflare R2',
+					used: data.breakdown?.totalBytes ?? data.totalSize,
+					limit: R2_FREE_TIER_BYTES
+				}
 			: data.utUsage
 				? { label: 'UploadThing', used: data.utUsage.usedBytes, limit: data.utUsage.limitBytes }
 				: null
 	);
+
+	// Per-type rows (SONA-192). Fixed order — the bar's segment order is locked
+	// to the row order so the color mapping never becomes color-only (WCAG 1.4.1).
+	const breakdownRows = [
+		{ kind: 'artwork', label: m.admin_settings_breakdown_artwork },
+		{ kind: 'vrVideo', label: m.admin_settings_breakdown_vr_videos },
+		{ kind: 'vrModel', label: m.admin_settings_breakdown_vr_models },
+		{ kind: 'sticker', label: m.admin_settings_breakdown_stickers },
+		{ kind: 'vrImage', label: m.admin_settings_breakdown_vr_images },
+		{ kind: 'other', label: m.admin_settings_breakdown_avatars_other }
+	] as const;
+
+	// Share of USED bytes (the bar percentage is share of the limit — the column
+	// header disambiguates). Whole percents from 1%, one decimal below it.
+	function sharePct(bytes: number, total: number): string {
+		if (total <= 0 || bytes <= 0) return '0%';
+		const pct = (bytes / total) * 100;
+		return pct >= 1 ? `${Math.round(pct)}%` : `${pct.toFixed(1)}%`;
+	}
 	// Originals still sitting on UploadThing after migrating to R2.
 	const utLeftover = $derived(
 		data.settings.storageProvider === 'r2' && data.utUsage && data.utUsage.usedBytes > 0
@@ -669,37 +694,85 @@
 						<span>{m.admin_settings_usage({ label: activeUsage.label, used: formatSize(activeUsage.used), limit: formatSize(activeUsage.limit) })}</span>
 						<span class="storage-pct">{pct.toFixed(1)}%</span>
 					</div>
-					<div class="storage-bar">
-						<div class="storage-bar-fill" style="width: {pct}%" class:warning={pct > 80} class:danger={pct > 95}></div>
-					</div>
+					{#if data.breakdown}
+						<!-- Redundant visual summary of the table below, so it's hidden from
+						     the accessibility tree (six values; progressbar can't express it).
+						     Segment order is locked to the table's row order. -->
+						<div class="storage-bar" aria-hidden="true">
+							{#each breakdownRows as row (row.kind)}
+								{#if data.breakdown.kinds[row.kind].bytes > 0}
+									<div
+										class="storage-seg seg-{row.kind}"
+										style="width: {(data.breakdown.kinds[row.kind].bytes / activeUsage.limit) * 100}%"
+									></div>
+								{/if}
+							{/each}
+						</div>
+					{:else}
+						<div class="storage-bar">
+							<div class="storage-bar-fill" style="width: {pct}%" class:warning={pct > 80} class:danger={pct > 95}></div>
+						</div>
+					{/if}
 				</div>
+			{/if}
+			{#if data.breakdown}
+				<table class="breakdown">
+					<caption class="sr-only">{m.admin_settings_breakdown_caption()}</caption>
+					<thead>
+						<tr>
+							<th scope="col" class="col-type">{m.admin_settings_breakdown_type()}</th>
+							<th scope="col"><span class="sr-only">{m.admin_settings_breakdown_files()}</span></th>
+							<th scope="col" class="col-size">{m.admin_settings_breakdown_size()}</th>
+							<th scope="col" class="col-share">{m.admin_settings_breakdown_share()}</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each breakdownRows as row (row.kind)}
+							<tr>
+								<td class="col-type"><span class="swatch seg-{row.kind}" aria-hidden="true"></span>{row.label()}</td>
+								<td class="col-files">{m.admin_settings_breakdown_file_count({ count: data.breakdown.kinds[row.kind].count })}</td>
+								<td class="col-size">{formatSize(data.breakdown.kinds[row.kind].bytes)}</td>
+								<td class="col-share">{sharePct(data.breakdown.kinds[row.kind].bytes, data.breakdown.totalBytes)}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{:else if data.settings.storageProvider === 'uploadthing'}
+				<p class="breakdown-r2-note">{m.admin_settings_breakdown_r2_only()}</p>
 			{/if}
 			{#if utLeftover > 0}
 				<p class="ut-leftover">
 					{m.admin_settings_ut_leftover_pre({ size: formatSize(utLeftover) })}<a href="/admin/storage/migrate">{m.admin_settings_ut_leftover_link()}</a>{m.admin_settings_ut_leftover_post()}
 				</p>
 			{/if}
-			<div class="storage-info">
+			<dl class="storage-info">
 				<div class="storage-stat">
-					<span class="stat-label">{m.admin_settings_stat_tracked()}</span>
-					<span class="stat-value">{formatSize(data.totalSize)}</span>
+					<dt class="stat-label">{m.admin_settings_stat_tracked()}</dt>
+					<dd class="stat-value">{formatSize(data.breakdown?.totalBytes ?? data.totalSize)}</dd>
 				</div>
-				<div class="storage-stat">
-					<span class="stat-label">{m.admin_tab_images()}</span>
-					<span class="stat-value">{data.imageCount}</span>
-				</div>
+				{#if data.breakdown}
+					<div class="storage-stat">
+						<dt class="stat-label">{m.admin_settings_stat_files()}</dt>
+						<dd class="stat-value">{data.breakdown.totalCount.toLocaleString()}</dd>
+					</div>
+				{:else}
+					<div class="storage-stat">
+						<dt class="stat-label">{m.admin_tab_images()}</dt>
+						<dd class="stat-value">{data.imageCount.toLocaleString()}</dd>
+					</div>
+				{/if}
 				<!-- Hidden on R2 (stale UT count); see showUtFileStat in ./ut-stat. -->
 				{#if showUtFileStat(data)}
 					<div class="storage-stat">
-						<span class="stat-label">{m.admin_settings_stat_ut_files()}</span>
-						<span class="stat-value">{data.utUsage.filesUploaded}</span>
+						<dt class="stat-label">{m.admin_settings_stat_ut_files()}</dt>
+						<dd class="stat-value">{data.utUsage.filesUploaded.toLocaleString()}</dd>
 					</div>
 				{/if}
 				<div class="storage-stat">
-					<span class="stat-label">{m.admin_settings_stat_provider()}</span>
-					<span class="stat-value provider">{data.settings.storageProvider === 'r2' ? 'Cloudflare R2' : 'UploadThing'}</span>
+					<dt class="stat-label">{m.admin_settings_stat_provider()}</dt>
+					<dd class="stat-value provider">{data.settings.storageProvider === 'r2' ? 'Cloudflare R2' : 'UploadThing'}</dd>
 				</div>
-			</div>
+			</dl>
 		</section>
 
 <form method="POST" action="?/saveStorage" class="contents" use:enhance={() => {
@@ -1561,6 +1634,174 @@
 
 	.storage-bar-fill.danger {
 		background: var(--destructive);
+	}
+
+	/* ── Per-type breakdown (SONA-192) ─────────────────────────────────────
+	   The segmented bar is aria-hidden (the table carries the data); segment
+	   order is locked to row order. Separators use the page background so
+	   adjacent segments stay distinguishable (WCAG 1.4.11) in every theme.
+	   Colors are validated ≥3:1 against the track in the default palettes:
+	   the dark set on #2E2E2E, the light set on #E7E8E5 and white. */
+	.storage-bar {
+		display: flex;
+	}
+
+	.storage-seg {
+		height: 100%;
+	}
+
+	.storage-seg + .storage-seg {
+		border-left: 2px solid var(--background);
+	}
+
+	.seg-artwork {
+		background: #ff8400;
+	}
+	.seg-vrVideo {
+		background: #4fa3ff;
+	}
+	.seg-vrModel {
+		background: #4ade80;
+	}
+	.seg-sticker {
+		background: #e879f9;
+	}
+	.seg-vrImage {
+		background: #ffc966;
+	}
+	.seg-other {
+		background: #8a8f98;
+	}
+
+	:global([data-theme='light']) .seg-artwork {
+		background: #c2410c;
+	}
+	:global([data-theme='light']) .seg-vrVideo {
+		background: #2563eb;
+	}
+	:global([data-theme='light']) .seg-vrModel {
+		background: #15803d;
+	}
+	:global([data-theme='light']) .seg-sticker {
+		background: #a21caf;
+	}
+	:global([data-theme='light']) .seg-vrImage {
+		background: #92400e;
+	}
+	:global([data-theme='light']) .seg-other {
+		background: #57606a;
+	}
+
+	.breakdown {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 13.5px;
+	}
+
+	.breakdown th {
+		padding: 8px 2px 2px;
+		border-top: 1px solid var(--border);
+		font-size: 12px;
+		font-weight: 400;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+		text-align: left;
+	}
+
+	.breakdown th.col-size,
+	.breakdown th.col-share,
+	.breakdown td.col-size,
+	.breakdown td.col-share {
+		text-align: right;
+	}
+
+	.breakdown th {
+		white-space: nowrap;
+	}
+
+	/* The files column absorbs the free width so type + count hug the left edge
+	   and size + share hug the right, like the usage bar above. */
+	.breakdown td.col-files {
+		width: 99%;
+	}
+
+	.breakdown td.col-type {
+		white-space: nowrap;
+	}
+
+	/* 320px reflow (WCAG 1.4.10): let the type names wrap instead of scrolling. */
+	@media (max-width: 520px) {
+		.breakdown td.col-type {
+			white-space: normal;
+		}
+	}
+
+	.breakdown td {
+		padding: 8px 2px;
+		border-bottom: 1px solid var(--border);
+		vertical-align: middle;
+	}
+
+	.breakdown tr:last-child td {
+		border-bottom: none;
+	}
+
+	.breakdown td.col-type {
+		font-weight: 500;
+		padding-right: 10px;
+	}
+
+	.breakdown td.col-files {
+		color: var(--muted-foreground);
+		font-size: 13px;
+		white-space: nowrap;
+		padding-right: 10px;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.breakdown td.col-size {
+		font-family: var(--font-primary);
+		font-weight: 600;
+		font-size: 13px;
+		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.breakdown th.col-share {
+		padding-left: 12px;
+	}
+
+	.breakdown td.col-share {
+		color: var(--muted-foreground);
+		font-size: 13px;
+		min-width: 56px;
+		white-space: nowrap;
+		padding-left: 12px;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.swatch {
+		display: inline-block;
+		width: 9px;
+		height: 9px;
+		border-radius: 3px;
+		margin-right: 10px;
+		vertical-align: 1px;
+	}
+
+	.breakdown-r2-note {
+		font-size: 13px;
+		color: var(--muted-foreground);
+		margin: 12px 0 0;
+	}
+
+	.storage-info {
+		margin: 0;
+	}
+
+	.storage-info dd {
+		margin: 0;
 	}
 
 	.storage-info {
