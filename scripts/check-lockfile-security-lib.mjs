@@ -4,9 +4,10 @@
 // Dependency-free on purpose: the guard runs before `npm ci` in CI.
 
 /**
- * @typedef {{ name?: string, version?: string }} LockEntry
+ * @typedef {{ name?: string, version?: string, link?: boolean }} LockEntry
  * @typedef {{ lockfileVersion?: number, packages?: Record<string, LockEntry> }} Lockfile
  * @typedef {{ path: string, name: string, version: string, floor: string }} Offender
+ * @typedef {{ path: string, name: string }} Unreadable
  */
 
 // Every resolved entry for these packages must be at or above the floor,
@@ -15,7 +16,8 @@
 export const FLOORS = {
 	cookie: '0.7.0',
 	esbuild: '0.25.0',
-	nanoid: '3.3.18'
+	nanoid: '3.3.18',
+	undici: '7.29.0'
 };
 
 /**
@@ -87,6 +89,9 @@ export function compare(a, b) {
  * tree, so scanning it would find nothing and report a clean run over a
  * lockfile that may well carry the vulnerable versions. Refuse it instead.
  *
+ * npm always writes the root "" entry, so a packages map without one is
+ * truncated or hand-edited rather than merely dependency-free — same refusal.
+ *
  * @param {Lockfile} lock
  */
 function assertLockShape(lock) {
@@ -98,31 +103,48 @@ function assertLockShape(lock) {
 				`regenerate it with npm >= 8.3 so the security overrides apply.`
 		);
 	}
+	if (!packages['']) {
+		throw new Error(
+			`package-lock.json has no root "" entry in its packages map, so it is truncated or ` +
+				`corrupt; regenerate it with npm >= 8.3 so the security overrides apply.`
+		);
+	}
 }
 
 /**
  * Walks every entry in a parsed lockfile once, collecting the ones below their
- * floor and which floor packages were never seen at all. A floor package with
- * no entry is reported, not judged — the caller decides what `missing` means.
+ * floor, the ones we can't read a version off at all, and which floor packages
+ * were never seen. A floor package with no entry is reported, not judged — the
+ * caller decides what `missing` means.
  *
  * @param {Lockfile} lock
  * @param {Record<string, string>} [floors]
- * @returns {{ offenders: Offender[], checked: number, missing: string[] }}
+ * @returns {{ offenders: Offender[], checked: number, missing: string[], unreadable: Unreadable[] }}
  */
 export function scanLockfile(lock, floors = FLOORS) {
 	assertFloors(floors);
 	assertLockShape(lock);
 	const packages = lock.packages;
 	const offenders = [];
+	const unreadable = [];
 	// `name` wins over the path tail so an aliased install (a different
 	// directory name for the same package) is still matched against its floor.
 	const seen = new Set();
 	let checked = 0;
 	for (const [path, entry] of Object.entries(packages)) {
+		// A link entry points at a workspace/local dir and carries no version by
+		// design; the real entry it points at is in the map too.
+		if (entry.link === true) continue;
 		const name = entry.name ?? path.split('node_modules/').pop() ?? '';
 		const floor = floors[name];
-		if (!floor || !entry.version) continue;
+		if (!floor) continue;
 		seen.add(name);
+		// A floor package we can't read a version off is unscannable, not clean:
+		// treat it like an offender rather than letting it pass as "missing".
+		if (!entry.version) {
+			unreadable.push({ path: path || '(root)', name });
+			continue;
+		}
 		checked++;
 		if (compare(entry.version, floor) < 0) {
 			offenders.push({
@@ -136,6 +158,7 @@ export function scanLockfile(lock, floors = FLOORS) {
 	return {
 		offenders,
 		checked,
-		missing: Object.keys(floors).filter((name) => !seen.has(name))
+		missing: Object.keys(floors).filter((name) => !seen.has(name)),
+		unreadable
 	};
 }

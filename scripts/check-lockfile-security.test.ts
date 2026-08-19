@@ -5,11 +5,15 @@ import { dirname, join } from 'node:path';
 import { FLOORS, compare, scanLockfile } from './check-lockfile-security-lib.mjs';
 
 // The guard is what stands between an old-npm lockfile regen and a silent
-// downgrade of cookie/esbuild/nanoid, so its two rules — how versions compare
-// and which lockfile entries get compared — are pinned here against synthetic
-// lock objects rather than only against the committed package-lock.json.
+// downgrade of cookie/esbuild/nanoid/undici, so its two rules — how versions
+// compare and which lockfile entries get compared — are pinned here against
+// synthetic lock objects rather than only against the committed
+// package-lock.json.
 
 const entry = (version: string, name?: string) => (name ? { name, version } : { version });
+// npm always writes the root "" entry, and the scan now refuses a map without
+// one, so every synthetic lock carries it.
+const packages = (entries: Record<string, unknown>) => ({ '': { name: 'sona' }, ...entries });
 
 describe('compare', () => {
 	const cases: Array<[string, string, number]> = [
@@ -45,7 +49,7 @@ describe('floor validation', () => {
 
 	it.each(['latest', '^8.17.1', '', '0.x.0'])('throws on a floor of %s', (floor) => {
 		expect(() =>
-			scanLockfile({ packages: { 'node_modules/ws': entry('8.18.0') } }, { ws: floor })
+			scanLockfile({ packages: packages({ 'node_modules/ws': entry('8.18.0') }) }, { ws: floor })
 		).toThrow(/Invalid security floor/);
 	});
 });
@@ -53,10 +57,10 @@ describe('floor validation', () => {
 describe('scanLockfile', () => {
 	it('flags a nested entry below its floor', () => {
 		const { offenders } = scanLockfile({
-			packages: {
+			packages: packages({
 				'node_modules/cookie': entry('0.7.2'),
 				'node_modules/youch/node_modules/cookie': entry('0.6.0')
-			}
+			})
 		});
 		expect(offenders).toEqual([
 			{
@@ -70,7 +74,7 @@ describe('scanLockfile', () => {
 
 	it('passes an entry exactly at the floor', () => {
 		const { offenders, checked } = scanLockfile({
-			packages: { 'node_modules/cookie': entry(FLOORS.cookie) }
+			packages: packages({ 'node_modules/cookie': entry(FLOORS.cookie) })
 		});
 		expect(offenders).toEqual([]);
 		expect(checked).toBe(1);
@@ -82,21 +86,21 @@ describe('scanLockfile', () => {
 		['0.x.0', 'cookie']
 	])('flags %s of %s', (version, name) => {
 		const { offenders } = scanLockfile({
-			packages: { [`node_modules/${name}`]: entry(version) }
+			packages: packages({ [`node_modules/${name}`]: entry(version) })
 		});
 		expect(offenders.map((o) => o.version)).toEqual([version]);
 	});
 
 	it('reports a floor package that has no entry at all', () => {
 		const { missing } = scanLockfile({
-			packages: { 'node_modules/cookie': entry('0.7.2') }
+			packages: packages({ 'node_modules/cookie': entry('0.7.2') })
 		});
-		expect(missing).toEqual(['esbuild', 'nanoid']);
+		expect(missing).toEqual(['esbuild', 'nanoid', 'undici']);
 	});
 
 	it('matches an aliased entry by its name field, not the path tail', () => {
 		const { offenders } = scanLockfile({
-			packages: { 'node_modules/cookie-alias': entry('0.6.0', 'cookie') }
+			packages: packages({ 'node_modules/cookie-alias': entry('0.6.0', 'cookie') })
 		});
 		expect(offenders).toEqual([
 			{ path: 'node_modules/cookie-alias', name: 'cookie', version: '0.6.0', floor: '0.7.0' }
@@ -121,12 +125,37 @@ describe('scanLockfile', () => {
 		);
 	});
 
-	it('ignores entries with no resolved version', () => {
-		const { offenders, checked, missing } = scanLockfile({
-			packages: { 'node_modules/cookie': {} }
+	// npm always writes the root "" entry, so a map without one is truncated —
+	// scanning it would report clean over a lockfile we never really read.
+	it('throws on a packages map with no root "" entry', () => {
+		expect(() =>
+			scanLockfile({ lockfileVersion: 3, packages: { 'node_modules/cookie': entry('0.7.2') } })
+		).toThrow(/no root "" entry/);
+	});
+
+	it('throws on an empty packages map', () => {
+		expect(() => scanLockfile({ lockfileVersion: 3, packages: {} })).toThrow(/no root "" entry/);
+	});
+
+	// A floor entry we can't read a version off is unscannable, not absent: it
+	// has to fail the run rather than fall into the warn-only `missing` bucket.
+	it('reports a versionless floor entry as unreadable, not missing', () => {
+		const { offenders, checked, missing, unreadable } = scanLockfile({
+			packages: packages({ 'node_modules/cookie': {} })
 		});
 		expect(offenders).toEqual([]);
 		expect(checked).toBe(0);
+		expect(unreadable).toEqual([{ path: 'node_modules/cookie', name: 'cookie' }]);
+		expect(missing).not.toContain('cookie');
+	});
+
+	// A link entry points at a local/workspace dir and carries no version by
+	// design, so it must not trip the unreadable bucket.
+	it('skips a versionless link entry', () => {
+		const { unreadable, missing } = scanLockfile({
+			packages: packages({ 'node_modules/cookie': { link: true, resolved: 'packages/cookie' } })
+		});
+		expect(unreadable).toEqual([]);
 		expect(missing).toContain('cookie');
 	});
 });
@@ -141,8 +170,15 @@ describe('FLOORS matches package.json overrides', () => {
 			'utf-8'
 		)
 	).overrides;
-	// Plain keys like "undici" pin a version without a floor range — not our business.
+	// A plain key ("pkg": "^1.2.3") pins a version without naming a floor, so it
+	// can't be checked against FLOORS — every security override is written as a
+	// "pkg@<floor" range instead.
 	const rangeKeys = Object.keys(overrides).filter((key) => key.includes('@<'));
+
+	it('writes every override as a floor range', () => {
+		expect(rangeKeys).toHaveLength(Object.keys(overrides).length);
+		expect(rangeKeys).toHaveLength(Object.keys(FLOORS).length);
+	});
 
 	it.each(rangeKeys)('override %s has a matching FLOORS entry', (key) => {
 		const [name, floor] = key.split('@<');
