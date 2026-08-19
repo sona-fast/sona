@@ -14,6 +14,7 @@ graph TB
         Public[🖼️ Public routes — galleries, characters, VR, stickers]
         Admin[🛠️ Admin routes — setup wizard, uploads, settings]
         API[⚙️ API routes — /api/*, /img, oEmbed, RSS feed, cron]
+        QR[📱 /connect/qr — convention scan target, reads no D1]
 
         subgraph "Server lib"
             Auth[🔐 Admin auth + password reset]
@@ -59,6 +60,7 @@ graph TB
     Hooks --> Public
     Hooks --> Admin
     Hooks --> API
+    Hooks --> QR
 
     Admin --> Auth
     Admin --> Storage
@@ -104,6 +106,15 @@ graph TB
 - The artist registry is a separate Worker with its own D1 database and a
   daily cron trigger. The app talks to it over HTTP with `REGISTRY_API_KEY`;
   without the key, registry features stay off.
+- `/connect/qr` is the one route that reads nothing from D1. It renders the
+  fullscreen QR an operator holds up at a convention, so it sits outside both
+  the admin session (which validates against D1 per request and fails closed)
+  and the public layout that loads settings. Its payload comes from the request
+  URL and the site name the root layout already carries. That is why a
+  convention-wifi outage costs the admin panel but not the handoff.
+- The cons.fyi feed supplies each convention's IANA timezone as well as its
+  dates, which is what lets `/connect` decide "here now" in the event's own
+  zone rather than the reader's or UTC.
 - Telegram, FurTrack, Resend, and Turnstile are optional integrations, keyed
   off secrets or settings (see `wrangler.toml.example` for the full list).
 - GitHub Actions is part of the runtime, not just delivery: the scheduled
