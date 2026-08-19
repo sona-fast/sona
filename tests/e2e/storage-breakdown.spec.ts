@@ -11,15 +11,18 @@ import { adminLogin } from './admin-login';
 //
 // Runs against the ut-stat project's dedicated server (see playwright.config.ts):
 // it flips the storage provider, which would race the shared server's specs. The
-// local R2 bucket is empty, so every row renders as a zero row — the structure
-// assertions are provider-driven, not data-driven.
+// R2 test also seeds one real object through /api/upload so a segment and a
+// non-zero row render; the remaining rows stay zero rows.
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e-uploadthing.toml.
 const PASSWORD = 'e2e-admin-password';
 
-async function login(page: Page) {
-	await adminLogin(page, PASSWORD);
-}
+// 1×1 transparent PNG (68 bytes) — a real raster so the server-side sniff
+// passes; same fixture as upload.spec.ts.
+const PNG = Buffer.from(
+	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+	'base64'
+);
 
 // Same retry pattern as ut-stat.spec.ts: the panel is display:none until the
 // hydrated tab click lands.
@@ -52,12 +55,25 @@ test.describe.configure({ mode: 'serial' });
 
 test.describe('admin settings storage breakdown', () => {
 	test.beforeEach(async ({ page }) => {
-		await login(page);
+		await adminLogin(page, PASSWORD);
 		await page.goto('/admin/settings');
 	});
 
 	test('renders the accessible breakdown table and segmented bar under R2', async ({ page }) => {
 		await setProvider(page, 'r2');
+
+		// Seed one real artwork object into the local bucket through the real
+		// upload endpoint (the page's admin session cookie rides along), so a
+		// bar segment and a non-zero row have data to render.
+		const upload = await page.request.post('/api/upload', {
+			multipart: {
+				file: { name: 'e2e-breakdown.png', mimeType: 'image/png', buffer: PNG },
+				folder: 'artwork'
+			}
+		});
+		expect(upload.ok()).toBe(true);
+		await page.goto('/admin/settings');
+		await openStorageTab(page);
 
 		const table = page.locator('table.breakdown');
 		await expect(table).toBeVisible();
@@ -72,10 +88,22 @@ test.describe('admin settings storage breakdown', () => {
 		await expect(headers.nth(2)).toHaveText('Size');
 		await expect(headers.nth(3)).toHaveText('Share of used');
 
-		// Six rows in the fixed kind order, ending on the catch-all bucket.
+		// Seven rows in the fixed kind order: fursuit photos sixth, the
+		// catch-all bucket last.
 		const rows = table.locator('tbody tr');
-		await expect(rows).toHaveCount(6);
-		await expect(rows.nth(5)).toContainText('Avatars & other files');
+		await expect(rows).toHaveCount(7);
+		await expect(rows.nth(5)).toContainText('Fursuit photos');
+		await expect(rows.nth(6)).toContainText('Avatars & other files');
+
+		// The seeded object shows up: an artwork segment with a real inline
+		// width, and the artwork row carries a formatted non-zero size (68
+		// bytes → 0.1 KB). The seed data also stages VR model files in the
+		// bucket, so assert the artwork segment, not a total segment count.
+		const seg = page.locator('.storage-seg.seg-artwork');
+		await expect(seg).toHaveCount(1);
+		const width = await seg.evaluate((el) => parseFloat((el as HTMLElement).style.width));
+		expect(width).toBeGreaterThan(0);
+		await expect(rows.nth(0)).toContainText('0.1 KB');
 
 		// The segmented bar is redundant with the table, so it must stay out of
 		// the accessibility tree.
@@ -92,7 +120,7 @@ test.describe('admin settings storage breakdown', () => {
 
 		await expect(page.locator('table.breakdown')).toHaveCount(0);
 		await expect(
-			page.getByText('Usage by content type is available on Cloudflare R2 storage.')
+			page.getByText('Usage by content type is only available on Cloudflare R2.')
 		).toBeVisible();
 	});
 });

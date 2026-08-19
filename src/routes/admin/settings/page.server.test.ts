@@ -1472,5 +1472,32 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 		expect(result.settings.storageProvider).toBe('r2');
 		expect(result.imageCount).toBe(0);
 		expect(result.storageStatus.r2).toBe(true);
+		// Key-privacy invariant: an R2 error can echo an object key, and that
+		// key must never ride anywhere in the page payload.
+		expect(JSON.stringify(result)).not.toContain('some-object-key');
+	});
+
+	it('degrades to breakdown null when the listing never settles (5s deadline)', async () => {
+		vi.useFakeTimers();
+		try {
+			// A bucket whose list() hangs forever — only the deadline can win.
+			const bucket = { list: vi.fn(() => new Promise<never>(() => {})) };
+			const { db, platform } = makeLoadDb({ IMAGES: bucket });
+			await setRawSetting(db, 'storageProvider', 'r2');
+
+			const pending = load(loadEvent(platform)) as Promise<{
+				breakdown: unknown;
+				settings: Record<string, unknown>;
+				storageStatus: { r2: boolean };
+			}>;
+			await vi.advanceTimersByTimeAsync(5000);
+			const result = await pending;
+
+			expect(result.breakdown).toBeNull();
+			expect(result.settings.storageProvider).toBe('r2');
+			expect(result.storageStatus.r2).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

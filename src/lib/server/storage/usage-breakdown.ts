@@ -18,6 +18,7 @@ export const BREAKDOWN_KINDS = [
 	'vrModel',
 	'sticker',
 	'vrImage',
+	'fursuit',
 	'other'
 ] as const;
 
@@ -46,8 +47,8 @@ export interface ListableBucket {
  * Folder prefix -> content type. `vr-media/` holds both showcase images and
  * `.webm` clips (webm uploads are only accepted for that folder, see
  * /api/upload), so the extension is the discriminator. Anything outside the
- * known content folders — `avatars/`, `fursuit/`, or a stray legacy key —
- * lands in `other` so the rows always sum to the bar total.
+ * known content folders — `avatars/` or a stray legacy key — lands in `other`
+ * so the rows always sum to the bar total.
  */
 export function classifyKey(key: string): BreakdownKind {
 	const folder = key.slice(0, key.indexOf('/') + 1);
@@ -60,6 +61,8 @@ export function classifyKey(key: string): BreakdownKind {
 			return 'vrModel';
 		case 'stickers/':
 			return 'sticker';
+		case 'fursuit/':
+			return 'fursuit';
 		default:
 			return 'other';
 	}

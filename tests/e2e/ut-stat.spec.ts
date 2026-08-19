@@ -71,10 +71,8 @@ test.describe('admin settings UploadThing file-count stat', () => {
 	test('renders the UT file count while UploadThing is the active provider', async ({ page }) => {
 		await setProvider(page, 'uploadthing');
 		await expect(utFilesStat(page)).toBeVisible();
-		// The value comes from the mocked getUsageInfo() payload (filesUploaded:
-		// 4242), rendered through toLocaleString — accept it with or without the
-		// group separator so the assertion doesn't hinge on the server's locale.
-		await expect(utFilesStat(page).locator('..')).toContainText(/4,?242/);
+		// The value comes from the mocked getUsageInfo() payload (filesUploaded: 4242).
+		await expect(utFilesStat(page).locator('..')).toContainText('4242');
 	});
 
 	test('hides the stale UT file count after migrating to R2, keeping the leftover prompt', async ({
@@ -86,8 +84,8 @@ test.describe('admin settings UploadThing file-count stat', () => {
 		// ...and so is its VALUE anywhere on the page. This is the assertion the unit
 		// tests structurally can't make: it catches ANY new unguarded render of the
 		// count (e.g. a bare `{data.utUsage.filesUploaded}` in a card/tooltip), not
-		// just the one guarded call site. Raw and toLocaleString'd forms both count.
-		await expect(page.getByText(/4,?242/)).toHaveCount(0);
+		// just the one guarded call site.
+		await expect(page.getByText('4242')).toHaveCount(0);
 		// utUsage is still non-null (token set + mocked) — the leftover prompt (which
 		// needs non-null, non-zero UT usage) is still shown, proving the count was
 		// hidden by the PROVIDER guard, not by usage going null.

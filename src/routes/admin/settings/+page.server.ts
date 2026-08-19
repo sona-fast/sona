@@ -71,6 +71,17 @@ import type { Actions, PageServerLoad } from './$types';
 
 const SESSION_DURATION = 60 * 60 * 24 * 7; // 7 days in seconds
 
+// Cap a slow upstream (UT usage API, R2 listing) so the settings page never
+// hangs on it; the timer is cleared on both outcomes so a rejection can't
+// leave it running.
+function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const deadline = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+	});
+	return Promise.race([promise, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
 export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	const db = getDb(platform!.env.DB);
 	// The editor must render current persisted values, not a cached snapshot.
@@ -99,9 +110,7 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	if (token) {
 		try {
 			const utapi = new UTApi({ token });
-			const controller = new AbortController();
-			const timeout = setTimeout(() => controller.abort(), 5000);
-			const info = await Promise.race([
+			const info = await withDeadline(
 				(utapi as unknown as {
 					getUsageInfo(): Promise<{
 						appTotalBytes: number;
@@ -110,11 +119,8 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 						filesUploaded: number;
 					}>;
 				}).getUsageInfo(),
-				new Promise<never>((_, reject) => {
-					controller.signal.addEventListener('abort', () => reject(new Error('UT timeout')));
-				})
-			]);
-			clearTimeout(timeout);
+				5000
+			);
 			utUsage = {
 				usedBytes: info.appTotalBytes,
 				limitBytes: info.limitBytes,
@@ -134,15 +140,7 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	let breakdown: StorageBreakdown | null = null;
 	if (settings.storageProvider === 'r2' && platform?.env.IMAGES) {
 		try {
-			const controller = new AbortController();
-			const timeout = setTimeout(() => controller.abort(), 5000);
-			breakdown = await Promise.race([
-				collectUsageBreakdown(platform.env.IMAGES),
-				new Promise<never>((_, reject) => {
-					controller.signal.addEventListener('abort', () => reject(new Error('R2 list timeout')));
-				})
-			]);
-			clearTimeout(timeout);
+			breakdown = await withDeadline(collectUsageBreakdown(platform.env.IMAGES), 5000);
 		} catch {
 			// R2 list unavailable or too slow — the aggregate bar still renders.
 			// If logging is ever added here, log a STATIC message only: R2 errors

@@ -7,6 +7,7 @@ describe('classifyKey', () => {
 		expect(classifyKey('artwork/abc-thumb.webp')).toBe('artwork');
 		expect(classifyKey('vr-models/abc.vrm')).toBe('vrModel');
 		expect(classifyKey('stickers/pack-slug/abc.webp')).toBe('sticker');
+		expect(classifyKey('fursuit/photographer/a.jpg')).toBe('fursuit');
 	});
 
 	it('splits vr-media into videos and images by the .webm extension', () => {
@@ -15,9 +16,8 @@ describe('classifyKey', () => {
 		expect(classifyKey('vr-media/poster.webp')).toBe('vrImage');
 	});
 
-	it('sends avatars, fursuit photos, strays, and folderless keys to other', () => {
+	it('sends avatars, strays, and folderless keys to other', () => {
 		expect(classifyKey('avatars/slug/a.webp')).toBe('other');
-		expect(classifyKey('fursuit/photographer/a.jpg')).toBe('other');
 		expect(classifyKey('legacy-folder/a.png')).toBe('other');
 		expect(classifyKey('no-folder.png')).toBe('other');
 	});
@@ -61,7 +61,8 @@ describe('collectUsageBreakdown', () => {
 		expect(breakdown.kinds.vrImage).toEqual({ bytes: 30, count: 1 });
 		expect(breakdown.kinds.vrModel).toEqual({ bytes: 300, count: 1 });
 		expect(breakdown.kinds.sticker).toEqual({ bytes: 10, count: 1 });
-		expect(breakdown.kinds.other).toEqual({ bytes: 11, count: 2 });
+		expect(breakdown.kinds.fursuit).toEqual({ bytes: 6, count: 1 });
+		expect(breakdown.kinds.other).toEqual({ bytes: 5, count: 1 });
 		expect(breakdown.totalBytes).toBe(1201);
 		expect(breakdown.totalCount).toBe(8);
 		// The rows always sum to the bar total — the UI relies on this.

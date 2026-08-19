@@ -14,6 +14,7 @@ export const breakdownRows: readonly { kind: BreakdownKind; label: () => string 
 	{ kind: 'vrModel', label: m.admin_settings_breakdown_vr_models },
 	{ kind: 'sticker', label: m.admin_settings_breakdown_stickers },
 	{ kind: 'vrImage', label: m.admin_settings_breakdown_vr_images },
+	{ kind: 'fursuit', label: m.admin_settings_breakdown_fursuit },
 	{ kind: 'other', label: m.admin_settings_breakdown_avatars_other }
 ];
 

@@ -677,8 +677,9 @@
 						<span>{m.admin_settings_usage({ label: activeUsage.label, used: formatSize(activeUsage.used), limit: formatSize(activeUsage.limit) })}</span>
 						<!-- In the breakdown branch the segmented bar has no warning/danger
 					     fill, so the header percentage carries the >80% / >95% signal
-					     instead (the fallback branch keeps it on the bar fill). -->
-					<span class="storage-pct" class:warning={!!data.breakdown && pct > 80} class:danger={!!data.breakdown && pct > 95}>{pct.toFixed(1)}%</span>
+					     instead (the fallback branch keeps it on the bar fill). The worded
+					     suffix keeps the state readable without color (WCAG 1.4.1). -->
+					<span class="storage-pct" class:warning={!!data.breakdown && pct > 80} class:danger={!!data.breakdown && pct > 95}>{pct.toFixed(1)}%{#if data.breakdown && pct > 95}{` · ${m.admin_settings_usage_full()}`}{:else if data.breakdown && pct > 80}{` · ${m.admin_settings_usage_near()}`}{/if}</span>
 					</div>
 					{#if data.breakdown}
 						<!-- Redundant visual summary of the table below, so it's hidden from
@@ -716,18 +717,22 @@
 						{#each breakdownRows as row (row.kind)}
 							{@const usage = data.breakdown.kinds[row.kind]}
 							<!-- Zero-byte rows stay (the fixed row set is the legend) but are
-							     dimmed, with an em dash where a size/share would only be noise. -->
+							     dimmed, with an outline swatch. -->
 							<tr class:zero={usage.bytes === 0}>
 								<td class="col-type"><span class="swatch seg-{row.kind}" aria-hidden="true"></span>{row.label()}</td>
 								<td class="col-files">{m.admin_settings_breakdown_file_count({ count: usage.count })}</td>
-								<td class="col-size">{usage.bytes === 0 ? '—' : formatSize(usage.bytes)}</td>
-								<td class="col-share">{usage.bytes === 0 ? '—' : sharePct(usage.bytes, data.breakdown.totalBytes)}</td>
+								<td class="col-size">{formatSize(usage.bytes)}</td>
+								<td class="col-share">{sharePct(usage.bytes, data.breakdown.totalBytes)}</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 			{:else if data.settings.storageProvider === 'uploadthing'}
 				<p class="breakdown-r2-note">{m.admin_settings_breakdown_r2_only()}</p>
+			{:else}
+				<!-- R2 with no breakdown: the bucket listing failed or timed out, so
+				     the bar above fell back to the D1 sum — say so. -->
+				<p class="breakdown-r2-note">{m.admin_settings_breakdown_unavailable()}</p>
 			{/if}
 			{#if utLeftover > 0}
 				<p class="ut-leftover">
@@ -736,9 +741,9 @@
 			{/if}
 			<dl class="storage-info">
 				<div class="storage-stat">
-					<!-- Deliberately the D1 sum: "Tracked" means DB-tracked everywhere
-					     else, and the bar header above already shows the bucket total, so
-					     the tracked-vs-bucket delta stays visible. -->
+					<!-- Deliberately the D1 sum, labelled "In database" to name its
+					     source; the bar header above already shows the bucket total, so
+					     the DB-vs-bucket delta stays visible. -->
 					<dt class="stat-label">{m.admin_settings_stat_tracked()}</dt>
 					<dd class="stat-value">{formatSize(data.totalSize)}</dd>
 				</div>
@@ -750,14 +755,14 @@
 				{:else}
 					<div class="storage-stat">
 						<dt class="stat-label">{m.admin_tab_images()}</dt>
-						<dd class="stat-value">{data.imageCount.toLocaleString()}</dd>
+						<dd class="stat-value">{data.imageCount}</dd>
 					</div>
 				{/if}
 				<!-- Hidden on R2 (stale UT count); see showUtFileStat in ./ut-stat. -->
 				{#if showUtFileStat(data)}
 					<div class="storage-stat">
 						<dt class="stat-label">{m.admin_settings_stat_ut_files()}</dt>
-						<dd class="stat-value">{data.utUsage.filesUploaded.toLocaleString()}</dd>
+						<dd class="stat-value">{data.utUsage.filesUploaded}</dd>
 					</div>
 				{/if}
 				<div class="storage-stat">
@@ -1630,9 +1635,16 @@
 	}
 
 	/* Breakdown branch only (no warning/danger bar fill there): the header
-	   percentage takes the same >80% / >95% colors as the fill. */
+	   percentage takes the same >80% / >95% colors as the fill. As TEXT the
+	   amber needs 4.5:1, which #f0b33a only clears on the dark themes
+	   (7.25:1 on #2E2E2E) — light gets a dark amber (#7a4f00: 6.40:1 on
+	   #F2F3F0). --destructive clears 4.5:1 as text in every theme. */
 	.storage-pct.warning {
 		color: #f0b33a;
+	}
+
+	:global([data-theme='light']) .storage-pct.warning {
+		color: #7a4f00;
 	}
 
 	.storage-pct.danger {
@@ -1644,9 +1656,12 @@
 	   order is locked to row order. Separators use the page background so
 	   adjacent segments stay distinguishable (WCAG 1.4.11) in every theme.
 	   Colors are validated ≥3:1 against the track in the default palettes:
-	   the dark set on #2E2E2E, the light set on #E7E8E5 and white (light
-	   vrImage teal #0F766E: 4.45:1 on #E7E8E5, 5.47:1 on #FFFFFF — moved out
-	   of the orange family so it can't be read as a shade of artwork). */
+	   the dark set on #2E2E2E, the light set on #E7E8E5 and white. Both
+	   vrImage teals sit outside the orange family so they can't be read as a
+	   shade of artwork (light #0F766E: 4.45:1 on #E7E8E5, 5.47:1 on #FFFFFF;
+	   dark #2DD4BF: 7.30:1 on #2E2E2E). Fursuit violet: dark #C4B5FD 7.36:1
+	   on #2E2E2E, light #6D28D9 5.78:1 on #E7E8E5, 7.10:1 on #FFFFFF. Dark
+	   other #9AA5B1: 5.43:1 on #2E2E2E, clearly apart from the empty track. */
 	.storage-seg {
 		height: 100%;
 	}
@@ -1668,10 +1683,13 @@
 		background: #e879f9;
 	}
 	.seg-vrImage {
-		background: #ffc966;
+		background: #2dd4bf;
+	}
+	.seg-fursuit {
+		background: #c4b5fd;
 	}
 	.seg-other {
-		background: #8a8f98;
+		background: #9aa5b1;
 	}
 
 	:global([data-theme='light']) .seg-artwork {
@@ -1688,6 +1706,9 @@
 	}
 	:global([data-theme='light']) .seg-vrImage {
 		background: #0f766e;
+	}
+	:global([data-theme='light']) .seg-fursuit {
+		background: #6d28d9;
 	}
 	:global([data-theme='light']) .seg-other {
 		background: #57606a;
@@ -1708,6 +1729,8 @@
 		text-transform: uppercase;
 		color: var(--muted-foreground);
 		text-align: left;
+		vertical-align: bottom;
+		white-space: nowrap;
 	}
 
 	.breakdown th.col-size,
@@ -1717,36 +1740,8 @@
 		text-align: right;
 	}
 
-	.breakdown th {
-		white-space: nowrap;
-	}
-
-	/* The files column absorbs the free width so type + count hug the left edge
-	   and size + share hug the right, like the usage bar above. */
-	.breakdown td.col-files {
-		width: 99%;
-	}
-
-	.breakdown td.col-type {
-		white-space: nowrap;
-	}
-
-	/* 320px reflow (WCAG 1.4.10): let the type names and column headers wrap
-	   instead of scrolling, and hand the flexible width to the label column so
-	   it gets the slack on mobile. */
-	@media (max-width: 520px) {
-		.breakdown th {
-			white-space: normal;
-		}
-
-		.breakdown td.col-type {
-			white-space: normal;
-			width: 99%;
-		}
-
-		.breakdown td.col-files {
-			width: auto;
-		}
+	.breakdown th.col-share {
+		padding-left: 12px;
 	}
 
 	.breakdown td {
@@ -1762,9 +1757,13 @@
 	.breakdown td.col-type {
 		font-weight: 500;
 		padding-right: 10px;
+		white-space: nowrap;
 	}
 
+	/* The files column absorbs the free width so type + count hug the left edge
+	   and size + share hug the right, like the usage bar above. */
 	.breakdown td.col-files {
+		width: 99%;
 		color: var(--muted-foreground);
 		font-size: 13px;
 		white-space: nowrap;
@@ -1780,10 +1779,6 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.breakdown th.col-share {
-		padding-left: 12px;
-	}
-
 	.breakdown td.col-share {
 		color: var(--muted-foreground);
 		font-size: 13px;
@@ -1791,6 +1786,36 @@
 		white-space: nowrap;
 		padding-left: 12px;
 		font-variant-numeric: tabular-nums;
+	}
+
+	/* 320px reflow (WCAG 1.4.10): let the labels, headers, and value cells
+	   wrap instead of scrolling, and hand the flexible width to the label
+	   column so it gets the slack on mobile. Every base rule above precedes
+	   this block so the overrides here actually win. */
+	@media (max-width: 520px) {
+		.breakdown th {
+			white-space: normal;
+		}
+
+		.breakdown td.col-type {
+			white-space: normal;
+			width: 99%;
+		}
+
+		.breakdown td.col-files,
+		.breakdown td.col-size,
+		.breakdown td.col-share {
+			white-space: normal;
+		}
+
+		.breakdown td.col-files {
+			width: auto;
+		}
+
+		.breakdown td.col-share {
+			min-width: 0;
+			padding-left: 6px;
+		}
 	}
 
 	.swatch {
