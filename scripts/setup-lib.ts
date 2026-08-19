@@ -5,6 +5,9 @@
  * tested without a Cloudflare account or a live shell.
  */
 
+import type { RateLimitStatus } from './waf-lib.ts';
+import type { TurnstileStatus } from './turnstile-lib.ts';
+
 const sqlStr = (s: string) => s.replace(/'/g, "''");
 
 export interface Migration {
@@ -388,5 +391,118 @@ export function ciWiringEntries(input: CiWiringInput): CiEntry[] {
 		{ kind: 'variable', name: 'D1_DATABASE_NAME', value: input.dbName },
 		{ kind: 'variable', name: 'SITE_URL', value: input.siteUrl },
 		{ kind: 'variable', name: 'FURTRACK_MODE', value: input.furtrackMode }
+	];
+}
+
+/**
+ * End-of-run summary lines for the zone-security provisioning (public-endpoint
+ * rate limit + admin-login Turnstile). The two features are independent, so the
+ * Turnstile lines must print for every rate-limit outcome — kept pure so a test
+ * can pin that, and the wording, without running the CLI.
+ *
+ * Status contracts: null = not attempted (no domain / no zone / no token);
+ * 'error' = provisioning failed — `downloadRateLimitDetail` carries waf-lib's
+ * reason (missing scope, absent zone, HTTP failure), which the summary repeats
+ * instead of assuming a cause; 'exists' rate limits are old news and stay
+ * silent.
+ *
+ * `turnstileWired` says whether BOTH halves of the wiring actually landed (the
+ * Pages PATCH carrying TURNSTILE_SITEKEY and the TURNSTILE_SECRET put). The
+ * login check fails open when either is missing, so a provisioned widget with
+ * failed wiring must read as NOT protected — never as enforced.
+ */
+export function securitySummaryLines(
+	host: string,
+	downloadRateLimit: RateLimitStatus | null,
+	downloadRateLimitDetail: string | null,
+	turnstileStatus: TurnstileStatus | null,
+	turnstileWired: boolean,
+	// The RESOLVED zone's name when it differs from the host (subdomain forks):
+	// the rate-limit rule is zone-wide, so the applied line must name the zone
+	// it actually landed on. The retry command keeps the host — the applier
+	// resolves the zone itself.
+	zoneName?: string | null
+): string[] {
+	const lines: string[] = [];
+	if (downloadRateLimit === 'error') {
+		lines.push(
+			`  • Public-endpoint rate limit: NOT set (${downloadRateLimitDetail ?? 'provisioning failed'}).`
+		);
+		lines.push('     Fix that, then run:');
+		lines.push(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
+	} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
+		lines.push(
+			`  • Public-endpoint rate limit: applied to the ${zoneName ?? host} zone (download beacon + oEmbed).`
+		);
+	}
+	if (turnstileStatus === 'error') {
+		lines.push('  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).');
+		lines.push('     Add that permission to the token and re-run setup to protect /admin/login.');
+	} else if (turnstileStatus && !turnstileWired) {
+		// Worded as an unverified-THIS-RUN claim: on a re-run, a previous run may
+		// have wired the project already, so "no bot check" would be false there —
+		// but on a first run it's exactly true, and that's the case that matters.
+		lines.push(
+			`  • Admin-login bot check: Turnstile widget ${turnstileStatus} for ${host}, but this run could`
+		);
+		lines.push('     NOT confirm the TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret attached. On a');
+		lines.push('     first run that means /admin/login has NO bot check (it fails open without both) —');
+		lines.push('     re-run setup, or set the var + secret on the Pages project yourself.');
+	} else if (turnstileStatus) {
+		lines.push(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}`);
+		lines.push('     (TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret set; enforced once deployed).');
+	}
+	return lines;
+}
+
+/**
+ * True when a Pages-project PATCH response confirms TURNSTILE_SITEKEY persisted
+ * with the value we sent. The PATCH returns the updated project; a 200 whose
+ * body silently dropped the var must not be reported as wired (the login check
+ * fails open without the sitekey), so the summary's turnstileWired flag keys
+ * off this read-back, not the HTTP status alone. Missing/malformed bodies read
+ * as unconfirmed — the safe, under-claiming direction.
+ */
+export function pagesPatchConfirmsSitekey(result: unknown, sitekey: string): boolean {
+	const envVars = (
+		result as {
+			deployment_configs?: { production?: { env_vars?: Record<string, { value?: string } | null> } };
+		} | null
+	)?.deployment_configs?.production?.env_vars;
+	return envVars?.TURNSTILE_SITEKEY?.value === sitekey;
+}
+
+/**
+ * Next-steps lines for wiring the R2 public URL (the CDN host) to the bucket.
+ * connect-domains is the primary path when a domain was given — it can't run
+ * inside setup because the zone must already be ACTIVE, and nameserver
+ * propagation can lag by hours. But connect-domains always attaches
+ * `cdn.<domain>`, so when the operator overrode the R2 public URL to anything
+ * else (or gave no domain), pointing them at it would wire the WRONG host and
+ * leave images 404ing — those cases get the dashboard walkthrough instead.
+ * Takes the raw domain answer (may be empty) and normalizes it itself. Kept
+ * pure so a test can pin that the connect-domains pointer doesn't rot out of
+ * the output again (a real fork setup shipped broken images because nothing
+ * named it).
+ */
+export function cdnAttachmentLines(r2PublicUrl: string, bucket: string, domain: string): string[] {
+	const host = hostFromDomain(domain);
+	if (host && hostFromDomain(r2PublicUrl) === `cdn.${host}`) {
+		return [
+			`  3. Connect ${r2PublicUrl} to the bucket — setup did not touch DNS.`,
+			'     Images 404 until you connect it. Once the zone is active in Cloudflare, run:',
+			'       CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> \\',
+			`         npm run connect-domains -- ${host}`,
+			'     Or add the CDN host by hand:',
+			`       Cloudflare dashboard → R2 → ${bucket} → Settings → Custom Domains → add ${r2PublicUrl}.`,
+			'     Diagnose a half-finished domain setup with:',
+			'       CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> \\',
+			`         npm run connect-domains -- --check ${host}`
+		];
+	}
+	return [
+		`  3. Point ${r2PublicUrl} at the bucket YOURSELF (setup did not touch DNS):`,
+		`     Cloudflare dashboard → R2 → ${bucket} → Settings → Custom Domains → add ${r2PublicUrl},`,
+		'     then create the DNS record it prompts for. Images 404 until this is done.'
 	];
 }

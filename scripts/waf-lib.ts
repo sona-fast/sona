@@ -12,23 +12,8 @@
  * The Cloudflare token is passed in, used only as a Bearer header by `cfApi`, and
  * never logged or returned in any result.
  */
-import { cfApi, hostFromDomain, type CfApiResult } from './setup-lib.ts';
-
-/**
- * Zone-name candidates for a host, most specific first: the host itself, then
- * with leading labels stripped down to the two-label registrable domain (so
- * `sub.example.com` also tries `example.com`, the zone that actually serves it).
- * Kept local so this PR is mergeable on its own; once #179's identically-shaped
- * `zoneNameCandidates` in setup-lib lands, collapse these to the shared one.
- */
-function zoneNameCandidates(host: string): string[] {
-	const labels = host.split('.').filter(Boolean);
-	const out: string[] = [];
-	for (let i = 0; i + 2 <= labels.length; i++) {
-		out.push(labels.slice(i).join('.'));
-	}
-	return out.length ? out : host ? [host] : [];
-}
+import { cfApi, hostFromDomain, zoneNameCandidates, type CfApiResult } from './setup-lib.ts';
+import { resolveZone } from './connect-domains-lib.ts';
 
 /**
  * Stable identifier so re-runs find-and-skip our rule (idempotent) and a future
@@ -167,27 +152,28 @@ const SCOPE_HINT = 'Zone → WAF: Edit (plus a Zone resource covering the domain
 export async function applyDownloadRateLimit(
 	cfToken: string,
 	domain: string,
-	api: typeof cfApi = cfApi
+	api: typeof cfApi = cfApi,
+	knownZoneId?: string
 ): Promise<RateLimitResult> {
 	const host = hostFromDomain(domain);
 	if (!host) return { status: 'error', detail: 'no domain given' };
 
-	// 1. Resolve the zone id. A subdomain (sub.example.com) is served by the
-	// registrable zone (example.com), so an exact `?name=<host>` lookup finds
-	// nothing — try the host then strip leading labels until a zone on the
-	// account matches. This mirrors the setup CLI's zone preflight so a
-	// subdomain-hosted fork isn't wrongly told its token lacks WAF access.
-	let zoneId: string | undefined;
-	for (const candidate of zoneNameCandidates(host)) {
-		const zoneRes = await api(cfToken, `/zones?name=${encodeURIComponent(candidate)}`);
-		if (!zoneRes.ok) {
+	// 1. Resolve the zone id via the shared candidate walk (a subdomain is served
+	// by its registrable zone, and any failed lookup aborts rather than reading
+	// as "no zone" — see resolveZone in connect-domains-lib.ts). Skipped when the
+	// caller already resolved the zone (the setup CLI's preflight just did).
+	let zoneId = knownZoneId;
+	if (!zoneId) {
+		const { zone, errorStatus, failedName } = await resolveZone(zoneNameCandidates(host), (name) =>
+			api(cfToken, `/zones?name=${encodeURIComponent(name)}`)
+		);
+		if (errorStatus !== null) {
 			return {
 				status: 'error',
-				detail: `could not query zones for ${candidate} (HTTP ${zoneRes.status}); token needs ${SCOPE_HINT}`
+				detail: `could not query zones for ${failedName ?? host} (HTTP ${errorStatus}); token needs ${SCOPE_HINT}`
 			};
 		}
-		zoneId = ((zoneRes.result as { id?: string }[] | undefined) ?? [])[0]?.id;
-		if (zoneId) break;
+		zoneId = zone.id;
 	}
 	if (!zoneId) {
 		return {

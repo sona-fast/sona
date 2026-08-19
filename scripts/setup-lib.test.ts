@@ -20,7 +20,10 @@ import {
 	imageResizingOutcome,
 	imageResizingIsOn,
 	ciWiringEntries,
-	cfApi
+	cfApi,
+	securitySummaryLines,
+	pagesPatchConfirmsSitekey,
+	cdnAttachmentLines
 } from './setup-lib.ts';
 
 describe('buildMigrationSql', () => {
@@ -604,5 +607,210 @@ describe('ciWiringEntries ↔ workflow YAML contract', () => {
 	it.each(entries)('$name is referenced as a workflow $kind', ({ kind, name }) => {
 		const ref = kind === 'secret' ? `secrets.${name}` : `vars.${name}`;
 		expect(yaml).toContain(ref);
+	});
+});
+
+describe('securitySummaryLines', () => {
+	const turnstileWarning = '  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).';
+
+	it('prints the Turnstile warning for EVERY rate-limit outcome (regression: a missing brace once nested it inside the applied branch)', () => {
+		for (const rl of [null, 'exists', 'error', 'created', 'updated'] as const) {
+			const lines = securitySummaryLines('taro.surf', rl, null, 'error', true);
+			expect(lines, `downloadRateLimit=${rl}`).toContain(turnstileWarning);
+		}
+	});
+
+	it('reports an applied rate limit and a created Turnstile widget together', () => {
+		const lines = securitySummaryLines('taro.surf', 'created', null, 'created', true);
+		expect(lines.join('\n')).toContain('Public-endpoint rate limit: applied to the taro.surf zone');
+		expect(lines.join('\n')).toContain('Admin-login bot check: Turnstile created for taro.surf');
+	});
+
+	it('repeats waf-lib’s failure reason and the retry command for a rate-limit error', () => {
+		const detail = 'token has no access to zone taro.surf: add Zone · WAF · Edit';
+		const text = securitySummaryLines('taro.surf', 'error', detail, null, false).join('\n');
+		expect(text).toContain(detail);
+		expect(text).toContain('npm run apply-download-ratelimit -- taro.surf');
+	});
+
+	it('does not blame token scope for a non-permission rate-limit failure', () => {
+		const detail = 'failed to write the rate-limit rule to taro.surf (HTTP 500)';
+		const text = securitySummaryLines('taro.surf', 'error', detail, null, false).join('\n');
+		expect(text).toContain(detail);
+		expect(text).not.toContain('token lacks Zone · WAF · Edit');
+		expect(text).toContain('npm run apply-download-ratelimit -- taro.surf');
+	});
+
+	it('falls back to a generic failure line when no detail survived', () => {
+		const text = securitySummaryLines('taro.surf', 'error', null, null, false).join('\n');
+		expect(text).toContain('NOT set (provisioning failed)');
+		expect(text).not.toContain('token lacks');
+	});
+
+	it('reports NO bot check when the widget provisioned but the wiring failed', () => {
+		// The login check fails open without the sitekey var + secret, so a
+		// provisioned widget with failed wiring must never read as enforced.
+		for (const status of ['created', 'exists'] as const) {
+			const text = securitySummaryLines('taro.surf', 'exists', null, status, false).join('\n');
+			expect(text).toContain('NOT confirm the TURNSTILE_SITEKEY');
+			expect(text).toContain('/admin/login has NO bot check');
+			// Honest on re-runs: the claim is scoped to this run / first runs.
+			expect(text).toContain('this run');
+			expect(text).toContain('first run');
+			expect(text).not.toContain('enforced once deployed');
+		}
+	});
+
+	it('never prints the enforced claim unless the wiring landed', () => {
+		const wired = securitySummaryLines('taro.surf', null, null, 'created', true).join('\n');
+		expect(wired).toContain('enforced once deployed');
+		const unwired = securitySummaryLines('taro.surf', null, null, 'created', false).join('\n');
+		expect(unwired).not.toContain('enforced once deployed');
+	});
+
+	it('names the RESOLVED parent zone in the applied line for a subdomain host', () => {
+		const text = securitySummaryLines(
+			'sona.taro.surf',
+			'created',
+			null,
+			null,
+			false,
+			'taro.surf'
+		).join('\n');
+		expect(text).toContain('applied to the taro.surf zone');
+		expect(text).not.toContain('applied to the sona.taro.surf zone');
+	});
+
+	it('stays silent about pre-existing rate limits and unattempted Turnstile', () => {
+		expect(securitySummaryLines('taro.surf', 'exists', null, null, false)).toEqual([]);
+		expect(securitySummaryLines('taro.surf', null, null, null, false)).toEqual([]);
+	});
+});
+
+describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
+	// main() is not importable (it drives live Cloudflare state), so pin the
+	// wiring at the source level: turnstileWired must be composed from the real
+	// PATCH result and the real secret-put result — forcing a literal here once
+	// survived the entire suite while reintroducing the very over-claim the
+	// helper exists to prevent.
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
+
+	it('passes pagesConfigOk && turnstileSecretSet, not a literal', () => {
+		expect(src).toMatch(/securitySummaryLines\(/);
+		expect(src).toMatch(/pagesConfigOk && turnstileSecretSet/);
+	});
+
+	it('passes the resolved zone name so subdomain summaries name the real zone', () => {
+		expect(src).toMatch(/pagesConfigOk && turnstileSecretSet,\s*\n?\s*resolvedZoneName/);
+	});
+
+	it('assigns pagesConfigOk from the Pages PATCH result, read-back confirmed', () => {
+		expect(src).toMatch(/pagesConfigOk =\s*\n?\s*res\.ok/);
+		expect(src).toMatch(/pagesPatchConfirmsSitekey\(res\.result, turnstileSitekey\)/);
+	});
+
+	it('putSecret reports failure instead of swallowing it', () => {
+		expect(src).toMatch(/catch\s*\{\s*\n?\s*return false/);
+	});
+});
+
+describe('pagesPatchConfirmsSitekey', () => {
+	const body = (value?: string) => ({
+		deployment_configs: {
+			production: { env_vars: value === undefined ? {} : { TURNSTILE_SITEKEY: { value } } }
+		}
+	});
+
+	it('confirms when the response echoes the sitekey we sent', () => {
+		expect(pagesPatchConfirmsSitekey(body('0xKEY'), '0xKEY')).toBe(true);
+	});
+
+	it('rejects a response that dropped or changed the var', () => {
+		expect(pagesPatchConfirmsSitekey(body(), '0xKEY')).toBe(false);
+		expect(pagesPatchConfirmsSitekey(body('0xOTHER'), '0xKEY')).toBe(false);
+	});
+
+	it('reads a missing/malformed body as unconfirmed (the safe direction)', () => {
+		expect(pagesPatchConfirmsSitekey(undefined, '0xKEY')).toBe(false);
+		expect(pagesPatchConfirmsSitekey({}, '0xKEY')).toBe(false);
+		expect(pagesPatchConfirmsSitekey({ deployment_configs: null }, '0xKEY')).toBe(false);
+	});
+});
+
+describe('cdnAttachmentLines', () => {
+	it('points at connect-domains (attach + --check) when a domain was given', () => {
+		const text = cdnAttachmentLines('https://cdn.taro.surf', 'taro-images', 'taro.surf').join('\n');
+		expect(text).toContain('npm run connect-domains -- taro.surf');
+		expect(text).toContain('npm run connect-domains -- --check taro.surf');
+		// connect-domains hard-requires BOTH env vars (it exits 1 otherwise), so
+		// both commands must name the pair.
+		expect(text.match(/CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id>/g)).toHaveLength(2);
+		// The dashboard route survives as the fallback for tokens without DNS scope.
+		expect(text).toContain('R2 → taro-images → Settings → Custom Domains → add https://cdn.taro.surf');
+		// The images-404 consequence rides the connect instruction itself.
+		expect(text).toContain('setup did not touch DNS.');
+		expect(text).toContain('Images 404 until you connect it.');
+	});
+
+	it('normalizes a messy domain answer to the bare host itself', () => {
+		const text = cdnAttachmentLines(
+			'https://cdn.taro.surf',
+			'taro-images',
+			'https://Taro.Surf/gallery'
+		).join('\n');
+		expect(text).toContain('npm run connect-domains -- taro.surf');
+	});
+
+	it('falls back to the dashboard when the R2 public URL is not cdn.<domain>', () => {
+		// connect-domains always attaches cdn.<domain>; pointing an overridden
+		// public URL at it would wire the wrong host and leave images 404ing.
+		const text = cdnAttachmentLines('https://images.taro.surf', 'taro-images', 'taro.surf').join('\n');
+		expect(text).not.toContain('connect-domains');
+		expect(text).toContain('Cloudflare dashboard → R2 → taro-images → Settings → Custom Domains');
+		expect(text).toContain('add https://images.taro.surf');
+		expect(text).toContain('Images 404 until this is done.');
+	});
+
+	it('falls back to the dashboard walkthrough when no domain was given', () => {
+		const text = cdnAttachmentLines('https://cdn.taro.surf', 'taro-images', '').join('\n');
+		expect(text).not.toContain('connect-domains');
+		expect(text).toContain('Cloudflare dashboard → R2 → taro-images → Settings → Custom Domains');
+		expect(text).toContain('Images 404 until this is done.');
+	});
+});
+
+describe('cdnAttachmentLines ↔ package.json contract', () => {
+	// The printed `npm run <script>` commands must exist in package.json — a
+	// script rename would otherwise point every fresh setup at a dead command.
+	const pkg = JSON.parse(
+		readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')
+	) as { scripts: Record<string, string> };
+	const text = cdnAttachmentLines('https://cdn.taro.surf', 'taro-images', 'taro.surf').join('\n');
+	const scripts = [...text.matchAll(/npm run (\S+)/g)].map((m) => m[1]);
+
+	it('prints at least one npm run command', () => {
+		expect(scripts).toContain('connect-domains');
+	});
+
+	it.each([...new Set(scripts)])('`npm run %s` exists in package.json scripts', (name) => {
+		expect(pkg.scripts).toHaveProperty(name);
+	});
+});
+
+describe('setup.ts ↔ zone-preflight source contract', () => {
+	// main() isn't importable, so pin that the preflight uses the shared
+	// candidate walk and distinguishes a failed lookup from "no zone" — the old
+	// inline loop read a 403 as "No Cloudflare zone found".
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
+
+	it('resolves the zone via resolveZone over zoneNameCandidates(host)', () => {
+		expect(src).toMatch(/resolveZone\(\s*zoneNameCandidates\(\s*host\s*\)/s);
+	});
+
+	it('handles a failed lookup before the no-zone branch', () => {
+		const errIdx = src.indexOf('zoneLookupError !== null');
+		const noZoneIdx = src.indexOf('No Cloudflare zone found');
+		expect(errIdx).toBeGreaterThan(-1);
+		expect(noZoneIdx).toBeGreaterThan(errIdx);
 	});
 });

@@ -60,7 +60,9 @@ original deployment it grew out of). The project home is
    > **Setting up a custom domain?** Export `CLOUDFLARE_API_TOKEN` +
    > `CLOUDFLARE_ACCOUNT_ID` (the same token as step 3, under **API token
    > scopes** below) before running setup so it can preflight your DNS /
-   > image-transform config.
+   > image-transform config. Setup itself never touches DNS — once the zone is
+   > active, `npm run connect-domains` attaches the CDN and site domains (see
+   > **Custom domain + image thumbnails** below).
 
    > **Run it in a real terminal.** `npm run setup` is interactive; piping input
    > through `npm run` (e.g. `printf ... | npm run setup`) truncates stdin. If you
@@ -86,6 +88,7 @@ original deployment it grew out of). The project home is
    | Account · D1 · Edit | create + migrate the database |
    | Account · Workers R2 Storage · Edit | create the image bucket |
    | Account · Turnstile · Edit | **only if** attaching a custom domain — provisions the admin-login bot check |
+   | Zone · Zone · Read | **only if** attaching a custom domain — lets connect-domains resolve the zone |
    | Zone · DNS · Edit | **only if** attaching a custom domain (writes the apex record) |
    | Zone · WAF · Edit | **only if** attaching a custom domain — adds a WAF rate limit on the public API endpoints (the download beacon and the oEmbed provider) |
    | Zone · Zone Settings · Edit | *optional* — lets setup enable image resizing for you |
@@ -133,8 +136,26 @@ Sona is single-admin, so there's no second account to let you back in. Two paths
 
 ### Custom domain + image thumbnails (post-deploy)
 
-Two things need a manual step on a custom domain — setup preflights them when it
-can, but calls them out here because they need dashboard/DNS access:
+`npm run setup` does not touch DNS — the domain wiring runs after it, once your
+nameservers point at Cloudflare and the zone is **active**:
+
+```sh
+export CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id>   # same pair as setup
+npm run connect-domains -- yourdomain.com            # attach cdn.<domain> → bucket, <domain> → Pages
+npm run connect-domains -- --check yourdomain.com    # read-only doctor: which step is missing?
+```
+
+`connect-domains` attaches the CDN host (`cdn.yourdomain.com`) to the images
+bucket and the site domain to the Pages project. **Images 404 until the CDN
+host is attached.** With *Zone · Zone Settings · Edit* on the token it also
+enables Image Transformations. It adds no other DNS records, and it's safe to
+re-run. Its token scopes are all in the **API token scopes** table in step 3.
+If your site lives on a subdomain (like
+`sona.yourdomain.com`), the zone is the root domain — scope the token to that
+zone, and Image Transformations is enabled zone-wide on it.
+
+Two things might still need a manual step. Setup and connect-domains preflight
+them where they can, but finishing either may need dashboard or DNS access:
 
 - **Pages apex domain.** After adding your domain to the Pages project, the
   **apex** needs a manual **proxied CNAME** `yourdomain.com → <project>.pages.dev`

@@ -249,6 +249,28 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		expect(calls).toHaveLength(1);
 	});
 
+	it('skips the zone lookup entirely when the caller provides a resolved zone id', async () => {
+		const { api, calls } = fakeApi({
+			[entryPath]: { ok: true, status: 200, result: { id: RULESET, rules: [] } },
+			[`POST /zones/${ZONE}/rulesets/${RULESET}/rules`]: { ok: true, status: 200 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api, ZONE);
+		expect(res.status).toBe('created');
+		// The setup CLI passes its preflight's zone id — no /zones?name= round trip.
+		expect(calls.some((c) => c.path.startsWith('/zones?name='))).toBe(false);
+	});
+
+	it('a transient failure mid-walk aborts — never falls through to the parent zone', async () => {
+		const { api, calls } = fakeApi({
+			'/zones?name=sub.example.com': { ok: false, status: 500 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'sub.example.com', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('HTTP 500');
+		// The walk stopped at the failing candidate instead of trying example.com.
+		expect(calls.map((c) => c.path)).toEqual(['/zones?name=sub.example.com']);
+	});
+
 	it('domain is not a zone / zones query fails → error, no ruleset touched', async () => {
 		const { api, calls } = fakeApi({
 			[zonePath]: { ok: false, status: 403, errors: [{ message: 'not authorized' }] }
@@ -256,6 +278,9 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
 		expect(res.status).toBe('error');
 		expect(res.detail).toContain('akito.dog');
+		// Pin the abort semantics too: without this, a walk that stops aborting on
+		// failed lookups still passed this test (found by mutation).
+		expect(res.detail).toContain('HTTP 403');
 		expect(calls).toHaveLength(1);
 	});
 

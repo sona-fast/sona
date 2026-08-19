@@ -4,6 +4,8 @@ import {
 	parseWranglerConfig,
 	classifyZone,
 	zoneGuidance,
+	zoneConsentLabel,
+	resolveZone,
 	findBucketDomain,
 	cdnDomainState,
 	bucketDomainTlsIssued,
@@ -74,8 +76,129 @@ describe('zoneGuidance (fail-soft messages)', () => {
 		expect(g).toContain('carter.ns.cf, fish.ns.cf');
 	});
 
+	it('tells a subdomain operator to add the domain they registered, naming the zones tried', () => {
+		const g = zoneGuidance({ exists: false, active: false }, 'sona.taro.surf', [
+			'sona.taro.surf',
+			'taro.surf'
+		]);
+		expect(g).toContain('Add the domain you registered to this Cloudflare account');
+		expect(g).toContain('Looked for zones named sona.taro.surf, taro.surf');
+	});
+
+	it('never names a computed root domain (co.uk is a public suffix, not an addable site)', () => {
+		const g = zoneGuidance({ exists: false, active: false }, 'example.co.uk', [
+			'example.co.uk',
+			'co.uk'
+		]);
+		expect(g).not.toContain('co.uk to this Cloudflare account');
+		expect(g).toContain('Add the domain you registered to this Cloudflare account');
+		expect(g).toContain('Looked for zones named example.co.uk, co.uk');
+	});
+
+	it('omits the names-tried parenthetical when only one zone name was looked up', () => {
+		const g = zoneGuidance({ exists: false, active: false }, 'taro.surf', ['taro.surf']);
+		expect(g).toContain('Add the domain you registered to this Cloudflare account');
+		expect(g).not.toContain('Looked for zones named');
+	});
+
+	it('names the RESOLVED parent zone in the not-active message for a subdomain host', () => {
+		const g = zoneGuidance(
+			{ exists: true, active: false, nameServers: ['carter.ns.cf', 'fish.ns.cf'] },
+			'sona.taro.surf',
+			['sona.taro.surf', 'taro.surf'],
+			'taro.surf'
+		);
+		expect(g).toContain('Zone taro.surf (serving sona.taro.surf) exists but is not active');
+		expect(g).toContain('carter.ns.cf, fish.ns.cf');
+	});
+
 	it('returns null when the zone is active (proceed)', () => {
 		expect(zoneGuidance({ exists: true, active: true, id: 'z1' }, 'taro.surf')).toBeNull();
+	});
+});
+
+describe('zoneConsentLabel', () => {
+	it('names the parent zone AND the host it serves when they differ', () => {
+		expect(zoneConsentLabel('sona.taro.surf', 'taro.surf')).toBe(
+			'the taro.surf zone (which serves sona.taro.surf)'
+		);
+	});
+
+	it('names just the zone when the host IS the zone', () => {
+		expect(zoneConsentLabel('taro.surf', 'taro.surf')).toBe('the taro.surf zone');
+	});
+
+	it('falls back to the host when no zone name was resolved', () => {
+		expect(zoneConsentLabel('taro.surf', null)).toBe('the taro.surf zone');
+		expect(zoneConsentLabel('taro.surf', undefined)).toBe('the taro.surf zone');
+	});
+});
+
+describe('resolveZone', () => {
+	const ok = (result: unknown) => ({ ok: true, status: 200, result });
+	const activeZone = [{ id: 'z1', status: 'active', name_servers: ['a.ns.cf'] }];
+
+	it('finds the registrable-domain zone for a subdomain (second candidate)', async () => {
+		const tried: string[] = [];
+		const { zone, zoneName, errorStatus } = await resolveZone(
+			['sona.taro.surf', 'taro.surf'],
+			async (name) => {
+				tried.push(name);
+				return ok(name === 'taro.surf' ? activeZone : []);
+			}
+		);
+		expect(tried).toEqual(['sona.taro.surf', 'taro.surf']);
+		expect(zone).toEqual({ exists: true, active: true, id: 'z1', nameServers: ['a.ns.cf'] });
+		expect(zoneName).toBe('taro.surf');
+		expect(errorStatus).toBeNull();
+	});
+
+	it('stops at the first candidate that matches (no extra lookups)', async () => {
+		const tried: string[] = [];
+		const { zoneName } = await resolveZone(['taro.surf'], async (name) => {
+			tried.push(name);
+			return ok(activeZone);
+		});
+		expect(tried).toEqual(['taro.surf']);
+		expect(zoneName).toBe('taro.surf');
+	});
+
+	it('reports no zone when no candidate matches', async () => {
+		const { zone, zoneName, errorStatus } = await resolveZone(
+			['sona.taro.surf', 'taro.surf'],
+			async () => ok([])
+		);
+		expect(zone).toEqual({ exists: false, active: false });
+		expect(zoneName).toBeNull();
+		expect(errorStatus).toBeNull();
+	});
+
+	it('aborts the walk on an auth error and surfaces the status', async () => {
+		const tried: string[] = [];
+		const { zone, errorStatus, failedName } = await resolveZone(['sona.taro.surf', 'taro.surf'], async (name) => {
+			tried.push(name);
+			return { ok: false, status: 403 };
+		});
+		expect(tried).toEqual(['sona.taro.surf']);
+		expect(errorStatus).toBe(403);
+		expect(zone).toEqual({ exists: false, active: false });
+		expect(failedName).toBe('sona.taro.surf');
+	});
+
+	it('aborts the walk on a transient error too (a 500 must not silently pick the parent zone)', async () => {
+		const tried: string[] = [];
+		const { zone, zoneName, errorStatus, failedName } = await resolveZone(
+			['sona.taro.surf', 'taro.surf'],
+			async (name) => {
+				tried.push(name);
+				return name === 'sona.taro.surf' ? { ok: false, status: 500 } : ok(activeZone);
+			}
+		);
+		expect(tried).toEqual(['sona.taro.surf']); // no further candidates tried
+		expect(errorStatus).toBe(500);
+		expect(failedName).toBe('sona.taro.surf');
+		expect(zoneName).toBeNull();
+		expect(zone).toEqual({ exists: false, active: false });
 	});
 });
 
@@ -245,6 +368,49 @@ describe('buildLadder + firstFailingRung', () => {
 		const ladder = buildLadder({ ...healthy, zoneExists: false });
 		expect(firstFailingRung(ladder)?.id).toBe('zone-exists');
 		expect(ladder.filter((r) => r.status === 'skip')).toHaveLength(5);
+	});
+
+	it('zone-exists tells a subdomain operator to add the domain they registered, naming the zones tried', () => {
+		const ladder = buildLadder({
+			...healthy,
+			host: 'sona.taro.surf',
+			zoneExists: false,
+			zoneName: null,
+			candidates: ['sona.taro.surf', 'taro.surf']
+		});
+		const rung = firstFailingRung(ladder)!;
+		expect(rung.id).toBe('zone-exists');
+		expect(rung.action).toContain('Add the domain you registered to this Cloudflare account');
+		expect(rung.action).toContain('Looked for zones named sona.taro.surf, taro.surf');
+		expect(rung.action).not.toContain('Add sona.taro.surf');
+	});
+
+	it('zone-exists never names a computed root domain (multi-part TLD: co.uk is a public suffix)', () => {
+		const ladder = buildLadder({
+			...healthy,
+			host: 'example.co.uk',
+			zoneExists: false,
+			zoneName: null,
+			candidates: ['example.co.uk', 'co.uk']
+		});
+		const rung = firstFailingRung(ladder)!;
+		expect(rung.id).toBe('zone-exists');
+		expect(rung.action).not.toContain('co.uk to this Cloudflare account');
+		expect(rung.action).toContain('Add the domain you registered to this Cloudflare account');
+		expect(rung.action).toContain('Looked for zones named example.co.uk, co.uk');
+	});
+
+	it('names the RESOLVED (parent) zone on the transforms rung for a subdomain host', () => {
+		const ladder = buildLadder({
+			...healthy,
+			host: 'sona.taro.surf',
+			imageTransforms: false,
+			zoneName: 'taro.surf',
+			candidates: ['sona.taro.surf', 'taro.surf']
+		});
+		const rung = ladder.find((r) => r.id === 'image-transforms')!;
+		expect(rung.label).toContain('the taro.surf zone');
+		expect(rung.action).toContain('dashboard → taro.surf → Images');
 	});
 
 	it('names zone-active as the first failure when the zone is pending', () => {
