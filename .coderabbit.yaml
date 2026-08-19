@@ -1,0 +1,100 @@
+# CodeRabbit configuration.
+# This file overrides the organization UI settings, so it is the source of
+# truth for how reviews run here. Validate changes with:
+#   coderabbit config validate
+language: en-US
+
+tone_instructions: >-
+  Be direct and specific. Skip praise, preamble, and restatements of the diff.
+  Name the file and line, say what breaks, and stop. Do not propose refactors of
+  code the change did not touch.
+
+reviews:
+  profile: chill
+  poem: false
+  in_progress_fortune: false
+
+  # Review a branch when it is finished, not on every intermediate push. The
+  # ship loop lands many small commits before a branch is ready, and reviewing
+  # each one produces findings against work that is still in motion. Ask for a
+  # re-review with "@coderabbitai review" once the branch settles.
+  auto_review:
+    enabled: true
+    auto_incremental_review: false
+    drafts: false
+    # Dependency bumps are reviewed locally through the ship loop instead.
+    ignore_usernames:
+      - dependabot
+
+  pre_merge_checks:
+    title:
+      mode: warning
+      requirements: >-
+        Conventional Commits format. The scope names the area changed. Include
+        the Linear issue key when the work has one.
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+
+  finishing_touches:
+    simplify:
+      enabled: true
+
+  path_instructions:
+    - path: "**/*.{ts,js,mjs,svelte,toml,json,yml,yaml}"
+      instructions: >-
+        Flag Cloudflare account identifiers, zone IDs, Access or policy IDs, and
+        D1 database UUIDs that are hardcoded rather than read from an environment
+        variable, binding, or repository secret. A non-secret identifier in a
+        tracked file is still a leak once the repo is published.
+        Flag personal email addresses, real names, and messaging handles.
+    - path: "drizzle/**/*.sql"
+      instructions: >-
+        Flag any table or index named with a "_cf_" prefix. That namespace
+        belongs to Cloudflare's internal D1 schema and collides with it.
+        Check that each migration is additive or states its backfill, since these
+        migrations run against live databases that cannot be rolled back in place.
+    - path: ".github/workflows/**"
+      instructions: >-
+        Flag unpinned third-party actions, secrets exposed to pull_request_target
+        or to forked pull requests, and missing least-privilege permissions
+        blocks. These workflows deploy to production Cloudflare accounts.
+    - path: "src/**/*.{ts,svelte}"
+      instructions: >-
+        Sona's operator is the commissioner of the artwork, not the artist. Flag
+        attribution copy or data modeling that treats the operator as the creator.
+    - path: "docs/architecture.md"
+      instructions: >-
+        When a change adds or removes a dependency, binding, external service,
+        workflow, or cron endpoint, this document and its mermaid diagram must
+        change in the same pull request. Flag drift between the diagram and the
+        code in the diff.
+    - path: "**/*.{test,spec}.{ts,js}"
+      instructions: >-
+        Check that the test would fail if the behavior it covers were reverted.
+        Flag tests that only assert a function was called, or that restate the
+        implementation instead of pinning the observable result.
+
+chat:
+  art: false
+  allow_non_org_members: false
+  auto_reply: true
+
+knowledge_base:
+  # These repos share a lineage, so a learning recorded on one applies to the rest.
+  learnings:
+    scope: global
+  issues:
+    scope: global
+  pull_requests:
+    scope: global
+  linear:
+    usage: enabled
+    team_keys:
+      - SONA
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/CLAUDE.md"
+      - "docs/**/*.md"
