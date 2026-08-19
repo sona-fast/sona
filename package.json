@@ -17,6 +17,7 @@
 		"prepare": "npm run paraglide || echo '' && svelte-kit sync || echo ''",
 		"check": "npm run paraglide && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:catalog-pinning": "node scripts/check-catalog-pinning.mjs",
+		"check:lockfile-security": "node scripts/check-lockfile-security.mjs",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"pretest": "npm run paraglide",
 		"test": "vitest run",
@@ -35,9 +36,11 @@
 		"@sveltejs/adapter-auto": "^7.0.1",
 		"@sveltejs/kit": "^2.57.0",
 		"@sveltejs/vite-plugin-svelte": "^7.0.0",
+		"@types/cookie": "^0.6.0",
 		"@types/node": "^25.9.1",
 		"@types/three": "^0.185.4",
 		"better-sqlite3": "^12.9.0",
+		"cookie": "^0.7.2",
 		"drizzle-kit": "^0.31.10",
 		"esbuild": "^0.28.1",
 		"miniflare": "^4.20260730.0",
@@ -63,6 +66,9 @@
 		"wrangler": "^4.124.0"
 	},
 	"overrides": {
-		"undici": "^7.29.0"
+		"undici@<7.29.0": "^7.29.0",
+		"cookie@<0.7.0": "^0.7.2",
+		"esbuild@<0.25.0": "^0.25.0",
+		"nanoid@<3.3.18": "^3.3.18"
 	}
 }

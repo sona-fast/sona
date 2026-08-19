@@ -10,6 +10,8 @@ import { dirname, join } from 'node:path';
 // transpiles test imports without typechecking. This test typechecks every
 // non-test scripts/*.ts file through the TypeScript API so a syntax or type
 // error in scripts/ fails the ordinary unit suite.
+// The .mjs scripts are out of scope here; they are covered by their own unit
+// tests (e.g. check-lockfile-security.test.ts).
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = dirname(scriptsDir);

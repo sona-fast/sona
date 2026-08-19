@@ -24,6 +24,14 @@ jobs:
           node-version: 24 # match deploy.yml
           cache: npm
 
+      # Fails if the lockfile resolves a guarded package (FLOORS in
+      # scripts/check-lockfile-security-lib.mjs) below its security
+      # floor — npm before 8.3 ignores the "pkg@<range>" override
+      # keys, so an old-npm lockfile regen would revert them silently. Reads
+      # package-lock.json only (no dependencies), so it runs BEFORE `npm ci`:
+      # after it, a downgraded package's install scripts have already run.
+      - run: npm run check:lockfile-security
+
       - run: npm ci
 
       - run: npm run check
@@ -55,6 +63,9 @@ jobs:
           node-version: 24 # match deploy.yml
           cache: npm
 
+      # Same pre-`npm ci` security floor guard as the `check` job (see there).
+      - run: npm run check:lockfile-security
+
       - run: npm ci
 
       - run: npm run test:integration
@@ -75,6 +86,9 @@ jobs:
         with:
           node-version: 24 # match deploy.yml
           cache: npm
+
+      # Same pre-`npm ci` security floor guard as the `check` job (see there).
+      - run: npm run check:lockfile-security
 
       - run: npm ci
 
