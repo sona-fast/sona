@@ -5,7 +5,7 @@
 
 /**
  * @typedef {{ name?: string, version?: string }} LockEntry
- * @typedef {{ packages?: Record<string, LockEntry> }} Lockfile
+ * @typedef {{ lockfileVersion?: number, packages?: Record<string, LockEntry> }} Lockfile
  * @typedef {{ path: string, name: string, version: string, floor: string }} Offender
  */
 
@@ -58,6 +58,8 @@ assertFloors(FLOORS);
  * -1/0/1 comparison of dotted versions. A version we can't parse sorts BELOW
  * everything (fail closed) rather than being waved through as "greater", and a
  * prerelease sorts below its own bare release (semver: 0.25.0-beta < 0.25.0).
+ * Ordering *between* two prereleases is lexical, so only approximately semver —
+ * all the floors need is the below-release/above-release distinction.
  *
  * @param {string} a
  * @param {string} b
@@ -80,8 +82,28 @@ export function compare(a, b) {
 }
 
 /**
+ * The scan reads `packages`, the flat resolved map npm writes from
+ * lockfileVersion 2 on. An npm 6 (v1) lock has only the nested `dependencies`
+ * tree, so scanning it would find nothing and report a clean run over a
+ * lockfile that may well carry the vulnerable versions. Refuse it instead.
+ *
+ * @param {Lockfile} lock
+ */
+function assertLockShape(lock) {
+	const version = lock?.lockfileVersion;
+	const packages = lock?.packages;
+	if ((typeof version === 'number' && version < 2) || typeof packages !== 'object' || !packages) {
+		throw new Error(
+			`package-lock.json is lockfileVersion ${version ?? 'unknown'} (or has no packages map); ` +
+				`regenerate it with npm >= 8.3 so the security overrides apply.`
+		);
+	}
+}
+
+/**
  * Walks every entry in a parsed lockfile once, collecting the ones below their
- * floor and which floor packages were never seen at all.
+ * floor and which floor packages were never seen at all. A floor package with
+ * no entry is reported, not judged — the caller decides what `missing` means.
  *
  * @param {Lockfile} lock
  * @param {Record<string, string>} [floors]
@@ -89,7 +111,8 @@ export function compare(a, b) {
  */
 export function scanLockfile(lock, floors = FLOORS) {
 	assertFloors(floors);
-	const packages = lock.packages ?? {};
+	assertLockShape(lock);
+	const packages = lock.packages;
 	const offenders = [];
 	// `name` wins over the path tail so an aliased install (a different
 	// directory name for the same package) is still matched against its floor.

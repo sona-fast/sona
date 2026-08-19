@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { FLOORS, compare, scanLockfile } from './check-lockfile-security-lib.mjs';
 
 // The guard is what stands between an old-npm lockfile regen and a silent
@@ -100,6 +103,24 @@ describe('scanLockfile', () => {
 		]);
 	});
 
+	// A lockfileVersion 1 lock (npm 6) carries only the nested `dependencies`
+	// tree, so scanning `packages` would report a clean run over a lock that can
+	// hold cookie 0.6.0. It has to fail loudly rather than silently check zero.
+	it('throws on a lockfileVersion 1 lock', () => {
+		expect(() =>
+			scanLockfile({
+				lockfileVersion: 1,
+				dependencies: { cookie: { version: '0.6.0' } }
+			} as never)
+		).toThrow(/lockfileVersion 1 .*regenerate it with npm >= 8\.3/s);
+	});
+
+	it('throws on a lock with no packages map', () => {
+		expect(() => scanLockfile({ lockfileVersion: 3 } as never)).toThrow(
+			/has no packages map.*regenerate it with npm >= 8\.3/s
+		);
+	});
+
 	it('ignores entries with no resolved version', () => {
 		const { offenders, checked, missing } = scanLockfile({
 			packages: { 'node_modules/cookie': {} }
@@ -107,5 +128,28 @@ describe('scanLockfile', () => {
 		expect(offenders).toEqual([]);
 		expect(checked).toBe(0);
 		expect(missing).toContain('cookie');
+	});
+});
+
+// FLOORS only describes what package.json's `overrides` actually pin. Let the
+// two drift and the guard either checks a floor npm isn't enforcing or misses
+// one it is.
+describe('FLOORS matches package.json overrides', () => {
+	const overrides: Record<string, string> = JSON.parse(
+		readFileSync(
+			join(dirname(dirname(fileURLToPath(import.meta.url))), 'package.json'),
+			'utf-8'
+		)
+	).overrides;
+	// Plain keys like "undici" pin a version without a floor range — not our business.
+	const rangeKeys = Object.keys(overrides).filter((key) => key.includes('@<'));
+
+	it.each(rangeKeys)('override %s has a matching FLOORS entry', (key) => {
+		const [name, floor] = key.split('@<');
+		expect(FLOORS[name]).toBe(floor);
+	});
+
+	it.each(Object.entries(FLOORS))('FLOORS.%s (%s) has a matching override key', (name, floor) => {
+		expect(rangeKeys).toContain(`${name}@<${floor}`);
 	});
 });

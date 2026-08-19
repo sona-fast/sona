@@ -8,7 +8,9 @@
 // all three regardless of how.
 //
 // The floors and the scan itself live in check-lockfile-security-lib.mjs so
-// they can be unit-tested; this file is just the CLI wrapper.
+// they can be unit-tested; this file is just the CLI wrapper. Exit 1 means an
+// entry is below its floor, or the lockfile/floors are the wrong shape to check
+// at all; a floor package that has left the tree only warns.
 //
 // Run: node scripts/check-lockfile-security.mjs
 import { readFileSync } from 'node:fs';
@@ -19,16 +21,28 @@ import { FLOORS, scanLockfile } from './check-lockfile-security-lib.mjs';
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const lock = JSON.parse(readFileSync(join(repo, 'package-lock.json'), 'utf-8'));
-const { offenders, checked, missing } = scanLockfile(lock, FLOORS);
 
+let result;
+try {
+	result = scanLockfile(lock, FLOORS);
+} catch (error) {
+	// A stack trace buries the one line that tells the operator what to do.
+	console.error(`check-lockfile-security: ${error instanceof Error ? error.message : error}`);
+	process.exit(1);
+}
+const { offenders, checked, missing } = result;
+
+// A floor package with no entry is a warning, not a failure: the scan already
+// refused to read a lockfile shape it can't scan, so `missing` really does mean
+// the dependency left the tree — and with it the vulnerability. Failing here
+// would brick fork deploys over a condition a fork owner can't fix.
 for (const name of missing) {
-	console.error(
+	console.warn(
 		`check-lockfile-security: no resolved '${name}' entry in package-lock.json — ` +
-			`the >=${FLOORS[name]} floor can't be verified. If the dependency really is gone, ` +
+			`the >=${FLOORS[name]} floor has nothing to check. If the dependency is gone for good, ` +
 			`drop it from FLOORS in check-lockfile-security-lib.mjs.`
 	);
 }
-if (missing.length > 0) process.exit(1);
 
 if (offenders.length > 0) {
 	console.error(
