@@ -26,6 +26,12 @@ jobs:
 
       - run: npm ci
 
+      # Fails if the lockfile resolves cookie/esbuild/nanoid below their
+      # security floors — npm before 8.3 ignores the "pkg@<range>" override
+      # keys, so an old-npm lockfile regen would revert them silently. Reads
+      # package-lock.json only, so it runs before the slow steps.
+      - run: npm run check:lockfile-security
+
       - run: npm run check
 
       - run: npm test

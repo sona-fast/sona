@@ -17,6 +17,7 @@
 		"prepare": "npm run paraglide || echo '' && svelte-kit sync || echo ''",
 		"check": "npm run paraglide && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:catalog-pinning": "node scripts/check-catalog-pinning.mjs",
+		"check:lockfile-security": "node scripts/check-lockfile-security.mjs",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"pretest": "npm run paraglide",
 		"test": "vitest run",
