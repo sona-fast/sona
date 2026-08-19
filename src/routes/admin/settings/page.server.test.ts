@@ -1549,6 +1549,29 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 		expect(branches![3]).not.toContain('m.admin_settings_breakdown_too_large()');
 	});
 
+	// Source pin: the warning const and the worded percentage span must sit
+	// BEFORE the {#if data.breakdown} bar split, not inside the breakdown
+	// branch — re-gating them there would strip the worded suffix from the
+	// fallback branch and leave a color-only signal (WCAG 1.4.1) with the
+	// suite green.
+	it('the usage warning is not gated on the breakdown', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		const constIdx = src.indexOf('{@const warn = usageWarning(pct)}');
+		const spanIdx = src.indexOf('class="storage-pct"');
+		const barSplitIdx = src.indexOf('{#if data.breakdown}');
+		expect(constIdx).toBeGreaterThan(-1);
+		expect(spanIdx).toBeGreaterThan(-1);
+		expect(barSplitIdx).toBeGreaterThan(-1);
+		expect(constIdx).toBeLessThan(barSplitIdx);
+		expect(spanIdx).toBeLessThan(barSplitIdx);
+		// The span carries both the color classes and the worded suffixes.
+		const span = src.slice(spanIdx, src.indexOf('</span>', spanIdx));
+		expect(span).toContain('class:warning={warn ===');
+		expect(span).toContain('class:danger={warn ===');
+		expect(span).toContain('m.admin_settings_usage_near()');
+		expect(span).toContain('m.admin_settings_usage_full()');
+	});
+
 	it('degrades to breakdown null when the listing never settles (5s deadline)', async () => {
 		vi.useFakeTimers();
 		try {

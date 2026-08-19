@@ -1613,7 +1613,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		justify-content: space-between;
-		column-gap: 12px;
+		column-gap: 24px;
 		font-size: 13px;
 		color: var(--muted-foreground);
 		margin-bottom: 6px;
@@ -1652,8 +1652,9 @@
 	/* The colored + worded percentage renders in BOTH branches; the fallback
 	   bar's warning/danger fill above mirrors the same >80% / >95% thresholds,
 	   so text and fill always agree. As TEXT the amber needs 4.5:1, which
-	   #f0b33a only clears on the dark themes (7.25:1 on #2E2E2E) — light gets
-	   a dark amber (#7a4f00: 6.40:1 on #F2F3F0). --destructive clears 4.5:1
+	   #f0b33a only clears on the dark themes (10.08:1 on the #111111
+	   --background the text sits on) — light gets a dark amber (#7a4f00:
+	   6.40:1 on #F2F3F0). --destructive clears 4.5:1
 	   as text in every theme. */
 	.storage-pct.warning {
 		color: #f0b33a;
@@ -1824,12 +1825,14 @@
 
 	/* 320px reflow (WCAG 1.4.10): let the type labels and headers wrap
 	   instead of scrolling, and hand the flexible width to the label column
-	   (capped at 60vw) so it takes the slack on mobile. File counts, size,
-	   and share keep their base nowrap — measured at a 288px container with
-	   worst-case values ("VR showcase videos", "12,480 files", "1000.0 KB",
-	   "100%"), the table still fits, and a mid-value line break would
-	   misread as two values. Every base rule above precedes this block so
-	   the overrides here actually win. */
+	   (width: 99%, same trick as the base col-files rule) so it takes the
+	   slack on mobile. File counts, size, and share keep their base nowrap —
+	   measured at a 320px viewport / 288px container with worst-case values
+	   ("VR showcase videos" / "Avatars & other files", "20000 files" — the
+	   message renders raw counts, no separator, and the 20-page listing cap
+	   bounds it — "1023.9 GB", "100%", en and ja), the table still fits, and
+	   a mid-value line break would misread as two values. Every base rule
+	   above precedes this block so the overrides here actually win. */
 	@media (max-width: 520px) {
 		.breakdown thead th {
 			white-space: normal;
@@ -1839,9 +1842,12 @@
 			position: absolute;
 			width: 1px;
 			height: 1px;
+			padding: 0;
+			margin: -1px;
 			overflow: hidden;
-			clip: rect(0 0 0 0);
+			clip: rect(0, 0, 0, 0);
 			white-space: nowrap;
+			border: 0;
 		}
 
 		.breakdown thead th .share-short {
@@ -1850,8 +1856,7 @@
 
 		.breakdown tbody th.col-type {
 			white-space: normal;
-			width: auto;
-			max-width: 60vw;
+			width: 99%;
 		}
 
 		.breakdown td.col-files {
@@ -1890,7 +1895,7 @@
 	.breakdown-r2-note {
 		font-size: 13px;
 		color: var(--muted-foreground);
-		margin: 12px 0 0;
+		margin: 12px 0;
 	}
 
 	.storage-info {
