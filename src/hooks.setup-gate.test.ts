@@ -36,9 +36,14 @@ function makeHealthyDb(): D1Database {
 	return makeD1(sqlite);
 }
 
-function makeEvent(pathname: string, db: D1Database, env: Record<string, string> = {}) {
+function makeEvent(
+	pathname: string,
+	db: D1Database,
+	env: Record<string, string> = {},
+	sessionToken?: string
+) {
 	return {
-		cookies: { get: () => undefined },
+		cookies: { get: () => sessionToken },
 		url: new URL(`https://taro.surf${pathname}`),
 		// The observability block reads request headers for the device class;
 		// a bare Request keeps the DB-isolation spy's /gallery control honest.
@@ -53,11 +58,12 @@ const resolve = async () => new Response('ok', { headers: { 'content-type': 'tex
 async function driveGate(
 	pathname: string,
 	db: D1Database,
-	env: Record<string, string> = {}
+	env: Record<string, string> = {},
+	sessionToken?: string
 ): Promise<{ redirect: string | null; status: number; body: string }> {
 	try {
 		const res = (await authHandle({
-			event: makeEvent(pathname, db, env),
+			event: makeEvent(pathname, db, env, sessionToken),
 			resolve
 		} as never)) as Response;
 		return { redirect: null, status: res.status, body: await res.text() };
@@ -154,6 +160,12 @@ describe('setup gate — a failed settings read is not "no admin credential"', (
 		const prepare = vi.spyOn(db, 'prepare');
 
 		await driveGate('/.well-known/security.txt', db, observability);
+		expect(prepare).not.toHaveBeenCalled();
+
+		// With a session cookie too: the session lookup runs before the gates,
+		// so without its own exemption a cookie-carrying request would read the
+		// sessions table (the CodeRabbit round's catch on sona#379).
+		await driveGate('/.well-known/security.txt', db, observability, 'some-session-token');
 		expect(prepare).not.toHaveBeenCalled();
 
 		// Guard against a vacuous pass: the same drive on a public route does

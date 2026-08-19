@@ -113,10 +113,19 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 		? viewerTimeZone(event.cookies.get(VIEWER_TZ_COOKIE))
 		: 'UTC';
 
+	// security.txt stays reachable on an unclaimed or mid-setup fork — a
+	// deployment with no owner yet still needs a vulnerability-reporting path,
+	// and the route touches this fork's DB in NO direction (SONA-171): it skips
+	// the session lookup below (the response never varies on admin state), the
+	// setup gate, the theme read, and the observability counters. Canonical
+	// spelling only, per the exemption rule above: an encoded spelling takes
+	// the gates like any other path.
+	const isSecurityTxt = canonical && path === '/.well-known/security.txt';
+
 	const token = event.cookies.get(SESSION_COOKIE);
 
 	// Validate session against D1
-	if (token && event.platform?.env.DB) {
+	if (token && !isSecurityTxt && event.platform?.env.DB) {
 		try {
 			const db = getDb(event.platform.env.DB);
 			const session = await db
@@ -169,12 +178,6 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	const isSetupRoute = canonical && (path === '/admin/setup' || path.startsWith('/admin/setup/'));
 	const isAsset =
 		canonical && (path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png');
-	// security.txt stays reachable on an unclaimed or mid-setup fork — a
-	// deployment with no owner yet still needs a vulnerability-reporting path,
-	// and the route reads nothing from this fork's DB (SONA-171). Canonical
-	// spelling only, per the exemption rule above: an encoded spelling takes
-	// the gates like any other path.
-	const isSecurityTxt = canonical && path === '/.well-known/security.txt';
 	if (event.platform?.env.DB && !isSetupRoute && !isAsset && !isSecurityTxt) {
 		const db = getDb(event.platform.env.DB);
 		const state = await getSetupState(db, event.platform.env);

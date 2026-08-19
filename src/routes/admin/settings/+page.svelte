@@ -2118,7 +2118,10 @@
 	   amber is reserved for the unconfigured CTA. */
 	:global([data-theme='light']) .hint-link.muted { color: var(--muted-foreground); }
 	/* Links inside checklist rows (e.g. resend.com in step 1) — same AA fix. */
-	:global([data-theme='light']) .item .text a { color: #8A5A00; }
+	/* #7A4E00, one step darker than the shared #8A5A00: the checklist sits on
+	   var(--background), and terracotta light's #EADED6 puts #8A5A00 at 4.49:1 —
+	   a hair under AA. #7A4E00 clears 5.46:1 there and 6.46:1 on default light. */
+	:global([data-theme='light']) .item .text a { color: #7A4E00; }
 	:global([data-theme='light']) .status-tag.unset,
 	:global([data-theme='light']) .status-tag.unset .dot { color: #8A5A00; }
 	:global([data-theme='light']) .status-tag.unset .dot { background: #8A5A00; }
