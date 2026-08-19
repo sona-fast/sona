@@ -1383,6 +1383,7 @@
 	"admin_settings_con_card_subtitle": "出発前にスマホに保存しておけば、会場のWi-Fiに頼らずに済みます。",
 	"admin_settings_con_card_locked": "コンカードは{date}に全員公開されます。サポーターキーがあれば今すぐ使えます。",
 	"admin_settings_con_card_locked_link": "キーを追加",
+	"admin_settings_con_card_locked_post": "。",
 	"con_card_title": "{name}のコンカード",
 	"con_card_title_front": "{name}のコンカードの表面",
 	"con_card_title_back": "{name}のコンカードの裏面",

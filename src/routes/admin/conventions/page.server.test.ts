@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -353,6 +354,51 @@ describe('cons.fyi ingest: url sanitizing', () => {
 		expect(stored).toMatchObject([{ sourceId: 'mff-2026', url: null }]);
 	});
 
+	it('nulls a javascript: url already stored on a synced row, on the next sync', async () => {
+		// The gate is new; the rows it protects are not. A url that reached the
+		// schedule through the feed before the gate existed is still an href on the
+		// public page, and the sync already reads every row and writes one batch.
+		const { db, platform } = makeDb();
+		clearSettingsCache();
+		await db.insert(siteSettings).values({ key: 'blueskyUrl', value: 'https://bsky.app/profile/taro.surf' });
+		await db.insert(conventions).values({
+			name: 'Midwest FurFest 2026',
+			startDate: '2026-12-03',
+			url: 'javascript:alert(1)',
+			status: 'confirmed',
+			sourceId: 'mff-2026'
+		});
+		vi.mocked(consfyi.blueskyHandle).mockReturnValue('taro.surf');
+		vi.mocked(consfyi.fetchAttendingEvents).mockResolvedValue([event({ url: 'https://furfest.org' })]);
+
+		await actions.sync({ platform } as never);
+
+		expect(await db.select().from(conventions)).toMatchObject([
+			{ sourceId: 'mff-2026', url: null }
+		]);
+	});
+
+	it('leaves a good url on a synced row alone', async () => {
+		// The other direction: a re-run that nulls everything would pass the test
+		// above and quietly wipe every link on the schedule.
+		const { db, platform } = makeDb();
+		clearSettingsCache();
+		await db.insert(siteSettings).values({ key: 'blueskyUrl', value: 'https://bsky.app/profile/taro.surf' });
+		await db.insert(conventions).values({
+			name: 'Midwest FurFest 2026',
+			startDate: '2026-12-03',
+			url: 'https://furfest.org',
+			status: 'confirmed',
+			sourceId: 'mff-2026'
+		});
+		vi.mocked(consfyi.blueskyHandle).mockReturnValue('taro.surf');
+		vi.mocked(consfyi.fetchAttendingEvents).mockResolvedValue([event()]);
+
+		await actions.sync({ platform } as never);
+
+		expect(await db.select().from(conventions)).toMatchObject([{ url: 'https://furfest.org' }]);
+	});
+
 	it('stores null for a javascript: url picked from the feed by hand', async () => {
 		const { db, platform } = makeDb();
 		vi.mocked(consfyi.findConsFyiEvent).mockResolvedValue(event());
@@ -386,5 +432,41 @@ describe('cons.fyi ingest: url sanitizing', () => {
 		} as never);
 
 		expect(await db.select().from(conventions)).toMatchObject([{ url: 'https://furfest.org' }]);
+	});
+});
+
+// Source-pin for the page itself, per the con-card-markup.test.ts precedent:
+// nothing renders this component under the pure-TS vitest setup, and what the
+// live row does is a decision rather than styling.
+const pageSource = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+
+describe('admin conventions page: the live row', () => {
+	it('hands off to the QR with a plain link, not a scripted navigation', () => {
+		// /connect/qr is public, so the scan target still loads when admin has
+		// failed closed on a D1 outage, or when convention wifi left the session
+		// cookie in pieces. A goto() or a submit button needs the app working
+		// first, which is exactly the moment the operator is standing at a table.
+		expect(pageSource).toMatch(/<a href="\/connect\/qr"/);
+		expect(pageSource).not.toMatch(/goto\(/);
+		expect(pageSource).not.toMatch(/<button[^>]*qr-btn/);
+	});
+
+	it('shows the live pill in place of the status chip, never beside it', () => {
+		// Both are the row's status. Rendered together the row would claim to be
+		// live and upcoming at once, so the pill is the {#if} and the chip the
+		// {:else}, in the table and in the mobile list alike.
+		const branches = [
+			...pageSource.matchAll(
+				/\{#if live\}\s*<span class="live-pill">[\s\S]*?\{:else\}\s*<span class="status status-\{con\.status\}">[\s\S]*?\{\/if\}/g
+			)
+		];
+		expect(branches).toHaveLength(2);
+	});
+
+	it('carries the QR link in both the table and the mobile list', () => {
+		// The operator is on a phone at the table as often as at a desk, and a
+		// layout that drops the link hides the whole point of the live row.
+		expect([...pageSource.matchAll(/<a href="\/connect\/qr"/g)]).toHaveLength(2);
+		expect(pageSource).toMatch(/qr-btn mobile-qr/);
 	});
 });

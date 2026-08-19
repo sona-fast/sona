@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { adminLogin } from './admin-login';
 
 // The con card generator (SONA-115), driven in a real browser. Everything below
@@ -92,7 +93,16 @@ test.describe('admin settings con card', () => {
 		// Photos on iPhone refuses an SVG, so this path rasterizes through a canvas.
 		// The suffix is the assertion that the canvas half actually ran: a straight
 		// SVG save would come back .svg.
-		expect((await download).suggestedFilename()).toMatch(/\.png$/);
+		const saved = await download;
+		expect(saved.suggestedFilename()).toMatch(/\.png$/);
+
+		// And the file behind the name is a real PNG: a filename is set by the code
+		// that starts the save, before anything has been encoded, so an empty or
+		// truncated blob keeps the .png and lands on the phone unopenable.
+		const path = await saved.path();
+		const bytes = readFileSync(path);
+		expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+		expect(bytes.length).toBeGreaterThan(1000);
 
 		// The live region exists whether or not anything failed (a region created
 		// together with its text is not reliably announced), so "it worked" is the

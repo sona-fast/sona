@@ -48,8 +48,12 @@ describe('/connect/qr', () => {
 	// This route exists because admin fails closed on a D1 outage. If it ever
 	// needs a database it has lost its reason to be a separate page.
 	it('does not touch the database', () => {
+		// No platform in the event at all, so a load that reached for locals.db or
+		// platform.env.DB would throw rather than quietly returning something. And
+		// synchronous: a promise here means the page is awaiting a round trip.
 		const data = load({ url: new URL('https://sparky.ink/connect/qr') } as never);
-		expect(data).toBeTruthy();
+		expect(data).not.toBeInstanceOf(Promise);
+		expect(data).toMatchObject({ connectUrl: 'https://sparky.ink/connect' });
 	});
 
 	// The (paths) group's layout reads settings from D1, and /admin validates its

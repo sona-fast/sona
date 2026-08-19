@@ -115,18 +115,39 @@ describe('fetchConsFyiEvents', () => {
 		expect(event.timezone).toBe('America/Denver');
 	});
 
+	it('keeps a nested zone, which is a real IANA name and not junk', async () => {
+		// The bound below has to let three-part zones through: dropping
+		// America/Argentina/Ushuaia would silently un-zone a real con.
+		stubFeed(
+			jsonl({
+				id: 'ush',
+				name: 'Ushuaia Con',
+				startDate: '2026-09-10',
+				timezone: 'America/Argentina/Ushuaia'
+			})
+		);
+		const { fetchConsFyiEvents } = await import('./consfyi');
+		const [event] = await fetchConsFyiEvents();
+		expect(event.timezone).toBe('America/Argentina/Ushuaia');
+	});
+
 	it('leaves the zone undefined when the row has none, rather than throwing', async () => {
 		stubFeed(
 			jsonl(
 				{ id: 'none', name: 'No Zone Con', startDate: '2026-09-10' },
 				// A non-string zone is no zone: the column is an IANA name or nothing.
-				{ id: 'wrong', name: 'Bad Zone Con', startDate: '2026-09-11', timezone: 420 }
+				{ id: 'wrong', name: 'Bad Zone Con', startDate: '2026-09-11', timezone: 420 },
+				// And a string that is not a zone name is no zone either. It would be
+				// stored and then handed to Intl, which throws on it, in a page the
+				// operator did not touch.
+				{ id: 'junk', name: 'Junk Zone Con', startDate: '2026-09-12', timezone: 'not a zone!' }
 			)
 		);
 		const { fetchConsFyiEvents } = await import('./consfyi');
 		const byId = Object.fromEntries((await fetchConsFyiEvents()).map((e) => [e.id, e.timezone]));
 		expect(byId.none).toBeUndefined();
 		expect(byId.wrong).toBeUndefined();
+		expect(byId.junk).toBeUndefined();
 	});
 
 	it('returns [] (no throw) when the feed responds non-OK', async () => {

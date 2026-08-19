@@ -144,7 +144,10 @@ describe('conCardFaceSvg — the front', () => {
 	it('keeps a ZWJ emoji whole as the initial', () => {
 		const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
 		const svg = front({ name: `${family} Taro`, avatarHref: null });
-		expect(svg).toContain(family);
+		// The cluster has to BE one of the drawn texts. A substring match over the
+		// whole SVG passes on the name line alone, which carries the family emoji
+		// whatever the initial ends up being.
+		expect(texts(svg)).toContain(family);
 	});
 
 	it('splits the initial by code point, so an astral first glyph survives', () => {
@@ -219,6 +222,19 @@ describe('conCardFaceSvg — the front', () => {
 		expect(rendered.size).toBeLessThan(152);
 		// Shrunk, not cut, and inside the content column under the weighted measure.
 		expect(rendered.body).toBe('🦊'.repeat(8));
+		expect(8 * rendered.size).toBeLessThanOrEqual(CON_CARD_WIDTH - 56 * 2);
+	});
+
+	it('measures a keycap at a full em, though the digit it starts with is narrow', () => {
+		// The one cluster its base code point does not describe: '1' is Latin and
+		// narrow, and '1️⃣' is drawn as a square-em emoji. Weighed by the
+		// base alone, eight of them measured 730 units and fit the 738 unit column
+		// at the base size, then printed 1216 units wide.
+		const avatarHref = 'data:image/png;base64,AAAA';
+		const KEYCAP = '1️⃣';
+		const [rendered] = sized(front({ name: KEYCAP.repeat(8), species: null, avatarHref }));
+		expect(rendered.size).toBeLessThan(152);
+		expect(rendered.body).toBe(KEYCAP.repeat(8));
 		expect(8 * rendered.size).toBeLessThanOrEqual(CON_CARD_WIDTH - 56 * 2);
 	});
 

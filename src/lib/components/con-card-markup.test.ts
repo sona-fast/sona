@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import * as m from '$lib/paraglide/messages';
 
 // Source-pin for ConCard, per the link-row-markup.test.ts precedent: nothing
 // renders this component under the pure-TS vitest setup, and its three download
@@ -103,6 +104,18 @@ describe('ConCard download paths', () => {
 		// Read off the shared object, so the list cannot disagree with the card.
 		expect(source).toMatch(/shared\.species \? m\.con_card_field_species\(\)/);
 		expect(source).toMatch(/shared\.handles\.length \? m\.con_card_handles\(\)/);
+	});
+
+	it('composes the title and its field list into one sentence', () => {
+		// withFields concatenates with no separator of its own, so the boundary
+		// between the two lives in the suffix message. Pin the composed English
+		// string for a two-field card: a suffix that loses its leading period runs
+		// the list straight on from the name.
+		const fields = [m.con_card_field_species(), m.con_card_handles()];
+		const composed =
+			m.con_card_title_front({ name: 'Sparky' }) +
+			m.con_card_title_fields({ fields: fields.join(m.con_card_field_join()) });
+		expect(composed).toBe('Front of the con card for Sparky. Includes Species, Handles.');
 	});
 
 	it('clears both failure flags at the top of all three save paths', () => {

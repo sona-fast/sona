@@ -216,6 +216,10 @@ function clusters(body: string): string[] {
 function advanceOf(cluster: string): number {
 	const base = cluster.codePointAt(0);
 	if (base === undefined) return 0;
+	// The one cluster whose base does not describe it: a keycap is an ASCII digit
+	// (or # or *) wearing U+20E3, and it draws as a square-em emoji rather than as
+	// the narrow character it starts with.
+	if (cluster.includes('\u20E3')) return WIDE_ADVANCE;
 	return WIDE.test(String.fromCodePoint(base)) ? WIDE_ADVANCE : AVG_ADVANCE;
 }
 
@@ -316,8 +320,8 @@ function cardEdge(stroke: string): string {
 }
 
 /** The first character of the name, for the ring with no avatar in it. Split by
- *  code point: a name starting with an emoji or an astral CJK glyph must not be
- *  cut in half. */
+ *  grapheme cluster: a name starting with an emoji or an astral CJK glyph must
+ *  not be cut in half. */
 function initialOf(name: string): string {
 	// First grapheme cluster, not first code point: a name leading with a ZWJ
 	// emoji keeps the whole glyph in the ring rather than its first member.

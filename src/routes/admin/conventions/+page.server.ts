@@ -117,7 +117,12 @@ export const actions = {
 		}
 
 		const rows = await db
-			.select({ sourceId: conventions.sourceId, timezone: conventions.timezone })
+			.select({
+				id: conventions.id,
+				sourceId: conventions.sourceId,
+				timezone: conventions.timezone,
+				url: conventions.url
+			})
 			.from(conventions);
 		const existing = new Set(rows.map((r) => r.sourceId).filter(Boolean));
 		// Rows already on the schedule that have no zone yet: either they were added
@@ -132,6 +137,16 @@ export const actions = {
 		// The inserts ride the same batch as the backfills, so the whole sync is one
 		// round trip and lands all-or-nothing rather than half-applied.
 		const writes: BatchItem<'sqlite'>[] = [];
+		// Rows the feed put here before the url gate existed still carry whatever
+		// cons.fyi said at the time, and they are rendered as hrefs on the public
+		// schedule. The rows are already read and the batch is already going, so
+		// re-run the same gate over them: a javascript: url that got in earlier is
+		// cleared on the next sync rather than waiting to be noticed. Feed rows
+		// only: a hand-typed url passed the gate on its way in.
+		for (const row of rows) {
+			if (!row.sourceId || !row.url || sanitizeUrl(row.url)) continue;
+			writes.push(db.update(conventions).set({ url: null }).where(eq(conventions.id, row.id)));
+		}
 		for (const e of events) {
 			if (existing.has(e.id)) {
 				// Already on the schedule, but with no zone. Never overwrites a zone

@@ -82,8 +82,8 @@
 	// the con card" whichever boxes are ticked, which is the one thing this
 	// control exists to change. Read off `shared`, so a toggle can never disagree
 	// with the list. Concatenated with no separator of its own: the suffix message
-	// carries its own leading space in English and none in Japanese, which does
-	// not put one between a sentence and a parenthetical.
+	// carries its own leading punctuation, which closes the title as a sentence in
+	// English and opens a parenthetical in Japanese, where nothing goes between.
 	function withFields(title: string, fields: string[]): string {
 		const listed = fields.filter(Boolean);
 		if (listed.length === 0) return title;
@@ -296,11 +296,13 @@
 		<!-- Always in the DOM, empty until something has to be said: a live region
 		     created together with its text is not reliably announced. The handle hint
 		     shares it with the two failures because all three are the same moment for
-		     the operator: something about the card just changed under them. -->
+		     the operator: something about the card just changed under them. The two
+		     failures come first: a save that just went wrong outranks advice about a
+		     crowded card, and the region is read in DOM order. -->
 		<p class="status-line" role="status">
-			{#if chosenHandles.length > COMFORTABLE_HANDLES}<span class="hint">{m.con_card_handle_hint()}</span>{/if}
 			{#if avatarFailed}<span class="hint art-failed">{m.con_card_art_failed()}</span>{/if}
 			{#if rasterFailed}<span class="hint art-failed">{m.con_card_save_failed()}</span>{/if}
+			{#if chosenHandles.length > COMFORTABLE_HANDLES}<span class="hint">{m.con_card_handle_hint()}</span>{/if}
 		</p>
 
 		<div class="actions">
@@ -329,6 +331,11 @@
 	.con-card {
 		display: grid;
 		gap: 20px;
+		/* The settings section's explainer sits right above, and the previews are
+		   the loudest thing on the tab. The gap belongs to the card rather than to
+		   the paragraph: the same explainer style is used everywhere else on the
+		   page, where nothing needs the extra room. */
+		margin-top: 16px;
 	}
 	.preview {
 		display: flex;
@@ -399,6 +406,12 @@
 		font-size: 14px;
 		cursor: pointer;
 	}
+	/* .controls packs its children to the start, which leaves the hover wash
+	   narrower than the column it sits in. Claim the width so the wash lines up
+	   with the controls above it. */
+	.handles {
+		justify-self: stretch;
+	}
 	/* One handle per row, so the account the card will print sits beside the
 	   platform it belongs to rather than being guessed from a checkbox. */
 	.handles .rows {
@@ -418,8 +431,16 @@
 		padding-inline: 8px;
 		border-radius: var(--radius-s);
 	}
+	/* A tint of the text colour rather than --secondary: the wash stays a wash at
+	   any theme, instead of landing on a surface the muted handle text was never
+	   checked against. */
 	.handles .handle-row:hover {
-		background: var(--secondary);
+		background: color-mix(in srgb, var(--foreground) 8%, transparent);
+	}
+	/* The handle is muted while it sits still, and full strength under the
+	   pointer, per the SONA-124 chip: the row lifting means this row. */
+	.handles .handle-row:hover .handle-value {
+		color: var(--foreground);
 	}
 	.handle-value {
 		justify-self: end;
@@ -438,8 +459,11 @@
 	}
 	/* On a phone the two buttons wrap to a ragged pair of half-rows. Stack them
 	   full width instead, and put "save to phone" on top: it is the save that
-	   matters, and on a phone it is the one being pressed. `order` only, so the
-	   tab order still runs print then phone, matching the DOM. */
+	   matters, and on a phone it is the one being pressed. `order` only, so below
+	   520px the visual order and the tab order disagree: tabbing still runs print
+	   then phone, matching the DOM. Accepted: these are two independent buttons
+	   rather than a sequence, so neither one is a step toward the other and
+	   arriving at them in the other order costs nothing. */
 	@media (max-width: 520px) {
 		.actions {
 			display: grid;
