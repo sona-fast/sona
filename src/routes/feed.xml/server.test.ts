@@ -186,17 +186,22 @@ describe('GET /feed.xml — the master toggle', () => {
 		expect((await call(platform, { key: KEY })).status).toBe(404);
 	});
 
-	it('404s (fails closed) when the settings read throws', async () => {
+	it('503s (fails closed, retryably) when the settings read throws', async () => {
 		// getSettings swallows D1 errors and returns DEFAULTS, where the feed is
 		// default-ON — so a gate reading through it would publish the feed for an
-		// owner who turned it off. The raw read must 404 instead. An absent
+		// owner who turned it off. The raw read must refuse instead. An absent
 		// site_settings table is the read failure a mid-deploy fork actually hits.
+		//
+		// 503 rather than 404 on purpose: both refuse to serve, but readers treat
+		// 404 as "gone" and can drop the subscription for good, so a transient D1
+		// failure would cost a subscriber permanently. Only a deliberate opt-out
+		// gets 404 (the tests above).
 		const { db, platform, sqlite } = makeDb();
 		await addArtist(db);
 		await addImage(db);
 		sqlite.exec('DROP TABLE site_settings');
 
-		expect((await call(platform)).status).toBe(404);
+		expect((await call(platform)).status).toBe(503);
 	});
 });
 

@@ -76,8 +76,14 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 		SETTINGS_TIMEOUT_MS,
 		null
 	);
-	if (!raw) error(404, 'Not found');
-	// Absent means ON — only an explicit 'false' is an owner who opted out.
+	// 503, not 404, when the read itself failed: both refuse to serve, but a feed
+	// reader treats 404 as "this feed is gone" and several stop polling or mark
+	// the subscription dead, so one D1 latency spike would cost a subscriber
+	// permanently with no self-heal. 503 is the same refusal spelled as "come
+	// back", which is what a transient failure actually is.
+	if (!raw) error(503, 'Service unavailable');
+	// Absent means ON — only an explicit 'false' is an owner who opted out. This
+	// one IS 404: the feed really is gone, and a reader dropping it is correct.
 	if (raw.rssFeedEnabled === 'false') error(404, 'Not found');
 
 	// Adult work is served only when the owner enabled it AND the request carries

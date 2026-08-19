@@ -414,7 +414,7 @@
      — otherwise Enter in any Site-tab text field would regenerate the feed key
      instead of saving. Nested forms are not an option; this is what the
      attribute exists for. -->
-<form id="regenerate-feed-key" method="POST" action="?/regenerateFeedKey" use:enhance={() => {
+<form id="regenerate-feed-key" class="contents" method="POST" action="?/regenerateFeedKey" use:enhance={() => {
 	regeneratingFeedKey = true;
 	return async ({ result }) => {
 		regeneratingFeedKey = false;

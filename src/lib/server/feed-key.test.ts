@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { mintFeedKey, feedKeyMatches } from './feed-key';
 
+/** Alternating case, so the assertion cannot pass by folding one way only. */
+const mixedCase = (s: string) =>
+	Array.from(s, (c, i) => (i % 2 ? c.toUpperCase() : c.toLowerCase())).join('');
+
 describe('mintFeedKey', () => {
 	it('mints 32 lowercase hex characters — a full 128 bits', () => {
 		expect(mintFeedKey()).toMatch(/^[0-9a-f]{32}$/);
@@ -45,7 +49,17 @@ describe('feedKeyMatches', () => {
 		expect(feedKeyMatches('anything', '')).toBe(false);
 	});
 
-	it('is case-sensitive (the mint is lowercase; so is the comparison)', () => {
-		expect(feedKeyMatches(stored.toUpperCase(), stored)).toBe(false);
+	// Hex was chosen over base64url so the key survives being retyped by hand.
+	// That only pays off if the comparison folds case: otherwise a key copied
+	// from a screenshot in capitals returns the plain SFW feed, which looks
+	// exactly like a key that was revoked.
+	it('accepts the stored key in any case', () => {
+		expect(feedKeyMatches(stored.toUpperCase(), stored)).toBe(true);
+		expect(feedKeyMatches(mixedCase(stored), stored)).toBe(true);
+	});
+
+	it('still rejects a wrong key regardless of case', () => {
+		const wrong = stored.slice(0, -1) + (stored.endsWith('a') ? 'b' : 'a');
+		expect(feedKeyMatches(wrong.toUpperCase(), stored)).toBe(false);
 	});
 });

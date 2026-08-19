@@ -36,12 +36,19 @@ export function mintFeedKey(): string {
  * An empty `expected` — no key minted yet — never matches, including against an
  * empty `presented`. That is what stops `?key=` (or a bare `/feed.xml?key`) from
  * unlocking the adult feed on a fork that has not opted in.
+ *
+ * Case-insensitive, which is the point of choosing hex above: an owner who
+ * retypes the key from a screenshot in capitals would otherwise get the plain
+ * SFW document, indistinguishable from a key that had been revoked. Folding
+ * case widens nothing — the same 128 bits are still required — and happens
+ * after the length check, so the timing property is unchanged.
  */
 export function feedKeyMatches(presented: string | null, expected: string): boolean {
 	if (!expected || !presented || presented.length !== expected.length) return false;
+	const lowered = presented.toLowerCase();
 	let diff = 0;
 	for (let i = 0; i < expected.length; i++) {
-		diff |= presented.charCodeAt(i) ^ expected.charCodeAt(i);
+		diff |= lowered.charCodeAt(i) ^ expected.charCodeAt(i);
 	}
 	return diff === 0;
 }

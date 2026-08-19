@@ -302,6 +302,11 @@ describe('RSS feed key', () => {
 		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
 		expect(src).toMatch(/<form id="regenerate-feed-key"[^>]*action="\?\/regenerateFeedKey"/);
 		expect(src).toMatch(/type="submit"\s+form="regenerate-feed-key"/);
+		// display:contents, like the site form beside it. The panel is a flex
+		// column with a 40px gap, so an empty form that stays a flex item adds
+		// 40px of dead space above the first section — on every tab, including
+		// the ones that have nothing to do with the feed.
+		expect(src).toMatch(/<form id="regenerate-feed-key"[^>]*class="contents"/);
 		// No formaction anywhere: that is the shape that would re-break it.
 		expect(src).not.toContain('formaction');
 	});
