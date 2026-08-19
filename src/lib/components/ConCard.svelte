@@ -10,6 +10,7 @@
 		type ConCardColor,
 		type ConCardHandle
 	} from '$lib/con-card';
+	import { SOCIAL_PLATFORM_NAMES } from '$lib/social-label';
 
 	interface Props {
 		name: string;
@@ -178,8 +179,8 @@
 				{#if artCredit}
 					<label><input type="checkbox" bind:checked={includeCredit} /> {m.con_card_include_credit()}</label>
 				{/if}
-				{#each handles as handle, i (handle.label)}
-					<label><input type="checkbox" bind:checked={handleOn[i]} /> {handle.label}</label>
+				{#each handles as handle, i (handle.platform)}
+					<label><input type="checkbox" bind:checked={handleOn[i]} /> {SOCIAL_PLATFORM_NAMES[handle.platform]}</label>
 				{/each}
 			</div>
 		</fieldset>

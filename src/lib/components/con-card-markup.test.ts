@@ -26,6 +26,14 @@ describe('ConCard download paths', () => {
 		expect(source).toMatch(/savePhone[\s\S]*?artHref: await embedArt\(\)/);
 	});
 
+	it('names the platform beside each include toggle, where the card draws an icon', () => {
+		// The icons are for the printed card; a checkbox is settings UI and has to
+		// say which platform it turns on in words.
+		expect(source).toMatch(
+			/bind:checked=\{handleOn\[i\]\} \/> \{SOCIAL_PLATFORM_NAMES\[handle\.platform\]\}/
+		);
+	});
+
 	it('keeps the card whole when the art cannot be fetched', () => {
 		// The QR is the point of the card; a failed sheet must not block the save.
 		expect(source).toMatch(/artFailed = true;[\s\S]*?return null;/);

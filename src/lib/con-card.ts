@@ -1,4 +1,6 @@
 import { qrSvg } from '$lib/qr';
+import { SOCIAL_ICON_PATHS, SOCIAL_ICON_VIEWBOX } from '$lib/social-icon-paths';
+import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from '$lib/social-label';
 
 /**
  * The con card: the operator's site as a physical object, sized for a badge
@@ -21,8 +23,8 @@ export interface ConCardColor {
 }
 
 export interface ConCardHandle {
-	/** Platform name as it reads on screen ("Bluesky"). */
-	label: string;
+	/** Which platform the row stands for; the card draws its icon. */
+	platform: SocialPlatform;
 	/** The handle itself, already carrying its @ (see social-label's rule 1). */
 	value: string;
 }
@@ -75,6 +77,13 @@ const QR_GUTTER = 48;
 const MAX_CARD_COLORS = 4;
 /** Above this the handle rows shrink so a longer list still fits the column. */
 const COMFORTABLE_HANDLES = 2;
+/** Icon edge as a share of the row's font size, and the gap after it. */
+const ICON_SIZE_RATIO = 0.9;
+const ICON_GAP_RATIO = 0.4;
+/** How far the icon box rises above the text baseline it sits on. Brand marks
+ *  fill their box, so this centers one against cap height rather than against
+ *  the em box, which would ride high. */
+const ICON_LIFT_RATIO = 0.78;
 
 const FONT = "ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif";
 
@@ -165,6 +174,28 @@ function text(x: number, y: number, body: string, o: TextOpts): string {
 	return `<text ${attrs.join(' ')}>${esc(body)}</text>`;
 }
 
+/**
+ * A platform glyph on a handle row: the icon component's 24-unit artwork,
+ * scaled by a nested <svg> rather than by transform arithmetic. The <title>
+ * carries the platform name, which the row no longer spells out in text.
+ */
+function socialIcon(
+	x: number,
+	baseline: number,
+	size: number,
+	path: string,
+	name: string,
+	fill: string
+): string {
+	const top = Math.round(baseline - size * ICON_LIFT_RATIO);
+	return [
+		`<svg x="${x}" y="${top}" width="${size}" height="${size}" viewBox="0 0 ${SOCIAL_ICON_VIEWBOX} ${SOCIAL_ICON_VIEWBOX}" role="img">`,
+		`<title>${esc(name)}</title>`,
+		`<path d="${path}" fill="${fill}"/>`,
+		'</svg>'
+	].join('');
+}
+
 /** A field heading: small, tracked out, upper case. */
 function fieldLabel(x: number, y: number, body: string, fill: string): string {
 	return `<text x="${x}" y="${y}" font-size="24" font-weight="600" letter-spacing="4" fill="${fill}">${esc(body.toUpperCase())}</text>`;
@@ -251,10 +282,25 @@ export function conCardSvg(opts: ConCardOptions): string {
 		// The mock's two-handle guidance is a recommendation, not a limit — past
 		// it the rows shrink instead of the list being cut.
 		const size = handles.length > COMFORTABLE_HANDLES ? 30 : 34;
+		const icon = Math.round(size * ICON_SIZE_RATIO);
+		const gap = Math.round(size * ICON_GAP_RATIO);
 		handles.forEach((handle, i) => {
-			const line = `${handle.label} ${handle.value}`;
+			const baseline = y + 44 + i * (size + 12);
+			const glyph = SOCIAL_ICON_PATHS[handle.platform];
+			const name = SOCIAL_PLATFORM_NAMES[handle.platform] ?? '';
+			if (!glyph) {
+				// No glyph for this platform: the row reads as the platform name and
+				// the handle, rather than as a handle with a hole where its icon goes.
+				const line = name ? `${name} ${handle.value}` : handle.value;
+				parts.push(text(contentX, baseline, clampText(line, size, contentW), { size, fill: c.fg }));
+				return;
+			}
+			// Muted, like the field headings: the icon says which platform, the
+			// handle beside it is the part a stranger has to read and type.
+			parts.push(socialIcon(contentX, baseline, icon, glyph, name, c.muted));
+			const textX = contentX + icon + gap;
 			parts.push(
-				text(contentX, y + 44 + i * (size + 12), clampText(line, size, contentW), {
+				text(textX, baseline, clampText(handle.value, size, contentX + contentW - textX), {
 					size,
 					fill: c.fg
 				})

@@ -545,7 +545,7 @@ describe('settings load — con card (SONA-115)', () => {
 		name: string;
 		species: string;
 		colors: Array<{ name: string; hex: string }>;
-		handles: Array<{ label: string; value: string }>;
+		handles: Array<{ platform: string; value: string }>;
 		artCredit: string | null;
 		connectUrl: string;
 		displayDomain: string;
@@ -628,9 +628,11 @@ describe('settings load — con card (SONA-115)', () => {
 
 		const card = await conCard(db, platform);
 
+		// The platform id rather than its name: the card draws the platform as its
+		// icon, and the settings UI resolves the name it shows from the same id.
 		expect(card.handles).toEqual([
-			{ label: 'Bluesky', value: '@taro.surf' },
-			{ label: 'Telegram', value: '@taro_tg' }
+			{ platform: 'bluesky', value: '@taro.surf' },
+			{ platform: 'telegram', value: '@taro_tg' }
 		]);
 	});
 

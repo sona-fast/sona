@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { qrSvg } from './qr';
+import { SOCIAL_ICON_PATHS } from './social-icon-paths';
+import { SOCIAL_PLATFORM_NAMES } from './social-label';
 import {
 	conCardSvg,
 	conCardFileBase,
@@ -20,7 +22,7 @@ function card(overrides: Partial<ConCardOptions> = {}): string {
 			{ name: 'Rust', hex: '#b45309' },
 			{ name: 'Cream', hex: '#fef3c7' }
 		],
-		handles: [{ label: 'Bluesky', value: '@taro' }],
+		handles: [{ platform: 'bluesky', value: '@taro' }],
 		connectUrl: 'https://taro.surf/connect',
 		displayDomain: 'taro.surf',
 		...overrides
@@ -102,37 +104,66 @@ describe('conCardSvg — sections omit themselves', () => {
 });
 
 describe('conCardSvg — handles', () => {
-	it('renders one row per handle, platform then handle', () => {
+	it('renders one row per handle: the platform icon, then the handle', () => {
 		const svg = card({
 			handles: [
-				{ label: 'Bluesky', value: '@taro' },
-				{ label: 'Telegram', value: '@taro_tg' }
+				{ platform: 'bluesky', value: '@taro' },
+				{ platform: 'telegram', value: '@taro_tg' }
 			]
 		});
-		expect(texts(svg)).toEqual(
-			expect.arrayContaining(['Bluesky @taro', 'Telegram @taro_tg'])
-		);
+		expect(texts(svg)).toEqual(expect.arrayContaining(['@taro', '@taro_tg']));
+		// The platform reads as its mark, not as its name.
+		expect(texts(svg).join(' ')).not.toContain('Bluesky');
+		expect(svg).toContain(`<path d="${SOCIAL_ICON_PATHS.bluesky}"`);
+		expect(svg).toContain(`<path d="${SOCIAL_ICON_PATHS.telegram}"`);
+	});
+
+	it('draws each platform its own icon, named for a screen reader', () => {
+		for (const platform of ['bluesky', 'telegram', 'twitter', 'instagram'] as const) {
+			const svg = card({ handles: [{ platform, value: '@taro' }] });
+			const glyph = SOCIAL_ICON_PATHS[platform] as string;
+			expect(svg, platform).toContain(`<path d="${glyph}"`);
+			expect(svg, platform).toContain(`<title>${SOCIAL_PLATFORM_NAMES[platform]}</title>`);
+			// Every other platform's mark stays off this card.
+			for (const other of ['bluesky', 'telegram', 'twitter', 'instagram'] as const) {
+				if (other !== platform) expect(svg, `${platform}/${other}`).not.toContain(
+					`<path d="${SOCIAL_ICON_PATHS[other]}"`
+				);
+			}
+		}
+	});
+
+	it('falls back to the platform name in text when there is no icon for it', () => {
+		// FurTrack's mark is a dozen shapes rather than one path, so the card has
+		// no glyph to draw, and the row still has to read as a row.
+		const svg = card({ handles: [{ platform: 'furtrack', value: '@taro' }] });
+		expect(texts(svg)).toContain('FurTrack @taro');
+		expect(svg).not.toContain('<path d="undefined"');
+		expect(svg).not.toContain('<title>FurTrack</title>');
 	});
 
 	it('shrinks the rows past two handles rather than cutting the list', () => {
 		const two = card({
 			handles: [
-				{ label: 'Bluesky', value: '@a' },
-				{ label: 'Telegram', value: '@b' }
+				{ platform: 'bluesky', value: '@a' },
+				{ platform: 'telegram', value: '@b' }
 			]
 		});
 		const four = card({
 			handles: [
-				{ label: 'Bluesky', value: '@a' },
-				{ label: 'Telegram', value: '@b' },
-				{ label: 'Twitter', value: '@c' },
-				{ label: 'Instagram', value: '@d' }
+				{ platform: 'bluesky', value: '@a' },
+				{ platform: 'telegram', value: '@b' },
+				{ platform: 'twitter', value: '@c' },
+				{ platform: 'instagram', value: '@d' }
 			]
 		});
 		expect(two).toContain('font-size="34"');
 		expect(four).not.toContain('font-size="34"');
 		expect(four).toContain('font-size="30"');
-		expect(texts(four).filter((t) => t.startsWith('@') || t.includes(' @'))).toHaveLength(4);
+		expect(texts(four).filter((t) => t.startsWith('@'))).toHaveLength(4);
+		// The icons shrink with the rows they sit on.
+		expect(two).toContain(`width="31" height="31"`);
+		expect(four).toContain(`width="27" height="27"`);
 	});
 
 	it('caps the swatch row at four, so a long palette still reads as a palette', () => {
@@ -158,7 +189,9 @@ describe('conCardSvg — variants', () => {
 		for (const variant of ['light', 'dark'] as const) {
 			const svg = card({ variant });
 			const plate = svg.match(/<rect x="870"[^>]*fill="([^"]+)"/)?.[1];
-			const modules = svg.match(/<path d="[^"]*" fill="([^"]+)"/)?.[1];
+			// Anchored on the QR's own nested <svg>: the handle rows draw platform
+			// icons as paths too, and those come first in the document.
+			const modules = svg.match(/<g transform="translate[^>]*><path d="[^"]*" fill="([^"]+)"/)?.[1];
 			expect(plate, variant).toBe('#ffffff');
 			expect(modules, variant).not.toBe('#ffffff');
 		}
@@ -175,7 +208,9 @@ describe('conCardSvg — the printed sheet', () => {
 
 	it('takes its accessible name from the caller, and omits the title without one', () => {
 		expect(card({ title: 'Con card for Taro' })).toContain('<title>Con card for Taro</title>');
-		expect(card()).not.toContain('<title>');
+		// Handles carry a <title> per icon, so the card without one is the card
+		// with nothing else to title.
+		expect(card({ handles: [] })).not.toContain('<title>');
 	});
 
 	it('escapes operator-entered text rather than letting it close a tag', () => {

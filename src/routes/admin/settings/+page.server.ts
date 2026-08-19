@@ -42,7 +42,7 @@ import { sql, inArray } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl, isValidEmail, normalizeHttpsUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
-import { SOCIAL_PLATFORM_NAMES, socialAtHandle } from '$lib/social-label';
+import { socialAtHandle } from '$lib/social-label';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
 import { resolveAvatarUrl, isOurAvatarUrl, shouldWriteAvatar } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
@@ -131,7 +131,7 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 			// A setting with no handle in it renders as the bare platform name
 			// elsewhere; on a card that is a row telling a stranger nothing, so
 			// it is dropped instead.
-			return handle ? [{ label: SOCIAL_PLATFORM_NAMES[social], value: handle }] : [];
+			return handle ? [{ platform: social, value: handle }] : [];
 		}),
 		// The spine prefers the handle: it is shorter, and it is what someone
 		// reading the card can act on.
