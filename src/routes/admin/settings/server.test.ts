@@ -268,10 +268,26 @@ describe('RSS feed key', () => {
 		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
 		const handler = src.split('<form id="regenerate-feed-key"')[1]?.split('</form>')[0] ?? '';
 		expect(handler).toContain('use:enhance');
+		// Neither route back into the load: update() reruns it, invalidateAll is
+		// the same thing spelled out.
 		expect(handler).not.toContain('update(');
+		expect(handler).not.toContain('invalidateAll');
+		// The success arm takes the minted key from the result instead of reloading.
+		expect(handler).toMatch(/result\.type === 'success'/);
 		expect(handler).toContain('result.data?.feedKey');
+		expect(handler).toMatch(/regeneratedKey = key/);
+		// Everything else still has to be handed to applyAction by hand: skipping
+		// update() also skips the applyAction it would have run, so a failed D1
+		// write (`error`) and an expired session (`redirect`) would both vanish and
+		// the button would look inert while the leaked key stayed live.
+		expect(handler).toMatch(/else\s*\{[\s\S]*?applyAction\(result\)/);
+		expect(src).toMatch(/import \{[^}]*\bapplyAction\b[^}]*\} from '\$app\/forms'/);
 		// And the displayed address prefers that key over the loaded one.
-		expect(src).toContain('regeneratedKey ?? data.settings.rssNsfwKey');
+		expect(src).toMatch(/regeneratedKey \?\? data\.settings\.rssNsfwKey/);
+		// Until a load actually completes: the resync effect drops the local key so
+		// a key another tab has already replaced can't outlive its own data.
+		const resync = src.split('// Sync from server when data changes')[1]?.split('});')[0] ?? '';
+		expect(resync).toMatch(/regeneratedKey = null/);
 	});
 
 	// The Regenerate control destroys a working address, so it must never be what
@@ -293,28 +309,51 @@ describe('RSS feed key', () => {
 	it('nests the NSFW row inside the master toggle, and the key row inside both', () => {
 		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
 		const section = src.split('{m.admin_settings_rss_heading()}')[1]?.split('</section>')[0] ?? '';
-		expect(section).toContain('{#if rssFeedEnabled}');
 		// Order in the source is the nesting: master opens, then the NSFW row, then
-		// the key gate, which reads the STORED setting rather than the checkbox.
-		const master = section.indexOf('{#if rssFeedEnabled}');
-		const nsfwRow = section.indexOf('name="rssNsfwEnabled"');
-		const keyGate = section.indexOf('{#if data.settings.rssNsfwEnabled && feedKeyUrl}');
+		// the key gate.
+		const master = section.search(/\{#if\s+rssFeedEnabled\}/);
+		const nsfwRow = section.search(/name="rssNsfwEnabled"/);
+		const keyGate = section.search(/\{#if\s+feedKeyVisible\}/);
 		expect(master).toBeGreaterThan(-1);
 		expect(nsfwRow).toBeGreaterThan(master);
 		expect(keyGate).toBeGreaterThan(nsfwRow);
+		// That gate reads the STORED setting, not the checkbox: the key is minted
+		// by the save. One derived feeds both it and the describedby wiring below,
+		// so the two can't drift into describing an element that isn't rendered.
+		expect(src).toMatch(
+			/feedKeyVisible = \$derived\([\s\S]{0,40}data\.settings\.rssNsfwEnabled && feedKeyUrl/
+		);
 		// And the key row is what sits inside that innermost gate.
-		expect(section.indexOf('<CopyCommand')).toBeGreaterThan(keyGate);
+		expect(section.search(/<CopyCommand/)).toBeGreaterThan(keyGate);
 		// The pre-save arm: ticked but nothing minted yet. Without it the section
 		// looks inert, and nothing else in the suite would notice it going.
-		expect(section).toContain('{:else if rssNsfwEnabled}');
-		expect(section.indexOf('m.admin_settings_rss_key_pending()')).toBeGreaterThan(
-			section.indexOf('{:else if rssNsfwEnabled}')
-		);
+		const pendingArm = section.search(/\{:else if\s+rssNsfwEnabled\}/);
+		expect(pendingArm).toBeGreaterThan(keyGate);
+		expect(section.search(/m\.admin_settings_rss_key_pending\(\)/)).toBeGreaterThan(pendingArm);
 		// The master hint changes tense with the toggle. Collapsing the ternary to
 		// either arm leaves an owner reading about a feed that is not in the state
 		// the text describes.
 		const hint = section.match(/\{rssFeedEnabled\s*\?([\s\S]*?)\}/)?.[0] ?? '';
 		expect(hint).toContain('m.admin_settings_rss_enabled_hint()');
 		expect(hint).toContain('m.admin_settings_rss_enabled_hint_off()');
+	});
+
+	// A sighted owner who ticks the box sees the "save to create the address"
+	// line appear; a screen-reader user only meets it if the checkbox points at
+	// it. Both sides are plain strings, so renaming one alone leaves the pointer
+	// dangling and nothing else in the suite notices.
+	it('announces the pre-save line with the NSFW checkbox that produced it', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		const section = src.split('{m.admin_settings_rss_heading()}')[1]?.split('</section>')[0] ?? '';
+		expect(section).toMatch(/<p class="feed-key-pending" id="rssNsfwEnabled-pending">/);
+		const describedBy = section.match(/aria-describedby=\{([^}]*)\}/)?.[1] ?? '';
+		expect(describedBy).toContain('rssNsfwEnabled-desc');
+		expect(describedBy).toContain('rssNsfwEnabled-pending');
+		// Every id it can name has to resolve to an element in this same section.
+		const ids = [...describedBy.matchAll(/'([^']*)'/g)]
+			.flatMap((mm) => mm[1].split(/\s+/))
+			.filter(Boolean);
+		expect(ids.length).toBeGreaterThan(0);
+		for (const id of ids) expect(section, `aria-describedby names a missing id: ${id}`).toContain(`id="${id}"`);
 	});
 });

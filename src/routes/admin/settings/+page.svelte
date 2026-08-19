@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
+	import { applyAction, enhance } from '$app/forms';
 	import { afterNavigate, invalidateAll, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -78,12 +78,18 @@
 		const key = regeneratedKey ?? data.settings.rssNsfwKey;
 		return key ? `${$page.url.origin}/feed.xml?key=${key}` : '';
 	});
+	// Gated on the STORED setting, not the checkbox: the key is minted when the
+	// save lands, so there is nothing to show until the page reloads with one.
+	// One derived drives both the {#if} and feedKeyPending below — written twice,
+	// the two could drift and leave aria-describedby pointing at an id that was
+	// never rendered.
+	const feedKeyVisible = $derived(Boolean(data.settings.rssNsfwEnabled && feedKeyUrl));
 	// True exactly while the "Save to create the address" line is on screen (the
 	// {:else if rssNsfwEnabled} arm below). It joins the checkbox's
 	// aria-describedby so the line is announced with the control that produced
 	// it — otherwise a screen-reader user who ticks the box and tabs to Save
 	// never meets it.
-	const feedKeyPending = $derived(rssNsfwEnabled && !(data.settings.rssNsfwEnabled && feedKeyUrl));
+	const feedKeyPending = $derived(rssNsfwEnabled && !feedKeyVisible);
 	let termsOfService = $state(data.settings.termsOfService);
 
 	// Sona / character profile — feeds the /art page of the threePath landing.
@@ -325,6 +331,11 @@
 		aiPageText = data.settings.aiPageText;
 		rssFeedEnabled = data.settings.rssFeedEnabled;
 		rssNsfwEnabled = data.settings.rssNsfwEnabled;
+		// A completed load outranks the key Regenerate minted: in a second tab the
+		// stored key may have moved on again, and holding the local one would keep
+		// showing (and copying) a dead address. Regenerate deliberately does not
+		// reload, so this does not undo it.
+		regeneratedKey = null;
 		termsOfService = data.settings.termsOfService;
 		adminEmail = data.adminEmail;
 		sonaSpecies = data.settings.sonaSpecies;
@@ -416,6 +427,13 @@
 			const key = result.data?.feedKey;
 			if (typeof key === 'string') regeneratedKey = key;
 			toast.success(m.admin_settings_rss_regenerated());
+		} else {
+			// Skipping the update helper also skips the applyAction it would run, so
+			// every other result has to be handed over by hand: a failed D1 write
+			// comes back as `error` and an expired session as a `redirect` to the
+			// login page. Drop this and both vanish — the owner rotating a leaked
+			// key sees a button that does nothing while the old key stays live.
+			await applyAction(result);
 		}
 	};
 }}></form>
@@ -549,10 +567,7 @@
 						<span class="checkbox-desc" id="rssNsfwEnabled-desc">{m.admin_settings_rss_nsfw_hint()}</span>
 					</span>
 				</div>
-				<!-- Gated on the STORED key, not the checkbox: the key is minted when
-				     the save lands, so there is nothing to show until the page
-				     reloads with one. -->
-				{#if data.settings.rssNsfwEnabled && feedKeyUrl}
+				{#if feedKeyVisible}
 					<!-- The label is a plain span, not a <label>: there is no form control
 					     to point `for` at. role="group" + aria-labelledby is what ties it
 					     to the address and its controls, so a screen reader announces

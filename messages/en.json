@@ -37,7 +37,7 @@
 	"admin_settings_ai_text_label": "AI page text override",
 	"admin_settings_rss_heading": "RSS feed",
 	"admin_settings_rss_enabled_label": "Publish the RSS feed",
-	"admin_settings_rss_enabled_hint": "Your site offers a feed of new work at /feed.xml, linked from the footer. Feed readers use it to follow new uploads without an account. Sticker pack covers appear in the feed exactly as you set them, so choose ones that suit a public feed. Turn this off and the feed, the footer link, and the private NSFW address all go away.",
+	"admin_settings_rss_enabled_hint": "Your site offers a feed of new work at /feed.xml, linked from the footer. Feed readers use it to follow new uploads without an account. Sticker pack covers are not checked for adult content, so choose ones that suit a public feed. Turn this off and the feed, the footer link, and the private NSFW address all go away.",
 	"admin_settings_rss_enabled_hint_off": "Your site can offer a feed of new work at /feed.xml and link to it from the footer. Feed readers use it to follow new uploads without an account. Turn this on to publish it.",
 	"admin_settings_rss_nsfw_label": "Let feed readers request NSFW work",
 	"admin_settings_rss_nsfw_hint": "The feed lists safe-for-work items only. Turn this on and the site creates a second, private feed address that includes NSFW items, with no blur and no age gate in front of it. Feed readers keep their own copies of what they fetch, and you can't take those back. Some US states require age checks before adult material is shown publicly; whether and where to share the address is your call.",

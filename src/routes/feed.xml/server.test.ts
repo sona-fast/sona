@@ -588,10 +588,16 @@ describe('GET /feed.xml — caching', () => {
 		const { db, platform } = makeDb();
 		await addArtist(db);
 		await addImage(db);
+		await addImage(db, { id: 2, title: 'Spicy', slug: 'spicy', nsfw: true });
 		await setSetting(db, 'rssNsfwEnabled', 'true');
 		await setSetting(db, 'rssNsfwKey', KEY);
 
-		const { body } = await call(platform, { key: KEY, query: { utm_source: 'x' } });
+		const { status, body } = await call(platform, { key: KEY, query: { utm_source: 'x' } });
+		// The negatives below are only worth anything against a real adult
+		// document: `call` turns a thrown response into an empty body, so a request
+		// that started failing would pass this guard while proving nothing.
+		expect(status).toBe(200);
+		expect(itemTitles(body)).toContain('[NSFW] Spicy');
 		expect(body).not.toContain('<atom:link');
 		expect(body).not.toContain(KEY);
 	});
