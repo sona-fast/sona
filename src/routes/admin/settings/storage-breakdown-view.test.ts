@@ -25,20 +25,16 @@ describe('usageWarning', () => {
 	// Thresholds are exclusive on purpose: exactly 80% is fine, exactly 95% is
 	// only near — the words escalate strictly past each mark.
 	it('stays quiet at and below 80%', () => {
-		expect(usageWarning(79.9, true)).toBeNull();
+		expect(usageWarning(79.9)).toBeNull();
 	});
 
 	it('reports near past 80% up to 95%', () => {
-		expect(usageWarning(80.1, true)).toBe('near');
-		expect(usageWarning(95, true)).toBe('near');
+		expect(usageWarning(80.1)).toBe('near');
+		expect(usageWarning(95)).toBe('near');
 	});
 
 	it('reports full past 95%', () => {
-		expect(usageWarning(95.1, true)).toBe('full');
-	});
-
-	it('stays quiet without a breakdown, whatever the percentage', () => {
-		expect(usageWarning(96, false)).toBeNull();
+		expect(usageWarning(95.1)).toBe('full');
 	});
 });
 

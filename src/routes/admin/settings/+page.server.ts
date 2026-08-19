@@ -175,6 +175,8 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	// A list failure, a bucket too big for the page cap, or a listing slower
 	// than 5s all degrade to breakdown=null and the tab falls back to the
 	// aggregate bar (same deadline pattern as the UT usage fetch above).
+	// breakdownTooLarge tells the page WHY there's no breakdown — the page-cap
+	// case gets its own note instead of reading as a transient read failure.
 	//
 	// This block must stay LAST in load: each list() page is a subrequest, and
 	// the Workers free plan caps an invocation at 50 subrequests shared with
@@ -182,9 +184,12 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	// the budget only costs the breakdown (null → aggregate bar), never the
 	// D1-backed fields the rest of the page needs.
 	let breakdown: StorageBreakdown | null = null;
+	let breakdownTooLarge = false;
 	if (settings.storageProvider === 'r2' && platform?.env.IMAGES) {
 		try {
-			breakdown = await withDeadline(collectUsageBreakdown(platform.env.IMAGES), 5000);
+			const collected = await withDeadline(collectUsageBreakdown(platform.env.IMAGES), 5000);
+			if (collected === 'too-large') breakdownTooLarge = true;
+			else breakdown = collected;
 		} catch {
 			// R2 list unavailable or too slow — the aggregate bar still renders.
 			// If logging is ever added here, log a STATIC message only: R2 errors
@@ -201,6 +206,7 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		imageCount: stats?.count || 0,
 		totalSize: stats?.totalSize || 0,
 		breakdown,
+		breakdownTooLarge,
 		utUsage,
 		storageStatus,
 		registryEnabled: isRegistryEnabled(renv),

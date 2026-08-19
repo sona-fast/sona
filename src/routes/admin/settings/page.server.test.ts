@@ -1473,6 +1473,7 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 
 		const result = (await load(loadEvent(platform))) as unknown as {
 			breakdown: unknown;
+			breakdownTooLarge: boolean;
 			settings: Record<string, unknown>;
 			imageCount: number;
 			storageStatus: { r2: boolean };
@@ -1482,6 +1483,9 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 		};
 
 		expect(result.breakdown).toBeNull();
+		// A FAILED listing is not the too-large case — the page keys its two
+		// R2 no-breakdown notes on this flag.
+		expect(result.breakdownTooLarge).toBe(false);
 		// The rest of the payload still rides — the tab keeps its aggregate bar,
 		// and every D1-dependent field resolved before the listing failed.
 		expect(result.settings.storageProvider).toBe('r2');
@@ -1495,21 +1499,54 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 		expect(JSON.stringify(result)).not.toContain('some-object-key');
 	});
 
-	// Source pin (SONA-183 precedent): the two no-breakdown notes are branch-
-	// keyed on the provider, and no unit render exercises them — swapping the
-	// messages (or collapsing the branches) would leave the suite green while
-	// an R2 outage reads as "R2 only" to a fork already ON R2.
-	it('the no-breakdown notes are wired to the right provider branches', () => {
+	it('surfaces the too-large discriminant when the bucket outgrows the page cap', async () => {
+		// Endlessly truncated: every page says there's more. The collector stops
+		// at its cap and the loader maps that to breakdownTooLarge instead of a
+		// breakdown (or a failure).
+		let calls = 0;
+		const bucket = {
+			list: vi.fn(async () => {
+				calls += 1;
+				return {
+					objects: [{ key: 'artwork/a.png', size: 1 }],
+					truncated: true,
+					cursor: String(calls)
+				};
+			})
+		};
+		const { db, platform } = makeLoadDb({ IMAGES: bucket });
+		await setRawSetting(db, 'storageProvider', 'r2');
+
+		const result = (await load(loadEvent(platform))) as unknown as {
+			breakdown: unknown;
+			breakdownTooLarge: boolean;
+		};
+
+		expect(result.breakdown).toBeNull();
+		expect(result.breakdownTooLarge).toBe(true);
+		// The cap still bounds the subrequests: exactly the default 20 pages.
+		expect(bucket.list).toHaveBeenCalledTimes(20);
+	});
+
+	// Source pin (SONA-183 precedent): the three no-breakdown notes are branch-
+	// keyed, and no unit render exercises them — swapping the messages (or
+	// collapsing the branches) would leave the suite green while an R2 outage
+	// reads as "R2 only" (or as "too many files") to a fork already ON R2.
+	it('the no-breakdown notes are wired to the right branches', () => {
 		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
 		const branches = src.match(
-			/\{:else if data\.settings\.storageProvider === 'uploadthing'\}([\s\S]*?)\{:else\}([\s\S]*?)\{\/if\}/
+			/\{:else if data\.settings\.storageProvider === 'uploadthing'\}([\s\S]*?)\{:else if data\.breakdownTooLarge\}([\s\S]*?)\{:else\}([\s\S]*?)\{\/if\}/
 		);
-		expect(branches, 'uploadthing/else branch pair').not.toBeNull();
+		expect(branches, 'uploadthing/too-large/else branch triple').not.toBeNull();
 		// UploadThing: no per-prefix listing exists — the R2-only pointer.
 		expect(branches![1]).toContain('m.admin_settings_breakdown_r2_only()');
 		expect(branches![1]).not.toContain('m.admin_settings_breakdown_unavailable()');
-		// R2 with no breakdown: the listing failed — the unavailable note.
-		expect(branches![2]).toContain('m.admin_settings_breakdown_unavailable()');
+		// R2, bucket past the page cap: the too-large note, not the outage one.
+		expect(branches![2]).toContain('m.admin_settings_breakdown_too_large()');
+		expect(branches![2]).not.toContain('m.admin_settings_breakdown_unavailable()');
+		// R2 with no breakdown and not too large: the listing failed.
+		expect(branches![3]).toContain('m.admin_settings_breakdown_unavailable()');
+		expect(branches![3]).not.toContain('m.admin_settings_breakdown_too_large()');
 	});
 
 	it('degrades to breakdown null when the listing never settles (5s deadline)', async () => {

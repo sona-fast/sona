@@ -81,12 +81,24 @@ test.describe('admin settings storage breakdown', () => {
 		await expect(table.locator('caption')).toHaveText('Storage by content type');
 
 		// Four column headers, in order; the Files header is sr-only by design.
+		// The Share header holds a hidden short twin for ≤520px, so its visible
+		// (innerText) rendering is asserted rather than raw textContent —
+		// case-insensitively, since innerText reflects the uppercase transform.
 		const headers = table.locator('thead th');
 		await expect(headers).toHaveCount(4);
 		await expect(headers.nth(0)).toHaveText('Content type');
 		await expect(headers.nth(1)).toHaveText('Files');
 		await expect(headers.nth(2)).toHaveText('Size');
-		await expect(headers.nth(3)).toHaveText('Share of used');
+		await expect(headers.nth(3)).toHaveText(/^share of used$/i, { useInnerText: true });
+
+		// ≤520px the short "Share" shows instead, with the full phrase sr-only
+		// (kept in the accessibility tree, clipped off-screen — clipped text
+		// still rides innerText, so the two spans are asserted separately).
+		await page.setViewportSize({ width: 320, height: 800 });
+		await expect(headers.nth(3).locator('.share-short')).toBeVisible();
+		await expect(headers.nth(3).locator('.share-short')).toHaveText('Share');
+		await expect(headers.nth(3).locator('.share-full')).toHaveText('Share of used');
+		await page.setViewportSize({ width: 1280, height: 720 });
 
 		// Seven rows in the fixed kind order: fursuit photos sixth, the
 		// catch-all bucket last. Each type cell is a row header, so screen

@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { classifyKey, collectUsageBreakdown, type ListableBucket } from './usage-breakdown';
+import {
+	classifyKey,
+	collectUsageBreakdown,
+	type ListableBucket,
+	type StorageBreakdown
+} from './usage-breakdown';
+
+// Narrows away the 'too-large' discriminant for the happy-path tests.
+async function collectOk(bucket: ListableBucket): Promise<StorageBreakdown> {
+	const result = await collectUsageBreakdown(bucket);
+	if (result === 'too-large') throw new Error('unexpected too-large result');
+	return result;
+}
 
 describe('classifyKey', () => {
 	it('maps each content folder to its kind', () => {
@@ -42,7 +54,7 @@ function bucketOf(pages: { key: string; size: number }[][]): ListableBucket {
 
 describe('collectUsageBreakdown', () => {
 	it('sums bytes and counts per kind and in total', async () => {
-		const breakdown = (await collectUsageBreakdown(
+		const breakdown = await collectOk(
 			bucketOf([
 				[
 					{ key: 'artwork/a.png', size: 100 },
@@ -55,7 +67,7 @@ describe('collectUsageBreakdown', () => {
 					{ key: 'fursuit/p/a.jpg', size: 6 }
 				]
 			])
-		))!;
+		);
 		expect(breakdown.kinds.artwork).toEqual({ bytes: 150, count: 2 });
 		expect(breakdown.kinds.vrVideo).toEqual({ bytes: 700, count: 1 });
 		expect(breakdown.kinds.vrImage).toEqual({ bytes: 30, count: 1 });
@@ -71,28 +83,29 @@ describe('collectUsageBreakdown', () => {
 	});
 
 	it('follows the cursor across truncated pages', async () => {
-		const breakdown = (await collectUsageBreakdown(
+		const breakdown = await collectOk(
 			bucketOf([
 				[{ key: 'artwork/a.png', size: 1 }],
 				[{ key: 'artwork/b.png', size: 2 }],
 				[{ key: 'stickers/p/c.webp', size: 4 }]
 			])
-		))!;
+		);
 		expect(breakdown.kinds.artwork).toEqual({ bytes: 3, count: 2 });
 		expect(breakdown.kinds.sticker).toEqual({ bytes: 4, count: 1 });
 		expect(breakdown.totalCount).toBe(3);
 	});
 
 	it('returns all-zero kinds for an empty bucket', async () => {
-		const breakdown = (await collectUsageBreakdown(bucketOf([[]])))!;
+		const breakdown = await collectOk(bucketOf([[]]));
 		expect(breakdown.totalBytes).toBe(0);
 		expect(breakdown.totalCount).toBe(0);
 		expect(breakdown.kinds.vrVideo).toEqual({ bytes: 0, count: 0 });
 	});
 
-	it('yields null for a bucket still truncated past the page cap', async () => {
+	it('yields the too-large discriminant for a bucket still truncated past the page cap', async () => {
 		// An endless bucket: every page truncated. A partial breakdown would
-		// misstate every share, so the cap degrades to null (aggregate bar).
+		// misstate every share, so the cap degrades to 'too-large' (aggregate
+		// bar, with a note that says why — distinct from a listing failure).
 		let calls = 0;
 		const endless: ListableBucket = {
 			async list() {
@@ -104,13 +117,13 @@ describe('collectUsageBreakdown', () => {
 				};
 			}
 		};
-		expect(await collectUsageBreakdown(endless, 3)).toBeNull();
+		expect(await collectUsageBreakdown(endless, 3)).toBe('too-large');
 		expect(calls).toBe(3); // stops listing at the cap, no runaway loop
 
 		// The default cap is bounded too (20 pages — each page is a subrequest,
 		// and the Workers free plan allows 50 per invocation shared with D1).
 		calls = 0;
-		expect(await collectUsageBreakdown(endless)).toBeNull();
+		expect(await collectUsageBreakdown(endless)).toBe('too-large');
 		expect(calls).toBe(20);
 	});
 });

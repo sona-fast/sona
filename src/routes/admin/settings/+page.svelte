@@ -672,7 +672,7 @@
 			<h2>{m.admin_settings_tab_storage()}</h2>
 			{#if activeUsage}
 				{@const pct = Math.min(100, (activeUsage.used / activeUsage.limit) * 100)}
-				{@const warn = usageWarning(pct, true)}
+				{@const warn = usageWarning(pct)}
 				<div class="storage-bar-wrap">
 					<div class="storage-bar-header">
 						<span>{m.admin_settings_usage({ label: activeUsage.label, used: formatSize(activeUsage.used), limit: formatSize(activeUsage.limit) })}</span>
@@ -711,7 +711,10 @@
 							<th scope="col" class="col-type">{m.admin_settings_breakdown_type()}</th>
 							<th scope="col"><span class="sr-only">{m.admin_settings_breakdown_files()}</span></th>
 							<th scope="col" class="col-size">{m.admin_settings_breakdown_size()}</th>
-							<th scope="col" class="col-share">{m.admin_settings_breakdown_share()}</th>
+							<!-- ≤520px the full header is sr-only and the short "Share" shows
+							     instead (aria-hidden — the accessible name stays the full
+							     phrase at every width). -->
+							<th scope="col" class="col-share"><span class="share-full">{m.admin_settings_breakdown_share()}</span><span class="share-short" aria-hidden="true">{m.admin_settings_breakdown_share_short()}</span></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -730,6 +733,10 @@
 				</table>
 			{:else if data.settings.storageProvider === 'uploadthing'}
 				<p class="breakdown-r2-note">{m.admin_settings_breakdown_r2_only()}</p>
+			{:else if data.breakdownTooLarge}
+				<!-- R2, bucket past the listing page cap: not an outage — a partial
+				     breakdown would misstate every share, so say why instead. -->
+				<p class="breakdown-r2-note">{m.admin_settings_breakdown_too_large()}</p>
 			{:else}
 				<!-- R2 with no breakdown: the bucket listing failed or timed out, so
 				     the bar above fell back to the D1 sum — say so. -->
@@ -1598,9 +1605,15 @@
 		margin-bottom: 12px;
 	}
 
+	/* wrap + column-gap: at narrow widths the percentage drops to its own line
+	   instead of abutting the usage text; margin-left:auto keeps it right-
+	   aligned on that wrapped line (it's the last flex child, so at full width
+	   space-between already places it right and the margin is a no-op). */
 	.storage-bar-header {
 		display: flex;
+		flex-wrap: wrap;
 		justify-content: space-between;
+		column-gap: 12px;
 		font-size: 13px;
 		color: var(--muted-foreground);
 		margin-bottom: 6px;
@@ -1610,6 +1623,7 @@
 		font-family: var(--font-primary);
 		font-weight: 600;
 		color: var(--foreground);
+		margin-left: auto;
 	}
 
 	.storage-bar {
@@ -1635,11 +1649,12 @@
 		background: var(--destructive);
 	}
 
-	/* Breakdown branch only (no warning/danger bar fill there): the header
-	   percentage takes the same >80% / >95% colors as the fill. As TEXT the
-	   amber needs 4.5:1, which #f0b33a only clears on the dark themes
-	   (7.25:1 on #2E2E2E) — light gets a dark amber (#7a4f00: 6.40:1 on
-	   #F2F3F0). --destructive clears 4.5:1 as text in every theme. */
+	/* The colored + worded percentage renders in BOTH branches; the fallback
+	   bar's warning/danger fill above mirrors the same >80% / >95% thresholds,
+	   so text and fill always agree. As TEXT the amber needs 4.5:1, which
+	   #f0b33a only clears on the dark themes (7.25:1 on #2E2E2E) — light gets
+	   a dark amber (#7a4f00: 6.40:1 on #F2F3F0). --destructive clears 4.5:1
+	   as text in every theme. */
 	.storage-pct.warning {
 		color: #f0b33a;
 	}
@@ -1800,26 +1815,48 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	/* 320px reflow (WCAG 1.4.10): let the labels, headers, and file counts
-	   wrap instead of scrolling, and hand the flexible width to the label
-	   column so it gets the slack on mobile. Size and share keep their base
-	   nowrap — measured at a 288px container with worst-case values, the
-	   table still fits, and a mid-number line break would misread as two
-	   values. Every base rule above precedes this block so the overrides
-	   here actually win. */
+	/* Desktop shows the full "Share of used" header; the short twin only
+	   exists ≤520px (aria-hidden, with the full phrase kept sr-only there, so
+	   the accessible name never changes). */
+	.breakdown thead th .share-short {
+		display: none;
+	}
+
+	/* 320px reflow (WCAG 1.4.10): let the type labels and headers wrap
+	   instead of scrolling, and hand the flexible width to the label column
+	   (capped at 60vw) so it takes the slack on mobile. File counts, size,
+	   and share keep their base nowrap — measured at a 288px container with
+	   worst-case values ("VR showcase videos", "12,480 files", "1000.0 KB",
+	   "100%"), the table still fits, and a mid-value line break would
+	   misread as two values. Every base rule above precedes this block so
+	   the overrides here actually win. */
 	@media (max-width: 520px) {
 		.breakdown thead th {
 			white-space: normal;
 		}
 
+		.breakdown thead th .share-full {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip: rect(0 0 0 0);
+			white-space: nowrap;
+		}
+
+		.breakdown thead th .share-short {
+			display: inline;
+		}
+
 		.breakdown tbody th.col-type {
 			white-space: normal;
-			width: 99%;
+			width: auto;
+			max-width: 60vw;
 		}
 
 		.breakdown td.col-files {
-			white-space: normal;
 			width: auto;
+			padding-right: 6px;
 		}
 
 		.breakdown td.col-share {
@@ -1839,7 +1876,8 @@
 
 	/* Zero-byte kinds: muted row, outline swatch — present as a legend entry
 	   without competing with the rows that hold actual bytes. */
-	.breakdown tr.zero td {
+	.breakdown tr.zero td,
+	.breakdown tr.zero th {
 		color: var(--muted-foreground);
 		font-weight: 400;
 	}
