@@ -51,6 +51,13 @@ export interface ConventionWindow {
  * a banner that appears a few hours early is a much smaller failure than one that
  * goes dark while the operator is still at the event, which is the bug this
  * whole thing exists to fix.
+ *
+ * The grace is deliberately symmetric, and the back edge is the accepted cost: a
+ * zoneless row can keep claiming "here now" for up to a day after its end date.
+ * Trimming that side would drop the banner at 17:00 local on the closing day of a
+ * zoneless western-zone con, which is exactly the failure above. Rows synced from
+ * cons.fyi carry a real zone and take the exact path, so this only ever applies to
+ * hand-entered and pre-migration rows, and a sync heals them.
  */
 export function isConventionRunning(con: ConventionWindow, now: Date): boolean {
 	const end = con.endDate || con.startDate;

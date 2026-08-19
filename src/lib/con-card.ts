@@ -50,7 +50,8 @@ export interface ConCardOptions {
 	 *  so the download paths embed the avatar as a data URI before calling this.
 	 *  Without one the ring holds the name's initial. */
 	avatarHref?: string | null;
-	/** Art credit microtext on the back ("Art by @handle · taro.surf"). */
+	/** Artist credit microtext on the back ("Sona by @handle · taro.surf"). It
+	 *  credits the character reference, not the avatar drawn on the front. */
 	artCredit?: string | null;
 	/** What the QR encodes. Must be the fork's /connect URL. */
 	connectUrl: string;
@@ -108,6 +109,12 @@ const CREDIT_BASELINE = MADE_BASELINE - 42;
 
 /** Past six the bands stop reading as a flag and start reading as a gradient. */
 const MAX_CARD_COLORS = 6;
+/** Six rows at the small size put the last baseline just above the microtext; a
+ *  seventh prints through the art credit and an eighth runs off the card. The
+ *  settings load happens to offer exactly six platforms, so the geometry has
+ *  held so far by coincidence: this holds it on purpose, the way MAX_CARD_COLORS
+ *  holds the stripes. */
+const MAX_CARD_HANDLES = 6;
 /** Above this the handle rows shrink so a longer list still fits the column. */
 const COMFORTABLE_HANDLES = 2;
 /** Icon edge as a share of the row's font size, the gap after it, and the
@@ -405,7 +412,7 @@ function frontParts(opts: ConCardOptions, ids: string): string[] {
 /** The back: the ten second handoff. QR, domain, handles, microtext. */
 function backParts(opts: ConCardOptions, ids: string): string[] {
 	const c = PALETTES[opts.variant];
-	const handles = opts.handles ?? [];
+	const handles = (opts.handles ?? []).slice(0, MAX_CARD_HANDLES);
 	const contentW = CON_CARD_WIDTH - PAD * 2;
 	const parts: string[] = [];
 
@@ -504,8 +511,11 @@ export function conCardFaceSvg(face: ConCardFace, opts: ConCardOptions): string 
 
 /** Margin around the pair, wide enough to hold a crop mark outside each card. */
 const SHEET_MARGIN = 100;
-/** Gap between the two faces, so a knife between them cuts neither. */
-const SHEET_GAP = 100;
+/** Gap between the two faces, so a knife between them cuts neither. Wider than
+ *  the two facing marks put together (2 * (MARK_GAP + MARK) = 120): at 100 they
+ *  ran into each other and printed as one unbroken rule across the gutter, which
+ *  marks no trim line at all. */
+const SHEET_GAP = 200;
 /** Crop mark length, and how far it stands off the corner it marks. */
 const MARK = 40;
 const MARK_GAP = 20;

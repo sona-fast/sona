@@ -1266,6 +1266,12 @@
 				connectUrl={data.conCard.connectUrl}
 				displayDomain={data.conCard.displayDomain}
 			/>
+		{:catch}
+			<!-- A deploy between this page loading and the import firing leaves the
+			     client asking for a chunk hash that no longer exists. Without this
+			     branch that rejection surfaces as an unhandled error; a reload picks
+			     up the new hashes. -->
+			<p class="hint">{m.admin_settings_con_card_failed()}</p>
 		{/await}
 	{:else}
 		<!-- The key field is on this same tab, so the hint can point straight at it

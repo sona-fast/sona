@@ -157,11 +157,11 @@ describe('conCardFaceSvg — the front', () => {
 	});
 
 	it('carries the name and the species, and nothing else the back owns', () => {
-		const svg = front({ artCredit: 'Art by @nori', handles: [{ platform: 'bluesky', value: '@taro' }] });
+		const svg = front({ artCredit: 'Sona by @nori', handles: [{ platform: 'bluesky', value: '@taro' }] });
 		expect(texts(svg)).toEqual(expect.arrayContaining(['Taro', 'Red panda']));
 		// The front is worn all day: no QR, no handles, no credit line on it.
 		expect(texts(svg)).not.toContain('@taro');
-		expect(texts(svg)).not.toContain('Art by @nori');
+		expect(texts(svg)).not.toContain('Sona by @nori');
 		expect(svg).not.toContain('taro.surf');
 		expect(svg).not.toContain(`d="${qrSvg('https://taro.surf/connect').path}"`);
 	});
@@ -291,15 +291,15 @@ describe('conCardFaceSvg — the back', () => {
 	});
 
 	it('signs the bottom edge with the art credit and the made-with line', () => {
-		const svg = back({ artCredit: 'Art by @nori · taro.surf' });
+		const svg = back({ artCredit: 'Sona by @nori · taro.surf' });
 		expect(texts(svg)).toEqual(
-			expect.arrayContaining(['Art by @nori · taro.surf', 'Made with Sona'])
+			expect.arrayContaining(['Sona by @nori · taro.surf', 'Made with Sona'])
 		);
 	});
 
 	it('drops the credit line when the art credit is turned off', () => {
 		const svg = back({ artCredit: null });
-		expect(texts(svg)).not.toContain('Art by @nori · taro.surf');
+		expect(texts(svg)).not.toContain('Sona by @nori · taro.surf');
 		// The made-with line is not a toggle and stays either way.
 		expect(texts(svg)).toContain('Made with Sona');
 	});
@@ -387,6 +387,40 @@ describe('conCardFaceSvg — handles', () => {
 		}
 	});
 
+	it('caps the rows before the last one reaches the microtext', () => {
+		// The geometry has held so far only because the settings load happens to
+		// offer exactly six platforms: the rows march down at a fixed pitch and the
+		// art credit sits at a fixed baseline near the bottom edge. A seventh
+		// platform added to that load would print a row through the credit.
+		//
+		// Both baselines come out of the rendered SVG rather than being written
+		// down here, so the assertion tracks the constants instead of restating
+		// them.
+		const svg = back({
+			handles: Array.from({ length: 9 }, (_, i) => ({
+				platform: CARD_PLATFORMS[i % CARD_PLATFORMS.length],
+				value: `@row${i}`
+			})),
+			artCredit: 'Sona by @nori'
+		});
+		const rows = [...svg.matchAll(/<text [^>]*y="(\d+)"[^>]*>(@row\d+)<\/text>/g)].map((m) => ({
+			y: Number(m[1]),
+			body: m[2]
+		}));
+		const creditY = Number(svg.match(/<text [^>]*y="(\d+)"[^>]*>Sona by[^<]*<\/text>/)?.[1]);
+		expect(rows.length).toBeGreaterThan(0);
+		expect(creditY).toBeGreaterThan(0);
+
+		// Cut, not squeezed: the list is capped rather than the pitch shrinking to
+		// fit whatever it is handed.
+		expect(rows.length).toBeLessThan(9);
+		// The row the cap leaves last still clears the credit line.
+		expect(Math.max(...rows.map((r) => r.y))).toBeLessThan(creditY);
+		// And the cap is not set below what the product actually offers, which
+		// would drop a platform the operator filled in.
+		expect(rows.length).toBeGreaterThanOrEqual(CARD_PLATFORMS.length);
+	});
+
 	it('caps the bands at six, so a long palette still reads as a flag', () => {
 		const hexes = ['#111111', '#222222', '#333333', '#444444', '#555555', '#666666', '#777777'];
 		const svg = front({ colors: hexes.map((hex) => ({ name: hex, hex })) });
@@ -423,7 +457,7 @@ describe('conCardPrintSheetSvg', () => {
 	it('puts both faces on one sheet at true physical size', () => {
 		const svg = sheet({ avatarHref: 'data:image/png;base64,AAAA' });
 		// 2.125in + 2.125in of card, plus the gap and margins the marks live in.
-		expect(svg).toContain('width="5in" height="3.875in"');
+		expect(svg).toContain('width="5.25in" height="3.875in"');
 		expect(svg).toContain(`viewBox="0 0 ${CON_CARD_SHEET_WIDTH} ${CON_CARD_SHEET_HEIGHT}"`);
 		// The front by its avatar and its ring, the back by its QR and its domain.
 		expect(svg).toContain('<image href="data:image/png;base64,AAAA"');
@@ -431,7 +465,7 @@ describe('conCardPrintSheetSvg', () => {
 		expect(texts(svg)).toEqual(expect.arrayContaining(['Taro', 'taro.surf']));
 		// Side by side, each face translated to its own column.
 		expect(svg).toContain('<g transform="translate(100 100)">');
-		expect(svg).toContain('<g transform="translate(1050 100)">');
+		expect(svg).toContain('<g transform="translate(1150 100)">');
 	});
 
 	it('marks both cards for the knife, outside the trim line', () => {
@@ -442,6 +476,30 @@ describe('conCardPrintSheetSvg', () => {
 		// The top-left corner of the front card, marked from outside it.
 		expect(svg).toContain('<line x1="80" y1="100" x2="40" y2="100"/>');
 		expect(svg).toContain('<line x1="100" y1="80" x2="100" y2="40"/>');
+	});
+
+	it('keeps the two cards\' facing marks apart in the gutter', () => {
+		// The cards sit at the same y, so each trim line carries four horizontal
+		// marks across the sheet and the middle two face each other. If the gutter
+		// is not wider than the two of them, they meet and print as one unbroken
+		// rule, which shows the knife no trim line at all.
+		const svg = sheet();
+		const spans = [...svg.matchAll(/<line x1="(\d+)" y1="(\d+)" x2="(\d+)" y2="(\d+)"\/>/g)]
+			.map(([, x1, y1, x2, y2]) => ({ x1: +x1, y1: +y1, x2: +x2, y2: +y2 }))
+			.filter((l) => l.y1 === l.y2)
+			.map((l) => ({ y: l.y1, lo: Math.min(l.x1, l.x2), hi: Math.max(l.x1, l.x2) }));
+		// Two trim lines (top and bottom edge), four marks along each.
+		expect(new Set(spans.map((s) => s.y)).size).toBe(2);
+		expect(spans).toHaveLength(8);
+
+		for (const y of new Set(spans.map((s) => s.y))) {
+			const row = spans.filter((s) => s.y === y).sort((a, b) => a.lo - b.lo);
+			expect(row).toHaveLength(4);
+			for (let i = 0; i < row.length - 1; i++) {
+				expect(row[i].hi, `marks at y=${y} touch between x=${row[i].lo} and x=${row[i + 1].hi}`)
+					.toBeLessThan(row[i + 1].lo);
+			}
+		}
 	});
 
 	it('prints the light card whatever the phone is set to', () => {

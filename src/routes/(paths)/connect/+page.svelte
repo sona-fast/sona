@@ -46,6 +46,13 @@
 	const nextCon = $derived(data.conventions[0]);
 	const laterCons = $derived(data.conventions.slice(1));
 
+	// Because the live con is lifted out of data.conventions, an operator whose only
+	// row IS the live con leaves this list empty — and the empty state would then
+	// read "no cons on the calendar" directly under the block naming the con they
+	// are standing at. The here-now block already carries that event, so the whole
+	// section goes rather than leaving a heading with nothing beneath it.
+	const showCons = $derived(Boolean(nextCon) || !liveCon);
+
 	// The persona's name for the "About {name}" heading.
 	const personaName = $derived(data.settings.ownerName || data.settings.siteName);
 </script>
@@ -115,46 +122,48 @@
 	</div>
 </section>
 
-<hr class="divider" />
+{#if showCons}
+	<hr class="divider" />
 
-<section class="section">
-	<h2 class="section-label">{m.connect_cons()}</h2>
-	{#if nextCon}
-		<svelte:element
-			this={nextCon.url ? 'a' : 'div'}
-			class="next-con"
-			href={nextCon.url ?? undefined}
-			target={nextCon.url ? '_blank' : undefined}
-			rel={nextCon.url ? 'noopener noreferrer' : undefined}
-		>
-			<span class="next-pill">{m.connect_next_up()}</span>
-			<span class="next-date">{formatDate(nextCon.startDate)} · {weekday(nextCon.startDate)}</span>
-			<span class="next-name">{nextCon.name}</span>
-			{#if nextCon.location}<span class="next-loc">{nextCon.location}</span>{/if}
-		</svelte:element>
-
-		{#each laterCons as con}
+	<section class="section">
+		<h2 class="section-label">{m.connect_cons()}</h2>
+		{#if nextCon}
 			<svelte:element
-				this={con.url ? 'a' : 'div'}
-				class="con-row panel"
-				href={con.url ?? undefined}
-				target={con.url ? '_blank' : undefined}
-				rel={con.url ? 'noopener noreferrer' : undefined}
+				this={nextCon.url ? 'a' : 'div'}
+				class="next-con"
+				href={nextCon.url ?? undefined}
+				target={nextCon.url ? '_blank' : undefined}
+				rel={nextCon.url ? 'noopener noreferrer' : undefined}
 			>
-				<span class="con-date">
-					<span class="con-dot">{formatDate(con.startDate)}</span>
-					<span class="con-day">{weekday(con.startDate)}</span>
-				</span>
-				<span class="con-info">
-					<span class="con-name">{con.name}</span>
-					{#if con.location}<span class="con-loc">{con.location}</span>{/if}
-				</span>
+				<span class="next-pill">{m.connect_next_up()}</span>
+				<span class="next-date">{formatDate(nextCon.startDate)} · {weekday(nextCon.startDate)}</span>
+				<span class="next-name">{nextCon.name}</span>
+				{#if nextCon.location}<span class="next-loc">{nextCon.location}</span>{/if}
 			</svelte:element>
-		{/each}
-	{:else}
-		<p class="empty">{m.connect_no_cons()}</p>
-	{/if}
-</section>
+
+			{#each laterCons as con}
+				<svelte:element
+					this={con.url ? 'a' : 'div'}
+					class="con-row panel"
+					href={con.url ?? undefined}
+					target={con.url ? '_blank' : undefined}
+					rel={con.url ? 'noopener noreferrer' : undefined}
+				>
+					<span class="con-date">
+						<span class="con-dot">{formatDate(con.startDate)}</span>
+						<span class="con-day">{weekday(con.startDate)}</span>
+					</span>
+					<span class="con-info">
+						<span class="con-name">{con.name}</span>
+						{#if con.location}<span class="con-loc">{con.location}</span>{/if}
+					</span>
+				</svelte:element>
+			{/each}
+		{:else}
+			<p class="empty">{m.connect_no_cons()}</p>
+		{/if}
+	</section>
+{/if}
 
 <hr class="divider" />
 

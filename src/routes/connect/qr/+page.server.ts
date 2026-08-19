@@ -15,6 +15,13 @@ import type { PageServerLoad } from './$types';
  * The encoded target is /connect and never this page. A printed con card lives
  * outside the app and outlives its state, so pointing it at a route that could
  * later be gated would turn every printed card into dead paper.
+ *
+ * It also encodes url.origin, where the printed card prefers settings.siteUrl.
+ * That divergence is on purpose: reading siteUrl means the D1 round trip this
+ * route exists to avoid, and a screen QR is transient in a way a printed card is
+ * not, so a wrong host here is re-scannable rather than permanent. The one
+ * consequence is that an operator who opened admin on a preview alias hands out
+ * that host for as long as the screen is up.
  */
 export const load: PageServerLoad = ({ url }) => {
 	const connectUrl = new URL('/connect', url.origin).toString();
