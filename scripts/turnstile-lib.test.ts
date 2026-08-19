@@ -234,6 +234,34 @@ describe('provisionTurnstileWidget — walks past the first list page', () => {
 		expect(calls.filter((c) => c.method === 'GET')).toHaveLength(3);
 	});
 
+	// A body that isn't a list reads as a zero-length page, which looks exactly like
+	// the last page of the walk — so the old `?? []` ended the walk and created a
+	// second widget for a fork that already had one.
+	it('an ok page whose body is not a list errors instead of creating a duplicate', async () => {
+		const { api, calls } = fakeApi({
+			[listPage(1)]: { ok: true, status: 200, result: { widgets: [ourWidget] } }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('could not list Turnstile widgets');
+		expect(res.detail).toContain('HTTP 200');
+		expect(res.detail).toContain('carried no widget list');
+		// The reason is the body's shape, not the token — no scope misdirection.
+		expect(res.detail).not.toContain('token needs');
+		expect(calls.some((c) => c.method === 'POST')).toBe(false);
+	});
+
+	it('a missing result on a later page errors rather than ending the walk quietly', async () => {
+		const { api, calls } = fakeApi({
+			[listPage(1)]: { ok: true, status: 200, result: fullPageOfStrangers('p1') },
+			[listPage(2)]: { ok: true, status: 200 }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('carried no widget list');
+		expect(calls.some((c) => c.method === 'POST')).toBe(false);
+	});
+
 	it('a failure on page 2 reports it the same way a first-page failure does', async () => {
 		const { api, calls } = fakeApi({
 			[listPage(1)]: { ok: true, status: 200, result: fullPageOfStrangers('p1') },

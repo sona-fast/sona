@@ -95,7 +95,8 @@ export interface TurnstileResult {
  *   1. GET /accounts/<acct>/challenges/widgets → list the account's widgets, a
  *      page at a time until ours turns up or a page comes back short. A non-ok
  *      response on any page → a clear error whose detail carries the actual reason
- *      (the scope hint on 401/403, otherwise just the HTTP status). No mutation.
+ *      (the scope hint on 401/403, otherwise just the HTTP status), and so does an
+ *      ok page whose body isn't a list at all. No mutation.
  *   2. Match our widget by its stable `name` (WIDGET_NAME) AND `domains` containing
  *      this fork's host — see WIDGET_NAME on why the host half is required:
  *        - found → GET .../widgets/<sitekey> to read its secret authoritatively
@@ -141,7 +142,16 @@ export async function provisionTurnstileWidget(
 				detail: `could not list Turnstile widgets${statusLabel(listRes.status)}${failureTail(listRes)}`
 			};
 		}
-		const widgets = (listRes.result as Widget[] | undefined) ?? [];
+		// An ok page whose result isn't a list is a partial body. Reading it as an
+		// empty page would end the walk and mint a duplicate widget — the exact
+		// failure the paging exists to prevent — so stop and say so instead.
+		if (!Array.isArray(listRes.result)) {
+			return {
+				status: 'error',
+				detail: `could not list Turnstile widgets${statusLabel(listRes.status)}; the response carried no widget list, so setup stopped rather than risk creating a second widget`
+			};
+		}
+		const widgets = listRes.result as Widget[];
 		mine = widgets.find((w) => w.name === WIDGET_NAME && w.sitekey && w.domains?.includes(host));
 		if (mine || widgets.length < PER_PAGE) break;
 	}

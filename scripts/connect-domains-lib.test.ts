@@ -313,6 +313,14 @@ describe('planConnect', () => {
 		expect(planConnect({ ...base, cdnPresent: true, pagesAttached: true })).toEqual([]);
 	});
 
+	// Each mutation carries the permission IT needs, so a 401/403 on the attach can
+	// name that one scope instead of the whole token recipe or nothing at all.
+	it('gives each mutation its own token scope', () => {
+		const plan = planConnect({ ...base, cdnPresent: false, pagesAttached: false });
+		expect(plan[0].scopeHint).toBe('Account → Workers R2 Storage: Edit');
+		expect(plan[1].scopeHint).toBe('Account → Cloudflare Pages: Edit');
+	});
+
 	it('does NOT plan a create for a present-but-disabled CDN domain', () => {
 		const state = cdnDomainState(
 			{ ok: true, status: 200, result: { domains: [{ domain: 'cdn.taro.surf', enabled: false }] } },

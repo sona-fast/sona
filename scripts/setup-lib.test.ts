@@ -834,11 +834,15 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 		);
 		for (const source of [src, connectSrc]) {
 			expect(source).not.toMatch(/JSON\.stringify\(res\.errors/);
-			expect(source).toMatch(/cfErrorSummary\(res\.errors\)/);
-			// The empty-why case must not leave a trailing space after the status —
-			// pin the exact spacing ternary (a plain `) ${why}` mutant survives tests).
-			expect(source).toContain("${why ? ` ${why}` : ''}");
 		}
+		expect(src).toMatch(/cfErrorSummary\(res\.errors\)/);
+		// The empty-why case must not leave a trailing space after the status —
+		// pin the exact spacing ternary (a plain `) ${why}` mutant survives tests).
+		expect(src).toContain("${why ? ` ${why}` : ''}");
+		// connect-domains' attach failures report through cfFailureTail, which
+		// sanitizes through the same cfErrorSummary and punctuates the reason
+		// itself — so the status also decides whether a scope is named at all.
+		expect(connectSrc).toContain('cfFailureTail(res.status, res.errors, m.scopeHint)');
 	});
 
 	it('no middot scope names remain anywhere an operator sees one', () => {

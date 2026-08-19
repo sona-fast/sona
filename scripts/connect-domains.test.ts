@@ -184,4 +184,45 @@ describe('connect-domains.ts ↔ candidate-walk source contract', () => {
 	it('keeps the whole-zone disclosure on the transforms bullet', () => {
 		expect(src).toMatch(/affects the whole zone, not just \$\{host\}/);
 	});
+
+	it('reads the API reason whatever the status was', () => {
+		// Gating the summary on a 2xx dropped it for 400/404/500 — the statuses whose
+		// reason the operator most needs, since a 2xx-with-success:false is the only
+		// one they could have guessed at.
+		expect(src).toContain('const apiWhy = cfErrorSummary(errors);');
+		expect(src).not.toContain('errorStatus >= 200 && errorStatus < 300');
+	});
+});
+
+// Every other failed call in the mutating path reports through cfFailureTail, so
+// the reason tracks the status: the scope only on 401/403, the API's own words
+// when it gave any, and the network line for a thrown fetch. The previous copy
+// recommended the R2 read scope for every failure — including a 5xx and an
+// unreachable API — and printed a bare "(HTTP 0)" carrying nothing.
+describe('connect-domains.ts ↔ failure-reporting source contract', () => {
+	const src = readFileSync(
+		join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
+		'utf8'
+	);
+
+	it('reports the R2 custom-domain read through cfFailureTail', () => {
+		expect(src).toMatch(/cfFailureTail\(\s*r2Res\.status,\s*r2Res\.errors,\s*'Account → Workers R2 Storage: Read'/);
+		expect(src).not.toContain('token may lack Account → Workers R2 Storage: Read');
+	});
+
+	it("reports a failed attach with that mutation's own scope, never a bare HTTP 0", () => {
+		expect(src).toContain('cfFailureTail(res.status, res.errors, m.scopeHint)');
+		expect(src).not.toContain('(HTTP ${res.status})');
+	});
+
+	it('reports a failed Image Transformations enable the same way', () => {
+		expect(src).toMatch(/cfFailureTail\(\s*patched\.status,\s*patched\.errors,\s*'Zone → Zone Settings: Edit'/);
+		expect(src).not.toContain('(HTTP ${patched.status})');
+	});
+
+	it('uses statusLabel so a thrown fetch prints no status at all', () => {
+		expect(src).toContain('statusLabel(r2Res.status)');
+		expect(src).toContain('statusLabel(res.status)');
+		expect(src).toContain('statusLabel(patched.status)');
+	});
 });

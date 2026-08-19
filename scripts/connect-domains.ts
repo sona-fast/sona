@@ -33,6 +33,8 @@ import { fileURLToPath } from 'node:url';
 import {
 	cfApi,
 	cfErrorSummary,
+	cfFailureTail,
+	statusLabel,
 	hostFromDomain,
 	zoneNameCandidates,
 	imageResizingOutcome,
@@ -165,10 +167,11 @@ async function main(): Promise<number> {
 					`✖ Could not reach the Cloudflare API while looking up the zone for ${lookupName} — check your network and re-run.`
 				);
 			} else {
-				// A 2xx here means the API answered but its body said success:false —
-				// repeat the API's own reason when it gave one.
-				const apiWhy =
-					errorStatus >= 200 && errorStatus < 300 ? cfErrorSummary(errors) : '';
+				// The API answered and the lookup still failed — repeat its own reason
+				// whenever it gave one. A 400/404/500 body carries that reason as often
+				// as a 2xx-with-success:false does, and gating the summary on 2xx threw
+				// it away for exactly the statuses an operator can least explain.
+				const apiWhy = cfErrorSummary(errors);
 				console.error(
 					`✖ Cloudflare API error (HTTP ${errorStatus}${apiWhy ? `; the API said ${apiWhy}` : ''}) while looking up the zone for ${lookupName} — wait a moment and re-run.`
 				);
@@ -198,8 +201,15 @@ async function main(): Promise<number> {
 				`⚠ ${cdn} is already on the bucket but DISABLED — re-enable it in dashboard → R2 → ${bucket} → Custom Domains (not re-creating it).`
 			);
 		if (cdnState === 'unknown')
+			// The reason comes from the response, not from a guess: naming the R2 read
+			// scope for a 500 or an unreachable API sends the operator to re-mint a
+			// token that was never the problem.
 			console.warn(
-				`⚠ Couldn't read the bucket's custom domains (token may lack Account → Workers R2 Storage: Read) — skipping the ${cdn} attach.`
+				`⚠ Couldn't read the bucket's custom domains${statusLabel(r2Res.status)}${cfFailureTail(
+					r2Res.status,
+					r2Res.errors,
+					'Account → Workers R2 Storage: Read'
+				)} — skipping the ${cdn} attach.`
 			);
 
 		const plan = planConnect({
@@ -264,11 +274,14 @@ async function main(): Promise<number> {
 		for (const m of plan) {
 			const res = await cfApi(cfToken, m.path, { method: m.method, body: m.body });
 			if (res.ok) console.log(`✔ ${m.label}`);
-			else {
-				// Allowlisted code+message pairs only — never the raw errors body.
-				const why = cfErrorSummary(res.errors);
-				console.warn(`⚠ Could not ${m.label} (HTTP ${res.status})${why ? ` ${why}` : ''}`);
-			}
+			else
+				// cfFailureTail keeps the reason honest per status: the call's own scope
+				// on 401/403, the API's sanitized words when it gave any, and the
+				// did-not-respond line for a thrown fetch (where a bare "HTTP 0" said
+				// nothing at all).
+				console.warn(
+					`⚠ Could not ${m.label}${statusLabel(res.status)}${cfFailureTail(res.status, res.errors, m.scopeHint)}`
+				);
 		}
 
 		if (willEnableTransforms) {
@@ -279,7 +292,11 @@ async function main(): Promise<number> {
 			if (patched.ok) console.log(`✔ Image Transformations enabled on ${zoneLabel}.`);
 			else
 				console.warn(
-					`⚠ Could not enable Image Transformations (HTTP ${patched.status}) — enable it in the dashboard.`
+					`⚠ Could not enable Image Transformations${statusLabel(patched.status)}${cfFailureTail(
+						patched.status,
+						patched.errors,
+						'Zone → Zone Settings: Edit'
+					)} — enable it in the dashboard.`
 				);
 		} else if (transformsCurrent === true) {
 			console.log('✔ Image Transformations already on.');

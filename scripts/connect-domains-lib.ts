@@ -6,8 +6,11 @@
  * The Cloudflare REST caller (`cfApi`) and the bare-host / image-resizing
  * helpers live in setup-lib.ts and are reused verbatim — this file adds only
  * new, self-contained functions so it rebases cleanly against branches that
- * also touch setup-lib.ts.
+ * also touch setup-lib.ts. The one exception is a type-only import of that
+ * module's `CfApiResult`, so the shapes this file consumes can't drift from
+ * what `cfApi` actually returns; a type import adds no runtime dependency.
  */
+import type { CfApiResult } from './setup-lib.ts';
 
 /** `cdn.<host>` — the CDN subdomain we attach to the images R2 bucket. */
 export function cdnHost(host: string): string {
@@ -73,7 +76,7 @@ export function classifyZone(result: unknown): ZoneStatus {
  */
 export async function resolveZone(
 	candidates: string[],
-	lookup: (name: string) => Promise<{ ok: boolean; status: number; result?: unknown; errors?: unknown }>
+	lookup: (name: string) => Promise<CfApiResult>
 ): Promise<{
 	zone: ZoneStatus;
 	zoneName: string | null;
@@ -250,6 +253,8 @@ export interface PlannedMutation {
 	path: string;
 	body: Record<string, unknown>;
 	label: string;
+	/** The token permission THIS call needs — printed only when it fails with 401/403. */
+	scopeHint: string;
 }
 
 /**
@@ -268,14 +273,16 @@ export function planConnect(i: ConnectPlanInput): PlannedMutation[] {
 			method: 'POST',
 			path: `/accounts/${i.accountId}/r2/buckets/${i.bucket}/domains/custom`,
 			body: { domain: cdn, zoneId: i.zoneId, enabled: true, minTLS: '1.2' },
-			label: `attach ${cdn} to the ${i.bucket} bucket`
+			label: `attach ${cdn} to the ${i.bucket} bucket`,
+			scopeHint: 'Account → Workers R2 Storage: Edit'
 		});
 	if (!i.pagesAttached)
 		out.push({
 			method: 'POST',
 			path: `/accounts/${i.accountId}/pages/projects/${i.project}/domains`,
 			body: { name: i.host },
-			label: `attach ${i.host} to the ${i.project} Pages project`
+			label: `attach ${i.host} to the ${i.project} Pages project`,
+			scopeHint: 'Account → Cloudflare Pages: Edit'
 		});
 	return out;
 }
