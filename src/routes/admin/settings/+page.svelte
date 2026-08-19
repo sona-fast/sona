@@ -1256,7 +1256,7 @@
 			colors={data.conCard.colors}
 			handles={data.conCard.handles}
 			artCredit={data.conCard.artCredit}
-			refImageSrc={data.refImageSrc}
+			avatarSrc={data.conCard.avatarSrc}
 			connectUrl={data.conCard.connectUrl}
 			displayDomain={data.conCard.displayDomain}
 		/>

@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
 import { images, imageTags, tags, characters } from '$lib/server/db/schema';
-import { resolveRefImage, refImageSource } from './ref-image';
+import { resolveRefImage, refImageSource, storedImageSource } from './ref-image';
 
 import { makeD1 } from '$lib/server/test/d1';
 
@@ -175,5 +175,31 @@ describe('refImageSource — client canvas-loading strategy', () => {
 			src: '/api/admin/ref-image?id=9',
 			crossorigin: false
 		});
+	});
+});
+
+describe('storedImageSource — the strategy without the ref-sheet proxy', () => {
+	const opts = { origin: 'https://taro.surf', r2PublicUrl: 'https://cdn.taro.surf', dev: false };
+
+	it('answers for the URLs the page can read, exactly as refImageSource does', () => {
+		// The con card's avatar shares the branches but not the fallback: the
+		// by-ID proxy serves ref images only.
+		expect(storedImageSource('/img/avatars/owner/face.jpg', opts)?.src).toBe(
+			'/img/avatars/owner/face.jpg'
+		);
+		expect(storedImageSource('https://cdn.taro.surf/face.png', opts)?.src).toBe(
+			'/cdn-cgi/image/format=png,width=1600,fit=scale-down/https://cdn.taro.surf/face.png'
+		);
+		expect(storedImageSource('https://abc12.ufs.sh/f/key', opts)).toEqual({
+			src: 'https://abc12.ufs.sh/f/key',
+			crossorigin: true
+		});
+	});
+
+	it('is null for a URL the page has no way to read', () => {
+		// A hotlink we never re-hosted. The caller decides what that means: the
+		// ref sheet proxies it, the con card falls back to the name's initial.
+		expect(storedImageSource('https://cdn.bsky.app/img/avatar/plain/x', opts)).toBeNull();
+		expect(storedImageSource('//i.example.com/ref.png', opts)).toBeNull();
 	});
 });

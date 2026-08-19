@@ -55,7 +55,12 @@ import {
 	REGISTRY_URL_SETTING
 } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
-import { resolveRefImage, refImageSource, refImageCredit } from '$lib/server/ref-image';
+import {
+	resolveRefImage,
+	refImageSource,
+	refImageCredit,
+	storedImageSource
+} from '$lib/server/ref-image';
 import { isObservabilityEnabled } from '$lib/server/metrics';
 import {
 	verifySupporterKey,
@@ -118,6 +123,19 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		name: settings.ownerName || settings.siteName,
 		species: settings.sonaSpecies,
 		colors: parseSonaColors(settings.sonaColors),
+		// The front's face, which is the persona avatar rather than the ref sheet:
+		// the card is worn, and what a stranger matches against is a head. Resolved
+		// the same way the picker resolves the sheet, because the download paths
+		// have to read its bytes; the by-id proxy is not among the options, since
+		// it only serves ref images. An avatar we cannot reach from the page falls
+		// back to the name's initial on the card.
+		avatarSrc: settings.adminAvatarUrl
+			? (storedImageSource(settings.adminAvatarUrl, {
+					origin: url.origin,
+					r2PublicUrl: settings.r2PublicUrl,
+					dev
+				})?.src ?? settings.adminAvatarUrl)
+			: null,
 		// Every social the operator has set, in card order, best first. The card
 		// itself starts the first two checked and offers the rest, so the order
 		// here is what an operator sees pre-selected.
@@ -137,8 +155,8 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 			// it is dropped instead.
 			return handle ? [{ platform: social, value: handle }] : [];
 		}),
-		// The spine prefers the handle: it is shorter, and it is what someone
-		// reading the card can act on.
+		// The credit prefers the handle: it is shorter, and it is what someone
+		// reading the back of the card can act on.
 		artCredit: artist ? (artist.handle ?? artist.name) : null,
 		// /connect, never /connect/qr — see con-card.ts.
 		connectUrl: `${cardOrigin}/connect`,

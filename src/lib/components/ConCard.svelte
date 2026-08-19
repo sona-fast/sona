@@ -3,7 +3,8 @@
 	import { Download, Smartphone } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 	import {
-		conCardSvg,
+		conCardFaceSvg,
+		conCardPrintSheetSvg,
 		conCardFileBase,
 		CON_CARD_WIDTH,
 		CON_CARD_HEIGHT,
@@ -17,21 +18,21 @@
 		species: string;
 		colors: ConCardColor[];
 		handles: ConCardHandle[];
-		/** Artist to credit on the spine, or null when the sheet has no artist row. */
+		/** Artist to credit on the back, or null when the sheet has no artist row. */
 		artCredit: string | null;
-		/** The reference sheet, with the client loading strategy the server picked. */
-		refImageSrc: { src: string; crossorigin: boolean } | null;
+		/** The persona's face for the front, in a form the page can fetch. */
+		avatarSrc: string | null;
 		connectUrl: string;
 		displayDomain: string;
 	}
 
-	let { name, species, colors, handles, artCredit, refImageSrc, connectUrl, displayDomain }: Props =
+	let { name, species, colors, handles, artCredit, avatarSrc, connectUrl, displayDomain }: Props =
 		$props();
 
 	// The mock's guidance is two handles, so that is what starts checked; the
 	// rest are there to be turned on deliberately.
 	const COMFORTABLE_HANDLES = 2;
-	/** Downloaded at twice the layout size — a 4in card at 600dpi. */
+	/** Rasterized at twice the layout size, which is a badge at 800dpi. */
 	const RASTER_SCALE = 2;
 
 	// Read once: the page's data doesn't change under the component, and a prop
@@ -49,19 +50,14 @@
 
 	let savingPrint = $state(false);
 	let savingPhone = $state(false);
-	/** The art could not be fetched for embedding; the card saved without it. */
-	let artFailed = $state(false);
+	let savingFront = $state(false);
+	/** The avatar could not be fetched for embedding; the front saved with the
+	 *  name's initial in the ring instead. */
+	let avatarFailed = $state(false);
 
 	const chosenHandles = $derived(handles.filter((_, i) => handleOn[i]));
 
-	const labels = $derived({
-		species: m.con_card_field_species(),
-		colors: m.con_card_field_colors(),
-		online: m.con_card_field_online()
-	});
-
 	const shared = $derived({
-		labels,
 		name,
 		species: includeSpecies ? species : null,
 		colors: includeColors ? colors : [],
@@ -72,36 +68,49 @@
 				: null,
 		connectUrl,
 		displayDomain,
-		title: m.con_card_title({ name })
+		madeWith: m.con_card_made_with()
 	});
 
-	// The preview can point straight at the sheet: it renders in the page, where
-	// a same-origin href resolves. The downloads can't — see embedArt.
-	const preview = $derived(
-		conCardSvg({ ...shared, variant: 'light', artHref: refImageSrc?.src ?? null })
+	// The preview can point straight at the avatar: it renders in the page, where
+	// the URL resolves. The downloads can't, which is what embedAvatar is for.
+	const previewFront = $derived(
+		conCardFaceSvg('front', {
+			...shared,
+			variant: 'light',
+			avatarHref: avatarSrc,
+			title: m.con_card_title_front({ name })
+		})
+	);
+	const previewBack = $derived(
+		conCardFaceSvg('back', {
+			...shared,
+			variant: 'light',
+			title: m.con_card_title_back({ name })
+		})
 	);
 
-	/** The sheet as a data URI, fetched once and kept. Both downloads need it:
-	 *  a saved .svg is opened away from the site, and an external href is simply
-	 *  not drawn when the SVG is rasterized through a canvas. */
-	let artData: string | null = null;
-	async function embedArt(): Promise<string | null> {
-		if (!refImageSrc || artFailed) return null;
-		if (artData) return artData;
+	/** The avatar as a data URI, fetched once and kept. Every path that draws the
+	 *  front needs it: a saved .svg is opened away from the site, and an external
+	 *  href is simply not drawn when the SVG is rasterized through a canvas. */
+	let avatarData: string | null = null;
+	async function embedAvatar(): Promise<string | null> {
+		if (!avatarSrc || avatarFailed) return null;
+		if (avatarData) return avatarData;
 		try {
-			const response = await fetch(refImageSrc.src);
-			if (!response.ok) throw new Error(`art ${response.status}`);
+			const response = await fetch(avatarSrc);
+			if (!response.ok) throw new Error(`avatar ${response.status}`);
 			const blob = await response.blob();
-			artData = await new Promise<string>((resolve, reject) => {
+			avatarData = await new Promise<string>((resolve, reject) => {
 				const reader = new FileReader();
 				reader.onload = () => resolve(reader.result as string);
 				reader.onerror = () => reject(reader.error);
 				reader.readAsDataURL(blob);
 			});
-			return artData;
+			return avatarData;
 		} catch {
-			// A card without art still carries the QR, which is the point of it.
-			artFailed = true;
+			// The front still carries the colours and the name, and the back, which
+			// is the half that does the work, does not touch the avatar at all.
+			avatarFailed = true;
 			return null;
 		}
 	}
@@ -118,14 +127,34 @@
 		setTimeout(() => URL.revokeObjectURL(url), 0);
 	}
 
+	/** One face through a canvas, because Photos on iPhone refuses an SVG. */
+	async function savePng(svg: string, filename: string) {
+		const image = new Image();
+		await new Promise<void>((resolve, reject) => {
+			image.onload = () => resolve();
+			image.onerror = () => reject(new Error('svg raster'));
+			image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+		});
+		const canvas = document.createElement('canvas');
+		canvas.width = CON_CARD_WIDTH * RASTER_SCALE;
+		canvas.height = CON_CARD_HEIGHT * RASTER_SCALE;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return;
+		ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+		const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+		if (blob) save(blob, filename);
+	}
+
 	async function downloadPrint() {
 		savingPrint = true;
 		try {
-			const svg = conCardSvg({ ...shared, variant: 'light', artHref: await embedArt() });
-			save(
-				new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
-				`${conCardFileBase(name)}.svg`
-			);
+			// One sheet with both faces, so the operator prints once and cuts twice.
+			const svg = conCardPrintSheetSvg({
+				...shared,
+				avatarHref: await embedAvatar(),
+				title: m.con_card_title({ name })
+			});
+			save(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), `${conCardFileBase(name)}.svg`);
 		} finally {
 			savingPrint = false;
 		}
@@ -134,37 +163,50 @@
 	async function savePhone() {
 		savingPhone = true;
 		try {
-			const svg = conCardSvg({ ...shared, variant: 'dark', artHref: await embedArt() });
-			const image = new Image();
-			await new Promise<void>((resolve, reject) => {
-				image.onload = () => resolve();
-				image.onerror = () => reject(new Error('svg raster'));
-				image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+			// The back alone: at a con the phone has one job, and the front adds
+			// nothing to a screen the person holding it is already looking at.
+			const svg = conCardFaceSvg('back', {
+				...shared,
+				variant: 'dark',
+				title: m.con_card_title_back({ name })
 			});
-			const canvas = document.createElement('canvas');
-			canvas.width = CON_CARD_WIDTH * RASTER_SCALE;
-			canvas.height = CON_CARD_HEIGHT * RASTER_SCALE;
-			const ctx = canvas.getContext('2d');
-			if (!ctx) return;
-			ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-			const blob = await new Promise<Blob | null>((resolve) =>
-				canvas.toBlob(resolve, 'image/png')
-			);
-			// PNG rather than SVG because Photos on iPhone refuses an SVG, which
-			// is the whole reason this path exists alongside the print download.
-			if (blob) save(blob, `${conCardFileBase(name)}.png`);
-		} catch {
-			artFailed = true;
+			await savePng(svg, `${conCardFileBase(name)}-back.png`);
 		} finally {
 			savingPhone = false;
+		}
+	}
+
+	async function saveFront() {
+		savingFront = true;
+		try {
+			const svg = conCardFaceSvg('front', {
+				...shared,
+				variant: 'dark',
+				avatarHref: await embedAvatar(),
+				title: m.con_card_title_front({ name })
+			});
+			await savePng(svg, `${conCardFileBase(name)}-front.png`);
+		} catch {
+			avatarFailed = true;
+		} finally {
+			savingFront = false;
 		}
 	}
 </script>
 
 <div class="con-card">
 	<!-- Inlined rather than sourced from a blob URL so the preview repaints with
-	     each toggle. conCardSvg escapes every operator value it is handed. -->
-	<div class="preview">{@html preview}</div>
+	     each toggle. conCardFaceSvg escapes every operator value it is handed. -->
+	<div class="preview">
+		<figure>
+			<figcaption>{m.con_card_face_front()}</figcaption>
+			<div class="face">{@html previewFront}</div>
+		</figure>
+		<figure>
+			<figcaption>{m.con_card_face_back()}</figcaption>
+			<div class="face">{@html previewBack}</div>
+		</figure>
+	</div>
 
 	<div class="controls">
 		<fieldset class="includes">
@@ -188,7 +230,7 @@
 		{#if chosenHandles.length > COMFORTABLE_HANDLES}
 			<p class="hint">{m.con_card_handle_hint()}</p>
 		{/if}
-		{#if artFailed}
+		{#if avatarFailed}
 			<p class="hint art-failed" role="status">{m.con_card_art_failed()}</p>
 		{/if}
 
@@ -203,6 +245,11 @@
 			</button>
 		</div>
 		<p class="hint">{m.con_card_save_phone_hint()}</p>
+		<!-- Secondary on purpose: the back is the useful save, and the front is
+		     here for whoever wants it behind a lock screen. -->
+		<button type="button" class="link-action" onclick={saveFront} disabled={savingFront}>
+			{savingFront ? m.admin_saving() : m.con_card_save_front()}
+		</button>
 	</div>
 </div>
 
@@ -212,14 +259,29 @@
 		gap: 20px;
 	}
 	.preview {
-		max-width: 520px;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 16px;
+	}
+	.preview figure {
+		margin: 0;
+		flex: 0 1 200px;
+	}
+	.preview figcaption {
+		margin-bottom: 6px;
+		font-size: 11px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+	.face {
 		border-radius: var(--radius-s);
 		overflow: hidden;
-		/* The light card is opaque white in both modes — a frame keeps it from
+		/* The light card is opaque white in both modes; a frame keeps it from
 		   floating on a dark settings page. */
 		box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
 	}
-	.preview :global(svg) {
+	.face :global(svg) {
 		display: block;
 		width: 100%;
 		height: auto;
@@ -227,8 +289,9 @@
 	.controls {
 		display: grid;
 		gap: 12px;
+		justify-items: start;
 	}
-	/* A real fieldset for the grouping, with the row layout on an inner div —
+	/* A real fieldset for the grouping, with the row layout on an inner div:
 	   a <legend> in a flex container is laid out by its own rules. */
 	.includes {
 		border: none;
@@ -273,5 +336,22 @@
 	}
 	.art-failed {
 		color: var(--destructive);
+	}
+	.link-action {
+		background: none;
+		border: none;
+		padding: 0;
+		font: inherit;
+		font-size: 13px;
+		color: var(--muted-foreground);
+		text-decoration: underline;
+		cursor: pointer;
+	}
+	.link-action:hover:not(:disabled) {
+		color: var(--foreground);
+	}
+	.link-action:disabled {
+		cursor: default;
+		opacity: 0.6;
 	}
 </style>

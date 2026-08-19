@@ -546,6 +546,7 @@ describe('settings load — con card (SONA-115)', () => {
 		species: string;
 		colors: Array<{ name: string; hex: string }>;
 		handles: Array<{ platform: string; value: string }>;
+		avatarSrc: string | null;
 		artCredit: string | null;
 		connectUrl: string;
 		displayDomain: string;
@@ -665,6 +666,33 @@ describe('settings load — con card (SONA-115)', () => {
 		expect(section.slice(0, section.indexOf('{:else}'))).toContain('<ConCard');
 		expect(src).toContain("isFeatureEnabled('con-card'");
 		expect(src).toMatch(/<section class="security-section" data-tab="account">\s*\n\s*<h2>\{m\.admin_settings_con_card_heading\(\)\}/);
+	});
+
+	it('sends the persona avatar for the front, same-origin so the page can read it', async () => {
+		const { db, platform } = makeLoadDb();
+		// The front holds the persona's face, not the reference sheet: the card is
+		// worn, and what a stranger matches against is a head.
+		await setRawSetting(db, 'adminAvatarUrl', '/img/avatars/owner/face.jpg');
+
+		expect((await conCard(db, platform)).avatarSrc).toBe('/img/avatars/owner/face.jpg');
+	});
+
+	it('leaves the avatar null when none is set, so the front falls back to an initial', async () => {
+		const { db, platform } = makeLoadDb();
+
+		expect((await conCard(db, platform)).avatarSrc).toBeNull();
+	});
+
+	it('keeps an avatar it cannot reach same-origin rather than dropping it', async () => {
+		const { db, platform } = makeLoadDb();
+		// A hotlink we never re-hosted has no same-origin form. The raw URL still
+		// draws in the preview, and the download path falls back to the initial if
+		// the fetch is refused.
+		await setRawSetting(db, 'adminAvatarUrl', 'https://cdn.bsky.app/img/avatar/plain/x');
+
+		expect((await conCard(db, platform)).avatarSrc).toBe(
+			'https://cdn.bsky.app/img/avatar/plain/x'
+		);
 	});
 
 	it('credits the reference sheet by the artist handle when there is one', async () => {

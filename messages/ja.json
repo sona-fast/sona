@@ -1383,15 +1383,20 @@
 	"admin_settings_con_card_subtitle": "出発前にスマホに保存しておけば、会場のWi-Fiに頼らずに済みます。",
 	"admin_settings_con_card_locked": "コンカードは{date}に全員公開されます。サポーターキーがあれば今すぐ使えます。",
 	"con_card_title": "{name}のコンカード",
+	"con_card_title_front": "{name}のコンカードの表面",
+	"con_card_title_back": "{name}のコンカードの裏面",
+	"con_card_face_front": "表面",
+	"con_card_face_back": "裏面",
+	"con_card_made_with": "Sona で作成",
 	"con_card_field_species": "種族",
 	"con_card_field_colors": "カラー",
-	"con_card_field_online": "SNS",
 	"con_card_art_credit": "イラスト: {artist} · {domain}",
 	"con_card_include": "含める項目",
 	"con_card_include_credit": "イラストのクレジット",
 	"con_card_handle_hint": "ハンドルが3つ以上になると、カードの文字が小さくなります。",
 	"con_card_download_print": "印刷用にダウンロード",
 	"con_card_save_phone": "スマホに保存",
-	"con_card_save_phone_hint": "iPhoneの写真アプリはSVGを受け付けないため、PNGで保存します。",
-	"con_card_art_failed": "リファレンスシートを読み込めなかったため、イラストなしで保存しました。"
+	"con_card_save_phone_hint": "iPhoneの写真アプリはSVGを受け付けないため、裏面をPNGで保存します。",
+	"con_card_save_front": "ロック画面用に表面も保存",
+	"con_card_art_failed": "アイコン画像を読み込めなかったため、頭文字で保存しました。"
 }

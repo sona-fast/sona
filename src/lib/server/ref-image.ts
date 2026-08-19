@@ -67,30 +67,32 @@ export async function resolveRefImage(db: Db): Promise<RefImage | null> {
 	);
 }
 
-/** How the client should load the sheet into a canvas WITHOUT tainting it. */
+/** How the client should load one of our images WITHOUT tainting a canvas. */
 export interface RefImageSource {
 	src: string;
 	crossorigin: boolean;
 }
 
 /**
- * Pick the client image-loading strategy for the ref-sheet color picker:
+ * Pick the client image-loading strategy for a URL we stored, for the callers
+ * that have to read its bytes (the ref-sheet color picker samples it on a
+ * canvas; the con card embeds it as a data URI):
  * 1. root-relative / same-origin URL → as-is (never taints the canvas);
  * 2. our own R2 public URL in prod → same-origin Cloudflare image transform
  *    (`format=png` re-encodes losslessly and `width=1600,fit=scale-down` caps
  *    the decode cost, so sampled pixels are exact within the ≤1600px working
  *    image the picker samples from);
  * 3. UploadThing (ufs.sh / utfs.io) → raw URL + crossorigin="anonymous"
- *    (UT serves Access-Control-Allow-Origin: *);
- * 4. anything else (incl. dev pointing at prod-origin URLs) → the admin-gated
- *    by-ID proxy endpoint, which never accepts a URL parameter (SSRF).
+ *    (UT serves Access-Control-Allow-Origin: *).
+ *
+ * Null when none of those applies (incl. dev pointing at prod-origin URLs):
+ * there is no way to read that URL's bytes from the page, and what to do about
+ * it differs per caller.
  */
-export function refImageSource(
-	image: RefImage,
+export function storedImageSource(
+	imageUrl: string,
 	opts: { origin: string; r2PublicUrl: string; dev: boolean }
-): RefImageSource {
-	const { imageUrl } = image;
-
+): RefImageSource | null {
 	// 1. Same-origin or root-relative (but not protocol-relative `//host/...`).
 	if (imageUrl.startsWith('/') && !imageUrl.startsWith('//')) {
 		return { src: imageUrl, crossorigin: false };
@@ -110,29 +112,45 @@ export function refImageSource(
 	try {
 		host = new URL(imageUrl).hostname;
 	} catch {
-		// not an absolute URL — fall through to the proxy
+		// not an absolute URL, so there is no host to match
 	}
 	if (isUploadThingHost(host)) {
 		return { src: imageUrl, crossorigin: true };
 	}
 
-	// 4. By-ID proxy.
-	return { src: `/api/admin/ref-image?id=${image.id}`, crossorigin: false };
+	return null;
 }
 
-/** Who to credit for the reference sheet, for the con card's spine line. */
+/**
+ * The ref sheet for the color picker. Where storedImageSource has no answer the
+ * sheet still has one: the admin-gated by-ID proxy endpoint, which never
+ * accepts a URL parameter (SSRF).
+ */
+export function refImageSource(
+	image: RefImage,
+	opts: { origin: string; r2PublicUrl: string; dev: boolean }
+): RefImageSource {
+	return (
+		storedImageSource(image.imageUrl, opts) ?? {
+			src: `/api/admin/ref-image?id=${image.id}`,
+			crossorigin: false
+		}
+	);
+}
+
+/** Who to credit for the reference sheet, for the con card's back. */
 export interface RefImageCredit {
 	name: string;
-	/** The artist's @handle where one can be derived, for a shorter spine. */
+	/** The artist's @handle where one can be derived, for a shorter credit. */
 	handle: string | null;
 }
 
-/** Platforms the spine credit will read a handle from, best first. A card has
+/** Platforms the credit will read a handle from, best first. The card has
  *  room for one, and this is the order an artist is most likely to want. */
 const CREDIT_PLATFORMS = ['bluesky', 'twitter', 'telegram', 'instagram', 'furaffinity'] as const;
 
 /**
- * The artist behind an image, with a handle for the con card's spine credit.
+ * The artist behind an image, with a handle for the con card's art credit.
  * Null when the image has no artist row (imports without attribution).
  */
 export async function refImageCredit(db: Db, imageId: number): Promise<RefImageCredit | null> {
