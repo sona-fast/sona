@@ -1399,3 +1399,78 @@ describe('deleteAll — every content table in the backup is wiped', () => {
 		}
 	});
 });
+
+describe('settings load — storage breakdown (SONA-192)', () => {
+	function stubBucket(pages: { key: string; size: number }[][]) {
+		let calls = 0;
+		return {
+			list: vi.fn(async () => {
+				const objects = pages[calls];
+				calls += 1;
+				return {
+					objects,
+					truncated: calls < pages.length,
+					cursor: calls < pages.length ? String(calls) : undefined
+				};
+			})
+		};
+	}
+
+	it('skips the bucket listing entirely on UploadThing (breakdown null, list never called)', async () => {
+		const bucket = stubBucket([[]]);
+		const { db, platform } = makeLoadDb({ IMAGES: bucket });
+		await setRawSetting(db, 'storageProvider', 'uploadthing');
+
+		const result = (await load(loadEvent(platform))) as unknown as { breakdown: unknown };
+
+		expect(result.breakdown).toBeNull();
+		expect(bucket.list).not.toHaveBeenCalled();
+	});
+
+	it('collects the paginated breakdown on R2 with matching totals', async () => {
+		const bucket = stubBucket([
+			[
+				{ key: 'artwork/a.png', size: 100 },
+				{ key: 'vr-media/clip.webm', size: 700 }
+			],
+			[{ key: 'stickers/p/s.webp', size: 10 }]
+		]);
+		const { db, platform } = makeLoadDb({ IMAGES: bucket });
+		await setRawSetting(db, 'storageProvider', 'r2');
+
+		const result = (await load(loadEvent(platform))) as unknown as {
+			breakdown: {
+				totalBytes: number;
+				totalCount: number;
+				kinds: Record<string, { bytes: number; count: number }>;
+			} | null;
+		};
+
+		expect(bucket.list).toHaveBeenCalledTimes(2);
+		expect(result.breakdown).toMatchObject({ totalBytes: 810, totalCount: 3 });
+		expect(result.breakdown!.kinds.vrVideo).toEqual({ bytes: 700, count: 1 });
+	});
+
+	it('degrades to breakdown null (payload intact, no throw) when the R2 list rejects', async () => {
+		const bucket = {
+			list: vi.fn(async (): Promise<never> => {
+				throw new Error('R2 down: artwork/some-object-key.png');
+			})
+		};
+		const { db, platform } = makeLoadDb({ IMAGES: bucket });
+		await setRawSetting(db, 'storageProvider', 'r2');
+
+		const result = (await load(loadEvent(platform))) as unknown as {
+			breakdown: unknown;
+			settings: Record<string, unknown>;
+			imageCount: number;
+			storageStatus: { r2: boolean };
+		};
+
+		expect(result.breakdown).toBeNull();
+		// The rest of the payload still rides — the tab keeps its aggregate bar.
+		expect(result.settings.storageProvider).toBe('r2');
+		expect(result.imageCount).toBe(0);
+		expect(result.storageStatus.r2).toBe(true);
+	});
+});

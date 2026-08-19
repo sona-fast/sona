@@ -16,6 +16,7 @@
 	import { resendSetupProgress } from '$lib/resend-setup';
 	import { resolveTabId, visibleTabIds, type TabId } from './tabs';
 	import { showUtFileStat } from './ut-stat';
+	import { breakdownRows, sharePct } from './storage-breakdown-view';
 	import { baseLocale, locales } from '$lib/paraglide/runtime';
 	import { earlyAccessLabel } from '$lib/early-access';
 	import * as m from '$lib/paraglide/messages';
@@ -251,24 +252,6 @@
 				: null
 	);
 
-	// Per-type rows (SONA-192). Fixed order — the bar's segment order is locked
-	// to the row order so the color mapping never becomes color-only (WCAG 1.4.1).
-	const breakdownRows = [
-		{ kind: 'artwork', label: m.admin_settings_breakdown_artwork },
-		{ kind: 'vrVideo', label: m.admin_settings_breakdown_vr_videos },
-		{ kind: 'vrModel', label: m.admin_settings_breakdown_vr_models },
-		{ kind: 'sticker', label: m.admin_settings_breakdown_stickers },
-		{ kind: 'vrImage', label: m.admin_settings_breakdown_vr_images },
-		{ kind: 'other', label: m.admin_settings_breakdown_avatars_other }
-	] as const;
-
-	// Share of USED bytes (the bar percentage is share of the limit — the column
-	// header disambiguates). Whole percents from 1%, one decimal below it.
-	function sharePct(bytes: number, total: number): string {
-		if (total <= 0 || bytes <= 0) return '0%';
-		const pct = (bytes / total) * 100;
-		return pct >= 1 ? `${Math.round(pct)}%` : `${pct.toFixed(1)}%`;
-	}
 	// Originals still sitting on UploadThing after migrating to R2.
 	const utLeftover = $derived(
 		data.settings.storageProvider === 'r2' && data.utUsage && data.utUsage.usedBytes > 0
@@ -692,7 +675,10 @@
 				<div class="storage-bar-wrap">
 					<div class="storage-bar-header">
 						<span>{m.admin_settings_usage({ label: activeUsage.label, used: formatSize(activeUsage.used), limit: formatSize(activeUsage.limit) })}</span>
-						<span class="storage-pct">{pct.toFixed(1)}%</span>
+						<!-- In the breakdown branch the segmented bar has no warning/danger
+					     fill, so the header percentage carries the >80% / >95% signal
+					     instead (the fallback branch keeps it on the bar fill). -->
+					<span class="storage-pct" class:warning={!!data.breakdown && pct > 80} class:danger={!!data.breakdown && pct > 95}>{pct.toFixed(1)}%</span>
 					</div>
 					{#if data.breakdown}
 						<!-- Redundant visual summary of the table below, so it's hidden from
@@ -728,11 +714,14 @@
 					</thead>
 					<tbody>
 						{#each breakdownRows as row (row.kind)}
-							<tr>
+							{@const usage = data.breakdown.kinds[row.kind]}
+							<!-- Zero-byte rows stay (the fixed row set is the legend) but are
+							     dimmed, with an em dash where a size/share would only be noise. -->
+							<tr class:zero={usage.bytes === 0}>
 								<td class="col-type"><span class="swatch seg-{row.kind}" aria-hidden="true"></span>{row.label()}</td>
-								<td class="col-files">{m.admin_settings_breakdown_file_count({ count: data.breakdown.kinds[row.kind].count })}</td>
-								<td class="col-size">{formatSize(data.breakdown.kinds[row.kind].bytes)}</td>
-								<td class="col-share">{sharePct(data.breakdown.kinds[row.kind].bytes, data.breakdown.totalBytes)}</td>
+								<td class="col-files">{m.admin_settings_breakdown_file_count({ count: usage.count })}</td>
+								<td class="col-size">{usage.bytes === 0 ? '—' : formatSize(usage.bytes)}</td>
+								<td class="col-share">{usage.bytes === 0 ? '—' : sharePct(usage.bytes, data.breakdown.totalBytes)}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -747,12 +736,15 @@
 			{/if}
 			<dl class="storage-info">
 				<div class="storage-stat">
+					<!-- Deliberately the D1 sum: "Tracked" means DB-tracked everywhere
+					     else, and the bar header above already shows the bucket total, so
+					     the tracked-vs-bucket delta stays visible. -->
 					<dt class="stat-label">{m.admin_settings_stat_tracked()}</dt>
-					<dd class="stat-value">{formatSize(data.breakdown?.totalBytes ?? data.totalSize)}</dd>
+					<dd class="stat-value">{formatSize(data.totalSize)}</dd>
 				</div>
 				{#if data.breakdown}
 					<div class="storage-stat">
-						<dt class="stat-label">{m.admin_settings_stat_files()}</dt>
+						<dt class="stat-label">{m.admin_settings_breakdown_files()}</dt>
 						<dd class="stat-value">{data.breakdown.totalCount.toLocaleString()}</dd>
 					</div>
 				{:else}
@@ -1615,6 +1607,7 @@
 	}
 
 	.storage-bar {
+		display: flex;
 		width: 100%;
 		height: 8px;
 		background: var(--secondary);
@@ -1636,16 +1629,24 @@
 		background: var(--destructive);
 	}
 
+	/* Breakdown branch only (no warning/danger bar fill there): the header
+	   percentage takes the same >80% / >95% colors as the fill. */
+	.storage-pct.warning {
+		color: #f0b33a;
+	}
+
+	.storage-pct.danger {
+		color: var(--destructive);
+	}
+
 	/* ── Per-type breakdown (SONA-192) ─────────────────────────────────────
 	   The segmented bar is aria-hidden (the table carries the data); segment
 	   order is locked to row order. Separators use the page background so
 	   adjacent segments stay distinguishable (WCAG 1.4.11) in every theme.
 	   Colors are validated ≥3:1 against the track in the default palettes:
-	   the dark set on #2E2E2E, the light set on #E7E8E5 and white. */
-	.storage-bar {
-		display: flex;
-	}
-
+	   the dark set on #2E2E2E, the light set on #E7E8E5 and white (light
+	   vrImage teal #0F766E: 4.45:1 on #E7E8E5, 5.47:1 on #FFFFFF — moved out
+	   of the orange family so it can't be read as a shade of artwork). */
 	.storage-seg {
 		height: 100%;
 	}
@@ -1686,7 +1687,7 @@
 		background: #a21caf;
 	}
 	:global([data-theme='light']) .seg-vrImage {
-		background: #92400e;
+		background: #0f766e;
 	}
 	:global([data-theme='light']) .seg-other {
 		background: #57606a;
@@ -1730,10 +1731,21 @@
 		white-space: nowrap;
 	}
 
-	/* 320px reflow (WCAG 1.4.10): let the type names wrap instead of scrolling. */
+	/* 320px reflow (WCAG 1.4.10): let the type names and column headers wrap
+	   instead of scrolling, and hand the flexible width to the label column so
+	   it gets the slack on mobile. */
 	@media (max-width: 520px) {
+		.breakdown th {
+			white-space: normal;
+		}
+
 		.breakdown td.col-type {
 			white-space: normal;
+			width: 99%;
+		}
+
+		.breakdown td.col-files {
+			width: auto;
 		}
 	}
 
@@ -1790,6 +1802,18 @@
 		vertical-align: 1px;
 	}
 
+	/* Zero-byte kinds: muted row, outline swatch — present as a legend entry
+	   without competing with the rows that hold actual bytes. */
+	.breakdown tr.zero td {
+		color: var(--muted-foreground);
+		font-weight: 400;
+	}
+
+	.breakdown tr.zero .swatch {
+		background: transparent;
+		border: 1px solid var(--muted-foreground);
+	}
+
 	.breakdown-r2-note {
 		font-size: 13px;
 		color: var(--muted-foreground);
@@ -1797,20 +1821,17 @@
 	}
 
 	.storage-info {
-		margin: 0;
-	}
-
-	.storage-info dd {
-		margin: 0;
-	}
-
-	.storage-info {
 		display: flex;
 		gap: 32px;
+		margin: 0;
 		padding: 16px;
 		background: var(--card);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-s);
+	}
+
+	.storage-info dd {
+		margin: 0;
 	}
 
 	.storage-stat {

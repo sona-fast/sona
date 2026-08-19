@@ -78,11 +78,21 @@ function emptyBreakdown(): StorageBreakdown {
 /**
  * One paginated pass over the whole bucket (instead of one list per prefix):
  * fewer subrequests, and unknown prefixes still count toward the total.
+ *
+ * Bounded: a bucket still truncated after `maxPages` pages (50 × 1000 objects
+ * by default) yields null — a partial breakdown would misstate every share, so
+ * the caller degrades to the aggregate bar instead.
  */
-export async function collectUsageBreakdown(bucket: ListableBucket): Promise<StorageBreakdown> {
+export async function collectUsageBreakdown(
+	bucket: ListableBucket,
+	maxPages = 50
+): Promise<StorageBreakdown | null> {
 	const breakdown = emptyBreakdown();
 	let cursor: string | undefined;
+	let pages = 0;
 	do {
+		if (pages >= maxPages) return null;
+		pages += 1;
 		const page = await bucket.list({ cursor, limit: 1000 });
 		for (const object of page.objects) {
 			const kind = breakdown.kinds[classifyKey(object.key)];

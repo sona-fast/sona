@@ -90,7 +90,9 @@ const uploadServerEnv = {
 };
 
 const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
-const UT_SPEC = '**/ut-stat.spec.ts';
+// storage-breakdown rides the ut-stat server: it also flips the storage
+// provider, which would race the shared server's specs (SONA-192).
+const UT_SPECS = ['**/ut-stat.spec.ts', '**/storage-breakdown.spec.ts'];
 const UPLOAD_SPEC = '**/upload.spec.ts';
 
 // Seed a fresh throwaway D1 first, then boot the dev server against it. Seeding
@@ -132,7 +134,7 @@ export default defineConfig({
 	projects: [
 		{
 			name: 'chromium',
-			testIgnore: [RECOVERY_SPEC, UT_SPEC, UPLOAD_SPEC],
+			testIgnore: [RECOVERY_SPEC, ...UT_SPECS, UPLOAD_SPEC],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
 		},
 		{
@@ -142,7 +144,10 @@ export default defineConfig({
 		},
 		{
 			name: 'ut-stat',
-			testMatch: UT_SPEC,
+			testMatch: UT_SPECS,
+			// Both specs mutate the shared seeded DB's storage provider — one
+			// worker keeps the two files from racing each other's saves.
+			workers: 1,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${UT_PORT}` }
 		},
 		{
