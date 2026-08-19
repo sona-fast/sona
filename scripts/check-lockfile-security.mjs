@@ -7,83 +7,42 @@
 // so; nanoid has no override at all and rides on the lockfile alone. This reads
 // what actually got resolved, so it catches all three regardless of how.
 //
+// The floors and the scan itself live in check-lockfile-security-lib.mjs so
+// they can be unit-tested; this file is just the CLI wrapper.
+//
 // Run: node scripts/check-lockfile-security.mjs
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { FLOORS, scanLockfile } from './check-lockfile-security-lib.mjs';
 
-const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Every resolved entry for these packages must be at or above the floor,
-// wherever in the tree it sits — a nested copy is just as exploitable.
-const FLOORS = {
-  cookie: "0.7.0",
-  esbuild: "0.25.0",
-  nanoid: "3.3.18",
-};
+const lock = JSON.parse(readFileSync(join(repo, 'package-lock.json'), 'utf-8'));
+const { offenders, checked, missing } = scanLockfile(lock, FLOORS);
 
-/** -1/0/1 comparison of dotted numeric versions; prerelease tags are ignored. */
-function compare(a, b) {
-  const parse = (v) => v.split("-")[0].split(".").map(Number);
-  const [x, y] = [parse(a), parse(b)];
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const diff = (x[i] ?? 0) - (y[i] ?? 0);
-    if (diff !== 0) return diff < 0 ? -1 : 1;
-  }
-  return 0;
+for (const name of missing) {
+	console.error(
+		`check-lockfile-security: no resolved '${name}' entry in package-lock.json — ` +
+			`the >=${FLOORS[name]} floor can't be verified. If the dependency really is gone, ` +
+			`drop it from FLOORS in check-lockfile-security-lib.mjs.`
+	);
 }
-
-const lock = JSON.parse(readFileSync(join(repo, "package-lock.json"), "utf-8"));
-const packages = lock.packages ?? {};
-
-const offenders = [];
-let checked = 0;
-for (const [path, entry] of Object.entries(packages)) {
-  const name = entry.name ?? path.split("node_modules/").pop();
-  const floor = FLOORS[name];
-  if (!floor || !entry.version) continue;
-  checked++;
-  if (compare(entry.version, floor) < 0) {
-    offenders.push({
-      path: path || "(root)",
-      name,
-      version: entry.version,
-      floor,
-    });
-  }
-}
-
-for (const [name, floor] of Object.entries(FLOORS)) {
-  const seen = Object.entries(packages).some(
-    ([path, entry]) =>
-      (entry.name ?? path.split("node_modules/").pop()) === name &&
-      entry.version,
-  );
-  if (!seen) {
-    console.error(
-      `check-lockfile-security: no resolved '${name}' entry in package-lock.json — ` +
-        `the >=${floor} floor can't be verified. If the dependency really is gone, ` +
-        `drop it from FLOORS in this script.`,
-    );
-    process.exit(1);
-  }
-}
+if (missing.length > 0) process.exit(1);
 
 if (offenders.length > 0) {
-  console.error(
-    `check-lockfile-security: ${offenders.length} lockfile entr(y/ies) below their security ` +
-      `floor. npm ignores "pkg@<range>" override keys before npm 8.3 — regenerate the ` +
-      `lockfile with npm >=8.3 (\`npm --version\`), or raise the pin directly.`,
-  );
-  for (const { path, name, version, floor } of offenders) {
-    console.error(`  ${path}: ${name}@${version} < ${floor}`);
-  }
-  process.exit(1);
+	console.error(
+		`check-lockfile-security: ${offenders.length} lockfile entr(y/ies) below their security ` +
+			`floor. npm ignores "pkg@<range>" override keys before npm 8.3 — regenerate the ` +
+			`lockfile with npm >=8.3 (\`npm --version\`), or raise the pin directly.`
+	);
+	for (const { path, name, version, floor } of offenders) {
+		console.error(`  ${path}: ${name}@${version} < ${floor}`);
+	}
+	process.exit(1);
 }
 
 const summary = Object.entries(FLOORS)
-  .map(([name, floor]) => `${name}>=${floor}`)
-  .join(", ");
-console.log(
-  `check-lockfile-security: OK — ${checked} entr(y/ies) meet ${summary}`,
-);
+	.map(([name, floor]) => `${name}>=${floor}`)
+	.join(', ');
+console.log(`check-lockfile-security: OK — ${checked} entr(y/ies) meet ${summary}`);
