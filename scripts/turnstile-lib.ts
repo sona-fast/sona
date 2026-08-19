@@ -125,11 +125,14 @@ export async function provisionTurnstileWidget(
 
 	// 1. List existing widgets a page at a time; reconcile against ours by stable
 	// name. Stop at the first match, at a short page (the last one), or at MAX_PAGES.
+	// The explicit sort keeps the page offsets stable: under the API's default order a
+	// widget deleted mid-walk shifts later widgets back a slot, and ours could slide
+	// from an unread page onto one already read.
 	let mine: Widget | undefined;
 	for (let page = 1; page <= MAX_PAGES; page++) {
 		const listRes = await api(
 			cfToken,
-			`/accounts/${accountId}/challenges/widgets?page=${page}&per_page=${PER_PAGE}`
+			`/accounts/${accountId}/challenges/widgets?page=${page}&per_page=${PER_PAGE}&order=created_on&direction=asc`
 		);
 		if (!listRes.ok) {
 			return {

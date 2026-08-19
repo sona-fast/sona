@@ -40,7 +40,7 @@ function fakeApi(routes: Record<string, CfApiResult>) {
 
 const PER_PAGE = 50;
 const listPage = (page: number) =>
-	`GET /accounts/${ACCT}/challenges/widgets?page=${page}&per_page=${PER_PAGE}`;
+	`GET /accounts/${ACCT}/challenges/widgets?page=${page}&per_page=${PER_PAGE}&order=created_on&direction=asc`;
 const listPath = listPage(1);
 /** A full page of widgets belonging to nobody we care about. */
 const fullPageOfStrangers = (tag: string) =>
@@ -215,6 +215,8 @@ describe('provisionTurnstileWidget — walks past the first list page', () => {
 		expect(calls.some((c) => c.method === 'POST')).toBe(false);
 		// Stopped at the match rather than reading on.
 		expect(calls.some((c) => c.path.includes('page=3'))).toBe(false);
+		// Offsets only mean the same thing page to page under an explicit sort.
+		expect(calls[0].path).toContain('order=created_on&direction=asc');
 	});
 
 	it('creates exactly once after two full pages hold no widget of ours', async () => {
@@ -244,6 +246,36 @@ describe('provisionTurnstileWidget — walks past the first list page', () => {
 		expect(res.detail).toContain('Turnstile: Edit');
 		// A failed page must never fall through to a create.
 		expect(calls.some((c) => c.method === 'POST')).toBe(false);
+	});
+
+	// An API that ignored `page` would hand back the same full page forever. The fake
+	// here is a handler rather than a route map so it can do exactly that: every list
+	// request answers with a full page of strangers, whatever page was asked for.
+	it('stops after MAX_PAGES when every page comes back full', async () => {
+		const calls: Call[] = [];
+		const api = async (
+			token: string,
+			path: string,
+			init: { method?: string; body?: unknown } = {}
+		): Promise<CfApiResult> => {
+			const method = init.method ?? 'GET';
+			calls.push({ token, path, method, body: init.body });
+			if (method === 'POST') {
+				return { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } };
+			}
+			return { ok: true, status: 200, result: fullPageOfStrangers('endless') };
+		};
+
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+
+		// Terminated at the bound instead of hanging.
+		expect(calls.filter((c) => c.method === 'GET')).toHaveLength(20);
+		// Current behavior, asserted so a change to it is a deliberate one: the walk
+		// ending without a match is indistinguishable from "we have no widget", so the
+		// create fires. It mints a duplicate on an account this large, which beats
+		// leaving the fork with no widget and a locked admin login.
+		expect(res.status).toBe('created');
+		expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
 	});
 });
 
