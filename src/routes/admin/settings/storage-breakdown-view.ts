@@ -37,6 +37,6 @@ export function sharePct(bytes: number, total: number): string {
  * (WCAG 1.4.1). Drives BOTH the percentage's color classes and the suffix.
  */
 export function usageWarning(pct: number): 'full' | 'near' | null {
-	if (pct <= 80) return null;
+	if (!Number.isFinite(pct) || pct <= 80) return null;
 	return pct > 95 ? 'full' : 'near';
 }

@@ -28,6 +28,10 @@ describe('usageWarning', () => {
 		expect(usageWarning(79.9)).toBeNull();
 	});
 
+	it('stays quiet on a non-finite percentage', () => {
+		expect(usageWarning(Number.NaN)).toBeNull();
+	});
+
 	it('reports near past 80% up to 95%', () => {
 		expect(usageWarning(80.1)).toBe('near');
 		expect(usageWarning(95)).toBe('near');

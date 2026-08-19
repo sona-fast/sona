@@ -1572,6 +1572,16 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 		expect(span).toContain('m.admin_settings_usage_full()');
 	});
 
+	// Source pin: the Bucket files tile renders the raw count. A locale-aware
+	// format (toLocaleString) diverges between SSR (workerd en-US) and the
+	// client's browser locale — a hydration text mismatch — and disagrees with
+	// the raw-count Files column.
+	it('the Bucket files tile renders the raw count', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(src).toContain('{data.breakdown.totalCount}');
+		expect(src).not.toContain('totalCount.toLocaleString');
+	});
+
 	it('degrades to breakdown null when the listing never settles (5s deadline)', async () => {
 		vi.useFakeTimers();
 		try {

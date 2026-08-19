@@ -758,7 +758,7 @@
 				{#if data.breakdown}
 					<div class="storage-stat">
 						<dt class="stat-label">{m.admin_settings_stat_bucket_files()}</dt>
-						<dd class="stat-value">{data.breakdown.totalCount.toLocaleString()}</dd>
+						<dd class="stat-value">{data.breakdown.totalCount}</dd>
 					</div>
 				{:else}
 					<div class="storage-stat">
