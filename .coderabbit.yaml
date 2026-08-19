@@ -24,7 +24,7 @@ reviews:
     drafts: false
     # Dependency bumps are reviewed locally through the ship loop instead.
     ignore_usernames:
-      - dependabot
+      - "dependabot[bot]"
 
   pre_merge_checks:
     title:
@@ -57,9 +57,11 @@ reviews:
         migrations run against live databases that cannot be rolled back in place.
     - path: ".github/workflows/**"
       instructions: >-
-        Flag unpinned third-party actions, secrets exposed to pull_request_target
-        or to forked pull requests, and missing least-privilege permissions
-        blocks. These workflows deploy to production Cloudflare accounts.
+        Flag unpinned third-party actions and secrets exposed to
+        pull_request_target or to forked pull requests. Check the permissions
+        block by value, not just for its presence: flag read-all, write-all, and
+        any scope broader than the job actually uses. These workflows deploy to
+        production Cloudflare accounts.
     - path: "src/**/*.{ts,svelte}"
       instructions: >-
         Sona's operator is the commissioner of the artwork, not the artist. Flag
