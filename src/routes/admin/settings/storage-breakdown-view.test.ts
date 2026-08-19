@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BREAKDOWN_KINDS } from '$lib/server/storage/usage-breakdown';
 import * as m from '$lib/paraglide/messages';
-import { breakdownRows, sharePct } from './storage-breakdown-view';
+import { breakdownRows, sharePct, usageWarning } from './storage-breakdown-view';
 
 describe('sharePct', () => {
 	// Two-tier precision on purpose (approved-mock rendering): whole percents
@@ -18,6 +18,27 @@ describe('sharePct', () => {
 
 	it('keeps one decimal below 1% so tiny kinds stay visible', () => {
 		expect(sharePct(4, 1000)).toBe('0.4%');
+	});
+});
+
+describe('usageWarning', () => {
+	// Thresholds are exclusive on purpose: exactly 80% is fine, exactly 95% is
+	// only near — the words escalate strictly past each mark.
+	it('stays quiet at and below 80%', () => {
+		expect(usageWarning(79.9, true)).toBeNull();
+	});
+
+	it('reports near past 80% up to 95%', () => {
+		expect(usageWarning(80.1, true)).toBe('near');
+		expect(usageWarning(95, true)).toBe('near');
+	});
+
+	it('reports full past 95%', () => {
+		expect(usageWarning(95.1, true)).toBe('full');
+	});
+
+	it('stays quiet without a breakdown, whatever the percentage', () => {
+		expect(usageWarning(96, false)).toBeNull();
 	});
 });
 

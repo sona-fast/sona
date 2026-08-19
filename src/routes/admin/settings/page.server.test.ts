@@ -1459,22 +1459,57 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 		};
 		const { db, platform } = makeLoadDb({ IMAGES: bucket });
 		await setRawSetting(db, 'storageProvider', 'r2');
+		// Seed the D1-backed fields the load resolves BEFORE the bucket listing:
+		// the listing runs last (free-plan subrequest budget — see the loader
+		// comment), so a listing failure must never cost these.
+		await setRawSetting(db, 'adminEmail', 'recover@taro.surf');
+		await setRawSetting(db, 'supporterKey', 'head.tail');
+		vi.mocked(verifySupporterKey).mockResolvedValueOnce({
+			valid: true,
+			login: 'sparky',
+			tier: 2,
+			expiresAt: new Date('2026-09-01T00:00:00Z')
+		});
 
 		const result = (await load(loadEvent(platform))) as unknown as {
 			breakdown: unknown;
 			settings: Record<string, unknown>;
 			imageCount: number;
 			storageStatus: { r2: boolean };
+			adminEmail: string;
+			supporterKey: { state: string } | null;
+			registryEnabled: boolean;
 		};
 
 		expect(result.breakdown).toBeNull();
-		// The rest of the payload still rides — the tab keeps its aggregate bar.
+		// The rest of the payload still rides — the tab keeps its aggregate bar,
+		// and every D1-dependent field resolved before the listing failed.
 		expect(result.settings.storageProvider).toBe('r2');
 		expect(result.imageCount).toBe(0);
 		expect(result.storageStatus.r2).toBe(true);
+		expect(result.adminEmail).toBe('recover@taro.surf');
+		expect(result.supporterKey).toMatchObject({ state: 'valid' });
+		expect(result.registryEnabled).toBe(false);
 		// Key-privacy invariant: an R2 error can echo an object key, and that
 		// key must never ride anywhere in the page payload.
 		expect(JSON.stringify(result)).not.toContain('some-object-key');
+	});
+
+	// Source pin (SONA-183 precedent): the two no-breakdown notes are branch-
+	// keyed on the provider, and no unit render exercises them — swapping the
+	// messages (or collapsing the branches) would leave the suite green while
+	// an R2 outage reads as "R2 only" to a fork already ON R2.
+	it('the no-breakdown notes are wired to the right provider branches', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		const branches = src.match(
+			/\{:else if data\.settings\.storageProvider === 'uploadthing'\}([\s\S]*?)\{:else\}([\s\S]*?)\{\/if\}/
+		);
+		expect(branches, 'uploadthing/else branch pair').not.toBeNull();
+		// UploadThing: no per-prefix listing exists — the R2-only pointer.
+		expect(branches![1]).toContain('m.admin_settings_breakdown_r2_only()');
+		expect(branches![1]).not.toContain('m.admin_settings_breakdown_unavailable()');
+		// R2 with no breakdown: the listing failed — the unavailable note.
+		expect(branches![2]).toContain('m.admin_settings_breakdown_unavailable()');
 	});
 
 	it('degrades to breakdown null when the listing never settles (5s deadline)', async () => {

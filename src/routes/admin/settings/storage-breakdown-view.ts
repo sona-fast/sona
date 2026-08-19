@@ -28,3 +28,14 @@ export function sharePct(bytes: number, total: number): string {
 	const pct = (bytes / total) * 100;
 	return pct >= 1 ? `${Math.round(pct)}%` : `${pct.toFixed(1)}%`;
 }
+
+/**
+ * Usage-warning level for the bar header: 'full' above 95%, 'near' above 80%,
+ * null otherwise (or when there's no breakdown to warn about). Drives BOTH the
+ * percentage's color classes and the worded suffix, so the state never becomes
+ * color-only (WCAG 1.4.1).
+ */
+export function usageWarning(pct: number, hasBreakdown: boolean): 'full' | 'near' | null {
+	if (!hasBreakdown || pct <= 80) return null;
+	return pct > 95 ? 'full' : 'near';
+}

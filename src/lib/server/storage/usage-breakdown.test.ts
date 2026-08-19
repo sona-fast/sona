@@ -107,9 +107,10 @@ describe('collectUsageBreakdown', () => {
 		expect(await collectUsageBreakdown(endless, 3)).toBeNull();
 		expect(calls).toBe(3); // stops listing at the cap, no runaway loop
 
-		// The default cap is bounded too (50 pages).
+		// The default cap is bounded too (20 pages — each page is a subrequest,
+		// and the Workers free plan allows 50 per invocation shared with D1).
 		calls = 0;
 		expect(await collectUsageBreakdown(endless)).toBeNull();
-		expect(calls).toBe(50);
+		expect(calls).toBe(20);
 	});
 });

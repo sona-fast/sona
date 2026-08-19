@@ -16,7 +16,7 @@
 	import { resendSetupProgress } from '$lib/resend-setup';
 	import { resolveTabId, visibleTabIds, type TabId } from './tabs';
 	import { showUtFileStat } from './ut-stat';
-	import { breakdownRows, sharePct } from './storage-breakdown-view';
+	import { breakdownRows, sharePct, usageWarning } from './storage-breakdown-view';
 	import { baseLocale, locales } from '$lib/paraglide/runtime';
 	import { earlyAccessLabel } from '$lib/early-access';
 	import * as m from '$lib/paraglide/messages';
@@ -672,14 +672,15 @@
 			<h2>{m.admin_settings_tab_storage()}</h2>
 			{#if activeUsage}
 				{@const pct = Math.min(100, (activeUsage.used / activeUsage.limit) * 100)}
+				{@const warn = usageWarning(pct, true)}
 				<div class="storage-bar-wrap">
 					<div class="storage-bar-header">
 						<span>{m.admin_settings_usage({ label: activeUsage.label, used: formatSize(activeUsage.used), limit: formatSize(activeUsage.limit) })}</span>
-						<!-- In the breakdown branch the segmented bar has no warning/danger
-					     fill, so the header percentage carries the >80% / >95% signal
-					     instead (the fallback branch keeps it on the bar fill). The worded
-					     suffix keeps the state readable without color (WCAG 1.4.1). -->
-					<span class="storage-pct" class:warning={!!data.breakdown && pct > 80} class:danger={!!data.breakdown && pct > 95}>{pct.toFixed(1)}%{#if data.breakdown && pct > 95}{` · ${m.admin_settings_usage_full()}`}{:else if data.breakdown && pct > 80}{` · ${m.admin_settings_usage_near()}`}{/if}</span>
+						<!-- The header percentage carries the >80% / >95% signal in every
+					     branch (the fallback branch's bar fill colors agree with it).
+					     The worded suffix keeps the state readable without color
+					     (WCAG 1.4.1). -->
+					<span class="storage-pct" class:warning={warn === 'near'} class:danger={warn === 'full'}>{pct.toFixed(1)}%{#if warn === 'full'}{` · ${m.admin_settings_usage_full()}`}{:else if warn === 'near'}{` · ${m.admin_settings_usage_near()}`}{/if}</span>
 					</div>
 					{#if data.breakdown}
 						<!-- Redundant visual summary of the table below, so it's hidden from
@@ -719,7 +720,7 @@
 							<!-- Zero-byte rows stay (the fixed row set is the legend) but are
 							     dimmed, with an outline swatch. -->
 							<tr class:zero={usage.bytes === 0}>
-								<td class="col-type"><span class="swatch seg-{row.kind}" aria-hidden="true"></span>{row.label()}</td>
+								<th scope="row" class="col-type"><span class="swatch seg-{row.kind}" aria-hidden="true"></span>{row.label()}</th>
 								<td class="col-files">{m.admin_settings_breakdown_file_count({ count: usage.count })}</td>
 								<td class="col-size">{formatSize(usage.bytes)}</td>
 								<td class="col-share">{sharePct(usage.bytes, data.breakdown.totalBytes)}</td>
@@ -749,7 +750,7 @@
 				</div>
 				{#if data.breakdown}
 					<div class="storage-stat">
-						<dt class="stat-label">{m.admin_settings_breakdown_files()}</dt>
+						<dt class="stat-label">{m.admin_settings_stat_bucket_files()}</dt>
 						<dd class="stat-value">{data.breakdown.totalCount.toLocaleString()}</dd>
 					</div>
 				{:else}
@@ -1651,6 +1652,12 @@
 		color: var(--destructive);
 	}
 
+	/* Outranks the light warning override above, so >95% escalates to red on
+	   light themes even if both classes ever apply together again. */
+	:global([data-theme='light']) .storage-pct.danger {
+		color: var(--destructive);
+	}
+
 	/* ── Per-type breakdown (SONA-192) ─────────────────────────────────────
 	   The segmented bar is aria-hidden (the table carries the data); segment
 	   order is locked to row order. Separators use the page background so
@@ -1720,7 +1727,9 @@
 		font-size: 13.5px;
 	}
 
-	.breakdown th {
+	/* thead-scoped: the type cells in tbody are row headers (th scope="row")
+	   and keep the body-cell styling below instead. */
+	.breakdown thead th {
 		padding: 8px 2px 2px;
 		border-top: 1px solid var(--border);
 		font-size: 12px;
@@ -1744,18 +1753,21 @@
 		padding-left: 12px;
 	}
 
-	.breakdown td {
+	.breakdown td,
+	.breakdown tbody th {
 		padding: 8px 2px;
 		border-bottom: 1px solid var(--border);
 		vertical-align: middle;
 	}
 
-	.breakdown tr:last-child td {
+	.breakdown tr:last-child td,
+	.breakdown tr:last-child th {
 		border-bottom: none;
 	}
 
-	.breakdown td.col-type {
+	.breakdown tbody th.col-type {
 		font-weight: 500;
+		text-align: left;
 		padding-right: 10px;
 		white-space: nowrap;
 	}
@@ -1788,27 +1800,25 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	/* 320px reflow (WCAG 1.4.10): let the labels, headers, and value cells
+	/* 320px reflow (WCAG 1.4.10): let the labels, headers, and file counts
 	   wrap instead of scrolling, and hand the flexible width to the label
-	   column so it gets the slack on mobile. Every base rule above precedes
-	   this block so the overrides here actually win. */
+	   column so it gets the slack on mobile. Size and share keep their base
+	   nowrap — measured at a 288px container with worst-case values, the
+	   table still fits, and a mid-number line break would misread as two
+	   values. Every base rule above precedes this block so the overrides
+	   here actually win. */
 	@media (max-width: 520px) {
-		.breakdown th {
+		.breakdown thead th {
 			white-space: normal;
 		}
 
-		.breakdown td.col-type {
+		.breakdown tbody th.col-type {
 			white-space: normal;
 			width: 99%;
 		}
 
-		.breakdown td.col-files,
-		.breakdown td.col-size,
-		.breakdown td.col-share {
-			white-space: normal;
-		}
-
 		.breakdown td.col-files {
+			white-space: normal;
 			width: auto;
 		}
 

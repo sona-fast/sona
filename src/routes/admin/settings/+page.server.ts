@@ -131,23 +131,6 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		}
 	}
 
-	// Per-content-type usage (SONA-192) — R2 only: derived from listing the
-	// bucket, so it also counts files D1 never tracked. Reduced to counts and
-	// sums here; raw object keys never leave the server or reach a log line.
-	// A list failure, a bucket too big for the page cap, or a listing slower
-	// than 5s all degrade to breakdown=null and the tab falls back to the
-	// aggregate bar (same deadline pattern as the UT usage fetch above).
-	let breakdown: StorageBreakdown | null = null;
-	if (settings.storageProvider === 'r2' && platform?.env.IMAGES) {
-		try {
-			breakdown = await withDeadline(collectUsageBreakdown(platform.env.IMAGES), 5000);
-		} catch {
-			// R2 list unavailable or too slow — the aggregate bar still renders.
-			// If logging is ever added here, log a STATIC message only: R2 errors
-			// can echo object keys, which must never reach a log line.
-		}
-	}
-
 	// Whether each provider's deploy-time config is present (secrets/bindings live
 	// in env, never in settings). utUsage succeeding also proves the UT token works.
 	const storageStatus = {
@@ -185,6 +168,29 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	// Features still inside their early-access window, with GA dates pre-formatted
 	// for display. Empty until the first pilot feature is registered.
 	const earlyAccess = earlyAccessActive(now).map((e) => ({ flag: e.flag, gaDate: formatDate(e.gaDate) }));
+
+	// Per-content-type usage (SONA-192) — R2 only: derived from listing the
+	// bucket, so it also counts files D1 never tracked. Reduced to counts and
+	// sums here; raw object keys never leave the server or reach a log line.
+	// A list failure, a bucket too big for the page cap, or a listing slower
+	// than 5s all degrade to breakdown=null and the tab falls back to the
+	// aggregate bar (same deadline pattern as the UT usage fetch above).
+	//
+	// This block must stay LAST in load: each list() page is a subrequest, and
+	// the Workers free plan caps an invocation at 50 subrequests shared with
+	// every D1 query above. Listing last means a bucket big enough to exhaust
+	// the budget only costs the breakdown (null → aggregate bar), never the
+	// D1-backed fields the rest of the page needs.
+	let breakdown: StorageBreakdown | null = null;
+	if (settings.storageProvider === 'r2' && platform?.env.IMAGES) {
+		try {
+			breakdown = await withDeadline(collectUsageBreakdown(platform.env.IMAGES), 5000);
+		} catch {
+			// R2 list unavailable or too slow — the aggregate bar still renders.
+			// If logging is ever added here, log a STATIC message only: R2 errors
+			// can echo object keys, which must never reach a log line.
+		}
+	}
 
 	return {
 		settings,

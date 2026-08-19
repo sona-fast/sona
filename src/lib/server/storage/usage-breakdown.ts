@@ -82,13 +82,16 @@ function emptyBreakdown(): StorageBreakdown {
  * One paginated pass over the whole bucket (instead of one list per prefix):
  * fewer subrequests, and unknown prefixes still count toward the total.
  *
- * Bounded: a bucket still truncated after `maxPages` pages (50 × 1000 objects
+ * Bounded: a bucket still truncated after `maxPages` pages (20 × 1000 objects
  * by default) yields null — a partial breakdown would misstate every share, so
- * the caller degrades to the aggregate bar instead.
+ * the caller degrades to the aggregate bar instead. The default is 20, not
+ * higher, because every list() page is a subrequest and the Workers FREE plan
+ * caps an invocation at 50 subrequests total — the settings load's D1 queries
+ * and other fetches share that budget.
  */
 export async function collectUsageBreakdown(
 	bucket: ListableBucket,
-	maxPages = 50
+	maxPages = 20
 ): Promise<StorageBreakdown | null> {
 	const breakdown = emptyBreakdown();
 	let cursor: string | undefined;

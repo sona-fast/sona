@@ -89,9 +89,11 @@ test.describe('admin settings storage breakdown', () => {
 		await expect(headers.nth(3)).toHaveText('Share of used');
 
 		// Seven rows in the fixed kind order: fursuit photos sixth, the
-		// catch-all bucket last.
+		// catch-all bucket last. Each type cell is a row header, so screen
+		// readers announce the type with every value cell.
 		const rows = table.locator('tbody tr');
 		await expect(rows).toHaveCount(7);
+		await expect(table.locator('tbody th[scope="row"]')).toHaveCount(7);
 		await expect(rows.nth(5)).toContainText('Fursuit photos');
 		await expect(rows.nth(6)).toContainText('Avatars & other files');
 
@@ -109,9 +111,10 @@ test.describe('admin settings storage breakdown', () => {
 		// the accessibility tree.
 		await expect(page.locator('.storage-bar[aria-hidden="true"]')).toHaveCount(1);
 
-		// The bucket-derived Files stat tile renders alongside the table.
+		// The bucket-derived file-count stat tile renders alongside the table,
+		// labelled with its source so it can't be read as the D1 image count.
 		await expect(
-			page.locator('.storage-info .stat-label', { hasText: 'Files' })
+			page.locator('.storage-info .stat-label', { hasText: 'Bucket files' })
 		).toBeVisible();
 	});
 
