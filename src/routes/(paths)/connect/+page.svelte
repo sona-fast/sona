@@ -70,7 +70,7 @@
 
 	<section class="section">
 		<div class="here-now">
-			<span class="live-pill"><span class="live-dot"></span>{m.connect_here_now()}</span>
+			<span class="live-pill">{m.connect_here_now()}</span>
 
 			<div class="here-ident">
 				{#if data.settings.adminAvatarUrl}
@@ -182,30 +182,7 @@
 		border-radius: var(--radius-pill);
 	}
 
-	.live-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--primary-foreground);
-	}
 
-	/* Motion is a second cue here, never the only one: the pill's label carries
-	   the state on its own for anyone who suppresses animation. */
-	@media (prefers-reduced-motion: no-preference) {
-		.live-dot {
-			animation: blip 2.4s ease-in-out infinite;
-		}
-		@keyframes blip {
-			0%,
-			72%,
-			100% {
-				opacity: 1;
-			}
-			84% {
-				opacity: 0.35;
-			}
-		}
-	}
 
 	.here-ident {
 		display: flex;

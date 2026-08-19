@@ -184,7 +184,7 @@
 					<td>{metaLine(con.location, con.timezone) || '—'}</td>
 					<td>
 						{#if live}
-							<span class="live-pill"><span class="live-dot"></span>{m.connect_here_now()}</span>
+							<span class="live-pill">{m.connect_here_now()}</span>
 						{:else}
 							<span class="status status-{con.status}">{statusLabel(con.status)}</span>
 						{/if}
@@ -227,7 +227,7 @@
 				{/if}
 			</div>
 			{#if live}
-				<span class="live-pill"><span class="live-dot"></span>{m.connect_here_now()}</span>
+				<span class="live-pill">{m.connect_here_now()}</span>
 			{:else}
 				<span class="status status-{con.status}">{statusLabel(con.status)}</span>
 			{/if}
@@ -450,31 +450,7 @@
 		white-space: nowrap;
 	}
 
-	.live-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--primary-foreground);
-		flex: none;
-	}
 
-	/* Motion is a second cue here, never the only one: the pill's label carries
-	   the state on its own for anyone who suppresses animation. */
-	@media (prefers-reduced-motion: no-preference) {
-		.live-dot {
-			animation: blip 2.4s ease-in-out infinite;
-		}
-		@keyframes blip {
-			0%,
-			72%,
-			100% {
-				opacity: 1;
-			}
-			84% {
-				opacity: 0.35;
-			}
-		}
-	}
 
 	.row-actions {
 		display: flex;
