@@ -498,7 +498,14 @@
 				/>
 				<span class="checkbox-text">
 					<label class="checkbox-title" for="rssFeedEnabled">{m.admin_settings_rss_enabled_label()}</label>
-					<span class="checkbox-desc" id="rssFeedEnabled-desc">{m.admin_settings_rss_enabled_hint()}</span>
+					<!-- The hint describes what the site DOES, so it has to change tense
+					     with the toggle: left in the present it would describe a feed an
+					     owner who turned it off is not serving. -->
+					<span class="checkbox-desc" id="rssFeedEnabled-desc"
+						>{rssFeedEnabled
+							? m.admin_settings_rss_enabled_hint()
+							: m.admin_settings_rss_enabled_hint_off()}</span
+					>
 				</span>
 			</div>
 			<!-- The NSFW row is meaningless with no feed to serve, so it disappears
@@ -524,8 +531,12 @@
 				     the save lands, so there is nothing to show until the page
 				     reloads with one. -->
 				{#if data.settings.rssNsfwEnabled && feedKeyUrl}
-					<div class="feed-key">
-						<span class="feed-key-label">{m.admin_settings_rss_key_label()}</span>
+					<!-- The label is a plain span, not a <label>: there is no form control
+					     to point `for` at. role="group" + aria-labelledby is what ties it
+					     to the address and its controls, so a screen reader announces
+					     what this block of text IS. -->
+					<div class="feed-key" role="group" aria-labelledby="feed-key-label">
+						<span class="feed-key-label" id="feed-key-label">{m.admin_settings_rss_key_label()}</span>
 						<CopyCommand text={feedKeyUrl} label={m.admin_settings_rss_copy()} />
 						<p class="hint">{m.admin_settings_rss_key_hint()}</p>
 						<button
@@ -537,6 +548,11 @@
 							{regeneratingFeedKey ? m.admin_settings_rss_regenerating() : m.admin_settings_rss_regenerate()}
 						</button>
 					</div>
+				{:else if rssNsfwEnabled}
+					<!-- Ticked but not yet saved. Without this the section looks inert:
+					     the address block only appears once the save mints a key, so an
+					     owner gets no sign that anything is about to happen. -->
+					<p class="hint feed-key-pending">{m.admin_settings_rss_key_pending()}</p>
 				{/if}
 			{/if}
 		</section>
@@ -1671,6 +1687,12 @@
 		flex-direction: column;
 		align-items: flex-start;
 		gap: 8px;
+		margin-top: 20px;
+	}
+
+	/* Stands where .feed-key will, so the block does not jump when the save
+	   replaces this line with the real address. */
+	.feed-key-pending {
 		margin-top: 20px;
 	}
 

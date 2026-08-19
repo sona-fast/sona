@@ -268,4 +268,24 @@ describe('RSS feed key', () => {
 		// No formaction anywhere: that is the shape that would re-break it.
 		expect(src).not.toContain('formaction');
 	});
+
+	// The two nested {#if}s are the UI half of the gate. Nothing executes them in
+	// a unit test, and flattening either one shows an owner a control that cannot
+	// work — an NSFW checkbox for a feed that 404s, or a key row before the save
+	// that mints the key.
+	it('nests the NSFW row inside the master toggle, and the key row inside both', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		const section = src.split('{m.admin_settings_rss_heading()}')[1]?.split('</section>')[0] ?? '';
+		expect(section).toContain('{#if rssFeedEnabled}');
+		// Order in the source is the nesting: master opens, then the NSFW row, then
+		// the key gate, which reads the STORED setting rather than the checkbox.
+		const master = section.indexOf('{#if rssFeedEnabled}');
+		const nsfwRow = section.indexOf('name="rssNsfwEnabled"');
+		const keyGate = section.indexOf('{#if data.settings.rssNsfwEnabled && feedKeyUrl}');
+		expect(master).toBeGreaterThan(-1);
+		expect(nsfwRow).toBeGreaterThan(master);
+		expect(keyGate).toBeGreaterThan(nsfwRow);
+		// And the key row is what sits inside that innermost gate.
+		expect(section.indexOf('<CopyCommand')).toBeGreaterThan(keyGate);
+	});
 });

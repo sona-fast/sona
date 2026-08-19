@@ -127,10 +127,15 @@ const setSetting = (db: Db, key: string, value: string) =>
  * (empty on a 304, which carries none). */
 async function call(
 	platform: App.Platform,
-	{ key, ifNoneMatch }: { key?: string; ifNoneMatch?: string } = {}
+	{
+		key,
+		ifNoneMatch,
+		query
+	}: { key?: string; ifNoneMatch?: string; query?: Record<string, string> } = {}
 ) {
 	const url = new URL(`${ORIGIN}/feed.xml`);
 	if (key !== undefined) url.searchParams.set('key', key);
+	for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, v);
 	const request = new Request(url, {
 		headers: ifNoneMatch ? { 'if-none-match': ifNoneMatch } : {}
 	});
@@ -267,6 +272,35 @@ describe('GET /feed.xml — what it publishes', () => {
 		await addPack(db);
 
 		expect(itemTitles((await call(platform)).body)).toEqual(['Taro Pack']);
+	});
+
+	it('caps the document at 50 entries, keeping the 50 NEWEST', async () => {
+		// The cap is what bounds the response; the ORDER is what makes it useful.
+		// A merge that sliced before sorting would still yield 50 items, just the
+		// wrong 50 — so assert both.
+		const { db, platform } = makeDb();
+		await addArtist(db);
+		/** Distinct instants a minute apart; higher i is newer. */
+		const at = (i: number) => new Date(Date.UTC(2026, 6, 1) + i * 60_000).toISOString();
+		for (let i = 1; i <= 60; i++) {
+			await addImage(db, {
+				id: i,
+				title: `Piece ${String(i).padStart(2, '0')}`,
+				slug: `piece-${i}`,
+				createdAt: at(i)
+			});
+		}
+		// A pack newer than every image: the cap must be applied to the MERGED
+		// timeline, not per section.
+		await addPack(db, { createdAt: at(99) });
+
+		const titles = itemTitles((await call(platform)).body);
+		expect(titles).toHaveLength(50);
+		expect(titles[0]).toBe('Taro Pack');
+		expect(titles[1]).toBe('Piece 60');
+		expect(titles[49]).toBe('Piece 12');
+		// The oldest fell off the end, not off the front.
+		expect(titles).not.toContain('Piece 11');
 	});
 });
 
@@ -425,6 +459,48 @@ describe('GET /feed.xml — the NSFW gate', () => {
 
 		expect(itemTitles((await call(platform, { key: '' })).body)).toEqual(['Tame']);
 	});
+
+	it('still finds SFW art behind 60 newer adult pieces', async () => {
+		// The filter has to run in SQL. Applied in JS after LIMIT 50, a run of adult
+		// uploads longer than the cap empties the public feed of art entirely while
+		// older SFW work sits unread — permanently, since nothing ages back in.
+		const { db, platform } = makeDb();
+		await addArtist(db);
+		await addImage(db, { id: 1, title: 'Tame', slug: 'tame', createdAt: '2026-01-01T00:00:00.000Z' });
+		for (let i = 2; i <= 62; i++) {
+			await addImage(db, {
+				id: i,
+				title: `Spicy ${i}`,
+				slug: `spicy-${i}`,
+				nsfw: true,
+				createdAt: new Date(Date.UTC(2026, 6, 1) + i * 60_000).toISOString()
+			});
+		}
+
+		expect(itemTitles((await call(platform)).body)).toEqual(['Tame']);
+	});
+
+	it('still finds a SFW avatar behind 60 newer adult ones', async () => {
+		const { db, platform } = makeDb();
+		await addArtist(db);
+		await addAvatar(db, { id: 1, slug: 'tame-vr', name: 'Tame VR', createdAt: '2026-01-01T00:00:00.000Z' });
+		// An adult poster on a SFW avatar row: the effective flag must be filtered
+		// in SQL too, not just the avatar's own column.
+		await addImage(db, { id: 500, slug: 'poster', nsfw: true, published: false });
+		for (let i = 2; i <= 62; i++) {
+			await addAvatar(db, {
+				id: i,
+				slug: `spicy-vr-${i}`,
+				name: `Spicy VR ${i}`,
+				// Half by their own flag, half only by their poster's.
+				nsfw: i % 2 === 0,
+				posterImageId: i % 2 === 0 ? undefined : 500,
+				createdAt: new Date(Date.UTC(2026, 6, 1) + i * 60_000).toISOString()
+			});
+		}
+
+		expect(itemTitles((await call(platform)).body)).toEqual(['Tame VR']);
+	});
 });
 
 describe('GET /feed.xml — caching', () => {
@@ -469,5 +545,51 @@ describe('GET /feed.xml — caching', () => {
 		expect((await call(platform)).headers.get('cache-control')).toBe(
 			'public, max-age=60, s-maxage=300'
 		);
+	});
+
+	it('keeps the keyed edition out of shared caches', async () => {
+		// Its body varies on a credential in the query string. A shared cache told
+		// to ignore query strings would store the adult document under the public
+		// /feed.xml and serve it to every anonymous visitor for the whole s-maxage.
+		const { db, platform } = makeDb();
+		await addArtist(db);
+		await addImage(db, { nsfw: true });
+		await setSetting(db, 'rssNsfwEnabled', 'true');
+		await setSetting(db, 'rssNsfwKey', KEY);
+
+		const res = await call(platform, { key: KEY });
+		expect(res.status).toBe(200);
+		expect(res.headers.get('cache-control')).toBe('private, max-age=60');
+	});
+
+	it('ignores junk query strings entirely — same body, same etag', async () => {
+		// Cloudflare keys its cache on the query string, so if a tracking param
+		// changed the body every shared link would miss cache and re-run the whole
+		// four-query fan-out against the primary.
+		const { db, platform } = makeDb();
+		await addArtist(db);
+		await addImage(db);
+
+		const plain = await call(platform);
+		const utm = await call(platform, { query: { utm_source: 'newsletter' } });
+		const fbclid = await call(platform, { query: { fbclid: 'IwAR-something-else' } });
+
+		expect(utm.body).toBe(plain.body);
+		expect(fbclid.body).toBe(plain.body);
+		expect(utm.headers.get('etag')).toBe(plain.headers.get('etag'));
+		expect(fbclid.headers.get('etag')).toBe(plain.headers.get('etag'));
+		// Specifically: the self link is the bare address, not the requested one.
+		expect(plain.body).toContain(`<atom:link href="${ORIGIN}/feed.xml" rel="self"`);
+	});
+
+	it('points the keyed edition\'s self link at the key that matched', async () => {
+		const { db, platform } = makeDb();
+		await addArtist(db);
+		await addImage(db);
+		await setSetting(db, 'rssNsfwEnabled', 'true');
+		await setSetting(db, 'rssNsfwKey', KEY);
+
+		const { body } = await call(platform, { key: KEY, query: { utm_source: 'x' } });
+		expect(body).toContain(`<atom:link href="${ORIGIN}/feed.xml?key=${KEY}" rel="self"`);
 	});
 });

@@ -26,7 +26,7 @@ export const RTA_LABEL = 'RTA-5042-1996-1400-1577-RTA';
 
 /** Prefix on the title of an adult item, so a reader that renders nothing but
  * titles still warns before the thumbnail loads. */
-export const NSFW_TITLE_PREFIX = '[NSFW] ';
+const NSFW_TITLE_PREFIX = '[NSFW] ';
 
 export interface FeedItem {
 	/** Plain, unprefixed title — the NSFW prefix is applied here, not by callers. */

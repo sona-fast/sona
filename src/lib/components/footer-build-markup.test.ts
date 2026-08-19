@@ -101,6 +101,14 @@ describe('feed link gating markup (SONA-172)', () => {
 			expect(messages.footer_rss, `${path.pathname} footer_rss`).toBeTruthy();
 			expect(messages.footer_legal_label, `${path.pathname} footer_legal_label`).toBeTruthy();
 		}
+		// Truthiness alone would stay green if the label reverted to "Legal", which
+		// is the whole regression: pin the en value, and pin that both chromes name
+		// the nav from that key rather than from a literal.
+		const en = JSON.parse(readFileSync(localePaths[0], 'utf8')) as Record<string, string>;
+		expect(en.footer_legal_label).toBe('Site links');
+		for (const src of [footerSrc, mobileCreditSrc]) {
+			expect(src).toMatch(/<nav class="legal-links" aria-label=\{m\.footer_legal_label\(\)\}/);
+		}
 	});
 });
 

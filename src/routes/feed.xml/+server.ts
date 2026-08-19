@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { images, artists, stickerPacks, vrAvatars, fursuitPhotos } from '$lib/server/db/schema';
 import { getSettings, getRawSettings } from '$lib/server/settings';
@@ -71,16 +71,11 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 	// is default-ON — so on a read failure a cached-settings gate would publish
 	// the feed for an owner who turned it off, and (with the NSFW keys equally
 	// unreadable) could not tell a correct key from a wrong one either.
-	let raw: Record<string, string | null> | null;
-	try {
-		raw = await withTimeout(
-			getRawSettings(db, ['rssFeedEnabled', 'rssNsfwEnabled', 'rssNsfwKey']),
-			SETTINGS_TIMEOUT_MS,
-			null
-		);
-	} catch {
-		raw = null;
-	}
+	const raw = await withTimeout(
+		getRawSettings(db, ['rssFeedEnabled', 'rssNsfwEnabled', 'rssNsfwKey']),
+		SETTINGS_TIMEOUT_MS,
+		null
+	);
 	if (!raw) error(404, 'Not found');
 	// Absent means ON — only an explicit 'false' is an owner who opted out.
 	if (raw.rssFeedEnabled === 'false') error(404, 'Not found');
@@ -97,7 +92,7 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 	// Art: parents only. A variant is another crop or palette of a piece already
 	// listed, so including them would show a subscriber the same artwork several
 	// times under near-identical titles.
-	const artRows = await db
+	const artQuery = db
 		.select({
 			title: images.title,
 			slug: images.slug,
@@ -111,11 +106,20 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 		})
 		.from(images)
 		.leftJoin(artists, eq(images.artistId, artists.id))
-		.where(and(eq(images.published, true), isNull(images.parentImageId)))
+		.where(
+			and(
+				eq(images.published, true),
+				isNull(images.parentImageId),
+				// The adult filter belongs in SQL, not in the loop below: with the
+				// LIMIT applied first, 50 consecutive adult uploads would leave the
+				// SFW document with no art at all while older SFW pieces sat unread.
+				adult ? undefined : eq(images.nsfw, false)
+			)
+		)
 		.orderBy(desc(images.createdAt))
 		.limit(MAX_ITEMS);
 
-	const packRows = await db
+	const packQuery = db
 		.select({
 			name: stickerPacks.name,
 			slug: stickerPacks.slug,
@@ -128,7 +132,7 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 		.orderBy(desc(stickerPacks.createdAt))
 		.limit(MAX_ITEMS);
 
-	const avatarRows = await db
+	const avatarQuery = db
 		.select({
 			name: vrAvatars.name,
 			slug: vrAvatars.slug,
@@ -141,21 +145,37 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 		})
 		.from(vrAvatars)
 		.leftJoin(images, eq(vrAvatars.posterImageId, images.id))
-		.where(eq(vrAvatars.published, true))
+		.where(
+			and(
+				eq(vrAvatars.published, true),
+				// Same reasoning as the art query, spelled against the effective flag
+				// (`nsfw || posterNsfw`): both halves must be non-adult, and an avatar
+				// with no poster row joins to NULL rather than to false.
+				adult ? undefined : eq(vrAvatars.nsfw, false),
+				adult ? undefined : or(isNull(images.nsfw), eq(images.nsfw, false))
+			)
+		)
 		.orderBy(desc(vrAvatars.createdAt))
 		.limit(MAX_ITEMS);
 
 	// Fursuit photos ride the same off switch the gallery probe uses: with
 	// FURTRACK_MODE unset the feature is off site-wide, and the feed must not be
 	// the one surface that keeps publishing stored rows.
-	const fursuitRows =
+	const fursuitQuery =
 		getMode(platform!.env) !== 'off'
-			? await db
-					.select()
-					.from(fursuitPhotos)
-					.orderBy(desc(fursuitPhotos.createdAt))
-					.limit(FURSUIT_SCAN)
+			? db.select().from(fursuitPhotos).orderBy(desc(fursuitPhotos.createdAt)).limit(FURSUIT_SCAN)
 			: [];
+
+	// The four reads are independent, so they go out together rather than one
+	// after another. Errors stay FATAL — no per-query fallback — because a feed
+	// that silently drops a whole section reads as "nothing new" to a subscriber,
+	// which is worse than the 5xx the reader would simply retry.
+	const [artRows, packRows, avatarRows, fursuitRows] = await Promise.all([
+		artQuery,
+		packQuery,
+		avatarQuery,
+		fursuitQuery
+	]);
 
 	/** Absolute URL for an image column, capped the same way og:image is. */
 	const absolute = (src: string | null, width?: number | null, height?: number | null) =>
@@ -238,9 +258,14 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 			link: origin,
 			description: adult ? ADULT_DESCRIPTION : SFW_DESCRIPTION,
 			copyright: COPYRIGHT,
-			// The address that returns THIS document, key and all — a reader that
-			// re-subscribes from rel="self" must land back on the same edition.
-			selfUrl: `${origin}${url.pathname}${url.search}`,
+			// The address that returns THIS document — built from known parts, never
+			// from the raw query. Echoing url.search made every tracking-param
+			// variant (?utm_source=, ?fbclid=) a byte-distinct body and ETag, so each
+			// one missed the shared cache and re-ran the whole fan-out against the
+			// primary. Only a key that actually matched earns a place here.
+			selfUrl: adult
+				? `${origin}${url.pathname}?key=${encodeURIComponent(raw.rssNsfwKey ?? '')}`
+				: `${origin}${url.pathname}`,
 			lastBuildDate: capped.length ? (rfc822(capped[0].createdAt) ?? undefined) : undefined,
 			adult
 		},
@@ -253,8 +278,11 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 		etag,
 		// Modest, matching the VR download route: an unpublish or a takedown should
 		// stop being served promptly, and a feed reader polls on its own schedule
-		// anyway.
-		'Cache-Control': 'public, max-age=60, s-maxage=300'
+		// anyway. The keyed edition is `private`: its body varies on a credential in
+		// the query string, and a shared cache configured to ignore query strings
+		// would otherwise store the adult document under the public /feed.xml and
+		// hand it to every anonymous visitor. 304 revalidation still works.
+		'Cache-Control': adult ? 'private, max-age=60' : 'public, max-age=60, s-maxage=300'
 	});
 	// Belt and braces on the keyed edition: the address is unguessable, but a
 	// crawler that is handed it (a pasted link, a referrer) must not index adult

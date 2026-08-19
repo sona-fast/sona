@@ -25,8 +25,7 @@ export const RULE_REF = 'sona_download_beacon_ratelimit';
 export const RULE_DESCRIPTION = 'sona: public endpoint rate limit';
 
 /**
- * Matches every /api path that is exempt from the admin gate in hooks.server.ts and
- * therefore reachable anonymously:
+ * Matches every anonymous, un-gated path that costs the origin a D1 fan-out:
  *   - POST     /api/metrics/download — the download beacon (see its +server.ts).
  *   - GET/HEAD /api/oembed           — the oEmbed provider (SONA-168). HEAD is in
  *     because SvelteKit runs the GET handler for HEAD when no HEAD is exported, so
@@ -34,15 +33,17 @@ export const RULE_DESCRIPTION = 'sona: public endpoint rate limit';
  *     `or` rather than `in {"GET" "HEAD"}`: the docs confirm space-separated set
  *     literals but not the quoted-string form, and this rule is applied unattended
  *     across the fleet — `eq`/`or` is syntax the deployed rule already proves.
+ *   - GET/HEAD /feed.xml             — the RSS feed (SONA-172), four primary-DB
+ *     reads per request and no other limit in front of it. Same HEAD reasoning.
  *
- * ONE rule covers both because the Free plan allows exactly ONE rate-limiting rule
- * per zone, and every fork runs on Free. A second rule is not "extra config" there
- * — the API rejects it. So when a new /api path is exempted from the gate, extend
- * this expression; do NOT add a rule. The counter is shared across the paths, which
- * is fine: they are matched per-IP and no real client hits both in the same window.
+ * ONE rule covers all three because the Free plan allows exactly ONE rate-limiting
+ * rule per zone, and every fork runs on Free. A second rule is not "extra config"
+ * there — the API rejects it. So when a new anonymous path appears, extend this
+ * expression; do NOT add a rule. The counter is shared across the paths, which is
+ * fine: they are matched per-IP and no real client hits two in the same window.
  */
 export const RULE_EXPRESSION =
-	'((http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download") or ((http.request.method eq "GET" or http.request.method eq "HEAD") and http.request.uri.path eq "/api/oembed"))';
+	'((http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download") or ((http.request.method eq "GET" or http.request.method eq "HEAD") and (http.request.uri.path eq "/api/oembed" or http.request.uri.path eq "/feed.xml")))';
 
 /**
  * Rate-limit knobs: at most 20 matching requests per 10s from one IP, then that IP

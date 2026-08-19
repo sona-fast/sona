@@ -62,14 +62,17 @@ describe('buildRule', () => {
 		});
 	});
 
-	it('targets exactly the two gate-exempt public paths, in one rule', () => {
+	it('targets exactly the three anonymous public paths, in one rule', () => {
 		// One rule for the reason documented on RULE_EXPRESSION (Free plan). Each
 		// clause is method-scoped so the rule can't be tripped by a verb the app
-		// doesn't serve — and /api/oembed lists HEAD as well as GET, because
-		// SvelteKit runs its GET handler for HEAD (same two D1 reads).
+		// doesn't serve — and the read paths list HEAD as well as GET, because
+		// SvelteKit runs their GET handlers for HEAD (same D1 reads).
 		expect(RULE_EXPRESSION).toBe(
-			'((http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download") or ((http.request.method eq "GET" or http.request.method eq "HEAD") and http.request.uri.path eq "/api/oembed"))'
+			'((http.request.method eq "POST" and http.request.uri.path eq "/api/metrics/download") or ((http.request.method eq "GET" or http.request.method eq "HEAD") and (http.request.uri.path eq "/api/oembed" or http.request.uri.path eq "/feed.xml")))'
 		);
+		// /feed.xml runs four primary-DB queries per request with nothing else in
+		// front of it; dropping it from the rule is the regression this catches.
+		expect(RULE_EXPRESSION).toContain('"/feed.xml"');
 	});
 });
 
