@@ -30,10 +30,29 @@ function parse(version) {
 	const dash = core.indexOf('-');
 	const release = dash === -1 ? core : core.slice(0, dash);
 	return {
-		nums: release.split('.').map(Number),
+		// Strict digits only: Number() would happily read '1e3', '0x9' or
+		// 'Infinity' as a huge number and wave the entry through.
+		nums: release.split('.').map((seg) => (/^\d+$/.test(seg) ? Number(seg) : NaN)),
 		prerelease: dash === -1 ? '' : core.slice(dash + 1)
 	};
 }
+
+/**
+ * A floor is our own constant, so a malformed one is a bug in this file rather
+ * than untrusted input — but it must fail loudly instead of comparing as
+ * unparseable, which would let every real version pass.
+ *
+ * @param {Record<string, string>} floors
+ */
+function assertFloors(floors) {
+	for (const [name, floor] of Object.entries(floors)) {
+		if (typeof floor !== 'string' || !/^\d+(\.\d+)*$/.test(floor)) {
+			throw new Error(`Invalid security floor for ${name}: ${floor}`);
+		}
+	}
+}
+
+assertFloors(FLOORS);
 
 /**
  * -1/0/1 comparison of dotted versions. A version we can't parse sorts BELOW
@@ -69,6 +88,7 @@ export function compare(a, b) {
  * @returns {{ offenders: Offender[], checked: number, missing: string[] }}
  */
 export function scanLockfile(lock, floors = FLOORS) {
+	assertFloors(floors);
 	const packages = lock.packages ?? {};
 	const offenders = [];
 	// `name` wins over the path tail so an aliased install (a different

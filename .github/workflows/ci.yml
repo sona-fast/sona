@@ -62,6 +62,9 @@ jobs:
           node-version: 24 # match deploy.yml
           cache: npm
 
+      # Same pre-`npm ci` security floor guard as the `check` job (see there).
+      - run: npm run check:lockfile-security
+
       - run: npm ci
 
       - run: npm run test:integration
@@ -82,6 +85,9 @@ jobs:
         with:
           node-version: 24 # match deploy.yml
           cache: npm
+
+      # Same pre-`npm ci` security floor guard as the `check` job (see there).
+      - run: npm run check:lockfile-security
 
       - run: npm ci
 

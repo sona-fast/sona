@@ -23,10 +23,27 @@ describe('compare', () => {
 		['3.3.18+build', '3.3.18', 0],
 		// Unparseable sorts below everything (fail closed).
 		['0.x.0', '0.7.0', -1],
-		['0.7.0', 'not-a-version', 1]
+		['0.7.0', 'not-a-version', 1],
+		// Number()-parseable but not decimal digits: still unparseable, so it
+		// sorts below rather than reading as 1000 / 9 / infinity.
+		['1e3', '0.7.0', -1],
+		['0x9.0.0', '0.7.0', -1],
+		['Infinity', '0.7.0', -1]
 	];
 	it.each(cases)('compare(%s, %s) === %i', (a, b, expected) => {
 		expect(compare(a, b)).toBe(expected);
+	});
+});
+
+describe('floor validation', () => {
+	it.each(Object.entries(FLOORS))('FLOORS.%s (%s) is a dotted numeric version', (_name, floor) => {
+		expect(floor).toMatch(/^\d+(\.\d+)*$/);
+	});
+
+	it.each(['latest', '^8.17.1', '', '0.x.0'])('throws on a floor of %s', (floor) => {
+		expect(() =>
+			scanLockfile({ packages: { 'node_modules/ws': entry('8.18.0') } }, { ws: floor })
+		).toThrow(/Invalid security floor/);
 	});
 });
 
