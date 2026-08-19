@@ -47,6 +47,17 @@ export const WIDGET_MODE = 'managed';
  * recipe names the same scope this module's errors do. */
 export const SCOPE_HINT = 'Account → Turnstile: Edit';
 
+/** Widgets asked for per list page; also the "was that page full?" test. */
+const PER_PAGE = 50;
+
+/**
+ * Stop after this many list pages. Termination normally comes from a short page,
+ * but an API that ignored `page` would hand back the same full page forever, so
+ * the loop needs a floor it cannot fall through. 20 pages covers far more widgets
+ * than any account we provision into holds.
+ */
+const MAX_PAGES = 20;
+
 /** setup-lib's shared cfFailureTail, bound to this lib's scope hint. */
 function failureTail(res: CfApiResult): string {
 	return cfFailureTail(res.status, res.errors, SCOPE_HINT);
@@ -81,8 +92,9 @@ export interface TurnstileResult {
  * Idempotently provision the admin-login Turnstile widget for `domain`'s host.
  *
  * Sequence (all via `cfApi`, Bearer `cfToken`):
- *   1. GET /accounts/<acct>/challenges/widgets → list the account's widgets. A
- *      non-ok response → a clear error whose detail carries the actual reason
+ *   1. GET /accounts/<acct>/challenges/widgets → list the account's widgets, a
+ *      page at a time until ours turns up or a page comes back short. A non-ok
+ *      response on any page → a clear error whose detail carries the actual reason
  *      (the scope hint on 401/403, otherwise just the HTTP status). No mutation.
  *   2. Match our widget by its stable `name` (WIDGET_NAME) AND `domains` containing
  *      this fork's host — see WIDGET_NAME on why the host half is required:
@@ -96,11 +108,11 @@ export interface TurnstileResult {
  * `api` is injectable (defaults to the real `cfApi`) so tests exercise every branch
  * without network. Never logs the token; the widget secret appears in no `detail`.
  *
- * Note on matching: the list is read with a generous page size, not paginated. A
- * fresh fork's account has at most a handful of widgets, so a single page finds
- * ours; the cost of the rare miss is a duplicate widget, never a crash. A miss is
- * the only acceptable failure direction here — see WIDGET_NAME on why matching must
- * never reuse a widget issued for a different host.
+ * Note on matching: the list is paginated because a first-page-only read on an
+ * account holding more than PER_PAGE widgets can miss ours, and a miss is not free
+ * — the re-run mints a duplicate widget and rewires Pages to its sitekey/secret.
+ * Missing is still the only acceptable failure direction, though: see WIDGET_NAME
+ * on why matching must never reuse a widget issued for a different host.
  */
 export async function provisionTurnstileWidget(
 	cfToken: string,
@@ -111,18 +123,24 @@ export async function provisionTurnstileWidget(
 	const host = hostFromDomain(domain);
 	if (!host) return { status: 'error', detail: 'no domain given' };
 
-	// 1. List existing widgets; reconcile against ours by stable name.
-	const listRes = await api(cfToken, `/accounts/${accountId}/challenges/widgets?per_page=50`);
-	if (!listRes.ok) {
-		return {
-			status: 'error',
-			detail: `could not list Turnstile widgets${statusLabel(listRes.status)}${failureTail(listRes)}`
-		};
+	// 1. List existing widgets a page at a time; reconcile against ours by stable
+	// name. Stop at the first match, at a short page (the last one), or at MAX_PAGES.
+	let mine: Widget | undefined;
+	for (let page = 1; page <= MAX_PAGES; page++) {
+		const listRes = await api(
+			cfToken,
+			`/accounts/${accountId}/challenges/widgets?page=${page}&per_page=${PER_PAGE}`
+		);
+		if (!listRes.ok) {
+			return {
+				status: 'error',
+				detail: `could not list Turnstile widgets${statusLabel(listRes.status)}${failureTail(listRes)}`
+			};
+		}
+		const widgets = (listRes.result as Widget[] | undefined) ?? [];
+		mine = widgets.find((w) => w.name === WIDGET_NAME && w.sitekey && w.domains?.includes(host));
+		if (mine || widgets.length < PER_PAGE) break;
 	}
-	const widgets = (listRes.result as Widget[] | undefined) ?? [];
-	const mine = widgets.find(
-		(w) => w.name === WIDGET_NAME && w.sitekey && w.domains?.includes(host)
-	);
 
 	// 2a. Reuse: fetch the single widget so we read its secret from the authoritative
 	// GET (matching `wrangler turnstile widget get`, which returns the secret).

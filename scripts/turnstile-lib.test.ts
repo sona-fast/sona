@@ -38,7 +38,17 @@ function fakeApi(routes: Record<string, CfApiResult>) {
 	return { api, calls };
 }
 
-const listPath = `GET /accounts/${ACCT}/challenges/widgets?per_page=50`;
+const PER_PAGE = 50;
+const listPage = (page: number) =>
+	`GET /accounts/${ACCT}/challenges/widgets?page=${page}&per_page=${PER_PAGE}`;
+const listPath = listPage(1);
+/** A full page of widgets belonging to nobody we care about. */
+const fullPageOfStrangers = (tag: string) =>
+	Array.from({ length: PER_PAGE }, (_, i) => ({
+		name: `stranger-${tag}-${i}`,
+		sitekey: `stranger-key-${tag}-${i}`,
+		domains: ['someone-else.example']
+	}));
 const createPath = `POST /accounts/${ACCT}/challenges/widgets`;
 const getPath = `GET /accounts/${ACCT}/challenges/widgets/${SITEKEY}`;
 // This fork's own widget, exactly as the list returns it.
@@ -183,6 +193,56 @@ describe('provisionTurnstileWidget — reuses when present (idempotent)', () => 
 		expect(res.detail).not.toContain('token needs');
 		expect(res.detail).toContain('the widget came back without one');
 		expect(res.detail).toContain('check that the token has');
+		expect(calls.some((c) => c.method === 'POST')).toBe(false);
+	});
+});
+
+// An account can hold more widgets than one page returns. Reading only the first
+// page would miss ours and the re-run would mint a duplicate, rewiring Pages to a
+// fresh sitekey/secret, so the list has to be walked page by page.
+describe('provisionTurnstileWidget — walks past the first list page', () => {
+	it('finds and reuses our widget when it sits on page 2', async () => {
+		const { api, calls } = fakeApi({
+			[listPage(1)]: { ok: true, status: 200, result: fullPageOfStrangers('p1') },
+			[listPage(2)]: { ok: true, status: 200, result: [ourWidget] },
+			[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('exists');
+		expect(res.sitekey).toBe(SITEKEY);
+		expect(res.secret).toBe(WIDGET_SECRET);
+		// The whole point: no duplicate widget.
+		expect(calls.some((c) => c.method === 'POST')).toBe(false);
+		// Stopped at the match rather than reading on.
+		expect(calls.some((c) => c.path.includes('page=3'))).toBe(false);
+	});
+
+	it('creates exactly once after two full pages hold no widget of ours', async () => {
+		const { api, calls } = fakeApi({
+			[listPage(1)]: { ok: true, status: 200, result: fullPageOfStrangers('p1') },
+			[listPage(2)]: { ok: true, status: 200, result: fullPageOfStrangers('p2') },
+			[listPage(3)]: { ok: true, status: 200, result: [] },
+			[createPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('created');
+		expect(res.sitekey).toBe(SITEKEY);
+		expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+		// The empty third page ended the walk.
+		expect(calls.filter((c) => c.method === 'GET')).toHaveLength(3);
+	});
+
+	it('a failure on page 2 reports it the same way a first-page failure does', async () => {
+		const { api, calls } = fakeApi({
+			[listPage(1)]: { ok: true, status: 200, result: fullPageOfStrangers('p1') },
+			[listPage(2)]: { ok: false, status: 403 }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('could not list Turnstile widgets');
+		expect(res.detail).toContain('token needs');
+		expect(res.detail).toContain('Turnstile: Edit');
+		// A failed page must never fall through to a create.
 		expect(calls.some((c) => c.method === 'POST')).toBe(false);
 	});
 });
