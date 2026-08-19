@@ -85,7 +85,12 @@ const ICON_GAP_RATIO = 0.4;
  *  the em box, which would ride high. */
 const ICON_LIFT_RATIO = 0.78;
 
-const FONT = "ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif";
+// CJK families named explicitly: the print .svg is opened in tools that do not
+// resolve the css generic keywords, and Arial has no Japanese glyphs. They sit
+// AFTER the Latin families on purpose: fallback is per glyph, so Latin keeps
+// Helvetica while Japanese falls through to a family that has it.
+const FONT =
+	"ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', Arial, 'Hiragino Sans', 'Yu Gothic', 'Noto Sans JP', sans-serif";
 
 /**
  * The two palettes. The QR keeps dark modules on a light plate in BOTH — an

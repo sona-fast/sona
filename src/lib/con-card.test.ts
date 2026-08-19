@@ -34,6 +34,16 @@ function texts(svg: string): string[] {
 	return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
 }
 
+describe('conCardSvg — the printed sheet', () => {
+	it('names a Japanese family in the font stack, ahead of the generic tail', () => {
+		const stack = card().match(/font-family="([^"]+)"/)?.[1] ?? '';
+		// The labels are printed in the operator's own language, and the tools a
+		// downloaded .svg is opened in do not all fall back past the stack.
+		expect(stack).toMatch(/Hiragino Sans|Yu Gothic|Noto Sans JP/);
+		expect(stack.indexOf('Hiragino Sans')).toBeLessThan(stack.lastIndexOf('sans-serif'));
+	});
+});
+
 describe('conCardSvg — the QR target', () => {
 	it('encodes the /connect URL it was given', () => {
 		const svg = card();
