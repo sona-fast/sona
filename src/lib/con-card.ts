@@ -319,7 +319,9 @@ function cardEdge(stroke: string): string {
  *  code point: a name starting with an emoji or an astral CJK glyph must not be
  *  cut in half. */
 function initialOf(name: string): string {
-	return [...name.trim()][0]?.toUpperCase() ?? '';
+	// First grapheme cluster, not first code point: a name leading with a ZWJ
+	// emoji keeps the whole glyph in the ring rather than its first member.
+	return clusters(name.trim())[0]?.toUpperCase() ?? '';
 }
 
 /** The front: colours, face, name. Worn all day, read from across a table. */

@@ -141,6 +141,12 @@ describe('conCardFaceSvg — the front', () => {
 		expect(texts(svg)).toContain('T');
 	});
 
+	it('keeps a ZWJ emoji whole as the initial', () => {
+		const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+		const svg = front({ name: `${family} Taro`, avatarHref: null });
+		expect(svg).toContain(family);
+	});
+
 	it('splits the initial by code point, so an astral first glyph survives', () => {
 		// A name starting with an emoji is one code point and two code units; a
 		// charAt fallback would put half a surrogate pair on a printed card.
