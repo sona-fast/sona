@@ -1114,7 +1114,15 @@ describe('settings load — supporter key is raw + verified, never in public set
 			// Each flag inside its window surfaces as flag + display-formatted GA
 			// date — and nothing else rides along (a NEW field in the mapping must
 			// be re-reviewed here first).
-			expect(result.earlyAccess).toEqual([{ flag: 'probe', gaDate: '2999.01.01' }]);
+			//
+			// Reviewed for this guard: 'con-card' is the shipped registry's first
+			// real entry (SONA-115). Its gaDate below is the registration-time
+			// placeholder; the release process resets it to merge date + 7 at
+			// merge, so this line changes again in the shipping PR, deliberately.
+			expect(result.earlyAccess).toEqual([
+				{ flag: 'con-card', gaDate: '2026.08.25' },
+				{ flag: 'probe', gaDate: '2999.01.01' }
+			]);
 			// The token must never leak into the client-exposed SiteSettings.
 			expect(result.settings.supporterKey).toBeUndefined();
 		} finally {
