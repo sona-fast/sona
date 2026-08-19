@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { qrSvg } from './qr';
-import { SOCIAL_ICON_PATHS } from './social-icon-paths';
-import { SOCIAL_PLATFORM_NAMES } from './social-label';
+import { SOCIAL_ICON_ART, type SocialIconArt } from './social-icon-paths';
+import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from './social-label';
 import {
 	conCardSvg,
 	conCardFileBase,
@@ -11,6 +11,23 @@ import {
 } from './con-card';
 
 const LABELS = { species: 'Species', colors: 'Colors', online: 'Online' };
+
+/** Every platform the settings load can put on a card, in the order it sends
+ *  them. All six draw a mark; none falls through to the text row. */
+const CARD_PLATFORMS = [
+	'bluesky',
+	'telegram',
+	'twitter',
+	'furaffinity',
+	'furtrack',
+	'instagram'
+] as const;
+
+function art(platform: SocialPlatform): SocialIconArt {
+	const entry = SOCIAL_ICON_ART[platform];
+	if (!entry) throw new Error(`no icon art for ${platform}`);
+	return entry;
+}
 
 function card(overrides: Partial<ConCardOptions> = {}): string {
 	return conCardSvg({
@@ -124,32 +141,46 @@ describe('conCardSvg — handles', () => {
 		expect(texts(svg)).toEqual(expect.arrayContaining(['@taro', '@taro_tg']));
 		// The platform reads as its mark, not as its name.
 		expect(texts(svg).join(' ')).not.toContain('Bluesky');
-		expect(svg).toContain(`<path d="${SOCIAL_ICON_PATHS.bluesky}"`);
-		expect(svg).toContain(`<path d="${SOCIAL_ICON_PATHS.telegram}"`);
+		expect(svg).toContain(art('bluesky').shapes);
+		expect(svg).toContain(art('telegram').shapes);
 	});
 
 	it('draws each platform its own icon, named for a screen reader', () => {
-		for (const platform of ['bluesky', 'telegram', 'twitter', 'instagram'] as const) {
+		// Every platform the settings load can put on a card, FurTrack among them:
+		// its mark is a dozen shapes, and a fragment carries those as well as it
+		// carries the single-shape ones.
+		for (const platform of CARD_PLATFORMS) {
 			const svg = card({ handles: [{ platform, value: '@taro' }] });
-			const glyph = SOCIAL_ICON_PATHS[platform] as string;
-			expect(svg, platform).toContain(`<path d="${glyph}"`);
+			expect(svg, platform).toContain(art(platform).shapes);
 			expect(svg, platform).toContain(`<title>${SOCIAL_PLATFORM_NAMES[platform]}</title>`);
+			// The name is the icon's alone: the row does not also spell it out.
+			expect(texts(svg), platform).not.toContain(`${SOCIAL_PLATFORM_NAMES[platform]} @taro`);
 			// Every other platform's mark stays off this card.
-			for (const other of ['bluesky', 'telegram', 'twitter', 'instagram'] as const) {
-				if (other !== platform) expect(svg, `${platform}/${other}`).not.toContain(
-					`<path d="${SOCIAL_ICON_PATHS[other]}"`
-				);
+			for (const other of CARD_PLATFORMS) {
+				if (other !== platform)
+					expect(svg, `${platform}/${other}`).not.toContain(art(other).shapes);
 			}
 		}
 	});
 
+	it('scales every mark to the same size from its own viewBox', () => {
+		// A mark drawn on a grid other than 24 would otherwise render at whatever
+		// fraction of the row that grid implies.
+		for (const platform of CARD_PLATFORMS) {
+			const svg = card({ handles: [{ platform, value: '@taro' }] });
+			const { viewBox } = art(platform);
+			expect(svg, platform).toContain(`width="31" height="31" viewBox="0 0 ${viewBox} ${viewBox}"`);
+		}
+	});
+
 	it('falls back to the platform name in text when there is no icon for it', () => {
-		// FurTrack's mark is a dozen shapes rather than one path, so the card has
-		// no glyph to draw, and the row still has to read as a row.
-		const svg = card({ handles: [{ platform: 'furtrack', value: '@taro' }] });
-		expect(texts(svg)).toContain('FurTrack @taro');
-		expect(svg).not.toContain('<path d="undefined"');
-		expect(svg).not.toContain('<title>FurTrack</title>');
+		// Unreachable through the settings load, which only builds handles for
+		// platforms the table covers. Kept because the id is load data: a row must
+		// read as a row rather than as a handle with a hole where its icon goes.
+		const svg = card({ handles: [{ platform: 'nowhere' as SocialPlatform, value: '@taro' }] });
+		expect(texts(svg)).toContain('@taro');
+		// The QR's is then the only nested <svg> on the card: no mark was drawn.
+		expect([...svg.matchAll(/<svg x=/g)]).toHaveLength(1);
 	});
 
 	it('shrinks the rows past two handles rather than cutting the list', () => {
@@ -159,21 +190,20 @@ describe('conCardSvg — handles', () => {
 				{ platform: 'telegram', value: '@b' }
 			]
 		});
-		const four = card({
-			handles: [
-				{ platform: 'bluesky', value: '@a' },
-				{ platform: 'telegram', value: '@b' },
-				{ platform: 'twitter', value: '@c' },
-				{ platform: 'instagram', value: '@d' }
-			]
+		// The full set the settings load can send, which is six.
+		const all = card({
+			handles: CARD_PLATFORMS.map((platform, i) => ({ platform, value: `@${i}` }))
 		});
 		expect(two).toContain('font-size="34"');
-		expect(four).not.toContain('font-size="34"');
-		expect(four).toContain('font-size="30"');
-		expect(texts(four).filter((t) => t.startsWith('@'))).toHaveLength(4);
-		// The icons shrink with the rows they sit on.
+		expect(all).not.toContain('font-size="34"');
+		expect(all).toContain('font-size="30"');
+		expect(texts(all).filter((t) => t.startsWith('@'))).toHaveLength(CARD_PLATFORMS.length);
+		// The icons shrink with the rows they sit on, whatever their own viewBox.
 		expect(two).toContain(`width="31" height="31"`);
-		expect(four).toContain(`width="27" height="27"`);
+		for (const platform of CARD_PLATFORMS) {
+			const { viewBox } = art(platform);
+			expect(all, platform).toContain(`width="27" height="27" viewBox="0 0 ${viewBox} ${viewBox}"`);
+		}
 	});
 
 	it('caps the swatch row at four, so a long palette still reads as a palette', () => {

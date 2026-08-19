@@ -118,12 +118,16 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		name: settings.ownerName || settings.siteName,
 		species: settings.sonaSpecies,
 		colors: parseSonaColors(settings.sonaColors),
-		// Card order, best first — the card has room for about two.
+		// Every social the operator has set, in card order, best first. The card
+		// itself starts the first two checked and offers the rest, so the order
+		// here is what an operator sees pre-selected.
 		handles: (
 			[
 				['bluesky', settings.blueskyUrl],
 				['telegram', settings.telegramUrl],
 				['twitter', settings.twitterUrl],
+				['furaffinity', settings.furAffinityUrl],
+				['furtrack', settings.furtrackUrl],
 				['instagram', settings.instagramUrl]
 			] as const
 		).flatMap(([social, value]) => {

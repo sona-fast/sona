@@ -1,5 +1,5 @@
 import { qrSvg } from '$lib/qr';
-import { SOCIAL_ICON_PATHS, SOCIAL_ICON_VIEWBOX } from '$lib/social-icon-paths';
+import { SOCIAL_ICON_ART, type SocialIconArt } from '$lib/social-icon-paths';
 import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from '$lib/social-label';
 
 /**
@@ -180,23 +180,26 @@ function text(x: number, y: number, body: string, o: TextOpts): string {
 }
 
 /**
- * A platform glyph on a handle row: the icon component's 24-unit artwork,
- * scaled by a nested <svg> rather than by transform arithmetic. The <title>
- * carries the platform name, which the row no longer spells out in text.
+ * A platform mark on a handle row: the icon component's artwork, scaled by a
+ * nested <svg> rather than by transform arithmetic. Scaled from the art's OWN
+ * viewBox, so a mark drawn on a different grid still lands at the same optical
+ * size as the rest. The fill sits on the wrapper because a mark can be any
+ * number of shapes, and fill inherits. The <title> carries the platform name,
+ * which the row no longer spells out in text.
  */
 function socialIcon(
 	x: number,
 	baseline: number,
 	size: number,
-	path: string,
+	art: SocialIconArt,
 	name: string,
 	fill: string
 ): string {
 	const top = Math.round(baseline - size * ICON_LIFT_RATIO);
 	return [
-		`<svg x="${x}" y="${top}" width="${size}" height="${size}" viewBox="0 0 ${SOCIAL_ICON_VIEWBOX} ${SOCIAL_ICON_VIEWBOX}" role="img">`,
+		`<svg x="${x}" y="${top}" width="${size}" height="${size}" viewBox="0 0 ${art.viewBox} ${art.viewBox}" fill="${fill}" role="img">`,
 		`<title>${esc(name)}</title>`,
-		`<path d="${path}" fill="${fill}"/>`,
+		art.shapes,
 		'</svg>'
 	].join('');
 }
@@ -291,10 +294,10 @@ export function conCardSvg(opts: ConCardOptions): string {
 		const gap = Math.round(size * ICON_GAP_RATIO);
 		handles.forEach((handle, i) => {
 			const baseline = y + 44 + i * (size + 12);
-			const glyph = SOCIAL_ICON_PATHS[handle.platform];
+			const art = SOCIAL_ICON_ART[handle.platform];
 			const name = SOCIAL_PLATFORM_NAMES[handle.platform] ?? '';
-			if (!glyph) {
-				// No glyph for this platform: the row reads as the platform name and
+			if (!art) {
+				// No artwork for this platform: the row reads as the platform name and
 				// the handle, rather than as a handle with a hole where its icon goes.
 				const line = name ? `${name} ${handle.value}` : handle.value;
 				parts.push(text(contentX, baseline, clampText(line, size, contentW), { size, fill: c.fg }));
@@ -302,7 +305,7 @@ export function conCardSvg(opts: ConCardOptions): string {
 			}
 			// Muted, like the field headings: the icon says which platform, the
 			// handle beside it is the part a stranger has to read and type.
-			parts.push(socialIcon(contentX, baseline, icon, glyph, name, c.muted));
+			parts.push(socialIcon(contentX, baseline, icon, art, name, c.muted));
 			const textX = contentX + icon + gap;
 			parts.push(
 				text(textX, baseline, clampText(handle.value, size, contentX + contentW - textX), {

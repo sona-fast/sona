@@ -618,13 +618,16 @@ describe('settings load — con card (SONA-115)', () => {
 		expect(card.colors).toEqual([{ name: 'Rust', hex: '#b45309' }]);
 	});
 
-	it('renders each social as an @handle, and drops a setting with no handle in it', async () => {
+	it('offers every configured social, in card order', async () => {
 		const { db, platform } = makeLoadDb();
+		// All six socials the settings hold. Each draws its own mark on the card,
+		// so none of them is worth withholding from the picker.
 		await setRawSetting(db, 'blueskyUrl', 'https://bsky.app/profile/taro.surf');
 		await setRawSetting(db, 'telegramUrl', 'https://t.me/taro_tg');
-		// A bare platform URL carries no account (social-label rule 2). On a card
-		// that row would tell a stranger nothing, so it must not be there at all.
-		await setRawSetting(db, 'twitterUrl', 'https://twitter.com');
+		await setRawSetting(db, 'twitterUrl', 'https://twitter.com/taro_x');
+		await setRawSetting(db, 'furAffinityUrl', 'https://www.furaffinity.net/user/taro_fa');
+		await setRawSetting(db, 'furtrackUrl', 'https://furtrack.com/user/taro_ft');
+		await setRawSetting(db, 'instagramUrl', 'https://instagram.com/taro_ig');
 
 		const card = await conCard(db, platform);
 
@@ -632,8 +635,25 @@ describe('settings load — con card (SONA-115)', () => {
 		// icon, and the settings UI resolves the name it shows from the same id.
 		expect(card.handles).toEqual([
 			{ platform: 'bluesky', value: '@taro.surf' },
-			{ platform: 'telegram', value: '@taro_tg' }
+			{ platform: 'telegram', value: '@taro_tg' },
+			{ platform: 'twitter', value: '@taro_x' },
+			{ platform: 'furaffinity', value: '@taro_fa' },
+			{ platform: 'furtrack', value: '@taro_ft' },
+			{ platform: 'instagram', value: '@taro_ig' }
 		]);
+	});
+
+	it('drops a setting with no handle in it', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'blueskyUrl', 'https://bsky.app/profile/taro.surf');
+		// A bare platform URL carries no account (social-label rule 2). On a card
+		// that row would tell a stranger nothing, so it must not be there at all.
+		await setRawSetting(db, 'twitterUrl', 'https://twitter.com');
+		await setRawSetting(db, 'furtrackUrl', 'https://furtrack.com');
+
+		const card = await conCard(db, platform);
+
+		expect(card.handles).toEqual([{ platform: 'bluesky', value: '@taro.surf' }]);
 	});
 
 	it('renders the card behind the early-access gate, on the Account tab', () => {
