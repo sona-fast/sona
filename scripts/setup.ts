@@ -329,6 +329,10 @@ async function main() {
 	// Whether the Pages-project PATCH (which carries TURNSTILE_SITEKEY) landed —
 	// the summary reports the bot check as wired only when it did.
 	let pagesConfigOk = false;
+	// The RESOLVED zone's name — the parent zone for a subdomain host. Summary
+	// lines that name the zone must use this, not the host (which for a
+	// subdomain has no Cloudflare zone of its own).
+	let resolvedZoneName: string | null = null;
 	if (domain) {
 		const host = hostFromDomain(domain);
 		if (cfToken && cfAccount) {
@@ -338,11 +342,13 @@ async function main() {
 			// error is reported as what it is — not as "no zone".
 			const {
 				zone: preflightZone,
+				zoneName: preflightZoneName,
 				errorStatus: zoneLookupError,
 				failedName: zoneLookupFailedName
 			} = await resolveZone(zoneNameCandidates(host), (name) =>
 				cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 			);
+			resolvedZoneName = preflightZoneName;
 			const zoneId = preflightZone.id;
 			if (zoneLookupError !== null) {
 				// status 0 = fetch threw (no network); a 2xx here means the API said
@@ -679,15 +685,18 @@ async function main() {
 		// Image Transformations (thumbnails/OG). off by default, per-zone; can't be
 		// enabled by the deploy token. imageResizingOn: true (on), false (still off),
 		// null (couldn't check — token lacks Zone Settings:Read).
+		// Zone-wide setting: name the RESOLVED zone (the parent for a subdomain),
+		// which is where the dashboard path actually lives.
+		const zoneName = resolvedZoneName ?? host;
 		if (imageResizingOn === true) {
-			console.log(`  • Image Transformations: enabled on the ${host} zone (thumbnails will resize).`);
+			console.log(`  • Image Transformations: enabled on the ${zoneName} zone (thumbnails will resize).`);
 			// Enabling the zone setting does NOT enable "Resize images from any origin",
 			// which a cross-zone source (e.g. an R2 public URL on another zone) needs.
 			console.log('     If images load from another zone/origin (e.g. an R2 public URL), also turn on');
-			console.log(`     "Resize images from any origin":  dashboard → ${host} → Images → Transformations.`);
+			console.log(`     "Resize images from any origin":  dashboard → ${zoneName} → Images → Transformations.`);
 		} else {
 			console.log('  • Image Transformations (thumbnails/OG images) is OFF or unverified. Enable it:');
-			console.log(`     dashboard → ${host} → Images → Transformations → "Enable for zone" +`);
+			console.log(`     dashboard → ${zoneName} → Images → Transformations → "Enable for zone" +`);
 			console.log('     "Resize images from any origin". Free tier: 5,000 transformations/month.');
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
@@ -697,7 +706,8 @@ async function main() {
 			downloadRateLimit,
 			downloadRateLimitDetail,
 			turnstileStatus,
-			pagesConfigOk && turnstileSecretSet
+			pagesConfigOk && turnstileSecretSet,
+			resolvedZoneName
 		)) {
 			console.log(line);
 		}

@@ -416,7 +416,12 @@ export function securitySummaryLines(
 	downloadRateLimit: RateLimitStatus | null,
 	downloadRateLimitDetail: string | null,
 	turnstileStatus: TurnstileStatus | null,
-	turnstileWired: boolean
+	turnstileWired: boolean,
+	// The RESOLVED zone's name when it differs from the host (subdomain forks):
+	// the rate-limit rule is zone-wide, so the applied line must name the zone
+	// it actually landed on. The retry command keeps the host — the applier
+	// resolves the zone itself.
+	zoneName?: string | null
 ): string[] {
 	const lines: string[] = [];
 	if (downloadRateLimit === 'error') {
@@ -427,7 +432,7 @@ export function securitySummaryLines(
 		lines.push(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
 	} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
 		lines.push(
-			`  • Public-endpoint rate limit: applied to the ${host} zone (download beacon + oEmbed).`
+			`  • Public-endpoint rate limit: applied to the ${zoneName ?? host} zone (download beacon + oEmbed).`
 		);
 	}
 	if (turnstileStatus === 'error') {

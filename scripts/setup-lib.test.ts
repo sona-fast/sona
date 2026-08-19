@@ -668,6 +668,19 @@ describe('securitySummaryLines', () => {
 		expect(unwired).not.toContain('enforced once deployed');
 	});
 
+	it('names the RESOLVED parent zone in the applied line for a subdomain host', () => {
+		const text = securitySummaryLines(
+			'sona.taro.surf',
+			'created',
+			null,
+			null,
+			false,
+			'taro.surf'
+		).join('\n');
+		expect(text).toContain('applied to the taro.surf zone');
+		expect(text).not.toContain('applied to the sona.taro.surf zone');
+	});
+
 	it('stays silent about pre-existing rate limits and unattempted Turnstile', () => {
 		expect(securitySummaryLines('taro.surf', 'exists', null, null, false)).toEqual([]);
 		expect(securitySummaryLines('taro.surf', null, null, null, false)).toEqual([]);
@@ -685,6 +698,10 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 	it('passes pagesConfigOk && turnstileSecretSet, not a literal', () => {
 		expect(src).toMatch(/securitySummaryLines\(/);
 		expect(src).toMatch(/pagesConfigOk && turnstileSecretSet/);
+	});
+
+	it('passes the resolved zone name so subdomain summaries name the real zone', () => {
+		expect(src).toMatch(/pagesConfigOk && turnstileSecretSet,\s*\n?\s*resolvedZoneName/);
 	});
 
 	it('assigns pagesConfigOk from the Pages PATCH result, read-back confirmed', () => {
