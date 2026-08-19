@@ -249,6 +249,7 @@
 	"admin_conventions_empty": "コンベンションはまだありません。",
 	"admin_conventions_delete_title": "コンベンションを削除",
 	"admin_conventions_delete_message": "「{name}」を予定から削除しますか？",
+	"admin_conventions_show_qr": "QRコードを表示",
 	"admin_nav_settings": "設定",
 	"admin_tab_images": "画像",
 	"admin_tab_fursuit": "着ぐるみ",

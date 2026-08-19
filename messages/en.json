@@ -305,6 +305,7 @@
 	"admin_conventions_empty": "No conventions yet.",
 	"admin_conventions_delete_title": "Delete Convention",
 	"admin_conventions_delete_message": "Delete \"{name}\" from your schedule?",
+	"admin_conventions_show_qr": "Show QR",
 	"admin_nav_settings": "Settings",
 	"admin_tab_images": "Images",
 	"admin_tab_fursuit": "Fursuit",

@@ -5,6 +5,7 @@ import { eq, asc, and, isNull } from 'drizzle-orm';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { fetchConsFyiEvents, findConsFyiEvent, fetchAttendingEvents, blueskyHandle } from '$lib/server/consfyi';
 import { getSettings } from '$lib/server/settings';
+import { isLiveNow } from '$lib/convention-window';
 import type { Actions, PageServerLoad } from './$types';
 
 const STATUSES = ['confirmed', 'maybe', 'considering'] as const;
@@ -16,15 +17,21 @@ function normStatus(raw: unknown): string {
 
 export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
+	const now = new Date();
 	const all = await db.select().from(conventions).orderBy(asc(conventions.startDate));
 
+	// The row the operator is standing at right now, resolved here rather than in
+	// the component: the answer depends on the wall clock, and deciding it during
+	// render would disagree between the server pass and hydration.
+	const liveId = all.find((c) => isLiveNow(c, now))?.id ?? null;
+
 	// Offer cons.fyi events that are still upcoming and not already on the schedule.
-	const today = new Date().toISOString().slice(0, 10);
+	const today = now.toISOString().slice(0, 10);
 	const addedSourceIds = new Set(all.map((c) => c.sourceId).filter(Boolean));
 	const feed = await fetchConsFyiEvents();
 	const available = feed.filter((e) => e.endDate >= today && !addedSourceIds.has(e.id));
 
-	return { conventions: all, available };
+	return { conventions: all, available, liveId };
 };
 
 export const actions = {
