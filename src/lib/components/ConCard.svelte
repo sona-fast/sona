@@ -51,9 +51,15 @@
 	let savingPrint = $state(false);
 	let savingPhone = $state(false);
 	let savingFront = $state(false);
-	/** The avatar could not be fetched for embedding; the front saved with the
-	 *  name's initial in the ring instead. */
+	/** The avatar could not be fetched for embedding; the card still saves, with
+	 *  the name's initial in the ring instead. Only ever the avatar: a card that
+	 *  did not save at all is rasterFailed, and saying "saved" there would be a
+	 *  lie the operator acts on. */
 	let avatarFailed = $state(false);
+	/** The raster path itself failed (the SVG would not load into an image, the
+	 *  canvas gave no context, or the encode produced no blob): nothing was
+	 *  saved. */
+	let rasterFailed = $state(false);
 
 	const chosenHandles = $derived(handles.filter((_, i) => handleOn[i]));
 
@@ -127,7 +133,9 @@
 		setTimeout(() => URL.revokeObjectURL(url), 0);
 	}
 
-	/** One face through a canvas, because Photos on iPhone refuses an SVG. */
+	/** One face through a canvas, because Photos on iPhone refuses an SVG. Throws
+	 *  on every way the raster can come up empty. A silent return would leave the
+	 *  operator with no file and no message. */
 	async function savePng(svg: string, filename: string) {
 		const image = new Image();
 		await new Promise<void>((resolve, reject) => {
@@ -139,13 +147,15 @@
 		canvas.width = CON_CARD_WIDTH * RASTER_SCALE;
 		canvas.height = CON_CARD_HEIGHT * RASTER_SCALE;
 		const ctx = canvas.getContext('2d');
-		if (!ctx) return;
+		if (!ctx) throw new Error('no canvas context');
 		ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 		const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-		if (blob) save(blob, filename);
+		if (!blob) throw new Error('png encode');
+		save(blob, filename);
 	}
 
 	async function downloadPrint() {
+		if (savingPrint) return;
 		savingPrint = true;
 		try {
 			// One sheet with both faces, so the operator prints once and cuts twice.
@@ -161,7 +171,9 @@
 	}
 
 	async function savePhone() {
+		if (savingPhone) return;
 		savingPhone = true;
+		rasterFailed = false;
 		try {
 			// The back alone: at a con the phone has one job, and the front adds
 			// nothing to a screen the person holding it is already looking at.
@@ -171,13 +183,19 @@
 				title: m.con_card_title_back({ name })
 			});
 			await savePng(svg, `${conCardFileBase(name)}-back.png`);
+		} catch {
+			// Nothing reached the phone. The avatar is not implicated: the back does
+			// not draw one.
+			rasterFailed = true;
 		} finally {
 			savingPhone = false;
 		}
 	}
 
 	async function saveFront() {
+		if (savingFront) return;
 		savingFront = true;
+		rasterFailed = false;
 		try {
 			const svg = conCardFaceSvg('front', {
 				...shared,
@@ -187,7 +205,9 @@
 			});
 			await savePng(svg, `${conCardFileBase(name)}-front.png`);
 		} catch {
-			avatarFailed = true;
+			// A raster failure, never an avatar one: embedAvatar swallows its own
+			// failure and returns null, and the card saves without it.
+			rasterFailed = true;
 		} finally {
 			savingFront = false;
 		}
@@ -221,25 +241,46 @@
 				{#if artCredit}
 					<label><input type="checkbox" bind:checked={includeCredit} /> {m.con_card_include_credit()}</label>
 				{/if}
-				{#each handles as handle, i (handle.platform)}
-					<label><input type="checkbox" bind:checked={handleOn[i]} /> {SOCIAL_PLATFORM_NAMES[handle.platform]}</label>
-				{/each}
 			</div>
 		</fieldset>
+
+		<!-- Their own group, per the mock: a handle row carries the account the card
+		     will print, which the include boxes above do not. -->
+		{#if handles.length}
+			<fieldset class="includes handles">
+				<legend>{m.con_card_handles()}</legend>
+				<div class="rows">
+					{#each handles as handle, i (handle.platform)}
+						<label class="handle-row">
+							<input type="checkbox" bind:checked={handleOn[i]} />
+							<span>{SOCIAL_PLATFORM_NAMES[handle.platform]}</span>
+							<span class="handle-value">{handle.value}</span>
+						</label>
+					{/each}
+				</div>
+			</fieldset>
+		{/if}
 
 		{#if chosenHandles.length > COMFORTABLE_HANDLES}
 			<p class="hint">{m.con_card_handle_hint()}</p>
 		{/if}
-		{#if avatarFailed}
-			<p class="hint art-failed" role="status">{m.con_card_art_failed()}</p>
-		{/if}
+		<!-- Always in the DOM, empty until something fails: a live region created
+		     together with its text is not reliably announced. Both failures share it
+		     because they are the same moment for the operator. -->
+		<p class="status-line" role="status">
+			{#if avatarFailed}<span class="hint art-failed">{m.con_card_art_failed()}</span>{/if}
+			{#if rasterFailed}<span class="hint art-failed">{m.con_card_save_failed()}</span>{/if}
+		</p>
 
 		<div class="actions">
-			<button type="button" class="btn btn-primary" onclick={downloadPrint} disabled={savingPrint}>
+			<!-- aria-busy rather than disabled: a control that vanishes from the tab
+			     order mid-press drops the focus the operator was holding. Re-entry is
+			     guarded in the handlers instead. -->
+			<button type="button" class="btn btn-secondary" onclick={downloadPrint} aria-busy={savingPrint}>
 				<Download size={15} />
 				{savingPrint ? m.admin_saving() : m.con_card_download_print()}
 			</button>
-			<button type="button" class="btn btn-secondary" onclick={savePhone} disabled={savingPhone}>
+			<button type="button" class="btn btn-primary" onclick={savePhone} aria-busy={savingPhone}>
 				<Smartphone size={15} />
 				{savingPhone ? m.admin_saving() : m.con_card_save_phone()}
 			</button>
@@ -247,7 +288,7 @@
 		<p class="hint">{m.con_card_save_phone_hint()}</p>
 		<!-- Secondary on purpose: the back is the useful save, and the front is
 		     here for whoever wants it behind a lock screen. -->
-		<button type="button" class="link-action" onclick={saveFront} disabled={savingFront}>
+		<button type="button" class="link-action" onclick={saveFront} aria-busy={savingFront}>
 			{savingFront ? m.admin_saving() : m.con_card_save_front()}
 		</button>
 	</div>
@@ -265,7 +306,10 @@
 	}
 	.preview figure {
 		margin: 0;
-		flex: 0 1 200px;
+		/* Shrinks rather than wraps: on a 390px phone the two faces have to stay
+		   side by side, which is how a two-sided card reads at all. */
+		flex: 1 1 150px;
+		max-width: 200px;
 	}
 	.preview figcaption {
 		margin-bottom: 6px;
@@ -319,6 +363,24 @@
 		font-size: 14px;
 		cursor: pointer;
 	}
+	/* One handle per row, so the account the card will print sits beside the
+	   platform it belongs to rather than being guessed from a checkbox. */
+	.handles .rows {
+		display: grid;
+		gap: 8px;
+		min-width: 260px;
+	}
+	.handles .handle-row {
+		display: grid;
+		grid-template-columns: auto auto 1fr;
+		align-items: center;
+		gap: 7px;
+	}
+	.handle-value {
+		justify-self: end;
+		color: var(--muted-foreground);
+		overflow-wrap: anywhere;
+	}
 	.actions {
 		display: flex;
 		flex-wrap: wrap;
@@ -337,6 +399,13 @@
 	.art-failed {
 		color: var(--destructive);
 	}
+	/* Empty most of the time, and it stays in the layout that way: the region has
+	   to exist before the message does. */
+	.status-line {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+	}
 	.link-action {
 		background: none;
 		border: none;
@@ -347,11 +416,7 @@
 		text-decoration: underline;
 		cursor: pointer;
 	}
-	.link-action:hover:not(:disabled) {
+	.link-action:hover {
 		color: var(--foreground);
-	}
-	.link-action:disabled {
-		cursor: default;
-		opacity: 0.6;
 	}
 </style>

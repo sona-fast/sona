@@ -170,18 +170,43 @@ function esc(value: string): string {
 		.replaceAll('&', '&amp;')
 		.replaceAll('<', '&lt;')
 		.replaceAll('>', '&gt;')
-		.replaceAll('"', '&quot;');
+		.replaceAll('"', '&quot;')
+		.replaceAll("'", '&#39;');
 }
 
 /**
  * SVG text does not wrap, so long values are measured and then cut. Monospace
  * makes the measure honest: 0.6em is the advance of every glyph in the Latin
  * families above, so the fit is arithmetic rather than a guess.
+ *
+ * A Japanese name is not measured by that number. East Asian Wide and Fullwidth
+ * code points are drawn on a square em by every family in the stack above, so a
+ * seven-glyph name measured at 0.6em passes the fit and then clips off the edge
+ * of a printed card. They count as a full em instead.
  */
 const AVG_ADVANCE = 0.6;
+const WIDE_ADVANCE = 1;
+/** East Asian Wide / Fullwidth: Hangul jamo, CJK radicals and punctuation, kana,
+ *  the CJK ideograph blocks (incl. the astral extensions), Hangul syllables,
+ *  compatibility ideographs, and the fullwidth forms. */
+const WIDE =
+	/[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{20000}-\u{3FFFD}]/u;
+
+/** Advance of a single code point, in em. */
+function advanceOf(glyph: string): number {
+	return WIDE.test(glyph) ? WIDE_ADVANCE : AVG_ADVANCE;
+}
+
+/** Advance of a whole string, in em. Iterated by code point, so an astral glyph
+ *  is measured once rather than as its two surrogates. */
+function advanceEm(body: string): number {
+	let em = 0;
+	for (const glyph of body) em += advanceOf(glyph);
+	return em;
+}
 
 function fitsIn(body: string, size: number, width: number): boolean {
-	return body.length * size * AVG_ADVANCE <= width;
+	return advanceEm(body) * size <= width;
 }
 
 /** The largest size in [min, base] that fits, stepping by 2. */
@@ -191,11 +216,24 @@ function fitSize(body: string, width: number, base: number, min: number): number
 	return size;
 }
 
-/** Cut to what fits at `size`, with an ellipsis stating that it was cut. */
+/** Cut to what fits at `size`, with an ellipsis stating that it was cut. Cut by
+ *  CODE POINT, never by code unit: half a surrogate pair makes the markup
+ *  unencodable, and encodeURIComponent (the raster path) throws on it. */
 function clampText(body: string, size: number, width: number): string {
 	if (fitsIn(body, size, width)) return body;
-	const max = Math.max(1, Math.floor(width / (size * AVG_ADVANCE)) - 1);
-	return `${body.slice(0, max).trimEnd()}…`;
+	// The ellipsis takes an advance of its own out of the budget.
+	const budget = width / size - AVG_ADVANCE;
+	const kept: string[] = [];
+	let em = 0;
+	for (const glyph of body) {
+		const next = em + advanceOf(glyph);
+		if (next > budget && kept.length > 0) break;
+		kept.push(glyph);
+		em = next;
+		// A width too narrow for even one glyph still keeps that one glyph.
+		if (em > budget) break;
+	}
+	return `${kept.join('').trimEnd()}…`;
 }
 
 interface TextOpts {

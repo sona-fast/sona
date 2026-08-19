@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { load } from './+page.server';
 import { qrMatrix } from '$lib/qr';
 
@@ -49,5 +50,37 @@ describe('/connect/qr', () => {
 	it('does not touch the database', () => {
 		const data = load({ url: new URL('https://sparky.ink/connect/qr') } as never);
 		expect(data).toBeTruthy();
+	});
+
+	// The (paths) group's layout reads settings from D1, and /admin validates its
+	// session against it. Either group would put the round trip this page exists
+	// to avoid back in front of it.
+	it('sits outside every route group', () => {
+		expect(new URL('.', import.meta.url).pathname).not.toMatch(/\/\([^)]*\)\//);
+	});
+});
+
+describe('/connect/qr markup', () => {
+	// Source-pin, per the con-card-markup.test.ts precedent: nothing renders this
+	// page under the pure-TS vitest setup, and both fixes below fail silently:
+	// one only at 200% zoom, the other only in a screen reader.
+	const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+
+	it('stays reachable when the plate is taller than the viewport', () => {
+		// Fixed, full-viewport and centered: at 200% zoom, or on a phone held
+		// landscape, plain centering pushes the typed-URL fallback off both ends
+		// with nothing to scroll.
+		expect(source).toMatch(/justify-content: safe center;/);
+		expect(source).toMatch(/overflow: auto;/);
+	});
+
+	it('names the code as a QR code, not as a bare URL', () => {
+		expect(source).toMatch(/aria-label=\{m\.con_qr_svg_label\(\{ url: data\.displayUrl \}\)\}/);
+	});
+
+	it('paints its text in a system font, without waiting on the webfont chain', () => {
+		expect(source).toMatch(/font-family:\s*\n?\s*system-ui/);
+		// Nothing on the page re-opts into the branded family.
+		expect(source).not.toContain('var(--font-primary)');
 	});
 });

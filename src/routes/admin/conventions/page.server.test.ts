@@ -3,13 +3,17 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
+import { asc } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { conventions } from '$lib/server/db/schema';
+import { conventions, siteSettings } from '$lib/server/db/schema';
+import { clearSettingsCache } from '$lib/server/settings';
+import type { ConsFyiEvent } from '$lib/server/consfyi';
 
 import { makeD1 } from '$lib/server/test/d1';
 
 // The load offers cons.fyi events that are not on the schedule yet, which is a
-// network call. Stubbed out: nothing here is about the feed.
+// network call. Stubbed out: nothing here is about the feed. The sync tests below
+// drive the same mocks per test, so the actions see the events they need.
 vi.mock('$lib/server/consfyi', () => ({
 	fetchConsFyiEvents: vi.fn(async () => []),
 	findConsFyiEvent: vi.fn(async () => undefined),
@@ -17,7 +21,8 @@ vi.mock('$lib/server/consfyi', () => ({
 	blueskyHandle: vi.fn(() => null)
 }));
 
-const { load } = await import('./+page.server');
+const { load, actions } = await import('./+page.server');
+const consfyi = await import('$lib/server/consfyi');
 
 type ConventionRow = typeof conventions.$inferSelect;
 type ConventionsData = { conventions: ConventionRow[]; liveId: number | null };
@@ -31,7 +36,9 @@ async function loadData(platform: App.Platform): Promise<ConventionsData> {
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
+	// site_settings: the sync action reads the operator's Bluesky URL out of it.
 	sqlite.exec(`
+		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE conventions (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL,
@@ -134,5 +141,143 @@ describe('admin conventions load', () => {
 
 		const res = await loadData(platform);
 		expect(res.liveId).toBe(res.conventions[0].id);
+	});
+});
+
+// The timezone is what decides whether a row goes live, so where it comes from
+// is worth pinning: the feed on the way in, and a backfill for the rows that
+// predate the column. Without the backfill the rollout needs a manual pass over
+// every fork's database, which is nobody's job.
+describe('cons.fyi sync: timezone', () => {
+	/** A cons.fyi feed event, in the shape fetchAttendingEvents returns. */
+	function event(overrides: Partial<ConsFyiEvent> = {}): ConsFyiEvent {
+		return {
+			id: 'mff-2026',
+			name: 'Midwest FurFest 2026',
+			url: 'https://furfest.org',
+			startDate: '2026-12-03',
+			endDate: '2026-12-06',
+			location: 'Rosemont, IL',
+			timezone: 'America/Chicago',
+			...overrides
+		};
+	}
+
+	/** Point the feed mocks at `events`, with a Bluesky handle configured. */
+	async function attending(db: ReturnType<typeof drizzle>, events: ConsFyiEvent[]) {
+		clearSettingsCache();
+		await db.insert(siteSettings).values({ key: 'blueskyUrl', value: 'https://bsky.app/profile/taro.surf' });
+		vi.mocked(consfyi.blueskyHandle).mockReturnValue('taro.surf');
+		vi.mocked(consfyi.fetchAttendingEvents).mockResolvedValue(events);
+	}
+
+	async function sync(platform: App.Platform): Promise<{ message?: string }> {
+		return (await actions.sync({ platform } as never)) as { message?: string };
+	}
+
+	function rows(db: ReturnType<typeof drizzle>) {
+		return db.select().from(conventions).orderBy(asc(conventions.id));
+	}
+
+	afterEach(() => {
+		clearSettingsCache();
+		vi.mocked(consfyi.blueskyHandle).mockReturnValue(null);
+		vi.mocked(consfyi.fetchAttendingEvents).mockResolvedValue([]);
+		vi.mocked(consfyi.findConsFyiEvent).mockResolvedValue(undefined);
+	});
+
+	it('fills in the zone on a row that was added before the column existed', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(conventions).values({
+			...TAILS,
+			name: 'Midwest FurFest 2026',
+			sourceId: 'mff-2026',
+			timezone: null
+		});
+		await attending(db, [event()]);
+
+		const result = await sync(platform);
+
+		expect((await rows(db))[0].timezone).toBe('America/Chicago');
+		// The count is reported: a silent backfill is indistinguishable from none.
+		expect(result.message).toContain('1 convention');
+	});
+
+	it('never overwrites a zone the row already has', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(conventions).values({
+			...TAILS,
+			name: 'Midwest FurFest 2026',
+			sourceId: 'mff-2026',
+			timezone: 'America/Vancouver'
+		});
+		// The feed disagrees. The stored zone stands: it may have been corrected by
+		// hand, and the isNull guard is what makes the backfill safe to re-run.
+		await attending(db, [event({ timezone: 'America/Denver' })]);
+
+		const result = await sync(platform);
+
+		expect((await rows(db))[0].timezone).toBe('America/Vancouver');
+		expect(result.message).toContain('Already in sync');
+	});
+
+	it('counts every row it filled, and only those', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(conventions).values([
+			{ ...TAILS, name: 'One', sourceId: 'one', timezone: null },
+			{ ...TAILS, name: 'Two', sourceId: 'two', timezone: null },
+			{ ...TAILS, name: 'Three', sourceId: 'three', timezone: 'America/Vancouver' }
+		]);
+		await attending(db, [
+			event({ id: 'one', timezone: 'America/Chicago' }),
+			event({ id: 'two', timezone: 'America/New_York' }),
+			event({ id: 'three', timezone: 'America/Denver' })
+		]);
+
+		const result = await sync(platform);
+
+		expect((await rows(db)).map((c) => c.timezone)).toEqual([
+			'America/Chicago',
+			'America/New_York',
+			'America/Vancouver'
+		]);
+		expect(result.message).toContain('2 conventions');
+	});
+
+	it('carries the zone in on a con the sync adds', async () => {
+		const { db, platform } = makeDb();
+		await attending(db, [event()]);
+
+		await sync(platform);
+
+		expect(await rows(db)).toMatchObject([
+			{ name: 'Midwest FurFest 2026', sourceId: 'mff-2026', timezone: 'America/Chicago' }
+		]);
+	});
+
+	it('carries the zone in on a con picked from the feed by hand', async () => {
+		const { db, platform } = makeDb();
+		vi.mocked(consfyi.findConsFyiEvent).mockResolvedValue(event());
+		const body = new FormData();
+		body.append('sourceId', 'mff-2026');
+
+		await actions.addFromSource({
+			platform,
+			request: new Request('https://taro.surf/admin/conventions?/addFromSource', {
+				method: 'POST',
+				body
+			})
+		} as never);
+
+		expect(await rows(db)).toMatchObject([{ sourceId: 'mff-2026', timezone: 'America/Chicago' }]);
+	});
+
+	it('leaves the zone null when the feed event carries none', async () => {
+		const { db, platform } = makeDb();
+		await attending(db, [event({ timezone: undefined })]);
+
+		await sync(platform);
+
+		expect((await rows(db))[0].timezone).toBeNull();
 	});
 });

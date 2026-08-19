@@ -62,6 +62,14 @@ function texts(svg: string): string[] {
 	return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
 }
 
+/** Every <text> with the size it was rendered at, for the fit/shrink math. */
+function sized(svg: string): Array<{ body: string; size: number }> {
+	return [...svg.matchAll(/<text[^>]*font-size="(\d+)"[^>]*>([^<]*)<\/text>/g)].map((m) => ({
+		size: Number(m[1]),
+		body: m[2]
+	}));
+}
+
 describe('conCardFaceSvg — the badge', () => {
 	it('is a CR80 portrait card whose viewBox matches its printed inches', () => {
 		for (const which of ['front', 'back'] as const) {
@@ -93,6 +101,11 @@ describe('conCardFaceSvg — the badge', () => {
 		const svg = front({ name: 'Taro & <Friends>', species: null, colors: [] });
 		expect(svg).toContain('Taro &amp; &lt;Friends&gt;');
 		expect(svg).not.toContain('<Friends>');
+		// Both quote forms, since a value can also land inside an attribute (the
+		// avatar href, a colour hex).
+		expect(front({ name: `Taro's "friend"`, species: null })).toContain(
+			'Taro&#39;s &quot;friend&quot;'
+		);
 	});
 });
 
@@ -147,6 +160,40 @@ describe('conCardFaceSvg — the front', () => {
 	it('drops the species line when the species is turned off', () => {
 		expect(texts(front({ species: null }))).not.toContain('Red panda');
 		expect(texts(front())).toContain('Red panda');
+	});
+
+	it('measures a Japanese name at full width, so it shrinks like a wide Latin one', () => {
+		// A CJK glyph is drawn on a square em by every family in the card's stack.
+		// Measured at the Latin 0.6em it passes the fit at the base size and then
+		// clips off the edge of a printed card.
+		const avatarHref = 'data:image/png;base64,AAAA';
+		const jp = sized(front({ name: 'タロウのなまえ', species: null, avatarHref }));
+		const latin = sized(front({ name: 'Tarooma', species: null, avatarHref }));
+		// Same seven code points; only the Japanese one is too wide for the base.
+		expect(latin[0].size).toBe(152);
+		expect(jp[0].size).toBeLessThan(latin[0].size);
+		// Whole, not cut, and inside the content column under the weighted measure.
+		expect(jp[0].body).toBe('タロウのなまえ');
+		expect(7 * jp[0].size).toBeLessThanOrEqual(CON_CARD_WIDTH - 56 * 2);
+	});
+
+	it('applies the same measure to the species line', () => {
+		// Fixed size, so a species too wide is cut rather than shrunk. Fifteen
+		// full-width glyphs overrun the column that fifteen Latin ones fit inside.
+		const wide = texts(front({ species: 'あ'.repeat(15) }));
+		const narrow = texts(front({ species: 'a'.repeat(15) }));
+		expect(wide.some((t) => t.startsWith('あ') && t.endsWith('…'))).toBe(true);
+		expect(narrow).toContain('a'.repeat(15));
+	});
+
+	it('cuts by code point, so a clamped name never ends in half a surrogate pair', () => {
+		// A lone surrogate makes the markup unencodable: encodeURIComponent, which
+		// the raster path runs the whole SVG through, throws on one.
+		const svg = front({ name: '🦊'.repeat(40), species: null, avatarHref: 'data:image/png;base64,AAAA' });
+		const clamped = texts(svg).find((t) => t.startsWith('🦊')) ?? '';
+		expect(clamped.endsWith('…')).toBe(true);
+		expect(clamped).not.toMatch(/[\uD800-\uDFFF]/u);
+		expect(() => encodeURIComponent(svg)).not.toThrow();
 	});
 
 	it('shrinks a name too long for the card instead of running it off the edge', () => {

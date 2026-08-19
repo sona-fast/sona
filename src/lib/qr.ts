@@ -3,15 +3,31 @@ import qrcode from 'qrcode-generator';
 /**
  * QR encoding for the convention handoff.
  *
- * Wraps qrcode-generator (MIT, no dependencies) in the two shapes this codebase
- * needs: an SVG path for server-rendered markup, and a module matrix for drawing
- * into a canvas when the con card is exported as a PNG.
+ * Wraps qrcode-generator (MIT, no dependencies) in the one shape this codebase
+ * renders: an SVG path, inlined into markup. The module matrix is qrSvg's own
+ * intermediate step; it stays exported because the structure a scanner actually
+ * needs (finder patterns, timing row and column) is assertable on the matrix and
+ * invisible in the path string the tests would otherwise have to parse. Nothing
+ * outside the tests consumes it: the PNG export rasterizes the whole card SVG
+ * through a canvas rather than drawing modules itself.
  *
  * Error correction is 'M' (~15% recoverable). The codes here get printed on a
  * card that lives in a badge holder and scanned in bad hall lighting, so some
  * tolerance for scuffing is worth the extra modules.
  */
 const ERROR_CORRECTION = 'M' as const;
+
+/**
+ * The payload as one character per UTF-8 byte.
+ *
+ * qrcode-generator's byte mode takes the low byte of every code unit, so a
+ * non-ASCII payload would encode as its own mojibake rather than fail. An
+ * internationalized domain reaches us already punycoded, but a path or a query
+ * string does not have to.
+ */
+function utf8Payload(text: string): string {
+	return String.fromCharCode(...new TextEncoder().encode(text));
+}
 
 export interface QrMatrix {
 	/** Modules per side, excluding the quiet zone. */
@@ -24,7 +40,7 @@ export function qrMatrix(text: string): QrMatrix {
 	if (!text) throw new Error('qrMatrix: nothing to encode');
 	// Type 0 lets the library pick the smallest version that fits the payload.
 	const qr = qrcode(0, ERROR_CORRECTION);
-	qr.addData(text);
+	qr.addData(utf8Payload(text));
 	qr.make();
 
 	const count = qr.getModuleCount();

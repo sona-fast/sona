@@ -98,6 +98,37 @@ describe('fetchConsFyiEvents', () => {
 		expect(byId.venue).toBe('The Big Hall');
 	});
 
+	// The zone is what decides whether a con counts as live (see convention-window):
+	// read it wrong and the /connect here-now block appears a day early or stays up
+	// a day late, in the operator's own timezone rather than the event's.
+	it('keeps the IANA zone the feed states', async () => {
+		stubFeed(
+			jsonl({
+				id: 'mff',
+				name: 'Midwest FurFest',
+				startDate: '2026-12-03',
+				timezone: 'America/Denver'
+			})
+		);
+		const { fetchConsFyiEvents } = await import('./consfyi');
+		const [event] = await fetchConsFyiEvents();
+		expect(event.timezone).toBe('America/Denver');
+	});
+
+	it('leaves the zone undefined when the row has none, rather than throwing', async () => {
+		stubFeed(
+			jsonl(
+				{ id: 'none', name: 'No Zone Con', startDate: '2026-09-10' },
+				// A non-string zone is no zone: the column is an IANA name or nothing.
+				{ id: 'wrong', name: 'Bad Zone Con', startDate: '2026-09-11', timezone: 420 }
+			)
+		);
+		const { fetchConsFyiEvents } = await import('./consfyi');
+		const byId = Object.fromEntries((await fetchConsFyiEvents()).map((e) => [e.id, e.timezone]));
+		expect(byId.none).toBeUndefined();
+		expect(byId.wrong).toBeUndefined();
+	});
+
 	it('returns [] (no throw) when the feed responds non-OK', async () => {
 		stubFeed('', { ok: false, status: 503 });
 		const { fetchConsFyiEvents } = await import('./consfyi');

@@ -52,6 +52,18 @@ describe('qrMatrix', () => {
 	it('refuses an empty payload rather than encoding nothing', () => {
 		expect(() => qrMatrix('')).toThrow();
 	});
+
+	it('encodes a non-ASCII payload as UTF-8, not as its low bytes', () => {
+		// The library's byte mode takes the low byte of every code unit, which turns
+		// a Japanese path into mojibake a scanner reads back as garbage rather than
+		// as a failure anyone would notice.
+		const kana = 'あ'.repeat(30);
+		expect(() => qrMatrix(kana)).not.toThrow();
+		// Three UTF-8 bytes per glyph, so the code has to grow past the 30-byte
+		// version the truncating encoder would have produced.
+		expect(qrMatrix(kana).count).toBeGreaterThan(qrMatrix('a'.repeat(30)).count);
+		expect(qrSvg(kana).path.length).toBeGreaterThan(0);
+	});
 });
 
 describe('qrPath', () => {

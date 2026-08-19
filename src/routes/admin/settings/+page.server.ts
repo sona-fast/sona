@@ -115,7 +115,19 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 
 	// Con card (SONA-115): everything the printable card needs, resolved here so
 	// the component never re-derives a handle or has to guess the fork's domain.
-	const artist = refImage ? await refImageCredit(db, refImage.id) : null;
+	//
+	// The credit and the storage totals are independent reads, so they go out
+	// together rather than one after the other.
+	const [artist, stats] = await Promise.all([
+		refImage ? refImageCredit(db, refImage.id) : null,
+		db
+			.select({
+				count: sql<number>`COUNT(*)`,
+				totalSize: sql<number>`COALESCE(SUM(file_size), 0)`
+			})
+			.from(images)
+			.get()
+	]);
 	// The configured canonical origin wins over the request's: a card is printed
 	// once and must not carry the alias or preview host it happened to be made on.
 	const cardOrigin = (settings.siteUrl.trim() || url.origin).replace(/\/+$/, '');
@@ -162,14 +174,6 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		connectUrl: `${cardOrigin}/connect`,
 		displayDomain: hostOf(cardOrigin)
 	};
-
-	const stats = await db
-		.select({
-			count: sql<number>`COUNT(*)`,
-			totalSize: sql<number>`COALESCE(SUM(file_size), 0)`
-		})
-		.from(images)
-		.get();
 
 	// Live UploadThing usage — authoritative, includes files not tracked in D1
 	// (e.g. orphans from failed uploads, legacy imports).

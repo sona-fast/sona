@@ -1263,6 +1263,11 @@ describe('settings load — supporter key is raw + verified, never in public set
 		// with a GA date far enough out that the assertion below never turns into
 		// a comparison of two empty lists as the shipped registry empties.
 		EARLY_ACCESS['probe'] = { gaDate: '2999-01-01', label: () => 'Probe' };
+		// Frozen inside the con-card window. earlyAccessActive is a comparison
+		// against the wall clock, so on the real one this test goes red the morning
+		// the flag GAs, which is the day it is least worth reading a red suite.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-08-20T12:00:00Z'));
 		try {
 			const result = (await load(loadEvent(platform))) as unknown as {
 				supporterKey: { keyRecord: string; state: string; validUntil: string } | null;
@@ -1302,6 +1307,7 @@ describe('settings load — supporter key is raw + verified, never in public set
 			// The token must never leak into the client-exposed SiteSettings.
 			expect(result.settings.supporterKey).toBeUndefined();
 		} finally {
+			vi.useRealTimers();
 			delete EARLY_ACCESS['probe'];
 		}
 	});

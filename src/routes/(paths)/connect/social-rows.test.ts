@@ -40,3 +40,21 @@ describe('/connect social rows', () => {
 		expect(source).not.toMatch(/socialLabel\s*\(/);
 	});
 });
+
+describe('/connect here-now block', () => {
+	it('serves the avatar through the CDN transform, with the raw original behind it', () => {
+		// It is a 60px slot; an untransformed original is a multi-MB download on the
+		// convention wifi this page is read over. rawFallback covers the off-zone
+		// hosts that 403 the transform.
+		expect(source).toMatch(/src=\{cdnImage\(data\.settings\.adminAvatarUrl, 120\)\}/);
+		expect(source).toMatch(/use:rawFallback=\{data\.settings\.adminAvatarUrl\}/);
+		// Intrinsic size stays on the tag so the block does not shift as it loads.
+		expect(source).toMatch(/class="here-avatar"[\s\S]*?width="60"\s*\n?\s*height="60"/);
+	});
+
+	it('opens with a heading, like every other section on the page', () => {
+		// Without one, the block that leads the page during a con is unreachable by
+		// heading navigation.
+		expect(source).toMatch(/<h2 class="live-pill">\{m\.connect_here_now\(\)\}<\/h2>/);
+	});
+});

@@ -6,7 +6,6 @@
 	import SetupDialog from '$lib/components/SetupDialog.svelte';
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import CloudflareSetupDialog from '$lib/components/CloudflareSetupDialog.svelte';
-	import ConCard from '$lib/components/ConCard.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE, R2_FREE_TIER_BYTES } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
@@ -1217,6 +1216,7 @@
 				<input
 					type="text"
 					class="input"
+					id="supporter-key"
 					name="supporterKey"
 					placeholder={data.supporterKey?.state === 'expired' ? m.admin_settings_supporter_placeholder_new() : m.admin_settings_supporter_placeholder()}
 					aria-invalid={form?.supporterKeyError ? 'true' : undefined}
@@ -1250,18 +1250,25 @@
 	<h2>{m.admin_settings_con_card_heading()}</h2>
 	<p class="explainer-body">{m.admin_settings_con_card_subtitle()}</p>
 	{#if conCardEnabled}
-		<ConCard
-			name={data.conCard.name}
-			species={data.conCard.species}
-			colors={data.conCard.colors}
-			handles={data.conCard.handles}
-			artCredit={data.conCard.artCredit}
-			avatarSrc={data.conCard.avatarSrc}
-			connectUrl={data.conCard.connectUrl}
-			displayDomain={data.conCard.displayDomain}
-		/>
+		<!-- Lazy chunk, like the ref-sheet picker: the card builds two full SVGs and
+		     rasterizes through a canvas, and every other tab of this page would
+		     otherwise carry that. -->
+		{#await import('$lib/components/ConCard.svelte') then { default: ConCard }}
+			<ConCard
+				name={data.conCard.name}
+				species={data.conCard.species}
+				colors={data.conCard.colors}
+				handles={data.conCard.handles}
+				artCredit={data.conCard.artCredit}
+				avatarSrc={data.conCard.avatarSrc}
+				connectUrl={data.conCard.connectUrl}
+				displayDomain={data.conCard.displayDomain}
+			/>
+		{/await}
 	{:else}
-		<p class="hint">{m.admin_settings_con_card_locked({ date: conCardGaDate })}</p>
+		<!-- The key field is on this same tab, so the hint can point straight at it
+		     rather than leaving the operator to find it. -->
+		<p class="hint">{m.admin_settings_con_card_locked({ date: conCardGaDate })} <a class="link-inline" href="#supporter-key">{m.admin_settings_con_card_locked_link()}</a></p>
 	{/if}
 </section>
 

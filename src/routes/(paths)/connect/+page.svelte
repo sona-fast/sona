@@ -10,6 +10,7 @@
 	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 	import * as m from '$lib/paraglide/messages';
+	import { cdnImage, rawFallback } from '$lib/img';
 	import { SOCIAL_PLATFORM_NAMES, socialAtHandle } from '$lib/social-label';
 
 	let { data } = $props();
@@ -70,11 +71,24 @@
 
 	<section class="section">
 		<div class="here-now">
-			<span class="live-pill">{m.connect_here_now()}</span>
+			<!-- The pill IS this section's heading: every other section on the page
+			     opens with one, and without it the live block is unreachable by
+			     heading navigation. Styling is unchanged; only the element. -->
+			<h2 class="live-pill">{m.connect_here_now()}</h2>
 
 			<div class="here-ident">
 				{#if data.settings.adminAvatarUrl}
-					<img class="here-avatar" src={data.settings.adminAvatarUrl} alt="" width="60" height="60" />
+					<!-- Through the CDN transform at 2x the rendered size, with the raw
+					     original as the fallback: an off-zone avatar host 403s the
+					     transform, and this page is read on convention wifi. -->
+					<img
+						class="here-avatar"
+						src={cdnImage(data.settings.adminAvatarUrl, 120)}
+						use:rawFallback={data.settings.adminAvatarUrl}
+						alt=""
+						width="60"
+						height="60"
+					/>
 				{/if}
 				<span class="here-who">{personaName}</span>
 			</div>
@@ -171,6 +185,8 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 7px;
+		/* An <h2>, so the UA's heading margins have to go. */
+		margin: 0;
 		font-family: var(--font-primary);
 		font-weight: 700;
 		font-size: 10px;
@@ -181,8 +197,6 @@
 		padding: 4px 10px;
 		border-radius: var(--radius-pill);
 	}
-
-
 
 	.here-ident {
 		display: flex;

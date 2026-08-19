@@ -195,7 +195,7 @@
 								<!-- A plain link on purpose: /connect/qr is public, so the scan target
 								     still loads when admin has failed closed on a D1 outage, or when
 								     convention wifi has not left the session cookie intact. -->
-								<a href="/connect/qr" class="btn btn-primary qr-btn">
+								<a href="/connect/qr" class="btn btn-outline qr-btn">
 									<QrCode size={15} /> {m.admin_conventions_show_qr()}
 								</a>
 							{/if}
@@ -221,7 +221,7 @@
 				<span class="con-name">{con.name}</span>
 				<span class="mobile-meta">{metaLine(formatDateRange(con.startDate, con.endDate), con.location, con.timezone)}</span>
 				{#if live}
-					<a href="/connect/qr" class="btn btn-primary qr-btn mobile-qr">
+					<a href="/connect/qr" class="btn btn-outline qr-btn mobile-qr">
 						<QrCode size={15} /> {m.admin_conventions_show_qr()}
 					</a>
 				{/if}
@@ -450,8 +450,6 @@
 		white-space: nowrap;
 	}
 
-
-
 	.row-actions {
 		display: flex;
 		align-items: center;
@@ -549,6 +547,12 @@
 			padding-left: 12px;
 			background: color-mix(in srgb, var(--primary) 8%, transparent);
 			box-shadow: inset 3px 0 0 var(--primary);
+		}
+
+		/* The wash puts muted text under 4.5:1 on the light themes, and the meta
+		   line is the dates and the venue, the row's only real content. */
+		.mobile-item.is-live .mobile-meta {
+			color: var(--foreground);
 		}
 
 		/* Under the meta line rather than in the cramped action slot: this is the

@@ -46,16 +46,53 @@ describe('ConCard download paths', () => {
 		expect(source).toMatch(/previewBack[\s\S]*?conCardFaceSvg\('back', \{[\s\S]*?variant: 'light'/);
 	});
 
-	it('names the platform beside each include toggle, where the card draws an icon', () => {
+	it('names the platform beside each handle toggle, where the card draws an icon', () => {
 		// The icons are for the printed card; a checkbox is settings UI and has to
-		// say which platform it turns on in words.
+		// say which platform it turns on in words, and which account, since the
+		// operator can have more than one per platform elsewhere on the site.
 		expect(source).toMatch(
-			/bind:checked=\{handleOn\[i\]\} \/> \{SOCIAL_PLATFORM_NAMES\[handle\.platform\]\}/
+			/bind:checked=\{handleOn\[i\]\}[\s\S]*?\{SOCIAL_PLATFORM_NAMES\[handle\.platform\]\}[\s\S]*?class="handle-value">\{handle\.value\}/
 		);
+	});
+
+	it('groups the includes and the handles as two fieldsets', () => {
+		// Per the approved mock: what goes on the card, then which accounts.
+		expect(source).toMatch(/<legend>\{m\.con_card_include\(\)\}<\/legend>/);
+		expect(source).toMatch(/<legend>\{m\.con_card_handles\(\)\}<\/legend>/);
 	});
 
 	it('keeps the card whole when the avatar cannot be fetched', () => {
 		// The QR is the point of the card, and the back never touches the avatar.
 		expect(source).toMatch(/avatarFailed = true;[\s\S]*?return null;/);
+	});
+
+	it('separates "saved without your avatar" from "nothing saved"', () => {
+		// avatarFailed is the embed path's alone; a raster failure must never claim
+		// a file was saved. Both save paths route their catch to rasterFailed.
+		expect(source.match(/avatarFailed = true/g) ?? []).toHaveLength(1);
+		expect(source).toMatch(/savePhone[\s\S]*?catch \{[\s\S]*?rasterFailed = true;/);
+		expect(source).toMatch(/saveFront[\s\S]*?catch \{[\s\S]*?rasterFailed = true;/);
+		// A canvas with no context and an encode with no blob are failures, not
+		// silent no-ops.
+		expect(source).toMatch(/if \(!ctx\) throw/);
+		expect(source).toMatch(/if \(!blob\) throw/);
+	});
+
+	it('renders the status region whether or not anything failed', () => {
+		// A live region created together with its text is not reliably announced,
+		// so the <p> is unconditional and the {#if} sits inside it.
+		expect(source).toMatch(
+			/<p class="status-line" role="status">[\s\S]*?\{#if avatarFailed\}[\s\S]*?\{#if rasterFailed\}[\s\S]*?<\/p>/
+		);
+	});
+
+	it('marks a save in progress with aria-busy rather than disabling the button', () => {
+		// A control that leaves the tab order mid-press drops the focus the operator
+		// was holding; re-entry is guarded in the handler instead.
+		expect(source).not.toMatch(/disabled=\{saving/);
+		for (const flag of ['savingPrint', 'savingPhone', 'savingFront']) {
+			expect(source, flag).toContain(`aria-busy={${flag}}`);
+			expect(source, flag).toMatch(new RegExp(`if \\(${flag}\\) return;`));
+		}
 	});
 });

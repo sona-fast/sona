@@ -1697,8 +1697,9 @@
 	"vr_stage_keys_hint": "Arrow keys orbit the camera; plus and minus keys zoom.",
 	"mature_revealed": "NSFW content shown.",
 	"admin_settings_con_card_heading": "Con card",
-	"admin_settings_con_card_subtitle": "Save it to your phone before you travel, so you are not depending on convention wifi.",
+	"admin_settings_con_card_subtitle": "Save your card to your phone before you travel, so you aren't relying on convention Wi-Fi.",
 	"admin_settings_con_card_locked": "Con cards open to everyone on {date}. A supporter key unlocks them now.",
+	"admin_settings_con_card_locked_link": "Add a supporter key",
 	"con_card_title": "Con card for {name}",
 	"con_card_title_front": "Front of the con card for {name}",
 	"con_card_title_back": "Back of the con card for {name}",
@@ -1710,10 +1711,13 @@
 	"con_card_art_credit": "Art by {artist} · {domain}",
 	"con_card_include": "Include",
 	"con_card_include_credit": "Art credit",
-	"con_card_handle_hint": "Past two handles, the text on the card gets smaller.",
+	"con_card_handles": "Handles",
+	"con_card_handle_hint": "With more than two handles, the text on the card gets smaller.",
 	"con_card_download_print": "Download for print",
 	"con_card_save_phone": "Save to phone",
-	"con_card_save_phone_hint": "A PNG of the back, because Photos on iPhone will not take an SVG.",
+	"con_card_save_phone_hint": "Saves the back as a PNG, because Photos on iPhone won't accept an SVG.",
 	"con_card_save_front": "Save the front for a lock screen",
-	"con_card_art_failed": "Your picture would not load, so the card saved with your initial instead."
+	"con_card_art_failed": "Your avatar wouldn't load, so the card uses your initial instead.",
+	"con_card_save_failed": "The save didn't work. Try again.",
+	"con_qr_svg_label": "QR code for {url}"
 }

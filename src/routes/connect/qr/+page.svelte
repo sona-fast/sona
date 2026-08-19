@@ -24,7 +24,7 @@
 			viewBox={data.qr.viewBox}
 			shape-rendering="crispEdges"
 			role="img"
-			aria-label={data.connectUrl}
+			aria-label={m.con_qr_svg_label({ url: data.displayUrl })}
 		>
 			<rect width="100%" height="100%" fill="#ffffff" />
 			<g transform="translate({data.qr.translate} {data.qr.translate})">
@@ -47,10 +47,22 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		justify-content: center;
+		/* Safe centering plus a scroll: at 200% zoom, or on a phone held landscape,
+		   the plate is taller than the viewport and plain centering would push the
+		   typed-URL fallback off both ends with no way to reach it. */
+		justify-content: safe center;
+		overflow: auto;
 		gap: 16px;
 		padding: 24px;
 		text-align: center;
+		/* The one screen whose first paint cannot wait on a webfont round trip: it
+		   is opened on convention wifi to be read out loud. */
+		font-family:
+			system-ui,
+			-apple-system,
+			'Segoe UI',
+			Roboto,
+			sans-serif;
 	}
 
 	.exit {
@@ -95,7 +107,6 @@
 
 	.who {
 		margin: 0;
-		font-family: var(--font-primary);
 		font-weight: 700;
 		font-size: 22px;
 		letter-spacing: 0.5px;
@@ -103,7 +114,6 @@
 
 	.url {
 		margin: 0;
-		font-family: var(--font-primary);
 		font-size: 12px;
 		letter-spacing: 0.06em;
 		color: #b8b9b6;

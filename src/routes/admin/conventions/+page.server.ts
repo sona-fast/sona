@@ -2,6 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { conventions } from '$lib/server/db/schema';
 import { eq, asc, and, isNull } from 'drizzle-orm';
+import type { BatchItem } from 'drizzle-orm/batch';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { fetchConsFyiEvents, findConsFyiEvent, fetchAttendingEvents, blueskyHandle } from '$lib/server/consfyi';
 import { getSettings } from '$lib/server/settings';
@@ -123,17 +124,20 @@ export const actions = {
 		const needsZone = new Set(rows.filter((r) => r.sourceId && !r.timezone).map((r) => r.sourceId));
 
 		let added = 0;
-		let backfilled = 0;
+		// Collected rather than awaited one at a time: a sync can touch a dozen rows,
+		// and D1 charges a subrequest per statement (the SONA-124 db.batch precedent).
+		const backfills: BatchItem<'sqlite'>[] = [];
 		for (const e of events) {
 			if (existing.has(e.id)) {
 				// Already on the schedule, but with no zone. Never overwrites a zone
 				// that is already set.
 				if (e.timezone && needsZone.has(e.id)) {
-					await db
-						.update(conventions)
-						.set({ timezone: e.timezone })
-						.where(and(eq(conventions.sourceId, e.id), isNull(conventions.timezone)));
-					backfilled++;
+					backfills.push(
+						db
+							.update(conventions)
+							.set({ timezone: e.timezone })
+							.where(and(eq(conventions.sourceId, e.id), isNull(conventions.timezone)))
+					);
 				}
 				continue;
 			}
@@ -149,6 +153,10 @@ export const actions = {
 			});
 			added++;
 		}
+		if (backfills.length > 0) {
+			await db.batch(backfills as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
+		}
+		const backfilled = backfills.length;
 
 		const parts: string[] = [];
 		if (added > 0) parts.push(`Synced ${added} convention${added === 1 ? '' : 's'} from cons.fyi.`);
