@@ -42,6 +42,7 @@ import { sql, inArray } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl, isValidEmail, normalizeHttpsUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
+import { SOCIAL_PLATFORM_NAMES, socialAtHandle } from '$lib/social-label';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
 import { resolveAvatarUrl, isOurAvatarUrl, shouldWriteAvatar } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
@@ -54,7 +55,7 @@ import {
 	REGISTRY_URL_SETTING
 } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
-import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
+import { resolveRefImage, refImageSource, refImageCredit } from '$lib/server/ref-image';
 import { isObservabilityEnabled } from '$lib/server/metrics';
 import {
 	verifySupporterKey,
@@ -83,6 +84,17 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
 	return Promise.race([promise, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
+/** The bare host of an origin, for printing under the con card's QR. A stored
+ *  siteUrl is validated as an https origin and url.origin always parses, so the
+ *  fallback only covers a row edited by hand straight into D1. */
+function hostOf(origin: string): string {
+	try {
+		return new URL(origin).host;
+	} catch {
+		return origin.replace(/^https?:\/\//, '');
+	}
+}
+
 export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	const db = getDb(platform!.env.DB);
 	// The editor must render current persisted values, not a cached snapshot.
@@ -95,6 +107,39 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	const refImageSrc = refImage
 		? refImageSource(refImage, { origin: url.origin, r2PublicUrl: settings.r2PublicUrl, dev })
 		: null;
+
+	// Con card (SONA-115): everything the printable card needs, resolved here so
+	// the component never re-derives a handle or has to guess the fork's domain.
+	const artist = refImage ? await refImageCredit(db, refImage.id) : null;
+	// The configured canonical origin wins over the request's: a card is printed
+	// once and must not carry the alias or preview host it happened to be made on.
+	const cardOrigin = (settings.siteUrl.trim() || url.origin).replace(/\/+$/, '');
+	const conCard = {
+		name: settings.ownerName || settings.siteName,
+		species: settings.sonaSpecies,
+		colors: parseSonaColors(settings.sonaColors),
+		// Card order, best first — the card has room for about two.
+		handles: (
+			[
+				['bluesky', settings.blueskyUrl],
+				['telegram', settings.telegramUrl],
+				['twitter', settings.twitterUrl],
+				['instagram', settings.instagramUrl]
+			] as const
+		).flatMap(([social, value]) => {
+			const handle = socialAtHandle(social, value);
+			// A setting with no handle in it renders as the bare platform name
+			// elsewhere; on a card that is a row telling a stranger nothing, so
+			// it is dropped instead.
+			return handle ? [{ label: SOCIAL_PLATFORM_NAMES[social], value: handle }] : [];
+		}),
+		// The spine prefers the handle: it is shorter, and it is what someone
+		// reading the card can act on.
+		artCredit: artist ? (artist.handle ?? artist.name) : null,
+		// /connect, never /connect/qr — see con-card.ts.
+		connectUrl: `${cardOrigin}/connect`,
+		displayDomain: hostOf(cardOrigin)
+	};
 
 	const stats = await db
 		.select({
@@ -201,6 +246,7 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	return {
 		settings,
 		refImageSrc,
+		conCard,
 		adminEmail,
 		supporterKey,
 		earlyAccess,

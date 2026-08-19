@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import { images, imageTags, tags, characters } from '$lib/server/db/schema';
+import { artists, images, imageTags, tags, characters } from '$lib/server/db/schema';
+import { socialAtHandle } from '$lib/social-label';
 import { isUploadThingHost } from '$lib/img';
 import type { getDb } from '$lib/server/db';
 
@@ -117,4 +118,41 @@ export function refImageSource(
 
 	// 4. By-ID proxy.
 	return { src: `/api/admin/ref-image?id=${image.id}`, crossorigin: false };
+}
+
+/** Who to credit for the reference sheet, for the con card's spine line. */
+export interface RefImageCredit {
+	name: string;
+	/** The artist's @handle where one can be derived, for a shorter spine. */
+	handle: string | null;
+}
+
+/** Platforms the spine credit will read a handle from, best first. A card has
+ *  room for one, and this is the order an artist is most likely to want. */
+const CREDIT_PLATFORMS = ['bluesky', 'twitter', 'telegram', 'instagram', 'furaffinity'] as const;
+
+/**
+ * The artist behind an image, with a handle for the con card's spine credit.
+ * Null when the image has no artist row (imports without attribution).
+ */
+export async function refImageCredit(db: Db, imageId: number): Promise<RefImageCredit | null> {
+	const row = await db
+		.select({
+			name: artists.name,
+			bluesky: artists.blueskyUrl,
+			twitter: artists.twitterUrl,
+			telegram: artists.telegramUrl,
+			instagram: artists.instagramUrl,
+			furaffinity: artists.furAffinityUrl
+		})
+		.from(artists)
+		.innerJoin(images, eq(images.artistId, artists.id))
+		.where(eq(images.id, imageId))
+		.get();
+	if (!row) return null;
+
+	const handle =
+		CREDIT_PLATFORMS.map((platform) => socialAtHandle(platform, row[platform])).find(Boolean) ??
+		null;
+	return { name: row.name, handle };
 }

@@ -1378,5 +1378,20 @@
 	"vr_load_failed": "3Dモデルを読み込めませんでした。しばらくしてからもう一度お試しください。",
 	"vr_webgl_unavailable": "このブラウザでは3D表示を利用できません。ページ内の写真と動画は引き続きご覧いただけます。",
 	"vr_stage_keys_hint": "矢印キーでカメラを回転、＋／−でズームできます。",
-	"mature_revealed": "NSFWコンテンツを表示しました。"
+	"mature_revealed": "NSFWコンテンツを表示しました。",
+	"admin_settings_con_card_heading": "コンカード",
+	"admin_settings_con_card_subtitle": "出発前にスマホに保存しておけば、会場のWi-Fiに頼らずに済みます。",
+	"admin_settings_con_card_locked": "コンカードは{date}に全員に公開されます。サポーターキーがあれば今すぐ使えます。",
+	"con_card_title": "{name}のコンカード",
+	"con_card_field_species": "種族",
+	"con_card_field_colors": "カラー",
+	"con_card_field_online": "オンライン",
+	"con_card_art_credit": "イラスト: {artist} · {domain}",
+	"con_card_include": "入れる項目",
+	"con_card_include_credit": "イラストのクレジット",
+	"con_card_handle_hint": "ハンドルが3つ以上になると、カードの文字が小さくなります。",
+	"con_card_download_print": "印刷用にダウンロード",
+	"con_card_save_phone": "スマホに保存",
+	"con_card_save_phone_hint": "iPhoneの写真アプリはSVGを受け付けないため、PNGで保存します。",
+	"con_card_art_failed": "参照シートを読み込めなかったため、イラストなしで保存しました。"
 }

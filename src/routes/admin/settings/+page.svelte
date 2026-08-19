@@ -6,6 +6,7 @@
 	import SetupDialog from '$lib/components/SetupDialog.svelte';
 	import CopyCommand from '$lib/components/CopyCommand.svelte';
 	import CloudflareSetupDialog from '$lib/components/CloudflareSetupDialog.svelte';
+	import ConCard from '$lib/components/ConCard.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { BACKUP_FILENAME_BASE, R2_FREE_TIER_BYTES } from '$lib/config';
 	import { normalizeHex } from '$lib/color-hex';
@@ -18,7 +19,7 @@
 	import { showUtFileStat } from './ut-stat';
 	import { breakdownRows, sharePct, usageWarning } from './storage-breakdown-view';
 	import { baseLocale, locales } from '$lib/paraglide/runtime';
-	import { earlyAccessLabel } from '$lib/early-access';
+	import { earlyAccessLabel, isFeatureEnabled } from '$lib/early-access';
 	import * as m from '$lib/paraglide/messages';
 
 	// Endonyms for the email-language options — a language name reads the same
@@ -185,6 +186,18 @@
 			.map((e) => m.admin_settings_supporter_early_item({ feature: earlyAccessLabel(e.flag), date: e.gaDate }))
 			.join(m.admin_settings_supporter_early_join())
 	);
+	// Con card gate. The GA date comes from the load's already-formatted
+	// early-access list, so the locked hint names the day the card opens to
+	// everyone rather than a raw registry date; the list drops the flag on its
+	// GA date, at which point this branch is unreachable anyway.
+	const conCardEnabled = $derived(
+		isFeatureEnabled('con-card', {
+			supporterKeyValid: data.supporterKey?.state === 'valid',
+			now: new Date()
+		})
+	);
+	const conCardGaDate = $derived(data.earlyAccess.find((e) => e.flag === 'con-card')?.gaDate ?? '');
+
 	let showResendSetup = $state(false);
 	let showCfSetup = $state(false);
 
@@ -1230,6 +1243,27 @@
 		</section>
 	</form>
 {/if}
+
+<!-- Con card (SONA-115): a printable card carrying the fork's /connect QR.
+     Early-access until its GA date, like any other pilot feature. -->
+<section class="security-section" data-tab="account">
+	<h2>{m.admin_settings_con_card_heading()}</h2>
+	<p class="explainer-body">{m.admin_settings_con_card_subtitle()}</p>
+	{#if conCardEnabled}
+		<ConCard
+			name={data.conCard.name}
+			species={data.conCard.species}
+			colors={data.conCard.colors}
+			handles={data.conCard.handles}
+			artCredit={data.conCard.artCredit}
+			refImageSrc={data.refImageSrc}
+			connectUrl={data.conCard.connectUrl}
+			displayDomain={data.conCard.displayDomain}
+		/>
+	{:else}
+		<p class="hint">{m.admin_settings_con_card_locked({ date: conCardGaDate })}</p>
+	{/if}
+</section>
 
 {#if data.registryEnabled}
 	<form method="POST" action="?/syncNow" class="contents" use:enhance={() => {

@@ -421,7 +421,12 @@ const LOAD_DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT N
 	CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
 		is_owner INTEGER NOT NULL DEFAULT 0, reference_image_id INTEGER, created_at TEXT);
 	CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at TEXT);
-	CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);`;
+	CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+	CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT,
+		twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT,
+		deviantart_url TEXT, patreon_url TEXT, instagram_url TEXT, global_id TEXT UNIQUE,
+		registry_version INTEGER, registry_synced_at TEXT, aliases TEXT,
+		avatar_resolved_at TEXT, created_at TEXT NOT NULL);`;
 
 const LOAD_URL = new URL('https://taro.surf/admin/settings');
 
@@ -532,6 +537,128 @@ describe('settings load — ref-sheet picker source', () => {
 		// UploadThing host → raw URL + crossorigin (see ref-image.test.ts for the
 		// full strategy matrix; this just proves the load wires it through).
 		expect(result.refImageSrc).toEqual({ src: 'https://abc12.ufs.sh/f/key', crossorigin: true });
+	});
+});
+
+describe('settings load — con card (SONA-115)', () => {
+	type ConCard = {
+		name: string;
+		species: string;
+		colors: Array<{ name: string; hex: string }>;
+		handles: Array<{ label: string; value: string }>;
+		artCredit: string | null;
+		connectUrl: string;
+		displayDomain: string;
+	};
+
+	async function conCard(db: ReturnType<typeof drizzle>, platform: App.Platform): Promise<ConCard> {
+		const result = (await load(loadEvent(platform))) as unknown as { conCard: ConCard };
+		return result.conCard;
+	}
+
+	/** A reference sheet by the given artist, resolved the same way /art does. */
+	async function seedRefSheet(db: ReturnType<typeof drizzle>, artist: Record<string, string>) {
+		const row = await db
+			.insert(schema.artists)
+			.values({ ...artist, createdAt: '2026-01-01' } as typeof schema.artists.$inferInsert)
+			.returning({ id: schema.artists.id })
+			.get();
+		const img = await db
+			.insert(schema.images)
+			.values({
+				title: 'ref',
+				slug: 'ref',
+				imageUrl: 'https://abc12.ufs.sh/f/key',
+				artistId: row.id,
+				createdAt: '2026-01-01'
+			})
+			.returning({ id: schema.images.id })
+			.get();
+		const tag = await db
+			.insert(schema.tags)
+			.values({ name: 'reference' })
+			.returning({ id: schema.tags.id })
+			.get();
+		await db.insert(schema.imageTags).values({ imageId: img.id, tagId: tag.id });
+	}
+
+	it('points the QR at /connect, never at the /connect/qr scan target', async () => {
+		const { db, platform } = makeLoadDb();
+
+		const card = await conCard(db, platform);
+
+		// A printed card outlives the app, and /connect is never gated.
+		expect(card.connectUrl).toBe('https://taro.surf/connect');
+		expect(card.connectUrl).not.toContain('/connect/qr');
+	});
+
+	it('prefers the configured canonical origin over the host the admin opened', async () => {
+		const { db, platform } = makeLoadDb();
+		// The request in loadEvent is https://taro.surf; the card must carry the
+		// canonical domain instead, since it is printed once.
+		await setRawSetting(db, 'siteUrl', 'https://taro.example/');
+
+		const card = await conCard(db, platform);
+
+		expect(card.connectUrl).toBe('https://taro.example/connect');
+		expect(card.displayDomain).toBe('taro.example');
+	});
+
+	it('carries the sona profile, with the owner name winning over the site name', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'siteName', 'Taro Surf');
+		await setRawSetting(db, 'ownerName', 'Taro');
+		await setRawSetting(db, 'sonaSpecies', 'Red panda');
+		await setRawSetting(db, 'sonaColors', JSON.stringify([{ name: 'Rust', hex: '#b45309' }]));
+
+		const card = await conCard(db, platform);
+
+		expect(card.name).toBe('Taro');
+		expect(card.species).toBe('Red panda');
+		expect(card.colors).toEqual([{ name: 'Rust', hex: '#b45309' }]);
+	});
+
+	it('renders each social as an @handle, and drops a setting with no handle in it', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, 'blueskyUrl', 'https://bsky.app/profile/taro.surf');
+		await setRawSetting(db, 'telegramUrl', 'https://t.me/taro_tg');
+		// A bare platform URL carries no account (social-label rule 2). On a card
+		// that row would tell a stranger nothing, so it must not be there at all.
+		await setRawSetting(db, 'twitterUrl', 'https://twitter.com');
+
+		const card = await conCard(db, platform);
+
+		expect(card.handles).toEqual([
+			{ label: 'Bluesky', value: '@taro.surf' },
+			{ label: 'Telegram', value: '@taro_tg' }
+		]);
+	});
+
+	it('renders the card behind the early-access gate, on the Account tab', () => {
+		// Source pin (the SONA-183 precedent above): the section is the only place
+		// the con card is reachable, so an ungated {#if} would hand a supporter
+		// feature to everyone with the whole suite still green.
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		const section = src.slice(src.indexOf('{#if conCardEnabled}'));
+		expect(section.slice(0, section.indexOf('{:else}'))).toContain('<ConCard');
+		expect(src).toContain("isFeatureEnabled('con-card'");
+		expect(src).toMatch(/<section class="security-section" data-tab="account">\s*\n\s*<h2>\{m\.admin_settings_con_card_heading\(\)\}/);
+	});
+
+	it('credits the reference sheet by the artist handle when there is one', async () => {
+		const { db, platform } = makeLoadDb();
+		await seedRefSheet(db, { name: 'Nori', blueskyUrl: 'https://bsky.app/profile/nori.art' });
+
+		expect((await conCard(db, platform)).artCredit).toBe('@nori.art');
+	});
+
+	it('falls back to the artist name, and to no credit at all without an artist', async () => {
+		const withName = makeLoadDb();
+		await seedRefSheet(withName.db, { name: 'Nori' });
+		expect((await conCard(withName.db, withName.platform)).artCredit).toBe('Nori');
+
+		const bare = makeLoadDb();
+		expect((await conCard(bare.db, bare.platform)).artCredit).toBeNull();
 	});
 });
 
@@ -1082,10 +1209,9 @@ describe('settings load — supporter key is raw + verified, never in public set
 			expiresAt: new Date('2026-09-01T00:00:00Z')
 		});
 
-		// The shipped registry is empty since vr-avatars retired (SONA-157), so
-		// seed a synthetic in-window flag for this test only (restored in the
-		// finally) — otherwise the earlyAccess assertion below would compare
-		// [] to [] and never exercise the flag + formatDate mapping.
+		// A synthetic in-window flag for this test only (restored in the finally),
+		// with a GA date far enough out that the assertion below never turns into
+		// a comparison of two empty lists as the shipped registry empties.
 		EARLY_ACCESS['probe'] = { gaDate: '2999-01-01', label: () => 'Probe' };
 		try {
 			const result = (await load(loadEvent(platform))) as unknown as {

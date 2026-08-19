@@ -1695,5 +1695,20 @@
 	"vr_load_failed": "Couldn't load the 3D model. Try again in a moment.",
 	"vr_webgl_unavailable": "3D view isn't available in this browser. Photos and video on this page still work.",
 	"vr_stage_keys_hint": "Arrow keys orbit the camera; plus and minus keys zoom.",
-	"mature_revealed": "NSFW content shown."
+	"mature_revealed": "NSFW content shown.",
+	"admin_settings_con_card_heading": "Con card",
+	"admin_settings_con_card_subtitle": "Save it to your phone before you travel, so you are not depending on convention wifi.",
+	"admin_settings_con_card_locked": "Con cards open to everyone on {date}. A supporter key unlocks them now.",
+	"con_card_title": "Con card for {name}",
+	"con_card_field_species": "Species",
+	"con_card_field_colors": "Colors",
+	"con_card_field_online": "Online",
+	"con_card_art_credit": "Art by {artist} · {domain}",
+	"con_card_include": "Include",
+	"con_card_include_credit": "Art credit",
+	"con_card_handle_hint": "Past two handles, the text on the card gets smaller.",
+	"con_card_download_print": "Download for print",
+	"con_card_save_phone": "Save to phone",
+	"con_card_save_phone_hint": "A PNG, because Photos on iPhone will not take an SVG.",
+	"con_card_art_failed": "The reference art would not load, so the saved card came out without it."
 }
