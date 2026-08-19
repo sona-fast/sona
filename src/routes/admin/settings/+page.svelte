@@ -189,6 +189,13 @@
 	// early-access list, so the locked hint names the day the card opens to
 	// everyone rather than a raw registry date; the list drops the flag on its
 	// GA date, at which point this branch is unreachable anyway.
+	//
+	// The gate is deliberately advisory rather than enforced: the load ships the
+	// card data whatever this resolves to, so a determined operator reaches the
+	// generator through devtools. That is the intended semantics. Early access is
+	// a seven-day head start rather than a paywall, and everything the card draws
+	// is the operator's own data on their own admin page, so there is nothing to
+	// withhold from them except the head start itself.
 	const conCardEnabled = $derived(
 		isFeatureEnabled('con-card', {
 			supporterKeyValid: data.supporterKey?.state === 'valid',

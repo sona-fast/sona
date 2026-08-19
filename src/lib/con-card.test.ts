@@ -157,11 +157,11 @@ describe('conCardFaceSvg — the front', () => {
 	});
 
 	it('carries the name and the species, and nothing else the back owns', () => {
-		const svg = front({ artCredit: 'Sona by @nori', handles: [{ platform: 'bluesky', value: '@taro' }] });
+		const svg = front({ artCredit: 'Fursona by @nori', handles: [{ platform: 'bluesky', value: '@taro' }] });
 		expect(texts(svg)).toEqual(expect.arrayContaining(['Taro', 'Red panda']));
 		// The front is worn all day: no QR, no handles, no credit line on it.
 		expect(texts(svg)).not.toContain('@taro');
-		expect(texts(svg)).not.toContain('Sona by @nori');
+		expect(texts(svg)).not.toContain('Fursona by @nori');
 		expect(svg).not.toContain('taro.surf');
 		expect(svg).not.toContain(`d="${qrSvg('https://taro.surf/connect').path}"`);
 	});
@@ -291,15 +291,15 @@ describe('conCardFaceSvg — the back', () => {
 	});
 
 	it('signs the bottom edge with the art credit and the made-with line', () => {
-		const svg = back({ artCredit: 'Sona by @nori · taro.surf' });
+		const svg = back({ artCredit: 'Fursona by @nori · taro.surf' });
 		expect(texts(svg)).toEqual(
-			expect.arrayContaining(['Sona by @nori · taro.surf', 'Made with Sona'])
+			expect.arrayContaining(['Fursona by @nori · taro.surf', 'Made with Sona'])
 		);
 	});
 
 	it('drops the credit line when the art credit is turned off', () => {
 		const svg = back({ artCredit: null });
-		expect(texts(svg)).not.toContain('Sona by @nori · taro.surf');
+		expect(texts(svg)).not.toContain('Fursona by @nori · taro.surf');
 		// The made-with line is not a toggle and stays either way.
 		expect(texts(svg)).toContain('Made with Sona');
 	});
@@ -401,13 +401,13 @@ describe('conCardFaceSvg — handles', () => {
 				platform: CARD_PLATFORMS[i % CARD_PLATFORMS.length],
 				value: `@row${i}`
 			})),
-			artCredit: 'Sona by @nori'
+			artCredit: 'Fursona by @nori'
 		});
 		const rows = [...svg.matchAll(/<text [^>]*y="(\d+)"[^>]*>(@row\d+)<\/text>/g)].map((m) => ({
 			y: Number(m[1]),
 			body: m[2]
 		}));
-		const creditY = Number(svg.match(/<text [^>]*y="(\d+)"[^>]*>Sona by[^<]*<\/text>/)?.[1]);
+		const creditY = Number(svg.match(/<text [^>]*y="(\d+)"[^>]*>Fursona by[^<]*<\/text>/)?.[1]);
 		expect(rows.length).toBeGreaterThan(0);
 		expect(creditY).toBeGreaterThan(0);
 
