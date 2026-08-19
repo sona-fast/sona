@@ -1270,7 +1270,7 @@
 	{:else}
 		<!-- The key field is on this same tab, so the hint can point straight at it
 		     rather than leaving the operator to find it. -->
-		<p class="hint">{m.admin_settings_con_card_locked({ date: conCardGaDate })} <a class="link-inline" href="#supporter-key">{m.admin_settings_con_card_locked_link()}</a>{m.admin_settings_con_card_locked_post()}</p>
+		<p class="hint">{m.admin_settings_con_card_locked({ date: conCardGaDate })}<a class="link-inline" href="#supporter-key">{m.admin_settings_con_card_locked_link()}</a>{m.admin_settings_con_card_locked_post()}</p>
 	{/if}
 </section>
 

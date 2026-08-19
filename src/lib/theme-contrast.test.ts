@@ -593,6 +593,23 @@ describe('SONA-115 con card handle-row hover wash WCAG AA contrast', () => {
 		expect(hoverToken).toBe('foreground');
 	});
 
+	// The resting pair is the one nobody was watching: --muted-foreground on the
+	// bare surface clears AA by 0.03 on terracotta light, so a token nudge could
+	// drop the handle values under it with every hover assertion still green.
+	const restBody = source.match(/^\s*\.handle-value\s*\{([^}]*)\}/m)?.[1];
+	const restToken = restBody?.match(/color:\s*var\(--([\w-]+)\)/)?.[1];
+
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: resting row text meets 4.5:1 on the ${surface}`, () => {
+				if (!restToken) throw new Error('the resting handle value sets no text color token');
+				expect(
+					contrast(blockToken(sel, restToken), blockToken(sel, surface))
+				).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			it(`${name}: hovered row text meets 4.5:1 on the wash over the ${surface}`, () => {
