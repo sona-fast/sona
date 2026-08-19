@@ -125,9 +125,10 @@ export async function provisionTurnstileWidget(
 
 	// 1. List existing widgets a page at a time; reconcile against ours by stable
 	// name. Stop at the first match, at a short page (the last one), or at MAX_PAGES.
-	// The explicit sort keeps the page offsets stable: under the API's default order a
-	// widget deleted mid-walk shifts later widgets back a slot, and ours could slide
-	// from an unread page onto one already read.
+	// The explicit sort pins the ordering for the life of the walk: created_on never
+	// changes, while the API's default order can be recomputed mid-walk and shuffle
+	// widgets across page boundaries. A concurrent delete can still shift a widget
+	// onto an already-read page — that miss just mints a duplicate, per above.
 	let mine: Widget | undefined;
 	for (let page = 1; page <= MAX_PAGES; page++) {
 		const listRes = await api(

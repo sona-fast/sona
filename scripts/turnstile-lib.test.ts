@@ -260,6 +260,12 @@ describe('provisionTurnstileWidget — walks past the first list page', () => {
 		): Promise<CfApiResult> => {
 			const method = init.method ?? 'GET';
 			calls.push({ token, path, method, body: init.body });
+			// Trip fast if the page bound is ever removed: without this, an unbounded
+			// walk only dies by exhausting the heap minutes later, taking the whole
+			// file's results with it and reading as CI flake instead of a lost bound.
+			if (calls.filter((c) => c.method === 'GET').length > 25) {
+				throw new Error('walk exceeded MAX_PAGES — the page bound is gone');
+			}
 			if (method === 'POST') {
 				return { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } };
 			}
