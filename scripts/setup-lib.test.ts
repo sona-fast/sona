@@ -21,10 +21,15 @@ import {
 	imageResizingIsOn,
 	ciWiringEntries,
 	cfApi,
+	cfErrorSummary,
 	securitySummaryLines,
 	pagesPatchConfirmsSitekey,
-	cdnAttachmentLines
+	cdnAttachmentLines,
+	type CfApiResult,
+	type SecuritySummaryInput
 } from './setup-lib.ts';
+import { applyDownloadRateLimit, SCOPE_HINT as WAF_SCOPE_HINT } from './waf-lib.ts';
+import { provisionTurnstileWidget, SCOPE_HINT as TURNSTILE_SCOPE_HINT } from './turnstile-lib.ts';
 
 describe('buildMigrationSql', () => {
 	it('creates schema_migrations and records each file after its body, in order', () => {
@@ -611,47 +616,129 @@ describe('ciWiringEntries ↔ workflow YAML contract', () => {
 });
 
 describe('securitySummaryLines', () => {
-	const turnstileWarning = '  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).';
+	const turnstileWarning = '  • Admin-login bot check: NOT set.';
+
+	const sum = (over: Partial<SecuritySummaryInput>) =>
+		securitySummaryLines({
+			host: 'taro.surf',
+			downloadRateLimit: null,
+			downloadRateLimitDetail: null,
+			turnstileStatus: null,
+			turnstileDetail: null,
+			turnstileWired: false,
+			...over
+		});
+
+	/**
+	 * waf-lib's REAL error detail for the given stubbed API outcomes. The summary
+	 * tests below must exercise wording waf-lib actually emits — a hand-typed
+	 * fixture once asserted against phrasing waf-lib never produced, making the
+	 * "does not blame token scope" test vacuously green.
+	 */
+	async function realRateLimitDetail(routes: Record<string, CfApiResult>): Promise<string> {
+		const res = await applyDownloadRateLimit(
+			'test-token',
+			'taro.surf',
+			async (_token, path, init: { method?: string } = {}) =>
+				routes[`${init.method ?? 'GET'} ${path}`] ?? { ok: false, status: 500 }
+		);
+		expect(res.status).toBe('error');
+		return res.detail;
+	}
 
 	it('prints the Turnstile warning for EVERY rate-limit outcome (regression: a missing brace once nested it inside the applied branch)', () => {
 		for (const rl of [null, 'exists', 'error', 'created', 'updated'] as const) {
-			const lines = securitySummaryLines('taro.surf', rl, null, 'error', true);
+			const lines = sum({ downloadRateLimit: rl, turnstileStatus: 'error', turnstileWired: true });
 			expect(lines, `downloadRateLimit=${rl}`).toContain(turnstileWarning);
 		}
 	});
 
 	it('reports an applied rate limit and a created Turnstile widget together', () => {
-		const lines = securitySummaryLines('taro.surf', 'created', null, 'created', true);
+		const lines = sum({ downloadRateLimit: 'created', turnstileStatus: 'created', turnstileWired: true });
 		expect(lines.join('\n')).toContain('Public-endpoint rate limit: applied to the taro.surf zone');
-		expect(lines.join('\n')).toContain('Admin-login bot check: Turnstile created for taro.surf');
+		expect(lines.join('\n')).toContain('Admin-login bot check: Turnstile created for taro.surf.');
 	});
 
-	it('repeats waf-lib’s failure reason and the retry command for a rate-limit error', () => {
-		const detail = 'token has no access to zone taro.surf: add Zone · WAF · Edit';
-		const text = securitySummaryLines('taro.surf', 'error', detail, null, false).join('\n');
-		expect(text).toContain(detail);
+	it('repeats waf-lib’s failure reason and the retry command for a rate-limit error', async () => {
+		// The real no-zone-access detail: the zone query succeeds but returns [].
+		const detail = await realRateLimitDetail({
+			'GET /zones?name=taro.surf': { ok: true, status: 200, result: [] }
+		});
+		expect(detail).toContain('no access to the taro.surf zone');
+		const text = sum({ downloadRateLimit: 'error', downloadRateLimitDetail: detail }).join('\n');
+		// The reason line carries the real detail and ends in a period.
+		expect(text).toContain(`Reason: ${detail}.`);
+		// The connective line between the reason and the retry command.
+		expect(text).toContain('When that is fixed, run:');
 		expect(text).toContain('npm run apply-download-ratelimit -- taro.surf');
 	});
 
-	it('does not blame token scope for a non-permission rate-limit failure', () => {
-		const detail = 'failed to write the rate-limit rule to taro.surf (HTTP 500)';
-		const text = securitySummaryLines('taro.surf', 'error', detail, null, false).join('\n');
+	it('does not blame token scope for a non-permission rate-limit failure', async () => {
+		// The real write-failure detail: zone resolves, no ruleset yet, PUT 500s.
+		const detail = await realRateLimitDetail({
+			'GET /zones?name=taro.surf': { ok: true, status: 200, result: [{ id: 'z1' }] },
+			'GET /zones/z1/rulesets/phases/http_ratelimit/entrypoint': { ok: false, status: 404 },
+			'PUT /zones/z1/rulesets/phases/http_ratelimit/entrypoint': { ok: false, status: 500 }
+		});
+		// Pin the branch, not just the status: the stub 500s any unmatched route,
+		// so path drift would silently reroute this to the zone query.
+		expect(detail).toContain('failed to write');
+		expect(detail).toContain('HTTP 500');
+		const text = sum({ downloadRateLimit: 'error', downloadRateLimitDetail: detail }).join('\n');
 		expect(text).toContain(detail);
-		expect(text).not.toContain('token lacks Zone · WAF · Edit');
+		expect(text).not.toContain('token needs');
 		expect(text).toContain('npm run apply-download-ratelimit -- taro.surf');
 	});
 
 	it('falls back to a generic failure line when no detail survived', () => {
-		const text = securitySummaryLines('taro.surf', 'error', null, null, false).join('\n');
-		expect(text).toContain('NOT set (provisioning failed)');
-		expect(text).not.toContain('token lacks');
+		const text = sum({ downloadRateLimit: 'error' }).join('\n');
+		expect(text).toContain('Public-endpoint rate limit: NOT set.');
+		expect(text).toContain('Reason: none reported.');
+		expect(text).toContain('When that is fixed, run:');
+		expect(text).not.toContain('token needs');
+	});
+
+	it('repeats turnstile-lib’s real failure reason for a Turnstile error', async () => {
+		// The real no-scope detail: the widget list 403s.
+		const res = await provisionTurnstileWidget(
+			'test-token',
+			'acct1',
+			'taro.surf',
+			async () => ({ ok: false, status: 403 })
+		);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('token needs');
+		const text = sum({ turnstileStatus: 'error', turnstileDetail: res.detail }).join('\n');
+		expect(text).toContain('Admin-login bot check: NOT set.');
+		expect(text).toContain(`Reason: ${res.detail}.`);
+		expect(text).toContain('When that is fixed, re-run setup to protect /admin/login.');
+	});
+
+	it('does not blame token scope for a non-permission Turnstile failure', async () => {
+		// The real transient detail: the widget list 500s.
+		const res = await provisionTurnstileWidget(
+			'test-token',
+			'acct1',
+			'taro.surf',
+			async () => ({ ok: false, status: 500 })
+		);
+		expect(res.status).toBe('error');
+		const text = sum({ turnstileStatus: 'error', turnstileDetail: res.detail }).join('\n');
+		expect(text).toContain(`Reason: ${res.detail}.`);
+		expect(text).not.toContain('token needs');
+	});
+
+	it('falls back to a generic Turnstile failure line when no detail survived', () => {
+		const text = sum({ turnstileStatus: 'error' }).join('\n');
+		expect(text).toContain('Admin-login bot check: NOT set.');
+		expect(text).toContain('Reason: none reported.');
 	});
 
 	it('reports NO bot check when the widget provisioned but the wiring failed', () => {
 		// The login check fails open without the sitekey var + secret, so a
 		// provisioned widget with failed wiring must never read as enforced.
 		for (const status of ['created', 'exists'] as const) {
-			const text = securitySummaryLines('taro.surf', 'exists', null, status, false).join('\n');
+			const text = sum({ downloadRateLimit: 'exists', turnstileStatus: status }).join('\n');
 			expect(text).toContain('NOT confirm the TURNSTILE_SITEKEY');
 			expect(text).toContain('/admin/login has NO bot check');
 			// Honest on re-runs: the claim is scoped to this run / first runs.
@@ -662,28 +749,25 @@ describe('securitySummaryLines', () => {
 	});
 
 	it('never prints the enforced claim unless the wiring landed', () => {
-		const wired = securitySummaryLines('taro.surf', null, null, 'created', true).join('\n');
+		const wired = sum({ turnstileStatus: 'created', turnstileWired: true }).join('\n');
 		expect(wired).toContain('enforced once deployed');
-		const unwired = securitySummaryLines('taro.surf', null, null, 'created', false).join('\n');
+		const unwired = sum({ turnstileStatus: 'created' }).join('\n');
 		expect(unwired).not.toContain('enforced once deployed');
 	});
 
 	it('names the RESOLVED parent zone in the applied line for a subdomain host', () => {
-		const text = securitySummaryLines(
-			'sona.taro.surf',
-			'created',
-			null,
-			null,
-			false,
-			'taro.surf'
-		).join('\n');
+		const text = sum({
+			host: 'sona.taro.surf',
+			downloadRateLimit: 'created',
+			zoneName: 'taro.surf'
+		}).join('\n');
 		expect(text).toContain('applied to the taro.surf zone');
 		expect(text).not.toContain('applied to the sona.taro.surf zone');
 	});
 
 	it('stays silent about pre-existing rate limits and unattempted Turnstile', () => {
-		expect(securitySummaryLines('taro.surf', 'exists', null, null, false)).toEqual([]);
-		expect(securitySummaryLines('taro.surf', null, null, null, false)).toEqual([]);
+		expect(sum({ downloadRateLimit: 'exists' })).toEqual([]);
+		expect(sum({})).toEqual([]);
 	});
 });
 
@@ -695,13 +779,138 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 	// helper exists to prevent.
 	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 
+	// The whole securitySummaryLines({...}) call, so property assertions below
+	// can't accidentally match unrelated code elsewhere in setup.ts.
+	const summaryCall = src.match(/securitySummaryLines\(\{[\s\S]*?\}\)/)?.[0] ?? '';
+
 	it('passes pagesConfigOk && turnstileSecretSet, not a literal', () => {
-		expect(src).toMatch(/securitySummaryLines\(/);
-		expect(src).toMatch(/pagesConfigOk && turnstileSecretSet/);
+		expect(summaryCall).toMatch(/turnstileWired:\s*pagesConfigOk && turnstileSecretSet/);
 	});
 
 	it('passes the resolved zone name so subdomain summaries name the real zone', () => {
-		expect(src).toMatch(/pagesConfigOk && turnstileSecretSet,\s*\n?\s*resolvedZoneName/);
+		expect(summaryCall).toMatch(/zoneName:\s*resolvedZoneName/);
+	});
+
+	it('assigns each detail from the provisioning result, not a literal', () => {
+		expect(src).toMatch(/downloadRateLimitDetail\s*=\s*rateLimit\.detail/);
+		expect(src).toMatch(/turnstileDetail\s*=\s*ts\.detail/);
+	});
+
+	// Shorthand properties are the variables themselves — a hardcoded
+	// `host: 'x'` or `turnstileStatus: null` (the SONA-189 bug shape) breaks
+	// the trailing-comma match.
+	it.each(['host', 'downloadRateLimit', 'downloadRateLimitDetail', 'turnstileStatus', 'turnstileDetail'])(
+		'%s is passed as call-site shorthand',
+		(prop) => {
+			expect(summaryCall).toMatch(new RegExp(`\\b${prop},`));
+		}
+	);
+
+	it('both zone-lookup warn sites repeat the API reason via cfErrorSummary', () => {
+		// main()s are not importable, so pin the wiring at source level: the
+		// resolveZone consumers must thread the errors body into cfErrorSummary.
+		expect(src).toContain('cfErrorSummary(zoneLookupErrors)');
+		const connectSrc = readFileSync(
+			join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
+			'utf8'
+		);
+		expect(connectSrc).toContain('cfErrorSummary(errors)');
+	});
+
+	it('setup’s zone-lookup warn attributes the API reason, not a bare parenthetical', () => {
+		// Three sites print '; the API said …' (this warn, connect-domains' error
+		// line, and cfFailureTail); pin this inline copy against drift.
+		expect(src).toContain('; the API said ${apiWhy}');
+		expect(src).not.toContain('(${apiWhy})');
+	});
+
+	it('never stringifies a raw cfApi errors body into the console', () => {
+		// The Pages-binding and connect-domains warns once printed
+		// JSON.stringify(res.errors), which can echo account/project identifiers —
+		// both must go through cfErrorSummary.
+		const connectSrc = readFileSync(
+			join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
+			'utf8'
+		);
+		for (const source of [src, connectSrc]) {
+			expect(source).not.toMatch(/JSON\.stringify\(res\.errors/);
+			expect(source).toMatch(/cfErrorSummary\(res\.errors\)/);
+			// The empty-why case must not leave a trailing space after the status —
+			// pin the exact spacing ternary (a plain `) ${why}` mutant survives tests).
+			expect(source).toContain("${why ? ` ${why}` : ''}");
+		}
+	});
+
+	it('no middot scope names remain anywhere an operator sees one', () => {
+		// The arrow form (Account → Turnstile: Edit) is the ruling; this guard
+		// fails on any middot (·) scope name reintroduced in an operator-facing
+		// surface. Code comments are out of scope; connect-domains-lib's '·'
+		// skip-glyph is the one allowed code occurrence.
+		const here = dirname(fileURLToPath(import.meta.url));
+
+		// The resolved constants themselves, not just their use sites.
+		expect(WAF_SCOPE_HINT).not.toContain('·');
+		expect(TURNSTILE_SCOPE_HINT).not.toContain('·');
+
+		// The recipes' positive pins, and apply-download-ratelimit's negative one
+		// (its file is not in the whole-file scan below, which subsumes the rest).
+		const recipeOf = (file: string) => {
+			const source = readFileSync(join(here, file), 'utf8');
+			const recipe = source.match(/const TOKEN_RECIPE =[\s\S]*?';/)?.[0] ?? '';
+			expect(recipe, `${file} TOKEN_RECIPE found`).not.toBe('');
+			return recipe;
+		};
+		expect(recipeOf('apply-download-ratelimit.ts')).not.toContain('·');
+		expect(recipeOf('setup.ts')).toContain('Zone → Zone: Read');
+		expect(recipeOf('setup.ts')).toContain('needed later to attach the apex record');
+
+		// Whole-file scan of the CLIs' non-comment code (printed strings live
+		// there): drop full-line and trailing // comments (a URL's :// never
+		// matches — the strip needs whitespace or line start before //), minus
+		// the one legal skip-glyph.
+		for (const file of ['setup.ts', 'connect-domains.ts', 'connect-domains-lib.ts']) {
+			const code = readFileSync(join(here, file), 'utf8')
+				.split('\n')
+				.filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+				.map((l) => l.replace(/(^|\s)\/\/.*$/, ''))
+				.filter((l) => !l.includes("skip: '·'"))
+				.join('\n');
+			expect(code, `${file} non-comment code`).not.toContain('·');
+		}
+
+		// The two connect-domains console strings hold the arrow form (positive
+		// pins so a wording rewrite can't silently drop the scope name).
+		const connectSource = readFileSync(join(here, 'connect-domains.ts'), 'utf8');
+		expect(connectSource).toContain(
+			"Image Transformations: couldn't verify (token lacks Zone → Zone Settings: Read)."
+		);
+		expect(connectSource).toContain(
+			"Image Transformations: couldn't verify (token lacks Zone → Zone Settings: Read) — enable it in the dashboard."
+		);
+
+		// README and UPDATING.md: every line outside code fences.
+		for (const doc of ['README.md', 'UPDATING.md']) {
+			const text = readFileSync(join(here, '..', doc), 'utf8');
+			let inFence = false;
+			const prose = text
+				.split('\n')
+				.filter((l) => {
+					if (/^\s*```/.test(l)) {
+						inFence = !inFence;
+						return false;
+					}
+					return !inFence;
+				})
+				.join('\n');
+			// Positive canaries so an empty or mis-parsed doc can't pass vacuously.
+			if (doc === 'README.md') expect(prose).toContain('| Scope | Why |');
+			if (doc === 'UPDATING.md') expect(prose).toContain('Zone → WAF: Edit');
+			expect(prose, `${doc} prose`).not.toContain('·');
+		}
+	});
+
+	it('the token recipe names Turnstile’s scope via the shared constant', () => {
+		expect(src).toMatch(/\$\{TURNSTILE_SCOPE_HINT\}/);
 	});
 
 	it('assigns pagesConfigOk from the Pages PATCH result, read-back confirmed', () => {
@@ -711,6 +920,126 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 
 	it('putSecret reports failure instead of swallowing it', () => {
 		expect(src).toMatch(/catch\s*\{\s*\n?\s*return false/);
+	});
+});
+
+describe('cfErrorSummary', () => {
+	it('prints each error as code: message, joined', () => {
+		expect(
+			cfErrorSummary([
+				{ code: 8000000, message: 'An unknown error occurred' },
+				{ code: 10000, message: 'Authentication error' }
+			])
+		).toBe('8000000: An unknown error occurred; 10000: Authentication error');
+	});
+
+	it('redacts everything but code + message (no stringified bodies)', () => {
+		const summary = cfErrorSummary([
+			{ code: 10000, message: 'Authentication error', detail: { account_id: 'acct-id-must-not-leak' } }
+		]);
+		expect(summary).toBe('10000: Authentication error');
+		expect(summary).not.toContain('acct-id-must-not-leak');
+	});
+
+	it('handles messages without a numeric code', () => {
+		expect(cfErrorSummary([{ message: 'plain message' }])).toBe('plain message');
+	});
+
+	it('yields empty for undefined, non-arrays, and junk entries', () => {
+		expect(cfErrorSummary(undefined)).toBe('');
+		expect(cfErrorSummary('a string body')).toBe('');
+		expect(cfErrorSummary({ message: 'not an array' })).toBe('');
+		expect(cfErrorSummary([null, 'junk', {}])).toBe('');
+	});
+
+	it('drops code-only and empty-message entries (no dangling "10000: ")', () => {
+		expect(cfErrorSummary([{ code: 10000 }])).toBe('');
+		expect(cfErrorSummary([{ code: 10000, message: '' }])).toBe('');
+		expect(cfErrorSummary([{ code: 10000 }, { code: 7003, message: 'kept' }])).toBe('7003: kept');
+	});
+
+	it('collapses whitespace so a multi-line message stays one printable line', () => {
+		expect(cfErrorSummary([{ code: 7003, message: 'line one\n\t line two' }])).toBe(
+			'7003: line one line two'
+		);
+	});
+
+	it('caps an over-long message so pasteable output stays readable', () => {
+		const long = 'x'.repeat(500);
+		const summary = cfErrorSummary([{ code: 7003, message: long }]);
+		expect(summary.length).toBeLessThan(230);
+		expect(summary).toContain('7003: ');
+		expect(summary.endsWith('…')).toBe(true);
+	});
+
+	it('scrubs path-shaped object ids out of the message (code 7003 echoes them)', () => {
+		const zoneId = 'a'.repeat(32);
+		const summary = cfErrorSummary([
+			{
+				code: 7003,
+				message: `Could not route to /zones/${zoneId}/rulesets/phases/http_ratelimit/entrypoint, perhaps your object identifier is invalid?`
+			}
+		]);
+		expect(summary).not.toContain(zoneId);
+		expect(summary).toContain('/zones/<id>/rulesets');
+		expect(summary).toContain('7003: Could not route');
+	});
+
+	it('scrubs ANY 32-hex path segment: uppercase, nested, and boundary-punctuated', () => {
+		const upper = 'ABCDEF0123456789ABCDEF0123456789';
+		const zid = 'b'.repeat(32);
+		const rid = 'c'.repeat(32);
+		const ruleId = 'd'.repeat(32);
+		const summary = cfErrorSummary([
+			{ code: 1, message: `bad account /accounts/${upper}.` },
+			{ code: 2, message: `no rule at /zones/${zid}/rulesets/${rid}/rules/${ruleId}, sorry` }
+		]);
+		for (const id of [upper, zid, rid, ruleId]) expect(summary).not.toContain(id);
+		// Ids straddling '.', ',', '/', and end-of-string all scrub.
+		expect(summary).toContain('1: bad account /accounts/<id>.');
+		expect(summary).toContain('2: no rule at /zones/<id>/rulesets/<id>/rules/<id>, sorry');
+	});
+
+	it('strips control/format chars (ANSI escapes) before printing', () => {
+		const summary = cfErrorSummary([{ code: 7003, message: '\u001b[31mred\u001b[0m\u200b alert' }]);
+		expect(summary).not.toContain('\u001b');
+		expect(summary).not.toContain('\u200b');
+		expect(summary).toContain('alert');
+	});
+
+	it('caps by code point so an emoji at the boundary is never split', () => {
+		// 199 chars + two emoji = 201 code points: over the 200 cap by one.
+		const summary = cfErrorSummary([{ code: 7003, message: 'x'.repeat(199) + '🎉🎉' }]);
+		expect(summary.endsWith('…')).toBe(true);
+		expect(summary).not.toContain('�');
+		// The kept 200 points end with the first emoji, whole.
+		expect(Array.from(summary).length).toBe(Array.from('7003: ').length + 201);
+		expect(summary).toContain('🎉');
+	});
+
+	it('caps the JOINED summary so many errors cannot yield a multi-KB line', () => {
+		const many = Array.from({ length: 10 }, (_, i) => ({ code: 1000 + i, message: 'y'.repeat(50) }));
+		const summary = cfErrorSummary(many);
+		expect(Array.from(summary).length).toBeLessThanOrEqual(301);
+		expect(summary.endsWith('…')).toBe(true);
+		expect(summary).toContain('1000: ');
+	});
+
+	it('the joined cap also counts code points (emoji at the join boundary stays whole)', () => {
+		// Two entries land the join at exactly 299 points (each under the
+		// per-message cap), so the third entry's emoji straddle the 300
+		// boundary: the cap must drop or keep each one whole.
+		const summary = cfErrorSummary([
+			{ code: 1000, message: 'y'.repeat(141) }, // line: 147 points
+			{ code: 1001, message: 'y'.repeat(142) }, // +2 +148 = 297, +2 = 299
+			{ message: '🎉🎉🎉' } // 300..302 — over the cap mid-emoji-run
+		]);
+		// The kept 300th point is the first emoji, whole — a UTF-16 slice would
+		// cut it into a lone surrogate and fail both of these.
+		expect(summary.endsWith('🎉…')).toBe(true);
+		expect(summary.isWellFormed()).toBe(true);
+		expect(summary).not.toContain('\uFFFD');
+		expect(Array.from(summary).length).toBe(301);
 	});
 });
 

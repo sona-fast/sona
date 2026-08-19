@@ -12,7 +12,14 @@
  * The Cloudflare token is passed in, used only as a Bearer header by `cfApi`, and
  * never logged or returned in any result.
  */
-import { cfApi, hostFromDomain, zoneNameCandidates, type CfApiResult } from './setup-lib.ts';
+import {
+	cfApi,
+	cfFailureTail,
+	hostFromDomain,
+	statusLabel,
+	zoneNameCandidates,
+	type CfApiResult
+} from './setup-lib.ts';
 import { resolveZone } from './connect-domains-lib.ts';
 
 /**
@@ -125,8 +132,25 @@ export interface RateLimitResult {
 	detail: string;
 }
 
-/** The token permission a fork operator must add, quoted verbatim in errors. */
-const SCOPE_HINT = 'Zone → WAF: Edit (plus a Zone resource covering the domain)';
+/** The token permission a fork operator must add, quoted verbatim in errors —
+ * exported so the notation drift guard can check the resolved string. */
+export const SCOPE_HINT = 'Zone → WAF: Edit (plus a Zone resource covering the domain)';
+
+/** setup-lib's shared cfFailureTail, bound to this lib's scope hint. */
+function failureTail(status: number, errors?: unknown): string {
+	return cfFailureTail(status, errors, SCOPE_HINT);
+}
+
+/**
+ * True when an error `detail` names a token-permission failure. Every branch
+ * that blames permissions interpolates SCOPE_HINT verbatim (via failureTail's
+ * 401/403 arm or the no-zone-access detail) and no other branch mentions it,
+ * so the standalone runner can decide whether the token recipe is relevant
+ * without RateLimitResult carrying an HTTP status.
+ */
+export function isPermissionError(detail: string): boolean {
+	return detail.includes(SCOPE_HINT);
+}
 
 /**
  * Idempotently apply the public-endpoint rate-limit rule to `domain`'s zone.
@@ -164,13 +188,14 @@ export async function applyDownloadRateLimit(
 	// caller already resolved the zone (the setup CLI's preflight just did).
 	let zoneId = knownZoneId;
 	if (!zoneId) {
-		const { zone, errorStatus, failedName } = await resolveZone(zoneNameCandidates(host), (name) =>
-			api(cfToken, `/zones?name=${encodeURIComponent(name)}`)
+		const { zone, errorStatus, errors, failedName } = await resolveZone(
+			zoneNameCandidates(host),
+			(name) => api(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 		);
 		if (errorStatus !== null) {
 			return {
 				status: 'error',
-				detail: `could not query zones for ${failedName ?? host} (HTTP ${errorStatus}); token needs ${SCOPE_HINT}`
+				detail: `could not query zones for ${failedName ?? host}${statusLabel(errorStatus)}${failureTail(errorStatus, errors)}`
 			};
 		}
 		zoneId = zone.id;
@@ -178,7 +203,7 @@ export async function applyDownloadRateLimit(
 	if (!zoneId) {
 		return {
 			status: 'error',
-			detail: `token has no access to zone ${host}: add ${SCOPE_HINT}`
+			detail: `the token has no access to the ${host} zone; add ${SCOPE_HINT}`
 		};
 	}
 
@@ -194,7 +219,7 @@ export async function applyDownloadRateLimit(
 		// 401/403 (no WAF scope) or a transient error — do NOT mutate.
 		return {
 			status: 'error',
-			detail: `could not read the rate-limit ruleset for ${host} (HTTP ${entry.status}); token needs ${SCOPE_HINT}`
+			detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}${failureTail(entry.status, entry.errors)}`
 		};
 	}
 
@@ -229,9 +254,12 @@ export async function applyDownloadRateLimit(
 	})();
 
 	if (!write.ok) {
+		// A 401/403 here is real even after the reads passed: WAF Read and WAF
+		// Edit are separate permission groups, so a Read-only token 403s exactly
+		// on this write. Any other status gets no scope advice.
 		return {
 			status: 'error',
-			detail: `failed to write the rate-limit rule to ${host} (HTTP ${write.status}); token needs ${SCOPE_HINT}`
+			detail: `failed to write the rate-limit rule to ${host}${statusLabel(write.status)}${failureTail(write.status, write.errors)}`
 		};
 	}
 	return mine

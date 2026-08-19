@@ -73,11 +73,13 @@ export function classifyZone(result: unknown): ZoneStatus {
  */
 export async function resolveZone(
 	candidates: string[],
-	lookup: (name: string) => Promise<{ ok: boolean; status: number; result?: unknown }>
+	lookup: (name: string) => Promise<{ ok: boolean; status: number; result?: unknown; errors?: unknown }>
 ): Promise<{
 	zone: ZoneStatus;
 	zoneName: string | null;
 	errorStatus: number | null;
+	/** The failed lookup's parsed `errors` body, for the caller's error detail. */
+	errors: unknown;
 	/** The candidate whose lookup failed — error messages must name IT, not the host. */
 	failedName: string | null;
 }> {
@@ -88,12 +90,20 @@ export async function resolveZone(
 				zone: { exists: false, active: false },
 				zoneName: null,
 				errorStatus: res.status,
+				errors: res.errors,
 				failedName: name
 			};
 		const zone = classifyZone(res.result);
-		if (zone.exists) return { zone, zoneName: name, errorStatus: null, failedName: null };
+		if (zone.exists)
+			return { zone, zoneName: name, errorStatus: null, errors: undefined, failedName: null };
 	}
-	return { zone: { exists: false, active: false }, zoneName: null, errorStatus: null, failedName: null };
+	return {
+		zone: { exists: false, active: false },
+		zoneName: null,
+		errorStatus: null,
+		errors: undefined,
+		failedName: null
+	};
 }
 
 /**
@@ -361,7 +371,7 @@ export function buildLadder(i: LadderInputs): Rung[] {
 		i.cdnState === 'attached' ? 'pass' : i.cdnState === 'absent' ? 'fail' : 'warn';
 	const cdnAction =
 		i.cdnState === 'unknown'
-			? `Couldn't verify — the token lacks Account · Workers R2 Storage · Read (or a transient API error). Check the bucket's Custom Domains in the dashboard.`
+			? `Couldn't verify — the token lacks Account → Workers R2 Storage: Read (or a transient API error). Check the bucket's Custom Domains in the dashboard.`
 			: i.cdnState === 'disabled'
 				? `${cdn} is attached but DISABLED — re-enable it in dashboard → R2 → your images bucket → Settings → Custom Domains.`
 				: `Run \`npm run connect-domains\` (no --check) to attach ${cdn} to the images bucket.`;
@@ -380,7 +390,7 @@ export function buildLadder(i: LadderInputs): Rung[] {
 		`Image Transformations are enabled on the ${zoneName} zone`,
 		i.imageTransforms === true ? 'pass' : 'warn',
 		i.imageTransforms === null
-			? `Couldn't verify Image Transformations (token lacks Zone Settings·Read); check dashboard → ${zoneName} → Images → Transformations.`
+			? `Couldn't verify Image Transformations (token lacks Zone → Zone Settings: Read); check dashboard → ${zoneName} → Images → Transformations.`
 			: `Enable it: dashboard → ${zoneName} → Images → Transformations → "Enable for zone". Until on, thumbnails serve the full-size original or 404.`
 	);
 

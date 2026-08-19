@@ -159,6 +159,14 @@ describe('connect-domains.ts ↔ candidate-walk source contract', () => {
 		expect(src).toMatch(/resolveZone\(\s*candidates/);
 	});
 
+	it('attributes the API reason on the zone-lookup error line', () => {
+		// Three sites print '; the API said …' (this one, setup.ts's warn, and
+		// cfFailureTail); pin this inline copy so the wording cannot drift back
+		// to a bare parenthetical.
+		expect(src).toContain('; the API said ${apiWhy}');
+		expect(src).not.toContain('(${apiWhy})');
+	});
+
 	it('passes the candidates to zoneGuidance', () => {
 		expect(src).toMatch(/zoneGuidance\(\s*zone,\s*host,\s*candidates,\s*zoneName\s*\)/);
 	});

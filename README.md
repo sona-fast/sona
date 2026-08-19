@@ -84,16 +84,16 @@ original deployment it grew out of). The project home is
 
    | Scope | Why |
    |-------|-----|
-   | Account · Cloudflare Pages · Edit | create/deploy the Pages project |
-   | Account · D1 · Edit | create + migrate the database |
-   | Account · Workers R2 Storage · Edit | create the image bucket |
-   | Account · Turnstile · Edit | **only if** attaching a custom domain — provisions the admin-login bot check |
-   | Zone · Zone · Read | **only if** attaching a custom domain — lets connect-domains resolve the zone |
-   | Zone · DNS · Edit | **only if** attaching a custom domain (writes the apex record) |
-   | Zone · WAF · Edit | **only if** attaching a custom domain — adds a WAF rate limit on the public API endpoints (the download beacon and the oEmbed provider) |
-   | Zone · Zone Settings · Edit | *optional* — lets setup enable image resizing for you |
+   | Account → Cloudflare Pages: Edit | create/deploy the Pages project |
+   | Account → D1: Edit | create + migrate the database |
+   | Account → Workers R2 Storage: Edit | create the image bucket |
+   | Account → Turnstile: Edit | **only if** attaching a custom domain — provisions the admin-login bot check |
+   | Zone → Zone: Read | **only if** attaching a custom domain — resolves the zone for setup's DNS preflight and for connect-domains |
+   | Zone → DNS: Edit | **only if** attaching a custom domain (writes the apex record) |
+   | Zone → WAF: Edit | **only if** attaching a custom domain — adds a WAF rate limit on the public API endpoints (the download beacon and the oEmbed provider) |
+   | Zone → Zone Settings: Edit | *optional* — lets setup enable image resizing for you |
 
-   Without **DNS · Edit**, registering the Pages apex domain succeeds but the DNS
+   Without **Zone → DNS: Edit**, registering the Pages apex domain succeeds but the DNS
    write fails, leaving the domain stuck `pending` with a confusing 522.
 4. **Finish in the first-run wizard.** Open `/admin/setup`, enter your
    `SETUP_TOKEN`, and set your admin password + site name, owner/persona name,
@@ -147,7 +147,7 @@ npm run connect-domains -- --check yourdomain.com    # read-only doctor: which s
 
 `connect-domains` attaches the CDN host (`cdn.yourdomain.com`) to the images
 bucket and the site domain to the Pages project. **Images 404 until the CDN
-host is attached.** With *Zone · Zone Settings · Edit* on the token it also
+host is attached.** With *Zone → Zone Settings: Edit* on the token it also
 enables Image Transformations. It adds no other DNS records, and it's safe to
 re-run. Its token scopes are all in the **API token scopes** table in step 3.
 If your site lives on a subdomain (like
@@ -170,7 +170,7 @@ them where they can, but finishing either may need dashboard or DNS access:
   origin"** so it can pull from the R2 CDN host. Free tier: **5,000
   transformations/month**. Until it's on, gallery thumbnails serve the full-size
   original (slow) or fail. The deploy token can't enable this unless it carries
-  *Zone · Zone Settings · Edit*.
+  *Zone → Zone Settings: Edit*.
 
 ### Local development
 

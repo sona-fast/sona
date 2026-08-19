@@ -464,7 +464,11 @@ describe('buildLadder + firstFailingRung', () => {
 		expect(firstFailingRung(off)).toBeUndefined();
 
 		const unknown = buildLadder({ ...healthy, imageTransforms: null });
-		expect(unknown.find((r) => r.id === 'image-transforms')?.status).toBe('warn');
+		const unknownRung = unknown.find((r) => r.id === 'image-transforms');
+		expect(unknownRung?.status).toBe('warn');
+		// The remedy names the missing scope in the arrow form the other
+		// operator-facing strings use (the notation drift guard's positive arm).
+		expect(unknownRung?.action).toContain('Zone → Zone Settings: Read');
 	});
 });
 

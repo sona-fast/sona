@@ -95,7 +95,7 @@ CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- <domain>
 ```
 
 `<domain>` is your site domain (e.g. `akito.dog`). The token needs one permission,
-**Zone · WAF · Edit**, on a token whose Zone Resources include that domain; it is
+**Zone → WAF: Edit**, on a token whose Zone Resources include that domain; it is
 read from the environment and never printed. The command is idempotent — the first
 run reports `updated`, any re-run reports `exists` — so it is safe to repeat if
 you're unsure whether it already ran.

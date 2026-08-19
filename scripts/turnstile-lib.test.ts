@@ -41,6 +41,8 @@ function fakeApi(routes: Record<string, CfApiResult>) {
 const listPath = `GET /accounts/${ACCT}/challenges/widgets?per_page=50`;
 const createPath = `POST /accounts/${ACCT}/challenges/widgets`;
 const getPath = `GET /accounts/${ACCT}/challenges/widgets/${SITEKEY}`;
+// This fork's own widget, exactly as the list returns it.
+const ourWidget = { name: WIDGET_NAME, sitekey: SITEKEY, domains: ['akito.dog'] };
 
 describe('buildCreateBody', () => {
 	it('encodes the stable name, the domain, and managed mode', () => {
@@ -94,7 +96,7 @@ describe('provisionTurnstileWidget — reuses when present (idempotent)', () => 
 			[listPath]: {
 				ok: true,
 				status: 200,
-				result: [{ name: WIDGET_NAME, sitekey: SITEKEY, domains: ['akito.dog'] }]
+				result: [ourWidget]
 			},
 			[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
 		});
@@ -138,10 +140,7 @@ describe('provisionTurnstileWidget — reuses when present (idempotent)', () => 
 			[listPath]: {
 				ok: true,
 				status: 200,
-				result: [
-					{ name: WIDGET_NAME, sitekey: 'sparky-key', domains: ['sparky.ink'] },
-					{ name: WIDGET_NAME, sitekey: SITEKEY, domains: ['akito.dog'] }
-				]
+				result: [{ name: WIDGET_NAME, sitekey: 'sparky-key', domains: ['sparky.ink'] }, ourWidget]
 			},
 			[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
 		});
@@ -170,7 +169,7 @@ describe('provisionTurnstileWidget — reuses when present (idempotent)', () => 
 			[listPath]: {
 				ok: true,
 				status: 200,
-				result: [{ name: WIDGET_NAME, sitekey: SITEKEY, domains: ['akito.dog'] }]
+				result: [ourWidget]
 			},
 			// GET succeeds but returns no secret (e.g. a partial/blank body).
 			[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY } }
@@ -179,6 +178,11 @@ describe('provisionTurnstileWidget — reuses when present (idempotent)', () => 
 		expect(res.status).toBe('error');
 		expect(res.secret).toBeUndefined();
 		expect(res.detail).toContain('could not read its secret');
+		// The GET was a 200 — a blank body is not a token-scope FAILURE, but the
+		// one actionable lead is still the token's read-vs-edit scope.
+		expect(res.detail).not.toContain('token needs');
+		expect(res.detail).toContain('the widget came back without one');
+		expect(res.detail).toContain('check that the token has');
 		expect(calls.some((c) => c.method === 'POST')).toBe(false);
 	});
 });
@@ -190,13 +194,53 @@ describe('provisionTurnstileWidget — clear errors, no mutation', () => {
 		});
 		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
 		expect(res.status).toBe('error');
+		expect(res.detail).toContain('token needs');
 		expect(res.detail).toContain('Turnstile: Edit');
 		// Only the list GET happened — never proceeded to create.
 		expect(calls).toHaveLength(1);
 		expect(calls[0].method).toBe('GET');
 	});
 
-	it('create call fails → scoped error, sitekey/secret absent', async () => {
+	it('a 401 list names the scope too — both permission statuses hint', async () => {
+		const { api } = fakeApi({
+			[listPath]: { ok: false, status: 401 }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('HTTP 401');
+		expect(res.detail).toContain('token needs');
+		expect(res.detail).toContain('Turnstile: Edit');
+	});
+
+	it('a 403 secret read names the scope, and no create fires', async () => {
+		const { api, calls } = fakeApi({
+			[listPath]: {
+				ok: true,
+				status: 200,
+				result: [ourWidget]
+			},
+			[getPath]: { ok: false, status: 403 }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('could not read its secret');
+		expect(res.detail).toContain('token needs');
+		expect(calls.some((c) => c.method === 'POST')).toBe(false);
+	});
+
+	// New contract: a 500 stays bare only when the body carried no usable
+	// errors (this fixture has none); with errors the reason is appended.
+	it('a transient list failure (500, no errors body) reports the status without blaming token scope', async () => {
+		const { api } = fakeApi({
+			[listPath]: { ok: false, status: 500 }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('HTTP 500');
+		expect(res.detail).not.toContain('token needs');
+	});
+
+	it('create call fails with 403 → scoped error, sitekey/secret absent', async () => {
 		const { api } = fakeApi({
 			[listPath]: { ok: true, status: 200, result: [] },
 			[createPath]: { ok: false, status: 403 }
@@ -204,17 +248,98 @@ describe('provisionTurnstileWidget — clear errors, no mutation', () => {
 		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
 		expect(res.status).toBe('error');
 		expect(res.detail).toContain('failed to create');
+		expect(res.detail).toContain('token needs');
 		expect(res.sitekey).toBeUndefined();
 		expect(res.secret).toBeUndefined();
 	});
 
-	it('create returns ok but a body with no sitekey/secret → error', async () => {
+	it('create returns ok but a body with no sitekey/secret → error, no scope blame', async () => {
 		const { api } = fakeApi({
 			[listPath]: { ok: true, status: 200, result: [] },
 			[createPath]: { ok: true, status: 200, result: {} }
 		});
 		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
 		expect(res.status).toBe('error');
+		// The ok create just proved the token's scope, so no scope advice — and
+		// no claim about whether the widget exists, because we can't know.
+		expect(res.detail).not.toContain('token needs');
+		expect(res.detail).not.toContain('confirm the token');
+		expect(res.detail).toContain(
+			'the response carried no sitekey/secret, so the widget may exist but setup could not read its keys'
+		);
+	});
+
+	// cfApi maps a 2xx whose body says success:false to ok=false — a bare
+	// '(HTTP 200)' would be nonsense, so the detail carries the error summary.
+	it('a 200 list whose body says success:false repeats the API’s own reason', async () => {
+		const { api } = fakeApi({
+			[listPath]: {
+				ok: false,
+				status: 200,
+				errors: [{ code: 1001, message: 'account is on hold' }]
+			}
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('HTTP 200');
+		expect(res.detail).toContain('the API reported failure (1001: account is on hold)');
+		expect(res.detail).not.toContain('token needs');
+	});
+
+	it('a 200 secret read whose body says success:false repeats the reason too', async () => {
+		const { api } = fakeApi({
+			[listPath]: { ok: true, status: 200, result: [ourWidget] },
+			[getPath]: { ok: false, status: 200, errors: [{ code: 1002, message: 'widget is locked' }] }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('could not read its secret');
+		expect(res.detail).toContain('the API reported failure (1002: widget is locked)');
+		expect(res.detail).not.toContain('token needs');
+	});
+
+	it('a 200 create whose body says success:false repeats the reason too', async () => {
+		const { api } = fakeApi({
+			[listPath]: { ok: true, status: 200, result: [] },
+			[createPath]: { ok: false, status: 200, errors: [{ code: 1003, message: 'quota exceeded' }] }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('failed to create');
+		expect(res.detail).toContain('the API reported failure (1003: quota exceeded)');
+		expect(res.detail).not.toContain('token needs');
+	});
+
+	it('a 201 whose body says success:false is treated the same as a 200', async () => {
+		const { api } = fakeApi({
+			[listPath]: { ok: false, status: 201, errors: [{ code: 1004, message: 'odd but possible' }] }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('the API reported failure (1004: odd but possible)');
+		expect(res.detail).not.toContain('token needs');
+	});
+
+	it('a thrown fetch (status 0) says the API was never reached', async () => {
+		const { api } = fakeApi({
+			[listPath]: { ok: false, status: 0 }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('the Cloudflare API did not respond');
+		// The tail already says it; a bare '(HTTP 0)' would be noise.
+		expect(res.detail).not.toContain('HTTP 0');
+		expect(res.detail).not.toContain('token needs');
+		expect(res.detail).not.toContain('reported failure');
+	});
+
+	it('a success:false body with no errors says so instead of trailing nothing', async () => {
+		const { api } = fakeApi({
+			[listPath]: { ok: false, status: 200 }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('the API reported failure with no reason given');
 	});
 
 	it('empty domain → error before any network call', async () => {
@@ -252,7 +377,7 @@ describe('provisionTurnstileWidget — never leaks the token or the widget secre
 				[listPath]: {
 					ok: true,
 					status: 200,
-					result: [{ name: WIDGET_NAME, sitekey: SITEKEY, domains: ['akito.dog'] }]
+					result: [ourWidget]
 				},
 				[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
 			}
@@ -264,5 +389,85 @@ describe('provisionTurnstileWidget — never leaks the token or the widget secre
 			// The secret is still returned for wiring — just never in the printable detail.
 			expect(res.secret).toBe(WIDGET_SECRET);
 		}
+	});
+
+	it('no error detail carries a non-allowlisted error field, the secret, or the sitekey', async () => {
+		// The allowlisted code+message IS repeated in error details now (that is
+		// the honest contract); everything else in the body must never be.
+		const ALLOWLISTED_MESSAGE = 'cf-error-message-expected-in-detail';
+		const NON_ALLOWLISTED_MARKER = 'cf-error-extra-field-must-not-leak';
+		const apiErrors = [
+			{ code: 10000, message: ALLOWLISTED_MESSAGE, detail_url: NON_ALLOWLISTED_MARKER }
+		];
+		// `carriesReason` = the failing route returned an errors body, so the
+		// detail must repeat its code+message.
+		const scenarios: { routes: Record<string, CfApiResult>; carriesReason?: boolean }[] = [
+			// list: scope failure / transient failure
+			{ routes: { [listPath]: { ok: false, status: 403, errors: apiErrors } }, carriesReason: true },
+			{ routes: { [listPath]: { ok: false, status: 500, errors: apiErrors } }, carriesReason: true },
+			// secret read: scope failure / 200 with a blank body
+			{
+				routes: {
+					[listPath]: { ok: true, status: 200, result: [ourWidget] },
+					[getPath]: { ok: false, status: 403, errors: apiErrors }
+				},
+				carriesReason: true
+			},
+			// Partial-body branches ignore `errors` entirely — the bodies here make
+			// the absent-message assertion below load-bearing.
+			{
+				routes: {
+					[listPath]: { ok: true, status: 200, result: [ourWidget] },
+					[getPath]: { ok: true, status: 200, result: { sitekey: SITEKEY }, errors: apiErrors }
+				}
+			},
+			// create: scope failure / 200 with a partial body
+			{
+				routes: {
+					[listPath]: { ok: true, status: 200, result: [] },
+					[createPath]: { ok: false, status: 403, errors: apiErrors }
+				},
+				carriesReason: true
+			},
+			{
+				routes: {
+					[listPath]: { ok: true, status: 200, result: [] },
+					[createPath]: { ok: true, status: 200, result: {}, errors: apiErrors }
+				}
+			}
+		];
+		for (const { routes, carriesReason } of scenarios) {
+			const { api } = fakeApi(routes);
+			const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+			expect(res.status).toBe('error');
+			expect(res.detail).not.toContain(NON_ALLOWLISTED_MARKER);
+			expect(res.detail).not.toContain(WIDGET_SECRET);
+			expect(res.detail).not.toContain(SITEKEY);
+			if (carriesReason) expect(res.detail).toContain(`10000: ${ALLOWLISTED_MESSAGE}`);
+			else expect(res.detail).not.toContain(ALLOWLISTED_MESSAGE);
+		}
+
+		// 200/success:false: the reported-failure arm repeats the allowlisted
+		// code+message too, and only the allowlisted fields may appear.
+		const { api } = fakeApi({
+			[listPath]: {
+				ok: false,
+				status: 200,
+				errors: [
+					{
+						code: 9109,
+						message: ALLOWLISTED_MESSAGE,
+						detail_url: NON_ALLOWLISTED_MARKER,
+						account_id: NON_ALLOWLISTED_MARKER
+					}
+				]
+			}
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain(`9109: ${ALLOWLISTED_MESSAGE}`);
+		expect(res.detail).not.toContain(NON_ALLOWLISTED_MARKER);
+		expect(res.detail).not.toContain(WIDGET_SECRET);
+		expect(res.detail).not.toContain(SITEKEY);
 	});
 });

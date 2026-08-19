@@ -315,6 +315,83 @@ export async function cfApi(
 	}
 }
 
+// Cap by code point, not UTF-16 unit, so an emoji at the boundary is dropped
+// whole instead of split into a lone surrogate.
+const capPoints = (value: string, max: number): string => {
+	const points = Array.from(value);
+	return points.length > max ? `${points.slice(0, max).join('')}…` : value;
+};
+
+/**
+ * One printable line naming a cfApi failure. Only the code + message fields
+ * are read (never the raw `errors` value JSON.stringified into
+ * operator-pasteable output), and any 32-hex path segment in the message —
+ * case-insensitive, however deep — is scrubbed to `<id>`: Cloudflare's own
+ * text can echo object ids (code 7003 quotes the request path, zone id
+ * included). The message content is otherwise printed verbatim. Anything
+ * that isn't the documented { code, message } array shape yields '' (the
+ * caller prints just the HTTP status).
+ */
+export function cfErrorSummary(errors: unknown): string {
+	if (!Array.isArray(errors)) return '';
+	const joined = errors
+		.filter((e): e is { code?: unknown; message?: unknown } => typeof e === 'object' && e !== null)
+		.map((e) => {
+			// No message, no line — a bare code would print a dangling '10000: '.
+			// Strip control/format chars (ANSI escapes, zero-widths), collapse
+			// whitespace, and cap each message: bodies can be multi-line or
+			// arbitrarily long, and this lands in operator-pasteable output.
+			const raw =
+				typeof e.message === 'string'
+					? e.message
+							.replace(/[\p{Cc}\p{Cf}]/gu, ' ')
+							.replace(/\s+/g, ' ')
+							.trim()
+							.replace(/(?<=\/)[0-9a-f]{32}(?=[/,.\s]|$)/gi, '<id>')
+					: '';
+			if (!raw) return '';
+			const message = capPoints(raw, 200);
+			return typeof e.code === 'number' ? `${e.code}: ${message}` : message;
+		})
+		.filter(Boolean)
+		.join('; ');
+	// Cap the whole summary too, so many errors can't yield a multi-KB line.
+	return capPoints(joined, 300);
+}
+
+/**
+ * Failure tail for a failed cfApi step, appended to an error detail so it
+ * carries an honest reason instead of a bare status:
+ *   - status 0     → cfApi's thrown-fetch marker; the API was never reached.
+ *   - 2xx          → the body said success:false (cfApi maps that to ok=false),
+ *                    so repeat the API's own code+message summary.
+ *   - 401/403      → the caller's scope hint, then '; the API said …' when
+ *                    the body gave a reason (the attribution keeps our advice
+ *                    and the API's own words separable).
+ *   - anything else (500 etc.) → '; the API said …' when the body gave a
+ *                    reason, else bare; never a scope hint — that misdirects.
+ * Shared by waf-lib and turnstile-lib, which each bind their own scope hint —
+ * the two private copies drifted apart once already.
+ */
+export function cfFailureTail(status: number, errors: unknown, scopeHint: string): string {
+	if (status === 0) return '; the Cloudflare API did not respond';
+	const why = cfErrorSummary(errors);
+	if (status >= 200 && status < 300) {
+		return `; the API reported failure${why ? ` (${why})` : ' with no reason given'}`;
+	}
+	const hint = status === 401 || status === 403 ? `; token needs ${scopeHint}` : '';
+	return `${hint}${why ? `; the API said ${why}` : ''}`;
+}
+
+/**
+ * The "(HTTP <n>)" fragment of an error detail — empty for status 0, where
+ * cfFailureTail already says the API did not respond and a bare "(HTTP 0)"
+ * is noise.
+ */
+export function statusLabel(status: number): string {
+	return status === 0 ? '' : ` (HTTP ${status})`;
+}
+
 export interface GhEligibilityInput {
 	/** `gh` binary is on PATH. */
 	ghInstalled: boolean;
@@ -401,34 +478,46 @@ export function ciWiringEntries(input: CiWiringInput): CiEntry[] {
  * can pin that, and the wording, without running the CLI.
  *
  * Status contracts: null = not attempted (no domain / no zone / no token);
- * 'error' = provisioning failed — `downloadRateLimitDetail` carries waf-lib's
- * reason (missing scope, absent zone, HTTP failure), which the summary repeats
- * instead of assuming a cause; 'exists' rate limits are old news and stay
- * silent.
+ * 'error' = provisioning failed — `downloadRateLimitDetail` / `turnstileDetail`
+ * carry the provisioning lib's reason (missing scope, HTTP failure), which the
+ * summary repeats instead of assuming a cause; 'exists' rate limits are old
+ * news and stay silent.
  *
  * `turnstileWired` says whether BOTH halves of the wiring actually landed (the
  * Pages PATCH carrying TURNSTILE_SITEKEY and the TURNSTILE_SECRET put). The
  * login check fails open when either is missing, so a provisioned widget with
  * failed wiring must read as NOT protected — never as enforced.
  */
-export function securitySummaryLines(
-	host: string,
-	downloadRateLimit: RateLimitStatus | null,
-	downloadRateLimitDetail: string | null,
-	turnstileStatus: TurnstileStatus | null,
-	turnstileWired: boolean,
+export interface SecuritySummaryInput {
+	host: string;
+	downloadRateLimit: RateLimitStatus | null;
+	downloadRateLimitDetail: string | null;
+	turnstileStatus: TurnstileStatus | null;
+	// turnstile-lib's failure reason when turnstileStatus is 'error'.
+	turnstileDetail: string | null;
+	turnstileWired: boolean;
 	// The RESOLVED zone's name when it differs from the host (subdomain forks):
 	// the rate-limit rule is zone-wide, so the applied line must name the zone
 	// it actually landed on. The retry command keeps the host — the applier
 	// resolves the zone itself.
-	zoneName?: string | null
-): string[] {
+	zoneName?: string | null;
+}
+
+export function securitySummaryLines(input: SecuritySummaryInput): string[] {
+	const {
+		host,
+		downloadRateLimit,
+		downloadRateLimitDetail,
+		turnstileStatus,
+		turnstileDetail,
+		turnstileWired,
+		zoneName
+	} = input;
 	const lines: string[] = [];
 	if (downloadRateLimit === 'error') {
-		lines.push(
-			`  • Public-endpoint rate limit: NOT set (${downloadRateLimitDetail ?? 'provisioning failed'}).`
-		);
-		lines.push('     Fix that, then run:');
+		lines.push('  • Public-endpoint rate limit: NOT set.');
+		lines.push(`     Reason: ${downloadRateLimitDetail ?? 'none reported'}.`);
+		lines.push('     When that is fixed, run:');
 		lines.push(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
 	} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
 		lines.push(
@@ -436,8 +525,9 @@ export function securitySummaryLines(
 		);
 	}
 	if (turnstileStatus === 'error') {
-		lines.push('  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).');
-		lines.push('     Add that permission to the token and re-run setup to protect /admin/login.');
+		lines.push('  • Admin-login bot check: NOT set.');
+		lines.push(`     Reason: ${turnstileDetail ?? 'none reported'}.`);
+		lines.push('     When that is fixed, re-run setup to protect /admin/login.');
 	} else if (turnstileStatus && !turnstileWired) {
 		// Worded as an unverified-THIS-RUN claim: on a re-run, a previous run may
 		// have wired the project already, so "no bot check" would be false there —
@@ -449,7 +539,7 @@ export function securitySummaryLines(
 		lines.push('     first run that means /admin/login has NO bot check (it fails open without both) —');
 		lines.push('     re-run setup, or set the var + secret on the Pages project yourself.');
 	} else if (turnstileStatus) {
-		lines.push(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}`);
+		lines.push(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}.`);
 		lines.push('     (TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret set; enforced once deployed).');
 	}
 	return lines;

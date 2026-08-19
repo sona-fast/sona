@@ -19,7 +19,7 @@
  * can be issued for any domain, including one whose DNS lives elsewhere — so the
  * caller does not gate this on zone resolution, only on having a custom domain.
  */
-import { cfApi, hostFromDomain } from './setup-lib.ts';
+import { cfApi, cfFailureTail, hostFromDomain, statusLabel, type CfApiResult } from './setup-lib.ts';
 
 /**
  * Stable widget name we match on so re-runs find-and-reuse our widget (idempotent)
@@ -43,8 +43,14 @@ export const WIDGET_NAME = 'sona-admin-login';
  */
 export const WIDGET_MODE = 'managed';
 
-/** The token permission a fork operator must add, quoted verbatim in errors. */
-const SCOPE_HINT = 'Account → Turnstile: Edit';
+/** The token permission a fork operator must add — exported so setup's token
+ * recipe names the same scope this module's errors do. */
+export const SCOPE_HINT = 'Account → Turnstile: Edit';
+
+/** setup-lib's shared cfFailureTail, bound to this lib's scope hint. */
+function failureTail(res: CfApiResult): string {
+	return cfFailureTail(res.status, res.errors, SCOPE_HINT);
+}
 
 /** A Turnstile widget as returned by the challenges/widgets API. */
 interface Widget {
@@ -76,8 +82,8 @@ export interface TurnstileResult {
  *
  * Sequence (all via `cfApi`, Bearer `cfToken`):
  *   1. GET /accounts/<acct>/challenges/widgets → list the account's widgets. A
- *      non-ok response (401/403 = no Turnstile scope, or a transient error) → a
- *      clear error naming the missing scope. No mutation.
+ *      non-ok response → a clear error whose detail carries the actual reason
+ *      (the scope hint on 401/403, otherwise just the HTTP status). No mutation.
  *   2. Match our widget by its stable `name` (WIDGET_NAME) AND `domains` containing
  *      this fork's host — see WIDGET_NAME on why the host half is required:
  *        - found → GET .../widgets/<sitekey> to read its secret authoritatively
@@ -110,7 +116,7 @@ export async function provisionTurnstileWidget(
 	if (!listRes.ok) {
 		return {
 			status: 'error',
-			detail: `could not list Turnstile widgets (HTTP ${listRes.status}); token needs ${SCOPE_HINT}`
+			detail: `could not list Turnstile widgets${statusLabel(listRes.status)}${failureTail(listRes)}`
 		};
 	}
 	const widgets = (listRes.result as Widget[] | undefined) ?? [];
@@ -124,9 +130,14 @@ export async function provisionTurnstileWidget(
 		const getRes = await api(cfToken, `/accounts/${accountId}/challenges/widgets/${mine.sitekey}`);
 		const secret = (getRes.result as Widget | undefined)?.secret;
 		if (!getRes.ok || !secret) {
+			// An ok response with no secret is a partial body — the one actionable
+			// lead is that a read-scoped token gets the widget without its secret.
+			const why = getRes.ok
+				? `; the widget came back without one, so check that the token has ${SCOPE_HINT}`
+				: failureTail(getRes);
 			return {
 				status: 'error',
-				detail: `found the ${WIDGET_NAME} widget for ${host} but could not read its secret (HTTP ${getRes.status}); token needs ${SCOPE_HINT}`
+				detail: `found the ${WIDGET_NAME} widget for ${host} but could not read its secret${statusLabel(getRes.status)}${why}`
 			};
 		}
 		return {
@@ -144,9 +155,15 @@ export async function provisionTurnstileWidget(
 	});
 	const created = createRes.result as Widget | undefined;
 	if (!createRes.ok || !created?.sitekey || !created?.secret) {
+		// An ok create with no sitekey/secret is a partial body — the widget most
+		// likely WAS created, so claim only what we know; the summary's re-run
+		// line carries the remedy (step 1's name+host match finds and reuses it).
+		const why = createRes.ok
+			? '; the response carried no sitekey/secret, so the widget may exist but setup could not read its keys'
+			: failureTail(createRes);
 		return {
 			status: 'error',
-			detail: `failed to create the ${WIDGET_NAME} Turnstile widget for ${host} (HTTP ${createRes.status}); token needs ${SCOPE_HINT}`
+			detail: `failed to create the ${WIDGET_NAME} Turnstile widget for ${host}${statusLabel(createRes.status)}${why}`
 		};
 	}
 	return {

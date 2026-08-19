@@ -41,13 +41,18 @@ import {
 	imageResizingIsOn,
 	ciWiringEntries,
 	cfApi,
+	cfErrorSummary,
 	securitySummaryLines,
 	pagesPatchConfirmsSitekey,
 	cdnAttachmentLines
 } from './setup-lib.ts';
 import { resolveZone } from './connect-domains-lib.ts';
 import { applyDownloadRateLimit, type RateLimitStatus } from './waf-lib.ts';
-import { provisionTurnstileWidget, type TurnstileStatus } from './turnstile-lib.ts';
+import {
+	provisionTurnstileWidget,
+	SCOPE_HINT as TURNSTILE_SCOPE_HINT,
+	type TurnstileStatus
+} from './turnstile-lib.ts';
 // Shared with the admin Settings save so the seeded siteUrl passes the same
 // https-URL validation (validate.ts has no imports, so tsx loads it directly).
 import { normalizeHttpsUrl } from '../src/lib/server/validate.ts';
@@ -126,13 +131,14 @@ const token = (bytes = 32) => randomBytes(bytes).toString('hex');
 // the message stay in sync with README's "API token" section.
 const TOKEN_RECIPE =
 	'Create a Cloudflare API token (dash → My Profile → API Tokens → Create Token → Custom token) with:\n' +
-	'    • Account · Cloudflare Pages · Edit\n' +
-	'    • Account · D1 · Edit\n' +
-	'    • Account · Workers R2 Storage · Edit\n' +
-	'    • Account · Turnstile · Edit      (only with a custom domain; adds the admin-login bot check)\n' +
-	'    • Zone · DNS · Edit               (only if you are attaching a custom domain)\n' +
-	'    • Zone · WAF · Edit               (only with a custom domain; adds the public rate limit)\n' +
-	'    • Zone · Zone Settings · Edit     (optional; lets setup enable image resizing for you)';
+	'    • Account → Cloudflare Pages: Edit\n' +
+	'    • Account → D1: Edit\n' +
+	'    • Account → Workers R2 Storage: Edit\n' +
+	`    • ${TURNSTILE_SCOPE_HINT}      (only with a custom domain; adds the admin-login bot check)\n` +
+	'    • Zone → Zone: Read              (only with a custom domain; resolves the zone)\n' +
+	'    • Zone → DNS: Edit               (only with a custom domain; needed later to attach the apex record)\n' +
+	'    • Zone → WAF: Edit               (only with a custom domain; adds the public rate limit)\n' +
+	'    • Zone → Zone Settings: Edit     (optional; lets setup enable image resizing for you)';
 
 async function main() {
 	console.log('— Sona setup —\n');
@@ -322,8 +328,14 @@ async function main() {
 	// domain — a *.pages.dev-only fork isn't provisioned one. Its sitekey (public)
 	// is set as a Pages var below and its secret as a Pages secret; the login page
 	// enforces the challenge only when BOTH are present. null = not attempted
-	// (no domain / no token); 'error' = token lacked Account · Turnstile · Edit.
+	// (no domain / no token); 'error' = provisioning failed — turnstileDetail
+	// carries the actual reason (scope on 401/403, otherwise the HTTP status
+	// or a partial body).
 	let turnstileStatus: TurnstileStatus | null = null;
+	// The human-readable reason behind a Turnstile 'error' — mirrors
+	// downloadRateLimitDetail so the summary repeats turnstile-lib's real
+	// failure instead of assuming a missing scope.
+	let turnstileDetail: string | null = null;
 	let turnstileSitekey = '';
 	let turnstileSecret = '';
 	// Whether the Pages-project PATCH (which carries TURNSTILE_SITEKEY) landed —
@@ -344,6 +356,7 @@ async function main() {
 				zone: preflightZone,
 				zoneName: preflightZoneName,
 				errorStatus: zoneLookupError,
+				errors: zoneLookupErrors,
 				failedName: zoneLookupFailedName
 			} = await resolveZone(zoneNameCandidates(host), (name) =>
 				cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
@@ -351,17 +364,21 @@ async function main() {
 			resolvedZoneName = preflightZoneName;
 			const zoneId = preflightZone.id;
 			if (zoneLookupError !== null) {
-				// status 0 = fetch threw (no network); a 2xx here means the API said
-				// success:false — neither reads sensibly as a bare "HTTP <n>".
+				// status 0 = fetch threw (no network). A 2xx means the API answered
+				// but its body said success:false, so repeat the API's own reason.
+				const apiWhy =
+					zoneLookupError >= 200 && zoneLookupError < 300
+						? cfErrorSummary(zoneLookupErrors)
+						: '';
 				const why =
 					zoneLookupError === 0
 						? 'could not reach the Cloudflare API'
-						: `Cloudflare API error, HTTP ${zoneLookupError}`;
+						: `Cloudflare API error, HTTP ${zoneLookupError}${apiWhy ? `; the API said ${apiWhy}` : ''}`;
 				console.warn(
 					`\n⚠ Zone lookup failed for ${zoneLookupFailedName ?? host} (${why}) — skipping the DNS / image-transform preflight.`
 				);
 				console.warn(
-					'  A 401/403 means the token lacks Zone · Zone · Read; otherwise re-run setup to retry.'
+					'  A 401/403 means the token lacks Zone → Zone: Read; otherwise re-run setup to retry.'
 				);
 			} else if (!zoneId) {
 				console.warn(
@@ -376,7 +393,7 @@ async function main() {
 				const dnsProbe = await cfApi(cfToken, `/zones/${zoneId}/dns_records?per_page=1`);
 				if (dnsProbeBlocksSetup(dnsProbe)) {
 					console.warn(
-						`\n⚠ Could not verify DNS access for ${host} (token lacks Zone · DNS · Read; attaching the apex CNAME later needs Zone · DNS · Edit).`
+						`\n⚠ Could not verify DNS access for ${host} (token lacks Zone → DNS: Read; attaching the apex CNAME later needs Zone → DNS: Edit).`
 					);
 					console.warn('  Setup only checks access — it never writes DNS itself. If you plan to attach');
 					console.warn('  the domain from the Cloudflare dashboard, you can continue.');
@@ -407,7 +424,7 @@ async function main() {
 
 				// WAF rate limit for the anonymously-reachable /api paths (download
 				// beacon + oEmbed provider — one rule, Free-plan cap). Non-fatal:
-				// a token without Zone · WAF · Edit just yields an 'error'
+				// a token without Zone → WAF: Edit just yields an 'error'
 				// result we warn about in Next steps — setup keeps going regardless.
 				// Reuse the zone the preflight just resolved — no second candidate walk.
 				const rateLimit = await applyDownloadRateLimit(cfToken, host, cfApi, zoneId);
@@ -423,10 +440,11 @@ async function main() {
 			// Turnstile widget for the admin-login bot check. Account-
 			// scoped, so — unlike the DNS / image-resizing checks above — it does NOT
 			// need a resolved zone and runs even when the domain's DNS lives elsewhere.
-			// Non-fatal: a token without Account · Turnstile · Edit just yields an
+			// Non-fatal: a token without Account → Turnstile: Edit just yields an
 			// 'error' result we warn about in Next steps — setup keeps going regardless.
 			const ts = await provisionTurnstileWidget(cfToken, cfAccount, host);
 			turnstileStatus = ts.status;
+			turnstileDetail = ts.detail;
 			turnstileSitekey = ts.sitekey ?? '';
 			turnstileSecret = ts.secret ?? '';
 			if (ts.status === 'error') {
@@ -439,7 +457,7 @@ async function main() {
 				'\n⚠ A custom domain was given but CLOUDFLARE_API_TOKEN/ACCOUNT_ID are not in the env,'
 			);
 			console.warn('  so setup cannot preflight DNS access. Attaching the apex domain needs a token');
-			console.warn('  with Zone · DNS · Edit (see README → custom domain).');
+			console.warn('  with Zone → DNS: Edit (see README → custom domain).');
 		}
 	}
 
@@ -509,7 +527,10 @@ async function main() {
 			);
 		} else {
 			console.warn('\n⚠ Could not attach bindings to the Pages project via the API');
-			console.warn(`  (HTTP ${res.status}) ${JSON.stringify(res.errors ?? '')}`);
+			// Only the allowlisted code+message pairs — never the raw errors body,
+			// which can echo account/project identifiers into pasteable output.
+			const why = cfErrorSummary(res.errors);
+			console.warn(`  (HTTP ${res.status})${why ? ` ${why}` : ''}`);
 			console.warn('  Fix: run ONE local deploy with wrangler.toml present so the bindings attach:');
 			console.warn('    npx wrangler pages deploy .svelte-kit/cloudflare');
 			console.warn('  Until then, CI (git push) deploys will have no D1/R2 binding.');
@@ -701,14 +722,15 @@ async function main() {
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
 		// Zone security: rate limit + admin-login Turnstile.
-		for (const line of securitySummaryLines(
+		for (const line of securitySummaryLines({
 			host,
 			downloadRateLimit,
 			downloadRateLimitDetail,
 			turnstileStatus,
-			pagesConfigOk && turnstileSecretSet,
-			resolvedZoneName
-		)) {
+			turnstileDetail,
+			turnstileWired: pagesConfigOk && turnstileSecretSet,
+			zoneName: resolvedZoneName
+		})) {
 			console.log(line);
 		}
 	}

@@ -32,6 +32,7 @@ import { stdin, stdout, env, argv, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import {
 	cfApi,
+	cfErrorSummary,
 	hostFromDomain,
 	zoneNameCandidates,
 	imageResizingOutcome,
@@ -58,11 +59,11 @@ import {
 
 const TOKEN_RECIPE =
 	'Create a Cloudflare API token (dash → My Profile → API Tokens → Create Token → Custom token) with:\n' +
-	'    • Zone · Zone · Read\n' +
-	'    • Zone · DNS · Edit\n' +
-	'    • Account · Workers R2 Storage · Edit   (to attach the bucket custom domain)\n' +
-	'    • Account · Cloudflare Pages · Edit      (to attach the site domain)\n' +
-	'    • Zone · Zone Settings · Edit            (optional; lets it enable Image Transformations)\n' +
+	'    • Zone → Zone: Read\n' +
+	'    • Zone → DNS: Edit\n' +
+	'    • Account → Workers R2 Storage: Edit   (to attach the bucket custom domain)\n' +
+	'    • Account → Cloudflare Pages: Edit     (to attach the site domain)\n' +
+	'    • Zone → Zone Settings: Edit           (optional; lets it enable Image Transformations)\n' +
 	'Then export CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID and re-run.';
 
 /** Best-effort read of the deployed `siteUrl` site-setting (forward-compat with SONA-24). */
@@ -148,8 +149,9 @@ async function main(): Promise<number> {
 		// a hard token error; any other failed lookup aborts too (a transient error
 		// must not silently pick the parent zone or read as "no zone").
 		const candidates = zoneNameCandidates(host);
-		const { zone, zoneName, errorStatus, failedName } = await resolveZone(candidates, (name) =>
-			cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
+		const { zone, zoneName, errorStatus, errors, failedName } = await resolveZone(
+			candidates,
+			(name) => cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 		);
 		if (errorStatus !== null) {
 			// Name the candidate whose lookup failed — for a subdomain host that can
@@ -163,8 +165,12 @@ async function main(): Promise<number> {
 					`✖ Could not reach the Cloudflare API while looking up the zone for ${lookupName} — check your network and re-run.`
 				);
 			} else {
+				// A 2xx here means the API answered but its body said success:false —
+				// repeat the API's own reason when it gave one.
+				const apiWhy =
+					errorStatus >= 200 && errorStatus < 300 ? cfErrorSummary(errors) : '';
 				console.error(
-					`✖ Cloudflare API error (HTTP ${errorStatus}) while looking up the zone for ${lookupName} — wait a moment and re-run.`
+					`✖ Cloudflare API error (HTTP ${errorStatus}${apiWhy ? `; the API said ${apiWhy}` : ''}) while looking up the zone for ${lookupName} — wait a moment and re-run.`
 				);
 			}
 			return 1;
@@ -193,7 +199,7 @@ async function main(): Promise<number> {
 			);
 		if (cdnState === 'unknown')
 			console.warn(
-				`⚠ Couldn't read the bucket's custom domains (token may lack Account · Workers R2 Storage · Read) — skipping the ${cdn} attach.`
+				`⚠ Couldn't read the bucket's custom domains (token may lack Account → Workers R2 Storage: Read) — skipping the ${cdn} attach.`
 			);
 
 		const plan = planConnect({
@@ -217,7 +223,7 @@ async function main(): Promise<number> {
 			console.log(
 				transformsCurrent === true
 					? '  Image Transformations: on.'
-					: "  Image Transformations: couldn't verify (token lacks Zone Settings·Read)."
+					: "  Image Transformations: couldn't verify (token lacks Zone → Zone Settings: Read)."
 			);
 			console.log(`  Re-check anytime:  npm run connect-domains -- --check ${host}`);
 			return 0;
@@ -258,7 +264,11 @@ async function main(): Promise<number> {
 		for (const m of plan) {
 			const res = await cfApi(cfToken, m.path, { method: m.method, body: m.body });
 			if (res.ok) console.log(`✔ ${m.label}`);
-			else console.warn(`⚠ Could not ${m.label} (HTTP ${res.status}) ${JSON.stringify(res.errors ?? '')}`);
+			else {
+				// Allowlisted code+message pairs only — never the raw errors body.
+				const why = cfErrorSummary(res.errors);
+				console.warn(`⚠ Could not ${m.label} (HTTP ${res.status})${why ? ` ${why}` : ''}`);
+			}
 		}
 
 		if (willEnableTransforms) {
@@ -275,7 +285,7 @@ async function main(): Promise<number> {
 			console.log('✔ Image Transformations already on.');
 		} else {
 			console.log(
-				"⚠ Image Transformations: couldn't verify (token lacks Zone Settings·Read) — enable it in the dashboard."
+				"⚠ Image Transformations: couldn't verify (token lacks Zone → Zone Settings: Read) — enable it in the dashboard."
 			);
 		}
 
