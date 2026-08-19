@@ -86,7 +86,6 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 	const adult =
 		raw.rssNsfwEnabled === 'true' && feedKeyMatches(url.searchParams.get('key'), raw.rssNsfwKey ?? '');
 
-	const settings = await getSettings(db);
 	const origin = url.origin;
 
 	// Art: parents only. A variant is another crop or palette of a piece already
@@ -166,15 +165,19 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 			? db.select().from(fursuitPhotos).orderBy(desc(fursuitPhotos.createdAt)).limit(FURSUIT_SCAN)
 			: [];
 
-	// The four reads are independent, so they go out together rather than one
-	// after another. Errors stay FATAL — no per-query fallback — because a feed
-	// that silently drops a whole section reads as "nothing new" to a subscriber,
-	// which is worse than the 5xx the reader would simply retry.
-	const [artRows, packRows, avatarRows, fursuitRows] = await Promise.all([
+	// The reads are independent, so they go out together rather than one after
+	// another. The settings read rides along too: it only supplies the channel
+	// title and none of the queries above depend on it, so awaiting it separately
+	// bought nothing but another serial round trip. Errors stay FATAL — no
+	// per-query fallback — because a feed that silently drops a whole section
+	// reads as "nothing new" to a subscriber, which is worse than the 5xx the
+	// reader would simply retry.
+	const [artRows, packRows, avatarRows, fursuitRows, settings] = await Promise.all([
 		artQuery,
 		packQuery,
 		avatarQuery,
-		fursuitQuery
+		fursuitQuery,
+		getSettings(db)
 	]);
 
 	/** Absolute URL for an image column, capped the same way og:image is. */
@@ -184,8 +187,10 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 	const items: FeedItem[] = [];
 
 	for (const row of artRows) {
-		// The SFW document omits adult rows entirely rather than listing them
-		// without their images: a title is content too.
+		// Backstop, not the filter: the SQL predicate above already excluded these
+		// rows from the public document. Kept because the failure it guards is a
+		// leak — an adult title reaching the SFW feed — and a future edit to the
+		// query would otherwise have nothing standing behind it.
 		if (row.nsfw && !adult) continue;
 		items.push({
 			title: row.title,
@@ -214,6 +219,10 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 	for (const row of avatarRows) {
 		// Effective adult flag, matching /vr's loader: a SFW avatar with an adult
 		// poster is adult as far as anything that renders the poster is concerned.
+		// This computation is live — it marks the item on the keyed feed. The skip
+		// below is the backstop only: the SQL already excluded these rows from the
+		// public document, and it stays for the same leak-path reason as the art
+		// loop's.
 		const nsfw = row.nsfw || (row.posterNsfw ?? false);
 		if (nsfw && !adult) continue;
 		items.push({
@@ -262,10 +271,11 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 			// from the raw query. Echoing url.search made every tracking-param
 			// variant (?utm_source=, ?fbclid=) a byte-distinct body and ETag, so each
 			// one missed the shared cache and re-ran the whole fan-out against the
-			// primary. Only a key that actually matched earns a place here.
-			selfUrl: adult
-				? `${origin}${url.pathname}?key=${encodeURIComponent(raw.rssNsfwKey ?? '')}`
-				: `${origin}${url.pathname}`,
+			// primary. The keyed edition names no address at all: its address IS the
+			// key, and a document that spells it out hands the credential to anyone
+			// who sees a rendered pane, a screenshot or a shared OPML file without
+			// ever seeing the subscription URL. rel="self" is optional in RSS.
+			selfUrl: adult ? undefined : `${origin}${url.pathname}`,
 			lastBuildDate: capped.length ? (rfc822(capped[0].createdAt) ?? undefined) : undefined,
 			adult
 		},

@@ -67,11 +67,23 @@
 	let rssFeedEnabled = $state(data.settings.rssFeedEnabled);
 	let rssNsfwEnabled = $state(data.settings.rssNsfwEnabled);
 	let regeneratingFeedKey = $state(false);
+	// The replacement Regenerate just minted, straight from the action. It wins
+	// over the loaded key until the next load, because Regenerate deliberately
+	// does NOT rerun the load: the $effect below resyncs every Site-tab field
+	// from `data`, so a reload here would silently revert unsaved edits.
+	let regeneratedKey = $state<string | null>(null);
 	// The private address is derived, never bound: the key is minted server-side
 	// and this page only ever displays what was stored.
-	const feedKeyUrl = $derived(
-		data.settings.rssNsfwKey ? `${$page.url.origin}/feed.xml?key=${data.settings.rssNsfwKey}` : ''
-	);
+	const feedKeyUrl = $derived.by(() => {
+		const key = regeneratedKey ?? data.settings.rssNsfwKey;
+		return key ? `${$page.url.origin}/feed.xml?key=${key}` : '';
+	});
+	// True exactly while the "Save to create the address" line is on screen (the
+	// {:else if rssNsfwEnabled} arm below). It joins the checkbox's
+	// aria-describedby so the line is announced with the control that produced
+	// it — otherwise a screen-reader user who ticks the box and tabs to Save
+	// never meets it.
+	const feedKeyPending = $derived(rssNsfwEnabled && !(data.settings.rssNsfwEnabled && feedKeyUrl));
 	let termsOfService = $state(data.settings.termsOfService);
 
 	// Sona / character profile — feeds the /art page of the threePath landing.
@@ -393,10 +405,18 @@
      attribute exists for. -->
 <form id="regenerate-feed-key" method="POST" action="?/regenerateFeedKey" use:enhance={() => {
 	regeneratingFeedKey = true;
-	return async ({ result, update }) => {
-		await update({ reset: false });
+	return async ({ result }) => {
 		regeneratingFeedKey = false;
-		if (result.type === 'success') toast.success(m.admin_settings_rss_regenerated());
+		if (result.type === 'success') {
+			// No reload on purpose — enhance's update helper is deliberately not
+			// destructured here. Rerunning the load fires the resync $effect, which
+			// reassigns every Site-tab field from the server, so an owner who typed
+			// a new site name and then hit Regenerate would watch it revert. The
+			// action hands back the key it minted instead.
+			const key = result.data?.feedKey;
+			if (typeof key === 'string') regeneratedKey = key;
+			toast.success(m.admin_settings_rss_regenerated());
+		}
 	};
 }}></form>
 
@@ -519,7 +539,9 @@
 						type="checkbox"
 						id="rssNsfwEnabled"
 						name="rssNsfwEnabled"
-						aria-describedby="rssNsfwEnabled-desc"
+						aria-describedby={feedKeyPending
+							? 'rssNsfwEnabled-desc rssNsfwEnabled-pending'
+							: 'rssNsfwEnabled-desc'}
 						bind:checked={rssNsfwEnabled}
 					/>
 					<span class="checkbox-text">
@@ -552,7 +574,7 @@
 					<!-- Ticked but not yet saved. Without this the section looks inert:
 					     the address block only appears once the save mints a key, so an
 					     owner gets no sign that anything is about to happen. -->
-					<p class="hint feed-key-pending">{m.admin_settings_rss_key_pending()}</p>
+					<p class="feed-key-pending" id="rssNsfwEnabled-pending">{m.admin_settings_rss_key_pending()}</p>
 				{/if}
 			{/if}
 		</section>
@@ -1690,10 +1712,15 @@
 		margin-top: 20px;
 	}
 
-	/* Stands where .feed-key will, so the block does not jump when the save
-	   replaces this line with the real address. */
+	/* Stands in for .feed-key-label, in the slot .feed-key will occupy: same
+	   offset from the hint above and same weight, so the section does not jump
+	   or change voice when the save replaces this line with the real address.
+	   Not a .hint — that class's `margin` shorthand is declared later at equal
+	   specificity and would win over any margin-top set here. */
 	.feed-key-pending {
-		margin-top: 20px;
+		margin: 20px 0 0;
+		font-size: 14px;
+		font-weight: 500;
 	}
 
 	.feed-key-label {

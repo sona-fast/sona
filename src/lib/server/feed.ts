@@ -51,8 +51,10 @@ export interface FeedChannel {
 	link: string;
 	description: string;
 	copyright: string;
-	/** Absolute URL this document was served from, for atom:link rel="self". */
-	selfUrl: string;
+	/** Absolute URL this document was served from, for atom:link rel="self".
+	 * Optional: the element is omitted when naming the address would publish a
+	 * credential inside the document (the keyed adult feed). */
+	selfUrl?: string;
 	/** RFC-822 `lastBuildDate`. Omitted when there are no items to date it by. */
 	lastBuildDate?: string;
 	/** True on the keyed feed: adds the channel-level RTA label. */
@@ -139,9 +141,15 @@ export function renderFeed(channel: FeedChannel, items: FeedItem[]): string {
 		element('title', channel.title, '\t\t'),
 		element('link', channel.link, '\t\t'),
 		element('description', channel.description, '\t\t'),
-		element('copyright', channel.copyright, '\t\t'),
-		`\t\t<atom:link href="${escapeXml(channel.selfUrl)}" rel="self" type="application/rss+xml" />`
+		element('copyright', channel.copyright, '\t\t')
 	];
+	// rel="self" is optional in RSS, and a document whose address is a secret has
+	// to leave it out: the body travels further than the subscription URL does.
+	if (channel.selfUrl) {
+		head.push(
+			`\t\t<atom:link href="${escapeXml(channel.selfUrl)}" rel="self" type="application/rss+xml" />`
+		);
+	}
 	if (channel.lastBuildDate) head.push(element('lastBuildDate', channel.lastBuildDate, '\t\t'));
 	// Channel-level adult self-label. Never emitted on the public SFW document —
 	// labelling the SFW feed adult would get the whole site filtered.

@@ -1,8 +1,9 @@
 /**
- * Cloudflare WAF rate-limit provisioning for the anonymously-reachable /api paths
- * (POST /api/metrics/download, GET/HEAD /api/oembed). Applies ONE zone-level
- * rate-limit rule capping how often a single IP can hit them — one, for the reason
- * documented on RULE_EXPRESSION — without touching any other WAF rule on the zone.
+ * Cloudflare WAF rate-limit provisioning for the anonymously-reachable endpoints
+ * (POST /api/metrics/download, GET/HEAD /api/oembed, GET/HEAD /feed.xml). Applies
+ * ONE zone-level rate-limit rule capping how often a single IP can hit them — one,
+ * for the reason documented on RULE_EXPRESSION — without touching any other WAF
+ * rule on the zone.
  *
  * The core `applyDownloadRateLimit` is shared by two callers: the fork setup CLI
  * (scripts/setup.ts, for future forks) and the standalone runner
@@ -239,6 +240,6 @@ export async function applyDownloadRateLimit(
 		? { status: 'updated', detail: `updated the public-endpoint rate-limit rule on ${host}` }
 		: {
 				status: 'created',
-				detail: `created the public-endpoint rate-limit rule on ${host} (POST /api/metrics/download + GET/HEAD /api/oembed: max ${RULE_RATELIMIT.requests_per_period} / ${RULE_RATELIMIT.period}s per IP, ${RULE_RATELIMIT.mitigation_timeout}s block)`
+				detail: `created the public-endpoint rate-limit rule on ${host} (POST /api/metrics/download + GET/HEAD /api/oembed + GET/HEAD /feed.xml: max ${RULE_RATELIMIT.requests_per_period} / ${RULE_RATELIMIT.period}s per IP, ${RULE_RATELIMIT.mitigation_timeout}s block)`
 			};
 }

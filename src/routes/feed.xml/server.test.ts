@@ -437,10 +437,9 @@ describe('GET /feed.xml — the NSFW gate', () => {
 		expect(wrong.status).toBe(200);
 		expect(itemTitles(wrong.body)).toEqual(['Tame']);
 		expect(wrong.headers.get('x-robots-tag')).toBeNull();
-		// Identical but for atom:link rel=self, which necessarily echoes the query.
-		expect(wrong.body.replace(/<atom:link[^>]*\/>/, '')).toBe(
-			anonymous.body.replace(/<atom:link[^>]*\/>/, '')
-		);
+		// Byte-identical, self link included: nothing in the document is built from
+		// the request's query string.
+		expect(wrong.body).toBe(anonymous.body);
 	});
 
 	it('serves the SFW document to the right key while the NSFW setting is off', async () => {
@@ -582,7 +581,10 @@ describe('GET /feed.xml — caching', () => {
 		expect(plain.body).toContain(`<atom:link href="${ORIGIN}/feed.xml" rel="self"`);
 	});
 
-	it('points the keyed edition\'s self link at the key that matched', async () => {
+	it('keeps the key out of the keyed edition\'s body entirely', async () => {
+		// A self link would print the subscription URL — key and all — inside the
+		// document, where a rendered feed pane, a screenshot or a shared OPML file
+		// carries it to people who were never given the address.
 		const { db, platform } = makeDb();
 		await addArtist(db);
 		await addImage(db);
@@ -590,6 +592,7 @@ describe('GET /feed.xml — caching', () => {
 		await setSetting(db, 'rssNsfwKey', KEY);
 
 		const { body } = await call(platform, { key: KEY, query: { utm_source: 'x' } });
-		expect(body).toContain(`<atom:link href="${ORIGIN}/feed.xml?key=${KEY}" rel="self"`);
+		expect(body).not.toContain('<atom:link');
+		expect(body).not.toContain(KEY);
 	});
 });

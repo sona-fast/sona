@@ -139,6 +139,14 @@ describe('renderFeed — document shape', () => {
 		expect(self.attrs.type).toBe('application/rss+xml');
 	});
 
+	it('omits atom:link when no address is given', () => {
+		// The keyed adult feed passes none: its address is a credential, and
+		// rel="self" would print it in the body. Still well-formed without it.
+		const channel = channelOf(renderFeed({ ...CHANNEL, selfUrl: undefined }, [ITEM]));
+		expect(child(channel, 'atom:link')).toBeUndefined();
+		expect(textOf(channel, 'title')).toBe('Taro Surf');
+	});
+
 	it('declares every namespace the items actually use', () => {
 		// A reader that meets media:content under an undeclared prefix is entitled
 		// to reject the whole document, so prefixes and declarations ship together.

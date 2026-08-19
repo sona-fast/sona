@@ -20,9 +20,9 @@ describe('CopyCommand accessible name', () => {
 
 	it('is passed a specific label by the feed-key row, which shares a page with other copy buttons', () => {
 		// The settings page renders several CopyCommands; an unlabelled one here
-		// would leave the screen reader announcing "Copy" four times over.
-		expect(settingsSrc).toContain(
-			'<CopyCommand text={feedKeyUrl} label={m.admin_settings_rss_copy()} />'
-		);
+		// would leave the screen reader announcing "Copy" four times over. Matched
+		// on the label prop alone: the accessible name is the whole subject, and
+		// pinning the entire element would red-fail on a prop reorder or a rewrap.
+		expect(settingsSrc).toMatch(/label=\{m\.admin_settings_rss_copy\(\)\}/);
 	});
 });

@@ -742,7 +742,10 @@ describe('no accent-color override on form controls (SONA-172)', () => {
 
 	it('leaves the checked-checkbox fill to the user agent', () => {
 		const offenders = styled.filter((file) => /(^|[;{\s])accent-color\s*:/.test(readFileSync(file, 'utf8')));
-		expect(offenders.map((f) => f.slice(srcRoot.length))).toEqual([]);
+		expect(
+			offenders.map((f) => f.slice(srcRoot.length)),
+			'accent-color repaints a checked checkbox with the site accent. --primary measures 2.20:1 on Ember light, under the 3:1 non-text bar, and a checkbox has no label text to fall back on — that failure is why --ring exists. Leave the fill to the user agent.'
+		).toEqual([]);
 	});
 
 	// The pointer floor and the describedby wiring are the other half of the
@@ -758,7 +761,12 @@ describe('no accent-color override on form controls (SONA-172)', () => {
 		for (const row of rows) {
 			const id = row.match(/id="([^"]+)"/)?.[1];
 			expect(id, `a checkbox row has no id:\n${row}`).toBeTruthy();
-			expect(row).toContain(`aria-describedby="${id}-desc"`);
+			// The hint id has to be IN the description list, not necessarily be all
+			// of it: a row may describe its control with a second element as well
+			// (the RSS key-pending line does).
+			const describedBy = row.match(/aria-describedby=(?:"[^"]*"|\{[^}]*\})/)?.[0];
+			expect(describedBy, `a checkbox row has no aria-describedby:\n${row}`).toBeTruthy();
+			expect(describedBy).toContain(`${id}-desc`);
 			expect(row).toMatch(new RegExp(`class="checkbox-title" for="${id}"`));
 			expect(row).toContain(`id="${id}-desc"`);
 		}

@@ -251,10 +251,27 @@ describe('RSS feed key', () => {
 		await saveSite(platform, { rssNsfwEnabledPresent: '1', rssNsfwEnabled: 'on' });
 		const before = read('rssNsfwKey');
 
-		await actions.regenerateFeedKey({ platform } as never);
+		const result = await actions.regenerateFeedKey({ platform } as never);
 		const after = read('rssNsfwKey');
 		expect(after).toMatch(/^[0-9a-f]{32}$/);
 		expect(after).not.toBe(before);
+		// The key rides back in the result: the page shows the new address from
+		// this value instead of reloading its data. Drop it and the address on
+		// screen silently keeps pointing at the address that just died.
+		expect(result).toEqual({ success: true, feedKey: after });
+	});
+
+	// Regenerate must not rerun the load. The load feeds a $effect that reassigns
+	// every Site-tab field from the server, so an owner who types a new site name
+	// and then regenerates the key would watch the name revert with no warning.
+	it('shows the new address without reloading the page data', () => {
+		const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		const handler = src.split('<form id="regenerate-feed-key"')[1]?.split('</form>')[0] ?? '';
+		expect(handler).toContain('use:enhance');
+		expect(handler).not.toContain('update(');
+		expect(handler).toContain('result.data?.feedKey');
+		// And the displayed address prefers that key over the loaded one.
+		expect(src).toContain('regeneratedKey ?? data.settings.rssNsfwKey');
 	});
 
 	// The Regenerate control destroys a working address, so it must never be what
@@ -287,5 +304,17 @@ describe('RSS feed key', () => {
 		expect(keyGate).toBeGreaterThan(nsfwRow);
 		// And the key row is what sits inside that innermost gate.
 		expect(section.indexOf('<CopyCommand')).toBeGreaterThan(keyGate);
+		// The pre-save arm: ticked but nothing minted yet. Without it the section
+		// looks inert, and nothing else in the suite would notice it going.
+		expect(section).toContain('{:else if rssNsfwEnabled}');
+		expect(section.indexOf('m.admin_settings_rss_key_pending()')).toBeGreaterThan(
+			section.indexOf('{:else if rssNsfwEnabled}')
+		);
+		// The master hint changes tense with the toggle. Collapsing the ternary to
+		// either arm leaves an owner reading about a feed that is not in the state
+		// the text describes.
+		const hint = section.match(/\{rssFeedEnabled\s*\?([\s\S]*?)\}/)?.[0] ?? '';
+		expect(hint).toContain('m.admin_settings_rss_enabled_hint()');
+		expect(hint).toContain('m.admin_settings_rss_enabled_hint_off()');
 	});
 });

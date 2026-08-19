@@ -449,8 +449,12 @@ export const actions = {
 	// subscribed to it silently stops receiving anything.
 	regenerateFeedKey: async ({ platform }) => {
 		const db = getDb(platform!.env.DB);
-		await saveSettings(db, { rssNsfwKey: mintFeedKey() });
-		return { success: true };
+		// The minted key rides back in the result so the page can show the new
+		// address without reloading its data: a reload would resync every Site-tab
+		// field from the server and throw away edits the owner had not saved yet.
+		const key = mintFeedKey();
+		await saveSettings(db, { rssNsfwKey: key });
+		return { success: true, feedKey: key };
 	},
 
 	saveConnections: async ({ request, platform }) => {
