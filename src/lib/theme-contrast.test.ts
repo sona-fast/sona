@@ -539,6 +539,31 @@ describe('public chip text (foreground on secondary) WCAG AA contrast (SONA-124)
 	}
 });
 
+// SONA-115 puts the live convention row on a primary wash and its pill on solid
+// primary: `color-mix(in srgb, var(--primary) 8%, transparent)` over the page
+// background, and --primary-foreground on --primary. Neither pairing was pinned
+// anywhere: the wash is a NEW surface (the same one /connect's here-now block
+// uses), and --primary-foreground on --primary was only ever asserted for
+// terracotta. Both are asserted here for every theme × mode.
+describe('SONA-115 live-row wash and live pill WCAG AA contrast', () => {
+	// The wash is mixed over transparent, so its real surface is the composite
+	// with whatever it sits on, which for a table row is the page background.
+	const WASH_PCT = 8;
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: row text meets 4.5:1 on the live wash over the background`, () => {
+			const washed = mix2(blockToken(sel, 'primary'), WASH_PCT, blockToken(sel, 'background'));
+			expect(contrast(blockToken(sel, 'foreground'), washed)).toBeGreaterThanOrEqual(4.5);
+		});
+
+		it(`${name}: the live pill's label meets 4.5:1 on solid primary`, () => {
+			expect(
+				contrast(blockToken(sel, 'primary-foreground'), blockToken(sel, 'primary'))
+			).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
+
 describe('SONA-124 chip CSS keeps the --foreground token (R2-A3)', () => {
 	// The token pairing above only matters while the components actually USE
 	// the token: a revert to color: var(--muted-foreground) in any chip rule

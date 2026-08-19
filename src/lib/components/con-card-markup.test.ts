@@ -70,6 +70,9 @@ describe('ConCard download paths', () => {
 		// avatarFailed is the embed path's alone; a raster failure must never claim
 		// a file was saved. Both save paths route their catch to rasterFailed.
 		expect(source.match(/avatarFailed = true/g) ?? []).toHaveLength(1);
+		// All THREE save paths, print included: it can fail too (the sheet is built
+		// and handed to the browser), and a silent one leaves no file and no message.
+		expect(source).toMatch(/downloadPrint[\s\S]*?catch \{[\s\S]*?rasterFailed = true;/);
 		expect(source).toMatch(/savePhone[\s\S]*?catch \{[\s\S]*?rasterFailed = true;/);
 		expect(source).toMatch(/saveFront[\s\S]*?catch \{[\s\S]*?rasterFailed = true;/);
 		// A canvas with no context and an encode with no blob are failures, not
@@ -84,6 +87,35 @@ describe('ConCard download paths', () => {
 		expect(source).toMatch(
 			/<p class="status-line" role="status">[\s\S]*?\{#if avatarFailed\}[\s\S]*?\{#if rasterFailed\}[\s\S]*?<\/p>/
 		);
+		// And the regression the positive match alone does not forbid: an {#if}
+		// WRAPPING the <p> puts the region and its text into the DOM together,
+		// which is the arrangement that goes unannounced.
+		expect(source).not.toMatch(
+			/\{#if[^}]*(avatarFailed|rasterFailed)[^}]*\}\s*<p class="status-line"/
+		);
+	});
+
+	it('says which fields each preview face is carrying, in its accessible name', () => {
+		// The toggles are the whole point of the control, and a bare "front of the
+		// con card" is the same name whichever boxes are ticked.
+		expect(source).toMatch(/previewFront[\s\S]*?title: withFields\(m\.con_card_title_front/);
+		expect(source).toMatch(/previewBack[\s\S]*?title: withFields\(m\.con_card_title_back/);
+		// Read off the shared object, so the list cannot disagree with the card.
+		expect(source).toMatch(/shared\.species \? m\.con_card_field_species\(\)/);
+		expect(source).toMatch(/shared\.handles\.length \? m\.con_card_handles\(\)/);
+	});
+
+	it('clears both failure flags at the top of all three save paths', () => {
+		// One state machine across the three buttons: a press reports on itself, so
+		// a transient avatar fetch failure is retried rather than remembered
+		// forever, and a stale "couldn't save" never sits over a save that worked.
+		for (const handler of ['downloadPrint', 'savePhone', 'saveFront']) {
+			expect(source, handler).toMatch(
+				new RegExp(`${handler}\\(\\)[\\s\\S]*?rasterFailed = false;\\s*avatarFailed = false;`)
+			);
+		}
+		// The cached data URI is NOT cleared with the flag: a success stays one fetch.
+		expect(source).not.toMatch(/avatarData = null/);
 	});
 
 	it('marks a save in progress with aria-busy rather than disabling the button', () => {

@@ -186,14 +186,57 @@ describe('conCardFaceSvg — the front', () => {
 		expect(narrow).toContain('a'.repeat(15));
 	});
 
-	it('cuts by code point, so a clamped name never ends in half a surrogate pair', () => {
+	it('cuts by grapheme cluster, so a clamped name never ends in half a surrogate pair', () => {
 		// A lone surrogate makes the markup unencodable: encodeURIComponent, which
 		// the raster path runs the whole SVG through, throws on one.
-		const svg = front({ name: '🦊'.repeat(40), species: null, avatarHref: 'data:image/png;base64,AAAA' });
-		const clamped = texts(svg).find((t) => t.startsWith('🦊')) ?? '';
+		//
+		// The leading 'A' is load-bearing. Without it every cut offset in the string
+		// is even, so a code-unit slice lands on a pair boundary by coincidence and
+		// the assertion passes against the very bug it exists for.
+		const svg = front({
+			name: `A${'🦊'.repeat(40)}`,
+			species: null,
+			avatarHref: 'data:image/png;base64,AAAA'
+		});
+		const clamped = texts(svg).find((t) => t.startsWith('A')) ?? '';
 		expect(clamped.endsWith('…')).toBe(true);
 		expect(clamped).not.toMatch(/[\uD800-\uDFFF]/u);
 		expect(() => encodeURIComponent(svg)).not.toThrow();
+	});
+
+	it('measures an emoji at a full em, so a row of them shrinks instead of overrunning', () => {
+		// An emoji is drawn on the same square em a CJK glyph is. Eight of them at
+		// the base size are 1216 units wide in a 738 unit column; measured at the
+		// Latin 0.6em they came to 730 and sailed through the fit.
+		const avatarHref = 'data:image/png;base64,AAAA';
+		const [rendered] = sized(front({ name: '🦊'.repeat(8), species: null, avatarHref }));
+		expect(rendered.size).toBeLessThan(152);
+		// Shrunk, not cut, and inside the content column under the weighted measure.
+		expect(rendered.body).toBe('🦊'.repeat(8));
+		expect(8 * rendered.size).toBeLessThanOrEqual(CON_CARD_WIDTH - 56 * 2);
+	});
+
+	it('counts a ZWJ family emoji as the one glyph it draws as, and never cuts inside it', () => {
+		// Seven code points, one cluster. Counted by code point the four families
+		// below measure 16.8em, get shrunk to the size floor, and are then cut
+		// through the middle of a family; counted by cluster they are 4em and fit
+		// the column at the base size.
+		const avatarHref = 'data:image/png;base64,AAAA';
+		const FAMILY = '👨‍👩‍👧‍👦';
+		const [four] = sized(front({ name: FAMILY.repeat(4), species: null, avatarHref }));
+		expect(four.size).toBe(152);
+		expect(four.body).toBe(FAMILY.repeat(4));
+
+		// And where it genuinely does not fit, the cut lands between families: a
+		// whole number of them, no dangling ZWJ, no half of a surrogate pair.
+		const [many] = sized(front({ name: FAMILY.repeat(12), species: null, avatarHref }));
+		expect(many.body.endsWith('…')).toBe(true);
+		const cut = many.body.slice(0, -1);
+		const kept = cut.length / FAMILY.length;
+		expect(cut).toBe(FAMILY.repeat(kept));
+		expect(kept).toBeGreaterThan(0);
+		expect(kept).toBeLessThan(12);
+		expect(many.body).not.toMatch(/[\uD800-\uDFFF]/u);
 	});
 
 	it('shrinks a name too long for the card instead of running it off the edge', () => {

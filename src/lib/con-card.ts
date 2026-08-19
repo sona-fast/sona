@@ -182,26 +182,47 @@ function esc(value: string): string {
  * A Japanese name is not measured by that number. East Asian Wide and Fullwidth
  * code points are drawn on a square em by every family in the stack above, so a
  * seven-glyph name measured at 0.6em passes the fit and then clips off the edge
- * of a printed card. They count as a full em instead.
+ * of a printed card. They count as a full em instead, and so does an emoji,
+ * which is drawn on the same square em.
+ *
+ * The unit of the measure is the GRAPHEME CLUSTER, not the code point. A ZWJ
+ * family emoji is seven code points and one drawn glyph: counted as seven it
+ * measures four times its real width, and gets shrunk to the size floor and
+ * then cut through the middle of the family. Segmenting first also makes the
+ * cut safe by construction, since a cluster boundary is never inside a
+ * surrogate pair.
  */
 const AVG_ADVANCE = 0.6;
 const WIDE_ADVANCE = 1;
 /** East Asian Wide / Fullwidth: Hangul jamo, CJK radicals and punctuation, kana,
  *  the CJK ideograph blocks (incl. the astral extensions), Hangul syllables,
- *  compatibility ideographs, and the fullwidth forms. */
+ *  compatibility ideographs, and the fullwidth forms. Plus the pictographs, and
+ *  the regional indicators a flag is built from: both square-em drawn. */
 const WIDE =
-	/[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{20000}-\u{3FFFD}]/u;
+	/[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{20000}-\u{3FFFD}\u{1F1E6}-\u{1F1FF}]|\p{Extended_Pictographic}/u;
 
-/** Advance of a single code point, in em. */
-function advanceOf(glyph: string): number {
-	return WIDE.test(glyph) ? WIDE_ADVANCE : AVG_ADVANCE;
+/** Intl.Segmenter is in workerd and in node, which is everywhere this file
+ *  runs. Built once: a segmenter per measured string would be the expensive
+ *  part of drawing a card. */
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+function clusters(body: string): string[] {
+	return [...GRAPHEMES.segment(body)].map((part) => part.segment);
 }
 
-/** Advance of a whole string, in em. Iterated by code point, so an astral glyph
- *  is measured once rather than as its two surrogates. */
+/** Advance of one grapheme cluster, in em, decided by its BASE code point: the
+ *  ZWJ, variation-selector and combining tail behind that base draws inside the
+ *  base's own box rather than beside it, so the whole cluster is one unit. */
+function advanceOf(cluster: string): number {
+	const base = cluster.codePointAt(0);
+	if (base === undefined) return 0;
+	return WIDE.test(String.fromCodePoint(base)) ? WIDE_ADVANCE : AVG_ADVANCE;
+}
+
+/** Advance of a whole string, in em. */
 function advanceEm(body: string): number {
 	let em = 0;
-	for (const glyph of body) em += advanceOf(glyph);
+	for (const cluster of clusters(body)) em += advanceOf(cluster);
 	return em;
 }
 
@@ -217,21 +238,22 @@ function fitSize(body: string, width: number, base: number, min: number): number
 }
 
 /** Cut to what fits at `size`, with an ellipsis stating that it was cut. Cut by
- *  CODE POINT, never by code unit: half a surrogate pair makes the markup
- *  unencodable, and encodeURIComponent (the raster path) throws on it. */
+ *  GRAPHEME CLUSTER, never by code unit: half a surrogate pair makes the markup
+ *  unencodable, and encodeURIComponent (the raster path) throws on it. A cut
+ *  inside a ZWJ sequence is legal markup and still wrong: it prints a stray
+ *  member of the family. */
 function clampText(body: string, size: number, width: number): string {
 	if (fitsIn(body, size, width)) return body;
 	// The ellipsis takes an advance of its own out of the budget.
 	const budget = width / size - AVG_ADVANCE;
 	const kept: string[] = [];
 	let em = 0;
-	for (const glyph of body) {
-		const next = em + advanceOf(glyph);
+	for (const cluster of clusters(body)) {
+		const next = em + advanceOf(cluster);
+		// A width too narrow for even one cluster still keeps that one cluster.
 		if (next > budget && kept.length > 0) break;
-		kept.push(glyph);
+		kept.push(cluster);
 		em = next;
-		// A width too narrow for even one glyph still keeps that one glyph.
-		if (em > budget) break;
 	}
 	return `${kept.join('').trimEnd()}…`;
 }

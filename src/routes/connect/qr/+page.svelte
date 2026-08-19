@@ -55,13 +55,14 @@
 		gap: 16px;
 		padding: 24px;
 		text-align: center;
-		/* The one screen whose first paint cannot wait on a webfont round trip: it
-		   is opened on convention wifi to be read out loud. */
+		/* The fork's own face, with a system stack behind it: this screen is held up
+		   at a table and read out loud, and it should look like the rest of the site
+		   doing it. First paint does not wait on the round trip either way, since the
+		   face is loaded with display=swap. */
 		font-family:
+			var(--font-primary),
 			system-ui,
 			-apple-system,
-			'Segoe UI',
-			Roboto,
 			sans-serif;
 	}
 
@@ -95,14 +96,22 @@
 		padding: 14px;
 		border-radius: 12px;
 		line-height: 0;
+		/* Same opt-out as .nsfw-badge: in forced-colors the plate and the modules
+		   both take the system pair and the code collapses into one solid square.
+		   A QR is not decoration, and an unscannable one is the whole screen
+		   failing. */
+		forced-color-adjust: none;
 	}
 
 	/* Bounded by the shorter viewport side so the code stays square and fully
-	   visible when the phone is held in landscape. */
+	   visible when the phone is held in landscape. 48vh rather than 62vh: at 62 the
+	   typed-URL fallback and the hint fall off a 390-tall landscape viewport, and
+	   the code is no use to someone who cannot scan it. */
 	.qr {
 		display: block;
-		width: min(62vw, 62vh, 420px);
-		height: min(62vw, 62vh, 420px);
+		width: min(62vw, 48vh, 420px);
+		height: min(62vw, 48vh, 420px);
+		forced-color-adjust: none;
 	}
 
 	.who {

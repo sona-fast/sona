@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
-import { asc } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { conventions, siteSettings } from '$lib/server/db/schema';
 import { clearSettingsCache } from '$lib/server/settings';
@@ -279,5 +279,112 @@ describe('cons.fyi sync: timezone', () => {
 		await sync(platform);
 
 		expect((await rows(db))[0].timezone).toBeNull();
+	});
+
+	it('leaves a zone alone when another writer fills it between the read and the write', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(conventions).values({
+			...TAILS,
+			name: 'Midwest FurFest 2026',
+			sourceId: 'mff-2026',
+			timezone: null
+		});
+		await attending(db, [event({ timezone: 'America/Chicago' })]);
+
+		// The backfill decides from a SELECT and writes later, so the isNull in its
+		// WHERE is the only thing standing between a hand-corrected zone and the
+		// feed's. Slip that correction in at the batch boundary, which is the one
+		// moment the race has, and the guard either holds or the fix is decorative.
+		const d1 = platform.env!.DB;
+		const realBatch = d1.batch.bind(d1);
+		d1.batch = (async (statements: never) => {
+			await db
+				.update(conventions)
+				.set({ timezone: 'America/Denver' })
+				.where(eq(conventions.sourceId, 'mff-2026'));
+			return realBatch(statements);
+		}) as typeof d1.batch;
+
+		const result = await sync(platform);
+
+		expect((await rows(db))[0].timezone).toBe('America/Denver');
+		// Counted from what the sync decided to write, not from what landed: the
+		// message is about the attempt, and the row it names is genuinely filled in.
+		expect(result.message).toContain('1 convention');
+	});
+});
+
+// The feed is a third party, and a convention's url is rendered as an href on the
+// public schedule. Both ingest paths run it through the same sanitizeUrl gate the
+// hand-typed form uses, so a javascript: href can't reach the page through
+// cons.fyi (or through a DNS answer for it) when it can't reach it by hand.
+describe('cons.fyi ingest: url sanitizing', () => {
+	function event(overrides: Partial<ConsFyiEvent> = {}): ConsFyiEvent {
+		return {
+			id: 'mff-2026',
+			name: 'Midwest FurFest 2026',
+			url: 'javascript:alert(1)',
+			startDate: '2026-12-03',
+			endDate: '2026-12-06',
+			location: 'Rosemont, IL',
+			timezone: 'America/Chicago',
+			...overrides
+		};
+	}
+
+	afterEach(() => {
+		clearSettingsCache();
+		vi.mocked(consfyi.blueskyHandle).mockReturnValue(null);
+		vi.mocked(consfyi.fetchAttendingEvents).mockResolvedValue([]);
+		vi.mocked(consfyi.findConsFyiEvent).mockResolvedValue(undefined);
+	});
+
+	it('stores null for a javascript: url the sync brings in', async () => {
+		const { db, platform } = makeDb();
+		clearSettingsCache();
+		await db.insert(siteSettings).values({ key: 'blueskyUrl', value: 'https://bsky.app/profile/taro.surf' });
+		vi.mocked(consfyi.blueskyHandle).mockReturnValue('taro.surf');
+		vi.mocked(consfyi.fetchAttendingEvents).mockResolvedValue([event()]);
+
+		await actions.sync({ platform } as never);
+
+		const stored = await db.select().from(conventions).orderBy(asc(conventions.id));
+		// The row is still added: the con is real, only its link is not.
+		expect(stored).toMatchObject([{ sourceId: 'mff-2026', url: null }]);
+	});
+
+	it('stores null for a javascript: url picked from the feed by hand', async () => {
+		const { db, platform } = makeDb();
+		vi.mocked(consfyi.findConsFyiEvent).mockResolvedValue(event());
+		const body = new FormData();
+		body.append('sourceId', 'mff-2026');
+
+		await actions.addFromSource({
+			platform,
+			request: new Request('https://taro.surf/admin/conventions?/addFromSource', {
+				method: 'POST',
+				body
+			})
+		} as never);
+
+		expect(await db.select().from(conventions)).toMatchObject([{ url: null }]);
+	});
+
+	it('keeps a real https url through both paths', async () => {
+		// The other direction: a gate that nulls everything would pass the two above.
+		const { db, platform } = makeDb();
+		vi.mocked(consfyi.findConsFyiEvent).mockResolvedValue(event({ url: 'https://furfest.org' }));
+		const body = new FormData();
+		body.append('sourceId', 'mff-2026');
+
+		await actions.addFromSource({
+			platform,
+			request: new Request('https://taro.surf/admin/conventions?/addFromSource', {
+				method: 'POST',
+				body
+			})
+		} as never);
+
+		expect(await db.select().from(conventions)).toMatchObject([{ url: 'https://furfest.org' }]);
 	});
 });

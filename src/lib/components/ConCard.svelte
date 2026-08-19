@@ -77,6 +77,19 @@
 		madeWith: m.con_card_made_with()
 	});
 
+	// What each face is actually carrying right now, appended to its accessible
+	// name. The preview is a picture: without this a screen reader hears "front of
+	// the con card" whichever boxes are ticked, which is the one thing this
+	// control exists to change. Read off `shared`, so a toggle can never disagree
+	// with the list. Concatenated with no separator of its own: the suffix message
+	// carries its own leading space in English and none in Japanese, which does
+	// not put one between a sentence and a parenthetical.
+	function withFields(title: string, fields: string[]): string {
+		const listed = fields.filter(Boolean);
+		if (listed.length === 0) return title;
+		return `${title}${m.con_card_title_fields({ fields: listed.join(m.con_card_field_join()) })}`;
+	}
+
 	// The preview can point straight at the avatar: it renders in the page, where
 	// the URL resolves. The downloads can't, which is what embedAvatar is for.
 	const previewFront = $derived(
@@ -84,14 +97,20 @@
 			...shared,
 			variant: 'light',
 			avatarHref: avatarSrc,
-			title: m.con_card_title_front({ name })
+			title: withFields(m.con_card_title_front({ name }), [
+				shared.species ? m.con_card_field_species() : '',
+				shared.colors.length ? m.con_card_field_colors() : ''
+			])
 		})
 	);
 	const previewBack = $derived(
 		conCardFaceSvg('back', {
 			...shared,
 			variant: 'light',
-			title: m.con_card_title_back({ name })
+			title: withFields(m.con_card_title_back({ name }), [
+				shared.handles.length ? m.con_card_handles() : '',
+				shared.artCredit ? m.con_card_include_credit() : ''
+			])
 		})
 	);
 
@@ -154,9 +173,15 @@
 		save(blob, filename);
 	}
 
+	// All three save paths share one state machine: clear both flags on the way in
+	// so each press reports on itself, and route every failure to rasterFailed.
+	// avatarFailed resets too, so a fetch that failed once on bad wifi is retried
+	// on the next press; avatarData is NOT cleared, so a success stays one fetch.
 	async function downloadPrint() {
 		if (savingPrint) return;
 		savingPrint = true;
+		rasterFailed = false;
+		avatarFailed = false;
 		try {
 			// One sheet with both faces, so the operator prints once and cuts twice.
 			const svg = conCardPrintSheetSvg({
@@ -165,6 +190,11 @@
 				title: m.con_card_title({ name })
 			});
 			save(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), `${conCardFileBase(name)}.svg`);
+		} catch {
+			// Building the sheet or handing it to the browser threw: no file reached
+			// the disk, and the avatar is not what failed (embedAvatar swallows its
+			// own failure and returns null).
+			rasterFailed = true;
 		} finally {
 			savingPrint = false;
 		}
@@ -174,6 +204,7 @@
 		if (savingPhone) return;
 		savingPhone = true;
 		rasterFailed = false;
+		avatarFailed = false;
 		try {
 			// The back alone: at a con the phone has one job, and the front adds
 			// nothing to a screen the person holding it is already looking at.
@@ -196,6 +227,7 @@
 		if (savingFront) return;
 		savingFront = true;
 		rasterFailed = false;
+		avatarFailed = false;
 		try {
 			const svg = conCardFaceSvg('front', {
 				...shared,
@@ -261,13 +293,12 @@
 			</fieldset>
 		{/if}
 
-		{#if chosenHandles.length > COMFORTABLE_HANDLES}
-			<p class="hint">{m.con_card_handle_hint()}</p>
-		{/if}
-		<!-- Always in the DOM, empty until something fails: a live region created
-		     together with its text is not reliably announced. Both failures share it
-		     because they are the same moment for the operator. -->
+		<!-- Always in the DOM, empty until something has to be said: a live region
+		     created together with its text is not reliably announced. The handle hint
+		     shares it with the two failures because all three are the same moment for
+		     the operator: something about the card just changed under them. -->
 		<p class="status-line" role="status">
+			{#if chosenHandles.length > COMFORTABLE_HANDLES}<span class="hint">{m.con_card_handle_hint()}</span>{/if}
 			{#if avatarFailed}<span class="hint art-failed">{m.con_card_art_failed()}</span>{/if}
 			{#if rasterFailed}<span class="hint art-failed">{m.con_card_save_failed()}</span>{/if}
 		</p>
@@ -306,9 +337,10 @@
 	}
 	.preview figure {
 		margin: 0;
-		/* Shrinks rather than wraps: on a 390px phone the two faces have to stay
-		   side by side, which is how a two-sided card reads at all. */
-		flex: 1 1 150px;
+		/* Shrinks rather than wraps: on a 320px phone the two faces have to stay
+		   side by side, which is how a two-sided card reads at all. The basis is
+		   what the pair costs at that width, gap included. */
+		flex: 1 1 130px;
 		max-width: 200px;
 	}
 	.preview figcaption {
@@ -324,6 +356,10 @@
 		/* The light card is opaque white in both modes; a frame keeps it from
 		   floating on a dark settings page. */
 		box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+		/* Same opt-out as .nsfw-badge: in forced-colors every fill in the preview
+		   would collapse to the system pair, and the card would read as one solid
+		   block rather than as the thing about to come out of a printer. */
+		forced-color-adjust: none;
 	}
 	.face :global(svg) {
 		display: block;
@@ -375,6 +411,15 @@
 		grid-template-columns: auto auto 1fr;
 		align-items: center;
 		gap: 7px;
+		/* The row is the click target, so it gets a hover of its own. The inline
+		   padding is paid back as a negative margin: the wash reaches past the text
+		   on both sides without the row moving when it appears. */
+		margin-inline: -8px;
+		padding-inline: 8px;
+		border-radius: var(--radius-s);
+	}
+	.handles .handle-row:hover {
+		background: var(--secondary);
 	}
 	.handle-value {
 		justify-self: end;
@@ -390,6 +435,25 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 7px;
+	}
+	/* On a phone the two buttons wrap to a ragged pair of half-rows. Stack them
+	   full width instead, and put "save to phone" on top: it is the save that
+	   matters, and on a phone it is the one being pressed. `order` only, so the
+	   tab order still runs print then phone, matching the DOM. */
+	@media (max-width: 520px) {
+		.actions {
+			display: grid;
+			grid-template-columns: 1fr;
+			/* .controls packs its children to the start, so the row has to claim the
+			   width before the buttons can fill it. */
+			justify-self: stretch;
+		}
+		.actions .btn {
+			justify-content: center;
+		}
+		.actions .btn-primary {
+			order: -1;
+		}
 	}
 	.hint {
 		margin: 0;

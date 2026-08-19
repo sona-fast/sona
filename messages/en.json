@@ -1699,10 +1699,12 @@
 	"admin_settings_con_card_heading": "Con card",
 	"admin_settings_con_card_subtitle": "Save your card to your phone before you travel, so you aren't relying on convention Wi-Fi.",
 	"admin_settings_con_card_locked": "Con cards open to everyone on {date}. A supporter key unlocks them now.",
-	"admin_settings_con_card_locked_link": "Add a supporter key",
+	"admin_settings_con_card_locked_link": "Add your key",
 	"con_card_title": "Con card for {name}",
 	"con_card_title_front": "Front of the con card for {name}",
 	"con_card_title_back": "Back of the con card for {name}",
+	"con_card_title_fields": " Includes {fields}.",
+	"con_card_field_join": ", ",
 	"con_card_face_front": "Front",
 	"con_card_face_back": "Back",
 	"con_card_made_with": "Made with Sona",
@@ -1718,6 +1720,6 @@
 	"con_card_save_phone_hint": "Saves the back as a PNG, because Photos on iPhone won't accept an SVG.",
 	"con_card_save_front": "Save the front for a lock screen",
 	"con_card_art_failed": "Your avatar wouldn't load, so the card uses your initial instead.",
-	"con_card_save_failed": "The save didn't work. Try again.",
+	"con_card_save_failed": "Couldn't save the card. Try again.",
 	"con_qr_svg_label": "QR code for {url}"
 }

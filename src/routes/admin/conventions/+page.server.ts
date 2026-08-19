@@ -54,7 +54,9 @@ export const actions = {
 			location: event.location || null,
 			startDate: event.startDate,
 			endDate: event.endDate || null,
-			url: event.url || null,
+			// Through the same gate as a hand-typed url. The feed is a third party,
+			// and this value is rendered as an href on the public schedule.
+			url: sanitizeUrl(event.url) || null,
 			status: normStatus(data.get('status')),
 			sourceId,
 			timezone: event.timezone || null
@@ -124,39 +126,46 @@ export const actions = {
 		const needsZone = new Set(rows.filter((r) => r.sourceId && !r.timezone).map((r) => r.sourceId));
 
 		let added = 0;
+		let backfilled = 0;
 		// Collected rather than awaited one at a time: a sync can touch a dozen rows,
 		// and D1 charges a subrequest per statement (the SONA-124 db.batch precedent).
-		const backfills: BatchItem<'sqlite'>[] = [];
+		// The inserts ride the same batch as the backfills, so the whole sync is one
+		// round trip and lands all-or-nothing rather than half-applied.
+		const writes: BatchItem<'sqlite'>[] = [];
 		for (const e of events) {
 			if (existing.has(e.id)) {
 				// Already on the schedule, but with no zone. Never overwrites a zone
 				// that is already set.
 				if (e.timezone && needsZone.has(e.id)) {
-					backfills.push(
+					writes.push(
 						db
 							.update(conventions)
 							.set({ timezone: e.timezone })
 							.where(and(eq(conventions.sourceId, e.id), isNull(conventions.timezone)))
 					);
+					backfilled++;
 				}
 				continue;
 			}
-			await db.insert(conventions).values({
-				name: e.name,
-				location: e.location || null,
-				startDate: e.startDate,
-				endDate: e.endDate || null,
-				url: e.url || null,
-				status: 'confirmed',
-				sourceId: e.id,
-				timezone: e.timezone || null
-			});
+			writes.push(
+				db.insert(conventions).values({
+					name: e.name,
+					location: e.location || null,
+					startDate: e.startDate,
+					endDate: e.endDate || null,
+					// Same gate as the manual path: the feed is a third party and this
+					// value becomes an href on the public schedule.
+					url: sanitizeUrl(e.url) || null,
+					status: 'confirmed',
+					sourceId: e.id,
+					timezone: e.timezone || null
+				})
+			);
 			added++;
 		}
-		if (backfills.length > 0) {
-			await db.batch(backfills as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
+		if (writes.length > 0) {
+			await db.batch(writes as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
 		}
-		const backfilled = backfills.length;
 
 		const parts: string[] = [];
 		if (added > 0) parts.push(`Synced ${added} convention${added === 1 ? '' : 's'} from cons.fyi.`);

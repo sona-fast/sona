@@ -1382,10 +1382,12 @@
 	"admin_settings_con_card_heading": "コンカード",
 	"admin_settings_con_card_subtitle": "出発前にスマホに保存しておけば、会場のWi-Fiに頼らずに済みます。",
 	"admin_settings_con_card_locked": "コンカードは{date}に全員公開されます。サポーターキーがあれば今すぐ使えます。",
-	"admin_settings_con_card_locked_link": "サポーターキーを追加",
+	"admin_settings_con_card_locked_link": "キーを追加",
 	"con_card_title": "{name}のコンカード",
 	"con_card_title_front": "{name}のコンカードの表面",
 	"con_card_title_back": "{name}のコンカードの裏面",
+	"con_card_title_fields": "（{fields}を含む）",
+	"con_card_field_join": "、",
 	"con_card_face_front": "表面",
 	"con_card_face_back": "裏面",
 	"con_card_made_with": "Sonaで作成",
@@ -1400,7 +1402,7 @@
 	"con_card_save_phone": "スマホに保存",
 	"con_card_save_phone_hint": "iPhoneの写真アプリはSVGを受け付けないため、裏面をPNGで保存します。",
 	"con_card_save_front": "ロック画面用に表面も保存",
-	"con_card_art_failed": "アイコン画像を読み込めなかったため、頭文字で表示しています。",
-	"con_card_save_failed": "保存できませんでした。もう一度お試しください。",
+	"con_card_art_failed": "アバター画像を読み込めなかったため、頭文字で表示しています。",
+	"con_card_save_failed": "カードを保存できませんでした。もう一度お試しください。",
 	"con_qr_svg_label": "{url}のQRコード"
 }

@@ -78,9 +78,11 @@ describe('/connect/qr markup', () => {
 		expect(source).toMatch(/aria-label=\{m\.con_qr_svg_label\(\{ url: data\.displayUrl \}\)\}/);
 	});
 
-	it('paints its text in a system font, without waiting on the webfont chain', () => {
-		expect(source).toMatch(/font-family:\s*\n?\s*system-ui/);
-		// Nothing on the page re-opts into the branded family.
-		expect(source).not.toContain('var(--font-primary)');
+	it('leads with the fork face and keeps a system stack behind it', () => {
+		// The screen is held up at a table with the fork's name on it, so it uses
+		// the fork's face. First paint still does not wait on the round trip: every
+		// family in app.css is loaded with display: swap, which paints the fallback
+		// and swaps the face in when it arrives.
+		expect(source).toMatch(/font-family:\s*\n?\s*var\(--font-primary\),\s*\n?\s*system-ui/);
 	});
 });

@@ -1250,9 +1250,11 @@
 	<h2>{m.admin_settings_con_card_heading()}</h2>
 	<p class="explainer-body">{m.admin_settings_con_card_subtitle()}</p>
 	{#if conCardEnabled}
-		<!-- Lazy chunk, like the ref-sheet picker: the card builds two full SVGs and
-		     rasterizes through a canvas, and every other tab of this page would
-		     otherwise carry that. -->
+		<!-- Deferred chunk, like the ref-sheet picker: the card builds two full SVGs
+		     and rasterizes through a canvas, and none of that belongs in the bundle
+		     the settings page blocks on. It is NOT tab-scoped: the section is in the
+		     DOM on every tab (CSS hides it), so the import starts as soon as this
+		     page renders, just not before it. -->
 		{#await import('$lib/components/ConCard.svelte') then { default: ConCard }}
 			<ConCard
 				name={data.conCard.name}
@@ -1268,7 +1270,7 @@
 	{:else}
 		<!-- The key field is on this same tab, so the hint can point straight at it
 		     rather than leaving the operator to find it. -->
-		<p class="hint">{m.admin_settings_con_card_locked({ date: conCardGaDate })} <a class="link-inline" href="#supporter-key">{m.admin_settings_con_card_locked_link()}</a></p>
+		<p class="hint">{m.admin_settings_con_card_locked({ date: conCardGaDate })} <a class="link-inline" href="#supporter-key">{m.admin_settings_con_card_locked_link()}</a>.</p>
 	{/if}
 </section>
 
