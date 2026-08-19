@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -6,19 +7,20 @@ import type { D1Database } from '@cloudflare/workers-types';
 import { isRedirect } from '@sveltejs/kit';
 import { DrizzleQueryError } from 'drizzle-orm/errors';
 
-// Control the setup gate without touching D1. hashToken is also imported by the
-// hook (unused here — no session cookie), so keep the rest of the module real.
+// Control the setup gate without touching D1. The spread keeps the rest of the
+// module real — hashToken in particular, which the hook AND the authenticated
+// cache test below both need to agree on.
 vi.mock('$lib/server/admin-auth', async (orig) => ({
 	...(await orig<typeof import('$lib/server/admin-auth')>()),
 	getSetupState: vi.fn()
 }));
 
-import { getSetupState } from '$lib/server/admin-auth';
-import { authHandle, handleError } from './hooks.server';
+import { getSetupState, hashToken } from '$lib/server/admin-auth';
+import { authHandle, handleError, decodePathname } from './hooks.server';
 
 import { makeD1 } from '$lib/server/test/d1';
 import { ADMIN_AUTH_EXEMPT, isAdminAuthExempt } from '$lib/admin-routes';
-import { VIEWER_TZ_COOKIE } from '$lib/config';
+import { SESSION_COOKIE, VIEWER_TZ_COOKIE } from '$lib/config';
 
 function makeDb(): D1Database {
 	const sqlite = new Database(':memory:');
@@ -254,19 +256,233 @@ describe('authHandle — /api/oembed is public (third-party embedders have no se
 	it('does not exempt sibling paths — a prefix match would open the whole namespace', async () => {
 		vi.mocked(getSetupState).mockResolvedValue('complete');
 
-		// '/api/%6Fembed' pins the encoding case as DEFENSE IN DEPTH, not as production
-		// behaviour: the hook compares the RAW pathname while SvelteKit's router decodes
-		// per-segment. In production, Cloudflare URL normalization (scope `incoming`,
-		// enabled on every fork zone) decodes the path before the Worker sees it, so a
-		// real request spelled this way arrives as '/api/oembed' and is served. This
-		// asserts the hook still fails closed on a zone with normalization turned off.
-		for (const path of ['/api/oembed/extra', '/api/oembedx', '/api/%6Fembed']) {
+		for (const path of ['/api/oembed/extra', '/api/oembedx']) {
 			const res = (await authHandle({
 				event: makeEvent(path, makeDb()),
 				resolve
 			} as never)) as Response;
 			expect(res.status, `${path} must stay behind the admin gate`).toBe(401);
 		}
+	});
+
+	it('does not exempt a non-canonical spelling — exemptions are canonical-only (SONA-187)', async () => {
+		vi.mocked(getSetupState).mockResolvedValue('complete');
+
+		// '/api/%6Fembed' routes to /api/oembed in Kit, but the exemption must NOT
+		// follow it there: other systems keyed on the LITERAL path (the zone
+		// rate-limit rule in scripts/waf-lib.ts, the admin layout's
+		// isAdminAuthExempt($page.url.pathname) read) do not recognize the encoded
+		// spelling, so exempting it would serve it unauthenticated but
+		// un-rate-limited. Encoded spellings get gates, never exemptions — the
+		// /api/cron/ namespace included.
+		for (const path of ['/api/%6Fembed', '/api/metrics/downloa%64', '/api/cro%6E/purge']) {
+			const res = (await authHandle({
+				event: makeEvent(path, makeDb()),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must stay behind the admin gate`).toBe(401);
+		}
+
+		// Same for the admin-side exemptions: an encoded spelling of /admin/login
+		// is an ordinary admin path to the gate and redirects like one.
+		const db = makeDb();
+		expect(await redirectFor('/admin/lo%67in', db)).toEqual({ status: 302, location: '/admin/login' });
+		expect(await redirectFor('/%61dmin/login', db)).toEqual({ status: 302, location: '/admin/login' });
+	});
+});
+
+// The whole SONA-187 fix rests on decodePathname producing the SAME string Kit
+// routes on. Kit does not export decode_pathname, so pin it against Kit's own
+// source: read the function out of node_modules, reconstruct it, and compare
+// behaviour. A @sveltejs/kit upgrade that changes decode_pathname fails here and
+// forces decodePathname to be re-checked rather than silently diverging.
+describe('decodePathname stays a faithful mirror of Kit decode_pathname', () => {
+	const src = readFileSync('node_modules/@sveltejs/kit/src/utils/url.js', 'utf8');
+	const body = src.match(/export function decode_pathname\(pathname\)\s*\{([\s\S]*?)\n\}/)?.[1];
+	if (!body) throw new Error('decode_pathname not found in Kit source — update this drift guard');
+	const kitDecode = new Function('pathname', body) as (p: string) => string;
+
+	const cases = [
+		'/',
+		'/admin/images',
+		'/%61dmin/images',
+		'/%2561dmin/images',
+		'/api%2Foembed',
+		'/tags/foo%20bar',
+		'/tags/%E6%97%A5%E6%9C%AC',
+		'/%25',
+		'/%2525'
+	];
+	it.each(cases)('matches Kit for %s', (input) => {
+		expect(decodePathname(input)).toBe(kitDecode(input));
+	});
+
+	it('throws on the same malformed sequence Kit throws on', () => {
+		expect(() => decodePathname('/%E0%A4%A')).toThrow();
+		expect(() => kitDecode('/%E0%A4%A')).toThrow();
+	});
+});
+
+// SONA-187: SvelteKit matches routes on the DECODED pathname, so every gate
+// must too — a percent-encoded first character ('/%61dmin' = '/admin') used to
+// skip the admin session gate, the /api 401 and the setup gate while still
+// resolving to the protected route.
+describe('authHandle — percent-encoded paths cannot bypass the gates (SONA-187)', () => {
+	beforeEach(() => {
+		vi.mocked(getSetupState).mockReset();
+		vi.mocked(getSetupState).mockResolvedValue('complete');
+	});
+
+	it('redirects an encoded admin path to /admin/login like its decoded twin', async () => {
+		const db = makeDb();
+		expect(await redirectFor('/%61dmin/images', db)).toEqual({ status: 302, location: '/admin/login' });
+		expect(await redirectFor('/admin/%69mages', db)).toEqual({ status: 302, location: '/admin/login' });
+	});
+
+	it('returns 401 for an encoded /api path without a session', async () => {
+		for (const path of ['/%61pi/artists', '/api/%61rtists']) {
+			const res = (await authHandle({
+				event: makeEvent(path, makeDb()),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must stay behind the admin gate`).toBe(401);
+			// The 401 returns before the bottom header block, so it carries the
+			// shared hardening record itself.
+			expect(res.headers.get('X-Content-Type-Options'), path).toBe('nosniff');
+			expect(res.headers.get('Cache-Control'), path).toBe('private, no-store, no-cache');
+		}
+	});
+
+	it('keeps the setup gate closed for encoded paths while setup is incomplete', async () => {
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
+		const db = makeDb();
+
+		// An encoded /api path takes the API branch (503), not the page redirect.
+		const res = (await authHandle({
+			event: makeEvent('/%61pi/artists', db),
+			resolve
+		} as never)) as Response;
+		expect(res.status).toBe(503);
+
+		expect(await redirectFor('/%61dmin/images', db)).toEqual({ status: 302, location: '/admin/setup' });
+	});
+
+	it('keeps admin and api shut for encoded paths while the setup state is unknown', async () => {
+		vi.mocked(getSetupState).mockResolvedValue('unknown');
+
+		for (const path of ['/%61dmin/images', '/%61pi/artists']) {
+			const res = (await authHandle({
+				event: makeEvent(path, makeDb()),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must 503 while the setup state is unknown`).toBe(503);
+			// Early return — the hardening headers ride the shared record here too.
+			expect(res.headers.get('X-Content-Type-Options'), path).toBe('nosniff');
+		}
+	});
+
+	it('answers a malformed percent-sequence with a 400 before any gate runs', async () => {
+		// decodeURI throws on this, and so does Kit's own decode_pathname — no
+		// route could ever match it, so the hook refuses it outright.
+		const res = (await authHandle({
+			event: makeEvent('/%E0%A4%A', makeDb()),
+			resolve
+		} as never)) as Response;
+		expect(res.status).toBe(400);
+		// The 400 returns before the header block at the bottom of the handler, so
+		// it must carry its own hardening headers and an explicit no-store.
+		expect(res.headers.get('Cache-Control')).toBe('private, no-store, no-cache');
+		expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+		// The plain-text body declares itself; nothing invites content sniffing.
+		expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+	});
+
+	it('does not double-decode: a %25-escaped spelling stays literal, like in the router', async () => {
+		// '/%2561dmin' stays '/%2561dmin' (the %25 split blocks the second decode),
+		// in Kit's router too, so no /admin route matches it.
+		// The gate must neither 400 it nor treat it as /admin.
+		const db = makeDb();
+		expect(await redirectFor('/%2561dmin/images', db)).toBeNull();
+	});
+
+	it('still serves legitimately encoded public routes', async () => {
+		const db = makeDb();
+		for (const path of ['/tags/foo%20bar', '/img/2024%2Fkey.png']) {
+			const res = (await authHandle({
+				event: makeEvent(path, db),
+				resolve
+			} as never)) as Response;
+			expect(res.status, `${path} must resolve normally`).toBe(200);
+		}
+	});
+
+	it('stamps the private no-store default on an authenticated encoded /api response, never the public one', async () => {
+		// The cache branch reads the DECODED path too (isPublic in hooks.server.ts).
+		// An admin with a valid session passes the /api gate, so their encoded /api
+		// spelling DOES reach resolve — and the non-HTML 200 coming back must get
+		// the private default. The encoding sits in the FIRST segment ('/%61pi'),
+		// so the raw pathname does not start with '/api': an isPublic that read the
+		// raw pathname would stamp the public s-maxage default on this private
+		// JSON, which is exactly the regression this test discriminates.
+		const sqlite = new Database(':memory:');
+		sqlite.exec(`
+			CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+			CREATE TABLE sessions (token TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+		`);
+		sqlite
+			.prepare('INSERT INTO sessions (token, created_at, expires_at) VALUES (?, ?, ?)')
+			.run(await hashToken('some-token'), new Date().toISOString(), new Date(Date.now() + 3_600_000).toISOString());
+		const url = new URL('https://taro.surf/%61pi/artists');
+		const res = (await authHandle({
+			event: {
+				cookies: { get: (name: string) => (name === SESSION_COOKIE ? 'some-token' : undefined) },
+				url,
+				request: new Request(url),
+				locals: {} as App.Locals,
+				platform: { env: { DB: makeD1(sqlite) } } as unknown as App.Platform
+			} as never,
+			resolve: async () => new Response('{}', { headers: { 'content-type': 'application/json' } })
+		} as never)) as Response;
+		expect(res.status).toBe(200);
+		expect(res.headers.get('Cache-Control')).toBe('private, no-store, no-cache');
+	});
+
+	it('keeps an encoded-slash /api path behind the gate', async () => {
+		// '/api%2Foembed' survives decodeURI unchanged (reserved chars stay
+		// encoded), so it is canonical but NOT '/api/oembed' — no exemption, 401.
+		// (This does not discriminate the decodeURI/decodeURIComponent choice —
+		// it 401s under either; the asset test below is what pins the decoder.)
+		const res = (await authHandle({
+			event: makeEvent('/api%2Foembed', makeDb()),
+			resolve
+		} as never)) as Response;
+		expect(res.status).toBe(401);
+	});
+
+	it('an encoded-slash asset path stays canonical under decodeURI and exempt from the setup gate', async () => {
+		// '/_app/immutable/chunk%2Fx.js' survives decodeURI unchanged, so it is
+		// canonical and isAsset exempts it from the setup gate — it must resolve.
+		// Under a decodeURIComponent swap the %2F becomes a slash, canonicity
+		// breaks, isAsset goes false and the incomplete-setup redirect fires: THIS
+		// is the observable difference between the two decoders.
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
+		expect(await redirectFor('/_app/immutable/chunk%2Fx.js', makeDb())).toBeNull();
+	});
+
+	it('does not exempt a non-canonical asset spelling from the setup gate', async () => {
+		// isAsset is canonical-only like every other exemption: '/_a%70p/…' routes
+		// to the asset path in Kit but must still hit the setup gate here.
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
+		expect(await redirectFor('/_a%70p/immutable/x.js', makeDb())).toEqual({ status: 302, location: '/admin/setup' });
+	});
+
+	it('treats an encoded /admin/setup spelling as an ordinary admin path in the setup gate', async () => {
+		// The setup-route exemption is canonical-only too: while setup is
+		// incomplete, an encoded spelling of the wizard redirects into the real one
+		// instead of rendering under the encoded URL.
+		vi.mocked(getSetupState).mockResolvedValue('incomplete');
+		const db = makeDb();
+		expect(await redirectFor('/admin/setu%70', db)).toEqual({ status: 302, location: '/admin/setup' });
 	});
 });
 
@@ -479,6 +695,31 @@ describe('handleError — rich 5xx sample (issue #6)', () => {
 		expect(row.message).toBe('D1_ERROR: boom ← outer wrapper');
 	});
 
+	it('records the DECODED route, matching authHandle, so one 5xx class never splits across two route strings', async () => {
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/%61dmin/images', db, waits);
+
+		handleError({ error: new Error('boom'), event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		expect(sqlite.prepare('SELECT route FROM error_sample').get().route).toBe('/admin/images');
+	});
+
+	it('falls back to the raw route when the pathname does not decode', async () => {
+		// authHandle 400s a malformed pathname before resolve, so this can't
+		// normally happen — but a decode throw inside handleError must not turn an
+		// error REPORT into a second error.
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		const event = metricsEvent('/%E0%A4%A', db, waits);
+
+		handleError({ error: new Error('boom'), event, status: 500, message: 'Internal Error' } as never);
+		await Promise.all(waits);
+
+		expect(sqlite.prepare('SELECT route FROM error_sample').get().route).toBe('/%E0%A4%A');
+	});
+
 	it('does nothing for a sub-500 status', async () => {
 		const { db, sqlite } = makeMetricsDb();
 		const waits: Promise<unknown>[] = [];
@@ -549,6 +790,62 @@ describe('authHandle — Tier-A page-view capture (issue #149)', () => {
 			{ metric: 'referrer', dim: 't.co', count: 1 }, // host only — the path+query are gone
 			{ metric: 'request', dim: 'public', count: 1 }
 		]);
+	});
+
+	it('stores the DECODED path as the pageview key for an encoded public URL', async () => {
+		// The pageview dim is deliberately the decoded path (see the comment at the
+		// pageViewStatements call site): '/tags/foo%20bar' and '/tags/foo bar' are
+		// one page to Kit's router, so they must roll up as one counter row.
+		const { db, sqlite } = makeMetricsDb();
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: pageviewEvent('/tags/foo%20bar', db, waits, {
+				'user-agent': REAL_UA,
+				'cf-ipcountry': 'US'
+			}),
+			resolve: resolveHtml
+		} as never);
+		await Promise.all(waits);
+
+		const rows = sqlite.prepare("SELECT dim FROM metric_rollup WHERE metric='pageview'").all();
+		expect(rows).toEqual([{ dim: '/tags/foo bar' }]);
+	});
+
+	it('classifies an encoded admin path by its DECODED route class — no visitor page view', async () => {
+		// routeClass and the pageview key read the decoded path (SONA-187). If a
+		// regression fed them the raw pathname, an admin loading '/%61dmin/images'
+		// would classify as 'public' and mint a visitor pageview row for an admin
+		// page. An admin session is needed so the request survives the gate.
+		const { db, sqlite } = makeMetricsDb();
+		sqlite.exec(
+			`CREATE TABLE sessions (token TEXT PRIMARY KEY, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);`
+		);
+		sqlite
+			.prepare('INSERT INTO sessions (token, created_at, expires_at) VALUES (?, ?, ?)')
+			.run(
+				await hashToken('some-token'),
+				new Date().toISOString(),
+				new Date(Date.now() + 3_600_000).toISOString()
+			);
+		const waits: Promise<unknown>[] = [];
+		await authHandle({
+			event: {
+				cookies: { get: (name: string) => (name === SESSION_COOKIE ? 'some-token' : undefined) },
+				url: new URL('https://taro.surf/%61dmin/images'),
+				request: { headers: headers({ 'user-agent': REAL_UA, 'cf-ipcountry': 'US' }) },
+				locals: {} as App.Locals,
+				platform: {
+					env: { DB: db, OBSERVABILITY_ENABLED: 'true' },
+					context: { waitUntil: (p: Promise<unknown>) => waits.push(p) }
+				}
+			} as never,
+			resolve: resolveHtml
+		} as never);
+		await Promise.all(waits);
+
+		const request = sqlite.prepare("SELECT dim FROM metric_rollup WHERE metric='request'").all();
+		expect(request).toEqual([{ dim: 'admin' }]);
+		expect(sqlite.prepare("SELECT COUNT(*) c FROM metric_rollup WHERE metric='pageview'").get().c).toBe(0);
 	});
 
 	it('does NOT count admin routes or cron endpoints as page views', async () => {

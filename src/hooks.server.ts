@@ -36,15 +36,80 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
 		});
 	});
 
+// The hardening headers, shared by EVERY response path in authHandle: the
+// early-return 400/401/503s and the header block at the bottom. One record so
+// a sixth header added later cannot land on one path and miss another.
+// (Cache-Control is not in here — each path sets its own.)
+const SECURITY_HEADERS = {
+	'Strict-Transport-Security': 'max-age=31536000',
+	'X-Frame-Options': 'DENY',
+	'X-Content-Type-Options': 'nosniff',
+	'Referrer-Policy': 'strict-origin-when-cross-origin',
+	'Permissions-Policy': 'camera=(), microphone=(), geolocation=()'
+} as const;
+const SECURITY_HEADER_ENTRIES = Object.entries(SECURITY_HEADERS);
+
+// Kit's decode_pathname, mirrored (see the comment in authHandle). Shared with
+// handleError so both record the SAME route identity for a 5xx. Exported so a
+// test can pin it against Kit's own source and fail if an upgrade diverges.
+export const decodePathname = (pathname: string) => pathname.split('%25').map(decodeURI).join('%25');
+
 // Exported for unit testing the auth/setup gate in isolation (driving the
 // composed `handle` would also run paraglideMiddleware, which needs a full
 // request pipeline).
 export const authHandle: Handle = async ({ event, resolve }) => {
+	// Every gate below compares the DECODED pathname, because that is what
+	// SvelteKit routes on: its respond.js runs decode_pathname over the raw path
+	// before matching, so `/%61dmin/images` and `/admin/images` reach the SAME
+	// route handler. Gating on the raw `event.url.pathname` let a percent-encoded
+	// first character skip the admin session gate, the /api 401 and the setup
+	// gate while still resolving to the protected route (SONA-187). Some fork
+	// zones normalize incoming URLs at the edge, which masked this — the app must
+	// not depend on an edge setting each fork's owner controls.
+	//
+	// The decoding mirrors Kit's decode_pathname exactly: decodeURI leaves
+	// reserved characters (%2F and friends) encoded, and the %25 split keeps a
+	// literal %25 from ever double-decoding — so a double-encoded `/%2561dmin`
+	// stays `/%2561dmin` here just as it does in the router (where it 404s).
+	//
+	// Not gate-only: the observability block at the bottom stores the decoded
+	// path too (routeClass and the page-view path), so an encoded spelling rolls
+	// up under the route it actually served rather than fragmenting the counters.
+	let path: string;
+	try {
+		path = decodePathname(event.url.pathname);
+	} catch {
+		// Kit's own decode of this pathname throws too, so no route would ever
+		// match it. Answer the malformed sequence before any gate logic runs.
+		// This returns before the header block at the bottom of the handler, so
+		// stamp the shared hardening headers (and an explicit no-store) here.
+		// Content-Type is this path's own: a plain-text body needs saying so.
+		return new Response('Malformed URI', {
+			status: 400,
+			headers: {
+				'Content-Type': 'text/plain; charset=utf-8',
+				'Cache-Control': 'private, no-store, no-cache',
+				...SECURITY_HEADERS
+			}
+		});
+	}
+
+	// Gates apply to the decoded path; EXEMPTIONS apply only to the canonical
+	// spelling. A non-canonical spelling routes to the same handler in Kit, but
+	// other systems keyed on the LITERAL path do not recognize it: the zone
+	// rate-limit rule (scripts/waf-lib.ts) matches the raw path, and the admin
+	// layout reads isAdminAuthExempt($page.url.pathname). Letting `/api/%6Fembed`
+	// pick up the /api/oembed exemption would serve it unauthenticated but
+	// un-rate-limited, and an encoded /admin/login would render with the wrong
+	// chrome. So encoded spellings get the strictest treatment: gates yes,
+	// exemptions no — they 401/302 like any other protected path.
+	const canonical = event.url.pathname === path;
+
 	// The operator's zone, resolved once here so the admin loads and actions all
 	// read the same value rather than each re-deriving it (SONA-119). Only the
 	// admin area displays dates in it, and validating costs an Intl construction,
 	// so public requests keep the UTC default rather than paying for it.
-	event.locals.timeZone = event.url.pathname.startsWith('/admin')
+	event.locals.timeZone = path.startsWith('/admin')
 		? viewerTimeZone(event.cookies.get(VIEWER_TZ_COOKIE))
 		: 'UTC';
 
@@ -101,13 +166,15 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// (see admin/setup/+page.server.ts). The 503 below is not that guard — note
 	// that /admin/setup is exempt here, so the wizard renders during an outage
 	// exactly as it did before. The 503 keeps the REST of the admin panel shut.
-	const path = event.url.pathname;
-	const isSetupRoute = path === '/admin/setup' || path.startsWith('/admin/setup/');
-	const isAsset = path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png';
+	const isSetupRoute = canonical && (path === '/admin/setup' || path.startsWith('/admin/setup/'));
+	const isAsset =
+		canonical && (path.startsWith('/_app/') || path === '/favicon.ico' || path === '/favicon.png');
 	// security.txt stays reachable on an unclaimed or mid-setup fork — a
 	// deployment with no owner yet still needs a vulnerability-reporting path,
-	// and the route reads nothing from this fork's DB (SONA-171).
-	const isSecurityTxt = path === '/.well-known/security.txt';
+	// and the route reads nothing from this fork's DB (SONA-171). Canonical
+	// spelling only, per the exemption rule above: an encoded spelling takes
+	// the gates like any other path.
+	const isSecurityTxt = canonical && path === '/.well-known/security.txt';
 	if (event.platform?.env.DB && !isSetupRoute && !isAsset && !isSecurityTxt) {
 		const db = getDb(event.platform.env.DB);
 		const state = await getSetupState(db, event.platform.env);
@@ -115,7 +182,12 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 			case 'complete':
 				break;
 			case 'incomplete':
-				if (path.startsWith('/api')) return new Response('Setup required', { status: 503 });
+				if (path.startsWith('/api')) {
+					return new Response('Setup required', {
+						status: 503,
+						headers: { 'Cache-Control': 'private, no-store, no-cache', ...SECURITY_HEADERS }
+					});
+				}
 				throw redirect(302, '/admin/setup');
 			case 'unknown':
 				// 'unknown' is also what a fork whose D1 migrations never ran looks
@@ -129,7 +201,11 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 						'Setup state unavailable. If this is a new deployment, apply the D1 migrations.',
 						{
 							status: 503,
-							headers: { 'Retry-After': '30', 'Cache-Control': 'private, no-store, no-cache' }
+							headers: {
+								'Retry-After': '30',
+								'Cache-Control': 'private, no-store, no-cache',
+								...SECURITY_HEADERS
+							}
 						}
 					);
 				}
@@ -143,7 +219,7 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// Protect admin routes (except login, the first-run setup wizard, and the
 	// password-recovery pages). /admin/forgot + /admin/reset are reachable without
 	// a session but stay behind the setup gate above, like /admin/login.
-	if (event.url.pathname.startsWith('/admin') && !isAdminAuthExempt(event.url.pathname)) {
+	if (path.startsWith('/admin') && !(canonical && isAdminAuthExempt(path))) {
 		if (!event.locals.admin) {
 			throw redirect(302, '/admin/login');
 		}
@@ -172,16 +248,20 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// open this route to writes the day someone adds a POST handler there; spelling
 	// it as a path AND a method cannot.
 	const isOembedRead =
-		event.url.pathname === '/api/oembed' &&
+		canonical &&
+		path === '/api/oembed' &&
 		(event.request?.method === 'GET' || event.request?.method === 'HEAD');
 	if (
-		event.url.pathname.startsWith('/api') &&
-		!event.url.pathname.startsWith('/api/cron/') &&
-		event.url.pathname !== '/api/metrics/download' &&
+		path.startsWith('/api') &&
+		!(canonical && path.startsWith('/api/cron/')) &&
+		!(canonical && path === '/api/metrics/download') &&
 		!isOembedRead &&
 		!event.locals.admin
 	) {
-		return new Response('Unauthorized', { status: 401 });
+		return new Response('Unauthorized', {
+			status: 401,
+			headers: { 'Cache-Control': 'private, no-store, no-cache', ...SECURITY_HEADERS }
+		});
 	}
 
 	// Apply the active theme + the visitor's dark/light mode at SSR so the first
@@ -253,6 +333,9 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 			const device = deviceClass(event.request.headers.get('user-agent'));
 			if (device) {
 				counters.push(
+					// The pageview key is deliberately the DECODED path: if a non-canonical
+					// public URL ever ships (a non-ASCII slug), its counter splits at this
+					// deploy boundary — intended, decoded is the canonical identity.
 					...pageViewStatements(db, {
 						path,
 						device,
@@ -287,11 +370,9 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// protects the Sona host, which is the host it is served from; widening it to
 	// an operator's whole domain is their call to make at the edge, not ours to
 	// make for them from inside the app.
-	response.headers.set('Strict-Transport-Security', 'max-age=31536000');
-	response.headers.set('X-Frame-Options', 'DENY');
-	response.headers.set('X-Content-Type-Options', 'nosniff');
-	response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-	response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+	for (const [name, value] of SECURITY_HEADER_ENTRIES) {
+		response.headers.set(name, value);
+	}
 
 	// Cache control. Page HTML is locale-dependent (chosen per-request from the
 	// PARAGLIDE_LOCALE cookie / Accept-Language). Cloudflare's edge cache key is the
@@ -302,7 +383,9 @@ export const authHandle: Handle = async ({ event, resolve }) => {
 	// intermediary that does honor it. Non-HTML public responses still edge-cache.
 	// To recover edge caching for HTML, add a Cloudflare Cache Rule with a custom
 	// cache key that includes the PARAGLIDE_LOCALE cookie (infra, not code).
-	const isPublic = !event.url.pathname.startsWith('/admin') && !event.url.pathname.startsWith('/api');
+	// Decoded for the same reason as the gates: an encoded /api or /admin path
+	// must not pick up the public shared-cache default.
+	const isPublic = !path.startsWith('/admin') && !path.startsWith('/api');
 	const isHtml = response.headers.get('content-type')?.includes('text/html') ?? false;
 	if (isPublic && (response.status === 200 || response.status === 304 || response.status === 206) && !isHtml) {
 		// Honor a handler's explicit Cache-Control; only stamp the shared default
@@ -372,9 +455,15 @@ export const handleError: HandleServerError = ({ error, event, status, message }
 		event.locals.errorSampled = true;
 		const db = getDb(event.platform.env.DB);
 		const detail = causeChainMessage(error, message);
-		schedule(
-			event.platform,
-			recordError(db, { route: event.url.pathname, status, message: detail })
-		);
+		// Same decoded route identity as authHandle's fallback sampler, so one 5xx
+		// class never lands under two route strings. A malformed pathname (which
+		// authHandle 400s before resolve, so it can't normally reach here) stays raw.
+		let route: string;
+		try {
+			route = decodePathname(event.url.pathname);
+		} catch {
+			route = event.url.pathname;
+		}
+		schedule(event.platform, recordError(db, { route, status, message: detail }));
 	}
 };
