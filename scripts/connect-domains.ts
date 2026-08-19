@@ -148,20 +148,23 @@ async function main(): Promise<number> {
 		// a hard token error; any other failed lookup aborts too (a transient error
 		// must not silently pick the parent zone or read as "no zone").
 		const candidates = zoneNameCandidates(host);
-		const { zone, zoneName, errorStatus } = await resolveZone(candidates, (name) =>
+		const { zone, zoneName, errorStatus, failedName } = await resolveZone(candidates, (name) =>
 			cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 		);
 		if (errorStatus !== null) {
+			// Name the candidate whose lookup failed — for a subdomain host that can
+			// be the parent zone, and pointing at the host would mislead.
+			const lookupName = failedName ?? host;
 			if (errorStatus === 401 || errorStatus === 403) {
 				console.error(`✖ The API token cannot read zones (HTTP ${errorStatus}).\n`);
 				console.error(TOKEN_RECIPE);
 			} else if (errorStatus === 0) {
 				console.error(
-					`✖ Could not reach the Cloudflare API while looking up the zone for ${host} — check your network and re-run.`
+					`✖ Could not reach the Cloudflare API while looking up the zone for ${lookupName} — check your network and re-run.`
 				);
 			} else {
 				console.error(
-					`✖ Cloudflare API error (HTTP ${errorStatus}) while looking up the zone for ${host} — wait a moment and re-run.`
+					`✖ Cloudflare API error (HTTP ${errorStatus}) while looking up the zone for ${lookupName} — wait a moment and re-run.`
 				);
 			}
 			return 1;
