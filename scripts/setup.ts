@@ -47,6 +47,7 @@ import {
 	securitySummaryLines,
 	storageSummaryLines,
 	telegramSummaryLine,
+	resendSecretWarnLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -636,8 +637,12 @@ async function main() {
 	const uploadThingTokenSet =
 		!useR2 && uploadThingToken ? putSecret('UPLOADTHING_TOKEN', uploadThingToken) : false;
 	const telegramTokenSet = telegramBotToken ? putSecret('TELEGRAM_BOT_TOKEN', telegramBotToken) : false;
-	if (resendApiKey) putSecret('RESEND_API_KEY', resendApiKey);
-	if (resendFrom) putSecret('RESEND_FROM', resendFrom);
+	// Optional, but a supplied value whose put failed can't stay silent — see
+	// resendSecretWarnLines: the failure would otherwise show up as a dead reset
+	// link months later.
+	const resendFailed: string[] = [];
+	if (resendApiKey && !putSecret('RESEND_API_KEY', resendApiKey)) resendFailed.push('RESEND_API_KEY');
+	if (resendFrom && !putSecret('RESEND_FROM', resendFrom)) resendFailed.push('RESEND_FROM');
 	// Turnstile secret for the admin-login siteverify. Server-only, so
 	// it's a Pages secret (never a plain var); the public sitekey was set above.
 	// The login check fails open without it, so remember whether the put landed.
@@ -713,6 +718,7 @@ async function main() {
 		`Fursuit photos: ${furtrackMode === 'off' ? 'disabled' : `enabled (${furtrackMode})`}${primaryCharacter ? ` — character "${primaryCharacter}"` : ''}.`
 	);
 	console.log(telegramSummaryLine(Boolean(telegramBotToken), telegramTokenSet));
+	for (const line of resendSecretWarnLines(resendFailed, project)) console.warn(line);
 	console.log('Migrations applied and recorded in schema_migrations (first CI deploy is a no-op).');
 	console.log('\nNext steps:\n');
 	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');

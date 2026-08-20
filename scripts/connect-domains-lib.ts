@@ -204,6 +204,12 @@ export function cdnDomainState(
 	name: string
 ): CdnDomainState {
 	if (!res.ok) return 'unknown';
+	// Same rule as pagesDomainState: an ok response carrying no domain list is
+	// unreadable, not empty. findBucketDomain coerces either shape to [], so
+	// without this a malformed body reads as 'absent' and green-lights the attach
+	// this read exists to gate.
+	const r = res.result as { domains?: unknown } | undefined;
+	if (!Array.isArray(res.result) && !Array.isArray(r?.domains)) return 'unknown';
 	const d = findBucketDomain(res.result, name);
 	if (!d) return 'absent';
 	return d.enabled === false ? 'disabled' : 'attached';

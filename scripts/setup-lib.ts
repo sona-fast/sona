@@ -607,6 +607,22 @@ export function storageSummaryLines(input: StorageSummaryInput): string[] {
  * Telegram import hidden, and saying "enabled" would send the operator hunting in
  * the app for a feature that never turned on.
  */
+/**
+ * Names the Resend secrets whose put failed. These are optional, so silence is
+ * right when the operator supplied none — but a value they DID supply that
+ * failed to land must be said out loud: password-reset email reads these at
+ * runtime, so the failure would otherwise surface as a dead reset link long
+ * after setup finished.
+ */
+export function resendSecretWarnLines(failed: string[], project: string): string[] {
+	if (failed.length === 0) return [];
+	return [
+		`\n⚠ Resend secrets that did NOT get set: ${failed.join(', ')}.`,
+		'  Password-reset email stays off until they are:',
+		...failed.map((name) => `    npx wrangler pages secret put ${name} --project-name ${project}`)
+	];
+}
+
 export function telegramSummaryLine(tokenProvided: boolean, tokenSet: boolean): string {
 	if (!tokenProvided) return 'Telegram sticker import: not configured.';
 	return tokenSet

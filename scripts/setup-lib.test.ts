@@ -26,6 +26,7 @@ import {
 	zoneLookupWarnLines,
 	storageSummaryLines,
 	telegramSummaryLine,
+	resendSecretWarnLines,
 	setupTokenLines,
 	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
@@ -858,6 +859,34 @@ describe('storageSummaryLines', () => {
 		}).join('\n');
 		expect(unset).toContain('NOT READY (the UPLOADTHING_TOKEN secret is not set)');
 		expect(unset).toContain('--project-name taro');
+	});
+});
+
+describe('resendSecretWarnLines', () => {
+	it('stays silent when every supplied Resend secret landed', () => {
+		expect(resendSecretWarnLines([], 'taro-surf')).toEqual([]);
+	});
+
+	// A failed put here surfaces months later as a dead password-reset link, so the
+	// names and the command to fix them have to be said at setup time.
+	it('names each failed secret and the command that sets it', () => {
+		const text = resendSecretWarnLines(['RESEND_API_KEY', 'RESEND_FROM'], 'taro-surf').join('\n');
+		expect(text).toContain('RESEND_API_KEY, RESEND_FROM');
+		expect(text).toContain('Password-reset email stays off');
+		expect(text).toContain('npx wrangler pages secret put RESEND_API_KEY --project-name taro-surf');
+		expect(text).toContain('npx wrangler pages secret put RESEND_FROM --project-name taro-surf');
+	});
+});
+
+describe('setup.ts ↔ Resend secret contract', () => {
+	// main() isn't importable, so pin at source level that both puts are checked
+	// rather than fired and forgotten, the way they were before.
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
+
+	it('records a failed Resend put instead of discarding the result', () => {
+		expect(src).toMatch(/!putSecret\('RESEND_API_KEY'/);
+		expect(src).toMatch(/!putSecret\('RESEND_FROM'/);
+		expect(src).toMatch(/resendSecretWarnLines\(resendFailed/);
 	});
 });
 

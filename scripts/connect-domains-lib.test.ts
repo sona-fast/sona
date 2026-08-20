@@ -207,6 +207,21 @@ describe('resolveZone', () => {
 describe('cdnDomainState', () => {
 	const ok = (domains: unknown[]) => ({ ok: true, status: 200, result: { domains } });
 
+	// The twin of pagesDomainState's rule: findBucketDomain coerces either accepted
+	// shape to [], so an ok response carrying neither would read as 'absent' and
+	// green-light the attach this read exists to gate.
+	it("reports a malformed body as unknown, never as 'absent'", () => {
+		for (const result of [undefined, null, {}, { domains: 'nope' }, 'nope', 42]) {
+			expect(
+				cdnDomainState({ ok: true, status: 200, result }, 'cdn.taro.surf'),
+				`result=${JSON.stringify(result) ?? 'undefined'}`
+			).toBe('unknown');
+		}
+		// Both real shapes still read as a list, not as unreadable.
+		expect(cdnDomainState({ ok: true, status: 200, result: [] }, 'cdn.taro.surf')).toBe('absent');
+		expect(cdnDomainState(ok([]), 'cdn.taro.surf')).toBe('absent');
+	});
+
 	it('is attached for an enabled custom domain', () => {
 		expect(cdnDomainState(ok([{ domain: 'cdn.taro.surf', enabled: true }]), 'cdn.taro.surf')).toBe(
 			'attached'
