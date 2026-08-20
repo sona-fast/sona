@@ -80,13 +80,19 @@ Page manually with `?afterId=<lastId>` from each response until `rasters` comes
 back below the limit. Stickers imported after the upgrade are sniffed at import
 time and need nothing.
 
-## One-time per fork: re-apply the WAF rate-limit rule (oEmbed)
+## One-time per fork: re-apply the WAF rate-limit rule (oEmbed, RSS feed)
 
-The release that adds the oEmbed provider (`/api/oembed`) makes a second `/api`
-path reachable without an admin session, and widens the WAF rate-limit rule to
-cover it. New forks get the widened rule from `npm run setup`; a fork that was
-**already deployed** still has the older download-only rule, so until you re-apply
-it the oEmbed endpoint is anonymous with no rate limit.
+Two releases have widened this rule. The oEmbed provider (`/api/oembed`) added a
+second anonymous `/api` path, and the RSS feed (`/feed.xml`, v1.2.0) added a
+third public endpoint that reads the database several times per uncached
+request. New forks get the current rule from `npm run setup`; a fork that was
+**already deployed** still has whichever expression it was created with, and
+nothing re-applies it on deploy, so until you run this the newer endpoints are
+anonymous with no rate limit.
+
+Run it again after any release that says so, even if you ran it before: it
+rewrites the rule to the current expression rather than only creating a missing
+one.
 
 Run this once per fork, from a clone:
 
@@ -105,10 +111,12 @@ you're unsure whether it already ran.
 > unprotected until the site moves to a custom domain.
 
 The rule blocks an address for 10 seconds once it makes 20 matching requests in
-10 seconds, counted per Cloudflare data centre. Link-preview services fetch from
-shared addresses, so roughly twenty-odd of your links pasted into one chat
-channel at once can trip it. The previews that miss show no image rather than an
-error, and they come back on the next paste.
+10 seconds, counted per Cloudflare data centre. One rule covers all three paths
+because the Free plan allows exactly one rate-limiting rule per zone, so the
+count is shared between them. Link-preview services fetch from shared addresses,
+so roughly twenty-odd of your links pasted into one chat channel at once can trip
+it. The previews that miss show no image rather than an error, and they come back
+on the next paste.
 
 **Your link previews also change on this release** if your images are hosted off
 your own Cloudflare zone — UploadThing (the default), a `*.r2.dev` bucket, or an
