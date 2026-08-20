@@ -14,19 +14,18 @@ reviews:
   poem: false
   in_progress_fortune: false
 
-  # Stacked PRs target the branch below them rather than main, and reviews are
-  # limited to the default branch unless the bases are named here. Without this
-  # the lower PR in a stack gets reviewed and the upper one is skipped, which is
-  # the half carrying the newer work.
-  base_branches:
-    - "claude/.*"
-
   # Review a branch when it is finished, not on every intermediate push. The
   # ship loop lands many small commits before a branch is ready, and reviewing
   # each one produces findings against work that is still in motion. Ask for a
   # re-review with "@coderabbitai review" once the branch settles.
   auto_review:
     enabled: true
+    # Stacked PRs target the branch below them rather than main, and only the
+    # default branch is reviewed unless the other bases are named here. Without
+    # this the lower PR in a stack is reviewed and the upper one is skipped,
+    # which is the half carrying the newer work.
+    base_branches:
+      - "claude/.*"
     auto_incremental_review: false
     drafts: false
     # Dependency bumps are reviewed locally through the ship loop instead.
