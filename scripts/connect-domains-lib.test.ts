@@ -536,6 +536,18 @@ describe('pagesDomainState', () => {
 		expect(pagesDomainState({ ok: true, status: 200, result: [] }, 'taro.surf')).toBe('absent');
 	});
 
+	// A 200 carrying something that isn't a list tells us nothing about the
+	// domains, so it has to read the same as a failed request. Coercing it to an
+	// empty list would say 'absent' and green-light the attach it should gate.
+	it("reports a malformed body as unknown, never as 'absent'", () => {
+		for (const result of [undefined, null, {}, 'nope', 42]) {
+			expect(
+				pagesDomainState({ ok: true, status: 200, result }, 'taro.surf'),
+				`result=${JSON.stringify(result) ?? 'undefined'}`
+			).toBe('unknown');
+		}
+	});
+
 	it("reports a failed read as unknown, never as 'absent' (auth-vs-absent)", () => {
 		expect(pagesDomainState({ ok: false, status: 403 }, 'taro.surf')).toBe('unknown');
 		expect(pagesDomainState({ ok: false, status: 500 }, 'taro.surf')).toBe('unknown');

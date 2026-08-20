@@ -236,6 +236,10 @@ export function pagesDomainState(
 	host: string
 ): PagesDomainState {
 	if (!res.ok) return 'unknown';
+	// An ok response whose body isn't a list is unreadable, not empty. Letting it
+	// coerce to [] would report 'absent' and walk into the attach this read exists
+	// to gate, which is the same mistake as reading a failed response.
+	if (!Array.isArray(res.result)) return 'unknown';
 	return pagesDomainAttached(res.result, host) ? 'attached' : 'absent';
 }
 
