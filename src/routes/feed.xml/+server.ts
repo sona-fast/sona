@@ -36,7 +36,7 @@ const MAX_ITEMS = 50;
 const FURSUIT_SCAN = MAX_ITEMS * 2;
 
 /** Matches the settings timeout every public load uses: a hung read resolves to
- * the documented 404 rather than hanging until the Worker's own limit. */
+ * the documented 503 rather than hanging until the Worker's own limit. */
 const SETTINGS_TIMEOUT_MS = 3000;
 
 /** Channel copy. Plain English constants rather than paraglide messages, for the
@@ -87,8 +87,8 @@ export const GET: RequestHandler = async ({ url, request, platform }) => {
 	if (raw.rssFeedEnabled === 'false') error(404, 'Not found');
 
 	// Adult work is served only when the owner enabled it AND the request carries
-	// the minted key. Both halves fail closed: an unreadable settings row already
-	// 404'd above, and a null key can never match.
+	// the minted key. Both halves fail closed: an unreadable settings row was
+	// already refused above (503), and a null key can never match.
 	const adult =
 		raw.rssNsfwEnabled === 'true' && feedKeyMatches(url.searchParams.get('key'), raw.rssNsfwKey ?? '');
 
