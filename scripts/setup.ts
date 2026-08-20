@@ -41,8 +41,14 @@ import {
 	imageResizingIsOn,
 	ciWiringEntries,
 	cfApi,
-	cfErrorSummary,
+	cfFailureTail,
+	statusLabel,
+	zoneLookupWarnLines,
 	securitySummaryLines,
+	storageSummaryLines,
+	telegramSummaryLine,
+	setupTokenLines,
+	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
 	cdnAttachmentLines
 } from './setup-lib.ts';
@@ -126,12 +132,16 @@ function ghSet(kind: 'secret' | 'variable', name: string, value: string, repo: s
 
 const token = (bytes = 32) => randomBytes(bytes).toString('hex');
 
+// The scope the Pages-project PATCH needs, named in a failure only when the
+// status (401/403) proves that is the reason.
+const PAGES_SCOPE_HINT = 'Account → Cloudflare Pages: Edit';
+
 // The friend-facing API-token recipe, printed whenever a scope preflight fails so
 // the operator knows exactly what to (re)create. Kept in one place so the CLI and
 // the message stay in sync with README's "API token" section.
 const TOKEN_RECIPE =
 	'Create a Cloudflare API token (dash → My Profile → API Tokens → Create Token → Custom token) with:\n' +
-	'    • Account → Cloudflare Pages: Edit\n' +
+	`    • ${PAGES_SCOPE_HINT}\n` +
 	'    • Account → D1: Edit\n' +
 	'    • Account → Workers R2 Storage: Edit\n' +
 	`    • ${TURNSTILE_SCOPE_HINT}      (only with a custom domain; adds the admin-login bot check)\n` +
@@ -364,22 +374,15 @@ async function main() {
 			resolvedZoneName = preflightZoneName;
 			const zoneId = preflightZone.id;
 			if (zoneLookupError !== null) {
-				// status 0 = fetch threw (no network). A 2xx means the API answered
-				// but its body said success:false, so repeat the API's own reason.
-				const apiWhy =
-					zoneLookupError >= 200 && zoneLookupError < 300
-						? cfErrorSummary(zoneLookupErrors)
-						: '';
-				const why =
-					zoneLookupError === 0
-						? 'could not reach the Cloudflare API'
-						: `Cloudflare API error, HTTP ${zoneLookupError}${apiWhy ? `; the API said ${apiWhy}` : ''}`;
-				console.warn(
-					`\n⚠ Zone lookup failed for ${zoneLookupFailedName ?? host} (${why}) — skipping the DNS / image-transform preflight.`
-				);
-				console.warn(
-					'  A 401/403 means the token lacks Zone → Zone: Read; otherwise re-run setup to retry.'
-				);
+				// The reason (and whether a scope is named at all) is decided by the
+				// status, in the shared helper — see zoneLookupWarnLines.
+				for (const line of zoneLookupWarnLines(
+					zoneLookupFailedName ?? host,
+					zoneLookupError,
+					zoneLookupErrors
+				)) {
+					console.warn(line);
+				}
 			} else if (!zoneId) {
 				console.warn(
 					`\n⚠ No Cloudflare zone found for ${host} — skipping the DNS / image-transform preflight.`
@@ -469,6 +472,18 @@ async function main() {
 	process.stdout.write(d1Out);
 	let dbId = parseDatabaseId(d1Out);
 	if (!dbId) dbId = await ask('Could not auto-detect database_id — paste it from the output above', '');
+	// Still nothing: `wrangler d1 create` failed and no id was pasted, so we never
+	// established that a database exists. Writing wrangler.toml and PATCHing the
+	// Pages project with an empty database_id would print two ✔ lines for bindings
+	// that point at nothing, and only blow up later in the migration step.
+	if (!dbId) {
+		console.error('\n✖ No D1 database_id — `wrangler d1 create` did not report one and none was pasted.');
+		console.error('  Setup stopped rather than wire wrangler.toml and the Pages project to no database.');
+		console.error('  Check the wrangler output above, then re-run setup.');
+		process.exitCode = 1;
+		rl.close();
+		return;
+	}
 
 	// 3. R2 bucket — always create it so the IMAGES binding is valid. Detect the
 	//    "R2 not enabled on this account" case (error 10042) rather than swallowing
@@ -522,15 +537,18 @@ async function main() {
 		pagesConfigOk =
 			res.ok && (!turnstileSitekey || pagesPatchConfirmsSitekey(res.result, turnstileSitekey));
 		if (res.ok) {
+			// Name only what was sent: the R2 binding is omitted when R2 isn't enabled.
 			console.log(
-				'✔ attached D1/R2 bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).'
+				`✔ attached D1${r2Missing ? '' : '/R2'} bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).`
 			);
 		} else {
-			console.warn('\n⚠ Could not attach bindings to the Pages project via the API');
-			// Only the allowlisted code+message pairs — never the raw errors body,
-			// which can echo account/project identifiers into pasteable output.
-			const why = cfErrorSummary(res.errors);
-			console.warn(`  (HTTP ${res.status})${why ? ` ${why}` : ''}`);
+			// cfFailureTail keeps the reason honest per status — a thrown fetch says
+			// the API did not respond instead of "(HTTP 0)", and only a 401/403 names
+			// the scope. It reads the allowlisted code+message pairs, never the raw
+			// errors body, which can echo account/project identifiers.
+			console.warn(
+				`\n⚠ Could not attach bindings to the Pages project via the API${statusLabel(res.status)}${cfFailureTail(res.status, res.errors, PAGES_SCOPE_HINT)}`
+			);
 			console.warn('  Fix: run ONE local deploy with wrangler.toml present so the bindings attach:');
 			console.warn('    npx wrangler pages deploy .svelte-kit/cloudflare');
 			console.warn('  Until then, CI (git push) deploys will have no D1/R2 binding.');
@@ -583,10 +601,16 @@ async function main() {
 		// Seed the FurTrack character/tag the fursuit feature queries.
 		primaryCharacter
 	});
-	run(`npx wrangler d1 execute ${dbName} --remote --command "${seed}"`, {
-		allowFail: true,
-		stdin: 'ignore'
-	});
+	// Tolerated failure, but not an ignored one: the summary says the provider was
+	// seeded, and a failed execute leaves the app with no storage backend at boot.
+	let seedOk = true;
+	try {
+		run(`npx wrangler d1 execute ${dbName} --remote --command "${seed}"`, { stdin: 'ignore' });
+	} catch {
+		seedOk = false;
+		console.warn('\n⚠ Could not seed site_settings — the storage provider is not recorded yet.');
+		console.warn('  Set it in admin Settings → Storage Provider after the first deploy.');
+	}
 
 	// 7. Generate + set secrets. SETUP_TOKEN gates the first-run wizard.
 	const setupToken = token();
@@ -605,10 +629,13 @@ async function main() {
 			return false; // allowFail
 		}
 	};
-	putSecret('SETUP_TOKEN', setupToken);
-	putSecret('CRON_SECRET', cronSecret);
-	if (!useR2 && uploadThingToken) putSecret('UPLOADTHING_TOKEN', uploadThingToken);
-	if (telegramBotToken) putSecret('TELEGRAM_BOT_TOKEN', telegramBotToken);
+	// Keep every put's result: the summary below must report what actually landed,
+	// not what we tried to write.
+	const setupTokenSet = putSecret('SETUP_TOKEN', setupToken);
+	const cronSecretSet = putSecret('CRON_SECRET', cronSecret);
+	const uploadThingTokenSet =
+		!useR2 && uploadThingToken ? putSecret('UPLOADTHING_TOKEN', uploadThingToken) : false;
+	const telegramTokenSet = telegramBotToken ? putSecret('TELEGRAM_BOT_TOKEN', telegramBotToken) : false;
 	if (resendApiKey) putSecret('RESEND_API_KEY', resendApiKey);
 	if (resendFrom) putSecret('RESEND_FROM', resendFrom);
 	// Turnstile secret for the admin-login siteverify. Server-only, so
@@ -679,16 +706,13 @@ async function main() {
 	rl.close();
 
 	console.log('\n──────────────────────────────────────────────');
-	if (useR2 && r2Missing) {
-		console.log('Storage backend: Cloudflare R2 — NOT READY (R2 is not enabled on this account).');
-		console.log(`  Create the bucket, then re-run setup:  npx wrangler r2 bucket create ${bucket}`);
-	} else {
-		console.log(`Storage backend: ${provider === 'r2' ? 'Cloudflare R2' : 'UploadThing'} (set up).`);
+	for (const line of storageSummaryLines({ provider, r2Missing, uploadThingTokenSet, bucket, project })) {
+		console.log(line);
 	}
 	console.log(
 		`Fursuit photos: ${furtrackMode === 'off' ? 'disabled' : `enabled (${furtrackMode})`}${primaryCharacter ? ` — character "${primaryCharacter}"` : ''}.`
 	);
-	console.log(`Telegram sticker import: ${telegramBotToken ? 'enabled (bot token set)' : 'not configured'}.`);
+	console.log(telegramSummaryLine(Boolean(telegramBotToken), telegramTokenSet));
 	console.log('Migrations applied and recorded in schema_migrations (first CI deploy is a no-op).');
 	console.log('\nNext steps:\n');
 	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');
@@ -734,15 +758,16 @@ async function main() {
 			console.log(line);
 		}
 	}
-	console.log('\n  Your one-time setup token (enter it in the wizard):\n');
-	console.log(`     SETUP_TOKEN = ${setupToken}`);
+	for (const line of setupTokenLines({ setupToken, setupTokenSet, project })) {
+		console.log(line);
+	}
 	if (ciSecretsSet) {
 		console.log('\n  CI deploy secrets/variables are set — pushing to main will deploy.');
 	} else {
 		console.log('\n  Before deploying via GitHub, set the CI secrets/variables (see the note above).');
 	}
 	console.log('  Verify bindings any time with:  npx wrangler pages project list  /  npx wrangler d1 list');
-	console.log('  (CRON_SECRET set for the cron jobs; storageProvider seeded.)');
+	console.log(provisioningNoteLine(cronSecretSet, seedOk));
 	console.log('──────────────────────────────────────────────\n');
 }
 

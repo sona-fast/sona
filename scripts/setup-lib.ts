@@ -394,6 +394,26 @@ export function statusLabel(status: number): string {
 	return status === 0 ? '' : ` (HTTP ${status})`;
 }
 
+/** The scope a zone lookup needs — named only when the status proves it (401/403). */
+export const ZONE_READ_SCOPE_HINT = 'Zone → Zone: Read';
+
+/**
+ * The warn setup prints when the custom-domain zone lookup fails, as lines.
+ * cfFailureTail decides what the reason is per status, so a 400/404/500 that
+ * carried a message repeats it (the inline version gated that on 2xx and threw
+ * it away for exactly the statuses an operator can least explain), a thrown
+ * fetch says the API did not respond instead of "HTTP 0", and Zone → Zone: Read
+ * is named only on a 401/403 rather than guessed at for every failure.
+ * `name` is the candidate whose lookup failed — for a subdomain host that can be
+ * the parent zone, and pointing at the host would mislead.
+ */
+export function zoneLookupWarnLines(name: string, status: number, errors: unknown): string[] {
+	return [
+		`\n⚠ Zone lookup failed for ${name}${statusLabel(status)}${cfFailureTail(status, errors, ZONE_READ_SCOPE_HINT)} — skipping the DNS / image-transform preflight.`,
+		'  Re-run setup to retry the preflight.'
+	];
+}
+
 export interface GhEligibilityInput {
 	/** `gh` binary is on PATH. */
 	ghInstalled: boolean;
@@ -545,6 +565,88 @@ export function securitySummaryLines(input: SecuritySummaryInput): string[] {
 		lines.push('     (TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret set; enforced once deployed).');
 	}
 	return lines;
+}
+
+export interface StorageSummaryInput {
+	/** Active image store: 'r2' | 'uploadthing'. */
+	provider: string;
+	/** The R2 bucket create said R2 isn't enabled on the account. */
+	r2Missing: boolean;
+	/** The UPLOADTHING_TOKEN secret put succeeded (false when no token was given). */
+	uploadThingTokenSet: boolean;
+	bucket: string;
+	project: string;
+}
+
+/**
+ * The end-of-run "Storage backend:" lines. Both backends report NOT READY on the
+ * state we actually established: R2 when the bucket create said R2 isn't enabled,
+ * UploadThing when the UPLOADTHING_TOKEN put didn't land (a skipped or failed put
+ * used to still print "(set up)", which is the same over-claim turnstileWired
+ * exists to prevent — the operator deploys and every upload fails).
+ */
+export function storageSummaryLines(input: StorageSummaryInput): string[] {
+	const { provider, r2Missing, uploadThingTokenSet, bucket, project } = input;
+	if (provider === 'r2') {
+		if (!r2Missing) return ['Storage backend: Cloudflare R2 (set up).'];
+		return [
+			'Storage backend: Cloudflare R2 — NOT READY (R2 is not enabled on this account).',
+			`  Create the bucket, then re-run setup:  npx wrangler r2 bucket create ${bucket}`
+		];
+	}
+	if (uploadThingTokenSet) return ['Storage backend: UploadThing (set up).'];
+	return [
+		'Storage backend: UploadThing — NOT READY (the UPLOADTHING_TOKEN secret is not set).',
+		`  Set it, then re-deploy:  npx wrangler pages secret put UPLOADTHING_TOKEN --project-name ${project}`
+	];
+}
+
+/**
+ * The end-of-run "Telegram sticker import:" line. `enabled (bot token set)` is a
+ * claim about a secret put, so it needs the put's result — a failed put leaves
+ * Telegram import hidden, and saying "enabled" would send the operator hunting in
+ * the app for a feature that never turned on.
+ */
+export function telegramSummaryLine(tokenProvided: boolean, tokenSet: boolean): string {
+	if (!tokenProvided) return 'Telegram sticker import: not configured.';
+	return tokenSet
+		? 'Telegram sticker import: enabled (bot token set).'
+		: 'Telegram sticker import: enabled, but the bot token did NOT get set — import stays hidden.';
+}
+
+/**
+ * The end-of-run block that hands the operator their one-time SETUP_TOKEN. The
+ * wizard authenticates against the SETUP_TOKEN secret on the Pages project, so
+ * when that put failed the printed value is not yet a working token — say that
+ * and give the command, rather than printing it as if the wizard would take it.
+ */
+export function setupTokenLines(input: { setupToken: string; setupTokenSet: boolean; project: string }): string[] {
+	const { setupToken, setupTokenSet, project } = input;
+	if (setupTokenSet) {
+		return ['\n  Your one-time setup token (enter it in the wizard):\n', `     SETUP_TOKEN = ${setupToken}`];
+	}
+	return [
+		'\n  ⚠ The SETUP_TOKEN secret did NOT get set on the Pages project, so the wizard will',
+		'     reject this token until you set it yourself:',
+		`       npx wrangler pages secret put SETUP_TOKEN --project-name ${project}`,
+		`     SETUP_TOKEN = ${setupToken}`
+	];
+}
+
+/**
+ * The closing parenthetical of the summary, which used to assert both halves
+ * unconditionally. Each is a write that can fail: without CRON_SECRET the
+ * scheduled syncs can't authenticate, and without the seed the app boots with no
+ * storage backend — so each is reported from its own result.
+ */
+export function provisioningNoteLine(cronSecretSet: boolean, seedOk: boolean): string {
+	const cron = cronSecretSet
+		? 'CRON_SECRET set for the cron jobs'
+		: 'CRON_SECRET NOT set — the cron jobs cannot authenticate';
+	const seed = seedOk
+		? 'storageProvider seeded'
+		: 'storageProvider NOT seeded — set it in admin Settings';
+	return `  (${cron}; ${seed}.)`;
 }
 
 /**

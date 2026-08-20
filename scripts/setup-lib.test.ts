@@ -23,6 +23,11 @@ import {
 	cfApi,
 	cfErrorSummary,
 	securitySummaryLines,
+	zoneLookupWarnLines,
+	storageSummaryLines,
+	telegramSummaryLine,
+	setupTokenLines,
+	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
 	cdnAttachmentLines,
 	type CfApiResult,
@@ -771,6 +776,133 @@ describe('securitySummaryLines', () => {
 	});
 });
 
+describe('zoneLookupWarnLines', () => {
+	const warn = (status: number, errors?: unknown) => zoneLookupWarnLines('taro.surf', status, errors).join('\n');
+
+	it('says the API did not respond on a thrown fetch, never "HTTP 0"', () => {
+		const text = warn(0);
+		expect(text).toContain('the Cloudflare API did not respond');
+		expect(text).not.toContain('HTTP 0');
+		expect(text).not.toContain('Zone → Zone: Read');
+	});
+
+	it('names Zone → Zone: Read only on a 401/403', () => {
+		for (const status of [401, 403]) {
+			const text = warn(status, [{ code: 9109, message: 'Unauthorized' }]);
+			expect(text).toContain(`(HTTP ${status})`);
+			expect(text).toContain('token needs Zone → Zone: Read');
+			expect(text).toContain('the API said 9109: Unauthorized');
+		}
+	});
+
+	it('repeats the API reason on a 2xx whose body said success:false', () => {
+		const text = warn(200, [{ code: 1001, message: 'nope' }]);
+		expect(text).toContain('the API reported failure (1001: nope)');
+		expect(text).not.toContain('Zone → Zone: Read');
+	});
+
+	it('repeats the API reason on a non-2xx that carried one, without guessing a scope', () => {
+		// The bug this replaced computed the reason only for a 2xx, so a 400/404/500
+		// that carried one dropped it — exactly the statuses an operator can least
+		// explain on their own.
+		for (const status of [400, 404, 500]) {
+			const text = warn(status, [{ code: 1002, message: 'boom' }]);
+			expect(text).toContain(`(HTTP ${status})`);
+			expect(text).toContain('the API said 1002: boom');
+			expect(text).not.toContain('Zone → Zone: Read');
+		}
+	});
+
+	it('prints just the status when the failure carried no reason', () => {
+		const text = warn(500);
+		expect(text).toContain('(HTTP 500)');
+		expect(text).not.toContain('the API said');
+	});
+
+	it('names the failed candidate and keeps the skip + retry wording in every arm', () => {
+		for (const status of [0, 403, 200, 500]) {
+			const text = warn(status, [{ code: 1, message: 'x' }]);
+			expect(text).toContain('Zone lookup failed for taro.surf');
+			expect(text).toContain('— skipping the DNS / image-transform preflight.');
+			expect(text).toContain('Re-run setup to retry the preflight.');
+		}
+	});
+});
+
+describe('storageSummaryLines', () => {
+	const base = { bucket: 'taro-images', project: 'taro' };
+
+	it('reports R2 as set up, and NOT READY when R2 is not enabled', () => {
+		expect(
+			storageSummaryLines({ ...base, provider: 'r2', r2Missing: false, uploadThingTokenSet: false })
+		).toEqual(['Storage backend: Cloudflare R2 (set up).']);
+		const missing = storageSummaryLines({
+			...base,
+			provider: 'r2',
+			r2Missing: true,
+			uploadThingTokenSet: false
+		}).join('\n');
+		expect(missing).toContain('NOT READY (R2 is not enabled on this account)');
+		expect(missing).toContain('npx wrangler r2 bucket create taro-images');
+	});
+
+	it('only calls UploadThing set up when the token secret actually landed', () => {
+		expect(
+			storageSummaryLines({ ...base, provider: 'uploadthing', r2Missing: false, uploadThingTokenSet: true })
+		).toEqual(['Storage backend: UploadThing (set up).']);
+		const unset = storageSummaryLines({
+			...base,
+			provider: 'uploadthing',
+			r2Missing: false,
+			uploadThingTokenSet: false
+		}).join('\n');
+		expect(unset).toContain('NOT READY (the UPLOADTHING_TOKEN secret is not set)');
+		expect(unset).toContain('--project-name taro');
+	});
+});
+
+describe('telegramSummaryLine', () => {
+	it('claims the bot token is set only when the put succeeded', () => {
+		expect(telegramSummaryLine(false, false)).toContain('not configured');
+		expect(telegramSummaryLine(true, true)).toContain('enabled (bot token set)');
+		const failed = telegramSummaryLine(true, false);
+		expect(failed).toContain('did NOT get set');
+		expect(failed).not.toContain('(bot token set)');
+	});
+});
+
+describe('setupTokenLines', () => {
+	const input = { setupToken: 'abc123', project: 'taro' };
+
+	it('hands over the token when the secret landed', () => {
+		const text = setupTokenLines({ ...input, setupTokenSet: true }).join('\n');
+		expect(text).toContain('SETUP_TOKEN = abc123');
+		expect(text).toContain('enter it in the wizard');
+		expect(text).not.toContain('did NOT get set');
+	});
+
+	it('says the wizard will reject it, and how to set it, when the put failed', () => {
+		const text = setupTokenLines({ ...input, setupTokenSet: false }).join('\n');
+		expect(text).toContain('did NOT get set');
+		expect(text).toContain('npx wrangler pages secret put SETUP_TOKEN --project-name taro');
+		// Still print the value — it is the token the operator will need after fixing.
+		expect(text).toContain('SETUP_TOKEN = abc123');
+	});
+});
+
+describe('provisioningNoteLine', () => {
+	it('asserts each half only when its write landed', () => {
+		expect(provisioningNoteLine(true, true)).toBe(
+			'  (CRON_SECRET set for the cron jobs; storageProvider seeded.)'
+		);
+		expect(provisioningNoteLine(false, true)).toContain('CRON_SECRET NOT set');
+		expect(provisioningNoteLine(true, false)).toContain('storageProvider NOT seeded');
+		const both = provisioningNoteLine(false, false);
+		expect(both).toContain('CRON_SECRET NOT set');
+		expect(both).toContain('storageProvider NOT seeded');
+	});
+});
+
 describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 	// main() is not importable (it drives live Cloudflare state), so pin the
 	// wiring at the source level: turnstileWired must be composed from the real
@@ -806,10 +938,12 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 		}
 	);
 
-	it('both zone-lookup warn sites repeat the API reason via cfErrorSummary', () => {
+	it('both zone-lookup warn sites repeat the API reason', () => {
 		// main()s are not importable, so pin the wiring at source level: the
-		// resolveZone consumers must thread the errors body into cfErrorSummary.
-		expect(src).toContain('cfErrorSummary(zoneLookupErrors)');
+		// resolveZone consumers must thread the errors body into a summarizer.
+		// setup's arms are unit-tested directly via zoneLookupWarnLines below.
+		expect(src).toContain('zoneLookupWarnLines(');
+		expect(src).toContain('zoneLookupErrors');
 		const connectSrc = readFileSync(
 			join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
 			'utf8'
@@ -817,17 +951,11 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 		expect(connectSrc).toContain('cfErrorSummary(errors)');
 	});
 
-	it('setup’s zone-lookup warn attributes the API reason, not a bare parenthetical', () => {
-		// Three sites print '; the API said …' (this warn, connect-domains' error
-		// line, and cfFailureTail); pin this inline copy against drift.
-		expect(src).toContain('; the API said ${apiWhy}');
-		expect(src).not.toContain('(${apiWhy})');
-	});
-
 	it('never stringifies a raw cfApi errors body into the console', () => {
 		// The Pages-binding and connect-domains warns once printed
 		// JSON.stringify(res.errors), which can echo account/project identifiers —
-		// both must go through cfErrorSummary.
+		// both must go through cfFailureTail, which reads only the allowlisted
+		// code+message pairs (and lets the status decide whether a scope is named).
 		const connectSrc = readFileSync(
 			join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
 			'utf8'
@@ -835,14 +963,27 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 		for (const source of [src, connectSrc]) {
 			expect(source).not.toMatch(/JSON\.stringify\(res\.errors/);
 		}
-		expect(src).toMatch(/cfErrorSummary\(res\.errors\)/);
-		// The empty-why case must not leave a trailing space after the status —
-		// pin the exact spacing ternary (a plain `) ${why}` mutant survives tests).
-		expect(src).toContain("${why ? ` ${why}` : ''}");
-		// connect-domains' attach failures report through cfFailureTail, which
-		// sanitizes through the same cfErrorSummary and punctuates the reason
-		// itself — so the status also decides whether a scope is named at all.
+		expect(src).toContain('cfFailureTail(res.status, res.errors, PAGES_SCOPE_HINT)');
+		// A bare status is what cfFailureTail replaced — "(HTTP 0)" for a thrown
+		// fetch was the meaningless line this pin now forbids coming back.
+		expect(src).not.toContain('(HTTP ${res.status})');
 		expect(connectSrc).toContain('cfFailureTail(res.status, res.errors, m.scopeHint)');
+	});
+
+	it('stops rather than wire an empty D1 database_id', () => {
+		// A failed `wrangler d1 create` plus an empty paste used to flow on and
+		// print ✔ lines for bindings pointing at no database.
+		expect(src).toMatch(/if \(!dbId\) \{[\s\S]*?process\.exitCode = 1;/);
+	});
+
+	it('reports secret puts from their results, not from what it tried to write', () => {
+		expect(src).toMatch(/const setupTokenSet = putSecret\('SETUP_TOKEN'/);
+		expect(src).toMatch(/const cronSecretSet = putSecret\('CRON_SECRET'/);
+		expect(src).toContain('uploadThingTokenSet');
+		expect(src).toContain('telegramSummaryLine(Boolean(telegramBotToken), telegramTokenSet)');
+		// The seed's own result, from the execute's exit — not a literal true.
+		expect(src).toContain('provisioningNoteLine(cronSecretSet, seedOk)');
+		expect(src).toMatch(/catch \{\s*seedOk = false;/);
 	});
 
 	it('no middot scope names remain anywhere an operator sees one', () => {
