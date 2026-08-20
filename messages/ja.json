@@ -1401,7 +1401,7 @@
 	"con_card_handles": "ハンドル",
 	"con_card_handle_hint": "ハンドルが3つ以上になると、カードの文字が小さくなります。",
 	"con_card_download_print": "印刷用にダウンロード",
-	"con_card_save_phone": "スマホに保存",
+	"con_card_save_phone": "裏面をスマホに保存",
 	"con_card_save_phone_hint": "iPhoneの写真アプリはSVGを受け付けないため、裏面をPNGで保存します。",
 	"con_card_save_front": "ロック画面用に表面も保存",
 	"con_card_art_failed": "アバター画像を読み込めなかったため、頭文字で表示しています。",

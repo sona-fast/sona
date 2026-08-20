@@ -1718,7 +1718,7 @@
 	"con_card_handles": "Handles",
 	"con_card_handle_hint": "With more than two handles, the text on the card gets smaller.",
 	"con_card_download_print": "Download for print",
-	"con_card_save_phone": "Save to phone",
+	"con_card_save_phone": "Save the back to your phone",
 	"con_card_save_phone_hint": "Saves the back as a PNG, because Photos on iPhone won't accept an SVG.",
 	"con_card_save_front": "Save the front for a lock screen",
 	"con_card_art_failed": "Your avatar wouldn't load, so the card uses your initial instead.",

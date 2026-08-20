@@ -494,13 +494,17 @@
 		gap: 4px;
 		margin: 0;
 	}
+	/* --link, not --muted-foreground: this is an action, and sharing the hint's
+	   colour left the third download reading as a footnote to the sentence above
+	   it. The vertical padding is for the thumb, since this flow is used one
+	   handed on a con floor. */
 	.link-action {
 		background: none;
 		border: none;
-		padding: 0;
+		padding: 6px 0;
 		font: inherit;
 		font-size: 13px;
-		color: var(--muted-foreground);
+		color: var(--link);
 		text-decoration: underline;
 		cursor: pointer;
 	}

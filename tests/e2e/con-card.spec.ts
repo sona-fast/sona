@@ -88,7 +88,7 @@ test.describe('admin settings con card', () => {
 		page
 	}) => {
 		const download = page.waitForEvent('download');
-		await conCard(page).getByRole('button', { name: 'Save to phone' }).click();
+		await conCard(page).getByRole('button', { name: 'Save the back to your phone' }).click();
 
 		// Photos on iPhone refuses an SVG, so this path rasterizes through a canvas.
 		// The suffix is the assertion that the canvas half actually ran: a straight
