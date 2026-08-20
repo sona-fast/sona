@@ -19,6 +19,12 @@ const PASSWORD = 'e2e-admin-password';
 // timers running, which everything else on the settings page depends on.
 const AFTER_GA = new Date('2026-12-01T12:00:00.000Z');
 
+// Before it, for the locked half. Both dates are fixed points rather than
+// offsets from the real clock, so neither test changes meaning when the flag
+// actually reaches GA — the gate is a $derived over `new Date()` in the
+// browser, and page.clock is what that reads.
+const BEFORE_GA = new Date('2026-01-05T12:00:00.000Z');
+
 // ?tab=account rather than clicking the tab: the tab click sets component state
 // that afterNavigate clears, and this spec arrives mid-hydration. The param
 // resolves reactively and survives, which is the SONA-114 deep link's whole job.
@@ -48,8 +54,13 @@ test.describe('admin settings con card', () => {
 		await adminLogin(page, PASSWORD);
 		await openSettings(page);
 		// The component is a deferred chunk, so the section is a heading and an
-		// empty await block until it lands.
-		await expect(conCard(page)).toBeVisible();
+		// empty await block until it lands. Three things have to happen before it
+		// does: hydration, the gate re-deriving against the faked clock, and the
+		// chunk request itself. On a cold CI runner that does not fit in the default
+		// 5s expect timeout — it failed its first attempt on every CI run and was
+		// green only because Playwright retried it, which reports the suite as flaky
+		// and would hide a real break behind a passing retry.
+		await expect(conCard(page)).toBeVisible({ timeout: 30_000 });
 	});
 
 	test('groups the card options as two fieldsets: what goes on it, then which accounts', async ({
@@ -137,4 +148,42 @@ test.describe('/connect/qr', () => {
 	// property is structural and is pinned as such in
 	// src/routes/connect/qr/page.server.test.ts: the load touches no database,
 	// and the route sits outside every group whose layout does.
+});
+
+test.describe('admin settings con card, before its GA date', () => {
+	// The seed mints no supporter key, so a pre-GA clock puts this admin on the
+	// locked side of the gate. Worth a browser: the locked branch is the one an
+	// operator without a key sees for the whole head-start week, and until now it
+	// was only pinned as source text.
+	test.beforeEach(async ({ page }) => {
+		await page.clock.setFixedTime(BEFORE_GA);
+		await adminLogin(page, PASSWORD);
+		await openSettings(page);
+	});
+
+	test('offers the key instead of the generator', async ({ page }) => {
+		const section = page.locator('section.security-section', {
+			has: page.getByRole('heading', { name: 'Con card' })
+		});
+		// The hint names a date and points at the field that fixes it. Matched on the
+		// sentence rather than the date itself: early-access.ts owns that value and a
+		// unit test already pins it, so repeating it here would just be a second copy
+		// to update.
+		await expect(section.getByText(/open to everyone on/)).toBeVisible();
+		await expect(section.getByRole('link', { name: 'Add your key' })).toHaveAttribute(
+			'href',
+			'#supporter-key'
+		);
+		// And the generator is not rendered — checked twice, with a wait between,
+		// which is the whole point. The server renders this branch from its own real
+		// clock, so an immediate assertion only observes the server's answer and
+		// passes even when the browser is about to disagree. The second check runs
+		// after hydration has had time to re-render, so it is the client gate being
+		// tested. Verified by moving this clock past GA: the first assertion still
+		// passes, the second one fails.
+		await expect(conCard(page)).toHaveCount(0);
+		await page.waitForTimeout(3000);
+		await expect(conCard(page)).toHaveCount(0);
+		await expect(section.getByText(/open to everyone on/)).toBeVisible();
+	});
 });
