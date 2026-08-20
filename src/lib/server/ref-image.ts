@@ -138,7 +138,17 @@ export function refImageSource(
 	);
 }
 
-/** Who to credit for the reference sheet, for the con card's back. */
+/**
+ * Who to credit for the reference sheet, for the con card's back.
+ *
+ * CURRENT IDENTITY ONLY. The artists table carries an `aliases` column of former
+ * names and handles, kept so old ?artist= links still resolve. None of it may
+ * reach this credit: a card is printed once and cannot be corrected, and in this
+ * community a rename is often a transition or a move away from harassment, so a
+ * former handle on paper is a harm that outlives any fix we could ship. Read
+ * `artists.name` and the live platform URLs, never `aliases`, and do not add an
+ * "also known as" fallback here however sensible it looks elsewhere.
+ */
 export interface RefImageCredit {
 	name: string;
 	/** The artist's @handle where one can be derived, for a shorter credit. */

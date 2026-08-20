@@ -12,6 +12,12 @@ import type { PageServerLoad } from './$types';
  * comes from the root layout, which already falls back to a default when D1 is
  * unreachable.
  *
+ * The payload stays a bare /connect URL: no per-card token, no per-scan
+ * parameter. A card is printed, so there is no way to give notice at the point
+ * of collection, and anything unique per recipient would turn a scan into
+ * collection of the scanner's data. A single shared source marker would be fine
+ * if attribution is ever wanted; a minted one never is.
+ *
  * The encoded target is /connect and never this page. A printed con card lives
  * outside the app and outlives its state, so pointing it at a route that could
  * later be gated would turn every printed card into dead paper.
