@@ -174,6 +174,26 @@ describe('provisionTurnstileWidget — reuses when present (idempotent)', () => 
 		expect(res.sitekey).toBe(SITEKEY);
 	});
 
+	// An entry carrying our name AND our host is ours, whatever shape its sitekey
+	// came back in. Treating it as "not ours" would walk on and create a second
+	// widget for the same name+host, which is the duplicate the walk exists to avoid.
+	it('errors (no create) when our own entry carries no usable sitekey', async () => {
+		for (const sitekey of [undefined, '', 42]) {
+			const { api, calls } = fakeApi({
+				[listPath]: {
+					ok: true,
+					status: 200,
+					result: [{ name: WIDGET_NAME, sitekey, domains: ['akito.dog'] }]
+				},
+				[createPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
+			});
+			const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+			expect(res.status, `sitekey=${String(sitekey)}`).toBe('error');
+			expect(res.detail).toContain('no usable sitekey');
+			expect(calls.some((c) => c.method === 'POST')).toBe(false);
+		}
+	});
+
 	it('errors (no mutation) when the existing widget’s secret cannot be read', async () => {
 		const { api, calls } = fakeApi({
 			[listPath]: {

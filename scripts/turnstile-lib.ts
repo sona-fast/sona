@@ -158,10 +158,20 @@ export async function provisionTurnstileWidget(
 			};
 		}
 		const widgets = listRes.result as Widget[];
-		mine = widgets.find(
-			(w) =>
-				w.name === WIDGET_NAME && w.sitekey && Array.isArray(w.domains) && w.domains.includes(host)
+		// Match on name + host first, THEN insist on a usable sitekey. Folding the
+		// sitekey test into the match would read a sitekey-less entry as "not ours"
+		// and walk on to create — but an entry carrying our name and our host IS
+		// ours, so its absence is disproven and creating would mint a second widget.
+		const candidate = widgets.find(
+			(w) => w.name === WIDGET_NAME && Array.isArray(w.domains) && w.domains.includes(host)
 		);
+		if (candidate && (typeof candidate.sitekey !== 'string' || !candidate.sitekey)) {
+			return {
+				status: 'error',
+				detail: `found the ${WIDGET_NAME} Turnstile widget for ${host} but it carried no usable sitekey, so setup stopped rather than risk creating a second widget`
+			};
+		}
+		mine = candidate;
 		if (mine || widgets.length < PER_PAGE) break;
 		// Every page came back full, so this walk never reached the end of the list
 		// and ours could still sit on page MAX_PAGES + 1. Absence is unproven, and
