@@ -882,15 +882,17 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 			expect(code, `${file} non-comment code`).not.toContain('·');
 		}
 
-		// The two connect-domains console strings hold the arrow form (positive
-		// pins so a wording rewrite can't silently drop the scope name).
+		// The two connect-domains transforms strings now hand the scope to
+		// cfFailureTail, which prints it only on a 401/403, so pin the arrow form at
+		// those call sites (positive pins so a rewrite can't drop the scope name)
+		// and pin out the old sentence that blamed the scope for every failure.
 		const connectSource = readFileSync(join(here, 'connect-domains.ts'), 'utf8');
-		expect(connectSource).toContain(
-			"Image Transformations: couldn't verify (token lacks Zone → Zone Settings: Read)."
-		);
-		expect(connectSource).toContain(
-			"Image Transformations: couldn't verify (token lacks Zone → Zone Settings: Read) — enable it in the dashboard."
-		);
+		expect(
+			connectSource.match(
+				/cfFailureTail\(\s*irGet\.status,\s*irGet\.errors,\s*'Zone → Zone Settings: Read'/g
+			)
+		).toHaveLength(2);
+		expect(connectSource).not.toContain('token lacks Zone → Zone Settings: Read');
 
 		// README and UPDATING.md: every line outside code fences.
 		for (const doc of ['README.md', 'UPDATING.md']) {

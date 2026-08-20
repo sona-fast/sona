@@ -6,11 +6,12 @@
  * The Cloudflare REST caller (`cfApi`) and the bare-host / image-resizing
  * helpers live in setup-lib.ts and are reused verbatim — this file adds only
  * new, self-contained functions so it rebases cleanly against branches that
- * also touch setup-lib.ts. The one exception is a type-only import of that
- * module's `CfApiResult`, so the shapes this file consumes can't drift from
- * what `cfApi` actually returns; a type import adds no runtime dependency.
+ * also touch setup-lib.ts. It imports that module's `CfApiResult` shape (so the
+ * shapes this file consumes can't drift from what `cfApi` actually returns) plus
+ * the two failure-reporting helpers, so a can't-verify rung explains itself with
+ * the same per-status honesty the CLI's own messages use.
  */
-import type { CfApiResult } from './setup-lib.ts';
+import { cfFailureTail, statusLabel, type CfApiResult } from './setup-lib.ts';
 
 /** `cdn.<host>` — the CDN subdomain we attach to the images R2 bucket. */
 export function cdnHost(host: string): string {
@@ -223,6 +224,22 @@ export function pagesDomainAttached(result: unknown, host: string): boolean {
 }
 
 /**
+ * The Pages project's state for `host`, with the same auth-vs-absent distinction
+ * the bucket read gets: `unknown` when the GET itself failed. Reading an empty
+ * `result` off a failed response would say "not attached" and send us straight
+ * into an attach the read was supposed to tell us whether we needed.
+ */
+export type PagesDomainState = 'attached' | 'absent' | 'unknown';
+
+export function pagesDomainState(
+	res: { ok: boolean; status: number; result?: unknown },
+	host: string
+): PagesDomainState {
+	if (!res.ok) return 'unknown';
+	return pagesDomainAttached(res.result, host) ? 'attached' : 'absent';
+}
+
+/**
  * Classifies an HTTPS probe to `cdn.<domain>/`: `ok` for any real response
  * (a 4xx for a blank key still proves the domain + TLS are wired), `unreachable`
  * for a thrown fetch (status 0 — DNS/TLS never connected), and `edge-error` for
@@ -245,7 +262,8 @@ export interface ConnectPlanInput {
 	zoneId: string;
 	/** The CDN custom domain already exists (attached OR disabled OR unverifiable) — don't create it. */
 	cdnPresent: boolean;
-	pagesAttached: boolean;
+	/** The Pages domain already exists (attached OR unverifiable) — don't create it. */
+	pagesPresent: boolean;
 }
 
 export interface PlannedMutation {
@@ -264,6 +282,11 @@ export interface PlannedMutation {
  * present, so a re-run after a partial success issues just the missing call
  * (idempotent) — and a present-but-disabled CDN domain is left for the operator
  * to re-enable rather than re-created. Adds nothing else to the zone.
+ *
+ * Both `present` flags mean "don't create", not "confirmed attached": when the
+ * read that would have told us failed, the caller passes true and we plan
+ * nothing, because the one thing we must not do is mutate on a state we never
+ * managed to read.
  */
 export function planConnect(i: ConnectPlanInput): PlannedMutation[] {
 	const out: PlannedMutation[] = [];
@@ -276,7 +299,7 @@ export function planConnect(i: ConnectPlanInput): PlannedMutation[] {
 			label: `attach ${cdn} to the ${i.bucket} bucket`,
 			scopeHint: 'Account → Workers R2 Storage: Edit'
 		});
-	if (!i.pagesAttached)
+	if (!i.pagesPresent)
 		out.push({
 			method: 'POST',
 			path: `/accounts/${i.accountId}/pages/projects/${i.project}/domains`,
@@ -322,15 +345,31 @@ export interface LadderInputs {
 	zoneActive: boolean;
 	/** attached = healthy, absent = not there, disabled = present-but-off, unknown = R2 read failed. */
 	cdnState: CdnDomainState;
+	/** The R2 read's HTTP status + errors body, so an `unknown` rung can say WHY. */
+	cdnReadStatus?: number;
+	cdnReadErrors?: unknown;
 	/** true = cert issued, false = still provisioning, null = couldn't verify (R2 read failed / not attached). */
 	tlsIssued: boolean | null;
-	/** true = on, false = off, null = couldn't verify (token lacks Zone Settings·Read). */
+	/** true = on, false = off, null = couldn't verify (the settings read failed). */
 	imageTransforms: boolean | null;
+	/** The Image Transformations read's HTTP status + errors body, for the same reason. */
+	imageTransformsStatus?: number;
+	imageTransformsErrors?: unknown;
 	cdnLoad: CdnProbe;
 	/** The RESOLVED zone's name (the parent zone for a subdomain host); null/absent when no zone matched. */
 	zoneName?: string | null;
 	/** The zone names the lookup tried, most specific first (last one is the root domain). */
 	candidates?: string[];
+}
+
+/**
+ * The reason a read couldn't be verified, in the CLI's own per-status form: the
+ * scope hint only on 401/403, the did-not-respond line on a thrown fetch, the
+ * API's words when it gave any. Empty when the caller recorded no status — we
+ * would rather say nothing than name a cause we never observed.
+ */
+function readFailureTail(status: number | undefined, errors: unknown, scopeHint: string): string {
+	return status === undefined ? '' : `${statusLabel(status)}${cfFailureTail(status, errors, scopeHint)}`;
 }
 
 /**
@@ -378,7 +417,11 @@ export function buildLadder(i: LadderInputs): Rung[] {
 		i.cdnState === 'attached' ? 'pass' : i.cdnState === 'absent' ? 'fail' : 'warn';
 	const cdnAction =
 		i.cdnState === 'unknown'
-			? `Couldn't verify — the token lacks Account → Workers R2 Storage: Read (or a transient API error). Check the bucket's Custom Domains in the dashboard.`
+			? `Couldn't verify${readFailureTail(
+					i.cdnReadStatus,
+					i.cdnReadErrors,
+					'Account → Workers R2 Storage: Read'
+				)}. Check the bucket's Custom Domains in the dashboard.`
 			: i.cdnState === 'disabled'
 				? `${cdn} is attached but DISABLED — re-enable it in dashboard → R2 → your images bucket → Settings → Custom Domains.`
 				: `Run \`npm run connect-domains\` (no --check) to attach ${cdn} to the images bucket.`;
@@ -397,7 +440,11 @@ export function buildLadder(i: LadderInputs): Rung[] {
 		`Image Transformations are enabled on the ${zoneName} zone`,
 		i.imageTransforms === true ? 'pass' : 'warn',
 		i.imageTransforms === null
-			? `Couldn't verify Image Transformations (token lacks Zone → Zone Settings: Read); check dashboard → ${zoneName} → Images → Transformations.`
+			? `Couldn't verify Image Transformations${readFailureTail(
+					i.imageTransformsStatus,
+					i.imageTransformsErrors,
+					'Zone → Zone Settings: Read'
+				)}; check dashboard → ${zoneName} → Images → Transformations.`
 			: `Enable it: dashboard → ${zoneName} → Images → Transformations → "Enable for zone". Until on, thumbnails serve the full-size original or 404.`
 	);
 

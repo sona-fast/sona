@@ -49,7 +49,7 @@ import {
 	zoneConsentLabel,
 	cdnDomainState,
 	bucketDomainTlsIssued,
-	pagesDomainAttached,
+	pagesDomainState,
 	classifyCdnProbe,
 	planConnect,
 	siteUrlMismatch,
@@ -194,7 +194,7 @@ async function main(): Promise<number> {
 		const r2Res = await cfApi(cfToken, `/accounts/${cfAccount}/r2/buckets/${bucket}/domains/custom`);
 		const pagesRes = await cfApi(cfToken, `/accounts/${cfAccount}/pages/projects/${project}/domains`);
 		const cdnState = cdnDomainState(r2Res, cdn);
-		const pagesAttached = pagesDomainAttached(pagesRes.result, host);
+		const pagesState = pagesDomainState(pagesRes, host);
 
 		if (cdnState === 'disabled')
 			console.warn(
@@ -212,6 +212,18 @@ async function main(): Promise<number> {
 				)} — skipping the ${cdn} attach.`
 			);
 
+		if (pagesState === 'unknown')
+			// Same discipline as the R2 path: the read that failed is the one that
+			// would have told us whether the attach is needed, so we don't attach.
+			// Posting it anyway would be mutating on state we never managed to read.
+			console.warn(
+				`⚠ Couldn't read the ${project} Pages project's domains${statusLabel(pagesRes.status)}${cfFailureTail(
+					pagesRes.status,
+					pagesRes.errors,
+					'Account → Cloudflare Pages: Read'
+				)} — skipping the ${host} attach.`
+			);
+
 		const plan = planConnect({
 			accountId: cfAccount,
 			bucket,
@@ -219,7 +231,7 @@ async function main(): Promise<number> {
 			host,
 			zoneId: zone.id ?? '',
 			cdnPresent: cdnState !== 'absent',
-			pagesAttached
+			pagesPresent: pagesState !== 'absent'
 		});
 
 		// Image Transformations current state (read-only), so the preview can honestly
@@ -229,11 +241,23 @@ async function main(): Promise<number> {
 		const willEnableTransforms = transformsCurrent === false;
 
 		if (plan.length === 0 && !willEnableTransforms) {
-			console.log(`✔ Already connected: ${cdn} → ${bucket} bucket and ${host} → ${project} Pages.`);
+			// "Already connected" is a claim about state we read. When either read
+			// failed, an empty plan means we declined to act, not that the domains
+			// are in place — say which one it was.
+			const unread = cdnState === 'unknown' ? cdn : pagesState === 'unknown' ? host : null;
+			console.log(
+				unread
+					? `ℹ Nothing changed — the ${unread} attachment couldn't be read, so nothing was created.`
+					: `✔ Already connected: ${cdn} → ${bucket} bucket and ${host} → ${project} Pages.`
+			);
 			console.log(
 				transformsCurrent === true
 					? '  Image Transformations: on.'
-					: "  Image Transformations: couldn't verify (token lacks Zone → Zone Settings: Read)."
+					: `  Image Transformations: couldn't verify${statusLabel(irGet.status)}${cfFailureTail(
+							irGet.status,
+							irGet.errors,
+							'Zone → Zone Settings: Read'
+						)}.`
 			);
 			console.log(`  Re-check anytime:  npm run connect-domains -- --check ${host}`);
 			return 0;
@@ -302,7 +326,11 @@ async function main(): Promise<number> {
 			console.log('✔ Image Transformations already on.');
 		} else {
 			console.log(
-				"⚠ Image Transformations: couldn't verify (token lacks Zone → Zone Settings: Read) — enable it in the dashboard."
+				`⚠ Image Transformations: couldn't verify${statusLabel(irGet.status)}${cfFailureTail(
+					irGet.status,
+					irGet.errors,
+					'Zone → Zone Settings: Read'
+				)} — enable it in the dashboard.`
 			);
 		}
 
@@ -362,13 +390,19 @@ export async function runDoctor(a: DoctorArgs, deps: DoctorDeps = defaultDoctorD
 	let tlsIssued: boolean | null = null;
 	let transforms: boolean | null = null;
 	let cdnLoad: CdnProbe = 'unreachable';
+	// Left undefined when the zone is unusable and the reads never ran — a rung
+	// then says "couldn't verify" with no cause, rather than inventing one.
+	let r2Read: CfApiResult | undefined;
+	let irRead: CfApiResult | undefined;
 
 	if (zoneUsable(a.zone)) {
 		const r2Res = await deps.api(a.cfToken, `/accounts/${a.cfAccount}/r2/buckets/${a.bucket}/domains/custom`);
+		r2Read = r2Res;
 		cdnState = cdnDomainState(r2Res, a.cdn);
 		tlsIssued = cdnState === 'attached' ? bucketDomainTlsIssued(r2Res.result, a.cdn) : null;
 
 		const ir = await deps.api(a.cfToken, `/zones/${a.zone.id}/settings/image_resizing`);
+		irRead = ir;
 		transforms = imageResizingOutcome(ir, false);
 
 		// Independent HTTPS probe (not via the API) — informative even when the token
@@ -383,8 +417,12 @@ export async function runDoctor(a: DoctorArgs, deps: DoctorDeps = defaultDoctorD
 		zoneName: a.zoneName,
 		candidates: a.candidates,
 		cdnState,
+		cdnReadStatus: r2Read?.status,
+		cdnReadErrors: r2Read?.errors,
 		tlsIssued,
 		imageTransforms: transforms,
+		imageTransformsStatus: irRead?.status,
+		imageTransformsErrors: irRead?.errors,
 		cdnLoad
 	});
 	for (const line of renderLadder(ladder)) console.log(line);

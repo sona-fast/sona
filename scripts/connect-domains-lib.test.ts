@@ -10,6 +10,7 @@ import {
 	cdnDomainState,
 	bucketDomainTlsIssued,
 	pagesDomainAttached,
+	pagesDomainState,
 	classifyCdnProbe,
 	planConnect,
 	siteUrlMismatch,
@@ -17,7 +18,8 @@ import {
 	firstFailingRung,
 	renderLadder,
 	type CdnDomainState,
-	type CdnProbe
+	type CdnProbe,
+	type LadderInputs
 } from './connect-domains-lib.ts';
 
 describe('cdnHost', () => {
@@ -289,7 +291,7 @@ describe('planConnect', () => {
 	};
 
 	it('plans BOTH mutations with the correct paths and bodies when nothing is present', () => {
-		const plan = planConnect({ ...base, cdnPresent: false, pagesAttached: false });
+		const plan = planConnect({ ...base, cdnPresent: false, pagesPresent: false });
 		expect(plan).toHaveLength(2);
 		expect(plan[0]).toMatchObject({
 			method: 'POST',
@@ -304,19 +306,19 @@ describe('planConnect', () => {
 	});
 
 	it('skips the CDN create when the domain is already present (idempotent)', () => {
-		const plan = planConnect({ ...base, cdnPresent: true, pagesAttached: false });
+		const plan = planConnect({ ...base, cdnPresent: true, pagesPresent: false });
 		expect(plan).toHaveLength(1);
 		expect(plan[0].path).toContain('/pages/projects/');
 	});
 
 	it('plans nothing when both records are already present', () => {
-		expect(planConnect({ ...base, cdnPresent: true, pagesAttached: true })).toEqual([]);
+		expect(planConnect({ ...base, cdnPresent: true, pagesPresent: true })).toEqual([]);
 	});
 
 	// Each mutation carries the permission IT needs, so a 401/403 on the attach can
 	// name that one scope instead of the whole token recipe or nothing at all.
 	it('gives each mutation its own token scope', () => {
-		const plan = planConnect({ ...base, cdnPresent: false, pagesAttached: false });
+		const plan = planConnect({ ...base, cdnPresent: false, pagesPresent: false });
 		expect(plan[0].scopeHint).toBe('Account → Workers R2 Storage: Edit');
 		expect(plan[1].scopeHint).toBe('Account → Cloudflare Pages: Edit');
 	});
@@ -327,7 +329,7 @@ describe('planConnect', () => {
 			'cdn.taro.surf'
 		);
 		expect(state).toBe('disabled');
-		const plan = planConnect({ ...base, cdnPresent: state !== 'absent', pagesAttached: true });
+		const plan = planConnect({ ...base, cdnPresent: state !== 'absent', pagesPresent: true });
 		expect(plan).toEqual([]); // disabled ⇒ present ⇒ no re-create POST
 	});
 });
@@ -471,12 +473,89 @@ describe('buildLadder + firstFailingRung', () => {
 		expect(off.find((r) => r.id === 'cdn-loads')?.status).toBe('pass');
 		expect(firstFailingRung(off)).toBeUndefined();
 
-		const unknown = buildLadder({ ...healthy, imageTransforms: null });
+		const unknown = buildLadder({
+			...healthy,
+			imageTransforms: null,
+			imageTransformsStatus: 403
+		});
 		const unknownRung = unknown.find((r) => r.id === 'image-transforms');
 		expect(unknownRung?.status).toBe('warn');
 		// The remedy names the missing scope in the arrow form the other
 		// operator-facing strings use (the notation drift guard's positive arm).
 		expect(unknownRung?.action).toContain('Zone → Zone Settings: Read');
+	});
+
+	// The scope is the reason for exactly one class of failure. Naming it for a
+	// 5xx or an unreachable API sends the operator to re-mint a token that was
+	// never the problem, so the can't-verify rungs read their cause off the
+	// response they actually got.
+	const transformsAction = (over: Partial<LadderInputs>) =>
+		buildLadder({ ...healthy, imageTransforms: null, ...over }).find(
+			(r) => r.id === 'image-transforms'
+		)!.action!;
+
+	it('blames the Zone Settings scope for a 403 only, never for a 5xx or an unreachable API', () => {
+		expect(transformsAction({ imageTransformsStatus: 401 })).toContain('token needs Zone → Zone Settings: Read');
+
+		const server = transformsAction({
+			imageTransformsStatus: 500,
+			imageTransformsErrors: [{ code: 10000, message: 'Internal error' }]
+		});
+		expect(server).not.toContain('Zone → Zone Settings: Read');
+		expect(server).toContain('(HTTP 500)');
+		expect(server).toContain('the API said 10000: Internal error');
+
+		const offline = transformsAction({ imageTransformsStatus: 0 });
+		expect(offline).not.toContain('Zone → Zone Settings: Read');
+		expect(offline).not.toContain('HTTP 0');
+		expect(offline).toContain('the Cloudflare API did not respond');
+	});
+
+	it('says nothing about a cause when no read status was recorded', () => {
+		const action = transformsAction({});
+		expect(action).not.toContain('Zone → Zone Settings: Read');
+		expect(action).toContain("Couldn't verify Image Transformations;");
+	});
+
+	it('reports the R2 read failure by status too, not always as a missing scope', () => {
+		const cdnAction = (over: Partial<LadderInputs>) =>
+			buildLadder({ ...healthy, cdnState: 'unknown', tlsIssued: null, ...over }).find(
+				(r) => r.id === 'cdn-attached'
+			)!.action!;
+		expect(cdnAction({ cdnReadStatus: 403 })).toContain('token needs Account → Workers R2 Storage: Read');
+		expect(cdnAction({ cdnReadStatus: 503 })).not.toContain('Account → Workers R2 Storage: Read');
+		expect(cdnAction({ cdnReadStatus: 0 })).toContain('the Cloudflare API did not respond');
+	});
+});
+
+describe('pagesDomainState', () => {
+	const attached = [{ name: 'taro.surf' }];
+
+	it('distinguishes attached from absent on a successful read', () => {
+		expect(pagesDomainState({ ok: true, status: 200, result: attached }, 'taro.surf')).toBe('attached');
+		expect(pagesDomainState({ ok: true, status: 200, result: [] }, 'taro.surf')).toBe('absent');
+	});
+
+	it("reports a failed read as unknown, never as 'absent' (auth-vs-absent)", () => {
+		expect(pagesDomainState({ ok: false, status: 403 }, 'taro.surf')).toBe('unknown');
+		expect(pagesDomainState({ ok: false, status: 500 }, 'taro.surf')).toBe('unknown');
+		expect(pagesDomainState({ ok: false, status: 0 }, 'taro.surf')).toBe('unknown');
+	});
+
+	// The whole point of the unknown state: the read that failed is the one that
+	// would have told us whether the attach is needed, so we must not attach.
+	it('plans no Pages attach when the read failed', () => {
+		const state = pagesDomainState({ ok: false, status: 500 }, 'taro.surf');
+		const plan = planConnect({
+			accountId: 'acct1',
+			bucket: 'taro-surf-images',
+			project: 'taro-surf',
+			host: 'taro.surf',
+			zoneId: 'z1',
+			cdnPresent: true,
+			pagesPresent: state !== 'absent'
+		});
+		expect(plan).toEqual([]);
 	});
 });
 
