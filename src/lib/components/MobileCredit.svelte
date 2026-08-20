@@ -20,6 +20,9 @@
 		{#if settings.aiPageEnabled}
 			<a href="/ai">{m.footer_ai()}</a>
 		{/if}
+		{#if settings.rssFeedEnabled}
+			<a href="/feed.xml">{m.footer_rss()}</a>
+		{/if}
 	</nav>
 	<SonaBadge {host} />
 	<BuildReceipt linked={settings.aiPageEnabled} />
@@ -47,6 +50,12 @@
 
 	.legal-links {
 		display: flex;
+		/* Four links (privacy, terms, /ai, feed) no longer fit one 320px row at
+		   200% zoom — WCAG 1.4.4 territory, where the alternative to wrapping is
+		   a horizontally scrolled footer. The column is centered, so a wrapped
+		   row still reads as one group. */
+		flex-wrap: wrap;
+		justify-content: center;
 		gap: 12px;
 		font-size: 12px;
 	}

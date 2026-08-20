@@ -27,6 +27,18 @@
 
 <svelte:head>
 	<title>{data.siteName}</title>
+	<!-- Feed autodiscovery lives in the ROOT layout, not the (public) one: the
+	     homepage is +page@.svelte and escapes that layout, and the homepage is
+	     exactly where a reader's "find the feed" button looks. Only ever the SFW
+	     address — the keyed edition is private by construction. -->
+	{#if data.rssFeedEnabled}
+		<link
+			rel="alternate"
+			type="application/rss+xml"
+			title={data.siteName}
+			href="/feed.xml"
+		/>
+	{/if}
 </svelte:head>
 
 {@render children()}

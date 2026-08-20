@@ -11,6 +11,7 @@ import {
 	clearSupporterKeyStatusCache,
 	parseSonaColors
 } from '$lib/server/settings';
+import { mintFeedKey } from '$lib/server/feed-key';
 import { deleteOrphansAll, collectReferencedUrls } from '$lib/server/storage';
 import { collectUsageBreakdown, type StorageBreakdown } from '$lib/server/storage/usage-breakdown';
 import { clearVrTabCache } from '$lib/server/vr-gate';
@@ -290,6 +291,15 @@ export const actions = {
 			}
 		}
 
+		// The NSFW feed toggle, and whether a key already exists for it. Read from
+		// the RAW row rather than getSettings so a cached snapshot can never say
+		// "no key" for a fork that has one and get it silently replaced — which
+		// would break every reader already subscribed to the old address.
+		const nsfwFeed = data.has('rssNsfwEnabledPresent')
+			? data.get('rssNsfwEnabled') === 'on'
+			: undefined;
+		const existingFeedKey = nsfwFeed ? await getRawSetting(db, 'rssNsfwKey') : null;
+
 		let themeId: string | undefined;
 		if (data.has('themeId')) {
 			const themeRaw = (data.get('themeId') as string) ?? '';
@@ -391,6 +401,21 @@ export const actions = {
 				? data.get('aiPageEnabled') === 'on'
 				: undefined,
 			aiPageText,
+			// RSS feed (SONA-172) — the same Present-marker pairing. The NSFW marker
+			// is only rendered while the master toggle is on, so turning the feed
+			// off leaves rssNsfwEnabled untouched rather than silently clearing an
+			// opt-in the owner would have to make again.
+			rssFeedEnabled: data.has('rssFeedEnabledPresent')
+				? data.get('rssFeedEnabled') === 'on'
+				: undefined,
+			rssNsfwEnabled: nsfwFeed,
+			// Minted on the save that first turns the NSFW feed on, so the address
+			// exists by the time the page reloads and can show it. Never re-minted
+			// on a later save (that would silently break a subscribed reader) and
+			// never cleared on turn-off — an owner who toggles it back on keeps the
+			// address they already handed to their reader. Regenerating is the
+			// explicit, separate action below.
+			rssNsfwKey: nsfwFeed && !existingFeedKey ? mintFeedKey() : undefined,
 			// Undefined unless the matching override text changed above, so each is
 			// only written when that page's policy actually changed.
 			privacyUpdatedAt,
@@ -416,6 +441,20 @@ export const actions = {
 		});
 
 		return { success: true };
+	},
+
+	// Mint a replacement feed key. Deliberately its own action rather than a
+	// checkbox on the site form: it is destructive in a way a save is not — the
+	// previous address stops working the moment this lands, and every reader
+	// subscribed to it silently stops receiving anything.
+	regenerateFeedKey: async ({ platform }) => {
+		const db = getDb(platform!.env.DB);
+		// The minted key rides back in the result so the page can show the new
+		// address without reloading its data: a reload would resync every Site-tab
+		// field from the server and throw away edits the owner had not saved yet.
+		const key = mintFeedKey();
+		await saveSettings(db, { rssNsfwKey: key });
+		return { success: true, feedKey: key };
 	},
 
 	saveConnections: async ({ request, platform }) => {

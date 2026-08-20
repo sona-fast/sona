@@ -722,3 +722,62 @@ describe('no component anchor rule colors with --primary (SONA-193)', () => {
 		expect(offenders).toEqual([]);
 	});
 });
+
+// A native checkbox draws its checked fill with the UA's own accent, which every
+// browser picks to clear the 3:1 non-text contrast bar (WCAG 1.4.11) against its
+// own background. Overriding it with `accent-color: var(--primary)` would replace
+// that with the site's terracotta, which measures 2.20:1 on Ember light — the
+// same pairing SONA-193 repointed anchors away from. The checkbox has no text to
+// carry the state, so a checked box that does not read as checked has no fallback.
+//
+// Nothing in the repo sets accent-color today. This pins that: the SONA-172
+// settings rows were the first checkboxes anyone was tempted to style, and the
+// tempting fix is exactly the one that fails.
+describe('no accent-color override on form controls (SONA-172)', () => {
+	const srcRoot = fileURLToPath(new URL('..', import.meta.url));
+	const styled = readdirSync(srcRoot, { recursive: true })
+		.map(String)
+		.filter((p) => p.endsWith('.svelte') || p.endsWith('.css'))
+		.map((p) => `${srcRoot}/${p}`);
+
+	it('leaves the checked-checkbox fill to the user agent', () => {
+		const offenders = styled.filter((file) => /(^|[;{\s])accent-color\s*:/.test(readFileSync(file, 'utf8')));
+		expect(
+			offenders.map((f) => f.slice(srcRoot.length)),
+			'accent-color repaints a checked checkbox with the site accent. --primary measures 2.20:1 on Ember light, under the 3:1 non-text bar, and a checkbox has no label text to fall back on — that failure is why --ring exists. Leave the fill to the user agent.'
+		).toEqual([]);
+	});
+
+	// The pointer floor and the describedby wiring are the other half of the
+	// SONA-183 checkbox idiom, and a new row that copies the markup but not the
+	// class loses both silently.
+	it('gives every settings checkbox row the 24px title target and a described hint', () => {
+		const src = readFileSync(
+			new URL('../routes/admin/settings/+page.svelte', import.meta.url),
+			'utf8'
+		);
+		const rows = [...src.matchAll(/<div class="checkbox-row">([\s\S]*?)<\/div>/g)].map((m) => m[1]);
+		expect(rows.length).toBeGreaterThanOrEqual(4);
+		for (const row of rows) {
+			const id = row.match(/id="([^"]+)"/)?.[1];
+			expect(id, `a checkbox row has no id:\n${row}`).toBeTruthy();
+			// The hint id has to be IN the description list, not necessarily be all
+			// of it: a row may describe its control with a second element as well
+			// (the RSS key-pending line does).
+			const describedBy = row.match(/aria-describedby=(?:"[^"]*"|\{[^}]*\})/)?.[0];
+			expect(describedBy, `a checkbox row has no aria-describedby:\n${row}`).toBeTruthy();
+			if (describedBy?.startsWith('aria-describedby={')) {
+				// A conditional list has to name the hint in EVERY arm. Searching the
+				// expression as a whole would pass on a false arm that drops the hint,
+				// which is the arm most readers land on.
+				const arms = [...describedBy.matchAll(/'([^']*)'/g)].map((a) => a[1]);
+				expect(arms.length, `a computed aria-describedby has no id literals:\n${row}`).toBeGreaterThan(0);
+				for (const arm of arms) expect(arm.split(/\s+/), `arm omits the hint id:\n${row}`).toContain(`${id}-desc`);
+			} else {
+				expect(describedBy).toContain(`${id}-desc`);
+			}
+			expect(row).toMatch(new RegExp(`class="checkbox-title" for="${id}"`));
+			expect(row).toContain(`id="${id}-desc"`);
+		}
+	});
+});

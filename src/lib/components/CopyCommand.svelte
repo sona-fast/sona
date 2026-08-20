@@ -5,9 +5,14 @@
 	interface Props {
 		/** The exact text copied to the clipboard. Also rendered verbatim. */
 		text: string;
+		/** Accessible name for the copy button. The default reads "Copy", which is
+		 * unambiguous next to a setup command; a page with more than one copyable
+		 * value passes something that names WHICH value ("Copy address"), since
+		 * that name is all a screen-reader user gets to tell them apart. */
+		label?: string;
 	}
 
-	let { text }: Props = $props();
+	let { text, label }: Props = $props();
 	let copied = $state(false);
 	// Announced to screen readers on copy — the icon swap alone is silent.
 	let announce = $state('');
@@ -25,7 +30,7 @@
 	}
 </script>
 
-<div class="cmd">{text}<button class="copy" class:copied onclick={copy} aria-label={m.admin_setup_copy()}>
+<div class="cmd">{text}<button class="copy" class:copied onclick={copy} aria-label={label ?? m.admin_setup_copy()}>
 		{#if copied}<Check size={14} />{:else}<Copy size={14} />{/if}
 	</button><span class="sr-only" aria-live="polite">{announce}</span></div>
 

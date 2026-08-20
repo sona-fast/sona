@@ -56,6 +56,62 @@ describe('AI-page link gating markup', () => {
 	});
 });
 
+describe('feed link gating markup (SONA-172)', () => {
+	// Same rule as the /ai link above: a fork that turned the feed off gets
+	// neither the link nor the route. Below 768px the desktop Footer is
+	// display:none, so MobileCredit needs its own copy or phone visitors could
+	// never reach the feed.
+	it('wraps the feed link in the rssFeedEnabled conditional in both chromes', () => {
+		expect(footerSrc).toMatch(/\{#if settings\.rssFeedEnabled\}\s*<a href="\/feed\.xml"/);
+		expect(mobileCreditSrc).toMatch(/\{#if settings\.rssFeedEnabled\}\s*<a href="\/feed\.xml"/);
+	});
+
+	// Only ever the SFW address. The keyed edition is private by construction, so
+	// a footer or autodiscovery link carrying `?key=` would publish it to every
+	// visitor of every page.
+	it('never points a public link at a keyed feed address', () => {
+		const rootLayout = readFileSync(new URL('../../routes/+layout.svelte', import.meta.url), 'utf8');
+		for (const src of [footerSrc, mobileCreditSrc, rootLayout]) {
+			expect(src).not.toMatch(/feed\.xml\?/);
+		}
+	});
+
+	it('advertises the feed for autodiscovery from the ROOT layout, behind the toggle', () => {
+		// The (public) layout would miss the homepage, which is +page@.svelte and
+		// escapes it — and the homepage is exactly where a reader's "find the feed"
+		// button looks.
+		const rootLayout = readFileSync(new URL('../../routes/+layout.svelte', import.meta.url), 'utf8');
+		expect(rootLayout).toMatch(
+			/\{#if data\.rssFeedEnabled\}[\s\S]*?rel="alternate"[\s\S]*?type="application\/rss\+xml"/
+		);
+	});
+
+	// Four links no longer fit one 320px row at 200% zoom. Without wrapping the
+	// alternative is a horizontally scrolled footer (WCAG 1.4.4 / 1.4.10).
+	it('lets the mobile link row wrap', () => {
+		const legalLinks = mobileCreditSrc.match(/\.legal-links \{([\s\S]*?)\}/)?.[1] ?? '';
+		expect(legalLinks).toMatch(/flex-wrap:\s*wrap/);
+	});
+
+	// The nav holds more than legal pages now, so the group's accessible name has
+	// to describe what is actually in it.
+	it('labels the link nav as site links, not legal', () => {
+		for (const path of localePaths) {
+			const messages = JSON.parse(readFileSync(path, 'utf8')) as Record<string, string>;
+			expect(messages.footer_rss, `${path.pathname} footer_rss`).toBeTruthy();
+			expect(messages.footer_legal_label, `${path.pathname} footer_legal_label`).toBeTruthy();
+		}
+		// Truthiness alone would stay green if the label reverted to "Legal", which
+		// is the whole regression: pin the en value, and pin that both chromes name
+		// the nav from that key rather than from a literal.
+		const en = JSON.parse(readFileSync(localePaths[0], 'utf8')) as Record<string, string>;
+		expect(en.footer_legal_label).toBe('Site links');
+		for (const src of [footerSrc, mobileCreditSrc]) {
+			expect(src).toMatch(/<nav class="legal-links" aria-label=\{m\.footer_legal_label\(\)\}/);
+		}
+	});
+});
+
 describe('build receipt accessible name', () => {
 	// WCAG 2.5.3 Label in Name: the link's accessible name must contain its
 	// visible text, or speech input ("click build") cannot activate it. The two
