@@ -31,8 +31,20 @@ function componentShapes(component: string): string {
 		source.indexOf('>', source.indexOf('<svg')) + 1,
 		source.lastIndexOf('</svg>')
 	);
-	return inner
-		.replaceAll(/<!--[\s\S]*?-->/g, '')
+	// Strip to a fixed point rather than in one pass: a single sweep over nested
+	// or overlapping comment markers can leave a bare <!-- behind, which is what
+	// CodeQL's incomplete-multi-character-sanitization rule is about. Nothing
+	// hostile reaches this helper, since it reads our own components off disk,
+	// but a comparison that silently keeps a fragment of what it meant to remove
+	// is wrong on its own terms.
+	let withoutComments = inner;
+	let previous: string;
+	do {
+		previous = withoutComments;
+		withoutComments = withoutComments.replaceAll(/<!--[\s\S]*?-->/g, '');
+	} while (withoutComments !== previous);
+
+	return withoutComments
 		.replaceAll(/\s+/g, ' ')
 		.replaceAll(/\s*\/>/g, '/>')
 		.replaceAll(/>\s+</g, '><')
