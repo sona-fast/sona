@@ -129,6 +129,28 @@ describe('runDoctor', () => {
 		expect(text).not.toContain('Add the root domain');
 	});
 
+	// The reads never ran, so there is no status to report. A rung that filled in
+	// "(HTTP 0); the Cloudflare API did not respond" here would be describing a
+	// call that was never made — and a mutant doing exactly that survived.
+	it('says couldn\'t-verify with NO status and no scope when the zone is unusable', async () => {
+		const out: string[] = [];
+		const spy = vi.spyOn(console, 'log').mockImplementation((...x) => {
+			out.push(x.join(' '));
+		});
+		const { api, calls } = recordingApi();
+		await runDoctor(args({ zone: { exists: true, active: false, id: 'z1' } }), deps(api));
+		spy.mockRestore();
+		const text = out.join('\n');
+		expect(calls).toEqual([]);
+		expect(text).toContain("Couldn't verify. Check the bucket's Custom Domains");
+		expect(text).toContain("Couldn't verify Image Transformations;");
+		expect(text).not.toMatch(/HTTP \d/);
+		expect(text).not.toContain('the Cloudflare API did not respond');
+		expect(text).not.toContain('Workers R2 Storage: Read');
+		expect(text).not.toContain('Zone → Zone Settings: Read');
+		expect(text).not.toContain('carried no domain list');
+	});
+
 	// One 'unknown' outcome, several causes. The doctor threads the read's own
 	// status and errors into the rung, so a 5xx or an unreachable API never reads
 	// as "your token is missing a scope".
@@ -222,13 +244,12 @@ describe('connect-domains.ts ↔ candidate-walk source contract', () => {
 		// reason the operator most needs, since a 2xx-with-success:false is the only
 		// one they could have guessed at.
 		expect(src).toContain('const apiWhy = cfErrorSummary(errors);');
-		expect(src).not.toContain('errorStatus >= 200 && errorStatus < 300');
 	});
 });
 
-// Every other failed call in the mutating path reports through cfFailureTail, so
-// the reason tracks the status: the scope only on 401/403, the API's own words
-// when it gave any, and the network line for a thrown fetch. The previous copy
+// Every failed call in the mutating path reports through failureDetail, so the
+// reason tracks the status: the scope only on 401/403, the API's own words when
+// it gave any, and the network line for a thrown fetch. The previous copy
 // recommended the R2 read scope for every failure — including a 5xx and an
 // unreachable API — and printed a bare "(HTTP 0)" carrying nothing.
 describe('connect-domains.ts ↔ failure-reporting source contract', () => {
@@ -237,39 +258,24 @@ describe('connect-domains.ts ↔ failure-reporting source contract', () => {
 		'utf8'
 	);
 
-	it('reports the R2 custom-domain read through cfFailureTail', () => {
-		expect(src).toMatch(/cfFailureTail\(\s*r2Res\.status,\s*r2Res\.errors,\s*'Account → Workers R2 Storage: Read'/);
-		expect(src).not.toContain('token may lack Account → Workers R2 Storage: Read');
+	// The two domain reads go through domainReadFailure, which also tells an ok
+	// response carrying no list apart from a failed one; everything else composes
+	// statusLabel + cfFailureTail via failureDetail.
+	it('reports both domain reads through domainReadFailure', () => {
+		expect(src).toMatch(/domainReadFailure\(\s*r2Res,\s*'Account → Workers R2 Storage: Read'/);
+		expect(src).toMatch(/domainReadFailure\(\s*pagesRes,\s*'Account → Cloudflare Pages: Read'/);
 	});
 
-	it("reports a failed attach with that mutation's own scope, never a bare HTTP 0", () => {
-		expect(src).toContain('cfFailureTail(res.status, res.errors, m.scopeHint)');
-		expect(src).not.toContain('(HTTP ${res.status})');
+	it("reports a failed attach with that mutation's own scope", () => {
+		expect(src).toContain('failureDetail(res, m.scopeHint)');
 	});
 
 	it('reports a failed Image Transformations enable the same way', () => {
-		expect(src).toMatch(/cfFailureTail\(\s*patched\.status,\s*patched\.errors,\s*'Zone → Zone Settings: Edit'/);
-		expect(src).not.toContain('(HTTP ${patched.status})');
-	});
-
-	it('uses statusLabel so a thrown fetch prints no status at all', () => {
-		expect(src).toContain('statusLabel(r2Res.status)');
-		expect(src).toContain('statusLabel(res.status)');
-		expect(src).toContain('statusLabel(patched.status)');
-	});
-
-	it('reports the Pages-domain read through cfFailureTail as well', () => {
-		expect(src).toMatch(
-			/cfFailureTail\(\s*pagesRes\.status,\s*pagesRes\.errors,\s*'Account → Cloudflare Pages: Read'/
-		);
-		expect(src).toContain('statusLabel(pagesRes.status)');
+		expect(src).toMatch(/failureDetail\(\s*patched,\s*'Zone → Zone Settings: Edit'/);
 	});
 
 	it('reads the Image Transformations reason off the response, not off a fixed scope', () => {
-		expect(src).toMatch(
-			/cfFailureTail\(\s*irGet\.status,\s*irGet\.errors,\s*'Zone → Zone Settings: Read'/
-		);
-		expect(src).not.toContain('token lacks Zone → Zone Settings: Read');
+		expect(src).toMatch(/failureDetail\(\s*irGet,\s*'Zone → Zone Settings: Read'/);
 	});
 });
 
@@ -286,9 +292,6 @@ describe('connect-domains.ts ↔ never-mutate-on-an-unread-state contract', () =
 	it('derives the Pages attach from pagesDomainState, which reports a failed read as unknown', () => {
 		expect(src).toMatch(/pagesDomainState\(\s*pagesRes,\s*host\s*\)/);
 		expect(src).toContain("pagesPresent: pagesState !== 'absent'");
-		// The old wiring read the list off a possibly-failed response, so a 403
-		// became "not attached" and the attach went out anyway.
-		expect(src).not.toContain('pagesDomainAttached(pagesRes.result, host)');
 	});
 
 	it('skips the attach and says so when either read came back unknown', () => {
@@ -298,6 +301,6 @@ describe('connect-domains.ts ↔ never-mutate-on-an-unread-state contract', () =
 	});
 
 	it('never claims "Already connected" off a read that failed', () => {
-		expect(src).toMatch(/const unread = cdnState === 'unknown' \? cdn : pagesState === 'unknown' \? host : null/);
+		expect(src).toMatch(/Nothing changed — the \$\{unread\} attachment couldn't be read/);
 	});
 });

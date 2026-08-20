@@ -97,6 +97,19 @@ export function isR2NotEnabled(output: string): boolean {
 }
 
 /**
+ * True when a `wrangler r2 bucket create` run left the bucket in place: a clean
+ * exit, or a failure that only means the bucket was already there (error 10004 —
+ * the re-run case, which exits non-zero but is a success for our purposes).
+ *
+ * Every other failure means NO bucket: R2 not enabled, or — the case that
+ * prompted this — a token missing Account → Workers R2 Storage: Edit, which
+ * carries none of isR2NotEnabled's markers and so used to read as success.
+ */
+export function bucketCreateSucceeded(output: string, commandOk: boolean): boolean {
+	return commandOk || /\b10004\b/.test(output) || /already exists/i.test(output);
+}
+
+/**
  * Ensures a URL carries an http(s) scheme, mirroring `sanitizeUrl` in
  * src/lib/server/validate.ts: a value with no `http://`/`https://` prefix is
  * assumed https. Empty input stays empty (the operator can set it later). Used
@@ -252,7 +265,7 @@ export function dnsProbeBlocksSetup(probe: { ok: boolean; status: number }): boo
  * Classifies the Image Transformations preflight outcome from the zone-setting
  * GET and (when it was off) the enabling PATCH's success: `true` = on (already
  * on, or PATCHed on), `false` = still off (PATCH failed), `null` = unknown (the
- * GET failed, e.g. the token lacks Zone Settings·Read). `patchOk` is ignored
+ * GET failed, e.g. the token lacks Zone → Zone Settings: Read). `patchOk` is ignored
  * unless the GET succeeded and reported the setting as off.
  */
 export function imageResizingOutcome(
@@ -315,6 +328,15 @@ export async function cfApi(
 	}
 }
 
+/**
+ * True for a non-null object — the guard every API-body walk needs before it
+ * reads a property, since `typeof null === 'object'`. Shared so the four copies
+ * that guarded Cloudflare list entries can't drift apart.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
 // Cap by code point, not UTF-16 unit, so an emoji at the boundary is dropped
 // whole instead of split into a lone surrogate.
 const capPoints = (value: string, max: number): string => {
@@ -337,19 +359,26 @@ const capPoints = (value: string, max: number): string => {
 export function cfErrorSummary(errors: unknown): string {
 	if (!Array.isArray(errors)) return '';
 	const joined = errors
-		.filter((e): e is { code?: unknown; message?: unknown } => typeof e === 'object' && e !== null)
+		.filter(isRecord)
 		.map((e) => {
 			// No message, no line — a bare code would print a dangling '10000: '.
 			// Strip control/format chars (ANSI escapes, zero-widths), collapse
 			// whitespace, and cap each message: bodies can be multi-line or
 			// arbitrarily long, and this lands in operator-pasteable output.
+			// Format chars are DELETED, not spaced: a zero-width inside an id would
+			// otherwise split it into two halves that no longer match the 32-hex run,
+			// and the id would print. Control chars still become a space — those do
+			// separate words. The id boundaries are alphanumeric lookarounds rather
+			// than \b, so an id butted against an underscore still scrubs (\b treats
+			// _ as a word char, so `zone_<id>` slipped through).
 			const raw =
 				typeof e.message === 'string'
 					? e.message
-							.replace(/[\p{Cc}\p{Cf}]/gu, ' ')
+							.replace(/\p{Cf}/gu, '')
+							.replace(/\p{Cc}/gu, ' ')
 							.replace(/\s+/g, ' ')
 							.trim()
-							.replace(/\b[0-9a-f]{32}\b/gi, '<id>')
+							.replace(/(?<![0-9a-z])[0-9a-f]{32}(?![0-9a-z])/gi, '<id>')
 					: '';
 			if (!raw) return '';
 			const message = capPoints(raw, 200);
@@ -394,6 +423,15 @@ export function statusLabel(status: number): string {
 	return status === 0 ? '' : ` (HTTP ${status})`;
 }
 
+/**
+ * The whole "why it failed" suffix for a failed cfApi call: the status label
+ * followed by the failure tail. The two are always printed together, so this is
+ * the single form every caller appends to its own sentence.
+ */
+export function failureDetail(res: { status: number; errors?: unknown }, scopeHint: string): string {
+	return `${statusLabel(res.status)}${cfFailureTail(res.status, res.errors, scopeHint)}`;
+}
+
 /** The scope a zone lookup needs — named only when the status proves it (401/403). */
 export const ZONE_READ_SCOPE_HINT = 'Zone → Zone: Read';
 
@@ -409,7 +447,7 @@ export const ZONE_READ_SCOPE_HINT = 'Zone → Zone: Read';
  */
 export function zoneLookupWarnLines(name: string, status: number, errors: unknown): string[] {
 	return [
-		`\n⚠ Zone lookup failed for ${name}${statusLabel(status)}${cfFailureTail(status, errors, ZONE_READ_SCOPE_HINT)} — skipping the DNS / image-transform preflight.`,
+		`\n⚠ Zone lookup failed for ${name}${failureDetail({ status, errors }, ZONE_READ_SCOPE_HINT)} — skipping the DNS / image-transform preflight.`,
 		'  Re-run setup to retry the preflight.'
 	];
 }
@@ -572,6 +610,8 @@ export interface StorageSummaryInput {
 	provider: string;
 	/** The R2 bucket create said R2 isn't enabled on the account. */
 	r2Missing: boolean;
+	/** The bucket create reported the bucket in place (created, or already there). */
+	bucketReady: boolean;
 	/** The UPLOADTHING_TOKEN secret put succeeded (false when no token was given). */
 	uploadThingTokenSet: boolean;
 	bucket: string;
@@ -580,18 +620,28 @@ export interface StorageSummaryInput {
 
 /**
  * The end-of-run "Storage backend:" lines. Both backends report NOT READY on the
- * state we actually established: R2 when the bucket create said R2 isn't enabled,
- * UploadThing when the UPLOADTHING_TOKEN put didn't land (a skipped or failed put
- * used to still print "(set up)", which is the same over-claim turnstileWired
- * exists to prevent — the operator deploys and every upload fails).
+ * state we actually established: R2 when the bucket create didn't put a bucket
+ * there, UploadThing when the UPLOADTHING_TOKEN put didn't land (a skipped or
+ * failed put used to still print "(set up)", which is the same over-claim
+ * turnstileWired exists to prevent — the operator deploys and every upload fails).
+ *
+ * "R2 is not enabled" is only ONE way the create fails. A token without Account →
+ * Workers R2 Storage: Edit fails with none of that error's markers, so the claim
+ * keys off the create's own outcome and the not-enabled text only picks the
+ * wording — otherwise setup says "(set up)" about a bucket that doesn't exist.
  */
 export function storageSummaryLines(input: StorageSummaryInput): string[] {
-	const { provider, r2Missing, uploadThingTokenSet, bucket, project } = input;
+	const { provider, r2Missing, bucketReady, uploadThingTokenSet, bucket, project } = input;
 	if (provider === 'r2') {
-		if (!r2Missing) return ['Storage backend: Cloudflare R2 (set up).'];
+		if (bucketReady) return ['Storage backend: Cloudflare R2 (set up).'];
+		if (r2Missing)
+			return [
+				'Storage backend: Cloudflare R2 — NOT READY (R2 is not enabled on this account).',
+				`  Create the bucket, then re-run setup:  npx wrangler r2 bucket create ${bucket}`
+			];
 		return [
-			'Storage backend: Cloudflare R2 — NOT READY (R2 is not enabled on this account).',
-			`  Create the bucket, then re-run setup:  npx wrangler r2 bucket create ${bucket}`
+			`Storage backend: Cloudflare R2 — NOT READY (the ${bucket} bucket was not created).`,
+			`  Create it, then re-run setup:  npx wrangler r2 bucket create ${bucket}`
 		];
 	}
 	if (uploadThingTokenSet) return ['Storage backend: UploadThing (set up).'];

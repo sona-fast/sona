@@ -120,6 +120,29 @@ describe('provisionTurnstileWidget — reuses when present (idempotent)', () => 
 		expect(get?.method).toBe('GET');
 	});
 
+	// The sitekey comes back from the API, so it is encoded like any other
+	// untrusted path segment — one carrying a '/' would otherwise rewrite the URL.
+	it('encodes the sitekey it puts in the single-widget GET path', async () => {
+		const odd = 'key/../evil';
+		const { api, calls } = fakeApi({
+			[listPath]: {
+				ok: true,
+				status: 200,
+				result: [{ name: WIDGET_NAME, sitekey: odd, domains: ['akito.dog'] }]
+			},
+			[`GET /accounts/${ACCT}/challenges/widgets/key%2F..%2Fevil`]: {
+				ok: true,
+				status: 200,
+				result: { sitekey: odd, secret: WIDGET_SECRET }
+			}
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('exists');
+		expect(calls.some((c) => c.path === `/accounts/${ACCT}/challenges/widgets/key%2F..%2Fevil`)).toBe(
+			true
+		);
+	});
+
 	// One Cloudflare account can hold several forks, and every fork's widget carries
 	// the same stable name — so the host, not the name alone, is what identifies ours.
 	// Reusing a sibling fork's widget would hand this fork a sitekey scoped to the

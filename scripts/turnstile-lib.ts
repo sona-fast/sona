@@ -19,7 +19,14 @@
  * can be issued for any domain, including one whose DNS lives elsewhere — so the
  * caller does not gate this on zone resolution, only on having a custom domain.
  */
-import { cfApi, cfFailureTail, hostFromDomain, statusLabel, type CfApiResult } from './setup-lib.ts';
+import {
+	cfApi,
+	cfFailureTail,
+	failureDetail,
+	hostFromDomain,
+	statusLabel,
+	type CfApiResult
+} from './setup-lib.ts';
 
 /**
  * Stable widget name we match on so re-runs find-and-reuse our widget (idempotent)
@@ -140,7 +147,7 @@ export async function provisionTurnstileWidget(
 		if (!listRes.ok) {
 			return {
 				status: 'error',
-				detail: `could not list Turnstile widgets${statusLabel(listRes.status)}${failureTail(listRes)}`
+				detail: `could not list Turnstile widgets${failureDetail(listRes, SCOPE_HINT)}`
 			};
 		}
 		// An ok page whose result isn't a list of widget objects is a partial body.
@@ -188,7 +195,12 @@ export async function provisionTurnstileWidget(
 	// 2a. Reuse: fetch the single widget so we read its secret from the authoritative
 	// GET (matching `wrangler turnstile widget get`, which returns the secret).
 	if (mine?.sitekey) {
-		const getRes = await api(cfToken, `/accounts/${accountId}/challenges/widgets/${mine.sitekey}`);
+		// The sitekey comes back from the API, so it is encoded like any other
+		// untrusted path segment rather than pasted into the URL.
+		const getRes = await api(
+			cfToken,
+			`/accounts/${accountId}/challenges/widgets/${encodeURIComponent(mine.sitekey)}`
+		);
 		const secret = (getRes.result as Widget | undefined)?.secret;
 		if (!getRes.ok || !secret) {
 			// An ok response with no secret is a partial body — the one actionable

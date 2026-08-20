@@ -544,14 +544,32 @@ describe('buildLadder + firstFailingRung', () => {
 		expect(action).toContain("Couldn't verify Image Transformations;");
 	});
 
+	const cdnAction = (over: Partial<LadderInputs>) =>
+		buildLadder({ ...healthy, cdnState: 'unknown', tlsIssued: null, ...over }).find(
+			(r) => r.id === 'cdn-attached'
+		)!.action!;
+
 	it('reports the R2 read failure by status too, not always as a missing scope', () => {
-		const cdnAction = (over: Partial<LadderInputs>) =>
-			buildLadder({ ...healthy, cdnState: 'unknown', tlsIssued: null, ...over }).find(
-				(r) => r.id === 'cdn-attached'
-			)!.action!;
-		expect(cdnAction({ cdnReadStatus: 403 })).toContain('token needs Account → Workers R2 Storage: Read');
-		expect(cdnAction({ cdnReadStatus: 503 })).not.toContain('Account → Workers R2 Storage: Read');
-		expect(cdnAction({ cdnReadStatus: 0 })).toContain('the Cloudflare API did not respond');
+		expect(cdnAction({ cdnRead: { ok: false, status: 403 } })).toContain(
+			'token needs Account → Workers R2 Storage: Read'
+		);
+		expect(cdnAction({ cdnRead: { ok: false, status: 503 } })).not.toContain(
+			'Account → Workers R2 Storage: Read'
+		);
+		expect(cdnAction({ cdnRead: { ok: false, status: 0 } })).toContain(
+			'the Cloudflare API did not respond'
+		);
+	});
+
+	// cfApi sets ok only when the API reported success, so an ok response we
+	// couldn't read is a partial body. Feeding its 200 to the failure tail said
+	// "the API reported failure with no reason given" — the opposite of what
+	// happened, about the one case the operator can least explain.
+	it('says an ok-but-unreadable read carried no domain list, never that the API failed', () => {
+		const action = cdnAction({ cdnRead: { ok: true, status: 200 } });
+		expect(action).toContain('(HTTP 200); the response carried no domain list');
+		expect(action).not.toContain('the API reported failure');
+		expect(action).not.toContain('Workers R2 Storage: Read');
 	});
 });
 

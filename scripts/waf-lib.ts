@@ -14,10 +14,12 @@
  */
 import {
 	cfApi,
-	cfFailureTail,
+	failureDetail,
 	hostFromDomain,
+	isRecord,
 	statusLabel,
 	zoneNameCandidates,
+	ZONE_READ_SCOPE_HINT,
 	type CfApiResult
 } from './setup-lib.ts';
 import { resolveZone } from './connect-domains-lib.ts';
@@ -147,11 +149,6 @@ const deniedByScope = (status: number): boolean => status === 401 || status === 
  * exported so the notation drift guard can check the resolved string. */
 export const SCOPE_HINT = 'Zone → WAF: Edit (plus a Zone resource covering the domain)';
 
-/** setup-lib's shared cfFailureTail, bound to this lib's scope hint. */
-function failureTail(status: number, errors?: unknown): string {
-	return cfFailureTail(status, errors, SCOPE_HINT);
-}
-
 /**
  * True when the run failed because the token was refused. Reads the fact the
  * call recorded rather than searching the formatted `detail` for the scope
@@ -167,8 +164,9 @@ export function isPermissionError(res: Pick<RateLimitResult, 'permissionDenied'>
  *
  * Sequence (all via `cfApi`, Bearer `cfToken`):
  *   1. GET /zones?name=<host>            → resolve the zone id (host derived from
- *      the domain input; scheme/path stripped). No zone in the account, or the
- *      token can't see it, → a clear error naming the missing scope. No mutation.
+ *      the domain input; scheme/path stripped). A failed lookup names Zone →
+ *      Zone: Read, the scope THIS call needs; an empty list says the zone wasn't
+ *      found, which is as much a wrong domain as a permission. No mutation.
  *   2. GET /zones/<id>/rulesets/phases/http_ratelimit/entrypoint → the zone's
  *      rate-limit ruleset. 404 = no ruleset yet (fine — we create it). 401/403 or
  *      other non-ok = token lacks WAF scope → clear error, no mutation.
@@ -203,19 +201,25 @@ export async function applyDownloadRateLimit(
 			(name) => api(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 		);
 		if (errorStatus !== null) {
+			// The zone lookup is a Zone → Zone: Read call, not a WAF one — naming the
+			// WAF scope here sends the operator to fix a permission this step never
+			// needed.
 			return {
 				status: 'error',
-				detail: `could not query zones for ${failedName ?? host}${statusLabel(errorStatus)}${failureTail(errorStatus, errors)}`,
+				detail: `could not query zones for ${failedName ?? host}${failureDetail({ status: errorStatus, errors }, ZONE_READ_SCOPE_HINT)}`,
 				permissionDenied: deniedByScope(errorStatus)
 			};
 		}
 		zoneId = zone.id;
 	}
 	if (!zoneId) {
+		// An empty zone list is two different stories the API can't tell apart: the
+		// domain isn't on this account (a typo, or the wrong account), or the token
+		// can't see it. permissionDenied stays UNSET so the runner doesn't print the
+		// whole token recipe for what is most often a wrong domain.
 		return {
 			status: 'error',
-			detail: `the token has no access to the ${host} zone; add ${SCOPE_HINT}`,
-			permissionDenied: true
+			detail: `no ${host} zone was found on this Cloudflare account — check the domain, the account, and that the token's Zone Resources include it`
 		};
 	}
 
@@ -224,14 +228,24 @@ export async function applyDownloadRateLimit(
 	let rulesetId: string | undefined;
 	let existing: ExistingRule[] = [];
 	if (entry.ok) {
-		const r = entry.result as { id?: string; rules?: ExistingRule[] } | undefined;
+		const r = entry.result as { id?: string; rules?: unknown } | undefined;
+		// An ok body whose `rules` is present but not an array is a partial body, not
+		// an empty ruleset: reading it as [] would append a second copy of our rule,
+		// and calling .find on it threw outright — after setup had already written D1,
+		// R2 and Pages. Stop the way turnstile-lib stops, without mutating.
+		if (r?.rules !== undefined && !Array.isArray(r.rules)) {
+			return {
+				status: 'error',
+				detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}; the response carried no rule list, so the rule was not written`
+			};
+		}
 		rulesetId = r?.id;
-		existing = r?.rules ?? [];
+		existing = (r?.rules ?? []) as ExistingRule[];
 	} else if (entry.status !== 404) {
 		// 401/403 (no WAF scope) or a transient error — do NOT mutate.
 		return {
 			status: 'error',
-			detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}${failureTail(entry.status, entry.errors)}`,
+			detail: `could not read the rate-limit ruleset for ${host}${failureDetail(entry, SCOPE_HINT)}`,
 			permissionDenied: deniedByScope(entry.status)
 		};
 	}
@@ -242,22 +256,28 @@ export async function applyDownloadRateLimit(
 	// The entry guard matters as much as the ref match: a non-object in the zone's
 	// rules would throw on the property read, turning someone else's odd ruleset
 	// into a crash instead of a rule we simply don't own.
-	const mine = existing.find((r) => typeof r === 'object' && r !== null && r.ref === RULE_REF);
+	const mine = existing.find((r) => isRecord(r) && r.ref === RULE_REF);
 	if (mine && ruleMatches(mine)) {
 		return { status: 'exists', detail: `rate-limit rule already present on ${host} — no change` };
 	}
 
+	// The ruleset and rule ids come back from the API, so they are encoded like any
+	// other untrusted path segment rather than pasted into the URL.
 	const write: CfApiResult = await (async () => {
 		if (mine && rulesetId && mine.id) {
 			// Param bump: update just our rule in place.
-			return api(cfToken, `/zones/${zoneId}/rulesets/${rulesetId}/rules/${mine.id}`, {
-				method: 'PATCH',
-				body: buildRule()
-			});
+			return api(
+				cfToken,
+				`/zones/${zoneId}/rulesets/${encodeURIComponent(rulesetId)}/rules/${encodeURIComponent(mine.id)}`,
+				{
+					method: 'PATCH',
+					body: buildRule()
+				}
+			);
 		}
 		if (rulesetId) {
 			// Ruleset exists, our rule is absent: append only our rule.
-			return api(cfToken, `/zones/${zoneId}/rulesets/${rulesetId}/rules`, {
+			return api(cfToken, `/zones/${zoneId}/rulesets/${encodeURIComponent(rulesetId)}/rules`, {
 				method: 'POST',
 				body: buildRule()
 			});
@@ -275,7 +295,7 @@ export async function applyDownloadRateLimit(
 		// on this write. Any other status gets no scope advice.
 		return {
 			status: 'error',
-			detail: `failed to write the rate-limit rule to ${host}${statusLabel(write.status)}${failureTail(write.status, write.errors)}`,
+			detail: `failed to write the rate-limit rule to ${host}${failureDetail(write, SCOPE_HINT)}`,
 			permissionDenied: deniedByScope(write.status)
 		};
 	}

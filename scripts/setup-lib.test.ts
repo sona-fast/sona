@@ -8,6 +8,7 @@ import {
 	buildSeedSql,
 	sanitizeProjectName,
 	isR2NotEnabled,
+	bucketCreateSucceeded,
 	ensureUrlScheme,
 	ghSecretEligibility,
 	parseDatabaseId,
@@ -177,6 +178,28 @@ describe('isR2NotEnabled', () => {
 	it('does not flag empty/success output', () => {
 		expect(isR2NotEnabled('')).toBe(false);
 		expect(isR2NotEnabled('Created bucket sona-images')).toBe(false);
+	});
+});
+
+describe('bucketCreateSucceeded', () => {
+	it('is true for a clean create', () => {
+		expect(bucketCreateSucceeded('Created bucket sona-images', true)).toBe(true);
+	});
+
+	// The re-run case: wrangler exits non-zero, but the bucket is there, so setup
+	// must not report the R2 backend as broken.
+	it('treats an already-exists failure as the bucket being in place', () => {
+		expect(bucketCreateSucceeded('A bucket with that name already exists', false)).toBe(true);
+		expect(bucketCreateSucceeded('Failed [code: 10004]', false)).toBe(true);
+	});
+
+	// The failure that prompted this: a token without Account → Workers R2
+	// Storage: Edit carries none of isR2NotEnabled's markers, so sniffing the text
+	// read it as success and setup bound a bucket that does not exist.
+	it('is false for a permission failure and for R2 not being enabled', () => {
+		expect(bucketCreateSucceeded('Authentication error [code: 10000]', false)).toBe(false);
+		expect(bucketCreateSucceeded('Failed [code: 10042]: R2 not enabled', false)).toBe(false);
+		expect(bucketCreateSucceeded('', false)).toBe(false);
 	});
 });
 
@@ -670,7 +693,7 @@ describe('securitySummaryLines', () => {
 		const detail = await realRateLimitDetail({
 			'GET /zones?name=taro.surf': { ok: true, status: 200, result: [] }
 		});
-		expect(detail).toContain('no access to the taro.surf zone');
+		expect(detail).toContain('no taro.surf zone was found on this Cloudflare account');
 		const text = sum({ downloadRateLimit: 'error', downloadRateLimitDetail: detail }).join('\n');
 		// The reason line carries the real detail and ends in a period.
 		expect(text).toContain(`Reason: ${detail}.`);
@@ -835,26 +858,56 @@ describe('storageSummaryLines', () => {
 
 	it('reports R2 as set up, and NOT READY when R2 is not enabled', () => {
 		expect(
-			storageSummaryLines({ ...base, provider: 'r2', r2Missing: false, uploadThingTokenSet: false })
+			storageSummaryLines({
+				...base,
+				provider: 'r2',
+				r2Missing: false,
+				bucketReady: true,
+				uploadThingTokenSet: false
+			})
 		).toEqual(['Storage backend: Cloudflare R2 (set up).']);
 		const missing = storageSummaryLines({
 			...base,
 			provider: 'r2',
 			r2Missing: true,
+			bucketReady: false,
 			uploadThingTokenSet: false
 		}).join('\n');
 		expect(missing).toContain('NOT READY (R2 is not enabled on this account)');
 		expect(missing).toContain('npx wrangler r2 bucket create taro-images');
 	});
 
+	// "R2 is not enabled" is one of several ways the create fails. A token without
+	// Account → Workers R2 Storage: Edit carries none of that error's markers, and
+	// claiming "(set up)" there binds a bucket that does not exist.
+	it('reports R2 as NOT READY when the bucket create failed for any other reason', () => {
+		const failed = storageSummaryLines({
+			...base,
+			provider: 'r2',
+			r2Missing: false,
+			bucketReady: false,
+			uploadThingTokenSet: false
+		}).join('\n');
+		expect(failed).toContain('NOT READY (the taro-images bucket was not created)');
+		expect(failed).toContain('npx wrangler r2 bucket create taro-images');
+		expect(failed).not.toContain('(set up)');
+	});
+
 	it('only calls UploadThing set up when the token secret actually landed', () => {
 		expect(
-			storageSummaryLines({ ...base, provider: 'uploadthing', r2Missing: false, uploadThingTokenSet: true })
+			storageSummaryLines({
+				...base,
+				provider: 'uploadthing',
+				r2Missing: false,
+				bucketReady: false,
+				uploadThingTokenSet: true
+			})
 		).toEqual(['Storage backend: UploadThing (set up).']);
 		const unset = storageSummaryLines({
 			...base,
 			provider: 'uploadthing',
 			r2Missing: false,
+			bucketReady: false,
 			uploadThingTokenSet: false
 		}).join('\n');
 		expect(unset).toContain('NOT READY (the UPLOADTHING_TOKEN secret is not set)');
@@ -983,7 +1036,7 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 	it('never stringifies a raw cfApi errors body into the console', () => {
 		// The Pages-binding and connect-domains warns once printed
 		// JSON.stringify(res.errors), which can echo account/project identifiers —
-		// both must go through cfFailureTail, which reads only the allowlisted
+		// both must go through failureDetail, which reads only the allowlisted
 		// code+message pairs (and lets the status decide whether a scope is named).
 		const connectSrc = readFileSync(
 			join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
@@ -992,11 +1045,7 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 		for (const source of [src, connectSrc]) {
 			expect(source).not.toMatch(/JSON\.stringify\(res\.errors/);
 		}
-		expect(src).toContain('cfFailureTail(res.status, res.errors, PAGES_SCOPE_HINT)');
-		// A bare status is what cfFailureTail replaced — "(HTTP 0)" for a thrown
-		// fetch was the meaningless line this pin now forbids coming back.
-		expect(src).not.toContain('(HTTP ${res.status})');
-		expect(connectSrc).toContain('cfFailureTail(res.status, res.errors, m.scopeHint)');
+		expect(src).toContain('failureDetail(res, PAGES_SCOPE_HINT)');
 	});
 
 	it('stops rather than wire an empty D1 database_id', () => {
@@ -1008,61 +1057,65 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 	it('reports secret puts from their results, not from what it tried to write', () => {
 		expect(src).toMatch(/const setupTokenSet = putSecret\('SETUP_TOKEN'/);
 		expect(src).toMatch(/const cronSecretSet = putSecret\('CRON_SECRET'/);
-		expect(src).toContain('uploadThingTokenSet');
 		expect(src).toContain('telegramSummaryLine(Boolean(telegramBotToken), telegramTokenSet)');
 		// The seed's own result, from the execute's exit — not a literal true.
 		expect(src).toContain('provisioningNoteLine(cronSecretSet, seedOk)');
-		expect(src).toMatch(/catch \{\s*seedOk = false;/);
+	});
+
+	// Shorthand or nothing: `uploadThingTokenSet: true` satisfies a bare
+	// toContain of the name, and that literal is exactly the over-claim these
+	// helpers exist to prevent.
+	it('passes the storage summary the real results as shorthand', () => {
+		const storageCall = src.match(/storageSummaryLines\(\{[\s\S]*?\}\)/)?.[0] ?? '';
+		expect(storageCall).not.toBe('');
+		for (const prop of ['bucketReady', 'uploadThingTokenSet', 'r2Missing']) {
+			expect(storageCall).toMatch(new RegExp(`\\b${prop},`));
+		}
+	});
+
+	// The R2 "(set up)" claim: derived from the create's own outcome, never from
+	// the absence of the not-enabled error text.
+	it('derives bucketReady from the bucket create outcome', () => {
+		expect(src).toMatch(/const bucketReady = bucketCreateSucceeded\(r2Out, r2CreateOk\)/);
+	});
+
+	// Same shape as the securitySummaryLines pin: hardcoding setupTokenSet: true
+	// here prints the token as if the wizard would take it, and survived the suite.
+	it('passes the setup-token block the real put result as shorthand', () => {
+		const tokenCall = src.match(/setupTokenLines\(\{[\s\S]*?\}\)/)?.[0] ?? '';
+		expect(tokenCall).not.toBe('');
+		expect(tokenCall).toMatch(/\bsetupTokenSet[,}]/);
 	});
 
 	it('no middot scope names remain anywhere an operator sees one', () => {
-		// The arrow form (Account → Turnstile: Edit) is the ruling; this guard
-		// fails on any middot (·) scope name reintroduced in an operator-facing
-		// surface. Code comments are out of scope; connect-domains-lib's '·'
-		// skip-glyph is the one allowed code occurrence.
+		// The arrow form (Account → Turnstile: Edit) is the ruling; this guard fails
+		// on any middot (·) reintroduced in the CLIs or the operator docs. Comments
+		// are in scope too now that they use the arrow form, so the whole file is
+		// scanned — connect-domains-lib's skip glyph is the one allowance.
 		const here = dirname(fileURLToPath(import.meta.url));
 
 		// The resolved constants themselves, not just their use sites.
 		expect(WAF_SCOPE_HINT).not.toContain('·');
 		expect(TURNSTILE_SCOPE_HINT).not.toContain('·');
 
-		// The recipes' positive pins, and apply-download-ratelimit's negative one
-		// (its file is not in the whole-file scan below, which subsumes the rest).
-		const recipeOf = (file: string) => {
-			const source = readFileSync(join(here, file), 'utf8');
-			const recipe = source.match(/const TOKEN_RECIPE =[\s\S]*?';/)?.[0] ?? '';
-			expect(recipe, `${file} TOKEN_RECIPE found`).not.toBe('');
-			return recipe;
-		};
-		expect(recipeOf('apply-download-ratelimit.ts')).not.toContain('·');
-		expect(recipeOf('setup.ts')).toContain('Zone → Zone: Read');
-		expect(recipeOf('setup.ts')).toContain('needed later to attach the apex record');
-
-		// Whole-file scan of the CLIs' non-comment code (printed strings live
-		// there): drop full-line and trailing // comments (a URL's :// never
-		// matches — the strip needs whitespace or line start before //), minus
-		// the one legal skip-glyph.
-		for (const file of ['setup.ts', 'connect-domains.ts', 'connect-domains-lib.ts']) {
-			const code = readFileSync(join(here, file), 'utf8')
-				.split('\n')
-				.filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-				.map((l) => l.replace(/(^|\s)\/\/.*$/, ''))
-				.filter((l) => !l.includes("skip: '·'"))
-				.join('\n');
-			expect(code, `${file} non-comment code`).not.toContain('·');
+		for (const file of [
+			'setup.ts',
+			'setup-lib.ts',
+			'connect-domains.ts',
+			'connect-domains-lib.ts',
+			'apply-download-ratelimit.ts',
+			'waf-lib.ts',
+			'turnstile-lib.ts'
+		]) {
+			const source = readFileSync(join(here, file), 'utf8').replaceAll("skip: '·'", '');
+			expect(source, `${file}`).not.toContain('·');
 		}
 
-		// The two connect-domains transforms strings now hand the scope to
-		// cfFailureTail, which prints it only on a 401/403, so pin the arrow form at
-		// those call sites (positive pins so a rewrite can't drop the scope name)
-		// and pin out the old sentence that blamed the scope for every failure.
-		const connectSource = readFileSync(join(here, 'connect-domains.ts'), 'utf8');
-		expect(
-			connectSource.match(
-				/cfFailureTail\(\s*irGet\.status,\s*irGet\.errors,\s*'Zone → Zone Settings: Read'/g
-			)
-		).toHaveLength(2);
-		expect(connectSource).not.toContain('token lacks Zone → Zone Settings: Read');
+		// Positive canaries so the scan can't pass on a file that lost its recipe.
+		expect(readFileSync(join(here, 'setup.ts'), 'utf8')).toContain('Zone → Zone: Read');
+		expect(readFileSync(join(here, 'apply-download-ratelimit.ts'), 'utf8')).toContain(
+			'Zone → WAF: Edit'
+		);
 
 		// README and UPDATING.md: every line outside code fences.
 		for (const doc of ['README.md', 'UPDATING.md']) {
@@ -1090,12 +1143,7 @@ describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
 	});
 
 	it('assigns pagesConfigOk from the Pages PATCH result, read-back confirmed', () => {
-		expect(src).toMatch(/pagesConfigOk =\s*\n?\s*res\.ok/);
 		expect(src).toMatch(/pagesPatchConfirmsSitekey\(res\.result, turnstileSitekey\)/);
-	});
-
-	it('putSecret reports failure instead of swallowing it', () => {
-		expect(src).toMatch(/catch\s*\{\s*\n?\s*return false/);
 	});
 });
 
@@ -1189,6 +1237,25 @@ describe('cfErrorSummary', () => {
 		expect(summary).toContain('1: account_id=<id> is not authorized');
 		expect(summary).toContain('2: zone "<id>" not found');
 		expect(summary).toContain('3: ruleset (<id>) is missing');
+	});
+
+	// A zero-width joiner inside an id used to become a space, splitting the run
+	// into two halves that no longer matched the 32-hex pattern — so the id
+	// printed. Deleting format chars keeps the run intact and the scrub working.
+	it('scrubs an id even when a zero-width char sits inside it', () => {
+		const zid = 'a'.repeat(32);
+		const split = `${zid.slice(0, 10)}\u200b${zid.slice(10)}`;
+		const summary = cfErrorSummary([{ code: 1, message: `zone ${split} not found` }]);
+		expect(summary).toBe('1: zone <id> not found');
+	});
+
+	// \b treats '_' as a word char, so an id butted against an underscore never
+	// hit a word boundary and slipped through unscrubbed.
+	it('scrubs an id sitting next to an underscore', () => {
+		const zid = 'b'.repeat(32);
+		const summary = cfErrorSummary([{ code: 1, message: `key zone_${zid}_v2 rejected` }]);
+		expect(summary).not.toContain(zid);
+		expect(summary).toBe('1: key zone_<id>_v2 rejected');
 	});
 
 	it('leaves shorter hex runs alone (only a full 32-hex id is an object id)', () => {

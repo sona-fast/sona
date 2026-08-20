@@ -27,6 +27,7 @@ import {
 	buildMigrationSql,
 	buildSeedSql,
 	sanitizeProjectName,
+	bucketCreateSucceeded,
 	isR2NotEnabled,
 	ensureUrlScheme,
 	ghSecretEligibility,
@@ -41,8 +42,7 @@ import {
 	imageResizingIsOn,
 	ciWiringEntries,
 	cfApi,
-	cfFailureTail,
-	statusLabel,
+	failureDetail,
 	zoneLookupWarnLines,
 	securitySummaryLines,
 	storageSummaryLines,
@@ -80,6 +80,8 @@ type RunOpts = {
 	allowFail?: boolean;
 	stdin?: 'inherit' | 'ignore';
 	env?: NodeJS.ProcessEnv;
+	/** Called on a tolerated failure, so a caller can record that it happened. */
+	onFail?: () => void;
 };
 function run(cmd: string, opts: RunOpts = {}): string {
 	console.log(`\n$ ${cmd}`);
@@ -93,7 +95,10 @@ function run(cmd: string, opts: RunOpts = {}): string {
 		if (opts.allowFail) {
 			// On a tolerated failure, hand back whatever the command printed so callers
 			// can sniff it (e.g. the R2 "not enabled" error). Inherited stdio isn't
-			// captured, so this is only non-empty when `capture` was set.
+			// captured, so this is only non-empty when `capture` was set — which is why
+			// a caller that must know whether the command SUCCEEDED takes onFail rather
+			// than reading the text.
+			opts.onFail?.();
 			const e = err as { stdout?: string | Buffer; stderr?: string | Buffer };
 			return `${e.stdout ?? ''}${e.stderr ?? ''}`;
 		}
@@ -319,7 +324,7 @@ async function main() {
 
 	// 0. Custom-domain preflight (only when a domain was given). Checks (does not
 	//    guarantee) DNS access for the zone — the Pages apex CNAME needs
-	//    Zone·DNS·Edit, and without it the domain sticks `pending` with a confusing
+	//    Zone → DNS: Edit, and without it the domain sticks `pending` with a confusing
 	//    522 — and, while we have the zone, checks/enables Image Transformations
 	//    (thumbnails/OG images are built via /cdn-cgi/image, which is off by default
 	//    and per-zone). Runs before provisioning so a missing DNS scope surfaces
@@ -413,7 +418,7 @@ async function main() {
 					}
 				}
 				// Image Transformations. Off by default, per-zone, and NOT grantable by
-				// the deploy token — enable it if the token carries Zone Settings·Edit,
+				// the deploy token — enable it if the token carries Zone → Zone Settings: Edit,
 				// else leave imageResizingOn=null (unknown) and warn in Next steps.
 				const ir = await cfApi(cfToken, `/zones/${zoneId}/settings/image_resizing`);
 				let patchOk = false;
@@ -489,15 +494,31 @@ async function main() {
 	// 3. R2 bucket — always create it so the IMAGES binding is valid. Detect the
 	//    "R2 not enabled on this account" case (error 10042) rather than swallowing
 	//    it as success and later claiming the R2 backend is set up.
-	const r2Out = run(`npx wrangler r2 bucket create ${bucket}`, { capture: true, allowFail: true });
+	let r2CreateOk = true;
+	const r2Out = run(`npx wrangler r2 bucket create ${bucket}`, {
+		capture: true,
+		allowFail: true,
+		onFail: () => {
+			r2CreateOk = false;
+		}
+	});
 	process.stdout.write(r2Out);
 	const r2Missing = isR2NotEnabled(r2Out);
+	// Whether a bucket is actually there, from the create's own outcome — not from
+	// the absence of one particular error string. An "already exists" failure on a
+	// re-run counts as ready; a permission failure does not.
+	const bucketReady = bucketCreateSucceeded(r2Out, r2CreateOk);
 	if (r2Missing) {
 		console.warn('\n⚠ R2 does not appear to be enabled on this Cloudflare account.');
 		console.warn('  Enable it at dash.cloudflare.com → R2, then re-run setup');
 		console.warn(`  (or run:  npx wrangler r2 bucket create ${bucket}).`);
 		if (useR2)
 			console.warn(`  Image uploads will NOT work until the bucket "${bucket}" exists.`);
+	} else if (!bucketReady) {
+		console.warn(`\n⚠ Could not create the R2 bucket "${bucket}" — see the wrangler output above.`);
+		console.warn('  A token without Account → Workers R2 Storage: Edit fails exactly here.');
+		console.warn(`  Create it, then re-run setup:  npx wrangler r2 bucket create ${bucket}`);
+		if (useR2) console.warn('  Image uploads will NOT work until that bucket exists.');
 	}
 
 	// 4. Render wrangler.toml from the template.
@@ -520,7 +541,9 @@ async function main() {
 	if (cfToken && cfAccount) {
 		const payload = buildPagesConfigPayload({
 			dbId,
-			bucket: r2Missing ? '' : bucket,
+			// Bind R2 only when a bucket is actually there — binding a name the create
+			// never made ships a broken IMAGES binding on the first CI deploy.
+			bucket: bucketReady ? bucket : '',
 			// TURNSTILE_SITEKEY is public (rendered into the login page), so it rides
 			// as a plain Pages var alongside FURTRACK_MODE. Its secret is set separately
 			// as a Pages secret below. Absent when Turnstile wasn't provisioned.
@@ -538,17 +561,17 @@ async function main() {
 		pagesConfigOk =
 			res.ok && (!turnstileSitekey || pagesPatchConfirmsSitekey(res.result, turnstileSitekey));
 		if (res.ok) {
-			// Name only what was sent: the R2 binding is omitted when R2 isn't enabled.
+			// Name only what was sent: the R2 binding is omitted when no bucket exists.
 			console.log(
-				`✔ attached D1${r2Missing ? '' : '/R2'} bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).`
+				`✔ attached D1${bucketReady ? '/R2' : ''} bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).`
 			);
 		} else {
-			// cfFailureTail keeps the reason honest per status — a thrown fetch says
+			// failureDetail keeps the reason honest per status — a thrown fetch says
 			// the API did not respond instead of "(HTTP 0)", and only a 401/403 names
 			// the scope. It reads the allowlisted code+message pairs, never the raw
 			// errors body, which can echo account/project identifiers.
 			console.warn(
-				`\n⚠ Could not attach bindings to the Pages project via the API${statusLabel(res.status)}${cfFailureTail(res.status, res.errors, PAGES_SCOPE_HINT)}`
+				`\n⚠ Could not attach bindings to the Pages project via the API${failureDetail(res, PAGES_SCOPE_HINT)}`
 			);
 			console.warn('  Fix: run ONE local deploy with wrangler.toml present so the bindings attach:');
 			console.warn('    npx wrangler pages deploy .svelte-kit/cloudflare');
@@ -711,7 +734,14 @@ async function main() {
 	rl.close();
 
 	console.log('\n──────────────────────────────────────────────');
-	for (const line of storageSummaryLines({ provider, r2Missing, uploadThingTokenSet, bucket, project })) {
+	for (const line of storageSummaryLines({
+		provider,
+		r2Missing,
+		bucketReady,
+		uploadThingTokenSet,
+		bucket,
+		project
+	})) {
 		console.log(line);
 	}
 	console.log(

@@ -14,7 +14,7 @@
  * the resolved zone (for a subdomain host that's the parent zone serving it);
  * each is idempotent and beyond those nothing else in the zone is touched. The
  * API token comes from
- * CLOUDFLARE_API_TOKEN (Zone·Read + DNS·Edit, plus Zone Settings·Edit to enable
+ * CLOUDFLARE_API_TOKEN (Zone → Zone: Read + Zone → DNS: Edit, plus Zone → Zone Settings: Edit to enable
  * Image Transformations for you); it is read from the env, never stored or
  * printed.
  *
@@ -33,8 +33,7 @@ import { fileURLToPath } from 'node:url';
 import {
 	cfApi,
 	cfErrorSummary,
-	cfFailureTail,
-	statusLabel,
+	failureDetail,
 	hostFromDomain,
 	zoneNameCandidates,
 	imageResizingOutcome,
@@ -51,6 +50,7 @@ import {
 	bucketDomainTlsIssued,
 	pagesDomainState,
 	classifyCdnProbe,
+	domainReadFailure,
 	planConnect,
 	siteUrlMismatch,
 	buildLadder,
@@ -205,9 +205,8 @@ async function main(): Promise<number> {
 			// scope for a 500 or an unreachable API sends the operator to re-mint a
 			// token that was never the problem.
 			console.warn(
-				`⚠ Couldn't read the bucket's custom domains${statusLabel(r2Res.status)}${cfFailureTail(
-					r2Res.status,
-					r2Res.errors,
+				`⚠ Couldn't read the bucket's custom domains${domainReadFailure(
+					r2Res,
 					'Account → Workers R2 Storage: Read'
 				)} — skipping the ${cdn} attach.`
 			);
@@ -217,9 +216,8 @@ async function main(): Promise<number> {
 			// would have told us whether the attach is needed, so we don't attach.
 			// Posting it anyway would be mutating on state we never managed to read.
 			console.warn(
-				`⚠ Couldn't read the ${project} Pages project's domains${statusLabel(pagesRes.status)}${cfFailureTail(
-					pagesRes.status,
-					pagesRes.errors,
+				`⚠ Couldn't read the ${project} Pages project's domains${domainReadFailure(
+					pagesRes,
 					'Account → Cloudflare Pages: Read'
 				)} — skipping the ${host} attach.`
 			);
@@ -253,11 +251,7 @@ async function main(): Promise<number> {
 			console.log(
 				transformsCurrent === true
 					? '  Image Transformations: on.'
-					: `  Image Transformations: couldn't verify${statusLabel(irGet.status)}${cfFailureTail(
-							irGet.status,
-							irGet.errors,
-							'Zone → Zone Settings: Read'
-						)}.`
+					: `  Image Transformations: couldn't verify${failureDetail(irGet, 'Zone → Zone Settings: Read')}.`
 			);
 			console.log(`  Re-check anytime:  npm run connect-domains -- --check ${host}`);
 			return 0;
@@ -299,12 +293,12 @@ async function main(): Promise<number> {
 			const res = await cfApi(cfToken, m.path, { method: m.method, body: m.body });
 			if (res.ok) console.log(`✔ ${m.label}`);
 			else
-				// cfFailureTail keeps the reason honest per status: the call's own scope
+				// failureDetail keeps the reason honest per status: the call's own scope
 				// on 401/403, the API's sanitized words when it gave any, and the
 				// did-not-respond line for a thrown fetch (where a bare "HTTP 0" said
 				// nothing at all).
 				console.warn(
-					`⚠ Could not ${m.label}${statusLabel(res.status)}${cfFailureTail(res.status, res.errors, m.scopeHint)}`
+					`⚠ Could not ${m.label}${failureDetail(res, m.scopeHint)}`
 				);
 		}
 
@@ -316,21 +310,13 @@ async function main(): Promise<number> {
 			if (patched.ok) console.log(`✔ Image Transformations enabled on ${zoneLabel}.`);
 			else
 				console.warn(
-					`⚠ Could not enable Image Transformations${statusLabel(patched.status)}${cfFailureTail(
-						patched.status,
-						patched.errors,
-						'Zone → Zone Settings: Edit'
-					)} — enable it in the dashboard.`
+					`⚠ Could not enable Image Transformations${failureDetail(patched, 'Zone → Zone Settings: Edit')} — enable it in the dashboard.`
 				);
 		} else if (transformsCurrent === true) {
 			console.log('✔ Image Transformations already on.');
 		} else {
 			console.log(
-				`⚠ Image Transformations: couldn't verify${statusLabel(irGet.status)}${cfFailureTail(
-					irGet.status,
-					irGet.errors,
-					'Zone → Zone Settings: Read'
-				)} — enable it in the dashboard.`
+				`⚠ Image Transformations: couldn't verify${failureDetail(irGet, 'Zone → Zone Settings: Read')} — enable it in the dashboard.`
 			);
 		}
 
@@ -417,8 +403,7 @@ export async function runDoctor(a: DoctorArgs, deps: DoctorDeps = defaultDoctorD
 		zoneName: a.zoneName,
 		candidates: a.candidates,
 		cdnState,
-		cdnReadStatus: r2Read?.status,
-		cdnReadErrors: r2Read?.errors,
+		cdnRead: r2Read,
 		tlsIssued,
 		imageTransforms: transforms,
 		imageTransformsStatus: irRead?.status,

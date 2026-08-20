@@ -11,7 +11,7 @@
  * the two failure-reporting helpers, so a can't-verify rung explains itself with
  * the same per-status honesty the CLI's own messages use.
  */
-import { cfFailureTail, statusLabel, type CfApiResult } from './setup-lib.ts';
+import { failureDetail, isRecord, statusLabel, type CfApiResult } from './setup-lib.ts';
 
 /** `cdn.<host>` — the CDN subdomain we attach to the images R2 bucket. */
 export function cdnHost(host: string): string {
@@ -189,7 +189,7 @@ export function findBucketDomain(result: unknown, name: string): BucketDomain | 
 		(Array.isArray(result) ? (result as BucketDomain[]) : [])) as BucketDomain[];
 	// A list entry that isn't an object would throw on the property read, turning a
 	// malformed body into a crash instead of the 'unknown' its caller reports.
-	return list.find((d) => typeof d === 'object' && d !== null && d.domain === name);
+	return list.find((d) => isRecord(d) && d.domain === name);
 }
 
 /**
@@ -197,7 +197,7 @@ export function findBucketDomain(result: unknown, name: string): BucketDomain | 
  * treat differently: `attached` (enabled — nothing to do), `disabled` (present
  * but turned off — enable it in the dashboard, do NOT re-create), `absent` (not
  * there — safe to create), and `unknown` (the GET failed, e.g. the token lacks
- * Account · Workers R2 Storage · Read — we must NOT report this as "not attached").
+ * Account → Workers R2 Storage: Read — we must NOT report this as "not attached").
  */
 export type CdnDomainState = 'attached' | 'disabled' | 'absent' | 'unknown';
 
@@ -230,7 +230,7 @@ export function pagesDomainAttached(result: unknown, host: string): boolean {
 	const list = (Array.isArray(result) ? result : []) as { name?: string }[];
 	// Same guard as findBucketDomain: a non-object entry would throw on the
 	// property read rather than simply failing to match.
-	return list.some((d) => typeof d === 'object' && d !== null && d.name === host);
+	return list.some((d) => isRecord(d) && d.name === host);
 }
 
 /**
@@ -359,9 +359,8 @@ export interface LadderInputs {
 	zoneActive: boolean;
 	/** attached = healthy, absent = not there, disabled = present-but-off, unknown = R2 read failed. */
 	cdnState: CdnDomainState;
-	/** The R2 read's HTTP status + errors body, so an `unknown` rung can say WHY. */
-	cdnReadStatus?: number;
-	cdnReadErrors?: unknown;
+	/** The R2 read itself, so an `unknown` rung can say WHY; absent when it never ran. */
+	cdnRead?: { ok: boolean; status: number; errors?: unknown };
 	/** true = cert issued, false = still provisioning, null = couldn't verify (R2 read failed / not attached). */
 	tlsIssued: boolean | null;
 	/** true = on, false = off, null = couldn't verify (the settings read failed). */
@@ -383,7 +382,23 @@ export interface LadderInputs {
  * would rather say nothing than name a cause we never observed.
  */
 function readFailureTail(status: number | undefined, errors: unknown, scopeHint: string): string {
-	return status === undefined ? '' : `${statusLabel(status)}${cfFailureTail(status, errors, scopeHint)}`;
+	return status === undefined ? '' : failureDetail({ status, errors }, scopeHint);
+}
+
+/**
+ * The same reason for a domain read that returned nothing usable — but told
+ * apart from a failed one. cfApi reports `ok` only when the API said success, so
+ * an ok response we couldn't read is a partial body: saying "the API reported
+ * failure" there would state the opposite of what happened. Empty when the read
+ * never ran, for the same reason readFailureTail is.
+ */
+export function domainReadFailure(
+	res: { ok: boolean; status: number; errors?: unknown } | undefined,
+	scopeHint: string
+): string {
+	if (!res) return '';
+	if (res.ok) return `${statusLabel(res.status)}; the response carried no domain list`;
+	return failureDetail(res, scopeHint);
 }
 
 /**
@@ -431,9 +446,8 @@ export function buildLadder(i: LadderInputs): Rung[] {
 		i.cdnState === 'attached' ? 'pass' : i.cdnState === 'absent' ? 'fail' : 'warn';
 	const cdnAction =
 		i.cdnState === 'unknown'
-			? `Couldn't verify${readFailureTail(
-					i.cdnReadStatus,
-					i.cdnReadErrors,
+			? `Couldn't verify${domainReadFailure(
+					i.cdnRead,
 					'Account → Workers R2 Storage: Read'
 				)}. Check the bucket's Custom Domains in the dashboard.`
 			: i.cdnState === 'disabled'

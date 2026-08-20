@@ -240,14 +240,17 @@ describe('applyDownloadRateLimit — subdomain host resolves via the registrable
 });
 
 describe('applyDownloadRateLimit — clear errors, no mutation', () => {
-	it('token has no access to the zone (empty result) → error naming WAF scope, no ruleset touched', async () => {
+	// An empty zone list is as often a typo or the wrong account as it is a
+	// permission, so it must not read as a refusal — isPermissionError decides
+	// whether the runner prints the whole token recipe.
+	it('an empty zone list says the zone was not found, without claiming a refusal', async () => {
 		const { api, calls } = fakeApi({
 			[zonePath]: { ok: true, status: 200, result: [] }
 		});
 		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
 		expect(res.status).toBe('error');
-		expect(res.detail).toContain('no access to the akito.dog zone');
-		expect(res.detail).toContain('WAF: Edit');
+		expect(res.detail).toContain('no akito.dog zone was found on this Cloudflare account');
+		expect(isPermissionError(res)).toBe(false);
 		// Never proceeded to the ruleset endpoint.
 		expect(calls).toHaveLength(1);
 	});
@@ -287,9 +290,11 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		// failed lookups still passed this test (found by mutation).
 		expect(res.detail).toContain('HTTP 403');
 		// A 403 IS a permission failure — the scope hint must survive here even
-		// though non-permission statuses dropped it.
-		expect(res.detail).toContain('token needs');
-		expect(res.detail).toContain('WAF: Edit');
+		// though non-permission statuses dropped it. The scope named is the one
+		// THIS call needs: the zone lookup is a Zone: Read, not a WAF: Edit.
+		expect(res.detail).toContain('token needs Zone → Zone: Read');
+		expect(res.detail).not.toContain('WAF: Edit');
+		expect(isPermissionError(res)).toBe(true);
 		expect(calls).toHaveLength(1);
 	});
 
@@ -368,6 +373,59 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		expect(res.detail).toContain('HTTP 200');
 		expect(res.detail).toContain('the API reported failure (2001: zone is on hold)');
 		expect(res.detail).not.toContain('token needs');
+	});
+
+	// Ids come back from the API, so they are encoded like any other untrusted
+	// path segment — an id carrying a '/' would otherwise rewrite the URL.
+	it('encodes the ruleset and rule ids it puts in the write path', async () => {
+		const odd = 'rs/../evil';
+		const { api, calls } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: {
+				ok: true,
+				status: 200,
+				result: { id: odd, rules: [{ id: 'r/1', ref: RULE_REF }] }
+			},
+			[`PATCH /zones/${ZONE}/rulesets/rs%2F..%2Fevil/rules/r%2F1`]: { ok: true, status: 200 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('updated');
+		const patch = calls.find((c) => c.method === 'PATCH')!;
+		expect(patch.path).toBe(`/zones/${ZONE}/rulesets/rs%2F..%2Fevil/rules/r%2F1`);
+	});
+
+	// WAF Read and WAF Edit are separate permission groups, so a read-only token
+	// gets through both GETs and is refused exactly on the write. That is the case
+	// the recipe gate exists for, and nothing above it can prove it.
+	it('a 403 on the write itself is a permission error, even though both reads passed', async () => {
+		const { api, calls } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: false, status: 404 },
+			[putEntryPath]: { ok: false, status: 403 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('failed to write');
+		expect(res.detail).toContain('token needs Zone → WAF: Edit');
+		expect(isPermissionError(res)).toBe(true);
+		expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+	});
+
+	// An ok body whose `rules` isn't an array threw `existing.find is not a
+	// function` — a crash after setup had already written D1, R2 and Pages. It
+	// stops like turnstile-lib's partial-body arms: an error, and no write.
+	it('an ok entrypoint whose rules is not an array stops without mutating', async () => {
+		for (const rules of [{}, 'nope', 42, null]) {
+			const { api, calls } = fakeApi({
+				[zonePath]: zoneOk,
+				[entryPath]: { ok: true, status: 200, result: { id: RULESET, rules } }
+			});
+			const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+			expect(res.status, `rules=${JSON.stringify(rules)}`).toBe('error');
+			expect(res.detail).toContain('the response carried no rule list');
+			expect(isPermissionError(res)).toBe(false);
+			expect(calls.every((c) => c.method === 'GET')).toBe(true);
+		}
 	});
 
 	it('empty domain → error before any network call', async () => {
@@ -618,12 +676,14 @@ describe('isPermissionError — the standalone runner’s recipe gate', () => {
 		);
 		expect(isPermissionError(denied)).toBe(true);
 
-		const noAccess = await applyDownloadRateLimit(
+		// A zone lookup refused outright IS a permission failure, even though the
+		// scope it names is the zone one rather than WAF.
+		const zoneDenied = await applyDownloadRateLimit(
 			SECRET,
 			'akito.dog',
-			fakeApi({ [zonePath]: { ok: true, status: 200, result: [] } }).api
+			fakeApi({ [zonePath]: { ok: false, status: 403 } }).api
 		);
-		expect(isPermissionError(noAccess)).toBe(true);
+		expect(isPermissionError(zoneDenied)).toBe(true);
 
 		const transient = await applyDownloadRateLimit(
 			SECRET,
