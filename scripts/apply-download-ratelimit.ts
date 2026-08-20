@@ -24,6 +24,7 @@ import { applyDownloadRateLimit, isPermissionError } from './waf-lib.ts';
 const TOKEN_RECIPE =
 	'Set CLOUDFLARE_API_TOKEN to a Cloudflare API token (dash → My Profile → API Tokens →\n' +
 	'Create Token → Custom token) with:\n' +
+	'    • Zone → Zone: Read\n' +
 	'    • Zone → WAF: Edit\n' +
 	'  and a Zone Resource that includes the fork domain, then re-run:\n' +
 	'    CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- <domain>';
@@ -58,10 +59,10 @@ async function main(): Promise<number> {
 			return 0;
 		default:
 			console.error(`✖ ${res.detail}\n`);
-			// The recipe fixes token scopes, so print it only when the detail names
-			// a permission failure (isPermissionError keys off waf-lib's own scope
-			// hint) — a transient HTTP error just gets plain retry guidance.
-			if (isPermissionError(res.detail)) {
+			// The recipe fixes token scopes, so print it only when the call actually
+			// hit a refusal (the result records that; the wording is not consulted)
+			// — a transient HTTP error just gets plain retry guidance.
+			if (isPermissionError(res)) {
 				console.error(TOKEN_RECIPE);
 			} else {
 				console.error('This may not be a token-permission problem. Re-run once the');

@@ -130,7 +130,18 @@ export interface RateLimitResult {
 	status: RateLimitStatus;
 	/** Human-readable, secret-free summary safe to print. */
 	detail: string;
+	/**
+	 * True when the API refused this call for a token permission (401/403, or a
+	 * zone the token cannot see). Carried as a fact rather than re-derived by
+	 * reading the formatted `detail`, so the standalone runner decides whether to
+	 * print the token recipe from what happened, not from wording that a
+	 * Cloudflare message could coincidentally echo.
+	 */
+	permissionDenied?: boolean;
 }
+
+/** Whether an HTTP status means the token was refused, as opposed to any other failure. */
+const deniedByScope = (status: number): boolean => status === 401 || status === 403;
 
 /** The token permission a fork operator must add, quoted verbatim in errors —
  * exported so the notation drift guard can check the resolved string. */
@@ -142,14 +153,13 @@ function failureTail(status: number, errors?: unknown): string {
 }
 
 /**
- * True when an error `detail` names a token-permission failure. Every branch
- * that blames permissions interpolates SCOPE_HINT verbatim (via failureTail's
- * 401/403 arm or the no-zone-access detail) and no other branch mentions it,
- * so the standalone runner can decide whether the token recipe is relevant
- * without RateLimitResult carrying an HTTP status.
+ * True when the run failed because the token was refused. Reads the fact the
+ * call recorded rather than searching the formatted `detail` for the scope
+ * hint: the API's own message is echoed into that text, so a Cloudflare
+ * message quoting the permission would otherwise be read as a refusal.
  */
-export function isPermissionError(detail: string): boolean {
-	return detail.includes(SCOPE_HINT);
+export function isPermissionError(res: Pick<RateLimitResult, 'permissionDenied'>): boolean {
+	return res.permissionDenied === true;
 }
 
 /**
@@ -195,7 +205,8 @@ export async function applyDownloadRateLimit(
 		if (errorStatus !== null) {
 			return {
 				status: 'error',
-				detail: `could not query zones for ${failedName ?? host}${statusLabel(errorStatus)}${failureTail(errorStatus, errors)}`
+				detail: `could not query zones for ${failedName ?? host}${statusLabel(errorStatus)}${failureTail(errorStatus, errors)}`,
+				permissionDenied: deniedByScope(errorStatus)
 			};
 		}
 		zoneId = zone.id;
@@ -203,7 +214,8 @@ export async function applyDownloadRateLimit(
 	if (!zoneId) {
 		return {
 			status: 'error',
-			detail: `the token has no access to the ${host} zone; add ${SCOPE_HINT}`
+			detail: `the token has no access to the ${host} zone; add ${SCOPE_HINT}`,
+			permissionDenied: true
 		};
 	}
 
@@ -219,7 +231,8 @@ export async function applyDownloadRateLimit(
 		// 401/403 (no WAF scope) or a transient error — do NOT mutate.
 		return {
 			status: 'error',
-			detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}${failureTail(entry.status, entry.errors)}`
+			detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}${failureTail(entry.status, entry.errors)}`,
+			permissionDenied: deniedByScope(entry.status)
 		};
 	}
 
@@ -259,7 +272,8 @@ export async function applyDownloadRateLimit(
 		// on this write. Any other status gets no scope advice.
 		return {
 			status: 'error',
-			detail: `failed to write the rate-limit rule to ${host}${statusLabel(write.status)}${failureTail(write.status, write.errors)}`
+			detail: `failed to write the rate-limit rule to ${host}${statusLabel(write.status)}${failureTail(write.status, write.errors)}`,
+			permissionDenied: deniedByScope(write.status)
 		};
 	}
 	return mine

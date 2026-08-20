@@ -4,6 +4,7 @@ import {
 	applyDownloadRateLimit,
 	buildRule,
 	isPermissionError,
+	SCOPE_HINT as WAF_SCOPE_HINT,
 	RULE_REF,
 	RULE_DESCRIPTION,
 	RULE_EXPRESSION,
@@ -615,14 +616,14 @@ describe('isPermissionError — the standalone runner’s recipe gate', () => {
 			'akito.dog',
 			fakeApi({ [zonePath]: zoneOk, [entryPath]: { ok: false, status: 403 } }).api
 		);
-		expect(isPermissionError(denied.detail)).toBe(true);
+		expect(isPermissionError(denied)).toBe(true);
 
 		const noAccess = await applyDownloadRateLimit(
 			SECRET,
 			'akito.dog',
 			fakeApi({ [zonePath]: { ok: true, status: 200, result: [] } }).api
 		);
-		expect(isPermissionError(noAccess.detail)).toBe(true);
+		expect(isPermissionError(noAccess)).toBe(true);
 
 		const transient = await applyDownloadRateLimit(
 			SECRET,
@@ -633,6 +634,28 @@ describe('isPermissionError — the standalone runner’s recipe gate', () => {
 				[putEntryPath]: { ok: false, status: 500 }
 			}).api
 		);
-		expect(isPermissionError(transient.detail)).toBe(false);
+		expect(isPermissionError(transient)).toBe(false);
+	});
+
+	// The gate used to search the formatted detail for the scope hint. Since the
+	// API's own message is echoed into that same text, a 500 whose body quoted the
+	// permission read as a refusal and sent the operator to re-mint a working
+	// token. The result now records what happened, so the wording cannot lie.
+	it('is false for a 500 whose API message quotes the scope hint verbatim', async () => {
+		const res = await applyDownloadRateLimit(
+			SECRET,
+			'akito.dog',
+			fakeApi({
+				[zonePath]: zoneOk,
+				[entryPath]: { ok: false, status: 404 },
+				[putEntryPath]: {
+					ok: false,
+					status: 500,
+					errors: [{ code: 1000, message: `internal error; check Zone → WAF: Edit (plus a Zone resource covering the domain)` }]
+				}
+			}).api
+		);
+		expect(res.detail).toContain(WAF_SCOPE_HINT);
+		expect(isPermissionError(res)).toBe(false);
 	});
 });
