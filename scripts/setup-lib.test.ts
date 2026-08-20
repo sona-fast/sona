@@ -1004,6 +1004,28 @@ describe('cfErrorSummary', () => {
 		expect(summary).toContain('2: no rule at /zones/<id>/rulesets/<id>/rules/<id>, sorry');
 	});
 
+	it('scrubs ids that are not path segments: assigned, quoted, parenthesized', () => {
+		const acct = 'e'.repeat(32);
+		const zid = 'f'.repeat(32);
+		const rid = '0'.repeat(32);
+		const summary = cfErrorSummary([
+			{ code: 1, message: `account_id=${acct} is not authorized` },
+			{ code: 2, message: `zone "${zid}" not found` },
+			{ code: 3, message: `ruleset (${rid}) is missing` }
+		]);
+		for (const id of [acct, zid, rid]) expect(summary).not.toContain(id);
+		expect(summary).toContain('1: account_id=<id> is not authorized');
+		expect(summary).toContain('2: zone "<id>" not found');
+		expect(summary).toContain('3: ruleset (<id>) is missing');
+	});
+
+	it('leaves shorter hex runs alone (only a full 32-hex id is an object id)', () => {
+		const summary = cfErrorSummary([
+			{ code: 1, message: 'checksum abcdef01 and prefix abcdef0123456789 are fine' }
+		]);
+		expect(summary).toBe('1: checksum abcdef01 and prefix abcdef0123456789 are fine');
+	});
+
 	it('strips control/format chars (ANSI escapes) before printing', () => {
 		const summary = cfErrorSummary([{ code: 7003, message: '\u001b[31mred\u001b[0m\u200b alert' }]);
 		expect(summary).not.toContain('\u001b');

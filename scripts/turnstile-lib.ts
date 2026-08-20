@@ -125,7 +125,8 @@ export async function provisionTurnstileWidget(
 	if (!host) return { status: 'error', detail: 'no domain given' };
 
 	// 1. List existing widgets a page at a time; reconcile against ours by stable
-	// name. Stop at the first match, at a short page (the last one), or at MAX_PAGES.
+	// name. Stop at the first match or at a short page (the last one); MAX_PAGES
+	// full pages means the list never ended, which is an error rather than a miss.
 	// The explicit sort pins the ordering for the life of the walk: created_on never
 	// changes, while the API's default order can be recomputed mid-walk and shuffle
 	// widgets across page boundaries. A concurrent delete can still shift a widget
@@ -142,18 +143,36 @@ export async function provisionTurnstileWidget(
 				detail: `could not list Turnstile widgets${statusLabel(listRes.status)}${failureTail(listRes)}`
 			};
 		}
-		// An ok page whose result isn't a list is a partial body. Reading it as an
-		// empty page would end the walk and mint a duplicate widget — the exact
-		// failure the paging exists to prevent — so stop and say so instead.
-		if (!Array.isArray(listRes.result)) {
+		// An ok page whose result isn't a list of widget objects is a partial body.
+		// Reading it as an empty page would end the walk and mint a duplicate
+		// widget — the exact failure the paging exists to prevent — so stop and say
+		// so instead. Entries are checked before the cast: a `[null]` page would
+		// otherwise throw a TypeError out of the match below.
+		if (
+			!Array.isArray(listRes.result) ||
+			listRes.result.some((w) => typeof w !== 'object' || w === null)
+		) {
 			return {
 				status: 'error',
 				detail: `could not list Turnstile widgets${statusLabel(listRes.status)}; the response carried no widget list, so setup stopped rather than risk creating a second widget`
 			};
 		}
 		const widgets = listRes.result as Widget[];
-		mine = widgets.find((w) => w.name === WIDGET_NAME && w.sitekey && w.domains?.includes(host));
+		mine = widgets.find(
+			(w) =>
+				w.name === WIDGET_NAME && w.sitekey && Array.isArray(w.domains) && w.domains.includes(host)
+		);
 		if (mine || widgets.length < PER_PAGE) break;
+		// Every page came back full, so this walk never reached the end of the list
+		// and ours could still sit on page MAX_PAGES + 1. Absence is unproven, and
+		// creating on an unproven absence mints a second widget for the same
+		// name+host — after which runs match whichever one the API returns first.
+		if (page === MAX_PAGES) {
+			return {
+				status: 'error',
+				detail: `could not find the ${WIDGET_NAME} Turnstile widget for ${host} in the first ${MAX_PAGES} pages of the widget list${statusLabel(listRes.status)}; the list did not end there, so setup stopped rather than risk creating a second widget`
+			};
+		}
 	}
 
 	// 2a. Reuse: fetch the single widget so we read its secret from the authoritative

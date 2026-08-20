@@ -279,7 +279,7 @@ describe('provisionTurnstileWidget — walks past the first list page', () => {
 	// An API that ignored `page` would hand back the same full page forever. The fake
 	// here is a handler rather than a route map so it can do exactly that: every list
 	// request answers with a full page of strangers, whatever page was asked for.
-	it('stops after MAX_PAGES when every page comes back full', async () => {
+	it('stops after MAX_PAGES when every page comes back full, without creating', async () => {
 		const calls: Call[] = [];
 		const api = async (
 			token: string,
@@ -304,10 +304,37 @@ describe('provisionTurnstileWidget — walks past the first list page', () => {
 
 		// Terminated at the bound instead of hanging.
 		expect(calls.filter((c) => c.method === 'GET')).toHaveLength(20);
-		// Current behavior, asserted so a change to it is a deliberate one: the walk
-		// ending without a match is indistinguishable from "we have no widget", so the
-		// create fires. It mints a duplicate on an account this large, which beats
-		// leaving the fork with no widget and a locked admin login.
+		// Ending on a full page is not the end of the list: ours could sit on page 21.
+		// Creating here would mint a duplicate for the same name+host, after which
+		// every later run matches whichever one comes back first — so the walk stops
+		// and says what it could not rule out.
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('first 20 pages');
+		expect(res.detail).toContain('did not end there');
+		expect(calls.some((c) => c.method === 'POST')).toBe(false);
+	});
+
+	it('a page holding a non-object entry errors instead of throwing', async () => {
+		const { api, calls } = fakeApi({
+			[listPage(1)]: { ok: true, status: 200, result: [null] }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('carried no widget list');
+		expect(calls.some((c) => c.method === 'POST')).toBe(false);
+	});
+
+	it('an entry whose domains is not a list never matches', async () => {
+		const { api, calls } = fakeApi({
+			[listPage(1)]: {
+				ok: true,
+				status: 200,
+				result: [{ ...ourWidget, domains: 'akito.dog' }]
+			},
+			[createPath]: { ok: true, status: 200, result: { sitekey: SITEKEY, secret: WIDGET_SECRET } }
+		});
+		const res = await provisionTurnstileWidget(TOKEN, ACCT, 'akito.dog', api);
+		// A short page ended the walk, so absence is proven and the create is right.
 		expect(res.status).toBe('created');
 		expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
 	});

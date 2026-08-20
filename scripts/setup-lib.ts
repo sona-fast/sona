@@ -325,10 +325,12 @@ const capPoints = (value: string, max: number): string => {
 /**
  * One printable line naming a cfApi failure. Only the code + message fields
  * are read (never the raw `errors` value JSON.stringified into
- * operator-pasteable output), and any 32-hex path segment in the message —
- * case-insensitive, however deep — is scrubbed to `<id>`: Cloudflare's own
- * text can echo object ids (code 7003 quotes the request path, zone id
- * included). The message content is otherwise printed verbatim. Anything
+ * operator-pasteable output), and any standalone 32-hex run in the message —
+ * case-insensitive, whatever delimits it: a path segment, `account_id=…`,
+ * quoted, or parenthesized — is scrubbed to `<id>`: Cloudflare's own text can
+ * echo object ids (code 7003 quotes the request path, zone id included). A
+ * longer hex run is left alone, since it isn't an object id. The message
+ * content is otherwise printed verbatim. Anything
  * that isn't the documented { code, message } array shape yields '' (the
  * caller prints just the HTTP status).
  */
@@ -347,7 +349,7 @@ export function cfErrorSummary(errors: unknown): string {
 							.replace(/[\p{Cc}\p{Cf}]/gu, ' ')
 							.replace(/\s+/g, ' ')
 							.trim()
-							.replace(/(?<=\/)[0-9a-f]{32}(?=[/,.\s]|$)/gi, '<id>')
+							.replace(/\b[0-9a-f]{32}\b/gi, '<id>')
 					: '';
 			if (!raw) return '';
 			const message = capPoints(raw, 200);
