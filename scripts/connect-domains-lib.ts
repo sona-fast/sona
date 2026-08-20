@@ -187,7 +187,9 @@ interface BucketDomain {
 export function findBucketDomain(result: unknown, name: string): BucketDomain | undefined {
 	const list = ((result as { domains?: BucketDomain[] } | undefined)?.domains ??
 		(Array.isArray(result) ? (result as BucketDomain[]) : [])) as BucketDomain[];
-	return list.find((d) => d.domain === name);
+	// A list entry that isn't an object would throw on the property read, turning a
+	// malformed body into a crash instead of the 'unknown' its caller reports.
+	return list.find((d) => typeof d === 'object' && d !== null && d.domain === name);
 }
 
 /**

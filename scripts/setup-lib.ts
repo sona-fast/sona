@@ -602,12 +602,6 @@ export function storageSummaryLines(input: StorageSummaryInput): string[] {
 }
 
 /**
- * The end-of-run "Telegram sticker import:" line. `enabled (bot token set)` is a
- * claim about a secret put, so it needs the put's result — a failed put leaves
- * Telegram import hidden, and saying "enabled" would send the operator hunting in
- * the app for a feature that never turned on.
- */
-/**
  * Names the Resend secrets whose put failed. These are optional, so silence is
  * right when the operator supplied none — but a value they DID supply that
  * failed to land must be said out loud: password-reset email reads these at
@@ -623,6 +617,12 @@ export function resendSecretWarnLines(failed: string[], project: string): string
 	];
 }
 
+/**
+ * The end-of-run "Telegram sticker import:" line. `enabled (bot token set)` is a
+ * claim about a secret put, so it needs the put's result — a failed put leaves
+ * Telegram import hidden, and saying "enabled" would send the operator hunting in
+ * the app for a feature that never turned on.
+ */
 export function telegramSummaryLine(tokenProvided: boolean, tokenSet: boolean): string {
 	if (!tokenProvided) return 'Telegram sticker import: not configured.';
 	return tokenSet
