@@ -1297,11 +1297,12 @@ describe('settings load — supporter key is raw + verified, never in public set
 			// be re-reviewed here first).
 			//
 			// Reviewed for this guard: 'con-card' is the shipped registry's first
-			// real entry (SONA-115). Its gaDate below is the registration-time
-			// placeholder; the release process resets it to merge date + 7 at
-			// merge, so this line changes again in the shipping PR, deliberately.
+			// real entry (SONA-115), and its gaDate is now the shipping value
+			// (merge date + 7) rather than the registration placeholder. The
+			// clock above is frozen inside that window, so this stays true after
+			// the date passes in the real world.
 			expect(result.earlyAccess).toEqual([
-				{ flag: 'con-card', gaDate: '2026.08.25' },
+				{ flag: 'con-card', gaDate: '2026.08.27' },
 				{ flag: 'probe', gaDate: '2999.01.01' }
 			]);
 			// The token must never leak into the client-exposed SiteSettings.

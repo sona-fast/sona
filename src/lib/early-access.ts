@@ -45,7 +45,7 @@ export const EARLY_ACCESS: Record<string, { gaDate: string; label: EarlyAccessLa
 	// The QR handoff at /connect/qr is deliberately NOT gated. It renders a public
 	// URL, holds no secret, and exists precisely to avoid a database round trip on
 	// convention wifi — a supporter check would put that round trip back.
-	'con-card': { gaDate: '2026-08-25', label: m.early_access_label_con_card }
+	'con-card': { gaDate: '2026-08-27', label: m.early_access_label_con_card }
 };
 
 /**
