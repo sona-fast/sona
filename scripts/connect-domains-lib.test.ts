@@ -204,6 +204,18 @@ describe('resolveZone', () => {
 	});
 });
 
+describe('pagesDomainAttached / findBucketDomain — malformed entries', () => {
+	// A junk entry must simply fail to match, never throw: the callers turn a
+	// non-match into 'absent' or 'unknown', and a TypeError would escape both.
+	it('does not throw on non-object entries', () => {
+		expect(() => pagesDomainAttached([null, 'x', 42, { name: 'taro.surf' }], 'taro.surf')).not.toThrow();
+		expect(pagesDomainAttached([null, 'x', 42, { name: 'taro.surf' }], 'taro.surf')).toBe(true);
+		expect(pagesDomainAttached([null, 'x', 42], 'taro.surf')).toBe(false);
+		expect(() => findBucketDomain({ domains: [null, 'x', 42] }, 'cdn.taro.surf')).not.toThrow();
+		expect(findBucketDomain({ domains: [null, 'x', 42] }, 'cdn.taro.surf')).toBeUndefined();
+	});
+});
+
 describe('cdnDomainState', () => {
 	const ok = (domains: unknown[]) => ({ ok: true, status: 200, result: { domains } });
 

@@ -239,7 +239,10 @@ export async function applyDownloadRateLimit(
 	// 3. Reconcile against any rule we already own. Match on our stable ref ONLY —
 	// not the human description — so we never PATCH an operator's own rule that
 	// merely happens to share the label.
-	const mine = existing.find((r) => r.ref === RULE_REF);
+	// The entry guard matters as much as the ref match: a non-object in the zone's
+	// rules would throw on the property read, turning someone else's odd ruleset
+	// into a crash instead of a rule we simply don't own.
+	const mine = existing.find((r) => typeof r === 'object' && r !== null && r.ref === RULE_REF);
 	if (mine && ruleMatches(mine)) {
 		return { status: 'exists', detail: `rate-limit rule already present on ${host} — no change` };
 	}

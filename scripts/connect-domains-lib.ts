@@ -228,7 +228,9 @@ export function bucketDomainTlsIssued(result: unknown, name: string): boolean {
  */
 export function pagesDomainAttached(result: unknown, host: string): boolean {
 	const list = (Array.isArray(result) ? result : []) as { name?: string }[];
-	return list.some((d) => d.name === host);
+	// Same guard as findBucketDomain: a non-object entry would throw on the
+	// property read rather than simply failing to match.
+	return list.some((d) => typeof d === 'object' && d !== null && d.name === host);
 }
 
 /**
