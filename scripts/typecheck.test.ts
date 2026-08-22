@@ -33,8 +33,10 @@ const compilerOptions: ts.CompilerOptions = {
 	module: ts.ModuleKind.ESNext,
 	moduleResolution: ts.ModuleResolutionKind.Bundler,
 	target: ts.ScriptTarget.ESNext,
+	// No explicit typeRoots: TypeScript's default walks up parent directories
+	// for node_modules/@types, so this also works in a git worktree that has no
+	// node_modules of its own (module resolution already walks up the same way).
 	types: ['node'],
-	typeRoots: [join(rootDir, 'node_modules', '@types')],
 	paths: {
 		'$app/environment': [join(rootDir, 'vitest-stubs', 'app-environment.ts')],
 		'$lib/*': [join(rootDir, 'src', 'lib', '*')]
@@ -49,6 +51,7 @@ describe('scripts/ typecheck', () => {
 	it('every scripts/*.ts file typechecks cleanly', () => {
 		const program = ts.createProgram(entryFiles, compilerOptions);
 		const diagnostics = [
+			...program.getOptionsDiagnostics(),
 			...program.getSyntacticDiagnostics(),
 			...program.getSemanticDiagnostics()
 		];

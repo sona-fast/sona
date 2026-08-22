@@ -14,7 +14,7 @@
  * the resolved zone (for a subdomain host that's the parent zone serving it);
  * each is idempotent and beyond those nothing else in the zone is touched. The
  * API token comes from
- * CLOUDFLARE_API_TOKEN (Zone·Read + DNS·Edit, plus Zone Settings·Edit to enable
+ * CLOUDFLARE_API_TOKEN (Zone → Zone: Read + Zone → DNS: Edit, plus Zone → Zone Settings: Edit to enable
  * Image Transformations for you); it is read from the env, never stored or
  * printed.
  *
@@ -32,6 +32,8 @@ import { stdin, stdout, env, argv, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import {
 	cfApi,
+	cfErrorSummary,
+	failureDetail,
 	hostFromDomain,
 	zoneNameCandidates,
 	imageResizingOutcome,
@@ -46,8 +48,9 @@ import {
 	zoneConsentLabel,
 	cdnDomainState,
 	bucketDomainTlsIssued,
-	pagesDomainAttached,
+	pagesDomainState,
 	classifyCdnProbe,
+	domainReadFailure,
 	planConnect,
 	siteUrlMismatch,
 	buildLadder,
@@ -58,11 +61,11 @@ import {
 
 const TOKEN_RECIPE =
 	'Create a Cloudflare API token (dash → My Profile → API Tokens → Create Token → Custom token) with:\n' +
-	'    • Zone · Zone · Read\n' +
-	'    • Zone · DNS · Edit\n' +
-	'    • Account · Workers R2 Storage · Edit   (to attach the bucket custom domain)\n' +
-	'    • Account · Cloudflare Pages · Edit      (to attach the site domain)\n' +
-	'    • Zone · Zone Settings · Edit            (optional; lets it enable Image Transformations)\n' +
+	'    • Zone → Zone: Read\n' +
+	'    • Zone → DNS: Edit\n' +
+	'    • Account → Workers R2 Storage: Edit   (to attach the bucket custom domain)\n' +
+	'    • Account → Cloudflare Pages: Edit     (to attach the site domain)\n' +
+	'    • Zone → Zone Settings: Edit           (optional; lets it enable Image Transformations)\n' +
 	'Then export CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID and re-run.';
 
 /** Best-effort read of the deployed `siteUrl` site-setting (forward-compat with SONA-24). */
@@ -148,8 +151,9 @@ async function main(): Promise<number> {
 		// a hard token error; any other failed lookup aborts too (a transient error
 		// must not silently pick the parent zone or read as "no zone").
 		const candidates = zoneNameCandidates(host);
-		const { zone, zoneName, errorStatus, failedName } = await resolveZone(candidates, (name) =>
-			cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
+		const { zone, zoneName, errorStatus, errors, failedName } = await resolveZone(
+			candidates,
+			(name) => cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 		);
 		if (errorStatus !== null) {
 			// Name the candidate whose lookup failed — for a subdomain host that can
@@ -163,8 +167,13 @@ async function main(): Promise<number> {
 					`✖ Could not reach the Cloudflare API while looking up the zone for ${lookupName} — check your network and re-run.`
 				);
 			} else {
+				// The API answered and the lookup still failed — repeat its own reason
+				// whenever it gave one. A 400/404/500 body carries that reason as often
+				// as a 2xx-with-success:false does, and gating the summary on 2xx threw
+				// it away for exactly the statuses an operator can least explain.
+				const apiWhy = cfErrorSummary(errors);
 				console.error(
-					`✖ Cloudflare API error (HTTP ${errorStatus}) while looking up the zone for ${lookupName} — wait a moment and re-run.`
+					`✖ Cloudflare API error (HTTP ${errorStatus}${apiWhy ? `; the API said ${apiWhy}` : ''}) while looking up the zone for ${lookupName} — wait a moment and re-run.`
 				);
 			}
 			return 1;
@@ -185,15 +194,32 @@ async function main(): Promise<number> {
 		const r2Res = await cfApi(cfToken, `/accounts/${cfAccount}/r2/buckets/${bucket}/domains/custom`);
 		const pagesRes = await cfApi(cfToken, `/accounts/${cfAccount}/pages/projects/${project}/domains`);
 		const cdnState = cdnDomainState(r2Res, cdn);
-		const pagesAttached = pagesDomainAttached(pagesRes.result, host);
+		const pagesState = pagesDomainState(pagesRes, host);
 
 		if (cdnState === 'disabled')
 			console.warn(
 				`⚠ ${cdn} is already on the bucket but DISABLED — re-enable it in dashboard → R2 → ${bucket} → Custom Domains (not re-creating it).`
 			);
 		if (cdnState === 'unknown')
+			// The reason comes from the response, not from a guess: naming the R2 read
+			// scope for a 500 or an unreachable API sends the operator to re-mint a
+			// token that was never the problem.
 			console.warn(
-				`⚠ Couldn't read the bucket's custom domains (token may lack Account · Workers R2 Storage · Read) — skipping the ${cdn} attach.`
+				`⚠ Couldn't read the bucket's custom domains${domainReadFailure(
+					r2Res,
+					'Account → Workers R2 Storage: Read'
+				)} — skipping the ${cdn} attach.`
+			);
+
+		if (pagesState === 'unknown')
+			// Same discipline as the R2 path: the read that failed is the one that
+			// would have told us whether the attach is needed, so we don't attach.
+			// Posting it anyway would be mutating on state we never managed to read.
+			console.warn(
+				`⚠ Couldn't read the ${project} Pages project's domains${domainReadFailure(
+					pagesRes,
+					'Account → Cloudflare Pages: Read'
+				)} — skipping the ${host} attach.`
 			);
 
 		const plan = planConnect({
@@ -203,7 +229,7 @@ async function main(): Promise<number> {
 			host,
 			zoneId: zone.id ?? '',
 			cdnPresent: cdnState !== 'absent',
-			pagesAttached
+			pagesPresent: pagesState !== 'absent'
 		});
 
 		// Image Transformations current state (read-only), so the preview can honestly
@@ -213,11 +239,19 @@ async function main(): Promise<number> {
 		const willEnableTransforms = transformsCurrent === false;
 
 		if (plan.length === 0 && !willEnableTransforms) {
-			console.log(`✔ Already connected: ${cdn} → ${bucket} bucket and ${host} → ${project} Pages.`);
+			// "Already connected" is a claim about state we read. When either read
+			// failed, an empty plan means we declined to act, not that the domains
+			// are in place — say which one it was.
+			const unread = cdnState === 'unknown' ? cdn : pagesState === 'unknown' ? host : null;
+			console.log(
+				unread
+					? `ℹ Nothing changed — the ${unread} attachment couldn't be read, so nothing was created.`
+					: `✔ Already connected: ${cdn} → ${bucket} bucket and ${host} → ${project} Pages.`
+			);
 			console.log(
 				transformsCurrent === true
 					? '  Image Transformations: on.'
-					: "  Image Transformations: couldn't verify (token lacks Zone Settings·Read)."
+					: `  Image Transformations: couldn't verify${failureDetail(irGet, 'Zone → Zone Settings: Read')}.`
 			);
 			console.log(`  Re-check anytime:  npm run connect-domains -- --check ${host}`);
 			return 0;
@@ -258,7 +292,14 @@ async function main(): Promise<number> {
 		for (const m of plan) {
 			const res = await cfApi(cfToken, m.path, { method: m.method, body: m.body });
 			if (res.ok) console.log(`✔ ${m.label}`);
-			else console.warn(`⚠ Could not ${m.label} (HTTP ${res.status}) ${JSON.stringify(res.errors ?? '')}`);
+			else
+				// failureDetail keeps the reason honest per status: the call's own scope
+				// on 401/403, the API's sanitized words when it gave any, and the
+				// did-not-respond line for a thrown fetch (where a bare "HTTP 0" said
+				// nothing at all).
+				console.warn(
+					`⚠ Could not ${m.label}${failureDetail(res, m.scopeHint)}`
+				);
 		}
 
 		if (willEnableTransforms) {
@@ -269,13 +310,13 @@ async function main(): Promise<number> {
 			if (patched.ok) console.log(`✔ Image Transformations enabled on ${zoneLabel}.`);
 			else
 				console.warn(
-					`⚠ Could not enable Image Transformations (HTTP ${patched.status}) — enable it in the dashboard.`
+					`⚠ Could not enable Image Transformations${failureDetail(patched, 'Zone → Zone Settings: Edit')} — enable it in the dashboard.`
 				);
 		} else if (transformsCurrent === true) {
 			console.log('✔ Image Transformations already on.');
 		} else {
 			console.log(
-				"⚠ Image Transformations: couldn't verify (token lacks Zone Settings·Read) — enable it in the dashboard."
+				`⚠ Image Transformations: couldn't verify${failureDetail(irGet, 'Zone → Zone Settings: Read')} — enable it in the dashboard.`
 			);
 		}
 
@@ -335,13 +376,19 @@ export async function runDoctor(a: DoctorArgs, deps: DoctorDeps = defaultDoctorD
 	let tlsIssued: boolean | null = null;
 	let transforms: boolean | null = null;
 	let cdnLoad: CdnProbe = 'unreachable';
+	// Left undefined when the zone is unusable and the reads never ran — a rung
+	// then says "couldn't verify" with no cause, rather than inventing one.
+	let r2Read: CfApiResult | undefined;
+	let irRead: CfApiResult | undefined;
 
 	if (zoneUsable(a.zone)) {
 		const r2Res = await deps.api(a.cfToken, `/accounts/${a.cfAccount}/r2/buckets/${a.bucket}/domains/custom`);
+		r2Read = r2Res;
 		cdnState = cdnDomainState(r2Res, a.cdn);
 		tlsIssued = cdnState === 'attached' ? bucketDomainTlsIssued(r2Res.result, a.cdn) : null;
 
 		const ir = await deps.api(a.cfToken, `/zones/${a.zone.id}/settings/image_resizing`);
+		irRead = ir;
 		transforms = imageResizingOutcome(ir, false);
 
 		// Independent HTTPS probe (not via the API) — informative even when the token
@@ -356,8 +403,11 @@ export async function runDoctor(a: DoctorArgs, deps: DoctorDeps = defaultDoctorD
 		zoneName: a.zoneName,
 		candidates: a.candidates,
 		cdnState,
+		cdnRead: r2Read,
 		tlsIssued,
 		imageTransforms: transforms,
+		imageTransformsStatus: irRead?.status,
+		imageTransformsErrors: irRead?.errors,
 		cdnLoad
 	});
 	for (const line of renderLadder(ladder)) console.log(line);

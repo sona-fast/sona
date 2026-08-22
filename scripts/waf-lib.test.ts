@@ -3,6 +3,8 @@ import type { CfApiResult } from './setup-lib.ts';
 import {
 	applyDownloadRateLimit,
 	buildRule,
+	isPermissionError,
+	SCOPE_HINT as WAF_SCOPE_HINT,
 	RULE_REF,
 	RULE_DESCRIPTION,
 	RULE_EXPRESSION,
@@ -41,6 +43,7 @@ const ZONE = 'zone123';
 const RULESET = 'ruleset456';
 const zonePath = 'GET /zones?name=akito.dog';
 const entryPath = `GET /zones/${ZONE}/rulesets/phases/http_ratelimit/entrypoint`;
+const putEntryPath = `PUT /zones/${ZONE}/rulesets/phases/http_ratelimit/entrypoint`;
 const zoneOk: CfApiResult = { ok: true, status: 200, result: [{ id: ZONE }] };
 
 describe('buildRule', () => {
@@ -82,7 +85,7 @@ describe('applyDownloadRateLimit — zone resolves, rule created', () => {
 			[zonePath]: zoneOk,
 			// No http_ratelimit ruleset on the zone yet.
 			[entryPath]: { ok: false, status: 404 },
-			[`PUT /zones/${ZONE}/rulesets/phases/http_ratelimit/entrypoint`]: { ok: true, status: 200 }
+			[putEntryPath]: { ok: true, status: 200 }
 		});
 		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
 		expect(res.status).toBe('created');
@@ -240,14 +243,17 @@ describe('applyDownloadRateLimit — subdomain host resolves via the registrable
 });
 
 describe('applyDownloadRateLimit — clear errors, no mutation', () => {
-	it('token has no access to the zone (empty result) → error naming WAF scope, no ruleset touched', async () => {
+	// An empty zone list is as often a typo or the wrong account as it is a
+	// permission, so it must not read as a refusal — isPermissionError decides
+	// whether the runner prints the whole token recipe.
+	it('an empty zone list says the zone was not found, without claiming a refusal', async () => {
 		const { api, calls } = fakeApi({
 			[zonePath]: { ok: true, status: 200, result: [] }
 		});
 		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
 		expect(res.status).toBe('error');
-		expect(res.detail).toContain('no access to zone akito.dog');
-		expect(res.detail).toContain('WAF: Edit');
+		expect(res.detail).toContain('no akito.dog zone was found on this Cloudflare account');
+		expect(isPermissionError(res)).toBe(false);
 		// Never proceeded to the ruleset endpoint.
 		expect(calls).toHaveLength(1);
 	});
@@ -270,6 +276,8 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		const res = await applyDownloadRateLimit(SECRET, 'sub.example.com', api);
 		expect(res.status).toBe('error');
 		expect(res.detail).toContain('HTTP 500');
+		// A 500 is not a permission problem — no scope advice on this branch.
+		expect(res.detail).not.toContain('token needs');
 		// The walk stopped at the failing candidate instead of trying example.com.
 		expect(calls.map((c) => c.path)).toEqual(['/zones?name=sub.example.com']);
 	});
@@ -284,6 +292,12 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		// Pin the abort semantics too: without this, a walk that stops aborting on
 		// failed lookups still passed this test (found by mutation).
 		expect(res.detail).toContain('HTTP 403');
+		// A 403 IS a permission failure — the scope hint must survive here even
+		// though non-permission statuses dropped it. The scope named is the one
+		// THIS call needs: the zone lookup is a Zone: Read, not a WAF: Edit.
+		expect(res.detail).toContain('token needs Zone → Zone: Read');
+		expect(res.detail).not.toContain('WAF: Edit');
+		expect(isPermissionError(res)).toBe(true);
 		expect(calls).toHaveLength(1);
 	});
 
@@ -299,6 +313,124 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		expect(calls.every((c) => c.method === 'GET')).toBe(true);
 	});
 
+	it('a 401 entrypoint read names the scope too — both permission statuses hint', async () => {
+		const { api } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: false, status: 401 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('HTTP 401');
+		expect(res.detail).toContain('token needs');
+		expect(res.detail).toContain('WAF: Edit');
+	});
+
+	// New contract: a 500 stays bare only when the body carried no usable
+	// errors (this fixture has none); with errors the reason is appended.
+	it('a transient entrypoint failure (500, no errors body) reports the status without blaming token scope', async () => {
+		const { api, calls } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: false, status: 500 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('HTTP 500');
+		expect(res.detail).not.toContain('token needs');
+		expect(calls.every((c) => c.method === 'GET')).toBe(true);
+	});
+
+	it('a thrown fetch (status 0) says the API was never reached', async () => {
+		const { api } = fakeApi({
+			[zonePath]: { ok: false, status: 0 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('the Cloudflare API did not respond');
+		// The tail already says it; a bare '(HTTP 0)' would be noise.
+		expect(res.detail).not.toContain('HTTP 0');
+		expect(res.detail).not.toContain('token needs');
+	});
+
+	it('a 200 zone query whose body says success:false carries the API’s reason', async () => {
+		// resolveZone threads the failed lookup's errors body through, so this
+		// arm prints the reason like the ruleset-read and write branches do.
+		const { api } = fakeApi({
+			[zonePath]: { ok: false, status: 200, errors: [{ code: 2003, message: 'zones listing disabled' }] }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('could not query zones');
+		expect(res.detail).toContain('the API reported failure (2003: zones listing disabled)');
+		expect(res.detail).not.toContain('token needs');
+	});
+
+	it('a 200 entrypoint read whose body says success:false repeats the API’s reason', async () => {
+		// cfApi maps a 2xx with success:false to ok=false — a bare '(HTTP 200)'
+		// would be nonsense, so the detail carries the error summary.
+		const { api } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: false, status: 200, errors: [{ code: 2001, message: 'zone is on hold' }] }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('HTTP 200');
+		expect(res.detail).toContain('the API reported failure (2001: zone is on hold)');
+		expect(res.detail).not.toContain('token needs');
+	});
+
+	// Ids come back from the API, so they are encoded like any other untrusted
+	// path segment — an id carrying a '/' would otherwise rewrite the URL.
+	it('encodes the ruleset and rule ids it puts in the write path', async () => {
+		const odd = 'rs/../evil';
+		const { api, calls } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: {
+				ok: true,
+				status: 200,
+				result: { id: odd, rules: [{ id: 'r/1', ref: RULE_REF }] }
+			},
+			[`PATCH /zones/${ZONE}/rulesets/rs%2F..%2Fevil/rules/r%2F1`]: { ok: true, status: 200 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('updated');
+		const patch = calls.find((c) => c.method === 'PATCH')!;
+		expect(patch.path).toBe(`/zones/${ZONE}/rulesets/rs%2F..%2Fevil/rules/r%2F1`);
+	});
+
+	// WAF Read and WAF Edit are separate permission groups, so a read-only token
+	// gets through both GETs and is refused exactly on the write. That is the case
+	// the recipe gate exists for, and nothing above it can prove it.
+	it('a 403 on the write itself is a permission error, even though both reads passed', async () => {
+		const { api, calls } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: false, status: 404 },
+			[putEntryPath]: { ok: false, status: 403 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('failed to write');
+		expect(res.detail).toContain('token needs Zone → WAF: Edit');
+		expect(isPermissionError(res)).toBe(true);
+		expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+	});
+
+	// An ok body whose `rules` isn't an array threw `existing.find is not a
+	// function` — a crash after setup had already written D1, R2 and Pages. It
+	// stops like turnstile-lib's partial-body arms: an error, and no write.
+	it('an ok entrypoint whose rules is not an array stops without mutating', async () => {
+		for (const rules of [{}, 'nope', 42, null]) {
+			const { api, calls } = fakeApi({
+				[zonePath]: zoneOk,
+				[entryPath]: { ok: true, status: 200, result: { id: RULESET, rules } }
+			});
+			const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+			expect(res.status, `rules=${JSON.stringify(rules)}`).toBe('error');
+			expect(res.detail).toContain('the response carried no rule list');
+			expect(isPermissionError(res)).toBe(false);
+			expect(calls.every((c) => c.method === 'GET')).toBe(true);
+		}
+	});
+
 	it('empty domain → error before any network call', async () => {
 		const { api, calls } = fakeApi({});
 		const res = await applyDownloadRateLimit(SECRET, '   ', api);
@@ -308,39 +440,159 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 });
 
 describe('applyDownloadRateLimit — never leaks the token', () => {
-	it('the secret appears in no returned detail across every branch', async () => {
-		const scenarios: Record<string, CfApiResult>[] = [
+	it('no returned detail carries a non-allowlisted error field, the secret, or the zone id, across every branch', async () => {
+		// The allowlisted code+message IS repeated in error details now (that is
+		// the honest contract); everything else in the body must never be.
+		const ALLOWLISTED_MESSAGE = 'cf-error-message-expected-in-detail';
+		const NON_ALLOWLISTED_MARKER = 'cf-error-extra-field-must-not-leak';
+		const apiErrors = [
+			{ code: 10000, message: ALLOWLISTED_MESSAGE, detail_url: NON_ALLOWLISTED_MARKER }
+		];
+		// Each scenario pins the branch it exercises via the expected status —
+		// otherwise route drift would silently collapse them all into the error
+		// branch and the sweep would stop covering the success details.
+		// `carriesReason` = the failing route returned an errors body, so the
+		// detail must repeat its code+message.
+		const scenarios: {
+			routes: Record<string, CfApiResult>;
+			status: string;
+			carriesReason?: boolean;
+		}[] = [
 			// error: no zone access
-			{ [zonePath]: { ok: true, status: 200, result: [] } },
+			{ routes: { [zonePath]: { ok: true, status: 200, result: [] } }, status: 'error' },
 			// error: zones query failed
-			{ [zonePath]: { ok: false, status: 403 } },
+			{
+				routes: { [zonePath]: { ok: false, status: 403, errors: apiErrors } },
+				status: 'error',
+				carriesReason: true
+			},
 			// error: entrypoint scope failure
-			{ [zonePath]: zoneOk, [entryPath]: { ok: false, status: 403 } },
+			{
+				routes: { [zonePath]: zoneOk, [entryPath]: { ok: false, status: 403, errors: apiErrors } },
+				status: 'error',
+				carriesReason: true
+			},
 			// error: write failed
 			{
-				[zonePath]: zoneOk,
-				[entryPath]: { ok: false, status: 404 },
-				[`PUT /zones/${ZONE}/rulesets/phases/http_ratelimit/entrypoint`]: { ok: false, status: 500 }
+				routes: {
+					[zonePath]: zoneOk,
+					[entryPath]: { ok: false, status: 404 },
+					[putEntryPath]: {
+						ok: false,
+						status: 500,
+						errors: apiErrors
+					}
+				},
+				status: 'error',
+				carriesReason: true
 			},
-			// success: created
+			// success: created (no ruleset yet, PUT creates the entrypoint)
 			{
-				[zonePath]: zoneOk,
-				[entryPath]: { ok: false, status: 404 },
-				[`PUT /zones/${ZONE}/rulesets/phases/http_ratelimit/entrypoint`]: { ok: true, status: 200 }
+				routes: {
+					[zonePath]: zoneOk,
+					[entryPath]: { ok: false, status: 404 },
+					[putEntryPath]: { ok: true, status: 200 }
+				},
+				status: 'created'
+			},
+			// success: created (ruleset exists, POST appends our rule)
+			{
+				routes: {
+					[zonePath]: zoneOk,
+					[entryPath]: { ok: true, status: 200, result: { id: RULESET, rules: [] } },
+					[`POST /zones/${ZONE}/rulesets/${RULESET}/rules`]: { ok: true, status: 200 }
+				},
+				status: 'created'
+			},
+			// success: updated (our rule present with stale params, PATCH in place)
+			{
+				routes: {
+					[zonePath]: zoneOk,
+					[entryPath]: {
+						ok: true,
+						status: 200,
+						result: {
+							id: RULESET,
+							rules: [{ id: 'mine', ref: RULE_REF, action: 'block', enabled: true, expression: 'stale' }]
+						}
+					},
+					[`PATCH /zones/${ZONE}/rulesets/${RULESET}/rules/mine`]: { ok: true, status: 200 }
+				},
+				status: 'updated'
+			},
+			// success: exists (our rule already identical — no-op)
+			{
+				routes: {
+					[zonePath]: zoneOk,
+					[entryPath]: {
+						ok: true,
+						status: 200,
+						result: {
+							id: RULESET,
+							rules: [
+								{
+									id: 'mine',
+									ref: RULE_REF,
+									action: 'block',
+									enabled: true,
+									expression: RULE_EXPRESSION,
+									ratelimit: { ...RULE_RATELIMIT }
+								}
+							]
+						}
+					}
+				},
+				status: 'exists'
 			}
 		];
-		for (const routes of scenarios) {
+		for (const { routes, status, carriesReason } of scenarios) {
 			const { api } = fakeApi(routes);
 			const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+			expect(res.status).toBe(status);
 			expect(res.detail).not.toContain(SECRET);
+			expect(res.detail).not.toContain(ZONE);
+			expect(res.detail).not.toContain(NON_ALLOWLISTED_MARKER);
+			if (carriesReason) expect(res.detail).toContain(`10000: ${ALLOWLISTED_MESSAGE}`);
+			else expect(res.detail).not.toContain(ALLOWLISTED_MESSAGE);
 		}
+		// The knownZoneId entry point skips the zone walk — its details must be
+		// just as clean (the caller-provided zone id is the leak candidate here).
+		const { api } = fakeApi({
+			[entryPath]: { ok: false, status: 500, errors: apiErrors }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api, ZONE);
+		expect(res.status).toBe('error');
+		expect(res.detail).not.toContain(SECRET);
+		expect(res.detail).not.toContain(ZONE);
+		expect(res.detail).not.toContain(NON_ALLOWLISTED_MARKER);
+		expect(res.detail).toContain(`10000: ${ALLOWLISTED_MESSAGE}`);
+
+		// 200/success:false: the reported-failure arm repeats the allowlisted
+		// code+message too, and only the allowlisted fields may appear.
+		const split = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: false, status: 404 },
+			[putEntryPath]: {
+				ok: false,
+				status: 200,
+				errors: [
+					{ code: 9110, message: ALLOWLISTED_MESSAGE, detail_url: NON_ALLOWLISTED_MARKER }
+				]
+			}
+		});
+		const splitRes = await applyDownloadRateLimit(SECRET, 'akito.dog', split.api);
+		expect(splitRes.status).toBe('error');
+		expect(splitRes.detail).toContain(`9110: ${ALLOWLISTED_MESSAGE}`);
+		expect(splitRes.detail).not.toContain(NON_ALLOWLISTED_MARKER);
+		expect(splitRes.detail).not.toContain(SECRET);
+		expect(splitRes.detail).not.toContain(ZONE);
 	});
 
 	it('passes the token through to cfApi as the first arg (used as Bearer, not in path/body)', async () => {
 		const { api, calls } = fakeApi({
 			[zonePath]: zoneOk,
 			[entryPath]: { ok: false, status: 404 },
-			[`PUT /zones/${ZONE}/rulesets/phases/http_ratelimit/entrypoint`]: { ok: true, status: 200 }
+			[putEntryPath]: { ok: true, status: 200 }
 		});
 		await applyDownloadRateLimit(SECRET, 'akito.dog', api);
 		// Token is the first arg on every call; never embedded in a path or body.
@@ -353,14 +605,120 @@ describe('applyDownloadRateLimit — never leaks the token', () => {
 });
 
 describe('applyDownloadRateLimit — write failure', () => {
-	it('surfaces a scoped error when the create PUT fails', async () => {
+	it('reports the write failure with its status, without blaming token scope', async () => {
+		// The token already read the ruleset by this point, so a failed write is
+		// rarely a scope problem — the old "token needs …" suffix here sent
+		// operators to fix scopes for what was really an HTTP 500.
 		const { api } = fakeApi({
 			[zonePath]: zoneOk,
 			[entryPath]: { ok: false, status: 404 },
-			[`PUT /zones/${ZONE}/rulesets/phases/http_ratelimit/entrypoint`]: { ok: false, status: 500 }
+			[putEntryPath]: { ok: false, status: 500 }
 		});
 		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
 		expect(res.status).toBe('error');
 		expect(res.detail).toContain('failed to write');
+		expect(res.detail).toContain('HTTP 500');
+		expect(res.detail).not.toContain('token needs');
+	});
+
+	it('a 403 with an errors body appends the attributed API reason after the scope hint', async () => {
+		// Our advice first, the API's own words attributed after — separable, not
+		// contradictory, and neither is dropped.
+		const { api } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: false, status: 403, errors: [{ code: 10000, message: 'Authentication error' }] }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toMatch(/token needs .*; the API said 10000: Authentication error/);
+	});
+
+	it('a 403 write DOES name the scope: WAF Read and WAF Edit are separate groups', async () => {
+		// A token minted with WAF Read passes the zone query and the entrypoint
+		// read, then 403s on the first mutation — the most likely real-world
+		// failure, so it must keep the guidance.
+		const { api } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: false, status: 404 },
+			[putEntryPath]: { ok: false, status: 403 }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('failed to write');
+		expect(res.detail).toContain('HTTP 403');
+		expect(res.detail).toContain('token needs');
+		expect(res.detail).toContain('WAF: Edit');
+	});
+
+	it('a 200 write whose body says success:false repeats the API’s reason', async () => {
+		const { api } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: false, status: 404 },
+			[putEntryPath]: {
+				ok: false,
+				status: 200,
+				errors: [{ code: 2002, message: 'ruleset limit reached' }]
+			}
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('error');
+		expect(res.detail).toContain('failed to write');
+		expect(res.detail).toContain('the API reported failure (2002: ruleset limit reached)');
+		expect(res.detail).not.toContain('token needs');
+	});
+});
+
+describe('isPermissionError — the standalone runner’s recipe gate', () => {
+	// apply-download-ratelimit.ts prints its token recipe only when this returns
+	// true, so pin it against REAL branch output, both directions.
+	it('is true for real permission details and false for real transient ones', async () => {
+		const denied = await applyDownloadRateLimit(
+			SECRET,
+			'akito.dog',
+			fakeApi({ [zonePath]: zoneOk, [entryPath]: { ok: false, status: 403 } }).api
+		);
+		expect(isPermissionError(denied)).toBe(true);
+
+		// A zone lookup refused outright IS a permission failure, even though the
+		// scope it names is the zone one rather than WAF.
+		const zoneDenied = await applyDownloadRateLimit(
+			SECRET,
+			'akito.dog',
+			fakeApi({ [zonePath]: { ok: false, status: 403 } }).api
+		);
+		expect(isPermissionError(zoneDenied)).toBe(true);
+
+		const transient = await applyDownloadRateLimit(
+			SECRET,
+			'akito.dog',
+			fakeApi({
+				[zonePath]: zoneOk,
+				[entryPath]: { ok: false, status: 404 },
+				[putEntryPath]: { ok: false, status: 500 }
+			}).api
+		);
+		expect(isPermissionError(transient)).toBe(false);
+	});
+
+	// The gate used to search the formatted detail for the scope hint. Since the
+	// API's own message is echoed into that same text, a 500 whose body quoted the
+	// permission read as a refusal and sent the operator to re-mint a working
+	// token. The result now records what happened, so the wording cannot lie.
+	it('is false for a 500 whose API message quotes the scope hint verbatim', async () => {
+		const res = await applyDownloadRateLimit(
+			SECRET,
+			'akito.dog',
+			fakeApi({
+				[zonePath]: zoneOk,
+				[entryPath]: { ok: false, status: 404 },
+				[putEntryPath]: {
+					ok: false,
+					status: 500,
+					errors: [{ code: 1000, message: `internal error; check Zone → WAF: Edit (plus a Zone resource covering the domain)` }]
+				}
+			}).api
+		);
+		expect(res.detail).toContain(WAF_SCOPE_HINT);
+		expect(isPermissionError(res)).toBe(false);
 	});
 });

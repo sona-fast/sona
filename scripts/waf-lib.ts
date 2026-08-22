@@ -13,7 +13,16 @@
  * The Cloudflare token is passed in, used only as a Bearer header by `cfApi`, and
  * never logged or returned in any result.
  */
-import { cfApi, hostFromDomain, zoneNameCandidates, type CfApiResult } from './setup-lib.ts';
+import {
+	cfApi,
+	failureDetail,
+	hostFromDomain,
+	isRecord,
+	statusLabel,
+	zoneNameCandidates,
+	ZONE_READ_SCOPE_HINT,
+	type CfApiResult
+} from './setup-lib.ts';
 import { resolveZone } from './connect-domains-lib.ts';
 
 /**
@@ -125,18 +134,41 @@ export interface RateLimitResult {
 	status: RateLimitStatus;
 	/** Human-readable, secret-free summary safe to print. */
 	detail: string;
+	/**
+	 * True when the API refused this call for a token permission (401/403, or a
+	 * zone the token cannot see). Carried as a fact rather than re-derived by
+	 * reading the formatted `detail`, so the standalone runner decides whether to
+	 * print the token recipe from what happened, not from wording that a
+	 * Cloudflare message could coincidentally echo.
+	 */
+	permissionDenied?: boolean;
 }
 
-/** The token permission a fork operator must add, quoted verbatim in errors. */
-const SCOPE_HINT = 'Zone → WAF: Edit (plus a Zone resource covering the domain)';
+/** Whether an HTTP status means the token was refused, as opposed to any other failure. */
+const deniedByScope = (status: number): boolean => status === 401 || status === 403;
+
+/** The token permission a fork operator must add, quoted verbatim in errors —
+ * exported so the notation drift guard can check the resolved string. */
+export const SCOPE_HINT = 'Zone → WAF: Edit (plus a Zone resource covering the domain)';
+
+/**
+ * True when the run failed because the token was refused. Reads the fact the
+ * call recorded rather than searching the formatted `detail` for the scope
+ * hint: the API's own message is echoed into that text, so a Cloudflare
+ * message quoting the permission would otherwise be read as a refusal.
+ */
+export function isPermissionError(res: Pick<RateLimitResult, 'permissionDenied'>): boolean {
+	return res.permissionDenied === true;
+}
 
 /**
  * Idempotently apply the public-endpoint rate-limit rule to `domain`'s zone.
  *
  * Sequence (all via `cfApi`, Bearer `cfToken`):
  *   1. GET /zones?name=<host>            → resolve the zone id (host derived from
- *      the domain input; scheme/path stripped). No zone in the account, or the
- *      token can't see it, → a clear error naming the missing scope. No mutation.
+ *      the domain input; scheme/path stripped). A failed lookup names Zone →
+ *      Zone: Read, the scope THIS call needs; an empty list says the zone wasn't
+ *      found, which is as much a wrong domain as a permission. No mutation.
  *   2. GET /zones/<id>/rulesets/phases/http_ratelimit/entrypoint → the zone's
  *      rate-limit ruleset. 404 = no ruleset yet (fine — we create it). 401/403 or
  *      other non-ok = token lacks WAF scope → clear error, no mutation.
@@ -166,74 +198,107 @@ export async function applyDownloadRateLimit(
 	// caller already resolved the zone (the setup CLI's preflight just did).
 	let zoneId = knownZoneId;
 	if (!zoneId) {
-		const { zone, errorStatus, failedName } = await resolveZone(zoneNameCandidates(host), (name) =>
-			api(cfToken, `/zones?name=${encodeURIComponent(name)}`)
+		const { zone, errorStatus, errors, failedName } = await resolveZone(
+			zoneNameCandidates(host),
+			(name) => api(cfToken, `/zones?name=${encodeURIComponent(name)}`)
 		);
 		if (errorStatus !== null) {
+			// The zone lookup is a Zone → Zone: Read call, not a WAF one — naming the
+			// WAF scope here sends the operator to fix a permission this step never
+			// needed.
 			return {
 				status: 'error',
-				detail: `could not query zones for ${failedName ?? host} (HTTP ${errorStatus}); token needs ${SCOPE_HINT}`
+				detail: `could not query zones for ${failedName ?? host}${failureDetail({ status: errorStatus, errors }, ZONE_READ_SCOPE_HINT)}`,
+				permissionDenied: deniedByScope(errorStatus)
 			};
 		}
 		zoneId = zone.id;
 	}
 	if (!zoneId) {
+		// An empty zone list is two different stories the API can't tell apart: the
+		// domain isn't on this account (a typo, or the wrong account), or the token
+		// can't see it. permissionDenied stays UNSET so the runner doesn't print the
+		// whole token recipe for what is most often a wrong domain.
 		return {
 			status: 'error',
-			detail: `token has no access to zone ${host}: add ${SCOPE_HINT}`
+			detail: `no ${host} zone was found on this Cloudflare account — check the domain, the account, and that the token's Zone Resources include it`
 		};
 	}
 
 	// 2. Read the zone's http_ratelimit entrypoint ruleset.
-	const entry = await api(cfToken, `/zones/${zoneId}/rulesets/phases/http_ratelimit/entrypoint`);
+	const entry = await api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/phases/http_ratelimit/entrypoint`);
 	let rulesetId: string | undefined;
 	let existing: ExistingRule[] = [];
 	if (entry.ok) {
-		const r = entry.result as { id?: string; rules?: ExistingRule[] } | undefined;
+		const r = entry.result as { id?: string; rules?: unknown } | undefined;
+		// An ok body whose `rules` is present but not an array is a partial body, not
+		// an empty ruleset: reading it as [] would append a second copy of our rule,
+		// and calling .find on it threw outright — after setup had already written D1,
+		// R2 and Pages. Stop the way turnstile-lib stops, without mutating.
+		if (r?.rules !== undefined && !Array.isArray(r.rules)) {
+			return {
+				status: 'error',
+				detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}; the response carried no rule list, so the rule was not written`
+			};
+		}
 		rulesetId = r?.id;
-		existing = r?.rules ?? [];
+		existing = (r?.rules ?? []) as ExistingRule[];
 	} else if (entry.status !== 404) {
 		// 401/403 (no WAF scope) or a transient error — do NOT mutate.
 		return {
 			status: 'error',
-			detail: `could not read the rate-limit ruleset for ${host} (HTTP ${entry.status}); token needs ${SCOPE_HINT}`
+			detail: `could not read the rate-limit ruleset for ${host}${failureDetail(entry, SCOPE_HINT)}`,
+			permissionDenied: deniedByScope(entry.status)
 		};
 	}
 
 	// 3. Reconcile against any rule we already own. Match on our stable ref ONLY —
 	// not the human description — so we never PATCH an operator's own rule that
 	// merely happens to share the label.
-	const mine = existing.find((r) => r.ref === RULE_REF);
+	// The entry guard matters as much as the ref match: a non-object in the zone's
+	// rules would throw on the property read, turning someone else's odd ruleset
+	// into a crash instead of a rule we simply don't own.
+	const mine = existing.find((r) => isRecord(r) && r.ref === RULE_REF);
 	if (mine && ruleMatches(mine)) {
 		return { status: 'exists', detail: `rate-limit rule already present on ${host} — no change` };
 	}
 
+	// The ruleset and rule ids come back from the API, so they are encoded like any
+	// other untrusted path segment rather than pasted into the URL.
 	const write: CfApiResult = await (async () => {
 		if (mine && rulesetId && mine.id) {
 			// Param bump: update just our rule in place.
-			return api(cfToken, `/zones/${zoneId}/rulesets/${rulesetId}/rules/${mine.id}`, {
-				method: 'PATCH',
-				body: buildRule()
-			});
+			return api(
+				cfToken,
+				`/zones/${encodeURIComponent(zoneId)}/rulesets/${encodeURIComponent(rulesetId)}/rules/${encodeURIComponent(mine.id)}`,
+				{
+					method: 'PATCH',
+					body: buildRule()
+				}
+			);
 		}
 		if (rulesetId) {
 			// Ruleset exists, our rule is absent: append only our rule.
-			return api(cfToken, `/zones/${zoneId}/rulesets/${rulesetId}/rules`, {
+			return api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/${encodeURIComponent(rulesetId)}/rules`, {
 				method: 'POST',
 				body: buildRule()
 			});
 		}
 		// No http_ratelimit ruleset yet: create the entrypoint with our rule.
-		return api(cfToken, `/zones/${zoneId}/rulesets/phases/http_ratelimit/entrypoint`, {
+		return api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/phases/http_ratelimit/entrypoint`, {
 			method: 'PUT',
 			body: { rules: [buildRule()] }
 		});
 	})();
 
 	if (!write.ok) {
+		// A 401/403 here is real even after the reads passed: WAF Read and WAF
+		// Edit are separate permission groups, so a Read-only token 403s exactly
+		// on this write. Any other status gets no scope advice.
 		return {
 			status: 'error',
-			detail: `failed to write the rate-limit rule to ${host} (HTTP ${write.status}); token needs ${SCOPE_HINT}`
+			detail: `failed to write the rate-limit rule to ${host}${failureDetail(write, SCOPE_HINT)}`,
+			permissionDenied: deniedByScope(write.status)
 		};
 	}
 	return mine
