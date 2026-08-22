@@ -26,6 +26,8 @@
  * without its two message entries fails early-access.test.ts.
  */
 
+import * as m from '$lib/paraglide/messages';
+
 /** A flag's localized label message — paraglide's message-function shape. */
 export type EarlyAccessLabel = (
 	inputs?: Record<string, never>,
@@ -33,10 +35,17 @@ export type EarlyAccessLabel = (
 ) => string;
 
 export const EARLY_ACCESS: Record<string, { gaDate: string; label: EarlyAccessLabel }> = {
-	// Empty: no feature is currently inside its early-access window. The first
-	// entry was 'vr-avatars' (GA'd 2026-08-17, retired per the release process
-	// above — SONA-157). Shape of an entry, for the next release:
-	// 'vr-avatars': { gaDate: '2026-08-17', label: m.early_access_label_vr_avatars }
+	// The con card generator (SONA-115). Admin-side, creates nothing persistent,
+	// and useful at any meetup rather than only in convention season.
+	//
+	// gaDate is set at MERGE to merge date + 7, per the release process above. If
+	// this PR sits, reset it before landing: a date that has already passed makes
+	// the flag born GA'd, and the seven-day window silently never happens.
+	//
+	// The QR handoff at /connect/qr is deliberately NOT gated. It renders a public
+	// URL, holds no secret, and exists precisely to avoid a database round trip on
+	// convention wifi — a supporter check would put that round trip back.
+	'con-card': { gaDate: '2026-08-27', label: m.early_access_label_con_card }
 };
 
 /**

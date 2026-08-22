@@ -61,6 +61,7 @@
 		"emojilib": "^4.0.3",
 		"lottie-web": "^5.13.0",
 		"lucide-svelte": "^0.468.0",
+		"qrcode-generator": "^2.0.4",
 		"three": "^0.185.1",
 		"uploadthing": "^7.7.4",
 		"wrangler": "^4.124.0"

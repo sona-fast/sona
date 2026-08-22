@@ -539,6 +539,88 @@ describe('public chip text (foreground on secondary) WCAG AA contrast (SONA-124)
 	}
 });
 
+// SONA-115 puts the live convention row on a primary wash and its pill on solid
+// primary: `color-mix(in srgb, var(--primary) 8%, transparent)` over the page
+// background, and --primary-foreground on --primary. Neither pairing was pinned
+// anywhere: the wash is a NEW surface (the same one /connect's here-now block
+// uses), and --primary-foreground on --primary was only ever asserted for
+// terracotta. Both are asserted here for every theme × mode.
+describe('SONA-115 live-row wash and live pill WCAG AA contrast', () => {
+	// The wash is mixed over transparent, so its real surface is the composite
+	// with whatever it sits on, which for a table row is the page background.
+	const WASH_PCT = 8;
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: row text meets 4.5:1 on the live wash over the background`, () => {
+			const washed = mix2(blockToken(sel, 'primary'), WASH_PCT, blockToken(sel, 'background'));
+			expect(contrast(blockToken(sel, 'foreground'), washed)).toBeGreaterThanOrEqual(4.5);
+		});
+
+		it(`${name}: the live pill's label meets 4.5:1 on solid primary`, () => {
+			expect(
+				contrast(blockToken(sel, 'primary-foreground'), blockToken(sel, 'primary'))
+			).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
+
+// The con card's handle rows wash on hover. --secondary was the obvious fill and
+// the wrong one: it is a surface token, and the muted handle value sitting on it
+// was never checked against it. The wash is now a tint of the text colour over
+// transparent, and the handle value goes full strength under the pointer (the
+// SONA-124 chip precedent). Parse the real percentage and token out of the
+// component, so a wash tweak re-runs the math and a revert to --muted-foreground
+// text fails the pin.
+describe('SONA-115 con card handle-row hover wash WCAG AA contrast', () => {
+	const source = readFileSync(
+		fileURLToPath(new URL('./components/ConCard.svelte', import.meta.url)),
+		'utf8'
+	);
+	const washBody = source.match(/^\s*\.handles \.handle-row:hover\s*\{([^}]*)\}/m)?.[1];
+	if (!washBody) throw new Error('.handles .handle-row:hover rule not found in ConCard.svelte');
+	const washPct = Number(
+		washBody.match(
+			/background:\s*color-mix\(in srgb,\s*var\(--foreground\)\s*(\d+)%,\s*transparent\)/
+		)?.[1]
+	);
+	const hoverBody = source.match(
+		/^\s*\.handles \.handle-row:hover \.handle-value\s*\{([^}]*)\}/m
+	)?.[1];
+	const hoverToken = hoverBody?.match(/color:\s*var\(--([\w-]+)\)/)?.[1];
+
+	it('washes with a foreground tint and lifts the handle value to --foreground', () => {
+		if (!Number.isFinite(washPct)) throw new Error('the hover wash is no longer a foreground tint');
+		expect(hoverToken).toBe('foreground');
+	});
+
+	// The resting pair is the one nobody was watching: --muted-foreground on the
+	// bare surface clears AA by 0.03 on terracotta light, so a token nudge could
+	// drop the handle values under it with every hover assertion still green.
+	const restBody = source.match(/^\s*\.handle-value\s*\{([^}]*)\}/m)?.[1];
+	const restToken = restBody?.match(/color:\s*var\(--([\w-]+)\)/)?.[1];
+
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: resting row text meets 4.5:1 on the ${surface}`, () => {
+				if (!restToken) throw new Error('the resting handle value sets no text color token');
+				expect(
+					contrast(blockToken(sel, restToken), blockToken(sel, surface))
+				).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: hovered row text meets 4.5:1 on the wash over the ${surface}`, () => {
+				if (!hoverToken) throw new Error('the hovered handle value sets no text color token');
+				const washed = mix2(blockToken(sel, 'foreground'), washPct, blockToken(sel, surface));
+				expect(contrast(blockToken(sel, hoverToken), washed)).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+});
+
 describe('SONA-124 chip CSS keeps the --foreground token (R2-A3)', () => {
 	// The token pairing above only matters while the components actually USE
 	// the token: a revert to color: var(--muted-foreground) in any chip rule

@@ -40,3 +40,51 @@ describe('/connect social rows', () => {
 		expect(source).not.toMatch(/socialLabel\s*\(/);
 	});
 });
+
+describe('/connect here-now block', () => {
+	it('serves the avatar through the CDN transform, with the raw original behind it', () => {
+		// It is a 60px slot; an untransformed original is a multi-MB download on the
+		// convention wifi this page is read over. rawFallback covers the off-zone
+		// hosts that 403 the transform.
+		expect(source).toMatch(/src=\{cdnImage\(data\.settings\.adminAvatarUrl, 120\)\}/);
+		expect(source).toMatch(/use:rawFallback=\{data\.settings\.adminAvatarUrl\}/);
+		// Intrinsic size stays on the tag so the block does not shift as it loads.
+		expect(source).toMatch(/class="here-avatar"[\s\S]*?width="60"\s*\n?\s*height="60"/);
+	});
+
+	it('opens with a heading, like every other section on the page', () => {
+		// Without one, the block that leads the page during a con is unreachable by
+		// heading navigation.
+		expect(source).toMatch(/<h2 class="live-pill">\{m\.connect_here_now\(\)\}<\/h2>/);
+	});
+});
+
+describe('/connect conventions section', () => {
+	// The load lifts the running con OUT of data.conventions, so an operator whose
+	// only row IS the live con leaves this list empty. Guarding the section on
+	// nextCon alone cannot tell that case apart from having no cons at all, and
+	// prints "no cons on the calendar right now" directly under the here-now block
+	// naming the con the visitor is standing at.
+	const guard = source.match(/const showCons = \$derived\((.+)\);/)?.[1];
+
+	it('decides the section on the live con as well as the list', () => {
+		// Pinned as source: the page pulls in $app/state and paraglide, so it does
+		// not render under this pure-TS setup (same reason as the rows above).
+		// Both terms, so both empty cases are distinguishable:
+		//   live con + nothing upcoming  -> hidden, the here-now block has the event
+		//   no live con + nothing upcoming -> shown, and the empty state is true
+		expect(guard).toBe('Boolean(nextCon) || !liveCon');
+	});
+
+	it('hangs the whole section off that guard, heading included', () => {
+		// A heading with nothing beneath it is its own small lie, so the guard wraps
+		// the section rather than just the empty paragraph.
+		expect(source).toMatch(
+			/\{#if showCons\}\s*<hr class="divider" \/>\s*<section class="section">\s*<h2 class="section-label">\{m\.connect_cons\(\)\}<\/h2>/
+		);
+	});
+
+	it('leaves the genuinely-empty message unchanged', () => {
+		expect(source).toMatch(/\{:else\}\s*<p class="empty">\{m\.connect_no_cons\(\)\}<\/p>/);
+	});
+});

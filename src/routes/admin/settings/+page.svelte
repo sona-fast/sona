@@ -18,7 +18,7 @@
 	import { showUtFileStat } from './ut-stat';
 	import { breakdownRows, sharePct, usageWarning } from './storage-breakdown-view';
 	import { baseLocale, locales } from '$lib/paraglide/runtime';
-	import { earlyAccessLabel } from '$lib/early-access';
+	import { earlyAccessLabel, isFeatureEnabled } from '$lib/early-access';
 	import * as m from '$lib/paraglide/messages';
 
 	// Endonyms for the email-language options — a language name reads the same
@@ -185,6 +185,25 @@
 			.map((e) => m.admin_settings_supporter_early_item({ feature: earlyAccessLabel(e.flag), date: e.gaDate }))
 			.join(m.admin_settings_supporter_early_join())
 	);
+	// Con card gate. The GA date comes from the load's already-formatted
+	// early-access list, so the locked hint names the day the card opens to
+	// everyone rather than a raw registry date; the list drops the flag on its
+	// GA date, at which point this branch is unreachable anyway.
+	//
+	// The gate is deliberately advisory rather than enforced: the load ships the
+	// card data whatever this resolves to, so a determined operator reaches the
+	// generator through devtools. That is the intended semantics. Early access is
+	// a seven-day head start rather than a paywall, and everything the card draws
+	// is the operator's own data on their own admin page, so there is nothing to
+	// withhold from them except the head start itself.
+	const conCardEnabled = $derived(
+		isFeatureEnabled('con-card', {
+			supporterKeyValid: data.supporterKey?.state === 'valid',
+			now: new Date()
+		})
+	);
+	const conCardGaDate = $derived(data.earlyAccess.find((e) => e.flag === 'con-card')?.gaDate ?? '');
+
 	let showResendSetup = $state(false);
 	let showCfSetup = $state(false);
 
@@ -1204,6 +1223,7 @@
 				<input
 					type="text"
 					class="input"
+					id="supporter-key"
 					name="supporterKey"
 					placeholder={data.supporterKey?.state === 'expired' ? m.admin_settings_supporter_placeholder_new() : m.admin_settings_supporter_placeholder()}
 					aria-invalid={form?.supporterKeyError ? 'true' : undefined}
@@ -1230,6 +1250,42 @@
 		</section>
 	</form>
 {/if}
+
+<!-- Con card (SONA-115): a printable card carrying the fork's /connect QR.
+     Early-access until its GA date, like any other pilot feature. -->
+<section class="security-section" data-tab="account">
+	<h2>{m.admin_settings_con_card_heading()}</h2>
+	<p class="explainer-body">{m.admin_settings_con_card_subtitle()}</p>
+	{#if conCardEnabled}
+		<!-- Deferred chunk, like the ref-sheet picker: the card builds two full SVGs
+		     and rasterizes through a canvas, and none of that belongs in the bundle
+		     the settings page blocks on. It is NOT tab-scoped: the section is in the
+		     DOM on every tab (CSS hides it), so the import starts as soon as this
+		     page renders, just not before it. -->
+		{#await import('$lib/components/ConCard.svelte') then { default: ConCard }}
+			<ConCard
+				name={data.conCard.name}
+				species={data.conCard.species}
+				colors={data.conCard.colors}
+				handles={data.conCard.handles}
+				artCredit={data.conCard.artCredit}
+				avatarSrc={data.conCard.avatarSrc}
+				connectUrl={data.conCard.connectUrl}
+				displayDomain={data.conCard.displayDomain}
+			/>
+		{:catch}
+			<!-- A deploy between this page loading and the import firing leaves the
+			     client asking for a chunk hash that no longer exists. Without this
+			     branch that rejection surfaces as an unhandled error; a reload picks
+			     up the new hashes. -->
+			<p class="hint">{m.admin_settings_con_card_failed()}</p>
+		{/await}
+	{:else}
+		<!-- The key field is on this same tab, so the hint can point straight at it
+		     rather than leaving the operator to find it. -->
+		<p class="hint">{m.admin_settings_con_card_locked({ date: conCardGaDate })}<a class="link-inline" href="#supporter-key">{m.admin_settings_con_card_locked_link()}</a>{m.admin_settings_con_card_locked_post()}</p>
+	{/if}
+</section>
 
 {#if data.registryEnabled}
 	<form method="POST" action="?/syncNow" class="contents" use:enhance={() => {

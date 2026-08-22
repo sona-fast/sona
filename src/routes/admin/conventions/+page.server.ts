@@ -1,10 +1,12 @@
 import { fail } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { conventions } from '$lib/server/db/schema';
-import { eq, asc } from 'drizzle-orm';
+import { eq, asc, and, isNull } from 'drizzle-orm';
+import type { BatchItem } from 'drizzle-orm/batch';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { fetchConsFyiEvents, findConsFyiEvent, fetchAttendingEvents, blueskyHandle } from '$lib/server/consfyi';
 import { getSettings } from '$lib/server/settings';
+import { isLiveNow } from '$lib/convention-window';
 import type { Actions, PageServerLoad } from './$types';
 
 const STATUSES = ['confirmed', 'maybe', 'considering'] as const;
@@ -16,15 +18,21 @@ function normStatus(raw: unknown): string {
 
 export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
+	const now = new Date();
 	const all = await db.select().from(conventions).orderBy(asc(conventions.startDate));
 
+	// The row the operator is standing at right now, resolved here rather than in
+	// the component: the answer depends on the wall clock, and deciding it during
+	// render would disagree between the server pass and hydration.
+	const liveId = all.find((c) => isLiveNow(c, now))?.id ?? null;
+
 	// Offer cons.fyi events that are still upcoming and not already on the schedule.
-	const today = new Date().toISOString().slice(0, 10);
+	const today = now.toISOString().slice(0, 10);
 	const addedSourceIds = new Set(all.map((c) => c.sourceId).filter(Boolean));
 	const feed = await fetchConsFyiEvents();
 	const available = feed.filter((e) => e.endDate >= today && !addedSourceIds.has(e.id));
 
-	return { conventions: all, available };
+	return { conventions: all, available, liveId };
 };
 
 export const actions = {
@@ -46,9 +54,12 @@ export const actions = {
 			location: event.location || null,
 			startDate: event.startDate,
 			endDate: event.endDate || null,
-			url: event.url || null,
+			// Through the same gate as a hand-typed url. The feed is a third party,
+			// and this value is rendered as an href on the public schedule.
+			url: sanitizeUrl(event.url) || null,
 			status: normStatus(data.get('status')),
-			sourceId
+			sourceId,
+			timezone: event.timezone || null
 		});
 		return { success: true };
 	},
@@ -105,33 +116,84 @@ export const actions = {
 			};
 		}
 
-		const existing = new Set(
-			(await db.select({ sourceId: conventions.sourceId }).from(conventions))
-				.map((r) => r.sourceId)
-				.filter(Boolean)
-		);
+		const rows = await db
+			.select({
+				id: conventions.id,
+				sourceId: conventions.sourceId,
+				timezone: conventions.timezone,
+				url: conventions.url
+			})
+			.from(conventions);
+		const existing = new Set(rows.map((r) => r.sourceId).filter(Boolean));
+		// Rows already on the schedule that have no zone yet: either they were added
+		// before the column existed, or the feed had no zone at the time. Filling
+		// these in here is what keeps the timezone rollout free of a manual backfill.
+		const needsZone = new Set(rows.filter((r) => r.sourceId && !r.timezone).map((r) => r.sourceId));
 
 		let added = 0;
+		let backfilled = 0;
+		// Collected rather than awaited one at a time: a sync can touch a dozen rows,
+		// and D1 charges a subrequest per statement (the SONA-124 db.batch precedent).
+		// The inserts ride the same batch as the backfills, so the whole sync is one
+		// round trip and lands all-or-nothing rather than half-applied.
+		const writes: BatchItem<'sqlite'>[] = [];
+		// Rows the feed put here before the url gate existed still carry whatever
+		// cons.fyi said at the time, and they are rendered as hrefs on the public
+		// schedule. The rows are already read and the batch is already going, so
+		// re-run the same gate over them: a javascript: url that got in earlier is
+		// cleared on the next sync rather than waiting to be noticed. Feed rows
+		// only: a hand-typed url passed the gate on its way in.
+		for (const row of rows) {
+			if (!row.sourceId || !row.url || sanitizeUrl(row.url)) continue;
+			writes.push(db.update(conventions).set({ url: null }).where(eq(conventions.id, row.id)));
+		}
 		for (const e of events) {
-			if (existing.has(e.id)) continue;
-			await db.insert(conventions).values({
-				name: e.name,
-				location: e.location || null,
-				startDate: e.startDate,
-				endDate: e.endDate || null,
-				url: e.url || null,
-				status: 'confirmed',
-				sourceId: e.id
-			});
+			if (existing.has(e.id)) {
+				// Already on the schedule, but with no zone. Never overwrites a zone
+				// that is already set.
+				if (e.timezone && needsZone.has(e.id)) {
+					writes.push(
+						db
+							.update(conventions)
+							.set({ timezone: e.timezone })
+							.where(and(eq(conventions.sourceId, e.id), isNull(conventions.timezone)))
+					);
+					backfilled++;
+				}
+				continue;
+			}
+			writes.push(
+				db.insert(conventions).values({
+					name: e.name,
+					location: e.location || null,
+					startDate: e.startDate,
+					endDate: e.endDate || null,
+					// Same gate as the manual path: the feed is a third party and this
+					// value becomes an href on the public schedule.
+					url: sanitizeUrl(e.url) || null,
+					status: 'confirmed',
+					sourceId: e.id,
+					timezone: e.timezone || null
+				})
+			);
 			added++;
 		}
+		if (writes.length > 0) {
+			await db.batch(writes as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
+		}
 
+		const parts: string[] = [];
+		if (added > 0) parts.push(`Synced ${added} convention${added === 1 ? '' : 's'} from cons.fyi.`);
+		if (backfilled > 0)
+			parts.push(
+				`Filled in the timezone for ${backfilled} convention${backfilled === 1 ? '' : 's'} already on your schedule.`
+			);
 		return {
 			success: true,
 			message:
-				added === 0
-					? `Already in sync — all ${events.length} con(s) you're going to are on your schedule.`
-					: `Synced ${added} convention${added === 1 ? '' : 's'} from cons.fyi.`
+				parts.length > 0
+					? parts.join(' ')
+					: `Already in sync — all ${events.length} con(s) you're going to are on your schedule.`
 		};
 	}
 } satisfies Actions;

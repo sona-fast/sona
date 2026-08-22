@@ -12,6 +12,9 @@ export interface ConsFyiEvent {
 	venue?: string;
 	/** Best-effort "City, ST" derived from the event's full address. */
 	location: string;
+	/** IANA zone of the event, e.g. 'America/Denver'. Present on every row of the
+	 * feed we have seen, but treated as optional so a row missing it still parses. */
+	timezone?: string;
 }
 
 const FEED_URL = 'https://data.cons.fyi/current.jsonl';
@@ -53,6 +56,16 @@ function deriveLocation(address?: string, venue?: string): string {
 	return venue ?? address;
 }
 
+/** An IANA zone name and nothing else. The zone the feed hands us is stored on
+ *  the convention row and then fed to Intl to decide whether a con is running
+ *  now, so a junk value from a third party would throw there rather than here.
+ *  Nested zones (America/Argentina/Ushuaia) are real, hence the repeated tail. */
+const IANA_ZONE = /^[A-Za-z_]+\/[A-Za-z0-9_+\-/]+$/;
+
+function ianaZone(value: unknown): string | undefined {
+	return typeof value === 'string' && IANA_ZONE.test(value) ? value : undefined;
+}
+
 /** Fetch + parse the feed (cached). Returns [] on any failure so the admin
  * page degrades to manual entry rather than erroring. */
 export async function fetchConsFyiEvents(): Promise<ConsFyiEvent[]> {
@@ -78,7 +91,8 @@ export async function fetchConsFyiEvents(): Promise<ConsFyiEvent[]> {
 					startDate: String(e.startDate),
 					endDate: typeof e.endDate === 'string' ? e.endDate : String(e.startDate),
 					venue: typeof e.venue === 'string' ? e.venue : undefined,
-					location: deriveLocation(e.address, e.venue)
+					location: deriveLocation(e.address, e.venue),
+					timezone: ianaZone(e.timezone)
 				});
 			} catch {
 				// Skip malformed lines.

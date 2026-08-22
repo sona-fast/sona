@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { Plus, Trash2, ExternalLink, RefreshCw } from 'lucide-svelte';
+	import { Plus, Trash2, ExternalLink, RefreshCw, QrCode } from 'lucide-svelte';
 	import { formatDate, formatDateRange } from '$lib';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import * as m from '$lib/paraglide/messages';
@@ -24,6 +24,13 @@
 	function sourceLabel(e: { name: string; location: string; startDate: string }): string {
 		const loc = e.location ? ` · ${e.location}` : '';
 		return `${e.name}${loc} (${formatDate(e.startDate)})`;
+	}
+
+	// The event's own zone rides along on the line that already carries the
+	// location. That zone is what decides whether a row counts as live, so it has
+	// to be readable when it looks wrong.
+	function metaLine(...parts: (string | null | undefined)[]): string {
+		return parts.filter(Boolean).join(' · ');
 	}
 </script>
 
@@ -160,7 +167,8 @@
 		</thead>
 		<tbody>
 			{#each data.conventions as con}
-				<tr>
+				{@const live = con.id === data.liveId}
+				<tr class:is-live={live}>
 					<td>
 						<span class="con-name">{con.name}</span>
 						{#if con.sourceId}
@@ -173,12 +181,28 @@
 						{/if}
 					</td>
 					<td>{formatDateRange(con.startDate, con.endDate)}</td>
-					<td>{con.location ?? '—'}</td>
-					<td><span class="status status-{con.status}">{statusLabel(con.status)}</span></td>
+					<td>{metaLine(con.location, con.timezone) || '—'}</td>
 					<td>
-						<button class="icon-btn" aria-label={m.admin_conventions_delete_aria()} onclick={() => (deleteTarget = { id: con.id, name: con.name })}>
-							<Trash2 size={16} />
-						</button>
+						{#if live}
+							<span class="live-pill">{m.connect_here_now()}</span>
+						{:else}
+							<span class="status status-{con.status}">{statusLabel(con.status)}</span>
+						{/if}
+					</td>
+					<td>
+						<div class="row-actions">
+							{#if live}
+								<!-- A plain link on purpose: /connect/qr is public, so the scan target
+								     still loads when admin has failed closed on a D1 outage, or when
+								     convention wifi has not left the session cookie intact. -->
+								<a href="/connect/qr" class="btn btn-outline qr-btn">
+									<QrCode size={15} /> {m.admin_conventions_show_qr()}
+								</a>
+							{/if}
+							<button class="icon-btn" aria-label={m.admin_conventions_delete_aria()} onclick={() => (deleteTarget = { id: con.id, name: con.name })}>
+								<Trash2 size={16} />
+							</button>
+						</div>
 					</td>
 				</tr>
 			{:else}
@@ -191,12 +215,22 @@
 <!-- Mobile list -->
 <div class="mobile-list">
 	{#each data.conventions as con}
-		<div class="mobile-item">
+		{@const live = con.id === data.liveId}
+		<div class="mobile-item" class:is-live={live}>
 			<div class="mobile-main">
 				<span class="con-name">{con.name}</span>
-				<span class="mobile-meta">{formatDateRange(con.startDate, con.endDate)}{con.location ? ` · ${con.location}` : ''}</span>
+				<span class="mobile-meta">{metaLine(formatDateRange(con.startDate, con.endDate), con.location, con.timezone)}</span>
+				{#if live}
+					<a href="/connect/qr" class="btn btn-outline qr-btn mobile-qr">
+						<QrCode size={15} /> {m.admin_conventions_show_qr()}
+					</a>
+				{/if}
 			</div>
-			<span class="status status-{con.status}">{statusLabel(con.status)}</span>
+			{#if live}
+				<span class="live-pill">{m.connect_here_now()}</span>
+			{:else}
+				<span class="status status-{con.status}">{statusLabel(con.status)}</span>
+			{/if}
 			<form method="POST" action="?/delete" use:enhance class="inline-form">
 				<input type="hidden" name="id" value={con.id} />
 				<button type="submit" class="icon-btn" aria-label={m.admin_conventions_delete_aria()}><Trash2 size={16} /></button>
@@ -390,6 +424,48 @@
 		color: var(--muted-foreground);
 	}
 
+	/* The live row. Same primary-mixed wash as the /connect here-now block rather
+	   than a signal colour of its own, so it reads as elevated in every fork
+	   theme. The bar is an inset shadow, not a border, so the row does not shift
+	   by 3px when it goes live. Painted on the cells because a shadow on a <tr>
+	   is dropped under border-collapse. */
+	tr.is-live > td {
+		background: color-mix(in srgb, var(--primary) 8%, transparent);
+	}
+
+	tr.is-live > td:first-child {
+		box-shadow: inset 3px 0 0 var(--primary);
+	}
+
+	.live-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 2px 10px;
+		border-radius: var(--radius-pill);
+		font-size: 12px;
+		font-weight: 600;
+		background: var(--primary);
+		color: var(--primary-foreground);
+		white-space: nowrap;
+	}
+
+	.row-actions {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+
+	/* Shorter than the 40px default so a live row keeps the height of every other
+	   row in the table. */
+	.qr-btn {
+		height: 32px;
+		padding: 6px 14px;
+		font-size: 13px;
+		white-space: nowrap;
+	}
+
 	.empty {
 		text-align: center;
 		color: var(--muted-foreground);
@@ -465,6 +541,25 @@
 		.mobile-meta {
 			font-size: 12px;
 			color: var(--muted-foreground);
+		}
+
+		.mobile-item.is-live {
+			padding-left: 12px;
+			background: color-mix(in srgb, var(--primary) 8%, transparent);
+			box-shadow: inset 3px 0 0 var(--primary);
+		}
+
+		/* The wash puts muted text under 4.5:1 on the light themes, and the meta
+		   line is the dates and the venue, the row's only real content. */
+		.mobile-item.is-live .mobile-meta {
+			color: var(--foreground);
+		}
+
+		/* Under the meta line rather than in the cramped action slot: this is the
+		   button that gets tapped in a hallway with one hand. */
+		.mobile-qr {
+			align-self: flex-start;
+			margin-top: 8px;
 		}
 
 		.mobile-add-row {

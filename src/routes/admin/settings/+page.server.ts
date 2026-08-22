@@ -42,6 +42,7 @@ import { sql, inArray } from 'drizzle-orm';
 import { SESSION_COOKIE } from '$lib/config';
 import { sanitizeText, sanitizeUrl, isValidEmail, normalizeHttpsUrl } from '$lib/server/validate';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
+import { socialAtHandle } from '$lib/social-label';
 import { MAX_SONA_COLORS, dedupePalette } from '$lib/palette-merge';
 import { resolveAvatarUrl, isOurAvatarUrl, shouldWriteAvatar } from '$lib/server/avatar';
 import { verifyAdminPassword, hashPassword, hashToken } from '$lib/server/admin-auth';
@@ -54,7 +55,12 @@ import {
 	REGISTRY_URL_SETTING
 } from '$lib/server/registry';
 import { syncArtists } from '$lib/server/artist-sync';
-import { resolveRefImage, refImageSource } from '$lib/server/ref-image';
+import {
+	resolveRefImage,
+	refImageSource,
+	refImageCredit,
+	storedImageSource
+} from '$lib/server/ref-image';
 import { isObservabilityEnabled } from '$lib/server/metrics';
 import {
 	verifySupporterKey,
@@ -83,6 +89,17 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
 	return Promise.race([promise, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
+/** The bare host of an origin, for printing under the con card's QR. A stored
+ *  siteUrl is validated as an https origin and url.origin always parses, so the
+ *  fallback only covers a row edited by hand straight into D1. */
+function hostOf(origin: string): string {
+	try {
+		return new URL(origin).host;
+	} catch {
+		return origin.replace(/^https?:\/\//, '');
+	}
+}
+
 export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	const db = getDb(platform!.env.DB);
 	// The editor must render current persisted values, not a cached snapshot.
@@ -96,13 +113,67 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		? refImageSource(refImage, { origin: url.origin, r2PublicUrl: settings.r2PublicUrl, dev })
 		: null;
 
-	const stats = await db
-		.select({
-			count: sql<number>`COUNT(*)`,
-			totalSize: sql<number>`COALESCE(SUM(file_size), 0)`
-		})
-		.from(images)
-		.get();
+	// Con card (SONA-115): everything the printable card needs, resolved here so
+	// the component never re-derives a handle or has to guess the fork's domain.
+	//
+	// The credit and the storage totals are independent reads, so they go out
+	// together rather than one after the other.
+	const [artist, stats] = await Promise.all([
+		refImage ? refImageCredit(db, refImage.id) : null,
+		db
+			.select({
+				count: sql<number>`COUNT(*)`,
+				totalSize: sql<number>`COALESCE(SUM(file_size), 0)`
+			})
+			.from(images)
+			.get()
+	]);
+	// The configured canonical origin wins over the request's: a card is printed
+	// once and must not carry the alias or preview host it happened to be made on.
+	const cardOrigin = (settings.siteUrl.trim() || url.origin).replace(/\/+$/, '');
+	const conCard = {
+		name: settings.ownerName || settings.siteName,
+		species: settings.sonaSpecies,
+		colors: parseSonaColors(settings.sonaColors),
+		// The front's face, which is the persona avatar rather than the ref sheet:
+		// the card is worn, and what a stranger matches against is a head. Resolved
+		// the same way the picker resolves the sheet, because the download paths
+		// have to read its bytes; the by-id proxy is not among the options, since
+		// it only serves ref images. An avatar we cannot reach from the page falls
+		// back to the name's initial on the card.
+		avatarSrc: settings.adminAvatarUrl
+			? (storedImageSource(settings.adminAvatarUrl, {
+					origin: url.origin,
+					r2PublicUrl: settings.r2PublicUrl,
+					dev
+				})?.src ?? settings.adminAvatarUrl)
+			: null,
+		// Every social the operator has set, in card order, best first. The card
+		// itself starts the first two checked and offers the rest, so the order
+		// here is what an operator sees pre-selected.
+		handles: (
+			[
+				['bluesky', settings.blueskyUrl],
+				['telegram', settings.telegramUrl],
+				['twitter', settings.twitterUrl],
+				['furaffinity', settings.furAffinityUrl],
+				['furtrack', settings.furtrackUrl],
+				['instagram', settings.instagramUrl]
+			] as const
+		).flatMap(([social, value]) => {
+			const handle = socialAtHandle(social, value);
+			// A setting with no handle in it renders as the bare platform name
+			// elsewhere; on a card that is a row telling a stranger nothing, so
+			// it is dropped instead.
+			return handle ? [{ platform: social, value: handle }] : [];
+		}),
+		// The credit prefers the handle: it is shorter, and it is what someone
+		// reading the back of the card can act on.
+		artCredit: artist ? (artist.handle ?? artist.name) : null,
+		// /connect, never /connect/qr — see con-card.ts.
+		connectUrl: `${cardOrigin}/connect`,
+		displayDomain: hostOf(cardOrigin)
+	};
 
 	// Live UploadThing usage — authoritative, includes files not tracked in D1
 	// (e.g. orphans from failed uploads, legacy imports).
@@ -201,6 +272,7 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	return {
 		settings,
 		refImageSrc,
+		conCard,
 		adminEmail,
 		supporterKey,
 		earlyAccess,
