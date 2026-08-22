@@ -57,7 +57,7 @@
 		"@uploadthing/shared": "^7.1.10",
 		"@uploadthing/svelte": "^7.3.3",
 		"drizzle-orm": "^0.45.2",
-		"effect": "^3.17.7",
+		"effect": "^3.20.0",
 		"emojilib": "^4.0.3",
 		"lottie-web": "^5.13.0",
 		"lucide-svelte": "^0.468.0",
