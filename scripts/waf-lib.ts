@@ -224,7 +224,7 @@ export async function applyDownloadRateLimit(
 	}
 
 	// 2. Read the zone's http_ratelimit entrypoint ruleset.
-	const entry = await api(cfToken, `/zones/${zoneId}/rulesets/phases/http_ratelimit/entrypoint`);
+	const entry = await api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/phases/http_ratelimit/entrypoint`);
 	let rulesetId: string | undefined;
 	let existing: ExistingRule[] = [];
 	if (entry.ok) {
@@ -268,7 +268,7 @@ export async function applyDownloadRateLimit(
 			// Param bump: update just our rule in place.
 			return api(
 				cfToken,
-				`/zones/${zoneId}/rulesets/${encodeURIComponent(rulesetId)}/rules/${encodeURIComponent(mine.id)}`,
+				`/zones/${encodeURIComponent(zoneId)}/rulesets/${encodeURIComponent(rulesetId)}/rules/${encodeURIComponent(mine.id)}`,
 				{
 					method: 'PATCH',
 					body: buildRule()
@@ -277,13 +277,13 @@ export async function applyDownloadRateLimit(
 		}
 		if (rulesetId) {
 			// Ruleset exists, our rule is absent: append only our rule.
-			return api(cfToken, `/zones/${zoneId}/rulesets/${encodeURIComponent(rulesetId)}/rules`, {
+			return api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/${encodeURIComponent(rulesetId)}/rules`, {
 				method: 'POST',
 				body: buildRule()
 			});
 		}
 		// No http_ratelimit ruleset yet: create the entrypoint with our rule.
-		return api(cfToken, `/zones/${zoneId}/rulesets/phases/http_ratelimit/entrypoint`, {
+		return api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/phases/http_ratelimit/entrypoint`, {
 			method: 'PUT',
 			body: { rules: [buildRule()] }
 		});
