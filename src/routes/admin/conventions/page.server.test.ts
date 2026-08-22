@@ -84,7 +84,11 @@ describe('admin conventions load', () => {
 		at('2026-01-01T00:00:00Z');
 
 		const res = await loadData(platform);
-		expect(res.conventions.map((c) => c.timezone)).toEqual(['America/Vancouver', null]);
+		// By name, not by position: both rows share a startDate and the loader orders
+		// on that column alone, so SQLite may return the tie either way round.
+		const byName = Object.fromEntries(res.conventions.map((c) => [c.name, c.timezone]));
+		expect(byName[TAILS.name]).toBe('America/Vancouver');
+		expect(byName['Manual con']).toBeNull();
 	});
 
 	it('marks the confirmed convention running right now as live', async () => {

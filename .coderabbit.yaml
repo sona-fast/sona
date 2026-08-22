@@ -20,6 +20,12 @@ reviews:
   # re-review with "@coderabbitai review" once the branch settles.
   auto_review:
     enabled: true
+    # Stacked PRs target the branch below them rather than main, and only the
+    # default branch is reviewed unless the other bases are named here. Without
+    # this the lower PR in a stack is reviewed and the upper one is skipped,
+    # which is the half carrying the newer work.
+    base_branches:
+      - "claude/.*"
     auto_incremental_review: false
     drafts: false
     # Dependency bumps are reviewed locally through the ship loop instead.

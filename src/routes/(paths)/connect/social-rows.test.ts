@@ -49,7 +49,9 @@ describe('/connect here-now block', () => {
 		expect(source).toMatch(/src=\{cdnImage\(data\.settings\.adminAvatarUrl, 120\)\}/);
 		expect(source).toMatch(/use:rawFallback=\{data\.settings\.adminAvatarUrl\}/);
 		// Intrinsic size stays on the tag so the block does not shift as it loads.
-		expect(source).toMatch(/class="here-avatar"[\s\S]*?width="60"\s*\n?\s*height="60"/);
+		// Scoped to this tag: [^>]* cannot cross into the next element, so removing
+		// the pair from the avatar fails the test even if a later tag carries one.
+		expect(source).toMatch(/class="here-avatar"[^>]*width="60"[^>]*height="60"[^>]*\/>/);
 	});
 
 	it('opens with a heading, like every other section on the page', () => {

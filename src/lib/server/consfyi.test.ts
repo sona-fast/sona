@@ -140,7 +140,10 @@ describe('fetchConsFyiEvents', () => {
 				// And a string that is not a zone name is no zone either. It would be
 				// stored and then handed to Intl, which throws on it, in a page the
 				// operator did not touch.
-				{ id: 'junk', name: 'Junk Zone Con', startDate: '2026-09-12', timezone: 'not a zone!' }
+				{ id: 'junk', name: 'Junk Zone Con', startDate: '2026-09-12', timezone: 'not a zone!' },
+				// Zone-SHAPED and still not a zone. This is the case a shape check waves
+				// through, and the one that reaches Intl as an unresolvable name.
+				{ id: 'shaped', name: 'Shaped Zone Con', startDate: '2026-09-13', timezone: 'Foo/Bar' }
 			)
 		);
 		const { fetchConsFyiEvents } = await import('./consfyi');
@@ -148,6 +151,22 @@ describe('fetchConsFyiEvents', () => {
 		expect(byId.none).toBeUndefined();
 		expect(byId.wrong).toBeUndefined();
 		expect(byId.junk).toBeUndefined();
+		expect(byId.shaped).toBeUndefined();
+	});
+
+	it('keeps single-segment zones, which are real IANA names', async () => {
+		// A Tokyo con whose row says 'Japan' must take the exact path, not fall back
+		// to the widened no-zone window: the zone is real, we just failed to see it.
+		stubFeed(
+			jsonl(
+				{ id: 'jp', name: 'Japan Con', startDate: '2026-09-10', timezone: 'Japan' },
+				{ id: 'utc', name: 'Online Con', startDate: '2026-09-11', timezone: 'UTC' }
+			)
+		);
+		const { fetchConsFyiEvents } = await import('./consfyi');
+		const byId = Object.fromEntries((await fetchConsFyiEvents()).map((e) => [e.id, e.timezone]));
+		expect(byId.jp).toBe('Japan');
+		expect(byId.utc).toBe('UTC');
 	});
 
 	it('returns [] (no throw) when the feed responds non-OK', async () => {

@@ -58,12 +58,22 @@ function deriveLocation(address?: string, venue?: string): string {
 
 /** An IANA zone name and nothing else. The zone the feed hands us is stored on
  *  the convention row and then fed to Intl to decide whether a con is running
- *  now, so a junk value from a third party would throw there rather than here.
- *  Nested zones (America/Argentina/Ushuaia) are real, hence the repeated tail. */
-const IANA_ZONE = /^[A-Za-z_]+\/[A-Za-z0-9_+\-/]+$/;
-
+ *  now, so it is worth rejecting a junk value from a third party here.
+ *
+ *  Asking Intl rather than matching a shape, because Intl is what consumes the
+ *  stored value: a shape check both accepts names Intl cannot resolve
+ *  (`Foo/Bar`) and rejects single-segment names that are real zones (`UTC`,
+ *  `Japan`). Those are the two answers that matter and a regex gets both wrong.
+ *  Unresolvable zones are not fatal downstream — `dateInZone` catches and the
+ *  window widens — but a con with a real zone should take the exact path. */
 function ianaZone(value: unknown): string | undefined {
-	return typeof value === 'string' && IANA_ZONE.test(value) ? value : undefined;
+	if (typeof value !== 'string' || value === '') return undefined;
+	try {
+		new Intl.DateTimeFormat('en-CA', { timeZone: value });
+		return value;
+	} catch {
+		return undefined;
+	}
 }
 
 /** Fetch + parse the feed (cached). Returns [] on any failure so the admin
