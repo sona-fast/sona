@@ -122,6 +122,24 @@ test.describe('admin settings con card', () => {
 		await expect(status).toHaveAttribute('role', 'status');
 		await expect(status).toHaveText('');
 	});
+	test('prints the operator\'s face, not an initial where the face should be', async ({
+		page
+	}) => {
+		// The one assertion nobody wrote. The card embeds the avatar by reading its
+		// bytes, which no unit test exercises (they hand the builder a finished
+		// data: URI) and no other e2e reaches (the only download test saves the
+		// back, which draws no avatar). A whole release shipped with this silently
+		// falling back to an initial circle.
+		const download = page.waitForEvent('download');
+		await conCard(page).getByRole('button', { name: /print/i }).click();
+		const svg = await (await download).createReadStream();
+		let body = '';
+		for await (const chunk of svg) body += chunk;
+
+		// An embedded raster, not a reference the printer would have to resolve.
+		expect(body).toMatch(/<image[^>]+href="data:image\//);
+	});
+
 });
 
 // The fullscreen scan target. It sits outside every route group and reads no

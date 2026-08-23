@@ -61,6 +61,7 @@ import {
 	refImageCredit,
 	storedImageSource
 } from '$lib/server/ref-image';
+import { isSameOriginUrl } from '$lib/server/image-proxy';
 import { isObservabilityEnabled } from '$lib/server/metrics';
 import {
 	verifySupporterKey,
@@ -100,6 +101,27 @@ function hostOf(origin: string): string {
 	}
 }
 
+/**
+ * What the con card should load the persona avatar FROM, given the stored URL.
+ *
+ * `storedImageSource` answers for a canvas sampler that loads through an
+ * `<img>`; the card reads bytes through `fetch`, which `connect-src 'self'`
+ * confines to our own origin. So its `crossorigin: true` answer (UploadThing)
+ * is right for the picker and wrong here, and its `null` answer (a hotlink we
+ * never re-hosted) has no in-page remedy at all. Both go through the proxy.
+ */
+function avatarSrcFor(
+	avatarUrl: string | null | undefined,
+	opts: { origin: string; r2PublicUrl: string; dev: boolean }
+): string | null {
+	if (!avatarUrl) return null;
+	const resolved = storedImageSource(avatarUrl, opts);
+	if (resolved && !resolved.crossorigin && isSameOriginUrl(resolved.src, opts.origin)) {
+		return resolved.src;
+	}
+	return '/api/admin/avatar';
+}
+
 export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	const db = getDb(platform!.env.DB);
 	// The editor must render current persisted values, not a cached snapshot.
@@ -136,18 +158,20 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		species: settings.sonaSpecies,
 		colors: parseSonaColors(settings.sonaColors),
 		// The front's face, which is the persona avatar rather than the ref sheet:
-		// the card is worn, and what a stranger matches against is a head. Resolved
-		// the same way the picker resolves the sheet, because the download paths
-		// have to read its bytes; the by-id proxy is not among the options, since
-		// it only serves ref images. An avatar we cannot reach from the page falls
-		// back to the name's initial on the card.
-		avatarSrc: settings.adminAvatarUrl
-			? (storedImageSource(settings.adminAvatarUrl, {
-					origin: url.origin,
-					r2PublicUrl: settings.r2PublicUrl,
-					dev
-				})?.src ?? settings.adminAvatarUrl)
-			: null,
+		// the card is worn, and what a stranger matches against is a head.
+		//
+		// The download paths read the avatar's BYTES, and `connect-src 'self'`
+		// means a cross-origin fetch is blocked however permissive the remote
+		// host's CORS is. So the card is never handed a URL it cannot read: when
+		// the stored URL is not already same-origin, it gets the byte proxy
+		// instead. This used to fall back to the raw URL, which threw away the
+		// one thing storedImageSource had just told us and produced a card with
+		// an initial where the operator's face belongs.
+		avatarSrc: avatarSrcFor(settings.adminAvatarUrl, {
+			origin: url.origin,
+			r2PublicUrl: settings.r2PublicUrl,
+			dev
+		}),
 		// Every social the operator has set, in card order, best first. The card
 		// itself starts the first two checked and offers the rest, so the order
 		// here is what an operator sees pre-selected.

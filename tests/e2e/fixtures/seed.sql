@@ -9,6 +9,11 @@ INSERT OR REPLACE INTO site_settings (key, value) VALUES
   ('setupComplete', 'true'),
   ('siteName',      'E2E Test Gallery'),
   ('ownerName',     'E2E'),
+  -- A face for the con card. Without one the card draws an initial, which is
+  -- exactly the broken state this suite failed to notice for a whole release:
+  -- with no avatar seeded, no e2e could tell a working embed from a silent
+  -- fallback. Root-relative, so the page can read its bytes.
+  ('adminAvatarUrl', '/e2e-face.png'),
   -- Recovery address for the forgot-reset spec. Inert for the other specs
   -- (nothing reads it); no adminPasswordHash is seeded, so the legacy
   -- ADMIN_PASSWORD login path other specs rely on stays authoritative.

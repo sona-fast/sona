@@ -683,16 +683,28 @@ describe('settings load — con card (SONA-115)', () => {
 		expect((await conCard(db, platform)).avatarSrc).toBeNull();
 	});
 
-	it('keeps an avatar it cannot reach same-origin rather than dropping it', async () => {
+	it('routes a hotlinked avatar through the byte proxy, so the face still prints', async () => {
 		const { db, platform } = makeLoadDb();
-		// A hotlink we never re-hosted has no same-origin form. The raw URL still
-		// draws in the preview, and the download path falls back to the initial if
-		// the fetch is refused.
+		// A hotlink we never re-hosted has no same-origin form, and the download
+		// paths read the avatar's bytes through fetch, which connect-src confines
+		// to our origin. Handing the card the raw URL is what used to put an
+		// initial where the operator's face belongs — on a badge whose whole job
+		// is letting someone confirm they met the right person.
 		await setRawSetting(db, 'adminAvatarUrl', 'https://cdn.bsky.app/img/avatar/plain/x');
 
-		expect((await conCard(db, platform)).avatarSrc).toBe(
-			'https://cdn.bsky.app/img/avatar/plain/x'
-		);
+		expect((await conCard(db, platform)).avatarSrc).toBe('/api/admin/avatar');
+	});
+
+	it('proxies an avatar that only a crossorigin <img> could read', async () => {
+		const { db, platform } = makeLoadDb();
+		// storedImageSource answers for the ref-sheet picker, which loads through
+		// an <img> and can set crossorigin. The card uses fetch, so that answer is
+		// right for the picker and unreadable here. UploadThing serves
+		// Access-Control-Allow-Origin: * and it makes no difference: CORS is not
+		// what blocks this, connect-src is.
+		await setRawSetting(db, 'adminAvatarUrl', 'https://utfs.io/f/abc123');
+
+		expect((await conCard(db, platform)).avatarSrc).toBe('/api/admin/avatar');
 	});
 
 	it('credits the reference sheet by the artist handle when there is one', async () => {
