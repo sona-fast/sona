@@ -97,6 +97,19 @@ export function isR2NotEnabled(output: string): boolean {
 }
 
 /**
+ * True when a `wrangler r2 bucket create` run left the bucket in place: a clean
+ * exit, or a failure that only means the bucket was already there (error 10004 —
+ * the re-run case, which exits non-zero but is a success for our purposes).
+ *
+ * Every other failure means NO bucket: R2 not enabled, or — the case that
+ * prompted this — a token missing Account → Workers R2 Storage: Edit, which
+ * carries none of isR2NotEnabled's markers and so used to read as success.
+ */
+export function bucketCreateSucceeded(output: string, commandOk: boolean): boolean {
+	return commandOk || /\b10004\b/.test(output) || /already exists/i.test(output);
+}
+
+/**
  * Ensures a URL carries an http(s) scheme, mirroring `sanitizeUrl` in
  * src/lib/server/validate.ts: a value with no `http://`/`https://` prefix is
  * assumed https. Empty input stays empty (the operator can set it later). Used
@@ -252,7 +265,7 @@ export function dnsProbeBlocksSetup(probe: { ok: boolean; status: number }): boo
  * Classifies the Image Transformations preflight outcome from the zone-setting
  * GET and (when it was off) the enabling PATCH's success: `true` = on (already
  * on, or PATCHed on), `false` = still off (PATCH failed), `null` = unknown (the
- * GET failed, e.g. the token lacks Zone Settings·Read). `patchOk` is ignored
+ * GET failed, e.g. the token lacks Zone → Zone Settings: Read). `patchOk` is ignored
  * unless the GET succeeded and reported the setting as off.
  */
 export function imageResizingOutcome(
@@ -313,6 +326,130 @@ export async function cfApi(
 	} catch (e) {
 		return { ok: false, status: 0, errors: e };
 	}
+}
+
+/**
+ * True for a non-null object — the guard every API-body walk needs before it
+ * reads a property, since `typeof null === 'object'`. Shared so the four copies
+ * that guarded Cloudflare list entries can't drift apart.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+// Cap by code point, not UTF-16 unit, so an emoji at the boundary is dropped
+// whole instead of split into a lone surrogate.
+const capPoints = (value: string, max: number): string => {
+	const points = Array.from(value);
+	return points.length > max ? `${points.slice(0, max).join('')}…` : value;
+};
+
+/**
+ * One printable line naming a cfApi failure. Only the code + message fields
+ * are read (never the raw `errors` value JSON.stringified into
+ * operator-pasteable output), and any standalone 32-hex run in the message —
+ * case-insensitive, whatever delimits it: a path segment, `account_id=…`,
+ * quoted, or parenthesized — is scrubbed to `<id>`: Cloudflare's own text can
+ * echo object ids (code 7003 quotes the request path, zone id included). A
+ * longer hex run is left alone, since it isn't an object id. The message
+ * content is otherwise printed verbatim. Anything
+ * that isn't the documented { code, message } array shape yields '' (the
+ * caller prints just the HTTP status).
+ */
+export function cfErrorSummary(errors: unknown): string {
+	if (!Array.isArray(errors)) return '';
+	const joined = errors
+		.filter(isRecord)
+		.map((e) => {
+			// No message, no line — a bare code would print a dangling '10000: '.
+			// Strip control/format chars (ANSI escapes, zero-widths), collapse
+			// whitespace, and cap each message: bodies can be multi-line or
+			// arbitrarily long, and this lands in operator-pasteable output.
+			// Format chars are DELETED, not spaced: a zero-width inside an id would
+			// otherwise split it into two halves that no longer match the 32-hex run,
+			// and the id would print. Control chars still become a space — those do
+			// separate words. The id boundaries are alphanumeric lookarounds rather
+			// than \b, so an id butted against an underscore still scrubs (\b treats
+			// _ as a word char, so `zone_<id>` slipped through).
+			const raw =
+				typeof e.message === 'string'
+					? e.message
+							.replace(/\p{Cf}/gu, '')
+							.replace(/\p{Cc}/gu, ' ')
+							.replace(/\s+/g, ' ')
+							.trim()
+							.replace(/(?<![0-9a-z])[0-9a-f]{32}(?![0-9a-z])/gi, '<id>')
+					: '';
+			if (!raw) return '';
+			const message = capPoints(raw, 200);
+			return typeof e.code === 'number' ? `${e.code}: ${message}` : message;
+		})
+		.filter(Boolean)
+		.join('; ');
+	// Cap the whole summary too, so many errors can't yield a multi-KB line.
+	return capPoints(joined, 300);
+}
+
+/**
+ * Failure tail for a failed cfApi step, appended to an error detail so it
+ * carries an honest reason instead of a bare status:
+ *   - status 0     → cfApi's thrown-fetch marker; the API was never reached.
+ *   - 2xx          → the body said success:false (cfApi maps that to ok=false),
+ *                    so repeat the API's own code+message summary.
+ *   - 401/403      → the caller's scope hint, then '; the API said …' when
+ *                    the body gave a reason (the attribution keeps our advice
+ *                    and the API's own words separable).
+ *   - anything else (500 etc.) → '; the API said …' when the body gave a
+ *                    reason, else bare; never a scope hint — that misdirects.
+ * Shared by waf-lib and turnstile-lib, which each bind their own scope hint —
+ * the two private copies drifted apart once already.
+ */
+export function cfFailureTail(status: number, errors: unknown, scopeHint: string): string {
+	if (status === 0) return '; the Cloudflare API did not respond';
+	const why = cfErrorSummary(errors);
+	if (status >= 200 && status < 300) {
+		return `; the API reported failure${why ? ` (${why})` : ' with no reason given'}`;
+	}
+	const hint = status === 401 || status === 403 ? `; token needs ${scopeHint}` : '';
+	return `${hint}${why ? `; the API said ${why}` : ''}`;
+}
+
+/**
+ * The "(HTTP <n>)" fragment of an error detail — empty for status 0, where
+ * cfFailureTail already says the API did not respond and a bare "(HTTP 0)"
+ * is noise.
+ */
+export function statusLabel(status: number): string {
+	return status === 0 ? '' : ` (HTTP ${status})`;
+}
+
+/**
+ * The whole "why it failed" suffix for a failed cfApi call: the status label
+ * followed by the failure tail. The two are always printed together, so this is
+ * the single form every caller appends to its own sentence.
+ */
+export function failureDetail(res: { status: number; errors?: unknown }, scopeHint: string): string {
+	return `${statusLabel(res.status)}${cfFailureTail(res.status, res.errors, scopeHint)}`;
+}
+
+/** The scope a zone lookup needs — named only when the status proves it (401/403). */
+export const ZONE_READ_SCOPE_HINT = 'Zone → Zone: Read';
+
+/**
+ * The warn setup prints when the custom-domain zone lookup fails, as lines.
+ * cfFailureTail decides what the reason is per status, so a 400/404/500 that
+ * carried a message repeats it (the inline version gated that on 2xx and threw
+ * it away for exactly the statuses an operator can least explain), a thrown
+ * fetch says the API did not respond instead of "HTTP 0", and Zone → Zone: Read
+ * is named only on a 401/403 rather than guessed at for every failure.
+ * `name` is the candidate whose lookup failed — for a subdomain host that can be
+ * the parent zone, and pointing at the host would mislead.
+ */
+export function zoneLookupWarnLines(name: string, status: number, errors: unknown): string[] {
+	return [
+		`\n⚠ Zone lookup failed for ${name}${failureDetail({ status, errors }, ZONE_READ_SCOPE_HINT)} — skipping the DNS / image-transform preflight.`,
+		'  Re-run setup to retry the preflight.'
+	];
 }
 
 export interface GhEligibilityInput {
@@ -401,34 +538,46 @@ export function ciWiringEntries(input: CiWiringInput): CiEntry[] {
  * can pin that, and the wording, without running the CLI.
  *
  * Status contracts: null = not attempted (no domain / no zone / no token);
- * 'error' = provisioning failed — `downloadRateLimitDetail` carries waf-lib's
- * reason (missing scope, absent zone, HTTP failure), which the summary repeats
- * instead of assuming a cause; 'exists' rate limits are old news and stay
- * silent.
+ * 'error' = provisioning failed — `downloadRateLimitDetail` / `turnstileDetail`
+ * carry the provisioning lib's reason (missing scope, HTTP failure), which the
+ * summary repeats instead of assuming a cause; 'exists' rate limits are old
+ * news and stay silent.
  *
  * `turnstileWired` says whether BOTH halves of the wiring actually landed (the
  * Pages PATCH carrying TURNSTILE_SITEKEY and the TURNSTILE_SECRET put). The
  * login check fails open when either is missing, so a provisioned widget with
  * failed wiring must read as NOT protected — never as enforced.
  */
-export function securitySummaryLines(
-	host: string,
-	downloadRateLimit: RateLimitStatus | null,
-	downloadRateLimitDetail: string | null,
-	turnstileStatus: TurnstileStatus | null,
-	turnstileWired: boolean,
+export interface SecuritySummaryInput {
+	host: string;
+	downloadRateLimit: RateLimitStatus | null;
+	downloadRateLimitDetail: string | null;
+	turnstileStatus: TurnstileStatus | null;
+	// turnstile-lib's failure reason when turnstileStatus is 'error'.
+	turnstileDetail: string | null;
+	turnstileWired: boolean;
 	// The RESOLVED zone's name when it differs from the host (subdomain forks):
 	// the rate-limit rule is zone-wide, so the applied line must name the zone
 	// it actually landed on. The retry command keeps the host — the applier
 	// resolves the zone itself.
-	zoneName?: string | null
-): string[] {
+	zoneName?: string | null;
+}
+
+export function securitySummaryLines(input: SecuritySummaryInput): string[] {
+	const {
+		host,
+		downloadRateLimit,
+		downloadRateLimitDetail,
+		turnstileStatus,
+		turnstileDetail,
+		turnstileWired,
+		zoneName
+	} = input;
 	const lines: string[] = [];
 	if (downloadRateLimit === 'error') {
-		lines.push(
-			`  • Public-endpoint rate limit: NOT set (${downloadRateLimitDetail ?? 'provisioning failed'}).`
-		);
-		lines.push('     Fix that, then run:');
+		lines.push('  • Public-endpoint rate limit: NOT set.');
+		lines.push(`     Reason: ${downloadRateLimitDetail ?? 'none reported'}.`);
+		lines.push('     When that is fixed, run:');
 		lines.push(`       CLOUDFLARE_API_TOKEN=<token> npm run apply-download-ratelimit -- ${host}`);
 	} else if (downloadRateLimit && downloadRateLimit !== 'exists') {
 		lines.push(
@@ -436,8 +585,9 @@ export function securitySummaryLines(
 		);
 	}
 	if (turnstileStatus === 'error') {
-		lines.push('  • Admin-login bot check: NOT set (token lacks Account · Turnstile · Edit).');
-		lines.push('     Add that permission to the token and re-run setup to protect /admin/login.');
+		lines.push('  • Admin-login bot check: NOT set.');
+		lines.push(`     Reason: ${turnstileDetail ?? 'none reported'}.`);
+		lines.push('     When that is fixed, re-run setup to protect /admin/login.');
 	} else if (turnstileStatus && !turnstileWired) {
 		// Worded as an unverified-THIS-RUN claim: on a re-run, a previous run may
 		// have wired the project already, so "no bot check" would be false there —
@@ -449,10 +599,120 @@ export function securitySummaryLines(
 		lines.push('     first run that means /admin/login has NO bot check (it fails open without both) —');
 		lines.push('     re-run setup, or set the var + secret on the Pages project yourself.');
 	} else if (turnstileStatus) {
-		lines.push(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}`);
+		lines.push(`  • Admin-login bot check: Turnstile ${turnstileStatus} for ${host}.`);
 		lines.push('     (TURNSTILE_SITEKEY var + TURNSTILE_SECRET secret set; enforced once deployed).');
 	}
 	return lines;
+}
+
+export interface StorageSummaryInput {
+	/** Active image store: 'r2' | 'uploadthing'. */
+	provider: string;
+	/** The R2 bucket create said R2 isn't enabled on the account. */
+	r2Missing: boolean;
+	/** The bucket create reported the bucket in place (created, or already there). */
+	bucketReady: boolean;
+	/** The UPLOADTHING_TOKEN secret put succeeded (false when no token was given). */
+	uploadThingTokenSet: boolean;
+	bucket: string;
+	project: string;
+}
+
+/**
+ * The end-of-run "Storage backend:" lines. Both backends report NOT READY on the
+ * state we actually established: R2 when the bucket create didn't put a bucket
+ * there, UploadThing when the UPLOADTHING_TOKEN put didn't land (a skipped or
+ * failed put used to still print "(set up)", which is the same over-claim
+ * turnstileWired exists to prevent — the operator deploys and every upload fails).
+ *
+ * "R2 is not enabled" is only ONE way the create fails. A token without Account →
+ * Workers R2 Storage: Edit fails with none of that error's markers, so the claim
+ * keys off the create's own outcome and the not-enabled text only picks the
+ * wording — otherwise setup says "(set up)" about a bucket that doesn't exist.
+ */
+export function storageSummaryLines(input: StorageSummaryInput): string[] {
+	const { provider, r2Missing, bucketReady, uploadThingTokenSet, bucket, project } = input;
+	if (provider === 'r2') {
+		if (bucketReady) return ['Storage backend: Cloudflare R2 (set up).'];
+		if (r2Missing)
+			return [
+				'Storage backend: Cloudflare R2 — NOT READY (R2 is not enabled on this account).',
+				`  Create the bucket, then re-run setup:  npx wrangler r2 bucket create ${bucket}`
+			];
+		return [
+			`Storage backend: Cloudflare R2 — NOT READY (the ${bucket} bucket was not created).`,
+			`  Create it, then re-run setup:  npx wrangler r2 bucket create ${bucket}`
+		];
+	}
+	if (uploadThingTokenSet) return ['Storage backend: UploadThing (set up).'];
+	return [
+		'Storage backend: UploadThing — NOT READY (the UPLOADTHING_TOKEN secret is not set).',
+		`  Set it, then re-deploy:  npx wrangler pages secret put UPLOADTHING_TOKEN --project-name ${project}`
+	];
+}
+
+/**
+ * Names the Resend secrets whose put failed. These are optional, so silence is
+ * right when the operator supplied none — but a value they DID supply that
+ * failed to land must be said out loud: password-reset email reads these at
+ * runtime, so the failure would otherwise surface as a dead reset link long
+ * after setup finished.
+ */
+export function resendSecretWarnLines(failed: string[], project: string): string[] {
+	if (failed.length === 0) return [];
+	return [
+		`\n⚠ Resend secrets that did NOT get set: ${failed.join(', ')}.`,
+		'  Password-reset email stays off until they are:',
+		...failed.map((name) => `    npx wrangler pages secret put ${name} --project-name ${project}`)
+	];
+}
+
+/**
+ * The end-of-run "Telegram sticker import:" line. `enabled (bot token set)` is a
+ * claim about a secret put, so it needs the put's result — a failed put leaves
+ * Telegram import hidden, and saying "enabled" would send the operator hunting in
+ * the app for a feature that never turned on.
+ */
+export function telegramSummaryLine(tokenProvided: boolean, tokenSet: boolean): string {
+	if (!tokenProvided) return 'Telegram sticker import: not configured.';
+	return tokenSet
+		? 'Telegram sticker import: enabled (bot token set).'
+		: 'Telegram sticker import: enabled, but the bot token did NOT get set — import stays hidden.';
+}
+
+/**
+ * The end-of-run block that hands the operator their one-time SETUP_TOKEN. The
+ * wizard authenticates against the SETUP_TOKEN secret on the Pages project, so
+ * when that put failed the printed value is not yet a working token — say that
+ * and give the command, rather than printing it as if the wizard would take it.
+ */
+export function setupTokenLines(input: { setupToken: string; setupTokenSet: boolean; project: string }): string[] {
+	const { setupToken, setupTokenSet, project } = input;
+	if (setupTokenSet) {
+		return ['\n  Your one-time setup token (enter it in the wizard):\n', `     SETUP_TOKEN = ${setupToken}`];
+	}
+	return [
+		'\n  ⚠ The SETUP_TOKEN secret did NOT get set on the Pages project, so the wizard will',
+		'     reject this token until you set it yourself:',
+		`       npx wrangler pages secret put SETUP_TOKEN --project-name ${project}`,
+		`     SETUP_TOKEN = ${setupToken}`
+	];
+}
+
+/**
+ * The closing parenthetical of the summary, which used to assert both halves
+ * unconditionally. Each is a write that can fail: without CRON_SECRET the
+ * scheduled syncs can't authenticate, and without the seed the app boots with no
+ * storage backend — so each is reported from its own result.
+ */
+export function provisioningNoteLine(cronSecretSet: boolean, seedOk: boolean): string {
+	const cron = cronSecretSet
+		? 'CRON_SECRET set for the cron jobs'
+		: 'CRON_SECRET NOT set — the cron jobs cannot authenticate';
+	const seed = seedOk
+		? 'storageProvider seeded'
+		: 'storageProvider NOT seeded — set it in admin Settings';
+	return `  (${cron}; ${seed}.)`;
 }
 
 /**

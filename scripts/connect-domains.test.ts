@@ -129,6 +129,60 @@ describe('runDoctor', () => {
 		expect(text).not.toContain('Add the root domain');
 	});
 
+	// The reads never ran, so there is no status to report. A rung that filled in
+	// "(HTTP 0); the Cloudflare API did not respond" here would be describing a
+	// call that was never made — and a mutant doing exactly that survived.
+	it('says couldn\'t-verify with NO status and no scope when the zone is unusable', async () => {
+		const out: string[] = [];
+		const spy = vi.spyOn(console, 'log').mockImplementation((...x) => {
+			out.push(x.join(' '));
+		});
+		const { api, calls } = recordingApi();
+		await runDoctor(args({ zone: { exists: true, active: false, id: 'z1' } }), deps(api));
+		spy.mockRestore();
+		const text = out.join('\n');
+		expect(calls).toEqual([]);
+		expect(text).toContain("Couldn't verify. Check the bucket's Custom Domains");
+		expect(text).toContain("Couldn't verify Image Transformations;");
+		expect(text).not.toMatch(/HTTP \d/);
+		expect(text).not.toContain('the Cloudflare API did not respond');
+		expect(text).not.toContain('Workers R2 Storage: Read');
+		expect(text).not.toContain('Zone → Zone Settings: Read');
+		expect(text).not.toContain('carried no domain list');
+	});
+
+	// One 'unknown' outcome, several causes. The doctor threads the read's own
+	// status and errors into the rung, so a 5xx or an unreachable API never reads
+	// as "your token is missing a scope".
+	it('gives the Image Transformations rung a different reason per failure status', async () => {
+		const render = async (ir: CfApiResult) => {
+			const out: string[] = [];
+			const spy = vi.spyOn(console, 'log').mockImplementation((...x) => {
+				out.push(x.join(' '));
+			});
+			const { api } = recordingApi({ image_resizing: ir });
+			await runDoctor(args(), deps(api));
+			spy.mockRestore();
+			return out.join('\n');
+		};
+
+		const denied = await render({ ok: false, status: 403 });
+		expect(denied).toContain('token needs Zone → Zone Settings: Read');
+
+		const server = await render({
+			ok: false,
+			status: 500,
+			errors: [{ code: 10000, message: 'Internal error' }]
+		});
+		expect(server).not.toContain('Zone → Zone Settings: Read');
+		expect(server).toContain('(HTTP 500)');
+		expect(server).toContain('the API said 10000: Internal error');
+
+		const offline = await render({ ok: false, status: 0 });
+		expect(offline).not.toContain('Zone → Zone Settings: Read');
+		expect(offline).toContain('the Cloudflare API did not respond');
+	});
+
 	it('always returns 0 (diagnostic), even when a rung hard-fails', async () => {
 		const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
 		// Domain unreachable → cdn-loads fails, but the command still exits 0.
@@ -159,6 +213,14 @@ describe('connect-domains.ts ↔ candidate-walk source contract', () => {
 		expect(src).toMatch(/resolveZone\(\s*candidates/);
 	});
 
+	it('attributes the API reason on the zone-lookup error line', () => {
+		// Three sites print '; the API said …' (this one, setup.ts's warn, and
+		// cfFailureTail); pin this inline copy so the wording cannot drift back
+		// to a bare parenthetical.
+		expect(src).toContain('; the API said ${apiWhy}');
+		expect(src).not.toContain('(${apiWhy})');
+	});
+
 	it('passes the candidates to zoneGuidance', () => {
 		expect(src).toMatch(/zoneGuidance\(\s*zone,\s*host,\s*candidates,\s*zoneName\s*\)/);
 	});
@@ -175,5 +237,70 @@ describe('connect-domains.ts ↔ candidate-walk source contract', () => {
 
 	it('keeps the whole-zone disclosure on the transforms bullet', () => {
 		expect(src).toMatch(/affects the whole zone, not just \$\{host\}/);
+	});
+
+	it('reads the API reason whatever the status was', () => {
+		// Gating the summary on a 2xx dropped it for 400/404/500 — the statuses whose
+		// reason the operator most needs, since a 2xx-with-success:false is the only
+		// one they could have guessed at.
+		expect(src).toContain('const apiWhy = cfErrorSummary(errors);');
+	});
+});
+
+// Every failed call in the mutating path reports through failureDetail, so the
+// reason tracks the status: the scope only on 401/403, the API's own words when
+// it gave any, and the network line for a thrown fetch. The previous copy
+// recommended the R2 read scope for every failure — including a 5xx and an
+// unreachable API — and printed a bare "(HTTP 0)" carrying nothing.
+describe('connect-domains.ts ↔ failure-reporting source contract', () => {
+	const src = readFileSync(
+		join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
+		'utf8'
+	);
+
+	// The two domain reads go through domainReadFailure, which also tells an ok
+	// response carrying no list apart from a failed one; everything else composes
+	// statusLabel + cfFailureTail via failureDetail.
+	it('reports both domain reads through domainReadFailure', () => {
+		expect(src).toMatch(/domainReadFailure\(\s*r2Res,\s*'Account → Workers R2 Storage: Read'/);
+		expect(src).toMatch(/domainReadFailure\(\s*pagesRes,\s*'Account → Cloudflare Pages: Read'/);
+	});
+
+	it("reports a failed attach with that mutation's own scope", () => {
+		expect(src).toContain('failureDetail(res, m.scopeHint)');
+	});
+
+	it('reports a failed Image Transformations enable the same way', () => {
+		expect(src).toMatch(/failureDetail\(\s*patched,\s*'Zone → Zone Settings: Edit'/);
+	});
+
+	it('reads the Image Transformations reason off the response, not off a fixed scope', () => {
+		expect(src).toMatch(/failureDetail\(\s*irGet,\s*'Zone → Zone Settings: Read'/);
+	});
+});
+
+// A read that failed is the one that would have told us whether the mutation is
+// needed, so it can't license the mutation. main() self-executes and isn't
+// importable, so pin the wiring at the source level; the behavior itself is
+// covered in connect-domains-lib.test.ts (pagesDomainState + planConnect).
+describe('connect-domains.ts ↔ never-mutate-on-an-unread-state contract', () => {
+	const src = readFileSync(
+		join(dirname(fileURLToPath(import.meta.url)), 'connect-domains.ts'),
+		'utf8'
+	);
+
+	it('derives the Pages attach from pagesDomainState, which reports a failed read as unknown', () => {
+		expect(src).toMatch(/pagesDomainState\(\s*pagesRes,\s*host\s*\)/);
+		expect(src).toContain("pagesPresent: pagesState !== 'absent'");
+	});
+
+	it('skips the attach and says so when either read came back unknown', () => {
+		expect(src).toMatch(/pagesState === 'unknown'/);
+		expect(src).toMatch(/skipping the \$\{host\} attach/);
+		expect(src).toMatch(/skipping the \$\{cdn\} attach/);
+	});
+
+	it('never claims "Already connected" off a read that failed', () => {
+		expect(src).toMatch(/Nothing changed — the \$\{unread\} attachment couldn't be read/);
 	});
 });

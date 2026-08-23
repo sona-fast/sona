@@ -27,6 +27,7 @@ import {
 	buildMigrationSql,
 	buildSeedSql,
 	sanitizeProjectName,
+	bucketCreateSucceeded,
 	isR2NotEnabled,
 	ensureUrlScheme,
 	ghSecretEligibility,
@@ -41,13 +42,24 @@ import {
 	imageResizingIsOn,
 	ciWiringEntries,
 	cfApi,
+	failureDetail,
+	zoneLookupWarnLines,
 	securitySummaryLines,
+	storageSummaryLines,
+	telegramSummaryLine,
+	resendSecretWarnLines,
+	setupTokenLines,
+	provisioningNoteLine,
 	pagesPatchConfirmsSitekey,
 	cdnAttachmentLines
 } from './setup-lib.ts';
 import { resolveZone } from './connect-domains-lib.ts';
 import { applyDownloadRateLimit, type RateLimitStatus } from './waf-lib.ts';
-import { provisionTurnstileWidget, type TurnstileStatus } from './turnstile-lib.ts';
+import {
+	provisionTurnstileWidget,
+	SCOPE_HINT as TURNSTILE_SCOPE_HINT,
+	type TurnstileStatus
+} from './turnstile-lib.ts';
 // Shared with the admin Settings save so the seeded siteUrl passes the same
 // https-URL validation (validate.ts has no imports, so tsx loads it directly).
 import { normalizeHttpsUrl } from '../src/lib/server/validate.ts';
@@ -68,6 +80,8 @@ type RunOpts = {
 	allowFail?: boolean;
 	stdin?: 'inherit' | 'ignore';
 	env?: NodeJS.ProcessEnv;
+	/** Called on a tolerated failure, so a caller can record that it happened. */
+	onFail?: () => void;
 };
 function run(cmd: string, opts: RunOpts = {}): string {
 	console.log(`\n$ ${cmd}`);
@@ -81,7 +95,10 @@ function run(cmd: string, opts: RunOpts = {}): string {
 		if (opts.allowFail) {
 			// On a tolerated failure, hand back whatever the command printed so callers
 			// can sniff it (e.g. the R2 "not enabled" error). Inherited stdio isn't
-			// captured, so this is only non-empty when `capture` was set.
+			// captured, so this is only non-empty when `capture` was set — which is why
+			// a caller that must know whether the command SUCCEEDED takes onFail rather
+			// than reading the text.
+			opts.onFail?.();
 			const e = err as { stdout?: string | Buffer; stderr?: string | Buffer };
 			return `${e.stdout ?? ''}${e.stderr ?? ''}`;
 		}
@@ -121,18 +138,23 @@ function ghSet(kind: 'secret' | 'variable', name: string, value: string, repo: s
 
 const token = (bytes = 32) => randomBytes(bytes).toString('hex');
 
+// The scope the Pages-project PATCH needs, named in a failure only when the
+// status (401/403) proves that is the reason.
+const PAGES_SCOPE_HINT = 'Account → Cloudflare Pages: Edit';
+
 // The friend-facing API-token recipe, printed whenever a scope preflight fails so
 // the operator knows exactly what to (re)create. Kept in one place so the CLI and
 // the message stay in sync with README's "API token" section.
 const TOKEN_RECIPE =
 	'Create a Cloudflare API token (dash → My Profile → API Tokens → Create Token → Custom token) with:\n' +
-	'    • Account · Cloudflare Pages · Edit\n' +
-	'    • Account · D1 · Edit\n' +
-	'    • Account · Workers R2 Storage · Edit\n' +
-	'    • Account · Turnstile · Edit      (only with a custom domain; adds the admin-login bot check)\n' +
-	'    • Zone · DNS · Edit               (only if you are attaching a custom domain)\n' +
-	'    • Zone · WAF · Edit               (only with a custom domain; adds the public rate limit)\n' +
-	'    • Zone · Zone Settings · Edit     (optional; lets setup enable image resizing for you)';
+	`    • ${PAGES_SCOPE_HINT}\n` +
+	'    • Account → D1: Edit\n' +
+	'    • Account → Workers R2 Storage: Edit\n' +
+	`    • ${TURNSTILE_SCOPE_HINT}      (only with a custom domain; adds the admin-login bot check)\n` +
+	'    • Zone → Zone: Read              (only with a custom domain; resolves the zone)\n' +
+	'    • Zone → DNS: Edit               (only with a custom domain; needed later to attach the apex record)\n' +
+	'    • Zone → WAF: Edit               (only with a custom domain; adds the public rate limit)\n' +
+	'    • Zone → Zone Settings: Edit     (optional; lets setup enable image resizing for you)';
 
 async function main() {
 	console.log('— Sona setup —\n');
@@ -302,7 +324,7 @@ async function main() {
 
 	// 0. Custom-domain preflight (only when a domain was given). Checks (does not
 	//    guarantee) DNS access for the zone — the Pages apex CNAME needs
-	//    Zone·DNS·Edit, and without it the domain sticks `pending` with a confusing
+	//    Zone → DNS: Edit, and without it the domain sticks `pending` with a confusing
 	//    522 — and, while we have the zone, checks/enables Image Transformations
 	//    (thumbnails/OG images are built via /cdn-cgi/image, which is off by default
 	//    and per-zone). Runs before provisioning so a missing DNS scope surfaces
@@ -322,8 +344,14 @@ async function main() {
 	// domain — a *.pages.dev-only fork isn't provisioned one. Its sitekey (public)
 	// is set as a Pages var below and its secret as a Pages secret; the login page
 	// enforces the challenge only when BOTH are present. null = not attempted
-	// (no domain / no token); 'error' = token lacked Account · Turnstile · Edit.
+	// (no domain / no token); 'error' = provisioning failed — turnstileDetail
+	// carries the actual reason (scope on 401/403, otherwise the HTTP status
+	// or a partial body).
 	let turnstileStatus: TurnstileStatus | null = null;
+	// The human-readable reason behind a Turnstile 'error' — mirrors
+	// downloadRateLimitDetail so the summary repeats turnstile-lib's real
+	// failure instead of assuming a missing scope.
+	let turnstileDetail: string | null = null;
 	let turnstileSitekey = '';
 	let turnstileSecret = '';
 	// Whether the Pages-project PATCH (which carries TURNSTILE_SITEKEY) landed —
@@ -344,6 +372,7 @@ async function main() {
 				zone: preflightZone,
 				zoneName: preflightZoneName,
 				errorStatus: zoneLookupError,
+				errors: zoneLookupErrors,
 				failedName: zoneLookupFailedName
 			} = await resolveZone(zoneNameCandidates(host), (name) =>
 				cfApi(cfToken, `/zones?name=${encodeURIComponent(name)}`)
@@ -351,18 +380,15 @@ async function main() {
 			resolvedZoneName = preflightZoneName;
 			const zoneId = preflightZone.id;
 			if (zoneLookupError !== null) {
-				// status 0 = fetch threw (no network); a 2xx here means the API said
-				// success:false — neither reads sensibly as a bare "HTTP <n>".
-				const why =
-					zoneLookupError === 0
-						? 'could not reach the Cloudflare API'
-						: `Cloudflare API error, HTTP ${zoneLookupError}`;
-				console.warn(
-					`\n⚠ Zone lookup failed for ${zoneLookupFailedName ?? host} (${why}) — skipping the DNS / image-transform preflight.`
-				);
-				console.warn(
-					'  A 401/403 means the token lacks Zone · Zone · Read; otherwise re-run setup to retry.'
-				);
+				// The reason (and whether a scope is named at all) is decided by the
+				// status, in the shared helper — see zoneLookupWarnLines.
+				for (const line of zoneLookupWarnLines(
+					zoneLookupFailedName ?? host,
+					zoneLookupError,
+					zoneLookupErrors
+				)) {
+					console.warn(line);
+				}
 			} else if (!zoneId) {
 				console.warn(
 					`\n⚠ No Cloudflare zone found for ${host} — skipping the DNS / image-transform preflight.`
@@ -376,7 +402,7 @@ async function main() {
 				const dnsProbe = await cfApi(cfToken, `/zones/${zoneId}/dns_records?per_page=1`);
 				if (dnsProbeBlocksSetup(dnsProbe)) {
 					console.warn(
-						`\n⚠ Could not verify DNS access for ${host} (token lacks Zone · DNS · Read; attaching the apex CNAME later needs Zone · DNS · Edit).`
+						`\n⚠ Could not verify DNS access for ${host} (token lacks Zone → DNS: Read; attaching the apex CNAME later needs Zone → DNS: Edit).`
 					);
 					console.warn('  Setup only checks access — it never writes DNS itself. If you plan to attach');
 					console.warn('  the domain from the Cloudflare dashboard, you can continue.');
@@ -392,7 +418,7 @@ async function main() {
 					}
 				}
 				// Image Transformations. Off by default, per-zone, and NOT grantable by
-				// the deploy token — enable it if the token carries Zone Settings·Edit,
+				// the deploy token — enable it if the token carries Zone → Zone Settings: Edit,
 				// else leave imageResizingOn=null (unknown) and warn in Next steps.
 				const ir = await cfApi(cfToken, `/zones/${zoneId}/settings/image_resizing`);
 				let patchOk = false;
@@ -407,7 +433,7 @@ async function main() {
 
 				// WAF rate limit for the anonymously-reachable /api paths (download
 				// beacon + oEmbed provider — one rule, Free-plan cap). Non-fatal:
-				// a token without Zone · WAF · Edit just yields an 'error'
+				// a token without Zone → WAF: Edit just yields an 'error'
 				// result we warn about in Next steps — setup keeps going regardless.
 				// Reuse the zone the preflight just resolved — no second candidate walk.
 				const rateLimit = await applyDownloadRateLimit(cfToken, host, cfApi, zoneId);
@@ -423,10 +449,11 @@ async function main() {
 			// Turnstile widget for the admin-login bot check. Account-
 			// scoped, so — unlike the DNS / image-resizing checks above — it does NOT
 			// need a resolved zone and runs even when the domain's DNS lives elsewhere.
-			// Non-fatal: a token without Account · Turnstile · Edit just yields an
+			// Non-fatal: a token without Account → Turnstile: Edit just yields an
 			// 'error' result we warn about in Next steps — setup keeps going regardless.
 			const ts = await provisionTurnstileWidget(cfToken, cfAccount, host);
 			turnstileStatus = ts.status;
+			turnstileDetail = ts.detail;
 			turnstileSitekey = ts.sitekey ?? '';
 			turnstileSecret = ts.secret ?? '';
 			if (ts.status === 'error') {
@@ -439,7 +466,7 @@ async function main() {
 				'\n⚠ A custom domain was given but CLOUDFLARE_API_TOKEN/ACCOUNT_ID are not in the env,'
 			);
 			console.warn('  so setup cannot preflight DNS access. Attaching the apex domain needs a token');
-			console.warn('  with Zone · DNS · Edit (see README → custom domain).');
+			console.warn('  with Zone → DNS: Edit (see README → custom domain).');
 		}
 	}
 
@@ -451,19 +478,47 @@ async function main() {
 	process.stdout.write(d1Out);
 	let dbId = parseDatabaseId(d1Out);
 	if (!dbId) dbId = await ask('Could not auto-detect database_id — paste it from the output above', '');
+	// Still nothing: `wrangler d1 create` failed and no id was pasted, so we never
+	// established that a database exists. Writing wrangler.toml and PATCHing the
+	// Pages project with an empty database_id would print two ✔ lines for bindings
+	// that point at nothing, and only blow up later in the migration step.
+	if (!dbId) {
+		console.error('\n✖ No D1 database_id — `wrangler d1 create` did not report one and none was pasted.');
+		console.error('  Setup stopped rather than wire wrangler.toml and the Pages project to no database.');
+		console.error('  Check the wrangler output above, then re-run setup.');
+		process.exitCode = 1;
+		rl.close();
+		return;
+	}
 
 	// 3. R2 bucket — always create it so the IMAGES binding is valid. Detect the
 	//    "R2 not enabled on this account" case (error 10042) rather than swallowing
 	//    it as success and later claiming the R2 backend is set up.
-	const r2Out = run(`npx wrangler r2 bucket create ${bucket}`, { capture: true, allowFail: true });
+	let r2CreateOk = true;
+	const r2Out = run(`npx wrangler r2 bucket create ${bucket}`, {
+		capture: true,
+		allowFail: true,
+		onFail: () => {
+			r2CreateOk = false;
+		}
+	});
 	process.stdout.write(r2Out);
 	const r2Missing = isR2NotEnabled(r2Out);
+	// Whether a bucket is actually there, from the create's own outcome — not from
+	// the absence of one particular error string. An "already exists" failure on a
+	// re-run counts as ready; a permission failure does not.
+	const bucketReady = bucketCreateSucceeded(r2Out, r2CreateOk);
 	if (r2Missing) {
 		console.warn('\n⚠ R2 does not appear to be enabled on this Cloudflare account.');
 		console.warn('  Enable it at dash.cloudflare.com → R2, then re-run setup');
 		console.warn(`  (or run:  npx wrangler r2 bucket create ${bucket}).`);
 		if (useR2)
 			console.warn(`  Image uploads will NOT work until the bucket "${bucket}" exists.`);
+	} else if (!bucketReady) {
+		console.warn(`\n⚠ Could not create the R2 bucket "${bucket}" — see the wrangler output above.`);
+		console.warn('  A token without Account → Workers R2 Storage: Edit fails exactly here.');
+		console.warn(`  Create it, then re-run setup:  npx wrangler r2 bucket create ${bucket}`);
+		if (useR2) console.warn('  Image uploads will NOT work until that bucket exists.');
 	}
 
 	// 4. Render wrangler.toml from the template.
@@ -486,7 +541,9 @@ async function main() {
 	if (cfToken && cfAccount) {
 		const payload = buildPagesConfigPayload({
 			dbId,
-			bucket: r2Missing ? '' : bucket,
+			// Bind R2 only when a bucket is actually there — binding a name the create
+			// never made ships a broken IMAGES binding on the first CI deploy.
+			bucket: bucketReady ? bucket : '',
 			// TURNSTILE_SITEKEY is public (rendered into the login page), so it rides
 			// as a plain Pages var alongside FURTRACK_MODE. Its secret is set separately
 			// as a Pages secret below. Absent when Turnstile wasn't provisioned.
@@ -504,12 +561,18 @@ async function main() {
 		pagesConfigOk =
 			res.ok && (!turnstileSitekey || pagesPatchConfirmsSitekey(res.result, turnstileSitekey));
 		if (res.ok) {
+			// Name only what was sent: the R2 binding is omitted when no bucket exists.
 			console.log(
-				'✔ attached D1/R2 bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).'
+				`✔ attached D1${bucketReady ? '/R2' : ''} bindings + FURTRACK_MODE to the Pages project (CI deploys get working bindings).`
 			);
 		} else {
-			console.warn('\n⚠ Could not attach bindings to the Pages project via the API');
-			console.warn(`  (HTTP ${res.status}) ${JSON.stringify(res.errors ?? '')}`);
+			// failureDetail keeps the reason honest per status — a thrown fetch says
+			// the API did not respond instead of "(HTTP 0)", and only a 401/403 names
+			// the scope. It reads the allowlisted code+message pairs, never the raw
+			// errors body, which can echo account/project identifiers.
+			console.warn(
+				`\n⚠ Could not attach bindings to the Pages project via the API${failureDetail(res, PAGES_SCOPE_HINT)}`
+			);
 			console.warn('  Fix: run ONE local deploy with wrangler.toml present so the bindings attach:');
 			console.warn('    npx wrangler pages deploy .svelte-kit/cloudflare');
 			console.warn('  Until then, CI (git push) deploys will have no D1/R2 binding.');
@@ -562,10 +625,16 @@ async function main() {
 		// Seed the FurTrack character/tag the fursuit feature queries.
 		primaryCharacter
 	});
-	run(`npx wrangler d1 execute ${dbName} --remote --command "${seed}"`, {
-		allowFail: true,
-		stdin: 'ignore'
-	});
+	// Tolerated failure, but not an ignored one: the summary says the provider was
+	// seeded, and a failed execute leaves the app with no storage backend at boot.
+	let seedOk = true;
+	try {
+		run(`npx wrangler d1 execute ${dbName} --remote --command "${seed}"`, { stdin: 'ignore' });
+	} catch {
+		seedOk = false;
+		console.warn('\n⚠ Could not seed site_settings — the storage provider is not recorded yet.');
+		console.warn('  Set it in admin Settings → Storage Provider after the first deploy.');
+	}
 
 	// 7. Generate + set secrets. SETUP_TOKEN gates the first-run wizard.
 	const setupToken = token();
@@ -584,12 +653,19 @@ async function main() {
 			return false; // allowFail
 		}
 	};
-	putSecret('SETUP_TOKEN', setupToken);
-	putSecret('CRON_SECRET', cronSecret);
-	if (!useR2 && uploadThingToken) putSecret('UPLOADTHING_TOKEN', uploadThingToken);
-	if (telegramBotToken) putSecret('TELEGRAM_BOT_TOKEN', telegramBotToken);
-	if (resendApiKey) putSecret('RESEND_API_KEY', resendApiKey);
-	if (resendFrom) putSecret('RESEND_FROM', resendFrom);
+	// Keep every put's result: the summary below must report what actually landed,
+	// not what we tried to write.
+	const setupTokenSet = putSecret('SETUP_TOKEN', setupToken);
+	const cronSecretSet = putSecret('CRON_SECRET', cronSecret);
+	const uploadThingTokenSet =
+		!useR2 && uploadThingToken ? putSecret('UPLOADTHING_TOKEN', uploadThingToken) : false;
+	const telegramTokenSet = telegramBotToken ? putSecret('TELEGRAM_BOT_TOKEN', telegramBotToken) : false;
+	// Optional, but a supplied value whose put failed can't stay silent — see
+	// resendSecretWarnLines: the failure would otherwise show up as a dead reset
+	// link months later.
+	const resendFailed: string[] = [];
+	if (resendApiKey && !putSecret('RESEND_API_KEY', resendApiKey)) resendFailed.push('RESEND_API_KEY');
+	if (resendFrom && !putSecret('RESEND_FROM', resendFrom)) resendFailed.push('RESEND_FROM');
 	// Turnstile secret for the admin-login siteverify. Server-only, so
 	// it's a Pages secret (never a plain var); the public sitekey was set above.
 	// The login check fails open without it, so remember whether the put landed.
@@ -658,16 +734,21 @@ async function main() {
 	rl.close();
 
 	console.log('\n──────────────────────────────────────────────');
-	if (useR2 && r2Missing) {
-		console.log('Storage backend: Cloudflare R2 — NOT READY (R2 is not enabled on this account).');
-		console.log(`  Create the bucket, then re-run setup:  npx wrangler r2 bucket create ${bucket}`);
-	} else {
-		console.log(`Storage backend: ${provider === 'r2' ? 'Cloudflare R2' : 'UploadThing'} (set up).`);
+	for (const line of storageSummaryLines({
+		provider,
+		r2Missing,
+		bucketReady,
+		uploadThingTokenSet,
+		bucket,
+		project
+	})) {
+		console.log(line);
 	}
 	console.log(
 		`Fursuit photos: ${furtrackMode === 'off' ? 'disabled' : `enabled (${furtrackMode})`}${primaryCharacter ? ` — character "${primaryCharacter}"` : ''}.`
 	);
-	console.log(`Telegram sticker import: ${telegramBotToken ? 'enabled (bot token set)' : 'not configured'}.`);
+	console.log(telegramSummaryLine(Boolean(telegramBotToken), telegramTokenSet));
+	for (const line of resendSecretWarnLines(resendFailed, project)) console.warn(line);
 	console.log('Migrations applied and recorded in schema_migrations (first CI deploy is a no-op).');
 	console.log('\nNext steps:\n');
 	console.log('  1. Deploy:  git push  (or `npx wrangler pages deploy .svelte-kit/cloudflare`)');
@@ -701,26 +782,28 @@ async function main() {
 			console.log('     Until on, gallery thumbnails serve the full-size original (slow) or 404.');
 		}
 		// Zone security: rate limit + admin-login Turnstile.
-		for (const line of securitySummaryLines(
+		for (const line of securitySummaryLines({
 			host,
 			downloadRateLimit,
 			downloadRateLimitDetail,
 			turnstileStatus,
-			pagesConfigOk && turnstileSecretSet,
-			resolvedZoneName
-		)) {
+			turnstileDetail,
+			turnstileWired: pagesConfigOk && turnstileSecretSet,
+			zoneName: resolvedZoneName
+		})) {
 			console.log(line);
 		}
 	}
-	console.log('\n  Your one-time setup token (enter it in the wizard):\n');
-	console.log(`     SETUP_TOKEN = ${setupToken}`);
+	for (const line of setupTokenLines({ setupToken, setupTokenSet, project })) {
+		console.log(line);
+	}
 	if (ciSecretsSet) {
 		console.log('\n  CI deploy secrets/variables are set — pushing to main will deploy.');
 	} else {
 		console.log('\n  Before deploying via GitHub, set the CI secrets/variables (see the note above).');
 	}
 	console.log('  Verify bindings any time with:  npx wrangler pages project list  /  npx wrangler d1 list');
-	console.log('  (CRON_SECRET set for the cron jobs; storageProvider seeded.)');
+	console.log(provisioningNoteLine(cronSecretSet, seedOk));
 	console.log('──────────────────────────────────────────────\n');
 }
 

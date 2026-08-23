@@ -6,8 +6,12 @@
  * The Cloudflare REST caller (`cfApi`) and the bare-host / image-resizing
  * helpers live in setup-lib.ts and are reused verbatim — this file adds only
  * new, self-contained functions so it rebases cleanly against branches that
- * also touch setup-lib.ts.
+ * also touch setup-lib.ts. It imports that module's `CfApiResult` shape (so the
+ * shapes this file consumes can't drift from what `cfApi` actually returns) plus
+ * the two failure-reporting helpers, so a can't-verify rung explains itself with
+ * the same per-status honesty the CLI's own messages use.
  */
+import { failureDetail, isRecord, statusLabel, type CfApiResult } from './setup-lib.ts';
 
 /** `cdn.<host>` — the CDN subdomain we attach to the images R2 bucket. */
 export function cdnHost(host: string): string {
@@ -73,11 +77,13 @@ export function classifyZone(result: unknown): ZoneStatus {
  */
 export async function resolveZone(
 	candidates: string[],
-	lookup: (name: string) => Promise<{ ok: boolean; status: number; result?: unknown }>
+	lookup: (name: string) => Promise<CfApiResult>
 ): Promise<{
 	zone: ZoneStatus;
 	zoneName: string | null;
 	errorStatus: number | null;
+	/** The failed lookup's parsed `errors` body, for the caller's error detail. */
+	errors: unknown;
 	/** The candidate whose lookup failed — error messages must name IT, not the host. */
 	failedName: string | null;
 }> {
@@ -88,12 +94,20 @@ export async function resolveZone(
 				zone: { exists: false, active: false },
 				zoneName: null,
 				errorStatus: res.status,
+				errors: res.errors,
 				failedName: name
 			};
 		const zone = classifyZone(res.result);
-		if (zone.exists) return { zone, zoneName: name, errorStatus: null, failedName: null };
+		if (zone.exists)
+			return { zone, zoneName: name, errorStatus: null, errors: undefined, failedName: null };
 	}
-	return { zone: { exists: false, active: false }, zoneName: null, errorStatus: null, failedName: null };
+	return {
+		zone: { exists: false, active: false },
+		zoneName: null,
+		errorStatus: null,
+		errors: undefined,
+		failedName: null
+	};
 }
 
 /**
@@ -173,7 +187,9 @@ interface BucketDomain {
 export function findBucketDomain(result: unknown, name: string): BucketDomain | undefined {
 	const list = ((result as { domains?: BucketDomain[] } | undefined)?.domains ??
 		(Array.isArray(result) ? (result as BucketDomain[]) : [])) as BucketDomain[];
-	return list.find((d) => d.domain === name);
+	// A list entry that isn't an object would throw on the property read, turning a
+	// malformed body into a crash instead of the 'unknown' its caller reports.
+	return list.find((d) => isRecord(d) && d.domain === name);
 }
 
 /**
@@ -181,7 +197,7 @@ export function findBucketDomain(result: unknown, name: string): BucketDomain | 
  * treat differently: `attached` (enabled — nothing to do), `disabled` (present
  * but turned off — enable it in the dashboard, do NOT re-create), `absent` (not
  * there — safe to create), and `unknown` (the GET failed, e.g. the token lacks
- * Account · Workers R2 Storage · Read — we must NOT report this as "not attached").
+ * Account → Workers R2 Storage: Read — we must NOT report this as "not attached").
  */
 export type CdnDomainState = 'attached' | 'disabled' | 'absent' | 'unknown';
 
@@ -190,6 +206,12 @@ export function cdnDomainState(
 	name: string
 ): CdnDomainState {
 	if (!res.ok) return 'unknown';
+	// Same rule as pagesDomainState: an ok response carrying no domain list is
+	// unreadable, not empty. findBucketDomain coerces either shape to [], so
+	// without this a malformed body reads as 'absent' and green-lights the attach
+	// this read exists to gate.
+	const r = res.result as { domains?: unknown } | undefined;
+	if (!Array.isArray(res.result) && !Array.isArray(r?.domains)) return 'unknown';
 	const d = findBucketDomain(res.result, name);
 	if (!d) return 'absent';
 	return d.enabled === false ? 'disabled' : 'attached';
@@ -206,7 +228,29 @@ export function bucketDomainTlsIssued(result: unknown, name: string): boolean {
  */
 export function pagesDomainAttached(result: unknown, host: string): boolean {
 	const list = (Array.isArray(result) ? result : []) as { name?: string }[];
-	return list.some((d) => d.name === host);
+	// Same guard as findBucketDomain: a non-object entry would throw on the
+	// property read rather than simply failing to match.
+	return list.some((d) => isRecord(d) && d.name === host);
+}
+
+/**
+ * The Pages project's state for `host`, with the same auth-vs-absent distinction
+ * the bucket read gets: `unknown` when the GET itself failed. Reading an empty
+ * `result` off a failed response would say "not attached" and send us straight
+ * into an attach the read was supposed to tell us whether we needed.
+ */
+export type PagesDomainState = 'attached' | 'absent' | 'unknown';
+
+export function pagesDomainState(
+	res: { ok: boolean; status: number; result?: unknown },
+	host: string
+): PagesDomainState {
+	if (!res.ok) return 'unknown';
+	// An ok response whose body isn't a list is unreadable, not empty. Letting it
+	// coerce to [] would report 'absent' and walk into the attach this read exists
+	// to gate, which is the same mistake as reading a failed response.
+	if (!Array.isArray(res.result)) return 'unknown';
+	return pagesDomainAttached(res.result, host) ? 'attached' : 'absent';
 }
 
 /**
@@ -232,7 +276,8 @@ export interface ConnectPlanInput {
 	zoneId: string;
 	/** The CDN custom domain already exists (attached OR disabled OR unverifiable) — don't create it. */
 	cdnPresent: boolean;
-	pagesAttached: boolean;
+	/** The Pages domain already exists (attached OR unverifiable) — don't create it. */
+	pagesPresent: boolean;
 }
 
 export interface PlannedMutation {
@@ -240,6 +285,8 @@ export interface PlannedMutation {
 	path: string;
 	body: Record<string, unknown>;
 	label: string;
+	/** The token permission THIS call needs — printed only when it fails with 401/403. */
+	scopeHint: string;
 }
 
 /**
@@ -249,6 +296,11 @@ export interface PlannedMutation {
  * present, so a re-run after a partial success issues just the missing call
  * (idempotent) — and a present-but-disabled CDN domain is left for the operator
  * to re-enable rather than re-created. Adds nothing else to the zone.
+ *
+ * Both `present` flags mean "don't create", not "confirmed attached": when the
+ * read that would have told us failed, the caller passes true and we plan
+ * nothing, because the one thing we must not do is mutate on a state we never
+ * managed to read.
  */
 export function planConnect(i: ConnectPlanInput): PlannedMutation[] {
 	const out: PlannedMutation[] = [];
@@ -258,14 +310,16 @@ export function planConnect(i: ConnectPlanInput): PlannedMutation[] {
 			method: 'POST',
 			path: `/accounts/${i.accountId}/r2/buckets/${i.bucket}/domains/custom`,
 			body: { domain: cdn, zoneId: i.zoneId, enabled: true, minTLS: '1.2' },
-			label: `attach ${cdn} to the ${i.bucket} bucket`
+			label: `attach ${cdn} to the ${i.bucket} bucket`,
+			scopeHint: 'Account → Workers R2 Storage: Edit'
 		});
-	if (!i.pagesAttached)
+	if (!i.pagesPresent)
 		out.push({
 			method: 'POST',
 			path: `/accounts/${i.accountId}/pages/projects/${i.project}/domains`,
 			body: { name: i.host },
-			label: `attach ${i.host} to the ${i.project} Pages project`
+			label: `attach ${i.host} to the ${i.project} Pages project`,
+			scopeHint: 'Account → Cloudflare Pages: Edit'
 		});
 	return out;
 }
@@ -305,15 +359,46 @@ export interface LadderInputs {
 	zoneActive: boolean;
 	/** attached = healthy, absent = not there, disabled = present-but-off, unknown = R2 read failed. */
 	cdnState: CdnDomainState;
+	/** The R2 read itself, so an `unknown` rung can say WHY; absent when it never ran. */
+	cdnRead?: { ok: boolean; status: number; errors?: unknown };
 	/** true = cert issued, false = still provisioning, null = couldn't verify (R2 read failed / not attached). */
 	tlsIssued: boolean | null;
-	/** true = on, false = off, null = couldn't verify (token lacks Zone Settings·Read). */
+	/** true = on, false = off, null = couldn't verify (the settings read failed). */
 	imageTransforms: boolean | null;
+	/** The Image Transformations read's HTTP status + errors body, for the same reason. */
+	imageTransformsStatus?: number;
+	imageTransformsErrors?: unknown;
 	cdnLoad: CdnProbe;
 	/** The RESOLVED zone's name (the parent zone for a subdomain host); null/absent when no zone matched. */
 	zoneName?: string | null;
 	/** The zone names the lookup tried, most specific first (last one is the root domain). */
 	candidates?: string[];
+}
+
+/**
+ * The reason a read couldn't be verified, in the CLI's own per-status form: the
+ * scope hint only on 401/403, the did-not-respond line on a thrown fetch, the
+ * API's words when it gave any. Empty when the caller recorded no status — we
+ * would rather say nothing than name a cause we never observed.
+ */
+function readFailureTail(status: number | undefined, errors: unknown, scopeHint: string): string {
+	return status === undefined ? '' : failureDetail({ status, errors }, scopeHint);
+}
+
+/**
+ * The same reason for a domain read that returned nothing usable — but told
+ * apart from a failed one. cfApi reports `ok` only when the API said success, so
+ * an ok response we couldn't read is a partial body: saying "the API reported
+ * failure" there would state the opposite of what happened. Empty when the read
+ * never ran, for the same reason readFailureTail is.
+ */
+export function domainReadFailure(
+	res: { ok: boolean; status: number; errors?: unknown } | undefined,
+	scopeHint: string
+): string {
+	if (!res) return '';
+	if (res.ok) return `${statusLabel(res.status)}; the response carried no domain list`;
+	return failureDetail(res, scopeHint);
 }
 
 /**
@@ -361,7 +446,10 @@ export function buildLadder(i: LadderInputs): Rung[] {
 		i.cdnState === 'attached' ? 'pass' : i.cdnState === 'absent' ? 'fail' : 'warn';
 	const cdnAction =
 		i.cdnState === 'unknown'
-			? `Couldn't verify — the token lacks Account · Workers R2 Storage · Read (or a transient API error). Check the bucket's Custom Domains in the dashboard.`
+			? `Couldn't verify${domainReadFailure(
+					i.cdnRead,
+					'Account → Workers R2 Storage: Read'
+				)}. Check the bucket's Custom Domains in the dashboard.`
 			: i.cdnState === 'disabled'
 				? `${cdn} is attached but DISABLED — re-enable it in dashboard → R2 → your images bucket → Settings → Custom Domains.`
 				: `Run \`npm run connect-domains\` (no --check) to attach ${cdn} to the images bucket.`;
@@ -380,7 +468,11 @@ export function buildLadder(i: LadderInputs): Rung[] {
 		`Image Transformations are enabled on the ${zoneName} zone`,
 		i.imageTransforms === true ? 'pass' : 'warn',
 		i.imageTransforms === null
-			? `Couldn't verify Image Transformations (token lacks Zone Settings·Read); check dashboard → ${zoneName} → Images → Transformations.`
+			? `Couldn't verify Image Transformations${readFailureTail(
+					i.imageTransformsStatus,
+					i.imageTransformsErrors,
+					'Zone → Zone Settings: Read'
+				)}; check dashboard → ${zoneName} → Images → Transformations.`
 			: `Enable it: dashboard → ${zoneName} → Images → Transformations → "Enable for zone". Until on, thumbnails serve the full-size original or 404.`
 	);
 

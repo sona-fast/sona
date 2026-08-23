@@ -19,7 +19,14 @@
  * can be issued for any domain, including one whose DNS lives elsewhere — so the
  * caller does not gate this on zone resolution, only on having a custom domain.
  */
-import { cfApi, hostFromDomain } from './setup-lib.ts';
+import {
+	cfApi,
+	cfFailureTail,
+	failureDetail,
+	hostFromDomain,
+	statusLabel,
+	type CfApiResult
+} from './setup-lib.ts';
 
 /**
  * Stable widget name we match on so re-runs find-and-reuse our widget (idempotent)
@@ -43,8 +50,25 @@ export const WIDGET_NAME = 'sona-admin-login';
  */
 export const WIDGET_MODE = 'managed';
 
-/** The token permission a fork operator must add, quoted verbatim in errors. */
-const SCOPE_HINT = 'Account → Turnstile: Edit';
+/** The token permission a fork operator must add — exported so setup's token
+ * recipe names the same scope this module's errors do. */
+export const SCOPE_HINT = 'Account → Turnstile: Edit';
+
+/** Widgets asked for per list page; also the "was that page full?" test. */
+const PER_PAGE = 50;
+
+/**
+ * Stop after this many list pages. Termination normally comes from a short page,
+ * but an API that ignored `page` would hand back the same full page forever, so
+ * the loop needs a floor it cannot fall through. 20 pages covers far more widgets
+ * than any account we provision into holds.
+ */
+const MAX_PAGES = 20;
+
+/** setup-lib's shared cfFailureTail, bound to this lib's scope hint. */
+function failureTail(res: CfApiResult): string {
+	return cfFailureTail(res.status, res.errors, SCOPE_HINT);
+}
 
 /** A Turnstile widget as returned by the challenges/widgets API. */
 interface Widget {
@@ -75,9 +99,11 @@ export interface TurnstileResult {
  * Idempotently provision the admin-login Turnstile widget for `domain`'s host.
  *
  * Sequence (all via `cfApi`, Bearer `cfToken`):
- *   1. GET /accounts/<acct>/challenges/widgets → list the account's widgets. A
- *      non-ok response (401/403 = no Turnstile scope, or a transient error) → a
- *      clear error naming the missing scope. No mutation.
+ *   1. GET /accounts/<acct>/challenges/widgets → list the account's widgets, a
+ *      page at a time until ours turns up or a page comes back short. A non-ok
+ *      response on any page → a clear error whose detail carries the actual reason
+ *      (the scope hint on 401/403, otherwise just the HTTP status), and so does an
+ *      ok page whose body isn't a list at all. No mutation.
  *   2. Match our widget by its stable `name` (WIDGET_NAME) AND `domains` containing
  *      this fork's host — see WIDGET_NAME on why the host half is required:
  *        - found → GET .../widgets/<sitekey> to read its secret authoritatively
@@ -90,11 +116,11 @@ export interface TurnstileResult {
  * `api` is injectable (defaults to the real `cfApi`) so tests exercise every branch
  * without network. Never logs the token; the widget secret appears in no `detail`.
  *
- * Note on matching: the list is read with a generous page size, not paginated. A
- * fresh fork's account has at most a handful of widgets, so a single page finds
- * ours; the cost of the rare miss is a duplicate widget, never a crash. A miss is
- * the only acceptable failure direction here — see WIDGET_NAME on why matching must
- * never reuse a widget issued for a different host.
+ * Note on matching: the list is paginated because a first-page-only read on an
+ * account holding more than PER_PAGE widgets can miss ours, and a miss is not free
+ * — the re-run mints a duplicate widget and rewires Pages to its sitekey/secret.
+ * Missing is still the only acceptable failure direction, though: see WIDGET_NAME
+ * on why matching must never reuse a widget issued for a different host.
  */
 export async function provisionTurnstileWidget(
 	cfToken: string,
@@ -105,28 +131,86 @@ export async function provisionTurnstileWidget(
 	const host = hostFromDomain(domain);
 	if (!host) return { status: 'error', detail: 'no domain given' };
 
-	// 1. List existing widgets; reconcile against ours by stable name.
-	const listRes = await api(cfToken, `/accounts/${accountId}/challenges/widgets?per_page=50`);
-	if (!listRes.ok) {
-		return {
-			status: 'error',
-			detail: `could not list Turnstile widgets (HTTP ${listRes.status}); token needs ${SCOPE_HINT}`
-		};
+	// 1. List existing widgets a page at a time; reconcile against ours by stable
+	// name. Stop at the first match or at a short page (the last one); MAX_PAGES
+	// full pages means the list never ended, which is an error rather than a miss.
+	// The explicit sort pins the ordering for the life of the walk: created_on never
+	// changes, while the API's default order can be recomputed mid-walk and shuffle
+	// widgets across page boundaries. A concurrent delete can still shift a widget
+	// onto an already-read page — that miss just mints a duplicate, per above.
+	let mine: Widget | undefined;
+	for (let page = 1; page <= MAX_PAGES; page++) {
+		const listRes = await api(
+			cfToken,
+			`/accounts/${accountId}/challenges/widgets?page=${page}&per_page=${PER_PAGE}&order=created_on&direction=asc`
+		);
+		if (!listRes.ok) {
+			return {
+				status: 'error',
+				detail: `could not list Turnstile widgets${failureDetail(listRes, SCOPE_HINT)}`
+			};
+		}
+		// An ok page whose result isn't a list of widget objects is a partial body.
+		// Reading it as an empty page would end the walk and mint a duplicate
+		// widget — the exact failure the paging exists to prevent — so stop and say
+		// so instead. Entries are checked before the cast: a `[null]` page would
+		// otherwise throw a TypeError out of the match below.
+		if (
+			!Array.isArray(listRes.result) ||
+			listRes.result.some((w) => typeof w !== 'object' || w === null)
+		) {
+			return {
+				status: 'error',
+				detail: `could not list Turnstile widgets${statusLabel(listRes.status)}; the response carried no widget list, so setup stopped rather than risk creating a second widget`
+			};
+		}
+		const widgets = listRes.result as Widget[];
+		// Match on name + host first, THEN insist on a usable sitekey. Folding the
+		// sitekey test into the match would read a sitekey-less entry as "not ours"
+		// and walk on to create — but an entry carrying our name and our host IS
+		// ours, so its absence is disproven and creating would mint a second widget.
+		const candidate = widgets.find(
+			(w) => w.name === WIDGET_NAME && Array.isArray(w.domains) && w.domains.includes(host)
+		);
+		if (candidate && (typeof candidate.sitekey !== 'string' || !candidate.sitekey)) {
+			return {
+				status: 'error',
+				detail: `found the ${WIDGET_NAME} Turnstile widget for ${host} but it carried no usable sitekey, so setup stopped rather than risk creating a second widget`
+			};
+		}
+		mine = candidate;
+		if (mine || widgets.length < PER_PAGE) break;
+		// Every page came back full, so this walk never reached the end of the list
+		// and ours could still sit on page MAX_PAGES + 1. Absence is unproven, and
+		// creating on an unproven absence mints a second widget for the same
+		// name+host — after which runs match whichever one the API returns first.
+		if (page === MAX_PAGES) {
+			return {
+				status: 'error',
+				detail: `could not find the ${WIDGET_NAME} Turnstile widget for ${host} in the first ${MAX_PAGES} pages of the widget list${statusLabel(listRes.status)}; the list did not end there, so setup stopped rather than risk creating a second widget`
+			};
+		}
 	}
-	const widgets = (listRes.result as Widget[] | undefined) ?? [];
-	const mine = widgets.find(
-		(w) => w.name === WIDGET_NAME && w.sitekey && w.domains?.includes(host)
-	);
 
 	// 2a. Reuse: fetch the single widget so we read its secret from the authoritative
 	// GET (matching `wrangler turnstile widget get`, which returns the secret).
 	if (mine?.sitekey) {
-		const getRes = await api(cfToken, `/accounts/${accountId}/challenges/widgets/${mine.sitekey}`);
+		// The sitekey comes back from the API, so it is encoded like any other
+		// untrusted path segment rather than pasted into the URL.
+		const getRes = await api(
+			cfToken,
+			`/accounts/${accountId}/challenges/widgets/${encodeURIComponent(mine.sitekey)}`
+		);
 		const secret = (getRes.result as Widget | undefined)?.secret;
 		if (!getRes.ok || !secret) {
+			// An ok response with no secret is a partial body — the one actionable
+			// lead is that a read-scoped token gets the widget without its secret.
+			const why = getRes.ok
+				? `; the widget came back without one, so check that the token has ${SCOPE_HINT}`
+				: failureTail(getRes);
 			return {
 				status: 'error',
-				detail: `found the ${WIDGET_NAME} widget for ${host} but could not read its secret (HTTP ${getRes.status}); token needs ${SCOPE_HINT}`
+				detail: `found the ${WIDGET_NAME} widget for ${host} but could not read its secret${statusLabel(getRes.status)}${why}`
 			};
 		}
 		return {
@@ -144,9 +228,15 @@ export async function provisionTurnstileWidget(
 	});
 	const created = createRes.result as Widget | undefined;
 	if (!createRes.ok || !created?.sitekey || !created?.secret) {
+		// An ok create with no sitekey/secret is a partial body — the widget most
+		// likely WAS created, so claim only what we know; the summary's re-run
+		// line carries the remedy (step 1's name+host match finds and reuses it).
+		const why = createRes.ok
+			? '; the response carried no sitekey/secret, so the widget may exist but setup could not read its keys'
+			: failureTail(createRes);
 		return {
 			status: 'error',
-			detail: `failed to create the ${WIDGET_NAME} Turnstile widget for ${host} (HTTP ${createRes.status}); token needs ${SCOPE_HINT}`
+			detail: `failed to create the ${WIDGET_NAME} Turnstile widget for ${host}${statusLabel(createRes.status)}${why}`
 		};
 	}
 	return {
