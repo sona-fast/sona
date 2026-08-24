@@ -103,6 +103,11 @@ function escapeHtml(value: string): string {
  * the image is repeated here as markup rather than left to media:content alone.
  * The alt text is the displayed title, NSFW prefix included, so a reader showing
  * alt text before the image loads carries the same warning the title does.
+ *
+ * A reader that supports both Media RSS and HTML descriptions shows the image
+ * twice. That is deliberate, not a bug to fix: Flickr's feed — the model for
+ * this markup — duplicates the same way, and dropping either copy would blank
+ * the image for the readers that only understand the other mechanism.
  */
 function imageDescriptionHtml(imageUrl: string, title: string, description?: string): string {
 	const img = `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)}" />`;
@@ -138,17 +143,14 @@ function renderItem(item: FeedItem): string {
 	lines.push(`\t\t\t<guid isPermaLink="true">${escapeXml(item.link)}</guid>`);
 	const pubDate = rfc822(item.createdAt);
 	if (pubDate) lines.push(element('pubDate', pubDate, '\t\t\t'));
-	if (item.imageUrl) {
-		lines.push(
-			element(
-				'description',
-				imageDescriptionHtml(item.imageUrl, title, item.description),
-				'\t\t\t'
-			)
-		);
-	} else if (item.description) {
-		lines.push(element('description', item.description, '\t\t\t'));
-	}
+	// Both branches HTML-escape: the image branch made <description> an
+	// HTML-valued element, so a reader HTML-unescapes EVERY description — an
+	// image-less one left raw would render stored markup live instead of
+	// literally.
+	const body = item.imageUrl
+		? imageDescriptionHtml(item.imageUrl, title, item.description)
+		: item.description && escapeHtml(item.description);
+	if (body) lines.push(element('description', body, '\t\t\t'));
 	if (item.credit) {
 		lines.push(element('dc:creator', item.credit, '\t\t\t'));
 		lines.push(element('media:credit', item.credit, '\t\t\t'));

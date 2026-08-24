@@ -221,14 +221,6 @@ describe('renderFeed — item fields', () => {
 
 describe('renderFeed — inline image in the description', () => {
 	const only = (item: FeedItem) => children(channelOf(renderFeed(CHANNEL, [item])), 'item')[0];
-	/** Undo the HTML escaping applied inside the description, so an assertion
-	 * compares the text a reader finally renders — the second of the two passes. */
-	const html = (text: string) =>
-		text
-			.replace(/&lt;/g, '<')
-			.replace(/&gt;/g, '>')
-			.replace(/&quot;/g, '"')
-			.replace(/&amp;/g, '&');
 
 	it('emits the image followed by the text description', () => {
 		expect(textOf(only({ ...ITEM, description: 'A drawing.' }), 'description')).toBe(
@@ -242,9 +234,20 @@ describe('renderFeed — inline image in the description', () => {
 		);
 	});
 
-	it('leaves a description with no image as plain text', () => {
+	it('HTML-escapes a description with no image, like the image branch does', () => {
+		// Plain text is its own escaped form, so it comes through unchanged...
 		const entry = only({ ...ITEM, imageUrl: undefined, description: 'Just words.' });
 		expect(textOf(entry, 'description')).toBe('Just words.');
+	});
+
+	it('renders markup in an image-less description literally, not as HTML', () => {
+		// ...but stored markup must survive BOTH unescape passes as text: the
+		// element is HTML-valued now, so a raw description here would render
+		// "See the <model> file" with the word swallowed as a live element.
+		const entry = only({ ...ITEM, imageUrl: undefined, description: 'See the <model> file' });
+		const source = textOf(entry, 'description')!;
+		expect(source).toBe('See the &lt;model&gt; file');
+		expect(unescape(source)).toBe('See the <model> file');
 	});
 
 	it('emits no description at all when the row has neither', () => {
@@ -284,7 +287,7 @@ describe('renderFeed — inline image in the description', () => {
 			'<img src="https://taro.surf/img.png?a=1&amp;b=2&amp;quot=%22" ' +
 				'alt="A &amp; B &lt;i&gt;&quot;x&quot;&lt;/i&gt;" /><p>Ben &amp; Jerry &lt;3</p>'
 		);
-		expect(html(source)).toBe(
+		expect(unescape(source)).toBe(
 			`<img src="${imageUrl}" alt="${title}" /><p>Ben & Jerry <3</p>`
 		);
 	});
