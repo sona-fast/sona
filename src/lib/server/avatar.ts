@@ -1,6 +1,7 @@
 import { fetchTwitterAvatar, twitterHandleFromUrl } from './twitter-avatar';
 import { getStorage, isAllowedImageType, extFromContentType, isOwnedUrl } from './storage';
 import type { SiteSettings } from './settings';
+import { setRawSetting, clearSettingsCache } from './settings';
 import { getDb } from './db';
 import { artists } from './db/schema';
 import { eq, or, isNotNull, sql } from 'drizzle-orm';
@@ -321,4 +322,54 @@ async function fetchBlueskyAvatar(blueskyUrl: string): Promise<string | null> {
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Heal the OWNER avatar if a previous re-host left a hotlink behind.
+ *
+ * resolveAvatarUrl falls back to the source hotlink when re-hosting fails, and
+ * settings saveSite writes that fallback rather than losing the picture
+ * entirely. Until this existed nothing ever retried, because the avatar refresh
+ * cron covered artists only, so one transient R2 or network failure pinned the
+ * owner on a third-party URL indefinitely: rot-prone, and unreadable by the
+ * page (see docs/reading-image-bytes.md).
+ *
+ * Heal-only on purpose. An owner avatar we already serve is left alone rather
+ * than re-fetched daily, matching the skip saveSite already makes. This costs
+ * one profile lookup per run only while the fork is in the broken state.
+ */
+export async function healOwnerAvatar(
+	db: ReturnType<typeof getDb>,
+	opts: { env: Env | undefined; settings: SiteSettings; origin: string }
+): Promise<{ attempted: boolean; healed: boolean }> {
+	const { env, settings, origin } = opts;
+	// Only Bluesky resolves for the owner today, same as saveSite.
+	if (!settings.blueskyUrl) return { attempted: false, healed: false };
+
+	const ours = (u: string) => isOurAvatarUrl(env, settings, origin, u);
+	const current = settings.adminAvatarUrl;
+	// Already serving our own copy: nothing to heal.
+	if (current && ours(current)) return { attempted: false, healed: false };
+
+	let resolved: string | null = null;
+	try {
+		resolved = await resolveAvatarUrl(
+			{ blueskyUrl: settings.blueskyUrl },
+			{ env, settings, origin, keyHint: 'owner' }
+		);
+	} catch {
+		// Same posture as the artist loop: one bad profile must not fail the run.
+		return { attempted: true, healed: false };
+	}
+
+	// Only a copy we serve counts as healed. Writing another hotlink over the one
+	// already stored would churn the row and change nothing.
+	if (!resolved || !ours(resolved)) return { attempted: true, healed: false };
+	if (!shouldWriteAvatar(env, settings, origin, current, resolved)) {
+		return { attempted: true, healed: false };
+	}
+
+	await setRawSetting(db, 'adminAvatarUrl', resolved);
+	clearSettingsCache();
+	return { attempted: true, healed: true };
 }

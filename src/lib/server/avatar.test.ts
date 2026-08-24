@@ -12,9 +12,11 @@ import {
 	refreshArtistAvatars,
 	isOurAvatarUrl,
 	shouldWriteAvatar,
-	type AvatarRehostContext
+	type AvatarRehostContext,
+	healOwnerAvatar
 } from './avatar';
 import type { SiteSettings } from './settings';
+import { getRawSetting } from './settings';
 
 const DDL = `
 CREATE TABLE artists (
@@ -23,6 +25,7 @@ CREATE TABLE artists (
 	patreon_url TEXT, instagram_url TEXT, global_id TEXT, registry_version INTEGER,
 	registry_synced_at TEXT, aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 );
+CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `;
 
 function makeDb() {
@@ -314,5 +317,75 @@ describe('refreshArtistAvatars', () => {
 		// Newest was skipped this run — its timestamp is unchanged.
 		const newest = await db.select().from(artists).where(eq(artists.name, 'Newest')).get();
 		expect(newest!.avatarResolvedAt).toBe('2026-06-01T00:00:00Z');
+	});
+});
+
+describe('healOwnerAvatar (the retry nothing used to do)', () => {
+	beforeEach(() => stubFetch());
+	afterEach(() => vi.restoreAllMocks());
+
+	const ownerSettings = (over: Partial<SiteSettings> = {}) =>
+		({
+			storageProvider: 'r2',
+			r2PublicUrl: 'https://cdn.test',
+			blueskyUrl: 'https://bsky.app/profile/nova.bsky.social',
+			adminAvatarUrl: BSKY_AVATAR,
+			...over
+		}) as unknown as SiteSettings;
+
+	const opts = (bucket: ReturnType<typeof fakeBucket>, settings: SiteSettings) => ({
+		env: { IMAGES: bucket } as unknown as App.Platform['env'],
+		settings,
+		origin: 'https://site.test'
+	});
+
+	it('re-hosts a stranded hotlink and stores the copy we serve', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		const settings = ownerSettings();
+
+		const res = await healOwnerAvatar(db, opts(bucket, settings));
+
+		expect(res).toEqual({ attempted: true, healed: true });
+		expect(bucket.put).toHaveBeenCalled();
+		const stored = await getRawSetting(db, 'adminAvatarUrl');
+		expect(stored).toMatch(/^https:\/\/cdn\.test\//);
+	});
+
+	it('leaves an avatar we already serve alone, without a profile lookup', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		const settings = ownerSettings({ adminAvatarUrl: 'https://cdn.test/avatars/owner/face.jpg' });
+
+		const res = await healOwnerAvatar(db, opts(bucket, settings));
+
+		// Heal-only: a healthy fork must not pay for a fetch every single run.
+		expect(res).toEqual({ attempted: false, healed: false });
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBeNull();
+	});
+
+	it('does not write another hotlink over the one already there', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		// Re-hosting fails, so resolveAvatarUrl falls back to the SOURCE hotlink.
+		stubFetch({ imageStatus: 500 });
+
+		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
+
+		// Reported honestly as still broken, and the row is left untouched rather
+		// than churned with an equivalent bad value.
+		expect(res).toEqual({ attempted: true, healed: false });
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBeNull();
+	});
+
+	it('does nothing when the owner has no bluesky handle to resolve from', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+
+		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings({ blueskyUrl: '' })));
+
+		expect(res).toEqual({ attempted: false, healed: false });
+		expect(globalThis.fetch).not.toHaveBeenCalled();
 	});
 });

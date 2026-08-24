@@ -56,7 +56,14 @@ describe('POST /api/cron/refresh-avatars', () => {
 		const env = makeEnv();
 		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '5' }));
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ processed: 0, refreshed: 0, remaining: 0 });
+		// ownerAvatar rides along in the response: these seeds set no blueskyUrl, so
+		// the heal is skipped without a lookup, which is the healthy-fork path.
+		expect(await res.json()).toEqual({
+			processed: 0,
+			refreshed: 0,
+			remaining: 0,
+			ownerAvatar: { attempted: false, healed: false }
+		});
 	});
 
 	it('clamps an oversized batch to MAX_BATCH (50) so a run fits the workflow curl ceiling', async () => {
@@ -70,6 +77,11 @@ describe('POST /api/cron/refresh-avatars', () => {
 
 		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '999' }));
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ processed: 50, refreshed: 0, remaining: 10 });
+		expect(await res.json()).toEqual({
+			processed: 50,
+			refreshed: 0,
+			remaining: 10,
+			ownerAvatar: { attempted: false, healed: false }
+		});
 	});
 });

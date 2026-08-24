@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
-import { refreshArtistAvatars } from '$lib/server/avatar';
+import { refreshArtistAvatars, healOwnerAvatar } from '$lib/server/avatar';
 import { requireCronSecret } from '$lib/server/cron-auth';
 import { recordJobRun, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
@@ -61,7 +61,21 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 			e instanceof Error ? e.message : 'refresh failed'));
 		throw e;
 	}
+	// The owner avatar too, which nothing used to retry. A failed re-host leaves
+	// settings holding a source hotlink, and until this ran here the only thing
+	// that ever tried again was the operator happening to save the site tab. It
+	// is heal-only, so on a healthy fork this costs nothing beyond a settings
+	// read. Deliberately after the artist batch and outside its try: a profile
+	// lookup for one avatar must not turn a successful artist run into a failure.
+	let ownerAvatar = { attempted: false, healed: false };
+	try {
+		ownerAvatar = await healOwnerAvatar(db, { env, settings, origin: url.origin });
+	} catch {
+		// Swallowed on purpose; the heartbeat below still records the artist result.
+	}
+
 	schedule(platform, recordJobRun(db, 'refresh-avatars', 'ok',
-		`refreshed ${result.refreshed}/${result.processed}, ${result.remaining} remaining`));
-	return json(result);
+		`refreshed ${result.refreshed}/${result.processed}, ${result.remaining} remaining` +
+			(ownerAvatar.attempted ? `, owner avatar ${ownerAvatar.healed ? 'healed' : 'still unresolved'}` : '')));
+	return json({ ...result, ownerAvatar });
 };

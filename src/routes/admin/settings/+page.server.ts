@@ -373,9 +373,12 @@ export const actions = {
 					} else if (
 						shouldWriteAvatar(platform?.env, current, url.origin, current.adminAvatarUrl, resolved)
 					) {
-						// Unchanged handle: the site tab posts bluesky on EVERY save and no
-						// cron heals the owner avatar, so a transient failure must not
-						// degrade it (rationale on shouldWriteAvatar).
+						// Unchanged handle: the site tab posts bluesky on EVERY save, so a
+						// transient failure must not degrade a good stored copy
+						// (rationale on shouldWriteAvatar). The refresh-avatars cron now
+						// retries a stranded hotlink daily via healOwnerAvatar, so this is
+						// no longer the only chance to recover, but it is still the fast
+						// one.
 						adminAvatarUrl = resolved!;
 					} else if (!currentOwned) {
 						// Nothing owned to keep and nothing resolvable — clear.
