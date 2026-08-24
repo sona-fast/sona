@@ -23,14 +23,17 @@ const ENTITY = /&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);/g;
 // declaration, which is why it is a class rather than a bare `/?`.
 const TOKEN = /<([?!/]?)([a-zA-Z][\w:.-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*([/?]?)>/g;
 
-/** Unescape the five predefined entities, so an assertion compares the ORIGINAL
- * text a reader would render. */
+/** Unescape the five predefined entities plus `&#39;` (the numeric apostrophe
+ * escapeHtml emits), so an assertion compares the ORIGINAL text a reader would
+ * render. `&#39;` runs before `&amp;` so a doubly-escaped `&amp;#39;` is not
+ * unescaped one pass too many. */
 function unescape(text: string): string {
 	return text
 		.replace(/&lt;/g, '<')
 		.replace(/&gt;/g, '>')
 		.replace(/&quot;/g, '"')
 		.replace(/&apos;/g, "'")
+		.replace(/&#39;/g, "'")
 		.replace(/&amp;/g, '&');
 }
 
@@ -237,16 +240,17 @@ describe('renderFeed — inline image in the description', () => {
 	});
 
 	it('renders markup in an image-less description literally, not as HTML', () => {
-		// Plain text is its own escaped form, so it comes through unchanged...
+		// The <p> wrapper matches the image branch, so the same stored text renders
+		// the same shape with or without an image...
 		const plain = only({ ...ITEM, imageUrl: undefined, description: 'Just words.' });
-		expect(textOf(plain, 'description')).toBe('Just words.');
+		expect(textOf(plain, 'description')).toBe('<p>Just words.</p>');
 		// ...but stored markup must survive BOTH unescape passes as text: the
 		// element is HTML-valued now, so a raw description here would render
 		// "See the <model> file" with the word swallowed as a live element.
 		const entry = only({ ...ITEM, imageUrl: undefined, description: 'See the <model> file' });
 		const source = textOf(entry, 'description')!;
-		expect(source).toBe('See the &lt;model&gt; file');
-		expect(unescape(source)).toBe('See the <model> file');
+		expect(source).toBe('<p>See the &lt;model&gt; file</p>');
+		expect(unescape(source)).toBe('<p>See the <model> file</p>');
 	});
 
 	it('emits no description at all when the row has neither', () => {
@@ -267,18 +271,27 @@ describe('renderFeed — inline image in the description', () => {
 		// where a stored value could turn into something a reader executes, so the
 		// description falls back to text-only while media:content keeps the URL.
 		const withText = only({ ...ITEM, imageUrl: '//taro.surf/img/parent.png', description: 'A drawing.' });
-		expect(textOf(withText, 'description')).toBe('A drawing.');
+		expect(textOf(withText, 'description')).toBe('<p>A drawing.</p>');
 		expect(child(withText, 'media:content')!.attrs.url).toBe('//taro.surf/img/parent.png');
 		expect(child(withText, 'media:thumbnail')!.attrs.url).toBe('//taro.surf/img/parent.png');
 		const bare = only({ ...ITEM, imageUrl: '//taro.surf/img/parent.png' });
 		expect(textOf(bare, 'description')).toBeUndefined();
+		// An exotic scheme falls back the same way — the text still ships, the URL
+		// never reaches reader-rendered HTML.
+		const script = only({ ...ITEM, imageUrl: 'javascript:alert(1)', description: 'A drawing.' });
+		expect(textOf(script, 'description')).toBe('<p>A drawing.</p>');
+		// The scheme test is case-insensitive, and the src keeps the URL as stored.
+		const upper = only({ ...ITEM, imageUrl: 'HTTPS://taro.surf/img/parent.png' });
+		expect(textOf(upper, 'description')).toBe(
+			'<img src="HTTPS://taro.surf/img/parent.png" alt="Parent Piece" />'
+		);
 	});
 
 	it('escapes an apostrophe in the description numerically', () => {
 		// `&#39;`, not `&apos;` — HTML 4 has no `&apos;`, and the numeric form
 		// keeps escapeHtml safe even in a single-quoted attribute position.
 		const entry = only({ ...ITEM, imageUrl: undefined, description: "Ben's" });
-		expect(textOf(entry, 'description')).toBe('Ben&#39;s');
+		expect(textOf(entry, 'description')).toBe('<p>Ben&#39;s</p>');
 	});
 
 	it('inlines the image on an adult item too, alt text prefix and all', () => {

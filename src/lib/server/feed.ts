@@ -61,6 +61,12 @@ export interface FeedChannel {
 	adult?: boolean;
 }
 
+/** The control characters XML 1.0 cannot represent at all (§2.2 allows only
+ * tab, LF and CR below 0x20). Shared by escapeXml and renderItem's imageUrl
+ * normalization, so both strip exactly the same set. */
+// eslint-disable-next-line no-control-regex
+const XML_ILLEGAL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+
 /**
  * Escape text for an XML text node or attribute value. All five predefined
  * entities, so one helper serves both positions and no caller has to remember
@@ -73,8 +79,7 @@ export interface FeedChannel {
  */
 export function escapeXml(value: string): string {
 	return value
-		// eslint-disable-next-line no-control-regex
-		.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+		.replace(XML_ILLEGAL_CHARS, '')
 		.replace(/&/g, '&amp;')
 		.replace(/</g, '&lt;')
 		.replace(/>/g, '&gt;')
@@ -157,20 +162,27 @@ function renderItem(item: FeedItem): string {
 	// HTML-valued element, so a reader HTML-unescapes EVERY description — an
 	// image-less one left raw would render stored markup live instead of
 	// literally.
-	const inlineImageUrl =
-		item.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? item.imageUrl : undefined;
+	// Strip XML-illegal control characters BEFORE the scheme test, so the string
+	// the guard vets is the string that gets emitted: escapeXml drops the same
+	// characters on output, and testing the raw value would let a control byte
+	// inside the scheme (e.g. "java\x00script:") pass a guard the emitted URL
+	// no longer satisfies.
+	const imageUrl = item.imageUrl?.replace(XML_ILLEGAL_CHARS, '');
+	const inlineImageUrl = imageUrl && /^https?:\/\//i.test(imageUrl) ? imageUrl : undefined;
 	const body = inlineImageUrl
 		? imageDescriptionHtml(inlineImageUrl, title, item.description)
-		: item.description && escapeHtml(item.description);
+		: item.description
+			? `<p>${escapeHtml(item.description)}</p>`
+			: undefined;
 	if (body) lines.push(element('description', body, '\t\t\t'));
 	if (item.credit) {
 		lines.push(element('dc:creator', item.credit, '\t\t\t'));
 		lines.push(element('media:credit', item.credit, '\t\t\t'));
 	}
-	if (item.imageUrl) {
+	if (imageUrl) {
 		lines.push(
-			`\t\t\t<media:content url="${escapeXml(item.imageUrl)}" medium="image" />`,
-			`\t\t\t<media:thumbnail url="${escapeXml(item.imageUrl)}" />`
+			`\t\t\t<media:content url="${escapeXml(imageUrl)}" medium="image" />`,
+			`\t\t\t<media:thumbnail url="${escapeXml(imageUrl)}" />`
 		);
 	}
 	// The per-item half of the in-band NSFW marking. A reader that ignores the

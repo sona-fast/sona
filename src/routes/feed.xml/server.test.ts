@@ -264,7 +264,7 @@ describe('GET /feed.xml — what it publishes', () => {
 		// travels escaped, hence the entity-spelled pattern.
 		const inlineSrc = body.match(/&lt;img src=&quot;(.+?)&quot;/)?.[1];
 		expect(inlineSrc).toBeTruthy();
-		expect(new URL(inlineSrc!.replace(/&amp;amp;/g, '&')).host).toBe('taro.surf');
+		expect(new URL(inlineSrc!).host).toBe('taro.surf');
 	});
 
 	it('prefers the thumbnail over the full-size image', async () => {
