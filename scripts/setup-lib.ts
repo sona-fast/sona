@@ -95,14 +95,33 @@ export const RESOURCE_NAME_RULE =
 	'lowercase letters, digits, and hyphens only (no spaces, quotes, or other punctuation), 1 to 58 characters, starting and ending with a letter or digit';
 
 /**
- * True when `name` is safe to use as a Pages project / D1 database / R2 bucket
- * name — the same character set `sanitizeProjectName` produces, which is also
- * what Cloudflare accepts. Checked on the operator's ANSWER, not just the prompt
+ * True when `name` is safe to use as a Pages project or R2 bucket name — the same
+ * character set `sanitizeProjectName` produces, which is also what Cloudflare
+ * accepts for those two. Checked on the operator's ANSWER, not just the prompt
  * default: setup hands these names to wrangler and writes them into
  * wrangler.toml, so a name carrying anything else risks the two disagreeing.
+ * (`$(?![\s\S])` rather than `$`, here and in the validators below, so a trailing
+ * newline can't slip past a caller that skipped the prompt's trim.)
  */
 export function isValidResourceName(name: string): boolean {
-	return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(name) && name.length <= 58;
+	return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$(?![\s\S])/.test(name) && name.length <= 58;
+}
+
+/** How a D1 database name may look, quoted verbatim when one is rejected. */
+export const DATABASE_NAME_RULE =
+	'letters, digits, underscores, and hyphens, starting with a letter or digit, up to 64 characters';
+
+/**
+ * True when `name` is usable as a D1 database name. Looser than the Pages/R2 rule
+ * on purpose: D1 accepts underscores and capitals, and the paste-the-database_id
+ * prompt exists so a re-run can point at a database that ALREADY exists — one an
+ * earlier setup, or the operator, may well have called `sona_db`. Neither form is
+ * dangerous here, since the name travels as a single argv element and lands in a
+ * quoted TOML value. The leading character must still be alphanumeric so wrangler
+ * can't read the answer as a flag.
+ */
+export function isValidDatabaseName(name: string): boolean {
+	return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$(?![\s\S])/.test(name);
 }
 
 /**
@@ -128,7 +147,8 @@ export const DATABASE_ID_RULE = 'the id exactly as wrangler printed it — hex d
  * quote or a newline would inject arbitrary TOML into the generated config.
  */
 export function isValidDatabaseId(id: string): boolean {
-	return /^[0-9a-fA-F-]{8,}$/.test(id);
+	// At least one hex digit: a string of nothing but hyphens is not an id.
+	return /^[0-9a-fA-F-]{8,}$(?![\s\S])/.test(id) && /[0-9a-fA-F]/.test(id);
 }
 
 /** What askUntilValid needs from its caller: a prompt, the run's interactivity, a voice. */
@@ -174,7 +194,14 @@ export function askResourceName(question: string, def: string, deps: AskDeps): P
 export function writePrivateTempSql(sql: string, prefix: string): { dir: string; path: string } {
 	const dir = mkdtempSync(join(tmpdir(), prefix));
 	const path = join(dir, 'sona.sql');
-	writeFileSync(path, sql, { mode: 0o600 });
+	try {
+		writeFileSync(path, sql, { mode: 0o600 });
+	} catch (err) {
+		// All or nothing: the caller only learns the directory exists by getting it
+		// back, so a failed write would otherwise leave one nobody ever cleans up.
+		removeTempSqlDir(dir);
+		throw err;
+	}
 	return { dir, path };
 }
 

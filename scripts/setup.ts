@@ -30,11 +30,13 @@ import {
 	askUntilValid,
 	derivedResourceName,
 	isValidDatabaseId,
+	isValidDatabaseName,
 	writePrivateTempSql,
 	removeTempSqlDir,
 	runWith,
 	type RunOpts,
 	RESOURCE_NAME_RULE,
+	DATABASE_NAME_RULE,
 	DATABASE_ID_RULE,
 	bucketCreateSucceeded,
 	isR2NotEnabled,
@@ -88,6 +90,17 @@ const askName = (q: string, def: string): Promise<string | null> =>
 		onReject: (answer) => {
 			console.warn(`\n⚠ "${answer}" can't be used as a Cloudflare resource name.`);
 			console.warn(`  Use ${RESOURCE_NAME_RULE}.`);
+		}
+	});
+// D1 gets its own rule: a re-run is expected to point at a database that already
+// exists, and an existing one may be named in a style the Pages/R2 rule forbids.
+const askDbName = (q: string, def: string): Promise<string | null> =>
+	askUntilValid(q, def, isValidDatabaseName, {
+		ask,
+		isInteractive: Boolean(stdin.isTTY),
+		onReject: (answer) => {
+			console.warn(`\n⚠ "${answer}" can't be used as a D1 database name.`);
+			console.warn(`  Use ${DATABASE_NAME_RULE}.`);
 		}
 	});
 const askYesNo = async (q: string, def = true) => {
@@ -144,7 +157,7 @@ function ghSet(kind: 'secret' | 'variable', name: string, value: string, repo: s
 	}
 }
 
-const token = (bytes = 32) => randomBytes(bytes).toString('hex');
+const token = () => randomBytes(32).toString('hex');
 
 // The scope the Pages-project PATCH needs, named in a failure only when the
 // status (401/403) proves that is the reason.
@@ -252,8 +265,8 @@ async function main() {
 	if (project === null) return abortAnswer('name', RESOURCE_NAME_RULE);
 	// The derived defaults are truncated to stay inside the rule — a name setup
 	// itself would reject is not a default it may offer.
-	const dbName = await askName('D1 database name', derivedResourceName(project, 'db'));
-	if (dbName === null) return abortAnswer('name', RESOURCE_NAME_RULE);
+	const dbName = await askDbName('D1 database name', derivedResourceName(project, 'db'));
+	if (dbName === null) return abortAnswer('database name', DATABASE_NAME_RULE);
 	const bucket = await askName('R2 bucket name', derivedResourceName(project, 'images'));
 	if (bucket === null) return abortAnswer('name', RESOURCE_NAME_RULE);
 
@@ -518,7 +531,7 @@ async function main() {
 				ask,
 				isInteractive: Boolean(stdin.isTTY),
 				onReject: (answer) => {
-					console.warn(`\n⚠ "${answer}" is not a database id — expected ${DATABASE_ID_RULE}.`);
+					console.warn(`\n⚠ "${answer}" is not a database id. Expected ${DATABASE_ID_RULE}.`);
 				}
 			}
 		);

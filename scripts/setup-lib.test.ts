@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { normalizeHttpsUrl } from '../src/lib/server/validate';
 import { readFileSync, readdirSync, existsSync, statSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
@@ -8,6 +9,7 @@ import {
 	buildSeedSql,
 	sanitizeProjectName,
 	isValidResourceName,
+	isValidDatabaseName,
 	derivedResourceName,
 	askResourceName,
 	writePrivateTempSql,
@@ -214,6 +216,14 @@ describe('isValidResourceName', () => {
 		}
 	});
 
+	// The prompt trims, but the validator is the thing being trusted: a caller that
+	// skipped the trim must not get a name with a newline glued to it past `$`.
+	it('rejects an answer with a trailing newline', () => {
+		expect(isValidResourceName('taro-surf\n')).toBe(false);
+		expect(isValidDatabaseName('sona_db\n')).toBe(false);
+		expect(isValidDatabaseId('3f8b0c62-1d4e\n')).toBe(false);
+	});
+
 	it('rejects empty, uppercase, and edge-hyphenated names, and anything over 58 chars', () => {
 		expect(isValidResourceName('')).toBe(false);
 		expect(isValidResourceName('MyBucket')).toBe(false);
@@ -393,7 +403,8 @@ describe('isValidDatabaseId', () => {
 			'abc"\ndatabase_name = "other"',
 			'3f8b0c62 1d4e',
 			'not-hex-zzzzzzzz',
-			'$(id)'
+			'$(id)',
+			'--------'
 		]) {
 			expect(isValidDatabaseId(bad), bad).toBe(false);
 		}
@@ -413,6 +424,24 @@ describe('askUntilValid', () => {
 		});
 		expect(got).toBe('3f8b0c62-1d4e-4a90-8f1b-9c2d0e5a7b31');
 		expect(rejected).toEqual(['nope!']);
+	});
+
+	// Blank is how an operator says "wrangler printed no id and I don't have one";
+	// the predicate lets it through so the existing no-id abort is what stops setup.
+	it('accepts a blank answer for the pasted database_id, without rejecting it', async () => {
+		const rejected: string[] = [];
+		let asks = 0;
+		const got = await askUntilValid('database_id', '', (a) => a === '' || isValidDatabaseId(a), {
+			ask: async () => {
+				asks++;
+				return '';
+			},
+			isInteractive: true,
+			onReject: (a) => rejected.push(a)
+		});
+		expect(got).toBe('');
+		expect(asks).toBe(1);
+		expect(rejected).toEqual([]);
 	});
 
 	it('gives up after exactly one ask when the run is not interactive', async () => {
@@ -463,6 +492,19 @@ describe('writePrivateTempSql', () => {
 		}
 	});
 
+	// The caller learns the directory exists only by getting it back, so a failed
+	// write must not leave one behind for nobody to clean up.
+	it('leaves no directory behind when the write fails', () => {
+		const dirs = () => readdirSync(tmpdir()).filter((n) => n.startsWith('sona-atomic-'));
+		const before = dirs();
+		// A real write failure, no mocking: node refuses to write a plain object, and
+		// it refuses it at the same call the caller's ENOSPC or EACCES would hit.
+		expect(() => writePrivateTempSql({} as unknown as string, 'sona-atomic-')).toThrow();
+		// Compared against what was already there, so a stray directory from another
+		// run can't decide this test either way.
+		expect(dirs()).toEqual(before);
+	});
+
 	it('gives each call its own directory', () => {
 		const a = writePrivateTempSql('SELECT 1;', 'sona-test-');
 		const b = writePrivateTempSql('SELECT 2;', 'sona-test-');
@@ -473,6 +515,33 @@ describe('writePrivateTempSql', () => {
 			rmSync(a.dir, { recursive: true, force: true });
 			rmSync(b.dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe('isValidDatabaseName', () => {
+	// D1 is looser than Pages/R2 on purpose: `wrangler d1 create` is allowed to
+	// fail, and the paste-the-id prompt exists so a re-run can point at a database
+	// that already exists — quite possibly one named in a style Pages would reject.
+	it('accepts the styles an existing D1 database may already use', () => {
+		expect(isValidDatabaseName('sona_db')).toBe(true);
+		expect(isValidDatabaseName('Sona-DB')).toBe(true);
+		expect(isValidDatabaseName('taro-surf-db')).toBe(true);
+		expect(isValidDatabaseName('db2')).toBe(true);
+	});
+
+	it('accepts the default setup derives, so the offered answer is always usable', () => {
+		expect(isValidDatabaseName(derivedResourceName('a'.repeat(58), 'db'))).toBe(true);
+	});
+
+	it('rejects a leading hyphen, which wrangler would read as a flag', () => {
+		expect(isValidDatabaseName('-leading')).toBe(false);
+	});
+
+	it('rejects anything a shell or an argv parser would treat as more than a name', () => {
+		for (const bad of ['my$db', 'my db', 'my"db', "my'db", 'my;db', 'my/db', '', 'a'.repeat(65)]) {
+			expect(isValidDatabaseName(bad), bad).toBe(false);
+		}
+		expect(isValidDatabaseName('a'.repeat(64))).toBe(true);
 	});
 });
 
@@ -1836,9 +1905,36 @@ describe('setup CLIs ↔ every temp SQL dir is cleaned up in a finally', () => {
 });
 
 describe('setup.ts ↔ a rejected answer is asked again, or setup stops', () => {
-	it("binds the shared loop to this run's TTY, so a piped run cannot loop forever", () => {
+	it("binds both prompts to this run's TTY, so a piped run cannot loop forever", () => {
 		expect(setupCode).toMatch(/askResourceName\(/);
-		expect(setupCode.match(/isInteractive:\s*Boolean\(\s*stdin\.isTTY\s*\)/g)).toHaveLength(2);
+		expect(setupCode).toMatch(/askUntilValid\(\s*q,\s*def,\s*isValidDatabaseName/);
+		// askName, askDbName, and the pasted database_id.
+		expect(setupCode.match(/isInteractive:\s*Boolean\(\s*stdin\.isTTY\s*\)/g)).toHaveLength(3);
+	});
+
+	// The prompts themselves, not just the helpers: reverting any of the three to a
+	// bare `await ask(` left every other pin in this file green.
+	it('asks for all three names through a validating prompt, each with its abort', () => {
+		const bindings = [...setupCode.matchAll(/const (project|dbName|bucket) = await (\w+)\(/g)];
+		expect(bindings.map((m) => [m[1], m[2]])).toEqual([
+			['project', 'askName'],
+			['dbName', 'askDbName'],
+			['bucket', 'askName']
+		]);
+		// Each answer is checked for null on the very next line — an unguarded one
+		// would carry a null name into wrangler and wrangler.toml.
+		for (const [name] of bindings.map((m) => [m[1]])) {
+			expect(setupCode, name).toMatch(
+				new RegExp(`const ${name} = await \\w+\\([^;]*;\\s*(?://[^\\n]*\\n\\s*)*if \\(${name} === null\\) return abortAnswer\\(`)
+			);
+		}
+	});
+
+	// The pasted database_id is the fourth validated answer, and blank still means
+	// "I don't have one" — the clause that lets the existing no-id abort fire.
+	it('validates the pasted database_id while still accepting a blank answer', () => {
+		expect(setupCode).toMatch(/\(answer\) => answer === ''\s*\|\|\s*isValidDatabaseId\(answer\)/);
+		expect(setupCode).toMatch(/if \(pasted === null\) return abortAnswer\(\s*'database id'/);
 	});
 
 	// Printing the reason and returning is not stopping: without these two, setup
