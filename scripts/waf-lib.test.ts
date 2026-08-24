@@ -456,15 +456,48 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 	});
 
 	// The rule-list guard and the id guard are different reads of the same body, so
-	// keep them told apart: a body with an id but a broken `rules` still reports the
-	// missing rule list.
-	it('reports a broken rule list as such even when the ruleset id is readable', async () => {
-		const { api } = fakeApi({
+	// keep them told apart. A body missing BOTH is the discriminating case: the rule
+	// list is what we can't parse, and saying "no ruleset id" would send the operator
+	// after the wrong thing.
+	it('reports a broken rule list as such, with or without a readable ruleset id', async () => {
+		for (const result of [{ id: RULESET, rules: 'nope' }, { rules: 'nope' }]) {
+			const { api, calls } = fakeApi({
+				[zonePath]: zoneOk,
+				[entryPath]: { ok: true, status: 200, result }
+			});
+			const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+			expect(res.status, JSON.stringify(result)).toBe('error');
+			expect(res.detail, JSON.stringify(result)).toContain('the response carried no rule list');
+			expect(calls.every((c) => c.method === 'GET')).toBe(true);
+		}
+	});
+
+	// The id only matters when a write is needed. Erroring above the no-op arm
+	// reported a failure for a zone that was already in exactly the right state.
+	it('reports exists for an already-correct rule even when the body carries no ruleset id', async () => {
+		const { api, calls } = fakeApi({
 			[zonePath]: zoneOk,
-			[entryPath]: { ok: true, status: 200, result: { id: RULESET, rules: 'nope' } }
+			[entryPath]: {
+				ok: true,
+				status: 200,
+				result: {
+					rules: [
+						{
+							id: 'mine',
+							ref: RULE_REF,
+							description: RULE_DESCRIPTION,
+							action: 'block',
+							enabled: true,
+							expression: RULE_EXPRESSION,
+							ratelimit: { ...RULE_RATELIMIT }
+						}
+					]
+				}
+			}
 		});
 		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
-		expect(res.detail).toContain('the response carried no rule list');
+		expect(res.status).toBe('exists');
+		expect(calls.every((c) => c.method === 'GET')).toBe(true);
 	});
 
 	it('empty domain → error before any network call', async () => {

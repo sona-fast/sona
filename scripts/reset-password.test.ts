@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, statSync, rmSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { verifyPasswordHash } from '../src/lib/server/admin-auth';
-import { hashPasswordPbkdf2, readDbName, askHidden, writePrivateTempSql } from './reset-password';
+import { hashPasswordPbkdf2, readDbName, askHidden } from './reset-password';
 
 describe('reset-password CLI — hash parity with admin-auth', () => {
 	it('produces a hash the app verifies as correct', async () => {
@@ -48,17 +50,18 @@ describe('reset-password CLI — masked password input', () => {
 	});
 });
 
-describe('reset-password CLI — private temp SQL file', () => {
-	it('writes the SQL into a 0700 dir as a 0600 file', () => {
-		const sql = "INSERT OR REPLACE INTO site_settings (key,value) VALUES ('adminPasswordHash','x');\n";
-		const { dir, path } = writePrivateTempSql(sql);
+// The last shell string in the setup workflow. The db name comes from
+// wrangler.toml, which an existing deployment may have written before setup
+// validated names at all, and the temp path is ours — argv keeps both literal.
+describe('reset-password CLI ↔ no shell for the D1 execute', () => {
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'reset-password.ts'), 'utf8');
 
-		try {
-			expect(existsSync(path)).toBe(true);
-			expect(statSync(dir).mode & 0o777).toBe(0o700);
-			expect(statSync(path).mode & 0o777).toBe(0o600);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
+	it('runs wrangler through execFileSync with an argv array', () => {
+		expect(src).toMatch(/execFileSync\(\s*'npx',\s*\[\s*'wrangler',\s*'d1',\s*'execute',\s*dbName,/s);
+		expect(src).not.toMatch(/execSync\(\s*`/);
+	});
+
+	it('writes the hash through the shared private temp-file helper', () => {
+		expect(src).toMatch(/writePrivateTempSql\(\s*sql,\s*'sona-reset-'\s*\)/);
 	});
 });

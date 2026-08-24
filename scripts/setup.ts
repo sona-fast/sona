@@ -18,16 +18,17 @@
  */
 import { execSync, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout, env, cwd } from 'node:process';
-import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
 	buildMigrationSql,
 	buildSeedSql,
 	sanitizeProjectName,
-	isValidResourceName,
+	askResourceName,
+	derivedResourceName,
+	writePrivateTempSql,
 	RESOURCE_NAME_RULE,
 	bucketCreateSucceeded,
 	isR2NotEnabled,
@@ -71,19 +72,18 @@ const ask = async (q: string, def: string) => {
 	const a = (await rl.question(`${q}${def ? ` [${def}]` : ''}: `)).trim();
 	return a || def;
 };
-// Ask for a Cloudflare resource name until the answer is one wrangler and
-// wrangler.toml will agree on, naming what was rejected. Returns null when the
-// run isn't interactive — there is no second answer to give, and provisioning
-// under a name we'd have to rewrite is exactly what this guards against.
-const askName = async (q: string, def: string): Promise<string | null> => {
-	for (;;) {
-		const answer = await ask(q, def);
-		if (isValidResourceName(answer)) return answer;
-		console.warn(`\n⚠ "${answer}" can't be used as a Cloudflare resource name.`);
-		console.warn(`  Use ${RESOURCE_NAME_RULE}.`);
-		if (!stdin.isTTY) return null;
-	}
-};
+// Ask for a Cloudflare resource name, re-asking until the answer is usable. The
+// loop itself lives in setup-lib (askResourceName) so it can be unit-tested; this
+// is the binding that supplies the prompt, the TTY fact, and the wording.
+const askName = (q: string, def: string): Promise<string | null> =>
+	askResourceName(q, def, {
+		ask,
+		isInteractive: Boolean(stdin.isTTY),
+		onReject: (answer) => {
+			console.warn(`\n⚠ "${answer}" can't be used as a Cloudflare resource name.`);
+			console.warn(`  Use ${RESOURCE_NAME_RULE}.`);
+		}
+	});
 const askYesNo = async (q: string, def = true) => {
 	const a = (await rl.question(`${q} [${def ? 'Y/n' : 'y/N'}]: `)).trim().toLowerCase();
 	if (!a) return def;
@@ -98,14 +98,17 @@ type RunOpts = {
 	/** Called on a tolerated failure, so a caller can record that it happened. */
 	onFail?: () => void;
 };
-function run(cmd: string, opts: RunOpts = {}): string {
-	console.log(`\n$ ${cmd}`);
+// The shared body of run() and runArgs(): one stdio decision, one tolerated-
+// failure path. Only the way the child is spawned differs between them.
+function runWith(
+	spawn: (stdio: import('node:child_process').StdioOptions) => string | null,
+	opts: RunOpts
+): string {
 	try {
 		const stdio: import('node:child_process').StdioOptions = opts.capture
 			? 'pipe'
 			: [opts.stdin ?? 'inherit', 'inherit', 'inherit'];
-		const out = execSync(cmd, { stdio, encoding: 'utf8', env: opts.env });
-		return out ?? '';
+		return spawn(stdio) ?? '';
 	} catch (err) {
 		if (opts.allowFail) {
 			// On a tolerated failure, hand back whatever the command printed so callers
@@ -121,6 +124,13 @@ function run(cmd: string, opts: RunOpts = {}): string {
 	}
 }
 
+// A fixed command line, run through a shell. Only for commands that interpolate
+// nothing — anything carrying an operator's answer goes through runArgs.
+function run(cmd: string, opts: RunOpts = {}): string {
+	console.log(`\n$ ${cmd}`);
+	return runWith((stdio) => execSync(cmd, { stdio, encoding: 'utf8', env: opts.env }), opts);
+}
+
 // run()'s contract, but the command is an argv array executed WITHOUT a shell.
 // Every call that interpolates an operator's answer (project, database, bucket,
 // a temp-file path) goes through here: as an argv element the answer reaches
@@ -129,23 +139,7 @@ function run(cmd: string, opts: RunOpts = {}): string {
 // still succeed under the rewritten name while wrangler.toml records the raw one.
 function runArgs(file: string, args: string[], opts: RunOpts = {}): string {
 	console.log(`\n$ ${file} ${args.join(' ')}`);
-	try {
-		const stdio: import('node:child_process').StdioOptions = opts.capture
-			? 'pipe'
-			: [opts.stdin ?? 'inherit', 'inherit', 'inherit'];
-		const out = execFileSync(file, args, { stdio, encoding: 'utf8', env: opts.env });
-		return out ?? '';
-	} catch (err) {
-		if (opts.allowFail) {
-			// Same as run(): hand back whatever the command printed so callers can
-			// sniff it, and record the failure via onFail for callers that must know
-			// the command did not succeed.
-			opts.onFail?.();
-			const e = err as { stdout?: string | Buffer; stderr?: string | Buffer };
-			return `${e.stdout ?? ''}${e.stderr ?? ''}`;
-		}
-		throw err;
-	}
+	return runWith((stdio) => execFileSync(file, args, { stdio, encoding: 'utf8', env: opts.env }), opts);
 }
 
 // True when the command runs to a zero exit. Used for gh/git probes where we
@@ -273,16 +267,20 @@ async function main() {
 	// passed to wrangler AND written into wrangler.toml, and a name outside the
 	// allowed shape would leave the two pointing at different resources.
 	const nameAbort = () => {
-		console.error('\n✖ Setup stopped: a resource name was rejected and this run has no TTY to re-ask on.');
-		console.error(`  Re-run interactively, or answer with ${RESOURCE_NAME_RULE}.`);
+		console.error(
+			'\n✖ Setup stopped: setup cannot use that name, and this run is not interactive, so there is no way to ask again.'
+		);
+		console.error(`  Re-run in a terminal, or supply a name that fits the rule: ${RESOURCE_NAME_RULE}.`);
 		process.exitCode = 1;
 		rl.close();
 	};
 	const project = await askName('Cloudflare Pages project name (lowercase, hyphenated)', defaultProject);
 	if (project === null) return nameAbort();
-	const dbName = await askName('D1 database name', `${project}-db`);
+	// The derived defaults are truncated to stay inside the rule — a name setup
+	// itself would reject is not a default it may offer.
+	const dbName = await askName('D1 database name', derivedResourceName(project, 'db'));
 	if (dbName === null) return nameAbort();
-	const bucket = await askName('R2 bucket name', `${project}-images`);
+	const bucket = await askName('R2 bucket name', derivedResourceName(project, 'images'));
 	if (bucket === null) return nameAbort();
 
 	// Default the R2 public URL to https://cdn.<domain> when a domain was given.
@@ -579,12 +577,15 @@ async function main() {
 
 	// 4. Render wrangler.toml from the template.
 	const tpl = readFileSync('wrangler.toml.example', 'utf8');
+	// Function replacements throughout: a `$&`, `$1` or `$'` in an answer — the
+	// pasted database_id is the one value no rule constrains — would otherwise be
+	// read as a replacement pattern and silently rewrite the line it lands in.
 	const toml = tpl
-		.replace(/^name = ".*"/m, `name = "${project}"`)
-		.replace(/database_name = ".*"/, `database_name = "${dbName}"`)
-		.replace(/database_id = ".*"/, `database_id = "${dbId}"`)
-		.replace(/bucket_name = ".*"/, `bucket_name = "${bucket}"`)
-		.replace(/^FURTRACK_MODE = ".*"/m, `FURTRACK_MODE = "${furtrackMode}"`);
+		.replace(/^name = ".*"/m, () => `name = "${project}"`)
+		.replace(/database_name = ".*"/, () => `database_name = "${dbName}"`)
+		.replace(/database_id = ".*"/, () => `database_id = "${dbId}"`)
+		.replace(/bucket_name = ".*"/, () => `bucket_name = "${bucket}"`)
+		.replace(/^FURTRACK_MODE = ".*"/m, () => `FURTRACK_MODE = "${furtrackMode}"`);
 	writeFileSync('wrangler.toml', toml);
 	console.log('\n✔ wrote wrangler.toml');
 
@@ -653,15 +654,14 @@ async function main() {
 	const combinedSql = buildMigrationSql(
 		migFiles.map((name) => ({ name, sql: readFileSync(join('drizzle', name), 'utf8') }))
 	);
-	const combinedPath = join(tmpdir(), `sona-migrations-${token(6)}.sql`);
-	writeFileSync(combinedPath, combinedSql);
+	const migrations = writePrivateTempSql(combinedSql, 'sona-migrations-');
 	try {
-		runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${combinedPath}`], {
+		runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${migrations.path}`], {
 			stdin: 'ignore'
 		});
 	} finally {
 		try {
-			unlinkSync(combinedPath);
+			rmSync(migrations.dir, { recursive: true, force: true });
 		} catch {
 			/* best-effort temp cleanup */
 		}
@@ -686,15 +686,20 @@ async function main() {
 	// Tolerated failure, but not an ignored one: the summary says the provider was
 	// seeded, and a failed execute leaves the app with no storage backend at boot.
 	let seedOk = true;
+	let seedDir = '';
 	// Handed to wrangler in a file, like the migration step above, rather than on a
 	// command line: the seed carries operator answers (the FurTrack character, the
 	// site and CDN URLs), and buildSeedSql escapes them for SQL, not for a shell —
 	// a `$`, a backtick or a quote in one would be expanded or split there while
 	// the execute still exited 0 and seedOk stayed true.
-	const seedPath = join(tmpdir(), `sona-seed-${token(6)}.sql`);
-	writeFileSync(seedPath, seed);
 	try {
-		runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${seedPath}`], {
+		// The write is INSIDE the try: a full or unwritable tmpdir is one more way
+		// the seed can fail, and it must degrade to seedOk=false like the rest. Left
+		// outside, it would throw out of main() with D1, R2 and the Pages project
+		// already created but SETUP_TOKEN and CRON_SECRET not yet set.
+		const written = writePrivateTempSql(seed, 'sona-seed-');
+		seedDir = written.dir;
+		runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${written.path}`], {
 			stdin: 'ignore'
 		});
 	} catch {
@@ -703,7 +708,7 @@ async function main() {
 		console.warn('  Set it in admin Settings → Storage Provider after the first deploy.');
 	} finally {
 		try {
-			unlinkSync(seedPath);
+			if (seedDir) rmSync(seedDir, { recursive: true, force: true });
 		} catch {
 			/* best-effort temp cleanup */
 		}

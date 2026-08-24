@@ -5,6 +5,9 @@
  * tested without a Cloudflare account or a live shell.
  */
 
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RateLimitStatus } from './waf-lib.ts';
 import type { TurnstileStatus } from './turnstile-lib.ts';
 
@@ -89,7 +92,7 @@ export function sanitizeProjectName(raw: string): string {
 
 /** How a resource name must look, quoted verbatim when one is rejected. */
 export const RESOURCE_NAME_RULE =
-	'lowercase letters, digits and hyphens (no spaces, quotes or other punctuation), 1–58 characters, starting and ending with a letter or digit';
+	'lowercase letters, digits, and hyphens only (no spaces, quotes, or other punctuation), 1 to 58 characters, starting and ending with a letter or digit';
 
 /**
  * True when `name` is safe to use as a Pages project / D1 database / R2 bucket
@@ -100,6 +103,57 @@ export const RESOURCE_NAME_RULE =
  */
 export function isValidResourceName(name: string): boolean {
 	return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(name) && name.length <= 58;
+}
+
+/**
+ * The default name setup offers for a derived resource (`<project>-db`,
+ * `<project>-images`). The project portion is truncated so the result always
+ * passes isValidResourceName: a 58-character project name is legal, but
+ * `<that>-images` is not, and setup would then reject a default it wrote itself
+ * — fatal on a run with no TTY to re-ask on.
+ */
+export function derivedResourceName(project: string, suffix: string): string {
+	const stem = project.slice(0, Math.max(58 - suffix.length - 1, 0)).replace(/-+$/, '');
+	return stem ? `${stem}-${suffix}` : suffix;
+}
+
+/**
+ * Ask for a resource name until the answer is one wrangler and wrangler.toml will
+ * agree on. `ask` and `isInteractive` are injected so the loop is testable and so
+ * this file stays free of readline and process state; `onReject` lets the caller
+ * explain the rule in its own voice. Returns null when a rejected answer can't be
+ * re-asked — a piped or CI run has no second answer to give, and provisioning
+ * under a name we would have to rewrite is what this guards against.
+ */
+export async function askResourceName(
+	question: string,
+	def: string,
+	deps: {
+		ask: (question: string, def: string) => Promise<string>;
+		isInteractive: boolean;
+		onReject?: (answer: string) => void;
+	}
+): Promise<string | null> {
+	for (;;) {
+		const answer = await deps.ask(question, def);
+		if (isValidResourceName(answer)) return answer;
+		deps.onReject?.(answer);
+		if (!deps.isInteractive) return null;
+	}
+}
+
+/**
+ * Write SQL to a private temp file — `mkdtemp` gives a directory only the current
+ * user can read (0700), so a seed or a password hash never sits in a predictable,
+ * world-readable path under the shared /tmp. Caller removes the returned directory
+ * once done. (The one impure helper here, shared by setup.ts and
+ * reset-password.ts so the three SQL temp files can't drift apart on permissions.)
+ */
+export function writePrivateTempSql(sql: string, prefix: string): { dir: string; path: string } {
+	const dir = mkdtempSync(join(tmpdir(), prefix));
+	const path = join(dir, 'sona.sql');
+	writeFileSync(path, sql, { mode: 0o600 });
+	return { dir, path };
 }
 
 /**

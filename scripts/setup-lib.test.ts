@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { normalizeHttpsUrl } from '../src/lib/server/validate';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
@@ -8,6 +8,9 @@ import {
 	buildSeedSql,
 	sanitizeProjectName,
 	isValidResourceName,
+	derivedResourceName,
+	askResourceName,
+	writePrivateTempSql,
 	isR2NotEnabled,
 	bucketCreateSucceeded,
 	ensureUrlScheme,
@@ -210,6 +213,105 @@ describe('isValidResourceName', () => {
 		expect(isValidResourceName('trail-')).toBe(false);
 		expect(isValidResourceName('a'.repeat(58))).toBe(true);
 		expect(isValidResourceName('a'.repeat(59))).toBe(false);
+	});
+});
+
+describe('derivedResourceName', () => {
+	it('appends the suffix to an ordinary project name', () => {
+		expect(derivedResourceName('taro-surf', 'db')).toBe('taro-surf-db');
+		expect(derivedResourceName('taro-surf', 'images')).toBe('taro-surf-images');
+	});
+
+	// A 58-char project name is legal, but `<it>-images` is not — so setup would
+	// have offered a default it then rejected, fatal on a run with no TTY.
+	it('truncates so a derived default always passes the validator', () => {
+		const long = 'a'.repeat(58);
+		expect(isValidResourceName(long)).toBe(true);
+		for (const suffix of ['db', 'images']) {
+			const derived = derivedResourceName(long, suffix);
+			expect(isValidResourceName(derived), derived).toBe(true);
+			expect(derived.endsWith(`-${suffix}`), derived).toBe(true);
+		}
+	});
+
+	it('does not leave a doubled hyphen where it cut', () => {
+		const project = `${'a'.repeat(50)}-${'b'.repeat(7)}`;
+		expect(derivedResourceName(project, 'images')).toBe(`${'a'.repeat(50)}-images`);
+	});
+});
+
+describe('askResourceName', () => {
+	it('re-asks until the answer is usable, and returns that answer', async () => {
+		const answers = ['my$bucket', 'my bucket', 'taro-surf-images'];
+		const rejected: string[] = [];
+		let asks = 0;
+		const got = await askResourceName('R2 bucket name', 'taro-surf-images', {
+			ask: async () => {
+				asks++;
+				return answers.shift()!;
+			},
+			isInteractive: true,
+			onReject: (a) => rejected.push(a)
+		});
+		expect(got).toBe('taro-surf-images');
+		expect(asks).toBe(3);
+		expect(rejected).toEqual(['my$bucket', 'my bucket']);
+	});
+
+	// Without a TTY there is no second answer to give, so re-asking would spin
+	// forever on the same piped line.
+	it('gives up after exactly one ask when the run is not interactive', async () => {
+		let asks = 0;
+		const got = await askResourceName('R2 bucket name', 'taro-surf-images', {
+			ask: async () => {
+				asks++;
+				return 'my$bucket';
+			},
+			isInteractive: false
+		});
+		expect(got).toBeNull();
+		expect(asks).toBe(1);
+	});
+
+	it('takes a good first answer without rejecting anything', async () => {
+		const rejected: string[] = [];
+		const got = await askResourceName('D1 database name', 'taro-surf-db', {
+			ask: async (_q, def) => def,
+			isInteractive: false,
+			onReject: (a) => rejected.push(a)
+		});
+		expect(got).toBe('taro-surf-db');
+		expect(rejected).toEqual([]);
+	});
+});
+
+describe('writePrivateTempSql', () => {
+	// The seed and the migration script both carry operator data, and the reset
+	// file carries a password hash: none of them may sit world-readable in /tmp.
+	it('writes the SQL into a 0700 dir as a 0600 file', () => {
+		const sql = "INSERT OR REPLACE INTO site_settings (key,value) VALUES ('adminPasswordHash','x');\n";
+		const { dir, path } = writePrivateTempSql(sql, 'sona-test-');
+
+		try {
+			expect(existsSync(path)).toBe(true);
+			expect(readFileSync(path, 'utf8')).toBe(sql);
+			expect(statSync(dir).mode & 0o777).toBe(0o700);
+			expect(statSync(path).mode & 0o777).toBe(0o600);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('gives each call its own directory', () => {
+		const a = writePrivateTempSql('SELECT 1;', 'sona-test-');
+		const b = writePrivateTempSql('SELECT 2;', 'sona-test-');
+		try {
+			expect(a.dir).not.toBe(b.dir);
+			expect(readFileSync(a.path, 'utf8')).toBe('SELECT 1;');
+		} finally {
+			rmSync(a.dir, { recursive: true, force: true });
+			rmSync(b.dir, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -1457,5 +1559,113 @@ describe('setup.ts ↔ zone-preflight source contract', () => {
 		const noZoneIdx = src.indexOf('No Cloudflare zone found');
 		expect(errIdx).toBeGreaterThan(-1);
 		expect(noZoneIdx).toBeGreaterThan(errIdx);
+	});
+});
+
+// setup.ts is main()-only: it self-executes and prompts, so there is nothing to
+// import and these rules are pinned at the source level, like the contracts above.
+// Only rules that encode behavior are pinned here — never formatting.
+const setupSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
+// Prose that mentions run() or execSync must not be read as a call site. Line
+// comments only: a `/*` inside one of them (`drizzle/*.sql`) would otherwise pair
+// with a later `*/` and swallow the code in between.
+const setupCode = setupSrc.replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+describe('setup.ts ↔ no operator answer reaches a shell', () => {
+	/** A top-level function's source: its header through the first column-0 `}`. */
+	const fnBody = (name: string): string => {
+		const start = setupCode.indexOf(`function ${name}(`);
+		if (start < 0) throw new Error(`setup.ts no longer defines function ${name}`);
+		const end = setupCode.indexOf('\n}', start);
+		if (end < 0) throw new Error(`function ${name} has no top-level close`);
+		return setupCode.slice(start, end);
+	};
+	// The two helpers allowed to spawn a shell, cut out so what remains is every
+	// other line of the CLI.
+	const outsideHelpers = ['run', 'commandSucceeds'].reduce(
+		(rest, name) => rest.replace(fnBody(name), ''),
+		setupCode
+	);
+
+	it('spawns a shell only inside run() and commandSucceeds()', () => {
+		// A bare execSync anywhere else is the hoisted form this whole change removes:
+		// `const cmd = ` + "`… ${project}`" + `; execSync(cmd)`.
+		expect(outsideHelpers).not.toMatch(/\bexecSync\s*\(/);
+	});
+
+	it('passes only fixed literals to the shell-string helpers', () => {
+		const firstArgs = [...outsideHelpers.matchAll(/\b(?:run|commandSucceeds)\(\s*([^,)]*)/g)].map(
+			(m) => m[1].trim()
+		);
+		// Non-vacuity: if the scan ever matches nothing (a rename, a regex that stops
+		// binding), it fails here instead of passing on an empty list.
+		expect(firstArgs).toEqual(
+			expect.arrayContaining([
+				"'npx wrangler whoami'",
+				"'git remote get-url origin'",
+				"'gh --version'",
+				"'gh auth status'"
+			])
+		);
+		// Each is a plain quoted literal: no interpolation, no concatenation, and no
+		// identifier holding a string built somewhere else.
+		for (const arg of firstArgs) expect(arg, arg).toMatch(/^'[^'$`]*'$|^"[^"$`]*"$/);
+	});
+});
+
+describe('setup.ts ↔ SQL never rides a command line', () => {
+	it('never hands wrangler SQL with --command', () => {
+		expect(setupCode).not.toContain('--command');
+	});
+
+	it('passes the migration and seed SQL as files, written through the private helper', () => {
+		expect(setupCode.match(/--file=\$\{\w+\.path\}/g)).toHaveLength(2);
+		expect(setupCode.match(/writePrivateTempSql\(/g)).toHaveLength(2);
+	});
+
+	it('writes the seed inside the try, so a failed write degrades instead of aborting', () => {
+		// Outside it, an ENOSPC or EACCES on tmpdir throws out of main() with D1, R2
+		// and Pages created but the secrets not yet set.
+		const tryIdx = setupCode.indexOf('let seedOk = true;');
+		const writeIdx = setupCode.indexOf('writePrivateTempSql(seed', tryIdx);
+		const catchIdx = setupCode.indexOf('seedOk = false;', tryIdx);
+		expect(writeIdx).toBeGreaterThan(tryIdx);
+		expect(catchIdx).toBeGreaterThan(writeIdx);
+	});
+});
+
+describe('setup.ts ↔ resource names are validated as answered', () => {
+	it('asks for all three names through the validating prompt', () => {
+		expect(setupCode).toMatch(/const\s+project\s*=\s*await\s+askName\(/);
+		expect(setupCode).toMatch(/const\s+dbName\s*=\s*await\s+askName\(/);
+		expect(setupCode).toMatch(/const\s+bucket\s*=\s*await\s+askName\(/);
+	});
+
+	it('binds the shared loop to this run\'s TTY, so a piped run cannot loop forever', () => {
+		expect(setupCode).toMatch(/askResourceName\(/);
+		expect(setupCode).toMatch(/isInteractive:\s*Boolean\(\s*stdin\.isTTY\s*\)/);
+	});
+
+	it('stops setup for each name that could not be re-asked', () => {
+		expect(setupCode.match(/===\s*null\)\s*return\s+nameAbort\(\)/g)).toHaveLength(3);
+	});
+
+	it('derives the db and bucket defaults through derivedResourceName', () => {
+		expect(setupCode).toMatch(/derivedResourceName\(\s*project,\s*'db'\s*\)/);
+		expect(setupCode).toMatch(/derivedResourceName\(\s*project,\s*'images'\s*\)/);
+	});
+});
+
+describe('setup.ts ↔ untrusted values are encoded, never pasted raw', () => {
+	it('encodes the project name in the Pages-project PATCH path', () => {
+		expect(setupCode).toContain('/pages/projects/${encodeURIComponent(project)}');
+	});
+
+	it('renders wrangler.toml with function replacements', () => {
+		// A `$&` or `$1` in the pasted database_id, used as a replacement STRING,
+		// silently rewrites the line it lands in.
+		const replacementStarts = [...setupCode.matchAll(/\.replace\([^,]+,\s*(.)/g)].map((m) => m[1]);
+		expect(replacementStarts.length).toBeGreaterThan(0);
+		expect(replacementStarts.filter((c) => c === '`')).toEqual([]);
 	});
 });

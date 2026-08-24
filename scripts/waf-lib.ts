@@ -245,18 +245,11 @@ export async function applyDownloadRateLimit(
 				detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}; the response carried no rule list, so the rule was not written`
 			};
 		}
-		// An ok body with no usable `id` is the same kind of partial read: the PATCH
-		// and POST paths both need the ruleset id, and falling through without one
-		// would PUT the phase entrypoint — replacing every rate-limit rule the
-		// operator owns with just ours. Stop instead, without mutating.
-		if (typeof r?.id !== 'string' || r.id === '') {
-			return {
-				status: 'error',
-				detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}; the response carried no ruleset id, so the rule was not written`
-			};
-		}
-		rulesetId = r.id;
-		existing = (r.rules ?? []) as ExistingRule[];
+		// A missing `id` is only a problem once we know a write is needed — it is
+		// checked below the no-op arm, so a body that already carries our correct
+		// rule still reports 'exists' rather than an error about an id nothing needs.
+		if (typeof r?.id === 'string' && r.id !== '') rulesetId = r.id;
+		existing = (r?.rules ?? []) as ExistingRule[];
 	} else if (entry.status === 404) {
 		phaseMissing = true;
 	} else {
@@ -277,6 +270,17 @@ export async function applyDownloadRateLimit(
 	const mine = existing.find((r) => isRecord(r) && r.ref === RULE_REF);
 	if (mine && ruleMatches(mine)) {
 		return { status: 'exists', detail: `rate-limit rule already present on ${host} — no change` };
+	}
+
+	// A write is needed from here on, and every path except the create needs the
+	// ruleset id. Without it the code would fall through to the PUT that replaces
+	// the phase entrypoint, wiping every rate-limit rule the operator owns and
+	// reporting success. Stop instead, without mutating.
+	if (!phaseMissing && !rulesetId) {
+		return {
+			status: 'error',
+			detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}; the response carried no ruleset id, so the rule was not written`
+		};
 	}
 
 	// The ruleset and rule ids come back from the API, so they are encoded like any
