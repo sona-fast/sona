@@ -87,6 +87,21 @@ export function sanitizeProjectName(raw: string): string {
 	return cleaned || 'sona';
 }
 
+/** How a resource name must look, quoted verbatim when one is rejected. */
+export const RESOURCE_NAME_RULE =
+	'lowercase letters, digits and hyphens (no spaces, quotes or other punctuation), 1–58 characters, starting and ending with a letter or digit';
+
+/**
+ * True when `name` is safe to use as a Pages project / D1 database / R2 bucket
+ * name — the same character set `sanitizeProjectName` produces, which is also
+ * what Cloudflare accepts. Checked on the operator's ANSWER, not just the prompt
+ * default: setup hands these names to wrangler and writes them into
+ * wrangler.toml, so a name carrying anything else risks the two disagreeing.
+ */
+export function isValidResourceName(name: string): boolean {
+	return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(name) && name.length <= 58;
+}
+
 /**
  * True when a `wrangler r2 bucket create` failure means R2 isn't enabled on the
  * account (Cloudflare error code 10042), as opposed to a benign "already

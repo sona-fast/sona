@@ -27,6 +27,8 @@ import {
 	buildMigrationSql,
 	buildSeedSql,
 	sanitizeProjectName,
+	isValidResourceName,
+	RESOURCE_NAME_RULE,
 	bucketCreateSucceeded,
 	isR2NotEnabled,
 	ensureUrlScheme,
@@ -69,6 +71,19 @@ const ask = async (q: string, def: string) => {
 	const a = (await rl.question(`${q}${def ? ` [${def}]` : ''}: `)).trim();
 	return a || def;
 };
+// Ask for a Cloudflare resource name until the answer is one wrangler and
+// wrangler.toml will agree on, naming what was rejected. Returns null when the
+// run isn't interactive — there is no second answer to give, and provisioning
+// under a name we'd have to rewrite is exactly what this guards against.
+const askName = async (q: string, def: string): Promise<string | null> => {
+	for (;;) {
+		const answer = await ask(q, def);
+		if (isValidResourceName(answer)) return answer;
+		console.warn(`\n⚠ "${answer}" can't be used as a Cloudflare resource name.`);
+		console.warn(`  Use ${RESOURCE_NAME_RULE}.`);
+		if (!stdin.isTTY) return null;
+	}
+};
 const askYesNo = async (q: string, def = true) => {
 	const a = (await rl.question(`${q} [${def ? 'Y/n' : 'y/N'}]: `)).trim().toLowerCase();
 	if (!a) return def;
@@ -98,6 +113,33 @@ function run(cmd: string, opts: RunOpts = {}): string {
 			// captured, so this is only non-empty when `capture` was set — which is why
 			// a caller that must know whether the command SUCCEEDED takes onFail rather
 			// than reading the text.
+			opts.onFail?.();
+			const e = err as { stdout?: string | Buffer; stderr?: string | Buffer };
+			return `${e.stdout ?? ''}${e.stderr ?? ''}`;
+		}
+		throw err;
+	}
+}
+
+// run()'s contract, but the command is an argv array executed WITHOUT a shell.
+// Every call that interpolates an operator's answer (project, database, bucket,
+// a temp-file path) goes through here: as an argv element the answer reaches
+// wrangler exactly as typed, where on a shell command line `$`, a backtick, a
+// quote or a space would be expanded or split — silently, since wrangler would
+// still succeed under the rewritten name while wrangler.toml records the raw one.
+function runArgs(file: string, args: string[], opts: RunOpts = {}): string {
+	console.log(`\n$ ${file} ${args.join(' ')}`);
+	try {
+		const stdio: import('node:child_process').StdioOptions = opts.capture
+			? 'pipe'
+			: [opts.stdin ?? 'inherit', 'inherit', 'inherit'];
+		const out = execFileSync(file, args, { stdio, encoding: 'utf8', env: opts.env });
+		return out ?? '';
+	} catch (err) {
+		if (opts.allowFail) {
+			// Same as run(): hand back whatever the command printed so callers can
+			// sniff it, and record the failure via onFail for callers that must know
+			// the command did not succeed.
 			opts.onFail?.();
 			const e = err as { stdout?: string | Buffer; stderr?: string | Buffer };
 			return `${e.stdout ?? ''}${e.stderr ?? ''}`;
@@ -227,9 +269,21 @@ async function main() {
 	// else the fork's directory, so a rename doesn't silently reuse the template's
 	// `sona` resources; the operator can override.
 	const defaultProject = sanitizeProjectName(domain || basename(cwd()));
-	const project = await ask('Cloudflare Pages project name (lowercase, hyphenated)', defaultProject);
-	const dbName = await ask('D1 database name', `${project}-db`);
-	const bucket = await ask('R2 bucket name', `${project}-images`);
+	// The three names are validated as answered, not just as defaulted: they are
+	// passed to wrangler AND written into wrangler.toml, and a name outside the
+	// allowed shape would leave the two pointing at different resources.
+	const nameAbort = () => {
+		console.error('\n✖ Setup stopped: a resource name was rejected and this run has no TTY to re-ask on.');
+		console.error(`  Re-run interactively, or answer with ${RESOURCE_NAME_RULE}.`);
+		process.exitCode = 1;
+		rl.close();
+	};
+	const project = await askName('Cloudflare Pages project name (lowercase, hyphenated)', defaultProject);
+	if (project === null) return nameAbort();
+	const dbName = await askName('D1 database name', `${project}-db`);
+	if (dbName === null) return nameAbort();
+	const bucket = await askName('R2 bucket name', `${project}-images`);
+	if (bucket === null) return nameAbort();
 
 	// Default the R2 public URL to https://cdn.<domain> when a domain was given.
 	// The app uses this verbatim as `${base}/${key}`, so normalize whatever the
@@ -471,10 +525,12 @@ async function main() {
 	}
 
 	// 1. Pages project (idempotent — ignore "already exists").
-	run(`npx wrangler pages project create ${project} --production-branch main`, { allowFail: true });
+	runArgs('npx', ['wrangler', 'pages', 'project', 'create', project, '--production-branch', 'main'], {
+		allowFail: true
+	});
 
 	// 2. D1 — create and capture the database_id from the printed config block.
-	const d1Out = run(`npx wrangler d1 create ${dbName}`, { capture: true, allowFail: true });
+	const d1Out = runArgs('npx', ['wrangler', 'd1', 'create', dbName], { capture: true, allowFail: true });
 	process.stdout.write(d1Out);
 	let dbId = parseDatabaseId(d1Out);
 	if (!dbId) dbId = await ask('Could not auto-detect database_id — paste it from the output above', '');
@@ -495,7 +551,7 @@ async function main() {
 	//    "R2 not enabled on this account" case (error 10042) rather than swallowing
 	//    it as success and later claiming the R2 backend is set up.
 	let r2CreateOk = true;
-	const r2Out = run(`npx wrangler r2 bucket create ${bucket}`, {
+	const r2Out = runArgs('npx', ['wrangler', 'r2', 'bucket', 'create', bucket], {
 		capture: true,
 		allowFail: true,
 		onFail: () => {
@@ -552,7 +608,7 @@ async function main() {
 				...(turnstileSitekey ? { TURNSTILE_SITEKEY: turnstileSitekey } : {})
 			}
 		});
-		const res = await cfApi(cfToken, `/accounts/${cfAccount}/pages/projects/${project}`, {
+		const res = await cfApi(cfToken, `/accounts/${cfAccount}/pages/projects/${encodeURIComponent(project)}`, {
 			method: 'PATCH',
 			body: payload
 		});
@@ -600,7 +656,9 @@ async function main() {
 	const combinedPath = join(tmpdir(), `sona-migrations-${token(6)}.sql`);
 	writeFileSync(combinedPath, combinedSql);
 	try {
-		run(`npx wrangler d1 execute ${dbName} --remote --file="${combinedPath}"`, { stdin: 'ignore' });
+		runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${combinedPath}`], {
+			stdin: 'ignore'
+		});
 	} finally {
 		try {
 			unlinkSync(combinedPath);
@@ -628,12 +686,27 @@ async function main() {
 	// Tolerated failure, but not an ignored one: the summary says the provider was
 	// seeded, and a failed execute leaves the app with no storage backend at boot.
 	let seedOk = true;
+	// Handed to wrangler in a file, like the migration step above, rather than on a
+	// command line: the seed carries operator answers (the FurTrack character, the
+	// site and CDN URLs), and buildSeedSql escapes them for SQL, not for a shell —
+	// a `$`, a backtick or a quote in one would be expanded or split there while
+	// the execute still exited 0 and seedOk stayed true.
+	const seedPath = join(tmpdir(), `sona-seed-${token(6)}.sql`);
+	writeFileSync(seedPath, seed);
 	try {
-		run(`npx wrangler d1 execute ${dbName} --remote --command "${seed}"`, { stdin: 'ignore' });
+		runArgs('npx', ['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${seedPath}`], {
+			stdin: 'ignore'
+		});
 	} catch {
 		seedOk = false;
 		console.warn('\n⚠ Could not seed site_settings — the storage provider is not recorded yet.');
 		console.warn('  Set it in admin Settings → Storage Provider after the first deploy.');
+	} finally {
+		try {
+			unlinkSync(seedPath);
+		} catch {
+			/* best-effort temp cleanup */
+		}
 	}
 
 	// 7. Generate + set secrets. SETUP_TOKEN gates the first-run wizard.
@@ -644,10 +717,11 @@ async function main() {
 		// secret is not echoed to the console or exposed in the process list.
 		// Returns whether the put succeeded — the summary must not claim a
 		// security control is wired when the write silently failed.
-		const cmd = `npx wrangler pages secret put ${name} --project-name ${project}`;
-		console.log(`\n$ ${cmd}`);
+		// argv, not a shell string, so the project name reaches wrangler as typed.
+		const args = ['wrangler', 'pages', 'secret', 'put', name, '--project-name', project];
+		console.log(`\n$ npx ${args.join(' ')}`);
 		try {
-			execSync(cmd, { input: `${value}\n`, stdio: ['pipe', 'inherit', 'inherit'] });
+			execFileSync('npx', args, { input: `${value}\n`, stdio: ['pipe', 'inherit', 'inherit'] });
 			return true;
 		} catch {
 			return false; // allowFail

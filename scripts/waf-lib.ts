@@ -229,6 +229,10 @@ export async function applyDownloadRateLimit(
 	const entry = await api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/phases/http_ratelimit/entrypoint`);
 	let rulesetId: string | undefined;
 	let existing: ExistingRule[] = [];
+	// Only a genuine 404 means "this zone has no rate-limit ruleset yet", which is
+	// the one state the phase-replacing PUT below is allowed to fix. Recorded as a
+	// fact here so an entrypoint we merely failed to read can never take that path.
+	let phaseMissing = false;
 	if (entry.ok) {
 		const r = entry.result as { id?: string; rules?: unknown } | undefined;
 		// An ok body whose `rules` is present but not an array is a partial body, not
@@ -241,9 +245,21 @@ export async function applyDownloadRateLimit(
 				detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}; the response carried no rule list, so the rule was not written`
 			};
 		}
-		rulesetId = r?.id;
-		existing = (r?.rules ?? []) as ExistingRule[];
-	} else if (entry.status !== 404) {
+		// An ok body with no usable `id` is the same kind of partial read: the PATCH
+		// and POST paths both need the ruleset id, and falling through without one
+		// would PUT the phase entrypoint — replacing every rate-limit rule the
+		// operator owns with just ours. Stop instead, without mutating.
+		if (typeof r?.id !== 'string' || r.id === '') {
+			return {
+				status: 'error',
+				detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}; the response carried no ruleset id, so the rule was not written`
+			};
+		}
+		rulesetId = r.id;
+		existing = (r.rules ?? []) as ExistingRule[];
+	} else if (entry.status === 404) {
+		phaseMissing = true;
+	} else {
 		// 401/403 (no WAF scope) or a transient error — do NOT mutate.
 		return {
 			status: 'error',
@@ -266,28 +282,33 @@ export async function applyDownloadRateLimit(
 	// The ruleset and rule ids come back from the API, so they are encoded like any
 	// other untrusted path segment rather than pasted into the URL.
 	const write: CfApiResult = await (async () => {
-		if (mine && rulesetId && mine.id) {
+		if (phaseMissing) {
+			// No http_ratelimit ruleset yet (a genuine 404): create the entrypoint with
+			// our rule. Reachable ONLY from that 404 — an ok read is either parsed into
+			// a ruleset id or returned as an error above.
+			return api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/phases/http_ratelimit/entrypoint`, {
+				method: 'PUT',
+				body: { rules: [buildRule()] }
+			});
+		}
+		// The entrypoint read succeeded, so the ruleset id is set (the guard above
+		// returned when it wasn't).
+		const setId = rulesetId as string;
+		if (mine && mine.id) {
 			// Param bump: update just our rule in place.
 			return api(
 				cfToken,
-				`/zones/${encodeURIComponent(zoneId)}/rulesets/${encodeURIComponent(rulesetId)}/rules/${encodeURIComponent(mine.id)}`,
+				`/zones/${encodeURIComponent(zoneId)}/rulesets/${encodeURIComponent(setId)}/rules/${encodeURIComponent(mine.id)}`,
 				{
 					method: 'PATCH',
 					body: buildRule()
 				}
 			);
 		}
-		if (rulesetId) {
-			// Ruleset exists, our rule is absent: append only our rule.
-			return api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/${encodeURIComponent(rulesetId)}/rules`, {
-				method: 'POST',
-				body: buildRule()
-			});
-		}
-		// No http_ratelimit ruleset yet: create the entrypoint with our rule.
-		return api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/phases/http_ratelimit/entrypoint`, {
-			method: 'PUT',
-			body: { rules: [buildRule()] }
+		// Ruleset exists, our rule is absent: append only our rule.
+		return api(cfToken, `/zones/${encodeURIComponent(zoneId)}/rulesets/${encodeURIComponent(setId)}/rules`, {
+			method: 'POST',
+			body: buildRule()
 		});
 	})();
 

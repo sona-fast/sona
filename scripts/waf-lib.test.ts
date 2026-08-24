@@ -431,6 +431,42 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		}
 	});
 
+	// An ok body carrying no ruleset id used to skip the PATCH and POST branches and
+	// land on the phase-entrypoint PUT, which REPLACES the zone's rate-limit ruleset
+	// with only our rule — deleting whatever the operator wrote — and then reported
+	// 'created'. Only a genuine 404 may take that path.
+	it('an ok entrypoint with no ruleset id stops without mutating', async () => {
+		for (const result of [
+			{ rules: [{ id: 'other', ref: 'someone_elses_rule' }] },
+			{ id: '', rules: [] },
+			{ id: 42, rules: [] },
+			undefined
+		]) {
+			const { api, calls } = fakeApi({
+				[zonePath]: zoneOk,
+				[entryPath]: { ok: true, status: 200, result }
+			});
+			const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+			expect(res.status, `result=${JSON.stringify(result)}`).toBe('error');
+			expect(res.detail).toContain('the response carried no ruleset id');
+			expect(isPermissionError(res)).toBe(false);
+			// The operator's own rules survive: nothing was written at all.
+			expect(calls.every((c) => c.method === 'GET')).toBe(true);
+		}
+	});
+
+	// The rule-list guard and the id guard are different reads of the same body, so
+	// keep them told apart: a body with an id but a broken `rules` still reports the
+	// missing rule list.
+	it('reports a broken rule list as such even when the ruleset id is readable', async () => {
+		const { api } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: { ok: true, status: 200, result: { id: RULESET, rules: 'nope' } }
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.detail).toContain('the response carried no rule list');
+	});
+
 	it('empty domain → error before any network call', async () => {
 		const { api, calls } = fakeApi({});
 		const res = await applyDownloadRateLimit(SECRET, '   ', api);

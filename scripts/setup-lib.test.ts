@@ -7,6 +7,7 @@ import {
 	buildMigrationSql,
 	buildSeedSql,
 	sanitizeProjectName,
+	isValidResourceName,
 	isR2NotEnabled,
 	bucketCreateSucceeded,
 	ensureUrlScheme,
@@ -119,6 +120,17 @@ describe('buildSeedSql', () => {
 		expect(sql).toContain("('primaryCharacter','o''brien')");
 	});
 
+	// The seed is SQL-escaped, never shell-escaped, so it is handed to wrangler in a
+	// file (setup.ts) rather than on a command line. The characters a shell would
+	// have eaten must survive into the SQL byte for byte — `$x` expanded to nothing,
+	// the backticks ran a subshell, and the double quote ended the argument early,
+	// all while the execute still exited 0.
+	it('keeps shell metacharacters in a value intact', () => {
+		const character = 'taro $x `id` "quoted" \\slash';
+		const sql = buildSeedSql({ provider: 'r2', primaryCharacter: character });
+		expect(sql).toContain(`('primaryCharacter','${character}')`);
+	});
+
 	// The CLI seed computes siteUrl as normalizeHttpsUrl(ensureUrlScheme(domain)) ?? ''
 	// (setup.ts). A malformed or non-https domain must normalize to null so the seed
 	// drops siteUrl entirely — rather than storing a value new URL() throws on later.
@@ -159,6 +171,45 @@ describe('sanitizeProjectName', () => {
 	it('falls back to sona when nothing usable remains', () => {
 		expect(sanitizeProjectName('...')).toBe('sona');
 		expect(sanitizeProjectName('')).toBe('sona');
+	});
+});
+
+describe('isValidResourceName', () => {
+	it('accepts the names sanitizeProjectName produces', () => {
+		for (const raw of ['Sparky.Ink', 'My Cool_Fork', 'café#site!', '--a..b__c--', '']) {
+			expect(isValidResourceName(sanitizeProjectName(raw)), raw).toBe(true);
+		}
+		expect(isValidResourceName('taro-surf-images')).toBe(true);
+		expect(isValidResourceName('sona2')).toBe(true);
+	});
+
+	// These are the answers that reached wrangler through a shell string: `my$site`
+	// arrived as `my`, and a quoted or spaced name split into several arguments —
+	// while wrangler.toml recorded the raw answer, so the bucket and the IMAGES
+	// binding named different things and setup still printed success.
+	it('rejects an answer carrying anything a shell would act on', () => {
+		for (const bad of [
+			'my$bucket',
+			'my`id`bucket',
+			'my"bucket"',
+			"my'bucket'",
+			'my bucket',
+			'my;bucket',
+			'my\\bucket',
+			'my/bucket',
+			'../escape'
+		]) {
+			expect(isValidResourceName(bad), bad).toBe(false);
+		}
+	});
+
+	it('rejects empty, uppercase, and edge-hyphenated names, and anything over 58 chars', () => {
+		expect(isValidResourceName('')).toBe(false);
+		expect(isValidResourceName('MyBucket')).toBe(false);
+		expect(isValidResourceName('-lead')).toBe(false);
+		expect(isValidResourceName('trail-')).toBe(false);
+		expect(isValidResourceName('a'.repeat(58))).toBe(true);
+		expect(isValidResourceName('a'.repeat(59))).toBe(false);
 	});
 });
 
