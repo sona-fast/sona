@@ -12,12 +12,12 @@
  * `wrangler login` (or CLOUDFLARE_API_TOKEN), like the rest of the CLI tooling.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { webcrypto as crypto } from 'node:crypto';
-import { writePrivateTempSql } from './setup-lib.ts';
+import { writePrivateTempSql, removeTempSqlDir } from './setup-lib.ts';
 
 // --- PBKDF2 — must stay in lockstep with src/lib/server/admin-auth.ts --------
 // (100k iterations is the Cloudflare Workers Web Crypto cap; see admin-auth.ts.)
@@ -115,13 +115,7 @@ async function main() {
 		console.log('\n✔ Admin password reset. Sign in at /admin/login with the new password.');
 	} finally {
 		rl.close();
-		if (sqlDir) {
-			try {
-				rmSync(sqlDir, { recursive: true, force: true });
-			} catch {
-				/* best-effort temp cleanup */
-			}
-		}
+		if (sqlDir) removeTempSqlDir(sqlDir);
 	}
 }
 

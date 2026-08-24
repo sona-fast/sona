@@ -11,6 +11,10 @@ import {
 	derivedResourceName,
 	askResourceName,
 	writePrivateTempSql,
+	removeTempSqlDir,
+	runWith,
+	isValidDatabaseId,
+	askUntilValid,
 	isR2NotEnabled,
 	bucketCreateSucceeded,
 	ensureUrlScheme,
@@ -41,6 +45,10 @@ import {
 } from './setup-lib.ts';
 import { applyDownloadRateLimit, SCOPE_HINT as WAF_SCOPE_HINT } from './waf-lib.ts';
 import { provisionTurnstileWidget, SCOPE_HINT as TURNSTILE_SCOPE_HINT } from './turnstile-lib.ts';
+
+// setup.ts self-executes, so the contracts below read its source instead of
+// importing it. One copy, shared by every `setup.ts ↔` describe in this file.
+const setupSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 
 describe('buildMigrationSql', () => {
 	it('creates schema_migrations and records each file after its body, in order', () => {
@@ -234,6 +242,14 @@ describe('derivedResourceName', () => {
 		}
 	});
 
+	// The docstring promises a valid name for any suffix, not just the two setup
+	// passes, so the return is clamped as well as the stem.
+	it('stays valid even when the suffix alone is over-long', () => {
+		const derived = derivedResourceName('taro-surf', 'x'.repeat(80));
+		expect(derived.length).toBeLessThanOrEqual(58);
+		expect(isValidResourceName(derived), derived).toBe(true);
+	});
+
 	it('does not leave a doubled hyphen where it cut', () => {
 		const project = `${'a'.repeat(50)}-${'b'.repeat(7)}`;
 		expect(derivedResourceName(project, 'images')).toBe(`${'a'.repeat(50)}-images`);
@@ -282,6 +298,151 @@ describe('askResourceName', () => {
 		});
 		expect(got).toBe('taro-surf-db');
 		expect(rejected).toEqual([]);
+	});
+});
+
+describe('runWith', () => {
+	// The two runners in setup.ts differ only in how they spawn; everything that
+	// decides what a caller SEES lives here, and dropping the opts argument on
+	// either delegation silently disables all three of these.
+	const spawnOk = (out: string) => {
+		const seen: unknown[] = [];
+		return {
+			seen,
+			spawn: (stdio: unknown) => {
+				seen.push(stdio);
+				return out;
+			}
+		};
+	};
+
+	it('hands back what the command printed when capturing', () => {
+		const { spawn, seen } = spawnOk('database_id = "abc"');
+		expect(runWith(spawn, { capture: true })).toBe('database_id = "abc"');
+		// Capturing means piped stdio — inherited output would leave the caller
+		// nothing to parse, which is how the dbId auto-detect breaks.
+		expect(seen).toEqual(['pipe']);
+	});
+
+	it('returns an empty string when the command printed nothing', () => {
+		expect(runWith(() => null, {})).toBe('');
+	});
+
+	it('inherits stdio by default, and ignores stdin when asked', () => {
+		const a = spawnOk('');
+		runWith(a.spawn, {});
+		expect(a.seen).toEqual([['inherit', 'inherit', 'inherit']]);
+
+		const b = spawnOk('');
+		runWith(b.spawn, { stdin: 'ignore' });
+		// wrangler's "Ok to proceed?" never fires without a stdin to read from.
+		expect(b.seen).toEqual([['ignore', 'inherit', 'inherit']]);
+	});
+
+	it('on a tolerated failure returns the output and reports it once', () => {
+		let failures = 0;
+		const out = runWith(
+			() => {
+				throw Object.assign(new Error('exit 1'), { stdout: 'partial ', stderr: 'code: 10042' });
+			},
+			{ allowFail: true, onFail: () => failures++ }
+		);
+		// Both streams, in order: isR2NotEnabled sniffs this text for the 10042 code.
+		expect(out).toBe('partial code: 10042');
+		// Once, not twice: r2CreateOk is flipped here, and the summary reports what
+		// actually landed from it.
+		expect(failures).toBe(1);
+	});
+
+	it('tolerates a failure that printed nothing at all', () => {
+		let failures = 0;
+		expect(runWith(() => {
+			throw new Error('spawn failed');
+		}, { allowFail: true, onFail: () => failures++ })).toBe('');
+		expect(failures).toBe(1);
+	});
+
+	it('rethrows when the failure is not tolerated', () => {
+		let failures = 0;
+		expect(() =>
+			runWith(
+				() => {
+					throw new Error('exit 1');
+				},
+				{ onFail: () => failures++ }
+			)
+		).toThrow('exit 1');
+		// onFail records a TOLERATED failure; an aborting one is not that.
+		expect(failures).toBe(0);
+	});
+});
+
+describe('isValidDatabaseId', () => {
+	it('accepts what parseDatabaseId itself extracts', () => {
+		const parsed = parseDatabaseId('database_id = "3f8b0c62-1d4e-4a90-8f1b-9c2d0e5a7b31"');
+		expect(parsed).not.toBeNull();
+		expect(isValidDatabaseId(parsed!)).toBe(true);
+	});
+
+	// The pasted id is written into wrangler.toml verbatim, so an answer that can
+	// close the string and open a new key would inject arbitrary config.
+	it('rejects anything that could rewrite the generated TOML', () => {
+		for (const bad of [
+			'',
+			'short',
+			'abc"\ndatabase_name = "other"',
+			'3f8b0c62 1d4e',
+			'not-hex-zzzzzzzz',
+			'$(id)'
+		]) {
+			expect(isValidDatabaseId(bad), bad).toBe(false);
+		}
+	});
+});
+
+describe('askUntilValid', () => {
+	// askResourceName is one binding of this loop; the pasted database_id is the
+	// other, and it accepts a blank answer as "I don't have one".
+	it('re-asks on a rejected answer and returns the first accepted one', async () => {
+		const answers = ['nope!', '3f8b0c62-1d4e-4a90-8f1b-9c2d0e5a7b31'];
+		const rejected: string[] = [];
+		const got = await askUntilValid('database_id', '', (a) => a === '' || isValidDatabaseId(a), {
+			ask: async () => answers.shift()!,
+			isInteractive: true,
+			onReject: (a) => rejected.push(a)
+		});
+		expect(got).toBe('3f8b0c62-1d4e-4a90-8f1b-9c2d0e5a7b31');
+		expect(rejected).toEqual(['nope!']);
+	});
+
+	it('gives up after exactly one ask when the run is not interactive', async () => {
+		let asks = 0;
+		const got = await askUntilValid('database_id', '', isValidDatabaseId, {
+			ask: async () => {
+				asks++;
+				return 'nope!';
+			},
+			isInteractive: false
+		});
+		expect(got).toBeNull();
+		expect(asks).toBe(1);
+	});
+});
+
+describe('removeTempSqlDir', () => {
+	it('removes the directory and the SQL inside it', () => {
+		const { dir, path } = writePrivateTempSql('SELECT 1;', 'sona-test-');
+		removeTempSqlDir(dir);
+		expect(existsSync(path)).toBe(false);
+		expect(existsSync(dir)).toBe(false);
+	});
+
+	// The SQL has already run by the time this is called; a directory someone else
+	// removed first is not a reason to fail the command that succeeded.
+	it('does not throw when the directory is already gone', () => {
+		const { dir } = writePrivateTempSql('SELECT 1;', 'sona-test-');
+		removeTempSqlDir(dir);
+		expect(() => removeTempSqlDir(dir)).not.toThrow();
 	});
 });
 
@@ -1085,9 +1246,9 @@ describe('resendSecretWarnLines', () => {
 });
 
 describe('setup.ts ↔ Resend secret contract', () => {
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 	// main() isn't importable, so pin at source level that both puts are checked
 	// rather than fired and forgotten, the way they were before.
-	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 
 	it('records a failed Resend put instead of discarding the result', () => {
 		expect(src).toMatch(/!putSecret\('RESEND_API_KEY'/);
@@ -1139,12 +1300,12 @@ describe('provisioningNoteLine', () => {
 });
 
 describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 	// main() is not importable (it drives live Cloudflare state), so pin the
 	// wiring at the source level: turnstileWired must be composed from the real
 	// PATCH result and the real secret-put result — forcing a literal here once
 	// survived the entire suite while reintroducing the very over-claim the
 	// helper exists to prevent.
-	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 
 	// The whole securitySummaryLines({...}) call, so property assertions below
 	// can't accidentally match unrelated code elsewhere in setup.ts.
@@ -1548,15 +1709,14 @@ describe('setup.ts ↔ zone-preflight source contract', () => {
 	// main() isn't importable, so pin that the preflight uses the shared
 	// candidate walk and distinguishes a failed lookup from "no zone" — the old
 	// inline loop read a 403 as "No Cloudflare zone found".
-	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 
 	it('resolves the zone via resolveZone over zoneNameCandidates(host)', () => {
-		expect(src).toMatch(/resolveZone\(\s*zoneNameCandidates\(\s*host\s*\)/s);
+		expect(setupSrc).toMatch(/resolveZone\(\s*zoneNameCandidates\(\s*host\s*\)/s);
 	});
 
 	it('handles a failed lookup before the no-zone branch', () => {
-		const errIdx = src.indexOf('zoneLookupError !== null');
-		const noZoneIdx = src.indexOf('No Cloudflare zone found');
+		const errIdx = setupSrc.indexOf('zoneLookupError !== null');
+		const noZoneIdx = setupSrc.indexOf('No Cloudflare zone found');
 		expect(errIdx).toBeGreaterThan(-1);
 		expect(noZoneIdx).toBeGreaterThan(errIdx);
 	});
@@ -1564,8 +1724,8 @@ describe('setup.ts ↔ zone-preflight source contract', () => {
 
 // setup.ts is main()-only: it self-executes and prompts, so there is nothing to
 // import and these rules are pinned at the source level, like the contracts above.
-// Only rules that encode behavior are pinned here — never formatting.
-const setupSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
+// Only rules that encode behavior are pinned here — never formatting, and never
+// something a unit test already proves.
 // Prose that mentions run() or execSync must not be read as a call site. Line
 // comments only: a `/*` inside one of them (`drizzle/*.sql`) would otherwise pair
 // with a later `*/` and swallow the code in between.
@@ -1611,6 +1771,21 @@ describe('setup.ts ↔ no operator answer reaches a shell', () => {
 		// identifier holding a string built somewhere else.
 		for (const arg of firstArgs) expect(arg, arg).toMatch(/^'[^'$`]*'$|^"[^"$`]*"$/);
 	});
+
+	// The two ways an argv call quietly becomes a shell call again.
+	it('never asks a child process for a shell', () => {
+		expect(setupCode).not.toMatch(/shell:\s*true/);
+		// execFileSync('sh', ['-c', …]) is a command line by another name.
+		expect(setupCode).not.toMatch(
+			/execFileSync\(\s*['"`](?:\/bin\/|\/usr\/bin\/)?(?:sh|bash|zsh|cmd)(?:\.exe)?['"`]/
+		);
+	});
+
+	// Dropping the opts argument silently disables capture, allowFail and onFail —
+	// the behavior runWith's own unit tests cover, wired to the two callers here.
+	it('forwards each runner\'s opts to runWith', () => {
+		expect(setupCode.match(/runWith\([^;]*,\s*opts\s*\)/g)).toHaveLength(2);
+	});
 });
 
 describe('setup.ts ↔ SQL never rides a command line', () => {
@@ -1634,25 +1809,46 @@ describe('setup.ts ↔ SQL never rides a command line', () => {
 	});
 });
 
-describe('setup.ts ↔ resource names are validated as answered', () => {
-	it('asks for all three names through the validating prompt', () => {
-		expect(setupCode).toMatch(/const\s+project\s*=\s*await\s+askName\(/);
-		expect(setupCode).toMatch(/const\s+dbName\s*=\s*await\s+askName\(/);
-		expect(setupCode).toMatch(/const\s+bucket\s*=\s*await\s+askName\(/);
-	});
+// Every private temp dir gets removed on the way out, whatever the command did.
+describe('setup CLIs ↔ every temp SQL dir is cleaned up in a finally', () => {
+	const files = {
+		'setup.ts': setupCode,
+		'reset-password.ts': readFileSync(
+			join(dirname(fileURLToPath(import.meta.url)), 'reset-password.ts'),
+			'utf8'
+		)
+	};
 
-	it('binds the shared loop to this run\'s TTY, so a piped run cannot loop forever', () => {
+	for (const [name, code] of Object.entries(files)) {
+		it(`${name} removes as many temp dirs as it writes, each from a finally`, () => {
+			const writes = code.match(/writePrivateTempSql\(/g) ?? [];
+			const removes = [...code.matchAll(/removeTempSqlDir\(/g)];
+			expect(writes.length, name).toBeGreaterThan(0);
+			expect(removes.length, name).toBe(writes.length);
+			for (const m of removes) {
+				const openIdx = code.lastIndexOf('finally {', m.index);
+				expect(openIdx, name).toBeGreaterThan(-1);
+				// Still inside that finally block — no intervening close brace.
+				expect(code.slice(openIdx, m.index), name).not.toContain('}');
+			}
+		});
+	}
+});
+
+describe('setup.ts ↔ a rejected answer is asked again, or setup stops', () => {
+	it("binds the shared loop to this run's TTY, so a piped run cannot loop forever", () => {
 		expect(setupCode).toMatch(/askResourceName\(/);
-		expect(setupCode).toMatch(/isInteractive:\s*Boolean\(\s*stdin\.isTTY\s*\)/);
+		expect(setupCode.match(/isInteractive:\s*Boolean\(\s*stdin\.isTTY\s*\)/g)).toHaveLength(2);
 	});
 
-	it('stops setup for each name that could not be re-asked', () => {
-		expect(setupCode.match(/===\s*null\)\s*return\s+nameAbort\(\)/g)).toHaveLength(3);
-	});
-
-	it('derives the db and bucket defaults through derivedResourceName', () => {
-		expect(setupCode).toMatch(/derivedResourceName\(\s*project,\s*'db'\s*\)/);
-		expect(setupCode).toMatch(/derivedResourceName\(\s*project,\s*'images'\s*\)/);
+	// Printing the reason and returning is not stopping: without these two, setup
+	// would carry on to provisioning and exit 0.
+	it('marks the run failed and closes the prompt when it cannot ask again', () => {
+		const start = setupCode.indexOf('const abortAnswer =');
+		expect(start).toBeGreaterThan(-1);
+		const body = setupCode.slice(start, setupCode.indexOf('\n\t};', start));
+		expect(body).toContain('process.exitCode = 1;');
+		expect(body).toContain('rl.close();');
 	});
 });
 
@@ -1661,11 +1857,8 @@ describe('setup.ts ↔ untrusted values are encoded, never pasted raw', () => {
 		expect(setupCode).toContain('/pages/projects/${encodeURIComponent(project)}');
 	});
 
-	it('renders wrangler.toml with function replacements', () => {
-		// A `$&` or `$1` in the pasted database_id, used as a replacement STRING,
-		// silently rewrites the line it lands in.
-		const replacementStarts = [...setupCode.matchAll(/\.replace\([^,]+,\s*(.)/g)].map((m) => m[1]);
-		expect(replacementStarts.length).toBeGreaterThan(0);
-		expect(replacementStarts.filter((c) => c === '`')).toEqual([]);
+	it('encodes the zone id in every zone call it makes itself', () => {
+		expect(setupCode).not.toMatch(/\/zones\/\$\{zoneId\}/);
+		expect(setupCode.match(/\/zones\/\$\{encodeURIComponent\(zoneId\)\}/g)).toHaveLength(3);
 	});
 });

@@ -18,7 +18,7 @@
  */
 import { execSync, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout, env, cwd } from 'node:process';
 import { basename, join } from 'node:path';
@@ -27,9 +27,15 @@ import {
 	buildSeedSql,
 	sanitizeProjectName,
 	askResourceName,
+	askUntilValid,
 	derivedResourceName,
+	isValidDatabaseId,
 	writePrivateTempSql,
+	removeTempSqlDir,
+	runWith,
+	type RunOpts,
 	RESOURCE_NAME_RULE,
+	DATABASE_ID_RULE,
 	bucketCreateSucceeded,
 	isR2NotEnabled,
 	ensureUrlScheme,
@@ -89,40 +95,6 @@ const askYesNo = async (q: string, def = true) => {
 	if (!a) return def;
 	return a === 'y' || a === 'yes';
 };
-
-type RunOpts = {
-	capture?: boolean;
-	allowFail?: boolean;
-	stdin?: 'inherit' | 'ignore';
-	env?: NodeJS.ProcessEnv;
-	/** Called on a tolerated failure, so a caller can record that it happened. */
-	onFail?: () => void;
-};
-// The shared body of run() and runArgs(): one stdio decision, one tolerated-
-// failure path. Only the way the child is spawned differs between them.
-function runWith(
-	spawn: (stdio: import('node:child_process').StdioOptions) => string | null,
-	opts: RunOpts
-): string {
-	try {
-		const stdio: import('node:child_process').StdioOptions = opts.capture
-			? 'pipe'
-			: [opts.stdin ?? 'inherit', 'inherit', 'inherit'];
-		return spawn(stdio) ?? '';
-	} catch (err) {
-		if (opts.allowFail) {
-			// On a tolerated failure, hand back whatever the command printed so callers
-			// can sniff it (e.g. the R2 "not enabled" error). Inherited stdio isn't
-			// captured, so this is only non-empty when `capture` was set — which is why
-			// a caller that must know whether the command SUCCEEDED takes onFail rather
-			// than reading the text.
-			opts.onFail?.();
-			const e = err as { stdout?: string | Buffer; stderr?: string | Buffer };
-			return `${e.stdout ?? ''}${e.stderr ?? ''}`;
-		}
-		throw err;
-	}
-}
 
 // A fixed command line, run through a shell. Only for commands that interpolate
 // nothing — anything carrying an operator's answer goes through runArgs.
@@ -266,22 +238,24 @@ async function main() {
 	// The three names are validated as answered, not just as defaulted: they are
 	// passed to wrangler AND written into wrangler.toml, and a name outside the
 	// allowed shape would leave the two pointing at different resources.
-	const nameAbort = () => {
+	// Reached only when a rejected answer can't be re-asked, which without a TTY is
+	// every rejected answer.
+	const abortAnswer = (what: string, rule: string) => {
 		console.error(
-			'\n✖ Setup stopped: setup cannot use that name, and this run is not interactive, so there is no way to ask again.'
+			`\n✖ Setup cannot use that ${what}, and this run is not interactive, so there is no way to ask again.`
 		);
-		console.error(`  Re-run in a terminal, or supply a name that fits the rule: ${RESOURCE_NAME_RULE}.`);
+		console.error(`  Re-run in a terminal, or supply a ${what} that fits the rule: ${rule}.`);
 		process.exitCode = 1;
 		rl.close();
 	};
 	const project = await askName('Cloudflare Pages project name (lowercase, hyphenated)', defaultProject);
-	if (project === null) return nameAbort();
+	if (project === null) return abortAnswer('name', RESOURCE_NAME_RULE);
 	// The derived defaults are truncated to stay inside the rule — a name setup
 	// itself would reject is not a default it may offer.
 	const dbName = await askName('D1 database name', derivedResourceName(project, 'db'));
-	if (dbName === null) return nameAbort();
+	if (dbName === null) return abortAnswer('name', RESOURCE_NAME_RULE);
 	const bucket = await askName('R2 bucket name', derivedResourceName(project, 'images'));
-	if (bucket === null) return nameAbort();
+	if (bucket === null) return abortAnswer('name', RESOURCE_NAME_RULE);
 
 	// Default the R2 public URL to https://cdn.<domain> when a domain was given.
 	// The app uses this verbatim as `${base}/${key}`, so normalize whatever the
@@ -451,7 +425,7 @@ async function main() {
 				// token can't even read DNS (and so can't write the apex CNAME later) —
 				// but setup never writes DNS itself, and an operator attaching the domain
 				// from the dashboard is fine, so warn + offer to continue rather than abort.
-				const dnsProbe = await cfApi(cfToken, `/zones/${zoneId}/dns_records?per_page=1`);
+				const dnsProbe = await cfApi(cfToken, `/zones/${encodeURIComponent(zoneId)}/dns_records?per_page=1`);
 				if (dnsProbeBlocksSetup(dnsProbe)) {
 					console.warn(
 						`\n⚠ Could not verify DNS access for ${host} (token lacks Zone → DNS: Read; attaching the apex CNAME later needs Zone → DNS: Edit).`
@@ -472,10 +446,10 @@ async function main() {
 				// Image Transformations. Off by default, per-zone, and NOT grantable by
 				// the deploy token — enable it if the token carries Zone → Zone Settings: Edit,
 				// else leave imageResizingOn=null (unknown) and warn in Next steps.
-				const ir = await cfApi(cfToken, `/zones/${zoneId}/settings/image_resizing`);
+				const ir = await cfApi(cfToken, `/zones/${encodeURIComponent(zoneId)}/settings/image_resizing`);
 				let patchOk = false;
 				if (ir.ok && !imageResizingIsOn(ir)) {
-					const enabled = await cfApi(cfToken, `/zones/${zoneId}/settings/image_resizing`, {
+					const enabled = await cfApi(cfToken, `/zones/${encodeURIComponent(zoneId)}/settings/image_resizing`, {
 						method: 'PATCH',
 						body: { value: 'on' }
 					});
@@ -531,7 +505,26 @@ async function main() {
 	const d1Out = runArgs('npx', ['wrangler', 'd1', 'create', dbName], { capture: true, allowFail: true });
 	process.stdout.write(d1Out);
 	let dbId = parseDatabaseId(d1Out);
-	if (!dbId) dbId = await ask('Could not auto-detect database_id — paste it from the output above', '');
+	if (!dbId) {
+		// The pasted id lands in wrangler.toml verbatim, so it is held to the shape
+		// parseDatabaseId itself extracts — a quote or a newline in the answer would
+		// otherwise write arbitrary TOML into the generated config. A blank answer
+		// still means "I don't have one", and falls through to the abort below.
+		const pasted = await askUntilValid(
+			'Could not auto-detect database_id — paste it from the output above',
+			'',
+			(answer) => answer === '' || isValidDatabaseId(answer),
+			{
+				ask,
+				isInteractive: Boolean(stdin.isTTY),
+				onReject: (answer) => {
+					console.warn(`\n⚠ "${answer}" is not a database id — expected ${DATABASE_ID_RULE}.`);
+				}
+			}
+		);
+		if (pasted === null) return abortAnswer('database id', DATABASE_ID_RULE);
+		dbId = pasted;
+	}
 	// Still nothing: `wrangler d1 create` failed and no id was pasted, so we never
 	// established that a database exists. Writing wrangler.toml and PATCHing the
 	// Pages project with an empty database_id would print two ✔ lines for bindings
@@ -660,11 +653,7 @@ async function main() {
 			stdin: 'ignore'
 		});
 	} finally {
-		try {
-			rmSync(migrations.dir, { recursive: true, force: true });
-		} catch {
-			/* best-effort temp cleanup */
-		}
+		removeTempSqlDir(migrations.dir);
 	}
 
 	// 6. Seed the storage provider so the app boots with the chosen backend (the
@@ -707,11 +696,7 @@ async function main() {
 		console.warn('\n⚠ Could not seed site_settings — the storage provider is not recorded yet.');
 		console.warn('  Set it in admin Settings → Storage Provider after the first deploy.');
 	} finally {
-		try {
-			if (seedDir) rmSync(seedDir, { recursive: true, force: true });
-		} catch {
-			/* best-effort temp cleanup */
-		}
+		if (seedDir) removeTempSqlDir(seedDir);
 	}
 
 	// 7. Generate + set secrets. SETUP_TOKEN gates the first-run wizard.

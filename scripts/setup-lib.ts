@@ -5,7 +5,7 @@
  * tested without a Cloudflare account or a live shell.
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RateLimitStatus } from './waf-lib.ts';
@@ -114,32 +114,54 @@ export function isValidResourceName(name: string): boolean {
  */
 export function derivedResourceName(project: string, suffix: string): string {
 	const stem = project.slice(0, Math.max(58 - suffix.length - 1, 0)).replace(/-+$/, '');
-	return stem ? `${stem}-${suffix}` : suffix;
+	// Clamped again on the way out so the promise above holds for ANY suffix, not
+	// just the two this codebase passes.
+	return (stem ? `${stem}-${suffix}` : suffix).slice(0, 58).replace(/-+$/, '');
+}
+
+/** What setup will accept when the operator pastes a D1 database_id by hand. */
+export const DATABASE_ID_RULE = 'the id exactly as wrangler printed it — hex digits and hyphens';
+
+/**
+ * True when `id` has the shape parseDatabaseId extracts from wrangler's output.
+ * A pasted id is written into wrangler.toml verbatim, so an answer carrying a
+ * quote or a newline would inject arbitrary TOML into the generated config.
+ */
+export function isValidDatabaseId(id: string): boolean {
+	return /^[0-9a-fA-F-]{8,}$/.test(id);
+}
+
+/** What askUntilValid needs from its caller: a prompt, the run's interactivity, a voice. */
+export interface AskDeps {
+	ask: (question: string, def: string) => Promise<string>;
+	isInteractive: boolean;
+	onReject?: (answer: string) => void;
 }
 
 /**
- * Ask for a resource name until the answer is one wrangler and wrangler.toml will
- * agree on. `ask` and `isInteractive` are injected so the loop is testable and so
- * this file stays free of readline and process state; `onReject` lets the caller
- * explain the rule in its own voice. Returns null when a rejected answer can't be
- * re-asked — a piped or CI run has no second answer to give, and provisioning
- * under a name we would have to rewrite is what this guards against.
+ * Ask until the answer passes `isValid`. The dependencies are injected so the loop
+ * is testable and this file stays free of readline and process state; `onReject`
+ * lets the caller explain the rule in its own voice. Returns null when a rejected
+ * answer can't be re-asked — a piped or CI run has no second answer to give, and
+ * proceeding on a value we would have to rewrite is what this guards against.
  */
-export async function askResourceName(
+export async function askUntilValid(
 	question: string,
 	def: string,
-	deps: {
-		ask: (question: string, def: string) => Promise<string>;
-		isInteractive: boolean;
-		onReject?: (answer: string) => void;
-	}
+	isValid: (answer: string) => boolean,
+	deps: AskDeps
 ): Promise<string | null> {
 	for (;;) {
 		const answer = await deps.ask(question, def);
-		if (isValidResourceName(answer)) return answer;
+		if (isValid(answer)) return answer;
 		deps.onReject?.(answer);
 		if (!deps.isInteractive) return null;
 	}
+}
+
+/** askUntilValid bound to the rule wrangler and wrangler.toml must agree on. */
+export function askResourceName(question: string, def: string, deps: AskDeps): Promise<string | null> {
+	return askUntilValid(question, def, isValidResourceName, deps);
 }
 
 /**
@@ -154,6 +176,59 @@ export function writePrivateTempSql(sql: string, prefix: string): { dir: string;
 	const path = join(dir, 'sona.sql');
 	writeFileSync(path, sql, { mode: 0o600 });
 	return { dir, path };
+}
+
+/**
+ * Remove a directory writePrivateTempSql made. Best-effort by design: the SQL has
+ * already run by the time this is called, and a temp file we couldn't unlink is
+ * not a reason to fail the command that succeeded.
+ */
+export function removeTempSqlDir(dir: string): void {
+	try {
+		rmSync(dir, { recursive: true, force: true });
+	} catch {
+		/* best-effort temp cleanup */
+	}
+}
+
+/** Options shared by the two command runners in setup.ts. */
+export interface RunOpts {
+	capture?: boolean;
+	allowFail?: boolean;
+	stdin?: 'inherit' | 'ignore';
+	env?: NodeJS.ProcessEnv;
+	/** Called on a tolerated failure, so a caller can record that it happened. */
+	onFail?: () => void;
+}
+
+/**
+ * The shared body of setup.ts's run() and runArgs(): one stdio decision, one
+ * tolerated-failure path. `spawn` is injected — the only difference between the
+ * two runners is whether it shells out or execs an argv array — which is also
+ * what makes this testable without spawning anything.
+ */
+export function runWith(
+	spawn: (stdio: import('node:child_process').StdioOptions) => string | null,
+	opts: RunOpts
+): string {
+	try {
+		const stdio: import('node:child_process').StdioOptions = opts.capture
+			? 'pipe'
+			: [opts.stdin ?? 'inherit', 'inherit', 'inherit'];
+		return spawn(stdio) ?? '';
+	} catch (err) {
+		if (opts.allowFail) {
+			// On a tolerated failure, hand back whatever the command printed so callers
+			// can sniff it (e.g. the R2 "not enabled" error). Inherited stdio isn't
+			// captured, so this is only non-empty when `capture` was set — which is why
+			// a caller that must know whether the command SUCCEEDED takes onFail rather
+			// than reading the text.
+			opts.onFail?.();
+			const e = err as { stdout?: string | Buffer; stderr?: string | Buffer };
+			return `${e.stdout ?? ''}${e.stderr ?? ''}`;
+		}
+		throw err;
+	}
 }
 
 /**
