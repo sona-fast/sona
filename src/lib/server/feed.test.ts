@@ -219,6 +219,77 @@ describe('renderFeed — item fields', () => {
 	});
 });
 
+describe('renderFeed — inline image in the description', () => {
+	const only = (item: FeedItem) => children(channelOf(renderFeed(CHANNEL, [item])), 'item')[0];
+	/** Undo the HTML escaping applied inside the description, so an assertion
+	 * compares the text a reader finally renders — the second of the two passes. */
+	const html = (text: string) =>
+		text
+			.replace(/&lt;/g, '<')
+			.replace(/&gt;/g, '>')
+			.replace(/&quot;/g, '"')
+			.replace(/&amp;/g, '&');
+
+	it('emits the image followed by the text description', () => {
+		expect(textOf(only({ ...ITEM, description: 'A drawing.' }), 'description')).toBe(
+			'<img src="https://taro.surf/img/parent.png" alt="Parent Piece" /><p>A drawing.</p>'
+		);
+	});
+
+	it('emits the image alone when the row has no text description', () => {
+		expect(textOf(only(ITEM), 'description')).toBe(
+			'<img src="https://taro.surf/img/parent.png" alt="Parent Piece" />'
+		);
+	});
+
+	it('leaves a description with no image as plain text', () => {
+		const entry = only({ ...ITEM, imageUrl: undefined, description: 'Just words.' });
+		expect(textOf(entry, 'description')).toBe('Just words.');
+	});
+
+	it('emits no description at all when the row has neither', () => {
+		expect(textOf(only({ ...ITEM, imageUrl: undefined }), 'description')).toBeUndefined();
+	});
+
+	it('keeps the Media RSS elements alongside the inline image', () => {
+		// The inline copy is for readers that ignore Media RSS; it does not replace
+		// the elements the readers that DO support it use.
+		const entry = only(ITEM);
+		expect(child(entry, 'media:content')!.attrs.url).toBe('https://taro.surf/img/parent.png');
+		expect(child(entry, 'media:thumbnail')!.attrs.url).toBe('https://taro.surf/img/parent.png');
+	});
+
+	it('inlines the image on an adult item too, alt text prefix and all', () => {
+		const entry = children(
+			channelOf(renderFeed({ ...CHANNEL, adult: true }, [{ ...ITEM, nsfw: true }])),
+			'item'
+		)[0];
+		expect(textOf(entry, 'description')).toBe(
+			'<img src="https://taro.surf/img/parent.png" alt="[NSFW] Parent Piece" />'
+		);
+	});
+
+	it('escapes the HTML exactly once inside the escaped XML', () => {
+		// Both passes are required and neither may run twice: XML-unescaping the
+		// element gives HTML source, and HTML-unescaping THAT gives the originals
+		// back. A double escape survives one pass too many and shows as literal
+		// `&amp;` in the reader.
+		const title = 'A & B <i>"x"</i>';
+		const imageUrl = 'https://taro.surf/img.png?a=1&b=2&quot=%22';
+		const xml = renderFeed(CHANNEL, [
+			{ ...ITEM, title, imageUrl, description: 'Ben & Jerry <3' }
+		]);
+		const source = textOf(children(channelOf(xml), 'item')[0], 'description')!;
+		expect(source).toBe(
+			'<img src="https://taro.surf/img.png?a=1&amp;b=2&amp;quot=%22" ' +
+				'alt="A &amp; B &lt;i&gt;&quot;x&quot;&lt;/i&gt;" /><p>Ben &amp; Jerry &lt;3</p>'
+		);
+		expect(html(source)).toBe(
+			`<img src="${imageUrl}" alt="${title}" /><p>Ben & Jerry <3</p>`
+		);
+	});
+});
+
 describe('renderFeed — escaping', () => {
 	it('escapes markup in a title rather than emitting it', () => {
 		const xml = renderFeed(CHANNEL, [{ ...ITEM, title: 'A & B <script>x</script>' }]);

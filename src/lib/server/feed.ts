@@ -83,6 +83,33 @@ export function escapeXml(value: string): string {
 }
 
 /**
+ * Escape text for an HTML attribute value or text node, for the markup that goes
+ * INSIDE a description. Two escapes stack here and both are required: this pass
+ * produces the HTML source a reader renders, and escapeXml then wraps that
+ * source as XML character data. A literal `&` therefore travels as `&amp;amp;`
+ * — XML-unescaped once to `&amp;`, which is what HTML spells an ampersand.
+ */
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
+}
+
+/**
+ * The description body for an item that has an image. Readers without Media RSS
+ * support (Vivaldi's reader, Feedly's article view) render only this element, so
+ * the image is repeated here as markup rather than left to media:content alone.
+ * The alt text is the displayed title, NSFW prefix included, so a reader showing
+ * alt text before the image loads carries the same warning the title does.
+ */
+function imageDescriptionHtml(imageUrl: string, title: string, description?: string): string {
+	const img = `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)}" />`;
+	return description ? `${img}<p>${escapeHtml(description)}</p>` : img;
+}
+
+/**
  * An ISO instant as RSS wants it (RFC 822 with a 4-digit year, per the spec's
  * own note). `toUTCString` is exactly that form — "Sat, 01 Aug 2026 00:00:00
  * GMT" — and is locale-independent by definition, unlike toLocaleString.
@@ -102,7 +129,8 @@ function element(name: string, value: string, indent: string): string {
 
 function renderItem(item: FeedItem): string {
 	const lines: string[] = ['\t\t<item>'];
-	lines.push(element('title', (item.nsfw ? NSFW_TITLE_PREFIX : '') + item.title, '\t\t\t'));
+	const title = (item.nsfw ? NSFW_TITLE_PREFIX : '') + item.title;
+	lines.push(element('title', title, '\t\t\t'));
 	lines.push(element('link', item.link, '\t\t\t'));
 	// isPermaLink is the default, but stating it is what tells a reader the guid
 	// is safe to resolve — and the guid IS the page URL, so dedupe survives a
@@ -110,7 +138,17 @@ function renderItem(item: FeedItem): string {
 	lines.push(`\t\t\t<guid isPermaLink="true">${escapeXml(item.link)}</guid>`);
 	const pubDate = rfc822(item.createdAt);
 	if (pubDate) lines.push(element('pubDate', pubDate, '\t\t\t'));
-	if (item.description) lines.push(element('description', item.description, '\t\t\t'));
+	if (item.imageUrl) {
+		lines.push(
+			element(
+				'description',
+				imageDescriptionHtml(item.imageUrl, title, item.description),
+				'\t\t\t'
+			)
+		);
+	} else if (item.description) {
+		lines.push(element('description', item.description, '\t\t\t'));
+	}
 	if (item.credit) {
 		lines.push(element('dc:creator', item.credit, '\t\t\t'));
 		lines.push(element('media:credit', item.credit, '\t\t\t'));
