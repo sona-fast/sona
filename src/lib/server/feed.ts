@@ -88,13 +88,18 @@ export function escapeXml(value: string): string {
  * produces the HTML source a reader renders, and escapeXml then wraps that
  * source as XML character data. A literal `&` therefore travels as `&amp;amp;`
  * — XML-unescaped once to `&amp;`, which is what HTML spells an ampersand.
+ *
+ * The apostrophe is escaped numerically (`&#39;` — HTML 4 has no `&apos;`) so
+ * the helper stays safe in single-quoted attribute positions too, rather than
+ * relying on every call site quoting its attributes with double quotes.
  */
 function escapeHtml(value: string): string {
 	return value
 		.replace(/&/g, '&amp;')
 		.replace(/</g, '&lt;')
 		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;');
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
 }
 
 /**
@@ -108,6 +113,11 @@ function escapeHtml(value: string): string {
  * twice. That is deliberate, not a bug to fix: Flickr's feed — the model for
  * this markup — duplicates the same way, and dropping either copy would blank
  * the image for the readers that only understand the other mechanism.
+ *
+ * Only absolute http(s) URLs are inlined — renderItem falls back to the
+ * text-only description for anything else. A protocol-relative or exotic-scheme
+ * URL inside reader-rendered HTML is where a stored value could turn into
+ * something a reader executes; media:content still carries it either way.
  */
 function imageDescriptionHtml(imageUrl: string, title: string, description?: string): string {
 	const img = `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)}" />`;
@@ -147,8 +157,10 @@ function renderItem(item: FeedItem): string {
 	// HTML-valued element, so a reader HTML-unescapes EVERY description — an
 	// image-less one left raw would render stored markup live instead of
 	// literally.
-	const body = item.imageUrl
-		? imageDescriptionHtml(item.imageUrl, title, item.description)
+	const inlineImageUrl =
+		item.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? item.imageUrl : undefined;
+	const body = inlineImageUrl
+		? imageDescriptionHtml(inlineImageUrl, title, item.description)
 		: item.description && escapeHtml(item.description);
 	if (body) lines.push(element('description', body, '\t\t\t'));
 	if (item.credit) {

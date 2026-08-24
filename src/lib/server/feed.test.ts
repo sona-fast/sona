@@ -185,6 +185,8 @@ describe('renderFeed — item fields', () => {
 	});
 
 	it('attaches the image as media:content and media:thumbnail', () => {
+		// The inline description copy is for readers that ignore Media RSS; it does
+		// not replace the elements the readers that DO support it use.
 		const entry = only(ITEM);
 		expect(child(entry, 'media:content')!.attrs.url).toBe('https://taro.surf/img/parent.png');
 		expect(child(entry, 'media:thumbnail')!.attrs.url).toBe('https://taro.surf/img/parent.png');
@@ -234,13 +236,10 @@ describe('renderFeed — inline image in the description', () => {
 		);
 	});
 
-	it('HTML-escapes a description with no image, like the image branch does', () => {
-		// Plain text is its own escaped form, so it comes through unchanged...
-		const entry = only({ ...ITEM, imageUrl: undefined, description: 'Just words.' });
-		expect(textOf(entry, 'description')).toBe('Just words.');
-	});
-
 	it('renders markup in an image-less description literally, not as HTML', () => {
+		// Plain text is its own escaped form, so it comes through unchanged...
+		const plain = only({ ...ITEM, imageUrl: undefined, description: 'Just words.' });
+		expect(textOf(plain, 'description')).toBe('Just words.');
 		// ...but stored markup must survive BOTH unescape passes as text: the
 		// element is HTML-valued now, so a raw description here would render
 		// "See the <model> file" with the word swallowed as a live element.
@@ -254,12 +253,32 @@ describe('renderFeed — inline image in the description', () => {
 		expect(textOf(only({ ...ITEM, imageUrl: undefined }), 'description')).toBeUndefined();
 	});
 
-	it('keeps the Media RSS elements alongside the inline image', () => {
-		// The inline copy is for readers that ignore Media RSS; it does not replace
-		// the elements the readers that DO support it use.
-		const entry = only(ITEM);
-		expect(child(entry, 'media:content')!.attrs.url).toBe('https://taro.surf/img/parent.png');
-		expect(child(entry, 'media:thumbnail')!.attrs.url).toBe('https://taro.surf/img/parent.png');
+	it('treats an empty description like a missing one', () => {
+		// `<p></p>` after the image — or a bare `<description></description>` —
+		// reads as "this work has a description and it is blank".
+		expect(textOf(only({ ...ITEM, imageUrl: undefined, description: '' }), 'description')).toBeUndefined();
+		expect(textOf(only({ ...ITEM, description: '' }), 'description')).toBe(
+			'<img src="https://taro.surf/img/parent.png" alt="Parent Piece" />'
+		);
+	});
+
+	it('inlines only absolute http(s) image URLs, without touching Media RSS', () => {
+		// A protocol-relative or exotic-scheme URL inside reader-rendered HTML is
+		// where a stored value could turn into something a reader executes, so the
+		// description falls back to text-only while media:content keeps the URL.
+		const withText = only({ ...ITEM, imageUrl: '//taro.surf/img/parent.png', description: 'A drawing.' });
+		expect(textOf(withText, 'description')).toBe('A drawing.');
+		expect(child(withText, 'media:content')!.attrs.url).toBe('//taro.surf/img/parent.png');
+		expect(child(withText, 'media:thumbnail')!.attrs.url).toBe('//taro.surf/img/parent.png');
+		const bare = only({ ...ITEM, imageUrl: '//taro.surf/img/parent.png' });
+		expect(textOf(bare, 'description')).toBeUndefined();
+	});
+
+	it('escapes an apostrophe in the description numerically', () => {
+		// `&#39;`, not `&apos;` — HTML 4 has no `&apos;`, and the numeric form
+		// keeps escapeHtml safe even in a single-quoted attribute position.
+		const entry = only({ ...ITEM, imageUrl: undefined, description: "Ben's" });
+		expect(textOf(entry, 'description')).toBe('Ben&#39;s');
 	});
 
 	it('inlines the image on an adult item too, alt text prefix and all', () => {
