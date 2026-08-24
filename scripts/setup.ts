@@ -31,12 +31,14 @@ import {
 	derivedResourceName,
 	isValidDatabaseId,
 	isValidDatabaseName,
+	isValidBucketName,
 	writePrivateTempSql,
 	removeTempSqlDir,
 	runWith,
 	type RunOpts,
 	RESOURCE_NAME_RULE,
 	DATABASE_NAME_RULE,
+	BUCKET_NAME_RULE,
 	DATABASE_ID_RULE,
 	bucketCreateSucceeded,
 	isR2NotEnabled,
@@ -101,6 +103,17 @@ const askDbName = (q: string, def: string): Promise<string | null> =>
 		onReject: (answer) => {
 			console.warn(`\n⚠ "${answer}" can't be used as a D1 database name.`);
 			console.warn(`  Use ${DATABASE_NAME_RULE}.`);
+		}
+	});
+// R2 allows a wider length range than Pages does, and a re-run may need to name a
+// bucket that already exists — the same point-at-what-is-there case D1 has.
+const askBucketName = (q: string, def: string): Promise<string | null> =>
+	askUntilValid(q, def, isValidBucketName, {
+		ask,
+		isInteractive: Boolean(stdin.isTTY),
+		onReject: (answer) => {
+			console.warn(`\n⚠ "${answer}" can't be used as an R2 bucket name.`);
+			console.warn(`  Use ${BUCKET_NAME_RULE}.`);
 		}
 	});
 const askYesNo = async (q: string, def = true) => {
@@ -267,8 +280,8 @@ async function main() {
 	// itself would reject is not a default it may offer.
 	const dbName = await askDbName('D1 database name', derivedResourceName(project, 'db'));
 	if (dbName === null) return abortAnswer('database name', DATABASE_NAME_RULE);
-	const bucket = await askName('R2 bucket name', derivedResourceName(project, 'images'));
-	if (bucket === null) return abortAnswer('name', RESOURCE_NAME_RULE);
+	const bucket = await askBucketName('R2 bucket name', derivedResourceName(project, 'images'));
+	if (bucket === null) return abortAnswer('bucket name', BUCKET_NAME_RULE);
 
 	// Default the R2 public URL to https://cdn.<domain> when a domain was given.
 	// The app uses this verbatim as `${base}/${key}`, so normalize whatever the
@@ -583,9 +596,11 @@ async function main() {
 
 	// 4. Render wrangler.toml from the template.
 	const tpl = readFileSync('wrangler.toml.example', 'utf8');
-	// Function replacements throughout: a `$&`, `$1` or `$'` in an answer — the
-	// pasted database_id is the one value no rule constrains — would otherwise be
-	// read as a replacement pattern and silently rewrite the line it lands in.
+	// Function replacements throughout: as a replacement STRING, a `$&`, `$1` or
+	// `$'` in a value would be read as a replacement pattern and silently rewrite
+	// the line it lands in. Every value here is charset-validated today, so none of
+	// them can carry one — the function form is what keeps that from being the
+	// thing holding the generated config together.
 	const toml = tpl
 		.replace(/^name = ".*"/m, () => `name = "${project}"`)
 		.replace(/database_name = ".*"/, () => `database_name = "${dbName}"`)
@@ -615,7 +630,7 @@ async function main() {
 				...(turnstileSitekey ? { TURNSTILE_SITEKEY: turnstileSitekey } : {})
 			}
 		});
-		const res = await cfApi(cfToken, `/accounts/${cfAccount}/pages/projects/${encodeURIComponent(project)}`, {
+		const res = await cfApi(cfToken, `/accounts/${encodeURIComponent(cfAccount)}/pages/projects/${encodeURIComponent(project)}`, {
 			method: 'PATCH',
 			body: payload
 		});

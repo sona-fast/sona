@@ -107,6 +107,23 @@ export function isValidResourceName(name: string): boolean {
 	return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$(?![\s\S])/.test(name) && name.length <= 58;
 }
 
+/** How an R2 bucket name may look, quoted verbatim when one is rejected. */
+export const BUCKET_NAME_RULE =
+	'lowercase letters, digits, and hyphens only, 3 to 63 characters, starting and ending with a letter or digit';
+
+/**
+ * True when `name` is usable as an R2 bucket name. Same character set as the Pages
+ * rule, different bounds — R2's are 3 to 63. Sharing one rule was wrong at both
+ * ends: a two-character answer passed here and then failed at create, and a bucket
+ * that already exists under a 59-to-63-character name could not be entered on a
+ * re-run at all.
+ */
+export function isValidBucketName(name: string): boolean {
+	return (
+		/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$(?![\s\S])/.test(name) && name.length >= 3 && name.length <= 63
+	);
+}
+
 /** How a D1 database name may look, quoted verbatim when one is rejected. */
 export const DATABASE_NAME_RULE =
 	'letters, digits, underscores, and hyphens, starting with a letter or digit, up to 64 characters';

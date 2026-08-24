@@ -10,6 +10,7 @@ import {
 	sanitizeProjectName,
 	isValidResourceName,
 	isValidDatabaseName,
+	isValidBucketName,
 	derivedResourceName,
 	askResourceName,
 	writePrivateTempSql,
@@ -514,6 +515,33 @@ describe('writePrivateTempSql', () => {
 		} finally {
 			rmSync(a.dir, { recursive: true, force: true });
 			rmSync(b.dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe('isValidBucketName', () => {
+	// R2's bounds are 3 to 63, not Pages' 1 to 58. The old shared rule let a
+	// two-character answer through to fail at create, and refused a long name that
+	// an earlier run had already created.
+	it('accepts the range R2 actually allows, at both ends', () => {
+		expect(isValidBucketName('a'.repeat(3))).toBe(true);
+		expect(isValidBucketName('a'.repeat(63))).toBe(true);
+		expect(isValidBucketName(`${'taro-surf-'.repeat(5)}images`)).toBe(true);
+		expect(isValidBucketName('taro-surf-images')).toBe(true);
+	});
+
+	it('accepts the default setup derives, so the offered answer is always usable', () => {
+		expect(isValidBucketName(derivedResourceName('a'.repeat(58), 'images'))).toBe(true);
+	});
+
+	it('rejects a name shorter or longer than R2 takes', () => {
+		expect(isValidBucketName('ab')).toBe(false);
+		expect(isValidBucketName('a'.repeat(64))).toBe(false);
+	});
+
+	it('keeps the Pages character set: no uppercase, edge hyphens, or punctuation', () => {
+		for (const bad of ['MyBucket', '-lead-ok', 'trail-', 'my$bucket', 'my bucket', 'my_bucket']) {
+			expect(isValidBucketName(bad), bad).toBe(false);
 		}
 	});
 });
@@ -1908,8 +1936,9 @@ describe('setup.ts ↔ a rejected answer is asked again, or setup stops', () => 
 	it("binds both prompts to this run's TTY, so a piped run cannot loop forever", () => {
 		expect(setupCode).toMatch(/askResourceName\(/);
 		expect(setupCode).toMatch(/askUntilValid\(\s*q,\s*def,\s*isValidDatabaseName/);
-		// askName, askDbName, and the pasted database_id.
-		expect(setupCode.match(/isInteractive:\s*Boolean\(\s*stdin\.isTTY\s*\)/g)).toHaveLength(3);
+		expect(setupCode).toMatch(/askUntilValid\(\s*q,\s*def,\s*isValidBucketName/);
+		// askName, askDbName, askBucketName, and the pasted database_id.
+		expect(setupCode.match(/isInteractive:\s*Boolean\(\s*stdin\.isTTY\s*\)/g)).toHaveLength(4);
 	});
 
 	// The prompts themselves, not just the helpers: reverting any of the three to a
@@ -1919,7 +1948,7 @@ describe('setup.ts ↔ a rejected answer is asked again, or setup stops', () => 
 		expect(bindings.map((m) => [m[1], m[2]])).toEqual([
 			['project', 'askName'],
 			['dbName', 'askDbName'],
-			['bucket', 'askName']
+			['bucket', 'askBucketName']
 		]);
 		// Each answer is checked for null on the very next line — an unguarded one
 		// would carry a null name into wrangler and wrangler.toml.
@@ -1949,8 +1978,10 @@ describe('setup.ts ↔ a rejected answer is asked again, or setup stops', () => 
 });
 
 describe('setup.ts ↔ untrusted values are encoded, never pasted raw', () => {
-	it('encodes the project name in the Pages-project PATCH path', () => {
-		expect(setupCode).toContain('/pages/projects/${encodeURIComponent(project)}');
+	it('encodes both segments of the Pages-project PATCH path', () => {
+		expect(setupCode).toContain(
+			'/accounts/${encodeURIComponent(cfAccount)}/pages/projects/${encodeURIComponent(project)}'
+		);
 	});
 
 	it('encodes the zone id in every zone call it makes itself', () => {
