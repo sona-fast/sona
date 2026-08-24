@@ -58,14 +58,19 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	// every day's run would die at the same place. What keeps one owner profile
 	// lookup from failing an otherwise good artist run is the try/catch below,
 	// which does that job from either position. Heal-only, so a healthy fork pays
-	// two settings reads and no network call at all.
+	// one settings read (getRawSettings fetches both owner keys in a single
+	// query, and the pre-write re-read is unreachable on that path) and no
+	// network call at all.
 	let ownerAvatar: OwnerAvatarHeal = 'skipped';
 	try {
 		ownerAvatar = await healOwnerAvatar(db, { env, settings, origin: url.origin });
 	} catch (e) {
-		// Never fails the run. Warned rather than silent (the artist loop already
-		// warns on a thrown resolve): without it, a fork stuck on a hotlink because
-		// this keeps throwing reports the exact heartbeat a healthy fork does.
+		// Never fails the run — but it must not report as a healthy fork either.
+		// 'unresolved' is exactly what a throw leaves behind (we tried, the owner
+		// is still on someone else's host), and it is the only part of this that
+		// reaches the operator: the warn goes to a log nobody reads, while the
+		// heartbeat below is on their background-jobs panel.
+		ownerAvatar = 'unresolved';
 		console.warn(`[avatar] owner heal threw: ${e instanceof Error ? e.message : String(e)}`);
 	}
 
@@ -87,14 +92,15 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	}
 	// Operator wording, not the function's. "still unresolved" would point them at
 	// their Bluesky profile, but the dominant failure is the other half — the
-	// profile resolves and the copy to storage fails — so this says where the
-	// picture is being served FROM, which is the thing that is actually wrong.
-	// Same phrase the admin artists panel already ships ("All avatars are already
-	// self-hosted"), rather than a metaphor no sibling heartbeat uses.
+	// profile resolves and the copy to storage fails. Reporting the ACTION rather
+	// than the state keeps it true in the branches where nothing is stranded on a
+	// third-party host at all: a handle that changed mid-run, and a fork whose
+	// owner has a handle but no picture anywhere. "self-hosted" is the phrase the
+	// admin artists panel already ships ("All avatars are already self-hosted").
 	const ownerNote =
 		ownerAvatar === 'skipped'
 			? ''
-			: `, owner avatar ${ownerAvatar === 'healed' ? 'now self-hosted' : 'still not self-hosted'}`;
+			: `, owner avatar ${ownerAvatar === 'healed' ? 'now self-hosted' : 'not re-hosted this run'}`;
 	schedule(platform, recordJobRun(db, 'refresh-avatars', 'ok',
 		`refreshed ${result.refreshed}/${result.processed}, ${result.remaining} remaining${ownerNote}`));
 	return json({ ...result, ownerAvatar });

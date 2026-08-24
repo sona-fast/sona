@@ -214,12 +214,13 @@ describe('POST /api/cron/refresh-avatars — the owner-avatar heal', () => {
 
 		await Promise.all(waits);
 		expect(jobRow(sqlite).detail).toBe(
-			'refreshed 0/0, 0 remaining, owner avatar still not self-hosted'
+			'refreshed 0/0, 0 remaining, owner avatar not re-hosted this run'
 		);
 	});
 
 	// A thrown heal must not cost the operator the artist run that already
-	// succeeded, nor the heartbeat that reports it.
+	// succeeded, nor the heartbeat that reports it — and must not be reported as
+	// the run a healthy fork has either, which is what 'skipped' would say.
 	it('still returns the artist counts and an ok heartbeat when the heal throws', async () => {
 		stubProfileAndImage();
 		const { sqlite, env } = strandedEnv();
@@ -235,18 +236,22 @@ describe('POST /api/cron/refresh-avatars — the owner-avatar heal', () => {
 		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '5', waits }));
 
 		expect(res.status).toBe(200);
+		// 'unresolved', not 'skipped': after a throw the owner IS still on someone
+		// else's host, and the console.warn is not on the operator's panel, so
+		// leaving the initializer would make this fork's heartbeat byte-identical
+		// to a healthy one's.
 		expect(await res.json()).toEqual({
 			processed: 0,
 			refreshed: 0,
 			remaining: 0,
-			ownerAvatar: 'skipped'
+			ownerAvatar: 'unresolved'
 		});
 		expect(warn).toHaveBeenCalled();
 
 		await Promise.all(waits);
 		const job = jobRow(sqlite);
 		expect(job.status).toBe('ok');
-		expect(job.detail).toBe('refreshed 0/0, 0 remaining');
+		expect(job.detail).toBe('refreshed 0/0, 0 remaining, owner avatar not re-hosted this run');
 		warn.mockRestore();
 	});
 });

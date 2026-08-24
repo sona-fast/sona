@@ -55,31 +55,46 @@ function r2Ctx(bucket: ReturnType<typeof fakeBucket>, keyHint = 'nova'): AvatarR
 }
 
 const BSKY_AVATAR = 'https://cdn.bsky.app/img/avatar/plain/did/abc@jpeg';
+/** Where a 3xx download points. Serving real bytes here makes following observable. */
+const REDIRECT_TARGET = 'https://redirected.test/x.jpg';
 
 /**
  * Route fetch by URL: the Bluesky getProfile lookup returns a profile with an
  * avatar, and the avatar download returns image bytes. `override` lets a test
  * change the download response (non-2xx, wrong content-type, or no profile).
+ *
+ * A 3xx `imageStatus` is modelled the way a real fetch treats one: followed to
+ * REDIRECT_TARGET unless the caller asked for redirect:'manual'. That is what
+ * lets a test pin the redirect posture by what gets stored rather than by
+ * asserting the request options back at the platform.
  */
 function stubFetch(override?: {
 	profile?: { avatar?: string } | null;
 	imageStatus?: number;
 	imageType?: string;
 }) {
-	// `init` is unused by the routing but captured so a test can assert the request
-	// options (the redirect posture is only observable there).
-	const fetchMock = vi.fn(async (input: string | URL, _init?: RequestInit) => {
+	const image = (type = override?.imageType ?? 'image/jpeg') =>
+		new Response(new Uint8Array([1, 2, 3, 4]), { status: 200, headers: { 'content-type': type } });
+	async function handle(input: string | URL, init?: RequestInit): Promise<Response> {
 		const url = String(input);
 		if (url.includes('getProfile')) {
 			const profile = override?.profile === undefined ? { avatar: BSKY_AVATAR } : override.profile;
 			if (!profile) return new Response('not found', { status: 404 });
 			return new Response(JSON.stringify(profile), { status: 200 });
 		}
+		// Only reachable when the download followed the redirect.
+		if (url === REDIRECT_TARGET) return image('image/jpeg');
 		// The avatar image download.
 		const status = override?.imageStatus ?? 200;
-		const type = override?.imageType ?? 'image/jpeg';
-		return new Response(new Uint8Array([1, 2, 3, 4]), { status, headers: { 'content-type': type } });
-	});
+		if (status >= 300 && status < 400) {
+			if (init?.redirect !== 'manual') return handle(REDIRECT_TARGET, init);
+			// 3xx is a null-body status, so the Response carries none.
+			return new Response(null, { status, headers: { location: REDIRECT_TARGET } });
+		}
+		if (status !== 200) return new Response('nope', { status });
+		return image();
+	}
+	const fetchMock = vi.fn(handle);
 	vi.stubGlobal('fetch', fetchMock);
 	return fetchMock;
 }
@@ -126,23 +141,34 @@ describe('resolveAvatarUrl re-hosting', () => {
 	// response rather than from a caller, but this fetch now runs unattended on a
 	// daily schedule, so a profile pointing at an internal host must not be
 	// downloaded at all — refused BEFORE the request, not after.
-	it('refuses to download an avatar hosted on a private address', async () => {
-		const fetchMock = stubFetch({ profile: { avatar: 'http://127.0.0.1:8080/x.jpg' } });
-		const bucket = fakeBucket();
-		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
-		// Only the profile lookup went out — the download never happened.
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		expect(bucket.put).not.toHaveBeenCalled();
-		expect(url).toBe('http://127.0.0.1:8080/x.jpg');
-	});
+	// Both spellings, because the refusal reads URL.hostname and only the bracketed
+	// form has a port to strip: URL.host would hand isPrivateHost '[::1]:8080',
+	// which its anchored IPv6 pattern does not match, and the download would go out.
+	it.each(['http://127.0.0.1:8080/x.jpg', 'http://[::1]:8080/x.jpg'])(
+		'refuses to download an avatar hosted on a private address (%s)',
+		async (avatar) => {
+			const fetchMock = stubFetch({ profile: { avatar } });
+			const bucket = fakeBucket();
+			const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+			// Only the profile lookup went out — the download never happened.
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(bucket.put).not.toHaveBeenCalled();
+			// Refused, not merely failed: a fallback here would store the internal
+			// address and put it in a public <img src>, making the visitor's browser
+			// attempt the request this refusal just prevented.
+			expect(url).toBeNull();
+		}
+	);
 
 	it('does not follow redirects on the avatar download', async () => {
-		const fetchMock = stubFetch();
-		await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(fakeBucket()));
+		stubFetch({ imageStatus: 302 });
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
 		// A storage/CDN host answering 3xx is an upstream error, not an invitation
-		// to fetch wherever it points. Asserted on the request because 'manual' is
-		// only observable there.
-		expect(fetchMock.mock.calls[1][1]).toMatchObject({ redirect: 'manual' });
+		// to fetch wherever it points. The stub serves real bytes at the redirect
+		// target, so dropping redirect:'manual' would store them instead.
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(url).toBe(BSKY_AVATAR);
 	});
 });
 
@@ -372,13 +398,15 @@ describe('healOwnerAvatar (the retry nothing used to do)', () => {
 	}
 
 	// Storage config only. The owner fields are deliberately set to values the
-	// function must IGNORE, so a test that passes proves it read D1.
+	// function must IGNORE, so a test that passes proves it read D1. The snapshot's
+	// avatar is a HOTLINK on purpose: an owned one would say "skip" for the same
+	// reason D1 does, and every skip test would pass without discriminating.
 	const ownerSettings = (over: Partial<SiteSettings> = {}) =>
 		({
 			storageProvider: 'r2',
 			r2PublicUrl: 'https://cdn.test',
 			blueskyUrl: 'https://bsky.app/profile/stale.bsky.social',
-			adminAvatarUrl: 'https://cdn.test/avatars/owner/stale.jpg',
+			adminAvatarUrl: 'https://cdn.bsky.app/img/avatar/plain/did/stale@jpeg',
 			...over
 		}) as unknown as SiteSettings;
 
@@ -407,6 +435,9 @@ describe('healOwnerAvatar (the retry nothing used to do)', () => {
 		expect(stored).toMatch(/^https:\/\/cdn\.test\/avatars\/owner\//);
 	});
 
+	// Covers the operator who saved a good avatar after the cron took its snapshot
+	// too: the snapshot here holds a hotlink, so a heal deciding from it would
+	// resolve and overwrite the copy D1 already has.
 	it('leaves an avatar we already serve alone, without a profile lookup', async () => {
 		const { db } = makeDb();
 		const bucket = fakeBucket();
@@ -424,16 +455,22 @@ describe('healOwnerAvatar (the retry nothing used to do)', () => {
 	it('does not write another hotlink over the one already there', async () => {
 		const { db } = makeDb();
 		const bucket = fakeBucket();
-		await seedOwner(db);
+		// A DIFFERENT hotlink from the one the profile hands back. Seeding the same
+		// URL would leave the row byte-identical whether the gate refused or wrote,
+		// so the fixture could not express the failure it claims to catch.
+		const stale = 'https://cdn.bsky.app/img/avatar/plain/did/old@jpeg';
+		await seedOwner(db, { adminAvatarUrl: stale });
 		// Re-hosting fails, so resolveAvatarUrl falls back to the SOURCE hotlink.
 		stubFetch({ imageStatus: 500 });
 
 		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
 
 		// Reported honestly as still broken, and the row is left holding what it
-		// held rather than churned with an equivalent bad value.
+		// held rather than churned with an equivalent bad value. This is the
+		// deliberate divergence from shouldWriteAvatar, which WOULD write here:
+		// neither URL is ours, so its "no owned avatar to lose" disjunct allows it.
 		expect(res).toBe('unresolved');
-		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(BSKY_AVATAR);
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(stale);
 	});
 
 	// The profile lookup 404s → resolveAvatarUrl returns null. Without the null
@@ -451,15 +488,22 @@ describe('healOwnerAvatar (the retry nothing used to do)', () => {
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(BSKY_AVATAR);
 	});
 
-	it('does nothing when the owner has no bluesky handle to resolve from', async () => {
+	// Two forks in one: the one that never set a handle, and the operator who
+	// cleared theirs after the cron took its snapshot. saveSite pairs the fields,
+	// so clearing bluesky clears the derived avatar with it, while the snapshot
+	// still carries a handle and a hotlink — the stale view says heal, and
+	// resurrecting an avatar the operator deliberately cleared is exactly what the
+	// fresh read prevents.
+	it('does nothing when D1 holds no bluesky handle, whatever the snapshot says', async () => {
 		const { db } = makeDb();
 		const bucket = fakeBucket();
-		await seedOwner(db, { blueskyUrl: '' });
+		await seedOwner(db, { blueskyUrl: '', adminAvatarUrl: '' });
 
 		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
 
 		expect(res).toBe('skipped');
 		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
 	});
 
 	// The isolate that repaired the row must stop serving the value it replaced.
@@ -479,36 +523,8 @@ describe('healOwnerAvatar (the retry nothing used to do)', () => {
 
 	// The snapshot the cron captured is minutes old by the time the heal runs, and
 	// a site-tab save in between is reachable by hand (the workflow has a
-	// workflow_dispatch). These three pin that D1 — not the snapshot — decides.
-	it('skips when the operator cleared their bluesky field after the snapshot was taken', async () => {
-		const { db } = makeDb();
-		const bucket = fakeBucket();
-		// saveSite pairs the two: clearing bluesky clears the derived avatar with it.
-		await seedOwner(db, { blueskyUrl: '', adminAvatarUrl: '' });
-
-		// The snapshot still carries a handle and a hotlink: the stale view says heal.
-		const stale = ownerSettings({ blueskyUrl: OWNER_HANDLE, adminAvatarUrl: BSKY_AVATAR });
-		const res = await healOwnerAvatar(db, opts(bucket, stale));
-
-		// Resurrecting an avatar the operator deliberately cleared is exactly the
-		// thing the fresh read prevents.
-		expect(res).toBe('skipped');
-		expect(globalThis.fetch).not.toHaveBeenCalled();
-		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
-	});
-
-	it('skips when the operator saved a good avatar after the snapshot was taken', async () => {
-		const { db } = makeDb();
-		const bucket = fakeBucket();
-		const justSaved = 'https://cdn.test/avatars/owner/just-saved.jpg';
-		await seedOwner(db, { adminAvatarUrl: justSaved });
-
-		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
-
-		expect(res).toBe('skipped');
-		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(justSaved);
-	});
-
+	// workflow_dispatch). This pins that D1 — not the snapshot — supplies the
+	// handle, as the two skip tests above pin that it supplies the stored avatar.
 	it('resolves against the handle stored in D1, not the one in the stale snapshot', async () => {
 		const { db } = makeDb();
 		const bucket = fakeBucket();
@@ -566,6 +582,23 @@ describe('healOwnerAvatar (the retry nothing used to do)', () => {
 		expect(res).toBe('healed');
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toMatch(
 			/^https:\/\/taro\.surf\/img\/avatars\/owner\//
+		);
+	});
+
+	// An operator typing a bare hostname into Site URL is ordinary, and without the
+	// fallback `new URL('taro.surf')` throws mid-heal: the cron swallows it and the
+	// heartbeat reads as a fork with nothing to heal.
+	it('falls back to the request origin when the configured Site URL is malformed', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		await seedOwner(db);
+		const settings = ownerSettings({ r2PublicUrl: '', siteUrl: 'taro.surf' });
+
+		const res = await healOwnerAvatar(db, opts(bucket, settings, 'https://fork.test'));
+
+		expect(res).toBe('healed');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toMatch(
+			/^https:\/\/fork\.test\/img\/avatars\/owner\//
 		);
 	});
 });

@@ -13,6 +13,16 @@ type Env = App.Platform['env'];
 const REHOST_FETCH_TIMEOUT_MS = 8000;
 
 /**
+ * A source URL we REFUSED, as distinct from one we tried and failed to copy.
+ * The difference decides what the caller does with the source: a failed copy
+ * falls back to it (a hotlink beats nothing), but falling back to a refused
+ * private address would store an internal URL and serve it in a public
+ * <img src> — the very fetch the refusal prevented, made from the visitor's
+ * browser instead of ours.
+ */
+const REFUSED = Symbol('refused');
+
+/**
  * What re-hosting needs: the active storage provider (from env + settings) plus
  * the request origin, so an R2 dev URL ('/img/...') is absolutized before it's
  * stored. `keyHint` groups objects under a readable folder (the artist name);
@@ -33,7 +43,9 @@ export interface AvatarRehostContext {
  *
  * Fail-soft: any problem (non-2xx, disallowed type, storage not configured, put
  * error) logs and returns null so the caller keeps the source URL — a possibly
- * short-lived hotlink still beats no avatar at all.
+ * short-lived hotlink still beats no avatar at all. The one exception is a
+ * refused private host, which returns REFUSED so the caller drops the source
+ * rather than keeping it.
  *
  * Same outbound posture as the byte proxy (image-proxy.ts), which fetches the
  * same class of stored URL: private/link-local hosts are refused, and redirects
@@ -46,7 +58,7 @@ async function rehostAvatar(
 	sourceUrl: string,
 	ctx: AvatarRehostContext,
 	handle: string
-): Promise<string | null> {
+): Promise<string | typeof REFUSED | null> {
 	try {
 		// Root-relative URLs have no hostname (already ours); absolute ones must
 		// not point the server-side fetch at an internal host.
@@ -54,11 +66,14 @@ async function rehostAvatar(
 		try {
 			host = new URL(sourceUrl).hostname;
 		} catch {
-			// not an absolute URL — nothing to resolve outward
+			// Defensive and untestable from here: source URLs always come from a
+			// profile response, so a non-absolute one has no path into this function.
+			// Left in because the alternative is a throw for a value we can treat as
+			// "nothing to resolve outward".
 		}
 		if (isPrivateHost(host)) {
 			console.warn(`[avatar] rehost refused: handle=${handle} private host`);
-			return null;
+			return REFUSED;
 		}
 		const res = await fetch(sourceUrl, {
 			signal: AbortSignal.timeout(REHOST_FETCH_TIMEOUT_MS),
@@ -99,8 +114,9 @@ async function rehostAvatar(
  *
  * When `rehost` is supplied, a resolved avatar is downloaded and stored in our
  * own image store and OUR URL is returned (falling back to the source URL if
- * re-hosting fails). Without it the raw source URL is returned — used only where
- * storage context isn't available (and by unit tests of the resolvers).
+ * re-hosting fails, or to null if the source was refused). Without it the raw
+ * source URL is returned — used only where storage context isn't available (and
+ * by unit tests of the resolvers).
  */
 export async function resolveAvatarUrl(
 	socials: {
@@ -111,20 +127,26 @@ export async function resolveAvatarUrl(
 	},
 	rehost?: AvatarRehostContext
 ): Promise<string | null> {
+	// Store the copy where we can, keep the source hotlink where the copy failed,
+	// and drop the URL entirely where it was refused (see REFUSED).
+	const store = async (avatar: string, handle: string): Promise<string | null> => {
+		if (!rehost) return avatar;
+		const stored = await rehostAvatar(avatar, rehost, handle);
+		if (stored === REFUSED) return null;
+		return stored ?? avatar;
+	};
+
 	// Try Bluesky first — public API, no auth needed
 	if (socials.blueskyUrl) {
 		const avatar = await fetchBlueskyAvatar(socials.blueskyUrl);
-		if (avatar) return rehost ? (await rehostAvatar(avatar, rehost, socials.blueskyUrl)) ?? avatar : avatar;
+		if (avatar) return store(avatar, socials.blueskyUrl);
 	}
 
 	// Twitter next — the guest-token flow (see twitter-avatar.ts). Fail-soft:
 	// a null here just means the artist saves without an avatar.
 	if (socials.twitterUrl) {
 		const avatar = await fetchTwitterAvatar(socials.twitterUrl);
-		if (avatar) {
-			const handle = twitterHandleFromUrl(socials.twitterUrl);
-			return rehost ? (await rehostAvatar(avatar, rehost, handle)) ?? avatar : avatar;
-		}
+		if (avatar) return store(avatar, twitterHandleFromUrl(socials.twitterUrl));
 	}
 
 	// Other platforms would need scraping or auth — skip for now
@@ -384,6 +406,11 @@ export async function healOwnerAvatar(
 	// what counts as our own storage — a machine endpoint should not take its
 	// canonical identity from a request header. A malformed configured value
 	// falls back rather than breaking the check (same posture as isOurAvatarUrl).
+	//
+	// Scoped to the heal on purpose. refreshArtistAvatars, called from the same
+	// handler, still anchors on the request origin; hoisting this there would
+	// change which host a no-CDN fork's ARTIST avatars are absolutized under, so
+	// it needs its own change and its own tests rather than a blind sync.
 	let origin = opts.origin;
 	if (settings.siteUrl) {
 		try {
@@ -405,7 +432,10 @@ export async function healOwnerAvatar(
 	// every future run and make the corruption permanent. The same read is what
 	// stops an avatar the operator deliberately cleared from being resurrected.
 	// `settings` still supplies the STORAGE config (provider, CDN base, site
-	// URL), which no site-tab save during the batch can invalidate the same way.
+	// URL). siteUrl is a site-tab field too, so it can go stale in the same
+	// window, but the consequence there is self-correcting rather than corrupting:
+	// a stale siteUrl absolutizes the copy under the old host, and the next run
+	// reads that value as not-ours and heals it again.
 	const before = await getRawSettings(db, ['blueskyUrl', 'adminAvatarUrl']);
 	const blueskyUrl = before.blueskyUrl ?? '';
 	const current = before.adminAvatarUrl ?? '';
@@ -416,13 +446,11 @@ export async function healOwnerAvatar(
 	// Already serving our own copy: nothing to heal.
 	if (current && ours(current)) return 'skipped';
 
-	let resolved: string | null = null;
-	try {
-		resolved = await resolveAvatarUrl({ blueskyUrl }, { env, settings, origin, keyHint: 'owner' });
-	} catch {
-		// Same posture as the artist loop: one bad profile must not fail the run.
-		return 'unresolved';
-	}
+	// Unguarded on purpose: resolveAvatarUrl is fail-soft end to end (the profile
+	// fetch and the re-host each swallow their own failures), so a try here would
+	// be a catch nothing can reach. The throws that ARE reachable in this function
+	// are the settings reads and the write, and the cron's catch reports those.
+	const resolved = await resolveAvatarUrl({ blueskyUrl }, { env, settings, origin, keyHint: 'owner' });
 
 	// The one and only write gate here. resolveAvatarUrl falls back to the SOURCE
 	// hotlink when re-hosting fails, so only a copy we serve counts as healed —
@@ -431,13 +459,22 @@ export async function healOwnerAvatar(
 	// also consulted: past this line `resolved` is non-null and ours, which
 	// satisfies its first disjunct unconditionally, so calling it would advertise
 	// a gate that can never refuse. The null check stays because `ours(null)`
-	// throws, and this function's only caller swallows what it throws.
+	// throws, and a TypeError surfaced as a failed heal is a worse account of a
+	// 404ing profile than this line's honest 'unresolved'.
 	if (!resolved || !ours(resolved)) return 'unresolved';
 
 	// Re-read immediately before the write. The resolve above spends seconds on
 	// the network, and the handle it ran against is the entire justification for
 	// the value it produced: if the operator changed or cleared their Bluesky
 	// field in the meantime, this copy is of an account that is no longer theirs.
+	//
+	// Reading blueskyUrl ALONE is safe only because of a key order elsewhere:
+	// saveSite hands saveSettings one object whose blueskyUrl key comes before
+	// adminAvatarUrl, and saveSettings writes the keys one at a time with no
+	// transaction. So a concurrent save that has already written its avatar has
+	// necessarily written its handle first, and this read sees it. Swap those two
+	// keys in that object literal and a save caught mid-flight would slip past
+	// this guard and lose its just-written avatar to the line below.
 	const now = await getRawSettings(db, ['blueskyUrl']);
 	if ((now.blueskyUrl ?? '') !== blueskyUrl) return 'unresolved';
 

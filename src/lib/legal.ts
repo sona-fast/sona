@@ -123,7 +123,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 			heading: 'Artwork and third-party attribution',
 			body: [
 				`${site} displays artwork and attributes it to the artists who created it, which may include their names, handles, and links to their profiles. Fursuit photographs may be attributed to their photographers, and 3D avatar models to the artists who modeled, rigged, or textured them.`,
-				'Artist profile pictures are normally copied to our own storage, but when that copy is unavailable your browser loads the image from the artist\'s own host (for example X, Bluesky, or our upload provider), which receives your IP address and the page you are viewing.',
+				'Profile pictures shown on the site are normally copied to our own storage, but when a copy is unavailable your browser loads the image from the host it lives on (for example X, Bluesky, or our upload provider), which receives your IP address and the page you are viewing.',
 				...(opts.feedPublished === false
 					? []
 					: [
@@ -156,7 +156,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 					: [
 							"For this site those tools are Anthropic's Claude, which writes and debugs code under the developer's direction, and CodeRabbit, a code review service that reads proposed changes."
 						]),
-				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) and Bluesky (fetching profile pictures for artists and for the site owner), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
+				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) and Bluesky (fetching the profile pictures shown on this site), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
 			]
 		},
 		{
