@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import { makeD1 } from '$lib/server/test/d1';
+import { clearSettingsCache } from '$lib/server/settings';
 import { POST } from './+server';
 
 const CRON_SECRET = 'test-cron-secret';
@@ -15,6 +16,7 @@ CREATE TABLE artists (
 	registry_synced_at TEXT, aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 );
 CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE job_run (name TEXT PRIMARY KEY, status TEXT NOT NULL, ran_at TEXT NOT NULL, detail TEXT);
 `;
 
 function makeEnv() {
@@ -23,16 +25,26 @@ function makeEnv() {
 	return { CRON_SECRET, DB: makeD1(sqlite) } as unknown as App.Platform['env'];
 }
 
-function postEvent(env: App.Platform['env'], { secret, batch }: { secret?: string; batch?: string } = {}) {
+function postEvent(
+	env: App.Platform['env'],
+	{ secret, batch, waits }: { secret?: string; batch?: string; waits?: Promise<unknown>[] } = {}
+) {
 	const url = new URL('http://localhost/api/cron/refresh-avatars');
 	if (batch !== undefined) url.searchParams.set('batch', batch);
 	const request = new Request(url, {
 		method: 'POST',
 		headers: secret ? { authorization: `Bearer ${secret}` } : {}
 	});
-	return { request, url, platform: { env } } as never;
+	// The heartbeat write is scheduled fire-and-forget; capturing it lets a test
+	// await the write before asserting the job_run row.
+	const context = waits ? { waitUntil: (p: Promise<unknown>) => waits.push(p) } : undefined;
+	return { request, url, platform: { env, context } } as never;
 }
 
+// getSettings memoizes at module scope for 60s and the entry is shared by every
+// test in this file, so without this a seeded test can read an earlier test's
+// cached defaults and pass for the wrong reason.
+beforeEach(() => clearSettingsCache());
 afterEach(() => vi.unstubAllGlobals());
 
 describe('POST /api/cron/refresh-avatars', () => {
@@ -62,7 +74,7 @@ describe('POST /api/cron/refresh-avatars', () => {
 			processed: 0,
 			refreshed: 0,
 			remaining: 0,
-			ownerAvatar: { attempted: false, healed: false }
+			ownerAvatar: 'skipped'
 		});
 	});
 
@@ -81,7 +93,160 @@ describe('POST /api/cron/refresh-avatars', () => {
 			processed: 50,
 			refreshed: 0,
 			remaining: 10,
-			ownerAvatar: { attempted: false, healed: false }
+			ownerAvatar: 'skipped'
 		});
+	});
+});
+
+// The heal is the reason this endpoint changed, so it gets its own coverage AT
+// the endpoint: the tests above pin only the skipped path, which is the value
+// the handler initializes to — they would stay green if the call were removed.
+describe('POST /api/cron/refresh-avatars — the owner-avatar heal', () => {
+	const BSKY_AVATAR = 'https://cdn.bsky.app/img/avatar/plain/did/abc@jpeg';
+
+	/** A fork stranded on a hotlink: a handle to resolve from, R2 with a CDN base. */
+	function strandedEnv() {
+		const sqlite = new Database(':memory:');
+		sqlite.exec(DDL);
+		sqlite.exec(`INSERT INTO site_settings (key, value) VALUES
+			('blueskyUrl', 'https://bsky.app/profile/nova.bsky.social'),
+			('adminAvatarUrl', '${BSKY_AVATAR}'),
+			('storageProvider', 'r2'),
+			('r2PublicUrl', 'https://cdn.test');`);
+		const bucket = {
+			put: vi.fn(async () => {}),
+			delete: vi.fn(async () => {}),
+			list: vi.fn(async () => ({ objects: [], truncated: false }))
+		};
+		const env = { CRON_SECRET, DB: makeD1(sqlite), IMAGES: bucket } as unknown as App.Platform['env'];
+		return { sqlite, env, bucket };
+	}
+
+	/** Profile lookup → an avatar; anything else → the image bytes. */
+	function stubProfileAndImage() {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: string | URL) =>
+				String(input).includes('getProfile')
+					? new Response(JSON.stringify({ avatar: BSKY_AVATAR }), { status: 200 })
+					: new Response(new Uint8Array([1, 2, 3, 4]), {
+							status: 200,
+							headers: { 'content-type': 'image/jpeg' }
+						})
+			)
+		);
+	}
+
+	function jobRow(sqlite: unknown) {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		return (sqlite as any)
+			.prepare("SELECT status, detail FROM job_run WHERE name='refresh-avatars'")
+			.get();
+	}
+
+	it('re-hosts the stranded owner avatar and says so in the response and the heartbeat', async () => {
+		stubProfileAndImage();
+		const { sqlite, env, bucket } = strandedEnv();
+		const waits: Promise<unknown>[] = [];
+
+		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '5', waits }));
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			processed: 0,
+			refreshed: 0,
+			remaining: 0,
+			ownerAvatar: 'healed'
+		});
+
+		expect(bucket.put).toHaveBeenCalled();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const stored = (sqlite as any)
+			.prepare("SELECT value FROM site_settings WHERE key='adminAvatarUrl'")
+			.get();
+		expect(stored.value).toMatch(/^https:\/\/cdn\.test\/avatars\/owner\//);
+
+		await Promise.all(waits);
+		const job = jobRow(sqlite);
+		expect(job.status).toBe('ok');
+		expect(job.detail).toBe('refreshed 0/0, 0 remaining, owner avatar now self-hosted');
+	});
+
+	// Ordering is load-bearing, not cosmetic: behind the artist batch the heal sits
+	// downstream of the workflow's curl --max-time, and a batch that burns the
+	// budget cancels the request before it runs — every day, since mode 'oldest'
+	// never drains. Call order is the only observable, so pin it.
+	it('runs the heal before the artist batch, not behind it', async () => {
+		stubProfileAndImage();
+		const { sqlite, env } = strandedEnv();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(sqlite as any).exec(
+			"INSERT INTO artists (name, bluesky_url, created_at) VALUES ('Nova', 'artist.bsky.social', 'x');"
+		);
+
+		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '5' }));
+		expect(res.status).toBe(200);
+
+		const lookups = vi
+			.mocked(globalThis.fetch)
+			.mock.calls.map((c) => String(c[0]))
+			.filter((u) => u.includes('getProfile'));
+		expect(lookups).toHaveLength(2);
+		expect(lookups[0]).toContain('actor=nova.bsky.social');
+	});
+
+	it('reports a heal that could not complete without claiming the profile is at fault', async () => {
+		// The profile resolves fine; the copy to storage is what fails, which is the
+		// dominant real-world shape and the reason the wording is about hosting.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: string | URL) =>
+				String(input).includes('getProfile')
+					? new Response(JSON.stringify({ avatar: BSKY_AVATAR }), { status: 200 })
+					: new Response('nope', { status: 500 })
+			)
+		);
+		const { sqlite, env } = strandedEnv();
+		const waits: Promise<unknown>[] = [];
+
+		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '5', waits }));
+		expect(res.status).toBe(200);
+		expect((await res.json()) as { ownerAvatar: string }).toMatchObject({ ownerAvatar: 'unresolved' });
+
+		await Promise.all(waits);
+		expect(jobRow(sqlite).detail).toBe(
+			'refreshed 0/0, 0 remaining, owner avatar still not self-hosted'
+		);
+	});
+
+	// A thrown heal must not cost the operator the artist run that already
+	// succeeded, nor the heartbeat that reports it.
+	it('still returns the artist counts and an ok heartbeat when the heal throws', async () => {
+		stubProfileAndImage();
+		const { sqlite, env } = strandedEnv();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		// The heal's settings write is the last thing it does; make it explode.
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(sqlite as any).exec(`
+			CREATE TRIGGER no_owner_write BEFORE UPDATE ON site_settings
+			WHEN NEW.key = 'adminAvatarUrl'
+			BEGIN SELECT RAISE(ABORT, 'settings write failed'); END;`);
+		const waits: Promise<unknown>[] = [];
+
+		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '5', waits }));
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			processed: 0,
+			refreshed: 0,
+			remaining: 0,
+			ownerAvatar: 'skipped'
+		});
+		expect(warn).toHaveBeenCalled();
+
+		await Promise.all(waits);
+		const job = jobRow(sqlite);
+		expect(job.status).toBe('ok');
+		expect(job.detail).toBe('refreshed 0/0, 0 remaining');
+		warn.mockRestore();
 	});
 });

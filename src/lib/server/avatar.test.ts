@@ -16,7 +16,7 @@ import {
 	healOwnerAvatar
 } from './avatar';
 import type { SiteSettings } from './settings';
-import { getRawSetting } from './settings';
+import { getRawSetting, getSettings, setRawSetting, clearSettingsCache } from './settings';
 
 const DDL = `
 CREATE TABLE artists (
@@ -66,7 +66,9 @@ function stubFetch(override?: {
 	imageStatus?: number;
 	imageType?: string;
 }) {
-	const fetchMock = vi.fn(async (input: string | URL) => {
+	// `init` is unused by the routing but captured so a test can assert the request
+	// options (the redirect posture is only observable there).
+	const fetchMock = vi.fn(async (input: string | URL, _init?: RequestInit) => {
 		const url = String(input);
 		if (url.includes('getProfile')) {
 			const profile = override?.profile === undefined ? { avatar: BSKY_AVATAR } : override.profile;
@@ -118,6 +120,29 @@ describe('resolveAvatarUrl re-hosting', () => {
 	it('returns the raw source URL when no re-host context is given', async () => {
 		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' });
 		expect(url).toBe(BSKY_AVATAR);
+	});
+
+	// Same outbound posture as the byte proxy: the URL comes from a profile
+	// response rather than from a caller, but this fetch now runs unattended on a
+	// daily schedule, so a profile pointing at an internal host must not be
+	// downloaded at all — refused BEFORE the request, not after.
+	it('refuses to download an avatar hosted on a private address', async () => {
+		const fetchMock = stubFetch({ profile: { avatar: 'http://127.0.0.1:8080/x.jpg' } });
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+		// Only the profile lookup went out — the download never happened.
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(url).toBe('http://127.0.0.1:8080/x.jpg');
+	});
+
+	it('does not follow redirects on the avatar download', async () => {
+		const fetchMock = stubFetch();
+		await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(fakeBucket()));
+		// A storage/CDN host answering 3xx is an upstream error, not an invitation
+		// to fetch wherever it points. Asserted on the request because 'manual' is
+		// only observable there.
+		expect(fetchMock.mock.calls[1][1]).toMatchObject({ redirect: 'manual' });
 	});
 });
 
@@ -321,71 +346,226 @@ describe('refreshArtistAvatars', () => {
 });
 
 describe('healOwnerAvatar (the retry nothing used to do)', () => {
-	beforeEach(() => stubFetch());
+	beforeEach(() => {
+		stubFetch();
+		// getSettings memoizes at module scope for 60s and the cache is shared by
+		// every test in this file, so a stale entry from an earlier test would
+		// otherwise answer here.
+		clearSettingsCache();
+	});
 	afterEach(() => vi.restoreAllMocks());
 
+	const OWNER_HANDLE = 'https://bsky.app/profile/nova.bsky.social';
+
+	/**
+	 * Seed the two OWNER rows. These live in D1 rather than in the settings
+	 * snapshot on purpose (see healOwnerAvatar): the cron captures settings once
+	 * and the operator can save the site tab before the heal runs, so the rows are
+	 * the only trustworthy source for what to resolve and what not to overwrite.
+	 */
+	async function seedOwner(
+		db: ReturnType<typeof makeDb>['db'],
+		row: { blueskyUrl?: string; adminAvatarUrl?: string } = {}
+	) {
+		const values = { blueskyUrl: OWNER_HANDLE, adminAvatarUrl: BSKY_AVATAR, ...row };
+		for (const [key, value] of Object.entries(values)) await setRawSetting(db, key, value);
+	}
+
+	// Storage config only. The owner fields are deliberately set to values the
+	// function must IGNORE, so a test that passes proves it read D1.
 	const ownerSettings = (over: Partial<SiteSettings> = {}) =>
 		({
 			storageProvider: 'r2',
 			r2PublicUrl: 'https://cdn.test',
-			blueskyUrl: 'https://bsky.app/profile/nova.bsky.social',
-			adminAvatarUrl: BSKY_AVATAR,
+			blueskyUrl: 'https://bsky.app/profile/stale.bsky.social',
+			adminAvatarUrl: 'https://cdn.test/avatars/owner/stale.jpg',
 			...over
 		}) as unknown as SiteSettings;
 
-	const opts = (bucket: ReturnType<typeof fakeBucket>, settings: SiteSettings) => ({
+	const opts = (
+		bucket: ReturnType<typeof fakeBucket>,
+		settings: SiteSettings,
+		origin = 'https://site.test'
+	) => ({
 		env: { IMAGES: bucket } as unknown as App.Platform['env'],
 		settings,
-		origin: 'https://site.test'
+		origin
 	});
 
 	it('re-hosts a stranded hotlink and stores the copy we serve', async () => {
 		const { db } = makeDb();
 		const bucket = fakeBucket();
-		const settings = ownerSettings();
+		await seedOwner(db);
 
-		const res = await healOwnerAvatar(db, opts(bucket, settings));
+		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
 
-		expect(res).toEqual({ attempted: true, healed: true });
-		expect(bucket.put).toHaveBeenCalled();
+		expect(res).toBe('healed');
+		// Under the owner's own folder — 'owner' silently becoming '' would still
+		// store SOMETHING, so pin the key, not just that a put happened.
+		expect(bucket.put.mock.calls[0][0]).toMatch(/^avatars\/owner\/[0-9a-f-]+\.jpg$/);
 		const stored = await getRawSetting(db, 'adminAvatarUrl');
-		expect(stored).toMatch(/^https:\/\/cdn\.test\//);
+		expect(stored).toMatch(/^https:\/\/cdn\.test\/avatars\/owner\//);
 	});
 
 	it('leaves an avatar we already serve alone, without a profile lookup', async () => {
 		const { db } = makeDb();
 		const bucket = fakeBucket();
-		const settings = ownerSettings({ adminAvatarUrl: 'https://cdn.test/avatars/owner/face.jpg' });
+		const owned = 'https://cdn.test/avatars/owner/face.jpg';
+		await seedOwner(db, { adminAvatarUrl: owned });
 
-		const res = await healOwnerAvatar(db, opts(bucket, settings));
+		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
 
 		// Heal-only: a healthy fork must not pay for a fetch every single run.
-		expect(res).toEqual({ attempted: false, healed: false });
+		expect(res).toBe('skipped');
 		expect(globalThis.fetch).not.toHaveBeenCalled();
-		expect(await getRawSetting(db, 'adminAvatarUrl')).toBeNull();
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(owned);
 	});
 
 	it('does not write another hotlink over the one already there', async () => {
 		const { db } = makeDb();
 		const bucket = fakeBucket();
+		await seedOwner(db);
 		// Re-hosting fails, so resolveAvatarUrl falls back to the SOURCE hotlink.
 		stubFetch({ imageStatus: 500 });
 
 		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
 
-		// Reported honestly as still broken, and the row is left untouched rather
-		// than churned with an equivalent bad value.
-		expect(res).toEqual({ attempted: true, healed: false });
-		expect(await getRawSetting(db, 'adminAvatarUrl')).toBeNull();
+		// Reported honestly as still broken, and the row is left holding what it
+		// held rather than churned with an equivalent bad value.
+		expect(res).toBe('unresolved');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(BSKY_AVATAR);
+	});
+
+	// The profile lookup 404s → resolveAvatarUrl returns null. Without the null
+	// check ahead of it, isOurAvatarUrl(null) throws a TypeError straight into the
+	// cron's swallowing catch, where nothing would ever report it.
+	it('reports a failed profile lookup instead of throwing on the null', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		await seedOwner(db);
+		stubFetch({ profile: null });
+
+		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
+
+		expect(res).toBe('unresolved');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(BSKY_AVATAR);
 	});
 
 	it('does nothing when the owner has no bluesky handle to resolve from', async () => {
 		const { db } = makeDb();
 		const bucket = fakeBucket();
+		await seedOwner(db, { blueskyUrl: '' });
 
-		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings({ blueskyUrl: '' })));
+		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
 
-		expect(res).toEqual({ attempted: false, healed: false });
+		expect(res).toBe('skipped');
 		expect(globalThis.fetch).not.toHaveBeenCalled();
+	});
+
+	// The isolate that repaired the row must stop serving the value it replaced.
+	// SETTINGS_TTL_MS is 60s, so a heal that left the cache warm would keep the
+	// hotlink on the page for a minute after it was fixed.
+	it('leaves the settings cache holding the healed URL, not the hotlink it replaced', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		await seedOwner(db);
+		// Prime it: this is the read the request that triggered the run already did.
+		expect((await getSettings(db)).adminAvatarUrl).toBe(BSKY_AVATAR);
+
+		expect(await healOwnerAvatar(db, opts(bucket, ownerSettings()))).toBe('healed');
+
+		expect((await getSettings(db)).adminAvatarUrl).toMatch(/^https:\/\/cdn\.test\/avatars\/owner\//);
+	});
+
+	// The snapshot the cron captured is minutes old by the time the heal runs, and
+	// a site-tab save in between is reachable by hand (the workflow has a
+	// workflow_dispatch). These three pin that D1 — not the snapshot — decides.
+	it('skips when the operator cleared their bluesky field after the snapshot was taken', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		// saveSite pairs the two: clearing bluesky clears the derived avatar with it.
+		await seedOwner(db, { blueskyUrl: '', adminAvatarUrl: '' });
+
+		// The snapshot still carries a handle and a hotlink: the stale view says heal.
+		const stale = ownerSettings({ blueskyUrl: OWNER_HANDLE, adminAvatarUrl: BSKY_AVATAR });
+		const res = await healOwnerAvatar(db, opts(bucket, stale));
+
+		// Resurrecting an avatar the operator deliberately cleared is exactly the
+		// thing the fresh read prevents.
+		expect(res).toBe('skipped');
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
+	});
+
+	it('skips when the operator saved a good avatar after the snapshot was taken', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		const justSaved = 'https://cdn.test/avatars/owner/just-saved.jpg';
+		await seedOwner(db, { adminAvatarUrl: justSaved });
+
+		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
+
+		expect(res).toBe('skipped');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(justSaved);
+	});
+
+	it('resolves against the handle stored in D1, not the one in the stale snapshot', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		await seedOwner(db, { blueskyUrl: 'https://bsky.app/profile/current.bsky.social' });
+
+		expect(await healOwnerAvatar(db, opts(bucket, ownerSettings()))).toBe('healed');
+
+		const lookup = String(vi.mocked(globalThis.fetch).mock.calls[0][0]);
+		expect(lookup).toContain('actor=current.bsky.social');
+		expect(lookup).not.toContain('stale.bsky.social');
+	});
+
+	// The resolve itself takes seconds on the network, so the handle can change
+	// under it too. The copy is then of an account that is no longer the owner's,
+	// and writing it would put the OLD face on the new handle — and because that
+	// value is one of ours, every later run would skip and the error would stick.
+	it('drops the re-hosted copy when the handle changes during the resolve', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		await seedOwner(db);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: string | URL) => {
+				if (String(input).includes('getProfile')) {
+					return new Response(JSON.stringify({ avatar: BSKY_AVATAR }), { status: 200 });
+				}
+				// The operator's save lands while the avatar bytes are downloading.
+				await setRawSetting(db, 'blueskyUrl', 'https://bsky.app/profile/moved.bsky.social');
+				return new Response(new Uint8Array([1, 2, 3, 4]), {
+					status: 200,
+					headers: { 'content-type': 'image/jpeg' }
+				});
+			})
+		);
+
+		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
+
+		expect(res).toBe('unresolved');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(BSKY_AVATAR);
+	});
+
+	// A machine endpoint behind a shared secret must not take its site identity
+	// from the caller's Host header: with no CDN configured the stored URL is
+	// absolutized against whatever origin it is handed, and isOurAvatarUrl would
+	// then accept the result, so the request origin would persist site-wide.
+	it('absolutizes against the configured Site URL, not the requesting host', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		await seedOwner(db);
+		// No r2PublicUrl → the R2 base is root-relative '/img' (the no-CDN fork).
+		const settings = ownerSettings({ r2PublicUrl: '', siteUrl: 'https://taro.surf' });
+
+		const res = await healOwnerAvatar(db, opts(bucket, settings, 'https://preview.pages.dev'));
+
+		expect(res).toBe('healed');
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toMatch(
+			/^https:\/\/taro\.surf\/img\/avatars\/owner\//
+		);
 	});
 });

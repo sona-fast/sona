@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
-import { refreshArtistAvatars, healOwnerAvatar } from '$lib/server/avatar';
+import { refreshArtistAvatars, healOwnerAvatar, type OwnerAvatarHeal } from '$lib/server/avatar';
 import { requireCronSecret } from '$lib/server/cron-auth';
 import { recordJobRun, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
@@ -45,6 +45,30 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	const db = getDb(env!.DB);
 	const settings = await getSettings(db);
 
+	// The owner avatar, which nothing used to retry: a failed re-host leaves
+	// settings holding a source hotlink, and the only thing that ever tried again
+	// was the operator happening to save the site tab.
+	//
+	// It goes FIRST, before the artist batch, because of the real bound on this
+	// request described above — the workflow's `curl --max-time`. A 50-artist
+	// batch of Twitter guest-token timeouts can burn that whole window; the
+	// client disconnect then cancels the request mid-run, and anything queued
+	// behind the batch never happens. For the heal that would not be an
+	// occasional miss but a permanent one, since mode 'oldest' never drains and
+	// every day's run would die at the same place. What keeps one owner profile
+	// lookup from failing an otherwise good artist run is the try/catch below,
+	// which does that job from either position. Heal-only, so a healthy fork pays
+	// two settings reads and no network call at all.
+	let ownerAvatar: OwnerAvatarHeal = 'skipped';
+	try {
+		ownerAvatar = await healOwnerAvatar(db, { env, settings, origin: url.origin });
+	} catch (e) {
+		// Never fails the run. Warned rather than silent (the artist loop already
+		// warns on a thrown resolve): without it, a fork stuck on a hotlink because
+		// this keeps throwing reports the exact heartbeat a healthy fork does.
+		console.warn(`[avatar] owner heal threw: ${e instanceof Error ? e.message : String(e)}`);
+	}
+
 	// Observability (issue #6): heartbeat for the background-jobs panel. A thrown
 	// error records a failed run before propagating, so the dashboard reflects it.
 	let result;
@@ -61,21 +85,17 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 			e instanceof Error ? e.message : 'refresh failed'));
 		throw e;
 	}
-	// The owner avatar too, which nothing used to retry. A failed re-host leaves
-	// settings holding a source hotlink, and until this ran here the only thing
-	// that ever tried again was the operator happening to save the site tab. It
-	// is heal-only, so on a healthy fork this costs nothing beyond a settings
-	// read. Deliberately after the artist batch and outside its try: a profile
-	// lookup for one avatar must not turn a successful artist run into a failure.
-	let ownerAvatar = { attempted: false, healed: false };
-	try {
-		ownerAvatar = await healOwnerAvatar(db, { env, settings, origin: url.origin });
-	} catch {
-		// Swallowed on purpose; the heartbeat below still records the artist result.
-	}
-
+	// Operator wording, not the function's. "still unresolved" would point them at
+	// their Bluesky profile, but the dominant failure is the other half — the
+	// profile resolves and the copy to storage fails — so this says where the
+	// picture is being served FROM, which is the thing that is actually wrong.
+	// Same phrase the admin artists panel already ships ("All avatars are already
+	// self-hosted"), rather than a metaphor no sibling heartbeat uses.
+	const ownerNote =
+		ownerAvatar === 'skipped'
+			? ''
+			: `, owner avatar ${ownerAvatar === 'healed' ? 'now self-hosted' : 'still not self-hosted'}`;
 	schedule(platform, recordJobRun(db, 'refresh-avatars', 'ok',
-		`refreshed ${result.refreshed}/${result.processed}, ${result.remaining} remaining` +
-			(ownerAvatar.attempted ? `, owner avatar ${ownerAvatar.healed ? 'healed' : 'still unresolved'}` : '')));
+		`refreshed ${result.refreshed}/${result.processed}, ${result.remaining} remaining${ownerNote}`));
 	return json({ ...result, ownerAvatar });
 };

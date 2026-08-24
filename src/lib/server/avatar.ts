@@ -1,7 +1,8 @@
 import { fetchTwitterAvatar, twitterHandleFromUrl } from './twitter-avatar';
 import { getStorage, isAllowedImageType, extFromContentType, isOwnedUrl } from './storage';
+import { isPrivateHost } from './image-proxy';
 import type { SiteSettings } from './settings';
-import { setRawSetting, clearSettingsCache } from './settings';
+import { getRawSettings, saveSettings } from './settings';
 import { getDb } from './db';
 import { artists } from './db/schema';
 import { eq, or, isNotNull, sql } from 'drizzle-orm';
@@ -33,6 +34,13 @@ export interface AvatarRehostContext {
  * Fail-soft: any problem (non-2xx, disallowed type, storage not configured, put
  * error) logs and returns null so the caller keeps the source URL — a possibly
  * short-lived hotlink still beats no avatar at all.
+ *
+ * Same outbound posture as the byte proxy (image-proxy.ts), which fetches the
+ * same class of stored URL: private/link-local hosts are refused, and redirects
+ * are NOT followed — a CDN answering a 3xx is unexpected enough to treat as an
+ * upstream error rather than chase to an arbitrary location. It matters more
+ * here than it used to, because the refresh cron now drives this unattended on
+ * a daily schedule rather than only from an operator's save.
  */
 async function rehostAvatar(
 	sourceUrl: string,
@@ -40,7 +48,22 @@ async function rehostAvatar(
 	handle: string
 ): Promise<string | null> {
 	try {
-		const res = await fetch(sourceUrl, { signal: AbortSignal.timeout(REHOST_FETCH_TIMEOUT_MS) });
+		// Root-relative URLs have no hostname (already ours); absolute ones must
+		// not point the server-side fetch at an internal host.
+		let host = '';
+		try {
+			host = new URL(sourceUrl).hostname;
+		} catch {
+			// not an absolute URL — nothing to resolve outward
+		}
+		if (isPrivateHost(host)) {
+			console.warn(`[avatar] rehost refused: handle=${handle} private host`);
+			return null;
+		}
+		const res = await fetch(sourceUrl, {
+			signal: AbortSignal.timeout(REHOST_FETCH_TIMEOUT_MS),
+			redirect: 'manual'
+		});
 		if (!res.ok) {
 			console.warn(`[avatar] rehost download failed: handle=${handle} status=${res.status}`);
 			return null;
@@ -325,14 +348,24 @@ async function fetchBlueskyAvatar(blueskyUrl: string): Promise<string | null> {
 }
 
 /**
+ * What one heal attempt did. Three outcomes, one value: 'skipped' is "nothing to
+ * heal, or nothing to heal FROM" (no handle, or the stored avatar is already
+ * ours), 'healed' is "a copy we serve is now stored", 'unresolved' is "we tried
+ * and the owner is still on someone else's host".
+ */
+export type OwnerAvatarHeal = 'skipped' | 'healed' | 'unresolved';
+
+/**
  * Heal the OWNER avatar if a previous re-host left a hotlink behind.
  *
  * resolveAvatarUrl falls back to the source hotlink when re-hosting fails, and
  * settings saveSite writes that fallback rather than losing the picture
  * entirely. Until this existed nothing ever retried, because the avatar refresh
  * cron covered artists only, so one transient R2 or network failure pinned the
- * owner on a third-party URL indefinitely: rot-prone, and unreadable by the
- * page (see docs/reading-image-bytes.md).
+ * owner on a third-party URL indefinitely — a URL that can rot to a 404, and
+ * that serves the operator's face from a host we do not control. (Readability
+ * is no longer part of the argument: /api/admin/avatar proxies those bytes
+ * same-origin for the con card, see docs/reading-image-bytes.md.)
  *
  * Heal-only on purpose. An owner avatar we already serve is left alone rather
  * than re-fetched daily, matching the skip saveSite already makes. This costs
@@ -341,35 +374,77 @@ async function fetchBlueskyAvatar(blueskyUrl: string): Promise<string | null> {
 export async function healOwnerAvatar(
 	db: ReturnType<typeof getDb>,
 	opts: { env: Env | undefined; settings: SiteSettings; origin: string }
-): Promise<{ attempted: boolean; healed: boolean }> {
-	const { env, settings, origin } = opts;
+): Promise<OwnerAvatarHeal> {
+	const { env, settings } = opts;
+
+	// The trust anchor for "ours" is the CONFIGURED site origin where there is
+	// one, and only the request origin as a fallback. This runs unattended behind
+	// a shared secret and the value it writes is site-wide, so which of the
+	// hostnames this fork answers on the caller happened to use must not decide
+	// what counts as our own storage — a machine endpoint should not take its
+	// canonical identity from a request header. A malformed configured value
+	// falls back rather than breaking the check (same posture as isOurAvatarUrl).
+	let origin = opts.origin;
+	if (settings.siteUrl) {
+		try {
+			origin = new URL(settings.siteUrl).origin;
+		} catch {
+			// keep the request origin
+		}
+	}
+
+	// The two OWNER fields come from D1, never from the caller's settings
+	// snapshot. The cron reads settings once and then spends minutes in the
+	// artist batch, and the operator can save the site tab during it (the
+	// workflow has a workflow_dispatch, so a hand-fired run right after noticing
+	// a broken avatar is the likely case, not a theoretical one). Deciding from
+	// the stale snapshot would resolve the OLD handle and overwrite a just-saved
+	// adminAvatarUrl with the previous account's face — exactly what saveSite's
+	// handleChanged branch exists to prevent — and since that value is then one
+	// of ours, the "already serving our own copy" skip below would short-circuit
+	// every future run and make the corruption permanent. The same read is what
+	// stops an avatar the operator deliberately cleared from being resurrected.
+	// `settings` still supplies the STORAGE config (provider, CDN base, site
+	// URL), which no site-tab save during the batch can invalidate the same way.
+	const before = await getRawSettings(db, ['blueskyUrl', 'adminAvatarUrl']);
+	const blueskyUrl = before.blueskyUrl ?? '';
+	const current = before.adminAvatarUrl ?? '';
 	// Only Bluesky resolves for the owner today, same as saveSite.
-	if (!settings.blueskyUrl) return { attempted: false, healed: false };
+	if (!blueskyUrl) return 'skipped';
 
 	const ours = (u: string) => isOurAvatarUrl(env, settings, origin, u);
-	const current = settings.adminAvatarUrl;
 	// Already serving our own copy: nothing to heal.
-	if (current && ours(current)) return { attempted: false, healed: false };
+	if (current && ours(current)) return 'skipped';
 
 	let resolved: string | null = null;
 	try {
-		resolved = await resolveAvatarUrl(
-			{ blueskyUrl: settings.blueskyUrl },
-			{ env, settings, origin, keyHint: 'owner' }
-		);
+		resolved = await resolveAvatarUrl({ blueskyUrl }, { env, settings, origin, keyHint: 'owner' });
 	} catch {
 		// Same posture as the artist loop: one bad profile must not fail the run.
-		return { attempted: true, healed: false };
+		return 'unresolved';
 	}
 
-	// Only a copy we serve counts as healed. Writing another hotlink over the one
-	// already stored would churn the row and change nothing.
-	if (!resolved || !ours(resolved)) return { attempted: true, healed: false };
-	if (!shouldWriteAvatar(env, settings, origin, current, resolved)) {
-		return { attempted: true, healed: false };
-	}
+	// The one and only write gate here. resolveAvatarUrl falls back to the SOURCE
+	// hotlink when re-hosting fails, so only a copy we serve counts as healed —
+	// writing another hotlink over the one already stored would churn the row and
+	// change nothing. The shared shouldWriteAvatar predicate is deliberately NOT
+	// also consulted: past this line `resolved` is non-null and ours, which
+	// satisfies its first disjunct unconditionally, so calling it would advertise
+	// a gate that can never refuse. The null check stays because `ours(null)`
+	// throws, and this function's only caller swallows what it throws.
+	if (!resolved || !ours(resolved)) return 'unresolved';
 
-	await setRawSetting(db, 'adminAvatarUrl', resolved);
-	clearSettingsCache();
-	return { attempted: true, healed: true };
+	// Re-read immediately before the write. The resolve above spends seconds on
+	// the network, and the handle it ran against is the entire justification for
+	// the value it produced: if the operator changed or cleared their Bluesky
+	// field in the meantime, this copy is of an account that is no longer theirs.
+	const now = await getRawSettings(db, ['blueskyUrl']);
+	if ((now.blueskyUrl ?? '') !== blueskyUrl) return 'unresolved';
+
+	// saveSettings, not a raw upsert: it is the helper every other settings write
+	// uses (saveSite writes this same key through it) and it clears the settings
+	// cache itself, so the isolate that just repaired the row stops serving the
+	// hotlink it replaced instead of holding it for the rest of SETTINGS_TTL_MS.
+	await saveSettings(db, { adminAvatarUrl: resolved });
+	return 'healed';
 }

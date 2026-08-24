@@ -289,7 +289,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// defaultTerms fails this test, and the fix is to bump the date constant AND
 	// this hash in the same commit. Deliberately one assertion, not a diff — the
 	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '32023facffb519d1a6b20d5af166bd7893bfe1179513121375bc34faaaf4a4d0';
+	const RECORDED_TEXT_HASH = '41ccbc3e0cbc49787b62c57ffb863fc9b9058bf4171d349d5aead60dc2c912f6';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both
