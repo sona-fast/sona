@@ -235,11 +235,13 @@ export async function applyDownloadRateLimit(
 	let phaseMissing = false;
 	if (entry.ok) {
 		const r = entry.result as { id?: string; rules?: unknown } | undefined;
-		// An ok body whose `rules` is present but not an array is a partial body, not
-		// an empty ruleset: reading it as [] would append a second copy of our rule,
-		// and calling .find on it threw outright — after setup had already written D1,
-		// R2 and Pages. Stop the way turnstile-lib stops, without mutating.
-		if (r?.rules !== undefined && !Array.isArray(r.rules)) {
+		// An ok body without a real `rules` array is a partial body, not an empty
+		// ruleset: an empty ruleset lists its rules as [], while a body that dropped
+		// the field tells us nothing about what the zone holds. Reading either as []
+		// would append a second copy of our rule (and a non-array threw outright) —
+		// after setup had already written D1, R2 and Pages. Stop the way
+		// turnstile-lib stops, without mutating.
+		if (!Array.isArray(r?.rules)) {
 			return {
 				status: 'error',
 				detail: `could not read the rate-limit ruleset for ${host}${statusLabel(entry.status)}; the response carried no rule list, so the rule was not written`

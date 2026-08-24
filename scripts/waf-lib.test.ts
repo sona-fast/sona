@@ -439,8 +439,7 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		for (const result of [
 			{ rules: [{ id: 'other', ref: 'someone_elses_rule' }] },
 			{ id: '', rules: [] },
-			{ id: 42, rules: [] },
-			undefined
+			{ id: 42, rules: [] }
 		]) {
 			const { api, calls } = fakeApi({
 				[zonePath]: zoneOk,
@@ -459,8 +458,16 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 	// keep them told apart. A body missing BOTH is the discriminating case: the rule
 	// list is what we can't parse, and saying "no ruleset id" would send the operator
 	// after the wrong thing.
+	// A body that DROPS the field entirely is the same partial read: only `rules: []`
+	// proves the ruleset is empty, so an id with no rule list must not turn into a
+	// POST that could duplicate our own rule.
 	it('reports a broken rule list as such, with or without a readable ruleset id', async () => {
-		for (const result of [{ id: RULESET, rules: 'nope' }, { rules: 'nope' }]) {
+		for (const result of [
+			{ id: RULESET, rules: 'nope' },
+			{ rules: 'nope' },
+			{ id: RULESET },
+			undefined
+		]) {
 			const { api, calls } = fakeApi({
 				[zonePath]: zoneOk,
 				[entryPath]: { ok: true, status: 200, result }
