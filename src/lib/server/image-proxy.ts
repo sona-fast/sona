@@ -37,7 +37,11 @@ export function isPrivateHost(hostname: string): boolean {
 		} else {
 			// Loopback (::1), unspecified (:: — connect() reaches loopback, same
 			// as its IPv4 twin 0.0.0.0), ULA (fc00::/7), link-local (fe80::/10).
-			return /^\[(::1?\]$|f[cd]|fe80:)/.test(host);
+			//
+			// fe80::/10 is a TEN bit prefix, so it spans fe80 through febf, not the
+			// fe80 block alone. Matching only 'fe80:' let fe90::1 and febf::1 through
+			// while this comment claimed otherwise.
+			return /^\[(::1?\]$|f[cd]|fe[89ab][0-9a-f]:)/.test(host);
 		}
 	}
 	// IPv4 loopback / unspecified / RFC1918 / link-local.
