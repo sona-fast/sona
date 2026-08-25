@@ -11,14 +11,13 @@
  * D1 name is read from wrangler.toml (as `npm run setup` writes it). Requires
  * `wrangler login` (or CLOUDFLARE_API_TOKEN), like the rest of the CLI tooling.
  */
-import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { webcrypto as crypto } from 'node:crypto';
+import { writePrivateTempSql, removeTempSqlDir } from './setup-lib.ts';
 
 // --- PBKDF2 — must stay in lockstep with src/lib/server/admin-auth.ts --------
 // (100k iterations is the Cloudflare Workers Web Crypto cap; see admin-auth.ts.)
@@ -79,19 +78,6 @@ export async function askHidden(
 	}
 }
 
-/**
- * Write SQL to a private temp file — `mkdtemp` gives a directory only the
- * current user can read (0700), so the password hash doesn't sit in a
- * predictable, world-readable path under the shared /tmp. Caller is
- * responsible for removing the returned directory once done.
- */
-export function writePrivateTempSql(sql: string): { dir: string; path: string } {
-	const dir = mkdtempSync(join(tmpdir(), 'sona-reset-'));
-	const path = join(dir, 'reset.sql');
-	writeFileSync(path, sql, { mode: 0o600 });
-	return { dir, path };
-}
-
 async function main() {
 	if (!existsSync('wrangler.toml')) {
 		throw new Error('wrangler.toml not found — run this from the project root after `npm run setup`.');
@@ -114,24 +100,22 @@ async function main() {
 		// it to a temp .sql file and use `--file`, the same way setup.ts applies SQL.
 		const esc = (s: string) => s.replace(/'/g, "''");
 		const sql = `INSERT OR REPLACE INTO site_settings (key,value) VALUES ('adminPasswordHash','${esc(hash)}');\nDELETE FROM sessions;\n`;
-		const written = writePrivateTempSql(sql);
+		const written = writePrivateTempSql(sql, 'sona-reset-');
 		sqlDir = written.dir;
 
 		console.log(`\nWriting new password hash to D1 "${dbName}" (remote) and clearing sessions…`);
 		// stdin ignored → wrangler's non-TTY path skips the "Ok to proceed?" prompt.
-		execSync(`npx wrangler d1 execute ${dbName} --remote --file="${written.path}"`, {
-			stdio: ['ignore', 'inherit', 'inherit']
-		});
+		// argv, not a shell string: the db name comes from wrangler.toml, and an
+		// existing deployment may legitimately carry characters a shell would act on.
+		execFileSync(
+			'npx',
+			['wrangler', 'd1', 'execute', dbName, '--remote', `--file=${written.path}`],
+			{ stdio: ['ignore', 'inherit', 'inherit'] }
+		);
 		console.log('\n✔ Admin password reset. Sign in at /admin/login with the new password.');
 	} finally {
 		rl.close();
-		if (sqlDir) {
-			try {
-				rmSync(sqlDir, { recursive: true, force: true });
-			} catch {
-				/* best-effort temp cleanup */
-			}
-		}
+		if (sqlDir) removeTempSqlDir(sqlDir);
 	}
 }
 

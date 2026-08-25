@@ -1,12 +1,23 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { normalizeHttpsUrl } from '../src/lib/server/validate';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
 	buildMigrationSql,
 	buildSeedSql,
 	sanitizeProjectName,
+	isValidResourceName,
+	isValidDatabaseName,
+	isValidBucketName,
+	derivedResourceName,
+	askResourceName,
+	writePrivateTempSql,
+	removeTempSqlDir,
+	runWith,
+	isValidDatabaseId,
+	askUntilValid,
 	isR2NotEnabled,
 	bucketCreateSucceeded,
 	ensureUrlScheme,
@@ -37,6 +48,10 @@ import {
 } from './setup-lib.ts';
 import { applyDownloadRateLimit, SCOPE_HINT as WAF_SCOPE_HINT } from './waf-lib.ts';
 import { provisionTurnstileWidget, SCOPE_HINT as TURNSTILE_SCOPE_HINT } from './turnstile-lib.ts';
+
+// setup.ts self-executes, so the contracts below read its source instead of
+// importing it. One copy, shared by every `setup.ts ↔` describe in this file.
+const setupSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 
 describe('buildMigrationSql', () => {
 	it('creates schema_migrations and records each file after its body, in order', () => {
@@ -119,6 +134,17 @@ describe('buildSeedSql', () => {
 		expect(sql).toContain("('primaryCharacter','o''brien')");
 	});
 
+	// The seed is SQL-escaped, never shell-escaped, so it is handed to wrangler in a
+	// file (setup.ts) rather than on a command line. The characters a shell would
+	// have eaten must survive into the SQL byte for byte — `$x` expanded to nothing,
+	// the backticks ran a subshell, and the double quote ended the argument early,
+	// all while the execute still exited 0.
+	it('keeps shell metacharacters in a value intact', () => {
+		const character = 'taro $x `id` "quoted" \\slash';
+		const sql = buildSeedSql({ provider: 'r2', primaryCharacter: character });
+		expect(sql).toContain(`('primaryCharacter','${character}')`);
+	});
+
 	// The CLI seed computes siteUrl as normalizeHttpsUrl(ensureUrlScheme(domain)) ?? ''
 	// (setup.ts). A malformed or non-https domain must normalize to null so the seed
 	// drops siteUrl entirely — rather than storing a value new URL() throws on later.
@@ -159,6 +185,391 @@ describe('sanitizeProjectName', () => {
 	it('falls back to sona when nothing usable remains', () => {
 		expect(sanitizeProjectName('...')).toBe('sona');
 		expect(sanitizeProjectName('')).toBe('sona');
+	});
+});
+
+describe('isValidResourceName', () => {
+	it('accepts the names sanitizeProjectName produces', () => {
+		for (const raw of ['Sparky.Ink', 'My Cool_Fork', 'café#site!', '--a..b__c--', '']) {
+			expect(isValidResourceName(sanitizeProjectName(raw)), raw).toBe(true);
+		}
+		expect(isValidResourceName('taro-surf-images')).toBe(true);
+		expect(isValidResourceName('sona2')).toBe(true);
+	});
+
+	// These are the answers that reached wrangler through a shell string: `my$site`
+	// arrived as `my`, and a quoted or spaced name split into several arguments —
+	// while wrangler.toml recorded the raw answer, so the bucket and the IMAGES
+	// binding named different things and setup still printed success.
+	it('rejects an answer carrying anything a shell would act on', () => {
+		for (const bad of [
+			'my$bucket',
+			'my`id`bucket',
+			'my"bucket"',
+			"my'bucket'",
+			'my bucket',
+			'my;bucket',
+			'my\\bucket',
+			'my/bucket',
+			'../escape'
+		]) {
+			expect(isValidResourceName(bad), bad).toBe(false);
+		}
+	});
+
+	// The prompt trims, but the validator is the thing being trusted: a caller that
+	// skipped the trim must not get a name with a newline glued to it past `$`.
+	it('rejects an answer with a trailing newline', () => {
+		expect(isValidResourceName('taro-surf\n')).toBe(false);
+		expect(isValidDatabaseName('sona_db\n')).toBe(false);
+		expect(isValidDatabaseId('3f8b0c62-1d4e\n')).toBe(false);
+	});
+
+	it('rejects empty, uppercase, and edge-hyphenated names, and anything over 58 chars', () => {
+		expect(isValidResourceName('')).toBe(false);
+		expect(isValidResourceName('MyBucket')).toBe(false);
+		expect(isValidResourceName('-lead')).toBe(false);
+		expect(isValidResourceName('trail-')).toBe(false);
+		expect(isValidResourceName('a'.repeat(58))).toBe(true);
+		expect(isValidResourceName('a'.repeat(59))).toBe(false);
+	});
+});
+
+describe('derivedResourceName', () => {
+	it('appends the suffix to an ordinary project name', () => {
+		expect(derivedResourceName('taro-surf', 'db')).toBe('taro-surf-db');
+		expect(derivedResourceName('taro-surf', 'images')).toBe('taro-surf-images');
+	});
+
+	// A 58-char project name is legal, but `<it>-images` is not — so setup would
+	// have offered a default it then rejected, fatal on a run with no TTY.
+	it('truncates so a derived default always passes the validator', () => {
+		const long = 'a'.repeat(58);
+		expect(isValidResourceName(long)).toBe(true);
+		for (const suffix of ['db', 'images']) {
+			const derived = derivedResourceName(long, suffix);
+			expect(isValidResourceName(derived), derived).toBe(true);
+			expect(derived.endsWith(`-${suffix}`), derived).toBe(true);
+		}
+	});
+
+	// The docstring promises a valid name for any suffix, not just the two setup
+	// passes, so the return is clamped as well as the stem.
+	it('stays valid even when the suffix alone is over-long', () => {
+		const derived = derivedResourceName('taro-surf', 'x'.repeat(80));
+		expect(derived.length).toBeLessThanOrEqual(58);
+		expect(isValidResourceName(derived), derived).toBe(true);
+	});
+
+	it('does not leave a doubled hyphen where it cut', () => {
+		const project = `${'a'.repeat(50)}-${'b'.repeat(7)}`;
+		expect(derivedResourceName(project, 'images')).toBe(`${'a'.repeat(50)}-images`);
+	});
+});
+
+describe('askResourceName', () => {
+	it('re-asks until the answer is usable, and returns that answer', async () => {
+		const answers = ['my$bucket', 'my bucket', 'taro-surf-images'];
+		const rejected: string[] = [];
+		let asks = 0;
+		const got = await askResourceName('R2 bucket name', 'taro-surf-images', {
+			ask: async () => {
+				asks++;
+				return answers.shift()!;
+			},
+			isInteractive: true,
+			onReject: (a) => rejected.push(a)
+		});
+		expect(got).toBe('taro-surf-images');
+		expect(asks).toBe(3);
+		expect(rejected).toEqual(['my$bucket', 'my bucket']);
+	});
+
+	// Without a TTY there is no second answer to give, so re-asking would spin
+	// forever on the same piped line.
+	it('gives up after exactly one ask when the run is not interactive', async () => {
+		let asks = 0;
+		const got = await askResourceName('R2 bucket name', 'taro-surf-images', {
+			ask: async () => {
+				asks++;
+				return 'my$bucket';
+			},
+			isInteractive: false
+		});
+		expect(got).toBeNull();
+		expect(asks).toBe(1);
+	});
+
+	it('takes a good first answer without rejecting anything', async () => {
+		const rejected: string[] = [];
+		const got = await askResourceName('D1 database name', 'taro-surf-db', {
+			ask: async (_q, def) => def,
+			isInteractive: false,
+			onReject: (a) => rejected.push(a)
+		});
+		expect(got).toBe('taro-surf-db');
+		expect(rejected).toEqual([]);
+	});
+});
+
+describe('runWith', () => {
+	// The two runners in setup.ts differ only in how they spawn; everything that
+	// decides what a caller SEES lives here, and dropping the opts argument on
+	// either delegation silently disables all three of these.
+	const spawnOk = (out: string) => {
+		const seen: unknown[] = [];
+		return {
+			seen,
+			spawn: (stdio: unknown) => {
+				seen.push(stdio);
+				return out;
+			}
+		};
+	};
+
+	it('hands back what the command printed when capturing', () => {
+		const { spawn, seen } = spawnOk('database_id = "abc"');
+		expect(runWith(spawn, { capture: true })).toBe('database_id = "abc"');
+		// Capturing means piped stdio — inherited output would leave the caller
+		// nothing to parse, which is how the dbId auto-detect breaks.
+		expect(seen).toEqual(['pipe']);
+	});
+
+	it('returns an empty string when the command printed nothing', () => {
+		expect(runWith(() => null, {})).toBe('');
+	});
+
+	it('inherits stdio by default, and ignores stdin when asked', () => {
+		const a = spawnOk('');
+		runWith(a.spawn, {});
+		expect(a.seen).toEqual([['inherit', 'inherit', 'inherit']]);
+
+		const b = spawnOk('');
+		runWith(b.spawn, { stdin: 'ignore' });
+		// wrangler's "Ok to proceed?" never fires without a stdin to read from.
+		expect(b.seen).toEqual([['ignore', 'inherit', 'inherit']]);
+	});
+
+	it('on a tolerated failure returns the output and reports it once', () => {
+		let failures = 0;
+		const out = runWith(
+			() => {
+				throw Object.assign(new Error('exit 1'), { stdout: 'partial ', stderr: 'code: 10042' });
+			},
+			{ allowFail: true, onFail: () => failures++ }
+		);
+		// Both streams, in order: isR2NotEnabled sniffs this text for the 10042 code.
+		expect(out).toBe('partial code: 10042');
+		// Once, not twice: r2CreateOk is flipped here, and the summary reports what
+		// actually landed from it.
+		expect(failures).toBe(1);
+	});
+
+	it('tolerates a failure that printed nothing at all', () => {
+		let failures = 0;
+		expect(runWith(() => {
+			throw new Error('spawn failed');
+		}, { allowFail: true, onFail: () => failures++ })).toBe('');
+		expect(failures).toBe(1);
+	});
+
+	it('rethrows when the failure is not tolerated', () => {
+		let failures = 0;
+		expect(() =>
+			runWith(
+				() => {
+					throw new Error('exit 1');
+				},
+				{ onFail: () => failures++ }
+			)
+		).toThrow('exit 1');
+		// onFail records a TOLERATED failure; an aborting one is not that.
+		expect(failures).toBe(0);
+	});
+});
+
+describe('isValidDatabaseId', () => {
+	it('accepts what parseDatabaseId itself extracts', () => {
+		const parsed = parseDatabaseId('database_id = "3f8b0c62-1d4e-4a90-8f1b-9c2d0e5a7b31"');
+		expect(parsed).not.toBeNull();
+		expect(isValidDatabaseId(parsed!)).toBe(true);
+	});
+
+	// The pasted id is written into wrangler.toml verbatim, so an answer that can
+	// close the string and open a new key would inject arbitrary config.
+	it('rejects anything that could rewrite the generated TOML', () => {
+		for (const bad of [
+			'',
+			'short',
+			'abc"\ndatabase_name = "other"',
+			'3f8b0c62 1d4e',
+			'not-hex-zzzzzzzz',
+			'$(id)',
+			'--------'
+		]) {
+			expect(isValidDatabaseId(bad), bad).toBe(false);
+		}
+	});
+});
+
+describe('askUntilValid', () => {
+	// askResourceName is one binding of this loop; the pasted database_id is the
+	// other, and it accepts a blank answer as "I don't have one".
+	it('re-asks on a rejected answer and returns the first accepted one', async () => {
+		const answers = ['nope!', '3f8b0c62-1d4e-4a90-8f1b-9c2d0e5a7b31'];
+		const rejected: string[] = [];
+		const got = await askUntilValid('database_id', '', (a) => a === '' || isValidDatabaseId(a), {
+			ask: async () => answers.shift()!,
+			isInteractive: true,
+			onReject: (a) => rejected.push(a)
+		});
+		expect(got).toBe('3f8b0c62-1d4e-4a90-8f1b-9c2d0e5a7b31');
+		expect(rejected).toEqual(['nope!']);
+	});
+
+	// Blank is how an operator says "wrangler printed no id and I don't have one";
+	// the predicate lets it through so the existing no-id abort is what stops setup.
+	it('accepts a blank answer for the pasted database_id, without rejecting it', async () => {
+		const rejected: string[] = [];
+		let asks = 0;
+		const got = await askUntilValid('database_id', '', (a) => a === '' || isValidDatabaseId(a), {
+			ask: async () => {
+				asks++;
+				return '';
+			},
+			isInteractive: true,
+			onReject: (a) => rejected.push(a)
+		});
+		expect(got).toBe('');
+		expect(asks).toBe(1);
+		expect(rejected).toEqual([]);
+	});
+
+	it('gives up after exactly one ask when the run is not interactive', async () => {
+		let asks = 0;
+		const got = await askUntilValid('database_id', '', isValidDatabaseId, {
+			ask: async () => {
+				asks++;
+				return 'nope!';
+			},
+			isInteractive: false
+		});
+		expect(got).toBeNull();
+		expect(asks).toBe(1);
+	});
+});
+
+describe('removeTempSqlDir', () => {
+	it('removes the directory and the SQL inside it', () => {
+		const { dir, path } = writePrivateTempSql('SELECT 1;', 'sona-test-');
+		removeTempSqlDir(dir);
+		expect(existsSync(path)).toBe(false);
+		expect(existsSync(dir)).toBe(false);
+	});
+
+	// The SQL has already run by the time this is called; a directory someone else
+	// removed first is not a reason to fail the command that succeeded.
+	it('does not throw when the directory is already gone', () => {
+		const { dir } = writePrivateTempSql('SELECT 1;', 'sona-test-');
+		removeTempSqlDir(dir);
+		expect(() => removeTempSqlDir(dir)).not.toThrow();
+	});
+});
+
+describe('writePrivateTempSql', () => {
+	// The seed and the migration script both carry operator data, and the reset
+	// file carries a password hash: none of them may sit world-readable in /tmp.
+	it('writes the SQL into a 0700 dir as a 0600 file', () => {
+		const sql = "INSERT OR REPLACE INTO site_settings (key,value) VALUES ('adminPasswordHash','x');\n";
+		const { dir, path } = writePrivateTempSql(sql, 'sona-test-');
+
+		try {
+			expect(existsSync(path)).toBe(true);
+			expect(readFileSync(path, 'utf8')).toBe(sql);
+			expect(statSync(dir).mode & 0o777).toBe(0o700);
+			expect(statSync(path).mode & 0o777).toBe(0o600);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	// The caller learns the directory exists only by getting it back, so a failed
+	// write must not leave one behind for nobody to clean up.
+	it('leaves no directory behind when the write fails', () => {
+		const dirs = () => readdirSync(tmpdir()).filter((n) => n.startsWith('sona-atomic-'));
+		const before = dirs();
+		// A real write failure, no mocking: node refuses to write a plain object, and
+		// it refuses it at the same call the caller's ENOSPC or EACCES would hit.
+		expect(() => writePrivateTempSql({} as unknown as string, 'sona-atomic-')).toThrow();
+		// Compared against what was already there, so a stray directory from another
+		// run can't decide this test either way.
+		expect(dirs()).toEqual(before);
+	});
+
+	it('gives each call its own directory', () => {
+		const a = writePrivateTempSql('SELECT 1;', 'sona-test-');
+		const b = writePrivateTempSql('SELECT 2;', 'sona-test-');
+		try {
+			expect(a.dir).not.toBe(b.dir);
+			expect(readFileSync(a.path, 'utf8')).toBe('SELECT 1;');
+		} finally {
+			rmSync(a.dir, { recursive: true, force: true });
+			rmSync(b.dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe('isValidBucketName', () => {
+	// R2's bounds are 3 to 63, not Pages' 1 to 58. The old shared rule let a
+	// two-character answer through to fail at create, and refused a long name that
+	// an earlier run had already created.
+	it('accepts the range R2 actually allows, at both ends', () => {
+		expect(isValidBucketName('a'.repeat(3))).toBe(true);
+		expect(isValidBucketName('a'.repeat(63))).toBe(true);
+		expect(isValidBucketName(`${'taro-surf-'.repeat(5)}images`)).toBe(true);
+		expect(isValidBucketName('taro-surf-images')).toBe(true);
+	});
+
+	it('accepts the default setup derives, so the offered answer is always usable', () => {
+		expect(isValidBucketName(derivedResourceName('a'.repeat(58), 'images'))).toBe(true);
+	});
+
+	it('rejects a name shorter or longer than R2 takes', () => {
+		expect(isValidBucketName('ab')).toBe(false);
+		expect(isValidBucketName('a'.repeat(64))).toBe(false);
+	});
+
+	it('keeps the Pages character set: no uppercase, edge hyphens, or punctuation', () => {
+		for (const bad of ['MyBucket', '-lead-ok', 'trail-', 'my$bucket', 'my bucket', 'my_bucket']) {
+			expect(isValidBucketName(bad), bad).toBe(false);
+		}
+	});
+});
+
+describe('isValidDatabaseName', () => {
+	// D1 is looser than Pages/R2 on purpose: `wrangler d1 create` is allowed to
+	// fail, and the paste-the-id prompt exists so a re-run can point at a database
+	// that already exists — quite possibly one named in a style Pages would reject.
+	it('accepts the styles an existing D1 database may already use', () => {
+		expect(isValidDatabaseName('sona_db')).toBe(true);
+		expect(isValidDatabaseName('Sona-DB')).toBe(true);
+		expect(isValidDatabaseName('taro-surf-db')).toBe(true);
+		expect(isValidDatabaseName('db2')).toBe(true);
+	});
+
+	it('accepts the default setup derives, so the offered answer is always usable', () => {
+		expect(isValidDatabaseName(derivedResourceName('a'.repeat(58), 'db'))).toBe(true);
+	});
+
+	it('rejects a leading hyphen, which wrangler would read as a flag', () => {
+		expect(isValidDatabaseName('-leading')).toBe(false);
+	});
+
+	it('rejects anything a shell or an argv parser would treat as more than a name', () => {
+		for (const bad of ['my$db', 'my db', 'my"db', "my'db", 'my;db', 'my/db', '', 'a'.repeat(65)]) {
+			expect(isValidDatabaseName(bad), bad).toBe(false);
+		}
+		expect(isValidDatabaseName('a'.repeat(64))).toBe(true);
 	});
 });
 
@@ -932,9 +1343,9 @@ describe('resendSecretWarnLines', () => {
 });
 
 describe('setup.ts ↔ Resend secret contract', () => {
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 	// main() isn't importable, so pin at source level that both puts are checked
 	// rather than fired and forgotten, the way they were before.
-	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 
 	it('records a failed Resend put instead of discarding the result', () => {
 		expect(src).toMatch(/!putSecret\('RESEND_API_KEY'/);
@@ -986,12 +1397,12 @@ describe('provisioningNoteLine', () => {
 });
 
 describe('setup.ts ↔ securitySummaryLines call-site contract', () => {
+	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 	// main() is not importable (it drives live Cloudflare state), so pin the
 	// wiring at the source level: turnstileWired must be composed from the real
 	// PATCH result and the real secret-put result — forcing a literal here once
 	// survived the entire suite while reintroducing the very over-claim the
 	// helper exists to prevent.
-	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 
 	// The whole securitySummaryLines({...}) call, so property assertions below
 	// can't accidentally match unrelated code elsewhere in setup.ts.
@@ -1395,16 +1806,186 @@ describe('setup.ts ↔ zone-preflight source contract', () => {
 	// main() isn't importable, so pin that the preflight uses the shared
 	// candidate walk and distinguishes a failed lookup from "no zone" — the old
 	// inline loop read a 403 as "No Cloudflare zone found".
-	const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'setup.ts'), 'utf8');
 
 	it('resolves the zone via resolveZone over zoneNameCandidates(host)', () => {
-		expect(src).toMatch(/resolveZone\(\s*zoneNameCandidates\(\s*host\s*\)/s);
+		expect(setupSrc).toMatch(/resolveZone\(\s*zoneNameCandidates\(\s*host\s*\)/s);
 	});
 
 	it('handles a failed lookup before the no-zone branch', () => {
-		const errIdx = src.indexOf('zoneLookupError !== null');
-		const noZoneIdx = src.indexOf('No Cloudflare zone found');
+		const errIdx = setupSrc.indexOf('zoneLookupError !== null');
+		const noZoneIdx = setupSrc.indexOf('No Cloudflare zone found');
 		expect(errIdx).toBeGreaterThan(-1);
 		expect(noZoneIdx).toBeGreaterThan(errIdx);
+	});
+});
+
+// setup.ts is main()-only: it self-executes and prompts, so there is nothing to
+// import and these rules are pinned at the source level, like the contracts above.
+// Only rules that encode behavior are pinned here — never formatting, and never
+// something a unit test already proves.
+// Prose that mentions run() or execSync must not be read as a call site. Line
+// comments only: a `/*` inside one of them (`drizzle/*.sql`) would otherwise pair
+// with a later `*/` and swallow the code in between.
+const setupCode = setupSrc.replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+describe('setup.ts ↔ no operator answer reaches a shell', () => {
+	/** A top-level function's source: its header through the first column-0 `}`. */
+	const fnBody = (name: string): string => {
+		const start = setupCode.indexOf(`function ${name}(`);
+		if (start < 0) throw new Error(`setup.ts no longer defines function ${name}`);
+		const end = setupCode.indexOf('\n}', start);
+		if (end < 0) throw new Error(`function ${name} has no top-level close`);
+		return setupCode.slice(start, end);
+	};
+	// The two helpers allowed to spawn a shell, cut out so what remains is every
+	// other line of the CLI.
+	const outsideHelpers = ['run', 'commandSucceeds'].reduce(
+		(rest, name) => rest.replace(fnBody(name), ''),
+		setupCode
+	);
+
+	it('spawns a shell only inside run() and commandSucceeds()', () => {
+		// A bare execSync anywhere else is the hoisted form this whole change removes:
+		// `const cmd = ` + "`… ${project}`" + `; execSync(cmd)`.
+		expect(outsideHelpers).not.toMatch(/\bexecSync\s*\(/);
+	});
+
+	it('passes only fixed literals to the shell-string helpers', () => {
+		const firstArgs = [...outsideHelpers.matchAll(/\b(?:run|commandSucceeds)\(\s*([^,)]*)/g)].map(
+			(m) => m[1].trim()
+		);
+		// Non-vacuity: if the scan ever matches nothing (a rename, a regex that stops
+		// binding), it fails here instead of passing on an empty list.
+		expect(firstArgs).toEqual(
+			expect.arrayContaining([
+				"'npx wrangler whoami'",
+				"'git remote get-url origin'",
+				"'gh --version'",
+				"'gh auth status'"
+			])
+		);
+		// Each is a plain quoted literal: no interpolation, no concatenation, and no
+		// identifier holding a string built somewhere else.
+		for (const arg of firstArgs) expect(arg, arg).toMatch(/^'[^'$`]*'$|^"[^"$`]*"$/);
+	});
+
+	// The two ways an argv call quietly becomes a shell call again.
+	it('never asks a child process for a shell', () => {
+		expect(setupCode).not.toMatch(/shell:\s*true/);
+		// execFileSync('sh', ['-c', …]) is a command line by another name.
+		expect(setupCode).not.toMatch(
+			/execFileSync\(\s*['"`](?:\/bin\/|\/usr\/bin\/)?(?:sh|bash|zsh|cmd)(?:\.exe)?['"`]/
+		);
+	});
+
+	// Dropping the opts argument silently disables capture, allowFail and onFail —
+	// the behavior runWith's own unit tests cover, wired to the two callers here.
+	it('forwards each runner\'s opts to runWith', () => {
+		expect(setupCode.match(/runWith\([^;]*,\s*opts\s*\)/g)).toHaveLength(2);
+	});
+});
+
+describe('setup.ts ↔ SQL never rides a command line', () => {
+	it('never hands wrangler SQL with --command', () => {
+		expect(setupCode).not.toContain('--command');
+	});
+
+	it('passes the migration and seed SQL as files, written through the private helper', () => {
+		expect(setupCode.match(/--file=\$\{\w+\.path\}/g)).toHaveLength(2);
+		expect(setupCode.match(/writePrivateTempSql\(/g)).toHaveLength(2);
+	});
+
+	it('writes the seed inside the try, so a failed write degrades instead of aborting', () => {
+		// Outside it, an ENOSPC or EACCES on tmpdir throws out of main() with D1, R2
+		// and Pages created but the secrets not yet set.
+		const tryIdx = setupCode.indexOf('let seedOk = true;');
+		const writeIdx = setupCode.indexOf('writePrivateTempSql(seed', tryIdx);
+		const catchIdx = setupCode.indexOf('seedOk = false;', tryIdx);
+		expect(writeIdx).toBeGreaterThan(tryIdx);
+		expect(catchIdx).toBeGreaterThan(writeIdx);
+	});
+});
+
+// Every private temp dir gets removed on the way out, whatever the command did.
+describe('setup CLIs ↔ every temp SQL dir is cleaned up in a finally', () => {
+	const files = {
+		'setup.ts': setupCode,
+		'reset-password.ts': readFileSync(
+			join(dirname(fileURLToPath(import.meta.url)), 'reset-password.ts'),
+			'utf8'
+		)
+	};
+
+	for (const [name, code] of Object.entries(files)) {
+		it(`${name} removes as many temp dirs as it writes, each from a finally`, () => {
+			const writes = code.match(/writePrivateTempSql\(/g) ?? [];
+			const removes = [...code.matchAll(/removeTempSqlDir\(/g)];
+			expect(writes.length, name).toBeGreaterThan(0);
+			expect(removes.length, name).toBe(writes.length);
+			for (const m of removes) {
+				const openIdx = code.lastIndexOf('finally {', m.index);
+				expect(openIdx, name).toBeGreaterThan(-1);
+				// Still inside that finally block — no intervening close brace.
+				expect(code.slice(openIdx, m.index), name).not.toContain('}');
+			}
+		});
+	}
+});
+
+describe('setup.ts ↔ a rejected answer is asked again, or setup stops', () => {
+	it("binds both prompts to this run's TTY, so a piped run cannot loop forever", () => {
+		expect(setupCode).toMatch(/askResourceName\(/);
+		expect(setupCode).toMatch(/askUntilValid\(\s*q,\s*def,\s*isValidDatabaseName/);
+		expect(setupCode).toMatch(/askUntilValid\(\s*q,\s*def,\s*isValidBucketName/);
+		// askName, askDbName, askBucketName, and the pasted database_id.
+		expect(setupCode.match(/isInteractive:\s*Boolean\(\s*stdin\.isTTY\s*\)/g)).toHaveLength(4);
+	});
+
+	// The prompts themselves, not just the helpers: reverting any of the three to a
+	// bare `await ask(` left every other pin in this file green.
+	it('asks for all three names through a validating prompt, each with its abort', () => {
+		const bindings = [...setupCode.matchAll(/const (project|dbName|bucket) = await (\w+)\(/g)];
+		expect(bindings.map((m) => [m[1], m[2]])).toEqual([
+			['project', 'askName'],
+			['dbName', 'askDbName'],
+			['bucket', 'askBucketName']
+		]);
+		// Each answer is checked for null on the very next line — an unguarded one
+		// would carry a null name into wrangler and wrangler.toml.
+		for (const [name] of bindings.map((m) => [m[1]])) {
+			expect(setupCode, name).toMatch(
+				new RegExp(`const ${name} = await \\w+\\([^;]*;\\s*(?://[^\\n]*\\n\\s*)*if \\(${name} === null\\) return abortAnswer\\(`)
+			);
+		}
+	});
+
+	// The pasted database_id is the fourth validated answer, and blank still means
+	// "I don't have one" — the clause that lets the existing no-id abort fire.
+	it('validates the pasted database_id while still accepting a blank answer', () => {
+		expect(setupCode).toMatch(/\(answer\) => answer === ''\s*\|\|\s*isValidDatabaseId\(answer\)/);
+		expect(setupCode).toMatch(/if \(pasted === null\) return abortAnswer\(\s*'database id'/);
+	});
+
+	// Printing the reason and returning is not stopping: without these two, setup
+	// would carry on to provisioning and exit 0.
+	it('marks the run failed and closes the prompt when it cannot ask again', () => {
+		const start = setupCode.indexOf('const abortAnswer =');
+		expect(start).toBeGreaterThan(-1);
+		const body = setupCode.slice(start, setupCode.indexOf('\n\t};', start));
+		expect(body).toContain('process.exitCode = 1;');
+		expect(body).toContain('rl.close();');
+	});
+});
+
+describe('setup.ts ↔ untrusted values are encoded, never pasted raw', () => {
+	it('encodes both segments of the Pages-project PATCH path', () => {
+		expect(setupCode).toContain(
+			'/accounts/${encodeURIComponent(cfAccount)}/pages/projects/${encodeURIComponent(project)}'
+		);
+	});
+
+	it('encodes the zone id in every zone call it makes itself', () => {
+		expect(setupCode).not.toMatch(/\/zones\/\$\{zoneId\}/);
+		expect(setupCode.match(/\/zones\/\$\{encodeURIComponent\(zoneId\)\}/g)).toHaveLength(3);
 	});
 });

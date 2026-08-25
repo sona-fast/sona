@@ -431,6 +431,82 @@ describe('applyDownloadRateLimit — clear errors, no mutation', () => {
 		}
 	});
 
+	// An ok body carrying no ruleset id used to skip the PATCH and POST branches and
+	// land on the phase-entrypoint PUT, which REPLACES the zone's rate-limit ruleset
+	// with only our rule — deleting whatever the operator wrote — and then reported
+	// 'created'. Only a genuine 404 may take that path.
+	it('an ok entrypoint with no ruleset id stops without mutating', async () => {
+		for (const result of [
+			{ rules: [{ id: 'other', ref: 'someone_elses_rule' }] },
+			{ id: '', rules: [] },
+			{ id: 42, rules: [] }
+		]) {
+			const { api, calls } = fakeApi({
+				[zonePath]: zoneOk,
+				[entryPath]: { ok: true, status: 200, result }
+			});
+			const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+			expect(res.status, `result=${JSON.stringify(result)}`).toBe('error');
+			expect(res.detail).toContain('the response carried no ruleset id');
+			expect(isPermissionError(res)).toBe(false);
+			// The operator's own rules survive: nothing was written at all.
+			expect(calls.every((c) => c.method === 'GET')).toBe(true);
+		}
+	});
+
+	// The rule-list guard and the id guard are different reads of the same body, so
+	// keep them told apart. A body missing BOTH is the discriminating case: the rule
+	// list is what we can't parse, and saying "no ruleset id" would send the operator
+	// after the wrong thing.
+	// A body that DROPS the field entirely is the same partial read: only `rules: []`
+	// proves the ruleset is empty, so an id with no rule list must not turn into a
+	// POST that could duplicate our own rule.
+	it('reports a broken rule list as such, with or without a readable ruleset id', async () => {
+		for (const result of [
+			{ id: RULESET, rules: 'nope' },
+			{ rules: 'nope' },
+			{ id: RULESET },
+			undefined
+		]) {
+			const { api, calls } = fakeApi({
+				[zonePath]: zoneOk,
+				[entryPath]: { ok: true, status: 200, result }
+			});
+			const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+			expect(res.status, JSON.stringify(result)).toBe('error');
+			expect(res.detail, JSON.stringify(result)).toContain('the response carried no rule list');
+			expect(calls.every((c) => c.method === 'GET')).toBe(true);
+		}
+	});
+
+	// The id only matters when a write is needed. Erroring above the no-op arm
+	// reported a failure for a zone that was already in exactly the right state.
+	it('reports exists for an already-correct rule even when the body carries no ruleset id', async () => {
+		const { api, calls } = fakeApi({
+			[zonePath]: zoneOk,
+			[entryPath]: {
+				ok: true,
+				status: 200,
+				result: {
+					rules: [
+						{
+							id: 'mine',
+							ref: RULE_REF,
+							description: RULE_DESCRIPTION,
+							action: 'block',
+							enabled: true,
+							expression: RULE_EXPRESSION,
+							ratelimit: { ...RULE_RATELIMIT }
+						}
+					]
+				}
+			}
+		});
+		const res = await applyDownloadRateLimit(SECRET, 'akito.dog', api);
+		expect(res.status).toBe('exists');
+		expect(calls.every((c) => c.method === 'GET')).toBe(true);
+	});
+
 	it('empty domain → error before any network call', async () => {
 		const { api, calls } = fakeApi({});
 		const res = await applyDownloadRateLimit(SECRET, '   ', api);

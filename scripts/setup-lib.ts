@@ -5,6 +5,9 @@
  * tested without a Cloudflare account or a live shell.
  */
 
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RateLimitStatus } from './waf-lib.ts';
 import type { TurnstileStatus } from './turnstile-lib.ts';
 
@@ -85,6 +88,191 @@ export function sanitizeProjectName(raw: string): string {
 		.slice(0, 58)
 		.replace(/-+$/, '');
 	return cleaned || 'sona';
+}
+
+/** How a resource name must look, quoted verbatim when one is rejected. */
+export const RESOURCE_NAME_RULE =
+	'lowercase letters, digits, and hyphens only (no spaces, quotes, or other punctuation), 1 to 58 characters, starting and ending with a letter or digit';
+
+/**
+ * True when `name` is safe to use as a Pages project or R2 bucket name — the same
+ * character set `sanitizeProjectName` produces, which is also what Cloudflare
+ * accepts for those two. Checked on the operator's ANSWER, not just the prompt
+ * default: setup hands these names to wrangler and writes them into
+ * wrangler.toml, so a name carrying anything else risks the two disagreeing.
+ * (`$(?![\s\S])` rather than `$`, here and in the validators below, so a trailing
+ * newline can't slip past a caller that skipped the prompt's trim.)
+ */
+export function isValidResourceName(name: string): boolean {
+	return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$(?![\s\S])/.test(name) && name.length <= 58;
+}
+
+/** How an R2 bucket name may look, quoted verbatim when one is rejected. */
+export const BUCKET_NAME_RULE =
+	'lowercase letters, digits, and hyphens only, 3 to 63 characters, starting and ending with a letter or digit';
+
+/**
+ * True when `name` is usable as an R2 bucket name. Same character set as the Pages
+ * rule, different bounds — R2's are 3 to 63. Sharing one rule was wrong at both
+ * ends: a two-character answer passed here and then failed at create, and a bucket
+ * that already exists under a 59-to-63-character name could not be entered on a
+ * re-run at all.
+ */
+export function isValidBucketName(name: string): boolean {
+	return (
+		/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$(?![\s\S])/.test(name) && name.length >= 3 && name.length <= 63
+	);
+}
+
+/** How a D1 database name may look, quoted verbatim when one is rejected. */
+export const DATABASE_NAME_RULE =
+	'letters, digits, underscores, and hyphens, starting with a letter or digit, up to 64 characters';
+
+/**
+ * True when `name` is usable as a D1 database name. Looser than the Pages/R2 rule
+ * on purpose: D1 accepts underscores and capitals, and the paste-the-database_id
+ * prompt exists so a re-run can point at a database that ALREADY exists — one an
+ * earlier setup, or the operator, may well have called `sona_db`. Neither form is
+ * dangerous here, since the name travels as a single argv element and lands in a
+ * quoted TOML value. The leading character must still be alphanumeric so wrangler
+ * can't read the answer as a flag.
+ */
+export function isValidDatabaseName(name: string): boolean {
+	return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$(?![\s\S])/.test(name);
+}
+
+/**
+ * The default name setup offers for a derived resource (`<project>-db`,
+ * `<project>-images`). The project portion is truncated so the result always
+ * passes isValidResourceName: a 58-character project name is legal, but
+ * `<that>-images` is not, and setup would then reject a default it wrote itself
+ * — fatal on a run with no TTY to re-ask on.
+ */
+export function derivedResourceName(project: string, suffix: string): string {
+	const stem = project.slice(0, Math.max(58 - suffix.length - 1, 0)).replace(/-+$/, '');
+	// Clamped again on the way out so the promise above holds for ANY suffix, not
+	// just the two this codebase passes.
+	return (stem ? `${stem}-${suffix}` : suffix).slice(0, 58).replace(/-+$/, '');
+}
+
+/** What setup will accept when the operator pastes a D1 database_id by hand. */
+export const DATABASE_ID_RULE = 'the id exactly as wrangler printed it — hex digits and hyphens';
+
+/**
+ * True when `id` has the shape parseDatabaseId extracts from wrangler's output.
+ * A pasted id is written into wrangler.toml verbatim, so an answer carrying a
+ * quote or a newline would inject arbitrary TOML into the generated config.
+ */
+export function isValidDatabaseId(id: string): boolean {
+	// At least one hex digit: a string of nothing but hyphens is not an id.
+	return /^[0-9a-fA-F-]{8,}$(?![\s\S])/.test(id) && /[0-9a-fA-F]/.test(id);
+}
+
+/** What askUntilValid needs from its caller: a prompt, the run's interactivity, a voice. */
+export interface AskDeps {
+	ask: (question: string, def: string) => Promise<string>;
+	isInteractive: boolean;
+	onReject?: (answer: string) => void;
+}
+
+/**
+ * Ask until the answer passes `isValid`. The dependencies are injected so the loop
+ * is testable and this file stays free of readline and process state; `onReject`
+ * lets the caller explain the rule in its own voice. Returns null when a rejected
+ * answer can't be re-asked — a piped or CI run has no second answer to give, and
+ * proceeding on a value we would have to rewrite is what this guards against.
+ */
+export async function askUntilValid(
+	question: string,
+	def: string,
+	isValid: (answer: string) => boolean,
+	deps: AskDeps
+): Promise<string | null> {
+	for (;;) {
+		const answer = await deps.ask(question, def);
+		if (isValid(answer)) return answer;
+		deps.onReject?.(answer);
+		if (!deps.isInteractive) return null;
+	}
+}
+
+/** askUntilValid bound to the rule wrangler and wrangler.toml must agree on. */
+export function askResourceName(question: string, def: string, deps: AskDeps): Promise<string | null> {
+	return askUntilValid(question, def, isValidResourceName, deps);
+}
+
+/**
+ * Write SQL to a private temp file — `mkdtemp` gives a directory only the current
+ * user can read (0700), so a seed or a password hash never sits in a predictable,
+ * world-readable path under the shared /tmp. Caller removes the returned directory
+ * once done. (The one impure helper here, shared by setup.ts and
+ * reset-password.ts so the three SQL temp files can't drift apart on permissions.)
+ */
+export function writePrivateTempSql(sql: string, prefix: string): { dir: string; path: string } {
+	const dir = mkdtempSync(join(tmpdir(), prefix));
+	const path = join(dir, 'sona.sql');
+	try {
+		writeFileSync(path, sql, { mode: 0o600 });
+	} catch (err) {
+		// All or nothing: the caller only learns the directory exists by getting it
+		// back, so a failed write would otherwise leave one nobody ever cleans up.
+		removeTempSqlDir(dir);
+		throw err;
+	}
+	return { dir, path };
+}
+
+/**
+ * Remove a directory writePrivateTempSql made. Best-effort by design: the SQL has
+ * already run by the time this is called, and a temp file we couldn't unlink is
+ * not a reason to fail the command that succeeded.
+ */
+export function removeTempSqlDir(dir: string): void {
+	try {
+		rmSync(dir, { recursive: true, force: true });
+	} catch {
+		/* best-effort temp cleanup */
+	}
+}
+
+/** Options shared by the two command runners in setup.ts. */
+export interface RunOpts {
+	capture?: boolean;
+	allowFail?: boolean;
+	stdin?: 'inherit' | 'ignore';
+	env?: NodeJS.ProcessEnv;
+	/** Called on a tolerated failure, so a caller can record that it happened. */
+	onFail?: () => void;
+}
+
+/**
+ * The shared body of setup.ts's run() and runArgs(): one stdio decision, one
+ * tolerated-failure path. `spawn` is injected — the only difference between the
+ * two runners is whether it shells out or execs an argv array — which is also
+ * what makes this testable without spawning anything.
+ */
+export function runWith(
+	spawn: (stdio: import('node:child_process').StdioOptions) => string | null,
+	opts: RunOpts
+): string {
+	try {
+		const stdio: import('node:child_process').StdioOptions = opts.capture
+			? 'pipe'
+			: [opts.stdin ?? 'inherit', 'inherit', 'inherit'];
+		return spawn(stdio) ?? '';
+	} catch (err) {
+		if (opts.allowFail) {
+			// On a tolerated failure, hand back whatever the command printed so callers
+			// can sniff it (e.g. the R2 "not enabled" error). Inherited stdio isn't
+			// captured, so this is only non-empty when `capture` was set — which is why
+			// a caller that must know whether the command SUCCEEDED takes onFail rather
+			// than reading the text.
+			opts.onFail?.();
+			const e = err as { stdout?: string | Buffer; stderr?: string | Buffer };
+			return `${e.stdout ?? ''}${e.stderr ?? ''}`;
+		}
+		throw err;
+	}
 }
 
 /**
