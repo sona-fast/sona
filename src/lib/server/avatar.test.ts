@@ -241,6 +241,19 @@ describe('resolveAvatarUrl re-hosting', () => {
 		expect(url).toBe(BSKY_AVATAR);
 	});
 
+	it('refuses an empty 200 rather than storing a blank avatar', async () => {
+		// It slips past both size guards: 0 is not over the ceiling, and res.body is
+		// non-null for an empty 200. Storing it is the worst outcome available,
+		// because the URL is then one of ours and the owner heal's already-ours skip
+		// pins the operator on a blank picture the cron will never repair.
+		stubFetch({ imageBytes: 0 });
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+		expect(bucket.put).not.toHaveBeenCalled();
+		// Falls back to the source, so the next run gets another go.
+		expect(url).toBe(BSKY_AVATAR);
+	});
+
 	it('still stores a body right up to the ceiling', async () => {
 		// The boundary matters both ways: a cap that refused everything would also
 		// pass every test above while quietly re-hosting nothing at all.

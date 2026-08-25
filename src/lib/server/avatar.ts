@@ -154,6 +154,19 @@ async function rehostAvatar(
 			console.warn(`[avatar] rehost skipped: handle=${handle} body over ${MAX_AVATAR_BYTES} bytes`);
 			return null;
 		}
+		// An empty 200 is a failed copy, not a copy of nothing. It slips past both
+		// size guards — `content-length: 0` is not over the ceiling, and `res.body`
+		// is non-null for an empty 200 (the spec only nulls it for 204/205/304 and
+		// HEAD) — so without this it would be stored and returned as a success.
+		// That is the worst outcome available here: the URL is then one of ours, so
+		// the owner heal's "already serving our own copy" skip short-circuits every
+		// future run and pins the operator on a permanently blank avatar the daily
+		// cron will never repair, while the panel reports it healed. Falling back
+		// leaves the old URL in place and lets the next run try again.
+		if (bytes.length === 0) {
+			console.warn(`[avatar] rehost skipped: handle=${handle} empty body`);
+			return null;
+		}
 		const ext = extFromContentType(contentType);
 		const uuid = crypto.randomUUID();
 		const slug = ctx.keyHint.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'artist';
@@ -192,6 +205,13 @@ export async function resolveAvatarUrl(
 	},
 	rehost?: AvatarRehostContext
 ): Promise<string | null> {
+	// `redirected` reports on THIS resolve, so clear it on the way in. Every
+	// caller happens to build its context inline today, which is the only reason
+	// a set-only flag reads correctly; a caller that reused one — sticker-import
+	// already passes a context it owns — would otherwise attribute one subject's
+	// redirect to every later one.
+	if (rehost) rehost.redirected = false;
+
 	// Store the copy where we can, keep the source hotlink where the copy failed,
 	// and drop the URL entirely where it was refused (see REFUSED).
 	const store = async (avatar: string, handle: string): Promise<string | null> => {
