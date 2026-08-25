@@ -39,8 +39,21 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	// run open.
 	requireCronSecret(request, env);
 
-	const raw = Number(url.searchParams.get('batch'));
-	const batch = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_BATCH) : DEFAULT_BATCH;
+	// An EXPLICIT batch=0 means "owner heal only, no artist work", and is how the
+	// workflow calls a fork that never opted into artist refreshing. It has to be
+	// distinguishable from an ABSENT param, which still means "use the default":
+	// treating both as 0 would make a bare call do nothing, and treating both as
+	// the default would start refreshing 25 artists on forks that deliberately
+	// opted out. The owner heal does not run on this dial — it is the fork's own
+	// avatar, not a batch of other people's.
+	const rawParam = url.searchParams.get('batch');
+	const raw = Number(rawParam);
+	const explicitZero = rawParam !== null && Number.isFinite(raw) && Math.floor(raw) === 0;
+	const batch = explicitZero
+		? 0
+		: Number.isFinite(raw) && raw > 0
+			? Math.min(Math.floor(raw), MAX_BATCH)
+			: DEFAULT_BATCH;
 
 	const db = getDb(env!.DB);
 	const settings = await getSettings(db);

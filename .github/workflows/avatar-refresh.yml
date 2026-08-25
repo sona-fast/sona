@@ -1,9 +1,12 @@
-# Scheduled refresh of artist avatars.
+# Scheduled avatar upkeep: this site's own avatar every run, artists' avatars
+# when the site has opted into that.
 #
 # Cloudflare Pages can't run native cron, so GitHub Actions is the scheduler: it
-# POSTs to the app's refresh endpoint, which re-resolves + re-hosts a bounded
-# batch of artist avatars (oldest-first) so re-hosted copies track each artist's
-# current picture. See issue #187.
+# POSTs to the app's refresh endpoint. That endpoint does two things. It heals
+# this site's OWN avatar when a previous re-host failed and left it pointing at
+# a third party, which every site wants and nothing else ever retries. And it
+# re-resolves + re-hosts a bounded batch of ARTIST avatars (oldest-first) so
+# re-hosted copies track each artist's current picture. See issue #187.
 #
 # Required:
 #   - repo secret CRON_SECRET (Settings -> Secrets and variables -> Actions)
@@ -11,9 +14,11 @@
 #     CRON_SECRET`). Without it the endpoint returns 401/503 and this job fails.
 #   - repo variable SITE_URL (Actions -> Variables) = your site's base URL,
 #     e.g. https://example.com.
+#
+# Optional:
 #   - repo variable AVATAR_REFRESH_BATCH (Actions -> Variables) = how many
-#     avatars to refresh per run. Unset or 0 means "not opted in" and the run is
-#     skipped with a log line (never a silent no-op). Start small, e.g. 25.
+#     ARTIST avatars to refresh per run. Unset or 0 means "not opted in", and
+#     the run still checks this site's own avatar. Start small, e.g. 25.
 name: Avatar refresh
 
 on:
@@ -45,14 +50,26 @@ jobs:
           if [ -z "$SITE_URL" ]; then
             echo "::error::SITE_URL repo variable is not set (Settings -> Secrets and variables -> Actions -> Variables) - set it to your site's base URL, e.g. https://example.com"; exit 1
           fi
-          # Avatar refresh is OPT-IN via the batch dial. Unset or 0 = not opted in
-          # -> skip with a visible log line (not a silent no-op), don't fail.
-          if [ -z "$AVATAR_REFRESH_BATCH" ] || [ "$AVATAR_REFRESH_BATCH" = "0" ]; then
-            echo "::warning::AVATAR_REFRESH_BATCH not set (or 0) - skipping avatar refresh (set the repo variable to a batch size, e.g. 25, to opt in)"; exit 0
+          # Refreshing OTHER people's avatars (artists) is opt-in via the batch
+          # dial. Unset or 0 means not opted in, and we send batch=0 rather than
+          # skipping the call: the endpoint also heals the fork's OWN avatar when
+          # a previous re-host left it on a third-party host, and that is not a
+          # batch of other people's pictures to opt into. Exiting here instead
+          # meant the heal reached no fork at all (the variable was set on none
+          # of them), so the fix shipped and did nothing.
+          BATCH="${AVATAR_REFRESH_BATCH:-0}"
+          # It lands in a URL, so refuse anything that is not a plain number
+          # rather than passing a typo (or worse) through to curl.
+          case "$BATCH" in
+            ''|*[!0-9]*)
+              echo "::error::AVATAR_REFRESH_BATCH must be a whole number (got '$BATCH') - unset it, or set it to a batch size like 25"; exit 1 ;;
+          esac
+          if [ "$BATCH" = "0" ]; then
+            echo "::notice::AVATAR_REFRESH_BATCH not set (or 0) - skipping the artist batch; still checking this site's own avatar (set the repo variable to a batch size, e.g. 25, to refresh artist avatars too)"
           fi
-          # Avatar refresh needs cron auth like the other cron jobs.
+          # The endpoint needs cron auth like the other cron jobs.
           if [ -z "$CRON_SECRET" ]; then
-            echo "::error::CRON_SECRET not set but AVATAR_REFRESH_BATCH is - set the repo secret (matching the Pages secret) to run the refresh"; exit 1
+            echo "::error::CRON_SECRET not set - set the repo secret (matching the Pages secret) to run the refresh"; exit 1
           fi
           # --max-time is the REAL bound on the refresh run: when curl gives up,
           # the server request is cancelled mid-batch and its job-run heartbeat
@@ -61,7 +78,7 @@ jobs:
           code=$(curl -sS --max-time 900 -o response.json -w '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "${SITE_URL%/}/api/cron/refresh-avatars?batch=${AVATAR_REFRESH_BATCH}")
+            "${SITE_URL%/}/api/cron/refresh-avatars?batch=${BATCH}")
           echo "HTTP $code"
           cat response.json || true
           echo

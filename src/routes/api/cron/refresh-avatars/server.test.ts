@@ -78,6 +78,48 @@ describe('POST /api/cron/refresh-avatars', () => {
 		});
 	});
 
+	it('does no artist work on an explicit batch=0, which is how a fork that never opted in still gets healed', async () => {
+		// The workflow sends batch=0 rather than skipping the call, because the
+		// owner heal is not a batch of other people's pictures to opt into. If this
+		// regressed to the default the endpoint would start refreshing 25 artists on
+		// forks that deliberately opted out.
+		const fetchMock = vi.fn(async () => new Response('nope', { status: 500 }));
+		vi.stubGlobal('fetch', fetchMock);
+		const sqlite = new Database(':memory:');
+		sqlite.exec(DDL);
+		const rows = Array.from({ length: 30 }, (_, i) => `('a${i}', 'a${i}.bsky.social', 'x')`).join(',');
+		sqlite.exec(`INSERT INTO artists (name, bluesky_url, created_at) VALUES ${rows};`);
+		const env = { CRON_SECRET, DB: makeD1(sqlite) } as unknown as App.Platform['env'];
+
+		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '0' }));
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			processed: 0,
+			refreshed: 0,
+			remaining: 30,
+			ownerAvatar: 'skipped'
+		});
+		// Not one profile lookup went out for an artist.
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('still uses the default batch when the param is absent, not zero', async () => {
+		// An ABSENT param and an explicit 0 mean different things, and collapsing
+		// them either way breaks one of the two callers.
+		vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+		const sqlite = new Database(':memory:');
+		sqlite.exec(DDL);
+		const rows = Array.from({ length: 30 }, (_, i) => `('a${i}', 'a${i}.bsky.social', 'x')`).join(',');
+		sqlite.exec(`INSERT INTO artists (name, bluesky_url, created_at) VALUES ${rows};`);
+		const env = { CRON_SECRET, DB: makeD1(sqlite) } as unknown as App.Platform['env'];
+
+		const res = await POST(postEvent(env, { secret: CRON_SECRET }));
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toMatchObject({ processed: 25, remaining: 5 });
+	});
+
 	it('clamps an oversized batch to MAX_BATCH (50) so a run fits the workflow curl ceiling', async () => {
 		// Every resolve fails fast offline; only the clamp arithmetic is under test.
 		vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
