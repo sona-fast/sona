@@ -349,6 +349,26 @@ describe('refreshArtistAvatars', () => {
 		expect(row!.avatarResolvedAt).toBeTruthy(); // stamped so it can't starve the rotation
 	});
 
+	it('reports no backlog at limit 0, which is how the cron says "not opted in"', async () => {
+		const { db } = makeDb();
+		await db.insert(artists).values([
+			{ name: 'A', blueskyUrl: 'a.bsky.social', avatarUrl: null, createdAt: 'x' },
+			{ name: 'B', blueskyUrl: 'b.bsky.social', avatarUrl: null, createdAt: 'x' }
+		]);
+
+		const r = await refreshArtistAvatars(db, {
+			env: { IMAGES: fakeBucket() } as unknown as App.Platform['env'],
+			settings: { storageProvider: 'r2', r2PublicUrl: 'https://cdn.test' } as unknown as SiteSettings,
+			origin: 'https://site.test',
+			limit: 0,
+			mode: 'oldest'
+		});
+
+		// `remaining: 2` would put a backlog on the daily heartbeat of every site
+		// that chose not to refresh artist avatars — one that can never drain.
+		expect(r).toEqual({ processed: 0, refreshed: 0, remaining: 0 });
+	});
+
 	it("mode 'oldest' rotates oldest-first (nulls first) and leaves the rest for next run", async () => {
 		const { db } = makeDb();
 		await db.insert(artists).values([

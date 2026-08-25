@@ -253,6 +253,12 @@ export async function refreshArtistAvatars(
 ): Promise<{ processed: number; refreshed: number; remaining: number }> {
 	const { env, settings, origin, limit, mode } = opts;
 
+	// No limit, nothing to say: the cron calls this with 0 on every site that
+	// never opted into artist refreshing, and counting a `remaining` it will never
+	// work through would report a permanent backlog to sites that chose not to
+	// have one. It also saves the full artist SELECT on the daily no-op run.
+	if (limit <= 0) return { processed: 0, refreshed: 0, remaining: 0 };
+
 	// Only Twitter and Bluesky resolve today (FA/Patreon are TODO), so an artist
 	// with neither can never be refreshed — leave them out of the queue entirely.
 	// NULLs-first ordering: `avatar_resolved_at IS NOT NULL` is 0 for nulls.

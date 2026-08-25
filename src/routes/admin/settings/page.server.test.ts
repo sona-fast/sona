@@ -59,7 +59,11 @@ function makeDb() {
 		aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL
 	);`);
 	const d1 = makeD1(sqlite);
-	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
+	return {
+		sqlite,
+		db: drizzle(d1, { schema }),
+		platform: { env: { DB: d1 } } as unknown as App.Platform
+	};
 }
 
 function connectEvent(platform: App.Platform, fields: Record<string, string>) {
@@ -989,9 +993,10 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		expect(resolveAvatarUrl).not.toHaveBeenCalled();
 	});
 
-	// Unchanged-handle guard (#187): the site tab posts bluesky on EVERY save, and
-	// no cron heals the owner avatar — an unrelated save (a transient resolve
-	// failure included) must not degrade an owned re-hosted copy. With the handle
+	// Unchanged-handle guard (#187): the site tab posts bluesky on EVERY save, so
+	// an unrelated save (a transient resolve failure included) must not degrade an
+	// owned re-hosted copy — the refresh cron would heal it back, but a day later
+	// and only from a hotlink, so don't create the damage. With the handle
 	// unchanged AND the avatar already ours, nothing could change, so the resolve
 	// is skipped entirely (which is also what keeps a transient failure harmless).
 	it('an UNCHANGED handle with an owned avatar skips re-resolution and keeps the avatar', async () => {
@@ -1038,8 +1043,9 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		await seed(db, 'blueskyUrl', 'https://bsky.app/profile/old.bsky.social');
 		await seed(db, 'adminAvatarUrl', '/img/avatars/owner/owned.jpg');
 		// Re-host failed → resolveAvatarUrl falls back to the new account's hotlink;
-		// storing a rot-prone hotlink for the owner (no cron heals it) is worse than
-		// clearing and re-saving once storage recovers.
+		// storing a rot-prone hotlink for the owner is worse than clearing and
+		// re-saving once storage recovers (the cron's heal is a slower backstop, not
+		// a reason to store one).
 		vi.mocked(resolveAvatarUrl).mockResolvedValueOnce(
 			'https://cdn.bsky.app/img/avatar/plain/hotlink'
 		);
@@ -1047,6 +1053,33 @@ describe('settings saveSite — bluesky present-branch re-resolves the avatar', 
 		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'new.bsky.social' }));
 
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe('');
+	});
+
+	// Load-bearing key ORDER, not a style choice: healOwnerAvatar (the refresh
+	// cron) re-reads blueskyUrl alone right before it writes adminAvatarUrl, and
+	// that single-key read is only a valid guard because a concurrent save has
+	// necessarily written its handle first — saveSettings walks this object in
+	// insertion order with no transaction. Swap the two keys and a save caught
+	// mid-flight slips past the guard and loses its just-written avatar.
+	it('writes blueskyUrl before adminAvatarUrl, which is what makes the cron heal guard safe', async () => {
+		const { sqlite, platform } = makeDb();
+		// Triggers, so the assertion is on the writes that actually reached D1
+		// rather than on the shape of the source.
+		sqlite.exec(`CREATE TABLE settings_writes (n INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL);
+		CREATE TRIGGER log_settings_insert AFTER INSERT ON site_settings
+		BEGIN INSERT INTO settings_writes (key) VALUES (NEW.key); END;
+		CREATE TRIGGER log_settings_update AFTER UPDATE ON site_settings
+		BEGIN INSERT INTO settings_writes (key) VALUES (NEW.key); END;`);
+
+		await actions.saveSite(saveSiteEvent(platform, { bluesky: 'sunday.bsky.social' }));
+
+		const keys: string[] = sqlite
+			.prepare('SELECT key FROM settings_writes ORDER BY n')
+			.all()
+			.map((r: { key: string }) => r.key);
+		expect(keys).toContain('blueskyUrl');
+		expect(keys).toContain('adminAvatarUrl');
+		expect(keys.indexOf('blueskyUrl')).toBeLessThan(keys.indexOf('adminAvatarUrl'));
 	});
 });
 

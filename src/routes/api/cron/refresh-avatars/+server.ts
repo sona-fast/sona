@@ -11,7 +11,11 @@ import type { RequestHandler } from './$types';
 // Machine-to-machine endpoint for the scheduled avatar refresh (issue #187, the
 // AVATAR_REFRESH_BATCH cron designed in #148). It re-resolves + re-hosts a bounded
 // batch of artist avatars, rotating oldest-first (rows never refreshed come first),
-// so re-hosted copies track the artist's current picture as they change it.
+// so re-hosted copies track the artist's current picture as they change it. Every
+// call also heals this site's OWN avatar when a previous re-host left it on a
+// third-party host, which is why batch=0 is a real mode and not a no-op: it means
+// "heal only, no artist work", and is how the workflow calls a site that never
+// opted into refreshing artist avatars.
 //
 // Like the other /api/cron/* endpoints this has NO admin session — it's exempted
 // from the admin gate in hooks.server.ts and authenticates with a shared secret:
@@ -47,13 +51,12 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	// opted out. The owner heal does not run on this dial — it is the fork's own
 	// avatar, not a batch of other people's.
 	const rawParam = url.searchParams.get('batch');
-	const raw = Number(rawParam);
-	const explicitZero = rawParam !== null && Number.isFinite(raw) && Math.floor(raw) === 0;
-	const batch = explicitZero
-		? 0
-		: Number.isFinite(raw) && raw > 0
-			? Math.min(Math.floor(raw), MAX_BATCH)
-			: DEFAULT_BATCH;
+	const n = rawParam === null ? DEFAULT_BATCH : Math.floor(Number(rawParam));
+	// A present-but-unparseable or negative batch means 0 (heal only), never the
+	// default: a caller we can't take at its word must not be upgraded into 25
+	// artists of real work. The workflow can't send one — it refuses a non-numeric
+	// value before curl — but this endpoint has no other guard in front of it.
+	const batch = Number.isFinite(n) && n >= 0 ? Math.min(n, MAX_BATCH) : 0;
 
 	const db = getDb(env!.DB);
 	const settings = await getSettings(db);
@@ -114,7 +117,13 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 		ownerAvatar === 'skipped'
 			? ''
 			: `, owner avatar ${ownerAvatar === 'healed' ? 'now self-hosted' : 'not re-hosted this run'}`;
-	schedule(platform, recordJobRun(db, 'refresh-avatars', 'ok',
-		`refreshed ${result.refreshed}/${result.processed}, ${result.remaining} remaining${ownerNote}`));
+	// At batch 0 there are no artist counts to report, and reporting them anyway
+	// ("refreshed 0/0, N remaining") reads as a backlog that never drains rather
+	// than as the opt-out it is.
+	const artistNote =
+		batch === 0
+			? 'artist refresh not requested'
+			: `refreshed ${result.refreshed}/${result.processed}, ${result.remaining} remaining`;
+	schedule(platform, recordJobRun(db, 'refresh-avatars', 'ok', `${artistNote}${ownerNote}`));
 	return json({ ...result, ownerAvatar });
 };

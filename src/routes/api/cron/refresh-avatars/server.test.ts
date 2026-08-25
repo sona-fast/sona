@@ -22,7 +22,41 @@ CREATE TABLE job_run (name TEXT PRIMARY KEY, status TEXT NOT NULL, ran_at TEXT N
 function makeEnv() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec(DDL);
-	return { CRON_SECRET, DB: makeD1(sqlite) } as unknown as App.Platform['env'];
+	return { sqlite, env: { CRON_SECRET, DB: makeD1(sqlite) } as unknown as App.Platform['env'] };
+}
+
+const BSKY_AVATAR = 'https://cdn.bsky.app/img/avatar/plain/did/abc@jpeg';
+
+/** A fork stranded on a hotlink: a handle to resolve from, R2 with a CDN base. */
+function strandedEnv() {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(DDL);
+	sqlite.exec(`INSERT INTO site_settings (key, value) VALUES
+		('blueskyUrl', 'https://bsky.app/profile/nova.bsky.social'),
+		('adminAvatarUrl', '${BSKY_AVATAR}'),
+		('storageProvider', 'r2'),
+		('r2PublicUrl', 'https://cdn.test');`);
+	const bucket = {
+		put: vi.fn(async () => {}),
+		delete: vi.fn(async () => {}),
+		list: vi.fn(async () => ({ objects: [], truncated: false }))
+	};
+	const env = { CRON_SECRET, DB: makeD1(sqlite), IMAGES: bucket } as unknown as App.Platform['env'];
+	return { sqlite, env, bucket };
+}
+
+function ownerAvatarRow(sqlite: unknown) {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	return (sqlite as any)
+		.prepare("SELECT value FROM site_settings WHERE key='adminAvatarUrl'")
+		.get();
+}
+
+function jobRow(sqlite: unknown) {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	return (sqlite as any)
+		.prepare("SELECT status, detail FROM job_run WHERE name='refresh-avatars'")
+		.get();
 }
 
 function postEvent(
@@ -48,10 +82,21 @@ beforeEach(() => clearSettingsCache());
 afterEach(() => vi.unstubAllGlobals());
 
 describe('POST /api/cron/refresh-avatars', () => {
-	it('rejects requests without a valid cron secret', async () => {
-		const env = makeEnv();
+	// Run the rejection against the STRANDED fixture, not an empty one: auth has to
+	// happen before any work, and on an empty database "did no work" is true either
+	// way. Here an unauthenticated POST that reached the heal would spend a profile
+	// lookup, an image download, an R2 put and a settings write before returning 401.
+	it('rejects requests without a valid cron secret, before doing any work', async () => {
+		const fetchMock = vi.fn(async () => new Response('nope', { status: 500 }));
+		vi.stubGlobal('fetch', fetchMock);
+		const { sqlite, env, bucket } = strandedEnv();
+
 		await expect(POST(postEvent(env, { secret: '' }))).rejects.toMatchObject({ status: 401 });
 		await expect(POST(postEvent(env, { secret: 'wrong' }))).rejects.toMatchObject({ status: 401 });
+
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(ownerAvatarRow(sqlite).value).toBe(BSKY_AVATAR);
 	});
 
 	it('refuses to run when no CRON_SECRET is configured (fail closed)', async () => {
@@ -65,8 +110,9 @@ describe('POST /api/cron/refresh-avatars', () => {
 		// No fetch should be needed with no artists, but stub it so an accidental
 		// network call fails loudly instead of hitting the real internet.
 		vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
-		const env = makeEnv();
-		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '5' }));
+		const { sqlite, env } = makeEnv();
+		const waits: Promise<unknown>[] = [];
+		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '5', waits }));
 		expect(res.status).toBe(200);
 		// ownerAvatar rides along in the response: these seeds set no blueskyUrl, so
 		// the heal is skipped without a lookup, which is the healthy-fork path.
@@ -76,6 +122,15 @@ describe('POST /api/cron/refresh-avatars', () => {
 			remaining: 0,
 			ownerAvatar: 'skipped'
 		});
+
+		// The heartbeat every HEALTHY fork writes daily, pinned in full: nothing to
+		// heal must say nothing about the owner at all. Without this the skipped
+		// branch is invisible, and a fork with a perfectly good avatar could report
+		// "owner avatar not re-hosted this run" every morning.
+		await Promise.all(waits);
+		const job = jobRow(sqlite);
+		expect(job.status).toBe('ok');
+		expect(job.detail).toBe('refreshed 0/0, 0 remaining');
 	});
 
 	it('does no artist work on an explicit batch=0, which is how a fork that never opted in still gets healed', async () => {
@@ -91,16 +146,43 @@ describe('POST /api/cron/refresh-avatars', () => {
 		sqlite.exec(`INSERT INTO artists (name, bluesky_url, created_at) VALUES ${rows};`);
 		const env = { CRON_SECRET, DB: makeD1(sqlite) } as unknown as App.Platform['env'];
 
-		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '0' }));
+		const waits: Promise<unknown>[] = [];
+		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '0', waits }));
 
 		expect(res.status).toBe(200);
+		// `remaining: 0`, not 30: a site that opted out has no backlog, and counting
+		// every artist it will never touch would report one to it daily.
 		expect(await res.json()).toEqual({
 			processed: 0,
 			refreshed: 0,
-			remaining: 30,
+			remaining: 0,
 			ownerAvatar: 'skipped'
 		});
 		// Not one profile lookup went out for an artist.
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		// And the heartbeat says opted out rather than quoting artist counts.
+		await Promise.all(waits);
+		expect(jobRow(sqlite).detail).toBe('artist refresh not requested');
+	});
+
+	it('treats a present-but-invalid batch as 0, not as the default', async () => {
+		// The workflow refuses a non-numeric value before curl, so this can only
+		// arrive from some other caller — and failing open into 25 artists of real
+		// work is the wrong way to read a request we could not parse.
+		const fetchMock = vi.fn(async () => new Response('nope', { status: 500 }));
+		vi.stubGlobal('fetch', fetchMock);
+		const sqlite = new Database(':memory:');
+		sqlite.exec(DDL);
+		const rows = Array.from({ length: 30 }, (_, i) => `('a${i}', 'a${i}.bsky.social', 'x')`).join(',');
+		sqlite.exec(`INSERT INTO artists (name, bluesky_url, created_at) VALUES ${rows};`);
+		const env = { CRON_SECRET, DB: makeD1(sqlite) } as unknown as App.Platform['env'];
+
+		for (const batch of ['abc', '-1']) {
+			const res = await POST(postEvent(env, { secret: CRON_SECRET, batch }));
+			expect(res.status).toBe(200);
+			expect(await res.json()).toMatchObject({ processed: 0, remaining: 0 });
+		}
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
@@ -144,26 +226,6 @@ describe('POST /api/cron/refresh-avatars', () => {
 // the endpoint: the tests above pin only the skipped path, which is the value
 // the handler initializes to — they would stay green if the call were removed.
 describe('POST /api/cron/refresh-avatars — the owner-avatar heal', () => {
-	const BSKY_AVATAR = 'https://cdn.bsky.app/img/avatar/plain/did/abc@jpeg';
-
-	/** A fork stranded on a hotlink: a handle to resolve from, R2 with a CDN base. */
-	function strandedEnv() {
-		const sqlite = new Database(':memory:');
-		sqlite.exec(DDL);
-		sqlite.exec(`INSERT INTO site_settings (key, value) VALUES
-			('blueskyUrl', 'https://bsky.app/profile/nova.bsky.social'),
-			('adminAvatarUrl', '${BSKY_AVATAR}'),
-			('storageProvider', 'r2'),
-			('r2PublicUrl', 'https://cdn.test');`);
-		const bucket = {
-			put: vi.fn(async () => {}),
-			delete: vi.fn(async () => {}),
-			list: vi.fn(async () => ({ objects: [], truncated: false }))
-		};
-		const env = { CRON_SECRET, DB: makeD1(sqlite), IMAGES: bucket } as unknown as App.Platform['env'];
-		return { sqlite, env, bucket };
-	}
-
 	/** Profile lookup → an avatar; anything else → the image bytes. */
 	function stubProfileAndImage() {
 		vi.stubGlobal(
@@ -177,13 +239,6 @@ describe('POST /api/cron/refresh-avatars — the owner-avatar heal', () => {
 						})
 			)
 		);
-	}
-
-	function jobRow(sqlite: unknown) {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		return (sqlite as any)
-			.prepare("SELECT status, detail FROM job_run WHERE name='refresh-avatars'")
-			.get();
 	}
 
 	it('re-hosts the stranded owner avatar and says so in the response and the heartbeat', async () => {
@@ -201,11 +256,7 @@ describe('POST /api/cron/refresh-avatars — the owner-avatar heal', () => {
 		});
 
 		expect(bucket.put).toHaveBeenCalled();
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const stored = (sqlite as any)
-			.prepare("SELECT value FROM site_settings WHERE key='adminAvatarUrl'")
-			.get();
-		expect(stored.value).toMatch(/^https:\/\/cdn\.test\/avatars\/owner\//);
+		expect(ownerAvatarRow(sqlite).value).toMatch(/^https:\/\/cdn\.test\/avatars\/owner\//);
 
 		await Promise.all(waits);
 		const job = jobRow(sqlite);
