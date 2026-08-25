@@ -61,6 +61,12 @@ export interface FeedChannel {
 	adult?: boolean;
 }
 
+/** The control characters XML 1.0 cannot represent at all (§2.2 allows only
+ * tab, LF and CR below 0x20). Shared by escapeXml and renderItem's imageUrl
+ * normalization, so both strip exactly the same set. */
+// eslint-disable-next-line no-control-regex
+const XML_ILLEGAL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+
 /**
  * Escape text for an XML text node or attribute value. All five predefined
  * entities, so one helper serves both positions and no caller has to remember
@@ -73,13 +79,54 @@ export interface FeedChannel {
  */
 export function escapeXml(value: string): string {
 	return value
-		// eslint-disable-next-line no-control-regex
-		.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+		.replace(XML_ILLEGAL_CHARS, '')
 		.replace(/&/g, '&amp;')
 		.replace(/</g, '&lt;')
 		.replace(/>/g, '&gt;')
 		.replace(/"/g, '&quot;')
 		.replace(/'/g, '&apos;');
+}
+
+/**
+ * Escape text for an HTML attribute value or text node, for the markup that goes
+ * INSIDE a description. Two escapes stack here and both are required: this pass
+ * produces the HTML source a reader renders, and escapeXml then wraps that
+ * source as XML character data. A literal `&` therefore travels as `&amp;amp;`
+ * — XML-unescaped once to `&amp;`, which is what HTML spells an ampersand.
+ *
+ * The apostrophe is escaped numerically (`&#39;` — HTML 4 has no `&apos;`) so
+ * the helper stays safe in single-quoted attribute positions too, rather than
+ * relying on every call site quoting its attributes with double quotes.
+ */
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
+/**
+ * The description body for an item that has an image. Readers without Media RSS
+ * support (Vivaldi's reader, Feedly's article view) render only this element, so
+ * the image is repeated here as markup rather than left to media:content alone.
+ * The alt text is the displayed title, NSFW prefix included, so a reader showing
+ * alt text before the image loads carries the same warning the title does.
+ *
+ * A reader that supports both Media RSS and HTML descriptions shows the image
+ * twice. That is deliberate, not a bug to fix: Flickr's feed — the model for
+ * this markup — duplicates the same way, and dropping either copy would blank
+ * the image for the readers that only understand the other mechanism.
+ *
+ * Only absolute http(s) URLs are inlined — renderItem falls back to the
+ * text-only description for anything else. A protocol-relative or exotic-scheme
+ * URL inside reader-rendered HTML is where a stored value could turn into
+ * something a reader executes; media:content still carries it either way.
+ */
+function imageDescriptionHtml(imageUrl: string, title: string, description?: string): string {
+	const img = `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)}" />`;
+	return description ? `${img}<p>${escapeHtml(description)}</p>` : img;
 }
 
 /**
@@ -102,7 +149,8 @@ function element(name: string, value: string, indent: string): string {
 
 function renderItem(item: FeedItem): string {
 	const lines: string[] = ['\t\t<item>'];
-	lines.push(element('title', (item.nsfw ? NSFW_TITLE_PREFIX : '') + item.title, '\t\t\t'));
+	const title = (item.nsfw ? NSFW_TITLE_PREFIX : '') + item.title;
+	lines.push(element('title', title, '\t\t\t'));
 	lines.push(element('link', item.link, '\t\t\t'));
 	// isPermaLink is the default, but stating it is what tells a reader the guid
 	// is safe to resolve — and the guid IS the page URL, so dedupe survives a
@@ -110,15 +158,31 @@ function renderItem(item: FeedItem): string {
 	lines.push(`\t\t\t<guid isPermaLink="true">${escapeXml(item.link)}</guid>`);
 	const pubDate = rfc822(item.createdAt);
 	if (pubDate) lines.push(element('pubDate', pubDate, '\t\t\t'));
-	if (item.description) lines.push(element('description', item.description, '\t\t\t'));
+	// Both branches HTML-escape: the image branch made <description> an
+	// HTML-valued element, so a reader HTML-unescapes EVERY description — an
+	// image-less one left raw would render stored markup live instead of
+	// literally.
+	// Strip XML-illegal control characters BEFORE the scheme test, so the string
+	// the guard vets is the string that gets emitted: escapeXml drops the same
+	// characters on output, and testing the raw value would let a control byte
+	// inside the scheme (e.g. "java\x00script:") pass a guard the emitted URL
+	// no longer satisfies.
+	const imageUrl = item.imageUrl?.replace(XML_ILLEGAL_CHARS, '');
+	const inlineImageUrl = imageUrl && /^https?:\/\//i.test(imageUrl) ? imageUrl : undefined;
+	const body = inlineImageUrl
+		? imageDescriptionHtml(inlineImageUrl, title, item.description)
+		: item.description
+			? `<p>${escapeHtml(item.description)}</p>`
+			: undefined;
+	if (body) lines.push(element('description', body, '\t\t\t'));
 	if (item.credit) {
 		lines.push(element('dc:creator', item.credit, '\t\t\t'));
 		lines.push(element('media:credit', item.credit, '\t\t\t'));
 	}
-	if (item.imageUrl) {
+	if (imageUrl) {
 		lines.push(
-			`\t\t\t<media:content url="${escapeXml(item.imageUrl)}" medium="image" />`,
-			`\t\t\t<media:thumbnail url="${escapeXml(item.imageUrl)}" />`
+			`\t\t\t<media:content url="${escapeXml(imageUrl)}" medium="image" />`,
+			`\t\t\t<media:thumbnail url="${escapeXml(imageUrl)}" />`
 		);
 	}
 	// The per-item half of the in-band NSFW marking. A reader that ignores the

@@ -259,6 +259,12 @@ describe('GET /feed.xml — what it publishes', () => {
 		const url = body.match(/<media:content url="([^"]+)"/)?.[1];
 		expect(url).toBeTruthy();
 		expect(new URL(url!).host).toBe('taro.surf');
+		// The inline description copy must be absolute too — it is what readers
+		// without Media RSS support actually load. In the raw XML the HTML markup
+		// travels escaped, hence the entity-spelled pattern.
+		const inlineSrc = body.match(/&lt;img src=&quot;(.+?)&quot;/)?.[1];
+		expect(inlineSrc).toBeTruthy();
+		expect(new URL(inlineSrc!).host).toBe('taro.surf');
 	});
 
 	it('prefers the thumbnail over the full-size image', async () => {

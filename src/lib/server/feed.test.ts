@@ -23,14 +23,17 @@ const ENTITY = /&(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);/g;
 // declaration, which is why it is a class rather than a bare `/?`.
 const TOKEN = /<([?!/]?)([a-zA-Z][\w:.-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*([/?]?)>/g;
 
-/** Unescape the five predefined entities, so an assertion compares the ORIGINAL
- * text a reader would render. */
+/** Unescape the five predefined entities plus `&#39;` (the numeric apostrophe
+ * escapeHtml emits), so an assertion compares the ORIGINAL text a reader would
+ * render. `&#39;` runs before `&amp;` so a doubly-escaped `&amp;#39;` is not
+ * unescaped one pass too many. */
 function unescape(text: string): string {
 	return text
 		.replace(/&lt;/g, '<')
 		.replace(/&gt;/g, '>')
 		.replace(/&quot;/g, '"')
 		.replace(/&apos;/g, "'")
+		.replace(/&#39;/g, "'")
 		.replace(/&amp;/g, '&');
 }
 
@@ -185,6 +188,8 @@ describe('renderFeed — item fields', () => {
 	});
 
 	it('attaches the image as media:content and media:thumbnail', () => {
+		// The inline description copy is for readers that ignore Media RSS; it does
+		// not replace the elements the readers that DO support it use.
 		const entry = only(ITEM);
 		expect(child(entry, 'media:content')!.attrs.url).toBe('https://taro.surf/img/parent.png');
 		expect(child(entry, 'media:thumbnail')!.attrs.url).toBe('https://taro.surf/img/parent.png');
@@ -216,6 +221,107 @@ describe('renderFeed — item fields', () => {
 	it('dates the channel from the newest entry it was handed', () => {
 		const channel = channelOf(renderFeed({ ...CHANNEL, lastBuildDate: 'Wed, 01 Jul 2026 00:00:00 GMT' }, [ITEM]));
 		expect(textOf(channel, 'lastBuildDate')).toBe('Wed, 01 Jul 2026 00:00:00 GMT');
+	});
+});
+
+describe('renderFeed — inline image in the description', () => {
+	const only = (item: FeedItem) => children(channelOf(renderFeed(CHANNEL, [item])), 'item')[0];
+
+	it('emits the image followed by the text description', () => {
+		expect(textOf(only({ ...ITEM, description: 'A drawing.' }), 'description')).toBe(
+			'<img src="https://taro.surf/img/parent.png" alt="Parent Piece" /><p>A drawing.</p>'
+		);
+	});
+
+	it('emits the image alone when the row has no text description', () => {
+		expect(textOf(only(ITEM), 'description')).toBe(
+			'<img src="https://taro.surf/img/parent.png" alt="Parent Piece" />'
+		);
+	});
+
+	it('renders markup in an image-less description literally, not as HTML', () => {
+		// The <p> wrapper matches the image branch, so the same stored text renders
+		// the same shape with or without an image...
+		const plain = only({ ...ITEM, imageUrl: undefined, description: 'Just words.' });
+		expect(textOf(plain, 'description')).toBe('<p>Just words.</p>');
+		// ...but stored markup must survive BOTH unescape passes as text: the
+		// element is HTML-valued now, so a raw description here would render
+		// "See the <model> file" with the word swallowed as a live element.
+		const entry = only({ ...ITEM, imageUrl: undefined, description: 'See the <model> file' });
+		const source = textOf(entry, 'description')!;
+		expect(source).toBe('<p>See the &lt;model&gt; file</p>');
+		expect(unescape(source)).toBe('<p>See the <model> file</p>');
+	});
+
+	it('emits no description at all when the row has neither', () => {
+		expect(textOf(only({ ...ITEM, imageUrl: undefined }), 'description')).toBeUndefined();
+	});
+
+	it('treats an empty description like a missing one', () => {
+		// `<p></p>` after the image — or a bare `<description></description>` —
+		// reads as "this work has a description and it is blank".
+		expect(textOf(only({ ...ITEM, imageUrl: undefined, description: '' }), 'description')).toBeUndefined();
+		expect(textOf(only({ ...ITEM, description: '' }), 'description')).toBe(
+			'<img src="https://taro.surf/img/parent.png" alt="Parent Piece" />'
+		);
+	});
+
+	it('inlines only absolute http(s) image URLs, without touching Media RSS', () => {
+		// A protocol-relative or exotic-scheme URL inside reader-rendered HTML is
+		// where a stored value could turn into something a reader executes, so the
+		// description falls back to text-only while media:content keeps the URL.
+		const withText = only({ ...ITEM, imageUrl: '//taro.surf/img/parent.png', description: 'A drawing.' });
+		expect(textOf(withText, 'description')).toBe('<p>A drawing.</p>');
+		expect(child(withText, 'media:content')!.attrs.url).toBe('//taro.surf/img/parent.png');
+		expect(child(withText, 'media:thumbnail')!.attrs.url).toBe('//taro.surf/img/parent.png');
+		const bare = only({ ...ITEM, imageUrl: '//taro.surf/img/parent.png' });
+		expect(textOf(bare, 'description')).toBeUndefined();
+		// An exotic scheme falls back the same way — the text still ships, the URL
+		// never reaches reader-rendered HTML.
+		const script = only({ ...ITEM, imageUrl: 'javascript:alert(1)', description: 'A drawing.' });
+		expect(textOf(script, 'description')).toBe('<p>A drawing.</p>');
+		// The scheme test is case-insensitive, and the src keeps the URL as stored.
+		const upper = only({ ...ITEM, imageUrl: 'HTTPS://taro.surf/img/parent.png' });
+		expect(textOf(upper, 'description')).toBe(
+			'<img src="HTTPS://taro.surf/img/parent.png" alt="Parent Piece" />'
+		);
+	});
+
+	it('escapes an apostrophe in the description numerically', () => {
+		// `&#39;`, not `&apos;` — HTML 4 has no `&apos;`, and the numeric form
+		// keeps escapeHtml safe even in a single-quoted attribute position.
+		const entry = only({ ...ITEM, imageUrl: undefined, description: "Ben's" });
+		expect(textOf(entry, 'description')).toBe('<p>Ben&#39;s</p>');
+	});
+
+	it('inlines the image on an adult item too, alt text prefix and all', () => {
+		const entry = children(
+			channelOf(renderFeed({ ...CHANNEL, adult: true }, [{ ...ITEM, nsfw: true }])),
+			'item'
+		)[0];
+		expect(textOf(entry, 'description')).toBe(
+			'<img src="https://taro.surf/img/parent.png" alt="[NSFW] Parent Piece" />'
+		);
+	});
+
+	it('escapes the HTML exactly once inside the escaped XML', () => {
+		// Both passes are required and neither may run twice: XML-unescaping the
+		// element gives HTML source, and HTML-unescaping THAT gives the originals
+		// back. A double escape survives one pass too many and shows as literal
+		// `&amp;` in the reader.
+		const title = 'A & B <i>"x"</i>';
+		const imageUrl = 'https://taro.surf/img.png?a=1&b=2&quot=%22';
+		const xml = renderFeed(CHANNEL, [
+			{ ...ITEM, title, imageUrl, description: 'Ben & Jerry <3' }
+		]);
+		const source = textOf(children(channelOf(xml), 'item')[0], 'description')!;
+		expect(source).toBe(
+			'<img src="https://taro.surf/img.png?a=1&amp;b=2&amp;quot=%22" ' +
+				'alt="A &amp; B &lt;i&gt;&quot;x&quot;&lt;/i&gt;" /><p>Ben &amp; Jerry &lt;3</p>'
+		);
+		expect(unescape(source)).toBe(
+			`<img src="${imageUrl}" alt="${title}" /><p>Ben & Jerry <3</p>`
+		);
 	});
 });
 

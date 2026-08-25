@@ -52,6 +52,18 @@ test('credits the artist and points each entry at its own page', async ({ reques
 	expect(body).toContain('<dc:creator>Test Artist</dc:creator>');
 });
 
+test('inlines the artwork image in the description markup', async ({ request, baseURL }) => {
+	const body = await (await request.get('/feed.xml')).text();
+	// The description's HTML travels XML-escaped, so the <img> a reader renders
+	// appears in the raw body as entities.
+	const item = body.split('<item>').find((i) => i.includes('<title>Parent Piece SFW</title>'));
+	expect(item).toBeTruthy();
+	const src = item!.match(/&lt;img src=&quot;(.+?)&quot;/)?.[1];
+	expect(src).toBeTruthy();
+	// Same-origin: the inline copy points at this site's own image, not elsewhere.
+	expect(new URL(src!).host).toBe(new URL(baseURL!).host);
+});
+
 test('a wrong key gets the ordinary SFW feed, never an error', async ({ request }) => {
 	// A 403 would confirm that a key exists to be guessed at. The seed enables no
 	// NSFW feed at all, so this also covers the hard-gate case.
