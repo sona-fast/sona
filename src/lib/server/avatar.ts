@@ -488,8 +488,15 @@ export type OwnerAvatarHeal = 'skipped' | 'healed' | 'unresolved' | 'redirected'
  * same-origin for the con card, see docs/reading-image-bytes.md.)
  *
  * Heal-only on purpose. An owner avatar we already serve is left alone rather
- * than re-fetched daily, matching the skip saveSite already makes. This costs
- * one profile lookup per run only while the fork is in the broken state.
+ * than re-fetched daily, matching the skip saveSite already makes, so a healthy
+ * fork pays one settings read and no network call.
+ *
+ * A fork that is NOT healthy pays a profile lookup every run until it heals,
+ * which is usually once. The exception is an operator with a Bluesky handle and
+ * no picture on it: that resolves to nothing every night indefinitely, and the
+ * panel carries a "not re-hosted this run" line for a fork nobody needs to fix.
+ * Left as-is rather than remembered, because a stored "gave up" flag is a second
+ * piece of state to invalidate when they finally set a picture.
  */
 export async function healOwnerAvatar(
 	db: ReturnType<typeof getDb>,
