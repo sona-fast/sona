@@ -113,10 +113,20 @@ export const POST: RequestHandler = async ({ request, platform, url }) => {
 	// third-party host at all: a handle that changed mid-run, and a fork whose
 	// owner has a handle but no picture anywhere. "self-hosted" is the phrase the
 	// admin artists panel already ships ("All avatars are already self-hosted").
-	const ownerNote =
-		ownerAvatar === 'skipped'
-			? ''
-			: `, owner avatar ${ownerAvatar === 'healed' ? 'now self-hosted' : 'not re-hosted this run'}`;
+	const ownerNotes: Record<OwnerAvatarHeal, string> = {
+		skipped: '',
+		healed: ', owner avatar now self-hosted',
+		unresolved: ', owner avatar not re-hosted this run',
+		// Named separately because it is the one outcome here that isn't about this
+		// fork and that re-running won't clear: the source answered a redirect, which
+		// the download deliberately doesn't follow. If a CDN ever starts fronting
+		// avatars that way, every fork lands on this line the same morning, and the
+		// difference between "not re-hosted" and "its host now redirects" is the
+		// difference between each operator hunting their own storage config and one
+		// of them saying so.
+		redirected: ', owner avatar not re-hosted this run (its host answered a redirect)'
+	};
+	const ownerNote = ownerNotes[ownerAvatar];
 	// At batch 0 there are no artist counts to report, and reporting them anyway
 	// ("refreshed 0/0, N remaining") reads as a backlog that never drains rather
 	// than as the opt-out it is.

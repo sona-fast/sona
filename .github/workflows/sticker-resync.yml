@@ -32,6 +32,9 @@ jobs:
     # fork workflows. Every fork (any other repo) runs this normally and fails
     # loudly if CRON_SECRET is missing — that's a real misconfiguration to fix.
     if: github.repository != 'sona-fast/sona'
+    # No GITHUB_TOKEN at all — see avatar-refresh.yml for why every cron job
+    # here declares this: nothing is checked out and nothing calls the API.
+    permissions: {}
     steps:
       - name: Trigger re-sync endpoint
         env:

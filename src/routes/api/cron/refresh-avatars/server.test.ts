@@ -311,6 +311,41 @@ describe('POST /api/cron/refresh-avatars — the owner-avatar heal', () => {
 		);
 	});
 
+	// The heartbeat is the only part of this an operator ever sees, so it is where
+	// a fleet-wide cause has to show up. A CDN fronting avatars behind a redirect
+	// puts every fork on this line the same morning; reported as a plain
+	// "not re-hosted this run" it reads as each operator's own storage problem,
+	// and the only evidence to the contrary is a console.warn nobody reads.
+	it('says a redirect out loud in the heartbeat, not just "not re-hosted"', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: string | URL) =>
+				String(input).includes('getProfile')
+					? new Response(JSON.stringify({ avatar: BSKY_AVATAR }), { status: 200 })
+					: new Response(null, { status: 302, headers: { location: 'https://elsewhere.test/x.jpg' } })
+			)
+		);
+		const { sqlite, env, bucket } = strandedEnv();
+		const waits: Promise<unknown>[] = [];
+
+		const res = await POST(postEvent(env, { secret: CRON_SECRET, batch: '5', waits }));
+
+		expect(res.status).toBe(200);
+		expect((await res.json()) as { ownerAvatar: string }).toMatchObject({
+			ownerAvatar: 'redirected'
+		});
+		// Still fail-soft in every other respect: nothing stored, hotlink kept.
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(ownerAvatarRow(sqlite).value).toBe(BSKY_AVATAR);
+
+		await Promise.all(waits);
+		const job = jobRow(sqlite);
+		expect(job.status).toBe('ok');
+		expect(job.detail).toBe(
+			'refreshed 0/0, 0 remaining, owner avatar not re-hosted this run (its host answered a redirect)'
+		);
+	});
+
 	// A thrown heal must not cost the operator the artist run that already
 	// succeeded, nor the heartbeat that reports it — and must not be reported as
 	// the run a healthy fork has either, which is what 'skipped' would say.

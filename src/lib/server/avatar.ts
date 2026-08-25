@@ -1,6 +1,7 @@
 import { fetchTwitterAvatar, twitterHandleFromUrl } from './twitter-avatar';
 import { getStorage, isAllowedImageType, extFromContentType, isOwnedUrl } from './storage';
 import { isPrivateHost } from './image-proxy';
+import { bufferStream, MaxBytesExceededError } from './storage/buffer';
 import type { SiteSettings } from './settings';
 import { getRawSettings, saveSettings } from './settings';
 import { getDb } from './db';
@@ -11,6 +12,22 @@ type Env = App.Platform['env'];
 
 /** Bound the avatar download so a slow/huge image can't stall the whole save. */
 const REHOST_FETCH_TIMEOUT_MS = 8000;
+
+/**
+ * 2 MiB: the ceiling on the avatar body itself. The timeout above bounds this in
+ * practice but not in principle — a fast upstream can hand over a great deal
+ * inside 8 seconds, and Workers have a hard memory ceiling, so an unbounded
+ * arrayBuffer() of whatever a third-party CDN chooses to send is an OOM waiting
+ * for a bad day. That day is likelier now than it was: this download used to
+ * happen only when an operator saved a form, and now runs unattended on every
+ * fork, daily.
+ *
+ * 2 MiB is generous for what this is. Bluesky serves avatars at 1000px max and
+ * twimg's `_400x400` is smaller still, so a few hundred KB is the real shape.
+ * Deliberately far below MAX_REMOTE_BUFFER_BYTES (10 MiB), which is sized for
+ * imported artwork; nothing on this path is artwork.
+ */
+export const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
 /**
  * A source URL we REFUSED, as distinct from one we tried and failed to copy.
@@ -33,6 +50,15 @@ export interface AvatarRehostContext {
 	settings: SiteSettings;
 	origin: string;
 	keyHint: string;
+	/**
+	 * Written by the re-host, never read by it: set when a download was abandoned
+	 * because the source answered a 3xx (see the redirect posture below). It is an
+	 * out-param rather than a return value because the only thing that needs to
+	 * know is the OWNER heal, three frames up, and resolveAvatarUrl's contract
+	 * (`string | null`, used by four other call sites) is not worth widening to
+	 * carry it. Callers that don't care simply never look.
+	 */
+	redirected?: boolean;
 }
 
 /**
@@ -41,11 +67,11 @@ export interface AvatarRehostContext {
  * rot: the source URL embeds a media id that changes when the artist updates
  * their picture, so a stored hotlink dies; a re-hosted copy never does.
  *
- * Fail-soft: any problem (non-2xx, disallowed type, storage not configured, put
- * error) logs and returns null so the caller keeps the source URL — a possibly
- * short-lived hotlink still beats no avatar at all. The one exception is a
- * refused private host, which returns REFUSED so the caller drops the source
- * rather than keeping it.
+ * Fail-soft: any problem (non-2xx, disallowed type, a body past
+ * MAX_AVATAR_BYTES, storage not configured, put error) logs and returns null so
+ * the caller keeps the source URL — a possibly short-lived hotlink still beats
+ * no avatar at all. The one exception is a refused private host, which returns
+ * REFUSED so the caller drops the source rather than keeping it.
  *
  * Same outbound posture as the byte proxy (image-proxy.ts), which fetches the
  * same class of stored URL: private/link-local hosts are refused, and redirects
@@ -80,6 +106,18 @@ async function rehostAvatar(
 			redirect: 'manual'
 		});
 		if (!res.ok) {
+			// A 3xx gets its own line and its own flag. Not following it is correct
+			// and stays, but it is not the same event as a 500 or a 404: those are one
+			// artist having a bad morning, while a CDN moving avatars behind a
+			// redirect stops re-hosting on every fork at once, on the same day,
+			// silently — rows still get stamped, so nothing looks unprocessed. The
+			// flag is what carries that as far as the owner clause of the cron's
+			// heartbeat, which is the only part of this an operator ever sees.
+			if (res.status >= 300 && res.status < 400) {
+				ctx.redirected = true;
+				console.warn(`[avatar] rehost download redirected: handle=${handle} status=${res.status} (not followed)`);
+				return null;
+			}
 			console.warn(`[avatar] rehost download failed: handle=${handle} status=${res.status}`);
 			return null;
 		}
@@ -88,7 +126,34 @@ async function rehostAvatar(
 			console.warn(`[avatar] rehost skipped: handle=${handle} unsupported type=${contentType || 'none'}`);
 			return null;
 		}
-		const bytes = new Uint8Array(await res.arrayBuffer());
+		// Oversize is a plain failure, not a REFUSED: the source is a public CDN URL
+		// and hotlinking it is safe, because the body we declined to hold in the
+		// isolate is one a visitor's browser streams into an <img> without trouble.
+		// The refusal above is the other case — there, falling back would make the
+		// visitor's browser attempt the very request we prevented.
+		//
+		// Content-Length first, so an honest upstream costs nothing to refuse; the
+		// length-limited read is what covers a missing or lying one. An absent
+		// header reads as 0 here and falls through to the read, which is the point.
+		const declared = Number(res.headers.get('content-length'));
+		if (Number.isFinite(declared) && declared > MAX_AVATAR_BYTES) {
+			console.warn(`[avatar] rehost skipped: handle=${handle} oversize content-length=${declared}`);
+			return null;
+		}
+		if (!res.body) {
+			console.warn(`[avatar] rehost skipped: handle=${handle} empty body`);
+			return null;
+		}
+		let bytes: Uint8Array;
+		try {
+			bytes = await bufferStream(res.body, MAX_AVATAR_BYTES);
+		} catch (e) {
+			// Caught here rather than left to the outer catch so the log says what
+			// actually happened; that one reports stage=store, which this is not.
+			if (!(e instanceof MaxBytesExceededError)) throw e;
+			console.warn(`[avatar] rehost skipped: handle=${handle} body over ${MAX_AVATAR_BYTES} bytes`);
+			return null;
+		}
 		const ext = extFromContentType(contentType);
 		const uuid = crypto.randomUUID();
 		const slug = ctx.keyHint.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'artist';
@@ -376,12 +441,19 @@ async function fetchBlueskyAvatar(blueskyUrl: string): Promise<string | null> {
 }
 
 /**
- * What one heal attempt did. Three outcomes, one value: 'skipped' is "nothing to
+ * What one heal attempt did. Four outcomes, one value: 'skipped' is "nothing to
  * heal, or nothing to heal FROM" (no handle, or the stored avatar is already
  * ours), 'healed' is "a copy we serve is now stored", 'unresolved' is "we tried
  * and the owner is still on someone else's host".
+ *
+ * 'redirected' is that same failure with its cause named: the source answered a
+ * 3xx, which the download refuses to follow. It earns its own outcome because it
+ * is the one failure here that isn't about this fork — if a CDN ever fronts
+ * avatars behind a redirect, every fork reports it on the same morning, and
+ * without the distinction each operator sees a permanent 'unresolved' that no
+ * amount of re-running or reconfiguring will clear.
  */
-export type OwnerAvatarHeal = 'skipped' | 'healed' | 'unresolved';
+export type OwnerAvatarHeal = 'skipped' | 'healed' | 'unresolved' | 'redirected';
 
 /**
  * Heal the OWNER avatar if a previous re-host left a hotlink behind.
@@ -456,7 +528,10 @@ export async function healOwnerAvatar(
 	// fetch and the re-host each swallow their own failures), so a try here would
 	// be a catch nothing can reach. The throws that ARE reachable in this function
 	// are the settings reads and the write, and the cron's catch reports those.
-	const resolved = await resolveAvatarUrl({ blueskyUrl }, { env, settings, origin, keyHint: 'owner' });
+	// The context is held rather than passed inline so its `redirected` out-param
+	// can be read back below.
+	const ctx: AvatarRehostContext = { env, settings, origin, keyHint: 'owner' };
+	const resolved = await resolveAvatarUrl({ blueskyUrl }, ctx);
 
 	// The one and only write gate here. resolveAvatarUrl falls back to the SOURCE
 	// hotlink when re-hosting fails, so only a copy we serve counts as healed —
@@ -467,7 +542,7 @@ export async function healOwnerAvatar(
 	// a gate that can never refuse. The null check stays because `ours(null)`
 	// throws, and a TypeError surfaced as a failed heal is a worse account of a
 	// 404ing profile than this line's honest 'unresolved'.
-	if (!resolved || !ours(resolved)) return 'unresolved';
+	if (!resolved || !ours(resolved)) return ctx.redirected ? 'redirected' : 'unresolved';
 
 	// Re-read immediately before the write. The resolve above spends seconds on
 	// the network, and the handle it ran against is the entire justification for

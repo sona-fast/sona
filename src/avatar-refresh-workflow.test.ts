@@ -10,6 +10,9 @@ import { fileURLToPath } from 'node:url';
 // door (src/turnstile-deploy-sync.test.ts,
 // src/lib/server/cf-analytics-scope.test.ts): the app is fine, the thing that
 // invokes it is not, and nothing fails.
+//
+// The last describe widens to avatar-refresh's sibling cron workflows, because
+// the token posture they share is only worth asserting across all of them.
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8');
 const workflow = read('../.github/workflows/avatar-refresh.yml');
@@ -106,5 +109,39 @@ describe('avatar-refresh.yml — SITE_URL receives the cron secret daily', () =>
 
 	it('passes the target as --url so a leading dash cannot become curl options', () => {
 		expect(step).toContain('--url "${SITE_URL%/}/api/cron/refresh-avatars');
+	});
+});
+
+// The whole family, not just this one workflow: a job that declares no
+// permissions inherits the repo default, and forks created before GitHub flipped
+// that default in 2023 still hand read-write-everything to every job. None of
+// these needs a token — no checkout, no action, no `gh` — so a step that grows
+// one is the thing to notice, not the empty block.
+describe('the /api/cron/* workflows ask for no GITHUB_TOKEN', () => {
+	const CRON_WORKFLOWS = [
+		'avatar-refresh.yml',
+		'sticker-resync.yml',
+		'artist-sync.yml',
+		'cleanup-orphans.yml',
+		'backfill-animated.yml'
+	];
+
+	it.each(CRON_WORKFLOWS)('%s declares permissions: {}', (file) => {
+		expect(read(`../.github/workflows/${file}`)).toMatch(/^ {4}permissions: \{\}$/m);
+	});
+
+	it.each(CRON_WORKFLOWS)('%s still has nothing that could use one', (file) => {
+		// The empty block is only safe while this stays true. A checkout, an
+		// action, or a `gh` call needs a scope, and adding one here would fail at
+		// runtime with a 403 that reads like an unrelated outage.
+		// Comment lines dropped first: backfill-animated documents `gh workflow run`
+		// as the way an operator fires it, which is prose about the Actions tab, not
+		// a call the job makes.
+		const yml = read(`../.github/workflows/${file}`)
+			.split('\n')
+			.filter((line) => !/^\s*#/.test(line))
+			.join('\n');
+		expect(yml).not.toContain('uses:');
+		expect(yml).not.toMatch(/\bgh (api|pr|issue|release|workflow) /);
 	});
 });

@@ -42,6 +42,11 @@ jobs:
     # The canonical template is intentionally unconfigured, so it must not run
     # fork workflows. Every fork (any other repo) runs this normally.
     if: github.repository != 'sona-fast/sona'
+    # No GITHUB_TOKEN at all: this job checks out nothing, runs no action, and
+    # talks only to the site over https. Forks created before GitHub's 2023
+    # default flip still hand read-write-everything to every job that stays
+    # silent, so the empty block is what makes that harmless here.
+    permissions: {}
     steps:
       - name: Trigger avatar refresh endpoint
         env:

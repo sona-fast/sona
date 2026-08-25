@@ -13,7 +13,8 @@ import {
 	isOurAvatarUrl,
 	shouldWriteAvatar,
 	type AvatarRehostContext,
-	healOwnerAvatar
+	healOwnerAvatar,
+	MAX_AVATAR_BYTES
 } from './avatar';
 import type { SiteSettings } from './settings';
 import { getRawSetting, getSettings, setRawSetting, clearSettingsCache } from './settings';
@@ -72,9 +73,22 @@ function stubFetch(override?: {
 	profile?: { avatar?: string } | null;
 	imageStatus?: number;
 	imageType?: string;
+	/** Bytes actually sent for the download. Default 4, the tiny fixture. */
+	imageBytes?: number;
+	/** Content-Length the download DECLARES. Omitted = no header, like a chunked
+	 *  response; set it away from imageBytes to model an upstream that lies. */
+	declaredLength?: number;
 }) {
-	const image = (type = override?.imageType ?? 'image/jpeg') =>
-		new Response(new Uint8Array([1, 2, 3, 4]), { status: 200, headers: { 'content-type': type } });
+	const image = (type = override?.imageType ?? 'image/jpeg') => {
+		const headers: Record<string, string> = { 'content-type': type };
+		if (override?.declaredLength !== undefined) {
+			headers['content-length'] = String(override.declaredLength);
+		}
+		return new Response(new Uint8Array(override?.imageBytes ?? 4).fill(1), {
+			status: 200,
+			headers
+		});
+	};
 	async function handle(input: string | URL, init?: RequestInit): Promise<Response> {
 		const url = String(input);
 		if (url.includes('getProfile')) {
@@ -169,6 +183,72 @@ describe('resolveAvatarUrl re-hosting', () => {
 		// target, so dropping redirect:'manual' would store them instead.
 		expect(bucket.put).not.toHaveBeenCalled();
 		expect(url).toBe(BSKY_AVATAR);
+	});
+
+	// The refusal above is right and stays; being unable to tell it apart from a
+	// bad morning at one CDN is the problem. A 3xx here would mean avatars moved
+	// behind a redirect, which happens to every fork at once and to none of them
+	// visibly, since the fallback hotlink still gets written and stamped.
+	it('marks a redirect on the context, where an ordinary failure leaves it alone', async () => {
+		const bucket = fakeBucket();
+
+		stubFetch({ imageStatus: 302 });
+		const redirected = r2Ctx(bucket);
+		expect(await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, redirected)).toBe(BSKY_AVATAR);
+		expect(redirected.redirected).toBe(true);
+
+		// A 500 is one artist, one morning: same fallback, no flag.
+		stubFetch({ imageStatus: 500 });
+		const failed = r2Ctx(bucket);
+		expect(await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, failed)).toBe(BSKY_AVATAR);
+		expect(failed.redirected).toBeFalsy();
+	});
+
+	it('logs a redirect as its own event, not as a generic download failure', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		stubFetch({ imageStatus: 302 });
+		await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(fakeBucket()));
+		// Greppable across a fleet's logs, which "rehost download failed status=302"
+		// buried among 404s and 500s is not.
+		expect(warn.mock.calls.flat().join(' ')).toContain('rehost download redirected');
+		warn.mockRestore();
+	});
+
+	// The 8s timeout bounds this in practice, not in principle: a fast upstream
+	// can hand over hundreds of MB inside it, and this download is now unattended
+	// and daily on every fork rather than something an operator watched happen.
+	it('refuses a body that declares itself oversize, before reading it', async () => {
+		// Four bytes on the wire, so ONLY the Content-Length check can reject this:
+		// dropping it lets the read cap wave the response straight through.
+		stubFetch({ declaredLength: MAX_AVATAR_BYTES + 1 });
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+		expect(bucket.put).not.toHaveBeenCalled();
+		// Plain failure, not a REFUSED: the source is a public CDN URL, and the body
+		// we declined to hold in the isolate is one a browser streams into an <img>
+		// without trouble. So the hotlink stays.
+		expect(url).toBe(BSKY_AVATAR);
+	});
+
+	it.each([
+		['no Content-Length at all', undefined],
+		['a Content-Length that lies', 10]
+	])('caps the read itself when the upstream sends %s', async (_label, declaredLength) => {
+		stubFetch({ imageBytes: MAX_AVATAR_BYTES + 1, declaredLength });
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(url).toBe(BSKY_AVATAR);
+	});
+
+	it('still stores a body right up to the ceiling', async () => {
+		// The boundary matters both ways: a cap that refused everything would also
+		// pass every test above while quietly re-hosting nothing at all.
+		stubFetch({ imageBytes: MAX_AVATAR_BYTES });
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+		expect(bucket.put).toHaveBeenCalledTimes(1);
+		expect(url).toContain('/avatars/nova/');
 	});
 });
 
@@ -491,6 +571,25 @@ describe('healOwnerAvatar (the retry nothing used to do)', () => {
 		// neither URL is ours, so its "no owned avatar to lose" disjunct allows it.
 		expect(res).toBe('unresolved');
 		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(stale);
+	});
+
+	// The one failure here that isn't about this fork. If a CDN starts fronting
+	// avatars behind a 3xx, every fork stops re-hosting on the same morning and
+	// each operator reads the same 'unresolved' they would get from their own
+	// broken storage config — so the cause has to survive as far as the outcome.
+	it('names a redirect as its own outcome, not as a plain unresolved', async () => {
+		const { db } = makeDb();
+		const bucket = fakeBucket();
+		await seedOwner(db);
+		stubFetch({ imageStatus: 302 });
+
+		const res = await healOwnerAvatar(db, opts(bucket, ownerSettings()));
+
+		expect(res).toBe('redirected');
+		// Same conservative write as any other failed heal: the hotlink stays, no
+		// copy is stored, and the extra outcome buys visibility only.
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(await getRawSetting(db, 'adminAvatarUrl')).toBe(BSKY_AVATAR);
 	});
 
 	// The profile lookup 404s → resolveAvatarUrl returns null. Without the null
