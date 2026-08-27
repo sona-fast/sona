@@ -97,7 +97,18 @@
 						height="60"
 					/>
 				{/if}
-				<span class="here-who">{personaName}</span>
+				<!-- Name and pronouns stack as one column beside the avatar, so the
+				     pair reads as one identity rather than as two rows of the flex
+				     row the avatar is in. With no pronouns set the wrapper holds the
+				     name alone and the block looks exactly as it did. -->
+				<div class="here-name-col">
+					<span class="here-who">{personaName}</span>
+					{#if data.settings.pronouns}
+						<span class="here-pronouns"
+							><span class="sr-only">{m.pronouns_prefix()}{' '}</span>{data.settings.pronouns}</span
+						>
+					{/if}
+				</div>
 			</div>
 
 			<span class="here-event">
@@ -224,6 +235,27 @@
 		outline-offset: -1px;
 	}
 
+	.here-name-col {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		min-width: 0;
+	}
+
+	/* Not the flat --muted-foreground the rest of the page uses for a secondary
+	   line: this block's ground is washed with --primary, and the neutral grey
+	   sits dull on it. Mixing a little of that same primary back into the grey
+	   keeps the line quiet without letting it go muddy. 16%, not the 18% this
+	   started at: the mix moves the ink toward the ground it sits on, and 18%
+	   measures 4.50:1 on ember light at the top of the wash — a hair under AA.
+	   theme-contrast.test.ts parses this percentage and re-runs the math. */
+	.here-pronouns {
+		font-family: var(--font-secondary);
+		font-size: 13px;
+		color: color-mix(in srgb, var(--primary) 16%, var(--muted-foreground));
+		overflow-wrap: break-word;
+	}
+
 	.here-who {
 		font-family: var(--font-primary);
 		font-weight: 700;
@@ -251,7 +283,9 @@
 	.here-loc {
 		font-family: var(--font-secondary);
 		font-size: 13px;
-		color: var(--muted-foreground);
+		/* Same 16% tint as .here-pronouns, for the same reason: one hue for every
+		   muted line on the washed card. theme-contrast.test.ts checks all three. */
+		color: color-mix(in srgb, var(--primary) 16%, var(--muted-foreground));
 	}
 
 	.here-through {
@@ -259,7 +293,7 @@
 		font-size: 11px;
 		letter-spacing: 1px;
 		text-transform: uppercase;
-		color: var(--muted-foreground);
+		color: color-mix(in srgb, var(--primary) 16%, var(--muted-foreground));
 		font-variant-numeric: tabular-nums;
 	}
 

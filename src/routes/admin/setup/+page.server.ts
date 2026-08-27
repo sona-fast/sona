@@ -132,6 +132,7 @@ export const actions = {
 		// design when unchosen.
 		const optional: Record<string, string> = {
 			ownerName: sanitizeText(data.get('ownerName') as string, 100),
+			pronouns: sanitizeText(data.get('pronouns') as string, 100),
 			aboutText: sanitizeText(data.get('aboutText') as string, 2000),
 			twitterUrl: normalizeSocialUrl('twitter', data.get('twitter') as string),
 			blueskyUrl: normalizeSocialUrl('bluesky', data.get('bluesky') as string),

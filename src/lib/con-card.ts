@@ -42,6 +42,9 @@ export interface ConCardOptions {
 	/** The operator's display name; the only field the card can't omit. */
 	name: string;
 	species?: string | null;
+	/** The operator's pronouns, printed under the species. Free text, drawn
+	 *  verbatim — the card never abbreviates or reorders what was typed. */
+	pronouns?: string | null;
 	/** Drawn as stripe bands behind the face, not as swatches. */
 	colors?: ConCardColor[];
 	handles?: ConCardHandle[];
@@ -92,6 +95,12 @@ const FACE_CY = STRIPE_H / 2;
 const FACE_RING = 18;
 const NAME_BASELINE = 1016;
 const SPECIES_BASELINE = 1086;
+/** Its own baseline rather than a line that moves up when the species is off:
+ *  the three lines are independent toggles, and a pronouns line that slides to
+ *  1086 on some cards and 1156 on others makes the front a different layout per
+ *  operator. Below the species, because that is the order the About page and the
+ *  /art details already read in. */
+const PRONOUNS_BASELINE = 1156;
 
 // Back.
 const QR_SIZE = 554;
@@ -171,14 +180,32 @@ const PALETTES: Record<ConCardVariant, Record<string, string>> = {
 	}
 };
 
-/** XML-escape. Every value on the card is operator-entered text. */
+/** XML-escape. Every value on the card is operator-entered text. Lone
+ *  surrogates go first so that every markup sink — title, avatar href, colour,
+ *  platform name — is clear of them, not just the text nodes. */
 function esc(value: string): string {
-	return value
+	return dropLoneSurrogates(value)
 		.replaceAll('&', '&amp;')
 		.replaceAll('<', '&lt;')
 		.replaceAll('>', '&gt;')
 		.replaceAll('"', '&quot;')
 		.replaceAll("'", '&#39;');
+}
+
+/** Drop half a surrogate pair. Settings saved before the clamp below counted
+ *  grapheme clusters were cut by code unit, so a row can still hold a value that
+ *  ends mid-emoji; the write path can't reach one already stored. Markup with a
+ *  lone surrogate in it is unencodable, and encodeURIComponent — the raster path
+ *  — throws on it, which reaches the operator as a raster failure they can do
+ *  nothing about.
+ *
+ *  Matching a whole pair first is what lets this avoid a lookbehind: Safari
+ *  before 16.4 throws a SyntaxError on one at parse time, and this module runs
+ *  in the browser for the save-to-phone path. */
+function dropLoneSurrogates(value: string): string {
+	return value.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, (m) =>
+		m.length === 2 ? m : ''
+	);
 }
 
 /**
@@ -399,6 +426,18 @@ function frontParts(opts: ConCardOptions, ids: string): string[] {
 		parts.push(
 			text(FACE_CX, SPECIES_BASELINE, clampText(opts.species, 52, contentW), {
 				size: 52,
+				fill: c.muted,
+				anchor: 'middle'
+			})
+		);
+	}
+	// Fixed size like the species, not fitSize'd like the name: a pronoun set is
+	// short, and shrinking this line would make it the one thing on the card whose
+	// size varies with its own content.
+	if (opts.pronouns) {
+		parts.push(
+			text(FACE_CX, PRONOUNS_BASELINE, clampText(opts.pronouns, 44, contentW), {
+				size: 44,
 				fill: c.muted,
 				anchor: 'middle'
 			})

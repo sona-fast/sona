@@ -30,6 +30,7 @@
 
 	let siteName = $state(data.settings.siteName);
 	let ownerName = $state(data.settings.ownerName);
+	let pronouns = $state(data.settings.pronouns);
 	let aboutText = $state(data.settings.aboutText);
 	let themeId = $state(data.settings.themeId);
 	let landingLayout = $state(data.settings.landingLayout);
@@ -327,6 +328,7 @@
 	$effect(() => {
 		siteName = data.settings.siteName;
 		ownerName = data.settings.ownerName;
+		pronouns = data.settings.pronouns;
 		aboutText = data.settings.aboutText;
 		themeId = data.settings.themeId;
 		landingLayout = data.settings.landingLayout;
@@ -485,6 +487,14 @@
 				<span>{m.admin_settings_owner_name()}</span>
 				<input type="text" class="input" bind:value={ownerName} name="ownerName" placeholder={m.admin_settings_owner_placeholder()} />
 			</label>
+			<label>
+				<span>{m.admin_settings_pronouns()}</span>
+				<!-- The hint lives outside the label and is pointed at instead: folded
+				     in, it would join the input's accessible name and be read out before
+				     every edit (the same rule the checkbox hints follow). -->
+				<input type="text" class="input" bind:value={pronouns} name="pronouns" placeholder={m.admin_settings_pronouns_placeholder()} aria-describedby="pronouns-hint" />
+			</label>
+			<p class="hint" id="pronouns-hint">{m.admin_settings_pronouns_hint()}</p>
 			<label>
 				<span>{m.admin_settings_about_text()}</span>
 				<textarea class="input" rows="4" name="aboutText" bind:value={aboutText}></textarea>
@@ -1266,6 +1276,7 @@
 			<ConCard
 				name={data.conCard.name}
 				species={data.conCard.species}
+				pronouns={data.conCard.pronouns}
 				colors={data.conCard.colors}
 				handles={data.conCard.handles}
 				artCredit={data.conCard.artCredit}

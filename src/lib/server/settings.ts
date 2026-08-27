@@ -17,6 +17,13 @@ export interface SiteSettings {
 	/** The site owner's / persona's display name (e.g. shown on the About page).
 	 * Empty falls back to `siteName` at the point of use. */
 	ownerName: string;
+	/** The owner's pronouns, exactly as they typed them (e.g. "they/them",
+	 * "彼/かれ"). ONE free-text field, rendered verbatim everywhere it appears:
+	 * never parsed into parts, never localized, never matched against a list.
+	 * Pronoun sets are personal and open-ended, and a picker or a translation
+	 * would be the software deciding which ones exist. Empty → nothing renders,
+	 * with no space held for it. */
+	pronouns: string;
 	aboutText: string;
 	/** Contact email shown on /share for larger photo batches. */
 	contactEmail: string;
@@ -181,6 +188,7 @@ export function parseLines(raw: string): string[] {
 export const PUBLIC_SETTINGS_KEYS = [
 	'siteName',
 	'ownerName',
+	'pronouns',
 	'aboutText',
 	'contactEmail',
 	'siteUrl',
@@ -266,6 +274,7 @@ export function toPublicSettings(settings: SiteSettings): PublicSiteSettings {
 export const DEFAULTS: SiteSettings = {
 	siteName: APP_NAME,
 	ownerName: '',
+	pronouns: '',
 	aboutText: 'A personal gallery for collecting and showcasing furry artwork from talented artists.',
 	// The three-path pages (/art, /connect, /share) render gracefully with these
 	// empty — sections that have no data simply don't show.
@@ -353,6 +362,7 @@ export async function getSettings(
 		const value: SiteSettings = {
 			siteName: map.siteName ?? DEFAULTS.siteName,
 			ownerName: map.ownerName ?? DEFAULTS.ownerName,
+			pronouns: map.pronouns ?? DEFAULTS.pronouns,
 			aboutText: map.aboutText ?? DEFAULTS.aboutText,
 			contactEmail: map.contactEmail ?? DEFAULTS.contactEmail,
 			siteUrl: map.siteUrl ?? DEFAULTS.siteUrl,

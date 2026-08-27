@@ -174,6 +174,20 @@ describe('getSettings — mapping & defaults', () => {
 		expect(s.sonaDos).toBe('');
 	});
 
+	it('maps a stored pronouns row and defaults it to blank (SONA-210)', async () => {
+		// Verbatim in both directions: whatever the operator typed comes back
+		// byte-for-byte, since every surface that renders it is forbidden to parse
+		// or localize it. A non-Latin set proves the mapping is not doing any
+		// normalization of its own.
+		const { db } = fakeReadDb([{ key: 'pronouns', value: '彼/かれ' }]);
+		expect((await getSettings(db)).pronouns).toBe('彼/かれ');
+
+		clearSettingsCache();
+		// Absent → empty, which is what every surface reads as "render nothing".
+		const { db: bare } = fakeReadDb([]);
+		expect((await getSettings(bare)).pronouns).toBe('');
+	});
+
 	it('maps a stored privacyUpdatedAt/termsUpdatedAt (the legal-pages "last updated" stamps)', async () => {
 		const { db } = fakeReadDb([
 			{ key: 'privacyUpdatedAt', value: '2026-05-01' },

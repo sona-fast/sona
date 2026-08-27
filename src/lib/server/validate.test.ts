@@ -1,5 +1,36 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeHttpsUrl, sanitizeUrl } from './validate';
+import { normalizeHttpsUrl, sanitizeText, sanitizeUrl } from './validate';
+
+describe('sanitizeText', () => {
+	it('trims and enforces the cap', () => {
+		expect(sanitizeText('  they/them  ', 100)).toBe('they/them');
+		expect(sanitizeText('abcdef', 3)).toBe('abc');
+	});
+
+	// The cap counts UTF-16 code units, so an emoji straddling it used to leave a
+	// lone high surrogate behind. That string is not well-formed UTF-8 and
+	// encodeURIComponent throws on it, which is what breaks the con card's PNG
+	// save on a value the operator typed into their own settings.
+	it('drops an emoji cut in half by the cap', () => {
+		const value = 'ab🦈';
+		expect(sanitizeText(value, 3)).toBe('ab');
+		expect(() => encodeURIComponent(sanitizeText(value, 3))).not.toThrow();
+		// A whole emoji inside the cap is kept.
+		expect(sanitizeText(value, 4)).toBe('ab🦈');
+	});
+
+	it('drops an orphaned low surrogate too, wherever it sits', () => {
+		// A value can arrive already broken — pasted, or stored by an older cut —
+		// and a trailing-high-only strip left the other half of the same problem in
+		// place. Both halves are unencodable, so both go.
+		expect(sanitizeText('ab\uDC3A', 100)).toBe('ab');
+		expect(sanitizeText('a\uDC3Ab', 100)).toBe('ab');
+		expect(sanitizeText('a\uD83Db', 100)).toBe('ab');
+		expect(() => encodeURIComponent(sanitizeText('ab\uDC3A', 100))).not.toThrow();
+		// The pair-first match still leaves whole emoji alone.
+		expect(sanitizeText('a🦈b', 100)).toBe('a🦈b');
+	});
+});
 
 describe('sanitizeUrl', () => {
 	it('passes a root-relative storage path through unchanged', () => {

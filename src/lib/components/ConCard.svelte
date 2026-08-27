@@ -16,6 +16,9 @@
 	interface Props {
 		name: string;
 		species: string;
+		/** The operator's pronouns setting. Empty means they have not set any, and
+		 *  the card offers no toggle at all rather than a dead one. */
+		pronouns: string;
 		colors: ConCardColor[];
 		handles: ConCardHandle[];
 		/** Artist to credit on the back, or null when the sheet has no artist row. */
@@ -26,8 +29,17 @@
 		displayDomain: string;
 	}
 
-	let { name, species, colors, handles, artCredit, avatarSrc, connectUrl, displayDomain }: Props =
-		$props();
+	let {
+		name,
+		species,
+		pronouns,
+		colors,
+		handles,
+		artCredit,
+		avatarSrc,
+		connectUrl,
+		displayDomain
+	}: Props = $props();
 
 	// The mock's guidance is two handles, so that is what starts checked; the
 	// rest are there to be turned on deliberately.
@@ -39,14 +51,36 @@
 	// change must never reset a box the operator has just unticked.
 	const initial = untrack(() => ({
 		species: !!species,
+		pronouns: !!pronouns,
 		colors: colors.length > 0,
 		credit: !!artCredit,
 		handles: handles.map((_, i) => i < COMFORTABLE_HANDLES)
 	}));
 	let includeSpecies = $state(initial.species);
+	let includePronouns = $state(initial.pronouns);
 	let includeColors = $state(initial.colors);
 	let includeCredit = $state(initial.credit);
 	let handleOn = $state(initial.handles);
+
+	// Every include setting is edited on this same page, so any prop can go from
+	// empty to filled under a mounted card. With nothing set there was no box at
+	// all, so there is no operator choice to overwrite: the box has to arrive
+	// ticked, the way it would on a fresh load. Tracked with a plain object and
+	// an effect that never reads the include state, so nothing loops.
+	let had = { ...initial };
+	$effect(() => {
+		const has = {
+			species: !!species,
+			pronouns: !!pronouns,
+			colors: colors.length > 0,
+			credit: !!artCredit
+		};
+		if (has.species && !had.species) includeSpecies = true;
+		if (has.pronouns && !had.pronouns) includePronouns = true;
+		if (has.colors && !had.colors) includeColors = true;
+		if (has.credit && !had.credit) includeCredit = true;
+		had = { ...had, ...has };
+	});
 
 	let savingPrint = $state(false);
 	let savingPhone = $state(false);
@@ -63,9 +97,15 @@
 
 	const chosenHandles = $derived(handles.filter((_, i) => handleOn[i]));
 
+	// Every box in the include group is conditional on the setting behind it, so a
+	// fresh install with none of them set gets an empty fieldset and a note about
+	// boxes that aren't there. Nothing to include, nothing to say about it.
+	const hasIncludes = $derived(!!species || !!pronouns || colors.length > 0 || !!artCredit);
+
 	const shared = $derived({
 		name,
 		species: includeSpecies ? species : null,
+		pronouns: includePronouns ? pronouns : null,
 		colors: includeColors ? colors : [],
 		handles: chosenHandles,
 		artCredit:
@@ -99,6 +139,7 @@
 			avatarHref: avatarSrc,
 			title: withFields(m.con_card_title_front({ name }), [
 				shared.species ? m.con_card_field_species() : '',
+				shared.pronouns ? m.con_card_field_pronouns() : '',
 				shared.colors.length ? m.con_card_field_colors() : ''
 			])
 		})
@@ -261,20 +302,34 @@
 	</div>
 
 	<div class="controls">
-		<fieldset class="includes">
-			<legend>{m.con_card_include()}</legend>
-			<div class="boxes">
-				{#if species}
-					<label><input type="checkbox" bind:checked={includeSpecies} /> {m.con_card_field_species()}</label>
-				{/if}
-				{#if colors.length}
-					<label><input type="checkbox" bind:checked={includeColors} /> {m.con_card_field_colors()}</label>
-				{/if}
-				{#if artCredit}
-					<label><input type="checkbox" bind:checked={includeCredit} /> {m.con_card_include_credit()}</label>
-				{/if}
-			</div>
-		</fieldset>
+		{#if hasIncludes}
+			<fieldset class="includes" aria-describedby="con-card-printed-note">
+				<legend>{m.con_card_include()}</legend>
+				<div class="boxes">
+					{#if species}
+						<label><input type="checkbox" bind:checked={includeSpecies} /> {m.con_card_field_species()}</label>
+					{/if}
+					<!-- Absent, not disabled, when no pronouns are set: a greyed box would
+					     put the question in front of an operator who has already answered
+					     it by leaving the setting empty. -->
+					{#if pronouns}
+						<label><input type="checkbox" bind:checked={includePronouns} /> {m.con_card_field_pronouns()}</label>
+					{/if}
+					{#if colors.length}
+						<label><input type="checkbox" bind:checked={includeColors} /> {m.con_card_field_colors()}</label>
+					{/if}
+					{#if artCredit}
+						<label><input type="checkbox" bind:checked={includeCredit} /> {m.con_card_include_credit()}</label>
+					{/if}
+				</div>
+			</fieldset>
+
+			<!-- The card is a printed object, so any of these toggles changes the next
+			     card and nothing already in a lanyard. Said once, for the whole group:
+			     it is a property of the boxes, not of one of them, so the fieldset
+			     points at it rather than the note repeating per box. -->
+			<p class="hint" id="con-card-printed-note">{m.con_card_printed_note()}</p>
+		{/if}
 
 		<!-- Their own group, per the mock: a handle row carries the account the card
 		     will print, which the include boxes above do not. -->

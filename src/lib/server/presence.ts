@@ -18,11 +18,21 @@ export const REFERENCE_TAG = 'reference';
 export function sonaDetails(
 	settings: Pick<
 		SiteSettings,
-		'sonaSpecies' | 'sonaBuild' | 'sonaKeyFeatures' | 'sonaColors' | 'sonaDos' | 'sonaDonts'
+		| 'sonaSpecies'
+		| 'sonaBuild'
+		| 'sonaKeyFeatures'
+		| 'sonaColors'
+		| 'sonaDos'
+		| 'sonaDonts'
+		| 'pronouns'
 	>
 ) {
 	return {
 		species: settings.sonaSpecies,
+		// The operator's own setting, not a field of the character — which is why
+		// it is `pronouns` rather than `sonaPronouns`. /art renders it as one more
+		// detail row, but it is the same value /about and the con card read.
+		pronouns: settings.pronouns,
 		build: settings.sonaBuild,
 		keyFeatures: settings.sonaKeyFeatures,
 		colors: parseSonaColors(settings.sonaColors),
@@ -49,7 +59,7 @@ export function artHasContent(
 	return (
 		refSheet !== null ||
 		recentArt.length > 0 ||
-		Boolean(sona.species || sona.build || sona.keyFeatures) ||
+		Boolean(sona.species || sona.build || sona.keyFeatures || sona.pronouns) ||
 		sona.colors.length > 0 ||
 		sona.dos.length > 0 ||
 		sona.donts.length > 0
@@ -58,7 +68,7 @@ export function artHasContent(
 
 /**
  * EXISTS-style evaluation of artHasContent for pages that don't render /art's
- * data (the splash card): the six sona-details settings first, then minimal
+ * data (the splash card): the seven sona-details settings first, then minimal
  * limit-1 probes of the same three image sources the /art load reads —
  * designated ref sheet, reference-tag fallback, recent SFW art —
  * short-circuiting on the first hit.
@@ -80,7 +90,8 @@ export async function probeArtContent(db: Database): Promise<boolean> {
 				'sonaKeyFeatures',
 				'sonaColors',
 				'sonaDos',
-				'sonaDonts'
+				'sonaDonts',
+				'pronouns'
 			])
 		);
 	const sonaMap = Object.fromEntries(sonaRows.map((r) => [r.key, r.value]));
@@ -90,7 +101,8 @@ export async function probeArtContent(db: Database): Promise<boolean> {
 		sonaKeyFeatures: sonaMap.sonaKeyFeatures ?? '',
 		sonaColors: sonaMap.sonaColors ?? '[]',
 		sonaDos: sonaMap.sonaDos ?? '',
-		sonaDonts: sonaMap.sonaDonts ?? ''
+		sonaDonts: sonaMap.sonaDonts ?? '',
+		pronouns: sonaMap.pronouns ?? ''
 	});
 	if (artHasContent(sona, null, [])) return true;
 
