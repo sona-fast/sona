@@ -66,7 +66,9 @@
 	// empty to filled under a mounted card. With nothing set there was no box at
 	// all, so there is no operator choice to overwrite: the box has to arrive
 	// ticked, the way it would on a fresh load. Tracked with a plain object and
-	// an effect that never reads the include state, so nothing loops.
+	// an effect that never reads the include state, so nothing loops. `had` is
+	// monotonic — "was this ever available" — so untick, clear, restore does not
+	// re-tick a box the operator already had an opinion about.
 	let had = { ...initial };
 	$effect(() => {
 		const has = {
@@ -79,7 +81,13 @@
 		if (has.pronouns && !had.pronouns) includePronouns = true;
 		if (has.colors && !had.colors) includeColors = true;
 		if (has.credit && !had.credit) includeCredit = true;
-		had = { ...had, ...has };
+		had = {
+			...had,
+			species: had.species || has.species,
+			pronouns: had.pronouns || has.pronouns,
+			colors: had.colors || has.colors,
+			credit: had.credit || has.credit
+		};
 	});
 
 	let savingPrint = $state(false);

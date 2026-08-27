@@ -96,7 +96,7 @@
 					     they/them" alone does not say the value gets published. -->
 					<label>
 						<span>{m.admin_settings_pronouns()}</span>
-						<input type="text" name="pronouns" class="input" placeholder={m.admin_setup_pronouns_placeholder()} />
+						<input type="text" name="pronouns" class="input" maxlength="100" placeholder={m.admin_setup_pronouns_placeholder()} />
 					</label>
 					<label>
 						<span>{m.admin_setup_fursona_name()}</span>

@@ -492,7 +492,7 @@
 				<!-- The hint lives outside the label and is pointed at instead: folded
 				     in, it would join the input's accessible name and be read out before
 				     every edit (the same rule the checkbox hints follow). -->
-				<input type="text" class="input" bind:value={pronouns} name="pronouns" placeholder={m.admin_settings_pronouns_placeholder()} aria-describedby="pronouns-hint" />
+				<input type="text" class="input" bind:value={pronouns} name="pronouns" maxlength="100" placeholder={m.admin_settings_pronouns_placeholder()} aria-describedby="pronouns-hint" />
 			</label>
 			<p class="hint" id="pronouns-hint">{m.admin_settings_pronouns_hint()}</p>
 			<label>

@@ -54,9 +54,15 @@ describe('con card pronouns toggle', () => {
 		expect(source).toMatch(/if \(has\.pronouns && !had\.pronouns\) includePronouns = true;/);
 		// The effect must not READ any include state, or writing it loops: each
 		// include* mention in its body is the assignment above, no more.
-		const effect = source.match(/\$effect\(\(\) => \{[\s\S]*?had = \{ \.\.\.had, \.\.\.has \};[\s\S]*?\}\);/)?.[0] ?? '';
+		const effect = source.match(/\$effect\(\(\) => \{[\s\S]*?had = \{[\s\S]*?\};[\s\S]*?\}\);/)?.[0] ?? '';
 		for (const name of ['includeSpecies', 'includePronouns', 'includeColors', 'includeCredit']) {
 			expect(effect.match(new RegExp(name, 'g'))).toHaveLength(1);
+		}
+		// `had` is monotonic — untick, clear, restore must not re-tick a box the
+		// operator already chose to leave off — so each field merges with ||,
+		// never resets from the current `has` alone.
+		for (const field of ['species', 'pronouns', 'colors', 'credit']) {
+			expect(effect).toContain(`${field}: had.${field} || has.${field}`);
 		}
 	});
 
