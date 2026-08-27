@@ -226,7 +226,13 @@ describe('settings pronouns field (SONA-210)', () => {
 		// read out before every edit — the same rule the checkbox hints follow.
 		const input = source.match(/<input[^>]*\bname="pronouns"[^>]*>/)?.[0] ?? '';
 		expect(input).toContain('aria-describedby="pronouns-hint"');
-		expect(source).toContain('<p class="hint" id="pronouns-hint">');
+		// The described element sits outside the pronouns <label>, and it renders
+		// the hint message — not some other string wearing the id.
+		const labelBlock =
+			source.match(/<label[^>]*>(?:(?!<\/label>)[\s\S])*name="pronouns"(?:(?!<\/label>)[\s\S])*<\/label>/)?.[0] ?? '';
+		expect(labelBlock).toContain('name="pronouns"');
+		expect(labelBlock).not.toContain('id="pronouns-hint"');
+		expect(source).toContain('<p class="hint" id="pronouns-hint">{m.admin_settings_pronouns_hint()}</p>');
 	});
 
 	it('names every surface the value will appear on, and how to opt out', () => {
