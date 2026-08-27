@@ -192,9 +192,10 @@ async function rehostAvatar(
  *
  * When `rehost` is supplied, a resolved avatar is downloaded and stored in our
  * own image store and OUR URL is returned (falling back to the source URL if
- * re-hosting fails, or to null if the source was refused). Without it the raw
- * source URL is returned — used only where storage context isn't available (and
- * by unit tests of the resolvers).
+ * re-hosting fails, and dropping the source entirely if it was refused, in
+ * which case the next platform is tried). Without it the raw source URL is
+ * returned — used only where storage context isn't available (and by unit tests
+ * of the resolvers).
  */
 export async function resolveAvatarUrl(
 	socials: {
@@ -221,17 +222,34 @@ export async function resolveAvatarUrl(
 		return stored ?? avatar;
 	};
 
+	// A refusal drops the URL but NOT the rest of the resolve. The null store()
+	// hands back is right — a refused private address must never be returned and
+	// persisted — but returning it from here too meant one platform's bad answer
+	// spoke for all of them: an artist with both socials whose Bluesky picture
+	// happened to sit on a refused host lost their perfectly good Twitter one as
+	// well. So a resolver that yields nothing usable falls through to the next,
+	// and null only comes back once every one of them has had its turn.
+	//
+	// Precedence is unchanged: each platform still returns the moment it produces
+	// something, so Bluesky wins whenever it works.
+
 	// Try Bluesky first — public API, no auth needed
 	if (socials.blueskyUrl) {
 		const avatar = await fetchBlueskyAvatar(socials.blueskyUrl);
-		if (avatar) return store(avatar, socials.blueskyUrl);
+		if (avatar) {
+			const url = await store(avatar, socials.blueskyUrl);
+			if (url) return url;
+		}
 	}
 
 	// Twitter next — the guest-token flow (see twitter-avatar.ts). Fail-soft:
 	// a null here just means the artist saves without an avatar.
 	if (socials.twitterUrl) {
 		const avatar = await fetchTwitterAvatar(socials.twitterUrl);
-		if (avatar) return store(avatar, twitterHandleFromUrl(socials.twitterUrl));
+		if (avatar) {
+			const url = await store(avatar, twitterHandleFromUrl(socials.twitterUrl));
+			if (url) return url;
+		}
 	}
 
 	// Other platforms would need scraping or auth — skip for now

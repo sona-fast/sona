@@ -11,11 +11,31 @@ import { fileURLToPath } from 'node:url';
 // src/lib/server/cf-analytics-scope.test.ts): the app is fine, the thing that
 // invokes it is not, and nothing fails.
 //
-// The last describe widens to avatar-refresh's sibling cron workflows, because
-// the token posture they share is only worth asserting across all of them.
+// The last two describes widen to avatar-refresh's sibling cron workflows,
+// because the token posture and the SITE_URL handling they share are only worth
+// asserting across all of them.
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8');
 const workflow = read('../.github/workflows/avatar-refresh.yml');
+
+/** Every workflow that POSTs to /api/cron/* with the fork's CRON_SECRET. */
+const CRON_WORKFLOWS = [
+	'avatar-refresh.yml',
+	'sticker-resync.yml',
+	'artist-sync.yml',
+	'cleanup-orphans.yml',
+	'backfill-animated.yml'
+];
+
+/** One workflow's step body. Sliced for the same reason `step` is below: each of
+ *  these files documents SITE_URL as `https://example.com` in its preamble, so an
+ *  assertion read against the whole file would be satisfied by prose. */
+function stepOf(file: string): string {
+	const yml = read(`../.github/workflows/${file}`);
+	const start = yml.indexOf('      - name:');
+	expect(start, `no step in ${file}`).toBeGreaterThan(-1);
+	return yml.slice(start);
+}
 
 // The step body, isolated so assertions can't be satisfied by an unrelated step.
 const step = (() => {
@@ -118,14 +138,6 @@ describe('avatar-refresh.yml — SITE_URL receives the cron secret daily', () =>
 // these needs a token — no checkout, no action, no `gh` — so a step that grows
 // one is the thing to notice, not the empty block.
 describe('the /api/cron/* workflows ask for no GITHUB_TOKEN', () => {
-	const CRON_WORKFLOWS = [
-		'avatar-refresh.yml',
-		'sticker-resync.yml',
-		'artist-sync.yml',
-		'cleanup-orphans.yml',
-		'backfill-animated.yml'
-	];
-
 	it.each(CRON_WORKFLOWS)('%s declares permissions: {}', (file) => {
 		expect(read(`../.github/workflows/${file}`)).toMatch(/^ {4}permissions: \{\}$/m);
 	});
@@ -143,5 +155,51 @@ describe('the /api/cron/* workflows ask for no GITHUB_TOKEN', () => {
 			.join('\n');
 		expect(yml).not.toContain('uses:');
 		expect(yml).not.toMatch(/\bgh (api|pr|issue|release|workflow) /);
+	});
+});
+
+// Also the whole family, and for the same reason the token posture is: every one
+// of these hands the fork's CRON_SECRET to whatever host SITE_URL names, and one
+// secret opens all of them. avatar-refresh got both of these first; asserting
+// them here is what stops the next workflow added to this folder from being the
+// one that only checks the variable is non-empty.
+describe('the /api/cron/* workflows guard the host they hand the secret to', () => {
+	it.each(CRON_WORKFLOWS)('%s refuses a SITE_URL that is not https', (file) => {
+		// A transposed or lapsed domain would otherwise collect a working
+		// credential for every state-changing cron endpoint, on a schedule, from
+		// forks whose Actions tab nobody is watching.
+		const body = stepOf(file);
+		expect(body).toMatch(/case "\$SITE_URL" in/);
+		expect(body).toContain('https://*) ;;');
+		expect(body).toContain('::error::SITE_URL must be an https URL');
+		// Before the request, not after it. Comment lines dropped first, the way
+		// the token test does it: each guard's own prose explains why the value
+		// also goes to curl as --url, and that mention must not be what satisfies
+		// the ordering.
+		const script = body
+			.split('\n')
+			.filter((line) => !/^\s*#/.test(line))
+			.join('\n');
+		expect(script.indexOf('case "$SITE_URL" in')).toBeLessThan(script.indexOf('curl'));
+	});
+
+	it.each(CRON_WORKFLOWS)('%s passes the target as --url, never as a bare argument', (file) => {
+		// A SITE_URL that begins with '-' is read as curl options otherwise.
+		const body = stepOf(file);
+		expect(body).toContain('--url "${SITE_URL%/}/api/cron/');
+		expect(body).not.toMatch(/\n\s+"\$\{SITE_URL%\/\}\/api\/cron\//);
+	});
+
+	it.each(CRON_WORKFLOWS)('%s still explains itself when curl never reaches the site', (file) => {
+		// `code=$(curl …)` under GitHub's default `bash -e` dies on a timeout, DNS
+		// failure or TLS error — before the response dump and before every status
+		// branch. That is a red run with nothing in it saying why, on a job that
+		// runs unattended. Keeping curl's exit code is what buys the diagnostic;
+		// exit 1 stays for a genuine non-200, which is the site's answer, not the
+		// absence of one.
+		const body = stepOf(file);
+		expect(body).toMatch(/code=\$\(curl[\s\S]*?\) \|\| rc=\$\?/);
+		expect(body).toMatch(/if \[ "\$rc" -ne 0 \]; then/);
+		expect(body).toMatch(/::warning::curl exited \$rc/);
 	});
 });

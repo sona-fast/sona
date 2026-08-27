@@ -99,10 +99,20 @@ jobs:
           # the server request is cancelled mid-batch and its job-run heartbeat
           # is lost. 900s pairs with the endpoint's MAX_BATCH=50 clamp: typical
           # runs take ~1-2s per artist, worst-case resolver timeouts ~28s each.
+          #
+          # Keep curl's own exit code: under the default 'bash -e' a timeout, DNS
+          # failure or TLS error ends the step on this line, before the dump and
+          # every branch below it, so the operator gets a red run that says
+          # nothing. Every fork runs this daily, which makes an unexplained
+          # failure the likeliest thing anyone here ever sees.
+          rc=0
           code=$(curl -sS --max-time 900 -o response.json -w '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
-            --url "${SITE_URL%/}/api/cron/refresh-avatars?batch=${BATCH}")
+            --url "${SITE_URL%/}/api/cron/refresh-avatars?batch=${BATCH}") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::curl exited $rc - the site never answered (DNS, TLS, or the 900s max-time); no avatars were refreshed this run"; exit 0
+          fi
           echo "HTTP $code"
           cat response.json || true
           echo

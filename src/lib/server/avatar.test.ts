@@ -174,6 +174,70 @@ describe('resolveAvatarUrl re-hosting', () => {
 		}
 	);
 
+	// The refusal above must not speak for platforms it never looked at. An artist
+	// with both socials whose Bluesky picture sits on a refused host still has a
+	// perfectly good Twitter one, and returning null from the whole resolve threw
+	// it away.
+	it('falls through to Twitter when the Bluesky avatar sits on a refused host', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: string | URL) => {
+				const url = String(input);
+				// Bluesky answers with a link-local address — refused before any download.
+				if (url.includes('getProfile')) {
+					return new Response(JSON.stringify({ avatar: 'http://169.254.169.254/x.jpg' }), {
+						status: 200
+					});
+				}
+				if (url.includes('guest/activate')) {
+					return new Response(JSON.stringify({ guest_token: 'gt' }), { status: 200 });
+				}
+				if (url.includes('UserByScreenName')) {
+					const body = {
+						data: {
+							user: {
+								result: {
+									legacy: {
+										profile_image_url_https: 'https://pbs.twimg.com/profile_images/9/pic_normal.jpg'
+									}
+								}
+							}
+						}
+					};
+					return new Response(JSON.stringify(body), { status: 200 });
+				}
+				// The twimg download.
+				return new Response(new Uint8Array(4).fill(1), {
+					status: 200,
+					headers: { 'content-type': 'image/jpeg' }
+				});
+			})
+		);
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl(
+			{ blueskyUrl: 'nova.bsky.social', twitterUrl: 'https://x.com/nova' },
+			r2Ctx(bucket)
+		);
+		// The Twitter picture was re-hosted and returned; the refused address is
+		// still nowhere near the result.
+		expect(bucket.put).toHaveBeenCalledTimes(1);
+		expect(url).toContain('/avatars/nova/');
+		expect(url).not.toContain('169.254');
+	});
+
+	it('still prefers Bluesky when it works, even with a Twitter URL alongside', async () => {
+		const fetchMock = stubFetch();
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl(
+			{ blueskyUrl: 'nova.bsky.social', twitterUrl: 'https://x.com/nova' },
+			r2Ctx(bucket)
+		);
+		expect(url).toContain('/avatars/nova/');
+		// Continuing past a refusal must not become continuing past a success:
+		// Twitter is never asked when Bluesky answered.
+		expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('api.x.com'))).toBe(false);
+	});
+
 	it('does not follow redirects on the avatar download', async () => {
 		stubFetch({ imageStatus: 302 });
 		const bucket = fakeBucket();

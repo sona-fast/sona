@@ -44,16 +44,33 @@ jobs:
           if [ -z "$SITE_URL" ]; then
             echo "::error::SITE_URL repo variable is not set (Settings → Secrets and variables → Actions → Variables) — set it to your site's base URL, e.g. https://example.com"; exit 1
           fi
+          # Whatever host this names gets CRON_SECRET in an Authorization header
+          # every night, and that one secret opens every /api/cron/* endpoint — so
+          # a transposed or lapsed domain (or a plain http one) would collect a
+          # working credential daily. https only. It also goes to curl as --url
+          # below, so a value starting with '-' stays a URL rather than options.
+          case "$SITE_URL" in
+            https://*) ;;
+            *)
+              echo "::error::SITE_URL must be an https URL (got '$SITE_URL') — set it to your site's base URL, e.g. https://example.com"; exit 1 ;;
+          esac
           # Sticker re-sync is OPTIONAL (a fork may not mirror Telegram packs), so
           # an unset secret means "not opted in" — skip quietly, don't fail. Deploy
           # (which is mandatory) still fails loudly on missing creds.
           if [ -z "$CRON_SECRET" ]; then
             echo "::warning::CRON_SECRET not set — skipping scheduled re-sync (optional; set the repo secret to opt in)"; exit 0
           fi
+          # Keep curl's own exit code: under the default `bash -e` a timeout, DNS
+          # failure or TLS error would kill the step right here, before the dump
+          # and every branch below it — a red run saying nothing about why.
+          rc=0
           code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "${SITE_URL%/}/api/cron/resync-telegram")
+            --url "${SITE_URL%/}/api/cron/resync-telegram") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::curl exited $rc — the site never answered (DNS, TLS, or the 120s timeout); nothing was re-synced this run"; exit 0
+          fi
           echo "HTTP $code"
           cat response.json || true
           echo
