@@ -67,6 +67,22 @@ describe('avatar-refresh.yml — the step calls the endpoint on every fork', () 
 		const zero = ifBlock('if [ "$BATCH" = "0" ]');
 		expect(zero).toContain('::notice::');
 		expect(zero).not.toContain('exit');
+		// The branch not exiting is only half of it: an `exit 0` anywhere between
+		// here and the request would skip the heal just as completely, and this
+		// assertion would not have noticed. So pin that the request is actually
+		// reached — nothing between the batch check and the curl exits at all.
+		// Comments are stripped first, or the prose about curl's exit code below
+		// counts as an exit.
+		const zeroCheck = step.indexOf('if [ "$BATCH" = "0" ]');
+		const request = step.indexOf('curl -sS');
+		expect(zeroCheck).toBeGreaterThan(-1);
+		expect(request).toBeGreaterThan(zeroCheck);
+		const between = step
+			.slice(zeroCheck, request)
+			.split('\n')
+			.filter((line) => !line.trim().startsWith('#'))
+			.join('\n');
+		expect(between).not.toMatch(/\bexit\b/);
 	});
 
 	it('puts the parsed BATCH in the URL, not the raw repo variable', () => {

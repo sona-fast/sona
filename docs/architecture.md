@@ -121,7 +121,13 @@ graph TB
   workflows (`sticker-resync` daily 06:00 UTC, `artist-sync` 06:30,
   `avatar-refresh` 07:00, `cleanup-orphans` weekly, `backfill-animated`
   dispatch-only) call the app's `POST /api/cron/*` endpoints with
-  `CRON_SECRET` as the bearer. Every push to `main` runs `ci.yml` and
+  `CRON_SECRET` as the bearer. `avatar-refresh` calls on every fork rather than
+  only opted-in ones, because it does two jobs: refreshing artists' avatars,
+  which is opt-in through the `AVATAR_REFRESH_BATCH` repo variable, and
+  re-hosting the site's own avatar when an earlier copy failed and left it on a
+  third-party host, which nothing else retries. An unset dial sends `batch=0`,
+  meaning the second job only. A fork with no `CRON_SECRET` warns and skips, as
+  the other cron workflows do. Every push to `main` runs `ci.yml` and
   `deploy.yml`, which redeploys the Pages project; `deploy.yml` also has a
   manual dispatch for forks synced through GitHub's Sync fork button, which
   emits no push event.

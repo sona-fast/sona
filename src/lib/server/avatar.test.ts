@@ -234,8 +234,12 @@ describe('resolveAvatarUrl re-hosting', () => {
 		);
 		expect(url).toContain('/avatars/nova/');
 		// Continuing past a refusal must not become continuing past a success:
-		// Twitter is never asked when Bluesky answered.
-		expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('api.x.com'))).toBe(false);
+		// Twitter is never asked when Bluesky answered. Asserted as the exact set of
+		// hosts contacted rather than "x.com appears nowhere" — a substring test over
+		// a URL matches an attacker-shaped host either side of it (CodeQL flags the
+		// pattern), and it would also stay silent if some third provider were added.
+		const hosts = fetchMock.mock.calls.map((c) => new URL(String(c[0])).hostname);
+		expect(hosts).toEqual(['public.api.bsky.app', 'cdn.bsky.app']);
 	});
 
 	it('does not follow redirects on the avatar download', async () => {
