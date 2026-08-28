@@ -1,19 +1,26 @@
-# Scheduled refresh of artist avatars.
+# Scheduled avatar upkeep: this site's own avatar every run, artists' avatars
+# when you opt in.
 #
 # Cloudflare Pages can't run native cron, so GitHub Actions is the scheduler: it
-# POSTs to the app's refresh endpoint, which re-resolves + re-hosts a bounded
-# batch of artist avatars (oldest-first) so re-hosted copies track each artist's
-# current picture. See issue #187.
+# POSTs to the app's refresh endpoint. The endpoint heals this site's OWN avatar
+# when a previous re-host failed and left it pointing at a third party; no other
+# scheduled job retries that, and otherwise it waits for you to save the site
+# tab. It also re-resolves + re-hosts a bounded batch of ARTIST avatars
+# (oldest-first), so re-hosted copies track each artist's current picture. See
+# issue #187.
 #
 # Required:
-#   - repo secret CRON_SECRET (Settings -> Secrets and variables -> Actions)
-#     matching the Pages secret of the same name (`wrangler pages secret put
-#     CRON_SECRET`). Without it the endpoint returns 401/503 and this job fails.
 #   - repo variable SITE_URL (Actions -> Variables) = your site's base URL,
 #     e.g. https://example.com.
+#
+# Optional:
+#   - repo secret CRON_SECRET (Settings -> Secrets and variables -> Actions)
+#     matching the Pages secret of the same name (`wrangler pages secret put
+#     CRON_SECRET`). Without it this run skips with a warning, like the other
+#     scheduled jobs.
 #   - repo variable AVATAR_REFRESH_BATCH (Actions -> Variables) = how many
-#     avatars to refresh per run. Unset or 0 means "not opted in" and the run is
-#     skipped with a log line (never a silent no-op). Start small, e.g. 25.
+#     ARTIST avatars to refresh per run. Unset or 0 skips the artist batch; the
+#     run still checks this site's own avatar. Start small, e.g. 25.
 name: Avatar refresh
 
 on:
@@ -35,6 +42,11 @@ jobs:
     # The canonical template is intentionally unconfigured, so it must not run
     # fork workflows. Every fork (any other repo) runs this normally.
     if: github.repository != 'sona-fast/sona'
+    # No GITHUB_TOKEN at all: this job checks out nothing, runs no action, and
+    # talks only to the site over https. Forks created before GitHub's 2023
+    # default flip still hand read-write-everything to every job that stays
+    # silent, so the empty block is what makes that harmless here.
+    permissions: {}
     steps:
       - name: Trigger avatar refresh endpoint
         env:
@@ -45,26 +57,68 @@ jobs:
           if [ -z "$SITE_URL" ]; then
             echo "::error::SITE_URL repo variable is not set (Settings -> Secrets and variables -> Actions -> Variables) - set it to your site's base URL, e.g. https://example.com"; exit 1
           fi
-          # Avatar refresh is OPT-IN via the batch dial. Unset or 0 = not opted in
-          # -> skip with a visible log line (not a silent no-op), don't fail.
-          if [ -z "$AVATAR_REFRESH_BATCH" ] || [ "$AVATAR_REFRESH_BATCH" = "0" ]; then
-            echo "::warning::AVATAR_REFRESH_BATCH not set (or 0) - skipping avatar refresh (set the repo variable to a batch size, e.g. 25, to opt in)"; exit 0
-          fi
-          # Avatar refresh needs cron auth like the other cron jobs.
+          # This value receives CRON_SECRET in an Authorization header every day,
+          # so refuse anything that is not an https URL: a typo'd (or plain http)
+          # host would be handed a working credential for every /api/cron/*
+          # endpoint. It is also passed as --url below, so a value starting with
+          # '-' can't be read as curl options.
+          case "$SITE_URL" in
+            https://*) ;;
+            *)
+              echo "::error::SITE_URL must be an https URL (got '$SITE_URL') - set it to your site's base URL, e.g. https://example.com"; exit 1 ;;
+          esac
+          # Cron auth, like the other cron jobs. A fork that never set the secret
+          # has not opted into cron at all, so skip with a warning rather than
+          # failing every morning on an Actions tab nobody may be watching (the
+          # same contract sticker-resync and cleanup-orphans keep).
           if [ -z "$CRON_SECRET" ]; then
-            echo "::error::CRON_SECRET not set but AVATAR_REFRESH_BATCH is - set the repo secret (matching the Pages secret) to run the refresh"; exit 1
+            echo "::warning::CRON_SECRET not set (Settings -> Secrets and variables -> Actions) - skipping the avatar refresh (set the repo secret, matching the Pages secret, to opt in)"; exit 0
+          fi
+          # Refreshing OTHER people's avatars (artists) is opt-in via the batch
+          # dial. Unset or 0 means not opted in, and we send batch=0 rather than
+          # skipping the call: the endpoint also heals the fork's OWN avatar when
+          # a previous re-host left it on a third-party host, and that is not a
+          # batch of other people's pictures to opt into. Exiting here instead
+          # meant the heal reached no fork at all (the variable was set on none
+          # of them), so the fix shipped and did nothing.
+          BATCH="${AVATAR_REFRESH_BATCH:-0}"
+          # It lands in a URL, so refuse anything that is not a plain number
+          # rather than passing a typo (or worse) through to curl.
+          case "$BATCH" in
+            *[!0-9]*)
+              echo "::error::AVATAR_REFRESH_BATCH must be a whole number (got '$BATCH') - leave it unset to skip artist avatars, or set a batch size, e.g. 25"; exit 1 ;;
+          esac
+          # Leading zeros pass the digit guard but are not the string '0', so
+          # normalise before the opt-out check below: '00' is a typo that would
+          # otherwise do no artist work with nothing said about it.
+          BATCH=$((10#$BATCH))
+          if [ "$BATCH" = "0" ]; then
+            echo "::notice::Artist avatars are not being refreshed; this run only checks this site's own avatar. To refresh artist avatars too, set the AVATAR_REFRESH_BATCH repo variable to a batch size, e.g. 25."
           fi
           # --max-time is the REAL bound on the refresh run: when curl gives up,
           # the server request is cancelled mid-batch and its job-run heartbeat
           # is lost. 900s pairs with the endpoint's MAX_BATCH=50 clamp: typical
           # runs take ~1-2s per artist, worst-case resolver timeouts ~28s each.
+          #
+          # Keep curl's own exit code: under the default 'bash -e' a timeout, DNS
+          # failure or TLS error ends the step on this line, before the dump and
+          # every branch below it, so the operator gets a red run that says
+          # nothing. Every fork runs this daily, which makes an unexplained
+          # failure the likeliest thing anyone here ever sees.
+          rc=0
           code=$(curl -sS --max-time 900 -o response.json -w '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "${SITE_URL%/}/api/cron/refresh-avatars?batch=${AVATAR_REFRESH_BATCH}")
+            --url "${SITE_URL%/}/api/cron/refresh-avatars?batch=${BATCH}") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::curl exited $rc - the site never answered (DNS, TLS, or the 900s max-time); no avatars were refreshed this run"; exit 0
+          fi
           echo "HTTP $code"
           cat response.json || true
           echo
+          if [ "$code" = "503" ]; then
+            echo "Cron is not configured on the site (no CRON_SECRET Pages secret) - skipping."; exit 0
+          fi
           if [ "$code" != "200" ]; then
             echo "::error::Avatar refresh endpoint returned HTTP $code"; exit 1
           fi

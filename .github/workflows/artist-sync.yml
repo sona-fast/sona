@@ -28,6 +28,9 @@ jobs:
     # fork workflows. Every fork (any other repo) runs this normally and fails
     # loudly if CRON_SECRET is missing — that's a real misconfiguration to fix.
     if: github.repository != 'sona-fast/sona'
+    # No GITHUB_TOKEN at all — see avatar-refresh.yml for why every cron job
+    # here declares this: nothing is checked out and nothing calls the API.
+    permissions: {}
     steps:
       - name: Trigger artist-sync endpoint
         env:
@@ -37,16 +40,33 @@ jobs:
           if [ -z "$SITE_URL" ]; then
             echo "::error::SITE_URL repo variable is not set (Settings → Secrets and variables → Actions → Variables) — set it to your site's base URL, e.g. https://example.com"; exit 1
           fi
+          # The Authorization header below carries CRON_SECRET to whatever host
+          # this names, and that secret opens every /api/cron/* endpoint — a typo'd
+          # or lapsed domain would be handed a working credential every morning.
+          # So: https only, and passed to curl as --url so a value starting with
+          # '-' can't be read as options.
+          case "$SITE_URL" in
+            https://*) ;;
+            *)
+              echo "::error::SITE_URL must be an https URL (got '$SITE_URL') — set it to your site's base URL, e.g. https://example.com"; exit 1 ;;
+          esac
           # Registry sync is OPTIONAL (a fork may not use the shared registry), so
           # an unset secret means "not opted in" — skip quietly, don't fail. Deploy
           # (which is mandatory) still fails loudly on missing creds.
           if [ -z "$CRON_SECRET" ]; then
             echo "::warning::CRON_SECRET not set — skipping scheduled sync (optional; set the repo secret to opt in)"; exit 0
           fi
+          # Hold curl's exit code rather than letting the default `bash -e` end the
+          # step on it: a timeout, DNS failure or TLS error would otherwise skip
+          # the dump and both branches below, leaving a red run with no cause named.
+          rc=0
           code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "${SITE_URL%/}/api/cron/sync-artists")
+            --url "${SITE_URL%/}/api/cron/sync-artists") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::curl exited $rc — the site never answered (DNS, TLS, or the 120s timeout); no artists were synced this run"; exit 0
+          fi
           echo "HTTP $code"; cat response.json || true; echo
           if [ "$code" = "503" ]; then
             echo "Registry not configured on the site — skipping."; exit 0

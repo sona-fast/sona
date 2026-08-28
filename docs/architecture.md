@@ -43,6 +43,7 @@ graph TB
         Resend[✉️ Resend]
         Turnstile[🧩 Cloudflare Turnstile]
         ConsFYI[📅 cons.fyi]
+        Avatars[🖼️ Bluesky + X — profile picture sources]
         UT[☁️ UploadThing — optional]
     end
 
@@ -91,6 +92,8 @@ graph TB
     CI --> Deploy
     Deploy -->|wrangler pages deploy| Hooks
     CronWF -->|POST /api/cron/* with CRON_SECRET| API
+    API -->|fetch profile pictures to re-host| Avatars
+    Admin -->|fetch profile pictures to re-host| Avatars
     Release -.->|pull tagged releases| Forks
 ```
 
@@ -121,7 +124,16 @@ graph TB
   workflows (`sticker-resync` daily 06:00 UTC, `artist-sync` 06:30,
   `avatar-refresh` 07:00, `cleanup-orphans` weekly, `backfill-animated`
   dispatch-only) call the app's `POST /api/cron/*` endpoints with
-  `CRON_SECRET` as the bearer. Every push to `main` runs `ci.yml` and
+  `CRON_SECRET` as the bearer. `avatar-refresh` calls on every fork rather than
+  only opted-in ones, because it does two jobs: refreshing artists' avatars,
+  which is opt-in through the `AVATAR_REFRESH_BATCH` repo variable, and
+  re-hosting the site's own avatar when an earlier copy failed and left it on a
+  third-party host, which nothing else retries. An unset dial sends `batch=0`,
+  meaning the second job only. A fork with no `CRON_SECRET` warns and skips, as
+  the other cron workflows do. That daily fork-wide run is also why the diagram
+  now carries a profile-picture edge to Bluesky and X: re-hosting has always
+  contacted them from an operator's save, but this makes it a scheduled
+  dependency rather than an occasional one. Every push to `main` runs `ci.yml` and
   `deploy.yml`, which redeploys the Pages project; `deploy.yml` also has a
   manual dispatch for forks synced through GitHub's Sync fork button, which
   emits no push event.

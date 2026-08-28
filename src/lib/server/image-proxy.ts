@@ -44,8 +44,15 @@ export function isPrivateHost(hostname: string): boolean {
 			return /^\[(::1?\]$|f[cd]|fe[89ab][0-9a-f]:)/.test(host);
 		}
 	}
-	// IPv4 loopback / unspecified / RFC1918 / link-local.
-	return /^(127\.|0\.0\.0\.0$|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+	// IPv4 loopback / unspecified / RFC1918 / link-local, plus three reserved
+	// ranges that are not RFC1918 but are just as much "not the public internet":
+	//  - 100.64/10 (RFC6598 CGNAT) is what a carrier or a Tailscale-style overlay
+	//    hands out, so it reaches another machine on the operator's network.
+	//  - 198.18/15 (RFC2544 benchmarking) is routed to lab gear where it exists.
+	//  - 192.0.0/24 (IETF protocol assignments) holds NAT64 and DS-Lite endpoints.
+	// Each is written to its exact prefix rather than to a whole octet: 100.63
+	// and 100.128 are ordinary public space, and so is 192.0.1.
+	return /^(127\.|0\.0\.0\.0$|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|198\.1[89]\.|192\.0\.0\.)/.test(host);
 }
 
 /** Whether a URL is already readable by a same-origin `fetch` from the page. */

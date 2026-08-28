@@ -26,6 +26,9 @@ jobs:
     # The canonical template is intentionally unconfigured, so it must not run
     # fork workflows. Every fork (any other repo) runs this normally.
     if: github.repository != 'sona-fast/sona'
+    # No GITHUB_TOKEN at all — see avatar-refresh.yml for why every cron job
+    # here declares this: nothing is checked out and nothing calls the API.
+    permissions: {}
     steps:
       - name: Trigger cleanup-orphans endpoint
         env:
@@ -35,16 +38,34 @@ jobs:
           if [ -z "$SITE_URL" ]; then
             echo "::error::SITE_URL repo variable is not set (Settings → Secrets and variables → Actions → Variables) — set it to your site's base URL, e.g. https://example.com"; exit 1
           fi
+          # This host receives CRON_SECRET in an Authorization header every week,
+          # and that secret opens every /api/cron/* endpoint — including the ones
+          # that delete. A misspelled or lapsed domain would be given a working
+          # credential, so refuse anything that isn't https. --url below keeps a
+          # leading '-' from being read as curl options.
+          case "$SITE_URL" in
+            https://*) ;;
+            *)
+              echo "::error::SITE_URL must be an https URL (got '$SITE_URL') — set it to your site's base URL, e.g. https://example.com"; exit 1 ;;
+          esac
           # Cleanup is OPTIONAL — an unset secret means "not opted in": skip
           # quietly, don't fail. Deploy (which is mandatory) still fails loudly
           # on missing creds.
           if [ -z "$CRON_SECRET" ]; then
             echo "::warning::CRON_SECRET not set — skipping scheduled cleanup (optional; set the repo secret to opt in)"; exit 0
           fi
+          # Curl's exit code is kept rather than left to the default `bash -e`,
+          # which would end the step here on a timeout, DNS failure or TLS error —
+          # past the dump, past every branch below, and past the jq that reads the
+          # file curl may not have written.
+          rc=0
           code=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "${SITE_URL%/}/api/cron/cleanup-orphans")
+            --url "${SITE_URL%/}/api/cron/cleanup-orphans") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::curl exited $rc — the site never answered (DNS, TLS, or the 120s timeout); nothing was cleaned up this run"; exit 0
+          fi
           echo "HTTP $code"; cat response.json || true; echo
           if [ "$code" = "503" ]; then
             echo "Cron is not configured on the site (no CRON_SECRET Pages secret) — skipping."; exit 0

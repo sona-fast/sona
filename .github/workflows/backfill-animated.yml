@@ -32,6 +32,9 @@ jobs:
     # The canonical template is intentionally unconfigured, so it must not run
     # fork workflows. Every fork (any other repo) runs this normally.
     if: github.repository != 'sona-fast/sona'
+    # No GITHUB_TOKEN at all — see avatar-refresh.yml for why every cron job
+    # here declares this: nothing is checked out and nothing calls the API.
+    permissions: {}
     steps:
       - name: Run paged backfill
         env:
@@ -42,6 +45,16 @@ jobs:
           if [ -z "$SITE_URL" ]; then
             echo "::error::SITE_URL repo variable is not set (Settings → Secrets and variables → Actions → Variables)"; exit 1
           fi
+          # Dispatched by hand rather than nightly, but the Authorization header
+          # still hands CRON_SECRET to whatever host this names, and that secret
+          # opens every /api/cron/* endpoint. A typo'd domain would collect a
+          # working credential, so refuse anything that isn't https. --url below
+          # keeps a leading '-' from being read as curl options.
+          case "$SITE_URL" in
+            https://*) ;;
+            *)
+              echo "::error::SITE_URL must be an https URL (got '$SITE_URL')"; exit 1 ;;
+          esac
           # Unlike the optional scheduled crons, this workflow only ever runs
           # because someone dispatched it — a missing secret is a real
           # misconfiguration, so fail loudly rather than skip.
@@ -57,13 +70,24 @@ jobs:
           after=0
           total_updated=0
           total_failed=0
+          stopped=''
           # Page until the server returns an empty page. The page-count backstop
           # (200 pages x limit) only trips on a runaway loop, not a real library.
           for i in $(seq 1 200); do
+            # Curl's own exit code, kept: the default `bash -e` would end the step
+            # mid-loop on a timeout, DNS failure or TLS error, throwing away the
+            # page count and the totals with nothing said about why. A backfill is
+            # idempotent, so an interrupted one is finished by dispatching again.
+            rc=0
             code=$(curl -sS --max-time 300 -o response.json -w '%{http_code}' \
               -X POST \
               -H "Authorization: Bearer $CRON_SECRET" \
-              "${SITE_URL%/}/api/cron/backfill-animated?limit=${LIMIT}&afterId=${after}")
+              --url "${SITE_URL%/}/api/cron/backfill-animated?limit=${LIMIT}&afterId=${after}") || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::warning::curl exited $rc on page $i — the site never answered (DNS, TLS, or the 300s timeout)"
+              stopped=1
+              break
+            fi
             echo "page $i (afterId=$after): HTTP $code"
             cat response.json; echo
             if [ "$code" != "200" ]; then
@@ -80,7 +104,11 @@ jobs:
             fi
             after=$(jq -r '.lastId // 0' response.json)
           done
-          echo "Backfill complete: $total_updated flags updated, $total_failed rows failed."
+          if [ -n "$stopped" ]; then
+            echo "Backfill stopped early: $total_updated flags updated, $total_failed rows failed so far — dispatch it again to carry on from here."
+          else
+            echo "Backfill complete: $total_updated flags updated, $total_failed rows failed."
+          fi
           if [ "$total_failed" -gt 0 ]; then
             echo "::warning::$total_failed rows could not be read — re-run the workflow to retry them (idempotent)."
           fi

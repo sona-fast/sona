@@ -11,6 +11,36 @@ describe('isPrivateHost', () => {
 		}
 	});
 
+	// Not RFC1918, but not the public internet either: CGNAT is what a carrier or
+	// an overlay network hands out, benchmarking space is routed to lab gear, and
+	// the IETF protocol block holds NAT64/DS-Lite endpoints. A stored URL naming
+	// one of them reaches a machine on the operator's network.
+	it('blocks CGNAT, benchmarking and IETF protocol space', () => {
+		for (const host of ['100.64.0.1', '100.100.5.5', '100.127.255.255', '198.18.0.1', '198.19.255.255', '192.0.0.1']) {
+			expect(isPrivateHost(host), host).toBe(true);
+		}
+	});
+
+	it('keeps those three prefixes exact, one address either side', () => {
+		// Written per-prefix rather than per-octet: 100.63 and 100.128 sit outside
+		// the /10, 198.17 and 198.20 outside the /15, and 192.0.1 outside the /24.
+		// A lazier regex (100., 198., 192.0.) would blackhole real public hosts.
+		for (const host of ['100.63.0.1', '100.128.0.1', '198.17.0.1', '198.20.0.1', '192.0.1.1']) {
+			expect(isPrivateHost(host), host).toBe(false);
+		}
+	});
+
+	// Not a gap to close, a normalisation to pin: the callers read
+	// `new URL(...).hostname`, and WHATWG parses an integer or hex-spelled IPv4
+	// host into dotted-decimal before the regex ever sees it. Anything here that
+	// stopped normalising would be a platform change, not a missing branch.
+	it('sees decimal and hex spellings of loopback already normalised by URL', () => {
+		expect(new URL('http://2130706433/x.jpg').hostname).toBe('127.0.0.1');
+		expect(new URL('http://0x7f000001/x.jpg').hostname).toBe('127.0.0.1');
+		expect(isPrivateHost(new URL('http://2130706433/x.jpg').hostname)).toBe(true);
+		expect(isPrivateHost(new URL('http://0x7f000001/x.jpg').hostname)).toBe(true);
+	});
+
 	it('blocks localhost however it is spelled', () => {
 		expect(isPrivateHost('localhost')).toBe(true);
 		// A trailing dot is an FQDN spelling of the same host.

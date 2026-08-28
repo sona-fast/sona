@@ -285,11 +285,16 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// — the constant is hand-maintained and an edit that forgot it would ship a
 	// stale date to every fork at once.
 	//
-	// So: pin a hash of the default text. Editing defaultPrivacyPolicy or
-	// defaultTerms fails this test, and the fix is to bump the date constant AND
-	// this hash in the same commit. Deliberately one assertion, not a diff — the
-	// point is to force the date bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '32023facffb519d1a6b20d5af166bd7893bfe1179513121375bc34faaaf4a4d0';
+	// So: pin a hash of the default text AND the date that goes with it. Editing
+	// defaultPrivacyPolicy or defaultTerms fails this test, and the fix is to bump
+	// the date constant AND both pins here in the same commit. The date pin is what
+	// makes the hash pin mean anything: with only the hash, an edit that updated
+	// the prose and the hash but reverted the date would pass, and every fork's
+	// privacy page would show a "Last updated" line older than its own text.
+	// Deliberately two assertions, not a diff — the point is to force the date
+	// bump, not to review the prose.
+	const RECORDED_TEXT_HASH = '1a2371801ad230c1791ca926588bdf7329e4844e9b6535742a6188ec7dd89385';
+	const RECORDED_UPDATED = '2026-08-24';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both
@@ -307,5 +312,10 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 			'The default legal text changed. Bump LEGAL_DEFAULTS_UPDATED in src/lib/legal.ts ' +
 				'and update RECORDED_TEXT_HASH here in the same commit.'
 		).toBe(RECORDED_TEXT_HASH);
+		expect(
+			LEGAL_DEFAULTS_UPDATED,
+			'LEGAL_DEFAULTS_UPDATED moved without the text. Update RECORDED_UPDATED here ' +
+				'in the same commit, or restore the date the pinned text shipped with.'
+		).toBe(RECORDED_UPDATED);
 	});
 });
