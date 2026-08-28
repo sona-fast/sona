@@ -107,6 +107,57 @@ describe('conCardFaceSvg — the badge', () => {
 			'Taro&#39;s &quot;friend&quot;'
 		);
 	});
+
+	it('drops half a surrogate pair left behind by an older cut', () => {
+		// Settings saved before the clamp counted grapheme clusters were cut by code
+		// unit, so a stored value can end mid-emoji and the write path can never
+		// reach it. encodeURIComponent is the raster path, and it throws on a lone
+		// surrogate: the operator would get a raster failure with nothing to fix.
+		const lone = '\uD83D';
+		for (const svg of [
+			front({ name: `Taro${lone}` }),
+			front({ species: `fox${lone}`, pronouns: `they/them${lone}` }),
+			back({ handles: [{ platform: 'bluesky', value: `@taro${lone}` }] })
+		]) {
+			expect(() => encodeURIComponent(svg)).not.toThrow();
+			expect(svg).not.toContain(lone);
+		}
+	});
+
+	it('drops half a surrogate pair out of the accessible name too, on every sheet', () => {
+		// The title is a markup sink like any other, and the name the operator
+		// types is what feeds it. A lone surrogate there makes the whole file
+		// unencodable, so the save reaches them as "save failed" and no file.
+		const lone = '\uD83D';
+		const title = `Taro${lone}`;
+		for (const [label, svg] of [
+			['front', front({ title })],
+			['back', back({ title })],
+			['sheet', sheet({ title })]
+		] as const) {
+			expect(() => encodeURIComponent(svg), label).not.toThrow();
+			expect(svg, label).not.toContain(lone);
+			expect(svg, label).toContain('<title>Taro</title>');
+		}
+	});
+
+	it('keeps whole pairs while dropping orphans, whichever half is orphaned', () => {
+		// The strip runs over every value on the card, so it has to leave real
+		// emoji alone: it matches a pair before it considers a single unit.
+		const cases: Array<[string, string]> = [
+			['🐺', '🐺'], // a valid pair survives whole
+			['a\uD83Db', 'ab'], // interior orphaned high
+			['a\uDC3Ab', 'ab'], // interior orphaned low
+			['\uD83D🐺', '🐺'], // high-high-low: the pair wins
+			['🐺\uDC3A', '🐺'], // pair then an orphaned low
+			['\uD83D\uD83D\uD83D', ''], // a run of orphans goes entirely
+			['🐺🐻', '🐺🐻'] // adjacent pairs
+		];
+		for (const [input, want] of cases) {
+			const title = front({ title: input }).match(/<title>([^<]*)<\/title>/)?.[1];
+			expect(title, JSON.stringify(input)).toBe(want);
+		}
+	});
 });
 
 describe('conCardFaceSvg — the front', () => {
@@ -169,6 +220,43 @@ describe('conCardFaceSvg — the front', () => {
 	it('drops the species line when the species is turned off', () => {
 		expect(texts(front({ species: null }))).not.toContain('Red panda');
 		expect(texts(front())).toContain('Red panda');
+	});
+
+	// SONA-210. The baseline is asserted, not just the presence: the pronouns sit
+	// on a line of their own below the species, and a shared baseline would print
+	// the two on top of each other whenever both are on.
+	it('prints the pronouns on their own baseline under the species', () => {
+		const line =
+			front({ pronouns: 'they/them' }).match(
+				/<text[^>]*>they\/them<\/text>/
+			)?.[0] ?? '';
+		expect(line).toContain('y="1156"');
+		expect(line).toContain('font-size="44"');
+		expect(line).toContain('text-anchor="middle"');
+		// Name and species keep the baselines they had before the line was added.
+		const at = (body: string) =>
+			front({ pronouns: 'they/them' }).match(
+				new RegExp(`<text[^>]*\\by="(\\d+)"[^>]*>${body}</text>`)
+			)?.[1];
+		expect(at('Taro')).toBe('1016');
+		expect(at('Red panda')).toBe('1086');
+	});
+
+	it('drops the pronouns line when they are unset or turned off', () => {
+		// The component passes null for a box the operator unticked, and the
+		// settings value is '' for an operator who never filled it in. Neither may
+		// reserve a line on the card.
+		expect(front({ pronouns: null })).not.toContain('y="1156"');
+		expect(front({ pronouns: '' })).not.toContain('y="1156"');
+		expect(front()).not.toContain('y="1156"');
+	});
+
+	it('clamps a long pronouns line rather than shrinking it off the column', () => {
+		// Fixed size like the species, so an overlong set is cut with an ellipsis.
+		const wide = texts(front({ pronouns: 'あ'.repeat(20) }));
+		expect(wide.some((t) => t.startsWith('あ') && t.endsWith('…'))).toBe(true);
+		// And a Latin set of the same length that does fit is left whole.
+		expect(texts(front({ pronouns: 'they/them' }))).toContain('they/them');
 	});
 
 	it('measures a Japanese name at full width, so it shrinks like a wide Latin one', () => {

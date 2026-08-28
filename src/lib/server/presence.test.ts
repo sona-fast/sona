@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './db/schema';
-import { characters, images, imageTags, tags } from './db/schema';
+import { characters, images, imageTags, siteSettings, tags } from './db/schema';
 import { makeD1 } from './test/d1';
 import { artHasContent, probeArtContent, sonaDetails } from './presence';
 
@@ -16,7 +16,8 @@ const emptySona = sonaDetails({
 	sonaKeyFeatures: '',
 	sonaColors: '[]',
 	sonaDos: '',
-	sonaDonts: ''
+	sonaDonts: '',
+	pronouns: ''
 });
 
 describe('artHasContent (#42 content gate)', () => {
@@ -35,6 +36,22 @@ describe('artHasContent (#42 content gate)', () => {
 	// recentArt already gates the page present.
 	it('counts featured art via recentArt (featured is a subset of the recent pool)', () => {
 		expect(artHasContent(emptySona, null, [{ slug: 'featured-also-recent' }])).toBe(true);
+	});
+
+	// SONA-210: pronouns is a detail row like species, so a fork whose ONLY filled
+	// field is pronouns has content. Left out of the predicate, /art would 404 on
+	// a page that renders a row, and the splash would hide a card that works.
+	it('is present when pronouns is the only filled detail', () => {
+		const pronounsOnly = sonaDetails({
+			sonaSpecies: '',
+			sonaBuild: '',
+			sonaKeyFeatures: '',
+			sonaColors: '[]',
+			sonaDos: '',
+			sonaDonts: '',
+			pronouns: 'they/them'
+		});
+		expect(artHasContent(pronounsOnly, null, [])).toBe(true);
 	});
 });
 
@@ -94,6 +111,16 @@ describe('probeArtContent — ref-sheet sources (SONA-18)', () => {
 		const db = makeDb();
 		await db.insert(images).values({ id: 5, title: 'Ref', slug: 'art-5', imageUrl: '/5.png', artistId: 1, published: true, nsfw: true, createdAt: '' });
 		await db.insert(characters).values({ name: 'Owner', isOwner: true, referenceImageId: 5 });
+
+		expect(await probeArtContent(db)).toBe(true);
+	});
+
+	// SONA-210: the probe reads the detail keys itself, so a key added to
+	// sonaDetails but not to its inArray list resolves false here while
+	// artHasContent says true — the splash would hide a card whose page renders.
+	it('is present for a fork whose only content is pronouns', async () => {
+		const db = makeDb();
+		await db.insert(siteSettings).values({ key: 'pronouns', value: 'they/them' });
 
 		expect(await probeArtContent(db)).toBe(true);
 	});

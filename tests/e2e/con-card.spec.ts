@@ -41,6 +41,8 @@ async function openSettings(page: Page) {
 const conCard = (page: Page) => page.locator('.con-card');
 /** The back face's inlined SVG: the face that carries the QR and the handles. */
 const backFace = (page: Page) => conCard(page).locator('figure').nth(1).locator('.face');
+/** The front face: the one carrying the name, species and pronouns lines. */
+const frontFace = (page: Page) => conCard(page).locator('figure').nth(0).locator('.face');
 
 // Serial on purpose. This suite logs in, rasterizes through a canvas and waits
 // on a download event, and the shared server's admin session flow has a
@@ -93,6 +95,25 @@ test.describe('admin settings con card', () => {
 		await expect(async () => {
 			expect(await backFace(page).innerHTML()).not.toBe(before);
 		}).toPass();
+	});
+
+	test('turning the pronouns off redraws the front without them (SONA-210)', async ({ page }) => {
+		// The seed sets pronouns, so the box is there and starts ticked: an operator
+		// who filled the setting in has already said yes to printing it.
+		const box = conCard(page)
+			.getByRole('group', { name: 'Include' })
+			.getByRole('checkbox', { name: 'Pronouns' });
+		await expect(box).toBeChecked();
+		await expect(frontFace(page)).toContainText('they/them');
+
+		await expect(async () => {
+			await box.uncheck();
+			await expect(box).not.toBeChecked({ timeout: 1500 });
+		}).toPass();
+
+		// Same as the handle toggle: the preview is inlined markup so it repaints,
+		// and the line the operator just turned off is gone from what will print.
+		await expect(frontFace(page)).not.toContainText('they/them');
 	});
 
 	test('saves the back to the phone as a PNG, and says nothing when it worked', async ({

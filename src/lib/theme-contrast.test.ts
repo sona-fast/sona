@@ -564,6 +564,59 @@ describe('SONA-115 live-row wash and live pill WCAG AA contrast', () => {
 	}
 });
 
+// SONA-210 puts the operator's pronouns in /connect's here-now block, whose
+// ground is a primary wash over --card. The line is deliberately NOT the flat
+// --muted-foreground the rest of the page uses (it reads dull on that ground):
+// it mixes a little primary back in, which moves it TOWARD the ground it sits
+// on and is exactly the kind of change that quietly sinks below AA. Parse both
+// mixes out of the component, per the DownloadMenu precedent, and check the ink
+// against both ends of the gradient — the strongest tint at the top of the
+// block, and the plain card the gradient fades to.
+describe('SONA-210 /connect pronouns ink on the here-now wash, every theme × mode', () => {
+	const connectCss = readFileSync(
+		fileURLToPath(new URL('../routes/(paths)/connect/+page.svelte', import.meta.url)),
+		'utf8'
+	);
+
+	function pct(re: RegExp, what: string): number {
+		const found = connectCss.match(re)?.[1];
+		if (!found) throw new Error(`${what} not found in connect/+page.svelte (mix changed?)`);
+		return Number(found);
+	}
+
+	// The ink: color-mix(in srgb, var(--primary) <pct>%, var(--muted-foreground)).
+	// All three muted lines on this card share the tint, so all three are parsed
+	// and checked. .here-through is 11px uppercase, which is still normal text
+	// under WCAG (bold starts at 14pt/18.66px), so 4.5:1 applies to it too.
+	const inkPcts = ['here-pronouns', 'here-loc', 'here-through'].map((cls) => ({
+		cls,
+		pct: pct(
+			new RegExp(
+				`\\.${cls}\\s*\\{[^}]*color:\\s*color-mix\\(in srgb,\\s*var\\(--primary\\)\\s*(\\d+)%,\\s*var\\(--muted-foreground\\)\\)`
+			),
+			`${cls} primary→muted-foreground color-mix`
+		)
+	}));
+	// The ground: the block's top-of-gradient wash over --card.
+	const washPct = pct(
+		/\.here-now\s*\{[^}]*linear-gradient\(180deg,\s*color-mix\(in srgb,\s*var\(--primary\)\s*(\d+)%,\s*transparent\)/,
+		'here-now primary wash color-mix'
+	);
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: every tinted line meets 4.5:1 across the here-now gradient`, () => {
+			const card = blockToken(sel, 'card');
+			for (const { cls, pct: inkPct } of inkPcts) {
+				const ink = mix2(blockToken(sel, 'primary'), inkPct, blockToken(sel, 'muted-foreground'));
+				// Top of the block (full wash) and the end the gradient fades to.
+				for (const ground of [mix2(blockToken(sel, 'primary'), washPct, card), card]) {
+					expect(contrast(ink, ground), cls).toBeGreaterThanOrEqual(4.5);
+				}
+			}
+		});
+	}
+});
+
 // The con card's handle rows wash on hover. --secondary was the obvious fill and
 // the wrong one: it is a surface token, and the muted handle value sitting on it
 // was never checked against it. The wash is now a tint of the text colour over

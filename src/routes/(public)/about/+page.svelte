@@ -69,7 +69,20 @@
 				<img src={data.avatarUrl} alt={ownerName} />
 			{/if}
 		</div>
-		<h1>{ownerName}</h1>
+		<!-- Name and pronouns are one group: the card's 16px gap stays between
+		     blocks, and the 4px inside keeps the line reading as the name's
+		     metadata rather than a block of its own. -->
+		<div class="ident">
+			<h1>{ownerName}</h1>
+			<!-- Under the name it belongs to, and only when there is one: an empty
+			     setting renders nothing rather than holding a gap under every heading.
+			     The visible line is the pronouns alone, so a screen reader gets the
+			     word "Pronouns" from the hidden prefix — out of context, "they/them"
+			     read straight after a name says nothing about what it is. -->
+			{#if settings.pronouns}
+				<p class="pronouns"><span class="sr-only">{m.pronouns_prefix()}{' '}</span>{settings.pronouns}</p>
+			{/if}
+		</div>
 		<p class="bio">{settings.aboutText}</p>
 
 		<div class="stats-row">
@@ -167,6 +180,22 @@
 
 	h1 {
 		font-size: 24px;
+	}
+
+	.ident {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.pronouns {
+		font-size: 13px;
+		color: var(--muted-foreground);
+		/* `anywhere` rather than `break-word`: the card centres its children, so a
+		   long unbroken value sets the block's min-content width and pushes the
+		   whole page sideways on a phone. Only `anywhere` reduces that min-content
+		   width; `break-word` wraps but measures the same and does not fix it. */
+		overflow-wrap: anywhere;
 	}
 
 	.bio {

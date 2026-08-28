@@ -9,6 +9,9 @@ INSERT OR REPLACE INTO site_settings (key, value) VALUES
   ('setupComplete', 'true'),
   ('siteName',      'E2E Test Gallery'),
   ('ownerName',     'E2E'),
+  -- Pronouns for the con card's include toggle (SONA-210). The card offers no
+  -- box at all when this is empty, so the toggle spec needs a value seeded.
+  ('pronouns',      'they/them'),
   -- A face for the con card. Without one the card draws an initial, which is
   -- exactly the broken state this suite failed to notice for a whole release:
   -- with no avatar seeded, no e2e could tell a working embed from a silent
@@ -163,3 +166,14 @@ INSERT OR REPLACE INTO metric_rollup (day, metric, dim, count) VALUES
   (date('now'), 'device', 'tablet', 5),
   (date('now'), 'referrer', 'example.com', 8),
   (date('now'), 'country', 'US', 25);
+
+-- One convention running RIGHT NOW, so /connect renders its here-now block in a
+-- browser (SONA-210). Dated off date('now') like the rollups above, with a day
+-- either side: the block is decided server-side from the real clock, so a fixed
+-- date would stop being live the day after it was written. Confirmed, because a
+-- 'maybe' row never counts as live, and zoned, because start/end are bare
+-- calendar dates and "is it running" is asked in the event's own timezone.
+INSERT OR REPLACE INTO conventions (id, name, location, start_date, end_date, url, status, timezone, created_at)
+VALUES
+  (1, 'E2E Live Con', 'Denver, CO', date('now', '-1 day'), date('now', '+1 day'),
+   NULL, 'confirmed', 'America/Denver', '2026-07-01T00:00:00.000Z');

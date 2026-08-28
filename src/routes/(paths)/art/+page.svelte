@@ -17,7 +17,11 @@
 		[
 			{ label: m.art_species(), value: data.sona.species },
 			{ label: m.art_build(), value: data.sona.build },
-			{ label: m.art_features(), value: data.sona.keyFeatures }
+			{ label: m.art_features(), value: data.sona.keyFeatures },
+			// After the character's own attributes: this row is the operator's, and
+			// it reads as an aside to the sheet rather than part of the description
+			// an artist draws from.
+			{ label: m.art_pronouns(), value: data.sona.pronouns }
 		].filter((d) => d.value)
 	);
 
@@ -343,6 +347,10 @@
 		font-size: 13px;
 		color: var(--foreground);
 		text-align: right;
+		/* Operator-typed values, so an unbroken 100-character one is reachable.
+		   `anywhere` rather than `break-word`, which wraps but leaves the
+		   min-content width intact and still forces the page sideways at 390px. */
+		overflow-wrap: anywhere;
 	}
 
 	.swatches {

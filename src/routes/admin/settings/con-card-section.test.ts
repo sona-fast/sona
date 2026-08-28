@@ -20,6 +20,12 @@ describe('con card section', () => {
 		expect(source).toMatch(/\{:catch\}[\s\S]*?\{m\.admin_settings_con_card_failed\(\)\}/);
 	});
 
+	// SONA-210: the setting reaches the card generator, or the preview draws a
+	// card without a line the operator has already filled in.
+	it('threads the pronouns setting into the card', () => {
+		expect(source).toMatch(/<ConCard[\s\S]*?pronouns=\{data\.conCard\.pronouns\}[\s\S]*?\/>/);
+	});
+
 	it('tells the operator what to do about it', () => {
 		// Recoverable, so the message has to name the recovery: this one is only
 		// fixed by reloading, which the operator has no reason to guess.

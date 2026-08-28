@@ -82,10 +82,21 @@ export function isValidEmail(email: string): boolean {
 
 /**
  * Sanitize a text input — trim, enforce max length.
+ *
+ * slice() counts UTF-16 code units, so a cap landing inside an astral character
+ * (an emoji, most of them two units) would leave a lone high surrogate at the
+ * end. That string is not well-formed UTF-8, and encodeURIComponent throws on
+ * it — which is how a stray emoji in a 100-character field takes out the con
+ * card's PNG save. Drop the half character instead — anywhere in the string, and
+ * either half, matching what the card's own renderer strips. Whole pairs match
+ * first so that real emoji survive.
  */
 export function sanitizeText(text: string | null | undefined, maxLength = 500): string {
 	if (!text) return '';
-	return text.trim().slice(0, maxLength);
+	return text
+		.trim()
+		.slice(0, maxLength)
+		.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, (m) => (m.length === 2 ? m : ''));
 }
 
 /**

@@ -9,6 +9,7 @@ import * as schema from '$lib/server/db/schema';
 import { getRawSetting, setRawSetting } from '$lib/server/settings';
 import { __resetSetupCache } from '$lib/server/admin-auth';
 import { DEFAULT_THEME_ID } from '$lib/themes';
+import * as m from '$lib/paraglide/messages';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -215,6 +216,54 @@ describe('setup wizard — blank optional fields never clobber CLI-seeded settin
 			if (!isRedirect(e)) throw e;
 		}
 		expect(await getRawSetting(db, 'primaryCharacter')).toBe('Taro');
+	});
+});
+
+describe('setup wizard — collects pronouns alongside the owner name (SONA-210)', () => {
+	it('saves a submitted pronouns value verbatim', async () => {
+		const { db, platform } = makeDb();
+
+		try {
+			await actions.default(setupEvent(platform, { pronouns: 'she/her' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		expect(await getRawSetting(db, 'pronouns')).toBe('she/her');
+	});
+
+	// Optional by operator decision: skipping the field in the wizard must not be
+	// a different state from never having one, and it follows the #60 rule so a
+	// blank does not clear a value the setup CLI seeded.
+	it('a blank pronouns writes nothing and leaves a seeded value intact', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(schema.siteSettings).values({ key: 'pronouns', value: 'they/them' });
+
+		try {
+			await actions.default(setupEvent(platform, { pronouns: '' }));
+			expect.unreachable('setup should redirect on success');
+		} catch (e) {
+			if (!isRedirect(e)) throw e;
+		}
+		expect(await getRawSetting(db, 'pronouns')).toBe('they/them');
+	});
+
+	it('the wizard form carries the field, next to the owner name', () => {
+		const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+		expect(source).toMatch(/<input[^>]*\bname="pronouns"[^>]*>/);
+		// Order matters: the pair reads as one identity, and a pronouns box that
+		// drifted below the about textarea would read as a site setting instead.
+		expect(source.indexOf('name="ownerName"')).toBeLessThan(source.indexOf('name="pronouns"'));
+		expect(source.indexOf('name="pronouns"')).toBeLessThan(source.indexOf('name="fursonaName"'));
+		// Not required: an owner who does not want pronouns published gets past
+		// setup by leaving it empty.
+		const input = source.match(/<input[^>]*\bname="pronouns"[^>]*>/)?.[0] ?? '';
+		expect(input).not.toContain('required');
+		// The wizard's own placeholder, which says the value gets published — the
+		// settings one is just an example and the wizard is where the field is met
+		// for the first time.
+		expect(input).toContain('{m.admin_setup_pronouns_placeholder()}');
+		expect(m.admin_setup_pronouns_placeholder()).toMatch(/shown/i);
 	});
 });
 

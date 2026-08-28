@@ -156,6 +156,7 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	const conCard = {
 		name: settings.ownerName || settings.siteName,
 		species: settings.sonaSpecies,
+		pronouns: settings.pronouns,
 		colors: parseSonaColors(settings.sonaColors),
 		// The front's face, which is the persona avatar rather than the ref sheet:
 		// the card is worn, and what a stranger matches against is a head.
@@ -466,6 +467,7 @@ export const actions = {
 		await saveSettings(db, {
 			siteName: text('siteName', 100),
 			ownerName: text('ownerName', 100),
+			pronouns: text('pronouns', 100),
 			aboutText: text('aboutText', 2000),
 			primaryCharacter: text('primaryCharacter', 100),
 			twitterUrl: social('twitter', 'twitter'),

@@ -88,6 +88,16 @@
 						<span>{m.admin_setup_owner_name()}</span>
 						<input type="text" name="ownerName" class="input" placeholder={m.admin_setup_owner_placeholder()} />
 					</label>
+					<!-- Optional like every field below the password block, and it stays
+					     that way: an owner who does not want pronouns published leaves it
+					     empty rather than being asked to choose one to get past setup.
+					     Shares the Settings label, but takes its own placeholder: the
+					     wizard is where an owner first meets the field, and "e.g.
+					     they/them" alone does not say the value gets published. -->
+					<label>
+						<span>{m.admin_settings_pronouns()}</span>
+						<input type="text" name="pronouns" class="input" maxlength="100" placeholder={m.admin_setup_pronouns_placeholder()} />
+					</label>
 					<label>
 						<span>{m.admin_setup_fursona_name()}</span>
 						<input type="text" name="fursonaName" class="input" placeholder={m.admin_setup_fursona_placeholder()} />

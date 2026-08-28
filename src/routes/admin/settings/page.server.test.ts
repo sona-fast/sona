@@ -21,6 +21,7 @@ import { DEFAULT_LANDING_LAYOUT } from '$lib/landing';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { verifySupporterKey, supporterKeyDisplayRecord } from '$lib/server/supporter-key';
 import { EARLY_ACCESS } from '$lib/early-access';
+import * as m from '$lib/paraglide/messages';
 import { actions, load } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -211,6 +212,46 @@ describe('settings — checkbox hints are described, not named (SONA-183)', () =
 	});
 });
 
+describe('settings pronouns field (SONA-210)', () => {
+	const source = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+
+	it('is a single-line text input with an example placeholder', () => {
+		const input = source.match(/<input[^>]*\bname="pronouns"[^>]*>/)?.[0] ?? '';
+		expect(input).toContain('type="text"');
+		expect(input).toContain('{m.admin_settings_pronouns_placeholder()}');
+	});
+
+	it('describes the field from outside its label', () => {
+		// Folded into the label the hint joins the input's accessible name and is
+		// read out before every edit — the same rule the checkbox hints follow.
+		const input = source.match(/<input[^>]*\bname="pronouns"[^>]*>/)?.[0] ?? '';
+		expect(input).toContain('aria-describedby="pronouns-hint"');
+		// The described element sits outside the pronouns <label>, and it renders
+		// the hint message — not some other string wearing the id.
+		const labelBlock =
+			source.match(/<label[^>]*>(?:(?!<\/label>)[\s\S])*name="pronouns"(?:(?!<\/label>)[\s\S])*<\/label>/)?.[0] ?? '';
+		expect(labelBlock).toContain('name="pronouns"');
+		expect(labelBlock).not.toContain('id="pronouns-hint"');
+		expect(source).toContain('<p class="hint" id="pronouns-hint">{m.admin_settings_pronouns_hint()}</p>');
+	});
+
+	it('names every surface the value will appear on, and how to opt out', () => {
+		// The setting publishes to four pages at once; an operator deciding whether
+		// to fill it in cannot see that from the field alone.
+		const hint = m.admin_settings_pronouns_hint();
+		for (const surface of [/About/, /character details/, /\/connect/, /con card/]) {
+			expect(hint).toMatch(surface);
+		}
+		expect(hint).toMatch(/blank/i);
+	});
+
+	it('rebinds after a save, so the saved value never visually reverts', () => {
+		// The save posts with reset:false, so the resync effect is the only thing
+		// putting the server's value back into the box.
+		expect(source).toMatch(/\$effect\(\(\) => \{[\s\S]*?pronouns = data\.settings\.pronouns;/);
+	});
+});
+
 describe('settings saveSite — three-path profile fields', () => {
 	it('persists the sona profile + contact email and drops malformed swatches', async () => {
 		const { db, platform } = makeDb();
@@ -220,6 +261,9 @@ describe('settings saveSite — three-path profile fields', () => {
 				siteName: 'Taro Surf',
 				splashSubtitle: 'surfing shark',
 				contactEmail: 'paws@example.com',
+				// Stored verbatim: the save never parses the slash, normalizes the
+				// case, or matches it against a list of known sets (SONA-210).
+				pronouns: 'they/them',
 				sonaSpecies: 'Shark',
 				sonaBuild: 'Round',
 				sonaKeyFeatures: 'Blue fins',
@@ -234,6 +278,7 @@ describe('settings saveSite — three-path profile fields', () => {
 
 		expect(result).toMatchObject({ success: true });
 		expect(await getRawSetting(db, 'contactEmail')).toBe('paws@example.com');
+		expect(await getRawSetting(db, 'pronouns')).toBe('they/them');
 		expect(await getRawSetting(db, 'splashSubtitle')).toBe('surfing shark');
 		expect(await getRawSetting(db, 'sonaSpecies')).toBe('Shark');
 		// Multipart form encoding normalizes newlines to CRLF (as browsers do);
@@ -544,6 +589,7 @@ describe('settings load — con card (SONA-115)', () => {
 	type ConCard = {
 		name: string;
 		species: string;
+		pronouns: string;
 		colors: Array<{ name: string; hex: string }>;
 		handles: Array<{ platform: string; value: string }>;
 		avatarSrc: string | null;
@@ -617,6 +663,18 @@ describe('settings load — con card (SONA-115)', () => {
 		expect(card.name).toBe('Taro');
 		expect(card.species).toBe('Red panda');
 		expect(card.colors).toEqual([{ name: 'Rust', hex: '#b45309' }]);
+	});
+
+	it('carries the pronouns setting, and an empty string when it is unset (SONA-210)', async () => {
+		const { db, platform } = makeLoadDb();
+
+		// Unset is the shape the card reads to decide whether to offer a toggle at
+		// all, so it has to be '' rather than null or undefined.
+		expect((await conCard(db, platform)).pronouns).toBe('');
+
+		await setRawSetting(db, 'pronouns', 'they/them');
+
+		expect((await conCard(db, platform)).pronouns).toBe('they/them');
 	});
 
 	it('offers every configured social, in card order', async () => {
