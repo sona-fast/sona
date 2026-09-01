@@ -6,6 +6,9 @@ import {
 	exifTiff,
 	findSegment,
 	gifFixture,
+	gifWithXmpFixture,
+	gifXmpMagicTrailer,
+	gifXmpRange,
 	jpegFixture,
 	jpegSosOffset,
 	pngChunks,
@@ -89,12 +92,18 @@ describe('scrubImageMetadata: JPEG', () => {
 		expect(scrubbed.length).toBe(original.length);
 	});
 
-	it('leaves everything from SOS onward byte-identical', () => {
+	it('leaves SOS through EOI byte-identical and zeroes the trailer', () => {
 		const sos = jpegSosOffset(original);
 		expect(sos).toBeGreaterThan(0);
-		expect(scrubbed.subarray(sos)).toEqual(original.subarray(sos));
-		// Including the junk trailer after EOI.
-		expect(text(scrubbed.subarray(scrubbed.length - 23))).toBe('trailing junk after EOI');
+		const eoi = original.length - 'trailing junk after EOI'.length;
+		// The scan carries a stuffed FF 00 and a restart marker FF D0, neither of
+		// which the EOI search may mistake for the end of the image.
+		expect(text(original.subarray(sos, eoi))).toContain('\xff\x00');
+		expect(text(original.subarray(sos, eoi))).toContain('\xff\xd0');
+		expect(scrubbed.subarray(sos, eoi)).toEqual(original.subarray(sos, eoi));
+		expect([...scrubbed.subarray(eoi - 2, eoi)]).toEqual([0xff, 0xd9]);
+		// Nothing after EOI survives: that is where a second picture hides.
+		expect(scrubbed.subarray(eoi).every((b) => b === 0)).toBe(true);
 	});
 
 	it('leaves JFIF, ICC, COM, DQT, SOF and DHT segments untouched', () => {
@@ -179,6 +188,20 @@ describe('scrubImageMetadata: JPEG Exif edge cases', () => {
 		expect(scrubbed.length).toBe(file.length);
 	});
 
+	it('zeroes a trailer carrying a whole second JPEG with its own GPS', () => {
+		// An MPF preview and a motion photo's MP4 both live after EOI, each with
+		// its own Exif; a decoder stops at EOI, so the bytes are dead weight.
+		const file = jpegFixture({ gpsTrailer: true });
+		const scrubbed = scrubImageMetadata(file);
+		expect(scrubbed.length).toBe(file.length);
+		const eoi = text(file).indexOf('\xff\xd9') + 2;
+		expect(eoi).toBeGreaterThan(2);
+		expect(scrubbed.subarray(eoi).every((b) => b === 0)).toBe(true);
+		expect(text(file)).toContain('preview scan');
+		expect(text(scrubbed)).not.toContain('preview scan');
+		expect(text(scrubbed)).not.toContain('MAKERNOT');
+	});
+
 	it('throws when a segment length runs past the end of the file', () => {
 		expect(() => scrubImageMetadata(jpegFixture({ truncated: true }))).toThrow(UnscrubbableImageError);
 	});
@@ -202,14 +225,36 @@ describe('scrubImageMetadata: PNG', () => {
 		const tiff = readTiff(data);
 		expect(tiff.orientation).toBe(3);
 		expect(tiff.strings[0x013b]).toBe('Nova Sparks');
+		expect(tiff.strings[0x8298]).toBe('(c) Nova');
 		expect(tiff.entries.some((e) => e.tag === 0x8825)).toBe(false);
 		expect(pngCrc(scrubbed.subarray(chunk.dataStart - 4, chunk.dataEnd))).toBe(chunk.crc);
+	});
+
+	it('rewrites the lowercase-flag variants too (exIf, zxIf, tXMP)', () => {
+		// The case bits are ancillary/private/safe-to-copy FLAGS, not identity: an
+		// encoder writing exIf still means Exif, and an exact-case match let it
+		// through with its GPS intact.
+		expect(pngChunks(original).map((c) => c.type)).toEqual(
+			expect.arrayContaining(['exIf', 'zxIf', 'tXMP'])
+		);
+		const exif = chunks.filter((c) => c.type === 'exIf');
+		expect(exif).toHaveLength(1);
+		// exIf keeps its type and becomes a minimal (here empty) directory.
+		const tiff = readTiff(scrubbed.subarray(exif[0].dataStart, exif[0].dataEnd));
+		expect(tiff.entries).toEqual([]);
+		expect(pngCrc(scrubbed.subarray(exif[0].dataStart - 4, exif[0].dataEnd))).toBe(exif[0].crc);
+		// zxIf (compressed Exif, which the scrubber does not inflate) and tXMP are
+		// renamed and zeroed like the text chunks.
+		expect(chunks.some((c) => c.type === 'zxIf' || c.type === 'tXMP')).toBe(false);
+		expect(text(scrubbed)).not.toContain('GPSLatitude');
+		expect(text(scrubbed)).not.toContain('fake deflated exif');
 	});
 
 	it('renames every text chunk to scRb, zeroes it, and fixes the CRC', () => {
 		expect(pngChunks(original).filter((c) => ['tEXt', 'zTXt', 'iTXt'].includes(c.type))).toHaveLength(3);
 		const renamed = chunks.filter((c) => c.type === 'scRb');
-		expect(renamed).toHaveLength(3);
+		// The three text chunks plus zxIf and tXMP.
+		expect(renamed).toHaveLength(5);
 		for (const chunk of renamed) {
 			expect(scrubbed.subarray(chunk.dataStart, chunk.dataEnd).every((b) => b === 0)).toBe(true);
 			expect(pngCrc(scrubbed.subarray(chunk.dataStart - 4, chunk.dataEnd))).toBe(chunk.crc);
@@ -218,8 +263,8 @@ describe('scrubImageMetadata: PNG', () => {
 		expect(text(scrubbed)).not.toContain('GPSLatitude');
 	});
 
-	it('leaves IHDR, iCCP, pHYs, IDAT and IEND identical', () => {
-		for (const type of ['IHDR', 'iCCP', 'pHYs', 'IDAT', 'IEND']) {
+	it('leaves IHDR, iCCP, pHYs, IDAT, the APNG chunks and IEND identical', () => {
+		for (const type of ['IHDR', 'iCCP', 'pHYs', 'acTL', 'fcTL', 'IDAT', 'fdAT', 'IEND']) {
 			const before = pngChunks(original).find((c) => c.type === type)!;
 			const after = chunks.find((c) => c.type === type)!;
 			expect(after.crc).toBe(before.crc);
@@ -259,8 +304,8 @@ describe('scrubImageMetadata: WebP', () => {
 		expect(packet.trimEnd().endsWith('<?xpacket end="w"?>')).toBe(true);
 	});
 
-	it('leaves ICCP and VP8 identical, pad byte included', () => {
-		for (const fourcc of ['ICCP', 'VP8 ']) {
+	it('leaves ICCP, the animation chunks and VP8 identical, pad byte included', () => {
+		for (const fourcc of ['ICCP', 'ANIM', 'ANMF', 'VP8 ']) {
 			const before = riffChunks(original).find((c) => c.fourcc === fourcc)!;
 			expect(scrubbed.subarray(before.dataStart, before.dataEnd + 1)).toEqual(
 				original.subarray(before.dataStart, before.dataEnd + 1)
@@ -274,6 +319,16 @@ describe('scrubImageMetadata: WebP', () => {
 	it('passes a simple-format file through byte-identical', () => {
 		const simple = webpSimpleFixture();
 		expect(scrubImageMetadata(simple)).toEqual(simple);
+	});
+
+	it('zeroes bytes past the declared RIFF size', () => {
+		// Same reasoning as the JPEG trailer: no decoder looks there, so anything
+		// parked past the declared size is metadata nothing examined.
+		const withTrailer = webpFixture({ trailer: 'GPSLatitude 51.5 hidden past the riff size' });
+		const out = scrubImageMetadata(withTrailer);
+		expect(out.length).toBe(withTrailer.length);
+		expect(out.subarray(original.length).every((b) => b === 0)).toBe(true);
+		expect(text(out)).not.toContain('GPSLatitude');
 	});
 });
 
@@ -293,6 +348,7 @@ describe('scrubImageMetadata: AVIF', () => {
 		expect([...payload.subarray(0, 4)]).toEqual([0, 0, 0, 0]);
 		const tiff = readTiff(payload.subarray(4));
 		expect(tiff.strings[0x013b]).toBe('Nova Sparks');
+		expect(tiff.strings[0x8298]).toBe('(c) Nova');
 		// AVIF carries orientation in irot/imir, so the Exif tag is not preserved.
 		expect(tiff.orientation).toBeUndefined();
 		expect(tiff.entries.some((e) => e.tag === 0x8825 || e.tag === 0x8769)).toBe(false);
@@ -319,6 +375,20 @@ describe('scrubImageMetadata: AVIF', () => {
 		const idat = avifFixture({ idatConstruction: true });
 		expect(() => scrubImageMetadata(idat.file)).toThrow(UnscrubbableImageError);
 	});
+
+	it('throws when an item extent declares more bytes than the record cap', () => {
+		// The extent is buffered whole to be rewritten, so its declared length is
+		// an allocation the file's author picks.
+		const huge = avifFixture({ hugeExifExtent: true });
+		expect(() => scrubImageMetadata(huge.file)).toThrow(UnscrubbableImageError);
+	});
+
+	it('throws on a size-0 box ahead of the meta box', () => {
+		// "Runs to the end of the file" before the item list has been read would
+		// pass the whole AVIF through unexamined.
+		const early = avifFixture({ freeBoxBeforeMeta: true });
+		expect(() => scrubImageMetadata(early.file)).toThrow(UnscrubbableImageError);
+	});
 });
 
 describe('scrubImageMetadata: pass-through and rejection', () => {
@@ -327,6 +397,32 @@ describe('scrubImageMetadata: pass-through and rejection', () => {
 		const scrubbed = scrubImageMetadata(gif);
 		expect(scrubbed).toEqual(gif);
 		expect(text(scrubbed)).toContain('made in SW1');
+	});
+
+	it('empties a GIF XMP application extension and keeps its magic trailer', () => {
+		// GIF89a has no Exif field, but Photoshop and Lightroom write GPS into an
+		// "XMP DataXMP" application extension.
+		const gif = gifWithXmpFixture();
+		const scrubbed = scrubImageMetadata(gif);
+		expect(scrubbed.length).toBe(gif.length);
+		expect(text(gif)).toContain('exif:GPSLatitude');
+		expect(text(scrubbed)).not.toContain('GPSLatitude');
+		const { start, end } = gifXmpRange();
+		const packet = text(scrubbed.subarray(start, end));
+		expect(packet.trimEnd().endsWith('<?xpacket end="w"?>')).toBe(true);
+		// The trailer is what makes a decoder's sub-block walk terminate, so it
+		// survives byte for byte.
+		expect([...scrubbed.subarray(end, end + 258)]).toEqual(gifXmpMagicTrailer());
+		// Everything else — identifier block, comment, frame — is untouched.
+		expect(scrubbed.subarray(0, start)).toEqual(gif.subarray(0, start));
+		expect(scrubbed.subarray(end)).toEqual(gif.subarray(end));
+	});
+
+	it('throws on a GIF whose block structure runs past the end', () => {
+		const gif = gifWithXmpFixture();
+		expect(() => scrubImageMetadata(gif.subarray(0, gif.length - 60))).toThrow(
+			UnscrubbableImageError
+		);
 	});
 
 	it('throws for bytes matching no raster signature', () => {
@@ -343,12 +439,15 @@ describe('scrubImageMetadataStream chunking invariance', () => {
 		['jpeg', jpegFixture()],
 		['jpeg without keepable tags', jpegFixture({ exif: { subIfd: true, gps: true } })],
 		['jpeg with a malformed exif', jpegFixture({ exif: { orientation: 6, artist: 'Nova', badIfdOffset: true } })],
+		['jpeg with a gps trailer', jpegFixture({ gpsTrailer: true })],
 		['png', pngFixture()],
 		['webp', webpFixture()],
+		['webp with a trailer past the riff size', webpFixture({ trailer: 'past the riff size' })],
 		['webp simple', webpSimpleFixture()],
 		['avif', avifFixture().file],
 		['avif with a large mdat', avifFixture({ largeMdat: true }).file],
-		['gif', gifFixture()]
+		['gif', gifFixture()],
+		['gif with an xmp extension', gifWithXmpFixture()]
 	];
 
 	for (const [name, fixture] of fixtures) {

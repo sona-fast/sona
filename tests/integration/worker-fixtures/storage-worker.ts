@@ -174,6 +174,24 @@ export default {
 					return json({ url, declaredSize: jpeg.length, storedSize: stored.length, storedHex: hex(stored) });
 				}
 
+				// The same scrub on the OTHER provider's streaming path: the bytes
+				// the ingest PUT carries are what UploadThing would store, and the
+				// capture side reads them out of the multipart frame.
+				case 'uploadthing-scrubbing-put': {
+					const storage = withMetadataScrubbing(
+						new UploadThingStorage({ token: env.UPLOADTHING_TOKEN })
+					);
+					const jpeg = jpegFixture();
+					const { url } = await storage.put({
+						suggestedKey: 'it/photo.jpg',
+						body: chunked(jpeg, 7),
+						size: jpeg.length,
+						contentType: 'image/jpeg',
+						filename: 'photo.jpg'
+					});
+					return json({ url, declaredSize: jpeg.length });
+				}
+
 				// A body the scrubber cannot walk must REJECT the put rather than
 				// leave the provider waiting on bytes that never arrive.
 				case 'r2-unscrubbable-stream': {

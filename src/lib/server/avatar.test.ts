@@ -19,6 +19,7 @@ import {
 import type { SiteSettings } from './settings';
 import { getRawSetting, getSettings, setRawSetting, clearSettingsCache } from './settings';
 import { jpegOfSize } from './test/raster-fixtures';
+import { jpegFixture } from './storage/scrub-metadata.fixtures';
 
 const DDL = `
 CREATE TABLE artists (
@@ -76,6 +77,8 @@ function stubFetch(override?: {
 	imageType?: string;
 	/** Bytes actually sent for the download. Default 4, the smallest real JPEG. */
 	imageBytes?: number;
+	/** Exact body to serve, for bytes jpegOfSize cannot express (a broken file). */
+	imageBody?: Uint8Array;
 	/** Content-Length the download DECLARES. Omitted = no header, like a chunked
 	 *  response; set it away from imageBytes to model an upstream that lies. */
 	declaredLength?: number;
@@ -85,7 +88,8 @@ function stubFetch(override?: {
 		if (override?.declaredLength !== undefined) {
 			headers['content-length'] = String(override.declaredLength);
 		}
-		return new Response(jpegOfSize(override?.imageBytes ?? 4), {
+		const body = override?.imageBody ?? jpegOfSize(override?.imageBytes ?? 4);
+		return new Response(body.slice().buffer as ArrayBuffer, {
 			status: 200,
 			headers
 		});
@@ -141,6 +145,17 @@ describe('resolveAvatarUrl re-hosting', () => {
 
 	it('refuses a non-raster content-type and keeps the source URL', async () => {
 		stubFetch({ imageType: 'text/html' });
+		const bucket = fakeBucket();
+		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(url).toBe(BSKY_AVATAR);
+	});
+
+	it('keeps the source URL when the bytes cannot be scrubbed', async () => {
+		// A JPEG the scrubber refuses (SONA-170) must fail soft exactly like a
+		// failed download: the avatar hotlink stays and nothing is stored, rather
+		// than a half-scrubbed object landing in the bucket.
+		stubFetch({ imageBody: jpegFixture({ truncated: true }) });
 		const bucket = fakeBucket();
 		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
 		expect(bucket.put).not.toHaveBeenCalled();

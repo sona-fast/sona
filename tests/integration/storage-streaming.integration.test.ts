@@ -37,6 +37,8 @@ interface CapturedRequest {
 	bodyBytes: number;
 	bodySha256: string;
 	headText: string;
+	/** Whole body, for the small-body scenarios that assert on stored bytes. */
+	bodyBase64: string | null;
 }
 
 let mf: Miniflare;
@@ -81,7 +83,8 @@ beforeAll(async () => {
 				transferEncoding: request.headers.get('transfer-encoding'),
 				bodyBytes: body.length,
 				bodySha256: createHash('sha256').update(body).digest('hex'),
-				headText: body.subarray(0, 512).toString('latin1')
+				headText: body.subarray(0, 512).toString('latin1'),
+				bodyBase64: body.length <= 64 * 1024 ? body.toString('base64') : null
 			});
 			const key = new URL(request.url).pathname.slice(1);
 			return new Response(JSON.stringify({ ufsUrl: `https://testapp.ufs.sh/f/${key}` }), {
@@ -174,6 +177,22 @@ describe('storage streaming under real workerd', () => {
 		// And the stored object no longer carries what the fixture came in with.
 		expect(Buffer.from(expected).toString('latin1')).not.toContain('GPSLatitude');
 		expect(result.url).toBe('/img/it/photo.jpg');
+	});
+
+	it('the scrubbing decorator scrubs the UploadThing ingest body too', async () => {
+		captured.length = 0;
+		const jpeg = jpegFixture();
+		const result = await run('uploadthing-scrubbing-put');
+		expect(captured).toHaveLength(1);
+		const put = captured[0];
+		// The framed body carries the scrubbed bytes, and the declared length is
+		// still the original size — the same size-preserving contract R2 relies on.
+		expect(result.declaredSize).toBe(jpeg.length);
+		expect(Number(put.contentLength)).toBe(put.bodyBytes);
+		expect(put.bodyBytes).toBeGreaterThan(jpeg.length);
+		const body = Buffer.from(put.bodyBase64!, 'base64').toString('latin1');
+		expect(body).toContain(Buffer.from(scrubImageMetadata(jpeg)).toString('latin1'));
+		expect(body).not.toContain('GPSLatitude');
 	});
 
 	it('a body the scrubber cannot walk rejects the put instead of hanging', async () => {

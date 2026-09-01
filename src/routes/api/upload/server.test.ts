@@ -4,12 +4,28 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { isHttpError } from '@sveltejs/kit';
 import { clearSettingsCache } from '$lib/server/settings';
+import { getStorage } from '$lib/server/storage';
 import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
 import { UnscrubbableImageError } from '$lib/server/storage/scrub-metadata';
+import { withMetadataScrubbing } from '$lib/server/storage/scrub';
+import { UploadThingStorage } from '$lib/server/storage/uploadthing';
+import { jpegFixture } from '$lib/server/storage/scrub-metadata.fixtures';
 import { POST } from './+server';
 
 import { makeD1 } from '$lib/server/test/d1';
 import { PNG_MAGIC } from '$lib/server/test/raster-fixtures';
+
+// UTApi is constructed in UploadThingStorage's constructor and never used by
+// the streaming path these tests drive; stubbed so no SDK setup is needed.
+vi.mock('uploadthing/server', () => ({ UTApi: class {} }));
+
+// The 422 assertions probe what was RECORDED, not just what was thrown — a
+// failure sample with the wrong status is invisible in the metrics dashboard.
+const recordUpload = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('$lib/server/metrics', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/server/metrics')>();
+	return { ...original, recordUpload };
+});
 
 // Stub only the provider resolution — the endpoint's own validation
 // (allowlist, sniff, size cap) stays real. `put` is what the assertions probe:
@@ -56,6 +72,7 @@ beforeEach(() => {
 	// getSettings caches per-isolate; each test uses a fresh in-memory DB.
 	clearSettingsCache();
 	put.mockClear();
+	recordUpload.mockClear();
 });
 
 describe('POST /api/upload', () => {
@@ -188,6 +205,51 @@ describe('POST /api/upload', () => {
 		expect(httpError.body.message).toBe(
 			"Couldn't strip metadata from this file. Re-export it and try again."
 		);
+		// The sample the dashboard shows carries the same status and message, not
+		// a bare "upload failed" at 500.
+		expect(recordUpload).toHaveBeenCalledTimes(1);
+		expect(recordUpload.mock.calls[0].slice(1)).toEqual([
+			false,
+			{ status: 422, message: "Couldn't strip metadata from this file. Re-export it and try again." }
+		]);
+	});
+
+	it('422s when the provider WRAPS the scrub failure (real streaming put)', async () => {
+		// On the streaming path nothing ever throws UnscrubbableImageError to the
+		// route: the transform errors the piped body and the provider's fetch
+		// rejects with its own error ("TypeError: fetch failed") carrying ours as
+		// .cause. Matching on the top-level error alone returned a 500 here.
+		const token = btoa(
+			JSON.stringify({ apiKey: 'sk_test_0123456789abcdef', appId: 'app123', regions: ['sea1'] })
+		);
+		const storage = withMetadataScrubbing(new UploadThingStorage({ token }));
+		vi.mocked(getStorage).mockReturnValueOnce(storage);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: unknown, init?: RequestInit) => {
+				try {
+					await new Response(init?.body as ReadableStream).arrayBuffer();
+				} catch (e) {
+					// undici's wrapping, reproduced: the real cause hangs underneath.
+					throw new TypeError('fetch failed', { cause: e });
+				}
+				return new Response('{}', { headers: { 'content-type': 'application/json' } });
+			})
+		);
+		const truncated = jpegFixture({ truncated: true });
+		const file = new File([truncated.slice().buffer as ArrayBuffer], 'photo.jpg', {
+			type: 'image/jpeg'
+		});
+
+		let thrown: unknown;
+		try {
+			await POST(postEvent(makePlatform(), file));
+		} catch (e) {
+			thrown = e;
+		}
+		vi.unstubAllGlobals();
+		expect(isHttpError(thrown)).toBe(true);
+		expect((thrown as { status: number }).status).toBe(422);
 	});
 
 	it('passes the allowlist-matched content type (parameters stripped, lowercased) to the provider', async () => {

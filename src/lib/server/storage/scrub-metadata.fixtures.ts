@@ -5,10 +5,11 @@
 // in their own module so other suites (storage decorator tests, the workerd
 // parity harness) can put the same real bytes instead of placeholder buffers.
 
-/** ASCII bytes of `text`, with no terminator unless the caller writes one. */
-export function ascii(text: string): number[] {
-	return [...text].map((c) => c.charCodeAt(0));
-}
+import { ascii, PNG_MAGIC } from '../test/raster-fixtures';
+
+// ascii and the PNG signature already exist for the animation-sniff suites;
+// re-exported so the scrubber tests keep one import site.
+export { ascii };
 
 /** ASCII bytes of `text` plus a trailing NUL. */
 function cstring(text: string): number[] {
@@ -195,6 +196,11 @@ export interface JpegOptions {
 	exif?: ExifOptions | null;
 	/** Truncate the file mid-segment (the length field promises more than exists). */
 	truncated?: boolean;
+	/**
+	 * Put a whole second JPEG after the EOI, Exif GPS and all — the shape an MPF
+	 * preview and a motion photo's trailer both take.
+	 */
+	gpsTrailer?: boolean;
 }
 
 /**
@@ -221,8 +227,21 @@ export function jpegFixture(opts: JpegOptions = {}): Uint8Array {
 		return Uint8Array.from(parts);
 	}
 	parts.push(...segment(0xda, [0x01, 0x01, 0x00, 0x00, 0x3f, 0x00]));
-	parts.push(...ascii('entropy coded scan data goes here'));
+	// A stuffed 0xFF (FF 00) and a restart marker (FF D0) inside the scan: the
+	// two things an EOI search must not mistake for the end of the image.
+	parts.push(...ascii('entropy'), 0xff, 0x00, ...ascii('scan'), 0xff, 0xd0, ...ascii('data'));
 	parts.push(0xff, 0xd9);
+	if (opts.gpsTrailer) {
+		parts.push(
+			0xff,
+			0xd8,
+			...segment(0xe1, [...ascii('Exif'), 0, 0, ...exifTiff({ gps: true, subIfd: true })]),
+			...ascii('preview scan'),
+			0xff,
+			0xd9
+		);
+		return Uint8Array.from(parts);
+	}
 	parts.push(...ascii('trailing junk after EOI'));
 	return Uint8Array.from(parts);
 }
@@ -266,8 +285,6 @@ export function findSegment(
 // PNG
 // ---------------------------------------------------------------------------
 
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-
 let crcTable: Uint32Array | null = null;
 
 /** PNG's CRC-32, reimplemented here so the fixtures don't lean on the code under test. */
@@ -292,18 +309,26 @@ function pngChunk(type: string, data: number[]): number[] {
 
 /**
  * A PNG with the metadata chunks the scrubber rewrites (eXIf, tEXt, zTXt, iTXt
- * holding XMP) alongside ones it must leave alone (iCCP, pHYs, IDAT).
+ * holding XMP, plus the case variants exIf/zxIf/tXMP an encoder may write)
+ * alongside ones it must leave alone (iCCP, pHYs, IDAT and the APNG chunks).
  */
 export function pngFixture(): Uint8Array {
-	const parts: number[] = [...PNG_SIGNATURE];
+	const parts: number[] = [...PNG_MAGIC];
 	parts.push(...pngChunk('IHDR', [...u32be(8), ...u32be(8), 8, 2, 0, 0, 0]));
-	parts.push(...pngChunk('eXIf', exifTiff({ orientation: 3, artist: 'Nova Sparks', gps: true, subIfd: true })));
+	parts.push(...pngChunk('eXIf', exifTiff({ orientation: 3, artist: 'Nova Sparks', copyright: '(c) Nova', gps: true, subIfd: true })));
+	// The case bits are flags, not identity: exIf/zxIf/tXMP mean the same thing.
+	parts.push(...pngChunk('exIf', exifTiff({ gps: true, subIfd: true })));
+	parts.push(...pngChunk('zxIf', [0, ...ascii('fake deflated exif with GPSLatitude 51.5')]));
+	parts.push(...pngChunk('tXMP', xmpWithGps()));
 	parts.push(...pngChunk('iCCP', [...cstring('icc'), 0, ...ascii('fake deflate stream')]));
 	parts.push(...pngChunk('pHYs', [...u32be(2835), ...u32be(2835), 1]));
+	parts.push(...pngChunk('acTL', [...u32be(2), ...u32be(0)]));
 	parts.push(...pngChunk('tEXt', [...cstring('Comment'), ...ascii('shot at 51.5,-0.12')]));
 	parts.push(...pngChunk('zTXt', [...cstring('Location'), 0, ...ascii('fake deflate stream')]));
 	parts.push(...pngChunk('iTXt', [...cstring('XML:com.adobe.xmp'), 0, 0, 0, 0, ...xmpWithGps()]));
+	parts.push(...pngChunk('fcTL', [...u32be(0), ...u32be(8), ...u32be(8), ...u32be(0), ...u32be(0), ...u16be(1), ...u16be(10), 0, 0]));
 	parts.push(...pngChunk('IDAT', [...ascii('fake idat payload')]));
+	parts.push(...pngChunk('fdAT', [...u32be(1), ...ascii('fake second frame')]));
 	parts.push(...pngChunk('IEND', []));
 	return Uint8Array.from(parts);
 }
@@ -334,20 +359,34 @@ function riffChunk(fourcc: string, data: number[]): number[] {
 	return [...ascii(fourcc), ...u32le(data.length), ...data, ...pad];
 }
 
+export interface WebpOptions {
+	/** Append bytes past the declared RIFF size, where a reader stops looking. */
+	trailer?: string;
+}
+
 /**
- * An extended-format (VP8X) WebP with ICCP, VP8, EXIF and XMP chunks. The ICCP
- * payload is deliberately odd-length so the pad byte is exercised.
+ * An extended-format (VP8X) WebP with ICCP, animation, VP8, EXIF and XMP
+ * chunks. The ICCP payload is deliberately odd-length so the pad byte is
+ * exercised.
  */
-export function webpFixture(): Uint8Array {
+export function webpFixture(opts: WebpOptions = {}): Uint8Array {
 	const chunks = [
-		// Flags byte: ICC (0x20) | EXIF (0x08) | XMP (0x04); then canvas size.
-		...riffChunk('VP8X', [0x2c, 0, 0, 0, 7, 0, 0, 7, 0, 0]),
+		// Flags byte: ICC (0x20) | EXIF (0x08) | XMP (0x04) | ANIM (0x02); then canvas size.
+		...riffChunk('VP8X', [0x2e, 0, 0, 0, 7, 0, 0, 7, 0, 0]),
 		...riffChunk('ICCP', ascii('an odd-length icc')),
+		...riffChunk('ANIM', [0, 0, 0, 0xff, 0, 0]),
+		...riffChunk('ANMF', [...ascii('fake frame header'), ...ascii('and its payload')]),
 		...riffChunk('VP8 ', ascii('fake lossy bitstream')),
 		...riffChunk('EXIF', exifTiff({ orientation: 8, copyright: '(c) Nova', gps: true })),
 		...riffChunk('XMP ', xmpWithGps())
 	];
-	return Uint8Array.from([...ascii('RIFF'), ...u32le(4 + chunks.length), ...ascii('WEBP'), ...chunks]);
+	return Uint8Array.from([
+		...ascii('RIFF'),
+		...u32le(4 + chunks.length),
+		...ascii('WEBP'),
+		...chunks,
+		...ascii(opts.trailer ?? '')
+	]);
 }
 
 /** A simple-format (VP8-only) WebP, which has nowhere to put metadata. */
@@ -396,6 +435,10 @@ export interface AvifOptions {
 	idatConstruction?: boolean;
 	/** Declare mdat with size==1 and a 64-bit largesize. */
 	largeMdat?: boolean;
+	/** Declare an Exif extent far past the record cap (the real payload is unchanged). */
+	hugeExifExtent?: boolean;
+	/** Insert a size-0 `free` box ("to end of file") ahead of the meta box. */
+	freeBoxBeforeMeta?: boolean;
 }
 
 export interface AvifFixture {
@@ -413,7 +456,10 @@ export interface AvifFixture {
  */
 export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	const av01Payload = ascii('fake av01 primary image bitstream');
-	const exifPayload = [...u32be(0), ...exifTiff({ artist: 'Nova Sparks', orientation: 6, gps: true, subIfd: true })];
+	const exifPayload = [
+		...u32be(0),
+		...exifTiff({ artist: 'Nova Sparks', copyright: '(c) Nova', orientation: 6, gps: true, subIfd: true })
+	];
 	const xmpPayload = xmpWithGps();
 
 	const ftyp = isoBox('ftyp', [...ascii('avif'), ...u32be(0), ...ascii('avif'), ...ascii('mif1'), ...ascii('miaf')]);
@@ -444,7 +490,12 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			0x00,
 			...u16be(3),
 			...item(1, 0, av01At, av01Payload.length),
-			...item(2, opts.idatConstruction ? 1 : 0, exifAt, exifPayload.length),
+			...item(
+				2,
+				opts.idatConstruction ? 1 : 0,
+				exifAt,
+				opts.hugeExifExtent ? 0x7ffffff0 : exifPayload.length
+			),
 			...item(3, 0, xmpAt, xmpPayload.length)
 		]);
 		const iprp = isoBox('iprp', [
@@ -458,7 +509,10 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	// offset-independent because every offset field is a fixed 4 bytes.
 	const metaSize = build(0, 0, 0).length;
 	const mdatHeader = opts.largeMdat ? 16 : 8;
-	const mdatStart = ftyp.length + metaSize;
+	// A size-0 box says "runs to the end of the file"; placed before meta, it
+	// would hand the whole file back unexamined.
+	const free = opts.freeBoxBeforeMeta ? [...u32be(0), ...ascii('free')] : [];
+	const mdatStart = ftyp.length + free.length + metaSize;
 	const av01At = mdatStart + mdatHeader;
 	const exifAt = av01At + av01Payload.length;
 	const xmpAt = exifAt + exifPayload.length;
@@ -468,7 +522,7 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 		? [...u32be(1), ...ascii('mdat'), ...u32be(0), ...u32be(mdatBody.length + 16), ...mdatBody]
 		: isoBox('mdat', mdatBody);
 	return {
-		file: Uint8Array.from([...ftyp, ...meta, ...mdat]),
+		file: Uint8Array.from([...ftyp, ...free, ...meta, ...mdat]),
 		av01: { start: av01At, end: av01At + av01Payload.length },
 		exif: { start: exifAt, end: exifAt + exifPayload.length },
 		xmp: { start: xmpAt, end: xmpAt + xmpPayload.length }
@@ -485,7 +539,7 @@ export function gifFixture(): Uint8Array {
 		ascii('GIF89a'),
 		[8, 0, 8, 0, 0x80, 0, 0], // logical screen descriptor, global colour table of 2
 		[0, 0, 0, 0xff, 0xff, 0xff],
-		[0x21, 0xfe, 12],
+		[0x21, 0xfe, 11],
 		ascii('made in SW1'),
 		[0],
 		[0x2c, 0, 0, 0, 0, 8, 0, 8, 0, 0],
@@ -494,8 +548,43 @@ export function gifFixture(): Uint8Array {
 	);
 }
 
-/** A metadata-free WebP, for call sites that store image/webp. */
-export function tinyWebp(): Uint8Array {
-	const chunks = riffChunk('VP8 ', ascii('fake lossy bitstream'));
-	return Uint8Array.from([...ascii('RIFF'), ...u32le(4 + chunks.length), ...ascii('WEBP'), ...chunks]);
+/**
+ * The 258-byte magic trailer that closes a GIF XMP extension: 0x01, the
+ * descending bytes 0xFF…0x00, then the sub-block terminator. Written out here
+ * (rather than imported) so the test proves the scrubber keeps the real one.
+ */
+export function gifXmpMagicTrailer(): number[] {
+	const descending: number[] = [];
+	for (let value = 0xff; value >= 0; value--) descending.push(value);
+	return [0x01, ...descending, 0x00];
+}
+
+/**
+ * The same GIF with an `XMP DataXMP` application extension carrying GPS —
+ * where Photoshop and Lightroom put it. The payload is raw XML, not a sub-block
+ * chain; only the magic trailer makes a chain walk over it terminate.
+ */
+export function gifWithXmpFixture(): Uint8Array {
+	return bytes(
+		ascii('GIF89a'),
+		[8, 0, 8, 0, 0x80, 0, 0],
+		[0, 0, 0, 0xff, 0xff, 0xff],
+		[0x21, 0xff, 11],
+		ascii('XMP DataXMP'),
+		xmpWithGps(),
+		gifXmpMagicTrailer(),
+		[0x21, 0xfe, 11],
+		ascii('made in SW1'),
+		[0],
+		[0x2c, 0, 0, 0, 0, 8, 0, 8, 0, 0],
+		[0x02, 0x02, 0x44, 0x01, 0x00],
+		[0x3b]
+	);
+}
+
+/** Offsets in gifWithXmpFixture() of the XMP payload, magic trailer excluded. */
+export function gifXmpRange(): { start: number; end: number } {
+	// header 6 + screen descriptor 7 + colour table 6 + extension head 3 + id 11.
+	const start = 33;
+	return { start, end: start + xmpWithGps().length };
 }

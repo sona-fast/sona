@@ -12,7 +12,7 @@
 // pass through untouched — there is no raster metadata in them to strip, and
 // the scrubber would reject them for having no raster signature.
 
-import { isAllowedImageType } from './index';
+import { isAllowedImageType } from './allowlist';
 import { scrubImageMetadata, scrubImageMetadataStream } from './scrub-metadata';
 import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
 
