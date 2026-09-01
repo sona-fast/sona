@@ -4,7 +4,7 @@
 	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
-	import { dropFiles } from '$lib/drop-files';
+	import { dropFiles, matchesAccept } from '$lib/drop-files';
 	import * as m from '$lib/paraglide/messages';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
@@ -137,12 +137,16 @@
 		// Reset so picking the same file again after a failure fires change.
 		input.value = '';
 		if (!files.length) return;
-		addStickerFiles(files);
+		// `accept` is a filter the OS dialog can override ("All files"), so a
+		// picked JPEG can arrive here; partition it the same way a drop is.
+		const accepted: File[] = [];
+		const rejected: File[] = [];
+		for (const f of files) (matchesAccept(f, STICKER_ACCEPT) ? accepted : rejected).push(f);
+		addStickerFiles(accepted, rejected);
 	}
 
-	// Shared by the file input and the drop attachment. `rejected` only ever
-	// arrives from a drop — the input's accept attribute filters the picker, a
-	// drop skips it — and those files are reported without being uploaded.
+	// Shared by the file input and the drop attachment; both partition their
+	// files first, so `rejected` is reported without being uploaded.
 	async function addStickerFiles(files: File[], rejected: File[] = []) {
 		if (rejected.length) {
 			// Cap the list: a folder dropped whole would otherwise put dozens of
@@ -175,9 +179,10 @@
 						artistId: '',
 						emojis: '',
 						nsfw: false,
-						// From the MIME type, not the name: a dropped file may have no
-						// extension or an uppercase one, and STICKER_ACCEPT admits
-						// MIME types only, so `type` is always one of the two here.
+						// From the MIME type, not the name: a file may have no extension
+						// or an uppercase one. Both entry points partition against
+						// STICKER_ACCEPT, which lists MIME types only, so anything that
+						// reaches here declared one of the two.
 						format: file.type === 'image/png' ? 'png' : 'webp'
 					});
 				} else {
@@ -360,7 +365,7 @@
 		<span class="sr-only" role="status">{stickerStatus}</span>
 		<label
 			class="upload-zone multi"
-			class:disabled={uploading}
+			class:disabled={uploading || saving}
 			{@attach dropFiles({
 				accept: STICKER_ACCEPT,
 				onFiles: addStickerFiles,
@@ -371,7 +376,7 @@
 		>
 			<Plus size={20} />
 			<span>{uploading ? m.admin_upload_uploading() : m.admin_pack_dropzone()}</span>
-			<input type="file" accept={STICKER_ACCEPT} multiple onchange={uploadStickers} disabled={uploading} class="sr-file" />
+			<input type="file" accept={STICKER_ACCEPT} multiple onchange={uploadStickers} disabled={uploading || saving} class="sr-file" />
 		</label>
 
 		{#if stickerEntries.length > 0}

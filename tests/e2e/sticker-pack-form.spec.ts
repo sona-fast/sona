@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Route } from '@playwright/test';
 import { adminLogin } from './admin-login';
 import {
 	dropOn,
@@ -224,4 +224,110 @@ test('a failed upload keeps the successes, and an all-failed drop never announce
 	failCalls = [1];
 	await dropOn(page, ZONE, [{ name: 'c.png', type: 'image/png' }]);
 	await expect(status).toHaveText('No stickers added');
+});
+
+test('the sticker zone refuses files while a save is in flight', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	let uploads = 0;
+	await page.route('**/api/upload', async (route) => {
+		uploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: '/x.png' })
+		});
+	});
+
+	await page.goto('/admin/stickers/manual');
+	await waitForDropAttachment(page, ZONE);
+
+	// Hold the form POST so `saving` stays true. page.route intercepts inside the
+	// browser, so the shared read-only server never sees the request; it is
+	// aborted rather than fulfilled at the end, which is what lets enhance settle.
+	let holdPost = (_route: Route) => {};
+	const posted = new Promise<Route>((resolve) => (holdPost = resolve));
+	await page.route('**/admin/stickers/manual**', async (route) => {
+		if (route.request().method() !== 'POST') {
+			await route.fallback();
+			return;
+		}
+		holdPost(route);
+	});
+
+	await page.fill('input[name="name"]', 'Save gate');
+	// By role first, then by selector: the button's label swaps to "Saving..."
+	// while the submit is in flight, so an accessible-name locator stops
+	// matching exactly when the assertions need it.
+	await page.getByRole('button', { name: 'Save pack' }).click();
+	const save = page.locator('form.form button[type="submit"]');
+	await expect(save).toBeDisabled();
+	await expect(page.locator(ZONE)).toHaveClass(/disabled/);
+
+	// A drop landing now would upload and append a row the already-serialized
+	// submit never sees, orphaning the file in storage.
+	const before = uploads;
+	await dropOn(page, ZONE, [{ name: 'late.png', type: 'image/png' }]);
+	await dragOver(page, ZONE);
+	await expect(page.locator(ZONE)).not.toHaveClass(/drag-over/);
+	// Past the moment a drop that DID land would have posted (mutation-checked).
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(before);
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveCount(0);
+
+	// The zone comes back once the submit settles, so a failed save is still
+	// editable. Settled as an action failure rather than an abort: an aborted
+	// fetch makes enhance render the error page, which takes the form away and
+	// leaves nothing to assert on. The data is devalue-encoded, the shape
+	// deserialize() expects.
+	await (await posted).fulfill({
+		contentType: 'application/json',
+		body: JSON.stringify({
+			type: 'failure',
+			status: 400,
+			data: '[{"error":1},"Held by the test"]'
+		})
+	});
+	await expect(save).toBeEnabled();
+	await expect(page.locator(ZONE)).not.toHaveClass(/disabled/);
+});
+
+test('picking a sticker resets the input, and a picked wrong type is rejected', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	let uploads = 0;
+	await page.route('**/api/upload', async (route) => {
+		uploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: `/x${uploads}.png` })
+		});
+	});
+
+	await page.goto('/admin/stickers/manual');
+	await waitForDropAttachment(page, ZONE);
+	const input = page.locator(`${ZONE} input[type="file"]`);
+
+	await input.setInputFiles({
+		name: 'sticker.png',
+		mimeType: 'image/png',
+		buffer: Buffer.from([1, 2, 3, 4])
+	});
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue('/x1.png');
+	// Reset after the pick: left alone the input keeps a fakepath value, and
+	// picking the same file again after a failure would fire no change event.
+	await expect(input).toHaveValue('');
+
+	// The picker's accept attribute is a filter the OS dialog can override, so a
+	// JPEG can arrive from the input too and has to be rejected the way a dropped
+	// one is. setInputFiles bypasses accept, which is what makes this
+	// discriminate.
+	const before = uploads;
+	await input.setInputFiles({
+		name: 'photo.jpg',
+		mimeType: 'image/jpeg',
+		buffer: Buffer.from([1, 2, 3, 4])
+	});
+	await expect(page.getByText('Skipped photo.jpg. Add PNG or WebP images instead.')).toBeVisible();
+	expect(uploads).toBe(before);
+	await expect(page.locator('input[name="sticker[1][imageUrl]"]')).toHaveCount(0);
 });

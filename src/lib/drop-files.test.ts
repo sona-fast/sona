@@ -118,7 +118,7 @@ describe('dropFiles', () => {
 	});
 
 	it('leaves an event a nested target already handled alone', () => {
-		const { el, calls } = setup(() => true);
+		const { el } = setup(() => true);
 		const over = Object.assign(new Event('dragover', { cancelable: true }), {
 			dataTransfer: { files: [], dropEffect: 'copy' }
 		});
@@ -126,12 +126,15 @@ describe('dropFiles', () => {
 		el.dispatchEvent(over);
 		// A disabled instance would have set 'none'; the inner target's 'copy' stays.
 		expect(over.dataTransfer.dropEffect).toBe('copy');
+		// The drop half needs an ENABLED instance: a disabled one ignores the file
+		// regardless, so only this discriminates the defaultPrevented guard.
+		const inner = setup();
 		const drop = Object.assign(new Event('drop', { cancelable: true }), {
 			dataTransfer: { files: [{ name: 'a.png', type: 'image/png' }], dropEffect: '' }
 		});
 		drop.preventDefault();
-		el.dispatchEvent(drop);
-		expect(calls).toHaveLength(0);
+		inner.el.dispatchEvent(drop);
+		expect(inner.calls).toHaveLength(0);
 	});
 
 	it('removes its listeners on cleanup', () => {

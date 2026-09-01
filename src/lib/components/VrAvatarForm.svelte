@@ -635,10 +635,10 @@
 				<div class="model-actions">
 					<label
 						class="btn-sm"
-						{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped })}
+						{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped, disabled: () => saving })}
 					>
 						{m.admin_vr_upload_replace()}
-						<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
+						<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} disabled={saving} class="sr-file" aria-describedby="vr-model-hint" />
 					</label>
 					<button type="button" class="btn-sm" onclick={removeModel}>{m.admin_vr_upload_remove()}</button>
 				</div>
@@ -650,10 +650,14 @@
 			{/if}
 		{:else}
 			<!-- The whole zone is the label for the hidden file input. -->
-			<label class="upload-zone" {@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped })}>
+			<label
+				class="upload-zone"
+				class:disabled={saving}
+				{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped, disabled: () => saving })}
+			>
 				<UploadCloud size={22} />
 				<span>{m.admin_vr_dropzone({ max: formatBytes(MAX_VR_MODEL_BYTES) })}</span>
-				<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
+				<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} disabled={saving} class="sr-file" aria-describedby="vr-model-hint" />
 			</label>
 		{/if}
 		{#if uploadError}
@@ -819,11 +823,13 @@
 		{/if}
 		<label
 			class="upload-zone media-zone"
-			class:disabled={mediaUploading}
+			class:disabled={mediaUploading || saving}
 			{@attach dropFiles({
 				accept: MEDIA_ACCEPT,
 				onFiles: uploadMedia,
-				disabled: () => mediaUploading
+				// Also while saving: a drop after Save would upload and append a row
+				// the already-serialized submit never sees, orphaning the file.
+				disabled: () => mediaUploading || saving
 			})}
 		>
 			<ImagePlus size={20} />
@@ -833,7 +839,7 @@
 				accept={MEDIA_ACCEPT}
 				multiple
 				onchange={onMediaPicked}
-				disabled={mediaUploading}
+				disabled={mediaUploading || saving}
 				class="sr-file"
 			/>
 		</label>
