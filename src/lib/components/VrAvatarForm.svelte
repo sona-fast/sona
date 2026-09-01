@@ -8,6 +8,7 @@
 	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
+	import { dropFiles } from '$lib/drop-files';
 	import { probeDimensions } from '$lib/probe-dimensions';
 	import { MAX_BUFFER_BYTES } from '$lib/config';
 	import { MAX_VR_MODEL_BYTES, creditRoleLabel, formatBytes, modelFileError, modelFormatLabel, namePlaceholderCharacter, platformLabel } from '$lib/vr';
@@ -215,12 +216,25 @@
 	// /api/upload's buffered cap — the shared constant, not a hardcoded twin.
 	const MAX_MEDIA_BYTES = MAX_BUFFER_BYTES;
 
-	async function onMediaPicked(e: Event) {
+	function onMediaPicked(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
 		input.value = '';
 		if (!files.length) return;
-		mediaErrors = [];
+		uploadMedia(files);
+	}
+
+	// Shared by the file input and the drop attachment. `rejected` only ever
+	// arrives from a drop — the input's accept attribute filters the picker, a
+	// drop skips it — and those files are reported without being uploaded.
+	async function uploadMedia(files: File[], rejected: File[] = []) {
+		if (!files.length && !rejected.length) return;
+		mediaErrors = rejected.map((file) => ({
+			uid: mediaErrorUid++,
+			name: file.name,
+			reason: 'bad-type' as const
+		}));
+		if (!files.length) return;
 		mediaUploading = true;
 		mediaStatus = m.admin_upload_uploading();
 		try {
@@ -307,6 +321,10 @@
 	let modelSizeBytes = $state<number | null>(avatar?.modelSizeBytes ?? null);
 	let modelFilename = $state(avatar?.modelUrl ? (avatar.modelUrl.split('/').pop() ?? '') : '');
 
+	// Shared by the file inputs and the drop attachment, so a drop accepts
+	// exactly what the picker offers.
+	const MODEL_ACCEPT = '.vrm,.fbx';
+
 	let uploading = $state(false);
 	let uploadLoaded = $state(0);
 	let uploadTotal = $state(0);
@@ -331,6 +349,18 @@
 		const file = input.files?.[0];
 		input.value = '';
 		if (!file) return;
+		uploadModel(file);
+	}
+
+	// Drops route here too. A drop of several files takes the first one: the
+	// avatar has a single model.
+	function onModelDropped(files: File[], rejected: File[]) {
+		if (files.length) uploadModel(files[0]);
+		// Wrong extension: the same banner modelFileError would raise, no request.
+		else if (rejected.length) uploadError = 'bad-type';
+	}
+
+	function uploadModel(file: File) {
 		uploadError = null;
 		// Client-side mirror of the server guards ($lib/vr modelFileError), for
 		// instant feedback — the endpoint re-checks all of it.
@@ -580,9 +610,12 @@
 					<span class="model-meta">{modelFormatLabel(modelFormat)} · {formatBytes(modelSizeBytes)}</span>
 				</div>
 				<div class="model-actions">
-					<label class="btn-sm">
+					<label
+						class="btn-sm"
+						{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped })}
+					>
 						{m.admin_vr_upload_replace()}
-						<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
+						<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
 					</label>
 					<button type="button" class="btn-sm" onclick={removeModel}>{m.admin_vr_upload_remove()}</button>
 				</div>
@@ -594,10 +627,10 @@
 			{/if}
 		{:else}
 			<!-- The whole zone is the label for the hidden file input. -->
-			<label class="upload-zone">
+			<label class="upload-zone" {@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped })}>
 				<UploadCloud size={22} />
 				<span>{m.admin_vr_dropzone({ max: formatBytes(MAX_VR_MODEL_BYTES) })}</span>
-				<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
+				<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
 			</label>
 		{/if}
 		{#if uploadError}
@@ -759,7 +792,15 @@
 				{/each}
 			</div>
 		{/if}
-		<label class="upload-zone media-zone" class:disabled={mediaUploading}>
+		<label
+			class="upload-zone media-zone"
+			class:disabled={mediaUploading}
+			{@attach dropFiles({
+				accept: MEDIA_ACCEPT,
+				onFiles: uploadMedia,
+				disabled: () => mediaUploading
+			})}
+		>
 			<ImagePlus size={20} />
 			<span>{mediaUploading ? m.admin_upload_uploading() : m.admin_vr_media_dropzone({ max: formatBytes(MAX_MEDIA_BYTES) })}</span>
 			<input
@@ -1034,6 +1075,9 @@
 		transition: border-color 0.15s; min-height: 88px;
 	}
 	.upload-zone:hover { border-color: var(--primary); }
+	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
+	   as the upload page's dropzone. The class is set by the drop attachment. */
+	.upload-zone:global(.drag-over) { border-color: var(--primary); background: rgba(255, 132, 0, 0.05); }
 	.upload-zone.disabled { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
 	.sr-file { position: absolute; opacity: 0; width: 0; height: 0; }
 	/* The hidden file inputs stay keyboard-focusable — surface focus on their
@@ -1078,6 +1122,7 @@
 		background: var(--secondary); color: var(--foreground); cursor: pointer; flex-direction: row;
 	}
 	.btn-sm:hover { border-color: var(--primary); }
+	.btn-sm:global(.drag-over) { border-color: var(--primary); background: rgba(255, 132, 0, 0.05); }
 
 	/* Showcase media rows (same row chrome as the credit list). */
 	.media-list { display: flex; flex-direction: column; gap: 10px; }

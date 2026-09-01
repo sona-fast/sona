@@ -4,6 +4,7 @@
 	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
+	import { dropFiles } from '$lib/drop-files';
 	import * as m from '$lib/paraglide/messages';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
@@ -103,6 +104,10 @@
 		}))
 	);
 
+	// Shared by the file input and the drop attachment, so a drop accepts exactly
+	// what the picker offers.
+	const STICKER_ACCEPT = 'image/png,image/webp';
+
 	let uploading = $state(false);
 	let published = $state(pack?.published ?? false);
 	let saving = $state(false);
@@ -121,9 +126,18 @@
 		return url;
 	}
 
-	async function uploadStickers(e: Event) {
+	function uploadStickers(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
+		if (!files.length) return;
+		addStickerFiles(files);
+	}
+
+	// Shared by the file input and the drop attachment. `rejected` only ever
+	// arrives from a drop — the input's accept attribute filters the picker, a
+	// drop skips it — and those files are reported without being uploaded.
+	async function addStickerFiles(files: File[], rejected: File[] = []) {
+		if (rejected.length) toast.error(m.admin_pack_upload_bad_type());
 		if (!files.length) return;
 		uploading = true;
 		let ok = 0;
@@ -314,10 +328,17 @@
 			<p class="hint">{m.admin_pack_edit_hint()}</p>
 		{/if}
 
-		<label class="upload-zone multi">
+		<label
+			class="upload-zone multi"
+			{@attach dropFiles({
+				accept: STICKER_ACCEPT,
+				onFiles: addStickerFiles,
+				disabled: () => uploading
+			})}
+		>
 			<Plus size={20} />
 			<span>{uploading ? m.admin_upload_uploading() : m.admin_pack_dropzone()}</span>
-			<input type="file" accept="image/png,image/webp" multiple onchange={uploadStickers} disabled={uploading} style="display:none" />
+			<input type="file" accept={STICKER_ACCEPT} multiple onchange={uploadStickers} disabled={uploading} style="display:none" />
 		</label>
 
 		{#if stickerEntries.length > 0}
@@ -500,6 +521,10 @@
 	}
 	.upload-zone.multi { width: 100%; }
 	.upload-zone:hover { border-color: var(--primary); }
+	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
+	   as the upload page's dropzone. :global because the drop attachment sets the
+	   class imperatively, so Svelte can't see it in the markup. */
+	.upload-zone:global(.drag-over) { border-color: var(--primary); background: rgba(255, 132, 0, 0.05); }
 	.remove-btn {
 		display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
 		background: none; color: var(--muted-foreground); border: 1px solid var(--border);

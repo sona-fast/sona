@@ -645,6 +645,7 @@
 	"admin_pack_manual_intro": "ステッカー画像（PNGまたはWebP）をアップロードし、セットの詳細を入力してください。各ステッカーには個別のアーティストと絵文字を設定できます。ファイルは保存前にストレージへアップロードされます。",
 	"admin_pack_edit_heading": "セットを編集: {name}",
 	"admin_pack_upload_partial": "{total}件中{ok}件をアップロードしました（{failed}件は失敗）",
+	"admin_pack_upload_bad_type": "パックに追加できるのはPNGとWebPのファイルのみです。",
 	"admin_pack_details": "セットの詳細",
 	"admin_pack_name": "セット名",
 	"admin_pack_name_placeholder": "マイステッカーセット",

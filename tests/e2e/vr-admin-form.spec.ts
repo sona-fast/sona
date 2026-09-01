@@ -161,3 +161,55 @@ test('typing a name auto-suggests the slug until the slug is touched', async ({ 
 	await page.getByRole('button', { name: 'Add credit' }).click();
 	await expect(page.locator('select[name="credit[0][artistId]"]')).toBeVisible();
 });
+
+test('dropping a file on the showcase media zone uploads it, and a wrong type is rejected without a request', async ({
+	page
+}) => {
+	await adminLogin(page, PASSWORD);
+
+	// Stub the upload endpoint: this spec shares a read-only server with the rest
+	// of the suite, so a real POST would leave an orphaned stored file behind.
+	let uploads = 0;
+	await page.route('**/api/upload', async (route) => {
+		uploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: '/x.png' })
+		});
+	});
+
+	await page.goto('/admin/vr/new');
+	await expect(page.getByText(/Add screenshots or short \.webm clips/)).toBeVisible();
+
+	// The browser can't be driven to drag a real file in, so build a DataTransfer
+	// in the page and dispatch the drop the attachment listens for.
+	const drop = (name: string, type: string) =>
+		page.evaluate(
+			({ name, type }) => {
+				const dt = new DataTransfer();
+				dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], name, { type }));
+				document
+					.querySelector('.media-zone')!
+					.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
+			},
+			{ name, type }
+		);
+
+	// Hydration-retry shape (see upload.spec.ts): a drop dispatched before the
+	// attachment has run silently does nothing. The counter resets per attempt.
+	await expect(async () => {
+		uploads = 0;
+		await drop('shot.png', 'image/png');
+		await expect(page.locator('input[name="media[0][url]"]')).toHaveValue('/x.png', {
+			timeout: 2000
+		});
+	}).toPass({ timeout: 20_000 });
+	expect(uploads).toBe(1);
+
+	// A dropped file skips the input's accept filter, so the zone has to reject
+	// the wrong type itself: the bad-type banner, and no POST.
+	const before = uploads;
+	await drop('notes.txt', 'text/plain');
+	await expect(page.getByText(/That file type isn't supported/)).toBeVisible();
+	expect(uploads).toBe(before);
+});
