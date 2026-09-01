@@ -53,8 +53,9 @@ export function dropFiles(opts: {
 			if (opts.disabled?.()) return;
 			const files = [...(e.dataTransfer?.files ?? [])];
 			if (!files.length) return;
-			const accepted = files.filter((f) => matchesAccept(f, opts.accept));
-			const rejected = files.filter((f) => !matchesAccept(f, opts.accept));
+			const accepted: File[] = [];
+			const rejected: File[] = [];
+			for (const f of files) (matchesAccept(f, opts.accept) ? accepted : rejected).push(f);
 			opts.onFiles(accepted, rejected);
 		};
 		node.addEventListener('dragenter', over);

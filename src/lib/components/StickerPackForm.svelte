@@ -105,8 +105,10 @@
 	);
 
 	// Shared by the file input and the drop attachment, so a drop accepts exactly
-	// what the picker offers.
-	const STICKER_ACCEPT = 'image/png,image/webp';
+	// what the picker offers. Extensions as well as MIME types: some platforms
+	// hand a dropped file over with an empty `type`, and the accept attribute
+	// takes both forms.
+	const STICKER_ACCEPT = 'image/png,image/webp,.png,.webp';
 
 	let uploading = $state(false);
 	let published = $state(pack?.published ?? false);
@@ -137,7 +139,8 @@
 	// arrives from a drop — the input's accept attribute filters the picker, a
 	// drop skips it — and those files are reported without being uploaded.
 	async function addStickerFiles(files: File[], rejected: File[] = []) {
-		if (rejected.length) toast.error(m.admin_pack_upload_bad_type());
+		if (rejected.length)
+			toast.error(m.admin_pack_upload_bad_type({ names: rejected.map((f) => f.name).join(', ') }));
 		if (!files.length) return;
 		uploading = true;
 		let ok = 0;
@@ -338,7 +341,7 @@
 		>
 			<Plus size={20} />
 			<span>{uploading ? m.admin_upload_uploading() : m.admin_pack_dropzone()}</span>
-			<input type="file" accept={STICKER_ACCEPT} multiple onchange={uploadStickers} disabled={uploading} style="display:none" />
+			<input type="file" accept={STICKER_ACCEPT} multiple onchange={uploadStickers} disabled={uploading} class="sr-file" />
 		</label>
 
 		{#if stickerEntries.length > 0}
@@ -521,10 +524,14 @@
 	}
 	.upload-zone.multi { width: 100%; }
 	.upload-zone:hover { border-color: var(--primary); }
+	.sr-file { position: absolute; opacity: 0; width: 0; height: 0; }
+	/* The hidden file input stays keyboard-focusable — surface its focus on the
+	   zone, which is the only thing visible. */
+	.upload-zone:has(.sr-file:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
 	   as the upload page's dropzone. :global because the drop attachment sets the
 	   class imperatively, so Svelte can't see it in the markup. */
-	.upload-zone:global(.drag-over) { border-color: var(--primary); background: rgba(255, 132, 0, 0.05); }
+	.upload-zone:global(.drag-over) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, transparent); }
 	.remove-btn {
 		display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
 		background: none; color: var(--muted-foreground); border: 1px solid var(--border);

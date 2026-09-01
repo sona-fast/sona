@@ -22,7 +22,7 @@ test('the create form renders its fields, dropzones and credit control', async (
 	await expect(page.locator('select[name="characterId"]')).toBeVisible();
 
 	// Model dropzone.
-	await expect(page.getByText(/Choose a \.vrm or \.fbx file to upload/)).toBeVisible();
+	await expect(page.getByText(/Drag & drop a \.vrm or \.fbx file here/)).toBeVisible();
 	// Format expectations under the dropzone (VR feedback round): which VRM
 	// versions the viewer takes, and that FBX is download-only.
 	await expect(page.getByText(/VRM 0\.x and 1\.0 both work in the 3D viewer/)).toBeVisible();
@@ -36,7 +36,7 @@ test('the create form renders its fields, dropzones and credit control', async (
 
 	// Showcase media manager (SP1) with its own dropzone.
 	await expect(page.getByRole('heading', { name: 'Showcase media' })).toBeVisible();
-	await expect(page.getByText(/Add screenshots or short \.webm clips/)).toBeVisible();
+	await expect(page.getByText(/Drag & drop screenshots or short \.webm clips here/)).toBeVisible();
 
 	// Credits editor entry point.
 	await expect(page.getByRole('button', { name: 'Add credit' })).toBeVisible();
@@ -179,7 +179,7 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 	});
 
 	await page.goto('/admin/vr/new');
-	await expect(page.getByText(/Add screenshots or short \.webm clips/)).toBeVisible();
+	await expect(page.getByText(/Drag & drop screenshots or short \.webm clips here/)).toBeVisible();
 
 	// The browser can't be driven to drag a real file in, so build a DataTransfer
 	// in the page and dispatch the drop the attachment listens for.
@@ -203,8 +203,8 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 		await expect(page.locator('input[name="media[0][url]"]')).toHaveValue('/x.png', {
 			timeout: 2000
 		});
+		expect(uploads).toBe(1);
 	}).toPass({ timeout: 20_000 });
-	expect(uploads).toBe(1);
 
 	// A dropped file skips the input's accept filter, so the zone has to reject
 	// the wrong type itself: the bad-type banner, and no POST.
@@ -212,4 +212,69 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 	await drop('notes.txt', 'text/plain');
 	await expect(page.getByText(/That file type isn't supported/)).toBeVisible();
 	expect(uploads).toBe(before);
+});
+
+test('dropping a model file on the model zone uploads one, and a wrong type is rejected without a request', async ({
+	page
+}) => {
+	await adminLogin(page, PASSWORD);
+
+	// Stubbed for the same reason as the media endpoint above: this spec shares a
+	// read-only server, so a real POST would leave a stored file behind.
+	let uploads = 0;
+	await page.route('**/api/admin/vr-model*', async (route) => {
+		uploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: '/m.vrm', size: 4, format: 'vrm' })
+		});
+	});
+
+	await page.goto('/admin/vr/new');
+	// The model zone, not the showcase-media one — both carry .upload-zone.
+	const zone = page.locator('label.upload-zone:not(.media-zone)');
+	await expect(zone).toBeVisible();
+
+	// Files dropped from a file manager often arrive with an empty type, so the
+	// extension is all the accept match has to work from.
+	const drop = (names: string[]) =>
+		page.evaluate((names) => {
+			const dt = new DataTransfer();
+			for (const name of names)
+				dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], name, { type: '' }));
+			document
+				.querySelector('label.upload-zone:not(.media-zone)')!
+				.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
+		}, names);
+
+	// Wrong type first: a successful drop swaps the zone for the model card, so
+	// this branch has to run while the zone is still on screen.
+	await expect(async () => {
+		uploads = 0;
+		await drop(['notes.txt']);
+		await expect(page.getByText(/That file doesn't look like a VRM or FBX model/)).toBeVisible({
+			timeout: 2000
+		});
+		expect(uploads).toBe(0);
+	}).toPass({ timeout: 20_000 });
+
+	// The highlight class is set imperatively and matched by a :global() rule —
+	// assert the painted border changed, not just that the class landed.
+	const resting = await zone.evaluate((el) => getComputedStyle(el).borderColor);
+	await page.evaluate(() => {
+		document
+			.querySelector('label.upload-zone:not(.media-zone)')!
+			.dispatchEvent(new DragEvent('dragover', { dataTransfer: new DataTransfer(), bubbles: true }));
+	});
+	await expect(zone).toHaveClass(/drag-over/);
+	await expect
+		.poll(() => zone.evaluate((el) => getComputedStyle(el).borderColor))
+		.not.toBe(resting);
+
+	// Two files, one model slot: only the first is uploaded, and only one
+	// request goes out.
+	const before = uploads;
+	await drop(['a.vrm', 'b.vrm']);
+	await expect(page.locator('.model-name')).toHaveText('a.vrm');
+	expect(uploads).toBe(before + 1);
 });

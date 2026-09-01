@@ -212,7 +212,10 @@
 		mediaEntries = mediaEntries.filter((_, idx) => idx !== i);
 	}
 
-	const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/avif,video/webm';
+	// Extensions as well as MIME types: some platforms hand a dropped file over
+	// with an empty `type`, and the picker's accept attribute takes both forms.
+	const MEDIA_ACCEPT =
+		'image/jpeg,image/png,image/gif,image/webp,image/avif,video/webm,.jpg,.jpeg,.png,.gif,.webp,.avif,.webm';
 	// /api/upload's buffered cap — the shared constant, not a hardcoded twin.
 	const MAX_MEDIA_BYTES = MAX_BUFFER_BYTES;
 
@@ -329,6 +332,9 @@
 	let uploadLoaded = $state(0);
 	let uploadTotal = $state(0);
 	let uploadError = $state<'too-large' | 'bad-type' | 'failed' | null>(null);
+	// Bumped on every error so {#key} remounts the role="alert" banner: setting
+	// uploadError to the value it already holds would otherwise announce nothing.
+	let uploadErrorUid = $state(0);
 	let errorFileSize = $state(0);
 
 	// Live-region text for the model upload, throttled to 10% steps so a screen
@@ -357,7 +363,10 @@
 	function onModelDropped(files: File[], rejected: File[]) {
 		if (files.length) uploadModel(files[0]);
 		// Wrong extension: the same banner modelFileError would raise, no request.
-		else if (rejected.length) uploadError = 'bad-type';
+		else if (rejected.length) {
+			uploadError = 'bad-type';
+			uploadErrorUid++;
+		}
 	}
 
 	function uploadModel(file: File) {
@@ -368,6 +377,7 @@
 		if (fileError) {
 			if (fileError === 'too-large') errorFileSize = file.size;
 			uploadError = fileError;
+			uploadErrorUid++;
 			return;
 		}
 		uploading = true;
@@ -402,10 +412,12 @@
 			} else {
 				uploadError = 'failed';
 			}
+			uploadErrorUid++;
 		};
 		xhr.onerror = () => {
 			uploading = false;
 			uploadError = 'failed';
+			uploadErrorUid++;
 		};
 		xhr.send(file);
 	}
@@ -634,15 +646,17 @@
 			</label>
 		{/if}
 		{#if uploadError}
-			<div class="banner err" role="alert">
-				{#if uploadError === 'too-large'}
-					{m.admin_vr_error_too_large({ size: formatBytes(errorFileSize), max: formatBytes(MAX_VR_MODEL_BYTES) })}
-				{:else if uploadError === 'bad-type'}
-					{m.admin_vr_error_bad_type()}
-				{:else}
-					{m.admin_vr_error_upload_failed()}
-				{/if}
-			</div>
+			{#key uploadErrorUid}
+				<div class="banner err" role="alert">
+					{#if uploadError === 'too-large'}
+						{m.admin_vr_error_too_large({ size: formatBytes(errorFileSize), max: formatBytes(MAX_VR_MODEL_BYTES) })}
+					{:else if uploadError === 'bad-type'}
+						{m.admin_vr_error_bad_type()}
+					{:else}
+						{m.admin_vr_error_upload_failed()}
+					{/if}
+				</div>
+			{/key}
 		{/if}
 		<!-- The hint keeps its id — the file inputs' aria-describedby points at
 		     it. The guide link opens a new tab so a half-filled form isn't lost. -->
@@ -1077,8 +1091,11 @@
 	.upload-zone:hover { border-color: var(--primary); }
 	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
 	   as the upload page's dropzone. The class is set by the drop attachment. */
-	.upload-zone:global(.drag-over) { border-color: var(--primary); background: rgba(255, 132, 0, 0.05); }
-	.upload-zone.disabled { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
+	.upload-zone:global(.drag-over) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, transparent); }
+	/* No pointer-events: none — the drop attachment has to receive dragover/drop
+	   to preventDefault, or a drop while uploading navigates away from the form.
+	   The nested input's own disabled attribute keeps clicks inert. */
+	.upload-zone.disabled { opacity: 0.55; cursor: not-allowed; }
 	.sr-file { position: absolute; opacity: 0; width: 0; height: 0; }
 	/* The hidden file inputs stay keyboard-focusable — surface focus on their
 	   visible hosts (same :has pattern as .platform-chip). */
@@ -1122,7 +1139,7 @@
 		background: var(--secondary); color: var(--foreground); cursor: pointer; flex-direction: row;
 	}
 	.btn-sm:hover { border-color: var(--primary); }
-	.btn-sm:global(.drag-over) { border-color: var(--primary); background: rgba(255, 132, 0, 0.05); }
+	.btn-sm:global(.drag-over) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
 
 	/* Showcase media rows (same row chrome as the credit list). */
 	.media-list { display: flex; flex-direction: column; gap: 10px; }
