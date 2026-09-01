@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { adminLogin } from './admin-login';
+import { dropOn, dragOver, expectDragOverHighlight } from './drop-files';
 
 // VR avatar admin form smoke (SONA-124, T1): VrAvatarForm and the /admin/vr/new
 // page never executed in any test before this. (The SONA-124 early-access gate
@@ -169,9 +170,13 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 
 	// Stub the upload endpoint: this spec shares a read-only server with the rest
 	// of the suite, so a real POST would leave an orphaned stored file behind.
+	// `hold`, when set, keeps a request in flight so the busy zone can be probed.
 	let uploads = 0;
+	let hold: Promise<void> | null = null;
+	let release = () => {};
 	await page.route('**/api/upload', async (route) => {
 		uploads++;
+		if (hold) await hold;
 		await route.fulfill({
 			contentType: 'application/json',
 			body: JSON.stringify({ url: '/x.png' })
@@ -181,25 +186,11 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 	await page.goto('/admin/vr/new');
 	await expect(page.getByText(/Drag & drop screenshots or short \.webm clips here/)).toBeVisible();
 
-	// The browser can't be driven to drag a real file in, so build a DataTransfer
-	// in the page and dispatch the drop the attachment listens for.
-	const drop = (name: string, type: string) =>
-		page.evaluate(
-			({ name, type }) => {
-				const dt = new DataTransfer();
-				dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], name, { type }));
-				document
-					.querySelector('.media-zone')!
-					.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
-			},
-			{ name, type }
-		);
-
 	// Hydration-retry shape (see upload.spec.ts): a drop dispatched before the
 	// attachment has run silently does nothing. The counter resets per attempt.
 	await expect(async () => {
 		uploads = 0;
-		await drop('shot.png', 'image/png');
+		await dropOn(page, '.media-zone', [{ name: 'shot.png', type: 'image/png' }]);
 		await expect(page.locator('input[name="media[0][url]"]')).toHaveValue('/x.png', {
 			timeout: 2000
 		});
@@ -209,9 +200,23 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 	// A dropped file skips the input's accept filter, so the zone has to reject
 	// the wrong type itself: the bad-type banner, and no POST.
 	const before = uploads;
-	await drop('notes.txt', 'text/plain');
+	await dropOn(page, '.media-zone', [{ name: 'notes.txt', type: 'text/plain' }]);
 	await expect(page.getByText(/That file type isn't supported/)).toBeVisible();
 	expect(uploads).toBe(before);
+
+	// While an upload runs the zone dims, but it must keep receiving pointer and
+	// drag events: `pointer-events: none` on .disabled would let the next drop
+	// reach the document and navigate the tab to the file. It still refuses the
+	// drop — no highlight — it just has to be the one refusing.
+	hold = new Promise<void>((resolve) => (release = resolve));
+	await dropOn(page, '.media-zone', [{ name: 'slow.png', type: 'image/png' }]);
+	const busy = page.locator('.media-zone.disabled');
+	await expect(busy).toBeVisible();
+	expect(await busy.evaluate((el) => getComputedStyle(el).pointerEvents)).not.toBe('none');
+	await dragOver(page, '.media-zone');
+	await expect(busy).not.toHaveClass(/drag-over/);
+	release();
+	await expect(page.locator('.media-zone.disabled')).toHaveCount(0);
 });
 
 test('dropping a model file on the model zone uploads one, and a wrong type is rejected without a request', async ({
@@ -221,9 +226,14 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 
 	// Stubbed for the same reason as the media endpoint above: this spec shares a
 	// read-only server, so a real POST would leave a stored file behind.
+	// `hold`, when set, keeps a request in flight so the progress bar can be
+	// probed while it is on screen.
 	let uploads = 0;
+	let hold: Promise<void> | null = null;
+	let release = () => {};
 	await page.route('**/api/admin/vr-model*', async (route) => {
 		uploads++;
+		if (hold) await hold;
 		await route.fulfill({
 			contentType: 'application/json',
 			body: JSON.stringify({ url: '/m.vrm', size: 4, format: 'vrm' })
@@ -232,20 +242,20 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 
 	await page.goto('/admin/vr/new');
 	// The model zone, not the showcase-media one — both carry .upload-zone.
-	const zone = page.locator('label.upload-zone:not(.media-zone)');
+	const MODEL_ZONE = 'label.upload-zone:not(.media-zone)';
+	const zone = page.locator(MODEL_ZONE);
 	await expect(zone).toBeVisible();
 
 	// Files dropped from a file manager often arrive with an empty type, so the
-	// extension is all the accept match has to work from.
+	// extension is all the accept match has to work from. That is safe here and
+	// not on the media zone: this endpoint keys off the filename, /api/upload
+	// off the declared MIME type.
 	const drop = (names: string[]) =>
-		page.evaluate((names) => {
-			const dt = new DataTransfer();
-			for (const name of names)
-				dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], name, { type: '' }));
-			document
-				.querySelector('label.upload-zone:not(.media-zone)')!
-				.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
-		}, names);
+		dropOn(
+			page,
+			MODEL_ZONE,
+			names.map((name) => ({ name, type: '' }))
+		);
 
 	// Wrong type first: a successful drop swaps the zone for the model card, so
 	// this branch has to run while the zone is still on screen.
@@ -258,18 +268,16 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 		expect(uploads).toBe(0);
 	}).toPass({ timeout: 20_000 });
 
-	// The highlight class is set imperatively and matched by a :global() rule —
-	// assert the painted border changed, not just that the class landed.
-	const resting = await zone.evaluate((el) => getComputedStyle(el).borderColor);
-	await page.evaluate(() => {
-		document
-			.querySelector('label.upload-zone:not(.media-zone)')!
-			.dispatchEvent(new DragEvent('dragover', { dataTransfer: new DataTransfer(), bubbles: true }));
-	});
-	await expect(zone).toHaveClass(/drag-over/);
-	await expect
-		.poll(() => zone.evaluate((el) => getComputedStyle(el).borderColor))
-		.not.toBe(resting);
+	// The same error twice: the banner is remounted per error, because a screen
+	// reader announces role="alert" on insertion only — leaving the first node in
+	// place would make the second drop silent. Tag the node, then prove the tag
+	// (and so the node) is gone.
+	await page.locator('.banner.err').evaluate((el) => el.setAttribute('data-first-error', ''));
+	await drop(['notes.txt']);
+	await expect(page.locator('.banner.err[data-first-error]')).toHaveCount(0);
+	await expect(page.getByText(/That file doesn't look like a VRM or FBX model/)).toBeVisible();
+
+	await expectDragOverHighlight(page, MODEL_ZONE);
 
 	// Two files, one model slot: only the first is uploaded, and only one
 	// request goes out.
@@ -277,4 +285,20 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 	await drop(['a.vrm', 'b.vrm']);
 	await expect(page.locator('.model-name')).toHaveText('a.vrm');
 	expect(uploads).toBe(before + 1);
+
+	// While an upload runs the progress bar takes the zone's place. It has no
+	// picker of its own, but it still has to swallow a drop: nothing cancels the
+	// event otherwise and the browser navigates the tab to the dropped file,
+	// losing the form. dropOn reports whether preventDefault was called, which is
+	// the cancellation itself — a dispatched DragEvent never navigates on its own.
+	hold = new Promise<void>((resolve) => (release = resolve));
+	const url = page.url();
+	const during = uploads;
+	await dropOn(page, 'label.btn-sm', [{ name: 'c.vrm', type: '' }]);
+	await expect(page.locator('.upload-progress')).toBeVisible();
+	expect(await dropOn(page, '.upload-progress', [{ name: 'd.vrm', type: '' }])).toBe(true);
+	expect(uploads).toBe(during + 1);
+	expect(page.url()).toBe(url);
+	release();
+	await expect(page.locator('.model-name')).toHaveText('c.vrm');
 });

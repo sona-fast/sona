@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { adminLogin } from './admin-login';
+import { dropOn, expectDragOverHighlight } from './drop-files';
 
 // Sticker-pack form drop zone (SONA-216). Like vr-admin-form.spec.ts this runs
 // on the SHARED read-only DB/server under fullyParallel: it drops files onto the
@@ -8,6 +9,8 @@ import { adminLogin } from './admin-login';
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
+
+const ZONE = '.upload-zone.multi';
 
 test('dropping a sticker adds a row, and a wrong type is rejected without a request', async ({
 	page
@@ -24,51 +27,50 @@ test('dropping a sticker adds a row, and a wrong type is rejected without a requ
 	});
 
 	await page.goto('/admin/stickers/manual');
-	const zone = page.locator('.upload-zone.multi');
+	const zone = page.locator(ZONE);
 	await expect(zone).toBeVisible();
-
-	const drop = (name: string, type: string) =>
-		page.evaluate(
-			({ name, type }) => {
-				const dt = new DataTransfer();
-				dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], name, { type }));
-				document
-					.querySelector('.upload-zone.multi')!
-					.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true }));
-			},
-			{ name, type }
-		);
 
 	// Hydration-retry shape (see vr-admin-form.spec.ts): a drop dispatched before
 	// the attachment has run silently does nothing. The counter resets per try.
 	await expect(async () => {
 		uploads = 0;
-		// Empty type on purpose: a file manager often hands one over that way, so
-		// the accept string has to carry the extension as well as the MIME type.
-		await drop('sticker.png', '');
+		await dropOn(page, ZONE, [{ name: 'sticker.png', type: 'image/png' }]);
 		await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue('/x.png', {
 			timeout: 2000
 		});
 		expect(uploads).toBe(1);
 	}).toPass({ timeout: 20_000 });
 
-	// The highlight class is set imperatively and matched by a :global() rule —
-	// assert the painted border changed, not just that the class landed.
-	const resting = await zone.evaluate((el) => getComputedStyle(el).borderColor);
-	await page.evaluate(() => {
-		document
-			.querySelector('.upload-zone.multi')!
-			.dispatchEvent(new DragEvent('dragover', { dataTransfer: new DataTransfer(), bubbles: true }));
-	});
-	await expect(zone).toHaveClass(/drag-over/);
-	await expect
-		.poll(() => zone.evaluate((el) => getComputedStyle(el).borderColor))
-		.not.toBe(resting);
+	await expectDragOverHighlight(page, ZONE);
 
 	// A dropped file skips the input's accept filter, so the zone rejects the
 	// wrong type itself: a toast naming the file, and no POST.
 	const before = uploads;
-	await drop('notes.txt', 'text/plain');
-	await expect(page.getByText(/Skipped notes\.txt/)).toBeVisible();
+	await dropOn(page, ZONE, [{ name: 'notes.txt', type: 'text/plain' }]);
+	await expect(page.getByText('Skipped notes.txt. Add PNG or WebP images instead.')).toBeVisible();
 	expect(uploads).toBe(before);
+});
+
+test('the sticker upload zone is reachable by keyboard and shows a focus ring', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/stickers/manual');
+	await expect(page.locator(ZONE)).toBeVisible();
+
+	// The file input is visually hidden, so nothing but the zone's own ring tells
+	// a keyboard user where focus is. Tab there for real: :focus-visible does not
+	// match a programmatic .focus(), which would make the ring assertion vacuous.
+	const input = `${ZONE} input[type="file"]`;
+	await page.locator('input[name="name"]').focus();
+	let reached = false;
+	for (let i = 0; i < 30 && !reached; i++) {
+		await page.keyboard.press('Tab');
+		reached = await page.evaluate(
+			(sel) => document.activeElement === document.querySelector(sel),
+			input
+		);
+	}
+	expect(reached).toBe(true);
+	expect(await page.locator(ZONE).evaluate((el) => getComputedStyle(el).outlineWidth)).not.toBe(
+		'0px'
+	);
 });

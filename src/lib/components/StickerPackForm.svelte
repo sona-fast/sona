@@ -105,12 +105,15 @@
 	);
 
 	// Shared by the file input and the drop attachment, so a drop accepts exactly
-	// what the picker offers. Extensions as well as MIME types: some platforms
-	// hand a dropped file over with an empty `type`, and the accept attribute
-	// takes both forms.
-	const STICKER_ACCEPT = 'image/png,image/webp,.png,.webp';
+	// what the picker offers. MIME types only: /api/upload validates the declared
+	// type and reads an empty one as application/octet-stream, so accepting a
+	// bare .png here would upload the whole file just to collect a 415.
+	const STICKER_ACCEPT = 'image/png,image/webp';
 
 	let uploading = $state(false);
+	// Upload start/done announcements for the stickers section's live region:
+	// the zone label and the new rows show both, but only visually.
+	let stickerStatus = $state('');
 	let published = $state(pack?.published ?? false);
 	let saving = $state(false);
 
@@ -139,10 +142,17 @@
 	// arrives from a drop — the input's accept attribute filters the picker, a
 	// drop skips it — and those files are reported without being uploaded.
 	async function addStickerFiles(files: File[], rejected: File[] = []) {
-		if (rejected.length)
-			toast.error(m.admin_pack_upload_bad_type({ names: rejected.map((f) => f.name).join(', ') }));
+		if (rejected.length) {
+			// Cap the list: a folder dropped whole would otherwise put dozens of
+			// names in one toast.
+			const shown = rejected.slice(0, 3).map((f) => f.name).join(', ');
+			toast.error(
+				m.admin_pack_upload_bad_type({ names: rejected.length > 3 ? `${shown}…` : shown })
+			);
+		}
 		if (!files.length) return;
 		uploading = true;
+		stickerStatus = m.admin_upload_uploading();
 		let ok = 0;
 		let failed = 0;
 		try {
@@ -173,6 +183,10 @@
 		}
 		// Keep the successful uploads; surface the failures without discarding them.
 		if (failed > 0) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
+		stickerStatus =
+			failed > 0
+				? m.admin_pack_upload_partial({ ok, total: files.length, failed })
+				: m.admin_pack_upload_done({ count: ok });
 	}
 
 	function removeSticker(i: number) {
@@ -331,6 +345,10 @@
 			<p class="hint">{m.admin_pack_edit_hint()}</p>
 		{/if}
 
+		<!-- Always-mounted live region (a region inserted together with its first
+		     content is often not announced): the zone label and the new rows
+		     report the upload visually only. -->
+		<span class="sr-only" role="status">{stickerStatus}</span>
 		<label
 			class="upload-zone multi"
 			{@attach dropFiles({
@@ -519,8 +537,8 @@
 	.upload-zone {
 		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
 		padding: 24px; border: 2px dashed var(--border); border-radius: var(--radius-s);
-		color: var(--muted-foreground); cursor: pointer; font-size: 13px; transition: border-color 0.15s;
-		min-height: 80px;
+		color: var(--muted-foreground); cursor: pointer; font-size: 13px;
+		transition: border-color 0.15s, background 0.15s; min-height: 80px;
 	}
 	.upload-zone.multi { width: 100%; }
 	.upload-zone:hover { border-color: var(--primary); }

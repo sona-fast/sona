@@ -212,10 +212,10 @@
 		mediaEntries = mediaEntries.filter((_, idx) => idx !== i);
 	}
 
-	// Extensions as well as MIME types: some platforms hand a dropped file over
-	// with an empty `type`, and the picker's accept attribute takes both forms.
-	const MEDIA_ACCEPT =
-		'image/jpeg,image/png,image/gif,image/webp,image/avif,video/webm,.jpg,.jpeg,.png,.gif,.webp,.avif,.webm';
+	// MIME types only: /api/upload validates the declared type and reads an empty
+	// one as application/octet-stream, so accepting a bare .png here would upload
+	// the whole file just to collect a 415.
+	const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/avif,video/webm';
 	// /api/upload's buffered cap — the shared constant, not a hardcoded twin.
 	const MAX_MEDIA_BYTES = MAX_BUFFER_BYTES;
 
@@ -231,7 +231,6 @@
 	// arrives from a drop — the input's accept attribute filters the picker, a
 	// drop skips it — and those files are reported without being uploaded.
 	async function uploadMedia(files: File[], rejected: File[] = []) {
-		if (!files.length && !rejected.length) return;
 		mediaErrors = rejected.map((file) => ({
 			uid: mediaErrorUid++,
 			name: file.name,
@@ -335,6 +334,10 @@
 	// Bumped on every error so {#key} remounts the role="alert" banner: setting
 	// uploadError to the value it already holds would otherwise announce nothing.
 	let uploadErrorUid = $state(0);
+	function setUploadError(kind: 'too-large' | 'bad-type' | 'failed') {
+		uploadError = kind;
+		uploadErrorUid++;
+	}
 	let errorFileSize = $state(0);
 
 	// Live-region text for the model upload, throttled to 10% steps so a screen
@@ -363,10 +366,7 @@
 	function onModelDropped(files: File[], rejected: File[]) {
 		if (files.length) uploadModel(files[0]);
 		// Wrong extension: the same banner modelFileError would raise, no request.
-		else if (rejected.length) {
-			uploadError = 'bad-type';
-			uploadErrorUid++;
-		}
+		else if (rejected.length) setUploadError('bad-type');
 	}
 
 	function uploadModel(file: File) {
@@ -376,8 +376,7 @@
 		const fileError = modelFileError(file);
 		if (fileError) {
 			if (fileError === 'too-large') errorFileSize = file.size;
-			uploadError = fileError;
-			uploadErrorUid++;
+			setUploadError(fileError);
 			return;
 		}
 		uploading = true;
@@ -406,18 +405,16 @@
 			}
 			if (xhr.status === 413) {
 				errorFileSize = file.size;
-				uploadError = 'too-large';
+				setUploadError('too-large');
 			} else if (xhr.status === 415) {
-				uploadError = 'bad-type';
+				setUploadError('bad-type');
 			} else {
-				uploadError = 'failed';
+				setUploadError('failed');
 			}
-			uploadErrorUid++;
 		};
 		xhr.onerror = () => {
 			uploading = false;
-			uploadError = 'failed';
-			uploadErrorUid++;
+			setUploadError('failed');
 		};
 		xhr.send(file);
 	}
@@ -606,7 +603,15 @@
 		     content is often not announced); text updates in 10% steps. -->
 		<span class="sr-only" role="status">{uploadAnnouncement}</span>
 		{#if uploading}
-			<div class="upload-progress">
+			<!-- Swallow-only drop target: this bar takes the zone's place while the
+			     upload runs, and with nothing preventing the default a second drop
+			     here navigates the tab to the file and loses the form. Attached to
+			     the bar rather than the whole section so the live zone's own
+			     dropEffect isn't overridden as the event bubbles. -->
+			<div
+				class="upload-progress"
+				{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: () => {}, disabled: () => true })}
+			>
 				<div class="progress-bar">
 					<div class="progress-fill" style="width: {uploadTotal > 0 ? (uploadLoaded / uploadTotal) * 100 : 0}%"></div>
 				</div>
@@ -1086,7 +1091,7 @@
 		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
 		padding: 28px 24px; border: 2px dashed var(--border); border-radius: var(--radius-s);
 		color: var(--muted-foreground); cursor: pointer; font-size: 13px; text-align: center;
-		transition: border-color 0.15s; min-height: 88px;
+		transition: border-color 0.15s, background 0.15s; min-height: 88px;
 	}
 	.upload-zone:hover { border-color: var(--primary); }
 	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
@@ -1096,6 +1101,9 @@
 	   to preventDefault, or a drop while uploading navigates away from the form.
 	   The nested input's own disabled attribute keeps clicks inert. */
 	.upload-zone.disabled { opacity: 0.55; cursor: not-allowed; }
+	/* Keeping pointer events also keeps :hover alive, so hold the resting border
+	   while the zone is busy rather than inviting a click it won't take. */
+	.upload-zone.disabled:hover { border-color: var(--border); }
 	.sr-file { position: absolute; opacity: 0; width: 0; height: 0; }
 	/* The hidden file inputs stay keyboard-focusable — surface focus on their
 	   visible hosts (same :has pattern as .platform-chip). */
@@ -1137,6 +1145,7 @@
 		display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px;
 		border: 1px solid var(--border); border-radius: var(--radius-xs);
 		background: var(--secondary); color: var(--foreground); cursor: pointer; flex-direction: row;
+		transition: border-color 0.15s, background 0.15s;
 	}
 	.btn-sm:hover { border-color: var(--primary); }
 	.btn-sm:global(.drag-over) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
