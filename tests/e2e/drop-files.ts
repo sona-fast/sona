@@ -56,6 +56,17 @@ export async function waitForDropAttachment(page: Page, selector: string) {
 	// Leave the zone at rest — the class only clears on dragleave or drop.
 	await page.locator(selector).dispatchEvent('dragleave');
 	await expect(page.locator(selector)).not.toHaveClass(/drag-over/);
+	// The class is gone but the 0.15s border-color transition is still running
+	// back toward the resting colour. Return only once two consecutive reads
+	// agree, so a caller's "resting" read never captures a mid-transition value.
+	await expect
+		.poll(async () => {
+			const read = () => page.locator(selector).evaluate((el) => getComputedStyle(el).borderColor);
+			const first = await read();
+			await page.waitForTimeout(60);
+			return (await read()) === first;
+		})
+		.toBe(true);
 }
 
 /**

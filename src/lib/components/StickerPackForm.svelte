@@ -490,7 +490,9 @@
 		<span class="save-note">{m.stickers_source_self_hosted()} · {m.admin_count_stickers({ count: stickerEntries.length })}</span>
 		<div class="save-actions">
 			<a href="/admin/stickers" class="btn btn-outline">{m.admin_cancel()}</a>
-			<button type="submit" class="btn btn-primary" disabled={saving}>
+			<!-- Blocked while stickers upload, as the VR form does: saving mid-upload
+			     stores the pack without the pending file, and the orphan sweep reaps it. -->
+			<button type="submit" class="btn btn-primary" disabled={saving || uploading}>
 				{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}<Check size={16} /> {submitLabel}{/if}
 			</button>
 		</div>

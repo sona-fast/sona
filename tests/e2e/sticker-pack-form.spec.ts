@@ -172,8 +172,13 @@ test('the sticker zone dims while an upload runs and refuses a drop without ligh
 	// heading for primary still measures as the resting colour.
 	await page.waitForTimeout(400);
 	expect(await busy.evaluate((el) => getComputedStyle(el).borderColor)).toBe(restingBorder);
+	// Saving mid-upload would store the pack without the pending file, so the
+	// submit is gated on the upload too (same guard as the VR form).
+	const save = page.getByRole('button', { name: 'Save pack' });
+	await expect(save).toBeDisabled();
 	release();
 	await expect(page.locator(`${ZONE}.disabled`)).toHaveCount(0);
+	await expect(save).toBeEnabled();
 });
 
 test('a failed upload keeps the successes, and an all-failed drop never announces zero', async ({
