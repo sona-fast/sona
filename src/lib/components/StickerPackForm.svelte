@@ -4,7 +4,7 @@
 	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
-	import { dropFiles, matchesAccept } from '$lib/drop-files';
+	import { dropFiles, partitionByAccept } from '$lib/drop-files';
 	import * as m from '$lib/paraglide/messages';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
@@ -139,9 +139,7 @@
 		if (!files.length) return;
 		// `accept` is a filter the OS dialog can override ("All files"), so a
 		// picked JPEG can arrive here; partition it the same way a drop is.
-		const accepted: File[] = [];
-		const rejected: File[] = [];
-		for (const f of files) (matchesAccept(f, STICKER_ACCEPT) ? accepted : rejected).push(f);
+		const { accepted, rejected } = partitionByAccept(files, STICKER_ACCEPT);
 		addStickerFiles(accepted, rejected);
 	}
 

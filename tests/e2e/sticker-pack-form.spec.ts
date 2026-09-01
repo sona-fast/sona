@@ -242,8 +242,7 @@ test('the sticker zone refuses files while a save is in flight', async ({ page }
 	await waitForDropAttachment(page, ZONE);
 
 	// Hold the form POST so `saving` stays true. page.route intercepts inside the
-	// browser, so the shared read-only server never sees the request; it is
-	// aborted rather than fulfilled at the end, which is what lets enhance settle.
+	// browser, so the shared read-only server never sees the request.
 	let holdPost = (_route: Route) => {};
 	const posted = new Promise<Route>((resolve) => (holdPost = resolve));
 	await page.route('**/admin/stickers/manual**', async (route) => {

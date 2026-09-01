@@ -8,7 +8,7 @@
 	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
-	import { dropFiles } from '$lib/drop-files';
+	import { dropFiles, partitionByAccept } from '$lib/drop-files';
 	import { probeDimensions } from '$lib/probe-dimensions';
 	import { MAX_BUFFER_BYTES } from '$lib/config';
 	import { MAX_VR_MODEL_BYTES, creditRoleLabel, formatBytes, modelFileError, modelFormatLabel, namePlaceholderCharacter, platformLabel } from '$lib/vr';
@@ -224,12 +224,14 @@
 		const files = [...(input.files ?? [])];
 		input.value = '';
 		if (!files.length) return;
-		uploadMedia(files);
+		// `accept` is a filter the OS dialog can override ("All files"), so a
+		// picked .txt would otherwise upload its whole body just to collect a 415.
+		const { accepted, rejected } = partitionByAccept(files, MEDIA_ACCEPT);
+		uploadMedia(accepted, rejected);
 	}
 
-	// Shared by the file input and the drop attachment. `rejected` only ever
-	// arrives from a drop — the input's accept attribute filters the picker, a
-	// drop skips it — and those files are reported without being uploaded.
+	// Shared by the file input and the drop attachment; both partition their
+	// files first, so `rejected` is reported without being uploaded.
 	async function uploadMedia(files: File[], rejected: File[] = []) {
 		mediaErrors = rejected.map((file) => ({
 			uid: mediaErrorUid++,
@@ -635,6 +637,7 @@
 				<div class="model-actions">
 					<label
 						class="btn-sm"
+						class:disabled={saving}
 						{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped, disabled: () => saving })}
 					>
 						{m.admin_vr_upload_replace()}
@@ -1160,6 +1163,9 @@
 		transition: border-color 0.15s, background-color 0.15s;
 	}
 	.btn-sm:hover { border-color: var(--primary); }
+	/* Same busy treatment as the zones: dimmed, and no hover invitation. */
+	.btn-sm.disabled { opacity: 0.55; cursor: not-allowed; }
+	.btn-sm.disabled:hover { border-color: var(--border); }
 	.btn-sm:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
 
 	/* Showcase media rows (same row chrome as the credit list). */

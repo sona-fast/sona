@@ -23,6 +23,16 @@ export function matchesAccept(file: { name: string; type: string }, accept: stri
 	});
 }
 
+/** Split files into those an accept string admits and those it refuses. Used by
+ * the drop handler and by the pickers, whose `accept` attribute is only a filter
+ * the OS dialog can override. */
+export function partitionByAccept(files: File[], accept: string): { accepted: File[]; rejected: File[] } {
+	const accepted: File[] = [];
+	const rejected: File[] = [];
+	for (const f of files) (matchesAccept(f, accept) ? accepted : rejected).push(f);
+	return { accepted, rejected };
+}
+
 /**
  * Drag-and-drop for an upload zone (SONA-216): highlights the element with
  * `drag-over` while a file is over it and hands the dropped files to `onFiles`.
@@ -58,9 +68,7 @@ export function dropFiles(opts: {
 			if (opts.disabled?.()) return;
 			const files = [...(e.dataTransfer?.files ?? [])];
 			if (!files.length) return;
-			const accepted: File[] = [];
-			const rejected: File[] = [];
-			for (const f of files) (matchesAccept(f, opts.accept) ? accepted : rejected).push(f);
+			const { accepted, rejected } = partitionByAccept(files, opts.accept);
 			opts.onFiles(accepted, rejected);
 		};
 		node.addEventListener('dragenter', over);

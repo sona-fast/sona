@@ -12,6 +12,8 @@ import { dropOn, dragOver, expectDragOverHighlight, waitForDropAttachment } from
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
+// The model zone; the showcase media zone shares the class.
+const MODEL_ZONE = 'label.upload-zone:not(.media-zone)';
 
 test('the create form renders its fields, dropzones and credit control', async ({ page }) => {
 	await adminLogin(page, PASSWORD);
@@ -229,6 +231,18 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 	expect(await busy.evaluate((el) => getComputedStyle(el).borderColor)).toBe(restingBorder);
 	release();
 	await expect(page.locator('.media-zone.disabled')).toHaveCount(0);
+
+	// The picker path partitions too: `accept` is only a filter the OS dialog
+	// can override, and setInputFiles bypasses it the same way.
+	const beforePick = uploads;
+	await page.locator('.media-zone input[type="file"]').setInputFiles({
+		name: 'notes.txt',
+		mimeType: 'text/plain',
+		buffer: Buffer.from('nope')
+	});
+	await expect(page.getByText(/That file type isn't supported/)).toBeVisible();
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(beforePick);
 });
 
 test('dropping a model file on the model zone uploads one, and a wrong type is rejected without a request', async ({
@@ -254,7 +268,6 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 
 	await page.goto('/admin/vr/new');
 	// The model zone, not the showcase-media one — both carry .upload-zone.
-	const MODEL_ZONE = 'label.upload-zone:not(.media-zone)';
 	const zone = page.locator(MODEL_ZONE);
 	await expect(zone).toBeVisible();
 
@@ -320,6 +333,36 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 	expect(page.url()).toBe(url);
 	release();
 	await expect(page.locator('.model-name')).toHaveText('c.vrm');
+
+	// With a model in place, the Replace button is gated on a save in flight the
+	// same way the zones are. Hold the POST inside the browser; the shared
+	// read-only server never sees it.
+	let holdPost = (_route: Route) => {};
+	const posted = new Promise<Route>((resolve) => (holdPost = resolve));
+	await page.route('**/admin/vr/new**', async (route) => {
+		if (route.request().method() !== 'POST') {
+			await route.fallback();
+			return;
+		}
+		holdPost(route);
+	});
+	await page.fill('input[name="name"]', 'Save gate');
+	await page.fill('input[name="slug"]', 'save-gate');
+	await page.selectOption('select[name="characterId"]', { label: 'Taro' });
+	await page.getByRole('button', { name: 'Create avatar' }).click();
+	await expect(page.locator('form.form button[type="submit"]')).toBeDisabled();
+	const replace = page.locator('label.btn-sm');
+	await expect(replace).toHaveClass(/disabled/);
+	const beforeSave = uploads;
+	await dropOn(page, 'label.btn-sm', [{ name: 'e.vrm', type: '' }]);
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(beforeSave);
+	await expect(page.locator('.model-name')).toHaveText('c.vrm');
+	await (await posted).fulfill({
+		contentType: 'application/json',
+		body: JSON.stringify({ type: 'failure', status: 400, data: '[{"error":1},"Held by the test"]' })
+	});
+	await expect(replace).not.toHaveClass(/disabled/);
 });
 
 test('the showcase media zone refuses files while a save is in flight', async ({ page }) => {
@@ -334,14 +377,22 @@ test('the showcase media zone refuses files while a save is in flight', async ({
 		});
 	});
 
+	let modelUploads = 0;
+	await page.route('**/api/admin/vr-model**', async (route) => {
+		modelUploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: '/m.vrm', size: 4, format: 'vrm' })
+		});
+	});
+
 	await page.goto('/admin/vr/new');
 	// Also the hydration probe: the attachment runs at hydration, so a click
 	// before it would submit the form for real instead of through enhance.
 	await waitForDropAttachment(page, '.media-zone');
 
 	// Hold the form POST so `saving` stays true. page.route intercepts inside the
-	// browser, so the shared read-only server never sees the request; it is
-	// aborted rather than fulfilled at the end, which is what lets enhance settle.
+	// browser, so the shared read-only server never sees the request.
 	let holdPost = (_route: Route) => {};
 	const posted = new Promise<Route>((resolve) => (holdPost = resolve));
 	await page.route('**/admin/vr/new**', async (route) => {
@@ -374,6 +425,17 @@ test('the showcase media zone refuses files while a save is in flight', async ({
 	expect(uploads).toBe(before);
 	await expect(page.locator('input[name="media[0][url]"]')).toHaveCount(0);
 
+	// The model zone is gated the same way: a model dropped mid-save would
+	// rewrite modelUrl after the body was serialized.
+	const modelZone = page.locator(MODEL_ZONE);
+	await expect(modelZone).toHaveClass(/disabled/);
+	await dropOn(page, MODEL_ZONE, [{ name: 'late.vrm', type: '' }]);
+	await dragOver(page, MODEL_ZONE);
+	await expect(modelZone).not.toHaveClass(/drag-over/);
+	await page.waitForTimeout(300);
+	expect(modelUploads).toBe(0);
+	await expect(page.locator('input[name="modelUrl"]')).toHaveValue('');
+
 	// The zone comes back once the submit settles, so a failed save is still
 	// editable. Settled as an action failure rather than an abort: an aborted
 	// fetch makes enhance render the error page, which takes the form away and
@@ -389,4 +451,5 @@ test('the showcase media zone refuses files while a save is in flight', async ({
 	});
 	await expect(save).toBeEnabled();
 	await expect(page.locator('.media-zone')).not.toHaveClass(/disabled/);
+	await expect(modelZone).not.toHaveClass(/disabled/);
 });
