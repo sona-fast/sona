@@ -455,8 +455,10 @@ function fullBox(type: string, version: number, flags: number, body: number[]): 
 	return isoBox(type, [version, (flags >> 16) & 0xff, (flags >> 8) & 0xff, flags & 0xff, ...body]);
 }
 
-function infe(id: number, itemType: string, name: string, contentType?: string): number[] {
-	return fullBox('infe', 2, 0, [
+function infe(id: number, itemType: string, name: string, contentType?: string, version = 2): number[] {
+	// Versions other than 2 are written with a v2 body on purpose: the parser
+	// refuses on the version byte alone, so what follows it never gets read.
+	return fullBox('infe', version, 0, [
 		...u16be(id),
 		...u16be(0),
 		...ascii(itemType),
@@ -504,6 +506,24 @@ export interface AvifOptions {
 	xmpContentType?: string;
 	/** Spell the Exif item's four-character type in lower case. */
 	lowercaseExifType?: boolean;
+	/** Write the Exif item's four-character type as this (a relabelled payload). */
+	exifItemType?: string;
+	/** Write the XMP item's four-character type as this instead of `mime`. */
+	xmpItemType?: string;
+	/** Write the Exif item's infe box at this version instead of 2. */
+	exifInfeVersion?: number;
+	/** Write the XMP item's infe box at this version instead of 2. */
+	xmpInfeVersion?: number;
+	/** Name a `grid` and an `iovl` item as well: derived images a real AVIF carries. */
+	derivedItems?: boolean;
+	/**
+	 * Keep the entry_count legal (3) but follow it with far more infe records
+	 * than the item cap, each with its own item_ID — the records cost the file
+	 * about 20 bytes apiece and the parser a map entry apiece.
+	 */
+	iinfRecordBomb?: boolean;
+	/** Declare an iloc index_size of 2, a width no reader supports. */
+	ilocIndexWidth?: boolean;
 	/** Name only the av01 item: a legitimately metadata-free AVIF. */
 	noMetadataItems?: boolean;
 	/**
@@ -599,17 +619,31 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	const build = (av01At: number, exifAt: number, xmpAt: number): number[] => {
 		const hdlr = fullBox('hdlr', 0, 0, [...u32be(0), ...ascii('pict'), ...u32be(0), ...u32be(0), ...u32be(0), 0]);
 		const pitm = fullBox('pitm', 0, 0, u16be(1));
-		const exifType = opts.lowercaseExifType ? 'exif' : 'Exif';
+		const exifType = opts.exifItemType ?? (opts.lowercaseExifType ? 'exif' : 'Exif');
+		// Records past the declared count, each with an item_ID of its own, so the
+		// walk is what stops them rather than the entry_count check.
+		const recordBomb: number[] = [];
+		if (opts.iinfRecordBomb) {
+			for (let id = 100; id < 400; id++) recordBomb.push(...infe(id, 'av01', 'Image'));
+		}
 		const iinf = opts.noMetadataItems
 			? fullBox('iinf', 0, 0, [...u16be(1), ...infe(1, 'av01', 'Image')])
 			: fullBox('iinf', 0, 0, [
-					...u16be(opts.iinfCountBomb ? 1000 : opts.duplicateInfe ? 4 : 3),
+					...u16be(opts.iinfCountBomb ? 1000 : (opts.duplicateInfe ? 4 : 3) + (opts.derivedItems ? 2 : 0)),
 					...infe(1, 'av01', 'Image'),
-					...infe(2, exifType, 'Exif'),
+					...infe(2, exifType, 'Exif', undefined, opts.exifInfeVersion),
 					...(opts.duplicateInfe ? infe(2, exifType, 'Exif') : []),
-					...infe(3, 'mime', 'XMP', opts.xmpContentType ?? 'application/rdf+xml')
+					...infe(
+						3,
+						opts.xmpItemType ?? 'mime',
+						'XMP',
+						opts.xmpContentType ?? 'application/rdf+xml',
+						opts.xmpInfeVersion
+					),
+					...(opts.derivedItems ? [...infe(4, 'grid', 'Grid'), ...infe(5, 'iovl', 'Overlay')] : []),
+					...recordBomb
 				]);
-		const version = opts.idatConstruction ? 1 : 0;
+		const version = opts.idatConstruction || opts.ilocIndexWidth ? 1 : 0;
 		const item = (id: number, method: number, at: number, length: number, split = false): number[] => [
 			...u16be(id),
 			// construction_method occupies 4 bits of a reserved 16 in v1/v2 only.
@@ -642,7 +676,9 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 						...(opts.duplicateIlocItem === 'decoyFirst' ? [...decoyItem, ...realItem] : [...realItem, ...decoyItem]),
 						...item(3, 0, xmpAt, xmpPayload.length)
 					];
-		const iloc = opts.ilocBomb ? bombIloc(opts.ilocBomb) : fullBox('iloc', version, 0, [0x44, 0x00, ...placed]);
+		const iloc = opts.ilocBomb
+			? bombIloc(opts.ilocBomb)
+			: fullBox('iloc', version, 0, [0x44, opts.ilocIndexWidth ? 0x02 : 0x00, ...placed]);
 		// A decoy places the Exif item somewhere harmless; whichever iloc the
 		// scrubber kept, the other one is the copy a reader might follow.
 		const decoyIloc = opts.decoyIloc

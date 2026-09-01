@@ -6,15 +6,23 @@
 // inherit it without a line of their own. That is the whole point of the
 // placement: a put that skips the scrub should not be expressible.
 //
-// Only bodies whose DECLARED content type is a raster we serve publicly are
-// scrubbed. Sticker media that isn't a raster (video/webm, the Lottie JSON of
-// an animated Telegram sticker) and VR model bytes (application/octet-stream)
-// pass through untouched — there is no raster metadata in them to strip, and
-// the scrubber would reject them for having no raster signature.
+// The BYTES decide, not the declared type. A declared raster is scrubbed; so is
+// anything else whose leading bytes carry a raster signature, because a caller
+// can be wrong about what it is holding — the sticker import takes its content
+// type from a Telegram file path, so a JPEG served under a .webm path would
+// otherwise skip the scrub with its GPS intact. Sticker media that really isn't
+// a raster (video/webm, the Lottie JSON of an animated sticker) and VR model
+// bytes (application/octet-stream) sniff as nothing and pass through untouched.
 
 import { isAllowedImageType } from './allowlist';
+import { peekStream } from '$lib/server/peek-stream';
 import { scrubImageMetadata, scrubImageMetadataStream } from './scrub-metadata';
+import { sniffImageType } from './sniff';
 import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
+
+/** Leading bytes handed to sniffImageType — enough for an AVIF ftyp box's
+ * compatible_brands, matching the scrubber's own sniff window. */
+const SNIFF_BYTES = 64;
 
 /**
  * Wrap `inner` so every stored raster goes through the metadata scrubber.
@@ -36,7 +44,7 @@ class ScrubbingStorage implements StorageProvider {
 	}
 
 	async put(input: PutInput): Promise<PutResult> {
-		if (!isAllowedImageType(input.contentType)) return this.#inner.put(input);
+		const declared = isAllowedImageType(input.contentType);
 		const { body } = input;
 		if (body instanceof ReadableStream) {
 			// `size` is unchanged on purpose: the scrub is size-preserving, so the
@@ -44,9 +52,17 @@ class ScrubbingStorage implements StorageProvider {
 			// presigned ingest) still holds. A throw inside the transform errors
 			// the piped stream, which rejects the provider's put rather than
 			// leaving it waiting on bytes that will never come.
-			return this.#inner.put({ ...input, body: body.pipeThrough(scrubImageMetadataStream()) });
+			if (declared) {
+				return this.#inner.put({ ...input, body: body.pipeThrough(scrubImageMetadataStream()) });
+			}
+			// peekStream replays the head rather than buffering the file, so a model
+			// upload still streams end to end — it just gets sniffed on the way past.
+			const { head, stream } = await peekStream(body, SNIFF_BYTES);
+			if (!sniffImageType(head)) return this.#inner.put({ ...input, body: stream });
+			return this.#inner.put({ ...input, body: stream.pipeThrough(scrubImageMetadataStream()) });
 		}
 		const bytes = body instanceof Uint8Array ? body : new Uint8Array(body);
+		if (!declared && !sniffImageType(bytes.subarray(0, SNIFF_BYTES))) return this.#inner.put(input);
 		return this.#inner.put({ ...input, body: scrubImageMetadata(bytes) });
 	}
 

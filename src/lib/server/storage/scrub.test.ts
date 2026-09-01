@@ -117,6 +117,55 @@ describe('getStorage wraps the provider in metadata scrubbing', () => {
 		expect(stored[1].bytes).toEqual(lottie);
 	});
 
+	it('scrubs raster bytes stored under a non-image content type', async () => {
+		// The sticker import takes its content type from a Telegram file path, so
+		// a JPEG served under a .webm path arrives declared video/webm. Gating on
+		// the declared type alone stored those bytes, GPS and all.
+		const stored: Stored[] = [];
+		const { storage } = storageFor(stored);
+		const jpeg = jpegFixture();
+		await storage.put({
+			suggestedKey: 'stickers/mislabelled.webm',
+			body: jpeg,
+			contentType: 'video/webm',
+			filename: 'mislabelled.webm'
+		});
+		expect(stored[0].bytes).toEqual(scrubImageMetadata(jpeg));
+		expect(new TextDecoder('latin1').decode(stored[0].bytes)).not.toContain('GPSLatitude');
+	});
+
+	it('scrubs raster bytes STREAMED under a non-image content type', async () => {
+		const stored: Stored[] = [];
+		const { storage } = storageFor(stored);
+		const jpeg = jpegFixture();
+		await storage.put({
+			suggestedKey: 'stickers/mislabelled-stream.webm',
+			body: streamOf(jpeg),
+			size: jpeg.length,
+			contentType: 'video/webm',
+			filename: 'mislabelled-stream.webm'
+		});
+		expect(stored[0].bytes).toEqual(scrubImageMetadata(jpeg));
+		expect(stored[0].bytes.length).toBe(jpeg.length);
+	});
+
+	it('streams a non-raster body through the sniff byte-identical', async () => {
+		// The VR model path: octet-stream bytes that sniff as no raster still reach
+		// the provider whole, and in chunks — the peek replays the head rather than
+		// buffering the file.
+		const stored: Stored[] = [];
+		const { storage } = storageFor(stored);
+		const model = new Uint8Array([...new TextEncoder().encode('glTF'), ...new Array(120).fill(7)]);
+		await storage.put({
+			suggestedKey: 'vr-models/a.vrm',
+			body: streamOf(model),
+			size: model.length,
+			contentType: 'application/octet-stream',
+			filename: 'a.vrm'
+		});
+		expect(stored[0].bytes).toEqual(model);
+	});
+
 	it('rejects a buffered body whose bytes are not a raster under an image type', async () => {
 		const stored: Stored[] = [];
 		const { storage, bucket } = storageFor(stored);

@@ -113,6 +113,15 @@ const MAX_ASCII_BYTES = 4096;
 const MAX_AVIF_ITEMS = 256;
 const MAX_ILOC_EXTENTS = 1024;
 
+/**
+ * The item types a real AVIF carries that hold no metadata: coded image data,
+ * and the derived images that arrange other items. `exif` and `mime` are handled
+ * separately because they are the ones being scrubbed. Anything outside this set
+ * is a payload the scrubber cannot reason about, so it is refused (see
+ * parseInfe) rather than skipped — skipping is what a relabelled Exif item wants.
+ */
+const INERT_AVIF_ITEM_TYPES = new Set(['av01', 'grid', 'iovl', 'iden', 'tmap']);
+
 // ---------------------------------------------------------------------------
 // The driver: a byte-stream coroutine
 // ---------------------------------------------------------------------------
@@ -932,9 +941,13 @@ function parseIinf(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>): void {
 function parseInfe(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>, seen: Set<number>): void {
 	if (body.length < 4) throw new UnscrubbableImageError('avif: infe box is truncated');
 	const version = body[0];
-	// Versions 0 and 1 predate item_type and are not used by AVIF; they carry no
-	// item we would scrub, so they are skipped rather than guessed at.
-	if (version !== 2 && version !== 3) return;
+	// Versions 0 and 1 predate item_type, so there is no way to tell what the
+	// entry describes. AVIF requires 2 or 3, and skipping the entry would let a
+	// version-1 infe hide the Exif item from the walk entirely, so anything else
+	// is refused.
+	if (version !== 2 && version !== 3) {
+		throw new UnscrubbableImageError(`avif: an infe box declares version ${version}, which AVIF does not use`);
+	}
 	let p = 4;
 	const idLen = version === 2 ? 2 : 4;
 	if (body.length < p + idLen + 2 + 4) throw new UnscrubbableImageError('avif: infe box is truncated');
@@ -958,14 +971,29 @@ function parseInfe(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>, seen: S
 		items.set(id, 'exif');
 		return;
 	}
-	if (itemType !== 'mime') return;
+	if (itemType !== 'mime') {
+		// Everything left is either an item a real AVIF carries and the scrubber
+		// knows holds no metadata, or an item type we cannot reason about at all.
+		// Skipping the unknown ones is what lets a relabelled Exif payload ride
+		// through unrewritten, so the inert set is spelled out and the rest refused.
+		if (!INERT_AVIF_ITEM_TYPES.has(itemType)) {
+			throw new UnscrubbableImageError(
+				`avif: the iinf box names an item of type "${itemType.slice(0, 4)}", which the scrubber does not know`
+			);
+		}
+		return;
+	}
 	// A content_type carries parameters (";charset=…") and any casing, and a
 	// reader normalises both before deciding the item is XMP, so this has to as
 	// well. Anything else is a mime payload the scrubber cannot classify — a
 	// real AVIF has none — so it is refused rather than passed through.
 	const contentType = readCString(body, p).text.split(';')[0].trim().toLowerCase();
 	if (contentType !== 'application/rdf+xml') {
-		throw new UnscrubbableImageError(`avif: a mime item declares content type "${contentType}", which is not XMP`);
+		// Truncated: the content_type comes from the file, and the message ends up
+		// in a log line and an operator-facing failure list.
+		throw new UnscrubbableImageError(
+			`avif: a mime item declares content type "${contentType.slice(0, 64)}", which is not XMP`
+		);
 	}
 	items.set(id, 'xmp');
 }
@@ -981,6 +1009,13 @@ function parseIloc(
 	const lengthSize = body[4] & 0x0f;
 	const baseOffsetSize = body[5] >> 4;
 	const indexSize = version === 0 ? 0 : body[5] & 0x0f;
+	// The index bytes are stepped over rather than read, so this width never
+	// reaches readUint's check the way offset_size and length_size do. A width no
+	// reader supports would still move the cursor, putting every extent after it
+	// at bytes the file never meant, so it is checked against the same widths.
+	if (indexSize !== 0 && indexSize !== 4 && indexSize !== 8) {
+		throw new UnscrubbableImageError(`avif: unsupported iloc field width ${indexSize}`);
+	}
 	// An extent with neither an offset nor a length addresses no bytes at all,
 	// and declaring one costs no input bytes either — which is what makes the
 	// item list an allocation bomb: a 2 KB meta box can name millions of extents

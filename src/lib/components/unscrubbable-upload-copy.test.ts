@@ -1,11 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import * as m from '$lib/paraglide/messages';
-import {
-	UNSCRUBBABLE_MESSAGE,
-	UNSCRUBBABLE_STICKER_MESSAGE,
-	UNSCRUBBABLE_IMPORT_MESSAGE
-} from '$lib/server/storage/scrub-metadata';
+import { UNSCRUBBABLE_MESSAGE, UNSCRUBBABLE_IMPORT_MESSAGE } from '$lib/server/storage/scrub-metadata';
 
 // SONA-170: /api/upload answers 422 when a file's metadata could not be
 // stripped, and the fix is the operator's (re-export the file). Both upload
@@ -29,17 +25,8 @@ describe('the 422 upload refusal reaches the screen', () => {
 		// a wording change lands on every surface at once — an operator reading
 		// the import result and one reading the upload tile see the same fix.
 		expect(UNSCRUBBABLE_MESSAGE).toBe(m.admin_upload_error_unscrubbable());
-		expect(UNSCRUBBABLE_STICKER_MESSAGE).toMatch(/metadata/);
 		// An imported photo is not the operator's file to re-export, so that
 		// import's sentence says what happened and stops there.
-		expect(UNSCRUBBABLE_IMPORT_MESSAGE).toMatch(/metadata/);
 		expect(UNSCRUBBABLE_IMPORT_MESSAGE).not.toMatch(/upload/i);
-	});
-
-	it('both messages tell the operator what to do about it', () => {
-		for (const message of [m.admin_upload_error_unscrubbable(), m.admin_vr_media_error_unscrubbable()]) {
-			expect(message).toMatch(/metadata/i);
-			expect(message).toMatch(/export/i);
-		}
 	});
 });

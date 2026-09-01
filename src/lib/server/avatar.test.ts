@@ -330,12 +330,22 @@ describe('resolveAvatarUrl re-hosting', () => {
 		// non-null for an empty 200. Storing it is the worst outcome available,
 		// because the URL is then one of ours and the owner heal's already-ours skip
 		// pins the operator on a blank picture the cron will never repair.
-		stubFetch({ imageBytes: 0 });
+		// Served as raw bytes rather than jpegOfSize(0), which refuses to build a
+		// sub-4-byte "JPEG" — that throw would fail the download instead, and the
+		// test would pass on the generic failure path with the guard unexercised.
+		stubFetch({ imageBody: new Uint8Array(0) });
 		const bucket = fakeBucket();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const url = await resolveAvatarUrl({ blueskyUrl: 'nova.bsky.social' }, r2Ctx(bucket));
 		expect(bucket.put).not.toHaveBeenCalled();
 		// Falls back to the source, so the next run gets another go.
 		expect(url).toBe(BSKY_AVATAR);
+		// Pinned to the guard's own log line: the store would refuse zero bytes too
+		// (nothing there parses as an image), so "put was not called" alone passes
+		// just as happily with the guard deleted.
+		expect(warn.mock.calls.flat().join(' ')).toContain('rehost skipped');
+		expect(warn.mock.calls.flat().join(' ')).toContain('empty body');
+		warn.mockRestore();
 	});
 
 	it('still stores a body right up to the ceiling', async () => {

@@ -22,9 +22,11 @@ and Telegram sticker imports, artist avatar re-hosting, the sticker re-key and
 migration between storage providers. An importer added later inherits it too,
 which is the reason the decorator sits there rather than at each call site.
 
-Bodies whose declared content type is not a raster we serve publicly pass
-straight through. That covers the VR showcase clips (`video/webm`), the Lottie
-JSON of an animated Telegram sticker, and VR model bytes.
+The bytes decide, not the declared content type. A body declared as a raster is
+scrubbed, and so is any other body whose leading bytes carry a raster
+signature, because a caller can be wrong about what it holds. Bodies that sniff
+as nothing pass straight through: the VR showcase clips (`video/webm`), the
+Lottie JSON of an animated Telegram sticker, and VR model bytes.
 
 ## What Sona removes, and what it keeps
 
@@ -95,15 +97,19 @@ unexamined would break the guarantee that every stored raster was scrubbed. An
 AVIF whose `mdat` comes before its `meta` box is refused on that rule: the
 layout is legal, but the walk has already passed those bytes by the time the
 item list names them, and an extent behind the walk cannot be rewritten in
-place. No common encoder writes it. An AVIF whose item list names a `mime`
-item that is not XMP is refused for the same reason: the scrubber cannot tell
-what the payload is, and no common encoder writes one.
+place. No common encoder writes it. An AVIF whose item list names a `mime` item
+that is not XMP is refused as well, because the scrubber cannot tell what that
+payload holds. So is an AVIF naming an item of any type outside the inert set
+the scrubber knows — `av01`, `grid`, `iovl`, `iden`, the `tmap` gain map, plus the `exif` and `mime`
+items it rewrites — because an item the walk skips is an item whose bytes ship
+as they are.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that
 photo as failed and logs the reason. Avatar re-hosting logs a warning and keeps
 the source URL as a hotlink. A sticker import reports the failure for that
-sticker.
+sticker. A provider migration lists the object as failed and asks you to replace
+it with a fresh export.
 
 ## Objects stored before scrubbing existed
 
@@ -111,4 +117,5 @@ Sona does not rewrite objects already in the bucket, and nothing sweeps the
 bucket, so a photo uploaded before the scrubber existed keeps whatever metadata
 it came with. Re-uploading the file cleans it up, and so does migrating between
 storage providers, because migration re-stores every object through the same
-layer.
+layer. An old object the parser refuses is listed as a migration failure
+instead, and only a fresh upload replaces it.

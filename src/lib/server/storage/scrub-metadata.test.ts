@@ -593,6 +593,58 @@ describe('scrubImageMetadata: AVIF', () => {
 		expect(() => scrubImageMetadata(avifFixture({ iinfCountBomb: true }).file)).toThrow(/over the \d+-item cap/);
 	});
 
+	it('throws when the iinf box holds more records than the cap however few it declares', () => {
+		// entry_count says 3 and 303 records follow, each with its own item_ID.
+		// The declared-count check passes; the records are what cost the parser a
+		// map entry apiece, so the walk has to count them itself.
+		expect(() => scrubImageMetadata(avifFixture({ iinfRecordBomb: true }).file)).toThrow(
+			/more than \d+ item entries/
+		);
+	});
+
+	it('throws on an item type the scrubber does not know', () => {
+		// A relabelled payload is the point: an item the walk skips is an item
+		// whose bytes stay as they are, so an Exif payload sitting under a type
+		// the scrubber has no opinion about would ship unrewritten.
+		expect(() => scrubImageMetadata(avifFixture({ exifItemType: 'jpeg' }).file)).toThrow(
+			/item of type "jpeg"/
+		);
+		expect(() => scrubImageMetadata(avifFixture({ xmpItemType: 'uriX' }).file)).toThrow(
+			/item of type "uri/
+		);
+	});
+
+	it('throws on an infe version AVIF does not use', () => {
+		// Versions 0 and 1 have no item_type field, so there is no way to tell
+		// what the entry describes — and a v0 entry carries a content_type, which
+		// is all a reader needs to find the XMP the walk just skipped.
+		expect(() => scrubImageMetadata(avifFixture({ exifInfeVersion: 1 }).file)).toThrow(
+			/infe box declares version 1/
+		);
+		expect(() => scrubImageMetadata(avifFixture({ xmpInfeVersion: 0 }).file)).toThrow(
+			/infe box declares version 0/
+		);
+	});
+
+	it('stores an AVIF carrying derived-image items alongside the coded image', () => {
+		// The counterpart to the refusal above: `grid` and `iovl` are items a real
+		// AVIF carries and hold no metadata, so the allowlist has to let them by
+		// or every multi-tile AVIF becomes a refusal.
+		const derived = avifFixture({ derivedItems: true });
+		const out = scrubImageMetadata(derived.file);
+		expect(out.length).toBe(derived.file.length);
+		expect(text(out.subarray(derived.exif.start, derived.exif.end))).not.toContain('MAKERNOT');
+	});
+
+	it('throws on an iloc index width no reader supports', () => {
+		// The index bytes are stepped over rather than read, so this width never
+		// reaches the check the offset and length widths get; a stride the file
+		// never used puts every extent after it at the wrong bytes.
+		expect(() => scrubImageMetadata(avifFixture({ ilocIndexWidth: true }).file)).toThrow(
+			/unsupported iloc field width 2/
+		);
+	});
+
 	it('throws when one item_ID is named or placed twice', () => {
 		// The map keeps the last entry and a reader may keep the first, so a decoy
 		// on either side of the real one moves the scrubber off the real payload.
