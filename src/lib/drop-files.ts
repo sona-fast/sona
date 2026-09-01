@@ -35,7 +35,10 @@ function carriesFiles(e: DragEvent): boolean {
  * Window-level guard for the admin forms that host drop zones: a file dropped
  * anywhere the zones don't cover (the hint under a zone, a media row, blank
  * form) would otherwise navigate the tab to the file and lose the form. Leaves
- * an event a zone already handled alone, and ignores non-file drags.
+ * an event a zone already handled alone, and ignores non-file drags. That is
+ * narrower than the zones on purpose: a zone can cancel every drag because it
+ * holds no text field, but this runs for the whole page, and cancelling a text
+ * or link drag here would block dropping text into the form's own inputs.
  */
 export function swallowStrayFileDrop(e: DragEvent) {
 	if (e.defaultPrevented || !carriesFiles(e)) return;
