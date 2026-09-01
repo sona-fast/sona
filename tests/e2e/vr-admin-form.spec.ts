@@ -353,6 +353,8 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 	await expect(page.locator('form.form button[type="submit"]')).toBeDisabled();
 	const replace = page.locator('label.btn-sm');
 	await expect(replace).toHaveClass(/disabled/);
+	// Remove mutates modelUrl the same way a replace does, so it waits too.
+	await expect(page.locator('.model-actions button')).toBeDisabled();
 	const beforeSave = uploads;
 	await dropOn(page, 'label.btn-sm', [{ name: 'e.vrm', type: '' }]);
 	await page.waitForTimeout(300);
@@ -435,6 +437,11 @@ test('the showcase media zone refuses files while a save is in flight', async ({
 	await page.waitForTimeout(300);
 	expect(modelUploads).toBe(0);
 	await expect(page.locator('input[name="modelUrl"]')).toHaveValue('');
+
+	// A drop that misses every zone (here: the form itself) is swallowed page-
+	// wide, so the browser never navigates to the file.
+	expect(await dropOn(page, 'form.form', [{ name: 'stray.png', type: 'image/png' }])).toBe(true);
+	expect(uploads).toBe(before);
 
 	// The zone comes back once the submit settles, so a failed save is still
 	// editable. Settled as an action failure rather than an abort: an aborted

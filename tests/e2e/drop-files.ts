@@ -28,15 +28,15 @@ export function dropOn(page: Page, selector: string, files: { name: string; type
 	);
 }
 
-/** Dispatch a `dragover` on the first element matching `selector`. */
+/** Dispatch a `dragover` on the first element matching `selector`. The
+ * DataTransfer carries a file so `types` includes 'Files', as a real file drag
+ * does; the zone ignores drags that carry none. */
 export function dragOver(page: Page, selector: string) {
 	return page.evaluate((selector) => {
+		const dt = new DataTransfer();
+		dt.items.add(new File([new Uint8Array([1])], 'probe.bin'));
 		document.querySelector(selector)!.dispatchEvent(
-			new DragEvent('dragover', {
-				dataTransfer: new DataTransfer(),
-				bubbles: true,
-				cancelable: true
-			})
+			new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true })
 		);
 	}, selector);
 }

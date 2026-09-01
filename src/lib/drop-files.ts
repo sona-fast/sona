@@ -23,6 +23,26 @@ export function matchesAccept(file: { name: string; type: string }, accept: stri
 	});
 }
 
+/** Whether a drag carries files at all. Dragged text or an image element also
+ * fires dragover; a zone must not light up for those. A missing `types` (test
+ * fakes) counts as files. */
+function carriesFiles(e: DragEvent): boolean {
+	const types = e.dataTransfer?.types;
+	return !types || types.includes('Files');
+}
+
+/**
+ * Window-level guard for the admin forms that host drop zones: a file dropped
+ * anywhere the zones don't cover (the hint under a zone, a media row, blank
+ * form) would otherwise navigate the tab to the file and lose the form. Leaves
+ * an event a zone already handled alone, and ignores non-file drags.
+ */
+export function swallowStrayFileDrop(e: DragEvent) {
+	if (e.defaultPrevented || !carriesFiles(e)) return;
+	e.preventDefault();
+	if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+}
+
 /** Split files into those an accept string admits and those it refuses. Used by
  * the drop handler and by the pickers, whose `accept` attribute is only a filter
  * the OS dialog can override. */
@@ -54,7 +74,7 @@ export function dropFiles(opts: {
 		// the event first; an outer swallow-only instance must not then override
 		// its dropEffect, so an already-handled event is left alone.
 		const over = (e: DragEvent) => {
-			if (e.defaultPrevented) return;
+			if (e.defaultPrevented || !carriesFiles(e)) return;
 			e.preventDefault();
 			const off = opts.disabled?.() ?? false;
 			if (e.dataTransfer) e.dataTransfer.dropEffect = off ? 'none' : 'copy';
@@ -62,9 +82,9 @@ export function dropFiles(opts: {
 		};
 		const leave = () => node.classList.remove('drag-over');
 		const drop = (e: DragEvent) => {
+			node.classList.remove('drag-over');
 			if (e.defaultPrevented) return;
 			e.preventDefault();
-			node.classList.remove('drag-over');
 			if (opts.disabled?.()) return;
 			const files = [...(e.dataTransfer?.files ?? [])];
 			if (!files.length) return;

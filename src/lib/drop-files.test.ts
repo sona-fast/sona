@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dropFiles, matchesAccept } from './drop-files';
+import { dropFiles, matchesAccept, partitionByAccept, swallowStrayFileDrop } from './drop-files';
 
 // The accept filter is the security-relevant half (SONA-216): the accept
 // ATTRIBUTE only constrains the file picker, so without this an admin dropping
@@ -58,6 +58,44 @@ function dragEvent(type: string, files: PickedFile[] = []) {
 	return Object.assign(new Event(type), { dataTransfer: { files, dropEffect: '' } });
 }
 
+describe('partitionByAccept', () => {
+	it('splits by the accept string and keeps input order in both buckets', () => {
+		const a = { name: 'a.vrm', type: '' };
+		const b = { name: 'notes.txt', type: 'text/plain' };
+		const c = { name: 'C.FBX', type: '' };
+		const d = { name: 'd.png', type: 'image/png' };
+		const { accepted, rejected } = partitionByAccept([a, b, c, d] as unknown as File[], '.vrm,.fbx');
+		expect(accepted).toEqual([a, c]);
+		expect(rejected).toEqual([b, d]);
+	});
+});
+
+describe('swallowStrayFileDrop', () => {
+	function stray(types: string[], prevented = false) {
+		const e = Object.assign(new Event('drop', { cancelable: true }), {
+			dataTransfer: { types, files: [], dropEffect: 'copy' }
+		});
+		if (prevented) e.preventDefault();
+		return e;
+	}
+
+	it('cancels a file drop nothing else handled', () => {
+		const e = stray(['Files']);
+		swallowStrayFileDrop(e as unknown as DragEvent);
+		expect(e.defaultPrevented).toBe(true);
+		expect(e.dataTransfer.dropEffect).toBe('none');
+	});
+
+	it('ignores non-file drags and events a zone already handled', () => {
+		const text = stray(['text/plain']);
+		swallowStrayFileDrop(text as unknown as DragEvent);
+		expect(text.defaultPrevented).toBe(false);
+		const handled = stray(['Files'], true);
+		swallowStrayFileDrop(handled as unknown as DragEvent);
+		expect(handled.dataTransfer.dropEffect).toBe('copy');
+	});
+});
+
 describe('dropFiles', () => {
 	function setup(disabled?: () => boolean) {
 		const el = new FakeEl();
@@ -78,6 +116,16 @@ describe('dropFiles', () => {
 		expect(el.classes.has('drag-over')).toBe(true);
 		el.dispatchEvent(dragEvent('dragleave'));
 		expect(el.classes.has('drag-over')).toBe(false);
+	});
+
+	it('does not light up for a drag that carries no files', () => {
+		const { el } = setup();
+		const ev = Object.assign(new Event('dragover', { cancelable: true }), {
+			dataTransfer: { types: ['text/plain'], files: [], dropEffect: '' }
+		});
+		el.dispatchEvent(ev);
+		expect(el.classes.has('drag-over')).toBe(false);
+		expect(ev.defaultPrevented).toBe(false);
 	});
 
 	it('sets the copy drop effect so the cursor reads as an upload', () => {

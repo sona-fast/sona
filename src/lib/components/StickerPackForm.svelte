@@ -4,7 +4,7 @@
 	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
-	import { dropFiles, partitionByAccept } from '$lib/drop-files';
+	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import * as m from '$lib/paraglide/messages';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
@@ -264,6 +264,10 @@
 		onMoved: clearSelection
 	});
 </script>
+
+<!-- A file dropped anywhere the zone doesn't cover would navigate the tab to
+     the file and lose the form; the zone handles its own drops first. -->
+<svelte:window ondragover={swallowStrayFileDrop} ondrop={swallowStrayFileDrop} />
 
 <a class="back-link" href="/admin/stickers"><ArrowLeft size={16} /> {m.admin_pack_back()}</a>
 <div class="page-header">

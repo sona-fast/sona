@@ -8,7 +8,7 @@
 	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
-	import { dropFiles, partitionByAccept } from '$lib/drop-files';
+	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { probeDimensions } from '$lib/probe-dimensions';
 	import { MAX_BUFFER_BYTES } from '$lib/config';
 	import { MAX_VR_MODEL_BYTES, creditRoleLabel, formatBytes, modelFileError, modelFormatLabel, namePlaceholderCharacter, platformLabel } from '$lib/vr';
@@ -238,7 +238,12 @@
 			name: file.name,
 			reason: 'bad-type' as const
 		}));
-		if (!files.length) return;
+		if (!files.length) {
+			// Nothing to upload, but the status region must not keep last batch's
+			// text beside a fresh bad-type banner.
+			if (rejected.length) mediaStatus = m.admin_vr_media_upload_issues();
+			return;
+		}
 		mediaUploading = true;
 		mediaStatus = m.admin_upload_uploading();
 		try {
@@ -445,6 +450,10 @@
 	);
 </script>
 
+<!-- A file dropped anywhere the zones don't cover would navigate the tab to
+     the file and lose the form; the zones handle their own drops first. -->
+<svelte:window ondragover={swallowStrayFileDrop} ondrop={swallowStrayFileDrop} />
+
 <a class="back-link" href="/admin/vr"><ArrowLeft size={16} /> {m.admin_vr_back()}</a>
 <div class="page-header">
 	<h1>{heading}</h1>
@@ -605,17 +614,7 @@
 		     content is often not announced); text updates in 10% steps. -->
 		<span class="sr-only" role="status">{uploadAnnouncement}</span>
 		{#if uploading}
-			<!-- Swallow-only drop target: this bar takes the zone's place while the
-			     upload runs, and with nothing preventing the default a second drop
-			     here navigates the tab to the file and loses the form. Attached to
-			     the bar rather than the whole section so the live zone's own
-			     dropEffect isn't overridden as the event bubbles. Empty accept
-			     because nothing is filtered: disabled means the drop is swallowed
-			     before any file is looked at. -->
-			<div
-				class="upload-progress"
-				{@attach dropFiles({ accept: '', onFiles: () => {}, disabled: () => true })}
-			>
+			<div class="upload-progress">
 				<div class="progress-bar">
 					<div class="progress-fill" style="width: {uploadTotal > 0 ? (uploadLoaded / uploadTotal) * 100 : 0}%"></div>
 				</div>
@@ -624,11 +623,7 @@
 				</span>
 			</div>
 		{:else if modelUrl}
-			<!-- The card is much bigger than its Replace button. A drop that misses
-			     the button by a few pixels would otherwise navigate the tab to the
-			     file; swallow it here. The button's own handler runs first and marks
-			     the event handled, so this never overrides its drop. -->
-			<div class="model-card" {@attach dropFiles({ accept: '', onFiles: () => {}, disabled: () => true })}>
+			<div class="model-card">
 				<FileBox size={20} />
 				<div class="model-info">
 					<span class="model-name">{modelFilename || modelUrl.split('/').pop()}</span>
@@ -643,7 +638,7 @@
 						{m.admin_vr_upload_replace()}
 						<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} disabled={saving} class="sr-file" aria-describedby="vr-model-hint" />
 					</label>
-					<button type="button" class="btn-sm" onclick={removeModel}>{m.admin_vr_upload_remove()}</button>
+					<button type="button" class="btn-sm" onclick={removeModel} disabled={saving}>{m.admin_vr_upload_remove()}</button>
 				</div>
 			</div>
 			{#if modelUrl !== (avatar?.modelUrl ?? '')}

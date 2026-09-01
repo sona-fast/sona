@@ -137,9 +137,11 @@ test('the sticker zone dims while an upload runs and refuses a drop without ligh
 }) => {
 	await adminLogin(page, PASSWORD);
 
+	let uploads = 0;
 	let hold: Promise<void> | null = null;
 	let release = () => {};
 	await page.route('**/api/upload', async (route) => {
+		uploads++;
 		if (hold) await hold;
 		await route.fulfill({
 			contentType: 'application/json',
@@ -160,7 +162,9 @@ test('the sticker zone dims while an upload runs and refuses a drop without ligh
 	const busy = page.locator(`${ZONE}.disabled`);
 	await expect(busy).toBeVisible();
 	// Polled past the zone's 0.15s opacity transition.
-	await expect.poll(() => busy.evaluate((el) => getComputedStyle(el).opacity)).toBe('0.55');
+	// Below the resting 1, not pinned to the end value: a backgrounded worker
+	// tab can leave the 0.15s transition parked mid-way.
+	await expect.poll(() => busy.evaluate((el) => parseFloat(getComputedStyle(el).opacity))).toBeLessThan(0.7);
 	// `pointer-events: none` on .disabled would let the next drop reach the
 	// document and navigate the tab to the file. The zone still refuses the
 	// drop — no highlight — it just has to be the one refusing.
@@ -179,6 +183,11 @@ test('the sticker zone dims while an upload runs and refuses a drop without ligh
 	release();
 	await expect(page.locator(`${ZONE}.disabled`)).toHaveCount(0);
 	await expect(save).toBeEnabled();
+
+	// A drop that misses the zone (here: the form itself) is swallowed page-wide.
+	const beforeStray = uploads;
+	expect(await dropOn(page, 'form.form', [{ name: 'stray.png', type: 'image/png' }])).toBe(true);
+	expect(uploads).toBe(beforeStray);
 });
 
 test('a failed upload keeps the successes, and an all-failed drop never announces zero', async ({
