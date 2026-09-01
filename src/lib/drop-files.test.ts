@@ -118,14 +118,17 @@ describe('dropFiles', () => {
 		expect(el.classes.has('drag-over')).toBe(false);
 	});
 
-	it('does not light up for a drag that carries no files', () => {
+	it('still cancels a drag that carries no files, without lighting up', () => {
+		// A dragged thumbnail or link over the zone must not navigate the tab
+		// either, so the zone stays a drop target; it just offers nothing.
 		const { el } = setup();
 		const ev = Object.assign(new Event('dragover', { cancelable: true }), {
-			dataTransfer: { types: ['text/plain'], files: [], dropEffect: '' }
+			dataTransfer: { types: ['text/uri-list'], files: [], dropEffect: 'copy' }
 		});
 		el.dispatchEvent(ev);
+		expect(ev.defaultPrevented).toBe(true);
+		expect(ev.dataTransfer.dropEffect).toBe('none');
 		expect(el.classes.has('drag-over')).toBe(false);
-		expect(ev.defaultPrevented).toBe(false);
 	});
 
 	it('sets the copy drop effect so the cursor reads as an upload', () => {
@@ -165,7 +168,7 @@ describe('dropFiles', () => {
 		expect(calls).toHaveLength(0);
 	});
 
-	it('leaves an event a nested target already handled alone', () => {
+	it('leaves an event something else already cancelled alone', () => {
 		const { el } = setup(() => true);
 		const over = Object.assign(new Event('dragover', { cancelable: true }), {
 			dataTransfer: { files: [], dropEffect: 'copy' }
@@ -175,14 +178,18 @@ describe('dropFiles', () => {
 		// A disabled instance would have set 'none'; the inner target's 'copy' stays.
 		expect(over.dataTransfer.dropEffect).toBe('copy');
 		// The drop half needs an ENABLED instance: a disabled one ignores the file
-		// regardless, so only this discriminates the defaultPrevented guard.
+		// regardless, so only this discriminates the defaultPrevented guard. Lit
+		// first, so the ordering (clear the highlight, then bail) is pinned too.
 		const inner = setup();
+		inner.el.dispatchEvent(dragEvent('dragenter'));
+		expect(inner.el.classes.has('drag-over')).toBe(true);
 		const drop = Object.assign(new Event('drop', { cancelable: true }), {
 			dataTransfer: { files: [{ name: 'a.png', type: 'image/png' }], dropEffect: '' }
 		});
 		drop.preventDefault();
 		inner.el.dispatchEvent(drop);
 		expect(inner.calls).toHaveLength(0);
+		expect(inner.el.classes.has('drag-over')).toBe(false);
 	});
 
 	it('removes its listeners on cleanup', () => {

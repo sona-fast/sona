@@ -69,13 +69,18 @@ export function dropFiles(opts: {
 	return (node) => {
 		// preventDefault on dragenter/dragover is what makes the element a drop
 		// target at all; without it the browser opens the file instead. It runs
-		// even while disabled so a drop on a busy zone is swallowed, not navigated.
-		// A nested drop target (the Replace button inside the model card) handles
-		// the event first; an outer swallow-only instance must not then override
-		// its dropEffect, so an already-handled event is left alone.
+		// even while disabled, and for drags that carry no files (a dragged
+		// thumbnail, a link from another tab), so nothing dropped on a zone ever
+		// navigates the tab; only the highlight and cursor are reserved for files.
+		// An event something else already cancelled is left alone so this zone
+		// never overrides that handler's dropEffect.
 		const over = (e: DragEvent) => {
-			if (e.defaultPrevented || !carriesFiles(e)) return;
+			if (e.defaultPrevented) return;
 			e.preventDefault();
+			if (!carriesFiles(e)) {
+				if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+				return;
+			}
 			const off = opts.disabled?.() ?? false;
 			if (e.dataTransfer) e.dataTransfer.dropEffect = off ? 'none' : 'copy';
 			if (!off) node.classList.add('drag-over');

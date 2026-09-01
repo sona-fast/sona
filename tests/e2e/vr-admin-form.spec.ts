@@ -205,6 +205,8 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 	await dropOn(page, '.media-zone', [{ name: 'notes.txt', type: 'text/plain' }]);
 	await expect(page.getByText(/That file type isn't supported/)).toBeVisible();
 	expect(uploads).toBe(before);
+	// The status region moves on from the previous batch's success text too.
+	await expect(page.getByText(/Media upload finished with errors/)).toBeAttached();
 
 	// While an upload runs the zone dims, but it must keep receiving pointer and
 	// drag events: `pointer-events: none` on .disabled would let the next drop
@@ -311,11 +313,11 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 	await expect(page.locator('.model-name')).toHaveText('a.vrm');
 	expect(uploads).toBe(before + 1);
 
-	// While an upload runs the progress bar takes the zone's place. It has no
-	// picker of its own, but it still has to swallow a drop: nothing cancels the
-	// event otherwise and the browser navigates the tab to the dropped file,
-	// losing the form. dropOn reports whether preventDefault was called, which is
-	// the cancellation itself — a dispatched DragEvent never navigates on its own.
+	// While an upload runs the progress bar takes the zone's place. A drop there
+	// misses every zone, so the page-wide guard has to cancel it or the browser
+	// navigates the tab to the file, losing the form. dropOn reports whether
+	// preventDefault was called, which is the cancellation itself — a dispatched
+	// DragEvent never navigates on its own.
 	// A drop that misses the Replace button and lands on the card is swallowed:
 	// cancelled, no request, so the browser never navigates to the file.
 	const beforeCard = uploads;

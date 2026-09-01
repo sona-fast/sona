@@ -181,7 +181,7 @@
 						// or an uppercase one. Both entry points partition against
 						// STICKER_ACCEPT, which lists MIME types only, so anything that
 						// reaches here declared one of the two.
-						format: file.type === 'image/png' ? 'png' : 'webp'
+						format: file.type.toLowerCase() === 'image/png' ? 'png' : 'webp'
 					});
 				} else {
 					failed++;
