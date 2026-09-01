@@ -491,7 +491,7 @@ describe('scrubImageMetadata: AVIF', () => {
 		expect(() => scrubImageMetadata(attack.file)).toThrow(/second meta box/);
 	});
 
-	it('scrubs an AVIF with a free box between the mdat and the end of the file', () => {
+	it('zeroes the content of a free box between the mdat and the end of the file', () => {
 		const trailing = avifFixture({ freeBoxAfterMdat: true });
 		const out = scrubImageMetadata(trailing.file);
 		expect(out.length).toBe(trailing.file.length);
@@ -500,8 +500,45 @@ describe('scrubImageMetadata: AVIF', () => {
 		);
 		expect(text(out.subarray(trailing.exif.start, trailing.exif.end))).not.toContain('MAKERNOT');
 		expect(text(out.subarray(trailing.xmp.start, trailing.xmp.end))).not.toContain('GPS');
-		// The free box after the payloads is copied through as a box, not zeroed.
-		expect(out.subarray(trailing.xmp.end)).toEqual(trailing.file.subarray(trailing.xmp.end));
+		// The box header stays so the walk still adds up; its content is padding
+		// nothing reads, and this one is holding an XMP packet with GPS in it.
+		const box = trailing.xmp.end;
+		expect(text(trailing.file.subarray(box))).toContain('exif:GPSLatitude');
+		expect(out.subarray(box, box + 8)).toEqual(trailing.file.subarray(box, box + 8));
+		expect(out.subarray(box + 8).every((b) => b === 0)).toBe(true);
+	});
+
+	it('zeroes the content of a uuid box carrying an XMP packet', () => {
+		// The Adobe XMP UUID is the box an editor uses when there is no item for
+		// the packet, and it is a top-level box no item list ever names.
+		const uuid = avifFixture({ uuidBoxAfterMdat: true });
+		const out = scrubImageMetadata(uuid.file);
+		expect(out.length).toBe(uuid.file.length);
+		expect(text(uuid.file)).toContain('exif:GPSLatitude');
+		expect(text(out.subarray(uuid.xmp.end))).not.toContain('GPS');
+		const box = uuid.xmp.end;
+		expect(out.subarray(box, box + 8)).toEqual(uuid.file.subarray(box, box + 8));
+		expect(out.subarray(box + 8).every((b) => b === 0)).toBe(true);
+	});
+
+	it('throws on a top-level box type no AVIF carries', () => {
+		// Copying an unrecognised box through is what lets an Exif payload ride in
+		// one, so the top-level allowlist is spelled out the way the item one is.
+		expect(() => scrubImageMetadata(avifFixture({ unknownBoxAfterMdat: true }).file)).toThrow(
+			/top-level zzzz box/
+		);
+	});
+
+	it('scrubs an AVIF whose avif brand sits past byte 64 of a long ftyp', () => {
+		// A mif1-major file can list its compatible brands for as long as the ftyp
+		// box declares; a 64-byte sniff window read this one as no raster at all
+		// and refused the put.
+		const long = avifFixture({ longFtyp: true });
+		expect(long.file.subarray(72, 76)).toEqual(Uint8Array.from(ascii('avif')));
+		const out = scrubImageMetadata(long.file);
+		expect(out.length).toBe(long.file.length);
+		expect(text(out.subarray(long.exif.start, long.exif.end))).not.toContain('MAKERNOT');
+		expect(text(out.subarray(long.xmp.start, long.xmp.end))).not.toContain('GPS');
 	});
 
 	it('scrubs extents that sit in a later box than the one after the meta box', () => {
@@ -740,6 +777,8 @@ describe('scrubImageMetadataStream chunking invariance', () => {
 		['avif', avifFixture().file],
 		['avif with a large mdat', avifFixture({ largeMdat: true }).file],
 		['avif with a free box after the mdat', avifFixture({ freeBoxAfterMdat: true }).file],
+		['avif with a uuid box after the mdat', avifFixture({ uuidBoxAfterMdat: true }).file],
+		['avif with a long ftyp', avifFixture({ longFtyp: true }).file],
 		['avif with the metadata in a second mdat', avifFixture({ splitMdat: true }).file],
 		['gif', gifFixture()],
 		['gif with an image after the trailer', gifFixture({ afterTrailer: true })],

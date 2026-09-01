@@ -86,9 +86,15 @@ export const UNSCRUBBABLE_IMPORT_MESSAGE =
 export const UNSCRUBBABLE_MIGRATE_MESSAGE =
 	"Couldn't strip this file's hidden metadata, so it wasn't migrated. Re-upload a fresh export to replace it.";
 
-/** Leading bytes handed to sniffImageType — enough for an AVIF ftyp box's
- * compatible_brands (which start at offset 16), matching /api/upload. */
-const SNIFF_BYTES = 64;
+/**
+ * Leading bytes handed to sniffImageType, here and in the storage decorator
+ * that shares this constant. An AVIF's compatible_brands start at offset 16 but
+ * run for as long as the ftyp box declares, so the `avif` brand of an
+ * mif1-major file can sit well past byte 64; 256 is far beyond any real ftyp,
+ * and the driver's takeUpTo resolves a shorter input as a short read rather
+ * than waiting for bytes that never come.
+ */
+export const SNIFF_BYTES = 256;
 
 /**
  * Ceiling on any single metadata record we buffer to rewrite (PNG/WebP chunks,
@@ -121,6 +127,20 @@ const MAX_ILOC_EXTENTS = 1024;
  * parseInfe) rather than skipped — skipping is what a relabelled Exif item wants.
  */
 const INERT_AVIF_ITEM_TYPES = new Set(['av01', 'grid', 'iovl', 'iden', 'tmap']);
+
+/**
+ * The top-level boxes a real AVIF carries. `ftyp`, `meta` and `mdat` are the
+ * file; `moov` and `moof` belong to an `avis` image sequence and hold sample
+ * tables rather than metadata payloads, so they are copied through. `free`,
+ * `skip` and `uuid` are the padding boxes, and their CONTENT is zeroed rather
+ * than copied: nothing reads them, and `uuid` is exactly where Adobe parks an
+ * XMP packet. Any other top-level type is refused — a real AVIF has none, and a
+ * box the walk copies unexamined is a box an Exif payload can ride through in.
+ */
+const TOP_LEVEL_AVIF_BOXES = new Set(['ftyp', 'meta', 'mdat', 'moov', 'moof', 'free', 'skip', 'uuid']);
+
+/** The subset of those whose content is zeroed instead of copied. */
+const ZEROED_AVIF_BOXES = new Set(['free', 'skip', 'uuid']);
 
 // ---------------------------------------------------------------------------
 // The driver: a byte-stream coroutine
@@ -741,6 +761,9 @@ function* scrubAvif(): Machine {
 		pos += 8;
 		const declared = u32(header, 0, true);
 		const type = String.fromCharCode(header[4], header[5], header[6], header[7]);
+		if (!TOP_LEVEL_AVIF_BOXES.has(type)) {
+			throw new UnscrubbableImageError(`avif: a top-level ${type} box, which the scrubber does not know`);
+		}
 		let contentLen: number | null;
 		if (declared === 1) {
 			const large = yield { kind: 'take', n: 8 };
@@ -756,6 +779,7 @@ function* scrubAvif(): Machine {
 			throw new UnscrubbableImageError(`avif: ${type} box declares an impossible size`);
 		}
 		if (type !== 'meta') {
+			const zero = ZEROED_AVIF_BOXES.has(type);
 			if (contentLen === null) {
 				// A box that runs to end of file is normal for the mdat AFTER the
 				// item list has been read. Before it, passing the rest through would
@@ -765,13 +789,14 @@ function* scrubAvif(): Machine {
 						`avif: the ${type} box runs to the end of the file before the meta box, so the metadata items were never examined`
 					);
 				}
-				pos = yield* passAvifContent(pos, null, pending);
+				pos = yield* passAvifContent(pos, null, pending, zero);
 				// No box boundary can follow inside a box that runs to end of file,
 				// so nothing left can be a second meta: the tail is payload.
-				yield { kind: 'rest' };
+				if (zero) yield* zeroToEnd();
+				else yield { kind: 'rest' };
 				return;
 			}
-			pos = yield* passAvifContent(pos, contentLen, pending);
+			pos = yield* passAvifContent(pos, contentLen, pending, zero);
 			continue;
 		}
 		if (metaSeen) {
@@ -797,13 +822,17 @@ function* scrubAvif(): Machine {
 /**
  * Pass one box's content through, rewriting every pending extent inside it.
  * `contentLen` of null means the box runs to end of file, so every extent left
- * belongs to it and the caller passes the remainder through. Returns the file
- * offset the walk has reached.
+ * belongs to it and the caller passes the remainder through. With `zero` the
+ * content is overwritten instead of copied — a padding box nothing reads (see
+ * ZEROED_AVIF_BOXES) — and a pending extent inside one is still rewritten in
+ * place, which is odd but legal, rather than left to the zeroing. Returns the
+ * file offset the walk has reached.
  */
 function* passAvifContent(
 	pos: number,
 	contentLen: number | null,
-	pending: AvifExtent[]
+	pending: AvifExtent[],
+	zero = false
 ): Generator<Step, number, Uint8Array> {
 	const end = contentLen === null ? Infinity : pos + contentLen;
 	while (pending.length && pending[0].offset < end) {
@@ -818,14 +847,30 @@ function* passAvifContent(
 				'avif: a metadata extent runs past the end of the box holding it, so it cannot be rewritten in place'
 			);
 		}
-		if (extent.offset > pos) yield { kind: 'copy', n: extent.offset - pos };
+		if (extent.offset > pos) yield* passAvifGap(extent.offset - pos, zero);
 		const payload = yield { kind: 'take', n: extent.length };
 		yield { kind: 'write', bytes: scrubAvifExtent(extent.kind, payload) };
 		pos = extent.offset + extent.length;
 	}
 	if (contentLen === null) return pos;
-	if (end > pos) yield { kind: 'copy', n: end - pos };
+	if (end > pos) yield* passAvifGap(end - pos, zero);
 	return end;
+}
+
+/** Move `n` bytes of box content along: copied, or overwritten with zeros. */
+function* passAvifGap(n: number, zero: boolean): Machine {
+	if (!zero) {
+		yield { kind: 'copy', n };
+		return;
+	}
+	// Blocked rather than taken whole: a padding box can be megabytes, and only
+	// the block under inspection should ever be held.
+	for (let left = n; left > 0; ) {
+		const block = Math.min(left, SCAN_BLOCK_BYTES);
+		yield { kind: 'take', n: block };
+		yield { kind: 'write', bytes: new Uint8Array(block) };
+		left -= block;
+	}
 }
 
 function scrubAvifExtent(kind: 'exif' | 'xmp', payload: Uint8Array): Uint8Array {
@@ -978,7 +1023,7 @@ function parseInfe(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>, seen: S
 		// through unrewritten, so the inert set is spelled out and the rest refused.
 		if (!INERT_AVIF_ITEM_TYPES.has(itemType)) {
 			throw new UnscrubbableImageError(
-				`avif: the iinf box names an item of type "${itemType.slice(0, 4)}", which the scrubber does not know`
+				`avif: the iinf box names an item of type "${itemType}", which the scrubber does not know`
 			);
 		}
 		return;

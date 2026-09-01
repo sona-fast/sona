@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { getStorage } from './index';
 import { scrubImageMetadata, UnscrubbableImageError } from './scrub-metadata';
-import { jpegFixture } from './scrub-metadata.fixtures';
+import { avifFixture, jpegFixture } from './scrub-metadata.fixtures';
 import type { SiteSettings } from '$lib/server/settings';
 
 // The decorator is not exported through getStorage's signature on purpose:
@@ -147,6 +147,38 @@ describe('getStorage wraps the provider in metadata scrubbing', () => {
 		});
 		expect(stored[0].bytes).toEqual(scrubImageMetadata(jpeg));
 		expect(stored[0].bytes.length).toBe(jpeg.length);
+	});
+
+	it('sniffs an AVIF whose avif brand sits past byte 64 of its ftyp', async () => {
+		// The sniff window has to cover the whole ftyp box: an mif1-major AVIF can
+		// carry the `avif` brand as its last compatible brand, and a 64-byte peek
+		// read those bytes as no raster and stored them with their GPS.
+		const stored: Stored[] = [];
+		const { storage } = storageFor(stored);
+		const { file } = avifFixture({ longFtyp: true });
+		await storage.put({
+			suggestedKey: 'stickers/mislabelled.webm',
+			body: file,
+			contentType: 'video/webm',
+			filename: 'mislabelled.webm'
+		});
+		expect(stored[0].bytes).toEqual(scrubImageMetadata(file));
+		expect(new TextDecoder('latin1').decode(stored[0].bytes)).not.toContain('GPSLatitude');
+	});
+
+	it('sniffs the same long ftyp on the streamed path', async () => {
+		const stored: Stored[] = [];
+		const { storage } = storageFor(stored);
+		const { file } = avifFixture({ longFtyp: true });
+		await storage.put({
+			suggestedKey: 'stickers/mislabelled-stream.webm',
+			body: streamOf(file),
+			size: file.length,
+			contentType: 'video/webm',
+			filename: 'mislabelled-stream.webm'
+		});
+		expect(stored[0].bytes).toEqual(scrubImageMetadata(file));
+		expect(stored[0].bytes.length).toBe(file.length);
 	});
 
 	it('streams a non-raster body through the sniff byte-identical', async () => {

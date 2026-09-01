@@ -451,6 +451,11 @@ function isoBox(type: string, body: number[]): number[] {
 	return [...u32be(body.length + 8), ...ascii(type), ...body];
 }
 
+/** BE7ACFCB-97A9-42E8-9C71-999491E3AFAC: the UUID Adobe stamps an XMP box with. */
+const ADOBE_XMP_UUID = [
+	0xbe, 0x7a, 0xcf, 0xcb, 0x97, 0xa9, 0x42, 0xe8, 0x9c, 0x71, 0x99, 0x94, 0x91, 0xe3, 0xaf, 0xac
+];
+
 function fullBox(type: string, version: number, flags: number, body: number[]): number[] {
 	return isoBox(type, [version, (flags >> 16) & 0xff, (flags >> 8) & 0xff, flags & 0xff, ...body]);
 }
@@ -478,8 +483,20 @@ export interface AvifOptions {
 	freeBoxBeforeMeta?: boolean;
 	/** Split the Exif item across two extents, which cannot be rewritten in place. */
 	splitExifExtent?: boolean;
-	/** Put a `free` box between the mdat and the end of the file. */
+	/** Put a `free` box holding an XMP packet between the mdat and the end of the file. */
 	freeBoxAfterMdat?: boolean;
+	/**
+	 * Put a `uuid` box after the mdat carrying the Adobe XMP UUID and a packet
+	 * with GPS — where an editor parks XMP that has no box of its own.
+	 */
+	uuidBoxAfterMdat?: boolean;
+	/** Put a box of a top-level type no AVIF carries after the mdat. */
+	unknownBoxAfterMdat?: boolean;
+	/**
+	 * Write a 76-byte ftyp with `mif1` as the major brand and `avif` as the last
+	 * compatible brand, at offset 72 — past a 64-byte sniff window.
+	 */
+	longFtyp?: boolean;
 	/**
 	 * Hold the Exif and XMP payloads in a SECOND mdat, with a `free` box between
 	 * it and the mdat holding the av01 — so the extents sit two boxes past the
@@ -614,7 +631,12 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 		? exifPayload.length + xmpPayload.length + 32
 		: exifPayload.length;
 
-	const ftyp = isoBox('ftyp', [...ascii('avif'), ...u32be(0), ...ascii('avif'), ...ascii('mif1'), ...ascii('miaf')]);
+	// The long form pads the compatible_brands so the `avif` brand lands at file
+	// offset 72: fourteen filler brands, then `avif` as the fifteenth.
+	const longBrands = Array.from({ length: 14 }, (_, i) => ascii(`br${String(i).padStart(2, '0')}`)).flat();
+	const ftyp = opts.longFtyp
+		? isoBox('ftyp', [...ascii('mif1'), ...u32be(0), ...longBrands, ...ascii('avif')])
+		: isoBox('ftyp', [...ascii('avif'), ...u32be(0), ...ascii('avif'), ...ascii('mif1'), ...ascii('miaf')]);
 
 	const build = (av01At: number, exifAt: number, xmpAt: number): number[] => {
 		const hdlr = fullBox('hdlr', 0, 0, [...u32be(0), ...ascii('pict'), ...u32be(0), ...u32be(0), ...u32be(0), 0]);
@@ -725,13 +747,18 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 		: opts.largeMdat
 			? [...u32be(1), ...ascii('mdat'), ...u32be(0), ...u32be(mdatBody.length + 16), ...mdatBody]
 			: isoBox('mdat', mdatBody);
-	// The straddling extent needs bytes past the mdat to reach into.
-	const trailingFree =
-		opts.freeBoxAfterMdat || opts.straddlingExifExtent || opts.mdatBeforeMeta
-			? isoBox('free', new Array(64).fill(0))
-			: [];
+	// The straddling extent needs bytes past the mdat to reach into. The padding
+	// boxes carry a real XMP packet so a test can tell a zeroed box from a copied
+	// one; `zzzz` is a top-level type no AVIF has.
+	const trailingBox = opts.uuidBoxAfterMdat
+		? isoBox('uuid', [...ADOBE_XMP_UUID, ...xmpWithGps()])
+		: opts.unknownBoxAfterMdat
+			? isoBox('zzzz', xmpWithGps())
+			: opts.freeBoxAfterMdat || opts.straddlingExifExtent || opts.mdatBeforeMeta
+				? isoBox('free', xmpWithGps())
+				: [];
 	const meta = build(av01At, opts.exifExtentPastEnd ? mdatStart + mdat.length + 16 : exifAt, xmpAt);
-	const baseLen = mdatStart + mdat.length + trailingFree.length;
+	const baseLen = mdatStart + mdat.length + trailingBox.length;
 	// A whole second AVIF item list and payload store, appended past the end of
 	// the first — the bytes a walk that stopped at the last extent hands back.
 	const secondAt = baseLen + metaSize + 8;
@@ -744,8 +771,8 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	return {
 		file: Uint8Array.from(
 			opts.mdatBeforeMeta
-				? [...ftyp, ...mdat, ...meta, ...trailingFree]
-				: [...ftyp, ...free, ...meta, ...mdat, ...trailingFree, ...second]
+				? [...ftyp, ...mdat, ...meta, ...trailingBox]
+				: [...ftyp, ...free, ...meta, ...mdat, ...trailingBox, ...second]
 		),
 		av01: { start: av01At, end: av01At + av01Payload.length },
 		exif: { start: exifAt, end: exifAt + exifPayload.length },

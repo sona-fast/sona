@@ -16,13 +16,9 @@
 
 import { isAllowedImageType } from './allowlist';
 import { peekStream } from '$lib/server/peek-stream';
-import { scrubImageMetadata, scrubImageMetadataStream } from './scrub-metadata';
+import { scrubImageMetadata, scrubImageMetadataStream, SNIFF_BYTES } from './scrub-metadata';
 import { sniffImageType } from './sniff';
 import type { StorageProvider, PutInput, PutResult, DeleteOrphansOptions } from './types';
-
-/** Leading bytes handed to sniffImageType — enough for an AVIF ftyp box's
- * compatible_brands, matching the scrubber's own sniff window. */
-const SNIFF_BYTES = 64;
 
 /**
  * Wrap `inner` so every stored raster goes through the metadata scrubber.

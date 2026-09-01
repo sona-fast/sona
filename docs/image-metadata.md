@@ -35,7 +35,7 @@ Lottie JSON of an animated Telegram sticker, and VR model bytes.
 | JPEG | The Exif sub-IFD, the GPS IFD, the maker note, IFD1 and its embedded thumbnail, the XMP packet, the multi-picture (MPF) index, the Photoshop resource block with its IPTC fields, and every byte after the end-of-image marker | Orientation, Artist, Copyright, the ICC color profile, JFIF, the comment segment, the scan up to and including the end-of-image marker, and every other APPn segment |
 | PNG | `eXIf` beyond the three kept tags, the `tEXt`, `zTXt` and `iTXt` text chunks (`iTXt` is where XMP lives), the compressed-Exif `zxIf` chunk and the `tXMP` chunk — matched whatever case the chunk type is written in — and every byte after the `IEND` chunk | Orientation, Artist, Copyright, `iCCP`, `IDAT`, and every other chunk, APNG included |
 | WebP | The `EXIF` chunk beyond the three kept tags, the `XMP ` chunk, the XMP feature bit in `VP8X`, and any bytes past the declared RIFF size | Orientation, Artist, Copyright, `ICCP`, `ANIM`, `ANMF`, `ALPH`, `VP8`, `VP8L`, and every other chunk |
-| AVIF | The Exif item beyond Artist and Copyright, and the XMP item | The image data, the item properties, the `irot`/`imir` orientation, and every other box. Boxes after the item payloads are still walked box by box: a second `meta` box is refused, and every other box is copied through |
+| AVIF | The Exif item beyond Artist and Copyright, the XMP item, and the content of every `free`, `skip` and `uuid` box, which is where an editor parks an XMP packet that has no item of its own | The image data, the item properties, the `irot`/`imir` orientation, and the `ftyp`, `mdat`, `moov` and `moof` boxes. Boxes after the item payloads are still walked box by box: a second `meta` box is refused, so is a top-level box of any type outside that list, and the padding boxes keep their headers so the box structure still adds up |
 | GIF | The payload of an `XMP DataXMP` application extension, and every byte after the trailer | Every other block, the comment extension and the XMP extension's magic trailer included |
 
 A JPEG's other application segments are the known gap. Sona rewrites APP1, APP2
@@ -100,9 +100,9 @@ item list names them, and an extent behind the walk cannot be rewritten in
 place. No common encoder writes it. An AVIF whose item list names a `mime` item
 that is not XMP is refused as well, because the scrubber cannot tell what that
 payload holds. So is an AVIF naming an item of any type outside the inert set
-the scrubber knows — `av01`, `grid`, `iovl`, `iden`, the `tmap` gain map, plus the `exif` and `mime`
-items it rewrites — because an item the walk skips is an item whose bytes ship
-as they are.
+the scrubber knows — `av01`, `grid`, `iovl`, `iden`, the `tmap` gain map, plus
+the `exif` and `mime` items it rewrites — because the walk copies an item it
+skips straight through, bytes and all.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that
@@ -115,7 +115,10 @@ it with a fresh export.
 
 Sona does not rewrite objects already in the bucket, and nothing sweeps the
 bucket, so a photo uploaded before the scrubber existed keeps whatever metadata
-it came with. Re-uploading the file cleans it up, and so does migrating between
-storage providers, because migration re-stores every object through the same
-layer. An old object the parser refuses is listed as a migration failure
-instead, and only a fresh upload replaces it.
+it came with. Re-uploading the file cleans it up. So does migrating between
+storage providers, but only for the objects the migration re-stores: it walks
+the artwork table, so it reaches artwork images and their thumbnails and
+nothing else. Artist avatars, Telegram sticker media, imported fursuit photos
+and VR media keep whatever metadata they were stored with until someone
+uploads them again. An old object the parser refuses is listed as a migration
+failure instead, and only a fresh upload replaces it.
