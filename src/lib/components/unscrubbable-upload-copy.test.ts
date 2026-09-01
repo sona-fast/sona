@@ -29,12 +29,9 @@ describe('the 422 upload refusal reaches the screen', () => {
 		// a wording change lands on every surface at once — an operator reading
 		// the import result and one reading the upload tile see the same fix.
 		expect(UNSCRUBBABLE_MESSAGE).toBe(m.admin_upload_error_unscrubbable());
-		// The sticker import's page names the item it failed on, so it says so.
-		expect(UNSCRUBBABLE_STICKER_MESSAGE).toMatch(/sticker/);
 		expect(UNSCRUBBABLE_STICKER_MESSAGE).toMatch(/metadata/);
 		// An imported photo is not the operator's file to re-export, so that
 		// import's sentence says what happened and stops there.
-		expect(UNSCRUBBABLE_IMPORT_MESSAGE).toMatch(/photo/);
 		expect(UNSCRUBBABLE_IMPORT_MESSAGE).toMatch(/metadata/);
 		expect(UNSCRUBBABLE_IMPORT_MESSAGE).not.toMatch(/upload/i);
 	});

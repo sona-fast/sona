@@ -545,6 +545,75 @@ describe('scrubImageMetadata: AVIF', () => {
 		);
 		expect(() => scrubImageMetadata(avifFixture({ decoyIinf: true }).file)).toThrow(/more than one iinf/);
 	});
+
+	it('empties the XMP item whatever case and parameters its content type carries', () => {
+		// A reader lowercases the type and ignores the parameters before deciding
+		// the item is XMP; an exact-string match let all three of these through
+		// with their GPS intact.
+		for (const contentType of ['application/RDF+XML', 'application/rdf+xml;charset=utf-8', 'application/rdf+xml ']) {
+			const fixture = avifFixture({ xmpContentType: contentType });
+			const out = scrubImageMetadata(fixture.file);
+			expect(text(out.subarray(fixture.xmp.start, fixture.xmp.end))).not.toContain('GPS');
+		}
+	});
+
+	it('throws on a mime item whose content type is not XMP', () => {
+		// A real AVIF carries no other mime item, so an unrecognised one is a
+		// payload this scrubber cannot classify rather than something to skip.
+		const odd = avifFixture({ xmpContentType: 'application/octet-stream' });
+		expect(() => scrubImageMetadata(odd.file)).toThrow(/not XMP/);
+	});
+
+	it('rewrites an Exif item whose type is spelled in lower case', () => {
+		const lower = avifFixture({ lowercaseExifType: true });
+		const out = scrubImageMetadata(lower.file);
+		expect(out.length).toBe(lower.file.length);
+		expect(text(out.subarray(lower.exif.start, lower.exif.end))).not.toContain('MAKERNOT');
+	});
+
+	it('throws when a box inside the meta box hides the item list', () => {
+		// The pitm box rewritten as a `free` that swallows the rest of the meta
+		// box, either by declaring no size or by declaring the exact bytes left.
+		// Every byte stays where it was, so a reader still finds the Exif item;
+		// a walk that trusts the decoy found no items and stored the file whole.
+		expect(() => scrubImageMetadata(avifFixture({ hideIinf: 'sizeZero' }).file)).toThrow(/declares no size/);
+		expect(() => scrubImageMetadata(avifFixture({ hideIinf: 'covering' }).file)).toThrow(/holds no iinf/);
+	});
+
+	it('stores an AVIF whose item list names no metadata item', () => {
+		// The counterpart to the refusal above: an iinf IS there, it just names
+		// only the image. A metadata-free AVIF has to keep storing.
+		const clean = avifFixture({ noMetadataItems: true });
+		expect(scrubImageMetadata(clean.file)).toEqual(clean.file);
+	});
+
+	it('throws when the iinf box declares more items than the cap', () => {
+		// An infe record is about 20 bytes, so a meta box at the record cap holds
+		// 200,000 of them — one map entry each.
+		expect(() => scrubImageMetadata(avifFixture({ iinfCountBomb: true }).file)).toThrow(/over the \d+-item cap/);
+	});
+
+	it('throws when one item_ID is named or placed twice', () => {
+		// The map keeps the last entry and a reader may keep the first, so a decoy
+		// on either side of the real one moves the scrubber off the real payload.
+		expect(() => scrubImageMetadata(avifFixture({ duplicateInfe: true }).file)).toThrow(
+			/names item 2 more than once/
+		);
+		expect(() => scrubImageMetadata(avifFixture({ duplicateIlocItem: 'decoyFirst' }).file)).toThrow(
+			/places item 2 more than once/
+		);
+		expect(() => scrubImageMetadata(avifFixture({ duplicateIlocItem: 'decoyLast' }).file)).toThrow(
+			/places item 2 more than once/
+		);
+	});
+
+	it('throws when a normally sized mdat comes before the meta box', () => {
+		// Legal layout, no encoder writes it: the payloads have gone past by the
+		// time the item list names them, and an extent behind the walk cannot be
+		// rewritten in place.
+		const early = avifFixture({ mdatBeforeMeta: true });
+		expect(() => scrubImageMetadata(early.file)).toThrow(/sits before the meta box/);
+	});
 });
 
 describe('scrubImageMetadata: pass-through and rejection', () => {

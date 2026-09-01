@@ -500,6 +500,28 @@ export interface AvifOptions {
 	decoyIloc?: 'before' | 'after';
 	/** Add a decoy iinf box naming the Exif item a second time. */
 	decoyIinf?: boolean;
+	/** Write the XMP item's content_type as this instead of `application/rdf+xml`. */
+	xmpContentType?: string;
+	/** Spell the Exif item's four-character type in lower case. */
+	lowercaseExifType?: boolean;
+	/** Name only the av01 item: a legitimately metadata-free AVIF. */
+	noMetadataItems?: boolean;
+	/**
+	 * Rewrite the `pitm` box's header so it hides the `iinf` that follows it —
+	 * `sizeZero` declares "to the end of the parent", `covering` declares a size
+	 * reaching the end of the meta box. Both keep every other byte in place.
+	 */
+	hideIinf?: 'sizeZero' | 'covering';
+	/** Declare an iinf entry_count over the parser's item cap. */
+	iinfCountBomb?: boolean;
+	/** Name the Exif item twice inside the one iinf box. */
+	duplicateInfe?: boolean;
+	/** Place item 2 twice in the one iloc box, decoy first or decoy last. */
+	duplicateIlocItem?: 'decoyFirst' | 'decoyLast';
+	/** Put the mdat ahead of the meta box, so the payloads go past before the
+	 * item list names them. A trailing `free` box gives the walk a box to reach
+	 * the pending extents in. */
+	mdatBeforeMeta?: boolean;
 	/**
 	 * Replace the iloc with one built to make the PARSE expensive rather than to
 	 * place any bytes: `zeroWidth` names 200 items of 65535 extents each, in
@@ -529,6 +551,21 @@ function bombIloc(kind: 'zeroWidth' | 'items' | 'extents'): number[] {
 	const items: number[] = [];
 	for (let id = 1; id <= 200; id++) items.push(...u16be(id), ...u16be(0), ...u16be(65535));
 	return fullBox('iloc', 0, 0, [0x00, 0x00, ...u16be(200), ...items]);
+}
+
+/**
+ * Rewrite the `pitm` box's 8-byte header in place as a `free` box that hides
+ * everything after it: `sizeZero` says "to the end of the parent", `covering`
+ * declares the exact number of bytes left in the meta box. Nothing moves, so
+ * the item list is still there for a reader that walks past the decoy — only a
+ * walk that trusts the declared size stops seeing it.
+ */
+function hideIinfBehindPitm(meta: number[], mode: 'sizeZero' | 'covering'): number[] {
+	const out = [...meta];
+	const marker = ascii('pitm');
+	const at = out.findIndex((_, i) => marker.every((b, k) => out[i + k] === b)) - 4;
+	out.splice(at, 8, ...u32be(mode === 'sizeZero' ? 0 : out.length - at), ...ascii('free'));
+	return out;
 }
 
 export interface AvifFixture {
@@ -562,12 +599,16 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	const build = (av01At: number, exifAt: number, xmpAt: number): number[] => {
 		const hdlr = fullBox('hdlr', 0, 0, [...u32be(0), ...ascii('pict'), ...u32be(0), ...u32be(0), ...u32be(0), 0]);
 		const pitm = fullBox('pitm', 0, 0, u16be(1));
-		const iinf = fullBox('iinf', 0, 0, [
-			...u16be(3),
-			...infe(1, 'av01', 'Image'),
-			...infe(2, 'Exif', 'Exif'),
-			...infe(3, 'mime', 'XMP', 'application/rdf+xml')
-		]);
+		const exifType = opts.lowercaseExifType ? 'exif' : 'Exif';
+		const iinf = opts.noMetadataItems
+			? fullBox('iinf', 0, 0, [...u16be(1), ...infe(1, 'av01', 'Image')])
+			: fullBox('iinf', 0, 0, [
+					...u16be(opts.iinfCountBomb ? 1000 : opts.duplicateInfe ? 4 : 3),
+					...infe(1, 'av01', 'Image'),
+					...infe(2, exifType, 'Exif'),
+					...(opts.duplicateInfe ? infe(2, exifType, 'Exif') : []),
+					...infe(3, 'mime', 'XMP', opts.xmpContentType ?? 'application/rdf+xml')
+				]);
 		const version = opts.idatConstruction ? 1 : 0;
 		const item = (id: number, method: number, at: number, length: number, split = false): number[] => [
 			...u16be(id),
@@ -581,20 +622,26 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			...(split ? [...u32be(at + length - 4), ...u32be(4)] : [])
 		];
 		// offset_size=4, length_size=4, base_offset_size=0, index_size/reserved=0.
-		const placed = opts.exifItemWithoutLocation
-			? [...u16be(2), ...item(1, 0, av01At, av01Payload.length), ...item(3, 0, xmpAt, xmpPayload.length)]
-			: [
-					...u16be(3),
-					...item(1, 0, av01At, av01Payload.length),
-					...item(
-						2,
-						opts.idatConstruction ? 1 : 0,
-						exifAt,
-						opts.hugeExifExtent ? 0x7ffffff0 : exifExtentLen,
-						opts.splitExifExtent
-					),
-					...item(3, 0, xmpAt, xmpPayload.length)
-				];
+		// A second entry for item 2 pointing at four harmless bytes: whichever of
+		// the two the scrubber keeps, the other is the one a reader may follow.
+		const decoyItem = opts.duplicateIlocItem ? item(2, 0, 0, 4) : [];
+		const realItem = item(
+			2,
+			opts.idatConstruction ? 1 : 0,
+			exifAt,
+			opts.hugeExifExtent ? 0x7ffffff0 : exifExtentLen,
+			opts.splitExifExtent
+		);
+		const placed = opts.noMetadataItems
+			? [...u16be(1), ...item(1, 0, av01At, av01Payload.length)]
+			: opts.exifItemWithoutLocation
+				? [...u16be(2), ...item(1, 0, av01At, av01Payload.length), ...item(3, 0, xmpAt, xmpPayload.length)]
+				: [
+						...u16be(opts.duplicateIlocItem ? 4 : 3),
+						...item(1, 0, av01At, av01Payload.length),
+						...(opts.duplicateIlocItem === 'decoyFirst' ? [...decoyItem, ...realItem] : [...realItem, ...decoyItem]),
+						...item(3, 0, xmpAt, xmpPayload.length)
+					];
 		const iloc = opts.ilocBomb ? bombIloc(opts.ilocBomb) : fullBox('iloc', version, 0, [0x44, 0x00, ...placed]);
 		// A decoy places the Exif item somewhere harmless; whichever iloc the
 		// scrubber kept, the other one is the copy a reader might follow.
@@ -606,7 +653,7 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			...isoBox('ipco', [...fullBox('av1C', 0, 0, [0x81, 0x00, 0x0c, 0x00]), ...isoBox('irot', [1])]),
 			...fullBox('ipma', 0, 0, [...u32be(1), ...u16be(1), 1, 0x81])
 		]);
-		return fullBox('meta', 0, 0, [
+		const meta = fullBox('meta', 0, 0, [
 			...hdlr,
 			...pitm,
 			...iinf,
@@ -616,6 +663,7 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			...(opts.decoyIloc === 'after' ? decoyIloc : []),
 			...iprp
 		]);
+		return opts.hideIinf ? hideIinfBehindPitm(meta, opts.hideIinf) : meta;
 	};
 
 	// Pass one sizes the meta box with placeholder offsets; the layout is
@@ -625,7 +673,9 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	// A size-0 box says "runs to the end of the file"; placed before meta, it
 	// would hand the whole file back unexamined.
 	const free = opts.freeBoxBeforeMeta ? [...u32be(0), ...ascii('free')] : [];
-	const mdatStart = ftyp.length + free.length + metaSize;
+	// With mdatBeforeMeta the payload store comes first, so the meta box that
+	// names it is what the walk reaches last.
+	const mdatStart = opts.mdatBeforeMeta ? ftyp.length : ftyp.length + free.length + metaSize;
 	const av01At = mdatStart + mdatHeader;
 	// With splitMdat the metadata payloads live in a second mdat, past a `free`
 	// box: the extents are then two boxes on from the meta box, not in the one
@@ -633,7 +683,7 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	const gapFree = isoBox('free', [0, 0, 0, 0]);
 	const exifAt = av01At + av01Payload.length + (opts.splitMdat ? gapFree.length + 8 : 0);
 	const xmpAt = exifAt + exifPayload.length;
-	const mdatBody = [...av01Payload, ...exifPayload, ...xmpPayload];
+	const mdatBody = opts.noMetadataItems ? [...av01Payload] : [...av01Payload, ...exifPayload, ...xmpPayload];
 	const mdat = opts.splitMdat
 		? [...isoBox('mdat', av01Payload), ...gapFree, ...isoBox('mdat', [...exifPayload, ...xmpPayload])]
 		: opts.largeMdat
@@ -641,7 +691,9 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			: isoBox('mdat', mdatBody);
 	// The straddling extent needs bytes past the mdat to reach into.
 	const trailingFree =
-		opts.freeBoxAfterMdat || opts.straddlingExifExtent ? isoBox('free', new Array(64).fill(0)) : [];
+		opts.freeBoxAfterMdat || opts.straddlingExifExtent || opts.mdatBeforeMeta
+			? isoBox('free', new Array(64).fill(0))
+			: [];
 	const meta = build(av01At, opts.exifExtentPastEnd ? mdatStart + mdat.length + 16 : exifAt, xmpAt);
 	const baseLen = mdatStart + mdat.length + trailingFree.length;
 	// A whole second AVIF item list and payload store, appended past the end of
@@ -654,7 +706,11 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			]
 		: [];
 	return {
-		file: Uint8Array.from([...ftyp, ...free, ...meta, ...mdat, ...trailingFree, ...second]),
+		file: Uint8Array.from(
+			opts.mdatBeforeMeta
+				? [...ftyp, ...mdat, ...meta, ...trailingFree]
+				: [...ftyp, ...free, ...meta, ...mdat, ...trailingFree, ...second]
+		),
 		av01: { start: av01At, end: av01At + av01Payload.length },
 		exif: { start: exifAt, end: exifAt + exifPayload.length },
 		xmp: { start: xmpAt, end: xmpAt + xmpPayload.length }

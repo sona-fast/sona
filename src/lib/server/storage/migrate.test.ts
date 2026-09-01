@@ -6,7 +6,8 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '$lib/server/db/schema';
 import { makeD1 } from '$lib/server/test/d1';
 import { PNG_MAGIC } from '$lib/server/test/raster-fixtures';
-import { migrateImages } from './migrate';
+import { migrateImages, migrateNextBatch } from './migrate';
+import { UnscrubbableImageError, UNSCRUBBABLE_MIGRATE_MESSAGE } from './scrub-metadata';
 import type { StorageProvider } from './types';
 
 function makeDb() {
@@ -238,5 +239,60 @@ describe('migrate copyOne content sniffing (SONA-141)', () => {
 		const result = await migrateImages({ db, fetchFn, target });
 		expect(result.migrated).toBe(1);
 		expect(result.failed).toBe(0);
+	});
+});
+
+describe('migrateNextBatch failure rows', () => {
+	it('tells the operator what to do when an object cannot be scrubbed', async () => {
+		// An object stored before the scrubber existed (SONA-170) is refused on the
+		// way into the new provider. The failures list is rendered on the migrate
+		// page, so the row has to say how to fix it, not repeat the parser.
+		const { sqlite, db } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+			.run('t', 'old', 'https://old.example/f/old');
+
+		const bytes = pngBytes(512);
+		const fetchFn = vi.fn(
+			async () =>
+				new Response(streamOf(bytes), {
+					headers: { 'content-type': 'image/png', 'content-length': String(bytes.length) }
+				})
+		) as unknown as typeof fetch;
+		// The scrub decorator's refusal reaches the caller wrapped in the
+		// provider's own fetch error, which is why this matches through
+		// isUnscrubbable rather than on the error it caught.
+		const target = fakeTarget(async () => {
+			throw new Error('fetch failed', { cause: new UnscrubbableImageError('png: chunk length is impossible') });
+		});
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+		const progress = await migrateNextBatch({ db, fetchFn, target, batchSize: 10 });
+		expect(progress.failed).toBe(1);
+		expect(progress.failures[0].error).toBe(UNSCRUBBABLE_MIGRATE_MESSAGE);
+		// The parser's own wording is still available, in the log.
+		expect(warn).toHaveBeenCalled();
+		warn.mockRestore();
+	});
+
+	it('keeps the underlying message for any other failure', async () => {
+		const { sqlite, db } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+			.run('t', 'old', 'https://old.example/f/old');
+
+		const bytes = pngBytes(512);
+		const fetchFn = vi.fn(
+			async () =>
+				new Response(streamOf(bytes), {
+					headers: { 'content-type': 'image/png', 'content-length': String(bytes.length) }
+				})
+		) as unknown as typeof fetch;
+		const target = fakeTarget(async () => {
+			throw new Error('bucket is full');
+		});
+
+		const progress = await migrateNextBatch({ db, fetchFn, target, batchSize: 10 });
+		expect(progress.failures[0].error).toBe('bucket is full');
 	});
 });

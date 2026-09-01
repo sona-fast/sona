@@ -613,6 +613,15 @@ describe('saveManualPack', () => {
 });
 
 describe('importTelegramPack', () => {
+	afterEach(() => {
+		// Restore the module-level default (throwing download) for the suites that
+		// follow, whichever test in here overrode it.
+		vi.mocked(downloadFile).mockReset();
+		vi.mocked(downloadFile).mockImplementation(async () => {
+			throw new Error('download boom');
+		});
+	});
+
 	it('leaves no empty pack when every download fails', async () => {
 		const { db } = makeDb();
 		await seedCharacterAndArtist(db);
@@ -671,11 +680,6 @@ describe('importTelegramPack', () => {
 		// The parser's own wording is still available, in the log.
 		expect(warn).toHaveBeenCalled();
 		warn.mockRestore();
-		// Restore the module-level default so later suites see the throwing one.
-		vi.mocked(downloadFile).mockReset();
-		vi.mocked(downloadFile).mockImplementation(async () => {
-			throw new Error('download boom');
-		});
 	});
 });
 

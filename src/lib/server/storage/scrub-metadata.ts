@@ -81,6 +81,11 @@ export const UNSCRUBBABLE_STICKER_MESSAGE =
 export const UNSCRUBBABLE_IMPORT_MESSAGE =
 	"Couldn't strip this photo's hidden metadata, so it wasn't saved.";
 
+/** The same refusal during a provider migration, where the object predates the
+ * scrubber and the operator has to replace it rather than retry the copy. */
+export const UNSCRUBBABLE_MIGRATE_MESSAGE =
+	"Couldn't strip this file's hidden metadata, so it wasn't migrated. Re-upload a fresh export to replace it.";
+
 /** Leading bytes handed to sniffImageType — enough for an AVIF ftyp box's
  * compatible_brands (which start at offset 16), matching /api/upload. */
 const SNIFF_BYTES = 64;
@@ -101,9 +106,11 @@ const MAX_ASCII_BYTES = 4096;
  * extent each, so 256 items and 1024 extents in total are far above anything an
  * encoder writes; both exist because an item record — and an extent inside it —
  * can cost as little as zero input bytes, so the declared counts, not the file
- * size, decide how much this parse allocates.
+ * size, decide how much this parse allocates. The item cap covers iinf as well
+ * as iloc: an infe record is about 20 bytes, so a meta box at the record cap
+ * holds 200,000 of them, and each one is a map entry.
  */
-const MAX_ILOC_ITEMS = 256;
+const MAX_AVIF_ITEMS = 256;
 const MAX_ILOC_EXTENTS = 1024;
 
 // ---------------------------------------------------------------------------
@@ -328,8 +335,13 @@ function* scrubMachine(): Machine {
 		case 'image/avif':
 			yield* scrubAvif();
 			return;
-		default:
+		case 'image/gif':
 			yield* scrubGif();
+			return;
+		default:
+			// A type the sniffer learns to recognise but nothing here walks would
+			// otherwise fall into whichever branch sat last.
+			throw new UnscrubbableImageError(`no scrubber for ${type}`);
 	}
 }
 
@@ -845,6 +857,13 @@ function parseAvifMeta(meta: Uint8Array): AvifExtent[] {
 			locations = parseIloc(box.body);
 		}
 	}
+	// No iinf at all means the walk never saw an item list — which is what a box
+	// covering the rest of the meta box buys an attacker: the items are still
+	// there for a reader that walks past it, and the scrubber found nothing to
+	// rewrite. An iinf naming no metadata item is a different thing and is fine.
+	if (!iinfSeen) {
+		throw new UnscrubbableImageError('avif: the meta box holds no iinf, so its item list was never read');
+	}
 	if (!items.size) return [];
 	const out: AvifExtent[] = [];
 	for (const [id, kind] of items) {
@@ -886,13 +905,31 @@ function parseIinf(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>): void {
 	const version = body[0];
 	const countLen = version === 0 ? 2 : 4;
 	if (body.length < 4 + countLen) throw new UnscrubbableImageError('avif: iinf box is truncated');
+	// entry_count is declared, so it is capped before anything is walked; the
+	// records actually present are counted too, because a small declared count
+	// with a meta box full of infe boxes costs the same map entries.
+	const declared = countLen === 2 ? u16(body, 4, true) : u32(body, 4, true);
+	if (declared > MAX_AVIF_ITEMS) {
+		throw new UnscrubbableImageError(
+			`avif: the iinf box lists ${declared} items, over the ${MAX_AVIF_ITEMS}-item cap`
+		);
+	}
+	// Every item_ID the iinf named, recognised or not: a repeat is what a decoy
+	// needs (see parseInfe).
+	const seen = new Set<number>();
+	let entries = 0;
 	for (const box of isoBoxes(body, 4 + countLen)) {
 		if (box.type !== 'infe') continue;
-		parseInfe(box.body, items);
+		if (++entries > MAX_AVIF_ITEMS) {
+			throw new UnscrubbableImageError(
+				`avif: the iinf box holds more than ${MAX_AVIF_ITEMS} item entries, over the cap`
+			);
+		}
+		parseInfe(box.body, items, seen);
 	}
 }
 
-function parseInfe(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>): void {
+function parseInfe(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>, seen: Set<number>): void {
 	if (body.length < 4) throw new UnscrubbableImageError('avif: infe box is truncated');
 	const version = body[0];
 	// Versions 0 and 1 predate item_type and are not used by AVIF; they carry no
@@ -902,18 +939,35 @@ function parseInfe(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>): void {
 	const idLen = version === 2 ? 2 : 4;
 	if (body.length < p + idLen + 2 + 4) throw new UnscrubbableImageError('avif: infe box is truncated');
 	const id = idLen === 2 ? u16(body, p, true) : u32(body, p, true);
+	// Two infe entries for one item_ID: the second overwrites the first here,
+	// while a reader may keep either — so a decoy declaring the Exif item to be
+	// some type we skip would leave the real payload unrewritten.
+	if (seen.has(id)) {
+		throw new UnscrubbableImageError(`avif: the iinf box names item ${id} more than once`);
+	}
+	seen.add(id);
 	p += idLen + 2; // item_ID, then item_protection_index
-	const itemType = String.fromCharCode(body[p], body[p + 1], body[p + 2], body[p + 3]);
+	// The four-character type is compared lowercased: `exif` is the same item to
+	// a reader as `Exif`, and matching only the spelled-out case let the other
+	// through unscrubbed.
+	const itemType = String.fromCharCode(body[p], body[p + 1], body[p + 2], body[p + 3]).toLowerCase();
 	p += 4;
 	const name = readCString(body, p);
 	p = name.next;
-	if (itemType === 'Exif') {
+	if (itemType === 'exif') {
 		items.set(id, 'exif');
 		return;
 	}
 	if (itemType !== 'mime') return;
-	const contentType = readCString(body, p);
-	if (contentType.text === 'application/rdf+xml') items.set(id, 'xmp');
+	// A content_type carries parameters (";charset=…") and any casing, and a
+	// reader normalises both before deciding the item is XMP, so this has to as
+	// well. Anything else is a mime payload the scrubber cannot classify — a
+	// real AVIF has none — so it is refused rather than passed through.
+	const contentType = readCString(body, p).text.split(';')[0].trim().toLowerCase();
+	if (contentType !== 'application/rdf+xml') {
+		throw new UnscrubbableImageError(`avif: a mime item declares content type "${contentType}", which is not XMP`);
+	}
+	items.set(id, 'xmp');
 }
 
 function parseIloc(
@@ -939,9 +993,9 @@ function parseIloc(
 	const countLen = version === 2 ? 4 : 2;
 	const itemCount = countLen === 2 ? u16(body, p, true) : u32(body, p, true);
 	p += countLen;
-	if (itemCount > MAX_ILOC_ITEMS) {
+	if (itemCount > MAX_AVIF_ITEMS) {
 		throw new UnscrubbableImageError(
-			`avif: the iloc box lists ${itemCount} items, over the ${MAX_ILOC_ITEMS}-item cap`
+			`avif: the iloc box lists ${itemCount} items, over the ${MAX_AVIF_ITEMS}-item cap`
 		);
 	}
 	let extentTotal = 0;
@@ -982,6 +1036,12 @@ function parseIloc(
 			p += lengthSize;
 			extents.push({ offset: baseOffset + offset, length });
 		}
+		// Two entries for one item_ID: the last one wins in this map, so a decoy
+		// placed after the real entry moves the scrubber off the real payload
+		// while a reader that keeps the first still finds it.
+		if (out.has(id)) {
+			throw new UnscrubbableImageError(`avif: the iloc box places item ${id} more than once`);
+		}
 		out.set(id, { method, extents });
 	}
 	return out;
@@ -1000,7 +1060,10 @@ function* isoBoxes(body: Uint8Array, start: number): Generator<{ type: string; b
 			size = u64(body, p + 8);
 			headerLen = 16;
 		} else if (declared === 0) {
-			size = body.length - p;
+			// "Runs to the end of the parent" inside a meta box is how a decoy
+			// swallows the iinf that follows it: a reader that knows the box type
+			// skips its 8 bytes and finds the item list, this walk would not.
+			throw new UnscrubbableImageError(`avif: the ${type} box inside the meta box declares no size`);
 		}
 		if (size < headerLen || p + size > body.length) {
 			throw new UnscrubbableImageError(`avif: ${type} box declares a size past its parent`);

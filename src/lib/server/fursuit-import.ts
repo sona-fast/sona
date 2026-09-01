@@ -232,12 +232,13 @@ export async function importFursuitPhotos(opts: {
 			// the storage layer. The row carries an operator-readable reason for
 			// when the import result is surfaced; the parser's own wording
 			// ("jpeg: segment 0x…") goes to the log.
-			if (isUnscrubbable(e)) {
-				console.warn('fursuit import: unscrubbable photo', photo.id, e);
-				result.items.push({ postId: photo.id, status: 'failed', error: UNSCRUBBABLE_IMPORT_MESSAGE });
-				continue;
-			}
-			result.items.push({ postId: photo.id, status: 'failed', error: e instanceof Error ? e.message : String(e) });
+			const unscrubbable = isUnscrubbable(e);
+			if (unscrubbable) console.warn('fursuit import: unscrubbable photo', photo.id, e);
+			result.items.push({
+				postId: photo.id,
+				status: 'failed',
+				error: unscrubbable ? UNSCRUBBABLE_IMPORT_MESSAGE : e instanceof Error ? e.message : String(e)
+			});
 		}
 	}
 
