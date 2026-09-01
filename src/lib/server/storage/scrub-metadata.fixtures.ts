@@ -1,0 +1,501 @@
+// Hand-built raster fixtures for the metadata scrubber (SONA-170).
+//
+// Built byte by byte rather than checked in as binaries: the point of each
+// fixture is the metadata records it contains, and a hex blob hides those. Kept
+// in their own module so other suites (storage decorator tests, the workerd
+// parity harness) can put the same real bytes instead of placeholder buffers.
+
+/** ASCII bytes of `text`, with no terminator unless the caller writes one. */
+export function ascii(text: string): number[] {
+	return [...text].map((c) => c.charCodeAt(0));
+}
+
+/** ASCII bytes of `text` plus a trailing NUL. */
+function cstring(text: string): number[] {
+	return [...ascii(text), 0];
+}
+
+function u16be(value: number): number[] {
+	return [(value >> 8) & 0xff, value & 0xff];
+}
+
+function u32be(value: number): number[] {
+	return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
+}
+
+function u32le(value: number): number[] {
+	return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
+}
+
+function bytes(...parts: (number | number[])[]): Uint8Array {
+	return Uint8Array.from(parts.flat());
+}
+
+// ---------------------------------------------------------------------------
+// TIFF / Exif
+// ---------------------------------------------------------------------------
+
+const TAG_ORIENTATION = 0x0112;
+const TAG_ARTIST = 0x013b;
+const TAG_COPYRIGHT = 0x8298;
+const TAG_DATETIME_ORIGINAL = 0x9003;
+const TAG_MAKERNOTE = 0x927c;
+const TAG_EXIF_IFD = 0x8769;
+const TAG_GPS_IFD = 0x8825;
+const TAG_GPS_LATITUDE = 0x0002;
+const TAG_GPS_LONGITUDE = 0x0004;
+const TYPE_BYTE = 1;
+const TYPE_ASCII = 2;
+const TYPE_SHORT = 3;
+const TYPE_LONG = 4;
+const TYPE_RATIONAL = 5;
+
+interface Entry {
+	tag: number;
+	type: number;
+	count: number;
+	/** Inline 4-byte value, or bytes to place in the data area. */
+	inline?: number[];
+	data?: number[];
+	/** Resolved during layout when `data` is used. */
+	pointerToIfd?: 'exif' | 'gps';
+}
+
+/** Lay out one IFD at `at`, returning its bytes plus the data that follows it. */
+function layoutIfd(entries: Entry[], at: number, next: number, offsets: Record<string, number>): number[] {
+	const sorted = [...entries].sort((a, b) => a.tag - b.tag);
+	const dataStart = at + 2 + sorted.length * 12 + 4;
+	let dataAt = dataStart;
+	const data: number[] = [];
+	const out: number[] = [...u16be(sorted.length)];
+	for (const entry of sorted) {
+		out.push(...u16be(entry.tag), ...u16be(entry.type), ...u32be(entry.count));
+		if (entry.pointerToIfd) {
+			out.push(...u32be(offsets[entry.pointerToIfd]));
+		} else if (entry.inline) {
+			const padded = [...entry.inline, 0, 0, 0, 0].slice(0, 4);
+			out.push(...padded);
+		} else {
+			out.push(...u32be(dataAt));
+			data.push(...entry.data!);
+			dataAt += entry.data!.length;
+		}
+	}
+	out.push(...u32be(next));
+	return [...out, ...data];
+}
+
+export interface ExifOptions {
+	orientation?: number;
+	artist?: string;
+	copyright?: string;
+	/** Include the Exif sub-IFD (DateTimeOriginal + a MakerNote). */
+	subIfd?: boolean;
+	/** Include a GPS IFD with a latitude and longitude. */
+	gps?: boolean;
+	/** Include IFD1 with a fake embedded thumbnail. */
+	thumbnail?: boolean;
+	/** Write an IFD0 offset past the end of the payload (a malformed original). */
+	badIfdOffset?: boolean;
+}
+
+/**
+ * A big-endian Exif TIFF. Every optional part is a real, separately-addressed
+ * IFD so the scrubbed output can be checked for its absence rather than for the
+ * absence of a substring.
+ */
+export function exifTiff(opts: ExifOptions = {}): number[] {
+	const header = [...ascii('MM'), ...u16be(42), ...u32be(opts.badIfdOffset ? 0xffff : 8)];
+	// Lay the sub-IFDs out after a generous IFD0 allowance, then place IFD0's
+	// pointers at those addresses. Overlap is impossible because IFD0's own data
+	// area is sized from its entry list below.
+	const ifd0Entries: Entry[] = [];
+	if (opts.orientation !== undefined) {
+		ifd0Entries.push({
+			tag: TAG_ORIENTATION,
+			type: TYPE_SHORT,
+			count: 1,
+			inline: u16be(opts.orientation)
+		});
+	}
+	if (opts.artist !== undefined) {
+		ifd0Entries.push({ tag: TAG_ARTIST, type: TYPE_ASCII, count: opts.artist.length + 1, data: cstring(opts.artist) });
+	}
+	if (opts.copyright !== undefined) {
+		ifd0Entries.push({
+			tag: TAG_COPYRIGHT,
+			type: TYPE_ASCII,
+			count: opts.copyright.length + 1,
+			data: cstring(opts.copyright)
+		});
+	}
+	if (opts.subIfd) ifd0Entries.push({ tag: TAG_EXIF_IFD, type: TYPE_LONG, count: 1, pointerToIfd: 'exif' });
+	if (opts.gps) ifd0Entries.push({ tag: TAG_GPS_IFD, type: TYPE_LONG, count: 1, pointerToIfd: 'gps' });
+
+	// Two passes: the first sizes IFD0 (with placeholder pointers), the second
+	// writes the real sub-IFD addresses.
+	const sized = layoutIfd(ifd0Entries, 8, 0, { exif: 0, gps: 0 });
+	const exifAt = 8 + sized.length;
+	const exifEntries: Entry[] = [
+		{ tag: TAG_DATETIME_ORIGINAL, type: TYPE_ASCII, count: 20, data: cstring('2019:07:04 11:22:33') },
+		{ tag: TAG_MAKERNOTE, type: TYPE_BYTE, count: 8, data: [...ascii('MAKERNOT')] }
+	];
+	const exifIfd = opts.subIfd ? layoutIfd(exifEntries, exifAt, 0, {}) : [];
+	const gpsAt = exifAt + exifIfd.length;
+	const gpsEntries: Entry[] = [
+		// 51/1 30/1 0/1 — a real-looking latitude, as three RATIONALs.
+		{
+			tag: TAG_GPS_LATITUDE,
+			type: TYPE_RATIONAL,
+			count: 3,
+			data: [...u32be(51), ...u32be(1), ...u32be(30), ...u32be(1), ...u32be(0), ...u32be(1)]
+		},
+		{
+			tag: TAG_GPS_LONGITUDE,
+			type: TYPE_RATIONAL,
+			count: 3,
+			data: [...u32be(0), ...u32be(1), ...u32be(7), ...u32be(1), ...u32be(0), ...u32be(1)]
+		}
+	];
+	const gpsIfd = opts.gps ? layoutIfd(gpsEntries, gpsAt, 0, {}) : [];
+	const ifd1At = gpsAt + gpsIfd.length;
+	const ifd1 = opts.thumbnail
+		? layoutIfd(
+				[{ tag: 0x0201, type: TYPE_LONG, count: 1, inline: u32be(ifd1At + 30) }, { tag: 0x0202, type: TYPE_LONG, count: 1, inline: u32be(8) }],
+				ifd1At,
+				0,
+				{}
+			)
+		: [];
+	const thumb = opts.thumbnail ? [...ascii('THUMBNAI')] : [];
+	const ifd0 = layoutIfd(ifd0Entries, 8, opts.thumbnail ? ifd1At : 0, { exif: exifAt, gps: gpsAt });
+	return [...header, ...ifd0, ...exifIfd, ...gpsIfd, ...ifd1, ...thumb];
+}
+
+/** An XMP packet carrying a GPS latitude, long enough to pad an empty one into. */
+export function xmpWithGps(): number[] {
+	return ascii(
+		'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>' +
+			'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' +
+			'<rdf:Description exif:GPSLatitude="51,30.000000N" exif:GPSLongitude="0,7.000000W"/>' +
+			'</rdf:RDF></x:xmpmeta><?xpacket end="w"?>'
+	);
+}
+
+// ---------------------------------------------------------------------------
+// JPEG
+// ---------------------------------------------------------------------------
+
+/** One marker segment: FF <marker> <2-byte length> <payload>. */
+function segment(marker: number, payload: number[]): number[] {
+	return [0xff, marker, ...u16be(payload.length + 2), ...payload];
+}
+
+export interface JpegOptions {
+	exif?: ExifOptions | null;
+	/** Truncate the file mid-segment (the length field promises more than exists). */
+	truncated?: boolean;
+}
+
+/**
+ * A JPEG carrying every segment kind the scrubber has an opinion about: APP0
+ * JFIF, APP1 Exif, APP1 XMP, APP2 ICC, APP2 MPF, APP13 Photoshop/IPTC, COM,
+ * DQT, SOF0, DHT, SOS with entropy data, EOI, and a junk trailer after EOI.
+ */
+export function jpegFixture(opts: JpegOptions = {}): Uint8Array {
+	const exif = opts.exif === null ? null : exifTiff(opts.exif ?? { orientation: 6, artist: 'Nova Sparks', copyright: '(c) 2019 Nova Sparks', subIfd: true, gps: true, thumbnail: true });
+	const parts: number[] = [0xff, 0xd8];
+	parts.push(...segment(0xe0, [...cstring('JFIF'), 1, 2, 0, ...u16be(72), ...u16be(72), 0, 0]));
+	if (exif) parts.push(...segment(0xe1, [...ascii('Exif'), 0, 0, ...exif]));
+	parts.push(...segment(0xe1, [...cstring('http://ns.adobe.com/xap/1.0/'), ...xmpWithGps()]));
+	parts.push(...segment(0xe2, [...cstring('ICC_PROFILE'), 1, 1, ...ascii('fake icc profile bytes')]));
+	parts.push(...segment(0xe2, [...cstring('MPF'), ...ascii('MM'), ...u16be(42), ...u32be(8), ...ascii('mpf index with a preview offset')]));
+	parts.push(...segment(0xed, [...cstring('Photoshop 3.0'), ...ascii('8BIM'), 0x04, 0x04, ...ascii('IPTC city: London')]));
+	parts.push(...segment(0xfe, ascii('a plain comment')));
+	parts.push(...segment(0xdb, [0x00, ...new Array(64).fill(0x10)]));
+	parts.push(...segment(0xc0, [0x08, ...u16be(8), ...u16be(8), 1, 0x01, 0x11, 0x00]));
+	parts.push(...segment(0xc4, [0x00, ...new Array(16).fill(0), ...new Array(1).fill(0x0a)]));
+	if (opts.truncated) {
+		// A segment whose declared length runs past the end of the file.
+		parts.push(0xff, 0xe1, ...u16be(500), ...ascii('short'));
+		return Uint8Array.from(parts);
+	}
+	parts.push(...segment(0xda, [0x01, 0x01, 0x00, 0x00, 0x3f, 0x00]));
+	parts.push(...ascii('entropy coded scan data goes here'));
+	parts.push(0xff, 0xd9);
+	parts.push(...ascii('trailing junk after EOI'));
+	return Uint8Array.from(parts);
+}
+
+/** Offset of the first byte of the SOS marker in `jpegFixture()`. */
+export function jpegSosOffset(file: Uint8Array): number {
+	for (let i = 2; i + 1 < file.length; i++) {
+		if (file[i] === 0xff && file[i + 1] === 0xda) return i;
+	}
+	return -1;
+}
+
+/**
+ * Find a marker segment's payload range (the bytes after its 2-byte length),
+ * matching on the payload's leading identifier so APP1 Exif and APP1 XMP can be
+ * told apart. Returns null when no such segment exists.
+ */
+export function findSegment(
+	file: Uint8Array,
+	marker: number,
+	identifier?: string
+): { start: number; end: number } | null {
+	let at = 2;
+	while (at + 4 <= file.length) {
+		if (file[at] !== 0xff) return null;
+		const code = file[at + 1];
+		if (code === 0xda || code === 0xd9) return null;
+		const length = (file[at + 2] << 8) | file[at + 3];
+		const start = at + 4;
+		const end = at + 2 + length;
+		if (code === marker) {
+			const id = identifier ? String.fromCharCode(...file.subarray(start, start + identifier.length)) : null;
+			if (!identifier || id === identifier) return { start, end };
+		}
+		at = end;
+	}
+	return null;
+}
+
+// ---------------------------------------------------------------------------
+// PNG
+// ---------------------------------------------------------------------------
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+let crcTable: Uint32Array | null = null;
+
+/** PNG's CRC-32, reimplemented here so the fixtures don't lean on the code under test. */
+export function pngCrc(data: number[] | Uint8Array): number {
+	if (!crcTable) {
+		crcTable = new Uint32Array(256);
+		for (let i = 0; i < 256; i++) {
+			let c = i;
+			for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+			crcTable[i] = c >>> 0;
+		}
+	}
+	let crc = 0xffffffff;
+	for (const byte of data) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+	return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: number[]): number[] {
+	const typed = [...ascii(type), ...data];
+	return [...u32be(data.length), ...typed, ...u32be(pngCrc(typed))];
+}
+
+/**
+ * A PNG with the metadata chunks the scrubber rewrites (eXIf, tEXt, zTXt, iTXt
+ * holding XMP) alongside ones it must leave alone (iCCP, pHYs, IDAT).
+ */
+export function pngFixture(): Uint8Array {
+	const parts: number[] = [...PNG_SIGNATURE];
+	parts.push(...pngChunk('IHDR', [...u32be(8), ...u32be(8), 8, 2, 0, 0, 0]));
+	parts.push(...pngChunk('eXIf', exifTiff({ orientation: 3, artist: 'Nova Sparks', gps: true, subIfd: true })));
+	parts.push(...pngChunk('iCCP', [...cstring('icc'), 0, ...ascii('fake deflate stream')]));
+	parts.push(...pngChunk('pHYs', [...u32be(2835), ...u32be(2835), 1]));
+	parts.push(...pngChunk('tEXt', [...cstring('Comment'), ...ascii('shot at 51.5,-0.12')]));
+	parts.push(...pngChunk('zTXt', [...cstring('Location'), 0, ...ascii('fake deflate stream')]));
+	parts.push(...pngChunk('iTXt', [...cstring('XML:com.adobe.xmp'), 0, 0, 0, 0, ...xmpWithGps()]));
+	parts.push(...pngChunk('IDAT', [...ascii('fake idat payload')]));
+	parts.push(...pngChunk('IEND', []));
+	return Uint8Array.from(parts);
+}
+
+/** Walk a PNG's chunks: { type, dataStart, dataEnd, crc }. */
+export function pngChunks(file: Uint8Array): { type: string; dataStart: number; dataEnd: number; crc: number }[] {
+	const out: { type: string; dataStart: number; dataEnd: number; crc: number }[] = [];
+	let at = 8;
+	while (at + 12 <= file.length) {
+		const length = ((file[at] << 24) | (file[at + 1] << 16) | (file[at + 2] << 8) | file[at + 3]) >>> 0;
+		const type = String.fromCharCode(file[at + 4], file[at + 5], file[at + 6], file[at + 7]);
+		const dataStart = at + 8;
+		const dataEnd = dataStart + length;
+		const crc =
+			((file[dataEnd] << 24) | (file[dataEnd + 1] << 16) | (file[dataEnd + 2] << 8) | file[dataEnd + 3]) >>> 0;
+		out.push({ type, dataStart, dataEnd, crc });
+		at = dataEnd + 4;
+	}
+	return out;
+}
+
+// ---------------------------------------------------------------------------
+// WebP
+// ---------------------------------------------------------------------------
+
+function riffChunk(fourcc: string, data: number[]): number[] {
+	const pad = data.length & 1 ? [0] : [];
+	return [...ascii(fourcc), ...u32le(data.length), ...data, ...pad];
+}
+
+/**
+ * An extended-format (VP8X) WebP with ICCP, VP8, EXIF and XMP chunks. The ICCP
+ * payload is deliberately odd-length so the pad byte is exercised.
+ */
+export function webpFixture(): Uint8Array {
+	const chunks = [
+		// Flags byte: ICC (0x20) | EXIF (0x08) | XMP (0x04); then canvas size.
+		...riffChunk('VP8X', [0x2c, 0, 0, 0, 7, 0, 0, 7, 0, 0]),
+		...riffChunk('ICCP', ascii('an odd-length icc')),
+		...riffChunk('VP8 ', ascii('fake lossy bitstream')),
+		...riffChunk('EXIF', exifTiff({ orientation: 8, copyright: '(c) Nova', gps: true })),
+		...riffChunk('XMP ', xmpWithGps())
+	];
+	return Uint8Array.from([...ascii('RIFF'), ...u32le(4 + chunks.length), ...ascii('WEBP'), ...chunks]);
+}
+
+/** A simple-format (VP8-only) WebP, which has nowhere to put metadata. */
+export function webpSimpleFixture(): Uint8Array {
+	const chunks = riffChunk('VP8 ', ascii('fake lossy bitstream, odd'));
+	return Uint8Array.from([...ascii('RIFF'), ...u32le(4 + chunks.length), ...ascii('WEBP'), ...chunks]);
+}
+
+/** Walk a RIFF file's chunks: { fourcc, dataStart, dataEnd }. */
+export function riffChunks(file: Uint8Array): { fourcc: string; dataStart: number; dataEnd: number }[] {
+	const out: { fourcc: string; dataStart: number; dataEnd: number }[] = [];
+	let at = 12;
+	while (at + 8 <= file.length) {
+		const fourcc = String.fromCharCode(file[at], file[at + 1], file[at + 2], file[at + 3]);
+		const size = (file[at + 4] | (file[at + 5] << 8) | (file[at + 6] << 16) | (file[at + 7] << 24)) >>> 0;
+		out.push({ fourcc, dataStart: at + 8, dataEnd: at + 8 + size });
+		at += 8 + size + (size & 1);
+	}
+	return out;
+}
+
+// ---------------------------------------------------------------------------
+// AVIF
+// ---------------------------------------------------------------------------
+
+function isoBox(type: string, body: number[]): number[] {
+	return [...u32be(body.length + 8), ...ascii(type), ...body];
+}
+
+function fullBox(type: string, version: number, flags: number, body: number[]): number[] {
+	return isoBox(type, [version, (flags >> 16) & 0xff, (flags >> 8) & 0xff, flags & 0xff, ...body]);
+}
+
+function infe(id: number, itemType: string, name: string, contentType?: string): number[] {
+	return fullBox('infe', 2, 0, [
+		...u16be(id),
+		...u16be(0),
+		...ascii(itemType),
+		...cstring(name),
+		...(contentType ? cstring(contentType) : [])
+	]);
+}
+
+export interface AvifOptions {
+	/** Use iloc v1 with construction_method 1 (idat) for the Exif item. */
+	idatConstruction?: boolean;
+	/** Declare mdat with size==1 and a 64-bit largesize. */
+	largeMdat?: boolean;
+}
+
+export interface AvifFixture {
+	file: Uint8Array;
+	av01: { start: number; end: number };
+	exif: { start: number; end: number };
+	xmp: { start: number; end: number };
+}
+
+/**
+ * A minimal AVIF: ftyp, a meta box naming an av01 image item plus an Exif item
+ * and an XMP mime item, and an mdat holding all three payloads. The item
+ * offsets in iloc are absolute file offsets, so the layout is computed twice —
+ * once to size the meta box, once with the real mdat addresses.
+ */
+export function avifFixture(opts: AvifOptions = {}): AvifFixture {
+	const av01Payload = ascii('fake av01 primary image bitstream');
+	const exifPayload = [...u32be(0), ...exifTiff({ artist: 'Nova Sparks', orientation: 6, gps: true, subIfd: true })];
+	const xmpPayload = xmpWithGps();
+
+	const ftyp = isoBox('ftyp', [...ascii('avif'), ...u32be(0), ...ascii('avif'), ...ascii('mif1'), ...ascii('miaf')]);
+
+	const build = (av01At: number, exifAt: number, xmpAt: number): number[] => {
+		const hdlr = fullBox('hdlr', 0, 0, [...u32be(0), ...ascii('pict'), ...u32be(0), ...u32be(0), ...u32be(0), 0]);
+		const pitm = fullBox('pitm', 0, 0, u16be(1));
+		const iinf = fullBox('iinf', 0, 0, [
+			...u16be(3),
+			...infe(1, 'av01', 'Image'),
+			...infe(2, 'Exif', 'Exif'),
+			...infe(3, 'mime', 'XMP', 'application/rdf+xml')
+		]);
+		const version = opts.idatConstruction ? 1 : 0;
+		const item = (id: number, method: number, at: number, length: number): number[] => [
+			...u16be(id),
+			// construction_method occupies 4 bits of a reserved 16 in v1/v2 only.
+			...(version === 0 ? [] : u16be(method)),
+			...u16be(0), // data_reference_index
+			// base_offset_size is 0, so no base offset bytes follow.
+			...u16be(1), // extent_count
+			...u32be(at),
+			...u32be(length)
+		];
+		// offset_size=4, length_size=4, base_offset_size=0, index_size/reserved=0.
+		const iloc = fullBox('iloc', version, 0, [
+			0x44,
+			0x00,
+			...u16be(3),
+			...item(1, 0, av01At, av01Payload.length),
+			...item(2, opts.idatConstruction ? 1 : 0, exifAt, exifPayload.length),
+			...item(3, 0, xmpAt, xmpPayload.length)
+		]);
+		const iprp = isoBox('iprp', [
+			...isoBox('ipco', [...fullBox('av1C', 0, 0, [0x81, 0x00, 0x0c, 0x00]), ...isoBox('irot', [1])]),
+			...fullBox('ipma', 0, 0, [...u32be(1), ...u16be(1), 1, 0x81])
+		]);
+		return fullBox('meta', 0, 0, [...hdlr, ...pitm, ...iinf, ...iloc, ...iprp]);
+	};
+
+	// Pass one sizes the meta box with placeholder offsets; the layout is
+	// offset-independent because every offset field is a fixed 4 bytes.
+	const metaSize = build(0, 0, 0).length;
+	const mdatHeader = opts.largeMdat ? 16 : 8;
+	const mdatStart = ftyp.length + metaSize;
+	const av01At = mdatStart + mdatHeader;
+	const exifAt = av01At + av01Payload.length;
+	const xmpAt = exifAt + exifPayload.length;
+	const meta = build(av01At, exifAt, xmpAt);
+	const mdatBody = [...av01Payload, ...exifPayload, ...xmpPayload];
+	const mdat = opts.largeMdat
+		? [...u32be(1), ...ascii('mdat'), ...u32be(0), ...u32be(mdatBody.length + 16), ...mdatBody]
+		: isoBox('mdat', mdatBody);
+	return {
+		file: Uint8Array.from([...ftyp, ...meta, ...mdat]),
+		av01: { start: av01At, end: av01At + av01Payload.length },
+		exif: { start: exifAt, end: exifAt + exifPayload.length },
+		xmp: { start: xmpAt, end: xmpAt + xmpPayload.length }
+	};
+}
+
+// ---------------------------------------------------------------------------
+// GIF
+// ---------------------------------------------------------------------------
+
+/** A one-frame GIF with a comment extension, which the scrubber leaves alone. */
+export function gifFixture(): Uint8Array {
+	return bytes(
+		ascii('GIF89a'),
+		[8, 0, 8, 0, 0x80, 0, 0], // logical screen descriptor, global colour table of 2
+		[0, 0, 0, 0xff, 0xff, 0xff],
+		[0x21, 0xfe, 12],
+		ascii('made in SW1'),
+		[0],
+		[0x2c, 0, 0, 0, 0, 8, 0, 8, 0, 0],
+		[0x02, 0x02, 0x44, 0x01, 0x00],
+		[0x3b]
+	);
+}
+
+/** A metadata-free WebP, for call sites that store image/webp. */
+export function tinyWebp(): Uint8Array {
+	const chunks = riffChunk('VP8 ', ascii('fake lossy bitstream'));
+	return Uint8Array.from([...ascii('RIFF'), ...u32le(4 + chunks.length), ...ascii('WEBP'), ...chunks]);
+}

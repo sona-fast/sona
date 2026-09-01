@@ -6,6 +6,8 @@
 // named scenario and returns a JSON verdict for the Node side to assert on.
 import { R2Storage } from '../../../src/lib/server/storage/r2';
 import { UploadThingStorage } from '../../../src/lib/server/storage/uploadthing';
+import { withMetadataScrubbing } from '../../../src/lib/server/storage/scrub';
+import { jpegFixture } from '../../../src/lib/server/storage/scrub-metadata.fixtures';
 import type { R2Bucket } from '@cloudflare/workers-types';
 
 interface Env {
@@ -28,6 +30,27 @@ function source(chunks: number, chunkSize: number): ReadableStream<Uint8Array> {
 			controller.enqueue(new Uint8Array(chunkSize));
 		}
 	});
+}
+
+/** A pull-based stream replaying `bytes` in `chunkSize` pieces. */
+function chunked(bytes: Uint8Array, chunkSize: number): ReadableStream<Uint8Array> {
+	let at = 0;
+	return new ReadableStream<Uint8Array>({
+		pull(controller) {
+			if (at >= bytes.length) {
+				controller.close();
+				return;
+			}
+			controller.enqueue(bytes.subarray(at, Math.min(at + chunkSize, bytes.length)));
+			at += chunkSize;
+		}
+	});
+}
+
+function hex(bytes: Uint8Array): string {
+	let out = '';
+	for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
+	return out;
 }
 
 async function json(data: unknown): Promise<Response> {
@@ -127,6 +150,50 @@ export default {
 						rejected = e instanceof Error ? e.message : String(e);
 					}
 					const head = await env.IMAGES.head('it/under.bin');
+					return json({ rejected, keyAbsent: head === null });
+				}
+
+				// SONA-170: the scrubbing decorator on the STREAMING R2 path under
+				// real workerd. Node's unit suite exercises the buffering branch
+				// (there is no FixedLengthStream there), so only this proves the
+				// scrub keeps the declared length through a FixedLengthStream.
+				case 'r2-scrubbing-put': {
+					const storage = withMetadataScrubbing(
+						new R2Storage({ bucket: env.IMAGES, publicBase: '/img' })
+					);
+					const jpeg = jpegFixture();
+					const { url } = await storage.put({
+						suggestedKey: 'it/photo.jpg',
+						body: chunked(jpeg, 7),
+						size: jpeg.length,
+						contentType: 'image/jpeg',
+						filename: 'photo.jpg'
+					});
+					const object = await env.IMAGES.get('it/photo.jpg');
+					const stored = object ? new Uint8Array(await object.arrayBuffer()) : new Uint8Array(0);
+					return json({ url, declaredSize: jpeg.length, storedSize: stored.length, storedHex: hex(stored) });
+				}
+
+				// A body the scrubber cannot walk must REJECT the put rather than
+				// leave the provider waiting on bytes that never arrive.
+				case 'r2-unscrubbable-stream': {
+					const storage = withMetadataScrubbing(
+						new R2Storage({ bucket: env.IMAGES, publicBase: '/img' })
+					);
+					const truncated = jpegFixture({ truncated: true });
+					let rejected: string | null = null;
+					try {
+						await storage.put({
+							suggestedKey: 'it/bad.jpg',
+							body: chunked(truncated, 7),
+							size: truncated.length,
+							contentType: 'image/jpeg',
+							filename: 'bad.jpg'
+						});
+					} catch (e) {
+						rejected = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+					}
+					const head = await env.IMAGES.head('it/bad.jpg');
 					return json({ rejected, keyAbsent: head === null });
 				}
 

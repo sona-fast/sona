@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { isHttpError } from '@sveltejs/kit';
 import { clearSettingsCache } from '$lib/server/settings';
 import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
+import { UnscrubbableImageError } from '$lib/server/storage/scrub-metadata';
 import { POST } from './+server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -165,6 +166,28 @@ describe('POST /api/upload', () => {
 		const file = new File([bytes], 'clip.mp4', { type: 'video/mp4' });
 		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(415);
 		expect(put).not.toHaveBeenCalled();
+	});
+
+	it('422s a file whose metadata could not be stripped, and records the failure', async () => {
+		// The storage layer refuses to store a raster it could not walk
+		// (SONA-170). That is a file problem with a fix the operator can apply,
+		// so it must not surface as an unexplained 500.
+		put.mockImplementationOnce(async () => {
+			throw new UnscrubbableImageError('jpeg: segment length runs past the end of the file');
+		});
+		const platform = makePlatform();
+		let thrown: unknown;
+		try {
+			await POST(postEvent(platform, pngFile(1024)));
+		} catch (e) {
+			thrown = e;
+		}
+		expect(isHttpError(thrown)).toBe(true);
+		const httpError = thrown as { status: number; body: { message: string } };
+		expect(httpError.status).toBe(422);
+		expect(httpError.body.message).toBe(
+			"Couldn't strip metadata from this file. Re-export it and try again."
+		);
 	});
 
 	it('passes the allowlist-matched content type (parameters stripped, lowercased) to the provider', async () => {

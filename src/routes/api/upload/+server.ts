@@ -4,6 +4,7 @@ import { getSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
 import { sniffImageType, isWebmHead } from '$lib/server/storage/sniff';
 import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
+import { UnscrubbableImageError } from '$lib/server/storage/scrub-metadata';
 import { recordUpload, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
@@ -92,6 +93,15 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			filename: file.name
 		});
 	} catch (e) {
+		// A file whose metadata we cannot strip is the operator's to fix, not a
+		// server fault: the storage layer refuses to store a raster it could not
+		// walk (SONA-170), and the way out is a re-export, so this is a 422 with
+		// an instruction rather than an opaque 500.
+		if (e instanceof UnscrubbableImageError) {
+			const message = "Couldn't strip metadata from this file. Re-export it and try again.";
+			schedule(platform, recordUpload(db, false, { status: 422, message }));
+			error(422, message);
+		}
 		schedule(platform, recordUpload(db, false, {
 			status: 500,
 			message: e instanceof Error ? e.message : 'storage put failed'

@@ -4,6 +4,7 @@ import { ZeroKeepError } from './types';
 import type { StorageProvider, DeleteOrphansOptions } from './types';
 import { R2Storage } from './r2';
 import { UploadThingStorage } from './uploadthing';
+import { withMetadataScrubbing } from './scrub';
 
 export type { StorageProvider } from './types';
 export { collectReferencedUrls } from './referenced-urls';
@@ -13,11 +14,24 @@ type Env = App.Platform['env'];
 /**
  * Resolve the active StorageProvider from settings (or an explicit override,
  * which migration uses to construct the *target* provider).
+ *
+ * The provider is wrapped so every stored raster has its location and
+ * identifying metadata stripped on the way in (SONA-170). Wrapping HERE rather
+ * than at each put site is what makes the guarantee hold for importers written
+ * later: there is no way to reach a provider that skips it.
  */
 export function getStorage(
 	env: Env | undefined,
 	settings: SiteSettings,
 	providerId: StorageProviderId = settings.storageProvider
+): StorageProvider {
+	return withMetadataScrubbing(makeProvider(env, settings, providerId));
+}
+
+function makeProvider(
+	env: Env | undefined,
+	settings: SiteSettings,
+	providerId: StorageProviderId
 ): StorageProvider {
 	if (providerId === 'r2') {
 		if (!env?.IMAGES) {

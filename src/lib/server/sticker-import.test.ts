@@ -666,7 +666,7 @@ describe('importStickerBatch', () => {
 	function mockDownloadOk() {
 		vi.mocked(getStickerSet).mockResolvedValue(multiSet);
 		vi.mocked(downloadFile).mockResolvedValue({
-			bytes: new ArrayBuffer(8),
+			bytes: staticWebp().buffer as ArrayBuffer,
 			contentType: 'application/octet-stream',
 			filePath: 'stickers/file_0.webp'
 		});
@@ -1037,7 +1037,7 @@ describe('importStickerBatch cross-pack shared-file safety', () => {
 			return s;
 		});
 		vi.mocked(downloadFile).mockResolvedValue({
-			bytes: new ArrayBuffer(8),
+			bytes: staticWebp().buffer as ArrayBuffer,
 			contentType: 'application/octet-stream',
 			filePath: 'stickers/file_0.webp'
 		});
@@ -1260,7 +1260,7 @@ describe('resyncTelegramPacks', () => {
 	function mockDownloadOk() {
 		vi.mocked(getStickerSet).mockResolvedValue(multiSet);
 		vi.mocked(downloadFile).mockResolvedValue({
-			bytes: new ArrayBuffer(8),
+			bytes: staticWebp().buffer as ArrayBuffer,
 			contentType: 'application/octet-stream',
 			filePath: 'stickers/file_0.webp'
 		});

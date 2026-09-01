@@ -4,6 +4,8 @@ import { Miniflare } from 'miniflare';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scrubImageMetadata } from '../../src/lib/server/storage/scrub-metadata';
+import { jpegFixture } from '../../src/lib/server/storage/scrub-metadata.fixtures';
 
 // Workerd-parity harness for the storage streaming paths (SONA-140).
 //
@@ -159,6 +161,25 @@ describe('storage streaming under real workerd', () => {
 		if (result.leftoverSize != null) {
 			expect(result.leftoverSize).toBe(2 * 1024 * 1024);
 		}
+	});
+
+	it('the scrubbing decorator stores scrubbed bytes at the declared length', async () => {
+		const result = await run('r2-scrubbing-put');
+		const expected = scrubImageMetadata(jpegFixture());
+		// The declared size is the ORIGINAL length: the scrub is size-preserving,
+		// which is what lets a streaming put keep its length declaration.
+		expect(result.declaredSize).toBe(jpegFixture().length);
+		expect(result.storedSize).toBe(expected.length);
+		expect(result.storedHex).toBe(Buffer.from(expected).toString('hex'));
+		// And the stored object no longer carries what the fixture came in with.
+		expect(Buffer.from(expected).toString('latin1')).not.toContain('GPSLatitude');
+		expect(result.url).toBe('/img/it/photo.jpg');
+	});
+
+	it('a body the scrubber cannot walk rejects the put instead of hanging', async () => {
+		const result = await run('r2-unscrubbable-stream');
+		expect(String(result.rejected)).toMatch(/UnscrubbableImageError/);
+		expect(result.keyAbsent).toBe(true);
 	});
 
 	it('an under-length source rejects the put and leaves the key absent', async () => {

@@ -18,6 +18,7 @@ import {
 } from './avatar';
 import type { SiteSettings } from './settings';
 import { getRawSetting, getSettings, setRawSetting, clearSettingsCache } from './settings';
+import { jpegOfSize } from './test/raster-fixtures';
 
 const DDL = `
 CREATE TABLE artists (
@@ -73,7 +74,7 @@ function stubFetch(override?: {
 	profile?: { avatar?: string } | null;
 	imageStatus?: number;
 	imageType?: string;
-	/** Bytes actually sent for the download. Default 4, the tiny fixture. */
+	/** Bytes actually sent for the download. Default 4, the smallest real JPEG. */
 	imageBytes?: number;
 	/** Content-Length the download DECLARES. Omitted = no header, like a chunked
 	 *  response; set it away from imageBytes to model an upstream that lies. */
@@ -84,7 +85,7 @@ function stubFetch(override?: {
 		if (override?.declaredLength !== undefined) {
 			headers['content-length'] = String(override.declaredLength);
 		}
-		return new Response(new Uint8Array(override?.imageBytes ?? 4).fill(1), {
+		return new Response(jpegOfSize(override?.imageBytes ?? 4), {
 			status: 200,
 			headers
 		});
@@ -207,7 +208,7 @@ describe('resolveAvatarUrl re-hosting', () => {
 					return new Response(JSON.stringify(body), { status: 200 });
 				}
 				// The twimg download.
-				return new Response(new Uint8Array(4).fill(1), {
+				return new Response(jpegOfSize(4), {
 					status: 200,
 					headers: { 'content-type': 'image/jpeg' }
 				});
@@ -753,7 +754,7 @@ describe('healOwnerAvatar (the retry nothing used to do)', () => {
 				}
 				// The operator's save lands while the avatar bytes are downloading.
 				await setRawSetting(db, 'blueskyUrl', 'https://bsky.app/profile/moved.bsky.social');
-				return new Response(new Uint8Array([1, 2, 3, 4]), {
+				return new Response(jpegOfSize(4), {
 					status: 200,
 					headers: { 'content-type': 'image/jpeg' }
 				});

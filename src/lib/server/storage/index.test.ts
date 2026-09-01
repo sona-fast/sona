@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { getStorage } from './index';
+import { tinyWebp } from './scrub-metadata.fixtures';
 import type { SiteSettings } from '$lib/server/settings';
 
 // The `$app/environment` stub reports dev:false, so getStorage here runs the
@@ -23,7 +24,7 @@ describe('getStorage r2 public-base fallback (prod)', () => {
 		const storage = getStorage(env, r2Settings(''));
 		const { url } = await storage.put({
 			suggestedKey: 'stickers/pack/abc.webp',
-			body: new ArrayBuffer(8),
+			body: tinyWebp(),
 			contentType: 'image/webp',
 			filename: 'abc.webp'
 		});
@@ -41,7 +42,7 @@ describe('getStorage r2 public-base fallback (prod)', () => {
 		const storage = getStorage(env, r2Settings('https://cdn.example.com'));
 		const { url } = await storage.put({
 			suggestedKey: 'stickers/pack/abc.webp',
-			body: new ArrayBuffer(8),
+			body: tinyWebp(),
 			contentType: 'image/webp',
 			filename: 'abc.webp'
 		});
