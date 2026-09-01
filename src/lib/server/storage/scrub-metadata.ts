@@ -63,8 +63,8 @@ export function isUnscrubbable(error: unknown): boolean {
 
 /**
  * What a server-side caller records when a put is refused. One sentence in one
- * place: /api/upload returns it as the 422 body and the fursuit import puts it
- * on the failed row, so the two surfaces cannot drift. It mirrors the client's
+ * place: /api/upload returns it as the 422 body, so the client and the server
+ * cannot drift. It mirrors the client's
  * admin_upload_error_unscrubbable message; the parser's own wording
  * ("jpeg: segment 0x…") is for the log, not for whoever has to fix the file.
  */
@@ -74,6 +74,12 @@ export const UNSCRUBBABLE_MESSAGE =
 /** The same refusal on the sticker import, whose page names the item. */
 export const UNSCRUBBABLE_STICKER_MESSAGE =
 	"Couldn't strip this sticker's hidden metadata, so it wasn't saved.";
+
+/** The same refusal on the fursuit import, where the photo came from FurTrack
+ * rather than from the operator, so re-exporting and uploading it is not the
+ * fix that sentence would be asking for. */
+export const UNSCRUBBABLE_IMPORT_MESSAGE =
+	"Couldn't strip this photo's hidden metadata, so it wasn't saved.";
 
 /** Leading bytes handed to sniffImageType — enough for an AVIF ftyp box's
  * compatible_brands (which start at offset 16), matching /api/upload. */
@@ -512,7 +518,8 @@ function rewriteExif(payload: Uint8Array, capacity: number, keepOrientation: boo
 	const prefixed = startsWith(payload, EXIF_PREFIX);
 	const start = prefixed ? EXIF_PREFIX.length : 0;
 	const tiff = minimalTiff(payload.subarray(start), capacity - start, keepOrientation);
-	if (!tiff) return out;
+	// No room for the TIFF after the prefix, so the whole record stays zeroed.
+	if (!tiff.length) return out;
 	if (prefixed) out.set(EXIF_PREFIX, 0);
 	out.set(tiff, start);
 	return out;
@@ -582,7 +589,7 @@ function* scrubPng(): Machine {
 		const body = yield { kind: 'take', n: length + 4 };
 		const newType = isExif ? header.subarray(4, 8) : SCRUBBED_CHUNK;
 		const data = isExif
-			? (minimalTiff(body.subarray(0, length), length, true) ?? new Uint8Array(length))
+			? minimalTiff(body.subarray(0, length), length, true)
 			: new Uint8Array(length);
 		yield { kind: 'write', bytes: header.subarray(0, 4) };
 		yield { kind: 'write', bytes: newType };
@@ -678,6 +685,12 @@ interface AvifExtent {
  * offsets in the `iloc` box — so the meta box is buffered and parsed, then each
  * referenced extent is rewritten as the stream reaches it.
  *
+ * The walk keeps going as boxes to the end of the input rather than passing the
+ * tail through once the extents are rewritten: bytes after the last extent are
+ * still boxes, and a second meta + mdat pair appended there would otherwise
+ * carry a whole second set of Exif and XMP through untouched. A second meta box
+ * is refused outright — a real AVIF has exactly one.
+ *
  * Nothing is preserved from an AVIF's Exif payload beyond Artist and Copyright:
  * AVIF carries orientation in the irot/imir item properties, not in EXIF, so
  * keeping the Exif Orientation tag could only ever fight the real one.
@@ -685,9 +698,21 @@ interface AvifExtent {
 function* scrubAvif(): Machine {
 	let pos = 0;
 	let metaSeen = false;
+	// Extents named by the meta box that the walk has not reached yet, sorted by
+	// offset and consumed from the front as each box's content goes past.
+	const pending: AvifExtent[] = [];
 	for (;;) {
 		const header = yield { kind: 'takeUpTo', n: 8 };
-		if (header.length === 0) return; // clean end at a box boundary
+		if (header.length === 0) {
+			// Clean end at a box boundary. An extent still pending here was placed
+			// past the end of the file by the item list, so it was never scrubbed.
+			if (pending.length) {
+				throw new UnscrubbableImageError(
+					'avif: the item list places a metadata extent past the end of the file'
+				);
+			}
+			return;
+		}
 		if (header.length < 8) {
 			throw new UnscrubbableImageError('avif: truncated box header');
 		}
@@ -719,12 +744,20 @@ function* scrubAvif(): Machine {
 						`avif: the ${type} box runs to the end of the file before the meta box, so the metadata items were never examined`
 					);
 				}
+				pos = yield* passAvifContent(pos, null, pending);
+				// No box boundary can follow inside a box that runs to end of file,
+				// so nothing left can be a second meta: the tail is payload.
 				yield { kind: 'rest' };
 				return;
 			}
-			if (contentLen) yield { kind: 'copy', n: contentLen };
-			pos += contentLen;
+			pos = yield* passAvifContent(pos, contentLen, pending);
 			continue;
+		}
+		if (metaSeen) {
+			// A real AVIF has one meta box. A second one names its own items in its
+			// own mdat, so accepting it would mean scrubbing whichever set of
+			// offsets we happened to parse and passing the other through.
+			throw new UnscrubbableImageError('avif: a second meta box, which a real file does not have');
 		}
 		if (contentLen === null || contentLen > MAX_RECORD_BYTES) {
 			throw new UnscrubbableImageError(`avif: meta box is too large to inspect (cap ${MAX_RECORD_BYTES} bytes)`);
@@ -735,23 +768,43 @@ function* scrubAvif(): Machine {
 		yield { kind: 'write', bytes: meta };
 		pos += contentLen;
 		metaSeen = true;
-		const extents = parseAvifMeta(meta);
-		if (!extents.length) continue;
-		extents.sort((a, b) => a.offset - b.offset);
-		for (const extent of extents) {
-			if (extent.offset < pos) {
-				throw new UnscrubbableImageError(
-					'avif: a metadata extent overlaps another or sits before the meta box, so it cannot be rewritten in place'
-				);
-			}
-			if (extent.offset > pos) yield { kind: 'copy', n: extent.offset - pos };
-			const payload = yield { kind: 'take', n: extent.length };
-			yield { kind: 'write', bytes: scrubAvifExtent(extent.kind, payload) };
-			pos = extent.offset + extent.length;
-		}
-		yield { kind: 'rest' };
-		return;
+		pending.push(...parseAvifMeta(meta));
+		pending.sort((a, b) => a.offset - b.offset);
 	}
+}
+
+/**
+ * Pass one box's content through, rewriting every pending extent inside it.
+ * `contentLen` of null means the box runs to end of file, so every extent left
+ * belongs to it and the caller passes the remainder through. Returns the file
+ * offset the walk has reached.
+ */
+function* passAvifContent(
+	pos: number,
+	contentLen: number | null,
+	pending: AvifExtent[]
+): Generator<Step, number, Uint8Array> {
+	const end = contentLen === null ? Infinity : pos + contentLen;
+	while (pending.length && pending[0].offset < end) {
+		const extent = pending.shift() as AvifExtent;
+		if (extent.offset < pos) {
+			throw new UnscrubbableImageError(
+				'avif: a metadata extent overlaps another or sits before the meta box, so it cannot be rewritten in place'
+			);
+		}
+		if (extent.offset + extent.length > end) {
+			throw new UnscrubbableImageError(
+				'avif: a metadata extent runs past the end of the box holding it, so it cannot be rewritten in place'
+			);
+		}
+		if (extent.offset > pos) yield { kind: 'copy', n: extent.offset - pos };
+		const payload = yield { kind: 'take', n: extent.length };
+		yield { kind: 'write', bytes: scrubAvifExtent(extent.kind, payload) };
+		pos = extent.offset + extent.length;
+	}
+	if (contentLen === null) return pos;
+	if (end > pos) yield { kind: 'copy', n: end - pos };
+	return end;
 }
 
 function scrubAvifExtent(kind: 'exif' | 'xmp', payload: Uint8Array): Uint8Array {
@@ -777,15 +830,30 @@ function parseAvifMeta(meta: Uint8Array): AvifExtent[] {
 	// meta is a FullBox: version + flags precede its child boxes.
 	const items = new Map<number, 'exif' | 'xmp'>();
 	let locations: Map<number, { method: number; extents: { offset: number; length: number }[] }> | null = null;
+	let iinfSeen = false;
 	for (const box of isoBoxes(meta, 4)) {
-		if (box.type === 'iinf') parseIinf(box.body, items);
-		else if (box.type === 'iloc') locations = parseIloc(box.body);
+		// A real meta box holds one iinf and one iloc. A second of either would
+		// let a decoy shadow the real one: the scrubber would follow whichever it
+		// kept, a reader whichever it prefers, and the metadata behind the other
+		// would never be rewritten.
+		if (box.type === 'iinf') {
+			if (iinfSeen) throw new UnscrubbableImageError('avif: the meta box holds more than one iinf');
+			iinfSeen = true;
+			parseIinf(box.body, items);
+		} else if (box.type === 'iloc') {
+			if (locations) throw new UnscrubbableImageError('avif: the meta box holds more than one iloc');
+			locations = parseIloc(box.body);
+		}
 	}
 	if (!items.size) return [];
 	const out: AvifExtent[] = [];
 	for (const [id, kind] of items) {
 		const location = locations?.get(id);
-		if (!location) continue; // an item the iloc does not place has no bytes to scrub
+		if (!location) {
+			// The item list names the payload but does not say where it is, so the
+			// scrubber cannot reach bytes a reader may still find another way.
+			throw new UnscrubbableImageError(`avif: the ${kind} item has no iloc entry, so its bytes cannot be located`);
+		}
 		if (location.method !== 0) {
 			throw new UnscrubbableImageError(
 				`avif: the ${kind} item uses construction_method ${location.method}; only file offsets are supported`
@@ -1110,13 +1178,14 @@ interface KeptTags {
  * IFD, the MakerNote, and IFD1 with its thumbnail (which is a second copy of the
  * picture and can carry its own metadata).
  *
- * Returns a buffer of exactly `capacity` bytes, or null when `capacity` cannot
- * hold even an empty directory. A malformed original does NOT throw: an
+ * Returns a buffer of exactly `capacity` bytes, zero-filled when `capacity`
+ * cannot hold even an empty directory. A malformed original does NOT throw: an
  * unreadable IFD yields an empty directory, because losing an orientation hint
  * beats refusing the upload.
  */
-function minimalTiff(tiff: Uint8Array, capacity: number, keepOrientation: boolean): Uint8Array | null {
-	if (capacity < 14) return null;
+function minimalTiff(tiff: Uint8Array, capacity: number, keepOrientation: boolean): Uint8Array {
+	// Too small for even an empty directory: zeros, which a decoder skips.
+	if (capacity < 14) return new Uint8Array(Math.max(capacity, 0));
 	// 'MM' is big-endian, 'II' little, and anything else is not a TIFF header —
 	// derived once here, because the rewrite has to be written in the SAME byte
 	// order it was read in.

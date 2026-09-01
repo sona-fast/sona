@@ -174,7 +174,7 @@ export function exifTiff(opts: ExifOptions = {}): number[] {
 }
 
 /** An XMP packet carrying a GPS latitude, long enough to pad an empty one into. */
-export function xmpWithGps(): number[] {
+function xmpWithGps(): number[] {
 	return ascii(
 		'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>' +
 			'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' +
@@ -476,6 +476,30 @@ export interface AvifOptions {
 	freeBoxBeforeMeta?: boolean;
 	/** Split the Exif item across two extents, which cannot be rewritten in place. */
 	splitExifExtent?: boolean;
+	/** Put a `free` box between the mdat and the end of the file. */
+	freeBoxAfterMdat?: boolean;
+	/**
+	 * Hold the Exif and XMP payloads in a SECOND mdat, with a `free` box between
+	 * it and the mdat holding the av01 — so the extents sit two boxes past the
+	 * meta box rather than in the one right after it.
+	 */
+	splitMdat?: boolean;
+	/**
+	 * Append a second meta + mdat pair, Exif GPS and XMP and all, after the end
+	 * of a complete AVIF — the bytes a walk that stopped at the last extent
+	 * would hand back untouched.
+	 */
+	secondMeta?: boolean;
+	/** Point the Exif extent past the end of the file. */
+	exifExtentPastEnd?: boolean;
+	/** Give the Exif extent a length that runs out of the mdat into the next box. */
+	straddlingExifExtent?: boolean;
+	/** Name the Exif item in iinf but leave it out of the iloc, so it has no place. */
+	exifItemWithoutLocation?: boolean;
+	/** Add a decoy iloc box before or after the real one. */
+	decoyIloc?: 'before' | 'after';
+	/** Add a decoy iinf box naming the Exif item a second time. */
+	decoyIinf?: boolean;
 	/**
 	 * Replace the iloc with one built to make the PARSE expensive rather than to
 	 * place any bytes: `zeroWidth` names 200 items of 65535 extents each, in
@@ -527,6 +551,11 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 		...exifTiff({ artist: 'Nova Sparks', copyright: '(c) Nova', orientation: 6, gps: true, subIfd: true })
 	];
 	const xmpPayload = xmpWithGps();
+	// A straddling extent claims the XMP payload after it plus 32 bytes of the
+	// box that follows the mdat.
+	const exifExtentLen = opts.straddlingExifExtent
+		? exifPayload.length + xmpPayload.length + 32
+		: exifPayload.length;
 
 	const ftyp = isoBox('ftyp', [...ascii('avif'), ...u32be(0), ...ascii('avif'), ...ascii('mif1'), ...ascii('miaf')]);
 
@@ -552,27 +581,41 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			...(split ? [...u32be(at + length - 4), ...u32be(4)] : [])
 		];
 		// offset_size=4, length_size=4, base_offset_size=0, index_size/reserved=0.
-		const iloc = opts.ilocBomb
-			? bombIloc(opts.ilocBomb)
-			: fullBox('iloc', version, 0, [
-					0x44,
-					0x00,
+		const placed = opts.exifItemWithoutLocation
+			? [...u16be(2), ...item(1, 0, av01At, av01Payload.length), ...item(3, 0, xmpAt, xmpPayload.length)]
+			: [
 					...u16be(3),
 					...item(1, 0, av01At, av01Payload.length),
 					...item(
 						2,
 						opts.idatConstruction ? 1 : 0,
 						exifAt,
-						opts.hugeExifExtent ? 0x7ffffff0 : exifPayload.length,
+						opts.hugeExifExtent ? 0x7ffffff0 : exifExtentLen,
 						opts.splitExifExtent
 					),
 					...item(3, 0, xmpAt, xmpPayload.length)
-				]);
+				];
+		const iloc = opts.ilocBomb ? bombIloc(opts.ilocBomb) : fullBox('iloc', version, 0, [0x44, 0x00, ...placed]);
+		// A decoy places the Exif item somewhere harmless; whichever iloc the
+		// scrubber kept, the other one is the copy a reader might follow.
+		const decoyIloc = opts.decoyIloc
+			? fullBox('iloc', 0, 0, [0x44, 0x00, ...u16be(1), ...u16be(2), ...u16be(0), ...u16be(1), ...u32be(0), ...u32be(4)])
+			: [];
+		const decoyIinf = opts.decoyIinf ? fullBox('iinf', 0, 0, [...u16be(1), ...infe(2, 'Exif', 'Exif')]) : [];
 		const iprp = isoBox('iprp', [
 			...isoBox('ipco', [...fullBox('av1C', 0, 0, [0x81, 0x00, 0x0c, 0x00]), ...isoBox('irot', [1])]),
 			...fullBox('ipma', 0, 0, [...u32be(1), ...u16be(1), 1, 0x81])
 		]);
-		return fullBox('meta', 0, 0, [...hdlr, ...pitm, ...iinf, ...iloc, ...iprp]);
+		return fullBox('meta', 0, 0, [
+			...hdlr,
+			...pitm,
+			...iinf,
+			...decoyIinf,
+			...(opts.decoyIloc === 'before' ? decoyIloc : []),
+			...iloc,
+			...(opts.decoyIloc === 'after' ? decoyIloc : []),
+			...iprp
+		]);
 	};
 
 	// Pass one sizes the meta box with placeholder offsets; the layout is
@@ -584,15 +627,34 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	const free = opts.freeBoxBeforeMeta ? [...u32be(0), ...ascii('free')] : [];
 	const mdatStart = ftyp.length + free.length + metaSize;
 	const av01At = mdatStart + mdatHeader;
-	const exifAt = av01At + av01Payload.length;
+	// With splitMdat the metadata payloads live in a second mdat, past a `free`
+	// box: the extents are then two boxes on from the meta box, not in the one
+	// right after it.
+	const gapFree = isoBox('free', [0, 0, 0, 0]);
+	const exifAt = av01At + av01Payload.length + (opts.splitMdat ? gapFree.length + 8 : 0);
 	const xmpAt = exifAt + exifPayload.length;
-	const meta = build(av01At, exifAt, xmpAt);
 	const mdatBody = [...av01Payload, ...exifPayload, ...xmpPayload];
-	const mdat = opts.largeMdat
-		? [...u32be(1), ...ascii('mdat'), ...u32be(0), ...u32be(mdatBody.length + 16), ...mdatBody]
-		: isoBox('mdat', mdatBody);
+	const mdat = opts.splitMdat
+		? [...isoBox('mdat', av01Payload), ...gapFree, ...isoBox('mdat', [...exifPayload, ...xmpPayload])]
+		: opts.largeMdat
+			? [...u32be(1), ...ascii('mdat'), ...u32be(0), ...u32be(mdatBody.length + 16), ...mdatBody]
+			: isoBox('mdat', mdatBody);
+	// The straddling extent needs bytes past the mdat to reach into.
+	const trailingFree =
+		opts.freeBoxAfterMdat || opts.straddlingExifExtent ? isoBox('free', new Array(64).fill(0)) : [];
+	const meta = build(av01At, opts.exifExtentPastEnd ? mdatStart + mdat.length + 16 : exifAt, xmpAt);
+	const baseLen = mdatStart + mdat.length + trailingFree.length;
+	// A whole second AVIF item list and payload store, appended past the end of
+	// the first — the bytes a walk that stopped at the last extent hands back.
+	const secondAt = baseLen + metaSize + 8;
+	const second = opts.secondMeta
+		? [
+				...build(secondAt, secondAt + av01Payload.length, secondAt + av01Payload.length + exifPayload.length),
+				...isoBox('mdat', mdatBody)
+			]
+		: [];
 	return {
-		file: Uint8Array.from([...ftyp, ...free, ...meta, ...mdat]),
+		file: Uint8Array.from([...ftyp, ...free, ...meta, ...mdat, ...trailingFree, ...second]),
 		av01: { start: av01At, end: av01At + av01Payload.length },
 		exif: { start: exifAt, end: exifAt + exifPayload.length },
 		xmp: { start: xmpAt, end: xmpAt + xmpPayload.length }

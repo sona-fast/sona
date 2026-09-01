@@ -30,11 +30,17 @@ JSON of an animated Telegram sticker, and VR model bytes.
 
 | Format | Removed | Kept |
 | --- | --- | --- |
-| JPEG | The Exif sub-IFD, the GPS IFD, the maker note, IFD1 and its embedded thumbnail, the XMP packet, the multi-picture (MPF) index, the Photoshop resource block with its IPTC fields, and every byte after the end-of-image marker | Orientation, Artist, Copyright, the ICC colour profile, JFIF, the comment segment, and the scan up to and including the end-of-image marker |
+| JPEG | The Exif sub-IFD, the GPS IFD, the maker note, IFD1 and its embedded thumbnail, the XMP packet, the multi-picture (MPF) index, the Photoshop resource block with its IPTC fields, and every byte after the end-of-image marker | Orientation, Artist, Copyright, the ICC colour profile, JFIF, the comment segment, the scan up to and including the end-of-image marker, and every other APPn segment |
 | PNG | `eXIf` beyond the three kept tags, the `tEXt`, `zTXt` and `iTXt` text chunks (`iTXt` is where XMP lives), the compressed-Exif `zxIf` chunk and the `tXMP` chunk — matched whatever case the chunk type is written in — and every byte after the `IEND` chunk | Orientation, Artist, Copyright, `iCCP`, `IDAT`, and every other chunk, APNG included |
-| WebP | The `EXIF` chunk beyond the three kept tags, the `XMP ` chunk, the XMP feature bit in `VP8X`, and any bytes past the declared RIFF size | Orientation, Artist, Copyright, `ICCP`, `ANIM`, `ANMF`, `ALPH`, `VP8`, `VP8L` |
-| AVIF | The Exif item beyond Artist and Copyright, and the XMP item | The image data, the item properties, and the `irot`/`imir` orientation |
+| WebP | The `EXIF` chunk beyond the three kept tags, the `XMP ` chunk, the XMP feature bit in `VP8X`, and any bytes past the declared RIFF size | Orientation, Artist, Copyright, `ICCP`, `ANIM`, `ANMF`, `ALPH`, `VP8`, `VP8L`, and every other chunk |
+| AVIF | The Exif item beyond Artist and Copyright, and the XMP item | The image data, the item properties, the `irot`/`imir` orientation, and every other box. Boxes after the item payloads are walked as boxes rather than passed through: a second `meta` box is refused, and anything else passes through |
 | GIF | The payload of an `XMP DataXMP` application extension, and every byte after the trailer | Every other block, the comment extension and the XMP extension's magic trailer included |
+
+A JPEG's other application segments are the known gap. Sona rewrites APP1, APP2
+and APP13, where Exif, XMP, the ICC profile, the MPF index and the Photoshop
+resource block live. APP0 and APP3 through APP12, plus APP14 and APP15, pass
+through as they are, so a JUMBF or C2PA record parked in APP11 survives the
+scrub.
 
 Orientation stays because dropping it turns a portrait photo sideways. Artist
 and Copyright stay because they are the artist's own attribution, and stripping
@@ -63,9 +69,9 @@ labelled `XMP DataXMP`, and Photoshop and Lightroom write GPS coordinates into
 it. That payload is replaced with an empty packet; the 258-byte magic trailer
 that closes the extension is kept, because it is what makes a decoder's
 sub-block walk terminate. Everything else in a GIF, comment extension included,
-passes through byte for byte, and everything after the trailer is zeroed —
-a decoder stops there, so a second image parked behind it is bytes nothing
-examined.
+passes through byte for byte, and everything after the trailer is zeroed,
+because a decoder stops at the trailer and never reaches a second image parked
+behind it.
 
 ## Rewrites preserve the file size
 
@@ -85,7 +91,10 @@ The parser fails closed. If a raster cannot be walked, because a segment length
 runs past the end of the file, a chunk length is impossible, or an AVIF places
 its metadata in a layout the rewriter does not support, the put throws
 `UnscrubbableImageError` and nothing is stored. Passing the bytes through
-unexamined would break the guarantee that every stored raster was scrubbed.
+unexamined would break the guarantee that every stored raster was scrubbed. An
+AVIF whose `mdat` comes before its `meta` box is refused on that rule: the
+layout is legal, but the payloads would already have gone past before the item
+list named them, and no common encoder writes it.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that

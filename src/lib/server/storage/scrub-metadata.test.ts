@@ -481,6 +481,70 @@ describe('scrubImageMetadata: AVIF', () => {
 		const early = avifFixture({ freeBoxBeforeMeta: true });
 		expect(() => scrubImageMetadata(early.file)).toThrow(UnscrubbableImageError);
 	});
+
+	it('keeps walking boxes past the last extent and refuses a second meta box', () => {
+		// A whole second item list and payload store appended after a valid AVIF:
+		// a walk that passed the tail through once the extents were rewritten
+		// handed this second set of Exif GPS and XMP back intact.
+		const attack = avifFixture({ secondMeta: true });
+		expect(text(attack.file.subarray(attack.file.length / 2))).toContain('exif:GPSLatitude');
+		expect(() => scrubImageMetadata(attack.file)).toThrow(/second meta box/);
+	});
+
+	it('scrubs an AVIF with a free box between the mdat and the end of the file', () => {
+		const trailing = avifFixture({ freeBoxAfterMdat: true });
+		const out = scrubImageMetadata(trailing.file);
+		expect(out.length).toBe(trailing.file.length);
+		expect(out.subarray(trailing.av01.start, trailing.av01.end)).toEqual(
+			trailing.file.subarray(trailing.av01.start, trailing.av01.end)
+		);
+		expect(text(out.subarray(trailing.exif.start, trailing.exif.end))).not.toContain('MAKERNOT');
+		expect(text(out.subarray(trailing.xmp.start, trailing.xmp.end))).not.toContain('GPS');
+		// The free box after the payloads is copied through as a box, not zeroed.
+		expect(out.subarray(trailing.xmp.end)).toEqual(trailing.file.subarray(trailing.xmp.end));
+	});
+
+	it('scrubs extents that sit in a later box than the one after the meta box', () => {
+		// av01 in the first mdat, a free box, then the Exif and XMP in a second:
+		// the extents have to survive a box boundary to be reached at all.
+		const split = avifFixture({ splitMdat: true });
+		const out = scrubImageMetadata(split.file);
+		expect(out.length).toBe(split.file.length);
+		expect(out.subarray(split.av01.start, split.av01.end)).toEqual(
+			split.file.subarray(split.av01.start, split.av01.end)
+		);
+		expect(text(out.subarray(split.exif.start, split.exif.end))).not.toContain('MAKERNOT');
+		expect(text(out.subarray(split.xmp.start, split.xmp.end))).not.toContain('GPS');
+	});
+
+	it('throws when the item list places an extent past the end of the file', () => {
+		const past = avifFixture({ exifExtentPastEnd: true });
+		expect(() => scrubImageMetadata(past.file)).toThrow(/past the end of the file/);
+	});
+
+	it('throws when an extent runs out of the box holding it', () => {
+		const straddle = avifFixture({ straddlingExifExtent: true });
+		expect(() => scrubImageMetadata(straddle.file)).toThrow(/runs past the end of the box/);
+	});
+
+	it('throws when a metadata item has no iloc entry', () => {
+		// Skipping the item would leave an Exif payload a reader can still find
+		// by another route, unscrubbed.
+		const unplaced = avifFixture({ exifItemWithoutLocation: true });
+		expect(() => scrubImageMetadata(unplaced.file)).toThrow(/has no iloc entry/);
+	});
+
+	it('throws on a second iloc or iinf box inside the meta box', () => {
+		// Whichever of the two the scrubber kept, the other is the one a reader
+		// might follow, so the decoy works from either side.
+		expect(() => scrubImageMetadata(avifFixture({ decoyIloc: 'before' }).file)).toThrow(
+			/more than one iloc/
+		);
+		expect(() => scrubImageMetadata(avifFixture({ decoyIloc: 'after' }).file)).toThrow(
+			/more than one iloc/
+		);
+		expect(() => scrubImageMetadata(avifFixture({ decoyIinf: true }).file)).toThrow(/more than one iinf/);
+	});
 });
 
 describe('scrubImageMetadata: pass-through and rejection', () => {
@@ -554,6 +618,8 @@ describe('scrubImageMetadataStream chunking invariance', () => {
 		['webp simple', webpSimpleFixture()],
 		['avif', avifFixture().file],
 		['avif with a large mdat', avifFixture({ largeMdat: true }).file],
+		['avif with a free box after the mdat', avifFixture({ freeBoxAfterMdat: true }).file],
+		['avif with the metadata in a second mdat', avifFixture({ splitMdat: true }).file],
 		['gif', gifFixture()],
 		['gif with an image after the trailer', gifFixture({ afterTrailer: true })],
 		['gif with an xmp extension', gifWithXmpFixture()]

@@ -228,3 +228,38 @@ test('a file whose metadata cannot be stripped fails the tile with the re-export
 	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('');
 	expect(statuses).toEqual([422]);
 });
+
+test('the VR media picker names the same refusal and gets a 422', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+
+	await page.goto('/admin/vr/new');
+	// The showcase-media picker, not the model or poster input: it is the one
+	// that accepts a clip alongside the stills.
+	const picker = 'input.sr-file[accept*="video/webm"]';
+	// Same hydration retry as stageFiles: setInputFiles' own change event does
+	// not reach Svelte 5's delegated handler, so dispatch one after staging.
+	const banner = page.locator('.banner.err .banner-line');
+	await expect(async () => {
+		statuses.length = 0;
+		await page.setInputFiles(picker, {
+			name: 'e2e-unscrubbable.jpg',
+			mimeType: 'image/jpeg',
+			buffer: UNSCRUBBABLE_JPEG
+		});
+		await page.evaluate((selector) => {
+			document.querySelector(selector)!.dispatchEvent(new Event('change', { bubbles: true }));
+		}, picker);
+		await expect(banner).toHaveCount(1, { timeout: 3000 });
+	}).toPass({ timeout: 20_000 });
+
+	// The VR form used to blame the connection for a 422.
+	await expect(banner).toContainText('Export a fresh copy from an image editor');
+	await expect(banner).toContainText('e2e-unscrubbable.jpg');
+	expect(statuses).toEqual([422]);
+});

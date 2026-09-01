@@ -10,7 +10,7 @@ import type { Database } from '$lib/server/db';
 import type { SiteSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
 import { sniffImageType } from '$lib/server/storage/sniff';
-import { isUnscrubbable, UNSCRUBBABLE_MESSAGE } from '$lib/server/storage/scrub-metadata';
+import { isUnscrubbable, UNSCRUBBABLE_IMPORT_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from '$lib/server/storage/buffer';
 import { fetchCharacterPhotos, furtrackUserAgent } from '$lib/server/furtrack';
 import { LICENSES, type LicenseKey } from '$lib/furtrack/license';
@@ -234,7 +234,7 @@ export async function importFursuitPhotos(opts: {
 			// ("jpeg: segment 0x…") goes to the log.
 			if (isUnscrubbable(e)) {
 				console.warn('fursuit import: unscrubbable photo', photo.id, e);
-				result.items.push({ postId: photo.id, status: 'failed', error: UNSCRUBBABLE_MESSAGE });
+				result.items.push({ postId: photo.id, status: 'failed', error: UNSCRUBBABLE_IMPORT_MESSAGE });
 				continue;
 			}
 			result.items.push({ postId: photo.id, status: 'failed', error: e instanceof Error ? e.message : String(e) });
