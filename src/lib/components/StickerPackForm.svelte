@@ -144,10 +144,12 @@
 	async function addStickerFiles(files: File[], rejected: File[] = []) {
 		if (rejected.length) {
 			// Cap the list: a folder dropped whole would otherwise put dozens of
-			// names in one toast.
-			const shown = rejected.slice(0, 3).map((f) => f.name).join(', ');
+			// names in one toast. Past three, a count reads better than three names
+			// and a trailing ellipsis.
 			toast.error(
-				m.admin_pack_upload_bad_type({ names: rejected.length > 3 ? `${shown}…` : shown })
+				rejected.length > 3
+					? m.admin_pack_upload_bad_type_many({ count: rejected.length })
+					: m.admin_pack_upload_bad_type({ names: rejected.map((f) => f.name).join(', ') })
 			);
 		}
 		if (!files.length) return;
@@ -171,7 +173,10 @@
 						artistId: '',
 						emojis: '',
 						nsfw: false,
-						format: file.name.endsWith('.png') ? 'png' : 'webp'
+						// From the MIME type, not the name: a dropped file may have no
+						// extension or an uppercase one, and STICKER_ACCEPT admits
+						// MIME types only, so `type` is always one of the two here.
+						format: file.type === 'image/png' ? 'png' : 'webp'
 					});
 				} else {
 					failed++;
@@ -180,13 +185,14 @@
 			stickerEntries = [...stickerEntries];
 		} finally {
 			uploading = false;
+			// Alongside clearing `uploading`, so a throw can't strand the region on
+			// "Uploading…". Always the done count, even on a partial failure: the
+			// toast is a live region too, and repeating the failure here reads it
+			// out twice.
+			stickerStatus = m.admin_pack_upload_done({ count: ok });
 		}
 		// Keep the successful uploads; surface the failures without discarding them.
 		if (failed > 0) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
-		stickerStatus =
-			failed > 0
-				? m.admin_pack_upload_partial({ ok, total: files.length, failed })
-				: m.admin_pack_upload_done({ count: ok });
 	}
 
 	function removeSticker(i: number) {
@@ -538,7 +544,7 @@
 		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
 		padding: 24px; border: 2px dashed var(--border); border-radius: var(--radius-s);
 		color: var(--muted-foreground); cursor: pointer; font-size: 13px;
-		transition: border-color 0.15s, background 0.15s; min-height: 80px;
+		transition: border-color 0.15s, background-color 0.15s, opacity 0.15s; min-height: 80px;
 	}
 	.upload-zone.multi { width: 100%; }
 	.upload-zone:hover { border-color: var(--primary); }
@@ -549,7 +555,7 @@
 	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
 	   as the upload page's dropzone. :global because the drop attachment sets the
 	   class imperatively, so Svelte can't see it in the markup. */
-	.upload-zone:global(.drag-over) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, transparent); }
+	.upload-zone:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
 	.remove-btn {
 		display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
 		background: none; color: var(--muted-foreground); border: 1px solid var(--border);

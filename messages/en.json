@@ -856,7 +856,22 @@
 	"admin_pack_edit_heading": "Edit pack: {name}",
 	"admin_pack_upload_partial": "{ok} of {total} uploaded, {failed} failed",
 	"admin_pack_upload_bad_type": "Skipped {names}. Add PNG or WebP images instead.",
-	"admin_pack_upload_done": "{count} sticker(s) added",
+	"admin_pack_upload_bad_type_many": "Skipped {count} files. Add PNG or WebP images instead.",
+	"admin_pack_upload_done": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "1 sticker added",
+				"countPlural=other": "{count} stickers added"
+			}
+		}
+	],
 	"admin_pack_details": "Pack details",
 	"admin_pack_name": "Pack name",
 	"admin_pack_name_placeholder": "My sticker pack",

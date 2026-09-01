@@ -17,9 +17,14 @@ test('dropping a sticker adds a row, and a wrong type is rejected without a requ
 }) => {
 	await adminLogin(page, PASSWORD);
 
+	// `hold`, when set, keeps a request in flight so the "Uploading…" state can be
+	// read off the live region before the done message replaces it.
 	let uploads = 0;
+	let hold: Promise<void> | null = null;
+	let release = () => {};
 	await page.route('**/api/upload', async (route) => {
 		uploads++;
+		if (hold) await hold;
 		await route.fulfill({
 			contentType: 'application/json',
 			body: JSON.stringify({ url: '/x.png' })
@@ -29,17 +34,26 @@ test('dropping a sticker adds a row, and a wrong type is rejected without a requ
 	await page.goto('/admin/stickers/manual');
 	const zone = page.locator(ZONE);
 	await expect(zone).toBeVisible();
+	// The stickers section's always-mounted live region.
+	const status = page.locator('span.sr-only[role="status"]');
 
 	// Hydration-retry shape (see vr-admin-form.spec.ts): a drop dispatched before
 	// the attachment has run silently does nothing. The counter resets per try.
+	hold = new Promise<void>((resolve) => (release = resolve));
 	await expect(async () => {
 		uploads = 0;
 		await dropOn(page, ZONE, [{ name: 'sticker.png', type: 'image/png' }]);
-		await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue('/x.png', {
-			timeout: 2000
-		});
+		// The held request keeps the zone busy, so a drop that landed shows up as
+		// the in-progress announcement rather than a finished row.
+		await expect(status).toHaveText('Uploading...', { timeout: 2000 });
 		expect(uploads).toBe(1);
 	}).toPass({ timeout: 20_000 });
+	release();
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue('/x.png');
+	// …and the same region reports the finish, as a real plural rather than
+	// "1 sticker(s) added".
+	await expect(status).toHaveText('1 sticker added');
+	hold = null;
 
 	await expectDragOverHighlight(page, ZONE);
 
@@ -48,6 +62,16 @@ test('dropping a sticker adds a row, and a wrong type is rejected without a requ
 	const before = uploads;
 	await dropOn(page, ZONE, [{ name: 'notes.txt', type: 'text/plain' }]);
 	await expect(page.getByText('Skipped notes.txt. Add PNG or WebP images instead.')).toBeVisible();
+	expect(uploads).toBe(before);
+
+	// Past three rejects the toast switches to a count: a folder dropped whole
+	// would otherwise be a wall of names ending in an ellipsis.
+	await dropOn(
+		page,
+		ZONE,
+		['a.txt', 'b.txt', 'c.txt', 'd.txt'].map((name) => ({ name, type: 'text/plain' }))
+	);
+	await expect(page.getByText('Skipped 4 files. Add PNG or WebP images instead.')).toBeVisible();
 	expect(uploads).toBe(before);
 });
 

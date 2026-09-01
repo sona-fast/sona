@@ -607,10 +607,12 @@
 			     upload runs, and with nothing preventing the default a second drop
 			     here navigates the tab to the file and loses the form. Attached to
 			     the bar rather than the whole section so the live zone's own
-			     dropEffect isn't overridden as the event bubbles. -->
+			     dropEffect isn't overridden as the event bubbles. Empty accept
+			     because nothing is filtered: disabled means the drop is swallowed
+			     before any file is looked at. -->
 			<div
 				class="upload-progress"
-				{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: () => {}, disabled: () => true })}
+				{@attach dropFiles({ accept: '', onFiles: () => {}, disabled: () => true })}
 			>
 				<div class="progress-bar">
 					<div class="progress-fill" style="width: {uploadTotal > 0 ? (uploadLoaded / uploadTotal) * 100 : 0}%"></div>
@@ -1091,12 +1093,12 @@
 		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
 		padding: 28px 24px; border: 2px dashed var(--border); border-radius: var(--radius-s);
 		color: var(--muted-foreground); cursor: pointer; font-size: 13px; text-align: center;
-		transition: border-color 0.15s, background 0.15s; min-height: 88px;
+		transition: border-color 0.15s, background-color 0.15s, opacity 0.15s; min-height: 88px;
 	}
 	.upload-zone:hover { border-color: var(--primary); }
 	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
 	   as the upload page's dropzone. The class is set by the drop attachment. */
-	.upload-zone:global(.drag-over) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 5%, transparent); }
+	.upload-zone:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
 	/* No pointer-events: none — the drop attachment has to receive dragover/drop
 	   to preventDefault, or a drop while uploading navigates away from the form.
 	   The nested input's own disabled attribute keeps clicks inert. */
@@ -1145,10 +1147,10 @@
 		display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px;
 		border: 1px solid var(--border); border-radius: var(--radius-xs);
 		background: var(--secondary); color: var(--foreground); cursor: pointer; flex-direction: row;
-		transition: border-color 0.15s, background 0.15s;
+		transition: border-color 0.15s, background-color 0.15s;
 	}
 	.btn-sm:hover { border-color: var(--primary); }
-	.btn-sm:global(.drag-over) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
+	.btn-sm:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
 
 	/* Showcase media rows (same row chrome as the credit list). */
 	.media-list { display: flex; flex-direction: column; gap: 10px; }

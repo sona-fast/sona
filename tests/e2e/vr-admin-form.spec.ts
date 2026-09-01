@@ -209,12 +209,24 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 	// reach the document and navigate the tab to the file. It still refuses the
 	// drop — no highlight — it just has to be the one refusing.
 	hold = new Promise<void>((resolve) => (release = resolve));
+	// Resting border, read while the zone is idle: keeping pointer events also
+	// keeps :hover alive, so the busy zone must hold this colour instead of
+	// lighting up primary as if it would take a click.
+	const restingBorder = await page
+		.locator('.media-zone')
+		.evaluate((el) => getComputedStyle(el).borderColor);
 	await dropOn(page, '.media-zone', [{ name: 'slow.png', type: 'image/png' }]);
 	const busy = page.locator('.media-zone.disabled');
 	await expect(busy).toBeVisible();
 	expect(await busy.evaluate((el) => getComputedStyle(el).pointerEvents)).not.toBe('none');
 	await dragOver(page, '.media-zone');
 	await expect(busy).not.toHaveClass(/drag-over/);
+	await busy.hover();
+	// Past the zone's 0.15s border-color transition: read any sooner and a border
+	// that IS heading for primary still measures as the resting colour, which
+	// would make the assertion below pass either way (mutation-checked).
+	await page.waitForTimeout(400);
+	expect(await busy.evaluate((el) => getComputedStyle(el).borderColor)).toBe(restingBorder);
 	release();
 	await expect(page.locator('.media-zone.disabled')).toHaveCount(0);
 });
