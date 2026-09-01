@@ -4,7 +4,7 @@ import { getSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
 import { sniffImageType, isWebmHead } from '$lib/server/storage/sniff';
 import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
-import { isUnscrubbable } from '$lib/server/storage/scrub-metadata';
+import { isUnscrubbable, UNSCRUBBABLE_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { recordUpload, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
@@ -100,9 +100,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		// chain: on the streaming path the refusal arrives wrapped by the
 		// provider's own fetch error.
 		if (isUnscrubbable(e)) {
-			const message = "Couldn't strip metadata from this file. Re-export it and try again.";
-			schedule(platform, recordUpload(db, false, { status: 422, message }));
-			error(422, message);
+			schedule(platform, recordUpload(db, false, { status: 422, message: UNSCRUBBABLE_MESSAGE }));
+			error(422, UNSCRUBBABLE_MESSAGE);
 		}
 		schedule(platform, recordUpload(db, false, {
 			status: 500,

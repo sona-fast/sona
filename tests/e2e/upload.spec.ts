@@ -24,6 +24,14 @@ const PNG = Buffer.from(
 	'base64'
 );
 
+// A JPEG the scrubber cannot walk: SOI, then an APP1 segment declaring 500
+// bytes with five in the file. The sniff sees a real JPEG, so the request gets
+// as far as the storage layer, which refuses to store a raster it could not
+// walk — a 422, not a 500 (SONA-170).
+const UNSCRUBBABLE_JPEG = Buffer.from([
+	0xff, 0xd8, 0xff, 0xe1, 0x01, 0xf4, ...Buffer.from('short')
+]);
+
 // Stage `files` through the hidden input and wait for their tiles to appear.
 // setInputFiles stages the file but its synthesized change event does not reach
 // Svelte 5's root-delegated `onchange` (verified: the handler never runs, while
@@ -186,4 +194,37 @@ test('an oversized file fails client-side without a POST; the rest of the batch 
 	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('');
 	// Exactly one POST fired — none for the doomed oversized file.
 	expect(uploads.counters.total).toBe(1);
+});
+
+test('a file whose metadata cannot be stripped fails the tile with the re-export message', async ({
+	page
+}) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	// The status the server really answered with, not just what the tile says.
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+
+	await page.goto('/admin/upload');
+	await stageFiles(
+		page,
+		{ name: 'e2e-unscrubbable.jpg', mimeType: 'image/jpeg', buffer: UNSCRUBBABLE_JPEG },
+		1,
+		() => {
+			statuses.length = 0;
+		}
+	);
+
+	// The tile tells the operator what to do about it, rather than showing the
+	// bare "Upload failed (422)" both clients used to fall back to.
+	const error = page.locator('.tile-error .error-text');
+	await expect(error).toContainText('Export a fresh copy from an image editor', {
+		timeout: 15_000
+	});
+	await expect(error).not.toContainText('422');
+	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('');
+	expect(statuses).toEqual([422]);
 });

@@ -8,6 +8,7 @@ import { R2Storage } from '../../../src/lib/server/storage/r2';
 import { UploadThingStorage } from '../../../src/lib/server/storage/uploadthing';
 import { withMetadataScrubbing } from '../../../src/lib/server/storage/scrub';
 import { jpegFixture } from '../../../src/lib/server/storage/scrub-metadata.fixtures';
+import { isUnscrubbable } from '../../../src/lib/server/storage/scrub-metadata';
 import type { R2Bucket } from '@cloudflare/workers-types';
 
 interface Env {
@@ -213,6 +214,32 @@ export default {
 					}
 					const head = await env.IMAGES.head('it/bad.jpg');
 					return json({ rejected, keyAbsent: head === null });
+				}
+
+				// The same refusal on the UploadThing path, where the SDK's own fetch
+				// wraps it. /api/upload maps the 422 off isUnscrubbable(), so what
+				// matters is that the refusal is still FINDABLE after that wrap —
+				// under the real SDK and the real runtime, not a stubbed fetch.
+				case 'uploadthing-unscrubbable-stream': {
+					const storage = withMetadataScrubbing(
+						new UploadThingStorage({ token: env.UPLOADTHING_TOKEN })
+					);
+					const truncated = jpegFixture({ truncated: true });
+					let rejected: string | null = null;
+					let unscrubbable = false;
+					try {
+						await storage.put({
+							suggestedKey: 'it/bad.jpg',
+							body: chunked(truncated, 7),
+							size: truncated.length,
+							contentType: 'image/jpeg',
+							filename: 'bad.jpg'
+						});
+					} catch (e) {
+						rejected = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+						unscrubbable = isUnscrubbable(e);
+					}
+					return json({ rejected, unscrubbable });
 				}
 
 				default:

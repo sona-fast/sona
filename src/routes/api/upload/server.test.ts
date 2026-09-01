@@ -6,7 +6,7 @@ import { isHttpError } from '@sveltejs/kit';
 import { clearSettingsCache } from '$lib/server/settings';
 import { getStorage } from '$lib/server/storage';
 import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
-import { UnscrubbableImageError } from '$lib/server/storage/scrub-metadata';
+import { UnscrubbableImageError, UNSCRUBBABLE_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { withMetadataScrubbing } from '$lib/server/storage/scrub';
 import { UploadThingStorage } from '$lib/server/storage/uploadthing';
 import { jpegFixture } from '$lib/server/storage/scrub-metadata.fixtures';
@@ -202,15 +202,13 @@ describe('POST /api/upload', () => {
 		expect(isHttpError(thrown)).toBe(true);
 		const httpError = thrown as { status: number; body: { message: string } };
 		expect(httpError.status).toBe(422);
-		expect(httpError.body.message).toBe(
-			"Couldn't strip metadata from this file. Re-export it and try again."
-		);
+		expect(httpError.body.message).toBe(UNSCRUBBABLE_MESSAGE);
 		// The sample the dashboard shows carries the same status and message, not
 		// a bare "upload failed" at 500.
 		expect(recordUpload).toHaveBeenCalledTimes(1);
 		expect(recordUpload.mock.calls[0].slice(1)).toEqual([
 			false,
-			{ status: 422, message: "Couldn't strip metadata from this file. Re-export it and try again." }
+			{ status: 422, message: UNSCRUBBABLE_MESSAGE }
 		]);
 	});
 

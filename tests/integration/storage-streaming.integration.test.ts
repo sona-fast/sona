@@ -201,6 +201,16 @@ describe('storage streaming under real workerd', () => {
 		expect(result.keyAbsent).toBe(true);
 	});
 
+	it('the UploadThing wrap keeps the refusal detectable, which is what makes the 422', async () => {
+		// UploadThing is the default provider, and on its streaming path nothing
+		// throws UnscrubbableImageError to the caller: the SDK's fetch rejects
+		// with its own error carrying ours underneath. /api/upload decides the
+		// 422 on isUnscrubbable(), so the walk has to survive the REAL wrap.
+		const result = await run('uploadthing-unscrubbable-stream');
+		expect(result.rejected).not.toBeNull();
+		expect(result.unscrubbable).toBe(true);
+	});
+
 	it('an under-length source rejects the put and leaves the key absent', async () => {
 		const result = await run('r2-under-length');
 		expect(String(result.rejected)).toMatch(/did not see all expected bytes/i);

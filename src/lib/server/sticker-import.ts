@@ -14,6 +14,7 @@ import { stickerPacks, stickers, stickerEmojis, artists, characters } from '$lib
 import type { Database } from '$lib/server/db';
 import type { SiteSettings } from '$lib/server/settings';
 import { getStorage, isAllowedStickerType, extFromContentType, deleteFile, isOwnedUrl } from '$lib/server/storage';
+import { isUnscrubbable, UNSCRUBBABLE_STICKER_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { getStickerSet, downloadFile, stickerSetUrl, parseStickerSetName, stickerMediaType } from '$lib/server/telegram';
 import type { TelegramSticker } from '$lib/server/telegram';
 import { resolveStickerArtistIds, inferAppendedArtistId, clearStickerTabCache } from '$lib/server/stickers';
@@ -613,11 +614,17 @@ export async function importTelegramPack(opts: {
 			}
 		} catch (e) {
 			result.failed++;
+			// A sticker whose metadata could not be stripped (SONA-170) is refused
+			// by the storage layer, and this page renders the per-item error — so
+			// the row says what to do about it and the parser's own wording
+			// ("jpeg: segment 0x…") goes to the log.
+			const unscrubbable = isUnscrubbable(e);
+			if (unscrubbable) console.warn('sticker import: unscrubbable sticker', sticker.fileUniqueId, e);
 			result.items.push({
 				fileUniqueId: sticker.fileUniqueId,
 				index,
 				status: 'failed',
-				error: e instanceof Error ? e.message : String(e),
+				error: unscrubbable ? UNSCRUBBABLE_STICKER_MESSAGE : e instanceof Error ? e.message : String(e),
 				emoji: sticker.emoji,
 				fileId: sticker.fileId
 			});

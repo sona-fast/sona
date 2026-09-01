@@ -201,7 +201,19 @@ export interface JpegOptions {
 	 * preview and a motion photo's trailer both take.
 	 */
 	gpsTrailer?: boolean;
+	/**
+	 * The progressive shape: a second scan, with a DQT between the two whose
+	 * table bytes contain FF D9 — the pair a blind end-of-image search stops at.
+	 */
+	secondScan?: boolean;
+	/** With `secondScan`, an APP1 Exif GPS segment in front of the second scan. */
+	exifBetweenScans?: boolean;
+	/** EOI straight after the JFIF segment, with no scan at all, then a trailer. */
+	noScan?: boolean;
 }
+
+/** The junk every non-truncated jpegFixture() parks after its EOI. */
+export const JPEG_TRAILER = 'trailing junk after EOI';
 
 /**
  * A JPEG carrying every segment kind the scrubber has an opinion about: APP0
@@ -212,6 +224,12 @@ export function jpegFixture(opts: JpegOptions = {}): Uint8Array {
 	const exif = opts.exif === null ? null : exifTiff(opts.exif ?? { orientation: 6, artist: 'Nova Sparks', copyright: '(c) 2019 Nova Sparks', subIfd: true, gps: true, thumbnail: true });
 	const parts: number[] = [0xff, 0xd8];
 	parts.push(...segment(0xe0, [...cstring('JFIF'), 1, 2, 0, ...u16be(72), ...u16be(72), 0, 0]));
+	if (opts.noScan) {
+		// The marker loop's own end-of-image path: a file that reaches EOI before
+		// any SOS still has a trailer to zero.
+		parts.push(0xff, 0xd9, ...ascii(JPEG_TRAILER));
+		return Uint8Array.from(parts);
+	}
 	if (exif) parts.push(...segment(0xe1, [...ascii('Exif'), 0, 0, ...exif]));
 	parts.push(...segment(0xe1, [...cstring('http://ns.adobe.com/xap/1.0/'), ...xmpWithGps()]));
 	parts.push(...segment(0xe2, [...cstring('ICC_PROFILE'), 1, 1, ...ascii('fake icc profile bytes')]));
@@ -230,6 +248,17 @@ export function jpegFixture(opts: JpegOptions = {}): Uint8Array {
 	// A stuffed 0xFF (FF 00) and a restart marker (FF D0) inside the scan: the
 	// two things an EOI search must not mistake for the end of the image.
 	parts.push(...ascii('entropy'), 0xff, 0x00, ...ascii('scan'), 0xff, 0xd0, ...ascii('data'));
+	if (opts.secondScan) {
+		// A quantisation table whose bytes happen to contain FF D9. A search that
+		// only looks for that pair stops here and zeroes the rest of the picture,
+		// real EOI included.
+		parts.push(...segment(0xdb, [0x01, ...new Array(30).fill(0x11), 0xff, 0xd9, ...new Array(32).fill(0x11)]));
+		if (opts.exifBetweenScans) {
+			parts.push(...segment(0xe1, [...ascii('Exif'), 0, 0, ...exifTiff({ artist: 'Nova Sparks', gps: true, subIfd: true })]));
+		}
+		parts.push(...segment(0xda, [0x01, 0x01, 0x00, 0x00, 0x3f, 0x00]));
+		parts.push(...ascii('second'), 0xff, 0x00, ...ascii('scan'), 0xff, 0xd7, ...ascii('bytes'));
+	}
 	parts.push(0xff, 0xd9);
 	if (opts.gpsTrailer) {
 		parts.push(
@@ -242,7 +271,7 @@ export function jpegFixture(opts: JpegOptions = {}): Uint8Array {
 		);
 		return Uint8Array.from(parts);
 	}
-	parts.push(...ascii('trailing junk after EOI'));
+	parts.push(...ascii(JPEG_TRAILER));
 	return Uint8Array.from(parts);
 }
 
@@ -312,7 +341,12 @@ function pngChunk(type: string, data: number[]): number[] {
  * holding XMP, plus the case variants exIf/zxIf/tXMP an encoder may write)
  * alongside ones it must leave alone (iCCP, pHYs, IDAT and the APNG chunks).
  */
-export function pngFixture(): Uint8Array {
+export interface PngOptions {
+	/** Append an eXIf chunk AFTER IEND, where a reader stops looking. */
+	afterIend?: boolean;
+}
+
+export function pngFixture(opts: PngOptions = {}): Uint8Array {
 	const parts: number[] = [...PNG_MAGIC];
 	parts.push(...pngChunk('IHDR', [...u32be(8), ...u32be(8), 8, 2, 0, 0, 0]));
 	parts.push(...pngChunk('eXIf', exifTiff({ orientation: 3, artist: 'Nova Sparks', copyright: '(c) Nova', gps: true, subIfd: true })));
@@ -330,6 +364,7 @@ export function pngFixture(): Uint8Array {
 	parts.push(...pngChunk('IDAT', [...ascii('fake idat payload')]));
 	parts.push(...pngChunk('fdAT', [...u32be(1), ...ascii('fake second frame')]));
 	parts.push(...pngChunk('IEND', []));
+	if (opts.afterIend) parts.push(...pngChunk('eXIf', exifTiff({ gps: true, subIfd: true })));
 	return Uint8Array.from(parts);
 }
 
@@ -439,6 +474,37 @@ export interface AvifOptions {
 	hugeExifExtent?: boolean;
 	/** Insert a size-0 `free` box ("to end of file") ahead of the meta box. */
 	freeBoxBeforeMeta?: boolean;
+	/** Split the Exif item across two extents, which cannot be rewritten in place. */
+	splitExifExtent?: boolean;
+	/**
+	 * Replace the iloc with one built to make the PARSE expensive rather than to
+	 * place any bytes: `zeroWidth` names 200 items of 65535 extents each, in
+	 * about 1.2 KB, by declaring offset and length widths of zero; `items` and
+	 * `extents` declare counts over the parser's caps with none of the records
+	 * they promise.
+	 */
+	ilocBomb?: 'zeroWidth' | 'items' | 'extents';
+}
+
+/**
+ * An iloc built to cost the parser far more than it costs the file. Every
+ * variant is a few hundred bytes: an extent record can be zero bytes wide
+ * (offset_size and length_size both 0), and a declared count needs no records
+ * behind it at all.
+ */
+function bombIloc(kind: 'zeroWidth' | 'items' | 'extents'): number[] {
+	if (kind === 'items') {
+		// item_count says 1000; not one item record follows.
+		return fullBox('iloc', 0, 0, [0x44, 0x00, ...u16be(1000)]);
+	}
+	if (kind === 'extents') {
+		// One item claiming 65535 extents, with none of their bytes present.
+		return fullBox('iloc', 0, 0, [0x44, 0x00, ...u16be(1), ...u16be(1), ...u16be(0), ...u16be(65535)]);
+	}
+	// 200 items × 65535 zero-width extents: 13 million extents in 1.2 KB.
+	const items: number[] = [];
+	for (let id = 1; id <= 200; id++) items.push(...u16be(id), ...u16be(0), ...u16be(65535));
+	return fullBox('iloc', 0, 0, [0x00, 0x00, ...u16be(200), ...items]);
 }
 
 export interface AvifFixture {
@@ -474,30 +540,34 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			...infe(3, 'mime', 'XMP', 'application/rdf+xml')
 		]);
 		const version = opts.idatConstruction ? 1 : 0;
-		const item = (id: number, method: number, at: number, length: number): number[] => [
+		const item = (id: number, method: number, at: number, length: number, split = false): number[] => [
 			...u16be(id),
 			// construction_method occupies 4 bits of a reserved 16 in v1/v2 only.
 			...(version === 0 ? [] : u16be(method)),
 			...u16be(0), // data_reference_index
 			// base_offset_size is 0, so no base offset bytes follow.
-			...u16be(1), // extent_count
+			...u16be(split ? 2 : 1), // extent_count
 			...u32be(at),
-			...u32be(length)
+			...u32be(split ? length - 4 : length),
+			...(split ? [...u32be(at + length - 4), ...u32be(4)] : [])
 		];
 		// offset_size=4, length_size=4, base_offset_size=0, index_size/reserved=0.
-		const iloc = fullBox('iloc', version, 0, [
-			0x44,
-			0x00,
-			...u16be(3),
-			...item(1, 0, av01At, av01Payload.length),
-			...item(
-				2,
-				opts.idatConstruction ? 1 : 0,
-				exifAt,
-				opts.hugeExifExtent ? 0x7ffffff0 : exifPayload.length
-			),
-			...item(3, 0, xmpAt, xmpPayload.length)
-		]);
+		const iloc = opts.ilocBomb
+			? bombIloc(opts.ilocBomb)
+			: fullBox('iloc', version, 0, [
+					0x44,
+					0x00,
+					...u16be(3),
+					...item(1, 0, av01At, av01Payload.length),
+					...item(
+						2,
+						opts.idatConstruction ? 1 : 0,
+						exifAt,
+						opts.hugeExifExtent ? 0x7ffffff0 : exifPayload.length,
+						opts.splitExifExtent
+					),
+					...item(3, 0, xmpAt, xmpPayload.length)
+				]);
 		const iprp = isoBox('iprp', [
 			...isoBox('ipco', [...fullBox('av1C', 0, 0, [0x81, 0x00, 0x0c, 0x00]), ...isoBox('irot', [1])]),
 			...fullBox('ipma', 0, 0, [...u32be(1), ...u16be(1), 1, 0x81])
@@ -533,8 +603,16 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 // GIF
 // ---------------------------------------------------------------------------
 
+export interface GifOptions {
+	/**
+	 * Append a second image — an XMP application extension carrying GPS, a frame
+	 * and another trailer — AFTER the trailer, where a decoder stops reading.
+	 */
+	afterTrailer?: boolean;
+}
+
 /** A one-frame GIF with a comment extension, which the scrubber leaves alone. */
-export function gifFixture(): Uint8Array {
+export function gifFixture(opts: GifOptions = {}): Uint8Array {
 	return bytes(
 		ascii('GIF89a'),
 		[8, 0, 8, 0, 0x80, 0, 0], // logical screen descriptor, global colour table of 2
@@ -544,8 +622,19 @@ export function gifFixture(): Uint8Array {
 		[0],
 		[0x2c, 0, 0, 0, 0, 8, 0, 8, 0, 0],
 		[0x02, 0x02, 0x44, 0x01, 0x00],
-		[0x3b]
+		[0x3b],
+		opts.afterTrailer ? gifAfterTrailer() : []
 	);
+}
+
+/** A whole second GIF image, XMP extension and all, to park past the trailer. */
+function gifAfterTrailer(): number[] {
+	return [
+		0x21, 0xff, 11, ...ascii('XMP DataXMP'), ...xmpWithGps(), ...gifXmpMagicTrailer(),
+		0x2c, 0, 0, 0, 0, 8, 0, 8, 0, 0,
+		0x02, 0x02, 0x44, 0x01, 0x00,
+		0x3b
+	];
 }
 
 /**

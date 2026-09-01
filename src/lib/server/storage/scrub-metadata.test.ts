@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { scrubImageMetadata, scrubImageMetadataStream, UnscrubbableImageError } from './scrub-metadata';
+import {
+	isUnscrubbable,
+	scrubImageMetadata,
+	scrubImageMetadataStream,
+	UnscrubbableImageError
+} from './scrub-metadata';
 import {
 	ascii,
 	avifFixture,
@@ -11,6 +16,7 @@ import {
 	gifXmpRange,
 	jpegFixture,
 	jpegSosOffset,
+	JPEG_TRAILER,
 	pngChunks,
 	pngCrc,
 	pngFixture,
@@ -205,6 +211,55 @@ describe('scrubImageMetadata: JPEG Exif edge cases', () => {
 	it('throws when a segment length runs past the end of the file', () => {
 		expect(() => scrubImageMetadata(jpegFixture({ truncated: true }))).toThrow(UnscrubbableImageError);
 	});
+
+	it('zeroes the trailer of a file that reaches EOI before any scan', () => {
+		const file = jpegFixture({ noScan: true });
+		const scrubbed = scrubImageMetadata(file);
+		const eoi = file.length - JPEG_TRAILER.length;
+		expect(scrubbed.length).toBe(file.length);
+		expect(scrubbed.subarray(0, eoi)).toEqual(file.subarray(0, eoi));
+		expect(scrubbed.subarray(eoi).every((b) => b === 0)).toBe(true);
+	});
+});
+
+describe('scrubImageMetadata: JPEG with more than one scan', () => {
+	// A progressive JPEG interleaves scans with segments, so the walk cannot
+	// treat the first SOS as the end of the marker stream.
+	it('keeps the later scans when a DQT between them contains FF D9', () => {
+		const file = jpegFixture({ secondScan: true });
+		const scrubbed = scrubImageMetadata(file);
+		const sos = jpegSosOffset(file);
+		const eoi = file.length - JPEG_TRAILER.length;
+		expect(scrubbed.length).toBe(file.length);
+		// The trap really is in the file: the DQT's table bytes read FF D9.
+		expect(text(file.subarray(sos, eoi)).indexOf('\xff\xd9')).toBeLessThan(eoi - sos - 2);
+		// Everything from the first scan through the REAL end marker survives...
+		expect(scrubbed.subarray(sos, eoi)).toEqual(file.subarray(sos, eoi));
+		expect(text(scrubbed)).toContain('second');
+		expect([...scrubbed.subarray(eoi - 2, eoi)]).toEqual([0xff, 0xd9]);
+		// ...and only the true trailer is zeroed.
+		expect(scrubbed.subarray(eoi).every((b) => b === 0)).toBe(true);
+	});
+
+	it('rewrites an APP1 Exif segment sitting between two scans', () => {
+		const file = jpegFixture({ secondScan: true, exifBetweenScans: true });
+		const scrubbed = scrubImageMetadata(file);
+		expect(scrubbed.length).toBe(file.length);
+		expect(text(file)).toContain('MAKERNOT');
+		expect(text(scrubbed)).not.toContain('MAKERNOT');
+		// The between-scans Exif became a minimal TIFF: the artist survives, the
+		// GPS and sub-IFD pointers do not.
+		const at = text(scrubbed).indexOf('Exif\0\0', jpegSosOffset(file));
+		expect(at).toBeGreaterThan(0);
+		const tiff = readTiff(scrubbed.subarray(at + 6));
+		expect(tiff.strings[0x013b]).toBe('Nova Sparks');
+		expect(tiff.entries.some((e) => e.tag === 0x8825 || e.tag === 0x8769)).toBe(false);
+		// The second scan and the real EOI are still there.
+		expect(text(scrubbed)).toContain('second');
+		const eoi = file.length - JPEG_TRAILER.length;
+		expect([...scrubbed.subarray(eoi - 2, eoi)]).toEqual([0xff, 0xd9]);
+		expect(scrubbed.subarray(eoi).every((b) => b === 0)).toBe(true);
+	});
 });
 
 describe('scrubImageMetadata: PNG', () => {
@@ -261,6 +316,19 @@ describe('scrubImageMetadata: PNG', () => {
 		}
 		expect(text(scrubbed)).not.toContain('51.5');
 		expect(text(scrubbed)).not.toContain('GPSLatitude');
+	});
+
+	it('zeroes an eXIf chunk appended after IEND', () => {
+		// A reader stops at IEND, so a chunk parked after it is metadata nothing
+		// examines — the same hole the JPEG trailer was.
+		const file = pngFixture({ afterIend: true });
+		const out = scrubImageMetadata(file);
+		const iend = pngFixture().length;
+		expect(out.length).toBe(file.length);
+		expect(out.subarray(0, iend)).toEqual(scrubbed);
+		expect(text(file)).toContain('MAKERNOT');
+		expect(text(out)).not.toContain('MAKERNOT');
+		expect(out.subarray(iend).every((b) => b === 0)).toBe(true);
 	});
 
 	it('leaves IHDR, iCCP, pHYs, IDAT, the APNG chunks and IEND identical', () => {
@@ -378,9 +446,33 @@ describe('scrubImageMetadata: AVIF', () => {
 
 	it('throws when an item extent declares more bytes than the record cap', () => {
 		// The extent is buffered whole to be rewritten, so its declared length is
-		// an allocation the file's author picks.
+		// an allocation the file's author picks. Matching the CAP's own wording:
+		// a truncation error here would mean the cap never ran.
 		const huge = avifFixture({ hugeExifExtent: true });
 		expect(() => scrubImageMetadata(huge.file)).toThrow(UnscrubbableImageError);
+		expect(() => scrubImageMetadata(huge.file)).toThrow(/over the \d+-byte cap/);
+	});
+
+	it('throws when an item is split across extents', () => {
+		const split = avifFixture({ splitExifExtent: true });
+		expect(() => scrubImageMetadata(split.file)).toThrow(/split across 2 extents/);
+	});
+
+	it('throws on an item list built to allocate rather than to place bytes', () => {
+		// 200 items × 65535 extents in about 1.2 KB of input: an extent whose
+		// offset and length are both zero bytes wide costs the file nothing and
+		// the parser an array entry, so the widths are refused outright...
+		expect(() => scrubImageMetadata(avifFixture({ ilocBomb: 'zeroWidth' }).file)).toThrow(
+			/neither an offset nor a length/
+		);
+		// ...and the declared counts are capped either side of that, so a bomb
+		// built from real-width extents cannot get through either.
+		expect(() => scrubImageMetadata(avifFixture({ ilocBomb: 'items' }).file)).toThrow(
+			/over the \d+-item cap/
+		);
+		expect(() => scrubImageMetadata(avifFixture({ ilocBomb: 'extents' }).file)).toThrow(
+			/over the \d+-extent cap/
+		);
 	});
 
 	it('throws on a size-0 box ahead of the meta box', () => {
@@ -418,6 +510,19 @@ describe('scrubImageMetadata: pass-through and rejection', () => {
 		expect(scrubbed.subarray(end)).toEqual(gif.subarray(end));
 	});
 
+	it('zeroes a second image appended after the GIF trailer', () => {
+		// A decoder stops at 0x3B, so a whole second GIF parked behind it — XMP
+		// extension and all — is bytes nothing walked.
+		const file = gifFixture({ afterTrailer: true });
+		const out = scrubImageMetadata(file);
+		const end = gifFixture().length;
+		expect(out.length).toBe(file.length);
+		expect(out.subarray(0, end)).toEqual(file.subarray(0, end));
+		expect(text(file)).toContain('GPSLatitude');
+		expect(text(out)).not.toContain('GPSLatitude');
+		expect(out.subarray(end).every((b) => b === 0)).toBe(true);
+	});
+
 	it('throws on a GIF whose block structure runs past the end', () => {
 		const gif = gifWithXmpFixture();
 		expect(() => scrubImageMetadata(gif.subarray(0, gif.length - 60))).toThrow(
@@ -440,23 +545,28 @@ describe('scrubImageMetadataStream chunking invariance', () => {
 		['jpeg without keepable tags', jpegFixture({ exif: { subIfd: true, gps: true } })],
 		['jpeg with a malformed exif', jpegFixture({ exif: { orientation: 6, artist: 'Nova', badIfdOffset: true } })],
 		['jpeg with a gps trailer', jpegFixture({ gpsTrailer: true })],
+		['jpeg with a second scan', jpegFixture({ secondScan: true })],
+		['jpeg with exif between two scans', jpegFixture({ secondScan: true, exifBetweenScans: true })],
 		['png', pngFixture()],
+		['png with a chunk after IEND', pngFixture({ afterIend: true })],
 		['webp', webpFixture()],
 		['webp with a trailer past the riff size', webpFixture({ trailer: 'past the riff size' })],
 		['webp simple', webpSimpleFixture()],
 		['avif', avifFixture().file],
 		['avif with a large mdat', avifFixture({ largeMdat: true }).file],
 		['gif', gifFixture()],
+		['gif with an image after the trailer', gifFixture({ afterTrailer: true })],
 		['gif with an xmp extension', gifWithXmpFixture()]
 	];
 
 	for (const [name, fixture] of fixtures) {
 		it(`matches the sync output for ${name} at every chunk size`, async () => {
 			const expected = scrubImageMetadata(fixture);
-			// A random split as well as the fixed sizes: a boundary landing inside a
-			// length field or an identifier string is the failure mode this guards.
-			const random = 1 + Math.floor(Math.random() * Math.max(fixture.length - 1, 1));
-			for (const size of [1, 2, 3, 7, 64, 4096, random]) {
+			// A boundary landing inside a length field, an identifier string or a
+			// marker pair is the failure mode this guards. 8191 and 8193 straddle
+			// the 8192-byte scan block, where the walk holds a trailing 0xFF back;
+			// fixed sizes rather than a random one so a failure is reproducible.
+			for (const size of [1, 2, 3, 7, 64, 4096, 8191, 8193]) {
 				const actual = await streamScrub(fixture, size);
 				expect(actual, `${name} at chunk size ${size}`).toEqual(expected);
 			}
@@ -468,6 +578,29 @@ describe('scrubImageMetadataStream chunking invariance', () => {
 			UnscrubbableImageError
 		);
 		await expect(streamScrub(new Uint8Array(32), 8)).rejects.toThrow(UnscrubbableImageError);
+	});
+});
+
+describe('isUnscrubbable', () => {
+	const refusal = new UnscrubbableImageError('jpeg: segment 0xe1 runs past the end');
+
+	it('finds the refusal however the runtime wrapped it', () => {
+		expect(isUnscrubbable(refusal)).toBe(true);
+		// undici's shape: the provider's fetch rejects carrying ours underneath.
+		expect(isUnscrubbable(new TypeError('fetch failed', { cause: refusal }))).toBe(true);
+		// A retrying client reports every attempt at once.
+		expect(isUnscrubbable(new AggregateError([new Error('first try'), refusal]))).toBe(true);
+		// And a rejection need not be an Error at all to carry a cause.
+		expect(isUnscrubbable({ cause: refusal })).toBe(true);
+	});
+
+	it('says no to anything else, and terminates on a cyclic chain', () => {
+		expect(isUnscrubbable(new Error('storage put failed'))).toBe(false);
+		expect(isUnscrubbable('jpeg: segment 0xe1 runs past the end')).toBe(false);
+		expect(isUnscrubbable(null)).toBe(false);
+		const loop = new Error('outer');
+		loop.cause = new Error('inner', { cause: loop });
+		expect(isUnscrubbable(loop)).toBe(false);
 	});
 });
 

@@ -135,25 +135,18 @@ describe('getStorage wraps the provider in metadata scrubbing', () => {
 		const stored: Stored[] = [];
 		const { storage } = storageFor(stored);
 		const truncated = jpegFixture({ truncated: true });
-		// A five-second ceiling: the failure this guards against is a put that
-		// never settles because the provider is still waiting on a stream the
-		// transform has already errored.
-		const settled = await Promise.race([
-			storage
-				.put({
-					suggestedKey: 'artwork/e.jpg',
-					body: streamOf(truncated),
-					size: truncated.length,
-					contentType: 'image/jpeg',
-					filename: 'e.jpg'
-				})
-				.then(
-					() => 'resolved',
-					(e) => (e instanceof UnscrubbableImageError ? 'rejected' : `other: ${e}`)
-				),
-			new Promise((resolve) => setTimeout(() => resolve('hung'), 5000))
-		]);
-		expect(settled).toBe('rejected');
+		// The failure this guards against is a put that never settles because the
+		// provider is still waiting on a stream the transform has already errored;
+		// that one shows up as the runner's own timeout, not as a wrong value.
+		await expect(
+			storage.put({
+				suggestedKey: 'artwork/e.jpg',
+				body: streamOf(truncated),
+				size: truncated.length,
+				contentType: 'image/jpeg',
+				filename: 'e.jpg'
+			})
+		).rejects.toThrow(UnscrubbableImageError);
 		expect(stored).toHaveLength(0);
 	});
 

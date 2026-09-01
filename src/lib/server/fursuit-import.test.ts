@@ -8,6 +8,7 @@ import * as schema from '$lib/server/db/schema';
 import type { SiteSettings } from '$lib/server/settings';
 import { makeD1 } from '$lib/server/test/d1';
 import { staticWebp } from './test/raster-fixtures';
+import { UNSCRUBBABLE_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { importFursuitPhotos, fursuitPhotosExist, clearFursuitPhotosCache } from './fursuit-import';
 
 const DDL = `
@@ -123,9 +124,7 @@ describe('importFursuitPhotos', () => {
 		});
 
 		expect(result.failed).toBe(1);
-		expect(result.items[0].error).toBe(
-			"Couldn't strip this photo's hidden metadata, so it wasn't saved. Export a fresh copy and import again."
-		);
+		expect(result.items[0].error).toBe(UNSCRUBBABLE_MESSAGE);
 		// The parser's own wording is still available, in the log.
 		expect(warn).toHaveBeenCalled();
 		warn.mockRestore();

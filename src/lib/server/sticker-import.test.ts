@@ -27,6 +27,7 @@ import { listPublicCharacterNames } from '$lib/server/characters';
 import { stickerTabEnabled, clearStickerTabCache } from '$lib/server/stickers';
 import { slugify } from '$lib/server/slugify';
 import { getStickerSet, downloadFile } from '$lib/server/telegram';
+import { UNSCRUBBABLE_STICKER_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { readFileSync } from 'node:fs';
 
 // Telegram is mocked so the import path is exercisable offline. getStickerSet
@@ -629,6 +630,52 @@ describe('importTelegramPack', () => {
 		expect(result.failed).toBe(1);
 		const packs = await db.select().from(stickerPacks);
 		expect(packs).toHaveLength(0);
+	});
+
+	it('tells the operator what to do when a sticker cannot be scrubbed', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		// A WebP head over bytes the scrubber cannot walk: the storage layer
+		// refuses it (SONA-170), and this page renders the per-item error, so the
+		// row must say how to fix it rather than repeat the parser's wording.
+		const broken = new Uint8Array([...staticWebp().subarray(0, 12), 0, 0, 0]);
+		vi.mocked(downloadFile).mockReset();
+		vi.mocked(downloadFile).mockResolvedValue({
+			bytes: broken.buffer as ArrayBuffer,
+			contentType: 'application/octet-stream',
+			filePath: 'stickers/file_0.webp'
+		});
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const bucket = {
+			put: vi.fn(async () => {}),
+			delete: vi.fn(async () => {}),
+			list: vi.fn(async () => ({ objects: [], truncated: false }))
+		};
+
+		const result = await importTelegramPack({
+			env: { IMAGES: bucket, TELEGRAM_BOT_TOKEN: 'x' } as unknown as SaveOpts['env'],
+			settings: {
+				primaryCharacter: '',
+				storageProvider: 'r2',
+				r2PublicUrl: 'https://cdn.test'
+			} as unknown as SiteSettings,
+			db,
+			nameOrUrl: 'failset',
+			managerArtistId: null,
+			defaultArtistId: null
+		});
+
+		expect(result.failed).toBe(1);
+		expect(result.items[0].error).toBe(UNSCRUBBABLE_STICKER_MESSAGE);
+		expect(bucket.put).not.toHaveBeenCalled();
+		// The parser's own wording is still available, in the log.
+		expect(warn).toHaveBeenCalled();
+		warn.mockRestore();
+		// Restore the module-level default so later suites see the throwing one.
+		vi.mocked(downloadFile).mockReset();
+		vi.mocked(downloadFile).mockImplementation(async () => {
+			throw new Error('download boom');
+		});
 	});
 });
 

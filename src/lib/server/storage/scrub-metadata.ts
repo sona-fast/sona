@@ -33,20 +33,47 @@ export class UnscrubbableImageError extends Error {
 }
 
 /**
- * Whether `error` is an UnscrubbableImageError, or wraps one as its cause. The
- * STREAMING path never throws it directly: the transform errors the piped body
- * and the provider's own fetch rejects with its error ("TypeError: fetch
- * failed") carrying ours underneath, so a caller mapping the refusal to a 422
- * has to look down the chain. Depth-capped because a cause chain can be cyclic.
+ * Whether `error` is an UnscrubbableImageError, or wraps one. The STREAMING
+ * path never throws it directly: the transform errors the piped body and the
+ * provider's own fetch rejects with its error ("TypeError: fetch failed")
+ * carrying ours underneath, so a caller mapping the refusal to a 422 has to
+ * look down the chain. The walk follows both wrapping shapes a runtime uses —
+ * `cause` and an AggregateError's `errors` — and does not require a link to be
+ * an Error, because a rejection can be a plain object carrying a cause.
+ * Depth-capped and cycle-guarded because a cause chain can be either.
  */
 export function isUnscrubbable(error: unknown): boolean {
-	let at = error;
-	for (let depth = 0; depth < 8 && at instanceof Error; depth++) {
-		if (at instanceof UnscrubbableImageError) return true;
-		at = at.cause;
+	const seen = new Set<unknown>();
+	let frontier: unknown[] = [error];
+	for (let depth = 0; depth < 8 && frontier.length; depth++) {
+		const next: unknown[] = [];
+		for (const at of frontier) {
+			if (at === null || (typeof at !== 'object' && typeof at !== 'function')) continue;
+			if (seen.has(at)) continue;
+			seen.add(at);
+			if (at instanceof UnscrubbableImageError) return true;
+			const link = at as { cause?: unknown; errors?: unknown };
+			if ('cause' in link) next.push(link.cause);
+			if (Array.isArray(link.errors)) next.push(...link.errors);
+		}
+		frontier = next;
 	}
 	return false;
 }
+
+/**
+ * What a server-side caller records when a put is refused. One sentence in one
+ * place: /api/upload returns it as the 422 body and the fursuit import puts it
+ * on the failed row, so the two surfaces cannot drift. It mirrors the client's
+ * admin_upload_error_unscrubbable message; the parser's own wording
+ * ("jpeg: segment 0x…") is for the log, not for whoever has to fix the file.
+ */
+export const UNSCRUBBABLE_MESSAGE =
+	"Couldn't strip this file's hidden metadata. Export a fresh copy from an image editor and upload that.";
+
+/** The same refusal on the sticker import, whose page names the item. */
+export const UNSCRUBBABLE_STICKER_MESSAGE =
+	"Couldn't strip this sticker's hidden metadata, so it wasn't saved.";
 
 /** Leading bytes handed to sniffImageType — enough for an AVIF ftyp box's
  * compatible_brands (which start at offset 16), matching /api/upload. */
@@ -62,6 +89,16 @@ const MAX_RECORD_BYTES = 4 * 1024 * 1024;
 
 /** Longest ASCII value we carry across into the rewritten TIFF. */
 const MAX_ASCII_BYTES = 4096;
+
+/**
+ * Ceilings on an AVIF item list. A real AVIF names a handful of items with one
+ * extent each, so 256 items and 1024 extents in total are far above anything an
+ * encoder writes; both exist because an item record — and an extent inside it —
+ * can cost as little as zero input bytes, so the declared counts, not the file
+ * size, decide how much this parse allocates.
+ */
+const MAX_ILOC_ITEMS = 256;
+const MAX_ILOC_EXTENTS = 1024;
 
 // ---------------------------------------------------------------------------
 // The driver: a byte-stream coroutine
@@ -90,6 +127,12 @@ type Step =
 
 type Machine = Generator<Step, void, Uint8Array>;
 
+/** A machine that reports whether the walk is finished (see passScanToEoi). */
+type ScanMachine = Generator<Step, boolean, Uint8Array>;
+
+/** Handed to the machine's first `next()`, where the value is discarded. */
+const NO_BYTES = new Uint8Array(0);
+
 class ScrubDriver {
 	#machine: Machine = scrubMachine();
 	#step: Step | null;
@@ -102,8 +145,8 @@ class ScrubDriver {
 		this.#step = this.#advance();
 	}
 
-	#advance(value?: Uint8Array): Step | null {
-		const next = value === undefined ? this.#machine.next() : this.#machine.next(value);
+	#advance(value: Uint8Array = NO_BYTES): Step | null {
+		const next = this.#machine.next(value);
 		return next.done ? null : next.value;
 	}
 
@@ -121,10 +164,10 @@ class ScrubDriver {
 		// Resolve pending takeUpTo steps with whatever arrived; at end of input a
 		// short read is the answer, not a wait. Each pass hands over every byte
 		// still queued, so the loop ends at the first EMPTY hand-over: every
-		// takeUpTo site (the leading sniff, the ISOBMFF box header, the JPEG
-		// scan and trailer walks) reads an empty array as end of input and stops
-		// asking. That also bounds the loop — a pass either consumes input or is
-		// the last one.
+		// takeUpTo site (the leading sniff, the ISOBMFF box header, the JPEG scan
+		// walk and every trailer walk) reads an empty array as end of input and
+		// stops asking. That also bounds the loop — a pass either consumes input
+		// or is the last one.
 		while (this.#step?.kind === 'takeUpTo') {
 			const remaining = concat(this.#pull(this.#inputLen));
 			this.#step = this.#advance(remaining);
@@ -175,18 +218,15 @@ class ScrubDriver {
 		};
 		for (;;) {
 			const step = this.#step;
-			if (step === null) {
-				// The machine ran to completion at a clean record boundary; anything
-				// after it is trailing data the format allows (and that no walk can
-				// interpret), so it passes through.
+			// null: the machine ran to completion at a clean record boundary.
+			// 'rest': it asked for the remainder explicitly. Either way what is
+			// left is trailing data the format allows (and that no walk can
+			// interpret), so it passes through.
+			if (step === null || step.kind === 'rest') {
 				if (this.#inputLen) for (const part of this.#pull(this.#inputLen)) emit(part);
 				return out;
 			}
 			switch (step.kind) {
-				case 'rest': {
-					if (this.#inputLen) for (const part of this.#pull(this.#inputLen)) emit(part);
-					return out;
-				}
 				case 'copy': {
 					const n = Math.min(step.n, this.#inputLen);
 					if (n) for (const part of this.#pull(n)) emit(part);
@@ -299,12 +339,13 @@ const ICC_PREFIX = ascii('ICC_PROFILE\0');
 const SCAN_BLOCK_BYTES = 8192;
 
 /**
- * Walk the marker segments up to SOS. The entropy-coded scan then passes
- * through untouched up to and including the first EOI — metadata never lives
- * inside compressed scan data — and everything AFTER the EOI is zeroed. That
- * trailer is where a phone hides its second picture: an MPF preview or a motion
- * photo's MP4 both sit there with their own Exif and GPS, and no decoder reads
- * past EOI, so zeroing costs nothing a viewer would notice.
+ * Walk the marker segments, scan by scan. Entropy-coded data passes through
+ * untouched — metadata never lives inside it — and the walk resumes here at
+ * every marker that ends a scan, so a progressive JPEG's later scans get the
+ * same segment treatment as its first. Everything after the EOI is zeroed:
+ * that trailer is where a phone hides its second picture, an MPF preview or a
+ * motion photo's MP4, each with its own Exif and GPS, and no decoder reads past
+ * EOI, so zeroing costs nothing a viewer would notice.
  */
 function* scrubJpeg(): Machine {
 	const soi = yield { kind: 'take', n: 2 };
@@ -342,10 +383,13 @@ function* scrubJpeg(): Machine {
 		const payloadLen = length - 2;
 		if (marker === 0xda) {
 			// The SOS header names the scan's components; the entropy-coded data
-			// follows it with no length of its own.
+			// follows it with no length of its own. The scan walk hands control
+			// back here when the entropy data ends at a marker that is not EOI —
+			// a progressive JPEG has several scans with DQT, DHT, DRI and even
+			// APPn segments between them, and each of those is this loop's job.
 			if (payloadLen) yield { kind: 'copy', n: payloadLen };
-			yield* passScanToEoi();
-			return;
+			if (yield* passScanToEoi()) return;
+			continue;
 		}
 		const scrubs = marker === 0xe1 || marker === 0xe2 || marker === 0xed;
 		if (!scrubs || payloadLen === 0) {
@@ -358,42 +402,59 @@ function* scrubJpeg(): Machine {
 }
 
 /**
- * Pass the entropy-coded scan through while watching for the first EOI, then
- * zero everything after it. Scanning for `FF D9` is unambiguous: inside the
- * scan an `FF` byte is always followed by `00` (byte stuffing) or by a restart
- * marker `D0`–`D7`, so the pair can only be the real end marker. Reaching the
- * end of input without one is fine — the scan passed through and nothing was
- * zeroed, which is what a truncated file that still decodes partially wants.
+ * Pass the entropy-coded scan through, stopping at the marker that ends it.
+ * Inside entropy data an `FF` is always followed by `00` (byte stuffing) or by
+ * a restart marker `D0`–`D7`, and both halves stay in the scan; `FF FF` is
+ * legal fill ahead of a marker. Any OTHER byte after an `FF` is a real marker
+ * and the entropy data has ended there.
+ *
+ * Returns true when the image is over: EOI (whose trailer is then zeroed —
+ * that is where a phone hides an MPF preview or a motion photo's MP4, each
+ * with its own GPS) or end of input, which is a truncated file that still
+ * decodes as far as it goes. Returns false at any other marker, handing the
+ * bytes back to scrubJpeg's marker loop — a progressive JPEG puts DQT, DHT,
+ * DRI and sometimes an APP1 Exif between its scans, and searching blindly for
+ * `FF D9` would both miss that APP1 and stop early on a DQT whose table bytes
+ * happen to read `FF D9`, zeroing the rest of the picture.
  */
-function* passScanToEoi(): Machine {
+function* passScanToEoi(): ScanMachine {
 	for (;;) {
 		const block = yield { kind: 'takeUpTo', n: SCAN_BLOCK_BYTES };
-		if (!block.length) return;
+		if (!block.length) return true;
 		// A short read only happens at end of input (see the driver), which is
 		// what makes it safe to emit a trailing 0xFF instead of holding it back.
 		const atEnd = block.length < SCAN_BLOCK_BYTES;
 		let found = -1;
 		for (let i = 0; i + 1 < block.length; i++) {
-			if (block[i] === 0xff && block[i + 1] === 0xd9) {
-				found = i;
-				break;
+			if (block[i] !== 0xff) continue;
+			const next = block[i + 1];
+			if (next === 0x00 || (next >= 0xd0 && next <= 0xd7)) {
+				i++; // stuffing or a restart marker: both bytes belong to the scan
+				continue;
 			}
+			if (next === 0xff) continue; // fill; judge the pair starting at that byte
+			found = i;
+			break;
 		}
 		if (found >= 0) {
-			yield { kind: 'write', bytes: block.subarray(0, found + 2) };
-			yield { kind: 'unread', bytes: block.subarray(found + 2) };
+			const endsImage = block[found + 1] === 0xd9;
+			// The EOI itself is part of the picture; any other marker goes back on
+			// the queue for the marker loop to read from its leading 0xFF.
+			yield { kind: 'write', bytes: block.subarray(0, found + (endsImage ? 2 : 0)) };
+			yield { kind: 'unread', bytes: block.subarray(found + (endsImage ? 2 : 0)) };
+			if (!endsImage) return false;
 			yield* zeroToEnd();
-			return;
+			return true;
 		}
 		if (!atEnd && block[block.length - 1] === 0xff) {
-			// The 0xFF may be the first half of an EOI split across chunks, so it
+			// The 0xFF may be the first half of a marker split across chunks, so it
 			// goes back on the queue to be judged with the byte that follows it.
 			yield { kind: 'write', bytes: block.subarray(0, block.length - 1) };
 			yield { kind: 'unread', bytes: block.subarray(block.length - 1) };
 			continue;
 		}
 		yield { kind: 'write', bytes: block };
-		if (atEnd) return;
+		if (atEnd) return true;
 	}
 }
 
@@ -418,14 +479,7 @@ function* zeroToEnd(): Machine {
 function scrubJpegSegment(marker: number, payload: Uint8Array): Uint8Array {
 	if (marker === 0xe1) {
 		if (startsWith(payload, EXIF_PREFIX)) {
-			const out = new Uint8Array(payload.length);
-			out.set(EXIF_PREFIX, 0);
-			const tiff = minimalTiff(payload.subarray(EXIF_PREFIX.length), payload.length - EXIF_PREFIX.length, true);
-			// A payload with no room for even an empty TIFF directory cannot stay a
-			// valid Exif segment, so it becomes an unrecognised (skipped) one.
-			if (!tiff) return new Uint8Array(payload.length);
-			out.set(tiff, EXIF_PREFIX.length);
-			return out;
+			return rewriteExif(payload, payload.length, true);
 		}
 		if (startsWith(payload, XMP_NS)) {
 			const out = new Uint8Array(payload.length);
@@ -443,6 +497,25 @@ function scrubJpegSegment(marker: number, payload: Uint8Array): Uint8Array {
 	}
 	// APP13.
 	return new Uint8Array(payload.length);
+}
+
+/**
+ * Rewrite an Exif record of exactly `capacity` bytes, wherever it lives. Most
+ * encoders store the bare TIFF, but some prefix the JPEG-style 'Exif\0\0'
+ * header; whichever shape the record already uses is kept, so a decoder that
+ * keys off it still finds what it expects. A capacity too small for even an
+ * empty directory is zeroed instead: an Exif record a decoder skips beats a
+ * malformed one it chokes on.
+ */
+function rewriteExif(payload: Uint8Array, capacity: number, keepOrientation: boolean): Uint8Array {
+	const out = new Uint8Array(Math.max(capacity, 0));
+	const prefixed = startsWith(payload, EXIF_PREFIX);
+	const start = prefixed ? EXIF_PREFIX.length : 0;
+	const tiff = minimalTiff(payload.subarray(start), capacity - start, keepOrientation);
+	if (!tiff) return out;
+	if (prefixed) out.set(EXIF_PREFIX, 0);
+	out.set(tiff, start);
+	return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -468,7 +541,7 @@ const SCRUBBED_CHUNK = ascii('scRb');
  * spelling would let it through carrying GPS.
  *
  * Everything else — IHDR, PLTE, IDAT, iCCP, cHRM, gAMA, sRGB, pHYs, tIME, and
- * the APNG chunks — is copied through.
+ * the APNG chunks — is copied through, and everything after IEND is zeroed.
  */
 function* scrubPng(): Machine {
 	const signature = yield { kind: 'take', n: 8 };
@@ -493,7 +566,10 @@ function* scrubPng(): Machine {
 			yield { kind: 'write', bytes: header };
 			yield { kind: 'copy', n: length + 4 };
 			if (type === 'IEND') {
-				yield { kind: 'rest' };
+				// IEND ends the image; a reader stops there. Bytes parked after it
+				// get the JPEG trailer's treatment — an eXIf chunk appended past
+				// IEND still reads as metadata to anything that goes looking.
+				yield* zeroToEnd();
 				return;
 			}
 			continue;
@@ -580,19 +656,9 @@ function scrubWebpChunk(fourcc: string, body: Uint8Array, size: number): Uint8Ar
 		out.set(emptyXmpPacket(size), 0);
 		return out;
 	}
-	// EXIF. Most encoders store the bare TIFF, but some prefix the JPEG-style
-	// 'Exif\0\0' header; keep whichever shape the file already uses so a decoder
-	// that keys off it still finds what it expects.
-	const payload = body.subarray(0, size);
-	if (startsWith(payload, EXIF_PREFIX)) {
-		out.set(EXIF_PREFIX, 0);
-		const tiff = minimalTiff(payload.subarray(EXIF_PREFIX.length), size - EXIF_PREFIX.length, true);
-		if (tiff) out.set(tiff, EXIF_PREFIX.length);
-		else out.fill(0);
-		return out;
-	}
-	const tiff = minimalTiff(payload, size, true);
-	if (tiff) out.set(tiff, 0);
+	// EXIF. The pad byte is outside the payload, so the rewrite fills `size`
+	// bytes and the pad stays zero.
+	out.set(rewriteExif(body.subarray(0, size), size, true), 0);
 	return out;
 }
 
@@ -701,8 +767,7 @@ function scrubAvifExtent(kind: 'exif' | 'xmp', payload: Uint8Array): Uint8Array 
 	const skip = u32(payload, 0, true);
 	const tiffStart = 4 + skip;
 	const original = tiffStart <= payload.length ? payload.subarray(tiffStart) : new Uint8Array(0);
-	const tiff = minimalTiff(original, payload.length - 4, false);
-	if (tiff) out.set(tiff, 4);
+	out.set(rewriteExif(original, payload.length - 4, false), 4);
 	return out;
 }
 
@@ -794,11 +859,24 @@ function parseIloc(
 	const lengthSize = body[4] & 0x0f;
 	const baseOffsetSize = body[5] >> 4;
 	const indexSize = version === 0 ? 0 : body[5] & 0x0f;
+	// An extent with neither an offset nor a length addresses no bytes at all,
+	// and declaring one costs no input bytes either — which is what makes the
+	// item list an allocation bomb: a 2 KB meta box can name millions of extents
+	// nothing could ever rewrite.
+	if (offsetSize === 0 && lengthSize === 0) {
+		throw new UnscrubbableImageError('avif: an iloc extent declares neither an offset nor a length');
+	}
 	let p = 6;
 	const idLen = version === 2 ? 4 : 2;
 	const countLen = version === 2 ? 4 : 2;
 	const itemCount = countLen === 2 ? u16(body, p, true) : u32(body, p, true);
 	p += countLen;
+	if (itemCount > MAX_ILOC_ITEMS) {
+		throw new UnscrubbableImageError(
+			`avif: the iloc box lists ${itemCount} items, over the ${MAX_ILOC_ITEMS}-item cap`
+		);
+	}
+	let extentTotal = 0;
 	const need = (n: number) => {
 		if (p + n > body.length) throw new UnscrubbableImageError('avif: iloc box is truncated');
 	};
@@ -820,6 +898,12 @@ function parseIloc(
 		need(2);
 		const extentCount = u16(body, p, true);
 		p += 2;
+		extentTotal += extentCount;
+		if (extentTotal > MAX_ILOC_EXTENTS) {
+			throw new UnscrubbableImageError(
+				`avif: the iloc box lists ${extentTotal} extents, over the ${MAX_ILOC_EXTENTS}-extent cap`
+			);
+		}
 		const extents: { offset: number; length: number }[] = [];
 		for (let e = 0; e < extentCount; e++) {
 			need(indexSize + offsetSize + lengthSize);
@@ -898,7 +982,8 @@ const GIF_XMP_TRAILER_BYTES = 258;
  * there — so the pass-through this format used to get was a hole. That one
  * extension's payload is replaced with an empty packet; every other block,
  * comment extension included, is copied byte for byte (same call as the JPEG
- * comment segment: it sometimes carries the artist's own notice).
+ * comment segment: it sometimes carries the artist's own notice). Bytes after
+ * the trailer are zeroed.
  */
 function* scrubGif(): Machine {
 	// Signature and version (6) plus the logical screen descriptor (7).
@@ -909,9 +994,10 @@ function* scrubGif(): Machine {
 		const introducer = yield { kind: 'take', n: 1 };
 		yield { kind: 'write', bytes: introducer };
 		if (introducer[0] === 0x3b) {
-			// Trailer. Anything after it is not part of the picture, but neither is
-			// it addressable metadata, so it passes through as trailing data.
-			yield { kind: 'rest' };
+			// Trailer. A decoder stops here, so anything after it is unexamined
+			// bytes — a whole second GIF with its own XMP extension fits there —
+			// and it is zeroed like the JPEG trailer rather than passed through.
+			yield* zeroToEnd();
 			return;
 		}
 		if (introducer[0] === 0x2c) {
@@ -1031,8 +1117,12 @@ interface KeptTags {
  */
 function minimalTiff(tiff: Uint8Array, capacity: number, keepOrientation: boolean): Uint8Array | null {
 	if (capacity < 14) return null;
+	// 'MM' is big-endian, 'II' little, and anything else is not a TIFF header —
+	// derived once here, because the rewrite has to be written in the SAME byte
+	// order it was read in.
 	const bigEndian = tiff.length >= 2 && tiff[0] === 0x4d && tiff[1] === 0x4d;
-	const tags = readIfd0(tiff, bigEndian);
+	const littleEndian = tiff.length >= 2 && tiff[0] === 0x49 && tiff[1] === 0x49;
+	const tags: KeptTags = bigEndian || littleEndian ? readIfd0(tiff, bigEndian) : {};
 	if (!keepOrientation) tags.orientation = undefined;
 	const out = new Uint8Array(capacity);
 	// Drop the optional values one at a time rather than overflow: a payload too
@@ -1050,8 +1140,6 @@ function minimalTiff(tiff: Uint8Array, capacity: number, keepOrientation: boolea
 function readIfd0(tiff: Uint8Array, bigEndian: boolean): KeptTags {
 	const tags: KeptTags = {};
 	if (tiff.length < 8) return tags;
-	const littleEndian = tiff[0] === 0x49 && tiff[1] === 0x49;
-	if (!bigEndian && !littleEndian) return tags;
 	if (u16(tiff, 2, bigEndian) !== 42) return tags;
 	const ifd = u32(tiff, 4, bigEndian);
 	if (ifd + 2 > tiff.length) return tags;
