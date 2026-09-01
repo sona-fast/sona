@@ -303,6 +303,8 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 	// event otherwise and the browser navigates the tab to the dropped file,
 	// losing the form. dropOn reports whether preventDefault was called, which is
 	// the cancellation itself — a dispatched DragEvent never navigates on its own.
+	// The Replace button is a drop target too, and paints its own highlight.
+	await expectDragOverHighlight(page, 'label.btn-sm');
 	hold = new Promise<void>((resolve) => (release = resolve));
 	const url = page.url();
 	const during = uploads;

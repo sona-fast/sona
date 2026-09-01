@@ -49,6 +49,9 @@ export function dragOver(page: Page, selector: string) {
  * a retried drop can.
  */
 export async function waitForDropAttachment(page: Page, selector: string) {
+	// Read the resting border before the first probe, while the zone is provably
+	// at rest: the settle check below waits for exactly this value to return.
+	const resting = await page.locator(selector).evaluate((el) => getComputedStyle(el).borderColor);
 	await expect(async () => {
 		await dragOver(page, selector);
 		await expect(page.locator(selector)).toHaveClass(/drag-over/, { timeout: 1000 });
@@ -57,16 +60,11 @@ export async function waitForDropAttachment(page: Page, selector: string) {
 	await page.locator(selector).dispatchEvent('dragleave');
 	await expect(page.locator(selector)).not.toHaveClass(/drag-over/);
 	// The class is gone but the 0.15s border-color transition is still running
-	// back toward the resting colour. Return only once two consecutive reads
-	// agree, so a caller's "resting" read never captures a mid-transition value.
+	// back toward the resting colour. Return only once it has arrived, so a
+	// caller's own "resting" read never captures a mid-transition value.
 	await expect
-		.poll(async () => {
-			const read = () => page.locator(selector).evaluate((el) => getComputedStyle(el).borderColor);
-			const first = await read();
-			await page.waitForTimeout(60);
-			return (await read()) === first;
-		})
-		.toBe(true);
+		.poll(() => page.locator(selector).evaluate((el) => getComputedStyle(el).borderColor))
+		.toBe(resting);
 }
 
 /**
