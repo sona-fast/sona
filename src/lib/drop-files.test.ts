@@ -117,6 +117,23 @@ describe('dropFiles', () => {
 		expect(calls).toHaveLength(0);
 	});
 
+	it('leaves an event a nested target already handled alone', () => {
+		const { el, calls } = setup(() => true);
+		const over = Object.assign(new Event('dragover', { cancelable: true }), {
+			dataTransfer: { files: [], dropEffect: 'copy' }
+		});
+		over.preventDefault();
+		el.dispatchEvent(over);
+		// A disabled instance would have set 'none'; the inner target's 'copy' stays.
+		expect(over.dataTransfer.dropEffect).toBe('copy');
+		const drop = Object.assign(new Event('drop', { cancelable: true }), {
+			dataTransfer: { files: [{ name: 'a.png', type: 'image/png' }], dropEffect: '' }
+		});
+		drop.preventDefault();
+		el.dispatchEvent(drop);
+		expect(calls).toHaveLength(0);
+	});
+
 	it('removes its listeners on cleanup', () => {
 		const { el, calls, cleanup } = setup();
 		cleanup?.();

@@ -303,6 +303,11 @@ test('dropping a model file on the model zone uploads one, and a wrong type is r
 	// event otherwise and the browser navigates the tab to the dropped file,
 	// losing the form. dropOn reports whether preventDefault was called, which is
 	// the cancellation itself — a dispatched DragEvent never navigates on its own.
+	// A drop that misses the Replace button and lands on the card is swallowed:
+	// cancelled, no request, so the browser never navigates to the file.
+	const beforeCard = uploads;
+	expect(await dropOn(page, '.model-card', [{ name: 'x.vrm', type: '' }])).toBe(true);
+	expect(uploads).toBe(beforeCard);
 	// The Replace button is a drop target too, and paints its own highlight.
 	await expectDragOverHighlight(page, 'label.btn-sm');
 	hold = new Promise<void>((resolve) => (release = resolve));

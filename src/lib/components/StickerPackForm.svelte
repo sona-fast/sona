@@ -134,6 +134,8 @@
 	function uploadStickers(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
+		// Reset so picking the same file again after a failure fires change.
+		input.value = '';
 		if (!files.length) return;
 		addStickerFiles(files);
 	}
@@ -362,7 +364,9 @@
 			{@attach dropFiles({
 				accept: STICKER_ACCEPT,
 				onFiles: addStickerFiles,
-				disabled: () => uploading
+				// Also while saving: a drop after Save would upload and append a row
+				// the already-serialized submit never sees.
+				disabled: () => uploading || saving
 			})}
 		>
 			<Plus size={20} />

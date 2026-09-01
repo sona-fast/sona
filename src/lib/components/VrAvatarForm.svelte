@@ -622,7 +622,11 @@
 				</span>
 			</div>
 		{:else if modelUrl}
-			<div class="model-card">
+			<!-- The card is much bigger than its Replace button. A drop that misses
+			     the button by a few pixels would otherwise navigate the tab to the
+			     file; swallow it here. The button's own handler runs first and marks
+			     the event handled, so this never overrides its drop. -->
+			<div class="model-card" {@attach dropFiles({ accept: '', onFiles: () => {}, disabled: () => true })}>
 				<FileBox size={20} />
 				<div class="model-info">
 					<span class="model-name">{modelFilename || modelUrl.split('/').pop()}</span>
