@@ -129,18 +129,28 @@ const MAX_ILOC_EXTENTS = 1024;
 const INERT_AVIF_ITEM_TYPES = new Set(['av01', 'grid', 'iovl', 'iden', 'tmap']);
 
 /**
- * The top-level boxes a real AVIF carries. `ftyp`, `meta` and `mdat` are the
- * file; `moov` and `moof` belong to an `avis` image sequence and hold sample
- * tables rather than metadata payloads, so they are copied through. `free`,
- * `skip` and `uuid` are the padding boxes, and their CONTENT is zeroed rather
- * than copied: nothing reads them, and `uuid` is exactly where Adobe parks an
- * XMP packet. Any other top-level type is refused — a real AVIF has none, and a
- * box the walk copies unexamined is a box an Exif payload can ride through in.
+ * The top-level boxes a still AVIF carries. `ftyp`, `meta` and `mdat` are the
+ * file. `free`, `skip` and `uuid` are the padding boxes, and their CONTENT is
+ * zeroed rather than copied: nothing reads them, and `uuid` is exactly where
+ * Adobe parks an XMP packet. Any other top-level type is refused — a box the
+ * walk copies unexamined is a box an Exif payload can ride through in. That
+ * refuses an `avis` image sequence, whose `moov` box carries the QuickTime
+ * location atoms in a `udta` this walk does not descend into.
  */
-const TOP_LEVEL_AVIF_BOXES = new Set(['ftyp', 'meta', 'mdat', 'moov', 'moof', 'free', 'skip', 'uuid']);
+const TOP_LEVEL_AVIF_BOXES = new Set(['ftyp', 'meta', 'mdat', 'free', 'skip', 'uuid']);
 
 /** The subset of those whose content is zeroed instead of copied. */
 const ZEROED_AVIF_BOXES = new Set(['free', 'skip', 'uuid']);
+
+/**
+ * The boxes a still image's `meta` box holds: the handler, the primary item,
+ * the item list, the item locations, the item properties and references, the
+ * data-reference and grouping boxes, and the embedded item data. Anything else
+ * inside `meta` is refused for the same reason the top-level list is spelled
+ * out — a `uuid` child is where an editor parks an XMP packet, and a `free`,
+ * `skip` or `udta` child is a payload the walk would otherwise step over.
+ */
+const AVIF_META_BOXES = new Set(['hdlr', 'pitm', 'iinf', 'iloc', 'iprp', 'iref', 'dinf', 'grpl', 'idat']);
 
 // ---------------------------------------------------------------------------
 // The driver: a byte-stream coroutine
@@ -623,7 +633,7 @@ function* scrubPng(): Machine {
 			continue;
 		}
 		if (length > MAX_RECORD_BYTES) {
-			throw new UnscrubbableImageError(`png: ${type} chunk is ${length} bytes, over the ${MAX_RECORD_BYTES}-byte cap`);
+			throw new UnscrubbableImageError(`png: ${loggable(type)} chunk is ${length} bytes, over the ${MAX_RECORD_BYTES}-byte cap`);
 		}
 		// The CRC covers type + data, so both the rename and the new data need a
 		// recomputed one; its 4 bytes are read and replaced, not copied.
@@ -762,7 +772,7 @@ function* scrubAvif(): Machine {
 		const declared = u32(header, 0, true);
 		const type = String.fromCharCode(header[4], header[5], header[6], header[7]);
 		if (!TOP_LEVEL_AVIF_BOXES.has(type)) {
-			throw new UnscrubbableImageError(`avif: a top-level ${type} box, which the scrubber does not know`);
+			throw new UnscrubbableImageError(`avif: a top-level ${loggable(type)} box, which the scrubber does not know`);
 		}
 		let contentLen: number | null;
 		if (declared === 1) {
@@ -898,6 +908,11 @@ function parseAvifMeta(meta: Uint8Array): AvifExtent[] {
 	let locations: Map<number, { method: number; extents: { offset: number; length: number }[] }> | null = null;
 	let iinfSeen = false;
 	for (const box of isoBoxes(meta, 4)) {
+		if (!AVIF_META_BOXES.has(box.type)) {
+			throw new UnscrubbableImageError(
+				`avif: a ${loggable(box.type)} box inside the meta box, which a still image does not have`
+			);
+		}
 		// A real meta box holds one iinf and one iloc. A second of either would
 		// let a decoy shadow the real one: the scrubber would follow whichever it
 		// kept, a reader whichever it prefers, and the metadata behind the other
@@ -1023,7 +1038,7 @@ function parseInfe(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>, seen: S
 		// through unrewritten, so the inert set is spelled out and the rest refused.
 		if (!INERT_AVIF_ITEM_TYPES.has(itemType)) {
 			throw new UnscrubbableImageError(
-				`avif: the iinf box names an item of type "${itemType}", which the scrubber does not know`
+				`avif: the iinf box names an item of type "${loggable(itemType)}", which the scrubber does not know`
 			);
 		}
 		return;
@@ -1034,10 +1049,10 @@ function parseInfe(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>, seen: S
 	// real AVIF has none — so it is refused rather than passed through.
 	const contentType = readCString(body, p).text.split(';')[0].trim().toLowerCase();
 	if (contentType !== 'application/rdf+xml') {
-		// Truncated: the content_type comes from the file, and the message ends up
-		// in a log line and an operator-facing failure list.
+		// Stripped and truncated: the content_type comes from the file (see
+		// loggable), and the message ends up in a log line.
 		throw new UnscrubbableImageError(
-			`avif: a mime item declares content type "${contentType.slice(0, 64)}", which is not XMP`
+			`avif: a mime item declares content type "${loggable(contentType)}", which is not XMP`
 		);
 	}
 	items.set(id, 'xmp');
@@ -1127,6 +1142,17 @@ function parseIloc(
 	return out;
 }
 
+/**
+ * Text taken from the file on its way into a refusal message. The message ends
+ * up in a log line and an operator-facing failure list, so a newline or a
+ * control character — which is what a four-character code or a content_type
+ * would need to forge a log line of its own — is dropped, and the rest is
+ * truncated.
+ */
+function loggable(text: string, max = 64): string {
+	return text.replace(/[^\x20-\x7e]/g, '').slice(0, max);
+}
+
 /** Iterate the ISOBMFF boxes inside `body` starting at `start`. */
 function* isoBoxes(body: Uint8Array, start: number): Generator<{ type: string; body: Uint8Array }> {
 	let p = start;
@@ -1143,10 +1169,10 @@ function* isoBoxes(body: Uint8Array, start: number): Generator<{ type: string; b
 			// "Runs to the end of the parent" inside a meta box is how a decoy
 			// swallows the iinf that follows it: a reader that knows the box type
 			// skips its 8 bytes and finds the item list, this walk would not.
-			throw new UnscrubbableImageError(`avif: the ${type} box inside the meta box declares no size`);
+			throw new UnscrubbableImageError(`avif: the ${loggable(type)} box inside the meta box declares no size`);
 		}
 		if (size < headerLen || p + size > body.length) {
-			throw new UnscrubbableImageError(`avif: ${type} box declares a size past its parent`);
+			throw new UnscrubbableImageError(`avif: ${loggable(type)} box declares a size past its parent`);
 		}
 		yield { type, body: body.subarray(p + headerLen, p + size) };
 		p += size;

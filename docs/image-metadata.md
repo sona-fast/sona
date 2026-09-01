@@ -35,7 +35,7 @@ Lottie JSON of an animated Telegram sticker, and VR model bytes.
 | JPEG | The Exif sub-IFD, the GPS IFD, the maker note, IFD1 and its embedded thumbnail, the XMP packet, the multi-picture (MPF) index, the Photoshop resource block with its IPTC fields, and every byte after the end-of-image marker | Orientation, Artist, Copyright, the ICC color profile, JFIF, the comment segment, the scan up to and including the end-of-image marker, and every other APPn segment |
 | PNG | `eXIf` beyond the three kept tags, the `tEXt`, `zTXt` and `iTXt` text chunks (`iTXt` is where XMP lives), the compressed-Exif `zxIf` chunk and the `tXMP` chunk — matched whatever case the chunk type is written in — and every byte after the `IEND` chunk | Orientation, Artist, Copyright, `iCCP`, `IDAT`, and every other chunk, APNG included |
 | WebP | The `EXIF` chunk beyond the three kept tags, the `XMP ` chunk, the XMP feature bit in `VP8X`, and any bytes past the declared RIFF size | Orientation, Artist, Copyright, `ICCP`, `ANIM`, `ANMF`, `ALPH`, `VP8`, `VP8L`, and every other chunk |
-| AVIF | The Exif item beyond Artist and Copyright, the XMP item, and the content of every `free`, `skip` and `uuid` box, which is where an editor parks an XMP packet that has no item of its own | The image data, the item properties, the `irot`/`imir` orientation, and the `ftyp`, `mdat`, `moov` and `moof` boxes. Boxes after the item payloads are still walked box by box: a second `meta` box is refused, so is a top-level box of any type outside that list, and the padding boxes keep their headers so the box structure still adds up |
+| AVIF | The Exif item beyond Artist and Copyright, the XMP item, and the content of every `free`, `skip` and `uuid` box, which is where an editor parks an XMP packet that has no item of its own | The image data, the item properties, the `irot`/`imir` orientation, and the `ftyp` and `mdat` boxes. Every top-level box is walked, including the ones after the item payloads: a second `meta` box is refused, so is any top-level box outside `ftyp`, `meta`, `mdat`, `free`, `skip` and `uuid`, and the padding boxes keep their headers so the box structure still adds up. Inside `meta`, only the boxes a still image needs are allowed |
 | GIF | The payload of an `XMP DataXMP` application extension, and every byte after the trailer | Every other block, the comment extension and the XMP extension's magic trailer included |
 
 A JPEG's other application segments are the known gap. Sona rewrites APP1, APP2
@@ -102,7 +102,8 @@ that is not XMP is refused as well, because the scrubber cannot tell what that
 payload holds. So is an AVIF naming an item of any type outside the inert set
 the scrubber knows — `av01`, `grid`, `iovl`, `iden`, the `tmap` gain map, plus
 the `exif` and `mime` items it rewrites — because the walk copies an item it
-skips straight through, bytes and all.
+skips straight through, bytes and all. AVIF image sequences are refused: their
+`moov` box can carry location atoms and the scrubber does not walk it.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that

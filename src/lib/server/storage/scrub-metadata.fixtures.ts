@@ -451,6 +451,16 @@ function isoBox(type: string, body: number[]): number[] {
 	return [...u32be(body.length + 8), ...ascii(type), ...body];
 }
 
+/**
+ * A QuickTime `©xyz` location atom, coordinates and all: a 2-byte string
+ * length, a 2-byte language code, then ISO 6709 text. The `©` is 0xA9, so the
+ * four-character type is built rather than written as ASCII.
+ */
+function quickTimeLocationAtom(): number[] {
+	const coords = ascii('+37.7749-122.4194/');
+	return [...u32be(coords.length + 12), 0xa9, ...ascii('xyz'), ...u16be(coords.length), ...u16be(0), ...coords];
+}
+
 /** BE7ACFCB-97A9-42E8-9C71-999491E3AFAC: the UUID Adobe stamps an XMP box with. */
 const ADOBE_XMP_UUID = [
 	0xbe, 0x7a, 0xcf, 0xcb, 0x97, 0xa9, 0x42, 0xe8, 0x9c, 0x71, 0x99, 0x94, 0x91, 0xe3, 0xaf, 0xac
@@ -493,6 +503,17 @@ export interface AvifOptions {
 	/** Put a box of a top-level type no AVIF carries after the mdat. */
 	unknownBoxAfterMdat?: boolean;
 	/**
+	 * Put a `moov` box after the mdat whose `udta` holds a QuickTime `©xyz`
+	 * location atom — the box an `avis` image sequence carries, with coordinates
+	 * in a place the walk does not descend into.
+	 */
+	moovBoxAfterMdat?: boolean;
+	/**
+	 * Write the trailing padding box with a declared size of 0 ("runs to the end
+	 * of the file") as a `free`, `skip` or `uuid` box holding an XMP packet.
+	 */
+	zeroSizeTrailingBox?: 'free' | 'skip' | 'uuid';
+	/**
 	 * Write a 76-byte ftyp with `mif1` as the major brand and `avif` as the last
 	 * compatible brand, at offset 72 — past a 64-byte sniff window.
 	 */
@@ -519,6 +540,11 @@ export interface AvifOptions {
 	decoyIloc?: 'before' | 'after';
 	/** Add a decoy iinf box naming the Exif item a second time. */
 	decoyIinf?: boolean;
+	/**
+	 * Put a `uuid` box carrying the Adobe XMP UUID and a packet with GPS INSIDE
+	 * the meta box, where no item list names it.
+	 */
+	uuidInsideMeta?: boolean;
 	/** Write the XMP item's content_type as this instead of `application/rdf+xml`. */
 	xmpContentType?: string;
 	/** Spell the Exif item's four-character type in lower case. */
@@ -719,7 +745,8 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			...(opts.decoyIloc === 'before' ? decoyIloc : []),
 			...iloc,
 			...(opts.decoyIloc === 'after' ? decoyIloc : []),
-			...iprp
+			...iprp,
+			...(opts.uuidInsideMeta ? isoBox('uuid', [...ADOBE_XMP_UUID, ...xmpWithGps()]) : [])
 		]);
 		return opts.hideIinf ? hideIinfBehindPitm(meta, opts.hideIinf) : meta;
 	};
@@ -750,13 +777,17 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	// The straddling extent needs bytes past the mdat to reach into. The padding
 	// boxes carry a real XMP packet so a test can tell a zeroed box from a copied
 	// one; `zzzz` is a top-level type no AVIF has.
-	const trailingBox = opts.uuidBoxAfterMdat
-		? isoBox('uuid', [...ADOBE_XMP_UUID, ...xmpWithGps()])
-		: opts.unknownBoxAfterMdat
-			? isoBox('zzzz', xmpWithGps())
-			: opts.freeBoxAfterMdat || opts.straddlingExifExtent || opts.mdatBeforeMeta
-				? isoBox('free', xmpWithGps())
-				: [];
+	const trailingBox = opts.zeroSizeTrailingBox
+		? [...u32be(0), ...ascii(opts.zeroSizeTrailingBox), ...xmpWithGps()]
+		: opts.moovBoxAfterMdat
+			? isoBox('moov', isoBox('udta', quickTimeLocationAtom()))
+			: opts.uuidBoxAfterMdat
+				? isoBox('uuid', [...ADOBE_XMP_UUID, ...xmpWithGps()])
+				: opts.unknownBoxAfterMdat
+					? isoBox('zzzz', xmpWithGps())
+					: opts.freeBoxAfterMdat || opts.straddlingExifExtent || opts.mdatBeforeMeta
+						? isoBox('free', xmpWithGps())
+						: [];
 	const meta = build(av01At, opts.exifExtentPastEnd ? mdatStart + mdat.length + 16 : exifAt, xmpAt);
 	const baseLen = mdatStart + mdat.length + trailingBox.length;
 	// A whole second AVIF item list and payload store, appended past the end of

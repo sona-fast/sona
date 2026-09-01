@@ -521,6 +521,46 @@ describe('scrubImageMetadata: AVIF', () => {
 		expect(out.subarray(box + 8).every((b) => b === 0)).toBe(true);
 	});
 
+	it.each(['free', 'skip', 'uuid'] as const)('zeroes a trailing %s box declared with size 0', (type) => {
+		// A size-0 box runs to the end of the file. After the item list has been
+		// read that is legal padding, and it is still where an XMP packet rides,
+		// so the content is zeroed rather than handed back with the tail.
+		const padded = avifFixture({ zeroSizeTrailingBox: type });
+		const out = scrubImageMetadata(padded.file);
+		expect(out.length).toBe(padded.file.length);
+		const box = padded.xmp.end;
+		expect(text(padded.file.subarray(box))).toContain('exif:GPSLatitude');
+		expect(out.subarray(box, box + 8)).toEqual(padded.file.subarray(box, box + 8));
+		expect(out.subarray(box + 8).every((b) => b === 0)).toBe(true);
+	});
+
+	it('throws on a top-level moov box, so an image sequence is refused', () => {
+		// A moov box holds its own metadata in udta — a QuickTime ©xyz location
+		// atom among it — and this walk does not descend into it, so copying the
+		// box through would carry the coordinates out.
+		const sequence = avifFixture({ moovBoxAfterMdat: true });
+		expect(text(sequence.file)).toContain('+37.7749-122.4194');
+		expect(() => scrubImageMetadata(sequence.file)).toThrow(/top-level moov box/);
+	});
+
+	it('throws on a uuid box inside the meta box', () => {
+		// No item list names it, so nothing rewrites it; the meta box is written
+		// back whole, which would carry the packet through intact.
+		const hidden = avifFixture({ uuidInsideMeta: true });
+		expect(text(hidden.file)).toContain('exif:GPSLatitude');
+		expect(() => scrubImageMetadata(hidden.file)).toThrow(/a uuid box inside the meta box/);
+	});
+
+	it('strips control characters out of a refusal message built from the file', () => {
+		// The content_type is the file's own bytes and the message ends up in a
+		// log line, so a newline in it must not forge a second line.
+		const forged = avifFixture({ xmpContentType: 'application/x\nmar 1 00:00:00 sona: stored' });
+		// The whole message, so the newline's absence is what the assertion is on.
+		expect(() => scrubImageMetadata(forged.file)).toThrow(
+			'avif: a mime item declares content type "application/xmar 1 00:00:00 sona: stored", which is not XMP'
+		);
+	});
+
 	it('throws on a top-level box type no AVIF carries', () => {
 		// Copying an unrecognised box through is what lets an Exif payload ride in
 		// one, so the top-level allowlist is spelled out the way the item one is.
@@ -614,7 +654,11 @@ describe('scrubImageMetadata: AVIF', () => {
 		// Every byte stays where it was, so a reader still finds the Exif item;
 		// a walk that trusts the decoy found no items and stored the file whole.
 		expect(() => scrubImageMetadata(avifFixture({ hideIinf: 'sizeZero' }).file)).toThrow(/declares no size/);
-		expect(() => scrubImageMetadata(avifFixture({ hideIinf: 'covering' }).file)).toThrow(/holds no iinf/);
+		// The covering decoy is a `free` box, which the meta box's own allowlist
+		// refuses before the missing item list is ever reached.
+		expect(() => scrubImageMetadata(avifFixture({ hideIinf: 'covering' }).file)).toThrow(
+			/a free box inside the meta box/
+		);
 	});
 
 	it('stores an AVIF whose item list names no metadata item', () => {
@@ -778,6 +822,7 @@ describe('scrubImageMetadataStream chunking invariance', () => {
 		['avif with a large mdat', avifFixture({ largeMdat: true }).file],
 		['avif with a free box after the mdat', avifFixture({ freeBoxAfterMdat: true }).file],
 		['avif with a uuid box after the mdat', avifFixture({ uuidBoxAfterMdat: true }).file],
+		['avif with a size-0 free box after the mdat', avifFixture({ zeroSizeTrailingBox: 'free' }).file],
 		['avif with a long ftyp', avifFixture({ longFtyp: true }).file],
 		['avif with the metadata in a second mdat', avifFixture({ splitMdat: true }).file],
 		['gif', gifFixture()],
