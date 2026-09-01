@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { adminLogin } from './admin-login';
-import { dropOn, expectDragOverHighlight } from './drop-files';
+import {
+	dropOn,
+	dragOver,
+	expectDragOverHighlight,
+	waitForDropAttachment
+} from './drop-files';
 
 // Sticker-pack form drop zone (SONA-216). Like vr-admin-form.spec.ts this runs
 // on the SHARED read-only DB/server under fullyParallel: it drops files onto the
@@ -97,4 +102,121 @@ test('the sticker upload zone is reachable by keyboard and shows a focus ring', 
 	expect(await page.locator(ZONE).evaluate((el) => getComputedStyle(el).outlineWidth)).not.toBe(
 		'0px'
 	);
+});
+
+test('the sticker format comes from the MIME type, not the file name', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	let calls = 0;
+	await page.route('**/api/upload', async (route) => {
+		calls++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: `/x${calls}.png` })
+		});
+	});
+
+	await page.goto('/admin/stickers/manual');
+	const status = page.locator('span.sr-only[role="status"]');
+	await waitForDropAttachment(page, ZONE);
+
+	// An uppercase extension and no extension at all: both are ordinary for a
+	// dropped file, and both defeat a name-based derivation.
+	await dropOn(page, ZONE, [
+		{ name: 'IMG.PNG', type: 'image/png' },
+		{ name: 'sticker', type: 'image/webp' }
+	]);
+	await expect(page.locator('input[name="sticker[0][format]"]')).toHaveValue('png');
+	await expect(page.locator('input[name="sticker[1][format]"]')).toHaveValue('webp');
+	// Two files in one drop, so the live region takes the plural branch.
+	await expect(status).toHaveText('2 stickers added');
+});
+
+test('the sticker zone dims while an upload runs and refuses a drop without lighting up', async ({
+	page
+}) => {
+	await adminLogin(page, PASSWORD);
+
+	let hold: Promise<void> | null = null;
+	let release = () => {};
+	await page.route('**/api/upload', async (route) => {
+		if (hold) await hold;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: '/x.png' })
+		});
+	});
+
+	await page.goto('/admin/stickers/manual');
+	await waitForDropAttachment(page, ZONE);
+
+	// Resting border, read while the zone is idle: the busy zone keeps pointer
+	// events (see below), which keeps :hover alive, so it must hold this colour
+	// instead of lighting up primary as if it would take a click.
+	const restingBorder = await page.locator(ZONE).evaluate((el) => getComputedStyle(el).borderColor);
+
+	hold = new Promise<void>((resolve) => (release = resolve));
+	await dropOn(page, ZONE, [{ name: 'slow.png', type: 'image/png' }]);
+	const busy = page.locator(`${ZONE}.disabled`);
+	await expect(busy).toBeVisible();
+	// Polled past the zone's 0.15s opacity transition.
+	await expect.poll(() => busy.evaluate((el) => getComputedStyle(el).opacity)).toBe('0.55');
+	// `pointer-events: none` on .disabled would let the next drop reach the
+	// document and navigate the tab to the file. The zone still refuses the
+	// drop — no highlight — it just has to be the one refusing.
+	expect(await busy.evaluate((el) => getComputedStyle(el).pointerEvents)).not.toBe('none');
+	await dragOver(page, ZONE);
+	await expect(busy).not.toHaveClass(/drag-over/);
+	await busy.hover();
+	// Past the border-color transition: read any sooner and a border that IS
+	// heading for primary still measures as the resting colour.
+	await page.waitForTimeout(400);
+	expect(await busy.evaluate((el) => getComputedStyle(el).borderColor)).toBe(restingBorder);
+	release();
+	await expect(page.locator(`${ZONE}.disabled`)).toHaveCount(0);
+});
+
+test('a failed upload keeps the successes, and an all-failed drop never announces zero', async ({
+	page
+}) => {
+	await adminLogin(page, PASSWORD);
+
+	// The form awaits each POST in turn, so the call index picks out which file
+	// fails.
+	let calls = 0;
+	let failCalls: number[] = [];
+	await page.route('**/api/upload', async (route) => {
+		calls++;
+		if (failCalls.includes(calls)) {
+			await route.fulfill({ status: 500, contentType: 'text/plain', body: 'nope' });
+			return;
+		}
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: `/x${calls}.png` })
+		});
+	});
+
+	await page.goto('/admin/stickers/manual');
+	const status = page.locator('span.sr-only[role="status"]');
+	await waitForDropAttachment(page, ZONE);
+
+	failCalls = [2];
+	await dropOn(page, ZONE, [
+		{ name: 'a.png', type: 'image/png' },
+		{ name: 'b.png', type: 'image/png' }
+	]);
+	// The one that landed is kept rather than discarded with the batch…
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue('/x1.png');
+	await expect(page.locator('input[name="sticker[1][imageUrl]"]')).toHaveCount(0);
+	await expect(page.getByText('1 of 2 uploaded, 1 failed')).toBeVisible();
+	// …and the live region reports what was added, not the failure: the toast is
+	// a live region too.
+	await expect(status).toHaveText('1 sticker added');
+
+	// Nothing landed at all, which as a count would read "0 stickers added".
+	calls = 0;
+	failCalls = [1];
+	await dropOn(page, ZONE, [{ name: 'c.png', type: 'image/png' }]);
+	await expect(status).toHaveText('No stickers added');
 });

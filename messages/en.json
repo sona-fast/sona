@@ -857,6 +857,7 @@
 	"admin_pack_upload_partial": "{ok} of {total} uploaded, {failed} failed",
 	"admin_pack_upload_bad_type": "Skipped {names}. Add PNG or WebP images instead.",
 	"admin_pack_upload_bad_type_many": "Skipped {count} files. Add PNG or WebP images instead.",
+	"admin_pack_upload_none": "No stickers added",
 	"admin_pack_upload_done": [
 		{
 			"declarations": [
@@ -867,7 +868,7 @@
 				"countPlural"
 			],
 			"match": {
-				"countPlural=one": "1 sticker added",
+				"countPlural=one": "{count} sticker added",
 				"countPlural=other": "{count} stickers added"
 			}
 		}

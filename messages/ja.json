@@ -647,6 +647,7 @@
 	"admin_pack_upload_partial": "{total}件中{ok}件をアップロードしました（{failed}件は失敗）",
 	"admin_pack_upload_bad_type": "{names}をスキップしました。PNGまたはWebPの画像を追加してください。",
 	"admin_pack_upload_bad_type_many": "{count}件のファイルをスキップしました。PNGまたはWebPの画像を追加してください。",
+	"admin_pack_upload_none": "ステッカーは追加されませんでした",
 	"admin_pack_upload_done": "ステッカーを{count}枚追加しました",
 	"admin_pack_details": "セットの詳細",
 	"admin_pack_name": "セット名",

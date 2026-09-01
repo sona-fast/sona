@@ -42,6 +42,23 @@ export function dragOver(page: Page, selector: string) {
 }
 
 /**
+ * Wait until the drop attachment is live on `selector`.
+ *
+ * The attachment runs at hydration, and a drop dispatched before that silently
+ * does nothing. dragover is the safe probe: retrying it can't add a row the way
+ * a retried drop can.
+ */
+export async function waitForDropAttachment(page: Page, selector: string) {
+	await expect(async () => {
+		await dragOver(page, selector);
+		await expect(page.locator(selector)).toHaveClass(/drag-over/, { timeout: 1000 });
+	}).toPass({ timeout: 20_000 });
+	// Leave the zone at rest — the class only clears on dragleave or drop.
+	await page.locator(selector).dispatchEvent('dragleave');
+	await expect(page.locator(selector)).not.toHaveClass(/drag-over/);
+}
+
+/**
  * A dragover must both set the class and repaint the zone. The class is set
  * imperatively and matched by a `:global()` rule, so assert the painted border
  * changed too — the class landing alone would pass with the rule deleted.

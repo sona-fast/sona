@@ -188,8 +188,9 @@
 			// Alongside clearing `uploading`, so a throw can't strand the region on
 			// "Uploading…". Always the done count, even on a partial failure: the
 			// toast is a live region too, and repeating the failure here reads it
-			// out twice.
-			stickerStatus = m.admin_pack_upload_done({ count: ok });
+			// out twice. When every upload failed, "0 stickers added" is a count of
+			// nothing — say so in words instead.
+			stickerStatus = ok === 0 ? m.admin_pack_upload_none() : m.admin_pack_upload_done({ count: ok });
 		}
 		// Keep the successful uploads; surface the failures without discarding them.
 		if (failed > 0) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
@@ -357,6 +358,7 @@
 		<span class="sr-only" role="status">{stickerStatus}</span>
 		<label
 			class="upload-zone multi"
+			class:disabled={uploading}
 			{@attach dropFiles({
 				accept: STICKER_ACCEPT,
 				onFiles: addStickerFiles,
@@ -556,6 +558,13 @@
 	   as the upload page's dropzone. :global because the drop attachment sets the
 	   class imperatively, so Svelte can't see it in the markup. */
 	.upload-zone:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
+	/* No pointer-events: none — the drop attachment has to receive dragover/drop
+	   to preventDefault, or a drop while uploading navigates away from the form.
+	   The nested input's own disabled attribute keeps clicks inert. */
+	.upload-zone.disabled { opacity: 0.55; cursor: not-allowed; }
+	/* Keeping pointer events also keeps :hover alive, so hold the resting border
+	   while the zone is busy rather than inviting a click it won't take. */
+	.upload-zone.disabled:hover { border-color: var(--border); }
 	.remove-btn {
 		display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
 		background: none; color: var(--muted-foreground); border: 1px solid var(--border);
