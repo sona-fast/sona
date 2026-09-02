@@ -26,11 +26,11 @@ describe('the 422 upload refusal reaches the screen', () => {
 	});
 
 	it('the sticker pack form names the refusal instead of only counting it', () => {
-		// The third /api/upload client. It reports failures as a count in a
-		// toast, so the refusal rides a second toast with the upload page's
-		// sentence, which fits: the operator uploaded this file.
+		// The third /api/upload client. It uploads files in batches and reports
+		// failures as a count in a toast, so the refusal rides a second toast
+		// that carries its own count rather than the single-file sentence.
 		expect(packForm).toContain('res.status === 422');
-		expect(packForm).toContain('m.admin_upload_error_unscrubbable()');
+		expect(packForm).toContain('m.admin_pack_upload_unscrubbable({ refused })');
 	});
 
 	it('the server-side sentence is the same one the upload page shows', () => {

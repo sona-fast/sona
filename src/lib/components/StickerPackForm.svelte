@@ -162,10 +162,12 @@
 			uploading = false;
 		}
 		// Keep the successful uploads; surface the failures without discarding them.
-		if (failed > 0) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
+		// When every failure is a refusal, the count would only repeat the number
+		// the refusal message carries, so it is shown alone.
+		if (failed > refused) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
 		// A refused file has a fix the operator can apply, so say so rather than
 		// leave it inside the failure count.
-		if (refused > 0) toast.error(m.admin_upload_error_unscrubbable());
+		if (refused > 0) toast.error(m.admin_pack_upload_unscrubbable({ refused }));
 	}
 
 	function removeSticker(i: number) {
