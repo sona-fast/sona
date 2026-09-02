@@ -134,8 +134,10 @@
 	let saving = $state(false);
 
 	// Returns the stored URL, or the response status so the caller can name the
-	// reason in the error banner instead of a bare "failed".
-	async function uploadFile(file: File): Promise<{ url: string } | { status: number }> {
+	// reason in the error banner instead of a bare "failed". Both are optional
+	// because a 2xx whose body carries no url is neither: the caller's typeof
+	// check reads that as a plain failure rather than storing `undefined`.
+	async function uploadFile(file: File): Promise<{ url?: string; status?: number }> {
 		const fd = new FormData();
 		fd.append('file', file);
 		// Keep sticker/cover uploads in the stickers/ partition instead of leaking
@@ -145,7 +147,7 @@
 		fd.append('folder', 'stickers');
 		const res = await fetch('/api/upload', { method: 'POST', body: fd });
 		if (!res.ok) return { status: res.status };
-		const { url } = (await res.json()) as { url: string };
+		const { url } = (await res.json()) as { url?: string };
 		return { url };
 	}
 
@@ -182,14 +184,24 @@
 		let ok = 0;
 		try {
 			for (const file of files) {
-				let result: { url: string } | { status: number };
+				// Client-side cap, ahead of the POST: /api/upload would answer 413
+				// only after the whole body went up the wire, so an oversized file
+				// costs the operator the upload before it can be named.
+				if (file.size > MAX_STICKER_BYTES) {
+					stickerErrors = [
+						...stickerErrors,
+						{ uid: stickerErrorUid++, name: file.name, reason: 'too-large' }
+					];
+					continue;
+				}
+				let result: { url?: string; status?: number };
 				try {
 					result = await uploadFile(file);
 				} catch {
 					// A thrown fetch (offline, aborted) carries no status of its own.
 					result = { status: 0 };
 				}
-				if ('url' in result) {
+				if (typeof result.url === 'string') {
 					ok++;
 					stickerEntries.push({
 						uid: nextUid++,
@@ -575,7 +587,7 @@
 	.page-header h1 { font-size: 22px; margin: 0 0 4px; }
 	.intro { font-size: 13px; color: var(--muted-foreground); max-width: 70ch; margin: 0; }
 	.banner { padding: 12px 16px; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
-	.banner.err { background: rgba(248,113,113,0.12); color: #f87171; }
+	.banner.err { background: color-mix(in srgb, var(--destructive) 12%, transparent); color: var(--foreground); }
 	/* Inside a section the flex gap already spaces siblings; the banner's own
 	   margin would double it. The form-level banner above the form keeps its
 	   margin. */

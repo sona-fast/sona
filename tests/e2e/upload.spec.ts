@@ -95,6 +95,11 @@ test('admin upload streams to UploadThing and the stored image renders', async (
 	);
 
 	await page.goto('/admin/upload');
+	// The zone's hint names all three ways in and the batch limit — the cap is
+	// otherwise invisible until a ninth file is refused. 8 = MAX_VARIANT_SET.
+	await expect(page.locator('.dropzone')).toContainText(
+		'Choose up to 8 images, drag them here, or paste from the clipboard'
+	);
 	await stageFiles(page, { name: 'e2e-upload.png', mimeType: 'image/png', buffer: PNG }, 1);
 
 	// The tile's hidden input receives the provider URL once /api/upload (and

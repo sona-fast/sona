@@ -17,6 +17,12 @@ const PASSWORD = 'e2e-admin-password';
 
 const ZONE = '.upload-zone.multi';
 
+// $lib/config's MAX_BUFFER_BYTES, restated rather than imported: config.ts
+// imports $app/environment, which does not resolve outside the Vite build (the
+// upload spec restates the same cap for the same reason). Drift is caught by
+// the unit test that pins MAX_BUFFER_BYTES to this value.
+const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 test('dropping a sticker adds a row, and a wrong type is rejected without a request', async ({
 	page
 }) => {
@@ -39,6 +45,9 @@ test('dropping a sticker adds a row, and a wrong type is rejected without a requ
 	await page.goto('/admin/stickers/manual');
 	const zone = page.locator(ZONE);
 	await expect(zone).toBeVisible();
+	// The idle label names both ways in, and the two formats the zone takes —
+	// the accept filter is invisible until a drop is refused otherwise.
+	await expect(zone).toContainText('Choose PNG or WebP images, or drag them here');
 	// The stickers section's always-mounted live region.
 	const status = page.locator('span.sr-only[role="status"]');
 
@@ -74,7 +83,7 @@ test('dropping a sticker adds a row, and a wrong type is rejected without a requ
 	expect(uploads).toBe(before);
 	// Nothing to upload, so the live region says the batch ended badly rather
 	// than keeping the previous batch's success text.
-	await expect(status).toHaveText('Sticker upload finished with errors — see the messages below the dropzone.');
+	await expect(status).toHaveText('Sticker upload finished with errors. Each file that failed is listed with its reason.');
 
 	// The list is uncapped and per-file: a folder dropped whole names every file
 	// it refused instead of collapsing to a count.
@@ -239,7 +248,7 @@ test('a failed upload keeps the successes, and the banner names the file that fa
 		/b\.png — Upload failed\. Check your connection and try again\./
 	]);
 	// The live region says the batch finished badly; the banner carries the names.
-	await expect(status).toHaveText('Sticker upload finished with errors — see the messages below the dropzone.');
+	await expect(status).toHaveText('Sticker upload finished with errors. Each file that failed is listed with its reason.');
 
 	// A fresh batch replaces the previous batch's lines rather than appending to
 	// files the operator has already dealt with.
@@ -249,6 +258,17 @@ test('a failed upload keeps the successes, and the banner names the file that fa
 	await expect(banner.locator('.banner-line')).toHaveText([
 		/c\.png — Upload failed\. Check your connection and try again\./
 	]);
+
+	// A batch that fully succeeds takes the banner away entirely, rather than
+	// leaving a stale alert beside rows that all landed.
+	calls = 0;
+	failCalls = [];
+	await dropOn(page, ZONE, [{ name: 'd.png', type: 'image/png' }]);
+	await expect(page.locator('input[name="sticker[1][imageUrl]"]')).toHaveValue('/x1.png');
+	await expect(page.locator('.banner.err')).toHaveCount(0);
+	// …and the live region goes back to the added count instead of holding the
+	// previous batch's failure text.
+	await expect(status).toHaveText('1 sticker added');
 });
 
 test('the sticker zone refuses files while a save is in flight', async ({ page }) => {
@@ -356,4 +376,74 @@ test('picking a sticker resets the input, and a picked wrong type is rejected', 
 	]);
 	expect(uploads).toBe(before);
 	await expect(page.locator('input[name="sticker[1][imageUrl]"]')).toHaveCount(0);
+});
+
+test('an oversized sticker is refused client-side, without a POST', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	let uploads = 0;
+	await page.route('**/api/upload', async (route) => {
+		uploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: `/x${uploads}.png` })
+		});
+	});
+
+	await page.goto('/admin/stickers/manual');
+	const status = page.locator('span.sr-only[role="status"]');
+	await waitForDropAttachment(page, ZONE);
+
+	// One byte past the cap /api/upload enforces. Without the client-side check
+	// the whole 64 MB goes up the wire just to collect a 413, so the assertion
+	// that matters is the absent request, not only the message.
+	await dropOn(page, ZONE, [
+		{ name: 'huge.png', type: 'image/png', size: MAX_BUFFER_BYTES + 1 },
+		{ name: 'small.png', type: 'image/png' }
+	]);
+	// The rest of the batch still uploads — one bad file doesn't sink the drop.
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue('/x1.png');
+	await expect(page.locator('.banner.err .banner-line')).toHaveText([
+		/huge\.png — This file is over 64\.0 MB\. Try a smaller image\./
+	]);
+	expect(uploads).toBe(1);
+	await expect(status).toHaveText(
+		'Sticker upload finished with errors. Each file that failed is listed with its reason.'
+	);
+});
+
+test('a 413 reads as too large and a 415 as an unsupported type', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	// The form awaits each POST in turn, so the call index picks the status each
+	// file gets back.
+	let calls = 0;
+	const statuses: Record<number, number> = { 1: 413, 2: 415 };
+	await page.route('**/api/upload', async (route) => {
+		calls++;
+		const status = statuses[calls];
+		if (status) {
+			await route.fulfill({ status, contentType: 'text/plain', body: 'nope' });
+			return;
+		}
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: `/x${calls}.png` })
+		});
+	});
+
+	await page.goto('/admin/stickers/manual');
+	await waitForDropAttachment(page, ZONE);
+
+	// Both files pass the client-side checks (right type, small enough), so the
+	// reason on each line can only have come from the server's status code.
+	await dropOn(page, ZONE, [
+		{ name: 'big.png', type: 'image/png' },
+		{ name: 'odd.png', type: 'image/png' }
+	]);
+	await expect(page.locator('.banner.err .banner-line')).toHaveText([
+		/big\.png — This file is over 64\.0 MB\. Try a smaller image\./,
+		/odd\.png — That file type isn't supported\. Use PNG or WebP\./
+	]);
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveCount(0);
 });

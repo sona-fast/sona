@@ -13,13 +13,25 @@ import { expect, type Page } from '@playwright/test';
  * the only thing standing between a dropped file and the browser navigating the
  * tab to it. A dispatched (untrusted) DragEvent never navigates on its own, so
  * the return value is how a swallow-only target can be asserted at all.
+ *
+ * `size`, when given, builds the file from that many zero bytes instead of the
+ * usual 4 — the only way to exercise a client-side size cap, which reads
+ * `File.size` and never looks at the contents.
  */
-export function dropOn(page: Page, selector: string, files: { name: string; type: string }[]) {
+export function dropOn(
+	page: Page,
+	selector: string,
+	files: { name: string; type: string; size?: number }[]
+) {
 	return page.evaluate(
 		({ selector, files }) => {
 			const dt = new DataTransfer();
 			for (const f of files)
-				dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], f.name, { type: f.type }));
+				dt.items.add(
+					new File([f.size ? new ArrayBuffer(f.size) : new Uint8Array([1, 2, 3, 4])], f.name, {
+						type: f.type
+					})
+				);
 			return !document.querySelector(selector)!.dispatchEvent(
 				new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })
 			);
