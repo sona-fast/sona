@@ -740,6 +740,37 @@ describe('importStickerBatch', () => {
 		return { fileId, emojis: over.emojis ?? [], artistId: over.artistId ?? null, nsfw: over.nsfw ?? false };
 	}
 
+	it('tells the operator what to do when a batched sticker cannot be scrubbed', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		// Same refusal as the whole-pack import, on the batched path the picker
+		// page uses: the row's reason must be the operator sentence, not the
+		// parser's wording.
+		vi.mocked(getStickerSet).mockResolvedValue(multiSet);
+		const broken = new Uint8Array([...staticWebp().subarray(0, 12), 0, 0, 0]);
+		vi.mocked(downloadFile).mockResolvedValue({
+			bytes: broken.buffer as ArrayBuffer,
+			contentType: 'application/octet-stream',
+			filePath: 'stickers/file_0.webp'
+		});
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+		const r = await importStickerBatch({
+			env: r2Env,
+			settings: r2Settings,
+			db,
+			nameOrUrl: 'megapack',
+			managerArtistId: null,
+			items: [item('a')]
+		});
+
+		expect(r.imported).toBe(0);
+		expect(r.failed).toHaveLength(1);
+		expect(r.failed[0].reason).toBe(UNSCRUBBABLE_STICKER_MESSAGE);
+		expect(warn).toHaveBeenCalled();
+		warn.mockRestore();
+	});
+
 	it('imports only the items in the batch', async () => {
 		const { db } = makeDb();
 		await seedCharacterAndArtist(db);

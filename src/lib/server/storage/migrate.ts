@@ -82,12 +82,14 @@ export async function migrateImages(opts: {
 			}
 		} catch (e) {
 			result.failed++;
+			// Same mapping as migrateNextBatch: the parser's own wording is for
+			// the log, not for the operator reading the failure list.
+			const unscrubbable = isUnscrubbable(e);
+			if (unscrubbable) console.warn('storage migration: unscrubbable object', row.id, e);
 			result.items.push({
 				imageId: row.id,
 				status: 'failed',
-				// Same mapping as migrateNextBatch: the parser's own wording is for
-				// the log, not for the operator reading the failure list.
-				error: isUnscrubbable(e)
+				error: unscrubbable
 					? UNSCRUBBABLE_MIGRATE_MESSAGE
 					: e instanceof Error
 						? e.message

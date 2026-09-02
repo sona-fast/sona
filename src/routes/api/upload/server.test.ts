@@ -185,7 +185,7 @@ describe('POST /api/upload', () => {
 		expect(put).not.toHaveBeenCalled();
 	});
 
-	it('422s a file whose metadata could not be stripped, and records the failure', async () => {
+	it('422s a file whose metadata could not be stripped, without recording an upload failure', async () => {
 		// The storage layer refuses to store a raster it could not walk
 		// (SONA-170). That is a file problem with a fix the operator can apply,
 		// so it must not surface as an unexplained 500.
@@ -203,13 +203,9 @@ describe('POST /api/upload', () => {
 		const httpError = thrown as { status: number; body: { message: string } };
 		expect(httpError.status).toBe(422);
 		expect(httpError.body.message).toBe(UNSCRUBBABLE_MESSAGE);
-		// The sample the dashboard shows carries the same status and message, not
-		// a bare "upload failed" at 500.
-		expect(recordUpload).toHaveBeenCalledTimes(1);
-		expect(recordUpload.mock.calls[0].slice(1)).toEqual([
-			false,
-			{ status: 422, message: UNSCRUBBABLE_MESSAGE }
-		]);
+		// A refused file is the operator's to fix, like a 413 or 415, so the
+		// health panel's failure count and error samples stay untouched.
+		expect(recordUpload).not.toHaveBeenCalled();
 	});
 
 	it('422s when the provider WRAPS the scrub failure (real streaming put)', async () => {

@@ -807,7 +807,15 @@ export async function importStickerBatch(opts: {
 				result.skipped++;
 			}
 		} catch (e) {
-			result.failed.push({ fileId: item.fileId, reason: e instanceof Error ? e.message : String(e) });
+			// Same refusal mapping as importTelegramPack: the batch page renders
+			// this reason, so the operator wording goes there and the parser's
+			// own wording goes to the log.
+			const unscrubbable = isUnscrubbable(e);
+			if (unscrubbable) console.warn('sticker import: unscrubbable sticker', item.fileId, e);
+			result.failed.push({
+				fileId: item.fileId,
+				reason: unscrubbable ? UNSCRUBBABLE_STICKER_MESSAGE : e instanceof Error ? e.message : String(e)
+			});
 		}
 	}
 

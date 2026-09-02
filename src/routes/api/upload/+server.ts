@@ -98,11 +98,11 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		// walk (SONA-170), and the way out is a re-export, so this is a 422 with
 		// an instruction rather than an opaque 500. The check walks the cause
 		// chain: on the streaming path the refusal arrives wrapped by the
-		// provider's own fetch error.
-		if (isUnscrubbable(e)) {
-			schedule(platform, recordUpload(db, false, { status: 422, message: UNSCRUBBABLE_MESSAGE }));
-			error(422, UNSCRUBBABLE_MESSAGE);
-		}
+		// provider's own fetch error. Like the 413 and 415 rejections above, a
+		// refused file is not an upload failure, so it is not recorded as one:
+		// the health panel counts the store misbehaving, not the operator's
+		// files being turned away.
+		if (isUnscrubbable(e)) error(422, UNSCRUBBABLE_MESSAGE);
 		schedule(platform, recordUpload(db, false, {
 			status: 500,
 			message: e instanceof Error ? e.message : 'storage put failed'
