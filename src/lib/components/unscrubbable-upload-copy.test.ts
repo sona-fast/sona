@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import * as m from '$lib/paraglide/messages';
-import { UNSCRUBBABLE_MESSAGE, UNSCRUBBABLE_IMPORT_MESSAGE } from '$lib/server/storage/scrub-metadata';
+import {
+	UNSCRUBBABLE_MESSAGE,
+	UNSCRUBBABLE_IMPORT_MESSAGE,
+	UNSCRUBBABLE_MIGRATE_MESSAGE
+} from '$lib/server/storage/scrub-metadata';
 
 // SONA-170: /api/upload answers 422 when a file's metadata could not be
 // stripped, and the fix is the operator's (re-export the file). Both upload
@@ -28,5 +32,10 @@ describe('the 422 upload refusal reaches the screen', () => {
 		// An imported photo is not the operator's file to re-export, so that
 		// import's sentence says what happened and stops there.
 		expect(UNSCRUBBABLE_IMPORT_MESSAGE).not.toMatch(/upload/i);
+		// The migration constant is shared with the sticker re-key, which
+		// migrates nothing and re-stores media the operator never uploaded, so
+		// its sentence may claim neither.
+		expect(UNSCRUBBABLE_MIGRATE_MESSAGE).not.toMatch(/migrat/i);
+		expect(UNSCRUBBABLE_MIGRATE_MESSAGE).not.toMatch(/upload/i);
 	});
 });

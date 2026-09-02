@@ -97,6 +97,13 @@ its exact length is declared up front, R2 through `FixedLengthStream` and
 UploadThing through its presigned ingest URL. A scrub that changed the length
 would force every upload to buffer in memory instead.
 
+The walk is linear in file size and holds at most one metadata record plus a
+64 KiB output block in memory, whatever the file's shape. Processor time is the
+other bound: a JPEG made of nothing but four-byte segments walks at about three
+megabytes a second, so a file at the 64 MB upload cap can take around ten
+seconds of worker time. Only the signed-in operator can send one, since every
+put site is admin-gated.
+
 ## When Sona refuses a file
 
 The parser fails closed. If a raster cannot be walked, because a segment length

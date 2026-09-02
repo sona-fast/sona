@@ -85,7 +85,7 @@ export const UNSCRUBBABLE_IMPORT_MESSAGE =
  * provider migration or the sticker re-key, where the object predates the
  * scrubber and the operator has to replace it rather than retry the copy. */
 export const UNSCRUBBABLE_MIGRATE_MESSAGE =
-	"Couldn't strip this file's hidden metadata, so it wasn't saved. Re-upload a fresh export to replace it.";
+	"Couldn't strip this file's hidden metadata, so it wasn't saved. Replace it with a fresh copy and try again.";
 
 /**
  * Leading bytes handed to sniffImageType, here and in the storage decorator
