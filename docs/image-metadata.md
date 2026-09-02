@@ -33,8 +33,8 @@ Lottie JSON of an animated Telegram sticker, and VR model bytes.
 | Format | Removed | Kept |
 | --- | --- | --- |
 | JPEG | The Exif sub-IFD, the GPS IFD, the maker note, IFD1 and its embedded thumbnail, the XMP packet, the multi-picture (MPF) index, the Photoshop resource block with its IPTC fields, and every byte after the end-of-image marker | Orientation, Artist, Copyright, the ICC color profile, JFIF, the comment segment, the scan up to and including the end-of-image marker, and every other APPn segment |
-| PNG | `eXIf` beyond the three kept tags, the `tEXt`, `zTXt` and `iTXt` text chunks (`iTXt` is where XMP lives), the compressed-Exif `zxIf` chunk and the `tXMP` chunk — matched whatever case the chunk type is written in — and every byte after the `IEND` chunk | Orientation, Artist, Copyright, `iCCP`, `IDAT`, and every other chunk, APNG included |
-| WebP | The `EXIF` chunk beyond the three kept tags, the `XMP ` chunk — both matched whatever case the fourcc is written in — the XMP feature bit in `VP8X`, and any bytes past the declared RIFF size | Orientation, Artist, Copyright, `ICCP`, `ANIM`, `ANMF`, `ALPH`, `VP8`, `VP8L`, and every other chunk |
+| PNG | `eXIf` beyond the three kept tags, the `tEXt`, `zTXt` and `iTXt` text chunks (`iTXt` is where XMP lives), the compressed-Exif `zxIf` chunk and the `tXMP` chunk (matched whatever case the chunk type is written in), and every byte after the `IEND` chunk | Orientation, Artist, Copyright, `iCCP`, `IDAT`, and every other chunk, APNG included |
+| WebP | The `EXIF` chunk beyond the three kept tags, the `XMP ` chunk (both matched whatever case the fourcc is written in), the XMP feature bit in `VP8X`, and any bytes past the declared RIFF size | Orientation, Artist, Copyright, `ICCP`, `ANIM`, `ANMF`, `ALPH`, `VP8`, `VP8L`, and every other chunk |
 | AVIF | The Exif item beyond Artist and Copyright, the XMP item, and the content of every top-level `free`, `skip` and `uuid` box, which is where an editor parks an XMP packet that has no item of its own | The image data, the item properties, the `irot`/`imir` orientation, and the `ftyp` and `mdat` boxes. Every top-level box is walked, including the ones after the item payloads: a second `meta` box is refused, so is any top-level box outside `ftyp`, `meta`, `mdat`, `free`, `skip` and `uuid`, and the padding boxes keep their headers so the box structure still adds up. Inside `meta`, only the boxes a still image needs are allowed |
 | GIF | The payload of an `XMP DataXMP` application extension, and every byte after the trailer | Every other block, the comment extension and the XMP extension's magic trailer included |
 
@@ -81,7 +81,9 @@ behind it.
 Every rewrite overwrites the same number of bytes it read. A metadata record is
 replaced by a minimal valid form and the slack is padded, with zeros for a
 binary record and with ASCII spaces inside an XMP packet, which the XMP spec
-already reserves for exactly this kind of in-place edit.
+already reserves for exactly this kind of in-place edit. An Exif record too
+small to hold even an empty directory is zeroed whole, prefix included, so a
+decoder skips an unrecognised segment rather than reading a hollow one.
 
 The length has to hold because both storage providers stream a body only when
 its exact length is declared up front, R2 through `FixedLengthStream` and
@@ -95,14 +97,14 @@ runs past the end of the file, a chunk length is impossible, or an AVIF places
 its metadata in a layout the rewriter does not support, the put throws
 `UnscrubbableImageError` and nothing is stored. Passing the bytes through
 unexamined would break the guarantee that every stored raster was scrubbed. An
-AVIF whose `mdat` comes before its `meta` box is refused on that rule: the
-layout is legal, but the walk has already passed those bytes by the time the
-item list names them, and an extent behind the walk cannot be rewritten in
-place. No common encoder writes it. An AVIF whose item list names a `mime` item
+AVIF that keeps its Exif or XMP payload in an `mdat` box placed before the
+`meta` box is refused on that rule: the layout is legal, but the walk has
+already passed those bytes by the time the item list names them, and an extent
+behind the walk cannot be rewritten in place. No common encoder writes it. An AVIF whose item list names a `mime` item
 that is not XMP is refused as well, because the scrubber cannot tell what that
 payload holds. So is an AVIF naming an item of any type outside the inert set
-the scrubber knows — `av01`, `grid`, `iovl`, `iden`, the `tmap` gain map, plus
-the `exif` and `mime` items it rewrites — because the walk copies an item it
+the scrubber knows (`av01`, `grid`, `iovl`, `iden`, the `tmap` gain map, plus
+the `exif` and `mime` items it rewrites), because the walk copies an item it
 skips straight through, bytes and all. AVIF image sequences are refused: their
 `moov` box can carry location atoms and the scrubber does not walk it. Inside
 `meta`, only the boxes a still image needs are allowed: `hdlr`, `pitm`, `iinf`,
