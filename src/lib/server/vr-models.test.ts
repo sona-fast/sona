@@ -5,7 +5,8 @@ import {
 	sniffModelFormat,
 	peekStream
 } from './vr-models';
-import { UnscrubbableImageError } from './storage/scrub-metadata';
+import { StalledSourceError } from './peek-stream';
+import { isUnscrubbable } from './storage/scrub-metadata';
 
 describe('modelExtFromFilename', () => {
 	it('accepts .vrm and .fbx case-insensitively', () => {
@@ -116,8 +117,12 @@ describe('peekStream', () => {
 				else controller.close();
 			}
 		});
-		await expect(peekStream(stuck, 64)).rejects.toThrow(UnscrubbableImageError);
+		const stall = await peekStream(stuck, 64).catch((e: unknown) => e);
+		expect(stall).toBeInstanceOf(StalledSourceError);
 		expect(reads).toBeLessThan(64);
+		// A stalled source is not an unscrubbable file: a non-image upload that
+		// stalls must not be told to re-export itself from an image editor.
+		expect(isUnscrubbable(stall)).toBe(false);
 	});
 
 	it('still succeeds when a run of empty chunks precedes the real data', async () => {

@@ -107,6 +107,9 @@ const MAX_RECORD_BYTES = 4 * 1024 * 1024;
 /** Longest ASCII value we carry across into the rewritten TIFF. */
 const MAX_ASCII_BYTES = 4096;
 
+/** Smallest TIFF that is still one: header, an empty IFD, and the next-IFD word. */
+const MIN_TIFF_BYTES = 14;
+
 /**
  * Ceilings on an AVIF item list. A real AVIF names a handful of items with one
  * extent each, so 256 items and 1024 extents in total are far above anything an
@@ -602,6 +605,11 @@ function rewriteExif(payload: Uint8Array, capacity: number, keepOrientation: boo
 	const out = new Uint8Array(Math.max(capacity, 0));
 	const prefixed = startsWith(payload, EXIF_PREFIX);
 	const start = prefixed ? EXIF_PREFIX.length : 0;
+	// No room for an empty directory after the prefix, so the whole record stays
+	// zeroed, the prefix included: an 'Exif\0\0' header wrapped around a zeroed
+	// TIFF header is a malformed Exif record a decoder may choke on, where an
+	// APP1 it does not recognise at all is simply skipped.
+	if (capacity - start < MIN_TIFF_BYTES) return out;
 	const tiff = minimalTiff(payload.subarray(start), capacity - start, keepOrientation);
 	// No room for the TIFF after the prefix, so the whole record stays zeroed.
 	if (!tiff.length) return out;
@@ -769,6 +777,10 @@ interface AvifExtent {
 	kind: 'exif' | 'xmp';
 }
 
+/** Refusal for an extent the walk has already passed, from either check below. */
+const EXTENT_BEHIND_THE_WALK =
+	'avif: a metadata extent overlaps another or sits before the meta box, so it cannot be rewritten in place';
+
 /**
  * Walk the top-level ISOBMFF boxes. The metadata items live in `meta` (which
  * names them) but their bytes live in `mdat`, addressed by absolute file
@@ -873,6 +885,13 @@ function* scrubAvif(): Machine {
 		metaSeen = true;
 		pending.push(...parseAvifMeta(meta));
 		pending.sort((a, b) => a.offset - b.offset);
+		// An mdat placed BEFORE the meta box that names it has already gone past,
+		// so its extents sit behind the walk and no in-place rewrite can reach
+		// them. Caught here rather than at the end of the file, where the leftover
+		// pending extent would be reported as one placed past the end.
+		if (pending.length && pending[0].offset < pos) {
+			throw new UnscrubbableImageError(EXTENT_BEHIND_THE_WALK);
+		}
 	}
 }
 
@@ -895,9 +914,7 @@ function* passAvifContent(
 	while (pending.length && pending[0].offset < end) {
 		const extent = pending.shift() as AvifExtent;
 		if (extent.offset < pos) {
-			throw new UnscrubbableImageError(
-				'avif: a metadata extent overlaps another or sits before the meta box, so it cannot be rewritten in place'
-			);
+			throw new UnscrubbableImageError(EXTENT_BEHIND_THE_WALK);
 		}
 		if (extent.offset + extent.length > end) {
 			throw new UnscrubbableImageError(
@@ -1331,6 +1348,13 @@ function* scrubGif(): Machine {
 			yield* copyGifSubBlocks();
 			continue;
 		}
+		if (introducer[0] === 0x00) {
+			// Some encoders pad between blocks with a zero byte; decoders step over
+			// it, and the animation sniffer already tolerates it (see the
+			// paddedMultiFrameGif fixture), so it is written through rather than
+			// refusing a file that displays fine everywhere else.
+			continue;
+		}
 		if (introducer[0] !== 0x21) {
 			throw new UnscrubbableImageError(
 				`gif: expected a block introducer, found 0x${introducer[0].toString(16)}`
@@ -1440,7 +1464,7 @@ interface KeptTags {
  */
 function minimalTiff(tiff: Uint8Array, capacity: number, keepOrientation: boolean): Uint8Array {
 	// Too small for even an empty directory: zeros, which a decoder skips.
-	if (capacity < 14) return new Uint8Array(Math.max(capacity, 0));
+	if (capacity < MIN_TIFF_BYTES) return new Uint8Array(Math.max(capacity, 0));
 	// 'MM' is big-endian, 'II' little, and anything else is not a TIFF header —
 	// derived once here, because the rewrite has to be written in the SAME byte
 	// order it was read in.

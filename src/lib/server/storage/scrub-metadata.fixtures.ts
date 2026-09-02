@@ -601,8 +601,8 @@ export interface AvifOptions {
 	/** Place item 2 twice in the one iloc box, decoy first or decoy last. */
 	duplicateIlocItem?: 'decoyFirst' | 'decoyLast';
 	/** Put the mdat ahead of the meta box, so the payloads go past before the
-	 * item list names them. A trailing `free` box gives the walk a box to reach
-	 * the pending extents in. */
+	 * item list names them. Nothing follows the meta box, so the refusal has to
+	 * come from reading the item list, not from reaching a later box. */
 	mdatBeforeMeta?: boolean;
 	/**
 	 * Replace the iloc with one built to make the PARSE expensive rather than to
@@ -828,7 +828,7 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 				? isoBox('uuid', [...ADOBE_XMP_UUID, ...xmpWithGps()])
 				: opts.unknownBoxAfterMdat
 					? isoBox('zzzz', xmpWithGps())
-					: opts.freeBoxAfterMdat || opts.straddlingExifExtent || opts.mdatBeforeMeta
+					: opts.freeBoxAfterMdat || opts.straddlingExifExtent
 						? isoBox('free', xmpWithGps())
 						: [];
 	const meta = build(av01At, opts.exifExtentPastEnd ? mdatStart + mdat.length + 16 : exifAt, xmpAt);

@@ -85,7 +85,13 @@ export async function migrateImages(opts: {
 			result.items.push({
 				imageId: row.id,
 				status: 'failed',
-				error: e instanceof Error ? e.message : String(e)
+				// Same mapping as migrateNextBatch: the parser's own wording is for
+				// the log, not for the operator reading the failure list.
+				error: isUnscrubbable(e)
+					? UNSCRUBBABLE_MIGRATE_MESSAGE
+					: e instanceof Error
+						? e.message
+						: String(e)
 			});
 		}
 		onProgress?.(++done, rows.length);

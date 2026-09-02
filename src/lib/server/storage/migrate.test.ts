@@ -295,4 +295,28 @@ describe('migrateNextBatch failure rows', () => {
 		const progress = await migrateNextBatch({ db, fetchFn, target, batchSize: 10 });
 		expect(progress.failures[0].error).toBe('bucket is full');
 	});
+
+	it('maps the same refusal the same way in migrateImages', async () => {
+		// The two entry points report the same failure to the same operator, so
+		// they must not word it differently.
+		const { sqlite, db } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+			.run('t', 'old', 'https://old.example/f/old');
+
+		const bytes = pngBytes(512);
+		const fetchFn = vi.fn(
+			async () =>
+				new Response(streamOf(bytes), {
+					headers: { 'content-type': 'image/png', 'content-length': String(bytes.length) }
+				})
+		) as unknown as typeof fetch;
+		const target = fakeTarget(async () => {
+			throw new Error('fetch failed', { cause: new UnscrubbableImageError('png: chunk length is impossible') });
+		});
+
+		const result = await migrateImages({ db, fetchFn, target });
+		expect(result.failed).toBe(1);
+		expect(result.items[0].error).toBe(UNSCRUBBABLE_MIGRATE_MESSAGE);
+	});
 });

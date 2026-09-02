@@ -24,6 +24,7 @@ import {
 	webpFixture,
 	webpSimpleFixture
 } from './scrub-metadata.fixtures';
+import { paddedMultiFrameGif } from '$lib/server/test/raster-fixtures';
 
 // A tiny TIFF reader, independent of the one under test, so the assertions
 // describe what a DECODER would find rather than restating the writer's logic.
@@ -206,6 +207,24 @@ describe('scrubImageMetadata: JPEG Exif edge cases', () => {
 		expect(text(file)).toContain('preview scan');
 		expect(text(scrubbed)).not.toContain('preview scan');
 		expect(text(scrubbed)).not.toContain('MAKERNOT');
+	});
+
+	it('zeroes an Exif payload too small to hold even an empty directory', () => {
+		// 12 bytes is room for the 'Exif\0\0' prefix but not for the 14-byte TIFF
+		// behind it, so the prefix goes too: an Exif marker wrapped around a zeroed
+		// TIFF header is malformed, where an APP1 a decoder cannot place is skipped.
+		const payload = [...ascii('Exif\0\0'), ...ascii('MM\0*\0\0')];
+		const file = Uint8Array.from([
+			0xff, 0xd8,
+			0xff, 0xe1, 0x00, payload.length + 2,
+			...payload,
+			0xff, 0xd9
+		]);
+		const scrubbed = scrubImageMetadata(file);
+		expect(scrubbed.length).toBe(file.length);
+		const body = scrubbed.subarray(6, 6 + payload.length);
+		expect(body.length).toBe(12);
+		expect([...body]).toEqual(new Array(12).fill(0));
 	});
 
 	it('throws when a segment length runs past the end of the file', () => {
@@ -866,7 +885,9 @@ describe('scrubImageMetadata: AVIF', () => {
 	it('throws when a normally sized mdat comes before the meta box', () => {
 		// Legal layout, no encoder writes it: the payloads have gone past by the
 		// time the item list names them, and an extent behind the walk cannot be
-		// rewritten in place.
+		// rewritten in place. Nothing follows the meta box here, so the refusal
+		// has to name THAT rather than reporting an extent past the end of the
+		// file, which is what a check deferred to the end of the walk would say.
 		const early = avifFixture({ mdatBeforeMeta: true });
 		expect(() => scrubImageMetadata(early.file)).toThrow(/sits before the meta box/);
 	});
@@ -897,6 +918,13 @@ describe('scrubImageMetadata: pass-through and rejection', () => {
 		// Everything else — identifier block, comment, frame — is untouched.
 		expect(scrubbed.subarray(0, start)).toEqual(gif.subarray(0, start));
 		expect(scrubbed.subarray(end)).toEqual(gif.subarray(end));
+	});
+
+	it('copies a 0x00 pad byte between GIF blocks through', () => {
+		// Some encoders pad between blocks. The animation sniffer already tolerates
+		// it, so refusing the file here would reject an upload that displays fine.
+		const gif = paddedMultiFrameGif();
+		expect(scrubImageMetadata(gif)).toEqual(gif);
 	});
 
 	it('zeroes a second image appended after the GIF trailer', () => {
@@ -950,7 +978,8 @@ describe('scrubImageMetadataStream chunking invariance', () => {
 		['avif with the metadata in a second mdat', avifFixture({ splitMdat: true }).file],
 		['gif', gifFixture()],
 		['gif with an image after the trailer', gifFixture({ afterTrailer: true })],
-		['gif with an xmp extension', gifWithXmpFixture()]
+		['gif with an xmp extension', gifWithXmpFixture()],
+		['gif with a pad byte between blocks', paddedMultiFrameGif()]
 	];
 
 	for (const [name, fixture] of fixtures) {

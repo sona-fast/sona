@@ -3,10 +3,21 @@
 // (which sniffs a raster signature before deciding to scrub). Lives on its own
 // so storage does not have to import the VR module for it.
 
-import { UnscrubbableImageError } from '$lib/server/storage/scrub-metadata';
-
 /** How many empty reads in a row end the peek instead of continuing it. */
 const MAX_EMPTY_READS = 8;
+
+/**
+ * Thrown when the source stops producing bytes mid-peek. A plain Error on
+ * purpose: the file is not the problem, so a caller mapping refusals to a 422
+ * ("export a fresh copy") must not pick this up — a stalled video upload would
+ * get image-editor advice. It falls to the caller's generic 500 path instead.
+ */
+export class StalledSourceError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'StalledSourceError';
+	}
+}
 
 /**
  * Peek the first `n` bytes of a stream WITHOUT materializing the body: reads
@@ -35,7 +46,7 @@ export async function peekStream(
 		if (value.length === 0) {
 			if (++empties >= MAX_EMPTY_READS) {
 				await reader.cancel();
-				throw new UnscrubbableImageError(
+				throw new StalledSourceError(
 					`the source stopped producing bytes after ${len} of ${n} peeked bytes`
 				);
 			}
