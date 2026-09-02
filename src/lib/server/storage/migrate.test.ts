@@ -314,9 +314,14 @@ describe('migrateNextBatch failure rows', () => {
 		const target = fakeTarget(async () => {
 			throw new Error('fetch failed', { cause: new UnscrubbableImageError('png: chunk length is impossible') });
 		});
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 		const result = await migrateImages({ db, fetchFn, target });
 		expect(result.failed).toBe(1);
 		expect(result.items[0].error).toBe(UNSCRUBBABLE_MIGRATE_MESSAGE);
+		// The parser's own wording still reaches the log, as it does from the
+		// batched entry point.
+		expect(warn).toHaveBeenCalled();
+		warn.mockRestore();
 	});
 });

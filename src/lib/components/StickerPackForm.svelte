@@ -116,6 +116,9 @@
 		// until the form is saved — so stickers/ is the correct target for now.
 		fd.append('folder', 'stickers');
 		const res = await fetch('/api/upload', { method: 'POST', body: fd });
+		// 422 is the one failure the operator can act on: the file's metadata
+		// could not be stripped, and a re-export fixes it (SONA-170).
+		if (res.status === 422) return 'refused';
 		if (!res.ok) return null;
 		const { url } = (await res.json()) as { url: string };
 		return url;
@@ -128,6 +131,7 @@
 		uploading = true;
 		let ok = 0;
 		let failed = 0;
+		let refused = 0;
 		try {
 			for (const file of files) {
 				let url: string | null = null;
@@ -136,7 +140,10 @@
 				} catch {
 					url = null;
 				}
-				if (url) {
+				if (url === 'refused') {
+					refused++;
+					failed++;
+				} else if (url) {
 					ok++;
 					stickerEntries.push({
 						uid: nextUid++,
@@ -156,6 +163,9 @@
 		}
 		// Keep the successful uploads; surface the failures without discarding them.
 		if (failed > 0) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
+		// A refused file has a fix the operator can apply, so say so rather than
+		// leave it inside the failure count.
+		if (refused > 0) toast.error(m.admin_upload_error_unscrubbable());
 	}
 
 	function removeSticker(i: number) {

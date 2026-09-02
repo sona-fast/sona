@@ -102,7 +102,13 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		// refused file is not an upload failure, so it is not recorded as one:
 		// the health panel counts the store misbehaving, not the operator's
 		// files being turned away.
-		if (isUnscrubbable(e)) error(422, UNSCRUBBABLE_MESSAGE);
+		if (isUnscrubbable(e)) {
+			// The parser's own wording goes to the log, where a scrubber bug that
+			// starts refusing real files can be diagnosed; the response carries the
+			// operator sentence.
+			console.warn('upload: unscrubbable file', key, e);
+			error(422, UNSCRUBBABLE_MESSAGE);
+		}
 		schedule(platform, recordUpload(db, false, {
 			status: 500,
 			message: e instanceof Error ? e.message : 'storage put failed'

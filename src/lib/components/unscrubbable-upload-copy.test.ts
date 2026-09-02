@@ -16,12 +16,21 @@ import {
 // canvas and is not mountable in this vitest setup.
 
 const vrForm = readFileSync(new URL('./VrAvatarForm.svelte', import.meta.url), 'utf8');
+const packForm = readFileSync(new URL('./StickerPackForm.svelte', import.meta.url), 'utf8');
 
 describe('the 422 upload refusal reaches the screen', () => {
 	it('the VR media picker maps 422 to its own reason and renders it', () => {
 		expect(vrForm).toContain('res.status === 422');
 		expect(vrForm).toContain("'unscrubbable'");
 		expect(vrForm).toContain('m.admin_vr_media_error_unscrubbable()');
+	});
+
+	it('the sticker pack form names the refusal instead of only counting it', () => {
+		// The third /api/upload client. It reports failures as a count in a
+		// toast, so the refusal rides a second toast with the upload page's
+		// sentence, which fits: the operator uploaded this file.
+		expect(packForm).toContain('res.status === 422');
+		expect(packForm).toContain('m.admin_upload_error_unscrubbable()');
 	});
 
 	it('the server-side sentence is the same one the upload page shows', () => {
