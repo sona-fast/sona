@@ -284,11 +284,12 @@
 				// Per-file guard: a malformed response body or probe failure records
 				// that file's error and lets the rest of the batch continue.
 				try {
-					const { url } = (await res.json()) as { url?: string };
+					const { url } = (await res.json()) as { url?: unknown };
 					// A 2xx whose body carries no usable url is a failure too (same
 					// check as the sticker form): a row pointing at nothing renders a
 					// broken tile and is rejected at save time with no file named.
-					if (!url) {
+					// The cast validates nothing, so check the type as well.
+					if (typeof url !== 'string' || !url) {
 						mediaErrors = [...mediaErrors, { uid: mediaErrorUid++, name: file.name, reason: 'failed' }];
 						continue;
 					}

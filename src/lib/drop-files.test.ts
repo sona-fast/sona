@@ -183,8 +183,12 @@ describe('dropFiles', () => {
 		el.dispatchEvent(ev);
 		expect(el.classes.has('drag-over')).toBe(false);
 		expect(ev.dataTransfer.dropEffect).toBe('none');
-		el.dispatchEvent(dragEvent('drop', [{ name: 'a.png', type: 'image/png' }]));
+		const drop = dragEvent('drop', [{ name: 'a.png', type: 'image/png' }]);
+		el.dispatchEvent(drop);
 		expect(calls).toHaveLength(0);
+		// Still cancelled: a busy zone swallows the drop instead of letting the
+		// browser navigate to the file.
+		expect(drop.defaultPrevented).toBe(true);
 	});
 
 	it('leaves an event something else already cancelled alone', () => {

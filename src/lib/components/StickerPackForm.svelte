@@ -156,8 +156,9 @@
 		// A 2xx whose body carries no usable url is a failure too: storing it
 		// would add a row pointing at nothing. Status 0 (no status of its own)
 		// makes the caller name it a plain "failed".
-		const { url } = (await res.json()) as { url?: string };
-		return url ? { url } : { status: 0 };
+		// The cast validates nothing, so check the type as well as emptiness.
+		const { url } = (await res.json()) as { url?: unknown };
+		return typeof url === 'string' && url ? { url } : { status: 0 };
 	}
 
 	function uploadStickers(e: Event) {
