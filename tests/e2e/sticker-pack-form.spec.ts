@@ -63,20 +63,29 @@ test('dropping a sticker adds a row, and a wrong type is rejected without a requ
 	await expectDragOverHighlight(page, ZONE);
 
 	// A dropped file skips the input's accept filter, so the zone rejects the
-	// wrong type itself: a toast naming the file, and no POST.
+	// wrong type itself: a persistent banner naming the file, and no POST.
 	const before = uploads;
+	const banner = page.locator('.banner.err');
 	await dropOn(page, ZONE, [{ name: 'notes.txt', type: 'text/plain' }]);
-	await expect(page.getByText('Skipped notes.txt. Add PNG or WebP images instead.')).toBeVisible();
+	await expect(banner).toBeVisible();
+	await expect(banner.locator('.banner-line')).toHaveText([
+		/notes\.txt — That file type isn't supported\. Use PNG or WebP\./
+	]);
 	expect(uploads).toBe(before);
+	// Nothing to upload, so the live region says the batch ended badly rather
+	// than keeping the previous batch's success text.
+	await expect(status).toHaveText('Sticker upload finished with errors — see the messages below the dropzone.');
 
-	// Past three rejects the toast switches to a count: a folder dropped whole
-	// would otherwise be a wall of names ending in an ellipsis.
+	// The list is uncapped and per-file: a folder dropped whole names every file
+	// it refused instead of collapsing to a count.
 	await dropOn(
 		page,
 		ZONE,
 		['a.txt', 'b.txt', 'c.txt', 'd.txt'].map((name) => ({ name, type: 'text/plain' }))
 	);
-	await expect(page.getByText('Skipped 4 files. Add PNG or WebP images instead.')).toBeVisible();
+	await expect(banner.locator('.banner-line')).toHaveCount(4);
+	await expect(banner.locator('.banner-line').first()).toContainText('a.txt');
+	await expect(banner.locator('.banner-line').last()).toContainText('d.txt');
 	expect(uploads).toBe(before);
 });
 
@@ -190,7 +199,7 @@ test('the sticker zone dims while an upload runs and refuses a drop without ligh
 	expect(uploads).toBe(beforeStray);
 });
 
-test('a failed upload keeps the successes, and an all-failed drop never announces zero', async ({
+test('a failed upload keeps the successes, and the banner names the file that failed', async ({
 	page
 }) => {
 	await adminLogin(page, PASSWORD);
@@ -223,16 +232,23 @@ test('a failed upload keeps the successes, and an all-failed drop never announce
 	// The one that landed is kept rather than discarded with the batch…
 	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue('/x1.png');
 	await expect(page.locator('input[name="sticker[1][imageUrl]"]')).toHaveCount(0);
-	await expect(page.getByText('1 of 2 uploaded, 1 failed')).toBeVisible();
-	// …and the live region reports what was added, not the failure: the toast is
-	// a live region too.
-	await expect(status).toHaveText('1 sticker added');
+	// …and the banner names the one that didn't, rather than a count that leaves
+	// the operator guessing which file to re-add.
+	const banner = page.locator('.banner.err');
+	await expect(banner.locator('.banner-line')).toHaveText([
+		/b\.png — Upload failed\. Check your connection and try again\./
+	]);
+	// The live region says the batch finished badly; the banner carries the names.
+	await expect(status).toHaveText('Sticker upload finished with errors — see the messages below the dropzone.');
 
-	// Nothing landed at all, which as a count would read "0 stickers added".
+	// A fresh batch replaces the previous batch's lines rather than appending to
+	// files the operator has already dealt with.
 	calls = 0;
 	failCalls = [1];
 	await dropOn(page, ZONE, [{ name: 'c.png', type: 'image/png' }]);
-	await expect(status).toHaveText('No stickers added');
+	await expect(banner.locator('.banner-line')).toHaveText([
+		/c\.png — Upload failed\. Check your connection and try again\./
+	]);
 });
 
 test('the sticker zone refuses files while a save is in flight', async ({ page }) => {
@@ -335,7 +351,9 @@ test('picking a sticker resets the input, and a picked wrong type is rejected', 
 		mimeType: 'image/jpeg',
 		buffer: Buffer.from([1, 2, 3, 4])
 	});
-	await expect(page.getByText('Skipped photo.jpg. Add PNG or WebP images instead.')).toBeVisible();
+	await expect(page.locator('.banner.err .banner-line')).toHaveText([
+		/photo\.jpg — That file type isn't supported\. Use PNG or WebP\./
+	]);
 	expect(uploads).toBe(before);
 	await expect(page.locator('input[name="sticker[1][imageUrl]"]')).toHaveCount(0);
 });

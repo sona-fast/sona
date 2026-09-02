@@ -5,6 +5,10 @@
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
+	import { MAX_BUFFER_BYTES } from '$lib/config';
+	// The shared size formatter; it lives in $lib/vr only because that page needed
+	// it first, and it carries no VR-specific behaviour.
+	import { formatBytes } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
@@ -110,14 +114,28 @@
 	// bare .png here would upload the whole file just to collect a 415.
 	const STICKER_ACCEPT = 'image/png,image/webp';
 
+	// /api/upload's buffered cap — the shared constant, not a hardcoded twin.
+	const MAX_STICKER_BYTES = MAX_BUFFER_BYTES;
+
 	let uploading = $state(false);
 	// Upload start/done announcements for the stickers section's live region:
 	// the zone label and the new rows show both, but only visually.
 	let stickerStatus = $state('');
+	// Per-file failure reporting, the same shape the VR media zone uses: a
+	// multi-file pick partially succeeds often, and a toast both disappears and
+	// collapses the batch into one line that reads as if everything failed. uid
+	// keys the {#each}: two same-named files failing the same way are distinct
+	// rows, so a name+reason key would collide.
+	let stickerErrorUid = 0;
+	let stickerErrors = $state<
+		{ uid: number; name: string; reason: 'too-large' | 'bad-type' | 'failed' }[]
+	>([]);
 	let published = $state(pack?.published ?? false);
 	let saving = $state(false);
 
-	async function uploadFile(file: File): Promise<string | null> {
+	// Returns the stored URL, or the response status so the caller can name the
+	// reason in the error banner instead of a bare "failed".
+	async function uploadFile(file: File): Promise<{ url: string } | { status: number }> {
 		const fd = new FormData();
 		fd.append('file', file);
 		// Keep sticker/cover uploads in the stickers/ partition instead of leaking
@@ -126,9 +144,9 @@
 		// until the form is saved — so stickers/ is the correct target for now.
 		fd.append('folder', 'stickers');
 		const res = await fetch('/api/upload', { method: 'POST', body: fd });
-		if (!res.ok) return null;
+		if (!res.ok) return { status: res.status };
 		const { url } = (await res.json()) as { url: string };
-		return url;
+		return { url };
 	}
 
 	function uploadStickers(e: Event) {
@@ -146,34 +164,36 @@
 	// Shared by the file input and the drop attachment; both partition their
 	// files first, so `rejected` is reported without being uploaded.
 	async function addStickerFiles(files: File[], rejected: File[] = []) {
-		if (rejected.length) {
-			// Cap the list: a folder dropped whole would otherwise put dozens of
-			// names in one toast. Past three, a count reads better than three names
-			// and a trailing ellipsis.
-			toast.error(
-				rejected.length > 3
-					? m.admin_pack_upload_bad_type_many({ count: rejected.length })
-					: m.admin_pack_upload_bad_type({ names: rejected.map((f) => f.name).join(', ') })
-			);
+		// A fresh batch replaces the previous batch's messages: leaving them would
+		// name files the operator has already dealt with.
+		stickerErrors = rejected.map((file) => ({
+			uid: stickerErrorUid++,
+			name: file.name,
+			reason: 'bad-type' as const
+		}));
+		if (!files.length) {
+			// Nothing to upload, but the status region must not keep the last
+			// batch's text beside a fresh bad-type banner.
+			if (rejected.length) stickerStatus = m.admin_pack_upload_issues();
+			return;
 		}
-		if (!files.length) return;
 		uploading = true;
 		stickerStatus = m.admin_upload_uploading();
 		let ok = 0;
-		let failed = 0;
 		try {
 			for (const file of files) {
-				let url: string | null = null;
+				let result: { url: string } | { status: number };
 				try {
-					url = await uploadFile(file);
+					result = await uploadFile(file);
 				} catch {
-					url = null;
+					// A thrown fetch (offline, aborted) carries no status of its own.
+					result = { status: 0 };
 				}
-				if (url) {
+				if ('url' in result) {
 					ok++;
 					stickerEntries.push({
 						uid: nextUid++,
-						imageUrl: url,
+						imageUrl: result.url,
 						artistId: '',
 						emojis: '',
 						nsfw: false,
@@ -184,21 +204,35 @@
 						format: file.type.toLowerCase() === 'image/png' ? 'png' : 'webp'
 					});
 				} else {
-					failed++;
+					// Keep the successful uploads; the banner names what didn't land.
+					stickerErrors = [
+						...stickerErrors,
+						{
+							uid: stickerErrorUid++,
+							name: file.name,
+							reason:
+								result.status === 413 ? 'too-large' : result.status === 415 ? 'bad-type' : 'failed'
+						}
+					];
 				}
 			}
 			stickerEntries = [...stickerEntries];
 		} finally {
 			uploading = false;
 			// Alongside clearing `uploading`, so a throw can't strand the region on
-			// "Uploading…". Always the done count, even on a partial failure: the
-			// toast is a live region too, and repeating the failure here reads it
-			// out twice. When every upload failed, "0 stickers added" is a count of
-			// nothing — say so in words instead.
-			stickerStatus = ok === 0 ? m.admin_pack_upload_none() : m.admin_pack_upload_done({ count: ok });
+			// "Uploading…". The banner names the failed files, so the region only
+			// has to say the batch finished badly — the same split the VR media
+			// zone announces. The "none added" arm stays as the floor for a batch
+			// that adds nothing without recording an error ("0 stickers added" is a
+			// count of nothing); every file today lands as a row or an error line,
+			// so it is a guard rather than a branch the UI reaches.
+			stickerStatus =
+				stickerErrors.length > 0
+					? m.admin_pack_upload_issues()
+					: ok === 0
+						? m.admin_pack_upload_none()
+						: m.admin_pack_upload_done({ count: ok });
 		}
-		// Keep the successful uploads; surface the failures without discarding them.
-		if (failed > 0) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
 	}
 
 	function removeSticker(i: number) {
@@ -380,6 +414,24 @@
 			<span>{uploading ? m.admin_upload_uploading() : m.admin_pack_dropzone()}</span>
 			<input type="file" accept={STICKER_ACCEPT} multiple onchange={uploadStickers} disabled={uploading || saving} class="sr-file" />
 		</label>
+		{#if stickerErrors.length > 0}
+			<div class="banner err" role="alert">
+				<!-- One line per failed file: a multi-pick can partially succeed, and
+				     an unnamed error beside fresh rows misreads as total failure. -->
+				{#each stickerErrors as err (err.uid)}
+					<p class="banner-line">
+						<strong>{err.name}</strong> —
+						{#if err.reason === 'too-large'}
+							{m.admin_pack_error_too_large({ max: formatBytes(MAX_STICKER_BYTES) })}
+						{:else if err.reason === 'bad-type'}
+							{m.admin_pack_error_bad_type()}
+						{:else}
+							{m.admin_pack_error_failed()}
+						{/if}
+					</p>
+				{/each}
+			</div>
+		{/if}
 
 		{#if stickerEntries.length > 0}
 			<!-- Bulk bar: select rows (click / shift-click range / Select all), then set
@@ -530,6 +582,12 @@
 	.intro { font-size: 13px; color: var(--muted-foreground); max-width: 70ch; margin: 0; }
 	.banner { padding: 12px 16px; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
 	.banner.err { background: rgba(248,113,113,0.12); color: #f87171; }
+	/* Inside a section the flex gap already spaces siblings; the banner's own
+	   margin would double it. The form-level banner above the form keeps its
+	   margin. */
+	.section > .banner { margin-bottom: 0; }
+	.banner-line { margin: 0; overflow-wrap: anywhere; }
+	.banner-line + .banner-line { margin-top: 6px; }
 	.form { display: flex; flex-direction: column; gap: 32px; max-width: 700px; }
 	.section { display: flex; flex-direction: column; gap: 16px; }
 	h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }

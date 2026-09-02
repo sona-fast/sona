@@ -25,7 +25,7 @@ test('the create form renders its fields, dropzones and credit control', async (
 	await expect(page.locator('select[name="characterId"]')).toBeVisible();
 
 	// Model dropzone.
-	await expect(page.getByText(/Drag & drop a \.vrm or \.fbx file here/)).toBeVisible();
+	await expect(page.getByText(/Choose a \.vrm or \.fbx file, or drag it here/)).toBeVisible();
 	// Format expectations under the dropzone (VR feedback round): which VRM
 	// versions the viewer takes, and that FBX is download-only.
 	await expect(page.getByText(/VRM 0\.x and 1\.0 both work in the 3D viewer/)).toBeVisible();
@@ -39,7 +39,7 @@ test('the create form renders its fields, dropzones and credit control', async (
 
 	// Showcase media manager (SP1) with its own dropzone.
 	await expect(page.getByRole('heading', { name: 'Showcase media' })).toBeVisible();
-	await expect(page.getByText(/Drag & drop screenshots or short \.webm clips here/)).toBeVisible();
+	await expect(page.getByText(/Choose screenshots or short \.webm clips, or drag them here/)).toBeVisible();
 
 	// Credits editor entry point.
 	await expect(page.getByRole('button', { name: 'Add credit' })).toBeVisible();
@@ -186,7 +186,7 @@ test('dropping a file on the showcase media zone uploads it, and a wrong type is
 	});
 
 	await page.goto('/admin/vr/new');
-	await expect(page.getByText(/Drag & drop screenshots or short \.webm clips here/)).toBeVisible();
+	await expect(page.getByText(/Choose screenshots or short \.webm clips, or drag them here/)).toBeVisible();
 
 	// Hydration-retry shape (see upload.spec.ts): a drop dispatched before the
 	// attachment has run silently does nothing. The counter resets per attempt.
