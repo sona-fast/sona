@@ -24,11 +24,10 @@ export function matchesAccept(file: { name: string; type: string }, accept: stri
 }
 
 /** Whether a drag carries files at all. Dragged text or an image element also
- * fires dragover; a zone must not light up for those. A missing `types` (test
- * fakes) counts as files. */
+ * fires dragover; a zone must not light up for those. A drag with no
+ * DataTransfer, or none that lists 'Files', carries none. */
 function carriesFiles(e: DragEvent): boolean {
-	const types = e.dataTransfer?.types;
-	return !types || types.includes('Files');
+	return Array.from(e.dataTransfer?.types ?? []).includes('Files');
 }
 
 /**

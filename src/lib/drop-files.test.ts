@@ -54,8 +54,10 @@ class FakeEl extends EventTarget {
 
 type PickedFile = { name: string; type: string };
 
-function dragEvent(type: string, files: PickedFile[] = []) {
-	return Object.assign(new Event(type), { dataTransfer: { files, dropEffect: '' } });
+// `types` mirrors what a real file drag carries; the zone reads it to tell a
+// file drag from a dragged link or selection.
+function dragEvent(type: string, files: PickedFile[] = [], types: string[] = ['Files']) {
+	return Object.assign(new Event(type), { dataTransfer: { files, types, dropEffect: '' } });
 }
 
 describe('partitionByAccept', () => {
@@ -131,6 +133,19 @@ describe('dropFiles', () => {
 		expect(el.classes.has('drag-over')).toBe(false);
 	});
 
+	it('treats a drag that lists no types as carrying no files', () => {
+		// Only a drag that says 'Files' lights the zone up: an empty types list is
+		// as much "not a file drag" as a text/uri-list one.
+		const { el } = setup();
+		const ev = Object.assign(new Event('dragover', { cancelable: true }), {
+			dataTransfer: { types: [], files: [], dropEffect: 'copy' }
+		});
+		el.dispatchEvent(ev);
+		expect(ev.defaultPrevented).toBe(true);
+		expect(ev.dataTransfer.dropEffect).toBe('none');
+		expect(el.classes.has('drag-over')).toBe(false);
+	});
+
 	it('sets the copy drop effect so the cursor reads as an upload', () => {
 		const { el } = setup();
 		const ev = dragEvent('dragover');
@@ -171,7 +186,7 @@ describe('dropFiles', () => {
 	it('leaves an event something else already cancelled alone', () => {
 		const { el } = setup(() => true);
 		const over = Object.assign(new Event('dragover', { cancelable: true }), {
-			dataTransfer: { files: [], dropEffect: 'copy' }
+			dataTransfer: { files: [], types: ['Files'], dropEffect: 'copy' }
 		});
 		over.preventDefault();
 		el.dispatchEvent(over);
@@ -184,7 +199,7 @@ describe('dropFiles', () => {
 		inner.el.dispatchEvent(dragEvent('dragenter'));
 		expect(inner.el.classes.has('drag-over')).toBe(true);
 		const drop = Object.assign(new Event('drop', { cancelable: true }), {
-			dataTransfer: { files: [{ name: 'a.png', type: 'image/png' }], dropEffect: '' }
+			dataTransfer: { files: [{ name: 'a.png', type: 'image/png' }], types: ['Files'], dropEffect: '' }
 		});
 		drop.preventDefault();
 		inner.el.dispatchEvent(drop);

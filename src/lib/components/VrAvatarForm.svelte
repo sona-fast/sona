@@ -196,6 +196,14 @@
 	// Upload start/done announcements for the media section's live region
 	// (R2-A10) — visually the dropzone label + rows already show both.
 	let mediaStatus = $state('');
+	// Bumped on every status write so {#key} replaces the node inside the live
+	// region: two single-file drops both say the same thing, and re-assigning the
+	// text it already holds changes no DOM, so nothing is announced.
+	let mediaStatusUid = $state(0);
+	function setMediaStatus(text: string) {
+		mediaStatus = text;
+		mediaStatusUid++;
+	}
 
 	const mediaReorder = new DragReorder({
 		count: () => mediaEntries.length,
@@ -241,11 +249,11 @@
 		if (!files.length) {
 			// Nothing to upload, but the status region must not keep last batch's
 			// text beside a fresh bad-type banner.
-			if (rejected.length) mediaStatus = m.admin_vr_media_upload_issues();
+			if (rejected.length) setMediaStatus(m.admin_vr_media_upload_issues());
 			return;
 		}
 		mediaUploading = true;
-		mediaStatus = m.admin_upload_uploading();
+		setMediaStatus(m.admin_upload_uploading());
 		try {
 			for (const file of files) {
 				if (file.size > MAX_MEDIA_BYTES) {
@@ -294,8 +302,9 @@
 			}
 		} finally {
 			mediaUploading = false;
-			mediaStatus =
-				mediaErrors.length > 0 ? m.admin_vr_media_upload_issues() : m.admin_vr_media_upload_done();
+			setMediaStatus(
+				mediaErrors.length > 0 ? m.admin_vr_media_upload_issues() : m.admin_vr_media_upload_done()
+			);
 		}
 	}
 
@@ -770,9 +779,11 @@
 		<h2>{m.admin_vr_section_media()}</h2>
 		<p class="field-hint">{m.admin_vr_media_hint()}</p>
 		<!-- Always-mounted live regions: reorder announcements, and the upload
-		     start/done status (R2-A10). -->
+		     start/done status (R2-A10). The status region itself stays put; only
+		     the node inside it is keyed, so repeating a status still mutates the
+		     region and gets announced. -->
 		<span class="sr-only" aria-live="polite">{mediaReorder.announcement}</span>
-		<span class="sr-only" role="status">{mediaStatus}</span>
+		<span class="sr-only" role="status">{#key mediaStatusUid}<span>{mediaStatus}</span>{/key}</span>
 		{#if mediaEntries.length > 0}
 			<div class="media-list">
 				{#each mediaEntries as item, i (item.uid)}

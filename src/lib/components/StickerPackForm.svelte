@@ -121,6 +121,14 @@
 	// Upload start/done announcements for the stickers section's live region:
 	// the zone label and the new rows show both, but only visually.
 	let stickerStatus = $state('');
+	// Bumped on every status write so {#key} replaces the node inside the live
+	// region: two single-file drops both say "1 sticker added", and re-assigning
+	// the text it already holds changes no DOM, so nothing is announced.
+	let statusUid = $state(0);
+	function setStickerStatus(text: string) {
+		stickerStatus = text;
+		statusUid++;
+	}
 	// Per-file failure reporting, the same shape the VR media zone uses: a
 	// multi-file pick partially succeeds often, and a toast both disappears and
 	// collapses the batch into one line that reads as if everything failed. uid
@@ -134,10 +142,8 @@
 	let saving = $state(false);
 
 	// Returns the stored URL, or the response status so the caller can name the
-	// reason in the error banner instead of a bare "failed". Both are optional
-	// because a 2xx whose body carries no url is neither: the caller's typeof
-	// check reads that as a plain failure rather than storing `undefined`.
-	async function uploadFile(file: File): Promise<{ url?: string; status?: number }> {
+	// reason in the error banner instead of a bare "failed".
+	async function uploadFile(file: File): Promise<{ url: string } | { status: number }> {
 		const fd = new FormData();
 		fd.append('file', file);
 		// Keep sticker/cover uploads in the stickers/ partition instead of leaking
@@ -147,8 +153,11 @@
 		fd.append('folder', 'stickers');
 		const res = await fetch('/api/upload', { method: 'POST', body: fd });
 		if (!res.ok) return { status: res.status };
+		// A 2xx whose body carries no usable url is a failure too: storing it
+		// would add a row pointing at nothing. Status 0 (no status of its own)
+		// makes the caller name it a plain "failed".
 		const { url } = (await res.json()) as { url?: string };
-		return { url };
+		return url ? { url } : { status: 0 };
 	}
 
 	function uploadStickers(e: Event) {
@@ -176,11 +185,11 @@
 		if (!files.length) {
 			// Nothing to upload, but the status region must not keep the last
 			// batch's text beside a fresh bad-type banner.
-			if (rejected.length) stickerStatus = m.admin_pack_upload_issues();
+			if (rejected.length) setStickerStatus(m.admin_pack_upload_issues());
 			return;
 		}
 		uploading = true;
-		stickerStatus = m.admin_upload_uploading();
+		setStickerStatus(m.admin_upload_uploading());
 		let ok = 0;
 		try {
 			for (const file of files) {
@@ -194,14 +203,14 @@
 					];
 					continue;
 				}
-				let result: { url?: string; status?: number };
+				let result: { url: string } | { status: number };
 				try {
 					result = await uploadFile(file);
 				} catch {
 					// A thrown fetch (offline, aborted) carries no status of its own.
 					result = { status: 0 };
 				}
-				if (typeof result.url === 'string') {
+				if ('url' in result) {
 					ok++;
 					stickerEntries.push({
 						uid: nextUid++,
@@ -236,8 +245,9 @@
 			// has to say the batch finished badly — the same split the VR media
 			// zone announces. Every file lands as a row or an error line, so a
 			// batch with no errors always added at least one.
-			stickerStatus =
-				stickerErrors.length > 0 ? m.admin_pack_upload_issues() : m.admin_pack_upload_done({ count: ok });
+			setStickerStatus(
+				stickerErrors.length > 0 ? m.admin_pack_upload_issues() : m.admin_pack_upload_done({ count: ok })
+			);
 		}
 	}
 
@@ -403,8 +413,10 @@
 
 		<!-- Always-mounted live region (a region inserted together with its first
 		     content is often not announced): the zone label and the new rows
-		     report the upload visually only. -->
-		<span class="sr-only" role="status">{stickerStatus}</span>
+		     report the upload visually only. The region itself stays put; only
+		     the node inside it is keyed, so repeating a status still mutates the
+		     region and gets announced. -->
+		<span class="sr-only" role="status">{#key statusUid}<span>{stickerStatus}</span>{/key}</span>
 		<label
 			class="upload-zone multi"
 			class:disabled={uploading || saving}

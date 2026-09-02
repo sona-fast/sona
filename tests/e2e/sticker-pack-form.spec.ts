@@ -51,17 +51,17 @@ test('dropping a sticker adds a row, and a wrong type is rejected without a requ
 	// The stickers section's always-mounted live region.
 	const status = page.locator('span.sr-only[role="status"]');
 
-	// Hydration-retry shape (see vr-admin-form.spec.ts): a drop dispatched before
-	// the attachment has run silently does nothing. The counter resets per try.
+	// A drop dispatched before the attachment has run silently does nothing, so
+	// wait for it rather than retrying the drop: the held request below keeps the
+	// zone disabled, and a retried drop could never recover anyway.
+	await waitForDropAttachment(page, ZONE);
+
 	hold = new Promise<void>((resolve) => (release = resolve));
-	await expect(async () => {
-		uploads = 0;
-		await dropOn(page, ZONE, [{ name: 'sticker.png', type: 'image/png' }]);
-		// The held request keeps the zone busy, so a drop that landed shows up as
-		// the in-progress announcement rather than a finished row.
-		await expect(status).toHaveText('Uploading...', { timeout: 2000 });
-		expect(uploads).toBe(1);
-	}).toPass({ timeout: 20_000 });
+	await dropOn(page, ZONE, [{ name: 'sticker.png', type: 'image/png' }]);
+	// The held request keeps the zone busy, so a drop that landed shows up as
+	// the in-progress announcement rather than a finished row.
+	await expect(status).toHaveText('Uploading...');
+	expect(uploads).toBe(1);
 	release();
 	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue('/x.png');
 	// …and the same region reports the finish, as a real plural rather than
@@ -83,7 +83,7 @@ test('dropping a sticker adds a row, and a wrong type is rejected without a requ
 	expect(uploads).toBe(before);
 	// Nothing to upload, so the live region says the batch ended badly rather
 	// than keeping the previous batch's success text.
-	await expect(status).toHaveText('Sticker upload finished with errors. Each file that failed is listed with its reason.');
+	await expect(status).toHaveText('Sticker upload finished with errors. Each file that failed shows the reason.');
 
 	// The list is uncapped and per-file: a folder dropped whole names every file
 	// it refused instead of collapsing to a count.
@@ -248,7 +248,18 @@ test('a failed upload keeps the successes, and the banner names the file that fa
 		/b\.png — Upload failed\. Check your connection and try again\./
 	]);
 	// The live region says the batch finished badly; the banner carries the names.
-	await expect(status).toHaveText('Sticker upload finished with errors. Each file that failed is listed with its reason.');
+	await expect(status).toHaveText('Sticker upload finished with errors. Each file that failed shows the reason.');
+	// Theme-safe text: the banner takes the theme's own foreground, so it stays
+	// readable on the tinted background in every theme rather than assuming one.
+	const [bannerColor, foreground] = await page.evaluate(() => {
+		const probe = document.createElement('span');
+		probe.style.color = 'var(--foreground)';
+		document.body.appendChild(probe);
+		const resolved = getComputedStyle(probe).color;
+		probe.remove();
+		return [getComputedStyle(document.querySelector('.banner.err')!).color, resolved];
+	});
+	expect(bannerColor).toBe(foreground);
 
 	// A fresh batch replaces the previous batch's lines rather than appending to
 	// files the operator has already dealt with.
@@ -408,7 +419,7 @@ test('an oversized sticker is refused client-side, without a POST', async ({ pag
 	]);
 	expect(uploads).toBe(1);
 	await expect(status).toHaveText(
-		'Sticker upload finished with errors. Each file that failed is listed with its reason.'
+		'Sticker upload finished with errors. Each file that failed shows the reason.'
 	);
 });
 
@@ -446,4 +457,62 @@ test('a 413 reads as too large and a 415 as an unsupported type', async ({ page 
 		/odd\.png — That file type isn't supported\. Use PNG or WebP\./
 	]);
 	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveCount(0);
+});
+
+test('a 200 without a usable url is a failure, not a row pointing nowhere', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	// A 2xx the form cannot read a URL out of. Stored as-is it would add a
+	// sticker row whose imageUrl is empty, and the pack would save broken.
+	let body = '{}';
+	await page.route('**/api/upload', async (route) => {
+		await route.fulfill({ contentType: 'application/json', body });
+	});
+
+	await page.goto('/admin/stickers/manual');
+	await waitForDropAttachment(page, ZONE);
+
+	await dropOn(page, ZONE, [{ name: 'a.png', type: 'image/png' }]);
+	await expect(page.locator('.banner.err .banner-line')).toHaveText([
+		/a\.png — Upload failed\. Check your connection and try again\./
+	]);
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveCount(0);
+
+	// An empty string is a url the body does carry, so only a non-empty check
+	// keeps it out of a row.
+	body = '{"url":""}';
+	await dropOn(page, ZONE, [{ name: 'b.png', type: 'image/png' }]);
+	await expect(page.locator('.banner.err .banner-line')).toHaveText([
+		/b\.png — Upload failed\. Check your connection and try again\./
+	]);
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveCount(0);
+});
+
+test('the same status twice is announced twice', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	await page.route('**/api/upload', async (route) => {
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: '/x.png' })
+		});
+	});
+
+	await page.goto('/admin/stickers/manual');
+	await waitForDropAttachment(page, ZONE);
+	const status = page.locator('span.sr-only[role="status"]');
+
+	await dropOn(page, ZONE, [{ name: 'a.png', type: 'image/png' }]);
+	await expect(status).toHaveText('1 sticker added');
+
+	// Two single-file drops produce the same text, and a screen reader only
+	// announces a live region that CHANGES: re-assigning the string it already
+	// holds touches no DOM and says nothing. Tag the node inside the region,
+	// then prove the tag (and so the node) is gone — the same shape as the model
+	// banner's remount test in vr-admin-form.spec.ts.
+	await status.locator('span').evaluate((el) => el.setAttribute('data-first-status', ''));
+	await dropOn(page, ZONE, [{ name: 'b.png', type: 'image/png' }]);
+	await expect(page.locator('input[name="sticker[1][imageUrl]"]')).toHaveValue('/x.png');
+	await expect(status.locator('span[data-first-status]')).toHaveCount(0);
+	await expect(status).toHaveText('1 sticker added');
 });
