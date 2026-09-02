@@ -263,3 +263,100 @@ test('the VR media picker names the same refusal and gets a 422', async ({ page 
 	await expect(banner).toContainText('e2e-unscrubbable.jpg');
 	expect(statuses).toEqual([422]);
 });
+
+// Stage `files` through the sticker pack form's picker (the page's only file
+// input). Unlike stageFiles, NO manual change dispatch: this input's onchange
+// does run off setInputFiles' own event (verified — dispatching as well ran the
+// handler twice and uploaded every file twice). The pack form's rows only
+// appear once an upload finishes, so the hydration retry waits for the first
+// POST to leave the browser instead. `onAttempt` runs at the top of EVERY
+// attempt so the caller's counters get reset before a re-stage.
+async function stagePackFiles(
+	page: Page,
+	files: Parameters<Page['setInputFiles']>[1],
+	uploads: ReturnType<typeof countUploadPosts>,
+	onAttempt: () => void = () => {}
+): Promise<void> {
+	await expect(async () => {
+		onAttempt();
+		uploads.reset();
+		await page.setInputFiles('input[type="file"]', files);
+		await expect.poll(() => uploads.counters.total, { timeout: 3000 }).toBeGreaterThan(0);
+	}).toPass({ timeout: 20_000 });
+}
+
+test('the sticker pack form names the refusal and keeps the good file in the batch', async ({
+	page
+}) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+	const uploads = countUploadPosts(page);
+
+	await page.goto('/admin/stickers/manual');
+	await stagePackFiles(
+		page,
+		[
+			{ name: 'e2e-unscrubbable.jpg', mimeType: 'image/jpeg', buffer: UNSCRUBBABLE_JPEG },
+			{ name: 'e2e-sticker.png', mimeType: 'image/png', buffer: PNG }
+		],
+		uploads,
+		() => {
+			statuses.length = 0;
+		}
+	);
+
+	// The toast fires only once every file in the batch has been answered, so
+	// waiting on it also waits out the uploads.
+	const toasts = page.locator('.alert-message');
+	await expect(toasts).toHaveCount(2, { timeout: 20_000 });
+	// A mixed batch gets both messages: the count, because a file did get
+	// through, and the refusal with its own count of REFUSED files.
+	await expect(toasts.filter({ hasText: '1 of 2 uploaded, 1 failed' })).toHaveCount(1);
+	const refusal = toasts.filter({ hasText: 'Export fresh copies from an image editor' });
+	await expect(refusal).toHaveCount(1);
+	await expect(refusal).toContainText('from 1 of those files');
+
+	// The statuses the server really answered with — one refusal, one success.
+	// Order varies with staging order, so compare sorted.
+	expect([...statuses].sort((a, b) => a - b)).toEqual([200, 422]);
+	// Only the good file became a sticker row.
+	await expect(page.locator('input[name$="[imageUrl]"]')).toHaveCount(1);
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue(
+		/^https:\/\/e2e-app-id\.ufs\.sh\/f\/./
+	);
+});
+
+test('a pack batch of only refused files shows the refusal alone', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+	const uploads = countUploadPosts(page);
+
+	await page.goto('/admin/stickers/manual');
+	await stagePackFiles(
+		page,
+		{ name: 'e2e-unscrubbable.jpg', mimeType: 'image/jpeg', buffer: UNSCRUBBABLE_JPEG },
+		uploads,
+		() => {
+			statuses.length = 0;
+		}
+	);
+
+	// Every failure was a refusal, so the partial-failure toast would only repeat
+	// the count the refusal already carries — exactly one toast appears.
+	const toasts = page.locator('.alert-message');
+	await expect(toasts).toHaveCount(1, { timeout: 20_000 });
+	await expect(toasts).toContainText('Export fresh copies from an image editor');
+	await expect(toasts).toContainText('from 1 of those files');
+	expect(statuses).toEqual([422]);
+	await expect(page.locator('input[name$="[imageUrl]"]')).toHaveCount(0);
+});

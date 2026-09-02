@@ -162,9 +162,13 @@
 			uploading = false;
 		}
 		// Keep the successful uploads; surface the failures without discarding them.
-		// When every failure is a refusal, the count would only repeat the number
-		// the refusal message carries, so it is shown alone.
-		if (failed > refused) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
+		// The count is shown whenever the batch was mixed: some file failed for a
+		// reason other than a refusal, or some file got through alongside a
+		// refusal. When every file was refused, the count would only repeat the
+		// number the refusal message carries, so the refusal is shown alone.
+		if (failed > refused || ok > 0) {
+			toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
+		}
 		// A refused file has a fix the operator can apply, so say so rather than
 		// leave it inside the failure count.
 		if (refused > 0) toast.error(m.admin_pack_upload_unscrubbable({ refused }));

@@ -321,7 +321,7 @@ describe('migrateNextBatch failure rows', () => {
 		expect(result.items[0].error).toBe(UNSCRUBBABLE_MIGRATE_MESSAGE);
 		// The parser's own wording still reaches the log, as it does from the
 		// batched entry point.
-		expect(warn).toHaveBeenCalled();
+		expect(warn.mock.calls[0][0]).toBe('storage migration: unscrubbable object');
 		warn.mockRestore();
 	});
 });

@@ -193,6 +193,7 @@ describe('POST /api/upload', () => {
 			throw new UnscrubbableImageError('jpeg: segment length runs past the end of the file');
 		});
 		const platform = makePlatform();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		let thrown: unknown;
 		try {
 			await POST(postEvent(platform, pngFile(1024)));
@@ -203,6 +204,13 @@ describe('POST /api/upload', () => {
 		const httpError = thrown as { status: number; body: { message: string } };
 		expect(httpError.status).toBe(422);
 		expect(httpError.body.message).toBe(UNSCRUBBABLE_MESSAGE);
+		// The operator sentence goes in the response; the parser's own wording
+		// goes to the log, so a scrubber bug refusing real files stays diagnosable.
+		expect(warn).toHaveBeenCalled();
+		const [label, , logged] = warn.mock.calls[0];
+		expect(label).toBe('upload: unscrubbable file');
+		expect((logged as Error).message).toContain('segment length runs past the end of the file');
+		warn.mockRestore();
 		// A refused file is the operator's to fix, like a 413 or 415, so the
 		// health panel's failure count and error samples stay untouched.
 		expect(recordUpload).not.toHaveBeenCalled();
