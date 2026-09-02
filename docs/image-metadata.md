@@ -58,6 +58,13 @@ authoritative one either way. The removal is for visitor privacy: every work
 keeps its on-page artist and photographer credit, and a rights holder can ask
 for a correction or removal through the contact in the privacy policy.
 
+The guarantee is about metadata a reader can find. A packet whose container
+label has been corrupted, say an APP1 marker or an `iTXt` chunk type with one
+byte changed, is no longer a metadata record to any reader, so the walk copies
+it through like any other unrecognised segment, and its text can still be found
+with a byte search. No encoder writes such a record; only a deliberately
+crafted file has one.
+
 The JPEG comment segment, the GIF comment extension and the PNG `tIME` chunk
 are accepted exceptions. A comment sometimes carries the artist's own notice,
 and `tIME` is a modification time rather than a capture time, so none of them
@@ -71,10 +78,10 @@ GIF has no Exif field, but GIF89a carries XMP in an application extension
 labelled `XMP DataXMP`, and Photoshop and Lightroom write GPS coordinates into
 it. That payload is replaced with an empty packet; the 258-byte magic trailer
 that closes the extension is kept, because it is what makes a decoder's
-sub-block walk terminate. Everything else in a GIF, comment extension included,
+sub-block walk terminate. Every other block, the comment extension included,
 passes through byte for byte, and everything after the trailer is zeroed,
 because a decoder stops at the trailer and never reaches a second image parked
-behind it.
+behind it. Two shapes are refused instead of copied, both described below.
 
 ## Rewrites preserve the file size
 
@@ -100,28 +107,38 @@ unexamined would break the guarantee that every stored raster was scrubbed. An
 AVIF that keeps its Exif or XMP payload in an `mdat` box placed before the
 `meta` box is refused on that rule: the layout is legal, but the walk has
 already passed those bytes by the time the item list names them, and an extent
-behind the walk cannot be rewritten in place. No common encoder writes it. An AVIF whose item list names a `mime` item
-that is not XMP is refused as well, because the scrubber cannot tell what that
-payload holds. So is an AVIF naming an item of any type outside the inert set
-the scrubber knows (`av01`, `grid`, `iovl`, `iden`, the `tmap` gain map, plus
-the `exif` and `mime` items it rewrites), because the walk copies an item it
-skips straight through, bytes and all. AVIF image sequences are refused: their
-`moov` box can carry location atoms and the scrubber does not walk it. Inside
-`meta`, only the boxes a still image needs are allowed: `hdlr`, `pitm`, `iinf`,
-`iloc`, `iprp`, `iref`, `dinf`, `grpl` and `idat`. A `uuid`, `free`, `skip`,
-`udta`, `xml `, `bxml` or nested `meta` box inside `meta`, or inside the
-`iprp`, `ipco`, `iref`, `dinf`, `dref` and `grpl` containers below it, is
-refused, because each one is another place an editor can park an XMP packet the
-walk would otherwise step over. An item list whose declared entry count
-disagrees with the entries present, or that holds anything other than item
-entries, is refused too.
+behind the walk cannot be rewritten in place. No common encoder writes it. An
+AVIF whose item list names a `mime` item that is not XMP is refused as well,
+because the scrubber cannot tell what that payload holds. So is an AVIF naming
+an item of any type outside the inert set the scrubber knows (`av01`, `grid`,
+`iovl`, `iden`, the `tmap` gain map, plus the `exif` and `mime` items it
+rewrites), because the walk copies an item it skips straight through, bytes and
+all. AVIF image sequences are refused: their `moov` box can carry location
+atoms and the scrubber does not walk it. Inside `meta`, only the boxes a still
+image needs are allowed: `hdlr`, `pitm`, `iinf`, `iloc`, `iprp`, `iref`,
+`dinf`, `grpl` and `idat`. A `uuid`, `free`, `skip`, `udta`, `xml `, `bxml` or
+nested `meta` box inside `meta`, or inside the `iprp`, `ipco`, `iref`, `dinf`,
+`dref` and `grpl` containers below it, is refused, because each one is another
+place an editor can park an XMP packet the walk would otherwise step over. An
+item list whose declared entry count disagrees with the entries present, or
+that holds anything other than item entries, is refused too.
+
+A GIF is refused on two rules of its own. An application extension whose
+identifier reads as `XMP Data` in any case but is not exactly `XMP DataXMP` is
+refused rather than copied, because the payload behind such a label is raw XML
+with no sub-block structure, so copying it through is the one way GPS
+coordinates could survive the walk intact. An XMP extension that does not end in
+the magic trailer is refused for the same reason: without the trailer the
+payload cannot be located, and the bytes in front of it cannot be replaced in
+place.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that
 photo as failed and logs the reason. Avatar re-hosting logs a warning and keeps
 the source URL as a hotlink. A sticker import reports the failure for that
 sticker. A provider migration lists the object as failed and asks you to replace
-it with a fresh export.
+it with a fresh export. The sticker re-key reports it the same way a migration
+does, since the operator has to replace the file either way.
 
 ## Objects stored before scrubbing existed
 

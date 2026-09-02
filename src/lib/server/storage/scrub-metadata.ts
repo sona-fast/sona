@@ -81,10 +81,11 @@ export const UNSCRUBBABLE_STICKER_MESSAGE =
 export const UNSCRUBBABLE_IMPORT_MESSAGE =
 	"Couldn't strip this photo's hidden metadata, so it wasn't saved.";
 
-/** The same refusal during a provider migration, where the object predates the
+/** The same refusal when an object already in the bucket is re-stored, by a
+ * provider migration or the sticker re-key, where the object predates the
  * scrubber and the operator has to replace it rather than retry the copy. */
 export const UNSCRUBBABLE_MIGRATE_MESSAGE =
-	"Couldn't strip this file's hidden metadata, so it wasn't migrated. Re-upload a fresh export to replace it.";
+	"Couldn't strip this file's hidden metadata, so it wasn't saved. Re-upload a fresh export to replace it.";
 
 /**
  * Leading bytes handed to sniffImageType, here and in the storage decorator
@@ -403,6 +404,8 @@ export function scrubImageMetadata(bytes: Uint8Array): Uint8Array {
 	// Sized to the input, which the size-preserving contract makes the output's
 	// length too: every piece is written into that one buffer at its offset, so
 	// this path never holds a list of pieces to concatenate at the end.
+	// Cost-only: the pre-sized buffer changes allocations, not output bytes, so
+	// it is deliberately left untested beyond the byte-for-byte round trips.
 	const driver = new ScrubDriver(bytes.length);
 	const parts = driver.push(bytes);
 	for (const tail of driver.end()) parts.push(tail);
@@ -498,10 +501,17 @@ function* scrubJpeg(): Machine {
 		if (lead[0] !== 0xff) {
 			throw new UnscrubbableImageError('jpeg: expected a marker prefix (0xFF)');
 		}
+		// The marker code follows the 0xFF directly in every real file, so it is
+		// read as one byte; only when that byte is itself 0xFF (fill, which may
+		// repeat) does the walk fall into the block loop below. Reading a whole
+		// block for every marker would cost an 8 KiB pull and unread per segment,
+		// which on a file of thousands of tiny segments doubles the walk's time.
+		const first = yield { kind: 'take', n: 1 };
+		yield { kind: 'write', bytes: first };
+		let marker = first[0];
 		// 0xFF may repeat as fill before the marker code; consume the run a block
 		// at a time rather than a byte at a time, because a file can be nothing
 		// but fill and a byte-sized step costs a byte-sized piece of output.
-		let marker = 0xff;
 		while (marker === 0xff) {
 			const block = yield { kind: 'takeUpTo', n: SCAN_BLOCK_BYTES };
 			if (!block.length) {
@@ -1409,7 +1419,9 @@ function* scrubGif(): Machine {
 			// paddedMultiFrameGif fixture), so it is written through rather than
 			// refusing a file that displays fine everywhere else. The rest of the
 			// run goes through a block at a time: a file that is mostly pad would
-			// otherwise cost one emitted piece per byte.
+			// otherwise cost one emitted piece per byte. Cost-only: block size
+			// changes piece count, not output bytes, so it is deliberately left
+			// untested beyond the chunk-count assertion and the integration timeout.
 			const block = yield { kind: 'takeUpTo', n: SCAN_BLOCK_BYTES };
 			let at = 0;
 			while (at < block.length && block[at] === 0x00) at++;

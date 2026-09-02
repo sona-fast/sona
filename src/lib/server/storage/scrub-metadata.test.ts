@@ -1048,8 +1048,9 @@ describe('scrubImageMetadata: long runs of one byte', () => {
 	});
 
 	it('refuses a JPEG that ends inside a run of fill', () => {
+		// Pin the reason, not just the type: the fill-run walk is what must refuse.
 		expect(() => scrubImageMetadata(fillRunJpeg(64).subarray(0, 40))).toThrow(
-			UnscrubbableImageError
+			/ends inside a run of 0xFF fill/
 		);
 	});
 });
