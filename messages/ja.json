@@ -644,7 +644,6 @@
 	"admin_pack_save_failed": "セットを保存できませんでした",
 	"admin_pack_manual_intro": "ステッカー画像（PNGまたはWebP）をアップロードし、セットの詳細を入力してください。各ステッカーには個別のアーティストと絵文字を設定できます。ファイルは保存前にストレージへアップロードされます。",
 	"admin_pack_edit_heading": "セットを編集: {name}",
-	"admin_pack_upload_none": "ステッカーは追加されませんでした",
 	"admin_pack_upload_issues": "ステッカーのアップロードが完了しましたが、エラーがあります — ドロップゾーンの下のメッセージを確認してください。",
 	"admin_pack_error_bad_type": "対応していないファイル形式です。PNGまたはWebPをご利用ください。",
 	"admin_pack_error_too_large": "このファイルは{max}を超えています。",

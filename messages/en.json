@@ -854,7 +854,6 @@
 	"admin_pack_save_failed": "Could not save pack",
 	"admin_pack_manual_intro": "Upload sticker images (PNG or WebP) and fill in the pack details. Each sticker can have its own artist and emoji. Files are uploaded to storage before saving.",
 	"admin_pack_edit_heading": "Edit pack: {name}",
-	"admin_pack_upload_none": "No stickers added",
 	"admin_pack_upload_issues": "Sticker upload finished with errors — see the messages below the dropzone.",
 	"admin_pack_error_bad_type": "That file type isn't supported. Use PNG or WebP.",
 	"admin_pack_error_too_large": "This file is over {max}.",

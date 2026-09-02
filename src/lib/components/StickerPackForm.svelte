@@ -222,16 +222,10 @@
 			// Alongside clearing `uploading`, so a throw can't strand the region on
 			// "Uploading…". The banner names the failed files, so the region only
 			// has to say the batch finished badly — the same split the VR media
-			// zone announces. The "none added" arm stays as the floor for a batch
-			// that adds nothing without recording an error ("0 stickers added" is a
-			// count of nothing); every file today lands as a row or an error line,
-			// so it is a guard rather than a branch the UI reaches.
+			// zone announces. Every file lands as a row or an error line, so a
+			// batch with no errors always added at least one.
 			stickerStatus =
-				stickerErrors.length > 0
-					? m.admin_pack_upload_issues()
-					: ok === 0
-						? m.admin_pack_upload_none()
-						: m.admin_pack_upload_done({ count: ok });
+				stickerErrors.length > 0 ? m.admin_pack_upload_issues() : m.admin_pack_upload_done({ count: ok });
 		}
 	}
 
