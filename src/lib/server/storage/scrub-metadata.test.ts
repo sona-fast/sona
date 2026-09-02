@@ -343,6 +343,37 @@ describe('scrubImageMetadata: PNG', () => {
 	});
 });
 
+describe('scrubImageMetadata: WebP refusals', () => {
+	it('refuses a chunk that runs past the RIFF size with a printable message', () => {
+		// The fourcc is four raw file bytes, here A, newline, A, A: the refusal
+		// names the chunk, and the message reaches console.warn on the import
+		// paths, so the newline must not survive into it.
+		const riffSize = 4 + 8 + 4;
+		const file = new Uint8Array([
+			...ascii('RIFF'),
+			riffSize, 0, 0, 0,
+			...ascii('WEBP'),
+			0x41, 0x0a, 0x41, 0x41,
+			0xe8, 0x03, 0, 0, // chunk size 1000, far past the 4 bytes present
+			1, 2, 3, 4
+		]);
+		let message = '';
+		try {
+			scrubImageMetadata(file);
+		} catch (e) {
+			expect(e).toBeInstanceOf(UnscrubbableImageError);
+			message = (e as Error).message;
+		}
+		expect(message).toMatch(/AAA chunk runs past the declared RIFF size/);
+		expect(message).toMatch(/^[\x20-\x7e]*$/);
+	});
+
+	it('refuses a chunk header that runs past the RIFF size', () => {
+		const file = new Uint8Array([...ascii('RIFF'), 6, 0, 0, 0, ...ascii('WEBP'), 0x41, 0x42]);
+		expect(() => scrubImageMetadata(file)).toThrow(/chunk header runs past the declared RIFF size/);
+	});
+});
+
 describe('scrubImageMetadata: WebP', () => {
 	const original = webpFixture();
 	const scrubbed = scrubImageMetadata(original);
@@ -692,6 +723,22 @@ describe('scrubImageMetadata: AVIF', () => {
 		expect(() => scrubImageMetadata(avifFixture({ hideIinf: 'covering' }).file)).toThrow(
 			/a free box inside the meta box/
 		);
+	});
+
+	it('refuses a meta box whose containers nest past the depth cap', () => {
+		// Twelve iprp boxes inside one another and nothing else: no refused box at
+		// the bottom, so only the cap can stop the descent. Without it the walk
+		// recurses until the stack gives out, which is a crash, not a refusal.
+		const box = (type: string, body: number[]): number[] => [
+			...[(8 + body.length) >>> 24, ((8 + body.length) >>> 16) & 0xff, ((8 + body.length) >>> 8) & 0xff, (8 + body.length) & 0xff],
+			...[...type].map((c) => c.charCodeAt(0)),
+			...body
+		];
+		let nested: number[] = [];
+		for (let i = 0; i < 12; i++) nested = box('iprp', nested);
+		const ftyp = box('ftyp', [...ascii('avif'), 0, 0, 0, 0, ...ascii('avif')]);
+		const meta = box('meta', [0, 0, 0, 0, ...nested]);
+		expect(() => scrubImageMetadata(new Uint8Array([...ftyp, ...meta]))).toThrow(/nest more than 8 deep/);
 	});
 
 	it('throws when a box other than an item entry sits inside the iinf box', () => {
