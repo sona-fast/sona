@@ -272,9 +272,10 @@ export default {
 					return new Response(`unknown scenario: ${scenario}`, { status: 400 });
 			}
 		} catch (e) {
-			return new Response(e instanceof Error ? `${e.message}\n${e.stack}` : String(e), {
-				status: 500
-			});
+			// The stack goes to the worker log, not the body: the test reads the
+			// message, and a stack in a response is what CodeQL flags as exposure.
+			if (e instanceof Error) console.error(e.stack);
+			return new Response(e instanceof Error ? e.message : String(e), { status: 500 });
 		}
 	}
 };

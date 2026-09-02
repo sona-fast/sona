@@ -120,7 +120,7 @@ describe('scrubImageMetadata: JPEG', () => {
 	it('leaves SOS through EOI byte-identical and zeroes the trailer', () => {
 		const sos = jpegSosOffset(original);
 		expect(sos).toBeGreaterThan(0);
-		const eoi = original.length - 'trailing junk after EOI'.length;
+		const eoi = original.length - JPEG_TRAILER.length;
 		// The scan carries a stuffed FF 00 and a restart marker FF D0, neither of
 		// which the EOI search may mistake for the end of the image.
 		expect(text(original.subarray(sos, eoi))).toContain('\xff\x00');
