@@ -545,6 +545,17 @@ export interface AvifOptions {
 	 * the meta box, where no item list names it.
 	 */
 	uuidInsideMeta?: boolean;
+	/**
+	 * Put that same `uuid` box one level DOWN inside the meta box: in the `ipco`
+	 * property list, or in an `iref` next to a real `dimg` reference.
+	 */
+	uuidDeepInMeta?: 'ipco' | 'iref';
+	/**
+	 * Fill the `ipco` with the property boxes a real encoder writes — `ispe`,
+	 * `pixi`, `colr` and `auxC` alongside `av1C` and `irot` — none of which the
+	 * walk knows by name.
+	 */
+	richIpco?: boolean;
 	/** Write the XMP item's content_type as this instead of `application/rdf+xml`. */
 	xmpContentType?: string;
 	/** Spell the Exif item's four-character type in lower case. */
@@ -577,6 +588,8 @@ export interface AvifOptions {
 	hideIinf?: 'sizeZero' | 'covering';
 	/** Declare an iinf entry_count over the parser's item cap. */
 	iinfCountBomb?: boolean;
+	/** Put a `free` box in front of the item entries inside iinf. */
+	iinfDecoyChild?: boolean;
 	/** Name the Exif item twice inside the one iinf box. */
 	duplicateInfe?: boolean;
 	/** Place item 2 twice in the one iloc box, decoy first or decoy last. */
@@ -678,6 +691,7 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			? fullBox('iinf', 0, 0, [...u16be(1), ...infe(1, 'av01', 'Image')])
 			: fullBox('iinf', 0, 0, [
 					...u16be(opts.iinfCountBomb ? 1000 : (opts.duplicateInfe ? 4 : 3) + (opts.derivedItems ? 2 : 0)),
+					...(opts.iinfDecoyChild ? isoBox('free', [0, 0, 0, 0]) : []),
 					...infe(1, 'av01', 'Image'),
 					...infe(2, exifType, 'Exif', undefined, opts.exifInfeVersion),
 					...(opts.duplicateInfe ? infe(2, exifType, 'Exif') : []),
@@ -733,10 +747,32 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			? fullBox('iloc', 0, 0, [0x44, 0x00, ...u16be(1), ...u16be(2), ...u16be(0), ...u16be(1), ...u32be(0), ...u32be(4)])
 			: [];
 		const decoyIinf = opts.decoyIinf ? fullBox('iinf', 0, 0, [...u16be(1), ...infe(2, 'Exif', 'Exif')]) : [];
+		const adobeUuidBox = isoBox('uuid', [...ADOBE_XMP_UUID, ...xmpWithGps()]);
+		// The property boxes a real encoder writes alongside the codec config:
+		// image size, bit depth per channel, colour, and the alpha marker.
+		const realProperties = opts.richIpco
+			? [
+					...fullBox('ispe', 0, 0, [...u32be(64), ...u32be(64)]),
+					...fullBox('pixi', 0, 0, [3, 8, 8, 8]),
+					...isoBox('colr', [...ascii('nclx'), ...u16be(1), ...u16be(13), ...u16be(6), 0x80]),
+					...fullBox('auxC', 0, 0, cstring('urn:mpeg:mpegB:cicp:systems:auxiliary:alpha'))
+				]
+			: [];
 		const iprp = isoBox('iprp', [
-			...isoBox('ipco', [...fullBox('av1C', 0, 0, [0x81, 0x00, 0x0c, 0x00]), ...isoBox('irot', [1])]),
+			...isoBox('ipco', [
+				...realProperties,
+				...fullBox('av1C', 0, 0, [0x81, 0x00, 0x0c, 0x00]),
+				...isoBox('irot', [1]),
+				...(opts.uuidDeepInMeta === 'ipco' ? adobeUuidBox : [])
+			]),
 			...fullBox('ipma', 0, 0, [...u32be(1), ...u16be(1), 1, 0x81])
 		]);
+		// An item reference box, with a `dimg` reference of the kind a real file
+		// carries next to whatever is being hidden in it.
+		const iref =
+			opts.uuidDeepInMeta === 'iref'
+				? fullBox('iref', 0, 0, [...isoBox('dimg', [...u16be(1), ...u16be(1), ...u16be(4)]), ...adobeUuidBox])
+				: [];
 		const meta = fullBox('meta', 0, 0, [
 			...hdlr,
 			...pitm,
@@ -746,6 +782,7 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 			...iloc,
 			...(opts.decoyIloc === 'after' ? decoyIloc : []),
 			...iprp,
+			...iref,
 			...(opts.uuidInsideMeta ? isoBox('uuid', [...ADOBE_XMP_UUID, ...xmpWithGps()]) : [])
 		]);
 		return opts.hideIinf ? hideIinfBehindPitm(meta, opts.hideIinf) : meta;

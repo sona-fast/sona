@@ -103,7 +103,12 @@ payload holds. So is an AVIF naming an item of any type outside the inert set
 the scrubber knows — `av01`, `grid`, `iovl`, `iden`, the `tmap` gain map, plus
 the `exif` and `mime` items it rewrites — because the walk copies an item it
 skips straight through, bytes and all. AVIF image sequences are refused: their
-`moov` box can carry location atoms and the scrubber does not walk it.
+`moov` box can carry location atoms and the scrubber does not walk it. Inside
+`meta`, only the boxes a still image needs are allowed: `hdlr`, `pitm`, `iinf`,
+`iloc`, `iprp`, `iref`, `dinf`, `grpl` and `idat`. A `uuid`, `free`, `skip` or
+`udta` box anywhere inside `meta`, at any depth, is refused, because those are
+another place an editor can park an XMP packet the walk would otherwise step
+over.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that

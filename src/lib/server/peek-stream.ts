@@ -3,6 +3,9 @@
 // (which sniffs a raster signature before deciding to scrub). Lives on its own
 // so storage does not have to import the VR module for it.
 
+/** How many empty reads in a row end the peek instead of continuing it. */
+const MAX_EMPTY_READS = 8;
+
 /**
  * Peek the first `n` bytes of a stream WITHOUT materializing the body: reads
  * whole chunks off the reader until `n` bytes (or EOF), then returns a new
@@ -17,9 +20,19 @@ export async function peekStream(
 	const reader = stream.getReader();
 	const chunks: Uint8Array[] = [];
 	let len = 0;
+	// A source is allowed to hand back an empty chunk, which advances nothing: a
+	// source that keeps handing them back would spin this loop forever. They
+	// carry no bytes, so they are dropped rather than replayed, and a run of them
+	// ends the peek with whatever head has been gathered.
+	let empties = 0;
 	while (len < n) {
 		const { done, value } = await reader.read();
 		if (done) break;
+		if (value.length === 0) {
+			if (++empties >= MAX_EMPTY_READS) break;
+			continue;
+		}
+		empties = 0;
 		chunks.push(value);
 		len += value.length;
 	}

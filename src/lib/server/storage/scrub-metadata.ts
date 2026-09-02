@@ -152,6 +152,40 @@ const ZEROED_AVIF_BOXES = new Set(['free', 'skip', 'uuid']);
  */
 const AVIF_META_BOXES = new Set(['hdlr', 'pitm', 'iinf', 'iloc', 'iprp', 'iref', 'dinf', 'grpl', 'idat']);
 
+/**
+ * The container boxes inside `meta` the walk descends into, and the offset its
+ * children start at: a plain container's children start at 0, a FullBox's after
+ * its version and flags, and `dref`'s after its entry count as well. The meta
+ * box is written back verbatim, so a payload nested in one of these rides
+ * through unless the walk goes all the way down.
+ */
+const AVIF_META_CONTAINERS = new Map([
+	['iprp', 0],
+	['ipco', 0],
+	['iref', 4],
+	['dinf', 0],
+	['dref', 8],
+	['grpl', 0]
+]);
+
+/**
+ * The boxes refused ANYWHERE inside `meta`, at any depth: each one carries an
+ * opaque or XMP payload a reader may surface, and `meta/iprp/ipco` is as good a
+ * place to park an Adobe `uuid` XMP box as the top of the meta box is. Unknown
+ * LEAF boxes deeper down are not refused — property and reference types vary by
+ * encoder (`ispe`, `pixi`, `av1C`, `colr`, `irot`, `auxC`, `dimg`, `thmb`, ...)
+ * and refusing them would reject real files.
+ */
+const REFUSED_INSIDE_META = new Set(['uuid', 'free', 'skip', 'udta', 'meta', 'xml ', 'bxml']);
+
+/**
+ * How deep the walk follows containers inside `meta`. A real file nests two or
+ * three levels (meta > iprp > ipco > property); the cap is what stops a file
+ * whose meta box is nothing but nested containers from recursing to a stack
+ * overflow instead of a refusal.
+ */
+const MAX_META_DEPTH = 8;
+
 // ---------------------------------------------------------------------------
 // The driver: a byte-stream coroutine
 // ---------------------------------------------------------------------------
@@ -680,7 +714,7 @@ function* scrubWebp(): Machine {
 		// but not of the payload.
 		const padded = size + (size & 1);
 		if (padded > remaining - 8) {
-			throw new UnscrubbableImageError(`webp: ${fourcc} chunk runs past the declared RIFF size`);
+			throw new UnscrubbableImageError(`webp: ${loggable(fourcc)} chunk runs past the declared RIFF size`);
 		}
 		remaining -= 8 + padded;
 		const rewrites = fourcc === 'VP8X' || fourcc === 'EXIF' || fourcc === 'XMP ';
@@ -690,7 +724,7 @@ function* scrubWebp(): Machine {
 			continue;
 		}
 		if (padded > MAX_RECORD_BYTES) {
-			throw new UnscrubbableImageError(`webp: ${fourcc} chunk is ${size} bytes, over the ${MAX_RECORD_BYTES}-byte cap`);
+			throw new UnscrubbableImageError(`webp: ${loggable(fourcc)} chunk is ${size} bytes, over the ${MAX_RECORD_BYTES}-byte cap`);
 		}
 		const body = yield { kind: 'take', n: padded };
 		yield { kind: 'write', bytes: chunkHeader };
@@ -900,6 +934,28 @@ function scrubAvifExtent(kind: 'exif' | 'xmp', payload: Uint8Array): Uint8Array 
 	return out;
 }
 
+/**
+ * Descend a container box inside `meta` and refuse the payload boxes at every
+ * level. The first-level allowlist above says which boxes may sit directly
+ * under meta; below it only the deny list applies, because the property and
+ * reference types a real encoder writes are open-ended.
+ */
+function checkMetaDescendants(type: string, body: Uint8Array, depth: number): void {
+	const start = AVIF_META_CONTAINERS.get(type);
+	if (start === undefined) return;
+	if (depth > MAX_META_DEPTH) {
+		throw new UnscrubbableImageError(`avif: boxes inside the meta box nest more than ${MAX_META_DEPTH} deep`);
+	}
+	for (const box of isoBoxes(body, start)) {
+		if (REFUSED_INSIDE_META.has(box.type)) {
+			throw new UnscrubbableImageError(
+				`avif: a ${loggable(box.type)} box inside the meta box's ${loggable(type)} box, which a still image does not have`
+			);
+		}
+		checkMetaDescendants(box.type, box.body, depth + 1);
+	}
+}
+
 /** iinf/iloc parse of a meta box, yielding the file extents of Exif and XMP items. */
 function parseAvifMeta(meta: Uint8Array): AvifExtent[] {
 	if (meta.length < 4) throw new UnscrubbableImageError('avif: meta box is truncated');
@@ -913,6 +969,7 @@ function parseAvifMeta(meta: Uint8Array): AvifExtent[] {
 				`avif: a ${loggable(box.type)} box inside the meta box, which a still image does not have`
 			);
 		}
+		checkMetaDescendants(box.type, box.body, 1);
 		// A real meta box holds one iinf and one iloc. A second of either would
 		// let a decoy shadow the real one: the scrubber would follow whichever it
 		// kept, a reader whichever it prefers, and the metadata behind the other
@@ -988,13 +1045,29 @@ function parseIinf(body: Uint8Array, items: Map<number, 'exif' | 'xmp'>): void {
 	const seen = new Set<number>();
 	let entries = 0;
 	for (const box of isoBoxes(body, 4 + countLen)) {
-		if (box.type !== 'infe') continue;
+		// Only item entries live in iinf. A `free` box sized to cover the entries
+		// that follow it would hide every item from this walk while a reader that
+		// knows the box type steps over it and finds them, so anything else is
+		// refused rather than skipped.
+		if (box.type !== 'infe') {
+			throw new UnscrubbableImageError(
+				`avif: a ${loggable(box.type)} box inside the iinf box, which holds only item entries`
+			);
+		}
 		if (++entries > MAX_AVIF_ITEMS) {
 			throw new UnscrubbableImageError(
 				`avif: the iinf box holds more than ${MAX_AVIF_ITEMS} item entries, over the cap`
 			);
 		}
 		parseInfe(box.body, items, seen);
+	}
+	// The declared count and the records present must agree: a count that
+	// understates the records is what a decoy hides behind, and one that
+	// overstates them points a reader at entries this walk never saw.
+	if (entries !== declared) {
+		throw new UnscrubbableImageError(
+			`avif: the iinf box declares ${declared} item entries but holds ${entries}`
+		);
 	}
 }
 
@@ -1149,8 +1222,8 @@ function parseIloc(
  * would need to forge a log line of its own — is dropped, and the rest is
  * truncated.
  */
-function loggable(text: string, max = 64): string {
-	return text.replace(/[^\x20-\x7e]/g, '').slice(0, max);
+function loggable(text: string): string {
+	return text.replace(/[^\x20-\x7e]/g, '').slice(0, 64);
 }
 
 /** Iterate the ISOBMFF boxes inside `body` starting at `start`. */

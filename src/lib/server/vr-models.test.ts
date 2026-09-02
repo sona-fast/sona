@@ -92,6 +92,33 @@ describe('peekStream', () => {
 		expect([...(await drain(stream))]).toEqual([9]);
 	});
 
+	it('reads past empty chunks instead of counting them', async () => {
+		// An empty chunk advances the byte count by nothing, so the loop has to
+		// treat it as no progress rather than as a step toward the window.
+		const chunks = [new Uint8Array(0), new Uint8Array(0), new Uint8Array([1, 2, 3, 4])];
+		const { head, stream } = await peekStream(streamOf(chunks), 4);
+		expect([...head]).toEqual([1, 2, 3, 4]);
+		expect([...(await drain(stream))]).toEqual([1, 2, 3, 4]);
+	});
+
+	it('stops on a source that only ever hands back empty chunks', async () => {
+		// One real byte, then nothing but empty chunks: a loop that waits for the
+		// window to fill reads until the source gives up, which on a source that
+		// never gives up is forever. The count is what the assertion is on.
+		let reads = 0;
+		const stuck = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				reads++;
+				if (reads === 1) controller.enqueue(new Uint8Array([7]));
+				else if (reads <= 64) controller.enqueue(new Uint8Array(0));
+				else controller.close();
+			}
+		});
+		const { head } = await peekStream(stuck, 64);
+		expect([...head]).toEqual([7]);
+		expect(reads).toBeLessThan(64);
+	});
+
 	it('handles an empty body', async () => {
 		const { head, stream } = await peekStream(streamOf([]), 64);
 		expect(head.length).toBe(0);

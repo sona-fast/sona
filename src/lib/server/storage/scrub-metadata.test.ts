@@ -551,6 +551,28 @@ describe('scrubImageMetadata: AVIF', () => {
 		expect(() => scrubImageMetadata(hidden.file)).toThrow(/a uuid box inside the meta box/);
 	});
 
+	it('throws on a uuid box nested deeper inside the meta box', () => {
+		// The meta box is written back verbatim, so an XMP packet parked in the
+		// property list or the reference box rides through just as intact as one
+		// at the top of meta — the walk has to reach every level to see it.
+		for (const where of ['ipco', 'iref'] as const) {
+			const nested = avifFixture({ uuidDeepInMeta: where });
+			expect(text(nested.file)).toContain('exif:GPSLatitude');
+			expect(() => scrubImageMetadata(nested.file)).toThrow(/a uuid box inside the meta box's/);
+		}
+	});
+
+	it('scrubs a file whose ipco holds the property boxes a real encoder writes', () => {
+		// The deeper walk refuses payload boxes by name; it must not refuse the
+		// property and reference types it does not know, or real files fail.
+		const rich = avifFixture({ richIpco: true });
+		const out = scrubImageMetadata(rich.file);
+		expect(out.length).toBe(rich.file.length);
+		expect(out.subarray(rich.av01.start, rich.av01.end)).toEqual(rich.file.subarray(rich.av01.start, rich.av01.end));
+		expect(text(out.subarray(rich.exif.start, rich.exif.end))).not.toContain('MAKERNOT');
+		expect(text(out.subarray(rich.xmp.start, rich.xmp.end))).not.toContain('GPS');
+	});
+
 	it('strips control characters out of a refusal message built from the file', () => {
 		// The content_type is the file's own bytes and the message ends up in a
 		// log line, so a newline in it must not forge a second line.
@@ -559,6 +581,17 @@ describe('scrubImageMetadata: AVIF', () => {
 		expect(() => scrubImageMetadata(forged.file)).toThrow(
 			'avif: a mime item declares content type "application/xmar 1 00:00:00 sona: stored", which is not XMP'
 		);
+	});
+
+	it('truncates file text in a refusal message to 64 characters', () => {
+		// The content_type is as long as the file says it is, and the message goes
+		// to a log line, so only the first 64 characters of it are carried.
+		const tail = 'x'.repeat(200);
+		const long = avifFixture({ xmpContentType: `application/${tail}` });
+		expect(() => scrubImageMetadata(long.file)).toThrow(
+			`avif: a mime item declares content type "application/${'x'.repeat(52)}", which is not XMP`
+		);
+		expect(() => scrubImageMetadata(long.file)).not.toThrow(tail);
 	});
 
 	it('throws on a top-level box type no AVIF carries', () => {
@@ -659,6 +692,26 @@ describe('scrubImageMetadata: AVIF', () => {
 		expect(() => scrubImageMetadata(avifFixture({ hideIinf: 'covering' }).file)).toThrow(
 			/a free box inside the meta box/
 		);
+	});
+
+	it('throws when a box other than an item entry sits inside the iinf box', () => {
+		// A `free` box ahead of the entries: a reader steps over it and finds the
+		// Exif item, a walk that skipped it would find no items and store the
+		// file whole.
+		expect(() => scrubImageMetadata(avifFixture({ iinfDecoyChild: true }).file)).toThrow(
+			/a free box inside the iinf box/
+		);
+	});
+
+	it('throws when the iinf entry_count disagrees with the entries present', () => {
+		// Same file, entry_count bumped by one in place: the item list points a
+		// reader at an entry this walk never saw.
+		const file = avifFixture({}).file.slice();
+		const iinf = indexOfAscii(file, 'iinf');
+		// FullBox: 4 bytes of version+flags follow the type, then the u16 count.
+		const countAt = iinf + 4 + 4;
+		file[countAt + 1] += 1;
+		expect(() => scrubImageMetadata(file)).toThrow(/declares 4 item entries but holds 3/);
 	});
 
 	it('stores an AVIF whose item list names no metadata item', () => {
@@ -887,3 +940,14 @@ describe('exifTiff fixture sanity', () => {
 		expect(text(tiff)).toContain('MAKERNOT');
 	});
 });
+
+/** Offset of the first occurrence of an ASCII `needle` in `bytes`, or -1. */
+function indexOfAscii(bytes: Uint8Array, needle: string): number {
+	outer: for (let i = 0; i + needle.length <= bytes.length; i++) {
+		for (let j = 0; j < needle.length; j++) {
+			if (bytes[i + j] !== needle.charCodeAt(j)) continue outer;
+		}
+		return i;
+	}
+	return -1;
+}
