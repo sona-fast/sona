@@ -126,7 +126,13 @@ describe('importFursuitPhotos', () => {
 		expect(result.failed).toBe(1);
 		expect(result.items[0].error).toBe(UNSCRUBBABLE_IMPORT_MESSAGE);
 		// The parser's own wording is still available, in the log.
-		expect(warn).toHaveBeenCalled();
+		expect(warn).toHaveBeenCalledWith(
+			'fursuit import: unscrubbable photo',
+			1918883,
+			expect.objectContaining({
+				message: 'the image ended inside a metadata record (truncated file)'
+			})
+		);
 		warn.mockRestore();
 	});
 });

@@ -287,7 +287,9 @@ describe('scrubImageMetadata: JPEG with more than one scan', () => {
 		const eoi = file.length - JPEG_TRAILER.length;
 		expect(scrubbed.length).toBe(file.length);
 		// The trap really is in the file: the DQT's table bytes read FF D9.
-		expect(text(file.subarray(sos, eoi)).indexOf('\xff\xd9')).toBeLessThan(eoi - sos - 2);
+		const trap = text(file.subarray(sos, eoi)).indexOf('\xff\xd9');
+		expect(trap).toBeGreaterThanOrEqual(0);
+		expect(trap).toBeLessThan(eoi - sos - 2);
 		// Everything from the first scan through the REAL end marker survives...
 		expect(scrubbed.subarray(sos, eoi)).toEqual(file.subarray(sos, eoi));
 		expect(text(scrubbed)).toContain('second');

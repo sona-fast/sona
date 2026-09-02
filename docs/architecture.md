@@ -67,6 +67,7 @@ graph TB
     Admin --> Auth
     Admin --> Storage
     Admin --> Importers
+    Importers --> Storage
     Admin --> RegClient
     Public --> Gates
     API --> RateLimit
