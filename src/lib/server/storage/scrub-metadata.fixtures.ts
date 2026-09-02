@@ -397,6 +397,8 @@ function riffChunk(fourcc: string, data: number[]): number[] {
 export interface WebpOptions {
 	/** Append bytes past the declared RIFF size, where a reader stops looking. */
 	trailer?: string;
+	/** Spell the EXIF chunk's fourcc lowercase, as a sloppy writer may. */
+	lowercaseExif?: boolean;
 }
 
 /**
@@ -412,7 +414,10 @@ export function webpFixture(opts: WebpOptions = {}): Uint8Array {
 		...riffChunk('ANIM', [0, 0, 0, 0xff, 0, 0]),
 		...riffChunk('ANMF', [...ascii('fake frame header'), ...ascii('and its payload')]),
 		...riffChunk('VP8 ', ascii('fake lossy bitstream')),
-		...riffChunk('EXIF', exifTiff({ orientation: 8, copyright: '(c) Nova', gps: true })),
+		...riffChunk(
+			opts.lowercaseExif ? 'exif' : 'EXIF',
+			exifTiff({ orientation: 8, copyright: '(c) Nova', gps: true })
+		),
 		...riffChunk('XMP ', xmpWithGps())
 	];
 	return Uint8Array.from([
@@ -509,10 +514,11 @@ export interface AvifOptions {
 	 */
 	moovBoxAfterMdat?: boolean;
 	/**
-	 * Write the trailing padding box with a declared size of 0 ("runs to the end
-	 * of the file") as a `free`, `skip` or `uuid` box holding an XMP packet.
+	 * Write the trailing box with a declared size of 0 ("runs to the end of the
+	 * file") as a `free`, `skip` or `uuid` padding box holding an XMP packet, or
+	 * as a `ftyp` — a box that has no business claiming the rest of the file.
 	 */
-	zeroSizeTrailingBox?: 'free' | 'skip' | 'uuid';
+	zeroSizeTrailingBox?: 'free' | 'skip' | 'uuid' | 'ftyp';
 	/**
 	 * Write a 76-byte ftyp with `mif1` as the major brand and `avif` as the last
 	 * compatible brand, at offset 72 — past a 64-byte sniff window.

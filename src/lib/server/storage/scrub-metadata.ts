@@ -709,6 +709,10 @@ function* scrubWebp(): Machine {
 		}
 		const chunkHeader = yield { kind: 'take', n: 8 };
 		const fourcc = String.fromCharCode(chunkHeader[0], chunkHeader[1], chunkHeader[2], chunkHeader[3]);
+		// Fourccs are matched case-insensitively: the spec spells them uppercase,
+		// but a writer that emits `exif` instead of `EXIF` still produces a chunk
+		// decoders read, so a case-sensitive match would walk GPS straight past.
+		const tag = fourcc.toUpperCase();
 		const size = u32(chunkHeader, 4, false);
 		// Chunks are padded to an even length; the pad byte is part of the stream
 		// but not of the payload.
@@ -717,7 +721,7 @@ function* scrubWebp(): Machine {
 			throw new UnscrubbableImageError(`webp: ${loggable(fourcc)} chunk runs past the declared RIFF size`);
 		}
 		remaining -= 8 + padded;
-		const rewrites = fourcc === 'VP8X' || fourcc === 'EXIF' || fourcc === 'XMP ';
+		const rewrites = tag === 'VP8X' || tag === 'EXIF' || tag === 'XMP ';
 		if (!rewrites) {
 			yield { kind: 'write', bytes: chunkHeader };
 			if (padded) yield { kind: 'copy', n: padded };
@@ -728,7 +732,7 @@ function* scrubWebp(): Machine {
 		}
 		const body = yield { kind: 'take', n: padded };
 		yield { kind: 'write', bytes: chunkHeader };
-		yield { kind: 'write', bytes: scrubWebpChunk(fourcc, body, size) };
+		yield { kind: 'write', bytes: scrubWebpChunk(tag, body, size) };
 	}
 	// Bytes past the declared RIFF size are not part of the picture and no
 	// decoder reads them, so they get the JPEG trailer's treatment: zeroed
@@ -736,15 +740,16 @@ function* scrubWebp(): Machine {
 	yield* zeroToEnd();
 }
 
-function scrubWebpChunk(fourcc: string, body: Uint8Array, size: number): Uint8Array {
-	if (fourcc === 'VP8X') {
+/** `tag` is the chunk's fourcc, uppercased by the caller. */
+function scrubWebpChunk(tag: string, body: Uint8Array, size: number): Uint8Array {
+	if (tag === 'VP8X') {
 		if (body.length < 1) return body;
 		const out = new Uint8Array(body);
 		out[0] &= ~0x04; // XMP metadata flag
 		return out;
 	}
 	const out = new Uint8Array(body.length);
-	if (fourcc === 'XMP ') {
+	if (tag === 'XMP ') {
 		out.set(emptyXmpPacket(size), 0);
 		return out;
 	}
@@ -815,6 +820,14 @@ function* scrubAvif(): Machine {
 			pos += 8;
 			contentLen = u64(large, 0) - 16;
 		} else if (declared === 0) {
+			// "Runs to the end of the file" is the mdat's form, and the padding
+			// boxes' — both are the last box in a file that has one. On a ftyp or a
+			// meta it is a way to swallow every box after it, so it is refused.
+			if (type !== 'mdat' && !ZEROED_AVIF_BOXES.has(type)) {
+				throw new UnscrubbableImageError(
+					`avif: a ${type} box declaring size 0 would run to the end of the file, which only mdat and padding boxes may do`
+				);
+			}
 			contentLen = null; // extends to end of file
 		} else {
 			contentLen = declared - 8;

@@ -5,6 +5,7 @@ import {
 	sniffModelFormat,
 	peekStream
 } from './vr-models';
+import { UnscrubbableImageError } from './storage/scrub-metadata';
 
 describe('modelExtFromFilename', () => {
 	it('accepts .vrm and .fbx case-insensitively', () => {
@@ -101,10 +102,11 @@ describe('peekStream', () => {
 		expect([...(await drain(stream))]).toEqual([1, 2, 3, 4]);
 	});
 
-	it('stops on a source that only ever hands back empty chunks', async () => {
+	it('refuses a source that only ever hands back empty chunks', async () => {
 		// One real byte, then nothing but empty chunks: a loop that waits for the
 		// window to fill reads until the source gives up, which on a source that
-		// never gives up is forever. The count is what the assertion is on.
+		// never gives up is forever. Giving up is not EOF, so the short head is
+		// refused rather than sniffed. The read count is asserted on too.
 		let reads = 0;
 		const stuck = new ReadableStream<Uint8Array>({
 			pull(controller) {
@@ -114,9 +116,18 @@ describe('peekStream', () => {
 				else controller.close();
 			}
 		});
-		const { head } = await peekStream(stuck, 64);
-		expect([...head]).toEqual([7]);
+		await expect(peekStream(stuck, 64)).rejects.toThrow(UnscrubbableImageError);
 		expect(reads).toBeLessThan(64);
+	});
+
+	it('still succeeds when a run of empty chunks precedes the real data', async () => {
+		// Under the give-up budget, so the empties are just slow progress, not a
+		// stalled source: the peek waits them out and returns the real head.
+		const chunks = [...Array(7)].map(() => new Uint8Array(0));
+		chunks.push(new Uint8Array([1, 2, 3, 4]));
+		const { head, stream } = await peekStream(streamOf(chunks), 4);
+		expect([...head]).toEqual([1, 2, 3, 4]);
+		expect([...(await drain(stream))]).toEqual([1, 2, 3, 4]);
 	});
 
 	it('handles an empty body', async () => {

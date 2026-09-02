@@ -403,6 +403,20 @@ describe('scrubImageMetadata: WebP', () => {
 		expect(packet.trimEnd().endsWith('<?xpacket end="w"?>')).toBe(true);
 	});
 
+	it('rewrites an EXIF chunk whose fourcc is spelled lowercase', () => {
+		// Decoders match the fourcc case-insensitively, so `exif` carries GPS just
+		// as well as `EXIF` does; a case-sensitive walk would copy it through.
+		const lower = webpFixture({ lowercaseExif: true });
+		const exif = riffChunks(lower).find((c) => c.fourcc === 'exif')!;
+		const before = readTiff(lower.subarray(exif.dataStart, exif.dataEnd));
+		expect(before.entries.some((e) => e.tag === 0x8825)).toBe(true);
+		const out = scrubImageMetadata(lower);
+		expect(out.length).toBe(lower.length);
+		const tiff = readTiff(out.subarray(exif.dataStart, exif.dataEnd));
+		expect(tiff.orientation).toBe(8);
+		expect(tiff.entries.some((e) => e.tag === 0x8825)).toBe(false);
+	});
+
 	it('leaves ICCP, the animation chunks and VP8 identical, pad byte included', () => {
 		for (const fourcc of ['ICCP', 'ANIM', 'ANMF', 'VP8 ']) {
 			const before = riffChunks(original).find((c) => c.fourcc === fourcc)!;
@@ -563,6 +577,15 @@ describe('scrubImageMetadata: AVIF', () => {
 		expect(text(padded.file.subarray(box))).toContain('exif:GPSLatitude');
 		expect(out.subarray(box, box + 8)).toEqual(padded.file.subarray(box, box + 8));
 		expect(out.subarray(box + 8).every((b) => b === 0)).toBe(true);
+	});
+
+	it('throws on a size-0 ftyp box, which may not claim the rest of the file', () => {
+		// Only the mdat and the padding boxes end the file, so a ftyp declaring
+		// size 0 is a way to swallow every box after it — a second meta among
+		// them — without the walk ever looking at one.
+		const swallow = avifFixture({ zeroSizeTrailingBox: 'ftyp' });
+		expect(text(swallow.file)).toContain('exif:GPSLatitude');
+		expect(() => scrubImageMetadata(swallow.file)).toThrow(/ftyp box declaring size 0/);
 	});
 
 	it('throws on a top-level moov box, so an image sequence is refused', () => {
@@ -754,7 +777,7 @@ describe('scrubImageMetadata: AVIF', () => {
 		// Same file, entry_count bumped by one in place: the item list points a
 		// reader at an entry this walk never saw.
 		const file = avifFixture({}).file.slice();
-		const iinf = indexOfAscii(file, 'iinf');
+		const iinf = text(file).indexOf('iinf');
 		// FullBox: 4 bytes of version+flags follow the type, then the u16 count.
 		const countAt = iinf + 4 + 4;
 		file[countAt + 1] += 1;
@@ -987,14 +1010,3 @@ describe('exifTiff fixture sanity', () => {
 		expect(text(tiff)).toContain('MAKERNOT');
 	});
 });
-
-/** Offset of the first occurrence of an ASCII `needle` in `bytes`, or -1. */
-function indexOfAscii(bytes: Uint8Array, needle: string): number {
-	outer: for (let i = 0; i + needle.length <= bytes.length; i++) {
-		for (let j = 0; j < needle.length; j++) {
-			if (bytes[i + j] !== needle.charCodeAt(j)) continue outer;
-		}
-		return i;
-	}
-	return -1;
-}

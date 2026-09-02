@@ -34,8 +34,8 @@ Lottie JSON of an animated Telegram sticker, and VR model bytes.
 | --- | --- | --- |
 | JPEG | The Exif sub-IFD, the GPS IFD, the maker note, IFD1 and its embedded thumbnail, the XMP packet, the multi-picture (MPF) index, the Photoshop resource block with its IPTC fields, and every byte after the end-of-image marker | Orientation, Artist, Copyright, the ICC color profile, JFIF, the comment segment, the scan up to and including the end-of-image marker, and every other APPn segment |
 | PNG | `eXIf` beyond the three kept tags, the `tEXt`, `zTXt` and `iTXt` text chunks (`iTXt` is where XMP lives), the compressed-Exif `zxIf` chunk and the `tXMP` chunk — matched whatever case the chunk type is written in — and every byte after the `IEND` chunk | Orientation, Artist, Copyright, `iCCP`, `IDAT`, and every other chunk, APNG included |
-| WebP | The `EXIF` chunk beyond the three kept tags, the `XMP ` chunk, the XMP feature bit in `VP8X`, and any bytes past the declared RIFF size | Orientation, Artist, Copyright, `ICCP`, `ANIM`, `ANMF`, `ALPH`, `VP8`, `VP8L`, and every other chunk |
-| AVIF | The Exif item beyond Artist and Copyright, the XMP item, and the content of every `free`, `skip` and `uuid` box, which is where an editor parks an XMP packet that has no item of its own | The image data, the item properties, the `irot`/`imir` orientation, and the `ftyp` and `mdat` boxes. Every top-level box is walked, including the ones after the item payloads: a second `meta` box is refused, so is any top-level box outside `ftyp`, `meta`, `mdat`, `free`, `skip` and `uuid`, and the padding boxes keep their headers so the box structure still adds up. Inside `meta`, only the boxes a still image needs are allowed |
+| WebP | The `EXIF` chunk beyond the three kept tags, the `XMP ` chunk — both matched whatever case the fourcc is written in — the XMP feature bit in `VP8X`, and any bytes past the declared RIFF size | Orientation, Artist, Copyright, `ICCP`, `ANIM`, `ANMF`, `ALPH`, `VP8`, `VP8L`, and every other chunk |
+| AVIF | The Exif item beyond Artist and Copyright, the XMP item, and the content of every top-level `free`, `skip` and `uuid` box, which is where an editor parks an XMP packet that has no item of its own | The image data, the item properties, the `irot`/`imir` orientation, and the `ftyp` and `mdat` boxes. Every top-level box is walked, including the ones after the item payloads: a second `meta` box is refused, so is any top-level box outside `ftyp`, `meta`, `mdat`, `free`, `skip` and `uuid`, and the padding boxes keep their headers so the box structure still adds up. Inside `meta`, only the boxes a still image needs are allowed |
 | GIF | The payload of an `XMP DataXMP` application extension, and every byte after the trailer | Every other block, the comment extension and the XMP extension's magic trailer included |
 
 A JPEG's other application segments are the known gap. Sona rewrites APP1, APP2
@@ -105,10 +105,12 @@ the `exif` and `mime` items it rewrites — because the walk copies an item it
 skips straight through, bytes and all. AVIF image sequences are refused: their
 `moov` box can carry location atoms and the scrubber does not walk it. Inside
 `meta`, only the boxes a still image needs are allowed: `hdlr`, `pitm`, `iinf`,
-`iloc`, `iprp`, `iref`, `dinf`, `grpl` and `idat`. A `uuid`, `free`, `skip` or
-`udta` box anywhere inside `meta`, at any depth, is refused, because those are
-another place an editor can park an XMP packet the walk would otherwise step
-over.
+`iloc`, `iprp`, `iref`, `dinf`, `grpl` and `idat`. A `uuid`, `free`, `skip`,
+`udta`, `xml `, `bxml` or nested `meta` box inside `meta`, or inside the
+property, reference and data containers below it, is refused, because each one
+is another place an editor can park an XMP packet the walk would otherwise step
+over. An item list whose declared entry count disagrees with the entries
+present, or that holds anything other than item entries, is refused too.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that

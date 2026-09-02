@@ -3,6 +3,8 @@
 // (which sniffs a raster signature before deciding to scrub). Lives on its own
 // so storage does not have to import the VR module for it.
 
+import { UnscrubbableImageError } from '$lib/server/storage/scrub-metadata';
+
 /** How many empty reads in a row end the peek instead of continuing it. */
 const MAX_EMPTY_READS = 8;
 
@@ -23,13 +25,20 @@ export async function peekStream(
 	// A source is allowed to hand back an empty chunk, which advances nothing: a
 	// source that keeps handing them back would spin this loop forever. They
 	// carry no bytes, so they are dropped rather than replayed, and a run of them
-	// ends the peek with whatever head has been gathered.
+	// ends the peek. Giving up early is not the same as end of input, so the head
+	// it gathered is short of what the caller asked for through no fault of the
+	// file: refuse rather than hand a sniffer a truncated head it would misread.
 	let empties = 0;
 	while (len < n) {
 		const { done, value } = await reader.read();
 		if (done) break;
 		if (value.length === 0) {
-			if (++empties >= MAX_EMPTY_READS) break;
+			if (++empties >= MAX_EMPTY_READS) {
+				await reader.cancel();
+				throw new UnscrubbableImageError(
+					`the source stopped producing bytes after ${len} of ${n} peeked bytes`
+				);
+			}
 			continue;
 		}
 		empties = 0;
