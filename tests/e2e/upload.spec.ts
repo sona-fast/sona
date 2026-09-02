@@ -319,7 +319,7 @@ test('the sticker pack form names the refusal and keeps the good file in the bat
 	await expect(toasts.filter({ hasText: '1 of 2 uploaded, 1 failed' })).toHaveCount(1);
 	const refusal = toasts.filter({ hasText: 'Export fresh copies from an image editor' });
 	await expect(refusal).toHaveCount(1);
-	await expect(refusal).toContainText('from 1 of those files');
+	await expect(refusal).toContainText('from 1 of the files you picked');
 
 	// The statuses the server really answered with — one refusal, one success.
 	// Order varies with staging order, so compare sorted.
@@ -356,7 +356,38 @@ test('a pack batch of only refused files shows the refusal alone', async ({ page
 	const toasts = page.locator('.alert-message');
 	await expect(toasts).toHaveCount(1, { timeout: 20_000 });
 	await expect(toasts).toContainText('Export fresh copies from an image editor');
-	await expect(toasts).toContainText('from 1 of those files');
+	await expect(toasts).toContainText('from 1 of the files you picked');
 	expect(statuses).toEqual([422]);
 	await expect(page.locator('input[name$="[imageUrl]"]')).toHaveCount(0);
+});
+
+test('a pack batch where every file uploads shows no toast at all', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+	const uploads = countUploadPosts(page);
+
+	await page.goto('/admin/stickers/manual');
+	await stagePackFiles(
+		page,
+		[
+			{ name: 'e2e-sticker-a.png', mimeType: 'image/png', buffer: PNG },
+			{ name: 'e2e-sticker-b.png', mimeType: 'image/png', buffer: PNG }
+		],
+		uploads,
+		() => {
+			statuses.length = 0;
+		}
+	);
+
+	// Both files became rows, so the batch is over. A count toast here would be
+	// the false "2 of 2 uploaded, 0 failed" error that the failed > 0 guard
+	// exists to prevent.
+	await expect(page.locator('input[name$="[imageUrl]"]')).toHaveCount(2, { timeout: 20_000 });
+	expect(statuses).toEqual([200, 200]);
+	await expect(page.locator('.alert-message')).toHaveCount(0);
 });

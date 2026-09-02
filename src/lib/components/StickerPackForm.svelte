@@ -127,6 +127,9 @@
 	async function uploadStickers(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
+		// Clear the picker so choosing the same path again (the re-export a
+		// refusal asks for) fires a change event instead of being dropped.
+		input.value = '';
 		if (!files.length) return;
 		uploading = true;
 		let ok = 0;

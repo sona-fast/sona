@@ -95,12 +95,17 @@ describe('POST /api/storage/rekey-stickers refusal mapping', () => {
 		// The parser's wording belongs in the log, not in the response: one
 		// warning per refused row, each naming the row and carrying the error.
 		expect(JSON.stringify(body)).not.toContain(PARSER_MESSAGE);
-		const warnings = vi.mocked(console.warn).mock.calls;
-		expect(warnings).toHaveLength(2);
-		for (const args of warnings) {
-			expect(args).toContain(1);
-			expect(args.some((a) => a instanceof Error && a.message === PARSER_MESSAGE)).toBe(true);
-		}
+		expect(console.warn).toHaveBeenCalledTimes(2);
+		expect(console.warn).toHaveBeenCalledWith(
+			'sticker re-key: unscrubbable object',
+			1,
+			expect.objectContaining({ message: PARSER_MESSAGE })
+		);
+		expect(console.warn).toHaveBeenCalledWith(
+			'fursuit re-key: unscrubbable object',
+			1,
+			expect.objectContaining({ message: PARSER_MESSAGE })
+		);
 
 		// Rows keep their old URLs: nothing was re-keyed.
 		const urls = sqlite.prepare('SELECT image_url FROM stickers').all() as Array<{ image_url: string }>;

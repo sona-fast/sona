@@ -856,7 +856,7 @@
 	"admin_pack_manual_intro": "Upload sticker images (PNG or WebP) and fill in the pack details. Each sticker can have its own artist and emoji. Files are uploaded to storage before saving.",
 	"admin_pack_edit_heading": "Edit pack: {name}",
 	"admin_pack_upload_partial": "{ok} of {total} uploaded, {failed} failed",
-	"admin_pack_upload_unscrubbable": "Couldn't strip hidden metadata from {refused} of those files. Export fresh copies from an image editor and upload those.",
+	"admin_pack_upload_unscrubbable": "Couldn't strip hidden metadata from {refused} of the files you picked. Export fresh copies from an image editor and upload those.",
 	"admin_pack_details": "Pack details",
 	"admin_pack_name": "Pack name",
 	"admin_pack_name_placeholder": "My sticker pack",
