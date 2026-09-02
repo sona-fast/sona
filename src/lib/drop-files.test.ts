@@ -57,7 +57,8 @@ type PickedFile = { name: string; type: string };
 // `types` mirrors what a real file drag carries; the zone reads it to tell a
 // file drag from a dragged link or selection.
 function dragEvent(type: string, files: PickedFile[] = [], types: string[] = ['Files']) {
-	return Object.assign(new Event(type), { dataTransfer: { files, types, dropEffect: '' } });
+	// Cancelable, so a test can see that the handler called preventDefault.
+	return Object.assign(new Event(type, { cancelable: true }), { dataTransfer: { files, types, dropEffect: '' } });
 }
 
 describe('partitionByAccept', () => {
@@ -160,7 +161,10 @@ describe('dropFiles', () => {
 		const good = { name: 'a.png', type: 'image/png' };
 		const model = { name: 'b.vrm', type: '' };
 		const bad = { name: 'notes.txt', type: 'text/plain' };
-		el.dispatchEvent(dragEvent('drop', [good, bad, model]));
+		const drop = dragEvent('drop', [good, bad, model]);
+		el.dispatchEvent(drop);
+		// Cancelling the drop is what keeps the browser from opening the file.
+		expect(drop.defaultPrevented).toBe(true);
 		expect(el.classes.has('drag-over')).toBe(false);
 		expect(calls).toHaveLength(1);
 		expect(calls[0].files).toEqual([good, model]);
