@@ -600,6 +600,11 @@ export interface AvifOptions {
 	duplicateInfe?: boolean;
 	/** Place item 2 twice in the one iloc box, decoy first or decoy last. */
 	duplicateIlocItem?: 'decoyFirst' | 'decoyLast';
+	/**
+	 * Leave the meta box out altogether: ftyp and mdat only, so no item list
+	 * names what the payload store holds.
+	 */
+	noMeta?: boolean;
 	/** Put the mdat ahead of the meta box, so the payloads go past before the
 	 * item list names them. Nothing follows the meta box, so the refusal has to
 	 * come from reading the item list, not from reaching a later box. */
@@ -803,7 +808,8 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 	const free = opts.freeBoxBeforeMeta ? [...u32be(0), ...ascii('free')] : [];
 	// With mdatBeforeMeta the payload store comes first, so the meta box that
 	// names it is what the walk reaches last.
-	const mdatStart = opts.mdatBeforeMeta ? ftyp.length : ftyp.length + free.length + metaSize;
+	const mdatStart =
+		opts.mdatBeforeMeta || opts.noMeta ? ftyp.length : ftyp.length + free.length + metaSize;
 	const av01At = mdatStart + mdatHeader;
 	// With splitMdat the metadata payloads live in a second mdat, past a `free`
 	// box: the extents are then two boxes on from the meta box, not in the one
@@ -844,9 +850,11 @@ export function avifFixture(opts: AvifOptions = {}): AvifFixture {
 		: [];
 	return {
 		file: Uint8Array.from(
-			opts.mdatBeforeMeta
-				? [...ftyp, ...mdat, ...meta, ...trailingBox]
-				: [...ftyp, ...free, ...meta, ...mdat, ...trailingBox, ...second]
+			opts.noMeta
+				? [...ftyp, ...mdat]
+				: opts.mdatBeforeMeta
+					? [...ftyp, ...mdat, ...meta, ...trailingBox]
+					: [...ftyp, ...free, ...meta, ...mdat, ...trailingBox, ...second]
 		),
 		av01: { start: av01At, end: av01At + av01Payload.length },
 		exif: { start: exifAt, end: exifAt + exifPayload.length },

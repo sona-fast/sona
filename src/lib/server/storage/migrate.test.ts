@@ -8,6 +8,7 @@ import { makeD1 } from '$lib/server/test/d1';
 import { PNG_MAGIC } from '$lib/server/test/raster-fixtures';
 import { migrateImages, migrateNextBatch } from './migrate';
 import { UnscrubbableImageError, UNSCRUBBABLE_MIGRATE_MESSAGE } from './scrub-metadata';
+import { avifFixture } from './scrub-metadata.fixtures';
 import type { StorageProvider } from './types';
 
 function makeDb() {
@@ -177,7 +178,9 @@ describe('migrate copyOne content sniffing (SONA-141)', () => {
 		// The header LIES (image/png) but the bytes are HTML — re-hosting them
 		// onto the CDN origin would serve active content. The row must fail and
 		// stay pending, and the provider must never see the bytes.
-		const html = new TextEncoder().encode('<html><script>alert(1)</script></html>'.padEnd(128, ' '));
+		// Padded past the sniff window so the rejection happens with the stream
+		// still open rather than at its end.
+		const html = new TextEncoder().encode('<html><script>alert(1)</script></html>'.padEnd(300, ' '));
 		// The body arrives in two chunks so the source is still mid-stream when
 		// the sniff rejects — the reader must be cancelled, not abandoned locked.
 		const cancelled = vi.fn();
@@ -239,6 +242,37 @@ describe('migrate copyOne content sniffing (SONA-141)', () => {
 		const result = await migrateImages({ db, fetchFn, target });
 		expect(result.migrated).toBe(1);
 		expect(result.failed).toBe(0);
+	});
+
+	it('migrates an AVIF whose avif brand sits past byte 64 of its ftyp', async () => {
+		// The sniff window is shared with the scrubber and /api/upload: a local
+		// 64-byte window here read this file as no raster and failed the row a
+		// fresh upload of the same bytes would have accepted.
+		const { sqlite, db } = makeDb();
+		sqlite
+			.prepare('INSERT INTO images (title, slug, image_url) VALUES (?, ?, ?)')
+			.run('t', 'long-ftyp', 'https://old.example/f/long-ftyp');
+		const bytes = avifFixture({ longFtyp: true }).file;
+		const fetchFn = vi.fn(
+			async () =>
+				new Response(streamOf(bytes), {
+					headers: {
+						'content-type': 'application/octet-stream',
+						'content-length': String(bytes.length)
+					}
+				})
+		) as unknown as typeof fetch;
+
+		const target = fakeTarget(async ({ suggestedKey, contentType, body }) => {
+			expect(contentType).toBe('image/avif');
+			expect(suggestedKey).toBe('artwork/long-ftyp.avif');
+			await new Response(body as ReadableStream).arrayBuffer();
+			return { url: 'https://cdn.example.com/artwork/long-ftyp.avif' };
+		});
+
+		const result = await migrateImages({ db, fetchFn, target });
+		expect(result.failed).toBe(0);
+		expect(result.migrated).toBe(1);
 	});
 });
 

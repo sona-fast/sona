@@ -947,6 +947,17 @@ describe('scrubImageMetadata: AVIF', () => {
 		const early = avifFixture({ mdatBeforeMeta: true });
 		expect(() => scrubImageMetadata(early.file)).toThrow(/sits before the meta box/);
 	});
+
+	it('throws on a file that ends with no meta box at all', async () => {
+		// ftyp plus an mdat of a declared size and nothing else: no item list, so
+		// nothing was ever read about what that payload store holds. The walk ends
+		// cleanly at a box boundary with no extent pending, which is the shape a
+		// "nothing left to do" return would store whole — Exif and XMP included.
+		const bare = avifFixture({ noMeta: true });
+		expect(() => scrubImageMetadata(bare.file)).toThrow(/without a meta box/);
+		// The streaming path runs the same walk and must refuse it too.
+		await expect(streamScrub(bare.file, 16)).rejects.toThrow(/without a meta box/);
+	});
 });
 
 describe('scrubImageMetadata: pass-through and rejection', () => {
@@ -1012,6 +1023,25 @@ describe('scrubImageMetadata: pass-through and rejection', () => {
 		expect(at).toBeGreaterThan(0);
 		gif.set(ascii('xmp'), at + 8);
 		expect(() => scrubImageMetadata(gif)).toThrow(/labelled like XMP/);
+	});
+
+	it('refuses an XMP extension whose trailer only starts like the magic one', () => {
+		// 0x01 0xFF is where a two-byte check stops looking. A crafted suffix that
+		// matches those two and then carries attacker bytes would be kept whole as
+		// "the trailer" while only the payload in front of it was replaced — so
+		// every byte of the 258 is checked: the leading 0x01, the descending run,
+		// and the terminator.
+		// The third byte (0xFE in the real trailer) and one from the middle of the
+		// descending run. Both are set to 0x01 so the sub-block chain still walks
+		// to the same terminator — only the trailer's shape is wrong.
+		const { end } = gifXmpRange();
+		for (const at of [end + 2, end + 130]) {
+			const gif = Uint8Array.from(gifWithXmpFixture());
+			gif[at] = 0x01;
+			expect(() => scrubImageMetadata(gif), `trailer byte ${at - end}`).toThrow(
+				/does not end in the magic trailer/
+			);
+		}
 	});
 
 	it('throws for bytes matching no raster signature', () => {

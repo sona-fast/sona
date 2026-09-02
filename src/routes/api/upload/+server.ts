@@ -4,7 +4,7 @@ import { getSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
 import { sniffImageType, isWebmHead } from '$lib/server/storage/sniff';
 import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
-import { isUnscrubbable, UNSCRUBBABLE_MESSAGE } from '$lib/server/storage/scrub-metadata';
+import { isUnscrubbable, SNIFF_BYTES, UNSCRUBBABLE_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { recordUpload, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
@@ -67,10 +67,12 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		error(415, `Unsupported image type: ${contentType}. Allowed: JPEG, PNG, GIF, WebP, AVIF, WebM.`);
 	}
 	// Verify the actual leading bytes match the declared type (M7) — the
-	// client-supplied content-type above can be spoofed. Sniff a cheap 64-byte
-	// head rather than buffering the whole file — big enough that an AVIF ftyp
-	// box's compatible_brands (which start at offset 16) are visible.
-	const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+	// client-supplied content-type above can be spoofed. Sniff a cheap head
+	// rather than buffering the whole file, sized by SNIFF_BYTES so this window
+	// matches the scrubber's: a real AVIF can pad compatible_brands far enough
+	// that the `avif` brand sits past a 64-byte head, and a shorter window here
+	// would 415 a file storage would have accepted.
+	const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
 	if (isWebm ? !isWebmHead(head) : !isAllowedImageType(sniffImageType(head))) {
 		error(415, 'File contents do not match an allowed image type.');
 	}

@@ -124,7 +124,9 @@ an item of any type outside the inert set the scrubber knows (`av01`, `grid`,
 `iovl`, `iden`, the `tmap` gain map, plus the `exif` and `mime` items it
 rewrites), because the walk copies an item it skips straight through, bytes and
 all. AVIF image sequences are refused: their `moov` box can carry location
-atoms and the scrubber does not walk it. Inside `meta`, only the boxes a still
+atoms and the scrubber does not walk it. An AVIF with no `meta` box at all is
+refused too, because nothing named what its payload store holds, so storing it
+would mean passing an unread `mdat` through. Inside `meta`, only the boxes a still
 image needs are allowed: `hdlr`, `pitm`, `iinf`, `iloc`, `iprp`, `iref`,
 `dinf`, `grpl` and `idat`. A `uuid`, `free`, `skip`, `udta`, `xml `, `bxml` or
 nested `meta` box inside `meta`, or inside the `iprp`, `ipco`, `iref`, `dinf`,
@@ -138,9 +140,10 @@ identifier reads as `XMP Data` in any case but is not exactly `XMP DataXMP` is
 refused rather than copied, because the payload behind such a label is raw XML
 with no sub-block structure, so copying it through is the one way GPS
 coordinates could survive the walk intact. An XMP extension that does not end in
-the magic trailer is refused for the same reason: without the trailer the
-payload cannot be located, and the bytes in front of it cannot be replaced in
-place.
+the magic trailer is refused for the same reason. All 258 bytes are checked:
+the leading 0x01, the descending run 0xFF to 0x00 and the block terminator.
+Without the trailer the payload cannot be located, and the bytes in front of
+it cannot be replaced in place.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that

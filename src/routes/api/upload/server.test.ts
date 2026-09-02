@@ -9,7 +9,7 @@ import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
 import { UnscrubbableImageError, UNSCRUBBABLE_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { withMetadataScrubbing } from '$lib/server/storage/scrub';
 import { UploadThingStorage } from '$lib/server/storage/uploadthing';
-import { jpegFixture } from '$lib/server/storage/scrub-metadata.fixtures';
+import { avifFixture, jpegFixture } from '$lib/server/storage/scrub-metadata.fixtures';
 import { POST } from './+server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -174,6 +174,17 @@ describe('POST /api/upload', () => {
 		const file = new File([bytes], 'clip.webm', { type: 'video/webm' });
 		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(415);
 		expect(put).not.toHaveBeenCalled();
+	});
+
+	it('accepts an AVIF whose avif brand sits past byte 64 of its ftyp', async () => {
+		// A real encoder can pad compatible_brands far enough that the `avif`
+		// brand lands past a 64-byte head. Sniffing that short a window 415s a
+		// file the scrubber and the storage layer both handle, so the endpoint
+		// reads SNIFF_BYTES — the same window the sniffer is specified against.
+		const avif = new Uint8Array(avifFixture({ longFtyp: true }).file);
+		const file = new File([avif], 'a.avif', { type: 'image/avif' });
+		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(200);
+		expect(put).toHaveBeenCalledTimes(1);
 	});
 
 	it('415s other video types (mp4 is not in the allowlist)', async () => {

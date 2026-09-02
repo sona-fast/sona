@@ -878,6 +878,15 @@ function* scrubAvif(): Machine {
 					'avif: the item list places a metadata extent past the end of the file'
 				);
 			}
+			// No meta box anywhere in the file: ftyp and mdat alone, with nothing
+			// naming what the mdat holds. Storing it would hand back a payload
+			// store no item list was ever read for, so it is refused like the
+			// runs-to-end mdat above.
+			if (!metaSeen) {
+				throw new UnscrubbableImageError(
+					'avif: the file ends without a meta box, so the metadata items were never examined'
+				);
+			}
 			return;
 		}
 		if (header.length < 8) {
@@ -1514,11 +1523,7 @@ function* scrubGifXmp(): Machine {
 		}
 	}
 	const region = concat(parts);
-	if (
-		region.length < GIF_XMP_TRAILER_BYTES ||
-		region[region.length - GIF_XMP_TRAILER_BYTES] !== 0x01 ||
-		region[region.length - GIF_XMP_TRAILER_BYTES + 1] !== 0xff
-	) {
+	if (!endsInGifXmpTrailer(region)) {
 		throw new UnscrubbableImageError(
 			'gif: the XMP extension does not end in the magic trailer, so its payload cannot be located'
 		);
@@ -1528,6 +1533,23 @@ function* scrubGifXmp(): Machine {
 	out.set(emptyXmpPacket(payloadLen), 0);
 	out.set(region.subarray(payloadLen), payloadLen);
 	yield { kind: 'write', bytes: out };
+}
+
+/**
+ * Whether the region ends in the whole magic trailer: 0x01, the 256 descending
+ * bytes 0xFF…0x00, then the block terminator. Every byte is checked, because
+ * matching only the first two would let a crafted 0x01 0xFF followed by
+ * attacker bytes stand in for the trailer — and those bytes are then kept as
+ * the trailer while the payload in front of them is what gets replaced.
+ */
+function endsInGifXmpTrailer(region: Uint8Array): boolean {
+	if (region.length < GIF_XMP_TRAILER_BYTES) return false;
+	const at = region.length - GIF_XMP_TRAILER_BYTES;
+	if (region[at] !== 0x01 || region[region.length - 1] !== 0x00) return false;
+	for (let i = 0; i < 256; i++) {
+		if (region[at + 1 + i] !== 0xff - i) return false;
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------

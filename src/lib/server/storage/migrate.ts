@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { images } from '$lib/server/db/schema';
 import type { Database } from '$lib/server/db';
 import { extFromContentType, isAllowedImageType } from './index';
-import { isUnscrubbable, UNSCRUBBABLE_MIGRATE_MESSAGE } from './scrub-metadata';
+import { isUnscrubbable, SNIFF_BYTES, UNSCRUBBABLE_MIGRATE_MESSAGE } from './scrub-metadata';
 import { sniffImageType } from './sniff';
 import type { StorageProvider } from './types';
 
@@ -251,9 +251,6 @@ async function copyOne(
 	});
 	return newUrl;
 }
-
-/** 64 bytes: enough for every raster signature, incl. AVIF ftyp compatible_brands. */
-const SNIFF_BYTES = 64;
 
 /** Read chunks off `reader` until at least `n` bytes have arrived (or EOF). */
 async function readAtLeast(
