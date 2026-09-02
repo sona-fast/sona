@@ -110,6 +110,10 @@ describe('POST /api/storage/rekey-stickers refusal mapping', () => {
 		// Rows keep their old URLs: nothing was re-keyed.
 		const urls = sqlite.prepare('SELECT image_url FROM stickers').all() as Array<{ image_url: string }>;
 		expect(urls).toEqual([{ image_url: '/img/old-sticker.png' }]);
+		const photos = sqlite.prepare('SELECT image_url FROM fursuit_photos').all() as Array<{
+			image_url: string;
+		}>;
+		expect(photos).toEqual([{ image_url: '/img/old-photo.jpg' }]);
 	});
 
 	it('still surfaces an ordinary failure with its own message', async () => {
@@ -122,6 +126,13 @@ describe('POST /api/storage/rekey-stickers refusal mapping', () => {
 		expect(body.items.map((i: { error: string }) => i.error)).toEqual([
 			'r2 put failed: 500',
 			'r2 put failed: 500'
+		]);
+		// A plain failure re-keys nothing either.
+		expect(sqlite.prepare('SELECT image_url FROM stickers').all()).toEqual([
+			{ image_url: '/img/old-sticker.png' }
+		]);
+		expect(sqlite.prepare('SELECT image_url FROM fursuit_photos').all()).toEqual([
+			{ image_url: '/img/old-photo.jpg' }
 		]);
 	});
 });
