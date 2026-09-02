@@ -965,6 +965,13 @@ describe('scrubImageMetadataStream chunking invariance', () => {
 				expect(actual, `${name} at chunk size ${size}`).toEqual(expected);
 			}
 		});
+
+		it(`scrubs ${name} to a fixed point`, () => {
+			// Provider migration and the sticker re-key both re-put bytes that
+			// were already scrubbed, so a second pass must change nothing.
+			const once = scrubImageMetadata(fixture);
+			expect(scrubImageMetadata(once), `${name} scrubbed twice`).toEqual(once);
+		});
 	}
 
 	it('errors the stream when the body cannot be scrubbed', async () => {

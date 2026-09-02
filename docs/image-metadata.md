@@ -110,8 +110,9 @@ skips straight through, bytes and all. AVIF image sequences are refused: their
 `udta`, `xml `, `bxml` or nested `meta` box inside `meta`, or inside the
 `iprp`, `ipco`, `iref`, `dinf`, `dref` and `grpl` containers below it, is
 refused, because each one is another place an editor can park an XMP packet the
-walk would otherwise step over. An item list whose declared entry count disagrees with the entries
-present, or that holds anything other than item entries, is refused too.
+walk would otherwise step over. An item list whose declared entry count
+disagrees with the entries present, or that holds anything other than item
+entries, is refused too.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that
