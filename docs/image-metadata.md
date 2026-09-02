@@ -10,8 +10,8 @@ Cloudflare Image Transformations already drop metadata, but only on the
 transform path. Several routes serve the stored original bytes untouched: GIFs
 skip the transform, `rawFallback` in `src/lib/img.ts` falls back to the source
 URL, the `/img/[...key]` route streams the object, and an R2 custom domain
-serves it directly. So the strip happens at store time instead, and what is
-stored is already clean on every route, including a full-quality download.
+serves it directly. So Sona strips the metadata at store time instead, and what
+is stored is already clean on every route, including a full-quality download.
 
 ## Where it happens
 
@@ -42,7 +42,8 @@ A JPEG's other application segments are the known gap. Sona rewrites APP1, APP2
 and APP13, where Exif, XMP, the ICC profile, the MPF index and the Photoshop
 resource block live. APP0 and APP3 through APP12, plus APP14 and APP15, pass
 through as they are, so a JUMBF or C2PA record parked in APP11 survives the
-scrub.
+scrub, and so does a JFXX thumbnail in APP0, which is a nested JPEG that can
+carry Exif of its own. No camera writes one.
 
 Orientation stays because dropping it turns a portrait photo sideways. Artist
 and Copyright stay because they are the artist's own attribution, and stripping
@@ -107,9 +108,9 @@ skips straight through, bytes and all. AVIF image sequences are refused: their
 `meta`, only the boxes a still image needs are allowed: `hdlr`, `pitm`, `iinf`,
 `iloc`, `iprp`, `iref`, `dinf`, `grpl` and `idat`. A `uuid`, `free`, `skip`,
 `udta`, `xml `, `bxml` or nested `meta` box inside `meta`, or inside the
-property, reference and data containers below it, is refused, because each one
-is another place an editor can park an XMP packet the walk would otherwise step
-over. An item list whose declared entry count disagrees with the entries
+`iprp`, `ipco`, `iref`, `dinf`, `dref` and `grpl` containers below it, is
+refused, because each one is another place an editor can park an XMP packet the
+walk would otherwise step over. An item list whose declared entry count disagrees with the entries
 present, or that holds anything other than item entries, is refused too.
 
 Each caller handles the refusal in its own way. An upload through `/api/upload`
