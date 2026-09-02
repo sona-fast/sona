@@ -97,12 +97,15 @@ its exact length is declared up front, R2 through `FixedLengthStream` and
 UploadThing through its presigned ingest URL. A scrub that changed the length
 would force every upload to buffer in memory instead.
 
+## What a scrub costs
+
 The walk is linear in file size and holds at most one metadata record plus a
 64 KiB output block in memory, whatever the file's shape. Processor time is the
-other bound: a JPEG made of nothing but four-byte segments walks at about three
-megabytes a second, so a file at the 64 MB upload cap can take around ten
-seconds of worker time. Only the signed-in operator can send one, since every
-put site is admin-gated.
+other bound: a JPEG made of nothing but four-byte segments, or a GIF made of
+one-byte sub-blocks, is among the slowest shapes the walk can be given, and a
+file like that at the 64 MiB upload cap measured around ten seconds of worker
+time. Only the signed-in operator can send such a file,
+because every put site is admin-gated.
 
 ## When Sona refuses a file
 
@@ -144,8 +147,8 @@ returns 422 and asks you to re-export the file. A fursuit import counts that
 photo as failed and logs the reason. Avatar re-hosting logs a warning and keeps
 the source URL as a hotlink. A sticker import reports the failure for that
 sticker. A provider migration lists the object as failed and asks you to replace
-it with a fresh export. The sticker re-key reports it the same way a migration
-does, since the operator has to replace the file either way.
+it with a fresh copy. The sticker re-key reports it the same way a migration
+does, because the operator has to replace the file either way.
 
 ## Objects stored before scrubbing existed
 
