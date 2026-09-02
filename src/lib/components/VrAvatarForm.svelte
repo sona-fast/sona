@@ -284,7 +284,14 @@
 				// Per-file guard: a malformed response body or probe failure records
 				// that file's error and lets the rest of the batch continue.
 				try {
-					const { url } = (await res.json()) as { url: string };
+					const { url } = (await res.json()) as { url?: string };
+					// A 2xx whose body carries no usable url is a failure too (same
+					// check as the sticker form): a row pointing at nothing renders a
+					// broken tile and is rejected at save time with no file named.
+					if (!url) {
+						mediaErrors = [...mediaErrors, { uid: mediaErrorUid++, name: file.name, reason: 'failed' }];
+						continue;
+					}
 					const { width, height } = await probeDimensions(file);
 					mediaEntries = [
 						...mediaEntries,
@@ -386,6 +393,8 @@
 	}
 
 	function uploadModel(file: File) {
+		// Clearing skips the uid bump on purpose: an empty banner needs no
+		// announcement, and the next error goes through setUploadError.
 		uploadError = null;
 		// Client-side mirror of the server guards ($lib/vr modelFileError), for
 		// instant feedback — the endpoint re-checks all of it.

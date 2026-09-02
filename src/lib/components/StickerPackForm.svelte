@@ -124,10 +124,10 @@
 	// Bumped on every status write so {#key} replaces the node inside the live
 	// region: two single-file drops both say "1 sticker added", and re-assigning
 	// the text it already holds changes no DOM, so nothing is announced.
-	let statusUid = $state(0);
+	let stickerStatusUid = $state(0);
 	function setStickerStatus(text: string) {
 		stickerStatus = text;
-		statusUid++;
+		stickerStatusUid++;
 	}
 	// Per-file failure reporting, the same shape the VR media zone uses: a
 	// multi-file pick partially succeeds often, and a toast both disappears and
@@ -416,7 +416,7 @@
 		     report the upload visually only. The region itself stays put; only
 		     the node inside it is keyed, so repeating a status still mutates the
 		     region and gets announced. -->
-		<span class="sr-only" role="status">{#key statusUid}<span>{stickerStatus}</span>{/key}</span>
+		<span class="sr-only" role="status">{#key stickerStatusUid}<span>{stickerStatus}</span>{/key}</span>
 		<label
 			class="upload-zone multi"
 			class:disabled={uploading || saving}

@@ -462,3 +462,58 @@ test('the showcase media zone refuses files while a save is in flight', async ({
 	await expect(page.locator('.media-zone')).not.toHaveClass(/disabled/);
 	await expect(modelZone).not.toHaveClass(/disabled/);
 });
+
+test('a 200 without a usable url is a media failure, not a broken tile', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	// Same guard as the sticker form: a 2xx the form cannot read a URL out of
+	// must land as a named failure, not a media row pointing at nothing.
+	let body = '{}';
+	await page.route('**/api/upload', async (route) => {
+		await route.fulfill({ contentType: 'application/json', body });
+	});
+
+	await page.goto('/admin/vr/new');
+	await waitForDropAttachment(page, '.media-zone');
+
+	await dropOn(page, '.media-zone', [{ name: 'a.png', type: 'image/png' }]);
+	await expect(page.locator('.banner.err .banner-line')).toHaveText([
+		/a\.png — Upload failed\. Check your connection and try again\./
+	]);
+	await expect(page.locator('input[name="media[0][url]"]')).toHaveCount(0);
+
+	body = '{"url":""}';
+	await dropOn(page, '.media-zone', [{ name: 'b.png', type: 'image/png' }]);
+	await expect(page.locator('.banner.err .banner-line')).toHaveText([
+		/b\.png — Upload failed\. Check your connection and try again\./
+	]);
+	await expect(page.locator('input[name="media[0][url]"]')).toHaveCount(0);
+});
+
+test('the same media status twice is announced twice', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	await page.route('**/api/upload', async (route) => {
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: '/x.png' })
+		});
+	});
+
+	await page.goto('/admin/vr/new');
+	await waitForDropAttachment(page, '.media-zone');
+	// The form has two role="status" regions (model upload progress, then the
+	// media status); the media one comes last in the document.
+	const status = page.locator('span.sr-only[role="status"]').last();
+
+	await dropOn(page, '.media-zone', [{ name: 'a.png', type: 'image/png' }]);
+	await expect(status).toHaveText('Media upload finished.');
+
+	// Re-assigning the text the region already holds touches no DOM and is not
+	// announced; the keyed inner node must be replaced (see the sticker spec).
+	await status.locator('span').evaluate((el) => el.setAttribute('data-first-status', ''));
+	await dropOn(page, '.media-zone', [{ name: 'b.png', type: 'image/png' }]);
+	await expect(page.locator('input[name="media[1][url]"]')).toHaveValue('/x.png');
+	await expect(status.locator('span[data-first-status]')).toHaveCount(0);
+	await expect(status).toHaveText('Media upload finished.');
+});
