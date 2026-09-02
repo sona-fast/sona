@@ -7,7 +7,7 @@
 import { R2Storage } from '../../../src/lib/server/storage/r2';
 import { UploadThingStorage } from '../../../src/lib/server/storage/uploadthing';
 import { withMetadataScrubbing } from '../../../src/lib/server/storage/scrub';
-import { jpegFixture } from '../../../src/lib/server/storage/scrub-metadata.fixtures';
+import { jpegFixture, padRunGif } from '../../../src/lib/server/storage/scrub-metadata.fixtures';
 import { isUnscrubbable } from '../../../src/lib/server/storage/scrub-metadata';
 import type { R2Bucket } from '@cloudflare/workers-types';
 
@@ -173,6 +173,32 @@ export default {
 					const object = await env.IMAGES.get('it/photo.jpg');
 					const stored = object ? new Uint8Array(await object.arrayBuffer()) : new Uint8Array(0);
 					return json({ url, declaredSize: jpeg.length, storedSize: stored.length, storedHex: hex(stored) });
+				}
+
+				// A file that is mostly a run of ONE repeated byte: the walk used to
+				// step through it a byte at a time and hand the driver a piece per
+				// byte, which exhausts this isolate's heap long before the upload
+				// cap. Node's suite cannot show that, because only here is the heap
+				// the real one.
+				case 'r2-pad-run-gif': {
+					const storage = withMetadataScrubbing(
+						new R2Storage({ bucket: env.IMAGES, publicBase: '/img' })
+					);
+					const gif = padRunGif(4 * MiB);
+					await storage.put({
+						suggestedKey: 'it/pad.gif',
+						body: chunked(gif, 64 * 1024),
+						size: gif.length,
+						contentType: 'image/gif',
+						filename: 'pad.gif'
+					});
+					const object = await env.IMAGES.get('it/pad.gif');
+					const stored = object ? new Uint8Array(await object.arrayBuffer()) : new Uint8Array(0);
+					// Compared here rather than shipped out as hex: 4 MiB of pad is
+					// an 8 MB string the Node side has no use for.
+					let identical = stored.length === gif.length;
+					for (let at = 0; identical && at < gif.length; at++) identical = stored[at] === gif[at];
+					return json({ declaredSize: gif.length, storedSize: stored.length, identical });
 				}
 
 				// The same scrub on the OTHER provider's streaming path: the bytes

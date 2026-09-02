@@ -9,6 +9,7 @@ import {
 	ascii,
 	avifFixture,
 	exifTiff,
+	fillRunJpeg,
 	findSegment,
 	gifFixture,
 	gifWithXmpFixture,
@@ -17,6 +18,7 @@ import {
 	jpegFixture,
 	jpegSosOffset,
 	JPEG_TRAILER,
+	padRunGif,
 	pngChunks,
 	pngCrc,
 	pngFixture,
@@ -65,7 +67,7 @@ function text(bytes: Uint8Array): string {
 	return new TextDecoder('latin1').decode(bytes);
 }
 
-async function streamScrub(input: Uint8Array, chunkSize: number): Promise<Uint8Array> {
+async function streamScrubParts(input: Uint8Array, chunkSize: number): Promise<Uint8Array[]> {
 	const source = new ReadableStream<Uint8Array>({
 		start(controller) {
 			for (let at = 0; at < input.length; at += chunkSize) {
@@ -81,6 +83,10 @@ async function streamScrub(input: Uint8Array, chunkSize: number): Promise<Uint8A
 		if (done) break;
 		parts.push(value);
 	}
+	return parts;
+}
+
+function joinParts(parts: Uint8Array[]): Uint8Array {
 	const total = parts.reduce((n, part) => n + part.length, 0);
 	const out = new Uint8Array(total);
 	let at = 0;
@@ -89,6 +95,18 @@ async function streamScrub(input: Uint8Array, chunkSize: number): Promise<Uint8A
 		at += part.length;
 	}
 	return out;
+}
+
+async function streamScrub(input: Uint8Array, chunkSize: number): Promise<Uint8Array> {
+	return joinParts(await streamScrubParts(input, chunkSize));
+}
+
+/** Index of the first differing byte, -1 when identical, -2 on a length
+ * mismatch: a megabyte-long toEqual reports nothing useful and takes a while. */
+function firstDifference(actual: Uint8Array, expected: Uint8Array): number {
+	if (actual.length !== expected.length) return -2;
+	for (let i = 0; i < actual.length; i++) if (actual[i] !== expected[i]) return i;
+	return -1;
 }
 
 describe('scrubImageMetadata: JPEG', () => {
@@ -225,6 +243,24 @@ describe('scrubImageMetadata: JPEG Exif edge cases', () => {
 		const body = scrubbed.subarray(6, 6 + payload.length);
 		expect(body.length).toBe(12);
 		expect([...body]).toEqual(new Array(12).fill(0));
+	});
+
+	it('zeroes a prefixed Exif payload whose TIFF has no byte-order mark, prefix included', () => {
+		// Room enough for a directory, but nothing behind the prefix reads as a
+		// TIFF, so writing an empty directory would fabricate one: the record is
+		// zeroed whole instead, which is also what keeps a second scrub a no-op.
+		const payload = [...ascii('Exif\0\0'), ...new Array(20).fill(0)];
+		const file = Uint8Array.from([
+			0xff, 0xd8,
+			0xff, 0xe1, 0x00, payload.length + 2,
+			...payload,
+			0xff, 0xd9
+		]);
+		const scrubbed = scrubImageMetadata(file);
+		expect(scrubbed.length).toBe(file.length);
+		const body = scrubbed.subarray(6, 6 + payload.length);
+		expect([...body]).toEqual(new Array(payload.length).fill(0));
+		expect(scrubImageMetadata(scrubbed)).toEqual(scrubbed);
 	});
 
 	it('throws when a segment length runs past the end of the file', () => {
@@ -461,6 +497,24 @@ describe('scrubImageMetadata: WebP', () => {
 		expect(out.length).toBe(withTrailer.length);
 		expect(out.subarray(original.length).every((b) => b === 0)).toBe(true);
 		expect(text(out)).not.toContain('GPSLatitude');
+	});
+
+	it('scrubs an EXIF chunk too small for a directory to a fixed point', () => {
+		// 'Exif\0\0' plus 10 bytes leaves no room for a directory behind the
+		// prefix, so the record is zeroed whole — and a second pass must not read
+		// those zeros as a TIFF it can fill an empty directory into, or the
+		// migration's re-put would change bytes it already scrubbed.
+		const payload = [...ascii('Exif\0\0'), ...new Array(10).fill(0x41)];
+		const chunks = [...ascii('EXIF'), payload.length, 0, 0, 0, ...payload];
+		const file = Uint8Array.from([
+			...ascii('RIFF'),
+			4 + chunks.length, 0, 0, 0,
+			...ascii('WEBP'),
+			...chunks
+		]);
+		const once = scrubImageMetadata(file);
+		expect(once.subarray(file.length - payload.length).every((b) => b === 0)).toBe(true);
+		expect(scrubImageMetadata(once)).toEqual(once);
 	});
 });
 
@@ -947,12 +1001,56 @@ describe('scrubImageMetadata: pass-through and rejection', () => {
 		);
 	});
 
+	it('refuses an application extension labelled like XMP but not exactly', () => {
+		// "XMP Dataxmp" is not the canonical label, but a reader matching the
+		// identifier loosely still finds XMP behind it, so copying its raw-XML
+		// payload through would walk GPS straight past the scrubber.
+		const gif = Uint8Array.from(gifWithXmpFixture());
+		const at = text(gif).indexOf('XMP DataXMP');
+		expect(at).toBeGreaterThan(0);
+		gif.set(ascii('xmp'), at + 8);
+		expect(() => scrubImageMetadata(gif)).toThrow(/labelled like XMP/);
+	});
+
 	it('throws for bytes matching no raster signature', () => {
 		expect(() => scrubImageMetadata(Uint8Array.from(ascii('<svg xmlns="x"><script/></svg>')))).toThrow(
 			UnscrubbableImageError
 		);
 		expect(() => scrubImageMetadata(new Uint8Array(8))).toThrow(UnscrubbableImageError);
 		expect(() => scrubImageMetadata(new Uint8Array(0))).toThrow(UnscrubbableImageError);
+	});
+});
+
+describe('scrubImageMetadata: long runs of one byte', () => {
+	// A megabyte of a single repeated byte is the shape that used to walk one
+	// byte per step, emitting a Uint8Array each time and holding every one of
+	// them until the caller concatenated — enough amplification to exhaust a
+	// worker's heap on a file well under the upload cap.
+	const RUN = 1024 * 1024;
+	const CHUNK = 64 * 1024;
+
+	it('passes a megabyte of GIF pad bytes through byte for byte, in few pieces', async () => {
+		const gif = padRunGif(RUN);
+		expect(firstDifference(scrubImageMetadata(gif), gif)).toBe(-1);
+		const parts = await streamScrubParts(gif, CHUNK);
+		expect(firstDifference(joinParts(parts), gif)).toBe(-1);
+		// A piece per input byte would be a million of them; the driver gathers
+		// its output into 64 KiB blocks, so the count tracks the file's size.
+		expect(parts.length).toBeLessThan(64);
+	});
+
+	it('passes a megabyte of JPEG 0xFF fill through byte for byte, in few pieces', async () => {
+		const jpeg = fillRunJpeg(RUN);
+		expect(firstDifference(scrubImageMetadata(jpeg), jpeg)).toBe(-1);
+		const parts = await streamScrubParts(jpeg, CHUNK);
+		expect(firstDifference(joinParts(parts), jpeg)).toBe(-1);
+		expect(parts.length).toBeLessThan(64);
+	});
+
+	it('refuses a JPEG that ends inside a run of fill', () => {
+		expect(() => scrubImageMetadata(fillRunJpeg(64).subarray(0, 40))).toThrow(
+			UnscrubbableImageError
+		);
 	});
 });
 
@@ -979,7 +1077,11 @@ describe('scrubImageMetadataStream chunking invariance', () => {
 		['gif', gifFixture()],
 		['gif with an image after the trailer', gifFixture({ afterTrailer: true })],
 		['gif with an xmp extension', gifWithXmpFixture()],
-		['gif with a pad byte between blocks', paddedMultiFrameGif()]
+		['gif with a pad byte between blocks', paddedMultiFrameGif()],
+		// Runs long enough that the block-consume walk splits them, at chunk sizes
+		// that put a boundary inside the run.
+		['gif with a long pad run', padRunGif(300)],
+		['jpeg with a long fill run', fillRunJpeg(300)]
 	];
 
 	for (const [name, fixture] of fixtures) {

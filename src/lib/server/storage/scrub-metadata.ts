@@ -222,6 +222,16 @@ type ScanMachine = Generator<Step, boolean, Uint8Array>;
 /** Handed to the machine's first `next()`, where the value is discarded. */
 const NO_BYTES = new Uint8Array(0);
 
+/**
+ * How much output the driver gathers before handing a piece on. A machine emits
+ * a piece per step — a marker byte, a rewritten record, a chunk passed through —
+ * and the steps that walk a byte at a time (a GIF pad run, a JPEG fill run) would
+ * otherwise cost one Uint8Array per input byte, every one of them retained until
+ * the caller concatenates. Pieces at least this big are handed on as they are, so
+ * a large pass-through chunk is never copied twice.
+ */
+const OUTPUT_BLOCK_BYTES = 64 * 1024;
+
 class ScrubDriver {
 	#machine: Machine = scrubMachine();
 	#step: Step | null;
@@ -229,8 +239,20 @@ class ScrubDriver {
 	#inputLen = 0;
 	#seen = 0;
 	#emitted = 0;
+	/** Allocated on first use and released at every flush, so a small file
+	 * never holds a block-sized buffer it did not need. */
+	#scratch: Uint8Array | null = null;
+	#scratchLen = 0;
+	#scratchSize: number;
 
-	constructor() {
+	/**
+	 * `scratchBytes` is the size of that gathering buffer. The sync entry point
+	 * passes the input's length, which the size-preserving contract makes the
+	 * exact output length, so the whole scrub lands in one buffer and no array of
+	 * pieces is ever retained.
+	 */
+	constructor(scratchBytes: number = OUTPUT_BLOCK_BYTES) {
+		this.#scratchSize = scratchBytes;
 		this.#step = this.#advance();
 	}
 
@@ -263,6 +285,7 @@ class ScrubDriver {
 			out.push(...this.#drain());
 			if (!remaining.length) break;
 		}
+		this.#flush(out);
 		const step = this.#step;
 		if (step !== null && step.kind !== 'rest') {
 			throw new UnscrubbableImageError('the image ended inside a metadata record (truncated file)');
@@ -299,11 +322,30 @@ class ScrubDriver {
 		return out;
 	}
 
+	/** Hand the gathered bytes on and let the buffer go. */
+	#flush(out: Uint8Array[]): void {
+		if (!this.#scratchLen) return;
+		out.push(this.#scratch!.subarray(0, this.#scratchLen));
+		this.#scratch = null;
+		this.#scratchLen = 0;
+	}
+
 	#drain(): Uint8Array[] {
 		const out: Uint8Array[] = [];
 		const emit = (bytes: Uint8Array) => {
 			this.#emitted += bytes.length;
-			out.push(bytes);
+			if (!bytes.length) return;
+			if (bytes.length > this.#scratchSize - this.#scratchLen) {
+				this.#flush(out);
+				// Too big to gather at all: hand it on as it is rather than copy it.
+				if (bytes.length >= this.#scratchSize) {
+					out.push(bytes);
+					return;
+				}
+			}
+			if (!this.#scratch) this.#scratch = new Uint8Array(this.#scratchSize);
+			this.#scratch.set(bytes, this.#scratchLen);
+			this.#scratchLen += bytes.length;
 		};
 		for (;;) {
 			const step = this.#step;
@@ -358,7 +400,10 @@ class ScrubDriver {
  * cannot be walked.
  */
 export function scrubImageMetadata(bytes: Uint8Array): Uint8Array {
-	const driver = new ScrubDriver();
+	// Sized to the input, which the size-preserving contract makes the output's
+	// length too: every piece is written into that one buffer at its offset, so
+	// this path never holds a list of pieces to concatenate at the end.
+	const driver = new ScrubDriver(bytes.length);
 	const parts = driver.push(bytes);
 	for (const tail of driver.end()) parts.push(tail);
 	return concat(parts);
@@ -453,12 +498,20 @@ function* scrubJpeg(): Machine {
 		if (lead[0] !== 0xff) {
 			throw new UnscrubbableImageError('jpeg: expected a marker prefix (0xFF)');
 		}
-		// 0xFF may repeat as fill before the marker code; consume the run.
+		// 0xFF may repeat as fill before the marker code; consume the run a block
+		// at a time rather than a byte at a time, because a file can be nothing
+		// but fill and a byte-sized step costs a byte-sized piece of output.
 		let marker = 0xff;
 		while (marker === 0xff) {
-			const next = yield { kind: 'take', n: 1 };
-			yield { kind: 'write', bytes: next };
-			marker = next[0];
+			const block = yield { kind: 'takeUpTo', n: SCAN_BLOCK_BYTES };
+			if (!block.length) {
+				throw new UnscrubbableImageError('jpeg: the file ends inside a run of 0xFF fill');
+			}
+			let at = 0;
+			while (at < block.length && block[at] === 0xff) at++;
+			if (at < block.length) marker = block[at++];
+			yield { kind: 'write', bytes: block.subarray(0, at) };
+			yield { kind: 'unread', bytes: block.subarray(at) };
 		}
 		// Standalone markers carry no length: TEM and the restart markers.
 		if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
@@ -611,8 +664,10 @@ function rewriteExif(payload: Uint8Array, capacity: number, keepOrientation: boo
 	// APP1 it does not recognise at all is simply skipped.
 	if (capacity - start < MIN_TIFF_BYTES) return out;
 	const tiff = minimalTiff(payload.subarray(start), capacity - start, keepOrientation);
-	// No room for the TIFF after the prefix, so the whole record stays zeroed.
-	if (!tiff.length) return out;
+	// Nothing worth a directory came back (no room, or no TIFF header to read),
+	// so the whole record stays zeroed, prefix included, for the same reason as
+	// above: a prefix around a zeroed TIFF is the hollow record, not a skipped one.
+	if (!tiff.length || (tiff[0] !== 0x49 && tiff[0] !== 0x4d)) return out;
 	if (prefixed) out.set(EXIF_PREFIX, 0);
 	out.set(tiff, start);
 	return out;
@@ -1352,7 +1407,14 @@ function* scrubGif(): Machine {
 			// Some encoders pad between blocks with a zero byte; decoders step over
 			// it, and the animation sniffer already tolerates it (see the
 			// paddedMultiFrameGif fixture), so it is written through rather than
-			// refusing a file that displays fine everywhere else.
+			// refusing a file that displays fine everywhere else. The rest of the
+			// run goes through a block at a time: a file that is mostly pad would
+			// otherwise cost one emitted piece per byte.
+			const block = yield { kind: 'takeUpTo', n: SCAN_BLOCK_BYTES };
+			let at = 0;
+			while (at < block.length && block[at] === 0x00) at++;
+			if (at) yield { kind: 'write', bytes: block.subarray(0, at) };
+			yield { kind: 'unread', bytes: block.subarray(at) };
 			continue;
 		}
 		if (introducer[0] !== 0x21) {
@@ -1387,10 +1449,30 @@ function* scrubGifApplication(): Machine {
 	const identifier = yield { kind: 'take', n: size[0] };
 	yield { kind: 'write', bytes: identifier };
 	if (size[0] !== GIF_XMP_ID.length || !startsWith(identifier, GIF_XMP_ID)) {
+		// A label that reads as XMP to a looser reader than this one — "XMP Dataxmp",
+		// or the identifier without its auth code — is refused rather than copied:
+		// the payload behind it is raw XML with no sub-block structure, so copying
+		// it through is the one way GPS could still leave this walk intact.
+		if (looksLikeGifXmp(identifier)) {
+			throw new UnscrubbableImageError(
+				'gif: an application extension labelled like XMP but not exactly "XMP DataXMP"'
+			);
+		}
 		yield* copyGifSubBlocks();
 		return;
 	}
 	yield* scrubGifXmp();
+}
+
+/** Whether the first 8 bytes of an identifier spell "XMP Data" in any case. */
+function looksLikeGifXmp(identifier: Uint8Array): boolean {
+	if (identifier.length < 8) return false;
+	for (let i = 0; i < 8; i++) {
+		// ASCII letters differ from their other case by 0x20, and the space and
+		// the rest of the label carry that bit already.
+		if ((identifier[i] | 0x20) !== (GIF_XMP_ID[i] | 0x20)) return false;
+	}
+	return true;
 }
 
 /**
@@ -1470,7 +1552,13 @@ function minimalTiff(tiff: Uint8Array, capacity: number, keepOrientation: boolea
 	// order it was read in.
 	const bigEndian = tiff.length >= 2 && tiff[0] === 0x4d && tiff[1] === 0x4d;
 	const littleEndian = tiff.length >= 2 && tiff[0] === 0x49 && tiff[1] === 0x49;
-	const tags: KeptTags = bigEndian || littleEndian ? readIfd0(tiff, bigEndian) : {};
+	// No byte-order mark at all is what an ALREADY-ZEROED record looks like, and a
+	// record too small for a directory behind its prefix is zeroed whole — so
+	// fabricating a directory here would make a second scrub of a scrubbed file
+	// change bytes. Zeros stay zeros; a real header with an unreadable IFD still
+	// gets the empty directory below.
+	if (!bigEndian && !littleEndian) return new Uint8Array(capacity);
+	const tags: KeptTags = readIfd0(tiff, bigEndian);
 	if (!keepOrientation) tags.orientation = undefined;
 	const out = new Uint8Array(capacity);
 	// Drop the optional values one at a time rather than overflow: a payload too

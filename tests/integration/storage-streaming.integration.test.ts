@@ -179,6 +179,22 @@ describe('storage streaming under real workerd', () => {
 		expect(result.url).toBe('/img/it/photo.jpg');
 	});
 
+	it(
+		'streams a 4 MiB GIF that is nearly all pad bytes without exhausting the heap',
+		async () => {
+			// The amplification this guards is per INPUT BYTE, so what matters is
+			// the run, not the picture: 4 MiB of pad under the real 128 MB isolate.
+			const result = await run('r2-pad-run-gif');
+			expect(result.storedSize).toBe(result.declaredSize);
+			expect(result.identical).toBe(true);
+		},
+		// Well under this suite's 180 s default on purpose: walking the run a byte
+		// at a time takes about two minutes here where the block walk takes a third
+		// of a second, so the cost regression fails the test rather than hiding in
+		// a passing one.
+		30_000
+	);
+
 	it('the scrubbing decorator scrubs the UploadThing ingest body too', async () => {
 		captured.length = 0;
 		const jpeg = jpegFixture();

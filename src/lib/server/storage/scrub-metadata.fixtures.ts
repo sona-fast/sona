@@ -926,6 +926,30 @@ export function gifWithXmpFixture(): Uint8Array {
 	);
 }
 
+/**
+ * A GIF that is header, `padBytes` of 0x00 inter-block padding, then trailer.
+ * A pad run is one of the two shapes that used to cost an emitted piece per
+ * input byte, so it is what the block-consume walk and the driver's output
+ * coalescing are measured against.
+ */
+export function padRunGif(padBytes: number): Uint8Array {
+	const out = new Uint8Array(13 + padBytes + 1);
+	out.set(ascii('GIF89a'), 0);
+	out.set([1, 0, 1, 0, 0, 0, 0], 6); // 1×1 logical screen, no global colour table
+	out[out.length - 1] = 0x3b; // trailer
+	return out;
+}
+
+/** The other one: SOI, `fillBytes` of 0xFF marker fill, then EOI. */
+export function fillRunJpeg(fillBytes: number): Uint8Array {
+	const out = new Uint8Array(2 + fillBytes + 1);
+	out[0] = 0xff;
+	out[1] = 0xd8;
+	out.fill(0xff, 2, 2 + fillBytes);
+	out[out.length - 1] = 0xd9;
+	return out;
+}
+
 /** Offsets in gifWithXmpFixture() of the XMP payload, magic trailer excluded. */
 export function gifXmpRange(): { start: number; end: number } {
 	// header 6 + screen descriptor 7 + colour table 6 + extension head 3 + id 11.
