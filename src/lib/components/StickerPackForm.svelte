@@ -166,7 +166,7 @@
 		// reason other than a refusal, or some file got through alongside a
 		// refusal. When every file was refused, the count would only repeat the
 		// number the refusal message carries, so the refusal is shown alone.
-		if (failed > refused || ok > 0) {
+		if (failed > 0 && (failed > refused || ok > 0)) {
 			toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
 		}
 		// A refused file has a fix the operator can apply, so say so rather than

@@ -270,8 +270,15 @@ describe('migrateNextBatch failure rows', () => {
 		const progress = await migrateNextBatch({ db, fetchFn, target, batchSize: 10 });
 		expect(progress.failed).toBe(1);
 		expect(progress.failures[0].error).toBe(UNSCRUBBABLE_MIGRATE_MESSAGE);
-		// The parser's own wording is still available, in the log.
-		expect(warn).toHaveBeenCalled();
+		// The parser's own wording is still available, in the log: the wrapped
+		// error goes there whole, refusal cause and all.
+		expect(warn).toHaveBeenCalledWith(
+			'storage migration: unscrubbable object',
+			expect.anything(),
+			expect.objectContaining({
+				cause: expect.objectContaining({ message: 'png: chunk length is impossible' })
+			})
+		);
 		warn.mockRestore();
 	});
 
@@ -321,7 +328,13 @@ describe('migrateNextBatch failure rows', () => {
 		expect(result.items[0].error).toBe(UNSCRUBBABLE_MIGRATE_MESSAGE);
 		// The parser's own wording still reaches the log, as it does from the
 		// batched entry point.
-		expect(warn.mock.calls[0][0]).toBe('storage migration: unscrubbable object');
+		expect(warn).toHaveBeenCalledWith(
+			'storage migration: unscrubbable object',
+			expect.anything(),
+			expect.objectContaining({
+				cause: expect.objectContaining({ message: 'png: chunk length is impossible' })
+			})
+		);
 		warn.mockRestore();
 	});
 });

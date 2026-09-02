@@ -94,6 +94,11 @@ describe('getStorage wraps the provider in metadata scrubbing', () => {
 		// arriving here at all proves the scrub preserved the declared length.
 		expect(stored[0].bytes).toEqual(scrubImageMetadata(jpeg));
 		expect(stored[0].bytes.length).toBe(jpeg.length);
+		// An oracle independent of the scrubber: the metadata the fixture carried
+		// is gone from the stored bytes, so a scrubber that became a pass-through
+		// could not satisfy this by agreeing with itself.
+		expect(new TextDecoder('latin1').decode(jpeg)).toContain('MAKERNOT');
+		expect(new TextDecoder('latin1').decode(stored[0].bytes)).not.toContain('MAKERNOT');
 	});
 
 	it('passes non-raster content types through untouched', async () => {
@@ -179,6 +184,8 @@ describe('getStorage wraps the provider in metadata scrubbing', () => {
 		});
 		expect(stored[0].bytes).toEqual(scrubImageMetadata(file));
 		expect(stored[0].bytes.length).toBe(file.length);
+		expect(new TextDecoder('latin1').decode(file)).toContain('GPSLatitude');
+		expect(new TextDecoder('latin1').decode(stored[0].bytes)).not.toContain('GPSLatitude');
 	});
 
 	it('streams a non-raster body through the sniff byte-identical', async () => {

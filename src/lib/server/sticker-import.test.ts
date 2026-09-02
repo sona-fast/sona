@@ -677,8 +677,13 @@ describe('importTelegramPack', () => {
 		expect(result.failed).toBe(1);
 		expect(result.items[0].error).toBe(UNSCRUBBABLE_STICKER_MESSAGE);
 		expect(bucket.put).not.toHaveBeenCalled();
-		// The parser's own wording is still available, in the log.
-		expect(warn).toHaveBeenCalled();
+		// The parser's own wording is still available, in the log: the refusal
+		// itself is logged, not only a label.
+		expect(warn).toHaveBeenCalledWith(
+			'sticker import: unscrubbable sticker',
+			expect.anything(),
+			expect.objectContaining({ name: 'UnscrubbableImageError' })
+		);
 		warn.mockRestore();
 	});
 });
@@ -767,7 +772,11 @@ describe('importStickerBatch', () => {
 		expect(r.imported).toBe(0);
 		expect(r.failed).toHaveLength(1);
 		expect(r.failed[0].reason).toBe(UNSCRUBBABLE_STICKER_MESSAGE);
-		expect(warn).toHaveBeenCalled();
+		expect(warn).toHaveBeenCalledWith(
+			'sticker import: unscrubbable sticker',
+			'a',
+			expect.objectContaining({ name: 'UnscrubbableImageError' })
+		);
 		warn.mockRestore();
 	});
 
