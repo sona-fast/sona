@@ -100,14 +100,15 @@ describe('swallowStrayFileDrop', () => {
 });
 
 describe('dropFiles', () => {
-	function setup(disabled?: () => boolean) {
+	function setup(disabled?: () => boolean, passThroughNonFileDrags = false) {
 		const el = new FakeEl();
 		const calls: { files: PickedFile[]; rejected: PickedFile[] }[] = [];
 		const attach = dropFiles({
 			accept: 'image/png,.vrm',
 			onFiles: (files, rejected) =>
 				calls.push({ files: files as unknown as PickedFile[], rejected: rejected as unknown as PickedFile[] }),
-			disabled
+			disabled,
+			passThroughNonFileDrags
 		});
 		const cleanup = attach(el as unknown as HTMLElement);
 		return { el, calls, cleanup };
@@ -213,6 +214,38 @@ describe('dropFiles', () => {
 		inner.el.dispatchEvent(drop);
 		expect(inner.calls).toHaveLength(0);
 		expect(inner.el.classes.has('drag-over')).toBe(false);
+	});
+
+	it('leaves a text drag alone when the zone passes non-file drags through', () => {
+		// The upload page's tile grid holds the variant label inputs: cancelling a
+		// dragged selection here would stop it ever reaching a label.
+		const { el, calls } = setup(undefined, true);
+		const over = Object.assign(new Event('dragover', { cancelable: true }), {
+			dataTransfer: { types: ['text/plain'], files: [], dropEffect: 'copy' }
+		});
+		el.dispatchEvent(over);
+		expect(over.defaultPrevented).toBe(false);
+		expect(over.dataTransfer.dropEffect).toBe('copy');
+		expect(el.classes.has('drag-over')).toBe(false);
+		const drop = Object.assign(new Event('drop', { cancelable: true }), {
+			dataTransfer: { types: ['text/plain'], files: [], dropEffect: 'copy' }
+		});
+		el.dispatchEvent(drop);
+		expect(drop.defaultPrevented).toBe(false);
+		expect(calls).toHaveLength(0);
+		// A file drag over the same zone is still claimed and still lights it up.
+		const file = dragEvent('dragover');
+		el.dispatchEvent(file);
+		expect(file.defaultPrevented).toBe(true);
+		expect(el.classes.has('drag-over')).toBe(true);
+		// The default instance cancels that same text drag — the option is what
+		// makes the difference, not the drag.
+		const plain = setup();
+		const same = Object.assign(new Event('dragover', { cancelable: true }), {
+			dataTransfer: { types: ['text/plain'], files: [], dropEffect: 'copy' }
+		});
+		plain.el.dispatchEvent(same);
+		expect(same.defaultPrevented).toBe(true);
 	});
 
 	it('removes its listeners on cleanup', () => {

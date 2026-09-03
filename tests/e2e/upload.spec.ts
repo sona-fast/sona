@@ -4,6 +4,7 @@ import { adminLogin } from './admin-login';
 import {
 	dropOn,
 	dragOver,
+	dragOverText,
 	expectDragOverHighlight,
 	waitForDropAttachment
 } from './drop-files';
@@ -239,24 +240,39 @@ test('dropping images adds tiles, and a wrong type is rejected without a request
 	// otherwise a second file dropped where the zone used to be would navigate
 	// the tab away from a half-filled form.
 	await waitForDropAttachment(page, '.tile-grid');
+	// The grid wraps the variant label inputs, so it lets a text drag through
+	// untouched — cancelling it would stop a dragged selection ever reaching a
+	// label. Uncancelled (dispatchEvent true) and no highlight.
+	expect(await dragOverText(page, '.tile-grid')).toBe(true);
+	await expect(page.locator('.tile-grid')).not.toHaveClass(/drag-over/);
+	// A file drag over the same grid is still claimed and still lights it up.
 	await expectDragOverHighlight(page, '.tile-grid');
 
 	// A dropped file skips the input's accept filter, so the page has to reject
-	// the wrong type itself: an error tile, and no POST.
+	// the wrong type itself: an error tile, and no POST for it. Dropped alongside
+	// an image, so the announcement has to tell the two apart.
 	const before = uploads;
-	await dropOn(page, '.tile-grid', [{ name: 'notes.txt', type: 'text/plain' }]);
+	await dropOn(page, '.tile-grid', [
+		{ name: 'second.png', type: 'image/png' },
+		{ name: 'notes.txt', type: 'text/plain' }
+	]);
 	await expect(page.locator('.tile-error .error-text')).toContainText(
 		"That file type isn't supported"
 	);
-	// Past the moment a POST that DID fire would have landed (mutation-checked).
-	await page.waitForTimeout(300);
-	expect(uploads).toBe(before);
-
-	// The refused file doesn't poison the zone: the next image still uploads.
-	await dropOn(page, '.tile-grid', [{ name: 'second.png', type: 'image/png' }]);
-	await expect(page.locator('input[name="imageUrl_2"]')).toHaveValue('/x2.png', {
+	// The live region counts only the file that really entered the batch as
+	// added; the refused one gets its own count.
+	// div, not p: the admin layout has its own sr-only live region.
+	await expect(page.locator('div.sr-only[aria-live="polite"]')).toHaveText(
+		"1 image(s) added 1 file(s) couldn't be added"
+	);
+	// The image in that same drop still uploads...
+	await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue('/x2.png', {
 		timeout: 15_000
 	});
+	// ...and exactly one POST fired — none for the refused file. Past the moment a
+	// POST that DID fire would have landed (mutation-checked).
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(before + 1);
 
 	// A drop that misses both zones (here: the form itself) is swallowed
 	// page-wide, so it can't navigate the tab to the file and lose the form.
@@ -267,6 +283,31 @@ test('dropping images adds tiles, and a wrong type is rejected without a request
 	await page.waitForTimeout(300);
 	expect(uploads).toBe(beforeStray);
 	await expect(page.locator('input[name^="imageUrl_"]')).toHaveCount(3);
+});
+
+test('refused files still take slots: nine wrong-type files fill the eight-tile cap', async ({
+	page
+}) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const uploads = countUploadPosts(page);
+
+	await page.goto('/admin/upload');
+	await waitForDropAttachment(page, '.dropzone');
+	// A refused file consumes a slot exactly like an accepted one — it holds a
+	// tile the operator has to dismiss — so nine of them hit the cap the seeded
+	// max (8, as the dropzone hint says) sets, and the ninth is skipped.
+	await dropOn(
+		page,
+		'.dropzone',
+		Array.from({ length: 9 }, (_, i) => ({ name: `notes-${i}.txt`, type: 'text/plain' }))
+	);
+	await expect(page.locator('.tile-error')).toHaveCount(8);
+	await expect(page.locator('.alert-message')).toHaveText('1 image(s) skipped — max 8');
+	// None of them was ever sent.
+	await page.waitForTimeout(300);
+	expect(uploads.counters.total).toBe(0);
 });
 
 test('a picked file the accept string refuses gets an error tile, not a POST', async ({ page }) => {

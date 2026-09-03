@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { CloudUpload, Check, Loader2, Plus, X } from 'lucide-svelte';
+	import { CloudUpload, Check, FileBox, Loader2, Plus, X } from 'lucide-svelte';
 	import { tick } from 'svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { extractImageFiles, isTextEditable, shouldHandleImagePaste } from '$lib/clipboard';
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
-	import { MAX_BUFFER_BYTES } from '$lib/config';
+	import { GALLERY_ACCEPT, MAX_BUFFER_BYTES } from '$lib/config';
 	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
 
@@ -92,14 +92,6 @@
 		}
 	}
 
-	// MIME types only, mirroring /api/upload's ALLOWED_IMAGE_TYPES for the
-	// artwork folder (no video/webm — that one is scoped to vr-media): the
-	// endpoint validates the DECLARED type and reads an empty one as
-	// application/octet-stream, so accepting a bare .png here would upload the
-	// whole file just to collect a 415. image/jpg is in the server's set too;
-	// leaving it out would refuse a file the server would happily store.
-	const GALLERY_ACCEPT = 'image/jpeg,image/jpg,image/png,image/gif,image/webp,image/avif';
-
 	// `rejected` holds files the accept string refused — from a drop, which the
 	// attribute never constrains, or from a picker the operator switched to "All
 	// files". They get a tile like an oversized file does (same slot accounting,
@@ -123,39 +115,51 @@
 		// uploading, and the announcement below counts tiles that really exist.
 		const batch: { key: number; file: File }[] = [];
 		for (const { file, badType } of fileArray) {
-			// Pre-check the server's size cap client-side: a file over it can only
-			// come back as a 413, so fail the tile here instead of a doomed POST.
-			const oversized = !badType && file.size > MAX_BUFFER_BYTES;
+			// The two ways a file fails before it is ever sent: a type the server
+			// refuses, and a size over the server's cap (which could only come back
+			// as a 413, so fail it here instead of firing a doomed POST). One
+			// expression drives the status, the message, and the batch below.
+			const error = badType
+				? m.admin_upload_error_bad_type()
+				: file.size > MAX_BUFFER_BYTES
+					? m.admin_upload_error_too_large({ max: formatSize(MAX_BUFFER_BYTES) })
+					: '';
 			const tile: Tile = {
 				key: tileKey++,
 				fileName: file.name,
-				previewUrl: URL.createObjectURL(file),
+				// A wrong-type file gets no object URL: handed to <img> it can only
+				// paint the browser's broken-image glyph. Its tile shows the resting
+				// surface and a file icon instead.
+				previewUrl: badType ? '' : URL.createObjectURL(file),
 				url: '',
 				width: 0,
 				height: 0,
 				fileSize: file.size,
-				status: oversized || badType ? 'error' : 'uploading',
-				error: badType
-					? m.admin_upload_error_bad_type()
-					: oversized
-						? m.admin_upload_error_too_large({ max: formatSize(MAX_BUFFER_BYTES) })
-						: '',
+				status: error ? 'error' : 'uploading',
+				error,
 				label: '',
 				nsfw: false
 			};
 			tiles = [...tiles, tile];
-			// Oversized and wrong-type files never enter the batch: no dimension
-			// probe (pass 2 would decode a >64 MB image for a tile that already
-			// failed) and no doomed POST. Their tile keeps 0×0 dims — it can't be
-			// saved anyway.
-			if (!oversized && !badType) batch.push({ key: tile.key, file });
+			// A failed tile never enters the batch: no dimension probe (pass 2 would
+			// decode a >64 MB image for a tile that already failed) and no doomed
+			// POST. Its tile keeps 0×0 dims — it can't be saved anyway.
+			if (!error) batch.push({ key: tile.key, file });
 		}
 
 		// Reset then set on the next tick so identical consecutive adds still
-		// re-announce to screen readers via the aria-live region.
+		// re-announce to screen readers via the aria-live region. Only files that
+		// really entered the batch are announced as added — the refused ones are
+		// counted separately, so the region never claims a rejected file was added.
+		const refused = fileArray.length - batch.length;
 		announce = '';
 		await tick();
-		announce = m.admin_upload_images_added({ count: fileArray.length });
+		announce = [
+			batch.length > 0 ? m.admin_upload_images_added({ count: batch.length }) : '',
+			refused > 0 ? m.admin_upload_images_rejected({ count: refused }) : ''
+		]
+			.filter(Boolean)
+			.join(' ');
 
 		// Pass 2: probe dimensions and upload. Uploads run one at a time WITHIN
 		// this batch (matching VrAvatarForm's media flow) so a full batch can't
@@ -176,7 +180,8 @@
 	function removeTile(key: number) {
 		const idx = tiles.findIndex((t) => t.key === key);
 		if (idx === -1) return;
-		URL.revokeObjectURL(tiles[idx].previewUrl);
+		// A wrong-type tile never got an object URL to revoke.
+		if (tiles[idx].previewUrl) URL.revokeObjectURL(tiles[idx].previewUrl);
 		tiles = tiles.filter((t) => t.key !== key);
 		if (parentIndex >= tiles.length) parentIndex = 0;
 	}
@@ -211,7 +216,10 @@
 		)
 			return;
 		e.preventDefault();
-		handleFiles(files);
+		// Clipboard images skip the accept filter the same way a drop does — a
+		// pasted SVG is a file /api/upload refuses — so partition them too.
+		const { accepted, rejected } = partitionByAccept(files, GALLERY_ACCEPT);
+		handleFiles(accepted, rejected);
 	}
 
 	function onArtistCreated(artist: { id: number; name: string }) {
@@ -258,10 +266,18 @@
 			class="dropzone"
 			class:disabled={saving}
 			{@attach dropFiles({ accept: GALLERY_ACCEPT, onFiles: handleFiles, disabled: () => saving })}
-			onclick={() => fileInput?.click()}
+			onclick={() => { if (!saving) fileInput?.click(); }}
 			role="button"
 			tabindex="0"
-			onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInput?.click(); }}
+			aria-disabled={saving}
+			onkeydown={(e) => {
+				if (saving) return;
+				if (e.key === 'Enter' || e.key === ' ') {
+					// Space on a role="button" scrolls the page unless it's cancelled.
+					if (e.key === ' ') e.preventDefault();
+					fileInput?.click();
+				}
+			}}
 		>
 			<CloudUpload size={40} />
 			<p>{m.admin_upload_dropzone_multi({ max: data.maxVariantSet })}</p>
@@ -270,12 +286,27 @@
 	{:else}
 		<div
 			class="tile-grid"
-			{@attach dropFiles({ accept: GALLERY_ACCEPT, onFiles: handleFiles, disabled: () => saving })}
+			{@attach dropFiles({
+				accept: GALLERY_ACCEPT,
+				onFiles: handleFiles,
+				disabled: () => saving,
+				// This zone wraps the variant label inputs, so a text drag has to
+				// reach them instead of being cancelled on the way.
+				passThroughNonFileDrags: true
+			})}
 		>
 			{#each tiles as tile, i (tile.key)}
 				<div class="tile" class:tile-error={tile.status === 'error'} class:tile-parent={isGroup && groupMode === 'new' && parentIndex === i}>
 					<div class="tile-preview">
-						<img src={tile.previewUrl} alt={tile.fileName} />
+						{#if tile.previewUrl}
+							<img src={tile.previewUrl} alt={tile.fileName} />
+						{:else}
+							<!-- A refused file has no preview to show; the icon stands in
+							     for it and carries the file name the img alt used to. -->
+							<div class="tile-placeholder" role="img" aria-label={tile.fileName}>
+								<FileBox size={28} />
+							</div>
+						{/if}
 						<div class="tile-status">
 							{#if tile.status === 'uploading'}
 								<Loader2 size={16} class="spin" />
@@ -314,7 +345,7 @@
 				</div>
 			{/each}
 			{#if tiles.length < data.maxVariantSet}
-				<button type="button" class="tile tile-add" onclick={() => fileInput?.click()}>
+				<button type="button" class="tile tile-add" disabled={saving} onclick={() => fileInput?.click()}>
 					<Plus size={20} />
 					<span>{m.admin_variant_add_files()}</span>
 				</button>
@@ -554,6 +585,12 @@
 		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
 	}
 
+	/* While the whole grid is the drop target, the add tile's own dashed border
+	   sits 12px inside the grid's and reads as a second, competing zone. */
+	.tile-grid:global(.drag-over) .tile-add {
+		border-color: transparent;
+	}
+
 	.tile {
 		display: flex;
 		flex-direction: column;
@@ -584,6 +621,16 @@
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
+	}
+
+	/* Stand-in for a refused file, which gets no object URL to preview. */
+	.tile-placeholder {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		height: 100%;
+		color: var(--muted-foreground);
 	}
 
 	.tile-status {
@@ -690,10 +737,6 @@
 	.radio-label input {
 		width: 15px;
 		height: 15px;
-	}
-
-	.error-text {
-		color: var(--destructive);
 	}
 
 	.dropzone-hint {

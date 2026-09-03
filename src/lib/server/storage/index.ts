@@ -61,7 +61,8 @@ export function extFromContentType(contentType: string): string {
 // from the R2 custom domain (which serves them directly with their stored
 // content-type, bypassing the worker's security headers), so an SVG with a <script>
 // or a text/html payload would execute in that origin. Keep this strict.
-const ALLOWED_IMAGE_TYPES = new Set([
+// Exported for the test that pins $lib/config's GALLERY_ACCEPT to this set.
+export const ALLOWED_IMAGE_TYPES = new Set([
 	'image/jpeg',
 	'image/jpg',
 	'image/png',

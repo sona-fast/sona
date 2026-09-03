@@ -54,6 +54,20 @@ export function dragOver(page: Page, selector: string) {
 	}, selector);
 }
 
+/** Dispatch a `dragover` carrying only text on `selector`, and report whether a
+ * handler cancelled it. A zone that wraps text fields (the upload page's tile
+ * grid) must leave this one alone, or a dragged selection can never reach a
+ * label input inside it. */
+export function dragOverText(page: Page, selector: string) {
+	return page.evaluate((selector) => {
+		const dt = new DataTransfer();
+		dt.setData('text/plain', 'a dragged selection');
+		return document.querySelector(selector)!.dispatchEvent(
+			new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true })
+		);
+	}, selector);
+}
+
 /**
  * Wait until the drop attachment is live on `selector`.
  *

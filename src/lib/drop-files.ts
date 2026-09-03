@@ -62,11 +62,18 @@ export function partitionByAccept(files: File[], accept: string): { accepted: Fi
  * The `accept` attribute only constrains the file PICKER — a dropped file skips
  * it entirely — so files are partitioned here and the caller reports the
  * rejected ones without ever posting them.
+ *
+ * `passThroughNonFileDrags` is for a zone that CONTAINS text fields (the upload
+ * page's tile grid holds the variant labels): a zone with no fields inside can
+ * cancel every drag, but cancelling a text drag over this one would block
+ * dropping a selection into a label. Off by default, because leaving a drag
+ * uncancelled is only safe where the drag carries no file.
  */
 export function dropFiles(opts: {
 	accept: string;
 	onFiles: (files: File[], rejected: File[]) => void;
 	disabled?: () => boolean;
+	passThroughNonFileDrags?: boolean;
 }): Attachment<HTMLElement> {
 	return (node) => {
 		// preventDefault on dragenter/dragover is what makes the element a drop
@@ -78,11 +85,15 @@ export function dropFiles(opts: {
 		// never overrides that handler's dropEffect.
 		const over = (e: DragEvent) => {
 			if (e.defaultPrevented) return;
-			e.preventDefault();
 			if (!carriesFiles(e)) {
+				// Leave a non-file drag entirely alone where the zone wraps text
+				// fields, so the browser's own text-drop handling still runs.
+				if (opts.passThroughNonFileDrags) return;
+				e.preventDefault();
 				if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
 				return;
 			}
+			e.preventDefault();
 			const off = opts.disabled?.() ?? false;
 			if (e.dataTransfer) e.dataTransfer.dropEffect = off ? 'none' : 'copy';
 			if (!off) node.classList.add('drag-over');
@@ -91,6 +102,9 @@ export function dropFiles(opts: {
 		const drop = (e: DragEvent) => {
 			node.classList.remove('drag-over');
 			if (e.defaultPrevented) return;
+			// Same reason as `over`: a text drop inside this zone belongs to the
+			// field it landed on, not here.
+			if (opts.passThroughNonFileDrags && !carriesFiles(e)) return;
 			e.preventDefault();
 			if (opts.disabled?.()) return;
 			const files = [...(e.dataTransfer?.files ?? [])];

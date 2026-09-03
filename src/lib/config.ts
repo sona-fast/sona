@@ -29,6 +29,18 @@ export const APP_NAME = 'Sona';
 export const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
 /**
+ * `accept` string for the admin gallery upload picker, and the filter dropped
+ * files are partitioned by. MIME types only, mirroring the server's
+ * ALLOWED_IMAGE_TYPES (`$lib/server/storage`): /api/upload validates the
+ * DECLARED type and reads an empty one as application/octet-stream, so accepting
+ * a bare `.png` here would upload the whole file just to collect a 415.
+ * Client-safe, and pinned to the server set by a test in config.test.ts — the
+ * two drifting apart either refuses a file the server would store or uploads one
+ * it will refuse.
+ */
+export const GALLERY_ACCEPT = 'image/jpeg,image/jpg,image/png,image/gif,image/webp,image/avif';
+
+/**
  * Admin session cookie name. Read in `hooks.server.ts` / `auth.ts` before any
  * DB access, so it must be a build-time constant rather than a setting.
  *
