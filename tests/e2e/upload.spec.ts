@@ -821,6 +821,7 @@ test('a lone refused drop does not poison the next clean batch', async ({ page }
 
 	// A clean batch afterwards closes clean: the stale refusal belongs to no
 	// batch, so it must not flip this one's finish to "with errors".
+	await waitForDropAttachment(page, '.tile-grid');
 	await dropOn(page, '.tile-grid', [{ name: 'good.png', type: 'image/png' }]);
 	await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.', { timeout: 15_000 });
 });

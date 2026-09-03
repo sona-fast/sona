@@ -86,9 +86,12 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ fileName: file.name, fileSize: file.size })
 			});
+			if (!checkRes.ok) throw new Error(m.admin_upload_failed_status({ status: checkRes.status }));
 			const { exists } = await checkRes.json();
 
 			if (exists && !confirm(m.admin_upload_duplicate_confirm({ fileName: file.name }))) {
+				// Declined: the tile goes, and so does the preview it was holding.
+				if (tile.previewUrl) URL.revokeObjectURL(tile.previewUrl);
 				tiles = tiles.filter((t) => t.key !== tile.key);
 				return;
 			}
@@ -97,10 +100,18 @@
 			fd.append('file', file);
 			const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd });
 			if (!uploadRes.ok) throw new Error(m.admin_upload_failed_status({ status: uploadRes.status }));
-			// The cast validates nothing: a 2xx whose body carries no usable url
-			// is a failure too (same check as the other two forms), not a tile
-			// pointing at nothing.
-			const { url } = (await uploadRes.json()) as { url?: unknown };
+			// A 2xx the form cannot read a url out of is a failure too (same check
+			// as the other two forms), not a tile pointing at nothing. That covers
+			// a non-JSON body (a proxy interstitial) as well as a JSON one without
+			// a usable url; either way the tile gets the localized message, not a
+			// parser's.
+			let body: { url?: unknown };
+			try {
+				body = await uploadRes.json();
+			} catch {
+				throw new Error(m.admin_upload_failed());
+			}
+			const { url } = body;
 			if (typeof url !== 'string' || !url) throw new Error(m.admin_upload_failed());
 			tile.url = url;
 			tile.status = 'done';
