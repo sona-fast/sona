@@ -416,7 +416,7 @@ test('refused files still take slots: nine wrong-type files fill the eight-tile 
 		Array.from({ length: 9 }, (_, i) => ({ name: `notes-${i}.txt`, type: 'text/plain' }))
 	);
 	await expect(page.locator('.tile-error')).toHaveCount(8);
-	await expect(page.locator('.alert-message')).toHaveText('1 image(s) skipped — max 8');
+	await expect(page.locator('.alert-message')).toHaveText('1 file(s) skipped — max 8');
 	// None of them was ever sent.
 	await page.waitForTimeout(300);
 	expect(uploads.counters.total).toBe(0);
@@ -800,4 +800,47 @@ test('the upload zones refuse files while a save is in flight', async ({ page })
 	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue(/^\/x\d+\.png$/, {
 		timeout: 15_000
 	});
+});
+
+test('a lone refused drop does not poison the next clean batch', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+	let uploads = 0;
+	await page.route('**/api/upload', async (route) => {
+		uploads++;
+		await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: `/x${uploads}.png` }) });
+	});
+
+	await page.goto('/admin/upload');
+	await waitForDropAttachment(page, '.dropzone');
+
+	// Nothing in flight: the refusal is announced and no batch opens.
+	await dropOn(page, '.dropzone', [{ name: 'vector.svg', type: 'image/svg+xml' }]);
+	await expect(page.locator('.tile-error .error-text')).toContainText("That file type isn't supported");
+	await expect(page.locator(LIVE_REGION)).toHaveText("1 file(s) couldn't be added");
+
+	// A clean batch afterwards closes clean: the stale refusal belongs to no
+	// batch, so it must not flip this one's finish to "with errors".
+	await dropOn(page, '.tile-grid', [{ name: 'good.png', type: 'image/png' }]);
+	await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.', { timeout: 15_000 });
+});
+
+test('a 200 without a usable url fails the tile instead of storing nothing', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+	await page.route('**/api/upload', (route) =>
+		route.fulfill({ contentType: 'application/json', body: '{}' })
+	);
+
+	await page.goto('/admin/upload');
+	await waitForDropAttachment(page, '.dropzone');
+	await dropOn(page, '.dropzone', [{ name: 'a.png', type: 'image/png' }]);
+
+	// Same guard as the sticker and VR forms: a row pointing at nothing would
+	// be silently dropped at save time, so the tile fails here and says so.
+	await expect(page.locator('.tile-error')).toHaveCount(1, { timeout: 15_000 });
+	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('');
+	await expect(page.locator(LIVE_REGION)).toHaveText(
+		'Upload finished with errors. Each file that failed shows the reason.'
+	);
 });

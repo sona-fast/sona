@@ -355,7 +355,7 @@
 	"admin_upload_retry_hint": "クリックまたはドラッグで再試行",
 	"admin_upload_dropzone_multi": "最大{max}枚の画像を選択するか、ここにドラッグするか、クリップボードから貼り付けてください",
 	"admin_upload_images_added": "{count}枚の画像を追加しました",
-	"admin_upload_over_limit": "{count}枚をスキップしました（最大{max}枚）",
+	"admin_upload_over_limit": "{count}件をスキップしました（最大{max}枚）",
 	"admin_upload_images_rejected": "{count}件のファイルを追加できませんでした",
 	"admin_upload_images_added_and_rejected": "{added}枚の画像を追加しました。{rejected}件のファイルを追加できませんでした",
 	"admin_upload_batch_done": "アップロードが完了しました。",

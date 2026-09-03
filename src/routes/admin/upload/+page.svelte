@@ -97,8 +97,12 @@
 			fd.append('file', file);
 			const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd });
 			if (!uploadRes.ok) throw new Error(m.admin_upload_failed_status({ status: uploadRes.status }));
-			const result = await uploadRes.json();
-			tile.url = result.url;
+			// The cast validates nothing: a 2xx whose body carries no usable url
+			// is a failure too (same check as the other two forms), not a tile
+			// pointing at nothing.
+			const { url } = (await uploadRes.json()) as { url?: unknown };
+			if (typeof url !== 'string' || !url) throw new Error(m.admin_upload_failed());
+			tile.url = url;
 			tile.status = 'done';
 		} catch (e) {
 			tile.error = e instanceof Error ? e.message : m.admin_upload_failed();
@@ -179,12 +183,6 @@
 					: m.admin_upload_images_rejected({ count: notUploaded })
 		);
 
-		// Pass 2: probe dimensions and upload. Uploads run one at a time WITHIN
-		// this batch (matching VrAvatarForm's media flow) so a full batch can't
-		// fire eight concurrent POSTs; a second drop mid-batch starts its own
-		// loop, so the guarantee is per-invocation, not global. Each tile still
-		// shows its own status. Mutate the tile via the `tiles` state proxy
-		// (not the pass-1 local) so updates stay reactive.
 		// Tiles the batch dropped — a declined duplicate, a removal mid-upload —
 		// are simply gone, so only survivors can report an error.
 		const createdAnError = () =>
@@ -197,6 +195,12 @@
 			if (inFlightBatches > 0 && createdAnError()) batchHadErrors = true;
 			return;
 		}
+		// Pass 2: probe dimensions and upload. Uploads run one at a time WITHIN
+		// this batch (matching VrAvatarForm's media flow) so a full batch can't
+		// fire eight concurrent POSTs; a second drop mid-batch starts its own
+		// loop, so the guarantee is per-invocation, not global. Each tile still
+		// shows its own status. Mutate the tile via the `tiles` state proxy
+		// (not the pass-1 local) so updates stay reactive.
 		inFlightBatches++;
 		try {
 			for (const { key, file } of batch) {

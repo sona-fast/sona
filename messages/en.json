@@ -411,7 +411,7 @@
 	"admin_upload_retry_hint": "Click or drag to try again",
 	"admin_upload_dropzone_multi": "Choose up to {max} images, drag them here, or paste from the clipboard",
 	"admin_upload_images_added": "{count} image(s) added",
-	"admin_upload_over_limit": "{count} image(s) skipped — max {max}",
+	"admin_upload_over_limit": "{count} file(s) skipped — max {max}",
 	"admin_upload_images_rejected": "{count} file(s) couldn't be added",
 	"admin_upload_images_added_and_rejected": "{added} image(s) added. {rejected} file(s) couldn't be added",
 	"admin_upload_batch_done": "Upload finished.",
