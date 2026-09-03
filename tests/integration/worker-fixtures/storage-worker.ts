@@ -8,7 +8,10 @@ import { R2Storage } from '../../../src/lib/server/storage/r2';
 import { UploadThingStorage } from '../../../src/lib/server/storage/uploadthing';
 import { withMetadataScrubbing } from '../../../src/lib/server/storage/scrub';
 import { jpegFixture, padRunGif } from '../../../src/lib/server/storage/scrub-metadata.fixtures';
-import { isUnscrubbable } from '../../../src/lib/server/storage/scrub-metadata';
+import {
+	isUnscrubbable,
+	UnscrubbableImageError
+} from '../../../src/lib/server/storage/scrub-metadata';
 import type { R2Bucket } from '@cloudflare/workers-types';
 
 interface Env {
@@ -52,6 +55,27 @@ function hex(bytes: Uint8Array): string {
 	let out = '';
 	for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
 	return out;
+}
+
+/**
+ * Which refusal a scenario hit, as one of a fixed set of literals. The response
+ * carries this vocabulary rather than the error's own text because CodeQL's
+ * js/stack-trace-exposure treats a caught error as a taint source with no
+ * sanitizers — `e.message`, `e.name` and `String(e)` all stay tainted, so none
+ * of them may reach a body. A boolean test is not a taint step, so a literal
+ * picked by one is clean. The detail goes to the worker log instead.
+ */
+function classify(
+	e: unknown
+): 'over-length' | 'under-length' | 'unscrubbable' | 'unscrubbable-wrapped' | 'other' {
+	// Identity first, so a length-worded wrapper carrying a refusal underneath
+	// still reads as the refusal.
+	if (e instanceof UnscrubbableImageError) return 'unscrubbable';
+	if (isUnscrubbable(e)) return 'unscrubbable-wrapped';
+	const message = e instanceof Error ? e.message : String(e);
+	if (/too many bytes/i.test(message)) return 'over-length';
+	if (/did not see all expected bytes/i.test(message)) return 'under-length';
+	return 'other';
 }
 
 async function json(data: unknown): Promise<Response> {
@@ -129,7 +153,8 @@ export default {
 							filename: 'over.bin'
 						});
 					} catch (e) {
-						rejected = e instanceof Error ? e.message : String(e);
+						console.error(`${scenario}: rejected`, e);
+						rejected = classify(e);
 					}
 					const head = await env.IMAGES.head('it/over.bin');
 					return json({ rejected, leftoverSize: head?.size ?? null });
@@ -148,7 +173,8 @@ export default {
 							filename: 'under.bin'
 						});
 					} catch (e) {
-						rejected = e instanceof Error ? e.message : String(e);
+						console.error(`${scenario}: rejected`, e);
+						rejected = classify(e);
 					}
 					const head = await env.IMAGES.head('it/under.bin');
 					return json({ rejected, keyAbsent: head === null });
@@ -236,7 +262,8 @@ export default {
 							filename: 'bad.jpg'
 						});
 					} catch (e) {
-						rejected = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+						console.error(`${scenario}: rejected`, e);
+						rejected = classify(e);
 					}
 					const head = await env.IMAGES.head('it/bad.jpg');
 					return json({ rejected, keyAbsent: head === null });
@@ -262,20 +289,26 @@ export default {
 							filename: 'bad.jpg'
 						});
 					} catch (e) {
-						rejected = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+						console.error(`${scenario}: rejected`, e);
+						rejected = classify(e);
 						unscrubbable = isUnscrubbable(e);
 					}
 					return json({ rejected, unscrubbable });
 				}
 
+				// A scenario that throws past every handler, so the test can pin what
+				// the outer catch sends back.
+				case 'throw':
+					throw new Error('deliberate failure with a distinctive message');
+
 				default:
 					return new Response(`unknown scenario: ${scenario}`, { status: 400 });
 			}
 		} catch (e) {
-			// The stack goes to the worker log, not the body: the test reads the
-			// message, and a stack in a response is what CodeQL flags as exposure.
-			if (e instanceof Error) console.error(e.stack);
-			return new Response(e instanceof Error ? e.message : String(e), { status: 500 });
+			// The error goes to the worker log, not the body: anything read off a
+			// caught error in a response is what CodeQL flags as exposure.
+			console.error('storage-worker: scenario failed', e);
+			return new Response('scenario failed', { status: 500 });
 		}
 	}
 };
