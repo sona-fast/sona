@@ -109,7 +109,15 @@
 			const fd = new FormData();
 			fd.append('file', file);
 			const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd });
-			if (!uploadRes.ok) throw new Error(m.admin_upload_failed_status({ status: uploadRes.status }));
+			// 422 is the one failure the operator can act on: the file's metadata
+			// could not be stripped, and a re-export fixes it (SONA-170).
+			if (!uploadRes.ok) {
+				throw new Error(
+					uploadRes.status === 422
+						? m.admin_upload_error_unscrubbable()
+						: m.admin_upload_failed_status({ status: uploadRes.status })
+				);
+			}
 			// A 2xx the form cannot read a url out of is a failure too (same check
 			// as the other two forms), not a tile pointing at nothing. That covers
 			// a non-JSON body (a proxy interstitial) as well as a JSON one without

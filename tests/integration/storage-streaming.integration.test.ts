@@ -4,6 +4,8 @@ import { Miniflare } from 'miniflare';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scrubImageMetadata } from '../../src/lib/server/storage/scrub-metadata';
+import { jpegFixture } from '../../src/lib/server/storage/scrub-metadata.fixtures';
 
 // Workerd-parity harness for the storage streaming paths (SONA-140).
 //
@@ -35,6 +37,8 @@ interface CapturedRequest {
 	bodyBytes: number;
 	bodySha256: string;
 	headText: string;
+	/** Whole body, for the small-body scenarios that assert on stored bytes. */
+	bodyBase64: string | null;
 }
 
 let mf: Miniflare;
@@ -79,7 +83,8 @@ beforeAll(async () => {
 				transferEncoding: request.headers.get('transfer-encoding'),
 				bodyBytes: body.length,
 				bodySha256: createHash('sha256').update(body).digest('hex'),
-				headText: body.subarray(0, 512).toString('latin1')
+				headText: body.subarray(0, 512).toString('latin1'),
+				bodyBase64: body.length <= 64 * 1024 ? body.toString('base64') : null
 			});
 			const key = new URL(request.url).pathname.slice(1);
 			return new Response(JSON.stringify({ ufsUrl: `https://testapp.ufs.sh/f/${key}` }), {
@@ -159,6 +164,67 @@ describe('storage streaming under real workerd', () => {
 		if (result.leftoverSize != null) {
 			expect(result.leftoverSize).toBe(2 * 1024 * 1024);
 		}
+	});
+
+	it('the scrubbing decorator stores scrubbed bytes at the declared length', async () => {
+		const result = await run('r2-scrubbing-put');
+		const expected = scrubImageMetadata(jpegFixture());
+		// The declared size is the ORIGINAL length: the scrub is size-preserving,
+		// which is what lets a streaming put keep its length declaration.
+		expect(result.declaredSize).toBe(jpegFixture().length);
+		expect(result.storedSize).toBe(expected.length);
+		expect(result.storedHex).toBe(Buffer.from(expected).toString('hex'));
+		// And the stored object no longer carries what the fixture came in with.
+		expect(Buffer.from(expected).toString('latin1')).not.toContain('GPSLatitude');
+		expect(result.url).toBe('/img/it/photo.jpg');
+	});
+
+	it(
+		'streams a 4 MiB GIF that is nearly all pad bytes without exhausting the heap',
+		async () => {
+			// The amplification this guards is per INPUT BYTE, so what matters is
+			// the run, not the picture: 4 MiB of pad under the real 128 MB isolate.
+			const result = await run('r2-pad-run-gif');
+			expect(result.storedSize).toBe(result.declaredSize);
+			expect(result.identical).toBe(true);
+		},
+		// Well under this suite's 180 s default on purpose: walking the run a byte
+		// at a time takes about two minutes here where the block walk takes a third
+		// of a second, so the cost regression fails the test rather than hiding in
+		// a passing one.
+		30_000
+	);
+
+	it('the scrubbing decorator scrubs the UploadThing ingest body too', async () => {
+		captured.length = 0;
+		const jpeg = jpegFixture();
+		const result = await run('uploadthing-scrubbing-put');
+		expect(captured).toHaveLength(1);
+		const put = captured[0];
+		// The framed body carries the scrubbed bytes, and the declared length is
+		// still the original size — the same size-preserving contract R2 relies on.
+		expect(result.declaredSize).toBe(jpeg.length);
+		expect(Number(put.contentLength)).toBe(put.bodyBytes);
+		expect(put.bodyBytes).toBeGreaterThan(jpeg.length);
+		const body = Buffer.from(put.bodyBase64!, 'base64').toString('latin1');
+		expect(body).toContain(Buffer.from(scrubImageMetadata(jpeg)).toString('latin1'));
+		expect(body).not.toContain('GPSLatitude');
+	});
+
+	it('a body the scrubber cannot walk rejects the put instead of hanging', async () => {
+		const result = await run('r2-unscrubbable-stream');
+		expect(String(result.rejected)).toMatch(/UnscrubbableImageError/);
+		expect(result.keyAbsent).toBe(true);
+	});
+
+	it('the UploadThing wrap keeps the refusal detectable, which is what makes the 422', async () => {
+		// UploadThing is the default provider, and on its streaming path nothing
+		// throws UnscrubbableImageError to the caller: the SDK's fetch rejects
+		// with its own error carrying ours underneath. /api/upload decides the
+		// 422 on isUnscrubbable(), so the walk has to survive the REAL wrap.
+		const result = await run('uploadthing-unscrubbable-stream');
+		expect(result.rejected).not.toBeNull();
+		expect(result.unscrubbable).toBe(true);
 	});
 
 	it('an under-length source rejects the put and leaves the key absent', async () => {

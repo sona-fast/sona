@@ -4,6 +4,7 @@ import { getSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
 import { sniffImageType, isWebmHead } from '$lib/server/storage/sniff';
 import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
+import { isUnscrubbable, SNIFF_BYTES, UNSCRUBBABLE_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { recordUpload, schedule } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
@@ -66,10 +67,12 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		error(415, `Unsupported image type: ${contentType}. Allowed: JPEG, PNG, GIF, WebP, AVIF, WebM.`);
 	}
 	// Verify the actual leading bytes match the declared type (M7) — the
-	// client-supplied content-type above can be spoofed. Sniff a cheap 64-byte
-	// head rather than buffering the whole file — big enough that an AVIF ftyp
-	// box's compatible_brands (which start at offset 16) are visible.
-	const head = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+	// client-supplied content-type above can be spoofed. Sniff a cheap head
+	// rather than buffering the whole file, sized by SNIFF_BYTES so this window
+	// matches the scrubber's: a real AVIF can pad compatible_brands far enough
+	// that the `avif` brand sits past a 64-byte head, and a shorter window here
+	// would 415 a file storage would have accepted.
+	const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
 	if (isWebm ? !isWebmHead(head) : !isAllowedImageType(sniffImageType(head))) {
 		error(415, 'File contents do not match an allowed image type.');
 	}
@@ -92,6 +95,22 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			filename: file.name
 		});
 	} catch (e) {
+		// A file whose metadata we cannot strip is the operator's to fix, not a
+		// server fault: the storage layer refuses to store a raster it could not
+		// walk (SONA-170), and the way out is a re-export, so this is a 422 with
+		// an instruction rather than an opaque 500. The check walks the cause
+		// chain: on the streaming path the refusal arrives wrapped by the
+		// provider's own fetch error. Like the 413 and 415 rejections above, a
+		// refused file is not an upload failure, so it is not recorded as one:
+		// the health panel counts the store misbehaving, not the operator's
+		// files being turned away.
+		if (isUnscrubbable(e)) {
+			// The parser's own wording goes to the log, where a scrubber bug that
+			// starts refusing real files can be diagnosed; the response carries the
+			// operator sentence.
+			console.warn('upload: unscrubbable file', key, e);
+			error(422, UNSCRUBBABLE_MESSAGE);
+		}
 		schedule(platform, recordUpload(db, false, {
 			status: 500,
 			message: e instanceof Error ? e.message : 'storage put failed'

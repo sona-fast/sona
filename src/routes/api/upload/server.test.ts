@@ -4,11 +4,28 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { isHttpError } from '@sveltejs/kit';
 import { clearSettingsCache } from '$lib/server/settings';
+import { getStorage } from '$lib/server/storage';
 import { MAX_BUFFER_BYTES } from '$lib/server/storage/buffer';
+import { UnscrubbableImageError, UNSCRUBBABLE_MESSAGE } from '$lib/server/storage/scrub-metadata';
+import { withMetadataScrubbing } from '$lib/server/storage/scrub';
+import { UploadThingStorage } from '$lib/server/storage/uploadthing';
+import { avifFixture, jpegFixture } from '$lib/server/storage/scrub-metadata.fixtures';
 import { POST } from './+server';
 
 import { makeD1 } from '$lib/server/test/d1';
 import { PNG_MAGIC } from '$lib/server/test/raster-fixtures';
+
+// UTApi is constructed in UploadThingStorage's constructor and never used by
+// the streaming path these tests drive; stubbed so no SDK setup is needed.
+vi.mock('uploadthing/server', () => ({ UTApi: class {} }));
+
+// The 422 assertions probe what was RECORDED, not just what was thrown — a
+// failure sample with the wrong status is invisible in the metrics dashboard.
+const recordUpload = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('$lib/server/metrics', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/server/metrics')>();
+	return { ...original, recordUpload };
+});
 
 // Stub only the provider resolution — the endpoint's own validation
 // (allowlist, sniff, size cap) stays real. `put` is what the assertions probe:
@@ -55,6 +72,7 @@ beforeEach(() => {
 	// getSettings caches per-isolate; each test uses a fresh in-memory DB.
 	clearSettingsCache();
 	put.mockClear();
+	recordUpload.mockClear();
 });
 
 describe('POST /api/upload', () => {
@@ -158,6 +176,17 @@ describe('POST /api/upload', () => {
 		expect(put).not.toHaveBeenCalled();
 	});
 
+	it('accepts an AVIF whose avif brand sits past byte 64 of its ftyp', async () => {
+		// A real encoder can pad compatible_brands far enough that the `avif`
+		// brand lands past a 64-byte head. Sniffing that short a window 415s a
+		// file the scrubber and the storage layer both handle, so the endpoint
+		// reads SNIFF_BYTES — the same window the sniffer is specified against.
+		const avif = new Uint8Array(avifFixture({ longFtyp: true }).file);
+		const file = new File([avif], 'a.avif', { type: 'image/avif' });
+		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(200);
+		expect(put).toHaveBeenCalledTimes(1);
+	});
+
 	it('415s other video types (mp4 is not in the allowlist)', async () => {
 		// ftyp box — a plausible real mp4 head; the declared type alone must sink it.
 		const bytes = new Uint8Array(64);
@@ -165,6 +194,75 @@ describe('POST /api/upload', () => {
 		const file = new File([bytes], 'clip.mp4', { type: 'video/mp4' });
 		expect(await statusOf(() => POST(postEvent(makePlatform(), file)))).toBe(415);
 		expect(put).not.toHaveBeenCalled();
+	});
+
+	it('422s a file whose metadata could not be stripped, without recording an upload failure', async () => {
+		// The storage layer refuses to store a raster it could not walk
+		// (SONA-170). That is a file problem with a fix the operator can apply,
+		// so it must not surface as an unexplained 500.
+		put.mockImplementationOnce(async () => {
+			throw new UnscrubbableImageError('jpeg: segment length runs past the end of the file');
+		});
+		const platform = makePlatform();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		let thrown: unknown;
+		try {
+			await POST(postEvent(platform, pngFile(1024)));
+		} catch (e) {
+			thrown = e;
+		}
+		expect(isHttpError(thrown)).toBe(true);
+		const httpError = thrown as { status: number; body: { message: string } };
+		expect(httpError.status).toBe(422);
+		expect(httpError.body.message).toBe(UNSCRUBBABLE_MESSAGE);
+		// The operator sentence goes in the response; the parser's own wording
+		// goes to the log, so a scrubber bug refusing real files stays diagnosable.
+		expect(warn).toHaveBeenCalled();
+		const [label, , logged] = warn.mock.calls[0];
+		expect(label).toBe('upload: unscrubbable file');
+		expect((logged as Error).message).toContain('segment length runs past the end of the file');
+		warn.mockRestore();
+		// A refused file is the operator's to fix, like a 413 or 415, so the
+		// health panel's failure count and error samples stay untouched.
+		expect(recordUpload).not.toHaveBeenCalled();
+	});
+
+	it('422s when the provider WRAPS the scrub failure (real streaming put)', async () => {
+		// On the streaming path nothing ever throws UnscrubbableImageError to the
+		// route: the transform errors the piped body and the provider's fetch
+		// rejects with its own error ("TypeError: fetch failed") carrying ours as
+		// .cause. Matching on the top-level error alone returned a 500 here.
+		const token = btoa(
+			JSON.stringify({ apiKey: 'sk_test_0123456789abcdef', appId: 'app123', regions: ['sea1'] })
+		);
+		const storage = withMetadataScrubbing(new UploadThingStorage({ token }));
+		vi.mocked(getStorage).mockReturnValueOnce(storage);
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (_url: unknown, init?: RequestInit) => {
+				try {
+					await new Response(init?.body as ReadableStream).arrayBuffer();
+				} catch (e) {
+					// undici's wrapping, reproduced: the real cause hangs underneath.
+					throw new TypeError('fetch failed', { cause: e });
+				}
+				return new Response('{}', { headers: { 'content-type': 'application/json' } });
+			})
+		);
+		const truncated = jpegFixture({ truncated: true });
+		const file = new File([truncated.slice().buffer as ArrayBuffer], 'photo.jpg', {
+			type: 'image/jpeg'
+		});
+
+		let thrown: unknown;
+		try {
+			await POST(postEvent(makePlatform(), file));
+		} catch (e) {
+			thrown = e;
+		}
+		vi.unstubAllGlobals();
+		expect(isHttpError(thrown)).toBe(true);
+		expect((thrown as { status: number }).status).toBe(422);
 	});
 
 	it('passes the allowlist-matched content type (parameters stripped, lowercased) to the provider', async () => {

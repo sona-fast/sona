@@ -31,7 +31,7 @@ export const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 /**
  * `accept` string for the admin gallery upload picker, and the filter dropped
  * files are partitioned by. MIME types only, mirroring the server's
- * ALLOWED_IMAGE_TYPES (`$lib/server/storage`): /api/upload validates the
+ * ALLOWED_IMAGE_TYPES (`$lib/server/storage/allowlist`): /api/upload validates the
  * DECLARED type and reads an empty one as application/octet-stream, so accepting
  * a bare `.png` here would upload the whole file just to collect a 415.
  * Client-safe, and pinned to the server set by a test in config.test.ts — the

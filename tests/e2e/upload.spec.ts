@@ -35,6 +35,22 @@ const PNG = Buffer.from(
 	'base64'
 );
 
+// A JPEG the scrubber cannot walk: SOI, then an APP1 segment declaring 500
+// bytes with five in the file. The sniff sees a real JPEG, so the request gets
+// as far as the storage layer, which refuses to store a raster it could not
+// walk — a 422, not a 500 (SONA-170).
+const UNSCRUBBABLE_JPEG = Buffer.from([
+	0xff, 0xd8, 0xff, 0xe1, 0x01, 0xf4, ...Buffer.from('short')
+]);
+
+// The same refusal in PNG, for the sticker pack form: its accept filter is PNG
+// and WebP only, so a JPEG never leaves the browser there and the server never
+// gets to answer. Signature, then a chunk header declaring 0xffffffff bytes —
+// past the scrubber's length ceiling, so the storage layer refuses with a 422.
+const UNSCRUBBABLE_PNG = Buffer.from([
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xff, 0xff, 0xff, ...Buffer.from('IHDR')
+]);
+
 // Stage `files` through the hidden input and wait for their tiles to appear.
 // setInputFiles stages the file but its synthesized change event does not reach
 // Svelte 5's root-delegated `onchange` (verified: the handler never runs, while
@@ -846,4 +862,198 @@ test('a 200 without a usable url fails the tile instead of storing nothing', asy
 	await expect(page.locator(LIVE_REGION)).toHaveText(
 		'Upload finished with errors. Each file that failed shows the reason.'
 	);
+});
+
+test('a file whose metadata cannot be stripped fails the tile with the re-export message', async ({
+	page
+}) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	// The status the server really answered with, not just what the tile says.
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+
+	await page.goto('/admin/upload');
+	await stageFiles(
+		page,
+		{ name: 'e2e-unscrubbable.jpg', mimeType: 'image/jpeg', buffer: UNSCRUBBABLE_JPEG },
+		1,
+		() => {
+			statuses.length = 0;
+		}
+	);
+
+	// The tile tells the operator what to do about it, rather than showing the
+	// bare "Upload failed (422)" both clients used to fall back to.
+	const error = page.locator('.tile-error .error-text');
+	await expect(error).toContainText('Export a fresh copy from an image editor', {
+		timeout: 15_000
+	});
+	await expect(error).not.toContainText('422');
+	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('');
+	expect(statuses).toEqual([422]);
+});
+
+test('the VR media picker names the same refusal and gets a 422', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+
+	await page.goto('/admin/vr/new');
+	// The showcase-media picker, not the model or poster input: it is the one
+	// that accepts a clip alongside the stills.
+	const picker = 'input.sr-file[accept*="video/webm"]';
+	// Same hydration retry as stageFiles: setInputFiles' own change event does
+	// not reach Svelte 5's delegated handler, so dispatch one after staging.
+	const banner = page.locator('.banner.err .banner-line');
+	await expect(async () => {
+		statuses.length = 0;
+		await page.setInputFiles(picker, {
+			name: 'e2e-unscrubbable.jpg',
+			mimeType: 'image/jpeg',
+			buffer: UNSCRUBBABLE_JPEG
+		});
+		await page.evaluate((selector) => {
+			document.querySelector(selector)!.dispatchEvent(new Event('change', { bubbles: true }));
+		}, picker);
+		await expect(banner).toHaveCount(1, { timeout: 3000 });
+	}).toPass({ timeout: 20_000 });
+
+	// The VR form used to blame the connection for a 422.
+	await expect(banner).toContainText('Export a fresh copy from an image editor');
+	await expect(banner).toContainText('e2e-unscrubbable.jpg');
+	expect(statuses).toEqual([422]);
+});
+
+// Stage `files` through the sticker pack form's picker (the page's only file
+// input). Unlike stageFiles, NO manual change dispatch: this input's onchange
+// does run off setInputFiles' own event (verified — dispatching as well ran the
+// handler twice and uploaded every file twice). The pack form's rows only
+// appear once an upload finishes, so the hydration retry waits for the first
+// POST to leave the browser instead. `onAttempt` runs at the top of EVERY
+// attempt so the caller's counters get reset before a re-stage.
+async function stagePackFiles(
+	page: Page,
+	files: Parameters<Page['setInputFiles']>[1],
+	uploads: ReturnType<typeof countUploadPosts>,
+	onAttempt: () => void = () => {}
+): Promise<void> {
+	await expect(async () => {
+		onAttempt();
+		uploads.reset();
+		await page.setInputFiles('input[type="file"]', files);
+		await expect.poll(() => uploads.counters.total, { timeout: 3000 }).toBeGreaterThan(0);
+	}).toPass({ timeout: 20_000 });
+}
+
+test('the sticker pack form names the refusal and keeps the good file in the batch', async ({
+	page
+}) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+	const uploads = countUploadPosts(page);
+
+	await page.goto('/admin/stickers/manual');
+	await stagePackFiles(
+		page,
+		[
+			{ name: 'e2e-unscrubbable.png', mimeType: 'image/png', buffer: UNSCRUBBABLE_PNG },
+			{ name: 'e2e-sticker.png', mimeType: 'image/png', buffer: PNG }
+		],
+		uploads,
+		() => {
+			statuses.length = 0;
+		}
+	);
+
+	// One banner line, naming the refused file and the fix. The good file is
+	// reported by its own row, not by a count, so a mixed batch reads as one
+	// failure beside one success instead of a summary that sounds total.
+	const banner = page.locator('.banner.err .banner-line');
+	await expect(banner).toHaveCount(1, { timeout: 20_000 });
+	await expect(banner).toContainText('e2e-unscrubbable.png');
+	await expect(banner).toContainText('Export a fresh copy from an image editor');
+
+	// The statuses the server really answered with — one refusal, one success.
+	// Order varies with staging order, so compare sorted.
+	expect([...statuses].sort((a, b) => a - b)).toEqual([200, 422]);
+	// Only the good file became a sticker row.
+	await expect(page.locator('input[name$="[imageUrl]"]')).toHaveCount(1);
+	await expect(page.locator('input[name="sticker[0][imageUrl]"]')).toHaveValue(
+		/^https:\/\/e2e-app-id\.ufs\.sh\/f\/./
+	);
+});
+
+test('a pack batch of only refused files shows the refusal alone', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+	const uploads = countUploadPosts(page);
+
+	await page.goto('/admin/stickers/manual');
+	await stagePackFiles(
+		page,
+		{ name: 'e2e-unscrubbable.png', mimeType: 'image/png', buffer: UNSCRUBBABLE_PNG },
+		uploads,
+		() => {
+			statuses.length = 0;
+		}
+	);
+
+	// The only file in the batch was refused: one banner line naming it, and no
+	// summary count anywhere — the line already says which file and why.
+	const banner = page.locator('.banner.err .banner-line');
+	await expect(banner).toHaveCount(1, { timeout: 20_000 });
+	await expect(banner).toContainText('e2e-unscrubbable.png');
+	await expect(banner).toContainText('Export a fresh copy from an image editor');
+	await expect(page.locator('.alert-message')).toHaveCount(0);
+	expect(statuses).toEqual([422]);
+	await expect(page.locator('input[name$="[imageUrl]"]')).toHaveCount(0);
+});
+
+test('a pack batch where every file uploads shows no toast at all', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const statuses: number[] = [];
+	page.on('response', (r) => {
+		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+	});
+	const uploads = countUploadPosts(page);
+
+	await page.goto('/admin/stickers/manual');
+	await stagePackFiles(
+		page,
+		[
+			{ name: 'e2e-sticker-a.png', mimeType: 'image/png', buffer: PNG },
+			{ name: 'e2e-sticker-b.png', mimeType: 'image/png', buffer: PNG }
+		],
+		uploads,
+		() => {
+			statuses.length = 0;
+		}
+	);
+
+	// Both files became rows, so the batch is over. Nothing failed, so there is
+	// no error banner and no toast to contradict the two rows.
+	await expect(page.locator('input[name$="[imageUrl]"]')).toHaveCount(2, { timeout: 20_000 });
+	expect(statuses).toEqual([200, 200]);
+	await expect(page.locator('.banner.err .banner-line')).toHaveCount(0);
+	await expect(page.locator('.alert-message')).toHaveCount(0);
 });

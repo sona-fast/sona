@@ -4,20 +4,37 @@ import { ZeroKeepError } from './types';
 import type { StorageProvider, DeleteOrphansOptions } from './types';
 import { R2Storage } from './r2';
 import { UploadThingStorage } from './uploadthing';
+import { withMetadataScrubbing } from './scrub';
 
 export type { StorageProvider } from './types';
 export { collectReferencedUrls } from './referenced-urls';
+// The raster allowlist lives in its own module (the scrubbing decorator needs
+// it without importing this one); re-exported so import sites stay put.
+export { isAllowedImageType } from './allowlist';
 
 type Env = App.Platform['env'];
 
 /**
  * Resolve the active StorageProvider from settings (or an explicit override,
  * which migration uses to construct the *target* provider).
+ *
+ * The provider is wrapped so every stored raster has its location and
+ * identifying metadata stripped on the way in (SONA-170). Wrapping HERE rather
+ * than at each put site is what makes the guarantee hold for importers written
+ * later: there is no way to reach a provider that skips it.
  */
 export function getStorage(
 	env: Env | undefined,
 	settings: SiteSettings,
 	providerId: StorageProviderId = settings.storageProvider
+): StorageProvider {
+	return withMetadataScrubbing(makeProvider(env, settings, providerId));
+}
+
+function makeProvider(
+	env: Env | undefined,
+	settings: SiteSettings,
+	providerId: StorageProviderId
 ): StorageProvider {
 	if (providerId === 'r2') {
 		if (!env?.IMAGES) {
@@ -54,27 +71,6 @@ const EXT_BY_TYPE: Record<string, string> = {
 export function extFromContentType(contentType: string): string {
 	const base = contentType.split(';')[0].trim().toLowerCase();
 	return EXT_BY_TYPE[base] ?? base.split('/')[1]?.replace(/[^a-z0-9]/g, '') ?? 'bin';
-}
-
-// Content-types accepted for stored, publicly-served images. Deliberately raster
-// only — NOT image/svg+xml or any document/active type. Stored objects are served
-// from the R2 custom domain (which serves them directly with their stored
-// content-type, bypassing the worker's security headers), so an SVG with a <script>
-// or a text/html payload would execute in that origin. Keep this strict.
-// Exported for the test that pins $lib/config's GALLERY_ACCEPT to this set.
-export const ALLOWED_IMAGE_TYPES: ReadonlySet<string> = new Set([
-	'image/jpeg',
-	'image/jpg',
-	'image/png',
-	'image/gif',
-	'image/webp',
-	'image/avif'
-]);
-
-/** Whether a content-type is a safe raster image we'll store and serve publicly. */
-export function isAllowedImageType(contentType: string | null | undefined): boolean {
-	if (!contentType) return false;
-	return ALLOWED_IMAGE_TYPES.has(contentType.split(';')[0].trim().toLowerCase());
 }
 
 // Content-types accepted for stored, publicly-served STICKER media. A superset of

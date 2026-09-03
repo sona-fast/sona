@@ -19,6 +19,7 @@ graph TB
         subgraph "Server lib"
             Auth[🔐 Admin auth + password reset]
             Storage[📦 Storage abstraction]
+            Scrub[🧹 Metadata scrub — every write, fail closed]
             Importers[📥 Importers — Telegram stickers, FurTrack, fursuit]
             RegClient[🔄 Registry client — search, submit, sync]
             Gates[🎟️ Supporter keys + early access + NSFW gating]
@@ -66,6 +67,7 @@ graph TB
     Admin --> Auth
     Admin --> Storage
     Admin --> Importers
+    Importers --> Storage
     Admin --> RegClient
     Public --> Gates
     API --> RateLimit
@@ -75,10 +77,12 @@ graph TB
     Gates --> D1
     RegClient --> D1
     Importers --> D1
-    Storage --> R2
-    Storage -.->|alternative provider| UT
+    Storage --> Scrub
+    Scrub --> R2
+    Scrub -.->|alternative provider| UT
     R2 --> CDN
     CDN --> Visitor
+    UT -.->|serves its own file URLs| Visitor
 
     Importers -->|sticker sets| TG
     Importers -->|photo import| FurTrack
@@ -104,8 +108,15 @@ graph TB
   and R2 (`IMAGES`).
 - R2 is only active when the `storageProvider` site setting is `r2`;
   UploadThing is the alternative provider, so that edge is dotted.
-- Image delivery to visitors goes through the R2 bucket's public custom
-  domain (the `r2PublicUrl` site setting), not through the app.
+- Every write reaches a provider through the metadata scrub
+  (`src/lib/server/storage/scrub.ts`): the bytes are sniffed, and a raster
+  image has its Exif, XMP and text metadata rewritten in place before it is
+  stored. An image the scrub cannot walk is refused rather than stored, and
+  `/api/upload` reports that as a 422. See `docs/image-metadata.md`.
+- When R2 is the provider, image delivery to visitors goes through the
+  bucket's public custom domain (the `r2PublicUrl` site setting), not through
+  the app. With UploadThing selected, visitors load images from the URLs
+  UploadThing returns at upload time.
 - The artist registry is a separate Worker with its own D1 database and a
   daily cron trigger. The app talks to it over HTTP with `REGISTRY_API_KEY`;
   without the key, registry features stay off.

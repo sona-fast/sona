@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { makeD1 } from '$lib/server/test/d1';
 import { clearSettingsCache } from '$lib/server/settings';
+import { jpegOfSize } from '$lib/server/test/raster-fixtures';
 import { POST } from './+server';
 
 const CRON_SECRET = 'test-cron-secret';
@@ -233,7 +234,7 @@ describe('POST /api/cron/refresh-avatars — the owner-avatar heal', () => {
 			vi.fn(async (input: string | URL) =>
 				String(input).includes('getProfile')
 					? new Response(JSON.stringify({ avatar: BSKY_AVATAR }), { status: 200 })
-					: new Response(new Uint8Array([1, 2, 3, 4]), {
+					: new Response(jpegOfSize(4), {
 							status: 200,
 							headers: { 'content-type': 'image/jpeg' }
 						})

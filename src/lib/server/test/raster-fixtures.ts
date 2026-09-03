@@ -42,3 +42,23 @@ export function paddedMultiFrameGif(): Uint8Array {
 	const frame = [0x2c, 0, 0, 0, 0, 2, 0, 2, 0, 0x00, 0x02, 1, 0x4c, 0x00];
 	return new Uint8Array([...header, ...frame, 0x00, ...frame, 0x3b]);
 }
+
+/**
+ * A valid, metadata-free JPEG of exactly `size` bytes (4 or more): SOI, EOI,
+ * then filler after EOI, which decoders ignore. Storage puts scrub raster
+ * bodies (SONA-170), so any call site that stores image/jpeg needs bytes a
+ * parser can actually walk rather than a placeholder buffer. Typed over a plain
+ * ArrayBuffer so it drops straight into a Response body.
+ *
+ * Four bytes is the floor, because SOI and EOI are two markers of two bytes and
+ * a JPEG without both is not one. A test that wants a shorter or empty body is
+ * testing something other than a JPEG, so it builds those bytes itself.
+ */
+export function jpegOfSize(size = 4): Uint8Array<ArrayBuffer> {
+	if (size < 4) {
+		throw new Error('a JPEG needs at least an SOI and an EOI marker (4 bytes); build shorter bodies directly');
+	}
+	const out = new Uint8Array(size).fill(0x20);
+	out.set([0xff, 0xd8, 0xff, 0xd9], 0);
+	return out;
+}

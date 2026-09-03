@@ -127,7 +127,7 @@
 	// rows, so a name+reason key would collide.
 	let stickerErrorUid = 0;
 	let stickerErrors = $state<
-		{ uid: number; name: string; reason: 'too-large' | 'bad-type' | 'failed' }[]
+		{ uid: number; name: string; reason: 'too-large' | 'bad-type' | 'unscrubbable' | 'failed' }[]
 	>([]);
 	let published = $state(pack?.published ?? false);
 	let saving = $state(false);
@@ -155,7 +155,8 @@
 	function uploadStickers(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
-		// Reset so picking the same file again after a failure fires change.
+		// Clear the picker so choosing the same path again (the re-export a
+		// refusal asks for) fires a change event instead of being dropped.
 		input.value = '';
 		if (!files.length) return;
 		// `accept` is a filter the OS dialog can override ("All files"), so a
@@ -224,7 +225,13 @@
 							uid: stickerErrorUid++,
 							name: file.name,
 							reason:
-								result.status === 413 ? 'too-large' : result.status === 415 ? 'bad-type' : 'failed'
+								result.status === 413
+									? 'too-large'
+									: result.status === 415
+										? 'bad-type'
+										: result.status === 422
+											? 'unscrubbable'
+											: 'failed'
 						}
 					];
 				}
@@ -435,6 +442,8 @@
 							{m.admin_pack_error_too_large({ max: formatBytes(MAX_BUFFER_BYTES) })}
 						{:else if err.reason === 'bad-type'}
 							{m.admin_pack_error_bad_type()}
+						{:else if err.reason === 'unscrubbable'}
+							{m.admin_pack_error_unscrubbable()}
 						{:else}
 							{m.admin_pack_error_failed()}
 						{/if}

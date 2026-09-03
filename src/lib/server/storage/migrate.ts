@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { images } from '$lib/server/db/schema';
 import type { Database } from '$lib/server/db';
 import { extFromContentType, isAllowedImageType } from './index';
+import { isUnscrubbable, SNIFF_BYTES, UNSCRUBBABLE_MIGRATE_MESSAGE } from './scrub-metadata';
 import { sniffImageType } from './sniff';
 import type { StorageProvider } from './types';
 
@@ -81,10 +82,18 @@ export async function migrateImages(opts: {
 			}
 		} catch (e) {
 			result.failed++;
+			// Same mapping as migrateNextBatch: the parser's own wording is for
+			// the log, not for the operator reading the failure list.
+			const unscrubbable = isUnscrubbable(e);
+			if (unscrubbable) console.warn('storage migration: unscrubbable object', row.id, e);
 			result.items.push({
 				imageId: row.id,
 				status: 'failed',
-				error: e instanceof Error ? e.message : String(e)
+				error: unscrubbable
+					? UNSCRUBBABLE_MIGRATE_MESSAGE
+					: e instanceof Error
+						? e.message
+						: String(e)
 			});
 		}
 		onProgress?.(++done, rows.length);
@@ -152,7 +161,17 @@ export async function migrateNextBatch(opts: {
 			recent.push({ slug: row.slug, status: 'migrated' });
 		} catch (e) {
 			failed++;
-			failures.push({ imageId: row.id, error: e instanceof Error ? e.message : String(e) });
+			// An object stored before the scrubber existed (SONA-170) can carry a
+			// layout the parser refuses, and the storage layer refuses it again on
+			// the way into the new provider. This page renders the per-object error,
+			// so the row says what to do about it and the parser's own wording
+			// ("jpeg: segment 0x…") goes to the log.
+			const unscrubbable = isUnscrubbable(e);
+			if (unscrubbable) console.warn('storage migration: unscrubbable object', row.id, e);
+			failures.push({
+				imageId: row.id,
+				error: unscrubbable ? UNSCRUBBABLE_MIGRATE_MESSAGE : e instanceof Error ? e.message : String(e)
+			});
 			recent.push({ slug: row.slug, status: 'failed' });
 		}
 	}
@@ -232,9 +251,6 @@ async function copyOne(
 	});
 	return newUrl;
 }
-
-/** 64 bytes: enough for every raster signature, incl. AVIF ftyp compatible_brands. */
-const SNIFF_BYTES = 64;
 
 /** Read chunks off `reader` until at least `n` bytes have arrived (or EOF). */
 async function readAtLeast(

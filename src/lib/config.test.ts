@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { GALLERY_ACCEPT, STICKER_ACCEPT, VR_MEDIA_ACCEPT } from './config';
-import { ALLOWED_IMAGE_TYPES, isAllowedImageType } from './server/storage';
+import { ALLOWED_IMAGE_TYPES, isAllowedImageType } from './server/storage/allowlist';
 
 // A type only the accept string has uploads a file /api/upload refuses with a
 // 415; a type only the server has is one the admin can't pick at all.

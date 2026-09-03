@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { getSettings } from '$lib/server/settings';
 import { getStorage, deleteFile, isOwnedUrl } from '$lib/server/storage';
+import { isUnscrubbable, UNSCRUBBABLE_MIGRATE_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { stickers, stickerPacks, fursuitPhotos } from '$lib/server/db/schema';
 import { photographerSlug } from '$lib/server/fursuit-import';
 import type { RequestHandler } from './$types';
@@ -114,12 +115,19 @@ export const POST: RequestHandler = async ({ platform, url, fetch }) => {
 			items.push({ table: 'stickers', id: row.id, status: 'rekeyed', oldUrl: row.imageUrl, newUrl });
 		} catch (e) {
 			failed++;
+			// An object stored before the scrubber existed (SONA-170) can carry a
+			// layout the parser refuses, and the storage layer refuses it again on
+			// the way back in. Report it the way the provider migration does — the
+			// operator has to replace the file — and keep the parser's own wording
+			// ("jpeg: segment 0x…") for the log.
+			const unscrubbable = isUnscrubbable(e);
+			if (unscrubbable) console.warn('sticker re-key: unscrubbable object', row.id, e);
 			items.push({
 				table: 'stickers',
 				id: row.id,
 				status: 'failed',
 				oldUrl: row.imageUrl,
-				error: e instanceof Error ? e.message : String(e)
+				error: unscrubbable ? UNSCRUBBABLE_MIGRATE_MESSAGE : e instanceof Error ? e.message : String(e)
 			});
 		}
 	}
@@ -144,12 +152,15 @@ export const POST: RequestHandler = async ({ platform, url, fetch }) => {
 			items.push({ table: 'fursuit_photos', id: row.id, status: 'rekeyed', oldUrl: row.imageUrl, newUrl });
 		} catch (e) {
 			failed++;
+			// Same refusal, same wording, on the photo half of the re-key.
+			const unscrubbable = isUnscrubbable(e);
+			if (unscrubbable) console.warn('fursuit re-key: unscrubbable object', row.id, e);
 			items.push({
 				table: 'fursuit_photos',
 				id: row.id,
 				status: 'failed',
 				oldUrl: row.imageUrl,
-				error: e instanceof Error ? e.message : String(e)
+				error: unscrubbable ? UNSCRUBBABLE_MIGRATE_MESSAGE : e instanceof Error ? e.message : String(e)
 			});
 		}
 	}

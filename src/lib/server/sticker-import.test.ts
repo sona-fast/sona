@@ -27,6 +27,7 @@ import { listPublicCharacterNames } from '$lib/server/characters';
 import { stickerTabEnabled, clearStickerTabCache } from '$lib/server/stickers';
 import { slugify } from '$lib/server/slugify';
 import { getStickerSet, downloadFile } from '$lib/server/telegram';
+import { UNSCRUBBABLE_STICKER_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { readFileSync } from 'node:fs';
 
 // Telegram is mocked so the import path is exercisable offline. getStickerSet
@@ -612,6 +613,15 @@ describe('saveManualPack', () => {
 });
 
 describe('importTelegramPack', () => {
+	afterEach(() => {
+		// Restore the module-level default (throwing download) for the suites that
+		// follow, whichever test in here overrode it.
+		vi.mocked(downloadFile).mockReset();
+		vi.mocked(downloadFile).mockImplementation(async () => {
+			throw new Error('download boom');
+		});
+	});
+
 	it('leaves no empty pack when every download fails', async () => {
 		const { db } = makeDb();
 		await seedCharacterAndArtist(db);
@@ -629,6 +639,52 @@ describe('importTelegramPack', () => {
 		expect(result.failed).toBe(1);
 		const packs = await db.select().from(stickerPacks);
 		expect(packs).toHaveLength(0);
+	});
+
+	it('tells the operator what to do when a sticker cannot be scrubbed', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		// A WebP head over bytes the scrubber cannot walk: the storage layer
+		// refuses it (SONA-170), and this page renders the per-item error, so the
+		// row must say how to fix it rather than repeat the parser's wording.
+		const broken = new Uint8Array([...staticWebp().subarray(0, 12), 0, 0, 0]);
+		vi.mocked(downloadFile).mockReset();
+		vi.mocked(downloadFile).mockResolvedValue({
+			bytes: broken.buffer as ArrayBuffer,
+			contentType: 'application/octet-stream',
+			filePath: 'stickers/file_0.webp'
+		});
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const bucket = {
+			put: vi.fn(async () => {}),
+			delete: vi.fn(async () => {}),
+			list: vi.fn(async () => ({ objects: [], truncated: false }))
+		};
+
+		const result = await importTelegramPack({
+			env: { IMAGES: bucket, TELEGRAM_BOT_TOKEN: 'x' } as unknown as SaveOpts['env'],
+			settings: {
+				primaryCharacter: '',
+				storageProvider: 'r2',
+				r2PublicUrl: 'https://cdn.test'
+			} as unknown as SiteSettings,
+			db,
+			nameOrUrl: 'failset',
+			managerArtistId: null,
+			defaultArtistId: null
+		});
+
+		expect(result.failed).toBe(1);
+		expect(result.items[0].error).toBe(UNSCRUBBABLE_STICKER_MESSAGE);
+		expect(bucket.put).not.toHaveBeenCalled();
+		// The parser's own wording is still available, in the log: the refusal
+		// itself is logged, not only a label.
+		expect(warn).toHaveBeenCalledWith(
+			'sticker import: unscrubbable sticker',
+			expect.anything(),
+			expect.objectContaining({ name: 'UnscrubbableImageError' })
+		);
+		warn.mockRestore();
 	});
 });
 
@@ -666,7 +722,7 @@ describe('importStickerBatch', () => {
 	function mockDownloadOk() {
 		vi.mocked(getStickerSet).mockResolvedValue(multiSet);
 		vi.mocked(downloadFile).mockResolvedValue({
-			bytes: new ArrayBuffer(8),
+			bytes: staticWebp().buffer as ArrayBuffer,
 			contentType: 'application/octet-stream',
 			filePath: 'stickers/file_0.webp'
 		});
@@ -688,6 +744,41 @@ describe('importStickerBatch', () => {
 	function item(fileId: string, over: { emojis?: string[]; artistId?: number | null; nsfw?: boolean } = {}) {
 		return { fileId, emojis: over.emojis ?? [], artistId: over.artistId ?? null, nsfw: over.nsfw ?? false };
 	}
+
+	it('tells the operator what to do when a batched sticker cannot be scrubbed', async () => {
+		const { db } = makeDb();
+		await seedCharacterAndArtist(db);
+		// Same refusal as the whole-pack import, on the batched path the picker
+		// page uses: the row's reason must be the operator sentence, not the
+		// parser's wording.
+		vi.mocked(getStickerSet).mockResolvedValue(multiSet);
+		const broken = new Uint8Array([...staticWebp().subarray(0, 12), 0, 0, 0]);
+		vi.mocked(downloadFile).mockResolvedValue({
+			bytes: broken.buffer as ArrayBuffer,
+			contentType: 'application/octet-stream',
+			filePath: 'stickers/file_0.webp'
+		});
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+		const r = await importStickerBatch({
+			env: r2Env,
+			settings: r2Settings,
+			db,
+			nameOrUrl: 'megapack',
+			managerArtistId: null,
+			items: [item('a')]
+		});
+
+		expect(r.imported).toBe(0);
+		expect(r.failed).toHaveLength(1);
+		expect(r.failed[0].reason).toBe(UNSCRUBBABLE_STICKER_MESSAGE);
+		expect(warn).toHaveBeenCalledWith(
+			'sticker import: unscrubbable sticker',
+			'a',
+			expect.objectContaining({ name: 'UnscrubbableImageError' })
+		);
+		warn.mockRestore();
+	});
 
 	it('imports only the items in the batch', async () => {
 		const { db } = makeDb();
@@ -1037,7 +1128,7 @@ describe('importStickerBatch cross-pack shared-file safety', () => {
 			return s;
 		});
 		vi.mocked(downloadFile).mockResolvedValue({
-			bytes: new ArrayBuffer(8),
+			bytes: staticWebp().buffer as ArrayBuffer,
 			contentType: 'application/octet-stream',
 			filePath: 'stickers/file_0.webp'
 		});
@@ -1260,7 +1351,7 @@ describe('resyncTelegramPacks', () => {
 	function mockDownloadOk() {
 		vi.mocked(getStickerSet).mockResolvedValue(multiSet);
 		vi.mocked(downloadFile).mockResolvedValue({
-			bytes: new ArrayBuffer(8),
+			bytes: staticWebp().buffer as ArrayBuffer,
 			contentType: 'application/octet-stream',
 			filePath: 'stickers/file_0.webp'
 		});
