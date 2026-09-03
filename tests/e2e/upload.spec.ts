@@ -223,10 +223,12 @@ function pasteFile(page: Page, name: string, type: string) {
 // The page's own live region (the admin layout has a separate one, a <p>).
 const LIVE_REGION = 'div.sr-only[aria-live="polite"]';
 
-// Record every text the live region is handed. A batch writes it three times in
-// quick succession — the added/refused counts, "Uploading...", then the outcome
-// — and only the last survives long enough for a polling locator assertion to
-// see it, so a MutationObserver is the only way to assert the earlier ones.
+// Record every text the live region is handed. A batch writes it twice — the
+// added/refused counts when the files land, then the outcome when the last one
+// is done — and only the second survives long enough for a polling locator
+// assertion to see it, so a MutationObserver is the only way to assert the
+// first. Two writes, not three: an "Uploading..." write between them landed in
+// the same frame as the counts and was the only one a screen reader read out.
 async function recordAnnouncements(page: Page) {
 	await page.evaluate((selector) => {
 		const region = document.querySelector(selector)!;
@@ -302,16 +304,22 @@ test('dropping images adds tiles, and a wrong type is rejected without a request
 	await expect(page.locator('.tile-error .error-text')).toContainText(
 		"That file type isn't supported"
 	);
-	// The live region counts only the file that really entered the batch as
-	// added; the refused one gets its own count, and the two are joined as the
-	// separate sentences they are.
-	await expect
-		.poll(announced)
-		.toContain("1 image(s) added. 1 file(s) couldn't be added");
 	// The image in that same drop still uploads...
 	await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue('/x2.png', {
 		timeout: 15_000
 	});
+	// The live region says exactly two things about this drop, in this order: the
+	// counts (only the file that really entered the batch is "added"; the refused
+	// one gets its own count, joined as the separate sentences they are), then how
+	// the batch ended. The end is "with errors" because the refused file is part
+	// of the drop — a batch that carried one can't report a clean finish.
+	await expect.poll(announced).toEqual([
+		"1 image(s) added. 1 file(s) couldn't be added",
+		'Upload finished with errors. Each file that failed shows the reason.'
+	]);
+	await expect(page.locator(LIVE_REGION)).toHaveText(
+		'Upload finished with errors. Each file that failed shows the reason.'
+	);
 	// ...and exactly one POST fired — none for the refused file. Past the moment a
 	// POST that DID fire would have landed (mutation-checked).
 	await page.waitForTimeout(300);
@@ -385,9 +393,53 @@ test('a picked file the accept string refuses gets an error tile, not a POST', a
 	// The placeholder carries the file name the alt text used to.
 	await expect(page.locator('.tile-preview img')).toHaveCount(0);
 	await expect(page.getByRole('img', { name: 'diagram.svg' })).toBeVisible();
+	// Nothing entered the batch, so the counts are the whole announcement: no
+	// batch opened, and "Upload finished." after a file that never uploaded would
+	// be a lie. Read again after a wait, since a later write would replace it.
+	await expect(page.locator(LIVE_REGION)).toHaveText("1 file(s) couldn't be added");
 	await page.waitForTimeout(300);
+	await expect(page.locator(LIVE_REGION)).toHaveText("1 file(s) couldn't be added");
 	expect(uploads.counters.total).toBe(0);
 });
+
+// The ja bad-type string runs to four lines at tile width. The status band used
+// to be an overlay pinned to the bottom of the preview, so at that height it
+// covered the placeholder icon; on a placeholder tile the band is in normal flow
+// and the icon keeps the space above it. Both widths, since the tile is narrower
+// on a phone and the string wraps further.
+for (const width of [1280, 390]) {
+	test(`the refused-file icon clears the status band at ${width}px in Japanese`, async ({
+		page
+	}) => {
+		await adminLogin(page, PASSWORD);
+		// The paraglide locale cookie (src/lib/paraglide/runtime.js cookieName)
+		// switches the SSR locale, the same way the VR guide spec does.
+		await page
+			.context()
+			.addCookies([{ name: 'PARAGLIDE_LOCALE', value: 'ja', domain: 'localhost', path: '/' }]);
+		await page.setViewportSize({ width, height: 900 });
+		await page.goto('/admin/upload');
+		await stageFiles(
+			page,
+			{ name: 'diagram.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg/>') },
+			1
+		);
+		await expect(page.locator('.tile-error .error-text')).toContainText(
+			'対応していないファイル形式です'
+		);
+
+		const icon = (await page.locator('.tile-placeholder svg').boundingBox())!;
+		const band = (await page.locator('.tile-status').boundingBox())!;
+		const preview = (await page.locator('.tile-preview').boundingBox())!;
+		// The icon sits entirely above the band and inside the preview box, so no
+		// part of it is covered or clipped away.
+		expect(icon.y + icon.height).toBeLessThanOrEqual(band.y + 0.5);
+		expect(icon.y).toBeGreaterThanOrEqual(preview.y - 0.5);
+		// The band fits too — one that overflowed would lose its last line to the
+		// preview's `overflow: hidden`.
+		expect(band.y + band.height).toBeLessThanOrEqual(preview.y + preview.height + 0.5);
+	});
+}
 
 // Pasting is the third way a file reaches the queue, and it goes through the
 // same accept partition a drop does — a pasted SVG is one /api/upload refuses.
@@ -448,6 +500,95 @@ test('a failed upload announces the batch as finished with errors', async ({ pag
 	await expect(page.locator(LIVE_REGION)).toHaveText(
 		'Upload finished with errors. Each file that failed shows the reason.'
 	);
+});
+
+test('an overlapping batch does not close out the one still uploading', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	// The first POST is held open until the test releases it; the second fails.
+	// So the second batch finishes FIRST, while the first is still in flight.
+	let arrived = () => {};
+	const firstArrived = new Promise<void>((resolve) => (arrived = resolve));
+	let release = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	let posts = 0;
+	await page.route('**/api/upload', async (route) => {
+		posts++;
+		if (posts === 1) {
+			arrived();
+			await held;
+			await route.fulfill({
+				contentType: 'application/json',
+				body: JSON.stringify({ url: '/held.png' })
+			});
+			return;
+		}
+		await route.fulfill({ status: 500, body: 'nope' });
+	});
+
+	await page.goto('/admin/upload');
+	await waitForDropAttachment(page, '.dropzone');
+	const announced = await recordAnnouncements(page);
+
+	await dropOn(page, '.dropzone', [{ name: 'held.png', type: 'image/png' }]);
+	await firstArrived;
+	// Its tile turned the dropzone into the grid, which is where the second drop
+	// lands — mid-flight, so the two batches overlap.
+	await waitForDropAttachment(page, '.tile-grid');
+	await dropOn(page, '.tile-grid', [{ name: 'doomed.png', type: 'image/png' }]);
+	await expect(page.locator('.tile-error .error-text')).toContainText('Upload failed (500)', {
+		timeout: 15_000
+	});
+	// The second batch is over, but the first is still uploading — announcing
+	// anything now would tell the operator a batch finished that hasn't.
+	expect(await announced()).not.toContain('Upload finished.');
+
+	release();
+	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/held.png', {
+		timeout: 15_000
+	});
+	// The last batch in flight speaks for both, and carries the failure the other
+	// one hit — not the clean finish its own file had.
+	await expect(page.locator(LIVE_REGION)).toHaveText(
+		'Upload finished with errors. Each file that failed shows the reason.'
+	);
+	await page.waitForTimeout(300);
+	expect(await announced()).not.toContain('Upload finished.');
+});
+
+test('the same batch outcome twice is announced twice', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	let uploads = 0;
+	await page.route('**/api/upload', async (route) => {
+		uploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: `/x${uploads}.png` })
+		});
+	});
+
+	await page.goto('/admin/upload');
+	await waitForDropAttachment(page, '.dropzone');
+	const region = page.locator(LIVE_REGION);
+
+	await dropOn(page, '.dropzone', [{ name: 'first.png', type: 'image/png' }]);
+	await expect(region).toHaveText('Upload finished.', { timeout: 15_000 });
+
+	// Re-assigning the text the region already holds touches no DOM and is not
+	// announced; the keyed inner node must be replaced (same shape as the VR
+	// form's "same media status twice" test). The first tile swapped the dropzone
+	// for the grid, which is where the second file goes.
+	await region.locator('span').evaluate((el) => el.setAttribute('data-first', ''));
+	await waitForDropAttachment(page, '.tile-grid');
+	await dropOn(page, '.tile-grid', [{ name: 'second.png', type: 'image/png' }]);
+	await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue(/^\/x\d+\.png$/, {
+		timeout: 15_000
+	});
+	await expect(region.locator('span[data-first]')).toHaveCount(0);
+	await expect(region).toHaveText('Upload finished.');
 });
 
 test('the upload zones refuse files while a save is in flight', async ({ page }) => {

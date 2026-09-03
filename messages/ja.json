@@ -353,7 +353,6 @@
 	"admin_upload_uploaded": "アップロード完了",
 	"admin_upload_replace_hint": "クリックまたはドラッグで差し替え",
 	"admin_upload_retry_hint": "クリックまたはドラッグで再試行",
-	"admin_upload_dropzone": "画像を選択するか、ここにドラッグしてください",
 	"admin_upload_dropzone_multi": "最大{max}枚の画像を選択するか、ここにドラッグするか、クリップボードから貼り付けてください",
 	"admin_upload_images_added": "{count}枚の画像を追加しました",
 	"admin_upload_over_limit": "{count}枚をスキップしました（最大{max}枚）",

@@ -41,9 +41,11 @@ function carriesFiles(e: DragEvent): boolean {
  * DOM-less node environment; `isTextEditable` only reads the three fields below.
  */
 function droppedOnTextField(e: DragEvent): boolean {
-	const t = e.target as { tagName?: unknown; type?: string; isContentEditable?: boolean } | null;
+	const t = e.target as Parameters<typeof isTextEditable>[0] | null;
+	// The cast is a claim, not a check: an EventTarget can be the document or the
+	// window, neither of which has a tagName.
 	if (typeof t?.tagName !== 'string') return false;
-	return isTextEditable(t as { tagName: string; type?: string; isContentEditable?: boolean });
+	return isTextEditable(t);
 }
 
 /**

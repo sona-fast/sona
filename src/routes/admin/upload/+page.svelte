@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { tick } from 'svelte';
 	import { CloudUpload, Check, FileBox, Loader2, Plus, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { extractImageFiles, isTextEditable, shouldHandleImagePaste } from '$lib/clipboard';
@@ -46,6 +45,12 @@
 	};
 	let tiles = $state<Tile[]>([]);
 	let tileKey = 0;
+	// Two drops can overlap: a second batch starts while the first is still
+	// uploading. Only the last batch in flight writes the terminal announcement,
+	// so neither closes the other out, and it carries any error either of them
+	// hit. Not $state — nothing renders them.
+	let inFlightBatches = 0;
+	let batchHadErrors = false;
 	let parentIndex = $state(0);
 	// 'new' = the set becomes a new piece (one tile is the parent);
 	// 'existing' = every file becomes a variant of an already-uploaded piece.
@@ -123,6 +128,10 @@
 		// over-admit a second drop that lands while this batch is still
 		// uploading, and the announcement below counts tiles that really exist.
 		const batch: { key: number; file: File }[] = [];
+		// Every tile this call creates, in the batch or not: the terminal
+		// announcement reports on all of them, so a file refused before the batch
+		// opened can't be closed out as a clean finish.
+		const created: number[] = [];
 		for (const { file, badType } of fileArray) {
 			// The two ways a file fails before it is ever sent: a type the server
 			// refuses, and a size over the server's cap (which could only come back
@@ -150,6 +159,7 @@
 				nsfw: false
 			};
 			tiles = [...tiles, tile];
+			created.push(tile.key);
 			// A failed tile never enters the batch: no dimension probe (pass 2 would
 			// decode a >64 MB image for a tile that already failed) and no doomed
 			// POST. Its tile keeps 0×0 dims — it can't be saved anyway.
@@ -159,14 +169,18 @@
 		// Only files that really entered the batch are announced as added — the
 		// refused ones are counted separately, so the region never claims a
 		// rejected file was added. The mixed case is its own message so each
-		// locale can punctuate the two sentences its own way.
-		const refused = fileArray.length - batch.length;
+		// locale can punctuate the two sentences its own way. Refused counts the
+		// wrong-type files alone: an oversized one holds a tile that names its own
+		// limit, so counting it here would report the same problem twice. When
+		// nothing entered the batch every file failed one way or the other, so all
+		// of them are counted as refused.
+		const refused = fileArray.filter(({ badType }) => badType).length;
 		setAnnounce(
 			batch.length > 0 && refused > 0
 				? m.admin_upload_images_added_and_rejected({ added: batch.length, rejected: refused })
 				: batch.length > 0
 					? m.admin_upload_images_added({ count: batch.length })
-					: m.admin_upload_images_rejected({ count: refused })
+					: m.admin_upload_images_rejected({ count: fileArray.length })
 		);
 
 		// Pass 2: probe dimensions and upload. Uploads run one at a time WITHIN
@@ -175,25 +189,39 @@
 		// loop, so the guarantee is per-invocation, not global. Each tile still
 		// shows its own status. Mutate the tile via the `tiles` state proxy
 		// (not the pass-1 local) so updates stay reactive.
+		// Nothing to upload: the counts above are the whole announcement, and no
+		// batch opens, so no "finished" ever follows them.
 		if (batch.length === 0) return;
-		// The await is load-bearing: without it the counts above and this status
-		// land in one synchronous run and the counts never reach the DOM at all.
-		await tick();
-		setAnnounce(m.admin_upload_uploading());
-		for (const { key, file } of batch) {
-			const dims = await getImageDimensions(file);
-			const tile = tiles.find((t) => t.key === key);
-			if (!tile) continue; // removed while the batch was still working
-			tile.width = dims.width;
-			tile.height = dims.height;
-			await uploadOne(tile, file);
+		// The counts above are the batch's start announcement. Writing "Uploading"
+		// on top of them here would land in the same frame and be the only thing a
+		// screen reader ever read out, so the batch says two things: what arrived,
+		// and how it ended.
+		inFlightBatches++;
+		try {
+			for (const { key, file } of batch) {
+				const dims = await getImageDimensions(file);
+				const tile = tiles.find((t) => t.key === key);
+				if (!tile) continue; // removed while the batch was still working
+				tile.width = dims.width;
+				tile.height = dims.height;
+				await uploadOne(tile, file);
+			}
+		} finally {
+			// The per-tile outcome is only visible as an icon or a line of text on
+			// the tile, so close the batch out in the live region too (mirroring the
+			// VR media flow). EVERY tile this call created counts, not just the
+			// uploaded ones — a file refused before the batch opened went wrong too,
+			// and calling that "finished" would be a lie. Tiles the batch dropped —
+			// a declined duplicate, a removal mid-upload — are simply gone, so only
+			// survivors can report an error.
+			if (created.some((key) => tiles.find((t) => t.key === key)?.status === 'error'))
+				batchHadErrors = true;
+			inFlightBatches--;
+			if (inFlightBatches === 0) {
+				setAnnounce(batchHadErrors ? m.admin_upload_batch_issues() : m.admin_upload_batch_done());
+				batchHadErrors = false;
+			}
 		}
-		// The per-tile outcome is only visible as an icon or a line of text on the
-		// tile, so close the batch out in the live region too (mirroring the VR
-		// media flow). Tiles the batch dropped — a declined duplicate, a removal
-		// mid-upload — are simply gone, so only survivors can report an error.
-		const failed = batch.some(({ key }) => tiles.find((t) => t.key === key)?.status === 'error');
-		setAnnounce(failed ? m.admin_upload_batch_issues() : m.admin_upload_batch_done());
 	}
 
 	function removeTile(key: number) {
@@ -325,7 +353,7 @@
 							<!-- A refused file has no preview to show; the icon stands in
 							     for it and carries the file name the img alt used to. -->
 							<div class="tile-placeholder" role="img" aria-label={tile.fileName}>
-								<FileBox size={28} />
+								<FileBox size={36} />
 							</div>
 						{/if}
 						<div class="tile-status">
@@ -644,19 +672,43 @@
 		background: var(--secondary);
 	}
 
+	/* A placeholder tile has no picture for the band to sit over, and its error
+	   line runs to four lines in ja — as an overlay the band covered the icon.
+	   Stack the two in normal flow instead, so the band takes the height it needs
+	   and the icon keeps what's left. Scoped by :has() so an <img> tile is
+	   untouched: there the band still floats over the picture. */
+	.tile-preview:has(.tile-placeholder) {
+		display: flex;
+		flex-direction: column;
+	}
+
+	/* The band is also tinted toward --destructive here so the failure reads
+	   without parsing the text. Only here: the backdrop is the known tile
+	   surface, where white on this mix measures 6.3:1 to 7.4:1 across the six
+	   themes. Over an image preview the backdrop is the artwork, and on a white
+	   one the same mix falls to 4.2:1 — under AA, and worse than the plain black
+	   band's 5.7:1 — so image tiles keep the black band. */
+	.tile-preview:has(.tile-placeholder) .tile-status {
+		position: static;
+		margin-top: auto;
+		background: color-mix(in srgb, var(--destructive) 55%, rgba(0, 0, 0, 0.6));
+	}
+
 	.tile-preview img {
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
 	}
 
-	/* Stand-in for a refused file, which gets no object URL to preview. */
+	/* Stand-in for a refused file, which gets no object URL to preview. Takes the
+	   height the band above leaves rather than the whole preview box. */
 	.tile-placeholder {
 		display: flex;
+		flex: 1;
+		min-height: 0;
 		align-items: center;
 		justify-content: center;
 		width: 100%;
-		height: 100%;
 		color: var(--muted-foreground);
 	}
 

@@ -43,9 +43,7 @@ export const GALLERY_ACCEPT = 'image/jpeg,image/jpg,image/png,image/gif,image/we
 /**
  * `accept` string for the VR avatar form's media picker and drop zone: every
  * image the gallery takes, plus the one video type the showcase renders. Derived
- * from GALLERY_ACCEPT rather than spelled out again — the copy that used to live
- * in the component had drifted (it was missing image/jpg, which the server
- * accepts), and the same pin test in config.test.ts now covers both.
+ * from GALLERY_ACCEPT rather than spelled out again, so the two can't drift.
  */
 export const VR_MEDIA_ACCEPT = `${GALLERY_ACCEPT},video/webm`;
 

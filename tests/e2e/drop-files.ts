@@ -56,7 +56,8 @@ export function dragOver(page: Page, selector: string) {
 
 /**
  * Dispatch a bubbling `dragover` carrying only text on `selector`, and report
- * whether a handler cancelled it.
+ * whether it came back UNcancelled — `true` means no handler called
+ * preventDefault (the inverse of what `dropOn` returns).
  *
  * `selector` is the element the drag LANDS on, which is what decides the
  * outcome: a zone that wraps text fields (the upload page's tile grid) has to
