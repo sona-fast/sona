@@ -149,9 +149,9 @@ Each caller handles the refusal in its own way. An upload through `/api/upload`
 returns 422 and asks you to re-export the file. A fursuit import counts that
 photo as failed and logs the reason. Avatar re-hosting logs a warning and keeps
 the source URL as a hotlink. A sticker import reports the failure for that
-sticker. Uploading stickers by hand in the pack form counts the refused files
-among the failures and names the refusal in a second message with its own
-count, because the operator picked those files and can re-export them. A provider migration lists the object as failed and asks you to replace
+sticker. Uploading stickers by hand in the pack form names each refused file
+and the fix on its own line under the upload zone, because the operator picked
+those files and can re-export them. A provider migration lists the object as failed and asks you to replace
 it with a fresh copy. The sticker re-key reports it the same way a migration
 does, because the operator has to replace the file either way.
 
