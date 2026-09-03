@@ -1,4 +1,45 @@
 import { describe, it, expect, vi } from 'vitest';
+import { GALLERY_ACCEPT, STICKER_ACCEPT, VR_MEDIA_ACCEPT } from './config';
+import { ALLOWED_IMAGE_TYPES, isAllowedImageType } from './server/storage/allowlist';
+
+// A type only the accept string has uploads a file /api/upload refuses with a
+// 415; a type only the server has is one the admin can't pick at all.
+describe('GALLERY_ACCEPT', () => {
+	const types = GALLERY_ACCEPT.split(',');
+
+	it('offers only types the server stores', () => {
+		for (const t of types) expect(isAllowedImageType(t)).toBe(true);
+	});
+
+	it('offers every type the server stores', () => {
+		expect(new Set(types)).toEqual(ALLOWED_IMAGE_TYPES);
+	});
+});
+
+// Same pin for the VR form's picker, which adds the one video type the showcase
+// renders on top of the gallery's images.
+describe('VR_MEDIA_ACCEPT', () => {
+	const types = VR_MEDIA_ACCEPT.split(',');
+
+	it('offers exactly the server image types, plus video/webm', () => {
+		expect(new Set(types.filter((t) => t.startsWith('image/')))).toEqual(ALLOWED_IMAGE_TYPES);
+		expect(types.filter((t) => !t.startsWith('image/'))).toEqual(['video/webm']);
+	});
+});
+
+// Stickers deliberately offer fewer formats than the gallery, but never one the
+// server refuses — that would upload a file just to collect a 415.
+describe('STICKER_ACCEPT', () => {
+	it('offers only types the server stores', () => {
+		for (const t of STICKER_ACCEPT.split(',')) expect(isAllowedImageType(t)).toBe(true);
+	});
+
+	it('is exactly PNG and WebP, the two formats a sticker is stored as', () => {
+		// A subset check alone would let image/jpeg slip in, since the server
+		// stores it for artwork; the sticker contract is narrower than that.
+		expect(STICKER_ACCEPT.split(',').sort()).toEqual(['image/png', 'image/webp']);
+	});
+});
 
 describe('SESSION_COOKIE', () => {
 	it('uses the __Host- prefix in production', async () => {

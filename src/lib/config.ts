@@ -29,6 +29,33 @@ export const APP_NAME = 'Sona';
 export const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
 /**
+ * `accept` string for the admin gallery upload picker, and the filter dropped
+ * files are partitioned by. MIME types only, mirroring the server's
+ * ALLOWED_IMAGE_TYPES (`$lib/server/storage/allowlist`): /api/upload validates the
+ * DECLARED type and reads an empty one as application/octet-stream, so accepting
+ * a bare `.png` here would upload the whole file just to collect a 415.
+ * Client-safe, and pinned to the server set by a test in config.test.ts — the
+ * two drifting apart either refuses a file the server would store or uploads one
+ * it will refuse.
+ */
+export const GALLERY_ACCEPT = 'image/jpeg,image/jpg,image/png,image/gif,image/webp,image/avif';
+
+/**
+ * `accept` string for the VR avatar form's media picker and drop zone: every
+ * image the gallery takes, plus the one video type the showcase renders. Derived
+ * from GALLERY_ACCEPT rather than spelled out again, so the two can't drift.
+ */
+export const VR_MEDIA_ACCEPT = `${GALLERY_ACCEPT},video/webm`;
+
+/**
+ * `accept` string for the sticker pack form's picker and drop zone. Narrower
+ * than GALLERY_ACCEPT on purpose — a sticker is stored as one of these two
+ * formats — but still a subset of what the server stores, pinned by a test in
+ * config.test.ts. MIME types only, for the same reason GALLERY_ACCEPT is.
+ */
+export const STICKER_ACCEPT = 'image/png,image/webp';
+
+/**
  * Admin session cookie name. Read in `hooks.server.ts` / `auth.ts` before any
  * DB access, so it must be a build-time constant rather than a setting.
  *

@@ -4,6 +4,11 @@
 	import { X, Plus, ArrowLeft, Check, Loader2, GripVertical, UserPlus } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
+	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
+	import { MAX_BUFFER_BYTES, STICKER_ACCEPT } from '$lib/config';
+	// The shared size formatter; it lives in $lib/vr only because that page needed
+	// it first, and it carries no VR-specific behaviour.
+	import { formatBytes } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 	import StickerMedia from '$lib/components/StickerMedia.svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
@@ -104,10 +109,32 @@
 	);
 
 	let uploading = $state(false);
+	// Upload start/done announcements for the stickers section's live region:
+	// the zone label and the new rows show both, but only visually.
+	let stickerStatus = $state('');
+	// Bumped on every status write so {#key} replaces the node inside the live
+	// region: two single-file drops both say "1 sticker added", and re-assigning
+	// the text it already holds changes no DOM, so nothing is announced.
+	let stickerStatusUid = $state(0);
+	function setStickerStatus(text: string) {
+		stickerStatus = text;
+		stickerStatusUid++;
+	}
+	// Per-file failure reporting, the same shape the VR media zone uses: a
+	// multi-file pick partially succeeds often, and a toast both disappears and
+	// collapses the batch into one line that reads as if everything failed. uid
+	// keys the {#each}: two same-named files failing the same way are distinct
+	// rows, so a name+reason key would collide.
+	let stickerErrorUid = 0;
+	let stickerErrors = $state<
+		{ uid: number; name: string; reason: 'too-large' | 'bad-type' | 'unscrubbable' | 'failed' }[]
+	>([]);
 	let published = $state(pack?.published ?? false);
 	let saving = $state(false);
 
-	async function uploadFile(file: File): Promise<string | null> {
+	// Returns the stored URL, or the response status so the caller can name the
+	// reason in the error banner instead of a bare "failed".
+	async function uploadFile(file: File): Promise<{ url: string } | { status: number }> {
 		const fd = new FormData();
 		fd.append('file', file);
 		// Keep sticker/cover uploads in the stickers/ partition instead of leaking
@@ -116,65 +143,111 @@
 		// until the form is saved — so stickers/ is the correct target for now.
 		fd.append('folder', 'stickers');
 		const res = await fetch('/api/upload', { method: 'POST', body: fd });
-		// 422 is the one failure the operator can act on: the file's metadata
-		// could not be stripped, and a re-export fixes it (SONA-170).
-		if (res.status === 422) return 'refused';
-		if (!res.ok) return null;
-		const { url } = (await res.json()) as { url: string };
-		return url;
+		if (!res.ok) return { status: res.status };
+		// A 2xx whose body carries no usable url is a failure too: storing it
+		// would add a row pointing at nothing. Status 0 (no status of its own)
+		// makes the caller name it a plain "failed".
+		// The cast validates nothing, so check the type as well as emptiness.
+		const { url } = (await res.json()) as { url?: unknown };
+		return typeof url === 'string' && url ? { url } : { status: 0 };
 	}
 
-	async function uploadStickers(e: Event) {
+	function uploadStickers(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
 		// Clear the picker so choosing the same path again (the re-export a
 		// refusal asks for) fires a change event instead of being dropped.
 		input.value = '';
 		if (!files.length) return;
+		// `accept` is a filter the OS dialog can override ("All files"), so a
+		// picked JPEG can arrive here; partition it the same way a drop is.
+		const { accepted, rejected } = partitionByAccept(files, STICKER_ACCEPT);
+		addStickerFiles(accepted, rejected);
+	}
+
+	// Shared by the file input and the drop attachment; both partition their
+	// files first, so `rejected` is reported without being uploaded.
+	async function addStickerFiles(files: File[], rejected: File[] = []) {
+		// A fresh batch replaces the previous batch's messages: leaving them would
+		// name files the operator has already dealt with.
+		stickerErrors = rejected.map((file) => ({
+			uid: stickerErrorUid++,
+			name: file.name,
+			reason: 'bad-type' as const
+		}));
+		if (!files.length) {
+			// Nothing to upload, but the status region must not keep the last
+			// batch's text beside a fresh bad-type banner.
+			if (rejected.length) setStickerStatus(m.admin_pack_upload_issues());
+			return;
+		}
 		uploading = true;
+		setStickerStatus(m.admin_upload_uploading());
 		let ok = 0;
-		let failed = 0;
-		let refused = 0;
 		try {
 			for (const file of files) {
-				let url: string | null = null;
-				try {
-					url = await uploadFile(file);
-				} catch {
-					url = null;
+				// Client-side cap, ahead of the POST: /api/upload would answer 413
+				// only after the whole body went up the wire, so an oversized file
+				// costs the operator the upload before it can be named.
+				if (file.size > MAX_BUFFER_BYTES) {
+					stickerErrors = [
+						...stickerErrors,
+						{ uid: stickerErrorUid++, name: file.name, reason: 'too-large' }
+					];
+					continue;
 				}
-				if (url === 'refused') {
-					refused++;
-					failed++;
-				} else if (url) {
+				let result: { url: string } | { status: number };
+				try {
+					result = await uploadFile(file);
+				} catch {
+					// A thrown fetch (offline, aborted) carries no status of its own.
+					result = { status: 0 };
+				}
+				if ('url' in result) {
 					ok++;
 					stickerEntries.push({
 						uid: nextUid++,
-						imageUrl: url,
+						imageUrl: result.url,
 						artistId: '',
 						emojis: '',
 						nsfw: false,
-						format: file.name.endsWith('.png') ? 'png' : 'webp'
+						// From the MIME type, not the name: a file may have no extension
+						// or an uppercase one. Both entry points partition against
+						// STICKER_ACCEPT, which lists MIME types only, so anything that
+						// reaches here declared one of the two.
+						format: file.type.toLowerCase() === 'image/png' ? 'png' : 'webp'
 					});
 				} else {
-					failed++;
+					// Keep the successful uploads; the banner names what didn't land.
+					stickerErrors = [
+						...stickerErrors,
+						{
+							uid: stickerErrorUid++,
+							name: file.name,
+							reason:
+								result.status === 413
+									? 'too-large'
+									: result.status === 415
+										? 'bad-type'
+										: result.status === 422
+											? 'unscrubbable'
+											: 'failed'
+						}
+					];
 				}
 			}
 			stickerEntries = [...stickerEntries];
 		} finally {
 			uploading = false;
+			// Alongside clearing `uploading`, so a throw can't strand the region on
+			// "Uploading…". The banner names the failed files, so the region only
+			// has to say the batch finished badly — the same split the VR media
+			// zone announces. Every file lands as a row or an error line, so a
+			// batch with no errors always added at least one.
+			setStickerStatus(
+				stickerErrors.length > 0 ? m.admin_pack_upload_issues() : m.admin_pack_upload_done({ count: ok })
+			);
 		}
-		// Keep the successful uploads; surface the failures without discarding them.
-		// The count is shown whenever the batch was mixed: some file failed for a
-		// reason other than a refusal, or some file got through alongside a
-		// refusal. When every file was refused, the count would only repeat the
-		// number the refusal message carries, so the refusal is shown alone.
-		if (failed > 0 && (failed > refused || ok > 0)) {
-			toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
-		}
-		// A refused file has a fix the operator can apply, so say so rather than
-		// leave it inside the failure count.
-		if (refused > 0) toast.error(m.admin_pack_upload_unscrubbable({ refused }));
 	}
 
 	function removeSticker(i: number) {
@@ -240,6 +313,10 @@
 		onMoved: clearSelection
 	});
 </script>
+
+<!-- A file dropped anywhere the zone doesn't cover would navigate the tab to
+     the file and lose the form; the zone handles its own drops first. -->
+<svelte:window ondragover={swallowStrayFileDrop} ondrop={swallowStrayFileDrop} />
 
 <a class="back-link" href="/admin/stickers"><ArrowLeft size={16} /> {m.admin_pack_back()}</a>
 <div class="page-header">
@@ -333,11 +410,47 @@
 			<p class="hint">{m.admin_pack_edit_hint()}</p>
 		{/if}
 
-		<label class="upload-zone multi">
+		<!-- Always-mounted live region (a region inserted together with its first
+		     content is often not announced): the zone label and the new rows
+		     report the upload visually only. The region itself stays put; only
+		     the node inside it is keyed, so repeating a status still mutates the
+		     region and gets announced. -->
+		<span class="sr-only" role="status">{#key stickerStatusUid}<span>{stickerStatus}</span>{/key}</span>
+		<label
+			class="upload-zone multi"
+			class:disabled={uploading || saving}
+			{@attach dropFiles({
+				accept: STICKER_ACCEPT,
+				onFiles: addStickerFiles,
+				// Also while saving: a drop after Save would upload and append a row
+				// the already-serialized submit never sees.
+				disabled: () => uploading || saving
+			})}
+		>
 			<Plus size={20} />
 			<span>{uploading ? m.admin_upload_uploading() : m.admin_pack_dropzone()}</span>
-			<input type="file" accept="image/png,image/webp" multiple onchange={uploadStickers} disabled={uploading} style="display:none" />
+			<input type="file" accept={STICKER_ACCEPT} multiple onchange={uploadStickers} disabled={uploading || saving} class="sr-file" />
 		</label>
+		{#if stickerErrors.length > 0}
+			<div class="banner err" role="alert">
+				<!-- One line per failed file: a multi-pick can partially succeed, and
+				     an unnamed error beside fresh rows misreads as total failure. -->
+				{#each stickerErrors as err (err.uid)}
+					<p class="banner-line">
+						<strong>{err.name}</strong> —
+						{#if err.reason === 'too-large'}
+							{m.admin_pack_error_too_large({ max: formatBytes(MAX_BUFFER_BYTES) })}
+						{:else if err.reason === 'bad-type'}
+							{m.admin_pack_error_bad_type()}
+						{:else if err.reason === 'unscrubbable'}
+							{m.admin_pack_error_unscrubbable()}
+						{:else}
+							{m.admin_pack_error_failed()}
+						{/if}
+					</p>
+				{/each}
+			</div>
+		{/if}
 
 		{#if stickerEntries.length > 0}
 			<!-- Bulk bar: select rows (click / shift-click range / Select all), then set
@@ -459,7 +572,9 @@
 		<span class="save-note">{m.stickers_source_self_hosted()} · {m.admin_count_stickers({ count: stickerEntries.length })}</span>
 		<div class="save-actions">
 			<a href="/admin/stickers" class="btn btn-outline">{m.admin_cancel()}</a>
-			<button type="submit" class="btn btn-primary" disabled={saving}>
+			<!-- Blocked while stickers upload, as the VR form does: saving mid-upload
+			     stores the pack without the pending file, and the orphan sweep reaps it. -->
+			<button type="submit" class="btn btn-primary" disabled={saving || uploading}>
 				{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}<Check size={16} /> {submitLabel}{/if}
 			</button>
 		</div>
@@ -485,7 +600,13 @@
 	.page-header h1 { font-size: 22px; margin: 0 0 4px; }
 	.intro { font-size: 13px; color: var(--muted-foreground); max-width: 70ch; margin: 0; }
 	.banner { padding: 12px 16px; border-radius: var(--radius-s); font-size: 13px; margin-bottom: 16px; }
-	.banner.err { background: rgba(248,113,113,0.12); color: #f87171; }
+	.banner.err { background: color-mix(in srgb, var(--destructive) 12%, transparent); color: var(--foreground); }
+	/* Inside a section the flex gap already spaces siblings; the banner's own
+	   margin would double it. The form-level banner above the form keeps its
+	   margin. */
+	.section > .banner { margin-bottom: 0; }
+	.banner-line { margin: 0; overflow-wrap: anywhere; }
+	.banner-line + .banner-line { margin-top: 6px; }
 	.form { display: flex; flex-direction: column; gap: 32px; max-width: 700px; }
 	.section { display: flex; flex-direction: column; gap: 16px; }
 	h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
@@ -514,11 +635,26 @@
 	.upload-zone {
 		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
 		padding: 24px; border: 2px dashed var(--border); border-radius: var(--radius-s);
-		color: var(--muted-foreground); cursor: pointer; font-size: 13px; transition: border-color 0.15s;
-		min-height: 80px;
+		color: var(--muted-foreground); cursor: pointer; font-size: 13px;
+		transition: border-color 0.15s, background-color 0.15s, opacity 0.15s; min-height: 80px;
 	}
 	.upload-zone.multi { width: 100%; }
 	.upload-zone:hover { border-color: var(--primary); }
+	.sr-file { position: absolute; opacity: 0; width: 0; height: 0; }
+	/* The hidden file input stays keyboard-focusable — surface its focus on the
+	   zone, which is the only thing visible. */
+	.upload-zone:has(.sr-file:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
+	   as the upload page's dropzone. :global because the drop attachment sets the
+	   class imperatively, so Svelte can't see it in the markup. */
+	.upload-zone:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
+	/* No pointer-events: none — the drop attachment has to receive dragover/drop
+	   to preventDefault, or a drop while uploading navigates away from the form.
+	   The nested input's own disabled attribute keeps clicks inert. */
+	.upload-zone.disabled { opacity: 0.55; cursor: not-allowed; }
+	/* Keeping pointer events also keeps :hover alive, so hold the resting border
+	   while the zone is busy rather than inviting a click it won't take. */
+	.upload-zone.disabled:hover { border-color: var(--border); }
 	.remove-btn {
 		display: flex; align-items: center; justify-content: center; width: 28px; height: 28px;
 		background: none; color: var(--muted-foreground); border: 1px solid var(--border);

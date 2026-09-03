@@ -8,8 +8,9 @@
 	import { cdnImage, rawFallback, THUMB_WIDTH } from '$lib';
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
+	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { probeDimensions } from '$lib/probe-dimensions';
-	import { MAX_BUFFER_BYTES } from '$lib/config';
+	import { MAX_BUFFER_BYTES, VR_MEDIA_ACCEPT } from '$lib/config';
 	import { MAX_VR_MODEL_BYTES, creditRoleLabel, formatBytes, modelFileError, modelFormatLabel, namePlaceholderCharacter, platformLabel } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
@@ -195,6 +196,14 @@
 	// Upload start/done announcements for the media section's live region
 	// (R2-A10) — visually the dropzone label + rows already show both.
 	let mediaStatus = $state('');
+	// Bumped on every status write so {#key} replaces the node inside the live
+	// region: two single-file drops both say the same thing, and re-assigning the
+	// text it already holds changes no DOM, so nothing is announced.
+	let mediaStatusUid = $state(0);
+	function setMediaStatus(text: string) {
+		mediaStatus = text;
+		mediaStatusUid++;
+	}
 
 	const mediaReorder = new DragReorder({
 		count: () => mediaEntries.length,
@@ -211,21 +220,36 @@
 		mediaEntries = mediaEntries.filter((_, idx) => idx !== i);
 	}
 
-	const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/avif,video/webm';
-	// /api/upload's buffered cap — the shared constant, not a hardcoded twin.
-	const MAX_MEDIA_BYTES = MAX_BUFFER_BYTES;
-
-	async function onMediaPicked(e: Event) {
+	function onMediaPicked(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
 		input.value = '';
 		if (!files.length) return;
-		mediaErrors = [];
+		// `accept` is a filter the OS dialog can override ("All files"), so a
+		// picked .txt would otherwise upload its whole body just to collect a 415.
+		const { accepted, rejected } = partitionByAccept(files, VR_MEDIA_ACCEPT);
+		uploadMedia(accepted, rejected);
+	}
+
+	// Shared by the file input and the drop attachment; both partition their
+	// files first, so `rejected` is reported without being uploaded.
+	async function uploadMedia(files: File[], rejected: File[] = []) {
+		mediaErrors = rejected.map((file) => ({
+			uid: mediaErrorUid++,
+			name: file.name,
+			reason: 'bad-type' as const
+		}));
+		if (!files.length) {
+			// Nothing to upload, but the status region must not keep last batch's
+			// text beside a fresh bad-type banner.
+			if (rejected.length) setMediaStatus(m.admin_vr_media_upload_issues());
+			return;
+		}
 		mediaUploading = true;
-		mediaStatus = m.admin_upload_uploading();
+		setMediaStatus(m.admin_upload_uploading());
 		try {
 			for (const file of files) {
-				if (file.size > MAX_MEDIA_BYTES) {
+				if (file.size > MAX_BUFFER_BYTES) {
 					mediaErrors = [...mediaErrors, { uid: mediaErrorUid++, name: file.name, reason: 'too-large' }];
 					continue;
 				}
@@ -262,7 +286,15 @@
 				// Per-file guard: a malformed response body or probe failure records
 				// that file's error and lets the rest of the batch continue.
 				try {
-					const { url } = (await res.json()) as { url: string };
+					const { url } = (await res.json()) as { url?: unknown };
+					// A 2xx whose body carries no usable url is a failure too (same
+					// check as the sticker form): a row pointing at nothing renders a
+					// broken tile and is rejected at save time with no file named.
+					// The cast validates nothing, so check the type as well.
+					if (typeof url !== 'string' || !url) {
+						mediaErrors = [...mediaErrors, { uid: mediaErrorUid++, name: file.name, reason: 'failed' }];
+						continue;
+					}
 					const { width, height } = await probeDimensions(file);
 					mediaEntries = [
 						...mediaEntries,
@@ -280,8 +312,9 @@
 			}
 		} finally {
 			mediaUploading = false;
-			mediaStatus =
-				mediaErrors.length > 0 ? m.admin_vr_media_upload_issues() : m.admin_vr_media_upload_done();
+			setMediaStatus(
+				mediaErrors.length > 0 ? m.admin_vr_media_upload_issues() : m.admin_vr_media_upload_done()
+			);
 		}
 	}
 
@@ -316,10 +349,21 @@
 	let modelSizeBytes = $state<number | null>(avatar?.modelSizeBytes ?? null);
 	let modelFilename = $state(avatar?.modelUrl ? (avatar.modelUrl.split('/').pop() ?? '') : '');
 
+	// Shared by the file inputs and the drop attachment, so a drop accepts
+	// exactly what the picker offers.
+	const MODEL_ACCEPT = '.vrm,.fbx';
+
 	let uploading = $state(false);
 	let uploadLoaded = $state(0);
 	let uploadTotal = $state(0);
 	let uploadError = $state<'too-large' | 'bad-type' | 'failed' | null>(null);
+	// Bumped on every error so {#key} remounts the role="alert" banner: setting
+	// uploadError to the value it already holds would otherwise announce nothing.
+	let uploadErrorUid = $state(0);
+	function setUploadError(kind: 'too-large' | 'bad-type' | 'failed') {
+		uploadError = kind;
+		uploadErrorUid++;
+	}
 	let errorFileSize = $state(0);
 
 	// Live-region text for the model upload, throttled to 10% steps so a screen
@@ -340,13 +384,27 @@
 		const file = input.files?.[0];
 		input.value = '';
 		if (!file) return;
+		uploadModel(file);
+	}
+
+	// Drops route here too. A drop of several files takes the first one: the
+	// avatar has a single model.
+	function onModelDropped(files: File[], rejected: File[]) {
+		if (files.length) uploadModel(files[0]);
+		// Wrong extension: the same banner modelFileError would raise, no request.
+		else if (rejected.length) setUploadError('bad-type');
+	}
+
+	function uploadModel(file: File) {
+		// Clearing skips the uid bump on purpose: an empty banner needs no
+		// announcement, and the next error goes through setUploadError.
 		uploadError = null;
 		// Client-side mirror of the server guards ($lib/vr modelFileError), for
 		// instant feedback — the endpoint re-checks all of it.
 		const fileError = modelFileError(file);
 		if (fileError) {
 			if (fileError === 'too-large') errorFileSize = file.size;
-			uploadError = fileError;
+			setUploadError(fileError);
 			return;
 		}
 		uploading = true;
@@ -375,16 +433,16 @@
 			}
 			if (xhr.status === 413) {
 				errorFileSize = file.size;
-				uploadError = 'too-large';
+				setUploadError('too-large');
 			} else if (xhr.status === 415) {
-				uploadError = 'bad-type';
+				setUploadError('bad-type');
 			} else {
-				uploadError = 'failed';
+				setUploadError('failed');
 			}
 		};
 		xhr.onerror = () => {
 			uploading = false;
-			uploadError = 'failed';
+			setUploadError('failed');
 		};
 		xhr.send(file);
 	}
@@ -412,6 +470,10 @@
 			: m.admin_vr_delete_message({ name: avatar?.name ?? '' })
 	);
 </script>
+
+<!-- A file dropped anywhere the zones don't cover would navigate the tab to
+     the file and lose the form; the zones handle their own drops first. -->
+<svelte:window ondragover={swallowStrayFileDrop} ondrop={swallowStrayFileDrop} />
 
 <a class="back-link" href="/admin/vr"><ArrowLeft size={16} /> {m.admin_vr_back()}</a>
 <div class="page-header">
@@ -589,11 +651,15 @@
 					<span class="model-meta">{modelFormatLabel(modelFormat)} · {formatBytes(modelSizeBytes)}</span>
 				</div>
 				<div class="model-actions">
-					<label class="btn-sm">
+					<label
+						class="btn-sm"
+						class:disabled={saving}
+						{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped, disabled: () => saving })}
+					>
 						{m.admin_vr_upload_replace()}
-						<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
+						<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} disabled={saving} class="sr-file" aria-describedby="vr-model-hint" />
 					</label>
-					<button type="button" class="btn-sm" onclick={removeModel}>{m.admin_vr_upload_remove()}</button>
+					<button type="button" class="btn-sm" onclick={removeModel} disabled={saving}>{m.admin_vr_upload_remove()}</button>
 				</div>
 			</div>
 			{#if modelUrl !== (avatar?.modelUrl ?? '')}
@@ -603,22 +669,28 @@
 			{/if}
 		{:else}
 			<!-- The whole zone is the label for the hidden file input. -->
-			<label class="upload-zone">
+			<label
+				class="upload-zone"
+				class:disabled={saving}
+				{@attach dropFiles({ accept: MODEL_ACCEPT, onFiles: onModelDropped, disabled: () => saving })}
+			>
 				<UploadCloud size={22} />
 				<span>{m.admin_vr_dropzone({ max: formatBytes(MAX_VR_MODEL_BYTES) })}</span>
-				<input type="file" accept=".vrm,.fbx" onchange={onModelPicked} class="sr-file" aria-describedby="vr-model-hint" />
+				<input type="file" accept={MODEL_ACCEPT} onchange={onModelPicked} disabled={saving} class="sr-file" aria-describedby="vr-model-hint" />
 			</label>
 		{/if}
 		{#if uploadError}
-			<div class="banner err" role="alert">
-				{#if uploadError === 'too-large'}
-					{m.admin_vr_error_too_large({ size: formatBytes(errorFileSize), max: formatBytes(MAX_VR_MODEL_BYTES) })}
-				{:else if uploadError === 'bad-type'}
-					{m.admin_vr_error_bad_type()}
-				{:else}
-					{m.admin_vr_error_upload_failed()}
-				{/if}
-			</div>
+			{#key uploadErrorUid}
+				<div class="banner err" role="alert">
+					{#if uploadError === 'too-large'}
+						{m.admin_vr_error_too_large({ size: formatBytes(errorFileSize), max: formatBytes(MAX_VR_MODEL_BYTES) })}
+					{:else if uploadError === 'bad-type'}
+						{m.admin_vr_error_bad_type()}
+					{:else}
+						{m.admin_vr_error_upload_failed()}
+					{/if}
+				</div>
+			{/key}
 		{/if}
 		<!-- The hint keeps its id — the file inputs' aria-describedby points at
 		     it. The guide link opens a new tab so a half-filled form isn't lost. -->
@@ -719,9 +791,11 @@
 		<h2>{m.admin_vr_section_media()}</h2>
 		<p class="field-hint">{m.admin_vr_media_hint()}</p>
 		<!-- Always-mounted live regions: reorder announcements, and the upload
-		     start/done status (R2-A10). -->
+		     start/done status (R2-A10). The status region itself stays put; only
+		     the node inside it is keyed, so repeating a status still mutates the
+		     region and gets announced. -->
 		<span class="sr-only" aria-live="polite">{mediaReorder.announcement}</span>
-		<span class="sr-only" role="status">{mediaStatus}</span>
+		<span class="sr-only" role="status">{#key mediaStatusUid}<span>{mediaStatus}</span>{/key}</span>
 		{#if mediaEntries.length > 0}
 			<div class="media-list">
 				{#each mediaEntries as item, i (item.uid)}
@@ -768,15 +842,25 @@
 				{/each}
 			</div>
 		{/if}
-		<label class="upload-zone media-zone" class:disabled={mediaUploading}>
+		<label
+			class="upload-zone media-zone"
+			class:disabled={mediaUploading || saving}
+			{@attach dropFiles({
+				accept: VR_MEDIA_ACCEPT,
+				onFiles: uploadMedia,
+				// Also while saving: a drop after Save would upload and append a row
+				// the already-serialized submit never sees, orphaning the file.
+				disabled: () => mediaUploading || saving
+			})}
+		>
 			<ImagePlus size={20} />
-			<span>{mediaUploading ? m.admin_upload_uploading() : m.admin_vr_media_dropzone({ max: formatBytes(MAX_MEDIA_BYTES) })}</span>
+			<span>{mediaUploading ? m.admin_upload_uploading() : m.admin_vr_media_dropzone({ max: formatBytes(MAX_BUFFER_BYTES) })}</span>
 			<input
 				type="file"
-				accept={MEDIA_ACCEPT}
+				accept={VR_MEDIA_ACCEPT}
 				multiple
 				onchange={onMediaPicked}
-				disabled={mediaUploading}
+				disabled={mediaUploading || saving}
 				class="sr-file"
 			/>
 		</label>
@@ -788,7 +872,7 @@
 					<p class="banner-line">
 						<strong>{err.name}</strong> —
 						{#if err.reason === 'too-large'}
-							{m.admin_vr_media_error_too_large({ max: formatBytes(MAX_MEDIA_BYTES) })}
+							{m.admin_vr_media_error_too_large({ max: formatBytes(MAX_BUFFER_BYTES) })}
 						{:else if err.reason === 'bad-type'}
 							{m.admin_vr_media_error_bad_type()}
 						{:else if err.reason === 'unscrubbable'}
@@ -1042,10 +1126,19 @@
 		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
 		padding: 28px 24px; border: 2px dashed var(--border); border-radius: var(--radius-s);
 		color: var(--muted-foreground); cursor: pointer; font-size: 13px; text-align: center;
-		transition: border-color 0.15s; min-height: 88px;
+		transition: border-color 0.15s, background-color 0.15s, opacity 0.15s; min-height: 88px;
 	}
 	.upload-zone:hover { border-color: var(--primary); }
-	.upload-zone.disabled { opacity: 0.55; cursor: not-allowed; pointer-events: none; }
+	/* Highlight while a file is dragged over the zone (SONA-216) — same treatment
+	   as the upload page's dropzone. The class is set by the drop attachment. */
+	.upload-zone:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 5%, transparent); }
+	/* No pointer-events: none — the drop attachment has to receive dragover/drop
+	   to preventDefault, or a drop while uploading navigates away from the form.
+	   The nested input's own disabled attribute keeps clicks inert. */
+	.upload-zone.disabled { opacity: 0.55; cursor: not-allowed; }
+	/* Keeping pointer events also keeps :hover alive, so hold the resting border
+	   while the zone is busy rather than inviting a click it won't take. */
+	.upload-zone.disabled:hover { border-color: var(--border); }
 	.sr-file { position: absolute; opacity: 0; width: 0; height: 0; }
 	/* The hidden file inputs stay keyboard-focusable — surface focus on their
 	   visible hosts (same :has pattern as .platform-chip). */
@@ -1087,8 +1180,13 @@
 		display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 10px;
 		border: 1px solid var(--border); border-radius: var(--radius-xs);
 		background: var(--secondary); color: var(--foreground); cursor: pointer; flex-direction: row;
+		transition: border-color 0.15s, background-color 0.15s;
 	}
 	.btn-sm:hover { border-color: var(--primary); }
+	/* Same busy treatment as the zones: dimmed, and no hover invitation. */
+	.btn-sm.disabled { opacity: 0.55; cursor: not-allowed; }
+	.btn-sm.disabled:hover { border-color: var(--border); }
+	.btn-sm:global(.drag-over) { border-color: var(--primary); background-color: color-mix(in srgb, var(--primary) 8%, var(--secondary)); }
 
 	/* Showcase media rows (same row chrome as the credit list). */
 	.media-list { display: flex; flex-direction: column; gap: 10px; }

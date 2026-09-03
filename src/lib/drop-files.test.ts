@@ -1,0 +1,287 @@
+import { describe, it, expect } from 'vitest';
+import { dropFiles, matchesAccept, partitionByAccept, swallowStrayFileDrop } from './drop-files';
+
+// The accept filter is the security-relevant half (SONA-216): the accept
+// ATTRIBUTE only constrains the file picker, so without this an admin dropping
+// a .txt on a zone would POST it to /api/upload.
+describe('matchesAccept', () => {
+	const f = (name: string, type = '') => ({ name, type });
+
+	it('matches extensions case-insensitively', () => {
+		expect(matchesAccept(f('avatar.vrm'), '.vrm,.fbx')).toBe(true);
+		expect(matchesAccept(f('AVATAR.VRM'), '.vrm,.fbx')).toBe(true);
+		expect(matchesAccept(f('avatar.fbx'), '.VRM,.FBX')).toBe(true);
+		expect(matchesAccept(f('notes.txt'), '.vrm,.fbx')).toBe(false);
+		// The extension must be at the END, not anywhere in the name.
+		expect(matchesAccept(f('vrm.txt'), '.vrm')).toBe(false);
+	});
+
+	it('matches exact MIME types', () => {
+		expect(matchesAccept(f('a.png', 'image/png'), 'image/png,image/webp')).toBe(true);
+		expect(matchesAccept(f('a.gif', 'image/gif'), 'image/png,image/webp')).toBe(false);
+		// A file the OS gave no type is not an exact-MIME match.
+		expect(matchesAccept(f('a.png'), 'image/png')).toBe(false);
+	});
+
+	it('matches wildcard MIME types', () => {
+		expect(matchesAccept(f('a.avif', 'image/avif'), 'image/*')).toBe(true);
+		expect(matchesAccept(f('a.webm', 'video/webm'), 'image/*')).toBe(false);
+		expect(matchesAccept(f('a.webm', 'video/webm'), 'image/*,video/*')).toBe(true);
+	});
+
+	it('tolerates spaces around the comma list', () => {
+		expect(matchesAccept(f('a.webm', 'video/webm'), 'image/png, video/webm')).toBe(true);
+		expect(matchesAccept(f('a.fbx'), '.vrm, .fbx')).toBe(true);
+	});
+
+	it('accepts everything when accept is empty', () => {
+		expect(matchesAccept(f('notes.txt', 'text/plain'), '')).toBe(true);
+		expect(matchesAccept(f('notes.txt', 'text/plain'), '  ,  ')).toBe(true);
+	});
+});
+
+// No jsdom in this repo (environment: 'node'), so the attachment runs against a
+// hand-rolled element: EventTarget gives real listener semantics, and classList
+// only needs add/remove/contains.
+class FakeEl extends EventTarget {
+	classes = new Set<string>();
+	classList = {
+		add: (c: string) => this.classes.add(c),
+		remove: (c: string) => this.classes.delete(c),
+		contains: (c: string) => this.classes.has(c)
+	};
+}
+
+type PickedFile = { name: string; type: string };
+
+// `types` mirrors what a real file drag carries; the zone reads it to tell a
+// file drag from a dragged link or selection.
+function dragEvent(type: string, files: PickedFile[] = [], types: string[] = ['Files']) {
+	// Cancelable, so a test can see that the handler called preventDefault.
+	return Object.assign(new Event(type, { cancelable: true }), { dataTransfer: { files, types, dropEffect: '' } });
+}
+
+// A drag carrying no files (a selection, a link from another tab), reporting
+// `target` as what it landed on. `target` is an accessor on Event.prototype, so
+// it has to be defined as an own property rather than assigned.
+function textDrag(type: string, target: unknown, types = ['text/plain']) {
+	const ev = Object.assign(new Event(type, { cancelable: true }), {
+		dataTransfer: { types, files: [] as PickedFile[], dropEffect: 'copy' }
+	});
+	Object.defineProperty(ev, 'target', { value: target });
+	return ev;
+}
+
+// What a variant label input looks like to isTextEditable, and what the grid
+// itself (a plain div) looks like.
+const LABEL_FIELD = { tagName: 'INPUT', type: 'text' };
+const GRID = { tagName: 'DIV' };
+
+describe('partitionByAccept', () => {
+	it('splits by the accept string and keeps input order in both buckets', () => {
+		const a = { name: 'a.vrm', type: '' };
+		const b = { name: 'notes.txt', type: 'text/plain' };
+		const c = { name: 'C.FBX', type: '' };
+		const d = { name: 'd.png', type: 'image/png' };
+		const { accepted, rejected } = partitionByAccept([a, b, c, d] as unknown as File[], '.vrm,.fbx');
+		expect(accepted).toEqual([a, c]);
+		expect(rejected).toEqual([b, d]);
+	});
+});
+
+describe('swallowStrayFileDrop', () => {
+	function stray(types: string[], prevented = false) {
+		const e = Object.assign(new Event('drop', { cancelable: true }), {
+			dataTransfer: { types, files: [], dropEffect: 'copy' }
+		});
+		if (prevented) e.preventDefault();
+		return e;
+	}
+
+	it('cancels a file drop nothing else handled', () => {
+		const e = stray(['Files']);
+		swallowStrayFileDrop(e as unknown as DragEvent);
+		expect(e.defaultPrevented).toBe(true);
+		expect(e.dataTransfer.dropEffect).toBe('none');
+	});
+
+	it('ignores non-file drags and events a zone already handled', () => {
+		const text = stray(['text/plain']);
+		swallowStrayFileDrop(text as unknown as DragEvent);
+		expect(text.defaultPrevented).toBe(false);
+		const handled = stray(['Files'], true);
+		swallowStrayFileDrop(handled as unknown as DragEvent);
+		expect(handled.dataTransfer.dropEffect).toBe('copy');
+	});
+});
+
+describe('dropFiles', () => {
+	function setup(disabled?: () => boolean, passThroughNonFileDrags = false) {
+		const el = new FakeEl();
+		const calls: { files: PickedFile[]; rejected: PickedFile[] }[] = [];
+		const attach = dropFiles({
+			accept: 'image/png,.vrm',
+			onFiles: (files, rejected) =>
+				calls.push({ files: files as unknown as PickedFile[], rejected: rejected as unknown as PickedFile[] }),
+			disabled,
+			passThroughNonFileDrags
+		});
+		const cleanup = attach(el as unknown as HTMLElement);
+		return { el, calls, cleanup };
+	}
+
+	it('toggles drag-over on dragover and clears it on dragleave', () => {
+		const { el } = setup();
+		el.dispatchEvent(dragEvent('dragover'));
+		expect(el.classes.has('drag-over')).toBe(true);
+		el.dispatchEvent(dragEvent('dragleave'));
+		expect(el.classes.has('drag-over')).toBe(false);
+	});
+
+	it('still cancels a drag that carries no files, without lighting up', () => {
+		// A dragged thumbnail or link over the zone must not navigate the tab
+		// either, so the zone stays a drop target; it just offers nothing.
+		const { el } = setup();
+		const ev = Object.assign(new Event('dragover', { cancelable: true }), {
+			dataTransfer: { types: ['text/uri-list'], files: [], dropEffect: 'copy' }
+		});
+		el.dispatchEvent(ev);
+		expect(ev.defaultPrevented).toBe(true);
+		expect(ev.dataTransfer.dropEffect).toBe('none');
+		expect(el.classes.has('drag-over')).toBe(false);
+	});
+
+	it('treats a drag that lists no types as carrying no files', () => {
+		// Only a drag that says 'Files' lights the zone up: an empty types list is
+		// as much "not a file drag" as a text/uri-list one.
+		const { el } = setup();
+		const ev = Object.assign(new Event('dragover', { cancelable: true }), {
+			dataTransfer: { types: [], files: [], dropEffect: 'copy' }
+		});
+		el.dispatchEvent(ev);
+		expect(ev.defaultPrevented).toBe(true);
+		expect(ev.dataTransfer.dropEffect).toBe('none');
+		expect(el.classes.has('drag-over')).toBe(false);
+	});
+
+	it('sets the copy drop effect so the cursor reads as an upload', () => {
+		const { el } = setup();
+		const ev = dragEvent('dragover');
+		el.dispatchEvent(ev);
+		expect(ev.dataTransfer.dropEffect).toBe('copy');
+	});
+
+	it('partitions dropped files and clears the highlight', () => {
+		const { el, calls } = setup();
+		el.dispatchEvent(dragEvent('dragenter'));
+		expect(el.classes.has('drag-over')).toBe(true);
+		const good = { name: 'a.png', type: 'image/png' };
+		const model = { name: 'b.vrm', type: '' };
+		const bad = { name: 'notes.txt', type: 'text/plain' };
+		const drop = dragEvent('drop', [good, bad, model]);
+		el.dispatchEvent(drop);
+		// Cancelling the drop is what keeps the browser from opening the file.
+		expect(drop.defaultPrevented).toBe(true);
+		expect(el.classes.has('drag-over')).toBe(false);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].files).toEqual([good, model]);
+		expect(calls[0].rejected).toEqual([bad]);
+	});
+
+	it('ignores an empty drop', () => {
+		const { el, calls } = setup();
+		el.dispatchEvent(dragEvent('drop', []));
+		expect(calls).toHaveLength(0);
+	});
+
+	it('suppresses the highlight and the drop while disabled', () => {
+		const { el, calls } = setup(() => true);
+		const ev = dragEvent('dragover');
+		el.dispatchEvent(ev);
+		expect(el.classes.has('drag-over')).toBe(false);
+		expect(ev.dataTransfer.dropEffect).toBe('none');
+		const drop = dragEvent('drop', [{ name: 'a.png', type: 'image/png' }]);
+		el.dispatchEvent(drop);
+		expect(calls).toHaveLength(0);
+		// Still cancelled: a busy zone swallows the drop instead of letting the
+		// browser navigate to the file.
+		expect(drop.defaultPrevented).toBe(true);
+	});
+
+	it('leaves an event something else already cancelled alone', () => {
+		const { el } = setup(() => true);
+		const over = Object.assign(new Event('dragover', { cancelable: true }), {
+			dataTransfer: { files: [], types: ['Files'], dropEffect: 'copy' }
+		});
+		over.preventDefault();
+		el.dispatchEvent(over);
+		// A disabled instance would have set 'none'; the inner target's 'copy' stays.
+		expect(over.dataTransfer.dropEffect).toBe('copy');
+		// The drop half needs an ENABLED instance: a disabled one ignores the file
+		// regardless, so only this discriminates the defaultPrevented guard. Lit
+		// first, so the ordering (clear the highlight, then bail) is pinned too.
+		const inner = setup();
+		inner.el.dispatchEvent(dragEvent('dragenter'));
+		expect(inner.el.classes.has('drag-over')).toBe(true);
+		const drop = Object.assign(new Event('drop', { cancelable: true }), {
+			dataTransfer: { files: [{ name: 'a.png', type: 'image/png' }], types: ['Files'], dropEffect: '' }
+		});
+		drop.preventDefault();
+		inner.el.dispatchEvent(drop);
+		expect(inner.calls).toHaveLength(0);
+		expect(inner.el.classes.has('drag-over')).toBe(false);
+	});
+
+	it('leaves a text drag alone when it lands on a field of a pass-through zone', () => {
+		// The upload page's tile grid holds the variant label inputs: cancelling a
+		// dragged selection here would stop it ever reaching a label. The event has
+		// to report the label as its target — that is the only thing that earns the
+		// pass-through.
+		const { el, calls } = setup(undefined, true);
+		const over = textDrag('dragover', LABEL_FIELD);
+		el.dispatchEvent(over);
+		expect(over.defaultPrevented).toBe(false);
+		expect(over.dataTransfer.dropEffect).toBe('copy');
+		expect(el.classes.has('drag-over')).toBe(false);
+		const drop = textDrag('drop', LABEL_FIELD);
+		el.dispatchEvent(drop);
+		expect(drop.defaultPrevented).toBe(false);
+		expect(calls).toHaveLength(0);
+		// A file drag over the same zone is still claimed and still lights it up.
+		const file = dragEvent('dragover');
+		el.dispatchEvent(file);
+		expect(file.defaultPrevented).toBe(true);
+		expect(el.classes.has('drag-over')).toBe(true);
+		// The default instance cancels that same text drag — the option is what
+		// makes the difference, not the drag.
+		const plain = setup();
+		const same = textDrag('dragover', LABEL_FIELD);
+		plain.el.dispatchEvent(same);
+		expect(same.defaultPrevented).toBe(true);
+	});
+
+	it('still cancels a non-file drag that misses the fields of a pass-through zone', () => {
+		// The regression that made the option dangerous: a link dragged from
+		// another tab carries no 'Files', so passing every non-file drag through
+		// let a drop on the grid's own padding navigate the tab away from the form.
+		const { el, calls } = setup(undefined, true);
+		const over = textDrag('dragover', GRID, ['text/uri-list']);
+		el.dispatchEvent(over);
+		expect(over.defaultPrevented).toBe(true);
+		expect(over.dataTransfer.dropEffect).toBe('none');
+		expect(el.classes.has('drag-over')).toBe(false);
+		const drop = textDrag('drop', GRID, ['text/uri-list']);
+		el.dispatchEvent(drop);
+		expect(drop.defaultPrevented).toBe(true);
+		expect(calls).toHaveLength(0);
+	});
+
+	it('removes its listeners on cleanup', () => {
+		const { el, calls, cleanup } = setup();
+		cleanup?.();
+		el.dispatchEvent(dragEvent('dragover'));
+		el.dispatchEvent(dragEvent('drop', [{ name: 'a.png', type: 'image/png' }]));
+		expect(el.classes.has('drag-over')).toBe(false);
+		expect(calls).toHaveLength(0);
+	});
+});
