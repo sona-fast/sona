@@ -358,6 +358,7 @@
 	"admin_upload_images_added": "{count}枚の画像を追加しました",
 	"admin_upload_over_limit": "{count}枚をスキップしました（最大{max}枚）",
 	"admin_upload_error_too_large": "このファイルは{max}を超えています。もっと小さい画像をお試しください。",
+	"admin_upload_error_bad_type": "対応していないファイル形式です。PNG・JPEG・GIF・WebPをご利用ください。",
 	"admin_field_variant_of": "バリエーション元",
 	"admin_field_variant_label": "バリエーションラベル",
 	"admin_variant_none": "バリエーションではない",

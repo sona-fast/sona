@@ -1,6 +1,12 @@
-import { test, expect, type Page, type Request } from '@playwright/test';
+import { test, expect, type Page, type Request, type Route } from '@playwright/test';
 import { promises as fs } from 'node:fs';
 import { adminLogin } from './admin-login';
+import {
+	dropOn,
+	dragOver,
+	expectDragOverHighlight,
+	waitForDropAttachment
+} from './drop-files';
 
 // End-to-end round-trip for the streaming upload path (SONA-136): an admin
 // uploads a file, /api/upload streams it to UploadThing (the active provider on
@@ -13,6 +19,10 @@ import { adminLogin } from './admin-login';
 // Runs on its own dev server + seeded DB (the "upload" project in
 // playwright.config.ts): it inserts image rows and depends on the provider
 // staying 'uploadthing', which the ut-stat spec flips on its own server.
+//
+// The drag-and-drop tests below (SONA-216) stay off that round trip: they stub
+// /api/upload and never submit the form, so they leave neither stored files nor
+// rows behind.
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e-uploadthing.toml.
 const PASSWORD = 'e2e-admin-password';
@@ -191,4 +201,173 @@ test('an oversized file fails client-side without a POST; the rest of the batch 
 	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('');
 	// Exactly one POST fired — none for the doomed oversized file.
 	expect(uploads.counters.total).toBe(1);
+});
+
+test('dropping images adds tiles, and a wrong type is rejected without a request', async ({
+	page
+}) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	// Stubbed rather than let through: this spec's dev server would really store
+	// the file, and a drop needs no proof the streaming path works — the first
+	// test covers that. The stub also keeps the seeded DB free of rows, since
+	// this test never submits the form.
+	let uploads = 0;
+	await page.route('**/api/upload', async (route) => {
+		uploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: `/x${uploads}.png` })
+		});
+	});
+
+	await page.goto('/admin/upload');
+	// A drop dispatched before the attachment has run silently does nothing.
+	await waitForDropAttachment(page, '.dropzone');
+	await expectDragOverHighlight(page, '.dropzone');
+
+	await dropOn(page, '.dropzone', [{ name: 'dropped.png', type: 'image/png' }]);
+	// The 15s budget every url assertion in this file carries: /api/upload is
+	// stubbed, but the duplicate check ahead of it still goes to the dev server,
+	// which compiles routes on demand and shares the machine with three others.
+	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/x1.png', {
+		timeout: 15_000
+	});
+
+	// The first tile replaces the dropzone with the grid, which takes drops too —
+	// otherwise a second file dropped where the zone used to be would navigate
+	// the tab away from a half-filled form.
+	await waitForDropAttachment(page, '.tile-grid');
+	await expectDragOverHighlight(page, '.tile-grid');
+
+	// A dropped file skips the input's accept filter, so the page has to reject
+	// the wrong type itself: an error tile, and no POST.
+	const before = uploads;
+	await dropOn(page, '.tile-grid', [{ name: 'notes.txt', type: 'text/plain' }]);
+	await expect(page.locator('.tile-error .error-text')).toContainText(
+		"That file type isn't supported"
+	);
+	// Past the moment a POST that DID fire would have landed (mutation-checked).
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(before);
+
+	// The refused file doesn't poison the zone: the next image still uploads.
+	await dropOn(page, '.tile-grid', [{ name: 'second.png', type: 'image/png' }]);
+	await expect(page.locator('input[name="imageUrl_2"]')).toHaveValue('/x2.png', {
+		timeout: 15_000
+	});
+
+	// A drop that misses both zones (here: the form itself) is swallowed
+	// page-wide, so it can't navigate the tab to the file and lose the form.
+	const beforeStray = uploads;
+	expect(await dropOn(page, 'form.upload-form', [{ name: 'stray.png', type: 'image/png' }])).toBe(
+		true
+	);
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(beforeStray);
+	await expect(page.locator('input[name^="imageUrl_"]')).toHaveCount(3);
+});
+
+test('a picked file the accept string refuses gets an error tile, not a POST', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+
+	const uploads = countUploadPosts(page);
+
+	await page.goto('/admin/upload');
+	// `accept` is only a filter the OS dialog can override ("All files"), and
+	// setInputFiles bypasses it the same way — so the picker partitions too. SVG
+	// is the file that matters: /api/upload refuses it because an SVG served
+	// straight from the storage origin can execute script.
+	await stageFiles(
+		page,
+		{ name: 'diagram.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg/>') },
+		1,
+		uploads.reset
+	);
+	await expect(page.locator('.tile-error .error-text')).toContainText(
+		"That file type isn't supported"
+	);
+	await page.waitForTimeout(300);
+	expect(uploads.counters.total).toBe(0);
+});
+
+test('the upload zones refuse files while a save is in flight', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	let uploads = 0;
+	await page.route('**/api/upload', async (route) => {
+		uploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: `/x${uploads}.png` })
+		});
+	});
+
+	await page.goto('/admin/upload');
+	await waitForDropAttachment(page, '.dropzone');
+	await dropOn(page, '.dropzone', [{ name: 'saved.png', type: 'image/png' }]);
+	// 15s for the same reason as the drop test above: the duplicate check ahead
+	// of the stubbed upload is a real request to the dev server.
+	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/x1.png', {
+		timeout: 15_000
+	});
+
+	// Hold the form POST so `saving` stays true. page.route intercepts inside the
+	// browser, so the seeded server never sees the request and no row is written.
+	let holdPost = (_route: Route) => {};
+	const posted = new Promise<Route>((resolve) => (holdPost = resolve));
+	await page.route('**/admin/upload**', async (route) => {
+		if (route.request().method() !== 'POST') {
+			await route.fallback();
+			return;
+		}
+		holdPost(route);
+	});
+
+	await page.fill('input[name="title"]', 'Save gate');
+	await page.selectOption('select[name="artistId"]', '1');
+	await page.getByRole('button', { name: 'Upload Artwork' }).click();
+	const save = page.locator('form.upload-form button[type="submit"]');
+	await expect(save).toBeDisabled();
+
+	// A drop landing now would upload a file the already-serialized submit never
+	// references, orphaning it in storage.
+	const before = uploads;
+	await dropOn(page, '.tile-grid', [{ name: 'late.png', type: 'image/png' }]);
+	await dragOver(page, '.tile-grid');
+	await expect(page.locator('.tile-grid')).not.toHaveClass(/drag-over/);
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(before);
+	await expect(page.locator('input[name^="imageUrl_"]')).toHaveCount(1);
+
+	// Removing the last tile mid-save brings the dropzone back — gated the same
+	// way, and it says so.
+	await page.locator('.tile-remove').click();
+	await expect(page.locator('.dropzone')).toHaveClass(/disabled/);
+	await dropOn(page, '.dropzone', [{ name: 'later.png', type: 'image/png' }]);
+	await dragOver(page, '.dropzone');
+	await expect(page.locator('.dropzone')).not.toHaveClass(/drag-over/);
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(before);
+
+	// The zones come back once the submit settles, so a failed save is still
+	// editable. Settled as an action failure rather than an abort: an aborted
+	// fetch makes enhance render the error page, which takes the form away and
+	// leaves nothing to assert on. The data is devalue-encoded, the shape
+	// deserialize() expects.
+	await (await posted).fulfill({
+		contentType: 'application/json',
+		body: JSON.stringify({
+			type: 'failure',
+			status: 400,
+			data: '[{"error":1},"Held by the test"]'
+		})
+	});
+	await expect(page.locator('.dropzone')).not.toHaveClass(/disabled/);
+	await dropOn(page, '.dropzone', [{ name: 'after.png', type: 'image/png' }]);
+	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue(/^\/x\d+\.png$/, {
+		timeout: 15_000
+	});
 });

@@ -4,6 +4,7 @@
 	import { tick } from 'svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { extractImageFiles, isTextEditable, shouldHandleImagePaste } from '$lib/clipboard';
+	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { MAX_BUFFER_BYTES } from '$lib/config';
 	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
@@ -17,7 +18,6 @@
 	);
 	let selectedArtistId = $state('');
 	let showNewArtist = $state(false);
-	let dragOver = $state(false);
 	let saving = $state(false);
 	let announce = $state('');
 	let fileInput: HTMLInputElement;
@@ -92,8 +92,23 @@
 		}
 	}
 
-	async function handleFiles(files: FileList | File[]) {
-		const incoming = Array.from(files);
+	// MIME types only, mirroring /api/upload's ALLOWED_IMAGE_TYPES for the
+	// artwork folder (no video/webm — that one is scoped to vr-media): the
+	// endpoint validates the DECLARED type and reads an empty one as
+	// application/octet-stream, so accepting a bare .png here would upload the
+	// whole file just to collect a 415. image/jpg is in the server's set too;
+	// leaving it out would refuse a file the server would happily store.
+	const GALLERY_ACCEPT = 'image/jpeg,image/jpg,image/png,image/gif,image/webp,image/avif';
+
+	// `rejected` holds files the accept string refused — from a drop, which the
+	// attribute never constrains, or from a picker the operator switched to "All
+	// files". They get a tile like an oversized file does (same slot accounting,
+	// same way to dismiss) but never a dimension probe or a POST.
+	async function handleFiles(files: FileList | File[], rejected: File[] = []) {
+		const incoming = [
+			...Array.from(files).map((file) => ({ file, badType: false })),
+			...rejected.map((file) => ({ file, badType: true }))
+		];
 		const room = Math.max(0, data.maxVariantSet - tiles.length);
 		const fileArray = incoming.slice(0, room);
 		const skipped = incoming.length - fileArray.length;
@@ -107,10 +122,10 @@
 		// over-admit a second drop that lands while this batch is still
 		// uploading, and the announcement below counts tiles that really exist.
 		const batch: { key: number; file: File }[] = [];
-		for (const file of fileArray) {
+		for (const { file, badType } of fileArray) {
 			// Pre-check the server's size cap client-side: a file over it can only
 			// come back as a 413, so fail the tile here instead of a doomed POST.
-			const oversized = file.size > MAX_BUFFER_BYTES;
+			const oversized = !badType && file.size > MAX_BUFFER_BYTES;
 			const tile: Tile = {
 				key: tileKey++,
 				fileName: file.name,
@@ -119,16 +134,21 @@
 				width: 0,
 				height: 0,
 				fileSize: file.size,
-				status: oversized ? 'error' : 'uploading',
-				error: oversized ? m.admin_upload_error_too_large({ max: formatSize(MAX_BUFFER_BYTES) }) : '',
+				status: oversized || badType ? 'error' : 'uploading',
+				error: badType
+					? m.admin_upload_error_bad_type()
+					: oversized
+						? m.admin_upload_error_too_large({ max: formatSize(MAX_BUFFER_BYTES) })
+						: '',
 				label: '',
 				nsfw: false
 			};
 			tiles = [...tiles, tile];
-			// Oversized files never enter the batch: no dimension probe (pass 2
-			// would decode a >64 MB image for a tile that already failed) and no
-			// doomed POST. Their tile keeps 0×0 dims — it can't be saved anyway.
-			if (!oversized) batch.push({ key: tile.key, file });
+			// Oversized and wrong-type files never enter the batch: no dimension
+			// probe (pass 2 would decode a >64 MB image for a tile that already
+			// failed) and no doomed POST. Their tile keeps 0×0 dims — it can't be
+			// saved anyway.
+			if (!oversized && !badType) batch.push({ key: tile.key, file });
 		}
 
 		// Reset then set on the next tick so identical consecutive adds still
@@ -161,27 +181,13 @@
 		if (parentIndex >= tiles.length) parentIndex = 0;
 	}
 
-	function handleDrop(e: DragEvent) {
-		e.preventDefault();
-		dragOver = false;
-		if (e.dataTransfer?.files) {
-			handleFiles(e.dataTransfer.files);
-		}
-	}
-
-	function handleDragOver(e: DragEvent) {
-		e.preventDefault();
-		dragOver = true;
-	}
-
-	function handleDragLeave() {
-		dragOver = false;
-	}
-
 	function handleFileSelect(e: Event) {
 		const input = e.target as HTMLInputElement;
 		if (input.files) {
-			handleFiles(input.files);
+			// `accept` is a filter the OS dialog can override ("All files"), so a
+			// picked SVG can arrive here; partition it the same way a drop is.
+			const { accepted, rejected } = partitionByAccept([...input.files], GALLERY_ACCEPT);
+			handleFiles(accepted, rejected);
 			input.value = '';
 		}
 	}
@@ -215,7 +221,7 @@
 	}
 </script>
 
-<svelte:window onpaste={handlePaste} />
+<svelte:window onpaste={handlePaste} ondragover={swallowStrayFileDrop} ondrop={swallowStrayFileDrop} />
 
 <div class="sr-only" aria-live="polite">{announce}</div>
 
@@ -248,13 +254,10 @@
 	{/each}
 
 	{#if tiles.length === 0}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="dropzone"
-			class:drag-over={dragOver}
-			ondrop={handleDrop}
-			ondragover={handleDragOver}
-			ondragleave={handleDragLeave}
+			class:disabled={saving}
+			{@attach dropFiles({ accept: GALLERY_ACCEPT, onFiles: handleFiles, disabled: () => saving })}
 			onclick={() => fileInput?.click()}
 			role="button"
 			tabindex="0"
@@ -265,12 +268,9 @@
 			<p class="dropzone-hint">{m.admin_upload_formats()}</p>
 		</div>
 	{:else}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="tile-grid"
-			ondrop={handleDrop}
-			ondragover={handleDragOver}
-			ondragleave={handleDragLeave}
+			{@attach dropFiles({ accept: GALLERY_ACCEPT, onFiles: handleFiles, disabled: () => saving })}
 		>
 			{#each tiles as tile, i (tile.key)}
 				<div class="tile" class:tile-error={tile.status === 'error'} class:tile-parent={isGroup && groupMode === 'new' && parentIndex === i}>
@@ -324,7 +324,7 @@
 
 	<input
 		type="file"
-		accept="image/*"
+		accept={GALLERY_ACCEPT}
 		multiple
 		bind:this={fileInput}
 		onchange={handleFileSelect}
@@ -505,19 +505,52 @@
 		color: var(--muted-foreground);
 		font-size: 14px;
 		cursor: pointer;
-		transition: border-color 0.15s, background 0.15s;
+		transition: border-color 0.15s, background-color 0.15s;
 	}
 
-	.dropzone:hover,
-	.dropzone.drag-over {
+	.dropzone:hover {
 		border-color: var(--primary);
-		background: rgba(255, 132, 0, 0.05);
+		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
+	}
+
+	/* Highlight while a file is dragged over the zone (SONA-216) — :global
+	   because the drop attachment sets the class imperatively, so Svelte can't
+	   see it in the markup. Same treatment as the VR and sticker zones. */
+	.dropzone:global(.drag-over) {
+		border-color: var(--primary);
+		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
+	}
+
+	/* No pointer-events: none — the attachment has to receive dragover/drop to
+	   preventDefault, or a drop while the save is in flight navigates away from
+	   the form. The zone only shows this state when every tile was removed
+	   after submitting; it still refuses the drop either way. */
+	.dropzone.disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
+	/* Keeping pointer events also keeps :hover alive, so hold the resting look
+	   while the zone is busy rather than inviting a click it won't take. */
+	.dropzone.disabled:hover {
+		border-color: var(--border);
+		background-color: transparent;
 	}
 
 	.tile-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
 		gap: 12px;
+		/* A transparent resting border reserves the space the drag-over highlight
+		   paints into, so dragging over the grid doesn't shift the tiles. */
+		border: 2px dashed transparent;
+		border-radius: var(--radius-s);
+		transition: border-color 0.15s, background-color 0.15s;
+	}
+
+	.tile-grid:global(.drag-over) {
+		border-color: var(--primary);
+		background-color: color-mix(in srgb, var(--primary) 5%, transparent);
 	}
 
 	.tile {

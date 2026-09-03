@@ -414,6 +414,7 @@
 	"admin_upload_images_added": "{count} image(s) added",
 	"admin_upload_over_limit": "{count} image(s) skipped — max {max}",
 	"admin_upload_error_too_large": "This file is over {max}. Try a smaller image.",
+	"admin_upload_error_bad_type": "That file type isn't supported. Use PNG, JPEG, GIF, or WebP.",
 	"admin_field_variant_of": "Variant of",
 	"admin_field_variant_label": "Variant label",
 	"admin_variant_none": "Not a variant",

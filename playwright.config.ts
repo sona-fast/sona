@@ -153,7 +153,7 @@ export default defineConfig({
 		{
 			name: 'upload',
 			testMatch: UPLOAD_SPEC,
-			// The three upload specs share one seeded dev server and an admin
+			// The upload tests share one seeded dev server and an admin
 			// session flow that flakes under parallel load — run them serially.
 			workers: 1,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${UPLOAD_PORT}` }
