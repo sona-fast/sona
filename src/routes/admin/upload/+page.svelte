@@ -328,6 +328,7 @@
 		multiple
 		bind:this={fileInput}
 		onchange={handleFileSelect}
+		disabled={saving}
 		style="display: none"
 	/>
 

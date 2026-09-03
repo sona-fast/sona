@@ -346,6 +346,9 @@ test('the upload zones refuse files while a save is in flight', async ({ page })
 	// way, and it says so.
 	await page.locator('.tile-remove').click();
 	await expect(page.locator('.dropzone')).toHaveClass(/disabled/);
+	// The click path is gated too: a disabled input ignores the programmatic
+	// click the zone sends it, so the picker can't open mid-save.
+	await expect(page.locator('input[type="file"]')).toBeDisabled();
 	await dropOn(page, '.dropzone', [{ name: 'later.png', type: 'image/png' }]);
 	await dragOver(page, '.dropzone');
 	await expect(page.locator('.dropzone')).not.toHaveClass(/drag-over/);
@@ -366,6 +369,7 @@ test('the upload zones refuse files while a save is in flight', async ({ page })
 		})
 	});
 	await expect(page.locator('.dropzone')).not.toHaveClass(/disabled/);
+	await expect(page.locator('input[type="file"]')).toBeEnabled();
 	await dropOn(page, '.dropzone', [{ name: 'after.png', type: 'image/png' }]);
 	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue(/^\/x\d+\.png$/, {
 		timeout: 15_000
