@@ -154,7 +154,7 @@ describe('storage streaming under real workerd', () => {
 
 	it('an over-length source rejects the put; any leftover is exactly the declared size', async () => {
 		const result = await run('r2-over-length');
-		expect(String(result.rejected)).toMatch(/too many bytes/i);
+		expect(result.rejected).toBe('over-length');
 		// NOT reliably atomic: whether a truncated object commits is a race
 		// between the store completing its write (FixedLengthStream ends its
 		// readable at exactly byteLength) and the pump's rejection. Both
@@ -213,7 +213,7 @@ describe('storage streaming under real workerd', () => {
 
 	it('a body the scrubber cannot walk rejects the put instead of hanging', async () => {
 		const result = await run('r2-unscrubbable-stream');
-		expect(String(result.rejected)).toMatch(/UnscrubbableImageError/);
+		expect(result.rejected).toBe('unscrubbable');
 		expect(result.keyAbsent).toBe(true);
 	});
 
@@ -222,14 +222,25 @@ describe('storage streaming under real workerd', () => {
 		// throws UnscrubbableImageError to the caller: the SDK's fetch rejects
 		// with its own error carrying ours underneath. /api/upload decides the
 		// 422 on isUnscrubbable(), so the walk has to survive the REAL wrap.
+		// Whether the SDK rethrows ours or buries it under its own is the SDK's
+		// business, so either classification passes here; the R2 case above is the
+		// one that pins a direct throw.
 		const result = await run('uploadthing-unscrubbable-stream');
-		expect(result.rejected).not.toBeNull();
+		expect(['unscrubbable', 'unscrubbable-wrapped']).toContain(result.rejected);
 		expect(result.unscrubbable).toBe(true);
 	});
 
 	it('an under-length source rejects the put and leaves the key absent', async () => {
 		const result = await run('r2-under-length');
-		expect(String(result.rejected)).toMatch(/did not see all expected bytes/i);
+		expect(result.rejected).toBe('under-length');
 		expect(result.keyAbsent).toBe(true);
+	});
+
+	it('a scenario that throws gets a fixed 500 body with none of the error in it', async () => {
+		// The outer catch is the one Response body no scenario verdict covers:
+		// the error goes to the worker log, and the body says only that it failed.
+		const res = await fetch(new URL('/?scenario=throw', workerOrigin));
+		expect(res.status).toBe(500);
+		expect(await res.text()).toBe('scenario failed');
 	});
 });
