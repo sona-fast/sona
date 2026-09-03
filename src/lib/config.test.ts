@@ -33,6 +33,12 @@ describe('STICKER_ACCEPT', () => {
 	it('offers only types the server stores', () => {
 		for (const t of STICKER_ACCEPT.split(',')) expect(isAllowedImageType(t)).toBe(true);
 	});
+
+	it('is exactly PNG and WebP, the two formats a sticker is stored as', () => {
+		// A subset check alone would let image/jpeg slip in, since the server
+		// stores it for artwork; the sticker contract is narrower than that.
+		expect(STICKER_ACCEPT.split(',').sort()).toEqual(['image/png', 'image/webp']);
+	});
 });
 
 describe('SESSION_COOKIE', () => {

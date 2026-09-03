@@ -74,7 +74,10 @@
 				resolve({ width: img.naturalWidth, height: img.naturalHeight });
 				URL.revokeObjectURL(img.src);
 			};
-			img.onerror = () => resolve({ width: 0, height: 0 });
+			img.onerror = () => {
+				resolve({ width: 0, height: 0 });
+				URL.revokeObjectURL(img.src);
+			};
 			img.src = URL.createObjectURL(file);
 		});
 	}
@@ -87,7 +90,14 @@
 				body: JSON.stringify({ fileName: file.name, fileSize: file.size })
 			});
 			if (!checkRes.ok) throw new Error(m.admin_upload_failed_status({ status: checkRes.status }));
-			const { exists } = await checkRes.json();
+			// Same guard as the upload parse below: a non-JSON 2xx must not put a
+			// parser's message on the tile.
+			let exists: unknown;
+			try {
+				({ exists } = await checkRes.json());
+			} catch {
+				throw new Error(m.admin_upload_failed());
+			}
 
 			if (exists && !confirm(m.admin_upload_duplicate_confirm({ fileName: file.name }))) {
 				// Declined: the tile goes, and so does the preview it was holding.
