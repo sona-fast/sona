@@ -190,7 +190,7 @@
 	// rows, so a name+reason key would collide.
 	let mediaErrorUid = 0;
 	let mediaErrors = $state<
-		{ uid: number; name: string; reason: 'too-large' | 'bad-type' | 'failed' }[]
+		{ uid: number; name: string; reason: 'too-large' | 'bad-type' | 'unscrubbable' | 'failed' }[]
 	>([]);
 	// Upload start/done announcements for the media section's live region
 	// (R2-A10) — visually the dropzone label + rows already show both.
@@ -245,7 +245,16 @@
 						{
 							uid: mediaErrorUid++,
 							name: file.name,
-							reason: res.status === 413 ? 'too-large' : res.status === 415 ? 'bad-type' : 'failed'
+							// 422: the metadata could not be stripped (SONA-170), which a
+							// re-export fixes — not a connection problem.
+							reason:
+								res.status === 413
+									? 'too-large'
+									: res.status === 415
+										? 'bad-type'
+										: res.status === 422
+											? 'unscrubbable'
+											: 'failed'
 						}
 					];
 					continue;
@@ -782,6 +791,8 @@
 							{m.admin_vr_media_error_too_large({ max: formatBytes(MAX_MEDIA_BYTES) })}
 						{:else if err.reason === 'bad-type'}
 							{m.admin_vr_media_error_bad_type()}
+						{:else if err.reason === 'unscrubbable'}
+							{m.admin_vr_media_error_unscrubbable()}
 						{:else}
 							{m.admin_vr_media_error_failed()}
 						{/if}

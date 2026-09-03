@@ -116,6 +116,9 @@
 		// until the form is saved — so stickers/ is the correct target for now.
 		fd.append('folder', 'stickers');
 		const res = await fetch('/api/upload', { method: 'POST', body: fd });
+		// 422 is the one failure the operator can act on: the file's metadata
+		// could not be stripped, and a re-export fixes it (SONA-170).
+		if (res.status === 422) return 'refused';
 		if (!res.ok) return null;
 		const { url } = (await res.json()) as { url: string };
 		return url;
@@ -124,10 +127,14 @@
 	async function uploadStickers(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
+		// Clear the picker so choosing the same path again (the re-export a
+		// refusal asks for) fires a change event instead of being dropped.
+		input.value = '';
 		if (!files.length) return;
 		uploading = true;
 		let ok = 0;
 		let failed = 0;
+		let refused = 0;
 		try {
 			for (const file of files) {
 				let url: string | null = null;
@@ -136,7 +143,10 @@
 				} catch {
 					url = null;
 				}
-				if (url) {
+				if (url === 'refused') {
+					refused++;
+					failed++;
+				} else if (url) {
 					ok++;
 					stickerEntries.push({
 						uid: nextUid++,
@@ -155,7 +165,16 @@
 			uploading = false;
 		}
 		// Keep the successful uploads; surface the failures without discarding them.
-		if (failed > 0) toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
+		// The count is shown whenever the batch was mixed: some file failed for a
+		// reason other than a refusal, or some file got through alongside a
+		// refusal. When every file was refused, the count would only repeat the
+		// number the refusal message carries, so the refusal is shown alone.
+		if (failed > 0 && (failed > refused || ok > 0)) {
+			toast.error(m.admin_pack_upload_partial({ ok, total: files.length, failed }));
+		}
+		// A refused file has a fix the operator can apply, so say so rather than
+		// leave it inside the failure count.
+		if (refused > 0) toast.error(m.admin_pack_upload_unscrubbable({ refused }));
 	}
 
 	function removeSticker(i: number) {

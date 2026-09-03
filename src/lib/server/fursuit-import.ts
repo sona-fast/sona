@@ -10,6 +10,7 @@ import type { Database } from '$lib/server/db';
 import type { SiteSettings } from '$lib/server/settings';
 import { getStorage, extFromContentType, isAllowedImageType } from '$lib/server/storage';
 import { sniffImageType } from '$lib/server/storage/sniff';
+import { isUnscrubbable, UNSCRUBBABLE_IMPORT_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from '$lib/server/storage/buffer';
 import { fetchCharacterPhotos, furtrackUserAgent } from '$lib/server/furtrack';
 import { LICENSES, type LicenseKey } from '$lib/furtrack/license';
@@ -227,7 +228,17 @@ export async function importFursuitPhotos(opts: {
 			result.items.push({ postId: photo.id, status: 'imported' });
 		} catch (e) {
 			result.failed++;
-			result.items.push({ postId: photo.id, status: 'failed', error: e instanceof Error ? e.message : String(e) });
+			// A photo whose metadata could not be stripped (SONA-170) is refused by
+			// the storage layer. The row carries an operator-readable reason for
+			// when the import result is surfaced; the parser's own wording
+			// ("jpeg: segment 0x…") goes to the log.
+			const unscrubbable = isUnscrubbable(e);
+			if (unscrubbable) console.warn('fursuit import: unscrubbable photo', photo.id, e);
+			result.items.push({
+				postId: photo.id,
+				status: 'failed',
+				error: unscrubbable ? UNSCRUBBABLE_IMPORT_MESSAGE : e instanceof Error ? e.message : String(e)
+			});
 		}
 	}
 

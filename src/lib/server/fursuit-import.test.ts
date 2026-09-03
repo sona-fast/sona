@@ -8,6 +8,7 @@ import * as schema from '$lib/server/db/schema';
 import type { SiteSettings } from '$lib/server/settings';
 import { makeD1 } from '$lib/server/test/d1';
 import { staticWebp } from './test/raster-fixtures';
+import { UNSCRUBBABLE_IMPORT_MESSAGE } from '$lib/server/storage/scrub-metadata';
 import { importFursuitPhotos, fursuitPhotosExist, clearFursuitPhotosCache } from './fursuit-import';
 
 const DDL = `
@@ -99,5 +100,39 @@ describe('importFursuitPhotos', () => {
 		expect(result.failed).toBe(1);
 		expect(result.items[0]).toMatchObject({ postId: 1918883, status: 'failed' });
 		expect(result.items[0].error).toMatch(/buffer cap/);
+	});
+
+	it('tells the operator what to do when a photo cannot be scrubbed', async () => {
+		const { db } = makeDb();
+		// A WebP head over bytes the scrubber cannot walk: the storage layer
+		// refuses it (SONA-170) and the row must say how to fix it, not repeat the
+		// parser's "webp: a chunk header runs past…".
+		const broken = new Uint8Array([...staticWebp().subarray(0, 12), 0, 0, 0]);
+		const brokenFetch = vi.fn(
+			async () =>
+				new Response(broken.buffer as ArrayBuffer, { headers: { 'content-type': 'image/webp' } })
+		) as unknown as typeof fetch;
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+		const result = await importFursuitPhotos({
+			env: testEnv,
+			settings: testSettings,
+			db,
+			fetchFn: brokenFetch,
+			character: 'Sparky',
+			postIds: [1918883]
+		});
+
+		expect(result.failed).toBe(1);
+		expect(result.items[0].error).toBe(UNSCRUBBABLE_IMPORT_MESSAGE);
+		// The parser's own wording is still available, in the log.
+		expect(warn).toHaveBeenCalledWith(
+			'fursuit import: unscrubbable photo',
+			1918883,
+			expect.objectContaining({
+				message: 'the image ended inside a metadata record (truncated file)'
+			})
+		);
+		warn.mockRestore();
 	});
 });

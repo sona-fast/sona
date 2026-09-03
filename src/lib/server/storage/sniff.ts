@@ -62,8 +62,9 @@ export function isWebmHead(bytes: Uint8Array): boolean {
 	// to spell exactly 'webm'. A plain byte scan would accept 'webm' appearing
 	// anywhere in the header (e.g. inside a Matroska file's metadata), so this
 	// walks the EBML header's child elements instead. DocType sits within the
-	// first handful of header elements, well inside the 64-byte sniff window;
-	// a header odd enough to push it out is rejected rather than trusted.
+	// first handful of header elements, well inside the head callers hand in
+	// (SNIFF_BYTES); a header odd enough to push it out is rejected rather
+	// than trusted.
 	let i = 4;
 	const headSize = vintLength(bytes[i]);
 	if (!headSize) return false;
