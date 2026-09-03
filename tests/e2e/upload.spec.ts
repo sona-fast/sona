@@ -204,6 +204,42 @@ test('an oversized file fails client-side without a POST; the rest of the batch 
 	expect(uploads.counters.total).toBe(1);
 });
 
+// Paste one file into the page. The clipboard can't be primed with a file from
+// the test runner, so build the DataTransfer inside the page and dispatch the
+// paste on `document` — it bubbles to the window handler the page listens on.
+function pasteFile(page: Page, name: string, type: string) {
+	return page.evaluate(
+		({ name, type }) => {
+			const dt = new DataTransfer();
+			dt.items.add(new File([new Uint8Array([1, 2, 3, 4])], name, { type }));
+			document.dispatchEvent(
+				new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })
+			);
+		},
+		{ name, type }
+	);
+}
+
+// The page's own live region (the admin layout has a separate one, a <p>).
+const LIVE_REGION = 'div.sr-only[aria-live="polite"]';
+
+// Record every text the live region is handed. A batch writes it three times in
+// quick succession — the added/refused counts, "Uploading...", then the outcome
+// — and only the last survives long enough for a polling locator assertion to
+// see it, so a MutationObserver is the only way to assert the earlier ones.
+async function recordAnnouncements(page: Page) {
+	await page.evaluate((selector) => {
+		const region = document.querySelector(selector)!;
+		const log: string[] = [];
+		(window as unknown as { __announced: string[] }).__announced = log;
+		new MutationObserver(() => {
+			const text = region.textContent!.trim();
+			if (text && text !== log[log.length - 1]) log.push(text);
+		}).observe(region, { childList: true, characterData: true, subtree: true });
+	}, LIVE_REGION);
+	return () => page.evaluate(() => (window as unknown as { __announced: string[] }).__announced);
+}
+
 test('dropping images adds tiles, and a wrong type is rejected without a request', async ({
 	page
 }) => {
@@ -235,15 +271,21 @@ test('dropping images adds tiles, and a wrong type is rejected without a request
 	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/x1.png', {
 		timeout: 15_000
 	});
+	// The per-file outcome is otherwise only an icon on the tile, so the batch
+	// closes out in the live region too. This is the last thing written, so a
+	// plain locator assertion can see it.
+	await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
 
 	// The first tile replaces the dropzone with the grid, which takes drops too —
 	// otherwise a second file dropped where the zone used to be would navigate
 	// the tab away from a half-filled form.
 	await waitForDropAttachment(page, '.tile-grid');
 	// The grid wraps the variant label inputs, so it lets a text drag through
-	// untouched — cancelling it would stop a dragged selection ever reaching a
-	// label. Uncancelled (dispatchEvent true) and no highlight.
-	expect(await dragOverText(page, '.tile-grid')).toBe(true);
+	// untouched — but only one that landed ON a label (asserted after the second
+	// drop below, once a label exists). A drag that hit the grid itself is still
+	// cancelled: a link dragged in from another tab carries no 'Files' either,
+	// and dropping it on the gap between tiles would navigate away from the form.
+	expect(await dragOverText(page, '.tile-grid', 'text/uri-list')).toBe(false);
 	await expect(page.locator('.tile-grid')).not.toHaveClass(/drag-over/);
 	// A file drag over the same grid is still claimed and still lights it up.
 	await expectDragOverHighlight(page, '.tile-grid');
@@ -252,6 +294,7 @@ test('dropping images adds tiles, and a wrong type is rejected without a request
 	// the wrong type itself: an error tile, and no POST for it. Dropped alongside
 	// an image, so the announcement has to tell the two apart.
 	const before = uploads;
+	const announced = await recordAnnouncements(page);
 	await dropOn(page, '.tile-grid', [
 		{ name: 'second.png', type: 'image/png' },
 		{ name: 'notes.txt', type: 'text/plain' }
@@ -260,11 +303,11 @@ test('dropping images adds tiles, and a wrong type is rejected without a request
 		"That file type isn't supported"
 	);
 	// The live region counts only the file that really entered the batch as
-	// added; the refused one gets its own count.
-	// div, not p: the admin layout has its own sr-only live region.
-	await expect(page.locator('div.sr-only[aria-live="polite"]')).toHaveText(
-		"1 image(s) added 1 file(s) couldn't be added"
-	);
+	// added; the refused one gets its own count, and the two are joined as the
+	// separate sentences they are.
+	await expect
+		.poll(announced)
+		.toContain("1 image(s) added. 1 file(s) couldn't be added");
 	// The image in that same drop still uploads...
 	await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue('/x2.png', {
 		timeout: 15_000
@@ -273,6 +316,14 @@ test('dropping images adds tiles, and a wrong type is rejected without a request
 	// POST that DID fire would have landed (mutation-checked).
 	await page.waitForTimeout(300);
 	expect(uploads).toBe(before + 1);
+
+	// Three tiles make this a group, so the variant label inputs are rendered.
+	// A text drag that lands on one is the case the grid passes through — the
+	// event bubbles up to the grid's handler with the input as its target, and
+	// the grid has to leave it alone or the selection never reaches the field.
+	await expect(page.locator('.tile-label').first()).toBeVisible();
+	expect(await dragOverText(page, '.tile-label')).toBe(true);
+	await expect(page.locator('.tile-grid')).not.toHaveClass(/drag-over/);
 
 	// A drop that misses both zones (here: the form itself) is swallowed
 	// page-wide, so it can't navigate the tab to the file and lose the form.
@@ -329,8 +380,74 @@ test('a picked file the accept string refuses gets an error tile, not a POST', a
 	await expect(page.locator('.tile-error .error-text')).toContainText(
 		"That file type isn't supported"
 	);
+	// A refused file gets no object URL, so its tile shows the placeholder rather
+	// than an <img> pointed at nothing — which would paint the broken-image glyph.
+	// The placeholder carries the file name the alt text used to.
+	await expect(page.locator('.tile-preview img')).toHaveCount(0);
+	await expect(page.getByRole('img', { name: 'diagram.svg' })).toBeVisible();
 	await page.waitForTimeout(300);
 	expect(uploads.counters.total).toBe(0);
+});
+
+// Pasting is the third way a file reaches the queue, and it goes through the
+// same accept partition a drop does — a pasted SVG is one /api/upload refuses.
+test('a pasted image uploads; a pasted SVG gets a placeholder error tile and no POST', async ({
+	page
+}) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	let uploads = 0;
+	await page.route('**/api/upload', async (route) => {
+		uploads++;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: `/p${uploads}.png` })
+		});
+	});
+
+	await page.goto('/admin/upload');
+	// The paste handler is on <svelte:window>, and it only claims a paste while
+	// focus is outside a text field — so wait for hydration the same way the drop
+	// tests do, and leave focus on <body>.
+	await waitForDropAttachment(page, '.dropzone');
+	await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+	await pasteFile(page, 'shot.png', 'image/png');
+	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/p1.png', {
+		timeout: 15_000
+	});
+
+	const before = uploads;
+	await pasteFile(page, 'diagram.svg', 'image/svg+xml');
+	await expect(page.locator('.tile-error .error-text')).toContainText(
+		"That file type isn't supported"
+	);
+	// One preview image for the pasted PNG, none for the refused SVG.
+	await expect(page.locator('.tile-preview img')).toHaveCount(1);
+	await expect(page.getByRole('img', { name: 'diagram.svg' })).toBeVisible();
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(before);
+});
+
+test('a failed upload announces the batch as finished with errors', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	await page.route('**/api/upload', (route) => route.fulfill({ status: 500, body: 'nope' }));
+
+	await page.goto('/admin/upload');
+	await waitForDropAttachment(page, '.dropzone');
+	await dropOn(page, '.dropzone', [{ name: 'doomed.png', type: 'image/png' }]);
+
+	await expect(page.locator('.tile-error .error-text')).toContainText('Upload failed (500)', {
+		timeout: 15_000
+	});
+	// The tile shows the reason; the live region says the batch is over and that
+	// something in it went wrong, so it isn't only visible to a sighted user.
+	await expect(page.locator(LIVE_REGION)).toHaveText(
+		'Upload finished with errors. Each file that failed shows the reason.'
+	);
 });
 
 test('the upload zones refuse files while a save is in flight', async ({ page }) => {
@@ -348,6 +465,17 @@ test('the upload zones refuse files while a save is in flight', async ({ page })
 
 	await page.goto('/admin/upload');
 	await waitForDropAttachment(page, '.dropzone');
+	// While nothing is saving, Space on the focused zone opens the picker and
+	// must NOT also scroll the page — the handler cancels the default for exactly
+	// that. Asserted before the save gate below, since the handler bails early
+	// while saving and would pass this vacuously.
+	expect(
+		await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)
+	).toBe(true);
+	await page.locator('.dropzone').focus();
+	await page.keyboard.press(' ');
+	expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
 	await dropOn(page, '.dropzone', [{ name: 'saved.png', type: 'image/png' }]);
 	// 15s for the same reason as the drop test above: the duplicate check ahead
 	// of the stubbed upload is a real request to the dev server.
@@ -382,11 +510,16 @@ test('the upload zones refuse files while a save is in flight', async ({ page })
 	await page.waitForTimeout(300);
 	expect(uploads).toBe(before);
 	await expect(page.locator('input[name^="imageUrl_"]')).toHaveCount(1);
+	// The other way into the picker says it's unavailable too — aria-disabled
+	// rather than `disabled`, so a keyboard user holding it keeps focus.
+	await expect(page.locator('.tile-add')).toHaveAttribute('aria-disabled', 'true');
 
 	// Removing the last tile mid-save brings the dropzone back — gated the same
 	// way, and it says so.
 	await page.locator('.tile-remove').click();
 	await expect(page.locator('.dropzone')).toHaveClass(/disabled/);
+	// The class is the look; aria-disabled is what a screen reader reads.
+	await expect(page.locator('.dropzone')).toHaveAttribute('aria-disabled', 'true');
 	// The click path is gated too: a disabled input ignores the programmatic
 	// click the zone sends it, so the picker can't open mid-save.
 	await expect(page.locator('input[type="file"]')).toBeDisabled();

@@ -1,10 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { GALLERY_ACCEPT } from './config';
+import { GALLERY_ACCEPT, VR_MEDIA_ACCEPT } from './config';
 import { ALLOWED_IMAGE_TYPES, isAllowedImageType } from './server/storage';
 
-// The picker's accept string and the server's allowlist have to say the same
-// thing: a type only the string has uploads a file /api/upload will refuse with
-// a 415, and a type only the server has is one the admin can't pick at all.
+// A type only the accept string has uploads a file /api/upload refuses with a
+// 415; a type only the server has is one the admin can't pick at all.
 describe('GALLERY_ACCEPT', () => {
 	const types = GALLERY_ACCEPT.split(',');
 
@@ -14,6 +13,17 @@ describe('GALLERY_ACCEPT', () => {
 
 	it('offers every type the server stores', () => {
 		expect(new Set(types)).toEqual(ALLOWED_IMAGE_TYPES);
+	});
+});
+
+// Same pin for the VR form's picker, which adds the one video type the showcase
+// renders on top of the gallery's images.
+describe('VR_MEDIA_ACCEPT', () => {
+	const types = VR_MEDIA_ACCEPT.split(',');
+
+	it('offers exactly the server image types, plus video/webm', () => {
+		expect(new Set(types.filter((t) => t.startsWith('image/')))).toEqual(ALLOWED_IMAGE_TYPES);
+		expect(types.filter((t) => !t.startsWith('image/'))).toEqual(['video/webm']);
 	});
 });
 

@@ -1,4 +1,5 @@
 import type { Attachment } from 'svelte/attachments';
+import { isTextEditable } from './clipboard';
 
 /**
  * Does a file satisfy an `accept` attribute string? Handles the three forms the
@@ -28,6 +29,21 @@ export function matchesAccept(file: { name: string; type: string }, accept: stri
  * DataTransfer, or none that lists 'Files', carries none. */
 function carriesFiles(e: DragEvent): boolean {
 	return Array.from(e.dataTransfer?.types ?? []).includes('Files');
+}
+
+/**
+ * Did the drag land on a text field of the zone's own markup? That is the only
+ * place a pass-through zone may leave a drag uncancelled: a link dragged from
+ * another tab (`text/uri-list`, no `Files`) dropped on the zone's padding would
+ * otherwise navigate the tab away from the form.
+ *
+ * Duck-typed rather than `instanceof HTMLElement` because these tests run in a
+ * DOM-less node environment; `isTextEditable` only reads the three fields below.
+ */
+function droppedOnTextField(e: DragEvent): boolean {
+	const t = e.target as { tagName?: unknown; type?: string; isContentEditable?: boolean } | null;
+	if (typeof t?.tagName !== 'string') return false;
+	return isTextEditable(t as { tagName: string; type?: string; isContentEditable?: boolean });
 }
 
 /**
@@ -66,8 +82,9 @@ export function partitionByAccept(files: File[], accept: string): { accepted: Fi
  * `passThroughNonFileDrags` is for a zone that CONTAINS text fields (the upload
  * page's tile grid holds the variant labels): a zone with no fields inside can
  * cancel every drag, but cancelling a text drag over this one would block
- * dropping a selection into a label. Off by default, because leaving a drag
- * uncancelled is only safe where the drag carries no file.
+ * dropping a selection into a label. Off by default, and even when on it only
+ * passes a drag through that landed ON one of those fields — leaving a drag
+ * uncancelled is only safe where the field it hit will handle it.
  */
 export function dropFiles(opts: {
 	accept: string;
@@ -87,8 +104,10 @@ export function dropFiles(opts: {
 			if (e.defaultPrevented) return;
 			if (!carriesFiles(e)) {
 				// Leave a non-file drag entirely alone where the zone wraps text
-				// fields, so the browser's own text-drop handling still runs.
-				if (opts.passThroughNonFileDrags) return;
+				// fields, so the browser's own text-drop handling still runs — but
+				// only on the field itself. Anywhere else in the zone it is cancelled
+				// like any other zone would.
+				if (opts.passThroughNonFileDrags && droppedOnTextField(e)) return;
 				e.preventDefault();
 				if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
 				return;
@@ -102,9 +121,10 @@ export function dropFiles(opts: {
 		const drop = (e: DragEvent) => {
 			node.classList.remove('drag-over');
 			if (e.defaultPrevented) return;
-			// Same reason as `over`: a text drop inside this zone belongs to the
-			// field it landed on, not here.
-			if (opts.passThroughNonFileDrags && !carriesFiles(e)) return;
+			// Same reason as `over`: a text drop on one of this zone's fields belongs
+			// to that field, not here. A non-file drop anywhere else still gets
+			// cancelled below.
+			if (opts.passThroughNonFileDrags && !carriesFiles(e) && droppedOnTextField(e)) return;
 			e.preventDefault();
 			if (opts.disabled?.()) return;
 			const files = [...(e.dataTransfer?.files ?? [])];

@@ -41,6 +41,15 @@ export const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 export const GALLERY_ACCEPT = 'image/jpeg,image/jpg,image/png,image/gif,image/webp,image/avif';
 
 /**
+ * `accept` string for the VR avatar form's media picker and drop zone: every
+ * image the gallery takes, plus the one video type the showcase renders. Derived
+ * from GALLERY_ACCEPT rather than spelled out again — the copy that used to live
+ * in the component had drifted (it was missing image/jpg, which the server
+ * accepts), and the same pin test in config.test.ts now covers both.
+ */
+export const VR_MEDIA_ACCEPT = `${GALLERY_ACCEPT},video/webm`;
+
+/**
  * Admin session cookie name. Read in `hooks.server.ts` / `auth.ts` before any
  * DB access, so it must be a build-time constant rather than a setting.
  *

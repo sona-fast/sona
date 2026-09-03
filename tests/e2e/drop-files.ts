@@ -54,18 +54,28 @@ export function dragOver(page: Page, selector: string) {
 	}, selector);
 }
 
-/** Dispatch a `dragover` carrying only text on `selector`, and report whether a
- * handler cancelled it. A zone that wraps text fields (the upload page's tile
- * grid) must leave this one alone, or a dragged selection can never reach a
- * label input inside it. */
-export function dragOverText(page: Page, selector: string) {
-	return page.evaluate((selector) => {
-		const dt = new DataTransfer();
-		dt.setData('text/plain', 'a dragged selection');
-		return document.querySelector(selector)!.dispatchEvent(
-			new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true })
-		);
-	}, selector);
+/**
+ * Dispatch a bubbling `dragover` carrying only text on `selector`, and report
+ * whether a handler cancelled it.
+ *
+ * `selector` is the element the drag LANDS on, which is what decides the
+ * outcome: a zone that wraps text fields (the upload page's tile grid) has to
+ * leave a drag alone that hit one of those fields, or a dragged selection can
+ * never reach a label input — but must still cancel one that hit the zone
+ * itself, since a dropped link would navigate the tab. `type` picks which
+ * flavour of drag: a selection (`text/plain`) or a link (`text/uri-list`).
+ */
+export function dragOverText(page: Page, selector: string, type = 'text/plain') {
+	return page.evaluate(
+		({ selector, type }) => {
+			const dt = new DataTransfer();
+			dt.setData(type, type === 'text/uri-list' ? 'https://example.com/a.png' : 'a dragged selection');
+			return document.querySelector(selector)!.dispatchEvent(
+				new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true })
+			);
+		},
+		{ selector, type }
+	);
 }
 
 /**

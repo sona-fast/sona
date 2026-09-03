@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { CloudUpload, Check, FileBox, Loader2, Plus, X } from 'lucide-svelte';
 	import { tick } from 'svelte';
+	import { CloudUpload, Check, FileBox, Loader2, Plus, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import { extractImageFiles, isTextEditable, shouldHandleImagePaste } from '$lib/clipboard';
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
@@ -20,6 +20,15 @@
 	let showNewArtist = $state(false);
 	let saving = $state(false);
 	let announce = $state('');
+	// Bumped on every write so {#key} replaces the node inside the live region:
+	// two identical batches say the same thing, and re-assigning text the region
+	// already holds changes no DOM, so nothing would be announced. Same shape the
+	// VR and sticker forms use.
+	let announceUid = $state(0);
+	function setAnnounce(text: string) {
+		announce = text;
+		announceUid++;
+	}
 	let fileInput: HTMLInputElement;
 
 	type Tile = {
@@ -147,19 +156,19 @@
 			if (!error) batch.push({ key: tile.key, file });
 		}
 
-		// Reset then set on the next tick so identical consecutive adds still
-		// re-announce to screen readers via the aria-live region. Only files that
-		// really entered the batch are announced as added — the refused ones are
-		// counted separately, so the region never claims a rejected file was added.
+		// Only files that really entered the batch are announced as added — the
+		// refused ones are counted separately, so the region never claims a
+		// rejected file was added. Two sentences, so join them as sentences;
+		// neither message ends in a period of its own.
 		const refused = fileArray.length - batch.length;
-		announce = '';
-		await tick();
-		announce = [
-			batch.length > 0 ? m.admin_upload_images_added({ count: batch.length }) : '',
-			refused > 0 ? m.admin_upload_images_rejected({ count: refused }) : ''
-		]
-			.filter(Boolean)
-			.join(' ');
+		setAnnounce(
+			[
+				batch.length > 0 ? m.admin_upload_images_added({ count: batch.length }) : '',
+				refused > 0 ? m.admin_upload_images_rejected({ count: refused }) : ''
+			]
+				.filter(Boolean)
+				.join('. ')
+		);
 
 		// Pass 2: probe dimensions and upload. Uploads run one at a time WITHIN
 		// this batch (matching VrAvatarForm's media flow) so a full batch can't
@@ -167,6 +176,11 @@
 		// loop, so the guarantee is per-invocation, not global. Each tile still
 		// shows its own status. Mutate the tile via the `tiles` state proxy
 		// (not the pass-1 local) so updates stay reactive.
+		if (batch.length === 0) return;
+		// The await is load-bearing: without it the counts above and this status
+		// land in one synchronous run and the counts never reach the DOM at all.
+		await tick();
+		setAnnounce(m.admin_upload_uploading());
 		for (const { key, file } of batch) {
 			const dims = await getImageDimensions(file);
 			const tile = tiles.find((t) => t.key === key);
@@ -175,6 +189,12 @@
 			tile.height = dims.height;
 			await uploadOne(tile, file);
 		}
+		// The per-tile outcome is only visible as an icon or a line of text on the
+		// tile, so close the batch out in the live region too (mirroring the VR
+		// media flow). Tiles the batch dropped — a declined duplicate, a removal
+		// mid-upload — are simply gone, so only survivors can report an error.
+		const failed = batch.some(({ key }) => tiles.find((t) => t.key === key)?.status === 'error');
+		setAnnounce(failed ? m.admin_upload_batch_issues() : m.admin_upload_batch_done());
 	}
 
 	function removeTile(key: number) {
@@ -231,7 +251,9 @@
 
 <svelte:window onpaste={handlePaste} ondragover={swallowStrayFileDrop} ondrop={swallowStrayFileDrop} />
 
-<div class="sr-only" aria-live="polite">{announce}</div>
+<!-- The region itself stays put; only the node inside it is keyed, so repeating
+     an announcement still mutates the region and gets read out. -->
+<div class="sr-only" aria-live="polite">{#key announceUid}<span>{announce}</span>{/key}</div>
 
 <div class="page-header">
 	<h1>{m.admin_upload_title()}</h1>
@@ -313,6 +335,8 @@
 							{:else if tile.status === 'done'}
 								<Check size={16} />
 							{:else}
+								<!-- .error-text carries no styling of its own — the status band
+								     already supplies the color; the class is a test hook. -->
 								<span class="error-text">{tile.error}</span>
 							{/if}
 						</div>
@@ -345,7 +369,11 @@
 				</div>
 			{/each}
 			{#if tiles.length < data.maxVariantSet}
-				<button type="button" class="tile tile-add" disabled={saving} onclick={() => fileInput?.click()}>
+				<!-- aria-disabled rather than `disabled`, matching the dropzone: a
+				     native disabled button loses focus the moment the save starts,
+				     dropping the keyboard user back on <body>. The click guard is what
+				     actually refuses. -->
+				<button type="button" class="tile tile-add" aria-disabled={saving} onclick={() => { if (!saving) fileInput?.click(); }}>
 					<Plus size={20} />
 					<span>{m.admin_variant_add_files()}</span>
 				</button>
@@ -719,6 +747,20 @@
 	.tile-add:hover {
 		border-color: var(--primary);
 		color: var(--primary);
+	}
+
+	/* Mirrors .dropzone.disabled — the other way into the picker has to read as
+	   unavailable while the save is in flight, not just refuse the click. */
+	.tile-add[aria-disabled='true'] {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
+	/* aria-disabled leaves the button hoverable, so undo exactly what :hover
+	   above sets and hold the resting look. */
+	.tile-add[aria-disabled='true']:hover {
+		border-color: var(--border);
+		color: var(--muted-foreground);
 	}
 
 	.group-section {

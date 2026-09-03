@@ -10,7 +10,7 @@
 	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { probeDimensions } from '$lib/probe-dimensions';
-	import { MAX_BUFFER_BYTES } from '$lib/config';
+	import { MAX_BUFFER_BYTES, VR_MEDIA_ACCEPT } from '$lib/config';
 	import { MAX_VR_MODEL_BYTES, creditRoleLabel, formatBytes, modelFileError, modelFormatLabel, namePlaceholderCharacter, platformLabel } from '$lib/vr';
 	import * as m from '$lib/paraglide/messages';
 
@@ -220,10 +220,6 @@
 		mediaEntries = mediaEntries.filter((_, idx) => idx !== i);
 	}
 
-	// MIME types only: /api/upload validates the declared type and reads an empty
-	// one as application/octet-stream, so accepting a bare .png here would upload
-	// the whole file just to collect a 415.
-	const MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/avif,video/webm';
 	// /api/upload's buffered cap — the shared constant, not a hardcoded twin.
 	const MAX_MEDIA_BYTES = MAX_BUFFER_BYTES;
 
@@ -234,7 +230,7 @@
 		if (!files.length) return;
 		// `accept` is a filter the OS dialog can override ("All files"), so a
 		// picked .txt would otherwise upload its whole body just to collect a 415.
-		const { accepted, rejected } = partitionByAccept(files, MEDIA_ACCEPT);
+		const { accepted, rejected } = partitionByAccept(files, VR_MEDIA_ACCEPT);
 		uploadMedia(accepted, rejected);
 	}
 
@@ -844,7 +840,7 @@
 			class="upload-zone media-zone"
 			class:disabled={mediaUploading || saving}
 			{@attach dropFiles({
-				accept: MEDIA_ACCEPT,
+				accept: VR_MEDIA_ACCEPT,
 				onFiles: uploadMedia,
 				// Also while saving: a drop after Save would upload and append a row
 				// the already-serialized submit never sees, orphaning the file.
@@ -855,7 +851,7 @@
 			<span>{mediaUploading ? m.admin_upload_uploading() : m.admin_vr_media_dropzone({ max: formatBytes(MAX_MEDIA_BYTES) })}</span>
 			<input
 				type="file"
-				accept={MEDIA_ACCEPT}
+				accept={VR_MEDIA_ACCEPT}
 				multiple
 				onchange={onMediaPicked}
 				disabled={mediaUploading || saving}

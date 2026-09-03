@@ -61,6 +61,22 @@ function dragEvent(type: string, files: PickedFile[] = [], types: string[] = ['F
 	return Object.assign(new Event(type, { cancelable: true }), { dataTransfer: { files, types, dropEffect: '' } });
 }
 
+// A drag carrying no files (a selection, a link from another tab), reporting
+// `target` as what it landed on. `target` is an accessor on Event.prototype, so
+// it has to be defined as an own property rather than assigned.
+function textDrag(type: string, target: unknown, types = ['text/plain']) {
+	const ev = Object.assign(new Event(type, { cancelable: true }), {
+		dataTransfer: { types, files: [] as PickedFile[], dropEffect: 'copy' }
+	});
+	Object.defineProperty(ev, 'target', { value: target });
+	return ev;
+}
+
+// What a variant label input looks like to isTextEditable, and what the grid
+// itself (a plain div) looks like.
+const LABEL_FIELD = { tagName: 'INPUT', type: 'text' };
+const GRID = { tagName: 'DIV' };
+
 describe('partitionByAccept', () => {
 	it('splits by the accept string and keeps input order in both buckets', () => {
 		const a = { name: 'a.vrm', type: '' };
@@ -216,20 +232,18 @@ describe('dropFiles', () => {
 		expect(inner.el.classes.has('drag-over')).toBe(false);
 	});
 
-	it('leaves a text drag alone when the zone passes non-file drags through', () => {
+	it('leaves a text drag alone when it lands on a field of a pass-through zone', () => {
 		// The upload page's tile grid holds the variant label inputs: cancelling a
-		// dragged selection here would stop it ever reaching a label.
+		// dragged selection here would stop it ever reaching a label. The event has
+		// to report the label as its target — that is the only thing that earns the
+		// pass-through.
 		const { el, calls } = setup(undefined, true);
-		const over = Object.assign(new Event('dragover', { cancelable: true }), {
-			dataTransfer: { types: ['text/plain'], files: [], dropEffect: 'copy' }
-		});
+		const over = textDrag('dragover', LABEL_FIELD);
 		el.dispatchEvent(over);
 		expect(over.defaultPrevented).toBe(false);
 		expect(over.dataTransfer.dropEffect).toBe('copy');
 		expect(el.classes.has('drag-over')).toBe(false);
-		const drop = Object.assign(new Event('drop', { cancelable: true }), {
-			dataTransfer: { types: ['text/plain'], files: [], dropEffect: 'copy' }
-		});
+		const drop = textDrag('drop', LABEL_FIELD);
 		el.dispatchEvent(drop);
 		expect(drop.defaultPrevented).toBe(false);
 		expect(calls).toHaveLength(0);
@@ -241,11 +255,25 @@ describe('dropFiles', () => {
 		// The default instance cancels that same text drag — the option is what
 		// makes the difference, not the drag.
 		const plain = setup();
-		const same = Object.assign(new Event('dragover', { cancelable: true }), {
-			dataTransfer: { types: ['text/plain'], files: [], dropEffect: 'copy' }
-		});
+		const same = textDrag('dragover', LABEL_FIELD);
 		plain.el.dispatchEvent(same);
 		expect(same.defaultPrevented).toBe(true);
+	});
+
+	it('still cancels a non-file drag that misses the fields of a pass-through zone', () => {
+		// The regression that made the option dangerous: a link dragged from
+		// another tab carries no 'Files', so passing every non-file drag through
+		// let a drop on the grid's own padding navigate the tab away from the form.
+		const { el, calls } = setup(undefined, true);
+		const over = textDrag('dragover', GRID, ['text/uri-list']);
+		el.dispatchEvent(over);
+		expect(over.defaultPrevented).toBe(true);
+		expect(over.dataTransfer.dropEffect).toBe('none');
+		expect(el.classes.has('drag-over')).toBe(false);
+		const drop = textDrag('drop', GRID, ['text/uri-list']);
+		el.dispatchEvent(drop);
+		expect(drop.defaultPrevented).toBe(true);
+		expect(calls).toHaveLength(0);
 	});
 
 	it('removes its listeners on cleanup', () => {
