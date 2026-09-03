@@ -414,6 +414,7 @@
 	"admin_upload_images_added": "{count} image(s) added",
 	"admin_upload_over_limit": "{count} image(s) skipped — max {max}",
 	"admin_upload_images_rejected": "{count} file(s) couldn't be added",
+	"admin_upload_images_added_and_rejected": "{added} image(s) added. {rejected} file(s) couldn't be added",
 	"admin_upload_batch_done": "Upload finished.",
 	"admin_upload_batch_issues": "Upload finished with errors. Each file that failed shows the reason.",
 	"admin_upload_error_too_large": "This file is over {max}. Try a smaller image.",

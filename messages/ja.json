@@ -358,6 +358,7 @@
 	"admin_upload_images_added": "{count}枚の画像を追加しました",
 	"admin_upload_over_limit": "{count}枚をスキップしました（最大{max}枚）",
 	"admin_upload_images_rejected": "{count}件のファイルを追加できませんでした",
+	"admin_upload_images_added_and_rejected": "{added}枚の画像を追加しました。{rejected}件のファイルを追加できませんでした",
 	"admin_upload_batch_done": "アップロードが完了しました。",
 	"admin_upload_batch_issues": "アップロードは完了しましたが、エラーがありました。失敗したファイルにはそれぞれ理由が表示されています。",
 	"admin_upload_error_too_large": "このファイルは{max}を超えています。もっと小さい画像をお試しください。",

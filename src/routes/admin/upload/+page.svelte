@@ -158,16 +158,15 @@
 
 		// Only files that really entered the batch are announced as added — the
 		// refused ones are counted separately, so the region never claims a
-		// rejected file was added. Two sentences, so join them as sentences;
-		// neither message ends in a period of its own.
+		// rejected file was added. The mixed case is its own message so each
+		// locale can punctuate the two sentences its own way.
 		const refused = fileArray.length - batch.length;
 		setAnnounce(
-			[
-				batch.length > 0 ? m.admin_upload_images_added({ count: batch.length }) : '',
-				refused > 0 ? m.admin_upload_images_rejected({ count: refused }) : ''
-			]
-				.filter(Boolean)
-				.join('. ')
+			batch.length > 0 && refused > 0
+				? m.admin_upload_images_added_and_rejected({ added: batch.length, rejected: refused })
+				: batch.length > 0
+					? m.admin_upload_images_added({ count: batch.length })
+					: m.admin_upload_images_rejected({ count: refused })
 		);
 
 		// Pass 2: probe dimensions and upload. Uploads run one at a time WITHIN
