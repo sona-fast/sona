@@ -62,7 +62,7 @@ export function extFromContentType(contentType: string): string {
 // content-type, bypassing the worker's security headers), so an SVG with a <script>
 // or a text/html payload would execute in that origin. Keep this strict.
 // Exported for the test that pins $lib/config's GALLERY_ACCEPT to this set.
-export const ALLOWED_IMAGE_TYPES = new Set([
+export const ALLOWED_IMAGE_TYPES: ReadonlySet<string> = new Set([
 	'image/jpeg',
 	'image/jpg',
 	'image/png',

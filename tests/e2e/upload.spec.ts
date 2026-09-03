@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Request, type Route } from '@playwright/test';
+import { test, expect, type Page, type Request, type Route, type TestInfo } from '@playwright/test';
 import { promises as fs } from 'node:fs';
 import { adminLogin } from './admin-login';
 import {
@@ -48,10 +48,10 @@ async function stageFiles(
 	page: Page,
 	files: Parameters<Page['setInputFiles']>[1],
 	expectedTileCount: number,
-	onAttempt: () => void = () => {}
+	onAttempt: () => void | Promise<void> = () => {}
 ): Promise<void> {
 	await expect(async () => {
-		onAttempt();
+		await onAttempt();
 		await page.setInputFiles('input[type="file"]', files);
 		await page.evaluate(() => {
 			document
@@ -166,6 +166,17 @@ test('a multi-file batch uploads sequentially within the batch — one in-flight
 	expect(uploads.counters.peak).toBe(1);
 });
 
+// A file one byte over the 64 MiB cap. Payload buffers are capped at 50 MB by
+// Playwright, so oversized files go via a path; ftruncate keeps them sparse (no
+// 64 MiB actually written).
+async function makeHugeFile(testInfo: TestInfo, name: string): Promise<string> {
+	const path = testInfo.outputPath(name);
+	const handle = await fs.open(path, 'w');
+	await handle.truncate(64 * 1024 * 1024 + 1);
+	await handle.close();
+	return path;
+}
+
 test('an oversized file fails client-side without a POST; the rest of the batch still uploads', async ({
 	page
 }, testInfo) => {
@@ -174,22 +185,22 @@ test('an oversized file fails client-side without a POST; the rest of the batch 
 
 	const uploads = countUploadPosts(page);
 
-	// One real small PNG plus a sparse file just over the 64 MiB cap. Payload
-	// buffers are capped at 50 MB by Playwright, so both go via file paths;
-	// ftruncate keeps the big one sparse (no 64 MiB actually written).
+	// One real small PNG plus a file just over the 64 MiB cap; both go via file
+	// paths, since Playwright caps payload buffers at 50 MB.
 	const smallPath = testInfo.outputPath('e2e-small.png');
 	await fs.writeFile(smallPath, PNG);
-	const hugePath = testInfo.outputPath('e2e-huge.png');
-	const handle = await fs.open(hugePath, 'w');
-	await handle.truncate(64 * 1024 * 1024 + 1);
-	await handle.close();
+	const hugePath = await makeHugeFile(testInfo, 'e2e-huge.png');
 
 	await page.goto('/admin/upload');
+	const announced = await recordAnnouncements(page);
 	// Oversized file FIRST: uploads run in staged order, so if a doomed POST
 	// were ever fired for it, it would land BEFORE the small file's POST — and
 	// the count assertion below (which waits on the small upload finishing)
 	// would catch it. Staged last, its POST could fire after the assertion.
-	await stageFiles(page, [hugePath, smallPath], 2, uploads.reset);
+	await stageFiles(page, [hugePath, smallPath], 2, async () => {
+		uploads.reset();
+		await clearAnnouncements(page);
+	});
 
 	// The oversized tile (tile 0) shows the image-scoped too-large message...
 	await expect(page.locator('.tile-error .error-text')).toContainText('over 64.0 MB');
@@ -202,6 +213,39 @@ test('an oversized file fails client-side without a POST; the rest of the batch 
 	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('');
 	// Exactly one POST fired — none for the doomed oversized file.
 	expect(uploads.counters.total).toBe(1);
+	// The counts cover every tile the pick created, oversized as well as
+	// wrong-type: one image entered the batch, one file didn't. And the batch is
+	// closed out as having errors, since the oversized tile is one of its own.
+	await expect.poll(announced).toEqual([
+		"1 image(s) added. 1 file(s) couldn't be added",
+		'Upload finished with errors. Each file that failed shows the reason.'
+	]);
+});
+
+test('a pick of nothing but oversized files is counted, and never says it finished', async ({
+	page
+}, testInfo) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	const uploads = countUploadPosts(page);
+	const firstPath = await makeHugeFile(testInfo, 'e2e-huge-1.png');
+	const secondPath = await makeHugeFile(testInfo, 'e2e-huge-2.png');
+
+	await page.goto('/admin/upload');
+	const announced = await recordAnnouncements(page);
+	await stageFiles(page, [firstPath, secondPath], 2, async () => {
+		uploads.reset();
+		await clearAnnouncements(page);
+	});
+
+	await expect(page.locator('.tile-error')).toHaveCount(2);
+	// No file entered the batch, so the counts are the whole announcement: both
+	// tiles are reported, and no batch opened that could later claim to be done.
+	await expect(page.locator(LIVE_REGION)).toHaveText("2 file(s) couldn't be added");
+	await page.waitForTimeout(300);
+	expect(await announced()).toEqual(["2 file(s) couldn't be added"]);
+	expect(uploads.counters.total).toBe(0);
 });
 
 // Paste one file into the page. The clipboard can't be primed with a file from
@@ -240,6 +284,15 @@ async function recordAnnouncements(page: Page) {
 		}).observe(region, { childList: true, characterData: true, subtree: true });
 	}, LIVE_REGION);
 	return () => page.evaluate(() => (window as unknown as { __announced: string[] }).__announced);
+}
+
+// Drop what the observer has seen so far. A stageFiles retry re-stages the files
+// and writes the counts again, so a test that asserts the exact log has to clear
+// it at the top of every attempt the same way the request counters are reset.
+function clearAnnouncements(page: Page) {
+	return page.evaluate(() => {
+		(window as unknown as { __announced?: string[] }).__announced?.splice(0);
+	});
 }
 
 test('dropping images adds tiles, and a wrong type is rejected without a request', async ({
@@ -428,9 +481,18 @@ for (const width of [1280, 390]) {
 			'対応していないファイル形式です'
 		);
 
+		// Measure only once the ja face is in: with a fallback font the string
+		// wraps to fewer lines, and a short band clears the icon no matter how the
+		// two are stacked.
+		await page.evaluate(() => document.fonts.ready);
+
 		const icon = (await page.locator('.tile-placeholder svg').boundingBox())!;
 		const band = (await page.locator('.tile-status').boundingBox())!;
 		const preview = (await page.locator('.tile-preview').boundingBox())!;
+		// The band really is the tall multi-line one this test exists for: taller
+		// than the space left over if it split the preview evenly with the icon.
+		// A one-line band would pass every assertion below without proving a thing.
+		expect(band.height).toBeGreaterThan(preview.height / 2 - icon.height / 2);
 		// The icon sits entirely above the band and inside the preview box, so no
 		// part of it is covered or clipped away.
 		expect(icon.y + icon.height).toBeLessThanOrEqual(band.y + 0.5);
@@ -557,6 +619,49 @@ test('an overlapping batch does not close out the one still uploading', async ({
 	expect(await announced()).not.toContain('Upload finished.');
 });
 
+test('a refused drop mid-batch still costs the running batch its clean finish', async ({ page }) => {
+	test.setTimeout(60_000);
+	await adminLogin(page, PASSWORD);
+
+	// The one POST is held open until the test releases it, so the batch it
+	// belongs to is still in flight when the second drop lands.
+	let arrived = () => {};
+	const firstArrived = new Promise<void>((resolve) => (arrived = resolve));
+	let release = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route('**/api/upload', async (route) => {
+		arrived();
+		await held;
+		await route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ url: '/held.png' })
+		});
+	});
+
+	await page.goto('/admin/upload');
+	await waitForDropAttachment(page, '.dropzone');
+
+	await dropOn(page, '.dropzone', [{ name: 'held.png', type: 'image/png' }]);
+	await firstArrived;
+	// An SVG on its own opens no batch of its own — it only puts an error tile on
+	// the screen — so the held batch is the only one left to report it.
+	await waitForDropAttachment(page, '.tile-grid');
+	await dropOn(page, '.tile-grid', [{ name: 'vector.svg', type: 'image/svg+xml' }]);
+	await expect(page.locator('.tile-error .error-text')).toContainText(
+		"That file type isn't supported"
+	);
+
+	release();
+	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/held.png', {
+		timeout: 15_000
+	});
+	// Its own file uploaded fine, but a refused tile arrived while it ran, so
+	// calling the screen clean would send the operator looking for nothing.
+	await expect(page.locator(LIVE_REGION)).toHaveText(
+		'Upload finished with errors. Each file that failed shows the reason.'
+	);
+});
+
 test('the same batch outcome twice is announced twice', async ({ page }) => {
 	test.setTimeout(60_000);
 	await adminLogin(page, PASSWORD);
@@ -648,6 +753,12 @@ test('the upload zones refuse files while a save is in flight', async ({ page })
 	await dropOn(page, '.tile-grid', [{ name: 'late.png', type: 'image/png' }]);
 	await dragOver(page, '.tile-grid');
 	await expect(page.locator('.tile-grid')).not.toHaveClass(/drag-over/);
+	await page.waitForTimeout(300);
+	expect(uploads).toBe(before);
+	await expect(page.locator('input[name^="imageUrl_"]')).toHaveCount(1);
+	// The third way in is gated too: paste has no zone to disable, so the handler
+	// has to bail on its own or it becomes the one route around the save gate.
+	await pasteFile(page, 'pasted.png', 'image/png');
 	await page.waitForTimeout(300);
 	expect(uploads).toBe(before);
 	await expect(page.locator('input[name^="imageUrl_"]')).toHaveCount(1);

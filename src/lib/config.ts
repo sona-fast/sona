@@ -48,6 +48,14 @@ export const GALLERY_ACCEPT = 'image/jpeg,image/jpg,image/png,image/gif,image/we
 export const VR_MEDIA_ACCEPT = `${GALLERY_ACCEPT},video/webm`;
 
 /**
+ * `accept` string for the sticker pack form's picker and drop zone. Narrower
+ * than GALLERY_ACCEPT on purpose — a sticker is stored as one of these two
+ * formats — but still a subset of what the server stores, pinned by a test in
+ * config.test.ts. MIME types only, for the same reason GALLERY_ACCEPT is.
+ */
+export const STICKER_ACCEPT = 'image/png,image/webp';
+
+/**
  * Admin session cookie name. Read in `hooks.server.ts` / `auth.ts` before any
  * DB access, so it must be a build-time constant rather than a setting.
  *

@@ -5,7 +5,7 @@
 	import { toast } from '$lib/toast.svelte';
 	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
-	import { MAX_BUFFER_BYTES } from '$lib/config';
+	import { MAX_BUFFER_BYTES, STICKER_ACCEPT } from '$lib/config';
 	// The shared size formatter; it lives in $lib/vr only because that page needed
 	// it first, and it carries no VR-specific behaviour.
 	import { formatBytes } from '$lib/vr';
@@ -108,15 +108,6 @@
 		}))
 	);
 
-	// Shared by the file input and the drop attachment, so a drop accepts exactly
-	// what the picker offers. MIME types only: /api/upload validates the declared
-	// type and reads an empty one as application/octet-stream, so accepting a
-	// bare .png here would upload the whole file just to collect a 415.
-	const STICKER_ACCEPT = 'image/png,image/webp';
-
-	// /api/upload's buffered cap — the shared constant, not a hardcoded twin.
-	const MAX_STICKER_BYTES = MAX_BUFFER_BYTES;
-
 	let uploading = $state(false);
 	// Upload start/done announcements for the stickers section's live region:
 	// the zone label and the new rows show both, but only visually.
@@ -197,7 +188,7 @@
 				// Client-side cap, ahead of the POST: /api/upload would answer 413
 				// only after the whole body went up the wire, so an oversized file
 				// costs the operator the upload before it can be named.
-				if (file.size > MAX_STICKER_BYTES) {
+				if (file.size > MAX_BUFFER_BYTES) {
 					stickerErrors = [
 						...stickerErrors,
 						{ uid: stickerErrorUid++, name: file.name, reason: 'too-large' }
@@ -441,7 +432,7 @@
 					<p class="banner-line">
 						<strong>{err.name}</strong> —
 						{#if err.reason === 'too-large'}
-							{m.admin_pack_error_too_large({ max: formatBytes(MAX_STICKER_BYTES) })}
+							{m.admin_pack_error_too_large({ max: formatBytes(MAX_BUFFER_BYTES) })}
 						{:else if err.reason === 'bad-type'}
 							{m.admin_pack_error_bad_type()}
 						{:else}

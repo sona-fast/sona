@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { GALLERY_ACCEPT, VR_MEDIA_ACCEPT } from './config';
+import { GALLERY_ACCEPT, STICKER_ACCEPT, VR_MEDIA_ACCEPT } from './config';
 import { ALLOWED_IMAGE_TYPES, isAllowedImageType } from './server/storage';
 
 // A type only the accept string has uploads a file /api/upload refuses with a
@@ -24,6 +24,14 @@ describe('VR_MEDIA_ACCEPT', () => {
 	it('offers exactly the server image types, plus video/webm', () => {
 		expect(new Set(types.filter((t) => t.startsWith('image/')))).toEqual(ALLOWED_IMAGE_TYPES);
 		expect(types.filter((t) => !t.startsWith('image/'))).toEqual(['video/webm']);
+	});
+});
+
+// Stickers deliberately offer fewer formats than the gallery, but never one the
+// server refuses — that would upload a file just to collect a 415.
+describe('STICKER_ACCEPT', () => {
+	it('offers only types the server stores', () => {
+		for (const t of STICKER_ACCEPT.split(',')) expect(isAllowedImageType(t)).toBe(true);
 	});
 });
 

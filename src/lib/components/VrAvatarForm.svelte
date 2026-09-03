@@ -220,9 +220,6 @@
 		mediaEntries = mediaEntries.filter((_, idx) => idx !== i);
 	}
 
-	// /api/upload's buffered cap — the shared constant, not a hardcoded twin.
-	const MAX_MEDIA_BYTES = MAX_BUFFER_BYTES;
-
 	function onMediaPicked(e: Event) {
 		const input = e.currentTarget as HTMLInputElement;
 		const files = [...(input.files ?? [])];
@@ -252,7 +249,7 @@
 		setMediaStatus(m.admin_upload_uploading());
 		try {
 			for (const file of files) {
-				if (file.size > MAX_MEDIA_BYTES) {
+				if (file.size > MAX_BUFFER_BYTES) {
 					mediaErrors = [...mediaErrors, { uid: mediaErrorUid++, name: file.name, reason: 'too-large' }];
 					continue;
 				}
@@ -848,7 +845,7 @@
 			})}
 		>
 			<ImagePlus size={20} />
-			<span>{mediaUploading ? m.admin_upload_uploading() : m.admin_vr_media_dropzone({ max: formatBytes(MAX_MEDIA_BYTES) })}</span>
+			<span>{mediaUploading ? m.admin_upload_uploading() : m.admin_vr_media_dropzone({ max: formatBytes(MAX_BUFFER_BYTES) })}</span>
 			<input
 				type="file"
 				accept={VR_MEDIA_ACCEPT}
@@ -866,7 +863,7 @@
 					<p class="banner-line">
 						<strong>{err.name}</strong> —
 						{#if err.reason === 'too-large'}
-							{m.admin_vr_media_error_too_large({ max: formatBytes(MAX_MEDIA_BYTES) })}
+							{m.admin_vr_media_error_too_large({ max: formatBytes(MAX_BUFFER_BYTES) })}
 						{:else if err.reason === 'bad-type'}
 							{m.admin_vr_media_error_bad_type()}
 						{:else}

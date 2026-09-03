@@ -166,21 +166,17 @@
 			if (!error) batch.push({ key: tile.key, file });
 		}
 
-		// Only files that really entered the batch are announced as added — the
-		// refused ones are counted separately, so the region never claims a
-		// rejected file was added. The mixed case is its own message so each
-		// locale can punctuate the two sentences its own way. Refused counts the
-		// wrong-type files alone: an oversized one holds a tile that names its own
-		// limit, so counting it here would report the same problem twice. When
-		// nothing entered the batch every file failed one way or the other, so all
-		// of them are counted as refused.
-		const refused = fileArray.filter(({ badType }) => badType).length;
+		// Every file that did not enter the batch is counted, wrong-type or
+		// oversized alike, so the opening announcement covers every tile this call
+		// created; the mixed case is its own message so each locale can punctuate
+		// the two sentences its own way.
+		const notUploaded = fileArray.length - batch.length;
 		setAnnounce(
-			batch.length > 0 && refused > 0
-				? m.admin_upload_images_added_and_rejected({ added: batch.length, rejected: refused })
+			batch.length > 0 && notUploaded > 0
+				? m.admin_upload_images_added_and_rejected({ added: batch.length, rejected: notUploaded })
 				: batch.length > 0
 					? m.admin_upload_images_added({ count: batch.length })
-					: m.admin_upload_images_rejected({ count: fileArray.length })
+					: m.admin_upload_images_rejected({ count: notUploaded })
 		);
 
 		// Pass 2: probe dimensions and upload. Uploads run one at a time WITHIN
@@ -189,13 +185,18 @@
 		// loop, so the guarantee is per-invocation, not global. Each tile still
 		// shows its own status. Mutate the tile via the `tiles` state proxy
 		// (not the pass-1 local) so updates stay reactive.
-		// Nothing to upload: the counts above are the whole announcement, and no
-		// batch opens, so no "finished" ever follows them.
-		if (batch.length === 0) return;
-		// The counts above are the batch's start announcement. Writing "Uploading"
-		// on top of them here would land in the same frame and be the only thing a
-		// screen reader ever read out, so the batch says two things: what arrived,
-		// and how it ended.
+		// Tiles the batch dropped — a declined duplicate, a removal mid-upload —
+		// are simply gone, so only survivors can report an error.
+		const createdAnError = () =>
+			created.some((key) => tiles.find((t) => t.key === key)?.status === 'error');
+
+		if (batch.length === 0) {
+			// Nothing to upload, so no batch opens and no "finished" follows the
+			// counts above — but a batch already in flight must not close out clean
+			// when this call just put an error tile on the screen.
+			if (inFlightBatches > 0 && createdAnError()) batchHadErrors = true;
+			return;
+		}
 		inFlightBatches++;
 		try {
 			for (const { key, file } of batch) {
@@ -211,11 +212,8 @@
 			// the tile, so close the batch out in the live region too (mirroring the
 			// VR media flow). EVERY tile this call created counts, not just the
 			// uploaded ones — a file refused before the batch opened went wrong too,
-			// and calling that "finished" would be a lie. Tiles the batch dropped —
-			// a declined duplicate, a removal mid-upload — are simply gone, so only
-			// survivors can report an error.
-			if (created.some((key) => tiles.find((t) => t.key === key)?.status === 'error'))
-				batchHadErrors = true;
+			// and calling that "finished" would be a lie.
+			if (createdAnError()) batchHadErrors = true;
 			inFlightBatches--;
 			if (inFlightBatches === 0) {
 				setAnnounce(batchHadErrors ? m.admin_upload_batch_issues() : m.admin_upload_batch_done());
@@ -252,6 +250,9 @@
 		// The New Artist dialog owns the clipboard while open (its name field
 		// autofocuses); don't create tiles behind the modal.
 		if (showNewArtist) return;
+		// A save in flight is already sending these tiles; the drop zone and the
+		// picker are disabled for the same reason, so paste can't be the one way in.
+		if (saving) return;
 		const dt = e.clipboardData;
 		if (!dt) return;
 		const files = extractImageFiles(dt.items);
@@ -362,8 +363,8 @@
 							{:else if tile.status === 'done'}
 								<Check size={16} />
 							{:else}
-								<!-- .error-text carries no styling of its own — the status band
-								     already supplies the color; the class is a test hook. -->
+								<!-- .error-text only tunes its wrapping — the status band already
+								     supplies the color; the class doubles as a test hook. -->
 								<span class="error-text">{tile.error}</span>
 							{/if}
 						</div>
@@ -664,6 +665,13 @@
 		border-color: var(--destructive);
 	}
 
+	/* The two error bands are tinted differently (a placeholder tile mixes in
+	   --destructive, an image tile keeps the black band for contrast over
+	   artwork), so give both the same destructive edge to read as one treatment. */
+	.tile-error .tile-status {
+		border-top: 2px solid var(--destructive);
+	}
+
 	.tile-preview {
 		position: relative;
 		aspect-ratio: 1;
@@ -725,6 +733,12 @@
 		background: rgba(0, 0, 0, 0.6);
 		color: white;
 		font-size: 11px;
+	}
+
+	/* Error text wraps to several lines in a narrow tile; even it out rather than
+	   leaving a one-word last line. */
+	.error-text {
+		text-wrap: pretty;
 	}
 
 	.tile-remove {
