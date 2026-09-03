@@ -441,8 +441,14 @@ test('the showcase media zone refuses files while a save is in flight', async ({
 	await expect(page.locator('input[name="modelUrl"]')).toHaveValue('');
 
 	// A drop that misses every zone (here: the form itself) is swallowed page-
-	// wide, so the browser never navigates to the file.
+	// wide, so the browser never navigates to the file. The request window is
+	// watched, not the counter: a regressed filter could still post a moment
+	// after the drop returns, which an immediate counter read would miss.
+	const strayPost = page
+		.waitForRequest('**/api/upload', { timeout: 300 })
+		.then(() => true, () => false);
 	expect(await dropOn(page, 'form.form', [{ name: 'stray.png', type: 'image/png' }])).toBe(true);
+	expect(await strayPost).toBe(false);
 	expect(uploads).toBe(before);
 
 	// The zone comes back once the submit settles, so a failed save is still
