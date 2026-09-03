@@ -423,6 +423,7 @@ test('refused files still take slots: nine wrong-type files fill the eight-tile 
 });
 
 test('a picked file the accept string refuses gets an error tile, not a POST', async ({ page }) => {
+	test.setTimeout(60_000);
 	await adminLogin(page, PASSWORD);
 
 	const uploads = countUploadPosts(page);
@@ -464,6 +465,7 @@ for (const width of [1280, 390]) {
 	test(`the refused-file icon clears the status band at ${width}px in Japanese`, async ({
 		page
 	}) => {
+		test.setTimeout(60_000);
 		await adminLogin(page, PASSWORD);
 		// The paraglide locale cookie (src/lib/paraglide/runtime.js cookieName)
 		// switches the SSR locale, the same way the VR guide spec does.

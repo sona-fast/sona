@@ -170,10 +170,11 @@
 			const tile: Tile = {
 				key: tileKey++,
 				fileName: file.name,
-				// A wrong-type file gets no object URL: handed to <img> it can only
-				// paint the browser's broken-image glyph. Its tile shows the resting
-				// surface and a file icon instead.
-				previewUrl: badType ? '' : URL.createObjectURL(file),
+				// A refused file gets no object URL. A wrong-type one handed to <img>
+				// can only paint the broken-image glyph, and an oversized one would
+				// make the browser decode a huge image for a tile that already
+				// failed. Both show the resting surface and a file icon instead.
+				previewUrl: error ? '' : URL.createObjectURL(file),
 				url: '',
 				width: 0,
 				height: 0,
