@@ -2127,12 +2127,16 @@ describe('artist lookup section markup (SONA-156)', () => {
 			expect(start, action).toBeGreaterThan(-1);
 			return markup.slice(start, markup.indexOf('}}>', start));
 		};
+		// Shape, not spelling: any early return through cancel() on the pending
+		// flag counts, however it is braced or wrapped.
+		const guardsOn = (flag: string) =>
+			new RegExp(`if\\s*\\(\\s*${flag}\\s*\\)\\s*\\{?\\s*return\\s+cancel\\(\\s*\\)`);
 		const save = handler('saveFuzzysearchKey');
 		expect(save).toContain('({ cancel })');
-		expect(save).toContain('if (savingFuzzysearchKey) return cancel();');
+		expect(save).toMatch(guardsOn('savingFuzzysearchKey'));
 		const remove = handler('removeFuzzysearchKey');
 		expect(remove).toContain('({ cancel })');
-		expect(remove).toContain('if (removingFuzzysearchKey) return cancel();');
+		expect(remove).toMatch(guardsOn('removingFuzzysearchKey'));
 	});
 
 	// A live region that mounts with its text already in place is not announced,

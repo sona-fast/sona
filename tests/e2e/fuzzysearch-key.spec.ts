@@ -27,29 +27,56 @@ const saveButton = (page: Page) =>
 const removeButton = (page: Page) => section(page).locator('button.btn-remove');
 const confirmPanel = (page: Page) => section(page).locator('.remove-confirm');
 const keyRecord = (page: Page) => section(page).locator('.key-record');
+const replaceLine = (page: Page) => section(page).locator('.replace-line');
 
 // Opening the confirmation must not move the destructive button under the
 // pointer: while the block's top edge shifted up on the swap, the confirm
 // Remove landed on the pixel Remove key was just clicked, so a double click or
 // an impatient second tap removed the key without the question being read.
 // Clicks Remove key at its own centre and asks where that point ends up.
+// Both boxes are read in one coordinate frame: the button is centred in the
+// viewport first and the click goes through page.mouse at that exact point,
+// because locator.click() scrolls the button into view itself — after which the
+// "before" box belongs to a frame the confirm button was never measured in, and
+// at 390px the button's centre sits under the bottom tab bar, so the click that
+// "worked" was a click at some other pixel entirely.
 async function openConfirmClearOfThePointer(page: Page) {
+	await removeButton(page).evaluate((el) => el.scrollIntoView({ block: 'center' }));
 	const box = await removeButton(page).boundingBox();
 	if (!box) throw new Error('Remove key has no bounding box');
 	const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-	await removeButton(page).click();
+	// The pixel has to belong to Remove key itself, or the click below opens the
+	// panel from somewhere else and the comparison proves nothing.
+	const owner = await page.evaluate(
+		({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.className ?? '',
+		point
+	);
+	expect(owner, `the clicked pixel is Remove key at ${page.viewportSize()?.width}px`).toContain(
+		'btn-remove'
+	);
+	const frame = await page.evaluate(() => window.scrollY);
+	await page.mouse.click(point.x, point.y);
 	await expect(confirmPanel(page)).toBeVisible();
+	// The mechanism that holds the block still: the replace line stays rendered
+	// while the confirmation is open, so the swap does not pull the block up.
+	await expect(replaceLine(page)).toBeVisible();
 	const confirm = confirmPanel(page).getByRole('button', { name: 'Remove', exact: true });
 	const after = await confirm.boundingBox();
 	if (!after) throw new Error('Remove (confirm) has no bounding box');
+	// Both boxes are viewport-relative, which is the frame the pointer lives in:
+	// focusing Keep can scroll the page, and whatever that scroll brings under
+	// the pointer is exactly what a second click would hit. So the shift is
+	// reported, not corrected for.
+	const scrolled = (await page.evaluate(() => window.scrollY)) - frame;
 	const covers =
 		point.x >= after.x &&
 		point.x <= after.x + after.width &&
 		point.y >= after.y &&
 		point.y <= after.y + after.height;
-	expect(covers, `confirm Remove covers the clicked point at ${page.viewportSize()?.width}px`).toBe(
-		false
-	);
+	expect(
+		covers,
+		`confirm Remove covers the clicked point at ${page.viewportSize()?.width}px (page scrolled ${scrolled}px)`
+	).toBe(false);
 }
 
 // The connections sections are hidden by CSS until the tab is active, and the
