@@ -2075,32 +2075,54 @@ describe('artist lookup section markup (SONA-156)', () => {
 	it('keeps Remove key reachable in the refused state', () => {
 		// Guarded on the key being SET, never narrowed by the refusal — a refused
 		// key the operator cannot remove would be a dead end.
-		const guard = '{#if !data.fuzzysearchKeyFromEnv && data.fuzzysearchKeySet}';
+		const guard = '{#if fuzzysearchKeyEditable && data.fuzzysearchKeySet}';
 		expect(src).toContain(guard);
 		const block = src.slice(src.indexOf(guard) + guard.length);
 		const actions = block.slice(0, block.indexOf('</section>'));
 		expect(actions).toContain('m.admin_settings_lookup_remove()');
-		expect(actions).not.toContain('fuzzysearchKeyRefused');
+		expect(actions).not.toContain('fuzzysearchKeyRefusedAt');
 	});
 
 	it('renders the refused eyebrow, the lapsed line, and a labelled record', () => {
-		expect(src).toContain('const fuzzysearchKeyRefused = $derived(!!data.fuzzysearchKeyRefusedAt)');
-		const refused = src.slice(src.indexOf('{#if fuzzysearchKeyRefused}'));
+		const refused = src.slice(src.indexOf('{#if fuzzysearchKeyRefusedAt}'));
 		const branch = refused.slice(0, refused.indexOf('{:else if data.fuzzysearchKeySet}'));
 		expect(branch).toContain('m.admin_settings_lookup_refused_eyebrow()');
 		expect(branch).toContain('class="lapsed-line"');
 		expect(branch).toContain('m.admin_settings_lookup_refused_line(');
 		// The mask's <dt> is visible only here, where the record sits above a "New
 		// FuzzySearch API key" field and would otherwise be an unlabelled pill.
-		expect(src).toContain("<dt class={fuzzysearchKeyRefused ? 'record-label' : 'sr-only'}>");
-		expect(src).toContain('m.admin_settings_lookup_refused_key_label()');
+		const dt = src.slice(src.indexOf('<dl class="key-dl">'));
+		const dtBlock = dt.slice(0, dt.indexOf('</dt>'));
+		expect(dtBlock).toContain('record-label');
+		expect(dtBlock).toContain('sr-only');
+		expect(dtBlock).toContain('m.admin_settings_lookup_refused_key_label()');
 	});
 
 	it('renames the key field and drops the self-serve hint when refused', () => {
-		expect(src).toContain(
-			'{fuzzysearchKeyRefused ? m.admin_settings_lookup_new_key_label() : m.admin_settings_lookup_key_label()}'
-		);
+		const label = src.slice(src.indexOf('m.admin_settings_lookup_new_key_label()'));
+		expect(label.slice(0, 120)).toContain('m.admin_settings_lookup_key_label()');
 		const hint = src.slice(0, src.indexOf('m.admin_settings_lookup_hint_pre()'));
-		expect(hint.slice(-200)).toContain('{#if !fuzzysearchKeyRefused}');
+		expect(hint.slice(-200)).toContain('{#if !fuzzysearchKeyRefusedAt}');
+	});
+
+	// Both submit buttons unmount on success, so the section hands focus on by
+	// hand and can never use `disabled` (disabling the focused button drops the
+	// keyboard user on <body>). A revert to disabled={saving} would reintroduce
+	// the focus loss with both suites green, so the wiring is pinned here.
+	it('drives focus by hand and marks pending with aria-busy, never disabled', () => {
+		const section = src.slice(src.indexOf('class="security-section lookup-section"'));
+		const markup = section.slice(0, section.indexOf('</section>'));
+		for (const ref of ['fuzzysearchKeepButton', 'fuzzysearchRemoveButton', 'fuzzysearchKeyInput']) {
+			expect(src, ref).toContain(`bind:this={${ref}}`);
+			expect(src, ref).toContain(`${ref}?.focus()`);
+		}
+		// The save form and the confirm-remove form: both report pending state to
+		// assistive tech without taking the control away.
+		expect(markup).toContain('aria-busy={savingFuzzysearchKey}');
+		expect(markup).toContain('aria-busy={removingFuzzysearchKey}');
+		expect(markup).not.toContain('disabled=');
+		// aria-busy is not reliably announced on a button, so the pending sentence
+		// also rides a live region that stays mounted for the life of the section.
+		expect(markup).toContain('role="status"');
 	});
 });

@@ -916,3 +916,39 @@ describe('no accent-color override on form controls (SONA-172)', () => {
 		}
 	});
 });
+
+// The Artist lookup "Remove key" button rides .btn-outline but overrides its
+// label to --destructive. .btn-outline's hover fill mixes --background 88%
+// toward white or black, and --destructive on that mix falls to 3.6-4.4:1 on
+// five of the six themes, so the component pins the fill back to --background
+// and lets the border carry the hover signal (SONA-156). Two halves: the token
+// pairing has to clear AA, and the rule has to keep using it.
+describe('SONA-156 Remove-key label on its pinned hover fill', () => {
+	const blocks = THEMES.flatMap(({ id }) =>
+		id === 'default'
+			? [
+					{ name: 'default dark', sel: ':root' },
+					{ name: 'default light', sel: "[data-theme='light']" }
+				]
+			: [
+					{ name: `${id} dark`, sel: `[data-theme-id='${id}']` },
+					{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
+				]
+	);
+
+	for (const { name, sel } of blocks) {
+		it(`${name}: destructive text on the page background meets 4.5:1`, () => {
+			expect(contrast(blockToken(sel, 'destructive'), blockToken(sel, 'background'))).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+
+	it('.lookup-section .btn-remove:hover pins the fill to var(--background)', () => {
+		const source = readFileSync(
+			fileURLToPath(new URL('../routes/admin/settings/+page.svelte', import.meta.url)),
+			'utf8'
+		);
+		const body = source.match(/^\s*\.lookup-section \.btn-remove:hover\s*\{([^}]*)\}/m)?.[1];
+		if (!body) throw new Error('.lookup-section .btn-remove:hover rule not found');
+		expect(body).toMatch(/background-color:\s*var\(--background\)\s*;/);
+	});
+});

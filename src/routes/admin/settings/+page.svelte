@@ -197,7 +197,13 @@
 	const fuzzysearchKeyTail = $derived(data.fuzzysearchKeyRecord?.replace(/^•+/, '') ?? '');
 	// The refusal marker drives the state selector, a label and a class in the
 	// section below; one local keeps the state machine readable in one place.
-	const fuzzysearchKeyRefused = $derived(!!data.fuzzysearchKeyRefusedAt);
+	// The date itself, not a flag: the branch that renders it is guarded on this
+	// value, so keeping it here saves a fallback for a state that cannot occur.
+	const fuzzysearchKeyRefusedAt = $derived(data.fuzzysearchKeyRefusedAt);
+	// A key staged as a deploy secret owns the whole section: nothing in it is
+	// editable from the browser. Named once so the three blocks below cannot
+	// drift apart one guard at a time.
+	const fuzzysearchKeyEditable = $derived(!data.fuzzysearchKeyFromEnv);
 
 	// Localized "in early access right now" list, joined for the status line. Empty
 	// until a pilot feature is registered, in which case the "nothing" line shows.
@@ -1416,12 +1422,18 @@
      never reaches this component: only the mask built in load. -->
 <section class="security-section lookup-section" data-tab="connections">
 	<h2>{m.admin_settings_lookup_heading()}</h2>
-	{#if fuzzysearchKeyRefused}
+	<!-- aria-busy on a button is a region attribute most screen readers ignore, so
+	     the in-flight state gets its own live region here, mounted for the life of
+	     the section (StickerPackForm's pattern). The outcome is the Toaster's. -->
+	<span class="sr-only" role="status">
+		{#if savingFuzzysearchKey}{m.admin_saving()}{:else if removingFuzzysearchKey}{m.admin_settings_lookup_removing()}{/if}
+	</span>
+	{#if fuzzysearchKeyRefusedAt}
 		<div class="key-eyebrow refused">{m.admin_settings_lookup_refused_eyebrow()}</div>
 		<!-- Directly under the eyebrow, in the supporter card's lapsed-line voice:
 		     this one sentence is the whole reason the refused state exists, and in
 		     the muted status voice further down it read as more boilerplate. -->
-		<p class="lapsed-line">{m.admin_settings_lookup_refused_line({ date: data.fuzzysearchKeyRefusedAt ?? '' })}</p>
+		<p class="lapsed-line">{m.admin_settings_lookup_refused_line({ date: fuzzysearchKeyRefusedAt })}</p>
 	{:else if data.fuzzysearchKeySet}
 		<div class="key-eyebrow connected">{m.admin_settings_lookup_connected_eyebrow()}</div>
 	{/if}
@@ -1438,8 +1450,8 @@
 			<!-- Visible in the refused state, where the record sits above a "New
 			     FuzzySearch API key" field and would otherwise be an unlabelled pill;
 			     the connected state's surrounding copy already names it. -->
-			<dt class={fuzzysearchKeyRefused ? 'record-label' : 'sr-only'}>
-				{fuzzysearchKeyRefused
+			<dt class={fuzzysearchKeyRefusedAt ? 'record-label' : 'sr-only'}>
+				{fuzzysearchKeyRefusedAt
 					? m.admin_settings_lookup_refused_key_label()
 					: m.admin_settings_lookup_saved_key_label()}
 			</dt>
@@ -1450,13 +1462,16 @@
 				{/if}
 			</dd>
 		</dl>
-		{#if !fuzzysearchKeyRefused && !confirmingFuzzysearchRemove}
+		{#if !fuzzysearchKeyRefusedAt && !confirmingFuzzysearchRemove}
 			<p class="status-line replace-line">{m.admin_settings_lookup_replace()}</p>
 		{/if}
 	{/if}
 
-	{#if !data.fuzzysearchKeyFromEnv && (!data.fuzzysearchKeySet || fuzzysearchKeyRefused)}
-		<form class="save-form" method="POST" action="?/saveFuzzysearchKey" use:enhance={() => {
+	{#if fuzzysearchKeyEditable && (!data.fuzzysearchKeySet || fuzzysearchKeyRefusedAt)}
+		<form class="save-form" method="POST" action="?/saveFuzzysearchKey" use:enhance={({ cancel }) => {
+			// aria-busy replaced `disabled`, so a second activation while the first
+			// request is in flight would otherwise run a second handler.
+			if (savingFuzzysearchKey) return cancel();
 			savingFuzzysearchKey = true;
 			return async ({ result, update }) => {
 				await update({ reset: false });
@@ -1471,7 +1486,7 @@
 			};
 		}}>
 			<label>
-				<span>{fuzzysearchKeyRefused ? m.admin_settings_lookup_new_key_label() : m.admin_settings_lookup_key_label()}</span>
+				<span>{fuzzysearchKeyRefusedAt ? m.admin_settings_lookup_new_key_label() : m.admin_settings_lookup_key_label()}</span>
 				<input
 					type="password"
 					class="input"
@@ -1489,7 +1504,7 @@
 			{/if}
 			<!-- Above the save row, like the registry section's token hint: an
 			     operator without a key needs the link before the button. -->
-			{#if !fuzzysearchKeyRefused}
+			{#if !fuzzysearchKeyRefusedAt}
 				<p class="hint">{m.admin_settings_lookup_hint_pre()}<a class="link-inline" href="https://api.fuzzysearch.net/selfserve" target="_blank" rel="noopener noreferrer">api.fuzzysearch.net/selfserve<span class="sr-only">{' '}{m.link_opens_new_tab()}</span></a>{m.admin_settings_lookup_hint_post()}</p>
 			{/if}
 			<div class="save-row">
@@ -1506,12 +1521,13 @@
 	     always wants to paste a replacement, and disconnecting is the rarer exit.
 	     Guarded on the key being SET, not on the state being connected — a refused
 	     key the operator cannot remove would be a dead end. -->
-	{#if !data.fuzzysearchKeyFromEnv && data.fuzzysearchKeySet}
+	{#if fuzzysearchKeyEditable && data.fuzzysearchKeySet}
 		{#if confirmingFuzzysearchRemove}
 			<div class="remove-confirm">
 				<p id="fuzzysearch-remove-confirm">{m.admin_settings_lookup_confirm()}</p>
 				<div class="confirm-actions">
-					<form method="POST" action="?/removeFuzzysearchKey" use:enhance={() => {
+					<form method="POST" action="?/removeFuzzysearchKey" use:enhance={({ cancel }) => {
+						if (removingFuzzysearchKey) return cancel();
 						removingFuzzysearchKey = true;
 						return async ({ result, update }) => {
 							await update({ reset: false });
@@ -2582,8 +2598,18 @@
 		border-color: color-mix(in srgb, var(--border) 60%, var(--foreground));
 		color: var(--destructive);
 	}
+	/* The fill is pinned back to --background: .btn-outline's hover mixes it 88%
+	   toward white or black, and --destructive on that mix drops to 3.6-4.4:1 in
+	   five of the six themes (SC 1.4.3). The hover signal rides the border. */
 	.lookup-section .btn-remove:hover {
+		background-color: var(--background);
 		border-color: var(--destructive);
+	}
+	/* The refused state stacks "Save key" over "Remove key"; at the section's
+	   14px step they read as one button group, so the destructive exit gets a
+	   wider gap from the form it does not belong to. */
+	.lookup-section .save-form + .key-actions {
+		margin-top: 24px;
 	}
 	.lookup-section .remove-confirm {
 		margin-top: 14px;

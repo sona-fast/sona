@@ -86,6 +86,9 @@ test.describe('admin settings artist lookup key', () => {
 		await expect(keyRecord(page)).toContainText('8901');
 		await expect(keyRecord(page)).not.toContainText('e2e-fuzzysearch');
 		await expect(keyInput(page)).toHaveCount(0);
+		// The save form unmounts and takes the focused Save button with it, so the
+		// button that replaces it has to pick focus up.
+		await expect(removeButton(page)).toBeFocused();
 
 		// Removal asks first, and moves focus onto the safe choice — every button
 		// involved unmounts as the panel opens, so without that a keyboard user
