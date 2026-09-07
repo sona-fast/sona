@@ -146,6 +146,7 @@ export function handleProfileUrl(site: LookupSite, handle: string): string | nul
  * `constructor` and `__proto__` with an inherited member rather than a miss. */
 const HOST_ALIASES = new Map<string, string>([
 	['x.com', 'twitter.com'],
+	['mobile.twitter.com', 'twitter.com'],
 	['sfw.furaffinity.net', 'furaffinity.net']
 ]);
 
@@ -173,7 +174,9 @@ export function normalizeSourceUrl(url: string | null | undefined): string {
 	// A tweet is identified by its status id alone: `/kuttoya/status/160` and the
 	// handle-less `/i/status/160` this client builds for a match with no artist
 	// are the same post, so both reduce to the `/i/` spelling before comparison.
-	if (host === 'twitter.com') path = path.replace(/^\/[^/]+\/status\//, '/i/status/');
+	// Anything after the id goes too, so the `/photo/1` permalink Twitter's own
+	// UI hands out compares equal to the bare tweet.
+	if (host === 'twitter.com') path = path.replace(/^\/[^/]+\/status\/(\d+).*$/, '/i/status/$1');
 	return host + path;
 }
 

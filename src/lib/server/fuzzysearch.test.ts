@@ -307,6 +307,9 @@ describe('normalizeSourceUrl', () => {
 		expect(normalizeSourceUrl('https://x.com/kuttoya/status/160')).toBe(
 			'twitter.com/i/status/160'
 		);
+		expect(normalizeSourceUrl('https://mobile.twitter.com/kuttoya/status/160')).toBe(
+			'twitter.com/i/status/160'
+		);
 		expect(normalizeSourceUrl('https://sfw.furaffinity.net/view/12345/')).toBe(
 			'furaffinity.net/view/12345'
 		);
@@ -320,6 +323,8 @@ describe('normalizeSourceUrl', () => {
 		expect(normalizeSourceUrl('https://twitter.com/i/status/160')).toBe(canonical);
 		expect(normalizeSourceUrl('https://twitter.com/kuttoya/status/160')).toBe(canonical);
 		expect(normalizeSourceUrl('https://x.com/kuttoya/status/160')).toBe(canonical);
+		// The address Twitter's UI hands out for a tweet's image.
+		expect(normalizeSourceUrl('https://x.com/kuttoya/status/160/photo/1')).toBe(canonical);
 	});
 
 	// A host that names an inherited Object member must be a lookup miss, not
