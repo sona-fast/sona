@@ -924,19 +924,7 @@ describe('no accent-color override on form controls (SONA-172)', () => {
 // and lets the border carry the hover signal (SONA-156). Two halves: the token
 // pairing has to clear AA, and the rule has to keep using it.
 describe('SONA-156 Remove-key label on its pinned hover fill', () => {
-	const blocks = THEMES.flatMap(({ id }) =>
-		id === 'default'
-			? [
-					{ name: 'default dark', sel: ':root' },
-					{ name: 'default light', sel: "[data-theme='light']" }
-				]
-			: [
-					{ name: `${id} dark`, sel: `[data-theme-id='${id}']` },
-					{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
-				]
-	);
-
-	for (const { name, sel } of blocks) {
+	for (const { name, sel } of THEME_BLOCKS) {
 		it(`${name}: destructive text on the page background meets 4.5:1`, () => {
 			expect(contrast(blockToken(sel, 'destructive'), blockToken(sel, 'background'))).toBeGreaterThanOrEqual(4.5);
 		});

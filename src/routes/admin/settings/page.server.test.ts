@@ -2112,10 +2112,6 @@ describe('artist lookup section markup (SONA-156)', () => {
 	it('drives focus by hand and marks pending with aria-busy, never disabled', () => {
 		const section = src.slice(src.indexOf('class="security-section lookup-section"'));
 		const markup = section.slice(0, section.indexOf('</section>'));
-		for (const ref of ['fuzzysearchKeepButton', 'fuzzysearchRemoveButton', 'fuzzysearchKeyInput']) {
-			expect(src, ref).toContain(`bind:this={${ref}}`);
-			expect(src, ref).toContain(`${ref}?.focus()`);
-		}
 		// The save form and the confirm-remove form: both report pending state to
 		// assistive tech without taking the control away.
 		expect(markup).toContain('aria-busy={savingFuzzysearchKey}');
@@ -2124,5 +2120,31 @@ describe('artist lookup section markup (SONA-156)', () => {
 		// aria-busy is not reliably announced on a button, so the pending sentence
 		// also rides a live region that stays mounted for the life of the section.
 		expect(markup).toContain('role="status"');
+		// Without `disabled`, cancel() is the only thing between a double
+		// activation and two in-flight writes, so each handler is pinned to it.
+		const handler = (action: string) => {
+			const start = markup.indexOf(`action="?/${action}" use:enhance=`);
+			expect(start, action).toBeGreaterThan(-1);
+			return markup.slice(start, markup.indexOf('}}>', start));
+		};
+		const save = handler('saveFuzzysearchKey');
+		expect(save).toContain('({ cancel })');
+		expect(save).toContain('if (savingFuzzysearchKey) return cancel();');
+		const remove = handler('removeFuzzysearchKey');
+		expect(remove).toContain('({ cancel })');
+		expect(remove).toContain('if (removingFuzzysearchKey) return cancel();');
+	});
+
+	// A live region that mounts with its text already in place is not announced,
+	// so this one sits outside every conditional branch — moving it inside
+	// {#if savingFuzzysearchKey} would leave the presence check above green.
+	it('mounts the live region ahead of every conditional branch', () => {
+		const section = src.slice(src.indexOf('class="security-section lookup-section"'));
+		const markup = section.slice(0, section.indexOf('</section>'));
+		expect(markup.indexOf('role="status"')).toBeLessThan(markup.indexOf('{#if'));
+		const region = markup.slice(markup.indexOf('role="status"'));
+		const body = region.slice(0, region.indexOf('</span>'));
+		expect(body).toContain('m.admin_saving()');
+		expect(body).toContain('m.admin_settings_lookup_removing()');
 	});
 });
