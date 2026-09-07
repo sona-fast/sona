@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	FUZZYSEARCH_ENDPOINT,
+	FUZZYSEARCH_MAX_DISTANCE,
 	FUZZYSEARCH_TIMEOUT_MS,
 	searchImage,
 	normalizeMatches,
@@ -98,6 +99,57 @@ describe('normalizeMatches', () => {
 		expect(normalizeMatches({ matches: [] })).toEqual([]);
 		expect(normalizeMatches(null)).toEqual([]);
 	});
+
+	// The cap is the line between a lead and noise, so it is pinned rather than
+	// left to whatever the constant happens to be.
+	it('keeps a match at the distance cap and drops the one past it', () => {
+		const at = normalizeMatches([
+			{ site: 'FurAffinity', site_id_str: '7', artists: [], distance: FUZZYSEARCH_MAX_DISTANCE }
+		]);
+		expect(at.map((m) => m.siteId)).toEqual(['7']);
+		expect(at[0].band).toBe('possible');
+		expect(
+			normalizeMatches([
+				{ site: 'FurAffinity', site_id_str: '8', artists: [], distance: FUZZYSEARCH_MAX_DISTANCE + 1 }
+			])
+		).toEqual([]);
+	});
+
+	// Third-party JSON: every field can be the wrong shape, and none of it may
+	// throw or reach the operator as a half-built match.
+	it('survives junk entries — dropping or nulling each without throwing', () => {
+		const junk = normalizeMatches([
+			// Negative distance: not a real Hamming distance, so not a lead.
+			{ site: 'FurAffinity', site_id_str: '1', distance: -1 },
+			// Non-numeric distances read as "unknown", which is allowed.
+			{ site: 'FurAffinity', site_id_str: '2', distance: 'close' },
+			{ site: 'FurAffinity', site_id_str: '3', distance: Number.NaN },
+			// No usable id — nothing to link to.
+			{ site: 'FurAffinity', distance: 0 },
+			{ site: 'FurAffinity', site_id_str: 12345, distance: 0 },
+			// Non-object entries.
+			null,
+			'FurAffinity',
+			42,
+			[{ site: 'FurAffinity', site_id_str: '9' }]
+		]);
+
+		expect(junk.map((m) => m.siteId)).toEqual(['2', '3']);
+		expect(junk.every((m) => m.distance === null && m.band === null)).toBe(true);
+	});
+
+	it('keeps only usable handles, and still builds a Twitter URL without one', () => {
+		const [match] = normalizeMatches([
+			{ site: 'Twitter', site_id_str: '160', artists: ['ok', '', '  ', 42, null], distance: 0 }
+		]);
+		expect(match.handles).toEqual(['ok']);
+
+		const [junkOnly] = normalizeMatches([
+			{ site: 'Twitter', site_id_str: '161', artists: [null, 7], distance: 0 }
+		]);
+		expect(junkOnly.handles).toEqual([]);
+		expect(junkOnly.postUrl).toBe('https://twitter.com/i/status/161');
+	});
 });
 
 describe('searchImage — request shape', () => {
@@ -118,19 +170,6 @@ describe('searchImage — request shape', () => {
 		expect((sent as File).name).toBe('image');
 		// The bound the signal was built with, pinned so it can't silently grow.
 		expect(FUZZYSEARCH_TIMEOUT_MS).toBe(8000);
-	});
-
-	it('accepts an ArrayBuffer as well as a Blob', async () => {
-		const { fn, calls } = fakeFetch(jsonResponse([]));
-		const result = await searchImage(new Uint8Array([9, 9]).buffer, 'k', fn);
-		expect(result).toEqual({ ok: true, matches: [] });
-		expect((calls[0].init.body as FormData).get('image')).toBeInstanceOf(File);
-	});
-
-	it('refuses without a key rather than calling out', async () => {
-		const { fn, calls } = fakeFetch(jsonResponse([]));
-		expect(await searchImage(new Blob(['x']), '', fn)).toEqual({ ok: false, reason: 'no_key' });
-		expect(calls).toHaveLength(0);
 	});
 });
 
@@ -178,6 +217,19 @@ describe('searchImage — failure mapping', () => {
 			ok: false,
 			reason: 'unavailable'
 		});
+	});
+
+	// A 200 carrying something other than the documented array is a broken
+	// upstream. Reported as no matches it would read as "your art isn't indexed",
+	// which is a different — and wrong — answer.
+	it('maps a 200 whose JSON is not an array to unavailable, not an empty list', async () => {
+		for (const body of [{ matches: [] }, 'ok', 42, null]) {
+			const { fn } = fakeFetch(jsonResponse(body));
+			expect(await searchImage(new Blob(['x']), 'k', fn), JSON.stringify(body)).toEqual({
+				ok: false,
+				reason: 'unavailable'
+			});
+		}
 	});
 });
 
@@ -248,9 +300,33 @@ describe('normalizeSourceUrl', () => {
 		expect(normalizeSourceUrl('  https://WWW.furaffinity.net/view/12345//  ')).toBe(canonical);
 	});
 
-	it('keeps path case, since some sites are case-sensitive there', () => {
+	// The same post under the site's other name. Without this fold, an operator
+	// who saved the x.com link gets no clash warning for the twitter.com URL
+	// this client builds.
+	it('folds known host aliases onto one canonical host', () => {
+		expect(normalizeSourceUrl('https://x.com/kuttoya/status/160')).toBe(
+			'twitter.com/kuttoya/status/160'
+		);
+		expect(normalizeSourceUrl('https://mobile.twitter.com/kuttoya/status/160')).toBe(
+			'twitter.com/kuttoya/status/160'
+		);
+		expect(normalizeSourceUrl('https://sfw.furaffinity.net/view/12345/')).toBe(
+			'furaffinity.net/view/12345'
+		);
+	});
+
+	it('lowercases the path on the hosts that treat it case-insensitively', () => {
 		expect(normalizeSourceUrl('https://twitter.com/Kuttoya/status/160')).toBe(
-			'twitter.com/Kuttoya/status/160'
+			'twitter.com/kuttoya/status/160'
+		);
+		expect(normalizeSourceUrl('https://www.furaffinity.net/View/12345/')).toBe(
+			'furaffinity.net/view/12345'
+		);
+	});
+
+	it('keeps path case elsewhere, since most sites are case-sensitive there', () => {
+		expect(normalizeSourceUrl('https://www.weasyl.com/submission/5150/Some-Title')).toBe(
+			'weasyl.com/submission/5150/Some-Title'
 		);
 	});
 
@@ -267,6 +343,15 @@ describe('handleProfileUrl', () => {
 			'https://www.furaffinity.net/user/kuttoya/'
 		);
 		expect(handleProfileUrl('Twitter', '@kuttoya')).toBe('https://twitter.com/kuttoya');
+	});
+
+	// A handle is third-party text: unescaped, a slash or a '?' in it re-points
+	// the URL at a page the operator did not ask for.
+	it('percent-encodes a handle carrying URL syntax', () => {
+		expect(handleProfileUrl('FurAffinity', 'evil/../../news')).toBe(
+			'https://www.furaffinity.net/user/evil%2F..%2F..%2Fnews/'
+		);
+		expect(handleProfileUrl('Twitter', 'a?b#c')).toBe('https://twitter.com/a%3Fb%23c');
 	});
 
 	it('returns null for sites with no artist column yet, and for a blank handle', () => {

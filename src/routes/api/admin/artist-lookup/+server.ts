@@ -42,7 +42,6 @@ import type { RequestHandler } from './$types';
 
 /** What the UI gets back for a failed lookup, and the status carrying it. */
 const FAILURE_STATUS: Record<LookupFailure, number> = {
-	no_key: 400,
 	key_refused: 401,
 	rate_limited: 429,
 	too_large: 413,
@@ -83,7 +82,12 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	if (contentType.includes('multipart/form-data')) {
 		// Layer 1 of the size cap: reject a body the client DECLARES oversized
 		// before formData() materializes it. Absent or unparseable header falls
-		// through to the exact check below.
+		// through to the exact check below — a chunked body carries no
+		// content-length, so for that shape the exact check on file.size is the
+		// only cap, and formData() buffers the part first. Accepted: this is an
+		// admin-only route behind the session, so a buffered oversized part costs
+		// the operator's own memory, and pre-counting the stream would mean
+		// re-implementing multipart parsing for a caller we already trust.
 		const declaredLength = Number(request.headers.get('content-length') ?? NaN);
 		if (Number.isFinite(declaredLength) && declaredLength > FUZZYSEARCH_MAX_BYTES + MULTIPART_SLACK_BYTES) {
 			return failure('too_large');
@@ -112,14 +116,17 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// followed, image/* content types only.
 		const stored = await proxyStoredImage(row.imageUrl, fetch);
 		if (!stored?.body) return failure('unavailable');
-		if (!(stored.headers.get('content-type') ?? '').startsWith('image/')) {
+		const storedType = (stored.headers.get('content-type') ?? '').split(';')[0].trim();
+		if (!storedType.startsWith('image/')) {
 			return failure('unavailable');
 		}
 		try {
 			const buffered = await bufferStream(stored.body, FUZZYSEARCH_MAX_BYTES);
 			// bufferStream allocates an exact-size array, so its backing buffer is
-			// the payload with nothing else in it.
-			bytes = new Blob([buffered.buffer as ArrayBuffer]);
+			// the payload with nothing else in it. The validated type rides along so
+			// the multipart part FuzzySearch receives from the edit page looks like
+			// the one the upload page sends (a File carries its own type).
+			bytes = new Blob([buffered.buffer as ArrayBuffer], { type: storedType });
 		} catch (e) {
 			if (e instanceof MaxBytesExceededError) return failure('too_large');
 			return failure('unavailable');
@@ -222,6 +229,9 @@ async function findSourceClash(
 		title: root?.title ?? first.title,
 		isVariant: first.parentImageId !== null,
 		parentImageId: first.parentImageId,
-		variantCount: clashing.length - 1
+		// Only the reported set's own rows. Two unrelated images that happen to
+		// carry the same source URL are separate clashes, and counting them here
+		// would tell the operator this one image has variants it doesn't have.
+		variantCount: clashing.filter((r) => (r.parentImageId ?? r.id) === rootId).length - 1
 	};
 }

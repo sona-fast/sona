@@ -13,7 +13,7 @@
 
 import { MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 import { getRawSetting } from './settings';
-import { handlesOverlap, SOCIAL_KEY_TO_PLATFORM } from './handle-normalize';
+import { normalizeHandle, socialsToHandles, type Platform } from './handle-normalize';
 import type { Database } from './db';
 
 type Env = App.Platform['env'];
@@ -49,7 +49,6 @@ export interface LookupMatch {
 }
 
 export type LookupFailure =
-	| 'no_key'
 	| 'key_refused'
 	| 'rate_limited'
 	| 'too_large'
@@ -133,15 +132,33 @@ export function postUrlFor(site: LookupSite, siteId: string, handles: string[]):
 export function handleProfileUrl(site: LookupSite, handle: string): string | null {
 	const h = handle.trim().replace(/^@+/, '');
 	if (!h) return null;
-	if (site === 'FurAffinity') return `https://www.furaffinity.net/user/${h}/`;
-	if (site === 'Twitter') return `https://twitter.com/${h}`;
+	// Percent-encoded like postUrlFor's ids: a handle is third-party text, and a
+	// slash or a '?' in it would otherwise re-point the URL at another page.
+	const safe = encodeURIComponent(h);
+	if (site === 'FurAffinity') return `https://www.furaffinity.net/user/${safe}/`;
+	if (site === 'Twitter') return `https://twitter.com/${safe}`;
 	return null;
 }
 
+/** Hosts that are the same site under two names. Without folding these, an
+ * operator who saved an `x.com` link gets no clash warning for the `twitter.com`
+ * URL this client builds. */
+const HOST_ALIASES: Record<string, string> = {
+	'x.com': 'twitter.com',
+	'mobile.twitter.com': 'twitter.com',
+	'sfw.furaffinity.net': 'furaffinity.net',
+	'd.furaffinity.net': 'furaffinity.net'
+};
+
+/** Hosts whose paths are case-insensitive, so `/View/12345` and `/view/12345`
+ * are one post. Left alone elsewhere — most sites' paths are case-sensitive. */
+const CASE_INSENSITIVE_PATH_HOSTS = new Set(['twitter.com', 'furaffinity.net']);
+
 /**
  * Normalize a source-post URL for equality checks: lowercase host, no scheme,
- * no `www.`, no query, no fragment, no trailing slash. Comparing raw strings
- * would miss `http` vs `https` and the trailing slash FurAffinity adds.
+ * no `www.`, no query, no fragment, no trailing slash, and known host aliases
+ * folded together. Comparing raw strings would miss `http` vs `https`, the
+ * trailing slash FurAffinity adds, and `x.com` against `twitter.com`.
  */
 export function normalizeSourceUrl(url: string | null | undefined): string {
 	const raw = (url ?? '').trim();
@@ -150,8 +167,10 @@ export function normalizeSourceUrl(url: string | null | undefined): string {
 	rest = rest.replace(/[?#].*$/, '');
 	rest = rest.replace(/\/+$/, '');
 	const slash = rest.indexOf('/');
-	const host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase().replace(/^www\./, '');
-	const path = slash === -1 ? '' : rest.slice(slash);
+	let host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase().replace(/^www\./, '');
+	host = HOST_ALIASES[host] ?? host;
+	let path = slash === -1 ? '' : rest.slice(slash);
+	if (CASE_INSENSITIVE_PATH_HOSTS.has(host)) path = path.toLowerCase();
 	return host + path;
 }
 
@@ -218,15 +237,12 @@ export function normalizeMatches(payload: unknown): LookupMatch[] {
  * status and a localized line, and the remote body never travels with them.
  */
 export async function searchImage(
-	bytes: Blob | ArrayBuffer,
+	bytes: Blob,
 	key: string,
 	fetchFn: typeof fetch = fetch
 ): Promise<LookupResult> {
-	if (!key) return { ok: false, reason: 'no_key' };
-
-	const blob = bytes instanceof Blob ? bytes : new Blob([bytes]);
 	const form = new FormData();
-	form.append('image', blob, 'image');
+	form.append('image', bytes, 'image');
 
 	let res: Response;
 	try {
@@ -254,7 +270,10 @@ export async function searchImage(
 	if (!res.ok) return { ok: false, reason: 'unavailable' };
 
 	const payload = await res.json().catch(() => null);
-	if (payload === null) return { ok: false, reason: 'unavailable' };
+	// A 200 that isn't the documented array is a broken upstream, not a search
+	// with no hits — reporting it as "no matches" would tell the operator their
+	// art is unindexed when nobody actually looked.
+	if (!Array.isArray(payload)) return { ok: false, reason: 'unavailable' };
 	return { ok: true, matches: normalizeMatches(payload) };
 }
 
@@ -290,30 +309,32 @@ export function strictestRating(
 	return { rating: best, sites };
 }
 
-/** The artist row key that holds a site's profile URL. */
-const SITE_SOCIAL_KEY: Partial<Record<LookupSite, string>> = {
-	FurAffinity: 'furAffinityUrl',
-	Twitter: 'twitterUrl'
+/** The platform a site's handles live on, for the sites we hold a column for. */
+const SITE_PLATFORM: Partial<Record<LookupSite, Platform>> = {
+	FurAffinity: 'furaffinity',
+	Twitter: 'twitter'
 };
 
 /**
  * Local artists whose stored socials point at one of a match's handles.
- * Uses `handlesOverlap`, the app's canonical "same artist" predicate, so this
- * agrees with the registry import and the artists API on what a match is.
+ * Compares through `normalizeHandle` and `socialsToHandles`, the same pair
+ * `handlesOverlap` is built on, so this agrees with the registry import and the
+ * artists API on what a match is.
  * A full scan, like every other handle matcher here — there is no handle index.
  */
 export function findLocalArtists<T extends Record<string, unknown>>(
 	rows: T[],
 	match: Pick<LookupMatch, 'site' | 'handles'>
 ): T[] {
-	const key = SITE_SOCIAL_KEY[match.site];
-	if (!key || !(key in SOCIAL_KEY_TO_PLATFORM)) return [];
-	const probes = match.handles
-		.map((h) => handleProfileUrl(match.site, h))
-		.filter((url): url is string => url !== null)
-		.map((url) => ({ [key]: url }));
-	if (probes.length === 0) return [];
-	return rows.filter((row) => probes.some((probe) => handlesOverlap(row, probe)));
+	const platform = SITE_PLATFORM[match.site];
+	if (!platform) return [];
+	const wanted = new Set(
+		match.handles.map((h) => normalizeHandle(platform, h)).filter((h) => h !== '')
+	);
+	if (wanted.size === 0) return [];
+	return rows.filter((row) =>
+		socialsToHandles(row).some((h) => h.platform === platform && wanted.has(h.handleNorm))
+	);
 }
 
 /**

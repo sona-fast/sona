@@ -255,6 +255,73 @@ describe('artist-lookup — stored image by id', () => {
 		expect(await statusOf(() => POST(jsonEvent(platform, { imageId: 404 })))).toBe(404);
 	});
 
+	it('sends the stored image with the content type the proxy validated', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.jpg', '2026-01-01');`
+		);
+		const jpeg = new Response(IMAGE_BYTES, {
+			status: 200,
+			headers: { 'content-type': 'image/jpeg; charset=binary' }
+		});
+
+		await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(jpeg).fn));
+
+		// The upload page forwards a File, which carries its own type; the edit
+		// page has to attach one or FuzzySearch sees an untyped part.
+		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/jpeg');
+	});
+
+	it('reports unavailable when the proxy refuses the stored URL', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/gone.png', '2026-01-01'),
+				(2, 'Internal', 'int', 'http://169.254.169.254/latest/meta-data', '2026-01-01');`
+		);
+
+		// Upstream 404: proxyStoredImage answers null, so there are no bytes.
+		const missing = imageFetch(new Response('nope', { status: 404 }));
+		const gone = await POST(jsonEvent(platform, { imageId: 1 }, missing.fn));
+		expect(gone.status).toBe(502);
+		expect(await gone.json()).toEqual({ enabled: true, error: 'unavailable' });
+
+		// A link-local host stored in the row is refused before any fetch.
+		const internal = imageFetch();
+		const blocked = await POST(jsonEvent(platform, { imageId: 2 }, internal.fn));
+		expect(blocked.status).toBe(502);
+		expect(internal.calls).toEqual([]);
+
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	it('refuses a stored image whose body runs past the cap', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Huge', 'huge', 'https://cdn.example.com/huge.png', '2026-01-01');`
+		);
+		// Streamed in 1 MiB chunks rather than allocated whole: bufferStream aborts
+		// mid-stream, which is the behaviour being pinned.
+		const chunk = new Uint8Array(1024 * 1024);
+		let sent = 0;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (sent > FUZZYSEARCH_MAX_BYTES) return controller.close();
+				sent += chunk.length;
+				controller.enqueue(chunk);
+			}
+		});
+		const huge = new Response(body, { status: 200, headers: { 'content-type': 'image/png' } });
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(huge).fn));
+
+		expect(res.status).toBe(413);
+		expect(await res.json()).toEqual({ enabled: true, error: 'too_large' });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
 	it('reports unavailable when the stored image is not an image', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		sqlite.exec(
@@ -288,6 +355,17 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 		const ok = await POST(multipartEvent(platform, pngFile()));
 		expect(ok.status).toBe(200);
 		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe('');
+	});
+
+	it('writes nothing on a clean success with no marker standing', async () => {
+		const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(200);
+		// Null, not '': the happy path costs one read, and never a write that
+		// would put a row in site_settings for every lookup.
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBeNull();
 	});
 
 	it('maps each remaining failure to its status without echoing a body', async () => {
@@ -336,6 +414,48 @@ describe('artist-lookup — source-post clash', () => {
 			parentImageId: null,
 			variantCount: 1
 		});
+	});
+
+	// The URL can sit on a VARIANT only — a set whose parent row carries no
+	// source URL. The clash is still the whole set, so the operator is pointed at
+	// the parent they can actually open, titled from the parent's own row.
+	it('reports the parent when only a variant carries the source URL', async () => {
+		const env = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		env.sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, source_post_url, parent_image_id, created_at)
+			 VALUES (10, 'Sparky at the beach', 'beach', 'https://cdn/10.png', NULL, NULL, '2026-01-01'),
+				(11, 'Beach variant', 'beach-v', 'https://cdn/11.png',
+				 'https://www.furaffinity.net/view/12345/', 10, '2026-01-02');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const res = await POST(multipartEvent(env.platform, pngFile()));
+		const body = (await res.json()) as { sourceClash: Record<string, unknown> };
+
+		expect(body.sourceClash).toEqual({
+			imageId: 10,
+			title: 'Sparky at the beach',
+			isVariant: true,
+			parentImageId: 10,
+			// One row in the set carries the URL, and it is the row being reported.
+			variantCount: 0
+		});
+	});
+
+	// Two unrelated images can carry the same source post (a two-piece
+	// commission, say). They are separate clashes, not variants of the one
+	// reported — counting them would claim variants this image does not have.
+	it('counts only the reported set when unrelated images share the URL', async () => {
+		const env = clashSetup(
+			`INSERT INTO images (id, title, slug, image_url, source_post_url, parent_image_id, created_at)
+			 VALUES (4, 'Same post, different piece', 'other-piece', 'https://cdn/4.png',
+				 'https://www.furaffinity.net/view/12345/', NULL, '2026-01-04');`
+		);
+
+		const res = await POST(multipartEvent(env.platform, pngFile()));
+		const body = (await res.json()) as { sourceClash: Record<string, unknown> };
+
+		expect(body.sourceClash).toMatchObject({ imageId: 1, variantCount: 1 });
 	});
 
 	it('does not report an image clashing with its own variant set', async () => {
