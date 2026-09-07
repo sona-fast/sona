@@ -28,6 +28,30 @@ const removeButton = (page: Page) => section(page).locator('button.btn-remove');
 const confirmPanel = (page: Page) => section(page).locator('.remove-confirm');
 const keyRecord = (page: Page) => section(page).locator('.key-record');
 
+// Opening the confirmation must not move the destructive button under the
+// pointer: while the block's top edge shifted up on the swap, the confirm
+// Remove landed on the pixel Remove key was just clicked, so a double click or
+// an impatient second tap removed the key without the question being read.
+// Clicks Remove key at its own centre and asks where that point ends up.
+async function openConfirmClearOfThePointer(page: Page) {
+	const box = await removeButton(page).boundingBox();
+	if (!box) throw new Error('Remove key has no bounding box');
+	const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+	await removeButton(page).click();
+	await expect(confirmPanel(page)).toBeVisible();
+	const confirm = confirmPanel(page).getByRole('button', { name: 'Remove', exact: true });
+	const after = await confirm.boundingBox();
+	if (!after) throw new Error('Remove (confirm) has no bounding box');
+	const covers =
+		point.x >= after.x &&
+		point.x <= after.x + after.width &&
+		point.y >= after.y &&
+		point.y <= after.y + after.height;
+	expect(covers, `confirm Remove covers the clicked point at ${page.viewportSize()?.width}px`).toBe(
+		false
+	);
+}
+
 // The connections sections are hidden by CSS until the tab is active, and the
 // toggle is client JS — so the click only "takes" once hydrated (the
 // supporter-key spec's retry shape).
@@ -93,8 +117,7 @@ test.describe('admin settings artist lookup key', () => {
 		// Removal asks first, and moves focus onto the safe choice — every button
 		// involved unmounts as the panel opens, so without that a keyboard user
 		// lands back on <body>.
-		await removeButton(page).click();
-		await expect(confirmPanel(page)).toBeVisible();
+		await openConfirmClearOfThePointer(page);
 		const keep = confirmPanel(page).getByRole('button', { name: 'Keep', exact: true });
 		await expect(keep).toBeFocused();
 
@@ -103,6 +126,14 @@ test.describe('admin settings artist lookup key', () => {
 		await expect(confirmPanel(page)).toHaveCount(0);
 		await expect(keyRecord(page)).toContainText('8901');
 		await expect(removeButton(page)).toBeFocused();
+
+		// Again at 390, where the block is taller and the shift used to be larger.
+		const desktop = page.viewportSize();
+		await page.setViewportSize({ width: 390, height: 844 });
+		await openConfirmClearOfThePointer(page);
+		await confirmPanel(page).getByRole('button', { name: 'Keep', exact: true }).click();
+		await expect(confirmPanel(page)).toHaveCount(0);
+		if (desktop) await page.setViewportSize(desktop);
 
 		// Remove, confirmed, clears the key and returns the section to its
 		// unconnected state — the state the seed hands every other spec.

@@ -1462,7 +1462,10 @@
 				{/if}
 			</dd>
 		</dl>
-		{#if !fuzzysearchKeyRefusedAt && !confirmingFuzzysearchRemove}
+		<!-- Kept rendered while the confirmation is open: dropping it at the same
+		     moment the button row is swapped pulled the block up by 34-54px, which
+		     put the destructive Remove under the pixel Remove key was clicked. -->
+		{#if !fuzzysearchKeyRefusedAt}
 			<p class="status-line replace-line">{m.admin_settings_lookup_replace()}</p>
 		{/if}
 	{/if}
@@ -2607,8 +2610,10 @@
 	}
 	/* The refused state stacks "Save key" over "Remove key"; at the section's
 	   14px step they read as one button group, so the destructive exit gets a
-	   wider gap from the form it does not belong to. */
-	.lookup-section .save-form + .key-actions {
+	   wider gap from the form it does not belong to. The confirmation panel takes
+	   the same step, since it replaces that row in place. */
+	.lookup-section .save-form + .key-actions,
+	.lookup-section .save-form + .remove-confirm {
 		margin-top: 24px;
 	}
 	.lookup-section .remove-confirm {
