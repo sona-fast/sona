@@ -195,6 +195,9 @@
 	// The mask's bullet run is read out one bullet at a time, so it is hidden from
 	// the accessibility tree and the part that identifies the key is spoken instead.
 	const fuzzysearchKeyTail = $derived(data.fuzzysearchKeyRecord?.replace(/^•+/, '') ?? '');
+	// The refusal marker drives the state selector, a label and a class in the
+	// section below; one local keeps the state machine readable in one place.
+	const fuzzysearchKeyRefused = $derived(!!data.fuzzysearchKeyRefusedAt);
 
 	// Localized "in early access right now" list, joined for the status line. Empty
 	// until a pilot feature is registered, in which case the "nothing" line shows.
@@ -1413,12 +1416,12 @@
      never reaches this component: only the mask built in load. -->
 <section class="security-section lookup-section" data-tab="connections">
 	<h2>{m.admin_settings_lookup_heading()}</h2>
-	{#if data.fuzzysearchKeyRefusedAt}
+	{#if fuzzysearchKeyRefused}
 		<div class="key-eyebrow refused">{m.admin_settings_lookup_refused_eyebrow()}</div>
 		<!-- Directly under the eyebrow, in the supporter card's lapsed-line voice:
 		     this one sentence is the whole reason the refused state exists, and in
 		     the muted status voice further down it read as more boilerplate. -->
-		<p class="lapsed-line">{m.admin_settings_lookup_refused_line({ date: data.fuzzysearchKeyRefusedAt })}</p>
+		<p class="lapsed-line">{m.admin_settings_lookup_refused_line({ date: data.fuzzysearchKeyRefusedAt ?? '' })}</p>
 	{:else if data.fuzzysearchKeySet}
 		<div class="key-eyebrow connected">{m.admin_settings_lookup_connected_eyebrow()}</div>
 	{/if}
@@ -1435,8 +1438,8 @@
 			<!-- Visible in the refused state, where the record sits above a "New
 			     FuzzySearch API key" field and would otherwise be an unlabelled pill;
 			     the connected state's surrounding copy already names it. -->
-			<dt class={data.fuzzysearchKeyRefusedAt ? 'record-label' : 'sr-only'}>
-				{data.fuzzysearchKeyRefusedAt
+			<dt class={fuzzysearchKeyRefused ? 'record-label' : 'sr-only'}>
+				{fuzzysearchKeyRefused
 					? m.admin_settings_lookup_refused_key_label()
 					: m.admin_settings_lookup_saved_key_label()}
 			</dt>
@@ -1447,67 +1450,28 @@
 				{/if}
 			</dd>
 		</dl>
-		{#if !data.fuzzysearchKeyRefusedAt && !confirmingFuzzysearchRemove}
+		{#if !fuzzysearchKeyRefused && !confirmingFuzzysearchRemove}
 			<p class="status-line replace-line">{m.admin_settings_lookup_replace()}</p>
-		{/if}
-		{#if confirmingFuzzysearchRemove}
-			<div class="remove-confirm">
-				<p role="alert">{m.admin_settings_lookup_confirm()}</p>
-				<div class="confirm-actions">
-					<form method="POST" action="?/removeFuzzysearchKey" use:enhance={() => {
-						removingFuzzysearchKey = true;
-						return async ({ result, update }) => {
-							await update({ reset: false });
-							removingFuzzysearchKey = false;
-							confirmingFuzzysearchRemove = false;
-							if (result.type === 'success') toast.success(m.admin_settings_lookup_removed());
-							// Both buttons are gone now — send focus to the field that
-							// replaced them rather than dropping it on <body>.
-							await tick();
-							fuzzysearchKeyInput?.focus();
-						};
-					}}>
-						<button type="submit" class="btn btn-destructive" disabled={removingFuzzysearchKey}>
-							{m.admin_settings_lookup_confirm_remove()}
-						</button>
-					</form>
-					<button
-						type="button"
-						class="btn btn-outline"
-						bind:this={fuzzysearchKeepButton}
-						onclick={async () => {
-							confirmingFuzzysearchRemove = false;
-							await tick();
-							fuzzysearchRemoveButton?.focus();
-						}}
-					>{m.admin_settings_lookup_confirm_keep()}</button>
-				</div>
-			</div>
-		{:else}
-			<div class="key-actions">
-				<button
-					type="button"
-					class="btn btn-remove"
-					bind:this={fuzzysearchRemoveButton}
-					onclick={() => (confirmingFuzzysearchRemove = true)}
-				>
-					{m.admin_settings_lookup_remove()}
-				</button>
-			</div>
 		{/if}
 	{/if}
 
-	{#if !data.fuzzysearchKeyFromEnv && (!data.fuzzysearchKeySet || data.fuzzysearchKeyRefusedAt)}
-		<form method="POST" action="?/saveFuzzysearchKey" use:enhance={() => {
+	{#if !data.fuzzysearchKeyFromEnv && (!data.fuzzysearchKeySet || fuzzysearchKeyRefused)}
+		<form class="save-form" method="POST" action="?/saveFuzzysearchKey" use:enhance={() => {
 			savingFuzzysearchKey = true;
 			return async ({ result, update }) => {
 				await update({ reset: false });
 				savingFuzzysearchKey = false;
-				if (result.type === 'success') toast.success(m.admin_settings_lookup_saved());
+				if (result.type === 'success') {
+					toast.success(m.admin_settings_lookup_saved());
+					// The form unmounts on a successful save, taking the focused Save
+					// button with it — hand focus to the button that replaces it.
+					await tick();
+					fuzzysearchRemoveButton?.focus();
+				}
 			};
 		}}>
 			<label>
-				<span>{data.fuzzysearchKeyRefusedAt ? m.admin_settings_lookup_new_key_label() : m.admin_settings_lookup_key_label()}</span>
+				<span>{fuzzysearchKeyRefused ? m.admin_settings_lookup_new_key_label() : m.admin_settings_lookup_key_label()}</span>
 				<input
 					type="password"
 					class="input"
@@ -1525,15 +1489,77 @@
 			{/if}
 			<!-- Above the save row, like the registry section's token hint: an
 			     operator without a key needs the link before the button. -->
-			{#if !data.fuzzysearchKeyRefusedAt}
+			{#if !fuzzysearchKeyRefused}
 				<p class="hint">{m.admin_settings_lookup_hint_pre()}<a class="link-inline" href="https://api.fuzzysearch.net/selfserve" target="_blank" rel="noopener noreferrer">api.fuzzysearch.net/selfserve<span class="sr-only">{' '}{m.link_opens_new_tab()}</span></a>{m.admin_settings_lookup_hint_post()}</p>
 			{/if}
 			<div class="save-row">
-				<button type="submit" class="btn btn-primary" disabled={savingFuzzysearchKey}>
+				<!-- aria-busy, not disabled: disabling the button that holds focus
+				     drops the keyboard user on <body> for the length of the request. -->
+				<button type="submit" class="btn btn-primary" aria-busy={savingFuzzysearchKey}>
 					{savingFuzzysearchKey ? m.admin_saving() : m.admin_settings_lookup_save()}
 				</button>
 			</div>
 		</form>
+	{/if}
+
+	<!-- Below the save row on purpose: in the refused state the operator almost
+	     always wants to paste a replacement, and disconnecting is the rarer exit.
+	     Guarded on the key being SET, not on the state being connected — a refused
+	     key the operator cannot remove would be a dead end. -->
+	{#if !data.fuzzysearchKeyFromEnv && data.fuzzysearchKeySet}
+		{#if confirmingFuzzysearchRemove}
+			<div class="remove-confirm">
+				<p id="fuzzysearch-remove-confirm">{m.admin_settings_lookup_confirm()}</p>
+				<div class="confirm-actions">
+					<form method="POST" action="?/removeFuzzysearchKey" use:enhance={() => {
+						removingFuzzysearchKey = true;
+						return async ({ result, update }) => {
+							await update({ reset: false });
+							removingFuzzysearchKey = false;
+							confirmingFuzzysearchRemove = false;
+							if (result.type === 'success') toast.success(m.admin_settings_lookup_removed());
+							// Both buttons are gone now — send focus to the field that
+							// replaced them rather than dropping it on <body>.
+							await tick();
+							fuzzysearchKeyInput?.focus();
+						};
+					}}>
+						<button
+							type="submit"
+							class="btn btn-destructive"
+							aria-busy={removingFuzzysearchKey}
+							aria-describedby="fuzzysearch-remove-confirm"
+						>
+							{removingFuzzysearchKey
+								? m.admin_settings_lookup_removing()
+								: m.admin_settings_lookup_confirm_remove()}
+						</button>
+					</form>
+					<button
+						type="button"
+						class="btn btn-outline"
+						aria-describedby="fuzzysearch-remove-confirm"
+						bind:this={fuzzysearchKeepButton}
+						onclick={async () => {
+							confirmingFuzzysearchRemove = false;
+							await tick();
+							fuzzysearchRemoveButton?.focus();
+						}}
+					>{m.admin_settings_lookup_confirm_keep()}</button>
+				</div>
+			</div>
+		{:else}
+			<div class="key-actions">
+				<button
+					type="button"
+					class="btn btn-outline btn-remove"
+					bind:this={fuzzysearchRemoveButton}
+					onclick={() => (confirmingFuzzysearchRemove = true)}
+				>
+					{m.admin_settings_lookup_remove()}
+				</button>
+			</div>
+		{/if}
 	{/if}
 </section>
 
@@ -2520,7 +2546,10 @@
 	.lookup-section .explainer-body {
 		margin: 0 0 14px;
 	}
-	.lookup-section form {
+	/* The save form only: a bare `form` selector also matches the removal
+	   confirmation's inner form, which is a centered flex item, so the margin
+	   pushed Remove below Keep. */
+	.lookup-section .save-form {
 		margin-top: 14px;
 	}
 	/* The <dl> holds the label for the mask; it must not add spacing of its own
@@ -2543,13 +2572,14 @@
 	}
 	/* Bordered pill, destructive text: removing the key is reversible (paste a
 	   new one) so it doesn't earn a filled destructive button here — the filled
-	   one is on the confirmation, where the action actually happens. */
+	   one is on the confirmation, where the action actually happens. It rides
+	   .btn-outline so the section's two bordered buttons behave alike; only the
+	   label colour and the boundary differ. */
 	/* The boundary is mixed toward --foreground rather than left on --border,
 	   which measures under 1.5:1 against the page and fails SC 1.4.11 as a
 	   control edge (the treatment .btn-outline already uses on hover). */
 	.lookup-section .btn-remove {
-		background: none;
-		border: 1px solid color-mix(in srgb, var(--border) 60%, var(--foreground));
+		border-color: color-mix(in srgb, var(--border) 60%, var(--foreground));
 		color: var(--destructive);
 	}
 	.lookup-section .btn-remove:hover {
@@ -2568,6 +2598,12 @@
 		color: var(--foreground);
 		line-height: 1.55;
 		max-width: 62ch;
+	}
+	/* Inside the panel the outline button's own --border edge sits at 1.0-1.3:1
+	   against --secondary (identical hex in two dark themes), so the boundary is
+	   mixed toward --foreground here: 5.4-7.6:1 on the panel. SC 1.4.11. */
+	.lookup-section .remove-confirm .btn-outline {
+		border-color: color-mix(in srgb, var(--border) 30%, var(--foreground));
 	}
 	.lookup-section .confirm-actions {
 		display: flex;

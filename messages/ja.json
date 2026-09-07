@@ -920,6 +920,7 @@
 	"admin_settings_lookup_removed": "キーを削除しました。",
 	"admin_settings_lookup_confirm": "キーを削除しますか？新しいキーを保存するまで、アップロード画面と編集画面から「アーティストを検索」がなくなります。",
 	"admin_settings_lookup_confirm_remove": "削除",
+	"admin_settings_lookup_removing": "削除中…",
 	"admin_settings_lookup_confirm_keep": "そのままにする",
 	"admin_settings_lookup_refused_eyebrow": "キーが拒否されました",
 	"admin_settings_lookup_refused_line": "前回の検索で、FuzzySearchはこのキーを受け付けませんでした（{date}）。",

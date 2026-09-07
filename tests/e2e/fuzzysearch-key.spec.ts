@@ -107,5 +107,28 @@ test.describe('admin settings artist lookup key', () => {
 		await confirmPanel(page).getByRole('button', { name: 'Remove', exact: true }).click();
 		await expect(keyRecord(page)).toHaveCount(0);
 		await expect(keyInput(page)).toBeVisible();
+		// Both confirmation buttons are gone, so focus has to land on the field
+		// that replaced them rather than on <body>.
+		await expect(keyInput(page)).toBeFocused();
 	});
+});
+
+// The save above writes to the SHARED seeded DB. If anything between it and the
+// final Remove fails, the key stays saved: the CI retry restarts this serial
+// block at the unconnected-state test, which then fails for the wrong reason,
+// and every later spec sees a connected section. Put the row back the way this
+// file found it (legal.spec.ts carries the same guard for privacyPolicy).
+test.afterAll(async ({ browser }) => {
+	const page = await browser.newPage();
+	try {
+		await adminLogin(page, PASSWORD);
+		await page.goto('/admin/settings');
+		await openConnectionsTab(page);
+		if ((await removeButton(page).count()) === 0) return;
+		await removeButton(page).click();
+		await confirmPanel(page).getByRole('button', { name: 'Remove', exact: true }).click();
+		await expect(keyRecord(page)).toHaveCount(0);
+	} finally {
+		await page.close();
+	}
 });

@@ -1200,6 +1200,7 @@
 	"admin_settings_lookup_removed": "Key removed.",
 	"admin_settings_lookup_confirm": "Remove the key? Look up artist disappears from upload and edit until you save a new one.",
 	"admin_settings_lookup_confirm_remove": "Remove",
+	"admin_settings_lookup_removing": "Removing…",
 	"admin_settings_lookup_confirm_keep": "Keep",
 	"admin_settings_lookup_refused_eyebrow": "Key refused",
 	"admin_settings_lookup_refused_line": "FuzzySearch didn't accept this key on the last lookup ({date}).",

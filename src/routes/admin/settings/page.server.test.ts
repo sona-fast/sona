@@ -2057,18 +2057,9 @@ describe('artist lookup section markup (SONA-156)', () => {
 		const keep = panel.slice(0, panel.indexOf('admin_settings_lookup_confirm_keep'));
 		expect(keep).toContain('btn-outline');
 		expect(keep).not.toContain('btn-secondary');
-	});
-
-	// Every button in the confirmation unmounts as it is used, so focus is moved
-	// by hand: into Keep when the panel opens, back to Remove key when it closes,
-	// and to the key field once the key is gone. A bare autofocus does none of it.
-	it('drives focus across the confirmation rather than relying on autofocus', () => {
-		const panel = src.slice(src.indexOf('class="remove-confirm"'));
-		expect(panel.slice(0, panel.indexOf('</section>'))).not.toContain('autofocus');
-		expect(src).toContain('bind:this={fuzzysearchKeepButton}');
-		expect(src).toContain('fuzzysearchKeepButton?.focus()');
-		expect(src).toContain('fuzzysearchRemoveButton?.focus()');
-		expect(src).toContain('fuzzysearchKeyInput?.focus()');
+		// var(--border) against the panel's var(--secondary) fill is 1.0:1 in two
+		// dark themes, so the edge inside the panel is overridden on its own.
+		expect(src).toContain('.lookup-section .remove-confirm .btn-outline');
 	});
 
 	// The bullet run is announced one bullet at a time, so it is hidden and the
@@ -2077,5 +2068,39 @@ describe('artist lookup section markup (SONA-156)', () => {
 		const record = src.slice(src.indexOf('<dd class="key-record">'));
 		expect(record.slice(0, 400)).toContain('aria-hidden="true"');
 		expect(src).toContain('m.admin_settings_lookup_key_ending(');
+	});
+
+	// The refused state is the one a broken key actually lands in, and e2e cannot
+	// reach it: only a real 401 from FuzzySearch writes the marker.
+	it('keeps Remove key reachable in the refused state', () => {
+		// Guarded on the key being SET, never narrowed by the refusal — a refused
+		// key the operator cannot remove would be a dead end.
+		const guard = '{#if !data.fuzzysearchKeyFromEnv && data.fuzzysearchKeySet}';
+		expect(src).toContain(guard);
+		const block = src.slice(src.indexOf(guard) + guard.length);
+		const actions = block.slice(0, block.indexOf('</section>'));
+		expect(actions).toContain('m.admin_settings_lookup_remove()');
+		expect(actions).not.toContain('fuzzysearchKeyRefused');
+	});
+
+	it('renders the refused eyebrow, the lapsed line, and a labelled record', () => {
+		expect(src).toContain('const fuzzysearchKeyRefused = $derived(!!data.fuzzysearchKeyRefusedAt)');
+		const refused = src.slice(src.indexOf('{#if fuzzysearchKeyRefused}'));
+		const branch = refused.slice(0, refused.indexOf('{:else if data.fuzzysearchKeySet}'));
+		expect(branch).toContain('m.admin_settings_lookup_refused_eyebrow()');
+		expect(branch).toContain('class="lapsed-line"');
+		expect(branch).toContain('m.admin_settings_lookup_refused_line(');
+		// The mask's <dt> is visible only here, where the record sits above a "New
+		// FuzzySearch API key" field and would otherwise be an unlabelled pill.
+		expect(src).toContain("<dt class={fuzzysearchKeyRefused ? 'record-label' : 'sr-only'}>");
+		expect(src).toContain('m.admin_settings_lookup_refused_key_label()');
+	});
+
+	it('renames the key field and drops the self-serve hint when refused', () => {
+		expect(src).toContain(
+			'{fuzzysearchKeyRefused ? m.admin_settings_lookup_new_key_label() : m.admin_settings_lookup_key_label()}'
+		);
+		const hint = src.slice(0, src.indexOf('m.admin_settings_lookup_hint_pre()'));
+		expect(hint.slice(-200)).toContain('{#if !fuzzysearchKeyRefused}');
 	});
 });
