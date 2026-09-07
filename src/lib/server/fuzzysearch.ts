@@ -88,6 +88,17 @@ export async function resolveFuzzysearchKey(
 	return stored || null;
 }
 
+/**
+ * Masked record of a stored key for the settings card: bullets for everything
+ * but the last four characters, never fewer than eight bullets, so the mask
+ * says nothing about a short key's length. The operator only needs to
+ * recognize which key is saved — the value itself never leaves the server.
+ */
+export function fuzzysearchKeyDisplayRecord(key: string): string {
+	const tail = key.length > 4 ? key.slice(-4) : '';
+	return '•'.repeat(Math.max(8, key.length - tail.length)) + tail;
+}
+
 /** Band for a distance, matching the wording the UI uses about confidence. */
 export function distanceBand(distance: number | null): MatchBand {
 	if (distance === null) return null;

@@ -176,6 +176,11 @@
 	let savingRecoveryEmail = $state(false);
 	let savingSupporterKey = $state(false);
 	let removingSupporterKey = $state(false);
+	let savingFuzzysearchKey = $state(false);
+	let removingFuzzysearchKey = $state(false);
+	// Purely client state: the Remove key button swaps the action row for a
+	// confirmation block rather than opening a dialog over the section.
+	let confirmingFuzzysearchRemove = $state(false);
 
 	// Localized "in early access right now" list, joined for the status line. Empty
 	// until a pilot feature is registered, in which case the "nothing" line shows.
@@ -1388,6 +1393,109 @@
 	</form>
 {/if}
 
+<!-- Artist lookup (SONA-156): the FuzzySearch connection. Four states — not
+     connected, connected, confirming removal, and key refused — all driven by
+     load data except the confirmation, which is client-only. The key itself
+     never reaches this component: only the mask built in load. -->
+<section class="security-section lookup-section" data-tab="connections">
+	<h2>{m.admin_settings_lookup_heading()}</h2>
+	{#if data.fuzzysearchKeyRefusedAt}
+		<div class="key-eyebrow refused">{m.admin_settings_lookup_refused_eyebrow()}</div>
+	{:else if data.fuzzysearchKeySet}
+		<div class="key-eyebrow connected">{m.admin_settings_lookup_connected_eyebrow()}</div>
+	{/if}
+	<!-- Disclosure first, in both connected and unconnected states: the operator
+	     is sending their own art to a third party, and that has to be readable
+	     before the key goes in, not only after. -->
+	<p class="explainer-body">{m.admin_settings_lookup_explainer_1()}</p>
+	<p class="explainer-body">{m.admin_settings_lookup_explainer_2()}</p>
+
+	{#if data.fuzzysearchKeyFromEnv}
+		<p class="status-line">{m.admin_settings_lookup_secret_pre()}<code>FUZZYSEARCH_API_KEY</code>{m.admin_settings_lookup_secret_post()}</p>
+	{:else if data.fuzzysearchKeyRefusedAt}
+		<p class="status-line">{m.admin_settings_lookup_refused_line({ date: data.fuzzysearchKeyRefusedAt })}</p>
+		<dl class="key-dl">
+			<dt class="sr-only">{m.admin_settings_lookup_refused_key_label()}</dt>
+			<dd class="key-record">{data.fuzzysearchKeyRecord}</dd>
+		</dl>
+	{:else if data.fuzzysearchKeySet}
+		<dl class="key-dl">
+			<dt class="sr-only">{m.admin_settings_lookup_saved_key_label()}</dt>
+			<dd class="key-record">{data.fuzzysearchKeyRecord}</dd>
+		</dl>
+		<p class="status-line replace-line">{m.admin_settings_lookup_replace()}</p>
+		{#if confirmingFuzzysearchRemove}
+			<div class="remove-confirm">
+				<p role="alert">{m.admin_settings_lookup_confirm()}</p>
+				<div class="confirm-actions">
+					<form method="POST" action="?/removeFuzzysearchKey" use:enhance={() => {
+						removingFuzzysearchKey = true;
+						return async ({ result, update }) => {
+							await update({ reset: false });
+							removingFuzzysearchKey = false;
+							confirmingFuzzysearchRemove = false;
+							if (result.type === 'success') toast.success(m.admin_settings_lookup_removed());
+						};
+					}}>
+						<button type="submit" class="btn btn-destructive" disabled={removingFuzzysearchKey}>
+							{m.admin_settings_lookup_confirm_remove()}
+						</button>
+					</form>
+					<!-- svelte-ignore a11y_autofocus -->
+					<button
+						type="button"
+						class="btn btn-secondary"
+						autofocus
+						onclick={() => (confirmingFuzzysearchRemove = false)}
+					>{m.admin_settings_lookup_confirm_keep()}</button>
+				</div>
+			</div>
+		{:else}
+			<div class="key-actions">
+				<button type="button" class="btn btn-remove" onclick={() => (confirmingFuzzysearchRemove = true)}>
+					{m.admin_settings_lookup_remove()}
+				</button>
+			</div>
+		{/if}
+	{/if}
+
+	{#if !data.fuzzysearchKeyFromEnv && (!data.fuzzysearchKeySet || data.fuzzysearchKeyRefusedAt)}
+		<form method="POST" action="?/saveFuzzysearchKey" use:enhance={() => {
+			savingFuzzysearchKey = true;
+			return async ({ result, update }) => {
+				await update({ reset: false });
+				savingFuzzysearchKey = false;
+				if (result.type === 'success') toast.success(m.admin_settings_lookup_saved());
+			};
+		}}>
+			<label>
+				<span>{data.fuzzysearchKeyRefusedAt ? m.admin_settings_lookup_new_key_label() : m.admin_settings_lookup_key_label()}</span>
+				<input
+					type="password"
+					class="input"
+					id="fuzzysearch-key"
+					name="fuzzysearchApiKey"
+					autocomplete="off"
+					placeholder={m.admin_settings_lookup_key_placeholder()}
+					aria-invalid={form?.fuzzysearchKeyError ? 'true' : undefined}
+					aria-describedby={form?.fuzzysearchKeyError ? 'fuzzysearch-key-error' : undefined}
+				/>
+			</label>
+			{#if form?.fuzzysearchKeyError}
+				<p class="field-error" id="fuzzysearch-key-error" role="alert">{m.admin_settings_lookup_error_invalid()}</p>
+			{/if}
+			<div class="save-row">
+				<button type="submit" class="btn btn-primary" disabled={savingFuzzysearchKey}>
+					{savingFuzzysearchKey ? m.admin_saving() : m.admin_settings_lookup_save()}
+				</button>
+			</div>
+			{#if !data.fuzzysearchKeyRefusedAt}
+				<p class="hint">{m.admin_settings_lookup_hint_pre()}<a class="link-inline" href="https://api.fuzzysearch.net/selfserve" target="_blank" rel="noopener noreferrer">api.fuzzysearch.net/selfserve<span class="sr-only">{' '}{m.link_opens_new_tab()}</span></a>{m.admin_settings_lookup_hint_post()}</p>
+			{/if}
+		</form>
+	{/if}
+</section>
+
 <section class="danger-zone" data-tab="account">
 	<h2>{m.admin_settings_danger_zone()}</h2>
 	<div class="danger-divider"></div>
@@ -2353,6 +2461,59 @@
 	}
 	.key-actions {
 		margin-top: 14px;
+	}
+
+	/* ── Artist lookup / FuzzySearch (SONA-156) ───────────────── */
+	/* The state colour rides the eyebrow, the section's only status surface —
+	   the same convention the supporter card uses for its countdown. */
+	.lookup-section .key-eyebrow.connected {
+		color: var(--status-ok);
+	}
+	.lookup-section .key-eyebrow.refused {
+		color: var(--status-warn);
+	}
+	/* The <dl> exists for the screen-reader label on the mask; it must not add
+	   spacing of its own on top of .key-record. */
+	.lookup-section .key-dl {
+		margin: 14px 0 0;
+	}
+	.lookup-section .key-dl dd {
+		margin: 0;
+	}
+	.lookup-section .replace-line {
+		margin-top: 14px;
+		margin-bottom: 0;
+	}
+	/* Bordered pill, destructive text: removing the key is reversible (paste a
+	   new one) so it doesn't earn a filled destructive button here — the filled
+	   one is on the confirmation, where the action actually happens. */
+	.lookup-section .btn-remove {
+		background: none;
+		border: 1px solid var(--border);
+		color: var(--destructive);
+	}
+	.lookup-section .btn-remove:hover {
+		border-color: var(--destructive);
+	}
+	.lookup-section .remove-confirm {
+		margin-top: 14px;
+		padding: 14px 16px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-s);
+		background: var(--secondary);
+	}
+	.lookup-section .remove-confirm p {
+		margin: 0 0 14px;
+		font-size: 14px;
+		color: var(--foreground);
+		line-height: 1.55;
+		max-width: 62ch;
+	}
+	.lookup-section .confirm-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+		align-items: center;
 	}
 	.save-row {
 		margin-top: 20px;

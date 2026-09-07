@@ -8,6 +8,11 @@ import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import {
+	FUZZYSEARCH_API_KEY_SETTING,
+	FUZZYSEARCH_KEY_REFUSED_SETTING,
+	fuzzysearchKeyDisplayRecord
+} from '$lib/server/fuzzysearch';
+import {
 	getRawSetting,
 	setRawSetting,
 	parseLines,
@@ -1898,5 +1903,124 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+// Artist lookup (SONA-156). The FuzzySearch key is a raw setting, so the load
+// exposes a MASK and a presence flag, never the key — and the deploy secret,
+// when set, sends nothing derived from itself at all.
+describe('settings — FuzzySearch key', () => {
+	function keyEvent(platform: App.Platform, fields: Record<string, string>) {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) body.append(k, v);
+		return {
+			platform,
+			url: LOAD_URL,
+			request: new Request('https://taro.surf/admin/settings?/saveFuzzysearchKey', {
+				method: 'POST',
+				body
+			})
+		} as never;
+	}
+
+	it('saves a well-formed key and clears any standing refusal', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z');
+
+		const result = await actions.saveFuzzysearchKey(
+			keyEvent(platform, { fuzzysearchApiKey: '  fs-live-abcdef3k9q  ' })
+		);
+
+		expect(result).toEqual({ fuzzysearchKeySaved: true });
+		expect(await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING)).toBe('fs-live-abcdef3k9q');
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe('');
+	});
+
+	it('refuses a key that is too short, too long, or not printable ASCII', async () => {
+		const { db, platform } = makeLoadDb();
+		for (const bad of ['short12', 'x'.repeat(201), 'has space here', 'smart“quote”key']) {
+			const result = (await actions.saveFuzzysearchKey(
+				keyEvent(platform, { fuzzysearchApiKey: bad })
+			)) as unknown as { status: number; data: { fuzzysearchKeyError: string } };
+			expect(result.status, bad).toBe(400);
+			expect(result.data.fuzzysearchKeyError).toBe('invalid');
+		}
+		expect(await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING)).toBeNull();
+	});
+
+	it('removes the key and the refusal marker together', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z');
+
+		expect(await actions.removeFuzzysearchKey({ platform } as never)).toEqual({
+			fuzzysearchKeyRemoved: true
+		});
+		expect(await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING)).toBe('');
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe('');
+	});
+
+	it('exposes a mask and presence, never the key itself', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeySet).toBe(true);
+		expect(result.fuzzysearchKeyFromEnv).toBe(false);
+		expect(result.fuzzysearchKeyRecord).toBe('••••••••••••••3k9q');
+		expect(JSON.stringify(result)).not.toContain('fs-live-abcdef3k9q');
+	});
+
+	it('reports the deploy secret without deriving anything from it', async () => {
+		const { platform } = makeLoadDb({ FUZZYSEARCH_API_KEY: 'fs-live-fromdeploy' });
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeySet).toBe(true);
+		expect(result.fuzzysearchKeyFromEnv).toBe(true);
+		expect(result.fuzzysearchKeyRecord).toBeNull();
+		expect(JSON.stringify(result)).not.toContain('fromdeploy');
+	});
+
+	it('surfaces a formatted refusal date only while a key is saved', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T10:20:30.000Z');
+
+		const orphan = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+		expect(orphan.fuzzysearchKeyRefusedAt).toBeNull();
+
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+		const refused = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+		expect(refused.fuzzysearchKeyRefusedAt).toBe('2026.09.01');
+	});
+
+	it('masks a short key to at least eight bullets', () => {
+		expect(fuzzysearchKeyDisplayRecord('abcd1234')).toBe('••••••••1234');
+		expect(fuzzysearchKeyDisplayRecord('abc')).toBe('••••••••');
+	});
+});
+
+// Source pin: the disclosure copy is the point of this section — an operator
+// has to read what leaves their site before they paste a key. Nothing renders
+// Svelte under the pure-TS vitest setup, so grep the file (the #182 pattern).
+describe('artist lookup section markup (SONA-156)', () => {
+	const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+
+	it('renders both disclosure paragraphs', () => {
+		expect(src).toContain('m.admin_settings_lookup_explainer_1()');
+		expect(src).toContain('m.admin_settings_lookup_explainer_2()');
+	});
+
+	it('links the self-serve key page as a safe external link', () => {
+		expect(src).toContain('https://api.fuzzysearch.net/selfserve');
+		const link = src.slice(src.indexOf('https://api.fuzzysearch.net/selfserve'), src.indexOf('https://api.fuzzysearch.net/selfserve') + 200);
+		expect(link).toContain('rel="noopener noreferrer"');
+	});
+
+	it('takes the key in a password field and never renders a stored key', () => {
+		expect(src).toContain('name="fuzzysearchApiKey"');
+		expect(src).toContain('data.fuzzysearchKeyRecord');
+		expect(src).not.toContain('data.fuzzysearchApiKey');
 	});
 });
