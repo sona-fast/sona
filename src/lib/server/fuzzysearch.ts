@@ -1,0 +1,317 @@
+// Server-only client for FuzzySearch (https://fuzzysearch.net), the reverse
+// image search behind "Look up artist" (SONA-156).
+//
+// Server-only for two reasons: the API key must never reach the browser, and
+// the operator's artwork leaves this app only from a place we control. Every
+// call is operator-initiated — nothing here runs on a render path, and nothing
+// is sent until the operator clicks.
+//
+// The response body is TREATED AS SECRET-ADJACENT: it is never logged, never
+// stored, and never echoed anywhere but the normalized shape below. A 4xx body
+// can carry the key back, and the match list is third-party data about the
+// operator's own art.
+
+import { MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
+import { getRawSetting } from './settings';
+import { handlesOverlap, SOCIAL_KEY_TO_PLATFORM } from './handle-normalize';
+import type { Database } from './db';
+
+type Env = App.Platform['env'];
+
+/** site_settings keys. Raw rows, like the registry fork key: kept out of the
+ * SiteSettings interface so the key never serializes to the browser. */
+export const FUZZYSEARCH_API_KEY_SETTING = 'fuzzysearchApiKey';
+/** ISO date-time of the last 401 from FuzzySearch, or '' once a call succeeds. */
+export const FUZZYSEARCH_KEY_REFUSED_SETTING = 'fuzzysearchKeyRefusedAt';
+
+export const FUZZYSEARCH_ENDPOINT = 'https://api.fuzzysearch.net/v1/image';
+/** Same 10 MiB bound every other third-party body gets (storage/buffer.ts). */
+export const FUZZYSEARCH_MAX_BYTES = MAX_REMOTE_BUFFER_BYTES;
+export const FUZZYSEARCH_TIMEOUT_MS = 8000;
+/** Hamming distance past which a match is noise rather than a lead. */
+export const FUZZYSEARCH_MAX_DISTANCE = 7;
+
+export type LookupSite = 'FurAffinity' | 'Weasyl' | 'e621' | 'Twitter';
+export type LookupRating = 'general' | 'mature' | 'adult';
+/** 0 → exact, 1-2 → strong, 3-7 → possible, unknown distance → null. */
+export type MatchBand = 'exact' | 'strong' | 'possible' | null;
+
+export interface LookupMatch {
+	site: LookupSite;
+	siteId: string;
+	/** Raw handles as the source site knows them (not normalized). */
+	handles: string[];
+	distance: number | null;
+	band: MatchBand;
+	postedAt: string | null;
+	rating: LookupRating | null;
+	postUrl: string;
+}
+
+export type LookupFailure =
+	| 'no_key'
+	| 'key_refused'
+	| 'rate_limited'
+	| 'too_large'
+	| 'invalid_image'
+	| 'unavailable';
+
+export type LookupResult =
+	| { ok: true; matches: LookupMatch[] }
+	| { ok: false; reason: LookupFailure };
+
+const SITES: readonly LookupSite[] = ['FurAffinity', 'Weasyl', 'e621', 'Twitter'];
+const RATINGS: readonly LookupRating[] = ['general', 'mature', 'adult'];
+
+/** Display order when distances tie: the sites whose matches are most likely to
+ * name an artist we can link locally come first. */
+const SITE_ORDER: Record<LookupSite, number> = {
+	FurAffinity: 0,
+	Twitter: 1,
+	Weasyl: 2,
+	e621: 3
+};
+
+/**
+ * Resolve the FuzzySearch key: a deploy-time `FUZZYSEARCH_API_KEY` secret wins
+ * and short-circuits the DB read, otherwise the D1 raw setting. Same precedence
+ * as the registry fork key, so a fork can connect from the admin UI without a
+ * deploy. Returns null when the integration is not configured.
+ */
+export async function resolveFuzzysearchKey(
+	db: Database,
+	env: Env | undefined
+): Promise<string | null> {
+	const fromEnv = env?.FUZZYSEARCH_API_KEY?.trim();
+	if (fromEnv) return fromEnv;
+	const stored = (await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING))?.trim();
+	return stored || null;
+}
+
+/** Band for a distance, matching the wording the UI uses about confidence. */
+export function distanceBand(distance: number | null): MatchBand {
+	if (distance === null) return null;
+	if (distance === 0) return 'exact';
+	if (distance <= 2) return 'strong';
+	return 'possible';
+}
+
+/** Public post URL for a match, by site. Built here rather than trusted from
+ * the response so a hostile payload cannot hand the operator an arbitrary link. */
+export function postUrlFor(site: LookupSite, siteId: string, handles: string[]): string {
+	const id = encodeURIComponent(siteId);
+	switch (site) {
+		case 'FurAffinity':
+			return `https://www.furaffinity.net/view/${id}/`;
+		case 'Weasyl':
+			return `https://www.weasyl.com/submission/${id}`;
+		case 'e621':
+			return `https://e621.net/posts/${id}`;
+		case 'Twitter': {
+			const handle = handles[0];
+			// Without a handle Twitter still resolves the status through /i/.
+			return handle
+				? `https://twitter.com/${encodeURIComponent(handle)}/status/${id}`
+				: `https://twitter.com/i/status/${id}`;
+		}
+	}
+}
+
+/** Canonical profile URL for a handle on a site we hold an artist column for.
+ * Weasyl and e621 have no column yet (SONA-219), so they resolve to null. */
+export function handleProfileUrl(site: LookupSite, handle: string): string | null {
+	const h = handle.trim().replace(/^@+/, '');
+	if (!h) return null;
+	if (site === 'FurAffinity') return `https://www.furaffinity.net/user/${h}/`;
+	if (site === 'Twitter') return `https://twitter.com/${h}`;
+	return null;
+}
+
+/**
+ * Normalize a source-post URL for equality checks: lowercase host, no scheme,
+ * no `www.`, no query, no fragment, no trailing slash. Comparing raw strings
+ * would miss `http` vs `https` and the trailing slash FurAffinity adds.
+ */
+export function normalizeSourceUrl(url: string | null | undefined): string {
+	const raw = (url ?? '').trim();
+	if (!raw) return '';
+	let rest = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+	rest = rest.replace(/[?#].*$/, '');
+	rest = rest.replace(/\/+$/, '');
+	const slash = rest.indexOf('/');
+	const host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase().replace(/^www\./, '');
+	const path = slash === -1 ? '' : rest.slice(slash);
+	return host + path;
+}
+
+interface RawMatch {
+	site?: unknown;
+	site_id_str?: unknown;
+	artists?: unknown;
+	distance?: unknown;
+	posted_at?: unknown;
+	rating?: unknown;
+}
+
+function normalizeMatch(raw: RawMatch): LookupMatch | null {
+	const site = SITES.find((s) => s === raw.site);
+	// 'Unknown' (and anything else we have no post-URL shape for) is dropped:
+	// a match we cannot link to is not a lead the operator can act on.
+	if (!site) return null;
+	const siteId = typeof raw.site_id_str === 'string' ? raw.site_id_str : '';
+	if (!siteId) return null;
+
+	const distance =
+		typeof raw.distance === 'number' && Number.isFinite(raw.distance) ? raw.distance : null;
+	if (distance !== null && (distance < 0 || distance > FUZZYSEARCH_MAX_DISTANCE)) return null;
+
+	const handles = Array.isArray(raw.artists)
+		? raw.artists.filter((a): a is string => typeof a === 'string' && a.trim() !== '')
+		: [];
+	const rating = RATINGS.find((r) => r === raw.rating) ?? null;
+
+	return {
+		site,
+		siteId,
+		handles,
+		distance,
+		band: distanceBand(distance),
+		postedAt: typeof raw.posted_at === 'string' ? raw.posted_at : null,
+		rating,
+		postUrl: postUrlFor(site, siteId, handles)
+	};
+}
+
+/** Closest first; an unknown distance sorts last; ties break on site order. */
+function compareMatches(a: LookupMatch, b: LookupMatch): number {
+	const ad = a.distance ?? Number.POSITIVE_INFINITY;
+	const bd = b.distance ?? Number.POSITIVE_INFINITY;
+	if (ad !== bd) return ad - bd;
+	return SITE_ORDER[a.site] - SITE_ORDER[b.site];
+}
+
+/** Normalize + filter + sort a raw v1/image payload. Exported for tests. */
+export function normalizeMatches(payload: unknown): LookupMatch[] {
+	if (!Array.isArray(payload)) return [];
+	return payload
+		.map((entry) => (entry && typeof entry === 'object' ? normalizeMatch(entry as RawMatch) : null))
+		.filter((m): m is LookupMatch => m !== null)
+		.sort(compareMatches);
+}
+
+/**
+ * POST the bytes to FuzzySearch and return normalized matches.
+ *
+ * `fetchFn` is injected so tests drive this without globals. Failures are
+ * returned as typed reasons rather than thrown: the caller maps each to a
+ * status and a localized line, and the remote body never travels with them.
+ */
+export async function searchImage(
+	bytes: Blob | ArrayBuffer,
+	key: string,
+	fetchFn: typeof fetch = fetch
+): Promise<LookupResult> {
+	if (!key) return { ok: false, reason: 'no_key' };
+
+	const blob = bytes instanceof Blob ? bytes : new Blob([bytes]);
+	const form = new FormData();
+	form.append('image', blob, 'image');
+
+	let res: Response;
+	try {
+		res = await fetchFn(FUZZYSEARCH_ENDPOINT, {
+			method: 'POST',
+			headers: { 'x-api-key': key },
+			body: form,
+			signal: AbortSignal.timeout(FUZZYSEARCH_TIMEOUT_MS)
+		});
+	} catch {
+		// Network error or the timeout firing. Deliberately no logging: the error
+		// can carry the request, and the request carries the key header.
+		return { ok: false, reason: 'unavailable' };
+	}
+
+	if (res.status === 401) return { ok: false, reason: 'key_refused' };
+	if (res.status === 429) return { ok: false, reason: 'rate_limited' };
+	if (res.status === 413) return { ok: false, reason: 'too_large' };
+	if (res.status === 400) {
+		// The one 400 worth distinguishing: FuzzySearch says the image is over its
+		// own limit. The body is inspected for that single token and discarded.
+		const body = await res.text().catch(() => '');
+		return { ok: false, reason: body.includes('too_large') ? 'too_large' : 'invalid_image' };
+	}
+	if (!res.ok) return { ok: false, reason: 'unavailable' };
+
+	const payload = await res.json().catch(() => null);
+	if (payload === null) return { ok: false, reason: 'unavailable' };
+	return { ok: true, matches: normalizeMatches(payload) };
+}
+
+/**
+ * The match worth prefilling the form from: the closest exact or strong one.
+ * `normalizeMatches` already sorted by distance then site, so the first
+ * qualifying entry is the best one.
+ */
+export function pickPrefillMatch(matches: LookupMatch[]): LookupMatch | null {
+	return matches.find((m) => m.band === 'exact' || m.band === 'strong') ?? null;
+}
+
+/**
+ * The strictest rating carried by the confident matches, with the sites that
+ * carried it — so the UI can say where an NSFW suggestion came from. Possible
+ * and unknown-distance matches are excluded: a loose match must not flip the
+ * operator's NSFW flag.
+ */
+export function strictestRating(
+	matches: LookupMatch[]
+): { rating: LookupRating; sites: LookupSite[] } | null {
+	const confident = matches.filter((m) => m.band === 'exact' || m.band === 'strong');
+	let best: LookupRating | null = null;
+	for (const m of confident) {
+		if (!m.rating) continue;
+		if (best === null || RATINGS.indexOf(m.rating) > RATINGS.indexOf(best)) best = m.rating;
+	}
+	if (!best) return null;
+	const sites: LookupSite[] = [];
+	for (const m of confident) {
+		if (m.rating === best && !sites.includes(m.site)) sites.push(m.site);
+	}
+	return { rating: best, sites };
+}
+
+/** The artist row key that holds a site's profile URL. */
+const SITE_SOCIAL_KEY: Partial<Record<LookupSite, string>> = {
+	FurAffinity: 'furAffinityUrl',
+	Twitter: 'twitterUrl'
+};
+
+/**
+ * Local artists whose stored socials point at one of a match's handles.
+ * Uses `handlesOverlap`, the app's canonical "same artist" predicate, so this
+ * agrees with the registry import and the artists API on what a match is.
+ * A full scan, like every other handle matcher here — there is no handle index.
+ */
+export function findLocalArtists<T extends Record<string, unknown>>(
+	rows: T[],
+	match: Pick<LookupMatch, 'site' | 'handles'>
+): T[] {
+	const key = SITE_SOCIAL_KEY[match.site];
+	if (!key || !(key in SOCIAL_KEY_TO_PLATFORM)) return [];
+	const probes = match.handles
+		.map((h) => handleProfileUrl(match.site, h))
+		.filter((url): url is string => url !== null)
+		.map((url) => ({ [key]: url }));
+	if (probes.length === 0) return [];
+	return rows.filter((row) => probes.some((probe) => handlesOverlap(row, probe)));
+}
+
+/**
+ * Local artists whose display name equals a handle, case-insensitively. Weaker
+ * evidence than a handle match (names collide), so it feeds the dialog's
+ * "you may already have this artist" guard rather than an automatic link.
+ */
+export function findArtistsByName<T extends { name: string }>(rows: T[], handle: string): T[] {
+	const needle = handle.trim().replace(/^@+/, '').toLowerCase();
+	if (!needle) return [];
+	return rows.filter((row) => row.name.trim().toLowerCase() === needle);
+}

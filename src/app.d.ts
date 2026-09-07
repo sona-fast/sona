@@ -97,6 +97,13 @@ declare global {
 				 */
 				REGISTRY_API_KEY?: string;
 				/**
+				 * FuzzySearch API key, enabling "Look up artist" (reverse image search).
+				 * Optional: without it — and without the key saved in Settings →
+				 * Connections, which this secret overrides — the lookup endpoint answers
+				 * `{ enabled: false }` and the button never appears.
+				 */
+				FUZZYSEARCH_API_KEY?: string;
+				/**
 				 * Resend API key. Gates the admin "Forgot password" flow: when unset,
 				 * /admin/forgot silently no-ops (still returns the generic response) and
 				 * the only recovery path is the `npm run reset-password` CLI. Set via
