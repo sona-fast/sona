@@ -330,9 +330,15 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 			? fuzzysearchKeyDisplayRecord(fuzzysearchStoredKey)
 			: null,
 		// Pre-formatted here, like the early-access GA dates, so the card renders
-		// one date string identically on SSR and after hydration.
+		// one date string identically on SSR and after hydration. Only for a key
+		// saved HERE: a refusal recorded against the deploy secret has no remedy
+		// on this page (no key to remove, no date to trust), so the refused state
+		// would be a dead end. The marker still gets written — it costs nothing
+		// and becomes meaningful again if the secret is ever dropped.
 		fuzzysearchKeyRefusedAt:
-			fuzzysearchStoredKey && fuzzysearchRefusedAt ? formatDate(fuzzysearchRefusedAt) : null,
+			!fuzzysearchKeyFromEnv && fuzzysearchStoredKey && fuzzysearchRefusedAt
+				? formatDate(fuzzysearchRefusedAt)
+				: null,
 		// Presence-only flags for the password-reset setup guide. The secret VALUES
 		// are deploy-time env and must never reach the client — only whether they exist.
 		resendKeySet: !!platform?.env?.RESEND_API_KEY,

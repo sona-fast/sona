@@ -1936,6 +1936,17 @@ describe('settings — FuzzySearch key', () => {
 		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe('');
 	});
 
+	it('accepts the shortest and longest keys the shape check allows', async () => {
+		const { db, platform } = makeLoadDb();
+		for (const ok of ['12345678', 'x'.repeat(200)]) {
+			expect(
+				await actions.saveFuzzysearchKey(keyEvent(platform, { fuzzysearchApiKey: ok })),
+				String(ok.length)
+			).toEqual({ fuzzysearchKeySaved: true });
+			expect(await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING)).toBe(ok);
+		}
+	});
+
 	it('refuses a key that is too short, too long, or not printable ASCII', async () => {
 		const { db, platform } = makeLoadDb();
 		for (const bad of ['short12', 'x'.repeat(201), 'has space here', 'smart“quote”key']) {
@@ -1995,6 +2006,20 @@ describe('settings — FuzzySearch key', () => {
 		expect(refused.fuzzysearchKeyRefusedAt).toBe('2026.09.01');
 	});
 
+	// A refusal recorded against the DEPLOY SECRET has no remedy on this page:
+	// there is no key here to remove or replace. Surfacing it would render a
+	// "Key refused" state with nothing the operator could do about it.
+	it('never reports a refusal for a key that came from the deploy secret', async () => {
+		const { db, platform } = makeLoadDb({ FUZZYSEARCH_API_KEY: 'fs-live-fromdeploy' });
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T10:20:30.000Z');
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeyFromEnv).toBe(true);
+		expect(result.fuzzysearchKeyRefusedAt).toBeNull();
+	});
+
 	it('masks a short key to at least eight bullets', () => {
 		expect(fuzzysearchKeyDisplayRecord('abcd1234')).toBe('••••••••1234');
 		expect(fuzzysearchKeyDisplayRecord('abc')).toBe('••••••••');
@@ -2022,5 +2047,35 @@ describe('artist lookup section markup (SONA-156)', () => {
 		expect(src).toContain('name="fuzzysearchApiKey"');
 		expect(src).toContain('data.fuzzysearchKeyRecord');
 		expect(src).not.toContain('data.fuzzysearchApiKey');
+	});
+
+	// The confirmation's safe choice needs a boundary of its own: .btn-secondary
+	// is filled with var(--secondary), which is also the panel's background, so
+	// Keep would sit at a 1.0:1 edge inside it (SC 1.4.11).
+	it('gives the Keep button a visible boundary, not the panel fill', () => {
+		const panel = src.slice(src.indexOf('class="remove-confirm"'));
+		const keep = panel.slice(0, panel.indexOf('admin_settings_lookup_confirm_keep'));
+		expect(keep).toContain('btn-outline');
+		expect(keep).not.toContain('btn-secondary');
+	});
+
+	// Every button in the confirmation unmounts as it is used, so focus is moved
+	// by hand: into Keep when the panel opens, back to Remove key when it closes,
+	// and to the key field once the key is gone. A bare autofocus does none of it.
+	it('drives focus across the confirmation rather than relying on autofocus', () => {
+		const panel = src.slice(src.indexOf('class="remove-confirm"'));
+		expect(panel.slice(0, panel.indexOf('</section>'))).not.toContain('autofocus');
+		expect(src).toContain('bind:this={fuzzysearchKeepButton}');
+		expect(src).toContain('fuzzysearchKeepButton?.focus()');
+		expect(src).toContain('fuzzysearchRemoveButton?.focus()');
+		expect(src).toContain('fuzzysearchKeyInput?.focus()');
+	});
+
+	// The bullet run is announced one bullet at a time, so it is hidden and the
+	// part that identifies the key is spoken instead.
+	it('hides the mask from screen readers and names its ending', () => {
+		const record = src.slice(src.indexOf('<dd class="key-record">'));
+		expect(record.slice(0, 400)).toContain('aria-hidden="true"');
+		expect(src).toContain('m.admin_settings_lookup_key_ending(');
 	});
 });

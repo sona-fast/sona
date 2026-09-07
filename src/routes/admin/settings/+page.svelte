@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { applyAction, enhance } from '$app/forms';
 	import { afterNavigate, invalidateAll, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -181,6 +182,19 @@
 	// Purely client state: the Remove key button swaps the action row for a
 	// confirmation block rather than opening a dialog over the section.
 	let confirmingFuzzysearchRemove = $state(false);
+	// Focus is moved by hand across the swap: every button involved UNMOUNTS as
+	// the state changes, so without this a keyboard user lands back on <body> and
+	// restarts from the top of a long page. (A bare `autofocus` doesn't do it —
+	// the document already has a focused element when the panel opens.)
+	let fuzzysearchKeepButton = $state<HTMLButtonElement | null>(null);
+	let fuzzysearchRemoveButton = $state<HTMLButtonElement | null>(null);
+	let fuzzysearchKeyInput = $state<HTMLInputElement | null>(null);
+	$effect(() => {
+		if (confirmingFuzzysearchRemove) fuzzysearchKeepButton?.focus();
+	});
+	// The mask's bullet run is read out one bullet at a time, so it is hidden from
+	// the accessibility tree and the part that identifies the key is spoken instead.
+	const fuzzysearchKeyTail = $derived(data.fuzzysearchKeyRecord?.replace(/^•+/, '') ?? '');
 
 	// Localized "in early access right now" list, joined for the status line. Empty
 	// until a pilot feature is registered, in which case the "nothing" line shows.
@@ -1401,6 +1415,10 @@
 	<h2>{m.admin_settings_lookup_heading()}</h2>
 	{#if data.fuzzysearchKeyRefusedAt}
 		<div class="key-eyebrow refused">{m.admin_settings_lookup_refused_eyebrow()}</div>
+		<!-- Directly under the eyebrow, in the supporter card's lapsed-line voice:
+		     this one sentence is the whole reason the refused state exists, and in
+		     the muted status voice further down it read as more boilerplate. -->
+		<p class="lapsed-line">{m.admin_settings_lookup_refused_line({ date: data.fuzzysearchKeyRefusedAt })}</p>
 	{:else if data.fuzzysearchKeySet}
 		<div class="key-eyebrow connected">{m.admin_settings_lookup_connected_eyebrow()}</div>
 	{/if}
@@ -1412,18 +1430,26 @@
 
 	{#if data.fuzzysearchKeyFromEnv}
 		<p class="status-line">{m.admin_settings_lookup_secret_pre()}<code>FUZZYSEARCH_API_KEY</code>{m.admin_settings_lookup_secret_post()}</p>
-	{:else if data.fuzzysearchKeyRefusedAt}
-		<p class="status-line">{m.admin_settings_lookup_refused_line({ date: data.fuzzysearchKeyRefusedAt })}</p>
-		<dl class="key-dl">
-			<dt class="sr-only">{m.admin_settings_lookup_refused_key_label()}</dt>
-			<dd class="key-record">{data.fuzzysearchKeyRecord}</dd>
-		</dl>
 	{:else if data.fuzzysearchKeySet}
 		<dl class="key-dl">
-			<dt class="sr-only">{m.admin_settings_lookup_saved_key_label()}</dt>
-			<dd class="key-record">{data.fuzzysearchKeyRecord}</dd>
+			<!-- Visible in the refused state, where the record sits above a "New
+			     FuzzySearch API key" field and would otherwise be an unlabelled pill;
+			     the connected state's surrounding copy already names it. -->
+			<dt class={data.fuzzysearchKeyRefusedAt ? 'record-label' : 'sr-only'}>
+				{data.fuzzysearchKeyRefusedAt
+					? m.admin_settings_lookup_refused_key_label()
+					: m.admin_settings_lookup_saved_key_label()}
+			</dt>
+			<dd class="key-record">
+				<span aria-hidden="true">{data.fuzzysearchKeyRecord}</span>
+				{#if fuzzysearchKeyTail}
+					<span class="sr-only">{m.admin_settings_lookup_key_ending({ tail: fuzzysearchKeyTail })}</span>
+				{/if}
+			</dd>
 		</dl>
-		<p class="status-line replace-line">{m.admin_settings_lookup_replace()}</p>
+		{#if !data.fuzzysearchKeyRefusedAt && !confirmingFuzzysearchRemove}
+			<p class="status-line replace-line">{m.admin_settings_lookup_replace()}</p>
+		{/if}
 		{#if confirmingFuzzysearchRemove}
 			<div class="remove-confirm">
 				<p role="alert">{m.admin_settings_lookup_confirm()}</p>
@@ -1435,24 +1461,36 @@
 							removingFuzzysearchKey = false;
 							confirmingFuzzysearchRemove = false;
 							if (result.type === 'success') toast.success(m.admin_settings_lookup_removed());
+							// Both buttons are gone now — send focus to the field that
+							// replaced them rather than dropping it on <body>.
+							await tick();
+							fuzzysearchKeyInput?.focus();
 						};
 					}}>
 						<button type="submit" class="btn btn-destructive" disabled={removingFuzzysearchKey}>
 							{m.admin_settings_lookup_confirm_remove()}
 						</button>
 					</form>
-					<!-- svelte-ignore a11y_autofocus -->
 					<button
 						type="button"
-						class="btn btn-secondary"
-						autofocus
-						onclick={() => (confirmingFuzzysearchRemove = false)}
+						class="btn btn-outline"
+						bind:this={fuzzysearchKeepButton}
+						onclick={async () => {
+							confirmingFuzzysearchRemove = false;
+							await tick();
+							fuzzysearchRemoveButton?.focus();
+						}}
 					>{m.admin_settings_lookup_confirm_keep()}</button>
 				</div>
 			</div>
 		{:else}
 			<div class="key-actions">
-				<button type="button" class="btn btn-remove" onclick={() => (confirmingFuzzysearchRemove = true)}>
+				<button
+					type="button"
+					class="btn btn-remove"
+					bind:this={fuzzysearchRemoveButton}
+					onclick={() => (confirmingFuzzysearchRemove = true)}
+				>
 					{m.admin_settings_lookup_remove()}
 				</button>
 			</div>
@@ -1476,6 +1514,7 @@
 					id="fuzzysearch-key"
 					name="fuzzysearchApiKey"
 					autocomplete="off"
+					bind:this={fuzzysearchKeyInput}
 					placeholder={m.admin_settings_lookup_key_placeholder()}
 					aria-invalid={form?.fuzzysearchKeyError ? 'true' : undefined}
 					aria-describedby={form?.fuzzysearchKeyError ? 'fuzzysearch-key-error' : undefined}
@@ -1484,14 +1523,16 @@
 			{#if form?.fuzzysearchKeyError}
 				<p class="field-error" id="fuzzysearch-key-error" role="alert">{m.admin_settings_lookup_error_invalid()}</p>
 			{/if}
+			<!-- Above the save row, like the registry section's token hint: an
+			     operator without a key needs the link before the button. -->
+			{#if !data.fuzzysearchKeyRefusedAt}
+				<p class="hint">{m.admin_settings_lookup_hint_pre()}<a class="link-inline" href="https://api.fuzzysearch.net/selfserve" target="_blank" rel="noopener noreferrer">api.fuzzysearch.net/selfserve<span class="sr-only">{' '}{m.link_opens_new_tab()}</span></a>{m.admin_settings_lookup_hint_post()}</p>
+			{/if}
 			<div class="save-row">
 				<button type="submit" class="btn btn-primary" disabled={savingFuzzysearchKey}>
 					{savingFuzzysearchKey ? m.admin_saving() : m.admin_settings_lookup_save()}
 				</button>
 			</div>
-			{#if !data.fuzzysearchKeyRefusedAt}
-				<p class="hint">{m.admin_settings_lookup_hint_pre()}<a class="link-inline" href="https://api.fuzzysearch.net/selfserve" target="_blank" rel="noopener noreferrer">api.fuzzysearch.net/selfserve<span class="sr-only">{' '}{m.link_opens_new_tab()}</span></a>{m.admin_settings_lookup_hint_post()}</p>
-			{/if}
 		</form>
 	{/if}
 </section>
@@ -2472,13 +2513,29 @@
 	.lookup-section .key-eyebrow.refused {
 		color: var(--status-warn);
 	}
-	/* The <dl> exists for the screen-reader label on the mask; it must not add
-	   spacing of its own on top of .key-record. */
+	/* .explainer-body carries no margin of its own (the supporter card renders a
+	   single paragraph), so the rhythm is set here: paragraph to paragraph, and
+	   prose to whatever the state puts next — a field label, the key record, or
+	   the secret note — all get the section's 14px step. */
+	.lookup-section .explainer-body {
+		margin: 0 0 14px;
+	}
+	.lookup-section form {
+		margin-top: 14px;
+	}
+	/* The <dl> holds the label for the mask; it must not add spacing of its own
+	   on top of .key-record. */
 	.lookup-section .key-dl {
 		margin: 14px 0 0;
 	}
 	.lookup-section .key-dl dd {
 		margin: 0;
+	}
+	/* Visible only in the refused state, where the record needs naming. */
+	.lookup-section .record-label {
+		font-size: 13px;
+		color: var(--muted-foreground);
+		margin-bottom: 6px;
 	}
 	.lookup-section .replace-line {
 		margin-top: 14px;
@@ -2487,9 +2544,12 @@
 	/* Bordered pill, destructive text: removing the key is reversible (paste a
 	   new one) so it doesn't earn a filled destructive button here — the filled
 	   one is on the confirmation, where the action actually happens. */
+	/* The boundary is mixed toward --foreground rather than left on --border,
+	   which measures under 1.5:1 against the page and fails SC 1.4.11 as a
+	   control edge (the treatment .btn-outline already uses on hover). */
 	.lookup-section .btn-remove {
 		background: none;
-		border: 1px solid var(--border);
+		border: 1px solid color-mix(in srgb, var(--border) 60%, var(--foreground));
 		color: var(--destructive);
 	}
 	.lookup-section .btn-remove:hover {

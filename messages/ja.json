@@ -913,6 +913,7 @@
 	"admin_settings_lookup_saved": "キーを保存しました。",
 	"admin_settings_lookup_error_invalid": "キーの形式が違うようです。FuzzySearchから受け取ったとおりに貼り付けてください。",
 	"admin_settings_lookup_connected_eyebrow": "接続済み",
+	"admin_settings_lookup_key_ending": "末尾 {tail}",
 	"admin_settings_lookup_saved_key_label": "保存済みのキー",
 	"admin_settings_lookup_replace": "別のキーを使うには、このキーを削除してから新しいキーを保存してください。",
 	"admin_settings_lookup_remove": "キーを削除",
