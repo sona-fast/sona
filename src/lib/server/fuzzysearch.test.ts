@@ -305,20 +305,32 @@ describe('normalizeSourceUrl', () => {
 	// this client builds.
 	it('folds known host aliases onto one canonical host', () => {
 		expect(normalizeSourceUrl('https://x.com/kuttoya/status/160')).toBe(
-			'twitter.com/kuttoya/status/160'
-		);
-		expect(normalizeSourceUrl('https://mobile.twitter.com/kuttoya/status/160')).toBe(
-			'twitter.com/kuttoya/status/160'
+			'twitter.com/i/status/160'
 		);
 		expect(normalizeSourceUrl('https://sfw.furaffinity.net/view/12345/')).toBe(
 			'furaffinity.net/view/12345'
 		);
 	});
 
+	// A match with no artist handle gets the /i/ URL this client builds, and the
+	// operator's saved link carries the handle. Same tweet, so both must reduce
+	// to the same string or the duplicate-source warning never fires.
+	it('reduces a tweet to its status id, with or without the handle', () => {
+		const canonical = 'twitter.com/i/status/160';
+		expect(normalizeSourceUrl('https://twitter.com/i/status/160')).toBe(canonical);
+		expect(normalizeSourceUrl('https://twitter.com/kuttoya/status/160')).toBe(canonical);
+		expect(normalizeSourceUrl('https://x.com/kuttoya/status/160')).toBe(canonical);
+	});
+
+	// A host that names an inherited Object member must be a lookup miss, not
+	// whatever the prototype carries under that key.
+	it('does not read host aliases through Object.prototype', () => {
+		expect(normalizeSourceUrl('http://constructor/view/1')).toBe('constructor/view/1');
+		expect(normalizeSourceUrl('http://__proto__/view/1')).toBe('__proto__/view/1');
+	});
+
 	it('lowercases the path on the hosts that treat it case-insensitively', () => {
-		expect(normalizeSourceUrl('https://twitter.com/Kuttoya/status/160')).toBe(
-			'twitter.com/kuttoya/status/160'
-		);
+		expect(normalizeSourceUrl('https://twitter.com/Kuttoya')).toBe('twitter.com/kuttoya');
 		expect(normalizeSourceUrl('https://www.furaffinity.net/View/12345/')).toBe(
 			'furaffinity.net/view/12345'
 		);
@@ -375,6 +387,13 @@ describe('findLocalArtists', () => {
 
 	it('matches a Twitter handle across host spellings', () => {
 		const found = findLocalArtists(rows, { site: 'Twitter', handles: ['Kuttoya'] });
+		expect(found.map((r) => r.id)).toEqual([2]);
+	});
+
+	// Twitter is where an @-prefixed handle actually arrives, and the stripping
+	// moved into normalizeHandle when this matcher was rewritten.
+	it('matches a Twitter handle that arrives with its @', () => {
+		const found = findLocalArtists(rows, { site: 'Twitter', handles: ['@Kuttoya'] });
 		expect(found.map((r) => r.id)).toEqual([2]);
 	});
 

@@ -90,9 +90,12 @@ export async function proxyStoredImage(
 	if (!upstream.ok || !upstream.body) return null;
 
 	const contentType = upstream.headers.get('content-type') ?? '';
+	// Media types are case-insensitive, so an upstream answering `Image/PNG` is
+	// still an image and must not be demoted to a download.
+	const isImage = contentType.toLowerCase().startsWith('image/');
 	return new Response(upstream.body, {
 		headers: {
-			'Content-Type': contentType.startsWith('image/') ? contentType : 'application/octet-stream',
+			'Content-Type': isImage ? contentType : 'application/octet-stream',
 			'Content-Disposition': 'inline',
 			'Cache-Control': 'private, no-store'
 		}

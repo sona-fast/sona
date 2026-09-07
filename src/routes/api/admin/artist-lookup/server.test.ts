@@ -273,6 +273,24 @@ describe('artist-lookup — stored image by id', () => {
 		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/jpeg');
 	});
 
+	// Media types are case-insensitive. An upstream spelling it `Image/JPEG` was
+	// demoted to a download by the proxy and then refused here as a non-image.
+	it('accepts a stored content type whatever its case', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.jpg', '2026-01-01');`
+		);
+		const jpeg = new Response(IMAGE_BYTES, {
+			status: 200,
+			headers: { 'content-type': 'Image/JPEG; charset=binary' }
+		});
+
+		await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(jpeg).fn));
+
+		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/jpeg');
+	});
+
 	it('reports unavailable when the proxy refuses the stored URL', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		sqlite.exec(

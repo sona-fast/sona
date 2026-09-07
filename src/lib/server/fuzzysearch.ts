@@ -142,13 +142,12 @@ export function handleProfileUrl(site: LookupSite, handle: string): string | nul
 
 /** Hosts that are the same site under two names. Without folding these, an
  * operator who saved an `x.com` link gets no clash warning for the `twitter.com`
- * URL this client builds. */
-const HOST_ALIASES: Record<string, string> = {
-	'x.com': 'twitter.com',
-	'mobile.twitter.com': 'twitter.com',
-	'sfw.furaffinity.net': 'furaffinity.net',
-	'd.furaffinity.net': 'furaffinity.net'
-};
+ * URL this client builds. A Map, not an object literal: a plain lookup answers
+ * `constructor` and `__proto__` with an inherited member rather than a miss. */
+const HOST_ALIASES = new Map<string, string>([
+	['x.com', 'twitter.com'],
+	['sfw.furaffinity.net', 'furaffinity.net']
+]);
 
 /** Hosts whose paths are case-insensitive, so `/View/12345` and `/view/12345`
  * are one post. Left alone elsewhere — most sites' paths are case-sensitive. */
@@ -168,9 +167,13 @@ export function normalizeSourceUrl(url: string | null | undefined): string {
 	rest = rest.replace(/\/+$/, '');
 	const slash = rest.indexOf('/');
 	let host = (slash === -1 ? rest : rest.slice(0, slash)).toLowerCase().replace(/^www\./, '');
-	host = HOST_ALIASES[host] ?? host;
+	host = HOST_ALIASES.get(host) ?? host;
 	let path = slash === -1 ? '' : rest.slice(slash);
 	if (CASE_INSENSITIVE_PATH_HOSTS.has(host)) path = path.toLowerCase();
+	// A tweet is identified by its status id alone: `/kuttoya/status/160` and the
+	// handle-less `/i/status/160` this client builds for a match with no artist
+	// are the same post, so both reduce to the `/i/` spelling before comparison.
+	if (host === 'twitter.com') path = path.replace(/^\/[^/]+\/status\//, '/i/status/');
 	return host + path;
 }
 

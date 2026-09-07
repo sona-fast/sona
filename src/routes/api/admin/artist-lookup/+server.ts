@@ -116,7 +116,12 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// followed, image/* content types only.
 		const stored = await proxyStoredImage(row.imageUrl, fetch);
 		if (!stored?.body) return failure('unavailable');
-		const storedType = (stored.headers.get('content-type') ?? '').split(';')[0].trim();
+		// Lowercased: media types are case-insensitive, so an `Image/PNG` header
+		// must pass the same check as `image/png`.
+		const storedType = (stored.headers.get('content-type') ?? '')
+			.split(';')[0]
+			.trim()
+			.toLowerCase();
 		if (!storedType.startsWith('image/')) {
 			return failure('unavailable');
 		}
