@@ -18,6 +18,7 @@
 		tileResultText,
 		candidateArtists,
 		lookupSentFile,
+		withCreatedArtist,
 		type LookupFields,
 		type LookupMatch,
 		type LookupSite,
@@ -359,6 +360,13 @@
 		appliedArtist = artist;
 		showNewArtist = false;
 		artistSeed = null;
+		// The result now names a local artist, so the panel stops offering to add
+		// one. Left alone it would still read "Add {handle} as a new artist", and a
+		// second click would create the same artist again.
+		const tile = parentTile;
+		if (tile && tile.lookup.kind === 'results') {
+			tile.lookup = { ...tile.lookup, data: withCreatedArtist(tile.lookup.data, artist) };
+		}
 	}
 
 	// ---- Artist lookup (SONA-156) -------------------------------------------
@@ -527,6 +535,9 @@
 		(button ?? lookupPill)?.focus();
 	}
 
+	/** Every caller passes the options bag explicitly or calls this with nothing:
+	 * handed to a callback prop bare, a DOM MouseEvent lands here as `options`,
+	 * and focus return survives only because an event has no `focus` property. */
 	function closeSharedLookup(options: { focus?: boolean } = {}) {
 		const tile = parentTile;
 		if (tile) tile.lookup = { kind: 'idle' };
@@ -884,9 +895,10 @@
 				fileName={tiles.length > 1 ? (parentTile?.fileName ?? '') : ''}
 				filled={sharedFilled}
 				edited={sharedEdited}
+				sourceUrlHeld={sourcePostUrl.trim() !== ''}
 				{appliedArtist}
 				privateNotice={isPrivate && lookupSentFile(sharedLookup)}
-				onclose={closeSharedLookup}
+				onclose={() => closeSharedLookup()}
 				onretry={() => parentTile && startLookup(parentTile.key)}
 				oncancel={() => {
 					if (parentTile) cancelLookup(parentTile.key);

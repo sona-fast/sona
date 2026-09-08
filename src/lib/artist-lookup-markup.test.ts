@@ -317,7 +317,7 @@ describe('the "From lookup" tag', () => {
 		expect(PANEL).toContain("statusKind === 'date_kept'");
 		expect(PANEL).toContain('m.admin_lookup_status_url_kept(');
 		expect(PANEL).toContain('m.admin_lookup_status_date_kept(');
-		expect(PANEL).toMatch(/statusLineKind\(filled, \{ clash: !!clash, edited \}\)/);
+		expect(PANEL).toMatch(/statusLineKind\(filled, \{ clash: !!clash, edited, urlHeld: sourceUrlHeld \}\)/);
 		expect(PANEL).toMatch(/seedStatusKind\(seeded, seedEdited\)/);
 		expect(PANEL).toMatch(/once per\s*\n?\s*(?:\/\/|\s)*field, not once per keystroke/);
 	});
@@ -415,6 +415,73 @@ describe('the artist on the edit page', () => {
 	});
 });
 
+describe('round 11 wiring', () => {
+	// The clash sentence has two shapes now, and the page is the only thing that
+	// knows whether the field holds a URL.
+	it('feeds the current source URL into the clash sentence, from both pages', () => {
+		expect(PANEL).toContain('sourceUrlHeld');
+		expect(PANEL).toMatch(/statusLineKind\(filled, \{[\s\S]*?urlHeld: sourceUrlHeld[\s\S]*?\}\)/);
+		expect(PANEL).toContain("statusKind === 'clash_kept'");
+		expect(PANEL).toContain('m.admin_lookup_status_clash_kept');
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(/sourceUrlHeld=\{sourcePostUrl\.trim\(\) !== ''\}/);
+		}
+	});
+
+	// Nested in the status paragraph it vanished whenever that sentence did, and
+	// the sentence goes away as soon as the operator edits the field the lookup
+	// filled — which says nothing about whether the artist is still unapplied.
+	it('renders the artist hint on its own condition, not the status line\'s', () => {
+		const status = PANEL.match(/\{#if statusKind !== 'none' && prefill\}[\s\S]*?\{\/if\}/)?.[0] ?? '';
+		expect(status).not.toContain('admin_lookup_status_artist_hint');
+		expect(PANEL).toMatch(
+			/\{#if editMode && outcome === 'existing' && !appliedArtist && candidates\[0\]\}\s*\n\s*<p class="lookup-status">\s*\n\s*\{m\.admin_lookup_status_artist_hint/
+		);
+	});
+
+	// A clash only exists because a prefill match produced the URL, so there is
+	// no state to guess a site for — and a guess would name the wrong one.
+	it('names no site in the clash body when there is no prefill match', () => {
+		expect(PANEL).not.toContain("prefill ? prefill.site : 'FurAffinity'");
+		expect(PANEL).toMatch(
+			/\{#if prefill\}\s*\n\s*<p class="lookup-lead">\s*\n\s*\{m\.admin_lookup_clash_body/
+		);
+	});
+
+	// Handed over bare, the DOM MouseEvent lands in closeSharedLookup as its
+	// options bag, and focus return survives only because an event happens to
+	// carry no `focus` property.
+	it('calls the close handlers with no arguments', () => {
+		expect(PANEL).not.toMatch(/onclick=\{onclose\}/);
+		expect(PANEL.match(/onclick=\{\(\) => onclose\(\)\}/g) ?? []).toHaveLength(3);
+		expect(UPLOAD).toContain('onclose={() => closeSharedLookup()}');
+	});
+
+	// A second click on the same result seeds nothing, and overwriting the record
+	// with that empty seed retracted the sentence describing the FIRST click —
+	// and the "they're a guess until you check them" disclosure with it — while
+	// the values and their tags stayed on screen.
+	it('keeps the seed record when a repeat seed writes nothing', () => {
+		const seedFn = EDIT.match(/function seedNewArtist\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(seedFn).toMatch(
+			/if \(seed\.artistName !== undefined \|\| seed\.profileUrl !== undefined\) lookupSeeded = seed;/
+		);
+		expect(seedFn).not.toMatch(/^\t\tlookupSeeded = seed;$/m);
+	});
+
+	// Left at 'new', the panel keeps offering "Add {handle} as a new artist" for
+	// an artist that now exists, and the second click creates a duplicate row:
+	// POST /api/artists enforces no name uniqueness on a non-registry create.
+	it('folds a created artist back into the result on the upload page', () => {
+		const created = UPLOAD.match(/function onArtistCreated\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(created).toContain('withCreatedArtist(tile.lookup.data, artist)');
+		expect(created).toMatch(/tile\.lookup\.kind === 'results'/);
+		// The edit page has no equivalent: it creates the artist server-side in
+		// the save action, and resetForImage clears the panel on the way back.
+		expect(EDIT).not.toContain('oncreated=');
+	});
+});
+
 // The announcements and the clash line name the piece each one is about; a
 // swap between "this piece" and the image being edited reads as the wrong
 // constraint (SONA-156 round 6).
@@ -428,14 +495,33 @@ describe('what the lookup copy names', () => {
 		);
 	});
 
-	it('says the gone state names the library, not FuzzySearch, in both catalogs', () => {
+	// "gallery", not "library": the collection has one name across the admin, and
+	// the sibling clash eyebrow already uses it. And it sends the operator to All
+	// Images rather than to a reload — the only page that reaches this state is
+	// the edit page, whose loader 404s for the row that just went away, so a
+	// reload lands on a not-found page instead of "what is there now".
+	it('says the gone state names the gallery, not FuzzySearch, in both catalogs', () => {
 		expect(en.admin_lookup_gone_body).toBe(
-			'This image is no longer in your library. Reload the page to see what is there now.'
+			'This image is no longer in your gallery. Go back to All Images to see what is there now.'
 		);
-		expect(en.admin_lookup_gone_body).not.toMatch(/FuzzySearch/);
+		expect(en.admin_lookup_gone_body).not.toMatch(/FuzzySearch|library|[Rr]eload/);
+		expect(en.admin_lookup_gone_body).toContain(en.admin_nav_all_images);
+		expect(en.admin_lookup_gone_eyebrow).toBe('Image is gone');
 		expect(ja.admin_lookup_gone_eyebrow).toBeTruthy();
 		expect(ja.admin_lookup_gone_body).toBeTruthy();
-		expect(ja.admin_lookup_gone_body).not.toMatch(/FuzzySearch/);
+		expect(ja.admin_lookup_gone_body).not.toMatch(/FuzzySearch|ライブラリ|再読み込み/);
+		expect(ja.admin_lookup_gone_body).toContain(ja.admin_nav_all_images);
+	});
+
+	// Both new strings say the thing STOPPED being true — the panel only renders
+	// them for a key or an image that was there when the page loaded. ja carries
+	// the nuance with もう, the same word the gone body uses for it.
+	it('says "no longer" in both catalogs for the key that went away', () => {
+		expect(en.admin_lookup_no_key_body).toBe(
+			'This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.'
+		);
+		expect(ja.admin_lookup_no_key_body).toContain('キーがもうありません');
+		expect(ja.admin_lookup_gone_body).toContain('もうありません');
 	});
 
 	it('says the seeded fields were left alone rather than that nothing was filled', () => {

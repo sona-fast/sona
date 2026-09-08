@@ -551,6 +551,43 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 	});
 
+	// prefillForResult skips the source URL on ANY clash, whatever the field
+	// holds, so the "left it empty" sentence was a false claim to an operator who
+	// pasted one first — the field is visibly not empty.
+	test('does not call a pasted source URL empty under a clash', async ({ page }) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				sourceClash: {
+					imageId: 1,
+					title: 'Test Image',
+					isVariant: false,
+					parentImageId: null,
+					variantCount: 0,
+					thumbnailUrl: null,
+					artistName: 'Test Artist',
+					uploadedAt: '2026-07-01T00:00:00.000Z',
+					width: 1200,
+					height: 900
+				}
+			})
+		);
+		await gotoEditHydrated(page);
+		const pasted = 'https://www.furaffinity.net/view/99999/';
+		await sourceInput(page).fill(pasted);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+
+		// The URL the operator pasted is still there, untagged and unclaimed.
+		await expect(sourceInput(page)).toHaveValue(pasted);
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(panel(page)).toContainText(
+			'left the source post URL as it was, because Test Image already uses it'
+		);
+		await expect(panel(page)).not.toContainText('left the source post URL empty');
+	});
+
 	test('the edit page never changes the artist without a click', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await gotoEditHydrated(page);
@@ -661,6 +698,44 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
 		await expect(sourceInput(page)).toHaveValue('');
+	});
+
+	// Left at the 'new' outcome, the panel kept offering "Add kuttoya as a new
+	// artist" after the artist existed, and POST /api/artists enforces no name
+	// uniqueness on a non-registry create — so the second click made a duplicate
+	// row the operator then had to find and merge.
+	test('stops offering to add an artist it just created', async ({ page }) => {
+		let creates = 0;
+		await page.route('**/api/artists', (route) => {
+			creates += 1;
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ id: 77, name: 'kuttoya' })
+			});
+		});
+		// No local artist behind the handle: the 'new' outcome, whose action opens
+		// the dialog.
+		await stubLookup(page, matchedBody({ localArtists: [] }));
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		const addNew = panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' });
+		await addNew.click();
+
+		// The dialog's fields carry ids rather than names, and this one arrives
+		// seeded with the handle the panel offered.
+		await expect(page.locator('#new-artist-name')).toHaveValue('kuttoya');
+		await page.getByRole('button', { name: 'Create Artist' }).click();
+
+		// The select holds the artist that was just created.
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('77');
+		// And the panel has moved off the 'new' outcome, so there is nothing left
+		// to click a second time.
+		await expect(addNew).toHaveCount(0);
+		await expect(panel(page)).toContainText('kuttoya');
+		expect(creates).toBe(1);
 	});
 
 	test('a variant tile rates its own tile and leaves the shared fields alone', async ({ page }) => {

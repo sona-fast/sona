@@ -215,7 +215,13 @@
 			artistName: artistName.trim() === '',
 			profileUrl: url.trim() === ''
 		});
-		lookupSeeded = seed;
+		// A second click on the same result seeds nothing, because the first click
+		// already filled the fields it was allowed to touch. Overwriting the record
+		// with that empty seed would retract the sentence describing what the FIRST
+		// click wrote — and the guess disclosure with it — while the values and
+		// their "From lookup" tags stay on screen. Nothing changed, so nothing said
+		// about it changes.
+		if (seed.artistName !== undefined || seed.profileUrl !== undefined) lookupSeeded = seed;
 		if (seed.artistName !== undefined) {
 			artistName = seed.artistName;
 			nameTagged = true;
@@ -382,6 +388,7 @@
 					edited={lookupEdited}
 					seeded={lookupSeeded}
 					seedEdited={lookupSeedEdited}
+					sourceUrlHeld={sourcePostUrl.trim() !== ''}
 					{appliedArtist}
 					editMode
 					variantBlocked={data.hasVariants}

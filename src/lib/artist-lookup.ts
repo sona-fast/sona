@@ -309,6 +309,38 @@ export function resolveOutcome(data: LookupResponse): LookupOutcome {
 	return LINKABLE_SITES.includes(match.site) ? 'new' : 'unlinked';
 }
 
+/**
+ * The result as it stands once the operator has created an artist from it. The
+ * new artist is recorded as a local hit on the prefill match — the one whose
+ * handle seeded the dialog — which is what moves the outcome from 'new' to
+ * 'existing'.
+ *
+ * Without it the panel keeps offering "Add {handle} as a new artist" for an
+ * artist that now exists, and the second click creates a duplicate row:
+ * POST /api/artists enforces no name uniqueness on a non-registry create, so
+ * nothing downstream refuses it and the operator is left merging two artists by
+ * hand. `pieces` is 0 because a just-created artist has none yet.
+ */
+export function withCreatedArtist(
+	data: LookupResponse,
+	artist: { id: number; name: string }
+): LookupResponse {
+	const matchIndex = data.matches.findIndex((x) => x.band === 'exact' || x.band === 'strong');
+	if (matchIndex === -1) return data;
+	const hit = { id: artist.id, name: artist.name, pieces: 0 };
+	const existing = data.localArtists.find((h) => h.matchIndex === matchIndex);
+	if (!existing) {
+		return { ...data, localArtists: [...data.localArtists, { matchIndex, artists: [hit] }] };
+	}
+	if (existing.artists.some((a) => a.id === artist.id)) return data;
+	return {
+		...data,
+		localArtists: data.localArtists.map((h) =>
+			h.matchIndex === matchIndex ? { ...h, artists: [...h.artists, hit] } : h
+		)
+	};
+}
+
 /** True when the ambiguity spans sites, which the copy names differently. */
 export function isCrossSiteAmbiguity(data: LookupResponse): boolean {
 	return new Set(candidateArtists(data).map((c) => c.site)).size > 1;
@@ -434,6 +466,7 @@ export type StatusLineKind =
 	| 'url_kept'
 	| 'date_kept'
 	| 'clash'
+	| 'clash_kept'
 	| 'none';
 
 /**
@@ -443,17 +476,26 @@ export type StatusLineKind =
  * and false of one it filled and the operator then changed — that case gets
  * `url_kept`, which claims the URL and stays silent about the date. `date_kept`
  * is the mirror.
+ *
+ * The clash pair follows the same rule for the URL. `prefillForResult` skips the
+ * URL on any clash, whatever the field holds, so "left the source post URL
+ * empty" is true only of a field that WAS empty. `urlHeld` says it is not, and
+ * picks `clash_kept`, which claims the date and says the URL was not filled
+ * without claiming it is empty.
  */
 export function statusLineKind(
 	filled: LookupFields,
-	options: { clash?: boolean; edited?: LookupEdited } = {}
+	options: { clash?: boolean; edited?: LookupEdited; urlHeld?: boolean } = {}
 ): StatusLineKind {
 	const edited = options.edited ?? {};
 	const urlFilled = filled.sourcePostUrl !== undefined;
 	const dateFilled = filled.commissionedAt !== undefined;
 	const url = urlFilled && !edited.sourcePostUrl;
 	const date = dateFilled && !edited.commissionedAt;
-	if (options.clash) return date ? 'clash' : 'none';
+	if (options.clash) {
+		if (!date) return 'none';
+		return options.urlHeld ? 'clash_kept' : 'clash';
+	}
 	if (url && date) return 'both';
 	if (url) return dateFilled ? 'url_kept' : 'url_only';
 	if (date) return urlFilled ? 'date_kept' : 'date_only';

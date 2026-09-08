@@ -24,6 +24,7 @@ import {
 	strictestRating,
 	tileResultText,
 	runLookup,
+	withCreatedArtist,
 	type LookupFailReason,
 	type LookupMatch,
 	type LookupResponse,
@@ -130,6 +131,45 @@ describe('artist-lookup — the wire shape agrees with the server', () => {
 		];
 		expect(pickPrefillMatch(matches)?.site).toBe('Twitter');
 		expect(pickPrefillMatch([match({ distance: 6, band: 'possible' })])).toBeNull();
+	});
+});
+
+describe('withCreatedArtist', () => {
+	// Left at 'new', the panel keeps offering "Add {handle} as a new artist" for
+	// an artist that now exists, and POST /api/artists enforces no name
+	// uniqueness on a non-registry create — so the second click makes a duplicate
+	// the operator then merges by hand (SONA-156 round 11).
+	it('turns the outcome from new into existing, with the artist selected', () => {
+		const before = response();
+		expect(resolveOutcome(before)).toBe('new');
+
+		const after = withCreatedArtist(before, { id: 7, name: 'Kuttoya' });
+
+		expect(resolveOutcome(after)).toBe('existing');
+		expect(candidateArtists(after)).toEqual([
+			{ id: 7, name: 'Kuttoya', pieces: 0, site: 'FurAffinity' }
+		]);
+		// The record it came from is untouched.
+		expect(before.localArtists).toEqual([]);
+	});
+
+	// The hit has to land on a CONFIDENT match, or candidateArtists skips it and
+	// the outcome never moves.
+	it('records the hit against the prefill match', () => {
+		const data = withCreatedArtist(
+			response({ matches: [match({ band: 'possible', distance: 9 }), match({ siteId: '9' })] }),
+			{ id: 7, name: 'Kuttoya' }
+		);
+		expect(data.localArtists).toEqual([
+			{ matchIndex: 1, artists: [{ id: 7, name: 'Kuttoya', pieces: 0 }] }
+		]);
+	});
+
+	it('adds nothing twice, and nothing at all with no confident match', () => {
+		const once = withCreatedArtist(response(), { id: 7, name: 'Kuttoya' });
+		expect(withCreatedArtist(once, { id: 7, name: 'Kuttoya' })).toBe(once);
+		const weak = response({ matches: [match({ band: 'possible', distance: 9 })] });
+		expect(withCreatedArtist(weak, { id: 7, name: 'Kuttoya' })).toBe(weak);
 	});
 });
 
@@ -589,6 +629,36 @@ describe('statusLineKind', () => {
 	it('says the clash sentence only when the date was filled', () => {
 		expect(statusLineKind({ commissionedAt: 'd' }, { clash: true })).toBe('clash');
 		expect(statusLineKind({}, { clash: true })).toBe('none');
+	});
+
+	// prefillForResult skips the source URL on ANY clash, whatever the field
+	// holds, so "left the source post URL empty" is a false claim to an operator
+	// who pasted one first or to an edit-page image that already has one.
+	it('does not call the source URL empty when the field holds one', () => {
+		const filled = { commissionedAt: 'd' };
+		expect(statusLineKind(filled, { clash: true, urlHeld: true })).toBe('clash_kept');
+		expect(statusLineKind(filled, { clash: true, urlHeld: false })).toBe('clash');
+		// An edited date is still nobody's to claim, held URL or not.
+		expect(
+			statusLineKind(filled, { clash: true, urlHeld: true, edited: { commissionedAt: true } })
+		).toBe('none');
+		// And urlHeld says nothing outside a clash, where the URL is fillable.
+		expect(statusLineKind({ sourcePostUrl: 'u' }, { urlHeld: true })).toBe('url_only');
+	});
+
+	it('claims the date and never the URL in the clash_kept sentence', () => {
+		expect(
+			m.admin_lookup_status_clash_kept({ site: 'FurAffinity', title: 'Ref' }, { locale: 'en' })
+		).toBe(
+			'Sona filled the commissioned date from the FurAffinity post and left the source post URL as it was, because Ref already uses it. You can change the date before you save.'
+		);
+		for (const locale of ['en', 'ja'] as const) {
+			const line = m.admin_lookup_status_clash_kept(
+				{ site: 'FurAffinity', title: 'Ref' },
+				{ locale }
+			);
+			expect(line).not.toMatch(/empty|空/);
+		}
 	});
 
 	// url_only has two causes and the kind cannot tell them apart: the post
