@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { X, Loader2 } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
@@ -146,6 +146,14 @@
 	// registryEnabled arrives as a prop (resolved in the admin layout load), so the
 	// search box's presence is decided before render. When on, fetch the catalog
 	// import plan for the footer + "Import all" flow.
+	// The control that opened the modal. Cancelling or creating unmounts the
+	// dialog, and without this focus falls to <body> and the next Tab restarts
+	// at the top of the page (2.4.3).
+	const opener = typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null);
+	onDestroy(() => {
+		if (opener?.isConnected) opener.focus();
+	});
+
 	onMount(async () => {
 		// A lookup-seeded name has never been through oninput, so nothing has
 		// searched the registry for it. Go through onNameInput rather than
@@ -383,7 +391,17 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="modal-backdrop" onclick={oncancel} onkeydown={(e) => { if (e.key === 'Escape') oncancel(); }}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal" role="dialog" aria-modal="true" aria-label={title} onclick={(e) => e.stopPropagation()}>
+	<!-- The guess lines describe the whole dialog, so they are read on entry:
+	     the name field autofocuses already full, and nothing else says where
+	     that value came from. -->
+	<div
+		class="modal"
+		role="dialog"
+		aria-modal="true"
+		aria-label={title}
+		aria-describedby={prefillSource === 'lookup' ? 'lookup-guess-lines' : undefined}
+		onclick={(e) => e.stopPropagation()}
+	>
 		<div class="modal-header">
 			<h2>{title}</h2>
 			<button class="icon-btn" onclick={oncancel} aria-label={m.admin_close()}><X size={18} /></button>
@@ -392,7 +410,7 @@
 		{#if prefillSource === 'lookup'}
 			<!-- These values came from a reverse image search, not from the artist.
 			     Say so before the operator publishes them under their own name. -->
-			<div class="guess-lines">
+			<div class="guess-lines" id="lookup-guess-lines">
 				<p class="guess-line">
 					{prefillSite
 						? m.admin_lookup_guess_line_site({ site: prefillSite })
@@ -495,16 +513,16 @@
 			<div class="social-section">
 				<h3>{m.admin_artists_col_social()}</h3>
 				{#if prefillSource === 'lookup' && prefillSite}
-					<p class="prefill-mark">
+					<p class="prefill-mark" id="lookup-prefill-mark">
 						<span class="lookup-tag">{m.admin_lookup_from_lookup()}</span>
 						{prefillSite}
 					</p>
 				{/if}
 				<div class="social-grid" class:has-prefill={prefillSource === 'lookup' && prefillSite}>
-					<label class="social-field" class:span-full={!!initialSocials?.twitter}><TwitterIcon size={14} /><span class="sr-only">Twitter</span><input type="text" class="input" bind:value={twitter} placeholder="@handle" /></label>
+					<label class="social-field" class:span-full={!!initialSocials?.twitter}><TwitterIcon size={14} /><span class="sr-only">Twitter</span><input type="text" class="input" bind:value={twitter} placeholder="@handle" aria-describedby={initialSocials?.twitter ? 'lookup-prefill-mark' : undefined} /></label>
 					<label class="social-field"><BlueskyIcon size={14} /><span class="sr-only">Bluesky</span><input type="text" class="input" bind:value={bluesky} placeholder="lunarpaws.bsky.social" /></label>
 					<label class="social-field"><TelegramIcon size={14} /><span class="sr-only">Telegram</span><input type="text" class="input" bind:value={telegram} placeholder="t.me/lunarpaws" /></label>
-					<label class="social-field" class:span-full={!!initialSocials?.furaffinity}><FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span><input type="text" class="input" bind:value={furaffinity} placeholder="furaffinity.net/user/lunarpaws" /></label>
+					<label class="social-field" class:span-full={!!initialSocials?.furaffinity}><FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span><input type="text" class="input" bind:value={furaffinity} placeholder="furaffinity.net/user/lunarpaws" aria-describedby={initialSocials?.furaffinity ? 'lookup-prefill-mark' : undefined} /></label>
 					<label class="social-field"><DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span><input type="text" class="input" bind:value={deviantart} placeholder="deviantart.com/..." /></label>
 					<label class="social-field"><PatreonIcon size={14} /><span class="sr-only">Patreon</span><input type="text" class="input" bind:value={patreon} placeholder="patreon.com/lunarpaws" /></label>
 					<label class="social-field"><InstagramIcon size={14} /><span class="sr-only">Instagram</span><input type="text" class="input" bind:value={instagram} placeholder="instagram.com/..." /></label>
@@ -578,7 +596,9 @@
 	.social-field .input { flex: 1; }
 	/* A lookup-filled profile URL is long — it gets the whole row rather than
 	   half of one (SONA-156). */
-	.social-grid.has-prefill .social-field.span-full { grid-column: 1 / -1; }
+	/* Full width, and last: taken in place it pushes its neighbour onto a row of
+	   its own and leaves an empty cell beside it. */
+	.social-grid.has-prefill .social-field.span-full { grid-column: 1 / -1; order: 1; }
 	.guess-lines { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
 	.guess-line { font-size: 13px; color: var(--muted-foreground); line-height: 1.5; margin: 0; }
 	.prefill-mark { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); margin: 0 0 6px; }

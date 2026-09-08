@@ -4,8 +4,10 @@
 	// operator chose; it owns no form fields of its own — every prefill and every
 	// artist change happens in the page, so the two pages keep their own idea of
 	// what "empty" means and what a click may overwrite.
-	import { Check, Info, Loader2 } from 'lucide-svelte';
+	import { Check, Globe, Info, Loader2 } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
+	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
+	import TwitterIcon from '$lib/components/icons/TwitterIcon.svelte';
 	import {
 		bandLabel,
 		candidateArtists,
@@ -17,12 +19,14 @@
 		postDateToInput,
 		ratingLabel,
 		resolveOutcome,
+		seedStatusKind,
 		siteLabel,
 		statusLineKind,
 		type ArtistChoice,
 		type LookupFields,
 		type LookupSite,
 		type LookupState,
+		type NewArtistSeed,
 		type SourceClash
 	} from '$lib/artist-lookup';
 
@@ -32,6 +36,10 @@
 		fileName?: string;
 		/** What the page's prefill actually wrote, for the status line. */
 		filled?: LookupFields;
+		/** What the page seeded into an inline new-artist form, for the status
+		 * line — the seed is subject to the same never-overwrite rule, so the
+		 * sentence has to say which of the two fields it actually filled. */
+		seeded?: NewArtistSeed;
 		/** The artist currently applied from this result, if any. */
 		appliedArtist?: { id: number; name: string } | null;
 		/** The image is private and the file went out anyway — say so. */
@@ -51,6 +59,7 @@
 		lookup,
 		fileName = '',
 		filled = {},
+		seeded = {},
 		appliedArtist = null,
 		privateNotice = false,
 		editMode = false,
@@ -71,6 +80,7 @@
 	const clash = $derived(data?.sourceClash ?? null);
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
 	const statusKind = $derived(statusLineKind(filled, { clash: !!clash }));
+	const seedKind = $derived(seedStatusKind(seeded));
 	// "Uploaded {date} · {artist}", with either half dropped when the row has no
 	// answer for it rather than spelled out as a blank.
 	const clashMeta = $derived.by(() => {
@@ -108,9 +118,18 @@
 	}
 </script>
 
-{#if lookup.kind !== 'idle'}
-	<div class="lookup-panel" role="region" aria-label={m.admin_lookup_panel_label()}>
-		<div class="lookup-body" role="status">
+<!-- The panel and its live region are ALWAYS in the DOM, collapsed to nothing
+     while idle. A role="status" inserted together with its first content is
+     commonly missed by screen readers, and that first content is "Sending the
+     image to FuzzySearch." — the one message that says the lookup started. -->
+<div
+	class="lookup-panel"
+	class:idle={lookup.kind === 'idle'}
+	role="region"
+	aria-label={m.admin_lookup_panel_label()}
+>
+	<div class="lookup-body" role="status">
+		{#if lookup.kind !== 'idle'}
 			{#if lookup.kind === 'searching'}
 				<div class="lookup-eyebrow">{m.admin_lookup_searching_eyebrow()}</div>
 				<div class="skeletons" aria-hidden="true">
@@ -118,7 +137,12 @@
 					<span class="skeleton"></span>
 					<span class="skeleton"></span>
 				</div>
-				<p class="lookup-status">{m.admin_lookup_searching_body()}</p>
+				<!-- The spinner belongs to the progress the line describes, not to the
+				     Cancel button, where it read as "cancelling in progress". -->
+				<p class="lookup-status searching-line">
+					<Loader2 size={14} class="spin" aria-hidden="true" />
+					{m.admin_lookup_searching_body()}
+				</p>
 			{:else if lookup.kind === 'no_match'}
 				<div class="lookup-eyebrow">{m.admin_lookup_no_match_eyebrow()}</div>
 				<p class="lookup-lead">{m.admin_lookup_no_match_body()}</p>
@@ -179,7 +203,18 @@
 					{#each data.matches as match (match.site + match.siteId)}
 						{@const handles = matchHandles(match)}
 						<li class="match-row">
-							<span class="match-site" aria-hidden="true">{match.site.slice(0, 2)}</span>
+							<!-- The brand mark, decorative: the line beside it names the site
+							     in words. Weasyl and e621 have no mark here, so they get the
+							     neutral globe rather than two letters of their name. -->
+							<span class="match-site" aria-hidden="true">
+								{#if match.site === 'FurAffinity'}
+									<FurAffinityIcon size={14} />
+								{:else if match.site === 'Twitter'}
+									<TwitterIcon size={14} />
+								{:else}
+									<Globe size={14} />
+								{/if}
+							</span>
 							<span class="match-id">
 								{#if handles}
 									<span class="match-who">{m.admin_lookup_match_line({ handles, site: siteLabel(match.site) })}</span>
@@ -259,21 +294,45 @@
 						{/if}
 					</p>
 				{/if}
+
+				<!-- The seed obeys the same never-overwrite rule as the two fields
+				     above, so the sentence names only what it actually wrote. -->
+				{#if seedKind !== 'none' && prefill}
+					<p class="lookup-status">
+						{#if seedKind === 'both'}
+							{m.admin_lookup_status_seed_both({ site: siteLabel(prefill.site) })}
+						{:else if seedKind === 'name_only'}
+							{m.admin_lookup_status_seed_name()}
+						{:else}
+							{m.admin_lookup_status_seed_link({ site: siteLabel(prefill.site) })}
+						{/if}
+					</p>
+				{/if}
 			{/if}
 
 			{#if privateNotice}
 				<p class="private-notice">{m.admin_lookup_private_notice()}</p>
 			{/if}
+		{/if}
 		</div>
 
+		{#if lookup.kind !== 'idle'}
 		<div class="lookup-actions">
 			{#if lookup.kind === 'searching'}
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>
-					<Loader2 size={14} class="spin" aria-hidden="true" />
 					{m.admin_lookup_cancel()}
 				</button>
 			{:else if lookup.kind === 'no_match'}
 				<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>
+				<!-- The spec's third no_match action: nothing matched, so the way
+				     forward is the artist by hand. An empty handle seeds nothing. -->
+				<button
+					type="button"
+					class="btn btn-secondary"
+					onclick={() => onaddnew({ handle: '', site: 'FurAffinity', linkable: false })}
+				>
+					{m.admin_upload_add_new_artist()}
+				</button>
 				<button type="button" class="btn btn-secondary" onclick={onclose}>{m.admin_lookup_close()}</button>
 			{:else if lookup.kind === 'failed'}
 				{#if lookup.reason === 'key_refused'}
@@ -292,7 +351,9 @@
 							{m.admin_lookup_use_artist({ name: candidates[0].name })}
 						</button>
 					{/if}
-					<a class="btn btn-secondary" href="/admin/images/{clash.imageId}/edit" target="_blank" rel="noopener noreferrer">
+					<!-- A text link, not a third button: the row reads primary,
+					     secondary, link, so "Add as a variant" is visibly the action. -->
+					<a class="text-action" href="/admin/images/{clash.imageId}/edit" target="_blank" rel="noopener noreferrer">
 						{m.admin_lookup_clash_open({ title: clash.title })}
 					</a>
 				{:else if outcome === 'existing' && candidates[0]}
@@ -343,8 +404,8 @@
 				<button type="button" class="btn btn-secondary" onclick={onclose}>{m.admin_lookup_close()}</button>
 			{/if}
 		</div>
-	</div>
-{/if}
+		{/if}
+</div>
 
 <style>
 	.lookup-panel {
@@ -355,6 +416,15 @@
 		display: flex;
 		flex-direction: column;
 		gap: 14px;
+	}
+
+	/* Idle: no card, no space, but the live region above still exists so the
+	   first message written into it is announced. Not display:none — a hidden
+	   region is not a region a screen reader watches. */
+	.lookup-panel.idle {
+		border: 0;
+		padding: 0;
+		gap: 0;
 	}
 	.lookup-eyebrow {
 		font-family: var(--font-primary);
@@ -387,6 +457,20 @@
 		margin: 10px 0 0;
 		max-width: 62ch;
 	}
+	/* The searching line carries the spinner, so it lines up with its text. */
+	.searching-line {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	/* A busy indicator is still motion: stop it for anyone who asked the OS to. */
+	@media (prefers-reduced-motion: reduce) {
+		.searching-line :global(.spin) {
+			animation: none;
+		}
+	}
+
 	.private-notice {
 		font-size: 13px;
 		color: var(--status-warn);
@@ -451,12 +535,14 @@
 		gap: 10px;
 	}
 	.match-site {
-		font-family: var(--font-primary);
-		font-size: 11px;
-		font-weight: 600;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		color: var(--muted-foreground);
 		width: 2.2em;
 		flex: none;
+		/* Baseline-aligned row: nudge the mark onto the text's baseline. */
+		align-self: center;
 	}
 	.match-id {
 		display: flex;
@@ -521,6 +607,11 @@
 		gap: 8px;
 		align-items: center;
 	}
+	.text-action {
+		font-size: 13px;
+		color: var(--link);
+	}
+
 	.lookup-actions .applied {
 		display: inline-flex;
 		align-items: center;

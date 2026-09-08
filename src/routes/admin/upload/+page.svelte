@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { tick } from 'svelte';
 	import { CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
@@ -369,6 +370,13 @@
 	let artistSeed = $state<{ handle: string; site: LookupSite; linkable: boolean } | null>(null);
 	// Per-tile aborts. Not $state — nothing renders them.
 	const lookupAborts = new Map<number, AbortController>();
+	// Closing or cancelling the panel destroys the button the operator is
+	// standing on, so focus has to be moved deliberately first (2.4.3). The
+	// origin is the parent tile's own button in a set, the fieldset pill alone.
+	let lookupPill = $state<HTMLButtonElement | null>(null);
+	let existingParentSelect = $state<HTMLSelectElement | null>(null);
+	// $state so `bind:this` into it is a reactive write (Svelte warns otherwise).
+	const tileLookupButtons = $state<Record<number, HTMLButtonElement | null>>({});
 
 	const parentTile = $derived(groupMode === 'new' ? (tiles[parentIndex] ?? null) : null);
 	const sharedLookup = $derived<LookupState>(parentTile?.lookup ?? { kind: 'idle' });
@@ -396,7 +404,25 @@
 			if (!live) return;
 			live.lookup = next;
 			if (isParent(key)) applyShared(next);
+			// A variant tile's outcome renders as plain text on the tile, outside
+			// the panel's live region — say it out loud, naming the file, or a
+			// screen-reader user has no way to know the lookup finished (4.1.3).
+			else announceTileLookup(live);
 		});
+	}
+
+	function announceTileLookup(tile: Tile) {
+		const fileName = tile.fileName;
+		if (tile.lookup.kind === 'failed') {
+			setAnnounce(m.admin_lookup_announce_tile_failed({ fileName }));
+			return;
+		}
+		const result = tileResult(tile);
+		setAnnounce(
+			result
+				? m.admin_lookup_announce_tile_match({ fileName, result: result.line })
+				: m.admin_lookup_announce_tile_no_match({ fileName })
+		);
 	}
 
 	function isParent(key: number): boolean {
@@ -455,22 +481,40 @@
 		// Object.is — a stringified id would match no option and select nothing.
 		selectedArtistId = artist.id;
 		appliedArtist = artist;
+		// The select sits above the panel and the button relabels itself in place,
+		// so nothing else tells a screen-reader user the artist was applied.
+		setAnnounce(m.admin_lookup_announce_using({ name: artist.name }));
 	}
 
 	function openLookupDialog(seed: { handle: string; site: LookupSite; linkable: boolean }) {
-		artistSeed = seed;
+		// The no_match action carries no handle: that is a plain "Add New Artist",
+		// with nothing for the dialog's guess disclosure to be about.
+		artistSeed = seed.handle ? seed : null;
 		showNewArtist = true;
 	}
 
-	function addAsVariant(clash: SourceClash) {
+	async function addAsVariant(clash: SourceClash) {
 		groupMode = 'existing';
 		existingParentId = String(clash.imageId);
-		closeSharedLookup();
+		closeSharedLookup({ focus: false });
+		// This click unmounts both the panel and the fieldset pill, so the landing
+		// spot is the select it just populated.
+		await tick();
+		existingParentSelect?.focus();
 	}
 
-	function closeSharedLookup() {
+	/** The control a shared lookup was started from — where focus goes back to
+	 * when the panel it opened is closed or cancelled (2.4.3). */
+	function focusLookupOrigin() {
+		const tile = parentTile;
+		const button = tile ? tileLookupButtons[tile.key] : null;
+		(button ?? lookupPill)?.focus();
+	}
+
+	function closeSharedLookup(options: { focus?: boolean } = {}) {
 		const tile = parentTile;
 		if (tile) tile.lookup = { kind: 'idle' };
+		if (options.focus !== false) focusLookupOrigin();
 	}
 
 	/** A variant tile whose confident match names a different local artist than
@@ -609,6 +653,7 @@
 						<button
 							type="button"
 							class="tile-lookup"
+							bind:this={tileLookupButtons[tile.key]}
 							aria-busy={tile.lookup.kind === 'searching'}
 							aria-describedby="lookup-hint"
 							onclick={() => startLookup(tile.key)}
@@ -718,7 +763,7 @@
 				<span>{m.admin_variant_group_existing()}</span>
 			</label>
 			{#if groupMode === 'existing'}
-				<select class="input" bind:value={existingParentId} required>
+				<select class="input" bind:this={existingParentSelect} bind:value={existingParentId} required>
 					<option value="">{m.admin_variant_pick_parent()}</option>
 					{#each data.parentCandidates as candidate}
 						<option value={String(candidate.id)}>{candidate.title}</option>
@@ -762,6 +807,7 @@
 				<button
 					type="button"
 					class="lookup-pill"
+					bind:this={lookupPill}
 					aria-describedby="lookup-hint"
 					aria-disabled={sharedLookup.kind === 'searching'}
 					onclick={() => startLookup(tiles[0].key)}
@@ -796,7 +842,11 @@
 				privateNotice={isPrivate && lookupSentFile(sharedLookup)}
 				onclose={closeSharedLookup}
 				onretry={() => parentTile && startLookup(parentTile.key)}
-				oncancel={() => parentTile && cancelLookup(parentTile.key)}
+				oncancel={() => {
+					if (parentTile) cancelLookup(parentTile.key);
+					// Cancel destroys itself; land back on the control that started it.
+					focusLookupOrigin();
+				}}
 				onuseartist={useLookupArtist}
 				onaddnew={openLookupDialog}
 				onaddvariant={addAsVariant}
@@ -1340,11 +1390,20 @@
 	}
 
 	/* aria-disabled, not `disabled`: a keyboard user mid-lookup keeps the focus
-	   they had. The click guard in startLookup is what actually refuses. */
+	   they had. The click guard in startLookup is what actually refuses. The
+	   fill is --secondary, so the text is --foreground: the --muted-foreground
+	   pairing measures 3.96:1 in terracotta light (SONA-124 found the same). */
 	.lookup-pill[aria-disabled='true'] {
 		background: var(--secondary);
-		color: var(--muted-foreground);
+		color: var(--foreground);
 		cursor: default;
+	}
+
+	/* Neither pill is a .btn, so app.css's focus ring doesn't reach them. */
+	.lookup-pill:focus-visible,
+	.tile-lookup:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
 	}
 
 	.hint-warn {
@@ -1416,6 +1475,12 @@
 		flex-wrap: wrap;
 	}
 
+	/* A grid child's default min-width is its content, so a long pill would
+	   push the tile — and the document — wider than the viewport. */
+	.tile-nsfw-row {
+		min-width: 0;
+	}
+
 	.rating-tag {
 		font-family: var(--font-primary);
 		font-size: 11px;
@@ -1424,6 +1489,23 @@
 		border-radius: var(--radius-pill);
 		padding: 1px 8px;
 		white-space: nowrap;
+		max-width: 100%;
+	}
+
+	/* The tile is ~170px wide and the text grows with the number of sites, so
+	   the pill wraps inside the tile rather than spilling out of it. */
+	.tile-nsfw-row .rating-tag {
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+
+	/* Same story for the shared row once the column itself is narrow: one line
+	   of pill is worth less than a page that doesn't scroll sideways. */
+	@media (max-width: 480px) {
+		.rating-tag {
+			white-space: normal;
+			overflow-wrap: anywhere;
+		}
 	}
 
 	.field-label {
