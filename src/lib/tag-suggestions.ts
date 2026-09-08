@@ -77,12 +77,14 @@ type SuggestionBody = {
 	source?: unknown;
 };
 
-/** Characters a chip label never legitimately holds: C0 and C1 controls, the
- * bidirectional overrides and isolates that can reorder the text around them,
- * and the comma. A tag name comes back from an endpoint that read somebody
- * else's post, and the comma is the Tags field's own separator — left in, one
- * accepted tag would become two the moment `applyTo` joined the field back up. */
-const UNSAFE_LABEL_CHARS = /[\u0000-\u001f\u007f,\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+/** Characters a chip label never legitimately holds: C0 and C1 controls, every
+ * format character (\p{Cf} covers the bidirectional overrides and isolates that
+ * can reorder the text around them, and the zero-width joiners that make two
+ * labels look alike), the line and paragraph separators, and the comma. A tag
+ * name comes back from an endpoint that read somebody else's post, and the comma
+ * is the Tags field's own separator — left in, one accepted tag would become two
+ * the moment `applyTo` joined the field back up. */
+const UNSAFE_LABEL_CHARS = /[\u0000-\u001f\u007f,\p{Cf}\p{Zl}\p{Zp}]/gu;
 
 function cleanLabel(value: string): string {
 	return value.replace(UNSAFE_LABEL_CHARS, '');
@@ -147,7 +149,13 @@ export function fromResponse(
 	let skippedExisting = false;
 	for (const entry of raw) {
 		if (typeof entry !== 'string') continue;
-		const key = sanitizeTag(entry);
+		// The key is taken from the LABEL, not from the raw entry: the two
+		// disagree about the whitespace controls, which cleanLabel deletes and
+		// sanitizeTag hyphenates. Keyed off the raw entry, 'fox\tkit' and 'foxkit'
+		// get different keys and the same label, and the keyed {#each} over the
+		// chips throws each_key_duplicate.
+		const label = cleanLabel(entry);
+		const key = sanitizeTag(label);
 		if (!key) continue;
 		if (already.has(key)) {
 			skippedExisting = true;
@@ -156,7 +164,7 @@ export function fromResponse(
 		// The endpoint already dedupes, but the input is a response body.
 		if (seen.has(key)) continue;
 		seen.add(key);
-		tags.push(cleanLabel(entry));
+		tags.push(label);
 	}
 
 	const count = Number(payload.imageCount);

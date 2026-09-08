@@ -85,20 +85,27 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const shown = matches.slice(0, want);
 	// D1 takes at most 100 bound parameters in one query, and "Load more" grows
 	// the page past that, so the display fetch goes in chunks.
-	const details = new Map<number, Omit<SuggestRow, 'source'>>();
+	// The chunks are issued together rather than one after the other: they are
+	// independent reads, and the page's own order comes from `shown` below.
+	const chunks = [];
 	for (let from = 0; from < shown.length; from += ID_CHUNK) {
 		const ids = shown.slice(from, from + ID_CHUNK).map((row) => row.id);
-		const rows = await db
-			.select({
-				id: images.id,
-				title: images.title,
-				thumbnailUrl: images.thumbnailUrl,
-				imageUrl: images.imageUrl,
-				artistName: artists.name
-			})
-			.from(images)
-			.leftJoin(artists, eq(images.artistId, artists.id))
-			.where(inArray(images.id, ids));
+		chunks.push(
+			db
+				.select({
+					id: images.id,
+					title: images.title,
+					thumbnailUrl: images.thumbnailUrl,
+					imageUrl: images.imageUrl,
+					artistName: artists.name
+				})
+				.from(images)
+				.leftJoin(artists, eq(images.artistId, artists.id))
+				.where(inArray(images.id, ids))
+		);
+	}
+	const details = new Map<number, Omit<SuggestRow, 'source'>>();
+	for (const rows of await Promise.all(chunks)) {
 		for (const row of rows) details.set(row.id, row);
 	}
 

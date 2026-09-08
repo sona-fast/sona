@@ -176,10 +176,16 @@ describe('suggest-tags load', () => {
 		expect(data.rows).toHaveLength(130);
 
 		const display = queries.filter((q) => q.sql.includes('"title"'));
-		expect(display.length).toBeGreaterThan(1);
+		// Every chunk is issued: 130 ids at 90 per query. The chunks run together
+		// rather than one after the other, so this counts them and checks their
+		// coverage as a set; the page's order comes from the candidate scan, which
+		// the assertion below pins.
+		expect(display).toHaveLength(2);
 		for (const q of display) expect(q.params.length).toBeLessThanOrEqual(100);
-		// Between them the chunks cover the page, in order.
-		expect(display.flatMap((q) => q.params)).toEqual(data.rows.map((r) => r.id));
+		expect(new Set(display.flatMap((q) => q.params))).toEqual(
+			new Set(data.rows.map((r) => r.id))
+		);
+		expect(data.rows.map((r) => r.id)).toEqual([...data.rows.map((r) => r.id)].sort((a, b) => b - a));
 	});
 
 	it('stops at the scan ceiling and reports a total capped at it', async () => {

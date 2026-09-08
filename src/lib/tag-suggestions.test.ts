@@ -133,9 +133,34 @@ describe('fromResponse — a 200', () => {
 		// right-to-left override in it would reorder the text around the chip, and
 		// a comma is the Tags field's separator: applyTo would split the accepted
 		// tag into two the moment it joined the field back up.
-		const state = fromResponse(200, ok(['fo\u202Ex', 'bea\u0007ch', 'sea, sky']), []);
-		expect(state).toMatchObject({ kind: 'suggested', tags: ['fox', 'beach', 'sea sky'] });
-		expect(applyTo('', selectedTags(state))).toBe('fox, beach, sea sky');
+		// U+2028 and a zero-width joiner go the same way: a line separator breaks
+		// the chip row, and a joiner makes two different labels look identical.
+		const state = fromResponse(
+			200,
+			ok(['fo\u202Ex', 'bea\u0007ch', 'sea, sky', 'wo\u2028lf', 'de\u200Der']),
+			[]
+		);
+		expect(state).toMatchObject({
+			kind: 'suggested',
+			tags: ['fox', 'beach', 'sea sky', 'wolf', 'deer']
+		});
+		expect(applyTo('', selectedTags(state))).toBe('fox, beach, sea sky, wolf, deer');
+	});
+
+	it('keys a suggestion off its cleaned label, so two entries never share one chip', () => {
+		// cleanLabel deletes a tab; sanitizeTag would have turned it into a hyphen.
+		// Keyed off the raw entry the pair below produced two chips with the same
+		// label, and the keyed {#each} over them threw each_key_duplicate.
+		const state = fromResponse(200, ok(['foxkit', 'fox\tkit']), []);
+		expect(state).toMatchObject({ kind: 'suggested', tags: ['foxkit'] });
+	});
+
+	it('matches a field tag against the cleaned label too', () => {
+		// Same disagreement on the other side: 'fox\tkit' IS the 'foxkit' already
+		// in the field once the label is cleaned, so it is skipped rather than
+		// offered as a second copy of a tag the image has.
+		const state = fromResponse(200, ok(['fox\tkit', 'sea']), ['foxkit']);
+		expect(state).toMatchObject({ kind: 'suggested', tags: ['sea'], skippedExisting: true });
 	});
 
 	it('drops tags the Tags field already holds, matched the way the sanitizer does', () => {

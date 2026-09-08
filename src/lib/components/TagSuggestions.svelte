@@ -195,9 +195,9 @@
 		await tick();
 		pill?.focus();
 
-		// What the lookup went out with. A 422 is a refusal of THIS link, so the
-		// answer has to be checked against the field it came from; nothing keeps
-		// the URL past this call.
+		// What the lookup went out with. Every answer is an answer about THIS
+		// link, so it has to be checked against the field it came from; nothing
+		// keeps the URL past this call.
 		const asked = sourceUrl;
 		const { status, body } = await requestSuggestions({ sourcePostUrl: asked });
 
@@ -205,12 +205,19 @@
 		if (seq !== requestSeq) return;
 
 		const next = fromResponse(status, body, parseTagInput(value));
-		// The field moved on while the refusal was in flight. Showing it would
-		// leave the hint refusing a link that is no longer there, and the reset
-		// effect below has already run for that edit, so it would stay. Dropped
-		// instead: back to idle, with nothing announced about a link nobody can
-		// see any more.
-		if (next.kind === 'noSource' && sourceUrl !== asked) {
+		// The field moved on while the answer was in flight, and these three
+		// outcomes each describe the POST the lookup went out with: chips would be
+		// offered as tags for the post now in the field, with their rating driving
+		// the NSFW prompt; "found nothing" would be a verdict on a post nobody can
+		// see; and a refusal would leave the hint refusing a URL that is gone. The
+		// reset effect below has already run for that edit, so any of them would
+		// stay. Dropped instead: back to idle, nothing announced. The lookup
+		// FAILURES are kept — "the lookup failed" is true whatever the field now
+		// holds, and their tray reads the current field for what to offer next.
+		if (
+			sourceUrl !== asked &&
+			(next.kind === 'suggested' || next.kind === 'empty' || next.kind === 'noSource')
+		) {
 			suggestion = { kind: 'idle' };
 			announcement = '';
 			return;

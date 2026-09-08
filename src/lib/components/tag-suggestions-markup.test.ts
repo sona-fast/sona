@@ -286,3 +286,15 @@ describe('the backfill rows', () => {
 		expect(backfillPage).toMatch(/id="row-\{row\.id\}-help"/);
 	});
 });
+
+describe('the multi-tile hint sentence', () => {
+	it('adds what the extra sentence has to add, without restating the hint it follows', () => {
+		// It is appended to admin_tag_suggest_hint on the upload form, so a sentence
+		// about where suggestions come from would say that twice in one paragraph.
+		const en = JSON.parse(read('../../../messages/en.json')) as Record<string, string>;
+		expect(en.admin_tag_suggest_hint_first_tile).toBe(
+			'Accepted tags apply to every image in this upload.'
+		);
+		expect(en.admin_tag_suggest_hint_first_tile).not.toMatch(/source post/);
+	});
+});

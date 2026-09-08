@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { gotoAfterLogin, loginRetrying } from './admin-login';
+import { ENDPOINT, stubSuggestions } from './tag-suggestions-helpers';
 
 // The "Suggest tags" control on /admin/upload, end to end (SONA-220).
 //
@@ -16,15 +17,6 @@ import { gotoAfterLogin, loginRetrying } from './admin-login';
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
 const BSKY_POST = 'https://bsky.app/profile/kirin.example/post/3kq7x2abc';
-
-const ENDPOINT = '**/api/admin/tag-suggestions';
-
-/** Answer the lookup with one canned response. */
-async function stubSuggestions(page: Page, status: number, body: unknown) {
-	await page.route(ENDPOINT, (route: Route) =>
-		route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
-	);
-}
 
 const tagsInput = (page: Page) => page.locator('input[name="tags"]');
 const nsfwBox = (page: Page) => page.locator('input[name="nsfw"]');
@@ -643,6 +635,48 @@ test('a 422 that lands after the URL has been edited is dropped, not shown', asy
 		'aria-describedby',
 		'tags-hint'
 	);
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+});
+
+test('suggestions that land after the URL has been edited are dropped too', async ({ page }) => {
+	// Not only a refusal: chips that land after the field moved on would be
+	// offered as tags for the post now in the field, and their rating would drive
+	// the NSFW prompt — from a lookup of a post the operator has replaced.
+	await openUploadForm(page);
+	let release = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(ENDPOINT, async (route: Route) => {
+		await held;
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				source: 'bluesky',
+				tags: ['mammal', 'canine', 'fox'],
+				rating: 'explicit',
+				imageCount: 1
+			})
+		});
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-spin')).toBeVisible();
+	await page.fill(
+		'input[name="sourcePostUrl"]',
+		'https://bsky.app/profile/kirin.example/post/3kq7x2def'
+	);
+	release();
+
+	// Back to idle: no chips, the ordinary hint, nothing announced, and no NSFW
+	// prompt from a rating that belongs to the other post.
+	await expect(page.locator('.tag-spin')).toHaveCount(0);
+	await expect(page.locator('.tag-chip')).toHaveCount(0);
+	await expect(page.locator('#tags-hint')).toContainText(
+		'Suggestions come from entail.dev, which reads the source post.'
+	);
+	await expect(liveRegion(page)).toHaveText('');
+	await expect(markNsfw(page)).toHaveCount(0);
+	await expect(tagsInput(page)).toHaveValue('');
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });
 

@@ -1,5 +1,6 @@
-import { test, expect, type Locator, type Page, type Route } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { gotoAfterLogin, gotoRetrying, loginRetrying } from './admin-login';
+import { ENDPOINT, stubSuggestions } from './tag-suggestions-helpers';
 
 // The tag backfill list at /admin/images/suggest-tags, end to end (SONA-220).
 //
@@ -16,8 +17,6 @@ import { gotoAfterLogin, gotoRetrying, loginRetrying } from './admin-login';
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e-uploadthing.toml.
 const PASSWORD = 'e2e-admin-password';
-const ENDPOINT = '**/api/admin/tag-suggestions';
-
 // The seed (tests/e2e/fixtures/seed.sql) lists 23 untagged images with a post
 // URL, ids 101–123, newest first. One page is 20 rows. The total is READ from
 // the page rather than pinned at 23: the save tests below take their rows off
@@ -26,12 +25,6 @@ const PAGE = 20;
 const BSKY_POST = 'https://bsky.app/profile/kirin.example/post/3kq7x2abc';
 
 test.describe.configure({ mode: 'serial' });
-
-async function stubSuggestions(page: Page, status: number, body: unknown) {
-	await page.route(ENDPOINT, (route: Route) =>
-		route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
-	);
-}
 
 /** The image ids the list is showing, newest first. The seeded titles carry
  * the id, which is the only place a row exposes it. */
@@ -52,6 +45,11 @@ async function clickSuggest(page: Page, title: string) {
 		await target.getByRole('button', { name: `Suggest tags for ${title}` }).click();
 		await expect(target.locator('.tag-eyebrow')).toBeVisible({ timeout: 1500 });
 	}).toPass();
+	// The retried click can leave a same-URL navigation still landing, and the
+	// re-render that lands with it detaches the tray's buttons under a click that
+	// has already resolved its element. Settle the page before the caller acts on
+	// the tray.
+	await page.waitForLoadState('networkidle');
 	return target;
 }
 
@@ -293,6 +291,7 @@ test('Save writes the tags and the row shows the saved line and static chips', a
 	});
 
 	const target = await clickSuggest(page, 'Backfill 119');
+	await expect(target.locator('.tag-chip')).toHaveCount(3);
 	await target.getByRole('button', { name: 'window' }).click();
 	await target.getByRole('button', { name: 'Save 2 tags to Backfill 119' }).click();
 

@@ -186,6 +186,28 @@ test('a multi-file batch uploads sequentially within the batch — one in-flight
 	expect(uploads.counters.peak).toBe(1);
 });
 
+test('the Tags hint says accepted tags cover the batch only while the batch has two tiles', async ({
+	page
+}) => {
+	// The upload form stages one set of tags for every tile it saves, so the hint
+	// carries an extra sentence about that once a second tile exists (SONA-220).
+	// The sentence rides on the ordinary hint, which needs a post URL in the
+	// field to be the ordinary hint at all.
+	const BATCH = 'Accepted tags apply to every image in this upload.';
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/upload');
+	await page.fill('input[name="sourcePostUrl"]', 'https://bsky.app/profile/e2e.example/post/3kq7x');
+
+	// One tile: the hint is the ordinary sentence alone.
+	await stageFiles(page, [{ name: 'e2e-hint-1.png', mimeType: 'image/png', buffer: PNG }], 1);
+	await expect(page.locator('#tags-hint')).toContainText('Suggestions come from entail.dev');
+	await expect(page.locator('#tags-hint')).not.toContainText(BATCH);
+
+	// A second tile joins the batch and the sentence appears.
+	await stageFiles(page, [{ name: 'e2e-hint-2.png', mimeType: 'image/png', buffer: PNG }], 2);
+	await expect(page.locator('#tags-hint')).toContainText(BATCH);
+});
+
 // A file one byte over the 64 MiB cap. Payload buffers are capped at 50 MB by
 // Playwright, so oversized files go via a path; ftruncate keeps them sparse (no
 // 64 MiB actually written).
