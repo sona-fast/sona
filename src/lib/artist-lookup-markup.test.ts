@@ -600,13 +600,19 @@ describe('what the lookup copy names', () => {
 		expect(ja.admin_lookup_gone_body).toContain('もうありません');
 	});
 
-	// Two bare verbs stacked ("Choose Use {name}"), and "change" was wrong for an
-	// edit-page image that has no artist yet.
-	it('says what the Use button does rather than telling the operator to choose it', () => {
-		expect(en.admin_lookup_status_artist_hint).toBe('Use {name} sets the artist.');
+	// The hint is the Use button's own aria-describedby, so restating the label
+	// ("Use {name} sets the artist.") both stutters when spoken and garden-paths
+	// on screen, where "Use {name}" reads as an imperative first. It says what
+	// the control does instead. "change" was wrong for an image with no artist.
+	it('says what the Use button does rather than restating its label', () => {
+		expect(en.admin_lookup_status_artist_hint).toBe('Sets the artist to {name}.');
 		expect(en.admin_lookup_status_artist_hint).not.toMatch(/Choose|change/);
+		// The label itself ("Use {name}") is not repeated in its own description.
+		expect(en.admin_lookup_status_artist_hint).not.toMatch(/Use \{name\}/);
 		expect(ja.admin_lookup_status_artist_hint).toContain('{name}');
 		expect(ja.admin_lookup_status_artist_hint).not.toContain('変える');
+		// Same in ja: no quoted copy of the button label 「{name}を使う」.
+		expect(ja.admin_lookup_status_artist_hint).not.toContain('を使う');
 	});
 
 	// One "Remove file" per tile told a screen-reader user nothing about WHICH
@@ -654,6 +660,19 @@ describe('focus after the panel goes away', () => {
 		expect(EDIT).toMatch(/function addAsVariant[\s\S]{0,1000}?parentSelect\?\.focus\(\)/);
 	});
 
+	// That select is a focus destination carrying an option this page never
+	// loaded, so it has to say what it is. The fieldset legend names the group,
+	// not the field (4.1.2, 3.3.2); the edit page's own parent select is
+	// labelled "Variant of" and this one now matches it.
+	it('names the upload page parent select the way the edit page names its own', () => {
+		expect(UPLOAD).toMatch(
+			/<label for="existing-parent-select">\{m\.admin_field_variant_of\(\)\}<\/label>\s*\n\s*<select[\s\S]{0,200}?id="existing-parent-select"/
+		);
+		expect(EDIT).toMatch(
+			/<span>\{m\.admin_field_variant_of\(\)\}<\/span>\s*\n\s*<select[\s\S]{0,120}?name="parentImageId"/
+		);
+	});
+
 	// The options were built at page load. A clash piece uploaded in another tab
 	// since then matches none of them, so the select fell back to blank with the
 	// panel already closed and the save stored no parent at all.
@@ -697,6 +716,16 @@ describe('focus after the panel goes away', () => {
 
 	it('gives the dialog its opener back', () => {
 		expect(DIALOG).toMatch(/onDestroy\([\s\S]{0,120}?opener\?\.isConnected[\s\S]{0,60}?focus\(\)/);
+	});
+
+	// "Use {name}" and "Using {name}" are two branches of the same snippet, so
+	// applying destroys the button the operator is standing on. It lives in the
+	// panel, so both pages and both action rows get the landing spot (2.4.3).
+	it('lands on the applied button after Use, from the panel itself', () => {
+		expect(PANEL).toMatch(
+			/onclick=\{async \(\) => \{\s*\n\s*onuseartist\(artist\);[\s\S]{0,500}?await tick\(\);\s*\n\s*document\.getElementById\('lookup-applied-artist'\)\?\.focus\(\);/
+		);
+		expect(PANEL).toMatch(/import \{ tick \} from 'svelte';/);
 	});
 });
 

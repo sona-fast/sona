@@ -4,6 +4,7 @@
 	// operator chose; it owns no form fields of its own — every prefill and every
 	// artist change happens in the page, so the two pages keep their own idea of
 	// what "empty" means and what a click may overwrite.
+	import { tick } from 'svelte';
 	import { Check, Globe, Info, Loader2 } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 	import FurAffinityIcon from '$lib/components/icons/FurAffinityIcon.svelte';
@@ -448,7 +449,16 @@
 						type="button"
 						class="btn {primary ? 'btn-primary' : 'btn-secondary'}"
 						aria-describedby={artistHintShown ? 'lookup-artist-hint' : undefined}
-						onclick={() => onuseartist(artist)}
+						onclick={async () => {
+							onuseartist(artist);
+							// Applying swaps this button for the "Using {name}" one above,
+							// and the two branches compile to separate fragments: the
+							// button the operator is standing on is destroyed, so without
+							// this focus lands on <body> and the next Tab restarts at the
+							// top of the page (2.4.3). Both pages get it from here.
+							await tick();
+							document.getElementById('lookup-applied-artist')?.focus();
+						}}
 					>
 						{m.admin_lookup_use_artist({ name: artist.name })}
 					</button>

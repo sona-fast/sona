@@ -883,7 +883,18 @@
 				<span>{m.admin_variant_group_existing()}</span>
 			</label>
 			{#if groupMode === 'existing'}
-				<select class="input" bind:this={existingParentSelect} bind:value={existingParentId} required>
+				<!-- Named like the edit page's own parent select: the legend names the
+				     group, not this field, and "Add as a variant" now pushes an option
+				     in and lands focus here, so a screen reader would otherwise read
+				     the clash title with nothing saying what holds it (4.1.2, 3.3.2). -->
+				<label for="existing-parent-select">{m.admin_field_variant_of()}</label>
+				<select
+					class="input"
+					id="existing-parent-select"
+					bind:this={existingParentSelect}
+					bind:value={existingParentId}
+					required
+				>
 					<option value="">{m.admin_variant_pick_parent()}</option>
 					{#each parentOptions as candidate}
 						<option value={String(candidate.id)}>{candidate.title}</option>
@@ -1329,6 +1340,14 @@
 	.tile-remove:hover {
 		background: var(--destructive);
 		color: var(--destructive-foreground);
+	}
+
+	/* Not a .btn, and app.css has no bare button:focus-visible rule, so removing
+	   a tile would land focus on the next Remove wearing only the user-agent
+	   ring — over an arbitrary image, on a chip that is 60% black (2.4.7). */
+	.tile-remove:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
 	}
 
 	.tile-meta {

@@ -262,11 +262,48 @@ test.describe('with a key saved', () => {
 
 		await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+		// The swap destroys the button that was just clicked, so without a landing
+		// spot focus falls to <body> and the next Tab restarts at the top (2.4.3).
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeFocused();
 
 		// Back to the empty option: the panel stops claiming its artist is in use.
 		await page.selectOption('select[name="artistId"]', '');
 		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toHaveCount(0);
+	});
+
+	// The clash row renders the same Use button from the same snippet, so it
+	// destroys its own button too. The landing spot lives in the panel rather
+	// than in either page, which is what makes both rows behave the same.
+	test('Use under a clash lands focus on the applied button too', async ({ page }) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				sourceClash: {
+					imageId: 1,
+					title: 'Test Image',
+					isVariant: false,
+					parentImageId: null,
+					variantCount: 0,
+					thumbnailUrl: null,
+					artistName: 'Test Artist',
+					uploadedAt: '2026-07-01T00:00:00.000Z',
+					width: 1200,
+					height: 900
+				}
+			})
+		);
+		await oneDoneTile(page);
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		// The clash row's own action is there, so this is the clash branch and not
+		// the plain "existing artist" one.
+		await expect(panel(page).getByRole('button', { name: 'Add as a variant' })).toBeVisible();
+
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeFocused();
 	});
 
 	test('the rating shows beside NSFW without touching the checkbox', async ({ page }) => {
@@ -1044,8 +1081,10 @@ test.describe('with a key saved', () => {
 		await panel(page).getByRole('button', { name: 'Add as a variant' }).click();
 
 		// The panel closed and the group switched to "a variant of an existing
-		// piece", so this select is what the save reads the parent from.
-		const parent = page.locator('.group-section select');
+		// piece", so this select is what the save reads the parent from. Found by
+		// its accessible name: focus lands here with an option this page never
+		// loaded, and a screen reader has to be able to say what field holds it.
+		const parent = page.getByRole('combobox', { name: 'Variant of' });
 		await expect(parent).toHaveValue('999');
 		await expect(parent.locator('option[value="999"]')).toHaveText('Uploaded In Another Tab');
 		await expect(page.locator('input[name="existingParentId"]')).toHaveValue('999');
