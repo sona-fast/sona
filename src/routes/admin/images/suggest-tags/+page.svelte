@@ -127,13 +127,13 @@
 		pills[id]?.focus();
 	}
 
-	/** Save with nothing picked. Blanked first for the reason the failure branch
-	 *  blanks: a repeat click writes the sentence the region already holds, and an
-	 *  unchanged region announces nothing. */
-	async function refuseEmptySave(title: string) {
+	/** Say a sentence the region may already be holding. Blanked first: a repeat
+	 *  of the same sentence is not a change, and an unchanged region announces
+	 *  nothing. The tick lets the emptying reach the DOM. */
+	async function reannounce(title: string, body: string) {
 		announcement = '';
 		await tick();
-		announce(title, m.admin_suggest_tags_save_needs_tag());
+		announce(title, body);
 	}
 
 	function setSaving(id: number, on: boolean) {
@@ -339,7 +339,7 @@
 					<form
 						method="POST"
 						action="?/save"
-						use:enhance={({ cancel }) => {
+						use:enhance={({ cancel, formElement }) => {
 							// The buttons are aria-disabled rather than disabled, so a click
 							// still reaches the form. Refuse it here: a second save while one
 							// is in flight, and a save with nothing picked, both do nothing.
@@ -349,9 +349,17 @@
 								// the button stays where it was and the row does not move. Say
 								// what to do first. A refusal during a save says nothing — the
 								// region already holds the Saving sentence.
-								if (chosen.length === 0) refuseEmptySave(row.title);
+								if (chosen.length === 0 && !saving.has(row.id))
+									reannounce(row.title, m.admin_suggest_tags_save_needs_tag());
 								return;
 							}
+							// The label narrows from "Save 3 tags" to "Saving" for the round
+							// trip, and a narrower button pulls Dismiss left out from under the
+							// pointer that just pressed Save. Hold the width the resting label
+							// gave it — measured rather than guessed, since the widest label
+							// differs by locale and by count.
+							const button = formElement.querySelector('button[type="submit"]');
+							if (button instanceof HTMLElement) button.style.minWidth = `${button.offsetWidth}px`;
 							setSaving(row.id, true);
 							setFailure(row.id, false);
 							const accepted = chosen;
@@ -361,6 +369,8 @@
 							announce(row.title, m.admin_suggest_tags_saving({ count: chosen.length }));
 							return async ({ result }) => {
 								setSaving(row.id, false);
+								// The resting label is back, so the button sizes itself again.
+								if (button instanceof HTMLElement) button.style.minWidth = '';
 								const { [row.id]: _dropped, ...rest } = states;
 								if (result.type === 'failure' && result.data?.error === 'tagged_elsewhere') {
 									// Another tab or the edit form tagged this image since the
@@ -397,12 +407,7 @@
 									// the row has to show that nothing landed, not only say it
 									// into the live region.
 									setFailure(row.id, true);
-									// Blanked first: a repeat of the same failure writes the
-									// sentence the region already holds, and an unchanged region
-									// announces nothing. The tick lets the emptying reach the DOM.
-									announcement = '';
-									await tick();
-									announce(row.title, m.admin_suggest_tags_save_failed());
+									await reannounce(row.title, m.admin_suggest_tags_save_failed());
 									// The sentence that says what happened is where the operator
 									// resumes, the way the sibling branches land focus.
 									statusLines[row.id]?.focus();

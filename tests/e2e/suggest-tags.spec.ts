@@ -207,6 +207,32 @@ test("a row's Suggest renders chips, and leaving one out changes the Save count"
 		'Backfill 120. Pick at least one tag to save.'
 	);
 	expect(saveCalls).toBe(0);
+
+	// Every value the region takes from here on, in order: the second refusal
+	// writes the sentence the region already holds, and a text node that never
+	// changes is a mutation Playwright cannot poll for after the fact.
+	await page.evaluate(() => {
+		const region = document.querySelector('p.sr-only[role="status"]');
+		const seen: string[] = [];
+		(window as unknown as { __regionLog: string[] }).__regionLog = seen;
+		new MutationObserver(() => seen.push(region?.textContent ?? '')).observe(region!, {
+			childList: true,
+			characterData: true,
+			subtree: true
+		});
+	});
+	await save.dispatchEvent('click');
+	// Blanked between the two identical sentences, so the second one is a change
+	// the live region announces rather than a no-op.
+	await expect
+		.poll(() =>
+			page
+				.evaluate(() => (window as unknown as { __regionLog: string[] }).__regionLog)
+				.then((log) => log.slice(-2))
+		)
+		.toEqual(['', 'Backfill 120. Pick at least one tag to save.']);
+	expect(saveCalls).toBe(0);
+
 	// Nothing left the page and nothing left the tray: every chip is still there
 	// to pick from.
 	await expect(chips).toHaveCount(4);
@@ -460,6 +486,10 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 	// what is under test here and changes while the save runs.
 	const save = target.locator('form.tag-actions button[type="submit"]');
 	await expect(save).toHaveAttribute('aria-label', 'Save 1 tag to Backfill 112');
+	// Measured before the save starts: the refused state draws a real border, and
+	// a border appearing from nothing would widen Dismiss and shove the row.
+	const dismiss = target.getByRole('button', { name: 'Dismiss suggestions for Backfill 112' });
+	const restBox = await dismiss.boundingBox();
 	// Focused first: Firefox on macOS does not focus a button on mousedown, and
 	// what is under test is that the save does not take focus away.
 	await save.focus();
@@ -476,7 +506,7 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 	await expect(save.locator('.tag-spin')).toBeVisible();
 	// And the label says so rather than still offering a count the click already
 	// took. The name it reads out keeps the row's title, the way the pill's does.
-	await expect(save).toHaveText('Saving…');
+	await expect(save).toHaveText('Saving');
 	await expect(save).toHaveAttribute('aria-label', 'Saving tags for Backfill 112');
 	// And the region says what the button is doing, rather than still holding the
 	// sentence from before the click.
@@ -484,7 +514,6 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 		'Backfill 112. Saving 1 tag.'
 	);
 
-	const dismiss = target.getByRole('button', { name: 'Dismiss suggestions for Backfill 112' });
 	await expect(dismiss).toHaveAttribute('aria-disabled', 'true');
 	// The refused text button reads as refused the same way Save beside it does —
 	// same fill, same label colour, same outline — so the two are one state on a
@@ -499,6 +528,14 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 	await dismiss.hover();
 	await expect(dismiss).toHaveCSS('color', inertLabel);
 	await expect(dismiss).toHaveCSS('background-color', await cssVarColor(page, '--secondary'));
+	// The refused border is drawn over the transparent one the rest rule reserves,
+	// so Dismiss is the same size mid-save as it was before the click. And Save
+	// holds its resting width while its label narrows, so Dismiss does not slide
+	// left out from under the pointer that just pressed Save either.
+	const savingBox = await dismiss.boundingBox();
+	expect(savingBox?.width).toBeCloseTo(restBox!.width, 1);
+	expect(savingBox?.height).toBeCloseTo(restBox!.height, 1);
+	expect(savingBox?.x).toBeCloseTo(restBox!.x, 1);
 	const pill = target.getByRole('button', { name: 'Suggest tags for Backfill 112' });
 	await expect(pill).toHaveAttribute('aria-disabled', 'true');
 	// Dispatched rather than clicked: Playwright waits for an aria-disabled
@@ -660,6 +697,34 @@ test('an expanded row drops its indent on a phone, where the head wraps', async 
 
 	const target = await clickSuggest(page, 'Backfill 114');
 	await expect(target.locator('.tag-eyebrow')).toHaveCSS('margin-left', '0px');
+
+	// Stacked, Save spans the tray and Dismiss sits under it. The inert fill the
+	// refused controls share on one line would draw a short pill orphaned at the
+	// left edge here, so Dismiss stays text-only while it refuses and the label
+	// colour is what says so.
+	let release: (() => void) | undefined;
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(savePost, async (route) => {
+		await held;
+		await route.fulfill({
+			status: 404,
+			contentType: 'application/json',
+			body: SAVE_NOT_FOUND
+		});
+	});
+	const save = target.locator('form.tag-actions button[type="submit"]');
+	await save.click();
+	const dismiss = target.getByRole('button', { name: 'Dismiss suggestions for Backfill 114' });
+	await expect(dismiss).toHaveAttribute('aria-disabled', 'true');
+	await expect(dismiss).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+	await expect(dismiss).toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
+	// The label still carries the mix the refused Save beside it carries: that is
+	// the whole of the refused cue once the fill is gone.
+	await expect(dismiss).toHaveCSS('color', await save.evaluate((el) => getComputedStyle(el).color));
+
+	release!();
+	await expect(target.locator('.tag-eyebrow.warn')).toHaveText('Not saved');
+	await page.unroute(savePost);
 });
 
 test('the edit page re-seeds its fields when a client-side navigation swaps the image', async ({ page }) => {

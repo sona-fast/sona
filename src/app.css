@@ -937,6 +937,18 @@ a.tag-pill {
 	.tag-actions .tag-btn-text {
 		padding-left: 0;
 	}
+
+	/* Refused, stacked. The inert fill is a shared state on one line, where the
+	   three refused controls sit side by side; stacked under a Save that spans
+	   the tray, the same fill draws a 67px pill orphaned at the left edge. So
+	   Dismiss stays the quiet text action it is at rest here, and the label mix
+	   is what says it is refused. border-color rather than border: the 1px is
+	   still reserved, so nothing shifts when the save starts. */
+	.tag-actions .tag-btn-text[aria-disabled='true'],
+	.tag-actions .tag-btn-text[aria-disabled='true']:hover {
+		background: none;
+		border-color: transparent;
+	}
 }
 
 /* The loader turns while a lookup or a save runs; a spinner that never stops

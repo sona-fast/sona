@@ -174,14 +174,37 @@ describe('the backfill rows', () => {
 		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_searching\(\{ title: row\.title \}\)/);
 		// Try again is not the same action as Suggest, so it is not named like it.
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_try_again\(\{ title: row\.title \}\)\}/);
-		// And Save reads "Saving…" while its own save runs, so its name follows the
-		// same way the pill's does.
+		// And Save reads "Saving" while its own save runs, so its name follows the
+		// same way the pill's does — and contains the visible label, which is why
+		// neither carries an ellipsis.
 		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_save_label\(\{/);
 		expect(backfillPage).toMatch(
 			/m\.admin_suggest_tags_row_saving_label\(\{ title: row\.title \}\)/
 		);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_dismiss\(\{ title: row\.title \}\)\}/);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_edit_image_label\(\{ title: row\.title \}\)\}/);
+	});
+
+	it('holds the Save button width while the label narrows to "Saving"', () => {
+		// The label shrinks for the round trip, and a narrower button pulls Dismiss
+		// left out from under the pointer that just pressed Save. The resting width
+		// is measured rather than guessed: the widest label differs by locale.
+		expect(backfillPage).toMatch(
+			/button\.style\.minWidth = `\$\{button\.offsetWidth\}px`/
+		);
+		expect(backfillPage).toMatch(/button\.style\.minWidth = ''/);
+	});
+
+	it('keeps the visible saving label inside the accessible name, in every locale', () => {
+		// WCAG 2.5.3 label in name: speech input picks the button by what it can
+		// read on it, so an accessible name that drops the visible word leaves the
+		// button unspeakable. An ellipsis on one side and not the other breaks it.
+		for (const locale of ['en', 'ja']) {
+			const messages = JSON.parse(read(`../../../messages/${locale}.json`)) as Record<string, string>;
+			expect(messages.admin_suggest_tags_row_saving_label).toContain(
+				messages.admin_suggest_tags_row_saving_short
+			);
+		}
 	});
 
 	it('marks the edit link\'s pencil decorative, since the link is named for its image', () => {

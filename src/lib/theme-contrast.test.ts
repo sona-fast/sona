@@ -996,6 +996,39 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		);
 	});
 
+	// Stacked under a full-width Save, that shared fill would be a short pill
+	// orphaned at the left edge, so the phone breakpoint drops it and leaves the
+	// label mix as the only refused cue. The mix is made against --secondary, so
+	// measure it where it actually lands there: on the card.
+	it('drops the refused Dismiss fill on a phone, where the label carries the state alone', () => {
+		const rule = css.match(
+			/\.tag-actions \.tag-btn-text\[aria-disabled='true'\],\n\t\.tag-actions \.tag-btn-text\[aria-disabled='true'\]:hover\s*\{([^}]*)\}/
+		)?.[1];
+		if (!rule) throw new Error('the phone-width refused Dismiss rule is missing from app.css');
+		expect(rule).toMatch(/background:\s*none\s*;/);
+		// border-color, not border: the 1px stays reserved so nothing shifts.
+		expect(rule).toMatch(/border-color:\s*transparent\s*;/);
+	});
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: the refused Dismiss label meets 4.5:1 on the card it sits on there`, () => {
+			const card = blockToken(sel, 'card');
+			const label = mix2(blockToken(sel, 'foreground'), disabledMix, blockToken(sel, 'secondary'));
+			expect(contrast(label, card)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+
+	// The refused state draws a real border. The rest rule reserves the same 1px
+	// as a transparent one, so the border appearing mid-save does not widen
+	// Dismiss and shove the row; the radius rides along so the visible border is
+	// the capsule the buttons beside it wear.
+	it('the resting Dismiss button reserves the refused border and its capsule', () => {
+		const rule = css.match(/^\.tag-btn-text\s*\{([^}]*)\}/m)?.[1];
+		if (!rule) throw new Error('the .tag-btn-text rest rule is missing from app.css');
+		expect(rule).toMatch(/border:\s*1px solid transparent\s*;/);
+		expect(rule).toMatch(/border-radius:\s*var\(--radius-pill\)\s*;/);
+	});
+
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			const border = name.endsWith('light') ? linkColor : (s: string) => blockToken(s, 'primary');
