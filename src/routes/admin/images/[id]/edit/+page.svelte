@@ -441,8 +441,12 @@
 						if (wasExisting && seededNothing) announcer.say(m.admin_lookup_announce_new_form());
 						// The form was already open and its fields hold the operator's own
 						// values, so this click wrote nothing anywhere. Say that instead of
-						// leaving the click unanswered.
-						else if (seededNothing && seed.handle)
+						// leaving the click unanswered. Judged on the name field rather than
+						// on the handle: the no_match action carries no handle and so can
+						// write nothing at all, and that click went unanswered too. An empty
+						// name field is the one case this sentence would be false in, and
+						// there the focus move below is the answer.
+						else if (seededNothing && artistName.trim() !== '')
 							announcer.say(m.admin_lookup_announce_seed_kept());
 						// Nothing landed in the name field, and both sentences above tell the
 						// operator to type it — so that is where focus goes.

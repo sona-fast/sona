@@ -539,6 +539,21 @@ describe('seedStatusKind', () => {
 		// A field the seed never wrote cannot be edited-since; the flag is inert.
 		expect(seedStatusKind({ artistName: 'k' }, { profileUrl: true })).toBe('name_only');
 	});
+
+	// Round 13 asked for an announcement when a second add-new click refills a
+	// field the operator cleared, on the grounds that the merged record still
+	// reads 'both' and the panel's sentence therefore does not change. It does
+	// change: clearing the field drops its "From lookup" tag, which is what the
+	// edited-since flag reads, so the kind falls to the other field's and the
+	// refill lifts it back. The panel body is an atomic role="status", so that
+	// swap is the announcement — a second one would say the same thing twice.
+	it('changes when a cleared field is seeded again, so the sentence changes with it', () => {
+		const seed = { artistName: 'k', profileUrl: 'u' };
+		// The operator clears the name: its tag goes, so the sentence claims the link.
+		expect(seedStatusKind(seed, { artistName: true })).toBe('link_only');
+		// The next click writes the name back and re-tags it.
+		expect(seedStatusKind(seed, {})).toBe('both');
+	});
 });
 
 describe('matchForArtist', () => {

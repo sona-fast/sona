@@ -786,10 +786,14 @@ describe('what a lookup says out loud', () => {
 
 	// The form was already open and holds the operator's own values, so the
 	// click wrote nothing anywhere and the panel's status line says nothing.
+	// Keyed on the name field, not on the handle: the no_match action carries no
+	// handle, and a repeat click on it wrote nothing and said nothing either.
 	it('says so when the click filled nothing because the fields were taken', () => {
 		expect(EDIT).toMatch(
-			/else if \(seededNothing && seed\.handle\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_seed_kept\(/
+			/else if \(seededNothing && artistName\.trim\(\) !== ''\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_seed_kept\(/
 		);
+		// The old handle test left the empty-handle click unanswered.
+		expect(EDIT).not.toContain('else if (seededNothing && seed.handle)');
 	});
 
 	// Both sentences tell the operator to type the name, so that is where focus

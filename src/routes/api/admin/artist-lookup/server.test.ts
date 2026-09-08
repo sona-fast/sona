@@ -874,6 +874,11 @@ describe('artist-lookup — after the search', () => {
 	// this file, not an upstream outage, and reporting it as one hides it: the
 	// operator is told FuzzySearch is down and nothing is logged anywhere. A
 	// match with no handles array is the cheapest way to make that code throw.
+	//
+	// That shape is synthetic: normalizeMatch in fuzzysearch.ts guards handles
+	// with Array.isArray, so a real client response can never reach the mapping
+	// without one. This test says what happens if the mapping throws, NOT that
+	// the guard is redundant — do not relax it on the strength of this test.
 	it('does not report a fault in its own mapping as an upstream outage', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		searchImage.mockResolvedValue({
