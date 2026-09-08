@@ -63,6 +63,9 @@ export function readTagInput(raw: string): {
 export async function replaceImageTags(db: Db, imageId: number, tagNames: string): Promise<string[]> {
 	await db.delete(imageTags).where(eq(imageTags.imageId, imageId));
 
+	// An empty field still deletes: clearing the Tags box on the edit form is how
+	// an image loses its tags. A caller with nothing to delete — a just-inserted
+	// image — skips this function instead.
 	if (!tagNames) return [];
 
 	const written: string[] = [];

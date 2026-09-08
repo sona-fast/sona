@@ -39,7 +39,22 @@ function makeDb() {
 		);
 	`);
 	const d1 = makeD1(sqlite);
-	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
+	// Every statement the action runs, so a test can assert which writes an
+	// upload issues rather than only what ends up stored.
+	const queries: string[] = [];
+	const prepare = d1.prepare.bind(d1);
+	const logged = {
+		...d1,
+		prepare: (sql: string) => {
+			queries.push(sql);
+			return prepare(sql);
+		}
+	} as unknown as typeof d1;
+	return {
+		db: drizzle(logged, { schema }),
+		platform: { env: { DB: logged } } as unknown as App.Platform,
+		queries
+	};
 }
 
 // The upload action ends in redirect(302, …), which throws; swallow it.
@@ -126,6 +141,27 @@ describe('admin upload — tag cap', () => {
 });
 
 describe('admin upload — tags that are accepted', () => {
+	it('issues no tag delete when the Tags field is empty', async () => {
+		// The shared write opens with a delete, which is what clearing the field on
+		// the edit form needs. A just-inserted image has nothing to delete, and a
+		// variant set would run one such delete per tile.
+		const { platform, queries } = makeDb();
+
+		await callDefault({
+			request: form({
+				count: '2',
+				imageUrl_0: 'https://cdn.example.com/a.png',
+				imageUrl_1: 'https://cdn.example.com/b.png',
+				title: 'No Tags',
+				artistId: '1',
+				tags: ''
+			}),
+			platform
+		});
+
+		expect(queries.some((sql) => /delete from "image_tags"/i.test(sql))).toBe(false);
+	});
+
 	it('writes the sanitized, de-duplicated names to the new image', async () => {
 		// The upload writes through replaceImageTags, the same call the edit form and
 		// the Suggest tags page use. Without a successful upload here, dropping that

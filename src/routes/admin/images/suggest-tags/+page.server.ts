@@ -47,8 +47,13 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// query string is not an error page: anything that is not a whole number
 	// above zero reads as the first page. (Math.max alone would let NaN through
 	// and slice the list down to nothing.)
+	// Clamped above as well: the scan stops at MAX_SCAN, so more pages than that
+	// covers can only inflate the Load more link's next number without adding a
+	// row.
 	const asked = Math.floor(Number(url.searchParams.get('pages') || 1));
-	const pages = Number.isFinite(asked) ? Math.max(1, asked) : 1;
+	const pages = Number.isFinite(asked)
+		? Math.min(Math.max(1, asked), Math.ceil(MAX_SCAN / PER_PAGE))
+		: 1;
 	const want = pages * PER_PAGE;
 
 	// Images with at least one tag row; everything else is a candidate.

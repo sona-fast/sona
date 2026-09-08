@@ -697,8 +697,10 @@
 
 	/* Everything the row expands into lines up with the title rather than with
 	   the card's padding: 56px of thumbnail plus the 12px row gap. The empty card
-	   has no thumbnail to clear. */
-	.rowcard:not(.empty) > :not(.rowhead) {
+	   has no thumbnail to clear. The chip row is a child component, so scoping
+	   never reaches its root element and it needs naming through :global. */
+	.rowcard:not(.empty) > :not(.rowhead),
+	.rowcard:not(.empty) > :global(.tag-chiprow) {
 		margin-left: 68px;
 	}
 
@@ -722,7 +724,8 @@
 
 	@media (max-width: 640px) {
 		/* The head wraps here, so there is no thumbnail column to line up with. */
-		.rowcard:not(.empty) > :not(.rowhead) {
+		.rowcard:not(.empty) > :not(.rowhead),
+		.rowcard:not(.empty) > :global(.tag-chiprow) {
 			margin-left: 0;
 		}
 

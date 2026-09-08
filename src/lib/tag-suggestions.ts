@@ -220,9 +220,10 @@ export function trayFor(state: SuggestionState): Tray {
 			return {
 				title: m.admin_tag_suggest_empty_title(),
 				// Everything it returned was already in the field, so "found nothing"
-				// would be a lie about the post. Say what actually happened instead.
+				// would be a lie about the post. Say what actually happened instead,
+				// rather than restating the policy line that sits under the chips.
 				body: state.skippedExisting
-					? m.admin_tag_suggest_help_existing()
+					? m.admin_tag_suggest_empty_existing_body()
 					: m.admin_tag_suggest_empty_body(),
 				warn: false,
 				retry: false

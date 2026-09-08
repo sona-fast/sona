@@ -1789,6 +1789,7 @@
 	"admin_tag_suggest_bad_link_body": "Sona can't look up this link. Check the source post URL.",
 	"admin_tag_suggest_empty_title": "No tags to suggest",
 	"admin_tag_suggest_empty_body": "entail.dev read the post but found nothing it's confident about.",
+	"admin_tag_suggest_empty_existing_body": "entail.dev only returned tags that are already in the Tags field.",
 	"admin_tag_suggest_rated_safe": "Rated safe by entail.dev.",
 	"admin_tag_suggest_rated_questionable": "Rated questionable by entail.dev.",
 	"admin_tag_suggest_rated_explicit": "Rated explicit by entail.dev.",

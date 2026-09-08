@@ -73,15 +73,22 @@
 	// be dropped when the operator has already asked again.
 	let requestSeq = 0;
 
+	// The URL the endpoint answered 422 for. The client recogniser matches it, so
+	// without this the pill stays enabled and another click repeats a lookup that
+	// cannot succeed. Comparing against the field's current value clears it the
+	// moment the operator edits the URL.
+	let refusedUrl = $state<string | null>(null);
+
 	// The pill is enabled by the same rule the endpoint applies, so a URL the
 	// server would refuse never looks clickable.
 	const source = $derived(classifySourceUrl(sourceUrl));
 	const searching = $derived(suggestion.kind === 'searching');
-	const disabled = $derived(source === null || searching);
+	const refused = $derived(refusedUrl !== null && sourceUrl === refusedUrl);
+	const disabled = $derived(source === null || refused || searching);
 	const chosen = $derived(selectedTags(suggestion));
 
 	const hint = $derived(
-		source === null || suggestion.kind === 'noSource'
+		source === null || refused || suggestion.kind === 'noSource'
 			? m.admin_tag_suggest_hint_no_source()
 			: m.admin_tag_suggest_hint()
 	);
@@ -112,6 +119,9 @@
 		if (seq !== requestSeq) return;
 
 		const next = fromResponse(status, body, parseTagInput(value));
+		// The server read this URL and refused it; the pill stops offering a click
+		// that would ask the same question again.
+		refusedUrl = next.kind === 'noSource' ? sourceUrl : null;
 		suggestion = next;
 		rating = next.kind === 'suggested' ? next.rating : null;
 		announcement = sentenceFor(next);
@@ -254,7 +264,17 @@
 				<p class="tag-panel-body">{tray.body}</p>
 				<div class="tag-actions">
 					{#if tray.retry}
-						<button type="button" class="tag-pill" onclick={suggest}>
+						<!-- The URL can be edited to something unrecognisable while this
+						     tray is open, and then suggest() refuses. Say so the way the
+						     pill does rather than leaving a button that does nothing:
+						     aria-disabled, and the hint that names what a URL has to be. -->
+						<button
+							type="button"
+							class="tag-pill"
+							aria-disabled={source === null}
+							aria-describedby={hintId}
+							onclick={suggest}
+						>
 							<RefreshCw size={14} aria-hidden="true" />
 							{m.admin_tag_suggest_try_again()}
 						</button>

@@ -184,7 +184,7 @@ describe('the tray a finished state draws', () => {
 		// found nothing would blame the classifier for the operator's own typing.
 		expect(trayFor({ kind: 'empty', skippedExisting: true })).toEqual({
 			title: 'No tags to suggest',
-			body: 'Sona skips tags this image already has.',
+			body: 'entail.dev only returned tags that are already in the Tags field.',
 			warn: false,
 			retry: false
 		});
@@ -253,7 +253,7 @@ describe('the sentences the live region reads', () => {
 			"No tags to suggest. entail.dev read the post but found nothing it's confident about."
 		);
 		expect(sentenceFor({ kind: 'empty', skippedExisting: true })).toBe(
-			'No tags to suggest. Sona skips tags this image already has.'
+			'No tags to suggest. entail.dev only returned tags that are already in the Tags field.'
 		);
 		expect(sentenceFor({ kind: 'notFound' })).toBe(
 			"Suggestions unavailable. entail.dev couldn't read this post."

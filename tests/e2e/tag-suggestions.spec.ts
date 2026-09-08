@@ -199,9 +199,11 @@ test('a post whose only tag is already typed says the tag was skipped, not that 
 	// come back with a tag, so the tray says what actually happened.
 	await expect(page.getByText('No tags to suggest').first()).toBeVisible();
 	await expect(page.locator('.tag-panel-body')).toHaveText(
-		'Sona skips tags this image already has.'
+		'entail.dev only returned tags that are already in the Tags field.'
 	);
-	await expect(liveRegion(page)).toContainText('Sona skips tags this image already has.');
+	await expect(liveRegion(page)).toContainText(
+		'entail.dev only returned tags that are already in the Tags field.'
+	);
 	await expect(tagsInput(page)).toHaveValue('fox');
 });
 
@@ -371,6 +373,68 @@ test('Try again keeps focus on the pill while the second lookup runs', async ({ 
 	await page.getByRole('button', { name: 'Try again' }).click();
 	await expect(page.getByRole('button', { name: 'Suggesting tags…' })).toBeFocused();
 	await expect(page.locator('.tag-skel-chip')).toHaveCount(5);
+});
+
+test('Try again refuses once the source URL is no longer a post it recognises', async ({
+	page
+}) => {
+	// The tray stays open while the operator edits the form, so the URL under it
+	// can stop being a post. Try again then refuses like the pill does, rather
+	// than sitting there looking clickable and doing nothing.
+	await openUploadForm(page);
+	await stubSuggestions(page, 502, { error: 'unavailable' });
+	await pill(page).click();
+
+	const retry = page.getByRole('button', { name: 'Try again' });
+	await expect(retry).toHaveAttribute('aria-disabled', 'false');
+
+	await page.fill('input[name="sourcePostUrl"]', '');
+	await expect(retry).toHaveAttribute('aria-disabled', 'true');
+	// It points at the hint that now says what a URL has to be.
+	const hintId = await retry.getAttribute('aria-describedby');
+	await expect(page.locator(`#${hintId}`)).toHaveText(
+		'Add a Bluesky or X post as the source URL to get tag suggestions.'
+	);
+
+	// A dispatched click asks nothing and says nothing.
+	let asked = 0;
+	await page.route(ENDPOINT, (route: Route) => {
+		asked += 1;
+		return route.fulfill({ status: 502, contentType: 'application/json', body: '{}' });
+	});
+	await retry.dispatchEvent('click');
+	await expect(page.locator('.tag-eyebrow')).toHaveText('Suggestions unavailable');
+	expect(asked).toBe(0);
+	await expect(liveRegion(page)).toHaveText(
+		"Suggestions unavailable. entail.dev didn't answer. Your tags are unchanged."
+	);
+});
+
+test('a URL the server refuses stops the pill until the field changes', async ({ page }) => {
+	// The client recogniser matches this URL, so nothing but the 422 says it is
+	// not a readable post. Without remembering it, the pill stays enabled and
+	// every click repeats the same failing lookup.
+	await openUploadForm(page);
+	await stubSuggestions(page, 422, { error: 'no_source' });
+
+	await pill(page).click();
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'true');
+	// The visible hint, not the live region, which also carries this sentence.
+	await expect(page.locator('#tags-hint')).toHaveText(
+		'Add a Bluesky or X post as the source URL to get tag suggestions.'
+	);
+
+	let asked = 0;
+	await page.route(ENDPOINT, (route: Route) => {
+		asked += 1;
+		return route.fulfill({ status: 422, contentType: 'application/json', body: '{}' });
+	});
+	await pill(page).dispatchEvent('click');
+	expect(asked).toBe(0);
+
+	// Editing the URL is what makes it worth asking again.
+	await page.fill('input[name="sourcePostUrl"]', `${BSKY_POST}9`);
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });
 
 test('a lookup in flight cannot be dismissed, so no answer can land on a closed tray', async ({

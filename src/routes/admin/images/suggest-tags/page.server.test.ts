@@ -205,6 +205,18 @@ describe('suggest-tags load', () => {
 		expect(data.rows[0].id).toBe(MAX_SCAN + 5);
 	});
 
+	it('clamps pages to what the scan ceiling can cover', async () => {
+		// Above the ceiling another page adds no row, so the count is held there:
+		// otherwise a hand-edited ?pages=500 keeps the Load more link counting up
+		// past anything the page could ever show.
+		const { db, platform } = makeDb();
+		for (let i = 1; i <= PER_PAGE + 1; i++) await seedImage(db, i, BSKY);
+
+		const data = await runLoad(platform, '?pages=500');
+		expect(data.pages).toBe(Math.ceil(MAX_SCAN / PER_PAGE));
+		expect(data.rows).toHaveLength(PER_PAGE + 1);
+	});
+
 	it('reads a junk or missing pages parameter as the first page', async () => {
 		const { db, platform } = makeDb();
 		for (let i = 1; i <= PER_PAGE + 1; i++) await seedImage(db, i, BSKY);

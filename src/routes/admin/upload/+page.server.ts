@@ -57,9 +57,11 @@ async function attachTagsAndCharacters(
 	characterIds: string
 ) {
 	// The same write the edit form and the Suggest tags page use, so all three
-	// paths dedupe and sanitize identically. The image was just inserted, so the
-	// delete it starts with has nothing to remove.
-	await replaceImageTags(db, imageId, tagNames);
+	// paths dedupe and sanitize identically. An upload with an empty Tags field
+	// skips the call: the image was just inserted, so the delete that write opens
+	// with would run against a fresh row, once per tile in a variant set. The
+	// edit form still calls it with an empty field, where the delete is the point.
+	if (tagNames) await replaceImageTags(db, imageId, tagNames);
 
 	if (characterIds) {
 		const ids = characterIds.split(',').map((id) => Number(id.trim())).filter(Boolean);

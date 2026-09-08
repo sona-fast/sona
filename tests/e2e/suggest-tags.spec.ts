@@ -186,8 +186,18 @@ test("a row's Suggest renders chips, and leaving one out changes the Save count"
 	await expect(chips).toHaveCount(4);
 	await expect(chips.first()).toHaveAttribute('aria-pressed', 'true');
 	await expect(target.getByText('Rated safe by entail.dev.')).toBeVisible();
-	// The expanded row lines up with the title, not with the card padding.
+	// The expanded row lines up with the title, not with the card padding. The
+	// chips are a child component, so check the rendered box too: a scoped rule
+	// that cannot reach the component root would leave the row at the card edge
+	// while the eyebrow above it stayed indented.
 	await expect(target.locator('.tag-eyebrow')).toHaveCSS('margin-left', '68px');
+	// One evaluate, so both rects come from the same frame rather than from
+	// either side of a re-render.
+	const [eyebrowX, chipRowX] = await target.evaluate((row) => [
+		row.querySelector('.tag-eyebrow')!.getBoundingClientRect().x,
+		row.querySelector('.tag-chiprow')!.getBoundingClientRect().x
+	]);
+	expect(chipRowX).toBe(eyebrowX);
 	await expect(target.getByText("Sona doesn't change the NSFW setting here.")).toBeVisible();
 
 	const save = target.getByRole('button', { name: /^Save \d+ tags? to Backfill 120$/ });
@@ -884,6 +894,14 @@ test('an expanded row drops its indent on a phone, where the head wraps', async 
 
 	const target = await clickSuggest(page, 'Backfill 114');
 	await expect(target.locator('.tag-eyebrow')).toHaveCSS('margin-left', '0px');
+	// The chips drop the indent with everything else, rather than sitting alone
+	// at the card edge on desktop and alone in from it here.
+	await expect(target.locator('.tag-chiprow')).toHaveCSS('margin-left', '0px');
+	const [phoneEyebrowX, phoneChipRowX] = await target.evaluate((row) => [
+		row.querySelector('.tag-eyebrow')!.getBoundingClientRect().x,
+		row.querySelector('.tag-chiprow')!.getBoundingClientRect().x
+	]);
+	expect(phoneChipRowX).toBe(phoneEyebrowX);
 
 	// Stacked, Save spans the tray and Dismiss sits under it. A phone has no
 	// cursor and no hover, so the refused Dismiss keeps the fill the refused
