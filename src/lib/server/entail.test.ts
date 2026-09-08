@@ -122,6 +122,14 @@ describe('translateTag', () => {
 		expect(tag).not.toMatch(/--|-$/);
 	});
 
+	it('returns quickly and null for a very long underscore run', () => {
+		// The qualifier-stripping regex backtracks quadratically on `_` runs; the
+		// input is cut to 200 characters before it runs, so 100k stays cheap.
+		const started = performance.now();
+		expect(translateTag('_'.repeat(100_000))).toBeNull();
+		expect(performance.now() - started).toBeLessThan(100);
+	});
+
 	it('drops emoticon tags instead of leaving their debris', () => {
 		// e621 carries symbol-only tags whose sanitized remains ("3", "-", "---")
 		// would otherwise be suggested as if they were words.
@@ -171,13 +179,32 @@ describe('suggestionsFromResult', () => {
 		expect(new Set(result).size).toBe(MAX_SUGGESTED_TAGS);
 	});
 
-	it('stops reading a hostile tag array after the entry cap', () => {
+	it('keeps the most confident entries when a hostile array exceeds the cap', () => {
+		// The classify path sends no confidence floor, so a body can list its
+		// tags in any order. The cap has to drop the least confident, not the
+		// last-listed: a qualifying tag deep past the cap survives, a lower one
+		// inside it does not.
 		const low = { name: 'noise', confidence: 0.1 };
-		const tags = Array.from({ length: MAX_RAW_ENTRIES + 1 }, () => ({ ...low }));
-		// The last entry inside the cap is read; the first one past it is not.
-		tags[MAX_RAW_ENTRIES - 1] = { name: 'canine', confidence: 0.99 };
-		tags[MAX_RAW_ENTRIES] = { name: 'mammal', confidence: 0.99 };
-		expect(suggestionsFromResult({ tags }).tags).toEqual(['canine']);
+		const tags: unknown[] = Array.from({ length: MAX_RAW_ENTRIES + 100 }, () => ({ ...low }));
+		tags[0] = { name: 'canine', confidence: 0.85 };
+		tags[MAX_RAW_ENTRIES + 50] = { name: 'mammal', confidence: 0.99 };
+		// Entries with no usable confidence sort last rather than throwing.
+		tags[5] = { name: 'junk', confidence: 'high' };
+		tags[6] = null;
+		tags[7] = { name: 'nan', confidence: Number.NaN };
+		expect(suggestionsFromResult({ tags }).tags).toEqual(['mammal', 'canine']);
+		// Ties keep the API's order (a stable sort).
+		const tied = [
+			{ name: 'zebra', confidence: 0.9 },
+			{ name: 'ant', confidence: 0.9 }
+		];
+		expect(suggestionsFromResult({ tags: tied }).tags).toEqual(['zebra', 'ant']);
+		// Past the cap, everything that remains is below what was kept.
+		const many = Array.from({ length: MAX_RAW_ENTRIES + 1 }, (_, i) => ({
+			name: `tag_${i}`,
+			confidence: i === MAX_RAW_ENTRIES ? 0.5 : 0.9
+		}));
+		expect(suggestionsFromResult({ tags: many }).tags).not.toContain(`tag-${MAX_RAW_ENTRIES}`);
 	});
 
 	it('drops junk entries and unknown ratings', () => {
@@ -406,10 +433,33 @@ describe('classifyMediaUrl', () => {
 		expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('caller deadline');
 	});
 
+	it('succeeds with a null rating when the poll body carries none', async () => {
+		const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+			init?.method === 'POST'
+				? json({ job_id: 'job-10' }, 202)
+				: json({ tags: [{ name: 'mammal', confidence: 0.99 }] })
+		);
+		expect(await classifyMediaUrl(url, fetchImpl)).toEqual({
+			ok: true,
+			suggestions: { tags: ['mammal'], rating: null },
+			imageCount: 1
+		});
+	});
+
 	it('is unavailable on a 200 poll body that is not a classification entry', async () => {
 		// null, a string, or an error envelope must not read as "no tags found".
+		// An envelope whose `tags` holds strings is an unknown shape too, while
+		// an empty `tags` array is a real (empty) result.
 		const unavailable = { ok: false, reason: 'unavailable' };
-		for (const body of [null, 'done', { detail: 'x' }]) {
+		const emptyFetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+			init?.method === 'POST' ? json({ job_id: 'job-9' }, 202) : json({ tags: [] })
+		);
+		expect(await classifyMediaUrl(url, emptyFetch)).toEqual({
+			ok: true,
+			suggestions: { tags: [], rating: null },
+			imageCount: 1
+		});
+		for (const body of [null, 'done', { detail: 'x' }, { tags: ['a'] }, { tags: [null] }]) {
 			const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
 				init?.method === 'POST' ? json({ job_id: 'job-9' }, 202) : json(body)
 			);

@@ -17,8 +17,8 @@ const X_BEARER =
 	'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 const X_ACTIVATE = 'https://api.x.com/1.1/guest/activate.json';
 /** api.x.com answers 404 to Node's default `User-Agent: node` and 200 to any
- * other value (verified 2026-09-07), so every request names itself. Exported
- * so twitter-media.ts sends the same one. */
+ * other value (verified 2026-09-07), so every request names itself.
+ * xGraphqlHeaders carries it; exported so the tests can assert the header. */
 export const X_USER_AGENT = 'Mozilla/5.0 (compatible; Sona; +https://github.com/sona-fast/sona)';
 const X_USER_BY_SCREEN_NAME = 'https://api.x.com/graphql/IGgvgiOx4QZndDHuD3x9TQ/UserByScreenName';
 const FETCH_TIMEOUT_MS = 5000;

@@ -44,10 +44,14 @@ const FAILURE_STATUS: Record<LookupFailure, number> = {
 };
 
 const MAX_URL_LENGTH = 2048;
-/** Ceiling on the whole lookup chain. The X path is three fetches plus an
- * enqueue and two polls, each with its own timeout, so without this the worst
- * case ran close to forty seconds. */
+/** Ceiling on the whole lookup chain. The X path is up to four fetches (the
+ * activate and the tweet lookup can each run twice) plus an enqueue and two
+ * polls, each with its own timeout, so without this the worst case ran close
+ * to forty seconds. */
 const LOOKUP_DEADLINE_MS = 20_000;
+// SvelteKit rejects any other named export from a +server file unless it
+// starts with an underscore; the tests read it under this name.
+export { LOOKUP_DEADLINE_MS as _LOOKUP_DEADLINE_MS };
 /** Read before parsing: a valid body is a short object with one field, so
  * anything past this is refused without handing it to JSON.parse. */
 const MAX_BODY_BYTES = 4096;
@@ -102,8 +106,9 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	let outcome: LookupOutcome;
 	// How many images the post carried. Only the Bluesky lookup and the tweet
-	// lookup see the post; classifyMediaUrl sees one image.
-	let imageCount: number;
+	// lookup see the post; classifyMediaUrl sees one image. Null when the
+	// tweet lookup could not count (see TweetPhotos).
+	let imageCount: number | null;
 	// One deadline for every outbound call below; each lookup returns
 	// `unavailable` when it fires.
 	const signal = AbortSignal.timeout(LOOKUP_DEADLINE_MS);

@@ -25,9 +25,15 @@ export const DEFAULT_CONFIDENCE_FLOOR = 0.8;
  * classifier can return hundreds; the UI shows a short list. */
 export const MAX_SUGGESTED_TAGS = 40;
 
-/** Most raw entries one classification is read for. A body is third-party
- * input, so the walk stops here rather than following an array of any size. */
+/** Most raw entries one classification is read for, taken from the top after
+ * a sort by confidence so the cap drops the least confident. A body is
+ * third-party input, so the walk stops here rather than following an array of
+ * any size. */
 export const MAX_RAW_ENTRIES = 200;
+
+/** Longest raw tag name translateTag looks at. e621 tags run well under this;
+ * the cut keeps the qualifier-stripping regex off a very long input. */
+const MAX_RAW_TAG_LENGTH = 200;
 
 // Both `wait=true` endpoints hold the connection open until the classifier
 // finishes rather than answering 202 straight away. That hold was measured at
@@ -145,6 +151,7 @@ export function classifySourceUrl(url: string): SourceKind | null {
  */
 export function translateTag(tag: string): string | null {
 	const translated = tag
+		.slice(0, MAX_RAW_TAG_LENGTH)
 		.trim()
 		.toLowerCase()
 		.replace(/[\s_]*\([^()]*\)\s*$/, '')
@@ -159,18 +166,31 @@ function normalizeRating(rating: unknown): EntailRating | null {
 	return rating === 'safe' || rating === 'questionable' || rating === 'explicit' ? rating : null;
 }
 
+/** Sort key for a raw tag entry: its confidence, or -Infinity when it has
+ * none, so junk entries sort last instead of unsettling the order. */
+function confidenceOf(entry: unknown): number {
+	const confidence = (entry as { confidence?: unknown } | null)?.confidence;
+	return typeof confidence === 'number' && !Number.isNaN(confidence) ? confidence : -Infinity;
+}
+
 /**
  * Turn one classification entry into Sona tag suggestions: keep the tags at or
- * above the confidence floor, translate them, and drop duplicates while
- * preserving the confidence order the API returns, capped at
- * {@link MAX_SUGGESTED_TAGS}. Reads at most {@link MAX_RAW_ENTRIES} entries. Pure.
+ * above the confidence floor, translate them, and drop duplicates, in
+ * confidence order (a stable sort, so ties keep the API's order), capped at
+ * {@link MAX_SUGGESTED_TAGS}. Reads at most {@link MAX_RAW_ENTRIES} entries,
+ * the most confident ones. Pure.
  */
 export function suggestionsFromResult(result: ClassificationEntry | null | undefined): Suggestions {
 	const rating = normalizeRating(result?.rating);
 	const raw = Array.isArray(result?.tags) ? result.tags : [];
 	const seen = new Set<string>();
 	const tags: string[] = [];
-	for (const entry of raw.slice(0, MAX_RAW_ENTRIES)) {
+	const ordered = raw.slice().sort((a, b) => {
+		const ca = confidenceOf(a);
+		const cb = confidenceOf(b);
+		return ca === cb ? 0 : cb > ca ? 1 : -1;
+	});
+	for (const entry of ordered.slice(0, MAX_RAW_ENTRIES)) {
 		const { name, confidence } = (entry ?? {}) as { name?: unknown; confidence?: unknown };
 		if (typeof name !== 'string') continue;
 		if (typeof confidence !== 'number' || !(confidence >= DEFAULT_CONFIDENCE_FLOOR)) continue;
@@ -261,9 +281,14 @@ function isAllowedMediaHost(url: string): boolean {
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** A finished `/classify/<job_id>` body is an object with a `tags` array, the
- * same way a `/post` body has an `images` array. */
+ * same way a `/post` body has an `images` array. The array's first entry, when
+ * there is one, has to be an object too: an error envelope that happens to
+ * carry `tags: ['...']` would otherwise read as an empty success. */
 function pollEntry(body: unknown): body is ClassificationEntry {
-	return typeof body === 'object' && body !== null && Array.isArray((body as ClassificationEntry).tags);
+	if (typeof body !== 'object' || body === null) return false;
+	const tags = (body as ClassificationEntry).tags;
+	if (!Array.isArray(tags)) return false;
+	return tags.length === 0 || (typeof tags[0] === 'object' && tags[0] !== null);
 }
 
 /**

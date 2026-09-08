@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import type { LookupOutcome, SourceKind } from '$lib/server/entail';
 import type { TweetMediaOutcome } from '$lib/server/twitter-media';
 import { makeD1 } from '$lib/server/test/d1';
-import { POST } from './+server';
+import { POST, _LOOKUP_DEADLINE_MS } from './+server';
 
 // Only the outbound calls are stubbed. classifySourceUrl stays real, so the
 // URL recognition the endpoint depends on is exercised rather than mocked.
@@ -136,6 +136,29 @@ describe('POST /api/admin/tag-suggestions', () => {
 		const res = await POST(event(platform, { sourcePostUrl: X_POST }));
 		expect(res.status).toBe(200);
 		expect((await res.json()).imageCount).toBe(3);
+	});
+
+	it('reports a null imageCount when the tweet lookup could not count', async () => {
+		const { platform } = makeEnv();
+		// The entities.media fallback lists one item whatever the tweet carried,
+		// so the count is unknown, not 1.
+		fetchTweetMediaUrl.mockResolvedValue({ ok: true, url: MEDIA_URL, photoCount: null });
+		classifyMediaUrl.mockResolvedValue({ ...suggestions, imageCount: 1 });
+		const res = await POST(event(platform, { sourcePostUrl: X_POST }));
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			source: 'x',
+			tags: ['mammal', 'pink-hair'],
+			rating: 'safe',
+			imageCount: null
+		});
+	});
+
+	it('gives the lookup chain a deadline that clears one full X round', async () => {
+		// One activate (5 s) + one tweet lookup (5 s) + one enqueue (3 s) + one
+		// poll (8 s) at their own timeouts is 21 s; the deadline exists to stop
+		// the retry paths, not to cut that chain short of its first attempt.
+		expect(_LOOKUP_DEADLINE_MS).toBeGreaterThanOrEqual(15_000);
 	});
 
 	it('reads the stored source URL for an imageId', async () => {

@@ -69,7 +69,7 @@ const QUERY_FIELD_TOGGLES = {
 /** `rate_limited` is X refusing the guest token twice over with a 429;
  * everything else that yields no photo is `unavailable`. */
 export type TweetMediaOutcome =
-	| { ok: true; url: string; photoCount: number }
+	| { ok: true; url: string; photoCount: number | null }
 	| { ok: false; reason: 'rate_limited' | 'unavailable' };
 
 const fail = (reason: 'rate_limited' | 'unavailable'): TweetMediaOutcome => ({ ok: false, reason });
@@ -77,8 +77,9 @@ const fail = (reason: 'rate_limited' | 'unavailable'): TweetMediaOutcome => ({ o
 type TweetMedia = { type?: unknown; media_url_https?: unknown };
 
 /** The first photo on a tweet, upgraded to its largest variant, and how many
- * photos the tweet carried in all. */
-export type TweetPhotos = { url: string; photoCount: number };
+ * photos the tweet carried in all. The count is null when it came from the
+ * `entities.media` fallback, which X truncates to one item. */
+export type TweetPhotos = { url: string; photoCount: number | null };
 
 /**
  * Extract the photos from a TweetResultByRestId response: the first one's
@@ -95,7 +96,11 @@ export function parseTweetPhotos(body: unknown): TweetPhotos | null {
 	const legacy = tweet.legacy as
 		| { extended_entities?: { media?: unknown }; entities?: { media?: unknown } }
 		| undefined;
-	const media = legacy?.extended_entities?.media ?? legacy?.entities?.media;
+	const extended = legacy?.extended_entities?.media;
+	// `entities.media` only ever lists one item, so a count read from it is not
+	// a count; only `extended_entities` is authoritative.
+	const counted = Array.isArray(extended);
+	const media = extended ?? legacy?.entities?.media;
 	if (!Array.isArray(media)) return null;
 
 	let first: string | null = null;
@@ -109,7 +114,7 @@ export function parseTweetPhotos(body: unknown): TweetPhotos | null {
 		const match = url.match(/^(.*)\.([a-z]+)$/i);
 		first = match ? `${match[1]}?format=${match[2].toLowerCase()}&name=4096x4096` : url;
 	}
-	return first ? { url: first, photoCount: Math.min(photoCount, MAX_TWEET_PHOTOS) } : null;
+	return first ? { url: first, photoCount: counted ? Math.min(photoCount, MAX_TWEET_PHOTOS) : null } : null;
 }
 
 function tweetLookup(

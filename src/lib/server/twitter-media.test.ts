@@ -84,12 +84,14 @@ describe('parseTweetPhotos', () => {
 		).toContain('AbCdEf123');
 	});
 
-	it('falls back to entities.media when extended_entities is absent', () => {
+	it('falls back to entities.media when extended_entities is absent, with no count', () => {
+		// X truncates entities.media to one item, so the photo resolves but the
+		// count is unknown rather than 1.
 		expect(
 			parseTweetPhotos({
 				data: { tweetResult: { result: { legacy: { entities: { media: [photo] } } } } }
-			})?.url
-		).toContain('AbCdEf123');
+			})
+		).toEqual({ url: 'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096', photoCount: null });
 	});
 
 	it('returns null on a text-only tweet, a tombstone, and junk', () => {
