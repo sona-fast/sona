@@ -545,10 +545,11 @@
 		dateTagged = false;
 		sharedFilled = {};
 		sharedUrlHeld = false;
-		// "Using {name}" is about the SELECT, not about the result that put the
-		// artist there: cleared while the select still holds it, the group-mode
-		// round trip relabelled the button back to "Use {name}".
-		if (!appliedArtist || Number(selectedArtistId) !== appliedArtist.id) appliedArtist = null;
+		// A second lookup's panel is about a new result, and an artist applied
+		// from the last one is not applied to it: cleared here, the way the edit
+		// page's resetLookupPrefill does. The group-mode round trip, which shows
+		// the SAME result again, holds this across the reset itself.
+		appliedArtist = null;
 		// A clash carried into the select belongs to the lookup that found it, so
 		// a second lookup must not leave the first one's piece on offer. The one
 		// the operator actually chose stays: dropping it would silently blank the
@@ -590,7 +591,14 @@
 	 * did not happen. */
 	function returnToNewSet() {
 		if (tiles[parentIndex]?.lookup.kind !== 'results') return;
+		// "Using {name}" is about the SELECT, not about the result that put the
+		// artist there. The re-derivation behind this round trip clears it, and
+		// the button relabelled itself back to "Use {name}" over a select that
+		// still held that artist. Only this round trip restores it: the operator
+		// changing the select, or a new result, is a real reason to drop it.
+		const held = appliedArtist;
 		const wrote = onParentChanged(parentIndex);
+		if (held && Number(selectedArtistId) === held.id) appliedArtist = held;
 		if (wrote.sourcePostUrl && wrote.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_refilled());
 		} else if (wrote.sourcePostUrl) {

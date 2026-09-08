@@ -466,7 +466,7 @@ describe('the artist on the edit page', () => {
 
 	it('flips and seeds the form in the panel action instead', () => {
 		expect(EDIT).toMatch(
-			/onaddnew=\{async \(seed\) => \{[\s\S]{0,600}?artistMode = 'new';\s*\n\s*const wrote = seedNewArtist\(seed\.handle, seed\.site, seed\.linkable\);/
+			/onaddnew=\{async \(seed\) => \{[\s\S]{0,600}?artistMode = 'new';[\s\S]{0,300}?const wrote = seedNewArtist\(seed\.handle, seed\.site, seed\.linkable\);/
 		);
 	});
 
@@ -600,6 +600,22 @@ describe('round 11 wiring', () => {
 		);
 		expect(EDIT).toContain("const seededNothing = seedStatusKind(wrote) === 'none';");
 		expect(EDIT).not.toContain('seedStatusKind(lookupSeeded)');
+	});
+
+	// Use, then "Add as a new artist instead": the save posts artistId=new and
+	// creates somebody, while the panel still read "Using {name}" about the
+	// artist the operator had just moved off. And the other way round, Use
+	// unmounts the inline fields the seed sentence is about, which went on
+	// saying Sona had filled a name and a link that were no longer on screen.
+	it('drops the applied artist and the seed when the edit form changes hands', () => {
+		expect(EDIT).toMatch(
+			/const wasExisting = artistMode === 'existing';\s*\n\s*artistMode = 'new';[\s\S]{0,300}?appliedArtist = null;/
+		);
+		const use = EDIT.match(/function useLookupArtist\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(use).toMatch(/appliedArtist = artist;/);
+		expect(use).toMatch(
+			/lookupSeeded = \{\};\s*\n\s*nameTagged = false;\s*\n\s*twitterTagged = false;\s*\n\s*furaffinityTagged = false;/
+		);
 	});
 
 	// Left at 'new', the panel keeps offering "Add {handle} as a new artist" for
@@ -845,14 +861,21 @@ describe('focus after the panel goes away', () => {
 		// One field written is one field named: the plural sentence over a single
 		// refill told the operator both had changed.
 		expect(UPLOAD).toMatch(
-			/function returnToNewSet\(\)[\s\S]{0,400}?const wrote = onParentChanged\(parentIndex\);\s*\n\s*if \(wrote\.sourcePostUrl && wrote\.commissionedAt\) \{[\s\S]{0,120}?m\.admin_lookup_announce_shared_refilled\(\)/
+			/function returnToNewSet\(\)[\s\S]{0,900}?const wrote = onParentChanged\(parentIndex\);[\s\S]{0,120}?if \(wrote\.sourcePostUrl && wrote\.commissionedAt\) \{[\s\S]{0,120}?m\.admin_lookup_announce_shared_refilled\(\)/
 		);
 		expect(UPLOAD).toMatch(
 			/\} else if \(wrote\.sourcePostUrl\) \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_shared_refilled_source\(\)\);\s*\n\s*\} else if \(wrote\.commissionedAt\) \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_shared_refilled_date\(\)\);/
 		);
-		// An artist the select still holds stays applied across that round trip.
+		// An artist the select still holds stays applied across that round trip —
+		// held by the round trip itself, not by the reset. A reset that spared a
+		// still-selected artist also spared it on a SECOND lookup, whose result
+		// names somebody else, leaving "Using {name}" over an unrelated match.
 		expect(UPLOAD).toMatch(
-			/function resetSharedPrefill\(\)[\s\S]{0,900}?if \(!appliedArtist \|\| Number\(selectedArtistId\) !== appliedArtist\.id\) appliedArtist = null;/
+			/function resetSharedPrefill\(\)[\s\S]{0,900}?\n\t\tappliedArtist = null;/
+		);
+		expect(UPLOAD).not.toMatch(/if \(!appliedArtist \|\| Number\(selectedArtistId\) !== appliedArtist\.id\)/);
+		expect(UPLOAD).toMatch(
+			/function returnToNewSet\(\)[\s\S]{0,600}?const held = appliedArtist;\s*\n\s*const wrote = onParentChanged\(parentIndex\);\s*\n\s*if \(held && Number\(selectedArtistId\) === held\.id\) appliedArtist = held;/
 		);
 	});
 

@@ -1007,6 +1007,45 @@ test.describe('with a key saved', () => {
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
 	});
 
+	// Both directions of the same switch on the edit page. The name-match result
+	// offers Use and "Add as a new artist instead" together, so the form can
+	// change hands twice without a second lookup.
+	test('the edit form drops the seed on Use and the applied artist on add-new', async ({
+		page
+	}) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				localArtists: [],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist' }] }]
+			})
+		);
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await panel(page).getByRole('button', { name: 'Add as a new artist instead' }).click();
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(panel(page)).toContainText(
+			"Sona filled the new artist's name and FurAffinity link."
+		);
+
+		// Use puts the select back, unmounting the fields the seed sentence is
+		// about: the sentence went on naming a name and a link that were gone.
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
+		await expect(page.locator('input[name="artistName"]')).toHaveCount(0);
+		await expect(panel(page)).not.toContainText("Sona filled the new artist's");
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+
+		// And back: the save now posts artistId=new and creates somebody else, so
+		// nothing is applied any more. The panel kept saying "Using Test Artist".
+		await panel(page).getByRole('button', { name: 'Add as a new artist instead' }).click();
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toHaveCount(0);
+		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
+	});
+
 	// The image already has an artist, and a handle Sona does not hold is a
 	// suggestion about it. Flipping the form here would insert a duplicate
 	// artist and re-credit the piece on the next save.
@@ -1773,6 +1812,39 @@ test.describe('with a key saved', () => {
 		await backToExisting();
 		await expect(parent.locator('option[value="999"]')).toHaveCount(0);
 		await expect(parent).toHaveValue('');
+	});
+
+	// "Using {name}" is about the result on screen. Sparing it in the prefill
+	// reset — which every lookup runs — carried it onto the NEXT result, so a
+	// second lookup opened already claiming an artist had been applied to it.
+	// Only the group-mode round trip, which re-shows the same result, holds it.
+	test('a second lookup opens unapplied even when the select still holds that artist', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
+
+		// Same artist, new result: the select keeps him, the panel does not claim
+		// he has been applied to this one.
+		await tileLookup(page).nth(0).click();
+		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toHaveCount(0);
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
+
+		// And a result naming somebody else offers them unapplied, with no stale
+		// "Using" left anywhere in the panel.
+		await stubLookup(page, otherArtistBody());
+		await tileLookup(page).nth(0).click();
+		await expect(panel(page).getByRole('button', { name: 'Use Avatar Artist' })).toBeVisible();
+		await expect(panel(page).getByRole('button', { name: /^Using / })).toHaveCount(0);
+		// The "Sets the artist to {name}." hint is the edit page's: the upload
+		// page never passes editMode, so it renders nowhere here.
+		await expect(panel(page)).not.toContainText('Sets the artist to');
 	});
 
 	test('a variant crediting somebody else says so on its tile', async ({ page }) => {

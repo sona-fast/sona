@@ -303,6 +303,13 @@
 		}
 		selectedArtistId = artist.id;
 		appliedArtist = artist;
+		// The seed sentence is about the inline new-artist fields, and this click
+		// replaces them with the select: left standing it went on saying Sona had
+		// filled a name and a link that are no longer on screen.
+		lookupSeeded = {};
+		nameTagged = false;
+		twitterTagged = false;
+		furaffinityTagged = false;
 		announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
 	}
 
@@ -472,6 +479,10 @@
 						// switched — say it only when this click is what did.
 						const wasExisting = artistMode === 'existing';
 						artistMode = 'new';
+						// The save now posts artistId=new and creates somebody: an artist
+						// applied before this click is not the artist this form will make,
+						// and "Using {name}" over it named the wrong one.
+						appliedArtist = null;
 						const wrote = seedNewArtist(seed.handle, seed.site, seed.linkable);
 						// A seed that wrote something is announced by the panel's own status
 						// line. An empty handle (the no_match action) writes nothing, so the
