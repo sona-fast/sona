@@ -6,6 +6,7 @@
 		conCardFaceSvg,
 		conCardPrintSheetSvg,
 		conCardFileBase,
+		isEmbeddableAvatarType,
 		CON_CARD_WIDTH,
 		CON_CARD_HEIGHT,
 		type ConCardColor,
@@ -173,6 +174,14 @@
 		try {
 			const response = await fetch(avatarSrc);
 			if (!response.ok) throw new Error(`avatar ${response.status}`);
+			// The proxy answers octet-stream for anything outside the raster
+			// allowlist, and a data URI made from that draws nothing. Treated as a
+			// failed avatar so the card falls back to the initial in the ring and
+			// says so, rather than saving a blank one. A response with no
+			// content-type at all is a direct same-origin avatar, not a refusal, so
+			// it still embeds.
+			const type = response.headers.get('content-type');
+			if (!isEmbeddableAvatarType(type)) throw new Error(`avatar type ${type}`);
 			const blob = await response.blob();
 			avatarData = await new Promise<string>((resolve, reject) => {
 				const reader = new FileReader();

@@ -8,6 +8,12 @@ import * as schema from '$lib/server/db/schema';
 import { siteSettings } from '$lib/server/db/schema';
 import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import {
+	FUZZYSEARCH_API_KEY_SETTING,
+	FUZZYSEARCH_KEY_REFUSED_SETTING,
+	fuzzysearchRefusedMarker,
+	fuzzysearchKeyDisplayRecord
+} from '$lib/server/fuzzysearch';
+import {
 	getRawSetting,
 	setRawSetting,
 	parseLines,
@@ -1898,5 +1904,368 @@ describe('settings load — storage breakdown (SONA-192)', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+// Artist lookup (SONA-156). The FuzzySearch key is a raw setting, so the load
+// exposes a MASK and a presence flag, never the key — and the deploy secret,
+// when set, sends nothing derived from itself at all.
+describe('settings — FuzzySearch key', () => {
+	function keyEvent(platform: App.Platform, fields: Record<string, string>) {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) body.append(k, v);
+		return {
+			platform,
+			url: LOAD_URL,
+			request: new Request('https://taro.surf/admin/settings?/saveFuzzysearchKey', {
+				method: 'POST',
+				body
+			})
+		} as never;
+	}
+
+	it('saves a well-formed key and clears any standing refusal', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z');
+
+		const result = await actions.saveFuzzysearchKey(
+			keyEvent(platform, { fuzzysearchApiKey: '  fs-live-abcdef3k9q  ' })
+		);
+
+		expect(result).toEqual({ fuzzysearchKeySaved: true });
+		expect(await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING)).toBe('fs-live-abcdef3k9q');
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe('');
+	});
+
+	it('accepts the shortest and longest keys the shape check allows', async () => {
+		const { db, platform } = makeLoadDb();
+		for (const ok of ['12345678', 'x'.repeat(200)]) {
+			expect(
+				await actions.saveFuzzysearchKey(keyEvent(platform, { fuzzysearchApiKey: ok })),
+				String(ok.length)
+			).toEqual({ fuzzysearchKeySaved: true });
+			expect(await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING)).toBe(ok);
+		}
+	});
+
+	it('refuses a key that is too short, too long, or not printable ASCII', async () => {
+		const { db, platform } = makeLoadDb();
+		for (const bad of ['short12', 'x'.repeat(201), 'has space here', 'smart“quote”key']) {
+			const result = (await actions.saveFuzzysearchKey(
+				keyEvent(platform, { fuzzysearchApiKey: bad })
+			)) as unknown as { status: number; data: { fuzzysearchKeyError: string } };
+			expect(result.status, bad).toBe(400);
+			expect(result.data.fuzzysearchKeyError).toBe('invalid');
+		}
+		expect(await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING)).toBeNull();
+	});
+
+	it('removes the key and the refusal marker together', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z');
+
+		expect(await actions.removeFuzzysearchKey({ platform } as never)).toEqual({
+			fuzzysearchKeyRemoved: true
+		});
+		expect(await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING)).toBe('');
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe('');
+	});
+
+	it('exposes a mask and presence, never the key itself', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeySet).toBe(true);
+		expect(result.fuzzysearchKeyFromEnv).toBe(false);
+		expect(result.fuzzysearchKeyRecord).toBe('••••••••3k9q');
+		expect(JSON.stringify(result)).not.toContain('fs-live-abcdef3k9q');
+	});
+
+	it('reports the deploy secret without deriving anything from it', async () => {
+		const { platform } = makeLoadDb({ FUZZYSEARCH_API_KEY: 'fs-live-fromdeploy' });
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeySet).toBe(true);
+		expect(result.fuzzysearchKeyFromEnv).toBe(true);
+		expect(result.fuzzysearchKeyRecord).toBeNull();
+		expect(JSON.stringify(result)).not.toContain('fromdeploy');
+	});
+
+	it('keeps the stored key out of the payload while the deploy secret is in use', async () => {
+		const { db, platform } = makeLoadDb({ FUZZYSEARCH_API_KEY: 'fs-live-fromdeploy' });
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeyFromEnv).toBe(true);
+		// Nothing derived from the dormant stored key travels — not the mask, not
+		// its last four — but the page still knows a key exists here.
+		expect(result.fuzzysearchKeyRecord).toBeNull();
+		expect(result.fuzzysearchKeySet).toBe(true);
+		const payload = JSON.stringify(result);
+		expect(payload).not.toContain('3k9q');
+		expect(payload).not.toContain('fromdeploy');
+	});
+
+	it('surfaces a formatted refusal date only while a key is saved', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(
+			db,
+			FUZZYSEARCH_KEY_REFUSED_SETTING,
+			fuzzysearchRefusedMarker('stored', new Date('2026-09-01T10:20:30.000Z'))
+		);
+
+		const orphan = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+		expect(orphan.fuzzysearchKeyRefusedAt).toBeNull();
+
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+		const refused = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+		expect(refused.fuzzysearchKeyRefusedAt).toBe('2026.09.01');
+	});
+
+	// A refusal recorded against the DEPLOY SECRET has no remedy on this page:
+	// there is no key here to remove or replace. Surfacing it would render a
+	// "Key refused" state with nothing the operator could do about it.
+	it('never reports a refusal for a key that came from the deploy secret', async () => {
+		const { db, platform } = makeLoadDb({ FUZZYSEARCH_API_KEY: 'fs-live-fromdeploy' });
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T10:20:30.000Z');
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeyFromEnv).toBe(true);
+		expect(result.fuzzysearchKeyRefusedAt).toBeNull();
+	});
+
+	// The marker is global, the card is not: a refusal recorded while the deploy
+	// secret was in use must not be shown against a stored key once the secret
+	// is dropped — that key was never turned away.
+	it('never reports a refusal recorded against the secret once it is gone', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+		await setRawSetting(
+			db,
+			FUZZYSEARCH_KEY_REFUSED_SETTING,
+			fuzzysearchRefusedMarker('env', new Date('2026-09-01T10:20:30.000Z'))
+		);
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeyFromEnv).toBe(false);
+		expect(result.fuzzysearchKeyRefusedAt).toBeNull();
+	});
+
+	it('masks every key to the same eight bullets, whatever its length', () => {
+		expect(fuzzysearchKeyDisplayRecord('abcd1234')).toBe('••••••••1234');
+		expect(fuzzysearchKeyDisplayRecord('fs-live-abcdef3k9q')).toBe('••••••••3k9q');
+		expect(fuzzysearchKeyDisplayRecord('abc')).toBe('••••••••');
+	});
+});
+
+// Source pin: the disclosure copy is the point of this section — an operator
+// has to read what leaves their site before they paste a key. Nothing renders
+// Svelte under the pure-TS vitest setup, so grep the file (the #182 pattern).
+describe('artist lookup section markup (SONA-156)', () => {
+	const src = readFileSync(new URL('./+page.svelte', import.meta.url), 'utf8');
+
+	it('renders both disclosure paragraphs', () => {
+		expect(src).toContain('m.admin_settings_lookup_explainer_1()');
+		expect(src).toContain('m.admin_settings_lookup_explainer_2()');
+	});
+
+	it('links the self-serve key page as a safe external link', () => {
+		expect(src).toContain('https://api.fuzzysearch.net/selfserve');
+		const link = src.slice(src.indexOf('https://api.fuzzysearch.net/selfserve'), src.indexOf('https://api.fuzzysearch.net/selfserve') + 200);
+		expect(link).toContain('rel="noopener noreferrer"');
+	});
+
+	it('takes the key in a password field and never renders a stored key', () => {
+		expect(src).toContain('name="fuzzysearchApiKey"');
+		// The name alone would still pass if the field became a text input, which
+		// puts the key on screen and into the browser's autofill store.
+		const field = src.slice(
+			src.lastIndexOf('<input', src.indexOf('name="fuzzysearchApiKey"')),
+			src.indexOf('/>', src.indexOf('name="fuzzysearchApiKey"'))
+		);
+		expect(field).toContain('type="password"');
+		expect(field).toContain('autocomplete="off"');
+		expect(src).toContain('data.fuzzysearchKeyRecord');
+		expect(src).not.toContain('data.fuzzysearchApiKey');
+	});
+
+	// The confirmation's safe choice needs a boundary of its own: .btn-secondary
+	// is filled with var(--secondary), which is also the panel's background, so
+	// Keep would sit at a 1.0:1 edge inside it (SC 1.4.11).
+	it('gives the Keep button a visible boundary, not the panel fill', () => {
+		const panel = src.slice(src.indexOf('class="remove-confirm"'));
+		const keep = panel.slice(0, panel.indexOf('admin_settings_lookup_confirm_keep'));
+		expect(keep).toContain('btn-outline');
+		expect(keep).not.toContain('btn-secondary');
+		// var(--border) against the panel's var(--secondary) fill is 1.0:1 in two
+		// dark themes, so the edge inside the panel is overridden on its own.
+		expect(src).toContain('.lookup-section .remove-confirm .btn-outline');
+	});
+
+	// The bullet run is announced one bullet at a time, so it is hidden and the
+	// part that identifies the key is spoken instead.
+	it('hides the mask from screen readers and names its ending', () => {
+		const record = src.slice(src.indexOf('<dd class="key-record">'));
+		expect(record.slice(0, 400)).toContain('aria-hidden="true"');
+		expect(src).toContain('m.admin_settings_lookup_key_ending(');
+	});
+
+	// The refused state is the one a broken key actually lands in, and e2e cannot
+	// reach it: only a real 401 from FuzzySearch writes the marker.
+	it('keeps Remove key reachable in the refused state', () => {
+		// Guarded on the key being SET, never narrowed by the refusal — a refused
+		// key the operator cannot remove would be a dead end.
+		const guard = '{#if fuzzysearchKeyEditable && data.fuzzysearchKeySet}';
+		expect(src).toContain(guard);
+		const block = src.slice(src.indexOf(guard) + guard.length);
+		const actions = block.slice(0, block.indexOf('</section>'));
+		expect(actions).toContain('m.admin_settings_lookup_remove()');
+		expect(actions).not.toContain('fuzzysearchKeyRefusedAt');
+	});
+
+	it('renders the refused eyebrow, the lapsed line, and a labelled record', () => {
+		const refused = src.slice(src.indexOf('{#if fuzzysearchKeyRefusedAt}'));
+		const branch = refused.slice(0, refused.indexOf('{:else if data.fuzzysearchKeySet}'));
+		expect(branch).toContain('m.admin_settings_lookup_refused_eyebrow()');
+		expect(branch).toContain('class="lapsed-line"');
+		expect(branch).toContain('m.admin_settings_lookup_refused_line(');
+		// The mask's <dt> is visible only here, where the record sits above a "New
+		// FuzzySearch API key" field and would otherwise be an unlabelled pill.
+		const dt = src.slice(src.indexOf('<dl class="key-dl">'));
+		const dtBlock = dt.slice(0, dt.indexOf('</dt>'));
+		expect(dtBlock).toContain('record-label');
+		expect(dtBlock).toContain('sr-only');
+		expect(dtBlock).toContain('m.admin_settings_lookup_refused_key_label()');
+	});
+
+	it('renames the key field and drops the self-serve hint when refused', () => {
+		const label = src.slice(src.indexOf('m.admin_settings_lookup_new_key_label()'));
+		expect(label.slice(0, 120)).toContain('m.admin_settings_lookup_key_label()');
+		const hint = src.slice(0, src.indexOf('m.admin_settings_lookup_hint_pre()'));
+		expect(hint.slice(-200)).toContain('{#if !fuzzysearchKeyRefusedAt}');
+	});
+
+	// Both submit buttons unmount on success, so the section hands focus on by
+	// hand and can never use `disabled` (disabling the focused button drops the
+	// keyboard user on <body>). A revert to disabled={saving} would reintroduce
+	// the focus loss with both suites green, so the wiring is pinned here.
+	it('drives focus by hand and marks pending with aria-busy, never disabled', () => {
+		const section = src.slice(src.indexOf('class="security-section lookup-section"'));
+		const markup = section.slice(0, section.indexOf('</section>'));
+		// The save form and the confirm-remove form: both report pending state to
+		// assistive tech without taking the control away.
+		expect(markup).toContain('aria-busy={savingFuzzysearchKey}');
+		expect(markup).toContain('aria-busy={removingFuzzysearchKey}');
+		expect(markup).not.toContain('disabled=');
+		// aria-busy is not reliably announced on a button, so the pending sentence
+		// also rides a live region that stays mounted for the life of the section.
+		expect(markup).toContain('role="status"');
+		// Without `disabled`, cancel() is the only thing between a double
+		// activation and two in-flight writes, so each handler is pinned to it.
+		const handler = (action: string) => {
+			const start = markup.indexOf(`action="?/${action}" use:enhance=`);
+			expect(start, action).toBeGreaterThan(-1);
+			return markup.slice(start, markup.indexOf('}}>', start));
+		};
+		// Shape, not spelling: any early return through cancel() on the pending
+		// flag counts, however it is braced or wrapped.
+		const guardsOn = (flag: string) =>
+			new RegExp(`if\\s*\\(\\s*${flag}\\s*\\)\\s*\\{?\\s*return\\s+cancel\\(\\s*\\)`);
+		const save = handler('saveFuzzysearchKey');
+		expect(save).toContain('({ cancel })');
+		expect(save).toMatch(guardsOn('savingFuzzysearchKey'));
+		const remove = handler('removeFuzzysearchKey');
+		expect(remove).toContain('({ cancel })');
+		expect(remove).toMatch(guardsOn('removingFuzzysearchKey'));
+	});
+
+	// The panel opens where the pointer already is: the section is last on the
+	// tab, so focusing Keep scrolls the page up and confirm Remove can land on
+	// the pixel Remove key was just clicked. Losing this guard would let a double
+	// click remove the key with the question unread, and no geometry assertion
+	// can cover every line-wrap of the confirmation sentence. The guard is
+	// pointer-only: a keyboard user who Shift+Tabs from Keep and presses Enter
+	// cannot have suffered the hazard, and their activation must go through.
+	// It is also place-bound: only a click near where Remove key was clicked is
+	// the reflex, so a deliberate click elsewhere on the button is not swallowed.
+	it('ignores a confirm pointer click that lands inside the reflex window', () => {
+		// Remove key records when and where the panel opened, next to the flag.
+		const opens = src.indexOf('confirmingFuzzysearchRemove = true');
+		expect(opens).toBeGreaterThan(-1);
+		const records = src.slice(opens - 240, opens);
+		expect(records).toContain('fuzzysearchRemoveOpenedAt = performance.now()');
+		expect(records).toContain('fuzzysearchRemoveOpenedX = event.clientX');
+		expect(records).toContain('fuzzysearchRemoveOpenedY = event.clientY');
+		const start = src.indexOf('action="?/removeFuzzysearchKey" use:enhance=');
+		expect(start).toBeGreaterThan(-1);
+		const form = src.slice(start, src.indexOf('</form>', start));
+		// The button's own onclick blocks the submit, and only for a click that
+		// carries a positive detail — a keyboard-synthesized click carries 0.
+		const click = form.slice(form.indexOf('onclick='));
+		expect(click).toMatch(/event\.detail\s*>\s*0/);
+		// ...and only for one that landed within the reflex distance of the
+		// recorded point, on both axes.
+		expect(click).toMatch(
+			/Math\.abs\(\s*event\.clientX - fuzzysearchRemoveOpenedX\s*\)\s*<=\s*reflexPx/
+		);
+		expect(click).toMatch(
+			/Math\.abs\(\s*event\.clientY - fuzzysearchRemoveOpenedY\s*\)\s*<=\s*reflexPx/
+		);
+		// That distance is pointer-dependent, decided at click time: a fine
+		// pointer gets the narrow box, a coarse one the wide box that survives
+		// touch jitter.
+		expect(click).toContain("window.matchMedia?.('(pointer: coarse)')");
+		expect(click).toContain('FUZZYSEARCH_REMOVE_REFLEX_COARSE_PX');
+		expect(click).toContain('FUZZYSEARCH_REMOVE_REFLEX_PX');
+		expect(click).toMatch(
+			/FUZZYSEARCH_REMOVE_REFLEX_MS[\s\S]{0,300}event\.preventDefault\(\s*\)/
+		);
+		// The enhance callback keeps only the in-flight guard: no time check there,
+		// or a keyboard Enter would be swallowed again.
+		const handler = src.slice(start, src.indexOf('}}>', start));
+		expect(handler).not.toContain('fuzzysearchRemoveOpenedAt');
+		// Half a second: long enough to swallow a double click, short enough that
+		// a deliberate second click still goes through.
+		expect(src).toContain('const FUZZYSEARCH_REMOVE_REFLEX_MS = 500;');
+	});
+
+	// A failed removal left the key in place, so closing the panel would look
+	// exactly like pressing Keep and the operator would never learn it failed.
+	it('closes the confirmation only on success, and reports a failure', () => {
+		const start = src.indexOf('action="?/removeFuzzysearchKey" use:enhance=');
+		expect(start).toBeGreaterThan(-1);
+		const handler = src.slice(start, src.indexOf('}}>', start));
+		const success = handler.slice(handler.indexOf("if (result.type === 'success')"));
+		const branch = success.slice(0, success.indexOf('} else {'));
+		expect(branch).toContain('confirmingFuzzysearchRemove = false;');
+		expect(branch).toContain('m.admin_settings_lookup_removed()');
+		// Exactly one close, and it is the one inside the success branch.
+		expect(handler.match(/confirmingFuzzysearchRemove = false;/g)).toHaveLength(1);
+		// The failure path says so and puts focus back on the Keep button, which
+		// is still mounted.
+		const failed = success.slice(success.indexOf('} else {'));
+		expect(failed).toContain('toast.error(m.admin_something_wrong())');
+		expect(failed).toContain('fuzzysearchKeepButton?.focus()');
+	});
+
+	// A live region that mounts with its text already in place is not announced,
+	// so this one sits outside every conditional branch — moving it inside
+	// {#if savingFuzzysearchKey} would leave the presence check above green.
+	it('mounts the live region ahead of every conditional branch', () => {
+		const section = src.slice(src.indexOf('class="security-section lookup-section"'));
+		const markup = section.slice(0, section.indexOf('</section>'));
+		expect(markup.indexOf('role="status"')).toBeLessThan(markup.indexOf('{#if'));
+		const region = markup.slice(markup.indexOf('role="status"'));
+		const body = region.slice(0, region.indexOf('</span>'));
+		expect(body).toContain('m.admin_saving()');
+		expect(body).toContain('m.admin_settings_lookup_removing()');
 	});
 });

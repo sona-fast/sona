@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { applyAction, enhance } from '$app/forms';
 	import { afterNavigate, invalidateAll, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -176,6 +177,42 @@
 	let savingRecoveryEmail = $state(false);
 	let savingSupporterKey = $state(false);
 	let removingSupporterKey = $state(false);
+	let savingFuzzysearchKey = $state(false);
+	let removingFuzzysearchKey = $state(false);
+	// Purely client state: the Remove key button swaps the action row for a
+	// confirmation block rather than opening a dialog over the section.
+	let confirmingFuzzysearchRemove = $state(false);
+	// When and where the panel opened, and how long and how near confirm Remove
+	// ignores a pointer click. Not reactive: only the confirm button's onclick
+	// below reads them.
+	let fuzzysearchRemoveOpenedAt = 0;
+	let fuzzysearchRemoveOpenedX = 0;
+	let fuzzysearchRemoveOpenedY = 0;
+	const FUZZYSEARCH_REMOVE_REFLEX_MS = 500;
+	const FUZZYSEARCH_REMOVE_REFLEX_PX = 24;
+	const FUZZYSEARCH_REMOVE_REFLEX_COARSE_PX = 64;
+	// Focus is moved by hand across the swap: every button involved UNMOUNTS as
+	// the state changes, so without this a keyboard user lands back on <body> and
+	// restarts from the top of a long page. (A bare `autofocus` doesn't do it —
+	// the document already has a focused element when the panel opens.)
+	let fuzzysearchKeepButton = $state<HTMLButtonElement | null>(null);
+	let fuzzysearchRemoveButton = $state<HTMLButtonElement | null>(null);
+	let fuzzysearchKeyInput = $state<HTMLInputElement | null>(null);
+	$effect(() => {
+		if (confirmingFuzzysearchRemove) fuzzysearchKeepButton?.focus();
+	});
+	// The mask's bullet run is read out one bullet at a time, so it is hidden from
+	// the accessibility tree and the part that identifies the key is spoken instead.
+	const fuzzysearchKeyTail = $derived(data.fuzzysearchKeyRecord?.replace(/^•+/, '') ?? '');
+	// The refusal marker drives the state selector, a label and a class in the
+	// section below; one local keeps the state machine readable in one place.
+	// The date itself, not a flag: the branch that renders it is guarded on this
+	// value, so keeping it here saves a fallback for a state that cannot occur.
+	const fuzzysearchKeyRefusedAt = $derived(data.fuzzysearchKeyRefusedAt);
+	// A key staged as a deploy secret owns the whole section: nothing in it is
+	// editable from the browser. Named once so the three blocks below cannot
+	// drift apart one guard at a time.
+	const fuzzysearchKeyEditable = $derived(!data.fuzzysearchKeyFromEnv);
 
 	// Localized "in early access right now" list, joined for the status line. Empty
 	// until a pilot feature is registered, in which case the "nothing" line shows.
@@ -1388,6 +1425,210 @@
 	</form>
 {/if}
 
+<!-- Artist lookup (SONA-156): the FuzzySearch connection. Four states — not
+     connected, connected, confirming removal, and key refused — all driven by
+     load data except the confirmation, which is client-only. The key itself
+     never reaches this component: only the mask built in load. -->
+<section class="security-section lookup-section" data-tab="connections">
+	<h2>{m.admin_settings_lookup_heading()}</h2>
+	<!-- aria-busy on a button is a region attribute most screen readers ignore, so
+	     the in-flight state gets its own live region here, mounted for the life of
+	     the section (StickerPackForm's pattern). The outcome is the Toaster's. -->
+	<span class="sr-only" role="status">
+		{#if savingFuzzysearchKey}{m.admin_saving()}{:else if removingFuzzysearchKey}{m.admin_settings_lookup_removing()}{/if}
+	</span>
+	{#if fuzzysearchKeyRefusedAt}
+		<div class="key-eyebrow refused">{m.admin_settings_lookup_refused_eyebrow()}</div>
+		<!-- Directly under the eyebrow, in the supporter card's lapsed-line voice:
+		     this one sentence is the whole reason the refused state exists, and in
+		     the muted status voice further down it read as more boilerplate. -->
+		<p class="lapsed-line">{m.admin_settings_lookup_refused_line({ date: fuzzysearchKeyRefusedAt })}</p>
+	{:else if data.fuzzysearchKeySet}
+		<div class="key-eyebrow connected">{m.admin_settings_lookup_connected_eyebrow()}</div>
+	{/if}
+	<!-- Disclosure first, in both connected and unconnected states: the operator
+	     is sending their own art to a third party, and that has to be readable
+	     before the key goes in, not only after. -->
+	<p class="explainer-body">{m.admin_settings_lookup_explainer_1()}</p>
+	<p class="explainer-body">{m.admin_settings_lookup_explainer_2()}</p>
+
+	{#if data.fuzzysearchKeyFromEnv}
+		<p class="status-line">{m.admin_settings_lookup_secret_pre()}<code>FUZZYSEARCH_API_KEY</code>{m.admin_settings_lookup_secret_post()}</p>
+	{:else if data.fuzzysearchKeySet}
+		<dl class="key-dl">
+			<!-- Visible in the refused state, where the record sits above a "New
+			     FuzzySearch API key" field and would otherwise be an unlabelled pill;
+			     the connected state's surrounding copy already names it. -->
+			<dt class={fuzzysearchKeyRefusedAt ? 'record-label' : 'sr-only'}>
+				{fuzzysearchKeyRefusedAt
+					? m.admin_settings_lookup_refused_key_label()
+					: m.admin_settings_lookup_saved_key_label()}
+			</dt>
+			<dd class="key-record">
+				<span aria-hidden="true">{data.fuzzysearchKeyRecord}</span>
+				{#if fuzzysearchKeyTail}
+					<span class="sr-only">{m.admin_settings_lookup_key_ending({ tail: fuzzysearchKeyTail })}</span>
+				{/if}
+			</dd>
+		</dl>
+		<!-- Kept rendered while the confirmation is open: dropping it at the same
+		     moment the button row is swapped pulled the block up by 34-54px, which
+		     put the destructive Remove under the pixel Remove key was clicked. -->
+		{#if !fuzzysearchKeyRefusedAt}
+			<p class="status-line replace-line">{m.admin_settings_lookup_replace()}</p>
+		{/if}
+	{/if}
+
+	{#if fuzzysearchKeyEditable && (!data.fuzzysearchKeySet || fuzzysearchKeyRefusedAt)}
+		<form class="save-form" method="POST" action="?/saveFuzzysearchKey" use:enhance={({ cancel }) => {
+			// aria-busy replaced `disabled`, so a second activation while the first
+			// request is in flight would otherwise run a second handler.
+			if (savingFuzzysearchKey) return cancel();
+			savingFuzzysearchKey = true;
+			return async ({ result, update }) => {
+				await update({ reset: false });
+				savingFuzzysearchKey = false;
+				if (result.type === 'success') {
+					toast.success(m.admin_settings_lookup_saved());
+					// The form unmounts on a successful save, taking the focused Save
+					// button with it — hand focus to the button that replaces it.
+					await tick();
+					fuzzysearchRemoveButton?.focus();
+				}
+			};
+		}}>
+			<label>
+				<span>{fuzzysearchKeyRefusedAt ? m.admin_settings_lookup_new_key_label() : m.admin_settings_lookup_key_label()}</span>
+				<input
+					type="password"
+					class="input"
+					id="fuzzysearch-key"
+					name="fuzzysearchApiKey"
+					autocomplete="off"
+					bind:this={fuzzysearchKeyInput}
+					placeholder={m.admin_settings_lookup_key_placeholder()}
+					aria-invalid={form?.fuzzysearchKeyError ? 'true' : undefined}
+					aria-describedby={form?.fuzzysearchKeyError ? 'fuzzysearch-key-error' : undefined}
+				/>
+			</label>
+			{#if form?.fuzzysearchKeyError}
+				<p class="field-error" id="fuzzysearch-key-error" role="alert">{m.admin_settings_lookup_error_invalid()}</p>
+			{/if}
+			<!-- Above the save row, like the registry section's token hint: an
+			     operator without a key needs the link before the button. -->
+			{#if !fuzzysearchKeyRefusedAt}
+				<p class="hint">{m.admin_settings_lookup_hint_pre()}<a class="link-inline" href="https://api.fuzzysearch.net/selfserve" target="_blank" rel="noopener noreferrer">api.fuzzysearch.net/selfserve<span class="sr-only">{' '}{m.link_opens_new_tab()}</span></a>{m.admin_settings_lookup_hint_post()}</p>
+			{/if}
+			<div class="save-row">
+				<!-- aria-busy, not disabled: disabling the button that holds focus
+				     drops the keyboard user on <body> for the length of the request. -->
+				<button type="submit" class="btn btn-primary" aria-busy={savingFuzzysearchKey}>
+					{savingFuzzysearchKey ? m.admin_saving() : m.admin_settings_lookup_save()}
+				</button>
+			</div>
+		</form>
+	{/if}
+
+	<!-- Below the save row on purpose: in the refused state the operator almost
+	     always wants to paste a replacement, and disconnecting is the rarer exit.
+	     Guarded on the key being SET, not on the state being connected — a refused
+	     key the operator cannot remove would be a dead end. -->
+	{#if fuzzysearchKeyEditable && data.fuzzysearchKeySet}
+		{#if confirmingFuzzysearchRemove}
+			<div class="remove-confirm">
+				<p id="fuzzysearch-remove-confirm">{m.admin_settings_lookup_confirm()}</p>
+				<div class="confirm-actions">
+					<form method="POST" action="?/removeFuzzysearchKey" use:enhance={({ cancel }) => {
+						if (removingFuzzysearchKey) return cancel();
+						removingFuzzysearchKey = true;
+						return async ({ result, update }) => {
+							await update({ reset: false });
+							removingFuzzysearchKey = false;
+							if (result.type === 'success') {
+								confirmingFuzzysearchRemove = false;
+								toast.success(m.admin_settings_lookup_removed());
+								// Both buttons are gone now — send focus to the field that
+								// replaced them rather than dropping it on <body>.
+								await tick();
+								fuzzysearchKeyInput?.focus();
+							} else {
+								// The key is still stored: closing the panel here would look
+								// exactly like pressing Keep. Say it failed, leave the
+								// confirmation open, and put focus back on Keep.
+								toast.error(m.admin_something_wrong());
+								await tick();
+								fuzzysearchKeepButton?.focus();
+							}
+						};
+					}}>
+						<button
+							type="submit"
+							class="btn btn-destructive"
+							aria-busy={removingFuzzysearchKey}
+							aria-describedby="fuzzysearch-remove-confirm"
+							onclick={(event) => {
+								// Pointer only, and only the reflex. The section is last on the tab,
+								// so focusing Keep scrolls the page up under a stationary pointer and
+								// this button can land on the pixel Remove key was just clicked; a
+								// click that soon after the panel opened AND that near where the
+								// pointer already was is a reflex, not a decision. A click elsewhere
+								// on the button means the pointer moved, so it goes through at once.
+								// A keyboard activation carries detail 0 and cannot hit that hazard,
+								// so Enter straight after Shift+Tab still removes the key.
+								// A finger is not a mouse: an impatient second tap lands a couple of
+								// dozen pixels off the first, so a coarse pointer gets a wider box,
+								// and a browser without matchMedia is treated as coarse.
+								const reflexPx =
+									(window.matchMedia?.('(pointer: coarse)').matches ?? true)
+										? FUZZYSEARCH_REMOVE_REFLEX_COARSE_PX
+										: FUZZYSEARCH_REMOVE_REFLEX_PX;
+								if (
+									event.detail > 0 &&
+									performance.now() - fuzzysearchRemoveOpenedAt < FUZZYSEARCH_REMOVE_REFLEX_MS &&
+									Math.abs(event.clientX - fuzzysearchRemoveOpenedX) <= reflexPx &&
+									Math.abs(event.clientY - fuzzysearchRemoveOpenedY) <= reflexPx
+								)
+									event.preventDefault();
+							}}
+						>
+							{removingFuzzysearchKey
+								? m.admin_settings_lookup_removing()
+								: m.admin_settings_lookup_confirm_remove()}
+						</button>
+					</form>
+					<button
+						type="button"
+						class="btn btn-outline"
+						aria-describedby="fuzzysearch-remove-confirm"
+						bind:this={fuzzysearchKeepButton}
+						onclick={async () => {
+							confirmingFuzzysearchRemove = false;
+							await tick();
+							fuzzysearchRemoveButton?.focus();
+						}}
+					>{m.admin_settings_lookup_confirm_keep()}</button>
+				</div>
+			</div>
+		{:else}
+			<div class="key-actions">
+				<button
+					type="button"
+					class="btn btn-outline btn-remove"
+					bind:this={fuzzysearchRemoveButton}
+					onclick={(event) => {
+						fuzzysearchRemoveOpenedAt = performance.now();
+						fuzzysearchRemoveOpenedX = event.clientX;
+						fuzzysearchRemoveOpenedY = event.clientY;
+						confirmingFuzzysearchRemove = true;
+					}}
+				>
+					{m.admin_settings_lookup_remove()}
+				</button>
+			</div>
+		{/if}
+	{/if}
+</section>
+
 <section class="danger-zone" data-tab="account">
 	<h2>{m.admin_settings_danger_zone()}</h2>
 	<div class="danger-divider"></div>
@@ -2353,6 +2594,100 @@
 	}
 	.key-actions {
 		margin-top: 14px;
+	}
+
+	/* ── Artist lookup / FuzzySearch (SONA-156) ───────────────── */
+	/* The state colour rides the eyebrow, the section's only status surface —
+	   the same convention the supporter card uses for its countdown. */
+	.lookup-section .key-eyebrow.connected {
+		color: var(--status-ok);
+	}
+	.lookup-section .key-eyebrow.refused {
+		color: var(--status-warn);
+	}
+	/* .explainer-body carries no margin of its own (the supporter card renders a
+	   single paragraph), so the rhythm is set here: paragraph to paragraph, and
+	   prose to whatever the state puts next — a field label, the key record, or
+	   the secret note — all get the section's 14px step. */
+	.lookup-section .explainer-body {
+		margin: 0 0 14px;
+	}
+	/* The save form only: a bare `form` selector also matches the removal
+	   confirmation's inner form, which is a centered flex item, so the margin
+	   pushed Remove below Keep. */
+	.lookup-section .save-form {
+		margin-top: 14px;
+	}
+	/* The <dl> holds the label for the mask; it must not add spacing of its own
+	   on top of .key-record. */
+	.lookup-section .key-dl {
+		margin: 14px 0 0;
+	}
+	.lookup-section .key-dl dd {
+		margin: 0;
+	}
+	/* Visible only in the refused state, where the record needs naming. */
+	.lookup-section .record-label {
+		font-size: 13px;
+		color: var(--muted-foreground);
+		margin-bottom: 6px;
+	}
+	.lookup-section .replace-line {
+		margin-top: 14px;
+		margin-bottom: 0;
+	}
+	/* Bordered pill, destructive text: removing the key is reversible (paste a
+	   new one) so it doesn't earn a filled destructive button here — the filled
+	   one is on the confirmation, where the action actually happens. It rides
+	   .btn-outline so the section's two bordered buttons behave alike; only the
+	   label colour and the boundary differ. */
+	/* The boundary is mixed toward --foreground rather than left on --border,
+	   which measures under 1.5:1 against the page and fails SC 1.4.11 as a
+	   control edge (the treatment .btn-outline already uses on hover). */
+	.lookup-section .btn-remove {
+		border-color: color-mix(in srgb, var(--border) 60%, var(--foreground));
+		color: var(--destructive);
+	}
+	/* The fill is pinned back to --background: .btn-outline's hover mixes it 88%
+	   toward white or black, and --destructive on that mix drops to 3.6-4.4:1 in
+	   five of the six themes (SC 1.4.3). The hover signal rides the border. */
+	.lookup-section .btn-remove:hover {
+		background-color: var(--background);
+		border-color: var(--destructive);
+	}
+	/* The refused state stacks "Save key" over "Remove key"; at the section's
+	   14px step they read as one button group, so the destructive exit gets a
+	   wider gap from the form it does not belong to. The confirmation panel takes
+	   the same step, since it replaces that row in place. */
+	.lookup-section .save-form + .key-actions,
+	.lookup-section .save-form + .remove-confirm {
+		margin-top: 24px;
+	}
+	.lookup-section .remove-confirm {
+		margin-top: 14px;
+		padding: 14px 16px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-s);
+		background: var(--secondary);
+	}
+	.lookup-section .remove-confirm p {
+		margin: 0 0 14px;
+		font-size: 14px;
+		color: var(--foreground);
+		line-height: 1.55;
+		max-width: 62ch;
+	}
+	/* Inside the panel the outline button's own --border edge sits at 1.0-1.3:1
+	   against --secondary (identical hex in two dark themes), so the boundary is
+	   mixed toward --foreground here: 5.4-7.6:1 on the panel. SC 1.4.11. */
+	.lookup-section .remove-confirm .btn-outline {
+		border-color: color-mix(in srgb, var(--border) 30%, var(--foreground));
+	}
+	.lookup-section .confirm-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+		align-items: center;
 	}
 	.save-row {
 		margin-top: 20px;
