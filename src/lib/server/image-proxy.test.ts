@@ -114,14 +114,34 @@ describe('proxyStoredImage', () => {
 		expect((await proxy('image/png')).headers.get('content-type')).toBe('image/png');
 	});
 
-	it('demotes a non-image content type to a download', async () => {
-		expect((await proxy('text/html')).headers.get('content-type')).toBe('application/octet-stream');
+	// The type parameters an upstream may attach are not part of the media type.
+	it('passes an allowed type through with its parameters', async () => {
+		const res = await proxy('Image/JPEG; charset=binary');
+		expect(res.headers.get('content-type')).toBe('Image/JPEG; charset=binary');
+		expect(res.headers.get('content-disposition')).toBe('inline');
+	});
+
+	// Narrower than image/*: SVG is an image type that carries script, so it is
+	// demoted exactly like a text/html payload wearing an image URL.
+	it('demotes svg and non-image types to a download', async () => {
+		for (const type of ['image/svg+xml', 'text/html']) {
+			const res = await proxy(type);
+			expect(res.headers.get('content-type'), type).toBe('application/octet-stream');
+			expect(res.headers.get('content-disposition'), type).toBe('attachment');
+		}
 	});
 
 	it('serves inline and never caches', async () => {
 		const res = await proxy('image/png');
 		expect(res.headers.get('content-disposition')).toBe('inline');
 		expect(res.headers.get('cache-control')).toBe('private, no-store');
+	});
+
+	// A second, redundant layer: even a response a browser decided to render
+	// gets an opaque origin with scripts off.
+	it('sandboxes the response', async () => {
+		expect((await proxy('image/png')).headers.get('content-security-policy')).toBe('sandbox');
+		expect((await proxy('text/html')).headers.get('content-security-policy')).toBe('sandbox');
 	});
 
 	it('refuses a private host without fetching', async () => {

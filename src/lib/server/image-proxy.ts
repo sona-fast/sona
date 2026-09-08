@@ -12,8 +12,11 @@
  * Callers pass a URL the SERVER looked up (a stored row, a setting), never one
  * the client supplied, which is what keeps this from being an SSRF hole. On top
  * of that: private and link-local hosts are refused, redirects are not
- * followed, and only image/* content types are echoed back.
+ * followed, and only the raster types the storage layer itself accepts are
+ * echoed back inline.
  */
+
+import { isAllowedImageType } from './storage/allowlist';
 
 // Loopback / unspecified / RFC1918 / link-local / ULA hosts a stored URL must
 // never point the server-side fetch at.
@@ -90,13 +93,18 @@ export async function proxyStoredImage(
 	if (!upstream.ok || !upstream.body) return null;
 
 	const contentType = upstream.headers.get('content-type') ?? '';
-	// Media types are case-insensitive, so an upstream answering `Image/PNG` is
-	// still an image and must not be demoted to a download.
-	const isImage = contentType.toLowerCase().startsWith('image/');
+	// The same raster allowlist stored uploads pass, rather than the whole of
+	// `image/*`: SVG is an image type that carries script, and an upstream is
+	// free to label anything it likes. isAllowedImageType is case-insensitive
+	// and ignores parameters, so `Image/JPEG; charset=binary` still passes.
+	// Anything else is handed back as an opaque download that no browser will
+	// render, with a sandbox CSP as a second, redundant layer in case one does.
+	const isImage = isAllowedImageType(contentType);
 	return new Response(upstream.body, {
 		headers: {
 			'Content-Type': isImage ? contentType : 'application/octet-stream',
-			'Content-Disposition': 'inline',
+			'Content-Disposition': isImage ? 'inline' : 'attachment',
+			'Content-Security-Policy': 'sandbox',
 			'Cache-Control': 'private, no-store'
 		}
 	});
