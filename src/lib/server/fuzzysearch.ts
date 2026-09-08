@@ -354,6 +354,10 @@ export async function searchImage(
 			method: 'POST',
 			headers: { 'x-api-key': key },
 			body: form,
+			// Never follow a redirect: fetch would replay the key header at
+			// whatever host the Location points to. A 3xx falls through to
+			// `!res.ok` and reads as unavailable.
+			redirect: 'manual',
 			signal: AbortSignal.timeout(FUZZYSEARCH_TIMEOUT_MS)
 		});
 	} catch {

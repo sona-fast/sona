@@ -2069,6 +2069,14 @@ describe('artist lookup section markup (SONA-156)', () => {
 
 	it('takes the key in a password field and never renders a stored key', () => {
 		expect(src).toContain('name="fuzzysearchApiKey"');
+		// The name alone would still pass if the field became a text input, which
+		// puts the key on screen and into the browser's autofill store.
+		const field = src.slice(
+			src.lastIndexOf('<input', src.indexOf('name="fuzzysearchApiKey"')),
+			src.indexOf('/>', src.indexOf('name="fuzzysearchApiKey"'))
+		);
+		expect(field).toContain('type="password"');
+		expect(field).toContain('autocomplete="off"');
 		expect(src).toContain('data.fuzzysearchKeyRecord');
 		expect(src).not.toContain('data.fuzzysearchApiKey');
 	});

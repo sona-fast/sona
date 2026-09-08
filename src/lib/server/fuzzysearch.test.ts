@@ -187,6 +187,8 @@ describe('searchImage — request shape', () => {
 		expect(calls[0].init.method).toBe('POST');
 		expect((calls[0].init.headers as Record<string, string>)['x-api-key']).toBe('secret-key');
 		expect(calls[0].init.signal).toBeInstanceOf(AbortSignal);
+		// Following a redirect would replay the key header at the Location host.
+		expect(calls[0].init.redirect).toBe('manual');
 		const body = calls[0].init.body as FormData;
 		expect(body).toBeInstanceOf(FormData);
 		const sent = body.get('image');
@@ -230,6 +232,8 @@ describe('searchImage — failure mapping', () => {
 		// A revoked or suspended key answers 403, not 401; both are the refused
 		// state the settings card can act on.
 		[403, 'key_refused'],
+		// Nothing follows the redirect, so the 3xx itself is the answer.
+		[302, 'unavailable'],
 		[429, 'rate_limited'],
 		[413, 'too_large'],
 		[500, 'unavailable'],
