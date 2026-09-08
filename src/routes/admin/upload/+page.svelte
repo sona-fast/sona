@@ -38,6 +38,9 @@
 	// still submit through their own name attributes, unchanged.
 	let tagsValue = $state('');
 	let sourcePostUrl = $state('');
+	// Set by the suggestion control while its hint is refusing this URL, so a
+	// screen reader user who tabs to the field finds the refusal on it.
+	let sourceDescribedBy = $state<string | undefined>(undefined);
 	// entail.dev's rating for the last suggestion, shown beside the NSFW box. A
 	// suggestion never checks that box; `nsfw` only moves when the operator does.
 	let suggestedRating = $state<EntailRating | null>(null);
@@ -534,6 +537,7 @@
 	<TagSuggestions
 		bind:value={tagsValue}
 		bind:rating={suggestedRating}
+		bind:sourceDescribedBy
 		sourceUrl={sourcePostUrl}
 		existingTags={data.tags.map((t) => t.name)}
 		placeholder={m.admin_upload_tags_placeholder()}
@@ -595,6 +599,7 @@
 			class="input"
 			placeholder={m.admin_upload_source_placeholder()}
 			name="sourcePostUrl"
+			aria-describedby={sourceDescribedBy}
 			bind:value={sourcePostUrl}
 		/>
 	</label>

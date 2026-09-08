@@ -1460,6 +1460,7 @@
 	"admin_tag_suggest_empty_title": "提案できるタグはありません",
 	"admin_tag_suggest_empty_body": "entail.devは投稿を読み取りましたが、確信できるタグは見つかりませんでした。",
 	"admin_tag_suggest_empty_existing_body": "entail.devが返したタグは、どれもすでにタグ欄にあります。",
+	"admin_tag_suggest_empty_no_image_body": "その投稿には、entail.devが見る画像がありません。",
 	"admin_tag_suggest_rated_safe": "entail.devの判定：全年齢向け。",
 	"admin_tag_suggest_rated_questionable": "entail.devの判定：センシティブ。",
 	"admin_tag_suggest_rated_explicit": "entail.devの判定：成人向け。",

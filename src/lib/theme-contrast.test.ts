@@ -396,6 +396,25 @@ describe('muted-foreground non-text contrast, every theme × surface × mode (WC
 	}
 });
 
+// The refused-link hint under the Tags field is coloured --status-warn, the same
+// token the suggestion tray's eyebrow uses (SONA-220). It is small text on the
+// admin form's card, so it is held to 4.5:1 there. --status-warn is declared once
+// per MODE (:root for dark, [data-theme='light'] for light) and inherited by the
+// alternate themes, so the colour comes from the mode block and the surface from
+// the theme's own block. A failure here is a finding to report, not to silence.
+describe('warn text WCAG AA contrast on cards, every theme × mode (SONA-220)', () => {
+	const warnFor = (sel: string) =>
+		blockToken(sel.includes("[data-theme='light']") ? "[data-theme='light']" : ':root', 'status-warn');
+
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: text colored --status-warn meets 4.5:1 on the ${surface} surface`, () => {
+				expect(contrast(warnFor(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+});
+
 // The .btn hover shifts only the fill (color-mix), never the label opacity: a
 // blanket `opacity` hover composited the label over the page and dropped its
 // contrast below AA in several themes (#103). Here we parse the actual color-mix

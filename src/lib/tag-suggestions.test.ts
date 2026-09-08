@@ -88,7 +88,32 @@ describe('fromResponse — a 200', () => {
 
 	it('is empty when the post was read but nothing came back', () => {
 		// A tweet with no photo, or a post where every tag fell below the floor.
-		expect(fromResponse(200, ok([]), [])).toEqual({ kind: 'empty', skippedExisting: false });
+		expect(fromResponse(200, ok([]), [])).toEqual({
+			kind: 'empty',
+			skippedExisting: false,
+			noImage: false
+		});
+	});
+
+	it('is unavailable when a 200 is not the shape the endpoint answers with', () => {
+		// A re-gated fork answers the same URL with an HTML login page, which
+		// reads as a null body. "Found nothing" would hide the Try again that
+		// works again once the operator is back through the gate.
+		expect(fromResponse(200, null, [])).toEqual({ kind: 'unavailable' });
+		expect(fromResponse(200, 'not json', [])).toEqual({ kind: 'unavailable' });
+		expect(fromResponse(200, { ...ok([]), tags: 'fox' }, [])).toEqual({ kind: 'unavailable' });
+		expect(fromResponse(200, {}, [])).toEqual({ kind: 'unavailable' });
+	});
+
+	it('flags a post with no picture, which nothing was asked about', () => {
+		// An X post that is text, video or a GIF: the endpoint answers 200 with no
+		// tags and imageCount 0 without asking entail.dev anything, so crediting
+		// the classifier with a verdict would be false.
+		expect(fromResponse(200, ok([], { imageCount: 0 }), [])).toEqual({
+			kind: 'empty',
+			skippedExisting: false,
+			noImage: true
+		});
 	});
 
 	it('drops tags the Tags field already holds, matched the way the sanitizer does', () => {
@@ -103,7 +128,8 @@ describe('fromResponse — a 200', () => {
 		// field already held all of them.
 		expect(fromResponse(200, ok(['fox', 'beach']), ['beach', 'fox'])).toEqual({
 			kind: 'empty',
-			skippedExisting: true
+			skippedExisting: true,
+			noImage: false
 		});
 	});
 
@@ -189,6 +215,14 @@ describe('the tray a finished state draws', () => {
 			warn: false,
 			retry: false
 		});
+		// Nothing looked at the post, so the tray says what the post is missing
+		// rather than what entail.dev concluded.
+		expect(trayFor({ kind: 'empty', noImage: true })).toEqual({
+			title: 'No tags to suggest',
+			body: 'That post has no picture for entail.dev to look at.',
+			warn: false,
+			retry: false
+		});
 		expect(trayFor({ kind: 'notFound' })).toMatchObject({
 			title: 'Suggestions unavailable',
 			body: "entail.dev couldn't read this post.",
@@ -255,6 +289,9 @@ describe('the sentences the live region reads', () => {
 		);
 		expect(sentenceFor({ kind: 'empty', skippedExisting: true })).toBe(
 			'No tags to suggest. entail.dev only returned tags that are already in the Tags field.'
+		);
+		expect(sentenceFor({ kind: 'empty', noImage: true })).toBe(
+			'No tags to suggest. That post has no picture for entail.dev to look at.'
 		);
 		expect(sentenceFor({ kind: 'notFound' })).toBe(
 			"Suggestions unavailable. entail.dev couldn't read this post."

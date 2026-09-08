@@ -36,7 +36,8 @@
 		rating = $bindable(null),
 		existingTags = [],
 		placeholder = '',
-		firstTileOnly = false
+		firstTileOnly = false,
+		sourceDescribedBy = $bindable(undefined)
 	}: {
 		/** The Tags input's value, bound out to the form that submits it. */
 		value: string;
@@ -52,6 +53,11 @@
 		placeholder?: string;
 		/** Multi-tile uploads suggest for the parent tile only; say so. */
 		firstTileOnly?: boolean;
+		/** The id the form should hang off its Source Post URL input while the
+		 *  refusal under this field is about that URL, or undefined. The hint
+		 *  lives here; the field it refuses lives in the form, and a screen
+		 *  reader that lands on that field finds nothing otherwise. */
+		sourceDescribedBy?: string | undefined;
 	} = $props();
 
 	// One Tags field per form, so the ids are fixed.
@@ -115,10 +121,14 @@
 	// keystroke, and a region rewritten with the sentence it already holds
 	// announces it all over again — and leaving the state arms it again, so
 	// clearing the field a second time is announced a second time.
+	// The one condition the effect below and the tray body both read: a retryable
+	// tray still open over a field that no longer holds a post.
+	const noPostToRetry = $derived(retryTrayOpen && source === null);
+
 	let spoken = false;
 	$effect(() => {
 		const sentence = m.admin_tag_suggest_retry_needs_post_body();
-		if (retryTrayOpen && source === null) {
+		if (noPostToRetry) {
 			if (spoken) return;
 			spoken = true;
 			announcement = sentence;
@@ -130,8 +140,11 @@
 		// holding it is a region that cannot announce it again: rewriting a live
 		// region with the text it already has is not a change, so nothing is
 		// read. Cleared only while it is still this sentence — a lookup that
-		// started in the meantime has written its own. Untracked, or the write
-		// below would re-run the effect that made it.
+		// started in the meantime has written its own. No UI path reaches that
+		// today (a lookup refuses to start while the field holds no post, so the
+		// exit has already run by the time one can), so the guard is defensive
+		// and is not driven by a test. Untracked, or the write below would re-run
+		// the effect that made it.
 		if (untrack(() => announcement) === sentence) announcement = '';
 	});
 
@@ -155,6 +168,13 @@
 		});
 	});
 
+	// A 422 refuses the URL in the other field, so that field points at the hint
+	// saying so for as long as the refusal stands. Cleared with the state, which
+	// the effect above resets as soon as the operator edits the URL.
+	$effect(() => {
+		sourceDescribedBy = suggestion.kind === 'noSource' ? hintId : undefined;
+	});
+
 	// The pill points at the sentence that explains its current state: the hint
 	// normally, the "Reading the …" line while a lookup runs, and the applied
 	// line once tags have landed.
@@ -175,12 +195,26 @@
 		await tick();
 		pill?.focus();
 
-		const { status, body } = await requestSuggestions({ sourcePostUrl: sourceUrl });
+		// What the lookup went out with. A 422 is a refusal of THIS link, so the
+		// answer has to be checked against the field it came from; nothing keeps
+		// the URL past this call.
+		const asked = sourceUrl;
+		const { status, body } = await requestSuggestions({ sourcePostUrl: asked });
 
 		// The operator asked again while this was in flight; that answer wins.
 		if (seq !== requestSeq) return;
 
 		const next = fromResponse(status, body, parseTagInput(value));
+		// The field moved on while the refusal was in flight. Showing it would
+		// leave the hint refusing a link that is no longer there, and the reset
+		// effect below has already run for that edit, so it would stay. Dropped
+		// instead: back to idle, with nothing announced about a link nobody can
+		// see any more.
+		if (next.kind === 'noSource' && sourceUrl !== asked) {
+			suggestion = { kind: 'idle' };
+			announcement = '';
+			return;
+		}
 		suggestion = next;
 		rating = next.kind === 'suggested' ? next.rating : null;
 		announcement = sentenceFor(next);
@@ -259,7 +293,10 @@
 			{m.admin_tag_suggest_applied({ count: suggestion.count })}
 		</p>
 	{:else}
-		<p class="hint" id={hintId}>
+		<!-- A refused link is a warning, not a note: in the tray the same sentence
+		     gets the warn eyebrow, and left in the plain hint colour here it reads
+		     like the "Existing:" line under it. -->
+		<p class="hint" class:warn={suggestion.kind === 'noSource'} id={hintId}>
 			{hint}{#if firstTileOnly && source !== null}&nbsp;{m.admin_tag_suggest_hint_first_tile()}{/if}
 		</p>
 	{/if}
@@ -327,9 +364,7 @@
 				     for a post sits about 60px from this line, and a body echoing it word
 				     for word would read as the same line printed twice. -->
 				<p class="tag-panel-body">
-					{retryTrayOpen && source === null
-						? m.admin_tag_suggest_retry_needs_post_body()
-						: tray.body}
+					{noPostToRetry ? m.admin_tag_suggest_retry_needs_post_body() : tray.body}
 				</p>
 				<div class="tag-actions">
 					{#if tray.retry}
@@ -404,6 +439,12 @@
 		margin: 0;
 		font-size: 12px;
 		color: var(--muted-foreground);
+	}
+
+	/* The tray eyebrow's warn colour, held to 4.5:1 on the card in every theme
+	   by theme-contrast.test.ts. */
+	.hint.warn {
+		color: var(--status-warn);
 	}
 
 	@media (max-width: 640px) {

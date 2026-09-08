@@ -87,8 +87,18 @@ async function cssVarColor(page: Page, token: string) {
 	}, token);
 }
 
+/** A cold run occasionally bounces back to /admin/login inside adminLogin's
+ * own waitForURL, and the test then fails before it has done anything. The
+ * login step navigates to the form itself and is idempotent, so it is retried
+ * here rather than in the shared helper every other spec depends on. */
+async function loginRetrying(page: Page) {
+	await expect(async () => {
+		await adminLogin(page, PASSWORD);
+	}).toPass({ timeout: 60_000 });
+}
+
 async function openList(page: Page, search = '') {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page);
 	await gotoAfterLogin(page, `/admin/images/suggest-tags${search}`);
 	await expect(page.getByRole('heading', { level: 1, name: 'Suggest tags' })).toBeVisible();
 }
@@ -871,7 +881,7 @@ test('the edit page keeps what the operator typed when the sidebar form submits'
 	// field, the source URL and the NSFW box are the operator's, not the row's:
 	// if they follow `data`, that invalidation reverts them and the next Save
 	// writes the reverted values.
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page);
 	await gotoAfterLogin(page, '/admin/images/101/edit');
 
 	const tags = page.locator('input[name="tags"]');
@@ -975,7 +985,7 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 	// an invalidation does not revert what the operator typed. A same-route
 	// navigation to a DIFFERENT image is the one case they must follow `data`
 	// again — otherwise image A's typed tags are staged onto image B and saved.
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page);
 
 	// What image 102 actually stores, read first: the rows above tag their own
 	// images, and the last test in this file tags whatever is left.

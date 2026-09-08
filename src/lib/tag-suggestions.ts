@@ -45,8 +45,11 @@ export type SuggestionState =
 	/** The post was read and there is nothing worth suggesting. `skippedExisting`
 	 *  is true when there was something and the Tags field already held all of
 	 *  it: the tray then says the tags were skipped rather than that entail.dev
-	 *  found nothing, which would be false. */
-	| { kind: 'empty'; skippedExisting?: boolean }
+	 *  found nothing, which would be false. `noImage` is true when the post
+	 *  carried no picture at all — an X post that is text, video or a GIF, or a
+	 *  Bluesky post entail.dev has no image for — where saying the classifier
+	 *  read the post and was unconvinced would be false too. */
+	| { kind: 'empty'; skippedExisting?: boolean; noImage?: boolean }
 	/** 202: queued or still classifying. Retryable. */
 	| { kind: 'notReady' }
 	/** 502: an upstream failure. Retryable. */
@@ -115,8 +118,14 @@ export function fromResponse(
 	if (status === 400) return { kind: 'badLink' };
 	if (status !== 200) return { kind: 'unavailable' };
 
-	const payload = (body ?? {}) as SuggestionBody;
-	const raw = Array.isArray(payload.tags) ? payload.tags : [];
+	// A 200 that is not the shape this endpoint answers with is not an empty
+	// answer: a re-gated fork puts an HTML login page behind the same URL, and
+	// reading that as "found nothing" would drop the Try again the operator
+	// needs once the gate lets them through.
+	if (typeof body !== 'object' || body === null) return { kind: 'unavailable' };
+	const payload = body as SuggestionBody;
+	if (!Array.isArray(payload.tags)) return { kind: 'unavailable' };
+	const raw = payload.tags;
 	const already = new Set(existingTags.map(sanitizeTag).filter(Boolean));
 
 	const tags: string[] = [];
@@ -136,9 +145,13 @@ export function fromResponse(
 		tags.push(entry);
 	}
 
-	if (tags.length === 0) return { kind: 'empty', skippedExisting };
-
 	const count = Number(payload.imageCount);
+
+	// Nothing came back and the post carried no picture: the endpoint answers
+	// that without asking entail.dev anything, so the tray says the post had
+	// nothing to look at rather than crediting the classifier with a verdict.
+	if (tags.length === 0) return { kind: 'empty', skippedExisting, noImage: count === 0 };
+
 	return {
 		kind: 'suggested',
 		tags,
@@ -225,7 +238,9 @@ export function trayFor(state: SuggestionState): Tray {
 				// rather than restating the policy line that sits under the chips.
 				body: state.skippedExisting
 					? m.admin_tag_suggest_empty_existing_body()
-					: m.admin_tag_suggest_empty_body(),
+					: state.noImage
+						? m.admin_tag_suggest_empty_no_image_body()
+						: m.admin_tag_suggest_empty_body(),
 				warn: false,
 				retry: false
 			};

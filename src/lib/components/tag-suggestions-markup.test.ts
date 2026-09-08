@@ -71,6 +71,27 @@ describe('the suggest pill', () => {
 		);
 	});
 
+	it('points the Source Post URL field at the hint while that URL is what was refused', () => {
+		// The hint lives under the Tags field; the URL it refuses lives in another
+		// field of the form. Without this, a screen reader user who tabs to the
+		// named field is told nothing about why the lookup will not run.
+		expect(suggestions).toMatch(
+			/sourceDescribedBy = suggestion\.kind === 'noSource' \? hintId : undefined;/
+		);
+		for (const page of [uploadPage, editPage]) {
+			expect(page).toMatch(/bind:sourceDescribedBy/);
+			expect(page).toMatch(/name="sourcePostUrl"\s*\n?\s*aria-describedby=\{sourceDescribedBy\}/);
+		}
+	});
+
+	it('drops a refusal that lands after the URL it refuses has left the field', () => {
+		// The reset effect has already run for that edit, so a 422 arriving late
+		// would stick — leaving the hint refusing a link nobody can see.
+		expect(suggestions).toMatch(
+			/const asked = sourceUrl;[\s\S]*?if \(next\.kind === 'noSource' && sourceUrl !== asked\) \{\s*\n\s*suggestion = \{ kind: 'idle' \};\s*\n\s*announcement = '';/
+		);
+	});
+
 	it('reads the post the field names, never a stored URL the field has moved away from', () => {
 		// On the edit page the stored URL and the field can differ once the operator
 		// edits it; the pill, the hint and the lookup all follow the field.

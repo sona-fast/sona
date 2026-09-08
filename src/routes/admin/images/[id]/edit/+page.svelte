@@ -33,6 +33,9 @@
 	let tagsValue = $state(data.imageTags.join(', '));
 	let sourcePostUrl = $state(data.image.sourcePostUrl || '');
 	let suggestedRating = $state<EntailRating | null>(null);
+	// Set by the suggestion control while its hint is refusing this URL, so a
+	// screen reader user who tabs to the field finds the refusal on it.
+	let sourceDescribedBy = $state<string | undefined>(undefined);
 	let nsfw = $state(data.image.nsfw);
 	let nsfwInput = $state<HTMLInputElement | null>(null);
 	// A same-route navigation to a DIFFERENT image is the one case the fields
@@ -208,6 +211,7 @@
 			<TagSuggestions
 				bind:value={tagsValue}
 				bind:rating={suggestedRating}
+				bind:sourceDescribedBy
 				sourceUrl={sourcePostUrl}
 				existingTags={data.tags.map((t) => t.name)}
 			/>
@@ -295,7 +299,13 @@
 
 		<label>
 			<span>{m.admin_field_source_url()}</span>
-			<input type="url" class="input" name="sourcePostUrl" bind:value={sourcePostUrl} />
+			<input
+				type="url"
+				class="input"
+				name="sourcePostUrl"
+				aria-describedby={sourceDescribedBy}
+				bind:value={sourcePostUrl}
+			/>
 		</label>
 
 		<div class="form-actions">

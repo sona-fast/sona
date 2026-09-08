@@ -35,8 +35,18 @@ const pill = (page: Page) => page.getByRole('button', { name: 'Suggest tags', ex
 // The one live region on the field: role=status, visually hidden, written into.
 const liveRegion = (page: Page) => page.locator('.field > p.sr-only[role="status"]');
 
+/** A cold run occasionally bounces back to /admin/login inside adminLogin's
+ * own waitForURL, and the test then fails before it has done anything. The
+ * login step navigates to the form itself and is idempotent, so it is retried
+ * here rather than in the shared helper every other spec depends on. */
+async function loginRetrying(page: Page) {
+	await expect(async () => {
+		await adminLogin(page, PASSWORD);
+	}).toPass({ timeout: 60_000 });
+}
+
 async function openUploadForm(page: Page) {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page);
 	await gotoAfterLogin(page, '/admin/upload');
 	await expect(tagsInput(page)).toBeVisible();
 	// The pill only runs once the source field holds a post URL it recognises.
@@ -50,7 +60,7 @@ async function openUploadForm(page: Page) {
 }
 
 test('the pill refuses to run until the source URL is a post it recognises', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page);
 	await gotoAfterLogin(page, '/admin/upload');
 
 	// aria-disabled rather than disabled: the pill stays reachable by keyboard so
@@ -168,7 +178,9 @@ test('a 202 says the post is not classified yet and offers another try', async (
 
 test('a post with nothing to suggest says so and offers only Dismiss', async ({ page }) => {
 	await openUploadForm(page);
-	await stubSuggestions(page, 200, { source: 'bluesky', tags: [], rating: null, imageCount: 0 });
+	// One image, no tag above the floor: entail.dev did look, so the sentence
+	// credits it with the verdict. imageCount 0 is a different sentence below.
+	await stubSuggestions(page, 200, { source: 'bluesky', tags: [], rating: null, imageCount: 1 });
 
 	await pill(page).click();
 
@@ -433,7 +445,7 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	// instead of repeating the hint that sits a few lines above it. The eyebrow
 	// still names the failure that opened the tray.
 	await expect(page.locator('.tag-panel-body')).toHaveText(
-		"There's no post at the source URL to try again with."
+		"There's no post at the source post URL to try again with."
 	);
 	await expect(page.locator('.tag-eyebrow')).toHaveText('Suggestions unavailable');
 
@@ -449,7 +461,7 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	// The body swapped when the URL stopped being a post, and a screen reader
 	// gets nothing from a swap it cannot see: the sentence the body now draws is
 	// written into the live region as the URL goes.
-	await expect(liveRegion(page)).toHaveText("There's no post at the source URL to try again with.");
+	await expect(liveRegion(page)).toHaveText("There's no post at the source post URL to try again with.");
 
 	// Retyping a post and clearing it again is the same state entered a second
 	// time, and a screen reader has to hear it a second time. The region holds
@@ -470,7 +482,7 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	await page.fill('input[name="sourcePostUrl"]', '');
 	await expect
 		.poll(() => page.evaluate(() => (window as unknown as { __tagLog: string[] }).__tagLog))
-		.toEqual(['', "There's no post at the source URL to try again with."]);
+		.toEqual(['', "There's no post at the source post URL to try again with."]);
 });
 
 test('the tray action spans the tray on a phone, like the pill above it', async ({ page }) => {
@@ -527,6 +539,23 @@ test('a 422 answers in the hint rather than the tray', async ({ page }) => {
 		"Sona can't look up this link. Check the source post URL."
 	);
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+	// The refused URL lives in another field. A screen reader user who tabs to
+	// it finds the refusal on it, rather than only under the Tags field.
+	await expect(page.locator('input[name="sourcePostUrl"]')).toHaveAttribute(
+		'aria-describedby',
+		'tags-hint'
+	);
+	// And it is drawn as a warning, like the same sentence in the tray, rather
+	// than in the note colour the "Existing:" line under it uses.
+	const warn = await page.evaluate(() => {
+		const probe = document.createElement('span');
+		probe.style.color = 'var(--status-warn)';
+		document.body.append(probe);
+		const value = getComputedStyle(probe).color;
+		probe.remove();
+		return value;
+	});
+	await expect(page.locator('#tags-hint')).toHaveCSS('color', warn);
 
 	// Clear the field and the refusal is the operator's to fix again, so the
 	// hint goes back to saying what a URL has to be.
@@ -545,6 +574,84 @@ test('a 422 answers in the hint rather than the tray', async ({ page }) => {
 	// that the sentence is the ordinary one again.
 	await expect(page.locator('#tags-hint')).toContainText(
 		'Suggestions come from entail.dev, which reads the source post.'
+	);
+	await expect(page.locator('#tags-hint')).not.toHaveClass(/warn/);
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+	// The description goes with the refusal: the field is no longer being
+	// refused, so it no longer points at the hint.
+	await expect(page.locator('input[name="sourcePostUrl"]')).not.toHaveAttribute(
+		'aria-describedby',
+		'tags-hint'
+	);
+});
+
+test('a tray that opens over an already-cleared URL says so, in the body and out loud', async ({
+	page
+}) => {
+	// The failure lands on a field that no longer holds a post, so the tray opens
+	// straight into the no-post state: nothing about the URL changed while the
+	// tray was up, so a sentence announced only on that transition would leave a
+	// screen reader with the "Reading the Bluesky post" line as the last word.
+	await openUploadForm(page);
+	let release = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(ENDPOINT, async (route: Route) => {
+		await held;
+		await route.fulfill({
+			status: 500,
+			contentType: 'application/json',
+			body: JSON.stringify({ error: 'unavailable' })
+		});
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-spin')).toBeVisible();
+	await page.fill('input[name="sourcePostUrl"]', '');
+	release();
+
+	await expect(page.locator('.tag-eyebrow')).toHaveText('Suggestions unavailable');
+	await expect(page.locator('.tag-panel-body')).toHaveText(
+		"There's no post at the source post URL to try again with."
+	);
+	await expect(liveRegion(page)).toHaveText(
+		"There's no post at the source post URL to try again with."
+	);
+});
+
+test('a 422 that lands after the URL has been edited is dropped, not shown', async ({ page }) => {
+	// The refusal is about the link the lookup went out with. By the time it
+	// lands the field holds a different post, and the reset that follows an edit
+	// has already run — so showing it would leave the hint refusing a link the
+	// operator cannot see.
+	await openUploadForm(page);
+	let release = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(ENDPOINT, async (route: Route) => {
+		await held;
+		await route.fulfill({
+			status: 422,
+			contentType: 'application/json',
+			body: JSON.stringify({ error: 'unsupported_source' })
+		});
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-spin')).toBeVisible();
+	await page.fill(
+		'input[name="sourcePostUrl"]',
+		'https://bsky.app/profile/kirin.example/post/3kq7x2def'
+	);
+	release();
+
+	// Back to idle: the ordinary hint, nothing announced, and a pill that runs.
+	await expect(page.locator('.tag-spin')).toHaveCount(0);
+	await expect(page.locator('#tags-hint')).toContainText(
+		'Suggestions come from entail.dev, which reads the source post.'
+	);
+	await expect(liveRegion(page)).toHaveText('');
+	await expect(page.locator('input[name="sourcePostUrl"]')).not.toHaveAttribute(
+		'aria-describedby',
+		'tags-hint'
 	);
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });
@@ -572,7 +679,7 @@ test('a lookup in flight cannot be dismissed, so no answer can land on a closed 
 });
 
 test('an image stored as NSFW opens its edit page with the box already checked', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page);
 	// Image 4 is seeded nsfw=1. The box reads the stored row, so a classifier
 	// rating is the only thing that could ever move it — and it never does.
 	await gotoAfterLogin(page, '/admin/images/4/edit');
@@ -610,8 +717,31 @@ test('a reduced-motion preference stops the spinner', async ({ page }) => {
 	await expect(page.locator('.tag-spin')).toHaveCSS('animation-name', 'none');
 });
 
+test('a post with no picture says so rather than blaming the classifier', async ({ page }) => {
+	// An X post that is text, video or a GIF: the endpoint answers 200 with no
+	// tags and imageCount 0 without asking entail.dev anything, so the tray must
+	// not say entail.dev read the post and was unconvinced.
+	await loginRetrying(page);
+	await gotoAfterLogin(page, '/admin/images/1/edit');
+	await expect(tagsInput(page)).toBeVisible();
+	await stubSuggestions(page, 200, { source: 'x', tags: [], rating: null, imageCount: 0 });
+
+	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/kirin/status/1789012345678901234');
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+	await pill(page).click();
+
+	await expect(page.locator('.tag-eyebrow')).toHaveText('No tags to suggest');
+	await expect(page.locator('.tag-panel-body')).toHaveText(
+		'That post has no picture for entail.dev to look at.'
+	);
+	await expect(liveRegion(page)).toContainText(
+		'That post has no picture for entail.dev to look at.'
+	);
+	await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+});
+
 test('the edit page looks up the URL in the field, not the stored one', async ({ page }) => {
-	await adminLogin(page, PASSWORD);
+	await loginRetrying(page);
 	// Image 1 is seeded with no source post; the field is what the operator
 	// types, and the lookup has to follow it.
 	await gotoAfterLogin(page, '/admin/images/1/edit');
