@@ -190,7 +190,10 @@ describe('artist-lookup — uploaded file', () => {
 		const body = (await res.json()) as {
 			enabled: boolean;
 			matches: unknown[];
-			localArtists: Array<{ matchIndex: number; artists: Array<{ id: number; name: string }> }>;
+			localArtists: Array<{
+				matchIndex: number;
+				artists: Array<{ id: number; name: string; pieces: number }>;
+			}>;
 			nameMatches: Array<{ matchIndex: number; artists: Array<{ id: number }> }>;
 			sourceClash: unknown;
 		};
@@ -198,11 +201,35 @@ describe('artist-lookup — uploaded file', () => {
 		expect(res.status).toBe(200);
 		expect(body.enabled).toBe(true);
 		expect(body.matches).toEqual([FA_EXACT]);
-		expect(body.localArtists).toEqual([{ matchIndex: 0, artists: [{ id: 1, name: 'Kuttoya' }] }]);
+		// `pieces` rides along so the ambiguous picker can tell two same-named
+		// artists apart; this gallery has no images, so the count is 0.
+		expect(body.localArtists).toEqual([
+			{ matchIndex: 0, artists: [{ id: 1, name: 'Kuttoya', pieces: 0 }] }
+		]);
 		// Both rows are named for the handle; the name-only one is the weak hit.
 		expect(body.nameMatches[0].artists.map((a) => a.id)).toEqual([1, 2]);
 		expect(body.sourceClash).toBeNull();
 		expect(searchImage.mock.calls[0][0]).toBeInstanceOf(File);
+	});
+
+	// Two artists can share a display name, so the picker needs something else to
+	// tell them apart. One grouped count, not a query per hit.
+	it('counts how many pieces each matched artist already has', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, furaffinity_url, created_at)
+			 VALUES (1, 'Kuttoya', 'https://www.furaffinity.net/user/KUTTOYA/', '2026-01-01');
+			 INSERT INTO images (id, title, slug, image_url, artist_id, created_at)
+			 VALUES (1, 'One', 'one', 'https://cdn/1.png', 1, '2026-01-01'),
+				(2, 'Two', 'two', 'https://cdn/2.png', 1, '2026-01-02');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+		const body = (await res.json()) as {
+			localArtists: Array<{ artists: Array<{ pieces: number }> }>;
+		};
+		expect(body.localArtists[0].artists[0].pieces).toBe(2);
 	});
 
 	it('refuses a file over the remote-body cap on its exact size', async () => {
@@ -682,9 +709,37 @@ describe('artist-lookup — source-post clash', () => {
 		expect(body.sourceClash).toEqual({
 			imageId: 1,
 			title: 'Sparky at the beach',
+			// No thumbnail column on the seeded row, so the full image stands in.
+			thumbnailUrl: 'https://cdn/1.png',
+			artistName: null,
+			uploadedAt: '2026-01-01',
 			isVariant: false,
 			parentImageId: null,
 			variantCount: 1
+		});
+	});
+
+	// The warning shows the operator the piece itself, so the row carries what it
+	// takes to recognize one: its thumbnail, who drew it, and when it landed.
+	it('carries the clashing piece thumbnail, artist and upload date', async () => {
+		const env = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		env.sqlite.exec(
+			`INSERT INTO artists (id, name, created_at) VALUES (7, 'Kuttoya', '2026-01-01');
+			 INSERT INTO images (id, title, slug, image_url, thumbnail_url, source_post_url,
+				 artist_id, parent_image_id, created_at)
+			 VALUES (1, 'Sparky at the beach', 'beach', 'https://cdn/1.png', 'https://cdn/1-thumb.png',
+				 'https://www.furaffinity.net/view/12345/', 7, NULL, '2026-02-09');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const res = await POST(multipartEvent(env.platform, pngFile()));
+		const body = (await res.json()) as { sourceClash: Record<string, unknown> };
+
+		expect(body.sourceClash).toMatchObject({
+			imageId: 1,
+			thumbnailUrl: 'https://cdn/1-thumb.png',
+			artistName: 'Kuttoya',
+			uploadedAt: '2026-02-09'
 		});
 	});
 
@@ -707,6 +762,9 @@ describe('artist-lookup — source-post clash', () => {
 		expect(body.sourceClash).toEqual({
 			imageId: 10,
 			title: 'Sparky at the beach',
+			thumbnailUrl: 'https://cdn/10.png',
+			artistName: null,
+			uploadedAt: '2026-01-01',
 			isVariant: true,
 			parentImageId: 10,
 			// One row in the set carries the URL, and it is the row being reported.

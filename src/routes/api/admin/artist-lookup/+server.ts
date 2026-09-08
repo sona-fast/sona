@@ -1,5 +1,5 @@
 import { json, error } from '@sveltejs/kit';
-import { eq, isNotNull } from 'drizzle-orm';
+import { count, eq, isNotNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { images, artists } from '$lib/server/db/schema';
 import { proxyStoredImage } from '$lib/server/image-proxy';
@@ -83,10 +83,13 @@ function hasAllowedImageBytes(head: Uint8Array): boolean {
 	return isAllowedImageType(sniffImageType(head));
 }
 
-/** Artists whose stored socials or display name point at a match, per match. */
+/** Artists whose stored socials or display name point at a match, per match.
+ * `pieces` is how many images the artist already has: two artists can carry the
+ * same display name, and the count is what lets the operator tell them apart in
+ * the picker. */
 interface ArtistHit {
 	matchIndex: number;
-	artists: Array<{ id: number; name: string }>;
+	artists: Array<{ id: number; name: string; pieces: number }>;
 }
 
 export const POST: RequestHandler = async ({ request, platform, fetch }) => {
@@ -243,18 +246,35 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		})
 		.from(artists);
 
+	// One grouped count for the whole gallery rather than a query per hit — the
+	// picker needs it for at most a handful of artists, and a per-artist query
+	// would fan out with the match list. Skipped when nothing matched.
+	const pieceCounts = new Map<number, number>();
+	if (matches.length > 0) {
+		const counted = await db
+			.select({ artistId: images.artistId, pieces: count() })
+			.from(images)
+			.groupBy(images.artistId);
+		for (const row of counted) pieceCounts.set(row.artistId, row.pieces);
+	}
+	const withPieces = (a: { id: number; name: string }) => ({
+		id: a.id,
+		name: a.name,
+		pieces: pieceCounts.get(a.id) ?? 0
+	});
+
 	const localArtists: ArtistHit[] = [];
 	const nameMatches: ArtistHit[] = [];
 	matches.forEach((match, matchIndex) => {
 		const byHandle = findLocalArtists(artistRows, match);
 		if (byHandle.length) {
-			localArtists.push({ matchIndex, artists: byHandle.map((a) => ({ id: a.id, name: a.name })) });
+			localArtists.push({ matchIndex, artists: byHandle.map(withPieces) });
 		}
 		// Weaker evidence, kept separate: a name collision is a "you may already
 		// have this artist" prompt, never an automatic link.
-		const byName = new Map<number, { id: number; name: string }>();
+		const byName = new Map<number, { id: number; name: string; pieces: number }>();
 		for (const handle of match.handles) {
-			for (const a of findArtistsByName(artistRows, handle)) byName.set(a.id, { id: a.id, name: a.name });
+			for (const a of findArtistsByName(artistRows, handle)) byName.set(a.id, withPieces(a));
 		}
 		if (byName.size) nameMatches.push({ matchIndex, artists: [...byName.values()] });
 	});
@@ -301,14 +321,30 @@ async function findSourceClash(
 
 	const first = clashing[0];
 	const rootId = first.parentImageId ?? first.id;
-	const root =
-		first.parentImageId === null
-			? { title: first.title }
-			: await db.select({ title: images.title }).from(images).where(eq(images.id, rootId)).get();
+	// Always re-read the root row: the scan above only selected what the equality
+	// check needed, and the warning shows the operator the piece itself — its
+	// thumbnail, who drew it, and when it was uploaded.
+	const root = await db
+		.select({
+			title: images.title,
+			thumbnailUrl: images.thumbnailUrl,
+			imageUrl: images.imageUrl,
+			createdAt: images.createdAt,
+			artistName: artists.name
+		})
+		.from(images)
+		.leftJoin(artists, eq(images.artistId, artists.id))
+		.where(eq(images.id, rootId))
+		.get();
 
 	return {
 		imageId: rootId,
 		title: root?.title ?? first.title,
+		// The stored thumbnail where there is one, the full image otherwise — a
+		// row saved before thumbnails existed still gets a picture.
+		thumbnailUrl: root?.thumbnailUrl ?? root?.imageUrl ?? null,
+		artistName: root?.artistName ?? null,
+		uploadedAt: root?.createdAt ?? null,
 		isVariant: first.parentImageId !== null,
 		parentImageId: first.parentImageId,
 		// Only the reported set's own rows. Two unrelated images that happen to
