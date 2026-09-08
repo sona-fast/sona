@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { X_USER_AGENT } from './twitter-avatar';
 import { fetchTweetMediaUrl, parseTweetPhotos } from './twitter-media';
 
 afterEach(() => {
@@ -140,10 +139,6 @@ describe('fetchTweetMediaUrl', () => {
 		expect(tokens).toEqual(['gt-1']);
 		const lookup = String(fetchImpl.mock.calls.find(([t]) => !String(t).includes('guest/activate'))?.[0]);
 		expect(lookup).toContain(encodeURIComponent(`"tweetId":"${id}"`));
-		// api.x.com 404s Node's default `User-Agent: node`, so both calls name themselves.
-		for (const [, init] of fetchImpl.mock.calls) {
-			expect(new Headers(init?.headers).get('user-agent')).toBe(X_USER_AGENT);
-		}
 	});
 
 	it('retries once with a fresh token on 401', async () => {
@@ -154,9 +149,6 @@ describe('fetchTweetMediaUrl', () => {
 		expect(outcome.ok && outcome.url).toContain('AbCdEf123');
 		expect(activations.count).toBe(2);
 		expect(tokens).toEqual(['gt-1', 'gt-2']);
-		for (const [, init] of fetchImpl.mock.calls) {
-			expect(new Headers(init?.headers).get('user-agent')).toBe(X_USER_AGENT);
-		}
 	});
 
 	it('retries once with a fresh token on 429', async () => {
@@ -167,9 +159,6 @@ describe('fetchTweetMediaUrl', () => {
 		expect(outcome.ok && outcome.url).toContain('AbCdEf123');
 		expect(activations.count).toBe(2);
 		expect(tokens).toEqual(['gt-1', 'gt-2']);
-		for (const [, init] of fetchImpl.mock.calls) {
-			expect(new Headers(init?.headers).get('user-agent')).toBe(X_USER_AGENT);
-		}
 	});
 
 	it('returns unavailable without fetching when the deadline has already passed', async () => {

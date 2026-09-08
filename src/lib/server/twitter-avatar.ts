@@ -16,10 +16,6 @@ import { errorLabel, timeoutSignal } from './fetch-errors';
 const X_BEARER =
 	'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 const X_ACTIVATE = 'https://api.x.com/1.1/guest/activate.json';
-/** api.x.com answers 404 to Node's default `User-Agent: node` and 200 to any
- * other value (verified 2026-09-07), so every request names itself.
- * xGraphqlHeaders carries it; exported so the tests can assert the header. */
-export const X_USER_AGENT = 'Mozilla/5.0 (compatible; Sona; +https://github.com/sona-fast/sona)';
 const X_USER_BY_SCREEN_NAME = 'https://api.x.com/graphql/IGgvgiOx4QZndDHuD3x9TQ/UserByScreenName';
 const FETCH_TIMEOUT_MS = 5000;
 
@@ -63,7 +59,7 @@ export async function activateGuestToken(
 	try {
 		const res = await fetchImpl(X_ACTIVATE, {
 			method: 'POST',
-			headers: { Authorization: X_BEARER, 'User-Agent': X_USER_AGENT },
+			headers: { Authorization: X_BEARER },
 			signal: timeoutSignal(FETCH_TIMEOUT_MS, signal)
 		});
 		if (!res.ok) {
@@ -89,7 +85,6 @@ export function xGraphqlHeaders(guestToken: string): Record<string, string> {
 		.join('');
 	return {
 		Authorization: X_BEARER,
-		'User-Agent': X_USER_AGENT,
 		'x-guest-token': guestToken,
 		'x-csrf-token': csrf,
 		'x-twitter-active-user': 'yes',

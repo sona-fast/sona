@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-	X_USER_AGENT,
 	twitterHandleFromUrl,
 	parseUserAvatar,
 	to400x400,
@@ -90,12 +89,7 @@ describe('fetchTwitterAvatar', () => {
 		expect(await fetchTwitterAvatar('https://x.com/examplefox')).toBe(
 			'https://pbs.twimg.com/profile_images/9/pic_400x400.jpg'
 		);
-		// api.x.com 404s Node's default `User-Agent: node`; the activation and
-		// the lookup both send the shared one.
 		expect(fetchImpl).toHaveBeenCalledTimes(2);
-		for (const [, init] of fetchImpl.mock.calls) {
-			expect(new Headers(init?.headers).get('user-agent')).toBe(X_USER_AGENT);
-		}
 	});
 
 	it('retries once with a fresh token on 429, then succeeds', async () => {
