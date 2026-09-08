@@ -20,14 +20,17 @@ const ENTAIL_CLASSIFY = 'https://entail.dev/api/classify';
 /** The floor entail.dev's own docs recommend for Sona. */
 export const DEFAULT_CONFIDENCE_FLOOR = 0.8;
 
-// Budget: a /post lookup is one call. A classify is one POST plus at most
-// three polls with a short pause between them, which keeps the worst case
-// (3000 + 3 * 2000 + 2 * 250) just under ten seconds.
+// Both `wait=true` endpoints hold the connection open until the classifier
+// finishes rather than answering 202 straight away. That hold was measured at
+// roughly five seconds for a fresh job on 2026-09-08, so every timeout here
+// has to clear it comfortably or we abort the very response we asked to wait
+// for. A classify is one enqueue plus at most two polls, worst case about
+// 3 + 8 + 0.25 + 8 seconds; the caller shows a pending state while it waits.
 const POST_TIMEOUT_MS = 8000;
 const CLASSIFY_TIMEOUT_MS = 3000;
-const POLL_TIMEOUT_MS = 2000;
+const POLL_TIMEOUT_MS = 8000;
 const POLL_PAUSE_MS = 250;
-const POLL_ATTEMPTS = 3;
+const POLL_ATTEMPTS = 2;
 
 export type EntailRating = 'safe' | 'questionable' | 'explicit';
 

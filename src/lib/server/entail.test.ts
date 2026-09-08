@@ -227,8 +227,26 @@ describe('classifyMediaUrl', () => {
 			return json({ status: 'processing' }, 202);
 		});
 		expect(await classifyMediaUrl('https://pbs.twimg.com/media/abc', fetchImpl)).toBeNull();
-		expect(polls).toBe(3);
+		expect(polls).toBe(2);
 	});
+
+	// The poll endpoint answers `wait=true` by holding the connection until the
+	// classifier finishes — about five seconds for a fresh job. A poll timeout
+	// shorter than that hold aborts the response we asked to wait for, which is
+	// what a 2000 ms timeout did in the first cut of this module.
+	it('waits out a poll that the server holds open for seconds', async () => {
+		const heldFor = 2500;
+		const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+			if (init?.method === 'POST') return json({ job_id: 'job-5' }, 202);
+			await new Promise((resolve) => setTimeout(resolve, heldFor));
+			init?.signal?.throwIfAborted();
+			return json(done);
+		});
+		expect(await classifyMediaUrl('https://pbs.twimg.com/media/abc', fetchImpl)).toEqual({
+			tags: ['mammal'],
+			rating: 'questionable'
+		});
+	}, 10_000);
 
 	it('returns null on a rate-limited enqueue, a missing job id, and errors', async () => {
 		const url = 'https://pbs.twimg.com/media/abc';
