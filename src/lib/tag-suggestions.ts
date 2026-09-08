@@ -191,37 +191,6 @@ export function ratingLabel(rating: EntailRating | null): string {
 			: m.admin_tag_suggest_rated_safe();
 }
 
-/**
- * The sentence a finished state puts in the live region. A title and a body
- * are joined through a message rather than a space, so the pause between them
- * is punctuated the way the locale punctuates it.
- */
-export function sentenceFor(next: SuggestionState): string {
-	const join = (title: string, body: string) => m.admin_tag_suggest_status_join({ title, body });
-	switch (next.kind) {
-		case 'suggested':
-			return m.admin_tag_suggest_eyebrow({ count: next.tags.length });
-		case 'empty':
-			return join(m.admin_tag_suggest_empty_title(), m.admin_tag_suggest_empty_body());
-		case 'notReady':
-			return join(m.admin_tag_suggest_not_yet_title(), m.admin_tag_suggest_not_yet_body());
-		case 'rateLimited':
-			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_rate_limited_body());
-		case 'notFound':
-			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_not_found_body());
-		case 'badLink':
-			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_bad_link_body());
-		case 'signedOut':
-			return join(m.admin_tag_suggest_signed_out_title(), m.admin_tag_suggest_signed_out_body());
-		case 'unavailable':
-			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_unavailable_body());
-		case 'noSource':
-			return m.admin_tag_suggest_hint_no_source();
-		default:
-			return '';
-	}
-}
-
 /** What the tray shows for a finished state that is not a suggestion: an
  * eyebrow, a sentence, and either Try again, a way back to the login page, or
  * only Dismiss. */
@@ -231,8 +200,9 @@ export type Tray = {
 	warn: boolean;
 	retry: boolean;
 	/** A dead session is the one failure another lookup cannot fix; the tray
-	 *  offers the login page instead of a Try again. */
-	signIn: boolean;
+	 *  offers the login page instead of a Try again. Set only there, so no other
+	 *  branch has to remember to say no. */
+	signIn?: boolean;
 };
 
 /**
@@ -248,23 +218,21 @@ export function trayFor(state: SuggestionState): Tray {
 				title: m.admin_tag_suggest_empty_title(),
 				body: m.admin_tag_suggest_empty_body(),
 				warn: false,
-				retry: false,
-				signIn: false
+				retry: false
 			};
 		case 'notReady':
 			return {
 				title: m.admin_tag_suggest_not_yet_title(),
 				body: m.admin_tag_suggest_not_yet_body(),
 				warn: true,
-				retry: true,
-				signIn: false
+				retry: true
 			};
 		case 'rateLimited':
-			return { title: unavailable, body: m.admin_tag_suggest_rate_limited_body(), warn: true, retry: true, signIn: false };
+			return { title: unavailable, body: m.admin_tag_suggest_rate_limited_body(), warn: true, retry: true };
 		case 'notFound':
-			return { title: unavailable, body: m.admin_tag_suggest_not_found_body(), warn: true, retry: false, signIn: false };
+			return { title: unavailable, body: m.admin_tag_suggest_not_found_body(), warn: true, retry: false };
 		case 'badLink':
-			return { title: unavailable, body: m.admin_tag_suggest_bad_link_body(), warn: true, retry: false, signIn: false };
+			return { title: unavailable, body: m.admin_tag_suggest_bad_link_body(), warn: true, retry: false };
 		case 'signedOut':
 			return {
 				title: m.admin_tag_suggest_signed_out_title(),
@@ -277,10 +245,37 @@ export function trayFor(state: SuggestionState): Tray {
 			// The forms answer this under the field, so only the backfill row draws
 			// it: a stored URL that has been edited into something unreadable since
 			// the list loaded.
-			return { title: unavailable, body: m.admin_tag_suggest_hint_no_source(), warn: true, retry: false, signIn: false };
+			return { title: unavailable, body: m.admin_tag_suggest_hint_no_source(), warn: true, retry: false };
 		default:
 			// 'unavailable', and the states the tray never renders.
-			return { title: unavailable, body: m.admin_tag_suggest_unavailable_body(), warn: true, retry: true, signIn: false };
+			return { title: unavailable, body: m.admin_tag_suggest_unavailable_body(), warn: true, retry: true };
+	}
+}
+
+/**
+ * The sentence a finished state puts in the live region. Every failure says
+ * exactly what its tray says, so the two are read from the same mapping rather
+ * than written out twice: the title and the body are joined through a message,
+ * so the pause between them is punctuated the way the locale punctuates it.
+ *
+ * Three states answer differently. A suggestion has no tray, the forms answer
+ * `noSource` under the field rather than with the tray's "unavailable" title,
+ * and the states with nothing to announce say nothing.
+ */
+export function sentenceFor(next: SuggestionState): string {
+	switch (next.kind) {
+		case 'suggested':
+			return m.admin_tag_suggest_eyebrow({ count: next.tags.length });
+		case 'noSource':
+			return m.admin_tag_suggest_hint_no_source();
+		case 'idle':
+		case 'searching':
+		case 'applied':
+			return '';
+		default: {
+			const tray = trayFor(next);
+			return m.admin_tag_suggest_status_join({ title: tray.title, body: tray.body });
+		}
 	}
 }
 

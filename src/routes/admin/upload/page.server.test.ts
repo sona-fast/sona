@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { characters, images, tags } from '$lib/server/db/schema';
+import { characters, imageTags, images, tags } from '$lib/server/db/schema';
 import { load, actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -122,6 +122,35 @@ describe('admin upload — tag cap', () => {
 			`Tags are too long. Use up to ${MAX_TAGS_INPUT_LENGTH} characters.`
 		);
 		expect(await db.select({ id: images.id }).from(images).get()).toBeUndefined();
+	});
+});
+
+describe('admin upload — tags that are accepted', () => {
+	it('writes the sanitized, de-duplicated names to the new image', async () => {
+		// The upload writes through replaceImageTags, the same call the edit form and
+		// the Suggest tags page use. Without a successful upload here, dropping that
+		// call would leave the cap tests above green and store no tags at all.
+		const { db, platform } = makeDb();
+
+		await callDefault({
+			request: form({
+				count: '1',
+				imageUrl_0: 'https://cdn.example.com/new.png',
+				title: 'New Art',
+				artistId: '1',
+				tags: 'fox, Fox , , fox, bird'
+			}),
+			platform
+		});
+
+		const newImage = await db.select({ id: images.id }).from(images).get();
+		expect(newImage?.id).toBeTruthy();
+		const written = await db
+			.select({ name: tags.name })
+			.from(imageTags)
+			.innerJoin(tags, eq(tags.id, imageTags.tagId))
+			.where(eq(imageTags.imageId, newImage!.id));
+		expect(written.map((row) => row.name)).toEqual(['fox', 'bird']);
 	});
 });
 

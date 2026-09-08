@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { getDb } from './db';
 import { imageTags, tags } from './db/schema';
+import { sanitizeText } from './validate';
 import { sanitizeTag } from '$lib/tags';
 
 type Db = ReturnType<typeof getDb>;
@@ -28,6 +29,26 @@ export function parseImageTags(tagNames: string): string[] {
 		if (name && !names.includes(name)) names.push(name);
 	}
 	return names;
+}
+
+/**
+ * Read a Tags field the way all three save actions have to read it: the length
+ * check runs on the raw value, because sanitizing shortens it and a field cut
+ * to the ceiling would pass a check the operator's input failed; the count runs
+ * on the sanitized value, because that is what would be written.
+ *
+ * Returns the sanitized value alongside the problem, so a caller that accepts
+ * the input writes the same string this counted. The three actions word their
+ * refusals differently, so the problem is named rather than phrased here.
+ */
+export function readTagInput(raw: string): {
+	problem: 'too_long' | 'too_many' | null;
+	value: string;
+} {
+	if (raw.length > MAX_TAGS_INPUT_LENGTH) return { problem: 'too_long', value: '' };
+	const value = sanitizeText(raw, MAX_TAGS_INPUT_LENGTH);
+	if (parseImageTags(value).length > MAX_IMAGE_TAGS) return { problem: 'too_many', value };
+	return { problem: null, value };
 }
 
 /**

@@ -7,7 +7,13 @@ import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { imageTags, images, tags } from '$lib/server/db/schema';
 import { makeD1 } from '$lib/server/test/d1';
-import { MAX_IMAGE_TAGS, parseImageTags, replaceImageTags } from './image-tags';
+import {
+	MAX_IMAGE_TAGS,
+	MAX_TAGS_INPUT_LENGTH,
+	parseImageTags,
+	readTagInput,
+	replaceImageTags
+} from './image-tags';
 
 // The one write path both tag saves share (SONA-220). The edit form and the
 // Suggest tags page each post a comma-separated string with no limit of its
@@ -65,5 +71,26 @@ describe('replaceImageTags', () => {
 		expect(await tagNamesOf(db, 1)).toEqual(written);
 		// Nothing past the cap was minted into the tag table either.
 		expect(await db.select({ id: tags.id }).from(tags)).toHaveLength(MAX_IMAGE_TAGS);
+	});
+});
+
+describe('readTagInput', () => {
+	it('measures the length before sanitizing, so a long field cannot pass by being cut', () => {
+		// sanitizeText shortens to the same ceiling, so checking the sanitized value
+		// would accept every over-long field instead of refusing it.
+		const huge = 'a'.repeat(MAX_TAGS_INPUT_LENGTH + 1);
+		expect(readTagInput(huge)).toEqual({ problem: 'too_long', value: '' });
+	});
+
+	it('counts the sanitized value, which is what the write would store', () => {
+		const tooMany = Array.from({ length: MAX_IMAGE_TAGS + 1 }, (_, i) => `tag-${i}`).join(', ');
+		expect(readTagInput(tooMany).problem).toBe('too_many');
+	});
+
+	it('accepts an ordinary field and hands back the value to write', () => {
+		expect(readTagInput('  fox, Fox , , bird ')).toEqual({
+			problem: null,
+			value: 'fox, Fox , , bird'
+		});
 	});
 });

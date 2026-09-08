@@ -164,8 +164,7 @@ describe('the tray a finished state draws', () => {
 			title: 'Suggestions unavailable',
 			body: 'Add a Bluesky or X post as the source URL to get tag suggestions.',
 			warn: true,
-			retry: false,
-			signIn: false
+			retry: false
 		});
 	});
 
@@ -174,8 +173,7 @@ describe('the tray a finished state draws', () => {
 			title: 'No tags to suggest',
 			body: "entail.dev read the post but found nothing it's confident about.",
 			warn: false,
-			retry: false,
-			signIn: false
+			retry: false
 		});
 		expect(trayFor({ kind: 'notFound' })).toMatchObject({
 			title: 'Suggestions unavailable',

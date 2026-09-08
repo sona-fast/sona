@@ -196,7 +196,7 @@ for (const rating of ['explicit', 'questionable'] as const) {
 		await expect(nsfwBox(page)).toBeChecked();
 		// Said as a staged change, not a persisted one: nothing is saved yet.
 		await expect(ratingRegion(page)).toHaveText(
-			'The NSFW box is now checked. It takes effect when you submit the form.'
+			'The NSFW box is now checked. Sona saves the change when you submit the form.'
 		);
 		// The button removed itself, so focus lands on the box it checked.
 		await expect(markNsfw(page)).toHaveCount(0);
@@ -233,15 +233,19 @@ test('the 429, 404 and 502 answers each show their own sentence', async ({ page 
 		await stubSuggestions(page, status, { error: 'x' });
 		await pill(page).click();
 
-		await expect(page.locator('.tag-eyebrow.warn')).toHaveText('Suggestions unavailable');
-		await expect(page.locator('.tag-panel-body')).toHaveText(body);
+		// Scoped to the tray, and waited for by its sentence: the previous case's
+		// tray is still on the page for the moment it takes this one to render, and
+		// a Dismiss clicked on the way out is detached before the click lands.
+		const tray = page.locator('.tag-tray');
+		await expect(tray.locator('.tag-eyebrow.warn')).toHaveText('Suggestions unavailable');
+		await expect(tray.locator('.tag-panel-body')).toHaveText(body);
 		// Title and body reach the live region as two sentences, not run together.
 		await expect(liveRegion(page)).toHaveText(`Suggestions unavailable. ${body}`);
 		// 404 is final; the other two are worth another click.
 		await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(retry ? 1 : 0);
 		await expect(tagsInput(page)).toHaveValue('');
 
-		await page.getByRole('button', { name: 'Dismiss' }).click();
+		await tray.getByRole('button', { name: 'Dismiss' }).click();
 		await expect(page.locator('.tag-tray')).toHaveCount(0);
 	}
 });

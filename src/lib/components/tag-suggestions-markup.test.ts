@@ -52,6 +52,17 @@ describe('the suggest pill', () => {
 		expect(suggestions).not.toMatch(/title=\{/);
 	});
 
+	it('keeps the "From suggestions" badge out of the label, so the input stays "Tags"', () => {
+		// Inside <label for="tags-input"> the badge joins the input's accessible
+		// name, which then reads "Tags From suggestions" once tags are applied.
+		expect(suggestions).toMatch(
+			/<label class="field-label" for=\{inputId\}>\{m\.admin_field_tags\(\)\}<\/label>/
+		);
+		expect(suggestions).toMatch(
+			/<\/label>\s*\{#if suggestion\.kind === 'applied'\}<span class="tag">/
+		);
+	});
+
 	it('reads the post the field names, never a stored URL the field has moved away from', () => {
 		// On the edit page the stored URL and the field can differ once the operator
 		// edits it; the pill, the hint and the lookup all follow the field.
@@ -130,6 +141,19 @@ describe('the rating never touches the NSFW checkbox', () => {
 	});
 });
 
+describe('a dead session', () => {
+	it('offers the login page on both surfaces, since another lookup sends the same cookie', () => {
+		// trayFor sets signIn only for a 401. Both surfaces have to draw it, or the
+		// one that does not leaves a Try again that can only fail the same way.
+		for (const source of [suggestions, backfillPage]) {
+			// The icon is decorative: the label beside it is the anchor's whole name.
+			expect(source).toMatch(
+				/\{#if tray\.signIn\}[\s\S]*?<a class="tag-pill" href="\/admin\/login">\s*<LogIn size=\{14\} aria-hidden="true" \/>\s*\{m\.admin_tag_suggest_sign_in\(\)\}\s*<\/a>/
+			);
+		}
+	});
+});
+
 describe('the backfill rows', () => {
 	it('name every control by its image, since the page repeats them per row', () => {
 		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_suggest\(\{ title: row\.title \}\)/);
@@ -169,7 +193,9 @@ describe('the backfill rows', () => {
 		// The keyframes and their reduced-motion guard live in app.css, so the same
 		// class spins on both surfaces. That it actually animates is asserted in
 		// the browser, in tests/e2e/tag-suggestions.spec.ts.
-		expect(backfillPage).toMatch(/saving\.has\(row\.id\)\}<LoaderCircle size=\{14\} class="tag-spin" \/>/);
+		expect(backfillPage).toMatch(
+			/saving\.has\(row\.id\)\}<LoaderCircle size=\{14\} class="tag-spin" aria-hidden="true" \/>/
+		);
 	});
 
 	it('leaves the thumbnail alt empty, because the row heading names the image', () => {

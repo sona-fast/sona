@@ -844,6 +844,15 @@ a.tag-pill {
 	color: color-mix(in srgb, var(--foreground) 75%, var(--secondary));
 }
 
+/* The saved and refused rows offer one action beside a row of static saved-tag
+   chips wearing the same capsule. The chips' resting --border is 1.3-1.8:1 on a
+   card, so a shared border makes the action read as one more tag: this one takes
+   a border mixed most of the way to --foreground, which clears the 3:1 bar for a
+   control boundary on every theme's card (worst 3.79:1 on terracotta light). */
+.tag-pill-action {
+	border-color: color-mix(in srgb, var(--foreground) 55%, var(--card));
+}
+
 .tag-btn-text {
 	padding: 8px 10px;
 	min-height: 36px;
@@ -880,8 +889,10 @@ a.tag-pill {
 .tag-btn-text:focus-visible,
 /* The saved line and the conflict sentence are focused programmatically when
    the button that was clicked disappears with the tray, so they need a ring
-   too — they are where the keyboard user resumes. */
+   too — they are where the keyboard user resumes. So is a backfill row's
+   heading, which Load more focuses once the longer list has rendered. */
 .tag-status-line:focus-visible,
+.rowtitle:focus-visible,
 .tag-panel-body:focus-visible {
 	outline: 2px solid var(--ring);
 	outline-offset: 2px;

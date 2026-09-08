@@ -33,6 +33,13 @@ async function stubSuggestions(page: Page, status: number, body: unknown) {
 	);
 }
 
+/** The image ids the list is showing, newest first. The seeded titles carry
+ * the id, which is the only place a row exposes it. */
+async function listedIds(page: Page): Promise<number[]> {
+	const titles = await page.locator('li.rowcard .rowtitle').allTextContents();
+	return titles.map((title) => Number(/Backfill (\d+)/.exec(title)?.[1]));
+}
+
 const row = (page: Page, title: string) =>
 	page.locator('li.rowcard').filter({ has: page.getByRole('heading', { name: title }) });
 
@@ -54,7 +61,7 @@ async function openList(page: Page, search = '') {
 	await expect(page.getByRole('heading', { level: 1, name: 'Suggest tags' })).toBeVisible();
 }
 
-test('Load more grows the list rather than paging away from it', async ({ page }) => {
+test('Load more grows the list rather than paging away from it', async ({ page, baseURL }) => {
 	await openList(page);
 	await expect(page.locator('li.rowcard')).toHaveCount(PAGE);
 	const showing = page.getByText(/^Showing \d+ of \d+$/);
@@ -67,15 +74,35 @@ test('Load more grows the list rather than paging away from it', async ({ page }
 	// Clicking before that is a full page load, and the focus move below is a
 	// client behaviour.
 	await expect(page.locator('.thumb-fallback').first()).toBeVisible();
+
+	const shownIds = await listedIds(page);
+	const last = shownIds[shownIds.length - 1];
+	// A row above the fold picks up tags elsewhere before the click. The reloaded
+	// list is a row shorter and everything below it moves up, so the row that
+	// follows the last one on screen is no longer at the position it was at. On a
+	// retry this row is already tagged and the post is refused, which is fine: the
+	// assertion below reads the list it actually got.
+	await page.request.post('/admin/images/suggest-tags?/save', {
+		form: { id: '122', tags: 'backfilled' },
+		headers: { origin: baseURL! }
+	});
+
 	await page.getByRole('link', { name: 'Load more' }).click();
-	await expect(page.locator('li.rowcard')).toHaveCount(total);
-	// Every row of the first page is still there, in the same place.
+	// No Load more left, and the oldest row is listed: the rest of the list is on
+	// screen. Not an exact count — a retry of this file starts from a list this
+	// test has already taken a row off.
+	await expect(page.getByRole('link', { name: 'Load more' })).toHaveCount(0);
 	await expect(page.locator('li.rowcard').first()).toContainText('Backfill 123');
 	await expect(page.locator('li.rowcard').last()).toContainText('Backfill 101');
-	await expect(page.getByRole('link', { name: 'Load more' })).toHaveCount(0);
-	// The link that had focus is gone with the click; focus lands on the first row
-	// the click added rather than dropping to the top of the document.
-	await expect(page.locator('li.rowcard').nth(PAGE).locator('.rowtitle')).toBeFocused();
+	const grown = await listedIds(page);
+	expect(grown.length).toBeGreaterThan(PAGE);
+
+	// The link that had focus is gone with the click; focus lands on the row that
+	// follows the last one that was on screen, rather than dropping to the top of
+	// the document or on whatever now sits at that position.
+	const next = grown[grown.indexOf(last) + 1];
+	expect(next, 'no row follows the last one that was on screen').toBeTruthy();
+	await expect(row(page, `Backfill ${next}`).locator('.rowtitle')).toBeFocused();
 });
 
 test('a row meta line names the source without an orphaned separator', async ({ page }) => {
@@ -145,10 +172,16 @@ test('Save writes the tags and the row shows the saved line and static chips', a
 	// The labels the chips showed, not the sanitized names the row stored.
 	await expect(statics.nth(0)).toHaveText('rain drops');
 	await expect(statics.nth(1)).toHaveText('cozy');
-	await expect(target.getByRole('link', { name: 'Edit image Backfill 119' })).toHaveAttribute(
-		'href',
-		'/admin/images/119/edit'
-	);
+	const action = target.getByRole('link', { name: 'Edit image Backfill 119' });
+	await expect(action).toHaveAttribute('href', '/admin/images/119/edit');
+	// The row's one action, beside static chips wearing the same capsule: its
+	// border is what tells them apart, so it is not the chips' resting border.
+	const chipBorder = await statics.first().evaluate((el) => getComputedStyle(el).borderTopColor);
+	await expect(action).not.toHaveCSS('border-top-color', chipBorder);
+	// And it stands off the chip row rather than reading as one more line of it.
+	const chipBox = await target.locator('.tag-chiprow').boundingBox();
+	const actionBox = await action.boundingBox();
+	expect(actionBox!.y - (chipBox!.y + chipBox!.height)).toBeGreaterThan(12);
 
 	// The tags are real: the edit form loads them, and the row is off the list.
 	await page.goto('/admin/images/119/edit');
@@ -220,14 +253,14 @@ test('a save that fails for any other reason says so in the row and the live reg
 	// gone, a 400 for an id that is not one — all land on the generic sentence.
 	// Answering the save with one keeps the assertion on the page rather than on
 	// how the action can be provoked, and writes nothing to the row.
-	await page.route(
-		(url) => url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save'),
-		(route) =>
-			route.fulfill({
-				status: 404,
-				contentType: 'application/json',
-				body: JSON.stringify({ type: 'failure', status: 404, data: '[{"error":1},"not_found"]' })
-			})
+	const savePost = (url: URL) =>
+		url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save');
+	await page.route(savePost, (route) =>
+		route.fulfill({
+			status: 404,
+			contentType: 'application/json',
+			body: JSON.stringify({ type: 'failure', status: 404, data: '[{"error":1},"not_found"]' })
+		})
 	);
 
 	await target.getByRole('button', { name: 'Save 1 tag to Backfill 116' }).click();
@@ -244,6 +277,45 @@ test('a save that fails for any other reason says so in the row and the live reg
 	// The chips stay, so the operator can try the same save again.
 	await expect(target.locator('.tag-chip')).toHaveCount(1);
 	await expect(target.locator('.tag-status-line')).toHaveCount(0);
+	// The sentence saying nothing landed is where a keyboard user resumes.
+	await expect(target.locator('.tag-panel-body')).toBeFocused();
+	// Save is the retry here, so the header's Suggest pill goes while the failure
+	// shows: it would throw the chips away rather than save them.
+	await expect(target.getByRole('button', { name: 'Suggest tags for Backfill 116' })).toHaveCount(
+		0
+	);
+
+	// Dismiss puts the row back to where a fresh lookup starts, and the pill with
+	// it. The row stops saying the last save failed: left alone, "Not saved" sits
+	// above chips that were never saved at all.
+	await page.unroute(savePost);
+	await target.getByRole('button', { name: 'Dismiss suggestions for Backfill 116' }).click();
+	const pill = target.getByRole('button', { name: 'Suggest tags for Backfill 116' });
+	await expect(pill).toBeVisible();
+	await pill.click();
+	await expect(target.getByText('1 suggested tag from entail.dev')).toBeVisible();
+	await expect(target.locator('.tag-eyebrow.warn')).toHaveCount(0);
+	await expect(target.getByText("Sona couldn't save those tags. Try again.")).toHaveCount(0);
+});
+
+test('a row\'s pill keeps focus and says it is working while the lookup runs', async ({ page }) => {
+	// The tray that would hold Try again is the skeleton while the lookup runs, so
+	// the pill is the only control left for focus to be on — under a name that
+	// says which image is being read.
+	await openList(page);
+	await page.route(ENDPOINT, () => new Promise<void>(() => {}));
+
+	const target = row(page, 'Backfill 113');
+	const pill = target.getByRole('button', { name: 'Suggest tags for Backfill 113' });
+	await expect(async () => {
+		await pill.click();
+		await expect(target.locator('.tag-skel-chip')).toHaveCount(5, { timeout: 1500 });
+	}).toPass();
+
+	const working = target.getByRole('button', { name: 'Suggesting tags for Backfill 113' });
+	await expect(working).toBeVisible();
+	await expect(working).toBeFocused();
+	await expect(working).toHaveAttribute('aria-disabled', 'true');
 });
 
 test('a save answered with a redirect follows it rather than blaming the save', async ({ page }) => {

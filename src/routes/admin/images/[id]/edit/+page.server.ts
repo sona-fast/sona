@@ -8,7 +8,7 @@ import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import {
 	MAX_IMAGE_TAGS,
 	MAX_TAGS_INPUT_LENGTH,
-	parseImageTags,
+	readTagInput,
 	replaceImageTags
 } from '$lib/server/image-tags';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
@@ -99,14 +99,14 @@ export const actions = {
 		// this field used to take ran BEFORE the count guard, so a hundred ordinary
 		// names lost their tail mid-word and the fragment saved as a success.
 		const tagsRaw = String(data.get('tags') ?? '');
-		if (tagsRaw.length > MAX_TAGS_INPUT_LENGTH) {
-			return fail(400, { error: m.admin_field_tags_too_long({ max: MAX_TAGS_INPUT_LENGTH }) });
-		}
-		const tagNames = sanitizeText(tagsRaw, MAX_TAGS_INPUT_LENGTH);
 		// Refused, not truncated: a save that quietly dropped tags would report
 		// success and leave the operator to notice the missing ones later. Counted
 		// the way the write counts, so what is refused is what would not have fit.
-		if (parseImageTags(tagNames).length > MAX_IMAGE_TAGS) {
+		const { problem: tagsProblem, value: tagNames } = readTagInput(tagsRaw);
+		if (tagsProblem === 'too_long') {
+			return fail(400, { error: m.admin_field_tags_too_long({ max: MAX_TAGS_INPUT_LENGTH }) });
+		}
+		if (tagsProblem === 'too_many') {
 			return fail(400, { error: m.admin_field_tags_too_many({ max: MAX_IMAGE_TAGS }) });
 		}
 		const characterIds = (data.get('characters') as string)?.trim();

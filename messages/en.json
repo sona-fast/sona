@@ -1793,7 +1793,7 @@
 	"admin_tag_suggest_rated_questionable": "Rated questionable by entail.dev.",
 	"admin_tag_suggest_rated_explicit": "Rated explicit by entail.dev.",
 	"admin_tag_suggest_mark_nsfw": "Mark it NSFW",
-	"admin_tag_suggest_marked_nsfw": "The NSFW box is now checked. It takes effect when you submit the form.",
+	"admin_tag_suggest_marked_nsfw": "The NSFW box is now checked. Sona saves the change when you submit the form.",
 	"admin_suggest_tags_title": "Suggest tags",
 	"admin_suggest_tags_explainer": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "This image has a Bluesky or X source post and no tags yet. Sona asks entail.dev one image at a time, and saves the tags only when you accept them.", "countPlural=other": "These {count} images have a Bluesky or X source post and no tags yet. Sona asks entail.dev one image at a time, and saves the tags only when you accept them."}}],
 	"admin_suggest_tags_source_bluesky": "Bluesky post",
@@ -1815,6 +1815,6 @@
 	"admin_suggest_tags_showing": "Showing {shown} of {total}",
 	"admin_suggest_tags_load_more": "Load more",
 	"admin_suggest_tags_empty_title": "Nothing to suggest right now",
-	"admin_suggest_tags_empty_body": "Every image with a Bluesky or X source post already has tags. Add another one and Sona checks it here.",
+	"admin_suggest_tags_empty_body": "Every image with a Bluesky or X source post already has tags. Add an image with one of those posts and it appears here.",
 	"admin_suggest_tags_back": "Back to All Images"
 }

@@ -12,7 +12,7 @@
 	// direction: a slow, rate-limited, or dead entail.dev leaves the field and
 	// the form untouched.
 	import { tick } from 'svelte';
-	import { Check, LoaderCircle, RefreshCw, Tag } from 'lucide-svelte';
+	import { Check, LoaderCircle, LogIn, RefreshCw, Tag } from 'lucide-svelte';
 	import TagSuggestionChips from './TagSuggestionChips.svelte';
 	import { classifySourceUrl } from '$lib/tags';
 	import {
@@ -144,10 +144,12 @@
 </script>
 
 <div class="field">
-	<label class="field-label" for={inputId}>
-		{m.admin_field_tags()}
+	<!-- The badge sits beside the label, not inside it: inside, it joins the
+	     input's accessible name and the field reads "Tags From suggestions". -->
+	<div class="label-row">
+		<label class="field-label" for={inputId}>{m.admin_field_tags()}</label>
 		{#if suggestion.kind === 'applied'}<span class="tag">{m.admin_tag_suggest_from_suggestions()}</span>{/if}
-	</label>
+	</div>
 
 	<div class="input-group">
 		<input
@@ -167,10 +169,10 @@
 			onclick={suggest}
 		>
 			{#if searching}
-				<LoaderCircle size={14} class="tag-spin" />
+				<LoaderCircle size={14} class="tag-spin" aria-hidden="true" />
 				{m.admin_tag_suggest_searching()}
 			{:else}
-				<Tag size={14} />
+				<Tag size={14} aria-hidden="true" />
 				{m.admin_tag_suggest_button()}
 			{/if}
 		</button>
@@ -184,7 +186,7 @@
 		<!-- Focus lands here after Add: the tray that held the button is gone, so
 		     the line that says what happened is where the operator resumes. -->
 		<p class="tag-status-line" id={appliedId} tabindex="-1" bind:this={statusLine}>
-			<Check size={14} />
+			<Check size={14} aria-hidden="true" />
 			{m.admin_tag_suggest_applied({ count: suggestion.count })}
 		</p>
 	{:else}
@@ -253,14 +255,17 @@
 				<div class="tag-actions">
 					{#if tray.retry}
 						<button type="button" class="tag-pill" onclick={suggest}>
-							<RefreshCw size={14} />
+							<RefreshCw size={14} aria-hidden="true" />
 							{m.admin_tag_suggest_try_again()}
 						</button>
 					{/if}
 					{#if tray.signIn}
 						<!-- A dead session: another lookup sends the same cookie, so the way
 						     out is the login page. -->
-						<a class="tag-pill" href="/admin/login">{m.admin_tag_suggest_sign_in()}</a>
+						<a class="tag-pill" href="/admin/login">
+							<LogIn size={14} aria-hidden="true" />
+							{m.admin_tag_suggest_sign_in()}
+						</a>
 					{/if}
 					<button
 						type="button"
@@ -283,11 +288,14 @@
 		gap: 6px;
 	}
 
-	.field-label {
+	.label-row {
 		display: flex;
 		align-items: center;
 		gap: 8px;
 		flex-wrap: wrap;
+	}
+
+	.field-label {
 		font-size: 14px;
 		font-weight: 500;
 	}

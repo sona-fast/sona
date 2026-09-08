@@ -13,7 +13,7 @@
 	import { applyAction, enhance } from '$app/forms';
 	import { afterNavigate } from '$app/navigation';
 	import { tick } from 'svelte';
-	import { Check, ImageOff, LoaderCircle, Pencil, RefreshCw, Tag } from 'lucide-svelte';
+	import { Check, ImageOff, LoaderCircle, LogIn, Pencil, RefreshCw, Tag } from 'lucide-svelte';
 	import TagSuggestionChips from '$lib/components/TagSuggestionChips.svelte';
 	import { cdnImage, THUMB_WIDTH } from '$lib/img';
 	import { sanitizeTag } from '$lib/tags';
@@ -57,9 +57,11 @@
 	let statusLines = $state<Record<number, HTMLElement | null>>({});
 	let rowTitles = $state<Record<number, HTMLElement | null>>({});
 	const requestSeq: Record<number, number> = {};
-	// How many rows were on screen when Load more was clicked, so the row that
-	// follows them can take focus once the longer list renders.
-	let grewFrom: number | null = null;
+	// The id of the last row on screen when Load more was clicked, so the row that
+	// follows it can take focus once the longer list renders. An id rather than a
+	// count: a row saved above it drops off the reloaded list, and a position would
+	// then land focus one row too far down.
+	let grewAfterId: number | null = null;
 
 	const stateOf = (id: number): SuggestionState => states[id] ?? { kind: 'idle' };
 
@@ -77,6 +79,10 @@
 	async function suggest(id: number, source: 'bluesky' | 'x', title: string) {
 		if (stateOf(id).kind === 'searching') return;
 		const seq = (requestSeq[id] = (requestSeq[id] ?? 0) + 1);
+		// A failed save leaves "Not saved" on the row. This lookup replaces what that
+		// was about, so the eyebrow goes with it rather than sitting above fresh chips
+		// as if they were the ones that would not save.
+		setFailure(id, false);
 		states = { ...states, [id]: { kind: 'searching', source } };
 		announce(title, readingLabel(source));
 		// "Try again" lived in the tray that just became the searching skeleton;
@@ -106,6 +112,7 @@
 
 	async function dismiss(id: number) {
 		requestSeq[id] = (requestSeq[id] ?? 0) + 1;
+		setFailure(id, false);
 		const { [id]: _dropped, ...rest } = states;
 		states = rest;
 		announcement = '';
@@ -130,13 +137,16 @@
 	// their place. Focus would otherwise stay on a link that is now gone, which
 	// drops it to the top of the document.
 	afterNavigate(async () => {
-		if (grewFrom === null) return;
-		const from = grewFrom;
-		grewFrom = null;
+		if (grewAfterId === null) return;
+		const after = grewAfterId;
+		grewAfterId = null;
 		// After the longer list has rendered: `data` still holds the rows the page
 		// arrived with while the callback runs.
 		await tick();
-		const first = data.rows[from];
+		const was = data.rows.findIndex((row) => row.id === after);
+		// The row that followed the last one on screen — or the top of the list, if
+		// that row has been saved off it since.
+		const first = was === -1 ? data.rows[0] : data.rows[was + 1];
 		if (first) rowTitles[first.id]?.focus();
 	});
 </script>
@@ -152,7 +162,7 @@
 {#if data.rows.length === 0}
 	<div class="rowcard empty">
 		<div class="rowhead">
-			<Tag size={20} class="empty-icon" />
+			<Tag size={20} class="empty-icon" aria-hidden="true" />
 			<h2 class="emptytitle">{m.admin_suggest_tags_empty_title()}</h2>
 		</div>
 		<p class="rowmeta empty-body">{m.admin_suggest_tags_empty_body()}</p>
@@ -194,13 +204,15 @@
 							{#if row.artistName}{row.artistName} &middot;{' '}{/if}{sourceLabel(row.source)}
 						</p>
 					</div>
-					{#if !savedTags && !conflicts[row.id] && (rowState.kind === 'idle' || rowState.kind === 'searching' || rowState.kind === 'suggested')}
+					{#if !savedTags && !conflicts[row.id] && !failures[row.id] && (rowState.kind === 'idle' || rowState.kind === 'searching' || rowState.kind === 'suggested')}
 						<!-- Stays put while the row is idle, looking up, or showing chips, like
 						     the forms' pill: aria-disabled through the lookup so focus has
 						     somewhere to be while the tray shows the skeleton, and a second
 						     click runs the lookup again. It goes once a failure tray takes the
 						     row over, because that tray carries Try again and one row does not
-						     need two controls firing the same lookup. -->
+						     need two controls firing the same lookup — and for the same reason
+						     while a save has failed, where Save is the retry and this pill would
+						     throw the chips away instead. -->
 						<button
 							bind:this={pills[row.id]}
 							type="button"
@@ -212,10 +224,10 @@
 							onclick={() => suggest(row.id, row.source, row.title)}
 						>
 							{#if rowState.kind === 'searching'}
-								<LoaderCircle size={14} class="tag-spin" />
+								<LoaderCircle size={14} class="tag-spin" aria-hidden="true" />
 								{m.admin_tag_suggest_searching()}
 							{:else}
-								<Tag size={14} />
+								<Tag size={14} aria-hidden="true" />
 								{m.admin_tag_suggest_button()}
 							{/if}
 						</button>
@@ -235,11 +247,11 @@
 						<!-- The row's only action once it is saved or refused, so it takes
 						     the pill's shape rather than reading as muted body text. -->
 						<a
-							class="tag-pill"
+							class="tag-pill tag-pill-action"
 							href="/admin/images/{row.id}/edit"
 							aria-label={m.admin_suggest_tags_edit_image_label({ title: row.title })}
 						>
-							<Pencil size={14} />
+							<Pencil size={14} aria-hidden="true" />
 							{m.admin_suggest_tags_edit_image()}
 						</a>
 					</div>
@@ -249,7 +261,7 @@
 						tabindex="-1"
 						bind:this={statusLines[row.id]}
 					>
-						<Check size={14} />
+						<Check size={14} aria-hidden="true" />
 						{m.admin_suggest_tags_saved({ count: savedTags.length })}
 					</p>
 					<div class="tag-chiprow">
@@ -261,11 +273,11 @@
 						<!-- The row's only action once it is saved or refused, so it takes
 						     the pill's shape rather than reading as muted body text. -->
 						<a
-							class="tag-pill"
+							class="tag-pill tag-pill-action"
 							href="/admin/images/{row.id}/edit"
 							aria-label={m.admin_suggest_tags_edit_image_label({ title: row.title })}
 						>
-							<Pencil size={14} />
+							<Pencil size={14} aria-hidden="true" />
 							{m.admin_suggest_tags_edit_image()}
 						</a>
 					</div>
@@ -304,7 +316,9 @@
 						     sentence is body text. The chips stay put, so the Save button
 						     below is still the way to try again. -->
 						<p class="tag-eyebrow warn">{m.admin_suggest_tags_not_saved()}</p>
-						<p class="tag-panel-body">{m.admin_suggest_tags_save_failed()}</p>
+						<p class="tag-panel-body" tabindex="-1" bind:this={statusLines[row.id]}>
+							{m.admin_suggest_tags_save_failed()}
+						</p>
 					{/if}
 					<form
 						method="POST"
@@ -338,7 +352,15 @@
 									// the row has to show that nothing landed, not only say it
 									// into the live region.
 									setFailure(row.id, true);
+									// Blanked first: a repeat of the same failure writes the
+									// sentence the region already holds, and an unchanged region
+									// announces nothing. The tick lets the emptying reach the DOM.
+									announcement = '';
+									await tick();
 									announce(row.title, m.admin_suggest_tags_save_failed());
+									// The sentence that says what happened is where the operator
+									// resumes, the way the sibling branches land focus.
+									statusLines[row.id]?.focus();
 									return;
 								}
 								const written = (result.data?.savedTags as string[] | undefined) ?? accepted;
@@ -369,7 +391,7 @@
 								title: row.title
 							})}
 						>
-							{#if saving.has(row.id)}<LoaderCircle size={14} class="tag-spin" />{/if}
+							{#if saving.has(row.id)}<LoaderCircle size={14} class="tag-spin" aria-hidden="true" />{/if}
 							{m.admin_suggest_tags_row_save({ count: chosen.length })}
 						</button>
 						<button
@@ -399,14 +421,17 @@
 								aria-label={m.admin_suggest_tags_row_try_again({ title: row.title })}
 								onclick={() => suggest(row.id, row.source, row.title)}
 							>
-								<RefreshCw size={14} />
+								<RefreshCw size={14} aria-hidden="true" />
 								{m.admin_tag_suggest_try_again()}
 							</button>
 						{/if}
 						{#if tray.signIn}
 							<!-- A dead session: another lookup sends the same cookie, so the
 							     way out is the login page. -->
-							<a class="tag-pill" href="/admin/login">{m.admin_tag_suggest_sign_in()}</a>
+							<a class="tag-pill" href="/admin/login">
+								<LogIn size={14} aria-hidden="true" />
+								{m.admin_tag_suggest_sign_in()}
+							</a>
 						{/if}
 						<button
 							type="button"
@@ -434,7 +459,7 @@
 			class="tag-pill load-more"
 			href="?pages={data.pages + 1}"
 			data-sveltekit-noscroll
-			onclick={() => (grewFrom = data.rows.length)}
+			onclick={() => (grewAfterId = data.rows[data.rows.length - 1]?.id ?? null)}
 		>
 			{m.admin_suggest_tags_load_more()}
 		</a>
@@ -587,6 +612,13 @@
 
 	.load-more {
 		text-decoration: none;
+	}
+
+	/* The saved row's action sits under a row of static chips it must not read as
+	   part of. The card's 12px gap alone reads as chip spacing, so the action row
+	   takes a little more air than the lines above it. */
+	.tag-chiprow + .tag-actions {
+		margin-top: 4px;
 	}
 
 	@media (max-width: 640px) {

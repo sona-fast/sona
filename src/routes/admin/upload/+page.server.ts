@@ -8,7 +8,7 @@ import { variantAssignmentError, MAX_VARIANT_SET } from '$lib/server/variants';
 import {
 	MAX_IMAGE_TAGS,
 	MAX_TAGS_INPUT_LENGTH,
-	parseImageTags,
+	readTagInput,
 	replaceImageTags
 } from '$lib/server/image-tags';
 import * as m from '$lib/paraglide/messages';
@@ -117,11 +117,11 @@ export const actions = {
 
 		// Refused, not truncated, and before anything is inserted: an upload that
 		// silently dropped tags would report success without them.
-		if (tagsRaw.length > MAX_TAGS_INPUT_LENGTH) {
+		const { problem: tagsProblem, value: tagNames } = readTagInput(tagsRaw);
+		if (tagsProblem === 'too_long') {
 			return fail(400, { error: m.admin_field_tags_too_long({ max: MAX_TAGS_INPUT_LENGTH }) });
 		}
-		const tagNames = sanitizeText(tagsRaw, MAX_TAGS_INPUT_LENGTH);
-		if (parseImageTags(tagNames).length > MAX_IMAGE_TAGS) {
+		if (tagsProblem === 'too_many') {
 			return fail(400, { error: m.admin_field_tags_too_many({ max: MAX_IMAGE_TAGS }) });
 		}
 

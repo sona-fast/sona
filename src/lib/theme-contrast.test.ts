@@ -977,3 +977,33 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		}
 	}
 });
+
+// SONA-220: the saved and refused backfill rows put one action beside a row of
+// static saved-tag chips wearing the same capsule. The action's border is what
+// separates them, so it is a control boundary held to 3:1 on the card it sits
+// on — the chips' resting --border is nowhere near that, which is the point.
+describe('SONA-220 saved-row action border contrast, every theme × mode', () => {
+	// color-mix(in srgb, var(--foreground) N%, var(--card)); parse N rather than
+	// pinning it, so a later tweak is measured instead of failing on the number.
+	const actionMix = (() => {
+		const mix = blockBody('.tag-pill-action').match(
+			/border-color:\s*color-mix\(in srgb,\s*var\(--foreground\)\s*(\d+)%,\s*var\(--card\)\)/
+		);
+		if (!mix) throw new Error('the saved-row action border is no longer a foreground/card mix');
+		return Number(mix[1]);
+	})();
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: the action border meets 3:1 on the card it sits on`, () => {
+			const card = blockToken(sel, 'card');
+			expect(contrast(mix2(blockToken(sel, 'foreground'), actionMix, card), card)).toBeGreaterThanOrEqual(3);
+		});
+
+		it(`${name}: it is a clear step up from the static chip border beside it`, () => {
+			const card = blockToken(sel, 'card');
+			const chip = contrast(blockToken(sel, 'border'), card);
+			const action = contrast(mix2(blockToken(sel, 'foreground'), actionMix, card), card);
+			expect(action).toBeGreaterThan(chip * 1.5);
+		});
+	}
+});

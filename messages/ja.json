@@ -1450,7 +1450,7 @@
 	"admin_tag_suggest_unavailable_body": "entail.devから応答がありませんでした。タグは変更されていません。",
 	"admin_tag_suggest_rate_limited_body": "entail.devが混雑しています。1分ほど待ってからもう一度試してください。",
 	"admin_tag_suggest_not_found_body": "entail.devはこの投稿を読み取れませんでした。",
-	"admin_tag_suggest_signed_out_title": "サインアウトしました",
+	"admin_tag_suggest_signed_out_title": "サインアウトされました",
 	"admin_tag_suggest_signed_out_body": "セッションが終了しました。続けるにはもう一度サインインしてください。",
 	"admin_tag_suggest_sign_in": "サインイン",
 	"admin_field_tags_too_many": "タグは最大{max}件までです。",
@@ -1484,6 +1484,6 @@
 	"admin_suggest_tags_showing": "{total}件中{shown}件を表示",
 	"admin_suggest_tags_load_more": "さらに読み込む",
 	"admin_suggest_tags_empty_title": "今は提案できるものがありません",
-	"admin_suggest_tags_empty_body": "BlueskyまたはXの元投稿がある画像にはすべてタグがついています。もう1枚追加すると、Sonaがここで確認します。",
+	"admin_suggest_tags_empty_body": "BlueskyまたはXの元投稿がある画像を追加すると、ここに表示されます。",
 	"admin_suggest_tags_back": "すべての画像に戻る"
 }

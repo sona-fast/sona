@@ -2,12 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { and, desc, eq, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { artists, imageTags, images } from '$lib/server/db/schema';
-import {
-	MAX_IMAGE_TAGS,
-	MAX_TAGS_INPUT_LENGTH,
-	parseImageTags,
-	replaceImageTags
-} from '$lib/server/image-tags';
+import { readTagInput, replaceImageTags } from '$lib/server/image-tags';
 import { classifySourceUrl } from '$lib/tags';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -122,15 +117,11 @@ export const actions: Actions = {
 		if (!Number.isInteger(id) || id <= 0) return fail(400, { error: 'invalid_request' });
 
 		// These tags come from the tray rather than a text field, so reaching the
-		// cap here takes a hand-made post. The three write paths still agree on the
-		// limit, and refuse rather than truncate.
-		const tagsRaw = String(data.get('tags') ?? '');
-		if (
-			tagsRaw.length > MAX_TAGS_INPUT_LENGTH ||
-			parseImageTags(tagsRaw).length > MAX_IMAGE_TAGS
-		) {
-			return fail(400, { error: 'too_many_tags' });
-		}
+		// cap here takes a hand-made post. The three write paths read the field
+		// through the same helper, and refuse rather than truncate. This page has no
+		// field to word two refusals for, so both problems answer the same way.
+		const { problem: tagsProblem, value: tagNames } = readTagInput(String(data.get('tags') ?? ''));
+		if (tagsProblem) return fail(400, { error: 'too_many_tags' });
 
 		const row = await db.select({ id: images.id }).from(images).where(eq(images.id, id)).get();
 		if (!row) return fail(404, { error: 'not_found' });
@@ -149,7 +140,7 @@ export const actions: Actions = {
 
 		// The same persistence the edit form's save uses, so a tag written here is
 		// indistinguishable from one typed there.
-		const written = await replaceImageTags(db, id, tagsRaw);
+		const written = await replaceImageTags(db, id, tagNames);
 		return { savedId: id, savedTags: written };
 	}
 };
