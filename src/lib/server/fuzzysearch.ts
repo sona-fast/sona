@@ -16,6 +16,17 @@ import { getRawSetting } from './settings';
 import { normalizeHandle, socialsToHandles, type Platform } from './handle-normalize';
 import type { Database } from './db';
 
+// Three rules the browser needs as much as this file does: which match the form
+// is prefilled from, the strictest rating across the confident matches, and the
+// canonical profile URL for a handle. They live in the client-safe
+// `$lib/artist-lookup` and are re-exported here so server importers keep this
+// path — the handle-normalize.ts pattern, and the reason there is one copy.
+export {
+	pickPrefillMatch,
+	strictestRating,
+	profileUrlFor as handleProfileUrl
+} from '$lib/artist-lookup';
+
 type Env = App.Platform['env'];
 
 /** site_settings keys. Raw rows, like the registry fork key: kept out of the
@@ -172,19 +183,6 @@ export function postUrlFor(site: LookupSite, siteId: string, handles: string[]):
 				: `https://twitter.com/i/status/${id}`;
 		}
 	}
-}
-
-/** Canonical profile URL for a handle on a site we hold an artist column for.
- * Weasyl and e621 have no column yet (SONA-219), so they resolve to null. */
-export function handleProfileUrl(site: LookupSite, handle: string): string | null {
-	const h = cleanHandle(handle);
-	if (!h) return null;
-	// Percent-encoded like postUrlFor's ids: a handle is third-party text, and a
-	// slash or a '?' in it would otherwise re-point the URL at another page.
-	const safe = encodeURIComponent(h);
-	if (site === 'FurAffinity') return `https://www.furaffinity.net/user/${safe}/`;
-	if (site === 'Twitter') return `https://twitter.com/${safe}`;
-	return null;
 }
 
 /** Hosts that are the same site under two names. Without folding these, an
@@ -410,38 +408,6 @@ export async function searchImage(
 	// art is unindexed when nobody actually looked.
 	if (!Array.isArray(payload)) return { ok: false, reason: 'unavailable' };
 	return { ok: true, matches: normalizeMatches(payload) };
-}
-
-/**
- * The match worth prefilling the form from: the closest exact or strong one.
- * `normalizeMatches` already sorted by distance then site, so the first
- * qualifying entry is the best one.
- */
-export function pickPrefillMatch(matches: LookupMatch[]): LookupMatch | null {
-	return matches.find((m) => m.band === 'exact' || m.band === 'strong') ?? null;
-}
-
-/**
- * The strictest rating carried by the confident matches, with the sites that
- * carried it — so the UI can say where an NSFW suggestion came from. Possible
- * and unknown-distance matches are excluded: a loose match must not flip the
- * operator's NSFW flag.
- */
-export function strictestRating(
-	matches: LookupMatch[]
-): { rating: LookupRating; sites: LookupSite[] } | null {
-	const confident = matches.filter((m) => m.band === 'exact' || m.band === 'strong');
-	let best: LookupRating | null = null;
-	for (const m of confident) {
-		if (!m.rating) continue;
-		if (best === null || RATINGS.indexOf(m.rating) > RATINGS.indexOf(best)) best = m.rating;
-	}
-	if (!best) return null;
-	const sites: LookupSite[] = [];
-	for (const m of confident) {
-		if (m.rating === best && !sites.includes(m.site)) sites.push(m.site);
-	}
-	return { rating: best, sites };
 }
 
 /** The platform a site's handles live on, for the sites we hold a column for. */

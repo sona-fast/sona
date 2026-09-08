@@ -6,7 +6,7 @@ import {
 	isCrossSiteAmbiguity,
 	matchHandle,
 	matchHandles,
-	matchedSites,
+	lookupSentFile,
 	nameMatchArtists,
 	pickPrefillMatch,
 	postDateToInput,
@@ -24,12 +24,12 @@ import {
 	type LookupSite
 } from './artist-lookup';
 // A node test may reach into the server module; the browser bundle may not.
-// Importing both here is how the two copies of the wire shape stay in step.
+// Importing both here is how the wire shape and the shared rules stay in step.
 import {
 	FUZZYSEARCH_MAX_BYTES,
 	handleProfileUrl,
-	strictestRating as serverStrictestRating,
-	type LookupMatch as ServerLookupMatch
+	pickPrefillMatch as serverPickPrefillMatch,
+	strictestRating as serverStrictestRating
 } from './server/fuzzysearch';
 import * as m from './paraglide/messages';
 
@@ -70,30 +70,27 @@ describe('artist-lookup — the wire shape agrees with the server', () => {
 		expect(LOOKUP_MAX_BYTES).toBe(FUZZYSEARCH_MAX_BYTES);
 	});
 
-	it('builds the same profile URLs the endpoint matches artists on', () => {
-		const sites: LookupSite[] = ['FurAffinity', 'Twitter', 'Weasyl', 'e621'];
-		for (const site of sites) {
-			expect(profileUrlFor(site, '@kuttoya')).toBe(handleProfileUrl(site, '@kuttoya'));
-		}
-		expect(profileUrlFor('FurAffinity', '  @ ')).toBeNull();
-		// A slash in a handle must not re-point the URL at another page.
-		expect(profileUrlFor('Twitter', 'a/b')).toBe('https://twitter.com/a%2Fb');
+	// The rules below used to exist twice, once per module, and the tests could
+	// only assert the two copies agreed today. The server re-exports these now,
+	// so identity is the assertion: a re-introduced copy fails here rather than
+	// drifting quietly (SONA-156 round 1).
+	it('is the one implementation the server module re-exports', () => {
+		expect(serverStrictestRating).toBe(strictestRating);
+		expect(serverPickPrefillMatch).toBe(pickPrefillMatch);
+		expect(handleProfileUrl).toBe(profileUrlFor);
 	});
 
-	it('picks the same strictest rating the server does', () => {
+	it('picks the strictest rating across the confident matches only', () => {
 		const matches = [
 			match({ rating: 'general' }),
 			match({ site: 'Twitter', siteId: '9', rating: 'adult', distance: 2, band: 'strong' }),
 			// Possible matches never raise the rating.
 			match({ site: 'e621', siteId: '7', rating: 'adult', distance: 5, band: 'possible' })
 		];
-		expect(strictestRating(matches)).toEqual(
-			serverStrictestRating(matches as unknown as ServerLookupMatch[])
-		);
 		expect(strictestRating(matches)).toEqual({ rating: 'adult', sites: ['Twitter'] });
 	});
 
-	it('picks the same prefill match the server does', () => {
+	it('prefills from the closest confident match, and from nothing looser', () => {
 		const matches = [
 			match({ distance: 4, band: 'possible' }),
 			match({ site: 'Twitter', siteId: '9', distance: 1, band: 'strong' })
@@ -215,17 +212,38 @@ describe('labels and formatting', () => {
 		expect(matchHandles(match({ handles: ['@a', ' b ', '  '] }))).toBe('a, b');
 	});
 
-	it('lists the sites a result touched, once each, in order', () => {
-		expect(
-			matchedSites([match(), match({ siteId: '2' }), match({ site: 'Twitter', siteId: '9' })])
-		).toEqual(['FurAffinity', 'Twitter']);
-	});
-
 	it('has the plural keys the panel needs', () => {
 		expect(m.admin_lookup_found_on_sites({ count: 1 })).toBe('Found on 1 site');
 		expect(m.admin_lookup_found_on_sites({ count: 2 })).toBe('Found on 2 sites');
 		expect(m.admin_lookup_variants({ count: 1 })).toBe(' and its 1 variant');
 		expect(m.admin_lookup_variants({ count: 3 })).toBe(' and its 3 variants');
+		expect(m.admin_lookup_pieces({ count: 1 })).toBe('1 piece');
+		expect(m.admin_lookup_pieces({ count: 12 })).toBe('12 pieces');
+	});
+
+	// resolveOutcome fires at two OR MORE candidates, so the sentence counts
+	// rather than saying "two" (SONA-156 round 1, copy gate).
+	it('counts the ambiguous candidates instead of claiming there are two', () => {
+		expect(m.admin_lookup_ambiguous({ handle: 'kuttoya', count: 3 })).toBe(
+			'kuttoya matches 3 artists in your list.'
+		);
+		expect(m.admin_lookup_ambiguous_cross({ count: 2 })).toBe(
+			'These matches point to 2 artists in your list.'
+		);
+	});
+
+	// The eyebrow puts this straight after "FOUND ON 2 SITES"; without the
+	// leading space in the message the compiler leaves them jammed together.
+	it('carries its own leading space in the filename eyebrow', () => {
+		expect(m.admin_lookup_eyebrow_file({ fileName: 'photo.png' })).toBe(' \u00b7 photo.png');
+	});
+
+	// The status line for a date-only prefill must not claim a reason it cannot
+	// know: the URL is also left alone when the operator already typed one.
+	it('says only what the date-only prefill did', () => {
+		expect(m.admin_lookup_status_date_only({ site: 'FurAffinity' })).toBe(
+			'Sona filled the commissioned date from the FurAffinity post and left the source post URL alone. You can change the date before you save.'
+		);
 	});
 });
 
@@ -288,6 +306,32 @@ describe('stateFromResponse', () => {
 		expect(state.data.sourceClash).toBeNull();
 	});
 
+	// The endpoint builds every post URL, so anything that is not an https link
+	// came from something that is not the endpoint — and both the panel row and
+	// the upload tile render it as an anchor the operator clicks.
+	it('drops a match whose post URL is not an https link', async () => {
+		const state = await stateFromResponse(
+			jsonResponse(
+				response({
+					matches: [
+						match({ postUrl: 'javascript:alert(1)' }),
+						match({ site: 'Twitter', siteId: '9', postUrl: 'https://twitter.com/a/status/9' })
+					]
+				})
+			)
+		);
+		if (state.kind !== 'results') throw new Error('expected results');
+		expect(state.data.matches.map((x) => x.postUrl)).toEqual(['https://twitter.com/a/status/9']);
+	});
+
+	it('reads a result whose only match has an unusable URL as no_match', async () => {
+		expect(
+			await stateFromResponse(
+				jsonResponse(response({ matches: [match({ postUrl: 'javascript:alert(1)' })] }))
+			)
+		).toEqual({ kind: 'no_match' });
+	});
+
 	it('reads an empty match list as no_match', async () => {
 		expect(await stateFromResponse(jsonResponse({ enabled: true, matches: [] }))).toEqual({
 			kind: 'no_match'
@@ -338,6 +382,29 @@ describe('stateFromResponse', () => {
 			kind: 'failed',
 			reason: 'unavailable'
 		});
+	});
+});
+
+describe('lookupSentFile', () => {
+	// The disclosure is about the FILE having left the browser, not about the
+	// lookup having worked: it belongs on a failure just as much as on a result.
+	it('is true for every outcome the request actually reached', () => {
+		expect(lookupSentFile({ kind: 'results', applied: false, data: response() })).toBe(true);
+		expect(lookupSentFile({ kind: 'no_match' })).toBe(true);
+		for (const reason of ['key_refused', 'rate_limited', 'invalid_image', 'unavailable', 'signed_out'] as const) {
+			expect(lookupSentFile({ kind: 'failed', reason })).toBe(true);
+		}
+	});
+
+	// too_large is refused by runLookup before anything is sent, so claiming the
+	// file went out would be a false disclosure.
+	it('is false for too_large, which never leaves the browser', () => {
+		expect(lookupSentFile({ kind: 'failed', reason: 'too_large' })).toBe(false);
+	});
+
+	it('says nothing before an outcome exists', () => {
+		expect(lookupSentFile({ kind: 'idle' })).toBe(false);
+		expect(lookupSentFile({ kind: 'searching' })).toBe(false);
 	});
 });
 

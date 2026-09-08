@@ -25,10 +25,13 @@ export interface LookupMatch {
 	postUrl: string;
 }
 
-/** Local artists a single match points at, by its index in `matches`. */
+/** Local artists a single match points at, by its index in `matches`. `pieces`
+ * is how many images that artist already has — the ambiguous picker shows it,
+ * because two artists can share a name and the count is what tells them apart.
+ * Optional: a response from before the endpoint counted them carries none. */
 export interface ArtistHit {
 	matchIndex: number;
-	artists: Array<{ id: number; name: string }>;
+	artists: Array<{ id: number; name: string; pieces?: number }>;
 }
 
 export interface SourceClash {
@@ -37,6 +40,11 @@ export interface SourceClash {
 	isVariant: boolean;
 	parentImageId: number | null;
 	variantCount: number;
+	/** The piece the operator is being pointed at, for the thumbnail row. Null
+	 * where the row carries none. */
+	thumbnailUrl: string | null;
+	artistName: string | null;
+	uploadedAt: string | null;
 }
 
 export interface LookupResponse {
@@ -122,9 +130,9 @@ export function ratingTag(
 }
 
 /** The strictest rating across the confident matches, with the sites carrying
- * it. Mirrors `strictestRating` on the server so a tile can rate itself from a
- * response the endpoint already normalized. Possible and unknown-distance
- * matches are excluded: a loose match must not suggest an NSFW flag. */
+ * it. The one implementation — `$lib/server/fuzzysearch` re-exports this rather
+ * than restating it. Possible and unknown-distance matches are excluded: a
+ * loose match must not suggest an NSFW flag. */
 export function strictestRating(
 	matches: LookupMatch[]
 ): { rating: LookupRating; sites: LookupSite[] } | null {
@@ -144,7 +152,8 @@ export function strictestRating(
 }
 
 /** The match the form is filled from: the closest confident one. The endpoint
- * already sorted by distance then site, so the first qualifier is the best. */
+ * already sorted by distance then site, so the first qualifier is the best.
+ * Re-exported by `$lib/server/fuzzysearch`; this is the only copy. */
 export function pickPrefillMatch(matches: LookupMatch[]): LookupMatch | null {
 	return matches.find((x) => x.band === 'exact' || x.band === 'strong') ?? null;
 }
@@ -173,9 +182,11 @@ export function matchHandles(match: LookupMatch): string {
 }
 
 /** Canonical profile URL for a handle, for the sites Sona holds a column for.
- * Mirrors `handleProfileUrl` on the server (pinned by the unit test) so the
- * new-artist prefill offers the same link the endpoint would have matched on.
- * Weasyl and e621 have no column yet (SONA-219) and resolve to null. */
+ * `$lib/server/fuzzysearch` re-exports this as `handleProfileUrl`, so the
+ * new-artist prefill offers the same link the endpoint matched on. The handle
+ * is third-party text, so it is percent-encoded: a slash or a '?' in it would
+ * otherwise re-point the URL at another page. Weasyl and e621 have no column
+ * yet (SONA-219) and resolve to null. */
 export function profileUrlFor(site: LookupSite, handle: string): string | null {
 	const clean = handle.trim().replace(/^@+/, '');
 	if (!clean) return null;
@@ -189,6 +200,8 @@ export interface ArtistChoice {
 	id: number;
 	name: string;
 	site: LookupSite;
+	/** How many pieces this artist already has, when the endpoint counted them. */
+	pieces?: number;
 }
 
 /**
@@ -279,12 +292,15 @@ export function statusLineKind(
 	return 'none';
 }
 
-/** The sites named on the result rows, in order, for the "found on N sites"
- * eyebrow. */
-export function matchedSites(matches: LookupMatch[]): LookupSite[] {
-	const sites: LookupSite[] = [];
-	for (const match of matches) if (!sites.includes(match.site)) sites.push(match.site);
-	return sites;
+/**
+ * Whether the file has already left the browser in this state. Every state but
+ * `too_large` — refused client-side before anything is sent — means FuzzySearch
+ * received a copy, so a private image's disclosure belongs on all of them, not
+ * just on a result. `idle` and `searching` are not outcomes and carry no notice.
+ */
+export function lookupSentFile(state: LookupState): boolean {
+	if (state.kind === 'idle' || state.kind === 'searching') return false;
+	return !(state.kind === 'failed' && state.reason === 'too_large');
 }
 
 /** Body shapes the endpoint answers with. */
@@ -300,6 +316,16 @@ const FAIL_REASONS: readonly LookupFailReason[] = [
 	'invalid_image',
 	'unavailable'
 ];
+
+/**
+ * The one gate on a match's post URL. The endpoint builds these itself, so a
+ * `javascript:` or `data:` URL can only arrive from something that is not the
+ * endpoint — and both the panel row and the upload tile render it as an anchor
+ * the operator clicks. Dropped here, once, rather than guarded at each link.
+ */
+function hasLinkableUrl(match: LookupMatch): boolean {
+	return typeof match?.postUrl === 'string' && match.postUrl.startsWith('https://');
+}
 
 /**
  * Turn a response into a state. Mapped by the body's `error` field rather than
@@ -331,7 +357,7 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	// The key went away between the page load and the click. Nothing to show and
 	// nothing the panel can offer, so it reads as an outage.
 	if (data.enabled === false) return { kind: 'failed', reason: 'unavailable' };
-	const matches = Array.isArray(data.matches) ? data.matches : [];
+	const matches = (Array.isArray(data.matches) ? data.matches : []).filter(hasLinkableUrl);
 	if (matches.length === 0) return { kind: 'no_match' };
 	return {
 		kind: 'results',
