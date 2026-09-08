@@ -395,7 +395,11 @@ describe('the "From lookup" tag', () => {
 		expect(EDIT).toMatch(
 			/const lookupSeedEdited = \$derived\(\{[\s\S]{0,300}?profileUrl: lookupSeeded\.profileUrl !== undefined && !twitterTagged && !furaffinityTagged/
 		);
-		expect(EDIT).toMatch(/seeded=\{lookupSeeded\}\s*\n\s*seedEdited=\{lookupSeedEdited\}/);
+		// The record is handed over only in the mode its fields are mounted in;
+		// the pair itself stays together.
+		expect(EDIT).toMatch(
+			/seeded=\{artistMode === 'new' \? lookupSeeded : \{\}\}\s*\n\s*seedEdited=\{lookupSeedEdited\}/
+		);
 	});
 
 	// The panel's sentences: a kept field is named, the edited one is not
@@ -607,17 +611,24 @@ describe('round 11 wiring', () => {
 	// artist the operator had just moved off. And the other way round, Use
 	// unmounts the inline fields the seed sentence is about, which went on
 	// saying Sona had filled a name and a link that were no longer on screen.
-	it('drops the applied artist and the seed when the edit form changes hands', () => {
+	// Both sentences are gated on the mode rather than cleared: cleared, a flip
+	// back to the inline form showed Sona's values with no "From lookup" tag and
+	// nothing said about where they came from (3.3.2).
+	it('shows each panel sentence only in the mode its fields are in', () => {
 		// Read off the mode, so the toggle above the form closes the same way the
 		// panel's action does rather than needing its own clear.
 		expect(EDIT).toMatch(
 			/appliedArtist=\{artistMode === 'existing' \? appliedArtist : null\}/
 		);
+		expect(EDIT).toMatch(/seeded=\{artistMode === 'new' \? lookupSeeded : \{\}\}/);
 		const use = EDIT.match(/function useLookupArtist\([\s\S]*?\n\t\}/)?.[0] ?? '';
 		expect(use).toMatch(/appliedArtist = artist;/);
-		expect(use).toMatch(
-			/lookupSeeded = \{\};\s*\n\s*nameTagged = false;\s*\n\s*twitterTagged = false;\s*\n\s*furaffinityTagged = false;/
-		);
+		// The record and the tags survive the click, so the fields, their tags,
+		// and the sentence come back together when the operator flips back.
+		expect(use).not.toMatch(/lookupSeeded = \{\}/);
+		expect(use).not.toMatch(/nameTagged = false/);
+		expect(use).not.toMatch(/twitterTagged = false/);
+		expect(use).not.toMatch(/furaffinityTagged = false/);
 	});
 
 	// Left at 'new', the panel keeps offering "Add {handle} as a new artist" for

@@ -75,7 +75,10 @@
 	let newTwitter = $state('');
 	let newFuraffinity = $state('');
 	// What the last seed wrote into the inline new-artist form, for the panel's
-	// status line, plus the tag on each field it filled.
+	// status line, plus the tag on each field it filled. Handed to the panel only
+	// while that form is what saves, the same way appliedArtist is: the sentence
+	// names fields the artist select replaced. The record itself outlives the
+	// flip so the fields, their tags, and the sentence come back together.
 	let lookupSeeded = $state<NewArtistSeed>({});
 	let nameTagged = $state(false);
 	let twitterTagged = $state(false);
@@ -309,13 +312,12 @@
 		}
 		selectedArtistId = artist.id;
 		appliedArtist = artist;
-		// The seed sentence is about the inline new-artist fields, and this click
-		// replaces them with the select: left standing it went on saying Sona had
-		// filled a name and a link that are no longer on screen.
-		lookupSeeded = {};
-		nameTagged = false;
-		twitterTagged = false;
-		furaffinityTagged = false;
+		// The seed record and the field tags are left standing. The sentence they
+		// feed is about fields this click replaced with the select, so the PROP is
+		// gated on the mode instead — clearing the record here would empty the
+		// inline form's story while its values stayed typed in, and flipping back
+		// to new-artist mode would show Sona's name and link with no "From lookup"
+		// tag and nothing said about where they came from (3.3.2).
 		announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
 	}
 
@@ -468,7 +470,7 @@
 					{lookup}
 					filled={lookupFilled}
 					edited={lookupEdited}
-					seeded={lookupSeeded}
+					seeded={artistMode === 'new' ? lookupSeeded : {}}
 					seedEdited={lookupSeedEdited}
 					sourceUrlHeld={lookupUrlHeld}
 					appliedArtist={artistMode === 'existing' ? appliedArtist : null}

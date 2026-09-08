@@ -1010,7 +1010,7 @@ test.describe('with a key saved', () => {
 	// Both directions of the same switch on the edit page. The name-match result
 	// offers Use and "Add as a new artist instead" together, so the form can
 	// change hands twice without a second lookup.
-	test('the edit form drops the seed on Use and the applied artist on add-new', async ({
+	test('the edit form shows each panel sentence only in the mode its fields are in', async ({
 		page
 	}) => {
 		await stubLookup(
@@ -1026,6 +1026,8 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).toBeVisible();
 		await panel(page).getByRole('button', { name: 'Add as a new artist instead' }).click();
 		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(page.locator('#artist-name-lookup-tag')).toHaveText('From lookup');
+		await expect(page.locator('#furaffinity-lookup-tag')).toHaveText('From lookup');
 		await expect(panel(page)).toContainText(
 			"Sona filled the new artist's name and FurAffinity link."
 		);
@@ -1041,9 +1043,15 @@ test.describe('with a key saved', () => {
 		// And back: the save now posts artistId=new and creates somebody else, so
 		// nothing is applied any more. The panel kept saying "Using Test Artist".
 		await panel(page).getByRole('button', { name: 'Add as a new artist instead' }).click();
-		// The values the seed and the operator put in the inline fields survive the
-		// round trip; only the record naming them and its tags went.
+		// The inline fields come back with their values, their "From lookup" tags,
+		// and the sentence naming them together. Cleared on Use, they would have
+		// come back as Sona's values with nothing saying where they came from.
 		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(page.locator('#artist-name-lookup-tag')).toHaveText('From lookup');
+		await expect(page.locator('#furaffinity-lookup-tag')).toHaveText('From lookup');
+		await expect(panel(page)).toContainText(
+			"Sona filled the new artist's name and FurAffinity link."
+		);
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toHaveCount(0);
 		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
 
@@ -1052,9 +1060,14 @@ test.describe('with a key saved', () => {
 		// because the select is what saves; in new-artist mode it is not.
 		await page.getByRole('button', { name: 'Select Existing' }).click();
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+		await expect(panel(page)).not.toContainText("Sona filled the new artist's");
 		await page.getByRole('button', { name: 'Add New Artist' }).click();
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toHaveCount(0);
 		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(page.locator('#artist-name-lookup-tag')).toHaveText('From lookup');
+		await expect(panel(page)).toContainText(
+			"Sona filled the new artist's name and FurAffinity link."
+		);
 	});
 
 	// The image already has an artist, and a handle Sona does not hold is a
