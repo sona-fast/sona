@@ -1041,9 +1041,20 @@ test.describe('with a key saved', () => {
 		// And back: the save now posts artistId=new and creates somebody else, so
 		// nothing is applied any more. The panel kept saying "Using Test Artist".
 		await panel(page).getByRole('button', { name: 'Add as a new artist instead' }).click();
+		// The values the seed and the operator put in the inline fields survive the
+		// round trip; only the record naming them and its tags went.
 		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toHaveCount(0);
 		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
+
+		// The toggle above the form is the same flip by hand, and it reaches the
+		// panel the same way: back on the select the artist is applied again,
+		// because the select is what saves; in new-artist mode it is not.
+		await page.getByRole('button', { name: 'Select Existing' }).click();
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+		await page.getByRole('button', { name: 'Add New Artist' }).click();
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toHaveCount(0);
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
 	});
 
 	// The image already has an artist, and a handle Sona does not hold is a

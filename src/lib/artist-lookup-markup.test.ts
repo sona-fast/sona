@@ -608,8 +608,10 @@ describe('round 11 wiring', () => {
 	// unmounts the inline fields the seed sentence is about, which went on
 	// saying Sona had filled a name and a link that were no longer on screen.
 	it('drops the applied artist and the seed when the edit form changes hands', () => {
+		// Read off the mode, so the toggle above the form closes the same way the
+		// panel's action does rather than needing its own clear.
 		expect(EDIT).toMatch(
-			/const wasExisting = artistMode === 'existing';\s*\n\s*artistMode = 'new';[\s\S]{0,300}?appliedArtist = null;/
+			/appliedArtist=\{artistMode === 'existing' \? appliedArtist : null\}/
 		);
 		const use = EDIT.match(/function useLookupArtist\([\s\S]*?\n\t\}/)?.[0] ?? '';
 		expect(use).toMatch(/appliedArtist = artist;/);
@@ -652,6 +654,14 @@ describe('round 11 wiring', () => {
 describe('what the lookup copy names', () => {
 	const en = JSON.parse(read('messages/en.json'));
 	const ja = JSON.parse(read('messages/ja.json'));
+
+	// The tile announcement joins its outcome and its private disclosure through
+	// a message key so each locale owns the separator. Nothing read the ja value,
+	// so the ASCII space this replaced could have come back unnoticed.
+	it('leaves the separator between the two announcement parts to the locale', () => {
+		expect(en.admin_lookup_announce_tile_with_notice).toBe('{outcome} {disclosure}');
+		expect(ja.admin_lookup_announce_tile_with_notice).toBe('{outcome}{disclosure}');
+	});
 
 	it('blames the image being edited for the variant block', () => {
 		expect(en.admin_lookup_clash_has_variants).toBe(

@@ -64,6 +64,12 @@
 	);
 	let sourceTagged = $state(false);
 	let dateTagged = $state(false);
+	/** The artist the panel applied to the SELECT. Handed to the panel only
+	 * while the select is what saves: in new-artist mode the save posts
+	 * artistId=new and creates somebody else, so "Using {name}" there named an
+	 * artist this form was about to replace. Both ways into that mode — the
+	 * panel's "Add as a new artist instead" and the toggle above the form — are
+	 * the same flip, so the prop reads the mode instead of each path clearing. */
 	let appliedArtist = $state<{ id: number; name: string } | null>(null);
 	let artistName = $state('');
 	let newTwitter = $state('');
@@ -465,7 +471,7 @@
 					seeded={lookupSeeded}
 					seedEdited={lookupSeedEdited}
 					sourceUrlHeld={lookupUrlHeld}
-					{appliedArtist}
+					appliedArtist={artistMode === 'existing' ? appliedArtist : null}
 					editMode
 					variantBlocked={data.hasVariants}
 					privateNotice={sentPrivate && lookupSentFile(lookup)}
@@ -479,10 +485,6 @@
 						// switched — say it only when this click is what did.
 						const wasExisting = artistMode === 'existing';
 						artistMode = 'new';
-						// The save now posts artistId=new and creates somebody: an artist
-						// applied before this click is not the artist this form will make,
-						// and "Using {name}" over it named the wrong one.
-						appliedArtist = null;
 						const wrote = seedNewArtist(seed.handle, seed.site, seed.linkable);
 						// A seed that wrote something is announced by the panel's own status
 						// line. An empty handle (the no_match action) writes nothing, so the
