@@ -7,6 +7,7 @@ import {
 	matchForArtist,
 	matchHandle,
 	matchHandles,
+	matchKey,
 	lookupSentFile,
 	mergeSamePost,
 	nameMatchArtists,
@@ -101,6 +102,25 @@ describe('artist-lookup — the wire shape agrees with the server', () => {
 			match({ site: 'e621', siteId: '7', rating: 'adult', distance: 5, band: 'possible' })
 		];
 		expect(strictestRating(matches)).toEqual({ rating: 'adult', sites: ['Twitter'] });
+	});
+
+	// One post identity, built three ways: the server's dedupe, the client's, and
+	// the panel's keyed each. A bare concatenation is not an identity — a site
+	// "e621" with id "12" reads the same as a site "e6211" with id "2" — so the
+	// helper separates the parts with a character neither of them can hold.
+	it('keys a post on its site and id with no pair able to collide', () => {
+		expect(matchKey(match({ site: 'FurAffinity', siteId: '12345' }))).toBe(
+			matchKey({ site: 'FurAffinity', siteId: '12345' })
+		);
+		expect(matchKey({ site: 'e621', siteId: '12' })).not.toBe(
+			matchKey({ site: 'e6211' as LookupSite, siteId: '2' })
+		);
+		expect('e621' + '12').toBe('e6211' + '2');
+		// Both parts are still in the key, and the separator is not something a
+		// site name or a site id can contain.
+		expect(matchKey({ site: 'e621', siteId: '12' })).toContain('e621');
+		expect(matchKey({ site: 'e621', siteId: '12' })).toContain('12');
+		expect(matchKey({ site: 'e621', siteId: '12' })).toBe('e621\u000012');
 	});
 
 	// Two comparators read the rating order: strictestRating across a match list,

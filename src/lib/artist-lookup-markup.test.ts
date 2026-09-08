@@ -71,6 +71,13 @@ describe('the panel', () => {
 		expect(PANEL).toMatch(/<div class="lookup-body" role="status">/);
 	});
 
+	// The keyed each built the post identity a third way, by bare concatenation,
+	// while the two dedupes it renders the output of used two others.
+	it('keys the match list on the shared post identity', () => {
+		expect(PANEL).toMatch(/\{#each data\.matches as match \(matchKey\(match\)\)\}/);
+		expect(PANEL).not.toMatch(/match\.site \+ match\.siteId/);
+	});
+
 	// A live region inserted together with its first content is commonly missed,
 	// and that first content is the "lookup has started" message. The region is
 	// in the DOM from the first render; the state branch is inside it.

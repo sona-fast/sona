@@ -16,6 +16,7 @@
 		matchForArtist,
 		matchHandle,
 		matchHandles,
+		matchKey,
 		nameMatchArtists,
 		pickPrefillMatch,
 		postDateToInput,
@@ -280,7 +281,7 @@
 				{/if}
 
 				<ul class="match-list">
-					{#each data.matches as match (match.site + match.siteId)}
+					{#each data.matches as match (matchKey(match))}
 						{@const handles = matchHandles(match)}
 						<li class="match-row">
 							<!-- The brand mark, decorative: the line beside it names the site

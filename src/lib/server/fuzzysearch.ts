@@ -14,7 +14,7 @@
 import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 import { getRawSetting } from './settings';
 import { normalizeHandle, socialsToHandles, type Platform } from './handle-normalize';
-import { mergeSamePost } from '$lib/artist-lookup';
+import { matchKey, mergeSamePost } from '$lib/artist-lookup';
 import type { Database } from './db';
 
 // Four rules the browser needs as much as this file does: which match the form
@@ -306,7 +306,7 @@ export function normalizeMatches(payload: unknown): LookupMatch[] {
 		.sort(compareMatches);
 	const kept = new Map<string, LookupMatch>();
 	for (const match of sorted) {
-		const key = `${match.site}\u0000${match.siteId}`;
+		const key = matchKey(match);
 		const first = kept.get(key);
 		kept.set(key, first ? mergeSamePost(first, match) : match);
 	}

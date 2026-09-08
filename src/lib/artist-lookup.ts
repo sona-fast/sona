@@ -565,6 +565,14 @@ function stricterRating(a: LookupRating | null, b: LookupRating | null): LookupR
 	return RATING_ORDER.indexOf(a) >= RATING_ORDER.indexOf(b) ? a : b;
 }
 
+/** The identity of a post: its site and its id there. The server's dedupe, the
+ * client's, and the panel's keyed each built it their own way. The separator is
+ * a character neither part can hold, so no pair of a site and an id collides
+ * with another pair. */
+export function matchKey(match: Pick<LookupMatch, 'site' | 'siteId'>): string {
+	return `${match.site}\u0000${match.siteId}`;
+}
+
 /**
  * Fold a duplicate of the same post into the row being kept. Dropping it
  * instead threw away whatever only the duplicate knew: a Twitter copy with an
@@ -604,7 +612,7 @@ function usableMatches(raw: LookupMatch[]): { matches: LookupMatch[]; indexMap: 
 	const kept = new Map<string, number>();
 	raw.forEach((match, index) => {
 		if (!hasLinkableUrl(match)) return;
-		const key = `${match.site} ${match.siteId}`;
+		const key = matchKey(match);
 		const already = kept.get(key);
 		if (already !== undefined) {
 			// A duplicate's hits belong to the row that stayed, and so does whatever
