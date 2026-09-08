@@ -11,7 +11,8 @@
 // avatar. Registry-linked artists get theirs through the registry instead.
 
 // X web client's public bearer (shipped to every browser) — not a secret.
-const X_BEARER =
+// Exported so twitter-media.ts can reuse the same guest-token flow.
+export const X_BEARER =
 	'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 const X_ACTIVATE = 'https://api.x.com/1.1/guest/activate.json';
 const X_USER_BY_SCREEN_NAME = 'https://api.x.com/graphql/IGgvgiOx4QZndDHuD3x9TQ/UserByScreenName';
@@ -47,9 +48,11 @@ export function to400x400(url: string): string {
 	return url.replace(/_normal(\.[a-z]+)$/i, '_400x400$1');
 }
 
-async function activateGuestToken(): Promise<string | null> {
+/** Activate a guest token against the public web bearer. Shared with
+ * twitter-media.ts; `fetchImpl` is only for tests. Never throws. */
+export async function activateGuestToken(fetchImpl: typeof fetch = fetch): Promise<string | null> {
 	try {
-		const res = await fetch(X_ACTIVATE, {
+		const res = await fetchImpl(X_ACTIVATE, {
 			method: 'POST',
 			headers: { Authorization: X_BEARER },
 			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
