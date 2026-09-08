@@ -82,8 +82,10 @@ const BODY_BUFFER_TIMEOUT_MS = 20_000;
 /**
  * The body with a deadline on the whole read: on expiry the upstream is
  * cancelled and this stream errors, which the caller answers with unavailable.
- * Raced per read rather than measured against one wall clock, because a host
- * that sends nothing at all never returns from `read()` for a clock to check.
+ * One timer, armed once when the stream is built, so this is a total budget for
+ * the body and not an idle timeout. Deliberately: a host that trickles a byte at
+ * a time would keep an idle timer alive forever, and it is the whole transfer
+ * the operator is waiting on.
  */
 function bodyWithDeadline(
 	body: ReadableStream<Uint8Array>,
@@ -107,7 +109,19 @@ function bodyWithDeadline(
 	expired.catch(() => {});
 	return new ReadableStream({
 		async pull(controller) {
-			const { done, value } = await Promise.race([reader.read(), expired]);
+			let read: Awaited<ReturnType<typeof reader.read>>;
+			try {
+				read = await Promise.race([reader.read(), expired]);
+			} catch (e) {
+				// The deadline rejects here, and so does an upstream that resets
+				// mid-body. Either way this stream errors, and an errored stream never
+				// calls `cancel` — the other place the timer is cleared. Without this
+				// the timer stays armed on a request that has already been answered,
+				// and fires `reader.cancel()` into a closed request context.
+				clearTimeout(timer);
+				throw e;
+			}
+			const { done, value } = read;
 			if (timedOut) throw new Error('stored image body timed out');
 			if (done) {
 				clearTimeout(timer);
@@ -156,7 +170,18 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 
 	// No key configured: the integration is off, not broken. The UI hides the
 	// button on this answer instead of showing an error (the registry shape).
-	const resolved = await resolveFuzzysearchKey(db, platform?.env);
+	//
+	// Guarded like the reads below, and it matters most here: this is the
+	// handler's FIRST await, and on a fork whose key lives in site settings
+	// rather than the deploy secret it reads D1, where getRawSetting lets an
+	// error propagate. Unguarded, a transient D1 fault answers 500 with no
+	// `forwarded`, which the client reads as "the bytes were sent".
+	let resolved: Awaited<ReturnType<typeof resolveFuzzysearchKey>>;
+	try {
+		resolved = await resolveFuzzysearchKey(db, platform?.env);
+	} catch {
+		return failure('unavailable', false);
+	}
 	if (!resolved) return json({ enabled: false, forwarded: false });
 
 	const contentType = request.headers.get('content-type') ?? '';
@@ -189,7 +214,15 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		let form: FormData;
 		try {
 			form = await request.formData();
-		} catch {
+		} catch (e) {
+			// One rejection here is not an outage: the adapter enforces its own body
+			// size limit while parsing, and refuses a body that overruns it with a
+			// 413. That is the same refusal the declared-length check above makes, so
+			// it keeps the same answer — a chunked body carries no content-length and
+			// reaches the cap here instead.
+			if (e && typeof e === 'object' && (e as { status?: unknown }).status === 413) {
+				return failure('too_large', false);
+			}
 			return failure('unavailable', false);
 		}
 		const file = form.get('file');
@@ -320,66 +353,81 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	}
 
 	const matches = result.matches;
-	// The whole artist table, and the piece counts below, are only ever read
-	// against a match — so a no-match answer reads neither. Same guard on both,
-	// or the cheaper query is the one that stays behind.
-	const artistRows =
-		matches.length > 0
-			? await db
-					.select({
-						id: artists.id,
-						name: artists.name,
-						twitterUrl: artists.twitterUrl,
-						furAffinityUrl: artists.furAffinityUrl
-					})
-					.from(artists)
-			: [];
+	// Every read below runs AFTER the bytes reached FuzzySearch, so a D1 fault
+	// here is answered `forwarded: true` — the private-image notice on the edit
+	// page is honest about a lookup that did leave the app. Answered as a typed
+	// failure rather than thrown, so it does not land in the >= 500 rollup as a
+	// second fault on top of the one it already is.
+	//
+	// The matches are NOT returned with an empty localArtists instead: the panel
+	// reads that as "no local artist has this handle" and offers to add one that
+	// already exists, which is a duplicate artist row the operator then has to
+	// find and merge. No answer beats a wrong one here.
+	try {
+		// The whole artist table, and the piece counts below, are only ever read
+		// against a match — so a no-match answer reads neither. Same guard on both,
+		// or the cheaper query is the one that stays behind.
+		const artistRows =
+			matches.length > 0
+				? await db
+						.select({
+							id: artists.id,
+							name: artists.name,
+							twitterUrl: artists.twitterUrl,
+							furAffinityUrl: artists.furAffinityUrl
+						})
+						.from(artists)
+				: [];
 
-	// One grouped count for the whole gallery rather than a query per hit — the
-	// picker needs it for at most a handful of artists, and a per-artist query
-	// would fan out with the match list. Skipped when nothing matched. Every
-	// image with the artist_id, variants and unpublished rows included: that is
-	// what /admin/artists shows in its Artworks column, and two numbers for the
-	// same artist on two admin screens is the worse answer. The unattributed
-	// group has no artist to key on, so it is left out of the query.
-	const pieceCounts = new Map<number, number>();
-	if (matches.length > 0) {
-		const counted = await db
-			.select({ artistId: images.artistId, pieces: count() })
-			.from(images)
-			.where(isNotNull(images.artistId))
-			.groupBy(images.artistId);
-		for (const row of counted) if (row.artistId !== null) pieceCounts.set(row.artistId, row.pieces);
+		// One grouped count for the whole gallery rather than a query per hit — the
+		// picker needs it for at most a handful of artists, and a per-artist query
+		// would fan out with the match list. Skipped when nothing matched. Every
+		// image with the artist_id, variants and unpublished rows included: that is
+		// what /admin/artists shows in its Artworks column, and two numbers for the
+		// same artist on two admin screens is the worse answer. The unattributed
+		// group has no artist to key on, so it is left out of the query.
+		const pieceCounts = new Map<number, number>();
+		if (matches.length > 0) {
+			const counted = await db
+				.select({ artistId: images.artistId, pieces: count() })
+				.from(images)
+				.where(isNotNull(images.artistId))
+				.groupBy(images.artistId);
+			for (const row of counted)
+				if (row.artistId !== null) pieceCounts.set(row.artistId, row.pieces);
+		}
+		const withPieces = (a: { id: number; name: string }) => ({
+			id: a.id,
+			name: a.name,
+			pieces: pieceCounts.get(a.id) ?? 0
+		});
+
+		const localArtists: ArtistHit[] = [];
+		const nameMatches: ArtistHit[] = [];
+		matches.forEach((match, matchIndex) => {
+			const byHandle = findLocalArtists(artistRows, match);
+			if (byHandle.length) {
+				localArtists.push({ matchIndex, artists: byHandle.map(withPieces) });
+			}
+			// Weaker evidence, kept separate: a name collision is a "you may already
+			// have this artist" prompt, never an automatic link.
+			const byName = new Map<number, { id: number; name: string; pieces: number }>();
+			for (const handle of match.handles) {
+				for (const a of findArtistsByName(artistRows, handle)) byName.set(a.id, withPieces(a));
+			}
+			if (byName.size) nameMatches.push({ matchIndex, artists: [...byName.values()] });
+		});
+
+		return json({
+			enabled: true,
+			matches,
+			localArtists,
+			nameMatches,
+			sourceClash: await findSourceClash(db, matches, selfImage)
+		});
+	} catch {
+		return failure('unavailable', true);
 	}
-	const withPieces = (a: { id: number; name: string }) => ({
-		id: a.id,
-		name: a.name,
-		pieces: pieceCounts.get(a.id) ?? 0
-	});
-
-	const localArtists: ArtistHit[] = [];
-	const nameMatches: ArtistHit[] = [];
-	matches.forEach((match, matchIndex) => {
-		const byHandle = findLocalArtists(artistRows, match);
-		if (byHandle.length) {
-			localArtists.push({ matchIndex, artists: byHandle.map(withPieces) });
-		}
-		// Weaker evidence, kept separate: a name collision is a "you may already
-		// have this artist" prompt, never an automatic link.
-		const byName = new Map<number, { id: number; name: string; pieces: number }>();
-		for (const handle of match.handles) {
-			for (const a of findArtistsByName(artistRows, handle)) byName.set(a.id, withPieces(a));
-		}
-		if (byName.size) nameMatches.push({ matchIndex, artists: [...byName.values()] });
-	});
-
-	return json({
-		enabled: true,
-		matches,
-		localArtists,
-		nameMatches,
-		sourceClash: await findSourceClash(db, matches, selfImage)
-	});
 };
 
 /** The image (or variant set) already credited to the same source post, so the

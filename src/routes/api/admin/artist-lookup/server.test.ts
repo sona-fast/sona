@@ -177,6 +177,28 @@ describe('artist-lookup — configuration', () => {
 
 		expect(searchImage.mock.calls[0][1]).toBe('from-settings');
 	});
+
+	// The FIRST await in the handler, and on a fork whose key lives in settings
+	// it reads D1 — where getRawSetting lets an error propagate. Unguarded it
+	// answers a 500 with no `forwarded`, which the client reads as "the bytes
+	// were sent" and the edit page turns into the private-image disclosure for
+	// bytes that never left the worker. Deliberately no env key: with one, the
+	// resolution never touches D1 and this fires nothing.
+	it('answers a key lookup that throws with a dated failure, not a 500', async () => {
+		const { platform } = makeEnv();
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = (sql: string) => {
+			if (/from "site_settings"/i.test(sql)) throw new Error('D1_ERROR: database is locked');
+			return realPrepare(sql);
+		};
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
 });
 
 describe('artist-lookup — uploaded file', () => {
@@ -293,6 +315,43 @@ describe('artist-lookup — uploaded file', () => {
 		const res = await POST(multipartEvent(platform, pngFile(FUZZYSEARCH_MAX_BYTES + 1)));
 		expect(res.status).toBe(413);
 		expect(await res.json()).toEqual({ enabled: true, error: 'too_large', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// The adapter enforces its own body cap while parsing, and rejects with a 413
+	// HttpError. A chunked body carries no content-length, so the declared-length
+	// check above never sees it and this is where it lands: the operator gets
+	// "too large", not an outage, and it stays out of the 5xx rollup.
+	it('keeps the 413 when the adapter refuses an oversized body', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const request = {
+			headers: new Headers({ 'content-type': 'multipart/form-data; boundary=x' }),
+			formData: async () => {
+				throw Object.assign(new Error('Content-length exceeds limit'), { status: 413 });
+			}
+		};
+
+		const res = await POST({ request, platform, fetch: imageFetch().fn } as never);
+
+		expect(res.status).toBe(413);
+		expect(await res.json()).toEqual({ enabled: true, error: 'too_large', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// Any other formData rejection is still an outage, not a size refusal.
+	it('reports unavailable when the body parse fails for any other reason', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const request = {
+			headers: new Headers({ 'content-type': 'multipart/form-data; boundary=x' }),
+			formData: async () => {
+				throw new Error('connection reset');
+			}
+		};
+
+		const res = await POST({ request, platform, fetch: imageFetch().fn } as never);
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -523,7 +582,10 @@ describe('artist-lookup — stored image by id', () => {
 	// The proxy's timeout bounds the wait for HEADERS only. A host that answers
 	// and then trickles nothing leaves the panel spinning until the platform
 	// kills the request, so the buffering carries a deadline of its own.
-	it('gives up on a stored body that stops arriving', async () => {
+	// Explicit timeout: the body advances a simulated 20 s deadline in two
+	// steps, and the awaits between them have run past vitest's 5 s default on a
+	// loaded machine.
+	it('gives up on a stored body that stops arriving', { timeout: 15_000 }, async () => {
 		vi.useFakeTimers();
 		try {
 			const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
@@ -562,6 +624,40 @@ describe('artist-lookup — stored image by id', () => {
 			expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
 			// The bytes are not left flowing into an isolate nobody is reading.
 			expect(cancelled).toBe(true);
+			expect(searchImage).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	// An upstream that RESETS mid-body rather than stalling. The deadline stream
+	// errors, and an errored stream never calls cancel — the other place the timer
+	// is cleared — so an unguarded version leaves a 20 s timer armed on a request
+	// that has already been answered, firing reader.cancel() into a request
+	// context workerd has closed.
+	it('clears the body deadline when the stored read rejects', { timeout: 15_000 }, async () => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			sqlite.exec(
+				`INSERT INTO images (id, title, slug, image_url, created_at)
+				 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+			);
+			const resetting = new ReadableStream<Uint8Array>({
+				pull() {
+					throw new Error('connection reset by peer');
+				}
+			});
+			const failing = imageFetch(
+				new Response(resetting, { status: 200, headers: { 'content-type': 'image/png' } })
+			);
+
+			const res = await POST(jsonEvent(platform, { imageId: 1 }, failing.fn));
+
+			expect(res.status).toBe(502);
+			expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+			// The point of the test: nothing is still armed once the answer is out.
+			expect(vi.getTimerCount()).toBe(0);
 			expect(searchImage).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
@@ -708,6 +804,33 @@ describe('artist-lookup — stored image by id', () => {
 
 		expect(res.status).toBe(200);
 		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/png');
+	});
+});
+
+describe('artist-lookup — after the search', () => {
+	// These reads run AFTER the bytes reached FuzzySearch, so the failure is
+	// dated `forwarded: true` — the private-image notice on the edit page is then
+	// honest about a lookup that did leave the app. And it is a typed answer
+	// rather than a throw, so it does not also land in the >= 500 rollup.
+	//
+	// NOT degraded to the matches with an empty localArtists: the panel reads
+	// that as "no local artist has this handle" and offers to add one that
+	// already exists, which is a duplicate artist row to merge by hand.
+	it('answers a post-search read that throws with a forwarded failure', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = (sql: string) => {
+			if (/from "artists"/i.test(sql)) throw new Error('D1_ERROR: database is locked');
+			return realPrepare(sql);
+		};
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: true });
+		expect(searchImage).toHaveBeenCalled();
 	});
 });
 
