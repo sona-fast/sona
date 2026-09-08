@@ -10,11 +10,12 @@
 	// One row at a time: each row owns its own lookup, its own chips and its own
 	// live region, so a slow or failed lookup on one image leaves the rest of the
 	// page alone.
-	import { enhance } from '$app/forms';
+	import { applyAction, enhance } from '$app/forms';
 	import { tick } from 'svelte';
-	import { Check, LoaderCircle, RefreshCw, Tag } from 'lucide-svelte';
+	import { Check, ImageOff, LoaderCircle, RefreshCw, Tag } from 'lucide-svelte';
 	import TagSuggestionChips from '$lib/components/TagSuggestionChips.svelte';
 	import { cdnImage, THUMB_WIDTH } from '$lib/img';
+	import { sanitizeTag } from '$lib/tags';
 	import {
 		fromResponse,
 		ratingLabel,
@@ -23,6 +24,7 @@
 		selectedTags,
 		sentenceFor,
 		toggleTag,
+		trayFor,
 		type SuggestionState
 	} from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
@@ -33,6 +35,9 @@
 	// works down the list. Rows with no entry have not been asked about.
 	let states = $state<Record<number, SuggestionState>>({});
 	let saved = $state<Record<number, string[]>>({});
+	// Rows whose thumbnail failed to load, so the card shows a placeholder rather
+	// than the browser's broken-image glyph.
+	let broken = $state<Record<number, true>>({});
 	// Rows whose save was refused because the image picked up tags elsewhere
 	// since the list loaded. The row keeps saying so until the page reloads.
 	let conflicts = $state<Record<number, true>>({});
@@ -107,8 +112,8 @@
 {#if data.rows.length === 0}
 	<div class="rowcard empty">
 		<div class="rowhead">
-			<Tag size={16} class="empty-icon" />
-			<h2 class="rowtitle">{m.admin_suggest_tags_empty_title()}</h2>
+			<Tag size={20} class="empty-icon" />
+			<h2 class="emptytitle">{m.admin_suggest_tags_empty_title()}</h2>
 		</div>
 		<p class="rowmeta empty-body">{m.admin_suggest_tags_empty_body()}</p>
 		<a class="btn btn-secondary self-start" href="/admin/images">{m.admin_suggest_tags_back()}</a>
@@ -124,13 +129,20 @@
 			<li class="rowcard">
 				<div class="rowhead">
 					<div class="rowthumb">
-						<!-- Empty alt: the heading beside it already names the image. -->
-						<img
-							src={cdnImage(row.thumbnailUrl || row.imageUrl, THUMB_WIDTH)}
-							alt=""
-							loading="lazy"
-							decoding="async"
-						/>
+						{#if broken[row.id]}
+							<!-- A file that has gone from storage would otherwise show the
+							     browser's broken-image glyph, which is louder than the row. -->
+							<ImageOff size={18} class="thumb-fallback" aria-hidden="true" />
+						{:else}
+							<!-- Empty alt: the heading beside it already names the image. -->
+							<img
+								src={cdnImage(row.thumbnailUrl || row.imageUrl, THUMB_WIDTH)}
+								alt=""
+								loading="lazy"
+								decoding="async"
+								onerror={() => (broken = { ...broken, [row.id]: true })}
+							/>
+						{/if}
 					</div>
 					<div class="rowbody">
 						<h2 class="rowtitle">
@@ -165,9 +177,12 @@
 				</div>
 
 				{#if conflicts[row.id]}
-					<!-- Focusable for the same reason as the saved line: the Save button
-					     that was clicked is gone with the tray. -->
-					<p class="tag-eyebrow warn" tabindex="-1" bind:this={statusLines[row.id]}>
+					<!-- Split like the tray's failures: the eyebrow is a label, and a
+					     whole sentence set in 11px uppercase is not readable as one. The
+					     sentence is focusable for the same reason as the saved line — the
+					     Save button that was clicked is gone with the tray. -->
+					<p class="tag-eyebrow warn">{m.admin_suggest_tags_not_saved()}</p>
+					<p class="tag-panel-body" tabindex="-1" bind:this={statusLines[row.id]}>
 						{m.admin_suggest_tags_save_conflict()}
 					</p>
 					<div class="tag-actions">
@@ -251,12 +266,24 @@
 									statusLines[row.id]?.focus();
 									return;
 								}
+								if (result.type === 'redirect' || result.type === 'error') {
+									// An expired session redirects to the login page and a thrown
+									// error has its own page; "Couldn't save those tags" would
+									// strand the operator on a list that cannot save anything.
+									await applyAction(result);
+									return;
+								}
 								if (result.type !== 'success') {
 									announcement = m.admin_suggest_tags_save_failed();
 									return;
 								}
 								const written = (result.data?.savedTags as string[] | undefined) ?? accepted;
-								saved = { ...saved, [row.id]: written };
+								// The action answers with the sanitized names it stored; show the
+								// labels the chips showed, matched the way the sanitizer matches.
+								const labels = written.map(
+									(name) => accepted.find((tag) => sanitizeTag(tag) === name) ?? name
+								);
+								saved = { ...saved, [row.id]: labels };
 								states = rest;
 								announcement = m.admin_suggest_tags_saved({ count: written.length });
 								// The button that was clicked is gone with the tray; land focus
@@ -290,33 +317,15 @@
 							{m.admin_tag_suggest_dismiss()}
 						</button>
 					</form>
-				{:else if rowState.kind === 'empty'}
-					<p class="tag-eyebrow">{m.admin_tag_suggest_empty_title()}</p>
-					<p class="tag-panel-body">{m.admin_tag_suggest_empty_body()}</p>
-					<div class="tag-actions">
-						<button
-							type="button"
-							class="tag-btn-text tag-btn-text-flush"
-							aria-label={m.admin_suggest_tags_row_dismiss({ title: row.title })}
-							onclick={() => dismiss(row.id)}
-						>
-							{m.admin_tag_suggest_dismiss()}
-						</button>
-					</div>
 				{:else if rowState.kind !== 'idle' && rowState.kind !== 'applied' && rowState.kind !== 'noSource'}
-					<p class="tag-eyebrow warn">
-						{rowState.kind === 'notReady'
-							? m.admin_tag_suggest_not_yet_title()
-							: m.admin_tag_suggest_unavailable_title()}
-					</p>
-					<p class="tag-panel-body">
-						{#if rowState.kind === 'notReady'}{m.admin_tag_suggest_not_yet_body()}
-						{:else if rowState.kind === 'rateLimited'}{m.admin_tag_suggest_rate_limited_body()}
-						{:else if rowState.kind === 'notFound'}{m.admin_tag_suggest_not_found_body()}
-						{:else}{m.admin_tag_suggest_unavailable_body()}{/if}
-					</p>
+					<!-- Every finished state that is not a suggestion: the same tray the
+					     forms draw, from the same mapping, so a row and a form say the
+					     same thing about the same answer. -->
+					{@const tray = trayFor(rowState)}
+					<p class="tag-eyebrow" class:warn={tray.warn}>{tray.title}</p>
+					<p class="tag-panel-body">{tray.body}</p>
 					<div class="tag-actions">
-						{#if rowState.kind !== 'notFound'}
+						{#if tray.retry}
 							<button
 								type="button"
 								class="tag-pill"
@@ -330,7 +339,7 @@
 						<button
 							type="button"
 							class="tag-btn-text"
-							class:tag-btn-text-flush={rowState.kind === 'notFound'}
+							class:tag-btn-text-flush={!tray.retry}
 							aria-label={m.admin_suggest_tags_row_dismiss({ title: row.title })}
 							onclick={() => dismiss(row.id)}
 						>
@@ -395,6 +404,20 @@
 		max-width: 800px;
 	}
 
+	/* The page's only content when the list is empty, so it sits above a row
+	   title without reaching the page heading. */
+	.emptytitle {
+		margin: 0;
+		font-size: 18px;
+		font-weight: 500;
+	}
+
+	/* lucide renders the class onto its own svg, which scoped CSS cannot see. */
+	.rowcard.empty :global(.empty-icon) {
+		color: var(--muted-foreground);
+		flex: none;
+	}
+
 	/* Same measure as the explainer: the card is wider than a line should be. */
 	.empty-body {
 		max-width: 62ch;
@@ -422,6 +445,13 @@
 
 	:global([data-theme='light']) .rowthumb {
 		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+	}
+
+	.rowthumb {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--muted-foreground);
 	}
 
 	.rowthumb img {
@@ -457,11 +487,23 @@
 		color: var(--muted-foreground);
 	}
 
+	/* Everything the row expands into lines up with the title rather than with
+	   the card's padding: 56px of thumbnail plus the 12px row gap. The empty card
+	   has no thumbnail to clear. */
+	.rowcard:not(.empty) > :not(.rowhead) {
+		margin-left: 68px;
+	}
+
 	.load-more {
 		text-decoration: none;
 	}
 
 	@media (max-width: 640px) {
+		/* The head wraps here, so there is no thumbnail column to line up with. */
+		.rowcard:not(.empty) > :not(.rowhead) {
+			margin-left: 0;
+		}
+
 		.rowhead {
 			flex-wrap: wrap;
 		}

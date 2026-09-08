@@ -11,6 +11,19 @@ type Db = ReturnType<typeof getDb>;
 export const MAX_IMAGE_TAGS = 100;
 
 /**
+ * The tag names a comma-separated input really holds: sanitized, blanks dropped,
+ * repeats collapsed. The save actions count these to refuse an over-cap input
+ * before they write anything, so what they count is what would land.
+ */
+export function parseImageTags(tagNames: string): string[] {
+	const names: string[] = [];
+	for (const name of tagNames.split(',').map(sanitizeTag)) {
+		if (name && !names.includes(name)) names.push(name);
+	}
+	return names;
+}
+
+/**
  * Replace an image's tags with the ones in a comma-separated string, minting
  * any tag row that does not exist yet.
  *
@@ -25,10 +38,9 @@ export async function replaceImageTags(db: Db, imageId: number, tagNames: string
 	if (!tagNames) return [];
 
 	const written: string[] = [];
-	const tagList = tagNames.split(',').map(sanitizeTag).filter(Boolean);
-	for (const tagName of tagList) {
-		// A repeated name in the input would otherwise insert the same pair twice.
-		if (written.includes(tagName)) continue;
+	for (const tagName of parseImageTags(tagNames)) {
+		// The actions refuse an over-cap input before they write; this is the net
+		// under anything that reaches here by another path.
 		if (written.length >= MAX_IMAGE_TAGS) break;
 		let tag = await db.select().from(tags).where(eq(tags.name, tagName)).get();
 		if (!tag) {

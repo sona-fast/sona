@@ -5,6 +5,8 @@ import { eq, isNull, count as countFn } from 'drizzle-orm';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
 import { variantAssignmentError, MAX_VARIANT_SET } from '$lib/server/variants';
+import { MAX_IMAGE_TAGS, parseImageTags } from '$lib/server/image-tags';
+import * as m from '$lib/paraglide/messages';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -108,6 +110,12 @@ export const actions = {
 
 		if (count < 1 || count > MAX_VARIANT_SET) {
 			return fail(400, { error: `A variant set is 1–${MAX_VARIANT_SET} files` });
+		}
+
+		// Refused, not truncated, and before anything is inserted: an upload that
+		// silently dropped tags would report success without them.
+		if (parseImageTags(tagNames).length > MAX_IMAGE_TAGS) {
+			return fail(400, { error: m.admin_field_tags_too_many({ max: MAX_IMAGE_TAGS }) });
 		}
 
 		type Tile = {

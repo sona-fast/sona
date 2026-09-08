@@ -9,6 +9,7 @@ import {
 	selectedTags,
 	sentenceFor,
 	toggleTag,
+	trayFor,
 	type SuggestionState
 } from './tag-suggestions';
 
@@ -41,8 +42,17 @@ describe('fromResponse — failure statuses', () => {
 		expect(fromResponse(422, { error: 'unsupported_source' }, [])).toEqual({ kind: 'noSource' });
 	});
 
-	it('treats a 400 and a transport failure (status 0) as unavailable', () => {
-		expect(fromResponse(400, { error: 'invalid_request' }, [])).toEqual({ kind: 'unavailable' });
+	it('reads a 400 as a link the endpoint refused, not as an entail.dev outage', () => {
+		// A URL the endpoint's own length cap rejects passes classifySourceUrl, so
+		// the pill runs and the answer is a 400. Another click sends the same link.
+		expect(fromResponse(400, { error: 'invalid_request' }, [])).toEqual({ kind: 'badLink' });
+		expect(trayFor({ kind: 'badLink' })).toMatchObject({ retry: false, warn: true });
+		expect(sentenceFor({ kind: 'badLink' })).toBe(
+			"Suggestions unavailable. Sona can't look up this link. Check the source post URL."
+		);
+	});
+
+	it('treats a transport failure (status 0) as unavailable', () => {
 		expect(fromResponse(0, null, [])).toEqual({ kind: 'unavailable' });
 	});
 });
@@ -52,7 +62,6 @@ describe('fromResponse — a 200', () => {
 		const state = fromResponse(200, ok(['mammal', 'canine', 'fox'], { imageCount: 3 }), []);
 		expect(state).toMatchObject({
 			kind: 'suggested',
-			source: 'bluesky',
 			tags: ['mammal', 'canine', 'fox'],
 			rating: 'safe',
 			imageCount: 3,
@@ -85,7 +94,7 @@ describe('fromResponse — a 200', () => {
 
 	it('falls back to one image and no rating when the body says something else', () => {
 		const state = fromResponse(200, { tags: ['fox'], rating: 'spicy', imageCount: -4 }, []);
-		expect(state).toMatchObject({ kind: 'suggested', rating: null, imageCount: 1, source: 'bluesky' });
+		expect(state).toMatchObject({ kind: 'suggested', rating: null, imageCount: 1 });
 	});
 });
 
@@ -115,6 +124,33 @@ describe('chips', () => {
 		const idle: SuggestionState = { kind: 'idle' };
 		expect(toggleTag(idle, 'fox')).toBe(idle);
 		expect(selectedTags(idle)).toEqual([]);
+	});
+});
+
+describe('the tray a finished state draws', () => {
+	// One mapping for the two forms and the backfill rows, so the same answer
+	// never reads as two different outcomes on two surfaces.
+	it('offers Try again only where another click could answer differently', () => {
+		for (const kind of ['notReady', 'rateLimited', 'unavailable'] as const) {
+			expect(trayFor({ kind })).toMatchObject({ retry: true });
+		}
+		for (const kind of ['empty', 'notFound', 'badLink'] as const) {
+			expect(trayFor({ kind })).toMatchObject({ retry: false });
+		}
+	});
+
+	it('warns for every failure, but not for a post with nothing to suggest', () => {
+		expect(trayFor({ kind: 'empty' })).toEqual({
+			title: 'No tags to suggest',
+			body: "entail.dev read the post but found nothing it's confident about.",
+			warn: false,
+			retry: false
+		});
+		expect(trayFor({ kind: 'notFound' })).toMatchObject({
+			title: 'Suggestions unavailable',
+			body: "entail.dev couldn't read this post.",
+			warn: true
+		});
 	});
 });
 
@@ -192,10 +228,12 @@ describe('the sentences the live region reads', () => {
 	});
 
 	it('labels every rating, and reads an unknown one as safe', () => {
-		expect(ratingLabel('explicit')).toBe('Rated explicit by entail.dev');
-		expect(ratingLabel('questionable')).toBe('Rated questionable by entail.dev');
-		expect(ratingLabel('safe')).toBe('Rated safe by entail.dev');
-		expect(ratingLabel(null)).toBe('Rated safe by entail.dev');
+		// Each label ends its own sentence: on the backfill row it is followed by
+		// another one on the same line.
+		expect(ratingLabel('explicit')).toBe('Rated explicit by entail.dev.');
+		expect(ratingLabel('questionable')).toBe('Rated questionable by entail.dev.');
+		expect(ratingLabel('safe')).toBe('Rated safe by entail.dev.');
+		expect(ratingLabel(null)).toBe('Rated safe by entail.dev.');
 	});
 });
 

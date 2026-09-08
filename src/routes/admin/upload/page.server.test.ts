@@ -9,6 +9,7 @@ import { characters, images } from '$lib/server/db/schema';
 import { load, actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
+import { MAX_IMAGE_TAGS } from '$lib/server/image-tags';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -56,6 +57,40 @@ function form(fields: Record<string, string>): Request {
 	for (const [k, v] of Object.entries(fields)) fd.set(k, v);
 	return new Request('http://localhost/admin/upload', { method: 'POST', body: fd });
 }
+
+// Short names on purpose: the Tags input is sanitized to 500 characters before
+// the action sees it, so only short tags can reach the hundred-tag cap at all.
+function shortTags(n: number): string[] {
+	const letters = 'abcdefghijklmnopqrstuvwxyz';
+	const names: string[] = [];
+	for (const a of letters) {
+		names.push(a);
+		if (names.length === n) return names;
+	}
+	for (const a of letters) {
+		for (const b of letters) {
+			names.push(a + b);
+			if (names.length === n) return names;
+		}
+	}
+	return names;
+}
+
+describe('admin upload — tag cap', () => {
+	it('refuses a tag list past the cap and uploads nothing', async () => {
+		const { db, platform } = makeDb();
+		const tooMany = shortTags(MAX_IMAGE_TAGS + 1).join(', ');
+
+		const result = await callDefault({
+			request: form({ count: '1', imageUrl_0: 'https://cdn.example.com/new.png', title: 'New Art', artistId: '1', tags: tooMany }),
+			platform
+		});
+
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe('Keep it to at most 100 tags.');
+		expect(await db.select({ id: images.id }).from(images).get()).toBeUndefined();
+	});
+});
 
 describe('admin upload — use as reference sheet', () => {
 	it('sets the owner reference to the uploaded image when the box is checked', async () => {

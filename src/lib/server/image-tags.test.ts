@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { imageTags, images, tags } from '$lib/server/db/schema';
 import { makeD1 } from '$lib/server/test/d1';
-import { MAX_IMAGE_TAGS, replaceImageTags } from './image-tags';
+import { MAX_IMAGE_TAGS, parseImageTags, replaceImageTags } from './image-tags';
 
 // The one write path both tag saves share (SONA-220). The edit form and the
 // Suggest tags page each post a comma-separated string with no limit of its
@@ -38,6 +38,15 @@ async function tagNamesOf(db: Db, imageId: number) {
 		.where(eq(imageTags.imageId, imageId));
 	return rows.map((r) => r.name);
 }
+
+describe('parseImageTags', () => {
+	// What the save actions count before they refuse an over-cap list, so it has
+	// to count what the write would keep: sanitized, blanks out, repeats collapsed.
+	it('sanitizes, drops blanks and collapses repeats, in input order', () => {
+		expect(parseImageTags('Digital Media, fox, FOX, !!!, , fox')).toEqual(['digital-media', 'fox']);
+		expect(parseImageTags('')).toEqual([]);
+	});
+});
 
 describe('replaceImageTags', () => {
 	it('keeps at most the cap, counted after sanitizing and de-duplicating', async () => {

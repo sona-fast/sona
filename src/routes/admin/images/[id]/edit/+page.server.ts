@@ -5,13 +5,14 @@ import { eq, and, isNull, ne } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { getSettings } from '$lib/server/settings';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
-import { replaceImageTags } from '$lib/server/image-tags';
+import { MAX_IMAGE_TAGS, parseImageTags, replaceImageTags } from '$lib/server/image-tags';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
 	variantAssignmentError,
 	REFERENCE_BECOMES_VARIANT_ERROR,
 	VARIANT_BECOMES_REFERENCE_ERROR
 } from '$lib/server/variants';
+import * as m from '$lib/paraglide/messages';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -90,6 +91,12 @@ export const actions = {
 		const artistName = sanitizeText(data.get('artistName') as string, 200);
 		const collectionId = data.get('collectionId') as string;
 		const tagNames = sanitizeText(data.get('tags') as string, 500);
+		// Refused, not truncated: a save that quietly dropped tags would report
+		// success and leave the operator to notice the missing ones later. Counted
+		// the way the write counts, so what is refused is what would not have fit.
+		if (parseImageTags(tagNames).length > MAX_IMAGE_TAGS) {
+			return fail(400, { error: m.admin_field_tags_too_many({ max: MAX_IMAGE_TAGS }) });
+		}
 		const characterIds = (data.get('characters') as string)?.trim();
 		const nsfw = data.get('nsfw') === 'on';
 		const published = data.get('published') !== 'on';

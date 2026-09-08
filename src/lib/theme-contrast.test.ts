@@ -916,3 +916,64 @@ describe('no accent-color override on form controls (SONA-172)', () => {
 		}
 	});
 });
+
+// SONA-220: the tag chip and the suggest pill both hover. The pill's hovered
+// LABEL is small text (4.5:1) and both hovered BORDERS are non-text boundaries
+// (3:1), and raw --primary clears neither on a light card (2.32:1 as a label,
+// 2.46:1 as a border) nor, as a label, on an aurora dark one (4.06:1). Both
+// resolve through --link, the token that already exists for exactly this: it
+// tracks --primary where it passes and darkens where it does not.
+describe('SONA-220 tag chip and pill hover contrast, every theme × surface × mode', () => {
+	// Mirrors the CSS: a block declaring its own --link uses it, the rest fall
+	// through to their --primary.
+	function linkColor(sel: string): string {
+		return blockBody(sel).match(/--link:\s*(#[0-9A-Fa-f]{6})\s*;/)?.[1] ?? blockToken(sel, 'primary');
+	}
+
+	it('colors the hovered pill label with var(--link)', () => {
+		expect(blockBody('.tag-pill:hover')).toMatch(/color:\s*var\(--link\)\s*;/);
+	});
+
+	it('darkens the hovered chip and pill border to var(--link) in the light themes', () => {
+		const rule = css.match(
+			/^\[data-theme='light'\] \.tag-chip:not\(\.tag-chip-static\):hover,\n\[data-theme='light'\] \.tag-pill:hover\s*\{([^}]*)\}/m
+		)?.[1];
+		if (!rule) throw new Error('the light-theme tag hover border rule is missing from app.css');
+		expect(rule).toMatch(/border-color:\s*var\(--link\)\s*;/);
+	});
+
+	// The disabled pill keeps its place in the tab order and reads out
+	// "Suggesting tags…" while a lookup runs, so its label is text under the
+	// 4.5:1 bar. It is color-mix(in srgb, var(--foreground) N%, var(--secondary))
+	// over its own --secondary fill; parse N rather than pinning it.
+	const disabledMix = (() => {
+		const rule = blockBody(".tag-pill[aria-disabled='true']");
+		const mix = rule.match(
+			/color:\s*color-mix\(in srgb,\s*var\(--foreground\)\s*(\d+)%,\s*var\(--secondary\)\)/
+		);
+		if (!mix) throw new Error('the disabled pill label is no longer a foreground/secondary mix');
+		return Number(mix[1]);
+	})();
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: the disabled pill label meets 4.5:1 on its own fill`, () => {
+			const fill = blockToken(sel, 'secondary');
+			const label = mix2(blockToken(sel, 'foreground'), disabledMix, fill);
+			expect(contrast(label, fill)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			const border = name.endsWith('light') ? linkColor : (s: string) => blockToken(s, 'primary');
+
+			it(`${name}: the hovered pill label meets 4.5:1 on the ${surface} surface`, () => {
+				expect(contrast(linkColor(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+			});
+
+			it(`${name}: the hovered chip and pill border meets 3:1 on the ${surface} surface`, () => {
+				expect(contrast(border(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(3);
+			});
+		}
+	}
+});

@@ -19,9 +19,11 @@ const PASSWORD = 'e2e-admin-password';
 const ENDPOINT = '**/api/admin/tag-suggestions';
 
 // The seed (tests/e2e/fixtures/seed.sql) lists 23 untagged images with a post
-// URL, ids 101–123, newest first. One page is 20 rows.
-const TOTAL = 23;
+// URL, ids 101–123, newest first. One page is 20 rows. The total is READ from
+// the page rather than pinned at 23: the save tests below take their rows off
+// the list, so a retry of this file starts from a shorter one.
 const PAGE = 20;
+const BSKY_POST = 'https://bsky.app/profile/kirin.example/post/3kq7x2abc';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -55,10 +57,13 @@ async function openList(page: Page, search = '') {
 test('Load more grows the list rather than paging away from it', async ({ page }) => {
 	await openList(page);
 	await expect(page.locator('li.rowcard')).toHaveCount(PAGE);
-	await expect(page.getByText(`Showing ${PAGE} of ${TOTAL}`)).toBeVisible();
+	const showing = page.getByText(/^Showing \d+ of \d+$/);
+	await expect(showing).toContainText(`Showing ${PAGE} of `);
+	const total = Number(/of (\d+)$/.exec((await showing.textContent()) ?? '')?.[1]);
+	expect(total).toBeGreaterThan(PAGE);
 
 	await page.getByRole('link', { name: 'Load more' }).click();
-	await expect(page.locator('li.rowcard')).toHaveCount(TOTAL);
+	await expect(page.locator('li.rowcard')).toHaveCount(total);
 	// Every row of the first page is still there, in the same place.
 	await expect(page.locator('li.rowcard').first()).toContainText('Backfill 123');
 	await expect(page.locator('li.rowcard').last()).toContainText('Backfill 101');
@@ -71,6 +76,9 @@ test('a row meta line names the source without an orphaned separator', async ({ 
 	// X row says so.
 	await expect(row(page, 'Backfill 123').locator('.rowmeta')).toHaveText('Test Artist · X post');
 	await expect(row(page, 'Backfill 121').locator('.rowmeta')).toHaveText('Test Artist · Bluesky post');
+	// The seeded thumbnails 404 by design, so the row degrades to its placeholder
+	// rather than the browser's broken-image glyph.
+	await expect(row(page, 'Backfill 123').locator('.thumb-fallback')).toBeVisible();
 });
 
 test("a row's Suggest renders chips, and leaving one out changes the Save count", async ({ page }) => {
@@ -88,7 +96,9 @@ test("a row's Suggest renders chips, and leaving one out changes the Save count"
 	const chips = target.locator('.tag-chip');
 	await expect(chips).toHaveCount(4);
 	await expect(chips.first()).toHaveAttribute('aria-pressed', 'true');
-	await expect(target.getByText('Rated safe by entail.dev')).toBeVisible();
+	await expect(target.getByText('Rated safe by entail.dev.')).toBeVisible();
+	// The expanded row lines up with the title, not with the card padding.
+	await expect(target.locator('.tag-eyebrow')).toHaveCSS('margin-left', '68px');
 	await expect(target.getByText("Sona doesn't change the NSFW setting here.")).toBeVisible();
 
 	const save = target.getByRole('button', { name: /^Save \d+ tags? to Backfill 120$/ });
@@ -107,7 +117,7 @@ test('Save writes the tags and the row shows the saved line and static chips', a
 	await openList(page);
 	await stubSuggestions(page, 200, {
 		source: 'bluesky',
-		tags: ['rain', 'window', 'cozy'],
+		tags: ['rain drops', 'window', 'cozy'],
 		rating: 'safe',
 		imageCount: 1
 	});
@@ -122,7 +132,8 @@ test('Save writes the tags and the row shows the saved line and static chips', a
 	await expect(target.getByText('Saved', { exact: true })).toBeVisible();
 	const statics = target.locator('.tag-chip-static');
 	await expect(statics).toHaveCount(2);
-	await expect(statics.nth(0)).toHaveText('rain');
+	// The labels the chips showed, not the sanitized names the row stored.
+	await expect(statics.nth(0)).toHaveText('rain drops');
 	await expect(statics.nth(1)).toHaveText('cozy');
 	await expect(target.getByRole('link', { name: 'Edit image Backfill 119' })).toHaveAttribute(
 		'href',
@@ -131,7 +142,7 @@ test('Save writes the tags and the row shows the saved line and static chips', a
 
 	// The tags are real: the edit form loads them, and the row is off the list.
 	await page.goto('/admin/images/119/edit');
-	await expect(page.locator('input[name="tags"]')).toHaveValue('rain, cozy');
+	await expect(page.locator('input[name="tags"]')).toHaveValue('rain-drops, cozy');
 	await page.goto('/admin/images/suggest-tags');
 	await expect(row(page, 'Backfill 119')).toHaveCount(0);
 });
@@ -158,16 +169,19 @@ test('a row tagged elsewhere since the list loaded refuses to overwrite', async 
 
 	await target.getByRole('button', { name: 'Save 1 tag to Backfill 118' }).click();
 
-	const conflict = target.getByText(
+	// A label in the eyebrow, the sentence as body text: a full sentence in the
+	// eyebrow renders 11px uppercase.
+	await expect(target.locator('.tag-eyebrow.warn')).toHaveText('Not saved');
+	const conflict = target.locator('.tag-panel-body');
+	await expect(conflict).toHaveText(
 		'This image was tagged elsewhere since the list loaded. Open it to edit its tags.'
 	);
-	await expect(conflict).toBeVisible();
 	await expect(conflict).toBeFocused();
 	await expect(target.locator('.tag-chip')).toHaveCount(0);
-	await expect(target.getByRole('link', { name: 'Edit image Backfill 118' })).toHaveAttribute(
-		'href',
-		'/admin/images/118/edit'
-	);
+	const edit = target.getByRole('link', { name: 'Edit image Backfill 118' });
+	await expect(edit).toHaveAttribute('href', '/admin/images/118/edit');
+	// An anchor wearing the text-button class reads as one, underline and all.
+	await expect(edit).toHaveCSS('text-decoration-line', 'none');
 	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
 		'This image was tagged elsewhere since the list loaded. Open it to edit its tags.'
 	);
@@ -175,6 +189,74 @@ test('a row tagged elsewhere since the list loaded refuses to overwrite', async 
 	// The tag written elsewhere survived.
 	await page.goto('/admin/images/118/edit');
 	await expect(page.locator('input[name="tags"]')).toHaveValue('elsewhere');
+});
+
+test('a save that fails for any other reason says so in the live region', async ({ page }) => {
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	const target = await clickSuggest(page, 'Backfill 116');
+
+	// The action's failures other than the conflict — a 404 for an image that has
+	// gone, a 400 for an id that is not one — all land on the generic sentence.
+	// Answering the save with one keeps the assertion on the page rather than on
+	// how the action can be provoked, and writes nothing to the row.
+	await page.route(
+		(url) => url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save'),
+		(route) =>
+			route.fulfill({
+				status: 404,
+				contentType: 'application/json',
+				body: JSON.stringify({ type: 'failure', status: 404, data: '[{"error":1},"not_found"]' })
+			})
+	);
+
+	await target.getByRole('button', { name: 'Save 1 tag to Backfill 116' }).click();
+
+	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
+		"Sona couldn't save those tags. Try again."
+	);
+	// The chips stay, so the operator can try the same save again.
+	await expect(target.locator('.tag-chip')).toHaveCount(1);
+	await expect(target.locator('.tag-status-line')).toHaveCount(0);
+});
+
+test('the edit page keeps what the operator typed when the sidebar form submits', async ({ page }) => {
+	// The reference form calls update(), which invalidates every load. The Tags
+	// field, the source URL and the NSFW box are the operator's, not the row's:
+	// if they follow `data`, that invalidation reverts them and the next Save
+	// writes the reverted values.
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/images/101/edit');
+
+	const tags = page.locator('input[name="tags"]');
+	const url = page.locator('input[name="sourcePostUrl"]');
+	const nsfw = page.locator('input[name="nsfw"]');
+	const pill = page.getByRole('button', { name: 'Suggest tags', exact: true });
+	await expect(tags).toBeVisible();
+
+	// The pill's enabled state is computed in the browser from the field, so it
+	// flipping is proof the page has hydrated — anything typed before that could
+	// still be overwritten by hydration.
+	await url.fill('https://www.furaffinity.net/view/12345/');
+	await expect(pill).toHaveAttribute('aria-disabled', 'true');
+
+	await url.fill(BSKY_POST);
+	await tags.fill('fox, beach');
+	await nsfw.check();
+
+	await page.getByRole('button', { name: /reference sheet$/ }).click();
+	// The sidebar has answered and re-rendered from fresh load data.
+	await expect(page.getByRole('button', { name: 'Clear reference sheet' })).toBeVisible();
+
+	await expect(url).toHaveValue(BSKY_POST);
+	await expect(tags).toHaveValue('fox, beach');
+	await expect(nsfw).toBeChecked();
 });
 
 test('a failed lookup offers Try again, which keeps focus on the row pill', async ({ page }) => {
@@ -193,4 +275,39 @@ test('a failed lookup offers Try again, which keeps focus on the row pill', asyn
 	await target.getByRole('button', { name: 'Try again for Backfill 117' }).click();
 	await expect(target.getByRole('button', { name: 'Suggest tags for Backfill 117' })).toBeFocused();
 	await expect(target.getByText('No tags yet')).toBeVisible();
+});
+
+// Last on purpose: it tags every row that is left, so the list the tests above
+// count and save into is empty afterwards. Idempotent, so a retry still passes.
+test('with nothing left to suggest, the page shows its empty state', async ({ page, baseURL }) => {
+	await openList(page, '?pages=99');
+
+	// Tag whatever is still listed, through the page's own action. The seeded
+	// titles carry the image id, which is the only place the row exposes it.
+	for (const title of await page.locator('li.rowcard .rowtitle').allTextContents()) {
+		const id = /Backfill (\d+)/.exec(title)?.[1];
+		expect(id, `a row title without an id: ${title}`).toBeTruthy();
+		const saved = await page.request.post('/admin/images/suggest-tags?/save', {
+			form: { id: id!, tags: 'backfilled' },
+			headers: { origin: baseURL! }
+		});
+		expect(saved.ok()).toBe(true);
+	}
+
+	await page.goto('/admin/images/suggest-tags');
+	await expect(page.locator('li.rowcard')).toHaveCount(0);
+
+	// The framed empty card, not a bare line: a heading above a row title's size,
+	// a muted icon beside it, and the way back.
+	const card = page.locator('.rowcard.empty');
+	await expect(card.getByRole('heading', { name: 'Nothing to suggest right now' })).toBeVisible();
+	await expect(card.locator('.emptytitle')).toHaveCSS('font-size', '18px');
+	await expect(card).toContainText('Every image with a Bluesky or X source post already has tags.');
+	await expect(card.getByRole('link', { name: 'Back to All Images' })).toBeVisible();
+
+	// The icon carries the same muted ink as the body it sits above, at 20px.
+	const icon = card.locator('.empty-icon');
+	await expect(icon).toHaveAttribute('width', '20');
+	const muted = await card.locator('.empty-body').evaluate((el) => getComputedStyle(el).color);
+	await expect(icon).toHaveCSS('color', muted);
 });

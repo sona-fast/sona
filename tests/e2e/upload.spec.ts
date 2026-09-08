@@ -141,6 +141,10 @@ test('admin upload streams to UploadThing and the stored image renders', async (
 	// NOT `button[type="submit"]` — the sidebar's Logout button matches that first.
 	await page.getByRole('button', { name: 'Upload Artwork' }).click();
 	await page.waitForURL(/\/admin\/images/);
+	// The list defaults to commissioned-date order, and the twenty-three seeded
+	// backfill rows (SONA-220) fill its first page, so ask for the newest-uploaded
+	// view rather than assuming the new piece landed on it.
+	await page.goto('/admin/images?sort=uploaded&dir=desc');
 
 	// The saved piece renders from its STORED UploadThing URL (dev's cdnImage
 	// passes the raw src through), served by the route stub above.

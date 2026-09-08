@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { and, desc, eq, isNotNull, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { artists, imageTags, images } from '$lib/server/db/schema';
 import { replaceImageTags } from '$lib/server/image-tags';
@@ -26,6 +26,10 @@ export { PER_PAGE as _PER_PAGE };
  * page view. Past this the page shows what it found, and the total it reports
  * is capped at the scan limit rather than the true count. */
 const MAX_SCAN = 2000;
+export { MAX_SCAN as _MAX_SCAN };
+
+/** How many ids one display query binds. D1 allows 100 bound parameters. */
+const ID_CHUNK = 90;
 
 export type SuggestRow = {
 	id: number;
@@ -50,17 +54,13 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	// Images with at least one tag row; everything else is a candidate.
 	const tagged = db.select({ id: imageTags.imageId }).from(imageTags);
 
+	// The scan reads only what decides membership: the id and the URL the
+	// classifier judges. Carrying the display columns through it would put up to
+	// MAX_SCAN titles, thumbnails and image URLs in one D1 response — hundreds of
+	// kilobytes against a 1 MB cap — to render twenty of them.
 	const candidates = await db
-		.select({
-			id: images.id,
-			title: images.title,
-			thumbnailUrl: images.thumbnailUrl,
-			imageUrl: images.imageUrl,
-			artistName: artists.name,
-			sourcePostUrl: images.sourcePostUrl
-		})
+		.select({ id: images.id, sourcePostUrl: images.sourcePostUrl })
 		.from(images)
-		.leftJoin(artists, eq(images.artistId, artists.id))
 		.where(
 			and(
 				isNotNull(images.sourcePostUrl),
@@ -71,21 +71,40 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 		.orderBy(desc(images.id))
 		.limit(MAX_SCAN);
 
-	const matches: SuggestRow[] = [];
+	const matches: { id: number; source: 'bluesky' | 'x' }[] = [];
 	for (const row of candidates) {
 		const source = classifySourceUrl(row.sourcePostUrl ?? '');
-		if (!source) continue;
-		matches.push({
-			id: row.id,
-			title: row.title,
-			thumbnailUrl: row.thumbnailUrl,
-			imageUrl: row.imageUrl,
-			artistName: row.artistName,
-			source: source.kind
-		});
+		if (source) matches.push({ id: row.id, source: source.kind });
 	}
 
-	return { rows: matches.slice(0, want), total: matches.length, pages };
+	const shown = matches.slice(0, want);
+	// D1 takes at most 100 bound parameters in one query, and "Load more" grows
+	// the page past that, so the display fetch goes in chunks.
+	const details = new Map<number, Omit<SuggestRow, 'source'>>();
+	for (let from = 0; from < shown.length; from += ID_CHUNK) {
+		const ids = shown.slice(from, from + ID_CHUNK).map((row) => row.id);
+		const rows = await db
+			.select({
+				id: images.id,
+				title: images.title,
+				thumbnailUrl: images.thumbnailUrl,
+				imageUrl: images.imageUrl,
+				artistName: artists.name
+			})
+			.from(images)
+			.leftJoin(artists, eq(images.artistId, artists.id))
+			.where(inArray(images.id, ids));
+		for (const row of rows) details.set(row.id, row);
+	}
+
+	// Ordered by `shown`, not by the fetch: the display query says nothing about
+	// order, and the list is newest first.
+	const rows = shown.flatMap(({ id, source }) => {
+		const detail = details.get(id);
+		return detail ? [{ ...detail, source }] : [];
+	});
+
+	return { rows, total: matches.length, pages };
 };
 
 export const actions: Actions = {

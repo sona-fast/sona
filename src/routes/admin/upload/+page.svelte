@@ -570,7 +570,7 @@
 
 	<div class="tag-check-row">
 		<label class="checkbox-label">
-			<input type="checkbox" name="nsfw" bind:checked={nsfw} bind:this={nsfwInput} aria-describedby="tags-rating" />
+			<input type="checkbox" name="nsfw" bind:checked={nsfw} bind:this={nsfwInput} aria-describedby={suggestedRating ? 'tags-rating' : undefined} />
 			<span>{m.admin_field_mark_nsfw()}</span>
 		</label>
 		<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw checkbox={nsfwInput} />

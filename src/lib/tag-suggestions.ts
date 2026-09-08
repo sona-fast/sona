@@ -30,7 +30,6 @@ export type SuggestionState =
 	 *  chip order stays the classifier's confidence order either way. */
 	| {
 			kind: 'suggested';
-			source: SuggestionSource;
 			tags: string[];
 			leftOut: Set<string>;
 			rating: EntailRating | null;
@@ -52,12 +51,14 @@ export type SuggestionState =
 	/** 429: entail.dev's or X's per-IP limit. Retryable. */
 	| { kind: 'rateLimited' }
 	/** 404: the post could not be read, or the classifier declined it. */
-	| { kind: 'notFound' };
+	| { kind: 'notFound' }
+	/** 400: the endpoint refused the link itself — a URL past its length cap, say.
+	 *  Another click sends the same link, so this one offers no Try again. */
+	| { kind: 'badLink' };
 
 /** The shape POST /api/admin/tag-suggestions answers a 200 with. Everything is
  * `unknown` on the way in: this is a response body, not a promise. */
 type SuggestionBody = {
-	source?: unknown;
 	tags?: unknown;
 	rating?: unknown;
 	imageCount?: unknown;
@@ -67,12 +68,6 @@ const RATINGS: readonly string[] = ['safe', 'questionable', 'explicit'];
 
 function readRating(value: unknown): EntailRating | null {
 	return typeof value === 'string' && RATINGS.includes(value) ? (value as EntailRating) : null;
-}
-
-function readSource(value: unknown): SuggestionSource {
-	// Only two kinds exist, and the pill would not have been enabled for
-	// anything else; 'bluesky' is the safe read of a body we cannot trust.
-	return value === 'x' ? 'x' : 'bluesky';
 }
 
 /** Split a comma-separated Tags input into the tag names it holds. */
@@ -102,6 +97,10 @@ export function fromResponse(
 	// been clickable, so say what would make it clickable rather than blaming
 	// entail.dev for an answer it never gave.
 	if (status === 422) return { kind: 'noSource' };
+	// 400 is the endpoint refusing the link, not entail.dev failing to answer —
+	// an over-long URL, say. Saying "try again" would offer a click that sends
+	// the same link and fails the same way.
+	if (status === 400) return { kind: 'badLink' };
 	if (status !== 200) return { kind: 'unavailable' };
 
 	const payload = (body ?? {}) as SuggestionBody;
@@ -130,7 +129,6 @@ export function fromResponse(
 	const count = Number(payload.imageCount);
 	return {
 		kind: 'suggested',
-		source: readSource(payload.source),
 		tags,
 		leftOut: new Set(),
 		rating: readRating(payload.rating),
@@ -203,12 +201,52 @@ export function sentenceFor(next: SuggestionState): string {
 			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_rate_limited_body());
 		case 'notFound':
 			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_not_found_body());
+		case 'badLink':
+			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_bad_link_body());
 		case 'unavailable':
 			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_unavailable_body());
 		case 'noSource':
 			return m.admin_tag_suggest_hint_no_source();
 		default:
 			return '';
+	}
+}
+
+/** What the tray shows for a finished state that is not a suggestion: an
+ * eyebrow, a sentence, and either Try again or only Dismiss. */
+export type Tray = { title: string; body: string; warn: boolean; retry: boolean };
+
+/**
+ * The tray for every non-suggestion state. The two forms and the backfill page
+ * draw the same five outcomes, so the sentences and the "is another click worth
+ * it" answer are decided here once rather than in three `{:else if}` chains.
+ */
+export function trayFor(state: SuggestionState): Tray {
+	const unavailable = m.admin_tag_suggest_unavailable_title();
+	switch (state.kind) {
+		case 'empty':
+			return {
+				title: m.admin_tag_suggest_empty_title(),
+				body: m.admin_tag_suggest_empty_body(),
+				warn: false,
+				retry: false
+			};
+		case 'notReady':
+			return {
+				title: m.admin_tag_suggest_not_yet_title(),
+				body: m.admin_tag_suggest_not_yet_body(),
+				warn: true,
+				retry: true
+			};
+		case 'rateLimited':
+			return { title: unavailable, body: m.admin_tag_suggest_rate_limited_body(), warn: true, retry: true };
+		case 'notFound':
+			return { title: unavailable, body: m.admin_tag_suggest_not_found_body(), warn: true, retry: false };
+		case 'badLink':
+			return { title: unavailable, body: m.admin_tag_suggest_bad_link_body(), warn: true, retry: false };
+		default:
+			// 'unavailable', and the states the tray never renders.
+			return { title: unavailable, body: m.admin_tag_suggest_unavailable_body(), warn: true, retry: true };
 	}
 }
 

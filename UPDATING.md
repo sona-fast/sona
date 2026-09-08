@@ -50,15 +50,15 @@ after a fetch gives the same view from a clone.
 
 ## Read before upgrading: tag suggestions call entail.dev (SONA-220)
 
-This release adds an admin-only tag suggestion lookup for artwork. You will find
-it in three places: the **Suggest tags** button beside the Tags field when you
-upload a piece, the same button on a piece's edit page, and a **Suggest tags**
-page under All Images that works through everything you have with a Bluesky or X
-source post and no tags yet. Only you can start it, and nothing runs on its own. When you do, the site sends a public
-link to entail.dev, an image classifier, and shows you the tags it returns. For a
-Bluesky post that link is the post itself. For an X post the site first asks X's
-own API which picture the post carries, then sends the picture link X hands back.
-Nothing from either reply is stored; the suggestions are yours to accept or drop.
+This release adds an admin-only tag suggestion lookup for artwork. It appears in
+three places: the **Suggest tags** button beside the Tags field when you upload a
+piece, the same button on a piece's edit page, and a **Suggest tags** page under
+All Images that lists every image with a Bluesky or X source post and no tags
+yet. Only you can start it, and nothing runs on its own. When you do, the site
+sends a public link to entail.dev, an image classifier, and shows you the tags it
+returns. For a Bluesky post that link is the post itself. For an X post the site
+first asks X's own API which picture the post carries, then sends the picture
+link X hands back. Nothing is stored unless you accept it.
 
 The built-in privacy policy and the `/ai` page describe this call already. If
 you pasted your own privacy text or your own `/ai` text in Settings, **neither
@@ -75,6 +75,10 @@ public link to entail.dev, an image classifier. That link points at the artwork'
 source post, or at the picture in that post. For a post on X, the site first asks
 X's own service which picture the post carries. Only the site owner can start
 that, so nothing you do is sent to an AI service as you browse."
+
+The release also adds a database index on `image_tags`, which the **Suggest
+tags** page needs to find untagged images without reading every tag row. The
+deploy applies it; there is nothing for you to run.
 
 ## One-time backfill: sticker animation flags (SONA-123)
 

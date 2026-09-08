@@ -22,17 +22,31 @@
 	let referenceCleared = $state(false);
 
 	// Bound so the suggestion control can read the source URL as it is edited and
-	// write accepted tags back into the field. Both still submit by name. Writable
-	// $derived rather than $state: the field starts from the loaded row and follows
-	// it on a same-route navigation, while typing (and bind:) overrides it until
-	// the next load.
-	let tagsValue = $derived(data.imageTags.join(', '));
-	let sourcePostUrl = $derived(data.image.sourcePostUrl || '');
-	// entail.dev's rating for the last suggestion. It never moves the checkbox;
+	// write accepted tags back into the field. Both still submit by name.
+	// entail.dev's rating for the last suggestion never moves the checkbox;
 	// `nsfw` starts at the stored value and only the operator changes it.
+	//
+	// $state seeded from `data`, not writable $derived: the sidebar's reference
+	// form calls update(), which invalidates every load and would hand these
+	// three back their stored values — throwing away accepted tags, a typed
+	// source URL and a ticked NSFW box, and then saving the reverted ones.
+	let tagsValue = $state(data.imageTags.join(', '));
+	let sourcePostUrl = $state(data.image.sourcePostUrl || '');
 	let suggestedRating = $state<EntailRating | null>(null);
-	let nsfw = $derived(data.image.nsfw);
+	let nsfw = $state(data.image.nsfw);
 	let nsfwInput = $state<HTMLInputElement | null>(null);
+	// A same-route navigation to a DIFFERENT image is the one case the fields
+	// must follow `data` again. Keyed on the id, so an invalidation of the row
+	// already on screen leaves what the operator typed alone.
+	let seededImageId = data.image.id;
+	$effect(() => {
+		if (data.image.id === seededImageId) return;
+		seededImageId = data.image.id;
+		tagsValue = data.imageTags.join(', ');
+		sourcePostUrl = data.image.sourcePostUrl || '';
+		suggestedRating = null;
+		nsfw = data.image.nsfw;
+	});
 </script>
 
 <div class="page-header">
@@ -252,7 +266,7 @@
 
 		<div class="tag-check-row">
 			<label class="checkbox-label">
-				<input type="checkbox" name="nsfw" bind:checked={nsfw} bind:this={nsfwInput} aria-describedby="tags-rating" />
+				<input type="checkbox" name="nsfw" bind:checked={nsfw} bind:this={nsfwInput} aria-describedby={suggestedRating ? 'tags-rating' : undefined} />
 				<span>{m.admin_field_mark_nsfw()}</span>
 			</label>
 			<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw checkbox={nsfwInput} />

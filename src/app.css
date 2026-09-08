@@ -681,28 +681,21 @@ select.input {
 	transition: border-color 0.12s, background-color 0.12s;
 }
 
-.tag-chip:hover {
-	border-color: var(--primary);
-}
-
-/* A kept tag reads as a tint, not a fill: the solid --primary belongs to the
-   one primary button in the tray, and nine solid chips would outshout it. */
+/* A kept tag reads as a tint and its check, not an outline: the accent border
+   belongs to hover and focus, and nine outlined chips would outshout the one
+   primary button in the tray. The check is the non-colour cue for the state. */
 .tag-chip[aria-pressed='true'] {
 	background: color-mix(in srgb, var(--primary) 14%, transparent);
-	border-color: var(--primary);
+	border-color: var(--border);
 }
 
 .tag-chip[aria-pressed='true'] svg {
 	color: var(--primary);
 }
 
-/* --primary is 2.46:1 against the light background as a border, and its check
-   icon 2.16:1 on the tint — under the 3:1 bar for non-text. --link is the
-   darkened orange the light theme already uses where --primary fails. */
-[data-theme='light'] .tag-chip[aria-pressed='true'] {
-	border-color: var(--link);
-}
-
+/* --primary's check icon is 2.16:1 on the tint in the light themes, under the
+   3:1 bar for non-text. --link is the darkened orange they already use where
+   --primary fails. */
 [data-theme='light'] .tag-chip[aria-pressed='true'] svg {
 	color: var(--link);
 }
@@ -716,6 +709,12 @@ select.input {
 
 .tag-chip[aria-pressed='false']:hover {
 	color: var(--foreground);
+}
+
+/* After the pressed rules, which carry the same specificity: a kept chip has to
+   show the hover border too. */
+.tag-chip:hover {
+	border-color: var(--primary);
 }
 
 /* The saved tags on a backfill row: the same pill, with nothing to click. */
@@ -805,22 +804,38 @@ select.input {
 	transition: border-color 0.15s, color 0.15s;
 }
 
+/* --link, not --primary, for the label: the hovered label is small text, and
+   raw --primary is 2.32:1 on the light background and 4.06:1 on an aurora dark
+   card. --link is the same orange everywhere it passes and the darkened one
+   where it does not. */
 .tag-pill:hover {
 	border-color: var(--primary);
-	color: var(--primary);
+	color: var(--link);
+}
+
+/* The hover border is the same 2.46:1 on light cards that the selected chip's
+   border was, and a border has a 3:1 bar of its own. The static saved chips
+   are excluded: they have nothing to click, so their border stays put. */
+[data-theme='light'] .tag-chip:not(.tag-chip-static):hover,
+[data-theme='light'] .tag-pill:hover {
+	border-color: var(--link);
 }
 
 /* aria-disabled, not disabled: the pill stays focusable so a keyboard user can
-   reach it and read why it will not run. The handler refuses the click. */
+   reach it and read why it will not run, and it reads out "Suggesting tags…"
+   while a lookup runs. Its label is therefore text that has to be read, and
+   --muted-foreground on --secondary is 3.96:1 in terracotta light — mixing most
+   of the way to --foreground clears 4.5:1 in every theme while still reading as
+   off. The handler refuses the click. */
 .tag-pill[aria-disabled='true'] {
 	background: var(--secondary);
-	color: var(--muted-foreground);
+	color: color-mix(in srgb, var(--foreground) 75%, var(--secondary));
 	cursor: default;
 }
 
 .tag-pill[aria-disabled='true']:hover {
 	border-color: var(--border);
-	color: var(--muted-foreground);
+	color: color-mix(in srgb, var(--foreground) 75%, var(--secondary));
 }
 
 .tag-btn-text {
@@ -832,6 +847,9 @@ select.input {
 	font-family: var(--font-primary);
 	font-size: 13px;
 	cursor: pointer;
+	/* "Edit image" is an anchor wearing this class; without this it underlines
+	   and reads as a different kind of control from Dismiss beside it. */
+	text-decoration: none;
 }
 
 .tag-btn-text:hover {
@@ -853,9 +871,22 @@ select.input {
    the 3:1 non-text reason (SONA-171). */
 .tag-pill:focus-visible,
 .tag-chip:focus-visible,
-.tag-btn-text:focus-visible {
+.tag-btn-text:focus-visible,
+/* The saved line and the conflict sentence are focused programmatically when
+   the button that was clicked disappears with the tray, so they need a ring
+   too — they are where the keyboard user resumes. */
+.tag-status-line:focus-visible,
+.tag-panel-body:focus-visible {
 	outline: 2px solid var(--ring);
 	outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+	/* Stacked, the text button's own left padding starts its label right of the
+	   button above it; flush it to the tray's content edge. */
+	.tag-actions .tag-btn-text {
+		padding-left: 0;
+	}
 }
 
 /* The loader turns while a lookup or a save runs; a spinner that never stops

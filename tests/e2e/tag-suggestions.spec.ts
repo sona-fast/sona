@@ -182,14 +182,16 @@ for (const rating of ['explicit', 'questionable'] as const) {
 		// The note is warning-coloured and the box is NOT checked: the classifier
 		// is a hint, the operator's click is the decision.
 		const note = page.locator('.tag-rating-note.warn');
-		await expect(note).toHaveText(`Rated ${rating} by entail.dev`);
+		await expect(note).toHaveText(`Rated ${rating} by entail.dev.`);
 		await expect(nsfwBox(page)).not.toBeChecked();
 		await expect(markNsfw(page)).toBeVisible();
 
 		await markNsfw(page).click();
 		await expect(nsfwBox(page)).toBeChecked();
 		// Said as a staged change, not a persisted one: nothing is saved yet.
-		await expect(ratingRegion(page)).toHaveText('Marked NSFW. Save to apply it.');
+		await expect(ratingRegion(page)).toHaveText(
+			'The NSFW box is now checked. Save the image to apply it.'
+		);
 		// The button removed itself, so focus lands on the box it checked.
 		await expect(markNsfw(page)).toHaveCount(0);
 		await expect(nsfwBox(page)).toBeFocused();
@@ -272,6 +274,45 @@ test('a lookup in flight cannot be dismissed, so no answer can land on a closed 
 	await expect(liveRegion(page)).toHaveText('Reading the Bluesky post');
 	await expect(tagsInput(page)).toHaveValue('');
 	await expect(markNsfw(page)).toHaveCount(0);
+});
+
+test('an image stored as NSFW opens its edit page with the box already checked', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	// Image 4 is seeded nsfw=1. The box reads the stored row, so a classifier
+	// rating is the only thing that could ever move it — and it never does.
+	await page.goto('/admin/images/4/edit');
+	await expect(tagsInput(page)).toBeVisible();
+	await expect(nsfwBox(page)).toBeChecked();
+	await expect(markNsfw(page)).toHaveCount(0);
+});
+
+test('the pill takes the app focus ring and spins while a lookup runs', async ({ page }) => {
+	await openUploadForm(page);
+	// Tab from the Tags input, so the ring is a keyboard focus, not a click.
+	await tagsInput(page).focus();
+	await page.keyboard.press('Tab');
+	await expect(pill(page)).toBeFocused();
+	await expect(pill(page)).toHaveCSS('outline-style', 'solid');
+	await expect(pill(page)).toHaveCSS('outline-width', '2px');
+
+	// The config asks every test for reduced motion; this one measures the
+	// animation itself, so it opts its own page out.
+	await page.emulateMedia({ reducedMotion: 'no-preference' });
+	// The answer never arrives, so the spinner stays on screen to be measured.
+	await page.route(ENDPOINT, () => new Promise<void>(() => {}));
+	await pill(page).click();
+	await expect(page.locator('.tag-spin')).toHaveCSS('animation-name', 'tag-spin');
+});
+
+test('a reduced-motion preference stops the spinner', async ({ page }) => {
+	// Asked for on the page rather than taken from the config: `use.reducedMotion`
+	// is not an option this Playwright version applies (its own types do not
+	// declare it), so the config's setting reaches no browser.
+	await openUploadForm(page);
+	await page.emulateMedia({ reducedMotion: 'reduce' });
+	await page.route(ENDPOINT, () => new Promise<void>(() => {}));
+	await pill(page).click();
+	await expect(page.locator('.tag-spin')).toHaveCSS('animation-name', 'none');
 });
 
 test('the edit page looks up the URL in the field, not the stored one', async ({ page }) => {

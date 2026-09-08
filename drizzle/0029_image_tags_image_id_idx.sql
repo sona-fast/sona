@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS `image_tags_image_id_idx` ON `image_tags` (`image_id`);

@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { imageTags, images, tags } from '$lib/server/db/schema';
 import { makeD1 } from '$lib/server/test/d1';
-import { load, actions, _PER_PAGE as PER_PAGE } from './+page.server';
+import { load, actions, _MAX_SCAN as MAX_SCAN, _PER_PAGE as PER_PAGE } from './+page.server';
 
 // The backfill list (SONA-220). What is worth pinning here is which rows reach
 // the page — an image is a candidate only when its source URL is one the
@@ -16,6 +16,8 @@ import { load, actions, _PER_PAGE as PER_PAGE } from './+page.server';
 
 const BSKY = 'https://bsky.app/profile/kirin.example/post/3kq7x2abc';
 const X = 'https://x.com/kirin_draws/status/1834455667788990011';
+
+type Query = { sql: string; params: unknown[] };
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -34,7 +36,28 @@ function makeDb() {
 			featured_order INTEGER, created_at TEXT NOT NULL DEFAULT '');
 	`);
 	const d1 = makeD1(sqlite);
-	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
+	// Every statement the load runs, so a test can assert WHICH columns are read
+	// for how many rows, not only what comes back.
+	const queries: Query[] = [];
+	const prepare = d1.prepare.bind(d1);
+	const logged = {
+		...d1,
+		prepare: (sql: string) => {
+			const stmt = prepare(sql);
+			return {
+				...stmt,
+				bind: (...params: unknown[]) => {
+					queries.push({ sql, params });
+					return stmt.bind(...params);
+				}
+			};
+		}
+	} as unknown as typeof d1;
+	return {
+		db: drizzle(logged, { schema }),
+		platform: { env: { DB: logged } } as unknown as App.Platform,
+		queries
+	};
 }
 
 type Db = ReturnType<typeof makeDb>['db'];
@@ -118,6 +141,67 @@ describe('suggest-tags load', () => {
 		const second = await runLoad(platform, '?pages=2');
 		expect(second.rows).toHaveLength(PER_PAGE + 3);
 		expect(second.rows.slice(0, PER_PAGE).map((r) => r.id)).toEqual(first.rows.map((r) => r.id));
+	});
+
+	it('scans ids only, and fetches display columns for the rendered rows alone', async () => {
+		// The scan can reach MAX_SCAN rows to render twenty. Carrying titles,
+		// thumbnails and image URLs through it puts hundreds of kilobytes in one
+		// D1 response, against a 1 MB cap.
+		const { db, platform, queries } = makeDb();
+		for (let i = 1; i <= PER_PAGE + 3; i++) await seedImage(db, i, BSKY);
+		queries.length = 0;
+
+		const data = await runLoad(platform);
+		expect(data.rows).toHaveLength(PER_PAGE);
+		expect(data.total).toBe(PER_PAGE + 3);
+
+		const scan = queries.find((q) => q.sql.includes('"source_post_url"'));
+		expect(scan, 'the candidate scan did not run').toBeTruthy();
+		expect(scan!.sql).not.toContain('"title"');
+		expect(scan!.sql).not.toContain('"thumbnail_url"');
+
+		// One display query, bound to exactly the ids on the page.
+		const display = queries.filter((q) => q.sql.includes('"title"'));
+		expect(display).toHaveLength(1);
+		expect(display[0].params).toEqual(data.rows.map((r) => r.id));
+	});
+
+	it('chunks the display fetch, since Load more can grow past D1 bound parameters', async () => {
+		const { db, platform, queries } = makeDb();
+		for (let i = 1; i <= 130; i++) await seedImage(db, i, BSKY);
+		queries.length = 0;
+
+		const data = await runLoad(platform, '?pages=7');
+		expect(data.rows).toHaveLength(130);
+
+		const display = queries.filter((q) => q.sql.includes('"title"'));
+		expect(display.length).toBeGreaterThan(1);
+		for (const q of display) expect(q.params.length).toBeLessThanOrEqual(100);
+		// Between them the chunks cover the page, in order.
+		expect(display.flatMap((q) => q.params)).toEqual(data.rows.map((r) => r.id));
+	});
+
+	it('stops at the scan ceiling and reports a total capped at it', async () => {
+		// A library where nothing is tagged yet would otherwise classify the whole
+		// images table on every page view. Past the ceiling the page shows what it
+		// found and says so with a capped total rather than the true count.
+		const { db, platform } = makeDb();
+		await db.insert(images).values(
+			Array.from({ length: MAX_SCAN + 5 }, (_, i) => ({
+				id: i + 1,
+				title: `Art ${i + 1}`,
+				slug: `art-${i + 1}`,
+				imageUrl: `https://cdn.example.com/${i + 1}.png`,
+				artistId: 1,
+				sourcePostUrl: BSKY
+			}))
+		);
+
+		const data = await runLoad(platform);
+		expect(data.total).toBe(MAX_SCAN);
+		expect(data.rows).toHaveLength(PER_PAGE);
+		// Newest first, so the ceiling drops the oldest rows, not the newest.
+		expect(data.rows[0].id).toBe(MAX_SCAN + 5);
 	});
 
 	it('reads a junk or missing pages parameter as the first page', async () => {

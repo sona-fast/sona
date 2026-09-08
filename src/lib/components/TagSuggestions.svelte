@@ -24,6 +24,7 @@
 		selectedTags,
 		sentenceFor,
 		toggleTag,
+		trayFor,
 		type EntailRating,
 		type SuggestionState
 	} from '$lib/tag-suggestions';
@@ -234,41 +235,26 @@
 						{m.admin_tag_suggest_dismiss()}
 					</button>
 				</div>
-			{:else if suggestion.kind === 'empty'}
-				<p class="tag-eyebrow">{m.admin_tag_suggest_empty_title()}</p>
-				<p class="tag-panel-body">{m.admin_tag_suggest_empty_body()}</p>
-				<div class="tag-actions">
-					<button type="button" class="tag-btn-text tag-btn-text-flush" onclick={dismiss}>
-						{m.admin_tag_suggest_dismiss()}
-					</button>
-				</div>
-			{:else if suggestion.kind === 'notFound'}
-				<p class="tag-eyebrow warn">{m.admin_tag_suggest_unavailable_title()}</p>
-				<p class="tag-panel-body">{m.admin_tag_suggest_not_found_body()}</p>
-				<div class="tag-actions">
-					<button type="button" class="tag-btn-text tag-btn-text-flush" onclick={dismiss}>
-						{m.admin_tag_suggest_dismiss()}
-					</button>
-				</div>
 			{:else}
-				<!-- notReady, unavailable, rateLimited: same shape, different sentence,
-				     and all three are worth another click. -->
-				<p class="tag-eyebrow warn">
-					{suggestion.kind === 'notReady'
-						? m.admin_tag_suggest_not_yet_title()
-						: m.admin_tag_suggest_unavailable_title()}
-				</p>
-				<p class="tag-panel-body">
-					{#if suggestion.kind === 'notReady'}{m.admin_tag_suggest_not_yet_body()}
-					{:else if suggestion.kind === 'rateLimited'}{m.admin_tag_suggest_rate_limited_body()}
-					{:else}{m.admin_tag_suggest_unavailable_body()}{/if}
-				</p>
+				<!-- Every other finished state is the same tray: an eyebrow, a
+				     sentence, and Try again only where another click could answer
+				     differently. trayFor decides which, for this and the backfill row. -->
+				{@const tray = trayFor(suggestion)}
+				<p class="tag-eyebrow" class:warn={tray.warn}>{tray.title}</p>
+				<p class="tag-panel-body">{tray.body}</p>
 				<div class="tag-actions">
-					<button type="button" class="tag-pill" onclick={suggest}>
-						<RefreshCw size={14} />
-						{m.admin_tag_suggest_try_again()}
-					</button>
-					<button type="button" class="tag-btn-text" onclick={dismiss}>
+					{#if tray.retry}
+						<button type="button" class="tag-pill" onclick={suggest}>
+							<RefreshCw size={14} />
+							{m.admin_tag_suggest_try_again()}
+						</button>
+					{/if}
+					<button
+						type="button"
+						class="tag-btn-text"
+						class:tag-btn-text-flush={!tray.retry}
+						onclick={dismiss}
+					>
 						{m.admin_tag_suggest_dismiss()}
 					</button>
 				</div>
