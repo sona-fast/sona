@@ -19,7 +19,10 @@
 		applyTo,
 		fromResponse,
 		parseTagInput,
+		readingLabel,
+		requestSuggestions,
 		selectedTags,
+		sentenceFor,
 		toggleTag,
 		type EntailRating,
 		type SuggestionState
@@ -29,19 +32,18 @@
 	let {
 		value = $bindable(''),
 		sourceUrl = '',
-		imageId = null,
 		rating = $bindable(null),
 		existingTags = [],
 		placeholder = '',
-		firstTileOnly = false,
-		idPrefix = 'tags'
+		firstTileOnly = false
 	}: {
 		/** The Tags input's value, bound out to the form that submits it. */
 		value: string;
-		/** The Source Post URL field's current value; decides whether the pill runs. */
+		/** The Source Post URL field's current value. It decides whether the pill
+		 *  runs AND is what the lookup reads, so the pill, the hint and the answer
+		 *  always describe the same post — on the edit page too, where a stored
+		 *  URL may differ from what the operator has typed since. */
 		sourceUrl?: string;
-		/** Set on the edit page, where the URL is already stored server-side. */
-		imageId?: number | null;
 		/** The rating the last lookup returned, for the note beside "Mark as NSFW". */
 		rating?: EntailRating | null;
 		/** Tag names already in the site, offered as the input's tooltip. */
@@ -49,14 +51,14 @@
 		placeholder?: string;
 		/** Multi-tile uploads suggest for the parent tile only; say so. */
 		firstTileOnly?: boolean;
-		idPrefix?: string;
 	} = $props();
 
-	const inputId = `${idPrefix}-input`;
-	const hintId = `${idPrefix}-hint`;
-	const statusId = `${idPrefix}-status`;
-	const helpId = `${idPrefix}-help`;
-	const appliedId = `${idPrefix}-applied`;
+	// One Tags field per form, so the ids are fixed.
+	const inputId = 'tags-input';
+	const hintId = 'tags-hint';
+	const statusId = 'tags-status';
+	const helpId = 'tags-help';
+	const appliedId = 'tags-applied';
 
 	let suggestion = $state<SuggestionState>({ kind: 'idle' });
 	// The one live region on this field. It is rendered empty on page load and
@@ -70,8 +72,7 @@
 	let requestSeq = 0;
 
 	// The pill is enabled by the same rule the endpoint applies, so a URL the
-	// server would refuse never looks clickable. On the edit page the stored URL
-	// is what gets used, but the field is what the operator is looking at.
+	// server would refuse never looks clickable.
 	const source = $derived(classifySourceUrl(sourceUrl));
 	const searching = $derived(suggestion.kind === 'searching');
 	const disabled = $derived(source === null || searching);
@@ -90,64 +91,20 @@
 		suggestion.kind === 'applied' ? appliedId : suggestion.kind === 'searching' ? statusId : hintId
 	);
 
-	function setAnnouncement(text: string) {
-		announcement = text;
-	}
-
-	function readingLabel(kind: 'bluesky' | 'x') {
-		return kind === 'bluesky' ? m.admin_tag_suggest_reading_bluesky() : m.admin_tag_suggest_reading_x();
-	}
-
-	/** The sentence a finished state puts in the live region. */
-	function sentenceFor(next: SuggestionState): string {
-		switch (next.kind) {
-			case 'suggested':
-				return m.admin_tag_suggest_eyebrow({ count: next.tags.length });
-			case 'empty':
-				return `${m.admin_tag_suggest_empty_title()} ${m.admin_tag_suggest_empty_body()}`;
-			case 'notReady':
-				return `${m.admin_tag_suggest_not_yet_title()} ${m.admin_tag_suggest_not_yet_body()}`;
-			case 'rateLimited':
-				return `${m.admin_tag_suggest_unavailable_title()} ${m.admin_tag_suggest_rate_limited_body()}`;
-			case 'notFound':
-				return `${m.admin_tag_suggest_unavailable_title()} ${m.admin_tag_suggest_not_found_body()}`;
-			case 'unavailable':
-				return `${m.admin_tag_suggest_unavailable_title()} ${m.admin_tag_suggest_unavailable_body()}`;
-			case 'noSource':
-				return m.admin_tag_suggest_hint_no_source();
-			default:
-				return '';
-		}
-	}
-
 	async function suggest() {
 		// aria-disabled leaves the pill focusable, so the refusal happens here.
 		if (disabled || source === null) return;
 		const seq = ++requestSeq;
 		rating = null;
 		suggestion = { kind: 'searching', source: source.kind };
-		setAnnouncement(readingLabel(source.kind));
+		announcement = readingLabel(source.kind);
+		// "Try again" lives in the tray, and the tray just turned into the
+		// searching skeleton: keep focus on the pill rather than letting it drop
+		// to <body>. A click on the pill itself already has focus there.
+		await tick();
+		pill?.focus();
 
-		let status = 0;
-		let body: unknown = null;
-		try {
-			const res = await fetch('/api/admin/tag-suggestions', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(imageId === null ? { sourcePostUrl: sourceUrl } : { imageId })
-			});
-			status = res.status;
-			// A 202 carries no suggestions and a 5xx may carry no JSON at all;
-			// neither is a reason to put a parser's message on the form.
-			try {
-				body = await res.json();
-			} catch {
-				body = null;
-			}
-		} catch {
-			// Offline, aborted, blocked: the same answer as a dead upstream.
-			status = 0;
-		}
+		const { status, body } = await requestSuggestions({ sourcePostUrl: sourceUrl });
 
 		// The operator asked again while this was in flight; that answer wins.
 		if (seq !== requestSeq) return;
@@ -155,7 +112,7 @@
 		const next = fromResponse(status, body, parseTagInput(value));
 		suggestion = next;
 		rating = next.kind === 'suggested' ? next.rating : null;
-		setAnnouncement(sentenceFor(next));
+		announcement = sentenceFor(next);
 	}
 
 	function onToggle(tag: string) {
@@ -168,7 +125,7 @@
 		if (accepted.length === 0) return;
 		value = applyTo(value, accepted);
 		suggestion = { kind: 'applied', count: accepted.length };
-		setAnnouncement(m.admin_tag_suggest_applied({ count: accepted.length }));
+		announcement = m.admin_tag_suggest_applied({ count: accepted.length });
 		// The tray the button lived in is gone; land focus on the line that says
 		// what happened rather than dropping it to <body>.
 		await tick();
@@ -179,7 +136,7 @@
 		requestSeq++;
 		suggestion = { kind: 'idle' };
 		rating = null;
-		setAnnouncement('');
+		announcement = '';
 		pill?.focus();
 	}
 </script>
@@ -351,27 +308,6 @@
 		margin: 0;
 		font-size: 12px;
 		color: var(--muted-foreground);
-	}
-
-	/* The loader turns while a lookup runs; a spinner that never stops is exactly
-	   the motion prefers-reduced-motion is asking about, so it holds still. */
-	.input-group :global(.tag-spin) {
-		animation: tag-spin 1s linear infinite;
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.input-group :global(.tag-spin) {
-			animation: none;
-		}
-	}
-
-	@keyframes tag-spin {
-		from {
-			transform: rotate(0deg);
-		}
-		to {
-			transform: rotate(360deg);
-		}
 	}
 
 	@media (max-width: 640px) {

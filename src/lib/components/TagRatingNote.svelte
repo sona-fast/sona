@@ -11,19 +11,24 @@
 	// The note renders as plain text rather than the capsule SONA-156 uses for
 	// its lookup result: a capsule sitting next to a button reads as a second
 	// button.
+	import { tick } from 'svelte';
 	import { TriangleAlert } from 'lucide-svelte';
-	import type { EntailRating } from '$lib/tag-suggestions';
+	import { ratingLabel, type EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
 
 	let {
 		rating,
 		id,
-		nsfw = $bindable(false)
+		nsfw = $bindable(false),
+		checkbox = null
 	}: {
 		rating: EntailRating | null;
 		/** The checkbox points its aria-describedby here. */
 		id: string;
 		nsfw: boolean;
+		/** The NSFW checkbox itself: "Mark it NSFW" removes its own button, so
+		 *  focus moves to the box it just checked rather than dropping to <body>. */
+		checkbox?: HTMLInputElement | null;
 	} = $props();
 
 	// Persistent live region: the text is written into a node that was already
@@ -34,17 +39,13 @@
 
 	const warn = $derived(rating === 'explicit' || rating === 'questionable');
 
-	const label = $derived(
-		rating === 'explicit'
-			? m.admin_tag_suggest_rated_explicit()
-			: rating === 'questionable'
-				? m.admin_tag_suggest_rated_questionable()
-				: m.admin_tag_suggest_rated_safe()
-	);
+	const label = $derived(ratingLabel(rating));
 
-	function markNsfw() {
+	async function markNsfw() {
 		nsfw = true;
 		announcement = m.admin_tag_suggest_marked_nsfw();
+		await tick();
+		checkbox?.focus();
 	}
 </script>
 

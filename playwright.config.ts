@@ -93,7 +93,9 @@ const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
 // storage-breakdown rides the ut-stat server: it also flips the storage
 // provider, which would race the shared server's specs (SONA-192).
 const UT_SPECS = ['**/ut-stat.spec.ts', '**/storage-breakdown.spec.ts'];
-const UPLOAD_SPEC = '**/upload.spec.ts';
+// suggest-tags rides the upload server: its Save writes tag rows, and the
+// shared server's DB is read-only by convention (SONA-220).
+const UPLOAD_SPECS = ['**/upload.spec.ts', '**/suggest-tags.spec.ts'];
 
 // Seed a fresh throwaway D1 first, then boot the dev server against it. Seeding
 // here (not in globalSetup) guarantees it finishes before the server reads the
@@ -134,7 +136,7 @@ export default defineConfig({
 	projects: [
 		{
 			name: 'chromium',
-			testIgnore: [RECOVERY_SPEC, ...UT_SPECS, UPLOAD_SPEC],
+			testIgnore: [RECOVERY_SPEC, ...UT_SPECS, ...UPLOAD_SPECS],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
 		},
 		{
@@ -152,7 +154,7 @@ export default defineConfig({
 		},
 		{
 			name: 'upload',
-			testMatch: UPLOAD_SPEC,
+			testMatch: UPLOAD_SPECS,
 			// The upload tests share one seeded dev server and an admin
 			// session flow that flakes under parallel load — run them serially.
 			workers: 1,

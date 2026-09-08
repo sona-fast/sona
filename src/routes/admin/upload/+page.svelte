@@ -42,6 +42,7 @@
 	// suggestion never checks that box; `nsfw` only moves when the operator does.
 	let suggestedRating = $state<EntailRating | null>(null);
 	let nsfw = $state(false);
+	let nsfwInput = $state<HTMLInputElement | null>(null);
 
 	type Tile = {
 		key: number;
@@ -569,10 +570,10 @@
 
 	<div class="tag-check-row">
 		<label class="checkbox-label">
-			<input type="checkbox" name="nsfw" bind:checked={nsfw} aria-describedby="tags-rating" />
+			<input type="checkbox" name="nsfw" bind:checked={nsfw} bind:this={nsfwInput} aria-describedby="tags-rating" />
 			<span>{m.admin_field_mark_nsfw()}</span>
 		</label>
-		<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw />
+		<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw checkbox={nsfwInput} />
 	</div>
 
 	<label class="checkbox-label">

@@ -171,6 +171,18 @@ describe('suggest-tags save action', () => {
 		expect(await tagNamesOf(db, 1)).toEqual([]);
 	});
 
+	it('refuses to overwrite tags the image picked up since the list loaded', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		// The list showed image 1 as untagged; the edit form tagged it meanwhile.
+		await tagImage(db, 1, 'fox');
+
+		const result = await actions.save({ request: form({ id: '1', tags: 'beach, sand' }), platform } as never);
+		expect(result).toMatchObject({ status: 409, data: { error: 'tagged_elsewhere' } });
+		// The tag written elsewhere is still there and nothing from the row landed.
+		expect(await tagNamesOf(db, 1)).toEqual(['fox']);
+	});
+
 	it('saves nothing when every chip was left out', async () => {
 		const { db, platform } = makeDb();
 		await seedImage(db, 1, BSKY);

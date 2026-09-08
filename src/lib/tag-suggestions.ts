@@ -6,8 +6,13 @@
 // state, `toggleTag` flips a chip, and `applyTo` writes the accepted tags into
 // the comma-separated Tags input. Nothing here fetches, and nothing here
 // persists — the forms stage tags until their own Save.
+//
+// `requestSuggestions` is the one exception to "nothing here fetches": the two
+// forms and the backfill page all make the same POST and read its answer the
+// same way, so the call lives here once rather than three times.
 
 import { sanitizeTag } from '$lib/tags';
+import * as m from '$lib/paraglide/messages';
 
 export type EntailRating = 'safe' | 'questionable' | 'explicit';
 
@@ -132,6 +137,79 @@ export function fromResponse(
 		imageCount: Number.isInteger(count) && count > 0 ? count : 1,
 		skippedExisting
 	};
+}
+
+/** What the endpoint is asked. The forms send the field's current value, so
+ * the pill and the lookup always agree on which post is being read; the
+ * backfill page sends the id of a row whose URL is already stored. */
+export type SuggestionRequest = { sourcePostUrl: string } | { imageId: number };
+
+/**
+ * One POST to /api/admin/tag-suggestions. Never throws: a transport failure
+ * (offline, aborted, blocked) reads as status 0, and a body that is not JSON —
+ * a 202 carries no suggestions and a 5xx may carry no JSON at all — reads as
+ * null. Both go straight to `fromResponse`, which maps them onto a state.
+ */
+export async function requestSuggestions(
+	payload: SuggestionRequest
+): Promise<{ status: number; body: unknown }> {
+	try {
+		const res = await fetch('/api/admin/tag-suggestions', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload)
+		});
+		let body: unknown = null;
+		try {
+			body = await res.json();
+		} catch {
+			body = null;
+		}
+		return { status: res.status, body };
+	} catch {
+		return { status: 0, body: null };
+	}
+}
+
+/** The "Reading the … post" line for a lookup in flight. */
+export function readingLabel(kind: SuggestionSource): string {
+	return kind === 'bluesky' ? m.admin_tag_suggest_reading_bluesky() : m.admin_tag_suggest_reading_x();
+}
+
+/** "Rated safe by entail.dev" and its two siblings. */
+export function ratingLabel(rating: EntailRating | null): string {
+	return rating === 'explicit'
+		? m.admin_tag_suggest_rated_explicit()
+		: rating === 'questionable'
+			? m.admin_tag_suggest_rated_questionable()
+			: m.admin_tag_suggest_rated_safe();
+}
+
+/**
+ * The sentence a finished state puts in the live region. A title and a body
+ * are joined through a message rather than a space, so the pause between them
+ * is punctuated the way the locale punctuates it.
+ */
+export function sentenceFor(next: SuggestionState): string {
+	const join = (title: string, body: string) => m.admin_tag_suggest_status_join({ title, body });
+	switch (next.kind) {
+		case 'suggested':
+			return m.admin_tag_suggest_eyebrow({ count: next.tags.length });
+		case 'empty':
+			return join(m.admin_tag_suggest_empty_title(), m.admin_tag_suggest_empty_body());
+		case 'notReady':
+			return join(m.admin_tag_suggest_not_yet_title(), m.admin_tag_suggest_not_yet_body());
+		case 'rateLimited':
+			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_rate_limited_body());
+		case 'notFound':
+			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_not_found_body());
+		case 'unavailable':
+			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_unavailable_body());
+		case 'noSource':
+			return m.admin_tag_suggest_hint_no_source();
+		default:
+			return '';
+	}
 }
 
 /** The tags a suggested state would add, in the classifier's order. */

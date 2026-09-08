@@ -69,7 +69,9 @@
 	<div class="header-actions">
 		<!-- Entry point for the tag backfill list (SONA-220). Secondary beside
 		     Upload new: it is housekeeping, not the page's main job. -->
-		<a href="/admin/images/suggest-tags" class="btn btn-secondary"><Tag size={16} /> {m.admin_tag_suggest_button()}</a>
+		<!-- tap, not the app-wide hover preload: the backfill load scans every
+		     untagged image and classifies its URL, too much work for a hover. -->
+		<a href="/admin/images/suggest-tags" class="btn btn-secondary" data-sveltekit-preload-data="tap"><Tag size={16} /> {m.admin_tag_suggest_button()}</a>
 		<a href="/admin/upload" class="btn btn-primary desktop-upload"><Upload size={16} /> {m.admin_images_upload_new()}</a>
 	</div>
 </div>

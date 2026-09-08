@@ -23,7 +23,8 @@ export { PER_PAGE as _PER_PAGE };
 
 /** Ceiling on how many candidate rows one load will classify. A library where
  * nothing has been tagged yet would otherwise walk the whole table on every
- * page view; past this the page shows what it found and keeps offering more. */
+ * page view. Past this the page shows what it found, and the total it reports
+ * is capped at the scan limit rather than the true count. */
 const MAX_SCAN = 2000;
 
 export type SuggestRow = {
@@ -98,6 +99,18 @@ export const actions: Actions = {
 
 		const row = await db.select({ id: images.id }).from(images).where(eq(images.id, id)).get();
 		if (!row) return fail(404, { error: 'not_found' });
+
+		// The row was listed because it had no tags, but the edit form or another
+		// tab may have tagged it since the list loaded. replaceImageTags deletes
+		// before it inserts, so writing now would throw those tags away: refuse,
+		// and let the row send the operator to the edit form instead.
+		const tagged = await db
+			.select({ tagId: imageTags.tagId })
+			.from(imageTags)
+			.where(eq(imageTags.imageId, id))
+			.limit(1)
+			.get();
+		if (tagged) return fail(409, { error: 'tagged_elsewhere' });
 
 		// The same persistence the edit form's save uses, so a tag written here is
 		// indistinguishable from one typed there.

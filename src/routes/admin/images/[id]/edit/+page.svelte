@@ -22,13 +22,17 @@
 	let referenceCleared = $state(false);
 
 	// Bound so the suggestion control can read the source URL as it is edited and
-	// write accepted tags back into the field. Both still submit by name.
-	let tagsValue = $state(data.imageTags.join(', '));
-	let sourcePostUrl = $state(data.image.sourcePostUrl || '');
+	// write accepted tags back into the field. Both still submit by name. Writable
+	// $derived rather than $state: the field starts from the loaded row and follows
+	// it on a same-route navigation, while typing (and bind:) overrides it until
+	// the next load.
+	let tagsValue = $derived(data.imageTags.join(', '));
+	let sourcePostUrl = $derived(data.image.sourcePostUrl || '');
 	// entail.dev's rating for the last suggestion. It never moves the checkbox;
 	// `nsfw` starts at the stored value and only the operator changes it.
 	let suggestedRating = $state<EntailRating | null>(null);
-	let nsfw = $state(data.image.nsfw);
+	let nsfw = $derived(data.image.nsfw);
+	let nsfwInput = $state<HTMLInputElement | null>(null);
 </script>
 
 <div class="page-header">
@@ -187,7 +191,6 @@
 			bind:value={tagsValue}
 			bind:rating={suggestedRating}
 			sourceUrl={sourcePostUrl}
-			imageId={data.image.id}
 			existingTags={data.tags.map((t) => t.name)}
 		/>
 
@@ -249,10 +252,10 @@
 
 		<div class="tag-check-row">
 			<label class="checkbox-label">
-				<input type="checkbox" name="nsfw" bind:checked={nsfw} aria-describedby="tags-rating" />
+				<input type="checkbox" name="nsfw" bind:checked={nsfw} bind:this={nsfwInput} aria-describedby="tags-rating" />
 				<span>{m.admin_field_mark_nsfw()}</span>
 			</label>
-			<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw />
+			<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw checkbox={nsfwInput} />
 		</div>
 
 		<label class="checkbox-label">

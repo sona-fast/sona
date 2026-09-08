@@ -10,7 +10,8 @@ import { adminLogin } from './admin-login';
 // what the live region says, and where focus lands afterwards.
 //
 // Runs on the SHARED read-only DB/server: nothing here submits the form, so no
-// row is ever written.
+// row is ever written. The edit-page test only reads the form and intercepts
+// the lookup.
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
@@ -26,6 +27,10 @@ async function stubSuggestions(page: Page, status: number, body: unknown) {
 }
 
 const tagsInput = (page: Page) => page.locator('input[name="tags"]');
+const nsfwBox = (page: Page) => page.locator('input[name="nsfw"]');
+const markNsfw = (page: Page) => page.getByRole('button', { name: 'Mark it NSFW' });
+// The rating note's own live region, beside the checkbox.
+const ratingRegion = (page: Page) => page.locator('.tag-check-row p.sr-only[role="status"]');
 const pill = (page: Page) => page.getByRole('button', { name: 'Suggest tags', exact: true });
 // The one live region on the field: role=status, visually hidden, written into.
 const liveRegion = (page: Page) => page.locator('.field > p.sr-only[role="status"]');
@@ -162,4 +167,135 @@ test('a post with nothing to suggest says so and offers only Dismiss', async ({ 
 	await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Dismiss' })).toBeVisible();
 	await expect(tagsInput(page)).toHaveValue('');
+});
+
+for (const rating of ['explicit', 'questionable'] as const) {
+	test(`a ${rating} rating warns and offers Mark it NSFW, which checks the box and hands it focus`, async ({
+		page
+	}) => {
+		await openUploadForm(page);
+		await stubSuggestions(page, 200, { source: 'bluesky', tags: ['fox'], rating, imageCount: 1 });
+
+		await pill(page).click();
+		await expect(page.locator('.tag-chip')).toHaveCount(1);
+
+		// The note is warning-coloured and the box is NOT checked: the classifier
+		// is a hint, the operator's click is the decision.
+		const note = page.locator('.tag-rating-note.warn');
+		await expect(note).toHaveText(`Rated ${rating} by entail.dev`);
+		await expect(nsfwBox(page)).not.toBeChecked();
+		await expect(markNsfw(page)).toBeVisible();
+
+		await markNsfw(page).click();
+		await expect(nsfwBox(page)).toBeChecked();
+		// Said as a staged change, not a persisted one: nothing is saved yet.
+		await expect(ratingRegion(page)).toHaveText('Marked NSFW. Save to apply it.');
+		// The button removed itself, so focus lands on the box it checked.
+		await expect(markNsfw(page)).toHaveCount(0);
+		await expect(nsfwBox(page)).toBeFocused();
+		// The note stays, so the operator can still see why.
+		await expect(note).toBeVisible();
+	});
+}
+
+test('a safe rating never offers Mark it NSFW', async ({ page }) => {
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, { source: 'bluesky', tags: ['fox'], rating: 'safe', imageCount: 1 });
+
+	await pill(page).click();
+	await expect(page.getByText('Rated safe by entail.dev')).toBeVisible();
+	await expect(page.locator('.tag-rating-note.warn')).toHaveCount(0);
+	await expect(markNsfw(page)).toHaveCount(0);
+	await expect(nsfwBox(page)).not.toBeChecked();
+});
+
+test('the 429, 404 and 502 answers each show their own sentence', async ({ page }) => {
+	await openUploadForm(page);
+
+	const cases = [
+		{
+			status: 429,
+			body: 'entail.dev is busy. Wait a minute and try again.',
+			retry: true
+		},
+		{ status: 404, body: "entail.dev couldn't read this post.", retry: false },
+		{ status: 502, body: "entail.dev didn't answer. Your tags are unchanged.", retry: true }
+	];
+	for (const { status, body, retry } of cases) {
+		await stubSuggestions(page, status, { error: 'x' });
+		await pill(page).click();
+
+		await expect(page.locator('.tag-eyebrow.warn')).toHaveText('Suggestions unavailable');
+		await expect(page.locator('.tag-panel-body')).toHaveText(body);
+		// Title and body reach the live region as two sentences, not run together.
+		await expect(liveRegion(page)).toHaveText(`Suggestions unavailable. ${body}`);
+		// 404 is final; the other two are worth another click.
+		await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(retry ? 1 : 0);
+		await expect(tagsInput(page)).toHaveValue('');
+
+		await page.getByRole('button', { name: 'Dismiss' }).click();
+		await expect(page.locator('.tag-tray')).toHaveCount(0);
+	}
+});
+
+test('Try again keeps focus on the pill while the second lookup runs', async ({ page }) => {
+	await openUploadForm(page);
+	await stubSuggestions(page, 502, { error: 'unavailable' });
+	await pill(page).click();
+	await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+
+	// The second answer never arrives while we look: the tray is the skeleton,
+	// the Try again button is gone, and focus is on the pill rather than <body>.
+	await page.route(ENDPOINT, () => new Promise<void>(() => {}));
+	await page.getByRole('button', { name: 'Try again' }).click();
+	await expect(page.getByRole('button', { name: 'Suggesting tags…' })).toBeFocused();
+	await expect(page.locator('.tag-skel-chip')).toHaveCount(5);
+});
+
+test('a lookup in flight cannot be dismissed, so no answer can land on a closed tray', async ({
+	page
+}) => {
+	// The component drops an answer that arrives after Dismiss (its request
+	// sequence guard), but the UI never gets there: while a lookup runs the tray
+	// is the skeleton with no Dismiss, and the pill refuses a second click. This
+	// pins that shape, since it is what makes the late-answer case unreachable.
+	await openUploadForm(page);
+	await page.route(ENDPOINT, () => new Promise<void>(() => {}));
+
+	await pill(page).click();
+	await expect(page.locator('.tag-skel-chip')).toHaveCount(5);
+	await expect(page.getByRole('button', { name: 'Dismiss' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Suggesting tags…' })).toHaveAttribute(
+		'aria-disabled',
+		'true'
+	);
+	await expect(liveRegion(page)).toHaveText('Reading the Bluesky post');
+	await expect(tagsInput(page)).toHaveValue('');
+	await expect(markNsfw(page)).toHaveCount(0);
+});
+
+test('the edit page looks up the URL in the field, not the stored one', async ({ page }) => {
+	await adminLogin(page, PASSWORD);
+	// Image 1 is seeded with no source post; the field is what the operator
+	// types, and the lookup has to follow it.
+	await page.goto('/admin/images/1/edit');
+	await expect(tagsInput(page)).toBeVisible();
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'true');
+
+	const bodies: unknown[] = [];
+	await page.route(ENDPOINT, (route: Route) => {
+		bodies.push(route.request().postDataJSON());
+		return route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ source: 'bluesky', tags: ['fox'], rating: 'safe', imageCount: 1 })
+		});
+	});
+
+	await page.fill('input[name="sourcePostUrl"]', BSKY_POST);
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+	await pill(page).click();
+	await expect(page.locator('.tag-chip')).toHaveCount(1);
+
+	expect(bodies).toEqual([{ sourcePostUrl: BSKY_POST }]);
 });

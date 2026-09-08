@@ -13,6 +13,7 @@ const ratingNote = read('./TagRatingNote.svelte');
 const uploadPage = read('../../routes/admin/upload/+page.svelte');
 const editPage = read('../../routes/admin/images/[id]/edit/+page.svelte');
 const backfillPage = read('../../routes/admin/images/suggest-tags/+page.svelte');
+const appCss = read('../../app.css');
 
 describe('the tag suggestion live region', () => {
 	it('is one element rendered on load and written into, not inserted with its text', () => {
@@ -39,6 +40,14 @@ describe('the suggest pill', () => {
 		expect(suggestions).toMatch(/if \(disabled \|\| source === null\) return;/);
 	});
 
+	it('reads the post the field names, never a stored URL the field has moved away from', () => {
+		// On the edit page the stored URL and the field can differ once the operator
+		// edits it; the pill, the hint and the lookup all follow the field.
+		expect(suggestions).toMatch(/requestSuggestions\(\{ sourcePostUrl: sourceUrl \}\)/);
+		expect(suggestions).not.toMatch(/imageId/);
+		expect(editPage).not.toMatch(/imageId=\{data\.image\.id\}/);
+	});
+
 	it('points at the sentence that explains its current state', () => {
 		expect(suggestions).toMatch(
 			/suggestion\.kind === 'applied' \? appliedId : suggestion\.kind === 'searching' \? statusId : hintId/
@@ -54,7 +63,20 @@ describe('focus after a suggestion is accepted or dismissed', () => {
 
 	it('returns to the pill after Dismiss, rather than dropping to the body', () => {
 		expect(suggestions).toMatch(/function dismiss\(\)[\s\S]*?pill\?\.focus\(\)/);
-		expect(backfillPage).toMatch(/function dismiss\(id: number\)[\s\S]*?pills\[id\]\?\.focus\(\)/);
+		// The backfill row's pill only renders once the row is idle again, so the
+		// focus call has to wait for that render.
+		expect(backfillPage).toMatch(
+			/async function dismiss\(id: number\)[\s\S]*?await tick\(\);\n\t\tpills\[id\]\?\.focus\(\)/
+		);
+	});
+
+	it('keeps focus on the pill after Try again, whose own button is gone with the tray', () => {
+		expect(suggestions).toMatch(/kind: 'searching'[\s\S]*?await tick\(\);\n\t\tpill\?\.focus\(\)/);
+		expect(backfillPage).toMatch(/kind: 'searching'[\s\S]*?await tick\(\);\n\t\tpills\[id\]\?\.focus\(\)/);
+	});
+
+	it('waits for the saved line to render before focusing it on the backfill page', () => {
+		expect(backfillPage).toMatch(/await tick\(\);\n\t{8}statusLines\[row\.id\]\?\.focus\(\)/);
 	});
 });
 
@@ -74,17 +96,26 @@ describe('the rating never touches the NSFW checkbox', () => {
 	it('offers a button instead of checking the box for the operator', () => {
 		// The classifier is a hint about the artwork, not a decision about the
 		// gallery; a wrong automatic check publishes a piece under the wrong rating.
-		expect(ratingNote).toMatch(/function markNsfw\(\) \{\n\t\tnsfw = true;/);
+		expect(ratingNote).toMatch(/async function markNsfw\(\) \{\n\t\tnsfw = true;/);
 		expect(ratingNote).toMatch(/\{#if warn && !nsfw\}/);
 		expect(ratingNote).not.toMatch(/rating[\s\S]{0,80}=>[\s\S]{0,40}nsfw = true/);
+	});
+
+	it('moves focus to the checkbox it just checked, since its own button is gone', () => {
+		expect(ratingNote).toMatch(/nsfw = true;[\s\S]*?await tick\(\);\n\t\tcheckbox\?\.focus\(\)/);
+		for (const page of [uploadPage, editPage]) {
+			expect(page).toMatch(/name="nsfw" bind:checked=\{nsfw\} bind:this=\{nsfwInput\}/);
+		}
 	});
 
 	it('is referenced by the checkbox rather than sitting inside its label', () => {
 		// Inside the label, a screen reader would read the classifier's guess as
 		// part of the checkbox's own name.
 		for (const page of [uploadPage, editPage]) {
-			expect(page).toMatch(/name="nsfw" bind:checked=\{nsfw\} aria-describedby="tags-rating"/);
-			expect(page).toMatch(/<TagRatingNote rating=\{suggestedRating\} id="tags-rating" bind:nsfw \/>/);
+			expect(page).toMatch(/name="nsfw" bind:checked=\{nsfw\} bind:this=\{nsfwInput\} aria-describedby="tags-rating"/);
+			expect(page).toMatch(
+				/<TagRatingNote rating=\{suggestedRating\} id="tags-rating" bind:nsfw checkbox=\{nsfwInput\} \/>/
+			);
 		}
 	});
 });
@@ -92,13 +123,50 @@ describe('the rating never touches the NSFW checkbox', () => {
 describe('the backfill rows', () => {
 	it('name every control by its image, since the page repeats them per row', () => {
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_suggest\(\{ title: row\.title \}\)\}/);
+		// Try again is not the same action as Suggest, so it is not named like it.
+		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_try_again\(\{ title: row\.title \}\)\}/);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_save_label\(\{/);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_dismiss\(\{ title: row\.title \}\)\}/);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_edit_image_label\(\{ title: row\.title \}\)\}/);
 	});
 
+	it('prints the separator in the row meta only when an artist name precedes it', () => {
+		// `{' '}` rather than a bare space: Svelte trims whitespace at the block edge.
+		expect(backfillPage).toMatch(/\{#if row\.artistName\}\{row\.artistName\} &middot;\{' '\}\{\/if\}\{sourceLabel\(row\.source\)\}/);
+	});
+
+	it('keeps the rating and the NSFW note on one line, and spins the save loader', () => {
+		expect(backfillPage).toMatch(
+			/<p class="rowmeta">\n\t{6}\{#if rowState\.rating\}<span class="tag-rating-note"[^\n]*\{m\.admin_suggest_tags_nsfw_note\(\)\}\n\t{5}<\/p>/
+		);
+		expect(backfillPage).toMatch(/saving\.has\(row\.id\)\}<LoaderCircle size=\{14\} class="tag-spin" \/>/);
+		// The keyframes and their reduced-motion guard live in app.css now, so the
+		// same class spins on both surfaces.
+		expect(appCss).toMatch(/\.tag-spin \{\n\tanimation: tag-spin 1s linear infinite;/);
+		expect(appCss).toMatch(/prefers-reduced-motion: reduce\) \{\n\t\.tag-spin \{\n\t\tanimation: none;/);
+	});
+
+	it('gives the pill, chips and text buttons the same keyboard focus ring as .btn', () => {
+		expect(appCss).toMatch(
+			/\.tag-pill:focus-visible,\n\.tag-chip:focus-visible,\n\.tag-btn-text:focus-visible \{\n\toutline: 2px solid var\(--ring\);\n\toutline-offset: 2px;/
+		);
+	});
+
 	it('leaves the thumbnail alt empty, because the row heading names the image', () => {
-		expect(backfillPage).toMatch(/<img src=\{row\.thumbnailUrl \|\| row\.imageUrl\} alt="" \/>/);
+		expect(backfillPage).toMatch(/src=\{cdnImage\(row\.thumbnailUrl \|\| row\.imageUrl, THUMB_WIDTH\)\}\n\t{7}alt=""/);
+	});
+
+	it('loads thumbnails at thumbnail width, lazily, like the other admin lists', () => {
+		// A row with no thumbnail would otherwise pull the full-size original,
+		// twenty times per page, before the operator has scrolled to it.
+		expect(backfillPage).toMatch(/cdnImage\(row\.thumbnailUrl \|\| row\.imageUrl, THUMB_WIDTH\)[\s\S]{0,80}loading="lazy"\n\t{7}decoding="async"/);
+	});
+
+	it('does not preload the backfill list on hover from the images page', () => {
+		// app.html preloads data on hover app-wide; the backfill load scans and
+		// classifies every untagged image, so this link waits for the tap.
+		const imagesPage = read('../../routes/admin/images/+page.svelte');
+		expect(imagesPage).toMatch(/href="\/admin\/images\/suggest-tags"[^>]*data-sveltekit-preload-data="tap"/);
 	});
 
 	it('scopes the live-region and help ids per row so they stay unique', () => {
