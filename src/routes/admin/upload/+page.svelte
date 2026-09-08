@@ -469,7 +469,12 @@
 		const controller = new AbortController();
 		lookupAborts.set(key, controller);
 		tile.lookup = { kind: 'searching' };
-		if (isParent(key)) resetSharedPrefill();
+		// Which role this tile had when the request FIRED. Re-read on resolve, a
+		// group switched to "existing" mid-lookup made the parent's own result
+		// skip applyShared, and switching back showed a results panel with the
+		// shared fields still empty.
+		const wasParent = isParent(key);
+		if (wasParent) resetSharedPrefill();
 		void runLookup({ file: tile.file }, { signal: controller.signal }).then((next) => {
 			// Cancelled, or the tile was removed while the request was out.
 			if (lookupAborts.get(key) !== controller) return;
@@ -477,7 +482,7 @@
 			const live = tiles.find((t) => t.key === key);
 			if (!live) return;
 			live.lookup = next;
-			if (isParent(key)) applyShared(next);
+			if (wasParent) applyShared(next);
 			// A variant tile's outcome renders as plain text on the tile, outside
 			// the panel's live region — say it out loud, naming the file, or a
 			// screen-reader user has no way to know the lookup finished (4.1.3).
@@ -551,6 +556,13 @@
 	}
 
 	function useLookupArtist(artist: { id: number; name: string }) {
+		// The options were built when the page loaded. An artist created in another
+		// tab since then comes back as a candidate with no option of their own, so
+		// the button would flip to "Using {name}" over an empty select and the save
+		// would be refused by `required`. Carry them in, the way the dialog does.
+		if (!artistList.some((a) => a.id === artist.id)) {
+			artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
+		}
 		// The option values are numbers, and the select binding compares with
 		// Object.is — a stringified id would match no option and select nothing.
 		selectedArtistId = artist.id;

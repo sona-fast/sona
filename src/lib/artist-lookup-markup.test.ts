@@ -770,6 +770,42 @@ describe('focus after the panel goes away', () => {
 		expect(UPLOAD).toMatch(
 			/function resetSharedPrefill\(\)[\s\S]{0,700}?extraParents = extraParents\.filter\(\(c\) => String\(c\.id\) === existingParentId\);/
 		);
+		// And on the edit page's own repeat lookup, which resetForImage does not
+		// cover: it only runs on a move to another image.
+		expect(EDIT).toMatch(
+			/function resetLookupPrefill\(\)[\s\S]{0,1400}?extraParents = extraParents\.filter\(\(c\) => String\(c\.id\) === selectedParentId\);/
+		);
+	});
+
+	// Same shape one control over: an artist created in another tab after the
+	// page loaded comes back as a candidate with no option to select, so "Use
+	// {name}" confirmed an artist the select could not hold and `required`
+	// refused the save.
+	it('carries an artist the page did not load with into the artist select', () => {
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(
+				/function useLookupArtist[\s\S]{0,600}?if \(!artistList\.some\(\(a\) => a\.id === artist\.id\)\) \{\s*\n\s*artistList = \[\.\.\.artistList, artist\]/
+			);
+			// The select renders the mutable list, or the appended option is
+			// unreachable.
+			expect(source).toMatch(/\{#each artistList as artist\}/);
+			expect(source).not.toMatch(/\{#each data\.artists as artist\}/);
+		}
+		// A move to another image re-seeds the list from that image's own load.
+		expect(EDIT).toMatch(
+			/function resetForImage\(\)[\s\S]{0,600}?artistList = data\.artists\.map\(/
+		);
+	});
+
+	// The role was re-read when the request came back, so switching the group to
+	// "existing" mid-lookup skipped applyShared and switching back showed a
+	// results panel over empty shared fields.
+	it('applies the shared prefill by the role the tile had when the request fired', () => {
+		expect(UPLOAD).toMatch(
+			/function startLookup\(key: number\)[\s\S]{0,900}?const wasParent = isParent\(key\);\s*\n\s*if \(wasParent\) resetSharedPrefill\(\);/
+		);
+		expect(UPLOAD).toMatch(/if \(wasParent\) applyShared\(next\);/);
+		expect(UPLOAD).not.toMatch(/if \(isParent\(key\)\) applyShared\(next\);/);
 	});
 
 	// The Remove button lives inside the tile it removes, so activating it from
@@ -866,7 +902,7 @@ describe('what a lookup says out loud', () => {
 	it('announces the artist the panel applied', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(
-				/function useLookupArtist[\s\S]{0,400}?announcer\.say\(m\.admin_lookup_announce_using\(/
+				/function useLookupArtist[\s\S]{0,1000}?announcer\.say\(m\.admin_lookup_announce_using\(/
 			);
 			// The region has to be there before the message is. Both pages mount the
 			// one component rather than each keeping their own copy of it.

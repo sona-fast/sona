@@ -55,6 +55,13 @@
 	// Number, not a string: the option values are numbers and the select binding
 	// compares with Object.is.
 	let selectedArtistId = $state<string | number>(untrack(() => data.image.artistId ?? ''));
+	// An artist the lookup names can be one created in another tab since this
+	// page loaded, with no option in the select. They are appended here so "Use
+	// {name}" has something to select — `data.artists` is left untouched, the
+	// same shape the upload page's list has.
+	let artistList = $state<{ id: number; name: string }[]>(
+		untrack(() => data.artists.map((a) => ({ id: a.id, name: a.name })))
+	);
 	let sourceTagged = $state(false);
 	let dateTagged = $state(false);
 	let appliedArtist = $state<{ id: number; name: string } | null>(null);
@@ -119,6 +126,7 @@
 		sourcePostUrl = data.image.sourcePostUrl || '';
 		commissionedAt = data.image.commissionedAt || '';
 		selectedArtistId = data.image.artistId ?? '';
+		artistList = data.artists.map((a) => ({ id: a.id, name: a.name }));
 		selectedParentId = String(data.image.parentImageId ?? '');
 		isPrivate = !data.image.published;
 		extraParents = [];
@@ -181,6 +189,11 @@
 		lookupSeeded = {};
 		lookupUrlHeld = false;
 		appliedArtist = null;
+		// A clash carried into the parent select belongs to the lookup that found
+		// it, so a second lookup must not leave the first one's piece on offer. The
+		// one the operator actually chose stays: dropping it would silently blank
+		// the select and save no parent, which is what carrying it in prevented.
+		extraParents = extraParents.filter((c) => String(c.id) === selectedParentId);
 	}
 
 	function startLookup() {
@@ -274,6 +287,13 @@
 
 	function useLookupArtist(artist: { id: number; name: string }) {
 		artistMode = 'existing';
+		// The options were built when the page loaded. An artist created in another
+		// tab since then comes back as a candidate with no option of their own, so
+		// the button would flip to "Using {name}" over an empty select and the save
+		// would be refused by `required`.
+		if (!artistList.some((a) => a.id === artist.id)) {
+			artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
+		}
 		selectedArtistId = artist.id;
 		appliedArtist = artist;
 		announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
@@ -485,7 +505,7 @@
 					<span>{m.admin_field_artist()}</span>
 					<select class="input" name="artistId" bind:value={selectedArtistId} onchange={() => (appliedArtist = null)} required>
 						<option value="">{m.admin_upload_select_artist()}</option>
-						{#each data.artists as artist}
+						{#each artistList as artist}
 							<option value={artist.id}>{artist.name}</option>
 						{/each}
 					</select>

@@ -47,6 +47,25 @@ function matchedBody(over: Record<string, unknown> = {}) {
 	};
 }
 
+/** The same confident match, plus a source clash on a piece the page never
+ * loaded an option for. */
+function clashBody(imageId: number, title: string) {
+	return matchedBody({
+		sourceClash: {
+			imageId,
+			title,
+			isVariant: false,
+			parentImageId: null,
+			variantCount: 0,
+			thumbnailUrl: null,
+			artistName: 'Test Artist',
+			uploadedAt: '2026-07-09T00:00:00.000Z',
+			width: 1200,
+			height: 900
+		}
+	});
+}
+
 async function stubLookup(page: Page, body: unknown, status = 200) {
 	await page.route('**/api/admin/artist-lookup', (route) =>
 		route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
@@ -270,6 +289,28 @@ test.describe('with a key saved', () => {
 		await page.selectOption('select[name="artistId"]', '');
 		await expect(panel(page).getByRole('button', { name: 'Use Test Artist' })).toBeVisible();
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toHaveCount(0);
+	});
+
+	// The artist options are a page-load snapshot too. An artist created in
+	// another tab since then comes back as a candidate the select has no option
+	// for, so Use said "Using {name}" over an empty select and `required` refused
+	// the save the operator was told had been set up.
+	test('Use holds an artist the upload page never loaded an option for', async ({ page }) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				localArtists: [{ matchIndex: 0, artists: [{ id: 987, name: 'Made In Another Tab' }] }]
+			})
+		);
+		await oneDoneTile(page);
+		const select = page.locator('select[name="artistId"]');
+		await expect(select.locator('option[value="987"]')).toHaveCount(0);
+
+		await pill(page).click();
+		await panel(page).getByRole('button', { name: 'Use Made In Another Tab' }).click();
+
+		await expect(select).toHaveValue('987');
+		await expect(select.locator('option[value="987"]')).toHaveText('Made In Another Tab');
 	});
 
 	// The clash row renders the same Use button from the same snippet, so it
@@ -768,6 +809,58 @@ test.describe('with a key saved', () => {
 		await expect(parent.locator('option[value="999"]')).toHaveText('Uploaded In Another Tab');
 	});
 
+	// Same snapshot problem one control over: the artist the lookup names can be
+	// one created in another tab since this page loaded.
+	test('Use holds an artist the edit page never loaded an option for', async ({ page }) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				localArtists: [{ matchIndex: 0, artists: [{ id: 987, name: 'Made In Another Tab' }] }]
+			})
+		);
+		await gotoEditHydrated(page);
+		const select = page.locator('select[name="artistId"]');
+		await expect(select.locator('option[value="987"]')).toHaveCount(0);
+
+		await pill(page).click();
+		await panel(page).getByRole('button', { name: 'Use Made In Another Tab' }).click();
+
+		await expect(select).toHaveValue('987');
+		await expect(select.locator('option[value="987"]')).toHaveText('Made In Another Tab');
+	});
+
+	// A carried option belongs to the lookup that found it. The edit page's reset
+	// on a repeat lookup used to skip them, so the first clash stayed on offer
+	// for a result that no longer names it — and dropping the one the operator
+	// chose would blank the select instead, which is what carrying it in
+	// prevented.
+	test('a second lookup keeps a chosen clash parent and drops an unchosen one', async ({
+		page
+	}) => {
+		await stubLookup(page, clashBody(999, 'Uploaded In Another Tab'));
+		await gotoEditHydrated(page);
+		const parent = page.locator('select[name="parentImageId"]');
+
+		await pill(page).click();
+		await panel(page).getByRole('button', { name: 'Add as a variant' }).click();
+		await expect(parent).toHaveValue('999');
+
+		// Second lookup, a different clash, and the operator's pick untouched.
+		await stubLookup(page, clashBody(998, 'Also In Another Tab'));
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(parent).toHaveValue('999');
+		await expect(parent.locator('option[value="999"]')).toHaveCount(1);
+
+		// Off the carried option, and now a third lookup has no reason to keep it.
+		await parent.selectOption('');
+		await stubLookup(page, matchedBody());
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(parent.locator('option[value="999"]')).toHaveCount(0);
+		await expect(parent).toHaveValue('');
+	});
+
 	test('the edit page never changes the artist without a click', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await gotoEditHydrated(page);
@@ -977,6 +1070,9 @@ test.describe('with a key saved', () => {
 		await panel(page).getByRole('button', { name: 'Use Avatar Artist' }).click();
 		await expect(page.locator('select[name="artistId"]')).toHaveValue('2');
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		// Image 3 is published in the seed, so this tick is a real change to carry
+		// (or not) across the move.
+		await page.locator('input[name="published"]').check();
 
 		// A same-tab link between two edit pages: SvelteKit's router intercepts
 		// clicks on any same-origin anchor, so this is the client-side navigation
@@ -993,6 +1089,9 @@ test.describe('with a key saved', () => {
 		await page.click('#e2e-inapp-link');
 		await expect(page.locator('h1')).toBeVisible();
 		await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
+		// The tick is a seed like the rest: the destination image is published, so
+		// it reads that image's own state rather than the previous one's.
+		await expect(page.locator('input[name="published"]')).not.toBeChecked();
 		expect(
 			await page.evaluate(() => (window as unknown as { __e2eSameTab?: boolean }).__e2eSameTab)
 		).toBe(true);
@@ -1264,6 +1363,49 @@ test.describe('with a key saved', () => {
 		await expect(parent).toHaveValue('999');
 		await expect(parent.locator('option[value="999"]')).toHaveText('Uploaded In Another Tab');
 		await expect(page.locator('input[name="existingParentId"]')).toHaveValue('999');
+	});
+
+	// The same rule as the edit page's: a second lookup drops a carried option
+	// the operator did not choose, and keeps the one they did — dropping that
+	// would blank the select and save no parent at all.
+	test('a second upload lookup keeps a chosen clash parent and drops an unchosen one', async ({
+		page
+	}) => {
+		await stubLookup(page, clashBody(999, 'Uploaded In Another Tab'));
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await panel(page).getByRole('button', { name: 'Add as a variant' }).click();
+		const parent = page.getByRole('combobox', { name: 'Variant of' });
+		await expect(parent).toHaveValue('999');
+
+		// "Add as a variant" switched the group to an existing piece, which takes
+		// the fieldset pill away. Back to a new piece to run the second lookup.
+		const backToNew = async () => {
+			await page.getByRole('radio', { name: 'New piece' }).check();
+			await expect(pill(page)).toBeVisible();
+		};
+		const backToExisting = async () => {
+			await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		};
+
+		await backToNew();
+		await stubLookup(page, clashBody(998, 'Also In Another Tab'));
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await backToExisting();
+		await expect(parent).toHaveValue('999');
+		await expect(parent.locator('option[value="999"]')).toHaveCount(1);
+
+		// Off the carried option, and the next lookup has no reason to keep it.
+		await parent.selectOption('');
+		await backToNew();
+		await stubLookup(page, matchedBody());
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await backToExisting();
+		await expect(parent.locator('option[value="999"]')).toHaveCount(0);
+		await expect(parent).toHaveValue('');
 	});
 
 	test('a variant crediting somebody else says so on its tile', async ({ page }) => {
