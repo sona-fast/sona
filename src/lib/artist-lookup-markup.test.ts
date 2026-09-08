@@ -582,6 +582,15 @@ describe('what the lookup copy names', () => {
 		expect(ja.admin_lookup_gone_body).toContain('もうありません');
 	});
 
+	// Two bare verbs stacked ("Choose Use {name}"), and "change" was wrong for an
+	// edit-page image that has no artist yet.
+	it('says what the Use button does rather than telling the operator to choose it', () => {
+		expect(en.admin_lookup_status_artist_hint).toBe('Use {name} sets the artist.');
+		expect(en.admin_lookup_status_artist_hint).not.toMatch(/Choose|change/);
+		expect(ja.admin_lookup_status_artist_hint).toContain('{name}');
+		expect(ja.admin_lookup_status_artist_hint).not.toContain('変える');
+	});
+
 	it('says the seeded fields were left alone rather than that nothing was filled', () => {
 		expect(en.admin_lookup_announce_seed_kept).toBe(
 			"The new artist's fields already have values, so Sona left them alone."

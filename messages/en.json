@@ -1913,7 +1913,7 @@
 	"admin_lookup_status_url_kept": "Sona filled the source post URL from the {site} post. You can change it before you save.",
 	"admin_lookup_status_date_kept": "Sona filled the commissioned date from the {site} post. You can change it before you save.",
 	"admin_lookup_status_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was.",
-	"admin_lookup_status_artist_hint": "Choose Use {name} to change the artist.",
+	"admin_lookup_status_artist_hint": "Use {name} sets the artist.",
 	"admin_lookup_status_seed_both": "Sona filled the new artist's name and {site} link. They're a guess until you check them, and you're the one publishing them.",
 	"admin_lookup_status_seed_name": "Sona filled the new artist's name. It's a guess until you check it, and you're the one publishing it.",
 	"admin_lookup_status_seed_link": "Sona filled the new artist's {site} link. It's a guess until you check it, and you're the one publishing it.",
