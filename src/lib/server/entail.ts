@@ -39,6 +39,19 @@ export type Suggestions = {
 	rating: EntailRating | null;
 };
 
+/** Why a lookup produced nothing. `not_ready` is the one worth retrying: the
+ * post is queued but not classified yet. `rate_limited` is entail.dev's per-IP
+ * limit, which has no key to raise. Everything else — a timeout, a non-2xx, a
+ * job that never finished, a post with no furry images in it — is
+ * `unavailable`, because none of them tell the operator anything different. */
+export type LookupFailure = 'not_ready' | 'rate_limited' | 'unavailable';
+
+export type LookupOutcome =
+	| { ok: true; suggestions: Suggestions }
+	| { ok: false; reason: LookupFailure };
+
+const fail = (reason: LookupFailure): LookupOutcome => ({ ok: false, reason });
+
 /** One classification entry: an image inside a `/post` response, or the body
  * of a finished `/classify/<job_id>` poll. */
 export type ClassificationEntry = {
@@ -154,32 +167,49 @@ function firstImage(body: unknown): ClassificationEntry | null {
  * post whose images entail.dev hasn't classified yet answers 202, which we
  * treat as "nothing to suggest" rather than waiting around. Never throws.
  */
-export async function lookupBlueskyPost(
+export async function lookupBlueskyPostResult(
 	url: string,
 	fetchImpl: typeof fetch = fetch
-): Promise<Suggestions | null> {
+): Promise<LookupOutcome> {
 	const source = classifySourceUrl(url);
-	if (!source || source.kind !== 'bluesky') return null;
+	if (!source || source.kind !== 'bluesky') return fail('unavailable');
 
 	const endpoint = `${ENTAIL_POST}?url=${encodeURIComponent(source.url)}&min_confidence=${DEFAULT_CONFIDENCE_FLOOR}&wait=true`;
 	try {
 		const res = await fetchImpl(endpoint, { signal: AbortSignal.timeout(POST_TIMEOUT_MS) });
 		if (res.status === 202) {
-			// Queued for classification. Best effort: no retry loop.
+			// Queued for classification. Best effort: no retry loop here — the
+			// caller decides whether to ask again.
 			console.warn('[entail] post not classified yet: status=202');
-			return null;
+			return fail('not_ready');
+		}
+		if (res.status === 429) {
+			console.warn('[entail] post lookup rate limited: status=429');
+			return fail('rate_limited');
 		}
 		if (!res.ok) {
 			console.warn(`[entail] post lookup failed: status=${res.status}`);
-			return null;
+			return fail('unavailable');
 		}
 		const image = firstImage(await res.json());
-		if (!image) return null;
-		return suggestionsFromResult(image);
+		// No images means entail.dev found no furry artwork in the post, which
+		// leaves nothing to suggest.
+		if (!image) return fail('unavailable');
+		return { ok: true, suggestions: suggestionsFromResult(image) };
 	} catch (e) {
 		console.warn(`[entail] post lookup error: ${e instanceof Error ? e.message : String(e)}`);
-		return null;
+		return fail('unavailable');
 	}
+}
+
+/** Suggestions for a Bluesky post, or null for any failure. Use
+ * {@link lookupBlueskyPostResult} when the reason matters. */
+export async function lookupBlueskyPost(
+	url: string,
+	fetchImpl: typeof fetch = fetch
+): Promise<Suggestions | null> {
+	const outcome = await lookupBlueskyPostResult(url, fetchImpl);
+	return outcome.ok ? outcome.suggestions : null;
 }
 
 function jobIdFrom(body: unknown): string | null {
@@ -209,11 +239,11 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * classification job, then poll it a few times. Gives up (null) if the job
  * isn't done by the attempt cap. Never throws.
  */
-export async function classifyMediaUrl(
+export async function classifyMediaUrlResult(
 	url: string,
 	fetchImpl: typeof fetch = fetch
-): Promise<Suggestions | null> {
-	if (!isAllowedMediaHost(url)) return null;
+): Promise<LookupOutcome> {
+	if (!isAllowedMediaHost(url)) return fail('unavailable');
 
 	try {
 		const enqueued = await fetchImpl(ENTAIL_CLASSIFY, {
@@ -222,14 +252,18 @@ export async function classifyMediaUrl(
 			body: JSON.stringify({ url }),
 			signal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS)
 		});
+		if (enqueued.status === 429) {
+			console.warn('[entail] classify enqueue rate limited: status=429');
+			return fail('rate_limited');
+		}
 		if (!enqueued.ok && enqueued.status !== 202) {
 			console.warn(`[entail] classify enqueue failed: status=${enqueued.status}`);
-			return null;
+			return fail('unavailable');
 		}
 		const jobId = jobIdFrom(await enqueued.json());
 		if (!jobId) {
 			console.warn('[entail] classify enqueue returned no job id');
-			return null;
+			return fail('unavailable');
 		}
 
 		const poll = `${ENTAIL_CLASSIFY}/${encodeURIComponent(jobId)}?wait=true`;
@@ -237,18 +271,32 @@ export async function classifyMediaUrl(
 			if (attempt > 0) await pause(POLL_PAUSE_MS);
 			const res = await fetchImpl(poll, { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
 			if (res.status === 202) continue;
+			if (res.status === 429) {
+				console.warn('[entail] classify poll rate limited: status=429');
+				return fail('rate_limited');
+			}
 			if (!res.ok) {
 				console.warn(`[entail] classify poll failed: status=${res.status}`);
-				return null;
+				return fail('unavailable');
 			}
 			const body = (await res.json()) as (ClassificationEntry & { status?: unknown }) | null;
 			if (body?.status !== 'done') continue;
-			return suggestionsFromResult(body);
+			return { ok: true, suggestions: suggestionsFromResult(body) };
 		}
 		console.warn(`[entail] classify job unfinished after ${POLL_ATTEMPTS} polls`);
-		return null;
+		return fail('unavailable');
 	} catch (e) {
 		console.warn(`[entail] classify error: ${e instanceof Error ? e.message : String(e)}`);
-		return null;
+		return fail('unavailable');
 	}
+}
+
+/** Suggestions for one media URL, or null for any failure. Use
+ * {@link classifyMediaUrlResult} when the reason matters. */
+export async function classifyMediaUrl(
+	url: string,
+	fetchImpl: typeof fetch = fetch
+): Promise<Suggestions | null> {
+	const outcome = await classifyMediaUrlResult(url, fetchImpl);
+	return outcome.ok ? outcome.suggestions : null;
 }

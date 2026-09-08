@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	classifySourceUrl,
 	classifyMediaUrl,
+	classifyMediaUrlResult,
 	lookupBlueskyPost,
+	lookupBlueskyPostResult,
 	suggestionsFromResult,
 	translateTag
 } from './entail';
@@ -170,6 +172,20 @@ describe('lookupBlueskyPost', () => {
 		).toBeNull();
 	});
 
+	it('names the reason a lookup produced nothing', async () => {
+		const url = 'https://bsky.app/profile/did:plc:aaaa/post/3abc';
+		expect(await lookupBlueskyPostResult(url, vi.fn(async () => json({}, 202)))).toEqual({
+			ok: false,
+			reason: 'not_ready'
+		});
+		expect(
+			await lookupBlueskyPostResult(url, vi.fn(async () => new Response('slow down', { status: 429 })))
+		).toEqual({ ok: false, reason: 'rate_limited' });
+		expect(
+			await lookupBlueskyPostResult(url, vi.fn(async () => new Response('boom', { status: 500 })))
+		).toEqual({ ok: false, reason: 'unavailable' });
+	});
+
 	it('returns null when the post has no classified images', async () => {
 		expect(
 			await lookupBlueskyPost(
@@ -260,6 +276,23 @@ describe('classifyMediaUrl', () => {
 				})
 			)
 		).toBeNull();
+	});
+
+	it('names a rate limit from either the enqueue or a poll', async () => {
+		const url = 'https://pbs.twimg.com/media/abc';
+		expect(
+			await classifyMediaUrlResult(url, vi.fn(async () => new Response('slow down', { status: 429 })))
+		).toEqual({ ok: false, reason: 'rate_limited' });
+
+		const limitedPoll = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+			init?.method === 'POST'
+				? json({ job_id: 'job-6' }, 202)
+				: new Response('slow down', { status: 429 })
+		);
+		expect(await classifyMediaUrlResult(url, limitedPoll)).toEqual({
+			ok: false,
+			reason: 'rate_limited'
+		});
 	});
 
 	it('returns null when a poll fails outright', async () => {
