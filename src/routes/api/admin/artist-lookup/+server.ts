@@ -75,6 +75,14 @@ function failure(reason: LookupFailure) {
 	return json({ enabled: true, error: reason }, { status: FAILURE_STATUS[reason] });
 }
 
+/** Whether the leading bytes ARE one of the raster types on the allowlist.
+ * Both request shapes get their type from someone else's word for it — the
+ * browser's file.type, the upstream's Content-Type — so both hold the bytes
+ * themselves to the same gate before anything reaches FuzzySearch. */
+function hasAllowedImageBytes(head: Uint8Array): boolean {
+	return isAllowedImageType(sniffImageType(head));
+}
+
 /** Artists whose stored socials or display name point at a match, per match. */
 interface ArtistHit {
 	matchIndex: number;
@@ -121,7 +129,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// against the allowlist too (SNIFF_BYTES window, as in /api/upload).
 		if (!isAllowedImageType(file.type)) return failure('invalid_image');
 		const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
-		if (!isAllowedImageType(sniffImageType(head))) return failure('invalid_image');
+		if (!hasAllowedImageBytes(head)) return failure('invalid_image');
 		bytes = file;
 	} else {
 		const body = (await request.json().catch(() => null)) as { imageId?: unknown } | null;
@@ -159,6 +167,14 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		}
 		try {
 			const buffered = await bufferStream(stored.body, FUZZYSEARCH_MAX_BYTES);
+			// The header above is only the upstream's claim, the same way file.type
+			// is the browser's, so the bytes get the same sniff the multipart branch
+			// gives them: a response labelled image/png carrying a PDF is refused
+			// here rather than uploaded to a third party. invalid_image, not
+			// unavailable — the fetch worked, the content is what's wrong.
+			if (!hasAllowedImageBytes(buffered.subarray(0, SNIFF_BYTES))) {
+				return failure('invalid_image');
+			}
 			// bufferStream allocates an exact-size array, so its backing buffer is
 			// the payload with nothing else in it. The validated type rides along so
 			// the multipart part FuzzySearch receives from the edit page looks like

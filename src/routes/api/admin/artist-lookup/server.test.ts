@@ -472,6 +472,42 @@ describe('artist-lookup — stored image by id', () => {
 		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
+
+	// The upstream Content-Type is its own word for the bytes, so an origin (or
+	// a stored URL pointed somewhere else) can label a PDF image/png. The bytes
+	// get the same sniff an uploaded file gets, and nothing is sent.
+	it('refuses a stored image whose bytes are not the type the upstream declares', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+		);
+		const spoofed = new Response('%PDF-1.7 not a png', {
+			status: 200,
+			headers: { 'content-type': 'image/png' }
+		});
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(spoofed).fn));
+
+		expect(res.status).toBe(422);
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// The other side of the sniff: real PNG bytes behind a valid header still go
+	// out, so the check above can't be satisfied by refusing everything.
+	it('sends a stored image whose bytes match the declared type', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+		);
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }));
+
+		expect(res.status).toBe(200);
+		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/png');
+	});
 });
 
 describe('artist-lookup — failure mapping and the refused marker', () => {
