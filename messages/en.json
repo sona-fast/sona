@@ -1963,5 +1963,7 @@
 	"admin_lookup_announce_form_already_open": "The new artist form is already open.",
 	"admin_lookup_announce_seed_kept": "The new artist's fields already have values, so Sona left them alone.",
 	"admin_lookup_announce_searching_cleared": "Sona cleared the fields the last lookup filled.",
-	"admin_lookup_announce_shared_refilled": "Sona filled the shared fields from the parent image's result."
+	"admin_lookup_announce_shared_refilled": "Sona filled the shared fields from the parent image's result.",
+	"admin_lookup_announce_shared_refilled_source": "Sona filled the source post URL from the parent image's result.",
+	"admin_lookup_announce_shared_refilled_date": "Sona filled the commissioned date from the parent image's result."
 }

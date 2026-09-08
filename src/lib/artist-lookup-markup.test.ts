@@ -842,8 +842,13 @@ describe('focus after the panel goes away', () => {
 		expect(UPLOAD).toMatch(
 			/function applyShared\(next: LookupState\): \{ sourcePostUrl: boolean; commissionedAt: boolean \}/
 		);
+		// One field written is one field named: the plural sentence over a single
+		// refill told the operator both had changed.
 		expect(UPLOAD).toMatch(
-			/function returnToNewSet\(\)[\s\S]{0,400}?const wrote = onParentChanged\(parentIndex\);\s*\n\s*if \(wrote\.sourcePostUrl \|\| wrote\.commissionedAt\) \{[\s\S]{0,120}?m\.admin_lookup_announce_shared_refilled\(\)/
+			/function returnToNewSet\(\)[\s\S]{0,400}?const wrote = onParentChanged\(parentIndex\);\s*\n\s*if \(wrote\.sourcePostUrl && wrote\.commissionedAt\) \{[\s\S]{0,120}?m\.admin_lookup_announce_shared_refilled\(\)/
+		);
+		expect(UPLOAD).toMatch(
+			/\} else if \(wrote\.sourcePostUrl\) \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_shared_refilled_source\(\)\);\s*\n\s*\} else if \(wrote\.commissionedAt\) \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_shared_refilled_date\(\)\);/
 		);
 		// An artist the select still holds stays applied across that round trip.
 		expect(UPLOAD).toMatch(

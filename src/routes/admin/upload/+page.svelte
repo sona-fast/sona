@@ -584,14 +584,19 @@
 	 * then applied nothing, erasing them with no notice. The panel and its status
 	 * region are mounted by this same mode swap, so a region inserted together
 	 * with its first content is commonly missed — say the refill out loud, but
-	 * only when a field was really written. The operator who typed over both
-	 * fields keeps what they typed, and hearing that Sona filled them would be a
-	 * false report of a change that did not happen. */
+	 * only when a field was really written, and name the field when only one of
+	 * them was. The operator who typed over both fields keeps what they typed,
+	 * and hearing that Sona filled them would be a false report of a change that
+	 * did not happen. */
 	function returnToNewSet() {
 		if (tiles[parentIndex]?.lookup.kind !== 'results') return;
 		const wrote = onParentChanged(parentIndex);
-		if (wrote.sourcePostUrl || wrote.commissionedAt) {
+		if (wrote.sourcePostUrl && wrote.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_refilled());
+		} else if (wrote.sourcePostUrl) {
+			announcer.say(m.admin_lookup_announce_shared_refilled_source());
+		} else if (wrote.commissionedAt) {
+			announcer.say(m.admin_lookup_announce_shared_refilled_date());
 		}
 	}
 

@@ -1459,6 +1459,61 @@ test.describe('with a key saved', () => {
 		await expect(page.locator(LIVE_REGION)).not.toContainText('Sona filled the shared fields');
 	});
 
+	// One field typed over, one still the lookup's. The round trip rewrites only
+	// the one it cleared, and the plural sentence claimed the operator's own URL
+	// had been replaced too.
+	test('returning to a new set names the one field it refilled', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// Only the URL is typed over, so only its tag goes.
+		await sourceInput(page).fill('https://www.furaffinity.net/view/999999/');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
+
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await page.getByRole('radio', { name: 'New piece' }).check();
+		await expect(panel(page)).toContainText('kuttoya');
+
+		await expect(sourceInput(page)).toHaveValue('https://www.furaffinity.net/view/999999/');
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator(LIVE_REGION)).toContainText(
+			"Sona filled the commissioned date from the parent image's result."
+		);
+		await expect(page.locator(LIVE_REGION)).not.toContainText('the shared fields');
+	});
+
+	// The mirror image, so each of the two singular sentences is pinned to the
+	// field it is about rather than to whichever branch ran first.
+	test('returning to a new set names the source URL when that is all it refilled', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await dateInput(page).fill('2026-05-06');
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await page.getByRole('radio', { name: 'New piece' }).check();
+		await expect(panel(page)).toContainText('kuttoya');
+
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-05-06');
+		await expect(page.locator(LIVE_REGION)).toContainText(
+			"Sona filled the source post URL from the parent image's result."
+		);
+		await expect(page.locator(LIVE_REGION)).not.toContainText('the shared fields');
+	});
+
 	// The same rule from the other end: fields the operator filled BEFORE the
 	// lookup are never overwritten either, so the round trip writes nothing.
 	test('returning to a new set says nothing over fields filled before the lookup', async ({
