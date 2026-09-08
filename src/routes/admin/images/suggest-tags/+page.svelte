@@ -234,7 +234,7 @@
 						{#if broken[row.id]}
 							<!-- A file that has gone from storage would otherwise show the
 							     browser's broken-image glyph, which is louder than the row. -->
-							<ImageOff size={18} class="thumb-fallback" aria-hidden="true" />
+							<ImageOff size={18} aria-hidden="true" />
 						{:else}
 							<!-- Empty alt: the heading beside it already names the image. -->
 							<img
@@ -642,6 +642,9 @@
 	}
 
 	.rowthumb {
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		width: 56px;
 		height: 56px;
 		flex: none;
@@ -649,17 +652,12 @@
 		border-radius: var(--radius-xs);
 		background: var(--secondary);
 		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+		/* The placeholder glyph's colour, for a file that has left storage. */
+		color: var(--muted-foreground);
 	}
 
 	:global([data-theme='light']) .rowthumb {
 		box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
-	}
-
-	.rowthumb {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: var(--muted-foreground);
 	}
 
 	.rowthumb img {

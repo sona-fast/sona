@@ -95,12 +95,15 @@ describe('readTagInput', () => {
 		// sanitizeText shortens to the same ceiling, so checking the sanitized value
 		// would accept every over-long field instead of refusing it.
 		const huge = 'a'.repeat(MAX_TAGS_INPUT_LENGTH + 1);
-		expect(readTagInput(huge)).toEqual({ problem: 'too_long', value: '' });
+		// No value beside the problem: a refused field has nothing to write, and a
+		// caller that forwarded the empty string it once carried would clear the
+		// image's tags instead of refusing the save.
+		expect(readTagInput(huge)).toEqual({ problem: 'too_long' });
 	});
 
 	it('counts the sanitized value, which is what the write would store', () => {
 		const tooMany = Array.from({ length: MAX_IMAGE_TAGS + 1 }, (_, i) => `tag-${i}`).join(', ');
-		expect(readTagInput(tooMany).problem).toBe('too_many');
+		expect(readTagInput(tooMany)).toEqual({ problem: 'too_many' });
 	});
 
 	it('accepts an ordinary field and hands back the value to write', () => {

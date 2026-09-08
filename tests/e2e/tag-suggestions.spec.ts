@@ -428,12 +428,12 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	await expect(page.locator(`#${hintId}`)).toHaveText(
 		'Add a Bluesky or X post as the source URL to get tag suggestions.'
 	);
-	// And the tray body says so too, rather than leaving the outage sentence
-	// beside a button the missing URL is what actually stopped. Its own shorter
-	// sentence: the hint above says the same thing in full a few lines away. The
-	// eyebrow still names the failure that opened the tray.
+	// And the tray body says why, rather than leaving the outage sentence beside
+	// a button the missing URL is what actually stopped. It states the condition
+	// instead of repeating the hint that sits a few lines above it. The eyebrow
+	// still names the failure that opened the tray.
 	await expect(page.locator('.tag-panel-body')).toHaveText(
-		'Add a Bluesky or X post above to try again.'
+		"There's no post at the source URL to try again with."
 	);
 	await expect(page.locator('.tag-eyebrow')).toHaveText('Suggestions unavailable');
 
@@ -449,7 +449,28 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	// The body swapped when the URL stopped being a post, and a screen reader
 	// gets nothing from a swap it cannot see: the sentence the body now draws is
 	// written into the live region as the URL goes.
-	await expect(liveRegion(page)).toHaveText('Add a Bluesky or X post above to try again.');
+	await expect(liveRegion(page)).toHaveText("There's no post at the source URL to try again with.");
+
+	// Retyping a post and clearing it again is the same state entered a second
+	// time, and a screen reader has to hear it a second time. The region holds
+	// the sentence already, so an assertion on its text cannot tell a fresh
+	// announcement from the old one: every value it takes is logged instead.
+	await page.evaluate(() => {
+		const region = document.querySelector('.field > p.sr-only[role="status"]');
+		const seen: string[] = [];
+		(window as unknown as { __tagLog: string[] }).__tagLog = seen;
+		new MutationObserver(() => seen.push(region?.textContent ?? '')).observe(region!, {
+			childList: true,
+			characterData: true,
+			subtree: true
+		});
+	});
+	await page.fill('input[name="sourcePostUrl"]', BSKY_POST);
+	await expect(retry).toHaveAttribute('aria-disabled', 'false');
+	await page.fill('input[name="sourcePostUrl"]', '');
+	await expect
+		.poll(() => page.evaluate(() => (window as unknown as { __tagLog: string[] }).__tagLog))
+		.toEqual(['', "There's no post at the source URL to try again with."]);
 });
 
 test('the tray action spans the tray on a phone, like the pill above it', async ({ page }) => {
@@ -500,10 +521,10 @@ test('a 422 answers in the hint rather than the tray', async ({ page }) => {
 	// The field holds a link the client recogniser accepted, so the hint names
 	// that link rather than asking for a URL that is already there.
 	await expect(page.locator('#tags-hint')).toHaveText(
-		"entail.dev couldn't read this link as a post. Check the source post URL."
+		"Sona can't look up this link. Check the source post URL."
 	);
 	await expect(liveRegion(page)).toHaveText(
-		"entail.dev couldn't read this link as a post. Check the source post URL."
+		"Sona can't look up this link. Check the source post URL."
 	);
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 
@@ -513,6 +534,19 @@ test('a 422 answers in the hint rather than the tray', async ({ page }) => {
 	await expect(page.locator('#tags-hint')).toHaveText(
 		'Add a Bluesky or X post as the source URL to get tag suggestions.'
 	);
+	// The live region goes with it. Left holding the refusal, it would be the
+	// field's last word to a screen reader about a link that is no longer there.
+	await expect(liveRegion(page)).toHaveText('');
+
+	// And a different post gets the ordinary hint back, not the refusal the
+	// previous URL earned: the answer was about the link that was in the field.
+	await page.fill('input[name="sourcePostUrl"]', BSKY_POST);
+	// The upload form's hint carries its multi-tile clause too; what matters is
+	// that the sentence is the ordinary one again.
+	await expect(page.locator('#tags-hint')).toContainText(
+		'Suggestions come from entail.dev, which reads the source post.'
+	);
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });
 
 test('a lookup in flight cannot be dismissed, so no answer can land on a closed tray', async ({

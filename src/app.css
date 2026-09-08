@@ -932,6 +932,17 @@ a.tag-pill {
 }
 
 @media (max-width: 640px) {
+	/* Too narrow for a row: the tray's actions stack, and the primary button
+	   spans the tray. */
+	.tag-actions {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+
+	.tag-actions .btn {
+		width: 100%;
+	}
+
 	/* Stacked, the text button's own left padding starts its label right of the
 	   button above it; flush it to the tray's content edge. Not the refused
 	   variant: that one spans the tray below, and its label is centred by the
@@ -988,19 +999,6 @@ a.tag-pill {
 	}
 	to {
 		transform: rotate(360deg);
-	}
-}
-
-@media (max-width: 640px) {
-	/* Stacked, the tray's action spans it; the widths are set with the rest of
-	   the stacked row further up. */
-	.tag-actions {
-		flex-direction: column;
-		align-items: flex-start;
-	}
-
-	.tag-actions .btn {
-		width: 100%;
 	}
 }
 

@@ -37,17 +37,19 @@ export function parseImageTags(tagNames: string): string[] {
  * to the ceiling would pass a check the operator's input failed; the count runs
  * on the sanitized value, because that is what would be written.
  *
- * Returns the sanitized value alongside the problem, so a caller that accepts
- * the input writes the same string this counted. The three actions word their
- * refusals differently, so the problem is named rather than phrased here.
+ * Returns the sanitized value only when there is no problem, so a caller that
+ * accepts the input writes the same string this counted and one that forwards
+ * the value without checking cannot exist: a refused field has no value to
+ * write, and writing the empty string it used to carry would clear every tag on
+ * the image. The three actions word their refusals differently, so the problem
+ * is named rather than phrased here.
  */
-export function readTagInput(raw: string): {
-	problem: 'too_long' | 'too_many' | null;
-	value: string;
-} {
-	if (raw.length > MAX_TAGS_INPUT_LENGTH) return { problem: 'too_long', value: '' };
+export function readTagInput(
+	raw: string
+): { problem: 'too_long' } | { problem: 'too_many' } | { problem: null; value: string } {
+	if (raw.length > MAX_TAGS_INPUT_LENGTH) return { problem: 'too_long' };
 	const value = sanitizeText(raw, MAX_TAGS_INPUT_LENGTH);
-	if (parseImageTags(value).length > MAX_IMAGE_TAGS) return { problem: 'too_many', value };
+	if (parseImageTags(value).length > MAX_IMAGE_TAGS) return { problem: 'too_many' };
 	return { problem: null, value };
 }
 

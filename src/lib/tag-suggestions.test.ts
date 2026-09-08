@@ -168,7 +168,7 @@ describe('the tray a finished state draws', () => {
 		// rather than asking for a URL the field already holds.
 		expect(trayFor({ kind: 'noSource' })).toEqual({
 			title: 'Suggestions unavailable',
-			body: "entail.dev couldn't read this link as a post. Check the source post URL.",
+			body: "Sona can't look up this link. Check the source post URL.",
 			warn: true,
 			retry: false
 		});
@@ -272,7 +272,7 @@ describe('the sentences the live region reads', () => {
 		// the client recogniser accepted that link, so "add a post URL" would
 		// describe a field that is not empty.
 		expect(sentenceFor({ kind: 'noSource' })).toBe(
-			"entail.dev couldn't read this link as a post. Check the source post URL."
+			"Sona can't look up this link. Check the source post URL."
 		);
 		expect(sentenceFor({ kind: 'idle' })).toBe('');
 		expect(sentenceFor({ kind: 'searching', source: 'x' })).toBe('');

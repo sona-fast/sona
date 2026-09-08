@@ -11,7 +11,7 @@
 	// form's own Save is what persists them. The lookup is fail-soft in every
 	// direction: a slow, rate-limited, or dead entail.dev leaves the field and
 	// the form untouched.
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { Check, LoaderCircle, LogIn, RefreshCw, Tag } from 'lucide-svelte';
 	import TagSuggestionChips from './TagSuggestionChips.svelte';
 	import { classifySourceUrl } from '$lib/tags';
@@ -82,13 +82,13 @@
 
 	// Two different refusals, two different sentences. An empty or unrecognised
 	// field is the operator's to fill in; a 422 means the client recogniser
-	// accepted the link and the server still could not read a post at it, and
+	// accepted the link and the server's refused it before sending anything, and
 	// "add a post URL" would then describe a field that is not empty.
 	const hint = $derived(
 		source === null
 			? m.admin_tag_suggest_hint_no_source()
 			: suggestion.kind === 'noSource'
-				? m.admin_tag_suggest_not_a_post_body()
+				? m.admin_tag_suggest_bad_link_body()
 				: m.admin_tag_suggest_hint()
 	);
 
@@ -96,29 +96,63 @@
 	// failure whose Try again could answer differently, over a URL that has
 	// since stopped being a post. Derived rather than written inline, so the
 	// effect below announces the same transition the body draws.
+	// The four kinds this passes over are the ones the tray answers itself, with
+	// the skeleton, the chips, or nothing at all; trayFor hands every one of them
+	// its retry:true default, so they cannot be read off the mapping.
 	const retryTrayOpen = $derived(
 		suggestion.kind !== 'idle' &&
 			suggestion.kind !== 'applied' &&
-			suggestion.kind !== 'noSource' &&
 			suggestion.kind !== 'searching' &&
 			suggestion.kind !== 'suggested' &&
 			trayFor(suggestion).retry
 	);
 
 	// A sighted operator sees the body swap; a screen reader gets nothing unless
-	// the sentence is written into the live region. Announced on the transition
-	// from a post to no post only: the source field changes on every keystroke,
-	// and a region rewritten with the sentence it already holds announces it
-	// all over again.
-	// null until the effect has run once, so the first run records the URL the
-	// component opened with rather than reading it as a change.
-	let hadSource: boolean | null = null;
+	// the sentence is written into the live region, so the announcement runs off
+	// the same condition the body draws from rather than off a keystroke: a tray
+	// that opens over a URL the operator already cleared says the sentence too.
+	// Once per entry into the state — the source field changes on every
+	// keystroke, and a region rewritten with the sentence it already holds
+	// announces it all over again — and leaving the state arms it again, so
+	// clearing the field a second time is announced a second time.
+	let spoken = false;
 	$effect(() => {
-		const has = source !== null;
-		const was = hadSource;
-		hadSource = has;
-		if (was === true && !has && retryTrayOpen)
-			announcement = m.admin_tag_suggest_retry_needs_post_body();
+		const sentence = m.admin_tag_suggest_retry_needs_post_body();
+		if (retryTrayOpen && source === null) {
+			if (spoken) return;
+			spoken = true;
+			announcement = sentence;
+			return;
+		}
+		if (!spoken) return;
+		spoken = false;
+		// On the way out the sentence stops being true, and a region still
+		// holding it is a region that cannot announce it again: rewriting a live
+		// region with the text it already has is not a change, so nothing is
+		// read. Cleared only while it is still this sentence — a lookup that
+		// started in the meantime has written its own. Untracked, or the write
+		// below would re-run the effect that made it.
+		if (untrack(() => announcement) === sentence) announcement = '';
+	});
+
+	// A 422 is about the link that was in the field when the lookup ran. Once
+	// the operator edits the URL, the hint under the field would go on refusing
+	// a link that is no longer there, so the state goes back to idle and the
+	// hint back to the one that says what a URL has to be. The refused URL is
+	// not kept: the effect re-runs because it reads the field, and untrack keeps
+	// the state it clears out of its dependencies — read plainly, the reset
+	// would undo every 422 the moment it arrived.
+	$effect(() => {
+		void sourceUrl;
+		untrack(() => {
+			if (suggestion.kind !== 'noSource') return;
+			suggestion = { kind: 'idle' };
+			// The live region still holds what that state announced, about a link
+			// that has since left the field. It goes with the state, so a screen
+			// reader is not left the refusal as the field's last word. Cleared only
+			// while it is still that sentence.
+			if (announcement === m.admin_tag_suggest_bad_link_body()) announcement = '';
+		});
 	});
 
 	// The pill points at the sentence that explains its current state: the hint
@@ -289,9 +323,9 @@
 				<!-- Once the URL under an open tray stops being a post, what stands between
 				     the operator and another answer is the URL, not the failure the body
 				     describes. The eyebrow keeps saying what happened; the body says what
-				     to do about it. Its own shorter sentence, not the field's: the hint
-				     saying the same words sits about 60px below this line, and the tray
-				     can point at the field the operator has to go back to. -->
+				     is true instead. Its own sentence, not the field's: the hint asking
+				     for a post sits about 60px from this line, and a body echoing it word
+				     for word would read as the same line printed twice. -->
 				<p class="tag-panel-body">
 					{retryTrayOpen && source === null
 						? m.admin_tag_suggest_retry_needs_post_body()

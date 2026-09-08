@@ -105,7 +105,7 @@ test('Load more grows the list rather than paging away from it', async ({ page, 
 	// handler: it standing in for the image is the page saying it has hydrated.
 	// Clicking before that is a full page load, and the focus move below is a
 	// client behaviour.
-	await expect(page.locator('.thumb-fallback').first()).toBeVisible();
+	await expect(page.locator('.rowthumb svg').first()).toBeVisible();
 
 	const shownIds = await listedIds(page);
 	const last = shownIds[shownIds.length - 1];
@@ -175,7 +175,7 @@ test('a row meta line names the source without an orphaned separator', async ({ 
 	await expect(row(page, 'Backfill 121').locator('.rowmeta')).toHaveText('Test Artist · Bluesky post');
 	// The seeded thumbnails 404 by design, so the row degrades to its placeholder
 	// rather than the browser's broken-image glyph.
-	await expect(row(page, 'Backfill 123').locator('.thumb-fallback')).toBeVisible();
+	await expect(row(page, 'Backfill 123').locator('.rowthumb svg')).toBeVisible();
 });
 
 test("a row's Suggest renders chips, and leaving one out changes the Save count", async ({ page }) => {
@@ -1047,6 +1047,22 @@ test('a failed lookup replaces the row pill with a tray that offers Try again', 
 	await target.getByRole('button', { name: 'Try again for Backfill 117' }).click();
 	await expect(target.getByText('No tags yet')).toBeVisible();
 	await expect(target.locator('.tag-panel-body')).toBeFocused();
+});
+
+test('a row whose source URL is not a post says so and offers no second try', async ({ page }) => {
+	// The forms answer a 422 under the field; a row has no field, so the tray
+	// says it. Nothing was sent for that URL — the endpoint refuses it before it
+	// asks anyone — so the sentence blames neither entail.dev nor the operator's
+	// tags, and there is nothing another click could change.
+	await openList(page);
+	await stubSuggestions(page, 422, { error: 'unsupported_source' });
+
+	const target = await clickSuggest(page, 'Backfill 117');
+	await expect(target.getByText('Suggestions unavailable')).toBeVisible();
+	await expect(target.locator('.tag-panel-body')).toHaveText(
+		"Sona can't look up this link. Check the source post URL."
+	);
+	await expect(target.getByRole('button', { name: 'Try again for Backfill 117' })).toHaveCount(0);
 });
 
 // Last on purpose: it tags every row that is left, so the list the tests above

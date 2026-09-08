@@ -102,13 +102,14 @@ export const actions = {
 		// Refused, not truncated: a save that quietly dropped tags would report
 		// success and leave the operator to notice the missing ones later. Counted
 		// the way the write counts, so what is refused is what would not have fit.
-		const { problem: tagsProblem, value: tagNames } = readTagInput(tagsRaw);
-		if (tagsProblem === 'too_long') {
+		const tags = readTagInput(tagsRaw);
+		if (tags.problem === 'too_long') {
 			return fail(400, { error: m.admin_field_tags_too_long({ max: MAX_TAGS_INPUT_LENGTH }) });
 		}
-		if (tagsProblem === 'too_many') {
+		if (tags.problem === 'too_many') {
 			return fail(400, { error: m.admin_field_tags_too_many({ max: MAX_IMAGE_TAGS }) });
 		}
+		const tagNames = tags.value;
 		const characterIds = (data.get('characters') as string)?.trim();
 		const nsfw = data.get('nsfw') === 'on';
 		const published = data.get('published') !== 'on';

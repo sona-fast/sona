@@ -125,8 +125,9 @@ export const actions: Actions = {
 		// cap here takes a hand-made post. The three write paths read the field
 		// through the same helper, and refuse rather than truncate. This page has no
 		// field to word two refusals for, so both problems answer the same way.
-		const { problem: tagsProblem, value: tagNames } = readTagInput(String(data.get('tags') ?? ''));
-		if (tagsProblem) return fail(400, { error: 'too_many_tags' });
+		const tags = readTagInput(String(data.get('tags') ?? ''));
+		if (tags.problem) return fail(400, { error: 'too_many_tags' });
+		const tagNames = tags.value;
 		// The tray refuses a save with nothing picked, so an empty list only reaches
 		// here from a hand-made post or a form submitted before the page hydrated.
 		// Refusing matches what the tray does: a save that stores nothing should not

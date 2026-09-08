@@ -104,9 +104,10 @@ export function fromResponse(
 	// body, so blaming the classifier would send the operator round a Try again
 	// that fails the same way forever.
 	if (status === 401) return { kind: 'signedOut' };
-	// 422 is "this URL is not a Bluesky or X post". The pill should not have
-	// been clickable, so say what would make it clickable rather than blaming
-	// entail.dev for an answer it never gave.
+	// 422 is "this URL is not a Bluesky or X post", refused by the endpoint's own
+	// recogniser before anything is sent. The pill should not have been
+	// clickable, so the sentence names the link the site cannot look up rather
+	// than blaming entail.dev for an answer it was never asked for.
 	if (status === 422) return { kind: 'noSource' };
 	// 400 is the endpoint refusing the link, not entail.dev failing to answer —
 	// an over-long URL, say. Saying "try again" would offer a click that sends
@@ -252,9 +253,10 @@ export function trayFor(state: SuggestionState): Tray {
 		case 'noSource':
 			// The forms answer this under the field, so only the backfill row draws
 			// it. Either way the state came from a 422: the client recogniser
-			// accepted the link and the server could not read a post at it, so the
-			// sentence names the link rather than telling the operator to add one.
-			return { title: unavailable, body: m.admin_tag_suggest_not_a_post_body(), warn: true, retry: false };
+			// accepted the link and the server's did not, so this is the same
+			// refusal a 400 is, and it borrows that sentence — the site cannot look
+			// the link up, which is the truth about a URL nothing was sent for.
+			return { title: unavailable, body: m.admin_tag_suggest_bad_link_body(), warn: true, retry: false };
 		default:
 			// 'unavailable', and the states the tray never renders.
 			return { title: unavailable, body: m.admin_tag_suggest_unavailable_body(), warn: true, retry: true };
@@ -276,9 +278,10 @@ export function sentenceFor(next: SuggestionState): string {
 		case 'suggested':
 			return m.admin_tag_suggest_eyebrow({ count: next.tags.length });
 		case 'noSource':
-			// A 422: the field holds a link the client recogniser accepted, so
-			// "add a post URL" would describe a field that is not empty.
-			return m.admin_tag_suggest_not_a_post_body();
+			// A 422: the field holds a link the client recogniser accepted and the
+			// server's refused, so "add a post URL" would describe a field that is
+			// not empty. Nothing was sent for it, so nothing is blamed for it.
+			return m.admin_tag_suggest_bad_link_body();
 		case 'idle':
 		case 'searching':
 		case 'applied':
