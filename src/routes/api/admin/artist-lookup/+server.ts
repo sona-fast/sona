@@ -159,30 +159,24 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			.split(';')[0]
 			.trim()
 			.toLowerCase();
-		// The same allowlist the proxy applies, named rather than re-guessed: the
-		// proxy hands anything outside it back as application/octet-stream, and
-		// `image/*` would also let through the SVG it deliberately demoted.
-		if (!isAllowedImageType(storedType)) {
-			// Release the subrequest's stream: nothing reads this body, and an
-			// unread one keeps the connection open for the rest of the invocation.
-			await stored.body.cancel().catch(() => {});
-			return failure('unavailable');
-		}
 		try {
 			const buffered = await bufferStream(stored.body, FUZZYSEARCH_MAX_BYTES);
-			// The header above is only the upstream's claim, the same way file.type
-			// is the browser's, so the bytes get the same sniff the multipart branch
-			// gives them: a response labelled image/png carrying a PDF is refused
-			// here rather than uploaded to a third party. invalid_image, not
+			// The bytes decide, not the header: it is the upstream's claim the same
+			// way file.type is the browser's, and the proxy hands anything it does
+			// not recognize back as application/octet-stream — which used to refuse
+			// a stored PNG served without a usable type. A response labelled
+			// image/png carrying a PDF still goes nowhere. invalid_image, not
 			// unavailable — the fetch worked, the content is what's wrong.
-			if (!hasAllowedImageBytes(buffered.subarray(0, SNIFF_BYTES))) {
-				return failure('invalid_image');
-			}
+			const sniffed = sniffImageType(buffered.subarray(0, SNIFF_BYTES));
+			if (!isAllowedImageType(sniffed)) return failure('invalid_image');
 			// bufferStream allocates an exact-size array, so its backing buffer is
-			// the payload with nothing else in it. The validated type rides along so
-			// the multipart part FuzzySearch receives from the edit page looks like
-			// the one the upload page sends (a File carries its own type).
-			bytes = new Blob([buffered.buffer as ArrayBuffer], { type: storedType });
+			// the payload with nothing else in it. A type rides along so the
+			// multipart part FuzzySearch receives from the edit page looks like the
+			// one the upload page sends (a File carries its own type) — the
+			// upstream's where the allowlist accepts it, the sniffed one otherwise.
+			bytes = new Blob([buffered.buffer as ArrayBuffer], {
+				type: isAllowedImageType(storedType) ? storedType : (sniffed as string)
+			});
 		} catch (e) {
 			if (e instanceof MaxBytesExceededError) return failure('too_large');
 			return failure('unavailable');

@@ -523,6 +523,40 @@ describe('stateFromResponse', () => {
 		expect(state.data.localArtists).toEqual([{ matchIndex: 0, artists: [{ id: 4, name: 'Kuttoya' }] }]);
 	});
 
+	// Both hits now address one row, and the readers look a hit up with .find —
+	// so the second one's artists have to join the first's rather than sit in an
+	// entry nothing reads.
+	it('unions the artists of two hits that land on the same row', async () => {
+		const state = await stateFromResponse(
+			jsonResponse(
+				response({
+					matches: [match(), match({ handles: ['kuttoya2'] })],
+					localArtists: [
+						{ matchIndex: 0, artists: [{ id: 4, name: 'Kuttoya' }] },
+						{
+							matchIndex: 1,
+							artists: [
+								{ id: 4, name: 'Kuttoya' },
+								{ id: 7, name: 'Second' }
+							]
+						}
+					]
+				})
+			)
+		);
+		if (state.kind !== 'results') throw new Error('expected results');
+		expect(state.data.localArtists).toEqual([
+			{
+				matchIndex: 0,
+				artists: [
+					{ id: 4, name: 'Kuttoya' },
+					{ id: 7, name: 'Second' }
+				]
+			}
+		]);
+		expect(candidateArtists(state.data).map((a) => a.name)).toEqual(['Kuttoya', 'Second']);
+	});
+
 	// localArtists and nameMatches address matches by index into the list as it
 	// was sent, so dropping a match ahead of them has to move them along with it.
 	it('re-addresses artist hits over a dropped match, and drops the hits for it', async () => {
@@ -607,15 +641,19 @@ describe('lookupSentFile', () => {
 	it('is true for every outcome the request actually reached', () => {
 		expect(lookupSentFile({ kind: 'results', applied: false, data: response() })).toBe(true);
 		expect(lookupSentFile({ kind: 'no_match' })).toBe(true);
-		for (const reason of ['key_refused', 'rate_limited', 'invalid_image', 'unavailable', 'signed_out'] as const) {
+		for (const reason of ['key_refused', 'rate_limited', 'unavailable'] as const) {
 			expect(lookupSentFile({ kind: 'failed', reason })).toBe(true);
 		}
 	});
 
-	// too_large is refused by runLookup before anything is sent, so claiming the
-	// file went out would be a false disclosure.
-	it('is false for too_large, which never leaves the browser', () => {
-		expect(lookupSentFile({ kind: 'failed', reason: 'too_large' })).toBe(false);
+	// too_large is refused by runLookup before anything is sent; invalid_image is
+	// the endpoint's type and byte gates, and signed_out is the admin gate's own
+	// 401 — neither reaches FuzzySearch. Claiming the file went out to it would
+	// be a false disclosure.
+	it('is false for the refusals that never reach FuzzySearch', () => {
+		for (const reason of ['too_large', 'invalid_image', 'signed_out'] as const) {
+			expect(lookupSentFile({ kind: 'failed', reason })).toBe(false);
+		}
 	});
 
 	it('says nothing before an outcome exists', () => {

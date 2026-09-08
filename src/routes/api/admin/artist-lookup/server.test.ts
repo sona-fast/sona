@@ -438,7 +438,7 @@ describe('artist-lookup — stored image by id', () => {
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
-	it('reports unavailable when the stored image is not an image', async () => {
+	it('refuses a stored response whose bytes are not an image at all', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		sqlite.exec(
 			`INSERT INTO images (id, title, slug, image_url, created_at)
@@ -451,38 +451,36 @@ describe('artist-lookup — stored image by id', () => {
 
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(html).fn));
 
-		expect(res.status).toBe(502);
-		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(res.status).toBe(422);
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
-	// Nothing reads the body of a refused type, and an unread subrequest stream
-	// holds its connection open for the rest of the invocation.
-	it('cancels the proxied body when the stored type is refused', async () => {
+	// The proxy hands anything off its allowlist back as application/octet-stream,
+	// so a stored PNG whose origin serves it untyped used to be refused as an
+	// outage. The bytes are what the gate reads, and the part carries the type
+	// they sniff to.
+	it('sends a stored image the upstream typed octet-stream, under its sniffed type', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		sqlite.exec(
 			`INSERT INTO images (id, title, slug, image_url, created_at)
-			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.svg', '2026-01-01');`
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
 		);
-		const canceled = vi.fn();
-		const body = new ReadableStream<Uint8Array>({
-			pull(controller) {
-				controller.enqueue(new Uint8Array([1]));
-			},
-			cancel: canceled
+		const untyped = new Response(IMAGE_BYTES, {
+			status: 200,
+			headers: { 'content-type': 'application/octet-stream' }
 		});
-		const svg = new Response(body, { status: 200, headers: { 'content-type': 'image/svg+xml' } });
 
-		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(svg).fn));
+		await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(untyped).fn));
 
-		expect(res.status).toBe(502);
-		expect(canceled).toHaveBeenCalled();
+		expect(searchImage).toHaveBeenCalled();
+		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/png');
 	});
 
 	// SVG is an image type, so an `image/*` check would have sent it on. It is
-	// not one of the raster types storage accepts, the proxy demotes it to a
-	// download, and nothing is uploaded to FuzzySearch.
-	it('reports unavailable when the stored image is an svg', async () => {
+	// not one of the raster types storage accepts, and its bytes sniff to
+	// nothing, so nothing is uploaded to FuzzySearch.
+	it('refuses a stored image that is an svg', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		sqlite.exec(
 			`INSERT INTO images (id, title, slug, image_url, created_at)
@@ -495,8 +493,8 @@ describe('artist-lookup — stored image by id', () => {
 
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(svg).fn));
 
-		expect(res.status).toBe(502);
-		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(res.status).toBe(422);
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 

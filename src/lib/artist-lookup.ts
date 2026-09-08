@@ -395,14 +395,19 @@ export function statusLineKind(
 }
 
 /**
- * Whether the file has already left the browser in this state. Every state but
- * `too_large` — refused client-side before anything is sent — means FuzzySearch
- * received a copy, so a private image's disclosure belongs on all of them, not
- * just on a result. `idle` and `searching` are not outcomes and carry no notice.
+ * Whether FuzzySearch has a copy of the file in this state, which is what the
+ * private-image disclosure claims. A result and a no-match both mean it does,
+ * and so do the failures that came back from FuzzySearch itself. Three do not:
+ * `too_large` is refused client-side, and `invalid_image` (the endpoint's type
+ * and byte gates) and `signed_out` (the admin gate's own 401) are both decided
+ * before anything is forwarded. `idle` and `searching` are not outcomes and
+ * carry no notice.
  */
+const NOT_FORWARDED: readonly LookupFailReason[] = ['too_large', 'invalid_image', 'signed_out'];
+
 export function lookupSentFile(state: LookupState): boolean {
 	if (state.kind === 'idle' || state.kind === 'searching') return false;
-	return !(state.kind === 'failed' && state.reason === 'too_large');
+	return !(state.kind === 'failed' && NOT_FORWARDED.includes(state.reason));
 }
 
 /** Body shapes the endpoint answers with. */
@@ -459,13 +464,26 @@ function usableMatches(raw: LookupMatch[]): { matches: LookupMatch[]; indexMap: 
 }
 
 /** Re-address artist hits onto the filtered match list, dropping the ones whose
- * match is not being rendered at all. */
+ * match is not being rendered at all. Two hits can land on one index once a
+ * duplicate post folds into the row that stayed, and the readers here look a
+ * hit up with `.find` — so the lists are unioned rather than left as a second
+ * entry nothing reads. */
 function remapHits(hits: unknown, indexMap: Map<number, number>): ArtistHit[] {
 	if (!Array.isArray(hits)) return [];
-	return (hits as ArtistHit[]).flatMap((hit) => {
+	const merged = new Map<number, ArtistHit>();
+	for (const hit of hits as ArtistHit[]) {
 		const index = indexMap.get(hit?.matchIndex);
-		return index === undefined ? [] : [{ ...hit, matchIndex: index }];
-	});
+		if (index === undefined) continue;
+		const already = merged.get(index);
+		if (!already) {
+			merged.set(index, { ...hit, matchIndex: index, artists: [...(hit.artists ?? [])] });
+			continue;
+		}
+		for (const artist of hit.artists ?? []) {
+			if (!already.artists.some((a) => a.id === artist.id)) already.artists.push(artist);
+		}
+	}
+	return [...merged.values()];
 }
 
 /**
