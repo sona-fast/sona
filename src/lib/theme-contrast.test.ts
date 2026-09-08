@@ -1008,9 +1008,13 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		)?.[1];
 		if (!rule) throw new Error('the phone-width refused Dismiss rule is missing from app.css');
 		expect(rule).toMatch(/width:\s*100%\s*;/);
-		// The flush rule above zeroes the left pad; full width centres the label,
-		// so the pad comes back.
-		expect(rule).toMatch(/padding-left:\s*10px\s*;/);
+		// Full width centres the label, which takes the resting padding on both
+		// sides: the flush rule above passes this variant over rather than zeroing
+		// the left pad here and restoring it there.
+		expect(css).toMatch(
+			/\.tag-actions \.tag-btn-text:not\(\[aria-disabled='true'\]\)\s*\{\s*padding-left:\s*0\s*;/
+		);
+		expect(rule).not.toMatch(/padding/);
 		// And nothing here may undo the inert treatment the base rule sets.
 		expect(rule).not.toMatch(/background/);
 		expect(rule).not.toMatch(/border/);

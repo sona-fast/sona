@@ -88,7 +88,7 @@ describe('fromResponse — a 200', () => {
 
 	it('is empty when the post was read but nothing came back', () => {
 		// A tweet with no photo, or a post where every tag fell below the floor.
-		expect(fromResponse(200, ok([]), [])).toEqual({ kind: 'empty' });
+		expect(fromResponse(200, ok([]), [])).toEqual({ kind: 'empty', skippedExisting: false });
 	});
 
 	it('drops tags the Tags field already holds, matched the way the sanitizer does', () => {
@@ -99,7 +99,12 @@ describe('fromResponse — a 200', () => {
 	});
 
 	it('is empty when every suggestion is already in the field', () => {
-		expect(fromResponse(200, ok(['fox', 'beach']), ['beach', 'fox'])).toEqual({ kind: 'empty' });
+		// Flagged, because "found nothing" would be false: the post had tags and the
+		// field already held all of them.
+		expect(fromResponse(200, ok(['fox', 'beach']), ['beach', 'fox'])).toEqual({
+			kind: 'empty',
+			skippedExisting: true
+		});
 	});
 
 	it('drops repeats and non-strings from a body it cannot trust', () => {
@@ -175,6 +180,14 @@ describe('the tray a finished state draws', () => {
 			warn: false,
 			retry: false
 		});
+		// The post did have tags; the field already had them. Saying entail.dev
+		// found nothing would blame the classifier for the operator's own typing.
+		expect(trayFor({ kind: 'empty', skippedExisting: true })).toEqual({
+			title: 'No tags to suggest',
+			body: 'Sona skips tags this image already has.',
+			warn: false,
+			retry: false
+		});
 		expect(trayFor({ kind: 'notFound' })).toMatchObject({
 			title: 'Suggestions unavailable',
 			body: "entail.dev couldn't read this post.",
@@ -238,6 +251,9 @@ describe('the sentences the live region reads', () => {
 		);
 		expect(sentenceFor({ kind: 'empty' })).toBe(
 			"No tags to suggest. entail.dev read the post but found nothing it's confident about."
+		);
+		expect(sentenceFor({ kind: 'empty', skippedExisting: true })).toBe(
+			'No tags to suggest. Sona skips tags this image already has.'
 		);
 		expect(sentenceFor({ kind: 'notFound' })).toBe(
 			"Suggestions unavailable. entail.dev couldn't read this post."

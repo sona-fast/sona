@@ -178,6 +178,9 @@
 		// The list grew under a click that leaves no visible confirmation of how far
 		// it grew, so the region says what the hint says.
 		announcement = m.admin_suggest_tags_showing({ shown: data.rows.length, total: data.total });
+		// The list, not a row, is speaking now: leaving the last row's claim on the
+		// region would let its Dismiss blank a sentence it did not write.
+		announcedFor = null;
 		const was = data.rows.findIndex((row) => row.id === after);
 		// The row that followed the last one on screen — or the top of the list, if
 		// that row has been saved off it since.
@@ -348,7 +351,7 @@
 						<!-- Split like the conflict above: the eyebrow is a label, the
 						     sentence is body text. The chips stay put, so the Save button
 						     below is still the way to try again. -->
-						<p class="tag-eyebrow warn">{m.admin_suggest_tags_not_saved()}</p>
+						<p class="tag-eyebrow warn tag-fail">{m.admin_suggest_tags_not_saved()}</p>
 						<p class="tag-panel-body" tabindex="-1" bind:this={statusLines[row.id]}>
 							{m.admin_suggest_tags_save_failed()}
 						</p>
@@ -707,6 +710,13 @@
 	   part of. The card's 12px gap alone reads as chip spacing, so the action row
 	   takes a little more air than the lines above it. */
 	.tag-chiprow + .tag-actions {
+		margin-top: 4px;
+	}
+
+	/* The notice sits under the tray's hint lines, which the card's 12px gap
+	   spaces like paragraphs. A step more air above it groups it with the Save
+	   below rather than leaving it reading as one more hint. */
+	.tag-eyebrow.tag-fail {
 		margin-top: 4px;
 	}
 

@@ -42,8 +42,11 @@ export type SuggestionState =
 	 *  rating outlives this transition and is held by the caller, so it is not
 	 *  repeated here. */
 	| { kind: 'applied'; count: number }
-	/** The post was read and there is nothing worth suggesting. */
-	| { kind: 'empty' }
+	/** The post was read and there is nothing worth suggesting. `skippedExisting`
+	 *  is true when there was something and the Tags field already held all of
+	 *  it: the tray then says the tags were skipped rather than that entail.dev
+	 *  found nothing, which would be false. */
+	| { kind: 'empty'; skippedExisting?: boolean }
 	/** 202: queued or still classifying. Retryable. */
 	| { kind: 'notReady' }
 	/** 502: an upstream failure. Retryable. */
@@ -132,7 +135,7 @@ export function fromResponse(
 		tags.push(entry);
 	}
 
-	if (tags.length === 0) return { kind: 'empty' };
+	if (tags.length === 0) return { kind: 'empty', skippedExisting };
 
 	const count = Number(payload.imageCount);
 	return {
@@ -216,7 +219,11 @@ export function trayFor(state: SuggestionState): Tray {
 		case 'empty':
 			return {
 				title: m.admin_tag_suggest_empty_title(),
-				body: m.admin_tag_suggest_empty_body(),
+				// Everything it returned was already in the field, so "found nothing"
+				// would be a lie about the post. Say what actually happened instead.
+				body: state.skippedExisting
+					? m.admin_tag_suggest_help_existing()
+					: m.admin_tag_suggest_empty_body(),
 				warn: false,
 				retry: false
 			};

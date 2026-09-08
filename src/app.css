@@ -933,8 +933,10 @@ a.tag-pill {
 
 @media (max-width: 640px) {
 	/* Stacked, the text button's own left padding starts its label right of the
-	   button above it; flush it to the tray's content edge. */
-	.tag-actions .tag-btn-text {
+	   button above it; flush it to the tray's content edge. Not the refused
+	   variant: that one spans the tray below, and its label is centred by the
+	   padding it keeps on both sides. */
+	.tag-actions .tag-btn-text:not([aria-disabled='true']) {
 		padding-left: 0;
 	}
 
@@ -944,13 +946,12 @@ a.tag-pill {
 	   Save already takes here, and the two read as one inert row of controls.
 	   Touch is the reason the fill has to stay: there is no cursor and no hover
 	   on a phone, so the fill, the outline and the darker label are the only cues
-	   that the button is refusing. Padding back, against the flush rule above:
-	   full width centres the label, and a missing left pad would pull it off
-	   centre. */
+	   that the button is refusing. The flush rule above passes this variant over,
+	   so it keeps its resting padding: full width centres the label, and a
+	   missing left pad would pull it off centre. */
 	.tag-actions .tag-btn-text[aria-disabled='true'],
 	.tag-actions .tag-btn-text[aria-disabled='true']:hover {
 		width: 100%;
-		padding-left: 10px;
 	}
 }
 

@@ -181,6 +181,30 @@ test('a post with nothing to suggest says so and offers only Dismiss', async ({ 
 	await expect(tagsInput(page)).toHaveValue('');
 });
 
+test('a post whose only tag is already typed says the tag was skipped, not that there was none', async ({
+	page
+}) => {
+	await openUploadForm(page);
+	await tagsInput(page).fill('fox');
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	await pill(page).click();
+
+	// There is nothing left to offer, but entail.dev did read the post and did
+	// come back with a tag, so the tray says what actually happened.
+	await expect(page.getByText('No tags to suggest').first()).toBeVisible();
+	await expect(page.locator('.tag-panel-body')).toHaveText(
+		'Sona skips tags this image already has.'
+	);
+	await expect(liveRegion(page)).toContainText('Sona skips tags this image already has.');
+	await expect(tagsInput(page)).toHaveValue('fox');
+});
+
 for (const rating of ['explicit', 'questionable'] as const) {
 	test(`a ${rating} rating warns and offers Mark it NSFW, which checks the box and hands it focus`, async ({
 		page

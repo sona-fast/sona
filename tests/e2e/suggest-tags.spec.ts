@@ -111,6 +111,16 @@ test('Load more grows the list rather than paging away from it', async ({ page, 
 		headers: { origin: baseURL! }
 	});
 
+	// A row speaks into the region before the list grows, so the growth sentence
+	// below lands on a region a row still has a claim on.
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+	const spoke = await clickSuggest(page, 'Backfill 121');
+
 	// Activated from the keyboard, which is the path the focus move is for: the
 	// ring asserted below only draws when the last interaction was a key press.
 	const loadMore = page.getByRole('link', { name: 'Load more' });
@@ -139,9 +149,14 @@ test('Load more grows the list rather than paging away from it', async ({ page, 
 
 	// Nothing else says how far the list grew: the link is gone and the hint with
 	// it, so the region carries the count.
-	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
-		`Showing ${grown.length} of ${grown.length}`
-	);
+	const region = page.locator('p.sr-only[role="status"]');
+	await expect(region).toHaveText(`Showing ${grown.length} of ${grown.length}`);
+
+	// The list is what spoke last, not the row that spoke before it, so the row's
+	// Dismiss has nothing of its own to clear and leaves the count standing.
+	await spoke.getByRole('button', { name: 'Dismiss suggestions for Backfill 121' }).click();
+	await expect(spoke.locator('.tag-chip')).toHaveCount(0);
+	await expect(region).toHaveText(`Showing ${grown.length} of ${grown.length}`);
 });
 
 test('a row meta line names the source without an orphaned separator', async ({ page }) => {
@@ -368,6 +383,9 @@ test('a save that fails for any other reason says so in the row and the live reg
 	// Visible, not only announced: a sighted operator otherwise watches a save
 	// button that does nothing and a row where nothing changed.
 	await expect(target.locator('.tag-eyebrow.warn')).toHaveText('Not saved');
+	// And it reads as its own group with the Save below it rather than as one
+	// more hint line: a step of air above, on top of the card's paragraph gap.
+	await expect(target.locator('.tag-eyebrow.warn')).toHaveCSS('margin-top', '4px');
 	await expect(target.locator('.tag-panel-body')).toHaveText(
 		"Sona couldn't save those tags. Try again."
 	);
@@ -442,7 +460,12 @@ test('a second identical failure is announced again, not swallowed as an unchang
 		});
 	});
 
-	await save.click();
+	// The failure re-rendered the actions under the button the first click
+	// resolved, and clicking that stale element once lost the race. Wait for the
+	// button the re-render left resting before clicking it again.
+	const retry = target.getByRole('button', { name: 'Save 1 tag to Backfill 110' });
+	await expect(retry).not.toHaveAttribute('aria-disabled', 'true');
+	await retry.click();
 	// The last two entries, not the whole log. The click writes the "Saving"
 	// sentence first, so the failure that follows is a change the region
 	// announces on its own — and the row leaves it at that rather than blanking,
@@ -507,6 +530,30 @@ test('dismissing one row leaves the sentence another row just wrote in the regio
 	await saver.getByRole('button', { name: 'Dismiss suggestions for Backfill 115' }).click();
 	await expect(region).toHaveText('');
 	await page.unroute(savePost);
+});
+
+test('a row that only looked tags up still clears the region when it is dismissed', async ({
+	page
+}) => {
+	// The row the region is speaking for is remembered on every announcement, the
+	// lookup's included — not only on the save ones. Forget it on the lookup path
+	// and a row whose tray came from Suggest alone leaves its sentence standing
+	// after Dismiss, with no tray left on screen to explain it.
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	const target = await clickSuggest(page, 'Backfill 121');
+	const region = page.locator('p.sr-only[role="status"]');
+	await expect(region).toHaveText('Backfill 121. 1 suggested tag from entail.dev');
+
+	await target.getByRole('button', { name: 'Dismiss suggestions for Backfill 121' }).click();
+	await expect(target.locator('.tag-chip')).toHaveCount(0);
+	await expect(region).toHaveText('');
 });
 
 test('Dismiss and the row pill are refused while a save is in flight', async ({ page }) => {
