@@ -136,8 +136,10 @@ test.describe('admin settings artist lookup key', () => {
 		// DB. Retry until the save goes through the enhanced path: the marker only
 		// survives if the page never reloaded.
 		await expect(async () => {
-			// A native post left the page on a fresh load with the tab reset, so
-			// reopen it before reading the section's state.
+			// Start every attempt from a known page: a retry that died with the
+			// removal confirmation open would otherwise never see the Remove
+			// button (it lives in the panel's else branch) and spin to the timeout.
+			await page.goto('/admin/settings');
 			await openConnectionsTab(page);
 			if ((await removeButton(page).count()) > 0) {
 				// The aborted attempt saved the key: put the section back to
