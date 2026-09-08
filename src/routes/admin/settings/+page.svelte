@@ -182,6 +182,10 @@
 	// Purely client state: the Remove key button swaps the action row for a
 	// confirmation block rather than opening a dialog over the section.
 	let confirmingFuzzysearchRemove = $state(false);
+	// When the panel opened, and how long confirm Remove ignores a click.
+	// Not reactive: only the enhance callback below reads it.
+	let fuzzysearchRemoveOpenedAt = 0;
+	const FUZZYSEARCH_REMOVE_REFLEX_MS = 500;
 	// Focus is moved by hand across the swap: every button involved UNMOUNTS as
 	// the state changes, so without this a keyboard user lands back on <body> and
 	// restarts from the top of a long page. (A bare `autofocus` doesn't do it —
@@ -1531,6 +1535,12 @@
 				<div class="confirm-actions">
 					<form method="POST" action="?/removeFuzzysearchKey" use:enhance={({ cancel }) => {
 						if (removingFuzzysearchKey) return cancel();
+						// The section is last on the tab, so focusing Keep scrolls the page
+						// up under a stationary pointer and confirm Remove can land on the
+						// pixel Remove key was just clicked. A click that soon after the
+						// panel opened is a reflex, not a decision — ignore it.
+						if (performance.now() - fuzzysearchRemoveOpenedAt < FUZZYSEARCH_REMOVE_REFLEX_MS)
+							return cancel();
 						removingFuzzysearchKey = true;
 						return async ({ result, update }) => {
 							await update({ reset: false });
@@ -1582,7 +1592,10 @@
 					type="button"
 					class="btn btn-outline btn-remove"
 					bind:this={fuzzysearchRemoveButton}
-					onclick={() => (confirmingFuzzysearchRemove = true)}
+					onclick={() => {
+						fuzzysearchRemoveOpenedAt = performance.now();
+						confirmingFuzzysearchRemove = true;
+					}}
 				>
 					{m.admin_settings_lookup_remove()}
 				</button>

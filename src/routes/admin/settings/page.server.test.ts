@@ -2163,6 +2163,28 @@ describe('artist lookup section markup (SONA-156)', () => {
 		expect(remove).toMatch(guardsOn('removingFuzzysearchKey'));
 	});
 
+	// The panel opens where the pointer already is: the section is last on the
+	// tab, so focusing Keep scrolls the page up and confirm Remove can land on
+	// the pixel Remove key was just clicked. Losing this guard would let a double
+	// click remove the key with the question unread, and no geometry assertion
+	// can cover every line-wrap of the confirmation sentence.
+	it('ignores a confirm click that lands inside the reflex window', () => {
+		// Remove key records when the panel opened, next to setting the flag.
+		const opens = src.indexOf('confirmingFuzzysearchRemove = true');
+		expect(opens).toBeGreaterThan(-1);
+		expect(src.slice(opens - 120, opens)).toContain(
+			'fuzzysearchRemoveOpenedAt = performance.now()'
+		);
+		// The remove handler cancels the submission inside that window.
+		const start = src.indexOf('action="?/removeFuzzysearchKey" use:enhance=');
+		const handler = src.slice(start, src.indexOf('}}>', start));
+		expect(handler).toContain('fuzzysearchRemoveOpenedAt');
+		expect(handler).toMatch(/FUZZYSEARCH_REMOVE_REFLEX_MS[\s\S]{0,60}return\s+cancel\(\s*\)/);
+		// Half a second: long enough to swallow a double click, short enough that
+		// a deliberate second click still goes through.
+		expect(src).toContain('const FUZZYSEARCH_REMOVE_REFLEX_MS = 500;');
+	});
+
 	// A failed removal left the key in place, so closing the panel would look
 	// exactly like pressing Keep and the operator would never learn it failed.
 	it('closes the confirmation only on success, and reports a failure', () => {
