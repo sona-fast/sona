@@ -8,7 +8,10 @@
 //
 // Fail-soft throughout: any error resolves to a failed outcome and the caller
 // proceeds without a media URL. Videos and GIFs are skipped — only photos
-// resolve.
+// resolve, and only from `extended_entities.media`: the `entities.media`
+// fallback is not read, because it cannot tell a video's poster frame from a
+// photo. A tweet that resolves but carries no photo is a success with no
+// URL, not a failure.
 
 import { errorLabel, timeoutSignal } from './fetch-errors';
 import { activateGuestToken, xGraphqlHeaders } from './twitter-avatar';
@@ -66,10 +69,12 @@ const QUERY_FIELD_TOGGLES = {
 	withDisallowedReplyControls: false
 } as const;
 
-/** `rate_limited` is X refusing the guest token twice over with a 429;
- * everything else that yields no photo is `unavailable`. */
+/** `rate_limited` is X refusing the guest token twice over with a 429; a
+ * tweet that resolved with no photo is ok with a null URL; everything else
+ * is `unavailable`. */
 export type TweetMediaOutcome =
-	| { ok: true; url: string; photoCount: number | null }
+	| { ok: true; url: string; photoCount: number }
+	| { ok: true; url: null; photoCount: 0 }
 	| { ok: false; reason: 'rate_limited' | 'unavailable' };
 
 const fail = (reason: 'rate_limited' | 'unavailable'): TweetMediaOutcome => ({ ok: false, reason });
@@ -77,15 +82,16 @@ const fail = (reason: 'rate_limited' | 'unavailable'): TweetMediaOutcome => ({ o
 type TweetMedia = { type?: unknown; media_url_https?: unknown };
 
 /** The first photo on a tweet, upgraded to its largest variant, and how many
- * photos the tweet carried in all. The count is null when it came from the
- * `entities.media` fallback, which X truncates to one item. */
-export type TweetPhotos = { url: string; photoCount: number | null };
+ * photos the tweet carried in all; or no URL and a count of zero for a tweet
+ * that resolved without a photo. */
+export type TweetPhotos = { url: string; photoCount: number } | { url: null; photoCount: 0 };
 
 /**
  * Extract the photos from a TweetResultByRestId response: the first one's
  * URL, asking pbs.twimg.com for its largest variant, plus the photo count.
- * Returns null for a tweet with no photo (video- and GIF-only tweets
- * included). Pure, so it's testable.
+ * A tweet with no photo (text-, video- and GIF-only tweets included) has a
+ * null URL. Returns null when there is no tweet to read: a tombstone, junk,
+ * or a rotated GraphQL shape. Pure, so it's testable.
  */
 export function parseTweetPhotos(body: unknown): TweetPhotos | null {
 	const result = (body as { data?: { tweetResult?: { result?: Record<string, unknown> } } })?.data
@@ -93,15 +99,14 @@ export function parseTweetPhotos(body: unknown): TweetPhotos | null {
 	if (!result) return null;
 	// A tweet behind a visibility interstitial nests the real tweet one level down.
 	const tweet = (result.tweet as Record<string, unknown> | undefined) ?? result;
-	const legacy = tweet.legacy as
-		| { extended_entities?: { media?: unknown }; entities?: { media?: unknown } }
-		| undefined;
-	const extended = legacy?.extended_entities?.media;
-	// `entities.media` only ever lists one item, so a count read from it is not
-	// a count; only `extended_entities` is authoritative.
-	const counted = Array.isArray(extended);
-	const media = extended ?? legacy?.entities?.media;
-	if (!Array.isArray(media)) return null;
+	const legacy = tweet.legacy as { extended_entities?: { media?: unknown } } | undefined;
+	// `legacy` is what marks a resolved tweet; a tombstone has none.
+	if (!legacy || typeof legacy !== 'object') return null;
+	// Only `extended_entities` is read. `entities.media` is truncated to one
+	// item and types a video's poster frame as a photo, so it can neither
+	// count nor tell a photo from a video thumbnail.
+	const media = legacy.extended_entities?.media;
+	if (!Array.isArray(media)) return { url: null, photoCount: 0 };
 
 	let first: string | null = null;
 	let photoCount = 0;
@@ -114,7 +119,7 @@ export function parseTweetPhotos(body: unknown): TweetPhotos | null {
 		const match = url.match(/^(.*)\.([a-z]+)$/i);
 		first = match ? `${match[1]}?format=${match[2].toLowerCase()}&name=4096x4096` : url;
 	}
-	return first ? { url: first, photoCount: counted ? Math.min(photoCount, MAX_TWEET_PHOTOS) : null } : null;
+	return first ? { url: first, photoCount: Math.min(photoCount, MAX_TWEET_PHOTOS) } : { url: null, photoCount: 0 };
 }
 
 function tweetLookup(
@@ -175,10 +180,14 @@ export async function fetchTweetMediaUrl(
 		}
 		const photos = parseTweetPhotos(await res.json());
 		if (!photos) {
-			// 200 but no photo — a text/video tweet, a protected or deleted one, or
-			// the undocumented GraphQL shape rotated (see the file header).
-			console.warn('[tweet-media] tweet media lookup had no photo');
+			// 200 but no tweet — a protected or deleted one, or the undocumented
+			// GraphQL shape rotated (see the file header).
+			console.warn('[tweet-media] tweet media lookup had no tweet');
 			return fail('unavailable');
+		}
+		if (photos.url === null) {
+			// A resolved text, video or GIF tweet: nothing to classify, not an outage.
+			return { ok: true, url: null, photoCount: 0 };
 		}
 		return { ok: true, url: photos.url, photoCount: photos.photoCount };
 	} catch (e) {

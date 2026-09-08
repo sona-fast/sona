@@ -138,20 +138,16 @@ describe('POST /api/admin/tag-suggestions', () => {
 		expect((await res.json()).imageCount).toBe(3);
 	});
 
-	it('reports a null imageCount when the tweet lookup could not count', async () => {
+	it('answers a photoless tweet with no tags rather than an outage', async () => {
 		const { platform } = makeEnv();
-		// The entities.media fallback lists one item whatever the tweet carried,
-		// so the count is unknown, not 1.
-		fetchTweetMediaUrl.mockResolvedValue({ ok: true, url: MEDIA_URL, photoCount: null });
-		classifyMediaUrl.mockResolvedValue({ ...suggestions, imageCount: 1 });
+		// A text, video or GIF tweet has nothing to classify: the same 200 with
+		// no tags a Bluesky post with no classified image gets, and no
+		// classifier call.
+		fetchTweetMediaUrl.mockResolvedValue({ ok: true, url: null, photoCount: 0 });
 		const res = await POST(event(platform, { sourcePostUrl: X_POST }));
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({
-			source: 'x',
-			tags: ['mammal', 'pink-hair'],
-			rating: 'safe',
-			imageCount: null
-		});
+		expect(await res.json()).toEqual({ source: 'x', tags: [], rating: null, imageCount: 0 });
+		expect(classifyMediaUrl).not.toHaveBeenCalled();
 	});
 
 	it('gives the lookup chain a deadline that clears one full X round', async () => {
@@ -285,11 +281,13 @@ describe('POST /api/admin/tag-suggestions', () => {
 		expect(await res.json()).toEqual({ source: 'bluesky', tags: [], rating: null, imageCount: 0 });
 	});
 
-	it('502s not_ready when the post is queued but unclassified', async () => {
+	it('202s not_ready when the post is queued but unclassified', async () => {
 		const { platform } = makeEnv();
+		// Not a 5xx: hooks.server.ts books every 5xx into the site's error
+		// metric, and a queued post is not a server error.
 		lookupBlueskySource.mockResolvedValue({ ok: false, reason: 'not_ready' });
 		const res = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
-		expect(res.status).toBe(502);
+		expect(res.status).toBe(202);
 		expect(await res.json()).toEqual({ error: 'not_ready' });
 	});
 

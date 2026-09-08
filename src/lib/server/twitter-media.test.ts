@@ -22,6 +22,8 @@ const tweetWith = (media: unknown[]) => ({
 });
 
 const photo = { type: 'photo', media_url_https: 'https://pbs.twimg.com/media/AbCdEf123.jpg' };
+/** What parseTweetPhotos reports for a tweet that resolved without a photo. */
+const noPhoto = { url: null, photoCount: 0 };
 
 describe('parseTweetPhotos', () => {
 	it('upgrades the first photo to the largest variant', () => {
@@ -58,10 +60,12 @@ describe('parseTweetPhotos', () => {
 	});
 
 	it('skips video and animated gif entries', () => {
-		expect(parseTweetPhotos(tweetWith([{ type: 'video', media_url_https: 'https://pbs.twimg.com/x.jpg' }]))).toBeNull();
+		expect(parseTweetPhotos(tweetWith([{ type: 'video', media_url_https: 'https://pbs.twimg.com/x.jpg' }]))).toEqual(
+			noPhoto
+		);
 		expect(
 			parseTweetPhotos(tweetWith([{ type: 'animated_gif', media_url_https: 'https://pbs.twimg.com/y.jpg' }]))
-		).toBeNull();
+		).toEqual(noPhoto);
 		// A video alongside a photo is not counted as a photo, and the photo, not
 		// the video's poster, is what resolves.
 		expect(
@@ -84,18 +88,24 @@ describe('parseTweetPhotos', () => {
 		).toContain('AbCdEf123');
 	});
 
-	it('falls back to entities.media when extended_entities is absent, with no count', () => {
-		// X truncates entities.media to one item, so the photo resolves but the
-		// count is unknown rather than 1.
+	it('ignores entities.media, which cannot tell a video poster from a photo', () => {
+		// Only extended_entities carries the real media type; entities.media
+		// types a video's poster frame as a photo, so it is never read, and a
+		// tweet with nothing else is a tweet with no photo.
 		expect(
 			parseTweetPhotos({
 				data: { tweetResult: { result: { legacy: { entities: { media: [photo] } } } } }
 			})
-		).toEqual({ url: 'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096', photoCount: null });
+		).toEqual(noPhoto);
 	});
 
-	it('returns null on a text-only tweet, a tombstone, and junk', () => {
-		expect(parseTweetPhotos(tweetWith([]))).toBeNull();
+	it('reports no photo on a text-only tweet', () => {
+		expect(parseTweetPhotos(tweetWith([]))).toEqual(noPhoto);
+		expect(parseTweetPhotos({ data: { tweetResult: { result: { legacy: {} } } } })).toEqual(noPhoto);
+	});
+
+	it('returns null on a tombstone and junk', () => {
+		expect(parseTweetPhotos({ data: { tweetResult: { result: { __typename: 'TweetTombstone' } } } })).toBeNull();
 		expect(parseTweetPhotos({ data: { tweetResult: {} } })).toBeNull();
 		expect(parseTweetPhotos(null)).toBeNull();
 	});
@@ -192,11 +202,26 @@ describe('fetchTweetMediaUrl', () => {
 		expect(await fetchTweetMediaUrl(id, fetchImpl)).toEqual(unavailable);
 	});
 
-	it('fails soft on refusal, a photoless tweet, malformed JSON, and network errors', async () => {
+	it('resolves a photoless tweet as ok with no URL, not as an outage', async () => {
+		// A text, video or GIF tweet is a real answer; the endpoint turns it into
+		// "no tags" rather than an unavailable classifier.
+		expect(await fetchTweetMediaUrl(id, stub(() => json(tweetWith([]))).fetchImpl)).toEqual({
+			ok: true,
+			url: null,
+			photoCount: 0
+		});
+	});
+
+	it('fails soft on refusal, a tombstone, malformed JSON, and network errors', async () => {
 		expect(await fetchTweetMediaUrl(id, stub(() => new Response('no', { status: 403 })).fetchImpl)).toEqual(
 			unavailable
 		);
-		expect(await fetchTweetMediaUrl(id, stub(() => json(tweetWith([]))).fetchImpl)).toEqual(unavailable);
+		expect(
+			await fetchTweetMediaUrl(
+				id,
+				stub(() => json({ data: { tweetResult: { result: { __typename: 'TweetTombstone' } } } })).fetchImpl
+			)
+		).toEqual(unavailable);
 		expect(await fetchTweetMediaUrl(id, stub(() => new Response('<html>')).fetchImpl)).toEqual(unavailable);
 		expect(
 			await fetchTweetMediaUrl(

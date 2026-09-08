@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	MAX_RAW_ENTRIES,
+	MAX_SORTED_ENTRIES,
 	MAX_SUGGESTED_TAGS,
 	POLL_TIMEOUT_MS,
 	POST_TIMEOUT_MS,
@@ -205,6 +206,20 @@ describe('suggestionsFromResult', () => {
 			confidence: i === MAX_RAW_ENTRIES ? 0.5 : 0.9
 		}));
 		expect(suggestionsFromResult({ tags: many }).tags).not.toContain(`tag-${MAX_RAW_ENTRIES}`);
+	});
+
+	it('sorts only the first MAX_SORTED_ENTRIES of a hostile array', () => {
+		// The sort itself is bounded, not just the walk after it: a body far
+		// past what entail.dev ever returns is cut before it is copied and
+		// sorted, so a qualifying tag in the dropped tail is never seen, while
+		// one inside the bound but past MAX_RAW_ENTRIES still sorts to the top.
+		const low = { name: 'noise', confidence: 0.1 };
+		const tags: unknown[] = Array.from({ length: 5000 }, () => ({ ...low }));
+		tags[250] = { name: 'canine', confidence: 0.99 };
+		tags[4999] = { name: 'mammal', confidence: 0.99 };
+		expect(MAX_RAW_ENTRIES).toBeLessThan(250);
+		expect(MAX_SORTED_ENTRIES).toBeLessThan(4999);
+		expect(suggestionsFromResult({ tags }).tags).toEqual(['canine']);
 	});
 
 	it('drops junk entries and unknown ratings', () => {

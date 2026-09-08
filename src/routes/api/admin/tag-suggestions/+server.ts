@@ -35,10 +35,14 @@ import type { RequestHandler } from './$types';
 
 /** What the UI gets back for a failed lookup, and the status carrying it. */
 const FAILURE_STATUS: Record<LookupFailure, number> = {
-	// 502, not 401 or 503: the admin gate answers an expired session with its
+	// 202 for not_ready: the classifier has the post queued, nothing is broken,
+	// and hooks.server.ts counts every 5xx into the site's error metric, so a
+	// 502 here would book a server error against the site on each retry.
+	// unavailable stays 502, not 401 or 503: a real upstream failure belongs in
+	// that error rollup, and the admin gate answers an expired session with its
 	// own 401 and a plain-text body, so a 401 here would read as a logged-out
 	// operator. The body's `error` field is what tells the cases apart.
-	not_ready: 502,
+	not_ready: 202,
 	rate_limited: 429,
 	unavailable: 502
 };
@@ -110,9 +114,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	let outcome: LookupOutcome;
 	// How many images the post carried. Only the Bluesky lookup and the tweet
-	// lookup see the post; classifyMediaUrl sees one image. Null when the
-	// tweet lookup could not count (see TweetPhotos).
-	let imageCount: number | null;
+	// lookup see the post; classifyMediaUrl sees one image.
+	let imageCount: number;
 	// One deadline for every outbound call below; each lookup returns
 	// `unavailable` when it fires.
 	const signal = AbortSignal.timeout(LOOKUP_DEADLINE_MS);
@@ -129,6 +132,10 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		// classifyMediaUrl will send on. Only the validated status id goes out.
 		const media = await fetchTweetMediaUrl(source.id, fetch, signal);
 		if (!media.ok) return failure(media.reason);
+		// A tweet with no photo (text, video, GIF) has nothing to classify. That
+		// is a success with no tags, the same answer a Bluesky post with no
+		// classified image gets, not an outage.
+		if (media.url === null) return json({ source: source.kind, tags: [], rating: null, imageCount: 0 });
 		outcome = await classifyMediaUrl(media.url, fetch, signal);
 		if (!outcome.ok) return failure(outcome.reason);
 		imageCount = media.photoCount;

@@ -26,10 +26,14 @@ export const DEFAULT_CONFIDENCE_FLOOR = 0.8;
 export const MAX_SUGGESTED_TAGS = 40;
 
 /** Most raw entries one classification is read for, taken from the top after
- * a sort by confidence so the cap drops the least confident. A body is
- * third-party input, so the walk stops here rather than following an array of
- * any size. */
+ * a sort by confidence so the cap drops the least confident. */
 export const MAX_RAW_ENTRIES = 200;
+
+/** Most raw entries the confidence sort ever sees. A body is third-party
+ * input, so the array is cut to this length before it is copied and sorted;
+ * entail.dev returns at most a few hundred entries, anything beyond this is
+ * hostile, and the tail past the bound is dropped unsorted. */
+export const MAX_SORTED_ENTRIES = 2000;
 
 /** Longest raw tag name translateTag looks at. e621 tags run well under this;
  * the cut keeps the qualifier-stripping regex off a very long input. */
@@ -177,15 +181,15 @@ function confidenceOf(entry: unknown): number {
  * Turn one classification entry into Sona tag suggestions: keep the tags at or
  * above the confidence floor, translate them, and drop duplicates, in
  * confidence order (a stable sort, so ties keep the API's order), capped at
- * {@link MAX_SUGGESTED_TAGS}. Reads at most {@link MAX_RAW_ENTRIES} entries,
- * the most confident ones. Pure.
+ * {@link MAX_SUGGESTED_TAGS}. Sorts at most the first {@link MAX_SORTED_ENTRIES}
+ * entries and reads the {@link MAX_RAW_ENTRIES} most confident of those. Pure.
  */
 export function suggestionsFromResult(result: ClassificationEntry | null | undefined): Suggestions {
 	const rating = normalizeRating(result?.rating);
 	const raw = Array.isArray(result?.tags) ? result.tags : [];
 	const seen = new Set<string>();
 	const tags: string[] = [];
-	const ordered = raw.slice().sort((a, b) => {
+	const ordered = raw.slice(0, MAX_SORTED_ENTRIES).sort((a, b) => {
 		const ca = confidenceOf(a);
 		const cb = confidenceOf(b);
 		return ca === cb ? 0 : cb > ca ? 1 : -1;
