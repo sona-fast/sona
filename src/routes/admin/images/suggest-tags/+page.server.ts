@@ -35,8 +35,12 @@ export type SuggestRow = {
 export const load: PageServerLoad = async ({ platform, url }) => {
 	const db = getDb(platform!.env.DB);
 	// "Load more" grows the page rather than paging away from it, so the rows the
-	// operator has already worked through stay where they were.
-	const pages = Math.max(1, Number(url.searchParams.get('pages') || 1));
+	// operator has already worked through stay where they were. A hand-edited
+	// query string is not an error page: anything that is not a whole number
+	// above zero reads as the first page. (Math.max alone would let NaN through
+	// and slice the list down to nothing.)
+	const asked = Math.floor(Number(url.searchParams.get('pages') || 1));
+	const pages = Number.isFinite(asked) ? Math.max(1, asked) : 1;
 	const want = pages * PER_PAGE;
 
 	// Images with at least one tag row; everything else is a candidate.
