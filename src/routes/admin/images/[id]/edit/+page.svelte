@@ -1,8 +1,22 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { tick } from 'svelte';
-	import { Loader2 } from 'lucide-svelte';
+	import { Loader2, Search } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
+	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
+	import {
+		pickPrefillMatch,
+		prefillFields,
+		profileUrlFor,
+		ratingTag,
+		resolveOutcome,
+		runLookup,
+		strictestRating,
+		type LookupFields,
+		type LookupSite,
+		type LookupState,
+		type SourceClash
+	} from '$lib/artist-lookup';
 
 	let { data, form } = $props();
 
@@ -17,6 +31,101 @@
 	// explicit message — an emptied region announces nothing.
 	let referenceHint = $state<HTMLElement | null>(null);
 	let referenceCleared = $state(false);
+
+	// ---- Artist lookup (SONA-156) -------------------------------------------
+	// The bytes are on the storage host, and the CSP blocks the browser from
+	// reading them (docs/reading-image-bytes.md), so the request names the image
+	// by id and the server fetches it. Nothing is filled that already has a
+	// value, and the artist only changes on an explicit click.
+	let lookup = $state<LookupState>({ kind: 'idle' });
+	let lookupFilled = $state<LookupFields>({});
+	let sourcePostUrl = $state(data.image.sourcePostUrl || '');
+	let commissionedAt = $state(data.image.commissionedAt || '');
+	// Number, not a string: the option values are numbers and the select binding
+	// compares with Object.is.
+	let selectedArtistId = $state<string | number>(data.image.artistId ?? '');
+	let sourceTagged = $state(false);
+	let dateTagged = $state(false);
+	let appliedArtist = $state<{ id: number; name: string } | null>(null);
+	let artistName = $state('');
+	let newTwitter = $state('');
+	let newFuraffinity = $state('');
+	let lookupAbort: AbortController | null = null;
+
+	// The image is not published, so "look this up" means "send a private file to
+	// a third party" — say so before the click and again after it.
+	const isPrivate = !data.image.published;
+	const ratingTagText = $derived(
+		lookup.kind === 'results' ? ratingTag(strictestRating(lookup.data.matches)) : null
+	);
+
+	function startLookup() {
+		if (lookup.kind === 'searching') return;
+		lookupAbort?.abort();
+		const controller = new AbortController();
+		lookupAbort = controller;
+		lookup = { kind: 'searching' };
+		void runLookup({ imageId: data.image.id }, { signal: controller.signal }).then((next) => {
+			if (lookupAbort !== controller) return;
+			lookupAbort = null;
+			lookup = next;
+			applyPrefill(next);
+		});
+	}
+
+	function cancelLookup() {
+		lookupAbort?.abort();
+		lookupAbort = null;
+		lookup = { kind: 'idle' };
+	}
+
+	function applyPrefill(next: LookupState) {
+		if (next.kind !== 'results') return;
+		const match = pickPrefillMatch(next.data.matches);
+		const fields = prefillFields(
+			match,
+			{ sourcePostUrl: sourcePostUrl.trim() === '', commissionedAt: commissionedAt.trim() === '' },
+			{ skipSourceUrl: !!next.data.sourceClash }
+		);
+		lookupFilled = fields;
+		if (fields.sourcePostUrl !== undefined) {
+			sourcePostUrl = fields.sourcePostUrl;
+			sourceTagged = true;
+		}
+		if (fields.commissionedAt !== undefined) {
+			commissionedAt = fields.commissionedAt;
+			dateTagged = true;
+		}
+		// A handle with no local artist behind it is a new artist: flip to the
+		// inline form and seed what the match knows, rather than making the
+		// operator retype it. The values still need a save to exist.
+		const outcome = resolveOutcome(next.data);
+		if ((outcome === 'new' || outcome === 'unlinked') && match) {
+			artistMode = 'new';
+			seedNewArtist(match.handles[0] ?? '', match.site, outcome === 'new');
+		}
+	}
+
+	function seedNewArtist(handle: string, site: LookupSite, linkable: boolean) {
+		const clean = handle.trim().replace(/^@+/, '');
+		if (!clean) return;
+		artistName = clean;
+		if (!linkable) return;
+		const url = profileUrlFor(site, clean) ?? '';
+		if (site === 'Twitter') newTwitter = url;
+		else newFuraffinity = url;
+	}
+
+	function useLookupArtist(artist: { id: number; name: string }) {
+		artistMode = 'existing';
+		selectedArtistId = artist.id;
+		appliedArtist = artist;
+	}
+
+	function addAsVariant(clash: SourceClash) {
+		selectedParentId = String(clash.imageId);
+		lookup = { kind: 'idle' };
+	}
 </script>
 
 <div class="page-header">
@@ -90,6 +199,7 @@
 
 		<fieldset class="artist-section">
 			<legend>{m.admin_field_artist()}</legend>
+			<div class="artist-toggle-row">
 			<div class="artist-toggle">
 				<button
 					type="button"
@@ -108,14 +218,54 @@
 					{m.admin_upload_add_new_artist()}
 				</button>
 			</div>
+			{#if data.lookupEnabled}
+				<button
+					type="button"
+					class="lookup-pill"
+					aria-describedby="lookup-hint"
+					aria-disabled={lookup.kind === 'searching'}
+					onclick={startLookup}
+				>
+					<Search size={14} aria-hidden="true" /> {m.admin_lookup_button()}
+				</button>
+			{/if}
+			</div>
+			{#if data.lookupEnabled}
+				<small class="hint" class:hint-warn={isPrivate} id="lookup-hint">
+					{isPrivate ? m.admin_lookup_hint_private() : m.admin_lookup_hint()}
+				</small>
+			{:else}
+				<small class="hint" id="lookup-hint">
+					{m.admin_lookup_no_key_pre()}<a class="link" href="/admin/settings?tab=connections"
+						>{m.admin_lookup_no_key_link()}</a
+					>{m.admin_lookup_no_key_post()}
+				</small>
+			{/if}
+
+			<ArtistLookupPanel
+				{lookup}
+				filled={lookupFilled}
+				{appliedArtist}
+				editMode
+				privateNotice={isPrivate && lookup.kind === 'results'}
+				onclose={() => (lookup = { kind: 'idle' })}
+				onretry={startLookup}
+				oncancel={cancelLookup}
+				onuseartist={useLookupArtist}
+				onaddnew={(seed) => {
+					artistMode = 'new';
+					seedNewArtist(seed.handle, seed.site, seed.linkable);
+				}}
+				onaddvariant={addAsVariant}
+			/>
 
 			{#if artistMode === 'existing'}
 				<label>
 					<span>{m.admin_field_artist()}</span>
-					<select class="input" name="artistId" required>
+					<select class="input" name="artistId" bind:value={selectedArtistId} onchange={() => (appliedArtist = null)} required>
 						<option value="">{m.admin_upload_select_artist()}</option>
 						{#each data.artists as artist}
-							<option value={artist.id} selected={artist.id === data.image.artistId}>{artist.name}</option>
+							<option value={artist.id}>{artist.name}</option>
 						{/each}
 					</select>
 				</label>
@@ -123,12 +273,12 @@
 				<input type="hidden" name="artistId" value="new" />
 				<label>
 					<span>{m.admin_field_artist_name()}</span>
-					<input type="text" class="input" placeholder={m.admin_upload_artist_name_placeholder()} name="artistName" required />
+					<input type="text" class="input" placeholder={m.admin_upload_artist_name_placeholder()} name="artistName" bind:value={artistName} required />
 				</label>
 				<div class="social-grid">
 					<label>
 						<span>Twitter/X</span>
-						<input type="text" class="input" placeholder={m.admin_social_handle_placeholder()} name="twitter" />
+						<input type="text" class="input" placeholder={m.admin_social_handle_placeholder()} name="twitter" bind:value={newTwitter} />
 					</label>
 					<label>
 						<span>Bluesky</span>
@@ -227,16 +377,44 @@
 			</div>
 		{/if}
 
-		<label>
-			<span>{m.admin_field_commissioned_date()}</span>
-			<input type="date" class="input" name="commissionedAt" value={data.image.commissionedAt || ''} />
+		<!-- The label wraps only its own text; the "From lookup" pill sits after it
+		     as a sibling and is referenced with aria-describedby, so the input's
+		     accessible name stays the field name (SONA-220). -->
+		<div class="field">
+			<div class="label-row">
+				<label class="field-label" for="commissionedAt">{m.admin_field_commissioned_date()}</label>
+				{#if dateTagged}
+					<span class="lookup-tag" id="commissioned-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+				{/if}
+			</div>
+			<input
+				id="commissionedAt"
+				type="date"
+				class="input"
+				name="commissionedAt"
+				bind:value={commissionedAt}
+				oninput={() => (dateTagged = false)}
+				aria-describedby={dateTagged ? 'commissioned-lookup-tag' : undefined}
+			/>
 			<small class="hint">{m.admin_hint_commissioned_date()}</small>
-		</label>
+		</div>
 
-		<label class="checkbox-label">
-			<input type="checkbox" name="nsfw" checked={data.image.nsfw} />
-			<span>{m.admin_field_mark_nsfw()}</span>
-		</label>
+		<div class="nsfw-row">
+			<label class="checkbox-label">
+				<input
+					type="checkbox"
+					name="nsfw"
+					checked={data.image.nsfw}
+					aria-describedby={ratingTagText ? 'lookup-rating-tag' : undefined}
+				/>
+				<span>{m.admin_field_mark_nsfw()}</span>
+			</label>
+			<!-- Never checked by a lookup: the rating is what the sites said, and the
+			     call about this gallery stays the operator's. -->
+			{#if ratingTagText}
+				<span class="rating-tag" id="lookup-rating-tag">{ratingTagText}</span>
+			{/if}
+		</div>
 
 		<label class="checkbox-label">
 			<input type="checkbox" name="published" checked={!data.image.published} />
@@ -254,10 +432,23 @@
 			<small class="hint">{m.admin_field_featured_order_hint()}</small>
 		</label>
 
-		<label>
-			<span>{m.admin_field_source_url()}</span>
-			<input type="url" class="input" name="sourcePostUrl" value={data.image.sourcePostUrl || ''} />
-		</label>
+		<div class="field">
+			<div class="label-row">
+				<label class="field-label" for="sourcePostUrl">{m.admin_field_source_url()}</label>
+				{#if sourceTagged}
+					<span class="lookup-tag" id="source-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+				{/if}
+			</div>
+			<input
+				id="sourcePostUrl"
+				type="url"
+				class="input"
+				name="sourcePostUrl"
+				bind:value={sourcePostUrl}
+				oninput={() => (sourceTagged = false)}
+				aria-describedby={sourceTagged ? 'source-lookup-tag' : undefined}
+			/>
+		</div>
 
 		<div class="form-actions">
 			<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
@@ -373,6 +564,77 @@
 		font-size: 14px;
 		font-weight: 500;
 		padding: 0 8px;
+	}
+
+	/* Artist lookup (SONA-156) */
+	.artist-toggle-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.lookup-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 12px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		background: transparent;
+		color: var(--foreground);
+		font-size: 13px;
+		font-family: inherit;
+		cursor: pointer;
+	}
+
+	/* aria-disabled, not `disabled`: a keyboard user mid-lookup keeps the focus
+	   they had. The click guard in startLookup is what actually refuses. */
+	.lookup-pill[aria-disabled='true'] {
+		background: var(--secondary);
+		color: var(--muted-foreground);
+		cursor: default;
+	}
+
+	.hint-warn {
+		color: var(--status-warn);
+	}
+
+	.label-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.lookup-tag {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		padding: 1px 8px;
+		white-space: nowrap;
+	}
+
+	/* The rating never changes the checkbox — it reports what the sites said and
+	   sits beside it. nowrap so the sentence stays one unit, and the row wraps
+	   the whole pill to its own line when it no longer fits. */
+	.nsfw-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.rating-tag {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		padding: 1px 8px;
+		white-space: nowrap;
 	}
 
 	.artist-toggle {

@@ -11,6 +11,7 @@ import {
 	REFERENCE_BECOMES_VARIANT_ERROR,
 	VARIANT_BECOMES_REFERENCE_ERROR
 } from '$lib/server/variants';
+import { resolveFuzzysearchKey } from '$lib/server/fuzzysearch';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -65,6 +66,9 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		tags: allTags,
 		characters: allCharacters,
 		parentCandidates,
+		// Presence only — the key itself never leaves the server. Without one,
+		// "Look up artist" is not offered at all (SONA-156).
+		lookupEnabled: !!(await resolveFuzzysearchKey(db, platform?.env)),
 		// An image that already has variants is a parent — it can't also be a variant.
 		hasVariants: !!firstVariant,
 		ownerCharacter: ownerCharacter && {
