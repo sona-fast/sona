@@ -309,6 +309,10 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 
 		await expect(panel(page)).toBeVisible();
+		// The negatives below are only worth anything against a lookup that
+		// demonstrably found something: a failure panel would satisfy them all.
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(panel(page)).toContainText('Exact match');
 		await expect(sourceInput(page)).toHaveValue('https://example.test/mine/');
 		await expect(dateInput(page)).toHaveValue('2020-01-02');
 		// Nothing was filled, so nothing is tagged as filled.
@@ -326,6 +330,10 @@ test.describe('with a key saved', () => {
 
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
+		// Same reason as above: prove the lookup landed a match before reading
+		// anything into the fields it left alone.
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(panel(page)).toContainText('Exact match');
 		await expect(sourceInput(page)).toHaveValue('https://example.test/mine/');
 		await expect(dateInput(page)).toHaveValue('2020-01-02');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
@@ -371,6 +379,53 @@ test.describe('with a key saved', () => {
 		// Editing the seeded field drops its tag, like every other lookup tag.
 		await page.fill('input[name="furaffinity"]', 'furaffinity.net/user/someone/');
 		await expect(page.locator('#furaffinity-lookup-tag')).toHaveCount(0);
+	});
+
+	// SvelteKit reuses one component across a route-param change, so an edit page
+	// that moved to another image in the same tab would otherwise keep the
+	// previous image's applied artist, filled fields and "From lookup" tags. The
+	// source pin can only see that a reset exists; this is the only thing that
+	// proves it runs.
+	test('moving to another image in the same tab drops the previous lookup', async ({ page }) => {
+		// A result whose local artist is somebody OTHER than the destination
+		// image's own artist, so the select cannot read right by accident.
+		await stubLookup(page, otherArtistBody());
+		await page.goto('/admin/images/3/edit');
+		await expect(async () => {
+			await pill(page).click();
+			await expect(panel(page)).toBeVisible({ timeout: 1000 });
+		}).toPass({ timeout: 30_000 });
+
+		await panel(page).getByRole('button', { name: 'Use Avatar Artist' }).click();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('2');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+
+		// A same-tab link between two edit pages: SvelteKit's router intercepts
+		// clicks on any same-origin anchor, so this is the client-side navigation
+		// the reset exists for. The flag proves the page did not simply reload,
+		// which would reset everything by remounting and prove nothing.
+		await page.evaluate(() => {
+			(window as unknown as { __e2eSameTab?: boolean }).__e2eSameTab = true;
+			const link = document.createElement('a');
+			link.href = '/admin/images/1/edit';
+			link.id = 'e2e-inapp-link';
+			link.textContent = 'go';
+			document.body.appendChild(link);
+		});
+		await page.click('#e2e-inapp-link');
+		await expect(page.locator('h1')).toBeVisible();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
+		expect(
+			await page.evaluate(() => (window as unknown as { __e2eSameTab?: boolean }).__e2eSameTab)
+		).toBe(true);
+
+		// Nothing of the previous image's lookup survives the move: the region is
+		// back to idle (it stays mounted by design) and holds no result.
+		await expect(panel(page)).toHaveClass(/idle/);
+		await expect(panel(page)).not.toContainText('kuttoya');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		await expect(sourceInput(page)).toHaveValue('');
 	});
 
 	test('a variant tile rates its own tile and leaves the shared fields alone', async ({ page }) => {
