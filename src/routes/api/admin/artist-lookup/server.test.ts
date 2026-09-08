@@ -475,15 +475,17 @@ describe('artist-lookup — stored image by id', () => {
 });
 
 describe('artist-lookup — failure mapping and the refused marker', () => {
-	// 502, not 401: the admin gate answers an expired session with its own 401
+	// 424, not 401: the admin gate answers an expired session with its own 401
 	// and a plain-text body, so a 401 here would be indistinguishable from a
-	// logged-out admin and the caller's res.json() would throw.
-	it('records the refusal on a 502 and clears it on the next success', async () => {
+	// logged-out admin and the caller's res.json() would throw. And not a 5xx,
+	// which hooks.server.ts counts into the operator's error rollup — see the
+	// status-floor test below.
+	it('records the refusal on a 424 and clears it on the next success', async () => {
 		const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		searchImage.mockResolvedValue({ ok: false, reason: 'key_refused' });
 
 		const refused = await POST(multipartEvent(platform, pngFile()));
-		expect(refused.status).toBe(502);
+		expect(refused.status).toBe(424);
 		expect(await refused.json()).toEqual({ enabled: true, error: 'key_refused' });
 		// The source rides along with the date: this refusal was the deploy
 		// secret's, and the settings card must not blame a stored key for it.
@@ -562,7 +564,7 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 	});
 
 	// The marker is a convenience for the settings card, not the answer. A D1
-	// write that fails must not turn the typed 502 into a 500 whose body the
+	// write that fails must not turn the typed 424 into a 500 whose body the
 	// caller's res.json() can't read, nor cost a successful lookup its matches.
 	it('still answers key_refused when the marker cannot be written', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
@@ -571,7 +573,7 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 
 		const res = await POST(multipartEvent(platform, pngFile()));
 
-		expect(res.status).toBe(502);
+		expect(res.status).toBe(424);
 		expect(await res.json()).toEqual({ enabled: true, error: 'key_refused' });
 	});
 
@@ -601,6 +603,21 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 			expect(res.status, reason).toBe(status);
 			expect(await res.json()).toEqual({ enabled: true, error: reason });
 		}
+	});
+
+	// hooks.server.ts counts EVERY response with status >= 500 into the
+	// operator's error rollup, so a misconfigured key must not answer 5xx: it
+	// would fill the observability panel with server errors on every click.
+	it('keeps a refused key out of the error rollup', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: false, reason: 'key_refused' });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBeLessThan(500);
+		// Still distinguishable from the admin gate's own 401 and 400.
+		expect(res.status).not.toBe(401);
+		expect(res.status).not.toBe(400);
 	});
 });
 

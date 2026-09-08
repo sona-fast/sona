@@ -47,14 +47,22 @@ import type { RequestHandler } from './$types';
 
 /** What the UI gets back for a failed lookup, and the status carrying it. */
 const FAILURE_STATUS: Record<LookupFailure, number> = {
-	// 502, not 401: the admin gate answers an expired session with its own 401
-	// and a plain-text body, so a 401 here would read as a refused key and the
-	// caller's res.json() would throw. The body's `error` field is what tells
+	// Anything >= 500 is counted into the operator's error rollup
+	// (src/hooks.server.ts), so only a genuine server fault belongs up there: a
+	// key FuzzySearch refuses is configuration, and an operator who saved a bad
+	// key would otherwise see server errors on the observability panel with
+	// every click. 424 (Failed Dependency) says the request depended on
+	// FuzzySearch accepting the key. Not 401: the admin gate answers an expired
+	// session with its own 401 and a plain-text body, so a 401 here would read
+	// as a refused key and the caller's res.json() would throw. The gate emits
+	// only 401 and 400, never 424. The body's `error` field is what tells
 	// key_refused apart from unavailable.
-	key_refused: 502,
+	key_refused: 424,
 	rate_limited: 429,
 	too_large: 413,
 	invalid_image: 422,
+	// 502 deliberately: an upstream that failed IS a server fault and belongs in
+	// the error rollup.
 	unavailable: 502
 };
 
@@ -170,7 +178,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// button failing silently. The marker records WHICH key was refused, so a
 		// refusal against the deploy secret is never shown against a stored one.
 		// The marker is a convenience for the settings page, not part of the
-		// answer: a failed write must not turn a typed 502 into a 500 the caller
+		// answer: a failed write must not turn a typed 424 into a 500 the caller
 		// can't read. Nothing about the write's error names the body or the key.
 		if (result.reason === 'key_refused') {
 			try {
