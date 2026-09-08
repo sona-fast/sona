@@ -303,7 +303,7 @@ export function normalizeMatches(payload: unknown): LookupMatch[] {
 		.sort(compareMatches);
 	const seen = new Set<string>();
 	return sorted.filter((match) => {
-		const key = `${match.site} ${match.siteId}`;
+		const key = `${match.site}\u0000${match.siteId}`;
 		if (seen.has(key)) return false;
 		seen.add(key);
 		return true;
