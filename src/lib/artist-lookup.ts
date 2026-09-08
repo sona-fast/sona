@@ -172,6 +172,19 @@ export function matchHandles(match: LookupMatch): string {
 		.join(', ');
 }
 
+/** Canonical profile URL for a handle, for the sites Sona holds a column for.
+ * Mirrors `handleProfileUrl` on the server (pinned by the unit test) so the
+ * new-artist prefill offers the same link the endpoint would have matched on.
+ * Weasyl and e621 have no column yet (SONA-219) and resolve to null. */
+export function profileUrlFor(site: LookupSite, handle: string): string | null {
+	const clean = handle.trim().replace(/^@+/, '');
+	if (!clean) return null;
+	const safe = encodeURIComponent(clean);
+	if (site === 'FurAffinity') return `https://www.furaffinity.net/user/${safe}/`;
+	if (site === 'Twitter') return `https://twitter.com/${safe}`;
+	return null;
+}
+
 export interface ArtistChoice {
 	id: number;
 	name: string;
