@@ -77,14 +77,15 @@ type SuggestionBody = {
 	source?: unknown;
 };
 
-/** Characters a chip label never legitimately holds: C0 and C1 controls, every
- * format character (\p{Cf} covers the bidirectional overrides and isolates that
- * can reorder the text around them, and the zero-width joiners that make two
- * labels look alike), the line and paragraph separators, and the comma. A tag
+/** Characters a chip label never legitimately holds: every control character
+ * (\p{Cc}, which is C0, DEL and the C1 block — the next line U+0085 among them),
+ * every format character (\p{Cf} covers the bidirectional overrides and isolates
+ * that can reorder the text around them, and the zero-width joiners that make
+ * two labels look alike), the line and paragraph separators, and the comma. A tag
  * name comes back from an endpoint that read somebody else's post, and the comma
  * is the Tags field's own separator — left in, one accepted tag would become two
  * the moment `applyTo` joined the field back up. */
-const UNSAFE_LABEL_CHARS = /[\u0000-\u001f\u007f,\p{Cf}\p{Zl}\p{Zp}]/gu;
+const UNSAFE_LABEL_CHARS = /[\p{Cc},\p{Cf}\p{Zl}\p{Zp}]/gu;
 
 function cleanLabel(value: string): string {
 	return value.replace(UNSAFE_LABEL_CHARS, '');

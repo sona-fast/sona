@@ -201,12 +201,12 @@ test('a post whose only tag is already typed says the tag was skipped, not that 
 	await expect(tagsInput(page)).toHaveValue('fox');
 });
 
-test('a tray with no Try again keeps its own sentence when the source URL stops being a post', async ({
+test('a "nothing to suggest" tray goes when the source URL stops being that post', async ({
 	page
 }) => {
-	// The body only swaps to the no-source sentence where another click could
-	// answer differently. Nothing about this tray changes if the URL does: there
-	// was nothing left to offer, and no button the missing URL could refuse.
+	// The verdict is about the post the lookup read. Left standing over a URL
+	// that names something else, it reads as a verdict on the post now in the
+	// field — one nothing was ever asked about.
 	await openUploadForm(page);
 	await tagsInput(page).fill('fox');
 	await stubSuggestions(page, 200, {
@@ -223,15 +223,68 @@ test('a tray with no Try again keeps its own sentence when the source URL stops 
 	await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 
 	await page.fill('input[name="sourcePostUrl"]', 'not a post at all');
-	await expect(page.locator('.tag-panel-body')).toHaveText(
-		'entail.dev only returned tags that are already in the Tags field.'
+	await expect(page.locator('.tag-tray')).toHaveCount(0);
+	// And the live region does not keep saying it either.
+	await expect(liveRegion(page)).toHaveText('');
+	// The field itself is untouched: what the operator typed is theirs.
+	await expect(tagsInput(page)).toHaveValue('fox');
+});
+
+test('chips for one post are not left standing over another', async ({ page }) => {
+	// The chips, and the rating behind the NSFW prompt, describe the post the
+	// lookup read. Pasting a different post and accepting them would tag that one
+	// from a reading of the first.
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['mammal', 'canine', 'fox'],
+		rating: 'explicit',
+		imageCount: 1
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-chip')).toHaveCount(3);
+	await expect(markNsfw(page)).toBeVisible();
+
+	await page.fill(
+		'input[name="sourcePostUrl"]',
+		'https://bsky.app/profile/kirin.example/post/3kq7x2def'
 	);
-	await expect(page.locator('.tag-eyebrow')).toHaveText('No tags to suggest');
-	// And nothing is announced over it either: the sentence the tray drew when
-	// the lookup answered is still the one the live region holds.
-	await expect(liveRegion(page)).toContainText(
-		'entail.dev only returned tags that are already in the Tags field.'
+
+	// Back to idle: no chips, no rating note, the ordinary hint, and nothing left
+	// in the live region about a post that is no longer in the field.
+	await expect(page.locator('.tag-chip')).toHaveCount(0);
+	await expect(page.locator('.tag-tray')).toHaveCount(0);
+	await expect(page.locator('.tag-rating-note')).toHaveCount(0);
+	await expect(markNsfw(page)).toHaveCount(0);
+	await expect(page.locator('#tags-hint')).toContainText(
+		'Suggestions come from entail.dev, which reads the source post.'
 	);
+	await expect(liveRegion(page)).toHaveText('');
+	await expect(tagsInput(page)).toHaveValue('');
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+});
+
+test('an edit that still names the same post keeps the chips', async ({ page }) => {
+	// A tracking parameter pasted along with the link is the same post. Compared
+	// as text it is a different string, and the chips the operator is choosing
+	// from would vanish under them.
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['mammal', 'canine', 'fox'],
+		rating: 'explicit',
+		imageCount: 1
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+	await page.fill('input[name="sourcePostUrl"]', `${BSKY_POST}?utm_source=x`);
+
+	await expect(page.locator('.tag-chip')).toHaveCount(3);
+	await expect(page.locator('.tag-rating-note')).toHaveText('Rated explicit by entail.dev.');
+	await expect(liveRegion(page)).toHaveText('3 suggested tags from entail.dev');
 });
 
 for (const rating of ['explicit', 'questionable'] as const) {
@@ -625,12 +678,18 @@ test('a 422 that lands after the URL has been edited is dropped, not shown', asy
 	);
 	release();
 
-	// Back to idle: the ordinary hint, nothing announced, and a pill that runs.
+	// Back to idle: the ordinary hint, the drop said out loud, and a pill that
+	// runs.
 	await expect(page.locator('.tag-spin')).toHaveCount(0);
 	await expect(page.locator('#tags-hint')).toContainText(
 		'Suggestions come from entail.dev, which reads the source post.'
 	);
-	await expect(liveRegion(page)).toHaveText('');
+	// The region last said "Reading the Bluesky post". Emptied here, a screen
+	// reader would be left with a lookup that never ends, so it says what became
+	// of the one that did land.
+	await expect(liveRegion(page)).toHaveText(
+		'The source URL changed, so that lookup was set aside.'
+	);
 	await expect(page.locator('input[name="sourcePostUrl"]')).not.toHaveAttribute(
 		'aria-describedby',
 		'tags-hint'
@@ -667,16 +726,93 @@ test('suggestions that land after the URL has been edited are dropped too', asyn
 	);
 	release();
 
-	// Back to idle: no chips, the ordinary hint, nothing announced, and no NSFW
-	// prompt from a rating that belongs to the other post.
+	// Back to idle: no chips, the ordinary hint, the drop said out loud, and no
+	// NSFW prompt from a rating that belongs to the other post.
 	await expect(page.locator('.tag-spin')).toHaveCount(0);
 	await expect(page.locator('.tag-chip')).toHaveCount(0);
 	await expect(page.locator('#tags-hint')).toContainText(
 		'Suggestions come from entail.dev, which reads the source post.'
 	);
-	await expect(liveRegion(page)).toHaveText('');
+	await expect(liveRegion(page)).toHaveText(
+		'The source URL changed, so that lookup was set aside.'
+	);
 	await expect(markNsfw(page)).toHaveCount(0);
 	await expect(tagsInput(page)).toHaveValue('');
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+});
+
+test('a failure that lands after the URL has been edited is kept, not dropped', async ({ page }) => {
+	// The other side of the drop rule. "entail.dev didn't answer" is true whatever
+	// the field holds by the time it lands, and the tray's Try again reads the
+	// current field for what to offer next — so this one stays, with its sentence
+	// announced.
+	await openUploadForm(page);
+	let release = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(ENDPOINT, async (route: Route) => {
+		await held;
+		await route.fulfill({
+			status: 500,
+			contentType: 'application/json',
+			body: JSON.stringify({ error: 'unavailable' })
+		});
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-spin')).toBeVisible();
+	await page.fill(
+		'input[name="sourcePostUrl"]',
+		'https://bsky.app/profile/kirin.example/post/3kq7x2def'
+	);
+	release();
+
+	await expect(page.locator('.tag-eyebrow')).toHaveText('Suggestions unavailable');
+	await expect(page.locator('.tag-panel-body')).toHaveText(
+		"entail.dev didn't answer. Your tags are unchanged."
+	);
+	// The new URL is a post, so another click is worth offering.
+	const retry = page.getByRole('button', { name: 'Try again' });
+	await expect(retry).toBeVisible();
+	await expect(retry).toHaveAttribute('aria-disabled', 'false');
+	await expect(liveRegion(page)).toHaveText(
+		"Suggestions unavailable. entail.dev didn't answer. Your tags are unchanged."
+	);
+});
+
+test('an empty answer that lands after the URL has been edited is dropped too', async ({
+	page
+}) => {
+	// "Found nothing" is a verdict on the post the lookup read. Shown over the
+	// post now in the field, it reads as a verdict on that one, which nothing was
+	// ever asked about.
+	await openUploadForm(page);
+	let release = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(ENDPOINT, async (route: Route) => {
+		await held;
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ source: 'bluesky', tags: [], rating: null, imageCount: 1 })
+		});
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-spin')).toBeVisible();
+	await page.fill(
+		'input[name="sourcePostUrl"]',
+		'https://bsky.app/profile/kirin.example/post/3kq7x2def'
+	);
+	release();
+
+	// Back to idle: no tray at all, and no sentence about what the classifier
+	// made of a post that has left the field.
+	await expect(page.locator('.tag-spin')).toHaveCount(0);
+	await expect(page.locator('.tag-tray')).toHaveCount(0);
+	await expect(page.getByText('No tags to suggest')).toHaveCount(0);
+	await expect(liveRegion(page)).toHaveText(
+		'The source URL changed, so that lookup was set aside.'
+	);
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });
 

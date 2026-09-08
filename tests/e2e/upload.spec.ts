@@ -206,6 +206,13 @@ test('the Tags hint says accepted tags cover the batch only while the batch has 
 	// A second tile joins the batch and the sentence appears.
 	await stageFiles(page, [{ name: 'e2e-hint-2.png', mimeType: 'image/png', buffer: PNG }], 2);
 	await expect(page.locator('#tags-hint')).toContainText(BATCH);
+
+	// And it goes when the batch is one tile again: a sentence about every image
+	// in the upload, over an upload of one, describes a batch that is not there.
+	await page.getByRole('button', { name: 'Remove file' }).last().click();
+	await expect(page.locator('input[name^="imageUrl_"]')).toHaveCount(1);
+	await expect(page.locator('#tags-hint')).not.toContainText(BATCH);
+	await expect(page.locator('#tags-hint')).toContainText('Suggestions come from entail.dev');
 });
 
 // A file one byte over the 64 MiB cap. Payload buffers are capped at 50 MB by

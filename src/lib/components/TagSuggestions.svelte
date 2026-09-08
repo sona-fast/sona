@@ -78,6 +78,17 @@
 	// Guards a second click while a lookup is in flight, and lets a stale answer
 	// be dropped when the operator has already asked again.
 	let requestSeq = 0;
+	// Which post the answer on screen is about, canonical, or null where there is
+	// no answer that a change of URL could invalidate. Set only for the two states
+	// that describe the post itself — chips and "nothing to suggest" — so the
+	// failures, which are true whatever the field holds, keep their tray.
+	let answeredFor: string | null = null;
+
+	// Which post a URL names, or null for anything that is not a post. Two URLs
+	// that name the same post — a trailing slash, a tracking query string — give
+	// the same answer, so an edit that changes nothing about the post does not
+	// throw the answer away.
+	const canonical = (url: string) => classifySourceUrl(url)?.url ?? null;
 
 	// The pill is enabled by the same rule the endpoint applies, so a URL the
 	// server would refuse never looks clickable.
@@ -96,6 +107,20 @@
 			: suggestion.kind === 'noSource'
 				? m.admin_tag_suggest_bad_link_body()
 				: m.admin_tag_suggest_hint()
+	);
+
+	// The batch sentence rides on the ordinary hint, and only there: appended to
+	// the refusal it would answer a link the site cannot look up with a note about
+	// where accepted tags go. The two sentences are joined through a message
+	// rather than with a literal space — both already carry their own full stop,
+	// and Japanese sets no space after one.
+	const hintLine = $derived(
+		firstTileOnly && source !== null && suggestion.kind !== 'noSource'
+			? m.admin_tag_suggest_hint_join({
+					first: hint,
+					second: m.admin_tag_suggest_hint_first_tile()
+				})
+			: hint
 	);
 
 	// The tray body swaps to the no-source sentence exactly here: a finished
@@ -155,16 +180,35 @@
 	// not kept: the effect re-runs because it reads the field, and untrack keeps
 	// the state it clears out of its dependencies — read plainly, the reset
 	// would undo every 422 the moment it arrived.
+	//
+	// An answer about the post itself goes the same way, and for the same reason:
+	// chips from post A left standing over post B would be added to B, with A's
+	// rating driving the NSFW prompt, and A's "nothing to suggest" would be a
+	// verdict on a post nobody is looking at. Compared canonically, so a trailing
+	// slash or a tracking parameter on the same post keeps the answer. Accepted
+	// tags stay in the field either way — they are the operator's now — but the
+	// line that confirmed them and the rating behind the NSFW prompt go, because
+	// both are about the post that was looked up.
 	$effect(() => {
 		void sourceUrl;
 		untrack(() => {
-			if (suggestion.kind !== 'noSource') return;
+			if (suggestion.kind === 'noSource') {
+				suggestion = { kind: 'idle' };
+				// The live region still holds what that state announced, about a link
+				// that has since left the field. It goes with the state, so a screen
+				// reader is not left the refusal as the field's last word. Cleared only
+				// while it is still that sentence.
+				if (announcement === m.admin_tag_suggest_bad_link_body()) announcement = '';
+				return;
+			}
+			if (answeredFor === null || answeredFor === canonical(sourceUrl)) return;
+			answeredFor = null;
 			suggestion = { kind: 'idle' };
-			// The live region still holds what that state announced, about a link
-			// that has since left the field. It goes with the state, so a screen
-			// reader is not left the refusal as the field's last word. Cleared only
-			// while it is still that sentence.
-			if (announcement === m.admin_tag_suggest_bad_link_body()) announcement = '';
+			// The rating belongs to the answer, and the note beside the NSFW box
+			// reads it: left behind it would offer to mark the post now in the field
+			// on the strength of a lookup of another one.
+			rating = null;
+			announcement = '';
 		});
 	});
 
@@ -187,6 +231,7 @@
 		if (disabled || source === null) return;
 		const seq = ++requestSeq;
 		rating = null;
+		answeredFor = null;
 		suggestion = { kind: 'searching', source: source.kind };
 		announcement = readingLabel(source.kind);
 		// "Try again" lives in the tray, and the tray just turned into the
@@ -215,14 +260,21 @@
 		// FAILURES are kept — "the lookup failed" is true whatever the field now
 		// holds, and their tray reads the current field for what to offer next.
 		if (
-			sourceUrl !== asked &&
+			canonical(sourceUrl) !== canonical(asked) &&
 			(next.kind === 'suggested' || next.kind === 'empty' || next.kind === 'noSource')
 		) {
 			suggestion = { kind: 'idle' };
-			announcement = '';
+			// Not blanked: the region last said "Reading the …", and a screen reader
+			// left with that has no way to know the lookup ended. Say that it was set
+			// aside instead, which is what happened.
+			announcement = m.admin_tag_suggest_dropped_body();
 			return;
 		}
 		suggestion = next;
+		// Which post this answer is about, so an edit to the URL that lands on
+		// another post takes it away again.
+		answeredFor =
+			next.kind === 'suggested' || next.kind === 'empty' ? canonical(asked) : null;
 		rating = next.kind === 'suggested' ? next.rating : null;
 		announcement = sentenceFor(next);
 	}
@@ -246,6 +298,7 @@
 
 	function dismiss() {
 		requestSeq++;
+		answeredFor = null;
 		suggestion = { kind: 'idle' };
 		rating = null;
 		announcement = '';
@@ -304,7 +357,7 @@
 		     gets the warn eyebrow, and left in the plain hint colour here it reads
 		     like the "Existing:" line under it. -->
 		<p class="hint" class:warn={suggestion.kind === 'noSource'} id={hintId}>
-			{hint}{#if firstTileOnly && source !== null}&nbsp;{m.admin_tag_suggest_hint_first_tile()}{/if}
+			{hintLine}
 		</p>
 	{/if}
 

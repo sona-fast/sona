@@ -130,6 +130,20 @@ test('Load more grows the list rather than paging away from it', async ({ page, 
 	// Activated from the keyboard, which is the path the focus move is for: the
 	// ring asserted below only draws when the last interaction was a key press.
 	const loadMore = page.getByRole('link', { name: 'Load more' });
+
+	// Stacked at 390px it is the list's one action, so it spans the list and
+	// centres its label the way every pill on a row does. Asserted here rather
+	// than in the phone test below, which runs after enough saves to take the
+	// list under one page, where there is no Load more at all.
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(loadMore).toHaveCSS('justify-content', 'center');
+	const [pillWidth, cardWidth] = await page.evaluate(() => [
+		document.querySelector('.load-more')!.getBoundingClientRect().width,
+		document.querySelector('li.rowcard')!.getBoundingClientRect().width
+	]);
+	expect(Math.abs(pillWidth - cardWidth)).toBeLessThanOrEqual(1);
+	await page.setViewportSize({ width: 1280, height: 720 });
+
 	await loadMore.focus();
 	await loadMore.press('Enter');
 	// No Load more left, and the oldest row is listed: the rest of the list is on
@@ -292,7 +306,17 @@ test('Save writes the tags and the row shows the saved line and static chips', a
 
 	const target = await clickSuggest(page, 'Backfill 119');
 	await expect(target.locator('.tag-chip')).toHaveCount(3);
-	await target.getByRole('button', { name: 'window' }).click();
+	// The chip has reported itself detached in the instant after the count
+	// assertion passes, the way the row's own pill does, so the click and the
+	// count the Save label takes from it are retried as a pair. Reading
+	// aria-pressed first keeps the retry from toggling the chip back on.
+	await expect(async () => {
+		const chip = target.getByRole('button', { name: 'window' });
+		if ((await chip.getAttribute('aria-pressed')) === 'true') await chip.click();
+		await expect(
+			target.getByRole('button', { name: 'Save 2 tags to Backfill 119' })
+		).toBeVisible({ timeout: 2000 });
+	}).toPass({ timeout: 15_000 });
 	await target.getByRole('button', { name: 'Save 2 tags to Backfill 119' }).click();
 
 	const savedLine = target.locator('.tag-status-line');

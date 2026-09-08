@@ -185,7 +185,9 @@ describe('suggest-tags load', () => {
 		expect(new Set(display.flatMap((q) => q.params))).toEqual(
 			new Set(data.rows.map((r) => r.id))
 		);
-		expect(data.rows.map((r) => r.id)).toEqual([...data.rows.map((r) => r.id)].sort((a, b) => b - a));
+		// The expected order is written out rather than sorted from the answer: a
+		// sorted copy of the rows agrees with itself whatever order they arrived in.
+		expect(data.rows.map((r) => r.id)).toEqual(Array.from({ length: 130 }, (_, i) => 130 - i));
 	});
 
 	it('stops at the scan ceiling and reports a total capped at it', async () => {

@@ -147,8 +147,18 @@
 	async function reannounce(id: number, title: string, body: string) {
 		const next = m.admin_suggest_tags_row_announce({ title, body });
 		if (announcement === next) {
+			// The region is claimed BEFORE the await, not after it: the empty-save
+			// refusal calls this from a synchronous use:enhance callback without
+			// waiting, so another row can announce while the emptying reaches the
+			// DOM. Claimed first, that row's own announce takes the claim back, and
+			// the write below stands down rather than talking over a sentence that
+			// is now the current one. Nothing pins the interleaving itself: the gap
+			// is one microtask inside this function, which no click from the outside
+			// can be landed in.
+			announcedFor = id;
 			announcement = '';
 			await tick();
+			if (announcedFor !== id) return;
 		}
 		announcement = next;
 		announcedFor = id;
@@ -731,7 +741,8 @@
 			flex-wrap: wrap;
 		}
 
-		.rowhead .tag-pill {
+		.rowhead .tag-pill,
+		.load-more {
 			width: 100%;
 			justify-content: center;
 		}

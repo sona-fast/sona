@@ -13,6 +13,7 @@ import {
 	trayFor,
 	type SuggestionState
 } from './tag-suggestions';
+import { classifySourceUrl } from './tags';
 
 // The state machine behind the "Suggest tags" control (SONA-220). Every branch
 // is reachable from a status code and a body, so the whole thing is testable
@@ -135,16 +136,18 @@ describe('fromResponse — a 200', () => {
 		// tag into two the moment it joined the field back up.
 		// U+2028 and a zero-width joiner go the same way: a line separator breaks
 		// the chip row, and a joiner makes two different labels look identical.
+		// U+0085 is a C1 control, which the range this used to list stopped short
+		// of; the control-character property covers the whole block.
 		const state = fromResponse(
 			200,
-			ok(['fo\u202Ex', 'bea\u0007ch', 'sea, sky', 'wo\u2028lf', 'de\u200Der']),
+			ok(['fo\u202Ex', 'bea\u0007ch', 'sea, sky', 'wo\u2028lf', 'de\u200Der', 'ot\u0085ter']),
 			[]
 		);
 		expect(state).toMatchObject({
 			kind: 'suggested',
-			tags: ['fox', 'beach', 'sea sky', 'wolf', 'deer']
+			tags: ['fox', 'beach', 'sea sky', 'wolf', 'deer', 'otter']
 		});
-		expect(applyTo('', selectedTags(state))).toBe('fox, beach, sea sky, wolf, deer');
+		expect(applyTo('', selectedTags(state))).toBe('fox, beach, sea sky, wolf, deer, otter');
 	});
 
 	it('keys a suggestion off its cleaned label, so two entries never share one chip', () => {
@@ -428,5 +431,28 @@ describe('rowToFocusAfter — where Load more lands focus', () => {
 
 	it('has nothing to focus in an empty list', () => {
 		expect(rowToFocusAfter([], 1)).toBeUndefined();
+	});
+});
+
+describe('which post a source URL names', () => {
+	// TagSuggestions keeps an answer only while the field still names the post it
+	// answered, and it compares the two through classifySourceUrl rather than as
+	// text: typed one way and pasted another, the same post must not throw the
+	// chips away, and a different post must.
+	const canonical = (url: string) => classifySourceUrl(url)?.url ?? null;
+	const POST = 'https://bsky.app/profile/kirin.example/post/3kq7x2abc';
+
+	it('reads the same post out of the forms an operator pastes', () => {
+		expect(canonical(`${POST}/`)).toBe(canonical(POST));
+		expect(canonical(`${POST}?utm_source=x`)).toBe(canonical(POST));
+		expect(canonical(` ${POST} `)).toBe(canonical(POST));
+	});
+
+	it('reads another post, and a field that holds no post, as something else', () => {
+		expect(canonical('https://bsky.app/profile/kirin.example/post/3kq7x2def')).not.toBe(
+			canonical(POST)
+		);
+		expect(canonical('')).toBeNull();
+		expect(canonical('not a post at all')).toBeNull();
 	});
 });

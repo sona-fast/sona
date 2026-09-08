@@ -297,4 +297,53 @@ describe('the multi-tile hint sentence', () => {
 		);
 		expect(en.admin_tag_suggest_hint_first_tile).not.toMatch(/source post/);
 	});
+
+	it('is left off the refusal, which is not a hint the batch sentence belongs on', () => {
+		// In the noSource state the hint says the site cannot look this link up.
+		// Appending "accepted tags apply to every image" answers a question nobody
+		// asked about a lookup that never ran.
+		expect(suggestions).toMatch(
+			/firstTileOnly && source !== null && suggestion\.kind !== 'noSource'/
+		);
+	});
+
+	it('joins the two sentences through a message, not a literal space', () => {
+		// Both sentences carry their own full stop, and Japanese sets no space after
+		// one: the separator is the locale's to choose.
+		expect(suggestions).toMatch(/m\.admin_tag_suggest_hint_join\(\{/);
+		expect(suggestions).not.toMatch(/&nbsp;\{m\.admin_tag_suggest_hint_first_tile/);
+		const en = JSON.parse(read('../../../messages/en.json')) as Record<string, string>;
+		const ja = JSON.parse(read('../../../messages/ja.json')) as Record<string, string>;
+		expect(en.admin_tag_suggest_hint_join).toBe('{first} {second}');
+		expect(ja.admin_tag_suggest_hint_join).toBe('{first}{second}');
+	});
+});
+
+describe('an answer that stops being about the post in the field', () => {
+	it('is compared canonically, so a harmless edit to the same URL keeps it', () => {
+		// A trailing slash or a tracking parameter names the same post. Compared as
+		// text, either would throw away chips the operator is in the middle of
+		// choosing from.
+		expect(suggestions).toMatch(/const canonical = \(url: string\) =>\s*classifySourceUrl\(url\)\?\.url \?\? null;/);
+		expect(suggestions).toMatch(/canonical\(sourceUrl\) !== canonical\(asked\)/);
+		expect(suggestions).toMatch(/answeredFor === null \|\| answeredFor === canonical\(sourceUrl\)/);
+	});
+
+	it('says the lookup was set aside rather than blanking the live region', () => {
+		// The region last said "Reading the …". Emptied, a screen reader is left
+		// with a lookup that never ends.
+		expect(suggestions).toMatch(/announcement = m\.admin_tag_suggest_dropped_body\(\);/);
+	});
+});
+
+describe('the backfill page\'s shared live region', () => {
+	it('lets a later writer take the region back while a re-announce is mid-blank', () => {
+		// The empty-save refusal calls reannounce from a synchronous use:enhance
+		// callback without awaiting it. Claiming the region only after the tick
+		// would let that write land on top of another row's sentence, with
+		// announcedFor naming the wrong row afterwards.
+		expect(backfillPage).toMatch(
+			/announcedFor = id;\s*announcement = '';\s*await tick\(\);\s*if \(announcedFor !== id\) return;/
+		);
+	});
 });
