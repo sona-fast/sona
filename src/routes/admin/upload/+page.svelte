@@ -531,9 +531,11 @@
 		const site = siteLabel(match.site);
 		const different = differentArtist(tile);
 		// The visible line and the spoken one come from the same parts, so the
-		// middle dot never reaches the live region and never dangles.
+		// middle dot never reaches the live region and never dangles. The
+		// different-artist line carries no band, so it reads the same either way.
+		const differentLine = m.admin_lookup_tile_different({ handle, site });
 		const text = different
-			? { line: m.admin_lookup_tile_different({ handle, site }), spoken: m.admin_lookup_tile_different({ handle, site }) }
+			? { line: differentLine, spoken: differentLine }
 			: tileResultText(handle, match.site, match.band);
 		return {
 			different,
