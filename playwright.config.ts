@@ -96,7 +96,14 @@ const UT_SPECS = ['**/ut-stat.spec.ts', '**/storage-breakdown.spec.ts'];
 // artist-lookup rides the upload server too: it saves and removes the
 // FuzzySearch key row, which decides whether "Look up artist" renders at all —
 // on the shared server that would race every other spec (SONA-156).
-const UPLOAD_SPECS = ['**/upload.spec.ts', '**/artist-lookup.spec.ts'];
+// fuzzysearch-key writes and removes that same row from the settings page, so
+// it belongs on the same single-worker server rather than racing artist-lookup
+// over the key from the shared one.
+const UPLOAD_SPECS = [
+	'**/upload.spec.ts',
+	'**/artist-lookup.spec.ts',
+	'**/fuzzysearch-key.spec.ts'
+];
 
 // Seed a fresh throwaway D1 first, then boot the dev server against it. Seeding
 // here (not in globalSetup) guarantees it finishes before the server reads the
