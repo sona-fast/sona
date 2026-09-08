@@ -32,6 +32,21 @@ vi.mock('$lib/server/fuzzysearch', async (importOriginal) => {
 	return { ...original, searchImage };
 });
 
+// The real proxy by default. It swallows its own fetch, parse and cancel
+// errors today, so the only way to ask "what if it threw" is to make it throw.
+const proxyStoredImageSpy = vi.hoisted(() => vi.fn<(...args: never[]) => Promise<unknown>>());
+const realProxyStoredImage = vi.hoisted(() => ({
+	fn: null as null | ((...args: never[]) => Promise<unknown>)
+}));
+vi.mock('$lib/server/image-proxy', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/server/image-proxy')>();
+	realProxyStoredImage.fn = original.proxyStoredImage as unknown as (
+		...args: never[]
+	) => Promise<unknown>;
+	proxyStoredImageSpy.mockImplementation(realProxyStoredImage.fn);
+	return { ...original, proxyStoredImage: proxyStoredImageSpy };
+});
+
 // The real write by default; a test that needs the settings row to fail makes
 // this reject for that one call. The endpoint's answer must not depend on it.
 const setRawSettingSpy = vi.hoisted(() =>
@@ -149,6 +164,8 @@ beforeEach(() => {
 	searchImage.mockResolvedValue({ ok: true, matches: [] });
 	setRawSettingSpy.mockReset();
 	if (realSetRawSetting.fn) setRawSettingSpy.mockImplementation(realSetRawSetting.fn);
+	proxyStoredImageSpy.mockReset();
+	if (realProxyStoredImage.fn) proxyStoredImageSpy.mockImplementation(realProxyStoredImage.fn);
 });
 
 describe('artist-lookup — configuration', () => {
@@ -559,6 +576,26 @@ describe('artist-lookup — stored image by id', () => {
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
+	// Every other await before the search is guarded. This one was left to the
+	// callee's own discipline, and the callee has one thread it cannot catch: a
+	// `cancel()` that throws synchronously never gets its `.catch` attached. A
+	// throw here answers 500 with no `forwarded` field for bytes that never left
+	// the worker, and the edit page then shows the private-image notice.
+	it('answers a stored-image read that throws with a dated failure, not a 500', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+		);
+		proxyStoredImageSpy.mockRejectedValueOnce(new Error('cancel threw'));
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
 	// The same rule as the multipart guards: a database that throws must not
 	// become a 500 whose body the client cannot date.
 	it('answers a select that throws with a dated failure, not a 500', async () => {
@@ -810,8 +847,8 @@ describe('artist-lookup — stored image by id', () => {
 describe('artist-lookup — after the search', () => {
 	// These reads run AFTER the bytes reached FuzzySearch, so the failure is
 	// dated `forwarded: true` — the private-image notice on the edit page is then
-	// honest about a lookup that did leave the app. And it is a typed answer
-	// rather than a throw, so it does not also land in the >= 500 rollup.
+	// honest about a lookup that did leave the app. A typed answer rather than a
+	// throw because only a typed body can carry `forwarded`.
 	//
 	// NOT degraded to the matches with an empty localArtists: the panel reads
 	// that as "no local artist has this handle" and offers to add one that
@@ -831,6 +868,20 @@ describe('artist-lookup — after the search', () => {
 		expect(res.status).toBe(502);
 		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: true });
 		expect(searchImage).toHaveBeenCalled();
+	});
+
+	// Only the reads are guarded. A fault in the mapping below them is a bug in
+	// this file, not an upstream outage, and reporting it as one hides it: the
+	// operator is told FuzzySearch is down and nothing is logged anywhere. A
+	// match with no handles array is the cheapest way to make that code throw.
+	it('does not report a fault in its own mapping as an upstream outage', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({
+			ok: true,
+			matches: [{ ...FA_EXACT, handles: undefined as unknown as string[] }]
+		});
+
+		await expect(POST(multipartEvent(platform, pngFile()))).rejects.toThrow(TypeError);
 	});
 });
 

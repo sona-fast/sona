@@ -270,7 +270,17 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// hardening: private and link-local hosts refused, redirects not followed,
 		// only the stored raster types echoed back inline. A refusal, an upstream
 		// error and a rejected fetch all arrive here as null.
-		const stored = await proxyStoredImage(row.imageUrl, fetch);
+		let stored: Awaited<ReturnType<typeof proxyStoredImage>> = null;
+		try {
+			stored = await proxyStoredImage(row.imageUrl, fetch);
+		} catch {
+			// It swallows its own fetch, parse and cancel errors today, but every
+			// other await before the search is guarded and this one answers for
+			// bytes that never left the worker: a throw here would reach the 500
+			// handler with no `forwarded` field, and the edit page would show the
+			// private notice for a file FuzzySearch never saw.
+			return failure('unavailable', false);
+		}
 		if (!stored?.body) return failure('unavailable', false);
 		// Lowercased: media types are case-insensitive, so an `Image/PNG` header
 		// must pass the same check as `image/png`.
@@ -356,18 +366,32 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	// Every read below runs AFTER the bytes reached FuzzySearch, so a D1 fault
 	// here is answered `forwarded: true` — the private-image notice on the edit
 	// page is honest about a lookup that did leave the app. Answered as a typed
-	// failure rather than thrown, so it does not land in the >= 500 rollup as a
-	// second fault on top of the one it already is.
+	// failure rather than thrown because a typed body can carry `forwarded: true`
+	// and a thrown 500 cannot; it is still a 502 and still counted in the error
+	// rollup, once.
 	//
 	// The matches are NOT returned with an empty localArtists instead: the panel
 	// reads that as "no local artist has this handle" and offers to add one that
 	// already exists, which is a duplicate artist row the operator then has to
 	// find and merge. No answer beats a wrong one here.
+	//
+	// Only the reads are inside the try. The mapping and the response are built
+	// below it, so a TypeError in that code keeps its own stack instead of
+	// reporting as an upstream outage, and an `error()` added there later still
+	// answers with its own status.
+	let artistRows: {
+		id: number;
+		name: string;
+		twitterUrl: string | null;
+		furAffinityUrl: string | null;
+	}[];
+	const pieceCounts = new Map<number, number>();
+	let sourceClash: Awaited<ReturnType<typeof findSourceClash>>;
 	try {
 		// The whole artist table, and the piece counts below, are only ever read
 		// against a match — so a no-match answer reads neither. Same guard on both,
 		// or the cheaper query is the one that stays behind.
-		const artistRows =
+		artistRows =
 			matches.length > 0
 				? await db
 						.select({
@@ -386,7 +410,6 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// what /admin/artists shows in its Artworks column, and two numbers for the
 		// same artist on two admin screens is the worse answer. The unattributed
 		// group has no artist to key on, so it is left out of the query.
-		const pieceCounts = new Map<number, number>();
 		if (matches.length > 0) {
 			const counted = await db
 				.select({ artistId: images.artistId, pieces: count() })
@@ -396,38 +419,40 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			for (const row of counted)
 				if (row.artistId !== null) pieceCounts.set(row.artistId, row.pieces);
 		}
-		const withPieces = (a: { id: number; name: string }) => ({
-			id: a.id,
-			name: a.name,
-			pieces: pieceCounts.get(a.id) ?? 0
-		});
-
-		const localArtists: ArtistHit[] = [];
-		const nameMatches: ArtistHit[] = [];
-		matches.forEach((match, matchIndex) => {
-			const byHandle = findLocalArtists(artistRows, match);
-			if (byHandle.length) {
-				localArtists.push({ matchIndex, artists: byHandle.map(withPieces) });
-			}
-			// Weaker evidence, kept separate: a name collision is a "you may already
-			// have this artist" prompt, never an automatic link.
-			const byName = new Map<number, { id: number; name: string; pieces: number }>();
-			for (const handle of match.handles) {
-				for (const a of findArtistsByName(artistRows, handle)) byName.set(a.id, withPieces(a));
-			}
-			if (byName.size) nameMatches.push({ matchIndex, artists: [...byName.values()] });
-		});
-
-		return json({
-			enabled: true,
-			matches,
-			localArtists,
-			nameMatches,
-			sourceClash: await findSourceClash(db, matches, selfImage)
-		});
+		sourceClash = await findSourceClash(db, matches, selfImage);
 	} catch {
 		return failure('unavailable', true);
 	}
+
+	const withPieces = (a: { id: number; name: string }) => ({
+		id: a.id,
+		name: a.name,
+		pieces: pieceCounts.get(a.id) ?? 0
+	});
+
+	const localArtists: ArtistHit[] = [];
+	const nameMatches: ArtistHit[] = [];
+	matches.forEach((match, matchIndex) => {
+		const byHandle = findLocalArtists(artistRows, match);
+		if (byHandle.length) {
+			localArtists.push({ matchIndex, artists: byHandle.map(withPieces) });
+		}
+		// Weaker evidence, kept separate: a name collision is a "you may already
+		// have this artist" prompt, never an automatic link.
+		const byName = new Map<number, { id: number; name: string; pieces: number }>();
+		for (const handle of match.handles) {
+			for (const a of findArtistsByName(artistRows, handle)) byName.set(a.id, withPieces(a));
+		}
+		if (byName.size) nameMatches.push({ matchIndex, artists: [...byName.values()] });
+	});
+
+	return json({
+		enabled: true,
+		matches,
+		localArtists,
+		nameMatches,
+		sourceClash
+	});
 };
 
 /** The image (or variant set) already credited to the same source post, so the
