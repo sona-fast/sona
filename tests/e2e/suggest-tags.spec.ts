@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
-import { adminLogin } from './admin-login';
+import { adminLogin, gotoAfterLogin, gotoRetrying } from './admin-login';
 
 // The tag backfill list at /admin/images/suggest-tags, end to end (SONA-220).
 //
@@ -77,17 +77,6 @@ async function cssVarColor(page: Page, token: string) {
 		probe.remove();
 		return value;
 	}, token);
-}
-
-/** adminLogin resolves as soon as the login navigation commits, so the admin
- * page it lands on can still be settling — a goto issued into that lands as
- * net::ERR_ABORTED. Wait for the landed page, then navigate, retrying the
- * navigation if the abort still wins the race. */
-async function gotoAfterLogin(page: Page, path: string) {
-	await page.waitForLoadState('load');
-	await expect(async () => {
-		await page.goto(path);
-	}).toPass({ timeout: 15_000 });
 }
 
 async function openList(page: Page, search = '') {
@@ -201,6 +190,29 @@ test("a row's Suggest renders chips, and leaving one out changes the Save count"
 	await expect(save).toHaveAttribute('aria-disabled', 'true');
 	await expect(save).toHaveCSS('cursor', 'default');
 	await expect(save).toHaveCSS('background-color', await cssVarColor(page, '--secondary'));
+
+	// And it does nothing rather than merely looking refused: the button is
+	// aria-disabled, not disabled, so the click still reaches the form and the
+	// submit handler is what cancels it.
+	let saveCalls = 0;
+	await page.route(savePost, (route) => {
+		saveCalls += 1;
+		return route.abort();
+	});
+	// Dispatched rather than clicked: Playwright waits for an aria-disabled
+	// control to become enabled, so a real click never lands.
+	await save.dispatchEvent('click');
+	// The refusal is not silent — the region says what to do first.
+	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
+		'Backfill 120. Pick at least one tag to save.'
+	);
+	expect(saveCalls).toBe(0);
+	// Nothing left the page and nothing left the tray: every chip is still there
+	// to pick from.
+	await expect(chips).toHaveCount(4);
+	await expect(save).toHaveText('Save 0 tags');
+	await page.unroute(savePost);
+
 	// Picked again, so the button goes back to being the row's primary action.
 	await target.getByRole('button', { name: 'fox' }).click();
 	await expect(save).toHaveAttribute('aria-disabled', 'false');
@@ -248,9 +260,9 @@ test('Save writes the tags and the row shows the saved line and static chips', a
 	expect(actionBox!.y - (chipBox!.y + chipBox!.height)).toBeGreaterThan(12);
 
 	// The tags are real: the edit form loads them, and the row is off the list.
-	await page.goto('/admin/images/119/edit');
+	await gotoRetrying(page, '/admin/images/119/edit');
 	await expect(page.locator('input[name="tags"]')).toHaveValue('rain-drops, cozy');
-	await page.goto('/admin/images/suggest-tags');
+	await gotoRetrying(page, '/admin/images/suggest-tags');
 	await expect(row(page, 'Backfill 119')).toHaveCount(0);
 });
 
@@ -298,7 +310,7 @@ test('a row tagged elsewhere since the list loaded refuses to overwrite', async 
 	);
 
 	// The tag written elsewhere survived.
-	await page.goto('/admin/images/118/edit');
+	await gotoRetrying(page, '/admin/images/118/edit');
 	await expect(page.locator('input[name="tags"]')).toHaveValue('elsewhere');
 });
 
@@ -444,7 +456,10 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 		});
 	});
 
-	const save = target.getByRole('button', { name: 'Save 1 tag to Backfill 112' });
+	// Located by its position in the row, not by its name: the name is part of
+	// what is under test here and changes while the save runs.
+	const save = target.locator('form.tag-actions button[type="submit"]');
+	await expect(save).toHaveAttribute('aria-label', 'Save 1 tag to Backfill 112');
 	// Focused first: Firefox on macOS does not focus a button on mousedown, and
 	// what is under test is that the save does not take focus away.
 	await save.focus();
@@ -459,6 +474,10 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 	await expect(save).toHaveCSS('background-color', await cssVarColor(page, '--secondary'));
 	// The spinner stays: the row is working, not merely refusing.
 	await expect(save.locator('.tag-spin')).toBeVisible();
+	// And the label says so rather than still offering a count the click already
+	// took. The name it reads out keeps the row's title, the way the pill's does.
+	await expect(save).toHaveText('Saving…');
+	await expect(save).toHaveAttribute('aria-label', 'Saving tags for Backfill 112');
 	// And the region says what the button is doing, rather than still holding the
 	// sentence from before the click.
 	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
@@ -467,8 +486,19 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 
 	const dismiss = target.getByRole('button', { name: 'Dismiss suggestions for Backfill 112' });
 	await expect(dismiss).toHaveAttribute('aria-disabled', 'true');
-	// The refused text button reads as refused: no pointer cursor over it.
+	// The refused text button reads as refused the same way Save beside it does —
+	// same fill, same label colour, same outline — so the two are one state on a
+	// touch screen, where the cursor and the hover say nothing.
 	await expect(dismiss).toHaveCSS('cursor', 'default');
+	await expect(dismiss).toHaveCSS('background-color', await cssVarColor(page, '--secondary'));
+	await expect(dismiss).toHaveCSS('border-top-color', await cssVarColor(page, '--border'));
+	const inertLabel = await save.evaluate((el) => getComputedStyle(el).color);
+	await expect(dismiss).toHaveCSS('color', inertLabel);
+	// And a hover over it holds all of that, rather than brightening the way the
+	// enabled button's hover does.
+	await dismiss.hover();
+	await expect(dismiss).toHaveCSS('color', inertLabel);
+	await expect(dismiss).toHaveCSS('background-color', await cssVarColor(page, '--secondary'));
 	const pill = target.getByRole('button', { name: 'Suggest tags for Backfill 112' });
 	await expect(pill).toHaveAttribute('aria-disabled', 'true');
 	// Dispatched rather than clicked: Playwright waits for an aria-disabled
@@ -493,6 +523,9 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 	);
 	await expect(target.locator('.tag-chip')).toHaveCount(1);
 	await expect(save).toHaveAttribute('aria-disabled', 'false');
+	// The label goes back to offering the count, so the retry says what it will do.
+	await expect(save).toHaveText('Save 1 tag');
+	await expect(save).toHaveAttribute('aria-label', 'Save 1 tag to Backfill 112');
 	await expect(target.locator('.tag-panel-body')).toBeFocused();
 	await page.unroute(savePost);
 });
@@ -642,7 +675,7 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 	const storedTags = await page.locator('input[name="tags"]').inputValue();
 	const storedUrl = await page.locator('input[name="sourcePostUrl"]').inputValue();
 
-	await page.goto('/admin/images/101/edit');
+	await gotoRetrying(page, '/admin/images/101/edit');
 	const tags = page.locator('input[name="tags"]');
 	const url = page.locator('input[name="sourcePostUrl"]');
 	const pill = page.getByRole('button', { name: 'Suggest tags', exact: true });
@@ -725,7 +758,7 @@ test('with nothing left to suggest, the page shows its empty state', async ({ pa
 		expect(saved.ok()).toBe(true);
 	}
 
-	await page.goto('/admin/images/suggest-tags');
+	await gotoRetrying(page, '/admin/images/suggest-tags');
 	await expect(page.locator('li.rowcard')).toHaveCount(0);
 
 	// The framed empty card, not a bare line: a heading above a row title's size,

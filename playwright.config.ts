@@ -96,6 +96,12 @@ const UT_SPECS = ['**/ut-stat.spec.ts', '**/storage-breakdown.spec.ts'];
 // suggest-tags rides the upload server: its Save writes tag rows, and the
 // shared server's DB is read-only by convention (SONA-220).
 const UPLOAD_SPECS = ['**/upload.spec.ts', '**/suggest-tags.spec.ts'];
+// tag-suggestions stays on the SHARED server — it writes no rows, it only reads
+// the two admin forms with the lookup endpoint intercepted. What it cannot take
+// is the parallel project: its tests log in and then navigate, and a SvelteKit
+// client navigation landing after the fill detaches the form under the
+// assertion. Serial, one worker, same read-only server (SONA-220).
+const TAG_SUGGESTION_SPEC = '**/tag-suggestions.spec.ts';
 
 // Seed a fresh throwaway D1 first, then boot the dev server against it. Seeding
 // here (not in globalSetup) guarantees it finishes before the server reads the
@@ -136,7 +142,13 @@ export default defineConfig({
 	projects: [
 		{
 			name: 'chromium',
-			testIgnore: [RECOVERY_SPEC, ...UT_SPECS, ...UPLOAD_SPECS],
+			testIgnore: [RECOVERY_SPEC, ...UT_SPECS, ...UPLOAD_SPECS, TAG_SUGGESTION_SPEC],
+			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
+		},
+		{
+			name: 'tag-suggestions',
+			testMatch: TAG_SUGGESTION_SPEC,
+			workers: 1,
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
 		},
 		{

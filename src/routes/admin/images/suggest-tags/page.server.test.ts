@@ -288,12 +288,19 @@ describe('suggest-tags save action', () => {
 		expect(await tagNamesOf(db, 1)).toEqual([]);
 	});
 
-	it('saves nothing when every chip was left out', async () => {
+	it('refuses an empty list rather than reporting a save of nothing', async () => {
+		// The tray cancels this submit, so an empty field only arrives from a
+		// hand-made post or a form submitted before the page hydrated. Reporting
+		// success would put "Saved 0 tags" on a row nothing was written to.
 		const { db, platform } = makeDb();
 		await seedImage(db, 1, BSKY);
 
-		const result = await actions.save({ request: form({ id: '1', tags: '' }), platform } as never);
-		expect(result).toMatchObject({ savedId: 1, savedTags: [] });
+		const empty = await actions.save({ request: form({ id: '1', tags: '' }), platform } as never);
+		expect(empty).toMatchObject({ status: 400, data: { error: 'invalid_request' } });
+		// Separators and blanks alone sanitize down to nothing, and are refused the
+		// same way rather than deleting the row's tags.
+		const blank = await actions.save({ request: form({ id: '1', tags: ' , ,' }), platform } as never);
+		expect(blank).toMatchObject({ status: 400, data: { error: 'invalid_request' } });
 		expect(await tagNamesOf(db, 1)).toEqual([]);
 	});
 });

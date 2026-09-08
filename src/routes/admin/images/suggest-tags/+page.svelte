@@ -127,6 +127,15 @@
 		pills[id]?.focus();
 	}
 
+	/** Save with nothing picked. Blanked first for the reason the failure branch
+	 *  blanks: a repeat click writes the sentence the region already holds, and an
+	 *  unchanged region announces nothing. */
+	async function refuseEmptySave(title: string) {
+		announcement = '';
+		await tick();
+		announce(title, m.admin_suggest_tags_save_needs_tag());
+	}
+
 	function setSaving(id: number, on: boolean) {
 		const next = new Set(saving);
 		if (on) next.add(id);
@@ -336,6 +345,11 @@
 							// is in flight, and a save with nothing picked, both do nothing.
 							if (saving.has(row.id) || chosen.length === 0) {
 								cancel();
+								// A save refused for having nothing picked is otherwise silent:
+								// the button stays where it was and the row does not move. Say
+								// what to do first. A refusal during a save says nothing — the
+								// region already holds the Saving sentence.
+								if (chosen.length === 0) refuseEmptySave(row.title);
 								return;
 							}
 							setSaving(row.id, true);
@@ -421,18 +435,28 @@
 							type="submit"
 							class="btn btn-primary tag-btn-sm"
 							aria-disabled={chosen.length === 0 || saving.has(row.id)}
-							aria-label={m.admin_suggest_tags_row_save_label({
-								count: chosen.length,
-								title: row.title
-							})}
+							aria-label={saving.has(row.id)
+								? m.admin_suggest_tags_row_saving_label({ title: row.title })
+								: m.admin_suggest_tags_row_save_label({
+										count: chosen.length,
+										title: row.title
+									})}
 						>
-							{#if saving.has(row.id)}<LoaderCircle size={14} class="tag-spin" aria-hidden="true" />{/if}
-							{m.admin_suggest_tags_row_save({ count: chosen.length })}
+							{#if saving.has(row.id)}
+								<!-- The spinner alone says the row is working to anyone watching
+								     it; the label has to say so too, and the count it was
+								     offering is no longer what the button does. The live region
+								     carries the sentence with the count. -->
+								<LoaderCircle size={14} class="tag-spin" aria-hidden="true" />
+								{m.admin_suggest_tags_row_saving_short()}
+							{:else}
+								{m.admin_suggest_tags_row_save({ count: chosen.length })}
+							{/if}
 						</button>
 						<!-- Refused while the save runs, like Save beside it: closing the
 						     tray mid-save leaves the row with a heading and nothing else once
 						     the save answers. aria-disabled, so it stays reachable and says
-						     why; the handler above refuses the click. -->
+						     why; dismiss() returns early while the row is saving. -->
 						<button
 							type="button"
 							class="tag-btn-text"

@@ -174,7 +174,12 @@ describe('the backfill rows', () => {
 		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_searching\(\{ title: row\.title \}\)/);
 		// Try again is not the same action as Suggest, so it is not named like it.
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_try_again\(\{ title: row\.title \}\)\}/);
-		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_save_label\(\{/);
+		// And Save reads "Saving…" while its own save runs, so its name follows the
+		// same way the pill's does.
+		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_save_label\(\{/);
+		expect(backfillPage).toMatch(
+			/m\.admin_suggest_tags_row_saving_label\(\{ title: row\.title \}\)/
+		);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_dismiss\(\{ title: row\.title \}\)\}/);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_edit_image_label\(\{ title: row\.title \}\)\}/);
 	});
@@ -214,7 +219,7 @@ describe('the backfill rows', () => {
 		// class spins on both surfaces. That it actually animates is asserted in
 		// the browser, in tests/e2e/tag-suggestions.spec.ts.
 		expect(backfillPage).toMatch(
-			/saving\.has\(row\.id\)\}<LoaderCircle size=\{14\} class="tag-spin" aria-hidden="true" \/>/
+			/<LoaderCircle size=\{14\} class="tag-spin" aria-hidden="true" \/>\s*\{m\.admin_suggest_tags_row_saving_short\(\)\}/
 		);
 	});
 

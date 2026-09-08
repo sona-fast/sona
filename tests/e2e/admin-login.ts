@@ -109,3 +109,21 @@ export async function adminLogin(
 	await page.click('button[type="submit"]');
 	await page.waitForURL(/\/admin\/images/);
 }
+
+/** adminLogin resolves as soon as the login navigation commits, so the admin
+ * page it lands on can still be settling — a goto issued into that lands as
+ * net::ERR_ABORTED. Wait for the landed page, then navigate, retrying the
+ * navigation if the abort still wins the race. */
+export async function gotoAfterLogin(page: Page, path: string) {
+	await page.waitForLoadState('load');
+	await gotoRetrying(page, path);
+}
+
+/** The retry alone, for a navigation issued mid-test rather than straight after
+ * a login: the admin pages run client-side work after every load, and a goto
+ * that races it aborts the same way. */
+export async function gotoRetrying(page: Page, path: string) {
+	await expect(async () => {
+		await page.goto(path);
+	}).toPass({ timeout: 15_000 });
+}

@@ -979,6 +979,23 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		);
 	});
 
+	// And so does the row's Dismiss. A cursor and a hover that stops brightening
+	// say nothing on a touch screen, so the three refused controls carry the same
+	// fill and the same label mix — which puts Dismiss's label under the same
+	// 4.5:1 bar the loop above measures.
+	it('the refused Dismiss button reuses the disabled pill label mix on the same fill', () => {
+		const rule = css.match(
+			/^\.tag-btn-text\[aria-disabled='true'\],\n\.tag-btn-text\[aria-disabled='true'\]:hover\s*\{([^}]*)\}/m
+		)?.[1];
+		if (!rule) throw new Error('the refused Dismiss button rule is missing from app.css');
+		expect(rule).toMatch(/background:\s*var\(--secondary\)\s*;/);
+		expect(rule).toMatch(
+			new RegExp(
+				`color:\\s*color-mix\\(in srgb,\\s*var\\(--foreground\\)\\s*${disabledMix}%,\\s*var\\(--secondary\\)\\)`
+			)
+		);
+	});
+
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			const border = name.endsWith('light') ? linkColor : (s: string) => blockToken(s, 'primary');

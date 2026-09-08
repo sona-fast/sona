@@ -856,7 +856,13 @@ a.tag-pill {
 .tag-btn-text {
 	padding: 8px 10px;
 	min-height: 36px;
-	border: none;
+	/* Transparent rather than none: the refused state below draws a real border,
+	   and a border appearing from nothing would widen the button by 2px as a save
+	   starts, nudging the row it sits in. */
+	border: 1px solid transparent;
+	/* The capsule the refused border draws, matching Save and the pill it sits
+	   beside. Invisible at rest, where the border is transparent. */
+	border-radius: var(--radius-pill);
 	background: none;
 	color: var(--muted-foreground);
 	font-family: var(--font-primary);
@@ -871,14 +877,17 @@ a.tag-pill {
 	color: var(--foreground);
 }
 
-/* Refused while a save runs. The label still has to be read — aria-disabled
-   keeps it in the tab order — and --muted-foreground already sits near the
-   4.5:1 floor on a card, so dimming it further would fail the bar the pill's
-   disabled mix was chosen to clear. The state shows in the cursor and in the
-   hover that no longer brightens. */
+/* Refused while a save runs. A cursor and a hover that no longer brightens say
+   nothing on a touch screen, where there is neither — so it takes the same
+   inert treatment as the Save button and the row pill beside it, and the three
+   refused controls read as one state. The label still has to be read
+   (aria-disabled keeps it in the tab order), and the same mix that carries the
+   other two clears 4.5:1 on --secondary in every theme. */
 .tag-btn-text[aria-disabled='true'],
 .tag-btn-text[aria-disabled='true']:hover {
-	color: var(--muted-foreground);
+	background: var(--secondary);
+	color: color-mix(in srgb, var(--foreground) 75%, var(--secondary));
+	border: 1px solid var(--border);
 	cursor: default;
 }
 

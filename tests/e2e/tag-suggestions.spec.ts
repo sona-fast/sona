@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
-import { adminLogin } from './admin-login';
+import { adminLogin, gotoAfterLogin } from './admin-login';
 
 // The "Suggest tags" control on /admin/upload, end to end (SONA-220).
 //
@@ -35,23 +35,18 @@ const pill = (page: Page) => page.getByRole('button', { name: 'Suggest tags', ex
 // The one live region on the field: role=status, visually hidden, written into.
 const liveRegion = (page: Page) => page.locator('.field > p.sr-only[role="status"]');
 
-/** adminLogin resolves as soon as the login navigation commits, so the admin
- * page it lands on can still be settling — a goto issued into that lands as
- * net::ERR_ABORTED. Wait for the landed page, then navigate, retrying the
- * navigation if the abort still wins the race. */
-async function gotoAfterLogin(page: Page, path: string) {
-	await page.waitForLoadState('load');
-	await expect(async () => {
-		await page.goto(path);
-	}).toPass({ timeout: 15_000 });
-}
-
 async function openUploadForm(page: Page) {
 	await adminLogin(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/upload');
 	await expect(tagsInput(page)).toBeVisible();
 	// The pill only runs once the source field holds a post URL it recognises.
-	await page.fill('input[name="sourcePostUrl"]', BSKY_POST);
+	// Retried as a pair: a SvelteKit client navigation landing after the fill
+	// swaps the document, which drops the value and leaves the pill refusing —
+	// with the fill itself sometimes failing as a detached element first.
+	await expect(async () => {
+		await page.fill('input[name="sourcePostUrl"]', BSKY_POST);
+		await expect(pill(page)).toHaveAttribute('aria-disabled', 'false', { timeout: 2000 });
+	}).toPass({ timeout: 15_000 });
 }
 
 test('the pill refuses to run until the source URL is a post it recognises', async ({ page }) => {
@@ -274,6 +269,25 @@ test('marking NSFW a second time is announced again, and a fresh lookup clears t
 	});
 	await pill(page).click();
 	await expect(page.getByText('Rated safe by entail.dev')).toBeVisible();
+	await expect(ratingRegion(page)).toHaveText('');
+
+	// And when the next lookup returns the rating the last one did. The note
+	// clears on the lookup, not on the rating changing value, so two questionable
+	// images in a row do not leave the second one holding the first one's
+	// sentence.
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['kirin'],
+		rating: 'questionable',
+		imageCount: 1
+	});
+	await pill(page).click();
+	await nsfwBox(page).uncheck();
+	await markNsfw(page).click();
+	await expect(ratingRegion(page)).toHaveText(
+		'The NSFW box is now checked. Sona saves the change when you submit the form.'
+	);
+	await pill(page).click();
 	await expect(ratingRegion(page)).toHaveText('');
 });
 

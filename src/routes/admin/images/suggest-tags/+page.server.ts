@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { and, desc, eq, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { artists, imageTags, images } from '$lib/server/db/schema';
-import { readTagInput, replaceImageTags } from '$lib/server/image-tags';
+import { parseImageTags, readTagInput, replaceImageTags } from '$lib/server/image-tags';
 import { classifySourceUrl } from '$lib/tags';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -122,6 +122,11 @@ export const actions: Actions = {
 		// field to word two refusals for, so both problems answer the same way.
 		const { problem: tagsProblem, value: tagNames } = readTagInput(String(data.get('tags') ?? ''));
 		if (tagsProblem) return fail(400, { error: 'too_many_tags' });
+		// The tray refuses a save with nothing picked, so an empty list only reaches
+		// here from a hand-made post or a form submitted before the page hydrated.
+		// Refusing matches what the tray does: a save that stores nothing should not
+		// report a success the row would then show as "Saved 0 tags".
+		if (parseImageTags(tagNames).length === 0) return fail(400, { error: 'invalid_request' });
 
 		const row = await db.select({ id: images.id }).from(images).where(eq(images.id, id)).get();
 		if (!row) return fail(404, { error: 'not_found' });
