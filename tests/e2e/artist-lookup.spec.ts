@@ -484,7 +484,7 @@ test.describe('with a key saved', () => {
 			'FuzzySearch is limiting how often your site can search right now.'
 		);
 		await expect(panel(page)).toContainText(
-			'Sona sent this file to FuzzySearch while the image was private.'
+			'Sona sent this file to FuzzySearch while it was marked private.'
 		);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toBeVisible();
 
@@ -538,6 +538,68 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
 	});
 
+	// The upload page's own pair, the same two orders as the edit page's below.
+	// The notice used to read the live Private box, so ticking it after a
+	// resolved lookup claimed a send that was not marked private.
+	test('the upload page does not call a published lookup private after the fact', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).not.toContainText('Sona sent this file to FuzzySearch');
+
+		await page.check('input[name="published"]');
+		await expect(page.locator('#lookup-hint')).toContainText('This image is private.');
+		await expect(panel(page)).not.toContainText('Sona sent this file to FuzzySearch');
+	});
+
+	// And back the other way: the file that went out was the private one, so
+	// unticking cannot rewrite that. The hint is about the NEXT click, so it goes.
+	test('the upload page keeps the notice after Private is unticked', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		const privateBox = page.locator('input[name="published"]');
+		await privateBox.check();
+		await expect(page.locator('#lookup-hint')).toContainText('This image is private.');
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).toContainText(
+			'Sona sent this file to FuzzySearch while it was marked private.'
+		);
+
+		await privateBox.uncheck();
+		await expect(page.locator('#lookup-hint')).not.toContainText('This image is private.');
+		await expect(panel(page)).toContainText('Sona sent this file to FuzzySearch');
+	});
+
+	// The same snapshot on a variant tile, whose notice renders on the tile
+	// itself rather than in the panel.
+	test('a variant tile holds its own private disclosure', async ({ page }) => {
+		await stubLookup(page, otherArtistBody());
+		await twoDoneTiles(page);
+
+		const privateBox = page.locator('input[name="published"]');
+		await privateBox.check();
+		await tileLookup(page).nth(1).click();
+		await expect(page.locator('.tile-private-notice')).toContainText(
+			'Sona sent this file to FuzzySearch while it was marked private.'
+		);
+
+		// Unticking leaves the send that already happened described as it was.
+		await privateBox.uncheck();
+		await expect(page.locator('.tile-private-notice')).toHaveCount(1);
+
+		// And the parent tile, never looked up, never claims a send.
+		await tileLookup(page).nth(0).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).not.toContainText('Sona sent this file to FuzzySearch');
+	});
+
 	// The disclosure used to read the image as it was last SAVED, so an operator
 	// who ticked Private and then ran the lookup was told nothing either before
 	// the click or after it, while the file went to FuzzySearch just the same.
@@ -555,7 +617,7 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
 		await expect(panel(page)).toContainText(
-			'Sona sent this file to FuzzySearch while the image was private.'
+			'Sona sent this file to FuzzySearch while it was marked private.'
 		);
 
 		// And back the other way. The hint is about the NEXT click, so it goes;
@@ -601,7 +663,7 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
 		await expect(panel(page)).toContainText(
-			'Sona sent this file to FuzzySearch while the image was private.'
+			'Sona sent this file to FuzzySearch while it was marked private.'
 		);
 	});
 

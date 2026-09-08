@@ -1538,7 +1538,7 @@
 	"admin_lookup_signed_out_body": "管理者セッションの有効期限が切れました。サインインし直してから検索してください。",
 	"admin_lookup_no_key_eyebrow": "キーがありません",
 	"admin_lookup_no_key_body": "このサイトにはFuzzySearchのキーがもうありません。設定でキーを追加するか、アーティストを手で入力してください。",
-	"admin_lookup_private_notice": "この画像が非公開の状態で、ファイルをFuzzySearchに送信しました。",
+	"admin_lookup_private_notice": "この画像が非公開に設定された状態で、ファイルをFuzzySearchに送信しました。",
 	"admin_lookup_from_lookup": "検索で入力",
 	"admin_lookup_rating_tag": "{sites}でのレーティングは{rating}",
 	"admin_lookup_rating_tag_parent": "{sites}でのレーティングは{rating} · 親",

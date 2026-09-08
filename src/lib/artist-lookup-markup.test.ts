@@ -250,12 +250,16 @@ describe('the panel', () => {
 	// The file has already gone out on a failure too, so both pages key the
 	// notice off lookupSentFile rather than off a result (SONA-156 round 1).
 	it('shows the notice whenever the file actually went out', () => {
-		expect(UPLOAD).toMatch(/privateNotice=\{isPrivate && lookupSentFile\(/);
+		expect(UPLOAD).toMatch(/privateNotice=\{sharedSentPrivate && lookupSentFile\(/);
 		// And on a variant tile whose lookup ran while Private was checked.
-		expect(UPLOAD).toMatch(/isPrivate && lookupSentFile\(tile\.lookup\)/);
-		// The notice describes a send that already happened, so the edit page
-		// reads the state as it was when the request fired. Read live, a tick made
-		// after the click claimed the published file that went out was private.
+		expect(UPLOAD).toMatch(/tile\.sentPrivate && lookupSentFile\(tile\.lookup\)/);
+		// The notice describes a send that already happened, so both pages read
+		// the state as it was when the request fired. Read live, a tick made after
+		// the click claimed the published file that went out was private.
+		expect(UPLOAD).toMatch(
+			/function startLookup\(key: number\)[\s\S]{0,600}?tile\.sentPrivate = isPrivate;/
+		);
+		expect(UPLOAD).toContain('const sharedSentPrivate = $derived(parentTile?.sentPrivate ?? false)');
 		expect(EDIT).toMatch(/privateNotice=\{sentPrivate && lookupSentFile\(/);
 		expect(EDIT).toMatch(
 			/function startLookup\(\)[\s\S]{0,600}?sentPrivate = sendingPrivate;/

@@ -1939,7 +1939,7 @@
 	"admin_lookup_signed_out_body": "Your admin session expired. Sign in again, then look up the artist.",
 	"admin_lookup_no_key_eyebrow": "No key",
 	"admin_lookup_no_key_body": "This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.",
-	"admin_lookup_private_notice": "Sona sent this file to FuzzySearch while the image was private.",
+	"admin_lookup_private_notice": "Sona sent this file to FuzzySearch while it was marked private.",
 	"admin_lookup_from_lookup": "From lookup",
 	"admin_lookup_rating_tag": "Rated {rating} on {sites}",
 	"admin_lookup_rating_tag_parent": "Rated {rating} on {sites} · parent",

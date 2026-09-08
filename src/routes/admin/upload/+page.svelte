@@ -69,6 +69,11 @@
 		// lookup is possible.
 		file: File | null;
 		lookup: LookupState;
+		// What the Private box read when this tile's request fired. The notice
+		// describes a send that already happened, so reading the box live let a
+		// tick made afterwards claim a file that went out published, and an untick
+		// hide a true notice about a private one.
+		sentPrivate: boolean;
 	};
 	let tiles = $state<Tile[]>([]);
 	let tileKey = 0;
@@ -226,7 +231,8 @@
 				nsfw: false,
 				// A refused file is never looked up either, so it holds no bytes.
 				file: error ? null : file,
-				lookup: { kind: 'idle' }
+				lookup: { kind: 'idle' },
+				sentPrivate: false
 			};
 			tiles = [...tiles, tile];
 			created.push(tile.key);
@@ -454,6 +460,7 @@
 
 	const parentTile = $derived(groupMode === 'new' ? (tiles[parentIndex] ?? null) : null);
 	const sharedLookup = $derived<LookupState>(parentTile?.lookup ?? { kind: 'idle' });
+	const sharedSentPrivate = $derived(parentTile?.sentPrivate ?? false);
 	const sharedRating = $derived(
 		sharedLookup.kind === 'results' ? strictestRating(sharedLookup.data.matches) : null
 	);
@@ -469,6 +476,7 @@
 		const controller = new AbortController();
 		lookupAborts.set(key, controller);
 		tile.lookup = { kind: 'searching' };
+		tile.sentPrivate = isPrivate;
 		if (isParent(key)) resetSharedPrefill();
 		void runLookup({ file: tile.file }, { signal: controller.signal }).then((next) => {
 			// Cancelled, or the tile was removed while the request was out.
@@ -835,8 +843,8 @@
 							{/if}
 							<!-- The file went to FuzzySearch while the shared Private box was
 							     checked: say so on the tile the way the panel says it for the
-							     parent. -->
-							{#if isPrivate && lookupSentFile(tile.lookup)}
+							     parent. Read from the tile's own snapshot, not the live box. -->
+							{#if tile.sentPrivate && lookupSentFile(tile.lookup)}
 								<p class="tile-private-notice">{m.admin_lookup_private_notice()}</p>
 							{/if}
 							<input
@@ -1010,7 +1018,7 @@
 				edited={sharedEdited}
 				sourceUrlHeld={sharedUrlHeld}
 				{appliedArtist}
-				privateNotice={isPrivate && lookupSentFile(sharedLookup)}
+				privateNotice={sharedSentPrivate && lookupSentFile(sharedLookup)}
 				onclose={() => closeSharedLookup()}
 				onretry={() => parentTile && startLookup(parentTile.key)}
 				oncancel={() => {
