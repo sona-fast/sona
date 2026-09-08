@@ -58,10 +58,18 @@ async function oneDoneTile(page: Page) {
 	await page.route('**/api/upload', (route) =>
 		route.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/x1.png' }) })
 	);
-	await page.goto('/admin/upload');
-	await waitForDropAttachment(page, '.dropzone');
-	await dropOn(page, '.dropzone', [{ name: 'piece.png', type: 'image/png' }]);
-	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/x1.png', { timeout: 15_000 });
+	// Retried whole, the way the tab opener and the save step are: in `vite dev`
+	// the first request compiles the route, and a navigation or a drop that lands
+	// mid-hydration would otherwise sink the rest of the serial block. The goto
+	// is inside the block, so each attempt starts from a clean upload page.
+	await expect(async () => {
+		await page.goto('/admin/upload');
+		await waitForDropAttachment(page, '.dropzone');
+		await dropOn(page, '.dropzone', [{ name: 'piece.png', type: 'image/png' }]);
+		await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/x1.png', {
+			timeout: 15_000
+		});
+	}).toPass({ timeout: 30_000 });
 }
 
 /** Two done tiles: the first is the parent, the second a variant. The whole
@@ -71,13 +79,18 @@ async function twoDoneTiles(page: Page) {
 	await page.route('**/api/upload', (route) =>
 		route.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/x1.png' }) })
 	);
-	await page.goto('/admin/upload');
-	await waitForDropAttachment(page, '.dropzone');
-	await dropOn(page, '.dropzone', [
-		{ name: 'front.png', type: 'image/png' },
-		{ name: 'back.png', type: 'image/png' }
-	]);
-	await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue('/x1.png', { timeout: 15_000 });
+	// Same retry shape as oneDoneTile, for the same reason.
+	await expect(async () => {
+		await page.goto('/admin/upload');
+		await waitForDropAttachment(page, '.dropzone');
+		await dropOn(page, '.dropzone', [
+			{ name: 'front.png', type: 'image/png' },
+			{ name: 'back.png', type: 'image/png' }
+		]);
+		await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue('/x1.png', {
+			timeout: 15_000
+		});
+	}).toPass({ timeout: 30_000 });
 }
 
 /** A confident match whose local artist is somebody else — what the variant
@@ -641,6 +654,19 @@ test.describe('with a key saved', () => {
 		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
 
 		// The later route wins: the variant's match names a different artist.
+		await stubLookup(page, otherArtistBody());
+		await tileLookup(page).nth(1).click();
+		await expect(page.locator('.tile-result-warn')).toHaveText(
+			'Different artist: kuttoya on FurAffinity'
+		);
+	});
+
+	// The shared artist is far more often picked from the select than applied
+	// from the panel, and the warning used to be silent in exactly that case.
+	test('says so for an artist picked from the select by hand', async ({ page }) => {
+		await twoDoneTiles(page);
+		await page.locator('select[name="artistId"]').selectOption({ label: 'Test Artist' });
+
 		await stubLookup(page, otherArtistBody());
 		await tileLookup(page).nth(1).click();
 		await expect(page.locator('.tile-result-warn')).toHaveText(
