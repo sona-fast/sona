@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { characters, images } from '$lib/server/db/schema';
+import { characters, images, siteSettings } from '$lib/server/db/schema';
 import { REFERENCE_BECOMES_VARIANT_ERROR, VARIANT_BECOMES_REFERENCE_ERROR } from '$lib/server/variants';
 import { load, actions } from './+page.server';
 
@@ -278,5 +278,31 @@ describe('admin image edit — load ownerCharacter', () => {
 			ownerCharacter: unknown;
 		};
 		expect(data.ownerCharacter).toBe(null);
+	});
+});
+
+describe('admin image edit — load lookupEnabled (SONA-156)', () => {
+	const lookupEnabled = async (platform: App.Platform) =>
+		((await load({ params: { id: '5' }, platform } as never)) as { lookupEnabled: boolean })
+			.lookupEnabled;
+
+	it('is false with no key anywhere', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		expect(await lookupEnabled(platform)).toBe(false);
+	});
+
+	it('is true for a key saved in settings', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: 'a-saved-key' });
+		expect(await lookupEnabled(platform)).toBe(true);
+	});
+
+	it('is true for the deploy secret alone', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		const withEnv = { env: { ...platform.env, FUZZYSEARCH_API_KEY: 'from-deploy' } };
+		expect(await lookupEnabled(withEnv as unknown as App.Platform)).toBe(true);
 	});
 });
