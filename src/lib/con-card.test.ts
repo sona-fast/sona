@@ -632,10 +632,20 @@ describe('isEmbeddableAvatarType', () => {
 		expect(isEmbeddableAvatarType('Image/PNG; charset=binary')).toBe(true);
 	});
 
-	it('refuses the proxy download type, svg, and a missing header', () => {
-		const refused = ['application/octet-stream', 'image/svg+xml', 'text/html', '', null, undefined];
+	it('refuses the proxy download type and svg', () => {
+		const refused = ['application/octet-stream', 'image/svg+xml', 'text/html'];
 		for (const type of refused) {
 			expect(isEmbeddableAvatarType(type), String(type)).toBe(false);
+		}
+	});
+
+	// The guard also runs on the direct same-origin avatar URL, and the proxy
+	// always sets a content-type. Only a PRESENT, non-raster type is a refusal —
+	// treating a missing header as one drops a perfectly good avatar to the
+	// initial.
+	it('takes a response with no content-type at all', () => {
+		for (const type of ['', null, undefined]) {
+			expect(isEmbeddableAvatarType(type), String(type)).toBe(true);
 		}
 	});
 });

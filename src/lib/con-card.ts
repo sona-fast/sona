@@ -626,11 +626,13 @@ export function conCardPrintSheetSvg(opts: Omit<ConCardOptions, 'variant'>): str
  * same-origin byte proxy hands anything outside the stored raster allowlist back
  * as `application/octet-stream` with a download disposition, and a data URI
  * built from that never draws: the card would save with an empty ring and no
- * word to the operator. Read off GALLERY_ACCEPT so this and the server's
- * allowlist can't drift apart.
+ * word to the operator. Only a PRESENT, non-raster type is a failure — the
+ * proxy always sets a content-type, so a response without one is a direct
+ * same-origin avatar and stays embeddable. Read off GALLERY_ACCEPT so this and
+ * the server's allowlist can't drift apart.
  */
 export function isEmbeddableAvatarType(contentType: string | null | undefined): boolean {
-	if (!contentType) return false;
+	if (!contentType) return true;
 	const type = contentType.split(';')[0].trim().toLowerCase();
 	return GALLERY_ACCEPT.split(',').includes(type);
 }

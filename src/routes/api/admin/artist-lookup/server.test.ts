@@ -455,12 +455,15 @@ describe('artist-lookup — stored image by id', () => {
 });
 
 describe('artist-lookup — failure mapping and the refused marker', () => {
-	it('records the refusal on a 401 and clears it on the next success', async () => {
+	// 502, not 401: the admin gate answers an expired session with its own 401
+	// and a plain-text body, so a 401 here would be indistinguishable from a
+	// logged-out admin and the caller's res.json() would throw.
+	it('records the refusal on a 502 and clears it on the next success', async () => {
 		const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		searchImage.mockResolvedValue({ ok: false, reason: 'key_refused' });
 
 		const refused = await POST(multipartEvent(platform, pngFile()));
-		expect(refused.status).toBe(401);
+		expect(refused.status).toBe(502);
 		expect(await refused.json()).toEqual({ enabled: true, error: 'key_refused' });
 		// The source rides along with the date: this refusal was the deploy
 		// secret's, and the settings card must not blame a stored key for it.
@@ -484,6 +487,47 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toMatch(
 			/^\d{4}-\d{2}-\d{2}T.*\|stored$/
 		);
+	});
+
+	// A success by the deploy secret says nothing about the stored key
+	// FuzzySearch refused: clearing that marker would show "Connected" for a key
+	// still being refused once the secret is dropped again.
+	it('leaves a marker for the other key source standing on success', async () => {
+		const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z|stored');
+		searchImage.mockResolvedValue({ ok: true, matches: [] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(200);
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe(
+			'2026-09-01T00:00:00.000Z|stored'
+		);
+	});
+
+	it('clears the marker when the key that succeeded is the refused one', async () => {
+		const { db, platform } = makeEnv();
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'from-settings');
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z|stored');
+		searchImage.mockResolvedValue({ ok: true, matches: [] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(200);
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe('');
+	});
+
+	// A marker written before the source was recorded reads as 'stored', so a
+	// stored-key success still clears it.
+	it('clears a legacy bare-date marker on a stored-key success', async () => {
+		const { db, platform } = makeEnv();
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'from-settings');
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z');
+		searchImage.mockResolvedValue({ ok: true, matches: [] });
+
+		await POST(multipartEvent(platform, pngFile()));
+
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe('');
 	});
 
 	it('writes nothing on a clean success with no marker standing', async () => {

@@ -1535,12 +1535,21 @@
 						return async ({ result, update }) => {
 							await update({ reset: false });
 							removingFuzzysearchKey = false;
-							confirmingFuzzysearchRemove = false;
-							if (result.type === 'success') toast.success(m.admin_settings_lookup_removed());
-							// Both buttons are gone now — send focus to the field that
-							// replaced them rather than dropping it on <body>.
-							await tick();
-							fuzzysearchKeyInput?.focus();
+							if (result.type === 'success') {
+								confirmingFuzzysearchRemove = false;
+								toast.success(m.admin_settings_lookup_removed());
+								// Both buttons are gone now — send focus to the field that
+								// replaced them rather than dropping it on <body>.
+								await tick();
+								fuzzysearchKeyInput?.focus();
+							} else {
+								// The key is still stored: closing the panel here would look
+								// exactly like pressing Keep. Say it failed, leave the
+								// confirmation open, and put focus back on Keep.
+								toast.error(m.admin_something_wrong());
+								await tick();
+								fuzzysearchKeepButton?.focus();
+							}
 						};
 					}}>
 						<button

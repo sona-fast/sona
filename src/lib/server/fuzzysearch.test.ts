@@ -12,6 +12,7 @@ import {
 	handleProfileUrl,
 	findLocalArtists,
 	findArtistsByName,
+	fuzzysearchKeyDisplayRecord,
 	fuzzysearchRefusedMarker,
 	parseFuzzysearchRefusedMarker,
 	type LookupMatch
@@ -466,6 +467,20 @@ describe('findArtistsByName', () => {
 	it('does not match on a substring, or on nothing', () => {
 		expect(findArtistsByName(rows, 'kutt')).toEqual([]);
 		expect(findArtistsByName(rows, '  ')).toEqual([]);
+	});
+});
+
+describe('fuzzysearchKeyDisplayRecord', () => {
+	// Always eight bullets: a run sized to the key would tell anyone reading the
+	// settings card exactly how long the saved key is.
+	it('masks with a fixed bullet run whatever the key length', () => {
+		expect(fuzzysearchKeyDisplayRecord('abcdefgh1234')).toBe('••••••••1234');
+		expect(fuzzysearchKeyDisplayRecord('a'.repeat(64) + 'wxyz')).toBe('••••••••wxyz');
+		expect(fuzzysearchKeyDisplayRecord('abcde')).toBe('••••••••bcde');
+	});
+
+	it('shows no tail for a key too short to have one', () => {
+		expect(fuzzysearchKeyDisplayRecord('abcd')).toBe('••••••••');
 	});
 });
 

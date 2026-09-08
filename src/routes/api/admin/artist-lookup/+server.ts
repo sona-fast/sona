@@ -15,6 +15,7 @@ import {
 	findLocalArtists,
 	fuzzysearchRefusedMarker,
 	normalizeSourceUrl,
+	parseFuzzysearchRefusedMarker,
 	pickPrefillMatch,
 	resolveFuzzysearchKey,
 	searchImage,
@@ -46,7 +47,11 @@ import type { RequestHandler } from './$types';
 
 /** What the UI gets back for a failed lookup, and the status carrying it. */
 const FAILURE_STATUS: Record<LookupFailure, number> = {
-	key_refused: 401,
+	// 502, not 401: the admin gate answers an expired session with its own 401
+	// and a plain-text body, so a 401 here would read as a refused key and the
+	// caller's res.json() would throw. The body's `error` field is what tells
+	// key_refused apart from unavailable.
+	key_refused: 502,
 	rate_limited: 429,
 	too_large: 413,
 	invalid_image: 422,
@@ -174,9 +179,14 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		return failure(result.reason);
 	}
 
-	// The key works — clear a stale refusal marker (only when one is set, so the
-	// happy path costs one read rather than a write).
-	if (await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)) {
+	// The key works — clear a stale refusal marker, but only the marker for the
+	// key that just succeeded (a marker against the other source stays: a deploy
+	// secret succeeding says nothing about the stored key FuzzySearch refused).
+	// Read first, so the happy path costs one read rather than a write.
+	const refusedMarker = parseFuzzysearchRefusedMarker(
+		await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)
+	);
+	if (refusedMarker && refusedMarker.source === resolved.source) {
 		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
 	}
 

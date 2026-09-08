@@ -1980,7 +1980,7 @@ describe('settings — FuzzySearch key', () => {
 
 		expect(result.fuzzysearchKeySet).toBe(true);
 		expect(result.fuzzysearchKeyFromEnv).toBe(false);
-		expect(result.fuzzysearchKeyRecord).toBe('••••••••••••••3k9q');
+		expect(result.fuzzysearchKeyRecord).toBe('••••••••3k9q');
 		expect(JSON.stringify(result)).not.toContain('fs-live-abcdef3k9q');
 	});
 
@@ -2043,8 +2043,9 @@ describe('settings — FuzzySearch key', () => {
 		expect(result.fuzzysearchKeyRefusedAt).toBeNull();
 	});
 
-	it('masks a short key to at least eight bullets', () => {
+	it('masks every key to the same eight bullets, whatever its length', () => {
 		expect(fuzzysearchKeyDisplayRecord('abcd1234')).toBe('••••••••1234');
+		expect(fuzzysearchKeyDisplayRecord('fs-live-abcdef3k9q')).toBe('••••••••3k9q');
 		expect(fuzzysearchKeyDisplayRecord('abc')).toBe('••••••••');
 	});
 });
@@ -2160,6 +2161,25 @@ describe('artist lookup section markup (SONA-156)', () => {
 		const remove = handler('removeFuzzysearchKey');
 		expect(remove).toContain('({ cancel })');
 		expect(remove).toMatch(guardsOn('removingFuzzysearchKey'));
+	});
+
+	// A failed removal left the key in place, so closing the panel would look
+	// exactly like pressing Keep and the operator would never learn it failed.
+	it('closes the confirmation only on success, and reports a failure', () => {
+		const start = src.indexOf('action="?/removeFuzzysearchKey" use:enhance=');
+		expect(start).toBeGreaterThan(-1);
+		const handler = src.slice(start, src.indexOf('}}>', start));
+		const success = handler.slice(handler.indexOf("if (result.type === 'success')"));
+		const branch = success.slice(0, success.indexOf('} else {'));
+		expect(branch).toContain('confirmingFuzzysearchRemove = false;');
+		expect(branch).toContain('m.admin_settings_lookup_removed()');
+		// Exactly one close, and it is the one inside the success branch.
+		expect(handler.match(/confirmingFuzzysearchRemove = false;/g)).toHaveLength(1);
+		// The failure path says so and puts focus back on the Keep button, which
+		// is still mounted.
+		const failed = success.slice(success.indexOf('} else {'));
+		expect(failed).toContain('toast.error(m.admin_something_wrong())');
+		expect(failed).toContain('fuzzysearchKeepButton?.focus()');
 	});
 
 	// A live region that mounts with its text already in place is not announced,
