@@ -221,10 +221,13 @@ export function normalizeSourceUrl(url: string | null | undefined): string {
 	// `/view/12345`, and e621's old post path (`/post/show/160`) is today's
 	// `/posts/160`. An operator who saved either gets no clash warning without
 	// the fold. e621's old path also carried the tag string as a trailing
-	// segment (`/post/show/160/canine`), which is the same post; FurAffinity's
-	// stays anchored, since nothing follows the id there.
+	// segment (`/post/show/160/canine`), and Weasyl hangs the title slug off the
+	// submission path (`/submission/5150/some-title`) — both still the same post;
+	// FurAffinity's stays anchored, since nothing follows the id there.
 	if (host === 'furaffinity.net') path = path.replace(/^\/full\/(\d+)$/, '/view/$1');
 	if (host === 'e621.net') path = path.replace(/^\/post\/show\/(\d+)(?:\/.*)?$/, '/posts/$1');
+	if (host === 'weasyl.com')
+		path = path.replace(/^\/submission\/(\d+)(?:\/.*)?$/, '/submission/$1');
 	return host + path;
 }
 

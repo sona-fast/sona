@@ -631,6 +631,32 @@ describe('artist-lookup — source-post clash', () => {
 		expect(body.sourceClash).toMatchObject({ imageId: 1, variantCount: 1 });
 	});
 
+	// The saved link carries Weasyl's title slug while this client builds the bare
+	// submission URL. One post either way, so the warning still has to fire.
+	it('reports a clash when the stored Weasyl URL carries a title slug', async () => {
+		const env = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		env.sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, source_post_url, parent_image_id, created_at)
+			 VALUES (20, 'Sparky at the beach', 'beach', 'https://cdn/20.png',
+				 'https://www.weasyl.com/submission/5150/sparky-at-the-beach', NULL, '2026-01-01');`
+		);
+		searchImage.mockResolvedValue({
+			ok: true,
+			matches: [
+				{
+					...FA_EXACT,
+					site: 'Weasyl' as const,
+					siteId: '5150',
+					postUrl: 'https://www.weasyl.com/submission/5150'
+				}
+			]
+		});
+
+		const res = await POST(multipartEvent(env.platform, pngFile()));
+		const body = (await res.json()) as { sourceClash: Record<string, unknown> };
+		expect(body.sourceClash).toMatchObject({ imageId: 20, title: 'Sparky at the beach' });
+	});
+
 	it('does not report an image clashing with its own variant set', async () => {
 		const { platform } = clashSetup();
 		const res = await POST(jsonEvent(platform, { imageId: 2 }));

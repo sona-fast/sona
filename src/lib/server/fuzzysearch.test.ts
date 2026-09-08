@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
 	FUZZYSEARCH_ENDPOINT,
 	FUZZYSEARCH_MAX_DISTANCE,
@@ -175,6 +175,33 @@ describe('searchImage — request shape', () => {
 		// The bound the signal was built with, pinned so it can't silently grow.
 		expect(FUZZYSEARCH_TIMEOUT_MS).toBe(8000);
 	});
+
+	// `instanceof AbortSignal` passes for a signal that never fires, so the one
+	// handed to fetch is driven on fake timers: still live a tick before the
+	// bound, aborted a tick after. AbortSignal.timeout stands in as a
+	// controller on a plain setTimeout, which fake timers can advance.
+	it('hands fetch a signal that aborts at the timeout, not one that never fires', async () => {
+		vi.useFakeTimers();
+		const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+			const controller = new AbortController();
+			setTimeout(() => controller.abort(new DOMException('timed out', 'TimeoutError')), ms);
+			return controller.signal;
+		});
+		try {
+			const { fn, calls } = fakeFetch(jsonResponse([]));
+			await searchImage(new Blob(['x']), 'k', fn);
+
+			expect(timeout).toHaveBeenCalledWith(FUZZYSEARCH_TIMEOUT_MS);
+			const signal = calls[0].init.signal as AbortSignal;
+			vi.advanceTimersByTime(FUZZYSEARCH_TIMEOUT_MS - 1);
+			expect(signal.aborted).toBe(false);
+			vi.advanceTimersByTime(2);
+			expect(signal.aborted).toBe(true);
+		} finally {
+			timeout.mockRestore();
+			vi.useRealTimers();
+		}
+	});
 });
 
 describe('searchImage — failure mapping', () => {
@@ -349,9 +376,7 @@ describe('normalizeSourceUrl', () => {
 	});
 
 	it('keeps path case elsewhere, since most sites are case-sensitive there', () => {
-		expect(normalizeSourceUrl('https://www.weasyl.com/submission/5150/Some-Title')).toBe(
-			'weasyl.com/submission/5150/Some-Title'
-		);
+		expect(normalizeSourceUrl('https://www.weasyl.com/~Kuttoya')).toBe('weasyl.com/~Kuttoya');
 	});
 
 	// Each site's other spelling of one submission: FurAffinity's full-size view
@@ -371,6 +396,23 @@ describe('normalizeSourceUrl', () => {
 		// page there.
 		expect(normalizeSourceUrl('https://www.furaffinity.net/full/12345/extra')).toBe(
 			'furaffinity.net/full/12345/extra'
+		);
+	});
+
+	// Weasyl hangs the title slug off the submission path, and this client builds
+	// the bare spelling — both are the one submission, so an operator who saved
+	// the slugged link still gets the clash warning.
+	it('folds a Weasyl title slug off the submission path', () => {
+		const canonical = 'weasyl.com/submission/5150';
+		expect(normalizeSourceUrl(postUrlFor('Weasyl', '5150', []))).toBe(canonical);
+		expect(normalizeSourceUrl('https://www.weasyl.com/submission/5150')).toBe(canonical);
+		expect(normalizeSourceUrl('https://www.weasyl.com/submission/5150/Some-Title')).toBe(canonical);
+		expect(normalizeSourceUrl('https://www.weasyl.com/submission/5150/some-title/')).toBe(
+			canonical
+		);
+		// A different Weasyl page, not a submission under another spelling.
+		expect(normalizeSourceUrl('https://www.weasyl.com/submissions/5150')).toBe(
+			'weasyl.com/submissions/5150'
 		);
 	});
 
