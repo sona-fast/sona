@@ -11,8 +11,9 @@
 	// live region, so a slow or failed lookup on one image leaves the rest of the
 	// page alone.
 	import { applyAction, enhance } from '$app/forms';
+	import { afterNavigate } from '$app/navigation';
 	import { tick } from 'svelte';
-	import { Check, ImageOff, LoaderCircle, RefreshCw, Tag } from 'lucide-svelte';
+	import { Check, ImageOff, LoaderCircle, Pencil, RefreshCw, Tag } from 'lucide-svelte';
 	import TagSuggestionChips from '$lib/components/TagSuggestionChips.svelte';
 	import { cdnImage, THUMB_WIDTH } from '$lib/img';
 	import { sanitizeTag } from '$lib/tags';
@@ -41,6 +42,10 @@
 	// Rows whose save was refused because the image picked up tags elsewhere
 	// since the list loaded. The row keeps saying so until the page reloads.
 	let conflicts = $state<Record<number, true>>({});
+	// Rows whose save failed for any other reason — the image was deleted in
+	// another tab, say. The live region alone leaves a sighted operator looking
+	// at a row where nothing changed, so the row says so too.
+	let failures = $state<Record<number, true>>({});
 	// Every row with a save in flight, so a save landing on one row does not
 	// re-enable another row's button mid-flight.
 	let saving = $state(new Set<number>());
@@ -50,7 +55,11 @@
 	// warns (and stops tracking) when the container it writes into is not reactive.
 	let pills = $state<Record<number, HTMLButtonElement | null>>({});
 	let statusLines = $state<Record<number, HTMLElement | null>>({});
+	let rowTitles = $state<Record<number, HTMLElement | null>>({});
 	const requestSeq: Record<number, number> = {};
+	// How many rows were on screen when Load more was clicked, so the row that
+	// follows them can take focus once the longer list renders.
+	let grewFrom: number | null = null;
 
 	const stateOf = (id: number): SuggestionState => states[id] ?? { kind: 'idle' };
 
@@ -60,11 +69,16 @@
 			: m.admin_suggest_tags_source_x();
 	}
 
-	async function suggest(id: number, source: 'bluesky' | 'x') {
+	/** One live region serves every row, so each sentence names its image. */
+	function announce(title: string, body: string) {
+		announcement = m.admin_suggest_tags_row_announce({ title, body });
+	}
+
+	async function suggest(id: number, source: 'bluesky' | 'x', title: string) {
 		if (stateOf(id).kind === 'searching') return;
 		const seq = (requestSeq[id] = (requestSeq[id] ?? 0) + 1);
 		states = { ...states, [id]: { kind: 'searching', source } };
-		announcement = readingLabel(source);
+		announce(title, readingLabel(source));
 		// "Try again" lived in the tray that just became the searching skeleton;
 		// the row's pill is the control that survives, so focus stays there.
 		await tick();
@@ -76,7 +90,14 @@
 		// The row is on this page because it has no tags, so nothing is excluded.
 		const next = fromResponse(status, body, []);
 		states = { ...states, [id]: next };
-		announcement = sentenceFor(next);
+		announce(title, sentenceFor(next));
+		// An answer with no chips draws a tray, and the pill focus was sitting on
+		// goes with it; land on the sentence that says why, where Try again is the
+		// next tab stop.
+		if (next.kind !== 'suggested') {
+			await tick();
+			statusLines[id]?.focus();
+		}
 	}
 
 	function onToggle(id: number, tag: string) {
@@ -99,6 +120,25 @@
 		else next.delete(id);
 		saving = next;
 	}
+
+	function setFailure(id: number, on: boolean) {
+		const { [id]: _dropped, ...rest } = failures;
+		failures = on ? { ...rest, [id]: true } : rest;
+	}
+
+	// Load more is a link: the page grows, and the rows already on screen keep
+	// their place. Focus would otherwise stay on a link that is now gone, which
+	// drops it to the top of the document.
+	afterNavigate(async () => {
+		if (grewFrom === null) return;
+		const from = grewFrom;
+		grewFrom = null;
+		// After the longer list has rendered: `data` still holds the rows the page
+		// arrived with while the callback runs.
+		await tick();
+		const first = data.rows[from];
+		if (first) rowTitles[first.id]?.focus();
+	});
 </script>
 
 <div class="page-header">
@@ -145,25 +185,31 @@
 						{/if}
 					</div>
 					<div class="rowbody">
-						<h2 class="rowtitle">
+						<!-- Focusable so Load more can land focus on the first row it added,
+						     rather than leaving it on a link that is gone. -->
+						<h2 class="rowtitle" tabindex="-1" bind:this={rowTitles[row.id]}>
 							{row.title}
-							{#if savedTags}<span class="tag">{m.admin_suggest_tags_saved_tag()}</span>{/if}
 						</h2>
 						<p class="rowmeta">
 							{#if row.artistName}{row.artistName} &middot;{' '}{/if}{sourceLabel(row.source)}
 						</p>
 					</div>
-					{#if !savedTags && !conflicts[row.id]}
-						<!-- Stays put until the row is saved, like the forms' pill: aria-disabled
-						     through the lookup so focus has somewhere to be while the tray shows
-						     the skeleton, and a second click runs the lookup again. -->
+					{#if !savedTags && !conflicts[row.id] && (rowState.kind === 'idle' || rowState.kind === 'searching' || rowState.kind === 'suggested')}
+						<!-- Stays put while the row is idle, looking up, or showing chips, like
+						     the forms' pill: aria-disabled through the lookup so focus has
+						     somewhere to be while the tray shows the skeleton, and a second
+						     click runs the lookup again. It goes once a failure tray takes the
+						     row over, because that tray carries Try again and one row does not
+						     need two controls firing the same lookup. -->
 						<button
 							bind:this={pills[row.id]}
 							type="button"
 							class="tag-pill"
 							aria-disabled={rowState.kind === 'searching'}
-							aria-label={m.admin_suggest_tags_row_suggest({ title: row.title })}
-							onclick={() => suggest(row.id, row.source)}
+							aria-label={rowState.kind === 'searching'
+								? m.admin_suggest_tags_row_searching({ title: row.title })
+								: m.admin_suggest_tags_row_suggest({ title: row.title })}
+							onclick={() => suggest(row.id, row.source, row.title)}
 						>
 							{#if rowState.kind === 'searching'}
 								<LoaderCircle size={14} class="tag-spin" />
@@ -186,11 +232,14 @@
 						{m.admin_suggest_tags_save_conflict()}
 					</p>
 					<div class="tag-actions">
+						<!-- The row's only action once it is saved or refused, so it takes
+						     the pill's shape rather than reading as muted body text. -->
 						<a
-							class="tag-btn-text tag-btn-text-flush"
+							class="tag-pill"
 							href="/admin/images/{row.id}/edit"
 							aria-label={m.admin_suggest_tags_edit_image_label({ title: row.title })}
 						>
+							<Pencil size={14} />
 							{m.admin_suggest_tags_edit_image()}
 						</a>
 					</div>
@@ -209,11 +258,14 @@
 						{/each}
 					</div>
 					<div class="tag-actions">
+						<!-- The row's only action once it is saved or refused, so it takes
+						     the pill's shape rather than reading as muted body text. -->
 						<a
-							class="tag-btn-text tag-btn-text-flush"
+							class="tag-pill"
 							href="/admin/images/{row.id}/edit"
 							aria-label={m.admin_suggest_tags_edit_image_label({ title: row.title })}
 						>
+							<Pencil size={14} />
 							{m.admin_suggest_tags_edit_image()}
 						</a>
 					</div>
@@ -247,11 +299,19 @@
 							{m.admin_tag_suggest_multi_image({ count: rowState.imageCount })}
 						</p>
 					{/if}
+					{#if failures[row.id]}
+						<!-- Split like the conflict above: the eyebrow is a label, the
+						     sentence is body text. The chips stay put, so the Save button
+						     below is still the way to try again. -->
+						<p class="tag-eyebrow warn">{m.admin_suggest_tags_not_saved()}</p>
+						<p class="tag-panel-body">{m.admin_suggest_tags_save_failed()}</p>
+					{/if}
 					<form
 						method="POST"
 						action="?/save"
 						use:enhance={() => {
 							setSaving(row.id, true);
+							setFailure(row.id, false);
 							const accepted = chosen;
 							return async ({ result }) => {
 								setSaving(row.id, false);
@@ -261,7 +321,7 @@
 									// list loaded; the action refused rather than overwrite.
 									conflicts = { ...conflicts, [row.id]: true };
 									states = rest;
-									announcement = m.admin_suggest_tags_save_conflict();
+									announce(row.title, m.admin_suggest_tags_save_conflict());
 									await tick();
 									statusLines[row.id]?.focus();
 									return;
@@ -274,7 +334,11 @@
 									return;
 								}
 								if (result.type !== 'success') {
-									announcement = m.admin_suggest_tags_save_failed();
+									// The chips stay, so the same save can be tried again — but
+									// the row has to show that nothing landed, not only say it
+									// into the live region.
+									setFailure(row.id, true);
+									announce(row.title, m.admin_suggest_tags_save_failed());
 									return;
 								}
 								const written = (result.data?.savedTags as string[] | undefined) ?? accepted;
@@ -285,7 +349,7 @@
 								);
 								saved = { ...saved, [row.id]: labels };
 								states = rest;
-								announcement = m.admin_suggest_tags_saved({ count: written.length });
+								announce(row.title, m.admin_suggest_tags_saved({ count: written.length }));
 								// The button that was clicked is gone with the tray; land focus
 								// on the line that says what happened, once it exists.
 								await tick();
@@ -317,29 +381,37 @@
 							{m.admin_tag_suggest_dismiss()}
 						</button>
 					</form>
-				{:else if rowState.kind !== 'idle' && rowState.kind !== 'applied' && rowState.kind !== 'noSource'}
+				{:else if rowState.kind !== 'idle'}
 					<!-- Every finished state that is not a suggestion: the same tray the
 					     forms draw, from the same mapping, so a row and a form say the
 					     same thing about the same answer. -->
 					{@const tray = trayFor(rowState)}
 					<p class="tag-eyebrow" class:warn={tray.warn}>{tray.title}</p>
-					<p class="tag-panel-body">{tray.body}</p>
+					<!-- Focusable for the same reason as the conflict sentence: the row's
+					     pill is gone with this tray, so focus lands on the line that says
+					     what the lookup answered. -->
+					<p class="tag-panel-body" tabindex="-1" bind:this={statusLines[row.id]}>{tray.body}</p>
 					<div class="tag-actions">
 						{#if tray.retry}
 							<button
 								type="button"
 								class="tag-pill"
 								aria-label={m.admin_suggest_tags_row_try_again({ title: row.title })}
-								onclick={() => suggest(row.id, row.source)}
+								onclick={() => suggest(row.id, row.source, row.title)}
 							>
 								<RefreshCw size={14} />
 								{m.admin_tag_suggest_try_again()}
 							</button>
 						{/if}
+						{#if tray.signIn}
+							<!-- A dead session: another lookup sends the same cookie, so the
+							     way out is the login page. -->
+							<a class="tag-pill" href="/admin/login">{m.admin_tag_suggest_sign_in()}</a>
+						{/if}
 						<button
 							type="button"
 							class="tag-btn-text"
-							class:tag-btn-text-flush={!tray.retry}
+							class:tag-btn-text-flush={!tray.retry && !tray.signIn}
 							aria-label={m.admin_suggest_tags_row_dismiss({ title: row.title })}
 							onclick={() => dismiss(row.id)}
 						>
@@ -358,7 +430,12 @@
 		<!-- A link, not a fetch: the next page of rows comes from the same load,
 		     and the browser's back button then returns to the shorter list. The
 		     rows already on screen keep their place because the page grows. -->
-		<a class="tag-pill load-more" href="?pages={data.pages + 1}" data-sveltekit-noscroll>
+		<a
+			class="tag-pill load-more"
+			href="?pages={data.pages + 1}"
+			data-sveltekit-noscroll
+			onclick={() => (grewFrom = data.rows.length)}
+		>
 			{m.admin_suggest_tags_load_more()}
 		</a>
 	{/if}
@@ -421,6 +498,20 @@
 	/* Same measure as the explainer: the card is wider than a line should be. */
 	.empty-body {
 		max-width: 62ch;
+	}
+
+	/* The icon belongs beside the heading at every width — the shared .rowhead
+	   wraps below 640px, which would drop it onto its own line. */
+	.rowcard.empty .rowhead {
+		flex-wrap: nowrap;
+		align-items: flex-start;
+	}
+
+	/* One left edge for the card: the body and the button line up with the
+	   heading's text rather than with the icon. 20px of icon plus the 12px head
+	   gap. */
+	.rowcard.empty > :not(.rowhead) {
+		margin-left: 32px;
 	}
 
 	.self-start {

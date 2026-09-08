@@ -52,6 +52,23 @@ describe('fromResponse — failure statuses', () => {
 		);
 	});
 
+	it('reads a 401 as a dead session, and offers the login page instead of a retry', () => {
+		// The admin hook answers an expired or revoked session with a 401 and a text
+		// body. Falling through to `unavailable` blamed entail.dev and offered a Try
+		// again that sends the same dead cookie every time.
+		expect(fromResponse(401, null, [])).toEqual({ kind: 'signedOut' });
+		expect(trayFor({ kind: 'signedOut' })).toEqual({
+			title: 'Signed out',
+			body: 'Your session has ended. Sign in again to keep going.',
+			warn: true,
+			retry: false,
+			signIn: true
+		});
+		expect(sentenceFor({ kind: 'signedOut' })).toBe(
+			'Signed out. Your session has ended. Sign in again to keep going.'
+		);
+	});
+
 	it('treats a transport failure (status 0) as unavailable', () => {
 		expect(fromResponse(0, null, [])).toEqual({ kind: 'unavailable' });
 	});
@@ -134,9 +151,22 @@ describe('the tray a finished state draws', () => {
 		for (const kind of ['notReady', 'rateLimited', 'unavailable'] as const) {
 			expect(trayFor({ kind })).toMatchObject({ retry: true });
 		}
-		for (const kind of ['empty', 'notFound', 'badLink'] as const) {
+		for (const kind of ['empty', 'notFound', 'badLink', 'signedOut', 'noSource'] as const) {
 			expect(trayFor({ kind })).toMatchObject({ retry: false });
 		}
+	});
+
+	it('draws the backfill row a tray for a source URL it cannot read', () => {
+		// The forms answer this under the field, so only a row reaches it — an image
+		// whose stored URL was edited into something unreadable since the list
+		// loaded. Without a tray the row said nothing at all.
+		expect(trayFor({ kind: 'noSource' })).toEqual({
+			title: 'Suggestions unavailable',
+			body: 'Add a Bluesky or X post as the source URL to get tag suggestions.',
+			warn: true,
+			retry: false,
+			signIn: false
+		});
 	});
 
 	it('warns for every failure, but not for a post with nothing to suggest', () => {
@@ -144,7 +174,8 @@ describe('the tray a finished state draws', () => {
 			title: 'No tags to suggest',
 			body: "entail.dev read the post but found nothing it's confident about.",
 			warn: false,
-			retry: false
+			retry: false,
+			signIn: false
 		});
 		expect(trayFor({ kind: 'notFound' })).toMatchObject({
 			title: 'Suggestions unavailable',

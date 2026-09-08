@@ -47,7 +47,7 @@
 		sourceUrl?: string;
 		/** The rating the last lookup returned, for the note beside "Mark as NSFW". */
 		rating?: EntailRating | null;
-		/** Tag names already in the site, offered as the input's tooltip. */
+		/** Tag names already in the site, listed under the field. */
 		existingTags?: string[];
 		placeholder?: string;
 		/** Multi-tile uploads suggest for the parent tile only; say so. */
@@ -58,6 +58,7 @@
 	const inputId = 'tags-input';
 	const hintId = 'tags-hint';
 	const statusId = 'tags-status';
+	const eyebrowId = 'tags-eyebrow';
 	const helpId = 'tags-help';
 	const appliedId = 'tags-applied';
 
@@ -156,9 +157,6 @@
 			name="tags"
 			{placeholder}
 			bind:value
-			title={existingTags.length > 0
-				? m.admin_upload_existing_tags({ tags: existingTags.join(', ') })
-				: undefined}
 		/>
 		<button
 			bind:this={pill}
@@ -195,6 +193,13 @@
 		</p>
 	{/if}
 
+	{#if existingTags.length > 0}
+		<!-- The tag names already on the site, as both forms showed them before the
+		     suggestion control moved this field into a component. A tooltip hides it
+		     from touch and from keyboard users entirely. -->
+		<small class="hint">{m.admin_upload_existing_tags({ tags: existingTags.join(', ') })}</small>
+	{/if}
+
 	{#if suggestion.kind !== 'idle' && suggestion.kind !== 'applied' && suggestion.kind !== 'noSource'}
 		<div class="tag-tray" role="region" aria-label={m.admin_tag_suggest_region_label()}>
 			{#if suggestion.kind === 'searching'}
@@ -207,11 +212,14 @@
 					<span class="tag-skel-chip"></span>
 				</div>
 			{:else if suggestion.kind === 'suggested'}
-				<p class="tag-eyebrow">{m.admin_tag_suggest_eyebrow({ count: suggestion.tags.length })}</p>
+				<!-- The group is named from this line, the one a sighted operator reads,
+				     rather than from the live region: the backfill rows already do it
+				     this way, and a name only screen readers can see drifts. -->
+				<p class="tag-eyebrow" id={eyebrowId}>{m.admin_tag_suggest_eyebrow({ count: suggestion.tags.length })}</p>
 				<TagSuggestionChips
 					tags={suggestion.tags}
 					leftOut={suggestion.leftOut}
-					labelledBy={statusId}
+					labelledBy={eyebrowId}
 					describedBy={helpId}
 					ontoggle={onToggle}
 				/>
@@ -249,10 +257,15 @@
 							{m.admin_tag_suggest_try_again()}
 						</button>
 					{/if}
+					{#if tray.signIn}
+						<!-- A dead session: another lookup sends the same cookie, so the way
+						     out is the login page. -->
+						<a class="tag-pill" href="/admin/login">{m.admin_tag_suggest_sign_in()}</a>
+					{/if}
 					<button
 						type="button"
 						class="tag-btn-text"
-						class:tag-btn-text-flush={!tray.retry}
+						class:tag-btn-text-flush={!tray.retry && !tray.signIn}
 						onclick={dismiss}
 					>
 						{m.admin_tag_suggest_dismiss()}

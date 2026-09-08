@@ -62,6 +62,12 @@ test('the pill refuses to run until the source URL is a post it recognises', asy
 	await expect(
 		page.getByText('Suggestions come from entail.dev, which reads the source post.')
 	).toBeVisible();
+
+	// The tag names already on the site are a hint line under the field, as they
+	// were before this field became a component. A title tooltip would be there
+	// for a mouse and nowhere else.
+	await expect(page.getByText(/^Existing: /)).toBeVisible();
+	await expect(tagsInput(page)).not.toHaveAttribute('title');
 });
 
 test('suggested tags render as chips and land in the Tags field when accepted', async ({ page }) => {
@@ -97,7 +103,7 @@ test('suggested tags render as chips and land in the Tags field when accepted', 
 	// left out is not.
 	await expect(tagsInput(page)).toHaveValue('mammal, canine, fox');
 	await expect(liveRegion(page)).toHaveText(
-		'Sona added 3 tags. Change them in the Tags field before you save.'
+		'Sona added 3 tags. You can change them in the Tags field.'
 	);
 	// The tray is gone, so focus lands on the line that says what happened rather
 	// than dropping to the body.
@@ -190,7 +196,7 @@ for (const rating of ['explicit', 'questionable'] as const) {
 		await expect(nsfwBox(page)).toBeChecked();
 		// Said as a staged change, not a persisted one: nothing is saved yet.
 		await expect(ratingRegion(page)).toHaveText(
-			'The NSFW box is now checked. Save the image to apply it.'
+			'The NSFW box is now checked. It takes effect when you submit the form.'
 		);
 		// The button removed itself, so focus lands on the box it checked.
 		await expect(markNsfw(page)).toHaveCount(0);

@@ -62,12 +62,20 @@ test('Load more grows the list rather than paging away from it', async ({ page }
 	const total = Number(/of (\d+)$/.exec((await showing.textContent()) ?? '')?.[1]);
 	expect(total).toBeGreaterThan(PAGE);
 
+	// The placeholder replaces a thumbnail that 404s, which takes a client
+	// handler: it standing in for the image is the page saying it has hydrated.
+	// Clicking before that is a full page load, and the focus move below is a
+	// client behaviour.
+	await expect(page.locator('.thumb-fallback').first()).toBeVisible();
 	await page.getByRole('link', { name: 'Load more' }).click();
 	await expect(page.locator('li.rowcard')).toHaveCount(total);
 	// Every row of the first page is still there, in the same place.
 	await expect(page.locator('li.rowcard').first()).toContainText('Backfill 123');
 	await expect(page.locator('li.rowcard').last()).toContainText('Backfill 101');
 	await expect(page.getByRole('link', { name: 'Load more' })).toHaveCount(0);
+	// The link that had focus is gone with the click; focus lands on the first row
+	// the click added rather than dropping to the top of the document.
+	await expect(page.locator('li.rowcard').nth(PAGE).locator('.rowtitle')).toBeFocused();
 });
 
 test('a row meta line names the source without an orphaned separator', async ({ page }) => {
@@ -129,7 +137,9 @@ test('Save writes the tags and the row shows the saved line and static chips', a
 	const savedLine = target.locator('.tag-status-line');
 	await expect(savedLine).toHaveText('Saved 2 tags.');
 	await expect(savedLine).toBeFocused();
-	await expect(target.getByText('Saved', { exact: true })).toBeVisible();
+	// The line carries the count and takes the focus, so the title says nothing
+	// about the save on top of it.
+	await expect(target.locator('.rowtitle .tag')).toHaveCount(0);
 	const statics = target.locator('.tag-chip-static');
 	await expect(statics).toHaveCount(2);
 	// The labels the chips showed, not the sanitized names the row stored.
@@ -180,10 +190,14 @@ test('a row tagged elsewhere since the list loaded refuses to overwrite', async 
 	await expect(target.locator('.tag-chip')).toHaveCount(0);
 	const edit = target.getByRole('link', { name: 'Edit image Backfill 118' });
 	await expect(edit).toHaveAttribute('href', '/admin/images/118/edit');
-	// An anchor wearing the text-button class reads as one, underline and all.
+	// The row's only action, so it takes the pill's border rather than reading as
+	// muted text — and an anchor wearing it keeps the button's lack of underline.
+	await expect(edit).toHaveClass(/tag-pill/);
 	await expect(edit).toHaveCSS('text-decoration-line', 'none');
+	await expect(edit).not.toHaveCSS('border-top-width', '0px');
+	// One live region serves twenty rows, so the sentence names its image.
 	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
-		'This image was tagged elsewhere since the list loaded. Open it to edit its tags.'
+		'Backfill 118. This image was tagged elsewhere since the list loaded. Open it to edit its tags.'
 	);
 
 	// The tag written elsewhere survived.
@@ -191,7 +205,7 @@ test('a row tagged elsewhere since the list loaded refuses to overwrite', async 
 	await expect(page.locator('input[name="tags"]')).toHaveValue('elsewhere');
 });
 
-test('a save that fails for any other reason says so in the live region', async ({ page }) => {
+test('a save that fails for any other reason says so in the row and the live region', async ({ page }) => {
 	await openList(page);
 	await stubSuggestions(page, 200, {
 		source: 'bluesky',
@@ -218,12 +232,49 @@ test('a save that fails for any other reason says so in the live region', async 
 
 	await target.getByRole('button', { name: 'Save 1 tag to Backfill 116' }).click();
 
-	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
+	// Visible, not only announced: a sighted operator otherwise watches a save
+	// button that does nothing and a row where nothing changed.
+	await expect(target.locator('.tag-eyebrow.warn')).toHaveText('Not saved');
+	await expect(target.locator('.tag-panel-body')).toHaveText(
 		"Sona couldn't save those tags. Try again."
+	);
+	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
+		"Backfill 116. Sona couldn't save those tags. Try again."
 	);
 	// The chips stay, so the operator can try the same save again.
 	await expect(target.locator('.tag-chip')).toHaveCount(1);
 	await expect(target.locator('.tag-status-line')).toHaveCount(0);
+});
+
+test('a save answered with a redirect follows it rather than blaming the save', async ({ page }) => {
+	// An expired session answers the action with a redirect to the login page, and
+	// a thrown error has its own page. Either way "Couldn't save those tags" would
+	// strand the operator on a list that can no longer save anything.
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	const target = await clickSuggest(page, 'Backfill 115');
+	await page.route(
+		(url) => url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save'),
+		(route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ type: 'redirect', status: 303, location: '/admin/login' })
+			})
+	);
+
+	await target.getByRole('button', { name: 'Save 1 tag to Backfill 115' }).click();
+
+	// The redirect is followed. This session is still signed in, so the login page
+	// sends it on to the image list; what matters is that the list was left.
+	await page.waitForURL('**/admin/images');
+	await expect(page.getByText("Sona couldn't save those tags. Try again.")).toHaveCount(0);
 });
 
 test('the edit page keeps what the operator typed when the sidebar form submits', async ({ page }) => {
@@ -259,7 +310,80 @@ test('the edit page keeps what the operator typed when the sidebar form submits'
 	await expect(nsfw).toBeChecked();
 });
 
-test('a failed lookup offers Try again, which keeps focus on the row pill', async ({ page }) => {
+test('an expanded row drops its indent on a phone, where the head wraps', async ({ page }) => {
+	// The row's expansion lines up with the title, past the thumbnail column. At
+	// 390px the head wraps and there is no column to clear, so the indent would
+	// leave the tray pushed off the card.
+	await page.setViewportSize({ width: 390, height: 844 });
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	const target = await clickSuggest(page, 'Backfill 114');
+	await expect(target.locator('.tag-eyebrow')).toHaveCSS('margin-left', '0px');
+});
+
+test('the edit page re-seeds its fields when a client-side navigation swaps the image', async ({ page }) => {
+	// The Tags, Source Post URL and NSFW fields are $state seeded from `data`, so
+	// an invalidation does not revert what the operator typed. A same-route
+	// navigation to a DIFFERENT image is the one case they must follow `data`
+	// again — otherwise image A's typed tags are staged onto image B and saved.
+	await adminLogin(page, PASSWORD);
+
+	// What image 102 actually stores, read first: the rows above tag their own
+	// images, and the last test in this file tags whatever is left.
+	await page.goto('/admin/images/102/edit');
+	const storedTags = await page.locator('input[name="tags"]').inputValue();
+	const storedUrl = await page.locator('input[name="sourcePostUrl"]').inputValue();
+
+	await page.goto('/admin/images/101/edit');
+	const tags = page.locator('input[name="tags"]');
+	const url = page.locator('input[name="sourcePostUrl"]');
+	const pill = page.getByRole('button', { name: 'Suggest tags', exact: true });
+
+	// The pill's enabled state is computed in the browser, so it flipping is proof
+	// the page has hydrated and the typing below will not be overwritten by it.
+	await url.fill('https://www.furaffinity.net/view/12345/');
+	await expect(pill).toHaveAttribute('aria-disabled', 'true');
+	await url.fill(BSKY_POST);
+	await tags.fill('typed-on-101');
+	await expect(pill).toHaveAttribute('aria-disabled', 'false');
+
+	// A tray open on image 101: its chips would otherwise still be there to Add
+	// onto image 102 after the navigation below.
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+	await pill.click();
+	await expect(page.locator('.tag-tray .tag-chip')).toHaveCount(1);
+
+	// A client-side navigation, not page.goto: a full load would re-render from
+	// scratch and pass whether or not the fields follow `data`. No in-app link
+	// goes edit to edit, so this injects one — SvelteKit intercepts anchor clicks
+	// anywhere in the document.
+	await page.evaluate(() => {
+		const a = document.createElement('a');
+		a.href = '/admin/images/102/edit';
+		a.id = 'e2e-edit-102';
+		a.textContent = 'to 102';
+		document.body.appendChild(a);
+	});
+	await page.locator('#e2e-edit-102').click();
+	await page.waitForURL('**/admin/images/102/edit');
+
+	await expect(tags).toHaveValue(storedTags);
+	await expect(url).toHaveValue(storedUrl);
+	await expect(page.locator('.tag-tray')).toHaveCount(0);
+});
+
+test('a failed lookup replaces the row pill with a tray that offers Try again', async ({ page }) => {
 	await openList(page);
 	await stubSuggestions(page, 502, { error: 'unavailable' });
 
@@ -269,12 +393,17 @@ test('a failed lookup offers Try again, which keeps focus on the row pill', asyn
 		"entail.dev didn't answer. Your tags are unchanged."
 	);
 
-	// Try again is its own action, named as such; the row pill is what keeps
-	// focus while the second lookup runs.
+	// One control per row fires the lookup: the tray's Try again replaces the
+	// row's Suggest pill rather than sitting beside it.
+	await expect(target.getByRole('button', { name: 'Suggest tags for Backfill 117' })).toHaveCount(0);
+	await expect(target.locator('.tag-panel-body')).toBeFocused();
+
+	// Try again is its own action, named as such. The pill comes back while the
+	// second lookup runs and takes focus, then the answer's sentence takes it.
 	await stubSuggestions(page, 202, { error: 'not_ready' });
 	await target.getByRole('button', { name: 'Try again for Backfill 117' }).click();
-	await expect(target.getByRole('button', { name: 'Suggest tags for Backfill 117' })).toBeFocused();
 	await expect(target.getByText('No tags yet')).toBeVisible();
+	await expect(target.locator('.tag-panel-body')).toBeFocused();
 });
 
 // Last on purpose: it tags every row that is left, so the list the tests above
@@ -310,4 +439,19 @@ test('with nothing left to suggest, the page shows its empty state', async ({ pa
 	await expect(icon).toHaveAttribute('width', '20');
 	const muted = await card.locator('.empty-body').evaluate((el) => getComputedStyle(el).color);
 	await expect(icon).toHaveCSS('color', muted);
+
+	// One left edge: the body and the button line up with the heading's text, not
+	// with the icon beside it. At 390px the head still does not wrap, so the icon
+	// stays on the heading's line instead of taking one of its own.
+	for (const width of [1280, 390]) {
+		await page.setViewportSize({ width, height: 844 });
+		const heading = await card.locator('.emptytitle').boundingBox();
+		const body = await card.locator('.empty-body').boundingBox();
+		const back = await card.getByRole('link', { name: 'Back to All Images' }).boundingBox();
+		const glyph = await icon.boundingBox();
+		expect(Math.round(body!.x), `body edge at ${width}px`).toBe(Math.round(heading!.x));
+		expect(Math.round(back!.x), `button edge at ${width}px`).toBe(Math.round(heading!.x));
+		expect(glyph!.y, `icon beside the heading at ${width}px`).toBeLessThan(heading!.y + heading!.height);
+		expect(glyph!.x, `icon left of the heading at ${width}px`).toBeLessThan(heading!.x);
+	}
 });

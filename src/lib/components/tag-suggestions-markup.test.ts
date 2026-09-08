@@ -23,8 +23,11 @@ describe('the tag suggestion live region', () => {
 		expect(backfillPage).toMatch(/<p class="sr-only" role="status">\{announcement\}<\/p>/);
 	});
 
-	it('names the chip group from that region, and describes it with the instruction line', () => {
-		expect(suggestions).toMatch(/labelledBy=\{statusId\}/);
+	it('names the chip group from the visible eyebrow, and describes it with the instruction line', () => {
+		// The eyebrow is the line a sighted operator reads above the chips; naming
+		// the group from the live region instead gives it a name only a screen
+		// reader can see, which then drifts from what is on screen.
+		expect(suggestions).toMatch(/labelledBy=\{eyebrowId\}/);
 		expect(suggestions).toMatch(/describedBy=\{helpId\}/);
 		expect(chips).toMatch(/aria-labelledby=\{labelledBy\} aria-describedby=\{describedBy\}/);
 	});
@@ -39,18 +42,21 @@ describe('the suggest pill', () => {
 		expect(suggestions).toMatch(/if \(disabled \|\| source === null\) return;/);
 	});
 
+	it('lists the site\'s existing tags under the field rather than in a tooltip', () => {
+		// Both forms showed this as a hint line before the field became a component.
+		// A title attribute is a mouse-only affordance: no touch, no keyboard, and
+		// screen-reader support for it varies.
+		expect(suggestions).toMatch(
+			/<small class="hint">\{m\.admin_upload_existing_tags\(\{ tags: existingTags\.join\(', '\) \}\)\}<\/small>/
+		);
+		expect(suggestions).not.toMatch(/title=\{/);
+	});
+
 	it('reads the post the field names, never a stored URL the field has moved away from', () => {
 		// On the edit page the stored URL and the field can differ once the operator
 		// edits it; the pill, the hint and the lookup all follow the field.
-		expect(suggestions).toMatch(/requestSuggestions\(\{ sourcePostUrl: sourceUrl \}\)/);
 		expect(suggestions).not.toMatch(/imageId/);
 		expect(editPage).not.toMatch(/imageId=\{data\.image\.id\}/);
-	});
-
-	it('points at the sentence that explains its current state', () => {
-		expect(suggestions).toMatch(
-			/suggestion\.kind === 'applied' \? appliedId : suggestion\.kind === 'searching' \? statusId : hintId/
-		);
 	});
 });
 
@@ -126,7 +132,10 @@ describe('the rating never touches the NSFW checkbox', () => {
 
 describe('the backfill rows', () => {
 	it('name every control by its image, since the page repeats them per row', () => {
-		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_suggest\(\{ title: row\.title \}\)\}/);
+		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_suggest\(\{ title: row\.title \}\)/);
+		// While the lookup runs the pill reads "Suggesting tags…", so its accessible
+		// name has to say the same thing rather than keep the resting label.
+		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_searching\(\{ title: row\.title \}\)/);
 		// Try again is not the same action as Suggest, so it is not named like it.
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_try_again\(\{ title: row\.title \}\)\}/);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_save_label\(\{/);

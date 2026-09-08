@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { characters, imageTags, images, tags } from '$lib/server/db/schema';
 import { REFERENCE_BECOMES_VARIANT_ERROR, VARIANT_BECOMES_REFERENCE_ERROR } from '$lib/server/variants';
-import { MAX_IMAGE_TAGS } from '$lib/server/image-tags';
+import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH } from '$lib/server/image-tags';
 import { load, actions } from './+page.server';
 
 import { makeD1 } from '$lib/server/test/d1';
@@ -79,8 +79,6 @@ async function seedImage(db: ReturnType<typeof makeDb>['db'], id: number, publis
 	await db.insert(images).values({ id, title: 'Art', slug: `art-${id}`, imageUrl: `https://cdn.example.com/${id}.png`, artistId: 1, published });
 }
 
-// Short names on purpose: the Tags input is sanitized to 500 characters before
-// the action sees it, so only short tags can reach the hundred-tag cap at all.
 function shortTags(n: number): string[] {
 	const letters = 'abcdefghijklmnopqrstuvwxyz';
 	const names: string[] = [];
@@ -195,10 +193,45 @@ describe('admin image edit — save action', () => {
 			actions.save({ params: { id: '5' }, request: form({ title: 'Renamed', artistId: '1', tags: tooMany }), platform } as never)
 		);
 		expect((result as { status: number }).status).toBe(400);
-		expect((result as { data: { error: string } }).data.error).toBe('Keep it to at most 100 tags.');
+		expect((result as { data: { error: string } }).data.error).toBe('Use up to 100 tags.');
 		// Neither the tags nor the rest of the form landed.
 		expect(await tagNamesOf(db, 5)).toEqual([]);
 		expect((await db.select({ title: images.title }).from(images).where(eq(images.id, 5)).get())?.title).toBe('Art');
+	});
+
+	// The field used to be cut to 500 characters BEFORE the count guard ran, so a
+	// hundred and one ordinary names arrived as sixty-odd with the last one
+	// truncated mid-word, and saved as a success.
+	it('refuses ordinary-length names past the cap instead of truncating them', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		const tooMany = Array.from({ length: MAX_IMAGE_TAGS + 1 }, (_, i) => `cap-test-tag-${i}`).join(', ');
+		expect(tooMany.length).toBeGreaterThan(500);
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Renamed', artistId: '1', tags: tooMany }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe('Use up to 100 tags.');
+		// Nothing was written, and no fragment of a cut-off name was minted.
+		expect(await tagNamesOf(db, 5)).toEqual([]);
+		expect(await db.select({ id: tags.id }).from(tags).get()).toBeUndefined();
+		expect((await db.select({ title: images.title }).from(images).where(eq(images.id, 5)).get())?.title).toBe('Art');
+	});
+
+	it('refuses a tags field longer than the input ceiling', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		const huge = 'a'.repeat(MAX_TAGS_INPUT_LENGTH + 1);
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Renamed', artistId: '1', tags: huge }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe(
+			`Tags are too long. Use up to ${MAX_TAGS_INPUT_LENGTH} characters.`
+		);
+		expect(await tagNamesOf(db, 5)).toEqual([]);
 	});
 
 	it('saves a list exactly at the cap', async () => {

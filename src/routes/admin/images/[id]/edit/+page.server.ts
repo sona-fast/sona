@@ -5,7 +5,12 @@ import { eq, and, isNull, ne } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { getSettings } from '$lib/server/settings';
 import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
-import { MAX_IMAGE_TAGS, parseImageTags, replaceImageTags } from '$lib/server/image-tags';
+import {
+	MAX_IMAGE_TAGS,
+	MAX_TAGS_INPUT_LENGTH,
+	parseImageTags,
+	replaceImageTags
+} from '$lib/server/image-tags';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
 	variantAssignmentError,
@@ -90,7 +95,14 @@ export const actions = {
 		const artistId = data.get('artistId') as string;
 		const artistName = sanitizeText(data.get('artistName') as string, 200);
 		const collectionId = data.get('collectionId') as string;
-		const tagNames = sanitizeText(data.get('tags') as string, 500);
+		// Read raw and checked before anything shortens it: the 500-character cut
+		// this field used to take ran BEFORE the count guard, so a hundred ordinary
+		// names lost their tail mid-word and the fragment saved as a success.
+		const tagsRaw = String(data.get('tags') ?? '');
+		if (tagsRaw.length > MAX_TAGS_INPUT_LENGTH) {
+			return fail(400, { error: m.admin_field_tags_too_long({ max: MAX_TAGS_INPUT_LENGTH }) });
+		}
+		const tagNames = sanitizeText(tagsRaw, MAX_TAGS_INPUT_LENGTH);
 		// Refused, not truncated: a save that quietly dropped tags would report
 		// success and leave the operator to notice the missing ones later. Counted
 		// the way the write counts, so what is refused is what would not have fit.

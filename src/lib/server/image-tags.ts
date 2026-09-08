@@ -10,6 +10,13 @@ type Db = ReturnType<typeof getDb>;
  * here, so this is the one place the two save paths agree on a limit. */
 export const MAX_IMAGE_TAGS = 100;
 
+/** Ceiling on the raw Tags field, in characters. Room for MAX_IMAGE_TAGS names
+ * of realistic length, so an input the count guard would accept is never cut
+ * first: a field truncated mid-name stores the fragment and reports success,
+ * which is the failure the count guard exists to prevent. Past this the save
+ * actions refuse rather than truncate. */
+export const MAX_TAGS_INPUT_LENGTH = 4000;
+
 /**
  * The tag names a comma-separated input really holds: sanitized, blanks dropped,
  * repeats collapsed. The save actions count these to refuse an over-cap input

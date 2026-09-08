@@ -78,7 +78,7 @@ that, so nothing you do is sent to an AI service as you browse."
 
 The release also adds a database index on `image_tags`, which the **Suggest
 tags** page needs to find untagged images without reading every tag row. The
-deploy applies it; there is nothing for you to run.
+deploy applies it, so you don't need to run anything.
 
 ## One-time backfill: sticker animation flags (SONA-123)
 

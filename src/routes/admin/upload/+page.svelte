@@ -529,8 +529,8 @@
 
 	<!-- Tags takes a full-width row of its own so the "Suggest tags" pill sits
 	     beside the input and the accepted tags are readable without truncation.
-	     The site's existing tag names moved into the input's tooltip; the one
-	     hint line under the field belongs to the suggestion control now. -->
+	     The control draws the existing-tags hint under the field, as this form
+	     did before it. -->
 	<TagSuggestions
 		bind:value={tagsValue}
 		bind:rating={suggestedRating}

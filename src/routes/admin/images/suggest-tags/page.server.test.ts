@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { imageTags, images, tags } from '$lib/server/db/schema';
 import { makeD1 } from '$lib/server/test/d1';
+import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH } from '$lib/server/image-tags';
 import { load, actions, _MAX_SCAN as MAX_SCAN, _PER_PAGE as PER_PAGE } from './+page.server';
 
 // The backfill list (SONA-220). What is worth pinning here is which rows reach
@@ -265,6 +266,26 @@ describe('suggest-tags save action', () => {
 		expect(result).toMatchObject({ status: 409, data: { error: 'tagged_elsewhere' } });
 		// The tag written elsewhere is still there and nothing from the row landed.
 		expect(await tagNamesOf(db, 1)).toEqual(['fox']);
+	});
+
+	it('refuses an over-cap list, the way the two forms do', async () => {
+		// These tags come from the tray, so reaching the cap takes a hand-made post.
+		// The three write paths still agree, and this one refuses rather than
+		// storing the first hundred and reporting success.
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		const tooMany = Array.from({ length: MAX_IMAGE_TAGS + 1 }, (_, i) => `cap-test-tag-${i}`).join(', ');
+
+		const result = await actions.save({ request: form({ id: '1', tags: tooMany }), platform } as never);
+		expect(result).toMatchObject({ status: 400, data: { error: 'too_many_tags' } });
+		expect(await tagNamesOf(db, 1)).toEqual([]);
+
+		const huge = await actions.save({
+			request: form({ id: '1', tags: 'a'.repeat(MAX_TAGS_INPUT_LENGTH + 1) }),
+			platform
+		} as never);
+		expect(huge).toMatchObject({ status: 400, data: { error: 'too_many_tags' } });
+		expect(await tagNamesOf(db, 1)).toEqual([]);
 	});
 
 	it('saves nothing when every chip was left out', async () => {

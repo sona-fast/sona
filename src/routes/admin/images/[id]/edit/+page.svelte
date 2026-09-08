@@ -199,14 +199,19 @@
 		</label>
 
 		<!-- Tags takes a full-width row of its own so the "Suggest tags" pill sits
-		     beside the input. The site's existing tag names moved into the input's
-		     tooltip; the hint line under the field is the suggestion control's. -->
-		<TagSuggestions
-			bind:value={tagsValue}
-			bind:rating={suggestedRating}
-			sourceUrl={sourcePostUrl}
-			existingTags={data.tags.map((t) => t.name)}
-		/>
+		     beside the input. The control draws the existing-tags hint under the
+		     field, as this form did before it. -->
+		<!-- Keyed on the image: a same-route navigation to a different image
+		     re-seeds the fields above, and a tray still offering the previous
+		     image's suggestions would add them to this one. -->
+		{#key data.image.id}
+			<TagSuggestions
+				bind:value={tagsValue}
+				bind:rating={suggestedRating}
+				sourceUrl={sourcePostUrl}
+				existingTags={data.tags.map((t) => t.name)}
+			/>
+		{/key}
 
 		{#if data.hasVariants}
 			<p class="hint">{m.admin_variant_parent_hint()}</p>

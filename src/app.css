@@ -804,6 +804,12 @@ select.input {
 	transition: border-color 0.15s, color 0.15s;
 }
 
+/* The tray's Sign in link wears the pill. An anchor brings an underline the
+   buttons beside it do not have. */
+a.tag-pill {
+	text-decoration: none;
+}
+
 /* --link, not --primary, for the label: the hovered label is small text, and
    raw --primary is 2.32:1 on the light background and 4.06:1 on an aurora dark
    card. --link is the same orange everywhere it passes and the darkened one

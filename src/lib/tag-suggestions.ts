@@ -52,6 +52,10 @@ export type SuggestionState =
 	| { kind: 'rateLimited' }
 	/** 404: the post could not be read, or the classifier declined it. */
 	| { kind: 'notFound' }
+	/** 401: the admin session expired or was revoked. Another click sends the same
+	 *  dead cookie, so this one offers a way back to the login page instead of a
+	 *  Try again that can only fail. */
+	| { kind: 'signedOut' }
 	/** 400: the endpoint refused the link itself — a URL past its length cap, say.
 	 *  Another click sends the same link, so this one offers no Try again. */
 	| { kind: 'badLink' };
@@ -93,6 +97,10 @@ export function fromResponse(
 	if (status === 202) return { kind: 'notReady' };
 	if (status === 404) return { kind: 'notFound' };
 	if (status === 429) return { kind: 'rateLimited' };
+	// 401 is the admin session, not entail.dev: the hook answers it with a text
+	// body, so blaming the classifier would send the operator round a Try again
+	// that fails the same way forever.
+	if (status === 401) return { kind: 'signedOut' };
 	// 422 is "this URL is not a Bluesky or X post". The pill should not have
 	// been clickable, so say what would make it clickable rather than blaming
 	// entail.dev for an answer it never gave.
@@ -203,6 +211,8 @@ export function sentenceFor(next: SuggestionState): string {
 			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_not_found_body());
 		case 'badLink':
 			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_bad_link_body());
+		case 'signedOut':
+			return join(m.admin_tag_suggest_signed_out_title(), m.admin_tag_suggest_signed_out_body());
 		case 'unavailable':
 			return join(m.admin_tag_suggest_unavailable_title(), m.admin_tag_suggest_unavailable_body());
 		case 'noSource':
@@ -213,8 +223,17 @@ export function sentenceFor(next: SuggestionState): string {
 }
 
 /** What the tray shows for a finished state that is not a suggestion: an
- * eyebrow, a sentence, and either Try again or only Dismiss. */
-export type Tray = { title: string; body: string; warn: boolean; retry: boolean };
+ * eyebrow, a sentence, and either Try again, a way back to the login page, or
+ * only Dismiss. */
+export type Tray = {
+	title: string;
+	body: string;
+	warn: boolean;
+	retry: boolean;
+	/** A dead session is the one failure another lookup cannot fix; the tray
+	 *  offers the login page instead of a Try again. */
+	signIn: boolean;
+};
 
 /**
  * The tray for every non-suggestion state. The two forms and the backfill page
@@ -229,24 +248,39 @@ export function trayFor(state: SuggestionState): Tray {
 				title: m.admin_tag_suggest_empty_title(),
 				body: m.admin_tag_suggest_empty_body(),
 				warn: false,
-				retry: false
+				retry: false,
+				signIn: false
 			};
 		case 'notReady':
 			return {
 				title: m.admin_tag_suggest_not_yet_title(),
 				body: m.admin_tag_suggest_not_yet_body(),
 				warn: true,
-				retry: true
+				retry: true,
+				signIn: false
 			};
 		case 'rateLimited':
-			return { title: unavailable, body: m.admin_tag_suggest_rate_limited_body(), warn: true, retry: true };
+			return { title: unavailable, body: m.admin_tag_suggest_rate_limited_body(), warn: true, retry: true, signIn: false };
 		case 'notFound':
-			return { title: unavailable, body: m.admin_tag_suggest_not_found_body(), warn: true, retry: false };
+			return { title: unavailable, body: m.admin_tag_suggest_not_found_body(), warn: true, retry: false, signIn: false };
 		case 'badLink':
-			return { title: unavailable, body: m.admin_tag_suggest_bad_link_body(), warn: true, retry: false };
+			return { title: unavailable, body: m.admin_tag_suggest_bad_link_body(), warn: true, retry: false, signIn: false };
+		case 'signedOut':
+			return {
+				title: m.admin_tag_suggest_signed_out_title(),
+				body: m.admin_tag_suggest_signed_out_body(),
+				warn: true,
+				retry: false,
+				signIn: true
+			};
+		case 'noSource':
+			// The forms answer this under the field, so only the backfill row draws
+			// it: a stored URL that has been edited into something unreadable since
+			// the list loaded.
+			return { title: unavailable, body: m.admin_tag_suggest_hint_no_source(), warn: true, retry: false, signIn: false };
 		default:
 			// 'unavailable', and the states the tray never renders.
-			return { title: unavailable, body: m.admin_tag_suggest_unavailable_body(), warn: true, retry: true };
+			return { title: unavailable, body: m.admin_tag_suggest_unavailable_body(), warn: true, retry: true, signIn: false };
 	}
 }
 
