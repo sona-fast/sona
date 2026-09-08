@@ -10,6 +10,7 @@ import { REGISTRY_API_KEY_SETTING } from '$lib/server/registry';
 import {
 	FUZZYSEARCH_API_KEY_SETTING,
 	FUZZYSEARCH_KEY_REFUSED_SETTING,
+	fuzzysearchRefusedMarker,
 	fuzzysearchKeyDisplayRecord
 } from '$lib/server/fuzzysearch';
 import {
@@ -1996,7 +1997,11 @@ describe('settings — FuzzySearch key', () => {
 
 	it('surfaces a formatted refusal date only while a key is saved', async () => {
 		const { db, platform } = makeLoadDb();
-		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T10:20:30.000Z');
+		await setRawSetting(
+			db,
+			FUZZYSEARCH_KEY_REFUSED_SETTING,
+			fuzzysearchRefusedMarker('stored', new Date('2026-09-01T10:20:30.000Z'))
+		);
 
 		const orphan = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
 		expect(orphan.fuzzysearchKeyRefusedAt).toBeNull();
@@ -2017,6 +2022,24 @@ describe('settings — FuzzySearch key', () => {
 		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
 
 		expect(result.fuzzysearchKeyFromEnv).toBe(true);
+		expect(result.fuzzysearchKeyRefusedAt).toBeNull();
+	});
+
+	// The marker is global, the card is not: a refusal recorded while the deploy
+	// secret was in use must not be shown against a stored key once the secret
+	// is dropped — that key was never turned away.
+	it('never reports a refusal recorded against the secret once it is gone', async () => {
+		const { db, platform } = makeLoadDb();
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+		await setRawSetting(
+			db,
+			FUZZYSEARCH_KEY_REFUSED_SETTING,
+			fuzzysearchRefusedMarker('env', new Date('2026-09-01T10:20:30.000Z'))
+		);
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeyFromEnv).toBe(false);
 		expect(result.fuzzysearchKeyRefusedAt).toBeNull();
 	});
 

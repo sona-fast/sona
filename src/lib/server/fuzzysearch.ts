@@ -21,7 +21,8 @@ type Env = App.Platform['env'];
 /** site_settings keys. Raw rows, like the registry fork key: kept out of the
  * SiteSettings interface so the key never serializes to the browser. */
 export const FUZZYSEARCH_API_KEY_SETTING = 'fuzzysearchApiKey';
-/** ISO date-time of the last 401 from FuzzySearch, or '' once a call succeeds. */
+/** `<iso date-time>|<key source>` for the last refusal from FuzzySearch, or ''
+ * once a call succeeds. See `fuzzysearchRefusedMarker`. */
 export const FUZZYSEARCH_KEY_REFUSED_SETTING = 'fuzzysearchKeyRefusedAt';
 
 export const FUZZYSEARCH_ENDPOINT = 'https://api.fuzzysearch.net/v1/image';
@@ -71,20 +72,49 @@ const SITE_ORDER: Record<LookupSite, number> = {
 	e621: 3
 };
 
+/** Where the key in use came from: the deploy secret, or the admin settings. */
+export type FuzzysearchKeySource = 'env' | 'stored';
+
 /**
  * Resolve the FuzzySearch key: a deploy-time `FUZZYSEARCH_API_KEY` secret wins
  * and short-circuits the DB read, otherwise the D1 raw setting. Same precedence
  * as the registry fork key, so a fork can connect from the admin UI without a
- * deploy. Returns null when the integration is not configured.
+ * deploy. Returns null when the integration is not configured. The source
+ * travels with the key so a refusal can be recorded against the key it refused.
  */
 export async function resolveFuzzysearchKey(
 	db: Database,
 	env: Env | undefined
-): Promise<string | null> {
+): Promise<{ key: string; source: FuzzysearchKeySource } | null> {
 	const fromEnv = env?.FUZZYSEARCH_API_KEY?.trim();
-	if (fromEnv) return fromEnv;
+	if (fromEnv) return { key: fromEnv, source: 'env' };
 	const stored = (await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING))?.trim();
-	return stored || null;
+	return stored ? { key: stored, source: 'stored' } : null;
+}
+
+/**
+ * The value written to FUZZYSEARCH_KEY_REFUSED_SETTING: when the refusal
+ * happened and WHICH key was refused. The source has to be stored alongside
+ * the date because the settings card only offers a remedy for a key saved
+ * there — without it, a refusal recorded while the deploy secret was in use
+ * would later be shown against a stored key that was never refused.
+ */
+export function fuzzysearchRefusedMarker(
+	source: FuzzysearchKeySource,
+	at: Date = new Date()
+): string {
+	return `${at.toISOString()}|${source}`;
+}
+
+/** Read a refusal marker back. '' (the cleared value) and anything without a
+ * date come back null; a value carrying no source reads as 'stored', the state
+ * the settings card can act on. */
+export function parseFuzzysearchRefusedMarker(
+	raw: string | null | undefined
+): { at: string; source: FuzzysearchKeySource } | null {
+	const [at, source] = (raw ?? '').trim().split('|');
+	if (!at) return null;
+	return { at, source: source === 'env' ? 'env' : 'stored' };
 }
 
 /**
@@ -282,7 +312,10 @@ export async function searchImage(
 		return { ok: false, reason: 'unavailable' };
 	}
 
-	if (res.status === 401) return { ok: false, reason: 'key_refused' };
+	// 403 alongside 401, the pair the registry client already treats as an auth
+	// failure: a revoked or suspended key answers 403, and without it the
+	// operator would never see the refused state for the one case they can fix.
+	if (res.status === 401 || res.status === 403) return { ok: false, reason: 'key_refused' };
 	if (res.status === 429) return { ok: false, reason: 'rate_limited' };
 	if (res.status === 413) return { ok: false, reason: 'too_large' };
 	if (res.status === 400) {

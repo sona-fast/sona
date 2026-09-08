@@ -5,12 +5,15 @@ import { images, artists } from '$lib/server/db/schema';
 import { proxyStoredImage } from '$lib/server/image-proxy';
 import { isAllowedImageType } from '$lib/server/storage/allowlist';
 import { bufferStream, MaxBytesExceededError } from '$lib/server/storage/buffer';
+import { sniffImageType } from '$lib/server/storage/sniff';
+import { SNIFF_BYTES } from '$lib/server/storage/scrub-metadata';
 import { getRawSetting, setRawSetting } from '$lib/server/settings';
 import {
 	FUZZYSEARCH_KEY_REFUSED_SETTING,
 	FUZZYSEARCH_MAX_BYTES,
 	findArtistsByName,
 	findLocalArtists,
+	fuzzysearchRefusedMarker,
 	normalizeSourceUrl,
 	pickPrefillMatch,
 	resolveFuzzysearchKey,
@@ -70,8 +73,8 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 
 	// No key configured: the integration is off, not broken. The UI hides the
 	// button on this answer instead of showing an error (the registry shape).
-	const key = await resolveFuzzysearchKey(db, platform?.env);
-	if (!key) return json({ enabled: false });
+	const resolved = await resolveFuzzysearchKey(db, platform?.env);
+	if (!resolved) return json({ enabled: false });
 
 	const contentType = request.headers.get('content-type') ?? '';
 
@@ -98,6 +101,14 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		if (!(file instanceof File)) error(400, 'No file provided');
 		// Layer 2: the exact check, on the file's real size.
 		if (file.size > FUZZYSEARCH_MAX_BYTES) return failure('too_large');
+		// The same raster gate /api/upload applies, and for the same reason the
+		// imageId branch names the allowlist: an SVG or a PDF is not the
+		// operator's artwork, and it is not something to hand a third party. The
+		// declared type is the browser's word, so the leading bytes are checked
+		// against the allowlist too (SNIFF_BYTES window, as in /api/upload).
+		if (!isAllowedImageType(file.type)) return failure('invalid_image');
+		const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
+		if (!isAllowedImageType(sniffImageType(head))) return failure('invalid_image');
 		bytes = file;
 	} else {
 		const body = (await request.json().catch(() => null)) as { imageId?: unknown } | null;
@@ -128,6 +139,9 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// proxy hands anything outside it back as application/octet-stream, and
 		// `image/*` would also let through the SVG it deliberately demoted.
 		if (!isAllowedImageType(storedType)) {
+			// Release the subrequest's stream: nothing reads this body, and an
+			// unread one keeps the connection open for the rest of the invocation.
+			await stored.body.cancel().catch(() => {});
 			return failure('unavailable');
 		}
 		try {
@@ -143,14 +157,19 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		}
 	}
 
-	const result = await searchImage(bytes, key, fetch);
+	const result = await searchImage(bytes, resolved.key, fetch);
 
 	if (!result.ok) {
 		// A refused key is the one failure worth remembering: the settings page
 		// tells the operator their key stopped working instead of leaving the
-		// button failing silently.
+		// button failing silently. The marker records WHICH key was refused, so a
+		// refusal against the deploy secret is never shown against a stored one.
 		if (result.reason === 'key_refused') {
-			await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, new Date().toISOString());
+			await setRawSetting(
+				db,
+				FUZZYSEARCH_KEY_REFUSED_SETTING,
+				fuzzysearchRefusedMarker(resolved.source)
+			);
 		}
 		return failure(result.reason);
 	}

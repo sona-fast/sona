@@ -58,7 +58,8 @@ import {
 import {
 	FUZZYSEARCH_API_KEY_SETTING,
 	FUZZYSEARCH_KEY_REFUSED_SETTING,
-	fuzzysearchKeyDisplayRecord
+	fuzzysearchKeyDisplayRecord,
+	parseFuzzysearchRefusedMarker
 } from '$lib/server/fuzzysearch';
 import { syncArtists } from '$lib/server/artist-sync';
 import {
@@ -286,7 +287,9 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		FUZZYSEARCH_KEY_REFUSED_SETTING
 	]);
 	const fuzzysearchStoredKey = fuzzysearchRaw[FUZZYSEARCH_API_KEY_SETTING]?.trim() ?? '';
-	const fuzzysearchRefusedAt = fuzzysearchRaw[FUZZYSEARCH_KEY_REFUSED_SETTING] ?? '';
+	const fuzzysearchRefused = parseFuzzysearchRefusedMarker(
+		fuzzysearchRaw[FUZZYSEARCH_KEY_REFUSED_SETTING]
+	);
 
 	// Per-content-type usage (SONA-192) — R2 only: derived from listing the
 	// bucket, so it also counts files D1 never tracked. Reduced to counts and
@@ -338,13 +341,13 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 			: null,
 		// Pre-formatted here, like the early-access GA dates, so the card renders
 		// one date string identically on SSR and after hydration. Only for a key
-		// saved HERE: a refusal recorded against the deploy secret has no remedy
-		// on this page (no key to remove, no date to trust), so the refused state
-		// would be a dead end. The marker still gets written — it costs nothing
-		// and becomes meaningful again if the secret is ever dropped.
+		// saved HERE, and only when THAT key is the one that was refused: a
+		// refusal recorded against the deploy secret has no remedy on this page
+		// (no key to remove), and showing it after the secret is dropped would
+		// blame a stored key that FuzzySearch never turned away.
 		fuzzysearchKeyRefusedAt:
-			!fuzzysearchKeyFromEnv && fuzzysearchStoredKey && fuzzysearchRefusedAt
-				? formatDate(fuzzysearchRefusedAt)
+			!fuzzysearchKeyFromEnv && fuzzysearchStoredKey && fuzzysearchRefused?.source === 'stored'
+				? formatDate(fuzzysearchRefused.at)
 				: null,
 		// Presence-only flags for the password-reset setup guide. The secret VALUES
 		// are deploy-time env and must never reach the client — only whether they exist.

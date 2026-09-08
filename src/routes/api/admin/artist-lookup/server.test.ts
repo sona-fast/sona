@@ -45,8 +45,9 @@ const DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NU
 		registry_version INTEGER, registry_synced_at TEXT, aliases TEXT,
 		avatar_resolved_at TEXT, created_at TEXT NOT NULL);`;
 
-/** A 1×1-ish PNG stand-in — the endpoint never decodes, it only forwards. */
-const IMAGE_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+/** A PNG stand-in — the endpoint never decodes, but it does sniff the leading
+ * bytes of an uploaded file, so the signature has to be the real one. */
+const IMAGE_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function makeEnv(env: Record<string, unknown> = {}) {
 	const sqlite = new Database(':memory:');
@@ -97,7 +98,7 @@ function jsonEvent(platform: App.Platform, body: unknown, fetchFn: typeof fetch 
 
 function pngFile(size = 32) {
 	const bytes = new Uint8Array(size);
-	bytes.set(IMAGE_BYTES.slice(0, 4));
+	bytes.set(IMAGE_BYTES);
 	return new File([bytes], 'a.png', { type: 'image/png' });
 }
 
@@ -204,6 +205,36 @@ describe('artist-lookup — uploaded file', () => {
 		});
 		const res = await POST({ request, platform, fetch: imageFetch().fn } as never);
 		expect(res.status).toBe(413);
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// SVG and PDF are not the raster types storage accepts, and neither is the
+	// operator's artwork to hand a third party. Refused on the declared type
+	// alone, before anything leaves this app.
+	it('refuses a non-raster upload without contacting FuzzySearch', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const cases = [
+			new File(['<svg/>'], 'a.svg', { type: 'image/svg+xml' }),
+			new File(['%PDF-1.7'], 'a.pdf', { type: 'application/pdf' })
+		];
+		for (const file of cases) {
+			const res = await POST(multipartEvent(platform, file));
+			expect(res.status, file.type).toBe(422);
+			expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+		}
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// The declared type is the browser's word for it. A PDF renamed to .png is
+	// caught by the leading bytes, the same check /api/upload applies.
+	it('refuses an upload whose bytes are not the type it declares', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const spoofed = new File(['%PDF-1.7 not a png'], 'a.png', { type: 'image/png' });
+
+		const res = await POST(multipartEvent(platform, spoofed));
+
+		expect(res.status).toBe(422);
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -378,6 +409,29 @@ describe('artist-lookup — stored image by id', () => {
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
+	// Nothing reads the body of a refused type, and an unread subrequest stream
+	// holds its connection open for the rest of the invocation.
+	it('cancels the proxied body when the stored type is refused', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.svg', '2026-01-01');`
+		);
+		const canceled = vi.fn();
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				controller.enqueue(new Uint8Array([1]));
+			},
+			cancel: canceled
+		});
+		const svg = new Response(body, { status: 200, headers: { 'content-type': 'image/svg+xml' } });
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(svg).fn));
+
+		expect(res.status).toBe(502);
+		expect(canceled).toHaveBeenCalled();
+	});
+
 	// SVG is an image type, so an `image/*` check would have sent it on. It is
 	// not one of the raster types storage accepts, the proxy demotes it to a
 	// download, and nothing is uploaded to FuzzySearch.
@@ -408,12 +462,28 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 		const refused = await POST(multipartEvent(platform, pngFile()));
 		expect(refused.status).toBe(401);
 		expect(await refused.json()).toEqual({ enabled: true, error: 'key_refused' });
-		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		// The source rides along with the date: this refusal was the deploy
+		// secret's, and the settings card must not blame a stored key for it.
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toMatch(
+			/^\d{4}-\d{2}-\d{2}T.*\|env$/
+		);
 
 		searchImage.mockResolvedValue({ ok: true, matches: [] });
 		const ok = await POST(multipartEvent(platform, pngFile()));
 		expect(ok.status).toBe(200);
 		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBe('');
+	});
+
+	it('records a refusal of the saved key against that key, not the secret', async () => {
+		const { db, platform } = makeEnv();
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'from-settings');
+		searchImage.mockResolvedValue({ ok: false, reason: 'key_refused' });
+
+		await POST(multipartEvent(platform, pngFile()));
+
+		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toMatch(
+			/^\d{4}-\d{2}-\d{2}T.*\|stored$/
+		);
 	});
 
 	it('writes nothing on a clean success with no marker standing', async () => {

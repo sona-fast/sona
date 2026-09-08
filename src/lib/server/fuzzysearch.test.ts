@@ -12,6 +12,8 @@ import {
 	handleProfileUrl,
 	findLocalArtists,
 	findArtistsByName,
+	fuzzysearchRefusedMarker,
+	parseFuzzysearchRefusedMarker,
 	type LookupMatch
 } from './fuzzysearch';
 
@@ -177,6 +179,9 @@ describe('searchImage — request shape', () => {
 describe('searchImage — failure mapping', () => {
 	const cases: Array<[number, string]> = [
 		[401, 'key_refused'],
+		// A revoked or suspended key answers 403, not 401; both are the refused
+		// state the settings card can act on.
+		[403, 'key_refused'],
 		[429, 'rate_limited'],
 		[413, 'too_large'],
 		[500, 'unavailable'],
@@ -461,5 +466,30 @@ describe('findArtistsByName', () => {
 	it('does not match on a substring, or on nothing', () => {
 		expect(findArtistsByName(rows, 'kutt')).toEqual([]);
 		expect(findArtistsByName(rows, '  ')).toEqual([]);
+	});
+});
+
+describe('the refused marker', () => {
+	it('round-trips the date and the key source', () => {
+		const marker = fuzzysearchRefusedMarker('env', new Date('2026-09-01T10:00:00.000Z'));
+		expect(marker).toBe('2026-09-01T10:00:00.000Z|env');
+		expect(parseFuzzysearchRefusedMarker(marker)).toEqual({
+			at: '2026-09-01T10:00:00.000Z',
+			source: 'env'
+		});
+		expect(parseFuzzysearchRefusedMarker(fuzzysearchRefusedMarker('stored'))?.source).toBe('stored');
+	});
+
+	it('reads a cleared or missing marker as no refusal', () => {
+		expect(parseFuzzysearchRefusedMarker('')).toBeNull();
+		expect(parseFuzzysearchRefusedMarker(null)).toBeNull();
+		expect(parseFuzzysearchRefusedMarker(undefined)).toBeNull();
+	});
+
+	it('reads a marker with no source as a refusal of the stored key', () => {
+		expect(parseFuzzysearchRefusedMarker('2026-09-01T10:00:00.000Z')).toEqual({
+			at: '2026-09-01T10:00:00.000Z',
+			source: 'stored'
+		});
 	});
 });
