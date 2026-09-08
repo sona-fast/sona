@@ -465,10 +465,51 @@ test.describe('with a key saved', () => {
 			'This image is private. Sona sent the file to FuzzySearch for this lookup.'
 		);
 
-		// And back the other way, with the result still on screen.
+		// And back the other way. The hint is about the NEXT click, so it goes;
+		// the notice describes the file that already went out, which was the
+		// private one, so unticking cannot rewrite it.
 		await privateBox.uncheck();
-		await expect(panel(page)).not.toContainText('Sona sent the file to FuzzySearch');
 		await expect(page.locator('#lookup-hint')).not.toContainText('This image is private.');
+		await expect(panel(page)).toContainText('Sona sent the file to FuzzySearch');
+	});
+
+	// The other order. Read live, the notice claimed a private file had been sent
+	// when the file that actually went out was the published one.
+	test('the edit page does not call a published lookup private after the fact', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await gotoEditHydrated(page, '/admin/images/1/edit');
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).not.toContainText('Sona sent the file to FuzzySearch');
+
+		await page.locator('input[name="published"]').check();
+		await expect(page.locator('#lookup-hint')).toContainText('This image is private.');
+		await expect(panel(page)).not.toContainText('Sona sent the file to FuzzySearch');
+	});
+
+	// Image 10 is unpublished in the seed. Unticking Private says what the next
+	// save should do; until it happens the stored row still hides the file, so
+	// the lookup is still a private-file lookup and both lines have to say so.
+	test('the edit page discloses a lookup on an unpublished row with Private unticked', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await gotoEditHydrated(page);
+		const privateBox = page.locator('input[name="published"]');
+		await expect(privateBox).toBeChecked();
+		await expect(page.locator('#lookup-hint')).toContainText('This image is private.');
+
+		await privateBox.uncheck();
+		await expect(page.locator('#lookup-hint')).toContainText('This image is private.');
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).toContainText(
+			'This image is private. Sona sent the file to FuzzySearch for this lookup.'
+		);
 	});
 
 	// A second lookup used to read the first one's URL as something the operator

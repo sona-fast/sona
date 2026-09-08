@@ -32,7 +32,7 @@ describe('lookup button and its disclosure hint', () => {
 			expect(source).toContain('m.admin_lookup_hint()');
 			expect(source).toContain('m.admin_lookup_hint_private()');
 			// The warn variant is a class swap on the same line, not a second one.
-			expect(source).toMatch(/class:hint-warn=\{isPrivate\}/);
+			expect(source).toMatch(/class:hint-warn=\{(isPrivate|sendingPrivate)\}/);
 			// Both pages read the checkbox the operator can tick right now. Derived
 			// from the saved row instead, the edit page said nothing about sending a
 			// private file until the save had already happened.
@@ -40,6 +40,12 @@ describe('lookup button and its disclosure hint', () => {
 				/<input type="checkbox" name="published" bind:checked=\{isPrivate\} \/>/
 			);
 		}
+		// Nothing is saved on the upload page, so the checkbox is the whole story
+		// there. On the edit page the stored row hides the file too, so unticking
+		// Private on a row that is still unpublished must not drop the hint.
+		expect(UPLOAD).toMatch(/class:hint-warn=\{isPrivate\}/);
+		expect(EDIT).toMatch(/class:hint-warn=\{sendingPrivate\}/);
+		expect(EDIT).toContain('const sendingPrivate = $derived(!data.image.published || isPrivate)');
 		expect(EDIT).not.toContain('const isPrivate = $derived(!data.image.published)');
 		// The component is reused across a route-param change, so the tick has to
 		// go back to the next image's own state.
@@ -244,11 +250,16 @@ describe('the panel', () => {
 	// The file has already gone out on a failure too, so both pages key the
 	// notice off lookupSentFile rather than off a result (SONA-156 round 1).
 	it('shows the notice whenever the file actually went out', () => {
-		for (const source of [UPLOAD, EDIT]) {
-			expect(source).toMatch(/privateNotice=\{isPrivate && lookupSentFile\(/);
-		}
+		expect(UPLOAD).toMatch(/privateNotice=\{isPrivate && lookupSentFile\(/);
 		// And on a variant tile whose lookup ran while Private was checked.
 		expect(UPLOAD).toMatch(/isPrivate && lookupSentFile\(tile\.lookup\)/);
+		// The notice describes a send that already happened, so the edit page
+		// reads the state as it was when the request fired. Read live, a tick made
+		// after the click claimed the published file that went out was private.
+		expect(EDIT).toMatch(/privateNotice=\{sentPrivate && lookupSentFile\(/);
+		expect(EDIT).toMatch(
+			/function startLookup\(\)[\s\S]{0,600}?sentPrivate = sendingPrivate;/
+		);
 	});
 
 	it('shows the clash thumbnail row with the piece it points at', () => {

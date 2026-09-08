@@ -141,6 +141,16 @@
 	// Private and then runs the lookup is about to send an unpublished file, and
 	// a disclosure keyed on the row would say nothing until the save.
 	let isPrivate = $state(untrack(() => !data.image.published));
+	// Either half makes the file one no visitor can see: the stored row is what
+	// hides it today, the checkbox is the operator's intent to hide it at the
+	// next save. Unticking Private on a row that is still unpublished does not
+	// turn the lookup into a public-file lookup.
+	const sendingPrivate = $derived(!data.image.published || isPrivate);
+	// What the file that ACTUALLY went out was, read when the request fired. The
+	// hint above the button is about the next click, so it stays live; the notice
+	// under a finished lookup describes a send that already happened, and reading
+	// the checkbox live let a tick made after the click rewrite that history.
+	let sentPrivate = $state(false);
 	const ratingTagText = $derived(
 		lookup.kind === 'results' ? ratingTag(strictestRating(lookup.data.matches)) : null
 	);
@@ -185,6 +195,7 @@
 		const controller = new AbortController();
 		lookupAbort = controller;
 		lookup = { kind: 'searching' };
+		sentPrivate = sendingPrivate;
 		if (clearedInline) announcer.say(m.admin_lookup_announce_searching_cleared());
 		void runLookup({ imageId: data.image.id }, { signal: controller.signal }).then((next) => {
 			if (lookupAbort !== controller) return;
@@ -399,8 +410,8 @@
 			{/if}
 			</div>
 			{#if data.lookupEnabled}
-				<small class="hint" class:hint-warn={isPrivate} id="lookup-hint">
-					{isPrivate ? m.admin_lookup_hint_private() : m.admin_lookup_hint()}
+				<small class="hint" class:hint-warn={sendingPrivate} id="lookup-hint">
+					{sendingPrivate ? m.admin_lookup_hint_private() : m.admin_lookup_hint()}
 				</small>
 			{:else}
 				<small class="hint" id="lookup-hint">
@@ -423,7 +434,7 @@
 					{appliedArtist}
 					editMode
 					variantBlocked={data.hasVariants}
-					privateNotice={isPrivate && lookupSentFile(lookup)}
+					privateNotice={sentPrivate && lookupSentFile(lookup)}
 					onclose={closeLookup}
 					onretry={startLookup}
 					oncancel={cancelLookup}
