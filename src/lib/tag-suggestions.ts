@@ -251,9 +251,10 @@ export function trayFor(state: SuggestionState): Tray {
 			};
 		case 'noSource':
 			// The forms answer this under the field, so only the backfill row draws
-			// it: a stored URL that has been edited into something unreadable since
-			// the list loaded.
-			return { title: unavailable, body: m.admin_tag_suggest_hint_no_source(), warn: true, retry: false };
+			// it. Either way the state came from a 422: the client recogniser
+			// accepted the link and the server could not read a post at it, so the
+			// sentence names the link rather than telling the operator to add one.
+			return { title: unavailable, body: m.admin_tag_suggest_not_a_post_body(), warn: true, retry: false };
 		default:
 			// 'unavailable', and the states the tray never renders.
 			return { title: unavailable, body: m.admin_tag_suggest_unavailable_body(), warn: true, retry: true };
@@ -275,7 +276,9 @@ export function sentenceFor(next: SuggestionState): string {
 		case 'suggested':
 			return m.admin_tag_suggest_eyebrow({ count: next.tags.length });
 		case 'noSource':
-			return m.admin_tag_suggest_hint_no_source();
+			// A 422: the field holds a link the client recogniser accepted, so
+			// "add a post URL" would describe a field that is not empty.
+			return m.admin_tag_suggest_not_a_post_body();
 		case 'idle':
 		case 'searching':
 		case 'applied':

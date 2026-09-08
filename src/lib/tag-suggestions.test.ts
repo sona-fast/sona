@@ -162,12 +162,13 @@ describe('the tray a finished state draws', () => {
 	});
 
 	it('draws the backfill row a tray for a source URL it cannot read', () => {
-		// The forms answer this under the field, so only a row reaches it — an image
-		// whose stored URL was edited into something unreadable since the list
-		// loaded. Without a tray the row said nothing at all.
+		// The forms answer this under the field, so only a row reaches it. The
+		// state is a 422 either way: the link passed the client recogniser and the
+		// server still could not read a post at it, so the sentence names the link
+		// rather than asking for a URL the field already holds.
 		expect(trayFor({ kind: 'noSource' })).toEqual({
 			title: 'Suggestions unavailable',
-			body: 'Add a Bluesky or X post as the source URL to get tag suggestions.',
+			body: "entail.dev couldn't read this link as a post. Check the source post URL.",
 			warn: true,
 			retry: false
 		});
@@ -266,6 +267,12 @@ describe('the sentences the live region reads', () => {
 	it('counts the suggestions, and says nothing for the states that have no sentence', () => {
 		expect(sentenceFor(fromResponse(200, ok(['fox', 'beach']), []))).toBe(
 			'2 suggested tags from entail.dev'
+		);
+		// A 422 answers about the link the field holds, not about a missing one:
+		// the client recogniser accepted that link, so "add a post URL" would
+		// describe a field that is not empty.
+		expect(sentenceFor({ kind: 'noSource' })).toBe(
+			"entail.dev couldn't read this link as a post. Check the source post URL."
 		);
 		expect(sentenceFor({ kind: 'idle' })).toBe('');
 		expect(sentenceFor({ kind: 'searching', source: 'x' })).toBe('');

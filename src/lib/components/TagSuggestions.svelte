@@ -80,11 +80,46 @@
 	const disabled = $derived(source === null || searching);
 	const chosen = $derived(selectedTags(suggestion));
 
+	// Two different refusals, two different sentences. An empty or unrecognised
+	// field is the operator's to fill in; a 422 means the client recogniser
+	// accepted the link and the server still could not read a post at it, and
+	// "add a post URL" would then describe a field that is not empty.
 	const hint = $derived(
-		source === null || suggestion.kind === 'noSource'
+		source === null
 			? m.admin_tag_suggest_hint_no_source()
-			: m.admin_tag_suggest_hint()
+			: suggestion.kind === 'noSource'
+				? m.admin_tag_suggest_not_a_post_body()
+				: m.admin_tag_suggest_hint()
 	);
+
+	// The tray body swaps to the no-source sentence exactly here: a finished
+	// failure whose Try again could answer differently, over a URL that has
+	// since stopped being a post. Derived rather than written inline, so the
+	// effect below announces the same transition the body draws.
+	const retryTrayOpen = $derived(
+		suggestion.kind !== 'idle' &&
+			suggestion.kind !== 'applied' &&
+			suggestion.kind !== 'noSource' &&
+			suggestion.kind !== 'searching' &&
+			suggestion.kind !== 'suggested' &&
+			trayFor(suggestion).retry
+	);
+
+	// A sighted operator sees the body swap; a screen reader gets nothing unless
+	// the sentence is written into the live region. Announced on the transition
+	// from a post to no post only: the source field changes on every keystroke,
+	// and a region rewritten with the sentence it already holds announces it
+	// all over again.
+	// null until the effect has run once, so the first run records the URL the
+	// component opened with rather than reading it as a change.
+	let hadSource: boolean | null = null;
+	$effect(() => {
+		const has = source !== null;
+		const was = hadSource;
+		hadSource = has;
+		if (was === true && !has && retryTrayOpen)
+			announcement = m.admin_tag_suggest_retry_needs_post_body();
+	});
 
 	// The pill points at the sentence that explains its current state: the hint
 	// normally, the "Reading the …" line while a lookup runs, and the applied
@@ -254,9 +289,13 @@
 				<!-- Once the URL under an open tray stops being a post, what stands between
 				     the operator and another answer is the URL, not the failure the body
 				     describes. The eyebrow keeps saying what happened; the body says what
-				     to do about it, the same sentence the refused Try again points at. -->
+				     to do about it. Its own shorter sentence, not the field's: the hint
+				     saying the same words sits about 60px below this line, and the tray
+				     can point at the field the operator has to go back to. -->
 				<p class="tag-panel-body">
-					{tray.retry && source === null ? m.admin_tag_suggest_hint_no_source() : tray.body}
+					{retryTrayOpen && source === null
+						? m.admin_tag_suggest_retry_needs_post_body()
+						: tray.body}
 				</p>
 				<div class="tag-actions">
 					{#if tray.retry}

@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from '@playwright/test';
+import { test, expect, type Locator, type Page, type Route } from '@playwright/test';
 import { adminLogin, gotoAfterLogin, gotoRetrying } from './admin-login';
 
 // The tag backfill list at /admin/images/suggest-tags, end to end (SONA-220).
@@ -66,6 +66,14 @@ const SAVE_NOT_FOUND = JSON.stringify({
 	status: 404,
 	data: '[{"error":1},"not_found"]'
 });
+
+/** A row card's content width: what a control that spans the row measures at
+ * the phone breakpoint, where .tag-actions stacks and its pill widens to it. */
+async function cardContentWidth(target: Locator) {
+	return target.evaluate((el) => el.clientWidth
+		- parseFloat(getComputedStyle(el).paddingLeft)
+		- parseFloat(getComputedStyle(el).paddingRight));
+}
 
 /** The rgb() a CSS custom property resolves to in the page, for toHaveCSS. */
 async function cssVarColor(page: Page, token: string) {
@@ -310,6 +318,13 @@ test('Save writes the tags and the row shows the saved line and static chips', a
 	const actionBox = await action.boundingBox();
 	expect(actionBox!.y - (chipBox!.y + chipBox!.height)).toBeGreaterThan(12);
 
+	// Stacked at 390px it is the row's one action, so it spans the card the way
+	// Save did before it: the phone rule for a tray's pill reaches this anchor.
+	await page.setViewportSize({ width: 390, height: 844 });
+	const phoneBox = (await action.boundingBox())!;
+	expect(Math.abs(phoneBox.width - (await cardContentWidth(target)))).toBeLessThanOrEqual(1);
+	await page.setViewportSize({ width: 1280, height: 720 });
+
 	// The tags are real: the edit form loads them, and the row is off the list.
 	await gotoRetrying(page, '/admin/images/119/edit');
 	await expect(page.locator('input[name="tags"]')).toHaveValue('rain-drops, cozy');
@@ -355,6 +370,11 @@ test('a row tagged elsewhere since the list loaded refuses to overwrite', async 
 	await expect(edit).toHaveClass(/tag-pill/);
 	await expect(edit).toHaveCSS('text-decoration-line', 'none');
 	await expect(edit).not.toHaveCSS('border-top-width', '0px');
+	// And at 390px it spans the card, like every other tray action stacked there.
+	await page.setViewportSize({ width: 390, height: 844 });
+	const editBox = (await edit.boundingBox())!;
+	expect(Math.abs(editBox.width - (await cardContentWidth(target)))).toBeLessThanOrEqual(1);
+	await page.setViewportSize({ width: 1280, height: 720 });
 	// One live region serves twenty rows, so the sentence names its image.
 	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
 		'Backfill 118. This image was tagged elsewhere since the list loaded. Open it to edit its tags.'

@@ -207,6 +207,39 @@ test('a post whose only tag is already typed says the tag was skipped, not that 
 	await expect(tagsInput(page)).toHaveValue('fox');
 });
 
+test('a tray with no Try again keeps its own sentence when the source URL stops being a post', async ({
+	page
+}) => {
+	// The body only swaps to the no-source sentence where another click could
+	// answer differently. Nothing about this tray changes if the URL does: there
+	// was nothing left to offer, and no button the missing URL could refuse.
+	await openUploadForm(page);
+	await tagsInput(page).fill('fox');
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-panel-body')).toHaveText(
+		'entail.dev only returned tags that are already in the Tags field.'
+	);
+	await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+
+	await page.fill('input[name="sourcePostUrl"]', 'not a post at all');
+	await expect(page.locator('.tag-panel-body')).toHaveText(
+		'entail.dev only returned tags that are already in the Tags field.'
+	);
+	await expect(page.locator('.tag-eyebrow')).toHaveText('No tags to suggest');
+	// And nothing is announced over it either: the sentence the tray drew when
+	// the lookup answered is still the one the live region holds.
+	await expect(liveRegion(page)).toContainText(
+		'entail.dev only returned tags that are already in the Tags field.'
+	);
+});
+
 for (const rating of ['explicit', 'questionable'] as const) {
 	test(`a ${rating} rating warns and offers Mark it NSFW, which checks the box and hands it focus`, async ({
 		page
@@ -395,11 +428,12 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	await expect(page.locator(`#${hintId}`)).toHaveText(
 		'Add a Bluesky or X post as the source URL to get tag suggestions.'
 	);
-	// And the tray body says it too, rather than leaving the outage sentence
-	// beside a button the missing URL is what actually stopped. The eyebrow still
-	// names the failure that opened the tray.
+	// And the tray body says so too, rather than leaving the outage sentence
+	// beside a button the missing URL is what actually stopped. Its own shorter
+	// sentence: the hint above says the same thing in full a few lines away. The
+	// eyebrow still names the failure that opened the tray.
 	await expect(page.locator('.tag-panel-body')).toHaveText(
-		'Add a Bluesky or X post as the source URL to get tag suggestions.'
+		'Add a Bluesky or X post above to try again.'
 	);
 	await expect(page.locator('.tag-eyebrow')).toHaveText('Suggestions unavailable');
 
@@ -412,9 +446,10 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	await retry.dispatchEvent('click');
 	await expect(page.locator('.tag-eyebrow')).toHaveText('Suggestions unavailable');
 	expect(asked).toBe(0);
-	await expect(liveRegion(page)).toHaveText(
-		"Suggestions unavailable. entail.dev didn't answer. Your tags are unchanged."
-	);
+	// The body swapped when the URL stopped being a post, and a screen reader
+	// gets nothing from a swap it cannot see: the sentence the body now draws is
+	// written into the live region as the URL goes.
+	await expect(liveRegion(page)).toHaveText('Add a Bluesky or X post above to try again.');
 });
 
 test('the tray action spans the tray on a phone, like the pill above it', async ({ page }) => {
@@ -435,19 +470,49 @@ test('the tray action spans the tray on a phone, like the pill above it', async 
 	expect(Math.abs(box.width - content)).toBeLessThanOrEqual(1);
 });
 
+test('the Sign in link spans the tray on a phone, like Try again in its place', async ({ page }) => {
+	// A dead session draws an anchor where Try again would be, and the two are
+	// the same control to the operator. An anchor left at its intrinsic width
+	// would be the one tray action that reads as an aside.
+	await page.setViewportSize({ width: 390, height: 844 });
+	await openUploadForm(page);
+	await stubSuggestions(page, 401, { error: 'unauthorized' });
+	await pill(page).click();
+
+	const signIn = page.getByRole('link', { name: 'Sign in' });
+	await expect(signIn).toHaveAttribute('href', '/admin/login');
+	const box = (await signIn.boundingBox())!;
+	const content = await page.locator('.tag-tray').evaluate((el) => el.clientWidth
+		- parseFloat(getComputedStyle(el).paddingLeft)
+		- parseFloat(getComputedStyle(el).paddingRight));
+	expect(Math.abs(box.width - content)).toBeLessThanOrEqual(1);
+});
+
 test('a 422 answers in the hint rather than the tray', async ({ page }) => {
-	// The endpoint read the post and found nothing to read from. There is no tray
-	// for that: the hint under the field says what a URL has to be, and the pill
-	// stays clickable, since the operator can edit the URL and ask again.
+	// The endpoint could not read a post at the link. There is no tray for that:
+	// the hint under the field says so, and the pill stays clickable, since the
+	// operator can edit the URL and ask again.
 	await openUploadForm(page);
 	await stubSuggestions(page, 422, { error: 'unsupported_source' });
 
 	await pill(page).click();
 	await expect(page.locator('.tag-tray')).toHaveCount(0);
+	// The field holds a link the client recogniser accepted, so the hint names
+	// that link rather than asking for a URL that is already there.
+	await expect(page.locator('#tags-hint')).toHaveText(
+		"entail.dev couldn't read this link as a post. Check the source post URL."
+	);
+	await expect(liveRegion(page)).toHaveText(
+		"entail.dev couldn't read this link as a post. Check the source post URL."
+	);
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+
+	// Clear the field and the refusal is the operator's to fix again, so the
+	// hint goes back to saying what a URL has to be.
+	await page.fill('input[name="sourcePostUrl"]', '');
 	await expect(page.locator('#tags-hint')).toHaveText(
 		'Add a Bluesky or X post as the source URL to get tag suggestions.'
 	);
-	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });
 
 test('a lookup in flight cannot be dismissed, so no answer can land on a closed tray', async ({

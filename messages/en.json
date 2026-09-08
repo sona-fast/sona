@@ -1761,6 +1761,8 @@
 	"admin_tag_suggest_searching": "Suggesting tags…",
 	"admin_tag_suggest_hint": "Suggestions come from entail.dev, which reads the source post. Sona adds them only when you accept.",
 	"admin_tag_suggest_hint_no_source": "Add a Bluesky or X post as the source URL to get tag suggestions.",
+	"admin_tag_suggest_not_a_post_body": "entail.dev couldn't read this link as a post. Check the source post URL.",
+	"admin_tag_suggest_retry_needs_post_body": "Add a Bluesky or X post above to try again.",
 	"admin_tag_suggest_hint_first_tile": "Suggestions come from the first image in this upload.",
 	"admin_tag_suggest_region_label": "Tag suggestions",
 	"admin_tag_suggest_reading_bluesky": "Reading the Bluesky post",
