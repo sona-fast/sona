@@ -997,31 +997,25 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 	});
 
 	// Stacked under a full-width Save, that shared fill would be a short pill
-	// orphaned at the left edge, so the phone breakpoint drops it. The label mix
-	// goes with it: made against --secondary, it lands darker on the card than
-	// the resting label, and a refused control has no business reading louder
-	// than a working one. The refused cue there is the missing fill and the
-	// cursor, with the label held at its resting weight.
-	it('drops the refused Dismiss fill on a phone, where the label carries the state alone', () => {
+	// orphaned at the left edge, so the phone breakpoint widens it to the tray
+	// instead of dropping it. Dropping it is what this test is here to stop: a
+	// phone has no cursor and no hover, so the fill, the outline and the label
+	// mix are the whole of the refused cue. The mix rides on --secondary, which
+	// the disabled-pill loop above already floors at 4.5:1 in every theme.
+	it('widens the refused Dismiss to the tray on a phone and keeps the shared fill', () => {
 		const rule = css.match(
 			/\.tag-actions \.tag-btn-text\[aria-disabled='true'\],\n\t\.tag-actions \.tag-btn-text\[aria-disabled='true'\]:hover\s*\{([^}]*)\}/
 		)?.[1];
 		if (!rule) throw new Error('the phone-width refused Dismiss rule is missing from app.css');
-		expect(rule).toMatch(/background:\s*none\s*;/);
-		// border-color, not border: the 1px stays reserved so nothing shifts.
-		expect(rule).toMatch(/border-color:\s*transparent\s*;/);
-		expect(rule).toMatch(/color:\s*var\(--muted-foreground\)\s*;/);
+		expect(rule).toMatch(/width:\s*100%\s*;/);
+		// The flush rule above zeroes the left pad; full width centres the label,
+		// so the pad comes back.
+		expect(rule).toMatch(/padding-left:\s*10px\s*;/);
+		// And nothing here may undo the inert treatment the base rule sets.
+		expect(rule).not.toMatch(/background/);
+		expect(rule).not.toMatch(/border/);
+		expect(rule).not.toMatch(/color:/);
 	});
-
-	for (const { name, sel } of THEME_BLOCKS) {
-		it(`${name}: the refused Dismiss label meets 4.5:1 on the card it sits on there`, () => {
-			const card = blockToken(sel, 'card');
-			// The resting label colour, so the refused one is never the louder of
-			// the two — and still readable on the card it sits on.
-			const label = blockToken(sel, 'muted-foreground');
-			expect(contrast(label, card)).toBeGreaterThanOrEqual(4.5);
-		});
-	}
 
 	// The refused state draws a real border. The rest rule reserves the same 1px
 	// as a transparent one, so the border appearing mid-save does not widen

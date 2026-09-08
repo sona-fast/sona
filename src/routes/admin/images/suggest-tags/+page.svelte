@@ -19,7 +19,6 @@
 	import { sanitizeTag } from '$lib/tags';
 	import {
 		fromResponse,
-		needsReannounceBlank,
 		ratingLabel,
 		readingLabel,
 		requestSuggestions,
@@ -52,6 +51,11 @@
 	let saving = $state(new Set<number>());
 	// One live region for the list, written into rather than replaced.
 	let announcement = $state('');
+	// The row whose sentence the region currently holds. Dismiss clears the region
+	// only when it is still that row's sentence sitting there: the region is
+	// shared, and two rows can be working at once, so a blind blank on one row's
+	// Dismiss throws away what another row wrote in the same flush.
+	let announcedFor: number | null = null;
 	// $state, not plain objects: bind:this writes into a property here, and Svelte
 	// warns (and stops tracking) when the container it writes into is not reactive.
 	let pills = $state<Record<number, HTMLButtonElement | null>>({});
@@ -73,8 +77,9 @@
 	}
 
 	/** One live region serves every row, so each sentence names its image. */
-	function announce(title: string, body: string) {
+	function announce(id: number, title: string, body: string) {
 		announcement = m.admin_suggest_tags_row_announce({ title, body });
+		announcedFor = id;
 	}
 
 	async function suggest(id: number, source: 'bluesky' | 'x', title: string) {
@@ -88,7 +93,7 @@
 		// as if they were the ones that would not save.
 		setFailure(id, false);
 		states = { ...states, [id]: { kind: 'searching', source } };
-		announce(title, readingLabel(source));
+		announce(id, title, readingLabel(source));
 		// "Try again" lived in the tray that just became the searching skeleton;
 		// the row's pill is the control that survives, so focus stays there.
 		await tick();
@@ -100,7 +105,7 @@
 		// The row is on this page because it has no tags, so nothing is excluded.
 		const next = fromResponse(status, body, []);
 		states = { ...states, [id]: next };
-		announce(title, sentenceFor(next));
+		announce(id, title, sentenceFor(next));
 		// An answer with no chips draws a tray, and the pill focus was sitting on
 		// goes with it; land on the sentence that says why, where Try again is the
 		// next tab stop.
@@ -122,7 +127,12 @@
 		setFailure(id, false);
 		const { [id]: _dropped, ...rest } = states;
 		states = rest;
-		announcement = '';
+		// Only this row's own sentence: another row saving at the same time may have
+		// written the region since, and that sentence is not this row's to clear.
+		if (announcedFor === id) {
+			announcement = '';
+			announcedFor = null;
+		}
 		// The pill only renders once the row is idle again.
 		await tick();
 		pills[id]?.focus();
@@ -133,13 +143,14 @@
 	 *  that one case is blanked first and the tick lets the emptying reach the
 	 *  DOM. Only that case: the region is shared, and blanking it would swallow a
 	 *  sentence another row wrote in the same flush. */
-	async function reannounce(title: string, body: string) {
+	async function reannounce(id: number, title: string, body: string) {
 		const next = m.admin_suggest_tags_row_announce({ title, body });
-		if (needsReannounceBlank(announcement, next)) {
+		if (announcement === next) {
 			announcement = '';
 			await tick();
 		}
 		announcement = next;
+		announcedFor = id;
 	}
 
 	function setSaving(id: number, on: boolean) {
@@ -356,7 +367,7 @@
 								// what to do first. A refusal during a save says nothing — the
 								// region already holds the Saving sentence.
 								if (chosen.length === 0 && !saving.has(row.id))
-									reannounce(row.title, m.admin_suggest_tags_save_needs_tag());
+									reannounce(row.id, row.title, m.admin_suggest_tags_save_needs_tag());
 								return;
 							}
 							// The label narrows from "Save 3 tags" to "Saving" for the round
@@ -375,7 +386,7 @@
 							// The round trip can run long enough that a screen reader is left
 							// on the sentence the row said before it, so the region says the
 							// save is running.
-							announce(row.title, m.admin_suggest_tags_saving({ count: chosen.length }));
+							announce(row.id, row.title, m.admin_suggest_tags_saving({ count: chosen.length }));
 							return async ({ result }) => {
 								setSaving(row.id, false);
 								// The resting label is back, so the button sizes itself again.
@@ -386,7 +397,7 @@
 									// list loaded; the action refused rather than overwrite.
 									conflicts = { ...conflicts, [row.id]: true };
 									states = rest;
-									announce(row.title, m.admin_suggest_tags_save_conflict());
+									announce(row.id, row.title, m.admin_suggest_tags_save_conflict());
 									await tick();
 									statusLines[row.id]?.focus();
 									return;
@@ -416,7 +427,7 @@
 									// the row has to show that nothing landed, not only say it
 									// into the live region.
 									setFailure(row.id, true);
-									await reannounce(row.title, m.admin_suggest_tags_save_failed());
+									await reannounce(row.id, row.title, m.admin_suggest_tags_save_failed());
 									// The sentence that says what happened is where the operator
 									// resumes, the way the sibling branches land focus.
 									statusLines[row.id]?.focus();
@@ -430,7 +441,7 @@
 								);
 								saved = { ...saved, [row.id]: labels };
 								states = rest;
-								announce(row.title, m.admin_suggest_tags_saved({ count: written.length }));
+								announce(row.id, row.title, m.admin_suggest_tags_saved({ count: written.length }));
 								// The button that was clicked is gone with the tray; land focus
 								// on the line that says what happened, once it exists.
 								await tick();

@@ -11,17 +11,20 @@ import {
 	E2E_WRANGLER_CONFIG_UT,
 	E2E_UPLOADTHING_MOCK,
 	E2E_PLATFORM_PERSIST_UPLOAD,
-	E2E_PERSIST_TO_UPLOAD
+	E2E_PERSIST_TO_UPLOAD,
+	E2E_PLATFORM_PERSIST_TAGS,
+	E2E_PERSIST_TO_TAGS
 } from './tests/e2e/paths';
 
 // The shared read-only DB/server (gallery, palette), an isolated one for the
 // session-mutating password-recovery spec, an isolated one for the ut-stat
 // spec (needs UPLOADTHING_TOKEN + the UT interceptor, which would perturb the
-// shared specs), and an isolated one for the upload spec — see below.
+// shared specs), an isolated one for the upload spec, and an isolated one for
+// the serial tag-suggestions spec — see below.
 //
-// The four ports are derived from one base so a concurrent run can take a
-// private block: set SONA_E2E_BASE_PORT and this run binds base..base+3 instead
-// of 4179-4182. Without it, every checkout and every agent binds the same four
+// The five ports are derived from one base so a concurrent run can take a
+// private block: set SONA_E2E_BASE_PORT and this run binds base..base+4 instead
+// of 4179-4183. Without it, every checkout and every agent binds the same five
 // ports, and a second run either dies on --strictPort or (worse) gets its
 // servers killed by whoever assumes the listener is their own stray (SONA-164).
 // `||`, not `??`, for the same reason as persistRoot in tests/e2e/paths.ts: a
@@ -29,15 +32,16 @@ import {
 // explicitly invalid port still trips the check below rather than silently
 // falling back.)
 const BASE_PORT = Number(process.env.SONA_E2E_BASE_PORT || 4179);
-if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_532) {
+if (!Number.isInteger(BASE_PORT) || BASE_PORT < 1024 || BASE_PORT > 65_531) {
 	throw new Error(
-		`SONA_E2E_BASE_PORT must be an integer in 1024-65532 (needs 4 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
+		`SONA_E2E_BASE_PORT must be an integer in 1024-65531 (needs 5 consecutive ports), got: ${process.env.SONA_E2E_BASE_PORT}`
 	);
 }
 const PORT = BASE_PORT;
 const RECOVERY_PORT = BASE_PORT + 1;
 const UT_PORT = BASE_PORT + 2;
 const UPLOAD_PORT = BASE_PORT + 3;
+const TAGS_PORT = BASE_PORT + 4;
 
 // Point `vite dev` at the E2E-only wrangler config + throwaway persist dir (see
 // svelte.config.js, which honours these envs) so tests run against the DB the
@@ -89,6 +93,16 @@ const uploadServerEnv = {
 	NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${E2E_UPLOADTHING_MOCK}`.trim()
 };
 
+// The tag-suggestions spec runs one worker at a time and needs its own server
+// for it: on the shared one its serial logins queue behind the parallel chromium
+// project's load and time out. Same wrangler config as the shared server — it
+// writes no rows and needs no token — but its own seeded DB. See tests/e2e/paths.ts.
+const tagsServerEnv = {
+	SONA_E2E_WRANGLER_CONFIG: E2E_WRANGLER_CONFIG,
+	SONA_E2E_PERSIST_TO: E2E_PLATFORM_PERSIST_TAGS,
+	SONA_E2E_SEED_PERSIST_TO: E2E_PERSIST_TO_TAGS
+};
+
 const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
 // storage-breakdown rides the ut-stat server: it also flips the storage
 // provider, which would race the shared server's specs (SONA-192).
@@ -96,11 +110,11 @@ const UT_SPECS = ['**/ut-stat.spec.ts', '**/storage-breakdown.spec.ts'];
 // suggest-tags rides the upload server: its Save writes tag rows, and the
 // shared server's DB is read-only by convention (SONA-220).
 const UPLOAD_SPECS = ['**/upload.spec.ts', '**/suggest-tags.spec.ts'];
-// tag-suggestions stays on the SHARED server — it writes no rows, it only reads
-// the two admin forms with the lookup endpoint intercepted. What it cannot take
-// is the parallel project: its tests log in and then navigate, and a SvelteKit
-// client navigation landing after the fill detaches the form under the
-// assertion. Serial, one worker, same read-only server (SONA-220).
+// tag-suggestions reads the two admin forms with the lookup endpoint
+// intercepted and writes no rows, but it cannot take the parallel project: its
+// tests log in and then navigate, and a SvelteKit client navigation landing
+// after the fill detaches the form under the assertion. Serial, one worker, on
+// its own seeded server so nothing else loads it while it waits (SONA-220).
 const TAG_SUGGESTION_SPEC = '**/tag-suggestions.spec.ts';
 
 // Seed a fresh throwaway D1 first, then boot the dev server against it. Seeding
@@ -149,7 +163,7 @@ export default defineConfig({
 			name: 'tag-suggestions',
 			testMatch: TAG_SUGGESTION_SPEC,
 			workers: 1,
-			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
+			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${TAGS_PORT}` }
 		},
 		{
 			name: 'recovery',
@@ -177,6 +191,7 @@ export default defineConfig({
 		webServer(PORT, sharedServerEnv),
 		webServer(RECOVERY_PORT, recoveryServerEnv),
 		webServer(UT_PORT, utServerEnv),
-		webServer(UPLOAD_PORT, uploadServerEnv)
+		webServer(UPLOAD_PORT, uploadServerEnv),
+		webServer(TAGS_PORT, tagsServerEnv)
 	]
 });

@@ -2,7 +2,6 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
 	applyTo,
 	fromResponse,
-	needsReannounceBlank,
 	parseTagInput,
 	ratingLabel,
 	readingLabel,
@@ -303,23 +302,3 @@ describe('requestSuggestions', () => {
 	});
 });
 
-describe('re-saying a sentence the shared live region may already hold', () => {
-	it('blanks first when the region already holds the sentence being written', () => {
-		// An unchanged region announces nothing, so the one repeat case has to be
-		// emptied before the same sentence goes back in.
-		expect(needsReannounceBlank('Backfill 3. Not saved.', 'Backfill 3. Not saved.')).toBe(true);
-	});
-
-	it('writes straight over a different sentence', () => {
-		// The region serves every row. Blanking here would drop a sentence another
-		// row wrote into it in the same flush, and the new sentence is a change the
-		// region announces without any help.
-		expect(needsReannounceBlank('Backfill 4. Saving 1 tag.', 'Backfill 3. Not saved.')).toBe(
-			false
-		);
-	});
-
-	it('writes straight into a region that is already empty', () => {
-		expect(needsReannounceBlank('', 'Backfill 3. Not saved.')).toBe(false);
-	});
-});

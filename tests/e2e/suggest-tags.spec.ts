@@ -402,8 +402,10 @@ test('a second identical failure is announced again, not swallowed as an unchang
 	page
 }) => {
 	// A live region announces a change, so writing the sentence it already holds
-	// announces nothing. The row blanks the region and lets that reach the DOM
-	// before writing the same sentence again.
+	// announces nothing. The second click writes "Saving" first, so the identical
+	// failure that follows IS a change and is announced without any blanking —
+	// which matters on a list where two rows can save at once, since blanking the
+	// shared region would throw away whatever the other row just wrote.
 	await openList(page);
 	await stubSuggestions(page, 200, {
 		source: 'bluesky',
@@ -456,6 +458,54 @@ test('a second identical failure is announced again, not swallowed as an unchang
 			'Backfill 110. Saving 1 tag.',
 			"Backfill 110. Sona couldn't save those tags. Try again."
 		]);
+	await page.unroute(savePost);
+});
+
+test('dismissing one row leaves the sentence another row just wrote in the region', async ({
+	page
+}) => {
+	// The region serves the whole list, and two rows can be working at once.
+	// Dismiss used to blank it whatever it held, so closing one tray swallowed the
+	// sentence a row saving beside it had just written.
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	const saver = await clickSuggest(page, 'Backfill 115');
+	const closer = await clickSuggest(page, 'Backfill 117');
+
+	// Held open, so the save is still in flight while the other row is dismissed
+	// and its sentence is the one standing in the region.
+	let release: (() => void) | undefined;
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(savePost, async (route) => {
+		await held;
+		await route.fulfill({
+			status: 404,
+			contentType: 'application/json',
+			body: SAVE_NOT_FOUND
+		});
+	});
+
+	const region = page.locator('p.sr-only[role="status"]');
+	await saver.getByRole('button', { name: 'Save 1 tag to Backfill 115' }).click();
+	await expect(region).toHaveText('Backfill 115. Saving 1 tag.');
+
+	await closer.getByRole('button', { name: 'Dismiss suggestions for Backfill 117' }).click();
+	await expect(closer.locator('.tag-chip')).toHaveCount(0);
+	await expect(region).toHaveText('Backfill 115. Saving 1 tag.');
+
+	// And a row that IS the one in the region still clears it on Dismiss: nothing
+	// of its own is left to announce once its tray is gone.
+	release!();
+	await expect(saver.locator('.tag-eyebrow.warn')).toHaveText('Not saved');
+	await expect(region).toHaveText("Backfill 115. Sona couldn't save those tags. Try again.");
+	await saver.getByRole('button', { name: 'Dismiss suggestions for Backfill 115' }).click();
+	await expect(region).toHaveText('');
 	await page.unroute(savePost);
 });
 
@@ -543,11 +593,14 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 	// left out from under the pointer that just pressed Save either.
 	// Within a pixel: the hold rounds the resting width up to a whole pixel, so
 	// Dismiss can end a fraction to the right of where it rested, never left of it
-	// and never out from under the pointer.
+	// and never out from under the pointer. Directional, not an absolute
+	// tolerance: rounding the held width DOWN slides Dismiss left by a fraction of
+	// a pixel, which a one-pixel window either way would wave through.
 	const savingBox = await dismiss.boundingBox();
 	expect(Math.abs(savingBox!.width - restBox!.width)).toBeLessThanOrEqual(1);
 	expect(Math.abs(savingBox!.height - restBox!.height)).toBeLessThanOrEqual(1);
-	expect(Math.abs(savingBox!.x - restBox!.x)).toBeLessThanOrEqual(1);
+	expect(savingBox!.x).toBeGreaterThanOrEqual(restBox!.x - 0.01);
+	expect(savingBox!.x - restBox!.x).toBeLessThanOrEqual(1);
 	const pill = target.getByRole('button', { name: 'Suggest tags for Backfill 112' });
 	await expect(pill).toHaveAttribute('aria-disabled', 'true');
 	// Dispatched rather than clicked: Playwright waits for an aria-disabled
@@ -785,10 +838,10 @@ test('an expanded row drops its indent on a phone, where the head wraps', async 
 	const target = await clickSuggest(page, 'Backfill 114');
 	await expect(target.locator('.tag-eyebrow')).toHaveCSS('margin-left', '0px');
 
-	// Stacked, Save spans the tray and Dismiss sits under it. The inert fill the
-	// refused controls share on one line would draw a short pill orphaned at the
-	// left edge here, so Dismiss stays text-only while it refuses, at the same
-	// label colour it rests at.
+	// Stacked, Save spans the tray and Dismiss sits under it. A phone has no
+	// cursor and no hover, so the refused Dismiss keeps the fill the refused
+	// controls share on one line and spans the tray with it, rather than leaving
+	// a short pill orphaned at the left edge.
 	let release: (() => void) | undefined;
 	const held = new Promise<void>((resolve) => (release = resolve));
 	await page.route(savePost, async (route) => {
@@ -801,15 +854,25 @@ test('an expanded row drops its indent on a phone, where the head wraps', async 
 	});
 	const save = target.locator('form.tag-actions button[type="submit"]');
 	const saveRestBox = await save.boundingBox();
-	await save.click();
 	const dismiss = target.getByRole('button', { name: 'Dismiss suggestions for Backfill 114' });
+	const restColor = await dismiss.evaluate((el) => getComputedStyle(el).color);
+	const dismissRestBox = await dismiss.boundingBox();
+	await save.click();
 	await expect(dismiss).toHaveAttribute('aria-disabled', 'true');
-	await expect(dismiss).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-	await expect(dismiss).toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
-	// And the label goes back to its resting colour with the fill. The mix the
-	// refused Save beside it wears is made against that fill, so on the card it
-	// would draw a refused Dismiss darker than a working one.
-	await expect(dismiss).toHaveCSS('color', await cssVarColor(page, '--muted-foreground'));
+	await expect(dismiss).toHaveCSS('background-color', await cssVarColor(page, '--secondary'));
+	// One inert row: the refused Dismiss takes the width Save takes here.
+	const refusedBox = await dismiss.boundingBox();
+	const saveRefusedBox = await save.boundingBox();
+	expect(Math.abs(refusedBox!.width - saveRefusedBox!.width)).toBeLessThanOrEqual(1);
+	// And it grows rightward from the edge it rested at, so the label the pointer
+	// was over does not travel. Directional for the same reason as the one-line
+	// case: a fill that leaked left would sit inside a one-pixel window.
+	expect(refusedBox!.x).toBeGreaterThanOrEqual(dismissRestBox!.x - 0.01);
+	expect(refusedBox!.x - dismissRestBox!.x).toBeLessThanOrEqual(1);
+	// And the label darkens, so the refused state is legible without a cursor or
+	// a hover to say so.
+	const refusedColor = await dismiss.evaluate((el) => getComputedStyle(el).color);
+	expect(refusedColor).not.toBe(restColor);
 
 	release!();
 	await expect(target.locator('.tag-eyebrow.warn')).toHaveText('Not saved');

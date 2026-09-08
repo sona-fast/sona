@@ -310,14 +310,3 @@ export function applyTo(existingInput: string, accepted: string[]): string {
 	}
 	return kept.join(', ');
 }
-
-/**
- * Whether a live region already holding `current` has to be blanked before
- * `next` is written into it. A region announces a change, so writing back the
- * sentence it already holds announces nothing and needs the blanking pass.
- * Every other write is a change on its own — and blanking for those can swallow
- * a sentence another row wrote into the shared region in the same flush.
- */
-export function needsReannounceBlank(current: string, next: string): boolean {
-	return current === next;
-}

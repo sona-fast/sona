@@ -938,21 +938,19 @@ a.tag-pill {
 		padding-left: 0;
 	}
 
-	/* Refused, stacked. The inert fill is a shared state on one line, where the
-	   three refused controls sit side by side; stacked under a Save that spans
-	   the tray, the same fill draws a 67px pill orphaned at the left edge. So
-	   Dismiss stays the quiet text action it is at rest here, and the label mix
-	   is what says it is refused. border-color rather than border: the 1px is
-	   still reserved, so nothing shifts when the save starts. The label goes back
-	   to the resting colour with the fill: the mix above is made against
-	   --secondary, and on the card it lands darker than the resting label, which
-	   would leave the refused Dismiss reading louder than the one that works.
-	   --muted-foreground clears 4.5:1 on --card in every theme. */
+	/* Refused, stacked. On one line the three refused controls share the inert
+	   fill; stacked under a Save that spans the tray, that same fill would draw a
+	   67px pill orphaned at the left edge. So it spans the tray too, the width
+	   Save already takes here, and the two read as one inert row of controls.
+	   Touch is the reason the fill has to stay: there is no cursor and no hover
+	   on a phone, so the fill, the outline and the darker label are the only cues
+	   that the button is refusing. Padding back, against the flush rule above:
+	   full width centres the label, and a missing left pad would pull it off
+	   centre. */
 	.tag-actions .tag-btn-text[aria-disabled='true'],
 	.tag-actions .tag-btn-text[aria-disabled='true']:hover {
-		background: none;
-		border-color: transparent;
-		color: var(--muted-foreground);
+		width: 100%;
+		padding-left: 10px;
 	}
 }
 
