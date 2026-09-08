@@ -594,6 +594,41 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).not.toContainText('left the source post URL empty');
 	});
 
+	// The parent options are built when the page loads. A clash piece uploaded in
+	// another tab since then matches none of them, so the select fell back to
+	// blank with the panel already closed: the operator asked for a variant and
+	// the save stored no parent at all.
+	test('adds a clash the page never loaded as a variant parent anyway', async ({ page }) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				sourceClash: {
+					// No such image in the seed, so no option was rendered for it.
+					imageId: 999,
+					title: 'Uploaded In Another Tab',
+					isVariant: false,
+					parentImageId: null,
+					variantCount: 0,
+					thumbnailUrl: null,
+					artistName: 'Test Artist',
+					uploadedAt: '2026-07-09T00:00:00.000Z',
+					width: 1200,
+					height: 900
+				}
+			})
+		);
+		await gotoEditHydrated(page);
+		const parent = page.locator('select[name="parentImageId"]');
+		await expect(parent.locator('option[value="999"]')).toHaveCount(0);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await panel(page).getByRole('button', { name: 'Add as a variant' }).click();
+
+		await expect(parent).toHaveValue('999');
+		await expect(parent.locator('option[value="999"]')).toHaveText('Uploaded In Another Tab');
+	});
+
 	test('the edit page never changes the artist without a click', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await gotoEditHydrated(page);
@@ -922,6 +957,42 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
+	});
+
+	// Same as the edit page's: the option list is a page-load snapshot, and the
+	// clash the panel is offering can postdate it.
+	test('adds a clash the upload page never loaded as a variant parent anyway', async ({
+		page
+	}) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				sourceClash: {
+					imageId: 999,
+					title: 'Uploaded In Another Tab',
+					isVariant: false,
+					parentImageId: null,
+					variantCount: 0,
+					thumbnailUrl: null,
+					artistName: 'Test Artist',
+					uploadedAt: '2026-07-09T00:00:00.000Z',
+					width: 1200,
+					height: 900
+				}
+			})
+		);
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await panel(page).getByRole('button', { name: 'Add as a variant' }).click();
+
+		// The panel closed and the group switched to "a variant of an existing
+		// piece", so this select is what the save reads the parent from.
+		const parent = page.locator('.group-section select');
+		await expect(parent).toHaveValue('999');
+		await expect(parent.locator('option[value="999"]')).toHaveText('Uploaded In Another Tab');
+		await expect(page.locator('input[name="existingParentId"]')).toHaveValue('999');
 	});
 
 	test('a variant crediting somebody else says so on its tile', async ({ page }) => {

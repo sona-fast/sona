@@ -642,9 +642,29 @@ describe('focus after the panel goes away', () => {
 
 	it('lands on the select that "Add as a variant" just populated', () => {
 		expect(UPLOAD).toMatch(
-			/function addAsVariant[\s\S]{0,600}?existingParentSelect\?\.focus\(\)/
+			/function addAsVariant[\s\S]{0,1000}?existingParentSelect\?\.focus\(\)/
 		);
-		expect(EDIT).toMatch(/function addAsVariant[\s\S]{0,300}?parentSelect\?\.focus\(\)/);
+		expect(EDIT).toMatch(/function addAsVariant[\s\S]{0,1000}?parentSelect\?\.focus\(\)/);
+	});
+
+	// The options were built at page load. A clash piece uploaded in another tab
+	// since then matches none of them, so the select fell back to blank with the
+	// panel already closed and the save stored no parent at all.
+	it('carries a clash the page did not load with into the parent select', () => {
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(
+				/const parentOptions = \$derived\(\[\.\.\.data\.parentCandidates, \.\.\.extraParents\]\)/
+			);
+			expect(source).toMatch(
+				/if \(!parentOptions\.some\(\(c\) => c\.id === clash\.imageId\)\) \{\s*\n\s*extraParents = \[\.\.\.extraParents, \{ id: clash\.imageId, title: clash\.title \}\];/
+			);
+			// The select renders the merged list, or the synthetic option is unreachable.
+			expect(source).toMatch(/\{#each parentOptions as candidate\}/);
+			expect(source).not.toMatch(/\{#each data\.parentCandidates as candidate\}/);
+		}
+		// Moving to another image in the same tab drops the previous image's extras
+		// along with every other lookup seed.
+		expect(EDIT).toMatch(/function resetForImage\(\)[\s\S]{0,600}?extraParents = \[\];/);
 	});
 
 	it('gives the dialog its opener back', () => {

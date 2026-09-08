@@ -90,6 +90,10 @@
 	// standing on, so focus is moved back here first (2.4.3).
 	let lookupPill = $state<HTMLButtonElement | null>(null);
 	let parentSelect = $state<HTMLSelectElement | null>(null);
+	// Parent options the page did not load with, added by "Add as a variant" for a
+	// clash piece that postdates this page. Same shape as data.parentCandidates.
+	let extraParents = $state<{ id: number; title: string }[]>([]);
+	const parentOptions = $derived([...data.parentCandidates, ...extraParents]);
 	// The flip replaces the artist select with this field. When the seed left it
 	// empty there is nothing to read and the announcement says to type the name,
 	// so focus lands where that typing goes (2.4.3).
@@ -116,6 +120,7 @@
 		commissionedAt = data.image.commissionedAt || '';
 		selectedArtistId = data.image.artistId ?? '';
 		selectedParentId = String(data.image.parentImageId ?? '');
+		extraParents = [];
 		artistMode = 'existing';
 		artistName = '';
 		newTwitter = '';
@@ -260,6 +265,13 @@
 	}
 
 	async function addAsVariant(clash: SourceClash) {
+		// The options were built when the page loaded. A clash piece uploaded in
+		// another tab since then has none, so the select would fall back to blank
+		// with the panel already closed: the operator asked for a variant and would
+		// silently save none. Carry the clash in as its own option first.
+		if (!parentOptions.some((c) => c.id === clash.imageId)) {
+			extraParents = [...extraParents, { id: clash.imageId, title: clash.title }];
+		}
 		selectedParentId = String(clash.imageId);
 		lookup = { kind: 'idle' };
 		// The click unmounted its own button; land on the select it just set.
@@ -567,7 +579,7 @@
 					<span>{m.admin_field_variant_of()}</span>
 					<select class="input" name="parentImageId" bind:this={parentSelect} bind:value={selectedParentId}>
 						<option value="">{m.admin_variant_none()}</option>
-						{#each data.parentCandidates as candidate}
+						{#each parentOptions as candidate}
 							<option value={String(candidate.id)}>{candidate.title}</option>
 						{/each}
 					</select>

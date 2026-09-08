@@ -83,6 +83,10 @@
 	// 'existing' = every file becomes a variant of an already-uploaded piece.
 	let groupMode = $state<'new' | 'existing'>('new');
 	let existingParentId = $state('');
+	// Parent options the page did not load with, added by "Add as a variant" for a
+	// clash piece that postdates this page. Same shape as data.parentCandidates.
+	let extraParents = $state<{ id: number; title: string }[]>([]);
+	const parentOptions = $derived([...data.parentCandidates, ...extraParents]);
 
 	const isUploading = $derived(tiles.some((t) => t.status === 'uploading'));
 	const allUploaded = $derived(tiles.length > 0 && tiles.every((t) => t.status === 'done'));
@@ -543,6 +547,13 @@
 		// clash panel left behind resurfaces on the way back to a new group.
 		closeSharedLookup({ focus: false });
 		groupMode = 'existing';
+		// The options were built when the page loaded. A clash piece uploaded in
+		// another tab since then has none, so the select would fall back to blank
+		// with the panel already closed: the operator asked for a variant and would
+		// silently save none. Carry the clash in as its own option first.
+		if (!parentOptions.some((c) => c.id === clash.imageId)) {
+			extraParents = [...extraParents, { id: clash.imageId, title: clash.title }];
+		}
 		existingParentId = String(clash.imageId);
 		// This click unmounts both the panel and the fieldset pill, so the landing
 		// spot is the select it just populated.
@@ -844,7 +855,7 @@
 			{#if groupMode === 'existing'}
 				<select class="input" bind:this={existingParentSelect} bind:value={existingParentId} required>
 					<option value="">{m.admin_variant_pick_parent()}</option>
-					{#each data.parentCandidates as candidate}
+					{#each parentOptions as candidate}
 						<option value={String(candidate.id)}>{candidate.title}</option>
 					{/each}
 				</select>
