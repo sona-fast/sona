@@ -185,15 +185,10 @@ describe('the backfill rows', () => {
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_edit_image_label\(\{ title: row\.title \}\)\}/);
 	});
 
-	it('holds the Save button width while the label narrows to "Saving"', () => {
-		// The label shrinks for the round trip, and a narrower button pulls Dismiss
-		// left out from under the pointer that just pressed Save. The resting width
-		// is measured rather than guessed: the widest label differs by locale.
-		expect(backfillPage).toMatch(
-			/button\.style\.minWidth = `\$\{button\.offsetWidth\}px`/
-		);
-		expect(backfillPage).toMatch(/button\.style\.minWidth = ''/);
-	});
+	// The Save button holding its resting width while the label narrows to
+	// "Saving", and letting go of it afterwards, is measured in the browser by
+	// tests/e2e/suggest-tags.spec.ts — a grep here would keep passing if the line
+	// moved into a branch that only some saves reach.
 
 	it('keeps the visible saving label inside the accessible name, in every locale', () => {
 		// WCAG 2.5.3 label in name: speech input picks the button by what it can

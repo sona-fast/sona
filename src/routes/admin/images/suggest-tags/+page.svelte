@@ -19,6 +19,7 @@
 	import { sanitizeTag } from '$lib/tags';
 	import {
 		fromResponse,
+		needsReannounceBlank,
 		ratingLabel,
 		readingLabel,
 		requestSuggestions,
@@ -127,13 +128,18 @@
 		pills[id]?.focus();
 	}
 
-	/** Say a sentence the region may already be holding. Blanked first: a repeat
-	 *  of the same sentence is not a change, and an unchanged region announces
-	 *  nothing. The tick lets the emptying reach the DOM. */
+	/** Say a sentence the region may already be holding. A repeat of the same
+	 *  sentence is not a change, and an unchanged region announces nothing, so
+	 *  that one case is blanked first and the tick lets the emptying reach the
+	 *  DOM. Only that case: the region is shared, and blanking it would swallow a
+	 *  sentence another row wrote in the same flush. */
 	async function reannounce(title: string, body: string) {
-		announcement = '';
-		await tick();
-		announce(title, body);
+		const next = m.admin_suggest_tags_row_announce({ title, body });
+		if (needsReannounceBlank(announcement, next)) {
+			announcement = '';
+			await tick();
+		}
+		announcement = next;
 	}
 
 	function setSaving(id: number, on: boolean) {
@@ -357,9 +363,12 @@
 							// trip, and a narrower button pulls Dismiss left out from under the
 							// pointer that just pressed Save. Hold the width the resting label
 							// gave it — measured rather than guessed, since the widest label
-							// differs by locale and by count.
+							// differs by locale and by count. Rounded up, not to the integer
+							// `offsetWidth` reports: a resting box of 91.4px would be pinned at
+							// 91 and still let Dismiss slide left by half a pixel.
 							const button = formElement.querySelector('button[type="submit"]');
-							if (button instanceof HTMLElement) button.style.minWidth = `${button.offsetWidth}px`;
+							if (button instanceof HTMLElement)
+								button.style.minWidth = `${Math.ceil(button.getBoundingClientRect().width)}px`;
 							setSaving(row.id, true);
 							setFailure(row.id, false);
 							const accepted = chosen;

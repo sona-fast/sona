@@ -997,9 +997,11 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 	});
 
 	// Stacked under a full-width Save, that shared fill would be a short pill
-	// orphaned at the left edge, so the phone breakpoint drops it and leaves the
-	// label mix as the only refused cue. The mix is made against --secondary, so
-	// measure it where it actually lands there: on the card.
+	// orphaned at the left edge, so the phone breakpoint drops it. The label mix
+	// goes with it: made against --secondary, it lands darker on the card than
+	// the resting label, and a refused control has no business reading louder
+	// than a working one. The refused cue there is the missing fill and the
+	// cursor, with the label held at its resting weight.
 	it('drops the refused Dismiss fill on a phone, where the label carries the state alone', () => {
 		const rule = css.match(
 			/\.tag-actions \.tag-btn-text\[aria-disabled='true'\],\n\t\.tag-actions \.tag-btn-text\[aria-disabled='true'\]:hover\s*\{([^}]*)\}/
@@ -1008,12 +1010,15 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		expect(rule).toMatch(/background:\s*none\s*;/);
 		// border-color, not border: the 1px stays reserved so nothing shifts.
 		expect(rule).toMatch(/border-color:\s*transparent\s*;/);
+		expect(rule).toMatch(/color:\s*var\(--muted-foreground\)\s*;/);
 	});
 
 	for (const { name, sel } of THEME_BLOCKS) {
 		it(`${name}: the refused Dismiss label meets 4.5:1 on the card it sits on there`, () => {
 			const card = blockToken(sel, 'card');
-			const label = mix2(blockToken(sel, 'foreground'), disabledMix, blockToken(sel, 'secondary'));
+			// The resting label colour, so the refused one is never the louder of
+			// the two — and still readable on the card it sits on.
+			const label = blockToken(sel, 'muted-foreground');
 			expect(contrast(label, card)).toBeGreaterThanOrEqual(4.5);
 		});
 	}

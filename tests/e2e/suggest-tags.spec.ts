@@ -441,15 +441,21 @@ test('a second identical failure is announced again, not swallowed as an unchang
 	});
 
 	await save.click();
-	// The last two entries, not the whole log: the click also writes the "Saving"
-	// sentence first, which the in-flight test below is the one that pins.
+	// The last two entries, not the whole log. The click writes the "Saving"
+	// sentence first, so the failure that follows is a change the region
+	// announces on its own — and the row leaves it at that rather than blanking,
+	// which on a list where two rows can save at once would throw away whatever
+	// the other row had just written.
 	await expect
 		.poll(() =>
 			page
 				.evaluate(() => (window as unknown as { __regionLog: string[] }).__regionLog)
 				.then((log) => log.slice(-2))
 		)
-		.toEqual(['', "Backfill 110. Sona couldn't save those tags. Try again."]);
+		.toEqual([
+			'Backfill 110. Saving 1 tag.',
+			"Backfill 110. Sona couldn't save those tags. Try again."
+		]);
 	await page.unroute(savePost);
 });
 
@@ -490,6 +496,9 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 	// a border appearing from nothing would widen Dismiss and shove the row.
 	const dismiss = target.getByRole('button', { name: 'Dismiss suggestions for Backfill 112' });
 	const restBox = await dismiss.boundingBox();
+	// Save's own resting box, to check the width hold is let go of once the save
+	// answers rather than pinning the button at the "Saving" width for good.
+	const saveRestBox = await save.boundingBox();
 	// Focused first: Firefox on macOS does not focus a button on mousedown, and
 	// what is under test is that the save does not take focus away.
 	await save.focus();
@@ -532,10 +541,13 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 	// so Dismiss is the same size mid-save as it was before the click. And Save
 	// holds its resting width while its label narrows, so Dismiss does not slide
 	// left out from under the pointer that just pressed Save either.
+	// Within a pixel: the hold rounds the resting width up to a whole pixel, so
+	// Dismiss can end a fraction to the right of where it rested, never left of it
+	// and never out from under the pointer.
 	const savingBox = await dismiss.boundingBox();
-	expect(savingBox?.width).toBeCloseTo(restBox!.width, 1);
-	expect(savingBox?.height).toBeCloseTo(restBox!.height, 1);
-	expect(savingBox?.x).toBeCloseTo(restBox!.x, 1);
+	expect(Math.abs(savingBox!.width - restBox!.width)).toBeLessThanOrEqual(1);
+	expect(Math.abs(savingBox!.height - restBox!.height)).toBeLessThanOrEqual(1);
+	expect(Math.abs(savingBox!.x - restBox!.x)).toBeLessThanOrEqual(1);
 	const pill = target.getByRole('button', { name: 'Suggest tags for Backfill 112' });
 	await expect(pill).toHaveAttribute('aria-disabled', 'true');
 	// Dispatched rather than clicked: Playwright waits for an aria-disabled
@@ -564,6 +576,81 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 	await expect(save).toHaveText('Save 1 tag');
 	await expect(save).toHaveAttribute('aria-label', 'Save 1 tag to Backfill 112');
 	await expect(target.locator('.tag-panel-body')).toBeFocused();
+	// And the width hold is let go of with the label, so the button sizes itself
+	// to whatever it says next rather than staying pinned at the saving width.
+	expect(await save.evaluate((el) => el.style.minWidth)).toBe('');
+	const settledBox = await save.boundingBox();
+	expect(Math.abs(settledBox!.width - saveRestBox!.width)).toBeLessThanOrEqual(1);
+	await page.unroute(savePost);
+});
+
+test('a chip turned off mid-save leaves the Saving sentence standing', async ({ page }) => {
+	// The chips stay clickable while a save runs, so the row can end up with a
+	// save in flight and nothing picked. The refusal that follows a click on Save
+	// then has to stay silent: the region is already saying the save is running,
+	// and "Pick at least one tag to save." would talk over it about a save that is
+	// still going to land.
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	const target = await clickSuggest(page, 'Backfill 109');
+
+	let release: (() => void) | undefined;
+	let saveCalls = 0;
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(savePost, async (route) => {
+		saveCalls += 1;
+		await held;
+		await route.fulfill({
+			status: 404,
+			contentType: 'application/json',
+			body: SAVE_NOT_FOUND
+		});
+	});
+
+	const region = page.locator('p.sr-only[role="status"]');
+	const save = target.locator('form.tag-actions button[type="submit"]');
+	await save.click();
+	await expect(save).toHaveText('Saving');
+	await expect(region).toHaveText('Backfill 109. Saving 1 tag.');
+
+	// Every value the region takes from here on: the refusal would blank it before
+	// writing, and a blank that is written back over is a mutation an assertion on
+	// the text alone can run straight past.
+	await page.evaluate(() => {
+		const live = document.querySelector('p.sr-only[role="status"]');
+		const seen: string[] = [];
+		(window as unknown as { __regionLog: string[] }).__regionLog = seen;
+		new MutationObserver(() => seen.push(live?.textContent ?? '')).observe(live!, {
+			childList: true,
+			characterData: true,
+			subtree: true
+		});
+	});
+
+	// Nothing picked, with the save still in flight.
+	await target.getByRole('button', { name: 'fox' }).click();
+	// Dispatched rather than clicked: Playwright waits for an aria-disabled
+	// control to become enabled, so a real click never lands.
+	await save.dispatchEvent('click');
+	// Two frames is longer than the blank-and-rewrite the refusal would take.
+	await page.evaluate(
+		() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())))
+	);
+	expect(
+		await page.evaluate(() => (window as unknown as { __regionLog: string[] }).__regionLog)
+	).toEqual([]);
+	await expect(region).toHaveText('Backfill 109. Saving 1 tag.');
+	// And the second click never left the page.
+	expect(saveCalls).toBe(1);
+
+	release!();
+	await expect(target.locator('.tag-eyebrow.warn')).toHaveText('Not saved');
 	await page.unroute(savePost);
 });
 
@@ -700,8 +787,8 @@ test('an expanded row drops its indent on a phone, where the head wraps', async 
 
 	// Stacked, Save spans the tray and Dismiss sits under it. The inert fill the
 	// refused controls share on one line would draw a short pill orphaned at the
-	// left edge here, so Dismiss stays text-only while it refuses and the label
-	// colour is what says so.
+	// left edge here, so Dismiss stays text-only while it refuses, at the same
+	// label colour it rests at.
 	let release: (() => void) | undefined;
 	const held = new Promise<void>((resolve) => (release = resolve));
 	await page.route(savePost, async (route) => {
@@ -713,17 +800,25 @@ test('an expanded row drops its indent on a phone, where the head wraps', async 
 		});
 	});
 	const save = target.locator('form.tag-actions button[type="submit"]');
+	const saveRestBox = await save.boundingBox();
 	await save.click();
 	const dismiss = target.getByRole('button', { name: 'Dismiss suggestions for Backfill 114' });
 	await expect(dismiss).toHaveAttribute('aria-disabled', 'true');
 	await expect(dismiss).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
 	await expect(dismiss).toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
-	// The label still carries the mix the refused Save beside it carries: that is
-	// the whole of the refused cue once the fill is gone.
-	await expect(dismiss).toHaveCSS('color', await save.evaluate((el) => getComputedStyle(el).color));
+	// And the label goes back to its resting colour with the fill. The mix the
+	// refused Save beside it wears is made against that fill, so on the card it
+	// would draw a refused Dismiss darker than a working one.
+	await expect(dismiss).toHaveCSS('color', await cssVarColor(page, '--muted-foreground'));
 
 	release!();
 	await expect(target.locator('.tag-eyebrow.warn')).toHaveText('Not saved');
+	// The width the label narrowing was holding is handed back once the save
+	// answers: no inline min-width left on the button, and the box it settles at
+	// is the one it rested at before the click.
+	expect(await save.evaluate((el) => el.style.minWidth)).toBe('');
+	const settledBox = await save.boundingBox();
+	expect(Math.abs(settledBox!.width - saveRestBox!.width)).toBeLessThanOrEqual(1);
 	await page.unroute(savePost);
 });
 
