@@ -64,6 +64,52 @@ async function oneDoneTile(page: Page) {
 	await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/x1.png', { timeout: 15_000 });
 }
 
+/** Two done tiles: the first is the parent, the second a variant. The whole
+ * multi-tile half of the spec (per-tile lookups, the parent split) only exists
+ * above one file. */
+async function twoDoneTiles(page: Page) {
+	await page.route('**/api/upload', (route) =>
+		route.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/x1.png' }) })
+	);
+	await page.goto('/admin/upload');
+	await waitForDropAttachment(page, '.dropzone');
+	await dropOn(page, '.dropzone', [
+		{ name: 'front.png', type: 'image/png' },
+		{ name: 'back.png', type: 'image/png' }
+	]);
+	await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue('/x1.png', { timeout: 15_000 });
+}
+
+/** A confident match whose local artist is somebody else — what the variant
+ * tile's "Different artist" line is about. */
+function otherArtistBody() {
+	return matchedBody({
+		localArtists: [{ matchIndex: 0, artists: [{ id: 2, name: 'Avatar Artist' }] }]
+	});
+}
+
+const tileLookup = (page: Page) => page.locator('button.tile-lookup');
+const sourceInput = (page: Page) => page.locator('input[name="sourcePostUrl"]');
+const dateInput = (page: Page) => page.locator('input[name="commissionedAt"]');
+// Seeded by tests/e2e/fixtures/seed.sql, credited to Avatar Artist (id 2).
+const EDIT_IMAGE = '/admin/images/10/edit';
+
+/** In `vite dev` the client modules stream in, so a click fired right after
+ * goto can land before Svelte attaches its handlers — and a value typed before
+ * hydration is thrown away by it. Toggling the artist control and back is a
+ * probe that leaves the form exactly as it was found. */
+async function gotoEditHydrated(page: Page) {
+	await page.goto(EDIT_IMAGE);
+	// Retry the CLICK, not the navigation: `vite dev` compiles this route's
+	// modules on first request, and re-navigating would restart that every time.
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Add New Artist' }).click();
+		await expect(page.locator('input[name="artistName"]')).toBeVisible({ timeout: 1000 });
+	}).toPass({ timeout: 30_000 });
+	await page.getByRole('button', { name: 'Select Existing' }).click();
+	await expect(page.locator('select[name="artistId"]')).toBeVisible();
+}
+
 const section = (page: Page) => page.locator('section.lookup-section');
 
 // The tab is a client-side swap, so the section is in the DOM but hidden until
@@ -244,10 +290,139 @@ test.describe('with a key saved', () => {
 		);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toBeVisible();
 
-		// Close puts the panel away and leaves the form alone.
+		// Close puts the panel away and leaves the form alone. The region itself
+		// stays mounted (collapsed to nothing) so its next message is announced.
 		await panel(page).getByRole('button', { name: 'Close' }).click();
-		await expect(panel(page)).toHaveCount(0);
+		await expect(panel(page)).toBeHidden();
 		await expect(page.locator('form.upload-form button[type="submit"]')).toBeEnabled();
+	});
+
+	// The rule the module's own comment calls the one thing the operator cannot
+	// undo with a click. Everything else here fills EMPTY fields; this is the
+	// case where they are not empty, on both pages.
+	test('a lookup never overwrites what the operator typed first', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await sourceInput(page).fill('https://example.test/mine/');
+		await dateInput(page).fill('2020-01-02');
+		await pill(page).click();
+
+		await expect(panel(page)).toBeVisible();
+		await expect(sourceInput(page)).toHaveValue('https://example.test/mine/');
+		await expect(dateInput(page)).toHaveValue('2020-01-02');
+		// Nothing was filled, so nothing is tagged as filled.
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// And the status line claims no field either.
+		await expect(panel(page)).not.toContainText('Sona filled');
+	});
+
+	test('the edit page keeps the values already on the image', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await gotoEditHydrated(page);
+		await sourceInput(page).fill('https://example.test/mine/');
+		await dateInput(page).fill('2020-01-02');
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(sourceInput(page)).toHaveValue('https://example.test/mine/');
+		await expect(dateInput(page)).toHaveValue('2020-01-02');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+	});
+
+	test('the edit page never changes the artist without a click', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await gotoEditHydrated(page);
+		const select = page.locator('select[name="artistId"]');
+		await expect(select).toHaveValue('2');
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		// The result names Test Artist (id 1); the select is untouched until the
+		// operator says so.
+		await expect(select).toHaveValue('2');
+
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+		await expect(select).toHaveValue('1');
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+	});
+
+	test('the edit page keeps a new-artist name the operator typed', async ({ page }) => {
+		// No local artist behind the handle: the `new` outcome, which flips the
+		// page to its inline new-artist form and seeds it.
+		await stubLookup(page, matchedBody({ localArtists: [] }));
+		await gotoEditHydrated(page);
+		await page.getByRole('button', { name: 'Add New Artist' }).click();
+		await page.fill('input[name="artistName"]', 'My Own Name');
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		// The typed name survives and carries no tag; the empty link field is
+		// filled and tagged.
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('My Own Name');
+		await expect(page.locator('#artist-name-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('input[name="furaffinity"]')).toHaveValue(
+			'https://www.furaffinity.net/user/kuttoya/'
+		);
+		await expect(page.locator('#furaffinity-lookup-tag')).toBeVisible();
+
+		// Editing the seeded field drops its tag, like every other lookup tag.
+		await page.fill('input[name="furaffinity"]', 'furaffinity.net/user/someone/');
+		await expect(page.locator('#furaffinity-lookup-tag')).toHaveCount(0);
+	});
+
+	test('a variant tile rates its own tile and leaves the shared fields alone', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		// The second tile is not the parent, so its result is its own.
+		await tileLookup(page).nth(1).click();
+		const tileTag = page.locator('.tile-nsfw-row .rating-tag');
+		await expect(tileTag).toHaveCount(1);
+		await expect(tileTag).toHaveText('Rated General on FurAffinity');
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#shared-rating-tag')).toHaveCount(0);
+
+		// Removing the tile discards the result with it.
+		await page.getByRole('button', { name: 'Remove file' }).nth(1).click();
+		await expect(page.locator('.tile-nsfw-row .rating-tag')).toHaveCount(0);
+	});
+
+	test('the parent drives the shared fields, and moving it re-derives them', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+
+		// The shared fields describe whatever the parent is now: the second tile
+		// has no result of its own, so they clear rather than keep the first's.
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+	});
+
+	test('a variant crediting somebody else says so on its tile', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		// Apply the parent's artist first — the warn line compares against it.
+		await tileLookup(page).nth(0).click();
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+
+		// The later route wins: the variant's match names a different artist.
+		await stubLookup(page, otherArtistBody());
+		await tileLookup(page).nth(1).click();
+		await expect(page.locator('.tile-result-warn')).toHaveText(
+			'Different artist: kuttoya on FurAffinity'
+		);
 	});
 
 	// Last: leaves the DB as the seed built it, for whatever runs next on this

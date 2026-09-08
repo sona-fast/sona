@@ -49,8 +49,51 @@ describe('lookup button and its disclosure hint', () => {
 
 describe('the panel', () => {
 	it('is a labelled region whose body is a live status', () => {
-		expect(PANEL).toMatch(/class="lookup-panel" role="region" aria-label=\{m\.admin_lookup_panel_label\(\)\}/);
+		expect(PANEL).toMatch(/class="lookup-panel"[\s\S]{0,200}?role="region"/);
+		expect(PANEL).toMatch(/aria-label=\{m\.admin_lookup_panel_label\(\)\}/);
 		expect(PANEL).toMatch(/<div class="lookup-body" role="status">/);
+	});
+
+	// A live region inserted together with its first content is commonly missed,
+	// and that first content is the "lookup has started" message. The region is
+	// in the DOM from the first render; the state branch is inside it.
+	it('keeps the live region mounted while idle, collapsed to nothing', () => {
+		expect(PANEL).toMatch(/class:idle=\{lookup\.kind === 'idle'\}/);
+		expect(PANEL).toMatch(
+			/<div class="lookup-body" role="status">\s*\{#if lookup\.kind !== 'idle'\}/
+		);
+		expect(PANEL).toMatch(/\.lookup-panel\.idle \{[^}]*padding: 0;/);
+		// Not display:none — a hidden region is not one a screen reader watches.
+		expect(PANEL).not.toMatch(/\.lookup-panel\.idle \{[^}]*display: none/);
+	});
+
+	// "Fu", "We", "e6", "Tw" read as truncated text next to the site's own name.
+	it('marks each result row with a brand icon, not two letters of the name', () => {
+		expect(PANEL).not.toContain('match.site.slice(0, 2)');
+		expect(PANEL).toMatch(/class="match-site" aria-hidden="true"/);
+		expect(PANEL).toContain('<FurAffinityIcon');
+		expect(PANEL).toContain('<TwitterIcon');
+		// Weasyl and e621 have no mark of their own; they get the neutral glyph.
+		expect(PANEL).toContain('<Globe');
+	});
+
+	it('puts the searching spinner in the status line, not inside Cancel', () => {
+		expect(PANEL).toMatch(/class="lookup-status searching-line">\s*<Loader2/);
+		expect(PANEL).toMatch(/onclick=\{oncancel\}>\s*\{m\.admin_lookup_cancel\(\)\}/);
+		// A busy indicator is still motion.
+		expect(PANEL).toMatch(
+			/prefers-reduced-motion: reduce\)[\s\S]{0,120}?\.searching-line :global\(\.spin\)[\s\S]{0,60}?animation: none/
+		);
+	});
+
+	// The spec's third no_match action: nothing matched, so the way forward is
+	// the artist by hand.
+	it('offers Add New Artist when nothing matched', () => {
+		expect(PANEL).toMatch(
+			/lookup\.kind === 'no_match'\}[\s\S]{0,600}?m\.admin_upload_add_new_artist\(\)/
+		);
+		// An empty handle seeds nothing, so the dialog opens blank.
+		expect(PANEL).toMatch(/onaddnew\(\{ handle: '', /);
 	});
 
 	it('opens result links safely in a new tab', () => {
@@ -123,17 +166,77 @@ describe('the "From lookup" tag', () => {
 			);
 			expect(source).toMatch(/aria-describedby=\{dateTagged \? 'commissioned-lookup-tag' : undefined\}/);
 			expect(source).toMatch(/aria-describedby=\{sourceTagged \? 'source-lookup-tag' : undefined\}/);
-			// Editing a tagged field drops its tag.
-			expect(source).toMatch(/oninput=\{\(\) => \(dateTagged = false\)\}/);
-			expect(source).toMatch(/oninput=\{\(\) => \(sourceTagged = false\)\}/);
+			// Editing a tagged field drops its tag — however the handler is spelled.
+			expect(source).toMatch(/oninput=\{[^}]*dateTagged = false/);
+			expect(source).toMatch(/oninput=\{[^}]*sourceTagged = false/);
 		}
+	});
+
+	// The inline new-artist form is subject to the same never-overwrite rule:
+	// the operator can type a name and paste a profile URL before the lookup.
+	it('tags the inline new-artist fields the same way on the edit page', () => {
+		expect(EDIT).toMatch(
+			/<label class="field-label" for="artistName">[\s\S]*?<span class="lookup-tag" id="artist-name-lookup-tag">/
+		);
+		expect(EDIT).toMatch(/aria-describedby=\{nameTagged \? 'artist-name-lookup-tag' : undefined\}/);
+		expect(EDIT).toMatch(/oninput=\{[^}]*nameTagged = false/);
+		for (const field of ['twitter', 'furaffinity']) {
+			expect(EDIT).toMatch(
+				new RegExp(`<span class="lookup-tag" id="${field}-lookup-tag">`)
+			);
+			expect(EDIT).toMatch(new RegExp(`oninput=\\{[^}]*${field}Tagged = false`));
+		}
+		// The FurAffinity input has to be bound, or the seed reaches no field.
+		expect(EDIT).toMatch(/name="furaffinity"[\s\S]{0,120}?bind:value=\{newFuraffinity\}/);
+		// The seed itself goes through the shared helper, which owns the rule.
+		expect(EDIT).toContain('newArtistSeed(');
+		expect(EDIT).not.toMatch(/artistName = clean;/);
+	});
+
+	// SvelteKit reuses the component across a route-param change, so the seeds
+	// (and every lookup flag riding with them) describe the previous image.
+	it('re-seeds the edit page when a different image loads', () => {
+		expect(EDIT).toMatch(/const id = data\.image\.id;[\s\S]{0,200}?resetForImage\(\)/);
+		expect(EDIT).toMatch(/function resetForImage\(\)[\s\S]{0,600}?lookup = \{ kind: 'idle' \}/);
+		for (const flag of ['sourceTagged', 'dateTagged', 'nameTagged', 'appliedArtist']) {
+			expect(EDIT).toMatch(
+				new RegExp(`function resetForImage\\(\\)[\\s\\S]{0,700}?${flag} = `)
+			);
+		}
+	});
+});
+
+// Close, Cancel, and "Add as a variant" all destroy the button the operator is
+// standing on; focus has to be moved first or the next Tab restarts at the top
+// of the admin page (2.4.3).
+describe('focus after the panel goes away', () => {
+	it('returns focus to the control the lookup started from', () => {
+		expect(UPLOAD).toMatch(/function focusLookupOrigin\(\)/);
+		expect(UPLOAD).toMatch(/bind:this=\{lookupPill\}/);
+		expect(UPLOAD).toMatch(/bind:this=\{tileLookupButtons\[tile\.key\]\}/);
+		expect(UPLOAD).toMatch(/function closeSharedLookup[\s\S]{0,300}?focusLookupOrigin\(\)/);
+		expect(EDIT).toMatch(/function closeLookup\(\)[\s\S]{0,200}?lookupPill\?\.focus\(\)/);
+		expect(EDIT).toMatch(/onclose=\{closeLookup\}/);
+	});
+
+	it('lands on the select that "Add as a variant" just populated', () => {
+		expect(UPLOAD).toMatch(
+			/function addAsVariant[\s\S]{0,400}?existingParentSelect\?\.focus\(\)/
+		);
+		expect(EDIT).toMatch(/function addAsVariant[\s\S]{0,300}?parentSelect\?\.focus\(\)/);
+	});
+
+	it('gives the dialog its opener back', () => {
+		expect(DIALOG).toMatch(/onDestroy\([\s\S]{0,120}?opener\?\.isConnected[\s\S]{0,60}?focus\(\)/);
 	});
 });
 
 describe('the rating tag beside NSFW', () => {
 	it('is a sibling of the label, and never touches the checkbox', () => {
+		// The pill is a SIBLING of the label, not inside it (SONA-220). Any
+		// comment between the two is prose, not part of the contract.
 		expect(EDIT).toMatch(
-			/<div class="nsfw-row">[\s\S]*?<\/label>\s*<!--[\s\S]*?-->\s*\{#if ratingTagText\}\s*<span class="rating-tag" id="lookup-rating-tag">/
+			/<div class="nsfw-row">[\s\S]*?<\/label>[\s\S]*?<span class="rating-tag" id="lookup-rating-tag">/
 		);
 		expect(EDIT).toMatch(/aria-describedby=\{ratingTagText \? 'lookup-rating-tag' : undefined\}/);
 		expect(UPLOAD).toMatch(/aria-describedby=\{sharedRatingTag \? 'shared-rating-tag' : undefined\}/);
@@ -150,6 +253,60 @@ describe('the rating tag beside NSFW', () => {
 			expect(source).toMatch(/\.nsfw-row[\s\S]{0,80}\{[^}]*flex-wrap: wrap;/);
 		}
 	});
+
+	// The text grows with the number of sites; nowrap alone made the pill wider
+	// than its column and gave the whole document a horizontal scrollbar at
+	// 320px (1.4.10), and wider than its tile in the grid.
+	it('lets the pill wrap rather than pushing the page sideways', () => {
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(/\.rating-tag \{[^}]*max-width: 100%/);
+			expect(source).toMatch(
+				/@media \(max-width: 480px\) \{[\s\S]{0,200}?\.rating-tag \{[^}]*white-space: normal/
+			);
+		}
+		expect(UPLOAD).toMatch(/\.tile-nsfw-row \{[^}]*min-width: 0/);
+		expect(UPLOAD).toMatch(/\.tile-nsfw-row \.rating-tag \{[^}]*white-space: normal/);
+	});
+});
+
+describe('what a lookup says out loud', () => {
+	// A variant tile's outcome renders as plain text on the tile, outside the
+	// panel's live region, so nothing announced that the lookup finished.
+	it('announces a tile lookup by file name, one message per outcome', () => {
+		expect(UPLOAD).toMatch(/else announceTileLookup\(live\)/);
+		for (const id of [
+			'admin_lookup_announce_tile_match',
+			'admin_lookup_announce_tile_no_match',
+			'admin_lookup_announce_tile_failed'
+		]) {
+			expect(UPLOAD).toMatch(new RegExp(`setAnnounce\\(\\s*m\\.${id}\\(|m\\.${id}\\(\\{ fileName`));
+		}
+	});
+
+	// The select sits above the panel and the button relabels itself in place.
+	it('announces the artist the panel applied', () => {
+		expect(UPLOAD).toMatch(
+			/function useLookupArtist[\s\S]{0,400}?setAnnounce\(m\.admin_lookup_announce_using\(/
+		);
+	});
+});
+
+describe('the two new pills', () => {
+	it('carry the same focus ring the buttons around them do', () => {
+		expect(UPLOAD).toMatch(
+			/\.lookup-pill:focus-visible,\s*\.tile-lookup:focus-visible \{[^}]*outline: 2px solid var\(--ring\)/
+		);
+		expect(EDIT).toMatch(/\.lookup-pill:focus-visible \{[^}]*outline: 2px solid var\(--ring\)/);
+	});
+
+	// --muted-foreground on --secondary measures 3.96:1 in terracotta light.
+	it('keeps the searching state readable', () => {
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(
+				/\.lookup-pill\[aria-disabled='true'\] \{[^}]*color: var\(--foreground\)/
+			);
+		}
+	});
 });
 
 describe('the upload page grid', () => {
@@ -162,8 +319,9 @@ describe('the upload page grid', () => {
 
 	it('marks a busy tile button rather than disabling it', () => {
 		expect(UPLOAD).toMatch(/aria-busy=\{tile\.lookup\.kind === 'searching'\}/);
-		// A second click while one is in flight is ignored in startLookup.
-		expect(UPLOAD).toMatch(/function startLookup[\s\S]{0,200}?kind === 'searching'\) return;/);
+		// A second click while one is in flight is ignored in startLookup —
+		// however the rest of that guard's operands are ordered.
+		expect(UPLOAD).toMatch(/function startLookup[\s\S]{0,300}?'searching'[\s\S]{0,20}?\) return;/);
 	});
 
 	it('derives every per-tile result field from one guarded helper', () => {
@@ -204,7 +362,26 @@ describe('the new-artist dialog prefill', () => {
 		}
 	});
 
-	it('gives the prefilled social row the whole width', () => {
+	it('gives the prefilled social row the whole width, at the end of the grid', () => {
 		expect(DIALOG).toMatch(/\.social-field\.span-full \{[^}]*grid-column: 1 \/ -1/);
+		// In place it pushes its neighbour onto a row alone and leaves a hole.
+		expect(DIALOG).toMatch(/\.social-field\.span-full \{[^}]*order: 1/);
+	});
+
+	// The name field autofocuses already full, so the disclosure has to be read
+	// on entry rather than waiting to be tabbed past.
+	it('describes the dialog with the guess lines, and the field with its mark', () => {
+		expect(DIALOG).toMatch(/id="lookup-guess-lines"/);
+		expect(DIALOG).toMatch(
+			/aria-describedby=\{prefillSource === 'lookup' \? 'lookup-guess-lines' : undefined\}/
+		);
+		expect(DIALOG).toMatch(/class="prefill-mark" id="lookup-prefill-mark"/);
+		for (const field of ['twitter', 'furaffinity']) {
+			expect(DIALOG).toMatch(
+				new RegExp(
+					`bind:value=\\{${field}\\}[\\s\\S]{0,120}?aria-describedby=\\{initialSocials\\?\\.${field} \\? 'lookup-prefill-mark'`
+				)
+			);
+		}
 	});
 });

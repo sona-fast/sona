@@ -8,6 +8,8 @@ import {
 	matchHandles,
 	lookupSentFile,
 	nameMatchArtists,
+	newArtistSeed,
+	seedStatusKind,
 	pickPrefillMatch,
 	postDateToInput,
 	prefillFields,
@@ -19,6 +21,7 @@ import {
 	statusLineKind,
 	strictestRating,
 	runLookup,
+	type LookupFailReason,
 	type LookupMatch,
 	type LookupResponse,
 	type LookupSite
@@ -29,7 +32,9 @@ import {
 	FUZZYSEARCH_MAX_BYTES,
 	handleProfileUrl,
 	pickPrefillMatch as serverPickPrefillMatch,
-	strictestRating as serverStrictestRating
+	strictestRating as serverStrictestRating,
+	type LookupFailure as ServerLookupFailure,
+	type LookupMatch as ServerLookupMatch
 } from './server/fuzzysearch';
 import * as m from './paraglide/messages';
 
@@ -88,6 +93,31 @@ describe('artist-lookup — the wire shape agrees with the server', () => {
 			match({ site: 'e621', siteId: '7', rating: 'adult', distance: 5, band: 'possible' })
 		];
 		expect(strictestRating(matches)).toEqual({ rating: 'adult', sites: ['Twitter'] });
+	});
+
+	// No cast: a renamed or retyped field on either side fails `npm run check`,
+	// which is the only place a restated wire shape can be caught drifting.
+	it('states the same match shape the server does, in both directions', () => {
+		const fromClient: ServerLookupMatch = match();
+		const fromServer: LookupMatch = fromClient;
+		expect(fromServer.site).toBe('FurAffinity');
+	});
+
+	// A server reason the client has no case for degrades to 'unavailable' and
+	// shows the generic failure copy. The Record's key type is the server union,
+	// so adding a reason there fails the type check until this map names it.
+	it('maps every failure the server can report to its own reason', async () => {
+		const reasons: Record<ServerLookupFailure, LookupFailReason> = {
+			key_refused: 'key_refused',
+			rate_limited: 'rate_limited',
+			too_large: 'too_large',
+			invalid_image: 'invalid_image',
+			unavailable: 'unavailable'
+		};
+		for (const [wire, expected] of Object.entries(reasons)) {
+			const state = await stateFromResponse(jsonResponse({ enabled: true, error: wire }, 424));
+			expect(state).toEqual({ kind: 'failed', reason: expected });
+		}
 	});
 
 	it('prefills from the closest confident match, and from nothing looser', () => {
@@ -280,6 +310,54 @@ describe('prefillFields', () => {
 
 	it('fills nothing without a confident match', () => {
 		expect(prefillFields(null, { sourcePostUrl: true, commissionedAt: true })).toEqual({});
+	});
+});
+
+// The edit page's inline new-artist form is subject to the same rule as the
+// two fields above: the operator can switch to "new", type a display name and
+// paste a profile URL, and only then ask for a lookup (SONA-156 round 1).
+describe('newArtistSeed', () => {
+	const empty = { artistName: true, profileUrl: true };
+
+	it('fills both fields when both are empty', () => {
+		expect(newArtistSeed('kuttoya', 'FurAffinity', true, empty)).toEqual({
+			artistName: 'kuttoya',
+			profileUrl: 'https://www.furaffinity.net/user/kuttoya/'
+		});
+		expect(newArtistSeed('@kuttoya', 'Twitter', true, empty)).toEqual({
+			artistName: 'kuttoya',
+			profileUrl: 'https://twitter.com/kuttoya'
+		});
+	});
+
+	it('never overwrites a name or a URL the operator already typed', () => {
+		expect(
+			newArtistSeed('kuttoya', 'FurAffinity', true, { artistName: false, profileUrl: false })
+		).toEqual({});
+		expect(
+			newArtistSeed('kuttoya', 'FurAffinity', true, { artistName: false, profileUrl: true })
+		).toEqual({ profileUrl: 'https://www.furaffinity.net/user/kuttoya/' });
+		expect(
+			newArtistSeed('kuttoya', 'FurAffinity', true, { artistName: true, profileUrl: false })
+		).toEqual({ artistName: 'kuttoya' });
+	});
+
+	it('seeds a name only for a site with no artist column', () => {
+		expect(newArtistSeed('kuttoya', 'Weasyl', false, empty)).toEqual({ artistName: 'kuttoya' });
+	});
+
+	it('seeds nothing without a handle', () => {
+		expect(newArtistSeed('   ', 'FurAffinity', true, empty)).toEqual({});
+		expect(newArtistSeed('  @  ', 'FurAffinity', true, empty)).toEqual({});
+	});
+});
+
+describe('seedStatusKind', () => {
+	it('names only the fields the seed actually wrote', () => {
+		expect(seedStatusKind({ artistName: 'k', profileUrl: 'u' })).toBe('both');
+		expect(seedStatusKind({ artistName: 'k' })).toBe('name_only');
+		expect(seedStatusKind({ profileUrl: 'u' })).toBe('link_only');
+		expect(seedStatusKind({})).toBe('none');
 	});
 });
 
