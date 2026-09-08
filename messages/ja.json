@@ -1558,6 +1558,7 @@
 	"admin_lookup_announce_tile_failed": "{fileName}：検索に失敗しました。",
 	"admin_lookup_announce_using": "アーティストに{name}を設定しました。",
 	"admin_lookup_announce_new_form": "新しいアーティストのフォームに切り替えました。アーティストを手で入力してください。",
+	"admin_lookup_announce_form_already_open": "新しいアーティストのフォームはすでに開いています。",
 	"admin_lookup_announce_seed_kept": "新しいアーティストの各項目にはすでに値が入っているため、そのままにしました。",
 	"admin_lookup_announce_searching_cleared": "前回の検索で入力した項目は消去しました。"
 }

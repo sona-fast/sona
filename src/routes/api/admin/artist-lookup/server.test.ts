@@ -886,6 +886,29 @@ describe('artist-lookup — after the search', () => {
 		expect(searchImage).toHaveBeenCalled();
 	});
 
+	// A rejection that is not an Error has no `.message` to log, and a fetch
+	// failure can throw a value holding the request that carried the key
+	// upstream. Logged whole, that key lands in the worker's log.
+	it('keeps a non-Error thrown value out of the log', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		searchImage.mockRejectedValue({
+			request: { headers: { 'X-Api-Key': 'fuzzysearch-key-in-the-request' } }
+		});
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: true });
+		const logged = warn.mock.calls
+			.flat()
+			.map((value) => JSON.stringify(value))
+			.join(' ');
+		expect(logged).not.toContain('fuzzysearch-key-in-the-request');
+		expect(logged).not.toContain('X-Api-Key');
+		warn.mockRestore();
+	});
+
 	// Only the reads are guarded. A fault in the mapping below them is a bug in
 	// this file, not an upstream outage, and reporting it as one hides it: the
 	// operator is told FuzzySearch is down and nothing is logged anywhere. A

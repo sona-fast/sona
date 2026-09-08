@@ -306,6 +306,31 @@ test.describe('with a key saved', () => {
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeFocused();
 	});
 
+	// The third row that applies an artist: the handle is in nobody's list, but
+	// an artist already carries that name. It rendered its own Use button, so it
+	// never swapped to "Using" and looked like the click did nothing.
+	test('a name match swaps to Using and keeps focus, like the other rows', async ({ page }) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				localArtists: [],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist' }] }]
+			})
+		);
+		await oneDoneTile(page);
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		// The 'new' outcome's other action, so this is the name-match row.
+		await expect(
+			panel(page).getByRole('button', { name: 'Add as a new artist instead' })
+		).toBeVisible();
+
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeFocused();
+	});
+
 	test('the rating shows beside NSFW without touching the checkbox', async ({ page }) => {
 		await stubLookup(
 			page,
@@ -781,6 +806,35 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).toContainText(
 			"Sona filled the new artist's name and FurAffinity link."
 		);
+	});
+
+	// The no_match action carries no handle, so it never had anything to fill.
+	// Answered with the seed-kept line, it claimed fields "already have values,
+	// so Sona left them alone" while the FurAffinity field sat empty.
+	test('a repeat no-match add-new click says the form is open, not that it kept fields', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody({ matches: [], localArtists: [], nameMatches: [] }));
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		const addNew = panel(page).getByRole('button', { name: 'Add New Artist' });
+		await addNew.click();
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			'Switched to the new artist form. Add the artist by hand.'
+		);
+
+		// The operator's own name, and no lookup wrote it.
+		await page.fill('input[name="artistName"]', 'Hand Typed');
+		await expect(page.locator('#artist-name-lookup-tag')).toHaveCount(0);
+
+		await addNew.click();
+		await expect(page.locator(LIVE_REGION)).toHaveText('The new artist form is already open.');
+		await expect(page.locator(LIVE_REGION)).not.toContainText('left them alone');
+		// The name is the operator's, and the click still wrote nothing.
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('Hand Typed');
+		await expect(page.locator('input[name="furaffinity"]')).toHaveValue('');
 	});
 
 	// SvelteKit reuses one component across a route-param change, so an edit page

@@ -169,12 +169,18 @@ describe('the panel', () => {
 		expect(PANEL).toMatch(
 			/\{#snippet useArtistAction\(artist: \{ id: number; name: string \}, primary: boolean\)\}\s*\n\s*\{#if appliedArtist && appliedArtist\.id === artist\.id\}/
 		);
-		const rendered = PANEL.match(/\{@render useArtistAction\(candidates\[0\], (true|false)\)\}/g);
-		// Both action rows: the clash row secondary, the plain existing row primary.
+		const rendered = PANEL.match(/\{@render useArtistAction\([^)]+\)\}/g);
+		// Every row that applies an artist: the clash row secondary, the plain
+		// existing row primary, and the name-match row under the 'new' outcome —
+		// that last one rendered its own button, so it never swapped to "Using"
+		// and it had no landing spot for the focus the swap destroys.
 		expect(rendered).toEqual([
 			'{@render useArtistAction(candidates[0], false)}',
-			'{@render useArtistAction(candidates[0], true)}'
+			'{@render useArtistAction(candidates[0], true)}',
+			'{@render useArtistAction(nameHits[0], true)}'
 		]);
+		// No hand-rolled Use button left beside the snippet's own.
+		expect(PANEL).not.toMatch(/onclick=\{\(\) => onuseartist\(nameHits\[0\]\)\}/);
 		// One applied button in the file, so the id it carries stays unique.
 		expect(PANEL.match(/id="lookup-applied-artist"/g)).toHaveLength(1);
 	});
@@ -628,6 +634,17 @@ describe('what the lookup copy names', () => {
 		);
 	});
 
+	// The handle-less click had nothing to leave alone, so it gets a line about
+	// the form rather than one about fields it never touched.
+	it('carries the already-open line in both catalogs, claiming no filled field', () => {
+		expect(en.admin_lookup_announce_form_already_open).toBe(
+			'The new artist form is already open.'
+		);
+		expect(en.admin_lookup_announce_form_already_open).not.toMatch(/values|left them alone/);
+		expect(ja.admin_lookup_announce_form_already_open).toBeTruthy();
+		expect(ja.admin_lookup_announce_form_already_open).not.toContain('値');
+	});
+
 	// The panel's own status line already says the image is on its way to
 	// FuzzySearch, so this one carries only what that line does not.
 	it('carries the cleared-fields announcement in both catalogs, without the searching line', () => {
@@ -815,13 +832,21 @@ describe('what a lookup says out loud', () => {
 
 	// The form was already open and holds the operator's own values, so the
 	// click wrote nothing anywhere and the panel's status line says nothing.
-	// Keyed on the name field, not on the handle: the no_match action carries no
-	// handle, and a repeat click on it wrote nothing and said nothing either.
+	// Every repeat click is still answered, including the no_match one that
+	// carries no handle — but not with the same sentence: nothing was ever
+	// available to fill there, so "left them alone" would name fields the click
+	// never touched, with the FurAffinity field sitting empty.
 	it('says so when the click filled nothing because the fields were taken', () => {
 		expect(EDIT).toMatch(
-			/else if \(seededNothing && artistName\.trim\(\) !== ''\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_seed_kept\(/
+			/else if \(seededNothing && seed\.handle && artistName\.trim\(\) !== ''\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_seed_kept\(/
 		);
-		// The old handle test left the empty-handle click unanswered.
+		// The handle-less click keeps an answer of its own, which is what the
+		// earlier name-field-only condition was carrying.
+		expect(EDIT).toMatch(
+			/else if \(seededNothing && artistName\.trim\(\) !== ''\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_form_already_open\(/
+		);
+		// The condition this replaced answered no click at all when the handle was
+		// empty, whatever the name field held.
 		expect(EDIT).not.toContain('else if (seededNothing && seed.handle)');
 	});
 

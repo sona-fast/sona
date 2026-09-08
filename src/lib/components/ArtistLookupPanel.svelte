@@ -517,9 +517,11 @@
 					</button>
 				{:else if outcome === 'new' && prefill}
 					{#if nameHits.length}
-						<button type="button" class="btn btn-primary" onclick={() => onuseartist(nameHits[0])}>
-							{m.admin_lookup_use_artist({ name: nameHits[0].name })}
-						</button>
+						<!-- The same snippet as the other two rows: rendered as its own
+						     button this one never swapped to "Using {name}", so applying a
+						     name-matched artist looked like nothing happened, and it kept
+						     no landing spot for the focus the swap destroys. -->
+						{@render useArtistAction(nameHits[0], true)}
 						<button
 							type="button"
 							class="btn btn-secondary"

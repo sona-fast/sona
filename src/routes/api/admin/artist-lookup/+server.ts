@@ -324,9 +324,12 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	try {
 		result = await searchImage(bytes, resolved.key, fetch);
 	} catch (e) {
+		// The message of an Error, and never the value itself: a fetch failure can
+		// throw an object holding the request that carried the FuzzySearch key,
+		// and logging it whole would write that key to the worker's log.
 		console.warn(
 			'artist-lookup: lookup threw after the file was sent',
-			e instanceof Error ? e.message : e
+			e instanceof Error ? e.message : 'non-Error value'
 		);
 		return failure('unavailable', true);
 	}
