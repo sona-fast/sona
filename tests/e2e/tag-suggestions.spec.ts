@@ -395,6 +395,13 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	await expect(page.locator(`#${hintId}`)).toHaveText(
 		'Add a Bluesky or X post as the source URL to get tag suggestions.'
 	);
+	// And the tray body says it too, rather than leaving the outage sentence
+	// beside a button the missing URL is what actually stopped. The eyebrow still
+	// names the failure that opened the tray.
+	await expect(page.locator('.tag-panel-body')).toHaveText(
+		'Add a Bluesky or X post as the source URL to get tag suggestions.'
+	);
+	await expect(page.locator('.tag-eyebrow')).toHaveText('Suggestions unavailable');
 
 	// A dispatched click asks nothing and says nothing.
 	let asked = 0;
@@ -410,30 +417,36 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	);
 });
 
-test('a URL the server refuses stops the pill until the field changes', async ({ page }) => {
-	// The client recogniser matches this URL, so nothing but the 422 says it is
-	// not a readable post. Without remembering it, the pill stays enabled and
-	// every click repeats the same failing lookup.
+test('the tray action spans the tray on a phone, like the pill above it', async ({ page }) => {
+	// Stacked at 390px the field's own Suggest tags pill spans the column, and
+	// Save spans the tray on the backfill page. A Try again left at its intrinsic
+	// width reads as an aside rather than as the tray's action.
+	await page.setViewportSize({ width: 390, height: 844 });
 	await openUploadForm(page);
-	await stubSuggestions(page, 422, { error: 'no_source' });
+	await stubSuggestions(page, 502, { error: 'unavailable' });
+	await pill(page).click();
+
+	const retry = page.getByRole('button', { name: 'Try again' });
+	const box = (await retry.boundingBox())!;
+	// The tray's content box: its own width less the border and padding it draws.
+	const content = await page.locator('.tag-tray').evaluate((el) => el.clientWidth
+		- parseFloat(getComputedStyle(el).paddingLeft)
+		- parseFloat(getComputedStyle(el).paddingRight));
+	expect(Math.abs(box.width - content)).toBeLessThanOrEqual(1);
+});
+
+test('a 422 answers in the hint rather than the tray', async ({ page }) => {
+	// The endpoint read the post and found nothing to read from. There is no tray
+	// for that: the hint under the field says what a URL has to be, and the pill
+	// stays clickable, since the operator can edit the URL and ask again.
+	await openUploadForm(page);
+	await stubSuggestions(page, 422, { error: 'unsupported_source' });
 
 	await pill(page).click();
-	await expect(pill(page)).toHaveAttribute('aria-disabled', 'true');
-	// The visible hint, not the live region, which also carries this sentence.
+	await expect(page.locator('.tag-tray')).toHaveCount(0);
 	await expect(page.locator('#tags-hint')).toHaveText(
 		'Add a Bluesky or X post as the source URL to get tag suggestions.'
 	);
-
-	let asked = 0;
-	await page.route(ENDPOINT, (route: Route) => {
-		asked += 1;
-		return route.fulfill({ status: 422, contentType: 'application/json', body: '{}' });
-	});
-	await pill(page).dispatchEvent('click');
-	expect(asked).toBe(0);
-
-	// Editing the URL is what makes it worth asking again.
-	await page.fill('input[name="sourcePostUrl"]', `${BSKY_POST}9`);
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });
 

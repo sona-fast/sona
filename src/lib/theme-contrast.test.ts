@@ -1032,6 +1032,35 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		expect(rule).toMatch(/border-radius:\s*var\(--radius-pill\)\s*;/);
 	});
 
+	// A kept chip is a tint plus a check, and the check is the non-colour cue for
+	// the state, so it is a meaningful graphic under the 3:1 bar. It sits on the
+	// tint over the tray's --card, and takes --link in the light themes where raw
+	// --primary is too pale on it. Aurora dark is the tightest pair at 3.49:1.
+	const keptTint = (() => {
+		const rule = blockBody(".tag-chip[aria-pressed='true']");
+		const mix = rule.match(
+			/background:\s*color-mix\(in srgb,\s*var\(--primary\)\s*(\d+)%,\s*transparent\)/
+		);
+		if (!mix) throw new Error('the kept chip fill is no longer a primary tint');
+		return Number(mix[1]);
+	})();
+
+	it('draws the kept chip check in --primary, and in --link in the light themes', () => {
+		expect(blockBody(".tag-chip[aria-pressed='true'] svg")).toMatch(/color:\s*var\(--primary\)\s*;/);
+		expect(blockBody("[data-theme='light'] .tag-chip[aria-pressed='true'] svg")).toMatch(
+			/color:\s*var\(--link\)\s*;/
+		);
+	});
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: the kept chip's check meets 3:1 on the chip tint`, () => {
+			const card = blockToken(sel, 'card');
+			const tint = mix2(blockToken(sel, 'primary'), keptTint, card);
+			const icon = name.endsWith('light') ? linkColor(sel) : blockToken(sel, 'primary');
+			expect(contrast(icon, tint)).toBeGreaterThanOrEqual(3);
+		});
+	}
+
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			const border = name.endsWith('light') ? linkColor : (s: string) => blockToken(s, 'primary');

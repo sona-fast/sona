@@ -72,6 +72,22 @@ describe('replaceImageTags', () => {
 		// Nothing past the cap was minted into the tag table either.
 		expect(await db.select({ id: tags.id }).from(tags)).toHaveLength(MAX_IMAGE_TAGS);
 	});
+
+	// Clearing the Tags box is how an image loses its tags, so an empty string is
+	// a real instruction to delete rather than a no-op. The upload action skips
+	// this call entirely for a just-inserted image, which is only safe while an
+	// empty field keeps meaning "delete" here.
+	it('clears an image that had tags when the field comes in empty', async () => {
+		const db = makeDb();
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art', imageUrl: 'https://cdn.example.com/1.png', artistId: 1 });
+		await replaceImageTags(db, 1, 'fox, bird');
+		expect(await tagNamesOf(db, 1)).toEqual(['fox', 'bird']);
+
+		expect(await replaceImageTags(db, 1, '')).toEqual([]);
+		expect(await tagNamesOf(db, 1)).toEqual([]);
+		// The tag rows themselves survive: other images may still carry them.
+		expect(await db.select({ id: tags.id }).from(tags)).toHaveLength(2);
+	});
 });
 
 describe('readTagInput', () => {

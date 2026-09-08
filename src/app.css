@@ -978,9 +978,8 @@ a.tag-pill {
 }
 
 @media (max-width: 640px) {
-	/* Only the primary button stretches; Dismiss and Try again keep their
-	   natural width at the content edge, so they do not read as a second
-	   primary. */
+	/* Stacked, the tray's action spans it. Dismiss keeps its natural width at the
+	   content edge, so it does not read as a second action. */
 	.tag-actions {
 		flex-direction: column;
 		align-items: flex-start;
@@ -988,6 +987,17 @@ a.tag-pill {
 
 	.tag-actions .btn {
 		width: 100%;
+	}
+
+	/* Try again and Sign in are the tray's action wherever there is no primary
+	   button — the two never appear together — so they take the width the primary
+	   takes here, the same width the field's own Suggest tags pill already
+	   spans. A pill left at its intrinsic width reads as an aside beside a
+	   full-width Dismiss. The pill's label is centred by the box, not by padding,
+	   so nothing else has to change. */
+	.tag-actions .tag-pill {
+		width: 100%;
+		justify-content: center;
 	}
 }
 

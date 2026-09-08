@@ -42,6 +42,14 @@ describe('the suggest pill', () => {
 		expect(suggestions).toMatch(/if \(disabled \|\| source === null\) return;/);
 	});
 
+	it('refuses the tray\'s Try again by the same rule, since it runs the same lookup', () => {
+		// Try again calls suggest(), so it reads `disabled` rather than restating
+		// part of it — a URL edited to something unrecognisable stops both.
+		expect(suggestions).toMatch(
+			/\{#if tray\.retry\}[\s\S]*?aria-disabled=\{disabled\}[\s\S]*?onclick=\{suggest\}/
+		);
+	});
+
 	it('lists the site\'s existing tags under the field rather than in a tooltip', () => {
 		// Both forms showed this as a hint line before the field became a component.
 		// A title attribute is a mouse-only affordance: no touch, no keyboard, and

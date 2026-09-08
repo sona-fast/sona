@@ -267,6 +267,25 @@ describe('admin image edit — save action', () => {
 		expect(await tagNamesOf(db, 5)).toEqual(['beach']);
 	});
 
+	// Clearing the box is the only way to take every tag off an image, so an
+	// empty Tags field has to reach the write path rather than be read as
+	// "nothing to do". The upload action skips the write for a fresh image on
+	// exactly that reading, which is safe only while this stays true here.
+	it('clears the image tags when the Tags field is posted empty', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', tags: 'fox, beach' }), platform } as never)
+		);
+		expect(await tagNamesOf(db, 5)).toEqual(['beach', 'fox']);
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', tags: '' }), platform } as never)
+		);
+		expect(await tagNamesOf(db, 5)).toEqual([]);
+	});
+
 	// SONA-18: the other ordering of the same conflict — the guard in the
 	// reference action stops a variant becoming the sheet, this stops the sheet
 	// becoming a variant. Without it /art loses its ref sheet with nothing said.
