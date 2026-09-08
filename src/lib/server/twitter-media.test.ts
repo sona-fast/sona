@@ -227,6 +227,20 @@ describe('fetchTweetMediaUrl', () => {
 		);
 	});
 
+	it('reports a 200 that carries an errors array as unavailable, not not_found', async () => {
+		// A rotated query id or features map: X answers 200 with `errors` and no
+		// tweet. That is the integration, not the operator's post, so 502 not 404.
+		const errors = [{ message: 'Query not found', code: 42 }];
+		expect(await fetchTweetMediaUrl(id, stub(() => json({ errors })).fetchImpl)).toEqual(unavailable);
+		expect(
+			await fetchTweetMediaUrl(id, stub(() => json({ errors, data: { tweetResult: {} } })).fetchImpl)
+		).toEqual(unavailable);
+		// An empty errors array carries no error: still the not_found path.
+		expect(
+			await fetchTweetMediaUrl(id, stub(() => json({ errors: [], data: { tweetResult: {} } })).fetchImpl)
+		).toEqual({ ok: false, reason: 'not_found' });
+	});
+
 	it('fails soft on refusal, a server error, malformed JSON, and network errors', async () => {
 		expect(await fetchTweetMediaUrl(id, stub(() => new Response('no', { status: 403 })).fetchImpl)).toEqual(
 			unavailable

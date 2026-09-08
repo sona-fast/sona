@@ -182,7 +182,17 @@ export async function fetchTweetMediaUrl(
 			console.warn(`[tweet-media] tweet media lookup failed: status=${res.status}`);
 			return fail('unavailable');
 		}
-		const photos = parseTweetPhotos(await res.json());
+		const body: unknown = await res.json();
+		const errors = (body as { errors?: unknown } | null)?.errors;
+		if (Array.isArray(errors) && errors.length > 0) {
+			// X answers 200 with an `errors` array when the undocumented query id
+			// or features map rotates. That is our integration, not the tweet, so
+			// it must not read as "post not found". Count only: the messages are
+			// X's, and can carry the request back at us.
+			console.warn(`[tweet-media] tweet lookup returned errors: count=${errors.length}`);
+			return fail('unavailable');
+		}
+		const photos = parseTweetPhotos(body);
 		if (!photos) {
 			// 200 but no tweet: a protected or deleted one, which is the operator's
 			// input and not an outage. If the undocumented GraphQL shape rotated

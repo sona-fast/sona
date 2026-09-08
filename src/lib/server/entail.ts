@@ -79,6 +79,9 @@ export type LookupFailure = 'not_ready' | 'not_found' | 'rate_limited' | 'unavai
  * and they fall through to `unavailable` so an outage stays visible. */
 const DECLINED_STATUSES = new Set([400, 404, 410, 415, 422]);
 const declined = (status: number) => DECLINED_STATUSES.has(status);
+/** Poll-body statuses that mean the job will never finish. Any other non-done
+ * status (queued, running, processing) is still pending. */
+const TERMINAL_STATUSES = new Set(['failed', 'error', 'cancelled', 'canceled']);
 
 /** `imageCount` is how many images the source post carried. Suggestions come
  * from the first one only, so a count above 1 tells the UI the rest went
@@ -162,7 +165,8 @@ export function classifySourceUrl(url: string): SourceKind | null {
 /**
  * Translate one e621-vocabulary tag into a Sona tag. Drops the trailing
  * qualifier e621 appends to disambiguate (`digital_media_(artwork)`), swaps
- * underscores for hyphens, then runs the same sanitizer the tag inputs use.
+ * underscores, slashes and colons (`male/female`, `2:1`) for hyphens, then
+ * runs the same sanitizer the tag inputs use.
  * Emoticon tags (`<3`, `^_^`, `-_-`, `:3`) sanitize down to bare digits or
  * hyphens, so the result also needs a letter to count. Returns null when
  * nothing usable is left. Pure.
@@ -173,7 +177,7 @@ export function translateTag(tag: string): string | null {
 		.trim()
 		.toLowerCase()
 		.replace(/[\s_]*\([^()]*\)\s*$/, '')
-		.replace(/_/g, '-');
+		.replace(/[_/:]/g, '-');
 	const sanitized = sanitizeTag(translated)
 		.replace(/-{2,}/g, '-')
 		.replace(/^-|-$/g, '');
@@ -371,6 +375,12 @@ export async function classifyMediaUrl(
 			// The spec documents a 200 as "job done" and does not type a status
 			// field, so only an explicit contradiction sends us back to poll.
 			const body = (await res.json()) as (ClassificationEntry & { status?: unknown }) | null;
+			if (typeof body?.status === 'string' && TERMINAL_STATUSES.has(body.status.toLowerCase())) {
+				// A job that will never finish: polling on would only have the
+				// operator retry it. The status word is the API's, not user input.
+				console.warn(`[entail] classify job failed: status=${body.status}`);
+				return fail('unavailable');
+			}
 			if (body?.status && body.status !== 'done') continue;
 			// A finished job carries a `tags` array. Anything else (null, a string,
 			// an error envelope) is a shape we don't know, not an empty result.

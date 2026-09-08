@@ -109,6 +109,15 @@ describe('translateTag', () => {
 		expect(translateTag('  Pink_Hair  ')).toBe('pink-hair');
 	});
 
+	it('hyphenates a slash or colon instead of gluing the words together', () => {
+		// The sanitizer drops anything outside [a-z0-9 -], so without this
+		// `male/female` would collapse into `malefemale`.
+		expect(translateTag('male/female')).toBe('male-female');
+		expect(translateTag('canine/wolf_(species)')).toBe('canine-wolf');
+		// Still needs a letter: `2:1` is a ratio tag, not a word.
+		expect(translateTag('2:1')).toBeNull();
+	});
+
 	it('returns null when nothing survives', () => {
 		expect(translateTag('(artwork)')).toBeNull();
 		expect(translateTag('!!!')).toBeNull();
@@ -537,6 +546,32 @@ describe('classifyMediaUrl', () => {
 		});
 		expect(await classifyMediaUrl(url, fetchImpl)).toEqual({ ok: false, reason: 'not_ready' });
 		expect(polls).toBe(2);
+	});
+
+	it('keeps polling on a running status but gives up on a terminal one', async () => {
+		// `running` is pending, so it goes the full poll cap and answers
+		// not_ready. `failed` will never finish: the retry-later answer would only
+		// have the operator retry a dead job, so it is unavailable after one poll.
+		const pollsWith = (status: string) => {
+			let polls = 0;
+			const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+				if (init?.method === 'POST') return json({ job_id: 'job-9' }, 202);
+				polls++;
+				return json({ status });
+			});
+			return { fetchImpl, polls: () => polls };
+		};
+		const running = pollsWith('running');
+		expect(await classifyMediaUrl(url, running.fetchImpl)).toEqual({ ok: false, reason: 'not_ready' });
+		expect(running.polls()).toBe(2);
+
+		const failed = pollsWith('failed');
+		expect(await classifyMediaUrl(url, failed.fetchImpl)).toEqual({ ok: false, reason: 'unavailable' });
+		expect(failed.polls()).toBe(1);
+
+		const shouting = pollsWith('ERROR');
+		expect(await classifyMediaUrl(url, shouting.fetchImpl)).toEqual({ ok: false, reason: 'unavailable' });
+		expect(shouting.polls()).toBe(1);
 	});
 
 	// The poll endpoint answers `wait=true` by holding the connection until the
