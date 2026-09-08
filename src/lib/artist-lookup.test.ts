@@ -484,6 +484,47 @@ describe('stateFromResponse', () => {
 		).toEqual({ kind: 'failed', reason: 'unavailable' });
 	});
 
+	// The panel keys its rows on site + siteId. The endpoint dedupes too; this is
+	// the second pass, on the side that would throw each_key_duplicate.
+	it('keeps one row per post and moves the duplicate hit onto it', async () => {
+		const state = await stateFromResponse(
+			jsonResponse(
+				response({
+					matches: [match(), match({ handles: ['kuttoya2'] })],
+					localArtists: [{ matchIndex: 1, artists: [{ id: 4, name: 'Kuttoya' }] }]
+				})
+			)
+		);
+		if (state.kind !== 'results') throw new Error('expected results');
+		expect(state.data.matches).toHaveLength(1);
+		expect(state.data.localArtists).toEqual([{ matchIndex: 0, artists: [{ id: 4, name: 'Kuttoya' }] }]);
+	});
+
+	// localArtists and nameMatches address matches by index into the list as it
+	// was sent, so dropping a match ahead of them has to move them along with it.
+	it('re-addresses artist hits over a dropped match, and drops the hits for it', async () => {
+		const state = await stateFromResponse(
+			jsonResponse(
+				response({
+					matches: [
+						match({ postUrl: 'javascript:alert(1)' }),
+						match({ site: 'Twitter', siteId: '9', postUrl: 'https://twitter.com/a/status/9' })
+					],
+					localArtists: [
+						{ matchIndex: 0, artists: [{ id: 1, name: 'Dropped' }] },
+						{ matchIndex: 1, artists: [{ id: 2, name: 'Kept' }] }
+					],
+					nameMatches: [{ matchIndex: 1, artists: [{ id: 3, name: 'By name' }] }]
+				})
+			)
+		);
+		if (state.kind !== 'results') throw new Error('expected results');
+		expect(state.data.localArtists).toEqual([{ matchIndex: 0, artists: [{ id: 2, name: 'Kept' }] }]);
+		expect(state.data.nameMatches).toEqual([{ matchIndex: 0, artists: [{ id: 3, name: 'By name' }] }]);
+		// The hit now points at the match it belongs to, so the panel still offers it.
+		expect(candidateArtists(state.data).map((a) => a.name)).toEqual(['Kept']);
+	});
+
 	it('reads an empty match list as no_match', async () => {
 		expect(await stateFromResponse(jsonResponse({ enabled: true, matches: [] }))).toEqual({
 			kind: 'no_match'

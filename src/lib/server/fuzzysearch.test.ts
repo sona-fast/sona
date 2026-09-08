@@ -162,6 +162,26 @@ describe('normalizeMatches', () => {
 		expect(junk.every((m) => m.distance === null && m.band === null)).toBe(true);
 	});
 
+	// The panel keys its rows on site + siteId, so one post returned twice would
+	// crash the keyed each. The closest copy is the one that survives.
+	it('keeps one row per post, the closest copy', () => {
+		const deduped = normalizeMatches([
+			{ site: 'FurAffinity', site_id_str: '12345', artists: ['far'], distance: 4 },
+			{ site: 'FurAffinity', site_id_str: '12345', artists: ['near'], distance: 1 },
+			{ site: 'FurAffinity', site_id_str: '999', artists: ['other'], distance: 2 }
+		]);
+		expect(deduped.map((m) => `${m.siteId}:${m.distance}`)).toEqual(['12345:1', '999:2']);
+		expect(deduped[0].handles).toEqual(['near']);
+	});
+
+	it('keeps the same id on two different sites', () => {
+		const both = normalizeMatches([
+			{ site: 'FurAffinity', site_id_str: '160', artists: [], distance: 1 },
+			{ site: 'Twitter', site_id_str: '160', artists: [], distance: 1 }
+		]);
+		expect(both.map((m) => m.site)).toEqual(['FurAffinity', 'Twitter']);
+	});
+
 	it('keeps only usable handles, and still builds a Twitter URL without one', () => {
 		const [match] = normalizeMatches([
 			{ site: 'Twitter', site_id_str: '160', artists: ['ok', '', '  ', 42, null], distance: 0 }

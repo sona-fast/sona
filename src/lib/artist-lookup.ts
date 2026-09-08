@@ -423,6 +423,45 @@ function hasLinkableUrl(match: LookupMatch): boolean {
 }
 
 /**
+ * The match list the panel actually renders: linkable URLs only, and one row
+ * per post. The rows are keyed on site + siteId, so a post that came back twice
+ * would crash the keyed each; the endpoint dedupes too, and this is the second
+ * pass on the side that does the rendering.
+ *
+ * `indexMap` carries each kept match's old position, because `localArtists` and
+ * `nameMatches` address matches by index into the list as it was sent.
+ */
+function usableMatches(raw: LookupMatch[]): { matches: LookupMatch[]; indexMap: Map<number, number> } {
+	const matches: LookupMatch[] = [];
+	const indexMap = new Map<number, number>();
+	const kept = new Map<string, number>();
+	raw.forEach((match, index) => {
+		if (!hasLinkableUrl(match)) return;
+		const key = `${match.site} ${match.siteId}`;
+		const already = kept.get(key);
+		if (already !== undefined) {
+			// A duplicate's hits belong to the row that stayed.
+			indexMap.set(index, already);
+			return;
+		}
+		kept.set(key, matches.length);
+		indexMap.set(index, matches.length);
+		matches.push(match);
+	});
+	return { matches, indexMap };
+}
+
+/** Re-address artist hits onto the filtered match list, dropping the ones whose
+ * match is not being rendered at all. */
+function remapHits(hits: unknown, indexMap: Map<number, number>): ArtistHit[] {
+	if (!Array.isArray(hits)) return [];
+	return (hits as ArtistHit[]).flatMap((hit) => {
+		const index = indexMap.get(hit?.matchIndex);
+		return index === undefined ? [] : [{ ...hit, matchIndex: index }];
+	});
+}
+
+/**
  * Turn a response into a state. Mapped by the body's `error` field rather than
  * by status: the admin gate answers an expired session with its own plain-text
  * 401, and a status-keyed map would read that as a refused key and then throw
@@ -453,7 +492,7 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	// nothing the panel can offer, so it reads as an outage.
 	if (data.enabled === false) return { kind: 'failed', reason: 'unavailable' };
 	const raw = Array.isArray(data.matches) ? data.matches : [];
-	const matches = raw.filter(hasLinkableUrl);
+	const { matches, indexMap } = usableMatches(raw);
 	// Same reasoning as the non-array branch above: something looked, something
 	// answered, and the client refused to show it. Calling that "no matches" would
 	// tell the operator their art is unindexed when it may well be posted.
@@ -465,8 +504,8 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 		data: {
 			enabled: true,
 			matches,
-			localArtists: Array.isArray(data.localArtists) ? data.localArtists : [],
-			nameMatches: Array.isArray(data.nameMatches) ? data.nameMatches : [],
+			localArtists: remapHits(data.localArtists, indexMap),
+			nameMatches: remapHits(data.nameMatches, indexMap),
 			sourceClash: data.sourceClash ?? null
 		}
 	};

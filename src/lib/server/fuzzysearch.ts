@@ -290,13 +290,24 @@ function compareMatches(a: LookupMatch, b: LookupMatch): number {
 	return SITE_ORDER[a.site] - SITE_ORDER[b.site];
 }
 
-/** Normalize + filter + sort a raw v1/image payload. Exported for tests. */
+/** Normalize + filter + sort + dedupe a raw v1/image payload. Exported for
+ * tests. FuzzySearch can return one post twice (two hashes of the same
+ * submission), and site + siteId is the key the panel renders its rows under —
+ * a repeat would crash the keyed each. Deduped after the sort, so the row that
+ * survives is the closest one. */
 export function normalizeMatches(payload: unknown): LookupMatch[] {
 	if (!Array.isArray(payload)) return [];
-	return payload
+	const sorted = payload
 		.map((entry) => (entry && typeof entry === 'object' ? normalizeMatch(entry as RawMatch) : null))
 		.filter((m): m is LookupMatch => m !== null)
 		.sort(compareMatches);
+	const seen = new Set<string>();
+	return sorted.filter((match) => {
+		const key = `${match.site} ${match.siteId}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
 }
 
 /**
