@@ -870,6 +870,22 @@ describe('artist-lookup — after the search', () => {
 		expect(searchImage).toHaveBeenCalled();
 	});
 
+	// The call itself is guarded too. searchImage catches its own failures, so a
+	// throw out of it means something unforeseen, and the bytes are gone either
+	// way — an unguarded throw would answer 500 with no `forwarded` field for a
+	// file that already left the worker, and the edit page's private-image notice
+	// reads that field.
+	it('answers a search that throws with a forwarded failure, not a 500', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockRejectedValue(new Error('connection reset'));
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: true });
+		expect(searchImage).toHaveBeenCalled();
+	});
+
 	// Only the reads are guarded. A fault in the mapping below them is a bug in
 	// this file, not an upstream outage, and reporting it as one hides it: the
 	// operator is told FuzzySearch is down and nothing is logged anywhere. A

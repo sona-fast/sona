@@ -315,7 +315,21 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		}
 	}
 
-	const result = await searchImage(bytes, resolved.key, fetch);
+	// searchImage catches its own failures, so this guard is a second, redundant
+	// one. It is here because this is the handler's only unguarded await, and a
+	// throw would answer 500 with no `forwarded` field for bytes that already
+	// left the worker. forwarded is true for that reason: the file went out
+	// whether or not the call came back.
+	let result: Awaited<ReturnType<typeof searchImage>>;
+	try {
+		result = await searchImage(bytes, resolved.key, fetch);
+	} catch (e) {
+		console.warn(
+			'artist-lookup: lookup threw after the file was sent',
+			e instanceof Error ? e.message : e
+		);
+		return failure('unavailable', true);
+	}
 
 	if (!result.ok) {
 		// A refused key is the one failure worth remembering: the settings page
