@@ -47,8 +47,10 @@ const MAX_URL_LENGTH = 2048;
 /** Ceiling on the whole lookup chain. The X path is up to four fetches (the
  * activate and the tweet lookup can each run twice) plus an enqueue and two
  * polls, each with its own timeout, so without this the worst case ran close
- * to forty seconds. */
-const LOOKUP_DEADLINE_MS = 20_000;
+ * to forty seconds. One first attempt at every timeout is 21 s (5 + 5 + 3 + 8),
+ * so the ceiling sits just above that: it cuts the retry paths, never a chain
+ * that is merely slow. */
+const LOOKUP_DEADLINE_MS = 22_000;
 // SvelteKit rejects any other named export from a +server file unless it
 // starts with an underscore; the tests read it under this name.
 export { LOOKUP_DEADLINE_MS as _LOOKUP_DEADLINE_MS };

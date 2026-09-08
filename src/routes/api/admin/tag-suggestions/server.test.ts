@@ -158,7 +158,8 @@ describe('POST /api/admin/tag-suggestions', () => {
 		// One activate (5 s) + one tweet lookup (5 s) + one enqueue (3 s) + one
 		// poll (8 s) at their own timeouts is 21 s; the deadline exists to stop
 		// the retry paths, not to cut that chain short of its first attempt.
-		expect(_LOOKUP_DEADLINE_MS).toBeGreaterThanOrEqual(15_000);
+		const firstAttempt = 5_000 + 5_000 + 3_000 + 8_000;
+		expect(_LOOKUP_DEADLINE_MS).toBeGreaterThanOrEqual(firstAttempt);
 	});
 
 	it('reads the stored source URL for an imageId', async () => {
