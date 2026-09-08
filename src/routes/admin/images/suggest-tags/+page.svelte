@@ -78,6 +78,9 @@
 
 	async function suggest(id: number, source: 'bluesky' | 'x', title: string) {
 		if (stateOf(id).kind === 'searching') return;
+		// A lookup during a save would throw away the chips that save is writing,
+		// and the save landing afterwards would have no tray to report into.
+		if (saving.has(id)) return;
 		const seq = (requestSeq[id] = (requestSeq[id] ?? 0) + 1);
 		// A failed save leaves "Not saved" on the row. This lookup replaces what that
 		// was about, so the eyebrow goes with it rather than sitting above fresh chips
@@ -111,6 +114,9 @@
 	}
 
 	async function dismiss(id: number) {
+		// Closing the tray under an in-flight save leaves the row with a heading and
+		// nothing else once the save answers, so Dismiss waits for the answer.
+		if (saving.has(id)) return;
 		requestSeq[id] = (requestSeq[id] ?? 0) + 1;
 		setFailure(id, false);
 		const { [id]: _dropped, ...rest } = states;
@@ -143,6 +149,9 @@
 		// After the longer list has rendered: `data` still holds the rows the page
 		// arrived with while the callback runs.
 		await tick();
+		// The list grew under a click that leaves no visible confirmation of how far
+		// it grew, so the region says what the hint says.
+		announcement = m.admin_suggest_tags_showing({ shown: data.rows.length, total: data.total });
 		const was = data.rows.findIndex((row) => row.id === after);
 		// The row that followed the last one on screen — or the top of the list, if
 		// that row has been saved off it since.
@@ -158,6 +167,20 @@
 <!-- Persistent live region for the list: written into, never inserted with
      text already inside. -->
 <p class="sr-only" role="status">{announcement}</p>
+
+<!-- The row's only action once it is saved or refused, so it takes the pill's
+     shape rather than reading as muted body text. Both of those branches draw
+     the same link. -->
+{#snippet editLink(row: { id: number; title: string })}
+	<a
+		class="tag-pill tag-pill-action"
+		href="/admin/images/{row.id}/edit"
+		aria-label={m.admin_suggest_tags_edit_image_label({ title: row.title })}
+	>
+		<Pencil size={14} aria-hidden="true" />
+		{m.admin_suggest_tags_edit_image()}
+	</a>
+{/snippet}
 
 {#if data.rows.length === 0}
 	<div class="rowcard empty">
@@ -208,7 +231,9 @@
 						<!-- Stays put while the row is idle, looking up, or showing chips, like
 						     the forms' pill: aria-disabled through the lookup so focus has
 						     somewhere to be while the tray shows the skeleton, and a second
-						     click runs the lookup again. It goes once a failure tray takes the
+						     click runs the lookup again. Aria-disabled through a save too,
+						     where a fresh lookup would throw away the chips being saved. It
+						     goes once a failure tray takes the
 						     row over, because that tray carries Try again and one row does not
 						     need two controls firing the same lookup — and for the same reason
 						     while a save has failed, where Save is the retry and this pill would
@@ -217,7 +242,7 @@
 							bind:this={pills[row.id]}
 							type="button"
 							class="tag-pill"
-							aria-disabled={rowState.kind === 'searching'}
+							aria-disabled={rowState.kind === 'searching' || saving.has(row.id)}
 							aria-label={rowState.kind === 'searching'
 								? m.admin_suggest_tags_row_searching({ title: row.title })
 								: m.admin_suggest_tags_row_suggest({ title: row.title })}
@@ -244,16 +269,7 @@
 						{m.admin_suggest_tags_save_conflict()}
 					</p>
 					<div class="tag-actions">
-						<!-- The row's only action once it is saved or refused, so it takes
-						     the pill's shape rather than reading as muted body text. -->
-						<a
-							class="tag-pill tag-pill-action"
-							href="/admin/images/{row.id}/edit"
-							aria-label={m.admin_suggest_tags_edit_image_label({ title: row.title })}
-						>
-							<Pencil size={14} aria-hidden="true" />
-							{m.admin_suggest_tags_edit_image()}
-						</a>
+						{@render editLink(row)}
 					</div>
 				{:else if savedTags}
 					<p
@@ -270,16 +286,7 @@
 						{/each}
 					</div>
 					<div class="tag-actions">
-						<!-- The row's only action once it is saved or refused, so it takes
-						     the pill's shape rather than reading as muted body text. -->
-						<a
-							class="tag-pill tag-pill-action"
-							href="/admin/images/{row.id}/edit"
-							aria-label={m.admin_suggest_tags_edit_image_label({ title: row.title })}
-						>
-							<Pencil size={14} aria-hidden="true" />
-							{m.admin_suggest_tags_edit_image()}
-						</a>
+						{@render editLink(row)}
 					</div>
 				{:else if rowState.kind === 'searching'}
 					<p class="tag-eyebrow">{readingLabel(rowState.source)}</p>
@@ -340,14 +347,27 @@
 									statusLines[row.id]?.focus();
 									return;
 								}
-								if (result.type === 'redirect' || result.type === 'error') {
-									// An expired session redirects to the login page and a thrown
-									// error has its own page; "Couldn't save those tags" would
-									// strand the operator on a list that cannot save anything.
+								if (
+									result.type === 'redirect' ||
+									(result.type === 'error' && typeof result.status === 'number')
+								) {
+									// An expired session redirects to the login page and an error
+									// the server answered with has its own page; "Couldn't save
+									// those tags" would strand the operator on a list that cannot
+									// save anything. A status-less error is enhance reporting a
+									// fetch that never landed — offline, or a dropped connection —
+									// and rendering the error page over the list for that would
+									// throw away every row's staged chips, so it falls through to
+									// the row failure below.
 									await applyAction(result);
 									return;
 								}
 								if (result.type !== 'success') {
+									// The Not saved notice lives inside this row's suggestion tray.
+									// If the row left that state while the save was in flight, there
+									// is nowhere to render the notice and nothing to focus, so the
+									// row keeps whatever it moved on to.
+									if (stateOf(row.id).kind !== 'suggested') return;
 									// The chips stay, so the same save can be tried again — but
 									// the row has to show that nothing landed, not only say it
 									// into the live region.
@@ -394,9 +414,13 @@
 							{#if saving.has(row.id)}<LoaderCircle size={14} class="tag-spin" aria-hidden="true" />{/if}
 							{m.admin_suggest_tags_row_save({ count: chosen.length })}
 						</button>
+						<!-- Disabled while the save runs, like Save beside it: closing the
+						     tray mid-save leaves the row with a heading and nothing else once
+						     the save answers. -->
 						<button
 							type="button"
 							class="tag-btn-text"
+							disabled={saving.has(row.id)}
 							aria-label={m.admin_suggest_tags_row_dismiss({ title: row.title })}
 							onclick={() => dismiss(row.id)}
 						>

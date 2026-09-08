@@ -104,7 +104,11 @@ describe('chips', () => {
 	});
 
 	it('mark a left-out tag with a plus rather than only a colour', () => {
-		expect(chips).toMatch(/\{#if leftOut\.has\(tag\)\}<Plus size=\{14\} \/>\{:else\}<Check size=\{14\} \/>\{\/if\}/);
+		// Both glyphs are decorative: the tag name beside them is the chip's whole
+		// accessible name, and aria-pressed already carries the state.
+		expect(chips).toMatch(
+			/\{#if leftOut\.has\(tag\)\}<Plus size=\{14\} aria-hidden="true" \/>\{:else\}<Check size=\{14\} aria-hidden="true" \/>\{\/if\}/
+		);
 	});
 });
 

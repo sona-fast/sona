@@ -1462,7 +1462,7 @@
 	"admin_tag_suggest_rated_questionable": "entail.devの判定：センシティブ。",
 	"admin_tag_suggest_rated_explicit": "entail.devの判定：成人向け。",
 	"admin_tag_suggest_mark_nsfw": "NSFWにする",
-	"admin_tag_suggest_marked_nsfw": "NSFWのチェックを入れました。フォームを送信すると反映されます。",
+	"admin_tag_suggest_marked_nsfw": "NSFWのチェックを入れました。フォームを送信するとSonaが保存します。",
 	"admin_suggest_tags_title": "タグを提案",
 	"admin_suggest_tags_explainer": "BlueskyまたはXの元投稿があり、まだタグがない画像が{count}件あります。Sonaはentail.devに1枚ずつ問い合わせ、あなたが受け入れたときにだけタグを保存します。",
 	"admin_suggest_tags_source_bluesky": "Blueskyの投稿",
@@ -1484,6 +1484,6 @@
 	"admin_suggest_tags_showing": "{total}件中{shown}件を表示",
 	"admin_suggest_tags_load_more": "さらに読み込む",
 	"admin_suggest_tags_empty_title": "今は提案できるものがありません",
-	"admin_suggest_tags_empty_body": "BlueskyまたはXの元投稿がある画像を追加すると、ここに表示されます。",
+	"admin_suggest_tags_empty_body": "BlueskyまたはXの元投稿がある画像にはすべてタグがついています。そうした投稿がある画像を追加すると、ここに表示されます。",
 	"admin_suggest_tags_back": "すべての画像に戻る"
 }

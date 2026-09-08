@@ -53,7 +53,7 @@
 
 {#if rating}
 	<span class="tag-rating-note" class:warn {id}>
-		{#if warn}<TriangleAlert size={14} />{/if}
+		{#if warn}<TriangleAlert size={14} aria-hidden="true" />{/if}
 		{label}
 	</span>
 	{#if warn && !nsfw}

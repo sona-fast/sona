@@ -34,7 +34,7 @@
 			aria-pressed={!leftOut.has(tag)}
 			onclick={() => ontoggle(tag)}
 		>
-			{#if leftOut.has(tag)}<Plus size={14} />{:else}<Check size={14} />{/if}
+			{#if leftOut.has(tag)}<Plus size={14} aria-hidden="true" />{:else}<Check size={14} aria-hidden="true" />{/if}
 			{tag}
 		</button>
 	{/each}

@@ -87,7 +87,11 @@ test('Load more grows the list rather than paging away from it', async ({ page, 
 		headers: { origin: baseURL! }
 	});
 
-	await page.getByRole('link', { name: 'Load more' }).click();
+	// Activated from the keyboard, which is the path the focus move is for: the
+	// ring asserted below only draws when the last interaction was a key press.
+	const loadMore = page.getByRole('link', { name: 'Load more' });
+	await loadMore.focus();
+	await loadMore.press('Enter');
 	// No Load more left, and the oldest row is listed: the rest of the list is on
 	// screen. Not an exact count — a retry of this file starts from a list this
 	// test has already taken a row off.
@@ -102,7 +106,18 @@ test('Load more grows the list rather than paging away from it', async ({ page, 
 	// the document or on whatever now sits at that position.
 	const next = grown[grown.indexOf(last) + 1];
 	expect(next, 'no row follows the last one that was on screen').toBeTruthy();
-	await expect(row(page, `Backfill ${next}`).locator('.rowtitle')).toBeFocused();
+	const landed = row(page, `Backfill ${next}`).locator('.rowtitle');
+	await expect(landed).toBeFocused();
+	// A heading is only focusable because the page put focus on it, so it carries
+	// the app's ring like the buttons do — otherwise the focus move is invisible.
+	await expect(landed).toHaveCSS('outline-style', 'solid');
+	await expect(landed).toHaveCSS('outline-width', '2px');
+
+	// Nothing else says how far the list grew: the link is gone and the hint with
+	// it, so the region carries the count.
+	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
+		`Showing ${grown.length} of ${grown.length}`
+	);
 });
 
 test('a row meta line names the source without an orphaned separator', async ({ page }) => {
@@ -296,6 +311,148 @@ test('a save that fails for any other reason says so in the row and the live reg
 	await expect(target.getByText('1 suggested tag from entail.dev')).toBeVisible();
 	await expect(target.locator('.tag-eyebrow.warn')).toHaveCount(0);
 	await expect(target.getByText("Sona couldn't save those tags. Try again.")).toHaveCount(0);
+});
+
+test('a second identical failure is announced again, not swallowed as an unchanged region', async ({
+	page
+}) => {
+	// A live region announces a change, so writing the sentence it already holds
+	// announces nothing. The row blanks the region and lets that reach the DOM
+	// before writing the same sentence again.
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	const target = await clickSuggest(page, 'Backfill 110');
+	const savePost = (url: URL) =>
+		url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save');
+	await page.route(savePost, (route) =>
+		route.fulfill({
+			status: 404,
+			contentType: 'application/json',
+			body: JSON.stringify({ type: 'failure', status: 404, data: '[{"error":1},"not_found"]' })
+		})
+	);
+
+	const save = target.getByRole('button', { name: 'Save 1 tag to Backfill 110' });
+	await save.click();
+	await expect(target.locator('.tag-panel-body')).toHaveText(
+		"Sona couldn't save those tags. Try again."
+	);
+
+	// Every value the region takes from here on, in order: a text node that never
+	// changes is a mutation Playwright cannot poll for after the fact.
+	await page.evaluate(() => {
+		const region = document.querySelector('p.sr-only[role="status"]');
+		const seen: string[] = [];
+		(window as unknown as { __regionLog: string[] }).__regionLog = seen;
+		new MutationObserver(() => seen.push(region?.textContent ?? '')).observe(region!, {
+			childList: true,
+			characterData: true,
+			subtree: true
+		});
+	});
+
+	await save.click();
+	await expect
+		.poll(() =>
+			page.evaluate(() => (window as unknown as { __regionLog: string[] }).__regionLog)
+		)
+		.toEqual(['', "Backfill 110. Sona couldn't save those tags. Try again."]);
+	await page.unroute(savePost);
+});
+
+test('Dismiss and the row pill are refused while a save is in flight', async ({ page }) => {
+	// Dismissing mid-save used to put the row back to idle, and the failure that
+	// landed afterwards then set a notice that only renders inside the suggestion
+	// tray — leaving a row with a heading and nothing else, unrecoverable without
+	// a reload. The row pill during a save is the same race.
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	const target = await clickSuggest(page, 'Backfill 112');
+
+	// The save is held open, so everything below happens while it is in flight.
+	let release: (() => void) | undefined;
+	const held = new Promise<void>((resolve) => (release = resolve));
+	const savePost = (url: URL) =>
+		url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save');
+	await page.route(savePost, async (route) => {
+		await held;
+		await route.fulfill({
+			status: 404,
+			contentType: 'application/json',
+			body: JSON.stringify({ type: 'failure', status: 404, data: '[{"error":1},"not_found"]' })
+		});
+	});
+
+	await target.getByRole('button', { name: 'Save 1 tag to Backfill 112' }).click();
+
+	const dismiss = target.getByRole('button', { name: 'Dismiss suggestions for Backfill 112' });
+	await expect(dismiss).toBeDisabled();
+	const pill = target.getByRole('button', { name: 'Suggest tags for Backfill 112' });
+	await expect(pill).toHaveAttribute('aria-disabled', 'true');
+	// Dispatched rather than clicked: a disabled button swallows a real click, so
+	// this is what tests that the handlers refuse too.
+	await dismiss.dispatchEvent('click');
+	await pill.dispatchEvent('click');
+	await expect(target.locator('.tag-chip')).toHaveCount(1);
+	await expect(target.locator('.tag-skel-chip')).toHaveCount(0);
+
+	release!();
+
+	// The failure lands on a row that is still showing its chips, so it has
+	// somewhere to say so and something to try again with.
+	await expect(target.locator('.tag-eyebrow.warn')).toHaveText('Not saved');
+	await expect(target.locator('.tag-panel-body')).toHaveText(
+		"Sona couldn't save those tags. Try again."
+	);
+	await expect(target.locator('.tag-chip')).toHaveCount(1);
+	await expect(target.getByRole('button', { name: 'Save 1 tag to Backfill 112' })).toBeEnabled();
+	await expect(target.locator('.tag-panel-body')).toBeFocused();
+	await page.unroute(savePost);
+});
+
+test('a save whose request never lands blames the row, not the page', async ({ page }) => {
+	// Offline, or a dropped connection: enhance reports a thrown fetch as an error
+	// result with no status. Handing that to applyAction renders the error page
+	// over the list and throws away every row's staged chips.
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	const target = await clickSuggest(page, 'Backfill 111');
+	const savePost = (url: URL) =>
+		url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save');
+	await page.route(savePost, (route) => route.abort());
+
+	await target.getByRole('button', { name: 'Save 1 tag to Backfill 111' }).click();
+
+	await expect(target.locator('.tag-eyebrow.warn')).toHaveText('Not saved');
+	await expect(target.locator('.tag-panel-body')).toHaveText(
+		"Sona couldn't save those tags. Try again."
+	);
+	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
+		"Backfill 111. Sona couldn't save those tags. Try again."
+	);
+	// The list is still the list: no error page, and the chips are still staged.
+	await expect(page.getByRole('heading', { level: 1, name: 'Suggest tags' })).toBeVisible();
+	await expect(page.locator('li.rowcard').first()).toBeVisible();
+	await expect(target.locator('.tag-chip')).toHaveCount(1);
+	await page.unroute(savePost);
 });
 
 test('a row\'s pill keeps focus and says it is working while the lookup runs', async ({ page }) => {
