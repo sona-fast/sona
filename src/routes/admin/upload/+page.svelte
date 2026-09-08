@@ -319,6 +319,20 @@
 		}
 	}
 
+	/** Remove driven from the tile's own button, which the removal destroys.
+	 * Focus lands on the Remove button of the tile that slid into its place, else
+	 * the one before it, else the dropzone the empty grid leaves behind (2.4.3).
+	 * The declined-duplicate path calls removeTile directly: focus is on the file
+	 * input or the dropzone there, and neither goes away. */
+	async function removeTileFromButton(key: number) {
+		const idx = tiles.findIndex((t) => t.key === key);
+		if (idx === -1) return;
+		removeTile(key);
+		await tick();
+		const neighbour = tiles[idx] ?? tiles[idx - 1] ?? null;
+		(neighbour ? tileRemoveButtons[neighbour.key] : dropzone)?.focus();
+	}
+
 	function handleFileSelect(e: Event) {
 		const input = e.target as HTMLInputElement;
 		if (input.files) {
@@ -430,6 +444,13 @@
 	let artistSelect = $state<HTMLSelectElement | null>(null);
 	// $state so `bind:this` into it is a reactive write (Svelte warns otherwise).
 	const tileLookupButtons = $state<Record<number, HTMLButtonElement | null>>({});
+	// Each tile's Remove button sits inside the tile it removes, so activating one
+	// from the keyboard would drop focus to <body> (2.4.3). These are where focus
+	// goes instead — the neighbour that took the removed tile's place.
+	const tileRemoveButtons = $state<Record<number, HTMLButtonElement | null>>({});
+	// The last tile's removal replaces the whole grid with the dropzone, which is
+	// then the only control left to land on.
+	let dropzone = $state<HTMLDivElement | null>(null);
 
 	const parentTile = $derived(groupMode === 'new' ? (tiles[parentIndex] ?? null) : null);
 	const sharedLookup = $derived<LookupState>(parentTile?.lookup ?? { kind: 'idle' });
@@ -676,6 +697,7 @@
 	{#if tiles.length === 0}
 		<div
 			class="dropzone"
+			bind:this={dropzone}
 			class:disabled={saving}
 			{@attach dropFiles({ accept: GALLERY_ACCEPT, onFiles: handleFiles, disabled: () => saving })}
 			onclick={() => { if (!saving) fileInput?.click(); }}
@@ -730,7 +752,15 @@
 								<span class="error-text">{tile.error}</span>
 							{/if}
 						</div>
-						<button type="button" class="tile-remove" aria-label={m.admin_variant_remove_file()} onclick={() => removeTile(tile.key)}>
+						<!-- The file name rides in the accessible name so a screen reader can
+						     tell the grid's Remove buttons apart (2.4.6, 4.1.2). -->
+						<button
+							type="button"
+							class="tile-remove"
+							bind:this={tileRemoveButtons[tile.key]}
+							aria-label={m.admin_variant_remove_file({ fileName: tile.fileName })}
+							onclick={() => removeTileFromButton(tile.key)}
+						>
 							<X size={14} />
 						</button>
 					</div>

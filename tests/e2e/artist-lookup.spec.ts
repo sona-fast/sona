@@ -838,8 +838,9 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		await expect(page.locator('#shared-rating-tag')).toHaveCount(0);
 
-		// Removing the tile discards the result with it.
-		await page.getByRole('button', { name: 'Remove file' }).nth(1).click();
+		// Removing the tile discards the result with it. Each Remove button names
+		// its own file, so no nth() is needed to tell them apart.
+		await page.getByRole('button', { name: 'Remove back.png' }).click();
 		await expect(page.locator('.tile-nsfw-row .rating-tag')).toHaveCount(0);
 	});
 
@@ -887,7 +888,10 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
 
-		await page.getByRole('button', { name: 'Remove file' }).nth(0).click();
+		await page.getByRole('button', { name: 'Remove first.png' }).click();
+		// The button removed itself with its tile, so focus lands on the Remove
+		// button of the tile that slid into its place rather than on <body>.
+		await expect(page.getByRole('button', { name: 'Remove middle.png' })).toBeFocused();
 
 		await expect(page.getByRole('radio', { name: 'Parent: middle.png' })).toBeChecked();
 		await expect(sourceInput(page)).toHaveValue(POST_URL);

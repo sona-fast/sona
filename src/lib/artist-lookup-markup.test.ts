@@ -609,6 +609,13 @@ describe('what the lookup copy names', () => {
 		expect(ja.admin_lookup_status_artist_hint).not.toContain('変える');
 	});
 
+	// One "Remove file" per tile told a screen-reader user nothing about WHICH
+	// file the button removes (2.4.6, 4.1.2).
+	it('names the file in every tile Remove button, in both catalogs', () => {
+		expect(en.admin_variant_remove_file).toBe('Remove {fileName}');
+		expect(ja.admin_variant_remove_file).toContain('{fileName}');
+	});
+
 	it('says the seeded fields were left alone rather than that nothing was filled', () => {
 		expect(en.admin_lookup_announce_seed_kept).toBe(
 			"The new artist's fields already have values, so Sona left them alone."
@@ -665,6 +672,27 @@ describe('focus after the panel goes away', () => {
 		// Moving to another image in the same tab drops the previous image's extras
 		// along with every other lookup seed.
 		expect(EDIT).toMatch(/function resetForImage\(\)[\s\S]{0,600}?extraParents = \[\];/);
+	});
+
+	// The Remove button lives inside the tile it removes, so activating it from
+	// the keyboard dropped focus on <body> and the next Tab restarted at the top
+	// of the page (2.4.3). Every tile's button also read "Remove file" (2.4.6).
+	it('lands on a neighbouring Remove button after removing a tile', () => {
+		expect(UPLOAD).toMatch(/bind:this=\{tileRemoveButtons\[tile\.key\]\}/);
+		expect(UPLOAD).toMatch(
+			/async function removeTileFromButton[\s\S]{0,400}?await tick\(\);\s*\n\s*const neighbour = tiles\[idx\] \?\? tiles\[idx - 1\] \?\? null;\s*\n\s*\(neighbour \? tileRemoveButtons\[neighbour\.key\] : dropzone\)\?\.focus\(\)/
+		);
+		expect(UPLOAD).toMatch(/onclick=\{\(\) => removeTileFromButton\(tile\.key\)\}/);
+		// The empty grid leaves the dropzone as the only control to land on.
+		expect(UPLOAD).toMatch(/class="dropzone"\s*\n\s*bind:this=\{dropzone\}/);
+		// The file name is in the accessible name, the way the tile lookup button
+		// already carries it.
+		expect(UPLOAD).toMatch(
+			/aria-label=\{m\.admin_variant_remove_file\(\{ fileName: tile\.fileName \}\)\}/
+		);
+		// The declined-duplicate path keeps calling removeTile directly: focus is
+		// on the file input or the dropzone there, and neither goes away.
+		expect(UPLOAD).toContain('removeTile(tile.key);');
 	});
 
 	it('gives the dialog its opener back', () => {

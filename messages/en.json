@@ -425,7 +425,7 @@
 	"admin_variant_label_placeholder": "e.g. Transparent BG, NSFW alt",
 	"admin_variant_parent_hint": "This image has variants of its own, so it can't be made a variant of another image.",
 	"admin_variant_parent_radio": "Parent",
-	"admin_variant_remove_file": "Remove file",
+	"admin_variant_remove_file": "Remove {fileName}",
 	"admin_variant_add_files": "Add files",
 	"admin_variant_group_legend": "Variant group",
 	"admin_variant_group_single": "New piece",

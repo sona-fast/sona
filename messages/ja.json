@@ -369,7 +369,7 @@
 	"admin_variant_label_placeholder": "例：透過背景、NSFW版",
 	"admin_variant_parent_hint": "この画像には自身のバリエーションがあるため、他の画像のバリエーションにはできません。",
 	"admin_variant_parent_radio": "親",
-	"admin_variant_remove_file": "ファイルを削除",
+	"admin_variant_remove_file": "{fileName}を削除",
 	"admin_variant_add_files": "ファイルを追加",
 	"admin_variant_group_legend": "バリエーショングループ",
 	"admin_variant_group_single": "新しい作品",
