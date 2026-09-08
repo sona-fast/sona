@@ -9,8 +9,8 @@
 // normal outcome, not an error to surface.
 //
 // Everything here is fail-soft: any non-2xx, timeout, or unexpected shape
-// resolves to null and the caller carries on without suggestions. Third-party
-// response bodies are never logged and never stored.
+// resolves to a failed outcome and the caller carries on without suggestions.
+// Third-party response bodies are never logged and never stored.
 
 import { sanitizeTag } from './validate';
 
@@ -19,6 +19,10 @@ const ENTAIL_CLASSIFY = 'https://entail.dev/api/classify';
 
 /** The floor entail.dev's own docs recommend for Sona. */
 export const DEFAULT_CONFIDENCE_FLOOR = 0.8;
+
+/** Most tags a single lookup will suggest, counted after dedupe. The
+ * classifier can return hundreds; the UI shows a short list. */
+export const MAX_SUGGESTED_TAGS = 40;
 
 // Both `wait=true` endpoints hold the connection open until the classifier
 // finishes rather than answering 202 straight away. That hold was measured at
@@ -47,8 +51,11 @@ export type Suggestions = {
  * is not a failure at all; it succeeds with an empty tag list. */
 export type LookupFailure = 'not_ready' | 'rate_limited' | 'unavailable';
 
+/** `imageCount` is how many images the source post carried. Suggestions come
+ * from the first one only, so a count above 1 tells the UI the rest went
+ * unread. The X path always reports 1: it classifies a single media URL. */
 export type LookupOutcome =
-	| { ok: true; suggestions: Suggestions }
+	| { ok: true; suggestions: Suggestions; imageCount: number }
 	| { ok: false; reason: LookupFailure };
 
 const fail = (reason: LookupFailure): LookupOutcome => ({ ok: false, reason });
@@ -60,7 +67,9 @@ export type ClassificationEntry = {
 	tags?: unknown;
 };
 
-export type SourceKind = { kind: 'bluesky'; url: string } | { kind: 'x'; url: string };
+/** The `x` kind carries the status id so the tweet lookup never re-parses
+ * the URL. */
+export type SourceKind = { kind: 'bluesky'; url: string } | { kind: 'x'; url: string; id: string };
 
 const BLUESKY_ACTOR = /^[A-Za-z0-9._:%-]{1,256}$/;
 const BLUESKY_RKEY = /^[A-Za-z0-9._~-]{1,64}$/;
@@ -87,9 +96,17 @@ export function classifySourceUrl(url: string): SourceKind | null {
 	if (host === 'bsky.app') {
 		// /profile/<handle-or-did>/post/<rkey>
 		if (parts.length !== 4 || parts[0] !== 'profile' || parts[2] !== 'post') return null;
-		const actor = decodeURIComponent(parts[1]);
+		// Decode first, then validate the decoded actor: a malformed percent
+		// sequence throws, and an encoded slash would otherwise pass the regex
+		// and decode into a path separator in the canonical URL.
+		let actor: string;
+		try {
+			actor = decodeURIComponent(parts[1]);
+		} catch {
+			return null;
+		}
 		const rkey = parts[3];
-		if (!BLUESKY_ACTOR.test(parts[1]) || !BLUESKY_RKEY.test(rkey)) return null;
+		if (!BLUESKY_ACTOR.test(actor) || !BLUESKY_RKEY.test(rkey)) return null;
 		return { kind: 'bluesky', url: `https://bsky.app/profile/${actor}/post/${rkey}` };
 	}
 
@@ -100,7 +117,7 @@ export function classifySourceUrl(url: string): SourceKind | null {
 		if (keyword !== 'status' && keyword !== 'statuses') return null;
 		if (!STATUS_ID.test(id)) return null;
 		if (user !== 'i' && !X_USER.test(user)) return null;
-		return { kind: 'x', url: `https://x.com/${user}/status/${id}` };
+		return { kind: 'x', url: `https://x.com/${user}/status/${id}`, id };
 	}
 
 	return null;
@@ -129,7 +146,8 @@ function normalizeRating(rating: unknown): EntailRating | null {
 /**
  * Turn one classification entry into Sona tag suggestions: keep the tags at or
  * above the confidence floor, translate them, and drop duplicates while
- * preserving the confidence order the API returns. Pure.
+ * preserving the confidence order the API returns, capped at
+ * {@link MAX_SUGGESTED_TAGS}. Pure.
  */
 export function suggestionsFromResult(
 	result: ClassificationEntry | null | undefined,
@@ -147,20 +165,15 @@ export function suggestionsFromResult(
 		if (!tag || seen.has(tag)) continue;
 		seen.add(tag);
 		tags.push(tag);
+		if (tags.length >= MAX_SUGGESTED_TAGS) break;
 	}
 	return { tags, rating };
 }
 
-/** `/post` answers with `{ uri, images: [...] }`; tolerate a bare array too. */
-function firstImage(body: unknown): ClassificationEntry | null {
-	const images = Array.isArray(body)
-		? body
-		: Array.isArray((body as { images?: unknown })?.images)
-			? ((body as { images: unknown[] }).images)
-			: null;
-	if (!images || images.length === 0) return null;
-	const first = images[0];
-	return first && typeof first === 'object' ? (first as ClassificationEntry) : null;
+/** `/post` answers with `{ uri, images: [...] }`. */
+function postImages(body: unknown): ClassificationEntry[] {
+	const images = (body as { images?: unknown })?.images;
+	return Array.isArray(images) ? (images as ClassificationEntry[]) : [];
 }
 
 /**
@@ -168,7 +181,7 @@ function firstImage(body: unknown): ClassificationEntry | null {
  * post whose images entail.dev hasn't classified yet answers 202, which we
  * treat as "nothing to suggest" rather than waiting around. Never throws.
  */
-export async function lookupBlueskyPostResult(
+export async function lookupBlueskyPost(
 	url: string,
 	fetchImpl: typeof fetch = fetch
 ): Promise<LookupOutcome> {
@@ -195,34 +208,31 @@ export async function lookupBlueskyPostResult(
 		// An empty `images` array means entail.dev looked and found no furry
 		// artwork in the post. That is an answer, not a failure: the caller gets
 		// an empty tag list rather than an error it would have to explain.
-		const image = firstImage(await res.json());
+		const images = postImages(await res.json());
+		const first = images[0];
 		return {
 			ok: true,
-			suggestions: image ? suggestionsFromResult(image) : { tags: [], rating: null }
+			suggestions:
+				first && typeof first === 'object' ? suggestionsFromResult(first) : { tags: [], rating: null },
+			imageCount: images.length
 		};
 	} catch (e) {
-		console.warn(`[entail] post lookup error: ${e instanceof Error ? e.message : String(e)}`);
+		console.warn(`[entail] post lookup error: ${errorLabel(e)}`);
 		return fail('unavailable');
 	}
 }
 
-/** Suggestions for a Bluesky post, or null if the lookup failed. A post with
- * nothing to suggest resolves to an empty tag list, not null — "no suggestions"
- * and "no answer" are different facts. Use {@link lookupBlueskyPostResult} when
- * the reason for a failure matters. */
-export async function lookupBlueskyPost(
-	url: string,
-	fetchImpl: typeof fetch = fetch
-): Promise<Suggestions | null> {
-	const outcome = await lookupBlueskyPostResult(url, fetchImpl);
-	return outcome.ok ? outcome.suggestions : null;
+/** What a caught error is safe to log. A JSON parse failure's message quotes
+ * a fragment of the body, and third-party bodies are never logged, so a
+ * SyntaxError is reduced to its name. */
+export function errorLabel(e: unknown): string {
+	if (e instanceof SyntaxError) return e.name;
+	return e instanceof Error ? e.message : String(e);
 }
 
 function jobIdFrom(body: unknown): string | null {
-	const { job_id: jobId, id } = (body ?? {}) as { job_id?: unknown; id?: unknown };
-	if (typeof jobId === 'string' && jobId) return jobId;
-	if (typeof id === 'string' && id) return id;
-	return null;
+	const { job_id: jobId } = (body ?? {}) as { job_id?: unknown };
+	return typeof jobId === 'string' && jobId ? jobId : null;
 }
 
 /** entail.dev fetches the URL itself, so only the two CDNs it allowlists are
@@ -242,10 +252,10 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Suggestions for a single image URL on an allowlisted CDN: enqueue a
- * classification job, then poll it a few times. Gives up (null) if the job
- * isn't done by the attempt cap. Never throws.
+ * classification job, then poll it a few times. Gives up (`unavailable`) if
+ * the job isn't done by the attempt cap. Never throws.
  */
-export async function classifyMediaUrlResult(
+export async function classifyMediaUrl(
 	url: string,
 	fetchImpl: typeof fetch = fetch
 ): Promise<LookupOutcome> {
@@ -287,22 +297,12 @@ export async function classifyMediaUrlResult(
 			}
 			const body = (await res.json()) as (ClassificationEntry & { status?: unknown }) | null;
 			if (body?.status !== 'done') continue;
-			return { ok: true, suggestions: suggestionsFromResult(body) };
+			return { ok: true, suggestions: suggestionsFromResult(body), imageCount: 1 };
 		}
 		console.warn(`[entail] classify job unfinished after ${POLL_ATTEMPTS} polls`);
 		return fail('unavailable');
 	} catch (e) {
-		console.warn(`[entail] classify error: ${e instanceof Error ? e.message : String(e)}`);
+		console.warn(`[entail] classify error: ${errorLabel(e)}`);
 		return fail('unavailable');
 	}
-}
-
-/** Suggestions for one media URL, or null for any failure. Use
- * {@link classifyMediaUrlResult} when the reason matters. */
-export async function classifyMediaUrl(
-	url: string,
-	fetchImpl: typeof fetch = fetch
-): Promise<Suggestions | null> {
-	const outcome = await classifyMediaUrlResult(url, fetchImpl);
-	return outcome.ok ? outcome.suggestions : null;
 }

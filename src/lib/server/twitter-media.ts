@@ -6,9 +6,11 @@
 // against a real public tweet on 2026-09-08 (activate 200, GraphQL 200, photo
 // present). If resolution goes uniformly null, refresh them from FxEmbed.
 //
-// Fail-soft throughout: any error resolves to null and the caller proceeds
-// without a media URL. Videos and GIFs are skipped — only photos resolve.
+// Fail-soft throughout: any error resolves to a failed outcome and the caller
+// proceeds without a media URL. Videos and GIFs are skipped — only photos
+// resolve.
 
+import { errorLabel } from './entail';
 import { X_BEARER, activateGuestToken } from './twitter-avatar';
 
 const X_TWEET_BY_REST_ID = 'https://api.x.com/graphql/f2sagi1jweVHFkTUIHzmMQ/TweetResultByRestId';
@@ -61,14 +63,13 @@ const QUERY_FIELD_TOGGLES = {
 	withDisallowedReplyControls: false
 } as const;
 
-/** Pull the numeric status id out of any of the tweet URL shapes we accept
- * ("x.com/user/status/1", "twitter.com/i/status/1", ".../status/1/photo/1"). */
-export function tweetIdFromUrl(url: string): string | null {
-	const match = url
-		.trim()
-		.match(/(?:^|\/\/|\.)(?:x|twitter)\.com\/(?:[A-Za-z0-9_]{1,15}|i\/web|i)\/status(?:es)?\/(\d{1,20})(?:[/?#]|$)/i);
-	return match ? match[1] : null;
-}
+/** `rate_limited` is X refusing the guest token twice over with a 429;
+ * everything else that yields no photo is `unavailable`. */
+export type TweetMediaOutcome =
+	| { ok: true; url: string }
+	| { ok: false; reason: 'rate_limited' | 'unavailable' };
+
+const fail = (reason: 'rate_limited' | 'unavailable'): TweetMediaOutcome => ({ ok: false, reason });
 
 type TweetMedia = { type?: unknown; media_url_https?: unknown };
 
@@ -129,37 +130,41 @@ function tweetLookup(tweetId: string, guestToken: string, fetchImpl: typeof fetc
 	);
 }
 
-/** Resolve the first photo on a public tweet to a pbs.twimg.com URL. One guest
- * token, one fresh-token retry if X refuses it (401/429), then null. Never throws. */
+/** Resolve the first photo on a public tweet to a pbs.twimg.com URL, given the
+ * numeric status id classifySourceUrl already validated. One guest token, one
+ * fresh-token retry if X refuses it (401/429), then a failed outcome. Never
+ * throws. */
 export async function fetchTweetMediaUrl(
-	tweetUrl: string,
+	tweetId: string,
 	fetchImpl: typeof fetch = fetch
-): Promise<string | null> {
-	const tweetId = tweetIdFromUrl(tweetUrl);
-	if (!tweetId) return null;
+): Promise<TweetMediaOutcome> {
 	try {
 		let token = await activateGuestToken(fetchImpl);
-		if (!token) return null;
+		if (!token) return fail('unavailable');
 		let res = await tweetLookup(tweetId, token, fetchImpl);
 		if (res.status === 401 || res.status === 429) {
 			token = await activateGuestToken(fetchImpl);
-			if (!token) return null;
+			if (!token) return fail('unavailable');
 			res = await tweetLookup(tweetId, token, fetchImpl);
+		}
+		if (res.status === 429) {
+			console.warn('[avatar] tweet media lookup rate limited: status=429');
+			return fail('rate_limited');
 		}
 		if (!res.ok) {
 			console.warn(`[avatar] tweet media lookup failed: status=${res.status}`);
-			return null;
+			return fail('unavailable');
 		}
 		const photo = parseTweetPhotoUrl(await res.json());
 		if (!photo) {
 			// 200 but no photo — a text/video tweet, a protected or deleted one, or
 			// the undocumented GraphQL shape rotated (see the file header).
 			console.warn('[avatar] tweet media lookup had no photo');
-			return null;
+			return fail('unavailable');
 		}
-		return photo;
+		return { ok: true, url: photo };
 	} catch (e) {
-		console.warn(`[avatar] tweet media lookup error: ${e instanceof Error ? e.message : String(e)}`);
-		return null;
+		console.warn(`[avatar] tweet media lookup error: ${errorLabel(e)}`);
+		return fail('unavailable');
 	}
 }

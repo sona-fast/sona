@@ -104,7 +104,7 @@ describe('defaultPrivacyPolicy', () => {
 		// The runtime boundary, honestly scoped: nothing browsing-time goes to the
 		// tools, but shared diagnostic logs can carry request data — both halves
 		// must stay, or the paragraph overclaims again.
-		expect(text).toMatch(/nothing you do here is sent to them as you browse/);
+		expect(text).toMatch(/nothing you do here is sent to those tools as you browse/);
 		expect(text).toMatch(/can contain request data such as IP addresses/);
 	});
 
@@ -181,6 +181,9 @@ describe('defaultPrivacyPolicy', () => {
 		// The integrations list reads exhaustive, so it must actually be: every
 		// remote service a feature calls out to is named (SONA-167 round 1).
 		expect(text).toContain('Bluesky');
+		expect(text).toMatch(/resolving a post to its image/);
+		// SONA-220: the tag-suggestion lookup sends a post URL to entail.dev.
+		expect(text).toContain('entail.dev');
 		expect(text).toContain('FurTrack');
 		expect(text).toMatch(/shared artist registry/);
 	});
@@ -293,8 +296,8 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// privacy page would show a "Last updated" line older than its own text.
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '1a2371801ad230c1791ca926588bdf7329e4844e9b6535742a6188ec7dd89385';
-	const RECORDED_UPDATED = '2026-08-24';
+	const RECORDED_TEXT_HASH = 'f3861cf345d472156be90e5cbe8bf54700dd69c19dca975c42bdb20065b0edb4';
+	const RECORDED_UPDATED = '2026-09-08';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

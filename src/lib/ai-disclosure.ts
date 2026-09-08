@@ -2,8 +2,9 @@
 //
 // Wording approved by the operator 2026-08-12 after a peer review that set the
 // register: short, disclosure-only, no persuasion. Facts only — every claim
-// here is backed by the codebase (no runtime AI calls anywhere), the repo
-// policy (AI_POLICY.md), or the operator's own practice. An owner whose
+// here is backed by the codebase (the one runtime AI call is the operator's
+// tag-suggestion lookup against entail.dev, SONA-220), the repo policy
+// (AI_POLICY.md), or the operator's own practice. An owner whose
 // practice differs (or who wants their own words) overrides the text via
 // Settings, or turns the page off entirely with the aiPageEnabled toggle.
 //
@@ -70,7 +71,7 @@ export function defaultAiDisclosure(): AiDisclosure {
 			},
 			{
 				lead: 'Your data.',
-				body: "The running site never calls an AI service, so nothing you do is sent to one as you browse. When the software is being worked on, the developer's tools can read this site's logs and database, as any developer's could, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service. Model training is switched off on the accounts used, and CodeRabbit states that the data from its reviews is never used for training. The privacy policy has the details."
+				body: "The site calls an AI service in one place: when the site owner asks for tag suggestions on a piece of artwork, the public URL of its source post goes to entail.dev, an image classifier. Nothing you do is sent to an AI service as you browse. When the software is being worked on, the developer's tools can read this site's logs and database, as any developer's could, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service. Model training is switched off on the accounts used, and CodeRabbit states that the data from its reviews is never used for training. The privacy policy has the details."
 			},
 			{
 				lead: 'The model.',

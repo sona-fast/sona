@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fetchTweetMediaUrl, parseTweetPhotoUrl, tweetIdFromUrl } from './twitter-media';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fetchTweetMediaUrl, parseTweetPhotoUrl } from './twitter-media';
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 const json = (body: unknown, status = 200) =>
 	new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -18,29 +22,17 @@ const tweetWith = (media: unknown[]) => ({
 
 const photo = { type: 'photo', media_url_https: 'https://pbs.twimg.com/media/AbCdEf123.jpg' };
 
-describe('tweetIdFromUrl', () => {
-	it('reads the id out of the accepted shapes', () => {
-		expect(tweetIdFromUrl('https://x.com/examplefox/status/1234567890')).toBe('1234567890');
-		expect(tweetIdFromUrl('https://twitter.com/examplefox/status/1234567890?s=21')).toBe('1234567890');
-		expect(tweetIdFromUrl('https://x.com/examplefox/status/1234567890/photo/1')).toBe('1234567890');
-		expect(tweetIdFromUrl('https://x.com/i/status/1234567890')).toBe('1234567890');
-		expect(tweetIdFromUrl('https://x.com/i/web/status/1234567890')).toBe('1234567890');
-		expect(tweetIdFromUrl('https://mobile.twitter.com/examplefox/statuses/1234567890')).toBe('1234567890');
-	});
-
-	it('returns null for anything else', () => {
-		expect(tweetIdFromUrl('https://x.com/examplefox')).toBeNull();
-		expect(tweetIdFromUrl('https://x.com/examplefox/status/abc')).toBeNull();
-		expect(tweetIdFromUrl('https://bsky.app/profile/a/post/3abc')).toBeNull();
-		expect(tweetIdFromUrl('')).toBeNull();
-	});
-});
-
 describe('parseTweetPhotoUrl', () => {
 	it('upgrades the first photo to the largest variant', () => {
 		expect(parseTweetPhotoUrl(tweetWith([photo]))).toBe(
 			'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096'
 		);
+	});
+
+	it('passes a media URL with no extension through untouched', () => {
+		expect(
+			parseTweetPhotoUrl(tweetWith([{ type: 'photo', media_url_https: 'https://pbs.twimg.com/media/NoExt' }]))
+		).toBe('https://pbs.twimg.com/media/NoExt');
 	});
 
 	it('skips video and animated gif entries', () => {
@@ -84,58 +76,92 @@ describe('parseTweetPhotoUrl', () => {
 });
 
 describe('fetchTweetMediaUrl', () => {
-	const url = 'https://x.com/examplefox/status/1234567890';
+	const id = '1234567890';
+	const unavailable = { ok: false, reason: 'unavailable' };
 
 	const stub = (lookup: (n: number) => Response) => {
 		let lookups = 0;
 		const activations = { count: 0 };
-		const fetchImpl = vi.fn(async (target: string | URL | Request) => {
+		const fetchImpl = vi.fn(async (target: string | URL | Request, init?: RequestInit) => {
 			if (String(target).includes('guest/activate')) {
 				activations.count++;
 				return json({ guest_token: `gt-${activations.count}` });
 			}
+			tokens.push(String(new Headers(init?.headers).get('x-guest-token')));
 			return lookup(++lookups);
 		});
-		return { fetchImpl, activations };
+		const tokens: string[] = [];
+		return { fetchImpl, activations, tokens };
 	};
 
 	it('activates a guest token and resolves the first photo', async () => {
-		const { fetchImpl } = stub(() => json(tweetWith([photo])));
-		expect(await fetchTweetMediaUrl(url, fetchImpl)).toBe(
-			'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096'
-		);
+		const { fetchImpl, tokens } = stub(() => json(tweetWith([photo])));
+		expect(await fetchTweetMediaUrl(id, fetchImpl)).toEqual({
+			ok: true,
+			url: 'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096'
+		});
+		expect(tokens).toEqual(['gt-1']);
+		const lookup = String(fetchImpl.mock.calls.find(([t]) => !String(t).includes('guest/activate'))?.[0]);
+		expect(lookup).toContain(encodeURIComponent(`"tweetId":"${id}"`));
 	});
 
 	it('retries once with a fresh token on 401', async () => {
-		const { fetchImpl, activations } = stub((n) =>
+		const { fetchImpl, activations, tokens } = stub((n) =>
 			n === 1 ? new Response('nope', { status: 401 }) : json(tweetWith([photo]))
 		);
-		expect(await fetchTweetMediaUrl(url, fetchImpl)).toContain('AbCdEf123');
+		const outcome = await fetchTweetMediaUrl(id, fetchImpl);
+		expect(outcome.ok && outcome.url).toContain('AbCdEf123');
+		expect(activations.count).toBe(2);
+		expect(tokens).toEqual(['gt-1', 'gt-2']);
+	});
+
+	it('retries once with a fresh token on 429', async () => {
+		const { fetchImpl, activations, tokens } = stub((n) =>
+			n === 1 ? new Response('slow down', { status: 429 }) : json(tweetWith([photo]))
+		);
+		const outcome = await fetchTweetMediaUrl(id, fetchImpl);
+		expect(outcome.ok && outcome.url).toContain('AbCdEf123');
+		expect(activations.count).toBe(2);
+		expect(tokens).toEqual(['gt-1', 'gt-2']);
+	});
+
+	it('reports a rate limit that survives the retry', async () => {
+		const { fetchImpl, activations } = stub(() => new Response('slow down', { status: 429 }));
+		expect(await fetchTweetMediaUrl(id, fetchImpl)).toEqual({ ok: false, reason: 'rate_limited' });
 		expect(activations.count).toBe(2);
 	});
 
-	it('returns null without fetching when the URL has no tweet id', async () => {
-		const fetchImpl = vi.fn(async () => json(tweetWith([photo])));
-		expect(await fetchTweetMediaUrl('https://x.com/examplefox', fetchImpl)).toBeNull();
-		expect(fetchImpl).not.toHaveBeenCalled();
+	it('is unavailable after a 401 that survives the retry', async () => {
+		const { fetchImpl } = stub(() => new Response('nope', { status: 401 }));
+		expect(await fetchTweetMediaUrl(id, fetchImpl)).toEqual(unavailable);
 	});
 
 	it('fails soft on refusal, a photoless tweet, malformed JSON, and network errors', async () => {
-		expect(await fetchTweetMediaUrl(url, stub(() => new Response('no', { status: 403 })).fetchImpl)).toBeNull();
-		expect(await fetchTweetMediaUrl(url, stub(() => json(tweetWith([]))).fetchImpl)).toBeNull();
-		expect(await fetchTweetMediaUrl(url, stub(() => new Response('<html>')).fetchImpl)).toBeNull();
+		expect(await fetchTweetMediaUrl(id, stub(() => new Response('no', { status: 403 })).fetchImpl)).toEqual(
+			unavailable
+		);
+		expect(await fetchTweetMediaUrl(id, stub(() => json(tweetWith([]))).fetchImpl)).toEqual(unavailable);
+		expect(await fetchTweetMediaUrl(id, stub(() => new Response('<html>')).fetchImpl)).toEqual(unavailable);
 		expect(
 			await fetchTweetMediaUrl(
-				url,
+				id,
 				vi.fn(async () => {
 					throw new Error('TimeoutError');
 				})
 			)
-		).toBeNull();
+		).toEqual(unavailable);
 	});
 
-	it('returns null when the guest token cannot be activated', async () => {
+	it('logs a malformed body as a parse failure without quoting it', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		await fetchTweetMediaUrl(id, stub(() => new Response('<html>secret-body')).fetchImpl);
+		const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n');
+		expect(logged).toContain('SyntaxError');
+		expect(logged).not.toContain('secret-body');
+	});
+
+	it('is unavailable when the guest token cannot be activated', async () => {
 		const fetchImpl = vi.fn(async () => new Response('blocked', { status: 403 }));
-		expect(await fetchTweetMediaUrl(url, fetchImpl)).toBeNull();
+		expect(await fetchTweetMediaUrl(id, fetchImpl)).toEqual(unavailable);
 	});
 });

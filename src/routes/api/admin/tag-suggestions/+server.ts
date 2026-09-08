@@ -4,8 +4,8 @@ import { getDb } from '$lib/server/db';
 import { images } from '$lib/server/db/schema';
 import {
 	classifySourceUrl,
-	classifyMediaUrlResult,
-	lookupBlueskyPostResult,
+	classifyMediaUrl,
+	lookupBlueskyPost,
 	type LookupFailure,
 	type LookupOutcome
 } from '$lib/server/entail';
@@ -88,21 +88,22 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 
 	let outcome: LookupOutcome;
 	if (source.kind === 'bluesky') {
-		outcome = await lookupBlueskyPostResult(source.url);
+		outcome = await lookupBlueskyPost(source.url);
 	} else {
 		// entail.dev indexes Bluesky, not X, so an X post has to be classified
 		// from its image. X's API is the only thing that knows which image that
 		// is, and it hands back a pbs.twimg.com URL — one of the two hosts
-		// classifyMediaUrl will send on.
-		const mediaUrl = await fetchTweetMediaUrl(source.url);
-		if (!mediaUrl) return failure('unavailable');
-		outcome = await classifyMediaUrlResult(mediaUrl);
+		// classifyMediaUrl will send on. Only the validated status id goes out.
+		const media = await fetchTweetMediaUrl(source.id);
+		if (!media.ok) return failure(media.reason);
+		outcome = await classifyMediaUrl(media.url);
 	}
 
 	if (!outcome.ok) return failure(outcome.reason);
 	return json({
 		source: source.kind,
 		tags: outcome.suggestions.tags,
-		rating: outcome.suggestions.rating
+		rating: outcome.suggestions.rating,
+		imageCount: outcome.imageCount
 	});
 };

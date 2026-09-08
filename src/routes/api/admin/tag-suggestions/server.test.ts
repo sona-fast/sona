@@ -3,22 +3,25 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
 import type { LookupOutcome } from '$lib/server/entail';
+import type { TweetMediaOutcome } from '$lib/server/twitter-media';
 import { makeD1 } from '$lib/server/test/d1';
 import { POST } from './+server';
 
 // Only the outbound calls are stubbed. classifySourceUrl stays real, so the
 // URL recognition the endpoint depends on is exercised rather than mocked.
-const lookupBlueskyPostResult = vi.hoisted(() =>
+const lookupBlueskyPost = vi.hoisted(() =>
 	vi.fn(async (_url: string): Promise<LookupOutcome> => ({ ok: false, reason: 'unavailable' }))
 );
-const classifyMediaUrlResult = vi.hoisted(() =>
+const classifyMediaUrl = vi.hoisted(() =>
 	vi.fn(async (_url: string): Promise<LookupOutcome> => ({ ok: false, reason: 'unavailable' }))
 );
-const fetchTweetMediaUrl = vi.hoisted(() => vi.fn(async (_url: string): Promise<string | null> => null));
+const fetchTweetMediaUrl = vi.hoisted(() =>
+	vi.fn(async (_id: string): Promise<TweetMediaOutcome> => ({ ok: false, reason: 'unavailable' }))
+);
 
 vi.mock('$lib/server/entail', async (importOriginal) => {
 	const original = await importOriginal<typeof import('$lib/server/entail')>();
-	return { ...original, lookupBlueskyPostResult, classifyMediaUrlResult };
+	return { ...original, lookupBlueskyPost, classifyMediaUrl };
 });
 vi.mock('$lib/server/twitter-media', () => ({ fetchTweetMediaUrl }));
 
@@ -31,11 +34,13 @@ const DDL = `CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, title TE
 
 const BSKY_POST = 'https://bsky.app/profile/example.bsky.social/post/3abc';
 const X_POST = 'https://x.com/examplefox/status/1234567890';
+const X_ID = '1234567890';
 const MEDIA_URL = 'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096';
 
 const suggestions: LookupOutcome = {
 	ok: true,
-	suggestions: { tags: ['mammal', 'pink-hair'], rating: 'safe' }
+	suggestions: { tags: ['mammal', 'pink-hair'], rating: 'safe' },
+	imageCount: 3
 };
 
 function makeEnv() {
@@ -61,12 +66,12 @@ function event(platform: App.Platform, body: unknown, raw?: string) {
 }
 
 beforeEach(() => {
-	lookupBlueskyPostResult.mockReset();
-	classifyMediaUrlResult.mockReset();
+	lookupBlueskyPost.mockReset();
+	classifyMediaUrl.mockReset();
 	fetchTweetMediaUrl.mockReset();
-	lookupBlueskyPostResult.mockResolvedValue(suggestions);
-	classifyMediaUrlResult.mockResolvedValue(suggestions);
-	fetchTweetMediaUrl.mockResolvedValue(MEDIA_URL);
+	lookupBlueskyPost.mockResolvedValue(suggestions);
+	classifyMediaUrl.mockResolvedValue(suggestions);
+	fetchTweetMediaUrl.mockResolvedValue({ ok: true, url: MEDIA_URL });
 });
 
 describe('POST /api/admin/tag-suggestions', () => {
@@ -77,10 +82,11 @@ describe('POST /api/admin/tag-suggestions', () => {
 		expect(await res.json()).toEqual({
 			source: 'bluesky',
 			tags: ['mammal', 'pink-hair'],
-			rating: 'safe'
+			rating: 'safe',
+			imageCount: 3
 		});
 		// The canonical URL, not the caller's string.
-		expect(lookupBlueskyPostResult).toHaveBeenCalledWith(BSKY_POST);
+		expect(lookupBlueskyPost).toHaveBeenCalledWith(BSKY_POST);
 		expect(fetchTweetMediaUrl).not.toHaveBeenCalled();
 	});
 
@@ -91,12 +97,14 @@ describe('POST /api/admin/tag-suggestions', () => {
 		expect(await res.json()).toEqual({
 			source: 'x',
 			tags: ['mammal', 'pink-hair'],
-			rating: 'safe'
+			rating: 'safe',
+			imageCount: 3
 		});
-		expect(fetchTweetMediaUrl).toHaveBeenCalledWith(X_POST);
+		// Only the validated status id goes to X, never the caller's string.
+		expect(fetchTweetMediaUrl).toHaveBeenCalledWith(X_ID);
 		// The media URL is what reaches entail.dev — never the tweet URL.
-		expect(classifyMediaUrlResult).toHaveBeenCalledWith(MEDIA_URL);
-		expect(lookupBlueskyPostResult).not.toHaveBeenCalled();
+		expect(classifyMediaUrl).toHaveBeenCalledWith(MEDIA_URL);
+		expect(lookupBlueskyPost).not.toHaveBeenCalled();
 	});
 
 	it('reads the stored source URL for an imageId', async () => {
@@ -105,7 +113,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 		const res = await POST(event(platform, { imageId: 7 }));
 		expect(res.status).toBe(200);
 		expect((await res.json()).source).toBe('bluesky');
-		expect(lookupBlueskyPostResult).toHaveBeenCalledWith(BSKY_POST);
+		expect(lookupBlueskyPost).toHaveBeenCalledWith(BSKY_POST);
 	});
 
 	it('404s an unknown imageId', async () => {
@@ -113,7 +121,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 		const res = await POST(event(platform, { imageId: 99 }));
 		expect(res.status).toBe(404);
 		expect(await res.json()).toEqual({ error: 'not_found' });
-		expect(lookupBlueskyPostResult).not.toHaveBeenCalled();
+		expect(lookupBlueskyPost).not.toHaveBeenCalled();
 	});
 
 	it('422s a source we have no classifier for, including a stored empty one', async () => {
@@ -121,6 +129,8 @@ describe('POST /api/admin/tag-suggestions', () => {
 		insertImage(sqlite, null);
 		for (const body of [
 			{ sourcePostUrl: 'https://furaffinity.net/view/12345/' },
+			// A malformed percent sequence in the actor is unsupported, not a 500.
+			{ sourcePostUrl: 'https://bsky.app/profile/100%/post/3abc' },
 			{ sourcePostUrl: '' },
 			{ imageId: 7 }
 		]) {
@@ -128,7 +138,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 			expect(res.status).toBe(422);
 			expect(await res.json()).toEqual({ error: 'unsupported_source' });
 		}
-		expect(lookupBlueskyPostResult).not.toHaveBeenCalled();
+		expect(lookupBlueskyPost).not.toHaveBeenCalled();
 	});
 
 	it('400s malformed and ambiguous request bodies', async () => {
@@ -155,18 +165,19 @@ describe('POST /api/admin/tag-suggestions', () => {
 		const { platform } = makeEnv();
 		// The classifier read the post and rated it; nothing cleared the
 		// confidence floor. That is an answer, not a failure.
-		lookupBlueskyPostResult.mockResolvedValue({
+		lookupBlueskyPost.mockResolvedValue({
 			ok: true,
-			suggestions: { tags: [], rating: 'safe' }
+			suggestions: { tags: [], rating: 'safe' },
+			imageCount: 3
 		});
 		const res = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ source: 'bluesky', tags: [], rating: 'safe' });
+		expect(await res.json()).toEqual({ source: 'bluesky', tags: [], rating: 'safe', imageCount: 3 });
 	});
 
 	it('502s not_ready when the post is queued but unclassified', async () => {
 		const { platform } = makeEnv();
-		lookupBlueskyPostResult.mockResolvedValue({ ok: false, reason: 'not_ready' });
+		lookupBlueskyPost.mockResolvedValue({ ok: false, reason: 'not_ready' });
 		const res = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
 		expect(res.status).toBe(502);
 		expect(await res.json()).toEqual({ error: 'not_ready' });
@@ -174,23 +185,32 @@ describe('POST /api/admin/tag-suggestions', () => {
 
 	it('502s unavailable for a failed lookup and for an unresolvable tweet', async () => {
 		const { platform } = makeEnv();
-		lookupBlueskyPostResult.mockResolvedValue({ ok: false, reason: 'unavailable' });
+		lookupBlueskyPost.mockResolvedValue({ ok: false, reason: 'unavailable' });
 		const bsky = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
 		expect(bsky.status).toBe(502);
 		expect(await bsky.json()).toEqual({ error: 'unavailable' });
 
-		fetchTweetMediaUrl.mockResolvedValue(null);
+		fetchTweetMediaUrl.mockResolvedValue({ ok: false, reason: 'unavailable' });
 		const x = await POST(event(platform, { sourcePostUrl: X_POST }));
 		expect(x.status).toBe(502);
 		expect(await x.json()).toEqual({ error: 'unavailable' });
-		expect(classifyMediaUrlResult).not.toHaveBeenCalled();
+		expect(classifyMediaUrl).not.toHaveBeenCalled();
 	});
 
 	it('429s when entail.dev rate limited us', async () => {
 		const { platform } = makeEnv();
-		lookupBlueskyPostResult.mockResolvedValue({ ok: false, reason: 'rate_limited' });
+		lookupBlueskyPost.mockResolvedValue({ ok: false, reason: 'rate_limited' });
 		const res = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
 		expect(res.status).toBe(429);
 		expect(await res.json()).toEqual({ error: 'rate_limited' });
+	});
+
+	it('429s when X rate limited the tweet lookup', async () => {
+		const { platform } = makeEnv();
+		fetchTweetMediaUrl.mockResolvedValue({ ok: false, reason: 'rate_limited' });
+		const res = await POST(event(platform, { sourcePostUrl: X_POST }));
+		expect(res.status).toBe(429);
+		expect(await res.json()).toEqual({ error: 'rate_limited' });
+		expect(classifyMediaUrl).not.toHaveBeenCalled();
 	});
 });
