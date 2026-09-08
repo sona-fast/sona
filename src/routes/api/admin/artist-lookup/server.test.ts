@@ -37,11 +37,16 @@ vi.mock('$lib/server/fuzzysearch', async (importOriginal) => {
 const setRawSettingSpy = vi.hoisted(() =>
 	vi.fn<(...args: never[]) => Promise<unknown>>()
 );
+// The real implementation, kept so beforeEach can re-arm the spy after a reset:
+// a once-queued rejection a test failed to consume must not reject the next
+// test's first write.
+const realSetRawSetting = vi.hoisted(() => ({
+	fn: null as null | ((...args: never[]) => Promise<unknown>)
+}));
 vi.mock('$lib/server/settings', async (importOriginal) => {
 	const original = await importOriginal<typeof import('$lib/server/settings')>();
-	setRawSettingSpy.mockImplementation(
-		original.setRawSetting as unknown as (...args: never[]) => Promise<unknown>
-	);
+	realSetRawSetting.fn = original.setRawSetting as unknown as (...args: never[]) => Promise<unknown>;
+	setRawSettingSpy.mockImplementation(realSetRawSetting.fn);
 	return { ...original, setRawSetting: setRawSettingSpy };
 });
 
@@ -139,6 +144,8 @@ const FA_EXACT = {
 beforeEach(() => {
 	searchImage.mockReset();
 	searchImage.mockResolvedValue({ ok: true, matches: [] });
+	setRawSettingSpy.mockReset();
+	if (realSetRawSetting.fn) setRawSettingSpy.mockImplementation(realSetRawSetting.fn);
 });
 
 describe('artist-lookup — configuration', () => {
