@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { isPrivateHost, isSameOriginUrl, proxyStoredImage } from './image-proxy';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+	isPrivateHost,
+	isSameOriginUrl,
+	proxyStoredImage,
+	PROXY_HEADERS_TIMEOUT_MS
+} from './image-proxy';
 
 // The guard both byte proxies rely on. Driven directly rather than through a
 // route, because the boundaries are the whole point and a route test only ever
@@ -162,5 +167,51 @@ describe('proxyStoredImage', () => {
 			throw new TypeError('fetch failed');
 		}) as unknown as typeof fetch;
 		expect(await proxyStoredImage('https://cdn.example/img.png', rejecting)).toBeNull();
+	});
+
+	// The bound is on the HEADERS only. A host that accepts the connection and
+	// then says nothing would otherwise hold the operator's request open until
+	// the platform kills it; a big image that answers promptly must still be
+	// allowed to stream for as long as it takes.
+	describe('the wait for upstream headers', () => {
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => vi.useRealTimers());
+
+		it('gives up on a fetcher that never answers', async () => {
+			let signal: AbortSignal | undefined;
+			const silent = ((_url: string, init?: RequestInit) => {
+				signal = init?.signal ?? undefined;
+				// Rejects the way a real fetch does when its signal aborts.
+				return new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener('abort', () =>
+						reject(new DOMException('aborted', 'AbortError'))
+					);
+				});
+			}) as unknown as typeof fetch;
+
+			const pending = proxyStoredImage('https://cdn.example/img.png', silent);
+			await vi.advanceTimersByTimeAsync(PROXY_HEADERS_TIMEOUT_MS - 1);
+			expect(signal?.aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(2);
+			expect(signal?.aborted).toBe(true);
+			expect(await pending).toBeNull();
+		});
+
+		it('clears the timer once the headers land, so the body streams unbounded', async () => {
+			let signal: AbortSignal | undefined;
+			const answering = ((_url: string, init?: RequestInit) => {
+				signal = init?.signal ?? undefined;
+				return Promise.resolve(
+					new Response('bytes', { headers: { 'content-type': 'image/png' } })
+				);
+			}) as unknown as typeof fetch;
+
+			const res = await proxyStoredImage('https://cdn.example/img.png', answering);
+			expect(res?.headers.get('content-type')).toBe('image/png');
+			// Long past the bound: nothing is left to fire at a body still arriving.
+			await vi.advanceTimersByTimeAsync(PROXY_HEADERS_TIMEOUT_MS * 10);
+			expect(signal?.aborted).toBe(false);
+			expect(vi.getTimerCount()).toBe(0);
+		});
 	});
 });

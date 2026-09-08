@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { qrSvg } from './qr';
 import { SOCIAL_ICON_ART, type SocialIconArt } from './social-icon-paths';
 import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from './social-label';
@@ -646,6 +646,28 @@ describe('isEmbeddableAvatarType', () => {
 	it('takes a response with no content-type at all', () => {
 		for (const type of ['', null, undefined]) {
 			expect(isEmbeddableAvatarType(type), String(type)).toBe(true);
+		}
+	});
+
+	// GALLERY_ACCEPT has no spaces today, and an accept list is just as valid
+	// written with them. Read literally, a single space would drop the avatar to
+	// the initial for a type the server's own allowlist stores.
+	it('reads an accept list written with spaces after the commas', async () => {
+		vi.resetModules();
+		vi.doMock('$lib/config', async () => {
+			const actual = await vi.importActual<typeof import('./config')>('./config');
+			return { ...actual, GALLERY_ACCEPT: 'image/jpeg, image/png, image/webp' };
+		});
+		try {
+			const spaced = await import('./con-card');
+			expect(spaced.isEmbeddableAvatarType('image/png')).toBe(true);
+			expect(spaced.isEmbeddableAvatarType('image/webp')).toBe(true);
+			// Not in the stubbed list, so a false here also proves the stub is the
+			// list being read rather than the real constant.
+			expect(spaced.isEmbeddableAvatarType('image/gif')).toBe(false);
+		} finally {
+			vi.doUnmock('$lib/config');
+			vi.resetModules();
 		}
 	});
 });

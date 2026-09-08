@@ -169,12 +169,22 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// tells the operator their key stopped working instead of leaving the
 		// button failing silently. The marker records WHICH key was refused, so a
 		// refusal against the deploy secret is never shown against a stored one.
+		// The marker is a convenience for the settings page, not part of the
+		// answer: a failed write must not turn a typed 502 into a 500 the caller
+		// can't read. Nothing about the write's error names the body or the key.
 		if (result.reason === 'key_refused') {
-			await setRawSetting(
-				db,
-				FUZZYSEARCH_KEY_REFUSED_SETTING,
-				fuzzysearchRefusedMarker(resolved.source)
-			);
+			try {
+				await setRawSetting(
+					db,
+					FUZZYSEARCH_KEY_REFUSED_SETTING,
+					fuzzysearchRefusedMarker(resolved.source)
+				);
+			} catch (e) {
+				console.warn(
+					'artist-lookup: refused-key marker not written',
+					e instanceof Error ? e.message : e
+				);
+			}
 		}
 		return failure(result.reason);
 	}
@@ -182,12 +192,21 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	// The key works — clear a stale refusal marker, but only the marker for the
 	// key that just succeeded (a marker against the other source stays: a deploy
 	// secret succeeding says nothing about the stored key FuzzySearch refused).
-	// Read first, so the happy path costs one read rather than a write.
-	const refusedMarker = parseFuzzysearchRefusedMarker(
-		await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)
-	);
-	if (refusedMarker && refusedMarker.source === resolved.source) {
-		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
+	// Read first, so the happy path costs one read rather than a write. Best
+	// effort for the same reason as the write above: a settings row that won't
+	// clear must not cost the operator the matches they asked for.
+	try {
+		const refusedMarker = parseFuzzysearchRefusedMarker(
+			await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)
+		);
+		if (refusedMarker && refusedMarker.source === resolved.source) {
+			await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
+		}
+	} catch (e) {
+		console.warn(
+			'artist-lookup: refused-key marker not cleared',
+			e instanceof Error ? e.message : e
+		);
 	}
 
 	const matches = result.matches;

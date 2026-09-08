@@ -222,6 +222,28 @@ describe('searchImage — failure mapping', () => {
 		});
 	}
 
+	// The body of a failure is never read, and a subrequest stream left unread
+	// holds the connection open until the runtime reaps it.
+	it('cancels the unread body on every failure status', async () => {
+		for (const status of [...cases.map(([s]) => s), 400]) {
+			const response = new Response('nope', { status });
+			const cancel = vi.spyOn(response.body as ReadableStream, 'cancel');
+			const { fn } = fakeFetch(response);
+			await searchImage(new Blob(['x']), 'k', fn);
+			expect(cancel, String(status)).toHaveBeenCalled();
+		}
+	});
+
+	// The ok path reads the payload instead — cancelling it would throw away the
+	// matches the operator asked for.
+	it('does not cancel the body of a 200 it is about to read', async () => {
+		const response = jsonResponse([]);
+		const cancel = vi.spyOn(response.body as ReadableStream, 'cancel');
+		const { fn } = fakeFetch(response);
+		expect(await searchImage(new Blob(['x']), 'k', fn)).toEqual({ ok: true, matches: [] });
+		expect(cancel).not.toHaveBeenCalled();
+	});
+
 	it('splits 400 into too_large and invalid_image by body', async () => {
 		const big = fakeFetch(new Response('{"error":"too_large"}', { status: 400 }));
 		expect(await searchImage(new Blob(['x']), 'k', big.fn)).toEqual({

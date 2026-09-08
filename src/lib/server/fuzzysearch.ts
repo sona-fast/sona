@@ -294,6 +294,20 @@ export function normalizeMatches(payload: unknown): LookupMatch[] {
 }
 
 /**
+ * Drop the body of a response nobody is going to read. An unread stream holds
+ * the subrequest open until the runtime reaps it, and on a failure path there
+ * is nothing in the body worth keeping. Cancelling one that a `text()` already
+ * drained throws, which is as harmless as the cancel itself.
+ */
+async function discardBody(res: Response): Promise<void> {
+	try {
+		await res.body?.cancel();
+	} catch {
+		// already read, already cancelled, or never had a body
+	}
+}
+
+/**
  * POST the bytes to FuzzySearch and return normalized matches.
  *
  * `fetchFn` is injected so tests drive this without globals. Failures are
@@ -325,16 +339,29 @@ export async function searchImage(
 	// 403 alongside 401, the pair the registry client already treats as an auth
 	// failure: a revoked or suspended key answers 403, and without it the
 	// operator would never see the refused state for the one case they can fix.
-	if (res.status === 401 || res.status === 403) return { ok: false, reason: 'key_refused' };
-	if (res.status === 429) return { ok: false, reason: 'rate_limited' };
-	if (res.status === 413) return { ok: false, reason: 'too_large' };
+	if (res.status === 401 || res.status === 403) {
+		await discardBody(res);
+		return { ok: false, reason: 'key_refused' };
+	}
+	if (res.status === 429) {
+		await discardBody(res);
+		return { ok: false, reason: 'rate_limited' };
+	}
+	if (res.status === 413) {
+		await discardBody(res);
+		return { ok: false, reason: 'too_large' };
+	}
 	if (res.status === 400) {
 		// The one 400 worth distinguishing: FuzzySearch says the image is over its
 		// own limit. The body is inspected for that single token and discarded.
 		const body = await res.text().catch(() => '');
+		await discardBody(res);
 		return { ok: false, reason: body.includes('too_large') ? 'too_large' : 'invalid_image' };
 	}
-	if (!res.ok) return { ok: false, reason: 'unavailable' };
+	if (!res.ok) {
+		await discardBody(res);
+		return { ok: false, reason: 'unavailable' };
+	}
 
 	const payload = await res.json().catch(() => null);
 	// A 200 that isn't the documented array is a broken upstream, not a search

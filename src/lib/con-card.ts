@@ -634,7 +634,12 @@ export function conCardPrintSheetSvg(opts: Omit<ConCardOptions, 'variant'>): str
 export function isEmbeddableAvatarType(contentType: string | null | undefined): boolean {
 	if (!contentType) return true;
 	const type = contentType.split(';')[0].trim().toLowerCase();
-	return GALLERY_ACCEPT.split(',').includes(type);
+	// Tokens are trimmed: an accept list written with a space after the comma is
+	// the same list to an <input accept>, and reading it literally here would
+	// refuse a type the server's allowlist takes.
+	return GALLERY_ACCEPT.split(',')
+		.map((t) => t.trim())
+		.includes(type);
 }
 
 /** Filename stem for a downloaded card: `taro-con-card`. */

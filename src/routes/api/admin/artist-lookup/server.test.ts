@@ -32,6 +32,19 @@ vi.mock('$lib/server/fuzzysearch', async (importOriginal) => {
 	return { ...original, searchImage };
 });
 
+// The real write by default; a test that needs the settings row to fail makes
+// this reject for that one call. The endpoint's answer must not depend on it.
+const setRawSettingSpy = vi.hoisted(() =>
+	vi.fn<(...args: never[]) => Promise<unknown>>()
+);
+vi.mock('$lib/server/settings', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/server/settings')>();
+	setRawSettingSpy.mockImplementation(
+		original.setRawSetting as unknown as (...args: never[]) => Promise<unknown>
+	);
+	return { ...original, setRawSetting: setRawSettingSpy };
+});
+
 const DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, slug TEXT,
 		image_url TEXT NOT NULL, thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER,
@@ -539,6 +552,32 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 		// Null, not '': the happy path costs one read, and never a write that
 		// would put a row in site_settings for every lookup.
 		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toBeNull();
+	});
+
+	// The marker is a convenience for the settings card, not the answer. A D1
+	// write that fails must not turn the typed 502 into a 500 whose body the
+	// caller's res.json() can't read, nor cost a successful lookup its matches.
+	it('still answers key_refused when the marker cannot be written', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: false, reason: 'key_refused' });
+		setRawSettingSpy.mockRejectedValueOnce(new Error('D1_ERROR: no such table'));
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'key_refused' });
+	});
+
+	it('still answers the matches when the marker cannot be cleared', async () => {
+		const { db, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '2026-09-01T00:00:00.000Z|env');
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+		setRawSettingSpy.mockRejectedValueOnce(new Error('D1_ERROR: no such table'));
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(200);
+		expect((await res.json()).matches).toHaveLength(1);
 	});
 
 	it('maps each remaining failure to its status without echoing a body', async () => {

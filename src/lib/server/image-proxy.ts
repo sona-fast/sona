@@ -18,6 +18,15 @@
 
 import { isAllowedImageType } from './storage/allowlist';
 
+/**
+ * How long the upstream has to answer with HEADERS. The bound covers the wait
+ * for the response only — once the headers land the timer is cleared, so a
+ * large image streams for as long as it needs. Without it a host that accepts
+ * the connection and then says nothing holds the request open until the
+ * platform kills it, and the operator sees a spinner with no end.
+ */
+export const PROXY_HEADERS_TIMEOUT_MS = 10_000;
+
 // Loopback / unspecified / RFC1918 / link-local / ULA hosts a stored URL must
 // never point the server-side fetch at.
 export function isPrivateHost(hostname: string): boolean {
@@ -90,14 +99,21 @@ export async function proxyStoredImage(
 	// A storage host answering with a redirect is unexpected — treat it as an
 	// upstream error rather than following it to an arbitrary location.
 	let upstream: Response;
+	const controller = new AbortController();
+	const headersTimer = setTimeout(() => controller.abort(), PROXY_HEADERS_TIMEOUT_MS);
 	try {
-		upstream = await fetcher(imageUrl, { redirect: 'manual' });
+		upstream = await fetcher(imageUrl, { redirect: 'manual', signal: controller.signal });
 	} catch {
 		// A DNS failure, a reset connection or a TLS error rejects rather than
-		// answering. The stored image is as unreachable as it is on a non-ok
-		// response, so it reports the same way — every caller already handles null,
-		// and none of them has to answer 500 to a network blip.
+		// answering, and so does the abort above. The stored image is as
+		// unreachable as it is on a non-ok response, so it reports the same way —
+		// every caller already handles null, and none of them has to answer 500 to
+		// a network blip.
 		return null;
+	} finally {
+		// The headers are in (or the fetch is over): the body streams unbounded
+		// from here, so the timer must not fire mid-download.
+		clearTimeout(headersTimer);
 	}
 	if (!upstream.ok || !upstream.body) return null;
 
