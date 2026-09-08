@@ -48,6 +48,10 @@
 		/** The edit page fills only empty fields and never touches the artist, so
 		 * its status line says what it left alone rather than what it changed. */
 		editMode?: boolean;
+		/** This piece already has variants of its own, so it cannot become one:
+		 * the page renders no parent select for it and "Add as a variant" would
+		 * be a silent no-op. The clash panel says why instead of offering it. */
+		variantBlocked?: boolean;
 		onclose: () => void;
 		onretry: () => void;
 		oncancel: () => void;
@@ -64,6 +68,7 @@
 		appliedArtist = null,
 		privateNotice = false,
 		editMode = false,
+		variantBlocked = false,
 		onclose,
 		onretry,
 		oncancel,
@@ -196,6 +201,11 @@
 								clash.variantCount > 0 ? m.admin_lookup_variants({ count: clash.variantCount }) : ''
 						})}
 					</p>
+					{#if variantBlocked}
+						<!-- No "Add as a variant" below, so the panel says why rather than
+						     leaving the offer out unexplained. -->
+						<p class="lookup-status">{m.admin_lookup_clash_has_variants()}</p>
+					{/if}
 				{:else}
 					<div class="lookup-eyebrow">
 						{m.admin_lookup_found_on_sites({ count: siteCount })}{#if fileName}
@@ -348,9 +358,11 @@
 				<button type="button" class="btn btn-secondary" onclick={onclose}>{m.admin_lookup_close()}</button>
 			{:else if data}
 				{#if clash}
-					<button type="button" class="btn btn-primary" onclick={() => onaddvariant(clash)}>
-						{m.admin_lookup_clash_add_variant()}
-					</button>
+					{#if !variantBlocked}
+						<button type="button" class="btn btn-primary" onclick={() => onaddvariant(clash)}>
+							{m.admin_lookup_clash_add_variant()}
+						</button>
+					{/if}
 					{#if candidates[0]}
 						<button type="button" class="btn btn-secondary" onclick={() => onuseartist(candidates[0])}>
 							{m.admin_lookup_use_artist({ name: candidates[0].name })}

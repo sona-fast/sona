@@ -187,6 +187,29 @@ describe('resolveOutcome', () => {
 		}
 	});
 
+	// "Add {handle} as a new artist" with an empty handle reads as "Add  as a
+	// new artist", and the sentence above it promises a poster the match never
+	// named. Nothing to add, so nothing is offered.
+	it('is "none" when the prefill match names no handle', () => {
+		expect(resolveOutcome(response({ matches: [match({ handles: [] })] }))).toBe('none');
+		expect(resolveOutcome(response({ matches: [match({ handles: ['  @  '] })] }))).toBe('none');
+		for (const site of ['Weasyl', 'e621'] as LookupSite[]) {
+			expect(resolveOutcome(response({ matches: [match({ site, siteId: '5', handles: [] })] }))).toBe(
+				'none'
+			);
+		}
+	});
+
+	// The candidates are unioned across every confident match, so a handle-less
+	// match sorting first must not take away an offer another one earned.
+	it('still offers the local artist a later match named', () => {
+		const data = response({
+			matches: [match({ handles: [] }), match({ site: 'Twitter', siteId: '9', distance: 1, band: 'strong' })],
+			localArtists: [{ matchIndex: 1, artists: [{ id: 3, name: 'Kuttoya' }] }]
+		});
+		expect(resolveOutcome(data)).toBe('existing');
+	});
+
 	it('ignores a local artist that only a possible match named', () => {
 		const data = response({
 			matches: [match(), match({ site: 'e621', siteId: '7', distance: 6, band: 'possible' })],

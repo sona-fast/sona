@@ -128,6 +128,18 @@ describe('the panel', () => {
 		expect(PANEL).toMatch(/<fieldset class="pick-list">\s*<legend class="sr-only">/);
 	});
 
+	// A piece that already has variants renders no parent select, so the button
+	// would set a value nothing submits. The panel says why instead.
+	it('drops "Add as a variant" where the piece cannot be one, and explains it', () => {
+		expect(PANEL).toMatch(
+			/\{#if !variantBlocked\}\s*\n\s*<button[\s\S]{0,200}?m\.admin_lookup_clash_add_variant\(\)/
+		);
+		expect(PANEL).toMatch(
+			/\{#if variantBlocked\}[\s\S]{0,300}?m\.admin_lookup_clash_has_variants\(\)/
+		);
+		expect(EDIT).toMatch(/variantBlocked=\{data\.hasVariants\}/);
+	});
+
 	it('names the private-image disclosure after the lookup, in warn', () => {
 		expect(PANEL).toContain('m.admin_lookup_private_notice()');
 		expect(PANEL).toMatch(/\.private-notice \{[^}]*var\(--status-warn\)/);
@@ -250,8 +262,28 @@ describe('the artist on the edit page', () => {
 
 	it('flips and seeds the form in the panel action instead', () => {
 		expect(EDIT).toMatch(
-			/onaddnew=\{\(seed\) => \{[\s\S]{0,600}?artistMode = 'new';\s*\n\s*seedNewArtist\(seed\.handle, seed\.site, seed\.linkable\);/
+			/onaddnew=\{async \(seed\) => \{[\s\S]{0,600}?artistMode = 'new';\s*\n\s*seedNewArtist\(seed\.handle, seed\.site, seed\.linkable\);/
 		);
+	});
+
+	// A second lookup used to read the first one's URL as operator-typed, fill
+	// nothing, and leave a "From lookup" tag on a value from the other post.
+	it('undoes the previous lookup before running another one', () => {
+		expect(EDIT).toMatch(/function startLookup\(\)[\s\S]{0,120}?resetLookupPrefill\(\);/);
+		const reset = EDIT.match(/function resetLookupPrefill\(\)[\s\S]*?\n\t\}/)?.[0] ?? '';
+		// Only what the lookup itself wrote: the tag is the record of that.
+		for (const [tag, field] of [
+			['sourceTagged', 'sourcePostUrl'],
+			['dateTagged', 'commissionedAt'],
+			['nameTagged', 'artistName'],
+			['twitterTagged', 'newTwitter'],
+			['furaffinityTagged', 'newFuraffinity']
+		]) {
+			expect(reset).toMatch(new RegExp(`if \\(${tag}\\) ${field} = '';`));
+			expect(reset).toMatch(new RegExp(`${tag} = false;`));
+		}
+		expect(reset).toMatch(/lookupFilled = \{\};/);
+		expect(reset).toMatch(/lookupSeeded = \{\};/);
 	});
 });
 
@@ -270,7 +302,7 @@ describe('focus after the panel goes away', () => {
 
 	it('lands on the select that "Add as a variant" just populated', () => {
 		expect(UPLOAD).toMatch(
-			/function addAsVariant[\s\S]{0,400}?existingParentSelect\?\.focus\(\)/
+			/function addAsVariant[\s\S]{0,600}?existingParentSelect\?\.focus\(\)/
 		);
 		expect(EDIT).toMatch(/function addAsVariant[\s\S]{0,300}?parentSelect\?\.focus\(\)/);
 	});
@@ -360,8 +392,25 @@ describe('what a lookup says out loud', () => {
 			/const wasExisting = artistMode === 'existing';\s*\n\s*artistMode = 'new';/
 		);
 		expect(EDIT).toMatch(
-			/wasExisting && seedStatusKind\(lookupSeeded\) === 'none'\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_new_form\(/
+			/wasExisting && seededNothing\) announcer\.say\(m\.admin_lookup_announce_new_form\(/
 		);
+	});
+
+	// The form was already open and holds the operator's own values, so the
+	// click wrote nothing anywhere and the panel's status line says nothing.
+	it('says so when the click filled nothing because the fields were taken', () => {
+		expect(EDIT).toMatch(
+			/else if \(seededNothing && seed\.handle\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_seed_kept\(/
+		);
+	});
+
+	// Both sentences tell the operator to type the name, so that is where focus
+	// lands — the announcement and the landing spot have to agree (2.4.3).
+	it('lands on the name field when the seed left it empty', () => {
+		expect(EDIT).toMatch(
+			/if \(artistName\.trim\(\) === ''\) \{\s*\n\s*await tick\(\);\s*\n\s*artistNameInput\?\.focus\(\);/
+		);
+		expect(EDIT).toMatch(/bind:this=\{artistNameInput\}/);
 	});
 });
 
@@ -409,6 +458,26 @@ describe('the upload page grid', () => {
 	it('never puts the file name where the result line promises a handle', () => {
 		expect(UPLOAD).toMatch(/const handle = matchHandle\(match\);/);
 		expect(UPLOAD).not.toMatch(/matchHandle\(match\) \|\| tile\.fileName/);
+	});
+
+	// The candidates are unioned across every confident match, so the poster the
+	// "Different artist" line names is the one whose hit triggered it, not
+	// whichever match the rest of the tile happens to read from.
+	it('names the poster whose local artist the different-artist line is about', () => {
+		expect(UPLOAD).toMatch(/function differentArtistMatch\(tile: Tile\): LookupMatch \| null/);
+		expect(UPLOAD).toMatch(/const differentHandle = differentMatch \? matchHandle\(differentMatch\) : '';/);
+		// A triggering match that names nobody gets the unknown-poster wording
+		// rather than "Different artist:  on FurAffinity".
+		expect(UPLOAD).toMatch(/m\.admin_lookup_tile_different_unknown\(\{ site: differentSite \}\)/);
+	});
+
+	// closeSharedLookup reaches the tile through parentTile, which is null the
+	// moment the mode is no longer 'new' — so the reset has to go first or the
+	// stale clash panel resurfaces on the way back to a new group.
+	it('resets the tile lookup before switching to an existing group', () => {
+		expect(UPLOAD).toMatch(
+			/async function addAsVariant\(clash: SourceClash\) \{[\s\S]{0,300}?closeSharedLookup\(\{ focus: false \}\);\s*\n\s*groupMode = 'existing';/
+		);
 	});
 
 	it('holds the file on the tile so the bytes are what gets posted', () => {

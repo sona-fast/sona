@@ -1502,6 +1502,7 @@
 	"admin_lookup_clash_dimensions": "{width} × {height}",
 	"admin_lookup_clash_uploaded": "アップロード日 {date}",
 	"admin_lookup_clash_add_variant": "バリアントとして追加",
+	"admin_lookup_clash_has_variants": "この作品にはすでに独自のバリアントがあるため、他の作品のバリアントにはできません。",
 	"admin_lookup_clash_open": "「{title}」を開く",
 	"admin_lookup_status_both": "{site}の投稿から、投稿元URLと制作依頼日を入力しました。保存前にどちらも変更できます。",
 	"admin_lookup_status_url_only": "{site}の投稿から投稿元URLを入力しました。この投稿には日付がないため、制作依頼日はそのままです。",
@@ -1538,6 +1539,7 @@
 	"admin_lookup_tile_result_band": "{result} · {band}",
 	"admin_lookup_tile_result_spoken": "{result}、{band}",
 	"admin_lookup_tile_different": "別のアーティスト：{site}の{handle}",
+	"admin_lookup_tile_different_unknown": "別のアーティスト：{site}（投稿者不明）",
 	"admin_lookup_parent_radio": "親画像: {fileName}",
 	"admin_lookup_nsfw_for_file": "（{fileName}）",
 	"admin_lookup_nsfw_for_parent": "（親画像）",
@@ -1548,5 +1550,6 @@
 	"admin_lookup_announce_tile_no_match": "{fileName}：一致なし。",
 	"admin_lookup_announce_tile_failed": "{fileName}：検索に失敗しました。",
 	"admin_lookup_announce_using": "アーティストに{name}を設定しました。",
-	"admin_lookup_announce_new_form": "新しいアーティストのフォームに切り替えました。アーティストを手で入力してください。"
+	"admin_lookup_announce_new_form": "新しいアーティストのフォームに切り替えました。アーティストを手で入力してください。",
+	"admin_lookup_announce_seed_kept": "新しいアーティストの各項目にはすでに値が入っているため、何も入力しませんでした。"
 }

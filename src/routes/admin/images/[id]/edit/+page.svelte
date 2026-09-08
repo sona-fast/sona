@@ -71,6 +71,10 @@
 	// standing on, so focus is moved back here first (2.4.3).
 	let lookupPill = $state<HTMLButtonElement | null>(null);
 	let parentSelect = $state<HTMLSelectElement | null>(null);
+	// The flip replaces the artist select with this field. When the seed left it
+	// empty there is nothing to read and the announcement says to type the name,
+	// so focus lands where that typing goes (2.4.3).
+	let artistNameInput = $state<HTMLInputElement | null>(null);
 
 	// SvelteKit reuses this component across a route-param change, so the seeds
 	// above describe the PREVIOUS image after an in-app move between two edit
@@ -112,8 +116,31 @@
 		lookup.kind === 'results' ? ratingTag(strictestRating(lookup.data.matches)) : null
 	);
 
+	/** Undo what the PREVIOUS lookup wrote, but only where the operator has not
+	 * typed over it since — the tag is the record of that. Without this a second
+	 * lookup reads the first one's URL as operator-typed, fills nothing, and
+	 * leaves a "From lookup" tag on a value from the other post. The upload
+	 * page's resetSharedPrefill, plus the inline new-artist fields this page
+	 * owns. */
+	function resetLookupPrefill() {
+		if (sourceTagged) sourcePostUrl = '';
+		if (dateTagged) commissionedAt = '';
+		if (nameTagged) artistName = '';
+		if (twitterTagged) newTwitter = '';
+		if (furaffinityTagged) newFuraffinity = '';
+		sourceTagged = false;
+		dateTagged = false;
+		nameTagged = false;
+		twitterTagged = false;
+		furaffinityTagged = false;
+		lookupFilled = {};
+		lookupSeeded = {};
+		appliedArtist = null;
+	}
+
 	function startLookup() {
 		if (lookup.kind === 'searching') return;
+		resetLookupPrefill();
 		lookupAbort?.abort();
 		const controller = new AbortController();
 		lookupAbort = controller;
@@ -330,12 +357,13 @@
 					seeded={lookupSeeded}
 					{appliedArtist}
 					editMode
+					variantBlocked={data.hasVariants}
 					privateNotice={isPrivate && lookupSentFile(lookup)}
 					onclose={closeLookup}
 					onretry={startLookup}
 					oncancel={cancelLookup}
 					onuseartist={useLookupArtist}
-					onaddnew={(seed) => {
+					onaddnew={async (seed) => {
 						// Only this click flips the form. The operator may have opened the
 						// inline form by hand before the lookup, though, and then nothing
 						// switched — say it only when this click is what did.
@@ -345,8 +373,19 @@
 						// A seed that wrote something is announced by the panel's own status
 						// line. An empty handle (the no_match action) writes nothing, so the
 						// select is replaced by a name field with nothing said about it.
-						if (wasExisting && seedStatusKind(lookupSeeded) === 'none')
-							announcer.say(m.admin_lookup_announce_new_form());
+						const seededNothing = seedStatusKind(lookupSeeded) === 'none';
+						if (wasExisting && seededNothing) announcer.say(m.admin_lookup_announce_new_form());
+						// The form was already open and its fields hold the operator's own
+						// values, so this click wrote nothing anywhere. Say that instead of
+						// leaving the click unanswered.
+						else if (seededNothing && seed.handle)
+							announcer.say(m.admin_lookup_announce_seed_kept());
+						// Nothing landed in the name field, and both sentences above tell the
+						// operator to type it — so that is where focus goes.
+						if (artistName.trim() === '') {
+							await tick();
+							artistNameInput?.focus();
+						}
 					}}
 					onaddvariant={addAsVariant}
 				/>
@@ -381,6 +420,7 @@
 						class="input"
 						placeholder={m.admin_upload_artist_name_placeholder()}
 						name="artistName"
+						bind:this={artistNameInput}
 						bind:value={artistName}
 						oninput={() => (nameTagged = false)}
 						aria-describedby={nameTagged ? 'artist-name-lookup-tag' : undefined}

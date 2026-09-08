@@ -340,6 +340,45 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
 	});
 
+	// A second lookup used to read the first one's URL as something the operator
+	// typed, fill nothing, and leave a "From lookup" tag sitting on a value from
+	// the other post. Only the source pin can see the reset exists; this is what
+	// proves the second result actually replaces the first.
+	test('a second lookup replaces what the first one filled', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+
+		const second = 'https://www.furaffinity.net/view/67890/';
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '67890',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: '2026-05-06T10:00:00Z',
+						rating: 'general',
+						postUrl: second
+					}
+				]
+			})
+		);
+		await pill(page).click();
+		await expect(panel(page)).toContainText('Exact match');
+		await expect(sourceInput(page)).toHaveValue(second);
+		await expect(dateInput(page)).toHaveValue('2026-05-06');
+		// One tag, on the value the second lookup wrote.
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(1);
+	});
+
 	test('the edit page never changes the artist without a click', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await gotoEditHydrated(page);

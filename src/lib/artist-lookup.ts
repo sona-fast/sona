@@ -271,6 +271,13 @@ export function resolveOutcome(data: LookupResponse): LookupOutcome {
 	const candidates = candidateArtists(data);
 	if (candidates.length >= 2) return 'ambiguous';
 	if (candidates.length === 1) return 'existing';
+	// A match that names no poster is nothing to add: "{handle} isn't in your
+	// artist list yet" and "Add {handle} as a new artist" would both interpolate
+	// an empty handle. The result row already says "Unknown poster on {site}".
+	// Checked here rather than above, because the candidates are unioned across
+	// every confident match — a handle-less prefill match can sit above one that
+	// does name a local artist, and that offer is still good.
+	if (!matchHandle(match)) return 'none';
 	return LINKABLE_SITES.includes(match.site) ? 'new' : 'unlinked';
 }
 

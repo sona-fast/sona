@@ -19,6 +19,7 @@
 		candidateArtists,
 		lookupSentFile,
 		type LookupFields,
+		type LookupMatch,
 		type LookupSite,
 		type LookupState,
 		type SourceClash
@@ -492,9 +493,12 @@
 	}
 
 	async function addAsVariant(clash: SourceClash) {
+		// Reset the tile's lookup FIRST: closeSharedLookup reaches the tile through
+		// parentTile, which is null the moment the mode is no longer 'new', and a
+		// clash panel left behind resurfaces on the way back to a new group.
+		closeSharedLookup({ focus: false });
 		groupMode = 'existing';
 		existingParentId = String(clash.imageId);
-		closeSharedLookup({ focus: false });
 		// This click unmounts both the panel and the fieldset pill, so the landing
 		// spot is the select it just populated.
 		await tick();
@@ -516,11 +520,22 @@
 	}
 
 	/** A variant tile whose confident match names a different local artist than
-	 * the shared one — worth flagging rather than silently rating. */
-	function differentArtist(tile: Tile): boolean {
-		if (tile.lookup.kind !== 'results' || !appliedArtist) return false;
-		const own = candidateArtists(tile.lookup.data);
-		return own.length > 0 && !own.some((a) => a.id === appliedArtist?.id);
+	 * the shared one — worth flagging rather than silently rating. Returns the
+	 * match whose local-artist hit triggered it, because that is the poster the
+	 * line names: the candidates are unioned across every confident match, so
+	 * the trigger is not necessarily the prefill match. */
+	function differentArtistMatch(tile: Tile): LookupMatch | null {
+		if (tile.lookup.kind !== 'results' || !appliedArtist) return null;
+		const data = tile.lookup.data;
+		const own = candidateArtists(data);
+		if (own.length === 0 || own.some((a) => a.id === appliedArtist?.id)) return null;
+		return (
+			data.matches.find(
+				(match, index) =>
+					(match.band === 'exact' || match.band === 'strong') &&
+					data.localArtists.some((hit) => hit.matchIndex === index && hit.artists.length > 0)
+			) ?? null
+		);
 	}
 
 	/** Everything a variant tile shows from its own result. One guard and one
@@ -533,15 +548,20 @@
 		const match = pickPrefillMatch(matches) ?? matches[0];
 		if (!match) return null;
 		// No fallback to the file name: a match that names no handle is an unknown
-		// poster, and tileResultText says so. The different-artist path needs a
-		// handle by construction — it only fires on matches with local artists.
+		// poster, and tileResultText says so.
 		const handle = matchHandle(match);
-		const site = siteLabel(match.site);
-		const different = differentArtist(tile);
+		// The different-artist line names the poster whose local artist triggered
+		// it, which is not always the match the rest of the tile reads from.
+		const differentMatch = differentArtistMatch(tile);
+		const different = differentMatch !== null;
 		// The visible line and the spoken one come from the same parts, so the
 		// middle dot never reaches the live region and never dangles. The
 		// different-artist line carries no band, so it reads the same either way.
-		const differentLine = m.admin_lookup_tile_different({ handle, site });
+		const differentHandle = differentMatch ? matchHandle(differentMatch) : '';
+		const differentSite = siteLabel(differentMatch ? differentMatch.site : match.site);
+		const differentLine = differentHandle
+			? m.admin_lookup_tile_different({ handle: differentHandle, site: differentSite })
+			: m.admin_lookup_tile_different_unknown({ site: differentSite });
 		const text = different
 			? { line: differentLine, spoken: differentLine }
 			: tileResultText(handle, match.site, match.band);
