@@ -167,7 +167,7 @@
 		const accepted = chosen;
 		if (accepted.length === 0) return;
 		value = applyTo(value, accepted);
-		suggestion = { kind: 'applied', count: accepted.length, rating: suggestion.rating };
+		suggestion = { kind: 'applied', count: accepted.length };
 		setAnnouncement(m.admin_tag_suggest_applied({ count: accepted.length }));
 		// The tray the button lived in is gone; land focus on the line that says
 		// what happened rather than dropping it to <body>.

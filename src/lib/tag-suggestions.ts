@@ -34,8 +34,10 @@ export type SuggestionState =
 			 *  field already had it — the tray then says so. */
 			skippedExisting: boolean;
 	  }
-	/** The operator accepted `count` tags; they are in the Tags field now. */
-	| { kind: 'applied'; count: number; rating: EntailRating | null }
+	/** The operator accepted `count` tags; they are in the Tags field now. The
+	 *  rating outlives this transition and is held by the caller, so it is not
+	 *  repeated here. */
+	| { kind: 'applied'; count: number }
 	/** The post was read and there is nothing worth suggesting. */
 	| { kind: 'empty' }
 	/** 202: queued or still classifying. Retryable. */

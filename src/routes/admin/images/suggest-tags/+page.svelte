@@ -30,8 +30,10 @@
 	let saving = $state<number | null>(null);
 	// One live region for the list, written into rather than replaced.
 	let announcement = $state('');
-	let pills: Record<number, HTMLButtonElement | null> = {};
-	let statusLines: Record<number, HTMLElement | null> = {};
+	// $state, not plain objects: bind:this writes into a property here, and Svelte
+	// warns (and stops tracking) when the container it writes into is not reactive.
+	let pills = $state<Record<number, HTMLButtonElement | null>>({});
+	let statusLines = $state<Record<number, HTMLElement | null>>({});
 	const requestSeq: Record<number, number> = {};
 
 	const stateOf = (id: number): SuggestionState => states[id] ?? { kind: 'idle' };
@@ -141,8 +143,8 @@
 
 	<ul class="rows">
 		{#each data.rows as row (row.id)}
-			{@const state = stateOf(row.id)}
-			{@const chosen = selectedTags(state)}
+			{@const rowState = stateOf(row.id)}
+			{@const chosen = selectedTags(rowState)}
 			{@const savedTags = saved[row.id]}
 			<li class="rowcard">
 				<div class="rowhead">
@@ -157,7 +159,7 @@
 						</h2>
 						<p class="rowmeta">{row.artistName ?? ''} &middot; {sourceLabel(row.source)}</p>
 					</div>
-					{#if state.kind === 'idle' && !savedTags}
+					{#if rowState.kind === 'idle' && !savedTags}
 						<button
 							bind:this={pills[row.id]}
 							type="button"
@@ -194,8 +196,8 @@
 							{m.admin_suggest_tags_edit_image()}
 						</a>
 					</div>
-				{:else if state.kind === 'searching'}
-					<p class="tag-eyebrow">{readingLabel(state.source)}</p>
+				{:else if rowState.kind === 'searching'}
+					<p class="tag-eyebrow">{readingLabel(rowState.source)}</p>
 					<div class="tag-chiprow" aria-hidden="true">
 						<span class="tag-skel-chip"></span>
 						<span class="tag-skel-chip"></span>
@@ -203,27 +205,27 @@
 						<span class="tag-skel-chip"></span>
 						<span class="tag-skel-chip"></span>
 					</div>
-				{:else if state.kind === 'suggested'}
+				{:else if rowState.kind === 'suggested'}
 					<p class="tag-eyebrow" id="row-{row.id}-status">
-						{m.admin_tag_suggest_eyebrow({ count: state.tags.length })}
+						{m.admin_tag_suggest_eyebrow({ count: rowState.tags.length })}
 					</p>
 					<TagSuggestionChips
-						tags={state.tags}
-						leftOut={state.leftOut}
+						tags={rowState.tags}
+						leftOut={rowState.leftOut}
 						labelledBy="row-{row.id}-status"
 						describedBy="row-{row.id}-help"
 						ontoggle={(tag) => onToggle(row.id, tag)}
 					/>
 					<p class="tag-panel-sub" id="row-{row.id}-help">{m.admin_tag_suggest_help()}</p>
-					{#if state.rating}
-						<p class="tag-rating-note" class:warn={state.rating !== 'safe'}>
-							{ratingLabel(state.rating)}
+					{#if rowState.rating}
+						<p class="tag-rating-note" class:warn={rowState.rating !== 'safe'}>
+							{ratingLabel(rowState.rating)}
 						</p>
 					{/if}
 					<p class="rowmeta">{m.admin_suggest_tags_nsfw_note()}</p>
-					{#if state.imageCount > 1}
+					{#if rowState.imageCount > 1}
 						<p class="tag-panel-sub">
-							{m.admin_tag_suggest_multi_image({ count: state.imageCount })}
+							{m.admin_tag_suggest_multi_image({ count: rowState.imageCount })}
 						</p>
 					{/if}
 					<form
@@ -273,7 +275,7 @@
 							{m.admin_tag_suggest_dismiss()}
 						</button>
 					</form>
-				{:else if state.kind === 'empty'}
+				{:else if rowState.kind === 'empty'}
 					<p class="tag-eyebrow">{m.admin_tag_suggest_empty_title()}</p>
 					<p class="tag-panel-body">{m.admin_tag_suggest_empty_body()}</p>
 					<div class="tag-actions">
@@ -286,20 +288,20 @@
 							{m.admin_tag_suggest_dismiss()}
 						</button>
 					</div>
-				{:else if state.kind !== 'idle' && state.kind !== 'applied' && state.kind !== 'noSource'}
+				{:else if rowState.kind !== 'idle' && rowState.kind !== 'applied' && rowState.kind !== 'noSource'}
 					<p class="tag-eyebrow warn">
-						{state.kind === 'notReady'
+						{rowState.kind === 'notReady'
 							? m.admin_tag_suggest_not_yet_title()
 							: m.admin_tag_suggest_unavailable_title()}
 					</p>
 					<p class="tag-panel-body">
-						{#if state.kind === 'notReady'}{m.admin_tag_suggest_not_yet_body()}
-						{:else if state.kind === 'rateLimited'}{m.admin_tag_suggest_rate_limited_body()}
-						{:else if state.kind === 'notFound'}{m.admin_tag_suggest_not_found_body()}
+						{#if rowState.kind === 'notReady'}{m.admin_tag_suggest_not_yet_body()}
+						{:else if rowState.kind === 'rateLimited'}{m.admin_tag_suggest_rate_limited_body()}
+						{:else if rowState.kind === 'notFound'}{m.admin_tag_suggest_not_found_body()}
 						{:else}{m.admin_tag_suggest_unavailable_body()}{/if}
 					</p>
 					<div class="tag-actions">
-						{#if state.kind !== 'notFound'}
+						{#if rowState.kind !== 'notFound'}
 							<button
 								type="button"
 								class="tag-pill"
@@ -313,7 +315,7 @@
 						<button
 							type="button"
 							class="tag-btn-text"
-							class:tag-btn-text-flush={state.kind === 'notFound'}
+							class:tag-btn-text-flush={rowState.kind === 'notFound'}
 							aria-label={m.admin_suggest_tags_row_dismiss({ title: row.title })}
 							onclick={() => dismiss(row.id)}
 						>

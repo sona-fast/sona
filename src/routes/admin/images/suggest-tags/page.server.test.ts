@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { imageTags, images, tags } from '$lib/server/db/schema';
 import { makeD1 } from '$lib/server/test/d1';
-import { load, actions, PER_PAGE } from './+page.server';
+import { load, actions, _PER_PAGE as PER_PAGE } from './+page.server';
 
 // The backfill list (SONA-220). What is worth pinning here is which rows reach
 // the page — an image is a candidate only when its source URL is one the
@@ -40,9 +40,14 @@ function makeDb() {
 type Db = ReturnType<typeof makeDb>['db'];
 
 async function seedImage(db: Db, id: number, sourcePostUrl: string | null, title = `Art ${id}`) {
-	await db
-		.insert(images)
-		.values({ id, title, imageUrl: `https://cdn.example.com/${id}.png`, sourcePostUrl });
+	await db.insert(images).values({
+		id,
+		title,
+		slug: `art-${id}`,
+		imageUrl: `https://cdn.example.com/${id}.png`,
+		artistId: 1,
+		sourcePostUrl
+	});
 }
 
 async function tagImage(db: Db, imageId: number, name: string) {

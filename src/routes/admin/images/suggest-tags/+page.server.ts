@@ -16,12 +16,15 @@ import type { Actions, PageServerLoad } from './$types';
 // personal gallery (an image either has tags or it does not), so it is
 // classified whole: that is what lets the page say "Showing 4 of 12" honestly.
 
-export const PER_PAGE = 20;
+// SvelteKit rejects any other named export from a +page.server file unless it
+// starts with an underscore; the tests read these under these names.
+const PER_PAGE = 20;
+export { PER_PAGE as _PER_PAGE };
 
 /** Ceiling on how many candidate rows one load will classify. A library where
  * nothing has been tagged yet would otherwise walk the whole table on every
  * page view; past this the page shows what it found and keeps offering more. */
-export const MAX_SCAN = 2000;
+const MAX_SCAN = 2000;
 
 export type SuggestRow = {
 	id: number;
