@@ -2170,13 +2170,16 @@ describe('artist lookup section markup (SONA-156)', () => {
 	// can cover every line-wrap of the confirmation sentence. The guard is
 	// pointer-only: a keyboard user who Shift+Tabs from Keep and presses Enter
 	// cannot have suffered the hazard, and their activation must go through.
+	// It is also place-bound: only a click near where Remove key was clicked is
+	// the reflex, so a deliberate click elsewhere on the button is not swallowed.
 	it('ignores a confirm pointer click that lands inside the reflex window', () => {
-		// Remove key records when the panel opened, next to setting the flag.
+		// Remove key records when and where the panel opened, next to the flag.
 		const opens = src.indexOf('confirmingFuzzysearchRemove = true');
 		expect(opens).toBeGreaterThan(-1);
-		expect(src.slice(opens - 120, opens)).toContain(
-			'fuzzysearchRemoveOpenedAt = performance.now()'
-		);
+		const records = src.slice(opens - 240, opens);
+		expect(records).toContain('fuzzysearchRemoveOpenedAt = performance.now()');
+		expect(records).toContain('fuzzysearchRemoveOpenedX = event.clientX');
+		expect(records).toContain('fuzzysearchRemoveOpenedY = event.clientY');
 		const start = src.indexOf('action="?/removeFuzzysearchKey" use:enhance=');
 		expect(start).toBeGreaterThan(-1);
 		const form = src.slice(start, src.indexOf('</form>', start));
@@ -2184,8 +2187,16 @@ describe('artist lookup section markup (SONA-156)', () => {
 		// carries a positive detail — a keyboard-synthesized click carries 0.
 		const click = form.slice(form.indexOf('onclick='));
 		expect(click).toMatch(/event\.detail\s*>\s*0/);
+		// ...and only for one that landed within the reflex distance of the
+		// recorded point, on both axes.
 		expect(click).toMatch(
-			/FUZZYSEARCH_REMOVE_REFLEX_MS[\s\S]{0,60}event\.preventDefault\(\s*\)/
+			/Math\.abs\(\s*event\.clientX - fuzzysearchRemoveOpenedX\s*\)\s*<=\s*FUZZYSEARCH_REMOVE_REFLEX_PX/
+		);
+		expect(click).toMatch(
+			/Math\.abs\(\s*event\.clientY - fuzzysearchRemoveOpenedY\s*\)\s*<=\s*FUZZYSEARCH_REMOVE_REFLEX_PX/
+		);
+		expect(click).toMatch(
+			/FUZZYSEARCH_REMOVE_REFLEX_MS[\s\S]{0,300}event\.preventDefault\(\s*\)/
 		);
 		// The enhance callback keeps only the in-flight guard: no time check there,
 		// or a keyboard Enter would be swallowed again.

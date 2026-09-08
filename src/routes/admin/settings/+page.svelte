@@ -182,10 +182,14 @@
 	// Purely client state: the Remove key button swaps the action row for a
 	// confirmation block rather than opening a dialog over the section.
 	let confirmingFuzzysearchRemove = $state(false);
-	// When the panel opened, and how long confirm Remove ignores a pointer click.
-	// Not reactive: only the confirm button's onclick below reads it.
+	// When and where the panel opened, and how long and how near confirm Remove
+	// ignores a pointer click. Not reactive: only the confirm button's onclick
+	// below reads them.
 	let fuzzysearchRemoveOpenedAt = 0;
+	let fuzzysearchRemoveOpenedX = 0;
+	let fuzzysearchRemoveOpenedY = 0;
 	const FUZZYSEARCH_REMOVE_REFLEX_MS = 500;
+	const FUZZYSEARCH_REMOVE_REFLEX_PX = 24;
 	// Focus is moved by hand across the swap: every button involved UNMOUNTS as
 	// the state changes, so without this a keyboard user lands back on <body> and
 	// restarts from the top of a long page. (A bare `autofocus` doesn't do it —
@@ -1562,15 +1566,21 @@
 							aria-busy={removingFuzzysearchKey}
 							aria-describedby="fuzzysearch-remove-confirm"
 							onclick={(event) => {
-								// Pointer only. The section is last on the tab, so focusing Keep
-								// scrolls the page up under a stationary pointer and this button can
-								// land on the pixel Remove key was just clicked; a click that soon
-								// after the panel opened is a reflex, not a decision. A keyboard
-								// activation carries detail 0 and cannot hit that hazard, so Enter
-								// straight after Shift+Tab still removes the key.
+								// Pointer only, and only the reflex. The section is last on the tab,
+								// so focusing Keep scrolls the page up under a stationary pointer and
+								// this button can land on the pixel Remove key was just clicked; a
+								// click that soon after the panel opened AND that near where the
+								// pointer already was is a reflex, not a decision. A click elsewhere
+								// on the button means the pointer moved, so it goes through at once.
+								// A keyboard activation carries detail 0 and cannot hit that hazard,
+								// so Enter straight after Shift+Tab still removes the key.
 								if (
 									event.detail > 0 &&
-									performance.now() - fuzzysearchRemoveOpenedAt < FUZZYSEARCH_REMOVE_REFLEX_MS
+									performance.now() - fuzzysearchRemoveOpenedAt < FUZZYSEARCH_REMOVE_REFLEX_MS &&
+									Math.abs(event.clientX - fuzzysearchRemoveOpenedX) <=
+										FUZZYSEARCH_REMOVE_REFLEX_PX &&
+									Math.abs(event.clientY - fuzzysearchRemoveOpenedY) <=
+										FUZZYSEARCH_REMOVE_REFLEX_PX
 								)
 									event.preventDefault();
 							}}
@@ -1599,8 +1609,10 @@
 					type="button"
 					class="btn btn-outline btn-remove"
 					bind:this={fuzzysearchRemoveButton}
-					onclick={() => {
+					onclick={(event) => {
 						fuzzysearchRemoveOpenedAt = performance.now();
+						fuzzysearchRemoveOpenedX = event.clientX;
+						fuzzysearchRemoveOpenedY = event.clientY;
 						confirmingFuzzysearchRemove = true;
 					}}
 				>

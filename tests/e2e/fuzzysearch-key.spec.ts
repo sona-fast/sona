@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Request } from '@playwright/test';
 import { adminLogin } from './admin-login';
 
 // Artist lookup key settings (SONA-156), driven in a real browser: the four
@@ -90,12 +90,25 @@ async function openConfirmAndReflexClick(page: Page) {
 		point.y <= after.y + after.height;
 	const where = `at ${page.viewportSize()?.width}px (page scrolled ${scrolled}px, confirm Remove ${covers ? 'covers' : 'clears'} the clicked point)`;
 
-	// The reflex second click: same pixel, no pause.
+	// The reflex second click: same pixel, no pause. The listener pins the guard
+	// at the wire rather than through the sleep — a swallowed click never submits,
+	// so no removal POST may leave the page while the window is open.
+	const removePosts: string[] = [];
+	const watchRemovePosts = (request: Request) => {
+		if (
+			request.method() === 'POST' &&
+			decodeURIComponent(request.url()).includes('?/removeFuzzysearchKey')
+		)
+			removePosts.push(request.url());
+	};
+	page.on('request', watchRemovePosts);
 	await page.mouse.click(point.x, point.y);
 	// Asserted after the guard window, not before it: an unguarded removal takes
 	// a moment to come back, and checking too early passes while it is in flight.
 	// The wait doubles as the one the caller needs before clicking for real.
 	await page.waitForTimeout(REFLEX_GUARD_MS);
+	page.off('request', watchRemovePosts);
+	expect(removePosts, `the reflex click submitted nothing ${where}`).toEqual([]);
 	await expect(confirmPanel(page), `the confirmation stayed open ${where}`).toBeVisible();
 	await expect(keyRecord(page), `the key was not removed ${where}`).toContainText('8901');
 	await expect(replaceLine(page), `the block held still ${where}`).toBeVisible();
