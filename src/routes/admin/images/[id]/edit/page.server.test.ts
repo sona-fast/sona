@@ -9,7 +9,7 @@ import { characters, images, siteSettings } from '$lib/server/db/schema';
 import { REFERENCE_BECOMES_VARIANT_ERROR, VARIANT_BECOMES_REFERENCE_ERROR } from '$lib/server/variants';
 import { load, actions } from './+page.server';
 
-import { makeD1 } from '$lib/server/test/d1';
+import { makeD1, withFailingSettingsRead } from '$lib/server/test/d1';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -304,5 +304,18 @@ describe('admin image edit — load lookupEnabled (SONA-156)', () => {
 		await seedImage(db, 5);
 		const withEnv = { env: { ...platform.env, FUZZYSEARCH_API_KEY: 'from-deploy' } };
 		expect(await lookupEnabled(withEnv as unknown as App.Platform)).toBe(true);
+	});
+
+	// The key read moved into the load's Promise.all, so a D1 failure on it now
+	// rejects alongside the image read instead of after it. It still rejects:
+	// there is no page without the image either, and a lookupEnabled quietly
+	// forced to false would hide a broken database behind a missing button.
+	it('lets a failed key read reject the load rather than reporting no key', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		const broken = { env: { ...platform.env, DB: withFailingSettingsRead(platform.env.DB) } };
+		await expect(
+			load({ params: { id: '5' }, platform: broken } as never)
+		).rejects.toThrow(/site_settings/);
 	});
 });

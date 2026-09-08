@@ -8,7 +8,7 @@ import * as schema from '$lib/server/db/schema';
 import { characters, images, siteSettings } from '$lib/server/db/schema';
 import { load, actions } from './+page.server';
 
-import { makeD1 } from '$lib/server/test/d1';
+import { makeD1, withFailingSettingsRead } from '$lib/server/test/d1';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -141,5 +141,19 @@ describe('admin upload — load lookupEnabled (SONA-156)', () => {
 		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: '' });
 		const data = (await load({ platform } as never)) as { lookupEnabled: boolean };
 		expect(data.lookupEnabled).toBe(false);
+	});
+
+	// The key read moved into the load's Promise.all, so a D1 failure on it now
+	// rejects alongside the other five reads instead of after them. It still
+	// rejects: the page has no artist list without those reads either, and a
+	// lookupEnabled quietly forced to false would hide a broken database behind
+	// a missing button. This pins today's shape so a later fold cannot change it
+	// by accident.
+	it('lets a failed key read reject the load rather than reporting no key', async () => {
+		const { platform } = makeDb();
+		const broken = { env: { ...platform.env, DB: withFailingSettingsRead(platform.env.DB) } };
+		// Drizzle names the query it could not run, so the rejection says the
+		// settings read is what failed and not one of the five reads beside it.
+		await expect(load({ platform: broken } as never)).rejects.toThrow(/site_settings/);
 	});
 });

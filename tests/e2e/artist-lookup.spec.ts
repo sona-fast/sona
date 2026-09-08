@@ -1174,8 +1174,10 @@ test.describe('with a key saved', () => {
 	});
 
 	// Last: leaves the DB as the seed built it, for whatever runs next on this
-	// server. Not an afterAll — a hook failure is silent about which state it
-	// left behind, and this is the one action that matters to other specs.
+	// server. It stays a test rather than becoming a hook, because it also
+	// asserts what removal does to the upload page, and a hook failure is silent
+	// about which state it left behind. The hook below covers the runs where
+	// this test never gets to happen.
 	test('removing the key takes the button away again', async ({ page }) => {
 		await page.goto('/admin/settings');
 		await openConnectionsTab(page);
@@ -1192,5 +1194,34 @@ test.describe('with a key saved', () => {
 
 		await oneDoneTile(page);
 		await expect(pill(page)).toHaveCount(0);
+	});
+
+	// This describe is serial, so one flaky login skips every test after it —
+	// including the removal above. The key then survives the run and the next
+	// spec on this server sees a connected site: fuzzysearch-key.spec.ts opens
+	// with the unconnected state and would fail for a reason that has nothing to
+	// do with it. The hook runs whether or not the chain finished, and it says
+	// what it did rather than removing the key silently.
+	test.afterAll(async ({ browser }) => {
+		const page = await browser.newPage();
+		try {
+			await adminLogin(page, PASSWORD);
+			await page.goto('/admin/settings');
+			await openConnectionsTab(page);
+			// The test above already removed it on a run that got that far.
+			if ((await section(page).locator('button.btn-remove').count()) === 0) return;
+			console.warn('artist-lookup: the serial chain left the key behind; removing it here');
+			await section(page).locator('button.btn-remove').click();
+			await page.waitForTimeout(550);
+			await section(page)
+				.locator('.remove-confirm')
+				.getByRole('button', { name: 'Remove', exact: true })
+				.click();
+			await expect(section(page).locator('input[name="fuzzysearchApiKey"]')).toBeVisible({
+				timeout: 15_000
+			});
+		} finally {
+			await page.close();
+		}
 	});
 });
