@@ -42,8 +42,9 @@ export type Suggestions = {
 /** Why a lookup produced nothing. `not_ready` is the one worth retrying: the
  * post is queued but not classified yet. `rate_limited` is entail.dev's per-IP
  * limit, which has no key to raise. Everything else — a timeout, a non-2xx, a
- * job that never finished, a post with no furry images in it — is
- * `unavailable`, because none of them tell the operator anything different. */
+ * job that never finished — is `unavailable`, because none of them tell the
+ * operator anything different. A post the classifier read and found nothing in
+ * is not a failure at all; it succeeds with an empty tag list. */
 export type LookupFailure = 'not_ready' | 'rate_limited' | 'unavailable';
 
 export type LookupOutcome =
@@ -191,19 +192,24 @@ export async function lookupBlueskyPostResult(
 			console.warn(`[entail] post lookup failed: status=${res.status}`);
 			return fail('unavailable');
 		}
+		// An empty `images` array means entail.dev looked and found no furry
+		// artwork in the post. That is an answer, not a failure: the caller gets
+		// an empty tag list rather than an error it would have to explain.
 		const image = firstImage(await res.json());
-		// No images means entail.dev found no furry artwork in the post, which
-		// leaves nothing to suggest.
-		if (!image) return fail('unavailable');
-		return { ok: true, suggestions: suggestionsFromResult(image) };
+		return {
+			ok: true,
+			suggestions: image ? suggestionsFromResult(image) : { tags: [], rating: null }
+		};
 	} catch (e) {
 		console.warn(`[entail] post lookup error: ${e instanceof Error ? e.message : String(e)}`);
 		return fail('unavailable');
 	}
 }
 
-/** Suggestions for a Bluesky post, or null for any failure. Use
- * {@link lookupBlueskyPostResult} when the reason matters. */
+/** Suggestions for a Bluesky post, or null if the lookup failed. A post with
+ * nothing to suggest resolves to an empty tag list, not null — "no suggestions"
+ * and "no answer" are different facts. Use {@link lookupBlueskyPostResult} when
+ * the reason for a failure matters. */
 export async function lookupBlueskyPost(
 	url: string,
 	fetchImpl: typeof fetch = fetch

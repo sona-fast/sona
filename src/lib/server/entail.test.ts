@@ -186,13 +186,14 @@ describe('lookupBlueskyPost', () => {
 		).toEqual({ ok: false, reason: 'unavailable' });
 	});
 
-	it('returns null when the post has no classified images', async () => {
+	it('succeeds with no tags when the post has no classified images', async () => {
+		const fetchImpl = vi.fn(async () => json({ uri: 'at://x', images: [] }));
 		expect(
-			await lookupBlueskyPost(
-				'https://bsky.app/profile/did:plc:aaaa/post/3abc',
-				vi.fn(async () => json({ uri: 'at://x', images: [] }))
-			)
-		).toBeNull();
+			await lookupBlueskyPost('https://bsky.app/profile/did:plc:aaaa/post/3abc', fetchImpl)
+		).toEqual({ tags: [], rating: null });
+		expect(
+			await lookupBlueskyPostResult('https://bsky.app/profile/did:plc:aaaa/post/3abc', fetchImpl)
+		).toEqual({ ok: true, suggestions: { tags: [], rating: null } });
 	});
 });
 

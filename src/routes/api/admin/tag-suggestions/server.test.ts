@@ -151,6 +151,19 @@ describe('POST /api/admin/tag-suggestions', () => {
 		}
 	});
 
+	it('200s with no tags when the classifier found nothing to suggest', async () => {
+		const { platform } = makeEnv();
+		// The classifier read the post and rated it; nothing cleared the
+		// confidence floor. That is an answer, not a failure.
+		lookupBlueskyPostResult.mockResolvedValue({
+			ok: true,
+			suggestions: { tags: [], rating: 'safe' }
+		});
+		const res = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ source: 'bluesky', tags: [], rating: 'safe' });
+	});
+
 	it('502s not_ready when the post is queued but unclassified', async () => {
 		const { platform } = makeEnv();
 		lookupBlueskyPostResult.mockResolvedValue({ ok: false, reason: 'not_ready' });
