@@ -72,6 +72,25 @@ async function stubLookup(page: Page, body: unknown, status = 200) {
 	);
 }
 
+/** A lookup stub the test releases by hand. The role a tile plays is only
+ * readable at two different moments if the request can be held open while the
+ * operator moves the parent or the group mode under it. */
+async function deferredLookup(page: Page, body: unknown) {
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	await page.route('**/api/admin/artist-lookup', async (route) => {
+		await held;
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify(body)
+		});
+	});
+	return release;
+}
+
 /** Stub the upload path and get one tile to `done` on the upload page. */
 async function oneDoneTile(page: Page) {
 	await page.route('**/api/upload', (route) =>
@@ -163,6 +182,21 @@ async function openConnectionsTab(page: Page) {
 	}).toPass();
 }
 
+/** Save the throwaway key on the settings page, unless it is already there.
+ * Hydration-sensitive the same way the tab is: a click that lands before
+ * use:enhance is attached posts natively, and the reload resets the tab, leaving
+ * the connected state in the DOM but hidden. */
+async function saveLookupKey(page: Page) {
+	await expect(async () => {
+		await page.goto('/admin/settings');
+		await openConnectionsTab(page);
+		if ((await section(page).locator('button.btn-remove').count()) > 0) return;
+		await section(page).locator('input[name="fuzzysearchApiKey"]').fill(FAKE_KEY);
+		await section(page).locator('button[type="submit"]').click();
+		await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible({ timeout: 1500 });
+	}).toPass();
+}
+
 const pill = (page: Page) => page.locator('button.lookup-pill');
 // The page's own polite region (the admin layout has a separate one, a <p>).
 const LIVE_REGION = 'div.sr-only[aria-live="polite"]';
@@ -187,25 +221,33 @@ test('without a key there is no button, only a pointer at Settings', async ({ pa
 test.describe.configure({ mode: 'serial' });
 
 test.describe('with a key saved', () => {
+	// The key is what puts the button on the page, so every test here needs it
+	// saved. It used to be the first test that saved it, which made a filtered
+	// run (`-g`) fail on whatever it selected: the row was never written.
+	test.beforeAll(async ({ browser }) => {
+		// The retry loop inside runs until the hook's own budget, not the test's.
+		test.setTimeout(90_000);
+		const page = await browser.newPage();
+		try {
+			await adminLogin(page, PASSWORD);
+			await saveLookupKey(page);
+		} finally {
+			await page.close();
+		}
+	});
+
 	test.beforeEach(async ({ page }) => {
 		test.setTimeout(90_000);
 		await adminLogin(page, PASSWORD);
 	});
 
-	test('saving a key puts the button on the upload page', async ({ page }) => {
-		// Hydration-sensitive the same way the tab is: a click that lands before
-		// use:enhance is attached posts natively, and the reload resets the tab,
-		// leaving the connected state in the DOM but hidden.
-		await expect(async () => {
-			await page.goto('/admin/settings');
-			await openConnectionsTab(page);
-			if ((await section(page).locator('button.btn-remove').count()) > 0) return;
-			await section(page).locator('input[name="fuzzysearchApiKey"]').fill(FAKE_KEY);
-			await section(page).locator('button[type="submit"]').click();
-			await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible({
-				timeout: 1500
-			});
-		}).toPass();
+	test('the saved key puts the button on the upload page', async ({ page }) => {
+		await page.goto('/admin/settings');
+		await openConnectionsTab(page);
+		// What the save left behind: the section reports the connection and offers
+		// to take it away again.
+		await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible();
+		await expect(section(page).locator('button.btn-remove')).toBeVisible();
 
 		await oneDoneTile(page);
 		await expect(pill(page)).toBeVisible();
@@ -311,6 +353,16 @@ test.describe('with a key saved', () => {
 
 		await expect(select).toHaveValue('987');
 		await expect(select.locator('option[value="987"]')).toHaveText('Made In Another Tab');
+
+		// And it stays. A carried clash parent belongs to the lookup that found it
+		// and goes when the next result does not name it, but an artist is a global
+		// record: once this page knows it exists it is in the list, and a second
+		// lookup must not take the operator's chosen artist away.
+		await stubLookup(page, matchedBody());
+		await pill(page).click();
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(select.locator('option[value="987"]')).toHaveCount(1);
+		await expect(select).toHaveValue('987');
 	});
 
 	// The clash row renders the same Use button from the same snippet, so it
@@ -432,7 +484,7 @@ test.describe('with a key saved', () => {
 			'FuzzySearch is limiting how often your site can search right now.'
 		);
 		await expect(panel(page)).toContainText(
-			'This image is private. Sona sent the file to FuzzySearch for this lookup.'
+			'Sona sent this file to FuzzySearch while the image was private.'
 		);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toBeVisible();
 
@@ -503,7 +555,7 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
 		await expect(panel(page)).toContainText(
-			'This image is private. Sona sent the file to FuzzySearch for this lookup.'
+			'Sona sent this file to FuzzySearch while the image was private.'
 		);
 
 		// And back the other way. The hint is about the NEXT click, so it goes;
@@ -511,7 +563,7 @@ test.describe('with a key saved', () => {
 		// private one, so unticking cannot rewrite it.
 		await privateBox.uncheck();
 		await expect(page.locator('#lookup-hint')).not.toContainText('This image is private.');
-		await expect(panel(page)).toContainText('Sona sent the file to FuzzySearch');
+		await expect(panel(page)).toContainText('Sona sent this file to FuzzySearch');
 	});
 
 	// The other order. Read live, the notice claimed a private file had been sent
@@ -524,11 +576,11 @@ test.describe('with a key saved', () => {
 
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
-		await expect(panel(page)).not.toContainText('Sona sent the file to FuzzySearch');
+		await expect(panel(page)).not.toContainText('Sona sent this file to FuzzySearch');
 
 		await page.locator('input[name="published"]').check();
 		await expect(page.locator('#lookup-hint')).toContainText('This image is private.');
-		await expect(panel(page)).not.toContainText('Sona sent the file to FuzzySearch');
+		await expect(panel(page)).not.toContainText('Sona sent this file to FuzzySearch');
 	});
 
 	// Image 10 is unpublished in the seed. Unticking Private says what the next
@@ -549,7 +601,7 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
 		await expect(panel(page)).toContainText(
-			'This image is private. Sona sent the file to FuzzySearch for this lookup.'
+			'Sona sent this file to FuzzySearch while the image was private.'
 		);
 	});
 
@@ -827,6 +879,16 @@ test.describe('with a key saved', () => {
 
 		await expect(select).toHaveValue('987');
 		await expect(select.locator('option[value="987"]')).toHaveText('Made In Another Tab');
+
+		// And it stays. A carried clash parent belongs to the lookup that found it
+		// and goes when the next result does not name it, but an artist is a global
+		// record: once this page knows it exists it is in the list, and a second
+		// lookup must not take the operator's chosen artist away.
+		await stubLookup(page, matchedBody());
+		await pill(page).click();
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(select.locator('option[value="987"]')).toHaveCount(1);
+		await expect(select).toHaveValue('987');
 	});
 
 	// A carried option belongs to the lookup that found it. The edit page's reset
@@ -1224,6 +1286,58 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+	});
+
+	// The role used to be snapshotted when the request fired, so a lookup started
+	// on the parent and then demoted mid-flight still wrote its post URL and date
+	// into the shared fields — under a panel already pointing at the tile the
+	// operator had just made the parent, and into a save that would credit that
+	// tile with this one's post.
+	test('a late result from a demoted tile leaves the shared fields alone', async ({ page }) => {
+		await twoDoneTiles(page);
+		const release = await deferredLookup(page, matchedBody());
+
+		await tileLookup(page).nth(0).click();
+		await expect(tileLookup(page).nth(0)).toHaveAttribute('aria-busy', 'true');
+
+		// The parent moves while the first tile's request is still out.
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		release();
+		await expect(tileLookup(page).nth(0)).toHaveAttribute('aria-busy', 'false');
+
+		// The result landed on the tile that asked for it, as a variant's does.
+		await expect(page.locator('.tile-nsfw-row .rating-tag')).toHaveText(
+			'Rated General on FurAffinity'
+		);
+		// And nowhere near the shared fields, which now describe the second tile.
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#shared-rating-tag')).toHaveCount(0);
+		await expect(panel(page)).not.toContainText('kuttoya');
+	});
+
+	// The other half of the same rule. A result that lands while the group is
+	// "a variant of an existing piece" has no shared fields to fill, so coming
+	// back to a new set used to show a results panel over empty fields.
+	test('returning to a new set re-derives the shared fields from the parent', async ({ page }) => {
+		await oneDoneTile(page);
+		const release = await deferredLookup(page, matchedBody());
+
+		await pill(page).click();
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		release();
+		// The pill is gone with the group mode; the tile's own button reports the
+		// request finishing.
+		await expect(tileLookup(page).first()).toHaveAttribute('aria-busy', 'false');
+		await expect(sourceInput(page)).toHaveValue('');
+
+		await page.getByRole('radio', { name: 'New piece' }).check();
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 	});
 
 	// parentIndex is submitted as the hidden field the server picks the parent

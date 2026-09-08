@@ -784,7 +784,7 @@ describe('focus after the panel goes away', () => {
 	it('carries an artist the page did not load with into the artist select', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(
-				/function useLookupArtist[\s\S]{0,600}?if \(!artistList\.some\(\(a\) => a\.id === artist\.id\)\) \{\s*\n\s*artistList = \[\.\.\.artistList, artist\]/
+				/function useLookupArtist[\s\S]{0,900}?if \(!artistList\.some\(\(a\) => a\.id === artist\.id\)\) \{\s*\n\s*artistList = \[\.\.\.artistList, artist\]/
 			);
 			// The select renders the mutable list, or the appended option is
 			// unreachable.
@@ -797,15 +797,20 @@ describe('focus after the panel goes away', () => {
 		);
 	});
 
-	// The role was re-read when the request came back, so switching the group to
-	// "existing" mid-lookup skipped applyShared and switching back showed a
-	// results panel over empty shared fields.
-	it('applies the shared prefill by the role the tile had when the request fired', () => {
+	// A snapshot of the role taken when the request fired let a late result from
+	// the former parent write its post URL and date into the shared fields after
+	// another tile's Parent radio had claimed them. The role is read at resolve;
+	// the group-mode round trip that the snapshot was covering is closed by the
+	// "new" radio re-deriving the shared fields from the parent tile.
+	it('applies the shared prefill by the role the tile has when the result lands', () => {
 		expect(UPLOAD).toMatch(
-			/function startLookup\(key: number\)[\s\S]{0,900}?const wasParent = isParent\(key\);\s*\n\s*if \(wasParent\) resetSharedPrefill\(\);/
+			/function startLookup\(key: number\)[\s\S]{0,900}?if \(isParent\(key\)\) resetSharedPrefill\(\);/
 		);
-		expect(UPLOAD).toMatch(/if \(wasParent\) applyShared\(next\);/);
-		expect(UPLOAD).not.toMatch(/if \(isParent\(key\)\) applyShared\(next\);/);
+		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next\);/);
+		expect(UPLOAD).not.toMatch(/wasParent/);
+		expect(UPLOAD).toMatch(
+			/groupMode = 'new';\s*\n\s*onParentChanged\(parentIndex\);/
+		);
 	});
 
 	// The Remove button lives inside the tile it removes, so activating it from
@@ -902,7 +907,7 @@ describe('what a lookup says out loud', () => {
 	it('announces the artist the panel applied', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(
-				/function useLookupArtist[\s\S]{0,1000}?announcer\.say\(m\.admin_lookup_announce_using\(/
+				/function useLookupArtist[\s\S]{0,1300}?announcer\.say\(m\.admin_lookup_announce_using\(/
 			);
 			// The region has to be there before the message is. Both pages mount the
 			// one component rather than each keeping their own copy of it.

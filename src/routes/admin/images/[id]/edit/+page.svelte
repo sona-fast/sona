@@ -291,6 +291,10 @@
 		// tab since then comes back as a candidate with no option of their own, so
 		// the button would flip to "Using {name}" over an empty select and the save
 		// would be refused by `required`.
+		// Unlike a clash parent carried into the variant select, this option stays
+		// through the next lookup: an artist is a global record, so once it is known
+		// it belongs in the list, while a clash is one result's finding about this
+		// image.
 		if (!artistList.some((a) => a.id === artist.id)) {
 			artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
 		}

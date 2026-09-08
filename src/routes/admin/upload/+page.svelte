@@ -469,12 +469,7 @@
 		const controller = new AbortController();
 		lookupAborts.set(key, controller);
 		tile.lookup = { kind: 'searching' };
-		// Which role this tile had when the request FIRED. Re-read on resolve, a
-		// group switched to "existing" mid-lookup made the parent's own result
-		// skip applyShared, and switching back showed a results panel with the
-		// shared fields still empty.
-		const wasParent = isParent(key);
-		if (wasParent) resetSharedPrefill();
+		if (isParent(key)) resetSharedPrefill();
 		void runLookup({ file: tile.file }, { signal: controller.signal }).then((next) => {
 			// Cancelled, or the tile was removed while the request was out.
 			if (lookupAborts.get(key) !== controller) return;
@@ -482,7 +477,15 @@
 			const live = tiles.find((t) => t.key === key);
 			if (!live) return;
 			live.lookup = next;
-			if (wasParent) applyShared(next);
+			// The role as it is NOW, not as it was when the request fired. Ticking
+			// another tile's Parent radio mid-lookup re-points the shared fields at
+			// that tile, and a late result from the tile that used to be the parent
+			// would otherwise write its post URL and date under a panel showing the
+			// new one. Going the other way, a tile promoted to parent mid-lookup
+			// applies its result instead of showing it over empty fields. The
+			// group-mode round trip that made this a snapshot is handled where it
+			// happens: the "new" radio re-derives from the parent tile.
+			if (isParent(key)) applyShared(next);
 			// A variant tile's outcome renders as plain text on the tile, outside
 			// the panel's live region — say it out loud, naming the file, or a
 			// screen-reader user has no way to know the lookup finished (4.1.3).
@@ -560,6 +563,10 @@
 		// tab since then comes back as a candidate with no option of their own, so
 		// the button would flip to "Using {name}" over an empty select and the save
 		// would be refused by `required`. Carry them in, the way the dialog does.
+		// Unlike a clash parent carried into the variant select, this option stays
+		// through the next lookup: an artist is a global record, so once it is known
+		// it belongs in the list, while a clash is one result's finding about this
+		// image.
 		if (!artistList.some((a) => a.id === artist.id)) {
 			artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
 		}
@@ -892,7 +899,19 @@
 		<fieldset class="group-section">
 			<legend>{m.admin_variant_group_legend()}</legend>
 			<label class="radio-label">
-				<input type="radio" checked={groupMode === 'new'} onchange={() => (groupMode = 'new')} />
+				<!-- Back to a new set: the shared fields belong to the parent tile
+				     again, so re-derive them from whatever its lookup found. A lookup
+				     that resolved while the mode was "existing" filled nothing, and
+				     without this the operator returned to a results panel sitting over
+				     empty fields. -->
+				<input
+					type="radio"
+					checked={groupMode === 'new'}
+					onchange={() => {
+						groupMode = 'new';
+						onParentChanged(parentIndex);
+					}}
+				/>
 				<span>{tiles.length > 1 ? m.admin_variant_group_new() : m.admin_variant_group_single()}</span>
 			</label>
 			<label class="radio-label">
