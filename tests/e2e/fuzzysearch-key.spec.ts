@@ -129,11 +129,41 @@ test.describe('admin settings artist lookup key', () => {
 	});
 
 	test('saving connects, Keep backs out of removal, and Remove disconnects', async ({ page }) => {
-		await keyInput(page).fill(FAKE_KEY);
-		await saveButton(page).click();
+		// Save is hydration-sensitive the same way the tab is: a click that lands
+		// before use:enhance is attached posts the form natively, and the reload
+		// resets the tab — the connected eyebrow is then in the DOM but hidden, so
+		// every assertion below fails and the key stays saved in the shared seeded
+		// DB. Retry until the save goes through the enhanced path: the marker only
+		// survives if the page never reloaded.
+		await expect(async () => {
+			// A native post left the page on a fresh load with the tab reset, so
+			// reopen it before reading the section's state.
+			await openConnectionsTab(page);
+			if ((await removeButton(page).count()) > 0) {
+				// The aborted attempt saved the key: put the section back to
+				// unconnected before trying again.
+				await removeButton(page).click();
+				await confirmPanel(page).getByRole('button', { name: 'Remove', exact: true }).click();
+				await expect(keyInput(page)).toBeVisible();
+				await openConnectionsTab(page);
+			}
+			await page.evaluate(() => {
+				(window as unknown as Record<string, boolean>).__sonaSaveMarker = true;
+			});
+			await keyInput(page).fill(FAKE_KEY);
+			await saveButton(page).click();
+			// Connected: the eyebrow, and the mask — never the key itself.
+			await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible({
+				timeout: 1500
+			});
+			expect(
+				await page.evaluate(
+					() => (window as unknown as Record<string, boolean>).__sonaSaveMarker === true
+				),
+				'Save posted through use:enhance rather than reloading the page'
+			).toBe(true);
+		}).toPass();
 
-		// Connected: the eyebrow, and the mask — never the key itself.
-		await expect(section(page).locator('.key-eyebrow.connected')).toBeVisible();
 		await expect(keyRecord(page)).toContainText('8901');
 		await expect(keyRecord(page)).not.toContainText('e2e-fuzzysearch');
 		await expect(keyInput(page)).toHaveCount(0);
