@@ -336,9 +336,14 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		registryHasSecret: !!platform?.env?.REGISTRY_API_KEY,
 		fuzzysearchKeySet: fuzzysearchKeyFromEnv || !!fuzzysearchStoredKey,
 		fuzzysearchKeyFromEnv,
-		fuzzysearchKeyRecord: fuzzysearchStoredKey
-			? fuzzysearchKeyDisplayRecord(fuzzysearchStoredKey)
-			: null,
+		// The deploy secret wins, and while it does the card shows the secret's own
+		// line instead of a mask — so the stored key's last four have no reader and
+		// no business in the payload. Gated here rather than in the markup: a field
+		// the page never renders still ships in the SSR data blob.
+		fuzzysearchKeyRecord:
+			!fuzzysearchKeyFromEnv && fuzzysearchStoredKey
+				? fuzzysearchKeyDisplayRecord(fuzzysearchStoredKey)
+				: null,
 		// Pre-formatted here, like the early-access GA dates, so the card renders
 		// one date string identically on SSR and after hydration. Only for a key
 		// saved HERE, and only when THAT key is the one that was refused: a

@@ -1995,6 +1995,22 @@ describe('settings — FuzzySearch key', () => {
 		expect(JSON.stringify(result)).not.toContain('fromdeploy');
 	});
 
+	it('keeps the stored key out of the payload while the deploy secret is in use', async () => {
+		const { db, platform } = makeLoadDb({ FUZZYSEARCH_API_KEY: 'fs-live-fromdeploy' });
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, 'fs-live-abcdef3k9q');
+
+		const result = (await load(loadEvent(platform))) as unknown as Record<string, unknown>;
+
+		expect(result.fuzzysearchKeyFromEnv).toBe(true);
+		// Nothing derived from the dormant stored key travels — not the mask, not
+		// its last four — but the page still knows a key exists here.
+		expect(result.fuzzysearchKeyRecord).toBeNull();
+		expect(result.fuzzysearchKeySet).toBe(true);
+		const payload = JSON.stringify(result);
+		expect(payload).not.toContain('3k9q');
+		expect(payload).not.toContain('fromdeploy');
+	});
+
 	it('surfaces a formatted refusal date only while a key is saved', async () => {
 		const { db, platform } = makeLoadDb();
 		await setRawSetting(
