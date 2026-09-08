@@ -290,24 +290,54 @@ function compareMatches(a: LookupMatch, b: LookupMatch): number {
 	return SITE_ORDER[a.site] - SITE_ORDER[b.site];
 }
 
+/** The stricter of two ratings, either of which may be unknown. RATINGS runs
+ * lenient to strict. */
+function stricterRating(a: LookupRating | null, b: LookupRating | null): LookupRating | null {
+	if (a === null) return b;
+	if (b === null) return a;
+	return RATINGS.indexOf(a) >= RATINGS.indexOf(b) ? a : b;
+}
+
+/** Fold a duplicate of the same post into the row being kept. Dropping it
+ * instead threw away whatever only the duplicate knew: a Twitter copy with an
+ * empty artists array sorts ahead of its twin on an equal distance, and the
+ * survivor was then a handle-less `/i/status/` URL — the row read as an unknown
+ * poster, the offer to add the artist went with it, and no stored
+ * `twitter.com/{handle}/status/{id}` clashed with it. The kept row already holds
+ * the closest distance and the band that follows from it, since the list is
+ * sorted before this runs; the handles union, the rating goes to the stricter of
+ * the two, and the post URL is rebuilt from the merged handles. */
+function mergeMatch(kept: LookupMatch, duplicate: LookupMatch): LookupMatch {
+	const handles = [...kept.handles];
+	for (const handle of duplicate.handles) {
+		if (!handles.includes(handle)) handles.push(handle);
+	}
+	return {
+		...kept,
+		handles,
+		rating: stricterRating(kept.rating, duplicate.rating),
+		postUrl: postUrlFor(kept.site, kept.siteId, handles)
+	};
+}
+
 /** Normalize + filter + sort + dedupe a raw v1/image payload. Exported for
  * tests. FuzzySearch can return one post twice (two hashes of the same
  * submission), and site + siteId is the key the panel renders its rows under —
- * a repeat would crash the keyed each. Deduped after the sort, so the row that
- * survives is the closest one. */
+ * a repeat would crash the keyed each. Folded after the sort, so the row that
+ * survives is the closest one, carrying what its twins knew. */
 export function normalizeMatches(payload: unknown): LookupMatch[] {
 	if (!Array.isArray(payload)) return [];
 	const sorted = payload
 		.map((entry) => (entry && typeof entry === 'object' ? normalizeMatch(entry as RawMatch) : null))
 		.filter((m): m is LookupMatch => m !== null)
 		.sort(compareMatches);
-	const seen = new Set<string>();
-	return sorted.filter((match) => {
+	const kept = new Map<string, LookupMatch>();
+	for (const match of sorted) {
 		const key = `${match.site}\u0000${match.siteId}`;
-		if (seen.has(key)) return false;
-		seen.add(key);
-		return true;
-	});
+		const first = kept.get(key);
+		kept.set(key, first ? mergeMatch(first, match) : match);
+	}
+	return [...kept.values()];
 }
 
 /**

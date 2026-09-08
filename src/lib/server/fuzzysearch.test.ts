@@ -163,7 +163,8 @@ describe('normalizeMatches', () => {
 	});
 
 	// The panel keys its rows on site + siteId, so one post returned twice would
-	// crash the keyed each. The closest copy is the one that survives.
+	// crash the keyed each. The closest copy is the one that survives, and it
+	// takes the handles of the copies folded into it.
 	it('keeps one row per post, the closest copy', () => {
 		const deduped = normalizeMatches([
 			{ site: 'FurAffinity', site_id_str: '12345', artists: ['far'], distance: 4 },
@@ -171,7 +172,24 @@ describe('normalizeMatches', () => {
 			{ site: 'FurAffinity', site_id_str: '999', artists: ['other'], distance: 2 }
 		]);
 		expect(deduped.map((m) => `${m.siteId}:${m.distance}`)).toEqual(['12345:1', '999:2']);
-		expect(deduped[0].handles).toEqual(['near']);
+		expect(deduped[0].handles).toEqual(['near', 'far']);
+	});
+
+	// Equal distances leave the order to the payload, so the copy with no
+	// artists at all can be the one kept. Dropping its twin took the handle with
+	// it: the row said nobody posted this, offered no artist to add, and its
+	// /i/status/ URL matched no stored twitter.com/{handle}/status/{id}, so a
+	// piece already in the library raised no clash.
+	it('merges a handle-less duplicate rather than letting it win', () => {
+		const [match] = normalizeMatches([
+			{ site: 'Twitter', site_id_str: '160', artists: [], distance: 0, rating: 'general' },
+			{ site: 'Twitter', site_id_str: '160', artists: ['kuttoya'], distance: 0, rating: 'adult' }
+		]);
+		expect(match.handles).toEqual(['kuttoya']);
+		expect(match.postUrl).toBe('https://twitter.com/kuttoya/status/160');
+		// The stricter rating survives the fold: an NSFW hint must not be lost to
+		// whichever copy the payload happened to list first.
+		expect(match.rating).toBe('adult');
 	});
 
 	it('keeps the same id on two different sites', () => {
