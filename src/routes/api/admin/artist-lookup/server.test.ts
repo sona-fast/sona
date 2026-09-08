@@ -377,6 +377,27 @@ describe('artist-lookup — stored image by id', () => {
 		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
+
+	// SVG is an image type, so an `image/*` check would have sent it on. It is
+	// not one of the raster types storage accepts, the proxy demotes it to a
+	// download, and nothing is uploaded to FuzzySearch.
+	it('reports unavailable when the stored image is an svg', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.svg', '2026-01-01');`
+		);
+		const svg = new Response('<svg/>', {
+			status: 200,
+			headers: { 'content-type': 'image/svg+xml' }
+		});
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(svg).fn));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
 });
 
 describe('artist-lookup — failure mapping and the refused marker', () => {

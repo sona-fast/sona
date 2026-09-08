@@ -106,6 +106,13 @@ export function distanceBand(distance: number | null): MatchBand {
 	return 'possible';
 }
 
+/** A handle as the rest of this file wants it: trimmed, with the '@' decoration
+ * off. Handles arrive spelled either way, and one that was nothing but
+ * decoration comes back empty for the caller to fall back on. */
+function cleanHandle(handle: string): string {
+	return handle.trim().replace(/^@+/, '');
+}
+
 /** Public post URL for a match, by site. Built here rather than trusted from
  * the response so a hostile payload cannot hand the operator an arbitrary link. */
 export function postUrlFor(site: LookupSite, siteId: string, handles: string[]): string {
@@ -118,10 +125,9 @@ export function postUrlFor(site: LookupSite, siteId: string, handles: string[]):
 		case 'e621':
 			return `https://e621.net/posts/${id}`;
 		case 'Twitter': {
-			// Handles arrive spelled either way; the '@' is not part of the path.
-			// Stripped like handleProfileUrl does, and a handle that was nothing
-			// but decoration falls through to the handle-less spelling.
-			const handle = (handles[0] ?? '').trim().replace(/^@+/, '');
+			// The '@' is not part of the path, and a handle that was nothing but
+			// decoration falls through to the handle-less spelling.
+			const handle = cleanHandle(handles[0] ?? '');
 			// Without a handle Twitter still resolves the status through /i/.
 			return handle
 				? `https://twitter.com/${encodeURIComponent(handle)}/status/${id}`
@@ -133,7 +139,7 @@ export function postUrlFor(site: LookupSite, siteId: string, handles: string[]):
 /** Canonical profile URL for a handle on a site we hold an artist column for.
  * Weasyl and e621 have no column yet (SONA-219), so they resolve to null. */
 export function handleProfileUrl(site: LookupSite, handle: string): string | null {
-	const h = handle.trim().replace(/^@+/, '');
+	const h = cleanHandle(handle);
 	if (!h) return null;
 	// Percent-encoded like postUrlFor's ids: a handle is third-party text, and a
 	// slash or a '?' in it would otherwise re-point the URL at another page.
@@ -184,9 +190,11 @@ export function normalizeSourceUrl(url: string | null | undefined): string {
 	// full-size view (`/full/12345`) is the post this client builds as
 	// `/view/12345`, and e621's old post path (`/post/show/160`) is today's
 	// `/posts/160`. An operator who saved either gets no clash warning without
-	// the fold.
+	// the fold. e621's old path also carried the tag string as a trailing
+	// segment (`/post/show/160/canine`), which is the same post; FurAffinity's
+	// stays anchored, since nothing follows the id there.
 	if (host === 'furaffinity.net') path = path.replace(/^\/full\/(\d+)$/, '/view/$1');
-	if (host === 'e621.net') path = path.replace(/^\/post\/show\/(\d+)$/, '/posts/$1');
+	if (host === 'e621.net') path = path.replace(/^\/post\/show\/(\d+)(?:\/.*)?$/, '/posts/$1');
 	return host + path;
 }
 
@@ -359,7 +367,7 @@ export function findLocalArtists<T extends Record<string, unknown>>(
  * "you may already have this artist" guard rather than an automatic link.
  */
 export function findArtistsByName<T extends { name: string }>(rows: T[], handle: string): T[] {
-	const needle = handle.trim().replace(/^@+/, '').toLowerCase();
+	const needle = cleanHandle(handle).toLowerCase();
 	if (!needle) return [];
 	return rows.filter((row) => row.name.trim().toLowerCase() === needle);
 }

@@ -356,7 +356,13 @@ describe('normalizeSourceUrl', () => {
 			'furaffinity.net/view/12345'
 		);
 		expect(normalizeSourceUrl('https://e621.net/post/show/160')).toBe('e621.net/posts/160');
-		// Only the bare id form folds: a deeper path is a different page.
+		// e621's old path carried the tag string after the id, and that is still
+		// the same post — folded like a tweet's trailing segment.
+		expect(normalizeSourceUrl('https://e621.net/post/show/160/canine%20solo')).toBe(
+			'e621.net/posts/160'
+		);
+		// Only the bare id form folds on FurAffinity: a deeper path is a different
+		// page there.
 		expect(normalizeSourceUrl('https://www.furaffinity.net/full/12345/extra')).toBe(
 			'furaffinity.net/full/12345/extra'
 		);

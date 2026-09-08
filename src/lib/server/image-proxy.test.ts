@@ -153,4 +153,14 @@ describe('proxyStoredImage', () => {
 		expect(await proxyStoredImage('http://127.0.0.1/img.png', fetcher)).toBeNull();
 		expect(called).toBe(false);
 	});
+
+	// A fetch that REJECTS rather than answering — DNS failure, reset connection,
+	// TLS error. Handled here rather than in each route, so all three callers
+	// report the stored image as unreachable instead of throwing a 500.
+	it('answers null when the fetch rejects', async () => {
+		const rejecting = (async () => {
+			throw new TypeError('fetch failed');
+		}) as unknown as typeof fetch;
+		expect(await proxyStoredImage('https://cdn.example/img.png', rejecting)).toBeNull();
+	});
 });

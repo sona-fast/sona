@@ -3,6 +3,7 @@ import { eq, isNotNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { images, artists } from '$lib/server/db/schema';
 import { proxyStoredImage } from '$lib/server/image-proxy';
+import { isAllowedImageType } from '$lib/server/storage/allowlist';
 import { bufferStream, MaxBytesExceededError } from '$lib/server/storage/buffer';
 import { getRawSetting, setRawSetting } from '$lib/server/settings';
 import {
@@ -112,17 +113,10 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		selfImage = { id: row.id, parentImageId: row.parentImageId };
 
 		// Server-side fetch of a URL the SERVER looked up, with the shared
-		// hardening: private and link-local hosts refused, redirects not
-		// followed, image/* content types only.
-		let stored: Response | null;
-		try {
-			stored = await proxyStoredImage(row.imageUrl, fetch);
-		} catch {
-			// A DNS failure, a reset connection or a TLS error rejects rather than
-			// answering — the stored image is as unreachable as when the proxy
-			// refuses it outright, so it reports the same way.
-			return failure('unavailable');
-		}
+		// hardening: private and link-local hosts refused, redirects not followed,
+		// only the stored raster types echoed back inline. A refusal, an upstream
+		// error and a rejected fetch all arrive here as null.
+		const stored = await proxyStoredImage(row.imageUrl, fetch);
 		if (!stored?.body) return failure('unavailable');
 		// Lowercased: media types are case-insensitive, so an `Image/PNG` header
 		// must pass the same check as `image/png`.
@@ -130,7 +124,10 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			.split(';')[0]
 			.trim()
 			.toLowerCase();
-		if (!storedType.startsWith('image/')) {
+		// The same allowlist the proxy applies, named rather than re-guessed: the
+		// proxy hands anything outside it back as application/octet-stream, and
+		// `image/*` would also let through the SVG it deliberately demoted.
+		if (!isAllowedImageType(storedType)) {
 			return failure('unavailable');
 		}
 		try {

@@ -89,7 +89,16 @@ export async function proxyStoredImage(
 
 	// A storage host answering with a redirect is unexpected — treat it as an
 	// upstream error rather than following it to an arbitrary location.
-	const upstream = await fetcher(imageUrl, { redirect: 'manual' });
+	let upstream: Response;
+	try {
+		upstream = await fetcher(imageUrl, { redirect: 'manual' });
+	} catch {
+		// A DNS failure, a reset connection or a TLS error rejects rather than
+		// answering. The stored image is as unreachable as it is on a non-ok
+		// response, so it reports the same way — every caller already handles null,
+		// and none of them has to answer 500 to a network blip.
+		return null;
+	}
 	if (!upstream.ok || !upstream.body) return null;
 
 	const contentType = upstream.headers.get('content-type') ?? '';
