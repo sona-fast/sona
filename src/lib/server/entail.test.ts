@@ -260,6 +260,13 @@ describe('lookupBlueskySource', () => {
 		]
 	};
 
+	it('clamps the image count to what a post can carry', async () => {
+		const many = { images: Array.from({ length: 9 }, () => post.images[0]) };
+		const fetchImpl = vi.fn(async (_url: string | URL | Request) => json(many));
+		const outcome = await lookupBlueskyPost(url, fetchImpl);
+		expect(outcome.ok && outcome.imageCount).toBe(4);
+	});
+
 	it('uses the first image only, and reports how many there were', async () => {
 		const fetchImpl = vi.fn(async (_url: string | URL | Request) => json(post));
 		expect(await lookupBlueskyPost(url, fetchImpl)).toEqual({

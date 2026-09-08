@@ -35,6 +35,10 @@ export const MAX_RAW_ENTRIES = 200;
  * hostile, and the tail past the bound is dropped unsorted. */
 export const MAX_SORTED_ENTRIES = 2000;
 
+/** Bluesky allows four images per post; anything above that in a reply is a
+ * hostile or broken body, so the count shown to the operator is clamped. */
+export const MAX_POST_IMAGES = 4;
+
 /** Longest raw tag name translateTag looks at. e621 tags run well under this;
  * the cut keeps the qualifier-stripping regex off a very long input. */
 const MAX_RAW_TAG_LENGTH = 200;
@@ -270,7 +274,7 @@ export async function lookupBlueskySource(
 		return {
 			ok: true,
 			suggestions: suggestionsFromResult(images[0]),
-			imageCount: images.length
+			imageCount: Math.min(images.length, MAX_POST_IMAGES)
 		};
 	} catch (e) {
 		console.warn(`[entail] post lookup error: ${errorLabel(e)}`);

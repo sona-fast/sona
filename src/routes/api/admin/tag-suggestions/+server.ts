@@ -18,6 +18,10 @@ import type { RequestHandler } from './$types';
 // Suggests tags for an image from its source post, by asking entail.dev's
 // public classifier what is in the picture (SONA-220). Two request shapes:
 //
+// Caller contract: a 202 is `not_ready` and carries `{ error }` with no tags,
+// even though `res.ok` is true. Branch on `res.status === 202` (retry later)
+// before treating an ok response as a suggestion payload.
+//
 //   { imageId }        — the edit page, where the source URL is already stored.
 //   { sourcePostUrl }  — the upload page, where there is no image row yet and
 //                        the URL is whatever the operator has typed so far.
