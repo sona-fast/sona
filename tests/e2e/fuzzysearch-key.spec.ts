@@ -12,6 +12,9 @@ import { adminLogin } from './admin-login';
 // actions, saveFuzzysearchKey and removeFuzzysearchKey, and ends with the key
 // removed — which is the seeded state every other spec sees. The invalid-key
 // submission below persists nothing (it fails the shape check server-side).
+// Because every copy shares that one row, stress-running this file with
+// --repeat-each needs --workers=1; parallel copies race each other over the
+// key and fail for that reason alone. CI runs it once.
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
