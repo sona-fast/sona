@@ -50,8 +50,11 @@ after a fetch gives the same view from a clone.
 
 ## Read before upgrading: tag suggestions call entail.dev (SONA-220)
 
-This release adds an admin-only tag suggestion lookup for artwork. Only you can
-start it, and nothing runs on its own. When you do, the site sends a public
+This release adds an admin-only tag suggestion lookup for artwork. You will find
+it in three places: the **Suggest tags** button beside the Tags field when you
+upload a piece, the same button on a piece's edit page, and a **Suggest tags**
+page under All Images that works through everything you have with a Bluesky or X
+source post and no tags yet. Only you can start it, and nothing runs on its own. When you do, the site sends a public
 link to entail.dev, an image classifier, and shows you the tags it returns. For a
 Bluesky post that link is the post itself. For an X post the site first asks X's
 own API which picture the post carries, then sends the picture link X hands back.
