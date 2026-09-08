@@ -14,6 +14,7 @@
 		strictestRating,
 		bandLabel,
 		candidateArtists,
+		lookupSentFile,
 		type LookupFields,
 		type LookupSite,
 		type LookupState,
@@ -480,31 +481,27 @@
 		return own.length > 0 && !own.some((a) => a.id === appliedArtist?.id);
 	}
 
-	function tileResultLine(tile: Tile): string {
-		if (tile.lookup.kind !== 'results') return '';
-		const match = pickPrefillMatch(tile.lookup.data.matches) ?? tile.lookup.data.matches[0];
-		if (!match) return '';
+	/** Everything a variant tile shows from its own result. One guard and one
+	 * match fallback (the closest confident match, else the first row) rather
+	 * than the same pair re-derived per field. Null when there is nothing to
+	 * show. */
+	function tileResult(tile: Tile) {
+		if (tile.lookup.kind !== 'results') return null;
+		const matches = tile.lookup.data.matches;
+		const match = pickPrefillMatch(matches) ?? matches[0];
+		if (!match) return null;
 		const handle = matchHandle(match) || tile.fileName;
 		const site = siteLabel(match.site);
-		if (differentArtist(tile)) return m.admin_lookup_tile_different({ handle, site });
-		return m.admin_lookup_tile_result({ handle, site, band: bandLabel(match.band) ?? '' });
-	}
-
-	function tileRatingTag(tile: Tile): string | null {
-		if (tile.lookup.kind !== 'results') return null;
-		return ratingTag(strictestRating(tile.lookup.data.matches));
-	}
-
-	function tilePostUrl(tile: Tile): string {
-		if (tile.lookup.kind !== 'results') return '';
-		const match = pickPrefillMatch(tile.lookup.data.matches) ?? tile.lookup.data.matches[0];
-		return match?.postUrl ?? '';
-	}
-
-	function tilePostSite(tile: Tile): LookupSite | null {
-		if (tile.lookup.kind !== 'results') return null;
-		const match = pickPrefillMatch(tile.lookup.data.matches) ?? tile.lookup.data.matches[0];
-		return match?.site ?? null;
+		const different = differentArtist(tile);
+		return {
+			different,
+			line: different
+				? m.admin_lookup_tile_different({ handle, site })
+				: m.admin_lookup_tile_result({ handle, site, band: bandLabel(match.band) ?? '' }),
+			postUrl: match.postUrl,
+			site: match.site,
+			ratingTag: ratingTag(strictestRating(matches))
+		};
 	}
 </script>
 
@@ -613,6 +610,7 @@
 							type="button"
 							class="tile-lookup"
 							aria-busy={tile.lookup.kind === 'searching'}
+							aria-describedby="lookup-hint"
 							onclick={() => startLookup(tile.key)}
 						>
 							<Search size={12} aria-hidden="true" />
@@ -637,16 +635,20 @@
 							</label>
 						{/if}
 						{#if groupMode === 'existing' || parentIndex !== i}
-							{#if tile.lookup.kind === 'results'}
-								{@const site = tilePostSite(tile)}
-								<p class="tile-result" class:tile-result-warn={differentArtist(tile)}>{tileResultLine(tile)}</p>
-								{#if site}
-									<a class="tile-post-link" href={tilePostUrl(tile)} target="_blank" rel="noopener noreferrer">
-										{m.admin_lookup_view_post()}<span class="sr-only"
-											>{m.admin_lookup_view_post_site({ site: siteLabel(site) })}</span
-										>
-									</a>
-								{/if}
+							{@const result = tileResult(tile)}
+							{#if result}
+								<p class="tile-result" class:tile-result-warn={result.different}>{result.line}</p>
+								<a class="tile-post-link" href={result.postUrl} target="_blank" rel="noopener noreferrer">
+									{m.admin_lookup_view_post()}<span class="sr-only"
+										>{m.admin_lookup_view_post_site({ site: siteLabel(result.site) })}</span
+									>
+								</a>
+							{/if}
+							<!-- The file went to FuzzySearch while the shared Private box was
+							     checked: say so on the tile the way the panel says it for the
+							     parent. -->
+							{#if isPrivate && lookupSentFile(tile.lookup)}
+								<p class="tile-private-notice">{m.admin_lookup_private_notice()}</p>
 							{/if}
 							<input
 								type="text"
@@ -655,7 +657,7 @@
 								placeholder={m.admin_variant_label_placeholder()}
 								bind:value={tile.label}
 							/>
-							{@const tileTag = tileRatingTag(tile)}
+							{@const tileTag = result?.ratingTag ?? null}
 							<!-- The pill is a SIBLING of the label, not inside it: inside, it
 							     would join the checkbox's accessible name and a click on it
 							     would toggle the box (SONA-220). -->
@@ -773,7 +775,8 @@
 		</div>
 		{#if data.lookupEnabled}
 			<small class="hint" class:hint-warn={isPrivate} id="lookup-hint">
-				{#if isGroup}{m.admin_lookup_hint_multi()}
+				{#if isGroup && isPrivate}{m.admin_lookup_hint_multi_private()}
+				{:else if isGroup}{m.admin_lookup_hint_multi()}
 				{:else if isPrivate}{m.admin_lookup_hint_private()}
 				{:else}{m.admin_lookup_hint()}{/if}
 			</small>
@@ -790,7 +793,7 @@
 				fileName={tiles.length > 1 ? (parentTile?.fileName ?? '') : ''}
 				filled={sharedFilled}
 				{appliedArtist}
-				privateNotice={isPrivate && sharedLookup.kind === 'results'}
+				privateNotice={isPrivate && lookupSentFile(sharedLookup)}
 				onclose={closeSharedLookup}
 				onretry={() => parentTile && startLookup(parentTile.key)}
 				oncancel={() => parentTile && cancelLookup(parentTile.key)}
@@ -1376,6 +1379,13 @@
 	.tile-post-link {
 		font-size: 12px;
 		color: var(--link);
+	}
+
+	.tile-private-notice {
+		font-size: 12px;
+		color: var(--status-warn);
+		margin: 0;
+		line-height: 1.4;
 	}
 
 	.label-row {

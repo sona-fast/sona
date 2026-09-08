@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { X, Loader2 } from 'lucide-svelte';
 	import { toast } from '$lib/toast.svelte';
 	import * as m from '$lib/paraglide/messages';
@@ -51,11 +51,14 @@
 	// Mirrors the Edit Artist modal on /admin/artists, but creates via the
 	// /api/artists endpoint (AJAX) so the caller gets the new id back immediately
 	// and can use it in dropdowns without a page reload.
-	let name = $state(initialName);
-	let twitter = $state(initialSocials?.twitter ?? '');
+	// Seeds, read once: these props describe how the dialog OPENS, and a later
+	// prop change must not overwrite what the operator has since typed. untrack
+	// is the documented spelling for that (the ConCard pattern).
+	let name = $state(untrack(() => initialName));
+	let twitter = $state(untrack(() => initialSocials?.twitter ?? ''));
 	let bluesky = $state('');
 	let telegram = $state('');
-	let furaffinity = $state(initialSocials?.furaffinity ?? '');
+	let furaffinity = $state(untrack(() => initialSocials?.furaffinity ?? ''));
 	let deviantart = $state('');
 	let patreon = $state('');
 	let instagram = $state('');

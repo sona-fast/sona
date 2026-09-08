@@ -35,8 +35,15 @@ describe('lookup button and its disclosure hint', () => {
 		}
 	});
 
-	it('explains the per-tile split on the upload page', () => {
+	it('explains the per-tile split on the upload page, in both its variants', () => {
 		expect(UPLOAD).toContain('m.admin_lookup_hint_multi()');
+		// The multi-tile hint names FuzzySearch and has its own private wording;
+		// the warn class swap alone was claiming a disclosure that wasn't there.
+		expect(UPLOAD).toContain('m.admin_lookup_hint_multi_private()');
+	});
+
+	it('describes each per-tile button with that same hint', () => {
+		expect(UPLOAD).toMatch(/class="tile-lookup"[\s\S]*?aria-describedby="lookup-hint"/);
 	});
 });
 
@@ -50,7 +57,7 @@ describe('the panel', () => {
 		// Third-party post URLs: never hand the opener over.
 		expect(PANEL).toMatch(/href=\{match\.postUrl\}\s+target="_blank"\s+rel="noopener noreferrer"/);
 		expect(PANEL).toContain('m.admin_lookup_view_post_site(');
-		expect(UPLOAD).toMatch(/href=\{tilePostUrl\(tile\)\}\s+target="_blank"\s+rel="noopener noreferrer"/);
+		expect(UPLOAD).toMatch(/href=\{result\.postUrl\}\s+target="_blank"\s+rel="noopener noreferrer"/);
 	});
 
 	it('covers every failure state the endpoint can report', () => {
@@ -80,6 +87,26 @@ describe('the panel', () => {
 	it('names the private-image disclosure after the lookup, in warn', () => {
 		expect(PANEL).toContain('m.admin_lookup_private_notice()');
 		expect(PANEL).toMatch(/\.private-notice \{[^}]*var\(--status-warn\)/);
+	});
+
+	// The file has already gone out on a failure too, so both pages key the
+	// notice off lookupSentFile rather than off a result (SONA-156 round 1).
+	it('shows the notice whenever the file actually went out', () => {
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(/privateNotice=\{isPrivate && lookupSentFile\(/);
+		}
+		// And on a variant tile whose lookup ran while Private was checked.
+		expect(UPLOAD).toMatch(/isPrivate && lookupSentFile\(tile\.lookup\)/);
+	});
+
+	it('shows the clash thumbnail row with the piece it points at', () => {
+		expect(PANEL).toMatch(/class="clash-thumb"[\s\S]*?alt=""/);
+		expect(PANEL).toContain('m.admin_lookup_clash_uploaded(');
+	});
+
+	it('counts the ambiguous candidates and their pieces', () => {
+		expect(PANEL).toContain('count: candidates.length');
+		expect(PANEL).toContain('m.admin_lookup_pieces(');
 	});
 });
 
@@ -136,7 +163,13 @@ describe('the upload page grid', () => {
 	it('marks a busy tile button rather than disabling it', () => {
 		expect(UPLOAD).toMatch(/aria-busy=\{tile\.lookup\.kind === 'searching'\}/);
 		// A second click while one is in flight is ignored in startLookup.
-		expect(UPLOAD).toMatch(/if \(!tile \|\| !tile\.file \|\| tile\.lookup\.kind === 'searching'\) return;/);
+		expect(UPLOAD).toMatch(/function startLookup[\s\S]{0,200}?kind === 'searching'\) return;/);
+	});
+
+	it('derives every per-tile result field from one guarded helper', () => {
+		expect(UPLOAD).toMatch(/function tileResult\(/);
+		// The old shape re-derived the match (and re-guarded the state) per field.
+		expect(UPLOAD).not.toMatch(/function tile(ResultLine|RatingTag|PostUrl|PostSite)\(/);
 	});
 
 	it('holds the file on the tile so the bytes are what gets posted', () => {
@@ -161,12 +194,17 @@ describe('the new-artist dialog prefill', () => {
 
 	it('searches the registry once on open for a seeded name', () => {
 		expect(DIALOG).toMatch(/if \(prefillSource === 'lookup'\) onNameInput\(\);/);
-		expect(DIALOG).toMatch(/let name = \$state\(initialName\);/);
-		expect(DIALOG).toMatch(/let twitter = \$state\(initialSocials\?\.twitter \?\? ''\);/);
-		expect(DIALOG).toMatch(/let furaffinity = \$state\(initialSocials\?\.furaffinity \?\? ''\);/);
+	});
+
+	// Seeds, not bindings: read once through untrack so a later prop change
+	// cannot overwrite what the operator typed (and so svelte-check is quiet).
+	it('reads each seed prop once', () => {
+		for (const prop of ['initialName', 'initialSocials?.twitter', 'initialSocials?.furaffinity']) {
+			expect(DIALOG).toContain(`$state(untrack(() => ${prop}`);
+		}
 	});
 
 	it('gives the prefilled social row the whole width', () => {
-		expect(DIALOG).toMatch(/\.social-grid\.has-prefill \.social-field\.span-full \{ grid-column: 1 \/ -1; \}/);
+		expect(DIALOG).toMatch(/\.social-field\.span-full \{[^}]*grid-column: 1 \/ -1/);
 	});
 });

@@ -71,6 +71,16 @@
 	const clash = $derived(data?.sourceClash ?? null);
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
 	const statusKind = $derived(statusLineKind(filled, { clash: !!clash }));
+	// "Uploaded {date} · {artist}", with either half dropped when the row has no
+	// answer for it rather than spelled out as a blank.
+	const clashMeta = $derived.by(() => {
+		if (!clash) return '';
+		const parts: string[] = [];
+		const date = postDateToInput(clash.uploadedAt);
+		if (date) parts.push(m.admin_lookup_clash_uploaded({ date }));
+		if (clash.artistName) parts.push(clash.artistName);
+		return parts.join(' · ');
+	});
 
 	// The ambiguous state's radio list. Reset whenever the result changes so a
 	// stale pick can't be applied to a different lookup.
@@ -138,6 +148,17 @@
 			{:else if data}
 				{#if clash}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_clash_eyebrow()}</div>
+					<!-- The piece itself, so the operator recognizes it without opening it.
+					     The thumbnail is decorative: the title beside it already names it. -->
+					<div class="clash-row">
+						{#if clash.thumbnailUrl}
+							<img class="clash-thumb" src={clash.thumbnailUrl} alt="" />
+						{/if}
+						<span class="clash-id">
+							<span class="clash-title">{clash.title}</span>
+							{#if clashMeta}<span class="clash-meta">{clashMeta}</span>{/if}
+						</span>
+					</div>
 					<p class="lookup-lead">
 						{m.admin_lookup_clash_body({
 							site: siteLabel(prefill ? prefill.site : 'FurAffinity'),
@@ -186,8 +207,8 @@
 						<p class="outcome">
 							<Info size={14} aria-hidden="true" />
 							{isCrossSiteAmbiguity(data)
-								? m.admin_lookup_ambiguous_cross()
-								: m.admin_lookup_ambiguous({ handle })}
+								? m.admin_lookup_ambiguous_cross({ count: candidates.length })
+								: m.admin_lookup_ambiguous({ handle, count: candidates.length })}
 						</p>
 						<fieldset class="pick-list">
 							<legend class="sr-only">{m.admin_lookup_which_one()}</legend>
@@ -195,6 +216,9 @@
 								<label class="pick-row">
 									<input type="radio" name="lookup-artist-pick" value={String(candidate.id)} bind:group={picked} />
 									<span>{candidate.name}</span>
+									{#if candidate.pieces !== undefined}
+										<span class="pick-meta">{m.admin_lookup_pieces({ count: candidate.pieces })}</span>
+									{/if}
 									{#if isCrossSiteAmbiguity(data)}
 										<span class="pick-meta">{m.admin_lookup_via_site({ site: siteLabel(candidate.site) })}</span>
 									{/if}
@@ -385,6 +409,33 @@
 	}
 	.skeleton:nth-child(3) {
 		width: 60%;
+	}
+	.clash-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 10px;
+	}
+	.clash-thumb {
+		width: 44px;
+		height: 44px;
+		object-fit: cover;
+		border-radius: var(--radius-xs);
+		flex: none;
+	}
+	.clash-id {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+	.clash-title {
+		font-size: 14px;
+		color: var(--foreground);
+	}
+	.clash-meta {
+		font-size: 12px;
+		color: var(--muted-foreground);
 	}
 	.match-list {
 		list-style: none;

@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { Loader2, Search } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
 	import {
+		lookupSentFile,
 		pickPrefillMatch,
 		prefillFields,
 		profileUrlFor,
@@ -39,11 +40,14 @@
 	// value, and the artist only changes on an explicit click.
 	let lookup = $state<LookupState>({ kind: 'idle' });
 	let lookupFilled = $state<LookupFields>({});
-	let sourcePostUrl = $state(data.image.sourcePostUrl || '');
-	let commissionedAt = $state(data.image.commissionedAt || '');
+	// Read once, like every other form seed on this page: these are the values
+	// the form OPENS with, and a later `data` change must not throw away what the
+	// operator has typed. untrack is the documented spelling for that.
+	let sourcePostUrl = $state(untrack(() => data.image.sourcePostUrl || ''));
+	let commissionedAt = $state(untrack(() => data.image.commissionedAt || ''));
 	// Number, not a string: the option values are numbers and the select binding
 	// compares with Object.is.
-	let selectedArtistId = $state<string | number>(data.image.artistId ?? '');
+	let selectedArtistId = $state<string | number>(untrack(() => data.image.artistId ?? ''));
 	let sourceTagged = $state(false);
 	let dateTagged = $state(false);
 	let appliedArtist = $state<{ id: number; name: string } | null>(null);
@@ -54,7 +58,7 @@
 
 	// The image is not published, so "look this up" means "send a private file to
 	// a third party" — say so before the click and again after it.
-	const isPrivate = !data.image.published;
+	const isPrivate = $derived(!data.image.published);
 	const ratingTagText = $derived(
 		lookup.kind === 'results' ? ratingTag(strictestRating(lookup.data.matches)) : null
 	);
@@ -247,7 +251,7 @@
 				filled={lookupFilled}
 				{appliedArtist}
 				editMode
-				privateNotice={isPrivate && lookup.kind === 'results'}
+				privateNotice={isPrivate && lookupSentFile(lookup)}
 				onclose={() => (lookup = { kind: 'idle' })}
 				onretry={startLookup}
 				oncancel={cancelLookup}

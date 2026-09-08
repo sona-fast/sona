@@ -1787,7 +1787,8 @@
 	"admin_lookup_button_for": " for {fileName}",
 	"admin_lookup_hint": "Sona sends this image to FuzzySearch to find who posted it.",
 	"admin_lookup_hint_private": "This image is private. Looking it up still sends the file to FuzzySearch.",
-	"admin_lookup_hint_multi": "Sona looks up each tile separately. The parent's result fills the shared fields below; a variant's result only rates that variant.",
+	"admin_lookup_hint_multi": "Sona sends each image to FuzzySearch to find who posted it. The parent's result fills the shared fields below; a variant's result only rates that variant.",
+	"admin_lookup_hint_multi_private": "These images are private. Looking them up still sends the files to FuzzySearch. The parent's result fills the shared fields below; a variant's result only rates that variant.",
 	"admin_lookup_no_key_pre": "Sona can find who posted a piece if you add a FuzzySearch key in ",
 	"admin_lookup_no_key_link": "Settings",
 	"admin_lookup_no_key_post": ".",
@@ -1813,7 +1814,7 @@
 			}
 		}
 	],
-	"admin_lookup_eyebrow_file": "· {fileName}",
+	"admin_lookup_eyebrow_file": " · {fileName}",
 	"admin_lookup_match_line": "{handles} on {site}",
 	"admin_lookup_match_unknown": "Unknown poster on {site}",
 	"admin_lookup_band_exact": "Exact match",
@@ -1829,9 +1830,52 @@
 	"admin_lookup_use_artist": "Use {name}",
 	"admin_lookup_using_artist": "Using {name}",
 	"admin_lookup_close": "Close",
-	"admin_lookup_ambiguous": "{handle} matches two artists in your list.",
-	"admin_lookup_ambiguous_cross": "These matches point to two artists in your list.",
+	"admin_lookup_ambiguous": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{handle} matches {count} artist in your list.",
+				"countPlural=other": "{handle} matches {count} artists in your list."
+			}
+		}
+	],
+	"admin_lookup_ambiguous_cross": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "These matches point to {count} artist in your list.",
+				"countPlural=other": "These matches point to {count} artists in your list."
+			}
+		}
+	],
 	"admin_lookup_which_one": "Which one?",
+	"admin_lookup_pieces": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} piece",
+				"countPlural=other": "{count} pieces"
+			}
+		}
+	],
 	"admin_lookup_via_site": "via {site}",
 	"admin_lookup_use_selected": "Use selected artist",
 	"admin_lookup_new": "{handle} isn't in your artist list yet.",
@@ -1856,11 +1900,12 @@
 			}
 		}
 	],
+	"admin_lookup_clash_uploaded": "Uploaded {date}",
 	"admin_lookup_clash_add_variant": "Add as a variant",
 	"admin_lookup_clash_open": "Open {title}",
 	"admin_lookup_status_both": "Sona filled the source post URL and commissioned date from the {site} post. You can change both before you save.",
 	"admin_lookup_status_url_only": "Sona filled the source post URL from the {site} post. That post has no date, so the commissioned date is unchanged.",
-	"admin_lookup_status_date_only": "Sona filled the commissioned date from the {site} post. That post has no URL to save, so the source post URL is unchanged.",
+	"admin_lookup_status_date_only": "Sona filled the commissioned date from the {site} post and left the source post URL alone. You can change the date before you save.",
 	"admin_lookup_status_clash": "Sona filled the commissioned date from the {site} post and left the source post URL empty because {title} already uses it. You can change the date before you save.",
 	"admin_lookup_status_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was.",
 	"admin_lookup_status_artist_hint": "Click Use {name} to change the artist.",
@@ -1869,7 +1914,7 @@
 	"admin_lookup_no_match_hint": "Add the artist by hand, or try again with the original file.",
 	"admin_lookup_try_again": "Try again",
 	"admin_lookup_paused_eyebrow": "Lookup paused",
-	"admin_lookup_paused_body": "FuzzySearch is rate limiting your site right now.",
+	"admin_lookup_paused_body": "FuzzySearch is limiting how often your site can search right now.",
 	"admin_lookup_paused_hint": "Try again in a minute, or add the artist by hand. Your upload is unaffected.",
 	"admin_lookup_refused_eyebrow": "Key refused",
 	"admin_lookup_refused_body": "FuzzySearch didn't accept your API key.",

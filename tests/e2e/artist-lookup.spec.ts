@@ -231,9 +231,17 @@ test.describe('with a key saved', () => {
 	test('a rate limit pauses the lookup and keeps the upload usable', async ({ page }) => {
 		await stubLookup(page, { enabled: true, error: 'rate_limited' }, 429);
 		await oneDoneTile(page);
+		// Private, so the file leaving for a lookup that then FAILED still has to
+		// be disclosed — the notice is not for results only (SONA-156 round 1).
+		await page.check('input[name="published"]');
 		await pill(page).click();
 
-		await expect(panel(page)).toContainText('FuzzySearch is rate limiting your site right now.');
+		await expect(panel(page)).toContainText(
+			'FuzzySearch is limiting how often your site can search right now.'
+		);
+		await expect(panel(page)).toContainText(
+			'This image is private. Sona sent the file to FuzzySearch for this lookup.'
+		);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toBeVisible();
 
 		// Close puts the panel away and leaves the form alone.
