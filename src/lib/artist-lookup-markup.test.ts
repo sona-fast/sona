@@ -12,6 +12,7 @@ const UPLOAD = read('src/routes/admin/upload/+page.svelte');
 const EDIT = read('src/routes/admin/images/[id]/edit/+page.svelte');
 const PANEL = read('src/lib/components/ArtistLookupPanel.svelte');
 const DIALOG = read('src/lib/components/NewArtistDialog.svelte');
+const ANNOUNCER = read('src/lib/components/LiveAnnouncer.svelte');
 
 describe('lookup button and its disclosure hint', () => {
 	it('offers the button only when a key is configured, on both pages', () => {
@@ -145,7 +146,7 @@ describe('the panel', () => {
 	it('shows the clash thumbnail row with the piece it points at', () => {
 		expect(PANEL).toMatch(/class="clash-thumb"[\s\S]*?alt=""/);
 		expect(PANEL).toContain('m.admin_lookup_clash_uploaded(');
-		// "Uploaded {date} · {artist} · {w} x {h}", with the size dropped rather
+		// "Uploaded {date} · {artist} · {w} × {h}", with the size dropped rather
 		// than rendered blank on a row that has no width or height.
 		expect(PANEL).toMatch(
 			/if \(clash\.width && clash\.height\)[\s\S]{0,160}?m\.admin_lookup_clash_dimensions\(/
@@ -299,7 +300,9 @@ describe('what a lookup says out loud', () => {
 			'admin_lookup_announce_tile_no_match',
 			'admin_lookup_announce_tile_failed'
 		]) {
-			expect(UPLOAD).toMatch(new RegExp(`setAnnounce\\(\\s*m\\.${id}\\(|m\\.${id}\\(\\{ fileName`));
+			expect(UPLOAD).toMatch(
+				new RegExp(`announcer\\.say\\(\\s*m\\.${id}\\(|m\\.${id}\\(\\{ fileName`)
+			);
 		}
 	});
 
@@ -307,21 +310,28 @@ describe('what a lookup says out loud', () => {
 	it('announces the artist the panel applied', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(
-				/function useLookupArtist[\s\S]{0,400}?setAnnounce\(m\.admin_lookup_announce_using\(/
+				/function useLookupArtist[\s\S]{0,400}?announcer\.say\(m\.admin_lookup_announce_using\(/
 			);
-			// The region has to be there before the message is, and only the node
-			// inside it is keyed so a repeat still reads out.
-			expect(source).toMatch(
-				/class="sr-only" aria-live="polite">\{#key announceUid\}<span>\{announce\}<\/span>/
-			);
+			// The region has to be there before the message is. Both pages mount the
+			// one component rather than each keeping their own copy of it.
+			expect(source).toContain("import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte'");
+			expect(source).toContain('<LiveAnnouncer {announcer} />');
 		}
+		// Only the node inside the region is keyed, so a repeat still reads out.
+		expect(ANNOUNCER).toMatch(
+			/class="sr-only" aria-live="polite">\{#key announcer\.uid\}<span>\{announcer\.text\}<\/span>/
+		);
 	});
 
 	// "Add New Artist" from the no_match state seeds nothing, so the seed status
-	// line says nothing while the select is replaced by a name field.
-	it('announces the flip to the inline new-artist form when the seed is empty', () => {
+	// line says nothing while the select is replaced by a name field. A result
+	// that already flipped the form and filled it must not replay that sentence.
+	it('announces the flip to the inline new-artist form only when the mode changed', () => {
 		expect(EDIT).toMatch(
-			/seedStatusKind\(lookupSeeded\) === 'none'\) setAnnounce\(m\.admin_lookup_announce_new_form\(/
+			/const wasExisting = artistMode === 'existing';\s*\n\s*artistMode = 'new';/
+		);
+		expect(EDIT).toMatch(
+			/wasExisting && seedStatusKind\(lookupSeeded\) === 'none'\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_new_form\(/
 		);
 	});
 });
@@ -363,6 +373,13 @@ describe('the upload page grid', () => {
 		expect(UPLOAD).toMatch(/function tileResult\(/);
 		// The old shape re-derived the match (and re-guarded the state) per field.
 		expect(UPLOAD).not.toMatch(/function tile(ResultLine|RatingTag|PostUrl|PostSite)\(/);
+	});
+
+	// The file name is not a poster, and "{handle} on {site}" reads as though it
+	// were. tileResultText names an unknown poster instead.
+	it('never puts the file name where the result line promises a handle', () => {
+		expect(UPLOAD).toMatch(/const handle = matchHandle\(match\);/);
+		expect(UPLOAD).not.toMatch(/matchHandle\(match\) \|\| tile\.fileName/);
 	});
 
 	it('holds the file on the tile so the bytes are what gets posted', () => {

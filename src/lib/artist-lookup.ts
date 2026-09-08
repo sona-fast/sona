@@ -112,13 +112,20 @@ export function bandLabel(band: MatchBand): string | null {
  * parts so they cannot drift, and the separator is added only between two
  * present parts — a match with no distance carries no band, and a dangling
  * middle dot would render as "handle on site · " and be spoken as "dot".
+ *
+ * A match can name no handle at all (a Twitter post the API returns without
+ * one). "{handle} on {site}" promises a poster, so the empty case gets the
+ * panel's own "Unknown poster on {site}" rather than something standing in for
+ * a name.
  */
 export function tileResultText(
 	handle: string,
 	site: LookupSite,
 	band: MatchBand
 ): { line: string; spoken: string } {
-	const result = m.admin_lookup_tile_result({ handle, site: siteLabel(site) });
+	const result = handle.trim()
+		? m.admin_lookup_tile_result({ handle, site: siteLabel(site) })
+		: m.admin_lookup_match_unknown({ site: siteLabel(site) });
 	const label = bandLabel(band);
 	if (!label) return { line: result, spoken: result };
 	return {

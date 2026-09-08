@@ -1900,7 +1900,7 @@
 			}
 		}
 	],
-	"admin_lookup_clash_dimensions": "{width} x {height}",
+	"admin_lookup_clash_dimensions": "{width} × {height}",
 	"admin_lookup_clash_uploaded": "Uploaded {date}",
 	"admin_lookup_clash_add_variant": "Add as a variant",
 	"admin_lookup_clash_open": "Open {title}",
@@ -1910,9 +1910,9 @@
 	"admin_lookup_status_clash": "Sona filled the commissioned date from the {site} post and left the source post URL empty because {title} already uses it. You can change the date before you save.",
 	"admin_lookup_status_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was.",
 	"admin_lookup_status_artist_hint": "Click Use {name} to change the artist.",
-	"admin_lookup_status_seed_both": "Sona filled the new artist's name and {site} link. Check both before you save. They're a guess until you check them, and you're the one publishing them.",
-	"admin_lookup_status_seed_name": "Sona filled the new artist's name. Check it before you save. It's a guess until you check it, and you're the one publishing it.",
-	"admin_lookup_status_seed_link": "Sona filled the new artist's {site} link. Check it before you save. It's a guess until you check it, and you're the one publishing it.",
+	"admin_lookup_status_seed_both": "Sona filled the new artist's name and {site} link. They're a guess until you check them, and you're the one publishing them.",
+	"admin_lookup_status_seed_name": "Sona filled the new artist's name. It's a guess until you check it, and you're the one publishing it.",
+	"admin_lookup_status_seed_link": "Sona filled the new artist's {site} link. It's a guess until you check it, and you're the one publishing it.",
 	"admin_lookup_no_match_eyebrow": "No match",
 	"admin_lookup_no_match_body": "Nothing matched on FurAffinity, Weasyl, e621, or Twitter. The piece might not be posted publicly, or it might have been cropped or edited since it was posted.",
 	"admin_lookup_no_match_hint": "Add the artist by hand, or try again with the original file.",

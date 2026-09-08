@@ -4,6 +4,8 @@
 	import { Loader2, Search } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
+	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
+	import { Announcer } from '$lib/live-announcer.svelte';
 	import {
 		lookupSentFile,
 		newArtistSeed,
@@ -65,15 +67,8 @@
 	let lookupAbort: AbortController | null = null;
 	// The artist select sits above the panel and the panel's own status region
 	// does not change when an artist is applied, so this is the only thing that
-	// reports it (4.1.3). Keyed on a counter for the same reason the upload page
-	// keys its region: re-assigning identical text changes no DOM, and a region
-	// that does not change is never read out.
-	let announce = $state('');
-	let announceUid = $state(0);
-	function setAnnounce(text: string) {
-		announce = text;
-		announceUid++;
-	}
+	// reports it (4.1.3).
+	const announcer = new Announcer();
 	// Closing or cancelling the panel destroys the button the operator is
 	// standing on, so focus is moved back here first (2.4.3).
 	let lookupPill = $state<HTMLButtonElement | null>(null);
@@ -193,7 +188,7 @@
 		artistMode = 'existing';
 		selectedArtistId = artist.id;
 		appliedArtist = artist;
-		setAnnounce(m.admin_lookup_announce_using({ name: artist.name }));
+		announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
 	}
 
 	async function addAsVariant(clash: SourceClash) {
@@ -212,9 +207,7 @@
 	}
 </script>
 
-<!-- The region itself stays put; only the node inside it is keyed, so repeating
-     an announcement still mutates the region and gets read out. -->
-<div class="sr-only" aria-live="polite">{#key announceUid}<span>{announce}</span>{/key}</div>
+<LiveAnnouncer {announcer} />
 
 <div class="page-header">
 	<h1>{m.admin_image_edit_title()}</h1>
@@ -348,12 +341,17 @@
 					oncancel={cancelLookup}
 					onuseartist={useLookupArtist}
 					onaddnew={(seed) => {
+						// A result that resolved to new or unlinked already flipped the form
+						// and filled it, so neither half of the announcement would be true a
+						// second time — say it only when this click is what switched forms.
+						const wasExisting = artistMode === 'existing';
 						artistMode = 'new';
 						seedNewArtist(seed.handle, seed.site, seed.linkable);
 						// A seed that wrote something is announced by the panel's own status
 						// line. An empty handle (the no_match action) writes nothing, so the
 						// select is replaced by a name field with nothing said about it.
-						if (seedStatusKind(lookupSeeded) === 'none') setAnnounce(m.admin_lookup_announce_new_form());
+						if (wasExisting && seedStatusKind(lookupSeeded) === 'none')
+							announcer.say(m.admin_lookup_announce_new_form());
 					}}
 					onaddvariant={addAsVariant}
 				/>

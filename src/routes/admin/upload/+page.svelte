@@ -4,6 +4,8 @@
 	import { CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
 	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
+	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
+	import { Announcer } from '$lib/live-announcer.svelte';
 	import {
 		matchHandle,
 		pickPrefillMatch,
@@ -37,16 +39,9 @@
 	let selectedArtistId = $state<string | number>('');
 	let showNewArtist = $state(false);
 	let saving = $state(false);
-	let announce = $state('');
-	// Bumped on every write so {#key} replaces the node inside the live region:
-	// two identical batches say the same thing, and re-assigning text the region
-	// already holds changes no DOM, so nothing would be announced. Same shape the
-	// VR and sticker forms use.
-	let announceUid = $state(0);
-	function setAnnounce(text: string) {
-		announce = text;
-		announceUid++;
-	}
+	// Two identical batches say the same thing, so the region is keyed on a
+	// counter rather than on the text — see `$lib/live-announcer.svelte`.
+	const announcer = new Announcer();
 	let fileInput: HTMLInputElement;
 
 	type Tile = {
@@ -232,7 +227,7 @@
 		// created; the mixed case is its own message so each locale can punctuate
 		// the two sentences its own way.
 		const notUploaded = fileArray.length - batch.length;
-		setAnnounce(
+		announcer.say(
 			batch.length > 0 && notUploaded > 0
 				? m.admin_upload_images_added_and_rejected({ added: batch.length, rejected: notUploaded })
 				: batch.length > 0
@@ -277,7 +272,7 @@
 			if (createdAnError()) batchHadErrors = true;
 			inFlightBatches--;
 			if (inFlightBatches === 0) {
-				setAnnounce(batchHadErrors ? m.admin_upload_batch_issues() : m.admin_upload_batch_done());
+				announcer.say(batchHadErrors ? m.admin_upload_batch_issues() : m.admin_upload_batch_done());
 				batchHadErrors = false;
 			}
 		}
@@ -414,11 +409,11 @@
 	function announceTileLookup(tile: Tile) {
 		const fileName = tile.fileName;
 		if (tile.lookup.kind === 'failed') {
-			setAnnounce(m.admin_lookup_announce_tile_failed({ fileName }));
+			announcer.say(m.admin_lookup_announce_tile_failed({ fileName }));
 			return;
 		}
 		const result = tileResult(tile);
-		setAnnounce(
+		announcer.say(
 			result
 				? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
 				: m.admin_lookup_announce_tile_no_match({ fileName })
@@ -476,7 +471,7 @@
 		appliedArtist = artist;
 		// The select sits above the panel and the button relabels itself in place,
 		// so nothing else tells a screen-reader user the artist was applied.
-		setAnnounce(m.admin_lookup_announce_using({ name: artist.name }));
+		announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
 	}
 
 	function openLookupDialog(seed: { handle: string; site: LookupSite; linkable: boolean }) {
@@ -527,7 +522,10 @@
 		const matches = tile.lookup.data.matches;
 		const match = pickPrefillMatch(matches) ?? matches[0];
 		if (!match) return null;
-		const handle = matchHandle(match) || tile.fileName;
+		// No fallback to the file name: a match that names no handle is an unknown
+		// poster, and tileResultText says so. The different-artist path needs a
+		// handle by construction — it only fires on matches with local artists.
+		const handle = matchHandle(match);
 		const site = siteLabel(match.site);
 		const different = differentArtist(tile);
 		// The visible line and the spoken one come from the same parts, so the
@@ -550,9 +548,7 @@
 
 <svelte:window onpaste={handlePaste} ondragover={swallowStrayFileDrop} ondrop={swallowStrayFileDrop} />
 
-<!-- The region itself stays put; only the node inside it is keyed, so repeating
-     an announcement still mutates the region and gets read out. -->
-<div class="sr-only" aria-live="polite">{#key announceUid}<span>{announce}</span>{/key}</div>
+<LiveAnnouncer {announcer} />
 
 <div class="page-header">
 	<h1>{m.admin_upload_title()}</h1>

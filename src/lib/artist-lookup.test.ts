@@ -370,6 +370,19 @@ describe('tileResultText', () => {
 		expect(text.spoken).toBe('kuttoya on FurAffinity');
 		expect(text.line).not.toContain('·');
 	});
+
+	// A Twitter post can come back with no handle at all. "{handle} on {site}"
+	// promises a poster, so the empty case says "unknown poster" rather than
+	// putting anything else where the name goes.
+	it('names an unknown poster when the match carries no handle', () => {
+		const text = tileResultText('', 'Twitter', null);
+		expect(text.line).toBe(m.admin_lookup_match_unknown({ site: 'Twitter' }));
+		expect(text.spoken).toBe(text.line);
+		const banded = tileResultText('   ', 'Twitter', 'exact');
+		expect(banded.line).toBe(
+			`${m.admin_lookup_match_unknown({ site: 'Twitter' })} · ${m.admin_lookup_band_exact()}`
+		);
+	});
 });
 
 // The edit page's inline new-artist form is subject to the same rule as the
@@ -601,5 +614,35 @@ describe('runLookup', () => {
 			{ fetchFn: (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch }
 		);
 		expect(state).toEqual({ kind: 'failed', reason: 'unavailable' });
+	});
+});
+
+// The panel's seed sentences and the clash row's size, in both locales. Copy
+// pins rather than style notes: the seed lines carry the compliance clause
+// ("a guess until you check them, and you're the one publishing them") that the
+// dialog's own guess line carries, and they used to tell the operator to check
+// twice in two consecutive sentences.
+describe('the seed status copy', () => {
+	const locales = ['en', 'ja'] as const;
+
+	it('keeps the guess-and-publish clause without the extra imperative', () => {
+		for (const locale of locales) {
+			const both = m.admin_lookup_status_seed_both({ site: 'FurAffinity' }, { locale });
+			const name = m.admin_lookup_status_seed_name({}, { locale });
+			const link = m.admin_lookup_status_seed_link({ site: 'FurAffinity' }, { locale });
+			const clause = locale === 'en' ? "you're the one publishing" : '公開するのはあなたです';
+			const dropped = locale === 'en' ? 'before you save' : '保存前に';
+			for (const line of [both, name, link]) {
+				expect(line).toContain(clause);
+				expect(line).not.toContain(dropped);
+			}
+		}
+	});
+
+	it('sizes the clash row with a multiplication sign, not the letter x', () => {
+		for (const locale of locales) {
+			const size = m.admin_lookup_clash_dimensions({ width: 2048, height: 1536 }, { locale });
+			expect(size).toBe('2048 × 1536');
+		}
 	});
 });
