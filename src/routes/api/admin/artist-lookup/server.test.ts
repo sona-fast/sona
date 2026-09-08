@@ -120,12 +120,15 @@ function pngFile(size = 32) {
 	return new File([bytes], 'a.png', { type: 'image/png' });
 }
 
-async function statusOf(fn: () => unknown): Promise<number> {
+/** The status AND the body of an exit that answers by throwing. The body is
+ * asserted too because the client dates a failure by its `forwarded` field, and
+ * a throw above the FuzzySearch call that omits it reads as sent. */
+async function errorOf(fn: () => unknown): Promise<{ status: number; body: unknown }> {
 	try {
 		await fn();
-		return 200;
+		return { status: 200, body: null };
 	} catch (e) {
-		if (isHttpError(e)) return e.status;
+		if (isHttpError(e)) return { status: e.status, body: e.body };
 		throw e;
 	}
 }
@@ -344,8 +347,8 @@ describe('artist-lookup — uploaded file', () => {
 			method: 'POST',
 			body: new FormData()
 		});
-		expect(await statusOf(() => POST({ request, platform, fetch: imageFetch().fn } as never))).toBe(
-			400
+		expect(await errorOf(() => POST({ request, platform, fetch: imageFetch().fn } as never))).toEqual(
+			{ status: 400, body: { message: 'No file provided', forwarded: false } }
 		);
 	});
 });
@@ -373,17 +376,20 @@ describe('artist-lookup — stored image by id', () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const fetcher = imageFetch();
 		expect(
-			await statusOf(() =>
+			await errorOf(() =>
 				POST(jsonEvent(platform, { imageUrl: 'https://evil.example/x.png' }, fetcher.fn))
 			)
-		).toBe(400);
+		).toEqual({ status: 400, body: { message: 'Invalid image id', forwarded: false } });
 		expect(fetcher.calls).toEqual([]);
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
 	it('404s an unknown id', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
-		expect(await statusOf(() => POST(jsonEvent(platform, { imageId: 404 })))).toBe(404);
+		expect(await errorOf(() => POST(jsonEvent(platform, { imageId: 404 })))).toEqual({
+			status: 404,
+			body: { message: 'Image not found', forwarded: false }
+		});
 	});
 
 	it('sends the stored image with the content type the proxy validated', async () => {

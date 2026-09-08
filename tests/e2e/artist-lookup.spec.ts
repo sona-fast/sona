@@ -219,14 +219,23 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
 
+		// The status line reads the filled record rather than the tags, so it says
+		// both fields until one of them is typed over.
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL and commissioned date'
+		);
+
 		await page.fill('input[name="commissionedAt"]', '2026-05-06');
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('input[name="commissionedAt"]')).not.toHaveAttribute(
 			'aria-describedby',
 			'commissioned-lookup-tag'
 		);
-		// The other field's tag is untouched.
+		// The other field's tag is untouched, and so is its half of the line.
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL from the FurAffinity post and left the commissioned date as it was.'
+		);
 	});
 
 	test('Use artist applies it, and changing the select by hand reverts the button', async ({
@@ -474,6 +483,60 @@ test.describe('with a key saved', () => {
 			"The image you're editing already has variants of its own"
 		);
 		await expect(panel(page).getByRole('button', { name: 'Add as a variant' })).toHaveCount(0);
+	});
+
+	// A clash answers "this post is already here"; it says nothing about WHICH of
+	// two same-named artists drew it. The pick list belongs inside the clash body
+	// for that reason, and the source URL still stays out of the form — the post
+	// URL already belongs to the other piece.
+	test('asks which artist under a clash, and fills no source URL either way', async ({ page }) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				localArtists: [
+					{
+						matchIndex: 0,
+						artists: [
+							{ id: 1, name: 'Test Artist', pieces: 3 },
+							{ id: 2, name: 'Avatar Artist', pieces: 1 }
+						]
+					}
+				],
+				sourceClash: {
+					imageId: 1,
+					title: 'Test Image',
+					isVariant: false,
+					parentImageId: null,
+					variantCount: 0,
+					thumbnailUrl: null,
+					artistName: 'Test Artist',
+					uploadedAt: '2026-07-01T00:00:00.000Z',
+					width: 1200,
+					height: 900
+				}
+			})
+		);
+		await gotoEditHydrated(page);
+		const select = page.locator('select[name="artistId"]');
+		await expect(select).toHaveValue('2');
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).toContainText('Test Image');
+		// The radios render under the clash, not only in the plain ambiguous state.
+		const picks = panel(page).locator('.pick-list input[type="radio"]');
+		await expect(picks).toHaveCount(2);
+
+		const useSelected = panel(page).getByRole('button', { name: 'Use selected artist' });
+		await expect(useSelected).toBeDisabled();
+
+		await panel(page).locator('.pick-row', { hasText: 'Test Artist' }).first().click();
+		await expect(useSelected).toBeEnabled();
+		await useSelected.click();
+		await expect(select).toHaveValue('1');
+		// The clash's whole point: the post URL already belongs to another piece.
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 	});
 
 	test('the edit page never changes the artist without a click', async ({ page }) => {

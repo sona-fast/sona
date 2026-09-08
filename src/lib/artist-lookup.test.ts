@@ -717,6 +717,24 @@ describe('stateFromResponse', () => {
 		}
 	});
 
+	// The exits the endpoint answers by throwing (no file in the multipart body,
+	// a bad image id, an image that is gone) carry no `error` field — SvelteKit
+	// serializes the error body — but they do carry forwarded: false, and a
+	// deleted private image must not be reported as having reached FuzzySearch.
+	it('reads a SvelteKit error body as unavailable and not sent', async () => {
+		for (const [body, status] of [
+			[{ message: 'No file provided', forwarded: false }, 400],
+			[{ message: 'Invalid image id', forwarded: false }, 400],
+			[{ message: 'Image not found', forwarded: false }, 404]
+		] as const) {
+			expect(await stateFromResponse(jsonResponse(body, status))).toEqual({
+				kind: 'failed',
+				reason: 'unavailable',
+				sent: false
+			});
+		}
+	});
+
 	// An endpoint that says nothing about which side refused is one this client
 	// cannot date, so the disclosure errs toward saying the file went.
 	it('counts a failure body with no forwarded field as sent', async () => {
@@ -768,11 +786,13 @@ describe('stateFromResponse', () => {
 
 	// The endpoint answers enabled:false before it reads the body, so the file
 	// was never forwarded and the private-image notice must not claim it was.
-	it('treats a key that went away mid-session as an outage, not as a result', async () => {
+	// Its own reason too: nothing was asked of FuzzySearch, so the panel points
+	// at Settings instead of saying FuzzySearch didn't answer.
+	it('treats a key that went away mid-session as a missing key, not an outage', async () => {
 		const state = await stateFromResponse(jsonResponse({ enabled: false }));
 		expect(state).toEqual({
 			kind: 'failed',
-			reason: 'unavailable',
+			reason: 'no_key',
 			sent: false
 		});
 		expect(lookupSentFile(state)).toBe(false);

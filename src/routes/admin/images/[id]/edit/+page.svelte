@@ -584,7 +584,12 @@
 				class="input"
 				name="commissionedAt"
 				bind:value={commissionedAt}
-				oninput={() => (dateTagged = false)}
+				oninput={() => {
+					dateTagged = false;
+					// The panel's status line reads this record rather than the tag, so a
+					// field typed over has to leave both.
+					lookupFilled = { ...lookupFilled, commissionedAt: undefined };
+				}}
 				aria-describedby={dateTagged ? 'commissioned-lookup-tag' : undefined}
 			/>
 			<small class="hint">{m.admin_hint_commissioned_date()}</small>
@@ -636,7 +641,10 @@
 				class="input"
 				name="sourcePostUrl"
 				bind:value={sourcePostUrl}
-				oninput={() => (sourceTagged = false)}
+				oninput={() => {
+					sourceTagged = false;
+					lookupFilled = { ...lookupFilled, sourcePostUrl: undefined };
+				}}
 				aria-describedby={sourceTagged ? 'source-lookup-tag' : undefined}
 			/>
 		</div>

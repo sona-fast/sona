@@ -49,9 +49,9 @@
 		/** The edit page fills only empty fields and never touches the artist, so
 		 * its status line says what it left alone rather than what it changed. */
 		editMode?: boolean;
-		/** This piece already has variants of its own, so it cannot become one:
-		 * the page renders no parent select for it and "Add as a variant" would
-		 * be a silent no-op. The clash panel says why instead of offering it. */
+		/** The image being edited already has variants of its own, so it cannot
+		 * become a variant of another piece: the page renders no parent select for
+		 * it and "Add as a variant" would be a silent no-op. The clash panel says why instead of offering it. */
 		variantBlocked?: boolean;
 		onclose: () => void;
 		onretry: () => void;
@@ -181,6 +181,11 @@
 				{:else if lookup.reason === 'invalid_image'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_failed_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_invalid_body()}</p>
+				{:else if lookup.reason === 'no_key'}
+					<!-- The key went away after the page loaded, so the button is still
+					     here. Nothing was sent, and the remedy is Settings, not a retry. -->
+					<div class="lookup-eyebrow warn">{m.admin_lookup_no_key_eyebrow()}</div>
+					<p class="lookup-lead">{m.admin_lookup_no_key_body()}</p>
 				{:else if lookup.reason === 'signed_out'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_signed_out_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_signed_out_body()}</p>
@@ -371,7 +376,7 @@
 				</button>
 				<button type="button" class="btn btn-secondary" onclick={onclose}>{m.admin_lookup_close()}</button>
 			{:else if lookup.kind === 'failed'}
-				{#if lookup.reason === 'key_refused'}
+				{#if lookup.reason === 'key_refused' || lookup.reason === 'no_key'}
 					<a class="btn btn-secondary" href="/admin/settings?tab=connections">{m.admin_lookup_open_settings()}</a>
 				{:else if lookup.reason === 'rate_limited' || lookup.reason === 'unavailable'}
 					<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>

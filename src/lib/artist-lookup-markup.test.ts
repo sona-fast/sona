@@ -110,11 +110,23 @@ describe('the panel', () => {
 			'key_refused',
 			'too_large',
 			'invalid_image',
-			'signed_out'
+			'signed_out',
+			'no_key'
 		]) {
 			expect(PANEL).toContain(`lookup.reason === '${reason}'`);
 		}
 		expect(PANEL).toContain('m.admin_lookup_failed_body()');
+	});
+
+	// A key removed mid-session never reached FuzzySearch, so it gets the copy
+	// that points at Settings rather than the generic "didn't answer" line, and
+	// the same Settings action a refused key gets instead of a retry.
+	it('sends a removed key to Settings rather than reporting an outage', () => {
+		expect(PANEL).toContain('m.admin_lookup_no_key_eyebrow()');
+		expect(PANEL).toContain('m.admin_lookup_no_key_body()');
+		expect(PANEL).toMatch(
+			/lookup\.reason === 'key_refused' \|\| lookup\.reason === 'no_key'[\s\S]{0,200}?admin_lookup_open_settings/
+		);
 	});
 
 	// The handle and the name in that sentence have to come from the same match,
@@ -238,6 +250,24 @@ describe('the "From lookup" tag', () => {
 			// Editing a tagged field drops its tag — however the handler is spelled.
 			expect(source).toMatch(/oninput=\{[^}]*dateTagged = false/);
 			expect(source).toMatch(/oninput=\{[^}]*sourceTagged = false/);
+		}
+	});
+
+	// The tag is not the only record of a prefilled field: the panel's status
+	// line reads the filled record, so a field typed over has to leave both or
+	// the line goes on claiming a URL that is no longer the lookup's (SONA-156
+	// round 9).
+	it('drops the edited field from the record the status line reads', () => {
+		for (const [source, record] of [
+			[UPLOAD, 'sharedFilled'],
+			[EDIT, 'lookupFilled']
+		] as const) {
+			expect(source).toMatch(
+				new RegExp(`dateTagged = false;[\\s\\S]{0,200}?${record} = \\{ \\.\\.\\.${record}, commissionedAt: undefined \\}`)
+			);
+			expect(source).toMatch(
+				new RegExp(`sourceTagged = false;[\\s\\S]{0,200}?${record} = \\{ \\.\\.\\.${record}, sourcePostUrl: undefined \\}`)
+			);
 		}
 	});
 

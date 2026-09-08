@@ -75,7 +75,9 @@ const MULTIPART_SLACK_BYTES = 64 * 1024;
  * The gates below answer too_large and invalid_image with the same reason
  * FuzzySearch's own 413/400 carry, so the reason alone cannot tell the client
  * which side refused — and the private-image disclosure is built on that
- * difference. Every return above `searchImage` is forwarded: false. */
+ * difference. Every exit above `searchImage` owes the field: the returns below
+ * carry it here, and the `error()` throws carry it in their own body, because a
+ * failure the client cannot date is read as having been sent. */
 function failure(reason: LookupFailure, forwarded: boolean) {
 	return json({ enabled: true, error: reason, forwarded }, { status: FAILURE_STATUS[reason] });
 }
@@ -127,7 +129,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		}
 		const form = await request.formData();
 		const file = form.get('file');
-		if (!(file instanceof File)) error(400, 'No file provided');
+		if (!(file instanceof File)) error(400, { message: 'No file provided', forwarded: false });
 		// Layer 2: the exact check, on the file's real size.
 		if (file.size > FUZZYSEARCH_MAX_BYTES) return failure('too_large', false);
 		// The same raster gate /api/upload applies, and for the same reason the
@@ -142,14 +144,15 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	} else {
 		const body = (await request.json().catch(() => null)) as { imageId?: unknown } | null;
 		const imageId = Number(body?.imageId);
-		if (!Number.isInteger(imageId) || imageId <= 0) error(400, 'Invalid image id');
+		if (!Number.isInteger(imageId) || imageId <= 0)
+			error(400, { message: 'Invalid image id', forwarded: false });
 
 		const row = await db
 			.select({ id: images.id, imageUrl: images.imageUrl, parentImageId: images.parentImageId })
 			.from(images)
 			.where(eq(images.id, imageId))
 			.get();
-		if (!row) error(404, 'Image not found');
+		if (!row) error(404, { message: 'Image not found', forwarded: false });
 		selfImage = { id: row.id, parentImageId: row.parentImageId };
 
 		// Server-side fetch of a URL the SERVER looked up, with the shared

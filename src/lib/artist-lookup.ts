@@ -59,8 +59,9 @@ export interface LookupResponse {
 	sourceClash: SourceClash | null;
 }
 
-/** Why a lookup did not produce matches. `signed_out` is this file's own: the
- * admin gate answers an expired session with a plain-text 401, which is a
+/** Why a lookup did not produce matches. `signed_out` and `no_key` are this
+ * file's own: the admin gate answers an expired session with a plain-text 401,
+ * and the endpoint answers a removed key with enabled:false. Both carry a
  * different remedy from every FuzzySearch failure below. */
 export type LookupFailReason =
 	| 'key_refused'
@@ -68,7 +69,8 @@ export type LookupFailReason =
 	| 'too_large'
 	| 'invalid_image'
 	| 'unavailable'
-	| 'signed_out';
+	| 'signed_out'
+	| 'no_key';
 
 export type LookupState =
 	| { kind: 'idle' }
@@ -544,11 +546,12 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	}
 
 	const data = body as Partial<LookupResponse>;
-	// The key went away between the page load and the click. Nothing to show and
-	// nothing the panel can offer, so it reads as an outage. The endpoint answers
-	// this before it reads the body — it carries forwarded: false, and there is
-	// no path to this shape that forwarded anything — so `sent` is false.
-	if (data.enabled === false) return { kind: 'failed', reason: 'unavailable', sent: false };
+	// The key went away between the page load and the click. Its own reason, not
+	// the generic outage: FuzzySearch was never contacted, and the remedy is a key
+	// in Settings rather than a retry. The endpoint answers this before it reads
+	// the body — it carries forwarded: false, and there is no path to this shape
+	// that forwarded anything — so `sent` is false.
+	if (data.enabled === false) return { kind: 'failed', reason: 'no_key', sent: false };
 	const raw = Array.isArray(data.matches) ? data.matches : [];
 	const { matches, indexMap } = usableMatches(raw);
 	// Same reasoning as the non-array branch above: something looked, something
