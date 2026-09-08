@@ -128,13 +128,11 @@
 		if (nameTagged) artistName = '';
 		if (twitterTagged) newTwitter = '';
 		if (furaffinityTagged) newFuraffinity = '';
-		// The seed is what flipped the form to 'new'. With its name cleared and
-		// nothing of the operator's own left in the fields, the page would sit on
-		// an empty required form, so it goes back to the artist select. The
-		// clearing announcement in startLookup covers this too.
-		if (artistMode === 'new' && nameTagged && !artistName && !newTwitter && !newFuraffinity) {
-			artistMode = 'existing';
-		}
+		// The mode is left alone. Flipping back to the artist select unmounts the
+		// inline form, and five of its inputs (Bluesky, Telegram, DeviantArt,
+		// Patreon, Instagram) are uncontrolled — anything typed there goes with
+		// the form. An empty required form is a smaller cost than lost typing,
+		// and the clearing announcement in startLookup says what happened.
 		sourceTagged = false;
 		dateTagged = false;
 		nameTagged = false;

@@ -232,6 +232,35 @@ describe('artist-lookup — uploaded file', () => {
 		expect(body.localArtists[0].artists[0].pieces).toBe(2);
 	});
 
+	// /admin/artists shows a plain COUNT(*) over images.artist_id in its Artworks
+	// column, so this count is the same one: a variant and an unpublished piece
+	// both count there, and two different numbers for one artist on two admin
+	// screens is the worse answer. An image with no artist is nobody's count.
+	it('counts pieces the way /admin/artists does, and skips the unattributed', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, furaffinity_url, created_at)
+			 VALUES (1, 'Kuttoya', 'https://www.furaffinity.net/user/KUTTOYA/', '2026-01-01');
+			 INSERT INTO images (id, title, slug, image_url, artist_id, published, parent_image_id, created_at)
+			 VALUES (1, 'One', 'one', 'https://cdn/1.png', 1, 1, NULL, '2026-01-01'),
+				(2, 'Draft', 'two', 'https://cdn/2.png', 1, 0, NULL, '2026-01-02'),
+				(3, 'Variant', 'three', 'https://cdn/3.png', 1, 1, 1, '2026-01-03'),
+				(4, 'Nobody', 'four', 'https://cdn/4.png', NULL, 1, NULL, '2026-01-04');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+		const body = (await res.json()) as {
+			localArtists: Array<{ artists: Array<{ pieces: number }> }>;
+		};
+		// The same expression /admin/artists selects for its Artworks column.
+		const asAdminArtists = sqlite
+			.prepare('SELECT COUNT(*) AS n FROM images WHERE images.artist_id = 1')
+			.get() as { n: number };
+		expect(asAdminArtists.n).toBe(3);
+		expect(body.localArtists[0].artists[0].pieces).toBe(3);
+	});
+
 	it('refuses a file over the remote-body cap on its exact size', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const res = await POST(multipartEvent(platform, pngFile(FUZZYSEARCH_MAX_BYTES + 1)));

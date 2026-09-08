@@ -525,10 +525,16 @@
 	 * line names: the candidates are unioned across every confident match, so
 	 * the trigger is not necessarily the prefill match. */
 	function differentArtistMatch(tile: Tile): LookupMatch | null {
-		if (tile.lookup.kind !== 'results' || !appliedArtist) return null;
+		if (tile.lookup.kind !== 'results') return null;
+		// The shared SELECTION, not just a panel-applied one: appliedArtist is set
+		// by the panel's Use button and by a created artist, so keying off it meant
+		// an artist the operator picked from the select by hand never warned.
+		// Number('') is 0, which is the unselected case.
+		const sharedId = Number(selectedArtistId);
+		if (!sharedId) return null;
 		const data = tile.lookup.data;
 		const own = candidateArtists(data);
-		if (own.length === 0 || own.some((a) => a.id === appliedArtist?.id)) return null;
+		if (own.length === 0 || own.some((a) => a.id === sharedId)) return null;
 		return (
 			data.matches.find(
 				(match, index) =>

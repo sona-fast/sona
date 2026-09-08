@@ -75,7 +75,11 @@ export type LookupState =
 	| { kind: 'searching' }
 	| { kind: 'results'; data: LookupResponse; applied: boolean }
 	| { kind: 'no_match' }
-	| { kind: 'failed'; reason: LookupFailReason };
+	// `sent` records whether the file left the browser, which the reason cannot:
+	// too_large and invalid_image each arise both from a gate that runs before
+	// anything is forwarded and from FuzzySearch answering 413/400 after the file
+	// was sent. Only the code that made (or refused to make) the request knows.
+	| { kind: 'failed'; reason: LookupFailReason; sent: boolean };
 
 /** The cap the endpoint enforces (MAX_REMOTE_BUFFER_BYTES, 10 MiB). Restated
  * here so an oversized file is refused before it is uploaded a second time;
@@ -253,6 +257,23 @@ export function candidateArtists(data: LookupResponse): ArtistChoice[] {
 	return [...seen.values()];
 }
 
+/**
+ * The confident match whose local-artist hit produced this candidate. The
+ * candidates are unioned across every confident match, so the match that named
+ * one of them is not necessarily the prefill match — and a line that pairs the
+ * prefill match's handle with a candidate's name can read "alice is already in
+ * your list as Bob". Null when no hit names the artist.
+ */
+export function matchForArtist(data: LookupResponse, artistId: number): LookupMatch | null {
+	return (
+		data.matches.find((match, index) => {
+			if (match.band !== 'exact' && match.band !== 'strong') return false;
+			const hit = data.localArtists.find((h) => h.matchIndex === index);
+			return (hit?.artists ?? []).some((a) => a.id === artistId);
+		}) ?? null
+	);
+}
+
 /** The artists a name (not a handle) collision turned up for the prefill match.
  * Weaker evidence, so it prompts rather than links. */
 export function nameMatchArtists(data: LookupResponse): Array<{ id: number; name: string }> {
@@ -396,18 +417,16 @@ export function statusLineKind(
 
 /**
  * Whether FuzzySearch has a copy of the file in this state, which is what the
- * private-image disclosure claims. A result and a no-match both mean it does,
- * and so do the failures that came back from FuzzySearch itself. Three do not:
- * `too_large` is refused client-side, and `invalid_image` (the endpoint's type
- * and byte gates) and `signed_out` (the admin gate's own 401) are both decided
- * before anything is forwarded. `idle` and `searching` are not outcomes and
- * carry no notice.
+ * private-image disclosure claims. A result and a no-match both mean it does.
+ * A failure is read off its `sent` flag rather than its reason: `too_large`
+ * comes from the client-side size check AND from FuzzySearch answering 413,
+ * and `invalid_image` from the endpoint's own type gate AND from FuzzySearch
+ * answering 400 — the reason alone cannot tell the two apart. `idle` and
+ * `searching` are not outcomes and carry no notice.
  */
-const NOT_FORWARDED: readonly LookupFailReason[] = ['too_large', 'invalid_image', 'signed_out'];
-
 export function lookupSentFile(state: LookupState): boolean {
 	if (state.kind === 'idle' || state.kind === 'searching') return false;
-	return !(state.kind === 'failed' && NOT_FORWARDED.includes(state.reason));
+	return state.kind !== 'failed' || state.sent;
 }
 
 /** Body shapes the endpoint answers with. */
@@ -493,35 +512,35 @@ function remapHits(hits: unknown, indexMap: Map<number, number>): ArtistHit[] {
  * in `res.json()`. The content type is checked before anything is parsed.
  */
 export async function stateFromResponse(res: Response): Promise<LookupState> {
-	if (res.status === 401 || res.status === 403) return { kind: 'failed', reason: 'signed_out' };
+	if (res.status === 401 || res.status === 403) return { kind: 'failed', reason: 'signed_out', sent: false };
 	const contentType = res.headers.get('content-type') ?? '';
 	if (!contentType.toLowerCase().includes('application/json')) {
-		return { kind: 'failed', reason: 'unavailable' };
+		return { kind: 'failed', reason: 'unavailable', sent: true };
 	}
 	let body: unknown;
 	try {
 		body = await res.json();
 	} catch {
-		return { kind: 'failed', reason: 'unavailable' };
+		return { kind: 'failed', reason: 'unavailable', sent: true };
 	}
-	if (!body || typeof body !== 'object') return { kind: 'failed', reason: 'unavailable' };
+	if (!body || typeof body !== 'object') return { kind: 'failed', reason: 'unavailable', sent: true };
 
 	if (!res.ok) {
 		const reason = (body as FailureBody).error;
 		const known = FAIL_REASONS.find((r) => r === reason);
-		return { kind: 'failed', reason: known ?? 'unavailable' };
+		return { kind: 'failed', reason: known ?? 'unavailable', sent: true };
 	}
 
 	const data = body as Partial<LookupResponse>;
 	// The key went away between the page load and the click. Nothing to show and
 	// nothing the panel can offer, so it reads as an outage.
-	if (data.enabled === false) return { kind: 'failed', reason: 'unavailable' };
+	if (data.enabled === false) return { kind: 'failed', reason: 'unavailable', sent: true };
 	const raw = Array.isArray(data.matches) ? data.matches : [];
 	const { matches, indexMap } = usableMatches(raw);
 	// Same reasoning as the non-array branch above: something looked, something
 	// answered, and the client refused to show it. Calling that "no matches" would
 	// tell the operator their art is unindexed when it may well be posted.
-	if (matches.length === 0 && raw.length > 0) return { kind: 'failed', reason: 'unavailable' };
+	if (matches.length === 0 && raw.length > 0) return { kind: 'failed', reason: 'unavailable', sent: true };
 	if (matches.length === 0) return { kind: 'no_match' };
 	return {
 		kind: 'results',
@@ -546,7 +565,7 @@ export async function runLookup(
 	const fetchFn = options.fetchFn ?? fetch;
 	let init: RequestInit;
 	if ('file' in body) {
-		if (body.file.size > LOOKUP_MAX_BYTES) return { kind: 'failed', reason: 'too_large' };
+		if (body.file.size > LOOKUP_MAX_BYTES) return { kind: 'failed', reason: 'too_large', sent: false };
 		const form = new FormData();
 		form.append('file', body.file);
 		init = { method: 'POST', body: form };
@@ -561,7 +580,9 @@ export async function runLookup(
 	try {
 		res = await fetchFn('/api/admin/artist-lookup', { ...init, signal: options.signal });
 	} catch {
-		return { kind: 'failed', reason: 'unavailable' };
+		// The request was already on its way (a dropped connection, or the
+		// operator's Cancel), so the disclosure errs toward saying the file went.
+		return { kind: 'failed', reason: 'unavailable', sent: true };
 	}
 	return await stateFromResponse(res);
 }

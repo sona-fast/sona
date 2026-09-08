@@ -4,6 +4,7 @@ import {
 	bandLabel,
 	candidateArtists,
 	isCrossSiteAmbiguity,
+	matchForArtist,
 	matchHandle,
 	matchHandles,
 	lookupSentFile,
@@ -118,7 +119,7 @@ describe('artist-lookup — the wire shape agrees with the server', () => {
 		};
 		for (const [wire, expected] of Object.entries(reasons)) {
 			const state = await stateFromResponse(jsonResponse({ enabled: true, error: wire }, 424));
-			expect(state).toEqual({ kind: 'failed', reason: expected });
+			expect(state).toEqual({ kind: 'failed', reason: expected, sent: true });
 		}
 	});
 
@@ -456,6 +457,35 @@ describe('seedStatusKind', () => {
 	});
 });
 
+describe('matchForArtist', () => {
+	// The candidates are unioned across every confident match, so the match that
+	// named one is not always the prefill match. Pairing the prefill match's
+	// handle with that candidate's name renders "alice is already in your list
+	// as Bob".
+	it('names the match whose hit produced the candidate, not the prefill match', () => {
+		const data = response({
+			matches: [
+				match({ handles: ['alice'], distance: 0, band: 'exact' }),
+				match({ site: 'Twitter', siteId: '9', handles: ['bobby'], distance: 2, band: 'strong' })
+			],
+			localArtists: [{ matchIndex: 1, artists: [{ id: 7, name: 'Bob' }] }]
+		});
+		expect(matchHandle(pickPrefillMatch(data.matches))).toBe('alice');
+		expect(candidateArtists(data).map((a) => a.id)).toEqual([7]);
+		expect(matchHandle(matchForArtist(data, 7))).toBe('bobby');
+		expect(matchForArtist(data, 99)).toBeNull();
+	});
+
+	// A looser band never produces a candidate, so it never names one either.
+	it('ignores a hit on a match that is not confident', () => {
+		const data = response({
+			matches: [match({ handles: ['alice'], distance: 8, band: 'possible' })],
+			localArtists: [{ matchIndex: 0, artists: [{ id: 7, name: 'Bob' }] }]
+		});
+		expect(matchForArtist(data, 7)).toBeNull();
+	});
+});
+
 describe('statusLineKind', () => {
 	it('names only the fields that were actually filled', () => {
 		expect(statusLineKind({ sourcePostUrl: 'u', commissionedAt: 'd' })).toBe('both');
@@ -467,6 +497,29 @@ describe('statusLineKind', () => {
 	it('says the clash sentence only when the date was filled', () => {
 		expect(statusLineKind({ commissionedAt: 'd' }, { clash: true })).toBe('clash');
 		expect(statusLineKind({}, { clash: true })).toBe('none');
+	});
+
+	// url_only has two causes and the kind cannot tell them apart: the post
+	// carried no date, or the date field already held one. The sentence used to
+	// assert the first ("That post has no date"), which is a false claim in the
+	// second — it now mirrors date_only and says only what Sona did.
+	it('reads url_only from both of its causes, and claims neither', () => {
+		const dateless = prefillForResult(response({ matches: [match({ postedAt: null })] }), {
+			sourcePostUrl: '',
+			commissionedAt: ''
+		});
+		const dateTaken = prefillForResult(response(), {
+			sourcePostUrl: '',
+			commissionedAt: '2026-01-01'
+		});
+		expect(statusLineKind(dateless)).toBe('url_only');
+		expect(statusLineKind(dateTaken)).toBe('url_only');
+		expect(m.admin_lookup_status_url_only({ site: 'FurAffinity' }, { locale: 'en' })).toBe(
+			'Sona filled the source post URL from the FurAffinity post and left the commissioned date as it was.'
+		);
+		expect(m.admin_lookup_status_url_only({ site: 'FurAffinity' }, { locale: 'ja' })).toContain(
+			'制作依頼日はそのままにしています'
+		);
 	});
 });
 
@@ -504,7 +557,7 @@ describe('stateFromResponse', () => {
 			await stateFromResponse(
 				jsonResponse(response({ matches: [match({ postUrl: 'javascript:alert(1)' })] }))
 			)
-		).toEqual({ kind: 'failed', reason: 'unavailable' });
+		).toEqual({ kind: 'failed', reason: 'unavailable', sent: true });
 	});
 
 	// The panel keys its rows on site + siteId. The endpoint dedupes too; this is
@@ -599,7 +652,8 @@ describe('stateFromResponse', () => {
 		for (const [error, status] of cases) {
 			expect(await stateFromResponse(jsonResponse({ enabled: true, error }, status))).toEqual({
 				kind: 'failed',
-				reason: error
+				reason: error,
+				sent: true
 			});
 		}
 	});
@@ -610,7 +664,11 @@ describe('stateFromResponse', () => {
 			status: 401,
 			headers: { 'content-type': 'text/plain' }
 		});
-		expect(await stateFromResponse(gate)).toEqual({ kind: 'failed', reason: 'signed_out' });
+		expect(await stateFromResponse(gate)).toEqual({
+			kind: 'failed',
+			reason: 'signed_out',
+			sent: false
+		});
 	});
 
 	it('falls back to unavailable for a body it cannot read', async () => {
@@ -618,19 +676,32 @@ describe('stateFromResponse', () => {
 			status: 200,
 			headers: { 'content-type': 'text/html' }
 		});
-		expect(await stateFromResponse(html)).toEqual({ kind: 'failed', reason: 'unavailable' });
+		expect(await stateFromResponse(html)).toEqual({
+			kind: 'failed',
+			reason: 'unavailable',
+			sent: true
+		});
 
 		const broken = new Response('{', { status: 200, headers: { 'content-type': 'application/json' } });
-		expect(await stateFromResponse(broken)).toEqual({ kind: 'failed', reason: 'unavailable' });
+		expect(await stateFromResponse(broken)).toEqual({
+			kind: 'failed',
+			reason: 'unavailable',
+			sent: true
+		});
 
 		const unknownError = jsonResponse({ enabled: true, error: 'something new' }, 500);
-		expect(await stateFromResponse(unknownError)).toEqual({ kind: 'failed', reason: 'unavailable' });
+		expect(await stateFromResponse(unknownError)).toEqual({
+			kind: 'failed',
+			reason: 'unavailable',
+			sent: true
+		});
 	});
 
 	it('treats a key that went away mid-session as an outage, not as a result', async () => {
 		expect(await stateFromResponse(jsonResponse({ enabled: false }))).toEqual({
 			kind: 'failed',
-			reason: 'unavailable'
+			reason: 'unavailable',
+			sent: true
 		});
 	});
 });
@@ -642,17 +713,25 @@ describe('lookupSentFile', () => {
 		expect(lookupSentFile({ kind: 'results', applied: false, data: response() })).toBe(true);
 		expect(lookupSentFile({ kind: 'no_match' })).toBe(true);
 		for (const reason of ['key_refused', 'rate_limited', 'unavailable'] as const) {
-			expect(lookupSentFile({ kind: 'failed', reason })).toBe(true);
+			expect(lookupSentFile({ kind: 'failed', reason, sent: true })).toBe(true);
 		}
 	});
 
-	// too_large is refused by runLookup before anything is sent; invalid_image is
-	// the endpoint's type and byte gates, and signed_out is the admin gate's own
-	// 401 — neither reaches FuzzySearch. Claiming the file went out to it would
-	// be a false disclosure.
-	it('is false for the refusals that never reach FuzzySearch', () => {
-		for (const reason of ['too_large', 'invalid_image', 'signed_out'] as const) {
-			expect(lookupSentFile({ kind: 'failed', reason })).toBe(false);
+	// The two refusals that happen before any request goes out: runLookup's own
+	// size check, and the admin gate's 401. Claiming the file went out would be a
+	// false disclosure.
+	it('is false for the refusals that never left the browser', () => {
+		expect(lookupSentFile({ kind: 'failed', reason: 'too_large', sent: false })).toBe(false);
+		expect(lookupSentFile({ kind: 'failed', reason: 'signed_out', sent: false })).toBe(false);
+	});
+
+	// The reason alone cannot answer this: too_large and invalid_image each come
+	// from a gate that runs before anything is forwarded AND from FuzzySearch
+	// answering 413/400 after the file was sent. The flag is what decides.
+	it('reads the flag, not the reason', () => {
+		for (const reason of ['too_large', 'invalid_image'] as const) {
+			expect(lookupSentFile({ kind: 'failed', reason, sent: true })).toBe(true);
+			expect(lookupSentFile({ kind: 'failed', reason, sent: false })).toBe(false);
 		}
 	});
 
@@ -676,8 +755,28 @@ describe('runLookup', () => {
 				}) as unknown as typeof fetch
 			}
 		);
-		expect(state).toEqual({ kind: 'failed', reason: 'too_large' });
+		expect(state).toEqual({ kind: 'failed', reason: 'too_large', sent: false });
 		expect(called).toBe(false);
+	});
+
+	// The other origin of the same two reasons: the endpoint answered 413 or 400
+	// after the file had already gone out, so the disclosure has to say so. The
+	// client-side refusal above is the only thing that sets sent: false.
+	it('marks a size or format refusal that came back from the endpoint as sent', async () => {
+		for (const [error, status] of [
+			['too_large', 413],
+			['invalid_image', 400]
+		] as const) {
+			const state = await runLookup(
+				{ imageId: 1 },
+				{
+					fetchFn: (async () =>
+						jsonResponse({ enabled: true, error }, status)) as unknown as typeof fetch
+				}
+			);
+			expect(state).toEqual({ kind: 'failed', reason: error, sent: true });
+			expect(lookupSentFile(state)).toBe(true);
+		}
 	});
 
 	it('posts a file as multipart', async () => {
@@ -715,7 +814,7 @@ describe('runLookup', () => {
 			{ imageId: 1 },
 			{ fetchFn: (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch }
 		);
-		expect(state).toEqual({ kind: 'failed', reason: 'unavailable' });
+		expect(state).toEqual({ kind: 'failed', reason: 'unavailable', sent: true });
 	});
 });
 

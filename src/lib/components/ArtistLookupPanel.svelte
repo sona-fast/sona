@@ -12,6 +12,7 @@
 		bandLabel,
 		candidateArtists,
 		isCrossSiteAmbiguity,
+		matchForArtist,
 		matchHandle,
 		matchHandles,
 		nameMatchArtists,
@@ -82,6 +83,14 @@
 	const handle = $derived(matchHandle(prefill));
 	const outcome = $derived(data ? resolveOutcome(data) : 'none');
 	const candidates = $derived<ArtistChoice[]>(data ? candidateArtists(data) : []);
+	// The handle in the "already in your list" line comes from the match whose
+	// hit produced that candidate, not from the prefill match: the candidates are
+	// unioned across every confident match, so pairing the prefill handle with a
+	// candidate's name can read "alice is already in your list as Bob".
+	const existing = $derived(candidates.length === 1 ? candidates[0] : null);
+	const existingHandle = $derived(
+		data && existing ? matchHandle(matchForArtist(data, existing.id)) || handle : handle
+	);
 	const crossSite = $derived(data ? isCrossSiteAmbiguity(data) : false);
 	const nameHits = $derived(data ? nameMatchArtists(data) : []);
 	const clash = $derived(data?.sourceClash ?? null);
@@ -251,7 +260,7 @@
 					{#if outcome === 'existing'}
 						<p class="outcome">
 							<Check size={14} aria-hidden="true" />
-							{m.admin_lookup_existing({ handle, name: candidates[0]?.name ?? '' })}
+							{m.admin_lookup_existing({ handle: existingHandle, name: existing?.name ?? '' })}
 						</p>
 					{:else if outcome === 'ambiguous'}
 						<p class="outcome">

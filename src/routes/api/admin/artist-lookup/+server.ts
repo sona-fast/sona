@@ -242,14 +242,19 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 
 	// One grouped count for the whole gallery rather than a query per hit — the
 	// picker needs it for at most a handful of artists, and a per-artist query
-	// would fan out with the match list. Skipped when nothing matched.
+	// would fan out with the match list. Skipped when nothing matched. Every
+	// image with the artist_id, variants and unpublished rows included: that is
+	// what /admin/artists shows in its Artworks column, and two numbers for the
+	// same artist on two admin screens is the worse answer. The unattributed
+	// group has no artist to key on, so it is left out of the query.
 	const pieceCounts = new Map<number, number>();
 	if (matches.length > 0) {
 		const counted = await db
 			.select({ artistId: images.artistId, pieces: count() })
 			.from(images)
+			.where(isNotNull(images.artistId))
 			.groupBy(images.artistId);
-		for (const row of counted) pieceCounts.set(row.artistId, row.pieces);
+		for (const row of counted) if (row.artistId !== null) pieceCounts.set(row.artistId, row.pieces);
 	}
 	const withPieces = (a: { id: number; name: string }) => ({
 		id: a.id,

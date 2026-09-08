@@ -1906,7 +1906,7 @@
 	"admin_lookup_clash_has_variants": "The image you're editing already has variants of its own, so it can't become a variant of another piece.",
 	"admin_lookup_clash_open": "Open {title}",
 	"admin_lookup_status_both": "Sona filled the source post URL and commissioned date from the {site} post. You can change both before you save.",
-	"admin_lookup_status_url_only": "Sona filled the source post URL from the {site} post. That post has no date, so the commissioned date is unchanged.",
+	"admin_lookup_status_url_only": "Sona filled the source post URL from the {site} post and left the commissioned date as it was.",
 	"admin_lookup_status_date_only": "Sona filled the commissioned date from the {site} post and left the source post URL alone. You can change the date before you save.",
 	"admin_lookup_status_clash": "Sona filled the commissioned date from the {site} post and left the source post URL empty because {title} already uses it. You can change the date before you save.",
 	"admin_lookup_status_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was.",
@@ -1953,5 +1953,5 @@
 	"admin_lookup_announce_using": "Using {name} as the artist.",
 	"admin_lookup_announce_new_form": "Switched to the new artist form. Add the artist by hand.",
 	"admin_lookup_announce_seed_kept": "The new artist's fields already have values, so Sona left them alone.",
-	"admin_lookup_announce_searching_cleared": "Sending the image to FuzzySearch. The fields the last lookup filled were cleared."
+	"admin_lookup_announce_searching_cleared": "Sona cleared the fields the last lookup filled."
 }

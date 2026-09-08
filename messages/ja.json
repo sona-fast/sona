@@ -1505,7 +1505,7 @@
 	"admin_lookup_clash_has_variants": "編集中の画像にはすでに独自のバリアントがあるため、他の作品のバリアントにはできません。",
 	"admin_lookup_clash_open": "「{title}」を開く",
 	"admin_lookup_status_both": "{site}の投稿から、投稿元URLと制作依頼日を入力しました。保存前にどちらも変更できます。",
-	"admin_lookup_status_url_only": "{site}の投稿から投稿元URLを入力しました。この投稿には日付がないため、制作依頼日はそのままです。",
+	"admin_lookup_status_url_only": "{site}の投稿から投稿元URLを入力しました。制作依頼日はそのままにしています。",
 	"admin_lookup_status_date_only": "{site}の投稿から制作依頼日を入力しました。投稿元URLはそのままです。保存前に日付を変更できます。",
 	"admin_lookup_status_clash": "{site}の投稿から制作依頼日を入力しました。投稿元URLは「{title}」がすでに使っているため、空のままにしています。保存前に日付を変更できます。",
 	"admin_lookup_status_kept": "{site}の投稿から制作依頼日を入力しました。入力済みの投稿元URLはそのままにしています。",
@@ -1552,5 +1552,5 @@
 	"admin_lookup_announce_using": "アーティストに{name}を設定しました。",
 	"admin_lookup_announce_new_form": "新しいアーティストのフォームに切り替えました。アーティストを手で入力してください。",
 	"admin_lookup_announce_seed_kept": "新しいアーティストの各項目にはすでに値が入っているため、そのままにしました。",
-	"admin_lookup_announce_searching_cleared": "画像をFuzzySearchに送信しています。前回の検索で入力された項目は消去しました。"
+	"admin_lookup_announce_searching_cleared": "前回の検索で入力した項目は消去しました。"
 }

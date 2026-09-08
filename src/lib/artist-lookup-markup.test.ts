@@ -117,6 +117,15 @@ describe('the panel', () => {
 		expect(PANEL).toContain('m.admin_lookup_failed_body()');
 	});
 
+	// The handle and the name in that sentence have to come from the same match,
+	// or a two-result lookup renders "alice is already in your list as Bob".
+	it('names the already-listed artist off the match that found them', () => {
+		expect(PANEL).toMatch(/matchHandle\(matchForArtist\(data, existing\.id\)\)/);
+		expect(PANEL).toMatch(
+			/m\.admin_lookup_existing\(\{ handle: existingHandle, name: existing\?\.name \?\? '' \}\)/
+		);
+	});
+
 	it('offers each outcome its own action', () => {
 		expect(PANEL).toContain('m.admin_lookup_use_artist(');
 		expect(PANEL).toContain('m.admin_lookup_using_artist(');
@@ -286,13 +295,13 @@ describe('the artist on the edit page', () => {
 		expect(reset).toMatch(/lookupSeeded = \{\};/);
 	});
 
-	// A seed opened the inline form; with its name cleared and nothing of the
-	// operator's own in the fields, an empty required form is left behind.
-	it('returns to the artist select when the reset empties a seeded form', () => {
+	// Five of the inline form's inputs (Bluesky, Telegram, DeviantArt, Patreon,
+	// Instagram) are uncontrolled, so flipping the mode back would unmount the
+	// form and take anything typed in them with it. The reset leaves the mode
+	// alone and only empties what the lookup itself filled.
+	it('never closes the inline form the reset just emptied', () => {
 		const reset = EDIT.match(/function resetLookupPrefill\(\)[\s\S]*?\n\t\}/)?.[0] ?? '';
-		expect(reset).toMatch(
-			/if \(artistMode === 'new' && nameTagged && !artistName && !newTwitter && !newFuraffinity\) \{\s*\n\s*artistMode = 'existing';/
-		);
+		expect(reset).not.toMatch(/artistMode = /);
 	});
 
 	// The inline new-artist form stays on screen while the reset empties the
@@ -327,11 +336,15 @@ describe('what the lookup copy names', () => {
 		);
 	});
 
-	it('carries the cleared-fields announcement in both catalogs', () => {
+	// The panel's own status line already says the image is on its way to
+	// FuzzySearch, so this one carries only what that line does not.
+	it('carries the cleared-fields announcement in both catalogs, without the searching line', () => {
 		expect(en.admin_lookup_announce_searching_cleared).toBe(
-			'Sending the image to FuzzySearch. The fields the last lookup filled were cleared.'
+			'Sona cleared the fields the last lookup filled.'
 		);
+		expect(en.admin_lookup_announce_searching_cleared).not.toMatch(/FuzzySearch/);
 		expect(ja.admin_lookup_announce_searching_cleared).toBeTruthy();
+		expect(ja.admin_lookup_announce_searching_cleared).not.toMatch(/FuzzySearch/);
 	});
 });
 
@@ -513,6 +526,12 @@ describe('the upload page grid', () => {
 	// whichever match the rest of the tile happens to read from.
 	it('names the poster whose local artist the different-artist line is about', () => {
 		expect(UPLOAD).toMatch(/function differentArtistMatch\(tile: Tile\): LookupMatch \| null/);
+		// The shared SELECTION, not just a panel-applied artist: keying off
+		// appliedArtist meant an artist picked from the select never warned.
+		expect(UPLOAD).toMatch(
+			/function differentArtistMatch[\s\S]{0,500}?const sharedId = Number\(selectedArtistId\);/
+		);
+		expect(UPLOAD).not.toMatch(/function differentArtistMatch[\s\S]{0,200}?!appliedArtist/);
 		expect(UPLOAD).toMatch(/const differentHandle = differentMatch \? matchHandle\(differentMatch\) : '';/);
 		// A triggering match that names nobody gets the unknown-poster wording
 		// rather than "Different artist:  on FurAffinity".
