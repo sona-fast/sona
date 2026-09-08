@@ -46,9 +46,9 @@ export type SuggestionState =
 	 *  is true when there was something and the Tags field already held all of
 	 *  it: the tray then says the tags were skipped rather than that entail.dev
 	 *  found nothing, which would be false. `noImage` is true when the post
-	 *  carried no picture at all — an X post that is text, video or a GIF, or a
-	 *  Bluesky post entail.dev has no image for — where saying the classifier
-	 *  read the post and was unconvinced would be false too. */
+	 *  carried no picture at all — an X post that is text, video or a GIF —
+	 *  where saying the classifier read the post and was unconvinced would be
+	 *  false too. */
 	| { kind: 'empty'; skippedExisting?: boolean; noImage?: boolean }
 	/** 202: queued or still classifying. Retryable. */
 	| { kind: 'notReady' }
@@ -72,7 +72,21 @@ type SuggestionBody = {
 	tags?: unknown;
 	rating?: unknown;
 	imageCount?: unknown;
+	/** 'bluesky' or 'x', echoed by the endpoint. Only the X path answers
+	 *  imageCount 0 for a post that carried no picture. */
+	source?: unknown;
 };
+
+/** Characters a chip label never legitimately holds: C0 and C1 controls, the
+ * bidirectional overrides and isolates that can reorder the text around them,
+ * and the comma. A tag name comes back from an endpoint that read somebody
+ * else's post, and the comma is the Tags field's own separator — left in, one
+ * accepted tag would become two the moment `applyTo` joined the field back up. */
+const UNSAFE_LABEL_CHARS = /[\u0000-\u001f\u007f,\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+function cleanLabel(value: string): string {
+	return value.replace(UNSAFE_LABEL_CHARS, '');
+}
 
 const RATINGS: readonly string[] = ['safe', 'questionable', 'explicit'];
 
@@ -142,15 +156,19 @@ export function fromResponse(
 		// The endpoint already dedupes, but the input is a response body.
 		if (seen.has(key)) continue;
 		seen.add(key);
-		tags.push(entry);
+		tags.push(cleanLabel(entry));
 	}
 
 	const count = Number(payload.imageCount);
 
-	// Nothing came back and the post carried no picture: the endpoint answers
-	// that without asking entail.dev anything, so the tray says the post had
-	// nothing to look at rather than crediting the classifier with a verdict.
-	if (tags.length === 0) return { kind: 'empty', skippedExisting, noImage: count === 0 };
+	// Nothing came back and the post carried no picture: only the X path answers
+	// that, and it answers it without asking entail.dev anything, so the tray can
+	// say the post had nothing to look at rather than crediting the classifier
+	// with a verdict. A Bluesky post reaches imageCount 0 the other way round —
+	// entail.dev looked and classified nothing — so it keeps the general
+	// sentence.
+	if (tags.length === 0)
+		return { kind: 'empty', skippedExisting, noImage: count === 0 && payload.source === 'x' };
 
 	return {
 		kind: 'suggested',
@@ -306,6 +324,25 @@ export function sentenceFor(next: SuggestionState): string {
 			return m.admin_tag_suggest_status_join({ title: tray.title, body: tray.body });
 		}
 	}
+}
+
+/**
+ * Which row Load more should put focus on, given the list as it arrived and the
+ * id of the row that was last on screen when the link was clicked.
+ *
+ * Normally that is the row after the anchor — the first one the click added.
+ * When the anchor has been saved off the list since, the top of the list stands
+ * in. When the anchor is still the last row (every row that followed it went off
+ * the list), there is no row after it, and without falling back to the anchor
+ * itself focus would drop to the body.
+ */
+export function rowToFocusAfter<T extends { id: number }>(
+	rows: T[],
+	afterId: number
+): T | undefined {
+	const was = rows.findIndex((row) => row.id === afterId);
+	if (was === -1) return rows[0];
+	return rows[was + 1] ?? rows[was];
 }
 
 /** The tags a suggested state would add, in the classifier's order. */

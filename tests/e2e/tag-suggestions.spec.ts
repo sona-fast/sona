@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
-import { adminLogin, gotoAfterLogin } from './admin-login';
+import { gotoAfterLogin, loginRetrying } from './admin-login';
 
 // The "Suggest tags" control on /admin/upload, end to end (SONA-220).
 //
@@ -35,18 +35,8 @@ const pill = (page: Page) => page.getByRole('button', { name: 'Suggest tags', ex
 // The one live region on the field: role=status, visually hidden, written into.
 const liveRegion = (page: Page) => page.locator('.field > p.sr-only[role="status"]');
 
-/** A cold run occasionally bounces back to /admin/login inside adminLogin's
- * own waitForURL, and the test then fails before it has done anything. The
- * login step navigates to the form itself and is idempotent, so it is retried
- * here rather than in the shared helper every other spec depends on. */
-async function loginRetrying(page: Page) {
-	await expect(async () => {
-		await adminLogin(page, PASSWORD);
-	}).toPass({ timeout: 60_000 });
-}
-
 async function openUploadForm(page: Page) {
-	await loginRetrying(page);
+	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/upload');
 	await expect(tagsInput(page)).toBeVisible();
 	// The pill only runs once the source field holds a post URL it recognises.
@@ -60,7 +50,7 @@ async function openUploadForm(page: Page) {
 }
 
 test('the pill refuses to run until the source URL is a post it recognises', async ({ page }) => {
-	await loginRetrying(page);
+	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/upload');
 
 	// aria-disabled rather than disabled: the pill stays reachable by keyboard so
@@ -679,7 +669,7 @@ test('a lookup in flight cannot be dismissed, so no answer can land on a closed 
 });
 
 test('an image stored as NSFW opens its edit page with the box already checked', async ({ page }) => {
-	await loginRetrying(page);
+	await loginRetrying(page, PASSWORD);
 	// Image 4 is seeded nsfw=1. The box reads the stored row, so a classifier
 	// rating is the only thing that could ever move it — and it never does.
 	await gotoAfterLogin(page, '/admin/images/4/edit');
@@ -721,7 +711,7 @@ test('a post with no picture says so rather than blaming the classifier', async 
 	// An X post that is text, video or a GIF: the endpoint answers 200 with no
 	// tags and imageCount 0 without asking entail.dev anything, so the tray must
 	// not say entail.dev read the post and was unconvinced.
-	await loginRetrying(page);
+	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/images/1/edit');
 	await expect(tagsInput(page)).toBeVisible();
 	await stubSuggestions(page, 200, { source: 'x', tags: [], rating: null, imageCount: 0 });
@@ -732,16 +722,16 @@ test('a post with no picture says so rather than blaming the classifier', async 
 
 	await expect(page.locator('.tag-eyebrow')).toHaveText('No tags to suggest');
 	await expect(page.locator('.tag-panel-body')).toHaveText(
-		'That post has no picture for entail.dev to look at.'
+		'This post has no image for entail.dev to look at.'
 	);
 	await expect(liveRegion(page)).toContainText(
-		'That post has no picture for entail.dev to look at.'
+		'This post has no image for entail.dev to look at.'
 	);
 	await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 });
 
 test('the edit page looks up the URL in the field, not the stored one', async ({ page }) => {
-	await loginRetrying(page);
+	await loginRetrying(page, PASSWORD);
 	// Image 1 is seeded with no source post; the field is what the operator
 	// types, and the lookup has to follow it.
 	await gotoAfterLogin(page, '/admin/images/1/edit');
@@ -760,8 +750,54 @@ test('the edit page looks up the URL in the field, not the stored one', async ({
 
 	await page.fill('input[name="sourcePostUrl"]', BSKY_POST);
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
-	await pill(page).click();
-	await expect(page.locator('.tag-chip')).toHaveCount(1);
+	// The pill has reported itself unstable in the instant after that assertion
+	// passes, so the click and the chip it produces are retried as a pair.
+	await expect(async () => {
+		await pill(page).click();
+		await expect(page.locator('.tag-chip')).toHaveCount(1, { timeout: 2000 });
+	}).toPass({ timeout: 15_000 });
 
-	expect(bodies).toEqual([{ sourcePostUrl: BSKY_POST }]);
+	// The point is what the lookup asked for: the URL in the field, never the
+	// stored one. A retried click sends the same body again, so every body sent is
+	// checked rather than the list being pinned to one entry.
+	expect(bodies.length).toBeGreaterThan(0);
+	for (const body of bodies) expect(body).toEqual({ sourcePostUrl: BSKY_POST });
+});
+
+test('the edit form points its Source Post URL field at a refusal too', async ({ page }) => {
+	// The same 422 wiring as the upload form, pinned on the edit form as behaviour
+	// rather than as the shared component's source text: the two forms pass the
+	// binding themselves, so one of them could lose it without the other noticing.
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/images/1/edit');
+	await expect(tagsInput(page)).toBeVisible();
+	await stubSuggestions(page, 422, { error: 'unsupported_source' });
+
+	await page.fill('input[name="sourcePostUrl"]', BSKY_POST);
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+	await pill(page).click();
+
+	await expect(page.locator('#tags-hint')).toHaveText(
+		"Sona can't look up this link. Check the source post URL."
+	);
+	// A screen reader user who tabs to the refused field is told why the lookup
+	// will not run, instead of finding the reason only under the Tags field.
+	await expect(page.locator('input[name="sourcePostUrl"]')).toHaveAttribute(
+		'aria-describedby',
+		'tags-hint'
+	);
+
+	// Editing the URL retracts the refusal, and the description goes with it: it
+	// described a link the field no longer holds.
+	await page.fill(
+		'input[name="sourcePostUrl"]',
+		'https://bsky.app/profile/kirin.example/post/3kq7x2def'
+	);
+	await expect(page.locator('#tags-hint')).toContainText(
+		'Suggestions come from entail.dev, which reads the source post.'
+	);
+	await expect(page.locator('input[name="sourcePostUrl"]')).not.toHaveAttribute(
+		'aria-describedby',
+		'tags-hint'
+	);
 });

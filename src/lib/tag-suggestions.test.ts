@@ -7,6 +7,7 @@ import {
 	readingLabel,
 	requestSuggestions,
 	selectedTags,
+	rowToFocusAfter,
 	sentenceFor,
 	toggleTag,
 	trayFor,
@@ -109,11 +110,32 @@ describe('fromResponse — a 200', () => {
 		// An X post that is text, video or a GIF: the endpoint answers 200 with no
 		// tags and imageCount 0 without asking entail.dev anything, so crediting
 		// the classifier with a verdict would be false.
-		expect(fromResponse(200, ok([], { imageCount: 0 }), [])).toEqual({
+		expect(fromResponse(200, ok([], { source: 'x', imageCount: 0 }), [])).toEqual({
 			kind: 'empty',
 			skippedExisting: false,
 			noImage: true
 		});
+	});
+
+	it('does not call a Bluesky post picture-less when entail.dev classified nothing', () => {
+		// entail.dev answering with an empty images array is imageCount 0 on the
+		// Bluesky path: it looked and classified nothing, which is the opposite of
+		// the post having no picture. The tray keeps the general sentence.
+		expect(fromResponse(200, ok([], { source: 'bluesky', imageCount: 0 }), [])).toEqual({
+			kind: 'empty',
+			skippedExisting: false,
+			noImage: false
+		});
+	});
+
+	it('strips control, bidirectional and comma characters from a chip label', () => {
+		// The label is drawn from a body that describes somebody else's post. A
+		// right-to-left override in it would reorder the text around the chip, and
+		// a comma is the Tags field's separator: applyTo would split the accepted
+		// tag into two the moment it joined the field back up.
+		const state = fromResponse(200, ok(['fo\u202Ex', 'bea\u0007ch', 'sea, sky']), []);
+		expect(state).toMatchObject({ kind: 'suggested', tags: ['fox', 'beach', 'sea sky'] });
+		expect(applyTo('', selectedTags(state))).toBe('fox, beach, sea sky');
 	});
 
 	it('drops tags the Tags field already holds, matched the way the sanitizer does', () => {
@@ -219,7 +241,7 @@ describe('the tray a finished state draws', () => {
 		// rather than what entail.dev concluded.
 		expect(trayFor({ kind: 'empty', noImage: true })).toEqual({
 			title: 'No tags to suggest',
-			body: 'That post has no picture for entail.dev to look at.',
+			body: 'This post has no image for entail.dev to look at.',
 			warn: false,
 			retry: false
 		});
@@ -291,7 +313,7 @@ describe('the sentences the live region reads', () => {
 			'No tags to suggest. entail.dev only returned tags that are already in the Tags field.'
 		);
 		expect(sentenceFor({ kind: 'empty', noImage: true })).toBe(
-			'No tags to suggest. That post has no picture for entail.dev to look at.'
+			'No tags to suggest. This post has no image for entail.dev to look at.'
 		);
 		expect(sentenceFor({ kind: 'notFound' })).toBe(
 			"Suggestions unavailable. entail.dev couldn't read this post."
@@ -362,3 +384,24 @@ describe('requestSuggestions', () => {
 	});
 });
 
+describe('rowToFocusAfter — where Load more lands focus', () => {
+	const rows = [{ id: 1 }, { id: 2 }, { id: 3 }];
+
+	it('takes the row after the one that was last on screen', () => {
+		expect(rowToFocusAfter(rows, 2)).toEqual({ id: 3 });
+	});
+
+	it('keeps focus on the anchor when nothing follows it any more', () => {
+		// Every row the click added has since been saved off the list, so there is
+		// no row after the anchor. Returning undefined would drop focus to the body.
+		expect(rowToFocusAfter(rows, 3)).toEqual({ id: 3 });
+	});
+
+	it('falls back to the top of the list when the anchor itself has gone', () => {
+		expect(rowToFocusAfter(rows, 99)).toEqual({ id: 1 });
+	});
+
+	it('has nothing to focus in an empty list', () => {
+		expect(rowToFocusAfter([], 1)).toBeUndefined();
+	});
+});

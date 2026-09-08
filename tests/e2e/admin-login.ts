@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 // Shared admin-login step for the E2E specs. The e2e env configures Turnstile
 // with Cloudflare's always-pass TEST keys (see wrangler.e2e*.toml), so the login
@@ -108,6 +108,30 @@ export async function adminLogin(
 	}
 	await page.click('button[type="submit"]');
 	await page.waitForURL(/\/admin\/images/);
+}
+
+/** adminLogin, retried. A cold run occasionally bounces back to /admin/login
+ * inside adminLogin's own waitForURL, and the spec then fails before it has done
+ * anything. The login step navigates to the form itself and is idempotent, so it
+ * is retried here rather than in adminLogin, which every other spec depends on.
+ *
+ * The retry budget is longer than Playwright's 30s per-test default, so the test
+ * gets its own budget raised above it first: without that, a cold start dies at
+ * 30s with a bare timeout and no second attempt. The 120_000 in
+ * playwright.config.ts is the webServer boot timeout, not the per-test one.
+ * toPass reports the last attempt's error, so a genuine login failure still
+ * reads as itself. */
+export async function loginRetrying(page: Page, password: string) {
+	test.setTimeout(90_000);
+	await expect(async () => {
+		// Each attempt starts from a signed-out browser. An attempt that set the
+		// session cookie and then lost its own waitForURL would otherwise leave the
+		// next one filling a password field that is not there: /admin/login 302s to
+		// /admin/images once the cookie exists, so the retry would fail on the form
+		// rather than on the login.
+		await page.context().clearCookies();
+		await adminLogin(page, password);
+	}).toPass({ timeout: 60_000 });
 }
 
 /** adminLogin resolves as soon as the login navigation commits, so the admin

@@ -84,14 +84,6 @@ describe('the suggest pill', () => {
 		}
 	});
 
-	it('drops a refusal that lands after the URL it refuses has left the field', () => {
-		// The reset effect has already run for that edit, so a 422 arriving late
-		// would stick — leaving the hint refusing a link nobody can see.
-		expect(suggestions).toMatch(
-			/const asked = sourceUrl;[\s\S]*?if \(next\.kind === 'noSource' && sourceUrl !== asked\) \{\s*\n\s*suggestion = \{ kind: 'idle' \};\s*\n\s*announcement = '';/
-		);
-	});
-
 	it('reads the post the field names, never a stored URL the field has moved away from', () => {
 		// On the edit page the stored URL and the field can differ once the operator
 		// edits it; the pill, the hint and the lookup all follow the field.

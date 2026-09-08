@@ -22,6 +22,7 @@
 		ratingLabel,
 		readingLabel,
 		requestSuggestions,
+		rowToFocusAfter,
 		selectedTags,
 		sentenceFor,
 		toggleTag,
@@ -181,10 +182,10 @@
 		// The list, not a row, is speaking now: leaving the last row's claim on the
 		// region would let its Dismiss blank a sentence it did not write.
 		announcedFor = null;
-		const was = data.rows.findIndex((row) => row.id === after);
-		// The row that followed the last one on screen — or the top of the list, if
-		// that row has been saved off it since.
-		const first = was === -1 ? data.rows[0] : data.rows[was + 1];
+		// The row that followed the last one on screen — or the top of the list if
+		// that row has been saved off it since, or the row itself if nothing
+		// follows it any more.
+		const first = rowToFocusAfter(data.rows, after);
 		if (first) rowTitles[first.id]?.focus();
 	});
 </script>
