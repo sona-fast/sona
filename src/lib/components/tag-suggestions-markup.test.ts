@@ -128,6 +128,14 @@ describe('the rating never touches the NSFW checkbox', () => {
 		}
 	});
 
+	it('marks the warning triangle decorative, so the rating is read once', () => {
+		// The label beside it already says the rating; an unlabelled icon here would
+		// either be skipped or read as "graphic" in front of the sentence.
+		expect(ratingNote).toMatch(
+			/\{#if warn\}<TriangleAlert size=\{14\} aria-hidden="true" \/>\{\/if\}/
+		);
+	});
+
 	it('is referenced by the checkbox rather than sitting inside its label', () => {
 		// Inside the label, a screen reader would read the classifier's guess as
 		// part of the checkbox's own name.
@@ -169,6 +177,14 @@ describe('the backfill rows', () => {
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_save_label\(\{/);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_dismiss\(\{ title: row\.title \}\)\}/);
 		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_edit_image_label\(\{ title: row\.title \}\)\}/);
+	});
+
+	it('marks the edit link\'s pencil decorative, since the link is named for its image', () => {
+		// The anchor already carries an aria-label naming the image; an icon with a
+		// name of its own would be read in front of it.
+		expect(backfillPage).toMatch(
+			/\{#snippet editLink\([\s\S]*?<Pencil size=\{14\} aria-hidden="true" \/>/
+		);
 	});
 
 	it('gives the conflict its own eyebrow, and the sentence the body text and the focus', () => {

@@ -963,6 +963,22 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		});
 	}
 
+	// The backfill row's Save takes the same treatment when it refuses a click —
+	// same mix on the same fill — so the loop above covers it too. Pinned here so
+	// the two cannot drift into separate pairings unnoticed.
+	it('the refused Save button reuses the disabled pill label mix on the same fill', () => {
+		const rule = css.match(
+			/^\.tag-btn-sm\[aria-disabled='true'\],\n\.tag-btn-sm\[aria-disabled='true'\]:hover\s*\{([^}]*)\}/m
+		)?.[1];
+		if (!rule) throw new Error('the refused Save button rule is missing from app.css');
+		expect(rule).toMatch(/background-color:\s*var\(--secondary\)\s*;/);
+		expect(rule).toMatch(
+			new RegExp(
+				`color:\\s*color-mix\\(in srgb,\\s*var\\(--foreground\\)\\s*${disabledMix}%,\\s*var\\(--secondary\\)\\)`
+			)
+		);
+	});
+
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			const border = name.endsWith('light') ? linkColor : (s: string) => blockToken(s, 'primary');

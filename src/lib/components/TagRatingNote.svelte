@@ -41,8 +41,27 @@
 
 	const label = $derived(ratingLabel(rating));
 
+	// A fresh lookup replaces what this note is about, and the note stays mounted
+	// across lookups. Without this the region keeps holding "The NSFW box is now
+	// checked" from the image before.
+	// Starts null rather than at the current rating: reading a prop outside an
+	// effect captures only its initial value, and the first run has nothing to
+	// clear anyway.
+	let lastRating: EntailRating | null = null;
+	$effect(() => {
+		const current = rating;
+		if (current === lastRating) return;
+		lastRating = current;
+		announcement = '';
+	});
+
 	async function markNsfw() {
 		nsfw = true;
+		// The operator can untick the box by hand and mark it again. A live region
+		// announces a change, so writing the sentence it already holds announces
+		// nothing — blank it and let the emptying reach the DOM first.
+		announcement = '';
+		await tick();
 		announcement = m.admin_tag_suggest_marked_nsfw();
 		await tick();
 		checkbox?.focus();

@@ -1807,6 +1807,7 @@
 	"admin_suggest_tags_row_dismiss": "Dismiss suggestions for {title}",
 	"admin_suggest_tags_nsfw_note": "Sona doesn't change the NSFW setting here.",
 	"admin_suggest_tags_saved": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Saved {count} tag.", "countPlural=other": "Saved {count} tags."}}],
+	"admin_suggest_tags_saving": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Saving {count} tag.", "countPlural=other": "Saving {count} tags."}}],
 	"admin_suggest_tags_save_failed": "Sona couldn't save those tags. Try again.",
 	"admin_suggest_tags_not_saved": "Not saved",
 	"admin_suggest_tags_save_conflict": "This image was tagged elsewhere since the list loaded. Open it to edit its tags.",

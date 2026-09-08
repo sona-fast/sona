@@ -35,9 +35,20 @@ const pill = (page: Page) => page.getByRole('button', { name: 'Suggest tags', ex
 // The one live region on the field: role=status, visually hidden, written into.
 const liveRegion = (page: Page) => page.locator('.field > p.sr-only[role="status"]');
 
+/** adminLogin resolves as soon as the login navigation commits, so the admin
+ * page it lands on can still be settling — a goto issued into that lands as
+ * net::ERR_ABORTED. Wait for the landed page, then navigate, retrying the
+ * navigation if the abort still wins the race. */
+async function gotoAfterLogin(page: Page, path: string) {
+	await page.waitForLoadState('load');
+	await expect(async () => {
+		await page.goto(path);
+	}).toPass({ timeout: 15_000 });
+}
+
 async function openUploadForm(page: Page) {
 	await adminLogin(page, PASSWORD);
-	await page.goto('/admin/upload');
+	await gotoAfterLogin(page, '/admin/upload');
 	await expect(tagsInput(page)).toBeVisible();
 	// The pill only runs once the source field holds a post URL it recognises.
 	await page.fill('input[name="sourcePostUrl"]', BSKY_POST);
@@ -45,7 +56,7 @@ async function openUploadForm(page: Page) {
 
 test('the pill refuses to run until the source URL is a post it recognises', async ({ page }) => {
 	await adminLogin(page, PASSWORD);
-	await page.goto('/admin/upload');
+	await gotoAfterLogin(page, '/admin/upload');
 
 	// aria-disabled rather than disabled: the pill stays reachable by keyboard so
 	// the hint explaining what to add is announced with it.
@@ -206,6 +217,66 @@ for (const rating of ['explicit', 'questionable'] as const) {
 	});
 }
 
+test('marking NSFW a second time is announced again, and a fresh lookup clears the region', async ({
+	page
+}) => {
+	// A live region announces a change, so writing the sentence it already holds
+	// announces nothing. The operator can untick the box by hand and mark it
+	// again, which is the second use the region has to survive.
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['fox'],
+		rating: 'explicit',
+		imageCount: 1
+	});
+
+	await pill(page).click();
+	await markNsfw(page).click();
+	await expect(ratingRegion(page)).toHaveText(
+		'The NSFW box is now checked. Sona saves the change when you submit the form.'
+	);
+
+	// Unticked by hand: the button comes back, and the region still holds the
+	// sentence from the first click.
+	await nsfwBox(page).uncheck();
+	await expect(markNsfw(page)).toBeVisible();
+
+	// Every value the region takes from here on, in order: a text node that never
+	// changes is a mutation Playwright cannot poll for after the fact.
+	await page.evaluate(() => {
+		const region = document.querySelector('.tag-check-row p.sr-only[role="status"]');
+		const seen: string[] = [];
+		(window as unknown as { __ratingLog: string[] }).__ratingLog = seen;
+		new MutationObserver(() => seen.push(region?.textContent ?? '')).observe(region!, {
+			childList: true,
+			characterData: true,
+			subtree: true
+		});
+	});
+
+	await markNsfw(page).click();
+	await expect
+		.poll(() => page.evaluate(() => (window as unknown as { __ratingLog: string[] }).__ratingLog))
+		.toEqual([
+			'',
+			'The NSFW box is now checked. Sona saves the change when you submit the form.'
+		]);
+	await expect(nsfwBox(page)).toBeChecked();
+
+	// A second lookup replaces what the note is about, so the region stops saying
+	// the box was checked for the answer before it.
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['kirin'],
+		rating: 'safe',
+		imageCount: 1
+	});
+	await pill(page).click();
+	await expect(page.getByText('Rated safe by entail.dev')).toBeVisible();
+	await expect(ratingRegion(page)).toHaveText('');
+});
+
 test('a safe rating never offers Mark it NSFW', async ({ page }) => {
 	await openUploadForm(page);
 	await stubSuggestions(page, 200, { source: 'bluesky', tags: ['fox'], rating: 'safe', imageCount: 1 });
@@ -290,7 +361,7 @@ test('an image stored as NSFW opens its edit page with the box already checked',
 	await adminLogin(page, PASSWORD);
 	// Image 4 is seeded nsfw=1. The box reads the stored row, so a classifier
 	// rating is the only thing that could ever move it — and it never does.
-	await page.goto('/admin/images/4/edit');
+	await gotoAfterLogin(page, '/admin/images/4/edit');
 	await expect(tagsInput(page)).toBeVisible();
 	await expect(nsfwBox(page)).toBeChecked();
 	await expect(markNsfw(page)).toHaveCount(0);
@@ -329,7 +400,7 @@ test('the edit page looks up the URL in the field, not the stored one', async ({
 	await adminLogin(page, PASSWORD);
 	// Image 1 is seeded with no source post; the field is what the operator
 	// types, and the lookup has to follow it.
-	await page.goto('/admin/images/1/edit');
+	await gotoAfterLogin(page, '/admin/images/1/edit');
 	await expect(tagsInput(page)).toBeVisible();
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'true');
 

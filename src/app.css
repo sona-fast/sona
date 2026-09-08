@@ -871,6 +871,17 @@ a.tag-pill {
 	color: var(--foreground);
 }
 
+/* Refused while a save runs. The label still has to be read — aria-disabled
+   keeps it in the tab order — and --muted-foreground already sits near the
+   4.5:1 floor on a card, so dimming it further would fail the bar the pill's
+   disabled mix was chosen to clear. The state shows in the cursor and in the
+   hover that no longer brightens. */
+.tag-btn-text[aria-disabled='true'],
+.tag-btn-text[aria-disabled='true']:hover {
+	color: var(--muted-foreground);
+	cursor: default;
+}
+
 /* Alone in the actions row it has no primary button to sit beside, so drop the
    padding that would push it off the tray's content edge. */
 .tag-btn-text-flush {
@@ -880,6 +891,19 @@ a.tag-pill {
 .tag-btn-sm {
 	height: 36px;
 	padding: 8px 14px;
+}
+
+/* Save with nothing picked, or with its own save already running. At the full
+   --primary fill it is the loudest control on the row and the one that does
+   nothing, so it takes the aria-disabled pill's inert treatment instead — same
+   label mix, which clears 4.5:1 on --secondary in every theme. The hover rule
+   holds those values: .btn-primary:hover would otherwise lift the fill. */
+.tag-btn-sm[aria-disabled='true'],
+.tag-btn-sm[aria-disabled='true']:hover {
+	background-color: var(--secondary);
+	color: color-mix(in srgb, var(--foreground) 75%, var(--secondary));
+	border: 1px solid var(--border);
+	cursor: default;
 }
 
 /* Keyboard-focus ring, matching .btn:focus-visible: --ring, not --primary, for

@@ -55,9 +55,44 @@ async function clickSuggest(page: Page, title: string) {
 	return target;
 }
 
+/** The row's own save action, so a test can hold it open or answer it. */
+const savePost = (url: URL) =>
+	url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save');
+
+/** What the action answers when the image is gone: one of the save failures that
+ * lands on the generic "couldn't save" sentence rather than on the conflict. */
+const SAVE_NOT_FOUND = JSON.stringify({
+	type: 'failure',
+	status: 404,
+	data: '[{"error":1},"not_found"]'
+});
+
+/** The rgb() a CSS custom property resolves to in the page, for toHaveCSS. */
+async function cssVarColor(page: Page, token: string) {
+	return page.evaluate((name) => {
+		const probe = document.createElement('span');
+		probe.style.backgroundColor = `var(${name})`;
+		document.body.append(probe);
+		const value = getComputedStyle(probe).backgroundColor;
+		probe.remove();
+		return value;
+	}, token);
+}
+
+/** adminLogin resolves as soon as the login navigation commits, so the admin
+ * page it lands on can still be settling — a goto issued into that lands as
+ * net::ERR_ABORTED. Wait for the landed page, then navigate, retrying the
+ * navigation if the abort still wins the race. */
+async function gotoAfterLogin(page: Page, path: string) {
+	await page.waitForLoadState('load');
+	await expect(async () => {
+		await page.goto(path);
+	}).toPass({ timeout: 15_000 });
+}
+
 async function openList(page: Page, search = '') {
 	await adminLogin(page, PASSWORD);
-	await page.goto(`/admin/images/suggest-tags${search}`);
+	await gotoAfterLogin(page, `/admin/images/suggest-tags${search}`);
 	await expect(page.getByRole('heading', { level: 1, name: 'Suggest tags' })).toBeVisible();
 }
 
@@ -156,6 +191,20 @@ test("a row's Suggest renders chips, and leaving one out changes the Save count"
 	await target.getByRole('button', { name: 'beach' }).click();
 	await expect(save).toHaveText('Save 3 tags');
 	await expect(chips).toHaveCount(4);
+
+	// With every chip left out Save does nothing, so it stops wearing the row's
+	// loudest fill and its pointer cursor: it takes the refused pill's treatment.
+	for (const tag of ['mammal', 'canine', 'fox']) {
+		await target.getByRole('button', { name: tag }).click();
+	}
+	await expect(save).toHaveText('Save 0 tags');
+	await expect(save).toHaveAttribute('aria-disabled', 'true');
+	await expect(save).toHaveCSS('cursor', 'default');
+	await expect(save).toHaveCSS('background-color', await cssVarColor(page, '--secondary'));
+	// Picked again, so the button goes back to being the row's primary action.
+	await target.getByRole('button', { name: 'fox' }).click();
+	await expect(save).toHaveAttribute('aria-disabled', 'false');
+	await expect(save).toHaveCSS('cursor', 'pointer');
 
 	// Dismiss closes the tray and hands focus back to the row's pill.
 	await target.getByRole('button', { name: 'Dismiss suggestions for Backfill 120' }).click();
@@ -268,13 +317,11 @@ test('a save that fails for any other reason says so in the row and the live reg
 	// gone, a 400 for an id that is not one — all land on the generic sentence.
 	// Answering the save with one keeps the assertion on the page rather than on
 	// how the action can be provoked, and writes nothing to the row.
-	const savePost = (url: URL) =>
-		url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save');
 	await page.route(savePost, (route) =>
 		route.fulfill({
 			status: 404,
 			contentType: 'application/json',
-			body: JSON.stringify({ type: 'failure', status: 404, data: '[{"error":1},"not_found"]' })
+			body: SAVE_NOT_FOUND
 		})
 	);
 
@@ -328,13 +375,11 @@ test('a second identical failure is announced again, not swallowed as an unchang
 	});
 
 	const target = await clickSuggest(page, 'Backfill 110');
-	const savePost = (url: URL) =>
-		url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save');
 	await page.route(savePost, (route) =>
 		route.fulfill({
 			status: 404,
 			contentType: 'application/json',
-			body: JSON.stringify({ type: 'failure', status: 404, data: '[{"error":1},"not_found"]' })
+			body: SAVE_NOT_FOUND
 		})
 	);
 
@@ -358,9 +403,13 @@ test('a second identical failure is announced again, not swallowed as an unchang
 	});
 
 	await save.click();
+	// The last two entries, not the whole log: the click also writes the "Saving"
+	// sentence first, which the in-flight test below is the one that pins.
 	await expect
 		.poll(() =>
-			page.evaluate(() => (window as unknown as { __regionLog: string[] }).__regionLog)
+			page
+				.evaluate(() => (window as unknown as { __regionLog: string[] }).__regionLog)
+				.then((log) => log.slice(-2))
 		)
 		.toEqual(['', "Backfill 110. Sona couldn't save those tags. Try again."]);
 	await page.unroute(savePost);
@@ -383,30 +432,56 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 
 	// The save is held open, so everything below happens while it is in flight.
 	let release: (() => void) | undefined;
+	let saveCalls = 0;
 	const held = new Promise<void>((resolve) => (release = resolve));
-	const savePost = (url: URL) =>
-		url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save');
 	await page.route(savePost, async (route) => {
+		saveCalls += 1;
 		await held;
 		await route.fulfill({
 			status: 404,
 			contentType: 'application/json',
-			body: JSON.stringify({ type: 'failure', status: 404, data: '[{"error":1},"not_found"]' })
+			body: SAVE_NOT_FOUND
 		});
 	});
 
-	await target.getByRole('button', { name: 'Save 1 tag to Backfill 112' }).click();
+	const save = target.getByRole('button', { name: 'Save 1 tag to Backfill 112' });
+	// Focused first: Firefox on macOS does not focus a button on mousedown, and
+	// what is under test is that the save does not take focus away.
+	await save.focus();
+	await save.click();
+
+	// aria-disabled, not disabled: a real disabled attribute drops focus to the
+	// body for the whole round trip, leaving a keyboard user nowhere.
+	await expect(save).toHaveAttribute('aria-disabled', 'true');
+	await expect(save).toBeFocused();
+	// And it reads as refused while it runs, the same as with nothing picked.
+	await expect(save).toHaveCSS('cursor', 'default');
+	await expect(save).toHaveCSS('background-color', await cssVarColor(page, '--secondary'));
+	// The spinner stays: the row is working, not merely refusing.
+	await expect(save.locator('.tag-spin')).toBeVisible();
+	// And the region says what the button is doing, rather than still holding the
+	// sentence from before the click.
+	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
+		'Backfill 112. Saving 1 tag.'
+	);
 
 	const dismiss = target.getByRole('button', { name: 'Dismiss suggestions for Backfill 112' });
-	await expect(dismiss).toBeDisabled();
+	await expect(dismiss).toHaveAttribute('aria-disabled', 'true');
+	// The refused text button reads as refused: no pointer cursor over it.
+	await expect(dismiss).toHaveCSS('cursor', 'default');
 	const pill = target.getByRole('button', { name: 'Suggest tags for Backfill 112' });
 	await expect(pill).toHaveAttribute('aria-disabled', 'true');
-	// Dispatched rather than clicked: a disabled button swallows a real click, so
-	// this is what tests that the handlers refuse too.
+	// Dispatched rather than clicked: Playwright waits for an aria-disabled
+	// control to become enabled, so a real click never lands. What is under test
+	// is that the handlers refuse the event.
 	await dismiss.dispatchEvent('click');
 	await pill.dispatchEvent('click');
+	await save.dispatchEvent('click');
 	await expect(target.locator('.tag-chip')).toHaveCount(1);
 	await expect(target.locator('.tag-skel-chip')).toHaveCount(0);
+	// The second Save never left the page: the submit handler cancelled it.
+	expect(saveCalls).toBe(1);
+	await expect(save).toBeFocused();
 
 	release!();
 
@@ -417,7 +492,7 @@ test('Dismiss and the row pill are refused while a save is in flight', async ({ 
 		"Sona couldn't save those tags. Try again."
 	);
 	await expect(target.locator('.tag-chip')).toHaveCount(1);
-	await expect(target.getByRole('button', { name: 'Save 1 tag to Backfill 112' })).toBeEnabled();
+	await expect(save).toHaveAttribute('aria-disabled', 'false');
 	await expect(target.locator('.tag-panel-body')).toBeFocused();
 	await page.unroute(savePost);
 });
@@ -435,8 +510,6 @@ test('a save whose request never lands blames the row, not the page', async ({ p
 	});
 
 	const target = await clickSuggest(page, 'Backfill 111');
-	const savePost = (url: URL) =>
-		url.pathname === '/admin/images/suggest-tags' && url.search.includes('/save');
 	await page.route(savePost, (route) => route.abort());
 
 	await target.getByRole('button', { name: 'Save 1 tag to Backfill 111' }).click();
@@ -512,7 +585,7 @@ test('the edit page keeps what the operator typed when the sidebar form submits'
 	// if they follow `data`, that invalidation reverts them and the next Save
 	// writes the reverted values.
 	await adminLogin(page, PASSWORD);
-	await page.goto('/admin/images/101/edit');
+	await gotoAfterLogin(page, '/admin/images/101/edit');
 
 	const tags = page.locator('input[name="tags"]');
 	const url = page.locator('input[name="sourcePostUrl"]');
@@ -565,7 +638,7 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 
 	// What image 102 actually stores, read first: the rows above tag their own
 	// images, and the last test in this file tags whatever is left.
-	await page.goto('/admin/images/102/edit');
+	await gotoAfterLogin(page, '/admin/images/102/edit');
 	const storedTags = await page.locator('input[name="tags"]').inputValue();
 	const storedUrl = await page.locator('input[name="sourcePostUrl"]').inputValue();
 

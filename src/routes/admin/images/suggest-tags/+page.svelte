@@ -330,10 +330,21 @@
 					<form
 						method="POST"
 						action="?/save"
-						use:enhance={() => {
+						use:enhance={({ cancel }) => {
+							// The buttons are aria-disabled rather than disabled, so a click
+							// still reaches the form. Refuse it here: a second save while one
+							// is in flight, and a save with nothing picked, both do nothing.
+							if (saving.has(row.id) || chosen.length === 0) {
+								cancel();
+								return;
+							}
 							setSaving(row.id, true);
 							setFailure(row.id, false);
 							const accepted = chosen;
+							// The round trip can run long enough that a screen reader is left
+							// on the sentence the row said before it, so the region says the
+							// save is running.
+							announce(row.title, m.admin_suggest_tags_saving({ count: chosen.length }));
 							return async ({ result }) => {
 								setSaving(row.id, false);
 								const { [row.id]: _dropped, ...rest } = states;
@@ -402,10 +413,14 @@
 					>
 						<input type="hidden" name="id" value={row.id} />
 						<input type="hidden" name="tags" value={chosen.join(', ')} />
+						<!-- aria-disabled, not disabled, for the reason the row's pill is: a
+						     real disabled attribute drops focus to the body for the whole
+						     round trip, and the operator who clicked Save has nowhere to be
+						     while it runs. The submit handler refuses the click instead. -->
 						<button
 							type="submit"
 							class="btn btn-primary tag-btn-sm"
-							disabled={chosen.length === 0 || saving.has(row.id)}
+							aria-disabled={chosen.length === 0 || saving.has(row.id)}
 							aria-label={m.admin_suggest_tags_row_save_label({
 								count: chosen.length,
 								title: row.title
@@ -414,13 +429,14 @@
 							{#if saving.has(row.id)}<LoaderCircle size={14} class="tag-spin" aria-hidden="true" />{/if}
 							{m.admin_suggest_tags_row_save({ count: chosen.length })}
 						</button>
-						<!-- Disabled while the save runs, like Save beside it: closing the
+						<!-- Refused while the save runs, like Save beside it: closing the
 						     tray mid-save leaves the row with a heading and nothing else once
-						     the save answers. -->
+						     the save answers. aria-disabled, so it stays reachable and says
+						     why; the handler above refuses the click. -->
 						<button
 							type="button"
 							class="tag-btn-text"
-							disabled={saving.has(row.id)}
+							aria-disabled={saving.has(row.id)}
 							aria-label={m.admin_suggest_tags_row_dismiss({ title: row.title })}
 							onclick={() => dismiss(row.id)}
 						>
