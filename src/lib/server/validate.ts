@@ -100,13 +100,9 @@ export function sanitizeText(text: string | null | undefined, maxLength = 500): 
 }
 
 /**
- * Sanitize a tag name — lowercase, alphanumeric + hyphens only.
+ * Sanitize a tag name — lowercase, alphanumeric + hyphens only. Defined in
+ * $lib/tags so the tag suggestion chips in the browser can compare against the
+ * Tags input with the rule the server enforces; re-exported here because this
+ * is where every other validator lives.
  */
-export function sanitizeTag(tag: string): string {
-	return tag
-		.trim()
-		.toLowerCase()
-		.replace(/[^a-z0-9\s-]/g, '')
-		.replace(/\s+/g, '-')
-		.slice(0, 50);
-}
+export { sanitizeTag } from '$lib/tags';

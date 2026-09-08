@@ -4,7 +4,8 @@ import { images, artists, collections, tags, imageTags, characters, imageCharact
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { getSettings } from '$lib/server/settings';
-import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
+import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import { replaceImageTags } from '$lib/server/image-tags';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
 	variantAssignmentError,
@@ -216,19 +217,9 @@ export const actions = {
 			})
 			.where(eq(images.id, id));
 
-		// Update tags: remove old, add new
-		await db.delete(imageTags).where(eq(imageTags.imageId, id));
-
-		if (tagNames) {
-			const tagList = tagNames.split(',').map(sanitizeTag).filter(Boolean);
-			for (const tagName of tagList) {
-				let tag = await db.select().from(tags).where(eq(tags.name, tagName)).get();
-				if (!tag) {
-					tag = await db.insert(tags).values({ name: tagName }).returning().get();
-				}
-				await db.insert(imageTags).values({ imageId: id, tagId: tag.id });
-			}
-		}
+		// Update tags: remove old, add new. Shared with the Suggest tags page so
+		// both write tags through one sanitizer and one table (SONA-220).
+		await replaceImageTags(db, id, tagNames);
 
 		// Update characters: remove old, add new
 		await db.delete(imageCharacters).where(eq(imageCharacters.imageId, id));

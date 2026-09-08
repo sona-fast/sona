@@ -614,6 +614,246 @@ select.input {
 	}
 }
 
+/* ── SONA-220: tag suggestion tray ───────────────────────────────────────────
+   Shared by the "Suggest tags" control on /admin/upload and the edit form and
+   by the rows on /admin/images/suggest-tags, so the tray, the chips and the
+   status lines cannot drift apart between the three. Prefixed `tag-` because
+   both forms already scope a `.chip` of their own to the character pickers. */
+.tag-tray {
+	margin-top: 2px;
+	padding: 14px 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-s);
+}
+
+.tag-eyebrow {
+	margin: 0;
+	font-family: var(--font-primary);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--muted-foreground);
+}
+
+.tag-eyebrow.warn {
+	color: var(--status-warn);
+}
+
+.tag-panel-sub,
+.tag-panel-body {
+	margin: 0;
+	font-size: 13px;
+}
+
+.tag-panel-sub {
+	color: var(--muted-foreground);
+}
+
+.tag-chiprow {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.tag-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 36px;
+	padding: 6px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-pill);
+	background: transparent;
+	color: var(--foreground);
+	font-size: 13px;
+	cursor: pointer;
+	transition: border-color 0.12s, background-color 0.12s;
+}
+
+.tag-chip:hover {
+	border-color: var(--primary);
+}
+
+/* A kept tag reads as a tint, not a fill: the solid --primary belongs to the
+   one primary button in the tray, and nine solid chips would outshout it. */
+.tag-chip[aria-pressed='true'] {
+	background: color-mix(in srgb, var(--primary) 14%, transparent);
+	border-color: var(--primary);
+}
+
+.tag-chip[aria-pressed='true'] svg {
+	color: var(--primary);
+}
+
+/* Left out, not deleted — the dashed outline and the plus say it can come back.
+   No strikethrough: the tag is not wrong, it is just not wanted. */
+.tag-chip[aria-pressed='false'] {
+	border-style: dashed;
+	color: var(--muted-foreground);
+}
+
+.tag-chip[aria-pressed='false']:hover {
+	color: var(--foreground);
+}
+
+/* The saved tags on a backfill row: the same pill, with nothing to click. */
+.tag-chip-static {
+	cursor: default;
+	border-style: solid;
+}
+
+.tag-chip-static:hover {
+	border-color: var(--border);
+}
+
+.tag-skel-chip {
+	width: 88px;
+	height: 36px;
+	border-radius: var(--radius-pill);
+	background: var(--secondary);
+}
+
+.tag-skel-chip:nth-child(2) {
+	width: 64px;
+}
+
+.tag-skel-chip:nth-child(4) {
+	width: 110px;
+}
+
+.tag-status-line {
+	margin: 0;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+	color: var(--foreground);
+}
+
+.tag-status-line svg {
+	color: var(--status-ok);
+	flex: none;
+}
+
+/* Plain text, not a capsule: a capsule beside the "Mark it NSFW" button would
+   read as a second button. */
+.tag-rating-note {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--muted-foreground);
+}
+
+.tag-rating-note.warn {
+	color: var(--status-warn);
+}
+
+.tag-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+/* The "Mark as NSFW" row once a rating can sit beside it. The rating is a
+   sibling of the label, not inside it: a screen reader reading the label would
+   otherwise say the classifier's guess as part of the checkbox's own name. */
+.tag-check-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+	/* Wrapped onto its own line, the note lines up under the label text rather
+	   than under the checkbox. */
+	.tag-check-row .tag-rating-note,
+	.tag-check-row .btn {
+		margin-left: 24px;
+	}
+}
+
+/* The pill that opens a lookup — the outline capsule the "Add New Artist"
+   button already established on these forms. */
+.tag-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 36px;
+	padding: 6px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-pill);
+	background: none;
+	color: var(--foreground);
+	font-family: var(--font-primary);
+	font-size: 13px;
+	white-space: nowrap;
+	cursor: pointer;
+	transition: border-color 0.15s, color 0.15s;
+}
+
+.tag-pill:hover {
+	border-color: var(--primary);
+	color: var(--primary);
+}
+
+/* aria-disabled, not disabled: the pill stays focusable so a keyboard user can
+   reach it and read why it will not run. The handler refuses the click. */
+.tag-pill[aria-disabled='true'] {
+	background: var(--secondary);
+	color: var(--muted-foreground);
+	cursor: default;
+}
+
+.tag-pill[aria-disabled='true']:hover {
+	border-color: var(--border);
+	color: var(--muted-foreground);
+}
+
+.tag-btn-text {
+	padding: 8px 10px;
+	min-height: 36px;
+	border: none;
+	background: none;
+	color: var(--muted-foreground);
+	font-family: var(--font-primary);
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.tag-btn-text:hover {
+	color: var(--foreground);
+}
+
+/* Alone in the actions row it has no primary button to sit beside, so drop the
+   padding that would push it off the tray's content edge. */
+.tag-btn-text-flush {
+	padding-left: 0;
+}
+
+.tag-btn-sm {
+	height: 36px;
+	padding: 8px 14px;
+}
+
+@media (max-width: 640px) {
+	.tag-actions {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.tag-actions .btn {
+		width: 100%;
+	}
+}
+
 /* ── SONA-81: forced-colors: active (Windows High Contrast) ───────────────────
    In forced-colors, custom colours are replaced by the user's system palette, so
    colour-only cues vanish. Re-assert shape with system-colour borders and a

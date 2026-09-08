@@ -2,6 +2,9 @@
 	import { enhance } from '$app/forms';
 	import { tick } from 'svelte';
 	import { Loader2 } from 'lucide-svelte';
+	import TagSuggestions from '$lib/components/TagSuggestions.svelte';
+	import TagRatingNote from '$lib/components/TagRatingNote.svelte';
+	import type { EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
@@ -17,6 +20,15 @@
 	// explicit message — an emptied region announces nothing.
 	let referenceHint = $state<HTMLElement | null>(null);
 	let referenceCleared = $state(false);
+
+	// Bound so the suggestion control can read the source URL as it is edited and
+	// write accepted tags back into the field. Both still submit by name.
+	let tagsValue = $state(data.imageTags.join(', '));
+	let sourcePostUrl = $state(data.image.sourcePostUrl || '');
+	// entail.dev's rating for the last suggestion. It never moves the checkbox;
+	// `nsfw` starts at the stored value and only the operator changes it.
+	let suggestedRating = $state<EntailRating | null>(null);
+	let nsfw = $state(data.image.nsfw);
 </script>
 
 <div class="page-header">
@@ -158,24 +170,26 @@
 			{/if}
 		</fieldset>
 
-		<div class="row">
-			<label class="flex-1">
-				<span>{m.admin_field_collection()}</span>
-				<select class="input" name="collectionId">
-					<option value="">{m.admin_upload_no_collection()}</option>
-					{#each data.collections as collection}
-						<option value={collection.id} selected={collection.id === data.image.collectionId}>{collection.name}</option>
-					{/each}
-				</select>
-			</label>
-			<label class="flex-1">
-				<span>{m.admin_field_tags()}</span>
-				<input type="text" class="input" name="tags" value={data.imageTags.join(', ')} />
-				{#if data.tags.length > 0}
-					<small class="hint">{m.admin_upload_existing_tags({ tags: data.tags.map((t) => t.name).join(', ') })}</small>
-				{/if}
-			</label>
-		</div>
+		<label>
+			<span>{m.admin_field_collection()}</span>
+			<select class="input" name="collectionId">
+				<option value="">{m.admin_upload_no_collection()}</option>
+				{#each data.collections as collection}
+					<option value={collection.id} selected={collection.id === data.image.collectionId}>{collection.name}</option>
+				{/each}
+			</select>
+		</label>
+
+		<!-- Tags takes a full-width row of its own so the "Suggest tags" pill sits
+		     beside the input. The site's existing tag names moved into the input's
+		     tooltip; the hint line under the field is the suggestion control's. -->
+		<TagSuggestions
+			bind:value={tagsValue}
+			bind:rating={suggestedRating}
+			sourceUrl={sourcePostUrl}
+			imageId={data.image.id}
+			existingTags={data.tags.map((t) => t.name)}
+		/>
 
 		{#if data.hasVariants}
 			<p class="hint">{m.admin_variant_parent_hint()}</p>
@@ -233,10 +247,13 @@
 			<small class="hint">{m.admin_hint_commissioned_date()}</small>
 		</label>
 
-		<label class="checkbox-label">
-			<input type="checkbox" name="nsfw" checked={data.image.nsfw} />
-			<span>{m.admin_field_mark_nsfw()}</span>
-		</label>
+		<div class="tag-check-row">
+			<label class="checkbox-label">
+				<input type="checkbox" name="nsfw" bind:checked={nsfw} aria-describedby="tags-rating" />
+				<span>{m.admin_field_mark_nsfw()}</span>
+			</label>
+			<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw />
+		</div>
 
 		<label class="checkbox-label">
 			<input type="checkbox" name="published" checked={!data.image.published} />
@@ -256,7 +273,7 @@
 
 		<label>
 			<span>{m.admin_field_source_url()}</span>
-			<input type="url" class="input" name="sourcePostUrl" value={data.image.sourcePostUrl || ''} />
+			<input type="url" class="input" name="sourcePostUrl" bind:value={sourcePostUrl} />
 		</label>
 
 		<div class="form-actions">

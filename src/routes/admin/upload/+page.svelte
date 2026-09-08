@@ -2,10 +2,13 @@
 	import { enhance } from '$app/forms';
 	import { CloudUpload, Check, FileBox, Loader2, Plus, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
+	import TagSuggestions from '$lib/components/TagSuggestions.svelte';
+	import TagRatingNote from '$lib/components/TagRatingNote.svelte';
 	import { extractImageFiles, isTextEditable, shouldHandleImagePaste } from '$lib/clipboard';
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { GALLERY_ACCEPT, MAX_BUFFER_BYTES } from '$lib/config';
 	import { toast } from '$lib/toast.svelte';
+	import type { EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
@@ -29,6 +32,16 @@
 		announceUid++;
 	}
 	let fileInput: HTMLInputElement;
+
+	// The Tags and Source Post URL fields are bound so the suggestion control can
+	// read the URL the operator has typed and write accepted tags back. Both
+	// still submit through their own name attributes, unchanged.
+	let tagsValue = $state('');
+	let sourcePostUrl = $state('');
+	// entail.dev's rating for the last suggestion, shown beside the NSFW box. A
+	// suggestion never checks that box; `nsfw` only moves when the operator does.
+	let suggestedRating = $state<EntailRating | null>(null);
+	let nsfw = $state(false);
 
 	type Tile = {
 		key: number;
@@ -503,24 +516,28 @@
 		</button>
 	</fieldset>
 
-	<div class="row">
-		<label class="flex-1">
-			<span>{m.admin_field_collection()}</span>
-			<select class="input" name="collectionId">
-				<option value="">{m.admin_upload_no_collection()}</option>
-				{#each data.collections as collection}
-					<option value={collection.id}>{collection.name}</option>
-				{/each}
-			</select>
-		</label>
-		<label class="flex-1">
-			<span>{m.admin_field_tags()}</span>
-			<input type="text" class="input" placeholder={m.admin_upload_tags_placeholder()} name="tags" />
-			{#if data.tags.length > 0}
-				<small class="hint">{m.admin_upload_existing_tags({ tags: data.tags.map((t) => t.name).join(', ') })}</small>
-			{/if}
-		</label>
-	</div>
+	<label>
+		<span>{m.admin_field_collection()}</span>
+		<select class="input" name="collectionId">
+			<option value="">{m.admin_upload_no_collection()}</option>
+			{#each data.collections as collection}
+				<option value={collection.id}>{collection.name}</option>
+			{/each}
+		</select>
+	</label>
+
+	<!-- Tags takes a full-width row of its own so the "Suggest tags" pill sits
+	     beside the input and the accepted tags are readable without truncation.
+	     The site's existing tag names moved into the input's tooltip; the one
+	     hint line under the field belongs to the suggestion control now. -->
+	<TagSuggestions
+		bind:value={tagsValue}
+		bind:rating={suggestedRating}
+		sourceUrl={sourcePostUrl}
+		existingTags={data.tags.map((t) => t.name)}
+		placeholder={m.admin_upload_tags_placeholder()}
+		firstTileOnly={tiles.length > 1}
+	/>
 
 	{#if data.characters.length > 0}
 		<div class="field">
@@ -550,10 +567,13 @@
 		<small class="hint">{m.admin_hint_commissioned_date()}</small>
 	</label>
 
-	<label class="checkbox-label">
-		<input type="checkbox" name="nsfw" />
-		<span>{m.admin_field_mark_nsfw()}</span>
-	</label>
+	<div class="tag-check-row">
+		<label class="checkbox-label">
+			<input type="checkbox" name="nsfw" bind:checked={nsfw} aria-describedby="tags-rating" />
+			<span>{m.admin_field_mark_nsfw()}</span>
+		</label>
+		<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw />
+	</div>
 
 	<label class="checkbox-label">
 		<input type="checkbox" name="published" />
@@ -569,7 +589,13 @@
 
 	<label>
 		<span>{m.admin_field_source_url()}</span>
-		<input type="url" class="input" placeholder={m.admin_upload_source_placeholder()} name="sourcePostUrl" />
+		<input
+			type="url"
+			class="input"
+			placeholder={m.admin_upload_source_placeholder()}
+			name="sourcePostUrl"
+			bind:value={sourcePostUrl}
+		/>
 	</label>
 
 	<div class="form-actions">
@@ -947,15 +973,6 @@
 		color: var(--primary);
 	}
 
-	.row {
-		display: flex;
-		gap: 16px;
-	}
-
-	.flex-1 {
-		flex: 1;
-	}
-
 	.field {
 		display: flex;
 		flex-direction: column;
@@ -1045,10 +1062,6 @@
 
 		.tile-grid {
 			grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-		}
-
-		.row {
-			flex-direction: column;
 		}
 
 		.form-actions {
