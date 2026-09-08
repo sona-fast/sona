@@ -583,8 +583,14 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue(pasted);
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(panel(page)).toContainText(
-			'left the source post URL as it was, because Test Image already uses it'
+			'left your source post URL as it was, because that post is already the source of Test Image'
 		);
+		await expect(panel(page)).not.toContainText('left the source post URL empty');
+
+		// The sentence describes what the lookup did, once. Clearing the field now
+		// is the operator's doing, and the panel must not restate it as Sona's.
+		await sourceInput(page).fill('');
+		await expect(panel(page)).toContainText('left your source post URL as it was');
 		await expect(panel(page)).not.toContainText('left the source post URL empty');
 	});
 
@@ -706,7 +712,10 @@ test.describe('with a key saved', () => {
 	// row the operator then had to find and merge.
 	test('stops offering to add an artist it just created', async ({ page }) => {
 		let creates = 0;
+		// POSTs only: the count is pinning the create, and a GET added to this URL
+		// later would otherwise fail this test for a reason it says nothing about.
 		await page.route('**/api/artists', (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
 			creates += 1;
 			return route.fulfill({
 				status: 200,
@@ -736,6 +745,49 @@ test.describe('with a key saved', () => {
 		await expect(addNew).toHaveCount(0);
 		await expect(panel(page)).toContainText('kuttoya');
 		expect(creates).toBe(1);
+		// That swap destroyed the button the dialog captured as its opener, so
+		// without a deliberate landing spot focus falls to <body> and the next Tab
+		// restarts at the top of the page (2.4.3).
+		expect(await page.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('BODY');
+		await expect(
+			panel(page).getByRole('button', { name: 'Using kuttoya' })
+		).toBeFocused();
+	});
+
+	// The same dialog opens from the standalone "+ Add New Artist" button above
+	// the panel, with no lookup seed. An artist created there has nothing to do
+	// with the match on screen: credited to it, the panel claimed the handle was
+	// "already in your artist list as <unrelated name>" and the real add-new
+	// action disappeared.
+	test('does not credit the result with an artist created beside it', async ({ page }) => {
+		await page.route('**/api/artists', (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ id: 78, name: 'Bob Smith' })
+			});
+		});
+		await stubLookup(page, matchedBody({ localArtists: [] }));
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		const addNew = panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' });
+		await expect(addNew).toBeVisible();
+
+		// The standalone button, not the panel's action: no seed, so the dialog
+		// opens empty.
+		await page.getByRole('button', { name: 'Add New Artist' }).click();
+		await expect(page.locator('#new-artist-name')).toHaveValue('');
+		await page.locator('#new-artist-name').fill('Bob Smith');
+		await page.getByRole('button', { name: 'Create Artist' }).click();
+
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('78');
+		// The result is untouched: it still offers the artist it actually found,
+		// and never says kuttoya is Bob Smith.
+		await expect(addNew).toBeVisible();
+		await expect(panel(page)).not.toContainText('Bob Smith');
 	});
 
 	test('a variant tile rates its own tile and leaves the shared fields alone', async ({ page }) => {

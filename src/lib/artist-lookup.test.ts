@@ -650,7 +650,7 @@ describe('statusLineKind', () => {
 		expect(
 			m.admin_lookup_status_clash_kept({ site: 'FurAffinity', title: 'Ref' }, { locale: 'en' })
 		).toBe(
-			'Sona filled the commissioned date from the FurAffinity post and left the source post URL as it was, because Ref already uses it. You can change the date before you save.'
+			'Sona filled the commissioned date from the FurAffinity post and left your source post URL as it was, because that post is already the source of Ref. You can change the date before you save.'
 		);
 		for (const locale of ['en', 'ja'] as const) {
 			const line = m.admin_lookup_status_clash_kept(
@@ -658,6 +658,25 @@ describe('statusLineKind', () => {
 				{ locale }
 			);
 			expect(line).not.toMatch(/empty|空/);
+		}
+	});
+
+	// The clash pair says the FOUND post is the source of the other piece. "{title}
+	// already uses it" made "it" the URL the sentence had just named — the
+	// operator's own pasted one in the kept case — which is the false claim the
+	// pair exists to avoid.
+	it('names the found post, not the operator URL, as what clashes', () => {
+		expect(
+			m.admin_lookup_status_clash({ site: 'FurAffinity', title: 'Ref' }, { locale: 'en' })
+		).toBe(
+			'Sona filled the commissioned date from the FurAffinity post and left the source post URL empty, because that post is already the source of Ref. You can change the date before you save.'
+		);
+		for (const key of [m.admin_lookup_status_clash, m.admin_lookup_status_clash_kept]) {
+			for (const locale of ['en', 'ja'] as const) {
+				expect(key({ site: 'FurAffinity', title: 'Ref' }, { locale })).not.toMatch(
+					/already uses it|がすでに使っている/
+				);
+			}
 		}
 	});
 

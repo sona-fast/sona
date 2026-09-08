@@ -297,7 +297,12 @@ describe('the "From lookup" tag', () => {
 	// typed over is neither claimed nor described, and when none is left the seed
 	// line goes away (SONA-156 round 10).
 	it('tracks edited-since for the three seeded fields too', () => {
-		expect(EDIT).not.toMatch(/lookupSeeded = \{ \.\.\.lookupSeeded/);
+		// The seed record merges per field within one result, so a partial re-seed
+		// cannot drop a field it did not write. It still cannot carry a PREVIOUS
+		// result's seed: applyPrefill empties it before the new one is described.
+		expect(EDIT).toMatch(
+			/function applyPrefill\([\s\S]{0,300}?lookupSeeded = \{\};/
+		);
 		expect(EDIT).toMatch(
 			/const lookupSeedEdited = \$derived\(\{[\s\S]{0,300}?artistName: lookupSeeded\.artistName !== undefined && !nameTagged/
 		);
@@ -369,7 +374,7 @@ describe('the artist on the edit page', () => {
 
 	it('flips and seeds the form in the panel action instead', () => {
 		expect(EDIT).toMatch(
-			/onaddnew=\{async \(seed\) => \{[\s\S]{0,600}?artistMode = 'new';\s*\n\s*seedNewArtist\(seed\.handle, seed\.site, seed\.linkable\);/
+			/onaddnew=\{async \(seed\) => \{[\s\S]{0,600}?artistMode = 'new';\s*\n\s*const wrote = seedNewArtist\(seed\.handle, seed\.site, seed\.linkable\);/
 		);
 	});
 
@@ -423,8 +428,13 @@ describe('round 11 wiring', () => {
 		expect(PANEL).toMatch(/statusLineKind\(filled, \{[\s\S]*?urlHeld: sourceUrlHeld[\s\S]*?\}\)/);
 		expect(PANEL).toContain("statusKind === 'clash_kept'");
 		expect(PANEL).toContain('m.admin_lookup_status_clash_kept');
+		// A snapshot taken when the prefill ran, not a live read of the field: the
+		// sentence describes what the lookup did once, and clearing a pasted URL
+		// afterwards would otherwise flip it to "Sona left it empty".
 		for (const source of [UPLOAD, EDIT]) {
-			expect(source).toMatch(/sourceUrlHeld=\{sourcePostUrl\.trim\(\) !== ''\}/);
+			expect(source).toMatch(/sourceUrlHeld=\{(shared|lookup)UrlHeld\}/);
+			expect(source).not.toContain("sourceUrlHeld={sourcePostUrl.trim() !== ''}");
+			expect(source).toMatch(/(shared|lookup)UrlHeld = sourcePostUrl\.trim\(\) !== '';/);
 		}
 	});
 
@@ -435,8 +445,24 @@ describe('round 11 wiring', () => {
 		const status = PANEL.match(/\{#if statusKind !== 'none' && prefill\}[\s\S]*?\{\/if\}/)?.[0] ?? '';
 		expect(status).not.toContain('admin_lookup_status_artist_hint');
 		expect(PANEL).toMatch(
-			/\{#if editMode && outcome === 'existing' && !appliedArtist && candidates\[0\]\}\s*\n\s*<p class="lookup-status">\s*\n\s*\{m\.admin_lookup_status_artist_hint/
+			/const artistHintShown = \$derived\(\s*\n?\s*editMode && outcome === 'existing' && !appliedArtist && !!candidates\[0\]/
 		);
+		expect(PANEL).toMatch(
+			/\{#if artistHintShown && candidates\[0\]\}\s*\n\s*<p class="lookup-status" id="lookup-artist-hint">\s*\n\s*\{m\.admin_lookup_status_artist_hint/
+		);
+	});
+
+	// Proximity and matching wording only tied the hint to the button it names, so
+	// an operator who tabbed straight to the action row heard "Use {name}" with
+	// nothing saying the artist is not applied yet (3.3.2).
+	it('describes both Use buttons with the artist hint that names them', () => {
+		const describedBy = PANEL.match(
+			/aria-describedby=\{artistHintShown \? 'lookup-artist-hint' : undefined\}/g
+		);
+		expect(describedBy).toHaveLength(2);
+		// The hint's own condition gates the reference, so it never points at an
+		// id that is not rendered.
+		expect(PANEL).toContain('id="lookup-artist-hint"');
 	});
 
 	// A clash only exists because a prefill match produced the URL, so there is
@@ -460,13 +486,27 @@ describe('round 11 wiring', () => {
 	// A second click on the same result seeds nothing, and overwriting the record
 	// with that empty seed retracted the sentence describing the FIRST click —
 	// and the "they're a guess until you check them" disclosure with it — while
-	// the values and their tags stayed on screen.
+	// the values and their tags stayed on screen. A PARTIAL re-seed (the operator
+	// cleared the name, then clicked again) is the same retraction one field
+	// narrower, which is why the record merges rather than being replaced.
 	it('keeps the seed record when a repeat seed writes nothing', () => {
 		const seedFn = EDIT.match(/function seedNewArtist\([\s\S]*?\n\t\}/)?.[0] ?? '';
-		expect(seedFn).toMatch(
-			/if \(seed\.artistName !== undefined \|\| seed\.profileUrl !== undefined\) lookupSeeded = seed;/
-		);
+		expect(seedFn).toMatch(/lookupSeeded = \{ \.\.\.lookupSeeded, \.\.\.seed \};/);
 		expect(seedFn).not.toMatch(/^\t\tlookupSeeded = seed;$/m);
+	});
+
+	// The record survives a click that wrote nothing, so it can no longer answer
+	// "did THIS click write anything" — read for the announcement, it reports the
+	// first click's work as this one's and the second click says nothing at all.
+	it('announces the repeat add-new click from what that click wrote', () => {
+		const seedFn = EDIT.match(/function seedNewArtist\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(seedFn).toMatch(/\}\): NewArtistSeed \{|linkable: boolean\): NewArtistSeed \{/);
+		expect(seedFn).toMatch(/\n\t\treturn seed;\n/);
+		expect(EDIT).toMatch(
+			/const wrote = seedNewArtist\(seed\.handle, seed\.site, seed\.linkable\);/
+		);
+		expect(EDIT).toContain("const seededNothing = seedStatusKind(wrote) === 'none';");
+		expect(EDIT).not.toContain('seedStatusKind(lookupSeeded)');
 	});
 
 	// Left at 'new', the panel keeps offering "Add {handle} as a new artist" for
@@ -475,7 +515,22 @@ describe('round 11 wiring', () => {
 	it('folds a created artist back into the result on the upload page', () => {
 		const created = UPLOAD.match(/function onArtistCreated\([\s\S]*?\n\t\}/)?.[0] ?? '';
 		expect(created).toContain('withCreatedArtist(tile.lookup.data, artist)');
-		expect(created).toMatch(/tile\.lookup\.kind === 'results'/);
+		expect(created).toMatch(/tile\.lookup\.kind !== 'results'/);
+		// Only an artist the LOOKUP asked for. The standalone "+ Add New Artist"
+		// button opens the same dialog with no seed, and an artist created from it
+		// has nothing to do with the match on screen — folded in, the panel claims
+		// the handle is already in the list under that unrelated name and hides
+		// the real add-new action. The flag is captured before the seed is cleared.
+		expect(created).toMatch(/const fromLookup = artistSeed !== null;[\s\S]*?artistSeed = null;/);
+		expect(created).toMatch(/if \(!fromLookup \|\| !tile \|\| tile\.lookup\.kind !== 'results'\) return;/);
+		// Folding the artist in destroys the button the dialog captured as its
+		// opener, so focus is placed deliberately rather than left on <body>
+		// (2.4.3).
+		expect(created).toMatch(
+			/await tick\(\);\s*\n\s*\(document\.getElementById\('lookup-applied-artist'\) \?\? artistSelect\)\?\.focus\(\);/
+		);
+		expect(UPLOAD).toContain('bind:this={artistSelect}');
+		expect(PANEL).toContain('id="lookup-applied-artist"');
 		// The edit page has no equivalent: it creates the artist server-side in
 		// the save action, and resetForImage clears the panel on the way back.
 		expect(EDIT).not.toContain('oncreated=');
@@ -507,7 +562,10 @@ describe('what the lookup copy names', () => {
 		expect(en.admin_lookup_gone_body).not.toMatch(/FuzzySearch|library|[Rr]eload/);
 		expect(en.admin_lookup_gone_body).toContain(en.admin_nav_all_images);
 		expect(en.admin_lookup_gone_eyebrow).toBe('Image is gone');
-		expect(ja.admin_lookup_gone_eyebrow).toBeTruthy();
+		// 「画像がありません」 reads as "there is no image"; the state is that the
+		// image went away after the page loaded, which is what もう carries — the
+		// same nuance both bodies already have.
+		expect(ja.admin_lookup_gone_eyebrow).toBe('画像はもうありません');
 		expect(ja.admin_lookup_gone_body).toBeTruthy();
 		expect(ja.admin_lookup_gone_body).not.toMatch(/FuzzySearch|ライブラリ|再読み込み/);
 		expect(ja.admin_lookup_gone_body).toContain(ja.admin_nav_all_images);

@@ -352,7 +352,14 @@
 		handleFiles(accepted, rejected);
 	}
 
-	function onArtistCreated(artist: { id: number; name: string }) {
+	async function onArtistCreated(artist: { id: number; name: string }) {
+		// Which button opened the dialog, captured before the seed is cleared
+		// below. The panel's "Add {handle} as a new artist" seeds it; the
+		// standalone "+ Add New Artist" button above the panel does not, and an
+		// artist created from that one has nothing to do with the match on screen
+		// — credited to it, the panel would claim the handle "is already in your
+		// artist list as <unrelated name>" and drop the real add-new action.
+		const fromLookup = artistSeed !== null;
 		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
 		// The option values are numbers, and the select binding compares with
 		// Object.is — a stringified id would match no option and select nothing.
@@ -364,9 +371,15 @@
 		// one. Left alone it would still read "Add {handle} as a new artist", and a
 		// second click would create the same artist again.
 		const tile = parentTile;
-		if (tile && tile.lookup.kind === 'results') {
-			tile.lookup = { ...tile.lookup, data: withCreatedArtist(tile.lookup.data, artist) };
-		}
+		if (!fromLookup || !tile || tile.lookup.kind !== 'results') return;
+		tile.lookup = { ...tile.lookup, data: withCreatedArtist(tile.lookup.data, artist) };
+		// That swap destroys the button the dialog captured as its opener, so its
+		// onDestroy has nothing connected to restore focus to and the operator
+		// lands on <body> with the next Tab restarting at the top of the page
+		// (2.4.3). Land on the button that replaced it, or on the select holding
+		// the new artist when the result went ambiguous instead.
+		await tick();
+		(document.getElementById('lookup-applied-artist') ?? artistSelect)?.focus();
 	}
 
 	// ---- Artist lookup (SONA-156) -------------------------------------------
@@ -387,6 +400,11 @@
 	// below instead (SONA-156). The tag is that record — it goes up with the
 	// prefill and comes off on the first keystroke.
 	let sharedFilled = $state<LookupFields>({});
+	// Held-ness of the source post URL at the moment the prefill ran, beside the
+	// record of what it wrote. Read live, the clash sentence flips as the
+	// operator types: clearing a pasted URL afterwards would make the panel say
+	// Sona left the field empty, which the operator did, not Sona.
+	let sharedUrlHeld = $state(false);
 	const sharedEdited = $derived({
 		sourcePostUrl: sharedFilled.sourcePostUrl !== undefined && !sourceTagged,
 		commissionedAt: sharedFilled.commissionedAt !== undefined && !dateTagged
@@ -403,6 +421,7 @@
 	// origin is the parent tile's own button in a set, the fieldset pill alone.
 	let lookupPill = $state<HTMLButtonElement | null>(null);
 	let existingParentSelect = $state<HTMLSelectElement | null>(null);
+	let artistSelect = $state<HTMLSelectElement | null>(null);
 	// $state so `bind:this` into it is a reactive write (Svelte warns otherwise).
 	const tileLookupButtons = $state<Record<number, HTMLButtonElement | null>>({});
 
@@ -472,11 +491,13 @@
 		sourceTagged = false;
 		dateTagged = false;
 		sharedFilled = {};
+		sharedUrlHeld = false;
 		appliedArtist = null;
 	}
 
 	function applyShared(next: LookupState) {
 		if (next.kind !== 'results') return;
+		sharedUrlHeld = sourcePostUrl.trim() !== '';
 		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
 		sharedFilled = fields;
 		if (fields.sourcePostUrl !== undefined) {
@@ -848,6 +869,7 @@
 			<select
 				class="input"
 				name="artistId"
+				bind:this={artistSelect}
 				bind:value={selectedArtistId}
 				onchange={() => (appliedArtist = null)}
 				required
@@ -895,7 +917,7 @@
 				fileName={tiles.length > 1 ? (parentTile?.fileName ?? '') : ''}
 				filled={sharedFilled}
 				edited={sharedEdited}
-				sourceUrlHeld={sourcePostUrl.trim() !== ''}
+				sourceUrlHeld={sharedUrlHeld}
 				{appliedArtist}
 				privateNotice={isPrivate && lookupSentFile(sharedLookup)}
 				onclose={() => closeSharedLookup()}

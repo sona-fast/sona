@@ -42,6 +42,11 @@
 	// value, and the artist only changes on an explicit click.
 	let lookup = $state<LookupState>({ kind: 'idle' });
 	let lookupFilled = $state<LookupFields>({});
+	// Held-ness of the source post URL at the moment the prefill ran, beside the
+	// record of what it wrote. Read live, the clash sentence flips as the operator
+	// types: clearing a pasted URL afterwards would make the panel say Sona left
+	// the field empty, which the operator did, not Sona.
+	let lookupUrlHeld = $state(false);
 	// Read once, like every other form seed on this page: these are the values
 	// the form OPENS with, and a later `data` change must not throw away what the
 	// operator has typed. untrack is the documented spelling for that.
@@ -120,6 +125,7 @@
 		nameTagged = false;
 		twitterTagged = false;
 		furaffinityTagged = false;
+		lookupUrlHeld = false;
 		appliedArtist = null;
 	}
 
@@ -154,6 +160,7 @@
 		furaffinityTagged = false;
 		lookupFilled = {};
 		lookupSeeded = {};
+		lookupUrlHeld = false;
 		appliedArtist = null;
 	}
 
@@ -194,6 +201,7 @@
 		if (next.kind !== 'results') return;
 		// A new result describes a new seed, even when that seed is empty.
 		lookupSeeded = {};
+		lookupUrlHeld = sourcePostUrl.trim() !== '';
 		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
 		lookupFilled = fields;
 		if (fields.sourcePostUrl !== undefined) {
@@ -209,19 +217,22 @@
 	/** The inline new-artist form obeys the same rule as the two fields above:
 	 * a lookup is a suggestion, so it fills only what is empty, tags what it
 	 * filled, and the tag clears the moment the operator edits that field. */
-	function seedNewArtist(handle: string, site: LookupSite, linkable: boolean) {
+	function seedNewArtist(handle: string, site: LookupSite, linkable: boolean): NewArtistSeed {
 		const url = site === 'Twitter' ? newTwitter : newFuraffinity;
 		const seed = newArtistSeed(handle, site, linkable, {
 			artistName: artistName.trim() === '',
 			profileUrl: url.trim() === ''
 		});
-		// A second click on the same result seeds nothing, because the first click
-		// already filled the fields it was allowed to touch. Overwriting the record
-		// with that empty seed would retract the sentence describing what the FIRST
-		// click wrote — and the guess disclosure with it — while the values and
-		// their "From lookup" tags stay on screen. Nothing changed, so nothing said
-		// about it changes.
-		if (seed.artistName !== undefined || seed.profileUrl !== undefined) lookupSeeded = seed;
+		// Merged field by field, never replaced. A second click on the same result
+		// seeds nothing, because the first click already filled the fields it was
+		// allowed to touch, and overwriting the record with that empty seed would
+		// retract the sentence describing what the FIRST click wrote — and the
+		// guess disclosure with it — while the values and their "From lookup" tags
+		// stay on screen. A partial re-seed (the operator cleared the name, then
+		// clicked again) is the same retraction one field narrower: it writes the
+		// name only, and a replaced record would drop the profile URL while that
+		// field keeps its value and its tag.
+		lookupSeeded = { ...lookupSeeded, ...seed };
 		if (seed.artistName !== undefined) {
 			artistName = seed.artistName;
 			nameTagged = true;
@@ -235,6 +246,10 @@
 				furaffinityTagged = true;
 			}
 		}
+		// What THIS click wrote. The caller announces on it rather than on the
+		// merged record, which survives a click that wrote nothing and would
+		// therefore report the first click's work as this one's.
+		return seed;
 	}
 
 	function useLookupArtist(artist: { id: number; name: string }) {
@@ -388,7 +403,7 @@
 					edited={lookupEdited}
 					seeded={lookupSeeded}
 					seedEdited={lookupSeedEdited}
-					sourceUrlHeld={sourcePostUrl.trim() !== ''}
+					sourceUrlHeld={lookupUrlHeld}
 					{appliedArtist}
 					editMode
 					variantBlocked={data.hasVariants}
@@ -403,11 +418,14 @@
 						// switched — say it only when this click is what did.
 						const wasExisting = artistMode === 'existing';
 						artistMode = 'new';
-						seedNewArtist(seed.handle, seed.site, seed.linkable);
+						const wrote = seedNewArtist(seed.handle, seed.site, seed.linkable);
 						// A seed that wrote something is announced by the panel's own status
 						// line. An empty handle (the no_match action) writes nothing, so the
 						// select is replaced by a name field with nothing said about it.
-						const seededNothing = seedStatusKind(lookupSeeded) === 'none';
+						// Judged by what THIS click wrote: the record keeps the previous
+						// seed, so reading it would call a click that wrote nothing a
+						// success and leave a second click unanswered.
+						const seededNothing = seedStatusKind(wrote) === 'none';
 						if (wasExisting && seededNothing) announcer.say(m.admin_lookup_announce_new_form());
 						// The form was already open and its fields hold the operator's own
 						// values, so this click wrote nothing anywhere. Say that instead of

@@ -51,9 +51,12 @@
 		seeded?: NewArtistSeed;
 		/** `edited`, for the seeded fields — same rule, same reason. */
 		seedEdited?: SeedEdited;
-		/** Whether the source post URL field currently holds anything. Under a
-		 * clash the prefill skips that field whatever it holds, so this is what
-		 * tells "left it empty" from "left what was already there alone". */
+		/** Whether the source post URL field held anything when the prefill ran.
+		 * Under a clash the prefill skips that field whatever it holds, so this is
+		 * what tells "left it empty" from "left what was already there alone". A
+		 * snapshot, like `filled`, not a live read: the sentence describes what the
+		 * lookup did once, and typing into the field afterwards must not rewrite
+		 * it. */
 		sourceUrlHeld?: boolean;
 		/** The artist currently applied from this result, if any. */
 		appliedArtist?: { id: number; name: string } | null;
@@ -115,6 +118,13 @@
 		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld })
 	);
 	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
+	// The "Choose Use {name} to change the artist" sentence and the button it
+	// names render on the same condition, so the button can describe itself with
+	// it — an operator who tabs straight to the action row otherwise hears only
+	// "Use {name}", with nothing saying the artist is not applied yet.
+	const artistHintShown = $derived(
+		editMode && outcome === 'existing' && !appliedArtist && !!candidates[0]
+	);
 	// "Uploaded {date} · {artist} · {w} x {h}", with any part dropped when the row
 	// has no answer for it rather than spelled out as a blank.
 	const clashMeta = $derived.by(() => {
@@ -213,8 +223,8 @@
 				{:else if lookup.reason === 'gone'}
 					<!-- The image was deleted between the page load and the click. Nothing
 					     was sent, FuzzySearch never saw it, and a retry would hit the same
-					     missing row — so the only way forward is a reload, and Close is the
-					     only action below. -->
+					     missing row — so the body sends the operator to All Images, and
+					     Close is the only action below. -->
 					<div class="lookup-eyebrow warn">{m.admin_lookup_gone_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_gone_body()}</p>
 				{:else if lookup.reason === 'signed_out'}
@@ -385,8 +395,8 @@
 				     above it disappeared whenever that sentence did, and the sentence goes
 				     away as soon as the operator edits the field the lookup filled — which
 				     has nothing to do with whether the artist is still unapplied. -->
-				{#if editMode && outcome === 'existing' && !appliedArtist && candidates[0]}
-					<p class="lookup-status">
+				{#if artistHintShown && candidates[0]}
+					<p class="lookup-status" id="lookup-artist-hint">
 						{m.admin_lookup_status_artist_hint({ name: candidates[0].name })}
 					</p>
 				{/if}
@@ -451,7 +461,12 @@
 							{m.admin_lookup_use_selected()}
 						</button>
 					{:else if candidates[0]}
-						<button type="button" class="btn btn-secondary" onclick={() => onuseartist(candidates[0])}>
+						<button
+							type="button"
+							class="btn btn-secondary"
+							aria-describedby={artistHintShown ? 'lookup-artist-hint' : undefined}
+							onclick={() => onuseartist(candidates[0])}
+						>
 							{m.admin_lookup_use_artist({ name: candidates[0].name })}
 						</button>
 					{/if}
@@ -462,12 +477,26 @@
 					</a>
 				{:else if outcome === 'existing' && candidates[0]}
 					{#if appliedArtist && appliedArtist.id === candidates[0].id}
-						<button type="button" class="btn btn-secondary applied" onclick={() => onuseartist(candidates[0])}>
+						<!-- Named so a page can land focus here: creating the artist from the
+						     lookup's dialog destroys the "Add {handle} as a new artist"
+						     button this one replaces, and that button is the dialog's
+						     captured opener (2.4.3). -->
+						<button
+							type="button"
+							class="btn btn-secondary applied"
+							id="lookup-applied-artist"
+							onclick={() => onuseartist(candidates[0])}
+						>
 							<Check size={14} aria-hidden="true" />
 							{m.admin_lookup_using_artist({ name: candidates[0].name })}
 						</button>
 					{:else}
-						<button type="button" class="btn btn-primary" onclick={() => onuseartist(candidates[0])}>
+						<button
+							type="button"
+							class="btn btn-primary"
+							aria-describedby={artistHintShown ? 'lookup-artist-hint' : undefined}
+							onclick={() => onuseartist(candidates[0])}
+						>
 							{m.admin_lookup_use_artist({ name: candidates[0].name })}
 						</button>
 					{/if}
