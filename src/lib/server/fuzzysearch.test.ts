@@ -323,9 +323,10 @@ describe('searchImage — bounded response reads', () => {
 			reason: 'invalid_image'
 		});
 		expect(state.cancelled).toBe(true);
-		// Enough chunks to cross the cap (plus the one the stream reads ahead),
-		// nowhere near the whole body.
-		expect(state.pulled).toBeLessThanOrEqual(FUZZYSEARCH_ERROR_BODY_BYTES / 1024 + 2);
+		// Enough chunks to cross the cap plus a little read-ahead (how much the
+		// stream pulls ahead is the platform's choice, so leave it room), nowhere
+		// near the whole body.
+		expect(state.pulled).toBeLessThanOrEqual(FUZZYSEARCH_ERROR_BODY_BYTES / 1024 + 4);
 		expect(state.pulled).toBeLessThan(chunks.length);
 	});
 
