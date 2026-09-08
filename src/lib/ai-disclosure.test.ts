@@ -37,7 +37,10 @@ describe('defaultAiDisclosure', () => {
 		// the browsing-time claim scoped so it stays true.
 		expect(all).toMatch(/calls an AI service in one place/);
 		expect(all).toContain('entail.dev');
-		expect(all).toMatch(/Nothing you do is sent to an AI service as you browse/);
+		// Both paths: the post link (Bluesky) and the picture link X hands back.
+		expect(all).toMatch(/or to the picture in that post/);
+		expect(all).toMatch(/X's own service is asked which picture the post carries first/);
+		expect(all).toMatch(/Only the site owner can start that, so nothing you do is sent to an AI service as you browse/);
 		expect(all).toMatch(/logs and database/);
 		expect(all).toContain('CodeRabbit');
 		// Honesty about what dev-time log access can expose: no "your data never

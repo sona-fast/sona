@@ -44,6 +44,9 @@ const FAILURE_STATUS: Record<LookupFailure, number> = {
 };
 
 const MAX_URL_LENGTH = 2048;
+/** Read before parsing: a valid body is a short object with one field, so
+ * anything past this is refused without handing it to JSON.parse. */
+const MAX_BODY_BYTES = 4096;
 
 const failure = (reason: LookupFailure) =>
 	json({ error: reason }, { status: FAILURE_STATUS[reason] });
@@ -53,7 +56,14 @@ const invalid = () => json({ error: 'invalid_request' }, { status: 400 });
 type Body = { imageId?: unknown; sourcePostUrl?: unknown };
 
 export const POST: RequestHandler = async ({ request, platform }) => {
-	const body = (await request.json().catch(() => null)) as Body | null;
+	const raw = await request.arrayBuffer().catch(() => null);
+	if (!raw || raw.byteLength > MAX_BODY_BYTES) return invalid();
+	let body: Body | null;
+	try {
+		body = JSON.parse(new TextDecoder().decode(raw));
+	} catch {
+		body = null;
+	}
 	if (!body || typeof body !== 'object' || Array.isArray(body)) return invalid();
 
 	const hasImageId = body.imageId !== undefined && body.imageId !== null;
@@ -87,6 +97,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	if (!source) return json({ error: 'unsupported_source' }, { status: 422 });
 
 	let outcome: LookupOutcome;
+	let photoCount = 0;
 	if (source.kind === 'bluesky') {
 		outcome = await lookupBlueskyPost(source.url);
 	} else {
@@ -97,6 +108,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		const media = await fetchTweetMediaUrl(source.id);
 		if (!media.ok) return failure(media.reason);
 		outcome = await classifyMediaUrl(media.url);
+		photoCount = media.photoCount;
 	}
 
 	if (!outcome.ok) return failure(outcome.reason);
@@ -104,6 +116,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		source: source.kind,
 		tags: outcome.suggestions.tags,
 		rating: outcome.suggestions.rating,
-		imageCount: outcome.imageCount
+		// classifyMediaUrl sees one image; only the tweet lookup knows how many
+		// the post carried.
+		imageCount: source.kind === 'x' ? photoCount : outcome.imageCount
 	});
 };

@@ -3,6 +3,7 @@ import {
 	MAX_SUGGESTED_TAGS,
 	classifySourceUrl,
 	classifyMediaUrl,
+	errorLabel,
 	lookupBlueskyPost,
 	suggestionsFromResult,
 	translateTag
@@ -53,6 +54,24 @@ describe('classifySourceUrl', () => {
 			url: 'https://x.com/i/status/1234567890',
 			id: '1234567890'
 		});
+		// The share-sheet permalink form.
+		expect(classifySourceUrl('https://x.com/i/web/status/1234567890')).toEqual({
+			kind: 'x',
+			url: 'https://x.com/i/status/1234567890',
+			id: '1234567890'
+		});
+		expect(classifySourceUrl('https://twitter.com/i/web/status/1234567890?s=20')).toEqual({
+			kind: 'x',
+			url: 'https://x.com/i/status/1234567890',
+			id: '1234567890'
+		});
+		// `web` only means something after `i`.
+		expect(classifySourceUrl('https://x.com/web/status/1234567890')).toEqual({
+			kind: 'x',
+			url: 'https://x.com/web/status/1234567890',
+			id: '1234567890'
+		});
+		expect(classifySourceUrl('https://x.com/i/web/1234567890')).toBeNull();
 	});
 
 	it('rejects anything else', () => {
@@ -88,6 +107,16 @@ describe('translateTag', () => {
 		expect(translateTag('!!!')).toBeNull();
 		expect(translateTag('')).toBeNull();
 	});
+
+	it('drops emoticon tags instead of leaving their debris', () => {
+		// e621 carries symbol-only tags whose sanitized remains ("3", "-", "---")
+		// would otherwise be suggested as if they were words.
+		expect(translateTag('<3')).toBeNull();
+		expect(translateTag('^_^')).toBeNull();
+		expect(translateTag('-_-')).toBeNull();
+		expect(translateTag(':3')).toBeNull();
+		expect(translateTag('digital_media_(artwork)')).toBe('digital-media');
+	});
 });
 
 describe('suggestionsFromResult', () => {
@@ -102,12 +131,6 @@ describe('suggestionsFromResult', () => {
 				]
 			})
 		).toEqual({ tags: ['mammal', 'pink-hair'], rating: 'safe' });
-	});
-
-	it('honours a custom floor', () => {
-		expect(
-			suggestionsFromResult({ tags: [{ name: 'canine', confidence: 0.5 }] }, 0.4).tags
-		).toEqual(['canine']);
 	});
 
 	it('dedupes tags that translate to the same name', () => {
@@ -143,6 +166,23 @@ describe('suggestionsFromResult', () => {
 		).toEqual({ tags: [], rating: null });
 		expect(suggestionsFromResult(null)).toEqual({ tags: [], rating: null });
 		expect(suggestionsFromResult({ tags: 'nope' })).toEqual({ tags: [], rating: null });
+	});
+});
+
+describe('errorLabel', () => {
+	it('reduces a parse failure to its name and keeps everything else readable', () => {
+		// Every fail-soft catch in this module and twitter-media.ts logs through
+		// this. A SyntaxError's message quotes the body that failed to parse.
+		let parseError: unknown;
+		try {
+			JSON.parse('<html>secret-body');
+		} catch (e) {
+			parseError = e;
+		}
+		expect(errorLabel(parseError)).toBe('SyntaxError');
+		expect(errorLabel(new Error('TimeoutError'))).toBe('TimeoutError');
+		expect(errorLabel('plain string')).toBe('plain string');
+		expect(errorLabel(42)).toBe('42');
 	});
 });
 
@@ -209,12 +249,14 @@ describe('lookupBlueskyPost', () => {
 		expect(logged).not.toContain('<html>');
 	});
 
-	it('ignores a bare-array body the API never sends', async () => {
-		expect(await lookupBlueskyPost(url, vi.fn(async () => json(post.images)))).toEqual({
-			ok: true,
-			suggestions: { tags: [], rating: null },
-			imageCount: 0
-		});
+	it('is unavailable on a 200 whose body has no images array', async () => {
+		// A bare array, or an object missing `images`, is a shape we don't know.
+		// It must not pass as "the classifier found nothing" (which is `images: []`).
+		const unavailable = { ok: false, reason: 'unavailable' };
+		expect(await lookupBlueskyPost(url, vi.fn(async () => json(post.images)))).toEqual(unavailable);
+		expect(await lookupBlueskyPost(url, vi.fn(async () => json({ uri: 'at://x' })))).toEqual(
+			unavailable
+		);
 	});
 
 	it('succeeds with no tags when the post has no classified images', async () => {
@@ -225,6 +267,23 @@ describe('lookupBlueskyPost', () => {
 			imageCount: 0
 		});
 	});
+
+	// `/post?wait=true` holds the connection open while the classifier works,
+	// the same way the classify poll does (see the matching test below). A post
+	// timeout shorter than that hold would abort the answer we asked to wait for.
+	it('waits out a post lookup that the server holds open for seconds', async () => {
+		const heldFor = 2500;
+		const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+			await new Promise((resolve) => setTimeout(resolve, heldFor));
+			init?.signal?.throwIfAborted();
+			return json(post);
+		});
+		expect(await lookupBlueskyPost(url, fetchImpl)).toEqual({
+			ok: true,
+			suggestions: { tags: ['mammal'], rating: 'explicit' },
+			imageCount: 2
+		});
+	}, 10_000);
 });
 
 describe('classifyMediaUrl', () => {
@@ -320,17 +379,6 @@ describe('classifyMediaUrl', () => {
 				})
 			)
 		).toEqual(unavailable);
-	});
-
-	it('logs a malformed poll body as a parse failure without quoting it', async () => {
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
-			init?.method === 'POST' ? json({ job_id: 'job-8' }, 202) : new Response('<html>secret-body')
-		);
-		expect(await classifyMediaUrl(url, fetchImpl)).toEqual({ ok: false, reason: 'unavailable' });
-		const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n');
-		expect(logged).toContain('SyntaxError');
-		expect(logged).not.toContain('secret-body');
 	});
 
 	it('names a rate limit from either the enqueue or a poll', async () => {

@@ -71,7 +71,7 @@ export function defaultAiDisclosure(): AiDisclosure {
 			},
 			{
 				lead: 'Your data.',
-				body: "The site calls an AI service in one place: when the site owner asks for tag suggestions on a piece of artwork, the public URL of its source post goes to entail.dev, an image classifier. Nothing you do is sent to an AI service as you browse. When the software is being worked on, the developer's tools can read this site's logs and database, as any developer's could, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service. Model training is switched off on the accounts used, and CodeRabbit states that the data from its reviews is never used for training. The privacy policy has the details."
+				body: "The site calls an AI service in one place: when the site owner asks for tag suggestions on a piece of artwork, a public link to its source post, or to the picture in that post, goes to entail.dev, an image classifier. For a post on X, X's own service is asked which picture the post carries first. Only the site owner can start that, so nothing you do is sent to an AI service as you browse. When the software is being worked on, the developer's tools can read this site's logs and database, as any developer's could, and those logs can include visitors' IP addresses and the pages they requested. Code goes to Anthropic and to CodeRabbit, a review service. Model training is switched off on the accounts used, and CodeRabbit states that the data from its reviews is never used for training. The privacy policy has the details."
 			},
 			{
 				lead: 'The model.',

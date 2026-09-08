@@ -3,7 +3,7 @@
 // UNDOCUMENTED and rotate — both were lifted from FxEmbed's source
 // (packages/atmosphere/src/providers/twitter/graphql/{queries,features}.ts,
 // `TweetResultByRestIdQuery` plus its `rwebTweetFeatureKeys`) and verified
-// against a real public tweet on 2026-09-08 (activate 200, GraphQL 200, photo
+// against a real public tweet on 2026-09-07 (activate 200, GraphQL 200, photo
 // present). If resolution goes uniformly null, refresh them from FxEmbed.
 //
 // Fail-soft throughout: any error resolves to a failed outcome and the caller
@@ -66,19 +66,24 @@ const QUERY_FIELD_TOGGLES = {
 /** `rate_limited` is X refusing the guest token twice over with a 429;
  * everything else that yields no photo is `unavailable`. */
 export type TweetMediaOutcome =
-	| { ok: true; url: string }
+	| { ok: true; url: string; photoCount: number }
 	| { ok: false; reason: 'rate_limited' | 'unavailable' };
 
 const fail = (reason: 'rate_limited' | 'unavailable'): TweetMediaOutcome => ({ ok: false, reason });
 
 type TweetMedia = { type?: unknown; media_url_https?: unknown };
 
+/** The first photo on a tweet, upgraded to its largest variant, and how many
+ * photos the tweet carried in all. */
+export type TweetPhotos = { url: string; photoCount: number };
+
 /**
- * Extract the first photo from a TweetResultByRestId response and ask
- * pbs.twimg.com for its largest variant. Returns null for a tweet with no
- * photo (video- and GIF-only tweets included). Pure, so it's testable.
+ * Extract the photos from a TweetResultByRestId response: the first one's
+ * URL, asking pbs.twimg.com for its largest variant, plus the photo count.
+ * Returns null for a tweet with no photo (video- and GIF-only tweets
+ * included). Pure, so it's testable.
  */
-export function parseTweetPhotoUrl(body: unknown): string | null {
+export function parseTweetPhotos(body: unknown): TweetPhotos | null {
 	const result = (body as { data?: { tweetResult?: { result?: Record<string, unknown> } } })?.data
 		?.tweetResult?.result;
 	if (!result) return null;
@@ -90,15 +95,18 @@ export function parseTweetPhotoUrl(body: unknown): string | null {
 	const media = legacy?.extended_entities?.media ?? legacy?.entities?.media;
 	if (!Array.isArray(media)) return null;
 
+	let first: string | null = null;
+	let photoCount = 0;
 	for (const entry of media as TweetMedia[]) {
 		if (entry?.type !== 'photo') continue;
 		const url = entry.media_url_https;
 		if (typeof url !== 'string' || !url) continue;
+		photoCount++;
+		if (first) continue;
 		const match = url.match(/^(.*)\.([a-z]+)$/i);
-		if (!match) return url;
-		return `${match[1]}?format=${match[2].toLowerCase()}&name=4096x4096`;
+		first = match ? `${match[1]}?format=${match[2].toLowerCase()}&name=4096x4096` : url;
 	}
-	return null;
+	return first ? { url: first, photoCount } : null;
 }
 
 function tweetLookup(tweetId: string, guestToken: string, fetchImpl: typeof fetch): Promise<Response> {
@@ -130,8 +138,9 @@ function tweetLookup(tweetId: string, guestToken: string, fetchImpl: typeof fetc
 	);
 }
 
-/** Resolve the first photo on a public tweet to a pbs.twimg.com URL, given the
- * numeric status id classifySourceUrl already validated. One guest token, one
+/** Resolve the first photo on a public tweet to a pbs.twimg.com URL, and
+ * count the tweet's photos, given the numeric status id classifySourceUrl
+ * already validated. One guest token, one
  * fresh-token retry if X refuses it (401/429), then a failed outcome. Never
  * throws. */
 export async function fetchTweetMediaUrl(
@@ -143,8 +152,11 @@ export async function fetchTweetMediaUrl(
 		if (!token) return fail('unavailable');
 		let res = await tweetLookup(tweetId, token, fetchImpl);
 		if (res.status === 401 || res.status === 429) {
+			// If X was already rate limiting us and now refuses a fresh token
+			// too, that is still a rate limit, not an outage.
+			const limited = res.status === 429;
 			token = await activateGuestToken(fetchImpl);
-			if (!token) return fail('unavailable');
+			if (!token) return fail(limited ? 'rate_limited' : 'unavailable');
 			res = await tweetLookup(tweetId, token, fetchImpl);
 		}
 		if (res.status === 429) {
@@ -155,14 +167,14 @@ export async function fetchTweetMediaUrl(
 			console.warn(`[avatar] tweet media lookup failed: status=${res.status}`);
 			return fail('unavailable');
 		}
-		const photo = parseTweetPhotoUrl(await res.json());
-		if (!photo) {
+		const photos = parseTweetPhotos(await res.json());
+		if (!photos) {
 			// 200 but no photo — a text/video tweet, a protected or deleted one, or
 			// the undocumented GraphQL shape rotated (see the file header).
 			console.warn('[avatar] tweet media lookup had no photo');
 			return fail('unavailable');
 		}
-		return { ok: true, url: photo };
+		return { ok: true, url: photos.url, photoCount: photos.photoCount };
 	} catch (e) {
 		console.warn(`[avatar] tweet media lookup error: ${errorLabel(e)}`);
 		return fail('unavailable');

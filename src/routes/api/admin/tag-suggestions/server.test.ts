@@ -71,7 +71,7 @@ beforeEach(() => {
 	fetchTweetMediaUrl.mockReset();
 	lookupBlueskyPost.mockResolvedValue(suggestions);
 	classifyMediaUrl.mockResolvedValue(suggestions);
-	fetchTweetMediaUrl.mockResolvedValue({ ok: true, url: MEDIA_URL });
+	fetchTweetMediaUrl.mockResolvedValue({ ok: true, url: MEDIA_URL, photoCount: 1 });
 });
 
 describe('POST /api/admin/tag-suggestions', () => {
@@ -98,13 +98,23 @@ describe('POST /api/admin/tag-suggestions', () => {
 			source: 'x',
 			tags: ['mammal', 'pink-hair'],
 			rating: 'safe',
-			imageCount: 3
+			// The tweet's photo count, not whatever classifyMediaUrl reports.
+			imageCount: 1
 		});
 		// Only the validated status id goes to X, never the caller's string.
 		expect(fetchTweetMediaUrl).toHaveBeenCalledWith(X_ID);
 		// The media URL is what reaches entail.dev — never the tweet URL.
 		expect(classifyMediaUrl).toHaveBeenCalledWith(MEDIA_URL);
 		expect(lookupBlueskyPost).not.toHaveBeenCalled();
+	});
+
+	it('reports how many photos a multi-photo tweet carried', async () => {
+		const { platform } = makeEnv();
+		fetchTweetMediaUrl.mockResolvedValue({ ok: true, url: MEDIA_URL, photoCount: 3 });
+		classifyMediaUrl.mockResolvedValue({ ...suggestions, imageCount: 1 });
+		const res = await POST(event(platform, { sourcePostUrl: X_POST }));
+		expect(res.status).toBe(200);
+		expect((await res.json()).imageCount).toBe(3);
 	});
 
 	it('reads the stored source URL for an imageId', async () => {
@@ -152,7 +162,10 @@ describe('POST /api/admin/tag-suggestions', () => {
 			[{ imageId: 1.5 }, undefined],
 			[{ imageId: 0 }, undefined],
 			[{ sourcePostUrl: 42 }, undefined],
-			[{ sourcePostUrl: `https://bsky.app/profile/a/post/${'x'.repeat(2100)}` }, undefined]
+			[{ sourcePostUrl: `https://bsky.app/profile/a/post/${'x'.repeat(2100)}` }, undefined],
+			// Over the body cap: refused before JSON.parse ever sees it, even though
+			// the URL inside is fine and the padding would otherwise be ignored.
+			[undefined, JSON.stringify({ sourcePostUrl: BSKY_POST, pad: 'x'.repeat(4100) })]
 		];
 		for (const [body, raw] of bad) {
 			const res = await POST(event(platform, body, raw));
@@ -173,6 +186,19 @@ describe('POST /api/admin/tag-suggestions', () => {
 		const res = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({ source: 'bluesky', tags: [], rating: 'safe', imageCount: 3 });
+	});
+
+	it('passes an imageCount of 0 through as a success', async () => {
+		const { platform } = makeEnv();
+		// A post with no classified images: still 200, still zero, not a failure.
+		lookupBlueskyPost.mockResolvedValue({
+			ok: true,
+			suggestions: { tags: [], rating: null },
+			imageCount: 0
+		});
+		const res = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ source: 'bluesky', tags: [], rating: null, imageCount: 0 });
 	});
 
 	it('502s not_ready when the post is queued but unclassified', async () => {

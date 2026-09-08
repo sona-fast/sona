@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchTweetMediaUrl, parseTweetPhotoUrl } from './twitter-media';
+import { fetchTweetMediaUrl, parseTweetPhotos } from './twitter-media';
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -22,32 +22,44 @@ const tweetWith = (media: unknown[]) => ({
 
 const photo = { type: 'photo', media_url_https: 'https://pbs.twimg.com/media/AbCdEf123.jpg' };
 
-describe('parseTweetPhotoUrl', () => {
+describe('parseTweetPhotos', () => {
 	it('upgrades the first photo to the largest variant', () => {
-		expect(parseTweetPhotoUrl(tweetWith([photo]))).toBe(
-			'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096'
-		);
+		expect(parseTweetPhotos(tweetWith([photo]))).toEqual({
+			url: 'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096',
+			photoCount: 1
+		});
+	});
+
+	it('counts every photo but resolves only the first', () => {
+		const second = { type: 'photo', media_url_https: 'https://pbs.twimg.com/media/Second.png' };
+		const third = { type: 'photo', media_url_https: 'https://pbs.twimg.com/media/Third.png' };
+		expect(parseTweetPhotos(tweetWith([photo, second, third]))).toEqual({
+			url: 'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096',
+			photoCount: 3
+		});
 	});
 
 	it('passes a media URL with no extension through untouched', () => {
 		expect(
-			parseTweetPhotoUrl(tweetWith([{ type: 'photo', media_url_https: 'https://pbs.twimg.com/media/NoExt' }]))
+			parseTweetPhotos(tweetWith([{ type: 'photo', media_url_https: 'https://pbs.twimg.com/media/NoExt' }]))
+				?.url
 		).toBe('https://pbs.twimg.com/media/NoExt');
 	});
 
 	it('skips video and animated gif entries', () => {
-		expect(parseTweetPhotoUrl(tweetWith([{ type: 'video', media_url_https: 'https://pbs.twimg.com/x.jpg' }]))).toBeNull();
+		expect(parseTweetPhotos(tweetWith([{ type: 'video', media_url_https: 'https://pbs.twimg.com/x.jpg' }]))).toBeNull();
 		expect(
-			parseTweetPhotoUrl(tweetWith([{ type: 'animated_gif', media_url_https: 'https://pbs.twimg.com/y.jpg' }]))
+			parseTweetPhotos(tweetWith([{ type: 'animated_gif', media_url_https: 'https://pbs.twimg.com/y.jpg' }]))
 		).toBeNull();
+		// A video alongside a photo is not counted as a photo.
 		expect(
-			parseTweetPhotoUrl(tweetWith([{ type: 'video', media_url_https: 'https://pbs.twimg.com/x.jpg' }, photo]))
-		).toContain('format=jpg');
+			parseTweetPhotos(tweetWith([{ type: 'video', media_url_https: 'https://pbs.twimg.com/x.jpg' }, photo]))
+		).toEqual({ url: expect.stringContaining('format=jpg'), photoCount: 1 });
 	});
 
 	it('reads a tweet nested behind a visibility result', () => {
 		expect(
-			parseTweetPhotoUrl({
+			parseTweetPhotos({
 				data: {
 					tweetResult: {
 						result: {
@@ -56,22 +68,22 @@ describe('parseTweetPhotoUrl', () => {
 						}
 					}
 				}
-			})
+			})?.url
 		).toContain('AbCdEf123');
 	});
 
 	it('falls back to entities.media when extended_entities is absent', () => {
 		expect(
-			parseTweetPhotoUrl({
+			parseTweetPhotos({
 				data: { tweetResult: { result: { legacy: { entities: { media: [photo] } } } } }
-			})
+			})?.url
 		).toContain('AbCdEf123');
 	});
 
 	it('returns null on a text-only tweet, a tombstone, and junk', () => {
-		expect(parseTweetPhotoUrl(tweetWith([]))).toBeNull();
-		expect(parseTweetPhotoUrl({ data: { tweetResult: {} } })).toBeNull();
-		expect(parseTweetPhotoUrl(null)).toBeNull();
+		expect(parseTweetPhotos(tweetWith([]))).toBeNull();
+		expect(parseTweetPhotos({ data: { tweetResult: {} } })).toBeNull();
+		expect(parseTweetPhotos(null)).toBeNull();
 	});
 });
 
@@ -98,7 +110,8 @@ describe('fetchTweetMediaUrl', () => {
 		const { fetchImpl, tokens } = stub(() => json(tweetWith([photo])));
 		expect(await fetchTweetMediaUrl(id, fetchImpl)).toEqual({
 			ok: true,
-			url: 'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096'
+			url: 'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096',
+			photoCount: 1
 		});
 		expect(tokens).toEqual(['gt-1']);
 		const lookup = String(fetchImpl.mock.calls.find(([t]) => !String(t).includes('guest/activate'))?.[0]);
@@ -131,6 +144,19 @@ describe('fetchTweetMediaUrl', () => {
 		expect(activations.count).toBe(2);
 	});
 
+	it('stays rate_limited when the retry cannot even get a fresh token after a 429', async () => {
+		let activations = 0;
+		const fetchImpl = vi.fn(async (target: string | URL | Request) => {
+			if (String(target).includes('guest/activate')) {
+				activations++;
+				return activations === 1 ? json({ guest_token: 'gt-1' }) : new Response('slow down', { status: 429 });
+			}
+			return new Response('slow down', { status: 429 });
+		});
+		expect(await fetchTweetMediaUrl(id, fetchImpl)).toEqual({ ok: false, reason: 'rate_limited' });
+		expect(activations).toBe(2);
+	});
+
 	it('is unavailable after a 401 that survives the retry', async () => {
 		const { fetchImpl } = stub(() => new Response('nope', { status: 401 }));
 		expect(await fetchTweetMediaUrl(id, fetchImpl)).toEqual(unavailable);
@@ -150,14 +176,6 @@ describe('fetchTweetMediaUrl', () => {
 				})
 			)
 		).toEqual(unavailable);
-	});
-
-	it('logs a malformed body as a parse failure without quoting it', async () => {
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		await fetchTweetMediaUrl(id, stub(() => new Response('<html>secret-body')).fetchImpl);
-		const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n');
-		expect(logged).toContain('SyntaxError');
-		expect(logged).not.toContain('secret-body');
 	});
 
 	it('is unavailable when the guest token cannot be activated', async () => {

@@ -4,7 +4,7 @@
 // allowlisted CDN goes through the `/api/classify` enqueue-and-poll pair.
 //
 // Spec: https://entail.dev/api/openapi.json (docs at https://entail.dev/api/docs).
-// Response shapes below were confirmed against the live API on 2026-09-08.
+// Response shapes below were confirmed against the live API on 2026-09-07.
 // Rate limiting is per client IP and there are no API keys, so a 429 is a
 // normal outcome, not an error to surface.
 //
@@ -26,7 +26,7 @@ export const MAX_SUGGESTED_TAGS = 40;
 
 // Both `wait=true` endpoints hold the connection open until the classifier
 // finishes rather than answering 202 straight away. That hold was measured at
-// roughly five seconds for a fresh job on 2026-09-08, so every timeout here
+// roughly five seconds for a fresh job on 2026-09-07, so every timeout here
 // has to clear it comfortably or we abort the very response we asked to wait
 // for. A classify is one enqueue plus at most two polls, worst case about
 // 3 + 8 + 0.25 + 8 seconds; the caller shows a pending state while it waits.
@@ -53,7 +53,8 @@ export type LookupFailure = 'not_ready' | 'rate_limited' | 'unavailable';
 
 /** `imageCount` is how many images the source post carried. Suggestions come
  * from the first one only, so a count above 1 tells the UI the rest went
- * unread. The X path always reports 1: it classifies a single media URL. */
+ * unread. classifyMediaUrl has no post to count, so it reports 1 and the
+ * endpoint substitutes the tweet's photo count on the X path. */
 export type LookupOutcome =
 	| { ok: true; suggestions: Suggestions; imageCount: number }
 	| { ok: false; reason: LookupFailure };
@@ -111,7 +112,10 @@ export function classifySourceUrl(url: string): SourceKind | null {
 	}
 
 	if (host === 'x.com' || host === 'twitter.com' || host === 'mobile.x.com' || host === 'mobile.twitter.com') {
-		// /<user>/status/<id>, /i/status/<id>, either with a trailing /photo/N.
+		// /<user>/status/<id>, /i/status/<id>, /i/web/status/<id>, any with a
+		// trailing /photo/N. The `/i/web/` permalink is the form X's own share
+		// sheet hands out, so it canonicalises to /i/status/<id> like the rest.
+		if (parts[0] === 'i' && parts[1] === 'web') parts.splice(1, 1);
 		if (parts.length < 3) return null;
 		const [user, keyword, id] = parts;
 		if (keyword !== 'status' && keyword !== 'statuses') return null;
@@ -127,7 +131,9 @@ export function classifySourceUrl(url: string): SourceKind | null {
  * Translate one e621-vocabulary tag into a Sona tag. Drops the trailing
  * qualifier e621 appends to disambiguate (`digital_media_(artwork)`), swaps
  * underscores for hyphens, then runs the same sanitizer the tag inputs use.
- * Returns null when nothing usable is left. Pure.
+ * Emoticon tags (`<3`, `^_^`, `-_-`, `:3`) sanitize down to bare digits or
+ * hyphens, so the result also needs a letter to count. Returns null when
+ * nothing usable is left. Pure.
  */
 export function translateTag(tag: string): string | null {
 	const translated = tag
@@ -135,8 +141,10 @@ export function translateTag(tag: string): string | null {
 		.toLowerCase()
 		.replace(/[\s_]*\([^()]*\)\s*$/, '')
 		.replace(/_/g, '-');
-	const sanitized = sanitizeTag(translated);
-	return sanitized || null;
+	const sanitized = sanitizeTag(translated)
+		.replace(/-{2,}/g, '-')
+		.replace(/^-|-$/g, '');
+	return /[a-z]/.test(sanitized) ? sanitized : null;
 }
 
 function normalizeRating(rating: unknown): EntailRating | null {
@@ -149,10 +157,7 @@ function normalizeRating(rating: unknown): EntailRating | null {
  * preserving the confidence order the API returns, capped at
  * {@link MAX_SUGGESTED_TAGS}. Pure.
  */
-export function suggestionsFromResult(
-	result: ClassificationEntry | null | undefined,
-	floor = DEFAULT_CONFIDENCE_FLOOR
-): Suggestions {
+export function suggestionsFromResult(result: ClassificationEntry | null | undefined): Suggestions {
 	const rating = normalizeRating(result?.rating);
 	const raw = Array.isArray(result?.tags) ? result.tags : [];
 	const seen = new Set<string>();
@@ -160,7 +165,7 @@ export function suggestionsFromResult(
 	for (const entry of raw) {
 		const { name, confidence } = (entry ?? {}) as { name?: unknown; confidence?: unknown };
 		if (typeof name !== 'string') continue;
-		if (typeof confidence !== 'number' || !(confidence >= floor)) continue;
+		if (typeof confidence !== 'number' || !(confidence >= DEFAULT_CONFIDENCE_FLOOR)) continue;
 		const tag = translateTag(name);
 		if (!tag || seen.has(tag)) continue;
 		seen.add(tag);
@@ -170,10 +175,12 @@ export function suggestionsFromResult(
 	return { tags, rating };
 }
 
-/** `/post` answers with `{ uri, images: [...] }`. */
-function postImages(body: unknown): ClassificationEntry[] {
+/** `/post` answers with `{ uri, images: [...] }`. A body without an `images`
+ * array is a shape we don't know, so it resolves to null rather than to an
+ * empty list that would read as "nothing to suggest". */
+function postImages(body: unknown): ClassificationEntry[] | null {
 	const images = (body as { images?: unknown })?.images;
-	return Array.isArray(images) ? (images as ClassificationEntry[]) : [];
+	return Array.isArray(images) ? (images as ClassificationEntry[]) : null;
 }
 
 /**
@@ -207,13 +214,16 @@ export async function lookupBlueskyPost(
 		}
 		// An empty `images` array means entail.dev looked and found no furry
 		// artwork in the post. That is an answer, not a failure: the caller gets
-		// an empty tag list rather than an error it would have to explain.
+		// an empty tag list rather than an error it would have to explain. A body
+		// with no `images` array at all is neither; it is unavailable.
 		const images = postImages(await res.json());
-		const first = images[0];
+		if (!images) {
+			console.warn('[entail] post lookup returned an unexpected shape');
+			return fail('unavailable');
+		}
 		return {
 			ok: true,
-			suggestions:
-				first && typeof first === 'object' ? suggestionsFromResult(first) : { tags: [], rating: null },
+			suggestions: suggestionsFromResult(images[0]),
 			imageCount: images.length
 		};
 	} catch (e) {
