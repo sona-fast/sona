@@ -33,7 +33,17 @@ describe('lookup button and its disclosure hint', () => {
 			expect(source).toContain('m.admin_lookup_hint_private()');
 			// The warn variant is a class swap on the same line, not a second one.
 			expect(source).toMatch(/class:hint-warn=\{isPrivate\}/);
+			// Both pages read the checkbox the operator can tick right now. Derived
+			// from the saved row instead, the edit page said nothing about sending a
+			// private file until the save had already happened.
+			expect(source).toMatch(
+				/<input type="checkbox" name="published" bind:checked=\{isPrivate\} \/>/
+			);
 		}
+		expect(EDIT).not.toContain('const isPrivate = $derived(!data.image.published)');
+		// The component is reused across a route-param change, so the tick has to
+		// go back to the next image's own state.
+		expect(EDIT).toMatch(/function resetForImage\(\)[\s\S]{0,900}?isPrivate = !data\.image\.published;/);
 	});
 
 	it('explains the per-tile split on the upload page, in both its variants', () => {
@@ -181,8 +191,37 @@ describe('the panel', () => {
 		]);
 		// No hand-rolled Use button left beside the snippet's own.
 		expect(PANEL).not.toMatch(/onclick=\{\(\) => onuseartist\(nameHits\[0\]\)\}/);
-		// One applied button in the file, so the id it carries stays unique.
-		expect(PANEL.match(/id="lookup-applied-artist"/g)).toHaveLength(1);
+		// Two applied buttons in the source, one per snippet, and the outcome they
+		// render under is exclusive: useArtistAction under 'existing' or 'new',
+		// useSelectedAction under 'ambiguous'. So the id stays unique in the DOM.
+		expect(PANEL.match(/id="lookup-applied-artist"/g)).toHaveLength(2);
+	});
+
+	// The ambiguous row's Use button was the last one applying an artist without
+	// swapping to "Using" and without a landing spot, so a sighted operator saw
+	// nothing change and focus fell to <body> when the swap destroyed it.
+	it('applies the picked artist through the same two branches as the other rows', () => {
+		expect(PANEL).toMatch(
+			/\{#snippet useSelectedAction\(primary: boolean\)\}\s*\n\s*\{#if appliedArtist && pickedArtist && appliedArtist\.id === pickedArtist\.id\}/
+		);
+		// The applied branch names the artist the radio list picked and carries the
+		// landing spot; the unapplied one keeps the label and the disabled gate.
+		expect(PANEL).toMatch(
+			/\{#snippet useSelectedAction[\s\S]{0,400}?id="lookup-applied-artist"[\s\S]{0,200}?m\.admin_lookup_using_artist\(\{ name: pickedArtist\.name \}\)/
+		);
+		expect(PANEL).toMatch(
+			/\{#snippet useSelectedAction[\s\S]{0,900}?disabled=\{!picked\}[\s\S]{0,300}?document\.getElementById\('lookup-applied-artist'\)\?\.focus\(\)/
+		);
+		// Rendered from both ambiguous branches, under the clash and without it.
+		expect(PANEL.match(/\{@render useSelectedAction\([^)]+\)\}/g)).toEqual([
+			'{@render useSelectedAction(false)}',
+			'{@render useSelectedAction(true)}'
+		]);
+		// The pick is read from one derived, so the button and the click agree on
+		// which candidate the radio names.
+		expect(PANEL).toMatch(
+			/const pickedArtist = \$derived\(candidates\.find\(\(c\) => String\(c\.id\) === picked\) \?\? null\)/
+		);
 	});
 
 	// A piece that already has variants renders no parent select, so the button
@@ -250,7 +289,7 @@ describe('the panel', () => {
 		// The clash action row: "Use selected artist", disabled until a radio is
 		// picked, ahead of the single-candidate "Use {name}" button.
 		expect(PANEL).toMatch(
-			/\{#if outcome === 'ambiguous'\}[\s\S]{0,300}?disabled=\{!picked\}[\s\S]{0,120}?m\.admin_lookup_use_selected\(\)[\s\S]{0,200}?\{:else if candidates\[0\]\}/
+			/\{#if outcome === 'ambiguous'\}\s*\n\s*\{@render useSelectedAction\(false\)\}\s*\n\s*\{:else if candidates\[0\]\}/
 		);
 	});
 
@@ -714,6 +753,12 @@ describe('focus after the panel goes away', () => {
 		// Moving to another image in the same tab drops the previous image's extras
 		// along with every other lookup seed.
 		expect(EDIT).toMatch(/function resetForImage\(\)[\s\S]{0,600}?extraParents = \[\];/);
+		// Same on the upload page, where a second lookup replaces the shared
+		// prefill: the first clash's piece stops being on offer unless the operator
+		// chose it, and dropping a chosen one would blank the select instead.
+		expect(UPLOAD).toMatch(
+			/function resetSharedPrefill\(\)[\s\S]{0,700}?extraParents = extraParents\.filter\(\(c\) => String\(c\.id\) === existingParentId\);/
+		);
 	});
 
 	// The Remove button lives inside the tile it removes, so activating it from

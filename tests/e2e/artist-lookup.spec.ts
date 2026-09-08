@@ -445,6 +445,32 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
 	});
 
+	// The disclosure used to read the image as it was last SAVED, so an operator
+	// who ticked Private and then ran the lookup was told nothing either before
+	// the click or after it, while the file went to FuzzySearch just the same.
+	// Image 1 is published in the seed, so ticking the box is a real change; the
+	// spec never saves, so the row stays as seeded.
+	test('the edit page discloses a lookup on an image just ticked Private', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await gotoEditHydrated(page, '/admin/images/1/edit');
+		const privateBox = page.locator('input[name="published"]');
+		await expect(page.locator('#lookup-hint')).not.toContainText('This image is private.');
+
+		await privateBox.check();
+		await expect(page.locator('#lookup-hint')).toContainText('This image is private.');
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).toContainText(
+			'This image is private. Sona sent the file to FuzzySearch for this lookup.'
+		);
+
+		// And back the other way, with the result still on screen.
+		await privateBox.uncheck();
+		await expect(panel(page)).not.toContainText('Sona sent the file to FuzzySearch');
+		await expect(page.locator('#lookup-hint')).not.toContainText('This image is private.');
+	});
+
 	// A second lookup used to read the first one's URL as something the operator
 	// typed, fill nothing, and leave a "From lookup" tag sitting on a value from
 	// the other post. Only the source pin can see the reset exists; this is what
@@ -610,6 +636,14 @@ test.describe('with a key saved', () => {
 		await expect(useSelected).toBeEnabled();
 		await useSelected.click();
 		await expect(select).toHaveValue('1');
+		// Applying swaps this button the way the other rows swap, and focus lands
+		// on the replacement — it used to sit unchanged with focus on <body>.
+		const applied = panel(page).getByRole('button', { name: 'Using Test Artist' });
+		await expect(applied).toBeVisible();
+		await expect(applied).toBeFocused();
+		await expect(
+			panel(page).getByRole('button', { name: 'Use selected artist' })
+		).toHaveCount(0);
 		// The clash's whole point: the post URL already belongs to another piece.
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);

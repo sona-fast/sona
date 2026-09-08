@@ -520,6 +520,11 @@
 		sharedFilled = {};
 		sharedUrlHeld = false;
 		appliedArtist = null;
+		// A clash carried into the select belongs to the lookup that found it, so
+		// a second lookup must not leave the first one's piece on offer. The one
+		// the operator actually chose stays: dropping it would silently blank the
+		// select and save no parent, which is what carrying it in prevented.
+		extraParents = extraParents.filter((c) => String(c.id) === existingParentId);
 	}
 
 	function applyShared(next: LookupState) {

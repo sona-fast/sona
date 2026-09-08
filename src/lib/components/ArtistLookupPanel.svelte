@@ -148,9 +148,10 @@
 		picked = '';
 	});
 
+	const pickedArtist = $derived(candidates.find((c) => String(c.id) === picked) ?? null);
+
 	function useSelected() {
-		const artist = candidates.find((c) => String(c.id) === picked);
-		if (artist) onuseartist({ id: artist.id, name: artist.name });
+		if (pickedArtist) onuseartist({ id: pickedArtist.id, name: pickedArtist.name });
 	}
 
 	/** The metadata line under a result row, with unknown segments dropped
@@ -464,6 +465,39 @@
 					</button>
 				{/if}
 			{/snippet}
+			<!-- The ambiguous row's Use button, in both places it renders. It keeps
+			     its own label, because the radio list is what names the artist, but
+			     it applies through the same two branches as the snippet above: it
+			     used to leave the operator with an unchanged button and, once the
+			     swap destroyed it, focus on <body> (2.4.3, 4.1.2). -->
+			{#snippet useSelectedAction(primary: boolean)}
+				{#if appliedArtist && pickedArtist && appliedArtist.id === pickedArtist.id}
+					<button
+						type="button"
+						class="btn btn-secondary applied"
+						id="lookup-applied-artist"
+						onclick={useSelected}
+					>
+						<Check size={14} aria-hidden="true" />
+						{m.admin_lookup_using_artist({ name: pickedArtist.name })}
+					</button>
+				{:else}
+					<!-- Two or more candidates: the radio list above is the answer,
+					     and this stays disabled until one of them is picked. -->
+					<button
+						type="button"
+						class="btn {primary ? 'btn-primary' : 'btn-secondary'}"
+						disabled={!picked}
+						onclick={async () => {
+							useSelected();
+							await tick();
+							document.getElementById('lookup-applied-artist')?.focus();
+						}}
+					>
+						{m.admin_lookup_use_selected()}
+					</button>
+				{/if}
+			{/snippet}
 			{#if lookup.kind === 'searching'}
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>
 					{m.admin_lookup_cancel()}
@@ -495,11 +529,7 @@
 						</button>
 					{/if}
 					{#if outcome === 'ambiguous'}
-						<!-- Two or more candidates: the radio list above is the answer,
-						     and this stays disabled until one of them is picked. -->
-						<button type="button" class="btn btn-secondary" disabled={!picked} onclick={useSelected}>
-							{m.admin_lookup_use_selected()}
-						</button>
+						{@render useSelectedAction(false)}
 					{:else if candidates[0]}
 						<!-- Secondary: "Add as a variant" above is this row's primary. -->
 						{@render useArtistAction(candidates[0], false)}
@@ -512,9 +542,7 @@
 				{:else if outcome === 'existing' && candidates[0]}
 					{@render useArtistAction(candidates[0], true)}
 				{:else if outcome === 'ambiguous'}
-					<button type="button" class="btn btn-primary" disabled={!picked} onclick={useSelected}>
-						{m.admin_lookup_use_selected()}
-					</button>
+					{@render useSelectedAction(true)}
 				{:else if outcome === 'new' && prefill}
 					{#if nameHits.length}
 						<!-- The same snippet as the other two rows: rendered as its own

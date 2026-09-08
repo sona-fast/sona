@@ -120,6 +120,7 @@
 		commissionedAt = data.image.commissionedAt || '';
 		selectedArtistId = data.image.artistId ?? '';
 		selectedParentId = String(data.image.parentImageId ?? '');
+		isPrivate = !data.image.published;
 		extraParents = [];
 		artistMode = 'existing';
 		artistName = '';
@@ -135,8 +136,11 @@
 	}
 
 	// The image is not published, so "look this up" means "send a private file to
-	// a third party" — say so before the click and again after it.
-	const isPrivate = $derived(!data.image.published);
+	// a third party" — say so before the click and again after it. Bound to the
+	// checkbox rather than derived from the saved row: an operator who ticks
+	// Private and then runs the lookup is about to send an unpublished file, and
+	// a disclosure keyed on the row would say nothing until the save.
+	let isPrivate = $state(untrack(() => !data.image.published));
 	const ratingTagText = $derived(
 		lookup.kind === 'results' ? ratingTag(strictestRating(lookup.data.matches)) : null
 	);
@@ -676,7 +680,7 @@
 		</div>
 
 		<label class="checkbox-label">
-			<input type="checkbox" name="published" checked={!data.image.published} />
+			<input type="checkbox" name="published" bind:checked={isPrivate} />
 			<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
 		</label>
 
