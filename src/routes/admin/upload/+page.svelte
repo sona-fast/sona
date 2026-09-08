@@ -127,9 +127,11 @@
 			}
 
 			if (exists && !confirm(m.admin_upload_duplicate_confirm({ fileName: file.name }))) {
-				// Declined: the tile goes, and so does the preview it was holding.
-				if (tile.previewUrl) URL.revokeObjectURL(tile.previewUrl);
-				tiles = tiles.filter((t) => t.key !== tile.key);
+				// Declined: the tile goes the same way the Remove button sends it.
+				// Filtering the array by hand skipped the parent bookkeeping —
+				// parentIndex kept pointing past the end, the shared panel went quiet,
+				// and the save action dereferenced a tile that was no longer there.
+				removeTile(tile.key);
 				return;
 			}
 

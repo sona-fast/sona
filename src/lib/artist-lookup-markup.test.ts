@@ -823,6 +823,21 @@ describe('the upload page grid', () => {
 			/if \(movedTo !== -1\) \{\s*\n\s*parentIndex = movedTo;\s*\n\s*\} else \{[\s\S]{0,300}?onParentChanged\(parentIndex\);/
 		);
 	});
+
+	// Every removal goes through that bookkeeping. The declined-duplicate path
+	// filtered the array by hand, so with two tiles uploading and the second
+	// picked as parent, declining the first left parentIndex pointing past the
+	// end: the shared panel went quiet and the save action dereferenced a tile
+	// that was no longer there.
+	it('removes a declined duplicate the same way the Remove button does', () => {
+		const uploadOne = UPLOAD.match(/async function uploadOne\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(uploadOne).toContain('removeTile(tile.key);');
+		expect(uploadOne).not.toMatch(/tiles = tiles\.filter/);
+		// removeTile owns the revoke, so the decline path must not keep its own.
+		expect(UPLOAD).toMatch(
+			/function removeTile\([\s\S]{0,200}?URL\.revokeObjectURL\(tiles\[idx\]\.previewUrl\)/
+		);
+	});
 });
 
 describe('the new-artist dialog prefill', () => {

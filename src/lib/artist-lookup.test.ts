@@ -707,7 +707,7 @@ describe('statusLineKind', () => {
 describe('stateFromResponse', () => {
 	it('reads matches into the results state', async () => {
 		const state = await stateFromResponse(jsonResponse(response()));
-		expect(state).toMatchObject({ kind: 'results', applied: false });
+		expect(state).toMatchObject({ kind: 'results' });
 		if (state.kind !== 'results') throw new Error('expected results');
 		expect(state.data.matches).toHaveLength(1);
 		expect(state.data.sourceClash).toBeNull();
@@ -973,7 +973,7 @@ describe('lookupSentFile', () => {
 	// The disclosure is about the FILE having left the browser, not about the
 	// lookup having worked: it belongs on a failure just as much as on a result.
 	it('is true for every outcome the request actually reached', () => {
-		expect(lookupSentFile({ kind: 'results', applied: false, data: response() })).toBe(true);
+		expect(lookupSentFile({ kind: 'results', data: response() })).toBe(true);
 		expect(lookupSentFile({ kind: 'no_match' })).toBe(true);
 		for (const reason of ['key_refused', 'rate_limited', 'unavailable'] as const) {
 			expect(lookupSentFile({ kind: 'failed', reason, sent: true })).toBe(true);

@@ -860,6 +860,70 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 	});
 
+	// The declined-duplicate path used to drop the tile with a bare array filter,
+	// skipping the parent bookkeeping every other removal goes through. With the
+	// second tile picked as parent and the first declined, parentIndex stayed at
+	// 1 with one tile left: the shared panel went quiet and the save action
+	// dereferenced a tile that was no longer there.
+	test('a declined duplicate leaves the parent pick pointing at a real tile', async ({ page }) => {
+		let releaseFirst = () => {};
+		const firstChecked = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		// Held until the operator has picked the second tile as the parent, so the
+		// decline lands while the group is already two tiles wide.
+		await page.route('**/api/check-duplicate', async (route) => {
+			const body = route.request().postDataJSON() as { fileName?: string };
+			if (body?.fileName !== 'first.png') {
+				return route.fulfill({
+					contentType: 'application/json',
+					body: JSON.stringify({ exists: false })
+				});
+			}
+			await firstChecked;
+			return route.fulfill({
+				contentType: 'application/json',
+				body: JSON.stringify({ exists: true })
+			});
+		});
+		await stubLookup(page, matchedBody());
+		await page.route('**/api/upload', (route) =>
+			route.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/x1.png' }) })
+		);
+		// Dismissing the confirm is declining the duplicate.
+		page.on('dialog', (dialog) => void dialog.dismiss());
+
+		await page.goto('/admin/upload');
+		await waitForDropAttachment(page, '.dropzone');
+		await dropOn(page, '.dropzone', [
+			{ name: 'first.png', type: 'image/png' },
+			{ name: 'second.png', type: 'image/png' }
+		]);
+		// Both tiles exist from the first render, so the parent can be picked while
+		// the first file is still held on its duplicate check. Uploads run one at a
+		// time within a batch, so nothing has finished yet.
+		const secondRadio = page.getByRole('radio', { name: 'Parent: second.png' });
+		await expect(secondRadio).toBeVisible({ timeout: 15_000 });
+		await secondRadio.check();
+
+		releaseFirst();
+
+		// One tile left, and it is the one the parent field names. Stale, the index
+		// still reads 1 and points past the end of a one-tile group.
+		await expect(page.locator('input[name="imageUrl_1"]')).toHaveCount(0);
+		await expect(page.locator('input[name="imageUrl_0"]')).toHaveValue('/x1.png', {
+			timeout: 15_000
+		});
+		await expect(page.locator('input[name="parentIndex"]')).toHaveValue('0');
+		// The shared panel still works, which it cannot when parentIndex points
+		// past the end: the lookup fills the shared fields from the tile that is
+		// actually there. One tile left, so it is the shared pill, not a per-tile
+		// button.
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+	});
+
 	test('a variant crediting somebody else says so on its tile', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await twoDoneTiles(page);

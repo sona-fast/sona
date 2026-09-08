@@ -78,7 +78,7 @@ export type LookupFailReason =
 export type LookupState =
 	| { kind: 'idle' }
 	| { kind: 'searching' }
-	| { kind: 'results'; data: LookupResponse; applied: boolean }
+	| { kind: 'results'; data: LookupResponse }
 	| { kind: 'no_match' }
 	// `sent` records whether the file left the browser, which the reason cannot:
 	// too_large and invalid_image each arise both from a gate that runs before
@@ -653,7 +653,6 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	if (matches.length === 0) return { kind: 'no_match' };
 	return {
 		kind: 'results',
-		applied: false,
 		data: {
 			enabled: true,
 			matches,
