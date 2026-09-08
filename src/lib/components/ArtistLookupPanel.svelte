@@ -256,34 +256,46 @@
 					{/each}
 				</ul>
 
-				{#if !clash}
+				<!-- The clash panel asks the same question about the artist as any
+				     other ambiguous result: a duplicate source URL says nothing about
+				     WHICH of two same-named artists drew it, so the operator picks
+				     rather than having the first candidate chosen for them. -->
+				{#snippet ambiguousPick()}
+					<p class="outcome">
+						<Info size={14} aria-hidden="true" />
+						{crossSite
+							? m.admin_lookup_ambiguous_cross({ count: candidates.length })
+							: m.admin_lookup_ambiguous({ handle, count: candidates.length })}
+					</p>
+					<fieldset class="pick-list">
+						<legend class="sr-only">{m.admin_lookup_which_one()}</legend>
+						{#each candidates as candidate (candidate.id)}
+							<label class="pick-row">
+								<input type="radio" name="lookup-artist-pick" value={String(candidate.id)} bind:group={picked} />
+								<span>{candidate.name}</span>
+								{#if candidate.pieces !== undefined}
+									<span class="pick-meta">{m.admin_lookup_pieces({ count: candidate.pieces })}</span>
+								{/if}
+								{#if crossSite}
+									<span class="pick-meta">{m.admin_lookup_via_site({ site: siteLabel(candidate.site) })}</span>
+								{/if}
+							</label>
+						{/each}
+					</fieldset>
+				{/snippet}
+
+				{#if clash}
+					{#if outcome === 'ambiguous'}
+						{@render ambiguousPick()}
+					{/if}
+				{:else}
 					{#if outcome === 'existing'}
 						<p class="outcome">
 							<Check size={14} aria-hidden="true" />
 							{m.admin_lookup_existing({ handle: existingHandle, name: existing?.name ?? '' })}
 						</p>
 					{:else if outcome === 'ambiguous'}
-						<p class="outcome">
-							<Info size={14} aria-hidden="true" />
-							{crossSite
-								? m.admin_lookup_ambiguous_cross({ count: candidates.length })
-								: m.admin_lookup_ambiguous({ handle, count: candidates.length })}
-						</p>
-						<fieldset class="pick-list">
-							<legend class="sr-only">{m.admin_lookup_which_one()}</legend>
-							{#each candidates as candidate (candidate.id)}
-								<label class="pick-row">
-									<input type="radio" name="lookup-artist-pick" value={String(candidate.id)} bind:group={picked} />
-									<span>{candidate.name}</span>
-									{#if candidate.pieces !== undefined}
-										<span class="pick-meta">{m.admin_lookup_pieces({ count: candidate.pieces })}</span>
-									{/if}
-									{#if crossSite}
-										<span class="pick-meta">{m.admin_lookup_via_site({ site: siteLabel(candidate.site) })}</span>
-									{/if}
-								</label>
-							{/each}
-						</fieldset>
+						{@render ambiguousPick()}
 					{:else if outcome === 'new'}
 						<p class="outcome">
 							<Info size={14} aria-hidden="true" />
@@ -372,7 +384,13 @@
 							{m.admin_lookup_clash_add_variant()}
 						</button>
 					{/if}
-					{#if candidates[0]}
+					{#if outcome === 'ambiguous'}
+						<!-- Two or more candidates: the radio list above is the answer,
+						     and this stays disabled until one of them is picked. -->
+						<button type="button" class="btn btn-secondary" disabled={!picked} onclick={useSelected}>
+							{m.admin_lookup_use_selected()}
+						</button>
+					{:else if candidates[0]}
 						<button type="button" class="btn btn-secondary" onclick={() => onuseartist(candidates[0])}>
 							{m.admin_lookup_use_artist({ name: candidates[0].name })}
 						</button>

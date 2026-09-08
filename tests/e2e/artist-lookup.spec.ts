@@ -112,9 +112,19 @@ const EDIT_IMAGE = '/admin/images/10/edit';
  * hydration is thrown away by it. Toggling the artist control and back is a
  * probe that leaves the form exactly as it was found. */
 async function gotoEditHydrated(page: Page, path = EDIT_IMAGE) {
-	await page.goto(path);
-	// Retry the CLICK, not the navigation: `vite dev` compiles this route's
-	// modules on first request, and re-navigating would restart that every time.
+	// The first request to this route compiles it, which can outrun goto's own
+	// timeout and leave nothing to click. Three tries, and the compile the timed
+	// out attempt started carries into the next one.
+	for (let attempt = 1; ; attempt++) {
+		try {
+			await page.goto(path);
+			break;
+		} catch (e) {
+			if (attempt === 3) throw e;
+		}
+	}
+	// Past the navigation, retry the CLICK and not the navigation: re-navigating
+	// would throw away the hydration this is waiting on and start it over.
 	await expect(async () => {
 		await page.getByRole('button', { name: 'Add New Artist' }).click();
 		await expect(page.locator('input[name="artistName"]')).toBeVisible({ timeout: 1000 });
@@ -273,7 +283,7 @@ test.describe('with a key saved', () => {
 	});
 
 	test('a refused key says so and offers Settings, not a retry', async ({ page }) => {
-		await stubLookup(page, { enabled: true, error: 'key_refused' }, 424);
+		await stubLookup(page, { enabled: true, error: 'key_refused', forwarded: true }, 424);
 		await oneDoneTile(page);
 		await pill(page).click();
 
@@ -288,7 +298,7 @@ test.describe('with a key saved', () => {
 	});
 
 	test('a rate limit pauses the lookup and keeps the upload usable', async ({ page }) => {
-		await stubLookup(page, { enabled: true, error: 'rate_limited' }, 429);
+		await stubLookup(page, { enabled: true, error: 'rate_limited', forwarded: true }, 429);
 		await oneDoneTile(page);
 		// Private, so the file leaving for a lookup that then FAILED still has to
 		// be disclosed — the notice is not for results only (SONA-156 round 1).

@@ -189,6 +189,23 @@ describe('the panel', () => {
 		expect(UPLOAD).toMatch(/\{#if data\.lookupEnabled && groupMode === 'new'\}\s*<ArtistLookupPanel/);
 	});
 
+	// The clash branch used to offer candidates[0] outright, which picks one of
+	// two same-named artists for the operator. It renders the same radio list the
+	// non-clash ambiguous path does, and its button waits for a pick.
+	it('asks which artist under a clash too, and waits for the answer', () => {
+		expect(PANEL).toMatch(/\{#snippet ambiguousPick\(\)\}/);
+		// Rendered from both branches: once under the clash, once without it.
+		expect(PANEL.match(/\{@render ambiguousPick\(\)\}/g)).toHaveLength(2);
+		expect(PANEL).toMatch(
+			/\{#if clash\}\s*\n\s*\{#if outcome === 'ambiguous'\}\s*\n\s*\{@render ambiguousPick\(\)\}/
+		);
+		// The clash action row: "Use selected artist", disabled until a radio is
+		// picked, ahead of the single-candidate "Use {name}" button.
+		expect(PANEL).toMatch(
+			/\{#if outcome === 'ambiguous'\}[\s\S]{0,300}?disabled=\{!picked\}[\s\S]{0,120}?m\.admin_lookup_use_selected\(\)[\s\S]{0,200}?\{:else if candidates\[0\]\}/
+		);
+	});
+
 	it('counts the ambiguous candidates and their pieces', () => {
 		expect(PANEL).toContain('count: candidates.length');
 		expect(PANEL).toContain('m.admin_lookup_pieces(');

@@ -175,6 +175,37 @@ describe('resolveOutcome', () => {
 		expect(candidateArtists(crossSite).map((c) => c.site)).toEqual(['FurAffinity', 'Twitter']);
 	});
 
+	// A duplicate source URL says which piece already claims the post, and
+	// nothing about which of two same-named artists drew it — so the clash panel
+	// gets the same picker, and neither candidate is chosen for the operator.
+	it('stays "ambiguous" under a source clash', () => {
+		const data = response({
+			localArtists: [
+				{
+					matchIndex: 0,
+					artists: [
+						{ id: 3, name: 'Kuttoya' },
+						{ id: 4, name: 'Kuttoya Art' }
+					]
+				}
+			],
+			sourceClash: {
+				imageId: 4,
+				title: 'Beach',
+				isVariant: false,
+				parentImageId: null,
+				variantCount: 0,
+				thumbnailUrl: null,
+				artistName: null,
+				uploadedAt: null,
+				width: null,
+				height: null
+			}
+		});
+		expect(resolveOutcome(data)).toBe('ambiguous');
+		expect(candidateArtists(data)).toHaveLength(2);
+	});
+
 	it('is "new" for an unmatched handle on a site with an artist column', () => {
 		expect(resolveOutcome(response())).toBe('new');
 		expect(
@@ -298,7 +329,7 @@ describe('labels and formatting', () => {
 	// know: the URL is also left alone when the operator already typed one.
 	it('says only what the date-only prefill did', () => {
 		expect(m.admin_lookup_status_date_only({ site: 'FurAffinity' })).toBe(
-			'Sona filled the commissioned date from the FurAffinity post and left the source post URL alone. You can change the date before you save.'
+			'Sona filled the commissioned date from the FurAffinity post and left the source post URL as it was. You can change the date before you save.'
 		);
 	});
 });
@@ -515,10 +546,10 @@ describe('statusLineKind', () => {
 		expect(statusLineKind(dateless)).toBe('url_only');
 		expect(statusLineKind(dateTaken)).toBe('url_only');
 		expect(m.admin_lookup_status_url_only({ site: 'FurAffinity' }, { locale: 'en' })).toBe(
-			'Sona filled the source post URL from the FurAffinity post and left the commissioned date as it was.'
+			'Sona filled the source post URL from the FurAffinity post and left the commissioned date as it was. You can change the URL before you save.'
 		);
 		expect(m.admin_lookup_status_url_only({ site: 'FurAffinity' }, { locale: 'ja' })).toContain(
-			'制作依頼日はそのままにしています'
+			'制作依頼日はそのままにしています。保存前にURLを変更できます。'
 		);
 	});
 });
@@ -641,7 +672,9 @@ describe('stateFromResponse', () => {
 		});
 	});
 
-	it('maps each failure by the body error, not by the status', async () => {
+	// The upstream side: FuzzySearch answered, so the bytes had already gone out
+	// and the endpoint says so with forwarded: true.
+	it('maps an upstream failure by the body error, not by the status', async () => {
 		const cases = [
 			['key_refused', 424],
 			['rate_limited', 429],
@@ -650,12 +683,48 @@ describe('stateFromResponse', () => {
 			['unavailable', 502]
 		] as const;
 		for (const [error, status] of cases) {
-			expect(await stateFromResponse(jsonResponse({ enabled: true, error }, status))).toEqual({
+			expect(
+				await stateFromResponse(
+					jsonResponse({ enabled: true, error, forwarded: true }, status)
+				)
+			).toEqual({
 				kind: 'failed',
 				reason: error,
 				sent: true
 			});
 		}
+	});
+
+	// The gate side: the endpoint's own checks answer too_large and invalid_image
+	// with the same reasons and statuses FuzzySearch's 413/400 arrive as, so only
+	// `forwarded` tells them apart — and the disclosure hangs on it.
+	it('reads a gate refusal off forwarded, however it is reasoned', async () => {
+		const cases = [
+			['too_large', 413],
+			['invalid_image', 422],
+			['unavailable', 502]
+		] as const;
+		for (const [error, status] of cases) {
+			expect(
+				await stateFromResponse(
+					jsonResponse({ enabled: true, error, forwarded: false }, status)
+				)
+			).toEqual({
+				kind: 'failed',
+				reason: error,
+				sent: false
+			});
+		}
+	});
+
+	// An endpoint that says nothing about which side refused is one this client
+	// cannot date, so the disclosure errs toward saying the file went.
+	it('counts a failure body with no forwarded field as sent', async () => {
+		expect(await stateFromResponse(jsonResponse({ enabled: true, error: 'too_large' }, 413))).toEqual({
+			kind: 'failed',
+			reason: 'too_large',
+			sent: true
+		});
 	});
 
 	it('treats an expired admin session as "sign in again", never as a refused key', async () => {
@@ -697,12 +766,16 @@ describe('stateFromResponse', () => {
 		});
 	});
 
+	// The endpoint answers enabled:false before it reads the body, so the file
+	// was never forwarded and the private-image notice must not claim it was.
 	it('treats a key that went away mid-session as an outage, not as a result', async () => {
-		expect(await stateFromResponse(jsonResponse({ enabled: false }))).toEqual({
+		const state = await stateFromResponse(jsonResponse({ enabled: false }));
+		expect(state).toEqual({
 			kind: 'failed',
 			reason: 'unavailable',
-			sent: true
+			sent: false
 		});
+		expect(lookupSentFile(state)).toBe(false);
 	});
 });
 
@@ -759,10 +832,11 @@ describe('runLookup', () => {
 		expect(called).toBe(false);
 	});
 
-	// The other origin of the same two reasons: the endpoint answered 413 or 400
+	// The other origin of the same two reasons: FuzzySearch answered 413 or 400
 	// after the file had already gone out, so the disclosure has to say so. The
-	// client-side refusal above is the only thing that sets sent: false.
-	it('marks a size or format refusal that came back from the endpoint as sent', async () => {
+	// endpoint's `forwarded` is what separates this from the same reasons raised
+	// by its own gates, which the case below pins.
+	it('marks a size or format refusal that came back from FuzzySearch as sent', async () => {
 		for (const [error, status] of [
 			['too_large', 413],
 			['invalid_image', 400]
@@ -771,11 +845,36 @@ describe('runLookup', () => {
 				{ imageId: 1 },
 				{
 					fetchFn: (async () =>
-						jsonResponse({ enabled: true, error }, status)) as unknown as typeof fetch
+						jsonResponse(
+							{ enabled: true, error, forwarded: true },
+							status
+						)) as unknown as typeof fetch
 				}
 			);
 			expect(state).toEqual({ kind: 'failed', reason: error, sent: true });
 			expect(lookupSentFile(state)).toBe(true);
+		}
+	});
+
+	// The edit page holds no bytes to size-check, so a stored image the endpoint
+	// refuses is refused there — same reason, same status, nothing forwarded.
+	it('marks a size or format refusal raised by the endpoint gate as not sent', async () => {
+		for (const [error, status] of [
+			['too_large', 413],
+			['invalid_image', 422]
+		] as const) {
+			const state = await runLookup(
+				{ imageId: 1 },
+				{
+					fetchFn: (async () =>
+						jsonResponse(
+							{ enabled: true, error, forwarded: false },
+							status
+						)) as unknown as typeof fetch
+				}
+			);
+			expect(state).toEqual({ kind: 'failed', reason: error, sent: false });
+			expect(lookupSentFile(state)).toBe(false);
 		}
 	});
 

@@ -78,7 +78,9 @@ export type LookupState =
 	// `sent` records whether the file left the browser, which the reason cannot:
 	// too_large and invalid_image each arise both from a gate that runs before
 	// anything is forwarded and from FuzzySearch answering 413/400 after the file
-	// was sent. Only the code that made (or refused to make) the request knows.
+	// was sent. The client knows its own refusals; for the rest it reads the
+	// endpoint's `forwarded` field, which is the only thing that can tell an
+	// endpoint gate apart from FuzzySearch answering the same way.
 	| { kind: 'failed'; reason: LookupFailReason; sent: boolean };
 
 /** The cap the endpoint enforces (MAX_REMOTE_BUFFER_BYTES, 10 MiB). Restated
@@ -433,6 +435,10 @@ export function lookupSentFile(state: LookupState): boolean {
 interface FailureBody {
 	enabled?: boolean;
 	error?: string;
+	/** Whether the endpoint had already handed the bytes to FuzzySearch when it
+	 * failed. Its own gates answer too_large and invalid_image with the same
+	 * reasons FuzzySearch's 413/400 carry, so only the endpoint knows. */
+	forwarded?: boolean;
 }
 
 const FAIL_REASONS: readonly LookupFailReason[] = [
@@ -526,15 +532,23 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	if (!body || typeof body !== 'object') return { kind: 'failed', reason: 'unavailable', sent: true };
 
 	if (!res.ok) {
-		const reason = (body as FailureBody).error;
-		const known = FAIL_REASONS.find((r) => r === reason);
-		return { kind: 'failed', reason: known ?? 'unavailable', sent: true };
+		const failed = body as FailureBody;
+		const known = FAIL_REASONS.find((r) => r === failed.error);
+		// The endpoint says which side refused; a body without the field is one
+		// this client cannot date, so the disclosure errs toward saying it went.
+		return {
+			kind: 'failed',
+			reason: known ?? 'unavailable',
+			sent: failed.forwarded !== false
+		};
 	}
 
 	const data = body as Partial<LookupResponse>;
 	// The key went away between the page load and the click. Nothing to show and
-	// nothing the panel can offer, so it reads as an outage.
-	if (data.enabled === false) return { kind: 'failed', reason: 'unavailable', sent: true };
+	// nothing the panel can offer, so it reads as an outage. The endpoint answers
+	// this before it reads the body — it carries forwarded: false, and there is
+	// no path to this shape that forwarded anything — so `sent` is false.
+	if (data.enabled === false) return { kind: 'failed', reason: 'unavailable', sent: false };
 	const raw = Array.isArray(data.matches) ? data.matches : [];
 	const { matches, indexMap } = usableMatches(raw);
 	// Same reasoning as the non-array branch above: something looked, something

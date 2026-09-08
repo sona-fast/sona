@@ -59,7 +59,13 @@
 		nsfw: boolean;
 		// The bytes, kept for "Look up artist" (SONA-156): the lookup endpoint
 		// never accepts a URL from the client, so the file itself is what gets
-		// posted. Released with the tile.
+		// posted. Held for the tile's whole life and released with it: a lookup
+		// can be asked for at any point before the form is saved, and repeated.
+		// A dropped or picked file is a handle to something on disk, but a PASTED
+		// one is a blob the page is holding in memory — so the cost of keeping it
+		// is real, and dropping it early would cost the operator a lookup they
+		// can still ask for. Release it only where the code can tell no further
+		// lookup is possible.
 		file: File | null;
 		lookup: LookupState;
 	};

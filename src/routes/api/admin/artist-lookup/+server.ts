@@ -71,8 +71,13 @@ const FAILURE_STATUS: Record<LookupFailure, number> = {
  * is judged precisely by the exact size check. Mirrors /api/upload. */
 const MULTIPART_SLACK_BYTES = 64 * 1024;
 
-function failure(reason: LookupFailure) {
-	return json({ enabled: true, error: reason }, { status: FAILURE_STATUS[reason] });
+/** `forwarded` says whether the bytes reached FuzzySearch before this failure.
+ * The gates below answer too_large and invalid_image with the same reason
+ * FuzzySearch's own 413/400 carry, so the reason alone cannot tell the client
+ * which side refused — and the private-image disclosure is built on that
+ * difference. Every return above `searchImage` is forwarded: false. */
+function failure(reason: LookupFailure, forwarded: boolean) {
+	return json({ enabled: true, error: reason, forwarded }, { status: FAILURE_STATUS[reason] });
 }
 
 /** Whether the leading bytes ARE one of the raster types on the allowlist.
@@ -98,7 +103,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	// No key configured: the integration is off, not broken. The UI hides the
 	// button on this answer instead of showing an error (the registry shape).
 	const resolved = await resolveFuzzysearchKey(db, platform?.env);
-	if (!resolved) return json({ enabled: false });
+	if (!resolved) return json({ enabled: false, forwarded: false });
 
 	const contentType = request.headers.get('content-type') ?? '';
 
@@ -118,21 +123,21 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// re-implementing multipart parsing for a caller we already trust.
 		const declaredLength = Number(request.headers.get('content-length') ?? NaN);
 		if (Number.isFinite(declaredLength) && declaredLength > FUZZYSEARCH_MAX_BYTES + MULTIPART_SLACK_BYTES) {
-			return failure('too_large');
+			return failure('too_large', false);
 		}
 		const form = await request.formData();
 		const file = form.get('file');
 		if (!(file instanceof File)) error(400, 'No file provided');
 		// Layer 2: the exact check, on the file's real size.
-		if (file.size > FUZZYSEARCH_MAX_BYTES) return failure('too_large');
+		if (file.size > FUZZYSEARCH_MAX_BYTES) return failure('too_large', false);
 		// The same raster gate /api/upload applies, and for the same reason the
 		// imageId branch names the allowlist: an SVG or a PDF is not the
 		// operator's artwork, and it is not something to hand a third party. The
 		// declared type is the browser's word, so the leading bytes are checked
 		// against the allowlist too (SNIFF_BYTES window, as in /api/upload).
-		if (!isAllowedImageType(file.type)) return failure('invalid_image');
+		if (!isAllowedImageType(file.type)) return failure('invalid_image', false);
 		const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
-		if (!hasAllowedImageBytes(head)) return failure('invalid_image');
+		if (!hasAllowedImageBytes(head)) return failure('invalid_image', false);
 		bytes = file;
 	} else {
 		const body = (await request.json().catch(() => null)) as { imageId?: unknown } | null;
@@ -152,7 +157,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// only the stored raster types echoed back inline. A refusal, an upstream
 		// error and a rejected fetch all arrive here as null.
 		const stored = await proxyStoredImage(row.imageUrl, fetch);
-		if (!stored?.body) return failure('unavailable');
+		if (!stored?.body) return failure('unavailable', false);
 		// Lowercased: media types are case-insensitive, so an `Image/PNG` header
 		// must pass the same check as `image/png`.
 		const storedType = (stored.headers.get('content-type') ?? '')
@@ -168,7 +173,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			// image/png carrying a PDF still goes nowhere. invalid_image, not
 			// unavailable — the fetch worked, the content is what's wrong.
 			const sniffed = sniffImageType(buffered.subarray(0, SNIFF_BYTES));
-			if (!isAllowedImageType(sniffed)) return failure('invalid_image');
+			if (!isAllowedImageType(sniffed)) return failure('invalid_image', false);
 			// bufferStream allocates an exact-size array, so its backing buffer is
 			// the payload with nothing else in it. A type rides along so the
 			// multipart part FuzzySearch receives from the edit page looks like the
@@ -178,8 +183,8 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 				type: isAllowedImageType(storedType) ? storedType : (sniffed as string)
 			});
 		} catch (e) {
-			if (e instanceof MaxBytesExceededError) return failure('too_large');
-			return failure('unavailable');
+			if (e instanceof MaxBytesExceededError) return failure('too_large', false);
+			return failure('unavailable', false);
 		}
 	}
 
@@ -207,7 +212,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 				);
 			}
 		}
-		return failure(result.reason);
+		return failure(result.reason, true);
 	}
 
 	// The key works — clear a stale refusal marker, but only the marker for the
@@ -231,14 +236,20 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	}
 
 	const matches = result.matches;
-	const artistRows = await db
-		.select({
-			id: artists.id,
-			name: artists.name,
-			twitterUrl: artists.twitterUrl,
-			furAffinityUrl: artists.furAffinityUrl
-		})
-		.from(artists);
+	// The whole artist table, and the piece counts below, are only ever read
+	// against a match — so a no-match answer reads neither. Same guard on both,
+	// or the cheaper query is the one that stays behind.
+	const artistRows =
+		matches.length > 0
+			? await db
+					.select({
+						id: artists.id,
+						name: artists.name,
+						twitterUrl: artists.twitterUrl,
+						furAffinityUrl: artists.furAffinityUrl
+					})
+					.from(artists)
+			: [];
 
 	// One grouped count for the whole gallery rather than a query per hit — the
 	// picker needs it for at most a handful of artists, and a per-artist query

@@ -153,7 +153,7 @@ describe('artist-lookup — configuration', () => {
 		const { platform } = makeEnv();
 		const res = await POST(multipartEvent(platform, pngFile()));
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ enabled: false });
+		expect(await res.json()).toEqual({ enabled: false, forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -261,11 +261,35 @@ describe('artist-lookup — uploaded file', () => {
 		expect(body.localArtists[0].artists[0].pieces).toBe(3);
 	});
 
+	// Nothing matched, so there is nobody to match against: neither the artist
+	// table nor the piece counts are read. The gallery's whole artist list is the
+	// bigger of the two queries, and it used to run on every no-match answer.
+	it('reads no artists when nothing matched', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, created_at) VALUES (1, 'Kuttoya', '2026-01-01');`
+		);
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		const statements: string[] = [];
+		d1.prepare = (sql: string) => {
+			statements.push(sql);
+			return realPrepare(sql);
+		};
+		searchImage.mockResolvedValue({ ok: true, matches: [] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(200);
+		expect(statements.some((sql) => /from "artists"/i.test(sql))).toBe(false);
+		expect(statements.some((sql) => /count\(\*\)/i.test(sql))).toBe(false);
+	});
+
 	it('refuses a file over the remote-body cap on its exact size', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const res = await POST(multipartEvent(platform, pngFile(FUZZYSEARCH_MAX_BYTES + 1)));
 		expect(res.status).toBe(413);
-		expect(await res.json()).toEqual({ enabled: true, error: 'too_large' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'too_large', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -296,7 +320,7 @@ describe('artist-lookup — uploaded file', () => {
 		for (const file of cases) {
 			const res = await POST(multipartEvent(platform, file));
 			expect(res.status, file.type).toBe(422);
-			expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+			expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
 		}
 		expect(searchImage).not.toHaveBeenCalled();
 	});
@@ -310,7 +334,7 @@ describe('artist-lookup — uploaded file', () => {
 		const res = await POST(multipartEvent(platform, spoofed));
 
 		expect(res.status).toBe(422);
-		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -410,7 +434,7 @@ describe('artist-lookup — stored image by id', () => {
 		const missing = imageFetch(new Response('nope', { status: 404 }));
 		const gone = await POST(jsonEvent(platform, { imageId: 1 }, missing.fn));
 		expect(gone.status).toBe(502);
-		expect(await gone.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(await gone.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
 
 		// A link-local host stored in the row is refused before any fetch.
 		const internal = imageFetch();
@@ -437,7 +461,7 @@ describe('artist-lookup — stored image by id', () => {
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, rejecting));
 
 		expect(res.status).toBe(502);
-		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -463,7 +487,7 @@ describe('artist-lookup — stored image by id', () => {
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(huge).fn));
 
 		expect(res.status).toBe(413);
-		expect(await res.json()).toEqual({ enabled: true, error: 'too_large' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'too_large', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -481,7 +505,7 @@ describe('artist-lookup — stored image by id', () => {
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(html).fn));
 
 		expect(res.status).toBe(422);
-		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -523,7 +547,7 @@ describe('artist-lookup — stored image by id', () => {
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(svg).fn));
 
 		expect(res.status).toBe(422);
-		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -544,7 +568,7 @@ describe('artist-lookup — stored image by id', () => {
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(spoofed).fn));
 
 		expect(res.status).toBe(422);
-		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -576,7 +600,7 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 
 		const refused = await POST(multipartEvent(platform, pngFile()));
 		expect(refused.status).toBe(424);
-		expect(await refused.json()).toEqual({ enabled: true, error: 'key_refused' });
+		expect(await refused.json()).toEqual({ enabled: true, error: 'key_refused', forwarded: true });
 		// The source rides along with the date: this refusal was the deploy
 		// secret's, and the settings card must not blame a stored key for it.
 		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toMatch(
@@ -664,7 +688,7 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 		const res = await POST(multipartEvent(platform, pngFile()));
 
 		expect(res.status).toBe(424);
-		expect(await res.json()).toEqual({ enabled: true, error: 'key_refused' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'key_refused', forwarded: true });
 	});
 
 	it('still answers the matches when the marker cannot be cleared', async () => {
@@ -691,7 +715,7 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 			searchImage.mockResolvedValue({ ok: false, reason });
 			const res = await POST(multipartEvent(platform, pngFile()));
 			expect(res.status, reason).toBe(status);
-			expect(await res.json()).toEqual({ enabled: true, error: reason });
+			expect(await res.json()).toEqual({ enabled: true, error: reason, forwarded: true });
 		}
 	});
 
