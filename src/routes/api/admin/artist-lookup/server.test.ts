@@ -314,6 +314,26 @@ describe('artist-lookup — stored image by id', () => {
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
+	// A fetch that REJECTS rather than answering — DNS failure, reset connection,
+	// TLS error. Unwrapped it escapes as a 500 with a stack, instead of the same
+	// answer the null branch gives.
+	it('reports unavailable when the stored fetch rejects', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+		);
+		const rejecting = (async () => {
+			throw new TypeError('fetch failed');
+		}) as unknown as typeof fetch;
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, rejecting));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
 	it('refuses a stored image whose body runs past the cap', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		sqlite.exec(

@@ -114,7 +114,15 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// Server-side fetch of a URL the SERVER looked up, with the shared
 		// hardening: private and link-local hosts refused, redirects not
 		// followed, image/* content types only.
-		const stored = await proxyStoredImage(row.imageUrl, fetch);
+		let stored: Response | null;
+		try {
+			stored = await proxyStoredImage(row.imageUrl, fetch);
+		} catch {
+			// A DNS failure, a reset connection or a TLS error rejects rather than
+			// answering — the stored image is as unreachable as when the proxy
+			// refuses it outright, so it reports the same way.
+			return failure('unavailable');
+		}
 		if (!stored?.body) return failure('unavailable');
 		// Lowercased: media types are case-insensitive, so an `Image/PNG` header
 		// must pass the same check as `image/png`.

@@ -118,7 +118,10 @@ export function postUrlFor(site: LookupSite, siteId: string, handles: string[]):
 		case 'e621':
 			return `https://e621.net/posts/${id}`;
 		case 'Twitter': {
-			const handle = handles[0];
+			// Handles arrive spelled either way; the '@' is not part of the path.
+			// Stripped like handleProfileUrl does, and a handle that was nothing
+			// but decoration falls through to the handle-less spelling.
+			const handle = (handles[0] ?? '').trim().replace(/^@+/, '');
 			// Without a handle Twitter still resolves the status through /i/.
 			return handle
 				? `https://twitter.com/${encodeURIComponent(handle)}/status/${id}`
@@ -177,6 +180,13 @@ export function normalizeSourceUrl(url: string | null | undefined): string {
 	// Anything after the id goes too, so the `/photo/1` permalink Twitter's own
 	// UI hands out compares equal to the bare tweet.
 	if (host === 'twitter.com') path = path.replace(/^\/[^/]+\/status\/(\d+).*$/, '/i/status/$1');
+	// The same submission under each site's other spelling: FurAffinity's
+	// full-size view (`/full/12345`) is the post this client builds as
+	// `/view/12345`, and e621's old post path (`/post/show/160`) is today's
+	// `/posts/160`. An operator who saved either gets no clash warning without
+	// the fold.
+	if (host === 'furaffinity.net') path = path.replace(/^\/full\/(\d+)$/, '/view/$1');
+	if (host === 'e621.net') path = path.replace(/^\/post\/show\/(\d+)$/, '/posts/$1');
 	return host + path;
 }
 

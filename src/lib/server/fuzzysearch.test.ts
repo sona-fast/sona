@@ -8,6 +8,7 @@ import {
 	pickPrefillMatch,
 	strictestRating,
 	normalizeSourceUrl,
+	postUrlFor,
 	handleProfileUrl,
 	findLocalArtists,
 	findArtistsByName,
@@ -347,10 +348,44 @@ describe('normalizeSourceUrl', () => {
 		);
 	});
 
+	// Each site's other spelling of one submission: FurAffinity's full-size view
+	// and e621's old post path both name the post this client builds a canonical
+	// URL for.
+	it('folds the alternate post paths on FurAffinity and e621', () => {
+		expect(normalizeSourceUrl('https://www.furaffinity.net/full/12345/')).toBe(
+			'furaffinity.net/view/12345'
+		);
+		expect(normalizeSourceUrl('https://e621.net/post/show/160')).toBe('e621.net/posts/160');
+		// Only the bare id form folds: a deeper path is a different page.
+		expect(normalizeSourceUrl('https://www.furaffinity.net/full/12345/extra')).toBe(
+			'furaffinity.net/full/12345/extra'
+		);
+	});
+
 	it('is empty for blank input', () => {
 		expect(normalizeSourceUrl('')).toBe('');
 		expect(normalizeSourceUrl(null)).toBe('');
 		expect(normalizeSourceUrl(undefined)).toBe('');
+	});
+});
+
+describe('postUrlFor', () => {
+	// FuzzySearch hands Twitter handles back spelled either way, and the '@' is
+	// not part of the path — left in, it builds a 404 for every tweet.
+	it('strips a leading @ from the Twitter handle', () => {
+		expect(postUrlFor('Twitter', '160', ['@kuttoya'])).toBe(
+			'https://twitter.com/kuttoya/status/160'
+		);
+		expect(postUrlFor('Twitter', '160', ['kuttoya'])).toBe(
+			'https://twitter.com/kuttoya/status/160'
+		);
+	});
+
+	// Nothing left after stripping is the same as no handle at all.
+	it('falls back to the /i/ spelling when the handle is only decoration', () => {
+		expect(postUrlFor('Twitter', '160', ['@'])).toBe('https://twitter.com/i/status/160');
+		expect(postUrlFor('Twitter', '160', ['  '])).toBe('https://twitter.com/i/status/160');
+		expect(postUrlFor('Twitter', '160', [])).toBe('https://twitter.com/i/status/160');
 	});
 });
 

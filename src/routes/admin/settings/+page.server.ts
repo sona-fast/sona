@@ -6,6 +6,7 @@ import {
 	getSettings,
 	saveSettings,
 	getRawSetting,
+	getRawSettings,
 	setRawSetting,
 	clearSettingsCache,
 	clearSupporterKeyStatusCache,
@@ -278,8 +279,14 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	// own field rather than folded into a status object, so a later spread
 	// cannot pick the raw key up by accident (the supporter-key precedent).
 	const fuzzysearchKeyFromEnv = !!platform?.env?.FUZZYSEARCH_API_KEY?.trim();
-	const fuzzysearchStoredKey = (await getRawSetting(db, FUZZYSEARCH_API_KEY_SETTING))?.trim() ?? '';
-	const fuzzysearchRefusedAt = (await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)) ?? '';
+	// Both rows in one query: load already spends its subrequest budget on the
+	// D1 reads above, and these two keys are always read together.
+	const fuzzysearchRaw = await getRawSettings(db, [
+		FUZZYSEARCH_API_KEY_SETTING,
+		FUZZYSEARCH_KEY_REFUSED_SETTING
+	]);
+	const fuzzysearchStoredKey = fuzzysearchRaw[FUZZYSEARCH_API_KEY_SETTING]?.trim() ?? '';
+	const fuzzysearchRefusedAt = fuzzysearchRaw[FUZZYSEARCH_KEY_REFUSED_SETTING] ?? '';
 
 	// Per-content-type usage (SONA-192) — R2 only: derived from listing the
 	// bucket, so it also counts files D1 never tracked. Reduced to counts and
