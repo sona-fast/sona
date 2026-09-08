@@ -329,6 +329,8 @@ async function findSourceClash(
 			title: images.title,
 			thumbnailUrl: images.thumbnailUrl,
 			imageUrl: images.imageUrl,
+			width: images.width,
+			height: images.height,
 			createdAt: images.createdAt,
 			artistName: artists.name
 		})
@@ -345,6 +347,8 @@ async function findSourceClash(
 		thumbnailUrl: root?.thumbnailUrl ?? root?.imageUrl ?? null,
 		artistName: root?.artistName ?? null,
 		uploadedAt: root?.createdAt ?? null,
+		width: root?.width ?? null,
+		height: root?.height ?? null,
 		isVariant: first.parentImageId !== null,
 		parentImageId: first.parentImageId,
 		// Only the reported set's own rows. Two unrelated images that happen to

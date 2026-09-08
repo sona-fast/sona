@@ -713,6 +713,9 @@ describe('artist-lookup — source-post clash', () => {
 			thumbnailUrl: 'https://cdn/1.png',
 			artistName: null,
 			uploadedAt: '2026-01-01',
+			// The seeded row has no size columns, so the meta line drops that part.
+			width: null,
+			height: null,
 			isVariant: false,
 			parentImageId: null,
 			variantCount: 1
@@ -721,14 +724,14 @@ describe('artist-lookup — source-post clash', () => {
 
 	// The warning shows the operator the piece itself, so the row carries what it
 	// takes to recognize one: its thumbnail, who drew it, and when it landed.
-	it('carries the clashing piece thumbnail, artist and upload date', async () => {
+	it('carries the clashing piece thumbnail, artist, upload date and size', async () => {
 		const env = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		env.sqlite.exec(
 			`INSERT INTO artists (id, name, created_at) VALUES (7, 'Kuttoya', '2026-01-01');
 			 INSERT INTO images (id, title, slug, image_url, thumbnail_url, source_post_url,
-				 artist_id, parent_image_id, created_at)
+				 artist_id, parent_image_id, width, height, created_at)
 			 VALUES (1, 'Sparky at the beach', 'beach', 'https://cdn/1.png', 'https://cdn/1-thumb.png',
-				 'https://www.furaffinity.net/view/12345/', 7, NULL, '2026-02-09');`
+				 'https://www.furaffinity.net/view/12345/', 7, NULL, 1600, 900, '2026-02-09');`
 		);
 		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
 
@@ -739,7 +742,9 @@ describe('artist-lookup — source-post clash', () => {
 			imageId: 1,
 			thumbnailUrl: 'https://cdn/1-thumb.png',
 			artistName: 'Kuttoya',
-			uploadedAt: '2026-02-09'
+			uploadedAt: '2026-02-09',
+			width: 1600,
+			height: 900
 		});
 	});
 
@@ -765,6 +770,8 @@ describe('artist-lookup — source-post clash', () => {
 			thumbnailUrl: 'https://cdn/10.png',
 			artistName: null,
 			uploadedAt: '2026-01-01',
+			width: null,
+			height: null,
 			isVariant: true,
 			parentImageId: 10,
 			// One row in the set carries the URL, and it is the row being reported.
