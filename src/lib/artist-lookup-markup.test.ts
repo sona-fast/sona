@@ -171,6 +171,16 @@ describe('the panel', () => {
 	it('counts the ambiguous candidates and their pieces', () => {
 		expect(PANEL).toContain('count: candidates.length');
 		expect(PANEL).toContain('m.admin_lookup_pieces(');
+		// Asked once beside the candidates, not again per radio row.
+		expect(PANEL).toMatch(/const crossSite = \$derived\(/);
+		expect(PANEL).not.toMatch(/isCrossSiteAmbiguity\(data\)[\s\S]*?isCrossSiteAmbiguity\(data\)/);
+	});
+
+	// The result rows carry LookupMatch values; typing the helper as anything
+	// looser needed two `as never` casts to call the label helpers back.
+	it('types the result metadata line off the match itself', () => {
+		expect(PANEL).toMatch(/function metaFor\(match: Pick<LookupMatch, 'band' \| 'postedAt' \| 'rating'>\)/);
+		expect(PANEL).not.toMatch(/as never/);
 	});
 });
 
@@ -224,6 +234,24 @@ describe('the "From lookup" tag', () => {
 				new RegExp(`function resetForImage\\(\\)[\\s\\S]{0,700}?${flag} = `)
 			);
 		}
+	});
+});
+
+// The image on the edit page already has an artist. A result that names a
+// handle Sona does not hold is a suggestion, and taking it would insert a
+// duplicate artist and re-credit the piece on the next save.
+describe('the artist on the edit page', () => {
+	it('never switches to the inline new-artist form without a click', () => {
+		const applyPrefill = EDIT.match(/function applyPrefill\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(applyPrefill).toMatch(/lookupFilled = fields/);
+		expect(applyPrefill).not.toMatch(/artistMode/);
+		expect(applyPrefill).not.toMatch(/seedNewArtist/);
+	});
+
+	it('flips and seeds the form in the panel action instead', () => {
+		expect(EDIT).toMatch(
+			/onaddnew=\{\(seed\) => \{[\s\S]{0,600}?artistMode = 'new';\s*\n\s*seedNewArtist\(seed\.handle, seed\.site, seed\.linkable\);/
+		);
 	});
 });
 
@@ -324,8 +352,9 @@ describe('what a lookup says out loud', () => {
 	});
 
 	// "Add New Artist" from the no_match state seeds nothing, so the seed status
-	// line says nothing while the select is replaced by a name field. A result
-	// that already flipped the form and filled it must not replay that sentence.
+	// line says nothing while the select is replaced by a name field. An operator
+	// who opened the inline form by hand before the lookup switched nothing, so
+	// the sentence is not theirs either.
 	it('announces the flip to the inline new-artist form only when the mode changed', () => {
 		expect(EDIT).toMatch(
 			/const wasExisting = artistMode === 'existing';\s*\n\s*artistMode = 'new';/
@@ -391,7 +420,20 @@ describe('the upload page grid', () => {
 
 	it('re-derives the shared prefill when the parent moves or goes', () => {
 		expect(UPLOAD).toMatch(/onchange=\{\(\) => onParentChanged\(i\)\}/);
-		expect(UPLOAD).toMatch(/if \(wasParent\) onParentChanged\(parentIndex\);/);
+		// parentIndex is submitted as the hidden field the server picks the parent
+		// with, so a removal ahead of the parent has to move the index with it —
+		// otherwise the saved parent is a different file than the shared artist,
+		// date, source URL, and tags describe.
+		expect(UPLOAD).toMatch(
+			/const parentKey = tiles\[parentIndex\]\?\.key \?\? null;[\s\S]{0,120}?tiles = tiles\.filter/
+		);
+		expect(UPLOAD).toMatch(
+			/const movedTo = parentKey === null \? -1 : tiles\.findIndex\(\(t\) => t\.key === parentKey\);/
+		);
+		// Only a parent that is actually gone re-derives the shared fields.
+		expect(UPLOAD).toMatch(
+			/if \(movedTo !== -1\) \{\s*\n\s*parentIndex = movedTo;\s*\n\s*\} else \{[\s\S]{0,300}?onParentChanged\(parentIndex\);/
+		);
 	});
 });
 

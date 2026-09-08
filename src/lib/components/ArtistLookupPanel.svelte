@@ -24,6 +24,7 @@
 		statusLineKind,
 		type ArtistChoice,
 		type LookupFields,
+		type LookupMatch,
 		type LookupSite,
 		type LookupState,
 		type NewArtistSeed,
@@ -76,6 +77,7 @@
 	const handle = $derived(matchHandle(prefill));
 	const outcome = $derived(data ? resolveOutcome(data) : 'none');
 	const candidates = $derived<ArtistChoice[]>(data ? candidateArtists(data) : []);
+	const crossSite = $derived(data ? isCrossSiteAmbiguity(data) : false);
 	const nameHits = $derived(data ? nameMatchArtists(data) : []);
 	const clash = $derived(data?.sourceClash ?? null);
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
@@ -110,13 +112,13 @@
 
 	/** The metadata line under a result row, with unknown segments dropped
 	 * rather than spelled out as blanks. */
-	function metaFor(match: { band: string | null; postedAt: string | null; rating: string | null }) {
+	function metaFor(match: Pick<LookupMatch, 'band' | 'postedAt' | 'rating'>) {
 		const parts: string[] = [];
-		const band = bandLabel(match.band as never);
+		const band = bandLabel(match.band);
 		if (band) parts.push(band);
 		const date = postDateToInput(match.postedAt);
 		if (date) parts.push(m.admin_lookup_posted({ date }));
-		if (match.rating) parts.push(ratingLabel(match.rating as never));
+		if (match.rating) parts.push(ratingLabel(match.rating));
 		return parts.join(' · ');
 	}
 </script>
@@ -244,7 +246,7 @@
 					{:else if outcome === 'ambiguous'}
 						<p class="outcome">
 							<Info size={14} aria-hidden="true" />
-							{isCrossSiteAmbiguity(data)
+							{crossSite
 								? m.admin_lookup_ambiguous_cross({ count: candidates.length })
 								: m.admin_lookup_ambiguous({ handle, count: candidates.length })}
 						</p>
@@ -257,7 +259,7 @@
 									{#if candidate.pieces !== undefined}
 										<span class="pick-meta">{m.admin_lookup_pieces({ count: candidate.pieces })}</span>
 									{/if}
-									{#if isCrossSiteAmbiguity(data)}
+									{#if crossSite}
 										<span class="pick-meta">{m.admin_lookup_via_site({ site: siteLabel(candidate.site) })}</span>
 									{/if}
 								</label>

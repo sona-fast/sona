@@ -9,10 +9,8 @@
 	import {
 		lookupSentFile,
 		newArtistSeed,
-		pickPrefillMatch,
 		prefillForResult,
 		ratingTag,
-		resolveOutcome,
 		seedStatusKind,
 		runLookup,
 		strictestRating,
@@ -134,11 +132,16 @@
 		closeLookup();
 	}
 
+	/** Fields only. A handle with no local artist behind it is not a reason to
+	 * change this image's artist: the panel offers "Add {handle} as a new
+	 * artist", and only that click flips the form and seeds it — the same rule
+	 * the upload page's "Use {name}" follows. Flipping here would seed a
+	 * duplicate artist behind the operator's back and re-credit a piece that
+	 * already has one. */
 	function applyPrefill(next: LookupState) {
 		if (next.kind !== 'results') return;
 		// A new result describes a new seed, even when that seed is empty.
 		lookupSeeded = {};
-		const match = pickPrefillMatch(next.data.matches);
 		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
 		lookupFilled = fields;
 		if (fields.sourcePostUrl !== undefined) {
@@ -148,14 +151,6 @@
 		if (fields.commissionedAt !== undefined) {
 			commissionedAt = fields.commissionedAt;
 			dateTagged = true;
-		}
-		// A handle with no local artist behind it is a new artist: flip to the
-		// inline form and seed what the match knows, rather than making the
-		// operator retype it. The values still need a save to exist.
-		const outcome = resolveOutcome(next.data);
-		if ((outcome === 'new' || outcome === 'unlinked') && match) {
-			artistMode = 'new';
-			seedNewArtist(match.handles[0] ?? '', match.site, outcome === 'new');
 		}
 	}
 
@@ -341,9 +336,9 @@
 					oncancel={cancelLookup}
 					onuseartist={useLookupArtist}
 					onaddnew={(seed) => {
-						// A result that resolved to new or unlinked already flipped the form
-						// and filled it, so neither half of the announcement would be true a
-						// second time — say it only when this click is what switched forms.
+						// Only this click flips the form. The operator may have opened the
+						// inline form by hand before the lookup, though, and then nothing
+						// switched — say it only when this click is what did.
 						const wasExisting = artistMode === 'existing';
 						artistMode = 'new';
 						seedNewArtist(seed.handle, seed.site, seed.linkable);

@@ -287,12 +287,22 @@
 		// result is discarded with the tile.
 		lookupAborts.get(key)?.abort();
 		lookupAborts.delete(key);
-		const wasParent = isParent(key);
+		// The parent is a tile, not a position: removing anything before it shifts
+		// every later tile down one, and parentIndex rides along to the server as
+		// the hidden field that picks the parent piece. Left stale, the saved
+		// parent would be a different file while the shared artist, date, source
+		// URL, and tags still describe the old one.
+		const parentKey = tiles[parentIndex]?.key ?? null;
 		tiles = tiles.filter((t) => t.key !== key);
-		if (parentIndex >= tiles.length) parentIndex = 0;
-		// The shared fields described the removed parent; re-derive them from
-		// whichever tile the parent radio landed on.
-		if (wasParent) onParentChanged(parentIndex);
+		const movedTo = parentKey === null ? -1 : tiles.findIndex((t) => t.key === parentKey);
+		if (movedTo !== -1) {
+			parentIndex = movedTo;
+		} else {
+			if (parentIndex >= tiles.length) parentIndex = 0;
+			// The parent itself is gone: the shared fields described it, so
+			// re-derive them from whichever tile the radio landed on.
+			onParentChanged(parentIndex);
+		}
 	}
 
 	function handleFileSelect(e: Event) {

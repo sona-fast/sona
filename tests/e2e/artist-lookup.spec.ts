@@ -357,9 +357,29 @@ test.describe('with a key saved', () => {
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
 	});
 
+	// The image already has an artist, and a handle Sona does not hold is a
+	// suggestion about it. Flipping the form here would insert a duplicate
+	// artist and re-credit the piece on the next save.
+	test('the edit page keeps its artist when the result is a new one', async ({ page }) => {
+		await stubLookup(page, matchedBody({ localArtists: [] }));
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).toContainText("kuttoya isn't in your artist list yet.");
+		// Still the select, still the image's own artist, and no inline form.
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('2');
+		await expect(page.locator('input[name="artistName"]')).toHaveCount(0);
+
+		// Only the panel's own action opens the form and seeds it.
+		await panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' }).click();
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(page.locator('#artist-name-lookup-tag')).toBeVisible();
+	});
+
 	test('the edit page keeps a new-artist name the operator typed', async ({ page }) => {
-		// No local artist behind the handle: the `new` outcome, which flips the
-		// page to its inline new-artist form and seeds it.
+		// No local artist behind the handle: the `new` outcome, whose action opens
+		// the inline new-artist form and seeds it.
 		await stubLookup(page, matchedBody({ localArtists: [] }));
 		await gotoEditHydrated(page);
 		await page.getByRole('button', { name: 'Add New Artist' }).click();
@@ -367,6 +387,7 @@ test.describe('with a key saved', () => {
 
 		await pill(page).click();
 		await expect(panel(page)).toBeVisible();
+		await panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' }).click();
 		// The typed name survives and carries no tag; the empty link field is
 		// filled and tagged.
 		await expect(page.locator('input[name="artistName"]')).toHaveValue('My Own Name');
@@ -462,6 +483,40 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+	});
+
+	// parentIndex is submitted as the hidden field the server picks the parent
+	// with, so a tile removed ahead of the parent must move it along: otherwise
+	// the piece that saves is a different file than the shared artist, date and
+	// source URL describe.
+	test('removing a tile ahead of the parent keeps the parent and its fields', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await page.route('**/api/upload', (route) =>
+			route.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/x1.png' }) })
+		);
+		await page.goto('/admin/upload');
+		await waitForDropAttachment(page, '.dropzone');
+		await dropOn(page, '.dropzone', [
+			{ name: 'first.png', type: 'image/png' },
+			{ name: 'middle.png', type: 'image/png' },
+			{ name: 'last.png', type: 'image/png' }
+		]);
+		await expect(page.locator('input[name="imageUrl_2"]')).toHaveValue('/x1.png', {
+			timeout: 15_000
+		});
+
+		// The middle tile is the parent, and its result fills the shared fields.
+		await page.getByRole('radio', { name: 'Parent: middle.png' }).check();
+		await tileLookup(page).nth(1).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await page.getByRole('button', { name: 'Remove file' }).nth(0).click();
+
+		await expect(page.getByRole('radio', { name: 'Parent: middle.png' })).toBeChecked();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 	});
 
 	test('a variant crediting somebody else says so on its tile', async ({ page }) => {
