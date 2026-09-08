@@ -19,6 +19,7 @@ import {
 	parseFuzzysearchRefusedMarker,
 	type LookupMatch
 } from './fuzzysearch';
+import { RATING_ORDER } from '$lib/artist-lookup';
 
 // A fetch stand-in that records what the client sent and answers with a fixed
 // response. Injected rather than stubbed globally (the furtrack.test.ts shape).
@@ -117,6 +118,22 @@ describe('normalizeMatches', () => {
 		expect(matches[0].postedAt).toBe('2026-01-02T03:04:05Z');
 		expect(matches[0].rating).toBe('general');
 		expect(matches[3].rating).toBeNull();
+	});
+
+	// The parse held its own copy of the rating list, so a rating added to the
+	// comparators' order was dropped here and a rating added here sorted ahead of
+	// every rating they knew. One list now, read from both ends.
+	it('accepts exactly the ratings the comparators order by', () => {
+		for (const rating of RATING_ORDER) {
+			const [match] = normalizeMatches([
+				{ site: 'FurAffinity', site_id_str: '12345', artists: [], distance: 0, rating }
+			]);
+			expect(match.rating).toBe(rating);
+		}
+		const [unknown] = normalizeMatches([
+			{ site: 'FurAffinity', site_id_str: '12345', artists: [], distance: 0, rating: 'explicit' }
+		]);
+		expect(unknown.rating).toBeNull();
 	});
 
 	it('returns nothing for a payload that is not a list', () => {

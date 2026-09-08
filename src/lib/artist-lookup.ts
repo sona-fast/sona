@@ -172,9 +172,10 @@ export function ratingTag(
 	return options.parent ? m.admin_lookup_rating_tag_parent(params) : m.admin_lookup_rating_tag(params);
 }
 
-/** Lenient to strict. The one order both rating comparators read: they used to
- * hold a copy each, so a new rating had to be added twice to agree. */
-const RATING_ORDER: readonly LookupRating[] = ['general', 'mature', 'adult'];
+/** Lenient to strict. The one list of ratings anything reads: the two
+ * comparators and the endpoint's parse each held a copy, so a new rating had to
+ * be added in three places to agree. */
+export const RATING_ORDER: readonly LookupRating[] = ['general', 'mature', 'adult'];
 
 /** The strictest rating across the confident matches, with the sites carrying
  * it. The one implementation — `$lib/server/fuzzysearch` re-exports this rather
@@ -548,15 +549,6 @@ function hasLinkableUrl(match: LookupMatch): boolean {
 	return typeof match?.postUrl === 'string' && match.postUrl.startsWith('https://');
 }
 
-/**
- * The match list the panel actually renders: linkable URLs only, and one row
- * per post. The rows are keyed on site + siteId, so a post that came back twice
- * would crash the keyed each; the endpoint dedupes too, and this is the second
- * pass on the side that does the rendering.
- *
- * `indexMap` carries each kept match's old position, because `localArtists` and
- * `nameMatches` address matches by index into the list as it was sent.
- */
 /** The stricter of two ratings, either of which may be unknown. RATING_ORDER
  * runs lenient to strict. */
 function stricterRating(a: LookupRating | null, b: LookupRating | null): LookupRating | null {
@@ -606,6 +598,15 @@ export function mergeSamePost(kept: LookupMatch, duplicate: LookupMatch): Lookup
 	};
 }
 
+/**
+ * The match list the panel actually renders: linkable URLs only, and one row
+ * per post. The rows are keyed on site + siteId, so a post that came back twice
+ * would crash the keyed each; the endpoint dedupes too, and this is the second
+ * pass on the side that does the rendering.
+ *
+ * `indexMap` carries each kept match's old position, because `localArtists` and
+ * `nameMatches` address matches by index into the list as it was sent.
+ */
 function usableMatches(raw: LookupMatch[]): { matches: LookupMatch[]; indexMap: Map<number, number> } {
 	const matches: LookupMatch[] = [];
 	const indexMap = new Map<number, number>();

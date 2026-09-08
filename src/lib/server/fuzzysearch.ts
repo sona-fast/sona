@@ -14,7 +14,7 @@
 import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 import { getRawSetting } from './settings';
 import { normalizeHandle, socialsToHandles, type Platform } from './handle-normalize';
-import { matchKey, mergeSamePost } from '$lib/artist-lookup';
+import { matchKey, mergeSamePost, RATING_ORDER } from '$lib/artist-lookup';
 import type { Database } from './db';
 
 // Four rules the browser needs as much as this file does: which match the form
@@ -83,7 +83,6 @@ export type LookupResult =
 	| { ok: false; reason: LookupFailure };
 
 const SITES: readonly LookupSite[] = ['FurAffinity', 'Weasyl', 'e621', 'Twitter'];
-const RATINGS: readonly LookupRating[] = ['general', 'mature', 'adult'];
 
 /** Display order when distances tie: the sites whose matches are most likely to
  * name an artist we can link locally come first. */
@@ -271,7 +270,9 @@ function normalizeMatch(raw: RawMatch): LookupMatch | null {
 	const handles = Array.isArray(raw.artists)
 		? raw.artists.filter((a): a is string => typeof a === 'string' && a.trim() !== '')
 		: [];
-	const rating = RATINGS.find((r) => r === raw.rating) ?? null;
+	// The same list the comparators order by: a rating this parse accepted but
+	// they did not know would have sorted ahead of every rating they did.
+	const rating = RATING_ORDER.find((r) => r === raw.rating) ?? null;
 
 	return {
 		site,
