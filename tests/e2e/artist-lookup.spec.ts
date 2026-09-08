@@ -1367,6 +1367,15 @@ test.describe('with a key saved', () => {
 		release();
 		await expect(tileLookup(page).nth(0)).toHaveAttribute('aria-busy', 'false');
 
+		// A demoted tile's outcome renders as plain text outside any live region,
+		// so this is the only thing that tells a screen-reader operator the lookup
+		// they started finished. The whole region is that one message, naming the
+		// file it is about: applying it to the shared fields as well would have
+		// said the same result twice, under two different names.
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			'front.png: kuttoya on FurAffinity, Exact match.'
+		);
+
 		// The result landed on the tile that asked for it, as a variant's does.
 		await expect(page.locator('.tile-nsfw-row .rating-tag')).toHaveText(
 			'Rated General on FurAffinity'
