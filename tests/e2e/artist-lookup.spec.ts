@@ -1459,6 +1459,66 @@ test.describe('with a key saved', () => {
 		await expect(page.locator(LIVE_REGION)).not.toContainText('Sona filled the shared fields');
 	});
 
+	// The same rule from the other end: fields the operator filled BEFORE the
+	// lookup are never overwritten either, so the round trip writes nothing.
+	test('returning to a new set says nothing over fields filled before the lookup', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await sourceInput(page).fill('https://www.furaffinity.net/view/888888/');
+		await dateInput(page).fill('2026-01-02');
+		await pill(page).click();
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(sourceInput(page)).toHaveValue('https://www.furaffinity.net/view/888888/');
+
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await page.getByRole('radio', { name: 'New piece' }).check();
+		await expect(panel(page)).toContainText('kuttoya');
+
+		await expect(sourceInput(page)).toHaveValue('https://www.furaffinity.net/view/888888/');
+		await expect(dateInput(page)).toHaveValue('2026-01-02');
+		await expect(page.locator(LIVE_REGION)).not.toContainText('Sona filled the shared fields');
+	});
+
+	// And the case where the result itself fills nothing: every match sits in the
+	// possible band, so pickPrefillMatch returns null over two empty fields.
+	test('returning to a new set says nothing when the result is too weak to fill', async ({
+		page
+	}) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '12345',
+						handles: ['kuttoya'],
+						distance: 6,
+						band: 'possible',
+						postedAt: '2026-03-04T10:00:00Z',
+						rating: 'general',
+						postUrl: POST_URL
+					}
+				]
+			})
+		);
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(sourceInput(page)).toHaveValue('');
+
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await page.getByRole('radio', { name: 'New piece' }).check();
+		await expect(panel(page)).toContainText('kuttoya');
+
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator(LIVE_REGION)).not.toContainText('Sona filled the shared fields');
+	});
+
 	// Closing the panel puts the tile's lookup back to idle and leaves the fields
 	// it filled on screen. The round trip re-derived unconditionally: it cleared
 	// both tagged fields, then applied an idle lookup that filled nothing.

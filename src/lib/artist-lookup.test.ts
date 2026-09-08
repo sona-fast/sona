@@ -28,6 +28,7 @@ import {
 	withCreatedArtist,
 	type LookupFailReason,
 	type LookupMatch,
+	type LookupRating,
 	type LookupResponse,
 	type LookupSite
 } from './artist-lookup';
@@ -100,6 +101,27 @@ describe('artist-lookup — the wire shape agrees with the server', () => {
 			match({ site: 'e621', siteId: '7', rating: 'adult', distance: 5, band: 'possible' })
 		];
 		expect(strictestRating(matches)).toEqual({ rating: 'adult', sites: ['Twitter'] });
+	});
+
+	// Two comparators read the rating order: strictestRating across a match list,
+	// and the one inside mergeSamePost that folds a duplicate post. They held a
+	// copy of the order each, so a new rating added to one and not the other
+	// would have made them disagree about which of a pair is stricter.
+	it('ranks every pair of ratings the same way in both comparators', () => {
+		const ratings: (LookupRating | null)[] = [null, 'general', 'mature', 'adult'];
+		for (const a of ratings) {
+			for (const b of ratings) {
+				const merged = mergeSamePost(
+					match({ rating: a }),
+					match({ site: 'Twitter', siteId: '9', rating: b })
+				).rating;
+				const across = strictestRating([
+					match({ rating: a }),
+					match({ site: 'Twitter', siteId: '9', rating: b })
+				]);
+				expect(merged).toBe(across?.rating ?? null);
+			}
+		}
 	});
 
 	// No cast: a renamed or retyped field on either side fails `npm run check`,

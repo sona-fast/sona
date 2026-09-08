@@ -172,6 +172,10 @@ export function ratingTag(
 	return options.parent ? m.admin_lookup_rating_tag_parent(params) : m.admin_lookup_rating_tag(params);
 }
 
+/** Lenient to strict. The one order both rating comparators read: they used to
+ * hold a copy each, so a new rating had to be added twice to agree. */
+const RATING_ORDER: readonly LookupRating[] = ['general', 'mature', 'adult'];
+
 /** The strictest rating across the confident matches, with the sites carrying
  * it. The one implementation — `$lib/server/fuzzysearch` re-exports this rather
  * than restating it. Possible and unknown-distance matches are excluded: a
@@ -179,12 +183,12 @@ export function ratingTag(
 export function strictestRating(
 	matches: LookupMatch[]
 ): { rating: LookupRating; sites: LookupSite[] } | null {
-	const order: LookupRating[] = ['general', 'mature', 'adult'];
 	const confident = matches.filter((x) => x.band === 'exact' || x.band === 'strong');
 	let best: LookupRating | null = null;
 	for (const match of confident) {
 		if (!match.rating) continue;
-		if (best === null || order.indexOf(match.rating) > order.indexOf(best)) best = match.rating;
+		if (best === null || RATING_ORDER.indexOf(match.rating) > RATING_ORDER.indexOf(best))
+			best = match.rating;
 	}
 	if (!best) return null;
 	const sites: LookupSite[] = [];
@@ -553,8 +557,6 @@ function hasLinkableUrl(match: LookupMatch): boolean {
  * `indexMap` carries each kept match's old position, because `localArtists` and
  * `nameMatches` address matches by index into the list as it was sent.
  */
-const RATING_ORDER: readonly LookupRating[] = ['general', 'mature', 'adult'];
-
 /** The stricter of two ratings, either of which may be unknown. RATING_ORDER
  * runs lenient to strict. */
 function stricterRating(a: LookupRating | null, b: LookupRating | null): LookupRating | null {

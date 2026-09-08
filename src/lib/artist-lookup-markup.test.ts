@@ -430,9 +430,17 @@ describe('the "From lookup" tag', () => {
 	it('re-seeds the edit page when a different image loads', () => {
 		expect(EDIT).toMatch(/const id = data\.image\.id;[\s\S]{0,200}?resetForImage\(\)/);
 		expect(EDIT).toMatch(/function resetForImage\(\)[\s\S]{0,600}?lookup = \{ kind: 'idle' \}/);
-		for (const flag of ['sourceTagged', 'dateTagged', 'nameTagged', 'appliedArtist', 'sentPrivate']) {
+		for (const flag of [
+			'sourceTagged',
+			'dateTagged',
+			'nameTagged',
+			'appliedArtist',
+			'sentPrivate',
+			// Kept, the reference line reported the PREVIOUS image's clearing.
+			'referenceCleared'
+		]) {
 			expect(EDIT).toMatch(
-				new RegExp(`function resetForImage\\(\\)[\\s\\S]{0,800}?${flag} = `)
+				new RegExp(`function resetForImage\\(\\)[\\s\\S]{0,900}?${flag} = `)
 			);
 		}
 	});

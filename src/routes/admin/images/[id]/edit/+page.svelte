@@ -129,8 +129,9 @@
 		artistList = data.artists.map((a) => ({ id: a.id, name: a.name }));
 		selectedParentId = String(data.image.parentImageId ?? '');
 		isPrivate = !data.image.published;
-		// A snapshot of the send on the PREVIOUS image.
+		// Both describe the PREVIOUS image: a send, and a reference sheet cleared.
 		sentPrivate = false;
+		referenceCleared = false;
 		extraParents = [];
 		artistMode = 'existing';
 		artistName = '';
