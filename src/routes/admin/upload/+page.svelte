@@ -503,16 +503,21 @@
 
 	function announceTileLookup(tile: Tile) {
 		const fileName = tile.fileName;
+		let line: string;
 		if (tile.lookup.kind === 'failed') {
-			announcer.say(m.admin_lookup_announce_tile_failed({ fileName }));
-			return;
-		}
-		const result = tileResult(tile);
-		announcer.say(
-			result
+			line = m.admin_lookup_announce_tile_failed({ fileName });
+		} else {
+			const result = tileResult(tile);
+			line = result
 				? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
-				: m.admin_lookup_announce_tile_no_match({ fileName })
-		);
+				: m.admin_lookup_announce_tile_no_match({ fileName });
+		}
+		// The tile's private notice is a plain paragraph outside any live region,
+		// so this is the only way the disclosure reaches a screen-reader operator.
+		if (tile.sentPrivate && lookupSentFile(tile.lookup)) {
+			line = `${line} ${m.admin_lookup_private_notice()}`;
+		}
+		announcer.say(line);
 	}
 
 	function isParent(key: number): boolean {
@@ -535,7 +540,10 @@
 		dateTagged = false;
 		sharedFilled = {};
 		sharedUrlHeld = false;
-		appliedArtist = null;
+		// "Using {name}" is about the SELECT, not about the result that put the
+		// artist there: cleared while the select still holds it, the group-mode
+		// round trip relabelled the button back to "Use {name}".
+		if (!appliedArtist || Number(selectedArtistId) !== appliedArtist.id) appliedArtist = null;
 		// A clash carried into the select belongs to the lookup that found it, so
 		// a second lookup must not leave the first one's piece on offer. The one
 		// the operator actually chose stays: dropping it would silently blank the
@@ -556,6 +564,18 @@
 			commissionedAt = fields.commissionedAt;
 			dateTagged = true;
 		}
+	}
+
+	/** Back to a new set. Only re-derive when the parent tile still HAS a result:
+	 * closing the panel leaves the lookup idle while the fields it filled stay on
+	 * screen, and an unconditional re-derivation cleared both tagged fields and
+	 * then applied nothing, erasing them with no notice. The panel and its status
+	 * region are mounted by this same mode swap, so a region inserted together
+	 * with its first content is commonly missed — say the refill out loud. */
+	function returnToNewSet() {
+		if (tiles[parentIndex]?.lookup.kind !== 'results') return;
+		onParentChanged(parentIndex);
+		announcer.say(m.admin_lookup_announce_shared_refilled());
 	}
 
 	/** The parent moved: the shared fields describe whatever the parent is now. */
@@ -914,16 +934,22 @@
 				     empty fields. -->
 				<input
 					type="radio"
+					name="groupMode"
 					checked={groupMode === 'new'}
 					onchange={() => {
 						groupMode = 'new';
-						onParentChanged(parentIndex);
+						returnToNewSet();
 					}}
 				/>
 				<span>{tiles.length > 1 ? m.admin_variant_group_new() : m.admin_variant_group_single()}</span>
 			</label>
 			<label class="radio-label">
-				<input type="radio" checked={groupMode === 'existing'} onchange={() => (groupMode = 'existing')} />
+				<input
+					type="radio"
+					name="groupMode"
+					checked={groupMode === 'existing'}
+					onchange={() => (groupMode = 'existing')}
+				/>
 				<span>{m.admin_variant_group_existing()}</span>
 			</label>
 			{#if groupMode === 'existing'}

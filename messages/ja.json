@@ -1560,5 +1560,6 @@
 	"admin_lookup_announce_new_form": "新しいアーティストのフォームに切り替えました。アーティストを手で入力してください。",
 	"admin_lookup_announce_form_already_open": "新しいアーティストのフォームはすでに開いています。",
 	"admin_lookup_announce_seed_kept": "新しいアーティストの各項目にはすでに値が入っているため、そのままにしました。",
-	"admin_lookup_announce_searching_cleared": "前回の検索で入力した項目は消去しました。"
+	"admin_lookup_announce_searching_cleared": "前回の検索で入力した項目は消去しました。",
+	"admin_lookup_announce_shared_refilled": "親画像の検索結果から共有項目を入力しました。"
 }

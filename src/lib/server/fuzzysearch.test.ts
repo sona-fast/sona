@@ -192,6 +192,22 @@ describe('normalizeMatches', () => {
 		expect(match.rating).toBe('adult');
 	});
 
+	// Same shape one field over: a copy with no posted_at kept its own empty date
+	// and the commissioned date could not be filled from a post its twin dated.
+	it('takes the twin\'s date when the kept copy has none', () => {
+		const [match] = normalizeMatches([
+			{ site: 'FurAffinity', site_id_str: '12345', artists: ['kuttoya'], distance: 0 },
+			{
+				site: 'FurAffinity',
+				site_id_str: '12345',
+				artists: ['kuttoya'],
+				distance: 0,
+				posted_at: '2026-03-04T10:00:00Z'
+			}
+		]);
+		expect(match.postedAt).toBe('2026-03-04T10:00:00Z');
+	});
+
 	it('keeps the same id on two different sites', () => {
 		const both = normalizeMatches([
 			{ site: 'FurAffinity', site_id_str: '160', artists: [], distance: 1 },

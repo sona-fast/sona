@@ -8,6 +8,7 @@ import {
 	matchHandle,
 	matchHandles,
 	lookupSentFile,
+	mergeSamePost,
 	nameMatchArtists,
 	newArtistSeed,
 	seedStatusKind,
@@ -35,6 +36,7 @@ import {
 import {
 	FUZZYSEARCH_MAX_BYTES,
 	handleProfileUrl,
+	mergeSamePost as serverMergeSamePost,
 	pickPrefillMatch as serverPickPrefillMatch,
 	strictestRating as serverStrictestRating,
 	type LookupFailure as ServerLookupFailure,
@@ -85,6 +87,7 @@ describe('artist-lookup — the wire shape agrees with the server', () => {
 	// drifting quietly (SONA-156 round 1).
 	it('is the one implementation the server module re-exports', () => {
 		expect(serverStrictestRating).toBe(strictestRating);
+		expect(serverMergeSamePost).toBe(mergeSamePost);
 		expect(serverPickPrefillMatch).toBe(pickPrefillMatch);
 		expect(handleProfileUrl).toBe(profileUrlFor);
 	});
@@ -758,6 +761,47 @@ describe('stateFromResponse', () => {
 
 	// The panel keys its rows on site + siteId. The endpoint dedupes too; this is
 	// the second pass, on the side that would throw each_key_duplicate.
+	// The endpoint merges duplicates rather than dropping them; this pass has to
+	// do the same, or the row the panel renders disagrees with the row the
+	// endpoint built its clash check against.
+	it('folds what only the duplicate knew into the row that stays', async () => {
+		const state = await stateFromResponse(
+			jsonResponse(
+				response({
+					matches: [
+						match({
+							site: 'Twitter',
+							siteId: '160',
+							handles: [],
+							postedAt: null,
+							rating: 'general',
+							postUrl: 'https://twitter.com/i/status/160'
+						}),
+						match({
+							site: 'Twitter',
+							siteId: '160',
+							handles: ['kuttoya'],
+							postedAt: '2026-03-04T10:00:00Z',
+							rating: 'adult',
+							postUrl: 'https://twitter.com/kuttoya/status/160'
+						})
+					]
+				})
+			)
+		);
+		if (state.kind !== 'results') throw new Error('expected results');
+		expect(state.data.matches).toHaveLength(1);
+		const [row] = state.data.matches;
+		expect(row.handles).toEqual(['kuttoya']);
+		// A handle-less row's /i/status/ URL matches no stored
+		// twitter.com/{handle}/status/{id}, so the merged row takes the twin's.
+		expect(row.postUrl).toBe('https://twitter.com/kuttoya/status/160');
+		expect(row.rating).toBe('adult');
+		// And the date, or the commissioned date is unfillable from a post one of
+		// the two copies dated.
+		expect(row.postedAt).toBe('2026-03-04T10:00:00Z');
+	});
+
 	it('keeps one row per post and moves the duplicate hit onto it', async () => {
 		const state = await stateFromResponse(
 			jsonResponse(

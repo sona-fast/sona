@@ -1400,6 +1400,39 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		// The panel and its status region are mounted by this same swap, so a
+		// region inserted together with its first content is commonly missed: two
+		// fields the operator may save were refilled with nothing said.
+		await expect(page.locator(LIVE_REGION)).toContainText(
+			"Sona filled the shared fields from the parent image's result."
+		);
+
+		// And the artist the panel applied is still applied: the reset behind the
+		// re-derivation used to relabel the button over a select that still held
+		// that artist.
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await page.getByRole('radio', { name: 'New piece' }).check();
+		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+	});
+
+	// Closing the panel puts the tile's lookup back to idle and leaves the fields
+	// it filled on screen. The round trip re-derived unconditionally: it cleared
+	// both tagged fields, then applied an idle lookup that filled nothing.
+	test('a group-mode round trip keeps fields a closed lookup filled', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await panel(page).getByRole('button', { name: 'Close' }).click();
+		await expect(panel(page)).toBeHidden();
+
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await page.getByRole('radio', { name: 'New piece' }).check();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 	});
 
 	// parentIndex is submitted as the hidden field the server picks the parent

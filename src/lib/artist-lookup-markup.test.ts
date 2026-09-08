@@ -430,9 +430,9 @@ describe('the "From lookup" tag', () => {
 	it('re-seeds the edit page when a different image loads', () => {
 		expect(EDIT).toMatch(/const id = data\.image\.id;[\s\S]{0,200}?resetForImage\(\)/);
 		expect(EDIT).toMatch(/function resetForImage\(\)[\s\S]{0,600}?lookup = \{ kind: 'idle' \}/);
-		for (const flag of ['sourceTagged', 'dateTagged', 'nameTagged', 'appliedArtist']) {
+		for (const flag of ['sourceTagged', 'dateTagged', 'nameTagged', 'appliedArtist', 'sentPrivate']) {
 			expect(EDIT).toMatch(
-				new RegExp(`function resetForImage\\(\\)[\\s\\S]{0,700}?${flag} = `)
+				new RegExp(`function resetForImage\\(\\)[\\s\\S]{0,800}?${flag} = `)
 			);
 		}
 	});
@@ -772,7 +772,7 @@ describe('focus after the panel goes away', () => {
 		// prefill: the first clash's piece stops being on offer unless the operator
 		// chose it, and dropping a chosen one would blank the select instead.
 		expect(UPLOAD).toMatch(
-			/function resetSharedPrefill\(\)[\s\S]{0,700}?extraParents = extraParents\.filter\(\(c\) => String\(c\.id\) === existingParentId\);/
+			/function resetSharedPrefill\(\)[\s\S]{0,900}?extraParents = extraParents\.filter\(\(c\) => String\(c\.id\) === existingParentId\);/
 		);
 		// And on the edit page's own repeat lookup, which resetForImage does not
 		// cover: it only runs on a move to another image.
@@ -812,8 +812,21 @@ describe('focus after the panel goes away', () => {
 		);
 		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next\);/);
 		expect(UPLOAD).not.toMatch(/wasParent/);
+		expect(UPLOAD).toMatch(/groupMode = 'new';\s*\n\s*returnToNewSet\(\);/);
+		// Only re-derive from a parent that still HAS a result: with the panel
+		// closed its lookup is idle and the fields it filled are still on screen,
+		// and an unconditional re-derivation cleared them and applied nothing.
 		expect(UPLOAD).toMatch(
-			/groupMode = 'new';\s*\n\s*onParentChanged\(parentIndex\);/
+			/function returnToNewSet\(\)[\s\S]{0,400}?if \(tiles\[parentIndex\]\?\.lookup\.kind !== 'results'\) return;/
+		);
+		// The panel and its status region are mounted by the same mode swap, so a
+		// refill lands in a region inserted with its first content. Say it.
+		expect(UPLOAD).toMatch(
+			/function returnToNewSet\(\)[\s\S]{0,400}?m\.admin_lookup_announce_shared_refilled\(\)/
+		);
+		// An artist the select still holds stays applied across that round trip.
+		expect(UPLOAD).toMatch(
+			/function resetSharedPrefill\(\)[\s\S]{0,900}?if \(!appliedArtist \|\| Number\(selectedArtistId\) !== appliedArtist\.id\) appliedArtist = null;/
 		);
 	});
 
@@ -905,6 +918,20 @@ describe('what a lookup says out loud', () => {
 				new RegExp(`announcer\\.say\\(\\s*m\\.${id}\\(|m\\.${id}\\(\\{ fileName`)
 			);
 		}
+	});
+
+	// The tile's private notice is a plain paragraph outside any live region, so
+	// the outcome message is the only thing that can carry the disclosure.
+	it('says the private disclosure with a variant tile outcome', () => {
+		expect(UPLOAD).toMatch(
+			/function announceTileLookup[\s\S]{0,900}?tile\.sentPrivate && lookupSentFile\(tile\.lookup\)[\s\S]{0,200}?m\.admin_lookup_private_notice\(\)/
+		);
+	});
+
+	// Both group-mode radios share a name, or arrow keys do not move between
+	// them and the pair reads as two unrelated controls.
+	it('groups the group-mode radios under one name', () => {
+		expect(UPLOAD.match(/name="groupMode"/g) ?? []).toHaveLength(2);
 	});
 
 	// The select sits above the panel and the button relabels itself in place.

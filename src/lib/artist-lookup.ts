@@ -553,6 +553,49 @@ function hasLinkableUrl(match: LookupMatch): boolean {
  * `indexMap` carries each kept match's old position, because `localArtists` and
  * `nameMatches` address matches by index into the list as it was sent.
  */
+const RATING_ORDER: readonly LookupRating[] = ['general', 'mature', 'adult'];
+
+/** The stricter of two ratings, either of which may be unknown. RATING_ORDER
+ * runs lenient to strict. */
+function stricterRating(a: LookupRating | null, b: LookupRating | null): LookupRating | null {
+	if (a === null) return b;
+	if (b === null) return a;
+	return RATING_ORDER.indexOf(a) >= RATING_ORDER.indexOf(b) ? a : b;
+}
+
+/**
+ * Fold a duplicate of the same post into the row being kept. Dropping it
+ * instead threw away whatever only the duplicate knew: a Twitter copy with an
+ * empty artists array sorts ahead of its twin on an equal distance, and the
+ * survivor was then a handle-less `/i/status/` URL — the row read as an unknown
+ * poster, the offer to add the artist went with it, and no stored
+ * `twitter.com/{handle}/status/{id}` clashed with it.
+ *
+ * The kept row already holds the closest distance and the band that follows
+ * from it, because both callers fold after the sort. The handles union, the
+ * rating goes to the stricter of the two, and the date comes from whichever row
+ * has one. The post URL follows the handle it names: every row's URL was built
+ * from its own handles, so the twin's URL is what a rebuild from the merged
+ * handles would produce when the kept row had none.
+ *
+ * Both the endpoint's dedupe and the panel's second pass run this — the two
+ * used to be one merge and one silent drop, which disagreed about what a row
+ * said.
+ */
+export function mergeSamePost(kept: LookupMatch, duplicate: LookupMatch): LookupMatch {
+	const handles = [...kept.handles];
+	for (const handle of duplicate.handles) {
+		if (!handles.includes(handle)) handles.push(handle);
+	}
+	return {
+		...kept,
+		handles,
+		rating: stricterRating(kept.rating, duplicate.rating),
+		postedAt: kept.postedAt ?? duplicate.postedAt,
+		postUrl: kept.handles.length === 0 ? duplicate.postUrl : kept.postUrl
+	};
+}
+
 function usableMatches(raw: LookupMatch[]): { matches: LookupMatch[]; indexMap: Map<number, number> } {
 	const matches: LookupMatch[] = [];
 	const indexMap = new Map<number, number>();
@@ -562,7 +605,9 @@ function usableMatches(raw: LookupMatch[]): { matches: LookupMatch[]; indexMap: 
 		const key = `${match.site} ${match.siteId}`;
 		const already = kept.get(key);
 		if (already !== undefined) {
-			// A duplicate's hits belong to the row that stayed.
+			// A duplicate's hits belong to the row that stayed, and so does whatever
+			// only the duplicate knew.
+			matches[already] = mergeSamePost(matches[already], match);
 			indexMap.set(index, already);
 			return;
 		}
