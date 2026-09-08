@@ -44,7 +44,8 @@ graph TB
         Resend[✉️ Resend]
         Turnstile[🧩 Cloudflare Turnstile]
         ConsFYI[📅 cons.fyi]
-        Avatars[🖼️ Bluesky + X — profile picture sources]
+        Avatars[🖼️ Bluesky + X — profile pictures, tweet media]
+        Entail[🏷️ entail.dev — image tag classifier]
         UT[☁️ UploadThing — optional]
     end
 
@@ -89,6 +90,7 @@ graph TB
     Auth -->|reset email| Resend
     RateLimit --> Turnstile
     Public -->|convention dates| ConsFYI
+    API -->|tag suggestions for a source post| Entail
 
     RegClient -->|search / pull / submit| RegWorker
     RegWorker --> RegD1
@@ -96,7 +98,7 @@ graph TB
     CI --> Deploy
     Deploy -->|wrangler pages deploy| Hooks
     CronWF -->|POST /api/cron/* with CRON_SECRET| API
-    API -->|fetch profile pictures to re-host| Avatars
+    API -->|fetch profile pictures to re-host, resolve tweet media| Avatars
     Admin -->|fetch profile pictures to re-host| Avatars
     Release -.->|pull tagged releases| Forks
 ```
@@ -131,6 +133,11 @@ graph TB
   zone rather than the reader's or UTC.
 - Telegram, FurTrack, Resend, and Turnstile are optional integrations, keyed
   off secrets or settings (see `wrangler.toml.example` for the full list).
+- entail.dev needs no key or secret. The app calls it only when an operator
+  asks for tag suggestions on an image whose source post is on Bluesky or X,
+  and never on a render path or a schedule. An X post takes one extra hop:
+  X's own API resolves the post to its image, and that image URL is what
+  entail.dev classifies.
 - GitHub Actions is part of the runtime, not just delivery: the scheduled
   workflows (`sticker-resync` daily 06:00 UTC, `artist-sync` 06:30,
   `avatar-refresh` 07:00, `cleanup-orphans` weekly, `backfill-animated`

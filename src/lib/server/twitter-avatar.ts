@@ -10,6 +10,8 @@
 // and fail-soft: any error resolves to null and the save proceeds without an
 // avatar. Registry-linked artists get theirs through the registry instead.
 
+import { errorLabel, timeoutSignal } from './fetch-errors';
+
 // X web client's public bearer (shipped to every browser) — not a secret.
 const X_BEARER =
 	'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
@@ -47,12 +49,18 @@ export function to400x400(url: string): string {
 	return url.replace(/_normal(\.[a-z]+)$/i, '_400x400$1');
 }
 
-async function activateGuestToken(): Promise<string | null> {
+/** Activate a guest token against the public web bearer. Shared with
+ * twitter-media.ts; `fetchImpl` is only for tests, `signal` is the caller's
+ * overall deadline. Never throws. */
+export async function activateGuestToken(
+	fetchImpl: typeof fetch = fetch,
+	signal?: AbortSignal
+): Promise<string | null> {
 	try {
-		const res = await fetch(X_ACTIVATE, {
+		const res = await fetchImpl(X_ACTIVATE, {
 			method: 'POST',
 			headers: { Authorization: X_BEARER },
-			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+			signal: timeoutSignal(FETCH_TIMEOUT_MS, signal)
 		});
 		if (!res.ok) {
 			// A non-2xx here (esp. 403) is the signal that X is blocking Workers egress —
@@ -63,24 +71,31 @@ async function activateGuestToken(): Promise<string | null> {
 		const body = (await res.json()) as { guest_token?: unknown };
 		return typeof body.guest_token === 'string' ? body.guest_token : null;
 	} catch (e) {
-		console.warn(`[avatar] twitter guest-token activation error: ${e instanceof Error ? e.message : String(e)}`);
+		console.warn(`[avatar] twitter guest-token activation error: ${errorLabel(e)}`);
 		return null;
 	}
 }
 
-async function userLookup(handle: string, guestToken: string): Promise<Response> {
+/** The header set every X GraphQL call carries: the bearer, the guest token,
+ * and a fresh random csrf value mirrored into the cookie the way the web
+ * client does it. Shared with twitter-media.ts. */
+export function xGraphqlHeaders(guestToken: string): Record<string, string> {
 	const csrf = [...crypto.getRandomValues(new Uint8Array(16))]
 		.map((b) => b.toString(16).padStart(2, '0'))
 		.join('');
+	return {
+		Authorization: X_BEARER,
+		'x-guest-token': guestToken,
+		'x-csrf-token': csrf,
+		'x-twitter-active-user': 'yes',
+		Cookie: `guest_id=v1%3A${guestToken}; ct0=${csrf};`
+	};
+}
+
+async function userLookup(handle: string, guestToken: string): Promise<Response> {
 	const variables = encodeURIComponent(JSON.stringify({ screen_name: handle }));
 	return fetch(`${X_USER_BY_SCREEN_NAME}?variables=${variables}`, {
-		headers: {
-			Authorization: X_BEARER,
-			'x-guest-token': guestToken,
-			'x-csrf-token': csrf,
-			'x-twitter-active-user': 'yes',
-			Cookie: `guest_id=v1%3A${guestToken}; ct0=${csrf};`
-		},
+		headers: xGraphqlHeaders(guestToken),
 		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
 	});
 }
@@ -112,7 +127,7 @@ export async function fetchTwitterAvatar(twitterUrl: string): Promise<string | n
 		}
 		return to400x400(avatar);
 	} catch (e) {
-		console.warn(`[avatar] twitter lookup error: handle=${handle} ${e instanceof Error ? e.message : String(e)}`);
+		console.warn(`[avatar] twitter lookup error: handle=${handle} ${errorLabel(e)}`);
 		return null;
 	}
 }

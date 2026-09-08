@@ -27,7 +27,7 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
-export const LEGAL_DEFAULTS_UPDATED = '2026-08-24';
+export const LEGAL_DEFAULTS_UPDATED = '2026-09-07';
 
 /**
  * Resolve the "Last updated" date to show on a legal page from a *stable* source
@@ -150,13 +150,13 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 				// paragraph with the toggle would delete a real processor
 				// disclosure. Only the vendor NAMES follow the affirmation, since
 				// those are the part a declining owner has not stood behind.
-				'Sites running this software are typically built and maintained with AI development tools, which do not run as part of the site itself, so nothing you do here is sent to them as you browse. When the site owner or their developer is diagnosing a problem, the operational data they share with development or code-review tools can include server logs and database records, and those logs can contain request data such as IP addresses, page URLs, and browser user-agent strings.',
+				'Sites running this software are typically built and maintained with AI development tools, which do not run as part of the site itself, so nothing you do here is sent to those tools as you browse. When the site owner or their developer is diagnosing a problem, the operational data they share with development or code-review tools can include server logs and database records, and those logs can contain request data such as IP addresses, page URLs, and browser user-agent strings.',
 				...(opts.aiToolsDisclosed === false
 					? []
 					: [
 							"For this site those tools are Anthropic's Claude, which writes and debugs code under the developer's direction, and CodeRabbit, a code review service that reads proposed changes."
 						]),
-				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) and Bluesky (fetching the profile pictures shown on this site), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
+				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) and Bluesky (fetching the profile pictures shown on this site; X is also asked which picture a post carries), entail.dev (an image classifier that suggests tags for artwork from its source post or the picture in it), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
 			]
 		},
 		{

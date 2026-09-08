@@ -3,7 +3,8 @@ import {
 	twitterHandleFromUrl,
 	parseUserAvatar,
 	to400x400,
-	fetchTwitterAvatar
+	fetchTwitterAvatar,
+	xGraphqlHeaders
 } from './twitter-avatar';
 
 describe('twitterHandleFromUrl', () => {
@@ -52,6 +53,18 @@ describe('to400x400', () => {
 	});
 });
 
+describe('xGraphqlHeaders', () => {
+	it('mirrors a fresh csrf value into the cookie next to the guest id', () => {
+		const first = xGraphqlHeaders('gt-1');
+		const csrf = first['x-csrf-token'];
+		expect(csrf).toMatch(/^[0-9a-f]{32}$/);
+		expect(first.Cookie).toContain(`ct0=${csrf}`);
+		expect(first.Cookie).toContain('guest_id=v1%3Agt-1');
+		expect(first['x-guest-token']).toBe('gt-1');
+		expect(xGraphqlHeaders('gt-1')['x-csrf-token']).not.toBe(csrf);
+	});
+});
+
 describe('fetchTwitterAvatar', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
@@ -66,18 +79,17 @@ describe('fetchTwitterAvatar', () => {
 	};
 
 	it('activates a guest token and resolves the 400x400 avatar', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn(async (url: string | URL) => {
-				if (String(url).includes('guest/activate')) {
-					return new Response(JSON.stringify({ guest_token: 'gt' }), { status: 200 });
-				}
-				return new Response(JSON.stringify(userBody), { status: 200 });
-			})
-		);
+		const fetchImpl = vi.fn(async (url: string | URL, _init?: RequestInit) => {
+			if (String(url).includes('guest/activate')) {
+				return new Response(JSON.stringify({ guest_token: 'gt' }), { status: 200 });
+			}
+			return new Response(JSON.stringify(userBody), { status: 200 });
+		});
+		vi.stubGlobal('fetch', fetchImpl);
 		expect(await fetchTwitterAvatar('https://x.com/examplefox')).toBe(
 			'https://pbs.twimg.com/profile_images/9/pic_400x400.jpg'
 		);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
 	});
 
 	it('retries once with a fresh token on 429, then succeeds', async () => {

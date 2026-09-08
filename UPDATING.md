@@ -48,6 +48,31 @@ you sync — or to catch up on what shipped since you last did — read the
 the merged changes since the previous one. `git log --oneline <last-tag>..upstream/main`
 after a fetch gives the same view from a clone.
 
+## Read before upgrading: tag suggestions call entail.dev (SONA-220)
+
+This release adds an admin-only tag suggestion lookup for artwork. Only you can
+start it, and nothing runs on its own. When you do, the site sends a public
+link to entail.dev, an image classifier, and shows you the tags it returns. For a
+Bluesky post that link is the post itself. For an X post the site first asks X's
+own API which picture the post carries, then sends the picture link X hands back.
+Nothing from either reply is stored; the suggestions are yours to accept or drop.
+
+The built-in privacy policy and the `/ai` page describe this call already. If
+you pasted your own privacy text or your own `/ai` text in Settings, **neither
+was updated**, and your pages will not mention services your site now contacts.
+In your privacy policy's list of feature integrations, replace your X and
+Bluesky entry with the first line below and add the second:
+
+- `X (formerly Twitter) and Bluesky (fetching the profile pictures shown on this site; X is also asked which picture a post carries)`
+- `entail.dev (an image classifier that suggests tags for artwork from its source post or the picture in it)`
+
+And add this to your `/ai` text: "The site calls an AI service in one place. When
+the site owner asks for tag suggestions on a piece of artwork, the site sends a
+public link to entail.dev, an image classifier. That link points at the artwork's
+source post, or at the picture in that post. For a post on X, the site first asks
+X's own service which picture the post carries. Only the site owner can start
+that, so nothing you do is sent to an AI service as you browse."
+
 ## One-time backfill: sticker animation flags (SONA-123)
 
 The release that adds the per-sticker download-format menu also adds a
