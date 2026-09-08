@@ -162,6 +162,19 @@ describe('POST /api/admin/tag-suggestions', () => {
 		expect(_LOOKUP_DEADLINE_MS).toBeGreaterThanOrEqual(firstAttempt);
 	});
 
+	it('refuses a declared Content-Length over the cap before reading the body', async () => {
+		const { platform } = makeEnv();
+		const request = new Request('http://localhost/api/admin/tag-suggestions', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', 'content-length': '5000' },
+			body: JSON.stringify({ sourcePostUrl: BSKY_POST })
+		});
+		const res = await POST({ request, platform } as never);
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'invalid_request' });
+		expect(lookupBlueskySource).not.toHaveBeenCalled();
+	});
+
 	it('reads the stored source URL for an imageId', async () => {
 		const { sqlite, platform } = makeEnv();
 		insertImage(sqlite, BSKY_POST);

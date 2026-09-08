@@ -166,23 +166,23 @@ export async function fetchTweetMediaUrl(
 			res = await tweetLookup(tweetId, token, fetchImpl, signal);
 		}
 		if (res.status === 429) {
-			console.warn('[avatar] tweet media lookup rate limited: status=429');
+			console.warn('[tweet-media] tweet media lookup rate limited: status=429');
 			return fail('rate_limited');
 		}
 		if (!res.ok) {
-			console.warn(`[avatar] tweet media lookup failed: status=${res.status}`);
+			console.warn(`[tweet-media] tweet media lookup failed: status=${res.status}`);
 			return fail('unavailable');
 		}
 		const photos = parseTweetPhotos(await res.json());
 		if (!photos) {
 			// 200 but no photo — a text/video tweet, a protected or deleted one, or
 			// the undocumented GraphQL shape rotated (see the file header).
-			console.warn('[avatar] tweet media lookup had no photo');
+			console.warn('[tweet-media] tweet media lookup had no photo');
 			return fail('unavailable');
 		}
 		return { ok: true, url: photos.url, photoCount: photos.photoCount };
 	} catch (e) {
-		console.warn(`[avatar] tweet media lookup error: ${errorLabel(e)}`);
+		console.warn(`[tweet-media] tweet media lookup error: ${errorLabel(e)}`);
 		return fail('unavailable');
 	}
 }

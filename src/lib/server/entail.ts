@@ -327,7 +327,7 @@ export async function classifyMediaUrl(
 
 		const poll = `${ENTAIL_CLASSIFY}/${encodeURIComponent(jobId)}?wait=true`;
 		for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt++) {
-			if (attempt > 0) await pause(POLL_PAUSE_MS);
+			if (attempt > 0 && !signal?.aborted) await pause(POLL_PAUSE_MS);
 			const res = await fetchImpl(poll, { signal: timeoutSignal(POLL_TIMEOUT_MS, signal) });
 			if (res.status === 202) continue;
 			if (res.status === 429) {

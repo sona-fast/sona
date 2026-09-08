@@ -66,6 +66,8 @@ const invalid = () => json({ error: 'invalid_request' }, { status: 400 });
 type Body = { imageId?: unknown; sourcePostUrl?: unknown };
 
 export const POST: RequestHandler = async ({ request, platform }) => {
+	const declared = Number(request.headers.get('content-length'));
+	if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return invalid();
 	const text = await request.text().catch(() => null);
 	if (text === null || new TextEncoder().encode(text).length > MAX_BODY_BYTES) return invalid();
 	let body: Body | null;
