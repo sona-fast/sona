@@ -1900,6 +1900,7 @@
 			}
 		}
 	],
+	"admin_lookup_clash_dimensions": "{width} x {height}",
 	"admin_lookup_clash_uploaded": "Uploaded {date}",
 	"admin_lookup_clash_add_variant": "Add as a variant",
 	"admin_lookup_clash_open": "Open {title}",
@@ -1909,9 +1910,9 @@
 	"admin_lookup_status_clash": "Sona filled the commissioned date from the {site} post and left the source post URL empty because {title} already uses it. You can change the date before you save.",
 	"admin_lookup_status_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was.",
 	"admin_lookup_status_artist_hint": "Click Use {name} to change the artist.",
-	"admin_lookup_status_seed_both": "Sona filled the new artist's name and {site} link. Check both before you save.",
-	"admin_lookup_status_seed_name": "Sona filled the new artist's name. Check it before you save.",
-	"admin_lookup_status_seed_link": "Sona filled the new artist's {site} link. Check it before you save.",
+	"admin_lookup_status_seed_both": "Sona filled the new artist's name and {site} link. Check both before you save. They're a guess until you check them, and you're the one publishing them.",
+	"admin_lookup_status_seed_name": "Sona filled the new artist's name. Check it before you save. It's a guess until you check it, and you're the one publishing it.",
+	"admin_lookup_status_seed_link": "Sona filled the new artist's {site} link. Check it before you save. It's a guess until you check it, and you're the one publishing it.",
 	"admin_lookup_no_match_eyebrow": "No match",
 	"admin_lookup_no_match_body": "Nothing matched on FurAffinity, Weasyl, e621, or Twitter. The piece might not be posted publicly, or it might have been cropped or edited since it was posted.",
 	"admin_lookup_no_match_hint": "Add the artist by hand, or try again with the original file.",
@@ -1934,7 +1935,9 @@
 	"admin_lookup_from_lookup": "From lookup",
 	"admin_lookup_rating_tag": "Rated {rating} on {sites}",
 	"admin_lookup_rating_tag_parent": "Rated {rating} on {sites} · parent",
-	"admin_lookup_tile_result": "{handle} on {site} · {band}",
+	"admin_lookup_tile_result": "{handle} on {site}",
+	"admin_lookup_tile_result_band": "{result} · {band}",
+	"admin_lookup_tile_result_spoken": "{result}, {band}",
 	"admin_lookup_tile_different": "Different artist: {handle} on {site}",
 	"admin_lookup_parent_radio": "Parent: {fileName}",
 	"admin_lookup_nsfw_for_file": " for {fileName}",
@@ -1942,8 +1945,9 @@
 	"admin_lookup_guess_line_site": "Sona filled the name and {site} link from an image match. They're a guess until you check them, and you're the one publishing them.",
 	"admin_lookup_guess_line_name": "Sona filled the name from an image match. It's a guess until you check it, and you're the one publishing it.",
 	"admin_lookup_guess_line_registry": "Picking a registry match replaces what Sona filled.",
-	"admin_lookup_announce_tile_match": "{fileName}: {result}",
+	"admin_lookup_announce_tile_match": "{fileName}: {result}.",
 	"admin_lookup_announce_tile_no_match": "{fileName}: no match.",
 	"admin_lookup_announce_tile_failed": "{fileName}: lookup failed.",
-	"admin_lookup_announce_using": "Using {name} as the artist."
+	"admin_lookup_announce_using": "Using {name} as the artist.",
+	"admin_lookup_announce_new_form": "Switched to the new artist form. Add the artist by hand."
 }

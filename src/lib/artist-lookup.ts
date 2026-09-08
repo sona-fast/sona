@@ -45,6 +45,10 @@ export interface SourceClash {
 	thumbnailUrl: string | null;
 	artistName: string | null;
 	uploadedAt: string | null;
+	/** Pixel size of the piece, for the row's meta line. Null on a row saved
+	 * before the columns were filled. */
+	width: number | null;
+	height: number | null;
 }
 
 export interface LookupResponse {
@@ -100,6 +104,27 @@ export function bandLabel(band: MatchBand): string | null {
 		default:
 			return null;
 	}
+}
+
+/**
+ * A variant tile's result line, in the two forms it is needed in: the one the
+ * eye reads and the one the live region speaks. Both are built from the same
+ * parts so they cannot drift, and the separator is added only between two
+ * present parts — a match with no distance carries no band, and a dangling
+ * middle dot would render as "handle on site · " and be spoken as "dot".
+ */
+export function tileResultText(
+	handle: string,
+	site: LookupSite,
+	band: MatchBand
+): { line: string; spoken: string } {
+	const result = m.admin_lookup_tile_result({ handle, site: siteLabel(site) });
+	const label = bandLabel(band);
+	if (!label) return { line: result, spoken: result };
+	return {
+		line: m.admin_lookup_tile_result_band({ result, band: label }),
+		spoken: m.admin_lookup_tile_result_spoken({ result, band: label })
+	};
 }
 
 export function ratingLabel(rating: LookupRating): string {
@@ -276,6 +301,27 @@ export function prefillFields(
 	return fields;
 }
 
+/**
+ * The prefill a results state produces, given what the form currently holds.
+ * Which match to fill from, which fields count as empty, and the clash skip are
+ * one decision, and both pages were making it identically.
+ */
+export function prefillForResult(
+	data: LookupResponse,
+	current: { sourcePostUrl: string; commissionedAt: string }
+): LookupFields {
+	return prefillFields(
+		pickPrefillMatch(data.matches),
+		{
+			sourcePostUrl: current.sourcePostUrl.trim() === '',
+			commissionedAt: current.commissionedAt.trim() === ''
+		},
+		// The clash state deliberately leaves the URL empty: it already belongs to
+		// another piece, and copying it would make two pieces claim one post.
+		{ skipSourceUrl: !!data.sourceClash }
+	);
+}
+
 /** What a lookup may seed into the inline "new artist" form. Absent means
  * "left alone", exactly like `LookupFields`. */
 export interface NewArtistSeed {
@@ -399,7 +445,12 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	// The key went away between the page load and the click. Nothing to show and
 	// nothing the panel can offer, so it reads as an outage.
 	if (data.enabled === false) return { kind: 'failed', reason: 'unavailable' };
-	const matches = (Array.isArray(data.matches) ? data.matches : []).filter(hasLinkableUrl);
+	const raw = Array.isArray(data.matches) ? data.matches : [];
+	const matches = raw.filter(hasLinkableUrl);
+	// Same reasoning as the non-array branch above: something looked, something
+	// answered, and the client refused to show it. Calling that "no matches" would
+	// tell the operator their art is unindexed when it may well be posted.
+	if (matches.length === 0 && raw.length > 0) return { kind: 'failed', reason: 'unavailable' };
 	if (matches.length === 0) return { kind: 'no_match' };
 	return {
 		kind: 'results',

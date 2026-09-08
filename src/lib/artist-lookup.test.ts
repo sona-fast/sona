@@ -13,6 +13,7 @@ import {
 	pickPrefillMatch,
 	postDateToInput,
 	prefillFields,
+	prefillForResult,
 	profileUrlFor,
 	ratingTag,
 	resolveOutcome,
@@ -20,6 +21,7 @@ import {
 	stateFromResponse,
 	statusLineKind,
 	strictestRating,
+	tileResultText,
 	runLookup,
 	type LookupFailReason,
 	type LookupMatch,
@@ -313,6 +315,63 @@ describe('prefillFields', () => {
 	});
 });
 
+// The one decision both pages were making by hand: which match to fill from,
+// which fields count as empty, and the clash skip.
+describe('prefillForResult', () => {
+	it('fills what the form left empty, reading emptiness from the values', () => {
+		expect(prefillForResult(response(), { sourcePostUrl: '', commissionedAt: '  ' })).toEqual({
+			sourcePostUrl: 'https://www.furaffinity.net/view/12345/',
+			commissionedAt: '2026-03-04'
+		});
+	});
+
+	it('keeps what the operator typed', () => {
+		expect(
+			prefillForResult(response(), {
+				sourcePostUrl: 'https://example.test/mine',
+				commissionedAt: '2026-01-01'
+			})
+		).toEqual({});
+	});
+
+	it('leaves the URL to the piece that already claims it', () => {
+		const clash = response({
+			sourceClash: {
+				imageId: 4,
+				title: 'Beach',
+				isVariant: false,
+				parentImageId: null,
+				variantCount: 0,
+				thumbnailUrl: null,
+				artistName: null,
+				uploadedAt: null,
+				width: null,
+				height: null
+			}
+		});
+		expect(prefillForResult(clash, { sourcePostUrl: '', commissionedAt: '' })).toEqual({
+			commissionedAt: '2026-03-04'
+		});
+	});
+});
+
+// The visible line and the spoken one are built from the same parts, so a match
+// with no band cannot render a dangling separator or read one out.
+describe('tileResultText', () => {
+	it('separates the band with a middle dot for the eye and a comma for speech', () => {
+		const text = tileResultText('kuttoya', 'FurAffinity', 'exact');
+		expect(text.line).toBe(`kuttoya on FurAffinity · ${m.admin_lookup_band_exact()}`);
+		expect(text.spoken).toBe(`kuttoya on FurAffinity, ${m.admin_lookup_band_exact()}`);
+	});
+
+	it('drops the separator entirely when the match carries no band', () => {
+		const text = tileResultText('kuttoya', 'FurAffinity', null);
+		expect(text.line).toBe('kuttoya on FurAffinity');
+		expect(text.spoken).toBe('kuttoya on FurAffinity');
+		expect(text.line).not.toContain('·');
+	});
+});
+
 // The edit page's inline new-artist form is subject to the same rule as the
 // two fields above: the operator can switch to "new", type a display name and
 // paste a profile URL, and only then ask for a lookup (SONA-156 round 1).
@@ -402,12 +461,14 @@ describe('stateFromResponse', () => {
 		expect(state.data.matches.map((x) => x.postUrl)).toEqual(['https://twitter.com/a/status/9']);
 	});
 
-	it('reads a result whose only match has an unusable URL as no_match', async () => {
+	// Something looked and something answered; the client is the one that refused
+	// the result. "No match" would tell the operator their art is unindexed.
+	it('reads a result whose only match has an unusable URL as unavailable', async () => {
 		expect(
 			await stateFromResponse(
 				jsonResponse(response({ matches: [match({ postUrl: 'javascript:alert(1)' })] }))
 			)
-		).toEqual({ kind: 'no_match' });
+		).toEqual({ kind: 'failed', reason: 'unavailable' });
 	});
 
 	it('reads an empty match list as no_match', async () => {
