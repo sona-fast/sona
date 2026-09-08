@@ -310,7 +310,7 @@ describe('lookupBlueskySource', () => {
 		).toEqual({ ok: false, reason: 'unavailable' });
 	});
 
-	it('reports a non-429 4xx from /post as not_found, with the status in the log', async () => {
+	it('reports an input-rejection 4xx from /post as not_found, with the status in the log', async () => {
 		// entail.dev declining the input is the operator's problem, not an
 		// outage: the endpoint answers 404, which hooks.server.ts does not count
 		// as a site error the way it counts a 502.
@@ -569,7 +569,7 @@ describe('classifyMediaUrl', () => {
 		).toEqual(unavailable);
 	});
 
-	it('reports a non-429 4xx from the classify enqueue as not_found', async () => {
+	it('reports an input-rejection 4xx from the classify enqueue as not_found', async () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		for (const status of [404, 400]) {
 			expect(await classifyMediaUrl(url, vi.fn(async () => new Response('no', { status })))).toEqual({

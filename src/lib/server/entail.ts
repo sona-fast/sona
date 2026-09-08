@@ -60,8 +60,9 @@ export type Suggestions = {
 
 /** Why a lookup produced nothing. `not_ready` is the one worth retrying: the
  * post is queued, or the job is still running past our poll cap. `not_found`
- * is entail.dev declining the input with a non-429 4xx (an unknown post, or a
- * URL it will not fetch): the operator's input, not an outage. `rate_limited`
+ * is entail.dev refusing the input with one of DECLINED_STATUSES (an unknown
+ * post, or a URL it will not fetch): the operator's input, not an outage; auth
+ * and edge-block codes are `unavailable` instead. `rate_limited`
  * is entail.dev's per-IP limit, which has no key to raise. Everything else — a
  * timeout, a 5xx, an unexpected shape — is `unavailable`, an upstream failure.
  * A post the classifier read and found nothing in is not a failure at all; it
