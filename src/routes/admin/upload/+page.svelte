@@ -515,7 +515,12 @@
 		// The tile's private notice is a plain paragraph outside any live region,
 		// so this is the only way the disclosure reaches a screen-reader operator.
 		if (tile.sentPrivate && lookupSentFile(tile.lookup)) {
-			line = `${line} ${m.admin_lookup_private_notice()}`;
+			// One key holding both parts, not a concatenation: the separator between
+			// them is the locale's business (ja runs them together, en takes a space).
+			line = m.admin_lookup_announce_tile_with_notice({
+				outcome: line,
+				disclosure: m.admin_lookup_private_notice()
+			});
 		}
 		announcer.say(line);
 	}
@@ -551,19 +556,26 @@
 		extraParents = extraParents.filter((c) => String(c.id) === existingParentId);
 	}
 
-	function applyShared(next: LookupState) {
-		if (next.kind !== 'results') return;
+	/** Which of the two shared fields this call actually wrote. A result whose
+	 * fields the operator has typed over writes neither, and a caller that speaks
+	 * about the refill has to know that before it claims one happened. */
+	function applyShared(next: LookupState): { sourcePostUrl: boolean; commissionedAt: boolean } {
+		const wrote = { sourcePostUrl: false, commissionedAt: false };
+		if (next.kind !== 'results') return wrote;
 		sharedUrlHeld = sourcePostUrl.trim() !== '';
 		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
 		sharedFilled = fields;
 		if (fields.sourcePostUrl !== undefined) {
 			sourcePostUrl = fields.sourcePostUrl;
 			sourceTagged = true;
+			wrote.sourcePostUrl = true;
 		}
 		if (fields.commissionedAt !== undefined) {
 			commissionedAt = fields.commissionedAt;
 			dateTagged = true;
+			wrote.commissionedAt = true;
 		}
+		return wrote;
 	}
 
 	/** Back to a new set. Only re-derive when the parent tile still HAS a result:
@@ -571,11 +583,16 @@
 	 * screen, and an unconditional re-derivation cleared both tagged fields and
 	 * then applied nothing, erasing them with no notice. The panel and its status
 	 * region are mounted by this same mode swap, so a region inserted together
-	 * with its first content is commonly missed — say the refill out loud. */
+	 * with its first content is commonly missed — say the refill out loud, but
+	 * only when a field was really written. The operator who typed over both
+	 * fields keeps what they typed, and hearing that Sona filled them would be a
+	 * false report of a change that did not happen. */
 	function returnToNewSet() {
 		if (tiles[parentIndex]?.lookup.kind !== 'results') return;
-		onParentChanged(parentIndex);
-		announcer.say(m.admin_lookup_announce_shared_refilled());
+		const wrote = onParentChanged(parentIndex);
+		if (wrote.sourcePostUrl || wrote.commissionedAt) {
+			announcer.say(m.admin_lookup_announce_shared_refilled());
+		}
 	}
 
 	/** The parent moved: the shared fields describe whatever the parent is now. */
@@ -583,7 +600,7 @@
 		parentIndex = index;
 		resetSharedPrefill();
 		const tile = tiles[parentIndex];
-		if (tile) applyShared(tile.lookup);
+		return tile ? applyShared(tile.lookup) : { sourcePostUrl: false, commissionedAt: false };
 	}
 
 	function useLookupArtist(artist: { id: number; name: string }) {

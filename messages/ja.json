@@ -1556,6 +1556,7 @@
 	"admin_lookup_announce_tile_match": "{fileName}：{result}。",
 	"admin_lookup_announce_tile_no_match": "{fileName}：一致なし。",
 	"admin_lookup_announce_tile_failed": "{fileName}：検索に失敗しました。",
+	"admin_lookup_announce_tile_with_notice": "{outcome}{disclosure}",
 	"admin_lookup_announce_using": "アーティストに{name}を設定しました。",
 	"admin_lookup_announce_new_form": "新しいアーティストのフォームに切り替えました。アーティストを手で入力してください。",
 	"admin_lookup_announce_form_already_open": "新しいアーティストのフォームはすでに開いています。",

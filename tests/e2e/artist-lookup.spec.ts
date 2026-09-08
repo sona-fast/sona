@@ -589,6 +589,11 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('.tile-private-notice')).toContainText(
 			'Sona sent this file to FuzzySearch while it was marked private.'
 		);
+		// The notice is a plain paragraph outside any live region, so the spoken
+		// outcome has to carry the disclosure with it.
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			'back.png: kuttoya on FurAffinity, Exact match. Sona sent this file to FuzzySearch while it was marked private.'
+		);
 
 		// Unticking leaves the send that already happened described as it was.
 		await privateBox.uncheck();
@@ -1423,6 +1428,35 @@ test.describe('with a key saved', () => {
 		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
 		await page.getByRole('radio', { name: 'New piece' }).check();
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+	});
+
+	// The refill is announced because it happened. applyShared never overwrites a
+	// field the operator typed over, so the same round trip run over two typed
+	// fields writes nothing — and used to say Sona had filled them anyway.
+	test('returning to a new set says nothing when it refills nothing', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+
+		// Typed over, so the tags go and the values are the operator's.
+		await sourceInput(page).fill('https://www.furaffinity.net/view/999999/');
+		await dateInput(page).fill('2026-05-06');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await page.getByRole('radio', { name: 'New piece' }).check();
+		await expect(panel(page)).toContainText('kuttoya');
+
+		// What the operator typed is still there, untagged, and nothing claimed a
+		// refill that did not happen.
+		await expect(sourceInput(page)).toHaveValue('https://www.furaffinity.net/view/999999/');
+		await expect(dateInput(page)).toHaveValue('2026-05-06');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		await expect(page.locator(LIVE_REGION)).not.toContainText('Sona filled the shared fields');
 	});
 
 	// Closing the panel puts the tile's lookup back to idle and leaves the fields

@@ -1957,6 +1957,7 @@
 	"admin_lookup_announce_tile_match": "{fileName}: {result}.",
 	"admin_lookup_announce_tile_no_match": "{fileName}: no match.",
 	"admin_lookup_announce_tile_failed": "{fileName}: lookup failed.",
+	"admin_lookup_announce_tile_with_notice": "{outcome} {disclosure}",
 	"admin_lookup_announce_using": "Using {name} as the artist.",
 	"admin_lookup_announce_new_form": "Switched to the new artist form. Add the artist by hand.",
 	"admin_lookup_announce_form_already_open": "The new artist form is already open.",

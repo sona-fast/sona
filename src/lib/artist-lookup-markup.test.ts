@@ -820,9 +820,15 @@ describe('focus after the panel goes away', () => {
 			/function returnToNewSet\(\)[\s\S]{0,400}?if \(tiles\[parentIndex\]\?\.lookup\.kind !== 'results'\) return;/
 		);
 		// The panel and its status region are mounted by the same mode swap, so a
-		// refill lands in a region inserted with its first content. Say it.
+		// refill lands in a region inserted with its first content. Say it — but
+		// only when a field was really written. applyShared skips a field the
+		// operator typed over, so an operator who typed over both heard that Sona
+		// filled them while nothing had changed.
 		expect(UPLOAD).toMatch(
-			/function returnToNewSet\(\)[\s\S]{0,400}?m\.admin_lookup_announce_shared_refilled\(\)/
+			/function applyShared\(next: LookupState\): \{ sourcePostUrl: boolean; commissionedAt: boolean \}/
+		);
+		expect(UPLOAD).toMatch(
+			/function returnToNewSet\(\)[\s\S]{0,400}?const wrote = onParentChanged\(parentIndex\);\s*\n\s*if \(wrote\.sourcePostUrl \|\| wrote\.commissionedAt\) \{[\s\S]{0,120}?m\.admin_lookup_announce_shared_refilled\(\)/
 		);
 		// An artist the select still holds stays applied across that round trip.
 		expect(UPLOAD).toMatch(
@@ -924,8 +930,14 @@ describe('what a lookup says out loud', () => {
 	// the outcome message is the only thing that can carry the disclosure.
 	it('says the private disclosure with a variant tile outcome', () => {
 		expect(UPLOAD).toMatch(
-			/function announceTileLookup[\s\S]{0,900}?tile\.sentPrivate && lookupSentFile\(tile\.lookup\)[\s\S]{0,200}?m\.admin_lookup_private_notice\(\)/
+			/function announceTileLookup[\s\S]{0,900}?tile\.sentPrivate && lookupSentFile\(tile\.lookup\)[\s\S]{0,300}?m\.admin_lookup_private_notice\(\)/
 		);
+		// The two parts join through a message key, not an ASCII space in the
+		// code: ja runs them together and only the catalog can say so.
+		expect(UPLOAD).toMatch(
+			/m\.admin_lookup_announce_tile_with_notice\(\{\s*outcome: line,\s*disclosure: m\.admin_lookup_private_notice\(\)\s*\}\)/
+		);
+		expect(UPLOAD).not.toMatch(/\$\{line\} \$\{m\.admin_lookup_private_notice/);
 	});
 
 	// Both group-mode radios share a name, or arrow keys do not move between
