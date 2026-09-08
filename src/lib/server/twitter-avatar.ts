@@ -13,8 +13,7 @@
 import { errorLabel, timeoutSignal } from './fetch-errors';
 
 // X web client's public bearer (shipped to every browser) — not a secret.
-// Exported so twitter-media.ts can reuse the same guest-token flow.
-export const X_BEARER =
+const X_BEARER =
 	'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 const X_ACTIVATE = 'https://api.x.com/1.1/guest/activate.json';
 /** api.x.com answers 404 to Node's default `User-Agent: node` and 200 to any

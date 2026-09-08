@@ -192,24 +192,10 @@ function postImages(body: unknown): ClassificationEntry[] | null {
 }
 
 /**
- * Suggestions for a Bluesky post. Uses the post's first classified image; a
- * post whose images entail.dev hasn't classified yet answers 202, which we
- * treat as "nothing to suggest" rather than waiting around. Never throws.
- */
-export async function lookupBlueskyPost(
-	url: string,
-	fetchImpl: typeof fetch = fetch,
-	signal?: AbortSignal
-): Promise<LookupOutcome> {
-	const source = classifySourceUrl(url);
-	if (!source || source.kind !== 'bluesky') return fail('unavailable');
-	return lookupBlueskySource(source, fetchImpl, signal);
-}
-
-/**
- * The same lookup for a source classifySourceUrl has already validated. The
- * endpoint calls this directly so the canonical URL is not run through the
- * classifier (and percent-decoded) a second time. Never throws.
+ * Suggestions for a Bluesky post classifySourceUrl has already validated.
+ * Uses the post's first classified image; a post whose images entail.dev
+ * hasn't classified yet answers 202, which we treat as "nothing to suggest"
+ * rather than waiting around. Never throws.
  */
 export async function lookupBlueskySource(
 	source: Extract<SourceKind, { kind: 'bluesky' }>,
@@ -274,6 +260,12 @@ function isAllowedMediaHost(url: string): boolean {
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A finished `/classify/<job_id>` body is an object with a `tags` array, the
+ * same way a `/post` body has an `images` array. */
+function pollEntry(body: unknown): body is ClassificationEntry {
+	return typeof body === 'object' && body !== null && Array.isArray((body as ClassificationEntry).tags);
+}
+
 /**
  * Suggestions for a single image URL on an allowlisted CDN: enqueue a
  * classification job, then poll it a few times. Gives up (`unavailable`) if
@@ -325,6 +317,12 @@ export async function classifyMediaUrl(
 			// field, so only an explicit contradiction sends us back to poll.
 			const body = (await res.json()) as (ClassificationEntry & { status?: unknown }) | null;
 			if (body?.status && body.status !== 'done') continue;
+			// A finished job carries a `tags` array. Anything else (null, a string,
+			// an error envelope) is a shape we don't know, not an empty result.
+			if (!pollEntry(body)) {
+				console.warn('[entail] classify poll returned an unexpected shape');
+				return fail('unavailable');
+			}
 			return { ok: true, suggestions: suggestionsFromResult(body), imageCount: 1 };
 		}
 		console.warn(`[entail] classify job unfinished after ${POLL_ATTEMPTS} polls`);

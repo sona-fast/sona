@@ -6,7 +6,6 @@ import {
 	POST_TIMEOUT_MS,
 	classifySourceUrl,
 	classifyMediaUrl,
-	lookupBlueskyPost,
 	lookupBlueskySource,
 	suggestionsFromResult,
 	translateTag
@@ -202,8 +201,15 @@ describe('timeouts', () => {
 	});
 });
 
-describe('lookupBlueskyPost', () => {
+describe('lookupBlueskySource', () => {
 	const url = 'https://bsky.app/profile/did:plc:aaaa/post/3abc';
+	// The endpoint validates the URL with classifySourceUrl and hands the
+	// result straight to lookupBlueskySource; this does the same in one step.
+	const lookupBlueskyPost = (postUrl: string, fetchImpl: typeof fetch, signal?: AbortSignal) => {
+		const source = classifySourceUrl(postUrl);
+		if (!source || source.kind !== 'bluesky') throw new Error(`not a bluesky post: ${postUrl}`);
+		return lookupBlueskySource(source, fetchImpl, signal);
+	};
 	const post = {
 		uri: 'at://did:plc:aaaa/app.bsky.feed.post/3abc',
 		images: [
@@ -222,15 +228,6 @@ describe('lookupBlueskyPost', () => {
 		const requested = String(fetchImpl.mock.calls[0]?.[0]);
 		expect(requested).toContain('min_confidence=0.8');
 		expect(requested).toContain('wait=true');
-	});
-
-	it('fails without fetching for a non-bluesky URL', async () => {
-		const fetchImpl = vi.fn(async () => json(post));
-		expect(await lookupBlueskyPost('https://x.com/examplefox/status/1', fetchImpl)).toEqual({
-			ok: false,
-			reason: 'unavailable'
-		});
-		expect(fetchImpl).not.toHaveBeenCalled();
 	});
 
 	it('sends a validated source as-is through lookupBlueskySource', async () => {
@@ -388,6 +385,36 @@ describe('classifyMediaUrl', () => {
 			reason: 'unavailable'
 		});
 		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it('is unavailable when the caller\'s deadline passes during a fetch', async () => {
+		// The per-call timeout is joined with the caller's signal, so an abort
+		// from outside reaches the in-flight fetch through init.signal.
+		const controller = new AbortController();
+		const fetchImpl = vi.fn(
+			(_url: string | URL | Request, init?: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+				})
+		);
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const pending = classifyMediaUrl(url, fetchImpl, controller.signal);
+		controller.abort(new Error('caller deadline'));
+		expect(await pending).toEqual({ ok: false, reason: 'unavailable' });
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		// The caller's reason, not the per-call TimeoutError, is what ended it.
+		expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('caller deadline');
+	});
+
+	it('is unavailable on a 200 poll body that is not a classification entry', async () => {
+		// null, a string, or an error envelope must not read as "no tags found".
+		const unavailable = { ok: false, reason: 'unavailable' };
+		for (const body of [null, 'done', { detail: 'x' }]) {
+			const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+				init?.method === 'POST' ? json({ job_id: 'job-9' }, 202) : json(body)
+			);
+			expect(await classifyMediaUrl(url, fetchImpl)).toEqual(unavailable);
+		}
 	});
 
 	it('accepts cdn.bsky.app too', async () => {

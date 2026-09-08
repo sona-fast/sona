@@ -4,7 +4,8 @@ import {
 	twitterHandleFromUrl,
 	parseUserAvatar,
 	to400x400,
-	fetchTwitterAvatar
+	fetchTwitterAvatar,
+	xGraphqlHeaders
 } from './twitter-avatar';
 
 describe('twitterHandleFromUrl', () => {
@@ -50,6 +51,18 @@ describe('to400x400', () => {
 		expect(to400x400('https://pbs.twimg.com/profile_images/1/a.jpg')).toBe(
 			'https://pbs.twimg.com/profile_images/1/a.jpg'
 		);
+	});
+});
+
+describe('xGraphqlHeaders', () => {
+	it('mirrors a fresh csrf value into the cookie next to the guest id', () => {
+		const first = xGraphqlHeaders('gt-1');
+		const csrf = first['x-csrf-token'];
+		expect(csrf).toMatch(/^[0-9a-f]{32}$/);
+		expect(first.Cookie).toContain(`ct0=${csrf}`);
+		expect(first.Cookie).toContain('guest_id=v1%3Agt-1');
+		expect(first['x-guest-token']).toBe('gt-1');
+		expect(xGraphqlHeaders('gt-1')['x-csrf-token']).not.toBe(csrf);
 	});
 });
 
