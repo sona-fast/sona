@@ -1909,6 +1909,9 @@
 	"admin_lookup_status_clash": "Sona filled the commissioned date from the {site} post and left the source post URL empty because {title} already uses it. You can change the date before you save.",
 	"admin_lookup_status_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was.",
 	"admin_lookup_status_artist_hint": "Click Use {name} to change the artist.",
+	"admin_lookup_status_seed_both": "Sona filled the new artist's name and {site} link. Check both before you save.",
+	"admin_lookup_status_seed_name": "Sona filled the new artist's name. Check it before you save.",
+	"admin_lookup_status_seed_link": "Sona filled the new artist's {site} link. Check it before you save.",
 	"admin_lookup_no_match_eyebrow": "No match",
 	"admin_lookup_no_match_body": "Nothing matched on FurAffinity, Weasyl, e621, or Twitter. The piece might not be posted publicly, or it might have been cropped or edited since it was posted.",
 	"admin_lookup_no_match_hint": "Add the artist by hand, or try again with the original file.",
@@ -1938,5 +1941,9 @@
 	"admin_lookup_nsfw_for_parent": " for the parent",
 	"admin_lookup_guess_line_site": "Sona filled the name and {site} link from an image match. They're a guess until you check them, and you're the one publishing them.",
 	"admin_lookup_guess_line_name": "Sona filled the name from an image match. It's a guess until you check it, and you're the one publishing it.",
-	"admin_lookup_guess_line_registry": "Picking a registry match replaces what Sona filled."
+	"admin_lookup_guess_line_registry": "Picking a registry match replaces what Sona filled.",
+	"admin_lookup_announce_tile_match": "{fileName}: {result}",
+	"admin_lookup_announce_tile_no_match": "{fileName}: no match.",
+	"admin_lookup_announce_tile_failed": "{fileName}: lookup failed.",
+	"admin_lookup_announce_using": "Using {name} as the artist."
 }

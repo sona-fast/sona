@@ -6,9 +6,9 @@
 	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
 	import {
 		lookupSentFile,
+		newArtistSeed,
 		pickPrefillMatch,
 		prefillFields,
-		profileUrlFor,
 		ratingTag,
 		resolveOutcome,
 		runLookup,
@@ -16,6 +16,7 @@
 		type LookupFields,
 		type LookupSite,
 		type LookupState,
+		type NewArtistSeed,
 		type SourceClash
 	} from '$lib/artist-lookup';
 
@@ -54,7 +55,50 @@
 	let artistName = $state('');
 	let newTwitter = $state('');
 	let newFuraffinity = $state('');
+	// What the last seed wrote into the inline new-artist form, for the panel's
+	// status line, plus the tag on each field it filled.
+	let lookupSeeded = $state<NewArtistSeed>({});
+	let nameTagged = $state(false);
+	let twitterTagged = $state(false);
+	let furaffinityTagged = $state(false);
 	let lookupAbort: AbortController | null = null;
+	// Closing or cancelling the panel destroys the button the operator is
+	// standing on, so focus is moved back here first (2.4.3).
+	let lookupPill = $state<HTMLButtonElement | null>(null);
+	let parentSelect = $state<HTMLSelectElement | null>(null);
+
+	// SvelteKit reuses this component across a route-param change, so the seeds
+	// above describe the PREVIOUS image after an in-app move between two edit
+	// pages. Re-read them, and drop every lookup flag that rode along with them.
+	let seededImageId = untrack(() => data.image.id);
+	$effect(() => {
+		const id = data.image.id;
+		if (id === seededImageId) return;
+		seededImageId = id;
+		untrack(() => resetForImage());
+	});
+
+	function resetForImage() {
+		lookupAbort?.abort();
+		lookupAbort = null;
+		lookup = { kind: 'idle' };
+		lookupFilled = {};
+		lookupSeeded = {};
+		sourcePostUrl = data.image.sourcePostUrl || '';
+		commissionedAt = data.image.commissionedAt || '';
+		selectedArtistId = data.image.artistId ?? '';
+		selectedParentId = String(data.image.parentImageId ?? '');
+		artistMode = 'existing';
+		artistName = '';
+		newTwitter = '';
+		newFuraffinity = '';
+		sourceTagged = false;
+		dateTagged = false;
+		nameTagged = false;
+		twitterTagged = false;
+		furaffinityTagged = false;
+		appliedArtist = null;
+	}
 
 	// The image is not published, so "look this up" means "send a private file to
 	// a third party" — say so before the click and again after it.
@@ -80,11 +124,13 @@
 	function cancelLookup() {
 		lookupAbort?.abort();
 		lookupAbort = null;
-		lookup = { kind: 'idle' };
+		closeLookup();
 	}
 
 	function applyPrefill(next: LookupState) {
 		if (next.kind !== 'results') return;
+		// A new result describes a new seed, even when that seed is empty.
+		lookupSeeded = {};
 		const match = pickPrefillMatch(next.data.matches);
 		const fields = prefillFields(
 			match,
@@ -110,14 +156,29 @@
 		}
 	}
 
+	/** The inline new-artist form obeys the same rule as the two fields above:
+	 * a lookup is a suggestion, so it fills only what is empty, tags what it
+	 * filled, and the tag clears the moment the operator edits that field. */
 	function seedNewArtist(handle: string, site: LookupSite, linkable: boolean) {
-		const clean = handle.trim().replace(/^@+/, '');
-		if (!clean) return;
-		artistName = clean;
-		if (!linkable) return;
-		const url = profileUrlFor(site, clean) ?? '';
-		if (site === 'Twitter') newTwitter = url;
-		else newFuraffinity = url;
+		const url = site === 'Twitter' ? newTwitter : newFuraffinity;
+		const seed = newArtistSeed(handle, site, linkable, {
+			artistName: artistName.trim() === '',
+			profileUrl: url.trim() === ''
+		});
+		lookupSeeded = seed;
+		if (seed.artistName !== undefined) {
+			artistName = seed.artistName;
+			nameTagged = true;
+		}
+		if (seed.profileUrl !== undefined) {
+			if (site === 'Twitter') {
+				newTwitter = seed.profileUrl;
+				twitterTagged = true;
+			} else {
+				newFuraffinity = seed.profileUrl;
+				furaffinityTagged = true;
+			}
+		}
 	}
 
 	function useLookupArtist(artist: { id: number; name: string }) {
@@ -126,9 +187,19 @@
 		appliedArtist = artist;
 	}
 
-	function addAsVariant(clash: SourceClash) {
+	async function addAsVariant(clash: SourceClash) {
 		selectedParentId = String(clash.imageId);
 		lookup = { kind: 'idle' };
+		// The click unmounted its own button; land on the select it just set.
+		await tick();
+		parentSelect?.focus();
+	}
+
+	/** Close and Cancel destroy the button the operator is on, so focus goes
+	 * back to the control the lookup started from. */
+	function closeLookup() {
+		lookup = { kind: 'idle' };
+		lookupPill?.focus();
 	}
 </script>
 
@@ -223,9 +294,12 @@
 				</button>
 			</div>
 			{#if data.lookupEnabled}
+				<!-- Pushed to the end of the row: flush against the two-segment
+				     toggle it reads as a third segment of that control. -->
 				<button
 					type="button"
 					class="lookup-pill"
+					bind:this={lookupPill}
 					aria-describedby="lookup-hint"
 					aria-disabled={lookup.kind === 'searching'}
 					onclick={startLookup}
@@ -249,10 +323,11 @@
 			<ArtistLookupPanel
 				{lookup}
 				filled={lookupFilled}
+				seeded={lookupSeeded}
 				{appliedArtist}
 				editMode
 				privateNotice={isPrivate && lookupSentFile(lookup)}
-				onclose={() => (lookup = { kind: 'idle' })}
+				onclose={closeLookup}
 				onretry={startLookup}
 				oncancel={cancelLookup}
 				onuseartist={useLookupArtist}
@@ -275,15 +350,48 @@
 				</label>
 			{:else}
 				<input type="hidden" name="artistId" value="new" />
-				<label>
-					<span>{m.admin_field_artist_name()}</span>
-					<input type="text" class="input" placeholder={m.admin_upload_artist_name_placeholder()} name="artistName" bind:value={artistName} required />
-				</label>
+				<!-- Same shape as the commissioned-date and source-URL fields: the
+				     label wraps its own text, the "From lookup" tag is a sibling
+				     reached through aria-describedby (SONA-220), and typing in the
+				     field drops the tag. -->
+				<div class="field">
+					<div class="label-row">
+						<label class="field-label" for="artistName">{m.admin_field_artist_name()}</label>
+						{#if nameTagged}
+							<span class="lookup-tag" id="artist-name-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+						{/if}
+					</div>
+					<input
+						id="artistName"
+						type="text"
+						class="input"
+						placeholder={m.admin_upload_artist_name_placeholder()}
+						name="artistName"
+						bind:value={artistName}
+						oninput={() => (nameTagged = false)}
+						aria-describedby={nameTagged ? 'artist-name-lookup-tag' : undefined}
+						required
+					/>
+				</div>
 				<div class="social-grid">
-					<label>
-						<span>Twitter/X</span>
-						<input type="text" class="input" placeholder={m.admin_social_handle_placeholder()} name="twitter" bind:value={newTwitter} />
-					</label>
+					<div class="field">
+						<div class="label-row">
+							<label class="field-label" for="new-artist-twitter">Twitter/X</label>
+							{#if twitterTagged}
+								<span class="lookup-tag" id="twitter-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+							{/if}
+						</div>
+						<input
+							id="new-artist-twitter"
+							type="text"
+							class="input"
+							placeholder={m.admin_social_handle_placeholder()}
+							name="twitter"
+							bind:value={newTwitter}
+							oninput={() => (twitterTagged = false)}
+							aria-describedby={twitterTagged ? 'twitter-lookup-tag' : undefined}
+						/>
+					</div>
 					<label>
 						<span>Bluesky</span>
 						<input type="text" class="input" placeholder="bsky.app/profile/..." name="bluesky" />
@@ -292,10 +400,24 @@
 						<span>Telegram</span>
 						<input type="text" class="input" placeholder="t.me/..." name="telegram" />
 					</label>
-					<label>
-						<span>FurAffinity</span>
-						<input type="text" class="input" placeholder="furaffinity.net/user/..." name="furaffinity" />
-					</label>
+					<div class="field">
+						<div class="label-row">
+							<label class="field-label" for="new-artist-furaffinity">FurAffinity</label>
+							{#if furaffinityTagged}
+								<span class="lookup-tag" id="furaffinity-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+							{/if}
+						</div>
+						<input
+							id="new-artist-furaffinity"
+							type="text"
+							class="input"
+							placeholder="furaffinity.net/user/..."
+							name="furaffinity"
+							bind:value={newFuraffinity}
+							oninput={() => (furaffinityTagged = false)}
+							aria-describedby={furaffinityTagged ? 'furaffinity-lookup-tag' : undefined}
+						/>
+					</div>
 					<label>
 						<span>DeviantArt</span>
 						<input type="text" class="input" placeholder="deviantart.com/..." name="deviantart" />
@@ -337,7 +459,7 @@
 			<div class="row">
 				<label class="flex-1">
 					<span>{m.admin_field_variant_of()}</span>
-					<select class="input" name="parentImageId" bind:value={selectedParentId}>
+					<select class="input" name="parentImageId" bind:this={parentSelect} bind:value={selectedParentId}>
 						<option value="">{m.admin_variant_none()}</option>
 						{#each data.parentCandidates as candidate}
 							<option value={String(candidate.id)}>{candidate.title}</option>
@@ -590,14 +712,25 @@
 		font-size: 13px;
 		font-family: inherit;
 		cursor: pointer;
+		/* Off the toggle's shoulder: adjacent and same-height, it reads as a
+		   third segment of the Select existing / Add new control. */
+		margin-left: auto;
 	}
 
 	/* aria-disabled, not `disabled`: a keyboard user mid-lookup keeps the focus
-	   they had. The click guard in startLookup is what actually refuses. */
+	   they had. The click guard in startLookup is what actually refuses. The
+	   fill is --secondary, so the text is --foreground: the --muted-foreground
+	   pairing measures 3.96:1 in terracotta light (SONA-124 found the same). */
 	.lookup-pill[aria-disabled='true'] {
 		background: var(--secondary);
-		color: var(--muted-foreground);
+		color: var(--foreground);
 		cursor: default;
+	}
+
+	/* The pill is not a .btn, so app.css's focus ring doesn't reach it. */
+	.lookup-pill:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
 	}
 
 	.hint-warn {
@@ -639,6 +772,16 @@
 		border-radius: var(--radius-pill);
 		padding: 1px 8px;
 		white-space: nowrap;
+		max-width: 100%;
+	}
+
+	/* The text grows with the number of sites, so at narrow widths the pill
+	   wraps rather than pushing the document into a sideways scroll. */
+	@media (max-width: 480px) {
+		.rating-tag {
+			white-space: normal;
+			overflow-wrap: anywhere;
+		}
 	}
 
 	.artist-toggle {

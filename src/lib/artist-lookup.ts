@@ -276,6 +276,48 @@ export function prefillFields(
 	return fields;
 }
 
+/** What a lookup may seed into the inline "new artist" form. Absent means
+ * "left alone", exactly like `LookupFields`. */
+export interface NewArtistSeed {
+	artistName?: string;
+	profileUrl?: string;
+}
+
+/**
+ * What to write into the inline new-artist form. Same rule as `prefillFields`:
+ * only the fields the caller reports as empty are filled, because the operator
+ * may have typed a name and pasted a profile URL before asking for the lookup
+ * and neither is recoverable with a click. `linkable` is false for the sites
+ * Sona holds no artist column for (SONA-219), which seed a name only.
+ */
+export function newArtistSeed(
+	handle: string,
+	site: LookupSite,
+	linkable: boolean,
+	empty: { artistName: boolean; profileUrl: boolean }
+): NewArtistSeed {
+	const clean = handle.trim().replace(/^@+/, '');
+	if (!clean) return {};
+	const seed: NewArtistSeed = {};
+	if (empty.artistName) seed.artistName = clean;
+	if (!linkable || !empty.profileUrl) return seed;
+	const url = profileUrlFor(site, clean);
+	if (url) seed.profileUrl = url;
+	return seed;
+}
+
+/** Which sentence names what the seed actually wrote. */
+export type SeedStatusKind = 'both' | 'name_only' | 'link_only' | 'none';
+
+export function seedStatusKind(seed: NewArtistSeed): SeedStatusKind {
+	const name = seed.artistName !== undefined;
+	const link = seed.profileUrl !== undefined;
+	if (name && link) return 'both';
+	if (name) return 'name_only';
+	if (link) return 'link_only';
+	return 'none';
+}
+
 /** Which sentence describes what the prefill actually did. */
 export type StatusLineKind = 'both' | 'url_only' | 'date_only' | 'clash' | 'none';
 
