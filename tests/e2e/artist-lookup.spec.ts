@@ -145,6 +145,8 @@ async function openConnectionsTab(page: Page) {
 }
 
 const pill = (page: Page) => page.locator('button.lookup-pill');
+// The page's own polite region (the admin layout has a separate one, a <p>).
+const LIVE_REGION = 'div.sr-only[aria-live="polite"]';
 const panel = (page: Page) => page.getByRole('region', { name: 'Artist lookup' });
 
 test('without a key there is no button, only a pointer at Settings', async ({ page }) => {
@@ -692,6 +694,56 @@ test.describe('with a key saved', () => {
 		await page.fill('input[name="furaffinity"]', 'furaffinity.net/user/someone/');
 		await expect(page.locator('#furaffinity-lookup-tag')).toHaveCount(0);
 		await expect(panel(page)).not.toContainText("Sona filled the new artist's");
+	});
+
+	// The per-field seed merge and the second click's announcement were pinned by
+	// source regexes only. A second click must write nothing and say so, and a
+	// re-seed after the operator clears ONE field must not retract the other
+	// field's value, its tag, or the sentence naming it.
+	test('a second add-new click says it wrote nothing, and a partial re-seed keeps the rest', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody({ localArtists: [] }));
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		const addNew = panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' });
+		await addNew.click();
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(page.locator('input[name="furaffinity"]')).toHaveValue(
+			'https://www.furaffinity.net/user/kuttoya/'
+		);
+		await expect(panel(page)).toContainText(
+			"Sona filled the new artist's name and FurAffinity link."
+		);
+
+		// Both fields are taken now, so this click writes nothing anywhere. The
+		// panel's sentence cannot change to report that, so the live region does.
+		await addNew.click();
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			"The new artist's fields already have values, so Sona left them alone."
+		);
+
+		// Clearing the name drops its tag, so the sentence stops claiming it.
+		await page.fill('input[name="artistName"]', '');
+		await expect(page.locator('#artist-name-lookup-tag')).toHaveCount(0);
+		await expect(panel(page)).toContainText("Sona filled the new artist's FurAffinity link.");
+
+		// The re-seed writes the name back and nothing else. Replaced rather than
+		// merged, the record would drop the FurAffinity link while the field kept
+		// its value and its tag.
+		await addNew.click();
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(page.locator('input[name="furaffinity"]')).toHaveValue(
+			'https://www.furaffinity.net/user/kuttoya/'
+		);
+		await expect(page.locator('#furaffinity-lookup-tag')).toBeVisible();
+		// And the sentence claims both fields again. That swap is what answers this
+		// click: the panel body is an atomic role="status", so it is announced.
+		await expect(panel(page)).toContainText(
+			"Sona filled the new artist's name and FurAffinity link."
+		);
 	});
 
 	// SvelteKit reuses one component across a route-param change, so an edit page
