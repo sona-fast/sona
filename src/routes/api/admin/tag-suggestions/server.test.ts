@@ -2,26 +2,41 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
-import type { LookupOutcome } from '$lib/server/entail';
+import type { LookupOutcome, SourceKind } from '$lib/server/entail';
 import type { TweetMediaOutcome } from '$lib/server/twitter-media';
 import { makeD1 } from '$lib/server/test/d1';
 import { POST } from './+server';
 
 // Only the outbound calls are stubbed. classifySourceUrl stays real, so the
 // URL recognition the endpoint depends on is exercised rather than mocked.
-const lookupBlueskyPost = vi.hoisted(() =>
-	vi.fn(async (_url: string): Promise<LookupOutcome> => ({ ok: false, reason: 'unavailable' }))
+const lookupBlueskySource = vi.hoisted(() =>
+	vi.fn(
+		async (_source: SourceKind, _fetch?: typeof fetch, _signal?: AbortSignal): Promise<LookupOutcome> => ({
+			ok: false,
+			reason: 'unavailable'
+		})
+	)
 );
 const classifyMediaUrl = vi.hoisted(() =>
-	vi.fn(async (_url: string): Promise<LookupOutcome> => ({ ok: false, reason: 'unavailable' }))
+	vi.fn(
+		async (_url: string, _fetch?: typeof fetch, _signal?: AbortSignal): Promise<LookupOutcome> => ({
+			ok: false,
+			reason: 'unavailable'
+		})
+	)
 );
 const fetchTweetMediaUrl = vi.hoisted(() =>
-	vi.fn(async (_id: string): Promise<TweetMediaOutcome> => ({ ok: false, reason: 'unavailable' }))
+	vi.fn(
+		async (_id: string, _fetch?: typeof fetch, _signal?: AbortSignal): Promise<TweetMediaOutcome> => ({
+			ok: false,
+			reason: 'unavailable'
+		})
+	)
 );
 
 vi.mock('$lib/server/entail', async (importOriginal) => {
 	const original = await importOriginal<typeof import('$lib/server/entail')>();
-	return { ...original, lookupBlueskyPost, classifyMediaUrl };
+	return { ...original, lookupBlueskySource, classifyMediaUrl };
 });
 vi.mock('$lib/server/twitter-media', () => ({ fetchTweetMediaUrl }));
 
@@ -66,10 +81,10 @@ function event(platform: App.Platform, body: unknown, raw?: string) {
 }
 
 beforeEach(() => {
-	lookupBlueskyPost.mockReset();
+	lookupBlueskySource.mockReset();
 	classifyMediaUrl.mockReset();
 	fetchTweetMediaUrl.mockReset();
-	lookupBlueskyPost.mockResolvedValue(suggestions);
+	lookupBlueskySource.mockResolvedValue(suggestions);
 	classifyMediaUrl.mockResolvedValue(suggestions);
 	fetchTweetMediaUrl.mockResolvedValue({ ok: true, url: MEDIA_URL, photoCount: 1 });
 });
@@ -85,8 +100,12 @@ describe('POST /api/admin/tag-suggestions', () => {
 			rating: 'safe',
 			imageCount: 3
 		});
-		// The canonical URL, not the caller's string.
-		expect(lookupBlueskyPost).toHaveBeenCalledWith(BSKY_POST);
+		// The validated source, not the caller's string.
+		expect(lookupBlueskySource).toHaveBeenCalledWith(
+			{ kind: 'bluesky', url: BSKY_POST },
+			fetch,
+			expect.any(AbortSignal)
+		);
 		expect(fetchTweetMediaUrl).not.toHaveBeenCalled();
 	});
 
@@ -101,11 +120,13 @@ describe('POST /api/admin/tag-suggestions', () => {
 			// The tweet's photo count, not whatever classifyMediaUrl reports.
 			imageCount: 1
 		});
-		// Only the validated status id goes to X, never the caller's string.
-		expect(fetchTweetMediaUrl).toHaveBeenCalledWith(X_ID);
+		// Only the validated status id goes to X, never the caller's string, and
+		// both calls share the endpoint's one deadline.
+		expect(fetchTweetMediaUrl).toHaveBeenCalledWith(X_ID, fetch, expect.any(AbortSignal));
 		// The media URL is what reaches entail.dev — never the tweet URL.
-		expect(classifyMediaUrl).toHaveBeenCalledWith(MEDIA_URL);
-		expect(lookupBlueskyPost).not.toHaveBeenCalled();
+		expect(classifyMediaUrl).toHaveBeenCalledWith(MEDIA_URL, fetch, expect.any(AbortSignal));
+		expect(classifyMediaUrl.mock.calls[0]?.[2]).toBe(fetchTweetMediaUrl.mock.calls[0]?.[2]);
+		expect(lookupBlueskySource).not.toHaveBeenCalled();
 	});
 
 	it('reports how many photos a multi-photo tweet carried', async () => {
@@ -123,7 +144,11 @@ describe('POST /api/admin/tag-suggestions', () => {
 		const res = await POST(event(platform, { imageId: 7 }));
 		expect(res.status).toBe(200);
 		expect((await res.json()).source).toBe('bluesky');
-		expect(lookupBlueskyPost).toHaveBeenCalledWith(BSKY_POST);
+		expect(lookupBlueskySource).toHaveBeenCalledWith(
+			{ kind: 'bluesky', url: BSKY_POST },
+			fetch,
+			expect.any(AbortSignal)
+		);
 	});
 
 	it('404s an unknown imageId', async () => {
@@ -131,7 +156,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 		const res = await POST(event(platform, { imageId: 99 }));
 		expect(res.status).toBe(404);
 		expect(await res.json()).toEqual({ error: 'not_found' });
-		expect(lookupBlueskyPost).not.toHaveBeenCalled();
+		expect(lookupBlueskySource).not.toHaveBeenCalled();
 	});
 
 	it('422s a source we have no classifier for, including a stored empty one', async () => {
@@ -141,6 +166,9 @@ describe('POST /api/admin/tag-suggestions', () => {
 			{ sourcePostUrl: 'https://furaffinity.net/view/12345/' },
 			// A malformed percent sequence in the actor is unsupported, not a 500.
 			{ sourcePostUrl: 'https://bsky.app/profile/100%/post/3abc' },
+			// A double-encoded actor is refused up front rather than decoded a
+			// second time on its way to entail.dev.
+			{ sourcePostUrl: 'https://bsky.app/profile/a%252Fb/post/3abc' },
 			{ sourcePostUrl: '' },
 			{ imageId: 7 }
 		]) {
@@ -148,7 +176,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 			expect(res.status).toBe(422);
 			expect(await res.json()).toEqual({ error: 'unsupported_source' });
 		}
-		expect(lookupBlueskyPost).not.toHaveBeenCalled();
+		expect(lookupBlueskySource).not.toHaveBeenCalled();
 	});
 
 	it('400s malformed and ambiguous request bodies', async () => {
@@ -197,7 +225,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 		const { platform } = makeEnv();
 		// The classifier read the post and rated it; nothing cleared the
 		// confidence floor. That is an answer, not a failure.
-		lookupBlueskyPost.mockResolvedValue({
+		lookupBlueskySource.mockResolvedValue({
 			ok: true,
 			suggestions: { tags: [], rating: 'safe' },
 			imageCount: 3
@@ -210,7 +238,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 	it('passes an imageCount of 0 through as a success', async () => {
 		const { platform } = makeEnv();
 		// A post with no classified images: still 200, still zero, not a failure.
-		lookupBlueskyPost.mockResolvedValue({
+		lookupBlueskySource.mockResolvedValue({
 			ok: true,
 			suggestions: { tags: [], rating: null },
 			imageCount: 0
@@ -222,7 +250,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 
 	it('502s not_ready when the post is queued but unclassified', async () => {
 		const { platform } = makeEnv();
-		lookupBlueskyPost.mockResolvedValue({ ok: false, reason: 'not_ready' });
+		lookupBlueskySource.mockResolvedValue({ ok: false, reason: 'not_ready' });
 		const res = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
 		expect(res.status).toBe(502);
 		expect(await res.json()).toEqual({ error: 'not_ready' });
@@ -230,7 +258,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 
 	it('502s unavailable for a failed lookup and for an unresolvable tweet', async () => {
 		const { platform } = makeEnv();
-		lookupBlueskyPost.mockResolvedValue({ ok: false, reason: 'unavailable' });
+		lookupBlueskySource.mockResolvedValue({ ok: false, reason: 'unavailable' });
 		const bsky = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
 		expect(bsky.status).toBe(502);
 		expect(await bsky.json()).toEqual({ error: 'unavailable' });
@@ -244,7 +272,7 @@ describe('POST /api/admin/tag-suggestions', () => {
 
 	it('429s when entail.dev rate limited us', async () => {
 		const { platform } = makeEnv();
-		lookupBlueskyPost.mockResolvedValue({ ok: false, reason: 'rate_limited' });
+		lookupBlueskySource.mockResolvedValue({ ok: false, reason: 'rate_limited' });
 		const res = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
 		expect(res.status).toBe(429);
 		expect(await res.json()).toEqual({ error: 'rate_limited' });

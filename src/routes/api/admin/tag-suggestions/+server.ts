@@ -5,7 +5,7 @@ import { images } from '$lib/server/db/schema';
 import {
 	classifySourceUrl,
 	classifyMediaUrl,
-	lookupBlueskyPost,
+	lookupBlueskySource,
 	type LookupFailure,
 	type LookupOutcome
 } from '$lib/server/entail';
@@ -44,6 +44,10 @@ const FAILURE_STATUS: Record<LookupFailure, number> = {
 };
 
 const MAX_URL_LENGTH = 2048;
+/** Ceiling on the whole lookup chain. The X path is three fetches plus an
+ * enqueue and two polls, each with its own timeout, so without this the worst
+ * case ran close to forty seconds. */
+const LOOKUP_DEADLINE_MS = 20_000;
 /** Read before parsing: a valid body is a short object with one field, so
  * anything past this is refused without handing it to JSON.parse. */
 const MAX_BODY_BYTES = 4096;
@@ -100,8 +104,13 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	// How many images the post carried. Only the Bluesky lookup and the tweet
 	// lookup see the post; classifyMediaUrl sees one image.
 	let imageCount: number;
+	// One deadline for every outbound call below; each lookup returns
+	// `unavailable` when it fires.
+	const signal = AbortSignal.timeout(LOOKUP_DEADLINE_MS);
 	if (source.kind === 'bluesky') {
-		outcome = await lookupBlueskyPost(source.url);
+		// The validated source goes straight in, so the canonical URL is not
+		// percent-decoded a second time by a re-run of classifySourceUrl.
+		outcome = await lookupBlueskySource(source, fetch, signal);
 		if (!outcome.ok) return failure(outcome.reason);
 		imageCount = outcome.imageCount;
 	} else {
@@ -109,9 +118,9 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		// from its image. X's API is the only thing that knows which image that
 		// is, and it hands back a pbs.twimg.com URL — one of the two hosts
 		// classifyMediaUrl will send on. Only the validated status id goes out.
-		const media = await fetchTweetMediaUrl(source.id);
+		const media = await fetchTweetMediaUrl(source.id, fetch, signal);
 		if (!media.ok) return failure(media.reason);
-		outcome = await classifyMediaUrl(media.url);
+		outcome = await classifyMediaUrl(media.url, fetch, signal);
 		if (!outcome.ok) return failure(outcome.reason);
 		imageCount = media.photoCount;
 	}

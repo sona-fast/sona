@@ -12,7 +12,7 @@
 // resolves to a failed outcome and the caller carries on without suggestions.
 // Third-party response bodies are never logged and never stored.
 
-import { errorLabel } from './fetch-errors';
+import { errorLabel, timeoutSignal } from './fetch-errors';
 import { sanitizeTag } from './validate';
 
 const ENTAIL_POST = 'https://entail.dev/api/post';
@@ -77,7 +77,9 @@ export type ClassificationEntry = {
  * the URL. */
 export type SourceKind = { kind: 'bluesky'; url: string } | { kind: 'x'; url: string; id: string };
 
-const BLUESKY_ACTOR = /^[A-Za-z0-9._:%-]{1,256}$/;
+// Checked after percent-decoding, so a `%` that survives (a double-encoded
+// actor) is rejected rather than decoded again downstream.
+const BLUESKY_ACTOR = /^[A-Za-z0-9._:-]{1,256}$/;
 const BLUESKY_RKEY = /^[A-Za-z0-9._~-]{1,64}$/;
 const X_USER = /^[A-Za-z0-9_]{1,15}$/;
 const STATUS_ID = /^\d{1,20}$/;
@@ -196,14 +198,28 @@ function postImages(body: unknown): ClassificationEntry[] | null {
  */
 export async function lookupBlueskyPost(
 	url: string,
-	fetchImpl: typeof fetch = fetch
+	fetchImpl: typeof fetch = fetch,
+	signal?: AbortSignal
 ): Promise<LookupOutcome> {
 	const source = classifySourceUrl(url);
 	if (!source || source.kind !== 'bluesky') return fail('unavailable');
+	return lookupBlueskySource(source, fetchImpl, signal);
+}
 
+/**
+ * The same lookup for a source classifySourceUrl has already validated. The
+ * endpoint calls this directly so the canonical URL is not run through the
+ * classifier (and percent-decoded) a second time. Never throws.
+ */
+export async function lookupBlueskySource(
+	source: Extract<SourceKind, { kind: 'bluesky' }>,
+	fetchImpl: typeof fetch = fetch,
+	signal?: AbortSignal
+): Promise<LookupOutcome> {
 	const endpoint = `${ENTAIL_POST}?url=${encodeURIComponent(source.url)}&min_confidence=${DEFAULT_CONFIDENCE_FLOOR}&wait=true`;
 	try {
-		const res = await fetchImpl(endpoint, { signal: AbortSignal.timeout(POST_TIMEOUT_MS) });
+		signal?.throwIfAborted();
+		const res = await fetchImpl(endpoint, { signal: timeoutSignal(POST_TIMEOUT_MS, signal) });
 		if (res.status === 202) {
 			// Queued for classification. Best effort: no retry loop here — the
 			// caller decides whether to ask again.
@@ -265,16 +281,18 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 export async function classifyMediaUrl(
 	url: string,
-	fetchImpl: typeof fetch = fetch
+	fetchImpl: typeof fetch = fetch,
+	signal?: AbortSignal
 ): Promise<LookupOutcome> {
 	if (!isAllowedMediaHost(url)) return fail('unavailable');
 
 	try {
+		signal?.throwIfAborted();
 		const enqueued = await fetchImpl(ENTAIL_CLASSIFY, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ url }),
-			signal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS)
+			signal: timeoutSignal(CLASSIFY_TIMEOUT_MS, signal)
 		});
 		if (enqueued.status === 429) {
 			console.warn('[entail] classify enqueue rate limited: status=429');
@@ -293,7 +311,7 @@ export async function classifyMediaUrl(
 		const poll = `${ENTAIL_CLASSIFY}/${encodeURIComponent(jobId)}?wait=true`;
 		for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt++) {
 			if (attempt > 0) await pause(POLL_PAUSE_MS);
-			const res = await fetchImpl(poll, { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
+			const res = await fetchImpl(poll, { signal: timeoutSignal(POLL_TIMEOUT_MS, signal) });
 			if (res.status === 202) continue;
 			if (res.status === 429) {
 				console.warn('[entail] classify poll rate limited: status=429');
@@ -303,8 +321,10 @@ export async function classifyMediaUrl(
 				console.warn(`[entail] classify poll failed: status=${res.status}`);
 				return fail('unavailable');
 			}
+			// The spec documents a 200 as "job done" and does not type a status
+			// field, so only an explicit contradiction sends us back to poll.
 			const body = (await res.json()) as (ClassificationEntry & { status?: unknown }) | null;
-			if (body?.status !== 'done') continue;
+			if (body?.status && body.status !== 'done') continue;
 			return { ok: true, suggestions: suggestionsFromResult(body), imageCount: 1 };
 		}
 		console.warn(`[entail] classify job unfinished after ${POLL_ATTEMPTS} polls`);

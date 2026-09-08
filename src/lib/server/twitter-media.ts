@@ -10,8 +10,8 @@
 // proceeds without a media URL. Videos and GIFs are skipped — only photos
 // resolve.
 
-import { errorLabel } from './fetch-errors';
-import { X_BEARER, X_USER_AGENT, activateGuestToken } from './twitter-avatar';
+import { errorLabel, timeoutSignal } from './fetch-errors';
+import { activateGuestToken, xGraphqlHeaders } from './twitter-avatar';
 
 const X_TWEET_BY_REST_ID = 'https://api.x.com/graphql/f2sagi1jweVHFkTUIHzmMQ/TweetResultByRestId';
 const FETCH_TIMEOUT_MS = 5000;
@@ -112,10 +112,12 @@ export function parseTweetPhotos(body: unknown): TweetPhotos | null {
 	return first ? { url: first, photoCount: Math.min(photoCount, MAX_TWEET_PHOTOS) } : null;
 }
 
-function tweetLookup(tweetId: string, guestToken: string, fetchImpl: typeof fetch): Promise<Response> {
-	const csrf = [...crypto.getRandomValues(new Uint8Array(16))]
-		.map((b) => b.toString(16).padStart(2, '0'))
-		.join('');
+function tweetLookup(
+	tweetId: string,
+	guestToken: string,
+	fetchImpl: typeof fetch,
+	signal?: AbortSignal
+): Promise<Response> {
 	const variables = encodeURIComponent(
 		JSON.stringify({
 			tweetId,
@@ -129,15 +131,8 @@ function tweetLookup(tweetId: string, guestToken: string, fetchImpl: typeof fetc
 	return fetchImpl(
 		`${X_TWEET_BY_REST_ID}?variables=${variables}&features=${features}&fieldToggles=${fieldToggles}`,
 		{
-			headers: {
-				Authorization: X_BEARER,
-				'User-Agent': X_USER_AGENT,
-				'x-guest-token': guestToken,
-				'x-csrf-token': csrf,
-				'x-twitter-active-user': 'yes',
-				Cookie: `guest_id=v1%3A${guestToken}; ct0=${csrf};`
-			},
-			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+			headers: xGraphqlHeaders(guestToken),
+			signal: timeoutSignal(FETCH_TIMEOUT_MS, signal)
 		}
 	);
 }
@@ -149,19 +144,21 @@ function tweetLookup(tweetId: string, guestToken: string, fetchImpl: typeof fetc
  * throws. */
 export async function fetchTweetMediaUrl(
 	tweetId: string,
-	fetchImpl: typeof fetch = fetch
+	fetchImpl: typeof fetch = fetch,
+	signal?: AbortSignal
 ): Promise<TweetMediaOutcome> {
 	try {
-		let token = await activateGuestToken(fetchImpl);
+		signal?.throwIfAborted();
+		let token = await activateGuestToken(fetchImpl, signal);
 		if (!token) return fail('unavailable');
-		let res = await tweetLookup(tweetId, token, fetchImpl);
+		let res = await tweetLookup(tweetId, token, fetchImpl, signal);
 		if (res.status === 401 || res.status === 429) {
 			// If X was already rate limiting us and now refuses a fresh token
 			// too, that is still a rate limit, not an outage.
 			const limited = res.status === 429;
-			token = await activateGuestToken(fetchImpl);
+			token = await activateGuestToken(fetchImpl, signal);
 			if (!token) return fail(limited ? 'rate_limited' : 'unavailable');
-			res = await tweetLookup(tweetId, token, fetchImpl);
+			res = await tweetLookup(tweetId, token, fetchImpl, signal);
 		}
 		if (res.status === 429) {
 			console.warn('[avatar] tweet media lookup rate limited: status=429');

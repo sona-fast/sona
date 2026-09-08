@@ -156,7 +156,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 					: [
 							"For this site those tools are Anthropic's Claude, which writes and debugs code under the developer's direction, and CodeRabbit, a code review service that reads proposed changes."
 						]),
-				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) (fetching the profile pictures shown on this site, and finding the picture in a post), Bluesky (fetching the profile pictures shown on this site), entail.dev (suggesting tags for artwork from its source post or the picture in it), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
+				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) and Bluesky (fetching the profile pictures shown on this site; X is also asked which picture a post carries), entail.dev (an image classifier that suggests tags for artwork from its source post or the picture in it), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
 			]
 		},
 		{

@@ -57,13 +57,14 @@ Bluesky post that link is the post itself. For an X post the site first asks X's
 own API which picture the post carries, then sends the picture link X hands back.
 Nothing from either reply is stored; the suggestions are yours to accept or drop.
 
-The built-in privacy policy and the `/ai` page now name both services. **If you
-pasted your own privacy text or your own `/ai` text in Settings, neither was
-updated**, and your pages will not mention services your site now contacts. Add
-these to your privacy policy's list of feature integrations:
+The built-in privacy policy and the `/ai` page describe this call already. If
+you pasted your own privacy text or your own `/ai` text in Settings, **neither
+was updated**, and your pages will not mention services your site now contacts.
+In your privacy policy's list of feature integrations, replace your X and
+Bluesky entry with the first line below and add the second:
 
-- `X (formerly Twitter) (fetching the profile pictures shown on this site, and finding the picture in a post)`
-- `entail.dev (suggesting tags for artwork from its source post or the picture in it)`
+- `X (formerly Twitter) and Bluesky (fetching the profile pictures shown on this site; X is also asked which picture a post carries)`
+- `entail.dev (an image classifier that suggests tags for artwork from its source post or the picture in it)`
 
 And add this to your `/ai` text: "The site calls an AI service in one place. When
 the site owner asks for tag suggestions on a piece of artwork, the site sends a

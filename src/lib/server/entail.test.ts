@@ -7,6 +7,7 @@ import {
 	classifySourceUrl,
 	classifyMediaUrl,
 	lookupBlueskyPost,
+	lookupBlueskySource,
 	suggestionsFromResult,
 	translateTag
 } from './entail';
@@ -40,6 +41,10 @@ describe('classifySourceUrl', () => {
 		// An encoded slash passes the raw-actor regex but decodes into a path
 		// separator inside the canonical URL.
 		expect(classifySourceUrl('https://bsky.app/profile/a%2f..%2fx/post/3abc')).toBeNull();
+		// A double-encoded actor decodes to one that still carries a `%`; the
+		// endpoint used to decode that again downstream.
+		expect(classifySourceUrl('https://bsky.app/profile/a%252Fb/post/3abc')).toBeNull();
+		expect(classifySourceUrl('https://bsky.app/profile/foo%252ebar/post/3abc')).toBeNull();
 	});
 
 	it('accepts the x/twitter status shapes and canonicalises them', () => {
@@ -228,6 +233,23 @@ describe('lookupBlueskyPost', () => {
 		expect(fetchImpl).not.toHaveBeenCalled();
 	});
 
+	it('sends a validated source as-is through lookupBlueskySource', async () => {
+		const fetchImpl = vi.fn(async (_url: string | URL | Request) => json(post));
+		const source = { kind: 'bluesky' as const, url: 'https://bsky.app/profile/did:plc:aaaa/post/3abc' };
+		expect((await lookupBlueskySource(source, fetchImpl)).ok).toBe(true);
+		expect(String(fetchImpl.mock.calls[0]?.[0])).toContain(encodeURIComponent(source.url));
+	});
+
+	it('returns unavailable without fetching when the deadline has already passed', async () => {
+		const fetchImpl = vi.fn(async () => json(post));
+		const source = { kind: 'bluesky' as const, url };
+		expect(await lookupBlueskySource(source, fetchImpl, AbortSignal.abort())).toEqual({
+			ok: false,
+			reason: 'unavailable'
+		});
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
 	it('names the reason a lookup produced nothing', async () => {
 		expect(await lookupBlueskyPost(url, vi.fn(async () => json({}, 202)))).toEqual({
 			ok: false,
@@ -323,16 +345,49 @@ describe('classifyMediaUrl', () => {
 
 	it('enqueues then polls until the job is done', async () => {
 		let polls = 0;
+		const mediaUrl = 'https://pbs.twimg.com/media/abc?format=jpg';
 		const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-			if (init?.method === 'POST') return json({ job_id: 'job-1', status: 'enqueued' }, 202);
+			if (init?.method === 'POST') {
+				expect(new Headers(init.headers).get('content-type')).toBe('application/json');
+				expect(JSON.parse(String(init.body))).toEqual({ url: mediaUrl });
+				return json({ job_id: 'job-1', status: 'enqueued' }, 202);
+			}
 			polls++;
 			expect(String(url)).toContain('/classify/job-1?wait=true');
 			return polls === 1 ? json({ status: 'processing' }, 202) : json(done);
 		});
-		expect(await classifyMediaUrl('https://pbs.twimg.com/media/abc?format=jpg', fetchImpl)).toEqual(
-			success
-		);
+		expect(await classifyMediaUrl(mediaUrl, fetchImpl)).toEqual(success);
 		expect(polls).toBe(2);
+	});
+
+	it('encodes the job id into the poll path', async () => {
+		let polled = '';
+		const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			if (init?.method === 'POST') return json({ job_id: '../post' }, 202);
+			polled = String(url);
+			return json(done);
+		});
+		await classifyMediaUrl(url, fetchImpl);
+		expect(polled.startsWith('https://entail.dev/api/classify/')).toBe(true);
+		expect(polled).toContain('%2F');
+	});
+
+	it('accepts a 200 poll body that carries no status field', async () => {
+		const { status: _status, ...bare } = done;
+		const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+			init?.method === 'POST' ? json({ job_id: 'job-8' }, 202) : json(bare)
+		);
+		expect(await classifyMediaUrl(url, fetchImpl)).toEqual(success);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
+	it('returns unavailable without fetching when the deadline has already passed', async () => {
+		const fetchImpl = vi.fn(async () => json(done));
+		expect(await classifyMediaUrl(url, fetchImpl, AbortSignal.abort())).toEqual({
+			ok: false,
+			reason: 'unavailable'
+		});
+		expect(fetchImpl).not.toHaveBeenCalled();
 	});
 
 	it('accepts cdn.bsky.app too', async () => {

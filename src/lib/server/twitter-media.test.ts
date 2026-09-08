@@ -142,6 +142,9 @@ describe('fetchTweetMediaUrl', () => {
 		expect(outcome.ok && outcome.url).toContain('AbCdEf123');
 		expect(activations.count).toBe(2);
 		expect(tokens).toEqual(['gt-1', 'gt-2']);
+		for (const [, init] of fetchImpl.mock.calls) {
+			expect(new Headers(init?.headers).get('user-agent')).toBe(X_USER_AGENT);
+		}
 	});
 
 	it('retries once with a fresh token on 429', async () => {
@@ -152,6 +155,15 @@ describe('fetchTweetMediaUrl', () => {
 		expect(outcome.ok && outcome.url).toContain('AbCdEf123');
 		expect(activations.count).toBe(2);
 		expect(tokens).toEqual(['gt-1', 'gt-2']);
+		for (const [, init] of fetchImpl.mock.calls) {
+			expect(new Headers(init?.headers).get('user-agent')).toBe(X_USER_AGENT);
+		}
+	});
+
+	it('returns unavailable without fetching when the deadline has already passed', async () => {
+		const { fetchImpl } = stub(() => json(tweetWith([photo])));
+		expect(await fetchTweetMediaUrl(id, fetchImpl, AbortSignal.abort())).toEqual(unavailable);
+		expect(fetchImpl).not.toHaveBeenCalled();
 	});
 
 	it('reports a rate limit that survives the retry', async () => {

@@ -6,3 +6,11 @@ export function errorLabel(e: unknown): string {
 	if (e instanceof SyntaxError) return e.name;
 	return e instanceof Error ? e.message : String(e);
 }
+
+/** A per-call timeout, joined with the caller's overall deadline when it has
+ * one, so a chain of fail-soft fetches cannot outlive the request that asked
+ * for them. */
+export function timeoutSignal(ms: number, signal?: AbortSignal): AbortSignal {
+	const timeout = AbortSignal.timeout(ms);
+	return signal ? AbortSignal.any([timeout, signal]) : timeout;
+}
