@@ -1,3 +1,4 @@
+import { GALLERY_ACCEPT } from '$lib/config';
 import { qrSvg } from '$lib/qr';
 import { SOCIAL_ICON_ART, type SocialIconArt } from '$lib/social-icon-paths';
 import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from '$lib/social-label';
@@ -618,6 +619,20 @@ export function conCardPrintSheetSvg(opts: Omit<ConCardOptions, 'variant'>): str
 	]
 		.filter(Boolean)
 		.join('');
+}
+
+/**
+ * Whether a fetched avatar response can be embedded in a saved card. The
+ * same-origin byte proxy hands anything outside the stored raster allowlist back
+ * as `application/octet-stream` with a download disposition, and a data URI
+ * built from that never draws: the card would save with an empty ring and no
+ * word to the operator. Read off GALLERY_ACCEPT so this and the server's
+ * allowlist can't drift apart.
+ */
+export function isEmbeddableAvatarType(contentType: string | null | undefined): boolean {
+	if (!contentType) return false;
+	const type = contentType.split(';')[0].trim().toLowerCase();
+	return GALLERY_ACCEPT.split(',').includes(type);
 }
 
 /** Filename stem for a downloaded card: `taro-con-card`. */

@@ -6,6 +6,7 @@ import {
 	conCardFaceSvg,
 	conCardPrintSheetSvg,
 	conCardFileBase,
+	isEmbeddableAvatarType,
 	CON_CARD_WIDTH,
 	CON_CARD_HEIGHT,
 	CON_CARD_SHEET_WIDTH,
@@ -616,5 +617,25 @@ describe('conCardFileBase', () => {
 	it('falls back when the name slugs to nothing', () => {
 		expect(conCardFileBase('タロウ')).toBe('con-card');
 		expect(conCardFileBase('')).toBe('con-card');
+	});
+});
+
+// The card embeds the avatar as a data URI, and the byte proxy in front of it
+// hands anything outside the stored raster allowlist back as a download. A URI
+// built from one of those draws nothing, so the type decides whether the card
+// keeps the face or falls back to the initial in the ring.
+describe('isEmbeddableAvatarType', () => {
+	it('takes the raster types the gallery stores, whatever their spelling', () => {
+		for (const type of ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']) {
+			expect(isEmbeddableAvatarType(type), type).toBe(true);
+		}
+		expect(isEmbeddableAvatarType('Image/PNG; charset=binary')).toBe(true);
+	});
+
+	it('refuses the proxy download type, svg, and a missing header', () => {
+		const refused = ['application/octet-stream', 'image/svg+xml', 'text/html', '', null, undefined];
+		for (const type of refused) {
+			expect(isEmbeddableAvatarType(type), String(type)).toBe(false);
+		}
 	});
 });
