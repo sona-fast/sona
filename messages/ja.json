@@ -1531,6 +1531,8 @@
 	"admin_lookup_too_large_eyebrow": "ファイルが大きすぎます",
 	"admin_lookup_too_large_body": "このファイルはFuzzySearchには大きすぎます。アーティストを手で入力してください。",
 	"admin_lookup_invalid_body": "FuzzySearchはこのファイルを読み取れませんでした。",
+	"admin_lookup_gone_eyebrow": "画像がありません",
+	"admin_lookup_gone_body": "この画像はライブラリにもうありません。ページを再読み込みして、今ある内容を確認してください。",
 	"admin_lookup_signed_out_eyebrow": "セッションの期限切れ",
 	"admin_lookup_signed_out_body": "管理者セッションの有効期限が切れました。サインインし直してから検索してください。",
 	"admin_lookup_no_key_eyebrow": "キーがありません",

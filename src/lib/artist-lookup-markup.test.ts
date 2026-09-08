@@ -118,6 +118,19 @@ describe('the panel', () => {
 		expect(PANEL).toContain('m.admin_lookup_failed_body()');
 	});
 
+	// The row went away between the page load and the click: FuzzySearch was
+	// never contacted, a retry would find the same missing image, and the way
+	// forward is a reload — so the panel says that and offers Close alone.
+	it('tells the operator a deleted image is gone rather than reporting an outage', () => {
+		expect(PANEL).toContain("lookup.reason === 'gone'");
+		expect(PANEL).toContain('m.admin_lookup_gone_eyebrow()');
+		expect(PANEL).toContain('m.admin_lookup_gone_body()');
+		// The actions branch names the reasons that get a Settings link or a
+		// retry, and 'gone' is in neither.
+		const actions = PANEL.slice(PANEL.indexOf('<div class="lookup-actions">'));
+		expect(actions).not.toContain("'gone'");
+	});
+
 	// A key removed mid-session never reached FuzzySearch, so it gets the copy
 	// that points at Settings rather than the generic "didn't answer" line, and
 	// the same Settings action a refused key gets instead of a retry.
@@ -413,6 +426,16 @@ describe('what the lookup copy names', () => {
 		expect(en.admin_lookup_clash_has_variants).toBe(
 			"The image you're editing already has variants of its own, so it can't become a variant of another piece."
 		);
+	});
+
+	it('says the gone state names the library, not FuzzySearch, in both catalogs', () => {
+		expect(en.admin_lookup_gone_body).toBe(
+			'This image is no longer in your library. Reload the page to see what is there now.'
+		);
+		expect(en.admin_lookup_gone_body).not.toMatch(/FuzzySearch/);
+		expect(ja.admin_lookup_gone_eyebrow).toBeTruthy();
+		expect(ja.admin_lookup_gone_body).toBeTruthy();
+		expect(ja.admin_lookup_gone_body).not.toMatch(/FuzzySearch/);
 	});
 
 	it('says the seeded fields were left alone rather than that nothing was filled', () => {

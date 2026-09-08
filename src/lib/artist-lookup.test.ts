@@ -779,14 +779,14 @@ describe('stateFromResponse', () => {
 	});
 
 	// The exits the endpoint answers by throwing (no file in the multipart body,
-	// a bad image id, an image that is gone) carry no `error` field — SvelteKit
-	// serializes the error body — but they do carry forwarded: false, and a
-	// deleted private image must not be reported as having reached FuzzySearch.
+	// a bad image id) carry no `error` field — SvelteKit serializes the error
+	// body — but they do carry forwarded: false, and a private image must not be
+	// reported as having reached FuzzySearch. The 404 of a deleted image has its
+	// own reason; it is pinned below.
 	it('reads a SvelteKit error body as unavailable and not sent', async () => {
 		for (const [body, status] of [
 			[{ message: 'No file provided', forwarded: false }, 400],
-			[{ message: 'Invalid image id', forwarded: false }, 400],
-			[{ message: 'Image not found', forwarded: false }, 404]
+			[{ message: 'Invalid image id', forwarded: false }, 400]
 		] as const) {
 			expect(await stateFromResponse(jsonResponse(body, status))).toEqual({
 				kind: 'failed',
@@ -857,6 +857,26 @@ describe('stateFromResponse', () => {
 			sent: false
 		});
 		expect(lookupSentFile(state)).toBe(false);
+	});
+
+	// The image was deleted between the page load and the click. The endpoint's
+	// shaped 404 names no `error`, so the generic mapping read it as an outage
+	// and the panel said FuzzySearch didn't answer — about a lookup FuzzySearch
+	// was never asked to run.
+	it('treats a deleted image as gone, not as an outage', async () => {
+		const state = await stateFromResponse(
+			jsonResponse({ message: 'Image not found', forwarded: false }, 404)
+		);
+		expect(state).toEqual({ kind: 'failed', reason: 'gone', sent: false });
+		expect(lookupSentFile(state)).toBe(false);
+	});
+
+	// Only the shaped body. A 404 that DOES name a reason keeps it — 'gone' is
+	// the client's reading of a body with nothing to read, not a status map.
+	it('keeps the error a 404 names, where it names one', async () => {
+		expect(
+			await stateFromResponse(jsonResponse({ enabled: true, error: 'rate_limited' }, 404))
+		).toEqual({ kind: 'failed', reason: 'rate_limited', sent: true });
 	});
 });
 

@@ -203,6 +203,13 @@
 					     here. Nothing was sent, and the remedy is Settings, not a retry. -->
 					<div class="lookup-eyebrow warn">{m.admin_lookup_no_key_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_no_key_body()}</p>
+				{:else if lookup.reason === 'gone'}
+					<!-- The image was deleted between the page load and the click. Nothing
+					     was sent, FuzzySearch never saw it, and a retry would hit the same
+					     missing row — so the only way forward is a reload, and Close is the
+					     only action below. -->
+					<div class="lookup-eyebrow warn">{m.admin_lookup_gone_eyebrow()}</div>
+					<p class="lookup-lead">{m.admin_lookup_gone_body()}</p>
 				{:else if lookup.reason === 'signed_out'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_signed_out_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_signed_out_body()}</p>

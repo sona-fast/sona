@@ -341,6 +341,55 @@ describe('artist-lookup — uploaded file', () => {
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
+	// Every typed exit above searchImage carries `forwarded`. An UNGUARDED throw
+	// carries none: SvelteKit answers 500 with a body the client cannot date, the
+	// client's "err toward sent" default then shows the private-image disclosure
+	// for bytes that never left the endpoint, and the 500 lands in the operator's
+	// error rollup as a server fault. The three awaits below can all reject on a
+	// connection that drops mid-POST or a database that will not answer.
+	it('answers a rejected formData() with a dated failure, not a 500', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const request = {
+			headers: new Headers({ 'content-type': 'multipart/form-data; boundary=x' }),
+			formData: async () => {
+				throw new TypeError('connection reset');
+			}
+		} as unknown as Request;
+
+		const res = await POST({ request, platform, fetch: imageFetch().fn } as never);
+
+		// 502, the status this file gives unavailable everywhere: the point of the
+		// guard is the dated body, not the number.
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	it('answers a file whose leading bytes will not read the same way', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const file = pngFile();
+		// The part arrived, the body behind it stopped: slice() hands back a blob
+		// whose arrayBuffer() never resolves with bytes.
+		Object.defineProperty(file, 'slice', {
+			value: () => ({
+				arrayBuffer: async () => {
+					throw new TypeError('stalled');
+				}
+			})
+		});
+		const form = new FormData();
+		form.append('file', file);
+		const request = {
+			headers: new Headers({ 'content-type': 'multipart/form-data; boundary=x' }),
+			formData: async () => form
+		} as unknown as Request;
+
+		const res = await POST({ request, platform, fetch: imageFetch().fn } as never);
+
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
 	it('rejects a multipart body with no file', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const request = new Request('http://localhost/api/admin/artist-lookup', {
@@ -449,6 +498,74 @@ describe('artist-lookup — stored image by id', () => {
 		expect(internal.calls).toEqual([]);
 
 		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// The same rule as the multipart guards: a database that throws must not
+	// become a 500 whose body the client cannot date.
+	it('answers a select that throws with a dated failure, not a 500', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = (sql: string) => {
+			if (/from "images"/i.test(sql)) throw new Error('D1_ERROR: database is locked');
+			return realPrepare(sql);
+		};
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// The proxy's timeout bounds the wait for HEADERS only. A host that answers
+	// and then trickles nothing leaves the panel spinning until the platform
+	// kills the request, so the buffering carries a deadline of its own.
+	it('gives up on a stored body that stops arriving', async () => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			sqlite.exec(
+				`INSERT INTO images (id, title, slug, image_url, created_at)
+				 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+			);
+			let cancelled = false;
+			// Headers, then nothing: the stream never enqueues and never closes.
+			const trickle = new ReadableStream<Uint8Array>({
+				cancel() {
+					cancelled = true;
+				}
+			});
+			const stalling = imageFetch(
+				new Response(trickle, { status: 200, headers: { 'content-type': 'image/png' } })
+			);
+
+			// Mirrors the endpoint's BODY_BUFFER_TIMEOUT_MS. Held here rather than
+			// imported (a +server.ts exports handlers), and pinned by advancing to
+			// just short of it first: a shorter deadline settles early, a longer one
+			// leaves the second advance with nothing to fire.
+			const deadlineMs = 20_000;
+			let settled = false;
+			const pending = Promise.resolve(
+				POST(jsonEvent(platform, { imageId: 1 }, stalling.fn))
+			).then((r) => {
+				settled = true;
+				return r;
+			});
+			await vi.advanceTimersByTimeAsync(deadlineMs - 1_000);
+			expect(settled).toBe(false);
+			await vi.advanceTimersByTimeAsync(1_001);
+			const res = await pending;
+
+			expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+			// The bytes are not left flowing into an isolate nobody is reading.
+			expect(cancelled).toBe(true);
+			expect(searchImage).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	// A fetch that REJECTS rather than answering — DNS failure, reset connection,

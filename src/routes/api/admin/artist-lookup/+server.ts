@@ -71,6 +71,58 @@ const FAILURE_STATUS: Record<LookupFailure, number> = {
  * is judged precisely by the exact size check. Mirrors /api/upload. */
 const MULTIPART_SLACK_BYTES = 64 * 1024;
 
+/** How long the stored image's BODY has to arrive, once its headers have.
+ * PROXY_HEADERS_TIMEOUT_MS bounds only the wait for headers, so a storage host
+ * that answers and then trickles bytes would otherwise hold the lookup open
+ * until the platform killed the request — with the panel spinning the whole
+ * time. Generous next to a stored image on a working host, short next to the
+ * operator's patience. */
+const BODY_BUFFER_TIMEOUT_MS = 20_000;
+
+/**
+ * The body with a deadline on the whole read: on expiry the upstream is
+ * cancelled and this stream errors, which the caller answers with unavailable.
+ * Raced per read rather than measured against one wall clock, because a host
+ * that sends nothing at all never returns from `read()` for a clock to check.
+ */
+function bodyWithDeadline(
+	body: ReadableStream<Uint8Array>,
+	ms: number
+): ReadableStream<Uint8Array> {
+	const reader = body.getReader();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let timedOut = false;
+	const expired = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			// Rejected BEFORE the upstream is cancelled: cancelling settles the read
+			// this race is waiting on with done, and a stream that closed on the
+			// deadline would hand the caller a truncated image rather than a failure.
+			timedOut = true;
+			reject(new Error('stored image body timed out'));
+			void reader.cancel().catch(() => {});
+		}, ms);
+	});
+	// The race below is the only consumer, and it is not created until the first
+	// read — a rejection with nobody waiting is an unhandled rejection.
+	expired.catch(() => {});
+	return new ReadableStream({
+		async pull(controller) {
+			const { done, value } = await Promise.race([reader.read(), expired]);
+			if (timedOut) throw new Error('stored image body timed out');
+			if (done) {
+				clearTimeout(timer);
+				controller.close();
+				return;
+			}
+			controller.enqueue(value);
+		},
+		cancel(reason) {
+			clearTimeout(timer);
+			return reader.cancel(reason);
+		}
+	});
+}
+
 /** `forwarded` says whether the bytes reached FuzzySearch before this failure.
  * The gates below answer too_large and invalid_image with the same reason
  * FuzzySearch's own 413/400 carry, so the reason alone cannot tell the client
@@ -127,7 +179,19 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		if (Number.isFinite(declaredLength) && declaredLength > FUZZYSEARCH_MAX_BYTES + MULTIPART_SLACK_BYTES) {
 			return failure('too_large', false);
 		}
-		const form = await request.formData();
+		// Nothing on the pre-search side may reach SvelteKit's 500 handler. That
+		// body carries no `forwarded`, and a failure the client cannot date is read
+		// as having been sent — so the panel would show the private-image
+		// disclosure for bytes that never left this endpoint, and the 500 would
+		// land in the operator's error rollup (src/hooks.server.ts) as well. A
+		// connection that drops mid-POST makes formData() reject, so it is guarded
+		// like the JSON branch's parse below.
+		let form: FormData;
+		try {
+			form = await request.formData();
+		} catch {
+			return failure('unavailable', false);
+		}
 		const file = form.get('file');
 		if (!(file instanceof File)) error(400, { message: 'No file provided', forwarded: false });
 		// Layer 2: the exact check, on the file's real size.
@@ -138,7 +202,14 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		// declared type is the browser's word, so the leading bytes are checked
 		// against the allowlist too (SNIFF_BYTES window, as in /api/upload).
 		if (!isAllowedImageType(file.type)) return failure('invalid_image', false);
-		const head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
+		// Same reason as formData() above: reading the part's leading bytes can
+		// reject on a body that stopped arriving.
+		let head: Uint8Array;
+		try {
+			head = new Uint8Array(await file.slice(0, SNIFF_BYTES).arrayBuffer());
+		} catch {
+			return failure('unavailable', false);
+		}
 		if (!hasAllowedImageBytes(head)) return failure('invalid_image', false);
 		bytes = file;
 	} else {
@@ -147,11 +218,18 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 		if (!Number.isInteger(imageId) || imageId <= 0)
 			error(400, { message: 'Invalid image id', forwarded: false });
 
-		const row = await db
-			.select({ id: images.id, imageUrl: images.imageUrl, parentImageId: images.parentImageId })
-			.from(images)
-			.where(eq(images.id, imageId))
-			.get();
+		// And the same for D1: a busy or unreachable database throws, and a typed
+		// answer the client can read beats a 500 it cannot.
+		let row: { id: number; imageUrl: string; parentImageId: number | null } | undefined;
+		try {
+			row = await db
+				.select({ id: images.id, imageUrl: images.imageUrl, parentImageId: images.parentImageId })
+				.from(images)
+				.where(eq(images.id, imageId))
+				.get();
+		} catch {
+			return failure('unavailable', false);
+		}
 		if (!row) error(404, { message: 'Image not found', forwarded: false });
 		selfImage = { id: row.id, parentImageId: row.parentImageId };
 
@@ -168,7 +246,10 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			.trim()
 			.toLowerCase();
 		try {
-			const buffered = await bufferStream(stored.body, FUZZYSEARCH_MAX_BYTES);
+			const buffered = await bufferStream(
+				bodyWithDeadline(stored.body, BODY_BUFFER_TIMEOUT_MS),
+				FUZZYSEARCH_MAX_BYTES
+			);
 			// The bytes decide, not the header: it is the upstream's claim the same
 			// way file.type is the browser's, and the proxy hands anything it does
 			// not recognize back as application/octet-stream — which used to refuse

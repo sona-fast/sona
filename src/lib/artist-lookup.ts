@@ -59,10 +59,12 @@ export interface LookupResponse {
 	sourceClash: SourceClash | null;
 }
 
-/** Why a lookup did not produce matches. `signed_out` and `no_key` are this
- * file's own: the admin gate answers an expired session with a plain-text 401,
- * and the endpoint answers a removed key with enabled:false. Both carry a
- * different remedy from every FuzzySearch failure below. */
+/** Why a lookup did not produce matches. `signed_out`, `no_key` and `gone` are
+ * this file's own: the admin gate answers an expired session with a plain-text
+ * 401, the endpoint answers a removed key with enabled:false, and it answers an
+ * image that is no longer in the library with a shaped 404 that names no
+ * `error`. None of the three is a FuzzySearch failure, and each carries a
+ * different remedy from every one below. */
 export type LookupFailReason =
 	| 'key_refused'
 	| 'rate_limited'
@@ -70,7 +72,8 @@ export type LookupFailReason =
 	| 'invalid_image'
 	| 'unavailable'
 	| 'signed_out'
-	| 'no_key';
+	| 'no_key'
+	| 'gone';
 
 export type LookupState =
 	| { kind: 'idle' }
@@ -573,6 +576,15 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 
 	if (!res.ok) {
 		const failed = body as FailureBody;
+		// The row went away between the page load and the click: the endpoint's
+		// shaped 404 carries a message and no `error`, so the generic mapping below
+		// would read it as an outage and say FuzzySearch didn't answer — which was
+		// never asked. Client-side only: 'gone' is not in FAIL_REASONS because the
+		// endpoint never sends it as an `error` value, and a 404 that DOES name one
+		// keeps that reason. Nothing was forwarded, so the remedy is a reload.
+		if (res.status === 404 && failed.error === undefined) {
+			return { kind: 'failed', reason: 'gone', sent: false };
+		}
 		const known = FAIL_REASONS.find((r) => r === failed.error);
 		// The endpoint says which side refused; a body without the field is one
 		// this client cannot date, so the disclosure errs toward saying it went.
