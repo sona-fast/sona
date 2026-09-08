@@ -68,8 +68,12 @@ export type Suggestions = {
  * succeeds with an empty tag list. */
 export type LookupFailure = 'not_ready' | 'not_found' | 'rate_limited' | 'unavailable';
 
-/** A non-429 4xx is entail.dev declining what we sent, not failing. */
-const declined = (status: number) => status >= 400 && status < 500;
+/** The 4xx codes that mean entail.dev will not take this input (a post it
+ * does not index, a URL it rejects). Auth, quota, and edge-block codes such as
+ * 401, 403, and 408 are not in the set: those mean the integration is broken,
+ * and they fall through to `unavailable` so an outage stays visible. */
+const DECLINED_STATUSES = new Set([400, 404, 410, 415, 422]);
+const declined = (status: number) => DECLINED_STATUSES.has(status);
 
 /** `imageCount` is how many images the source post carried. Suggestions come
  * from the first one only, so a count above 1 tells the UI the rest went
@@ -222,9 +226,9 @@ function postImages(body: unknown): ClassificationEntry[] | null {
 
 /**
  * Suggestions for a Bluesky post classifySourceUrl has already validated.
- * Uses the post's first classified image; a post whose images entail.dev
- * hasn't classified yet answers 202, which we treat as "nothing to suggest"
- * rather than waiting around. Never throws.
+ * Uses the post's first classified image; a post entail.dev has queued but
+ * not classified yet answers 202, which comes back as the `not_ready` failure
+ * for the caller to retry later. Never throws.
  */
 export async function lookupBlueskySource(
 	source: Extract<SourceKind, { kind: 'bluesky' }>,

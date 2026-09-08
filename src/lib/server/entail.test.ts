@@ -321,6 +321,11 @@ describe('lookupBlueskySource', () => {
 			).toEqual({ ok: false, reason: 'not_found' });
 			expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain(`status=${status}`);
 		}
+		// A 403 is an edge block or an auth failure, not a declined post: the
+		// integration is broken, and that has to surface as an outage.
+		expect(
+			await lookupBlueskyPost(url, vi.fn(async () => new Response('blocked', { status: 403 })))
+		).toEqual({ ok: false, reason: 'unavailable' });
 	});
 
 	it('logs a malformed body as a parse failure without quoting it', async () => {
@@ -573,6 +578,10 @@ describe('classifyMediaUrl', () => {
 			});
 			expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain(`status=${status}`);
 		}
+		expect(await classifyMediaUrl(url, vi.fn(async () => new Response('blocked', { status: 403 })))).toEqual({
+			ok: false,
+			reason: 'unavailable'
+		});
 	});
 
 	it('names a rate limit from either the enqueue or a poll', async () => {
