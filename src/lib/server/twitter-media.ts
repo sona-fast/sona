@@ -69,15 +69,19 @@ const QUERY_FIELD_TOGGLES = {
 	withDisallowedReplyControls: false
 } as const;
 
-/** `rate_limited` is X refusing the guest token twice over with a 429; a
- * tweet that resolved with no photo is ok with a null URL; everything else
- * is `unavailable`. */
+/** `rate_limited` is X refusing the guest token twice over with a 429;
+ * `not_found` is a 200 with no tweet in it (deleted, protected, or a
+ * tombstone: nothing a guest token can read); a tweet that resolved with no
+ * photo is ok with a null URL; everything else (a non-2xx, a body that does
+ * not parse, a timeout) is `unavailable`. */
 export type TweetMediaOutcome =
 	| { ok: true; url: string; photoCount: number }
 	| { ok: true; url: null; photoCount: 0 }
-	| { ok: false; reason: 'rate_limited' | 'unavailable' };
+	| { ok: false; reason: TweetMediaFailure };
 
-const fail = (reason: 'rate_limited' | 'unavailable'): TweetMediaOutcome => ({ ok: false, reason });
+export type TweetMediaFailure = 'not_found' | 'rate_limited' | 'unavailable';
+
+const fail = (reason: TweetMediaFailure): TweetMediaOutcome => ({ ok: false, reason });
 
 type TweetMedia = { type?: unknown; media_url_https?: unknown };
 
@@ -180,10 +184,11 @@ export async function fetchTweetMediaUrl(
 		}
 		const photos = parseTweetPhotos(await res.json());
 		if (!photos) {
-			// 200 but no tweet — a protected or deleted one, or the undocumented
-			// GraphQL shape rotated (see the file header).
+			// 200 but no tweet: a protected or deleted one, which is the operator's
+			// input and not an outage. If the undocumented GraphQL shape rotated
+			// (see the file header) this fires for every tweet, so the log stays.
 			console.warn('[tweet-media] tweet media lookup had no tweet');
-			return fail('unavailable');
+			return fail('not_found');
 		}
 		if (photos.url === null) {
 			// A resolved text, video or GIF tweet: nothing to classify, not an outage.

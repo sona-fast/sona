@@ -9,7 +9,7 @@ import {
 	type LookupFailure,
 	type LookupOutcome
 } from '$lib/server/entail';
-import { fetchTweetMediaUrl } from '$lib/server/twitter-media';
+import { fetchTweetMediaUrl, type TweetMediaFailure } from '$lib/server/twitter-media';
 import type { RequestHandler } from './$types';
 
 // POST /api/admin/tag-suggestions  (admin-only via hooks — everything under
@@ -33,16 +33,21 @@ import type { RequestHandler } from './$types';
 // are returned, and the tags have been through the same sanitizer the tag
 // inputs use.
 
-/** What the UI gets back for a failed lookup, and the status carrying it. */
-const FAILURE_STATUS: Record<LookupFailure, number> = {
-	// 202 for not_ready: the classifier has the post queued, nothing is broken,
-	// and hooks.server.ts counts every 5xx into the site's error metric, so a
-	// 502 here would book a server error against the site on each retry.
-	// unavailable stays 502, not 401 or 503: a real upstream failure belongs in
-	// that error rollup, and the admin gate answers an expired session with its
-	// own 401 and a plain-text body, so a 401 here would read as a logged-out
-	// operator. The body's `error` field is what tells the cases apart.
+/** What the UI gets back for a failed lookup, and the status carrying it.
+ * hooks.server.ts counts every 5xx into the site's error metric, so only a
+ * real upstream failure gets a 5xx; the rest are outcomes, not errors.
+ *   202 not_ready: queued, or still classifying past our poll cap. Retry.
+ *   404 not_found: an unknown imageId, a source post the guest token cannot
+ *       read (deleted, protected), or the classifier declined the input.
+ *   429 rate_limited: entail.dev's or X's per-IP limit.
+ *   502 unavailable: an upstream failure only (a 5xx, a timeout, a body we
+ *       cannot read). Not 401 or 503: the admin gate answers an expired
+ *       session with its own 401 and a plain-text body, so a 401 here would
+ *       read as a logged-out operator.
+ * The body's `error` field is what tells the cases apart. */
+const FAILURE_STATUS: Record<LookupFailure | TweetMediaFailure, number> = {
 	not_ready: 202,
+	not_found: 404,
 	rate_limited: 429,
 	unavailable: 502
 };
@@ -62,7 +67,7 @@ export { LOOKUP_DEADLINE_MS as _LOOKUP_DEADLINE_MS };
  * anything past this is refused without handing it to JSON.parse. */
 const MAX_BODY_BYTES = 4096;
 
-const failure = (reason: LookupFailure) =>
+const failure = (reason: LookupFailure | TweetMediaFailure) =>
 	json({ error: reason }, { status: FAILURE_STATUS[reason] });
 
 const invalid = () => json({ error: 'invalid_request' }, { status: 400 });
@@ -99,7 +104,7 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 			.from(images)
 			.where(eq(images.id, imageId))
 			.get();
-		if (!row) return json({ error: 'not_found' }, { status: 404 });
+		if (!row) return failure('not_found');
 		sourcePostUrl = row.sourcePostUrl ?? '';
 	} else {
 		if (typeof body.sourcePostUrl !== 'string') return invalid();

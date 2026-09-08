@@ -305,6 +305,36 @@ describe('POST /api/admin/tag-suggestions', () => {
 		expect(classifyMediaUrl).not.toHaveBeenCalled();
 	});
 
+	it('404s not_found when the post cannot be read or the classifier declined it', async () => {
+		const { platform } = makeEnv();
+		// The operator's input, not an outage: the same 404 an unknown imageId
+		// gets, and not a 5xx the site's error metric would count.
+		lookupBlueskySource.mockResolvedValue({ ok: false, reason: 'not_found' });
+		const bsky = await POST(event(platform, { sourcePostUrl: BSKY_POST }));
+		expect(bsky.status).toBe(404);
+		expect(await bsky.json()).toEqual({ error: 'not_found' });
+
+		fetchTweetMediaUrl.mockResolvedValue({ ok: false, reason: 'not_found' });
+		const x = await POST(event(platform, { sourcePostUrl: X_POST }));
+		expect(x.status).toBe(404);
+		expect(await x.json()).toEqual({ error: 'not_found' });
+		expect(classifyMediaUrl).not.toHaveBeenCalled();
+
+		fetchTweetMediaUrl.mockResolvedValue({ ok: true, url: MEDIA_URL, photoCount: 1 });
+		classifyMediaUrl.mockResolvedValue({ ok: false, reason: 'not_found' });
+		const declined = await POST(event(platform, { sourcePostUrl: X_POST }));
+		expect(declined.status).toBe(404);
+		expect(await declined.json()).toEqual({ error: 'not_found' });
+	});
+
+	it('202s not_ready when a classify job is still running at the poll cap', async () => {
+		const { platform } = makeEnv();
+		classifyMediaUrl.mockResolvedValue({ ok: false, reason: 'not_ready' });
+		const res = await POST(event(platform, { sourcePostUrl: X_POST }));
+		expect(res.status).toBe(202);
+		expect(await res.json()).toEqual({ error: 'not_ready' });
+	});
+
 	it('429s when entail.dev rate limited us', async () => {
 		const { platform } = makeEnv();
 		lookupBlueskySource.mockResolvedValue({ ok: false, reason: 'rate_limited' });

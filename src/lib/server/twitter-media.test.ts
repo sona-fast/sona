@@ -212,16 +212,28 @@ describe('fetchTweetMediaUrl', () => {
 		});
 	});
 
-	it('fails soft on refusal, a tombstone, malformed JSON, and network errors', async () => {
-		expect(await fetchTweetMediaUrl(id, stub(() => new Response('no', { status: 403 })).fetchImpl)).toEqual(
-			unavailable
-		);
+	it('reports a tweet the guest token cannot read as not_found, not an outage', async () => {
+		// Deleted, protected, or a tombstone: X answers 200 with no tweet in it.
+		// That is the operator's input, so the endpoint answers 404, not 502.
+		const notFound = { ok: false, reason: 'not_found' };
 		expect(
 			await fetchTweetMediaUrl(
 				id,
 				stub(() => json({ data: { tweetResult: { result: { __typename: 'TweetTombstone' } } } })).fetchImpl
 			)
-		).toEqual(unavailable);
+		).toEqual(notFound);
+		expect(await fetchTweetMediaUrl(id, stub(() => json({ data: { tweetResult: {} } })).fetchImpl)).toEqual(
+			notFound
+		);
+	});
+
+	it('fails soft on refusal, a server error, malformed JSON, and network errors', async () => {
+		expect(await fetchTweetMediaUrl(id, stub(() => new Response('no', { status: 403 })).fetchImpl)).toEqual(
+			unavailable
+		);
+		expect(await fetchTweetMediaUrl(id, stub(() => new Response('boom', { status: 500 })).fetchImpl)).toEqual(
+			unavailable
+		);
 		expect(await fetchTweetMediaUrl(id, stub(() => new Response('<html>')).fetchImpl)).toEqual(unavailable);
 		expect(
 			await fetchTweetMediaUrl(

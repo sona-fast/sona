@@ -59,12 +59,17 @@ export type Suggestions = {
 };
 
 /** Why a lookup produced nothing. `not_ready` is the one worth retrying: the
- * post is queued but not classified yet. `rate_limited` is entail.dev's per-IP
- * limit, which has no key to raise. Everything else — a timeout, a non-2xx, a
- * job that never finished — is `unavailable`, because none of them tell the
- * operator anything different. A post the classifier read and found nothing in
- * is not a failure at all; it succeeds with an empty tag list. */
-export type LookupFailure = 'not_ready' | 'rate_limited' | 'unavailable';
+ * post is queued, or the job is still running past our poll cap. `not_found`
+ * is entail.dev declining the input with a non-429 4xx (an unknown post, or a
+ * URL it will not fetch): the operator's input, not an outage. `rate_limited`
+ * is entail.dev's per-IP limit, which has no key to raise. Everything else — a
+ * timeout, a 5xx, an unexpected shape — is `unavailable`, an upstream failure.
+ * A post the classifier read and found nothing in is not a failure at all; it
+ * succeeds with an empty tag list. */
+export type LookupFailure = 'not_ready' | 'not_found' | 'rate_limited' | 'unavailable';
+
+/** A non-429 4xx is entail.dev declining what we sent, not failing. */
+const declined = (status: number) => status >= 400 && status < 500;
 
 /** `imageCount` is how many images the source post carried. Suggestions come
  * from the first one only, so a count above 1 tells the UI the rest went
@@ -240,6 +245,10 @@ export async function lookupBlueskySource(
 			console.warn('[entail] post lookup rate limited: status=429');
 			return fail('rate_limited');
 		}
+		if (declined(res.status)) {
+			console.warn(`[entail] post lookup declined: status=${res.status}`);
+			return fail('not_found');
+		}
 		if (!res.ok) {
 			console.warn(`[entail] post lookup failed: status=${res.status}`);
 			return fail('unavailable');
@@ -297,7 +306,7 @@ function pollEntry(body: unknown): body is ClassificationEntry {
 
 /**
  * Suggestions for a single image URL on an allowlisted CDN: enqueue a
- * classification job, then poll it a few times. Gives up (`unavailable`) if
+ * classification job, then poll it a few times. Gives up (`not_ready`) if
  * the job isn't done by the attempt cap. Never throws.
  */
 export async function classifyMediaUrl(
@@ -305,7 +314,11 @@ export async function classifyMediaUrl(
 	fetchImpl: typeof fetch = fetch,
 	signal?: AbortSignal
 ): Promise<LookupOutcome> {
-	if (!isAllowedMediaHost(url)) return fail('unavailable');
+	if (!isAllowedMediaHost(url)) {
+		// The host, not the URL: a media URL is third-party data.
+		console.warn('[entail] media url host not allowed');
+		return fail('unavailable');
+	}
 
 	try {
 		signal?.throwIfAborted();
@@ -318,6 +331,10 @@ export async function classifyMediaUrl(
 		if (enqueued.status === 429) {
 			console.warn('[entail] classify enqueue rate limited: status=429');
 			return fail('rate_limited');
+		}
+		if (declined(enqueued.status)) {
+			console.warn(`[entail] classify enqueue declined: status=${enqueued.status}`);
+			return fail('not_found');
 		}
 		if (!enqueued.ok && enqueued.status !== 202) {
 			console.warn(`[entail] classify enqueue failed: status=${enqueued.status}`);
@@ -354,8 +371,10 @@ export async function classifyMediaUrl(
 			}
 			return { ok: true, suggestions: suggestionsFromResult(body), imageCount: 1 };
 		}
-		console.warn(`[entail] classify job unfinished after ${POLL_ATTEMPTS} polls`);
-		return fail('unavailable');
+		// Still running, not broken: the same retry-later answer a queued
+		// Bluesky post gets.
+		console.warn(`[entail] classify job not ready after ${POLL_ATTEMPTS} polls`);
+		return fail('not_ready');
 	} catch (e) {
 		console.warn(`[entail] classify error: ${errorLabel(e)}`);
 		return fail('unavailable');

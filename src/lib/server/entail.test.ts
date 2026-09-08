@@ -310,6 +310,19 @@ describe('lookupBlueskySource', () => {
 		).toEqual({ ok: false, reason: 'unavailable' });
 	});
 
+	it('reports a non-429 4xx from /post as not_found, with the status in the log', async () => {
+		// entail.dev declining the input is the operator's problem, not an
+		// outage: the endpoint answers 404, which hooks.server.ts does not count
+		// as a site error the way it counts a 502.
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		for (const status of [404, 400]) {
+			expect(
+				await lookupBlueskyPost(url, vi.fn(async () => new Response('no', { status })))
+			).toEqual({ ok: false, reason: 'not_found' });
+			expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain(`status=${status}`);
+		}
+	});
+
 	it('logs a malformed body as a parse failure without quoting it', async () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		expect(
@@ -372,14 +385,24 @@ describe('classifyMediaUrl', () => {
 		imageCount: 1
 	};
 
-	it('refuses a host outside the allowlist without fetching', async () => {
+	it('refuses a host outside the allowlist without fetching, and says so', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const fetchImpl = vi.fn(async () => json(done));
 		const refused = { ok: false, reason: 'unavailable' };
-		expect(await classifyMediaUrl('https://example.com/a.jpg', fetchImpl)).toEqual(refused);
-		expect(await classifyMediaUrl('https://evil.pbs.twimg.com/a.jpg', fetchImpl)).toEqual(refused);
-		expect(await classifyMediaUrl('http://pbs.twimg.com/a.jpg', fetchImpl)).toEqual(refused);
-		expect(await classifyMediaUrl('nonsense', fetchImpl)).toEqual(refused);
+		const rejected = [
+			'https://example.com/a.jpg',
+			'https://evil.pbs.twimg.com/a.jpg',
+			'http://pbs.twimg.com/a.jpg',
+			'nonsense'
+		];
+		for (const bad of rejected) expect(await classifyMediaUrl(bad, fetchImpl)).toEqual(refused);
 		expect(fetchImpl).not.toHaveBeenCalled();
+		// One warning per refusal, naming the reason but never the URL: a media
+		// URL is third-party data.
+		expect(warn).toHaveBeenCalledTimes(rejected.length);
+		const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n');
+		expect(logged).toContain('host not allowed');
+		for (const bad of rejected) expect(logged).not.toContain(bad);
 	});
 
 	it('enqueues then polls until the job is done', async () => {
@@ -491,14 +514,16 @@ describe('classifyMediaUrl', () => {
 		);
 	});
 
-	it('gives up after the poll cap', async () => {
+	it('reports a job still running at the poll cap as not_ready, not an outage', async () => {
+		// The same retry-later answer a queued Bluesky post gets: nothing broke,
+		// so the endpoint answers 202 rather than a 502 the site counts as an error.
 		let polls = 0;
 		const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
 			if (init?.method === 'POST') return json({ job_id: 'job-3' }, 202);
 			polls++;
 			return json({ status: 'processing' }, 202);
 		});
-		expect(await classifyMediaUrl(url, fetchImpl)).toEqual({ ok: false, reason: 'unavailable' });
+		expect(await classifyMediaUrl(url, fetchImpl)).toEqual({ ok: false, reason: 'not_ready' });
 		expect(polls).toBe(2);
 	});
 
@@ -537,6 +562,17 @@ describe('classifyMediaUrl', () => {
 				})
 			)
 		).toEqual(unavailable);
+	});
+
+	it('reports a non-429 4xx from the classify enqueue as not_found', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		for (const status of [404, 400]) {
+			expect(await classifyMediaUrl(url, vi.fn(async () => new Response('no', { status })))).toEqual({
+				ok: false,
+				reason: 'not_found'
+			});
+			expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain(`status=${status}`);
+		}
 	});
 
 	it('names a rate limit from either the enqueue or a poll', async () => {
