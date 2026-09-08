@@ -162,6 +162,23 @@ describe('the panel', () => {
 		expect(PANEL).toMatch(/<fieldset class="pick-list">\s*<legend class="sr-only">/);
 	});
 
+	// Under a clash the row rendered only the plain "Use {name}" button, so
+	// clicking it moved the select and the live region while the button itself
+	// never changed — a sighted operator had nothing saying it applied.
+	it('swaps the Use button to "Using" under a clash too, from one snippet', () => {
+		expect(PANEL).toMatch(
+			/\{#snippet useArtistAction\(artist: \{ id: number; name: string \}, primary: boolean\)\}\s*\n\s*\{#if appliedArtist && appliedArtist\.id === artist\.id\}/
+		);
+		const rendered = PANEL.match(/\{@render useArtistAction\(candidates\[0\], (true|false)\)\}/g);
+		// Both action rows: the clash row secondary, the plain existing row primary.
+		expect(rendered).toEqual([
+			'{@render useArtistAction(candidates[0], false)}',
+			'{@render useArtistAction(candidates[0], true)}'
+		]);
+		// One applied button in the file, so the id it carries stays unique.
+		expect(PANEL.match(/id="lookup-applied-artist"/g)).toHaveLength(1);
+	});
+
 	// A piece that already has variants renders no parent select, so the button
 	// would set a value nothing submits. The panel says why instead.
 	it('drops "Add as a variant" where the piece cannot be one, and explains it', () => {
@@ -459,7 +476,8 @@ describe('round 11 wiring', () => {
 		const describedBy = PANEL.match(
 			/aria-describedby=\{artistHintShown \? 'lookup-artist-hint' : undefined\}/g
 		);
-		expect(describedBy).toHaveLength(2);
+		// One reference, in the snippet both action rows render.
+		expect(describedBy).toHaveLength(1);
 		// The hint's own condition gates the reference, so it never points at an
 		// id that is not rendered.
 		expect(PANEL).toContain('id="lookup-artist-hint"');

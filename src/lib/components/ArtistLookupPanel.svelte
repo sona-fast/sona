@@ -424,6 +424,36 @@
 
 		{#if lookup.kind !== 'idle'}
 		<div class="lookup-actions">
+			<!-- One Use button for both action rows. Under a clash it used to render
+			     unapplied whatever the state, so clicking it moved the select and the
+			     live region while the button itself never changed — a sighted
+			     operator had nothing saying it applied. -->
+			{#snippet useArtistAction(artist: { id: number; name: string }, primary: boolean)}
+				{#if appliedArtist && appliedArtist.id === artist.id}
+					<!-- Named so a page can land focus here: creating the artist from the
+					     lookup's dialog destroys the "Add {handle} as a new artist"
+					     button this one replaces, and that button is the dialog's
+					     captured opener (2.4.3). -->
+					<button
+						type="button"
+						class="btn btn-secondary applied"
+						id="lookup-applied-artist"
+						onclick={() => onuseartist(artist)}
+					>
+						<Check size={14} aria-hidden="true" />
+						{m.admin_lookup_using_artist({ name: artist.name })}
+					</button>
+				{:else}
+					<button
+						type="button"
+						class="btn {primary ? 'btn-primary' : 'btn-secondary'}"
+						aria-describedby={artistHintShown ? 'lookup-artist-hint' : undefined}
+						onclick={() => onuseartist(artist)}
+					>
+						{m.admin_lookup_use_artist({ name: artist.name })}
+					</button>
+				{/if}
+			{/snippet}
 			{#if lookup.kind === 'searching'}
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>
 					{m.admin_lookup_cancel()}
@@ -461,14 +491,8 @@
 							{m.admin_lookup_use_selected()}
 						</button>
 					{:else if candidates[0]}
-						<button
-							type="button"
-							class="btn btn-secondary"
-							aria-describedby={artistHintShown ? 'lookup-artist-hint' : undefined}
-							onclick={() => onuseartist(candidates[0])}
-						>
-							{m.admin_lookup_use_artist({ name: candidates[0].name })}
-						</button>
+						<!-- Secondary: "Add as a variant" above is this row's primary. -->
+						{@render useArtistAction(candidates[0], false)}
 					{/if}
 					<!-- A text link, not a third button: the row reads primary,
 					     secondary, link, so "Add as a variant" is visibly the action. -->
@@ -476,30 +500,7 @@
 						{m.admin_lookup_clash_open({ title: clash.title })}
 					</a>
 				{:else if outcome === 'existing' && candidates[0]}
-					{#if appliedArtist && appliedArtist.id === candidates[0].id}
-						<!-- Named so a page can land focus here: creating the artist from the
-						     lookup's dialog destroys the "Add {handle} as a new artist"
-						     button this one replaces, and that button is the dialog's
-						     captured opener (2.4.3). -->
-						<button
-							type="button"
-							class="btn btn-secondary applied"
-							id="lookup-applied-artist"
-							onclick={() => onuseartist(candidates[0])}
-						>
-							<Check size={14} aria-hidden="true" />
-							{m.admin_lookup_using_artist({ name: candidates[0].name })}
-						</button>
-					{:else}
-						<button
-							type="button"
-							class="btn btn-primary"
-							aria-describedby={artistHintShown ? 'lookup-artist-hint' : undefined}
-							onclick={() => onuseartist(candidates[0])}
-						>
-							{m.admin_lookup_use_artist({ name: candidates[0].name })}
-						</button>
-					{/if}
+					{@render useArtistAction(candidates[0], true)}
 				{:else if outcome === 'ambiguous'}
 					<button type="button" class="btn btn-primary" disabled={!picked} onclick={useSelected}>
 						{m.admin_lookup_use_selected()}
