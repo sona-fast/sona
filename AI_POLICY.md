@@ -24,6 +24,11 @@ second AI model reads the first one's work, and CodeRabbit, a third-party
 service, reviews the diff. A human approves every merge and clicks every
 deploy. There is no review team here, just one maintainer and a set of tools.
 
+The running site makes one AI call of its own: when the operator asks for tag
+suggestions on a piece of artwork, the site sends a public link to the source
+post, or to the picture in it, to entail.dev, an image classifier. Nothing a
+visitor does reaches an AI service.
+
 ## Rules the agents work under
 
 These rules predate this file, and every agent session on this project works

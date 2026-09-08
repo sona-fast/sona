@@ -56,11 +56,11 @@ const invalid = () => json({ error: 'invalid_request' }, { status: 400 });
 type Body = { imageId?: unknown; sourcePostUrl?: unknown };
 
 export const POST: RequestHandler = async ({ request, platform }) => {
-	const raw = await request.arrayBuffer().catch(() => null);
-	if (!raw || raw.byteLength > MAX_BODY_BYTES) return invalid();
+	const text = await request.text().catch(() => null);
+	if (text === null || new TextEncoder().encode(text).length > MAX_BODY_BYTES) return invalid();
 	let body: Body | null;
 	try {
-		body = JSON.parse(new TextDecoder().decode(raw));
+		body = JSON.parse(text);
 	} catch {
 		body = null;
 	}
@@ -97,9 +97,13 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 	if (!source) return json({ error: 'unsupported_source' }, { status: 422 });
 
 	let outcome: LookupOutcome;
-	let photoCount = 0;
+	// How many images the post carried. Only the Bluesky lookup and the tweet
+	// lookup see the post; classifyMediaUrl sees one image.
+	let imageCount: number;
 	if (source.kind === 'bluesky') {
 		outcome = await lookupBlueskyPost(source.url);
+		if (!outcome.ok) return failure(outcome.reason);
+		imageCount = outcome.imageCount;
 	} else {
 		// entail.dev indexes Bluesky, not X, so an X post has to be classified
 		// from its image. X's API is the only thing that knows which image that
@@ -108,16 +112,14 @@ export const POST: RequestHandler = async ({ request, platform }) => {
 		const media = await fetchTweetMediaUrl(source.id);
 		if (!media.ok) return failure(media.reason);
 		outcome = await classifyMediaUrl(media.url);
-		photoCount = media.photoCount;
+		if (!outcome.ok) return failure(outcome.reason);
+		imageCount = media.photoCount;
 	}
 
-	if (!outcome.ok) return failure(outcome.reason);
 	return json({
 		source: source.kind,
 		tags: outcome.suggestions.tags,
 		rating: outcome.suggestions.rating,
-		// classifyMediaUrl sees one image; only the tweet lookup knows how many
-		// the post carried.
-		imageCount: source.kind === 'x' ? photoCount : outcome.imageCount
+		imageCount
 	});
 };

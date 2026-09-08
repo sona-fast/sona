@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { X_USER_AGENT } from './twitter-avatar';
 import { fetchTweetMediaUrl, parseTweetPhotos } from './twitter-media';
 
 afterEach(() => {
@@ -39,6 +40,16 @@ describe('parseTweetPhotos', () => {
 		});
 	});
 
+	it('clamps the photo count to the four X allows', () => {
+		// X attaches at most four photos; a body claiming more is not trusted.
+		const six = Array.from({ length: 6 }, (_, i) => ({
+			type: 'photo',
+			media_url_https: `https://pbs.twimg.com/media/P${i}.jpg`
+		}));
+		expect(parseTweetPhotos(tweetWith(six))?.photoCount).toBe(4);
+		expect(parseTweetPhotos(tweetWith(six.slice(0, 4)))?.photoCount).toBe(4);
+	});
+
 	it('passes a media URL with no extension through untouched', () => {
 		expect(
 			parseTweetPhotos(tweetWith([{ type: 'photo', media_url_https: 'https://pbs.twimg.com/media/NoExt' }]))
@@ -51,10 +62,11 @@ describe('parseTweetPhotos', () => {
 		expect(
 			parseTweetPhotos(tweetWith([{ type: 'animated_gif', media_url_https: 'https://pbs.twimg.com/y.jpg' }]))
 		).toBeNull();
-		// A video alongside a photo is not counted as a photo.
+		// A video alongside a photo is not counted as a photo, and the photo, not
+		// the video's poster, is what resolves.
 		expect(
 			parseTweetPhotos(tweetWith([{ type: 'video', media_url_https: 'https://pbs.twimg.com/x.jpg' }, photo]))
-		).toEqual({ url: expect.stringContaining('format=jpg'), photoCount: 1 });
+		).toEqual({ url: 'https://pbs.twimg.com/media/AbCdEf123?format=jpg&name=4096x4096', photoCount: 1 });
 	});
 
 	it('reads a tweet nested behind a visibility result', () => {
@@ -116,6 +128,10 @@ describe('fetchTweetMediaUrl', () => {
 		expect(tokens).toEqual(['gt-1']);
 		const lookup = String(fetchImpl.mock.calls.find(([t]) => !String(t).includes('guest/activate'))?.[0]);
 		expect(lookup).toContain(encodeURIComponent(`"tweetId":"${id}"`));
+		// api.x.com 404s Node's default `User-Agent: node`, so both calls name themselves.
+		for (const [, init] of fetchImpl.mock.calls) {
+			expect(new Headers(init?.headers).get('user-agent')).toBe(X_USER_AGENT);
+		}
 	});
 
 	it('retries once with a fresh token on 401', async () => {

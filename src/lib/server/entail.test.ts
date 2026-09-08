@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+	MAX_RAW_ENTRIES,
 	MAX_SUGGESTED_TAGS,
+	POLL_TIMEOUT_MS,
+	POST_TIMEOUT_MS,
 	classifySourceUrl,
 	classifyMediaUrl,
-	errorLabel,
 	lookupBlueskyPost,
 	suggestionsFromResult,
 	translateTag
@@ -108,6 +110,14 @@ describe('translateTag', () => {
 		expect(translateTag('')).toBeNull();
 	});
 
+	it('leaves no doubled or trailing hyphen when the cap cuts a hyphen run', () => {
+		// The sanitizer slices at 50 characters. A run of hyphens straddling the
+		// cut would otherwise survive as a doubled or trailing hyphen.
+		const tag = translateTag(`${'a'.repeat(48)}___bbb`);
+		expect(tag).toBe('a'.repeat(48));
+		expect(tag).not.toMatch(/--|-$/);
+	});
+
 	it('drops emoticon tags instead of leaving their debris', () => {
 		// e621 carries symbol-only tags whose sanitized remains ("3", "-", "---")
 		// would otherwise be suggested as if they were words.
@@ -157,6 +167,15 @@ describe('suggestionsFromResult', () => {
 		expect(new Set(result).size).toBe(MAX_SUGGESTED_TAGS);
 	});
 
+	it('stops reading a hostile tag array after the entry cap', () => {
+		const low = { name: 'noise', confidence: 0.1 };
+		const tags = Array.from({ length: MAX_RAW_ENTRIES + 1 }, () => ({ ...low }));
+		// The last entry inside the cap is read; the first one past it is not.
+		tags[MAX_RAW_ENTRIES - 1] = { name: 'canine', confidence: 0.99 };
+		tags[MAX_RAW_ENTRIES] = { name: 'mammal', confidence: 0.99 };
+		expect(suggestionsFromResult({ tags }).tags).toEqual(['canine']);
+	});
+
 	it('drops junk entries and unknown ratings', () => {
 		expect(
 			suggestionsFromResult({
@@ -169,20 +188,12 @@ describe('suggestionsFromResult', () => {
 	});
 });
 
-describe('errorLabel', () => {
-	it('reduces a parse failure to its name and keeps everything else readable', () => {
-		// Every fail-soft catch in this module and twitter-media.ts logs through
-		// this. A SyntaxError's message quotes the body that failed to parse.
-		let parseError: unknown;
-		try {
-			JSON.parse('<html>secret-body');
-		} catch (e) {
-			parseError = e;
-		}
-		expect(errorLabel(parseError)).toBe('SyntaxError');
-		expect(errorLabel(new Error('TimeoutError'))).toBe('TimeoutError');
-		expect(errorLabel('plain string')).toBe('plain string');
-		expect(errorLabel(42)).toBe('42');
+describe('timeouts', () => {
+	it('outlast the wait=true hold the server puts on a fresh job', () => {
+		// About five seconds measured on 2026-09-07; anything at or above six
+		// clears it. The comment above the constants explains why this matters.
+		expect(POST_TIMEOUT_MS).toBeGreaterThanOrEqual(6000);
+		expect(POLL_TIMEOUT_MS).toBeGreaterThanOrEqual(6000);
 	});
 });
 

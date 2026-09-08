@@ -12,6 +12,7 @@
 // resolves to a failed outcome and the caller carries on without suggestions.
 // Third-party response bodies are never logged and never stored.
 
+import { errorLabel } from './fetch-errors';
 import { sanitizeTag } from './validate';
 
 const ENTAIL_POST = 'https://entail.dev/api/post';
@@ -24,15 +25,19 @@ export const DEFAULT_CONFIDENCE_FLOOR = 0.8;
  * classifier can return hundreds; the UI shows a short list. */
 export const MAX_SUGGESTED_TAGS = 40;
 
+/** Most raw entries one classification is read for. A body is third-party
+ * input, so the walk stops here rather than following an array of any size. */
+export const MAX_RAW_ENTRIES = 200;
+
 // Both `wait=true` endpoints hold the connection open until the classifier
 // finishes rather than answering 202 straight away. That hold was measured at
 // roughly five seconds for a fresh job on 2026-09-07, so every timeout here
 // has to clear it comfortably or we abort the very response we asked to wait
 // for. A classify is one enqueue plus at most two polls, worst case about
 // 3 + 8 + 0.25 + 8 seconds; the caller shows a pending state while it waits.
-const POST_TIMEOUT_MS = 8000;
+export const POST_TIMEOUT_MS = 8000;
 const CLASSIFY_TIMEOUT_MS = 3000;
-const POLL_TIMEOUT_MS = 8000;
+export const POLL_TIMEOUT_MS = 8000;
 const POLL_PAUSE_MS = 250;
 const POLL_ATTEMPTS = 2;
 
@@ -120,7 +125,8 @@ export function classifySourceUrl(url: string): SourceKind | null {
 		const [user, keyword, id] = parts;
 		if (keyword !== 'status' && keyword !== 'statuses') return null;
 		if (!STATUS_ID.test(id)) return null;
-		if (user !== 'i' && !X_USER.test(user)) return null;
+		// `i` (the /i/status form) is a valid user segment by this pattern too.
+		if (!X_USER.test(user)) return null;
 		return { kind: 'x', url: `https://x.com/${user}/status/${id}`, id };
 	}
 
@@ -155,14 +161,14 @@ function normalizeRating(rating: unknown): EntailRating | null {
  * Turn one classification entry into Sona tag suggestions: keep the tags at or
  * above the confidence floor, translate them, and drop duplicates while
  * preserving the confidence order the API returns, capped at
- * {@link MAX_SUGGESTED_TAGS}. Pure.
+ * {@link MAX_SUGGESTED_TAGS}. Reads at most {@link MAX_RAW_ENTRIES} entries. Pure.
  */
 export function suggestionsFromResult(result: ClassificationEntry | null | undefined): Suggestions {
 	const rating = normalizeRating(result?.rating);
 	const raw = Array.isArray(result?.tags) ? result.tags : [];
 	const seen = new Set<string>();
 	const tags: string[] = [];
-	for (const entry of raw) {
+	for (const entry of raw.slice(0, MAX_RAW_ENTRIES)) {
 		const { name, confidence } = (entry ?? {}) as { name?: unknown; confidence?: unknown };
 		if (typeof name !== 'string') continue;
 		if (typeof confidence !== 'number' || !(confidence >= DEFAULT_CONFIDENCE_FLOOR)) continue;
@@ -230,14 +236,6 @@ export async function lookupBlueskyPost(
 		console.warn(`[entail] post lookup error: ${errorLabel(e)}`);
 		return fail('unavailable');
 	}
-}
-
-/** What a caught error is safe to log. A JSON parse failure's message quotes
- * a fragment of the body, and third-party bodies are never logged, so a
- * SyntaxError is reduced to its name. */
-export function errorLabel(e: unknown): string {
-	if (e instanceof SyntaxError) return e.name;
-	return e instanceof Error ? e.message : String(e);
 }
 
 function jobIdFrom(body: unknown): string | null {

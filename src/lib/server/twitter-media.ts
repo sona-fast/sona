@@ -10,11 +10,14 @@
 // proceeds without a media URL. Videos and GIFs are skipped — only photos
 // resolve.
 
-import { errorLabel } from './entail';
-import { X_BEARER, activateGuestToken } from './twitter-avatar';
+import { errorLabel } from './fetch-errors';
+import { X_BEARER, X_USER_AGENT, activateGuestToken } from './twitter-avatar';
 
 const X_TWEET_BY_REST_ID = 'https://api.x.com/graphql/f2sagi1jweVHFkTUIHzmMQ/TweetResultByRestId';
 const FETCH_TIMEOUT_MS = 5000;
+/** X attaches at most four photos to a post; a count past that is a response
+ * we do not trust, so it is clamped rather than reported. */
+const MAX_TWEET_PHOTOS = 4;
 
 const QUERY_FEATURES = {
 	rweb_video_screen_enabled: false,
@@ -106,7 +109,7 @@ export function parseTweetPhotos(body: unknown): TweetPhotos | null {
 		const match = url.match(/^(.*)\.([a-z]+)$/i);
 		first = match ? `${match[1]}?format=${match[2].toLowerCase()}&name=4096x4096` : url;
 	}
-	return first ? { url: first, photoCount } : null;
+	return first ? { url: first, photoCount: Math.min(photoCount, MAX_TWEET_PHOTOS) } : null;
 }
 
 function tweetLookup(tweetId: string, guestToken: string, fetchImpl: typeof fetch): Promise<Response> {
@@ -128,6 +131,7 @@ function tweetLookup(tweetId: string, guestToken: string, fetchImpl: typeof fetc
 		{
 			headers: {
 				Authorization: X_BEARER,
+				'User-Agent': X_USER_AGENT,
 				'x-guest-token': guestToken,
 				'x-csrf-token': csrf,
 				'x-twitter-active-user': 'yes',

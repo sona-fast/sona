@@ -180,10 +180,10 @@ describe('defaultPrivacyPolicy', () => {
 		expect(text).toContain('cons.fyi');
 		// The integrations list reads exhaustive, so it must actually be: every
 		// remote service a feature calls out to is named (SONA-167 round 1).
-		expect(text).toContain('Bluesky');
-		expect(text).toMatch(/finding the picture in a post/);
-		// SONA-220: the tag-suggestion lookup sends a post URL to entail.dev.
-		expect(text).toContain('entail.dev');
+		// Picture lookup is an X-only ask; Bluesky posts go to entail.dev whole.
+		expect(text).toMatch(/X \(formerly Twitter\) \(fetching the profile pictures shown on this site, and finding the picture in a post\), Bluesky \(fetching the profile pictures shown on this site\)/);
+		// SONA-220: the tag-suggestion lookup sends a post or picture URL to entail.dev.
+		expect(text).toMatch(/entail.dev \(suggesting tags for artwork from its source post or the picture in it\)/);
 		expect(text).toContain('FurTrack');
 		expect(text).toMatch(/shared artist registry/);
 	});
@@ -296,7 +296,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// privacy page would show a "Last updated" line older than its own text.
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
-	const RECORDED_TEXT_HASH = 'e016ba07a84e6b8f2523f393d7aacd2485789354598be8d5b70708974eae8032';
+	const RECORDED_TEXT_HASH = '36982486de4edbea612682e28801fee08ecbccf41ec0942a32370daf5a9b0910';
 	const RECORDED_UPDATED = '2026-09-07';
 
 	function defaultsText(): string {

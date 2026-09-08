@@ -174,6 +174,25 @@ describe('POST /api/admin/tag-suggestions', () => {
 		}
 	});
 
+	it('accepts a body of exactly the cap and refuses one byte more', async () => {
+		const { platform } = makeEnv();
+		// ASCII throughout, so characters are bytes. Pad to the cap exactly.
+		const shell = JSON.stringify({ sourcePostUrl: BSKY_POST, pad: '' });
+		const atCap = JSON.stringify({ sourcePostUrl: BSKY_POST, pad: 'x'.repeat(4096 - shell.length) });
+		expect(new TextEncoder().encode(atCap).length).toBe(4096);
+		expect((await POST(event(platform, undefined, atCap))).status).toBe(200);
+
+		const overCap = JSON.stringify({ sourcePostUrl: BSKY_POST, pad: 'x'.repeat(4097 - shell.length) });
+		expect(new TextEncoder().encode(overCap).length).toBe(4097);
+		const res = await POST(event(platform, undefined, overCap));
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'invalid_request' });
+		// Multi-byte characters count as bytes, not characters: 2048 two-byte
+		// characters fit in the pad's character budget but not its byte budget.
+		const wide = JSON.stringify({ sourcePostUrl: BSKY_POST, pad: 'é'.repeat(2048) });
+		expect((await POST(event(platform, undefined, wide))).status).toBe(400);
+	});
+
 	it('200s with no tags when the classifier found nothing to suggest', async () => {
 		const { platform } = makeEnv();
 		// The classifier read the post and rated it; nothing cleared the

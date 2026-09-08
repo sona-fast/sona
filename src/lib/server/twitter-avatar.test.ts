@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+	X_USER_AGENT,
 	twitterHandleFromUrl,
 	parseUserAvatar,
 	to400x400,
@@ -66,18 +67,22 @@ describe('fetchTwitterAvatar', () => {
 	};
 
 	it('activates a guest token and resolves the 400x400 avatar', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn(async (url: string | URL) => {
-				if (String(url).includes('guest/activate')) {
-					return new Response(JSON.stringify({ guest_token: 'gt' }), { status: 200 });
-				}
-				return new Response(JSON.stringify(userBody), { status: 200 });
-			})
-		);
+		const fetchImpl = vi.fn(async (url: string | URL, _init?: RequestInit) => {
+			if (String(url).includes('guest/activate')) {
+				return new Response(JSON.stringify({ guest_token: 'gt' }), { status: 200 });
+			}
+			return new Response(JSON.stringify(userBody), { status: 200 });
+		});
+		vi.stubGlobal('fetch', fetchImpl);
 		expect(await fetchTwitterAvatar('https://x.com/examplefox')).toBe(
 			'https://pbs.twimg.com/profile_images/9/pic_400x400.jpg'
 		);
+		// api.x.com 404s Node's default `User-Agent: node`; the activation and
+		// the lookup both send the shared one.
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+		for (const [, init] of fetchImpl.mock.calls) {
+			expect(new Headers(init?.headers).get('user-agent')).toBe(X_USER_AGENT);
+		}
 	});
 
 	it('retries once with a fresh token on 429, then succeeds', async () => {
