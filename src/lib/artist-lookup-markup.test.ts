@@ -269,7 +269,7 @@ describe('the artist on the edit page', () => {
 	// A second lookup used to read the first one's URL as operator-typed, fill
 	// nothing, and leave a "From lookup" tag on a value from the other post.
 	it('undoes the previous lookup before running another one', () => {
-		expect(EDIT).toMatch(/function startLookup\(\)[\s\S]{0,120}?resetLookupPrefill\(\);/);
+		expect(EDIT).toMatch(/function startLookup\(\)[\s\S]{0,400}?resetLookupPrefill\(\);/);
 		const reset = EDIT.match(/function resetLookupPrefill\(\)[\s\S]*?\n\t\}/)?.[0] ?? '';
 		// Only what the lookup itself wrote: the tag is the record of that.
 		for (const [tag, field] of [
@@ -284,6 +284,54 @@ describe('the artist on the edit page', () => {
 		}
 		expect(reset).toMatch(/lookupFilled = \{\};/);
 		expect(reset).toMatch(/lookupSeeded = \{\};/);
+	});
+
+	// A seed opened the inline form; with its name cleared and nothing of the
+	// operator's own in the fields, an empty required form is left behind.
+	it('returns to the artist select when the reset empties a seeded form', () => {
+		const reset = EDIT.match(/function resetLookupPrefill\(\)[\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(reset).toMatch(
+			/if \(artistMode === 'new' && nameTagged && !artistName && !newTwitter && !newFuraffinity\) \{\s*\n\s*artistMode = 'existing';/
+		);
+	});
+
+	// The inline new-artist form stays on screen while the reset empties the
+	// fields the last lookup filled, so the clearing has to be spoken.
+	it('announces the fields the reset cleared from an open new-artist form', () => {
+		const start = EDIT.match(/function startLookup\(\)[\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(start).toMatch(
+			/const clearedInline =\s*\n?\s*artistMode === 'new' && \(nameTagged \|\| twitterTagged \|\| furaffinityTagged\);/
+		);
+		expect(start).toMatch(
+			/if \(clearedInline\) announcer\.say\(m\.admin_lookup_announce_searching_cleared\(\)\);/
+		);
+	});
+});
+
+// The announcements and the clash line name the piece each one is about; a
+// swap between "this piece" and the image being edited reads as the wrong
+// constraint (SONA-156 round 6).
+describe('what the lookup copy names', () => {
+	const en = JSON.parse(read('messages/en.json'));
+	const ja = JSON.parse(read('messages/ja.json'));
+
+	it('blames the image being edited for the variant block', () => {
+		expect(en.admin_lookup_clash_has_variants).toBe(
+			"The image you're editing already has variants of its own, so it can't become a variant of another piece."
+		);
+	});
+
+	it('says the seeded fields were left alone rather than that nothing was filled', () => {
+		expect(en.admin_lookup_announce_seed_kept).toBe(
+			"The new artist's fields already have values, so Sona left them alone."
+		);
+	});
+
+	it('carries the cleared-fields announcement in both catalogs', () => {
+		expect(en.admin_lookup_announce_searching_cleared).toBe(
+			'Sending the image to FuzzySearch. The fields the last lookup filled were cleared.'
+		);
+		expect(ja.admin_lookup_announce_searching_cleared).toBeTruthy();
 	});
 });
 

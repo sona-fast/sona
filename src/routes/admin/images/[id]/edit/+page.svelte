@@ -128,6 +128,13 @@
 		if (nameTagged) artistName = '';
 		if (twitterTagged) newTwitter = '';
 		if (furaffinityTagged) newFuraffinity = '';
+		// The seed is what flipped the form to 'new'. With its name cleared and
+		// nothing of the operator's own left in the fields, the page would sit on
+		// an empty required form, so it goes back to the artist select. The
+		// clearing announcement in startLookup covers this too.
+		if (artistMode === 'new' && nameTagged && !artistName && !newTwitter && !newFuraffinity) {
+			artistMode = 'existing';
+		}
 		sourceTagged = false;
 		dateTagged = false;
 		nameTagged = false;
@@ -140,11 +147,17 @@
 
 	function startLookup() {
 		if (lookup.kind === 'searching') return;
+		// The reset empties inline new-artist fields the last lookup filled while
+		// the form stays on screen, so a sighted operator watches them empty and a
+		// screen-reader one gets nothing. Say it with the searching announcement.
+		const clearedInline =
+			artistMode === 'new' && (nameTagged || twitterTagged || furaffinityTagged);
 		resetLookupPrefill();
 		lookupAbort?.abort();
 		const controller = new AbortController();
 		lookupAbort = controller;
 		lookup = { kind: 'searching' };
+		if (clearedInline) announcer.say(m.admin_lookup_announce_searching_cleared());
 		void runLookup({ imageId: data.image.id }, { signal: controller.signal }).then((next) => {
 			if (lookupAbort !== controller) return;
 			lookupAbort = null;

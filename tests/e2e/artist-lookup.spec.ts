@@ -98,8 +98,8 @@ const EDIT_IMAGE = '/admin/images/10/edit';
  * goto can land before Svelte attaches its handlers — and a value typed before
  * hydration is thrown away by it. Toggling the artist control and back is a
  * probe that leaves the form exactly as it was found. */
-async function gotoEditHydrated(page: Page) {
-	await page.goto(EDIT_IMAGE);
+async function gotoEditHydrated(page: Page, path = EDIT_IMAGE) {
+	await page.goto(path);
 	// Retry the CLICK, not the navigation: `vite dev` compiles this route's
 	// modules on first request, and re-navigating would restart that every time.
 	await expect(async () => {
@@ -377,6 +377,80 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('2026-05-06');
 		// One tag, on the value the second lookup wrote.
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(1);
+	});
+
+	// The reset only undoes what the LAST lookup wrote. A URL the operator typed
+	// over the filled one carries no tag, so the second lookup has to leave it
+	// alone while still replacing the date it does still own.
+	test('a second lookup leaves a URL typed over the first one alone', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// Typing over the filled URL drops its tag; the date keeps its own.
+		await sourceInput(page).fill('https://example.test/mine/');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
+
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '67890',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: '2026-05-06T10:00:00Z',
+						rating: 'general',
+						postUrl: 'https://www.furaffinity.net/view/67890/'
+					}
+				]
+			})
+		);
+		await pill(page).click();
+		await expect(panel(page)).toContainText('Exact match');
+		await expect(sourceInput(page)).toHaveValue('https://example.test/mine/');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		// The date was still the lookup's, so the second result replaces it.
+		await expect(dateInput(page)).toHaveValue('2026-05-06');
+		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
+	});
+
+	// Image 1 already has a variant (image 2 in the seed), so it can't become
+	// one: the panel drops "Add as a variant" and says why instead.
+	test('a piece that already has variants is told why it cannot be one', async ({ page }) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				sourceClash: {
+					imageId: 10,
+					title: 'Lookup Edit Target',
+					isVariant: false,
+					parentImageId: null,
+					variantCount: 0,
+					thumbnailUrl: null,
+					artistName: 'Avatar Artist',
+					uploadedAt: '2026-07-05T00:00:00.000Z',
+					width: 900,
+					height: 700
+				}
+			})
+		);
+		await gotoEditHydrated(page, '/admin/images/1/edit');
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).toContainText('Lookup Edit Target');
+		await expect(panel(page)).toContainText(
+			"The image you're editing already has variants of its own"
+		);
+		await expect(panel(page).getByRole('button', { name: 'Add as a variant' })).toHaveCount(0);
 	});
 
 	test('the edit page never changes the artist without a click', async ({ page }) => {
