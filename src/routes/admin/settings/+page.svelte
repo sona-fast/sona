@@ -190,6 +190,7 @@
 	let fuzzysearchRemoveOpenedY = 0;
 	const FUZZYSEARCH_REMOVE_REFLEX_MS = 500;
 	const FUZZYSEARCH_REMOVE_REFLEX_PX = 24;
+	const FUZZYSEARCH_REMOVE_REFLEX_COARSE_PX = 64;
 	// Focus is moved by hand across the swap: every button involved UNMOUNTS as
 	// the state changes, so without this a keyboard user lands back on <body> and
 	// restarts from the top of a long page. (A bare `autofocus` doesn't do it —
@@ -1574,13 +1575,18 @@
 								// on the button means the pointer moved, so it goes through at once.
 								// A keyboard activation carries detail 0 and cannot hit that hazard,
 								// so Enter straight after Shift+Tab still removes the key.
+								// A finger is not a mouse: an impatient second tap lands a couple of
+								// dozen pixels off the first, so a coarse pointer gets a wider box,
+								// and a browser without matchMedia is treated as coarse.
+								const reflexPx =
+									(window.matchMedia?.('(pointer: coarse)').matches ?? true)
+										? FUZZYSEARCH_REMOVE_REFLEX_COARSE_PX
+										: FUZZYSEARCH_REMOVE_REFLEX_PX;
 								if (
 									event.detail > 0 &&
 									performance.now() - fuzzysearchRemoveOpenedAt < FUZZYSEARCH_REMOVE_REFLEX_MS &&
-									Math.abs(event.clientX - fuzzysearchRemoveOpenedX) <=
-										FUZZYSEARCH_REMOVE_REFLEX_PX &&
-									Math.abs(event.clientY - fuzzysearchRemoveOpenedY) <=
-										FUZZYSEARCH_REMOVE_REFLEX_PX
+									Math.abs(event.clientX - fuzzysearchRemoveOpenedX) <= reflexPx &&
+									Math.abs(event.clientY - fuzzysearchRemoveOpenedY) <= reflexPx
 								)
 									event.preventDefault();
 							}}

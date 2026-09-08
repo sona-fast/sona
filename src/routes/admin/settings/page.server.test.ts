@@ -2190,11 +2190,17 @@ describe('artist lookup section markup (SONA-156)', () => {
 		// ...and only for one that landed within the reflex distance of the
 		// recorded point, on both axes.
 		expect(click).toMatch(
-			/Math\.abs\(\s*event\.clientX - fuzzysearchRemoveOpenedX\s*\)\s*<=\s*FUZZYSEARCH_REMOVE_REFLEX_PX/
+			/Math\.abs\(\s*event\.clientX - fuzzysearchRemoveOpenedX\s*\)\s*<=\s*reflexPx/
 		);
 		expect(click).toMatch(
-			/Math\.abs\(\s*event\.clientY - fuzzysearchRemoveOpenedY\s*\)\s*<=\s*FUZZYSEARCH_REMOVE_REFLEX_PX/
+			/Math\.abs\(\s*event\.clientY - fuzzysearchRemoveOpenedY\s*\)\s*<=\s*reflexPx/
 		);
+		// That distance is pointer-dependent, decided at click time: a fine
+		// pointer gets the narrow box, a coarse one the wide box that survives
+		// touch jitter.
+		expect(click).toContain("window.matchMedia?.('(pointer: coarse)')");
+		expect(click).toContain('FUZZYSEARCH_REMOVE_REFLEX_COARSE_PX');
+		expect(click).toContain('FUZZYSEARCH_REMOVE_REFLEX_PX');
 		expect(click).toMatch(
 			/FUZZYSEARCH_REMOVE_REFLEX_MS[\s\S]{0,300}event\.preventDefault\(\s*\)/
 		);
