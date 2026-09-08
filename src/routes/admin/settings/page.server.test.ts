@@ -2167,19 +2167,30 @@ describe('artist lookup section markup (SONA-156)', () => {
 	// tab, so focusing Keep scrolls the page up and confirm Remove can land on
 	// the pixel Remove key was just clicked. Losing this guard would let a double
 	// click remove the key with the question unread, and no geometry assertion
-	// can cover every line-wrap of the confirmation sentence.
-	it('ignores a confirm click that lands inside the reflex window', () => {
+	// can cover every line-wrap of the confirmation sentence. The guard is
+	// pointer-only: a keyboard user who Shift+Tabs from Keep and presses Enter
+	// cannot have suffered the hazard, and their activation must go through.
+	it('ignores a confirm pointer click that lands inside the reflex window', () => {
 		// Remove key records when the panel opened, next to setting the flag.
 		const opens = src.indexOf('confirmingFuzzysearchRemove = true');
 		expect(opens).toBeGreaterThan(-1);
 		expect(src.slice(opens - 120, opens)).toContain(
 			'fuzzysearchRemoveOpenedAt = performance.now()'
 		);
-		// The remove handler cancels the submission inside that window.
 		const start = src.indexOf('action="?/removeFuzzysearchKey" use:enhance=');
+		expect(start).toBeGreaterThan(-1);
+		const form = src.slice(start, src.indexOf('</form>', start));
+		// The button's own onclick blocks the submit, and only for a click that
+		// carries a positive detail — a keyboard-synthesized click carries 0.
+		const click = form.slice(form.indexOf('onclick='));
+		expect(click).toMatch(/event\.detail\s*>\s*0/);
+		expect(click).toMatch(
+			/FUZZYSEARCH_REMOVE_REFLEX_MS[\s\S]{0,60}event\.preventDefault\(\s*\)/
+		);
+		// The enhance callback keeps only the in-flight guard: no time check there,
+		// or a keyboard Enter would be swallowed again.
 		const handler = src.slice(start, src.indexOf('}}>', start));
-		expect(handler).toContain('fuzzysearchRemoveOpenedAt');
-		expect(handler).toMatch(/FUZZYSEARCH_REMOVE_REFLEX_MS[\s\S]{0,60}return\s+cancel\(\s*\)/);
+		expect(handler).not.toContain('fuzzysearchRemoveOpenedAt');
 		// Half a second: long enough to swallow a double click, short enough that
 		// a deliberate second click still goes through.
 		expect(src).toContain('const FUZZYSEARCH_REMOVE_REFLEX_MS = 500;');

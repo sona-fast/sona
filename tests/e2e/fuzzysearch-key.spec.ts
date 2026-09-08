@@ -214,6 +214,27 @@ test.describe('admin settings artist lookup key', () => {
 		await expect(confirmPanel(page)).toHaveCount(0);
 		if (desktop) await page.setViewportSize(desktop);
 
+		// The guard is pointer-only, and the keyboard is the one modality that
+		// cannot suffer the hazard: Shift+Tab from Keep onto confirm Remove and
+		// press Enter with no pause at all — the key goes.
+		await removeButton(page).click();
+		await expect(
+			confirmPanel(page).getByRole('button', { name: 'Keep', exact: true })
+		).toBeFocused();
+		await page.keyboard.press('Shift+Tab');
+		const confirmRemove = confirmPanel(page).getByRole('button', { name: 'Remove', exact: true });
+		await expect(confirmRemove).toBeFocused();
+		await page.keyboard.press('Enter');
+		await expect(keyRecord(page)).toHaveCount(0);
+		await expect(keyInput(page)).toBeVisible();
+
+		// Put the key back so the deliberate pointer removal below still has
+		// something to remove. The page is hydrated by now (every click above went
+		// through the enhanced path), so this needs no retry.
+		await keyInput(page).fill(FAKE_KEY);
+		await saveButton(page).click();
+		await expect(keyRecord(page)).toContainText('8901');
+
 		// Remove, confirmed, clears the key and returns the section to its
 		// unconnected state — the state the seed hands every other spec.
 		await removeButton(page).click();

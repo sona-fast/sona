@@ -182,8 +182,8 @@
 	// Purely client state: the Remove key button swaps the action row for a
 	// confirmation block rather than opening a dialog over the section.
 	let confirmingFuzzysearchRemove = $state(false);
-	// When the panel opened, and how long confirm Remove ignores a click.
-	// Not reactive: only the enhance callback below reads it.
+	// When the panel opened, and how long confirm Remove ignores a pointer click.
+	// Not reactive: only the confirm button's onclick below reads it.
 	let fuzzysearchRemoveOpenedAt = 0;
 	const FUZZYSEARCH_REMOVE_REFLEX_MS = 500;
 	// Focus is moved by hand across the swap: every button involved UNMOUNTS as
@@ -1535,12 +1535,6 @@
 				<div class="confirm-actions">
 					<form method="POST" action="?/removeFuzzysearchKey" use:enhance={({ cancel }) => {
 						if (removingFuzzysearchKey) return cancel();
-						// The section is last on the tab, so focusing Keep scrolls the page
-						// up under a stationary pointer and confirm Remove can land on the
-						// pixel Remove key was just clicked. A click that soon after the
-						// panel opened is a reflex, not a decision — ignore it.
-						if (performance.now() - fuzzysearchRemoveOpenedAt < FUZZYSEARCH_REMOVE_REFLEX_MS)
-							return cancel();
 						removingFuzzysearchKey = true;
 						return async ({ result, update }) => {
 							await update({ reset: false });
@@ -1567,6 +1561,19 @@
 							class="btn btn-destructive"
 							aria-busy={removingFuzzysearchKey}
 							aria-describedby="fuzzysearch-remove-confirm"
+							onclick={(event) => {
+								// Pointer only. The section is last on the tab, so focusing Keep
+								// scrolls the page up under a stationary pointer and this button can
+								// land on the pixel Remove key was just clicked; a click that soon
+								// after the panel opened is a reflex, not a decision. A keyboard
+								// activation carries detail 0 and cannot hit that hazard, so Enter
+								// straight after Shift+Tab still removes the key.
+								if (
+									event.detail > 0 &&
+									performance.now() - fuzzysearchRemoveOpenedAt < FUZZYSEARCH_REMOVE_REFLEX_MS
+								)
+									event.preventDefault();
+							}}
 						>
 							{removingFuzzysearchKey
 								? m.admin_settings_lookup_removing()
