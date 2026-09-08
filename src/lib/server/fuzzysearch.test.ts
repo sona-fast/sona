@@ -373,10 +373,11 @@ describe('normalizeSourceUrl', () => {
 		expect(normalizeSourceUrl('https://www.furaffinity.net/View/12345/')).toBe(
 			'furaffinity.net/view/12345'
 		);
+		expect(normalizeSourceUrl('https://www.weasyl.com/~Kuttoya')).toBe('weasyl.com/~kuttoya');
 	});
 
 	it('keeps path case elsewhere, since most sites are case-sensitive there', () => {
-		expect(normalizeSourceUrl('https://www.weasyl.com/~Kuttoya')).toBe('weasyl.com/~Kuttoya');
+		expect(normalizeSourceUrl('https://e621.net/users/Kuttoya')).toBe('e621.net/users/Kuttoya');
 	});
 
 	// Each site's other spelling of one submission: FurAffinity's full-size view
@@ -408,6 +409,12 @@ describe('normalizeSourceUrl', () => {
 		expect(normalizeSourceUrl('https://www.weasyl.com/submission/5150')).toBe(canonical);
 		expect(normalizeSourceUrl('https://www.weasyl.com/submission/5150/Some-Title')).toBe(canonical);
 		expect(normalizeSourceUrl('https://www.weasyl.com/submission/5150/some-title/')).toBe(
+			canonical
+		);
+		// Weasyl's own permalink names the artist ahead of the id, with the slug
+		// optional and the username's case free to differ.
+		expect(normalizeSourceUrl('https://www.weasyl.com/~kuttoya/submissions/5150')).toBe(canonical);
+		expect(normalizeSourceUrl('https://www.weasyl.com/~Kuttoya/submissions/5150/some-title')).toBe(
 			canonical
 		);
 		// A different Weasyl page, not a submission under another spelling.

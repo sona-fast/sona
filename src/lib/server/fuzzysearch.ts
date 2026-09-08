@@ -190,8 +190,10 @@ const HOST_ALIASES = new Map<string, string>([
 ]);
 
 /** Hosts whose paths are case-insensitive, so `/View/12345` and `/view/12345`
- * are one post. Left alone elsewhere — most sites' paths are case-sensitive. */
-const CASE_INSENSITIVE_PATH_HOSTS = new Set(['twitter.com', 'furaffinity.net']);
+ * are one post. Weasyl is here for the username in its permalinks: `/~User/` and
+ * `/~user/` are the same artist, and what the fold below leaves is numeric. Left
+ * alone elsewhere — most sites' paths are case-sensitive. */
+const CASE_INSENSITIVE_PATH_HOSTS = new Set(['twitter.com', 'furaffinity.net', 'weasyl.com']);
 
 /**
  * Normalize a source-post URL for equality checks: lowercase host, no scheme,
@@ -223,11 +225,16 @@ export function normalizeSourceUrl(url: string | null | undefined): string {
 	// the fold. e621's old path also carried the tag string as a trailing
 	// segment (`/post/show/160/canine`), and Weasyl hangs the title slug off the
 	// submission path (`/submission/5150/some-title`) — both still the same post;
-	// FurAffinity's stays anchored, since nothing follows the id there.
+	// FurAffinity's stays anchored, since nothing follows the id there. Weasyl's
+	// own permalink names the artist as well (`/~kuttoya/submissions/5150/title`),
+	// and that is the submission this client builds as `/submission/5150`; a
+	// `/submissions/5150` with no user segment is another page, so it stays put.
 	if (host === 'furaffinity.net') path = path.replace(/^\/full\/(\d+)$/, '/view/$1');
 	if (host === 'e621.net') path = path.replace(/^\/post\/show\/(\d+)(?:\/.*)?$/, '/posts/$1');
 	if (host === 'weasyl.com')
-		path = path.replace(/^\/submission\/(\d+)(?:\/.*)?$/, '/submission/$1');
+		path = path
+			.replace(/^\/submission\/(\d+)(?:\/.*)?$/, '/submission/$1')
+			.replace(/^\/~[^/]+\/submissions\/(\d+)(?:\/.*)?$/, '/submission/$1');
 	return host + path;
 }
 
