@@ -11,7 +11,7 @@
 // can carry the key back, and the match list is third-party data about the
 // operator's own art.
 
-import { MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
+import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 import { getRawSetting } from './settings';
 import { normalizeHandle, socialsToHandles, type Platform } from './handle-normalize';
 import type { Database } from './db';
@@ -28,6 +28,14 @@ export const FUZZYSEARCH_KEY_REFUSED_SETTING = 'fuzzysearchKeyRefusedAt';
 export const FUZZYSEARCH_ENDPOINT = 'https://api.fuzzysearch.net/v1/image';
 /** Same 10 MiB bound every other third-party body gets (storage/buffer.ts). */
 export const FUZZYSEARCH_MAX_BYTES = MAX_REMOTE_BUFFER_BYTES;
+/** How much of a 4xx body the 400 branch reads before giving up on it: the
+ * token it looks for sits in a short JSON error object, and nothing past 4 KiB
+ * is evidence. */
+export const FUZZYSEARCH_ERROR_BODY_BYTES = 4096;
+/** How much of a 200 body is read: a match list runs to a few KB, so a MiB is
+ * already generous, and past it the response is a broken or hostile upstream
+ * rather than a search result. */
+export const FUZZYSEARCH_RESPONSE_BYTES = 1024 * 1024;
 export const FUZZYSEARCH_TIMEOUT_MS = 8000;
 /** Hamming distance past which a match is noise rather than a lead. */
 export const FUZZYSEARCH_MAX_DISTANCE = 7;
@@ -308,6 +316,24 @@ async function discardBody(res: Response): Promise<void> {
 }
 
 /**
+ * Read at most `max` bytes of a response body as text. A body that runs past
+ * the cap is cancelled and comes back null: a third party does not get to
+ * decide how much of this isolate's memory its answer occupies, and neither the
+ * 400 token nor the match list is anywhere near the caps above. An unreadable
+ * body reads as null the same way. `res.body` is null on some responses (and
+ * some test doubles), where `text()` is the only way in.
+ */
+async function readBounded(res: Response, max: number): Promise<string | null> {
+	if (!res.body) return await res.text().catch(() => null);
+	try {
+		return new TextDecoder().decode(await bufferStream(res.body, max));
+	} catch {
+		// Over the cap (bufferStream cancelled the rest), or the stream errored.
+		return null;
+	}
+}
+
+/**
  * POST the bytes to FuzzySearch and return normalized matches.
  *
  * `fetchFn` is injected so tests drive this without globals. Failures are
@@ -353,17 +379,28 @@ export async function searchImage(
 	}
 	if (res.status === 400) {
 		// The one 400 worth distinguishing: FuzzySearch says the image is over its
-		// own limit. The body is inspected for that single token and discarded.
-		const body = await res.text().catch(() => '');
+		// own limit. Only the first FUZZYSEARCH_ERROR_BODY_BYTES are inspected for
+		// that single token, and the body is discarded; one that runs past the cap
+		// is not evidence of anything, so it falls through to invalid_image.
+		const body = await readBounded(res, FUZZYSEARCH_ERROR_BODY_BYTES);
 		await discardBody(res);
-		return { ok: false, reason: body.includes('too_large') ? 'too_large' : 'invalid_image' };
+		return { ok: false, reason: body?.includes('too_large') ? 'too_large' : 'invalid_image' };
 	}
 	if (!res.ok) {
 		await discardBody(res);
 		return { ok: false, reason: 'unavailable' };
 	}
 
-	const payload = await res.json().catch(() => null);
+	// Bounded like the error body above: `res.json()` would buffer whatever the
+	// remote sends. Over the cap, unreadable, or unparsable all land on the
+	// non-array path below.
+	const text = await readBounded(res, FUZZYSEARCH_RESPONSE_BYTES);
+	let payload: unknown = null;
+	try {
+		if (text !== null) payload = JSON.parse(text);
+	} catch {
+		payload = null;
+	}
 	// A 200 that isn't the documented array is a broken upstream, not a search
 	// with no hits — reporting it as "no matches" would tell the operator their
 	// art is unindexed when nobody actually looked.

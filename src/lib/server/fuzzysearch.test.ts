@@ -3,6 +3,8 @@ import {
 	FUZZYSEARCH_ENDPOINT,
 	FUZZYSEARCH_MAX_DISTANCE,
 	FUZZYSEARCH_TIMEOUT_MS,
+	FUZZYSEARCH_ERROR_BODY_BYTES,
+	FUZZYSEARCH_RESPONSE_BYTES,
 	searchImage,
 	normalizeMatches,
 	pickPrefillMatch,
@@ -34,6 +36,24 @@ function jsonResponse(body: unknown, status = 200) {
 		status,
 		headers: { 'content-type': 'application/json' }
 	});
+}
+
+// A response whose body arrives chunk by chunk, recording how much was pulled
+// and whether the rest was cancelled — the way to see that a body past the byte
+// cap is never read to the end.
+function chunkedResponse(chunks: string[], status = 200) {
+	const state = { pulled: 0, cancelled: false };
+	const encoder = new TextEncoder();
+	const body = new ReadableStream<Uint8Array>({
+		pull(controller) {
+			if (state.pulled >= chunks.length) return controller.close();
+			controller.enqueue(encoder.encode(chunks[state.pulled++]));
+		},
+		cancel() {
+			state.cancelled = true;
+		}
+	});
+	return { response: new Response(body, { status }), state };
 }
 
 const MIXED_PAYLOAD = [
@@ -286,6 +306,71 @@ describe('searchImage — failure mapping', () => {
 				reason: 'unavailable'
 			});
 		}
+	});
+});
+
+// FuzzySearch is a third party: how many bytes of its answer this isolate holds
+// is our decision, not theirs.
+describe('searchImage — bounded response reads', () => {
+	it('stops reading a 400 body at the cap and reports invalid_image', async () => {
+		// The token sits in the last chunk, well past the cap it would have to be
+		// inside to count.
+		const chunks = [...Array(9).fill('a'.repeat(1024)), '{"error":"too_large"}'];
+		const { response, state } = chunkedResponse(chunks, 400);
+		const { fn } = fakeFetch(response);
+		expect(await searchImage(new Blob(['x']), 'k', fn)).toEqual({
+			ok: false,
+			reason: 'invalid_image'
+		});
+		expect(state.cancelled).toBe(true);
+		// Enough chunks to cross the cap (plus the one the stream reads ahead),
+		// nowhere near the whole body.
+		expect(state.pulled).toBeLessThanOrEqual(FUZZYSEARCH_ERROR_BODY_BYTES / 1024 + 2);
+		expect(state.pulled).toBeLessThan(chunks.length);
+	});
+
+	it('still finds the too_large token inside the cap', async () => {
+		const { response } = chunkedResponse(['{"error":"too_large"}'], 400);
+		const { fn } = fakeFetch(response);
+		expect(await searchImage(new Blob(['x']), 'k', fn)).toEqual({
+			ok: false,
+			reason: 'too_large'
+		});
+	});
+
+	it('maps a 200 body past the cap to unavailable without reading it all', async () => {
+		const chunk = 'x'.repeat(64 * 1024);
+		const chunks = Array(Math.ceil(FUZZYSEARCH_RESPONSE_BYTES / chunk.length) + 4).fill(chunk);
+		const { response, state } = chunkedResponse(chunks);
+		const { fn } = fakeFetch(response);
+		expect(await searchImage(new Blob(['x']), 'k', fn)).toEqual({
+			ok: false,
+			reason: 'unavailable'
+		});
+		expect(state.cancelled).toBe(true);
+		expect(state.pulled).toBeLessThan(chunks.length);
+	});
+
+	it('reads a 200 payload that fits, chunked', async () => {
+		const { response } = chunkedResponse(['[{"site":"FurAffinity",', '"site_id_str":"12345"}]']);
+		const { fn } = fakeFetch(response);
+		expect(await searchImage(new Blob(['x']), 'k', fn)).toEqual({
+			ok: true,
+			matches: [normalizeMatches([{ site: 'FurAffinity', site_id_str: '12345' }])[0]]
+		});
+	});
+
+	// Some responses (and some test doubles) carry no stream at all; text() is
+	// then the only way in.
+	it('falls back to text() when the response has no body stream', async () => {
+		const bodiless = {
+			status: 200,
+			ok: true,
+			body: null,
+			text: async () => '[]'
+		} as unknown as Response;
+		const { fn } = fakeFetch(bodiless);
+		expect(await searchImage(new Blob(['x']), 'k', fn)).toEqual({ ok: true, matches: [] });
 	});
 });
 
