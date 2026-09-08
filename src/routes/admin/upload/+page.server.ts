@@ -5,6 +5,7 @@ import { eq, isNull, count as countFn } from 'drizzle-orm';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
 import { variantAssignmentError, MAX_VARIANT_SET } from '$lib/server/variants';
+import { resolveFuzzysearchKey } from '$lib/server/fuzzysearch';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
@@ -34,6 +35,9 @@ export const load: PageServerLoad = async ({ platform }) => {
 		characters: allCharacters,
 		parentCandidates,
 		maxVariantSet: MAX_VARIANT_SET,
+		// Presence only — the key itself never leaves the server. Without one,
+		// "Look up artist" is not offered at all (SONA-156).
+		lookupEnabled: !!(await resolveFuzzysearchKey(db, platform?.env)),
 		ownerCharacter: ownerCharacter && {
 			name: ownerCharacter.name,
 			// A designation already exists on some image — checking the box replaces it.

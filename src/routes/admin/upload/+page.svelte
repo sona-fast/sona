@@ -1,7 +1,24 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { CloudUpload, Check, FileBox, Loader2, Plus, X } from 'lucide-svelte';
+	import { CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
+	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
+	import {
+		matchHandle,
+		pickPrefillMatch,
+		prefillFields,
+		profileUrlFor,
+		ratingTag,
+		runLookup,
+		siteLabel,
+		strictestRating,
+		bandLabel,
+		candidateArtists,
+		type LookupFields,
+		type LookupSite,
+		type LookupState,
+		type SourceClash
+	} from '$lib/artist-lookup';
 	import { extractImageFiles, isTextEditable, shouldHandleImagePaste } from '$lib/clipboard';
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { GALLERY_ACCEPT, MAX_BUFFER_BYTES } from '$lib/config';
@@ -15,7 +32,7 @@
 	let artistList = $state<{ id: number; name: string }[]>(
 		data.artists.map((a) => ({ id: a.id, name: a.name }))
 	);
-	let selectedArtistId = $state('');
+	let selectedArtistId = $state<string | number>('');
 	let showNewArtist = $state(false);
 	let saving = $state(false);
 	let announce = $state('');
@@ -42,6 +59,11 @@
 		error: string;
 		label: string;
 		nsfw: boolean;
+		// The bytes, kept for "Look up artist" (SONA-156): the lookup endpoint
+		// never accepts a URL from the client, so the file itself is what gets
+		// posted. Released with the tile.
+		file: File | null;
+		lookup: LookupState;
 	};
 	let tiles = $state<Tile[]>([]);
 	let tileKey = 0;
@@ -190,7 +212,10 @@
 				status: error ? 'error' : 'uploading',
 				error,
 				label: '',
-				nsfw: false
+				nsfw: false,
+				// A refused file is never looked up either, so it holds no bytes.
+				file: error ? null : file,
+				lookup: { kind: 'idle' }
 			};
 			tiles = [...tiles, tile];
 			created.push(tile.key);
@@ -261,8 +286,16 @@
 		if (idx === -1) return;
 		// A wrong-type tile never got an object URL to revoke.
 		if (tiles[idx].previewUrl) URL.revokeObjectURL(tiles[idx].previewUrl);
+		// A lookup still in flight for this tile has nowhere to land, and its
+		// result is discarded with the tile.
+		lookupAborts.get(key)?.abort();
+		lookupAborts.delete(key);
+		const wasParent = isParent(key);
 		tiles = tiles.filter((t) => t.key !== key);
 		if (parentIndex >= tiles.length) parentIndex = 0;
+		// The shared fields described the removed parent; re-derive them from
+		// whichever tile the parent radio landed on.
+		if (wasParent) onParentChanged(parentIndex);
 	}
 
 	function handleFileSelect(e: Event) {
@@ -306,8 +339,172 @@
 
 	function onArtistCreated(artist: { id: number; name: string }) {
 		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
-		selectedArtistId = String(artist.id);
+		// The option values are numbers, and the select binding compares with
+		// Object.is — a stringified id would match no option and select nothing.
+		selectedArtistId = artist.id;
+		appliedArtist = artist;
 		showNewArtist = false;
+		artistSeed = null;
+	}
+
+	// ---- Artist lookup (SONA-156) -------------------------------------------
+	// One lookup per tile. The parent tile's result drives the shared fields
+	// below the grid; a variant's result only rates that variant, because the
+	// shared fields describe the piece and a variant is the same piece.
+
+	// The two shared fields a lookup may fill. Controlled (they were plain
+	// uncontrolled inputs) so a result can write them and so an edit can drop the
+	// "From lookup" tag.
+	let sourcePostUrl = $state('');
+	let commissionedAt = $state('');
+	let sourceTagged = $state(false);
+	let dateTagged = $state(false);
+	// What the last shared prefill actually wrote, for the panel's status line.
+	let sharedFilled = $state<LookupFields>({});
+	// The artist this result put in the select, so "Use X" can read back as
+	// "Using X" and revert when the operator changes the select by hand.
+	let appliedArtist = $state<{ id: number; name: string } | null>(null);
+	// What the New Artist dialog opens prefilled with, when a lookup opened it.
+	let artistSeed = $state<{ handle: string; site: LookupSite; linkable: boolean } | null>(null);
+	// Per-tile aborts. Not $state — nothing renders them.
+	const lookupAborts = new Map<number, AbortController>();
+
+	const parentTile = $derived(groupMode === 'new' ? (tiles[parentIndex] ?? null) : null);
+	const sharedLookup = $derived<LookupState>(parentTile?.lookup ?? { kind: 'idle' });
+	const sharedRating = $derived(
+		sharedLookup.kind === 'results' ? strictestRating(sharedLookup.data.matches) : null
+	);
+	const sharedRatingTag = $derived(ratingTag(sharedRating, { parent: tiles.length > 1 }));
+	// Private is the checkbox's inverse ("Private" checked = not published), so
+	// the warn hint and the panel notice both key off it directly.
+	let isPrivate = $state(false);
+
+	function startLookup(key: number) {
+		const tile = tiles.find((t) => t.key === key);
+		if (!tile || !tile.file || tile.lookup.kind === 'searching') return;
+		lookupAborts.get(key)?.abort();
+		const controller = new AbortController();
+		lookupAborts.set(key, controller);
+		tile.lookup = { kind: 'searching' };
+		if (isParent(key)) resetSharedPrefill();
+		void runLookup({ file: tile.file }, { signal: controller.signal }).then((next) => {
+			// Cancelled, or the tile was removed while the request was out.
+			if (lookupAborts.get(key) !== controller) return;
+			lookupAborts.delete(key);
+			const live = tiles.find((t) => t.key === key);
+			if (!live) return;
+			live.lookup = next;
+			if (isParent(key)) applyShared(next);
+		});
+	}
+
+	function isParent(key: number): boolean {
+		return groupMode === 'new' && tiles[parentIndex]?.key === key;
+	}
+
+	function cancelLookup(key: number) {
+		lookupAborts.get(key)?.abort();
+		lookupAborts.delete(key);
+		const tile = tiles.find((t) => t.key === key);
+		if (tile) tile.lookup = { kind: 'idle' };
+	}
+
+	/** Undo what a previous shared prefill wrote, but only where the operator has
+	 * not typed over it since — the tag is the record of that. */
+	function resetSharedPrefill() {
+		if (sourceTagged) sourcePostUrl = '';
+		if (dateTagged) commissionedAt = '';
+		sourceTagged = false;
+		dateTagged = false;
+		sharedFilled = {};
+		appliedArtist = null;
+	}
+
+	function applyShared(next: LookupState) {
+		if (next.kind !== 'results') return;
+		const match = pickPrefillMatch(next.data.matches);
+		const fields = prefillFields(
+			match,
+			{ sourcePostUrl: sourcePostUrl.trim() === '', commissionedAt: commissionedAt.trim() === '' },
+			// The clash state deliberately leaves the URL empty: it already belongs
+			// to another piece, and copying it would make two pieces claim one post.
+			{ skipSourceUrl: !!next.data.sourceClash }
+		);
+		sharedFilled = fields;
+		if (fields.sourcePostUrl !== undefined) {
+			sourcePostUrl = fields.sourcePostUrl;
+			sourceTagged = true;
+		}
+		if (fields.commissionedAt !== undefined) {
+			commissionedAt = fields.commissionedAt;
+			dateTagged = true;
+		}
+	}
+
+	/** The parent moved: the shared fields describe whatever the parent is now. */
+	function onParentChanged(index: number) {
+		parentIndex = index;
+		resetSharedPrefill();
+		const tile = tiles[parentIndex];
+		if (tile) applyShared(tile.lookup);
+	}
+
+	function useLookupArtist(artist: { id: number; name: string }) {
+		// The option values are numbers, and the select binding compares with
+		// Object.is — a stringified id would match no option and select nothing.
+		selectedArtistId = artist.id;
+		appliedArtist = artist;
+	}
+
+	function openLookupDialog(seed: { handle: string; site: LookupSite; linkable: boolean }) {
+		artistSeed = seed;
+		showNewArtist = true;
+	}
+
+	function addAsVariant(clash: SourceClash) {
+		groupMode = 'existing';
+		existingParentId = String(clash.imageId);
+		closeSharedLookup();
+	}
+
+	function closeSharedLookup() {
+		const tile = parentTile;
+		if (tile) tile.lookup = { kind: 'idle' };
+	}
+
+	/** A variant tile whose confident match names a different local artist than
+	 * the shared one — worth flagging rather than silently rating. */
+	function differentArtist(tile: Tile): boolean {
+		if (tile.lookup.kind !== 'results' || !appliedArtist) return false;
+		const own = candidateArtists(tile.lookup.data);
+		return own.length > 0 && !own.some((a) => a.id === appliedArtist?.id);
+	}
+
+	function tileResultLine(tile: Tile): string {
+		if (tile.lookup.kind !== 'results') return '';
+		const match = pickPrefillMatch(tile.lookup.data.matches) ?? tile.lookup.data.matches[0];
+		if (!match) return '';
+		const handle = matchHandle(match) || tile.fileName;
+		const site = siteLabel(match.site);
+		if (differentArtist(tile)) return m.admin_lookup_tile_different({ handle, site });
+		return m.admin_lookup_tile_result({ handle, site, band: bandLabel(match.band) ?? '' });
+	}
+
+	function tileRatingTag(tile: Tile): string | null {
+		if (tile.lookup.kind !== 'results') return null;
+		return ratingTag(strictestRating(tile.lookup.data.matches));
+	}
+
+	function tilePostUrl(tile: Tile): string {
+		if (tile.lookup.kind !== 'results') return '';
+		const match = pickPrefillMatch(tile.lookup.data.matches) ?? tile.lookup.data.matches[0];
+		return match?.postUrl ?? '';
+	}
+
+	function tilePostSite(tile: Tile): LookupSite | null {
+		if (tile.lookup.kind !== 'results') return null;
+		const match = pickPrefillMatch(tile.lookup.data.matches) ?? tile.lookup.data.matches[0];
+		return match?.site ?? null;
 	}
 </script>
 
@@ -407,14 +604,50 @@
 						</button>
 					</div>
 					<div class="tile-meta">{tile.width} x {tile.height} &bull; {formatSize(tile.fileSize)}</div>
+					{#if data.lookupEnabled && isGroup && tile.status === 'done'}
+						<!-- One lookup per tile: the parent's result fills the shared
+						     fields, a variant's only rates that variant. The file name
+						     rides in the accessible name so a screen reader can tell the
+						     grid's buttons apart. -->
+						<button
+							type="button"
+							class="tile-lookup"
+							aria-busy={tile.lookup.kind === 'searching'}
+							onclick={() => startLookup(tile.key)}
+						>
+							<Search size={12} aria-hidden="true" />
+							{#if tile.lookup.kind === 'searching'}{m.admin_lookup_tile_searching()}
+							{:else if tile.lookup.kind === 'results' || tile.lookup.kind === 'no_match'}{m.admin_lookup_tile_done()}
+							{:else if tile.lookup.kind === 'failed'}{m.admin_lookup_tile_failed()}
+							{:else}{m.admin_lookup_button()}{/if}
+							<span class="sr-only">{m.admin_lookup_button_for({ fileName: tile.fileName })}</span>
+						</button>
+					{/if}
 					{#if isGroup}
 						{#if groupMode === 'new'}
 							<label class="tile-parent-pick">
-								<input type="radio" name="parentPick" checked={parentIndex === i} onchange={() => (parentIndex = i)} />
+								<input
+									type="radio"
+									name="parentPick"
+									checked={parentIndex === i}
+									aria-label={m.admin_lookup_parent_radio({ fileName: tile.fileName })}
+									onchange={() => onParentChanged(i)}
+								/>
 								<span>{m.admin_variant_parent_radio()}</span>
 							</label>
 						{/if}
 						{#if groupMode === 'existing' || parentIndex !== i}
+							{#if tile.lookup.kind === 'results'}
+								{@const site = tilePostSite(tile)}
+								<p class="tile-result" class:tile-result-warn={differentArtist(tile)}>{tileResultLine(tile)}</p>
+								{#if site}
+									<a class="tile-post-link" href={tilePostUrl(tile)} target="_blank" rel="noopener noreferrer">
+										{m.admin_lookup_view_post()}<span class="sr-only"
+											>{m.admin_lookup_view_post_site({ site: siteLabel(site) })}</span
+										>
+									</a>
+								{/if}
+							{/if}
 							<input
 								type="text"
 								class="input tile-label"
@@ -422,10 +655,28 @@
 								placeholder={m.admin_variant_label_placeholder()}
 								bind:value={tile.label}
 							/>
-							<label class="tile-nsfw">
-								<input type="checkbox" name="nsfw_{i}" bind:checked={tile.nsfw} />
-								<span>{m.admin_field_mark_nsfw()}</span>
-							</label>
+							{@const tileTag = tileRatingTag(tile)}
+							<!-- The pill is a SIBLING of the label, not inside it: inside, it
+							     would join the checkbox's accessible name and a click on it
+							     would toggle the box (SONA-220). -->
+							<div class="tile-nsfw-row">
+								<label class="tile-nsfw">
+									<input
+										type="checkbox"
+										name="nsfw_{i}"
+										bind:checked={tile.nsfw}
+										aria-describedby={tileTag ? `tile-rating-${tile.key}` : undefined}
+									/>
+									<span
+										>{m.admin_field_mark_nsfw()}<span class="sr-only"
+											>{m.admin_lookup_nsfw_for_file({ fileName: tile.fileName })}</span
+										></span
+									>
+								</label>
+								{#if tileTag}
+									<span class="rating-tag" id="tile-rating-{tile.key}">{tileTag}</span>
+								{/if}
+							</div>
 						{/if}
 					{/if}
 				</div>
@@ -491,16 +742,63 @@
 		<legend>{m.admin_field_artist()}</legend>
 		<label>
 			<span>{m.admin_field_artist()}</span>
-			<select class="input" name="artistId" bind:value={selectedArtistId} required>
+			<select
+				class="input"
+				name="artistId"
+				bind:value={selectedArtistId}
+				onchange={() => (appliedArtist = null)}
+				required
+			>
 				<option value="">{m.admin_upload_select_artist()}</option>
 				{#each artistList as artist}
 					<option value={artist.id}>{artist.name}</option>
 				{/each}
 			</select>
 		</label>
-		<button type="button" class="add-artist-btn" onclick={() => (showNewArtist = true)}>
-			<Plus size={14} /> {m.admin_upload_add_new_artist()}
-		</button>
+		<div class="artist-actions">
+			{#if data.lookupEnabled && !isGroup && tiles.length === 1 && tiles[0].status === 'done'}
+				<button
+					type="button"
+					class="lookup-pill"
+					aria-describedby="lookup-hint"
+					aria-disabled={sharedLookup.kind === 'searching'}
+					onclick={() => startLookup(tiles[0].key)}
+				>
+					<Search size={14} aria-hidden="true" /> {m.admin_lookup_button()}
+				</button>
+			{/if}
+			<button type="button" class="add-artist-btn" onclick={() => { artistSeed = null; showNewArtist = true; }}>
+				<Plus size={14} /> {m.admin_upload_add_new_artist()}
+			</button>
+		</div>
+		{#if data.lookupEnabled}
+			<small class="hint" class:hint-warn={isPrivate} id="lookup-hint">
+				{#if isGroup}{m.admin_lookup_hint_multi()}
+				{:else if isPrivate}{m.admin_lookup_hint_private()}
+				{:else}{m.admin_lookup_hint()}{/if}
+			</small>
+		{:else}
+			<small class="hint" id="lookup-hint">
+				{m.admin_lookup_no_key_pre()}<a class="link" href="/admin/settings?tab=connections"
+					>{m.admin_lookup_no_key_link()}</a
+				>{m.admin_lookup_no_key_post()}
+			</small>
+		{/if}
+		{#if groupMode === 'new'}
+			<ArtistLookupPanel
+				lookup={sharedLookup}
+				fileName={tiles.length > 1 ? (parentTile?.fileName ?? '') : ''}
+				filled={sharedFilled}
+				{appliedArtist}
+				privateNotice={isPrivate && sharedLookup.kind === 'results'}
+				onclose={closeSharedLookup}
+				onretry={() => parentTile && startLookup(parentTile.key)}
+				oncancel={() => parentTile && cancelLookup(parentTile.key)}
+				onuseartist={useLookupArtist}
+				onaddnew={openLookupDialog}
+				onaddvariant={addAsVariant}
+			/>
+		{/if}
 	</fieldset>
 
 	<div class="row">
@@ -544,19 +842,50 @@
 		</div>
 	{/if}
 
-	<label>
-		<span>{m.admin_field_commissioned_date()}</span>
-		<input type="date" class="input" name="commissionedAt" />
+	<!-- The label wraps only its own text; the "From lookup" pill sits after it
+	     as a sibling and is referenced with aria-describedby, so the input's
+	     accessible name stays the field name (SONA-220). -->
+	<div class="field">
+		<div class="label-row">
+			<label class="field-label" for="commissionedAt">{m.admin_field_commissioned_date()}</label>
+			{#if dateTagged}
+				<span class="lookup-tag" id="commissioned-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+			{/if}
+		</div>
+		<input
+			id="commissionedAt"
+			type="date"
+			class="input"
+			name="commissionedAt"
+			bind:value={commissionedAt}
+			oninput={() => (dateTagged = false)}
+			aria-describedby={dateTagged ? 'commissioned-lookup-tag' : undefined}
+		/>
 		<small class="hint">{m.admin_hint_commissioned_date()}</small>
-	</label>
+	</div>
+
+	<div class="nsfw-row">
+		<label class="checkbox-label">
+			<input
+				type="checkbox"
+				name="nsfw"
+				aria-describedby={sharedRatingTag ? 'shared-rating-tag' : undefined}
+			/>
+			<span
+				>{m.admin_field_mark_nsfw()}{#if tiles.length > 1}<span class="sr-only"
+						>{m.admin_lookup_nsfw_for_parent()}</span
+					>{/if}</span
+			>
+		</label>
+		<!-- Never checked by a lookup: the rating is what the sites said, and the
+		     call about this gallery stays the operator's. -->
+		{#if sharedRatingTag}
+			<span class="rating-tag" id="shared-rating-tag">{sharedRatingTag}</span>
+		{/if}
+	</div>
 
 	<label class="checkbox-label">
-		<input type="checkbox" name="nsfw" />
-		<span>{m.admin_field_mark_nsfw()}</span>
-	</label>
-
-	<label class="checkbox-label">
-		<input type="checkbox" name="published" />
+		<input type="checkbox" name="published" bind:checked={isPrivate} />
 		<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
 	</label>
 
@@ -567,10 +896,24 @@
 		</label>
 	{/if}
 
-	<label>
-		<span>{m.admin_field_source_url()}</span>
-		<input type="url" class="input" placeholder={m.admin_upload_source_placeholder()} name="sourcePostUrl" />
-	</label>
+	<div class="field">
+		<div class="label-row">
+			<label class="field-label" for="sourcePostUrl">{m.admin_field_source_url()}</label>
+			{#if sourceTagged}
+				<span class="lookup-tag" id="source-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+			{/if}
+		</div>
+		<input
+			id="sourcePostUrl"
+			type="url"
+			class="input"
+			placeholder={m.admin_upload_source_placeholder()}
+			name="sourcePostUrl"
+			bind:value={sourcePostUrl}
+			oninput={() => (sourceTagged = false)}
+			aria-describedby={sourceTagged ? 'source-lookup-tag' : undefined}
+		/>
+	</div>
 
 	<div class="form-actions">
 		<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
@@ -583,8 +926,17 @@
 {#if showNewArtist}
 	<NewArtistDialog
 		registryEnabled={data.registryEnabled}
+		initialName={artistSeed?.handle ?? ''}
+		initialSocials={artistSeed && artistSeed.linkable
+			? {
+					[artistSeed.site === 'Twitter' ? 'twitter' : 'furaffinity']:
+						profileUrlFor(artistSeed.site, artistSeed.handle) ?? ''
+				}
+			: undefined}
+		prefillSource={artistSeed ? 'lookup' : undefined}
+		prefillSite={artistSeed && artistSeed.linkable ? siteLabel(artistSeed.site) : ''}
 		oncreated={onArtistCreated}
-		oncancel={() => (showNewArtist = false)}
+		oncancel={() => { showNewArtist = false; artistSeed = null; }}
 	/>
 {/if}
 
@@ -960,6 +1312,108 @@
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
+	}
+
+	/* Artist lookup (SONA-156) */
+	.artist-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.lookup-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 12px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		background: transparent;
+		color: var(--foreground);
+		font-size: 13px;
+		font-family: inherit;
+		cursor: pointer;
+	}
+
+	/* aria-disabled, not `disabled`: a keyboard user mid-lookup keeps the focus
+	   they had. The click guard in startLookup is what actually refuses. */
+	.lookup-pill[aria-disabled='true'] {
+		background: var(--secondary);
+		color: var(--muted-foreground);
+		cursor: default;
+	}
+
+	.hint-warn {
+		color: var(--status-warn);
+	}
+
+	.tile-lookup {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 0;
+		border: 0;
+		background: none;
+		color: var(--link);
+		font-size: 12px;
+		font-family: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.tile-result {
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin: 0;
+		line-height: 1.4;
+	}
+
+	.tile-result-warn {
+		color: var(--status-warn);
+	}
+
+	.tile-post-link {
+		font-size: 12px;
+		color: var(--link);
+	}
+
+	.label-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.lookup-tag {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		padding: 1px 8px;
+		white-space: nowrap;
+	}
+
+	/* The rating never changes the checkbox — it reports what the sites said and
+	   sits beside it. nowrap so the sentence stays one unit, and the row wraps
+	   the whole pill to its own line when it no longer fits. */
+	.nsfw-row,
+	.tile-nsfw-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.rating-tag {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		padding: 1px 8px;
+		white-space: nowrap;
 	}
 
 	.field-label {

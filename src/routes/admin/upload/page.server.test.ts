@@ -13,6 +13,8 @@ import { makeD1 } from '$lib/server/test/d1';
 function makeDb() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec(`
+		-- The load resolves the FuzzySearch key from here (SONA-156).
+		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE artists (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT, twitter_url TEXT,
 			bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT, deviantart_url TEXT, patreon_url TEXT,

@@ -25,17 +25,37 @@
 		/** Whether the shared registry is connected — passed from page load so the
 		 *  registry search UI is decided BEFORE the modal renders (no flash-then-hide). */
 		registryEnabled?: boolean;
+		/** Seed the name field (SONA-156: the handle an image match named). */
+		initialName?: string;
+		/** Seed social fields with full profile URLs, keyed by the column name. */
+		initialSocials?: Partial<Record<'twitter' | 'furaffinity', string>>;
+		/** Where the seed came from. 'lookup' adds the disclosure that Sona
+		 * guessed these values, and runs the registry search once on open. */
+		prefillSource?: 'lookup';
+		/** The site the lookup filled from, named in that disclosure. Empty when
+		 * only the name was filled (Weasyl and e621 have no artist column). */
+		prefillSite?: string;
 	}
-	let { oncreated, oncancel, title = m.admin_new_artist_title(), onimportedall, registryEnabled = false }: Props = $props();
+	let {
+		oncreated,
+		oncancel,
+		title = m.admin_new_artist_title(),
+		onimportedall,
+		registryEnabled = false,
+		initialName = '',
+		initialSocials,
+		prefillSource,
+		prefillSite = ''
+	}: Props = $props();
 
 	// Mirrors the Edit Artist modal on /admin/artists, but creates via the
 	// /api/artists endpoint (AJAX) so the caller gets the new id back immediately
 	// and can use it in dropdowns without a page reload.
-	let name = $state('');
-	let twitter = $state('');
+	let name = $state(initialName);
+	let twitter = $state(initialSocials?.twitter ?? '');
 	let bluesky = $state('');
 	let telegram = $state('');
-	let furaffinity = $state('');
+	let furaffinity = $state(initialSocials?.furaffinity ?? '');
 	let deviantart = $state('');
 	let patreon = $state('');
 	let instagram = $state('');
@@ -124,6 +144,11 @@
 	// search box's presence is decided before render. When on, fetch the catalog
 	// import plan for the footer + "Import all" flow.
 	onMount(async () => {
+		// A lookup-seeded name has never been through oninput, so nothing has
+		// searched the registry for it. Go through onNameInput rather than
+		// searchRegistry directly, so the handle-vs-name classification and the
+		// debounce apply exactly as they would to a typed name (SONA-156).
+		if (prefillSource === 'lookup') onNameInput();
 		if (!registryEnabled) return;
 		try {
 			const res = await fetch('/api/registry/import');
@@ -361,6 +386,21 @@
 			<button class="icon-btn" onclick={oncancel} aria-label={m.admin_close()}><X size={18} /></button>
 		</div>
 
+		{#if prefillSource === 'lookup'}
+			<!-- These values came from a reverse image search, not from the artist.
+			     Say so before the operator publishes them under their own name. -->
+			<div class="guess-lines">
+				<p class="guess-line">
+					{prefillSite
+						? m.admin_lookup_guess_line_site({ site: prefillSite })
+						: m.admin_lookup_guess_line_name()}
+				</p>
+				{#if registryEnabled}
+					<p class="guess-line">{m.admin_lookup_guess_line_registry()}</p>
+				{/if}
+			</div>
+		{/if}
+
 		{#if errorMsg}<div class="err">{errorMsg}</div>{/if}
 
 		<div class="modal-form">
@@ -451,11 +491,17 @@
 
 			<div class="social-section">
 				<h3>{m.admin_artists_col_social()}</h3>
-				<div class="social-grid">
-					<label class="social-field"><TwitterIcon size={14} /><span class="sr-only">Twitter</span><input type="text" class="input" bind:value={twitter} placeholder="@handle" /></label>
+				{#if prefillSource === 'lookup' && prefillSite}
+					<p class="prefill-mark">
+						<span class="lookup-tag">{m.admin_lookup_from_lookup()}</span>
+						{prefillSite}
+					</p>
+				{/if}
+				<div class="social-grid" class:has-prefill={prefillSource === 'lookup' && prefillSite}>
+					<label class="social-field" class:span-full={!!initialSocials?.twitter}><TwitterIcon size={14} /><span class="sr-only">Twitter</span><input type="text" class="input" bind:value={twitter} placeholder="@handle" /></label>
 					<label class="social-field"><BlueskyIcon size={14} /><span class="sr-only">Bluesky</span><input type="text" class="input" bind:value={bluesky} placeholder="lunarpaws.bsky.social" /></label>
 					<label class="social-field"><TelegramIcon size={14} /><span class="sr-only">Telegram</span><input type="text" class="input" bind:value={telegram} placeholder="t.me/lunarpaws" /></label>
-					<label class="social-field"><FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span><input type="text" class="input" bind:value={furaffinity} placeholder="furaffinity.net/user/lunarpaws" /></label>
+					<label class="social-field" class:span-full={!!initialSocials?.furaffinity}><FurAffinityIcon size={14} /><span class="sr-only">FurAffinity</span><input type="text" class="input" bind:value={furaffinity} placeholder="furaffinity.net/user/lunarpaws" /></label>
 					<label class="social-field"><DeviantArtIcon size={14} /><span class="sr-only">DeviantArt</span><input type="text" class="input" bind:value={deviantart} placeholder="deviantart.com/..." /></label>
 					<label class="social-field"><PatreonIcon size={14} /><span class="sr-only">Patreon</span><input type="text" class="input" bind:value={patreon} placeholder="patreon.com/lunarpaws" /></label>
 					<label class="social-field"><InstagramIcon size={14} /><span class="sr-only">Instagram</span><input type="text" class="input" bind:value={instagram} placeholder="instagram.com/..." /></label>
@@ -527,6 +573,13 @@
 	.social-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 	.social-field { flex-direction: row; align-items: center; gap: 8px; color: var(--muted-foreground); }
 	.social-field .input { flex: 1; }
+	/* A lookup-filled profile URL is long — it gets the whole row rather than
+	   half of one (SONA-156). */
+	.social-grid.has-prefill .social-field.span-full { grid-column: 1 / -1; }
+	.guess-lines { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+	.guess-line { font-size: 13px; color: var(--muted-foreground); line-height: 1.5; margin: 0; }
+	.prefill-mark { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); margin: 0 0 6px; }
+	.lookup-tag { font-family: var(--font-primary); font-size: 11px; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 1px 8px; white-space: nowrap; }
 	.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 	.name-block { display: flex; flex-direction: column; gap: 6px; }
 	.field-label { font-size: 12px; color: var(--muted-foreground); }
