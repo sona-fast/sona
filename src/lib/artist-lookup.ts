@@ -391,31 +391,69 @@ export function newArtistSeed(
 	return seed;
 }
 
+/**
+ * Which of the fields a lookup filled the operator has typed over since. The
+ * record of what was filled never changes — this is the separate, mutable half
+ * of it, and a field the lookup never filled cannot appear here at all.
+ */
+export interface SeedEdited {
+	artistName?: boolean;
+	profileUrl?: boolean;
+}
+
 /** Which sentence names what the seed actually wrote. */
 export type SeedStatusKind = 'both' | 'name_only' | 'link_only' | 'none';
 
-export function seedStatusKind(seed: NewArtistSeed): SeedStatusKind {
-	const name = seed.artistName !== undefined;
-	const link = seed.profileUrl !== undefined;
+/** Only the fields still attributable to the lookup are named: a seeded field
+ * the operator typed over is theirs now, and neither sentence half claims it.
+ * `name_only` and `link_only` say nothing about the other field, so they hold
+ * whether it was never seeded or seeded and then edited. */
+export function seedStatusKind(seed: NewArtistSeed, edited: SeedEdited = {}): SeedStatusKind {
+	const name = seed.artistName !== undefined && !edited.artistName;
+	const link = seed.profileUrl !== undefined && !edited.profileUrl;
 	if (name && link) return 'both';
 	if (name) return 'name_only';
 	if (link) return 'link_only';
 	return 'none';
 }
 
-/** Which sentence describes what the prefill actually did. */
-export type StatusLineKind = 'both' | 'url_only' | 'date_only' | 'clash' | 'none';
+/** The two form fields' half of `SeedEdited`. */
+export interface LookupEdited {
+	sourcePostUrl?: boolean;
+	commissionedAt?: boolean;
+}
 
+/** Which sentence describes what the prefill actually did. */
+export type StatusLineKind =
+	| 'both'
+	| 'url_only'
+	| 'date_only'
+	| 'url_kept'
+	| 'date_kept'
+	| 'clash'
+	| 'none';
+
+/**
+ * The sentence names only the fields still attributable to the lookup, and
+ * asserts nothing about one the operator has edited since. `url_only` says the
+ * date was "left as it was", which is true of a date the lookup never filled
+ * and false of one it filled and the operator then changed — that case gets
+ * `url_kept`, which claims the URL and stays silent about the date. `date_kept`
+ * is the mirror.
+ */
 export function statusLineKind(
 	filled: LookupFields,
-	options: { clash?: boolean } = {}
+	options: { clash?: boolean; edited?: LookupEdited } = {}
 ): StatusLineKind {
-	const url = filled.sourcePostUrl !== undefined;
-	const date = filled.commissionedAt !== undefined;
+	const edited = options.edited ?? {};
+	const urlFilled = filled.sourcePostUrl !== undefined;
+	const dateFilled = filled.commissionedAt !== undefined;
+	const url = urlFilled && !edited.sourcePostUrl;
+	const date = dateFilled && !edited.commissionedAt;
 	if (options.clash) return date ? 'clash' : 'none';
 	if (url && date) return 'both';
-	if (url) return 'url_only';
-	if (date) return 'date_only';
+	if (url) return dateFilled ? 'url_kept' : 'url_only';
+	if (date) return urlFilled ? 'date_kept' : 'date_only';
 	return 'none';
 }
 

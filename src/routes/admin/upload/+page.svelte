@@ -374,7 +374,15 @@
 	let sourceTagged = $state(false);
 	let dateTagged = $state(false);
 	// What the last shared prefill actually wrote, for the panel's status line.
+	// Never edited afterwards: it is the record of what the lookup did, and a
+	// field the operator types over stops being attributable through the flags
+	// below instead (SONA-156). The tag is that record — it goes up with the
+	// prefill and comes off on the first keystroke.
 	let sharedFilled = $state<LookupFields>({});
+	const sharedEdited = $derived({
+		sourcePostUrl: sharedFilled.sourcePostUrl !== undefined && !sourceTagged,
+		commissionedAt: sharedFilled.commissionedAt !== undefined && !dateTagged
+	});
 	// The artist this result put in the select, so "Use X" can read back as
 	// "Using X" and revert when the operator changes the select by hand.
 	let appliedArtist = $state<{ id: number; name: string } | null>(null);
@@ -875,6 +883,7 @@
 				lookup={sharedLookup}
 				fileName={tiles.length > 1 ? (parentTile?.fileName ?? '') : ''}
 				filled={sharedFilled}
+				edited={sharedEdited}
 				{appliedArtist}
 				privateNotice={isPrivate && lookupSentFile(sharedLookup)}
 				onclose={closeSharedLookup}
@@ -949,10 +958,10 @@
 			name="commissionedAt"
 			bind:value={commissionedAt}
 			oninput={() => {
+				// The panel's status line reads the filled record through this tag: a
+				// field typed over stops being the lookup's, and the sentence then
+				// neither claims it nor says it was left alone.
 				dateTagged = false;
-				// The panel's status line reads this record rather than the tag, so a
-				// field typed over has to leave both.
-				sharedFilled = { ...sharedFilled, commissionedAt: undefined };
 			}}
 			aria-describedby={dateTagged ? 'commissioned-lookup-tag' : undefined}
 		/>
@@ -1007,7 +1016,6 @@
 			bind:value={sourcePostUrl}
 			oninput={() => {
 				sourceTagged = false;
-				sharedFilled = { ...sharedFilled, sourcePostUrl: undefined };
 			}}
 			aria-describedby={sourceTagged ? 'source-lookup-tag' : undefined}
 		/>

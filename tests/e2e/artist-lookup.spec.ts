@@ -219,8 +219,8 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
 
-		// The status line reads the filled record rather than the tags, so it says
-		// both fields until one of them is typed over.
+		// The status line names the fields still attributable to the lookup, so it
+		// says both until one of them is typed over.
 		await expect(panel(page)).toContainText(
 			'Sona filled the source post URL and commissioned date'
 		);
@@ -231,11 +231,20 @@ test.describe('with a key saved', () => {
 			'aria-describedby',
 			'commissioned-lookup-tag'
 		);
-		// The other field's tag is untouched, and so is its half of the line.
+		// The other field's tag is untouched, and so is its half of the line. The
+		// edited date is neither claimed nor called untouched: "left the commissioned
+		// date as it was" would be a false claim about a date Sona filled itself.
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 		await expect(panel(page)).toContainText(
-			'Sona filled the source post URL from the FurAffinity post and left the commissioned date as it was.'
+			'Sona filled the source post URL from the FurAffinity post. You can change it before you save.'
 		);
+		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
+
+		// Typing over the second filled field leaves nothing attributable, so the
+		// line goes away rather than claiming a field the operator now owns.
+		await page.fill('input[name="sourcePostUrl"]', 'https://example.com/mine');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(panel(page)).not.toContainText('Sona filled the source post URL');
 	});
 
 	test('Use artist applies it, and changing the select by hand reverts the button', async ({
@@ -493,12 +502,15 @@ test.describe('with a key saved', () => {
 		await stubLookup(
 			page,
 			matchedBody({
+				// The picked artist is listed SECOND on purpose: the select already
+				// holds the first one, so a build that applied candidates[0] instead
+				// of the radio would pass a test that picked the first row.
 				localArtists: [
 					{
 						matchIndex: 0,
 						artists: [
-							{ id: 1, name: 'Test Artist', pieces: 3 },
-							{ id: 2, name: 'Avatar Artist', pieces: 1 }
+							{ id: 2, name: 'Avatar Artist', pieces: 1 },
+							{ id: 1, name: 'Test Artist', pieces: 3 }
 						]
 					}
 				],
@@ -595,10 +607,13 @@ test.describe('with a key saved', () => {
 			'https://www.furaffinity.net/user/kuttoya/'
 		);
 		await expect(page.locator('#furaffinity-lookup-tag')).toBeVisible();
+		await expect(panel(page)).toContainText("Sona filled the new artist's FurAffinity link.");
 
-		// Editing the seeded field drops its tag, like every other lookup tag.
+		// Editing the seeded field drops its tag, like every other lookup tag —
+		// and with it the sentence, which has no seeded field left to name.
 		await page.fill('input[name="furaffinity"]', 'furaffinity.net/user/someone/');
 		await expect(page.locator('#furaffinity-lookup-tag')).toHaveCount(0);
+		await expect(panel(page)).not.toContainText("Sona filled the new artist's");
 	});
 
 	// SvelteKit reuses one component across a route-param change, so an edit page

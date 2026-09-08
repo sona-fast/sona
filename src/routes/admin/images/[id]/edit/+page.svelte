@@ -62,6 +62,20 @@
 	let nameTagged = $state(false);
 	let twitterTagged = $state(false);
 	let furaffinityTagged = $state(false);
+	// Both records above are written once per lookup and never edited: they say
+	// what the lookup did. Whether a filled field is still attributable to it is
+	// the tag's job, and these read the two together so the status lines name
+	// only the fields the operator has not typed over (SONA-156). The seed writes
+	// its link to whichever of the two social fields matches the site, so either
+	// tag standing means the seeded link is still the lookup's.
+	const lookupEdited = $derived({
+		sourcePostUrl: lookupFilled.sourcePostUrl !== undefined && !sourceTagged,
+		commissionedAt: lookupFilled.commissionedAt !== undefined && !dateTagged
+	});
+	const lookupSeedEdited = $derived({
+		artistName: lookupSeeded.artistName !== undefined && !nameTagged,
+		profileUrl: lookupSeeded.profileUrl !== undefined && !twitterTagged && !furaffinityTagged
+	});
 	let lookupAbort: AbortController | null = null;
 	// The artist select sits above the panel and the panel's own status region
 	// does not change when an artist is applied, so this is the only thing that
@@ -365,7 +379,9 @@
 				<ArtistLookupPanel
 					{lookup}
 					filled={lookupFilled}
+					edited={lookupEdited}
 					seeded={lookupSeeded}
+					seedEdited={lookupSeedEdited}
 					{appliedArtist}
 					editMode
 					variantBlocked={data.hasVariants}
@@ -585,10 +601,10 @@
 				name="commissionedAt"
 				bind:value={commissionedAt}
 				oninput={() => {
+					// The panel's status line reads the filled record through this tag: a
+					// field typed over stops being the lookup's, and the sentence then
+					// neither claims it nor says it was left alone.
 					dateTagged = false;
-					// The panel's status line reads this record rather than the tag, so a
-					// field typed over has to leave both.
-					lookupFilled = { ...lookupFilled, commissionedAt: undefined };
 				}}
 				aria-describedby={dateTagged ? 'commissioned-lookup-tag' : undefined}
 			/>
@@ -643,7 +659,6 @@
 				bind:value={sourcePostUrl}
 				oninput={() => {
 					sourceTagged = false;
-					lookupFilled = { ...lookupFilled, sourcePostUrl: undefined };
 				}}
 				aria-describedby={sourceTagged ? 'source-lookup-tag' : undefined}
 			/>

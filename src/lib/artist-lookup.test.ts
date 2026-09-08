@@ -486,6 +486,19 @@ describe('seedStatusKind', () => {
 		expect(seedStatusKind({ profileUrl: 'u' })).toBe('link_only');
 		expect(seedStatusKind({})).toBe('none');
 	});
+
+	// The seed record is immutable, so a field the operator typed over is dropped
+	// by the edited-since flags rather than by rewriting what the lookup did. The
+	// remaining sentence claims only the other field — neither name_only nor
+	// link_only says anything about the one that is gone (SONA-156 round 10).
+	it('drops a seeded field the operator typed over', () => {
+		const seed = { artistName: 'k', profileUrl: 'u' };
+		expect(seedStatusKind(seed, { profileUrl: true })).toBe('name_only');
+		expect(seedStatusKind(seed, { artistName: true })).toBe('link_only');
+		expect(seedStatusKind(seed, { artistName: true, profileUrl: true })).toBe('none');
+		// A field the seed never wrote cannot be edited-since; the flag is inert.
+		expect(seedStatusKind({ artistName: 'k' }, { profileUrl: true })).toBe('name_only');
+	});
 });
 
 describe('matchForArtist', () => {
@@ -523,6 +536,54 @@ describe('statusLineKind', () => {
 		expect(statusLineKind({ sourcePostUrl: 'u' })).toBe('url_only');
 		expect(statusLineKind({ commissionedAt: 'd' })).toBe('date_only');
 		expect(statusLineKind({})).toBe('none');
+	});
+
+	// Dropping an edited field from the record used to reclassify it as untouched,
+	// so url_only claimed Sona "left the commissioned date as it was" about a date
+	// it had filled and the operator then changed. The record stays put and the
+	// edited flags decide what is still attributable (SONA-156 round 10).
+	it('says nothing about a filled field the operator typed over', () => {
+		const both = { sourcePostUrl: 'u', commissionedAt: 'd' };
+		expect(statusLineKind(both, { edited: { commissionedAt: true } })).toBe('url_kept');
+		expect(statusLineKind(both, { edited: { sourcePostUrl: true } })).toBe('date_kept');
+		expect(statusLineKind(both, { edited: { sourcePostUrl: true, commissionedAt: true } })).toBe(
+			'none'
+		);
+		// A field the lookup never filled is not edited-since: the sentence may
+		// still say it was left as it was.
+		expect(statusLineKind({ sourcePostUrl: 'u' }, { edited: { commissionedAt: true } })).toBe(
+			'url_only'
+		);
+		expect(statusLineKind({ commissionedAt: 'd' }, { edited: { sourcePostUrl: true } })).toBe(
+			'date_only'
+		);
+	});
+
+	// The kept sentences name their own field and stop; the "left alone" half is
+	// exactly the claim that would be false.
+	it('claims only the kept field in both locales', () => {
+		expect(m.admin_lookup_status_url_kept({ site: 'FurAffinity' }, { locale: 'en' })).toBe(
+			'Sona filled the source post URL from the FurAffinity post. You can change it before you save.'
+		);
+		expect(m.admin_lookup_status_date_kept({ site: 'FurAffinity' }, { locale: 'en' })).toBe(
+			'Sona filled the commissioned date from the FurAffinity post. You can change it before you save.'
+		);
+		for (const locale of ['en', 'ja'] as const) {
+			for (const line of [
+				m.admin_lookup_status_url_kept({ site: 'FurAffinity' }, { locale }),
+				m.admin_lookup_status_date_kept({ site: 'FurAffinity' }, { locale })
+			]) {
+				expect(line).not.toMatch(/as it was|そのまま/);
+			}
+		}
+	});
+
+	// The clash sentence says the URL was left EMPTY, which stays true however
+	// the date is edited — but an edited date is no longer Sona's to claim.
+	it('drops the clash sentence once the date it names is typed over', () => {
+		expect(
+			statusLineKind({ commissionedAt: 'd' }, { clash: true, edited: { commissionedAt: true } })
+		).toBe('none');
 	});
 
 	it('says the clash sentence only when the date was filled', () => {

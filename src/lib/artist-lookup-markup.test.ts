@@ -253,22 +253,60 @@ describe('the "From lookup" tag', () => {
 		}
 	});
 
-	// The tag is not the only record of a prefilled field: the panel's status
-	// line reads the filled record, so a field typed over has to leave both or
-	// the line goes on claiming a URL that is no longer the lookup's (SONA-156
-	// round 9).
-	it('drops the edited field from the record the status line reads', () => {
-		for (const [source, record] of [
-			[UPLOAD, 'sharedFilled'],
-			[EDIT, 'lookupFilled']
+	// The record of what the lookup filled is immutable: dropping the edited field
+	// from it reclassified that field as untouched, and the status line then said
+	// Sona "left the commissioned date as it was" about a date it had filled and
+	// the operator had changed. Edited-since is tracked beside the record, off the
+	// tag, and only the status line's wording changes (SONA-156 round 10).
+	it('keeps the filled record immutable and tracks edited-since off the tag', () => {
+		for (const [source, record, edited] of [
+			[UPLOAD, 'sharedFilled', 'sharedEdited'],
+			[EDIT, 'lookupFilled', 'lookupEdited']
 		] as const) {
+			// Nothing writes the record but the prefill and the resets.
+			expect(source).not.toMatch(new RegExp(`${record} = \\{ \\.\\.\\.${record}`));
 			expect(source).toMatch(
-				new RegExp(`dateTagged = false;[\\s\\S]{0,200}?${record} = \\{ \\.\\.\\.${record}, commissionedAt: undefined \\}`)
+				new RegExp(
+					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,300}?sourcePostUrl: ${record}\\.sourcePostUrl !== undefined && !sourceTagged`
+				)
 			);
 			expect(source).toMatch(
-				new RegExp(`sourceTagged = false;[\\s\\S]{0,200}?${record} = \\{ \\.\\.\\.${record}, sourcePostUrl: undefined \\}`)
+				new RegExp(
+					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,300}?commissionedAt: ${record}\\.commissionedAt !== undefined && !dateTagged`
+				)
 			);
+			// And the panel is handed both halves.
+			expect(source).toMatch(new RegExp(`filled=\\{${record}\\}\\s*\\n\\s*edited=\\{${edited}\\}`));
 		}
+	});
+
+	// The seeded inline fields follow the same rule: a seeded field the operator
+	// typed over is neither claimed nor described, and when none is left the seed
+	// line goes away (SONA-156 round 10).
+	it('tracks edited-since for the three seeded fields too', () => {
+		expect(EDIT).not.toMatch(/lookupSeeded = \{ \.\.\.lookupSeeded/);
+		expect(EDIT).toMatch(
+			/const lookupSeedEdited = \$derived\(\{[\s\S]{0,300}?artistName: lookupSeeded\.artistName !== undefined && !nameTagged/
+		);
+		// The seed writes its link to whichever social field matches the site, so
+		// either tag still standing means the link is still the lookup's.
+		expect(EDIT).toMatch(
+			/const lookupSeedEdited = \$derived\(\{[\s\S]{0,300}?profileUrl: lookupSeeded\.profileUrl !== undefined && !twitterTagged && !furaffinityTagged/
+		);
+		expect(EDIT).toMatch(/seeded=\{lookupSeeded\}\s*\n\s*seedEdited=\{lookupSeedEdited\}/);
+	});
+
+	// The panel's sentences: a kept field is named, the edited one is not
+	// mentioned at all, and the region is atomic so the change is heard once per
+	// edited field rather than once per keystroke.
+	it('has a sentence that claims only the field still attributable', () => {
+		expect(PANEL).toContain("statusKind === 'url_kept'");
+		expect(PANEL).toContain("statusKind === 'date_kept'");
+		expect(PANEL).toContain('m.admin_lookup_status_url_kept(');
+		expect(PANEL).toContain('m.admin_lookup_status_date_kept(');
+		expect(PANEL).toMatch(/statusLineKind\(filled, \{ clash: !!clash, edited \}\)/);
+		expect(PANEL).toMatch(/seedStatusKind\(seeded, seedEdited\)/);
+		expect(PANEL).toMatch(/once per\s*\n?\s*(?:\/\/|\s)*field, not once per keystroke/);
 	});
 
 	// The inline new-artist form is subject to the same never-overwrite rule:

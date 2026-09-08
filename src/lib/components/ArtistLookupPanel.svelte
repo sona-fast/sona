@@ -24,11 +24,13 @@
 		siteLabel,
 		statusLineKind,
 		type ArtistChoice,
+		type LookupEdited,
 		type LookupFields,
 		type LookupMatch,
 		type LookupSite,
 		type LookupState,
 		type NewArtistSeed,
+		type SeedEdited,
 		type SourceClash
 	} from '$lib/artist-lookup';
 
@@ -36,12 +38,19 @@
 		lookup: LookupState;
 		/** Multi-tile only: the parent tile's file name, appended to the eyebrow. */
 		fileName?: string;
-		/** What the page's prefill actually wrote, for the status line. */
+		/** What the page's prefill actually wrote, for the status line. This record
+		 * is immutable — it describes the lookup, not the form as it stands now. */
 		filled?: LookupFields;
+		/** Which of those fields the operator has typed over since. An edited field
+		 * is no longer the lookup's, so the sentence stops claiming it AND stops
+		 * saying it was left alone. */
+		edited?: LookupEdited;
 		/** What the page seeded into an inline new-artist form, for the status
 		 * line — the seed is subject to the same never-overwrite rule, so the
 		 * sentence has to say which of the two fields it actually filled. */
 		seeded?: NewArtistSeed;
+		/** `edited`, for the seeded fields — same rule, same reason. */
+		seedEdited?: SeedEdited;
 		/** The artist currently applied from this result, if any. */
 		appliedArtist?: { id: number; name: string } | null;
 		/** The image is private and the file went out anyway — say so. */
@@ -65,7 +74,9 @@
 		lookup,
 		fileName = '',
 		filled = {},
+		edited = {},
 		seeded = {},
+		seedEdited = {},
 		appliedArtist = null,
 		privateNotice = false,
 		editMode = false,
@@ -95,8 +106,8 @@
 	const nameHits = $derived(data ? nameMatchArtists(data) : []);
 	const clash = $derived(data?.sourceClash ?? null);
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
-	const statusKind = $derived(statusLineKind(filled, { clash: !!clash }));
-	const seedKind = $derived(seedStatusKind(seeded));
+	const statusKind = $derived(statusLineKind(filled, { clash: !!clash, edited }));
+	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
 	// "Uploaded {date} · {artist} · {w} x {h}", with any part dropped when the row
 	// has no answer for it rather than spelled out as a blank.
 	const clashMeta = $derived.by(() => {
@@ -140,7 +151,13 @@
 <!-- The panel and its live region are ALWAYS in the DOM, collapsed to nothing
      while idle. A role="status" inserted together with its first content is
      commonly missed by screen readers, and that first content is "Sending the
-     image to FuzzySearch." — the one message that says the lookup started. -->
+     image to FuzzySearch." — the one message that says the lookup started.
+
+     The region is atomic, so every change to the status line re-speaks the whole
+     panel. What the lookup filled is a fixed record and only the edited-since
+     flags move, and a flag flips on the FIRST keystroke in a field and not
+     again — so an operator revising a filled field hears the panel once per
+     field, not once per keystroke. -->
 <div
 	class="lookup-panel"
 	class:idle={lookup.kind === 'idle'}
@@ -323,6 +340,10 @@
 							{m.admin_lookup_status_both({ site: siteLabel(prefill.site) })}
 						{:else if statusKind === 'url_only'}
 							{m.admin_lookup_status_url_only({ site: siteLabel(prefill.site) })}
+						{:else if statusKind === 'url_kept'}
+							{m.admin_lookup_status_url_kept({ site: siteLabel(prefill.site) })}
+						{:else if statusKind === 'date_kept'}
+							{m.admin_lookup_status_date_kept({ site: siteLabel(prefill.site) })}
 						{:else if statusKind === 'clash'}
 							{m.admin_lookup_status_clash({ site: siteLabel(prefill.site), title: clash?.title ?? '' })}
 						{:else if editMode}
