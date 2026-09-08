@@ -76,16 +76,47 @@ const failure = (reason: LookupFailure | TweetMediaFailure) =>
 
 const invalid = () => json({ error: 'invalid_request' }, { status: 400 });
 
+/** Reads the body chunk by chunk and stops at the first byte past the cap, so
+ * a chunked request with no Content-Length is refused without being buffered
+ * whole first. Null for no body, a read error, or too many bytes. */
+async function readBody(stream: ReadableStream<Uint8Array> | null): Promise<Uint8Array | null> {
+	if (!stream) return null;
+	const reader = stream.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			total += value.length;
+			if (total > MAX_BODY_BYTES) {
+				await reader.cancel();
+				return null;
+			}
+			chunks.push(value);
+		}
+	} catch {
+		return null;
+	}
+	const bytes = new Uint8Array(total);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.length;
+	}
+	return bytes;
+}
+
 type Body = { imageId?: unknown; sourcePostUrl?: unknown };
 
 export const POST: RequestHandler = async ({ request, platform }) => {
 	const declared = Number(request.headers.get('content-length'));
 	if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return invalid();
-	const text = await request.text().catch(() => null);
-	if (text === null || new TextEncoder().encode(text).length > MAX_BODY_BYTES) return invalid();
+	const bytes = await readBody(request.body);
+	if (bytes === null) return invalid();
 	let body: Body | null;
 	try {
-		body = JSON.parse(text);
+		body = JSON.parse(new TextDecoder().decode(bytes));
 	} catch {
 		body = null;
 	}

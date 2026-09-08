@@ -158,6 +158,32 @@ describe('POST /api/admin/tag-suggestions', () => {
 		expect(_LOOKUP_DEADLINE_MS).toBeGreaterThanOrEqual(firstAttempt);
 	});
 
+	it('502s unavailable when the deadline fires mid-lookup', async () => {
+		const { platform } = makeEnv();
+		// Own the deadline's signal so the test can fire it, and make the lookup
+		// answer only once it has: that is how a real lookup reports an abort.
+		const controller = new AbortController();
+		const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+		try {
+			lookupBlueskySource.mockImplementation(
+				(_source, _fetch, signal) =>
+					new Promise((resolve) => {
+						signal!.addEventListener('abort', () => resolve({ ok: false, reason: 'unavailable' }));
+					})
+			);
+			const pending = POST(event(platform, { sourcePostUrl: BSKY_POST }));
+			// The body read takes a few ticks; wait until the lookup is in flight.
+			await vi.waitFor(() => expect(lookupBlueskySource).toHaveBeenCalledTimes(1));
+			expect(lookupBlueskySource.mock.calls[0]?.[2]).toBe(controller.signal);
+			controller.abort();
+			const res = await pending;
+			expect(res.status).toBe(502);
+			expect(await res.json()).toEqual({ error: 'unavailable' });
+		} finally {
+			timeout.mockRestore();
+		}
+	});
+
 	it('refuses a declared Content-Length over the cap before reading the body', async () => {
 		const { platform } = makeEnv();
 		const request = new Request('http://localhost/api/admin/tag-suggestions', {
@@ -252,6 +278,42 @@ describe('POST /api/admin/tag-suggestions', () => {
 		// characters fit in the pad's character budget but not its byte budget.
 		const wide = JSON.stringify({ sourcePostUrl: BSKY_POST, pad: 'é'.repeat(2048) });
 		expect((await POST(event(platform, undefined, wide))).status).toBe(400);
+	});
+
+	it('stops reading a chunked body at the cap instead of buffering it whole', async () => {
+		const { platform } = makeEnv();
+		// No Content-Length, so the precheck cannot refuse it. Ten 1 KiB chunks:
+		// the read should give up once it passes 4096 bytes and cancel the
+		// stream, never pulling the rest.
+		const chunk = new TextEncoder().encode('x'.repeat(1024));
+		let pulled = 0;
+		let cancelled = false;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (pulled === 10) {
+					controller.close();
+					return;
+				}
+				pulled += 1;
+				controller.enqueue(chunk);
+			},
+			cancel() {
+				cancelled = true;
+			}
+		});
+		const request = new Request('http://localhost/api/admin/tag-suggestions', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body,
+			// Node requires this for a streaming request body.
+			duplex: 'half'
+		} as RequestInit);
+		const res = await POST({ request, platform } as never);
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: 'invalid_request' });
+		expect(cancelled).toBe(true);
+		expect(pulled).toBeLessThan(10);
+		expect(lookupBlueskySource).not.toHaveBeenCalled();
 	});
 
 	it('200s with no tags when the classifier found nothing to suggest', async () => {

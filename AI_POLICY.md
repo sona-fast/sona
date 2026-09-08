@@ -27,7 +27,10 @@ deploy. There is no review team here, just one maintainer and a set of tools.
 The running site makes one AI call of its own. When the operator asks for tag
 suggestions on a piece of artwork, the site sends entail.dev, an image
 classifier, a public link to the artwork's source post or to the picture in
-that post. Nothing a visitor does reaches an AI service.
+that post. In normal operation, nothing a visitor does reaches an AI service.
+The one exception is the diagnostic case the /ai page describes: when the
+maintainer is debugging, logs that can include visitor IP addresses and page
+URLs may pass through the development tools.
 
 ## Rules the agents work under
 
