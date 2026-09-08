@@ -774,9 +774,30 @@ describe('artist-lookup — source-post clash', () => {
 			height: null,
 			isVariant: true,
 			parentImageId: 10,
-			// One row in the set carries the URL, and it is the row being reported.
-			variantCount: 0
+			// The variant is the row that carries the URL, and the parent named
+			// above is not in the set — so it is one variant, not none.
+			variantCount: 1
 		});
+	});
+
+	// Same shape, more than one variant: the count is what the set holds, not the
+	// set minus a root row that never matched.
+	it('counts every variant when the parent carries no source URL', async () => {
+		const env = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		env.sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, source_post_url, parent_image_id, created_at)
+			 VALUES (10, 'Sparky at the beach', 'beach', 'https://cdn/10.png', NULL, NULL, '2026-01-01'),
+				(11, 'Beach variant', 'beach-v', 'https://cdn/11.png',
+				 'https://www.furaffinity.net/view/12345/', 10, '2026-01-02'),
+				(12, 'Beach variant 2', 'beach-v2', 'https://cdn/12.png',
+				 'https://www.furaffinity.net/view/12345/', 10, '2026-01-03');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const res = await POST(multipartEvent(env.platform, pngFile()));
+		const body = (await res.json()) as { sourceClash: Record<string, unknown> };
+
+		expect(body.sourceClash).toMatchObject({ imageId: 10, variantCount: 2 });
 	});
 
 	// Two unrelated images can carry the same source post (a two-piece

@@ -351,9 +351,13 @@ async function findSourceClash(
 		height: root?.height ?? null,
 		isVariant: first.parentImageId !== null,
 		parentImageId: first.parentImageId,
-		// Only the reported set's own rows. Two unrelated images that happen to
-		// carry the same source URL are separate clashes, and counting them here
-		// would tell the operator this one image has variants it doesn't have.
-		variantCount: clashing.filter((r) => (r.parentImageId ?? r.id) === rootId).length - 1
+		// Only the reported set's own rows, and only the variants among them. The
+		// root row itself is not always in the set — when just the variants carry
+		// the source URL, subtracting one for a root that never matched would
+		// undercount them. Two unrelated images that happen to carry the same
+		// source URL are separate clashes, and counting them here would tell the
+		// operator this one image has variants it doesn't have.
+		variantCount: clashing.filter((r) => (r.parentImageId ?? r.id) === rootId && r.id !== rootId)
+			.length
 	};
 }
