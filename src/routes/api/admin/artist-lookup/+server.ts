@@ -352,7 +352,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			} catch (e) {
 				console.warn(
 					'artist-lookup: refused-key marker not written',
-					e instanceof Error ? e.message : e
+					e instanceof Error ? e.message : 'non-Error value'
 				);
 			}
 		}
@@ -375,7 +375,7 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 	} catch (e) {
 		console.warn(
 			'artist-lookup: refused-key marker not cleared',
-			e instanceof Error ? e.message : e
+			e instanceof Error ? e.message : 'non-Error value'
 		);
 	}
 

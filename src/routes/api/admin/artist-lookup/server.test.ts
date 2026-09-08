@@ -1044,6 +1044,39 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 		expect((await res.json()).matches).toHaveLength(1);
 	});
 
+	// Same rule as the search catch above: a rejected value that is not an Error
+	// can be an object holding the request that carried the key, so both marker
+	// catches log a constant in that arm rather than the value itself.
+	it('keeps a non-Error marker failure out of the log, writing and clearing', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const thrown = { request: { headers: { 'X-Api-Key': 'fuzzysearch-key-in-the-request' } } };
+
+		const refused = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: false, reason: 'key_refused' });
+		setRawSettingSpy.mockRejectedValueOnce(thrown);
+		expect((await POST(multipartEvent(refused.platform, pngFile()))).status).toBe(424);
+
+		const cleared = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(
+			cleared.db,
+			FUZZYSEARCH_KEY_REFUSED_SETTING,
+			'2026-09-01T00:00:00.000Z|env'
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+		setRawSettingSpy.mockRejectedValueOnce(thrown);
+		expect((await POST(multipartEvent(cleared.platform, pngFile()))).status).toBe(200);
+
+		const logged = warn.mock.calls
+			.flat()
+			.map((value) => JSON.stringify(value))
+			.join(' ');
+		expect(logged).toContain('marker not written');
+		expect(logged).toContain('marker not cleared');
+		expect(logged).not.toContain('fuzzysearch-key-in-the-request');
+		expect(logged).not.toContain('X-Api-Key');
+		warn.mockRestore();
+	});
+
 	it('maps each remaining failure to its status without echoing a body', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const cases = [
