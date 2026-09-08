@@ -1512,7 +1512,7 @@
 	"admin_lookup_status_url_kept": "{site}の投稿から投稿元URLを入力しました。保存前に変更できます。",
 	"admin_lookup_status_date_kept": "{site}の投稿から制作依頼日を入力しました。保存前に変更できます。",
 	"admin_lookup_status_kept": "{site}の投稿から制作依頼日を入力しました。入力済みの投稿元URLはそのままにしています。",
-	"admin_lookup_status_artist_hint": "アーティストを{name}に設定します。",
+	"admin_lookup_status_artist_hint": "アーティストに{name}を設定します。",
 	"admin_lookup_status_seed_both": "新しいアーティストの名前と{site}のリンクを入力しました。確認するまでは推測にすぎず、公開するのはあなたです。",
 	"admin_lookup_status_seed_name": "新しいアーティストの名前を入力しました。確認するまでは推測にすぎず、公開するのはあなたです。",
 	"admin_lookup_status_seed_link": "新しいアーティストの{site}のリンクを入力しました。確認するまでは推測にすぎず、公開するのはあなたです。",

@@ -837,6 +837,53 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('input[name="furaffinity"]')).toHaveValue('');
 	});
 
+	// Weasyl is a site Sona holds no artist column for (SONA-219), so the seed
+	// carries a name and never a profile URL. A repeat click answered with the
+	// seed-kept line claimed the plural: fields "already have values, so Sona
+	// left them alone", with the FurAffinity field empty and never a candidate.
+	test('a repeat add-new click on an unlinked site says the form is open, not that it kept fields', async ({
+		page
+	}) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'Weasyl',
+						siteId: '12345',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: '2026-03-04T10:00:00Z',
+						rating: 'general',
+						postUrl: 'https://www.weasyl.com/~kuttoya/submissions/12345/piece'
+					}
+				],
+				localArtists: [],
+				nameMatches: []
+			})
+		);
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		const addNew = panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' });
+
+		// The first click fills the name and nothing else: there is no link to
+		// offer for this site.
+		await addNew.click();
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(page.locator('input[name="furaffinity"]')).toHaveValue('');
+		await expect(panel(page)).toContainText("Sona filled the new artist's name.");
+
+		// The name is taken and the link was never on offer, so this click writes
+		// nothing. The answer names the form, not fields it never touched.
+		await addNew.click();
+		await expect(page.locator(LIVE_REGION)).toHaveText('The new artist form is already open.');
+		await expect(page.locator(LIVE_REGION)).not.toContainText('left them alone');
+		await expect(page.locator('input[name="furaffinity"]')).toHaveValue('');
+	});
+
 	// SvelteKit reuses one component across a route-param change, so an edit page
 	// that moved to another image in the same tab would otherwise keep the
 	// previous image's applied artist, filled fields and "From lookup" tags. The

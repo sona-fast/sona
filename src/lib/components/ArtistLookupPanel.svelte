@@ -119,10 +119,10 @@
 		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld })
 	);
 	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
-	// The "Use {name} sets the artist" sentence and the button it
+	// The "Sets the artist to {name}." sentence and the button it
 	// names render on the same condition, so the button can describe itself with
 	// it — an operator who tabs straight to the action row otherwise hears only
-	// "Use {name}", with nothing saying the artist is not applied yet.
+	// "Use {name}", with nothing saying what pressing it does.
 	const artistHintShown = $derived(
 		editMode && outcome === 'existing' && !appliedArtist && !!candidates[0]
 	);

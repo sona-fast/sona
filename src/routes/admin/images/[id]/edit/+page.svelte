@@ -439,18 +439,19 @@
 						// success and leave a second click unanswered.
 						const seededNothing = seedStatusKind(wrote) === 'none';
 						if (wasExisting && seededNothing) announcer.say(m.admin_lookup_announce_new_form());
-						// The form was already open, the seed had a handle to offer, and the
-						// fields hold the operator's own values: this click wrote nothing
-						// because what it carried was already spoken for. An empty name
-						// field is the one case this sentence would be false in, and there
-						// the focus move below is the answer.
-						else if (seededNothing && seed.handle && artistName.trim() !== '')
+						// The form was already open, the seed had both a handle and a link
+						// to offer, and the fields hold the operator's own values: this
+						// click wrote nothing because what it carried was already spoken
+						// for. An empty name field is the one case this sentence would be
+						// false in, and there the focus move below is the answer.
+						else if (seededNothing && seed.handle && seed.linkable && artistName.trim() !== '')
 							announcer.say(m.admin_lookup_announce_seed_kept());
-						// The no_match action carries no handle, so there was nothing to
-						// fill and no field was left alone — "already have values, so Sona
-						// left them alone" is a false sentence about a FurAffinity field
-						// that is empty. The click still has to be answered, so say the
-						// state it found the form in.
+						// The no_match action carries no handle, and an unlinked site
+						// (SONA-219) carries no profile URL, so in both cases fewer fields
+						// were offered than "already have values, so Sona left them alone"
+						// claims — the FurAffinity field it names is empty and was never a
+						// candidate. The click still has to be answered, so say the state
+						// it found the form in.
 						else if (seededNothing && artistName.trim() !== '')
 							announcer.say(m.admin_lookup_announce_form_already_open());
 						// Nothing landed in the name field, and both sentences above tell the

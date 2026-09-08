@@ -619,6 +619,11 @@ describe('what the lookup copy names', () => {
 		expect(ja.admin_lookup_status_artist_hint).not.toContain('変える');
 		// Same in ja: no quoted copy of the button label 「{name}を使う」.
 		expect(ja.admin_lookup_status_artist_hint).not.toContain('を使う');
+		// The hint and the announcement the same click produces describe one
+		// operation, so they mark its case the same way and differ only in
+		// ます/ました — the particles flipped between the two before.
+		expect(ja.admin_lookup_status_artist_hint).toBe('アーティストに{name}を設定します。');
+		expect(ja.admin_lookup_announce_using).toBe('アーティストに{name}を設定しました。');
 	});
 
 	// One "Remove file" per tile told a screen-reader user nothing about WHICH
@@ -680,10 +685,11 @@ describe('focus after the panel goes away', () => {
 	// That select is a focus destination carrying an option this page never
 	// loaded, so it has to say what it is. The fieldset legend names the group,
 	// not the field (4.1.2, 3.3.2); the edit page's own parent select is
-	// labelled "Variant of" and this one now matches it.
+	// labelled "Variant of" and this one now matches it — same wrapping
+	// label/span shape, so it also picks up the page's field-label styling.
 	it('names the upload page parent select the way the edit page names its own', () => {
 		expect(UPLOAD).toMatch(
-			/<label for="existing-parent-select">\{m\.admin_field_variant_of\(\)\}<\/label>\s*\n\s*<select[\s\S]{0,200}?id="existing-parent-select"/
+			/<label>\s*\n\s*<span>\{m\.admin_field_variant_of\(\)\}<\/span>\s*\n\s*<select[\s\S]{0,200}?bind:this=\{existingParentSelect\}/
 		);
 		expect(EDIT).toMatch(
 			/<span>\{m\.admin_field_variant_of\(\)\}<\/span>\s*\n\s*<select[\s\S]{0,120}?name="parentImageId"/
@@ -833,12 +839,19 @@ describe('what a lookup says out loud', () => {
 	// The form was already open and holds the operator's own values, so the
 	// click wrote nothing anywhere and the panel's status line says nothing.
 	// Every repeat click is still answered, including the no_match one that
-	// carries no handle — but not with the same sentence: nothing was ever
+	// carries no handle, and the unlinked one that carries a handle but no
+	// profile URL — but not with the same sentence: fewer fields were ever
 	// available to fill there, so "left them alone" would name fields the click
 	// never touched, with the FurAffinity field sitting empty.
 	it('says so when the click filled nothing because the fields were taken', () => {
 		expect(EDIT).toMatch(
-			/else if \(seededNothing && seed\.handle && artistName\.trim\(\) !== ''\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_seed_kept\(/
+			/else if \(seededNothing && seed\.handle && seed\.linkable && artistName\.trim\(\) !== ''\)\s*\n?\s*announcer\.say\(m\.admin_lookup_announce_seed_kept\(/
+		);
+		// The unlinked seed (linkable false) never offered a profile URL, so it
+		// falls through to the already-open line rather than claiming a link
+		// field was left alone.
+		expect(EDIT).not.toMatch(
+			/else if \(seededNothing && seed\.handle && artistName\.trim\(\) !== ''\)/
 		);
 		// The handle-less click keeps an answer of its own, which is what the
 		// earlier name-field-only condition was carrying.
@@ -866,6 +879,15 @@ describe('the two new pills', () => {
 			/\.lookup-pill:focus-visible,\s*\.tile-lookup:focus-visible \{[^}]*outline: 2px solid var\(--ring\)/
 		);
 		expect(EDIT).toMatch(/\.lookup-pill:focus-visible \{[^}]*outline: 2px solid var\(--ring\)/);
+	});
+
+	// The tile Remove ring is offset onto the tile's own image, where no single
+	// colour clears 3:1 against every photo, so it carries a second near-white
+	// edge as well (1.4.11).
+	it('draws two edges on the tile Remove ring', () => {
+		expect(UPLOAD).toMatch(
+			/\.tile-remove:focus-visible \{[^}]*outline: 2px solid var\(--ring\);[^}]*box-shadow: 0 0 0 1px rgba\(255, 255, 255, 0\.9\)/
+		);
 	});
 
 	// --muted-foreground on --secondary measures 3.96:1 in terracotta light.

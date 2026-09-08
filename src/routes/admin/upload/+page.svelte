@@ -887,19 +887,20 @@
 				     group, not this field, and "Add as a variant" now pushes an option
 				     in and lands focus here, so a screen reader would otherwise read
 				     the clash title with nothing saying what holds it (4.1.2, 3.3.2). -->
-				<label for="existing-parent-select">{m.admin_field_variant_of()}</label>
-				<select
-					class="input"
-					id="existing-parent-select"
-					bind:this={existingParentSelect}
-					bind:value={existingParentId}
-					required
-				>
-					<option value="">{m.admin_variant_pick_parent()}</option>
-					{#each parentOptions as candidate}
-						<option value={String(candidate.id)}>{candidate.title}</option>
-					{/each}
-				</select>
+				<label>
+					<span>{m.admin_field_variant_of()}</span>
+					<select
+						class="input"
+						bind:this={existingParentSelect}
+						bind:value={existingParentId}
+						required
+					>
+						<option value="">{m.admin_variant_pick_parent()}</option>
+						{#each parentOptions as candidate}
+							<option value={String(candidate.id)}>{candidate.title}</option>
+						{/each}
+					</select>
+				</label>
 			{/if}
 		</fieldset>
 	{/if}
@@ -1344,10 +1345,14 @@
 
 	/* Not a .btn, and app.css has no bare button:focus-visible rule, so removing
 	   a tile would land focus on the next Remove wearing only the user-agent
-	   ring — over an arbitrary image, on a chip that is 60% black (2.4.7). */
+	   ring — over an arbitrary image, on a chip that is 60% black (2.4.7). The
+	   offset puts the outline on the image itself, where no single colour clears
+	   3:1 against every photo, so the box-shadow draws a second, near-white edge
+	   inside it: one of the two always separates from what is behind it (1.4.11). */
 	.tile-remove:focus-visible {
 		outline: 2px solid var(--ring);
 		outline-offset: 2px;
+		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9);
 	}
 
 	.tile-meta {
