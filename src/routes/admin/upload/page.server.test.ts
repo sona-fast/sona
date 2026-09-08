@@ -152,8 +152,22 @@ describe('admin upload — load lookupEnabled (SONA-156)', () => {
 	it('lets a failed key read reject the load rather than reporting no key', async () => {
 		const { platform } = makeDb();
 		const broken = { env: { ...platform.env, DB: withFailingSettingsRead(platform.env.DB) } };
-		// Drizzle names the query it could not run, so the rejection says the
-		// settings read is what failed and not one of the five reads beside it.
-		await expect(load({ platform: broken } as never)).rejects.toThrow(/site_settings/);
+		// Asserted on the helper's own wording, not on the table name drizzle
+		// prints: the key read wins the rejection race either way, so a helper
+		// loosened to fail every query would still satisfy a /site_settings/ pin
+		// while testing something else entirely.
+		const err = await Promise.resolve(load({ platform: broken } as never)).catch(
+			(e: unknown) => e
+		);
+		// Named on the helper's own error, which drizzle keeps as the cause: the
+		// message drizzle prints only names the table, and the key read wins the
+		// rejection race, so /site_settings/ alone passed just as happily against
+		// a helper that failed every query.
+		expect(err).toBeInstanceOf(Error);
+		expect(String((err as { cause?: unknown }).cause)).toContain('settings read failed');
+		// And the reads beside it still answer, so what rejected was the key read
+		// and not a database the helper had taken away wholesale.
+		const brokenDb = drizzle(broken.env.DB, { schema });
+		await expect(brokenDb.select().from(images)).resolves.toEqual([]);
 	});
 });

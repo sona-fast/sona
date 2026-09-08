@@ -314,8 +314,18 @@ describe('admin image edit — load lookupEnabled (SONA-156)', () => {
 		const { db, platform } = makeDb();
 		await seedImage(db, 5);
 		const broken = { env: { ...platform.env, DB: withFailingSettingsRead(platform.env.DB) } };
-		await expect(
+		// Named on the helper's own error, which drizzle keeps as the cause: the
+		// message drizzle prints only names the table, and the key read wins the
+		// rejection race, so /site_settings/ alone passed just as happily against
+		// a helper that failed every query.
+		const err = await Promise.resolve(
 			load({ params: { id: '5' }, platform: broken } as never)
-		).rejects.toThrow(/site_settings/);
+		).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(Error);
+		expect(String((err as { cause?: unknown }).cause)).toContain('settings read failed');
+		// And the image read beside it still answers, so what rejected was the key
+		// read and not a database the helper had taken away wholesale.
+		const brokenDb = drizzle(broken.env.DB, { schema });
+		await expect(brokenDb.select().from(images).where(eq(images.id, 5))).resolves.toHaveLength(1);
 	});
 });
