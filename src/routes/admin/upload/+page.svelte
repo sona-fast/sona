@@ -7,13 +7,13 @@
 	import {
 		matchHandle,
 		pickPrefillMatch,
-		prefillFields,
+		prefillForResult,
 		profileUrlFor,
 		ratingTag,
 		runLookup,
 		siteLabel,
 		strictestRating,
-		bandLabel,
+		tileResultText,
 		candidateArtists,
 		lookupSentFile,
 		type LookupFields,
@@ -420,7 +420,7 @@
 		const result = tileResult(tile);
 		setAnnounce(
 			result
-				? m.admin_lookup_announce_tile_match({ fileName, result: result.line })
+				? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
 				: m.admin_lookup_announce_tile_no_match({ fileName })
 		);
 	}
@@ -449,14 +449,7 @@
 
 	function applyShared(next: LookupState) {
 		if (next.kind !== 'results') return;
-		const match = pickPrefillMatch(next.data.matches);
-		const fields = prefillFields(
-			match,
-			{ sourcePostUrl: sourcePostUrl.trim() === '', commissionedAt: commissionedAt.trim() === '' },
-			// The clash state deliberately leaves the URL empty: it already belongs
-			// to another piece, and copying it would make two pieces claim one post.
-			{ skipSourceUrl: !!next.data.sourceClash }
-		);
+		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
 		sharedFilled = fields;
 		if (fields.sourcePostUrl !== undefined) {
 			sourcePostUrl = fields.sourcePostUrl;
@@ -537,11 +530,15 @@
 		const handle = matchHandle(match) || tile.fileName;
 		const site = siteLabel(match.site);
 		const different = differentArtist(tile);
+		// The visible line and the spoken one come from the same parts, so the
+		// middle dot never reaches the live region and never dangles.
+		const text = different
+			? { line: m.admin_lookup_tile_different({ handle, site }), spoken: m.admin_lookup_tile_different({ handle, site }) }
+			: tileResultText(handle, match.site, match.band);
 		return {
 			different,
-			line: different
-				? m.admin_lookup_tile_different({ handle, site })
-				: m.admin_lookup_tile_result({ handle, site, band: bandLabel(match.band) ?? '' }),
+			line: text.line,
+			spoken: text.spoken,
 			postUrl: match.postUrl,
 			site: match.site,
 			ratingTag: ratingTag(strictestRating(matches))
@@ -833,7 +830,7 @@
 				>{m.admin_lookup_no_key_post()}
 			</small>
 		{/if}
-		{#if groupMode === 'new'}
+		{#if data.lookupEnabled && groupMode === 'new'}
 			<ArtistLookupPanel
 				lookup={sharedLookup}
 				fileName={tiles.length > 1 ? (parentTile?.fileName ?? '') : ''}

@@ -145,6 +145,26 @@ describe('the panel', () => {
 	it('shows the clash thumbnail row with the piece it points at', () => {
 		expect(PANEL).toMatch(/class="clash-thumb"[\s\S]*?alt=""/);
 		expect(PANEL).toContain('m.admin_lookup_clash_uploaded(');
+		// "Uploaded {date} · {artist} · {w} x {h}", with the size dropped rather
+		// than rendered blank on a row that has no width or height.
+		expect(PANEL).toMatch(
+			/if \(clash\.width && clash\.height\)[\s\S]{0,160}?m\.admin_lookup_clash_dimensions\(/
+		);
+	});
+
+	// A disabled primary button that looks exactly like the enabled one reads as
+	// broken rather than as "pick a radio first".
+	it('dims the disabled action the way the rest of the admin forms do', () => {
+		expect(PANEL).toMatch(
+			/\.lookup-actions button:disabled \{[\s\S]{0,80}?opacity: 0\.5;[\s\S]{0,80}?cursor: not-allowed;/
+		);
+	});
+
+	// With no key the lookup can never start, so the empty landmark and the gap
+	// it holds open are cost with no benefit.
+	it('is mounted only where a lookup can actually be started', () => {
+		expect(EDIT).toMatch(/\{#if data\.lookupEnabled\}[\s\S]{0,300}?<ArtistLookupPanel/);
+		expect(UPLOAD).toMatch(/\{#if data\.lookupEnabled && groupMode === 'new'\}\s*<ArtistLookupPanel/);
 	});
 
 	it('counts the ambiguous candidates and their pieces', () => {
@@ -285,8 +305,23 @@ describe('what a lookup says out loud', () => {
 
 	// The select sits above the panel and the button relabels itself in place.
 	it('announces the artist the panel applied', () => {
-		expect(UPLOAD).toMatch(
-			/function useLookupArtist[\s\S]{0,400}?setAnnounce\(m\.admin_lookup_announce_using\(/
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(
+				/function useLookupArtist[\s\S]{0,400}?setAnnounce\(m\.admin_lookup_announce_using\(/
+			);
+			// The region has to be there before the message is, and only the node
+			// inside it is keyed so a repeat still reads out.
+			expect(source).toMatch(
+				/class="sr-only" aria-live="polite">\{#key announceUid\}<span>\{announce\}<\/span>/
+			);
+		}
+	});
+
+	// "Add New Artist" from the no_match state seeds nothing, so the seed status
+	// line says nothing while the select is replaced by a name field.
+	it('announces the flip to the inline new-artist form when the seed is empty', () => {
+		expect(EDIT).toMatch(
+			/seedStatusKind\(lookupSeeded\) === 'none'\) setAnnounce\(m\.admin_lookup_announce_new_form\(/
 		);
 	});
 });

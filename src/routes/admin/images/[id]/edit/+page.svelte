@@ -8,9 +8,10 @@
 		lookupSentFile,
 		newArtistSeed,
 		pickPrefillMatch,
-		prefillFields,
+		prefillForResult,
 		ratingTag,
 		resolveOutcome,
+		seedStatusKind,
 		runLookup,
 		strictestRating,
 		type LookupFields,
@@ -62,6 +63,17 @@
 	let twitterTagged = $state(false);
 	let furaffinityTagged = $state(false);
 	let lookupAbort: AbortController | null = null;
+	// The artist select sits above the panel and the panel's own status region
+	// does not change when an artist is applied, so this is the only thing that
+	// reports it (4.1.3). Keyed on a counter for the same reason the upload page
+	// keys its region: re-assigning identical text changes no DOM, and a region
+	// that does not change is never read out.
+	let announce = $state('');
+	let announceUid = $state(0);
+	function setAnnounce(text: string) {
+		announce = text;
+		announceUid++;
+	}
 	// Closing or cancelling the panel destroys the button the operator is
 	// standing on, so focus is moved back here first (2.4.3).
 	let lookupPill = $state<HTMLButtonElement | null>(null);
@@ -132,11 +144,7 @@
 		// A new result describes a new seed, even when that seed is empty.
 		lookupSeeded = {};
 		const match = pickPrefillMatch(next.data.matches);
-		const fields = prefillFields(
-			match,
-			{ sourcePostUrl: sourcePostUrl.trim() === '', commissionedAt: commissionedAt.trim() === '' },
-			{ skipSourceUrl: !!next.data.sourceClash }
-		);
+		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
 		lookupFilled = fields;
 		if (fields.sourcePostUrl !== undefined) {
 			sourcePostUrl = fields.sourcePostUrl;
@@ -185,6 +193,7 @@
 		artistMode = 'existing';
 		selectedArtistId = artist.id;
 		appliedArtist = artist;
+		setAnnounce(m.admin_lookup_announce_using({ name: artist.name }));
 	}
 
 	async function addAsVariant(clash: SourceClash) {
@@ -202,6 +211,10 @@
 		lookupPill?.focus();
 	}
 </script>
+
+<!-- The region itself stays put; only the node inside it is keyed, so repeating
+     an announcement still mutates the region and gets read out. -->
+<div class="sr-only" aria-live="polite">{#key announceUid}<span>{announce}</span>{/key}</div>
 
 <div class="page-header">
 	<h1>{m.admin_image_edit_title()}</h1>
@@ -320,23 +333,31 @@
 				</small>
 			{/if}
 
-			<ArtistLookupPanel
-				{lookup}
-				filled={lookupFilled}
-				seeded={lookupSeeded}
-				{appliedArtist}
-				editMode
-				privateNotice={isPrivate && lookupSentFile(lookup)}
-				onclose={closeLookup}
-				onretry={startLookup}
-				oncancel={cancelLookup}
-				onuseartist={useLookupArtist}
-				onaddnew={(seed) => {
-					artistMode = 'new';
-					seedNewArtist(seed.handle, seed.site, seed.linkable);
-				}}
-				onaddvariant={addAsVariant}
-			/>
+			{#if data.lookupEnabled}
+				<!-- No key means no lookup can ever start, so the panel's empty
+				     landmark and the gap it holds open earn nothing (SONA-156). -->
+				<ArtistLookupPanel
+					{lookup}
+					filled={lookupFilled}
+					seeded={lookupSeeded}
+					{appliedArtist}
+					editMode
+					privateNotice={isPrivate && lookupSentFile(lookup)}
+					onclose={closeLookup}
+					onretry={startLookup}
+					oncancel={cancelLookup}
+					onuseartist={useLookupArtist}
+					onaddnew={(seed) => {
+						artistMode = 'new';
+						seedNewArtist(seed.handle, seed.site, seed.linkable);
+						// A seed that wrote something is announced by the panel's own status
+						// line. An empty handle (the no_match action) writes nothing, so the
+						// select is replaced by a name field with nothing said about it.
+						if (seedStatusKind(lookupSeeded) === 'none') setAnnounce(m.admin_lookup_announce_new_form());
+					}}
+					onaddvariant={addAsVariant}
+				/>
+			{/if}
 
 			{#if artistMode === 'existing'}
 				<label>

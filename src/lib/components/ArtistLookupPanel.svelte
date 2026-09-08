@@ -81,14 +81,17 @@
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
 	const statusKind = $derived(statusLineKind(filled, { clash: !!clash }));
 	const seedKind = $derived(seedStatusKind(seeded));
-	// "Uploaded {date} · {artist}", with either half dropped when the row has no
-	// answer for it rather than spelled out as a blank.
+	// "Uploaded {date} · {artist} · {w} x {h}", with any part dropped when the row
+	// has no answer for it rather than spelled out as a blank.
 	const clashMeta = $derived.by(() => {
 		if (!clash) return '';
 		const parts: string[] = [];
 		const date = postDateToInput(clash.uploadedAt);
 		if (date) parts.push(m.admin_lookup_clash_uploaded({ date }));
 		if (clash.artistName) parts.push(clash.artistName);
+		if (clash.width && clash.height) {
+			parts.push(m.admin_lookup_clash_dimensions({ width: clash.width, height: clash.height }));
+		}
 		return parts.join(' · ');
 	});
 
@@ -606,6 +609,14 @@
 		flex-wrap: wrap;
 		gap: 8px;
 		align-items: center;
+	}
+
+	/* "Use selected artist" is disabled until a radio is picked, and a
+	   full-strength primary button that does nothing reads as broken. Same
+	   pattern as .form-actions button:disabled on the upload page. */
+	.lookup-actions button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 	.text-action {
 		font-size: 13px;
