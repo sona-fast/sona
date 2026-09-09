@@ -1070,6 +1070,67 @@ test.describe('with a key saved', () => {
 		);
 	});
 
+	// The other half of the same rule. resetLookupPrefill undoes only what is
+	// still tagged, so tags dropped on Use would put the first handle's name and
+	// link out of the next lookup's reach: the form would come back holding a
+	// name from the superseded result, and the save would create an artist
+	// called that.
+	test('a second lookup after Use clears the first handle from the inline form', async ({
+		page
+	}) => {
+		await stubLookup(
+			page,
+			matchedBody({
+				localArtists: [],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist' }] }]
+			})
+		);
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(panel(page)).toBeVisible();
+		await panel(page).getByRole('button', { name: 'Add as a new artist instead' }).click();
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('kuttoya');
+		await expect(page.locator('input[name="furaffinity"]')).toHaveValue(
+			/kuttoya/
+		);
+		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('1');
+
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '67890',
+						handles: ['sabaudon'],
+						distance: 0,
+						band: 'exact',
+						postedAt: '2026-05-06T10:00:00Z',
+						rating: 'general',
+						postUrl: 'https://www.furaffinity.net/view/67890/'
+					}
+				],
+				localArtists: [],
+				nameMatches: [{ matchIndex: 0, artists: [{ id: 1, name: 'Test Artist' }] }]
+			})
+		);
+		await pill(page).click();
+		await expect(panel(page)).toContainText('Exact match');
+
+		// Opened by hand, the form holds nothing from the first result.
+		await page.getByRole('button', { name: 'Add New Artist' }).click();
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('');
+		await expect(page.locator('input[name="furaffinity"]')).toHaveValue('');
+
+		// And the second result seeds its own handle into it.
+		await panel(page).getByRole('button', { name: 'Add as a new artist instead' }).click();
+		await expect(page.locator('input[name="artistName"]')).toHaveValue('sabaudon');
+		await expect(page.locator('input[name="furaffinity"]')).toHaveValue(/sabaudon/);
+		await expect(page.locator('input[name="furaffinity"]')).not.toHaveValue(/kuttoya/);
+	});
+
 	// The image already has an artist, and a handle Sona does not hold is a
 	// suggestion about it. Flipping the form here would insert a duplicate
 	// artist and re-credit the piece on the next save.
