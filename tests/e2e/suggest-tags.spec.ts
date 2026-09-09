@@ -10,12 +10,13 @@ import { ENDPOINT, stubSuggestions } from './tag-suggestions-helpers';
 // landed, that a row tagged elsewhere refuses to overwrite, and that Load more
 // grows the list.
 //
-// Runs on the upload project's own seeded server (playwright.config.ts): Save
-// writes tag rows, and the shared server's DB is read-only by convention. The
-// tests run serially and each saves on its own row, because a saved row drops
-// off the list on the next load and the Load more test counts the list.
+// Runs on its own seeded server, the suggest-tags project (playwright.config.ts):
+// Save writes tag rows, the shared server's DB is read-only by convention, and
+// the upload spec counts rows on the upload server. The tests run serially and
+// each saves on its own row, because a saved row drops off the list on the next
+// load and the Load more test counts the list.
 
-// Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e-uploadthing.toml.
+// Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml.
 const PASSWORD = 'e2e-admin-password';
 // The seed (tests/e2e/fixtures/seed.sql) lists 23 untagged images with a post
 // URL, ids 101–123, newest first. One page is 20 rows. The total is READ from
@@ -90,6 +91,26 @@ async function openList(page: Page, search = '') {
 	await gotoAfterLogin(page, `/admin/images/suggest-tags${search}`);
 	await expect(page.getByRole('heading', { level: 1, name: 'Suggest tags' })).toBeVisible();
 }
+
+test('the explainer keeps a reading measure on a wide screen', async ({ page }) => {
+	// At 1280 the paragraph ran to 86 characters a line and wrapped mid-clause.
+	// 50ch of Geist is about 70 characters, the top of a comfortable measure.
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await openList(page);
+	const explainer = page.locator('.explainer');
+	// The computed max-width is rounded to a tenth of a pixel; the probe is not.
+	const { fiftyCh, maxWidth } = await explainer.evaluate((el) => {
+		const probe = document.createElement('span');
+		probe.style.width = '50ch';
+		probe.style.display = 'inline-block';
+		el.append(probe);
+		const fiftyCh = probe.getBoundingClientRect().width;
+		probe.remove();
+		return { fiftyCh, maxWidth: parseFloat(getComputedStyle(el).maxWidth) };
+	});
+	expect(Math.abs(maxWidth - fiftyCh)).toBeLessThan(0.1);
+	await expect(explainer).toHaveCSS('max-width', /px$/);
+});
 
 test('Load more grows the list rather than paging away from it', async ({ page, baseURL }) => {
 	await openList(page);
@@ -972,11 +993,12 @@ test('an expanded row drops its indent on a phone, where the head wraps', async 
 	const refusedBox = await dismiss.boundingBox();
 	const saveRefusedBox = await save.boundingBox();
 	expect(Math.abs(refusedBox!.width - saveRefusedBox!.width)).toBeLessThanOrEqual(1);
-	// And it grows rightward from the edge it rested at, so the label the pointer
-	// was over does not travel. Directional for the same reason as the one-line
-	// case: a fill that leaked left would sit inside a one-pixel window.
-	expect(refusedBox!.x).toBeGreaterThanOrEqual(dismissRestBox!.x - 0.01);
-	expect(refusedBox!.x - dismissRestBox!.x).toBeLessThanOrEqual(1);
+	// And it grows out from the centre it rested at, so the label the pointer
+	// was over does not travel: stacked, Dismiss is centred under Save, and the
+	// full-width box centres the label at the same point.
+	const restCentre = dismissRestBox!.x + dismissRestBox!.width / 2;
+	const refusedCentre = refusedBox!.x + refusedBox!.width / 2;
+	expect(Math.abs(refusedCentre - restCentre)).toBeLessThanOrEqual(1);
 	// And the label darkens, so the refused state is legible without a cursor or
 	// a hover to say so.
 	const refusedColor = await dismiss.evaluate((el) => getComputedStyle(el).color);
@@ -1086,6 +1108,11 @@ test('a row whose source URL is not a post says so and offers no second try', as
 		"Sona can't look up this link. Check the source post URL."
 	);
 	await expect(target.getByRole('button', { name: 'Try again for Backfill 117' })).toHaveCount(0);
+	// The tray has an eyebrow here, unlike under the forms' field, so the region
+	// reads it the way it reads every other failure: title, then body.
+	await expect(page.locator('p.sr-only[role="status"]')).toHaveText(
+		"Backfill 117. Suggestions unavailable. Sona can't look up this link. Check the source post URL."
+	);
 });
 
 // Last on purpose: it tags every row that is left, so the list the tests above

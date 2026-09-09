@@ -9,6 +9,7 @@ import {
 	selectedTags,
 	rowToFocusAfter,
 	sentenceFor,
+	sourceKey,
 	toggleTag,
 	trayFor,
 	type SuggestionState
@@ -148,6 +149,17 @@ describe('fromResponse — a 200', () => {
 			tags: ['fox', 'beach', 'sea sky', 'wolf', 'deer', 'otter']
 		});
 		expect(applyTo('', selectedTags(state))).toBe('fox, beach, sea sky, wolf, deer, otter');
+	});
+
+	it('caps a chip label where sanitizeTag caps what it stores', () => {
+		// A chip longer than the 50 characters Save keeps would show the operator
+		// a tag that is not the one that lands in the field.
+		const long = 'a'.repeat(60);
+		const state = fromResponse(200, ok([long]), []);
+		expect(state).toMatchObject({ kind: 'suggested', tags: ['a'.repeat(50)] });
+		// The cap counts what is left after cleaning, not the raw entry.
+		const cleaned = fromResponse(200, ok([`\u202E${'b'.repeat(50)}`]), []);
+		expect(cleaned).toMatchObject({ kind: 'suggested', tags: ['b'.repeat(50)] });
 	});
 
 	it('keys a suggestion off its cleaned label, so two entries never share one chip', () => {
@@ -436,23 +448,34 @@ describe('rowToFocusAfter — where Load more lands focus', () => {
 
 describe('which post a source URL names', () => {
 	// TagSuggestions keeps an answer only while the field still names the post it
-	// answered, and it compares the two through classifySourceUrl rather than as
-	// text: typed one way and pasted another, the same post must not throw the
-	// chips away, and a different post must.
-	const canonical = (url: string) => classifySourceUrl(url)?.url ?? null;
+	// answered, and it compares the two through sourceKey rather than as text:
+	// typed one way and pasted another, the same post must not throw the chips
+	// away, and a different post must.
+	const key = (url: string) => sourceKey(classifySourceUrl(url));
 	const POST = 'https://bsky.app/profile/kirin.example/post/3kq7x2abc';
 
 	it('reads the same post out of the forms an operator pastes', () => {
-		expect(canonical(`${POST}/`)).toBe(canonical(POST));
-		expect(canonical(`${POST}?utm_source=x`)).toBe(canonical(POST));
-		expect(canonical(` ${POST} `)).toBe(canonical(POST));
+		expect(key(`${POST}/`)).toBe(key(POST));
+		expect(key(`${POST}?utm_source=x`)).toBe(key(POST));
+		expect(key(` ${POST} `)).toBe(key(POST));
+	});
+
+	it('reads one tweet under every handle', () => {
+		// The canonical URL keeps the handle, so /i/web/status/<id> from the share
+		// sheet and /<handle>/status/<id> from the address bar compare unequal as
+		// URLs; the key is the status id.
+		expect(key('https://x.com/i/web/status/1789012345678901234')).toBe('x:1789012345678901234');
+		expect(key('https://x.com/kirin/status/1789012345678901234')).toBe('x:1789012345678901234');
+		expect(key('https://twitter.com/kirin/status/1789012345678901234/photo/1')).toBe(
+			'x:1789012345678901234'
+		);
+		expect(key('https://x.com/kirin/status/1789012345678901235')).not.toBe('x:1789012345678901234');
 	});
 
 	it('reads another post, and a field that holds no post, as something else', () => {
-		expect(canonical('https://bsky.app/profile/kirin.example/post/3kq7x2def')).not.toBe(
-			canonical(POST)
-		);
-		expect(canonical('')).toBeNull();
-		expect(canonical('not a post at all')).toBeNull();
+		expect(key('https://bsky.app/profile/kirin.example/post/3kq7x2def')).not.toBe(key(POST));
+		expect(key('')).toBeNull();
+		expect(key('not a post at all')).toBeNull();
+		expect(sourceKey(null)).toBeNull();
 	});
 });

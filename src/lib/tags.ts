@@ -11,6 +11,10 @@
 // the server enforces. The server modules re-export these names, so existing
 // imports of `$lib/server/validate` and `$lib/server/entail` keep working.
 
+/** The most characters a stored tag name keeps. The suggestion chips cap their
+ * labels at the same length, so a chip never shows more than would be saved. */
+export const TAG_MAX_LENGTH = 50;
+
 /**
  * Sanitize a tag name — lowercase, alphanumeric + hyphens only.
  */
@@ -20,7 +24,7 @@ export function sanitizeTag(tag: string): string {
 		.toLowerCase()
 		.replace(/[^a-z0-9\s-]/g, '')
 		.replace(/\s+/g, '-')
-		.slice(0, 50);
+		.slice(0, TAG_MAX_LENGTH);
 }
 
 /** The `x` kind carries the status id so the tweet lookup never re-parses
@@ -30,6 +34,10 @@ export type SourceKind = { kind: 'bluesky'; url: string } | { kind: 'x'; url: st
 // Checked after percent-decoding, so a `%` that survives (a double-encoded
 // actor) is rejected rather than decoded again downstream.
 const BLUESKY_ACTOR = /^[A-Za-z0-9._:-]{1,256}$/;
+// The actor pattern admits an actor made only of dots, which names no handle
+// or DID. The URL parser collapses "." and ".." before they get here; "..." and
+// longer survive it.
+const ONLY_DOTS = /^\.+$/;
 const BLUESKY_RKEY = /^[A-Za-z0-9._~-]{1,64}$/;
 const X_USER = /^[A-Za-z0-9_]{1,15}$/;
 const STATUS_ID = /^\d{1,20}$/;
@@ -64,7 +72,7 @@ export function classifySourceUrl(url: string): SourceKind | null {
 			return null;
 		}
 		const rkey = parts[3];
-		if (!BLUESKY_ACTOR.test(actor) || !BLUESKY_RKEY.test(rkey)) return null;
+		if (!BLUESKY_ACTOR.test(actor) || ONLY_DOTS.test(actor) || !BLUESKY_RKEY.test(rkey)) return null;
 		return { kind: 'bluesky', url: `https://bsky.app/profile/${actor}/post/${rkey}` };
 	}
 

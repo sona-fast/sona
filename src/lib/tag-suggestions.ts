@@ -11,7 +11,7 @@
 // forms and the backfill page all make the same POST and read its answer the
 // same way, so the call lives here once rather than three times.
 
-import { sanitizeTag } from '$lib/tags';
+import { sanitizeTag, TAG_MAX_LENGTH, type SourceKind } from '$lib/tags';
 import * as m from '$lib/paraglide/messages';
 
 export type EntailRating = 'safe' | 'questionable' | 'explicit';
@@ -87,8 +87,10 @@ type SuggestionBody = {
  * the moment `applyTo` joined the field back up. */
 const UNSAFE_LABEL_CHARS = /[\p{Cc},\p{Cf}\p{Zl}\p{Zp}]/gu;
 
+// Capped where sanitizeTag caps what it stores, so a chip never shows more of a
+// label than Save would keep.
 function cleanLabel(value: string): string {
-	return value.replace(UNSAFE_LABEL_CHARS, '');
+	return value.replace(UNSAFE_LABEL_CHARS, '').slice(0, TAG_MAX_LENGTH);
 }
 
 const RATINGS: readonly string[] = ['safe', 'questionable', 'explicit'];
@@ -187,6 +189,19 @@ export function fromResponse(
 		imageCount: Number.isInteger(count) && count > 0 ? count : 1,
 		skippedExisting
 	};
+}
+
+/**
+ * Which post a recognised source URL names, as one string, or null for no
+ * post. The forms keep an answer only while the field still names the post it
+ * answered, and compare through this rather than through the canonical URL: an
+ * X status is one tweet under every handle (`/i/web/status/<id>` from the
+ * share sheet, `/<handle>/status/<id>` from the address bar), and the canonical
+ * URL keeps the handle. A Bluesky post is its canonical URL.
+ */
+export function sourceKey(source: SourceKind | null): string | null {
+	if (source === null) return null;
+	return source.kind === 'x' ? `x:${source.id}` : source.url;
 }
 
 /** What the endpoint is asked. The forms send the field's current value, so

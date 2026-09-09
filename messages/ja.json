@@ -1431,7 +1431,7 @@
 	"admin_tag_suggest_hint": "提案はentail.devが元投稿を読み取って行います。あなたが受け入れたときにだけ追加されます。",
 	"admin_tag_suggest_hint_no_source": "タグの提案を受けるには、元投稿URLにBlueskyまたはXの投稿を入力してください。",
 	"admin_tag_suggest_retry_needs_post_body": "元投稿URLに投稿がないため、もう一度試せません。",
-	"admin_tag_suggest_dropped_body": "元投稿URLが変わったため、その検索結果は使いません。",
+	"admin_tag_suggest_dropped_body": "元投稿URLが変わったため、その読み取り結果は使いません。",
 	"admin_tag_suggest_hint_join": "{first}{second}",
 	"admin_tag_suggest_hint_first_tile": "受け入れたタグは、このアップロードのすべての画像に適用されます。",
 	"admin_tag_suggest_region_label": "タグの提案",

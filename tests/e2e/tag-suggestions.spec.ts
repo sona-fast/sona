@@ -224,8 +224,9 @@ test('a "nothing to suggest" tray goes when the source URL stops being that post
 
 	await page.fill('input[name="sourcePostUrl"]', 'not a post at all');
 	await expect(page.locator('.tag-tray')).toHaveCount(0);
-	// And the live region does not keep saying it either.
-	await expect(liveRegion(page)).toHaveText('');
+	// And the live region says the verdict went, the way a drop mid-flight is
+	// said, rather than keeping it or going silent.
+	await expect(liveRegion(page)).toHaveText('The source URL changed, so Sona set that lookup aside.');
 	// The field itself is untouched: what the operator typed is theirs.
 	await expect(tagsInput(page)).toHaveValue('fox');
 });
@@ -251,8 +252,8 @@ test('chips for one post are not left standing over another', async ({ page }) =
 		'https://bsky.app/profile/kirin.example/post/3kq7x2def'
 	);
 
-	// Back to idle: no chips, no rating note, the ordinary hint, and nothing left
-	// in the live region about a post that is no longer in the field.
+	// Back to idle: no chips, no rating note, the ordinary hint, and the live
+	// region saying the answer about the post that left the field was set aside.
 	await expect(page.locator('.tag-chip')).toHaveCount(0);
 	await expect(page.locator('.tag-tray')).toHaveCount(0);
 	await expect(page.locator('.tag-rating-note')).toHaveCount(0);
@@ -260,9 +261,43 @@ test('chips for one post are not left standing over another', async ({ page }) =
 	await expect(page.locator('#tags-hint')).toContainText(
 		'Suggestions come from entail.dev, which reads the source post.'
 	);
-	await expect(liveRegion(page)).toHaveText('');
+	await expect(liveRegion(page)).toHaveText('The source URL changed, so Sona set that lookup aside.');
 	await expect(tagsInput(page)).toHaveValue('');
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+});
+
+test('accepted tags survive a URL edit; the confirmation and the rating do not', async ({
+	page
+}) => {
+	// Once Add has run the tags are the operator's, so a new post in the field
+	// must not take them back out of the Tags input. The line that confirmed
+	// them and the rating behind the NSFW prompt are about the post that was
+	// looked up, so those go with it.
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['mammal', 'canine', 'fox'],
+		rating: 'explicit',
+		imageCount: 1
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-chip')).toHaveCount(3);
+	await page.getByRole('button', { name: 'Add 3 tags' }).click();
+	await expect(page.locator('.tag-status-line')).toContainText('Sona added 3 tags.');
+	await expect(tagsInput(page)).toHaveValue('mammal, canine, fox');
+	await expect(markNsfw(page)).toBeVisible();
+
+	await page.fill(
+		'input[name="sourcePostUrl"]',
+		'https://bsky.app/profile/kirin.example/post/3kq7x2def'
+	);
+
+	await expect(tagsInput(page)).toHaveValue('mammal, canine, fox');
+	await expect(page.locator('.tag-status-line')).toHaveCount(0);
+	await expect(page.locator('.tag-rating-note')).toHaveCount(0);
+	await expect(markNsfw(page)).toHaveCount(0);
+	await expect(liveRegion(page)).toHaveText('The source URL changed, so Sona set that lookup aside.');
 });
 
 test('an edit that still names the same post keeps the chips', async ({ page }) => {
@@ -285,6 +320,36 @@ test('an edit that still names the same post keeps the chips', async ({ page }) 
 	await expect(page.locator('.tag-chip')).toHaveCount(3);
 	await expect(page.locator('.tag-rating-note')).toHaveText('Rated explicit by entail.dev.');
 	await expect(liveRegion(page)).toHaveText('3 suggested tags from entail.dev');
+});
+
+test('an X post rewritten from the share form to the handle form keeps the chips', async ({
+	page
+}) => {
+	// The share sheet hands out /i/web/status/<id>; the address bar shows
+	// /<handle>/status/<id>. One tweet, two URLs — and the canonical URL keeps
+	// the handle, so compared as URLs the chips would vanish under the operator.
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/images/1/edit');
+	await expect(tagsInput(page)).toBeVisible();
+	await stubSuggestions(page, 200, {
+		source: 'x',
+		tags: ['mammal', 'canine', 'fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/i/web/status/1789012345678901234');
+	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
+	await pill(page).click();
+	await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/kirin/status/1789012345678901234');
+	await expect(page.locator('.tag-chip')).toHaveCount(3);
+	await expect(liveRegion(page)).toHaveText('3 suggested tags from entail.dev');
+
+	// Another tweet is another post, and the chips go.
+	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/kirin/status/1789012345678901235');
+	await expect(page.locator('.tag-chip')).toHaveCount(0);
 });
 
 for (const rating of ['explicit', 'questionable'] as const) {
@@ -538,6 +603,26 @@ test('the tray action spans the tray on a phone, like the pill above it', async 
 	expect(Math.abs(box.width - content)).toBeLessThanOrEqual(1);
 });
 
+test('Dismiss sits centred under the primary button on a phone', async ({ page }) => {
+	// Stacked at 390px the primary spans the tray; a Dismiss flush at the left
+	// edge under it read as a separate control rather than the tray's second
+	// action.
+	await page.setViewportSize({ width: 390, height: 844 });
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['mammal', 'canine', 'fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+	await pill(page).click();
+
+	const add = (await page.getByRole('button', { name: 'Add 3 tags' }).boundingBox())!;
+	const dismiss = (await page.getByRole('button', { name: 'Dismiss' }).boundingBox())!;
+	expect(dismiss.width).toBeLessThan(add.width);
+	expect(Math.abs(dismiss.x + dismiss.width / 2 - (add.x + add.width / 2))).toBeLessThanOrEqual(1);
+});
+
 test('the Sign in link spans the tray on a phone, like Try again in its place', async ({ page }) => {
 	// A dead session draws an anchor where Try again would be, and the two are
 	// the same control to the operator. An anchor left at its intrinsic width
@@ -688,7 +773,7 @@ test('a 422 that lands after the URL has been edited is dropped, not shown', asy
 	// reader would be left with a lookup that never ends, so it says what became
 	// of the one that did land.
 	await expect(liveRegion(page)).toHaveText(
-		'The source URL changed, so that lookup was set aside.'
+		'The source URL changed, so Sona set that lookup aside.'
 	);
 	await expect(page.locator('input[name="sourcePostUrl"]')).not.toHaveAttribute(
 		'aria-describedby',
@@ -734,7 +819,7 @@ test('suggestions that land after the URL has been edited are dropped too', asyn
 		'Suggestions come from entail.dev, which reads the source post.'
 	);
 	await expect(liveRegion(page)).toHaveText(
-		'The source URL changed, so that lookup was set aside.'
+		'The source URL changed, so Sona set that lookup aside.'
 	);
 	await expect(markNsfw(page)).toHaveCount(0);
 	await expect(tagsInput(page)).toHaveValue('');
@@ -811,7 +896,7 @@ test('an empty answer that lands after the URL has been edited is dropped too', 
 	await expect(page.locator('.tag-tray')).toHaveCount(0);
 	await expect(page.getByText('No tags to suggest')).toHaveCount(0);
 	await expect(liveRegion(page)).toHaveText(
-		'The source URL changed, so that lookup was set aside.'
+		'The source URL changed, so Sona set that lookup aside.'
 	);
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });
@@ -932,6 +1017,14 @@ test('the edit page looks up the URL in the field, not the stored one', async ({
 	// checked rather than the list being pinned to one entry.
 	expect(bodies.length).toBeGreaterThan(0);
 	for (const body of bodies) expect(body).toEqual({ sourcePostUrl: BSKY_POST });
+
+	// With the tray open the card would end 20px above the variant controls and
+	// read as part of them; the edit page opens room under it, only while it is
+	// open.
+	await expect(page.locator('.tags-field')).toHaveCSS('margin-bottom', '12px');
+	await page.getByRole('button', { name: 'Dismiss' }).click();
+	await expect(page.locator('.tag-tray')).toHaveCount(0);
+	await expect(page.locator('.tags-field')).toHaveCSS('margin-bottom', '0px');
 });
 
 test('the edit form points its Source Post URL field at a refusal too', async ({ page }) => {

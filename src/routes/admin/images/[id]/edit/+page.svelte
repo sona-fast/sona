@@ -207,15 +207,20 @@
 		<!-- Keyed on the image: a same-route navigation to a different image
 		     re-seeds the fields above, and a tray still offering the previous
 		     image's suggestions would add them to this one. -->
-		{#key data.image.id}
-			<TagSuggestions
-				bind:value={tagsValue}
-				bind:rating={suggestedRating}
-				bind:sourceDescribedBy
-				sourceUrl={sourcePostUrl}
-				existingTags={data.tags.map((t) => t.name)}
-			/>
-		{/key}
+		<!-- The tray's card ends 20px above the variant controls, close enough to
+		     read as part of the tray; the wrapper adds room under it while it is
+		     open, and only then, so the resting form keeps its rhythm. -->
+		<div class="tags-field">
+			{#key data.image.id}
+				<TagSuggestions
+					bind:value={tagsValue}
+					bind:rating={suggestedRating}
+					bind:sourceDescribedBy
+					sourceUrl={sourcePostUrl}
+					existingTags={data.tags.map((t) => t.name)}
+				/>
+			{/key}
+		</div>
 
 		{#if data.hasVariants}
 			<p class="hint">{m.admin_variant_parent_hint()}</p>
@@ -391,6 +396,10 @@
 		flex-direction: column;
 		gap: 20px;
 		max-width: 600px;
+	}
+
+	.tags-field:has(:global(.tag-tray)) {
+		margin-bottom: 12px;
 	}
 
 	label {

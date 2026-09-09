@@ -106,7 +106,17 @@
 		// The row is on this page because it has no tags, so nothing is excluded.
 		const next = fromResponse(status, body, []);
 		states = { ...states, [id]: next };
-		announce(id, title, sentenceFor(next));
+		// A 422 draws the tray here — the forms answer it under their field, so
+		// sentenceFor gives it the body alone — and the tray has an eyebrow, which
+		// the region says the way it says every other failure's.
+		const tray = trayFor(next);
+		announce(
+			id,
+			title,
+			next.kind === 'noSource'
+				? m.admin_tag_suggest_status_join({ title: tray.title, body: tray.body })
+				: sentenceFor(next)
+		);
 		// An answer with no chips draws a tray, and the pill focus was sitting on
 		// goes with it; land on the sentence that says why, where Try again is the
 		// next tab stop.
@@ -578,8 +588,9 @@
 		font-size: 24px;
 	}
 
+	/* About 70 characters a line in Geist, whose ch is wide: 62ch ran to 86. */
 	.explainer {
-		max-width: 62ch;
+		max-width: 50ch;
 		margin: -12px 0 20px;
 		font-size: 14px;
 		color: var(--muted-foreground);

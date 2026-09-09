@@ -320,13 +320,17 @@ describe('the multi-tile hint sentence', () => {
 });
 
 describe('an answer that stops being about the post in the field', () => {
-	it('is compared canonically, so a harmless edit to the same URL keeps it', () => {
-		// A trailing slash or a tracking parameter names the same post. Compared as
-		// text, either would throw away chips the operator is in the middle of
-		// choosing from.
-		expect(suggestions).toMatch(/const canonical = \(url: string\) =>\s*classifySourceUrl\(url\)\?\.url \?\? null;/);
-		expect(suggestions).toMatch(/canonical\(sourceUrl\) !== canonical\(asked\)/);
-		expect(suggestions).toMatch(/answeredFor === null \|\| answeredFor === canonical\(sourceUrl\)/);
+	it('is compared by the post each URL names, so a harmless edit keeps it', () => {
+		// A trailing slash, a tracking parameter or an X status under another
+		// handle names the same post. Compared as text, any of them would throw
+		// away chips the operator is in the middle of choosing from. The key is
+		// read off the `source` derived, which already classified the field, and
+		// the snapshot a lookup went out with is taken from the same derived.
+		expect(suggestions).toMatch(/const post = \$derived\(sourceKey\(source\)\);/);
+		expect(suggestions).toMatch(/const askedPost = post;/);
+		expect(suggestions).toMatch(/post !== askedPost &&/);
+		expect(suggestions).toMatch(/answeredFor === null \|\| answeredFor === post/);
+		expect(suggestions).not.toMatch(/canonical\(/);
 	});
 
 	it('says the lookup was set aside rather than blanking the live region', () => {

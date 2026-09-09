@@ -23,6 +23,7 @@
 		requestSuggestions,
 		selectedTags,
 		sentenceFor,
+		sourceKey,
 		toggleTag,
 		trayFor,
 		type EntailRating,
@@ -78,21 +79,20 @@
 	// Guards a second click while a lookup is in flight, and lets a stale answer
 	// be dropped when the operator has already asked again.
 	let requestSeq = 0;
-	// Which post the answer on screen is about, canonical, or null where there is
+	// Which post the answer on screen is about, as its sourceKey, or null where there is
 	// no answer that a change of URL could invalidate. Set only for the two states
 	// that describe the post itself — chips and "nothing to suggest" — so the
 	// failures, which are true whatever the field holds, keep their tray.
 	let answeredFor: string | null = null;
 
-	// Which post a URL names, or null for anything that is not a post. Two URLs
-	// that name the same post — a trailing slash, a tracking query string — give
-	// the same answer, so an edit that changes nothing about the post does not
-	// throw the answer away.
-	const canonical = (url: string) => classifySourceUrl(url)?.url ?? null;
-
 	// The pill is enabled by the same rule the endpoint applies, so a URL the
 	// server would refuse never looks clickable.
 	const source = $derived(classifySourceUrl(sourceUrl));
+	// Which post the field names, or null. Two URLs that name the same post — a
+	// trailing slash, a tracking query string, an X status under another handle —
+	// give the same key, so an edit that changes nothing about the post does not
+	// throw the answer away.
+	const post = $derived(sourceKey(source));
 	const searching = $derived(suggestion.kind === 'searching');
 	const disabled = $derived(source === null || searching);
 	const chosen = $derived(selectedTags(suggestion));
@@ -184,8 +184,8 @@
 	// An answer about the post itself goes the same way, and for the same reason:
 	// chips from post A left standing over post B would be added to B, with A's
 	// rating driving the NSFW prompt, and A's "nothing to suggest" would be a
-	// verdict on a post nobody is looking at. Compared canonically, so a trailing
-	// slash or a tracking parameter on the same post keeps the answer. Accepted
+	// verdict on a post nobody is looking at. Compared by the post each names, so
+	// a trailing slash or a tracking parameter on the same post keeps the answer. Accepted
 	// tags stay in the field either way — they are the operator's now — but the
 	// line that confirmed them and the rating behind the NSFW prompt go, because
 	// both are about the post that was looked up.
@@ -201,14 +201,19 @@
 				if (announcement === m.admin_tag_suggest_bad_link_body()) announcement = '';
 				return;
 			}
-			if (answeredFor === null || answeredFor === canonical(sourceUrl)) return;
+			// `post` is read off the `source` derived, which already classified the
+			// field, rather than classifying the same string a second time.
+			if (answeredFor === null || answeredFor === post) return;
 			answeredFor = null;
 			suggestion = { kind: 'idle' };
 			// The rating belongs to the answer, and the note beside the NSFW box
 			// reads it: left behind it would offer to mark the post now in the field
 			// on the strength of a lookup of another one.
 			rating = null;
-			announcement = '';
+			// Said out loud, the way a drop mid-flight is: the region last named
+			// the answer, and a screen reader is otherwise not told it went. Once
+			// per change of post — the answeredFor guard above sees to that.
+			announcement = m.admin_tag_suggest_dropped_body();
 		});
 	});
 
@@ -240,10 +245,11 @@
 		await tick();
 		pill?.focus();
 
-		// What the lookup went out with. Every answer is an answer about THIS
-		// link, so it has to be checked against the field it came from; nothing
-		// keeps the URL past this call.
+		// What the lookup went out with, and which post that names. Every answer
+		// is an answer about THIS link, so it has to be checked against the field
+		// it came from; nothing keeps the URL past this call.
 		const asked = sourceUrl;
+		const askedPost = post;
 		const { status, body } = await requestSuggestions({ sourcePostUrl: asked });
 
 		// The operator asked again while this was in flight; that answer wins.
@@ -256,11 +262,11 @@
 		// the NSFW prompt; "found nothing" would be a verdict on a post nobody can
 		// see; and a refusal would leave the hint refusing a URL that is gone. The
 		// reset effect below has already run for that edit, so any of them would
-		// stay. Dropped instead: back to idle, nothing announced. The lookup
+		// stay. Dropped instead: back to idle, and said so. The lookup
 		// FAILURES are kept — "the lookup failed" is true whatever the field now
 		// holds, and their tray reads the current field for what to offer next.
 		if (
-			canonical(sourceUrl) !== canonical(asked) &&
+			post !== askedPost &&
 			(next.kind === 'suggested' || next.kind === 'empty' || next.kind === 'noSource')
 		) {
 			suggestion = { kind: 'idle' };
@@ -273,8 +279,7 @@
 		suggestion = next;
 		// Which post this answer is about, so an edit to the URL that lands on
 		// another post takes it away again.
-		answeredFor =
-			next.kind === 'suggested' || next.kind === 'empty' ? canonical(asked) : null;
+		answeredFor = next.kind === 'suggested' || next.kind === 'empty' ? askedPost : null;
 		rating = next.kind === 'suggested' ? next.rating : null;
 		announcement = sentenceFor(next);
 	}

@@ -1762,7 +1762,7 @@
 	"admin_tag_suggest_hint": "Suggestions come from entail.dev, which reads the source post. Sona adds them only when you accept.",
 	"admin_tag_suggest_hint_no_source": "Add a Bluesky or X post as the source URL to get tag suggestions.",
 	"admin_tag_suggest_retry_needs_post_body": "There's no post at the source post URL to try again with.",
-	"admin_tag_suggest_dropped_body": "The source URL changed, so that lookup was set aside.",
+	"admin_tag_suggest_dropped_body": "The source URL changed, so Sona set that lookup aside.",
 	"admin_tag_suggest_hint_join": "{first} {second}",
 	"admin_tag_suggest_hint_first_tile": "Accepted tags apply to every image in this upload.",
 	"admin_tag_suggest_region_label": "Tag suggestions",

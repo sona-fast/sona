@@ -1028,11 +1028,12 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		if (!rule) throw new Error('the phone-width refused Dismiss rule is missing from app.css');
 		expect(rule).toMatch(/width:\s*100%\s*;/);
 		// Full width centres the label, which takes the resting padding on both
-		// sides: the flush rule above passes this variant over rather than zeroing
-		// the left pad here and restoring it there.
+		// sides. A resting Dismiss keeps that padding too and is centred under the
+		// primary by the stacked row itself, so no rule zeroes a pad on either.
 		expect(css).toMatch(
-			/\.tag-actions \.tag-btn-text:not\(\[aria-disabled='true'\]\)\s*\{\s*padding-left:\s*0\s*;/
+			/@media \(max-width: 640px\) \{[^}]*\.tag-actions\s*\{\s*flex-direction:\s*column;\s*align-items:\s*center;/
 		);
+		expect(css).not.toMatch(/\.tag-actions \.tag-btn-text:not\(\[aria-disabled='true'\]\)/);
 		expect(rule).not.toMatch(/padding/);
 		// And nothing here may undo the inert treatment the base rule sets.
 		expect(rule).not.toMatch(/background/);

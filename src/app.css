@@ -934,21 +934,15 @@ a.tag-pill {
 @media (max-width: 640px) {
 	/* Too narrow for a row: the tray's actions stack, and the primary button
 	   spans the tray. */
+	/* Centred, so a resting Dismiss sits under the middle of the primary that
+	   spans the tray above it rather than flush at its left edge. */
 	.tag-actions {
 		flex-direction: column;
-		align-items: flex-start;
+		align-items: center;
 	}
 
 	.tag-actions .btn {
 		width: 100%;
-	}
-
-	/* Stacked, the text button's own left padding starts its label right of the
-	   button above it; flush it to the tray's content edge. Not the refused
-	   variant: that one spans the tray below, and its label is centred by the
-	   padding it keeps on both sides. */
-	.tag-actions .tag-btn-text:not([aria-disabled='true']) {
-		padding-left: 0;
 	}
 
 	/* Refused, stacked. On one line the three refused controls share the inert
@@ -973,7 +967,7 @@ a.tag-pill {
 	   by the box, not by padding, so nothing else has to change. Together with
 	   the two rules above, that is the whole of the stacked row: the tray's
 	   action pill spans the tray, so does a refused Dismiss beside it, and a
-	   resting Dismiss keeps its natural width flush at the content edge. */
+	   resting Dismiss keeps its natural width, centred under it. */
 	.tag-actions .tag-pill {
 		width: 100%;
 		justify-content: center;

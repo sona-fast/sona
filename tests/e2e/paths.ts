@@ -78,3 +78,11 @@ export const E2E_PLATFORM_PERSIST_UPLOAD = path.join(E2E_PERSIST_TO_UPLOAD, 'v3'
 // extra token or preload. See playwright.config.ts.
 export const E2E_PERSIST_TO_TAGS = path.join(persistRoot, '.wrangler-e2e-tag-suggestions');
 export const E2E_PLATFORM_PERSIST_TAGS = path.join(E2E_PERSIST_TO_TAGS, 'v3');
+
+// The suggest-tags spec drives the backfill list, whose Save WRITES tag rows.
+// It used to ride the upload server, whose DB the upload spec counts on, and
+// the two flaked each other in combined runs. So it gets its OWN throwaway DB
+// + dev server, serial like tag-suggestions and on the shared wrangler config:
+// the lookup endpoint is intercepted, so no token or preload is needed.
+export const E2E_PERSIST_TO_SUGGEST = path.join(persistRoot, '.wrangler-e2e-suggest-tags');
+export const E2E_PLATFORM_PERSIST_SUGGEST = path.join(E2E_PERSIST_TO_SUGGEST, 'v3');

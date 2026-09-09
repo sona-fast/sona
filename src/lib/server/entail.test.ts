@@ -47,6 +47,18 @@ describe('classifySourceUrl', () => {
 		expect(classifySourceUrl('https://bsky.app/profile/foo%252ebar/post/3abc')).toBeNull();
 	});
 
+	it('rejects a bluesky actor made only of dots', () => {
+		// The URL parser collapses "." and ".." out of the path before the
+		// classifier sees them, so those two fail on shape; "..." survives parsing,
+		// passes the character class, and names no handle or DID.
+		expect(classifySourceUrl('https://bsky.app/profile/./post/3abc')).toBeNull();
+		expect(classifySourceUrl('https://bsky.app/profile/%2e%2e/post/3abc')).toBeNull();
+		expect(classifySourceUrl('https://bsky.app/profile/.../post/3abc')).toBeNull();
+		expect(classifySourceUrl('https://bsky.app/profile/%2E%2E%2E/post/3abc')).toBeNull();
+		// A dot inside a handle is still fine.
+		expect(classifySourceUrl('https://bsky.app/profile/a.b/post/3abc')).not.toBeNull();
+	});
+
 	it('accepts the x/twitter status shapes and canonicalises them', () => {
 		const canonical = { kind: 'x', url: 'https://x.com/examplefox/status/1234567890', id: '1234567890' };
 		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890')).toEqual(canonical);

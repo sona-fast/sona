@@ -215,6 +215,36 @@ test('the Tags hint says accepted tags cover the batch only while the batch has 
 	await expect(page.locator('#tags-hint')).toContainText('Suggestions come from entail.dev');
 });
 
+test('the batch sentence stays off the hint while it refuses the source URL', async ({ page }) => {
+	// Appended to a refusal, the batch sentence would answer a link the site
+	// cannot look up with a note about where accepted tags go.
+	const BATCH = 'Accepted tags apply to every image in this upload.';
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/upload');
+	await page.fill('input[name="sourcePostUrl"]', 'https://bsky.app/profile/e2e.example/post/3kq7x');
+	await stageFiles(
+		page,
+		[
+			{ name: 'e2e-hint-3.png', mimeType: 'image/png', buffer: PNG },
+			{ name: 'e2e-hint-4.png', mimeType: 'image/png', buffer: PNG }
+		],
+		2
+	);
+	await expect(page.locator('#tags-hint')).toContainText(BATCH);
+
+	await page.route('**/api/admin/tag-suggestions', (route: Route) =>
+		route.fulfill({
+			status: 422,
+			contentType: 'application/json',
+			body: JSON.stringify({ error: 'unsupported_source' })
+		})
+	);
+	await page.getByRole('button', { name: 'Suggest tags', exact: true }).click();
+
+	await expect(page.locator('#tags-hint')).toContainText("Sona can't look up this link.");
+	await expect(page.locator('#tags-hint')).not.toContainText(BATCH);
+});
+
 // A file one byte over the 64 MiB cap. Payload buffers are capped at 50 MB by
 // Playwright, so oversized files go via a path; ftruncate keeps them sparse (no
 // 64 MiB actually written).
