@@ -524,6 +524,18 @@
 				if (!live) return;
 				live.lookup = { kind: 'failed', reason: 'unavailable', sent: true };
 				console.error(LOOKUP_RESULT_THREW);
+				// A variant tile's failure is plain text outside any live region, so
+				// without this the tile silently stops searching (4.1.3). Said
+				// directly rather than through announceTileLookup, which is one of
+				// the things that could have thrown, and guarded so a second throw
+				// cannot escape into another unhandled rejection.
+				if (!isParent(key)) {
+					try {
+						announcer.say(m.admin_lookup_announce_tile_failed({ fileName: live.fileName }));
+					} catch {
+						console.error(LOOKUP_RESULT_THREW);
+					}
+				}
 			});
 	}
 

@@ -1206,6 +1206,17 @@ describe('the upload page grid', () => {
 		expect(LOOKUP_RESULT_THREW).toBe('artist lookup: applying the result threw');
 	});
 
+	// The failed state a variant tile lands in is plain text outside any live
+	// region, so the catch has to speak it (4.1.3) — the parent's failure is
+	// already inside the panel's status region. Said through announcer.say, not
+	// announceTileLookup, which is one of the callers that could have thrown,
+	// and wrapped so a second throw cannot escape the catch.
+	it('announces a variant tile failure from the catch', () => {
+		expect(UPLOAD).toMatch(
+			/console\.error\(LOOKUP_RESULT_THREW\);[\s\S]{0,400}?if \(!isParent\(key\)\) \{\s*\n\s*try \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_tile_failed\(\{ fileName: live\.fileName \}\)\);\s*\n\s*\} catch \{/
+		);
+	});
+
 	it('holds the file on the tile so the bytes are what gets posted', () => {
 		expect(UPLOAD).toMatch(/file: File \| null;/);
 		expect(UPLOAD).toMatch(/file: error \? null : file,/);
