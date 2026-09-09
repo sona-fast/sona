@@ -124,6 +124,9 @@ describe('normalizeMatches', () => {
 	// comparators' order was dropped here and a rating added here sorted ahead of
 	// every rating they knew. One list now, read from both ends.
 	it('accepts exactly the ratings the comparators order by', () => {
+		// The loop below passes for any list, including an emptied or reordered
+		// one, so the list itself is pinned: least to most restrictive.
+		expect(RATING_ORDER).toEqual(['general', 'mature', 'adult']);
 		for (const rating of RATING_ORDER) {
 			const [match] = normalizeMatches([
 				{ site: 'FurAffinity', site_id_str: '12345', artists: [], distance: 0, rating }

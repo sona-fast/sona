@@ -652,6 +652,10 @@ function remapHits(hits: unknown, indexMap: Map<number, number>): ArtistHit[] {
 	return [...merged.values()];
 }
 
+/** What both pages log when applying a finished lookup throws. A constant, so
+ * the line is the same on either page and carries nothing from the result. */
+export const LOOKUP_RESULT_THREW = 'artist lookup: applying the result threw';
+
 /**
  * Turn a response into a state. Mapped by the body's `error` field rather than
  * by status: the admin gate answers an expired session with its own plain-text

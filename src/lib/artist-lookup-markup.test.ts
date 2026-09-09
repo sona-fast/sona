@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { LOOKUP_RESULT_THREW } from './artist-lookup';
 
 // Source pins for the "Look up artist" UI (SONA-156). Nothing renders Svelte
 // under the pure-TS vitest setup, so the wiring these components depend on is
@@ -674,6 +675,23 @@ describe('what the lookup copy names', () => {
 		expect(ja.admin_lookup_announce_tile_with_notice).toBe('{outcome}{disclosure}');
 	});
 
+	// One sentence per shape of refill, so the announcement never says "the
+	// shared fields" about a single field. Nothing read the ja side, so a
+	// missing translation or two identical sentences would have gone unnoticed.
+	it('names the refilled shared fields in both catalogs', () => {
+		expect(ja.admin_lookup_announce_shared_refilled).toBeTruthy();
+		expect(ja.admin_lookup_announce_shared_refilled_source).toContain('投稿元URL');
+		expect(ja.admin_lookup_announce_shared_refilled_date).toContain('制作依頼日');
+		for (const catalog of [en, ja]) {
+			const sentences = [
+				catalog.admin_lookup_announce_shared_refilled,
+				catalog.admin_lookup_announce_shared_refilled_source,
+				catalog.admin_lookup_announce_shared_refilled_date
+			];
+			expect(new Set(sentences).size).toBe(3);
+		}
+	});
+
 	it('blames the image being edited for the variant block', () => {
 		expect(en.admin_lookup_clash_has_variants).toBe(
 			"The image you're editing already has variants of its own, so it can't become a variant of another piece."
@@ -919,6 +937,11 @@ describe('focus after the panel goes away', () => {
 		// The declined-duplicate path keeps calling removeTile directly: focus is
 		// on the file input or the dropzone there, and neither goes away.
 		expect(UPLOAD).toContain('removeTile(tile.key);');
+		// Both records are keyed by tile, and a key is never reused: the removed
+		// tile's entries go with its abort rather than sitting there unreadable.
+		expect(UPLOAD).toMatch(
+			/function removeTile\([\s\S]{0,600}?lookupAborts\.delete\(key\);[\s\S]{0,300}?delete tileLookupButtons\[key\];\s*\n\s*delete tileRemoveButtons\[key\];/
+		);
 	});
 
 	it('gives the dialog its opener back', () => {
@@ -1156,6 +1179,31 @@ describe('the upload page grid', () => {
 		expect(UPLOAD).toMatch(
 			/async function addAsVariant\(clash: SourceClash\) \{[\s\S]{0,300}?closeSharedLookup\(\{ focus: false \}\);\s*\n\s*groupMode = 'existing';/
 		);
+	});
+
+	// runLookup resolves on every path it has, so nothing here rejects — but a
+	// throw in the code that applies the result would leave the panel on
+	// "searching" for the rest of the page's life, with no retry and an
+	// unhandled rejection in the console. Both pages catch it into the same
+	// failed state, and the "sent" flag says the file went, because by then the
+	// request had.
+	it('lands a throw while applying a result in the failed state', () => {
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(
+				/\.catch\(\(\) => \{[\s\S]{0,400}?kind: 'failed', reason: 'unavailable', sent: true[\s\S]{0,120}?console\.error\(LOOKUP_RESULT_THREW\)/
+			);
+			// Imported, not spelled out at the log site.
+			expect(source).toMatch(/LOOKUP_RESULT_THREW,\n/);
+		}
+		// The catch tells its own lookup from a cancelled one by the abort
+		// bookkeeping, so the success path clears that last — cleared first, a
+		// throw above it would read as a cancel and the catch would do nothing.
+		expect(UPLOAD).toMatch(
+			/else announceTileLookup\(live\);[\s\S]{0,200}?lookupAborts\.delete\(key\);\s*\n\s*\}\)/
+		);
+		expect(EDIT).toMatch(/applyPrefill\(next\);[\s\S]{0,200}?lookupAbort = null;\s*\n\s*\}\)/);
+		// One constant, shared, carrying nothing from the result.
+		expect(LOOKUP_RESULT_THREW).toBe('artist lookup: applying the result threw');
 	});
 
 	it('holds the file on the tile so the bytes are what gets posted', () => {

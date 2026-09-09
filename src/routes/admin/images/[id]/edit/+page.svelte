@@ -7,6 +7,7 @@
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
 	import {
+		LOOKUP_RESULT_THREW,
 		lookupSentFile,
 		newArtistSeed,
 		prefillForResult,
@@ -222,12 +223,27 @@
 		lookup = { kind: 'searching' };
 		sentPrivate = sendingPrivate;
 		if (clearedInline) announcer.say(m.admin_lookup_announce_searching_cleared());
-		void runLookup({ imageId: data.image.id }, { signal: controller.signal }).then((next) => {
-			if (lookupAbort !== controller) return;
-			lookupAbort = null;
-			lookup = next;
-			applyPrefill(next);
-		});
+		void runLookup({ imageId: data.image.id }, { signal: controller.signal })
+			.then((next) => {
+				if (lookupAbort !== controller) return;
+				lookup = next;
+				applyPrefill(next);
+				// Cleared last, so a throw in applyPrefill still reads as this
+				// lookup's in the catch below rather than as a cancelled one.
+				lookupAbort = null;
+			})
+			// runLookup itself resolves on every path, so only a throw in the
+			// callback above lands here. Without this the panel would sit on
+			// "searching" for the rest of the page's life, with nothing to retry
+			// from. The request had already gone out by then, so the disclosure errs
+			// toward saying the file went — the same call runLookup's own network
+			// catch makes.
+			.catch(() => {
+				if (lookupAbort !== controller) return;
+				lookupAbort = null;
+				lookup = { kind: 'failed', reason: 'unavailable', sent: true };
+				console.error(LOOKUP_RESULT_THREW);
+			});
 	}
 
 	function cancelLookup() {

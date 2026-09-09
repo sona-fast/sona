@@ -7,6 +7,7 @@
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
 	import {
+		LOOKUP_RESULT_THREW,
 		matchHandle,
 		pickPrefillMatch,
 		prefillForResult,
@@ -307,6 +308,11 @@
 		// result is discarded with the tile.
 		lookupAborts.get(key)?.abort();
 		lookupAborts.delete(key);
+		// The two focus-target records are keyed by tile as well, and a key is
+		// never reused, so an entry for a removed tile is dead weight nothing can
+		// read again. Dropped here beside the abort.
+		delete tileLookupButtons[key];
+		delete tileRemoveButtons[key];
 		// The parent is a tile, not a position: removing anything before it shifts
 		// every later tile down one, and parentIndex rides along to the server as
 		// the hidden field that picks the parent piece. Left stale, the saved
@@ -478,27 +484,47 @@
 		tile.lookup = { kind: 'searching' };
 		tile.sentPrivate = isPrivate;
 		if (isParent(key)) resetSharedPrefill();
-		void runLookup({ file: tile.file }, { signal: controller.signal }).then((next) => {
-			// Cancelled, or the tile was removed while the request was out.
-			if (lookupAborts.get(key) !== controller) return;
-			lookupAborts.delete(key);
-			const live = tiles.find((t) => t.key === key);
-			if (!live) return;
-			live.lookup = next;
-			// The role as it is NOW, not as it was when the request fired. Ticking
-			// another tile's Parent radio mid-lookup re-points the shared fields at
-			// that tile, and a late result from the tile that used to be the parent
-			// would otherwise write its post URL and date under a panel showing the
-			// new one. Going the other way, a tile promoted to parent mid-lookup
-			// applies its result instead of showing it over empty fields. The
-			// group-mode round trip that made this a snapshot is handled where it
-			// happens: the "new" radio re-derives from the parent tile.
-			if (isParent(key)) applyShared(next);
-			// A variant tile's outcome renders as plain text on the tile, outside
-			// the panel's live region — say it out loud, naming the file, or a
-			// screen-reader user has no way to know the lookup finished (4.1.3).
-			else announceTileLookup(live);
-		});
+		void runLookup({ file: tile.file }, { signal: controller.signal })
+			.then((next) => {
+				// Cancelled, or the tile was removed while the request was out.
+				if (lookupAborts.get(key) !== controller) return;
+				const live = tiles.find((t) => t.key === key);
+				if (!live) {
+					lookupAborts.delete(key);
+					return;
+				}
+				live.lookup = next;
+				// The role as it is NOW, not as it was when the request fired. Ticking
+				// another tile's Parent radio mid-lookup re-points the shared fields at
+				// that tile, and a late result from the tile that used to be the parent
+				// would otherwise write its post URL and date under a panel showing the
+				// new one. Going the other way, a tile promoted to parent mid-lookup
+				// applies its result instead of showing it over empty fields. The
+				// group-mode round trip that made this a snapshot is handled where it
+				// happens: the "new" radio re-derives from the parent tile.
+				if (isParent(key)) applyShared(next);
+				// A variant tile's outcome renders as plain text on the tile, outside
+				// the panel's live region — say it out loud, naming the file, or a
+				// screen-reader user has no way to know the lookup finished (4.1.3).
+				else announceTileLookup(live);
+				// Cleared last, so a throw anywhere above still reads as this
+				// lookup's in the catch below rather than as a cancelled one.
+				lookupAborts.delete(key);
+			})
+			// runLookup itself resolves on every path, so only a throw in the
+			// callback above lands here. Without this the tile would sit on
+			// "searching" for the rest of the page's life, with nothing to retry
+			// from. The request had already gone out by then, so the disclosure errs
+			// toward saying the file went — the same call runLookup's own network
+			// catch makes.
+			.catch(() => {
+				if (lookupAborts.get(key) !== controller) return;
+				lookupAborts.delete(key);
+				const live = tiles.find((t) => t.key === key);
+				if (!live) return;
+				live.lookup = { kind: 'failed', reason: 'unavailable', sent: true };
+				console.error(LOOKUP_RESULT_THREW);
+			});
 	}
 
 	function announceTileLookup(tile: Tile) {
