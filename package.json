@@ -49,7 +49,7 @@
 		"tsx": "^4.21.0",
 		"typescript": "^6.0.2",
 		"vite": "^8.0.7",
-		"vitest": "^4.1.7"
+		"vitest": "^4.1.11"
 	},
 	"dependencies": {
 		"@pixiv/three-vrm": "^3.5.5",
