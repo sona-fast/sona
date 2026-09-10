@@ -1442,6 +1442,56 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).not.toContainText('Bob Smith');
 	});
 
+	// The dialog is a plain overlay with no focus trap, so the Parent radio
+	// behind it stays reachable from the keyboard while it is open. Read back at
+	// close, the parent was whichever tile the radio had moved to: the created
+	// artist was credited to a result that never named the handle, and the tile
+	// that did name it kept offering to add the artist, where the second click
+	// creates the duplicate.
+	test('folds a created artist into the tile that offered the handle', async ({ page }) => {
+		let creates = 0;
+		await page.route('**/api/artists', (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
+			creates += 1;
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ id: 79, name: 'kuttoya' })
+			});
+		});
+		await stubLookup(page, matchedBody({ localArtists: [] }));
+		await twoDoneTiles(page);
+
+		// front.png is the parent, so its lookup is the one driving the panel, and
+		// the handle on offer is its result's.
+		await tileLookup(page).nth(0).click();
+		const addNew = panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' });
+		await addNew.click();
+		await expect(page.locator('#new-artist-name')).toHaveValue('kuttoya');
+
+		// Focus, not a click: the backdrop swallows a pointer, but nothing holds
+		// the keyboard inside the dialog, so a few Tabs land here for real.
+		await page.getByRole('radio', { name: 'Parent: back.png' }).focus();
+		await page.keyboard.press(' ');
+		await expect(page.getByRole('radio', { name: 'Parent: back.png' })).toBeChecked();
+
+		await page.getByRole('button', { name: 'Create Artist' }).click();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('79');
+
+		// back.png never ran a lookup, so it has no result for the new artist to
+		// be folded into and nothing about it changed.
+		await expect(page.getByRole('radio', { name: 'Parent: front.png' })).not.toBeChecked();
+		await expect(addNew).toHaveCount(0);
+
+		// front.png's result is where the artist landed: back on it, the panel has
+		// moved off the 'new' outcome and there is nothing to click a second time.
+		await page.getByRole('radio', { name: 'Parent: front.png' }).check();
+		await expect(panel(page)).toBeVisible();
+		await expect(addNew).toHaveCount(0);
+		await expect(panel(page)).toContainText('kuttoya');
+		expect(creates).toBe(1);
+	});
+
 	test('a variant tile rates its own tile and leaves the shared fields alone', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await twoDoneTiles(page);

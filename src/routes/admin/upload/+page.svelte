@@ -392,6 +392,8 @@
 		// — credited to it, the panel would claim the handle "is already in your
 		// artist list as <unrelated name>" and drop the real add-new action.
 		const fromLookup = artistSeed !== null;
+		// The tile the seed came from, also captured before the clear below.
+		const seedKey = artistSeed?.tileKey ?? null;
 		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
 		// The option values are numbers, and the select binding compares with
 		// Object.is — a stringified id would match no option and select nothing.
@@ -402,8 +404,21 @@
 		// The result now names a local artist, so the panel stops offering to add
 		// one. Left alone it would still read "Add {handle} as a new artist", and a
 		// second click would create the same artist again.
-		const tile = parentTile;
-		if (!fromLookup || !tile || tile.lookup.kind !== 'results') return;
+		// The seed's own tile, not whichever one is parent now: with no focus trap
+		// on the dialog, the Parent radio can be moved while it is open, and
+		// folding into the new parent would credit an unrelated result while
+		// leaving the seed's tile still offering to add the artist.
+		const tile = seedKey === null ? null : (tiles.find((t) => t.key === seedKey) ?? null);
+		if (!fromLookup || !tile || tile.lookup.kind !== 'results') {
+			// That tile can also be removed while the dialog is open, taking the
+			// button the dialog would have restored focus to with it (2.4.3). There
+			// is nothing to fold then; land on the select holding the new artist.
+			if (fromLookup && !tile) {
+				await tick();
+				artistSelect?.focus();
+			}
+			return;
+		}
 		tile.lookup = { ...tile.lookup, data: withCreatedArtist(tile.lookup.data, artist) };
 		// That swap destroys the button the dialog captured as its opener, so its
 		// onDestroy has nothing connected to restore focus to and the operator
@@ -445,7 +460,14 @@
 	// "Using X" and revert when the operator changes the select by hand.
 	let appliedArtist = $state<{ id: number; name: string } | null>(null);
 	// What the New Artist dialog opens prefilled with, when a lookup opened it.
-	let artistSeed = $state<{ handle: string; site: LookupSite; linkable: boolean } | null>(null);
+	// `tileKey` is the tile whose result offered the handle, carried inside the
+	// seed so the two are cleared together and can never drift apart.
+	let artistSeed = $state<{
+		handle: string;
+		site: LookupSite;
+		linkable: boolean;
+		tileKey: number | null;
+	} | null>(null);
 	// Per-tile aborts. Not $state — nothing renders them.
 	const lookupAborts = new Map<number, AbortController>();
 	// Closing or cancelling the panel destroys the button the operator is
@@ -487,6 +509,10 @@
 		// What runLookup settled on, so the catch below can keep this lookup's own
 		// answer to "did the file leave the browser" instead of assuming it did.
 		let settled: LookupState | null = null;
+		// Whether that answer reached the tile. The callback writes the state
+		// before it announces it, so a throw out of the announcement must not be
+		// read as "nothing arrived" and rewrite matches away.
+		let applied = false;
 		void runLookup({ file: tile.file }, { signal: controller.signal })
 			.then((next) => {
 				settled = next;
@@ -498,6 +524,7 @@
 					return;
 				}
 				live.lookup = next;
+				applied = true;
 				// The role as it is NOW, not as it was when the request fired. Ticking
 				// another tile's Parent radio mid-lookup re-points the shared fields at
 				// that tile, and a late result from the tile that used to be the parent
@@ -518,27 +545,44 @@
 			// runLookup itself resolves on every path, so only a throw in the
 			// callback above lands here. Without this the tile would sit on
 			// "searching" for the rest of the page's life, with nothing to retry
-			// from. The disclosure keeps the settled state's own "sent" — a
-			// client-refused too_large never left the browser, and rewriting it as
-			// sent would show a false private notice. With nothing captured the
-			// request had already gone out, so it errs toward saying the file went,
-			// the same call runLookup's own network catch makes.
+			// from. A failure is synthesised only when nothing was applied: the
+			// state goes on the tile before it is announced, so a throw while
+			// announcing would otherwise discard matches that did arrive and tell
+			// the operator FuzzySearch never answered. The disclosure keeps the
+			// settled state's own "sent" — a client-refused too_large never left
+			// the browser, and rewriting it as sent would show a false private
+			// notice. With nothing captured the request had already gone out, so it
+			// errs toward saying the file went, the same call runLookup's own
+			// network catch makes.
 			.catch(() => {
 				if (lookupAborts.get(key) !== controller) return;
 				lookupAborts.delete(key);
 				const live = tiles.find((t) => t.key === key);
 				if (!live) return;
-				const sent = settled?.kind === 'failed' ? settled.sent : true;
-				live.lookup = { kind: 'failed', reason: 'unavailable', sent };
+				if (!applied) {
+					const sent = settled?.kind === 'failed' ? settled.sent : true;
+					live.lookup = { kind: 'failed', reason: 'unavailable', sent };
+				}
 				console.error(LOOKUP_RESULT_THREW);
-				// A variant tile's failure is plain text outside any live region, so
-				// without this the tile silently stops searching (4.1.3). Said
-				// directly rather than through announceTileLookup, which is one of
-				// the things that could have thrown, and guarded so a second throw
-				// cannot escape into another unhandled rejection.
+				// A variant tile's outcome is plain text outside any live region, so
+				// without this the tile silently stops searching (4.1.3). What it says
+				// is what the tile now holds: the synthesised failure, or the result
+				// that stands. The failure is said directly rather than through
+				// announceTileLookup, which is one of the things that could have
+				// thrown; a result goes through it once, and falls back to the plain
+				// outcome line if that is what threw. Guarded throughout so a second
+				// throw cannot escape into another unhandled rejection.
 				if (!isParent(key)) {
 					try {
-						announcer.say(m.admin_lookup_announce_tile_failed({ fileName: live.fileName }));
+						if (!applied) {
+							announcer.say(m.admin_lookup_announce_tile_failed({ fileName: live.fileName }));
+						} else {
+							try {
+								announceTileLookup(live);
+							} catch {
+								announcer.say(tileLookupOutcome(live));
+							}
+						}
 					} catch {
 						console.error(LOOKUP_RESULT_THREW);
 					}
@@ -546,17 +590,22 @@
 			});
 	}
 
-	function announceTileLookup(tile: Tile) {
+	/** What the lookup found, as one sentence naming the file — without the
+	 * private disclosure the full announcement wraps around it. Its own function
+	 * so the catch below can still say the outcome when the wrapping threw. */
+	function tileLookupOutcome(tile: Tile): string {
 		const fileName = tile.fileName;
-		let line: string;
 		if (tile.lookup.kind === 'failed') {
-			line = m.admin_lookup_announce_tile_failed({ fileName });
-		} else {
-			const result = tileResult(tile);
-			line = result
-				? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
-				: m.admin_lookup_announce_tile_no_match({ fileName });
+			return m.admin_lookup_announce_tile_failed({ fileName });
 		}
+		const result = tileResult(tile);
+		return result
+			? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
+			: m.admin_lookup_announce_tile_no_match({ fileName });
+	}
+
+	function announceTileLookup(tile: Tile) {
+		let line = tileLookupOutcome(tile);
 		// The tile's private notice is a plain paragraph outside any live region,
 		// so this is the only way the disclosure reaches a screen-reader operator.
 		if (tile.sentPrivate && lookupSentFile(tile.lookup)) {
@@ -685,7 +734,11 @@
 	function openLookupDialog(seed: { handle: string; site: LookupSite; linkable: boolean }) {
 		// The no_match action carries no handle: that is a plain "Add New Artist",
 		// with nothing for the dialog's guess disclosure to be about.
-		artistSeed = seed.handle ? seed : null;
+		// The tile is captured HERE rather than read back when the dialog closes:
+		// the dialog has no focus trap, so the Parent radio behind it can still be
+		// reached from the keyboard, and the result the created artist belongs to
+		// is the one that offered the handle, not whichever tile is parent later.
+		artistSeed = seed.handle ? { ...seed, tileKey: parentTile?.key ?? null } : null;
 		showNewArtist = true;
 	}
 

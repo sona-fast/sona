@@ -645,7 +645,7 @@ describe('round 11 wiring', () => {
 		// the handle is already in the list under that unrelated name and hides
 		// the real add-new action. The flag is captured before the seed is cleared.
 		expect(created).toMatch(/const fromLookup = artistSeed !== null;[\s\S]*?artistSeed = null;/);
-		expect(created).toMatch(/if \(!fromLookup \|\| !tile \|\| tile\.lookup\.kind !== 'results'\) return;/);
+		expect(created).toMatch(/if \(!fromLookup \|\| !tile \|\| tile\.lookup\.kind !== 'results'\) \{/);
 		// Folding the artist in destroys the button the dialog captured as its
 		// opener, so focus is placed deliberately rather than left on <body>
 		// (2.4.3).
@@ -654,6 +654,24 @@ describe('round 11 wiring', () => {
 		);
 		expect(UPLOAD).toContain('bind:this={artistSelect}');
 		expect(PANEL).toContain('id="lookup-applied-artist"');
+		// Which tile the artist belongs to is decided when the dialog OPENS. The
+		// dialog is a plain overlay with no focus trap, so the Parent radio behind
+		// it stays reachable from the keyboard; read back at close, `parentTile`
+		// would credit a tile the handle has nothing to do with and leave the
+		// seed's own tile still offering to add the artist — a second click there
+		// creating the duplicate this whole path exists to prevent. Carried inside
+		// the seed so the key and the seed are cleared by the same assignment.
+		expect(UPLOAD).toMatch(/artistSeed = seed\.handle \? \{ \.\.\.seed, tileKey: parentTile\?\.key \?\? null \} : null;/);
+		expect(created).toMatch(/const seedKey = artistSeed\?\.tileKey \?\? null;/);
+		expect(created).toMatch(
+			/const tile = seedKey === null \? null : \(tiles\.find\(\(t\) => t\.key === seedKey\) \?\? null\);/
+		);
+		expect(created).not.toMatch(/const tile = parentTile;/);
+		// Removed while the dialog was open, that tile takes the dialog's opener
+		// with it, so focus has to be placed rather than left on <body> (2.4.3).
+		expect(created).toMatch(
+			/if \(fromLookup && !tile\) \{\s*\n\s*await tick\(\);\s*\n\s*artistSelect\?\.focus\(\);/
+		);
 		// The edit page has no equivalent: it creates the artist server-side in
 		// the save action, and resetForImage clears the panel on the way back.
 		expect(EDIT).not.toContain('oncreated=');
@@ -1203,6 +1221,15 @@ describe('the upload page grid', () => {
 		expect(UPLOAD).toMatch(
 			/const sent = settled\?\.kind === 'failed' \? settled\.sent : true;\s*\n\s*live\.lookup = \{ kind: 'failed', reason: 'unavailable', sent \};/
 		);
+		// The state is written to the tile BEFORE it is announced, so a throw out
+		// of the announcement is not "nothing arrived": rewriting it as failed
+		// would discard matches that did come back and tell the operator
+		// FuzzySearch never answered. A failure is synthesised only when nothing
+		// was applied.
+		expect(UPLOAD).toMatch(/live\.lookup = next;\s*\n\s*applied = true;/);
+		expect(UPLOAD).toMatch(
+			/if \(!applied\) \{\s*\n\s*const sent = settled\?\.kind === 'failed'/
+		);
 		// The catch tells its own lookup from a cancelled one by the abort
 		// bookkeeping, so the success path clears that last — cleared first, a
 		// throw above it would read as a cancel and the catch would do nothing.
@@ -1221,8 +1248,19 @@ describe('the upload page grid', () => {
 	// and wrapped so a second throw cannot escape the catch.
 	it('announces a variant tile failure from the catch', () => {
 		expect(UPLOAD).toMatch(
-			/console\.error\(LOOKUP_RESULT_THREW\);[\s\S]{0,400}?if \(!isParent\(key\)\) \{\s*\n\s*try \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_tile_failed\(\{ fileName: live\.fileName \}\)\);\s*\n\s*\} catch \{/
+			/if \(!isParent\(key\)\) \{\s*\n\s*try \{\s*\n\s*if \(!applied\) \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_tile_failed\(\{ fileName: live\.fileName \}\)\);/
 		);
+		// When the result stands, what the catch says is that result — announcing
+		// a failure over matches the tile is showing would contradict the screen.
+		// Through the normal path first, since only some of what it does threw,
+		// and down to the plain outcome line if the path itself is what threw.
+		expect(UPLOAD).toMatch(
+			/\} else \{\s*\n\s*try \{\s*\n\s*announceTileLookup\(live\);\s*\n\s*\} catch \{\s*\n\s*announcer\.say\(tileLookupOutcome\(live\)\);/
+		);
+		// The outcome line is its own function so the fallback can reach it
+		// without the private-disclosure wrapping that may be what threw.
+		expect(UPLOAD).toMatch(/function tileLookupOutcome\(tile: Tile\): string \{/);
+		expect(UPLOAD).toMatch(/let line = tileLookupOutcome\(tile\);/);
 	});
 
 	it('holds the file on the tile so the bytes are what gets posted', () => {
