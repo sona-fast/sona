@@ -484,8 +484,12 @@
 		tile.lookup = { kind: 'searching' };
 		tile.sentPrivate = isPrivate;
 		if (isParent(key)) resetSharedPrefill();
+		// What runLookup settled on, so the catch below can keep this lookup's own
+		// answer to "did the file leave the browser" instead of assuming it did.
+		let settled: LookupState | null = null;
 		void runLookup({ file: tile.file }, { signal: controller.signal })
 			.then((next) => {
+				settled = next;
 				// Cancelled, or the tile was removed while the request was out.
 				if (lookupAborts.get(key) !== controller) return;
 				const live = tiles.find((t) => t.key === key);
@@ -514,15 +518,18 @@
 			// runLookup itself resolves on every path, so only a throw in the
 			// callback above lands here. Without this the tile would sit on
 			// "searching" for the rest of the page's life, with nothing to retry
-			// from. The request had already gone out by then, so the disclosure errs
-			// toward saying the file went — the same call runLookup's own network
-			// catch makes.
+			// from. The disclosure keeps the settled state's own "sent" — a
+			// client-refused too_large never left the browser, and rewriting it as
+			// sent would show a false private notice. With nothing captured the
+			// request had already gone out, so it errs toward saying the file went,
+			// the same call runLookup's own network catch makes.
 			.catch(() => {
 				if (lookupAborts.get(key) !== controller) return;
 				lookupAborts.delete(key);
 				const live = tiles.find((t) => t.key === key);
 				if (!live) return;
-				live.lookup = { kind: 'failed', reason: 'unavailable', sent: true };
+				const sent = settled?.kind === 'failed' ? settled.sent : true;
+				live.lookup = { kind: 'failed', reason: 'unavailable', sent };
 				console.error(LOOKUP_RESULT_THREW);
 				// A variant tile's failure is plain text outside any live region, so
 				// without this the tile silently stops searching (4.1.3). Said

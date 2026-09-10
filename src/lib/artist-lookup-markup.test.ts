@@ -1190,11 +1190,19 @@ describe('the upload page grid', () => {
 	it('lands a throw while applying a result in the failed state', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(
-				/\.catch\(\(\) => \{[\s\S]{0,400}?kind: 'failed', reason: 'unavailable', sent: true[\s\S]{0,120}?console\.error\(LOOKUP_RESULT_THREW\)/
+				/\.catch\(\(\) => \{[\s\S]{0,400}?kind: 'failed', reason: 'unavailable', sent[\s\S]{0,120}?console\.error\(LOOKUP_RESULT_THREW\)/
 			);
 			// Imported, not spelled out at the log site.
 			expect(source).toMatch(/LOOKUP_RESULT_THREW,\n/);
 		}
+		// The upload callback runs for every settled kind, including a too_large
+		// the browser refused to send. Rewriting that as sent would put a private
+		// notice on a file that never left, so the catch keeps the settled state's
+		// own flag and only assumes the file went when it captured nothing.
+		expect(UPLOAD).toMatch(/\.then\(\(next\) => \{\s*\n\s*settled = next;/);
+		expect(UPLOAD).toMatch(
+			/const sent = settled\?\.kind === 'failed' \? settled\.sent : true;\s*\n\s*live\.lookup = \{ kind: 'failed', reason: 'unavailable', sent \};/
+		);
 		// The catch tells its own lookup from a cancelled one by the abort
 		// bookkeeping, so the success path clears that last — cleared first, a
 		// throw above it would read as a cancel and the catch would do nothing.
