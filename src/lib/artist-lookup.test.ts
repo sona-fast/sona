@@ -26,12 +26,14 @@ import {
 	strictestRating,
 	tileResultText,
 	runLookup,
+	sentAfterApplyThrew,
 	withCreatedArtist,
 	type LookupFailReason,
 	type LookupMatch,
 	type LookupRating,
 	type LookupResponse,
-	type LookupSite
+	type LookupSite,
+	type LookupState
 } from './artist-lookup';
 // A node test may reach into the server module; the browser bundle may not.
 // Importing both here is how the wire shape and the shared rules stay in step.
@@ -1102,6 +1104,30 @@ describe('lookupSentFile', () => {
 	it('says nothing before an outcome exists', () => {
 		expect(lookupSentFile({ kind: 'idle' })).toBe(false);
 		expect(lookupSentFile({ kind: 'searching' })).toBe(false);
+	});
+});
+
+// What the upload page's catch puts on the tile when applying a settled result
+// threw. The request itself is over by then, so the only question the flag
+// answers is whether the bytes ever left — and only a failure knows.
+describe('sentAfterApplyThrew', () => {
+	it.each([
+		['a failure the browser refused to send', { kind: 'failed', reason: 'too_large', sent: false }, false],
+		['a failure that went out', { kind: 'failed', reason: 'rate_limited', sent: true }, true],
+		['a result', { kind: 'results', data: response() }, true],
+		['a no-match', { kind: 'no_match' }, true],
+		// Cancelled or re-fired, never a state the request settles on: it reaches
+		// this only if the capture itself is what threw, and by then the request
+		// had gone out.
+		['a state still searching', { kind: 'searching' }, true]
+	] as [string, LookupState, boolean][])('is %s -> %s', (_label, settled, expected) => {
+		expect(sentAfterApplyThrew(settled)).toBe(expected);
+	});
+
+	// A throw early enough that nothing was captured: the request was already in
+	// flight, so it errs the same way runLookup's own network catch does.
+	it('assumes the file went when it captured nothing', () => {
+		expect(sentAfterApplyThrew(null)).toBe(true);
 	});
 });
 

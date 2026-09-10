@@ -19,6 +19,7 @@
 		tileResultText,
 		candidateArtists,
 		lookupSentFile,
+		sentAfterApplyThrew,
 		withCreatedArtist,
 		type LookupFields,
 		type LookupMatch,
@@ -548,41 +549,31 @@
 			// from. A failure is synthesised only when nothing was applied: the
 			// state goes on the tile before it is announced, so a throw while
 			// announcing would otherwise discard matches that did arrive and tell
-			// the operator FuzzySearch never answered. The disclosure keeps the
-			// settled state's own "sent" — a client-refused too_large never left
-			// the browser, and rewriting it as sent would show a false private
-			// notice. With nothing captured the request had already gone out, so it
-			// errs toward saying the file went, the same call runLookup's own
-			// network catch makes.
+			// the operator FuzzySearch never answered. What that synthesised failure
+			// discloses about the file having left the browser is
+			// sentAfterApplyThrew's call, off the state the request settled on.
 			.catch(() => {
 				if (lookupAborts.get(key) !== controller) return;
 				lookupAborts.delete(key);
 				const live = tiles.find((t) => t.key === key);
 				if (!live) return;
 				if (!applied) {
-					const sent = settled?.kind === 'failed' ? settled.sent : true;
+					const sent = sentAfterApplyThrew(settled);
 					live.lookup = { kind: 'failed', reason: 'unavailable', sent };
 				}
 				console.error(LOOKUP_RESULT_THREW);
 				// A variant tile's outcome is plain text outside any live region, so
-				// without this the tile silently stops searching (4.1.3). What it says
-				// is what the tile now holds: the synthesised failure, or the result
-				// that stands. The failure is said directly rather than through
-				// announceTileLookup, which is one of the things that could have
-				// thrown; a result goes through it once, and falls back to the plain
-				// outcome line if that is what threw. Guarded throughout so a second
-				// throw cannot escape into another unhandled rejection.
+				// without this the tile silently stops searching (4.1.3). Said from
+				// the state the tile has now settled on — the result that stands, or
+				// the failure synthesised above — so the announcement matches what
+				// the tile shows instead of reporting a failure over matches. Through
+				// the composer rather than announceTileLookup, which is one of the
+				// things that could have thrown, and guarded: on a second throw the
+				// constant is logged and nothing is said, rather than escaping into
+				// another unhandled rejection.
 				if (!isParent(key)) {
 					try {
-						if (!applied) {
-							announcer.say(m.admin_lookup_announce_tile_failed({ fileName: live.fileName }));
-						} else {
-							try {
-								announceTileLookup(live);
-							} catch {
-								announcer.say(tileLookupOutcome(live));
-							}
-						}
+						announcer.say(tileLookupLine(live));
 					} catch {
 						console.error(LOOKUP_RESULT_THREW);
 					}
@@ -590,24 +581,28 @@
 			});
 	}
 
-	/** What the lookup found, as one sentence naming the file — without the
-	 * private disclosure the full announcement wraps around it. Its own function
-	 * so the catch below can still say the outcome when the wrapping threw. */
-	function tileLookupOutcome(tile: Tile): string {
+	/** What a tile's lookup has to say, as one sentence naming the file: the
+	 * match, the no-match, or the failure the tile is showing, with the private
+	 * disclosure when one is due. Composed rather than said, so the catch below
+	 * can announce the state a tile actually settled on without going back
+	 * through anything that already threw. */
+	function tileLookupLine(tile: Tile): string {
 		const fileName = tile.fileName;
+		let line: string;
 		if (tile.lookup.kind === 'failed') {
-			return m.admin_lookup_announce_tile_failed({ fileName });
+			line = m.admin_lookup_announce_tile_failed({ fileName });
+		} else {
+			const result = tileResult(tile);
+			line = result
+				? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
+				: m.admin_lookup_announce_tile_no_match({ fileName });
 		}
-		const result = tileResult(tile);
-		return result
-			? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
-			: m.admin_lookup_announce_tile_no_match({ fileName });
-	}
-
-	function announceTileLookup(tile: Tile) {
-		let line = tileLookupOutcome(tile);
 		// The tile's private notice is a plain paragraph outside any live region,
 		// so this is the only way the disclosure reaches a screen-reader operator.
+		// Both halves of the same test the rendered notice uses: the file went out
+		// (lookupSentFile of the state the tile settled on) AND Private was ticked
+		// when it went. Off sentPrivate alone, a client-refused too_large would be
+		// spoken as a private send of a file that never left the browser.
 		if (tile.sentPrivate && lookupSentFile(tile.lookup)) {
 			// One key holding both parts, not a concatenation: the separator between
 			// them is the locale's business (ja runs them together, en takes a space).
@@ -616,7 +611,11 @@
 				disclosure: m.admin_lookup_private_notice()
 			});
 		}
-		announcer.say(line);
+		return line;
+	}
+
+	function announceTileLookup(tile: Tile) {
+		announcer.say(tileLookupLine(tile));
 	}
 
 	function isParent(key: number): boolean {

@@ -521,6 +521,19 @@ export function lookupSentFile(state: LookupState): boolean {
 	return state.kind !== 'failed' || state.sent;
 }
 
+/**
+ * What the disclosure should say about a lookup whose result threw on the way
+ * onto the page, given the state the request itself settled on. Only a failure
+ * knows whether the bytes left the browser, and only its own flag: a
+ * client-refused `too_large` never went out, and calling it sent would put a
+ * private-image notice on a file FuzzySearch never saw. Every other settled
+ * kind, and a throw so early that nothing was captured, means the request had
+ * already gone — the same call the network catch inside runLookup makes.
+ */
+export function sentAfterApplyThrew(settled: LookupState | null): boolean {
+	return settled?.kind === 'failed' ? settled.sent : true;
+}
+
 /** Body shapes the endpoint answers with. */
 interface FailureBody {
 	enabled?: boolean;

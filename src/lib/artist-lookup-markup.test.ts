@@ -1035,7 +1035,7 @@ describe('what a lookup says out loud', () => {
 	// the outcome message is the only thing that can carry the disclosure.
 	it('says the private disclosure with a variant tile outcome', () => {
 		expect(UPLOAD).toMatch(
-			/function announceTileLookup[\s\S]{0,900}?tile\.sentPrivate && lookupSentFile\(tile\.lookup\)[\s\S]{0,300}?m\.admin_lookup_private_notice\(\)/
+			/function tileLookupLine[\s\S]{0,900}?tile\.sentPrivate && lookupSentFile\(tile\.lookup\)[\s\S]{0,300}?m\.admin_lookup_private_notice\(\)/
 		);
 		// The two parts join through a message key, not an ASCII space in the
 		// code: ja runs them together and only the catalog can say so.
@@ -1203,8 +1203,9 @@ describe('the upload page grid', () => {
 	// throw in the code that applies the result would leave the panel on
 	// "searching" for the rest of the page's life, with no retry and an
 	// unhandled rejection in the console. Both pages catch it into the same
-	// failed state, and the "sent" flag says the file went, because by then the
-	// request had.
+	// failed state. The edit page has one lookup and no settled capture, so its
+	// flag is the flat "the request had gone out by then" true; the upload page
+	// decides its own from the state the request settled on, below.
 	it('lands a throw while applying a result in the failed state', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(
@@ -1213,23 +1214,23 @@ describe('the upload page grid', () => {
 			// Imported, not spelled out at the log site.
 			expect(source).toMatch(/LOOKUP_RESULT_THREW,\n/);
 		}
+		expect(EDIT).toMatch(/kind: 'failed', reason: 'unavailable', sent: true/);
 		// The upload callback runs for every settled kind, including a too_large
 		// the browser refused to send. Rewriting that as sent would put a private
 		// notice on a file that never left, so the catch keeps the settled state's
-		// own flag and only assumes the file went when it captured nothing.
+		// own flag and only assumes the file went when it captured nothing. The
+		// decision itself is a pure helper, unit-tested over every settled kind in
+		// artist-lookup.test.ts; this pins the wiring.
 		expect(UPLOAD).toMatch(/\.then\(\(next\) => \{\s*\n\s*settled = next;/);
-		expect(UPLOAD).toMatch(
-			/const sent = settled\?\.kind === 'failed' \? settled\.sent : true;\s*\n\s*live\.lookup = \{ kind: 'failed', reason: 'unavailable', sent \};/
-		);
+		expect(UPLOAD).toMatch(/const sent = sentAfterApplyThrew\(settled\);/);
+		expect(UPLOAD).toMatch(/\n\t\tsentAfterApplyThrew,\n/);
 		// The state is written to the tile BEFORE it is announced, so a throw out
 		// of the announcement is not "nothing arrived": rewriting it as failed
 		// would discard matches that did come back and tell the operator
 		// FuzzySearch never answered. A failure is synthesised only when nothing
 		// was applied.
 		expect(UPLOAD).toMatch(/live\.lookup = next;\s*\n\s*applied = true;/);
-		expect(UPLOAD).toMatch(
-			/if \(!applied\) \{\s*\n\s*const sent = settled\?\.kind === 'failed'/
-		);
+		expect(UPLOAD).toMatch(/if \(!applied\) \{\s*\n\s*const sent = sentAfterApplyThrew/);
 		// The catch tells its own lookup from a cancelled one by the abort
 		// bookkeeping, so the success path clears that last — cleared first, a
 		// throw above it would read as a cancel and the catch would do nothing.
@@ -1241,26 +1242,46 @@ describe('the upload page grid', () => {
 		expect(LOOKUP_RESULT_THREW).toBe('artist lookup: applying the result threw');
 	});
 
-	// The failed state a variant tile lands in is plain text outside any live
-	// region, so the catch has to speak it (4.1.3) — the parent's failure is
-	// already inside the panel's status region. Said through announcer.say, not
-	// announceTileLookup, which is one of the callers that could have thrown,
-	// and wrapped so a second throw cannot escape the catch.
-	it('announces a variant tile failure from the catch', () => {
+	// A variant tile's outcome is plain text outside any live region, so the
+	// catch has to speak it (4.1.3) — the parent's is already inside the panel's
+	// status region. What it says is the state the tile settled on, match,
+	// no-match, or failure, so the announcement and the screen agree. Composed
+	// by tileLookupLine rather than announced through announceTileLookup, one of
+	// the callers that could have thrown, and guarded: a second throw logs the
+	// constant and says nothing rather than escaping the catch.
+	it('announces a variant tile outcome from the catch', () => {
 		expect(UPLOAD).toMatch(
-			/if \(!isParent\(key\)\) \{\s*\n\s*try \{\s*\n\s*if \(!applied\) \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_tile_failed\(\{ fileName: live\.fileName \}\)\);/
+			/if \(!isParent\(key\)\) \{\s*\n\s*try \{\s*\n\s*announcer\.say\(tileLookupLine\(live\)\);\s*\n\s*\} catch \{\s*\n\s*console\.error\(LOOKUP_RESULT_THREW\);/
 		);
-		// When the result stands, what the catch says is that result — announcing
-		// a failure over matches the tile is showing would contradict the screen.
-		// Through the normal path first, since only some of what it does threw,
-		// and down to the plain outcome line if the path itself is what threw.
+		// Nothing is said as a bare failure any more: over a result that stands,
+		// that line would contradict the matches the tile is showing.
+		expect(UPLOAD).not.toMatch(
+			/announcer\.say\(m\.admin_lookup_announce_tile_failed\(\{ fileName: live\.fileName \}\)\)/
+		);
+	});
+
+	// One composer for what a tile's lookup says, used by the announcement on
+	// the success path and by the catch. Pure: it returns the line rather than
+	// saying it, so the catch can announce a settled state without going back
+	// through anything that already threw.
+	it('composes a tile lookup line once, disclosure included', () => {
+		expect(UPLOAD).toMatch(/function tileLookupLine\(tile: Tile\): string \{/);
 		expect(UPLOAD).toMatch(
-			/\} else \{\s*\n\s*try \{\s*\n\s*announceTileLookup\(live\);\s*\n\s*\} catch \{\s*\n\s*announcer\.say\(tileLookupOutcome\(live\)\);/
+			/function announceTileLookup\(tile: Tile\) \{\s*\n\s*announcer\.say\(tileLookupLine\(tile\)\);\s*\n\s*\}/
 		);
-		// The outcome line is its own function so the fallback can reach it
-		// without the private-disclosure wrapping that may be what threw.
-		expect(UPLOAD).toMatch(/function tileLookupOutcome\(tile: Tile\): string \{/);
-		expect(UPLOAD).toMatch(/let line = tileLookupOutcome\(tile\);/);
+		// The private suffix keys off BOTH halves of the test the rendered notice
+		// uses: Private was ticked when the lookup ran AND the state says the file
+		// actually left. Off sentPrivate alone, a client-refused too_large would
+		// be spoken as a private send of a file FuzzySearch never saw.
+		const composer = UPLOAD.match(/function tileLookupLine\(tile: Tile\): string \{[\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(composer).toContain('tile.sentPrivate && lookupSentFile(tile.lookup)');
+		// One key holding both parts, so the locale decides the separator.
+		expect(composer).toMatch(
+			/m\.admin_lookup_announce_tile_with_notice\(\{\s*\n\s*outcome: line,\s*\n\s*disclosure: m\.admin_lookup_private_notice\(\)/
+		);
+		expect(composer).toContain('return line;');
+		// It says nothing itself — the callers do.
+		expect(composer).not.toContain('announcer.say');
 	});
 
 	it('holds the file on the tile so the bytes are what gets posted', () => {
