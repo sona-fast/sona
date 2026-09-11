@@ -43,7 +43,7 @@
 		"cookie": "^0.7.2",
 		"drizzle-kit": "^0.31.10",
 		"esbuild": "^0.28.1",
-		"miniflare": "^4.20260730.0",
+		"miniflare": "^5.20260910.0-alpha",
 		"svelte": "^5.55.2",
 		"svelte-check": "^4.4.6",
 		"tsx": "^4.21.0",
@@ -64,7 +64,7 @@
 		"qrcode-generator": "^2.0.4",
 		"three": "^0.185.1",
 		"uploadthing": "^7.7.4",
-		"wrangler": "^4.124.0"
+		"wrangler": "^4.131.0"
 	},
 	"overrides": {
 		"undici@<7.29.0": "^7.29.0",
