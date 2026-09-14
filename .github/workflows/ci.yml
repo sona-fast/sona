@@ -34,6 +34,11 @@ jobs:
 
       - run: npm ci
 
+      # Fails if src/lib/themes/generated.css no longer matches the theme data
+      # it is rendered from (SONA-209) — a palette edit that skipped
+      # `npm run themes` would otherwise ship the old colours.
+      - run: npm run themes:check
+
       - run: npm run check
 
       - run: npm test

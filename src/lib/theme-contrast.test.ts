@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { THEMES } from './themes';
+import { THEMES, ALL_THEMES } from './themes';
+import {
+	TOKEN_ORDER,
+	cssName,
+	isAlias,
+	type TokenKey,
+	type PartialThemeTokens
+} from './themes/types.ts';
 
 // Guards WCAG AA contrast for the resting theme tokens (#76): the terracotta
 // accent used as small-text foreground on the page background and on cards, and
@@ -11,8 +18,14 @@ import { THEMES } from './themes';
 //
 // Scope note: these #76 asserts cover the terracotta pairings in full and
 // destructive everywhere; the other resting default/aurora pairings predate the
-// AA work and are not asserted. The .btn hover states are asserted separately in
-// the #103 describe block below (which DOES cover default/aurora hover).
+// AA work. The generic sweep at the bottom of this file (SONA-209) covers the
+// rest of the resting surface pairings for every theme × mode. The .btn hover
+// states are asserted separately in the #103 describe block below.
+//
+// Token values come from the theme DATA (src/lib/themes/*.theme.ts), which is
+// also what generates the CSS — so this file measures the same numbers the
+// browser gets. Only rules that are still hand-written (the .btn blocks, the
+// component styles) are read out of the stylesheets.
 
 const css = readFileSync(fileURLToPath(new URL('../app.css', import.meta.url)), 'utf8');
 
@@ -26,12 +39,80 @@ function blockBody(selector: string): string {
 	return body;
 }
 
+type Mode = 'dark' | 'light';
+
+const DEFAULT_THEME = ALL_THEMES[0];
+
+// Selector → the theme block it is generated from. The selectors are the ones
+// the rest of this file already names; keeping them as the lookup key means the
+// describes below read tokens the same way they always did.
+const BLOCK_BY_SELECTOR = new Map<string, { id: string; mode: Mode }>(
+	ALL_THEMES.flatMap((theme) => {
+		const isDefault = theme === DEFAULT_THEME;
+		return [
+			[isDefault ? ':root' : `[data-theme-id='${theme.id}']`, { id: theme.id, mode: 'dark' as Mode }],
+			[
+				isDefault ? "[data-theme='light']" : `[data-theme-id='${theme.id}'][data-theme='light']`,
+				{ id: theme.id, mode: 'light' as Mode }
+			]
+		] as const;
+	})
+);
+
+const TOKEN_BY_CSS_NAME = new Map<string, TokenKey>(
+	TOKEN_ORDER.map(([key, name]) => [name.slice(2), key])
+);
+
+// The cascade, as data. Every theme block has the same specificity except a
+// theme's own light block (two attribute selectors), so ties go to source order,
+// and the alternate themes are emitted after the default one. For an element
+// carrying data-theme-id='aurora' data-theme='light' the matching blocks are, in
+// falling precedence: the aurora light block, the aurora dark block (later in
+// source than [data-theme='light']), the default light block, then :root. That
+// is why aurora light has to re-declare --link: without it the aurora DARK
+// block's value wins there.
+function blockChain(id: string, mode: Mode): PartialThemeTokens[] {
+	const theme = ALL_THEMES.find((t) => t.id === id);
+	if (!theme) throw new Error(`unknown theme id: ${id}`);
+	if (theme === DEFAULT_THEME) {
+		return mode === 'dark' ? [theme.dark] : [theme.light, theme.dark];
+	}
+	return mode === 'dark'
+		? [theme.dark, DEFAULT_THEME.dark]
+		: [theme.light, theme.dark, DEFAULT_THEME.light, DEFAULT_THEME.dark];
+}
+
+// The value the browser computes for one token on one theme × mode. An alias
+// (var(--primary)) resolves through the SAME chain, because that is what a
+// var() reference does at use time — it reads the element's own cascaded value.
+function resolveToken(id: string, mode: Mode, key: TokenKey, seen: TokenKey[] = []): string {
+	if (seen.includes(key)) throw new Error(`alias cycle on ${id}/${mode}: ${[...seen, key].join(' → ')}`);
+	for (const block of blockChain(id, mode)) {
+		const value = block[key];
+		if (value === undefined) continue;
+		return isAlias(value) ? resolveToken(id, mode, value.ref, [...seen, key]) : value;
+	}
+	throw new Error(`${id} ${mode}: --${key} is not declared in any matching block`);
+}
+
+// Reads a token the way the old regex over app.css did — by block selector and
+// CSS custom-property name — but out of the theme data. Still hex-only: every
+// pairing asserted here is a contrast measurement, and rgba()/var() would give a
+// silently wrong number rather than an error.
 function blockToken(selector: string, name: string): string {
-	const block = blockBody(selector);
-	const value = block.match(new RegExp(`--${name}:\\s*(#[0-9A-Fa-f]{6})\\s*;`))?.[1];
-	if (!value) throw new Error(`--${name} not found as a 6-digit hex in the ${selector} block`);
+	const block = BLOCK_BY_SELECTOR.get(selector);
+	if (!block) throw new Error(`${selector} is not a generated theme block`);
+	const key = TOKEN_BY_CSS_NAME.get(name);
+	if (!key) throw new Error(`--${name} is not a theme token`);
+	const value = resolveToken(block.id, block.mode, key);
+	if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
+		throw new Error(`--${name} resolves to '${value}' on ${selector}, not a 6-digit hex`);
+	}
 	return value;
 }
+
+/** Token key → the name blockToken takes ('cardForeground' → 'card-foreground'). */
+const cssToken = (key: TokenKey): string => cssName(key).slice(2);
 
 function luminance(hex: string): number {
 	const n = parseInt(hex.slice(1), 16);
@@ -333,6 +414,81 @@ const THEME_BLOCKS = THEMES.flatMap(({ id }) =>
 				{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
 			]
 );
+
+// SONA-209: the resting surface pairings, swept over the theme DATA rather than
+// picked one at a time. Everything above grew pairing-by-pairing out of a bug
+// report, so a palette could (and did) carry combinations nothing measured. This
+// iterates every theme × mode and checks the pairings that hold for all of them:
+// text on its surface at 4.5:1, and the two non-text tokens at 3:1.
+//
+// Scope: raw --primary as TEXT is deliberately absent. It fails on Ember light
+// (2.20:1), which is the whole reason --link and --status-attention exist; fixing
+// it is SONA-126, not this sweep.
+const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> = [
+	{ ink: 'foreground', ground: 'background', floor: 4.5 },
+	{ ink: 'foreground', ground: 'card', floor: 4.5 },
+	{ ink: 'cardForeground', ground: 'card', floor: 4.5 },
+	{ ink: 'mutedForeground', ground: 'background', floor: 4.5 },
+	{ ink: 'mutedForeground', ground: 'card', floor: 4.5 },
+	{ ink: 'link', ground: 'background', floor: 4.5 },
+	{ ink: 'link', ground: 'card', floor: 4.5 },
+	{ ink: 'statusOk', ground: 'card', floor: 4.5 },
+	{ ink: 'statusWarn', ground: 'card', floor: 4.5 },
+	{ ink: 'statusAttention', ground: 'card', floor: 4.5 },
+	{ ink: 'destructiveForeground', ground: 'destructive', floor: 4.5 },
+	{ ink: 'primaryForeground', ground: 'primary', floor: 4.5 },
+	{ ink: 'border', ground: 'background', floor: 3 },
+	{ ink: 'ring', ground: 'background', floor: 3 }
+];
+
+// Pairings that fail TODAY, allowlisted with the ratio measured when the sweep
+// was written so the debt is visible instead of silencing the assertion. No
+// palette value was changed to make this suite green (SONA-209).
+//
+// --border on --background: every theme × mode sits at 1.3–1.5:1, because the
+// border is a hairline between two adjacent surfaces of the same family, not a
+// control boundary. WCAG 1.4.11 asks 3:1 of a border only where the border is
+// what identifies a component or its state — which is exactly the case for
+// --input on form fields, and that is the pairing worth fixing. Raising --border
+// to 3:1 everywhere would repaint every card and table rule in all six palettes,
+// so it needs a design decision, not a test tweak. The .input rule draws its
+// border with --input on a --background fill at the same ratios, and that IS a
+// field boundary; it is recorded on SONA-209 for the palette step (SONA-126).
+const KNOWN_FAILURES = new Map<string, number>([
+	['default dark border on background', 1.39],
+	['default light border on background', 1.45],
+	['aurora dark border on background', 1.43],
+	['aurora light border on background', 1.29],
+	['terracotta dark border on background', 1.39],
+	['terracotta light border on background', 1.38]
+]);
+
+describe('resting token pairings, every theme × mode (SONA-209)', () => {
+	for (const { name, sel } of THEME_BLOCKS) {
+		const { id, mode } = BLOCK_BY_SELECTOR.get(sel)!;
+		for (const { ink, ground, floor } of RESTING_PAIRS) {
+			const key = `${id} ${mode} ${ink} on ${ground}`;
+			it(`${name}: --${ink} on --${ground} meets ${floor}:1`, () => {
+				const ratio = contrast(blockToken(sel, cssToken(ink)), blockToken(sel, cssToken(ground)));
+				const known = KNOWN_FAILURES.get(key);
+				if (known !== undefined) {
+					// Self-cleaning: once the pairing clears its floor, the allowlist
+					// entry is stale and has to go, or it hides the next regression.
+					expect(
+						ratio,
+						`${id} ${mode}: --${ink} on --${ground} now measures ${ratio.toFixed(2)}:1 and clears ${floor}:1 — drop it from KNOWN_FAILURES`
+					).toBeLessThan(floor);
+					expect(ratio).toBeCloseTo(known, 1);
+					return;
+				}
+				expect(
+					ratio,
+					`${id} ${mode}: --${ink} on --${ground} measures ${ratio.toFixed(2)}:1, under the ${floor}:1 floor`
+				).toBeGreaterThanOrEqual(floor);
+			});
+		}
+	}
+});
 
 describe('resting .btn WCAG AA contrast — every theme × variant × mode (#121)', () => {
 	const variants = [
@@ -751,15 +907,14 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 // attention color at an AA-failing value sinks the guide's eyebrow, its
 // highlighted table value, and the form's guide link silently.
 describe('status-attention small-text WCAG AA contrast, every theme × surface × mode (SONA-162)', () => {
-	function statusAttention(sel: string): string {
-		const body = blockBody(sel);
-		const hex = body.match(/--status-attention:\s*(#[0-9A-Fa-f]{6})\s*;/)?.[1];
-		return hex ?? blockToken(sel, 'primary');
-	}
+	// blockToken does the lazy resolution now: a block either declares a hex or
+	// aliases/inherits its way to one, exactly as the cascade would.
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			it(`${name}: --status-attention text meets 4.5:1 on the ${surface} surface`, () => {
-				expect(contrast(statusAttention(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+				expect(
+					contrast(blockToken(sel, 'status-attention'), blockToken(sel, surface))
+				).toBeGreaterThanOrEqual(4.5);
 			});
 		}
 	}
@@ -775,12 +930,6 @@ describe('status-attention small-text WCAG AA contrast, every theme × surface �
 // bleeds into the other light themes through the plain [data-theme='light']
 // selector they all carry.
 describe('prose-link WCAG AA contrast, every theme × surface × mode (SONA-171)', () => {
-	function linkColor(sel: string): string {
-		const body = blockBody(sel);
-		const hex = body.match(/--link:\s*(#[0-9A-Fa-f]{6})\s*;/)?.[1];
-		return hex ?? blockToken(sel, 'primary');
-	}
-
 	it('the global anchor rule colors with var(--link), not var(--primary)', () => {
 		const rule = css.match(/^a\s*\{([^}]*)\}/m)?.[1];
 		if (!rule) throw new Error('global a rule not found in app.css');
@@ -794,15 +943,17 @@ describe('prose-link WCAG AA contrast, every theme × surface × mode (SONA-171)
 	});
 
 	for (const { name, sel } of THEME_BLOCKS) {
-		it(`${name}: declares --link in its own block`, () => {
-			expect(blockBody(sel)).toMatch(/--link:\s*(#[0-9A-Fa-f]{6}|var\(--primary\))\s*;/);
+		it(`${name}: declares link in its own token set`, () => {
+			const { id, mode } = BLOCK_BY_SELECTOR.get(sel)!;
+			const theme = ALL_THEMES.find((t) => t.id === id)!;
+			expect(theme[mode].link, `${name} inherits --link instead of declaring it`).toBeDefined();
 		});
 	}
 
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			it(`${name}: link text meets 4.5:1 on the ${surface} surface`, () => {
-				expect(contrast(linkColor(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+				expect(contrast(blockToken(sel, 'link'), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
 			});
 		}
 	}
