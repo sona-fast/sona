@@ -34,9 +34,14 @@ jobs:
 
       - run: npm ci
 
-      # Fails if src/lib/themes/generated.css no longer matches the theme data
-      # it is rendered from (SONA-209) — a palette edit that skipped
-      # `npm run themes` would otherwise ship the old colours.
+      # THIS is the drift guard (SONA-209). `npm ci` above runs `prepare`, which
+      # runs `npm run themes` and rewrites src/lib/themes/generated.css from the
+      # theme data — so a commit that edited a palette without regenerating
+      # leaves a dirty working tree right here, and this step fails on it.
+      - run: git diff --exit-code -- src/lib/themes/generated.css
+
+      # Catches the cases prepare's rewrite can't: the file missing, or the theme
+      # data failing to render at all.
       - run: npm run themes:check
 
       - run: npm run check

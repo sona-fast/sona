@@ -24,36 +24,40 @@
 // (`:root` and `[data-theme='light']` are the floor everything else falls back
 // to), so its two sets are typed as the complete ThemeTokens.
 
-/** Every colour token a theme can set, in the order the generator emits them. */
-export const TOKEN_ORDER = [
-	['background', '--background'],
-	['foreground', '--foreground'],
-	['card', '--card'],
-	['cardForeground', '--card-foreground'],
-	['primary', '--primary'],
-	['primaryForeground', '--primary-foreground'],
-	['secondary', '--secondary'],
-	['secondaryForeground', '--secondary-foreground'],
-	['muted', '--muted'],
-	['mutedForeground', '--muted-foreground'],
-	['accent', '--accent'],
-	['accentForeground', '--accent-foreground'],
-	['destructive', '--destructive'],
-	['destructiveForeground', '--destructive-foreground'],
-	['statusOk', '--status-ok'],
-	['statusWarn', '--status-warn'],
-	['statusAttention', '--status-attention'],
-	['link', '--link'],
-	['border', '--border'],
-	['input', '--input'],
-	['ring', '--ring'],
-	['sidebar', '--sidebar'],
-	['sidebarAccent', '--sidebar-accent'],
-	['sidebarForeground', '--sidebar-foreground'],
-	['sidebarBorder', '--sidebar-border']
-] as const satisfies ReadonlyArray<readonly [string, string]>;
+/**
+ * Every colour token a theme can set, mapped to its CSS custom property.
+ * KEY ORDER IS THE EMISSION ORDER: the generator walks these keys in order, so
+ * moving a key here moves the declaration in generated.css.
+ */
+export const TOKEN_CSS_NAMES = {
+	background: '--background',
+	foreground: '--foreground',
+	card: '--card',
+	cardForeground: '--card-foreground',
+	primary: '--primary',
+	primaryForeground: '--primary-foreground',
+	secondary: '--secondary',
+	secondaryForeground: '--secondary-foreground',
+	muted: '--muted',
+	mutedForeground: '--muted-foreground',
+	accent: '--accent',
+	accentForeground: '--accent-foreground',
+	destructive: '--destructive',
+	destructiveForeground: '--destructive-foreground',
+	statusOk: '--status-ok',
+	statusWarn: '--status-warn',
+	statusAttention: '--status-attention',
+	link: '--link',
+	border: '--border',
+	input: '--input',
+	ring: '--ring',
+	sidebar: '--sidebar',
+	sidebarAccent: '--sidebar-accent',
+	sidebarForeground: '--sidebar-foreground',
+	sidebarBorder: '--sidebar-border'
+} as const;
 
-export type TokenKey = (typeof TOKEN_ORDER)[number][0];
+export type TokenKey = keyof typeof TOKEN_CSS_NAMES;
 
 /** `var(--<ref>)` — resolved by the cascade at use time, not at build time. */
 export interface TokenAlias {
@@ -91,13 +95,9 @@ export function isAlias(value: TokenValue): value is TokenAlias {
 	return typeof value === 'object' && value !== null && 'ref' in value;
 }
 
-const CSS_NAME = new Map<string, string>(TOKEN_ORDER.map(([key, name]) => [key, name]));
-
 /** The CSS custom-property name for a token key (`cardForeground` → `--card-foreground`). */
 export function cssName(key: TokenKey): string {
-	const name = CSS_NAME.get(key);
-	if (!name) throw new Error(`unknown token key: ${key}`);
-	return name;
+	return TOKEN_CSS_NAMES[key];
 }
 
 /**
@@ -107,7 +107,7 @@ export function cssName(key: TokenKey): string {
  */
 export function cssValue(key: TokenKey, value: TokenValue): string {
 	if (isAlias(value)) {
-		if (!CSS_NAME.has(value.ref)) throw new Error(`${key}: alias to unknown token '${value.ref}'`);
+		if (!(value.ref in TOKEN_CSS_NAMES)) throw new Error(`${key}: alias to unknown token '${value.ref}'`);
 		return `var(${cssName(value.ref)})`;
 	}
 	if (HEX.test(value) || RGBA.test(value)) return value;

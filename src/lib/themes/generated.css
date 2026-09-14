@@ -2,9 +2,12 @@
    Rendered from src/lib/themes/*.theme.ts by scripts/build-themes.ts.
    Edit the theme file and run `npm run themes`, then commit this file.
 
-   Block order is source order, and source order decides ties: the theme blocks
-   all have the same specificity, so a token an alternate theme does not declare
-   falls through to :root / [data-theme='light'] — see types.ts. */
+   Only one block shape wins on specificity: an alternate theme's light block,
+   which carries two attribute selectors. The other three (:root,
+   [data-theme='light'], [data-theme-id='x']) all tie, so among them the later
+   block in this file wins — which is why an alternate theme's light block has to
+   re-declare --link rather than inherit it from [data-theme='light']. A token no
+   matching block declares falls through to :root — see types.ts. */
 
 /* Ember — warm orange (default) */
 :root {

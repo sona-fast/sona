@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { THEMES, ALL_THEMES } from './themes';
+import { THEMES } from './themes';
+import { ALL_THEMES } from './themes/all.ts';
 import {
-	TOKEN_ORDER,
+	TOKEN_CSS_NAMES,
 	cssName,
 	isAlias,
 	type TokenKey,
@@ -60,7 +61,7 @@ const BLOCK_BY_SELECTOR = new Map<string, { id: string; mode: Mode }>(
 );
 
 const TOKEN_BY_CSS_NAME = new Map<string, TokenKey>(
-	TOKEN_ORDER.map(([key, name]) => [name.slice(2), key])
+	Object.entries(TOKEN_CSS_NAMES).map(([key, name]) => [name.slice(2), key as TokenKey])
 );
 
 // The cascade, as data. Every theme block has the same specificity except a
@@ -95,24 +96,27 @@ function resolveToken(id: string, mode: Mode, key: TokenKey, seen: TokenKey[] = 
 	throw new Error(`${id} ${mode}: --${key} is not declared in any matching block`);
 }
 
-// Reads a token the way the old regex over app.css did — by block selector and
-// CSS custom-property name — but out of the theme data. Still hex-only: every
-// pairing asserted here is a contrast measurement, and rgba()/var() would give a
-// silently wrong number rather than an error.
-function blockToken(selector: string, name: string): string {
+// The hex one token resolves to on one generated block, by token KEY. Hex-only:
+// every pairing asserted here is a contrast measurement, and rgba()/var() would
+// give a silently wrong number rather than an error.
+function blockHex(selector: string, key: TokenKey): string {
 	const block = BLOCK_BY_SELECTOR.get(selector);
 	if (!block) throw new Error(`${selector} is not a generated theme block`);
-	const key = TOKEN_BY_CSS_NAME.get(name);
-	if (!key) throw new Error(`--${name} is not a theme token`);
 	const value = resolveToken(block.id, block.mode, key);
 	if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
-		throw new Error(`--${name} resolves to '${value}' on ${selector}, not a 6-digit hex`);
+		throw new Error(`${cssName(key)} resolves to '${value}' on ${selector}, not a 6-digit hex`);
 	}
 	return value;
 }
 
-/** Token key → the name blockToken takes ('cardForeground' → 'card-foreground'). */
-const cssToken = (key: TokenKey): string => cssName(key).slice(2);
+// The same read by CSS custom-property name, the way the old regex over app.css
+// did it. The describes that predate the sweep name tokens that way, so this is
+// the string adapter for them; new code takes the key.
+function blockToken(selector: string, name: string): string {
+	const key = TOKEN_BY_CSS_NAME.get(name);
+	if (!key) throw new Error(`--${name} is not a theme token`);
+	return blockHex(selector, key);
+}
 
 function luminance(hex: string): number {
 	const n = parseInt(hex.slice(1), 16);
@@ -423,13 +427,22 @@ const THEME_BLOCKS = THEMES.flatMap(({ id }) =>
 //
 // Scope: raw --primary as TEXT is deliberately absent. It fails on Ember light
 // (2.20:1), which is the whole reason --link and --status-attention exist; fixing
-// it is SONA-126, not this sweep.
+// it is SONA-126, not this sweep. --primary IS swept at the 3:1 non-text floor
+// below, where it draws selection and drop-target borders.
+//
+// Scope: the --sidebar* family is out of the sweep. The dark sidebar border is
+// an alpha value (rgba over whatever sits behind it), and this sweep measures
+// opaque pairs only — compositing it would be a second mechanism, not another
+// row in this table.
 const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> = [
 	{ ink: 'foreground', ground: 'background', floor: 4.5 },
 	{ ink: 'foreground', ground: 'card', floor: 4.5 },
 	{ ink: 'cardForeground', ground: 'card', floor: 4.5 },
 	{ ink: 'mutedForeground', ground: 'background', floor: 4.5 },
 	{ ink: 'mutedForeground', ground: 'card', floor: 4.5 },
+	// Chips and pills: muted label on the --secondary fill, live in the admin
+	// pages today. Re-pointing those uses at a darker token is the palette step.
+	{ ink: 'mutedForeground', ground: 'secondary', floor: 4.5 },
 	{ ink: 'link', ground: 'background', floor: 4.5 },
 	{ ink: 'link', ground: 'card', floor: 4.5 },
 	{ ink: 'statusOk', ground: 'card', floor: 4.5 },
@@ -438,38 +451,91 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 	{ ink: 'destructiveForeground', ground: 'destructive', floor: 4.5 },
 	{ ink: 'primaryForeground', ground: 'primary', floor: 4.5 },
 	{ ink: 'border', ground: 'background', floor: 3 },
-	{ ink: 'ring', ground: 'background', floor: 3 }
+	{ ink: 'border', ground: 'card', floor: 3 },
+	{ ink: 'ring', ground: 'background', floor: 3 },
+	// --input is the form-field boundary, in both places a field sits: on the
+	// page and inside a card. WCAG 1.4.11 wants 3:1 of it.
+	{ ink: 'input', ground: 'background', floor: 3 },
+	{ ink: 'input', ground: 'card', floor: 3 },
+	// --primary is not only a fill: it draws the selected-item and drop-target
+	// borders, which are non-text state indicators and so 1.4.11 at 3:1. Fixing
+	// the light-Ember case is SONA-126.
+	{ ink: 'primary', ground: 'background', floor: 3 },
+	{ ink: 'primary', ground: 'card', floor: 3 }
 ];
 
 // Pairings that fail TODAY, allowlisted with the ratio measured when the sweep
 // was written so the debt is visible instead of silencing the assertion. No
 // palette value was changed to make this suite green (SONA-209).
 //
-// --border on --background: every theme × mode sits at 1.3–1.5:1, because the
-// border is a hairline between two adjacent surfaces of the same family, not a
-// control boundary. WCAG 1.4.11 asks 3:1 of a border only where the border is
-// what identifies a component or its state — which is exactly the case for
-// --input on form fields, and that is the pairing worth fixing. Raising --border
-// to 3:1 everywhere would repaint every card and table rule in all six palettes,
-// so it needs a design decision, not a test tweak. The .input rule draws its
-// border with --input on a --background fill at the same ratios, and that IS a
-// field boundary; it is recorded on SONA-209 for the palette step (SONA-126).
+// WCAG 1.4.11 asks 3:1 of a boundary only where the boundary is what identifies
+// a control or its state. Two of the allowlisted pairings below ARE that, and
+// two are the decorative use the exception is for:
+//
+//   • REAL 1.4.11 failures. `.input` draws the form-field boundary with --input
+//     on a --background (or --card) fill, and `.btn-outline` fills with
+//     --background and draws its ONLY boundary with --border — both at the same
+//     1.3–1.8:1 as the hairlines, and both are controls a sighted user has to
+//     find by their edge. They fail today in every palette × mode. Deferred to
+//     the palette step (SONA-126, tracked on SONA-209) because this change moves
+//     the palettes into data and alters no colour value.
+//   • DECORATIVE. --border also draws the card and table hairlines — a rule
+//     between two adjacent surfaces of the same family, identifying nothing.
+//     1.4.11 does not apply there.
+//
+// Raising --border and --input to 3:1 repaints every card and table rule in
+// every palette, so it is a design decision, not a test tweak — which is why the
+// ratios are recorded here rather than silenced. Same for --primary as a
+// selection/drop-target border on light Ember.
 const KNOWN_FAILURES = new Map<string, number>([
 	['default dark border on background', 1.39],
 	['default light border on background', 1.45],
 	['aurora dark border on background', 1.43],
 	['aurora light border on background', 1.29],
 	['terracotta dark border on background', 1.39],
-	['terracotta light border on background', 1.38]
+	['terracotta light border on background', 1.38],
+	['default dark border on card', 1.28],
+	['default light border on card', 1.61],
+	['aurora dark border on card', 1.32],
+	['aurora light border on card', 1.4],
+	['terracotta dark border on card', 1.26],
+	['terracotta light border on card', 1.82],
+	['default dark input on background', 1.39],
+	['default light input on background', 1.45],
+	['aurora dark input on background', 1.43],
+	['aurora light input on background', 1.29],
+	['terracotta dark input on background', 1.39],
+	['terracotta light input on background', 1.38],
+	['default dark input on card', 1.28],
+	['default light input on card', 1.61],
+	['aurora dark input on card', 1.32],
+	['aurora light input on card', 1.4],
+	['terracotta dark input on card', 1.26],
+	['terracotta light input on card', 1.82],
+	['default light primary on background', 2.2],
+	['default light primary on card', 2.46],
+	['terracotta light mutedForeground on secondary', 3.96]
 ]);
 
 describe('resting token pairings, every theme × mode (SONA-209)', () => {
+	// An allowlist key the sweep never generates — a renamed token, a dropped
+	// pairing, a typo — silences nothing and reads as debt that is still there.
+	it('has no KNOWN_FAILURES entry the sweep does not generate', () => {
+		const generated = new Set(
+			THEME_BLOCKS.flatMap(({ sel }) => {
+				const { id, mode } = BLOCK_BY_SELECTOR.get(sel)!;
+				return RESTING_PAIRS.map(({ ink, ground }) => `${id} ${mode} ${ink} on ${ground}`);
+			})
+		);
+		expect([...KNOWN_FAILURES.keys()].filter((k) => !generated.has(k))).toEqual([]);
+	});
+
 	for (const { name, sel } of THEME_BLOCKS) {
 		const { id, mode } = BLOCK_BY_SELECTOR.get(sel)!;
 		for (const { ink, ground, floor } of RESTING_PAIRS) {
 			const key = `${id} ${mode} ${ink} on ${ground}`;
 			it(`${name}: --${ink} on --${ground} meets ${floor}:1`, () => {
-				const ratio = contrast(blockToken(sel, cssToken(ink)), blockToken(sel, cssToken(ground)));
+				const ratio = contrast(blockHex(sel, ink), blockHex(sel, ground));
 				const known = KNOWN_FAILURES.get(key);
 				if (known !== undefined) {
 					// Self-cleaning: once the pairing clears its floor, the allowlist
@@ -534,8 +600,14 @@ describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SON
 });
 
 // --muted-foreground is not only hint TEXT: it's the resting color of the social
-// icons, the copy button, the select chevron and other icon-only affordances,
-// which WCAG 1.4.11 (non-text contrast) holds to 3:1 against their background.
+// icons, the copy button and other icon-only affordances, which WCAG 1.4.11
+// (non-text contrast) holds to 3:1 against their background.
+//
+// The select chevron is NOT one of them, despite sitting on `select.input`: it
+// is an SVG data URI in app.css painted with a hardcoded #9ca3af (a data URI
+// can't read a custom property), so it neither follows this token nor changes
+// with the theme, and nothing here measures it. Moving it onto a token is the
+// palette step (SONA-126); this change alters no colour.
 // Every pairing currently clears it with room to spare — the tightest is
 // terracotta light on --background at 4.53:1 — so this is a pin against a future
 // token tweak, not a fix. A failure here is a finding to report, not to silence

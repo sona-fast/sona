@@ -14,8 +14,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { argv, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { ALL_THEMES } from '../src/lib/themes/index.ts';
-import { TOKEN_ORDER, cssName, cssValue, type ThemeDefinition } from '../src/lib/themes/types.ts';
+import { ALL_THEMES } from '../src/lib/themes/all.ts';
+import { DEFAULT_THEME_ID } from '../src/lib/themes/index.ts';
+import { TOKEN_CSS_NAMES, cssName, cssValue, type ThemeDefinition, type TokenKey } from '../src/lib/themes/types.ts';
 
 export const OUTPUT_PATH = fileURLToPath(new URL('../src/lib/themes/generated.css', import.meta.url));
 
@@ -23,9 +24,12 @@ const HEADER = `/* GENERATED FILE — do not edit.
    Rendered from src/lib/themes/*.theme.ts by scripts/build-themes.ts.
    Edit the theme file and run \`npm run themes\`, then commit this file.
 
-   Block order is source order, and source order decides ties: the theme blocks
-   all have the same specificity, so a token an alternate theme does not declare
-   falls through to :root / [data-theme='light'] — see types.ts. */
+   Only one block shape wins on specificity: an alternate theme's light block,
+   which carries two attribute selectors. The other three (:root,
+   [data-theme='light'], [data-theme-id='x']) all tie, so among them the later
+   block in this file wins — which is why an alternate theme's light block has to
+   re-declare --link rather than inherit it from [data-theme='light']. A token no
+   matching block declares falls through to :root — see types.ts. */
 `;
 
 /** One selector + its declarations, as a formatted CSS rule. '' is a blank line. */
@@ -35,7 +39,7 @@ function rule(selector: string, declarations: string[]): string {
 
 function tokenDeclarations(tokens: ThemeDefinition['dark']): string[] {
 	const out: string[] = [];
-	for (const [key] of TOKEN_ORDER) {
+	for (const key of Object.keys(TOKEN_CSS_NAMES) as TokenKey[]) {
 		const value = tokens[key];
 		// A token the block does not declare is left to the cascade on purpose.
 		if (value === undefined) continue;
@@ -56,9 +60,9 @@ function block(theme: ThemeDefinition, mode: 'dark' | 'light', selector: string)
 	return rule(selector, declarations);
 }
 
-/** Selectors for a theme's two blocks. The first theme is the default one. */
-function selectors(theme: ThemeDefinition, isDefault: boolean): { dark: string; light: string } {
-	return isDefault
+/** Selectors for a theme's two blocks. The default theme owns :root. */
+function selectors(theme: ThemeDefinition): { dark: string; light: string } {
+	return theme.id === DEFAULT_THEME_ID
 		? { dark: ':root', light: "[data-theme='light']" }
 		: {
 				dark: `[data-theme-id='${theme.id}']`,
@@ -66,9 +70,38 @@ function selectors(theme: ThemeDefinition, isDefault: boolean): { dark: string; 
 			};
 }
 
+const THEME_ID = /^[a-z][a-z0-9-]*$/;
+// Letters, digits, spaces, commas, quotes, hyphens — enough for a CSS
+// font-family list and nothing that could close the declaration.
+const FONT_FAMILY = /^[A-Za-z0-9 ,'"-]+$/;
+
+// These three strings reach the CSS unescaped: the id lands inside an attribute
+// selector, the label inside a comment, the font lists inside a declaration. A
+// stray quote, brace, or comment terminator would emit CSS that means something
+// other than the theme data says, so reject it the way cssValue rejects a value.
+function validateTheme(theme: ThemeDefinition): void {
+	if (!THEME_ID.test(theme.id)) {
+		throw new Error(`theme id '${theme.id}' is not a slug (lowercase letter, then letters, digits, hyphens)`);
+	}
+	if (theme.label.includes('*' + '/')) {
+		throw new Error(`theme '${theme.id}': label must not contain a comment terminator`);
+	}
+	for (const [slot, family] of Object.entries(theme.fonts ?? {})) {
+		if (!FONT_FAMILY.test(family)) {
+			throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has characters outside letters, digits, spaces, commas, quotes, and hyphens`);
+		}
+	}
+}
+
 export function renderThemesCss(themes: ThemeDefinition[]): string {
-	const blocks = themes.flatMap((theme, i) => {
-		const sel = selectors(theme, i === 0);
+	for (const theme of themes) validateTheme(theme);
+	// Emission order is source order and the default theme is the fallback floor,
+	// so it has to be emitted first (see the HEADER above).
+	if (themes[0]?.id !== DEFAULT_THEME_ID) {
+		throw new Error(`the first theme must be the default one ('${DEFAULT_THEME_ID}'), got '${themes[0]?.id}'`);
+	}
+	const blocks = themes.flatMap((theme) => {
+		const sel = selectors(theme);
 		return [
 			`/* ${theme.label} */\n${block(theme, 'dark', sel.dark)}`,
 			block(theme, 'light', sel.light)
@@ -78,16 +111,16 @@ export function renderThemesCss(themes: ThemeDefinition[]): string {
 }
 
 /** Exit code: 0 when the committed file matches, 1 when it is stale or missing. */
-export function checkThemesCss(path: string, expected: string, log = console.error): number {
+export function checkThemesCss(path: string, expected: string): number {
 	let actual: string;
 	try {
 		actual = readFileSync(path, 'utf8');
 	} catch {
-		log(`✖ ${path} is missing. Run \`npm run themes\`.`);
+		console.error(`✖ ${path} is missing. Run \`npm run themes\`.`);
 		return 1;
 	}
 	if (actual === expected) return 0;
-	log(`✖ ${path} is out of date with the theme data. Run \`npm run themes\` and commit the result.`);
+	console.error(`✖ ${path} is out of date with the theme data. Run \`npm run themes\` and commit the result.`);
 	return 1;
 }
 

@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { renderThemesCss, checkThemesCss } from './build-themes.ts';
+import { fileURLToPath } from 'node:url';
+import { renderThemesCss, checkThemesCss, OUTPUT_PATH } from './build-themes.ts';
+import { ALL_THEMES } from '../src/lib/themes/all.ts';
 import type { ThemeDefinition } from '../src/lib/themes/types.ts';
 
 // A two-token fixture rather than the real palettes: this asserts the LAYOUT
@@ -70,25 +72,112 @@ describe('renderThemesCss', () => {
 		];
 		expect(() => renderThemesCss(bad)).toThrow(/not a 6-digit hex/);
 	});
+
+	// The id, the label and the font lists are the three theme strings that reach
+	// the CSS unescaped (attribute selector, comment, declaration), so each gets
+	// the same treatment a bad colour value gets: a build failure.
+	it('rejects a theme id that is not a slug', () => {
+		const bad: ThemeDefinition[] = [
+			{ id: "x'] , [data-theme-id='default", label: 'Bad', dark: {}, light: {} }
+		];
+		expect(() => renderThemesCss(bad)).toThrow(/is not a slug/);
+	});
+
+	it('rejects a label that closes the comment it is emitted into', () => {
+		const bad: ThemeDefinition[] = [
+			{ id: 'default', label: 'Bad *' + '/ :root { --background: #000000; } /*', dark: {}, light: {} }
+		];
+		expect(() => renderThemesCss(bad)).toThrow(/comment terminator/);
+	});
+
+	it('rejects a font-family outside the safe character set', () => {
+		const bad: ThemeDefinition[] = [
+			{
+				id: 'default',
+				label: 'Bad',
+				dark: {},
+				light: {},
+				fonts: { primary: 'X; --background: #000000', secondary: "'B', sans-serif" }
+			}
+		];
+		expect(() => renderThemesCss(bad)).toThrow(/font-family/);
+	});
+
+	it('rejects a theme list whose first entry is not the default theme', () => {
+		const bad: ThemeDefinition[] = [{ id: 'alt', label: 'Alt', dark: {}, light: {} }];
+		expect(() => renderThemesCss(bad)).toThrow(/first theme must be the default one/);
+	});
+});
+
+// Catches a palette edit committed without `npm run themes`. In CI this
+// particular assert is redundant — `npm ci` runs `prepare`, which regenerates
+// the file before vitest ever reads it, and the CI job's `git diff` step is what
+// actually fails on a stale commit. It still earns its place locally and under a
+// bare `npm test` with no install in front of it.
+describe('the committed generated.css', () => {
+	it('matches what the theme data renders', () => {
+		expect(readFileSync(OUTPUT_PATH, 'utf8')).toBe(renderThemesCss(ALL_THEMES));
+	});
+});
+
+// src/app.css pulls the generated tokens in with an @import. CSS drops an
+// @import that follows any rule other than @charset, @layer, or another @import,
+// so a rule sneaking in above this line would ship a page with no colour tokens
+// at all — and nothing else in the suite would notice.
+describe('the app.css @import of the generated CSS', () => {
+	const appCss = readFileSync(fileURLToPath(new URL('../src/app.css', import.meta.url)), 'utf8');
+	const IMPORT_LINE = "@import './lib/themes/generated.css';";
+
+	it('imports the generated stylesheet', () => {
+		expect(appCss).toContain(IMPORT_LINE);
+	});
+
+	it('has nothing but @charset, other @imports, comments and whitespace above it', () => {
+		// Eats the things that ARE allowed above it, from the top down: whitespace,
+		// comments, and @charset/@import statements (quote-aware, because a Google
+		// Fonts URL carries semicolons inside its quotes). Whatever is left is a
+		// rule that would make the browser drop the import.
+		const allowed = [
+			/^\s+/,
+			/^\/\*[\s\S]*?\*\//,
+			/^@(?:charset|import)\b(?:[^;'"]|'[^']*'|"[^"]*")*;/
+		];
+		let rest = appCss.slice(0, appCss.indexOf(IMPORT_LINE));
+		for (let eaten = true; eaten; ) {
+			eaten = false;
+			for (const re of allowed) {
+				const match = rest.match(re)?.[0];
+				if (match) {
+					rest = rest.slice(match.length);
+					eaten = true;
+				}
+			}
+		}
+		expect(rest, `unexpected CSS above the generated.css @import: ${rest.slice(0, 120)}`).toBe('');
+	});
 });
 
 describe('checkThemesCss', () => {
 	const dir = mkdtempSync(path.join(tmpdir(), 'sona-themes-'));
 	const file = path.join(dir, 'generated.css');
 	const expected = renderThemesCss(fixture);
-	const silent = () => {};
+	// Silences the failure message this prints; the spy is restored per test.
+	const silence = () => vi.spyOn(console, 'error').mockImplementation(() => {});
+	afterEach(() => vi.restoreAllMocks());
 
 	it('passes when the committed file matches', () => {
 		writeFileSync(file, expected);
-		expect(checkThemesCss(file, expected, silent)).toBe(0);
+		expect(checkThemesCss(file, expected)).toBe(0);
 	});
 
 	it('detects drift', () => {
+		silence();
 		writeFileSync(file, expected.replace('#111111', '#222222'));
-		expect(checkThemesCss(file, expected, silent)).toBe(1);
+		expect(checkThemesCss(file, expected)).toBe(1);
 	});
 
 	it('detects a missing file', () => {
-		expect(checkThemesCss(path.join(dir, 'nope.css'), expected, silent)).toBe(1);
+		silence();
+		expect(checkThemesCss(path.join(dir, 'nope.css'), expected)).toBe(1);
 	});
 });
