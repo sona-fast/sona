@@ -311,9 +311,14 @@
 		lookupAborts.delete(key);
 		// The two focus-target records are keyed by tile as well, and a key is
 		// never reused, so an entry for a removed tile is dead weight nothing can
-		// read again. Dropped here beside the abort.
-		delete tileLookupButtons[key];
-		delete tileRemoveButtons[key];
+		// read again. Dropped after the flush that unmounts the tile, not here:
+		// Svelte writes null back into a bind:this slot when its element goes, so
+		// a delete now is undone a moment later and the record still grows one
+		// dead entry per removed tile.
+		void tick().then(() => {
+			delete tileLookupButtons[key];
+			delete tileRemoveButtons[key];
+		});
 		// The parent is a tile, not a position: removing anything before it shifts
 		// every later tile down one, and parentIndex rides along to the server as
 		// the hidden field that picks the parent piece. Left stale, the saved

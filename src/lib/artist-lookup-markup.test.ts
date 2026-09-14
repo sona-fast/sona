@@ -984,9 +984,12 @@ describe('focus after the panel goes away', () => {
 		// on the file input or the dropzone there, and neither goes away.
 		expect(UPLOAD).toContain('removeTile(tile.key);');
 		// Both records are keyed by tile, and a key is never reused: the removed
-		// tile's entries go with its abort rather than sitting there unreadable.
+		// tile's entries go rather than sitting there unreadable. After the flush,
+		// not beside the abort — Svelte writes null back into a bind:this slot when
+		// its element unmounts, so a synchronous delete is undone a moment later
+		// and each removal still leaves a dead key behind.
 		expect(UPLOAD).toMatch(
-			/function removeTile\([\s\S]{0,600}?lookupAborts\.delete\(key\);[\s\S]{0,300}?delete tileLookupButtons\[key\];\s*\n\s*delete tileRemoveButtons\[key\];/
+			/function removeTile\([\s\S]{0,600}?lookupAborts\.delete\(key\);[\s\S]{0,600}?void tick\(\)\.then\(\(\) => \{\s*\n\s*delete tileLookupButtons\[key\];\s*\n\s*delete tileRemoveButtons\[key\];\s*\n\s*\}\);/
 		);
 	});
 
