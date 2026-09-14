@@ -1541,6 +1541,42 @@ test.describe('with a key saved', () => {
 		release();
 	});
 
+	// The other way the opener disappears while the dialog is open: the tile the
+	// handle came from is removed outright, taking its whole result with it.
+	// There is no lookup button left to land on then, so the select holding the
+	// artist that was just created is the landing spot (2.4.3).
+	test('lands focus on the select when the seed tile is removed behind the dialog', async ({
+		page
+	}) => {
+		await page.route('**/api/artists', (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ id: 81, name: 'kuttoya' })
+			});
+		});
+		await stubLookup(page, matchedBody({ localArtists: [] }));
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		const addNew = panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' });
+		await addNew.click();
+		await expect(page.locator('#new-artist-name')).toHaveValue('kuttoya');
+
+		// Keyboard, not a click: the backdrop swallows a pointer, and the Remove
+		// button behind it is reachable from the keyboard for real.
+		await page.getByRole('button', { name: 'Remove front.png' }).focus();
+		await page.keyboard.press('Enter');
+		await expect(tileLookup(page)).toHaveCount(0);
+
+		await page.getByRole('button', { name: 'Create Artist' }).click();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('81');
+
+		expect(await page.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('BODY');
+		await expect(page.locator('select[name="artistId"]')).toBeFocused();
+	});
+
 	test('a variant tile rates its own tile and leaves the shared fields alone', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await twoDoneTiles(page);
@@ -1803,6 +1839,13 @@ test.describe('with a key saved', () => {
 	test('a group-mode round trip keeps fields a closed lookup filled', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await oneDoneTile(page);
+		// oneDoneTile retries the whole navigate-and-drop block, so a goto from an
+		// earlier attempt can still be in flight here. Resolved against the
+		// outgoing document, the "New piece" radio detached between the locator
+		// and the click and the round trip failed for a reason it says nothing
+		// about. Settle the navigation before touching the group-mode radios.
+		await page.waitForURL('**/admin/upload');
+		await page.waitForLoadState('load');
 
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
