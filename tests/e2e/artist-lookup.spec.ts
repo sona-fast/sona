@@ -1938,11 +1938,11 @@ test.describe('with a key saved', () => {
 		// existing mode brings the parent select with it.
 		await expect(async () => {
 			await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
-		}).toPass();
+		}).toPass({ timeout: 10_000 });
 		await expect(page.getByRole('combobox', { name: 'Variant of' })).toBeVisible();
 		await expect(async () => {
 			await page.getByRole('radio', { name: 'New piece' }).check();
-		}).toPass();
+		}).toPass({ timeout: 10_000 });
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
