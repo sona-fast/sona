@@ -666,8 +666,13 @@ describe('round 11 wiring', () => {
 		// so the branch speaks the same sentence the "Use {name}" click speaks. The
 		// parent path does not: the panel it lands in relabels itself to "Using
 		// {name}", and saying it too would speak the fact twice.
+		// Focus first, then the sentence: the say formats a message, and a throw
+		// there ahead of the focus call would leave the operator on <body> with
+		// nothing said either. Placing focus first commits the landing spot
+		// whatever the message does, and the live region still mutates on the
+		// flush after it.
 		expect(created).toMatch(
-			/await tick\(\);[\s\S]{0,500}?if \(!isParent\(tile\.key\)\) \{[\s\S]{0,400}?announcer\.say\(m\.admin_lookup_announce_using\(\{ name: artist\.name \}\)\);\s*\n\s*\(tileLookupButtons\[tile\.key\] \?\? artistSelect\)\?\.focus\(\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\(document\.getElementById\('lookup-applied-artist'\) \?\? artistSelect\)\?\.focus\(\);/
+			/await tick\(\);[\s\S]{0,500}?if \(!isParent\(tile\.key\)\) \{[\s\S]{0,500}?\(tileLookupButtons\[tile\.key\] \?\? artistSelect\)\?\.focus\(\);\s*\n\s*announcer\.say\(m\.admin_lookup_announce_using\(\{ name: artist\.name \}\)\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\(document\.getElementById\('lookup-applied-artist'\) \?\? artistSelect\)\?\.focus\(\);/
 		);
 		expect(UPLOAD).toContain('bind:this={artistSelect}');
 		expect(PANEL).toContain('id="lookup-applied-artist"');

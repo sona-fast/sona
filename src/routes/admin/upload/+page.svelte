@@ -442,8 +442,11 @@
 			// Focus lands on the seed tile's own lookup button, which is nowhere near
 			// the select the artist went into and carries no trace of the creation,
 			// so the same sentence "Use X" gives on click has to be spoken here.
-			announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
+			// Moved first: a throw while formatting that sentence would otherwise
+			// skip the focus call and leave the operator on <body> (2.4.3), and the
+			// live region still mutates on the flush after this.
 			(tileLookupButtons[tile.key] ?? artistSelect)?.focus();
+			announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
 			return;
 		}
 		(document.getElementById('lookup-applied-artist') ?? artistSelect)?.focus();
