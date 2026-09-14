@@ -17,7 +17,7 @@ import { errorLabel, timeoutSignal } from './fetch-errors';
 import { activateGuestToken, xGraphqlHeaders } from './twitter-avatar';
 
 const X_TWEET_BY_REST_ID = 'https://api.x.com/graphql/f2sagi1jweVHFkTUIHzmMQ/TweetResultByRestId';
-const FETCH_TIMEOUT_MS = 5000;
+export const FETCH_TIMEOUT_MS = 5000;
 /** X attaches at most four photos to a post; a count past that is a response
  * we do not trust, so it is clamped rather than reported. */
 const MAX_TWEET_PHOTOS = 4;

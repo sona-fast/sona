@@ -17,7 +17,7 @@ const X_BEARER =
 	'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 const X_ACTIVATE = 'https://api.x.com/1.1/guest/activate.json';
 const X_USER_BY_SCREEN_NAME = 'https://api.x.com/graphql/IGgvgiOx4QZndDHuD3x9TQ/UserByScreenName';
-const FETCH_TIMEOUT_MS = 5000;
+export const FETCH_TIMEOUT_MS = 5000;
 
 /** Extract a bare handle from the stored twitter URL formats
  * ("https://x.com/@ExampleFox/", "twitter.com/examplefox", "@examplefox"). */

@@ -2,8 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
-import type { LookupOutcome, SourceKind } from '$lib/server/entail';
-import type { TweetMediaOutcome } from '$lib/server/twitter-media';
+import {
+	CLASSIFY_TIMEOUT_MS,
+	POLL_ATTEMPTS,
+	POLL_PAUSE_MS,
+	POLL_TIMEOUT_MS,
+	type LookupOutcome,
+	type SourceKind
+} from '$lib/server/entail';
+import { FETCH_TIMEOUT_MS as ACTIVATE_TIMEOUT_MS } from '$lib/server/twitter-avatar';
+import { FETCH_TIMEOUT_MS as TWEET_TIMEOUT_MS, type TweetMediaOutcome } from '$lib/server/twitter-media';
 import { makeD1 } from '$lib/server/test/d1';
 import { POST, _LOOKUP_DEADLINE_MS } from './+server';
 
@@ -38,7 +46,12 @@ vi.mock('$lib/server/entail', async (importOriginal) => {
 	const original = await importOriginal<typeof import('$lib/server/entail')>();
 	return { ...original, lookupBlueskySource, classifyMediaUrl };
 });
-vi.mock('$lib/server/twitter-media', () => ({ fetchTweetMediaUrl }));
+// Spread the original so the real timeout constants the deadline pin below
+// sums stay readable through the mock.
+vi.mock('$lib/server/twitter-media', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/server/twitter-media')>();
+	return { ...original, fetchTweetMediaUrl };
+});
 
 const DDL = `CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, slug TEXT,
 	image_url TEXT NOT NULL, thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER,
@@ -151,11 +164,18 @@ describe('POST /api/admin/tag-suggestions', () => {
 	});
 
 	it('gives the lookup chain a deadline that clears one full X round', async () => {
-		// One activate (5 s) + one tweet lookup (5 s) + one enqueue (3 s) + one
-		// poll (8 s) at their own timeouts is 21 s; the deadline exists to stop
-		// the retry paths, not to cut that chain short of its first attempt.
-		const firstAttempt = 5_000 + 5_000 + 3_000 + 8_000;
-		expect(_LOOKUP_DEADLINE_MS).toBeGreaterThanOrEqual(firstAttempt);
+		// One activate + one tweet lookup + one enqueue + every poll the cap
+		// allows, with the pause between them, each at its own timeout. Both
+		// polls count: a job still running answers the first one 202, so cutting
+		// the second turns a 202 not_ready into a 502 the site counts as an
+		// error. Summed from the real constants so the pin tracks them.
+		const firstAttempt =
+			ACTIVATE_TIMEOUT_MS +
+			TWEET_TIMEOUT_MS +
+			CLASSIFY_TIMEOUT_MS +
+			POLL_ATTEMPTS * POLL_TIMEOUT_MS +
+			(POLL_ATTEMPTS - 1) * POLL_PAUSE_MS;
+		expect(_LOOKUP_DEADLINE_MS).toBeGreaterThan(firstAttempt);
 	});
 
 	it('502s unavailable when the deadline fires mid-lookup', async () => {

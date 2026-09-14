@@ -548,6 +548,28 @@ describe('classifyMediaUrl', () => {
 		expect(polls).toBe(2);
 	});
 
+	it('loses that not_ready when the caller deadline cuts the second poll', async () => {
+		// The reason the endpoint's ceiling has to clear both polls and the pause
+		// between them: a job still running answers the first poll 202, and a
+		// deadline that fires during the second one aborts the fetch, so the
+		// operator gets a 502 instead of the 202 the poll cap is there to give.
+		const deadline = new AbortController();
+		let polls = 0;
+		const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+			if (init?.method === 'POST') return json({ job_id: 'job-4' }, 202);
+			polls++;
+			if (polls === 1) return json({ status: 'processing' }, 202);
+			deadline.abort();
+			init?.signal?.throwIfAborted();
+			return json(done);
+		});
+		expect(await classifyMediaUrl(url, fetchImpl, deadline.signal)).toEqual({
+			ok: false,
+			reason: 'unavailable'
+		});
+		expect(polls).toBe(2);
+	});
+
 	it('keeps polling on a running status but gives up on a terminal one', async () => {
 		// `running` is pending, so it goes the full poll cap and answers
 		// not_ready. `failed` will never finish: the retry-later answer would only

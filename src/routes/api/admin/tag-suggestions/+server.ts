@@ -59,11 +59,16 @@ const FAILURE_STATUS: Record<LookupFailure | TweetMediaFailure, number> = {
 const MAX_URL_LENGTH = 2048;
 /** Ceiling on the whole lookup chain. The X path is up to four fetches (the
  * activate and the tweet lookup can each run twice) plus an enqueue and two
- * polls, each with its own timeout, so without this the worst case ran close
- * to forty seconds. One first attempt at every timeout is 21 s (5 + 5 + 3 + 8),
- * so the ceiling sits just above that: it cuts the retry paths, never a chain
- * that is merely slow. */
-const LOOKUP_DEADLINE_MS = 22_000;
+ * polls, each with its own timeout, so without this the worst case ran well
+ * past a minute. The invariant: the deadline never cuts a first attempt short.
+ * That attempt is the activate (5 s) + the tweet lookup (5 s) + the classify
+ * enqueue (3 s) + both polls with the pause between them (8 + 0.25 + 8), which
+ * is 29.25 s — the second poll is the normal path for a job still running, so
+ * a deadline below this turns the 202 `not_ready` the poll cap exists to
+ * produce into a 502 the site counts as an error. The ceiling sits just above
+ * that: it cuts the retry paths, never a chain that is merely slow. The UI's
+ * own client-side timeout has to stay above this. */
+const LOOKUP_DEADLINE_MS = 32_000;
 // SvelteKit rejects any other named export from a +server file unless it
 // starts with an underscore; the tests read it under this name.
 export { LOOKUP_DEADLINE_MS as _LOOKUP_DEADLINE_MS };
