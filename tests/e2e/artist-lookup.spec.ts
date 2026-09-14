@@ -1492,6 +1492,55 @@ test.describe('with a key saved', () => {
 		expect(creates).toBe(1);
 	});
 
+	// Nothing holds the keyboard inside the dialog, so the tile's own "Look up
+	// artist" button is reachable behind it and a restart puts that tile back on
+	// "searching". The result the dialog was opened from is gone by the time it
+	// closes, taking the add-new button the dialog captured as its opener — the
+	// same hole as a removed tile, which the create path used to handle only for
+	// removal. Focus has to land somewhere, or the next Tab restarts at the top
+	// of the admin page (2.4.3).
+	test('lands focus on the tile when its lookup restarted behind the dialog', async ({
+		page
+	}) => {
+		await page.route('**/api/artists', (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ id: 80, name: 'kuttoya' })
+			});
+		});
+		// No local artist behind the handle: the 'new' outcome, whose action opens
+		// the dialog.
+		await stubLookup(page, matchedBody({ localArtists: [] }));
+		await twoDoneTiles(page);
+
+		// front.png is the parent, so the panel is showing its result.
+		await tileLookup(page).nth(0).click();
+		const addNew = panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' });
+		await addNew.click();
+		await expect(page.locator('#new-artist-name')).toHaveValue('kuttoya');
+
+		// Registered second, so this one answers the restart; held open, the tile
+		// is still on 'searching' when the dialog closes.
+		const release = await deferredLookup(page, matchedBody({ localArtists: [] }));
+		// Focus and Enter, not a click: the backdrop swallows a pointer, but the
+		// keyboard reaches the tile for real.
+		await tileLookup(page).nth(0).focus();
+		await page.keyboard.press('Enter');
+		await expect(tileLookup(page).nth(0)).toHaveAttribute('aria-busy', 'true');
+		await expect(addNew).toHaveCount(0);
+
+		await page.getByRole('button', { name: 'Create Artist' }).click();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('80');
+
+		// The opener is gone with the result, so this is the landing spot.
+		expect(await page.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('BODY');
+		await expect(tileLookup(page).nth(0)).toBeFocused();
+
+		release();
+	});
+
 	test('a variant tile rates its own tile and leaves the shared fields alone', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await twoDoneTiles(page);

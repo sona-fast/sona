@@ -223,10 +223,18 @@
 		lookup = { kind: 'searching' };
 		sentPrivate = sendingPrivate;
 		if (clearedInline) announcer.say(m.admin_lookup_announce_searching_cleared());
+		// Whether the result reached the panel. The callback writes the state
+		// before it prefills from it, so a throw out of the prefill must not be
+		// read as "nothing arrived" and rewrite the matches away. Nothing in
+		// applyPrefill throws today — the upload page's announcement is what made
+		// this reachable there — but the two pages catch into the same failed
+		// state and should decide it the same way.
+		let applied = false;
 		void runLookup({ imageId: data.image.id }, { signal: controller.signal })
 			.then((next) => {
 				if (lookupAbort !== controller) return;
 				lookup = next;
+				applied = true;
 				applyPrefill(next);
 				// Cleared last, so a throw in applyPrefill still reads as this
 				// lookup's in the catch below rather than as a cancelled one.
@@ -241,7 +249,9 @@
 			.catch(() => {
 				if (lookupAbort !== controller) return;
 				lookupAbort = null;
-				lookup = { kind: 'failed', reason: 'unavailable', sent: true };
+				if (!applied) {
+					lookup = { kind: 'failed', reason: 'unavailable', sent: true };
+				}
 				console.error(LOOKUP_RESULT_THREW);
 			});
 	}

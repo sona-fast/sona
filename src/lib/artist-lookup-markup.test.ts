@@ -1237,6 +1237,17 @@ describe('the upload page grid', () => {
 		// was applied.
 		expect(UPLOAD).toMatch(/live\.lookup = next;\s*\n\s*applied = true;/);
 		expect(UPLOAD).toMatch(/if \(!applied\) \{\s*\n\s*const sent = sentAfterApplyThrew/);
+		// The edit page guards the same way. Nothing in its applyPrefill throws
+		// today, so the hole is unreachable there — but the two pages catch into
+		// one state, and a page that overwrites an applied result the moment it
+		// gains a throwing step is a defect waiting on an unrelated change.
+		expect(EDIT).toMatch(/lookup = next;\s*\n\s*applied = true;/);
+		expect(EDIT).toMatch(
+			/if \(!applied\) \{\s*\n\s*lookup = \{ kind: 'failed', reason: 'unavailable', sent: true \};/
+		);
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(/let applied = false;/);
+		}
 		// The catch tells its own lookup from a cancelled one by the abort
 		// bookkeeping, so the success path clears that last — cleared first, a
 		// throw above it would read as a cancel and the catch would do nothing.
