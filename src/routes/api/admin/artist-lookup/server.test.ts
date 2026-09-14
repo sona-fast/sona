@@ -65,6 +65,24 @@ vi.mock('$lib/server/settings', async (importOriginal) => {
 	return { ...original, setRawSetting: setRawSettingSpy };
 });
 
+// The real buffering by default. bufferStream allocates an exact-size array, so
+// a Blob built from the view and one built from its backing buffer carry the
+// same bytes and no assertion can tell them apart. The byte-for-byte test makes
+// this hand back a view into a larger allocation for one call, which is what
+// gives that test something to fail on.
+const bufferStreamSpy = vi.hoisted(() => vi.fn<(...args: never[]) => Promise<Uint8Array>>());
+const realBufferStream = vi.hoisted(() => ({
+	fn: null as null | ((...args: never[]) => Promise<Uint8Array>)
+}));
+vi.mock('$lib/server/storage/buffer', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/server/storage/buffer')>();
+	realBufferStream.fn = original.bufferStream as unknown as (
+		...args: never[]
+	) => Promise<Uint8Array>;
+	bufferStreamSpy.mockImplementation(realBufferStream.fn);
+	return { ...original, bufferStream: bufferStreamSpy };
+});
+
 const DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, slug TEXT,
 		image_url TEXT NOT NULL, thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER,
@@ -166,6 +184,8 @@ beforeEach(() => {
 	if (realSetRawSetting.fn) setRawSettingSpy.mockImplementation(realSetRawSetting.fn);
 	proxyStoredImageSpy.mockReset();
 	if (realProxyStoredImage.fn) proxyStoredImageSpy.mockImplementation(realProxyStoredImage.fn);
+	bufferStreamSpy.mockReset();
+	if (realBufferStream.fn) bufferStreamSpy.mockImplementation(realBufferStream.fn);
 });
 
 describe('artist-lookup — configuration', () => {
@@ -545,6 +565,18 @@ describe('artist-lookup — stored image by id', () => {
 			`INSERT INTO images (id, title, slug, image_url, created_at)
 			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
 		);
+
+		// The payload as a view into a larger, 0xff-padded allocation. Against the
+		// exact-size array bufferStream really returns, reading the view and
+		// reading its buffer give the same bytes, so this test passed either way;
+		// with the padding in place a Blob built from `.buffer` sends the padding
+		// too and the assertion below fails.
+		bufferStreamSpy.mockImplementationOnce(async (...args) => {
+			const real = await realBufferStream.fn!(...args);
+			const padded = new Uint8Array(real.byteLength + 8).fill(0xff);
+			padded.set(real, 4);
+			return padded.subarray(4, 4 + real.byteLength);
+		});
 
 		await POST(jsonEvent(platform, { imageId: 1 }));
 
