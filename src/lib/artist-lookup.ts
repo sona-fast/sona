@@ -209,7 +209,7 @@ export function pickPrefillMatch(matches: LookupMatch[]): LookupMatch | null {
 /** `<input type="date">` wants a bare calendar day. A timestamp that isn't one
  * comes back null rather than as a date the operator would have to correct.
  * A day that doesn't exist rolls over instead of failing to parse — Feb 30
- * becomes March 1 — so the parsed day is compared back to the matched one,
+ * becomes March 2 in a common year — so the parsed day is compared back to the matched one,
  * and a rollover comes back null rather than as a value the date input
  * would reject after the status line claimed it was filled. */
 export function postDateToInput(iso: string | null | undefined): string | null {
@@ -564,7 +564,13 @@ const FAIL_REASONS: readonly LookupFailReason[] = [
  * the operator clicks. Dropped here, once, rather than guarded at each link.
  */
 function hasLinkableUrl(match: LookupMatch): boolean {
-	return typeof match?.postUrl === 'string' && match.postUrl.startsWith('https://');
+	// The endpoint always sets handles to an array; a row without one would throw
+	// in matchHandles and blank the whole panel, so it is dropped here instead.
+	return (
+		Array.isArray(match?.handles) &&
+		typeof match.postUrl === 'string' &&
+		match.postUrl.startsWith('https://')
+	);
 }
 
 /** The stricter of two ratings, either of which may be unknown. RATING_ORDER

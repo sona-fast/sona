@@ -27,7 +27,7 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
-export const LEGAL_DEFAULTS_UPDATED = '2026-09-08';
+export const LEGAL_DEFAULTS_UPDATED = '2026-09-14';
 
 /**
  * Resolve the "Last updated" date to show on a legal page from a *stable* source

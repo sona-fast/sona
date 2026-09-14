@@ -161,6 +161,10 @@ async function gotoEditHydrated(page: Page, path = EDIT_IMAGE) {
 			if (attempt === 3) throw e;
 		}
 	}
+	// A goto that timed out on the route compile can leave that navigation still
+	// in flight; waiting for the page's own select once settles it, so the click
+	// retry below is not absorbing a late navigation that detaches the button.
+	await expect(page.locator('select[name="artistId"]')).toBeVisible({ timeout: 30_000 });
 	// Past the navigation, retry the CLICK and not the navigation: re-navigating
 	// would throw away the hydration this is waiting on and start it over.
 	await expect(async () => {

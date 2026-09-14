@@ -785,6 +785,19 @@ describe('stateFromResponse', () => {
 	// The endpoint builds every post URL, so anything that is not an https link
 	// came from something that is not the endpoint — and both the panel row and
 	// the upload tile render it as an anchor the operator clicks.
+	it('drops a match whose handles are not an array rather than throwing later', async () => {
+		const bad = { ...match({ siteId: '8' }), handles: undefined } as unknown as ReturnType<typeof match>;
+		const state = await stateFromResponse(
+			jsonResponse(
+				response({
+					matches: [bad, match({ site: 'Twitter', siteId: '9', postUrl: 'https://twitter.com/a/status/9' })]
+				})
+			)
+		);
+		if (state.kind !== 'results') throw new Error('expected results');
+		expect(state.data.matches.map((x) => x.postUrl)).toEqual(['https://twitter.com/a/status/9']);
+	});
+
 	it('drops a match whose post URL is not an https link', async () => {
 		const state = await stateFromResponse(
 			jsonResponse(

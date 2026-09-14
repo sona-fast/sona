@@ -295,7 +295,7 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
 	const RECORDED_TEXT_HASH = '3a1187cb2970888de509560a9e0c028b3340d5ba39f393da83e0c943b407a780';
-	const RECORDED_UPDATED = '2026-09-08';
+	const RECORDED_UPDATED = '2026-09-14';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both
