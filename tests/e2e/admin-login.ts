@@ -119,10 +119,13 @@ export async function adminLogin(
  * gets its own budget raised above it first: without that, a cold start dies at
  * 30s with a bare timeout and no second attempt. The 120_000 in
  * playwright.config.ts is the webServer boot timeout, not the per-test one.
+ * The budget is 90s rather than the 60s it started at: a full run boots six dev
+ * servers at once, and one login exhausted the shorter budget waiting on a box
+ * that was compiling five other projects' pages at the same time.
  * toPass reports the last attempt's error, so a genuine login failure still
  * reads as itself. */
 export async function loginRetrying(page: Page, password: string) {
-	test.setTimeout(90_000);
+	test.setTimeout(120_000);
 	await expect(async () => {
 		// Each attempt starts from a signed-out browser. An attempt that set the
 		// session cookie and then lost its own waitForURL would otherwise leave the
@@ -131,7 +134,7 @@ export async function loginRetrying(page: Page, password: string) {
 		// rather than on the login.
 		await page.context().clearCookies();
 		await adminLogin(page, password);
-	}).toPass({ timeout: 60_000 });
+	}).toPass({ timeout: 90_000 });
 }
 
 /** adminLogin resolves as soon as the login navigation commits, so the admin

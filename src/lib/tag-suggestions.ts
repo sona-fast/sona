@@ -87,9 +87,11 @@ type SuggestionBody = {
  * the moment `applyTo` joined the field back up. */
 const UNSAFE_LABEL_CHARS = /[\p{Cc},\p{Cf}\p{Zl}\p{Zp}]/gu;
 
-// Capped where sanitizeTag caps what it stores, so a chip never shows more of a
-// label than Save would keep. Sliced by code point, not by UTF-16 unit: a cut
-// through the middle of an astral character leaves a lone surrogate on the chip.
+// Capped at the length sanitizeTag stores, so a chip never shows more than
+// TAG_MAX_LENGTH code points. (It can still show characters Save drops:
+// sanitizeTag also strips anything outside its own alphabet.) Sliced by code
+// point, not by UTF-16 unit: a cut through the middle of an astral character
+// leaves a lone surrogate on the chip.
 function cleanLabel(value: string): string {
 	return Array.from(value.replace(UNSAFE_LABEL_CHARS, ''))
 		.slice(0, TAG_MAX_LENGTH)
@@ -218,6 +220,10 @@ export type SuggestionRequest = { sourcePostUrl: string } | { imageId: number };
  * not the classifier; the headroom is for the answer to make it back. Without
  * it a stalled connection left the pill disabled with no way out but a reload. */
 const REQUEST_TIMEOUT_MS = 30_000;
+// Exported for the test that pins it above the endpoint's own deadline; the
+// underscore marks it as read by the tests rather than by the forms, the way
+// +server.ts marks _LOOKUP_DEADLINE_MS.
+export { REQUEST_TIMEOUT_MS as _REQUEST_TIMEOUT_MS };
 
 /**
  * One POST to /api/admin/tag-suggestions. Never throws: a transport failure

@@ -235,6 +235,11 @@ test("a row's Suggest renders chips, and leaving one out changes the Save count"
 	await expect(target.getByText('4 suggested tags from entail.dev')).toBeVisible();
 	const chips = target.locator('.tag-chip');
 	await expect(chips).toHaveCount(4);
+	// The list repeats a chip group per row, so the group says which image it
+	// belongs to — the eyebrow names the count, the row title names the image.
+	await expect(
+		target.getByRole('group', { name: '4 suggested tags from entail.dev Backfill 120' })
+	).toBeVisible();
 	await expect(chips.first()).toHaveAttribute('aria-pressed', 'true');
 	await expect(target.getByText('Rated safe by entail.dev.')).toBeVisible();
 	// The expanded row lines up with the title, not with the card padding. The
@@ -941,8 +946,14 @@ test('the edit page keeps what the operator typed when the sidebar form submits'
 	await expect(pill).toHaveAttribute('aria-disabled', 'true');
 
 	await url.fill(BSKY_POST);
+	// The pill flipping back proves the SECOND fill reached the binding too, not
+	// only the DOM node: an input event lost between the two would leave the
+	// component holding the first URL and the assertions below reading a field
+	// the page no longer agrees with.
+	await expect(pill).toHaveAttribute('aria-disabled', 'false');
 	await tags.fill('fox, beach');
 	await nsfw.check();
+	await expect(nsfw).toBeChecked();
 
 	await page.getByRole('button', { name: /reference sheet$/ }).click();
 	// The sidebar has answered and re-rendered from fresh load data.

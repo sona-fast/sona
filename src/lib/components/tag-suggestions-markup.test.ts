@@ -115,6 +115,16 @@ describe('focus after a suggestion is accepted or dismissed', () => {
 	it('waits for the saved line to render before focusing it on the backfill page', () => {
 		expect(backfillPage).toMatch(/await tick\(\);\s*statusLines\[row\.id\]\?\.focus\(\)/);
 	});
+
+	it('waits for the failure line too, which reannounce does not always wait for', () => {
+		// reannounce awaits a tick only when the region already holds the same
+		// sentence. On the first failure it does not, so without a tick of its own
+		// this branch would focus a paragraph setFailure has not rendered yet and
+		// focus would drop to the body.
+		expect(backfillPage).toMatch(
+			/setFailure\(row\.id, true\);[\s\S]*?await reannounce\([\s\S]*?await tick\(\);\s*statusLines\[row\.id\]\?\.focus\(\)/
+		);
+	});
 });
 
 describe('chips', () => {
@@ -284,6 +294,10 @@ describe('the backfill rows', () => {
 	it('scopes the live-region and help ids per row so they stay unique', () => {
 		expect(backfillPage).toMatch(/id="row-\{row\.id\}-status"/);
 		expect(backfillPage).toMatch(/id="row-\{row\.id\}-help"/);
+		// The chip group takes its name from the eyebrow and the row title, so the
+		// title carries a per-row id too.
+		expect(backfillPage).toMatch(/id="row-\{row\.id\}-title"/);
+		expect(backfillPage).toMatch(/labelledBy="row-\{row\.id\}-status row-\{row\.id\}-title"/);
 	});
 });
 

@@ -263,7 +263,12 @@
 					<div class="rowbody">
 						<!-- Focusable so Load more can land focus on the first row it added,
 						     rather than leaving it on a link that is gone. -->
-						<h2 class="rowtitle" tabindex="-1" bind:this={rowTitles[row.id]}>
+						<h2
+							class="rowtitle"
+							id="row-{row.id}-title"
+							tabindex="-1"
+							bind:this={rowTitles[row.id]}
+						>
 							{row.title}
 						</h2>
 						<p class="rowmeta">
@@ -344,10 +349,15 @@
 					<p class="tag-eyebrow" id="row-{row.id}-status">
 						{m.admin_tag_suggest_eyebrow({ count: rowState.tags.length })}
 					</p>
+					<!-- The group is named by the eyebrow AND the row title: the page
+					     repeats this group per row, and every other control here ("Save 3
+					     tags to Backfill 120") names its image, so a group called only "3
+					     suggested tags" is the one thing a screen-reader user cannot
+					     place. -->
 					<TagSuggestionChips
 						tags={rowState.tags}
 						leftOut={rowState.leftOut}
-						labelledBy="row-{row.id}-status"
+						labelledBy="row-{row.id}-status row-{row.id}-title"
 						describedBy="row-{row.id}-help"
 						ontoggle={(tag) => onToggle(row.id, tag)}
 					/>
@@ -446,7 +456,11 @@
 									setFailure(row.id, true);
 									await reannounce(row.id, row.title, m.admin_suggest_tags_save_failed());
 									// The sentence that says what happened is where the operator
-									// resumes, the way the sibling branches land focus.
+									// resumes, the way the sibling branches land focus. The tick
+									// is this branch's own: reannounce waits for one only when the
+									// region already held the same sentence, and the paragraph
+									// being focused is rendered by setFailure above.
+									await tick();
 									statusLines[row.id]?.focus();
 									return;
 								}

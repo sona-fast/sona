@@ -449,14 +449,19 @@ describe('requestSuggestions', () => {
 		// reload. The call now carries a timeout signal; when it fires, fetch
 		// rejects with an AbortError, which reads as the same unavailable outcome
 		// a dropped connection does, so the tray with Try again appears.
-		const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
-			expect(init.signal).toBeInstanceOf(AbortSignal);
-			expect(init.signal?.aborted).toBe(false);
+		const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => {
 			throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
 		});
 		vi.stubGlobal('fetch', fetchMock);
 		expect(await requestSuggestions({ imageId: 7 })).toEqual({ status: 0, body: null });
 		expect(fetchMock).toHaveBeenCalledTimes(1);
+		// Read out here rather than asserted inside the mock: requestSuggestions
+		// catches everything, so an assertion that failed in the callback would be
+		// swallowed as a transport failure and the test would pass with no signal
+		// sent at all.
+		const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+		expect(init.signal).toBeInstanceOf(AbortSignal);
+		expect(init.signal?.aborted).toBe(false);
 	});
 });
 
