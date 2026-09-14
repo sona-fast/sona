@@ -17,8 +17,13 @@ const VITE_CONFIG = readFileSync('vite.config.ts', 'utf8');
 // whatever element the spec was about to click. The two files have to agree on
 // the directory names or the ignore silently stops covering them.
 describe('the dev server does not watch the e2e harness it is running under', () => {
+	// Pinned to its position, not just its presence: the same string sitting in a
+	// comment, in the fs.allow list, or in a build-side option reads as covered
+	// while the watcher goes on reloading the page mid-spec.
 	it('ignores the throwaway persist directories', () => {
-		expect(VITE_CONFIG).toContain("'**/.wrangler-e2e*/**'");
+		expect(VITE_CONFIG).toMatch(
+			/server:\s*\{[\s\S]*?watch:\s*\{\s*(?:\/\/[^\n]*\n\s*)*ignored:\s*\[[^\]]*'\*\*\/\.wrangler-e2e\*\/\*\*'/
+		);
 	});
 
 	it('names every persist directory the glob has to cover', () => {
