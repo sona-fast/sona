@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
+import type { D1Database } from '@cloudflare/workers-types';
 import { makeD1, withFailingSettingsRead } from './d1';
 
 function settingsD1() {
@@ -33,6 +34,22 @@ describe('withFailingSettingsRead', () => {
 		const stmt = settingsD1().prepare('SELECT value FROM site_settings WHERE key = ?');
 		const bound = stmt.bind('fuzzysearch_api_key') as Record<string, () => unknown>;
 		expect(() => bound[method]()).toThrow(D1_ERROR);
+	});
+
+	// batch used to be forwarded as the method itself, which detaches it from the
+	// database it belongs to. makeD1's batch is a closure and survives that, so
+	// the method is stood up on an object here the way a real D1 binding has it:
+	// detached, the call dies on `this`.
+	it('keeps batch attached to the database it wraps', () => {
+		const inner = {
+			marker: 'db',
+			prepare: () => ({ bind: () => ({}) }),
+			batch(this: { marker: string }) {
+				return this.marker;
+			}
+		} as unknown as D1Database;
+		const wrapped = withFailingSettingsRead(inner) as unknown as { batch: () => string };
+		expect(wrapped.batch()).toBe('db');
 	});
 
 	// Every other table still answers, so a test sees the key read failing rather

@@ -49,7 +49,10 @@ export function makeD1(sqlite: any): D1Database {
  * failing and not a database that is gone.
  */
 export function withFailingSettingsRead(d1: D1Database): D1Database {
-	const real = d1 as unknown as { prepare: (sql: string) => unknown; batch: unknown };
+	const real = d1 as unknown as {
+		prepare: (sql: string) => unknown;
+		batch: (...args: unknown[]) => unknown;
+	};
 	function prepare(sql: string) {
 		if (!sql.includes('site_settings')) return real.prepare(sql);
 		const fail = () => {
@@ -62,5 +65,8 @@ export function withFailingSettingsRead(d1: D1Database): D1Database {
 		const terminals = { run: fail, all: fail, raw: fail, first: fail, _run: fail };
 		return { bind: () => terminals, ...terminals };
 	}
-	return { prepare, batch: real.batch } as unknown as D1Database;
+	// Forwarded rather than handed out directly: passing the method itself
+	// detaches it from the D1 it belongs to, so a caller batching statements gets
+	// a `this` error instead of a batch.
+	return { prepare, batch: (...args: unknown[]) => real.batch(...args) } as unknown as D1Database;
 }
