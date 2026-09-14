@@ -1932,7 +1932,7 @@
 	"admin_lookup_failed_body": "FuzzySearch didn't answer.",
 	"admin_lookup_too_large_eyebrow": "Too large to look up",
 	"admin_lookup_too_large_body": "This file is too large for FuzzySearch. Add the artist by hand.",
-	"admin_lookup_invalid_body": "FuzzySearch couldn't read this file.",
+	"admin_lookup_invalid_body": "FuzzySearch couldn't read this file. Add the artist by hand.",
 	"admin_lookup_gone_eyebrow": "Image is gone",
 	"admin_lookup_gone_body": "This image is no longer in your gallery. Go back to All Images to see what is there now.",
 	"admin_lookup_signed_out_eyebrow": "Signed out",
