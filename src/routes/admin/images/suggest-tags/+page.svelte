@@ -289,7 +289,7 @@
 							{#if row.artistName}{row.artistName} &middot;{' '}{/if}{sourceLabel(row.source)}
 						</p>
 					</div>
-					{#if !savedTags && !conflicts[row.id] && !failures[row.id] && (rowState.kind === 'idle' || rowState.kind === 'searching' || rowState.kind === 'suggested')}
+					{#if !savedTags?.length && !conflicts[row.id] && !failures[row.id] && (rowState.kind === 'idle' || rowState.kind === 'searching' || rowState.kind === 'suggested')}
 						<!-- Stays put while the row is idle, looking up, or showing chips, like
 						     the forms' pill: aria-disabled through the lookup so focus has
 						     somewhere to be while the tray shows the skeleton, and a second
@@ -553,6 +553,15 @@
 					     pill is gone with this tray, so focus lands on the line that says
 					     what the lookup answered. -->
 					<p class="tag-panel-body" tabindex="-1" bind:this={statusLines[row.id]}>{tray.body}</p>
+					{#if rowState.kind === 'empty' && rowState.rating}
+						<!-- The classifier rated the picture, and that verdict stands whether
+						     or not any tag cleared the confidence floor. Drawn exactly as the
+						     suggested branch draws it, so a row that came back explicit with
+						     no tags says the same thing a row with tags says. -->
+						<p class="rowmeta">
+							<span class="tag-rating-note" class:warn={rowState.rating !== 'safe'}>{ratingLabel(rowState.rating)}</span>{m.admin_tag_suggest_hint_join({ first: '', second: m.admin_suggest_tags_nsfw_note() })}
+						</p>
+					{/if}
 					{#if rowState.kind === 'empty' && rowState.imageCount > 1}
 						<!-- The same note the chips carry: only the first image was read, so
 						     "nothing to suggest" is about that picture, not the whole post. -->

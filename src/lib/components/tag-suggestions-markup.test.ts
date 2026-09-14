@@ -163,6 +163,15 @@ describe('the rating never touches the NSFW checkbox', () => {
 		}
 	});
 
+	it('keeps the note up for an answer that suggested nothing', () => {
+		// The forms read the rating off the answer, and an empty answer carries one
+		// too: a post rated explicit whose tags all sat under the confidence floor
+		// is exactly the one the "Mark it NSFW" prompt exists for.
+		expect(suggestions).toMatch(
+			/rating = next\.kind === 'suggested' \|\| next\.kind === 'empty' \? next\.rating : null;/
+		);
+	});
+
 	it('marks the warning triangle decorative, so the rating is read once', () => {
 		// The label beside it already says the rating; an unlabelled icon here would
 		// either be skipped or read as "graphic" in front of the sentence.
@@ -376,6 +385,23 @@ describe('the backfill row\'s rating line', () => {
 			/<\/span>\{m\.admin_tag_suggest_hint_join\(\{ first: '', second: m\.admin_suggest_tags_nsfw_note\(\) \}\)\}/
 		);
 		expect(backfillPage).not.toMatch(/<\/span>\{' '\}/);
+	});
+
+	it('draws the same line when the answer came back with no tags', () => {
+		// The rating is a verdict on the picture, so it stands whether or not any
+		// tag cleared the confidence floor. Rendered only in the suggested branch,
+		// an explicit post whose tags all fell short showed the operator nothing.
+		expect(backfillPage).toMatch(
+			/\{#if rowState\.kind === 'empty' && rowState\.rating\}[\s\S]*?class:warn=\{rowState\.rating !== 'safe'\}>\{ratingLabel\(rowState\.rating\)\}<\/span>\{m\.admin_tag_suggest_hint_join\(/
+		);
+	});
+
+	it('reads an unsaved row the same way in the pill guard and the saved branch', () => {
+		// A row whose save wrote no tags leaves savedTags as an empty array: truthy
+		// to `!savedTags`, falsy to `savedTags?.length`. Read differently, the row
+		// lost its pill AND drew no saved line, so there was no way back to a lookup.
+		expect(backfillPage).toMatch(/\{#if !savedTags\?\.length && !conflicts\[row\.id\]/);
+		expect(backfillPage).toMatch(/\{:else if savedTags\?\.length\}/);
 	});
 
 	it('sets no space in Japanese and one in English, which is what the join is for', () => {

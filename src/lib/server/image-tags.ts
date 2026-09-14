@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from './db';
 import { imageTags, tags } from './db/schema';
 import { sanitizeText } from './validate';
-import { sanitizeTag } from '$lib/tags';
+import { sanitizeTag, TAG_MAX_LENGTH } from '$lib/tags';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -11,12 +11,15 @@ type Db = ReturnType<typeof getDb>;
  * here, so this is the one place the two save paths agree on a limit. */
 export const MAX_IMAGE_TAGS = 100;
 
-/** Ceiling on the raw Tags field, in characters. Room for MAX_IMAGE_TAGS names
- * of realistic length, so an input the count guard would accept is never cut
- * first: a field truncated mid-name stores the fragment and reports success,
- * which is the failure the count guard exists to prevent. Past this the save
- * actions refuse rather than truncate. */
-export const MAX_TAGS_INPUT_LENGTH = 4000;
+/** Ceiling on the raw Tags field, in characters. Derived from the other two caps
+ * rather than picked, so an input the count guard would accept is never refused
+ * or cut first: MAX_IMAGE_TAGS names at the longest a name may be, plus the two
+ * characters of ", " each one is separated by. At a flat 4000 a legal 100 tags of
+ * 50 characters came to 5,198 and was refused as too long, which named the wrong
+ * problem. Past this the save actions refuse rather than truncate: a field
+ * truncated mid-name stores the fragment and reports success, which is the
+ * failure the count guard exists to prevent. */
+export const MAX_TAGS_INPUT_LENGTH = MAX_IMAGE_TAGS * (TAG_MAX_LENGTH + 2);
 
 /**
  * The tag names a comma-separated input really holds: sanitized, blanks dropped,

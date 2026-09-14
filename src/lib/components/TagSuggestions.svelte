@@ -294,7 +294,11 @@
 		// Which post this answer is about, so an edit to the URL that lands on
 		// another post takes it away again.
 		answeredFor = next.kind === 'suggested' || next.kind === 'empty' ? askedPost : null;
-		rating = next.kind === 'suggested' ? next.rating : null;
+		// An empty answer carries a rating too: entail.dev rated the picture, and
+		// the tags it offered are a separate question. Read off the same states the
+		// line above keeps an answer for, so the note beside the NSFW box outlives
+		// a lookup whose tags all sat under the confidence floor.
+		rating = next.kind === 'suggested' || next.kind === 'empty' ? next.rating : null;
 		announcement = sentenceFor(next);
 	}
 

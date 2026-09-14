@@ -303,6 +303,35 @@ test('a post with nothing to suggest says so and offers only Dismiss', async ({ 
 	await expect(page.locator('.tag-panel-sub')).toHaveCount(0);
 });
 
+test('an explicit post with no tags above the floor still offers Mark it NSFW', async ({
+	page
+}) => {
+	await openUploadForm(page);
+	// entail.dev rated the picture explicit and was confident about none of its
+	// tags. The rating is the part the operator cannot afford to miss, and it used
+	// to go with the tags: the note and the prompt turned on whether one tag
+	// happened to clear the floor.
+	await stubSuggestions(page, 200, { source: 'bluesky', tags: [], rating: 'explicit', imageCount: 1 });
+
+	await pill(page).click();
+
+	await expect(page.getByText('No tags to suggest').first()).toBeVisible();
+	await expect(page.locator('.tag-rating-note.warn')).toHaveText('Rated explicit by entail.dev.');
+	await expect(nsfwBox(page)).not.toBeChecked();
+
+	await markNsfw(page).click();
+	await expect(nsfwBox(page)).toBeChecked();
+	await expect(ratingRegion(page)).toHaveText(
+		'The NSFW box is now checked. Sona saves the change when you submit the form.'
+	);
+	await expect(nsfwBox(page)).toBeFocused();
+
+	// The rating is about the post that was looked up, so it goes when the field
+	// names another one — the same way a suggested answer's rating does.
+	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/kirin/status/1789012345678901234');
+	await expect(page.locator('.tag-rating-note')).toHaveCount(0);
+});
+
 test('an empty answer about a multi-image post says only the first image was read', async ({
 	page
 }) => {

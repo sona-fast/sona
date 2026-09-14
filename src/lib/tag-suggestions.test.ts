@@ -96,7 +96,8 @@ describe('fromResponse — a 200', () => {
 			kind: 'empty',
 			skippedExisting: false,
 			noImage: false,
-			imageCount: 1
+			imageCount: 1,
+			rating: 'safe'
 		});
 	});
 
@@ -108,7 +109,32 @@ describe('fromResponse — a 200', () => {
 			kind: 'empty',
 			skippedExisting: false,
 			noImage: false,
-			imageCount: 4
+			imageCount: 4,
+			rating: 'safe'
+		});
+	});
+
+	it('carries the rating into the empty state, which is where it matters most', () => {
+		// entail.dev rates the picture; the tags are a separate question. A post it
+		// called explicit whose every tag sat under the confidence floor is exactly
+		// the one the operator needs the NSFW prompt for, and dropping the rating
+		// here made the prompt turn on whether one tag happened to clear the floor.
+		expect(fromResponse(200, ok([], { rating: 'explicit' }), [])).toMatchObject({
+			kind: 'empty',
+			rating: 'explicit'
+		});
+	});
+
+	it('reads a missing or unknown rating on an empty answer as no rating', () => {
+		// Same rule the suggested branch applies: a body is a body, so anything
+		// that is not one of the three ratings is none.
+		expect(fromResponse(200, ok([], { rating: undefined }), [])).toMatchObject({
+			kind: 'empty',
+			rating: null
+		});
+		expect(fromResponse(200, ok([], { rating: 'spicy' }), [])).toMatchObject({
+			kind: 'empty',
+			rating: null
 		});
 	});
 
@@ -133,7 +159,8 @@ describe('fromResponse — a 200', () => {
 			// 0 floors to 1, the way it does on the suggested branch. `noImage` is
 			// what carries "the post had no picture"; the count only decides whether
 			// the tray says one image out of several was read.
-			imageCount: 1
+			imageCount: 1,
+			rating: 'safe'
 		});
 	});
 
@@ -145,7 +172,8 @@ describe('fromResponse — a 200', () => {
 			kind: 'empty',
 			skippedExisting: false,
 			noImage: false,
-			imageCount: 1
+			imageCount: 1,
+			rating: 'safe'
 		});
 	});
 
@@ -218,7 +246,8 @@ describe('fromResponse — a 200', () => {
 			kind: 'empty',
 			skippedExisting: true,
 			noImage: false,
-			imageCount: 1
+			imageCount: 1,
+			rating: 'safe'
 		});
 	});
 
@@ -275,7 +304,7 @@ describe('the tray a finished state draws', () => {
 			expect(trayFor({ kind })).toMatchObject({ retry: false });
 		}
 		// Out of the loop because it carries a count the others have no field for.
-		expect(trayFor({ kind: 'empty', imageCount: 1 })).toMatchObject({ retry: false });
+		expect(trayFor({ kind: 'empty', imageCount: 1, rating: null })).toMatchObject({ retry: false });
 	});
 
 	it('draws the backfill row a tray for a source URL it cannot read', () => {
@@ -292,7 +321,7 @@ describe('the tray a finished state draws', () => {
 	});
 
 	it('warns for every failure, but not for a post with nothing to suggest', () => {
-		expect(trayFor({ kind: 'empty', imageCount: 1 })).toEqual({
+		expect(trayFor({ kind: 'empty', imageCount: 1, rating: null })).toEqual({
 			title: 'No tags to suggest',
 			body: "entail.dev read the post but found nothing it's confident about.",
 			warn: false,
@@ -300,7 +329,7 @@ describe('the tray a finished state draws', () => {
 		});
 		// The post did have tags; the field already had them. Saying entail.dev
 		// found nothing would blame the classifier for the operator's own typing.
-		expect(trayFor({ kind: 'empty', skippedExisting: true, imageCount: 1 })).toEqual({
+		expect(trayFor({ kind: 'empty', skippedExisting: true, imageCount: 1, rating: null })).toEqual({
 			title: 'No tags to suggest',
 			body: 'entail.dev only returned tags that are already in the Tags field.',
 			warn: false,
@@ -308,7 +337,7 @@ describe('the tray a finished state draws', () => {
 		});
 		// Nothing looked at the post, so the tray says what the post is missing
 		// rather than what entail.dev concluded.
-		expect(trayFor({ kind: 'empty', noImage: true, imageCount: 1 })).toEqual({
+		expect(trayFor({ kind: 'empty', noImage: true, imageCount: 1, rating: null })).toEqual({
 			title: 'No tags to suggest',
 			body: 'This post has no image for entail.dev to look at.',
 			warn: false,
@@ -413,13 +442,13 @@ describe('the sentences the live region reads', () => {
 		expect(sentenceFor({ kind: 'notReady' })).toBe(
 			"No tags yet. entail.dev hasn't read this post yet. Try again in a minute."
 		);
-		expect(sentenceFor({ kind: 'empty', imageCount: 1 })).toBe(
+		expect(sentenceFor({ kind: 'empty', imageCount: 1, rating: null })).toBe(
 			"No tags to suggest. entail.dev read the post but found nothing it's confident about."
 		);
-		expect(sentenceFor({ kind: 'empty', skippedExisting: true, imageCount: 1 })).toBe(
+		expect(sentenceFor({ kind: 'empty', skippedExisting: true, imageCount: 1, rating: null })).toBe(
 			'No tags to suggest. entail.dev only returned tags that are already in the Tags field.'
 		);
-		expect(sentenceFor({ kind: 'empty', noImage: true, imageCount: 1 })).toBe(
+		expect(sentenceFor({ kind: 'empty', noImage: true, imageCount: 1, rating: null })).toBe(
 			'No tags to suggest. This post has no image for entail.dev to look at.'
 		);
 		expect(sentenceFor({ kind: 'notFound' })).toBe(
@@ -434,12 +463,12 @@ describe('the sentences the live region reads', () => {
 		// The tray prints this note under "nothing to suggest" because only the
 		// first picture was read. Left out of the sentence, a screen reader hears a
 		// verdict on all four images.
-		expect(sentenceFor({ kind: 'empty', imageCount: 4 })).toBe(
+		expect(sentenceFor({ kind: 'empty', imageCount: 4, rating: null })).toBe(
 			"No tags to suggest. entail.dev read the post but found nothing it's confident about." +
 				' This post has 4 images. Suggestions come from the first one.'
 		);
 		// One image, no caveat: the tray does not draw it either.
-		expect(sentenceFor({ kind: 'empty', imageCount: 1 })).toBe(
+		expect(sentenceFor({ kind: 'empty', imageCount: 1, rating: null })).toBe(
 			"No tags to suggest. entail.dev read the post but found nothing it's confident about."
 		);
 	});

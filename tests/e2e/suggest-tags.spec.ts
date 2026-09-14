@@ -1132,6 +1132,21 @@ test('an empty answer on a row says only the first image of the post was read', 
 	);
 });
 
+test('a row rated explicit shows the rating even when no tag came back', async ({ page }) => {
+	// The rating is a verdict on the picture, and it stands whether or not any tag
+	// cleared the confidence floor. Drawn only beside chips, an explicit post with
+	// no tags told the operator nothing about what they were about to leave alone.
+	await openList(page);
+	await stubSuggestions(page, 200, { source: 'bluesky', tags: [], rating: 'explicit', imageCount: 1 });
+
+	const target = await clickSuggest(page, 'Backfill 117');
+	await expect(target.getByText('No tags to suggest')).toBeVisible();
+	await expect(target.locator('.tag-rating-note.warn')).toHaveText('Rated explicit by entail.dev.');
+	// The page saves tags, not ratings, and says so on this row the way it does
+	// beside the chips.
+	await expect(target.getByText("Sona doesn't change the NSFW setting here.")).toBeVisible();
+});
+
 test('a row whose source URL is not a post says so and offers no second try', async ({ page }) => {
 	// The forms answer a 422 under the field; a row has no field, so the tray
 	// says it. Nothing was sent for that URL — the endpoint refuses it before it

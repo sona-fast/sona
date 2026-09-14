@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { imageTags, images, tags } from '$lib/server/db/schema';
 import { makeD1 } from '$lib/server/test/d1';
+import { TAG_MAX_LENGTH } from '$lib/tags';
 import {
 	MAX_IMAGE_TAGS,
 	MAX_TAGS_INPUT_LENGTH,
@@ -243,6 +244,23 @@ describe('readTagInput', () => {
 	it('counts the sanitized value, which is what the write would store', () => {
 		const tooMany = Array.from({ length: MAX_IMAGE_TAGS + 1 }, (_, i) => `tag-${i}`).join(', ');
 		expect(readTagInput(tooMany)).toEqual({ problem: 'too_many' });
+	});
+
+	it('accepts a legal count of the longest names there is, and blames the count past it', () => {
+		// The two caps have to agree: 100 names of TAG_MAX_LENGTH separated by ", "
+		// is 5,198 characters, and a flat 4000-character ceiling refused it as too
+		// long — the wrong problem, and one the operator cannot fix by removing a
+		// tag. The count is what refuses one tag more.
+		const longName = (i: number) => `${String(i).padStart(3, '0')}`.padEnd(TAG_MAX_LENGTH, 'a');
+		const legal = Array.from({ length: MAX_IMAGE_TAGS }, (_, i) => longName(i)).join(', ');
+		expect(legal.length).toBeLessThanOrEqual(MAX_TAGS_INPUT_LENGTH);
+		expect(readTagInput(legal)).toEqual({ problem: null, value: legal });
+
+		// One name past the count, at a length the ceiling still admits, so the
+		// refusal names the count rather than the characters.
+		const overCount = Array.from({ length: MAX_IMAGE_TAGS + 1 }, (_, i) => `tag-${i}`).join(', ');
+		expect(overCount.length).toBeLessThanOrEqual(MAX_TAGS_INPUT_LENGTH);
+		expect(readTagInput(overCount)).toEqual({ problem: 'too_many' });
 	});
 
 	it('accepts an ordinary field and hands back the value to write', () => {

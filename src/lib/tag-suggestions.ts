@@ -51,8 +51,19 @@ export type SuggestionState =
 	 *  false too. `imageCount` is how many pictures the post carried, the same
 	 *  number the suggested tray reports: a post of four whose first image
 	 *  classified to nothing is a verdict on that one image, and the tray has to
-	 *  say so here as much as it does when tags come back. */
-	| { kind: 'empty'; skippedExisting?: boolean; noImage?: boolean; imageCount: number }
+	 *  say so here as much as it does when tags come back. `rating` is carried for
+	 *  the same reason: the classifier rates the picture, not the tags, so a post
+	 *  it called explicit whose every tag sat under the confidence floor still has
+	 *  a rating the operator needs to see — dropped here, the rating note and the
+	 *  "Mark it NSFW" prompt beside the checkbox would turn on whether one tag
+	 *  happened to clear the floor. */
+	| {
+			kind: 'empty';
+			skippedExisting?: boolean;
+			noImage?: boolean;
+			imageCount: number;
+			rating: EntailRating | null;
+	  }
 	/** 202: queued or still classifying. Retryable. */
 	| { kind: 'notReady' }
 	/** 502: an upstream failure. Retryable. */
@@ -194,7 +205,8 @@ export function fromResponse(
 			kind: 'empty',
 			skippedExisting,
 			noImage: count === 0 && payload.source === 'x',
-			imageCount
+			imageCount,
+			rating: readRating(payload.rating)
 		};
 
 	return {
