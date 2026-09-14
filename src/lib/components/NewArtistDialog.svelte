@@ -14,8 +14,16 @@
 	import PatreonIcon from '$lib/components/icons/PatreonIcon.svelte';
 	import InstagramIcon from '$lib/components/icons/InstagramIcon.svelte';
 
+	/** Logged when a caller's oncreated handler rejects. A constant, carrying
+	 * nothing from the artist: the log line is for the operator's console, not a
+	 * place to put a name the page already shows. */
+	const CREATED_HANDLER_THREW = 'new artist dialog: the oncreated handler threw';
+
 	interface Props {
-		oncreated: (artist: { id: number; name: string }) => void;
+		/** May be async: the upload page awaits a tick to move focus after the
+		 * dialog closes. The dialog resolves whatever comes back and logs a
+		 * rejection rather than letting it escape as an unhandled one. */
+		oncreated: (artist: { id: number; name: string }) => void | Promise<void>;
 		oncancel: () => void;
 		/** Dialog heading — e.g. "New Manager" when the created artist will manage a pack. */
 		title?: string;
@@ -382,7 +390,13 @@
 				toast.success(m.admin_new_artist_linked({ name: result.name }));
 			else if (result.status === 'reused')
 				toast.success(m.admin_new_artist_reused({ name: result.name }));
-			oncreated(result);
+			// Not awaited into the catch below: the artist exists by now, and a
+			// throw out of the caller's own handling is not a network failure to
+			// report as one. Resolved and logged instead, so an async handler's
+			// rejection cannot escape as an unhandled one.
+			void Promise.resolve(oncreated(result)).catch(() => {
+				console.error(CREATED_HANDLER_THREW);
+			});
 		} catch {
 			errorMsg = m.admin_new_artist_network_error();
 			toast.error(errorMsg);

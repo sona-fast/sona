@@ -1237,16 +1237,21 @@ describe('the upload page grid', () => {
 			// Imported, not spelled out at the log site.
 			expect(source).toMatch(/LOOKUP_RESULT_THREW,\n/);
 		}
-		expect(EDIT).toMatch(/kind: 'failed', reason: 'unavailable', sent: true/);
-		// The upload callback runs for every settled kind, including a too_large
-		// the browser refused to send. Rewriting that as sent would put a private
+		// Either callback runs for every settled kind, including a too_large the
+		// browser refused to send. Rewriting that as sent would put a private
 		// notice on a file that never left, so the catch keeps the settled state's
 		// own flag and only assumes the file went when it captured nothing. The
 		// decision itself is a pure helper, unit-tested over every settled kind in
-		// artist-lookup.test.ts; this pins the wiring.
-		expect(UPLOAD).toMatch(/\.then\(\(next\) => \{\s*\n\s*settled = next;/);
-		expect(UPLOAD).toMatch(/const sent = sentAfterApplyThrew\(settled\);/);
-		expect(UPLOAD).toMatch(/\n\t\tsentAfterApplyThrew,\n/);
+		// artist-lookup.test.ts; this pins the wiring. Both pages, the same way:
+		// the edit page hardcoded `sent: true` and claimed a file had gone to
+		// FuzzySearch on a lookup its own too_large gate refused to send.
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(/let settled: LookupState \| null = null;/);
+			expect(source).toMatch(/\.then\(\(next\) => \{\s*\n\s*settled = next;/);
+			expect(source).toMatch(/const sent = sentAfterApplyThrew\(settled\);/);
+			expect(source).toMatch(/\n\t\tsentAfterApplyThrew,\n/);
+			expect(source).not.toMatch(/reason: 'unavailable', sent: true/);
+		}
 		// The state is written to the tile BEFORE it is announced, so a throw out
 		// of the announcement is not "nothing arrived": rewriting it as failed
 		// would discard matches that did come back and tell the operator
@@ -1260,7 +1265,7 @@ describe('the upload page grid', () => {
 		// gains a throwing step is a defect waiting on an unrelated change.
 		expect(EDIT).toMatch(/lookup = next;\s*\n\s*applied = true;/);
 		expect(EDIT).toMatch(
-			/if \(!applied\) \{\s*\n\s*lookup = \{ kind: 'failed', reason: 'unavailable', sent: true \};/
+			/if \(!applied\) \{\s*\n\s*const sent = sentAfterApplyThrew\(settled\);\s*\n\s*lookup = \{ kind: 'failed', reason: 'unavailable', sent \};/
 		);
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(/let applied = false;/);
@@ -1372,6 +1377,24 @@ describe('the new-artist dialog prefill', () => {
 		// window used to fire a registry search for a dialog that no longer
 		// exists and write its result into the destroyed component's state.
 		expect(DIALOG).toMatch(/onDestroy\(\(\) => \{\s*\n(?:\s*\/\/[^\n]*\n)*\s*clearTimeout\(searchTimer\);/);
+	});
+
+	// The upload page's handler is async — it awaits a tick before moving focus —
+	// so a rejection after that tick escaped the dialog's own try/catch and
+	// surfaced as an unhandled rejection. The prop type has to admit the promise
+	// and the dialog has to resolve it. Not awaited into that catch either: the
+	// artist exists by the time the handler runs, and reporting a throw there as
+	// a network failure would tell the operator the create never went through.
+	it('resolves an async oncreated handler instead of dropping its rejection', () => {
+		expect(DIALOG).toMatch(
+			/oncreated: \(artist: \{ id: number; name: string \}\) => void \| Promise<void>;/
+		);
+		expect(DIALOG).toMatch(
+			/void Promise\.resolve\(oncreated\(result\)\)\.catch\(\(\) => \{\s*\n\s*console\.error\(CREATED_HANDLER_THREW\);\s*\n\s*\}\);/
+		);
+		// A constant, carrying nothing from the result.
+		expect(DIALOG).toMatch(/const CREATED_HANDLER_THREW = '[^']+';/);
+		expect(DIALOG).not.toMatch(/console\.error\(`/);
 	});
 
 	// Seeds, not bindings: read once through untrack so a later prop change
