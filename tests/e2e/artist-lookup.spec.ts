@@ -1478,6 +1478,13 @@ test.describe('with a key saved', () => {
 		await page.getByRole('button', { name: 'Create Artist' }).click();
 		await expect(page.locator('select[name="artistId"]')).toHaveValue('79');
 
+		// The fold's usual landing spot is the panel's "Using {name}" button, and
+		// the panel is showing back.png by now. Focus goes to the tile the handle
+		// came from instead of into another tile's result, or on down to <body>
+		// (2.4.3).
+		expect(await page.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('BODY');
+		await expect(tileLookup(page).nth(0)).toBeFocused();
+
 		// back.png never ran a lookup, so it has no result for the new artist to
 		// be folded into and nothing about it changed.
 		await expect(page.getByRole('radio', { name: 'Parent: front.png' })).not.toBeChecked();
@@ -1490,6 +1497,65 @@ test.describe('with a key saved', () => {
 		await expect(addNew).toHaveCount(0);
 		await expect(panel(page)).toContainText('kuttoya');
 		expect(creates).toBe(1);
+	});
+
+	// The same move, with the tile the radio lands on holding a result of its
+	// own that names the artist being created. The panel then renders the
+	// "Using kuttoya" button the fold reaches for by id — but it belongs to
+	// back.png's result, and front.png is where the handle came from, so
+	// following the id would drop the operator into an unrelated part of the
+	// page (2.4.3).
+	test('lands focus on the seed tile when the parent moved onto a matching result', async ({
+		page
+	}) => {
+		await page.route('**/api/artists', (route) => {
+			if (route.request().method() !== 'POST') return route.continue();
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ id: 82, name: 'kuttoya' })
+			});
+		});
+		// back.png looks up first and already knows the artist by the id the
+		// create returns; front.png's result is the 'new' outcome whose action
+		// opens the dialog.
+		let calls = 0;
+		await page.route('**/api/admin/artist-lookup', (route) => {
+			calls += 1;
+			const body =
+				calls === 1
+					? matchedBody({ localArtists: [{ matchIndex: 0, artists: [{ id: 82, name: 'kuttoya' }] }] })
+					: matchedBody({ localArtists: [] });
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify(body)
+			});
+		});
+		await twoDoneTiles(page);
+
+		// The variant's result stays on its own tile while front.png is parent.
+		await tileLookup(page).nth(1).click();
+		await expect(page.locator('.tile-result')).toHaveCount(1);
+
+		await tileLookup(page).nth(0).click();
+		const addNew = panel(page).getByRole('button', { name: 'Add kuttoya as a new artist' });
+		await addNew.click();
+		await expect(page.locator('#new-artist-name')).toHaveValue('kuttoya');
+
+		// Focus, not a click: the backdrop swallows a pointer, but the keyboard
+		// reaches the radio behind the dialog for real.
+		await page.getByRole('radio', { name: 'Parent: back.png' }).focus();
+		await page.keyboard.press(' ');
+		await expect(page.getByRole('radio', { name: 'Parent: back.png' })).toBeChecked();
+
+		await page.getByRole('button', { name: 'Create Artist' }).click();
+		await expect(page.locator('select[name="artistId"]')).toHaveValue('82');
+
+		// The id the fold used to follow is on screen, and it is back.png's.
+		await expect(panel(page).locator('#lookup-applied-artist')).toBeVisible();
+		expect(await page.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('BODY');
+		await expect(tileLookup(page).nth(0)).toBeFocused();
 	});
 
 	// Nothing holds the keyboard inside the dialog, so the tile's own "Look up

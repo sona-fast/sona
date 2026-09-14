@@ -649,8 +649,13 @@ describe('round 11 wiring', () => {
 		// Folding the artist in destroys the button the dialog captured as its
 		// opener, so focus is placed deliberately rather than left on <body>
 		// (2.4.3).
+		// And the panel renders the PARENT tile's lookup, so that button is the
+		// seed tile's only while the seed tile is still the parent. Moved behind
+		// the open dialog, the id names another tile's result and following it
+		// drops the operator somewhere unrelated; the seed tile's own lookup
+		// button is the landing spot there.
 		expect(created).toMatch(
-			/await tick\(\);\s*\n\s*\(document\.getElementById\('lookup-applied-artist'\) \?\? artistSelect\)\?\.focus\(\);/
+			/await tick\(\);[\s\S]{0,500}?if \(!isParent\(tile\.key\)\) \{\s*\n\s*\(tileLookupButtons\[tile\.key\] \?\? artistSelect\)\?\.focus\(\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\(document\.getElementById\('lookup-applied-artist'\) \?\? artistSelect\)\?\.focus\(\);/
 		);
 		expect(UPLOAD).toContain('bind:this={artistSelect}');
 		expect(PANEL).toContain('id="lookup-applied-artist"');

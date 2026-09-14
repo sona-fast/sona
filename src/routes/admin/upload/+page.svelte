@@ -433,6 +433,15 @@
 		// (2.4.3). Land on the button that replaced it, or on the select holding
 		// the new artist when the result went ambiguous instead.
 		await tick();
+		// The panel renders the parent tile's lookup, so that button is the seed
+		// tile's only while the seed tile is still the parent. Move the Parent
+		// radio while the dialog is open and the id belongs to another tile's
+		// result, which would send focus to an unrelated part of the page; land on
+		// the seed tile's own lookup button there instead.
+		if (!isParent(tile.key)) {
+			(tileLookupButtons[tile.key] ?? artistSelect)?.focus();
+			return;
+		}
 		(document.getElementById('lookup-applied-artist') ?? artistSelect)?.focus();
 	}
 
