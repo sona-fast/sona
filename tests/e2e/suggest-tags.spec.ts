@@ -92,6 +92,16 @@ async function openList(page: Page, search = '') {
 	await expect(page.getByRole('heading', { level: 1, name: 'Suggest tags' })).toBeVisible();
 }
 
+test('the Suggest tags link on the image list opens the backfill page', async ({ page }) => {
+	// The link in the image list's header is the only way into this page from the
+	// UI, so a renamed or dropped link would leave the backfill unreachable.
+	await loginRetrying(page, PASSWORD);
+	await gotoAfterLogin(page, '/admin/images');
+	await page.getByRole('link', { name: 'Suggest tags' }).click();
+	await expect(page).toHaveURL(/\/admin\/images\/suggest-tags$/);
+	await expect(page.getByRole('heading', { level: 1, name: 'Suggest tags' })).toBeVisible();
+});
+
 test('the explainer keeps a reading measure on a wide screen', async ({ page }) => {
 	// At 1280 the paragraph ran to 86 characters a line and wrapped mid-clause.
 	// 50ch of Geist is about 70 characters, the top of a comfortable measure.
@@ -949,6 +959,9 @@ test('an expanded row drops its indent on a phone, where the head wraps', async 
 	// leave the tray pushed off the card.
 	await page.setViewportSize({ width: 390, height: 844 });
 	await openList(page);
+	// The explainer's negative top margin is for the desktop tab strip; here it
+	// would cancel the strip's bottom padding and sit flush with the tab pills.
+	await expect(page.locator('.explainer')).toHaveCSS('margin-top', '0px');
 	await stubSuggestions(page, 200, {
 		source: 'bluesky',
 		tags: ['fox'],

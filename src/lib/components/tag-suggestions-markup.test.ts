@@ -303,7 +303,7 @@ describe('the multi-tile hint sentence', () => {
 		// Appending "accepted tags apply to every image" answers a question nobody
 		// asked about a lookup that never ran.
 		expect(suggestions).toMatch(
-			/firstTileOnly && source !== null && suggestion\.kind !== 'noSource'/
+			/multiTile && source !== null && suggestion\.kind !== 'noSource'/
 		);
 	});
 
@@ -337,6 +337,14 @@ describe('an answer that stops being about the post in the field', () => {
 		// The region last said "Reading the …". Emptied, a screen reader is left
 		// with a lookup that never ends.
 		expect(suggestions).toMatch(/announcement = m\.admin_tag_suggest_dropped_body\(\);/);
+	});
+
+	it('says nothing when the tags had already been accepted', () => {
+		// After Add the tags stay in the field, so "set that lookup aside" would
+		// tell a screen reader the opposite of what happened.
+		expect(suggestions).toMatch(
+			/const wasApplied = suggestion\.kind === 'applied';[\s\S]*?if \(wasApplied\) return;[\s\S]*?announcement = m\.admin_tag_suggest_dropped_body\(\);/
+		);
 	});
 });
 

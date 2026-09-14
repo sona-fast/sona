@@ -88,9 +88,12 @@ type SuggestionBody = {
 const UNSAFE_LABEL_CHARS = /[\p{Cc},\p{Cf}\p{Zl}\p{Zp}]/gu;
 
 // Capped where sanitizeTag caps what it stores, so a chip never shows more of a
-// label than Save would keep.
+// label than Save would keep. Sliced by code point, not by UTF-16 unit: a cut
+// through the middle of an astral character leaves a lone surrogate on the chip.
 function cleanLabel(value: string): string {
-	return value.replace(UNSAFE_LABEL_CHARS, '').slice(0, TAG_MAX_LENGTH);
+	return Array.from(value.replace(UNSAFE_LABEL_CHARS, ''))
+		.slice(0, TAG_MAX_LENGTH)
+		.join('');
 }
 
 const RATINGS: readonly string[] = ['safe', 'questionable', 'explicit'];
@@ -209,11 +212,19 @@ export function sourceKey(source: SourceKind | null): string | null {
  * backfill page sends the id of a row whose URL is already stored. */
 export type SuggestionRequest = { sourcePostUrl: string } | { imageId: number };
 
+/** How long one lookup may hang before the client gives up on it. The endpoint
+ * ends its own chain at 22 s (LOOKUP_DEADLINE_MS in +server.ts) and answers a
+ * 502 when it does, so a call still open past that has lost the connection,
+ * not the classifier; the headroom is for the answer to make it back. Without
+ * it a stalled connection left the pill disabled with no way out but a reload. */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 /**
  * One POST to /api/admin/tag-suggestions. Never throws: a transport failure
- * (offline, aborted, blocked) reads as status 0, and a body that is not JSON —
- * a 202 carries no suggestions and a 5xx may carry no JSON at all — reads as
- * null. Both go straight to `fromResponse`, which maps them onto a state.
+ * (offline, aborted, timed out, blocked) reads as status 0, and a body that is
+ * not JSON — a 202 carries no suggestions and a 5xx may carry no JSON at all —
+ * reads as null. Both go straight to `fromResponse`, which maps them onto a
+ * state.
  */
 export async function requestSuggestions(
 	payload: SuggestionRequest
@@ -222,7 +233,8 @@ export async function requestSuggestions(
 		const res = await fetch('/api/admin/tag-suggestions', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(payload)
+			body: JSON.stringify(payload),
+			signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
 		});
 		let body: unknown = null;
 		try {
@@ -328,9 +340,11 @@ export function trayFor(state: SuggestionState): Tray {
  *
  * Three states answer differently. A suggestion has no tray, the forms answer
  * `noSource` under the field rather than with the tray's "unavailable" title,
- * and the states with nothing to announce say nothing.
+ * and the states with nothing to announce say nothing. A caller that draws the
+ * tray for `noSource` too — the backfill row — passes `withTitle` and gets the
+ * same "Title. Body" every other failure gets.
  */
-export function sentenceFor(next: SuggestionState): string {
+export function sentenceFor(next: SuggestionState, { withTitle = false } = {}): string {
 	switch (next.kind) {
 		case 'suggested':
 			return m.admin_tag_suggest_eyebrow({ count: next.tags.length });
@@ -338,16 +352,15 @@ export function sentenceFor(next: SuggestionState): string {
 			// A 422: the field holds a link the client recogniser accepted and the
 			// server's refused, so "add a post URL" would describe a field that is
 			// not empty. Nothing was sent for it, so nothing is blamed for it.
-			return m.admin_tag_suggest_bad_link_body();
+			if (!withTitle) return m.admin_tag_suggest_bad_link_body();
+			break;
 		case 'idle':
 		case 'searching':
 		case 'applied':
 			return '';
-		default: {
-			const tray = trayFor(next);
-			return m.admin_tag_suggest_status_join({ title: tray.title, body: tray.body });
-		}
 	}
+	const tray = trayFor(next);
+	return m.admin_tag_suggest_status_join({ title: tray.title, body: tray.body });
 }
 
 /**

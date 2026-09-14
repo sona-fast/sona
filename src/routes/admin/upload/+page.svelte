@@ -541,7 +541,7 @@
 		sourceUrl={sourcePostUrl}
 		existingTags={data.tags.map((t) => t.name)}
 		placeholder={m.admin_upload_tags_placeholder()}
-		firstTileOnly={tiles.length > 1}
+		multiTile={tiles.length > 1}
 	/>
 
 	{#if data.characters.length > 0}

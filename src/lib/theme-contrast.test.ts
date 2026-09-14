@@ -1041,6 +1041,21 @@ describe('SONA-220 tag chip and pill hover contrast, every theme × surface × m
 		expect(rule).not.toMatch(/color:/);
 	});
 
+	// A lone Dismiss drops its left pad on a wide screen to sit on the tray's
+	// content edge. Stacked there is no edge to sit on, so the phone breakpoint
+	// gives the pad back — and it has to be the pad the button rests at, or the
+	// label lands off centre by the difference. Pinned to the base rule so the
+	// two cannot drift apart.
+	it('restores the resting left pad to a lone Dismiss on a phone', () => {
+		const base = css.match(/^\.tag-btn-text\s*\{([^}]*)\}/m)?.[1];
+		if (!base) throw new Error('the .tag-btn-text rest rule is missing from app.css');
+		const resting = /padding:\s*[\d.]+px\s+([\d.]+px)\s*;/.exec(base)?.[1];
+		if (!resting) throw new Error('the .tag-btn-text rest rule has no horizontal padding');
+		const rule = css.match(/\.tag-actions \.tag-btn-text-flush\s*\{([^}]*)\}/)?.[1];
+		if (!rule) throw new Error('the phone-width flush Dismiss rule is missing from app.css');
+		expect(rule).toMatch(new RegExp(`padding-left:\\s*${resting.replace('.', '\\.')}\\s*;`));
+	});
+
 	// The refused state draws a real border. The rest rule reserves the same 1px
 	// as a transparent one, so the border appearing mid-save does not widen
 	// Dismiss and shove the row; the radius rides along so the visible border is

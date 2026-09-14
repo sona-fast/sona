@@ -49,7 +49,7 @@ test('the pill refuses to run until the source URL is a post it recognises', asy
 	// the hint explaining what to add is announced with it.
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'true');
 	await expect(
-		page.getByText('Add a Bluesky or X post as the source URL to get tag suggestions.')
+		page.getByText('Add a Bluesky or X post as the source post URL to get tag suggestions.')
 	).toBeVisible();
 
 	await page.fill('input[name="sourcePostUrl"]', 'https://www.furaffinity.net/view/12345/');
@@ -226,7 +226,7 @@ test('a "nothing to suggest" tray goes when the source URL stops being that post
 	await expect(page.locator('.tag-tray')).toHaveCount(0);
 	// And the live region says the verdict went, the way a drop mid-flight is
 	// said, rather than keeping it or going silent.
-	await expect(liveRegion(page)).toHaveText('The source URL changed, so Sona set that lookup aside.');
+	await expect(liveRegion(page)).toHaveText('The source post URL changed, so Sona set that lookup aside.');
 	// The field itself is untouched: what the operator typed is theirs.
 	await expect(tagsInput(page)).toHaveValue('fox');
 });
@@ -261,7 +261,7 @@ test('chips for one post are not left standing over another', async ({ page }) =
 	await expect(page.locator('#tags-hint')).toContainText(
 		'Suggestions come from entail.dev, which reads the source post.'
 	);
-	await expect(liveRegion(page)).toHaveText('The source URL changed, so Sona set that lookup aside.');
+	await expect(liveRegion(page)).toHaveText('The source post URL changed, so Sona set that lookup aside.');
 	await expect(tagsInput(page)).toHaveValue('');
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });
@@ -297,7 +297,12 @@ test('accepted tags survive a URL edit; the confirmation and the rating do not',
 	await expect(page.locator('.tag-status-line')).toHaveCount(0);
 	await expect(page.locator('.tag-rating-note')).toHaveCount(0);
 	await expect(markNsfw(page)).toHaveCount(0);
-	await expect(liveRegion(page)).toHaveText('The source URL changed, so Sona set that lookup aside.');
+	// The tags stayed, so "set that lookup aside" would tell a screen reader the
+	// opposite of what happened. Nothing new is said: the region keeps the
+	// past-tense line that confirmed them, which is still true.
+	await expect(liveRegion(page)).toHaveText(
+		'Sona added 3 tags. You can change them in the Tags field.'
+	);
 });
 
 test('an edit that still names the same post keeps the chips', async ({ page }) => {
@@ -538,7 +543,7 @@ test('Try again refuses once the source URL is no longer a post it recognises', 
 	// It points at the hint that now says what a URL has to be.
 	const hintId = await retry.getAttribute('aria-describedby');
 	await expect(page.locator(`#${hintId}`)).toHaveText(
-		'Add a Bluesky or X post as the source URL to get tag suggestions.'
+		'Add a Bluesky or X post as the source post URL to get tag suggestions.'
 	);
 	// And the tray body says why, rather than leaving the outage sentence beside
 	// a button the missing URL is what actually stopped. It states the condition
@@ -623,6 +628,35 @@ test('Dismiss sits centred under the primary button on a phone', async ({ page }
 	expect(Math.abs(dismiss.x + dismiss.width / 2 - (add.x + add.width / 2))).toBeLessThanOrEqual(1);
 });
 
+test('a lone Dismiss centres its label on a phone', async ({ page }) => {
+	// With no primary button beside it Dismiss drops its left padding on a wide
+	// screen, to sit on the tray's content edge. Stacked and centred there is no
+	// edge, and the one-sided padding put the label about 5px right of centre.
+	await page.setViewportSize({ width: 390, height: 844 });
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, { source: 'bluesky', tags: [], rating: null, imageCount: 1 });
+	await pill(page).click();
+
+	const dismiss = page.getByRole('button', { name: 'Dismiss' });
+	await expect(dismiss).toBeVisible();
+	// The label's own box, not the button's: symmetric padding is what puts the
+	// text at the centre, and the button box would be centred either way.
+	const labelCentre = await dismiss.evaluate((el) => {
+		const range = document.createRange();
+		range.selectNodeContents(el);
+		const box = range.getBoundingClientRect();
+		return box.x + box.width / 2;
+	});
+	const trayCentre = await page.locator('.tag-tray').evaluate((el) => {
+		const style = getComputedStyle(el);
+		const padLeft = parseFloat(style.paddingLeft);
+		const padRight = parseFloat(style.paddingRight);
+		const contentLeft = el.getBoundingClientRect().x + el.clientLeft + padLeft;
+		return contentLeft + (el.clientWidth - padLeft - padRight) / 2;
+	});
+	expect(Math.abs(labelCentre - trayCentre)).toBeLessThanOrEqual(1);
+});
+
 test('the Sign in link spans the tray on a phone, like Try again in its place', async ({ page }) => {
 	// A dead session draws an anchor where Try again would be, and the two are
 	// the same control to the operator. An anchor left at its intrinsic width
@@ -681,7 +715,7 @@ test('a 422 answers in the hint rather than the tray', async ({ page }) => {
 	// hint goes back to saying what a URL has to be.
 	await page.fill('input[name="sourcePostUrl"]', '');
 	await expect(page.locator('#tags-hint')).toHaveText(
-		'Add a Bluesky or X post as the source URL to get tag suggestions.'
+		'Add a Bluesky or X post as the source post URL to get tag suggestions.'
 	);
 	// The live region goes with it. Left holding the refusal, it would be the
 	// field's last word to a screen reader about a link that is no longer there.
@@ -773,7 +807,7 @@ test('a 422 that lands after the URL has been edited is dropped, not shown', asy
 	// reader would be left with a lookup that never ends, so it says what became
 	// of the one that did land.
 	await expect(liveRegion(page)).toHaveText(
-		'The source URL changed, so Sona set that lookup aside.'
+		'The source post URL changed, so Sona set that lookup aside.'
 	);
 	await expect(page.locator('input[name="sourcePostUrl"]')).not.toHaveAttribute(
 		'aria-describedby',
@@ -819,7 +853,7 @@ test('suggestions that land after the URL has been edited are dropped too', asyn
 		'Suggestions come from entail.dev, which reads the source post.'
 	);
 	await expect(liveRegion(page)).toHaveText(
-		'The source URL changed, so Sona set that lookup aside.'
+		'The source post URL changed, so Sona set that lookup aside.'
 	);
 	await expect(markNsfw(page)).toHaveCount(0);
 	await expect(tagsInput(page)).toHaveValue('');
@@ -896,7 +930,7 @@ test('an empty answer that lands after the URL has been edited is dropped too', 
 	await expect(page.locator('.tag-tray')).toHaveCount(0);
 	await expect(page.getByText('No tags to suggest')).toHaveCount(0);
 	await expect(liveRegion(page)).toHaveText(
-		'The source URL changed, so Sona set that lookup aside.'
+		'The source post URL changed, so Sona set that lookup aside.'
 	);
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 });

@@ -162,6 +162,13 @@ describe('fromResponse — a 200', () => {
 		expect(cleaned).toMatchObject({ kind: 'suggested', tags: ['b'.repeat(50)] });
 	});
 
+	it('caps by code point, so the cut never splits an astral character', () => {
+		// 49 letters and an emoji is 51 UTF-16 units. Sliced by unit, the chip
+		// ended in a lone surrogate; sliced by code point it ends in the emoji.
+		const state = fromResponse(200, ok([`${'c'.repeat(49)}\u{1F98A}d`]), []);
+		expect(state).toMatchObject({ kind: 'suggested', tags: [`${'c'.repeat(49)}\u{1F98A}`] });
+	});
+
 	it('keys a suggestion off its cleaned label, so two entries never share one chip', () => {
 		// cleanLabel deletes a tab; sanitizeTag would have turned it into a hyphen.
 		// Keyed off the raw entry the pair below produced two chips with the same
@@ -378,6 +385,20 @@ describe('the sentences the live region reads', () => {
 		expect(sentenceFor({ kind: 'applied', count: 3 })).toBe('');
 	});
 
+	it('gives a 422 its tray title too where the caller draws the tray', () => {
+		// The backfill row draws the same tray for a 422 as for every other
+		// failure, so its region says the eyebrow the way it says the others'.
+		expect(sentenceFor({ kind: 'noSource' }, { withTitle: true })).toBe(
+			"Suggestions unavailable. Sona can't look up this link. Check the source post URL."
+		);
+		// The option changes nothing for the states that already carry a title,
+		// or that say nothing.
+		expect(sentenceFor({ kind: 'notFound' }, { withTitle: true })).toBe(
+			sentenceFor({ kind: 'notFound' })
+		);
+		expect(sentenceFor({ kind: 'applied', count: 3 }, { withTitle: true })).toBe('');
+	});
+
 	it('labels every rating, and reads an unknown one as safe', () => {
 		// Each label ends its own sentence: on the backfill row it is followed by
 		// another one on the same line.
@@ -421,6 +442,21 @@ describe('requestSuggestions', () => {
 			throw new TypeError('Failed to fetch');
 		});
 		expect(await requestSuggestions({ imageId: 7 })).toEqual({ status: 0, body: null });
+	});
+
+	it('sends a timeout signal, and reads the abort it raises as status 0', async () => {
+		// A connection that hangs left the pill disabled with no way out but a
+		// reload. The call now carries a timeout signal; when it fires, fetch
+		// rejects with an AbortError, which reads as the same unavailable outcome
+		// a dropped connection does, so the tray with Try again appears.
+		const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+			expect(init.signal).toBeInstanceOf(AbortSignal);
+			expect(init.signal?.aborted).toBe(false);
+			throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		expect(await requestSuggestions({ imageId: 7 })).toEqual({ status: 0, body: null });
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });
 

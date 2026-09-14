@@ -37,7 +37,7 @@
 		rating = $bindable(null),
 		existingTags = [],
 		placeholder = '',
-		firstTileOnly = false,
+		multiTile = false,
 		sourceDescribedBy = $bindable(undefined)
 	}: {
 		/** The Tags input's value, bound out to the form that submits it. */
@@ -52,8 +52,9 @@
 		/** Tag names already in the site, listed under the field. */
 		existingTags?: string[];
 		placeholder?: string;
-		/** Multi-tile uploads suggest for the parent tile only; say so. */
-		firstTileOnly?: boolean;
+		/** True when the upload has more than one tile. Accepted tags land on every
+		 *  tile, and the hint under the field says so only then. */
+		multiTile?: boolean;
 		/** The id the form should hang off its Source Post URL input while the
 		 *  refusal under this field is about that URL, or undefined. The hint
 		 *  lives here; the field it refuses lives in the form, and a screen
@@ -115,7 +116,7 @@
 	// rather than with a literal space — both already carry their own full stop,
 	// and Japanese sets no space after one.
 	const hintLine = $derived(
-		firstTileOnly && source !== null && suggestion.kind !== 'noSource'
+		multiTile && source !== null && suggestion.kind !== 'noSource'
 			? m.admin_tag_suggest_hint_join({
 					first: hint,
 					second: m.admin_tag_suggest_hint_first_tile()
@@ -205,11 +206,17 @@
 			// field, rather than classifying the same string a second time.
 			if (answeredFor === null || answeredFor === post) return;
 			answeredFor = null;
+			const wasApplied = suggestion.kind === 'applied';
 			suggestion = { kind: 'idle' };
 			// The rating belongs to the answer, and the note beside the NSFW box
 			// reads it: left behind it would offer to mark the post now in the field
 			// on the strength of a lookup of another one.
 			rating = null;
+			// Once Add has run the tags are the operator's and stay in the field, so
+			// "set that lookup aside" would tell a screen reader the opposite of
+			// what happened. The region keeps the past-tense line that confirmed
+			// them, which is still true; only the rating note went.
+			if (wasApplied) return;
 			// Said out loud, the way a drop mid-flight is: the region last named
 			// the answer, and a screen reader is otherwise not told it went. Once
 			// per change of post — the answeredFor guard above sees to that.
