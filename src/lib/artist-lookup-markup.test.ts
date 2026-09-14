@@ -1392,7 +1392,7 @@ describe('the upload page grid', () => {
 		// Nothing is said as a bare failure any more: over a result that stands,
 		// that line would contradict the matches the tile is showing.
 		expect(UPLOAD).not.toMatch(
-			/announcer\.say\(m\.admin_lookup_announce_tile_failed\(\{ fileName: live\.fileName \}\)\)/
+			/announcer\.say\(m\.admin_lookup_announce_tile_failure\(\{ fileName: live\.fileName/
 		);
 	});
 
