@@ -90,8 +90,9 @@ export interface ThemeDefinition {
 
 const HEX = /^#[0-9A-Fa-f]{6}$/;
 // Channels are 0-255, not any three digits: rgba(999, 0, 0, 0.5) is invalid CSS
-// and the browser drops the whole declaration.
-const CHANNEL = '(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)';
+// and the browser drops the whole declaration. Leading zeros are legal CSS, so
+// `007` is a padded 7 rather than a fourth digit.
+const CHANNEL = '(?:0*(?:25[0-5]|2[0-4]\\d|1?\\d?\\d))';
 const RGBA = new RegExp(
 	`^rgba\\(\\s*${CHANNEL}\\s*,\\s*${CHANNEL}\\s*,\\s*${CHANNEL}\\s*,\\s*(?:0|1|0?\\.\\d+)\\s*\\)$`
 );
@@ -121,5 +122,7 @@ export function cssValue(key: TokenKey, value: TokenValue): string {
 		return `var(${cssName(value.ref)})`;
 	}
 	if (HEX.test(value) || RGBA.test(value)) return value;
-	throw new Error(`${key}: '${value}' is not a 6-digit hex, an rgba() string, or an alias`);
+	throw new Error(
+		`${key}: '${value}' is not a 6-digit hex, an rgba() string with channels in 0-255, or an alias`
+	);
 }

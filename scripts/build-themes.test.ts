@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -194,7 +195,16 @@ describe('renderThemesCss', () => {
 		const bad: ThemeDefinition[] = [
 			{ id: 'default', label: 'Bad', dark: { sidebarBorder: 'rgba(999, 0, 0, 0.5)' }, light: {} }
 		];
-		expect(() => renderThemesCss(bad)).toThrow(/not a 6-digit hex/);
+		expect(() => renderThemesCss(bad)).toThrow(/channels in 0-255/);
+	});
+
+	// `007` is a padded 7, which CSS accepts — the channel bound is on the value,
+	// not on the digit count.
+	it('accepts an rgba() channel written with leading zeros', () => {
+		const ok: ThemeDefinition[] = [
+			{ id: 'default', label: 'Padded', dark: { sidebarBorder: 'rgba(007, 12, 12, 0.5)' }, light: {} }
+		];
+		expect(renderThemesCss(ok)).toContain('--sidebar-border: rgba(007, 12, 12, 0.5);');
 	});
 });
 
@@ -268,5 +278,43 @@ describe('checkThemesCss', () => {
 	it('detects a missing file', () => {
 		silence();
 		expect(checkThemesCss(path.join(dir, 'nope.css'), expected)).toBe(1);
+	});
+});
+
+// The tests above import the helpers, which leaves the direct-invocation guard
+// at the bottom of the script untested — and a guard that skips main() fails
+// silently: `npm run themes` writes nothing and `themes:check` keeps passing on
+// stale CSS. So run the script the way npm does, as a subprocess. Two spawns,
+// because tsx startup is the expensive part: one write into a temp file (which
+// also proves the committed CSS is what the theme data renders), then --check
+// against that file after staling it.
+describe('running the script directly', () => {
+	const root = fileURLToPath(new URL('..', import.meta.url));
+	const dir = mkdtempSync(path.join(tmpdir(), 'sona-themes-cli-'));
+	const file = path.join(dir, 'generated.css');
+	const run = (args: string[]) =>
+		spawnSync(path.join(root, 'node_modules/.bin/tsx'), ['scripts/build-themes.ts', ...args], {
+			cwd: root,
+			encoding: 'utf8',
+			env: { ...process.env, SONA_THEMES_OUTPUT: file }
+		});
+
+	const wrote = run([]);
+	const written = existsSync(file) ? readFileSync(file, 'utf8') : undefined;
+	// Stale it only if the write happened; otherwise --check would report a
+	// missing file and mask which of the two steps broke.
+	if (written !== undefined) writeFileSync(file, `${written}\n/* stale */\n`);
+	const stale = run(['--check']);
+
+	it('runs main() and writes the themes', () => {
+		expect(wrote.stderr).toBe('');
+		expect(wrote.status).toBe(0);
+		expect(wrote.stdout).toMatch(/wrote .* \(3 themes\)/);
+		expect(written).toBe(readFileSync(OUTPUT_PATH, 'utf8'));
+	});
+
+	it('exits 1 from --check when the file is stale', () => {
+		expect(stale.status).toBe(1);
+		expect(stale.stderr).toMatch(/out of date with the theme data/);
 	});
 });

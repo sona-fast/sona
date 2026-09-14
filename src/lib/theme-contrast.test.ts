@@ -51,11 +51,13 @@ function ruleBody(file: string, selector: string): string {
 // fractional, and the label is anchored to a declaration boundary so a rule
 // whose FIRST declaration is `color:` still parses while `border-color:` still
 // does not.
-function selfTint(body: string): { ink: string; pct: number; label: string | undefined } {
+// `where` names the rule in the failure, so a component that stops self-tinting
+// says which one rather than leaving the reader to find it among the rows below.
+function selfTint(body: string, where = 'rule'): { ink: string; pct: number; label: string | undefined } {
 	const tint = body.match(
 		/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+(?:\.\d+)?)%,\s*transparent\)/
 	);
-	if (!tint) throw new Error('rule no longer tints with a color-mix over transparent');
+	if (!tint) throw new Error(`${where} no longer tints with a color-mix over transparent`);
 	return {
 		ink: tint[1],
 		pct: Number(tint[2]),
@@ -83,6 +85,12 @@ describe('selfTint rule parsing', () => {
 			'\n\tborder-color: var(--border);\n\tbackground: color-mix(in srgb, var(--destructive) 20%, transparent);\n'
 		);
 		expect(label).toBeUndefined();
+	});
+
+	it('names the rule when it no longer tints', () => {
+		expect(() => selfTint('\n\tbackground: var(--card);\n', './components/X.svelte .chip')).toThrow(
+			'./components/X.svelte .chip no longer tints'
+		);
 	});
 });
 
@@ -980,7 +988,7 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 	];
 
 	for (const { file, selector } of banners) {
-		const { ink, pct: tintPct, label: textToken } = selfTint(ruleBody(file, selector));
+		const { ink, pct: tintPct, label: textToken } = selfTint(ruleBody(file, selector), `${file} ${selector}`);
 
 		it(`${file} ${selector} keeps the destructive tint and --foreground text`, () => {
 			expect(ink, `${selector} lost its destructive tint`).toBe('destructive');
@@ -1035,7 +1043,7 @@ describe('status-ink text on its own tint (SONA-209)', () => {
 	const TINTS = TINTED_RULES.map(({ file, selector }) => ({
 		file,
 		selector,
-		...selfTint(ruleBody(file, selector))
+		...selfTint(ruleBody(file, selector), `${file} ${selector}`)
 	}));
 
 	// Same bargain as KNOWN_FAILURES above: record the ratio measured when this

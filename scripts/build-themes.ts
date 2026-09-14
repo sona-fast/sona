@@ -12,7 +12,7 @@
  * wins.
  */
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { argv, exit } from 'node:process';
+import { argv, env, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
 import { assertNoAliasCycles } from '../src/lib/themes/cascade.ts';
@@ -162,9 +162,13 @@ export function checkThemesCss(path: string, expected: string): number {
 
 function main(): number {
 	const css = renderThemesCss(ALL_THEMES);
-	if (argv.includes('--check')) return checkThemesCss(OUTPUT_PATH, css);
-	writeFileSync(OUTPUT_PATH, css);
-	console.log(`✔ wrote ${OUTPUT_PATH} (${ALL_THEMES.length} themes)`);
+	// Unset in normal use. build-themes.test.ts points it at a temp file so it can
+	// run this script as a subprocess — the only way to exercise the guard below —
+	// without touching the committed CSS.
+	const output = env.SONA_THEMES_OUTPUT || OUTPUT_PATH;
+	if (argv.includes('--check')) return checkThemesCss(output, css);
+	writeFileSync(output, css);
+	console.log(`✔ wrote ${output} (${ALL_THEMES.length} themes)`);
 	return 0;
 }
 
