@@ -669,9 +669,15 @@ describe('round 11 wiring', () => {
 		expect(created).not.toMatch(/const tile = parentTile;/);
 		// Removed while the dialog was open, that tile takes the dialog's opener
 		// with it, so focus has to be placed rather than left on <body> (2.4.3).
+		// A surviving tile whose lookup left the results state — cancelled to
+		// idle, retried to searching — unmounts that same add-new button, so the
+		// branch places focus on every early return a lookup opened, not only the
+		// removed-tile one: the tile's own lookup button while it exists, else
+		// the select. Gated on `fromLookup` alone, never on `!tile`.
 		expect(created).toMatch(
-			/if \(fromLookup && !tile\) \{\s*\n\s*await tick\(\);\s*\n\s*artistSelect\?\.focus\(\);/
+			/if \(fromLookup\) \{\s*\n\s*await tick\(\);\s*\n\s*const button = tile \? tileLookupButtons\[tile\.key\] : null;\s*\n\s*\(button \?\? artistSelect\)\?\.focus\(\);/
 		);
+		expect(created).not.toMatch(/if \(fromLookup && !tile\)/);
 		// The edit page has no equivalent: it creates the artist server-side in
 		// the save action, and resetForImage clears the panel on the way back.
 		expect(EDIT).not.toContain('oncreated=');

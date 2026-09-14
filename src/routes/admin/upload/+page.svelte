@@ -412,11 +412,17 @@
 		const tile = seedKey === null ? null : (tiles.find((t) => t.key === seedKey) ?? null);
 		if (!fromLookup || !tile || tile.lookup.kind !== 'results') {
 			// That tile can also be removed while the dialog is open, taking the
-			// button the dialog would have restored focus to with it (2.4.3). There
-			// is nothing to fold then; land on the select holding the new artist.
-			if (fromLookup && !tile) {
+			// button the dialog would have restored focus to with it (2.4.3). The
+			// tile surviving is not enough either: a lookup cancelled back to idle
+			// or retried into searching unmounts the same add-new button, so the
+			// opener is gone there too and focus falls to <body> with the next Tab
+			// restarting at the top of the page. There is nothing to fold in either
+			// case; land on the tile's own lookup button while it exists, else on
+			// the select holding the new artist.
+			if (fromLookup) {
 				await tick();
-				artistSelect?.focus();
+				const button = tile ? tileLookupButtons[tile.key] : null;
+				(button ?? artistSelect)?.focus();
 			}
 			return;
 		}
