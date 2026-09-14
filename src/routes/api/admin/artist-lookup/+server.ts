@@ -301,12 +301,14 @@ export const POST: RequestHandler = async ({ request, platform, fetch }) => {
 			// unavailable — the fetch worked, the content is what's wrong.
 			const sniffed = sniffImageType(buffered.subarray(0, SNIFF_BYTES));
 			if (!isAllowedImageType(sniffed)) return failure('invalid_image', false);
-			// bufferStream allocates an exact-size array, so its backing buffer is
-			// the payload with nothing else in it. A type rides along so the
-			// multipart part FuzzySearch receives from the edit page looks like the
-			// one the upload page sends (a File carries its own type) — the
-			// upstream's where the allowlist accepts it, the sniffed one otherwise.
-			bytes = new Blob([buffered.buffer as ArrayBuffer], {
+			// The view itself, not its backing buffer: a Blob part honours a typed
+			// array's offset and length, so the payload is what goes up even if
+			// bufferStream ever returns a view into a larger allocation. A type
+			// rides along so the multipart part FuzzySearch receives from the edit
+			// page looks like the one the upload page sends (a File carries its own
+			// type) — the upstream's where the allowlist accepts it, the sniffed one
+			// otherwise.
+			bytes = new Blob([buffered], {
 				type: isAllowedImageType(storedType) ? storedType : (sniffed as string)
 			});
 		} catch (e) {

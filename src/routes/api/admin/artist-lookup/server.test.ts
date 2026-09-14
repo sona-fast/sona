@@ -535,6 +535,23 @@ describe('artist-lookup — stored image by id', () => {
 		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/jpeg');
 	});
 
+	// The Blob is built from the buffered view, not from its backing ArrayBuffer.
+	// Reading the buffer only matches the payload while bufferStream allocates an
+	// exact-size array; a view into a larger allocation would send trailing zero
+	// bytes FuzzySearch would then be matching against.
+	it('forwards a stored image byte for byte', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+		);
+
+		await POST(jsonEvent(platform, { imageId: 1 }));
+
+		const sent = new Uint8Array(await (searchImage.mock.calls[0][0] as Blob).arrayBuffer());
+		expect(Array.from(sent)).toEqual(Array.from(IMAGE_BYTES));
+	});
+
 	// Media types are case-insensitive. An upstream spelling it `Image/JPEG` was
 	// demoted to a download by the proxy and then refused here as a non-image.
 	it('accepts a stored content type whatever its case', async () => {

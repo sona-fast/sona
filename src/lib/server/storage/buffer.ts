@@ -35,11 +35,16 @@ export class MaxBytesExceededError extends Error {
  * Buffer a ReadableStream into a single Uint8Array, throwing
  * MaxBytesExceededError as soon as more than `max` bytes have arrived (the
  * stream is cancelled on overflow so nothing keeps flowing).
+ *
+ * The array is allocated here, so its buffer is a plain ArrayBuffer rather than
+ * the ArrayBufferLike the default type parameter allows. Said out loud because
+ * a BlobPart will not accept the loose form, and a caller handing the view
+ * straight to a Blob should not need a cast to do it.
  */
 export async function bufferStream(
 	body: ReadableStream<Uint8Array>,
 	max = MAX_BUFFER_BYTES
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
 	const reader = body.getReader();
 	const chunks: Uint8Array[] = [];
 	let total = 0;
