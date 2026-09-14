@@ -18,7 +18,10 @@
 	}: {
 		tags: string[];
 		leftOut: Set<string>;
-		/** The live-region paragraph that names this group ("9 suggested tags…"). */
+		/** The ids of the elements that name this group, space-separated: the
+		 *  eyebrow above the chips ("9 suggested tags…") in the forms' tray, and on
+		 *  the backfill page that eyebrow plus the row's title, so a row's chips
+		 *  say which image they belong to. */
 		labelledBy: string;
 		/** The instruction sentence under the chips. */
 		describedBy: string;

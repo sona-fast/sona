@@ -24,6 +24,7 @@
 		selectedTags,
 		sentenceFor,
 		sourceKey,
+		tagsToAdd,
 		toggleTag,
 		trayFor,
 		type EntailRating,
@@ -97,6 +98,12 @@
 	const searching = $derived(suggestion.kind === 'searching');
 	const disabled = $derived(source === null || searching);
 	const chosen = $derived(selectedTags(suggestion));
+	// What Add would actually land, which is not always what the chips show: the
+	// Tags field is live, so a suggested name the operator types in themselves
+	// between the lookup and the click is one `applyTo` skips. The button, the
+	// status line and the announcement all count off this, so none of them can
+	// claim three tags landed when two did.
+	const toAdd = $derived(tagsToAdd(value, chosen));
 
 	// Two different refusals, two different sentences. An empty or unrecognised
 	// field is the operator's to fill in; a 422 means the client recogniser
@@ -297,7 +304,7 @@
 
 	async function add() {
 		if (suggestion.kind !== 'suggested') return;
-		const accepted = chosen;
+		const accepted = toAdd;
 		if (accepted.length === 0) return;
 		value = applyTo(value, accepted);
 		suggestion = { kind: 'applied', count: accepted.length };
@@ -414,10 +421,10 @@
 					<button
 						type="button"
 						class="btn btn-primary tag-btn-sm"
-						disabled={chosen.length === 0}
+						disabled={toAdd.length === 0}
 						onclick={add}
 					>
-						{m.admin_tag_suggest_add({ count: chosen.length })}
+						{m.admin_tag_suggest_add({ count: toAdd.length })}
 					</button>
 					<button type="button" class="tag-btn-text" onclick={dismiss}>
 						{m.admin_tag_suggest_dismiss()}

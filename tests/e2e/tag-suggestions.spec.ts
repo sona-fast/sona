@@ -134,6 +134,41 @@ test('a tag already in the field is not offered again', async ({ page }) => {
 	await expect(tagsInput(page)).toHaveValue('Beach, fox');
 });
 
+test('the count says what landed when the operator types a suggested tag first', async ({
+	page
+}) => {
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['mammal', 'canine', 'fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	await pill(page).click();
+	await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+	// The Tags field is live: the lookup answered three tags, and now one of them
+	// is in the field by hand. Only two can land, so the button stops offering
+	// three before it is even clicked.
+	await tagsInput(page).fill('fox');
+	const add = page.getByRole('button', { name: 'Add 2 tags' });
+	await expect(add).toBeVisible();
+	await add.click();
+
+	// Three tags in the field, fox once. The chip that was already there is
+	// skipped rather than appended a second time.
+	await expect(tagsInput(page)).toHaveValue('fox, mammal, canine');
+	// And the count the operator is told is the count that landed, in the line on
+	// screen and in the live region both.
+	await expect(page.locator('.tag-status-line')).toHaveText(
+		'Sona added 2 tags. You can change them in the Tags field.'
+	);
+	await expect(liveRegion(page)).toHaveText(
+		'Sona added 2 tags. You can change them in the Tags field.'
+	);
+});
+
 test('a 202 says the post is not classified yet and offers another try', async ({ page }) => {
 	await openUploadForm(page);
 	// 202 is inside res.ok. Reading it as a payload would show an empty tray as

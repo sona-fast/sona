@@ -68,6 +68,12 @@
 	// count: a row saved above it drops off the reloaded list, and a position would
 	// then land focus one row too far down.
 	let grewAfterId: number | null = null;
+	// The `pages` value that Load more click is navigating to. afterNavigate runs
+	// for every navigation, not only that one, so the arming has to say which
+	// navigation it belongs to: a Load more click the operator abandons by
+	// clicking another link first would otherwise announce the list's size and
+	// move focus on whatever navigation landed instead.
+	let grewToPages: number | null = null;
 
 	const stateOf = (id: number): SuggestionState => states[id] ?? { kind: 'idle' };
 
@@ -182,10 +188,18 @@
 	// Load more is a link: the page grows, and the rows already on screen keep
 	// their place. Focus would otherwise stay on a link that is now gone, which
 	// drops it to the top of the document.
-	afterNavigate(async () => {
-		if (grewAfterId === null) return;
+	afterNavigate(async ({ to }) => {
 		const after = grewAfterId;
+		const pages = grewToPages;
+		// Disarmed on the way in, whichever navigation landed: an arming that
+		// outlives the click it came from fires on the next navigation instead.
 		grewAfterId = null;
+		grewToPages = null;
+		// Only the navigation Load more started. Another link clicked while that
+		// one was still in flight arrives here with the arming still set, and
+		// announcing the list's size over it would describe a page the operator is
+		// leaving and pull focus onto a row on the way out.
+		if (after === null || to?.url.searchParams.get('pages') !== String(pages)) return;
 		// After the longer list has rendered: `data` still holds the rows the page
 		// arrived with while the callback runs.
 		await tick();
@@ -362,9 +376,15 @@
 						ontoggle={(tag) => onToggle(row.id, tag)}
 					/>
 					<p class="tag-panel-sub" id="row-{row.id}-help">{m.admin_tag_suggest_help()}</p>
-					<!-- One line: the rating and the note that it changes nothing here. -->
+					<!-- One line: the rating and the note that it changes nothing here.
+					     Joined through the message the hint under the forms' field uses,
+					     not with a literal space: both sentences carry their own full
+					     stop, and Japanese sets no space after one. The rating has
+					     already been rendered in its own span, which is what carries the
+					     warn colour, so the join is handed an empty first sentence and
+					     supplies the separator alone. -->
 					<p class="rowmeta">
-						{#if rowState.rating}<span class="tag-rating-note" class:warn={rowState.rating !== 'safe'}>{ratingLabel(rowState.rating)}</span>{' '}{/if}{m.admin_suggest_tags_nsfw_note()}
+						{#if rowState.rating}<span class="tag-rating-note" class:warn={rowState.rating !== 'safe'}>{ratingLabel(rowState.rating)}</span>{m.admin_tag_suggest_hint_join({ first: '', second: m.admin_suggest_tags_nsfw_note() })}{:else}{m.admin_suggest_tags_nsfw_note()}{/if}
 					</p>
 					{#if rowState.imageCount > 1}
 						<p class="tag-panel-sub">
@@ -579,7 +599,10 @@
 			class="tag-pill load-more"
 			href="?pages={data.pages + 1}"
 			data-sveltekit-noscroll
-			onclick={() => (grewAfterId = data.rows[data.rows.length - 1]?.id ?? null)}
+			onclick={() => {
+				grewAfterId = data.rows[data.rows.length - 1]?.id ?? null;
+				grewToPages = data.pages + 1;
+			}}
 		>
 			{m.admin_suggest_tags_load_more()}
 		</a>

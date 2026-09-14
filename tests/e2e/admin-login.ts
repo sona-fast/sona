@@ -119,9 +119,11 @@ export async function adminLogin(
  * gets its own budget raised above it first: without that, a cold start dies at
  * 30s with a bare timeout and no second attempt. The 120_000 in
  * playwright.config.ts is the webServer boot timeout, not the per-test one.
- * The budget is 90s rather than the 60s it started at: a full run boots six dev
- * servers at once, and one login exhausted the shorter budget waiting on a box
- * that was compiling five other projects' pages at the same time.
+ * The toPass budget below is 90s rather than the 60s it started at: a full run
+ * boots six dev servers at once, and one login exhausted the shorter budget
+ * waiting on a box that was compiling five other projects' pages at the same
+ * time. The test timeout raised on the first line of the function is 120s, so
+ * the retry budget fits inside it with room for the spec's own work.
  * toPass reports the last attempt's error, so a genuine login failure still
  * reads as itself. */
 export async function loginRetrying(page: Page, password: string) {

@@ -22,9 +22,12 @@ import type { RequestHandler } from './$types';
 // even though `res.ok` is true. Branch on `res.status === 202` (retry later)
 // before treating an ok response as a suggestion payload.
 //
-//   { imageId }        — the edit page, where the source URL is already stored.
-//   { sourcePostUrl }  — the upload page, where there is no image row yet and
-//                        the URL is whatever the operator has typed so far.
+//   { sourcePostUrl }  — the upload and edit forms, which send the Source Post
+//                        URL field's current value, so the answer is about the
+//                        post the operator is looking at rather than the one
+//                        that happens to be stored.
+//   { imageId }        — the backfill list /admin/images/suggest-tags, where the
+//                        row has no field to read and its URL is already stored.
 //
 // Either shape goes through classifySourceUrl first, so the only URLs that
 // ever leave this app are ones we built: the canonical bsky.app post URL, or

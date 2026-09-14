@@ -10,6 +10,7 @@ import {
 	rowToFocusAfter,
 	sentenceFor,
 	sourceKey,
+	tagsToAdd,
 	toggleTag,
 	trayFor,
 	type SuggestionState
@@ -325,6 +326,44 @@ describe('applyTo', () => {
 
 	it('leaves the field alone when nothing was accepted', () => {
 		expect(applyTo('fox, beach', [])).toBe('fox, beach');
+	});
+});
+
+describe('tagsToAdd', () => {
+	// What the Add button counts and what "Sona added N tags" claims. applyTo
+	// skips a tag the field already holds, so counting the accepted chips instead
+	// says three landed when two did — which is what the operator is told after
+	// typing one of the suggested names in themselves between the lookup and the
+	// click.
+	it('counts only the tags the field does not already hold', () => {
+		expect(tagsToAdd('beach', ['fox', 'beach', 'sea'])).toEqual(['fox', 'sea']);
+	});
+
+	it('matches an existing tag the way Save would write it', () => {
+		// "Digital Media" and "digital-media" are one tag, so accepting the second
+		// over the first adds nothing.
+		expect(tagsToAdd('Digital Media', ['digital-media'])).toEqual([]);
+	});
+
+	it('collapses duplicates inside the accepted list', () => {
+		expect(tagsToAdd('', ['fox', 'fox'])).toEqual(['fox']);
+	});
+
+	it('drops an entry that sanitizes to nothing', () => {
+		expect(tagsToAdd('fox', ['!!!'])).toEqual([]);
+	});
+
+	it('agrees with what applyTo actually appends', () => {
+		// The count and the field are read from the same rule, so they cannot
+		// drift: every tag this returns lands, and no tag it leaves out does.
+		const field = 'beach, Fox';
+		const accepted = ['fox', 'sea', 'beach', 'sky'];
+		const added = tagsToAdd(field, accepted);
+		expect(added).toEqual(['sea', 'sky']);
+		expect(applyTo(field, accepted)).toBe('beach, Fox, sea, sky');
+		expect(parseTagInput(applyTo(field, accepted)).length - parseTagInput(field).length).toBe(
+			added.length
+		);
 	});
 });
 

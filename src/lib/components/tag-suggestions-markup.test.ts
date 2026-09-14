@@ -121,8 +121,12 @@ describe('focus after a suggestion is accepted or dismissed', () => {
 		// sentence. On the first failure it does not, so without a tick of its own
 		// this branch would focus a paragraph setFailure has not rendered yet and
 		// focus would drop to the body.
+		// Bounded to one statement block: a brace between the pieces means the
+		// match has left the failure branch. Unbounded, the lazy gaps slid past
+		// this branch's closing brace and matched the SAVED branch's tick further
+		// down, so the pin went on passing with the tick it is about deleted.
 		expect(backfillPage).toMatch(
-			/setFailure\(row\.id, true\);[\s\S]*?await reannounce\([\s\S]*?await tick\(\);\s*statusLines\[row\.id\]\?\.focus\(\)/
+			/setFailure\(row\.id, true\);(?:(?![{}])[\s\S])*?await reannounce\((?:(?![{}])[\s\S])*?await tick\(\);\s*statusLines\[row\.id\]\?\.focus\(\)/
 		);
 	});
 });
@@ -359,6 +363,56 @@ describe('an answer that stops being about the post in the field', () => {
 		expect(suggestions).toMatch(
 			/const wasApplied = suggestion\.kind === 'applied';[\s\S]*?if \(wasApplied\) return;[\s\S]*?announcement = m\.admin_tag_suggest_dropped_body\(\);/
 		);
+	});
+});
+
+describe('the backfill row\'s rating line', () => {
+	it('joins the rating to the NSFW note through the message, not a literal space', () => {
+		// Both sentences carry their own full stop and Japanese sets no space
+		// after one, so a literal space left a gap after the full stop in ja. The
+		// rating keeps its own span, which is what carries the warn colour, so the
+		// join supplies the separator with nothing in front of it.
+		expect(backfillPage).toMatch(
+			/<\/span>\{m\.admin_tag_suggest_hint_join\(\{ first: '', second: m\.admin_suggest_tags_nsfw_note\(\) \}\)\}/
+		);
+		expect(backfillPage).not.toMatch(/<\/span>\{' '\}/);
+	});
+
+	it('sets no space in Japanese and one in English, which is what the join is for', () => {
+		const en = JSON.parse(read('../../../messages/en.json')) as Record<string, string>;
+		const ja = JSON.parse(read('../../../messages/ja.json')) as Record<string, string>;
+		expect(en.admin_tag_suggest_hint_join).toBe('{first} {second}');
+		expect(ja.admin_tag_suggest_hint_join).toBe('{first}{second}');
+	});
+});
+
+describe('Load more', () => {
+	it('announces and moves focus only for the navigation its own click started', () => {
+		// afterNavigate runs for every navigation. Clicking Load more and then
+		// another link before it lands leaves the arming set, and without the
+		// check the page announces how far the list grew and pulls focus onto a
+		// row on the way out of the page.
+		expect(backfillPage).toMatch(/grewToPages = data\.pages \+ 1;/);
+		expect(backfillPage).toMatch(
+			/afterNavigate\(async \(\{ to \}\) => \{[\s\S]*?grewAfterId = null;\s*grewToPages = null;/
+		);
+		expect(backfillPage).toMatch(
+			/if \(after === null \|\| to\?\.url\.searchParams\.get\('pages'\) !== String\(pages\)\) return;/
+		);
+	});
+});
+
+describe('the Add button and the line that confirms it', () => {
+	it('count the tags that will actually land, not the chips that are lit', () => {
+		// applyTo skips a suggested tag the operator has since typed into the field
+		// themselves, so a count taken off the chips would say three tags were
+		// added when two were — in the button, in the status line and in the live
+		// region at once.
+		expect(suggestions).toMatch(/const toAdd = \$derived\(tagsToAdd\(value, chosen\)\);/);
+		expect(suggestions).toMatch(/disabled=\{toAdd\.length === 0\}/);
+		expect(suggestions).toMatch(/m\.admin_tag_suggest_add\(\{ count: toAdd\.length \}\)/);
+		expect(suggestions).toMatch(/const accepted = toAdd;/);
+		expect(suggestions).not.toMatch(/count: chosen\.length/);
 	});
 });
 

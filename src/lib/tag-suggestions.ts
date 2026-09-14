@@ -404,18 +404,33 @@ export function toggleTag(state: SuggestionState, tag: string): SuggestionState 
 }
 
 /**
+ * Which of `accepted` would actually land in the Tags input: the ones the field
+ * does not already hold (compared through `sanitizeTag`, so "Digital Media" and
+ * "digital-media" count as one), with duplicates inside `accepted` itself
+ * collapsed. In the classifier's order, like everything else here.
+ *
+ * The form counts the Add button and the "Sona added N tags" line off this
+ * rather than off the suggestion, because the field is live: a name the operator
+ * types in between the lookup and the click is one `applyTo` skips, and counting
+ * the chips would then say three tags landed when two did.
+ */
+export function tagsToAdd(existingInput: string, accepted: string[]): string[] {
+	const seen = new Set(parseTagInput(existingInput).map(sanitizeTag).filter(Boolean));
+	const add: string[] = [];
+	for (const tag of accepted) {
+		const key = sanitizeTag(tag);
+		if (!key || seen.has(key)) continue;
+		seen.add(key);
+		add.push(tag);
+	}
+	return add;
+}
+
+/**
  * Append accepted tags to the Tags input's value without disturbing what the
  * operator typed. Entries already in the field are skipped (compared through
  * `sanitizeTag`), and so are duplicates within `accepted`.
  */
 export function applyTo(existingInput: string, accepted: string[]): string {
-	const kept = parseTagInput(existingInput);
-	const seen = new Set(kept.map(sanitizeTag).filter(Boolean));
-	for (const tag of accepted) {
-		const key = sanitizeTag(tag);
-		if (!key || seen.has(key)) continue;
-		seen.add(key);
-		kept.push(tag);
-	}
-	return kept.join(', ');
+	return [...parseTagInput(existingInput), ...tagsToAdd(existingInput, accepted)].join(', ');
 }
