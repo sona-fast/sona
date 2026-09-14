@@ -2243,19 +2243,42 @@ test.describe('with a key saved', () => {
 		await expect(tileLookup(page)).toHaveCount(1);
 	});
 
-	// An expired session names itself on the button and keeps it. Settings is not
-	// the remedy, and the sign-in happens in another tab — so the tile has to
-	// still offer the click that picks the lookup back up. Taking the button away
-	// left that tile with no control at all.
+	// An expired session states itself above the tile's button and keeps it.
+	// Settings is not the remedy, and the sign-in happens in another tab — so the
+	// tile has to still offer the click that picks the lookup back up. Taking the
+	// button away left that tile with no control at all.
 	test('a variant tile whose session expired says to sign in again', async ({ page }) => {
 		await stubLookup(page, {}, 401);
 		await twoDoneTiles(page);
 
 		await tileLookup(page).nth(1).click();
 
-		await expect(tileLookup(page).nth(1)).toContainText('Signed out · Try again');
-		await expect(page.locator('.tile-lookup-failed')).toHaveCount(0);
+		await expect(page.locator('.tile-lookup-failed')).toHaveText('Signed out');
+		await expect(page.locator('.tile-lookup-reason')).toHaveText(
+			'Your admin session expired. Sign in again, then look up the artist.'
+		);
+		// The reason is on those lines, so the button under them is a plain retry.
+		await expect(tileLookup(page).nth(1)).toContainText('Try again');
+		await expect(tileLookup(page).nth(1)).not.toContainText('Signed out');
 		await expect(page.getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
+		await expect(tileLookup(page)).toHaveCount(2);
+	});
+
+	// The other retryable reason, and the one the label used to wrap on: a paused
+	// lookup names itself on the tile's own lines too, so the tile says what the
+	// announcement says rather than reading as a dead lookup.
+	test('a paused variant tile names the pause and keeps a plain retry', async ({ page }) => {
+		await stubLookup(page, { enabled: true, error: 'rate_limited', forwarded: true }, 429);
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(1).click();
+
+		await expect(page.locator('.tile-lookup-failed')).toHaveText('Lookup paused');
+		await expect(page.locator('.tile-lookup-reason')).toHaveText(
+			'FuzzySearch is limiting how often your site can search right now.'
+		);
+		await expect(tileLookup(page).nth(1)).toContainText('Try again');
+		await expect(tileLookup(page).nth(1)).not.toContainText('Lookup paused');
 		await expect(tileLookup(page)).toHaveCount(2);
 	});
 
@@ -2270,9 +2293,13 @@ test.describe('with a key saved', () => {
 		await tileLookup(page).nth(0).focus();
 		await tileLookup(page).nth(0).click();
 
-		// Both tiles still offer a button, and the parent's names the reason.
+		// Both tiles still offer a button, and the parent's is untouched by the
+		// failure: the panel reports it, so the label neither names the reason nor
+		// invites a retry.
 		await expect(tileLookup(page)).toHaveCount(2);
-		await expect(tileLookup(page).nth(0)).toContainText('No key');
+		await expect(tileLookup(page).nth(0)).toContainText('Look up artist');
+		await expect(tileLookup(page).nth(0)).not.toContainText('No key');
+		await expect(tileLookup(page).nth(0)).not.toContainText('Try again');
 		// The tile itself says nothing: the panel carries the reason and remedy.
 		await expect(page.locator('.tile-lookup-failed')).toHaveCount(0);
 		await expect(page.locator('a.tile-settings-link')).toHaveCount(0);

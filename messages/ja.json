@@ -1464,7 +1464,6 @@
 	"admin_lookup_no_key_post": "で追加すると、作品を投稿した人を探せます。",
 	"admin_lookup_tile_searching": "検索中…",
 	"admin_lookup_tile_done": "検索済み",
-	"admin_lookup_tile_failed_retry": "{reason} · やり直す",
 	"admin_lookup_panel_label": "アーティスト検索",
 	"admin_lookup_searching_eyebrow": "検索中",
 	"admin_lookup_searching_body": "画像をFuzzySearchに送信しています。",

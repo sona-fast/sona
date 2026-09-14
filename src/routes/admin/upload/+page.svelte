@@ -1068,17 +1068,22 @@
 					</div>
 					<div class="tile-meta">{tile.width} x {tile.height} &bull; {formatSize(tile.fileSize)}</div>
 					{#if data.lookupEnabled && isGroup && tile.status === 'done'}
-						{#if tile.lookup.kind === 'failed' && !tileCanRetry(tile.lookup.reason) && !isParent(tile.key)}
-							<!-- A retry cannot fix a key that went away, an expired session,
-							     or a file FuzzySearch refused, so the tile states the reason
-							     the panel's way and points at the remedy instead of offering
-							     a button that would fail the same way. Variant tiles only:
-							     the parent's failure is reported by the shared panel, which
-							     carries the same reason and the same Settings action, and
+						{#if tile.lookup.kind === 'failed' && !isParent(tile.key)}
+							<!-- The reason on the tile's own lines, whether or not a retry
+							     can fix it: composed into the button label instead, it wrapped
+							     to a second line starting with the separator. Two lines here
+							     also keep the tile saying what the announcement says. Variant
+							     tiles only: the parent's failure is reported by the shared
+							     panel, which carries the same reason and the same actions, and
 							     the parent's button is where the panel's Close sends focus
-							     back to (2.4.3), so it has to stay mounted. -->
+							     back to (2.4.3), so it has to stay mounted and unchanged. -->
 							<p class="tile-lookup-failed">{tileFailureLabel(tile.lookup.reason)}</p>
 							<p class="tile-lookup-reason">{tileFailureBody(tile.lookup.reason)}</p>
+						{/if}
+						{#if tile.lookup.kind === 'failed' && !tileCanRetry(tile.lookup.reason) && !isParent(tile.key)}
+							<!-- A retry cannot fix a key that went away or a file FuzzySearch
+							     refused, so the tile points at the remedy instead of offering
+							     a button that would fail the same way. -->
 							{#if tile.lookup.reason === 'no_key' || tile.lookup.reason === 'key_refused'}
 								<!-- A new tab, like the other lookup links: navigating this
 								     page away would drop the batch — the tiles, their labels,
@@ -1095,7 +1100,10 @@
 							<!-- One lookup per tile: the parent's result fills the shared
 							     fields, a variant's only rates that variant. The file name
 							     rides in the accessible name so a screen reader can tell the
-							     grid's buttons apart. -->
+							     grid's buttons apart. A failure names itself on the lines
+							     above and leaves this button a plain Try again; on the parent
+							     it is the panel that reports the failure, so the button is
+							     unchanged by one. -->
 							<button
 								type="button"
 								class="tile-lookup"
@@ -1107,9 +1115,7 @@
 								<Search size={12} aria-hidden="true" />
 								{#if tile.lookup.kind === 'searching'}{m.admin_lookup_tile_searching()}
 								{:else if tile.lookup.kind === 'results' || tile.lookup.kind === 'no_match'}{m.admin_lookup_tile_done()}
-								{:else if tile.lookup.kind === 'failed'}{m.admin_lookup_tile_failed_retry({
-										reason: tileFailureLabel(tile.lookup.reason)
-									})}
+								{:else if tile.lookup.kind === 'failed' && !isParent(tile.key)}{m.admin_lookup_try_again()}
 								{:else}{m.admin_lookup_button()}{/if}
 								<span class="sr-only">{m.admin_lookup_button_for({ fileName: tile.fileName })}</span>
 							</button>

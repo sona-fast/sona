@@ -108,26 +108,33 @@ describe('lookup button and its disclosure hint', () => {
 		expect(PANEL).toMatch(
 			/lookup\.reason === 'rate_limited' \|\| lookup\.reason === 'unavailable'\}\s*\n\s*<button[\s\S]{0,200}?m\.admin_lookup_try_again\(\)/
 		);
-		// The button is gone in that case, replaced by the reason and, where the
-		// remedy is a page, the same Settings link the panel offers — on a variant
-		// tile only. The parent's failure is the panel's to report, and its button
-		// is the focus target the panel's Close returns to, so the parent stays on
-		// the button branch however its lookup fails.
+		// Every variant-tile failure states its reason on the tile's own two
+		// lines, retryable or not, so the tile shows what the announcement says.
+		// The parent's failure is the panel's to report, and its button is the
+		// focus target the panel's Close returns to, so the parent stays on the
+		// button branch, with its label untouched, however its lookup fails.
+		expect(UPLOAD).toMatch(
+			/\{#if tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\}[\s\S]{0,700}?<p class="tile-lookup-failed">\{tileFailureLabel\(tile\.lookup\.reason\)\}<\/p>\s*\n\s*<p class="tile-lookup-reason">\{tileFailureBody\(tile\.lookup\.reason\)\}<\/p>/
+		);
+		// Only where a retry cannot work does the button give way to the link.
 		expect(UPLOAD).toMatch(
 			/\{#if tile\.lookup\.kind === 'failed' && !tileCanRetry\(tile\.lookup\.reason\) && !isParent\(tile\.key\)\}/
-		);
-		expect(UPLOAD).toMatch(
-			/<p class="tile-lookup-failed">\{tileFailureLabel\(tile\.lookup\.reason\)\}<\/p>\s*\n\s*<p class="tile-lookup-reason">\{tileFailureBody\(tile\.lookup\.reason\)\}<\/p>/
 		);
 		expect(UPLOAD).toMatch(
 			/\{#if tile\.lookup\.reason === 'no_key' \|\| tile\.lookup\.reason === 'key_refused'\}[\s\S]{0,500}?href="\/admin\/settings\?tab=connections"[\s\S]{0,120}?\{m\.admin_lookup_open_settings\(\)\}/
 		);
 		expect(PANEL).toContain('href="/admin/settings?tab=connections"');
-		// Where a retry does help, the button keeps it — and still names the
-		// reason, so a paused lookup does not read as a dead one.
+		// Where a retry does help, the button is a plain Try again under those
+		// two lines. Composed with the reason it wrapped onto a second line
+		// beginning with the separator, in ja at every tile width and in en at
+		// 390 — so the composed key is gone from the page and both catalogs.
 		expect(UPLOAD).toMatch(
-			/\{:else if tile\.lookup\.kind === 'failed'\}\{m\.admin_lookup_tile_failed_retry\(\{\s*\n\s*reason: tileFailureLabel\(tile\.lookup\.reason\)\s*\n\s*\}\)\}/
+			/\{:else if tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\}\{m\.admin_lookup_try_again\(\)\}/
 		);
+		expect(UPLOAD).not.toContain('admin_lookup_tile_failed_retry');
+		for (const catalog of ['messages/en.json', 'messages/ja.json']) {
+			expect(read(catalog)).not.toContain('admin_lookup_tile_failed_retry');
+		}
 	});
 
 	// Both Settings remedies leave the page they are offered from intact: the
