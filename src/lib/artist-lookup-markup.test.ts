@@ -1402,6 +1402,19 @@ describe('the new-artist dialog prefill', () => {
 		expect(DIALOG).not.toMatch(/console\.error\(`/);
 	});
 
+	// Same shape, same defect: the artists page passes an async onimportedall that
+	// awaits invalidateAll, so a rejected refresh escaped as an unhandled
+	// rejection. Not awaited into the import's own catch either — the import
+	// already succeeded, and a throw in the caller's refresh is not the network
+	// failure that catch reports.
+	it('resolves an async onimportedall handler instead of dropping its rejection', () => {
+		expect(DIALOG).toMatch(/onimportedall\?: \(\) => void \| Promise<void>;/);
+		expect(DIALOG).toMatch(
+			/void Promise\.resolve\(onimportedall\?\.\(\)\)\.catch\(\(\) => \{\s*\n\s*console\.error\(IMPORTED_ALL_HANDLER_THREW\);\s*\n\s*\}\);/
+		);
+		expect(DIALOG).toMatch(/const IMPORTED_ALL_HANDLER_THREW = '[^']+';/);
+	});
+
 	// Seeds, not bindings: read once through untrack so a later prop change
 	// cannot overwrite what the operator typed (and so svelte-check is quiet).
 	it('reads each seed prop once', () => {

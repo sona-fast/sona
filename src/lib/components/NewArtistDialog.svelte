@@ -19,6 +19,11 @@
 	 * place to put a name the page already shows. */
 	const CREATED_HANDLER_THREW = 'new artist dialog: the oncreated handler threw';
 
+	/** Logged when a caller's onimportedall handler rejects. Same shape and same
+	 * reasoning as the constant above: the artists page refreshes its list with
+	 * an async handler, so a rejected invalidateAll has to land somewhere. */
+	const IMPORTED_ALL_HANDLER_THREW = 'new artist dialog: the onimportedall handler threw';
+
 	interface Props {
 		/** May be async: the upload page awaits a tick to move focus after the
 		 * dialog closes. The dialog resolves whatever comes back and logs a
@@ -28,8 +33,11 @@
 		/** Dialog heading — e.g. "New Manager" when the created artist will manage a pack. */
 		title?: string;
 		/** Called after a successful "Import all" (bulk catalog import) so the
-		 * caller can refresh its artist list. Optional — a toast is shown anyway. */
-		onimportedall?: () => void;
+		 * caller can refresh its artist list. Optional — a toast is shown anyway.
+		 * May be async: the artists page awaits invalidateAll here. The dialog
+		 * resolves whatever comes back and logs a rejection rather than letting it
+		 * escape as an unhandled one. */
+		onimportedall?: () => void | Promise<void>;
 		/** Whether the shared registry is connected — passed from page load so the
 		 *  registry search UI is decided BEFORE the modal renders (no flash-then-hide). */
 		registryEnabled?: boolean;
@@ -212,7 +220,13 @@
 			}
 			toast.success(m.admin_registry_imported_toast({ count: data.created ?? 0 }));
 			showImportAll = false;
-			onimportedall?.();
+			// Not awaited into the catch below, for the same reason oncreated is not:
+			// the import already succeeded, and a throw out of the caller's refresh
+			// is not a network failure to report as one. Resolved and logged instead,
+			// so an async handler's rejection cannot escape as an unhandled one.
+			void Promise.resolve(onimportedall?.()).catch(() => {
+				console.error(IMPORTED_ALL_HANDLER_THREW);
+			});
 		} catch {
 			toast.error(m.admin_new_artist_network_error());
 		} finally {
