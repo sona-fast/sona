@@ -218,6 +218,16 @@ test('without a key there is no button, only a pointer at Settings', async ({ pa
 		'href',
 		'/admin/settings?tab=connections'
 	);
+	// A new tab, like the other two Settings remedies: the batch on this page
+	// would go with a same-tab navigation, and the name says where the click goes.
+	await expect(hint.getByRole('link', { name: 'Settings' })).toHaveAttribute('target', '_blank');
+	await expect(hint.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+		'rel',
+		'noopener noreferrer'
+	);
+	await expect(hint.getByRole('link', { name: 'Settings' })).toHaveAccessibleName(
+		'Settings (opens in a new tab)'
+	);
 });
 
 // Serial: every test below runs against one settings row — the first saves it,
@@ -485,10 +495,14 @@ test.describe('with a key saved', () => {
 			'href',
 			'/admin/settings?tab=connections'
 		);
-		// A new tab: the remedy must not navigate the upload away, batch and all.
+		// A new tab: the remedy must not navigate the upload away, batch and all —
+		// and the name says so, the way every other new-tab link on the admin does.
 		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAttribute(
 			'target',
 			'_blank'
+		);
+		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAccessibleName(
+			'Open Settings (opens in a new tab)'
 		);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
 		// Nothing was filled.
@@ -2219,8 +2233,10 @@ test.describe('with a key saved', () => {
 
 	// A key removed in another tab comes back as enabled:false on the next
 	// lookup. The tile used to call that "Lookup failed · Try again", and the
-	// retry met the same missing key every time.
-	test('a variant tile whose key went away points at Settings, not a retry', async ({ page }) => {
+	// retry met the same missing key every time; then the remedy replaced the
+	// button, and because it opens in a new tab the operator who saved a key and
+	// came back had nothing left to click. Both controls, now.
+	test('a variant tile whose key went away offers Settings beside its retry', async ({ page }) => {
 		await stubLookup(page, { enabled: false });
 		await twoDoneTiles(page);
 
@@ -2233,14 +2249,35 @@ test.describe('with a key saved', () => {
 		);
 		const settings = page.locator('a.tile-settings-link');
 		await expect(settings).toHaveAttribute('href', '/admin/settings?tab=connections');
-		// A new tab, or following the remedy would throw the batch away.
+		// A new tab, or following the remedy would throw the batch away — and the
+		// name says so out loud, the way every other new-tab link on the admin does.
 		await expect(settings).toHaveAttribute('target', '_blank');
 		await expect(settings).toHaveAttribute('rel', 'noopener noreferrer');
-		// The button the operator was standing on is gone with the retry it
-		// offered, so focus is handed to the remedy that replaced it (2.4.3).
-		await expect(settings).toBeFocused();
-		// Only the parent tile still has one: nothing on this tile offers a retry.
-		await expect(tileLookup(page)).toHaveCount(1);
+		await expect(settings).toHaveAccessibleName('Open Settings (opens in a new tab)');
+		// The key is read per request, so the tile keeps the retry that picks the
+		// lookup back up, and focus stays on the button the operator clicked.
+		await expect(tileLookup(page)).toHaveCount(2);
+		await expect(tileLookup(page).nth(1)).toContainText('Try again');
+		await expect(tileLookup(page).nth(1)).toBeFocused();
+		// The reason rides in the button's description, or a screen-reader
+		// operator coming back to the tile hears only "Try again for back.png".
+		await expect(tileLookup(page).nth(1)).toHaveAccessibleDescription(
+			'No key This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.'
+		);
+		await expect(settings).toHaveAccessibleDescription(
+			'No key This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.'
+		);
+
+		// The operator saves a key in that other tab and comes back: the click
+		// that was still there runs a lookup that works.
+		await stubLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+
+		await expect(page.locator('.tile-result')).toHaveCount(1);
+		await expect(page.locator('.tile-lookup-failed')).toHaveCount(0);
+		await expect(settings).toHaveCount(0);
+		await expect(tileLookup(page).nth(1)).toContainText('Looked up');
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-describedby', 'lookup-hint');
 	});
 
 	// An expired session states itself above the tile's button and keeps it.
@@ -2309,6 +2346,9 @@ test.describe('with a key saved', () => {
 		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAttribute(
 			'target',
 			'_blank'
+		);
+		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAccessibleName(
+			'Open Settings (opens in a new tab)'
 		);
 
 		await panel(page).getByRole('button', { name: 'Close' }).click();

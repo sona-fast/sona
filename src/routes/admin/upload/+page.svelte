@@ -310,16 +310,15 @@
 		// result is discarded with the tile.
 		lookupAborts.get(key)?.abort();
 		lookupAborts.delete(key);
-		// The three focus-target records are keyed by tile as well, and a key is
-		// never reused, so an entry for a removed tile is dead weight nothing can
-		// read again. Dropped after the flush that unmounts the tile, not here:
+		// Both focus-target records are keyed by tile as well, and a key is never
+		// reused, so an entry for a removed tile is dead weight nothing can read
+		// again. Dropped after the flush that unmounts the tile, not here:
 		// Svelte writes null back into a bind:this slot when its element goes, so
 		// a delete now is undone a moment later and the record still grows one
 		// dead entry per removed tile.
 		void tick().then(() => {
 			delete tileLookupButtons[key];
 			delete tileRemoveButtons[key];
-			delete tileSettingsLinks[key];
 		});
 		// The parent is a tile, not a position: removing anything before it shifts
 		// every later tile down one, and parentIndex rides along to the server as
@@ -508,9 +507,6 @@
 	let artistSelect = $state<HTMLSelectElement | null>(null);
 	// $state so `bind:this` into it is a reactive write (Svelte warns otherwise).
 	const tileLookupButtons = $state<Record<number, HTMLButtonElement | null>>({});
-	// A failure no retry can fix takes the button above away and puts the remedy
-	// in its place, so that link is where the focus standing on the button goes.
-	const tileSettingsLinks = $state<Record<number, HTMLAnchorElement | null>>({});
 	// Each tile's Remove button sits inside the tile it removes, so activating one
 	// from the keyboard would drop focus to <body> (2.4.3). These are where focus
 	// goes instead — the neighbour that took the removed tile's place.
@@ -583,8 +579,11 @@
 					announceTileLookup(live);
 				}
 				// Cleared last, so a throw anywhere above still reads as this
-				// lookup's in the catch below rather than as a cancelled one.
-				lookupAborts.delete(key);
+				// lookup's in the catch below rather than as a cancelled one. Only
+				// if the entry is still this request's: the focus handoff above
+				// awaits a tick, and a lookup started again in that window owns the
+				// slot — deleting it there would leave the newer one uncancellable.
+				if (lookupAborts.get(key) === controller) lookupAborts.delete(key);
 			})
 			// runLookup itself resolves on every path, so only a throw in the
 			// callback above lands here. Without this the tile would sit on
@@ -676,31 +675,31 @@
 		}
 	}
 
-	/** The reasons the tile keeps Try again for. A missing or refused key, a
-	 * deleted image, and a file FuzzySearch would not read all hit the same wall
-	 * on a second click, so the tile stops offering one. An expired session is
-	 * here even though the panel treats it as a dead end: the copy tells the
-	 * operator to sign in again and look up the artist, and the panel gets back
-	 * to a usable state through its Close while a variant tile has no other
-	 * control — without the button, signing in elsewhere leaves that tile with
-	 * nothing to click. A retry while still signed out re-renders what is
-	 * already there. */
+	/** The reasons the tile keeps Try again for. A deleted image and a file
+	 * FuzzySearch would not read hit the same wall on a second click, so the tile
+	 * stops offering one. Everything else is here because the operator can go and
+	 * fix it: an expired session ends in a sign-in elsewhere, and a missing or
+	 * refused key ends in Settings, which the tile now opens in a new tab — the
+	 * key is read per request, so the click that comes back works. The panel gets
+	 * to a usable state through its Close; a variant tile whose button went away
+	 * has nothing left to click at all. A retry that was too early re-renders
+	 * what is already there. */
 	function tileCanRetry(reason: LookupFailReason): boolean {
-		return reason === 'rate_limited' || reason === 'unavailable' || reason === 'signed_out';
+		return reason !== 'too_large' && reason !== 'invalid_image' && reason !== 'gone';
 	}
 
 	/** Such a failure unmounts the button the operator is standing on — it is the
 	 * one they clicked to start the lookup — so focus has to be moved deliberately
 	 * or it falls to <body> and the next Tab restarts at the top of the page
-	 * (2.4.3). It lands on the Settings link that took the button's place, or on
-	 * the artist select, which is where "add the artist by hand" happens. */
+	 * (2.4.3). It lands on the artist select, which is where "add the artist by
+	 * hand" happens: the three reasons that get here have no remedy on the tile. */
 	async function moveFocusOffTileButton(key: number, tile: Tile) {
 		if (tile.lookup.kind !== 'failed' || tileCanRetry(tile.lookup.reason)) return;
 		if (document.activeElement !== tileLookupButtons[key]) return;
 		// The replacement only exists after the DOM catches up with the state the
 		// caller just wrote.
 		await tick();
-		(tileSettingsLinks[key] ?? artistSelect)?.focus();
+		artistSelect?.focus();
 	}
 
 	function tileLookupLine(tile: Tile): string {
@@ -889,7 +888,10 @@
 	function focusLookupOrigin() {
 		const tile = parentTile;
 		const button = tile ? tileLookupButtons[tile.key] : null;
-		(button ?? lookupPill)?.focus();
+		// The pill renders for a single file only, so in a group it is null and
+		// the select is the last resort — the same one moveFocusOffTileButton
+		// falls back to.
+		(button ?? lookupPill ?? artistSelect)?.focus();
 	}
 
 	/** Every caller passes the options bag explicitly or calls this with nothing:
@@ -1077,39 +1079,50 @@
 							     panel, which carries the same reason and the same actions, and
 							     the parent's button is where the panel's Close sends focus
 							     back to (2.4.3), so it has to stay mounted and unchanged. -->
-							<p class="tile-lookup-failed">{tileFailureLabel(tile.lookup.reason)}</p>
-							<p class="tile-lookup-reason">{tileFailureBody(tile.lookup.reason)}</p>
+							<p class="tile-lookup-failed" id="tile-fail-label-{tile.key}">
+								{tileFailureLabel(tile.lookup.reason)}
+							</p>
+							<p class="tile-lookup-reason" id="tile-fail-reason-{tile.key}">
+								{tileFailureBody(tile.lookup.reason)}
+							</p>
 						{/if}
-						{#if tile.lookup.kind === 'failed' && !tileCanRetry(tile.lookup.reason) && !isParent(tile.key)}
-							<!-- A retry cannot fix a key that went away or a file FuzzySearch
-							     refused, so the tile points at the remedy instead of offering
-							     a button that would fail the same way. -->
-							{#if tile.lookup.reason === 'no_key' || tile.lookup.reason === 'key_refused'}
-								<!-- A new tab, like the other lookup links: navigating this
-								     page away would drop the batch — the tiles, their labels,
-								     the shared fields — with no way back to it. -->
-								<a
-									class="tile-settings-link"
-									bind:this={tileSettingsLinks[tile.key]}
-									href="/admin/settings?tab=connections"
-									target="_blank"
-									rel="noopener noreferrer">{m.admin_lookup_open_settings()}</a
-								>
-							{/if}
-						{:else}
+						{#if tile.lookup.kind === 'failed' && !isParent(tile.key) && (tile.lookup.reason === 'no_key' || tile.lookup.reason === 'key_refused')}
+							<!-- The remedy sits beside the retry rather than replacing it: the
+							     key is read per request, so once it is saved the click that
+							     comes back works. Replacing the button left the tile with no
+							     control at all once this link opened in a new tab. A new tab,
+							     like the other lookup links: navigating this page away would
+							     drop the batch — the tiles, their labels, the shared fields —
+							     with no way back to it. -->
+							<a
+								class="tile-settings-link"
+								href="/admin/settings?tab=connections"
+								target="_blank"
+								rel="noopener noreferrer"
+								aria-describedby="tile-fail-label-{tile.key} tile-fail-reason-{tile.key}"
+								>{m.admin_lookup_open_settings()}<span class="sr-only"
+									>{' '}{m.link_opens_new_tab()}</span
+								></a
+							>
+						{/if}
+						{#if !(tile.lookup.kind === 'failed' && !tileCanRetry(tile.lookup.reason) && !isParent(tile.key))}
 							<!-- One lookup per tile: the parent's result fills the shared
 							     fields, a variant's only rates that variant. The file name
 							     rides in the accessible name so a screen reader can tell the
 							     grid's buttons apart. A failure names itself on the lines
 							     above and leaves this button a plain Try again; on the parent
 							     it is the panel that reports the failure, so the button is
-							     unchanged by one. -->
+							     unchanged by one. The reason lines describe the button while
+							     it is standing under them, so a screen-reader operator coming
+							     back to the tile hears what went wrong, not just "Try again". -->
 							<button
 								type="button"
 								class="tile-lookup"
 								bind:this={tileLookupButtons[tile.key]}
 								aria-busy={tile.lookup.kind === 'searching'}
-								aria-describedby="lookup-hint"
+								aria-describedby={tile.lookup.kind === 'failed' && !isParent(tile.key)
+									? `tile-fail-label-${tile.key} tile-fail-reason-${tile.key}`
+									: 'lookup-hint'}
 								onclick={() => startLookup(tile.key)}
 							>
 								<Search size={12} aria-hidden="true" />
@@ -1318,8 +1331,17 @@
 			</small>
 		{:else}
 			<small class="hint" id="lookup-hint">
-				{m.admin_lookup_no_key_pre()}<a class="link" href="/admin/settings?tab=connections"
-					>{m.admin_lookup_no_key_link()}</a
+				<!-- The third Settings remedy, and a new tab for the same reason as the
+				     other two: this page holds a batch that a same-tab navigation
+				     would discard. -->
+				{m.admin_lookup_no_key_pre()}<a
+					class="link"
+					href="/admin/settings?tab=connections"
+					target="_blank"
+					rel="noopener noreferrer"
+					>{m.admin_lookup_no_key_link()}<span class="sr-only"
+						>{' '}{m.link_opens_new_tab()}</span
+					></a
 				>{m.admin_lookup_no_key_post()}
 			</small>
 		{/if}

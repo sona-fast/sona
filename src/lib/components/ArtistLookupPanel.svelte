@@ -524,7 +524,10 @@
 						class="btn btn-secondary"
 						href="/admin/settings?tab=connections"
 						target="_blank"
-						rel="noopener noreferrer">{m.admin_lookup_open_settings()}</a
+						rel="noopener noreferrer"
+						>{m.admin_lookup_open_settings()}<span class="sr-only"
+							>{' '}{m.link_opens_new_tab()}</span
+						></a
 					>
 				{:else if lookup.reason === 'rate_limited' || lookup.reason === 'unavailable'}
 					<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>

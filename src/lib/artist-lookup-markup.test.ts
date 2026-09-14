@@ -60,8 +60,20 @@ describe('lookup button and its disclosure hint', () => {
 		expect(UPLOAD).toContain('m.admin_lookup_hint_multi_private()');
 	});
 
+	// Except while the tile is showing a failure of its own: there the two
+	// reason lines above the button describe it, so a screen-reader operator
+	// coming back to the tile hears what went wrong rather than "Try again for
+	// foo.png" with no reason attached.
 	it('describes each per-tile button with that same hint', () => {
-		expect(UPLOAD).toMatch(/class="tile-lookup"[\s\S]*?aria-describedby="lookup-hint"/);
+		expect(UPLOAD).toMatch(
+			/class="tile-lookup"[\s\S]{0,400}?aria-describedby=\{tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\s*\n\s*\? `tile-fail-label-\$\{tile\.key\} tile-fail-reason-\$\{tile\.key\}`\s*\n\s*: 'lookup-hint'\}/
+		);
+		expect(UPLOAD).toMatch(/<p class="tile-lookup-failed" id="tile-fail-label-\{tile\.key\}">/);
+		expect(UPLOAD).toMatch(/<p class="tile-lookup-reason" id="tile-fail-reason-\{tile\.key\}">/);
+		// The remedy beside it is described by the same two lines.
+		expect(UPLOAD).toMatch(
+			/class="tile-settings-link"[\s\S]{0,300}?aria-describedby="tile-fail-label-\{tile\.key\} tile-fail-reason-\{tile\.key\}"/
+		);
 	});
 
 	// A variant tile renders its own outcome, so a tile that called every failure
@@ -97,13 +109,15 @@ describe('lookup button and its disclosure hint', () => {
 	});
 
 	// The panel offers Try again for exactly two reasons; every other one needs
-	// Settings, a sign-in, or a different file, and a second click would fail the
-	// same way. The tile keeps one for an expired session too: the panel gets
-	// back to a usable state through Close, while a variant tile whose button
-	// went away has nothing left to click after the operator signs in elsewhere.
+	// Settings, a sign-in, or a different file. The tile keeps one wherever the
+	// operator can go and fix the cause — an expired session, a missing or
+	// refused key — because the panel gets back to a usable state through Close
+	// while a variant tile whose button went away has nothing left to click when
+	// they come back. Only a file FuzzySearch would not read and an image that is
+	// gone fail the same way on a second click.
 	it('offers a tile retry only where a retry can work', () => {
 		expect(UPLOAD).toMatch(
-			/function tileCanRetry\(reason: LookupFailReason\): boolean \{\s*\n\s*return reason === 'rate_limited' \|\| reason === 'unavailable' \|\| reason === 'signed_out';/
+			/function tileCanRetry\(reason: LookupFailReason\): boolean \{\s*\n\s*return reason !== 'too_large' && reason !== 'invalid_image' && reason !== 'gone';/
 		);
 		expect(PANEL).toMatch(
 			/lookup\.reason === 'rate_limited' \|\| lookup\.reason === 'unavailable'\}\s*\n\s*<button[\s\S]{0,200}?m\.admin_lookup_try_again\(\)/
@@ -114,14 +128,17 @@ describe('lookup button and its disclosure hint', () => {
 		// focus target the panel's Close returns to, so the parent stays on the
 		// button branch, with its label untouched, however its lookup fails.
 		expect(UPLOAD).toMatch(
-			/\{#if tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\}[\s\S]{0,700}?<p class="tile-lookup-failed">\{tileFailureLabel\(tile\.lookup\.reason\)\}<\/p>\s*\n\s*<p class="tile-lookup-reason">\{tileFailureBody\(tile\.lookup\.reason\)\}<\/p>/
+			/\{#if tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\}[\s\S]{0,700}?<p class="tile-lookup-failed" id="tile-fail-label-\{tile\.key\}">\s*\n\s*\{tileFailureLabel\(tile\.lookup\.reason\)\}\s*\n\s*<\/p>\s*\n\s*<p class="tile-lookup-reason" id="tile-fail-reason-\{tile\.key\}">\s*\n\s*\{tileFailureBody\(tile\.lookup\.reason\)\}\s*\n\s*<\/p>/
 		);
-		// Only where a retry cannot work does the button give way to the link.
+		// Only where a retry cannot work does the button go away entirely.
 		expect(UPLOAD).toMatch(
-			/\{#if tile\.lookup\.kind === 'failed' && !tileCanRetry\(tile\.lookup\.reason\) && !isParent\(tile\.key\)\}/
+			/\{#if !\(tile\.lookup\.kind === 'failed' && !tileCanRetry\(tile\.lookup\.reason\) && !isParent\(tile\.key\)\)\}/
 		);
+		// The Settings remedy is its own block, beside the surviving button rather
+		// than in its place: it opens in a new tab, so replacing the button left
+		// the operator who saved a key and came back with nothing to click.
 		expect(UPLOAD).toMatch(
-			/\{#if tile\.lookup\.reason === 'no_key' \|\| tile\.lookup\.reason === 'key_refused'\}[\s\S]{0,500}?href="\/admin\/settings\?tab=connections"[\s\S]{0,120}?\{m\.admin_lookup_open_settings\(\)\}/
+			/\{#if tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\) && \(tile\.lookup\.reason === 'no_key' \|\| tile\.lookup\.reason === 'key_refused'\)\}[\s\S]{0,800}?href="\/admin\/settings\?tab=connections"[\s\S]{0,200}?\{m\.admin_lookup_open_settings\(\)\}/
 		);
 		expect(PANEL).toContain('href="/admin/settings?tab=connections"');
 		// Where a retry does help, the button is a plain Try again under those
@@ -140,25 +157,34 @@ describe('lookup button and its disclosure hint', () => {
 	// Both Settings remedies leave the page they are offered from intact: the
 	// upload page holds a whole batch and the edit page an unsaved row, and
 	// either would be discarded by a same-tab navigation to fix the key.
+	// All three of them: the tile's link, the panel's action, and the hint the
+	// page shows when no key is configured at all. Each says out loud that it
+	// opens a new tab, the way every other new-tab link on the admin does — a
+	// link that moves the operator somewhere else without warning is worse when
+	// the thing it leaves behind is an unsaved batch.
 	it('opens the Settings remedy in a new tab from the tile and the panel', () => {
 		expect(UPLOAD).toMatch(
-			/class="tile-settings-link"[\s\S]{0,300}?target="_blank"\s*\n\s*rel="noopener noreferrer"/
+			/class="tile-settings-link"[\s\S]{0,300}?target="_blank"\s*\n\s*rel="noopener noreferrer"[\s\S]{0,300}?\{m\.admin_lookup_open_settings\(\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
 		);
 		expect(PANEL).toMatch(
-			/href="\/admin\/settings\?tab=connections"\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"/
+			/href="\/admin\/settings\?tab=connections"\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"\s*\n\s*>\{m\.admin_lookup_open_settings\(\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
+		);
+		expect(UPLOAD).toMatch(
+			/\{m\.admin_lookup_no_key_pre\(\)\}<a\s*\n\s*class="link"\s*\n\s*href="\/admin\/settings\?tab=connections"\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"\s*\n\s*>\{m\.admin_lookup_no_key_link\(\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
 		);
 	});
 
 	// The failure that takes the button away takes the focus standing on it with
 	// it (2.4.3) — that button is what the operator clicked to start the lookup.
 	it('hands focus on when a tile failure unmounts its button', () => {
-		expect(UPLOAD).toMatch(/bind:this=\{tileSettingsLinks\[tile\.key\]\}/);
 		expect(UPLOAD).toMatch(
 			/async function moveFocusOffTileButton\(key: number, tile: Tile\) \{\s*\n\s*if \(tile\.lookup\.kind !== 'failed' \|\| tileCanRetry\(tile\.lookup\.reason\)\) return;\s*\n\s*if \(document\.activeElement !== tileLookupButtons\[key\]\) return;/
 		);
-		expect(UPLOAD).toMatch(
-			/await tick\(\);\s*\n\s*\(tileSettingsLinks\[key\] \?\? artistSelect\)\?\.focus\(\);/
-		);
+		// Only the three reasons with no remedy on the tile get here, and none of
+		// them leaves a control behind, so the select — where "add the artist by
+		// hand" happens — is the landing spot.
+		expect(UPLOAD).toMatch(/await tick\(\);\s*\n\s*artistSelect\?\.focus\(\);/);
+		expect(UPLOAD).not.toContain('tileSettingsLinks');
 	});
 });
 
@@ -938,6 +964,10 @@ describe('focus after the panel goes away', () => {
 		expect(UPLOAD).toMatch(/bind:this=\{lookupPill\}/);
 		expect(UPLOAD).toMatch(/bind:this=\{tileLookupButtons\[tile\.key\]\}/);
 		expect(UPLOAD).toMatch(/function closeSharedLookup[\s\S]{0,300}?focusLookupOrigin\(\)/);
+		// The pill renders above one file only, so in a group it is null: without a
+		// third link the chain would focus nothing if the parent's button ever went
+		// away. The select is where moveFocusOffTileButton ends up too.
+		expect(UPLOAD).toMatch(/\(button \?\? lookupPill \?\? artistSelect\)\?\.focus\(\);/);
 		expect(EDIT).toMatch(/function closeLookup\(\)[\s\S]{0,200}?lookupPill\?\.focus\(\)/);
 		expect(EDIT).toMatch(/onclose=\{closeLookup\}/);
 	});
@@ -1086,7 +1116,7 @@ describe('focus after the panel goes away', () => {
 		// its element unmounts, so a synchronous delete is undone a moment later
 		// and each removal still leaves a dead key behind.
 		expect(UPLOAD).toMatch(
-			/function removeTile\([\s\S]{0,600}?lookupAborts\.delete\(key\);[\s\S]{0,600}?void tick\(\)\.then\(\(\) => \{\s*\n\s*delete tileLookupButtons\[key\];\s*\n\s*delete tileRemoveButtons\[key\];\s*\n\s*delete tileSettingsLinks\[key\];\s*\n\s*\}\);/
+			/function removeTile\([\s\S]{0,600}?lookupAborts\.delete\(key\);[\s\S]{0,600}?void tick\(\)\.then\(\(\) => \{\s*\n\s*delete tileLookupButtons\[key\];\s*\n\s*delete tileRemoveButtons\[key\];\s*\n\s*\}\);/
 		);
 	});
 
@@ -1397,10 +1427,16 @@ describe('the upload page grid', () => {
 		// Both the focus handoff and the announcement sit above the delete for
 		// that reason.
 		expect(UPLOAD).toMatch(
-			/announceTileLookup\(live\);[\s\S]{0,200}?lookupAborts\.delete\(key\);/
+			/announceTileLookup\(live\);[\s\S]{0,600}?lookupAborts\.delete\(key\);/
 		);
 		expect(UPLOAD).toMatch(
-			/await moveFocusOffTileButton\(key, live\);[\s\S]{0,400}?lookupAborts\.delete\(key\);/
+			/await moveFocusOffTileButton\(key, live\);[\s\S]{0,800}?lookupAborts\.delete\(key\);/
+		);
+		// And the delete only fires for its own request: the focus handoff above
+		// awaits a tick, so a lookup started again in that window owns the slot
+		// and an unconditional delete would leave it uncancellable.
+		expect(UPLOAD).toMatch(
+			/if \(lookupAborts\.get\(key\) === controller\) lookupAborts\.delete\(key\);/
 		);
 		expect(EDIT).toMatch(/applyPrefill\(next\);[\s\S]{0,200}?lookupAbort = null;\s*\n\s*\}\)/);
 		// One constant, shared, carrying nothing from the result.
