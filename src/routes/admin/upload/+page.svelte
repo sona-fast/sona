@@ -21,6 +21,7 @@
 		lookupSentFile,
 		sentAfterApplyThrew,
 		withCreatedArtist,
+		type LookupFailReason,
 		type LookupFields,
 		type LookupMatch,
 		type LookupSite,
@@ -309,7 +310,7 @@
 		// result is discarded with the tile.
 		lookupAborts.get(key)?.abort();
 		lookupAborts.delete(key);
-		// The two focus-target records are keyed by tile as well, and a key is
+		// The three focus-target records are keyed by tile as well, and a key is
 		// never reused, so an entry for a removed tile is dead weight nothing can
 		// read again. Dropped after the flush that unmounts the tile, not here:
 		// Svelte writes null back into a bind:this slot when its element goes, so
@@ -318,6 +319,7 @@
 		void tick().then(() => {
 			delete tileLookupButtons[key];
 			delete tileRemoveButtons[key];
+			delete tileSettingsLinks[key];
 		});
 		// The parent is a tile, not a position: removing anything before it shifts
 		// every later tile down one, and parentIndex rides along to the server as
@@ -506,6 +508,9 @@
 	let artistSelect = $state<HTMLSelectElement | null>(null);
 	// $state so `bind:this` into it is a reactive write (Svelte warns otherwise).
 	const tileLookupButtons = $state<Record<number, HTMLButtonElement | null>>({});
+	// A failure no retry can fix takes the button above away and puts the remedy
+	// in its place, so that link is where the focus standing on the button goes.
+	const tileSettingsLinks = $state<Record<number, HTMLAnchorElement | null>>({});
 	// Each tile's Remove button sits inside the tile it removes, so activating one
 	// from the keyboard would drop focus to <body> (2.4.3). These are where focus
 	// goes instead — the neighbour that took the removed tile's place.
@@ -569,6 +574,10 @@
 				// Cleared last, so a throw anywhere above still reads as this
 				// lookup's in the catch below rather than as a cancelled one.
 				lookupAborts.delete(key);
+				// Past the delete on purpose: a throw in here lands in the catch
+				// below, which returns on the missing abort entry rather than
+				// announcing this tile's outcome a second time.
+				if (!isParent(key)) return moveFocusOffTileButton(key, live);
 			})
 			// runLookup itself resolves on every path, so only a throw in the
 			// callback above lands here. Without this the tile would sit on
@@ -613,11 +622,85 @@
 	 * disclosure when one is due. Composed rather than said, so the catch below
 	 * can announce the state a tile actually settled on without going back
 	 * through anything that already threw. */
+	/** The panel's own eyebrow for a failure reason, so a variant tile names the
+	 * failure the same way the panel does instead of calling every one of them a
+	 * lookup failure. `invalid_image` and `unavailable` share the panel's plain
+	 * "Lookup failed", the way its own branch does. */
+	function tileFailureLabel(reason: LookupFailReason): string {
+		switch (reason) {
+			case 'rate_limited':
+				return m.admin_lookup_paused_eyebrow();
+			case 'key_refused':
+				return m.admin_lookup_refused_eyebrow();
+			case 'too_large':
+				return m.admin_lookup_too_large_eyebrow();
+			case 'no_key':
+				return m.admin_lookup_no_key_eyebrow();
+			case 'gone':
+				return m.admin_lookup_gone_eyebrow();
+			case 'signed_out':
+				return m.admin_lookup_signed_out_eyebrow();
+			default:
+				return m.admin_lookup_failed_eyebrow();
+		}
+	}
+
+	/** The panel's sentence for a failure reason — the part that carries the
+	 * remedy (Settings, signing in again, a different file), which the eyebrow
+	 * alone cannot. Shown on the tile and spoken, for the same reason. */
+	function tileFailureBody(reason: LookupFailReason): string {
+		switch (reason) {
+			case 'rate_limited':
+				return m.admin_lookup_paused_body();
+			case 'key_refused':
+				return m.admin_lookup_refused_body();
+			case 'too_large':
+				return m.admin_lookup_too_large_body();
+			case 'invalid_image':
+				return m.admin_lookup_invalid_body();
+			case 'no_key':
+				return m.admin_lookup_no_key_body();
+			case 'gone':
+				return m.admin_lookup_gone_body();
+			case 'signed_out':
+				return m.admin_lookup_signed_out_body();
+			default:
+				return m.admin_lookup_failed_body();
+		}
+	}
+
+	/** The two reasons the panel offers Try again for. A missing or refused key,
+	 * an expired session, a deleted image, and a file FuzzySearch would not read
+	 * all hit the same wall on a second click, so the tile stops offering one. */
+	function tileCanRetry(reason: LookupFailReason): boolean {
+		return reason === 'rate_limited' || reason === 'unavailable';
+	}
+
+	/** Such a failure unmounts the button the operator is standing on — it is the
+	 * one they clicked to start the lookup — so focus has to be moved deliberately
+	 * or it falls to <body> and the next Tab restarts at the top of the page
+	 * (2.4.3). It lands on the Settings link that took the button's place, or on
+	 * the artist select, which is where "add the artist by hand" happens. */
+	async function moveFocusOffTileButton(key: number, tile: Tile) {
+		if (tile.lookup.kind !== 'failed' || tileCanRetry(tile.lookup.reason)) return;
+		if (document.activeElement !== tileLookupButtons[key]) return;
+		// The replacement only exists after the DOM catches up with the state the
+		// caller just wrote.
+		await tick();
+		(tileSettingsLinks[key] ?? artistSelect)?.focus();
+	}
+
 	function tileLookupLine(tile: Tile): string {
 		const fileName = tile.fileName;
 		let line: string;
 		if (tile.lookup.kind === 'failed') {
-			line = m.admin_lookup_announce_tile_failed({ fileName });
+			// The reason, not a bare "lookup failed": spoken is the only way a
+			// screen-reader operator learns the key went away or the session
+			// expired, and a generic failure invites a retry that cannot work.
+			line = m.admin_lookup_announce_tile_failure({
+				fileName,
+				reason: tileFailureBody(tile.lookup.reason)
+			});
 		} else {
 			const result = tileResult(tile);
 			line = result
@@ -972,25 +1055,43 @@
 					</div>
 					<div class="tile-meta">{tile.width} x {tile.height} &bull; {formatSize(tile.fileSize)}</div>
 					{#if data.lookupEnabled && isGroup && tile.status === 'done'}
-						<!-- One lookup per tile: the parent's result fills the shared
-						     fields, a variant's only rates that variant. The file name
-						     rides in the accessible name so a screen reader can tell the
-						     grid's buttons apart. -->
-						<button
-							type="button"
-							class="tile-lookup"
-							bind:this={tileLookupButtons[tile.key]}
-							aria-busy={tile.lookup.kind === 'searching'}
-							aria-describedby="lookup-hint"
-							onclick={() => startLookup(tile.key)}
-						>
-							<Search size={12} aria-hidden="true" />
-							{#if tile.lookup.kind === 'searching'}{m.admin_lookup_tile_searching()}
-							{:else if tile.lookup.kind === 'results' || tile.lookup.kind === 'no_match'}{m.admin_lookup_tile_done()}
-							{:else if tile.lookup.kind === 'failed'}{m.admin_lookup_tile_failed()}
-							{:else}{m.admin_lookup_button()}{/if}
-							<span class="sr-only">{m.admin_lookup_button_for({ fileName: tile.fileName })}</span>
-						</button>
+						{#if tile.lookup.kind === 'failed' && !tileCanRetry(tile.lookup.reason)}
+							<!-- A retry cannot fix a key that went away, an expired session,
+							     or a file FuzzySearch refused, so the tile states the reason
+							     the panel's way and points at the remedy instead of offering
+							     a button that would fail the same way. -->
+							<p class="tile-lookup-failed">{tileFailureLabel(tile.lookup.reason)}</p>
+							<p class="tile-lookup-reason">{tileFailureBody(tile.lookup.reason)}</p>
+							{#if tile.lookup.reason === 'no_key' || tile.lookup.reason === 'key_refused'}
+								<a
+									class="tile-settings-link"
+									bind:this={tileSettingsLinks[tile.key]}
+									href="/admin/settings?tab=connections">{m.admin_lookup_open_settings()}</a
+								>
+							{/if}
+						{:else}
+							<!-- One lookup per tile: the parent's result fills the shared
+							     fields, a variant's only rates that variant. The file name
+							     rides in the accessible name so a screen reader can tell the
+							     grid's buttons apart. -->
+							<button
+								type="button"
+								class="tile-lookup"
+								bind:this={tileLookupButtons[tile.key]}
+								aria-busy={tile.lookup.kind === 'searching'}
+								aria-describedby="lookup-hint"
+								onclick={() => startLookup(tile.key)}
+							>
+								<Search size={12} aria-hidden="true" />
+								{#if tile.lookup.kind === 'searching'}{m.admin_lookup_tile_searching()}
+								{:else if tile.lookup.kind === 'results' || tile.lookup.kind === 'no_match'}{m.admin_lookup_tile_done()}
+								{:else if tile.lookup.kind === 'failed'}{m.admin_lookup_tile_failed_retry({
+										reason: tileFailureLabel(tile.lookup.reason)
+									})}
+								{:else}{m.admin_lookup_button()}{/if}
+								<span class="sr-only">{m.admin_lookup_button_for({ fileName: tile.fileName })}</span>
+							</button>
+						{/if}
 					{/if}
 					{#if isGroup}
 						{#if groupMode === 'new'}
@@ -1810,18 +1911,22 @@
 		cursor: pointer;
 	}
 
-	.tile-result {
+	.tile-result,
+	.tile-lookup-failed,
+	.tile-lookup-reason {
 		font-size: 12px;
 		color: var(--muted-foreground);
 		margin: 0;
 		line-height: 1.4;
 	}
 
-	.tile-result-warn {
+	.tile-result-warn,
+	.tile-lookup-failed {
 		color: var(--status-warn);
 	}
 
-	.tile-post-link {
+	.tile-post-link,
+	.tile-settings-link {
 		font-size: 12px;
 		color: var(--link);
 	}

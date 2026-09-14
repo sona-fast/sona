@@ -2212,6 +2212,45 @@ test.describe('with a key saved', () => {
 		);
 	});
 
+	// A key removed in another tab comes back as enabled:false on the next
+	// lookup. The tile used to call that "Lookup failed · Try again", and the
+	// retry met the same missing key every time.
+	test('a variant tile whose key went away points at Settings, not a retry', async ({ page }) => {
+		await stubLookup(page, { enabled: false });
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(1).focus();
+		await tileLookup(page).nth(1).click();
+
+		await expect(page.locator('.tile-lookup-failed')).toHaveText('No key');
+		await expect(page.locator('.tile-lookup-reason')).toHaveText(
+			'This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.'
+		);
+		const settings = page.getByRole('link', { name: 'Open Settings' });
+		await expect(settings).toHaveAttribute('href', '/admin/settings?tab=connections');
+		// The button the operator was standing on is gone with the retry it
+		// offered, so focus is handed to the remedy that replaced it (2.4.3).
+		await expect(settings).toBeFocused();
+		// Only the parent tile still has one: nothing on this tile offers a retry.
+		await expect(tileLookup(page)).toHaveCount(1);
+	});
+
+	// The same shape for an expired session: nothing was sent, Settings is not
+	// the remedy, and a retry would meet the same 401.
+	test('a variant tile whose session expired says to sign in again', async ({ page }) => {
+		await stubLookup(page, {}, 401);
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(1).click();
+
+		await expect(page.locator('.tile-lookup-failed')).toHaveText('Signed out');
+		await expect(page.locator('.tile-lookup-reason')).toHaveText(
+			'Your admin session expired. Sign in again, then look up the artist.'
+		);
+		await expect(page.getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
+		await expect(tileLookup(page)).toHaveCount(1);
+	});
+
 	// Last: leaves the DB as the seed built it, for whatever runs next on this
 	// server. It stays a test rather than becoming a hook, because it also
 	// asserts what removal does to the upload page, and a hook failure is silent

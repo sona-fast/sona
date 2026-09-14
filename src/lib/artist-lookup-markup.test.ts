@@ -63,6 +63,79 @@ describe('lookup button and its disclosure hint', () => {
 	it('describes each per-tile button with that same hint', () => {
 		expect(UPLOAD).toMatch(/class="tile-lookup"[\s\S]*?aria-describedby="lookup-hint"/);
 	});
+
+	// A variant tile renders its own outcome, so a tile that called every failure
+	// "Lookup failed · Try again" invited an endless retry for a key that went
+	// away or a session that expired. The panel already tells the reasons apart;
+	// the tile says the same thing from the same keys.
+	it('names a variant tile failure the way the panel does', () => {
+		for (const [reason, eyebrow, body] of [
+			['rate_limited', 'admin_lookup_paused_eyebrow', 'admin_lookup_paused_body'],
+			['key_refused', 'admin_lookup_refused_eyebrow', 'admin_lookup_refused_body'],
+			['too_large', 'admin_lookup_too_large_eyebrow', 'admin_lookup_too_large_body'],
+			['no_key', 'admin_lookup_no_key_eyebrow', 'admin_lookup_no_key_body'],
+			['gone', 'admin_lookup_gone_eyebrow', 'admin_lookup_gone_body'],
+			['signed_out', 'admin_lookup_signed_out_eyebrow', 'admin_lookup_signed_out_body']
+		]) {
+			expect(UPLOAD).toMatch(
+				new RegExp(`function tileFailureLabel[\\s\\S]{0,600}?case '${reason}':\\s*\\n\\s*return m\\.${eyebrow}\\(\\)`)
+			);
+			expect(UPLOAD).toMatch(
+				new RegExp(`function tileFailureBody[\\s\\S]{0,700}?case '${reason}':\\s*\\n\\s*return m\\.${body}\\(\\)`)
+			);
+			// Both keys are the panel's own, not a second wording of the same fact.
+			expect(PANEL).toContain(`m.${eyebrow}()`);
+			expect(PANEL).toContain(`m.${body}()`);
+		}
+		// invalid_image and unavailable share the panel's plain "Lookup failed"
+		// eyebrow, which is how its own branch renders them.
+		expect(UPLOAD).toMatch(
+			/function tileFailureBody[\s\S]{0,700}?case 'invalid_image':\s*\n\s*return m\.admin_lookup_invalid_body\(\)/
+		);
+		expect(UPLOAD).toMatch(/function tileFailureLabel[\s\S]{0,700}?default:\s*\n\s*return m\.admin_lookup_failed_eyebrow\(\)/);
+		expect(UPLOAD).toMatch(/function tileFailureBody[\s\S]{0,800}?default:\s*\n\s*return m\.admin_lookup_failed_body\(\)/);
+	});
+
+	// The panel offers Try again for exactly two reasons; every other one needs
+	// Settings, a sign-in, or a different file, and a second click would fail the
+	// same way.
+	it('offers a tile retry only where a retry can work', () => {
+		expect(UPLOAD).toMatch(
+			/function tileCanRetry\(reason: LookupFailReason\): boolean \{\s*\n\s*return reason === 'rate_limited' \|\| reason === 'unavailable';/
+		);
+		expect(PANEL).toMatch(
+			/lookup\.reason === 'rate_limited' \|\| lookup\.reason === 'unavailable'\}\s*\n\s*<button[\s\S]{0,200}?m\.admin_lookup_try_again\(\)/
+		);
+		// The button is gone in that case, replaced by the reason and, where the
+		// remedy is a page, the same Settings link the panel offers.
+		expect(UPLOAD).toMatch(
+			/\{#if tile\.lookup\.kind === 'failed' && !tileCanRetry\(tile\.lookup\.reason\)\}/
+		);
+		expect(UPLOAD).toMatch(
+			/<p class="tile-lookup-failed">\{tileFailureLabel\(tile\.lookup\.reason\)\}<\/p>\s*\n\s*<p class="tile-lookup-reason">\{tileFailureBody\(tile\.lookup\.reason\)\}<\/p>/
+		);
+		expect(UPLOAD).toMatch(
+			/\{#if tile\.lookup\.reason === 'no_key' \|\| tile\.lookup\.reason === 'key_refused'\}[\s\S]{0,300}?href="\/admin\/settings\?tab=connections">\{m\.admin_lookup_open_settings\(\)\}/
+		);
+		expect(PANEL).toContain('href="/admin/settings?tab=connections"');
+		// Where a retry does help, the button keeps it — and still names the
+		// reason, so a paused lookup does not read as a dead one.
+		expect(UPLOAD).toMatch(
+			/\{:else if tile\.lookup\.kind === 'failed'\}\{m\.admin_lookup_tile_failed_retry\(\{\s*\n\s*reason: tileFailureLabel\(tile\.lookup\.reason\)\s*\n\s*\}\)\}/
+		);
+	});
+
+	// The failure that takes the button away takes the focus standing on it with
+	// it (2.4.3) — that button is what the operator clicked to start the lookup.
+	it('hands focus on when a tile failure unmounts its button', () => {
+		expect(UPLOAD).toMatch(/bind:this=\{tileSettingsLinks\[tile\.key\]\}/);
+		expect(UPLOAD).toMatch(
+			/async function moveFocusOffTileButton\(key: number, tile: Tile\) \{\s*\n\s*if \(tile\.lookup\.kind !== 'failed' \|\| tileCanRetry\(tile\.lookup\.reason\)\) return;\s*\n\s*if \(document\.activeElement !== tileLookupButtons\[key\]\) return;/
+		);
+		expect(UPLOAD).toMatch(
+			/await tick\(\);\s*\n\s*\(tileSettingsLinks\[key\] \?\? artistSelect\)\?\.focus\(\);/
+		);
+	});
 });
 
 describe('the panel', () => {
@@ -989,7 +1062,7 @@ describe('focus after the panel goes away', () => {
 		// its element unmounts, so a synchronous delete is undone a moment later
 		// and each removal still leaves a dead key behind.
 		expect(UPLOAD).toMatch(
-			/function removeTile\([\s\S]{0,600}?lookupAborts\.delete\(key\);[\s\S]{0,600}?void tick\(\)\.then\(\(\) => \{\s*\n\s*delete tileLookupButtons\[key\];\s*\n\s*delete tileRemoveButtons\[key\];\s*\n\s*\}\);/
+			/function removeTile\([\s\S]{0,600}?lookupAborts\.delete\(key\);[\s\S]{0,600}?void tick\(\)\.then\(\(\) => \{\s*\n\s*delete tileLookupButtons\[key\];\s*\n\s*delete tileRemoveButtons\[key\];\s*\n\s*delete tileSettingsLinks\[key\];\s*\n\s*\}\);/
 		);
 	});
 
@@ -1054,10 +1127,10 @@ describe('what a lookup says out loud', () => {
 		for (const id of [
 			'admin_lookup_announce_tile_match',
 			'admin_lookup_announce_tile_no_match',
-			'admin_lookup_announce_tile_failed'
+			'admin_lookup_announce_tile_failure'
 		]) {
 			expect(UPLOAD).toMatch(
-				new RegExp(`announcer\\.say\\(\\s*m\\.${id}\\(|m\\.${id}\\(\\{ fileName`)
+				new RegExp(`announcer\\.say\\(\\s*m\\.${id}\\(|m\\.${id}\\(\\{`)
 			);
 		}
 	});
@@ -1066,7 +1139,7 @@ describe('what a lookup says out loud', () => {
 	// the outcome message is the only thing that can carry the disclosure.
 	it('says the private disclosure with a variant tile outcome', () => {
 		expect(UPLOAD).toMatch(
-			/function tileLookupLine[\s\S]{0,900}?tile\.sentPrivate && lookupSentFile\(tile\.lookup\)[\s\S]{0,300}?m\.admin_lookup_private_notice\(\)/
+			/function tileLookupLine[\s\S]{0,1200}?tile\.sentPrivate && lookupSentFile\(tile\.lookup\)[\s\S]{0,300}?m\.admin_lookup_private_notice\(\)/
 		);
 		// The two parts join through a message key, not an ASCII space in the
 		// code: ja runs them together and only the catalog can say so.
@@ -1291,7 +1364,14 @@ describe('the upload page grid', () => {
 		// bookkeeping, so the success path clears that last — cleared first, a
 		// throw above it would read as a cancel and the catch would do nothing.
 		expect(UPLOAD).toMatch(
-			/else announceTileLookup\(live\);[\s\S]{0,200}?lookupAborts\.delete\(key\);\s*\n\s*\}\)/
+			/else announceTileLookup\(live\);[\s\S]{0,200}?lookupAborts\.delete\(key\);/
+		);
+		// The one thing after the delete: a failure that takes the tile's button
+		// away has to hand focus on, and a throw out of THAT has to reach a catch
+		// that reads it as a cancelled lookup and stays quiet, rather than
+		// announcing the same outcome twice.
+		expect(UPLOAD).toMatch(
+			/lookupAborts\.delete\(key\);[\s\S]{0,220}?if \(!isParent\(key\)\) return moveFocusOffTileButton\(key, live\);\s*\n\s*\}\)/
 		);
 		expect(EDIT).toMatch(/applyPrefill\(next\);[\s\S]{0,200}?lookupAbort = null;\s*\n\s*\}\)/);
 		// One constant, shared, carrying nothing from the result.
