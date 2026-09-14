@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 // better-sqlite3 ships no bundled types and is a dev-only test dependency here.
 // @ts-expect-error - no declaration file for 'better-sqlite3'
 import Database from 'better-sqlite3';
@@ -7,8 +7,16 @@ import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { imageTags, images, tags } from '$lib/server/db/schema';
 import { makeD1 } from '$lib/server/test/d1';
-import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH } from '$lib/server/image-tags';
+import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH, replaceImageTags } from '$lib/server/image-tags';
 import { load, actions, _MAX_SCAN as MAX_SCAN, _PER_PAGE as PER_PAGE } from './+page.server';
+
+// The write helper is the real one everywhere except the one test that needs it
+// to write nothing, which no input can produce: the action counts the names
+// before it calls, so an empty answer only comes from a row vanishing mid-write.
+vi.mock('$lib/server/image-tags', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/server/image-tags')>();
+	return { ...actual, replaceImageTags: vi.fn(actual.replaceImageTags) };
+});
 
 // The backfill list (SONA-220). What is worth pinning here is which rows reach
 // the page — an image is a candidate only when its source URL is one the
@@ -305,6 +313,20 @@ describe('suggest-tags save action', () => {
 			platform
 		} as never);
 		expect(huge).toMatchObject({ status: 400, data: { error: 'too_many_tags' } });
+		expect(await tagNamesOf(db, 1)).toEqual([]);
+	});
+
+	it('reports a failure when the write stored none of the names it was given', async () => {
+		// replaceImageTags skips a name whose tag row is deleted between the unique
+		// conflict and the re-select that follows it. With every name skipped the
+		// save wrote nothing, and answering with a success would put "Saved 0 tags"
+		// and an empty chip row where the tray used to be.
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		vi.mocked(replaceImageTags).mockResolvedValueOnce([]);
+
+		const result = await actions.save({ request: form({ id: '1', tags: 'fox' }), platform } as never);
+		expect(result).toMatchObject({ status: 500, data: { error: 'save_failed' } });
 		expect(await tagNamesOf(db, 1)).toEqual([]);
 	});
 

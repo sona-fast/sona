@@ -202,6 +202,10 @@ test('Add stays reachable with nothing picked and refuses the click', async ({ p
 	await expect(tagsInput(page)).toHaveValue('');
 	await expect(page.locator('.tag-chip')).toHaveCount(2);
 	await expect(page.locator('.tag-status-line')).toHaveCount(0);
+	// And it is not refused in silence: nothing on screen moves, so the sentence
+	// in the live region is all a screen reader gets. The same words the backfill
+	// row's Save uses when it is clicked with nothing picked.
+	await expect(liveRegion(page)).toHaveText('Pick at least one tag to save.');
 });
 
 test('Add goes inert, not invisible, once the field holds every suggested tag', async ({ page }) => {
@@ -250,6 +254,10 @@ test('Add goes inert, not invisible, once the field holds every suggested tag', 
 	await expect(tagsInput(page)).toHaveValue('mammal, fox');
 	await expect(page.locator('.tag-status-line')).toHaveCount(0);
 	await expect(page.locator('.tag-chip')).toHaveCount(2);
+	// Silently: both chips are lit, so "Pick at least one tag to save." would
+	// describe the opposite of what is on screen. The region keeps what the
+	// lookup said until there is a sentence for this refusal.
+	await expect(liveRegion(page)).toHaveText('2 suggested tags from entail.dev');
 });
 
 test('a 202 says the post is not classified yet and offers another try', async ({ page }) => {
@@ -309,6 +317,12 @@ test('an empty answer about a multi-image post says only the first image was rea
 	await expect(page.getByText('No tags to suggest').first()).toBeVisible();
 	await expect(page.locator('.tag-panel-sub')).toHaveText(
 		'This post has 4 images. Suggestions come from the first one.'
+	);
+	// The caveat is what keeps the verdict honest, so it is announced with it
+	// rather than left to the eye.
+	await expect(liveRegion(page)).toHaveText(
+		"No tags to suggest. entail.dev read the post but found nothing it's confident about." +
+			' This post has 4 images. Suggestions come from the first one.'
 	);
 });
 

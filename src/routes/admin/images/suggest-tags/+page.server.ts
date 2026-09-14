@@ -159,6 +159,12 @@ export const actions: Actions = {
 		// The same persistence the edit form's save uses, so a tag written here is
 		// indistinguishable from one typed there.
 		const written = await replaceImageTags(db, id, tagNames);
+		// The count above said there was something to write, so an empty answer
+		// means every name fell away inside the write — a tag row deleted between
+		// the conflict and the re-select. Reporting success would render "Saved 0
+		// tags" over an empty chip row; the row shows the save failed instead, with
+		// its chips still there to try again.
+		if (written.length === 0) return fail(500, { error: 'save_failed' });
 		return { savedId: id, savedTags: written };
 	}
 };

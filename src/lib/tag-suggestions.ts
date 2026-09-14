@@ -371,6 +371,21 @@ export function sentenceFor(next: SuggestionState, { withTitle = false } = {}): 
 			// not empty. Nothing was sent for it, so nothing is blamed for it.
 			if (!withTitle) return m.admin_tag_suggest_bad_link_body();
 			break;
+		case 'empty': {
+			// The tray prints the multi-image note under "nothing to suggest", and it
+			// is the line that keeps the verdict honest: only the first picture was
+			// read. Left visual, a screen reader hears a verdict on the whole post.
+			// Joined through the hint's message rather than with a literal space —
+			// both sentences carry their own full stop, and Japanese sets none after
+			// one.
+			const empty = trayFor(next);
+			const sentence = m.admin_tag_suggest_status_join({ title: empty.title, body: empty.body });
+			if (next.imageCount <= 1) return sentence;
+			return m.admin_tag_suggest_hint_join({
+				first: sentence,
+				second: m.admin_tag_suggest_multi_image({ count: next.imageCount })
+			});
+		}
 		case 'idle':
 		case 'searching':
 		case 'applied':

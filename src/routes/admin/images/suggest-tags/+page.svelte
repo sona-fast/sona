@@ -333,7 +333,7 @@
 					<div class="tag-actions">
 						{@render editLink(row)}
 					</div>
-				{:else if savedTags}
+				{:else if savedTags?.length}
 					<p
 						class="tag-status-line"
 						tabindex="-1"

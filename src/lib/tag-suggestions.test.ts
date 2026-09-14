@@ -430,6 +430,20 @@ describe('the sentences the live region reads', () => {
 		);
 	});
 
+	it('carries the multi-image caveat into the empty state it qualifies', () => {
+		// The tray prints this note under "nothing to suggest" because only the
+		// first picture was read. Left out of the sentence, a screen reader hears a
+		// verdict on all four images.
+		expect(sentenceFor({ kind: 'empty', imageCount: 4 })).toBe(
+			"No tags to suggest. entail.dev read the post but found nothing it's confident about." +
+				' This post has 4 images. Suggestions come from the first one.'
+		);
+		// One image, no caveat: the tray does not draw it either.
+		expect(sentenceFor({ kind: 'empty', imageCount: 1 })).toBe(
+			"No tags to suggest. entail.dev read the post but found nothing it's confident about."
+		);
+	});
+
 	it('counts the suggestions, and says nothing for the states that have no sentence', () => {
 		expect(sentenceFor(fromResponse(200, ok(['fox', 'beach']), []))).toBe(
 			'2 suggested tags from entail.dev'

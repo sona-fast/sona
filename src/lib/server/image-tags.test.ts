@@ -89,6 +89,54 @@ function makeRacingDb(name: string) {
 	};
 }
 
+/**
+ * The same race, one step further: the other request mints `name` after this
+ * one's first look — so the insert meets the unique index — and deletes it
+ * again before the re-select that follows the conflict. Neither the insert nor
+ * the re-select yields a tag row, which is the one path that skips a name.
+ */
+function makeVanishingDb(name: string) {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(SCHEMA_SQL);
+	const d1 = makeD1(sqlite);
+	let looks = 0;
+	const around = <T>(run: () => T): T => {
+		looks += 1;
+		// Second look: the re-select after the conflict. The row the other request
+		// minted is gone by the time this one reads.
+		if (looks === 2) sqlite.prepare('DELETE FROM tags WHERE name = ?').run(name);
+		const out = run();
+		// First look found nothing; the other request mints the name now.
+		if (looks === 1) sqlite.prepare('INSERT INTO tags (name) VALUES (?)').run(name);
+		return out;
+	};
+	const racing = {
+		...d1,
+		prepare(sql: string) {
+			const stmt = d1.prepare(sql);
+			if (!/^select/i.test(sql) || !sql.includes('"tags"')) return stmt;
+			return {
+				bind: (...params: unknown[]) => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const bound = (stmt as any).bind(...params);
+					// Only the looks at THIS name; the other names in the same save go
+					// through untouched, so the test can show they still land.
+					if (!params.includes(name)) return bound;
+					return {
+						...bound,
+						raw: () => around(() => bound.raw()),
+						all: () => around(() => bound.all())
+					};
+				}
+			};
+		}
+	};
+	return {
+		db: drizzle(racing as unknown as ReturnType<typeof makeD1>, { schema }),
+		sqlite
+	};
+}
+
 type Db = ReturnType<typeof makeDb>;
 
 async function tagNamesOf(db: Db, imageId: number) {
@@ -145,6 +193,23 @@ describe('replaceImageTags', () => {
 		expect(await tagNamesOf(db, 1)).toEqual(['fox']);
 		const linked = await db.select({ tagId: imageTags.tagId }).from(imageTags).where(eq(imageTags.imageId, 1));
 		expect(linked).toEqual([{ tagId: rows[0].id }]);
+	});
+
+	// The other save minted the name and then deleted it again, so the re-select
+	// after the unique conflict finds nothing either. One name is unwritable;
+	// failing the whole save over it would throw away the names that are fine.
+	it('skips a name whose tag row is deleted between the conflict and the re-select', async () => {
+		const { db, sqlite } = makeVanishingDb('fox');
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art', imageUrl: 'https://cdn.example.com/1.png', artistId: 1 });
+
+		await expect(replaceImageTags(db, 1, 'fox, bird')).resolves.toEqual(['bird']);
+
+		// No image_tags row points at the name that went, and the one that did not
+		// go is written in the same call.
+		expect(await tagNamesOf(db, 1)).toEqual(['bird']);
+		expect(sqlite.prepare("SELECT id FROM tags WHERE name = 'fox'").all()).toHaveLength(0);
+		const linked = await db.select({ tagId: imageTags.tagId }).from(imageTags).where(eq(imageTags.imageId, 1));
+		expect(linked).toHaveLength(1);
 	});
 
 	// Clearing the Tags box is how an image loses its tags, so an empty string is

@@ -409,7 +409,12 @@ describe('the Add button and the line that confirms it', () => {
 		// added when two were — in the button, in the status line and in the live
 		// region at once.
 		expect(suggestions).toMatch(/const toAdd = \$derived\(tagsToAdd\(value, chosen\)\);/);
-		expect(suggestions).toMatch(/disabled=\{toAdd\.length === 0\}/);
+		// aria-disabled, not disabled: a real disabled attribute takes the button
+		// out of the tab order, so an operator who tabbed to it cannot find out why
+		// it does nothing. The bare-attribute check is anchored on the space or
+		// newline before it, since `aria-disabled=` ends in the same characters.
+		expect(suggestions).toMatch(/aria-disabled=\{toAdd\.length === 0\}/);
+		expect(suggestions).not.toMatch(/\sdisabled=\{toAdd/);
 		expect(suggestions).toMatch(/m\.admin_tag_suggest_add\(\{ count: toAdd\.length \}\)/);
 		expect(suggestions).toMatch(/const accepted = toAdd;/);
 		expect(suggestions).not.toMatch(/count: chosen\.length/);
