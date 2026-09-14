@@ -1575,6 +1575,9 @@ test.describe('with a key saved', () => {
 		await expect(panel(page).locator('#lookup-applied-artist')).toBeVisible();
 		expect(await page.evaluate(() => document.activeElement?.tagName ?? '')).not.toBe('BODY');
 		await expect(tileLookup(page).nth(0)).toBeFocused();
+		// Focus is on a button that says nothing about the artist, and the select
+		// that took them is elsewhere, so the live region has to carry the news.
+		await expect(page.locator(LIVE_REGION)).toContainText('Using kuttoya as the artist.');
 	});
 
 	// Nothing holds the keyboard inside the dialog, so the tile's own "Look up

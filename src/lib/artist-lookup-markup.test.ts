@@ -661,8 +661,13 @@ describe('round 11 wiring', () => {
 		// the open dialog, the id names another tile's result and following it
 		// drops the operator somewhere unrelated; the seed tile's own lookup
 		// button is the landing spot there.
+		// That landing spot is a tile's "Look up artist" button, which says nothing
+		// about the artist, and the select that took them is elsewhere on the page,
+		// so the branch speaks the same sentence the "Use {name}" click speaks. The
+		// parent path does not: the panel it lands in relabels itself to "Using
+		// {name}", and saying it too would speak the fact twice.
 		expect(created).toMatch(
-			/await tick\(\);[\s\S]{0,500}?if \(!isParent\(tile\.key\)\) \{\s*\n\s*\(tileLookupButtons\[tile\.key\] \?\? artistSelect\)\?\.focus\(\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\(document\.getElementById\('lookup-applied-artist'\) \?\? artistSelect\)\?\.focus\(\);/
+			/await tick\(\);[\s\S]{0,500}?if \(!isParent\(tile\.key\)\) \{[\s\S]{0,400}?announcer\.say\(m\.admin_lookup_announce_using\(\{ name: artist\.name \}\)\);\s*\n\s*\(tileLookupButtons\[tile\.key\] \?\? artistSelect\)\?\.focus\(\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\(document\.getElementById\('lookup-applied-artist'\) \?\? artistSelect\)\?\.focus\(\);/
 		);
 		expect(UPLOAD).toContain('bind:this={artistSelect}');
 		expect(PANEL).toContain('id="lookup-applied-artist"');

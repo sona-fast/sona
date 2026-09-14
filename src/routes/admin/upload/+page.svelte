@@ -439,6 +439,10 @@
 		// result, which would send focus to an unrelated part of the page; land on
 		// the seed tile's own lookup button there instead.
 		if (!isParent(tile.key)) {
+			// Focus lands on the seed tile's own lookup button, which is nowhere near
+			// the select the artist went into and carries no trace of the creation,
+			// so the same sentence "Use X" gives on click has to be spoken here.
+			announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
 			(tileLookupButtons[tile.key] ?? artistSelect)?.focus();
 			return;
 		}
