@@ -14,6 +14,7 @@
 		ratingTag,
 		seedStatusKind,
 		runLookup,
+		sentAfterApplyThrew,
 		strictestRating,
 		type LookupFields,
 		type LookupSite,
@@ -223,6 +224,9 @@
 		lookup = { kind: 'searching' };
 		sentPrivate = sendingPrivate;
 		if (clearedInline) announcer.say(m.admin_lookup_announce_searching_cleared());
+		// What runLookup settled on, so the catch below can keep this lookup's own
+		// answer to "did the file leave the browser" instead of assuming it did.
+		let settled: LookupState | null = null;
 		// Whether the result reached the panel. The callback writes the state
 		// before it prefills from it, so a throw out of the prefill must not be
 		// read as "nothing arrived" and rewrite the matches away. Nothing in
@@ -232,6 +236,7 @@
 		let applied = false;
 		void runLookup({ imageId: data.image.id }, { signal: controller.signal })
 			.then((next) => {
+				settled = next;
 				if (lookupAbort !== controller) return;
 				lookup = next;
 				applied = true;
@@ -243,14 +248,16 @@
 			// runLookup itself resolves on every path, so only a throw in the
 			// callback above lands here. Without this the panel would sit on
 			// "searching" for the rest of the page's life, with nothing to retry
-			// from. The request had already gone out by then, so the disclosure errs
-			// toward saying the file went — the same call runLookup's own network
-			// catch makes.
+			// from. What that synthesised failure discloses about the file having
+			// left the browser is sentAfterApplyThrew's call, off the state the
+			// request settled on — hardcoding it put a private-image notice on a
+			// client-refused too_large the bytes never left for.
 			.catch(() => {
 				if (lookupAbort !== controller) return;
 				lookupAbort = null;
 				if (!applied) {
-					lookup = { kind: 'failed', reason: 'unavailable', sent: true };
+					const sent = sentAfterApplyThrew(settled);
+					lookup = { kind: 'failed', reason: 'unavailable', sent };
 				}
 				console.error(LOOKUP_RESULT_THREW);
 			});
