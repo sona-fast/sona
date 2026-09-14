@@ -50,10 +50,10 @@ const MAX_RAW_TAG_LENGTH = 200;
 // for. A classify is one enqueue plus at most two polls, worst case about
 // 3 + 8 + 0.25 + 8 seconds; the caller shows a pending state while it waits.
 export const POST_TIMEOUT_MS = 8000;
-const CLASSIFY_TIMEOUT_MS = 3000;
+export const CLASSIFY_TIMEOUT_MS = 3000;
 export const POLL_TIMEOUT_MS = 8000;
-const POLL_PAUSE_MS = 250;
-const POLL_ATTEMPTS = 2;
+export const POLL_PAUSE_MS = 250;
+export const POLL_ATTEMPTS = 2;
 
 export type EntailRating = 'safe' | 'questionable' | 'explicit';
 
