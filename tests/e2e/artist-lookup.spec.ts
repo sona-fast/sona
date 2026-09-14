@@ -1690,14 +1690,14 @@ test.describe('with a key saved', () => {
 	test('the variant label field is named after the file it belongs to', async ({ page }) => {
 		await twoDoneTiles(page);
 
-		const label = page.getByRole('textbox', { name: 'Label for back.png' });
+		const label = page.getByRole('textbox', { name: 'Variant label for back.png' });
 		await expect(label).toHaveCount(1);
 		await label.fill('Transparent BG');
-		await expect(page.getByRole('textbox', { name: 'Label for back.png' })).toHaveValue(
+		await expect(page.getByRole('textbox', { name: 'Variant label for back.png' })).toHaveValue(
 			'Transparent BG'
 		);
 		// The parent tile carries no label field, so no second name collides.
-		await expect(page.getByRole('textbox', { name: 'Label for front.png' })).toHaveCount(0);
+		await expect(page.getByRole('textbox', { name: 'Variant label for front.png' })).toHaveCount(0);
 	});
 
 	test('the parent drives the shared fields, and moving it re-derives them', async ({ page }) => {
