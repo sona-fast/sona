@@ -55,7 +55,12 @@ export function withFailingSettingsRead(d1: D1Database): D1Database {
 		const fail = () => {
 			throw new Error('D1_ERROR: settings read failed');
 		};
-		return { bind: () => ({ run: fail, all: fail, raw: fail, _run: fail }) };
+		// The terminals sit beside bind, not only behind it. A settings read with
+		// no parameters calls them straight off the statement, and a stub that
+		// only answers bind throws a TypeError there — which a test asserting on
+		// the D1 failure would either miss or credit to the wrong cause.
+		const terminals = { run: fail, all: fail, raw: fail, first: fail, _run: fail };
+		return { bind: () => terminals, ...terminals };
 	}
 	return { prepare, batch: real.batch } as unknown as D1Database;
 }
