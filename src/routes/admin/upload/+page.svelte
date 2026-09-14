@@ -547,7 +547,7 @@
 		// read as "nothing arrived" and rewrite matches away.
 		let applied = false;
 		void runLookup({ file: tile.file }, { signal: controller.signal })
-			.then((next) => {
+			.then(async (next) => {
 				settled = next;
 				// Cancelled, or the tile was removed while the request was out.
 				if (lookupAborts.get(key) !== controller) return;
@@ -567,17 +567,24 @@
 				// group-mode round trip that made this a snapshot is handled where it
 				// happens: the "new" radio re-derives from the parent tile.
 				if (isParent(key)) applyShared(next);
-				// A variant tile's outcome renders as plain text on the tile, outside
-				// the panel's live region — say it out loud, naming the file, or a
-				// screen-reader user has no way to know the lookup finished (4.1.3).
-				else announceTileLookup(live);
+				else {
+					// Focus first, then the announcement — the same order the created
+					// artist takes above. A failure that unmounts the button takes the
+					// focus standing on it (2.4.3), and moving focus in the same frame
+					// the polite region mutates can cost the queued sentence; a throw
+					// out of the announcement would skip the focus call entirely. The
+					// await is the tick the replacement control needs to exist; for a
+					// failure that keeps its button, and for every other outcome, this
+					// resolves without touching focus.
+					await moveFocusOffTileButton(key, live);
+					// A variant tile's outcome renders as plain text on the tile, outside
+					// the panel's live region — say it out loud, naming the file, or a
+					// screen-reader user has no way to know the lookup finished (4.1.3).
+					announceTileLookup(live);
+				}
 				// Cleared last, so a throw anywhere above still reads as this
 				// lookup's in the catch below rather than as a cancelled one.
 				lookupAborts.delete(key);
-				// Past the delete on purpose: a throw in here lands in the catch
-				// below, which returns on the missing abort entry rather than
-				// announcing this tile's outcome a second time.
-				if (!isParent(key)) return moveFocusOffTileButton(key, live);
 			})
 			// runLookup itself resolves on every path, so only a throw in the
 			// callback above lands here. Without this the tile would sit on
@@ -669,11 +676,17 @@
 		}
 	}
 
-	/** The two reasons the panel offers Try again for. A missing or refused key,
-	 * an expired session, a deleted image, and a file FuzzySearch would not read
-	 * all hit the same wall on a second click, so the tile stops offering one. */
+	/** The reasons the tile keeps Try again for. A missing or refused key, a
+	 * deleted image, and a file FuzzySearch would not read all hit the same wall
+	 * on a second click, so the tile stops offering one. An expired session is
+	 * here even though the panel treats it as a dead end: the copy tells the
+	 * operator to sign in again and look up the artist, and the panel gets back
+	 * to a usable state through its Close while a variant tile has no other
+	 * control — without the button, signing in elsewhere leaves that tile with
+	 * nothing to click. A retry while still signed out re-renders what is
+	 * already there. */
 	function tileCanRetry(reason: LookupFailReason): boolean {
-		return reason === 'rate_limited' || reason === 'unavailable';
+		return reason === 'rate_limited' || reason === 'unavailable' || reason === 'signed_out';
 	}
 
 	/** Such a failure unmounts the button the operator is standing on — it is the

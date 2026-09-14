@@ -98,10 +98,12 @@ describe('lookup button and its disclosure hint', () => {
 
 	// The panel offers Try again for exactly two reasons; every other one needs
 	// Settings, a sign-in, or a different file, and a second click would fail the
-	// same way.
+	// same way. The tile keeps one for an expired session too: the panel gets
+	// back to a usable state through Close, while a variant tile whose button
+	// went away has nothing left to click after the operator signs in elsewhere.
 	it('offers a tile retry only where a retry can work', () => {
 		expect(UPLOAD).toMatch(
-			/function tileCanRetry\(reason: LookupFailReason\): boolean \{\s*\n\s*return reason === 'rate_limited' \|\| reason === 'unavailable';/
+			/function tileCanRetry\(reason: LookupFailReason\): boolean \{\s*\n\s*return reason === 'rate_limited' \|\| reason === 'unavailable' \|\| reason === 'signed_out';/
 		);
 		expect(PANEL).toMatch(
 			/lookup\.reason === 'rate_limited' \|\| lookup\.reason === 'unavailable'\}\s*\n\s*<button[\s\S]{0,200}?m\.admin_lookup_try_again\(\)/
@@ -1138,7 +1140,12 @@ describe('what a lookup says out loud', () => {
 	// A variant tile's outcome renders as plain text on the tile, outside the
 	// panel's live region, so nothing announced that the lookup finished.
 	it('announces a tile lookup by file name, one message per outcome', () => {
-		expect(UPLOAD).toMatch(/else announceTileLookup\(live\)/);
+		// Focus moves before the sentence is queued: a polite region mutating in
+		// the same frame as a focus change can cost the sentence, and a throw out
+		// of the announcement would otherwise skip the focus call (2.4.3).
+		expect(UPLOAD).toMatch(
+			/await moveFocusOffTileButton\(key, live\);[\s\S]{0,400}?announceTileLookup\(live\);/
+		);
 		for (const id of [
 			'admin_lookup_announce_tile_match',
 			'admin_lookup_announce_tile_no_match',
@@ -1352,7 +1359,9 @@ describe('the upload page grid', () => {
 		// FuzzySearch on a lookup its own too_large gate refused to send.
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(/let settled: LookupState \| null = null;/);
-			expect(source).toMatch(/\.then\(\(next\) => \{\s*\n\s*settled = next;/);
+			// The upload page's callback is async: it awaits the focus handoff
+			// before it announces the outcome.
+			expect(source).toMatch(/\.then\((?:async )?\(next\) => \{\s*\n\s*settled = next;/);
 			expect(source).toMatch(/const sent = sentAfterApplyThrew\(settled\);/);
 			expect(source).toMatch(/\n\t\tsentAfterApplyThrew,\n/);
 			expect(source).not.toMatch(/reason: 'unavailable', sent: true/);
@@ -1378,15 +1387,13 @@ describe('the upload page grid', () => {
 		// The catch tells its own lookup from a cancelled one by the abort
 		// bookkeeping, so the success path clears that last — cleared first, a
 		// throw above it would read as a cancel and the catch would do nothing.
+		// Both the focus handoff and the announcement sit above the delete for
+		// that reason.
 		expect(UPLOAD).toMatch(
-			/else announceTileLookup\(live\);[\s\S]{0,200}?lookupAborts\.delete\(key\);/
+			/announceTileLookup\(live\);[\s\S]{0,200}?lookupAborts\.delete\(key\);/
 		);
-		// The one thing after the delete: a failure that takes the tile's button
-		// away has to hand focus on, and a throw out of THAT has to reach a catch
-		// that reads it as a cancelled lookup and stays quiet, rather than
-		// announcing the same outcome twice.
 		expect(UPLOAD).toMatch(
-			/lookupAborts\.delete\(key\);[\s\S]{0,220}?if \(!isParent\(key\)\) return moveFocusOffTileButton\(key, live\);\s*\n\s*\}\)/
+			/await moveFocusOffTileButton\(key, live\);[\s\S]{0,400}?lookupAborts\.delete\(key\);/
 		);
 		expect(EDIT).toMatch(/applyPrefill\(next\);[\s\S]{0,200}?lookupAbort = null;\s*\n\s*\}\)/);
 		// One constant, shared, carrying nothing from the result.

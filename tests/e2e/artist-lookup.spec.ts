@@ -2243,20 +2243,20 @@ test.describe('with a key saved', () => {
 		await expect(tileLookup(page)).toHaveCount(1);
 	});
 
-	// The same shape for an expired session: nothing was sent, Settings is not
-	// the remedy, and a retry would meet the same 401.
+	// An expired session names itself on the button and keeps it. Settings is not
+	// the remedy, and the sign-in happens in another tab — so the tile has to
+	// still offer the click that picks the lookup back up. Taking the button away
+	// left that tile with no control at all.
 	test('a variant tile whose session expired says to sign in again', async ({ page }) => {
 		await stubLookup(page, {}, 401);
 		await twoDoneTiles(page);
 
 		await tileLookup(page).nth(1).click();
 
-		await expect(page.locator('.tile-lookup-failed')).toHaveText('Signed out');
-		await expect(page.locator('.tile-lookup-reason')).toHaveText(
-			'Your admin session expired. Sign in again, then look up the artist.'
-		);
+		await expect(tileLookup(page).nth(1)).toContainText('Signed out · Try again');
+		await expect(page.locator('.tile-lookup-failed')).toHaveCount(0);
 		await expect(page.getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
-		await expect(tileLookup(page)).toHaveCount(1);
+		await expect(tileLookup(page)).toHaveCount(2);
 	});
 
 	// The parent tile keeps its button whatever the reason: its failure is the
