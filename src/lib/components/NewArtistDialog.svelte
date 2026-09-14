@@ -151,6 +151,10 @@
 	// at the top of the page (2.4.3).
 	const opener = typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null);
 	onDestroy(() => {
+		// A lookup seed arms the debounce on mount, so closing the dialog inside
+		// those 250 ms would otherwise fire a registry search for a dialog that is
+		// gone and land its result in the state of a destroyed component.
+		clearTimeout(searchTimer);
 		if (opener?.isConnected) opener.focus();
 	});
 

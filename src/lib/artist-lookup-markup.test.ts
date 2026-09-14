@@ -343,7 +343,14 @@ describe('the "From lookup" tag', () => {
 			expect(source).toMatch(
 				/<label class="field-label" for="sourcePostUrl">[\s\S]*?<span class="lookup-tag" id="source-lookup-tag">/
 			);
-			expect(source).toMatch(/aria-describedby=\{dateTagged \? 'commissioned-lookup-tag' : undefined\}/);
+			// The date's hint sat inside the wrapping label before the restructure,
+			// which put it in the input's accessible name. As a sibling it reaches a
+			// screen reader only if something references it, so it is described
+			// always and the tag joins it when there is one (1.3.1).
+			expect(source).toMatch(/<small class="hint" id="commissioned-hint">/);
+			expect(source).toMatch(
+				/aria-describedby=\{dateTagged \? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'\}/
+			);
 			expect(source).toMatch(/aria-describedby=\{sourceTagged \? 'source-lookup-tag' : undefined\}/);
 			// Editing a tagged field drops its tag — however the handler is spelled.
 			expect(source).toMatch(/oninput=\{[^}]*dateTagged = false/);
@@ -974,7 +981,7 @@ describe('focus after the panel goes away', () => {
 	});
 
 	it('gives the dialog its opener back', () => {
-		expect(DIALOG).toMatch(/onDestroy\([\s\S]{0,120}?opener\?\.isConnected[\s\S]{0,60}?focus\(\)/);
+		expect(DIALOG).toMatch(/onDestroy\([\s\S]{0,400}?opener\?\.isConnected[\s\S]{0,60}?focus\(\)/);
 	});
 
 	// "Use {name}" and "Using {name}" are two branches of the same snippet, so
@@ -1356,6 +1363,10 @@ describe('the new-artist dialog prefill', () => {
 
 	it('searches the registry once on open for a seeded name', () => {
 		expect(DIALOG).toMatch(/if \(prefillSource === 'lookup'\) onNameInput\(\);/);
+		// That arms the 250 ms debounce on mount, so Cancel or Escape inside the
+		// window used to fire a registry search for a dialog that no longer
+		// exists and write its result into the destroyed component's state.
+		expect(DIALOG).toMatch(/onDestroy\(\(\) => \{\s*\n(?:\s*\/\/[^\n]*\n)*\s*clearTimeout\(searchTimer\);/);
 	});
 
 	// Seeds, not bindings: read once through untrack so a later prop change

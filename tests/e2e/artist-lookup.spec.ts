@@ -270,6 +270,16 @@ test.describe('with a key saved', () => {
 			'aria-describedby',
 			'source-lookup-tag'
 		);
+		// The date's hint is a sibling of its input rather than inside the label,
+		// so it reaches a screen reader only through aria-describedby. The tag
+		// joins the hint instead of replacing it.
+		await expect(page.locator('input[name="commissionedAt"]')).toHaveAttribute(
+			'aria-describedby',
+			'commissioned-hint commissioned-lookup-tag'
+		);
+		await expect(page.locator('input[name="commissionedAt"]')).toHaveAccessibleDescription(
+			/Any date that's meaningful to you works here/
+		);
 		// The result link opens elsewhere without handing over the opener.
 		const link = panel(page).getByRole('link', { name: /View post/ });
 		await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
@@ -293,6 +303,10 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('input[name="commissionedAt"]')).not.toHaveAttribute(
 			'aria-describedby',
 			'commissioned-lookup-tag'
+		);
+		// The tag goes, the hint stays described.
+		await expect(page.locator('input[name="commissionedAt"]')).toHaveAccessibleDescription(
+			/Any date that's meaningful to you works here/
 		);
 		// The other field's tag is untouched, and so is its half of the line. The
 		// edited date is neither claimed nor called untouched: "left the commissioned
@@ -536,6 +550,11 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('2020-01-02');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// The hint under the date is a sibling of the input here too, so it is
+		// described with no tag on the field at all.
+		await expect(dateInput(page)).toHaveAccessibleDescription(
+			/Any date that's meaningful to you works here/
+		);
 	});
 
 	// The upload page's own pair, the same two orders as the edit page's below.
@@ -1905,21 +1924,22 @@ test.describe('with a key saved', () => {
 	test('a group-mode round trip keeps fields a closed lookup filled', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await oneDoneTile(page);
-		// oneDoneTile retries the whole navigate-and-drop block, so a goto from an
-		// earlier attempt can still be in flight here. Resolved against the
-		// outgoing document, the "New piece" radio detached between the locator
-		// and the click and the round trip failed for a reason it says nothing
-		// about. Settle the navigation before touching the group-mode radios.
-		await page.waitForURL('**/admin/upload');
-		await page.waitForLoadState('load');
-
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await panel(page).getByRole('button', { name: 'Close' }).click();
 		await expect(panel(page)).toBeHidden();
 
-		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
-		await page.getByRole('radio', { name: 'New piece' }).check();
+		// Each toggle re-renders the block the radios live in, so a radio can
+		// detach between the locator and the click. Retry the check itself, and
+		// wait for the mode's own content before asking for the other radio:
+		// existing mode brings the parent select with it.
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		}).toPass();
+		await expect(page.getByRole('combobox', { name: 'Variant of' })).toBeVisible();
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'New piece' }).check();
+		}).toPass();
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();

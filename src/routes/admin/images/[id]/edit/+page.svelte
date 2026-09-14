@@ -736,9 +736,13 @@
 					// neither claims it nor says it was left alone.
 					dateTagged = false;
 				}}
-				aria-describedby={dateTagged ? 'commissioned-lookup-tag' : undefined}
+				aria-describedby={dateTagged ? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'}
 			/>
-			<small class="hint">{m.admin_hint_commissioned_date()}</small>
+			<!-- The hint was inside the wrapping label before this restructure, which
+			     put it in the input's accessible name. Out here it is a plain sibling,
+			     so it is referenced instead — otherwise a screen reader never gets it
+			     (1.3.1). The lookup tag joins it when there is one. -->
+			<small class="hint" id="commissioned-hint">{m.admin_hint_commissioned_date()}</small>
 		</div>
 
 		<div class="nsfw-row">
