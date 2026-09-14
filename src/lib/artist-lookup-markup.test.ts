@@ -107,21 +107,36 @@ describe('lookup button and its disclosure hint', () => {
 			/lookup\.reason === 'rate_limited' \|\| lookup\.reason === 'unavailable'\}\s*\n\s*<button[\s\S]{0,200}?m\.admin_lookup_try_again\(\)/
 		);
 		// The button is gone in that case, replaced by the reason and, where the
-		// remedy is a page, the same Settings link the panel offers.
+		// remedy is a page, the same Settings link the panel offers — on a variant
+		// tile only. The parent's failure is the panel's to report, and its button
+		// is the focus target the panel's Close returns to, so the parent stays on
+		// the button branch however its lookup fails.
 		expect(UPLOAD).toMatch(
-			/\{#if tile\.lookup\.kind === 'failed' && !tileCanRetry\(tile\.lookup\.reason\)\}/
+			/\{#if tile\.lookup\.kind === 'failed' && !tileCanRetry\(tile\.lookup\.reason\) && !isParent\(tile\.key\)\}/
 		);
 		expect(UPLOAD).toMatch(
 			/<p class="tile-lookup-failed">\{tileFailureLabel\(tile\.lookup\.reason\)\}<\/p>\s*\n\s*<p class="tile-lookup-reason">\{tileFailureBody\(tile\.lookup\.reason\)\}<\/p>/
 		);
 		expect(UPLOAD).toMatch(
-			/\{#if tile\.lookup\.reason === 'no_key' \|\| tile\.lookup\.reason === 'key_refused'\}[\s\S]{0,300}?href="\/admin\/settings\?tab=connections">\{m\.admin_lookup_open_settings\(\)\}/
+			/\{#if tile\.lookup\.reason === 'no_key' \|\| tile\.lookup\.reason === 'key_refused'\}[\s\S]{0,500}?href="\/admin\/settings\?tab=connections"[\s\S]{0,120}?\{m\.admin_lookup_open_settings\(\)\}/
 		);
 		expect(PANEL).toContain('href="/admin/settings?tab=connections"');
 		// Where a retry does help, the button keeps it — and still names the
 		// reason, so a paused lookup does not read as a dead one.
 		expect(UPLOAD).toMatch(
 			/\{:else if tile\.lookup\.kind === 'failed'\}\{m\.admin_lookup_tile_failed_retry\(\{\s*\n\s*reason: tileFailureLabel\(tile\.lookup\.reason\)\s*\n\s*\}\)\}/
+		);
+	});
+
+	// Both Settings remedies leave the page they are offered from intact: the
+	// upload page holds a whole batch and the edit page an unsaved row, and
+	// either would be discarded by a same-tab navigation to fix the key.
+	it('opens the Settings remedy in a new tab from the tile and the panel', () => {
+		expect(UPLOAD).toMatch(
+			/class="tile-settings-link"[\s\S]{0,300}?target="_blank"\s*\n\s*rel="noopener noreferrer"/
+		);
+		expect(PANEL).toMatch(
+			/href="\/admin\/settings\?tab=connections"\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"/
 		);
 	});
 
@@ -235,7 +250,7 @@ describe('the panel', () => {
 		expect(PANEL).toContain('m.admin_lookup_no_key_eyebrow()');
 		expect(PANEL).toContain('m.admin_lookup_no_key_body()');
 		expect(PANEL).toMatch(
-			/lookup\.reason === 'key_refused' \|\| lookup\.reason === 'no_key'[\s\S]{0,200}?admin_lookup_open_settings/
+			/lookup\.reason === 'key_refused' \|\| lookup\.reason === 'no_key'[\s\S]{0,500}?admin_lookup_open_settings/
 		);
 	});
 

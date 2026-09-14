@@ -1055,18 +1055,27 @@
 					</div>
 					<div class="tile-meta">{tile.width} x {tile.height} &bull; {formatSize(tile.fileSize)}</div>
 					{#if data.lookupEnabled && isGroup && tile.status === 'done'}
-						{#if tile.lookup.kind === 'failed' && !tileCanRetry(tile.lookup.reason)}
+						{#if tile.lookup.kind === 'failed' && !tileCanRetry(tile.lookup.reason) && !isParent(tile.key)}
 							<!-- A retry cannot fix a key that went away, an expired session,
 							     or a file FuzzySearch refused, so the tile states the reason
 							     the panel's way and points at the remedy instead of offering
-							     a button that would fail the same way. -->
+							     a button that would fail the same way. Variant tiles only:
+							     the parent's failure is reported by the shared panel, which
+							     carries the same reason and the same Settings action, and
+							     the parent's button is where the panel's Close sends focus
+							     back to (2.4.3), so it has to stay mounted. -->
 							<p class="tile-lookup-failed">{tileFailureLabel(tile.lookup.reason)}</p>
 							<p class="tile-lookup-reason">{tileFailureBody(tile.lookup.reason)}</p>
 							{#if tile.lookup.reason === 'no_key' || tile.lookup.reason === 'key_refused'}
+								<!-- A new tab, like the other lookup links: navigating this
+								     page away would drop the batch — the tiles, their labels,
+								     the shared fields — with no way back to it. -->
 								<a
 									class="tile-settings-link"
 									bind:this={tileSettingsLinks[tile.key]}
-									href="/admin/settings?tab=connections">{m.admin_lookup_open_settings()}</a
+									href="/admin/settings?tab=connections"
+									target="_blank"
+									rel="noopener noreferrer">{m.admin_lookup_open_settings()}</a
 								>
 							{/if}
 						{:else}

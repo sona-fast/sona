@@ -485,6 +485,11 @@ test.describe('with a key saved', () => {
 			'href',
 			'/admin/settings?tab=connections'
 		);
+		// A new tab: the remedy must not navigate the upload away, batch and all.
+		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAttribute(
+			'target',
+			'_blank'
+		);
 		await expect(panel(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
 		// Nothing was filled.
 		await expect(page.locator('input[name="sourcePostUrl"]')).toHaveValue('');
@@ -2226,8 +2231,11 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('.tile-lookup-reason')).toHaveText(
 			'This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.'
 		);
-		const settings = page.getByRole('link', { name: 'Open Settings' });
+		const settings = page.locator('a.tile-settings-link');
 		await expect(settings).toHaveAttribute('href', '/admin/settings?tab=connections');
+		// A new tab, or following the remedy would throw the batch away.
+		await expect(settings).toHaveAttribute('target', '_blank');
+		await expect(settings).toHaveAttribute('rel', 'noopener noreferrer');
 		// The button the operator was standing on is gone with the retry it
 		// offered, so focus is handed to the remedy that replaced it (2.4.3).
 		await expect(settings).toBeFocused();
@@ -2249,6 +2257,35 @@ test.describe('with a key saved', () => {
 		);
 		await expect(page.getByRole('link', { name: 'Open Settings' })).toHaveCount(0);
 		await expect(tileLookup(page)).toHaveCount(1);
+	});
+
+	// The parent tile keeps its button whatever the reason: its failure is the
+	// shared panel's to report, and that button is where the panel's Close sends
+	// focus back to. Swapping it for the tile's own reason line left the close
+	// with nothing to focus and dropped focus to the body (2.4.3).
+	test('a parent tile whose key went away keeps the button Close returns to', async ({ page }) => {
+		await stubLookup(page, { enabled: false });
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).focus();
+		await tileLookup(page).nth(0).click();
+
+		// Both tiles still offer a button, and the parent's names the reason.
+		await expect(tileLookup(page)).toHaveCount(2);
+		await expect(tileLookup(page).nth(0)).toContainText('No key');
+		// The tile itself says nothing: the panel carries the reason and remedy.
+		await expect(page.locator('.tile-lookup-failed')).toHaveCount(0);
+		await expect(page.locator('a.tile-settings-link')).toHaveCount(0);
+		await expect(panel(page)).toContainText(
+			'This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.'
+		);
+		await expect(panel(page).getByRole('link', { name: 'Open Settings' })).toHaveAttribute(
+			'target',
+			'_blank'
+		);
+
+		await panel(page).getByRole('button', { name: 'Close' }).click();
+		await expect(tileLookup(page).nth(0)).toBeFocused();
 	});
 
 	// Last: leaves the DB as the seed built it, for whatever runs next on this

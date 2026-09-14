@@ -517,7 +517,15 @@
 				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
 			{:else if lookup.kind === 'failed'}
 				{#if lookup.reason === 'key_refused' || lookup.reason === 'no_key'}
-					<a class="btn btn-secondary" href="/admin/settings?tab=connections">{m.admin_lookup_open_settings()}</a>
+					<!-- A new tab, like the match links above: both pages that mount this
+					     panel hold unsaved work — an upload batch, an edit in progress —
+					     and navigating them away to fix the key would discard it. -->
+					<a
+						class="btn btn-secondary"
+						href="/admin/settings?tab=connections"
+						target="_blank"
+						rel="noopener noreferrer">{m.admin_lookup_open_settings()}</a
+					>
 				{:else if lookup.reason === 'rate_limited' || lookup.reason === 'unavailable'}
 					<button type="button" class="btn btn-secondary" onclick={onretry}>{m.admin_lookup_try_again()}</button>
 				{/if}
