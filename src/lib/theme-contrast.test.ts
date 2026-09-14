@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { THEMES } from './themes';
 import { ALL_THEMES } from './themes/all.ts';
 import { resolveToken, type ThemeMode } from './themes/cascade.ts';
 import { TOKEN_CSS_NAMES, cssName, type TokenKey } from './themes/types.ts';
@@ -157,18 +156,14 @@ function hoverBorderMix(selector: string): { pct: number; token: string } {
 
 describe('destructive button WCAG AA contrast, every theme × mode', () => {
 	// The default theme lives on :root / [data-theme='light']; alternate themes
-	// on [data-theme-id='<id>'] and its [data-theme='light'] variant.
-	const blocks = THEMES.flatMap(({ id }) =>
-		id === 'default'
-			? [
-					{ name: 'default dark', sel: ':root' },
-					{ name: 'default light', sel: "[data-theme='light']" }
-				]
-			: [
-					{ name: `${id} dark`, sel: `[data-theme-id='${id}']` },
-					{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
-				]
-	);
+	// on [data-theme-id='<id>'] and its [data-theme='light'] variant — all of
+	// which the generator already spells out, so take them from there rather than
+	// from a copy that can drift (THEME_BLOCKS below is the same list, but it is
+	// declared further down this file and the describe body runs at collection).
+	const blocks = [...BLOCK_BY_SELECTOR].map(([sel, { id, mode }]) => ({
+		name: `${id} ${mode}`,
+		sel
+	}));
 
 	for (const { name, sel } of blocks) {
 		it(`${name}: destructive-foreground text on destructive buttons meets 4.5:1`, () => {
@@ -640,22 +635,13 @@ describe('.btn hover-state WCAG AA contrast, every theme × variant (#103)', () 
 
 	// Dark modes use the base `.btn-*:hover` rule; light modes the
 	// `[data-theme='light'] .btn-*:hover` override (every light theme carries that
-	// attribute, so one override branch serves them all).
-	const themeBlocks = THEMES.flatMap(({ id }) =>
-		id === 'default'
-			? [
-					{ name: 'default dark', block: ':root', mode: 'dark' as const },
-					{ name: 'default light', block: "[data-theme='light']", mode: 'light' as const }
-				]
-			: [
-					{ name: `${id} dark`, block: `[data-theme-id='${id}']`, mode: 'dark' as const },
-					{
-						name: `${id} light`,
-						block: `[data-theme-id='${id}'][data-theme='light']`,
-						mode: 'light' as const
-					}
-				]
-	);
+	// attribute, so one override branch serves them all). The blocks themselves
+	// come from the generator's own selectors, not a hardcoded copy.
+	const themeBlocks = [...BLOCK_BY_SELECTOR].map(([block, { id, mode }]) => ({
+		name: `${id} ${mode}`,
+		block,
+		mode
+	}));
 
 	for (const { name, block, mode } of themeBlocks) {
 		for (const v of variants) {
@@ -937,7 +923,10 @@ describe('SONA-124 chip CSS keeps the --foreground token (R2-A3)', () => {
 describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)', () => {
 	const banners: Array<{ file: string; selector: string }> = [
 		{ file: './components/VrAvatarForm.svelte', selector: '.banner.err' },
-		{ file: './components/VrViewer.svelte', selector: '.load-error' }
+		{ file: './components/VrViewer.svelte', selector: '.load-error' },
+		// Same banner shape on the sticker-pack form. Its text is --foreground
+		// today, so this row pins that rather than fixing anything (r4-06).
+		{ file: './components/StickerPackForm.svelte', selector: '.banner.err' }
 	];
 
 	for (const { file, selector } of banners) {
@@ -970,87 +959,122 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 });
 
 // The status chips and callouts paint their label in the SAME ink as their
-// fill: color-mix(in srgb, var(--status-ok|--status-warn) N%, transparent) over
-// whatever surface the chip sits on, with the label left at the raw token. That
-// tint lifts the surface toward the ink, so the real ratio is the ink against
-// the composite, not against the bare --background or --card that the resting
-// sweep measures. Three percentages are in use (12% in the Cloudflare setup
-// dialog, 15% on the VR admin page, 20% on the observability page); each is
-// pinned to its source below, so retuning a tint re-runs this math instead of
-// silently moving the label closer to its own background.
+// fill: color-mix(in srgb, var(--<ink>) N%, transparent) over whatever surface
+// the chip sits on, with the label left at the raw token. That tint lifts the
+// surface toward the ink, so the real ratio is the ink against the composite,
+// not against the bare --background or --card that the resting sweep measures.
+//
+// --destructive is in the sweep too, not only the status inks: the
+// observability page's .sbadge.red paints destructive-on-destructive-tint,
+// which is the same self-tint shape and fails in nine theme × mode × surface
+// combinations (recorded below). Its SOLID counterpart is a different pairing
+// and lives in the destructive-button describe at the top of this file.
+//
+// Each row below is one RULE (file + selector), not a percentage: the tint
+// percentage and the ink token are parsed out of the rule itself, so a retuned
+// chip re-runs its own math instead of matching a hardcoded table.
 //
 // --status-attention is deliberately absent: nothing paints a tint of it (it is
 // small text on a plain surface, covered by the SONA-162 describe below).
 describe('status-ink text on its own tint (SONA-209)', () => {
-	const TINTS: Array<{ pct: number; file: string }> = [
-		{ pct: 12, file: './components/CloudflareSetupDialog.svelte' },
-		{ pct: 15, file: '../routes/admin/vr/+page.svelte' },
-		{ pct: 20, file: '../routes/admin/observability/+page.svelte' }
+	const TINTED_RULES: Array<{ file: string; selector: string }> = [
+		{ file: './components/CloudflareSetupDialog.svelte', selector: '.scope' },
+		{ file: './components/CloudflareSetupDialog.svelte', selector: '.callout' },
+		{ file: '../routes/admin/vr/+page.svelte', selector: '.vis-chip.published' },
+		{ file: '../routes/admin/vr/+page.svelte', selector: '.vis-chip.mature' },
+		{ file: '../routes/admin/observability/+page.svelte', selector: '.en' },
+		{ file: '../routes/admin/observability/+page.svelte', selector: '.sbadge.amber' },
+		{ file: '../routes/admin/observability/+page.svelte', selector: '.sbadge.red' }
 	];
-	const STATUS_INKS = ['status-ok', 'status-warn'] as const;
 	const SURFACES = ['background', 'card'] as const;
+
+	// Read each rule once: the tint percentage, the token it mixes, and the token
+	// the label is painted with. A rule that stops self-tinting (or stops being
+	// found at all) throws here rather than dropping silently out of the sweep.
+	const TINTS = TINTED_RULES.map(({ file, selector }) => {
+		const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
+		if (!body) throw new Error(`${selector} rule not found in ${file}`);
+		const tint = body.match(
+			/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*transparent\)/
+		);
+		if (!tint) throw new Error(`${file} ${selector} no longer tints with a color-mix over transparent`);
+		const label = body.match(/(?:^|[;{]\s*)color:\s*var\(--([\w-]+)\)/)?.[1];
+		return { file, selector, ink: tint[1], pct: Number(tint[2]), label };
+	});
 
 	// Same bargain as KNOWN_FAILURES above: record the ratio measured when this
 	// describe was written rather than silence the assert, because no palette
 	// value moves in SONA-209. Terracotta light's status inks are the palest of
 	// the three themes, and its page background is the lighter of the two
-	// surfaces, so that is where the ink and its tint converge.
+	// surfaces, so that is where a status ink and its tint converge. --destructive
+	// is a saturated red in every palette and sits close to its own 20% tint on
+	// most of them, which is why its failures are not confined to one theme.
 	const TINT_KNOWN_FAILURES = new Map<string, number>([
+		['terracotta light status-ok 14% on background', 4.43],
 		['terracotta light status-ok 15% on background', 4.38],
-		['terracotta light status-ok 20% on background', 4.07],
 		['terracotta light status-warn 15% on background', 4.34],
-		['terracotta light status-warn 20% on background', 4.02]
+		['terracotta light status-warn 20% on background', 4.02],
+		['ember dark destructive 20% on card', 4.31],
+		['ember light destructive 20% on background', 3.79],
+		['ember light destructive 20% on card', 4.19],
+		['aurora dark destructive 20% on card', 4.47],
+		['aurora light destructive 20% on background', 3.47],
+		['aurora light destructive 20% on card', 3.73],
+		['terracotta dark destructive 20% on background', 4.13],
+		['terracotta dark destructive 20% on card', 3.72],
+		['terracotta light destructive 20% on background', 3.57]
 	]);
 
-	for (const { pct, file } of TINTS) {
-		it(`${file} still tints a status token at ${pct}%`, () => {
-			const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+	for (const { file, selector, ink, pct, label } of TINTS) {
+		it(`${file} ${selector} still paints --${ink} on its own ${pct}% tint`, () => {
 			expect(
-				source,
-				`${file} no longer mixes a status token at ${pct}% — update the TINTS table to the percentage it uses now`
-			).toMatch(new RegExp(`color-mix\\(in srgb,\\s*var\\(--status-[\\w-]+\\)\\s*${pct}%`));
+				label,
+				`${file} ${selector} tints with --${ink} but labels with --${label} — the sweep below measures the self-tint pairing only`
+			).toBe(ink);
 		});
 	}
 
 	it('has no allowlist entry this sweep does not generate', () => {
 		const generated = new Set(
-			TINTS.flatMap(({ pct }) =>
-				STATUS_INKS.flatMap((ink) =>
-					SURFACES.flatMap((surface) =>
-						THEME_BLOCKS.map(({ name }) => `${name} ${ink} ${pct}% on ${surface}`)
-					)
+			TINTS.flatMap(({ ink, pct }) =>
+				SURFACES.flatMap((surface) =>
+					THEME_BLOCKS.map(({ name }) => `${name} ${ink} ${pct}% on ${surface}`)
 				)
 			)
 		);
 		expect([...TINT_KNOWN_FAILURES.keys()].filter((k) => !generated.has(k))).toEqual([]);
 	});
 
-	for (const { pct } of TINTS) {
-		for (const ink of STATUS_INKS) {
-			for (const surface of SURFACES) {
-				for (const { name, sel } of THEME_BLOCKS) {
-					const key = `${name} ${ink} ${pct}% on ${surface}`;
-					it(`${name}: --${ink} text meets 4.5:1 on its ${pct}% tint over the ${surface}`, () => {
-						const hex = blockToken(sel, ink);
-						const ratio = contrast(hex, mix2(hex, pct, blockToken(sel, surface)));
-						const known = TINT_KNOWN_FAILURES.get(key);
-						if (known !== undefined) {
-							expect(
-								ratio,
-								`${key} now measures ${ratio.toFixed(2)}:1 and clears 4.5:1 — drop it from TINT_KNOWN_FAILURES`
-							).toBeLessThan(4.5);
-							expect(
-								ratio,
-								`${key} moved from the recorded ${known}:1 to ${ratio.toFixed(2)}:1 and still fails 4.5:1 — update its TINT_KNOWN_FAILURES ratio`
-							).toBeCloseTo(known, 1);
-							return;
-						}
+	// Two rules can share an ink and a percentage (the two 20% observability
+	// badges do not, but a third could), so measure each distinct pairing once.
+	const PAIRINGS = [...new Map(TINTS.map((t) => [`${t.ink} ${t.pct}`, t])).values()];
+
+	for (const { ink, pct } of PAIRINGS) {
+		for (const surface of SURFACES) {
+			for (const { name, sel } of THEME_BLOCKS) {
+				const key = `${name} ${ink} ${pct}% on ${surface}`;
+				it(`${name}: --${ink} text meets 4.5:1 on its ${pct}% tint over the ${surface}`, () => {
+					const hex = blockToken(sel, ink);
+					const ratio = contrast(hex, mix2(hex, pct, blockToken(sel, surface)));
+					const known = TINT_KNOWN_FAILURES.get(key);
+					if (known !== undefined) {
 						expect(
 							ratio,
-							`${key} measures ${ratio.toFixed(2)}:1, under the 4.5:1 floor`
-						).toBeGreaterThanOrEqual(4.5);
-					});
-				}
+							`${key} now measures ${ratio.toFixed(2)}:1 and clears 4.5:1 — drop it from TINT_KNOWN_FAILURES`
+						).toBeLessThan(4.5);
+						expect(
+							ratio,
+							`${key} moved from the recorded ${known}:1 to ${ratio.toFixed(2)}:1 and still fails 4.5:1 — update its TINT_KNOWN_FAILURES ratio`
+						).toBeCloseTo(known, 1);
+						return;
+					}
+					expect(
+						ratio,
+						`${key} measures ${ratio.toFixed(2)}:1, under the 4.5:1 floor`
+					).toBeGreaterThanOrEqual(4.5);
+				});
 			}
 		}
 	}

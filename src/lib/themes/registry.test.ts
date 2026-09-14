@@ -30,6 +30,25 @@ describe('the theme registry', () => {
 		expect(files).toEqual(ALL_THEMES.map((t) => t.id).sort());
 	});
 
+	// `export { X } from './all.ts'` re-exports the palette and ships it just as
+	// surely as an import, so the pattern matches both forms.
+	const fromClause = /^\s*(?:import|export)\s[^;]*?from\s*'([^']+)'/gm;
+	const specifiers = (source: string) => [...source.matchAll(fromClause)].map((m) => m[1]);
+
+	// The regex IS the guard: a pattern that stopped matching one of these forms
+	// would report "imports no palette data" about a file that ships all of it.
+	it('matches every form a palette import can take', () => {
+		expect(specifiers(`export { ALL_THEMES } from './all.ts';`)).toEqual(['./all.ts']);
+		expect(specifiers(`import { ALL_THEMES } from './all.ts';`)).toEqual(['./all.ts']);
+		// Wrapped across lines, the way a formatter writes a long specifier list.
+		expect(specifiers(`import {\n\tALL_THEMES\n} from './all.ts';`)).toEqual(['./all.ts']);
+		// And still found when it is not the first import in the file.
+		expect(specifiers(`import { THEMES } from './x.ts';\nimport {\n\tALL_THEMES\n} from './all.ts';`)).toEqual([
+			'./x.ts',
+			'./all.ts'
+		]);
+	});
+
 	// The literal above only earns its keep while index.ts imports no palette: one
 	// `import { ALL_THEMES } from './all.ts'` added for convenience puts every hex
 	// of every theme back into the admin bundles, and every assert in this file
@@ -37,14 +56,8 @@ describe('the theme registry', () => {
 	// only used for types disappears at runtime but still ships if it is not
 	// `import type`.
 	it('imports no palette data', () => {
-		// `export { X } from './all.ts'` re-exports the palette and ships it just as
-		// surely as an import, so the pattern matches both forms.
-		const fromClause = /^\s*(?:import|export)\s[^;]*?from\s*'([^']+)'/gm;
-		expect([...`export { ALL_THEMES } from './all.ts';`.matchAll(fromClause)].map((m) => m[1])).toEqual([
-			'./all.ts'
-		]);
 		const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
-		const imported = [...source.matchAll(fromClause)].map((m) => m[1]);
+		const imported = specifiers(source);
 		expect(imported.filter((s) => s.includes('/all') || /\.theme\.ts$/.test(s))).toEqual([]);
 	});
 });

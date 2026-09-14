@@ -147,6 +147,21 @@ describe('renderThemesCss', () => {
 		expect(() => renderThemesCss(bad)).toThrow(/unbalanced ' quote/);
 	});
 
+	// The scan tracks which quote opened the string, so the other one inside it is
+	// just a character: a per-quote count rejected this well-formed family.
+	it('accepts an apostrophe inside a double-quoted family name', () => {
+		const ok: ThemeDefinition[] = [
+			{
+				id: 'default',
+				label: 'Apostrophe',
+				dark: { background: '#111111' },
+				light: {},
+				fonts: { primary: '"Sparky\'s Font", sans-serif', secondary: "'B', sans-serif" }
+			}
+		];
+		expect(renderThemesCss(ok)).toContain('--font-primary: "Sparky\'s Font", sans-serif;');
+	});
+
 	it('accepts a family name written in a non-Latin script', () => {
 		const ok: ThemeDefinition[] = [
 			{

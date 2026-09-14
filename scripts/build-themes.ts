@@ -97,12 +97,21 @@ function validateTheme(theme: ThemeDefinition): void {
 		if (!FONT_FAMILY.test(family)) {
 			throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has characters outside letters, digits, spaces, commas, quotes, and hyphens`);
 		}
-		// The character set allows quotes, so an odd count leaves one open and the
-		// rest of the stylesheet lands inside a string literal.
-		for (const quote of ["'", '"']) {
-			if (family.split(quote).length % 2 === 0) {
-				throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has an unbalanced ${quote} quote`);
+		// The character set allows both quote characters, so an unterminated string
+		// leaves the rest of the stylesheet inside a literal. One scan, tracking
+		// which quote opened the current string and ignoring the other while it is
+		// open — counting each quote separately would reject the legitimate
+		// `"Sparky's Font", sans-serif`.
+		let open: "'" | '"' | undefined;
+		for (const char of family) {
+			if (open === undefined) {
+				if (char === "'" || char === '"') open = char;
+			} else if (char === open) {
+				open = undefined;
 			}
+		}
+		if (open !== undefined) {
+			throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has an unbalanced ${open} quote`);
 		}
 	}
 }
