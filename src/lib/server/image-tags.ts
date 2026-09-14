@@ -77,7 +77,17 @@ export async function replaceImageTags(db: Db, imageId: number, tagNames: string
 		if (written.length >= MAX_IMAGE_TAGS) break;
 		let tag = await db.select().from(tags).where(eq(tags.name, tagName)).get();
 		if (!tag) {
-			tag = await db.insert(tags).values({ name: tagName }).returning().get();
+			// `tags.name` is unique, and two saves can run at once: the backfill page
+			// guards saving per row, and two untagged images by one artist carry the
+			// same names, so both requests can see no `fox` row and both insert. A
+			// plain insert throws on the second, the action answers with an error,
+			// and the page renders it over the list — losing every other row's
+			// staged chips. Let the loser of that race find the winner's row instead.
+			tag = await db.insert(tags).values({ name: tagName }).onConflictDoNothing().returning().get();
+			if (!tag) tag = await db.select().from(tags).where(eq(tags.name, tagName)).get();
+			// Neither minted nor found: the row was deleted between the conflict and
+			// the re-select. Skip the name rather than fail the whole save.
+			if (!tag) continue;
 		}
 		await db.insert(imageTags).values({ imageId, tagId: tag.id });
 		written.push(tagName);

@@ -169,6 +169,89 @@ test('the count says what landed when the operator types a suggested tag first',
 	);
 });
 
+test('Add stays reachable with nothing picked and refuses the click', async ({ page }) => {
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['mammal', 'fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	await pill(page).click();
+	// Both chips off: there is nothing to add. aria-disabled rather than a real
+	// disabled attribute, like every other refused control here — disabled takes
+	// the button out of the tab order, so an operator who tabbed to it is left
+	// with a control that vanished and no sentence saying why.
+	await page.getByRole('button', { name: 'mammal' }).click();
+	await page.getByRole('button', { name: 'fox' }).click();
+	const add = page.getByRole('button', { name: 'Add 0 tags' });
+	await expect(add).toHaveAttribute('aria-disabled', 'true');
+	// No real disabled attribute: that is the one that takes it out of the tab
+	// order. (Playwright reads aria-disabled as disabled too, so the check is on
+	// the attribute rather than through toBeEnabled.)
+	await expect(add).not.toHaveAttribute('disabled', /.*/);
+
+	// Reachable by keyboard, and the click does nothing: no tags land and the
+	// tray stays where it was.
+	await add.focus();
+	await expect(add).toBeFocused();
+	// Dispatched, the way the other aria-disabled controls are clicked here:
+	// Playwright's own click waits for an element it reads as enabled.
+	await add.dispatchEvent('click');
+	await expect(tagsInput(page)).toHaveValue('');
+	await expect(page.locator('.tag-chip')).toHaveCount(2);
+	await expect(page.locator('.tag-status-line')).toHaveCount(0);
+});
+
+test('Add goes inert, not invisible, once the field holds every suggested tag', async ({ page }) => {
+	await openUploadForm(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['mammal', 'fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	await pill(page).click();
+	const active = page.getByRole('button', { name: 'Add 2 tags' });
+	await expect(active).toHaveAttribute('aria-disabled', 'false');
+	const activeFill = await active.evaluate((el) => getComputedStyle(el).backgroundColor);
+
+	// The chips stay on screen; the operator types both names in by hand. The
+	// button counts what would land, not what was suggested, so there is nothing
+	// left for it to add.
+	await tagsInput(page).fill('mammal, fox');
+	const add = page.getByRole('button', { name: 'Add 0 tags' });
+	await expect(add).toHaveAttribute('aria-disabled', 'true');
+	await expect(add).not.toHaveAttribute('disabled', /.*/);
+
+	// And it looks refused rather than ready: the --secondary fill and the
+	// pointer the backfill row's Save button takes in the same state, off the
+	// same .tag-btn-sm[aria-disabled='true'] rule. At the primary fill it would
+	// be the loudest control in the tray and the one that does nothing.
+	const secondary = await page.evaluate(() => {
+		const probe = document.createElement('div');
+		probe.style.backgroundColor = 'var(--secondary)';
+		document.body.appendChild(probe);
+		const fill = getComputedStyle(probe).backgroundColor;
+		probe.remove();
+		return fill;
+	});
+	await expect(add).toHaveCSS('background-color', secondary);
+	await expect(add).toHaveCSS('cursor', 'default');
+	expect(secondary).not.toBe(activeFill);
+
+	// Still reachable, and the click does nothing: the field keeps what the
+	// operator typed and no "Sona added" line appears.
+	await add.focus();
+	await expect(add).toBeFocused();
+	await add.dispatchEvent('click');
+	await expect(tagsInput(page)).toHaveValue('mammal, fox');
+	await expect(page.locator('.tag-status-line')).toHaveCount(0);
+	await expect(page.locator('.tag-chip')).toHaveCount(2);
+});
+
 test('a 202 says the post is not classified yet and offers another try', async ({ page }) => {
 	await openUploadForm(page);
 	// 202 is inside res.ok. Reading it as a payload would show an empty tray as
@@ -208,6 +291,25 @@ test('a post with nothing to suggest says so and offers only Dismiss', async ({ 
 	await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Dismiss' })).toBeVisible();
 	await expect(tagsInput(page)).toHaveValue('');
+	// One image, so no note about which one was read.
+	await expect(page.locator('.tag-panel-sub')).toHaveCount(0);
+});
+
+test('an empty answer about a multi-image post says only the first image was read', async ({
+	page
+}) => {
+	await openUploadForm(page);
+	// Four images, nothing classified. Without the count, "found nothing" reads
+	// as a verdict on the whole post rather than on the one image entail.dev was
+	// given, and the operator has no reason to look at the other three.
+	await stubSuggestions(page, 200, { source: 'bluesky', tags: [], rating: null, imageCount: 4 });
+
+	await pill(page).click();
+
+	await expect(page.getByText('No tags to suggest').first()).toBeVisible();
+	await expect(page.locator('.tag-panel-sub')).toHaveText(
+		'This post has 4 images. Suggestions come from the first one.'
+	);
 });
 
 test('a post whose only tag is already typed says the tag was skipped, not that there was none', async ({

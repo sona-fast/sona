@@ -553,6 +553,13 @@
 					     pill is gone with this tray, so focus lands on the line that says
 					     what the lookup answered. -->
 					<p class="tag-panel-body" tabindex="-1" bind:this={statusLines[row.id]}>{tray.body}</p>
+					{#if rowState.kind === 'empty' && rowState.imageCount > 1}
+						<!-- The same note the chips carry: only the first image was read, so
+						     "nothing to suggest" is about that picture, not the whole post. -->
+						<p class="tag-panel-sub">
+							{m.admin_tag_suggest_multi_image({ count: rowState.imageCount })}
+						</p>
+					{/if}
 					<div class="tag-actions">
 						{#if tray.retry}
 							<button

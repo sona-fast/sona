@@ -48,8 +48,11 @@ export type SuggestionState =
 	 *  found nothing, which would be false. `noImage` is true when the post
 	 *  carried no picture at all — an X post that is text, video or a GIF —
 	 *  where saying the classifier read the post and was unconvinced would be
-	 *  false too. */
-	| { kind: 'empty'; skippedExisting?: boolean; noImage?: boolean }
+	 *  false too. `imageCount` is how many pictures the post carried, the same
+	 *  number the suggested tray reports: a post of four whose first image
+	 *  classified to nothing is a verdict on that one image, and the tray has to
+	 *  say so here as much as it does when tags come back. */
+	| { kind: 'empty'; skippedExisting?: boolean; noImage?: boolean; imageCount: number }
 	/** 202: queued or still classifying. Retryable. */
 	| { kind: 'notReady' }
 	/** 502: an upstream failure. Retryable. */
@@ -176,6 +179,9 @@ export function fromResponse(
 	}
 
 	const count = Number(payload.imageCount);
+	// The same floor the suggested state applies: an absent, fractional or
+	// negative count reads as the one image the classifier was given.
+	const imageCount = Number.isInteger(count) && count > 0 ? count : 1;
 
 	// Nothing came back and the post carried no picture: only the X path answers
 	// that, and it answers it without asking entail.dev anything, so the tray can
@@ -184,14 +190,19 @@ export function fromResponse(
 	// entail.dev looked and classified nothing — so it keeps the general
 	// sentence.
 	if (tags.length === 0)
-		return { kind: 'empty', skippedExisting, noImage: count === 0 && payload.source === 'x' };
+		return {
+			kind: 'empty',
+			skippedExisting,
+			noImage: count === 0 && payload.source === 'x',
+			imageCount
+		};
 
 	return {
 		kind: 'suggested',
 		tags,
 		leftOut: new Set(),
 		rating: readRating(payload.rating),
-		imageCount: Number.isInteger(count) && count > 0 ? count : 1,
+		imageCount,
 		skippedExisting
 	};
 }

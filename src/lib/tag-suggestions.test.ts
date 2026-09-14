@@ -95,7 +95,20 @@ describe('fromResponse — a 200', () => {
 		expect(fromResponse(200, ok([]), [])).toEqual({
 			kind: 'empty',
 			skippedExisting: false,
-			noImage: false
+			noImage: false,
+			imageCount: 1
+		});
+	});
+
+	it('carries the image count into the empty state too', () => {
+		// A post of four whose first image classified to nothing. The count is what
+		// the tray needs to say only one image was read; dropped here, "found
+		// nothing" reads as a verdict on the whole post.
+		expect(fromResponse(200, ok([], { imageCount: 4 }), [])).toEqual({
+			kind: 'empty',
+			skippedExisting: false,
+			noImage: false,
+			imageCount: 4
 		});
 	});
 
@@ -116,7 +129,11 @@ describe('fromResponse — a 200', () => {
 		expect(fromResponse(200, ok([], { source: 'x', imageCount: 0 }), [])).toEqual({
 			kind: 'empty',
 			skippedExisting: false,
-			noImage: true
+			noImage: true,
+			// 0 floors to 1, the way it does on the suggested branch. `noImage` is
+			// what carries "the post had no picture"; the count only decides whether
+			// the tray says one image out of several was read.
+			imageCount: 1
 		});
 	});
 
@@ -127,7 +144,8 @@ describe('fromResponse — a 200', () => {
 		expect(fromResponse(200, ok([], { source: 'bluesky', imageCount: 0 }), [])).toEqual({
 			kind: 'empty',
 			skippedExisting: false,
-			noImage: false
+			noImage: false,
+			imageCount: 1
 		});
 	});
 
@@ -199,7 +217,8 @@ describe('fromResponse — a 200', () => {
 		expect(fromResponse(200, ok(['fox', 'beach']), ['beach', 'fox'])).toEqual({
 			kind: 'empty',
 			skippedExisting: true,
-			noImage: false
+			noImage: false,
+			imageCount: 1
 		});
 	});
 
@@ -252,9 +271,11 @@ describe('the tray a finished state draws', () => {
 		for (const kind of ['notReady', 'rateLimited', 'unavailable'] as const) {
 			expect(trayFor({ kind })).toMatchObject({ retry: true });
 		}
-		for (const kind of ['empty', 'notFound', 'badLink', 'signedOut', 'noSource'] as const) {
+		for (const kind of ['notFound', 'badLink', 'signedOut', 'noSource'] as const) {
 			expect(trayFor({ kind })).toMatchObject({ retry: false });
 		}
+		// Out of the loop because it carries a count the others have no field for.
+		expect(trayFor({ kind: 'empty', imageCount: 1 })).toMatchObject({ retry: false });
 	});
 
 	it('draws the backfill row a tray for a source URL it cannot read', () => {
@@ -271,7 +292,7 @@ describe('the tray a finished state draws', () => {
 	});
 
 	it('warns for every failure, but not for a post with nothing to suggest', () => {
-		expect(trayFor({ kind: 'empty' })).toEqual({
+		expect(trayFor({ kind: 'empty', imageCount: 1 })).toEqual({
 			title: 'No tags to suggest',
 			body: "entail.dev read the post but found nothing it's confident about.",
 			warn: false,
@@ -279,7 +300,7 @@ describe('the tray a finished state draws', () => {
 		});
 		// The post did have tags; the field already had them. Saying entail.dev
 		// found nothing would blame the classifier for the operator's own typing.
-		expect(trayFor({ kind: 'empty', skippedExisting: true })).toEqual({
+		expect(trayFor({ kind: 'empty', skippedExisting: true, imageCount: 1 })).toEqual({
 			title: 'No tags to suggest',
 			body: 'entail.dev only returned tags that are already in the Tags field.',
 			warn: false,
@@ -287,7 +308,7 @@ describe('the tray a finished state draws', () => {
 		});
 		// Nothing looked at the post, so the tray says what the post is missing
 		// rather than what entail.dev concluded.
-		expect(trayFor({ kind: 'empty', noImage: true })).toEqual({
+		expect(trayFor({ kind: 'empty', noImage: true, imageCount: 1 })).toEqual({
 			title: 'No tags to suggest',
 			body: 'This post has no image for entail.dev to look at.',
 			warn: false,
@@ -392,13 +413,13 @@ describe('the sentences the live region reads', () => {
 		expect(sentenceFor({ kind: 'notReady' })).toBe(
 			"No tags yet. entail.dev hasn't read this post yet. Try again in a minute."
 		);
-		expect(sentenceFor({ kind: 'empty' })).toBe(
+		expect(sentenceFor({ kind: 'empty', imageCount: 1 })).toBe(
 			"No tags to suggest. entail.dev read the post but found nothing it's confident about."
 		);
-		expect(sentenceFor({ kind: 'empty', skippedExisting: true })).toBe(
+		expect(sentenceFor({ kind: 'empty', skippedExisting: true, imageCount: 1 })).toBe(
 			'No tags to suggest. entail.dev only returned tags that are already in the Tags field.'
 		);
-		expect(sentenceFor({ kind: 'empty', noImage: true })).toBe(
+		expect(sentenceFor({ kind: 'empty', noImage: true, imageCount: 1 })).toBe(
 			'No tags to suggest. This post has no image for entail.dev to look at.'
 		);
 		expect(sentenceFor({ kind: 'notFound' })).toBe(

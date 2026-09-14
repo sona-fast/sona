@@ -19,19 +19,74 @@ import {
 // Suggest tags page each post a comma-separated string with no limit of its
 // own, so the ceiling on how many tags one image keeps lives here.
 
+// `tags.name` is UNIQUE here because it is UNIQUE in schema.ts: the helper's
+// insert has to survive another request minting the same name first, and
+// without the index the race this file tests would pass either way.
+const SCHEMA_SQL = `
+	CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT '');
+	CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+	CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, slug TEXT,
+		image_url TEXT NOT NULL, thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER,
+		md5hash TEXT, nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1,
+		source_post_url TEXT, artist_id INTEGER, collection_id INTEGER, commissioned_at TEXT,
+		parent_image_id INTEGER, variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0,
+		featured_order INTEGER, created_at TEXT NOT NULL DEFAULT '');
+`;
+
 function makeDb() {
 	const sqlite = new Database(':memory:');
-	sqlite.exec(`
-		CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT '');
-		CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
-		CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, slug TEXT,
-			image_url TEXT NOT NULL, thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER,
-			md5hash TEXT, nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1,
-			source_post_url TEXT, artist_id INTEGER, collection_id INTEGER, commissioned_at TEXT,
-			parent_image_id INTEGER, variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0,
-			featured_order INTEGER, created_at TEXT NOT NULL DEFAULT '');
-	`);
+	sqlite.exec(SCHEMA_SQL);
 	return drizzle(makeD1(sqlite), { schema });
+}
+
+/**
+ * A database where another request mints `name` in the gap between this one's
+ * "does the tag exist" select and its insert — two backfill rows saving at once
+ * with a tag name in common. The select sees nothing, the insert meets the
+ * unique index.
+ */
+function makeRacingDb(name: string) {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(SCHEMA_SQL);
+	const d1 = makeD1(sqlite);
+	let raced = false;
+	const steal = () => {
+		if (raced) return;
+		raced = true;
+		sqlite.prepare('INSERT INTO tags (name) VALUES (?)').run(name);
+	};
+	// drizzle reads a select through raw(); the helper's re-select after the
+	// conflict goes through here too, which `raced` makes a no-op.
+	const racing = {
+		...d1,
+		prepare(sql: string) {
+			const stmt = d1.prepare(sql);
+			if (!/^select/i.test(sql) || !sql.includes('"tags"')) return stmt;
+			return {
+				bind: (...params: unknown[]) => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const bound = (stmt as any).bind(...params);
+					return {
+						...bound,
+						raw: () => {
+							const out = bound.raw();
+							steal();
+							return out;
+						},
+						all: () => {
+							const out = bound.all();
+							steal();
+							return out;
+						}
+					};
+				}
+			};
+		}
+	};
+	return {
+		db: drizzle(racing as unknown as ReturnType<typeof makeD1>, { schema }),
+		sqlite
+	};
 }
 
 type Db = ReturnType<typeof makeDb>;
@@ -71,6 +126,25 @@ describe('replaceImageTags', () => {
 		expect(await tagNamesOf(db, 1)).toEqual(written);
 		// Nothing past the cap was minted into the tag table either.
 		expect(await db.select({ id: tags.id }).from(tags)).toHaveLength(MAX_IMAGE_TAGS);
+	});
+
+	// Two backfill rows save at once (the page's guard is per row) and two
+	// untagged images by one artist share tag names, so both saves can find no
+	// `fox` row and both insert it. Before, the loser threw the unique
+	// constraint, the action answered with an error, and the page rendered it
+	// over the list — discarding every other row's staged chips.
+	it('links to the existing tag when another save mints the name first', async () => {
+		const { db, sqlite } = makeRacingDb('fox');
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art', imageUrl: 'https://cdn.example.com/1.png', artistId: 1 });
+
+		await expect(replaceImageTags(db, 1, 'fox')).resolves.toEqual(['fox']);
+
+		// One tag row, and the image points at the one the other save minted.
+		const rows = sqlite.prepare("SELECT id FROM tags WHERE name = 'fox'").all();
+		expect(rows).toHaveLength(1);
+		expect(await tagNamesOf(db, 1)).toEqual(['fox']);
+		const linked = await db.select({ tagId: imageTags.tagId }).from(imageTags).where(eq(imageTags.imageId, 1));
+		expect(linked).toEqual([{ tagId: rows[0].id }]);
 	});
 
 	// Clearing the Tags box is how an image loses its tags, so an empty string is

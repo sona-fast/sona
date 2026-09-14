@@ -1118,6 +1118,20 @@ test('a failed lookup replaces the row pill with a tray that offers Try again', 
 	await expect(target.locator('.tag-panel-body')).toBeFocused();
 });
 
+test('an empty answer on a row says only the first image of the post was read', async ({ page }) => {
+	// Four images, nothing classified. The row draws the same tray the forms do,
+	// so it has to carry the same note: without it "found nothing" reads as a
+	// verdict on the post rather than on the one image entail.dev was given.
+	await openList(page);
+	await stubSuggestions(page, 200, { source: 'bluesky', tags: [], rating: null, imageCount: 4 });
+
+	const target = await clickSuggest(page, 'Backfill 117');
+	await expect(target.getByText('No tags to suggest')).toBeVisible();
+	await expect(target.locator('.tag-panel-sub')).toHaveText(
+		'This post has 4 images. Suggestions come from the first one.'
+	);
+});
+
 test('a row whose source URL is not a post says so and offers no second try', async ({ page }) => {
 	// The forms answer a 422 under the field; a row has no field, so the tray
 	// says it. Nothing was sent for that URL — the endpoint refuses it before it

@@ -418,10 +418,15 @@
 					<p class="tag-panel-sub">{m.admin_tag_suggest_multi_image({ count: suggestion.imageCount })}</p>
 				{/if}
 				<div class="tag-actions">
+					<!-- aria-disabled, not disabled, like every other refused control here
+					     and on the backfill row: a real disabled attribute takes the button
+					     out of the tab order, so an operator who tabbed to it cannot find
+					     out why it does nothing. The early return in add() is the refusal,
+					     and .tag-btn-sm carries the inert style keyed on aria-disabled. -->
 					<button
 						type="button"
 						class="btn btn-primary tag-btn-sm"
-						disabled={toAdd.length === 0}
+						aria-disabled={toAdd.length === 0}
 						onclick={add}
 					>
 						{m.admin_tag_suggest_add({ count: toAdd.length })}
@@ -445,6 +450,12 @@
 				<p class="tag-panel-body">
 					{noPostToRetry ? m.admin_tag_suggest_retry_needs_post_body() : tray.body}
 				</p>
+				{#if suggestion.kind === 'empty' && suggestion.imageCount > 1}
+					<!-- The same note the chips get, for the same reason: only the first
+					     image was read, so "nothing to suggest" is a verdict on that one
+					     picture rather than on the whole post. -->
+					<p class="tag-panel-sub">{m.admin_tag_suggest_multi_image({ count: suggestion.imageCount })}</p>
+				{/if}
 				<div class="tag-actions">
 					{#if tray.retry}
 						<!-- The URL can be edited to something unrecognisable while this
