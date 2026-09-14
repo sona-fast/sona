@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderThemesCss, checkThemesCss, OUTPUT_PATH } from './build-themes.ts';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
-import type { ThemeDefinition } from '../src/lib/themes/types.ts';
+import type { ThemeDefinition, TokenKey } from '../src/lib/themes/types.ts';
 
 // A two-token fixture rather than the real palettes: this asserts the LAYOUT
 // (selectors, order, aliases, fonts, the inherit rule), and pinning it to the
@@ -73,6 +73,37 @@ describe('renderThemesCss', () => {
 		expect(() => renderThemesCss(bad)).toThrow(/not a 6-digit hex/);
 	});
 
+	it('rejects an alias to an Object.prototype member', () => {
+		// `ref in TOKEN_CSS_NAMES` also finds inherited members, so 'toString' used
+		// to pass the guard and emit `var(undefined)`. The cast is the point of the
+		// test: the type forbids it, a hand-edited theme file does not.
+		const bad: ThemeDefinition[] = [
+			{
+				id: 'default',
+				label: 'Bad',
+				dark: { background: { ref: 'toString' as unknown as TokenKey } },
+				light: {}
+			}
+		];
+		expect(() => renderThemesCss(bad)).toThrow(/alias to unknown token 'toString'/);
+	});
+
+	// An alias loop renders as valid CSS that the browser resolves to the
+	// guaranteed-invalid value, so both tokens vanish at use time with nothing to
+	// show for it. Caught at generation, over the same cascade the contrast test
+	// reads.
+	it('rejects aliases that point at each other', () => {
+		const bad: ThemeDefinition[] = [
+			{
+				id: 'default',
+				label: 'Cyclic',
+				dark: { accent: { ref: 'accentForeground' }, accentForeground: { ref: 'accent' } },
+				light: {}
+			}
+		];
+		expect(() => renderThemesCss(bad)).toThrow(/alias cycle on default\/dark: accent → accentForeground → accent/);
+	});
+
 	// The id, the label and the font lists are the three theme strings that reach
 	// the CSS unescaped (attribute selector, comment, declaration), so each gets
 	// the same treatment a bad colour value gets: a build failure.
@@ -101,6 +132,19 @@ describe('renderThemesCss', () => {
 			}
 		];
 		expect(() => renderThemesCss(bad)).toThrow(/font-family/);
+	});
+
+	it('accepts a family name written in a non-Latin script', () => {
+		const ok: ThemeDefinition[] = [
+			{
+				id: 'default',
+				label: 'CJK',
+				dark: { background: '#111111' },
+				light: {},
+				fonts: { primary: "'ヒラギノ角ゴシック', sans-serif", secondary: "'B', sans-serif" }
+			}
+		];
+		expect(renderThemesCss(ok)).toContain("--font-primary: 'ヒラギノ角ゴシック', sans-serif;");
 	});
 
 	it('rejects a theme list whose first entry is not the default theme', () => {

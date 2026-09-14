@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { THEMES, DEFAULT_THEME_ID } from './index.ts';
 import { ALL_THEMES } from './all.ts';
@@ -28,5 +28,17 @@ describe('the theme registry', () => {
 			.map((f) => f.replace(/\.theme\.ts$/, ''))
 			.sort();
 		expect(files).toEqual(ALL_THEMES.map((t) => t.id).sort());
+	});
+
+	// The literal above only earns its keep while index.ts imports no palette: one
+	// `import { ALL_THEMES } from './all.ts'` added for convenience puts every hex
+	// of every theme back into the admin bundles, and every assert in this file
+	// still passes. Read the source rather than the module — an import that is
+	// only used for types disappears at runtime but still ships if it is not
+	// `import type`.
+	it('imports no palette data', () => {
+		const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+		const imported = [...source.matchAll(/^\s*import\s[^;]*?from\s*'([^']+)'/gm)].map((m) => m[1]);
+		expect(imported.filter((s) => s.includes('/all') || /\.theme\.ts$/.test(s))).toEqual([]);
 	});
 });

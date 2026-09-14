@@ -107,7 +107,12 @@ export function cssName(key: TokenKey): string {
  */
 export function cssValue(key: TokenKey, value: TokenValue): string {
 	if (isAlias(value)) {
-		if (!(value.ref in TOKEN_CSS_NAMES)) throw new Error(`${key}: alias to unknown token '${value.ref}'`);
+		// hasOwnProperty, not `in`: `in` also finds Object.prototype members, so an
+		// alias to 'toString' or 'constructor' would pass the guard and emit
+		// var(undefined).
+		if (!Object.prototype.hasOwnProperty.call(TOKEN_CSS_NAMES, value.ref)) {
+			throw new Error(`${key}: alias to unknown token '${value.ref}'`);
+		}
 		return `var(${cssName(value.ref)})`;
 	}
 	if (HEX.test(value) || RGBA.test(value)) return value;

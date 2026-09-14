@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { argv, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
+import { assertNoAliasCycles } from '../src/lib/themes/cascade.ts';
 import { DEFAULT_THEME_ID } from '../src/lib/themes/index.ts';
 import { TOKEN_CSS_NAMES, cssName, cssValue, type ThemeDefinition, type TokenKey } from '../src/lib/themes/types.ts';
 
@@ -72,8 +73,10 @@ function selectors(theme: ThemeDefinition): { dark: string; light: string } {
 
 const THEME_ID = /^[a-z][a-z0-9-]*$/;
 // Letters, digits, spaces, commas, quotes, hyphens — enough for a CSS
-// font-family list and nothing that could close the declaration.
-const FONT_FAMILY = /^[A-Za-z0-9 ,'"-]+$/;
+// font-family list and nothing that could close the declaration. The letter and
+// digit classes are Unicode, so a family named in Japanese, Greek or Cyrillic
+// passes; only the punctuation is restricted.
+const FONT_FAMILY = /^[\p{L}\p{N} ,'"-]+$/u;
 
 // These three strings reach the CSS unescaped: the id lands inside an attribute
 // selector, the label inside a comment, the font lists inside a declaration. A
@@ -100,6 +103,11 @@ export function renderThemesCss(themes: ThemeDefinition[]): string {
 	if (themes[0]?.id !== DEFAULT_THEME_ID) {
 		throw new Error(`the first theme must be the default one ('${DEFAULT_THEME_ID}'), got '${themes[0]?.id}'`);
 	}
+	// Aliases are emitted as var() and resolved by the browser, so a loop between
+	// two of them renders as valid CSS and drops both tokens at use time. Checked
+	// here, over the same cascade chains the contrast test reads (cascade.ts),
+	// after the default-first check that those chains depend on.
+	assertNoAliasCycles(themes);
 	const blocks = themes.flatMap((theme) => {
 		const sel = selectors(theme);
 		return [

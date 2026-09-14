@@ -3,13 +3,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { THEMES } from './themes';
 import { ALL_THEMES } from './themes/all.ts';
-import {
-	TOKEN_CSS_NAMES,
-	cssName,
-	isAlias,
-	type TokenKey,
-	type PartialThemeTokens
-} from './themes/types.ts';
+import { resolveToken, type ThemeMode } from './themes/cascade.ts';
+import { TOKEN_CSS_NAMES, cssName, type TokenKey } from './themes/types.ts';
 
 // Guards WCAG AA contrast for the resting theme tokens (#76): the terracotta
 // accent used as small-text foreground on the page background and on cards, and
@@ -40,73 +35,54 @@ function blockBody(selector: string): string {
 	return body;
 }
 
-type Mode = 'dark' | 'light';
+type Mode = ThemeMode;
 
 const DEFAULT_THEME = ALL_THEMES[0];
+
+/** The selector the generator emits for one theme × mode (build-themes.ts). */
+function selectorFor(theme: (typeof ALL_THEMES)[number], mode: Mode): string {
+	const isDefault = theme === DEFAULT_THEME;
+	if (mode === 'dark') return isDefault ? ':root' : `[data-theme-id='${theme.id}']`;
+	return isDefault ? "[data-theme='light']" : `[data-theme-id='${theme.id}'][data-theme='light']`;
+}
 
 // Selector → the theme block it is generated from. The selectors are the ones
 // the rest of this file already names; keeping them as the lookup key means the
 // describes below read tokens the same way they always did.
 const BLOCK_BY_SELECTOR = new Map<string, { id: string; mode: Mode }>(
-	ALL_THEMES.flatMap((theme) => {
-		const isDefault = theme === DEFAULT_THEME;
-		return [
-			[isDefault ? ':root' : `[data-theme-id='${theme.id}']`, { id: theme.id, mode: 'dark' as Mode }],
-			[
-				isDefault ? "[data-theme='light']" : `[data-theme-id='${theme.id}'][data-theme='light']`,
-				{ id: theme.id, mode: 'light' as Mode }
-			]
-		] as const;
-	})
+	ALL_THEMES.flatMap((theme) =>
+		(['dark', 'light'] as Mode[]).map(
+			(mode) => [selectorFor(theme, mode), { id: theme.id, mode }] as const
+		)
+	)
 );
 
 const TOKEN_BY_CSS_NAME = new Map<string, TokenKey>(
 	Object.entries(TOKEN_CSS_NAMES).map(([key, name]) => [name.slice(2), key as TokenKey])
 );
 
-// The cascade, as data. Every theme block has the same specificity except a
-// theme's own light block (two attribute selectors), so ties go to source order,
-// and the alternate themes are emitted after the default one. For an element
-// carrying data-theme-id='aurora' data-theme='light' the matching blocks are, in
-// falling precedence: the aurora light block, the aurora dark block (later in
-// source than [data-theme='light']), the default light block, then :root. That
-// is why aurora light has to re-declare --link: without it the aurora DARK
-// block's value wins there.
-function blockChain(id: string, mode: Mode): PartialThemeTokens[] {
-	const theme = ALL_THEMES.find((t) => t.id === id);
-	if (!theme) throw new Error(`unknown theme id: ${id}`);
-	if (theme === DEFAULT_THEME) {
-		return mode === 'dark' ? [theme.dark] : [theme.light, theme.dark];
+// The hex one token resolves to on one theme × mode. The cascade itself lives in
+// ./themes/cascade.ts, which the generator also uses, so the chain this measures
+// and the chain that renders the CSS cannot drift apart. Hex-only: every pairing
+// asserted here is a contrast measurement, and rgba()/var() would give a
+// silently wrong number rather than an error.
+function themeHex(id: string, mode: Mode, key: TokenKey): string {
+	const value = resolveToken(ALL_THEMES, id, mode, key);
+	if (value === undefined) {
+		throw new Error(`${id} ${mode}: ${cssName(key)} is not declared in any matching block`);
 	}
-	return mode === 'dark'
-		? [theme.dark, DEFAULT_THEME.dark]
-		: [theme.light, theme.dark, DEFAULT_THEME.light, DEFAULT_THEME.dark];
+	if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
+		throw new Error(`${cssName(key)} resolves to '${value}' on ${id} ${mode}, not a 6-digit hex`);
+	}
+	return value;
 }
 
-// The value the browser computes for one token on one theme × mode. An alias
-// (var(--primary)) resolves through the SAME chain, because that is what a
-// var() reference does at use time — it reads the element's own cascaded value.
-function resolveToken(id: string, mode: Mode, key: TokenKey, seen: TokenKey[] = []): string {
-	if (seen.includes(key)) throw new Error(`alias cycle on ${id}/${mode}: ${[...seen, key].join(' → ')}`);
-	for (const block of blockChain(id, mode)) {
-		const value = block[key];
-		if (value === undefined) continue;
-		return isAlias(value) ? resolveToken(id, mode, value.ref, [...seen, key]) : value;
-	}
-	throw new Error(`${id} ${mode}: --${key} is not declared in any matching block`);
-}
-
-// The hex one token resolves to on one generated block, by token KEY. Hex-only:
-// every pairing asserted here is a contrast measurement, and rgba()/var() would
-// give a silently wrong number rather than an error.
+// The same read by generated-block SELECTOR, which is how every describe that
+// predates the sweep names a theme × mode.
 function blockHex(selector: string, key: TokenKey): string {
 	const block = BLOCK_BY_SELECTOR.get(selector);
 	if (!block) throw new Error(`${selector} is not a generated theme block`);
-	const value = resolveToken(block.id, block.mode, key);
-	if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
-		throw new Error(`${cssName(key)} resolves to '${value}' on ${selector}, not a 6-digit hex`);
-	}
-	return value;
+	return themeHex(block.id, block.mode, key);
 }
 
 // The same read by CSS custom-property name, the way the old regex over app.css
@@ -443,10 +419,19 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 	// Chips and pills: muted label on the --secondary fill, live in the admin
 	// pages today. Re-pointing those uses at a darker token is the palette step.
 	{ ink: 'mutedForeground', ground: 'secondary', floor: 4.5 },
+	// --muted is where those same chips and rows go on hover (the gallery
+	// character chips, the about page's convention rows), so the muted label sits
+	// on it for as long as the pointer is there. Terracotta light fails it today,
+	// like the resting --secondary pairing above.
+	{ ink: 'mutedForeground', ground: 'muted', floor: 4.5 },
 	{ ink: 'link', ground: 'background', floor: 4.5 },
 	{ ink: 'link', ground: 'card', floor: 4.5 },
 	{ ink: 'statusOk', ground: 'card', floor: 4.5 },
 	{ ink: 'statusWarn', ground: 'card', floor: 4.5 },
+	// The same two status inks also label rows that sit straight on the page (the
+	// storage breakdown, the settings status lines), not only on cards.
+	{ ink: 'statusOk', ground: 'background', floor: 4.5 },
+	{ ink: 'statusWarn', ground: 'background', floor: 4.5 },
 	{ ink: 'statusAttention', ground: 'card', floor: 4.5 },
 	{ ink: 'destructiveForeground', ground: 'destructive', floor: 4.5 },
 	{ ink: 'primaryForeground', ground: 'primary', floor: 4.5 },
@@ -514,28 +499,35 @@ const KNOWN_FAILURES = new Map<string, number>([
 	['terracotta light input on card', 1.82],
 	['default light primary on background', 2.2],
 	['default light primary on card', 2.46],
-	['terracotta light mutedForeground on secondary', 3.96]
+	['terracotta light mutedForeground on secondary', 3.96],
+	// The hover twin of the pairing above, and it fails for the same reason.
+	['terracotta light mutedForeground on muted', 4.11]
 ]);
+
+// The sweep walks the theme DATA, not the selector list: every theme × mode,
+// named by the id + mode that also form its KNOWN_FAILURES key, so a failure
+// message names the exact entry to add or drop.
+const SWEEP_BLOCKS = ALL_THEMES.flatMap((theme) =>
+	(['dark', 'light'] as Mode[]).map((mode) => ({ id: theme.id, mode }))
+);
 
 describe('resting token pairings, every theme × mode (SONA-209)', () => {
 	// An allowlist key the sweep never generates — a renamed token, a dropped
 	// pairing, a typo — silences nothing and reads as debt that is still there.
 	it('has no KNOWN_FAILURES entry the sweep does not generate', () => {
 		const generated = new Set(
-			THEME_BLOCKS.flatMap(({ sel }) => {
-				const { id, mode } = BLOCK_BY_SELECTOR.get(sel)!;
-				return RESTING_PAIRS.map(({ ink, ground }) => `${id} ${mode} ${ink} on ${ground}`);
-			})
+			SWEEP_BLOCKS.flatMap(({ id, mode }) =>
+				RESTING_PAIRS.map(({ ink, ground }) => `${id} ${mode} ${ink} on ${ground}`)
+			)
 		);
 		expect([...KNOWN_FAILURES.keys()].filter((k) => !generated.has(k))).toEqual([]);
 	});
 
-	for (const { name, sel } of THEME_BLOCKS) {
-		const { id, mode } = BLOCK_BY_SELECTOR.get(sel)!;
+	for (const { id, mode } of SWEEP_BLOCKS) {
 		for (const { ink, ground, floor } of RESTING_PAIRS) {
 			const key = `${id} ${mode} ${ink} on ${ground}`;
-			it(`${name}: --${ink} on --${ground} meets ${floor}:1`, () => {
-				const ratio = contrast(blockHex(sel, ink), blockHex(sel, ground));
+			it(`${id} ${mode}: --${ink} on --${ground} meets ${floor}:1`, () => {
+				const ratio = contrast(themeHex(id, mode, ink), themeHex(id, mode, ground));
 				const known = KNOWN_FAILURES.get(key);
 				if (known !== undefined) {
 					// Self-cleaning: once the pairing clears its floor, the allowlist
@@ -544,7 +536,10 @@ describe('resting token pairings, every theme × mode (SONA-209)', () => {
 						ratio,
 						`${id} ${mode}: --${ink} on --${ground} now measures ${ratio.toFixed(2)}:1 and clears ${floor}:1 — drop it from KNOWN_FAILURES`
 					).toBeLessThan(floor);
-					expect(ratio).toBeCloseTo(known, 1);
+					expect(
+						ratio,
+						`${id} ${mode}: --${ink} on --${ground} moved from the recorded ${known}:1 to ${ratio.toFixed(2)}:1 and still fails ${floor}:1 — update its KNOWN_FAILURES ratio to the new measurement`
+					).toBeCloseTo(known, 1);
 					return;
 				}
 				expect(
@@ -608,6 +603,12 @@ describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SON
 // can't read a custom property), so it neither follows this token nor changes
 // with the theme, and nothing here measures it. Moving it onto a token is the
 // palette step (SONA-126); this change alters no colour.
+//
+// Recorded so the debt has a number rather than a shrug: on the LIGHT page
+// backgrounds #9ca3af measures 2.28:1 (ember), 2.34:1 (aurora) and 1.92:1
+// (terracotta) — all under the 3:1 that 1.4.11 asks of the glyph that says a
+// field is a dropdown. The dark modes pass. Measured 2026-09-14 against the
+// theme data; re-measure rather than trust these once a palette moves.
 // Every pairing currently clears it with room to spare — the tightest is
 // terracotta light on --background at 4.53:1 — so this is a pin against a future
 // token tweak, not a fix. A failure here is a finding to report, not to silence
