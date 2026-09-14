@@ -1684,6 +1684,22 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('.tile-nsfw-row .rating-tag')).toHaveCount(0);
 	});
 
+	// The label field used to be identified by its placeholder alone, which a
+	// typed value takes away, so a screen reader had nothing to tell one tile's
+	// field from another's. The name has to name the file and survive a value.
+	test('the variant label field is named after the file it belongs to', async ({ page }) => {
+		await twoDoneTiles(page);
+
+		const label = page.getByRole('textbox', { name: 'Label for back.png' });
+		await expect(label).toHaveCount(1);
+		await label.fill('Transparent BG');
+		await expect(page.getByRole('textbox', { name: 'Label for back.png' })).toHaveValue(
+			'Transparent BG'
+		);
+		// The parent tile carries no label field, so no second name collides.
+		await expect(page.getByRole('textbox', { name: 'Label for front.png' })).toHaveCount(0);
+	});
+
 	test('the parent drives the shared fields, and moving it re-derives them', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await twoDoneTiles(page);

@@ -423,6 +423,7 @@
 	"admin_field_variant_label": "Variant label",
 	"admin_variant_none": "Not a variant",
 	"admin_variant_label_placeholder": "e.g. Transparent BG, NSFW alt",
+	"admin_variant_label_for": "Label for {fileName}",
 	"admin_variant_parent_hint": "This image has variants of its own, so it can't be made a variant of another image.",
 	"admin_variant_parent_radio": "Parent",
 	"admin_variant_remove_file": "Remove {fileName}",

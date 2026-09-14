@@ -367,6 +367,7 @@
 	"admin_field_variant_label": "バリエーションラベル",
 	"admin_variant_none": "バリエーションではない",
 	"admin_variant_label_placeholder": "例：透過背景、NSFW版",
+	"admin_variant_label_for": "{fileName}のラベル",
 	"admin_variant_parent_hint": "この画像には自身のバリエーションがあるため、他の画像のバリエーションにはできません。",
 	"admin_variant_parent_radio": "親",
 	"admin_variant_remove_file": "{fileName}を削除",

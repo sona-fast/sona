@@ -1021,10 +1021,14 @@
 							{#if tile.sentPrivate && lookupSentFile(tile.lookup)}
 								<p class="tile-private-notice">{m.admin_lookup_private_notice()}</p>
 							{/if}
+							<!-- The placeholder disappears the moment the operator types, so it
+							     cannot be the field's name; the aria-label names the field and
+							     the file it belongs to, the way the tile's other controls do. -->
 							<input
 								type="text"
 								class="input tile-label"
 								name="label_{i}"
+								aria-label={m.admin_variant_label_for({ fileName: tile.fileName })}
 								placeholder={m.admin_variant_label_placeholder()}
 								bind:value={tile.label}
 							/>

@@ -1184,6 +1184,15 @@ describe('the upload page grid', () => {
 		expect(UPLOAD).toContain('m.admin_lookup_parent_radio({ fileName: tile.fileName })');
 	});
 
+	// The placeholder is gone as soon as the field holds a value, so it cannot
+	// be what names the field (WCAG 3.3.2, 4.1.2). The aria-label names it and
+	// the file it belongs to, and the placeholder stays as the example it is.
+	it('names the variant label field after its file, placeholder and all', () => {
+		expect(UPLOAD).toMatch(
+			/class="input tile-label"\s*\n\s*name="label_\{i\}"\s*\n\s*aria-label=\{m\.admin_variant_label_for\(\{ fileName: tile\.fileName \}\)\}\s*\n\s*placeholder=\{m\.admin_variant_label_placeholder\(\)\}/
+		);
+	});
+
 	it('marks a busy tile button rather than disabling it', () => {
 		expect(UPLOAD).toMatch(/aria-busy=\{tile\.lookup\.kind === 'searching'\}/);
 		// A second click while one is in flight is ignored in startLookup —
