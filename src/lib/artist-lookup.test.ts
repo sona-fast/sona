@@ -379,6 +379,13 @@ describe('labels and formatting', () => {
 		expect(postDateToInput('2026-13-45T00:00:00Z')).toBeNull();
 	});
 
+	it('refuses a day the calendar does not have rather than rolling it over', () => {
+		expect(postDateToInput('2026-02-30')).toBeNull();
+		expect(postDateToInput('2026-02-30T10:00:00Z')).toBeNull();
+		expect(postDateToInput('2026-04-31')).toBeNull();
+		expect(postDateToInput('2024-02-29')).toBe('2024-02-29');
+	});
+
 	it('strips the @ from handles and joins the rest', () => {
 		expect(matchHandle(match({ handles: ['@kuttoya'] }))).toBe('kuttoya');
 		expect(matchHandle(match({ handles: [] }))).toBe('');

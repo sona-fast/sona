@@ -207,13 +207,18 @@ export function pickPrefillMatch(matches: LookupMatch[]): LookupMatch | null {
 }
 
 /** `<input type="date">` wants a bare calendar day. A timestamp that isn't one
- * comes back null rather than as a date the operator would have to correct. */
+ * comes back null rather than as a date the operator would have to correct.
+ * A day that doesn't exist rolls over instead of failing to parse — Feb 30
+ * becomes March 1 — so the parsed day is compared back to the matched one,
+ * and a rollover comes back null rather than as a value the date input
+ * would reject after the status line claimed it was filled. */
 export function postDateToInput(iso: string | null | undefined): string | null {
 	if (!iso) return null;
 	const match = /^(\d{4}-\d{2}-\d{2})/.exec(iso.trim());
 	if (!match) return null;
 	const parsed = new Date(match[1] + 'T00:00:00Z');
-	return Number.isNaN(parsed.getTime()) ? null : match[1];
+	if (Number.isNaN(parsed.getTime())) return null;
+	return parsed.toISOString().slice(0, 10) === match[1] ? match[1] : null;
 }
 
 /** The first handle a match names, without its '@'. */
