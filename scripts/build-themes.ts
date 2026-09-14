@@ -11,7 +11,7 @@
  * are load-bearing, because theme blocks tie on specificity and the later one
  * wins.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { argv, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
@@ -123,6 +123,14 @@ export function renderThemesCss(themes: ThemeDefinition[]): string {
 	if (themes[0]?.id !== DEFAULT_THEME_ID) {
 		throw new Error(`the first theme must be the default one ('${DEFAULT_THEME_ID}'), got '${themes[0]?.id}'`);
 	}
+	// Two themes sharing an id emit two blocks on the same selector: the later one
+	// silently wins in the browser, and the picker gets two entries that cannot be
+	// told apart.
+	const seen = new Set<string>();
+	for (const theme of themes) {
+		if (seen.has(theme.id)) throw new Error(`duplicate theme id '${theme.id}'`);
+		seen.add(theme.id);
+	}
 	// Aliases are emitted as var() and resolved by the browser, so a loop between
 	// two of them renders as valid CSS and drops both tokens at use time. Checked
 	// here, over the same cascade chains the contrast test reads (cascade.ts),
@@ -161,6 +169,10 @@ function main(): number {
 }
 
 // Only run when invoked directly, so the unit tests can import the helpers.
-if (argv[1] && fileURLToPath(import.meta.url) === argv[1]) {
+// Compared as realpaths: a symlinked checkout (or --preserve-symlinks-main)
+// makes the two spellings differ, and the string compare would then skip main()
+// silently — `npm run themes` would write nothing and `themes:check` would keep
+// passing on stale CSS.
+if (argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(argv[1])) {
 	exit(main());
 }

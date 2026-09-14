@@ -89,7 +89,12 @@ export interface ThemeDefinition {
 }
 
 const HEX = /^#[0-9A-Fa-f]{6}$/;
-const RGBA = /^rgba\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*(?:0|1|0?\.\d+)\s*\)$/;
+// Channels are 0-255, not any three digits: rgba(999, 0, 0, 0.5) is invalid CSS
+// and the browser drops the whole declaration.
+const CHANNEL = '(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)';
+const RGBA = new RegExp(
+	`^rgba\\(\\s*${CHANNEL}\\s*,\\s*${CHANNEL}\\s*,\\s*${CHANNEL}\\s*,\\s*(?:0|1|0?\\.\\d+)\\s*\\)$`
+);
 
 export function isAlias(value: TokenValue): value is TokenAlias {
 	return typeof value === 'object' && value !== null && 'ref' in value;

@@ -35,6 +35,57 @@ function blockBody(selector: string): string {
 	return body;
 }
 
+// The same read against a component source file: the describes below parse the
+// tint rules out of the components that paint them, so a rule that moves or
+// stops matching fails here instead of dropping silently out of a sweep.
+function ruleBody(file: string, selector: string): string {
+	const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
+	if (!body) throw new Error(`${selector} rule not found in ${file}`);
+	return body;
+}
+
+// One self-tint rule: `background: color-mix(in srgb, var(--<ink>) N%,
+// transparent)` plus the token its label is painted with. The percentage may be
+// fractional, and the label is anchored to a declaration boundary so a rule
+// whose FIRST declaration is `color:` still parses while `border-color:` still
+// does not.
+function selfTint(body: string): { ink: string; pct: number; label: string | undefined } {
+	const tint = body.match(
+		/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+(?:\.\d+)?)%,\s*transparent\)/
+	);
+	if (!tint) throw new Error('rule no longer tints with a color-mix over transparent');
+	return {
+		ink: tint[1],
+		pct: Number(tint[2]),
+		label: body.match(/(?:^|[;{])\s*color:\s*var\(--([\w-]+)\)/)?.[1]
+	};
+}
+
+describe('selfTint rule parsing', () => {
+	it('parses a rule whose first declaration is the label color', () => {
+		const { ink, pct, label } = selfTint(
+			'\n\tcolor: var(--status-ok);\n\tbackground: color-mix(in srgb, var(--status-ok) 14%, transparent);\n'
+		);
+		expect({ ink, pct, label }).toEqual({ ink: 'status-ok', pct: 14, label: 'status-ok' });
+	});
+
+	it('parses a fractional tint percentage', () => {
+		const { pct } = selfTint(
+			'\n\tbackground: color-mix(in srgb, var(--destructive) 12.5%, transparent);\n\tcolor: var(--foreground);\n'
+		);
+		expect(pct).toBe(12.5);
+	});
+
+	it('does not read a border-color declaration as the label', () => {
+		const { label } = selfTint(
+			'\n\tborder-color: var(--border);\n\tbackground: color-mix(in srgb, var(--destructive) 20%, transparent);\n'
+		);
+		expect(label).toBeUndefined();
+	});
+});
+
 type Mode = ThemeMode;
 
 /** The selector the generator emits for one theme × mode (build-themes.ts). */
@@ -52,6 +103,21 @@ const BLOCK_BY_SELECTOR = new Map<string, { id: string; mode: Mode }>(
 		)
 	)
 );
+
+// Every theme × mode block in app.css, shared by the describes below (it was
+// copy-pasted three times). Derived from BLOCK_BY_SELECTOR (and so from the
+// generator's own selectors) rather than hardcoded, so a new theme is
+// enumerated automatically — a hardcoded list would let it skip the per-block
+// --link declaration guard and inherit another theme's link color through the
+// shared [data-theme='light'] selector. `name` labels the default theme by its
+// palette name (ember); the describes that predate the sweep spell their own
+// names out of `id` and `mode`.
+const THEME_BLOCKS = [...BLOCK_BY_SELECTOR].map(([sel, { id, mode }]) => ({
+	name: `${id === 'default' ? 'ember' : id} ${mode}`,
+	id,
+	mode,
+	sel
+}));
 
 const TOKEN_BY_CSS_NAME = new Map<string, TokenKey>(
 	Object.entries(TOKEN_CSS_NAMES).map(([key, name]) => [name.slice(2), key as TokenKey])
@@ -157,15 +223,10 @@ function hoverBorderMix(selector: string): { pct: number; token: string } {
 describe('destructive button WCAG AA contrast, every theme × mode', () => {
 	// The default theme lives on :root / [data-theme='light']; alternate themes
 	// on [data-theme-id='<id>'] and its [data-theme='light'] variant — all of
-	// which the generator already spells out, so take them from there rather than
-	// from a copy that can drift (THEME_BLOCKS below is the same list, but it is
-	// declared further down this file and the describe body runs at collection).
-	const blocks = [...BLOCK_BY_SELECTOR].map(([sel, { id, mode }]) => ({
-		name: `${id} ${mode}`,
-		sel
-	}));
-
-	for (const { name, sel } of blocks) {
+	// which the generator already spells out, so take them from THEME_BLOCKS
+	// rather than from a copy that can drift.
+	for (const { id, mode, sel } of THEME_BLOCKS) {
+		const name = `${id} ${mode}`;
 		it(`${name}: destructive-foreground text on destructive buttons meets 4.5:1`, () => {
 			const destructive = blockToken(sel, 'destructive');
 			const destructiveForeground = blockToken(sel, 'destructive-foreground');
@@ -369,18 +430,6 @@ describe('ember light theme WCAG AA contrast', () => {
 // dark primary drop (#121) fails here; terracotta light primary (4.68:1) sits
 // closest to the floor. Scope: assert only; do not tune colors to pass — a new
 // failure is a finding to report, not to silence.
-// Every theme × mode block in app.css, shared by the resting-state and
-// focus-ring describes below (was copy-pasted three times). Derived from
-// BLOCK_BY_SELECTOR (and so from the generator's own selectors) rather than
-// hardcoded, so a new theme is enumerated automatically —
-// a hardcoded list would let it skip the per-block --link declaration guard
-// and inherit another theme's link color through the shared
-// [data-theme='light'] selector.
-const THEME_BLOCKS = [...BLOCK_BY_SELECTOR].map(([sel, { id, mode }]) => ({
-	name: `${id === 'default' ? 'ember' : id} ${mode}`,
-	sel
-}));
-
 // SONA-209: the resting surface pairings, swept over the theme DATA rather than
 // picked one at a time. Everything above grew pairing-by-pairing out of a bug
 // report, so a palette could (and did) carry combinations nothing measured. This
@@ -427,6 +476,11 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 	{ ink: 'statusAttention', ground: 'card', floor: 4.5 },
 	{ ink: 'destructiveForeground', ground: 'destructive', floor: 4.5 },
 	{ ink: 'primaryForeground', ground: 'primary', floor: 4.5 },
+	// The other two foreground/fill pairs the palettes declare. Both clear AA
+	// comfortably today (9.07:1 at the worst), so they are pinned rather than
+	// fixed — nothing here tunes a colour.
+	{ ink: 'secondaryForeground', ground: 'secondary', floor: 4.5 },
+	{ ink: 'accentForeground', ground: 'accent', floor: 4.5 },
 	{ ink: 'border', ground: 'background', floor: 3 },
 	{ ink: 'border', ground: 'card', floor: 3 },
 	{ ink: 'ring', ground: 'background', floor: 3 },
@@ -637,20 +691,15 @@ describe('.btn hover-state WCAG AA contrast, every theme × variant (#103)', () 
 	// `[data-theme='light'] .btn-*:hover` override (every light theme carries that
 	// attribute, so one override branch serves them all). The blocks themselves
 	// come from the generator's own selectors, not a hardcoded copy.
-	const themeBlocks = [...BLOCK_BY_SELECTOR].map(([block, { id, mode }]) => ({
-		name: `${id} ${mode}`,
-		block,
-		mode
-	}));
-
-	for (const { name, block, mode } of themeBlocks) {
+	for (const { id, mode, sel } of THEME_BLOCKS) {
+		const name = `${id} ${mode}`;
 		for (const v of variants) {
 			it(`${name}: hovered .btn-${v.name} label meets 4.5:1`, () => {
 				const hoverSel =
 					mode === 'light' ? `[data-theme='light'] .btn-${v.name}:hover` : `.btn-${v.name}:hover`;
 				const { pct, toward } = hoverMix(hoverSel);
-				const fill = blockToken(block, v.fill);
-				const label = blockToken(block, v.label);
+				const fill = blockToken(sel, v.fill);
+				const label = blockToken(sel, v.label);
 				const hovered = mixSrgb(fill, pct, toward);
 				expect(contrast(label, hovered)).toBeGreaterThanOrEqual(4.5);
 			});
@@ -662,15 +711,16 @@ describe('.btn hover-state WCAG AA contrast, every theme × variant (#103)', () 
 	// solid fill (#103 designer finding). Assert the hovered border stays visibly
 	// distinct from the hovered fill in every theme × mode — a plain dissolve sits
 	// near 1:1, so 1.5:1 is a comfortable floor above it.
-	for (const { name, block, mode } of themeBlocks) {
+	for (const { id, mode, sel } of THEME_BLOCKS) {
+		const name = `${id} ${mode}`;
 		it(`${name}: hovered .btn-outline border stays distinct from the fill`, () => {
 			const hoverSel =
 				mode === 'light' ? "[data-theme='light'] .btn-outline:hover" : '.btn-outline:hover';
 			const { pct: fillPct, toward } = hoverMix(hoverSel);
-			const fill = mixSrgb(blockToken(block, 'background'), fillPct, toward);
+			const fill = mixSrgb(blockToken(sel, 'background'), fillPct, toward);
 			// The border-color shift lives on the base rule and cascades to both modes.
 			const { pct: borderPct, token } = hoverBorderMix('.btn-outline:hover');
-			const border = mix2(blockToken(block, 'border'), borderPct, blockToken(block, token));
+			const border = mix2(blockToken(sel, 'border'), borderPct, blockToken(sel, token));
 			expect(contrast(border, fill)).toBeGreaterThanOrEqual(1.5);
 		});
 	}
@@ -930,19 +980,10 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 	];
 
 	for (const { file, selector } of banners) {
-		const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
-		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
-		if (!body) throw new Error(`${selector} rule not found in ${file}`);
-		const tintPct = Number(
-			body.match(
-				/background:\s*color-mix\(in srgb,\s*var\(--destructive\)\s*(\d+)%,\s*transparent\)/
-			)?.[1]
-		);
-		const textToken = body.match(/color:\s*var\(--([\w-]+)\)/)?.[1];
+		const { ink, pct: tintPct, label: textToken } = selfTint(ruleBody(file, selector));
 
 		it(`${file} ${selector} keeps the destructive tint and --foreground text`, () => {
-			if (!Number.isFinite(tintPct)) throw new Error(`${selector} lost its destructive tint`);
+			expect(ink, `${selector} lost its destructive tint`).toBe('destructive');
 			expect(textToken).toBe('foreground');
 		});
 
@@ -991,18 +1032,11 @@ describe('status-ink text on its own tint (SONA-209)', () => {
 	// Read each rule once: the tint percentage, the token it mixes, and the token
 	// the label is painted with. A rule that stops self-tinting (or stops being
 	// found at all) throws here rather than dropping silently out of the sweep.
-	const TINTS = TINTED_RULES.map(({ file, selector }) => {
-		const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
-		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
-		if (!body) throw new Error(`${selector} rule not found in ${file}`);
-		const tint = body.match(
-			/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*transparent\)/
-		);
-		if (!tint) throw new Error(`${file} ${selector} no longer tints with a color-mix over transparent`);
-		const label = body.match(/(?:^|[;{]\s*)color:\s*var\(--([\w-]+)\)/)?.[1];
-		return { file, selector, ink: tint[1], pct: Number(tint[2]), label };
-	});
+	const TINTS = TINTED_RULES.map(({ file, selector }) => ({
+		file,
+		selector,
+		...selfTint(ruleBody(file, selector))
+	}));
 
 	// Same bargain as KNOWN_FAILURES above: record the ratio measured when this
 	// describe was written rather than silence the assert, because no palette

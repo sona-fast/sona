@@ -179,6 +179,23 @@ describe('renderThemesCss', () => {
 		const bad: ThemeDefinition[] = [{ id: 'alt', label: 'Alt', dark: {}, light: {} }];
 		expect(() => renderThemesCss(bad)).toThrow(/first theme must be the default one/);
 	});
+
+	it('rejects two themes that share an id', () => {
+		// Both would emit on [data-theme-id='alt'], so the later block wins and the
+		// earlier theme's palette is unreachable.
+		const bad: ThemeDefinition[] = [
+			...fixture,
+			{ id: 'alt', label: 'Fixture alt again', dark: {}, light: {} }
+		];
+		expect(() => renderThemesCss(bad)).toThrow(/duplicate theme id 'alt'/);
+	});
+
+	it('rejects an rgba() channel above 255', () => {
+		const bad: ThemeDefinition[] = [
+			{ id: 'default', label: 'Bad', dark: { sidebarBorder: 'rgba(999, 0, 0, 0.5)' }, light: {} }
+		];
+		expect(() => renderThemesCss(bad)).toThrow(/not a 6-digit hex/);
+	});
 });
 
 // Catches a palette edit committed without `npm run themes`. In CI this
