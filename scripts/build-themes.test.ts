@@ -134,6 +134,19 @@ describe('renderThemesCss', () => {
 		expect(() => renderThemesCss(bad)).toThrow(/font-family/);
 	});
 
+	it('rejects a font-family with an unbalanced quote', () => {
+		const bad: ThemeDefinition[] = [
+			{
+				id: 'default',
+				label: 'Bad',
+				dark: {},
+				light: {},
+				fonts: { primary: "'Chakra Petch, sans-serif", secondary: "'B', sans-serif" }
+			}
+		];
+		expect(() => renderThemesCss(bad)).toThrow(/unbalanced ' quote/);
+	});
+
 	it('accepts a family name written in a non-Latin script', () => {
 		const ok: ThemeDefinition[] = [
 			{

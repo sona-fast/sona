@@ -37,8 +37,14 @@ describe('the theme registry', () => {
 	// only used for types disappears at runtime but still ships if it is not
 	// `import type`.
 	it('imports no palette data', () => {
+		// `export { X } from './all.ts'` re-exports the palette and ships it just as
+		// surely as an import, so the pattern matches both forms.
+		const fromClause = /^\s*(?:import|export)\s[^;]*?from\s*'([^']+)'/gm;
+		expect([...`export { ALL_THEMES } from './all.ts';`.matchAll(fromClause)].map((m) => m[1])).toEqual([
+			'./all.ts'
+		]);
 		const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
-		const imported = [...source.matchAll(/^\s*import\s[^;]*?from\s*'([^']+)'/gm)].map((m) => m[1]);
+		const imported = [...source.matchAll(fromClause)].map((m) => m[1]);
 		expect(imported.filter((s) => s.includes('/all') || /\.theme\.ts$/.test(s))).toEqual([]);
 	});
 });

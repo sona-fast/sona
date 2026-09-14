@@ -5,6 +5,7 @@ import { THEMES } from './themes';
 import { ALL_THEMES } from './themes/all.ts';
 import { resolveToken, type ThemeMode } from './themes/cascade.ts';
 import { TOKEN_CSS_NAMES, cssName, type TokenKey } from './themes/types.ts';
+import { themeSelectors } from '../../scripts/build-themes.ts';
 
 // Guards WCAG AA contrast for the resting theme tokens (#76): the terracotta
 // accent used as small-text foreground on the page background and on cards, and
@@ -37,13 +38,9 @@ function blockBody(selector: string): string {
 
 type Mode = ThemeMode;
 
-const DEFAULT_THEME = ALL_THEMES[0];
-
 /** The selector the generator emits for one theme × mode (build-themes.ts). */
 function selectorFor(theme: (typeof ALL_THEMES)[number], mode: Mode): string {
-	const isDefault = theme === DEFAULT_THEME;
-	if (mode === 'dark') return isDefault ? ':root' : `[data-theme-id='${theme.id}']`;
-	return isDefault ? "[data-theme='light']" : `[data-theme-id='${theme.id}'][data-theme='light']`;
+	return themeSelectors(theme)[mode];
 }
 
 // Selector → the theme block it is generated from. The selectors are the ones
@@ -379,21 +376,15 @@ describe('ember light theme WCAG AA contrast', () => {
 // failure is a finding to report, not to silence.
 // Every theme × mode block in app.css, shared by the resting-state and
 // focus-ring describes below (was copy-pasted three times). Derived from
-// THEMES rather than hardcoded so a new theme is enumerated automatically —
+// BLOCK_BY_SELECTOR (and so from the generator's own selectors) rather than
+// hardcoded, so a new theme is enumerated automatically —
 // a hardcoded list would let it skip the per-block --link declaration guard
 // and inherit another theme's link color through the shared
 // [data-theme='light'] selector.
-const THEME_BLOCKS = THEMES.flatMap(({ id }) =>
-	id === 'default'
-		? [
-				{ name: 'ember dark', sel: ':root' },
-				{ name: 'ember light', sel: "[data-theme='light']" }
-			]
-		: [
-				{ name: `${id} dark`, sel: `[data-theme-id='${id}']` },
-				{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
-			]
-);
+const THEME_BLOCKS = [...BLOCK_BY_SELECTOR].map(([sel, { id, mode }]) => ({
+	name: `${id === 'default' ? 'ember' : id} ${mode}`,
+	sel
+}));
 
 // SONA-209: the resting surface pairings, swept over the theme DATA rather than
 // picked one at a time. Everything above grew pairing-by-pairing out of a bug
@@ -406,10 +397,11 @@ const THEME_BLOCKS = THEMES.flatMap(({ id }) =>
 // it is SONA-126, not this sweep. --primary IS swept at the 3:1 non-text floor
 // below, where it draws selection and drop-target borders.
 //
-// Scope: the --sidebar* family is out of the sweep. The dark sidebar border is
-// an alpha value (rgba over whatever sits behind it), and this sweep measures
-// opaque pairs only — compositing it would be a second mechanism, not another
-// row in this table.
+// Scope: only --sidebar-border is out of the sweep. Its dark value is an alpha
+// value (rgba over whatever sits behind it), and this sweep measures opaque
+// pairs only — compositing it would be a second mechanism, not another row in
+// this table. --sidebar and --sidebar-foreground are opaque hexes and ARE
+// swept below.
 const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> = [
 	{ ink: 'foreground', ground: 'background', floor: 4.5 },
 	{ ink: 'foreground', ground: 'card', floor: 4.5 },
@@ -424,6 +416,11 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 	// on it for as long as the pointer is there. Terracotta light fails it today,
 	// like the resting --secondary pairing above.
 	{ ink: 'mutedForeground', ground: 'muted', floor: 4.5 },
+	// The admin shell's nav: the active/heading label uses --sidebar-foreground,
+	// the resting links --muted-foreground, both on the --sidebar fill
+	// (src/routes/admin/+layout.svelte).
+	{ ink: 'sidebarForeground', ground: 'sidebar', floor: 4.5 },
+	{ ink: 'mutedForeground', ground: 'sidebar', floor: 4.5 },
 	{ ink: 'link', ground: 'background', floor: 4.5 },
 	{ ink: 'link', ground: 'card', floor: 4.5 },
 	{ ink: 'statusOk', ground: 'card', floor: 4.5 },
@@ -501,15 +498,16 @@ const KNOWN_FAILURES = new Map<string, number>([
 	['default light primary on card', 2.46],
 	['terracotta light mutedForeground on secondary', 3.96],
 	// The hover twin of the pairing above, and it fails for the same reason.
-	['terracotta light mutedForeground on muted', 4.11]
+	['terracotta light mutedForeground on muted', 4.11],
+	// The admin nav's resting labels on the same palette, same cause: terracotta
+	// light's --muted-foreground is too pale for its warm mid-tone surfaces.
+	['terracotta light mutedForeground on sidebar', 3.96]
 ]);
 
 // The sweep walks the theme DATA, not the selector list: every theme × mode,
 // named by the id + mode that also form its KNOWN_FAILURES key, so a failure
 // message names the exact entry to add or drop.
-const SWEEP_BLOCKS = ALL_THEMES.flatMap((theme) =>
-	(['dark', 'light'] as Mode[]).map((mode) => ({ id: theme.id, mode }))
-);
+const SWEEP_BLOCKS = [...BLOCK_BY_SELECTOR.values()];
 
 describe('resting token pairings, every theme × mode (SONA-209)', () => {
 	// An allowlist key the sweep never generates — a renamed token, a dropped
@@ -966,6 +964,93 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 					const composite = mix2(blockToken(sel, 'destructive'), tintPct, blockToken(sel, surface));
 					expect(contrast(blockToken(sel, textToken), composite)).toBeGreaterThanOrEqual(4.5);
 				});
+			}
+		}
+	}
+});
+
+// The status chips and callouts paint their label in the SAME ink as their
+// fill: color-mix(in srgb, var(--status-ok|--status-warn) N%, transparent) over
+// whatever surface the chip sits on, with the label left at the raw token. That
+// tint lifts the surface toward the ink, so the real ratio is the ink against
+// the composite, not against the bare --background or --card that the resting
+// sweep measures. Three percentages are in use (12% in the Cloudflare setup
+// dialog, 15% on the VR admin page, 20% on the observability page); each is
+// pinned to its source below, so retuning a tint re-runs this math instead of
+// silently moving the label closer to its own background.
+//
+// --status-attention is deliberately absent: nothing paints a tint of it (it is
+// small text on a plain surface, covered by the SONA-162 describe below).
+describe('status-ink text on its own tint (SONA-209)', () => {
+	const TINTS: Array<{ pct: number; file: string }> = [
+		{ pct: 12, file: './components/CloudflareSetupDialog.svelte' },
+		{ pct: 15, file: '../routes/admin/vr/+page.svelte' },
+		{ pct: 20, file: '../routes/admin/observability/+page.svelte' }
+	];
+	const STATUS_INKS = ['status-ok', 'status-warn'] as const;
+	const SURFACES = ['background', 'card'] as const;
+
+	// Same bargain as KNOWN_FAILURES above: record the ratio measured when this
+	// describe was written rather than silence the assert, because no palette
+	// value moves in SONA-209. Terracotta light's status inks are the palest of
+	// the three themes, and its page background is the lighter of the two
+	// surfaces, so that is where the ink and its tint converge.
+	const TINT_KNOWN_FAILURES = new Map<string, number>([
+		['terracotta light status-ok 15% on background', 4.38],
+		['terracotta light status-ok 20% on background', 4.07],
+		['terracotta light status-warn 15% on background', 4.34],
+		['terracotta light status-warn 20% on background', 4.02]
+	]);
+
+	for (const { pct, file } of TINTS) {
+		it(`${file} still tints a status token at ${pct}%`, () => {
+			const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+			expect(
+				source,
+				`${file} no longer mixes a status token at ${pct}% — update the TINTS table to the percentage it uses now`
+			).toMatch(new RegExp(`color-mix\\(in srgb,\\s*var\\(--status-[\\w-]+\\)\\s*${pct}%`));
+		});
+	}
+
+	it('has no allowlist entry this sweep does not generate', () => {
+		const generated = new Set(
+			TINTS.flatMap(({ pct }) =>
+				STATUS_INKS.flatMap((ink) =>
+					SURFACES.flatMap((surface) =>
+						THEME_BLOCKS.map(({ name }) => `${name} ${ink} ${pct}% on ${surface}`)
+					)
+				)
+			)
+		);
+		expect([...TINT_KNOWN_FAILURES.keys()].filter((k) => !generated.has(k))).toEqual([]);
+	});
+
+	for (const { pct } of TINTS) {
+		for (const ink of STATUS_INKS) {
+			for (const surface of SURFACES) {
+				for (const { name, sel } of THEME_BLOCKS) {
+					const key = `${name} ${ink} ${pct}% on ${surface}`;
+					it(`${name}: --${ink} text meets 4.5:1 on its ${pct}% tint over the ${surface}`, () => {
+						const hex = blockToken(sel, ink);
+						const ratio = contrast(hex, mix2(hex, pct, blockToken(sel, surface)));
+						const known = TINT_KNOWN_FAILURES.get(key);
+						if (known !== undefined) {
+							expect(
+								ratio,
+								`${key} now measures ${ratio.toFixed(2)}:1 and clears 4.5:1 — drop it from TINT_KNOWN_FAILURES`
+							).toBeLessThan(4.5);
+							expect(
+								ratio,
+								`${key} moved from the recorded ${known}:1 to ${ratio.toFixed(2)}:1 and still fails 4.5:1 — update its TINT_KNOWN_FAILURES ratio`
+							).toBeCloseTo(known, 1);
+							return;
+						}
+						expect(
+							ratio,
+							`${key} measures ${ratio.toFixed(2)}:1, under the 4.5:1 floor`
+						).toBeGreaterThanOrEqual(4.5);
+					});
+				}
 			}
 		}
 	}

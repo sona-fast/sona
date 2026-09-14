@@ -61,8 +61,12 @@ function block(theme: ThemeDefinition, mode: 'dark' | 'light', selector: string)
 	return rule(selector, declarations);
 }
 
-/** Selectors for a theme's two blocks. The default theme owns :root. */
-function selectors(theme: ThemeDefinition): { dark: string; light: string } {
+/**
+ * Selectors for a theme's two blocks. The default theme owns :root. Exported so
+ * src/lib/theme-contrast.test.ts names blocks with the generator's own strings
+ * rather than a copy that can drift from it.
+ */
+export function themeSelectors(theme: ThemeDefinition): { dark: string; light: string } {
 	return theme.id === DEFAULT_THEME_ID
 		? { dark: ':root', light: "[data-theme='light']" }
 		: {
@@ -93,6 +97,13 @@ function validateTheme(theme: ThemeDefinition): void {
 		if (!FONT_FAMILY.test(family)) {
 			throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has characters outside letters, digits, spaces, commas, quotes, and hyphens`);
 		}
+		// The character set allows quotes, so an odd count leaves one open and the
+		// rest of the stylesheet lands inside a string literal.
+		for (const quote of ["'", '"']) {
+			if (family.split(quote).length % 2 === 0) {
+				throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has an unbalanced ${quote} quote`);
+			}
+		}
 	}
 }
 
@@ -109,7 +120,7 @@ export function renderThemesCss(themes: ThemeDefinition[]): string {
 	// after the default-first check that those chains depend on.
 	assertNoAliasCycles(themes);
 	const blocks = themes.flatMap((theme) => {
-		const sel = selectors(theme);
+		const sel = themeSelectors(theme);
 		return [
 			`/* ${theme.label} */\n${block(theme, 'dark', sel.dark)}`,
 			block(theme, 'light', sel.light)
