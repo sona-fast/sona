@@ -215,11 +215,11 @@ export function sourceKey(source: SourceKind | null): string | null {
 export type SuggestionRequest = { sourcePostUrl: string } | { imageId: number };
 
 /** How long one lookup may hang before the client gives up on it. The endpoint
- * ends its own chain at 22 s (LOOKUP_DEADLINE_MS in +server.ts) and answers a
+ * ends its own chain at 32 s (LOOKUP_DEADLINE_MS in +server.ts) and answers a
  * 502 when it does, so a call still open past that has lost the connection,
  * not the classifier; the headroom is for the answer to make it back. Without
  * it a stalled connection left the pill disabled with no way out but a reload. */
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 40_000;
 // Exported for the test that pins it above the endpoint's own deadline; the
 // underscore marks it as read by the tests rather than by the forms, the way
 // +server.ts marks _LOOKUP_DEADLINE_MS.
