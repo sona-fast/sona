@@ -609,11 +609,11 @@ describe('which post a source URL names', () => {
 		// sheet and /<handle>/status/<id> from the address bar compare unequal as
 		// URLs; the key is the status id.
 		expect(key('https://x.com/i/web/status/1789012345678901234')).toBe('x:1789012345678901234');
-		expect(key('https://x.com/kirin/status/1789012345678901234')).toBe('x:1789012345678901234');
-		expect(key('https://twitter.com/kirin/status/1789012345678901234/photo/1')).toBe(
+		expect(key('https://x.com/examplefox/status/1789012345678901234')).toBe('x:1789012345678901234');
+		expect(key('https://twitter.com/examplefox/status/1789012345678901234/photo/1')).toBe(
 			'x:1789012345678901234'
 		);
-		expect(key('https://x.com/kirin/status/1789012345678901235')).not.toBe('x:1789012345678901234');
+		expect(key('https://x.com/examplefox/status/1789012345678901235')).not.toBe('x:1789012345678901234');
 	});
 
 	it('reads another post, and a field that holds no post, as something else', () => {

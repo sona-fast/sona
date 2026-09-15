@@ -328,7 +328,7 @@ test('an explicit post with no tags above the floor still offers Mark it NSFW', 
 
 	// The rating is about the post that was looked up, so it goes when the field
 	// names another one — the same way a suggested answer's rating does.
-	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/kirin/status/1789012345678901234');
+	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/examplefox/status/1789012345678901234');
 	await expect(page.locator('.tag-rating-note')).toHaveCount(0);
 });
 
@@ -528,12 +528,12 @@ test('an X post rewritten from the share form to the handle form keeps the chips
 	await pill(page).click();
 	await expect(page.locator('.tag-chip')).toHaveCount(3);
 
-	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/kirin/status/1789012345678901234');
+	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/examplefox/status/1789012345678901234');
 	await expect(page.locator('.tag-chip')).toHaveCount(3);
 	await expect(liveRegion(page)).toHaveText('3 suggested tags from entail.dev');
 
 	// Another tweet is another post, and the chips go.
-	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/kirin/status/1789012345678901235');
+	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/examplefox/status/1789012345678901235');
 	await expect(page.locator('.tag-chip')).toHaveCount(0);
 });
 
@@ -1185,7 +1185,7 @@ test('a post with no picture says so rather than blaming the classifier', async 
 	await expect(tagsInput(page)).toBeVisible();
 	await stubSuggestions(page, 200, { source: 'x', tags: [], rating: null, imageCount: 0 });
 
-	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/kirin/status/1789012345678901234');
+	await page.fill('input[name="sourcePostUrl"]', 'https://x.com/examplefox/status/1789012345678901234');
 	await expect(pill(page)).toHaveAttribute('aria-disabled', 'false');
 	await pill(page).click();
 
