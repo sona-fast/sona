@@ -100,12 +100,6 @@ function sourceClash(imageId: number, title: string) {
 	};
 }
 
-/** The X match with a source clash on it: the post already belongs to another
- * piece, so the prefill deliberately leaves the source URL alone. */
-function xClashBody(imageId: number, title: string) {
-	return { ...xMatchBody(), sourceClash: sourceClash(imageId, title) };
-}
-
 /** The same confident match, plus a source clash on a piece the page never
  * loaded an option for. */
 function clashBody(imageId: number, title: string) {
@@ -252,6 +246,16 @@ const pill = (page: Page) => page.locator('button.lookup-pill');
 const suggestPill = (page: Page) => page.getByRole('button', { name: 'Suggest tags', exact: true });
 // The page's own polite region (the admin layout has a separate one, a <p>).
 const LIVE_REGION = 'div.sr-only[aria-live="polite"]';
+
+/** The suggestion every chips test stubs: three tags and a rating, from the X
+ * post the lookup fills the source field with. */
+const THREE_TAG_SUGGESTION = {
+	source: 'x',
+	tags: ['mammal', 'canine', 'fox'],
+	rating: 'explicit',
+	imageCount: 1
+};
+
 const panel = (page: Page) => page.getByRole('region', { name: 'Artist lookup' });
 
 test('without a key there is no button, only a pointer at Settings', async ({ page }) => {
@@ -547,12 +551,7 @@ test.describe('with a key saved', () => {
 
 	test('both rating pills sit beside the one NSFW box, and neither ticks it', async ({ page }) => {
 		await stubLookup(page, xMatchBody());
-		await stubSuggestions(page, 200, {
-			source: 'x',
-			tags: ['mammal', 'canine', 'fox'],
-			rating: 'explicit',
-			imageCount: 1
-		});
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
 		await oneDoneTile(page);
 		const nsfw = page.locator('input[name="nsfw"]');
 
@@ -614,12 +613,7 @@ test.describe('with a key saved', () => {
 
 	test('the edit page draws both pills on one row too', async ({ page }) => {
 		await stubLookup(page, xMatchBody());
-		await stubSuggestions(page, 200, {
-			source: 'x',
-			tags: ['mammal', 'canine', 'fox'],
-			rating: 'explicit',
-			imageCount: 1
-		});
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
 		// 1280 first: what the operator is most likely on, and the width the two
 		// forms disagreed at.
 		await page.setViewportSize({ width: 1280, height: 900 });
@@ -665,6 +659,15 @@ test.describe('with a key saved', () => {
 			expect(Math.abs((await centre(selector)) - labelCentre)).toBeLessThanOrEqual(1);
 		}
 		await expect(page.locator('.tag-check-row .btn')).toHaveText('Mark it NSFW');
+		// One line each, not just one row. The note wrapped "entail.dev." onto a
+		// second line for an 8px shortfall, which the row's own gap pays for: three
+		// gaps at 4px instead of 8px buys back 12px (SONA-220).
+		for (const selector of ['#tags-rating', '#lookup-rating-tag']) {
+			const box = await page.locator(selector).boundingBox();
+			if (!box) throw new Error(`${selector} has no box`);
+			expect(box.height).toBeLessThan(24);
+		}
+		await expect(page.locator('.tag-check-row')).toHaveCSS('gap', '4px');
 		// And the phone is untouched by that: shrinking the pills is a rule for the
 		// wide row only, so at 320 the row still wraps whole items, each onto its
 		// own line under the label text rather than under the checkbox.
@@ -709,6 +712,21 @@ test.describe('with a key saved', () => {
 			return el ? el.scrollWidth - el.clientWidth : 0;
 		});
 		expect(narrowOverflow).toBeLessThanOrEqual(0);
+
+		// 1024: a wide window whose column is still under 560px. Wrapping put the
+		// 24px indent on items that had not wrapped, so the row read as inline with
+		// 32px gaps between its items. Stacked, every item that carries the indent
+		// is on a line of its own and they share one left edge.
+		await page.setViewportSize({ width: 1024, height: 900 });
+		const pillBox = await page.locator('#lookup-rating-tag').boundingBox();
+		const noteBox = await page.locator('#tags-rating').boundingBox();
+		const buttonBox = await page.locator('.tag-check-row .btn').boundingBox();
+		if (!pillBox || !noteBox || !buttonBox) throw new Error('the stacked row has no box');
+		expect(buttonBox.x).toBeCloseTo(pillBox.x, 0);
+		expect(noteBox.x).toBeCloseTo(pillBox.x, 0);
+		// Stacked, not inline: each one sits below the one before it.
+		expect(noteBox.y).toBeGreaterThan(pillBox.y);
+		expect(buttonBox.y).toBeGreaterThan(noteBox.y);
 	});
 
 	// ---- The Source Post URL field's own two descriptions --------------------
@@ -761,22 +779,12 @@ test.describe('with a key saved', () => {
 		await bothSourceDescriptions(page);
 	});
 
-	test('a second lookup that lands on the same post keeps the suggested chips', async ({
-		page
-	}) => {
-		// The source URL used to be blanked the moment the second lookup started
-		// and refilled only when it came back, so the suggestion control saw the
-		// post change and threw away chips the operator was still choosing from —
-		// for a lookup that landed on the very same post.
-		await stubLookup(page, xMatchBody());
-		await stubSuggestions(page, 200, {
-			source: 'x',
-			tags: ['mammal', 'canine', 'fox'],
-			rating: 'explicit',
-			imageCount: 1
-		});
-		await oneDoneTile(page);
-
+	/** A repeat lookup on the SAME post, then one that fails outright. Neither is
+	 * a reason to disturb the source URL field, and the suggestion standing on it
+	 * survives both. The source URL used to be blanked the moment the second
+	 * lookup started and refilled only when it came back, so the control saw the
+	 * post change and threw away chips the operator was still choosing from. */
+	async function chipsSurviveARepeatLookup(page: Page) {
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue(X_POST);
 		await suggestPill(page).click();
@@ -803,24 +811,22 @@ test.describe('with a key saved', () => {
 		// that only when the post under it really changes, and neither a repeat of
 		// the same post nor a failed lookup is that.
 		await expect(page.locator('#tags-status')).not.toContainText('set that lookup aside');
-	});
+	}
 
-	test('a second lookup that lands elsewhere replaces the URL, and the chips go with it', async ({
+	test('a second lookup that lands on the same post keeps the suggested chips', async ({
 		page
 	}) => {
-		// The other half of the same rule: keeping the field through the round trip
-		// must not turn into keeping a URL the new result disagrees with. The
-		// replacement happens when the result lands, and the suggestion about the
-		// old post goes then — not at the click, and not never.
 		await stubLookup(page, xMatchBody());
-		await stubSuggestions(page, 200, {
-			source: 'x',
-			tags: ['mammal', 'canine', 'fox'],
-			rating: 'explicit',
-			imageCount: 1
-		});
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
 		await oneDoneTile(page);
+		await chipsSurviveARepeatLookup(page);
+	});
 
+	/** The other half of the same rule: keeping the field through the round trip
+	 * must not turn into keeping a URL the new result disagrees with. The
+	 * replacement happens when the result lands, and the suggestion about the old
+	 * post goes then — not at the click, and not never. */
+	async function aRepeatLookupElsewhereReplacesTheURL(page: Page) {
 		await pill(page).click();
 		await expect(sourceInput(page)).toHaveValue(X_POST);
 		await suggestPill(page).click();
@@ -830,12 +836,32 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 
 		await expect(sourceInput(page)).toHaveValue(X_POST_2);
+		await expect(dateInput(page)).toHaveValue('2026-03-05');
 		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		// The suggestion was about the old post, so it goes with it — and says so.
 		await expect(page.locator('.tag-chip')).toHaveCount(0);
 		await expect(page.locator('#tags-rating')).toHaveCount(0);
 		await expect(page.locator('#tags-status')).toHaveText(
 			'The source post URL changed, so Sona set that lookup aside.'
 		);
+	}
+
+	test('a second lookup that lands elsewhere replaces the URL, and the chips go with it', async ({
+		page
+	}) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
+		await oneDoneTile(page);
+		await aRepeatLookupElsewhereReplacesTheURL(page);
+	});
+
+	test('the edit page replaces the URL when the repeat lookup lands elsewhere', async ({
+		page
+	}) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
+		await gotoEditHydrated(page);
+		await aRepeatLookupElsewhereReplacesTheURL(page);
 	});
 
 	// The click-time reset was narrowed so a repeat lookup keeps the field it is
@@ -861,6 +887,11 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// And it says so. The new parent has no result, so the panel shows nothing
+		// about the two fields that just emptied under the operator (4.1.3).
+		await expect(page.locator(LIVE_REGION)).toContainText(
+			"Sona cleared the source post URL and commissioned date the last parent's lookup filled."
+		);
 	});
 
 	test('a clash after a lookup calls the field empty, not the operator\'s', async ({ page }) => {
@@ -876,7 +907,9 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue(X_POST);
 		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
 
-		await stubLookup(page, xClashBody(9001, 'Clash Piece'));
+		// The X match with a clash on it: the post already belongs to another
+		// piece, so the prefill deliberately leaves the source URL alone.
+		await stubLookup(page, { ...xMatchBody(), sourceClash: sourceClash(9001, 'Clash Piece') });
 		await pill(page).click();
 
 		await expect(panel(page)).toContainText(
@@ -887,6 +920,44 @@ test.describe('with a key saved', () => {
 		// wrote is gone, because this result had nothing to put in its place.
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+	});
+
+	/** A no-match is a result too, and it prefills nothing. It used to return
+	 * before the clearing branches, so the first lookup's URL and date stayed on
+	 * the form, still tagged "From lookup", under a panel saying Sona found
+	 * nothing — the values and the sentence disagreeing on the same screen. */
+	async function aNoMatchEmptiesWhatTheLastLookupFilled(page: Page) {
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
+
+		await stubLookup(page, { enabled: true, matches: [] });
+		await pill(page).click();
+
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// The no-match arm carries no status line of its own, so the sentence is
+		// rendered there beside the body rather than only under a result.
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+		);
+	}
+
+	test('a no-match empties the fields the last lookup filled', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+		await aNoMatchEmptiesWhatTheLastLookupFilled(page);
+	});
+
+	test('the edit page empties them on a no-match too', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+		await aNoMatchEmptiesWhatTheLastLookupFilled(page);
 	});
 
 	// The branch that empties the commissioned date had no test of its own: a
@@ -911,7 +982,7 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
 		await expect(panel(page)).toContainText(
-			'Sona filled the source post URL from the Twitter post and emptied the commissioned date the last lookup filled, because that post carries no date.'
+			'Sona filled the source post URL from the Twitter post and cleared the commissioned date the last lookup filled, because that post has no date.'
 		);
 		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
 	});
@@ -921,67 +992,9 @@ test.describe('with a key saved', () => {
 	// suggestion about the very post it was on its way back with.
 	test('the edit page keeps the suggested chips through a repeat lookup', async ({ page }) => {
 		await stubLookup(page, xMatchBody());
-		await stubSuggestions(page, 200, {
-			source: 'x',
-			tags: ['mammal', 'canine', 'fox'],
-			rating: 'explicit',
-			imageCount: 1
-		});
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
 		await gotoEditHydrated(page);
-
-		await pill(page).click();
-		await expect(sourceInput(page)).toHaveValue(X_POST);
-		await suggestPill(page).click();
-		await expect(page.locator('.tag-chip')).toHaveCount(3);
-
-		await pill(page).click();
-		await expect(panel(page)).toContainText('kuttoya');
-		await expect(sourceInput(page)).toHaveValue(X_POST);
-		await expect(page.locator('.tag-chip')).toHaveCount(3);
-		await expect(page.locator('#tags-rating')).toHaveText('Rated explicit by entail.dev.');
-
-		// And a lookup that fails outright leaves the field as it was, rather than
-		// emptying it with nothing to put back.
-		await stubLookup(page, { enabled: true, error: 'rate_limited', forwarded: true }, 429);
-		await pill(page).click();
-		await expect(panel(page)).toContainText(
-			'FuzzySearch is limiting how often your site can search right now.'
-		);
-		await expect(sourceInput(page)).toHaveValue(X_POST);
-		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
-		await expect(page.locator('.tag-chip')).toHaveCount(3);
-		await expect(page.locator('#tags-status')).not.toContainText('set that lookup aside');
-	});
-
-	test('the edit page replaces the URL when the repeat lookup lands elsewhere', async ({
-		page
-	}) => {
-		await stubLookup(page, xMatchBody());
-		await stubSuggestions(page, 200, {
-			source: 'x',
-			tags: ['mammal', 'canine', 'fox'],
-			rating: 'explicit',
-			imageCount: 1
-		});
-		await gotoEditHydrated(page);
-
-		await pill(page).click();
-		await expect(sourceInput(page)).toHaveValue(X_POST);
-		await suggestPill(page).click();
-		await expect(page.locator('.tag-chip')).toHaveCount(3);
-
-		await stubLookup(page, xMatchBody(SECOND_POST));
-		await pill(page).click();
-
-		await expect(sourceInput(page)).toHaveValue(X_POST_2);
-		await expect(dateInput(page)).toHaveValue('2026-03-05');
-		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
-		// The suggestion was about the old post, so it goes with it — and says so.
-		await expect(page.locator('.tag-chip')).toHaveCount(0);
-		await expect(page.locator('#tags-rating')).toHaveCount(0);
-		await expect(page.locator('#tags-status')).toHaveText(
-			'The source post URL changed, so Sona set that lookup aside.'
-		);
+		await chipsSurviveARepeatLookup(page);
 	});
 
 	test('the edit page empties both fields when the result has nothing to put back', async ({
@@ -1007,7 +1020,7 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
 		await expect(panel(page)).toContainText(
-			'Sona emptied the source post URL and commissioned date the last lookup filled, because this result has nothing to put there.'
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
 		);
 		await expect(panel(page)).not.toContainText('left the source post URL as it was');
 	});

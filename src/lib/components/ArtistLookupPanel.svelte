@@ -127,8 +127,19 @@
 	);
 	// The sentences that only report an emptied field name no site, and the
 	// result that empties one can be a no-match with no prefill match to name.
+	// Held as text rather than inline in the markup because a no-match renders
+	// its own arm, well above the status line every other result uses.
 	const emptiedOnly = $derived(
 		statusKind === 'both_emptied' || statusKind === 'url_emptied' || statusKind === 'date_emptied'
+	);
+	const emptiedText = $derived(
+		statusKind === 'both_emptied'
+			? m.admin_lookup_status_both_emptied()
+			: statusKind === 'url_emptied'
+				? m.admin_lookup_status_url_emptied()
+				: statusKind === 'date_emptied'
+					? m.admin_lookup_status_date_emptied()
+					: ''
 	);
 	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
 	// The "Sets the artist to {name}." sentence and the button it
@@ -213,6 +224,13 @@
 			{:else if lookup.kind === 'no_match'}
 				<div class="lookup-eyebrow">{m.admin_lookup_no_match_eyebrow()}</div>
 				<p class="lookup-lead">{m.admin_lookup_no_match_body()}</p>
+				<!-- A no-match is a result with nothing to prefill, so it empties what
+				     the last lookup filled. Said here, above the hint: the operator
+				     watches the two fields go blank and this arm carries no status
+				     line of its own. -->
+				{#if emptiedOnly}
+					<p class="lookup-status">{emptiedText}</p>
+				{/if}
 				<p class="lookup-status">{m.admin_lookup_no_match_hint()}</p>
 			{:else if lookup.kind === 'failed'}
 				{#if lookup.reason === 'rate_limited'}
@@ -382,12 +400,8 @@
 
 				{#if statusKind !== 'none' && (prefill || emptiedOnly)}
 					<p class="lookup-status">
-						{#if statusKind === 'both_emptied'}
-							{m.admin_lookup_status_both_emptied()}
-						{:else if statusKind === 'url_emptied'}
-							{m.admin_lookup_status_url_emptied()}
-						{:else if statusKind === 'date_emptied'}
-							{m.admin_lookup_status_date_emptied()}
+						{#if emptiedOnly}
+							{emptiedText}
 						{:else if !prefill}
 							<!-- Unreachable: the three sentences above are the only ones that
 							     render without a prefill match. Here so every sentence below
@@ -408,6 +422,11 @@
 							{m.admin_lookup_status_clash({ site: siteLabel(prefill.site), title: clash?.title ?? '' })}
 						{:else if statusKind === 'clash_kept'}
 							{m.admin_lookup_status_clash_kept({
+								site: siteLabel(prefill.site),
+								title: clash?.title ?? ''
+							})}
+						{:else if statusKind === 'clash_emptied'}
+							{m.admin_lookup_status_clash_emptied({
 								site: siteLabel(prefill.site),
 								title: clash?.title ?? ''
 							})}

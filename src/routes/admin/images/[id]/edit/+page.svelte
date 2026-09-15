@@ -331,7 +331,14 @@
 		// A failure, or a search cancelled back to idle, leaves both fields exactly
 		// as they are: there is no new post to describe them, and what the last
 		// lookup wrote is still the best thing the page knows.
-		if (next.kind !== 'results') return;
+		//
+		// A no-match is not one of those. It is a settled result with nothing to
+		// prefill, so it runs the whole of this: it fills neither field, which
+		// empties whatever the last lookup filled and records it for the sentence
+		// the panel's no-match arm renders. Returning early here instead left the
+		// last lookup's URL and date on the form, still tagged From lookup, under
+		// a panel saying Sona found nothing.
+		if (next.kind !== 'results' && next.kind !== 'no_match') return;
 		// A new result describes a new seed, even when that seed is empty.
 		lookupSeeded = {};
 		// A field the LAST prefill wrote and the operator has not typed over since
@@ -343,10 +350,10 @@
 		const ownSource = sourceTagged ? '' : sourcePostUrl;
 		const ownDate = dateTagged ? '' : commissionedAt;
 		lookupUrlHeld = ownSource.trim() !== '';
-		const fields = prefillForResult(next.data, {
-			sourcePostUrl: ownSource,
-			commissionedAt: ownDate
-		});
+		const fields: LookupFields =
+			next.kind === 'results'
+				? prefillForResult(next.data, { sourcePostUrl: ownSource, commissionedAt: ownDate })
+				: {};
 		lookupFilled = fields;
 		const cleared: LookupCleared = {};
 		if (fields.sourcePostUrl !== undefined) {
@@ -855,7 +862,7 @@
 			     (SONA-220). Neither ever ticks it; both sit outside the label so a
 			     screen reader doesn't read a classifier's guess as part of the
 			     checkbox's own name. -->
-			<div class="nsfw-row tag-check-row">
+			<div class="tag-check-row">
 				<label class="checkbox-label">
 					<input
 						type="checkbox"
@@ -1098,53 +1105,9 @@
 		white-space: nowrap;
 	}
 
-	/* The rating never changes the checkbox — it reports what the sites said and
-	   sits beside it. The row wraps a pill to its own line when it no longer
-	   fits. */
-	.nsfw-row {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		flex-wrap: wrap;
-	}
-
-	/* The text grows with the number of sites, so the pill wraps rather than
-	   pushing the document into a sideways scroll. Kept on one line it cannot
-	   shrink at all, and this form's column is 600px wide: the pill would rather
-	   widen the row than break. */
-	.rating-tag {
-		font-family: var(--font-primary);
-		font-size: 11px;
-		color: var(--muted-foreground);
-		border: 1px solid var(--border);
-		/* A fixed radius, not the pill token. Wrapped to three or more lines the
-		   token clamps to half the box height, which pulls the end caps' arc inside
-		   the text's own inset and leaves the first and last lines running flush
-		   against the border. At one line the two are identical. */
-		border-radius: 12px;
-		padding: 1px 8px;
-		white-space: normal;
-		overflow-wrap: break-word;
-		max-width: 100%;
-	}
-
-	/* With room for all four, this row holds one line and the two rating items
-	   give up the difference instead of pushing "Mark it NSFW" onto a second row.
-	   Flex picks its line breaks from each item's CONTENT size however shrinkable
-	   it is, so a zero basis is what takes the two out of that decision; the cap
-	   keeps either from stretching past its own text. The floor is what makes it
-	   safe: without one, a column narrower than the row shrinks both items until
-	   the text is a character per line, and with one an overfull row drops the
-	   button to a second line the way it always did. Asked of the column, not the
-	   window — this form's column is 219px wide in an 800px window. */
-	@container admin-form (min-width: 560px) {
-		.nsfw-row .rating-tag,
-		.nsfw-row :global(.tag-rating-note) {
-			flex: 1 1 0;
-			min-width: 14ch;
-			max-width: max-content;
-		}
-	}
+	/* The row itself, the pill in it, and how the two share the row's width are
+	   global — both admin forms hold the same row. See `.tag-check-row` and
+	   `.rating-tag` in app.css. */
 
 	.artist-toggle {
 		display: flex;

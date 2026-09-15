@@ -788,15 +788,46 @@ describe('statusLineKind', () => {
 				{ clash: true, cleared: { sourcePostUrl: true, commissionedAt: true } }
 			)
 		).toBe('both_emptied');
+		// Only the URL emptied, under a body saying Sona found a post and declined
+		// it. The plain url_emptied sentence gives "this lookup filled nothing in
+		// its place" as the reason, which contradicts that body, so the clash gets
+		// a sentence naming its own reason.
+		expect(statusLineKind({}, { clash: true, cleared: { sourcePostUrl: true } })).toBe(
+			'clash_emptied'
+		);
+		expect(
+			m.admin_lookup_status_clash_emptied({ site: 'FurAffinity', title: 'Ref' }, { locale: 'en' })
+		).toBe(
+			'Sona cleared the source post URL the last lookup filled, because the FurAffinity post Sona found is already the source of Ref. You can type one in before you save.'
+		);
+		for (const locale of ['en', 'ja'] as const) {
+			expect(
+				m.admin_lookup_status_clash_emptied({ site: 'FurAffinity', title: 'Ref' }, { locale })
+			).toContain('Ref');
+		}
 	});
 
 	it('names the emptied field in the sentence, in both locales', () => {
 		expect(m.admin_lookup_status_url_and_date_emptied({ site: 'Twitter' }, { locale: 'en' })).toBe(
-			'Sona filled the source post URL from the Twitter post and emptied the commissioned date the last lookup filled, because that post carries no date. You can change the URL before you save.'
+			'Sona filled the source post URL from the Twitter post and cleared the commissioned date the last lookup filled, because that post has no date. You can change the URL before you save.'
 		);
 		expect(m.admin_lookup_status_url_emptied({}, { locale: 'en' })).toBe(
-			'Sona emptied the source post URL the last lookup filled, because this result has no post to put there.'
+			'Sona cleared the source post URL the last lookup filled, because this lookup filled nothing in its place. You can type one in before you save.'
 		);
+		// A clash result DOES have a post — Sona declined it — so no sentence on
+		// this path may say the lookup found nothing to put there.
+		expect(m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'en' })).toBe(
+			'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because this result has no link to put there. You can change the date before you save.'
+		);
+		expect(m.admin_lookup_status_both_emptied({}, { locale: 'en' })).toBe(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+		);
+		expect(m.admin_lookup_status_date_emptied({}, { locale: 'en' })).toBe(
+			'Sona cleared the commissioned date the last lookup filled, because this result has no date.'
+		);
+		// The panel's click-time announcement and these lines describe the same
+		// thing, so they use the same verb.
+		expect(m.admin_lookup_announce_searching_cleared({}, { locale: 'en' })).toContain('cleared');
 		for (const line of [
 			m.admin_lookup_status_url_and_date_emptied({ site: 'Twitter' }, { locale: 'ja' }),
 			m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'ja' }),
@@ -804,7 +835,9 @@ describe('statusLineKind', () => {
 			m.admin_lookup_status_url_emptied({}, { locale: 'ja' }),
 			m.admin_lookup_status_date_emptied({}, { locale: 'ja' })
 		]) {
-			expect(line).toContain('空にしました');
+			expect(line).toContain('消去しました');
+			// 検索 is what every other Japanese string in the file calls a lookup.
+			expect(line).not.toContain('ルックアップ');
 		}
 		// None of them claims a field was left alone, which is what they replace.
 		for (const locale of ['en', 'ja'] as const) {

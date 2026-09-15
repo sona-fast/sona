@@ -802,16 +802,26 @@
 	}
 
 	/** Undo what a previous shared prefill wrote, but only where the operator has
-	 * not typed over it since — the tag is the record of that. */
-	function resetSharedPrefill() {
-		if (sourceTagged) sourcePostUrl = '';
-		if (dateTagged) commissionedAt = '';
+	 * not typed over it since — the tag is the record of that. Returns which of
+	 * the two fields that emptied, so the caller can say so: this reset runs on a
+	 * parent move, where no result is on its way to describe what happened. */
+	function resetSharedPrefill(): LookupCleared {
+		const emptied: LookupCleared = {};
+		if (sourceTagged) {
+			sourcePostUrl = '';
+			emptied.sourcePostUrl = true;
+		}
+		if (dateTagged) {
+			commissionedAt = '';
+			emptied.commissionedAt = true;
+		}
 		sourceTagged = false;
 		dateTagged = false;
 		sharedFilled = {};
 		sharedUrlHeld = false;
 		sharedCleared = {};
 		resetSharedResult();
+		return emptied;
 	}
 
 	/** What the last result put on the page OUTSIDE the two shared fields. A new
@@ -839,7 +849,14 @@
 		// A failure, or a search cancelled back to idle, leaves both fields exactly
 		// as they are: there is no new post to describe them, and what the last
 		// lookup wrote is still the best thing the page knows.
-		if (next.kind !== 'results') return wrote;
+		//
+		// A no-match is not one of those. It is a settled result with nothing to
+		// prefill, so it runs the whole of this: it fills neither field, which
+		// empties whatever the last lookup filled and records it for the sentence
+		// the panel's no-match arm renders. Returning early here instead left the
+		// last lookup's URL and date on the form, still tagged From lookup, under
+		// a panel saying Sona found nothing.
+		if (next.kind !== 'results' && next.kind !== 'no_match') return wrote;
 		// A field the LAST prefill wrote and the operator has not typed over since
 		// is still the lookup's to replace, so this result reads it as empty and
 		// fills it. Only the tag can tell the two apart, which is why the value is
@@ -847,10 +864,10 @@
 		const ownSource = sourceTagged ? '' : sourcePostUrl;
 		const ownDate = dateTagged ? '' : commissionedAt;
 		sharedUrlHeld = ownSource.trim() !== '';
-		const fields = prefillForResult(next.data, {
-			sourcePostUrl: ownSource,
-			commissionedAt: ownDate
-		});
+		const fields: LookupFields =
+			next.kind === 'results'
+				? prefillForResult(next.data, { sourcePostUrl: ownSource, commissionedAt: ownDate })
+				: {};
 		sharedFilled = fields;
 		const cleared: LookupCleared = {};
 		if (fields.sourcePostUrl !== undefined) {
@@ -916,9 +933,27 @@
 	/** The parent moved: the shared fields describe whatever the parent is now. */
 	function onParentChanged(index: number) {
 		parentIndex = index;
-		resetSharedPrefill();
+		const emptied = resetSharedPrefill();
 		const tile = tiles[parentIndex];
-		return tile ? applyShared(tile.lookup) : { sourcePostUrl: false, commissionedAt: false };
+		const wrote = tile
+			? applyShared(tile.lookup)
+			: { sourcePostUrl: false, commissionedAt: false };
+		// The new parent put nothing back. A tile with no result of its own shows
+		// no panel and no status line, so the two fields the last parent's lookup
+		// filled empty with nothing on screen saying why — said out loud instead,
+		// the way returnToNewSet announces a refill. Only when nothing was
+		// written: a refill has its own announcement there, and two in one tick
+		// leaves the region holding the second.
+		if (!wrote.sourcePostUrl && !wrote.commissionedAt) {
+			if (emptied.sourcePostUrl && emptied.commissionedAt) {
+				announcer.say(m.admin_lookup_announce_shared_cleared());
+			} else if (emptied.sourcePostUrl) {
+				announcer.say(m.admin_lookup_announce_shared_cleared_source());
+			} else if (emptied.commissionedAt) {
+				announcer.say(m.admin_lookup_announce_shared_cleared_date());
+			}
+		}
+		return wrote;
 	}
 
 	function useLookupArtist(artist: { id: number; name: string }) {
@@ -1541,7 +1576,7 @@
 	     (SONA-156) and entail.dev's from the tag suggestion (SONA-220). Neither
 	     ever ticks it; both sit outside the label so a screen reader doesn't read
 	     a classifier's guess as part of the checkbox's own name. -->
-	<div class="nsfw-row tag-check-row">
+	<div class="tag-check-row">
 		<label class="checkbox-label">
 			<input
 				type="checkbox"
@@ -2108,59 +2143,20 @@
 
 	/* The rating never changes the checkbox — it reports what the sites said and
 	   sits beside it. The row wraps a pill to its own line when it no longer
-	   fits. */
-	.nsfw-row,
+	   fits. The shared row is a `.tag-check-row` and takes the same shape from
+	   app.css; the tile is not, and keeps its own. */
 	.tile-nsfw-row {
 		display: flex;
 		align-items: center;
 		gap: 8px;
 		flex-wrap: wrap;
-	}
-
-	/* A grid child's default min-width is its content, so a long pill would
-	   push the tile — and the document — wider than the viewport. */
-	.tile-nsfw-row {
+		/* A grid child's default min-width is its content, so a long pill would
+		   push the tile — and the document — wider than the viewport. */
 		min-width: 0;
 	}
 
-	/* The text grows with the number of sites, so the pill wraps inside whatever
-	   holds it rather than spilling out: the tile is ~170px wide, and the shared
-	   row is beside a second pill and a button once a suggestion has run. Kept
-	   on one line the pill cannot shrink at all, which pushed the document into
-	   a sideways scroll on a narrow phone. */
-	.rating-tag {
-		font-family: var(--font-primary);
-		font-size: 11px;
-		color: var(--muted-foreground);
-		border: 1px solid var(--border);
-		/* A fixed radius, not the pill token. Wrapped to three or more lines the
-		   token clamps to half the box height, which pulls the end caps' arc inside
-		   the text's own inset and leaves the first and last lines running flush
-		   against the border. At one line the two are identical. */
-		border-radius: 12px;
-		padding: 1px 8px;
-		white-space: normal;
-		overflow-wrap: break-word;
-		max-width: 100%;
-	}
-
-	/* With room for all four, this row holds one line and the two rating items
-	   give up the difference instead of pushing "Mark it NSFW" onto a second row.
-	   Flex picks its line breaks from each item's CONTENT size however shrinkable
-	   it is, so a zero basis is what takes the two out of that decision; the cap
-	   keeps either from stretching past its own text. The floor is what makes it
-	   safe: without one, a column narrower than the row shrinks both items until
-	   the text is a character per line, and with one an overfull row drops the
-	   button to a second line the way it always did. Asked of the column, not the
-	   window — this form's column is 219px wide in an 800px window. */
-	@container admin-form (min-width: 560px) {
-		.nsfw-row .rating-tag,
-		.nsfw-row :global(.tag-rating-note) {
-			flex: 1 1 0;
-			min-width: 14ch;
-			max-width: max-content;
-		}
-	}
+	/* The pill itself, and how the shared row shares its width with it, are
+	   global — the tiles hold the same pill. See `.rating-tag` in app.css. */
 
 	.field-label {
 		font-size: 14px;

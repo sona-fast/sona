@@ -485,6 +485,7 @@ export type StatusLineKind =
 	| 'date_kept'
 	| 'clash'
 	| 'clash_kept'
+	| 'clash_emptied'
 	| 'url_and_date_emptied'
 	| 'date_and_url_emptied'
 	| 'both_emptied'
@@ -531,6 +532,13 @@ export function statusLineKind(
 		// The clash sentence already says the URL was left empty, which is what
 		// emptying it leaves behind, so only the date needs the extra kinds below.
 		if (date) return options.urlHeld ? 'clash_kept' : 'clash';
+		// A clash with no date to report either. The plain url_emptied sentence
+		// gives "this lookup filled nothing in its place" as the reason, which
+		// reads as a lookup that found nothing under a body saying Sona found a
+		// post and declined it, so the clash names its own reason. Both fields
+		// emptied keeps both_emptied below: that one claims no reason the clash
+		// body contradicts.
+		if (cleared.sourcePostUrl && !cleared.commissionedAt) return 'clash_emptied';
 	} else {
 		if (url && date) return 'both';
 		if (url) {

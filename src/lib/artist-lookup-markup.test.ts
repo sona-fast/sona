@@ -537,7 +537,7 @@ describe('the "From lookup" tag', () => {
 		// cannot drop a field it did not write. It still cannot carry a PREVIOUS
 		// result's seed: applyPrefill empties it before the new one is described.
 		expect(EDIT).toMatch(
-			/function applyPrefill\([\s\S]{0,600}?lookupSeeded = \{\};/
+			/function applyPrefill\([\s\S]{0,1200}?lookupSeeded = \{\};/
 		);
 		expect(EDIT).toMatch(
 			/const lookupSeedEdited = \$derived\(\{[\s\S]{0,300}?artistName: lookupSeeded\.artistName !== undefined && !nameTagged/
@@ -900,6 +900,32 @@ describe('what the lookup copy names', () => {
 		}
 	});
 
+	// The mirror of those three. Moving the parent empties the two fields the
+	// last parent's lookup filled, and a parent with no result of its own puts
+	// nothing in the panel to say so (4.1.3).
+	it('names the cleared shared fields in both catalogs, and says them out loud', () => {
+		expect(ja.admin_lookup_announce_shared_cleared).toBeTruthy();
+		expect(ja.admin_lookup_announce_shared_cleared_source).toContain('投稿元URL');
+		expect(ja.admin_lookup_announce_shared_cleared_date).toContain('制作依頼日');
+		for (const catalog of [en, ja]) {
+			const sentences = [
+				catalog.admin_lookup_announce_shared_cleared,
+				catalog.admin_lookup_announce_shared_cleared_source,
+				catalog.admin_lookup_announce_shared_cleared_date
+			];
+			expect(new Set(sentences).size).toBe(3);
+		}
+		// The reset hands back what it emptied, and the parent move says it —
+		// only where nothing was written, because a refill has its own line and
+		// two announcements in one tick leave the region holding the second.
+		expect(UPLOAD).toMatch(
+			/function resetSharedPrefill\(\): LookupCleared \{[\s\S]{0,400}?emptied\.sourcePostUrl = true;[\s\S]{0,300}?emptied\.commissionedAt = true;[\s\S]{0,300}?return emptied;/
+		);
+		expect(UPLOAD).toMatch(
+			/function onParentChanged\(index: number\)[\s\S]{0,900}?if \(!wrote\.sourcePostUrl && !wrote\.commissionedAt\) \{[\s\S]{0,400}?m\.admin_lookup_announce_shared_cleared\(\)/
+		);
+	});
+
 	// An unreadable file is a dead end on a variant tile: not retryable, no
 	// Settings remedy, and the focus handler sends the operator to the artist
 	// select. So the body has to end by telling them to type the name, the way
@@ -998,9 +1024,12 @@ describe('what the lookup copy names', () => {
 
 	// The panel's own status line already says the image is on its way to
 	// FuzzySearch, so this one carries only what that line does not.
+	// It fires for the inline new-artist fields alone now: the two prefilled ones
+	// wait for the result and are reported by the panel's status line, so a line
+	// saying "the fields" named none of what the operator watched empty.
 	it('carries the cleared-fields announcement in both catalogs, without the searching line', () => {
 		expect(en.admin_lookup_announce_searching_cleared).toBe(
-			'Sona cleared the fields the last lookup filled.'
+			'Sona cleared the new artist details the last lookup filled.'
 		);
 		expect(en.admin_lookup_announce_searching_cleared).not.toMatch(/FuzzySearch/);
 		expect(ja.admin_lookup_announce_searching_cleared).toBeTruthy();
@@ -1178,23 +1207,48 @@ describe('focus after the panel goes away', () => {
 			// refill it. Only the tag tells that from something the operator typed.
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,900}?const ownSource = sourceTagged \\? '' : sourcePostUrl;\\s+const ownDate = dateTagged \\? '' : commissionedAt;`
+					`function ${apply}\\([\\s\\S]{0,1600}?const ownSource = sourceTagged \\? '' : sourcePostUrl;\\s+const ownDate = dateTagged \\? '' : commissionedAt;`
 				)
 			);
 			// And where the result offers nothing, the deferred field is emptied
 			// there instead — recorded, so the status line can say so (4.1.3).
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,2000}?\\} else if \\(sourceTagged\\) \\{[\\s\\S]{0,600}?sourcePostUrl = '';\\s+sourceTagged = false;\\s+cleared\\.sourcePostUrl = true;`
+					`function ${apply}\\([\\s\\S]{0,2800}?\\} else if \\(sourceTagged\\) \\{[\\s\\S]{0,600}?sourcePostUrl = '';\\s+sourceTagged = false;\\s+cleared\\.sourcePostUrl = true;`
 				)
 			);
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,2400}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
+					`function ${apply}\\([\\s\\S]{0,3200}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
 				)
 			);
 			expect(source).toMatch(/cleared=\{(shared|lookup)Cleared\}/);
 		}
+		// A no-match is a result too: it fills neither field, which empties what
+		// the last lookup filled. Returning early on it left the first lookup's
+		// URL and date on the form, still tagged, under "no match".
+		for (const [source, apply] of [
+			[UPLOAD, 'applyShared'],
+			[EDIT, 'applyPrefill']
+		] as const) {
+			expect(source).toMatch(
+				new RegExp(
+					`function ${apply}\\([\\s\\S]{0,1200}?if \\(next\\.kind !== 'results' && next\\.kind !== 'no_match'\\) return`
+				)
+			);
+			// And a no-match prefills nothing, so every fill branch is skipped and
+			// every clearing branch runs.
+			expect(source).toMatch(
+				new RegExp(
+					`const fields: LookupFields =\\s+next\\.kind === 'results'\\s+\\? prefillForResult\\([\\s\\S]{0,200}?\\)\\s+: \\{\\};`
+				)
+			);
+		}
+		// The no-match arm has no status line of its own, so the sentence is
+		// rendered there as well as under a result.
+		expect(PANEL).toMatch(
+			/\{:else if lookup\.kind === 'no_match'\}[\s\S]{0,600}?\{#if emptiedOnly\}\s+<p class="lookup-status">\{emptiedText\}<\/p>/
+		);
 		// The panel reads that record, and says the field was emptied rather than
 		// left as it was.
 		expect(PANEL).toMatch(/statusLineKind\(filled, \{ clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared \}\)/);
@@ -1203,7 +1257,8 @@ describe('focus after the panel goes away', () => {
 			'admin_lookup_status_date_and_url_emptied',
 			'admin_lookup_status_both_emptied',
 			'admin_lookup_status_url_emptied',
-			'admin_lookup_status_date_emptied'
+			'admin_lookup_status_date_emptied',
+			'admin_lookup_status_clash_emptied'
 		]) {
 			expect(PANEL).toContain(`m.${key}`);
 		}
@@ -1258,7 +1313,7 @@ describe('the rating tag beside NSFW', () => {
 		// The pill is a SIBLING of the label, not inside it (SONA-220). Any
 		// comment between the two is prose, not part of the contract.
 		expect(EDIT).toMatch(
-			/<div class="nsfw-row tag-check-row">[\s\S]*?<\/label>[\s\S]*?<span class="rating-tag" id="lookup-rating-tag">/
+			/<div class="tag-check-row">[\s\S]*?<\/label>[\s\S]*?<span class="rating-tag" id="lookup-rating-tag">/
 		);
 		// entail.dev's rating shares the row since SONA-220, so the checkbox points
 		// at a derived that joins whichever of the two pills is on screen.
@@ -1279,8 +1334,12 @@ describe('the rating tag beside NSFW', () => {
 	});
 
 	it('lets the row wrap a pill to its own line', () => {
+		// One rule for the row, in app.css. A page-scoped copy outranks the global
+		// one on specificity, so the copies quietly held the wide gap and the
+		// centred alignment that the two container queries are trying to change.
+		expect(APP_CSS).toMatch(/\.tag-check-row \{[^}]*flex-wrap: wrap;/);
 		for (const source of [UPLOAD, EDIT]) {
-			expect(source).toMatch(/\.nsfw-row[\s\S]{0,80}\{[^}]*flex-wrap: wrap;/);
+			expect(source).not.toMatch(/\.nsfw-row/);
 		}
 		// Wrapped, the two pills and the "Mark it NSFW" button all line up under
 		// the label text rather than one of them under the checkbox. Asked of the
@@ -1288,25 +1347,40 @@ describe('the rating tag beside NSFW', () => {
 		// window, so a viewport query indented the phone and left every width in
 		// between wrapping to the checkbox's edge.
 		expect(APP_CSS).toMatch(
-			/@container admin-form \(max-width: 559px\) \{[\s\S]{0,900}?\.tag-check-row \.tag-rating-note,\s+\.tag-check-row \.rating-tag,\s+\.tag-check-row \.btn \{\s+margin-left: 24px;/
+			/@container admin-form not \(min-width: 560px\) \{[\s\S]{0,900}?\.tag-check-row \.tag-rating-note,\s+\.tag-check-row \.rating-tag,\s+\.tag-check-row \.btn \{\s+margin-left: 24px;/
 		);
 		expect(APP_CSS).not.toMatch(/@media \(max-width: 640px\)[\s\S]{0,900}?\.tag-check-row/);
+		// The two ranges abut: `max-width: 559px` and `min-width: 560px` leave a
+		// fractional column width — 559.5px is what a fractional grid track gives
+		// — matching neither, with the row indented by neither rule.
+		expect(APP_CSS).not.toMatch(/@container admin-form \(max-width/);
+		// Stacked rather than wrapped in that range, which is what the mocks draw:
+		// wrapping put the 24px indent on items that had not wrapped, so an inline
+		// row carried 32px gaps at 1024 and 1150 on the edit form.
+		expect(APP_CSS).toMatch(
+			/@container admin-form not \(min-width: 560px\) \{[\s\S]{0,900}?\.tag-check-row \{\s+flex-direction: column;\s+align-items: flex-start;/
+		);
 	});
 
 	// The text grows with the number of sites; nowrap made the pill wider than
 	// its column and gave the whole document a horizontal scrollbar at 320px
 	// (1.4.10), wider than its tile in the grid, and — kept on one line beside a
 	// second pill and a button — it pushed that button onto a row of its own.
+	//
+	// One rule for all three pills, in app.css: the two forms and the tiles hold
+	// the same pill, and the copy in each page was byte-for-byte the other's.
 	it('lets the pill wrap rather than pushing the page sideways', () => {
+		expect(APP_CSS).toMatch(/\.rating-tag \{[^}]*max-width: 100%/);
+		expect(APP_CSS).toMatch(/\.rating-tag \{[^}]*white-space: normal;/);
+		// break-word, not anywhere: anywhere breaks mid-word, which is how a
+		// squeezed pill ends up one character per line.
+		expect(APP_CSS).toMatch(/\.rating-tag \{[^}]*overflow-wrap: break-word;/);
+		expect(APP_CSS).not.toMatch(/\.rating-tag \{[^}]*overflow-wrap: anywhere;/);
+		// No rule anywhere puts it back on one line, and neither page carries a
+		// copy of the rule any more.
+		expect(APP_CSS).not.toMatch(/\.rating-tag \{[^}]*white-space: nowrap;/);
 		for (const source of [UPLOAD, EDIT]) {
-			expect(source).toMatch(/\.rating-tag \{[^}]*max-width: 100%/);
-			expect(source).toMatch(/\.rating-tag \{[^}]*white-space: normal;/);
-			// break-word, not anywhere: anywhere breaks mid-word, which is how a
-			// squeezed pill ends up one character per line.
-			expect(source).toMatch(/\.rating-tag \{[^}]*overflow-wrap: break-word;/);
-			expect(source).not.toMatch(/\.rating-tag \{[^}]*overflow-wrap: anywhere;/);
-			// No rule anywhere puts it back on one line.
-			expect(source).not.toMatch(/\.rating-tag \{[^}]*white-space: nowrap;/);
+			expect(source).not.toMatch(/\.rating-tag \{/);
 		}
 		expect(UPLOAD).toMatch(/\.tile-nsfw-row \{[^}]*min-width: 0/);
 	});
@@ -1316,10 +1390,8 @@ describe('the rating tag beside NSFW', () => {
 	// last lines run flush against the border. A fixed radius holds through any
 	// number of lines, and at one line the two are the same shape.
 	it('caps the pill radius rather than following the box height', () => {
-		for (const source of [UPLOAD, EDIT]) {
-			expect(source).toMatch(/\.rating-tag \{[^}]*border-radius: 12px;/);
-			expect(source).not.toMatch(/\.rating-tag \{[^}]*border-radius: var\(--radius-pill\)/);
-		}
+		expect(APP_CSS).toMatch(/\.rating-tag \{[^}]*border-radius: 12px;/);
+		expect(APP_CSS).not.toMatch(/\.rating-tag \{[^}]*border-radius: var\(--radius-pill\)/);
 	});
 
 	// Where the column has room for all four, the two rating items give up the
@@ -1329,13 +1401,25 @@ describe('the rating tag beside NSFW', () => {
 	// keyed to the window instead, the same rule ran in a 219px column and shrank
 	// both items to about one character per line.
 	it('shrinks the two rating items only where the column has room', () => {
+		expect(APP_CSS).toMatch(
+			/@container admin-form \(min-width: 560px\) \{\s+\.tag-check-row \.rating-tag,\s+\.tag-check-row \.tag-rating-note \{\s+flex: 1 1 0;\s+min-width: 14ch;\s+max-width: max-content;/
+		);
+		// Three gaps at 8px against an 8px shortfall: the edit form's row wants
+		// 608px in a 600px column, so the note wrapped "entail.dev." to a second
+		// line. 4px buys back the 12px that keeps all four items on one line.
+		expect(APP_CSS).toMatch(
+			/@container admin-form \(min-width: 560px\) \{[\s\S]{0,600}?\.tag-check-row \{\s+gap: 4px;/
+		);
+		// Nothing shrinks off a viewport query any more, and the rule is keyed to
+		// the row rather than to either page's copy of it.
+		expect(APP_CSS).not.toMatch(/@media \([^)]*\) \{\s+\.tag-check-row \.rating-tag,/);
 		for (const source of [UPLOAD, EDIT]) {
-			expect(source).toMatch(
-				/@container admin-form \(min-width: 560px\) \{\s+\.nsfw-row \.rating-tag,\s+\.nsfw-row :global\(\.tag-rating-note\) \{\s+flex: 1 1 0;\s+min-width: 14ch;\s+max-width: max-content;/
-			);
-			// Nothing shrinks off a viewport query any more.
-			expect(source).not.toMatch(/@media \([^)]*\) \{\s+\.nsfw-row \.rating-tag,/);
+			expect(source).not.toMatch(/@container admin-form \(min-width: 560px\)/);
 		}
+		// The tile row is not a tag-check-row, so the tile pill keeps its own
+		// width — the rule above would shrink it inside a 170px tile.
+		expect(UPLOAD).toMatch(/<div class="tile-nsfw-row">/);
+		expect(UPLOAD).not.toMatch(/class="tile-nsfw-row tag-check-row"/);
 		// The column each form names, and the tile row is not one of them.
 		expect(EDIT).toMatch(
 			/\.edit-form \{[\s\S]{0,400}?container-type: inline-size;\s+container-name: admin-form;/
