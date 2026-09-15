@@ -67,7 +67,7 @@ describe('lookup button and its disclosure hint', () => {
 	// not the whole of it.
 	it('describes each per-tile button with that hint, and with its failure reason first', () => {
 		expect(UPLOAD).toMatch(
-			/class="tile-lookup"[\s\S]{0,400}?aria-describedby=\{tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\s*\n\s*\? `tile-fail-label-\$\{tile\.key\} tile-fail-reason-\$\{tile\.key\} lookup-hint`\s*\n\s*: 'lookup-hint'\}/
+			/class="tile-lookup"[\s\S]{0,400}?aria-describedby=\{tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\s+\? `tile-fail-label-\$\{tile\.key\} tile-fail-reason-\$\{tile\.key\} lookup-hint`\s+: 'lookup-hint'\}/
 		);
 		expect(UPLOAD).toMatch(/<p class="tile-lookup-failed" id="tile-fail-label-\{tile\.key\}">/);
 		expect(UPLOAD).toMatch(/<p class="tile-lookup-reason" id="tile-fail-reason-\{tile\.key\}">/);
@@ -98,10 +98,10 @@ describe('lookup button and its disclosure hint', () => {
 			['signed_out', 'admin_lookup_signed_out_eyebrow', 'admin_lookup_signed_out_body']
 		]) {
 			expect(UPLOAD).toMatch(
-				new RegExp(`function tileFailureLabel[\\s\\S]{0,600}?case '${reason}':\\s*\\n\\s*return m\\.${eyebrow}\\(\\)`)
+				new RegExp(`function tileFailureLabel[\\s\\S]{0,600}?case '${reason}':\\s+return m\\.${eyebrow}\\(\\)`)
 			);
 			expect(UPLOAD).toMatch(
-				new RegExp(`function tileFailureBody[\\s\\S]{0,700}?case '${reason}':\\s*\\n\\s*return m\\.${body}\\(\\)`)
+				new RegExp(`function tileFailureBody[\\s\\S]{0,700}?case '${reason}':\\s+return m\\.${body}\\(\\)`)
 			);
 			// Both keys are the panel's own, not a second wording of the same fact.
 			expect(PANEL).toContain(`m.${eyebrow}()`);
@@ -110,10 +110,10 @@ describe('lookup button and its disclosure hint', () => {
 		// invalid_image and unavailable share the panel's plain "Lookup failed"
 		// eyebrow, which is how its own branch renders them.
 		expect(UPLOAD).toMatch(
-			/function tileFailureBody[\s\S]{0,700}?case 'invalid_image':\s*\n\s*return m\.admin_lookup_invalid_body\(\)/
+			/function tileFailureBody[\s\S]{0,700}?case 'invalid_image':\s+return m\.admin_lookup_invalid_body\(\)/
 		);
-		expect(UPLOAD).toMatch(/function tileFailureLabel[\s\S]{0,700}?default:\s*\n\s*return m\.admin_lookup_failed_eyebrow\(\)/);
-		expect(UPLOAD).toMatch(/function tileFailureBody[\s\S]{0,800}?default:\s*\n\s*return m\.admin_lookup_failed_body\(\)/);
+		expect(UPLOAD).toMatch(/function tileFailureLabel[\s\S]{0,700}?default:\s+return m\.admin_lookup_failed_eyebrow\(\)/);
+		expect(UPLOAD).toMatch(/function tileFailureBody[\s\S]{0,800}?default:\s+return m\.admin_lookup_failed_body\(\)/);
 	});
 
 	// The panel offers Try again for exactly two reasons; every other one needs
@@ -125,10 +125,10 @@ describe('lookup button and its disclosure hint', () => {
 	// gone fail the same way on a second click.
 	it('offers a tile retry only where a retry can work', () => {
 		expect(UPLOAD).toMatch(
-			/function tileCanRetry\(reason: LookupFailReason\): boolean \{\s*\n\s*return reason !== 'too_large' && reason !== 'invalid_image' && reason !== 'gone';/
+			/function tileCanRetry\(reason: LookupFailReason\): boolean \{\s+return reason !== 'too_large' && reason !== 'invalid_image' && reason !== 'gone';/
 		);
 		expect(PANEL).toMatch(
-			/lookup\.reason === 'rate_limited' \|\| lookup\.reason === 'unavailable'\}\s*\n\s*<button[\s\S]{0,200}?m\.admin_lookup_try_again\(\)/
+			/lookup\.reason === 'rate_limited' \|\| lookup\.reason === 'unavailable'\}\s+<button[\s\S]{0,200}?m\.admin_lookup_try_again\(\)/
 		);
 		// Every variant-tile failure states its reason on the tile's own two
 		// lines, retryable or not, so the tile shows what the announcement says.
@@ -136,7 +136,7 @@ describe('lookup button and its disclosure hint', () => {
 		// focus target the panel's Close returns to, so the parent stays on the
 		// button branch, with its label untouched, however its lookup fails.
 		expect(UPLOAD).toMatch(
-			/\{#if tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\}[\s\S]{0,700}?<p class="tile-lookup-failed" id="tile-fail-label-\{tile\.key\}">\s*\n\s*\{tileFailureLabel\(tile\.lookup\.reason\)\}\s*\n\s*<\/p>\s*\n\s*<p class="tile-lookup-reason" id="tile-fail-reason-\{tile\.key\}">\s*\n\s*\{tileFailureBody\(tile\.lookup\.reason\)\}\s*\n\s*<\/p>/
+			/\{#if tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\}[\s\S]{0,700}?<p class="tile-lookup-failed" id="tile-fail-label-\{tile\.key\}">\s+\{tileFailureLabel\(tile\.lookup\.reason\)\}\s+<\/p>\s+<p class="tile-lookup-reason" id="tile-fail-reason-\{tile\.key\}">\s+\{tileFailureBody\(tile\.lookup\.reason\)\}\s+<\/p>/
 		);
 		// Only where a retry cannot work does the button go away entirely.
 		expect(UPLOAD).toMatch(
@@ -173,18 +173,18 @@ describe('lookup button and its disclosure hint', () => {
 	// an unsaved batch.
 	it('opens every new-tab link in the feature with an announced new tab', () => {
 		expect(UPLOAD).toMatch(
-			/class="tile-settings-link"[\s\S]{0,300}?target="_blank"\s*\n\s*rel="noopener noreferrer"[\s\S]{0,300}?\{m\.admin_lookup_open_settings\(\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
+			/class="tile-settings-link"[\s\S]{0,300}?target="_blank"\s+rel="noopener noreferrer"[\s\S]{0,300}?\{m\.admin_lookup_open_settings\(\)\}<span class="sr-only"\s+>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
 		);
 		expect(PANEL).toMatch(
-			/href="\/admin\/settings\?tab=connections"\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"\s*\n\s*>\{m\.admin_lookup_open_settings\(\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
+			/href="\/admin\/settings\?tab=connections"\s+target="_blank"\s+rel="noopener noreferrer"\s+>\{m\.admin_lookup_open_settings\(\)\}<span class="sr-only"\s+>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
 		);
 		expect(UPLOAD).toMatch(
-			/\{m\.admin_lookup_no_key_pre\(\)\}<a\s*\n\s*class="link"\s*\n\s*href="\/admin\/settings\?tab=connections"\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"\s*\n\s*>\{m\.admin_lookup_no_key_link\(\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
+			/\{m\.admin_lookup_no_key_pre\(\)\}<a\s+class="link"\s+href="\/admin\/settings\?tab=connections"\s+target="_blank"\s+rel="noopener noreferrer"\s+>\{m\.admin_lookup_no_key_link\(\)\}<span class="sr-only"\s+>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
 		);
 		// The clash row's link to the piece the upload collided with: the fourth
 		// and last target="_blank" in the feature.
 		expect(PANEL).toMatch(
-			/class="text-action" href="\/admin\/images\/\{clash\.imageId\}\/edit" target="_blank" rel="noopener noreferrer">\s*\n\s*\{m\.admin_lookup_clash_open\(\{ title: clash\.title \}\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
+			/class="text-action" href="\/admin\/images\/\{clash\.imageId\}\/edit" target="_blank" rel="noopener noreferrer">\s+\{m\.admin_lookup_clash_open\(\{ title: clash\.title \}\)\}<span class="sr-only"\s+>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
 		);
 	});
 
@@ -192,12 +192,12 @@ describe('lookup button and its disclosure hint', () => {
 	// it (2.4.3) — that button is what the operator clicked to start the lookup.
 	it('hands focus on when a tile failure unmounts its button', () => {
 		expect(UPLOAD).toMatch(
-			/async function moveFocusOffTileButton\(key: number, tile: Tile\) \{\s*\n\s*if \(tile\.lookup\.kind !== 'failed' \|\| tileCanRetry\(tile\.lookup\.reason\)\) return;\s*\n\s*if \(document\.activeElement !== tileLookupButtons\[key\]\) return;/
+			/async function moveFocusOffTileButton\(key: number, tile: Tile\) \{\s+if \(tile\.lookup\.kind !== 'failed' \|\| tileCanRetry\(tile\.lookup\.reason\)\) return;\s+if \(document\.activeElement !== tileLookupButtons\[key\]\) return;/
 		);
 		// Only the three reasons with no remedy on the tile get here, and none of
 		// them leaves a control behind, so the select — where "add the artist by
 		// hand" happens — is the landing spot.
-		expect(UPLOAD).toMatch(/await tick\(\);\s*\n\s*artistSelect\?\.focus\(\);/);
+		expect(UPLOAD).toMatch(/await tick\(\);\s+artistSelect\?\.focus\(\);/);
 		expect(UPLOAD).not.toContain('tileSettingsLinks');
 	});
 });
@@ -328,7 +328,7 @@ describe('the panel', () => {
 	// never changed — a sighted operator had nothing saying it applied.
 	it('swaps the Use button to "Using" under a clash too, from one snippet', () => {
 		expect(PANEL).toMatch(
-			/\{#snippet useArtistAction\(artist: \{ id: number; name: string \}, primary: boolean\)\}\s*\n\s*\{#if appliedArtist && appliedArtist\.id === artist\.id\}/
+			/\{#snippet useArtistAction\(artist: \{ id: number; name: string \}, primary: boolean\)\}\s+\{#if appliedArtist && appliedArtist\.id === artist\.id\}/
 		);
 		const rendered = PANEL.match(/\{@render useArtistAction\([^)]+\)\}/g);
 		// Every row that applies an artist: the clash row secondary, the plain
@@ -353,7 +353,7 @@ describe('the panel', () => {
 	// nothing change and focus fell to <body> when the swap destroyed it.
 	it('applies the picked artist through the same two branches as the other rows', () => {
 		expect(PANEL).toMatch(
-			/\{#snippet useSelectedAction\(primary: boolean\)\}\s*\n\s*\{#if appliedArtist && pickedArtist && appliedArtist\.id === pickedArtist\.id\}/
+			/\{#snippet useSelectedAction\(primary: boolean\)\}\s+\{#if appliedArtist && pickedArtist && appliedArtist\.id === pickedArtist\.id\}/
 		);
 		// The applied branch names the artist the radio list picked and carries the
 		// landing spot; the unapplied one keeps the label and the disabled gate.
@@ -379,7 +379,7 @@ describe('the panel', () => {
 	// would set a value nothing submits. The panel says why instead.
 	it('drops "Add as a variant" where the piece cannot be one, and explains it', () => {
 		expect(PANEL).toMatch(
-			/\{#if !variantBlocked\}\s*\n\s*<button[\s\S]{0,200}?m\.admin_lookup_clash_add_variant\(\)/
+			/\{#if !variantBlocked\}\s+<button[\s\S]{0,200}?m\.admin_lookup_clash_add_variant\(\)/
 		);
 		expect(PANEL).toMatch(
 			/\{#if variantBlocked\}[\s\S]{0,300}?m\.admin_lookup_clash_has_variants\(\)/
@@ -444,12 +444,12 @@ describe('the panel', () => {
 		// Rendered from both branches: once under the clash, once without it.
 		expect(PANEL.match(/\{@render ambiguousPick\(\)\}/g)).toHaveLength(2);
 		expect(PANEL).toMatch(
-			/\{#if clash\}\s*\n\s*\{#if outcome === 'ambiguous'\}\s*\n\s*\{@render ambiguousPick\(\)\}/
+			/\{#if clash\}\s+\{#if outcome === 'ambiguous'\}\s+\{@render ambiguousPick\(\)\}/
 		);
 		// The clash action row: "Use selected artist", disabled until a radio is
 		// picked, ahead of the single-candidate "Use {name}" button.
 		expect(PANEL).toMatch(
-			/\{#if outcome === 'ambiguous'\}\s*\n\s*\{@render useSelectedAction\(false\)\}\s*\n\s*\{:else if candidates\[0\]\}/
+			/\{#if outcome === 'ambiguous'\}\s+\{@render useSelectedAction\(false\)\}\s+\{:else if candidates\[0\]\}/
 		);
 	});
 
@@ -518,7 +518,7 @@ describe('the "From lookup" tag', () => {
 				)
 			);
 			// And the panel is handed both halves.
-			expect(source).toMatch(new RegExp(`filled=\\{${record}\\}\\s*\\n\\s*edited=\\{${edited}\\}`));
+			expect(source).toMatch(new RegExp(`filled=\\{${record}\\}\\s+edited=\\{${edited}\\}`));
 		}
 	});
 
@@ -543,7 +543,7 @@ describe('the "From lookup" tag', () => {
 		// The record is handed over only in the mode its fields are mounted in;
 		// the pair itself stays together.
 		expect(EDIT).toMatch(
-			/seeded=\{artistMode === 'new' \? lookupSeeded : \{\}\}\s*\n\s*seedEdited=\{lookupSeedEdited\}/
+			/seeded=\{artistMode === 'new' \? lookupSeeded : \{\}\}\s+seedEdited=\{lookupSeedEdited\}/
 		);
 	});
 
@@ -689,7 +689,7 @@ describe('round 11 wiring', () => {
 			/const artistHintShown = \$derived\(\s*\n?\s*editMode && outcome === 'existing' && !appliedArtist && !!candidates\[0\]/
 		);
 		expect(PANEL).toMatch(
-			/\{#if artistHintShown && candidates\[0\]\}\s*\n\s*<p class="lookup-status" id="lookup-artist-hint">\s*\n\s*\{m\.admin_lookup_status_artist_hint/
+			/\{#if artistHintShown && candidates\[0\]\}\s+<p class="lookup-status" id="lookup-artist-hint">\s+\{m\.admin_lookup_status_artist_hint/
 		);
 	});
 
@@ -712,7 +712,7 @@ describe('round 11 wiring', () => {
 	it('names no site in the clash body when there is no prefill match', () => {
 		expect(PANEL).not.toContain("prefill ? prefill.site : 'FurAffinity'");
 		expect(PANEL).toMatch(
-			/\{#if prefill\}\s*\n\s*<p class="lookup-lead">\s*\n\s*\{m\.admin_lookup_clash_body/
+			/\{#if prefill\}\s+<p class="lookup-lead">\s+\{m\.admin_lookup_clash_body/
 		);
 	});
 
@@ -809,7 +809,7 @@ describe('round 11 wiring', () => {
 		// whatever the message does, and the live region still mutates on the
 		// flush after it.
 		expect(created).toMatch(
-			/await tick\(\);[\s\S]{0,500}?if \(!isParent\(tile\.key\)\) \{[\s\S]{0,500}?\(tileLookupButtons\[tile\.key\] \?\? artistSelect\)\?\.focus\(\);\s*\n\s*announcer\.say\(m\.admin_lookup_announce_using\(\{ name: artist\.name \}\)\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\(document\.getElementById\('lookup-applied-artist'\) \?\? artistSelect\)\?\.focus\(\);/
+			/await tick\(\);[\s\S]{0,500}?if \(!isParent\(tile\.key\)\) \{[\s\S]{0,500}?\(tileLookupButtons\[tile\.key\] \?\? artistSelect\)\?\.focus\(\);\s+announcer\.say\(m\.admin_lookup_announce_using\(\{ name: artist\.name \}\)\);\s+return;\s+\}\s+\(document\.getElementById\('lookup-applied-artist'\) \?\? artistSelect\)\?\.focus\(\);/
 		);
 		expect(UPLOAD).toContain('bind:this={artistSelect}');
 		expect(PANEL).toContain('id="lookup-applied-artist"');
@@ -834,7 +834,7 @@ describe('round 11 wiring', () => {
 		// removed-tile one: the tile's own lookup button while it exists, else
 		// the select. Gated on `fromLookup` alone, never on `!tile`.
 		expect(created).toMatch(
-			/if \(fromLookup\) \{\s*\n\s*await tick\(\);\s*\n\s*const button = tile \? tileLookupButtons\[tile\.key\] : null;\s*\n\s*\(button \?\? artistSelect\)\?\.focus\(\);/
+			/if \(fromLookup\) \{\s+await tick\(\);\s+const button = tile \? tileLookupButtons\[tile\.key\] : null;\s+\(button \?\? artistSelect\)\?\.focus\(\);/
 		);
 		expect(created).not.toMatch(/if \(fromLookup && !tile\)/);
 		// The edit page has no equivalent: it creates the artist server-side in
@@ -1014,10 +1014,10 @@ describe('focus after the panel goes away', () => {
 	// label/span shape, so it also picks up the page's field-label styling.
 	it('names the upload page parent select the way the edit page names its own', () => {
 		expect(UPLOAD).toMatch(
-			/<label>\s*\n\s*<span>\{m\.admin_field_variant_of\(\)\}<\/span>\s*\n\s*<select[\s\S]{0,200}?bind:this=\{existingParentSelect\}/
+			/<label>\s+<span>\{m\.admin_field_variant_of\(\)\}<\/span>\s+<select[\s\S]{0,200}?bind:this=\{existingParentSelect\}/
 		);
 		expect(EDIT).toMatch(
-			/<span>\{m\.admin_field_variant_of\(\)\}<\/span>\s*\n\s*<select[\s\S]{0,120}?name="parentImageId"/
+			/<span>\{m\.admin_field_variant_of\(\)\}<\/span>\s+<select[\s\S]{0,120}?name="parentImageId"/
 		);
 	});
 
@@ -1030,7 +1030,7 @@ describe('focus after the panel goes away', () => {
 				/const parentOptions = \$derived\(\[\.\.\.data\.parentCandidates, \.\.\.extraParents\]\)/
 			);
 			expect(source).toMatch(
-				/if \(!parentOptions\.some\(\(c\) => c\.id === clash\.imageId\)\) \{\s*\n\s*extraParents = \[\.\.\.extraParents, \{ id: clash\.imageId, title: clash\.title \}\];/
+				/if \(!parentOptions\.some\(\(c\) => c\.id === clash\.imageId\)\) \{\s+extraParents = \[\.\.\.extraParents, \{ id: clash\.imageId, title: clash\.title \}\];/
 			);
 			// The select renders the merged list, or the synthetic option is unreachable.
 			expect(source).toMatch(/\{#each parentOptions as candidate\}/);
@@ -1059,7 +1059,7 @@ describe('focus after the panel goes away', () => {
 	it('carries an artist the page did not load with into the artist select', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(
-				/function useLookupArtist[\s\S]{0,900}?if \(!artistList\.some\(\(a\) => a\.id === artist\.id\)\) \{\s*\n\s*artistList = \[\.\.\.artistList, artist\]/
+				/function useLookupArtist[\s\S]{0,900}?if \(!artistList\.some\(\(a\) => a\.id === artist\.id\)\) \{\s+artistList = \[\.\.\.artistList, artist\]/
 			);
 			// The select renders the mutable list, or the appended option is
 			// unreachable.
@@ -1083,7 +1083,7 @@ describe('focus after the panel goes away', () => {
 		);
 		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next\);/);
 		expect(UPLOAD).not.toMatch(/wasParent/);
-		expect(UPLOAD).toMatch(/groupMode = 'new';\s*\n\s*returnToNewSet\(\);/);
+		expect(UPLOAD).toMatch(/groupMode = 'new';\s+returnToNewSet\(\);/);
 		// Only re-derive from a parent that still HAS a result: with the panel
 		// closed its lookup is idle and the fields it filled are still on screen,
 		// and an unconditional re-derivation cleared them and applied nothing.
@@ -1104,7 +1104,7 @@ describe('focus after the panel goes away', () => {
 			/function returnToNewSet\(\)[\s\S]{0,900}?const wrote = onParentChanged\(parentIndex\);[\s\S]{0,120}?if \(wrote\.sourcePostUrl && wrote\.commissionedAt\) \{[\s\S]{0,120}?m\.admin_lookup_announce_shared_refilled\(\)/
 		);
 		expect(UPLOAD).toMatch(
-			/\} else if \(wrote\.sourcePostUrl\) \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_shared_refilled_source\(\)\);\s*\n\s*\} else if \(wrote\.commissionedAt\) \{\s*\n\s*announcer\.say\(m\.admin_lookup_announce_shared_refilled_date\(\)\);/
+			/\} else if \(wrote\.sourcePostUrl\) \{\s+announcer\.say\(m\.admin_lookup_announce_shared_refilled_source\(\)\);\s+\} else if \(wrote\.commissionedAt\) \{\s+announcer\.say\(m\.admin_lookup_announce_shared_refilled_date\(\)\);/
 		);
 		// An artist the select still holds stays applied across that round trip —
 		// held by the round trip itself, not by the reset. A reset that spared a
@@ -1115,7 +1115,7 @@ describe('focus after the panel goes away', () => {
 		);
 		expect(UPLOAD).not.toMatch(/if \(!appliedArtist \|\| Number\(selectedArtistId\) !== appliedArtist\.id\)/);
 		expect(UPLOAD).toMatch(
-			/function returnToNewSet\(\)[\s\S]{0,600}?const held = appliedArtist;\s*\n\s*const wrote = onParentChanged\(parentIndex\);\s*\n\s*if \(held && Number\(selectedArtistId\) === held\.id\) appliedArtist = held;/
+			/function returnToNewSet\(\)[\s\S]{0,600}?const held = appliedArtist;\s+const wrote = onParentChanged\(parentIndex\);\s+if \(held && Number\(selectedArtistId\) === held\.id\) appliedArtist = held;/
 		);
 	});
 
@@ -1125,11 +1125,11 @@ describe('focus after the panel goes away', () => {
 	it('lands on a neighbouring Remove button after removing a tile', () => {
 		expect(UPLOAD).toMatch(/bind:this=\{tileRemoveButtons\[tile\.key\]\}/);
 		expect(UPLOAD).toMatch(
-			/async function removeTileFromButton[\s\S]{0,400}?await tick\(\);\s*\n\s*const neighbour = tiles\[idx\] \?\? tiles\[idx - 1\] \?\? null;\s*\n\s*\(neighbour \? tileRemoveButtons\[neighbour\.key\] : dropzone\)\?\.focus\(\)/
+			/async function removeTileFromButton[\s\S]{0,400}?await tick\(\);\s+const neighbour = tiles\[idx\] \?\? tiles\[idx - 1\] \?\? null;\s+\(neighbour \? tileRemoveButtons\[neighbour\.key\] : dropzone\)\?\.focus\(\)/
 		);
 		expect(UPLOAD).toMatch(/onclick=\{\(\) => removeTileFromButton\(tile\.key\)\}/);
 		// The empty grid leaves the dropzone as the only control to land on.
-		expect(UPLOAD).toMatch(/class="dropzone"\s*\n\s*bind:this=\{dropzone\}/);
+		expect(UPLOAD).toMatch(/class="dropzone"\s+bind:this=\{dropzone\}/);
 		// The file name is in the accessible name, the way the tile lookup button
 		// already carries it.
 		expect(UPLOAD).toMatch(
@@ -1144,7 +1144,7 @@ describe('focus after the panel goes away', () => {
 		// its element unmounts, so a synchronous delete is undone a moment later
 		// and each removal still leaves a dead key behind.
 		expect(UPLOAD).toMatch(
-			/function removeTile\([\s\S]{0,600}?lookupAborts\.delete\(key\);[\s\S]{0,600}?void tick\(\)\.then\(\(\) => \{\s*\n\s*delete tileLookupButtons\[key\];\s*\n\s*delete tileRemoveButtons\[key\];\s*\n\s*\}\);/
+			/function removeTile\([\s\S]{0,600}?lookupAborts\.delete\(key\);[\s\S]{0,600}?void tick\(\)\.then\(\(\) => \{\s+delete tileLookupButtons\[key\];\s+delete tileRemoveButtons\[key\];\s+\}\);/
 		);
 	});
 
@@ -1157,7 +1157,7 @@ describe('focus after the panel goes away', () => {
 	// panel, so both pages and both action rows get the landing spot (2.4.3).
 	it('lands on the applied button after Use, from the panel itself', () => {
 		expect(PANEL).toMatch(
-			/onclick=\{async \(\) => \{\s*\n\s*onuseartist\(artist\);[\s\S]{0,500}?await tick\(\);\s*\n\s*document\.getElementById\('lookup-applied-artist'\)\?\.focus\(\);/
+			/onclick=\{async \(\) => \{\s+onuseartist\(artist\);[\s\S]{0,500}?await tick\(\);\s+document\.getElementById\('lookup-applied-artist'\)\?\.focus\(\);/
 		);
 		expect(PANEL).toMatch(/import \{ tick \} from 'svelte';/);
 	});
@@ -1265,7 +1265,7 @@ describe('what a lookup says out loud', () => {
 	// the sentence is not theirs either.
 	it('announces the flip to the inline new-artist form only when the mode changed', () => {
 		expect(EDIT).toMatch(
-			/const wasExisting = artistMode === 'existing';\s*\n\s*artistMode = 'new';/
+			/const wasExisting = artistMode === 'existing';\s+artistMode = 'new';/
 		);
 		expect(EDIT).toMatch(
 			/wasExisting && seededNothing\) announcer\.say\(m\.admin_lookup_announce_new_form\(/
@@ -1303,7 +1303,7 @@ describe('what a lookup says out loud', () => {
 	// lands — the announcement and the landing spot have to agree (2.4.3).
 	it('lands on the name field when the seed left it empty', () => {
 		expect(EDIT).toMatch(
-			/if \(artistName\.trim\(\) === ''\) \{\s*\n\s*await tick\(\);\s*\n\s*artistNameInput\?\.focus\(\);/
+			/if \(artistName\.trim\(\) === ''\) \{\s+await tick\(\);\s+artistNameInput\?\.focus\(\);/
 		);
 		expect(EDIT).toMatch(/bind:this=\{artistNameInput\}/);
 	});
@@ -1349,7 +1349,7 @@ describe('the upload page grid', () => {
 	// the file it belongs to, and the placeholder stays as the example it is.
 	it('names the variant label field after its file, placeholder and all', () => {
 		expect(UPLOAD).toMatch(
-			/class="input tile-label"\s*\n\s*name="label_\{i\}"\s*\n\s*aria-label=\{m\.admin_variant_label_for\(\{ fileName: tile\.fileName \}\)\}\s*\n\s*placeholder=\{m\.admin_variant_label_placeholder\(\)\}/
+			/class="input tile-label"\s+name="label_\{i\}"\s+aria-label=\{m\.admin_variant_label_for\(\{ fileName: tile\.fileName \}\)\}\s+placeholder=\{m\.admin_variant_label_placeholder\(\)\}/
 		);
 	});
 
@@ -1395,7 +1395,7 @@ describe('the upload page grid', () => {
 	// stale clash panel resurfaces on the way back to a new group.
 	it('resets the tile lookup before switching to an existing group', () => {
 		expect(UPLOAD).toMatch(
-			/async function addAsVariant\(clash: SourceClash\) \{[\s\S]{0,300}?closeSharedLookup\(\{ focus: false \}\);\s*\n\s*groupMode = 'existing';/
+			/async function addAsVariant\(clash: SourceClash\) \{[\s\S]{0,300}?closeSharedLookup\(\{ focus: false \}\);\s+groupMode = 'existing';/
 		);
 	});
 
@@ -1426,7 +1426,7 @@ describe('the upload page grid', () => {
 			expect(source).toMatch(/let settled: LookupState \| null = null;/);
 			// The upload page's callback is async: it awaits the focus handoff
 			// before it announces the outcome.
-			expect(source).toMatch(/\.then\((?:async )?\(next\) => \{\s*\n\s*settled = next;/);
+			expect(source).toMatch(/\.then\((?:async )?\(next\) => \{\s+settled = next;/);
 			expect(source).toMatch(/const sent = sentAfterApplyThrew\(settled\);/);
 			expect(source).toMatch(/\n\t\tsentAfterApplyThrew,\n/);
 			expect(source).not.toMatch(/reason: 'unavailable', sent: true/);
@@ -1436,15 +1436,15 @@ describe('the upload page grid', () => {
 		// would discard matches that did come back and tell the operator
 		// FuzzySearch never answered. A failure is synthesised only when nothing
 		// was applied.
-		expect(UPLOAD).toMatch(/live\.lookup = next;\s*\n\s*applied = true;/);
-		expect(UPLOAD).toMatch(/if \(!applied\) \{\s*\n\s*const sent = sentAfterApplyThrew/);
+		expect(UPLOAD).toMatch(/live\.lookup = next;\s+applied = true;/);
+		expect(UPLOAD).toMatch(/if \(!applied\) \{\s+const sent = sentAfterApplyThrew/);
 		// The edit page guards the same way. Nothing in its applyPrefill throws
 		// today, so the hole is unreachable there — but the two pages catch into
 		// one state, and a page that overwrites an applied result the moment it
 		// gains a throwing step is a defect waiting on an unrelated change.
-		expect(EDIT).toMatch(/lookup = next;\s*\n\s*applied = true;/);
+		expect(EDIT).toMatch(/lookup = next;\s+applied = true;/);
 		expect(EDIT).toMatch(
-			/if \(!applied\) \{\s*\n\s*const sent = sentAfterApplyThrew\(settled\);\s*\n\s*lookup = \{ kind: 'failed', reason: 'unavailable', sent \};/
+			/if \(!applied\) \{\s+const sent = sentAfterApplyThrew\(settled\);\s+lookup = \{ kind: 'failed', reason: 'unavailable', sent \};/
 		);
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(/let applied = false;/);
@@ -1466,7 +1466,7 @@ describe('the upload page grid', () => {
 		expect(UPLOAD).toMatch(
 			/if \(lookupAborts\.get\(key\) === controller\) lookupAborts\.delete\(key\);/
 		);
-		expect(EDIT).toMatch(/applyPrefill\(next\);[\s\S]{0,200}?lookupAbort = null;\s*\n\s*\}\)/);
+		expect(EDIT).toMatch(/applyPrefill\(next\);[\s\S]{0,200}?lookupAbort = null;\s+\}\)/);
 		// One constant, shared, carrying nothing from the result.
 		expect(LOOKUP_RESULT_THREW).toBe('artist lookup: applying the result threw');
 	});
@@ -1480,7 +1480,7 @@ describe('the upload page grid', () => {
 	// constant and says nothing rather than escaping the catch.
 	it('announces a variant tile outcome from the catch', () => {
 		expect(UPLOAD).toMatch(
-			/if \(!isParent\(key\)\) \{\s*\n\s*try \{\s*\n\s*announcer\.say\(tileLookupLine\(live\)\);\s*\n\s*\} catch \{\s*\n\s*console\.error\(LOOKUP_RESULT_THREW\);/
+			/if \(!isParent\(key\)\) \{\s+try \{\s+announcer\.say\(tileLookupLine\(live\)\);\s+\} catch \{\s+console\.error\(LOOKUP_RESULT_THREW\);/
 		);
 		// Nothing is said as a bare failure any more: over a result that stands,
 		// that line would contradict the matches the tile is showing.
@@ -1496,7 +1496,7 @@ describe('the upload page grid', () => {
 	it('composes a tile lookup line once, disclosure included', () => {
 		expect(UPLOAD).toMatch(/function tileLookupLine\(tile: Tile\): string \{/);
 		expect(UPLOAD).toMatch(
-			/function announceTileLookup\(tile: Tile\) \{\s*\n\s*announcer\.say\(tileLookupLine\(tile\)\);\s*\n\s*\}/
+			/function announceTileLookup\(tile: Tile\) \{\s+announcer\.say\(tileLookupLine\(tile\)\);\s+\}/
 		);
 		// The private suffix keys off BOTH halves of the test the rendered notice
 		// uses: Private was ticked when the lookup ran AND the state says the file
@@ -1506,7 +1506,7 @@ describe('the upload page grid', () => {
 		expect(composer).toContain('tile.sentPrivate && lookupSentFile(tile.lookup)');
 		// One key holding both parts, so the locale decides the separator.
 		expect(composer).toMatch(
-			/m\.admin_lookup_announce_tile_with_notice\(\{\s*\n\s*outcome: line,\s*\n\s*disclosure: m\.admin_lookup_private_notice\(\)/
+			/m\.admin_lookup_announce_tile_with_notice\(\{\s+outcome: line,\s+disclosure: m\.admin_lookup_private_notice\(\)/
 		);
 		expect(composer).toContain('return line;');
 		// It says nothing itself — the callers do.
@@ -1534,7 +1534,7 @@ describe('the upload page grid', () => {
 		);
 		// Only a parent that is actually gone re-derives the shared fields.
 		expect(UPLOAD).toMatch(
-			/if \(movedTo !== -1\) \{\s*\n\s*parentIndex = movedTo;\s*\n\s*\} else \{[\s\S]{0,300}?onParentChanged\(parentIndex\);/
+			/if \(movedTo !== -1\) \{\s+parentIndex = movedTo;\s+\} else \{[\s\S]{0,300}?onParentChanged\(parentIndex\);/
 		);
 	});
 
@@ -1580,7 +1580,7 @@ describe('the new-artist dialog prefill', () => {
 			/oncreated: \(artist: \{ id: number; name: string \}\) => void \| Promise<void>;/
 		);
 		expect(DIALOG).toMatch(
-			/void Promise\.resolve\(oncreated\(result\)\)\.catch\(\(\) => \{\s*\n\s*console\.error\(CREATED_HANDLER_THREW\);\s*\n\s*\}\);/
+			/void Promise\.resolve\(oncreated\(result\)\)\.catch\(\(\) => \{\s+console\.error\(CREATED_HANDLER_THREW\);\s+\}\);/
 		);
 		// A constant, carrying nothing from the result.
 		expect(DIALOG).toMatch(/const CREATED_HANDLER_THREW = '[^']+';/);
@@ -1595,7 +1595,7 @@ describe('the new-artist dialog prefill', () => {
 	it('resolves an async onimportedall handler instead of dropping its rejection', () => {
 		expect(DIALOG).toMatch(/onimportedall\?: \(\) => void \| Promise<void>;/);
 		expect(DIALOG).toMatch(
-			/void Promise\.resolve\(onimportedall\?\.\(\)\)\.catch\(\(\) => \{\s*\n\s*console\.error\(IMPORTED_ALL_HANDLER_THREW\);\s*\n\s*\}\);/
+			/void Promise\.resolve\(onimportedall\?\.\(\)\)\.catch\(\(\) => \{\s+console\.error\(IMPORTED_ALL_HANDLER_THREW\);\s+\}\);/
 		);
 		expect(DIALOG).toMatch(/const IMPORTED_ALL_HANDLER_THREW = '[^']+';/);
 	});
