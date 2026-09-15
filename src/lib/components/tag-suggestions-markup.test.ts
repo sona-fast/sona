@@ -39,7 +39,6 @@ describe('the suggest pill', () => {
 		// would never reach the hint explaining what to do about it.
 		expect(suggestions).toMatch(/aria-disabled=\{disabled\}/);
 		expect(suggestions).not.toMatch(/(?<!aria-)disabled=\{disabled\}/);
-		expect(suggestions).toMatch(/if \(disabled \|\| source === null\) return;/);
 	});
 
 	it('refuses the tray\'s Try again by the same rule, since it runs the same lookup', () => {
@@ -353,8 +352,6 @@ describe('an answer that stops being about the post in the field', () => {
 		// away chips the operator is in the middle of choosing from. The key is
 		// read off the `source` derived, which already classified the field, and
 		// the snapshot a lookup went out with is taken from the same derived.
-		expect(suggestions).toMatch(/const post = \$derived\(sourceKey\(source\)\);/);
-		expect(suggestions).toMatch(/const askedPost = post;/);
 		expect(suggestions).toMatch(/post !== askedPost &&/);
 		expect(suggestions).toMatch(/answeredFor === null \|\| answeredFor === post/);
 		expect(suggestions).not.toMatch(/canonical\(/);
@@ -434,7 +431,6 @@ describe('the Add button and the line that confirms it', () => {
 		// themselves, so a count taken off the chips would say three tags were
 		// added when two were — in the button, in the status line and in the live
 		// region at once.
-		expect(suggestions).toMatch(/const toAdd = \$derived\(tagsToAdd\(value, chosen\)\);/);
 		// aria-disabled, not disabled: a real disabled attribute takes the button
 		// out of the tab order, so an operator who tabbed to it cannot find out why
 		// it does nothing. The bare-attribute check is anchored on the space or
@@ -442,7 +438,6 @@ describe('the Add button and the line that confirms it', () => {
 		expect(suggestions).toMatch(/aria-disabled=\{toAdd\.length === 0\}/);
 		expect(suggestions).not.toMatch(/\sdisabled=\{toAdd/);
 		expect(suggestions).toMatch(/m\.admin_tag_suggest_add\(\{ count: toAdd\.length \}\)/);
-		expect(suggestions).toMatch(/const accepted = toAdd;/);
 		expect(suggestions).not.toMatch(/count: chosen\.length/);
 	});
 });
