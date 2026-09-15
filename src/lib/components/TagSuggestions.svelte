@@ -325,15 +325,16 @@
 		if (accepted.length === 0) {
 			// The button is aria-disabled rather than disabled, so the click lands
 			// here and is refused. Refused silently, the tray does not move and a
-			// screen reader is told nothing: say what to do first, in the words the
-			// backfill row's Save already uses for the same refusal.
+			// screen reader is told nothing: say what to do first, the way the
+			// backfill row's Save does for the same refusal, in words that name Add
+			// rather than Save, since Add only stages tags into the field.
 			//
 			// Only where nothing is picked, which is the one case that sentence
 			// describes. Add also refuses with every chip lit and every name already
 			// typed into the field, and "pick at least one tag" would then tell the
 			// operator the opposite of what is on screen. That case stays silent
 			// until it has a sentence of its own.
-			if (chosen.length === 0) await reannounce(m.admin_suggest_tags_save_needs_tag());
+			if (chosen.length === 0) await reannounce(m.admin_tag_suggest_add_needs_tag());
 			return;
 		}
 		value = applyTo(value, accepted);

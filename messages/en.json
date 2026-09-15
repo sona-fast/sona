@@ -1816,6 +1816,7 @@
 	"admin_suggest_tags_save_failed": "Sona couldn't save those tags. Try again.",
 	"admin_suggest_tags_not_saved": "Not saved",
 	"admin_suggest_tags_save_needs_tag": "Pick at least one tag to save.",
+	"admin_tag_suggest_add_needs_tag": "Pick at least one tag to add.",
 	"admin_suggest_tags_row_saving_short": "Saving",
 	"admin_suggest_tags_row_saving_label": "Saving tags for {title}",
 	"admin_suggest_tags_save_conflict": "This image was tagged elsewhere since the list loaded. Open it to edit its tags.",

@@ -1485,6 +1485,7 @@
 	"admin_suggest_tags_save_failed": "タグを保存できませんでした。もう一度試してください。",
 	"admin_suggest_tags_not_saved": "未保存",
 	"admin_suggest_tags_save_needs_tag": "保存するタグを1つ以上選んでください。",
+	"admin_tag_suggest_add_needs_tag": "追加するタグを1つ以上選んでください。",
 	"admin_suggest_tags_row_saving_short": "保存中",
 	"admin_suggest_tags_row_saving_label": "「{title}」のタグを保存中",
 	"admin_suggest_tags_save_conflict": "リストを読み込んだ後に、この画像には別の場所でタグが付けられました。画像を開いてタグを編集してください。",

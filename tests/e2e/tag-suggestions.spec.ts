@@ -205,7 +205,7 @@ test('Add stays reachable with nothing picked and refuses the click', async ({ p
 	// And it is not refused in silence: nothing on screen moves, so the sentence
 	// in the live region is all a screen reader gets. The same words the backfill
 	// row's Save uses when it is clicked with nothing picked.
-	await expect(liveRegion(page)).toHaveText('Pick at least one tag to save.');
+	await expect(liveRegion(page)).toHaveText('Pick at least one tag to add.');
 });
 
 test('Add goes inert, not invisible, once the field holds every suggested tag', async ({ page }) => {
@@ -254,7 +254,7 @@ test('Add goes inert, not invisible, once the field holds every suggested tag', 
 	await expect(tagsInput(page)).toHaveValue('mammal, fox');
 	await expect(page.locator('.tag-status-line')).toHaveCount(0);
 	await expect(page.locator('.tag-chip')).toHaveCount(2);
-	// Silently: both chips are lit, so "Pick at least one tag to save." would
+	// Silently: both chips are lit, so "Pick at least one tag to add." would
 	// describe the opposite of what is on screen. The region keeps what the
 	// lookup said until there is a sentence for this refusal.
 	await expect(liveRegion(page)).toHaveText('2 suggested tags from entail.dev');
