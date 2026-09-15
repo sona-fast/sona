@@ -36,6 +36,13 @@ export const TOKEN_CSS_NAMES = {
 	cardForeground: '--card-foreground',
 	primary: '--primary',
 	primaryForeground: '--primary-foreground',
+	// --primary as SMALL TEXT (headings, labels, eyebrows, counts, chip text).
+	// --primary itself is a fill and a border first, and on a light page it is far
+	// too light to read as 14px text (Ember light is 2.20:1). Every block that
+	// declares --primary declares this one too: dark blocks point it back at
+	// --primary, light blocks carry a darkened value that clears 4.5:1 on both
+	// --background and --card (SONA-126).
+	primaryText: '--primary-text',
 	secondary: '--secondary',
 	secondaryForeground: '--secondary-foreground',
 	muted: '--muted',
@@ -72,11 +79,66 @@ export type ThemeTokens = { [K in TokenKey]: TokenValue };
 /** What an alternate theme declares: whatever it does not inherit. */
 export type PartialThemeTokens = Partial<ThemeTokens>;
 
+/**
+ * One `@font-face` block. The fonts are SELF-HOSTED (SONA-181): the files live
+ * in static/fonts/ and are fetched by `node scripts/fetch-fonts.mjs`, so no page
+ * contacts Google's font CDN.
+ */
+export interface FontFace {
+	/** The family name the font-family lists refer to, unquoted. */
+	family: string;
+	/** A single weight (400) or a variable-font range ('100 900'). */
+	weight: number | string;
+	/** Defaults to 'normal'. */
+	style?: string;
+	/** Path under /fonts/, e.g. '/fonts/JetBrainsMono-400-latin.woff2'. */
+	src: string;
+	/** The subset this file covers. Without it the browser downloads every slice. */
+	unicodeRange?: string;
+}
+
+/**
+ * The unicode-range strings Google's CSS2 API emits for its named subsets. They
+ * are identical across all three families we self-host, so they are named once
+ * here rather than repeated in every face.
+ */
+export const SUBSET_LATIN =
+	'U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD';
+export const SUBSET_LATIN_EXT =
+	'U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF';
+export const SUBSET_VIETNAMESE =
+	'U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB';
+
+/**
+ * The two Japanese slices, cut from the upstream OFL release by
+ * `node scripts/subset-plex-jp.mjs` rather than taken from Google (see that
+ * script for why). Kana and the punctuation that sets Japanese text travel
+ * together — no page renders hiragana without also wanting 、。「」！？ — so they
+ * are one file; the 2,965 JIS X 0208 level 1 kanji are the other, four times the
+ * size and only needed once the text is more than kana.
+ */
+export const SUBSET_JP_KANA =
+	'U+3000-303F, U+3040-309F, U+30A0-30FF, U+31F0-31FF, U+FF00-FFEF';
+// The CJK Unified Ideographs block. The FILE holds JIS level 1 only, so a rarer
+// kanji matches this face, finds no glyph and falls back per character — which
+// is the behaviour we want, and cheaper than spelling 2,965 code points out as
+// ~1,200 ranges in a stylesheet every visitor downloads.
+export const SUBSET_JP_KANJI = 'U+4E00-9FFF';
+
 export interface ThemeFonts {
 	/** CSS font-family list for --font-primary (headings, UI chrome). */
 	primary: string;
 	/** CSS font-family list for --font-secondary (body copy). */
 	secondary: string;
+	/**
+	 * The self-hosted files behind those families. The generator emits every
+	 * theme's faces at the top of generated.css — @font-face is top-level, it
+	 * cannot be nested inside a theme's selector — but a browser downloads a file
+	 * only when something on the page actually renders in that family, and
+	 * --font-primary/--font-secondary name these families only inside the theme's
+	 * own block. So an unselected theme's fonts cost a parsed rule and no bytes.
+	 */
+	faces?: FontFace[];
 }
 
 export interface ThemeDefinition {

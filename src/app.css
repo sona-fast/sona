@@ -1,11 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
-/* Terracotta theme fonts (Chakra Petch headings, IBM Plex Sans JP body). The
-   import is unconditional, but font binaries only download when the family is
-   actually used — i.e. when the terracotta theme is selected. */
-@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Sans+JP:wght@400;500;600;700&display=swap');
-/* Theme palettes — generated from src/lib/themes/*.theme.ts by `npm run themes`.
-   Must stay with the @import group at the top: CSS drops an @import that follows
-   any other rule, and the build silently ships a page with no colour tokens. */
+/* Theme palettes and their self-hosted @font-face blocks — generated from
+   src/lib/themes/*.theme.ts by `npm run themes`. Must stay the FIRST rule: CSS
+   drops an @import that follows any other rule, and the build silently ships a
+   page with no colour tokens. Nothing here reaches Google's font CDN; the
+   woff2 files are served from static/fonts/ (SONA-181). */
 @import './lib/themes/generated.css';
 
 @font-face {
@@ -180,13 +177,14 @@ input, select, textarea {
 
 .btn-outline:hover {
 	background-color: color-mix(in srgb, var(--background) 88%, white);
-	/* The hover fill lands right next to --border (both are --background nudged
-	   slightly), which dissolves the 1px outline into a solid fill and shifts the
-	   button's character. Pull the border toward --foreground so it stays a
-	   visibly distinct outline on hover. One rule serves both modes: --border and
-	   --foreground are theme-scoped, and the light-mode override below only
-	   restyles the fill. Guarded by theme-contrast.test.ts. */
-	border-color: color-mix(in srgb, var(--border) 60%, var(--foreground));
+	/* Mixed from --input, the token the resting border uses (SONA-126). The hover
+	   fill is --background nudged slightly, so a boundary left near --background
+	   dissolves into a solid fill and the button loses its character. Pull it
+	   toward --foreground so it stays a visibly distinct outline on hover. One
+	   rule serves both modes: --input and --foreground are theme-scoped, and the
+	   light-mode override below only restyles the fill. Guarded by
+	   theme-contrast.test.ts. */
+	border-color: color-mix(in srgb, var(--input) 60%, var(--foreground));
 }
 
 .btn-destructive:hover {
@@ -222,7 +220,10 @@ input, select, textarea {
 .btn-outline {
 	background-color: var(--background);
 	color: var(--foreground);
-	border: 1px solid var(--border);
+	/* --input, not --border: this 1px edge is the ONLY thing that marks the
+	   button as a control, so WCAG 1.4.11 wants 3:1 of it. --border stays the
+	   decorative hairline between adjacent surfaces (SONA-126). */
+	border: 1px solid var(--input);
 	box-shadow: 0 1px 1.75px rgba(0, 0, 0, 0.05);
 }
 

@@ -1,4 +1,4 @@
-import type { ThemeDefinition, ThemeTokens } from './types.ts';
+import { SUBSET_LATIN, SUBSET_LATIN_EXT, type ThemeDefinition, type ThemeTokens } from './types.ts';
 
 // Ember — warm orange. The default theme, and the floor every other theme falls
 // back to: it emits `:root` and `[data-theme='light']`, so both sets are
@@ -11,6 +11,9 @@ const dark: ThemeTokens = {
 	cardForeground: '#FFFFFF',
 	primary: '#FF8400',
 	primaryForeground: '#111111',
+	// primary reads fine as small text on this dark page (7.69:1) and on cards
+	// (7.09:1), so the text token is the same colour.
+	primaryText: { ref: 'primary' },
 	secondary: '#2E2E2E',
 	secondaryForeground: '#FFFFFF',
 	muted: '#2E2E2E',
@@ -33,7 +36,10 @@ const dark: ThemeTokens = {
 	// theme-contrast.test.ts for every theme × surface × mode.
 	link: { ref: 'primary' },
 	border: '#2E2E2E',
-	input: '#2E2E2E',
+	// The form-field and outline-button boundary, raised to clear WCAG 1.4.11's
+	// 3:1 on BOTH surfaces a control sits on (3.49:1 on the page, 3.22:1 on
+	// cards). --border stays the soft hairline it was (SONA-126).
+	input: '#6A6A6A',
 	ring: '#666666',
 	sidebar: '#18181b',
 	sidebarAccent: '#2a2a30',
@@ -48,6 +54,10 @@ const light: ThemeTokens = {
 	cardForeground: '#111111',
 	primary: '#FF8400',
 	primaryForeground: '#111111',
+	// primary (#FF8400) is 2.20:1 on this light background — unreadable as small
+	// text. The same darkened orange --link uses: 5.26:1 on the page background,
+	// 5.86:1 on cards.
+	primaryText: '#A04E00',
 	secondary: '#E7E8E5',
 	secondaryForeground: '#111111',
 	muted: '#F2F3F0',
@@ -70,7 +80,8 @@ const light: ThemeTokens = {
 	// link text. Darkened orange: 5.26:1 on the page background, 5.86:1 on cards.
 	link: '#A04E00',
 	border: '#CBCCC9',
-	input: '#CBCCC9',
+	// 3.84:1 on the page background, 4.28:1 on cards.
+	input: '#797B76',
 	ring: '#666666',
 	sidebar: '#E7E8E5',
 	sidebarAccent: '#CBCCC9',
@@ -85,6 +96,19 @@ export const defaultTheme: ThemeDefinition = {
 	light,
 	fonts: {
 		primary: "'JetBrains Mono', monospace",
-		secondary: "'Geist', sans-serif"
+		secondary: "'Geist', sans-serif",
+		// Geist is NOT here: its three faces are hand-written in app.css and always
+		// apply, because this theme is the fallback floor for every other one.
+		// JetBrains Mono is fetched by `node scripts/fetch-fonts.mjs`.
+		faces: [
+			{ family: 'JetBrains Mono', weight: 400, src: '/fonts/JetBrainsMono-400-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'JetBrains Mono', weight: 400, src: '/fonts/JetBrainsMono-400-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'JetBrains Mono', weight: 500, src: '/fonts/JetBrainsMono-500-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'JetBrains Mono', weight: 500, src: '/fonts/JetBrainsMono-500-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'JetBrains Mono', weight: 600, src: '/fonts/JetBrainsMono-600-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'JetBrains Mono', weight: 600, src: '/fonts/JetBrainsMono-600-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
+			{ family: 'JetBrains Mono', weight: 700, src: '/fonts/JetBrainsMono-700-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'JetBrains Mono', weight: 700, src: '/fonts/JetBrainsMono-700-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT }
+		]
 	}
 };

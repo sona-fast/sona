@@ -88,7 +88,7 @@ npx wrangler pages secret put CLOUDFLARE_ZONE_ID       --project-name <your-proj
 		height: 24px;
 		border-radius: var(--radius-pill);
 		background: color-mix(in srgb, var(--primary) 16%, transparent);
-		color: var(--primary);
+		color: var(--primary-text);
 		font: 600 12px var(--font-primary);
 		display: flex;
 		align-items: center;

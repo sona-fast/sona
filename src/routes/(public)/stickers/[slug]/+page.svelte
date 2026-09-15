@@ -460,7 +460,7 @@
 
 	.pack-chip.telegram {
 		background: color-mix(in srgb, var(--primary) 16%, var(--background));
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 
 	.telegram-cta {

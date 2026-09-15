@@ -1811,7 +1811,7 @@
 	}
 
 	.tile-parent .tile-parent-pick {
-		color: var(--primary);
+		color: var(--primary-text);
 		font-weight: 500;
 	}
 
@@ -1836,7 +1836,7 @@
 
 	.tile-add:hover {
 		border-color: var(--primary);
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 
 	/* Mirrors .dropzone.disabled — the other way into the picker has to read as
@@ -1935,7 +1935,7 @@
 
 	.add-artist-btn:hover {
 		border-color: var(--primary);
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 
 	.field {

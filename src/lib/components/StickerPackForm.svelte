@@ -617,7 +617,7 @@
 	.check-label.sm { font-size: 12px; }
 	.check-label input[type='checkbox'] { margin: 0; flex-shrink: 0; }
 	.hint { font-size: 12px; color: var(--muted-foreground); margin: -8px 0 0; }
-	.manager-hint { font-size: 11px; color: var(--primary); margin-top: 2px; }
+	.manager-hint { font-size: 11px; color: var(--primary-text); margin-top: 2px; }
 	.locked-artist { font-size: 12px; padding: 5px 8px; color: var(--muted-foreground); border: 1px dashed var(--border); border-radius: var(--radius-xs); }
 	/* Select + inline "New artist" action sitting on one row. The select flexes; the
 	   button hugs its content so it stays compact next to the dropdown. */
@@ -629,7 +629,7 @@
 	.new-artist-btn {
 		display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex-shrink: 0;
 		font-size: 12px; padding: 3px 10px; border-radius: var(--radius-pill);
-		border: 1px dashed var(--border); background: none; color: var(--primary); cursor: pointer;
+		border: 1px dashed var(--border); background: none; color: var(--primary-text); cursor: pointer;
 	}
 	.new-artist-btn:hover { border-color: var(--primary); }
 	.upload-zone {
@@ -705,7 +705,7 @@
 	.btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
 	.bulk-div { width: 1px; height: 20px; background: var(--border); }
 	.bulk-bar .link-btn { margin-left: auto; }
-	.link-btn { background: none; border: none; color: var(--primary); font-size: 12px; padding: 0; cursor: pointer; }
+	.link-btn { background: none; border: none; color: var(--primary-text); font-size: 12px; padding: 0; cursor: pointer; }
 	.link-btn:hover { text-decoration: underline; }
 
 	/* Publish switch */

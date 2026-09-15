@@ -656,7 +656,7 @@
 	   keep the passing --primary border. */
 	:global([data-theme='light']) .reg-results li.active { outline: 2px solid var(--ring); outline-offset: -2px; }
 	.linked-row { display: flex; align-items: center; gap: 8px; }
-	.linked { color: var(--primary); font-size: 12px; }
+	.linked { color: var(--primary-text); font-size: 12px; }
 	.unlink { background: none; border: none; padding: 0; cursor: pointer; color: var(--muted-foreground); font-size: 12px; font-family: inherit; text-decoration: underline; }
 	.unlink:hover { color: var(--foreground); }
 	.reg-id { display: flex; flex-direction: column; min-width: 0; }
@@ -664,12 +664,12 @@
 	.reg-handle { font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.reg-import-pill {
 		margin-left: auto; flex-shrink: 0; padding: 1px 8px; font-size: 11px;
-		color: var(--primary); border: 1px solid var(--primary); border-radius: var(--radius-pill);
+		color: var(--primary-text); border: 1px solid var(--primary); border-radius: var(--radius-pill);
 	}
 	.reg-footer { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
 	.reg-import-all {
 		background: none; border: none; padding: 0; cursor: pointer;
-		color: var(--primary); font-size: 12px; font-family: inherit;
+		color: var(--primary-text); font-size: 12px; font-family: inherit;
 	}
 	.reg-import-all:hover { text-decoration: underline; }
 	.confirm-layer { z-index: 110; }

@@ -1086,7 +1086,7 @@
 	}
 	.platform-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
 	.platform-chip.on {
-		border-color: var(--primary); color: var(--primary);
+		border-color: var(--primary); color: var(--primary-text);
 		background: color-mix(in srgb, var(--primary) 8%, transparent);
 	}
 	.platform-chip:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -1118,7 +1118,7 @@
 	.add-credit-btn {
 		display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
 		font-size: 12px; padding: 4px 12px; border-radius: var(--radius-pill);
-		border: 1px dashed var(--border); background: none; color: var(--primary); cursor: pointer;
+		border: 1px dashed var(--border); background: none; color: var(--primary-text); cursor: pointer;
 	}
 	.add-credit-btn:hover { border-color: var(--primary); }
 

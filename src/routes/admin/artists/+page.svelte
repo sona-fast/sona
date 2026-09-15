@@ -503,7 +503,7 @@
 		font-family: var(--font-primary);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		color: var(--primary);
+		color: var(--primary-text);
 		border: 1px solid var(--primary);
 		border-radius: var(--radius-pill);
 		vertical-align: middle;
@@ -826,7 +826,7 @@
 			border: 1px dashed var(--border);
 			border-radius: var(--radius-s);
 			background: none;
-			color: var(--primary);
+			color: var(--primary-text);
 			font-size: 14px;
 			font-family: var(--font-primary);
 			font-weight: 500;

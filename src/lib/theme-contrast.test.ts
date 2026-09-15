@@ -216,16 +216,19 @@ function hoverMix(selector: string): { pct: number; toward: 'black' | 'white' } 
 	return { pct: Number(m[1]), toward: m[2] as 'black' | 'white' };
 }
 
-// Pulls the border-color color-mix out of the outline hover rule (border pct +
-// the token it mixes toward). Throws if the rule stops shifting the border, so
-// the #103 outline-dissolve fix can't silently regress.
-function hoverBorderMix(selector: string): { pct: number; token: string } {
+// Pulls the border-color color-mix out of the outline hover rule: the base token
+// it mixes FROM, the percentage, and the token it mixes toward. The base is read
+// rather than assumed — SONA-126 moved the resting border from --border to
+// --input and the hover followed, and a measurement against the wrong base would
+// have gone on passing. Throws if the rule stops shifting the border, so the #103
+// outline-dissolve fix can't silently regress.
+function hoverBorderMix(selector: string): { base: string; pct: number; token: string } {
 	const rule = blockBody(selector);
 	const m = rule.match(
-		/border-color:\s*color-mix\(in srgb,\s*var\(--border\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/
+		/border-color:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/
 	);
 	if (!m) throw new Error(`${selector} has no border-color color-mix (outline-dissolve fix reverted?)`);
-	return { pct: Number(m[1]), token: m[2] };
+	return { base: m[1], pct: Number(m[2]), token: m[3] };
 }
 
 describe('destructive button WCAG AA contrast, every theme × mode', () => {
@@ -445,9 +448,10 @@ describe('ember light theme WCAG AA contrast', () => {
 // text on its surface at 4.5:1, and the two non-text tokens at 3:1.
 //
 // Scope: raw --primary as TEXT is deliberately absent. It fails on Ember light
-// (2.20:1), which is the whole reason --link and --status-attention exist; fixing
-// it is SONA-126, not this sweep. --primary IS swept at the 3:1 non-text floor
-// below, where it draws selection and drop-target borders.
+// (2.20:1), which is why --link, --status-attention and now --primary-text
+// (SONA-126) exist; --primary-text is swept at 4.5:1 below. --primary itself is
+// swept at the 3:1 non-text floor, where it draws selection and drop-target
+// borders.
 //
 // Scope: only --sidebar-border is out of the sweep. Its dark value is an alpha
 // value (rgba over whatever sits behind it), and this sweep measures opaque
@@ -475,6 +479,11 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 	{ ink: 'mutedForeground', ground: 'sidebar', floor: 4.5 },
 	{ ink: 'link', ground: 'background', floor: 4.5 },
 	{ ink: 'link', ground: 'card', floor: 4.5 },
+	// --primary-text is --primary in its small-text role (SONA-126): headings,
+	// eyebrows, counts, chip labels. Same 4.5:1 floor as --link, on both surfaces
+	// a label sits on.
+	{ ink: 'primaryText', ground: 'background', floor: 4.5 },
+	{ ink: 'primaryText', ground: 'card', floor: 4.5 },
 	{ ink: 'statusOk', ground: 'card', floor: 4.5 },
 	{ ink: 'statusWarn', ground: 'card', floor: 4.5 },
 	// The same two status inks also label rows that sit straight on the page (the
@@ -508,24 +517,19 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 // palette value was changed to make this suite green (SONA-209).
 //
 // WCAG 1.4.11 asks 3:1 of a boundary only where the boundary is what identifies
-// a control or its state. Two of the allowlisted pairings below ARE that, and
-// two are the decorative use the exception is for:
+// a control or its state. SONA-126 split the two uses apart:
 //
-//   • REAL 1.4.11 failures. `.input` draws the form-field boundary with --input
-//     on a --background (or --card) fill, and `.btn-outline` fills with
-//     --background and draws its ONLY boundary with --border — both at the same
-//     1.3–1.8:1 as the hairlines, and both are controls a sighted user has to
-//     find by their edge. They fail today in every palette × mode. Deferred to
-//     the palette step (SONA-126, tracked on SONA-209) because this change moves
-//     the palettes into data and alters no colour value.
-//   • DECORATIVE. --border also draws the card and table hairlines — a rule
-//     between two adjacent surfaces of the same family, identifying nothing.
-//     1.4.11 does not apply there.
+//   • CONTROLS now clear 1.4.11. `.input` draws the form-field boundary with
+//     --input, and `.btn-outline` now draws its only boundary with --input too
+//     (it used --border). Every palette × mode raised --input to at least 3.2:1
+//     on both --background and --card, so neither has an entry below any more.
+//   • DECORATIVE hairlines are what is left. --border draws the card and table
+//     rules — a line between two adjacent surfaces of the same family,
+//     identifying nothing — so 1.4.11 does not apply and the ratios stay
+//     recorded here rather than silenced.
 //
-// Raising --border and --input to 3:1 repaints every card and table rule in
-// every palette, so it is a design decision, not a test tweak — which is why the
-// ratios are recorded here rather than silenced. Same for --primary as a
-// selection/drop-target border on light Ember.
+// Same for --primary as a selection/drop-target border on light Ember: that one
+// is still real debt, recorded rather than tuned.
 const KNOWN_FAILURES = new Map<string, number>([
 	['default dark border on background', 1.39],
 	['default light border on background', 1.45],
@@ -539,18 +543,6 @@ const KNOWN_FAILURES = new Map<string, number>([
 	['aurora light border on card', 1.4],
 	['terracotta dark border on card', 1.26],
 	['terracotta light border on card', 1.82],
-	['default dark input on background', 1.39],
-	['default light input on background', 1.45],
-	['aurora dark input on background', 1.43],
-	['aurora light input on background', 1.29],
-	['terracotta dark input on background', 1.39],
-	['terracotta light input on background', 1.38],
-	['default dark input on card', 1.28],
-	['default light input on card', 1.61],
-	['aurora dark input on card', 1.32],
-	['aurora light input on card', 1.4],
-	['terracotta dark input on card', 1.26],
-	['terracotta light input on card', 1.82],
 	['default light primary on background', 2.2],
 	['default light primary on card', 2.46],
 	['terracotta light mutedForeground on secondary', 3.96],
@@ -746,8 +738,8 @@ describe('.btn hover-state WCAG AA contrast, every theme × variant (#103)', () 
 			const { pct: fillPct, toward } = hoverMix(hoverSel);
 			const fill = mixSrgb(blockToken(sel, 'background'), fillPct, toward);
 			// The border-color shift lives on the base rule and cascades to both modes.
-			const { pct: borderPct, token } = hoverBorderMix('.btn-outline:hover');
-			const border = mix2(blockToken(sel, 'border'), borderPct, blockToken(sel, token));
+			const { base, pct: borderPct, token } = hoverBorderMix('.btn-outline:hover');
+			const border = mix2(blockToken(sel, base), borderPct, blockToken(sel, token));
 			expect(contrast(border, fill)).toBeGreaterThanOrEqual(1.5);
 		});
 	}
@@ -1590,4 +1582,155 @@ describe('SONA-156 Remove-key label on its hover fill', () => {
 			expect(contrast(label, fill)).toBeGreaterThanOrEqual(4.5);
 		});
 	}
+});
+
+// SONA-126: --primary-text is the token --primary becomes when it has to be read
+// rather than looked at. The sweep above already measures it against --background
+// and --card for every theme × mode; this pins the LIGHT blocks specifically,
+// because light is where raw --primary fails (Ember light is 2.20:1) and where a
+// future palette tweak would break it first. It also pins that the value is a
+// concrete hex rather than an alias that silently resolves to the dark block's.
+describe('light --primary-text is readable as small text (SONA-126)', () => {
+	for (const theme of ALL_THEMES) {
+		it(`${theme.id} light: --primary-text clears 4.5:1 on --background and --card`, () => {
+			const ink = themeHex(theme.id, 'light', 'primaryText');
+			for (const ground of ['background', 'card'] as const) {
+				const ratio = contrast(ink, themeHex(theme.id, 'light', ground));
+				expect(
+					ratio,
+					`${theme.id} light: --primary-text (${ink}) on --${ground} measures ${ratio.toFixed(2)}:1`
+				).toBeGreaterThanOrEqual(4.5);
+			}
+		});
+	}
+
+	// Every block that declares --primary declares --primary-text next to it. A
+	// block that sets one and not the other inherits a text colour tuned for a
+	// different palette — the source-order trap the --link comments describe.
+	it('every block that declares --primary declares --primary-text', () => {
+		const missing = ALL_THEMES.flatMap((theme) =>
+			(['dark', 'light'] as const)
+				.filter((mode) => theme[mode].primary !== undefined && theme[mode].primaryText === undefined)
+				.map((mode) => `${theme.id} ${mode}`)
+		);
+		expect(missing).toEqual([]);
+	});
+});
+
+// SONA-126: `color: var(--primary)` on a TEXT selector is the bug --primary-text
+// fixes — on Ember light it paints 14px labels at 2.20:1. The sweep moved every
+// text use over; what is left is --primary drawing something that is not read as
+// text, and each of those is named here with why. A new `color: var(--primary)`
+// fails this test until it is either repointed at --primary-text or added below
+// with a reason.
+describe('no text rule paints with raw --primary (SONA-126)', () => {
+	const srcRoot = fileURLToPath(new URL('..', import.meta.url));
+
+	// file → the rules that keep raw --primary, and why. Icons carry no text, so
+	// WCAG's 4.5:1 small-text bar does not apply to them; the one text entry sits
+	// on a dark scrim rather than on --background or --card.
+	const ALLOWED = new Map<string, string[]>([
+		['/app.css', ["tag-chip[aria-pressed='true'] svg — the chip's check glyph, not its label"]],
+		[
+			'/lib/components/Callout.svelte',
+			['.primary .icon — the callout glyph; .primary .title is the text and uses --primary-text']
+		],
+		[
+			'/lib/components/SetupDialog.svelte',
+			['.modal-sub :global(svg) — the subtitle glyph, next to --muted-foreground text']
+		],
+		[
+			'/lib/components/RefSheetPicker.svelte',
+			['.modal-sub :global(svg) — the same subtitle glyph as SetupDialog']
+		],
+		[
+			'/lib/components/LinkRow.svelte',
+			['.badge — a 36px tinted disc holding one icon and no text']
+		],
+		[
+			'/lib/components/CopyCommand.svelte',
+			['.copy.copied — the copy button is an icon; its state is announced, not read']
+		],
+		[
+			'/routes/(paths)/art/+page.svelte',
+			['.featured-label :global(svg) — the star glyph beside the label']
+		],
+		[
+			'/routes/(paths)/+layout.svelte',
+			['.hero .hero-icon — the hero glyph, sized well past the small-text bar']
+		],
+		[
+			'/routes/(public)/+page@.svelte',
+			[
+				'.card:hover :global(.chevron) — the hover affordance glyph',
+				'.badge — a 44px tinted tile holding one icon and no text'
+			]
+		],
+		[
+			'/routes/(public)/stickers/+page.svelte',
+			[
+				".source-chip.telegram — text, but on the chip's rgba(0, 0, 0, 0.7) scrim over artwork, where the darkened token would lose contrast rather than gain it"
+			]
+		],
+		[
+			'/routes/(public)/stickers/[slug]/[id]/+page.svelte',
+			['.pack-link-arrow — the arrow glyph after the link, which uses --primary-text']
+		]
+	]);
+
+	const styled = readdirSync(srcRoot, { recursive: true })
+		.map(String)
+		.filter((p) => p.endsWith('.svelte') || p.endsWith('.css'))
+		.map((p) => `/${p}`);
+
+	// `color:` only — `background-color:` and `border-color:` end in the same
+	// characters, and both are legitimate --primary uses.
+	const RAW = /(?:^|[;{\s])color:\s*var\(--primary\)/;
+
+	it('has no allowlist entry for a file that no longer uses raw --primary', () => {
+		const stale = [...ALLOWED.keys()].filter(
+			(f) => !styled.includes(f) || !RAW.test(readFileSync(`${srcRoot}${f}`, 'utf8'))
+		);
+		expect(stale, 'these files stopped using raw --primary — drop them from ALLOWED').toEqual([]);
+	});
+
+	it('paints text with --primary-text everywhere else', () => {
+		const offenders = styled.filter(
+			(f) => !ALLOWED.has(f) && RAW.test(readFileSync(`${srcRoot}${f}`, 'utf8'))
+		);
+		expect(
+			offenders,
+			'`color: var(--primary)` measures 2.20:1 on Ember light. Use var(--primary-text) for text, or add the rule to ALLOWED above with the reason it is not text.'
+		).toEqual([]);
+	});
+});
+
+// SONA-126 raised --input to 3:1 on both surfaces so the two CONTROL boundaries
+// clear WCAG 1.4.11, and pointed .btn-outline at it. The sweep above measures
+// the token; this pins the rules that use it, because a rule quietly moved back
+// to --border would pass every contrast assertion and still leave the control
+// edge at ~1.4:1.
+describe('control boundaries use --input, not --border (SONA-126)', () => {
+	const rules = {
+		'.btn-outline': "the outline button's 1px edge is the only thing marking it as a control",
+		'.input': 'the form-field boundary'
+	};
+
+	for (const [selector, why] of Object.entries(rules)) {
+		it(`${selector} draws its border with --input`, () => {
+			const border = blockBody(selector).match(/border:\s*1px solid var\(--([\w-]+)\)/)?.[1];
+			expect(border, `${selector} declares no 1px solid border`).toBeDefined();
+			expect(border, `${why} — --border is the decorative hairline and sits near 1.4:1`).toBe(
+				'input'
+			);
+		});
+	}
+
+	// The hover shifts the SAME boundary, so it has to start from the same token.
+	// Mixing from --border while the resting edge draws with --input makes the
+	// button's outline jump palette on hover, and the shift stops being the small
+	// nudge #103 asked for.
+	it('.btn-outline:hover shifts the border it actually has', () => {
+		expect(hoverBorderMix('.btn-outline:hover').base).toBe('input');
+	});
 });

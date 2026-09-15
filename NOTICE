@@ -13,3 +13,18 @@ This product bundles the Geist typeface (Copyright 2023 Vercel, in
 collaboration with basement.studio), used under the SIL Open Font
 License 1.1 (https://openfontlicense.org). Font files are in
 static/fonts/.
+
+This product bundles the JetBrains Mono typeface (Copyright 2020 The
+JetBrains Mono Project Authors, https://github.com/JetBrains/JetBrainsMono),
+used under the SIL Open Font License 1.1 (https://openfontlicense.org).
+Font files are in static/fonts/.
+
+This product bundles the Chakra Petch typeface (Copyright 2018 The Chakra
+Petch Project Authors, https://github.com/cadsondemak/Chakra-Petch), used
+under the SIL Open Font License 1.1 (https://openfontlicense.org). Font
+files are in static/fonts/.
+
+This product bundles the IBM Plex Sans JP typeface (Copyright 2017 IBM
+Corp., https://github.com/IBM/plex), used under the SIL Open Font
+License 1.1 (https://openfontlicense.org). Font files are in
+static/fonts/.

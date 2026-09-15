@@ -637,7 +637,7 @@
 	.select-with-action .input { flex: 1; min-width: 0; }
 	.link-btn {
 		display: inline-flex; align-items: center; gap: 5px; background: none; border: none;
-		color: var(--primary); font-size: 12px; padding: 0; cursor: pointer;
+		color: var(--primary-text); font-size: 12px; padding: 0; cursor: pointer;
 	}
 	.link-btn:hover { text-decoration: underline; }
 	.hint { font-size: 11px; color: var(--muted-foreground); margin: 0; }
@@ -698,7 +698,7 @@
 	.ctx-new-artist {
 		display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 10px;
 		border-radius: var(--radius-pill); border: 1px dashed var(--border); background: none;
-		color: var(--primary); cursor: pointer;
+		color: var(--primary-text); cursor: pointer;
 	}
 	.ctx-new-artist:hover { border-color: var(--primary); }
 	.warn-text { color: #f5a623 !important; }

@@ -183,7 +183,10 @@ graph TB
   ways: `git ls-files --error-unmatch` proves it is still tracked, `git diff
   --exit-code` after the install catches a palette edit that was never
   regenerated, and `npm run themes:check` runs the renderer with its exit code
-  exposed, because `prepare` swallows failures.
+  exposed, because `prepare` swallows failures. The renderer also emits the
+  `@font-face` blocks for the self-hosted typefaces in `static/fonts/` (fetched
+  by `node scripts/fetch-fonts.mjs`), so the CSP allows no external stylesheet
+  or font origin and no page load reaches a font CDN.
 - Forks are independent deployments of the same stack on their owners' own
   Cloudflare accounts. They adopt changes by pulling the tagged releases that
   `release.yml` publishes — see `UPDATING.md` — not by tracking `main`.

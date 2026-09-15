@@ -291,7 +291,7 @@
 	}
 	.mode-key.off { background: var(--secondary); color: var(--muted-foreground); }
 	.mode-key.mock { background: rgba(0,136,204,0.15); color: #3aa0e0; }
-	.mode-key.live { background: rgba(255,132,0,0.16); color: var(--primary); }
+	.mode-key.live { background: rgba(255,132,0,0.16); color: var(--primary-text); }
 	.mode-desc { font-size: 12.5px; color: var(--muted-foreground); line-height: 1.55; }
 	.callout {
 		display: flex; gap: 10px; padding: 12px 14px; border-radius: var(--radius-s);
@@ -352,7 +352,7 @@
 	.imp-row .cell.thumb img { width: 44px; height: 44px; object-fit: contain; background: var(--secondary); border-radius: var(--radius-xs); }
 	.imp-row .cell.who { display: flex; align-items: center; gap: 5px; font-weight: 500; }
 	.imp-row .cell.lic { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-foreground); cursor: help; }
-	.badge.perm { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid var(--primary); border-radius: var(--radius-s); color: var(--primary); font-size: 11px; cursor: help; }
+	.badge.perm { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid var(--primary); border-radius: var(--radius-s); color: var(--primary-text); font-size: 11px; cursor: help; }
 	.imp-row .cell.link a { color: var(--link); font-size: 12px; }
 	.btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: var(--radius-s); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
 	.btn-icon:hover { color: #f87171; border-color: #f87171; }

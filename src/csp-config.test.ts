@@ -98,9 +98,12 @@ describe('kit.csp directives', () => {
 		expect(d['frame-src']).toContain('https://challenges.cloudflare.com');
 	});
 
-	it('allows the Google Fonts stylesheet + files', () => {
-		expect(d['style-src']).toContain('https://fonts.googleapis.com');
-		expect(d['font-src']).toContain('https://fonts.gstatic.com');
+	// SONA-181 self-hosted the typefaces. Re-adding either origin would let a
+	// stylesheet or a font come from Google again — the exact request the privacy
+	// policy now says the site does not make.
+	it('names no external font or stylesheet origin', () => {
+		expect(d['style-src']).toEqual(['self', 'unsafe-inline']);
+		expect(d['font-src']).toEqual(['self']);
 	});
 
 	it('denies framing and plugins', () => {

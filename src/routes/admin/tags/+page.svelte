@@ -293,7 +293,7 @@
 		}
 
 		.hash {
-			color: var(--primary);
+			color: var(--primary-text);
 			font-family: var(--font-primary);
 			font-weight: 700;
 			font-size: 16px;
@@ -308,7 +308,7 @@
 		.mobile-tag-count {
 			font-size: 12px;
 			font-weight: 600;
-			color: var(--primary);
+			color: var(--primary-text);
 			background: rgba(255, 132, 0, 0.15);
 			padding: 2px 8px;
 			border-radius: var(--radius-pill);
@@ -328,7 +328,7 @@
 			border: 1px dashed var(--border);
 			border-radius: var(--radius-s);
 			background: none;
-			color: var(--primary);
+			color: var(--primary-text);
 			font-size: 14px;
 			font-family: var(--font-primary);
 			font-weight: 500;

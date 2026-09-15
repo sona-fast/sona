@@ -186,7 +186,7 @@ Two knock-on effects worth knowing:
   logs can still reach development tools on any site. If you do use those tools
   and want them named, write your own privacy text in Settings, Legal.
 - The built-in privacy policy gained disclosures for the AI development tools,
-  Cloudflare's Web Analytics beacon, Google Fonts, and the feature integrations
+  Cloudflare's Web Analytics beacon, and the feature integrations
   (Turnstile, Telegram, cons.fyi, X, Bluesky, FurTrack, and the shared artist
   registry). **If you pasted your own privacy text, none of that was added to
   your site** and the third-party recipients your deployment actually contacts

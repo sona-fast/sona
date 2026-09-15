@@ -318,7 +318,7 @@
 	.pack-link {
 		font-size: 14px;
 		font-weight: 600;
-		color: var(--primary);
+		color: var(--primary-text);
 	}
 
 	.pack-link-row :global(.pack-link-arrow) {

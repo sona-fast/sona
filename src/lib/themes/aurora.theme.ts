@@ -12,6 +12,10 @@ const dark: PartialThemeTokens = {
 	// Near-black button label; darkened from the page bg (#0e0f1a) so the resting
 	// label-on-fill clears WCAG AA (4.60:1 vs 4.39 before; hover stays 5.60).
 	primaryForeground: '#07080d',
+	// primary is 4.38:1 on this dark background and 4.06:1 on cards — below AA
+	// for small text, the same reason --link is lightened below. The text token
+	// takes that lighter violet: 7.00:1 on the background, 6.48:1 on cards.
+	primaryText: '#a48bff',
 	secondary: '#232544',
 	secondaryForeground: '#f4f4ff',
 	muted: '#232544',
@@ -27,7 +31,8 @@ const dark: PartialThemeTokens = {
 	// The same lighter violet: 7.00:1 on the background, 6.48:1 on cards.
 	link: '#a48bff',
 	border: '#2a2c50',
-	input: '#2a2c50',
+	// 3.91:1 on the page background, 3.62:1 on cards (WCAG 1.4.11).
+	input: '#6A6DA0',
 	ring: '#7c5cff',
 	sidebar: '#131426',
 	sidebarAccent: '#232544',
@@ -42,6 +47,11 @@ const light: PartialThemeTokens = {
 	cardForeground: '#16172a',
 	primary: '#6a4cf0',
 	primaryForeground: '#ffffff',
+	// This theme's light primary already reads as small text (4.96:1 on the
+	// background, 5.38:1 on cards), so the text token aliases it. Declared here
+	// for the same source-order reason as --link below: without it the aurora
+	// DARK block's #a48bff would win, at 2.51:1 on this light background.
+	primaryText: { ref: 'primary' },
 	secondary: '#ececfa',
 	secondaryForeground: '#16172a',
 	muted: '#f0f0fb',
@@ -59,7 +69,8 @@ const light: PartialThemeTokens = {
 	// without this line its #a48bff wins here — 2.51:1 on this light background.
 	link: { ref: 'primary' },
 	border: '#d8d8ee',
-	input: '#d8d8ee',
+	// 3.53:1 on the page background, 3.83:1 on cards.
+	input: '#7D7FAA',
 	ring: '#6a4cf0',
 	sidebar: '#ececfa',
 	sidebarAccent: '#d8d8ee',

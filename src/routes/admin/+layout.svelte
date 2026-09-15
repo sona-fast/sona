@@ -257,7 +257,7 @@
 
 	.admin-badge {
 		font-size: 12px;
-		color: var(--primary);
+		color: var(--primary-text);
 		font-weight: 600;
 		font-family: var(--font-primary);
 	}
