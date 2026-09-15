@@ -333,8 +333,14 @@
 		} else {
 			if (parentIndex >= tiles.length) parentIndex = 0;
 			// The parent itself is gone: the shared fields described it, so
-			// re-derive them from whichever tile the radio landed on.
-			onParentChanged(parentIndex);
+			// re-derive them from whichever tile the radio landed on. Only in the
+			// new-set mode, where a tile really is the parent. In 'existing' no
+			// tile owns the shared fields and the panel is not even rendered, so
+			// re-deriving would clear a lookup-tagged source URL and date that
+			// survived the flip out of 'new' and write nothing back, erasing them
+			// with none of the announcement returnToNewSet makes. The flip back
+			// to 'new' goes through returnToNewSet, which re-derives them there.
+			if (groupMode !== 'existing') onParentChanged(parentIndex);
 		}
 	}
 

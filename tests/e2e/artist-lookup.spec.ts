@@ -2029,6 +2029,53 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
 	});
 
+	// In the existing-piece mode no tile is the parent: the panel is not rendered
+	// and nothing owns the shared fields, so removing the tile that parentIndex
+	// still points at used to re-derive from a tile whose lookup is idle. That
+	// cleared the lookup-filled source URL and date that had survived the flip
+	// out of the new-set mode and wrote nothing back, erasing them silently.
+	test('removing the old parent in existing mode keeps the shared fields', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await page.route('**/api/upload', (route) =>
+			route.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/x1.png' }) })
+		);
+		await page.goto('/admin/upload');
+		await waitForDropAttachment(page, '.dropzone');
+		await dropOn(page, '.dropzone', [
+			{ name: 'first.png', type: 'image/png' },
+			{ name: 'second.png', type: 'image/png' }
+		]);
+		await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue('/x1.png', {
+			timeout: 15_000
+		});
+
+		// The first tile is the parent, and its result fills the shared fields.
+		await tileLookup(page).first().click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		await expect(page.getByRole('combobox', { name: 'Variant of' })).toBeVisible();
+
+		await page.getByRole('button', { name: 'Remove first.png' }).click();
+		await expect(page.getByRole('button', { name: 'Remove first.png' })).toBeHidden();
+
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+
+		// And the flip back is unchanged: the surviving tile's lookup is idle, so
+		// returnToNewSet leaves the fields alone rather than clearing them.
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'New piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+	});
+
 	// The declined-duplicate path used to drop the tile with a bare array filter,
 	// skipping the parent bookkeeping every other removal goes through. With the
 	// second tile picked as parent and the first declined, parentIndex stayed at

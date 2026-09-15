@@ -1533,7 +1533,14 @@ describe('the upload page grid', () => {
 		);
 		// Only a parent that is actually gone re-derives the shared fields.
 		expect(UPLOAD).toMatch(
-			/if \(movedTo !== -1\) \{\s+parentIndex = movedTo;\s+\} else \{[\s\S]{0,300}?onParentChanged\(parentIndex\);/
+			/if \(movedTo !== -1\) \{\s+parentIndex = movedTo;\s+\} else \{[\s\S]{0,900}?onParentChanged\(parentIndex\);/
+		);
+		// And only in the mode where a tile is the parent. In 'existing' no tile
+		// owns the shared fields, so re-deriving there clears a lookup-tagged
+		// source URL and date that survived the flip and writes nothing back,
+		// erasing them without the announcement returnToNewSet makes.
+		expect(UPLOAD).toMatch(
+			/if \(groupMode !== 'existing'\) onParentChanged\(parentIndex\);/
 		);
 	});
 
