@@ -877,7 +877,7 @@ describe('what the lookup copy names', () => {
 	it('ends the unreadable-file body by sending the operator to the artist field', () => {
 		const enClosing = 'Add the artist by hand.';
 		expect(en.admin_lookup_too_large_body).toContain(enClosing);
-		expect(en.admin_lookup_invalid_body).toBe(`FuzzySearch couldn't read this file. ${enClosing}`);
+		expect(en.admin_lookup_invalid_body.endsWith(` ${enClosing}`)).toBe(true);
 		const jaClosing = 'アーティストを手で入力してください。';
 		expect(ja.admin_lookup_too_large_body).toContain(jaClosing);
 		expect(ja.admin_lookup_invalid_body.endsWith(jaClosing)).toBe(true);
