@@ -24,6 +24,10 @@ original deployment it grew out of). The project home is
 - **Sticker packs** — mirror Telegram sticker sets or upload your own; static,
   animated (.tgs→Lottie), and video stickers, with per-sticker artist credit and
   emoji search. *(Telegram import gated by `TELEGRAM_BOT_TOKEN`.)*
+- **Artist lookup** — reverse image search an upload against FuzzySearch to
+  find who drew it, then credit them without leaving the form. *(Optional;
+  keyed off a `FUZZYSEARCH_API_KEY` secret or a key saved in Settings →
+  Connections. Nothing is sent until you click.)*
 - **Conventions** — track the cons you're attending (picked from the
   [cons.fyi](https://cons.fyi) feed, synced from your Bluesky "going" labels, or
   entered manually); upcoming ones show on the About page.

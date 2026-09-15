@@ -185,6 +185,10 @@ describe('defaultPrivacyPolicy', () => {
 		// SONA-220: the tag-suggestion lookup sends a post or picture URL to entail.dev.
 		expect(text).toMatch(/entail.dev \(an image classifier that suggests tags for artwork from its source post or the picture in it\)/);
 		expect(text).toContain('FurTrack');
+		expect(text).toContain('FuzzySearch');
+		// The lookup sends a copy of the image, and an unpublished one too; naming
+		// the provider alone would not disclose either (SONA-156).
+		expect(text).toMatch(/FuzzySearch \(finding where a piece was posted; when the site owner asks for a lookup, a copy of that image is sent, including images not published on this site\)/);
 		expect(text).toMatch(/shared artist registry/);
 	});
 });
@@ -296,8 +300,8 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// privacy page would show a "Last updated" line older than its own text.
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '3920a2040e2b5aa90608844acd275dcbb92b69439da22d1e07e8d7ec403cddfd';
-	const RECORDED_UPDATED = '2026-09-07';
+	const RECORDED_TEXT_HASH = 'b2c656867b76ec288a85b230ccce8279bdff6cd963edea4e90e1b31f0c7351fa';
+	const RECORDED_UPDATED = '2026-09-15';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both

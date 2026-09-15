@@ -19,17 +19,21 @@ describe('the edit page\'s re-seed effect', () => {
 		// script's $state survives the remount: each value has to be re-seeded
 		// here or image B starts with image A's. `saving` is the one that is not a
 		// stored value, and a navigation mid-save would otherwise leave B's Save
-		// disabled until A's request landed.
-		const effect = editPage.match(/seededImageId = data\.image\.id;([\s\S]*?)\}\);/)?.[1] ?? '';
+		// disabled until A's request landed. The effect itself only spots the move;
+		// the re-seeding lives in resetForImage, which the artist lookup shares.
+		expect(editPage).toMatch(/if \(id === seededImageId\) return;[\s\S]{0,200}?resetForImage\(\)/);
+		const reset = editPage.match(/function resetForImage\(\) \{([\s\S]*?)\n\t\}/)?.[1] ?? '';
 		for (const line of [
 			'tagsValue = ',
 			'sourcePostUrl = ',
+			'suggestedRating = null;',
+			'nsfw = data.image.nsfw;',
 			'selectedParentId = ',
 			"artistMode = 'existing';",
 			'referenceCleared = false;',
 			'saving = false;'
 		]) {
-			expect(effect).toContain(line);
+			expect(reset).toContain(line);
 		}
 	});
 });
@@ -101,7 +105,12 @@ describe('the suggest pill', () => {
 		);
 		for (const page of [uploadPage, editPage]) {
 			expect(page).toMatch(/bind:sourceDescribedBy/);
-			expect(page).toMatch(/name="sourcePostUrl"\s*\n?\s*aria-describedby=\{sourceDescribedBy\}/);
+			// Since SONA-156 the same field can also carry the lookup's "From lookup"
+			// tag, so the two ids are joined and the field points at the pair.
+			expect(page).toMatch(/aria-describedby=\{sourceFieldDescribedBy\}/);
+			expect(page).toMatch(
+				/const sourceFieldDescribedBy = \$derived\(\s*\[sourceDescribedBy, sourceTagged \? 'source-lookup-tag' : undefined\]/
+			);
 		}
 	});
 
@@ -180,7 +189,7 @@ describe('the rating never touches the NSFW checkbox', () => {
 	it('moves focus to the checkbox it just checked, since its own button is gone', () => {
 		expect(ratingNote).toMatch(/nsfw = true;[\s\S]*?await tick\(\);\n\t\tcheckbox\?\.focus\(\)/);
 		for (const page of [uploadPage, editPage]) {
-			expect(page).toMatch(/name="nsfw" bind:checked=\{nsfw\} bind:this=\{nsfwInput\}/);
+			expect(page).toMatch(/name="nsfw"\s+bind:checked=\{nsfw\}\s+bind:this=\{nsfwInput\}/);
 		}
 	});
 
@@ -208,8 +217,13 @@ describe('the rating never touches the NSFW checkbox', () => {
 			// Pointed at the note only while there is a note: an aria-describedby that
 			// names a missing id describes nothing, and screen readers vary on whether
 			// they say so.
+			// The lookup's own rating pill can sit in the same row (SONA-156), so the
+			// two ids are joined and the box points at whichever are on screen.
 			expect(page).toMatch(
-				/name="nsfw" bind:checked=\{nsfw\} bind:this=\{nsfwInput\} aria-describedby=\{suggestedRating \? 'tags-rating' : undefined\}/
+				/name="nsfw"\s+bind:checked=\{nsfw\}\s+bind:this=\{nsfwInput\}\s+aria-describedby=\{nsfwDescribedBy\}/
+			);
+			expect(page).toMatch(
+				/const nsfwDescribedBy = \$derived\([\s\S]{0,200}?suggestedRating \? 'tags-rating' : undefined/
 			);
 			expect(page).toMatch(
 				/<TagRatingNote rating=\{suggestedRating\} id="tags-rating" bind:nsfw checkbox=\{nsfwInput\} \/>/

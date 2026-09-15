@@ -6,6 +6,7 @@ import {
 	getSettings,
 	saveSettings,
 	getRawSetting,
+	getRawSettings,
 	setRawSetting,
 	clearSettingsCache,
 	clearSupporterKeyStatusCache,
@@ -54,6 +55,12 @@ import {
 	REGISTRY_API_KEY_SETTING,
 	REGISTRY_URL_SETTING
 } from '$lib/server/registry';
+import {
+	FUZZYSEARCH_API_KEY_SETTING,
+	FUZZYSEARCH_KEY_REFUSED_SETTING,
+	fuzzysearchKeyDisplayRecord,
+	parseFuzzysearchRefusedMarker
+} from '$lib/server/fuzzysearch';
 import { syncArtists } from '$lib/server/artist-sync';
 import {
 	resolveRefImage,
@@ -266,6 +273,24 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 	// for display. Empty until the first pilot feature is registered.
 	const earlyAccess = earlyAccessActive(now).map((e) => ({ flag: e.flag, gaDate: formatDate(e.gaDate) }));
 
+	// FuzzySearch key (SONA-156) — a raw setting like the registry fork key, so
+	// it never rides along in the client-exposed SiteSettings. Only the MASK
+	// travels, and only for a key saved here: a key that came from the deploy
+	// secret sends nothing derived from it at all. The mask is attached as its
+	// own field rather than folded into a status object, so a later spread
+	// cannot pick the raw key up by accident (the supporter-key precedent).
+	const fuzzysearchKeyFromEnv = !!platform?.env?.FUZZYSEARCH_API_KEY?.trim();
+	// Both rows in one query: load already spends its subrequest budget on the
+	// D1 reads above, and these two keys are always read together.
+	const fuzzysearchRaw = await getRawSettings(db, [
+		FUZZYSEARCH_API_KEY_SETTING,
+		FUZZYSEARCH_KEY_REFUSED_SETTING
+	]);
+	const fuzzysearchStoredKey = fuzzysearchRaw[FUZZYSEARCH_API_KEY_SETTING]?.trim() ?? '';
+	const fuzzysearchRefused = parseFuzzysearchRefusedMarker(
+		fuzzysearchRaw[FUZZYSEARCH_KEY_REFUSED_SETTING]
+	);
+
 	// Per-content-type usage (SONA-192) — R2 only: derived from listing the
 	// bucket, so it also counts files D1 never tracked. Reduced to counts and
 	// sums here; raw object keys never leave the server or reach a log line.
@@ -309,6 +334,26 @@ export const load: PageServerLoad = async ({ platform, url, locals }) => {
 		storageStatus,
 		registryEnabled: isRegistryEnabled(renv),
 		registryHasSecret: !!platform?.env?.REGISTRY_API_KEY,
+		fuzzysearchKeySet: fuzzysearchKeyFromEnv || !!fuzzysearchStoredKey,
+		fuzzysearchKeyFromEnv,
+		// The deploy secret wins, and while it does the card shows the secret's own
+		// line instead of a mask — so the stored key's last four have no reader and
+		// no business in the payload. Gated here rather than in the markup: a field
+		// the page never renders still ships in the SSR data blob.
+		fuzzysearchKeyRecord:
+			!fuzzysearchKeyFromEnv && fuzzysearchStoredKey
+				? fuzzysearchKeyDisplayRecord(fuzzysearchStoredKey)
+				: null,
+		// Pre-formatted here, like the early-access GA dates, so the card renders
+		// one date string identically on SSR and after hydration. Only for a key
+		// saved HERE, and only when THAT key is the one that was refused: a
+		// refusal recorded against the deploy secret has no remedy on this page
+		// (no key to remove), and showing it after the secret is dropped would
+		// blame a stored key that FuzzySearch never turned away.
+		fuzzysearchKeyRefusedAt:
+			!fuzzysearchKeyFromEnv && fuzzysearchStoredKey && fuzzysearchRefused?.source === 'stored'
+				? formatDate(fuzzysearchRefused.at)
+				: null,
 		// Presence-only flags for the password-reset setup guide. The secret VALUES
 		// are deploy-time env and must never reach the client — only whether they exist.
 		resendKeySet: !!platform?.env?.RESEND_API_KEY,
@@ -684,6 +729,35 @@ export const actions = {
 		await setRawSetting(db, REGISTRY_URL_SETTING, '');
 		clearSettingsCache();
 		return { success: true, registryMessage: 'Disconnected from the shared registry.' };
+	},
+
+	// FuzzySearch key (SONA-156). A raw setting, like the registry fork key, so
+	// the key stays out of the public client payload — and the action returns
+	// only a flag, never the value it just stored.
+	saveFuzzysearchKey: async ({ request, platform }) => {
+		const db = getDb(platform!.env.DB);
+		const data = await request.formData();
+		const raw = data.get('fuzzysearchApiKey');
+		const key = typeof raw === 'string' ? raw.trim() : '';
+		// Shape check only — whether the key WORKS is answered by the first
+		// lookup, which records a refusal the section then surfaces. Printable
+		// ASCII: an API key with a space or a smart quote in it is a bad paste,
+		// and would ride into a request header.
+		if (key.length < 8 || key.length > 200 || !/^[\x21-\x7e]+$/.test(key)) {
+			return fail(400, { fuzzysearchKeyError: 'invalid' });
+		}
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, key);
+		// A new key deserves a clean slate: the old key's refusal says nothing
+		// about this one.
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
+		return { fuzzysearchKeySaved: true };
+	},
+
+	removeFuzzysearchKey: async ({ platform }) => {
+		const db = getDb(platform!.env.DB);
+		await setRawSetting(db, FUZZYSEARCH_API_KEY_SETTING, '');
+		await setRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING, '');
+		return { fuzzysearchKeyRemoved: true };
 	},
 
 	saveSecurityEmail: async ({ request, platform }) => {

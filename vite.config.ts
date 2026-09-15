@@ -37,6 +37,17 @@ export default defineConfig({
 	server: {
 		fs: {
 			allow: [searchForWorkspaceRoot(process.cwd()), nodeModulesRealpath()]
+		},
+		// A Playwright run drives `npm run dev`, and without SONA_E2E_PERSIST_ROOT
+		// its throwaway miniflare state lands in the checkout the same server is
+		// watching (tests/e2e/paths.ts builds .wrangler-e2e, -recovery,
+		// -uploadthing and -upload off the repo root). Every D1 write during a
+		// spec then looks like a source edit, and the reload it triggers detaches
+		// the element the spec is mid-click on. Vite's own defaults already cover
+		// .git, node_modules, the cache dir and test-results, so those are not
+		// repeated here.
+		watch: {
+			ignored: ['**/.wrangler-e2e*/**', '**/playwright-report/**', '**/playwright/.cache/**']
 		}
 	},
 	plugins: [

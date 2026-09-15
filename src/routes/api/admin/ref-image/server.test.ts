@@ -56,9 +56,12 @@ describe('GET /api/admin/ref-image — by-ID image proxy', () => {
 
 		// Fetched the DB-stored URL — never a caller-supplied one — and never
 		// follows a redirect away from it.
-		expect(vi.mocked(fetchMock)).toHaveBeenCalledWith('https://cdn.x/ref.png', {
-			redirect: 'manual'
-		});
+		expect(vi.mocked(fetchMock)).toHaveBeenCalledWith(
+			'https://cdn.x/ref.png',
+			// The proxy also bounds the wait for headers, so the init carries its
+			// abort signal alongside the redirect mode.
+			expect.objectContaining({ redirect: 'manual' })
+		);
 		expect(res.status).toBe(200);
 		expect(res.headers.get('content-type')).toBe('image/png');
 		expect(res.headers.get('content-disposition')).toBe('inline');

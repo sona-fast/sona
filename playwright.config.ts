@@ -120,7 +120,17 @@ const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
 // storage-breakdown rides the ut-stat server: it also flips the storage
 // provider, which would race the shared server's specs (SONA-192).
 const UT_SPECS = ['**/ut-stat.spec.ts', '**/storage-breakdown.spec.ts'];
-const UPLOAD_SPECS = ['**/upload.spec.ts'];
+// artist-lookup rides the upload server too: it saves and removes the
+// FuzzySearch key row, which decides whether "Look up artist" renders at all —
+// on the shared server that would race every other spec (SONA-156).
+// fuzzysearch-key writes and removes that same row from the settings page, so
+// it belongs on the same single-worker server rather than racing artist-lookup
+// over the key from the shared one.
+const UPLOAD_SPECS = [
+	'**/upload.spec.ts',
+	'**/artist-lookup.spec.ts',
+	'**/fuzzysearch-key.spec.ts'
+];
 // suggest-tags writes tag rows through its Save, so it takes neither the shared
 // server (read-only by convention) nor the upload one (SONA-220).
 const SUGGEST_TAGS_SPEC = '**/suggest-tags.spec.ts';

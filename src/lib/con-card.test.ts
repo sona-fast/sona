@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { qrSvg } from './qr';
 import { SOCIAL_ICON_ART, type SocialIconArt } from './social-icon-paths';
 import { SOCIAL_PLATFORM_NAMES, type SocialPlatform } from './social-label';
@@ -6,6 +6,7 @@ import {
 	conCardFaceSvg,
 	conCardPrintSheetSvg,
 	conCardFileBase,
+	isEmbeddableAvatarType,
 	CON_CARD_WIDTH,
 	CON_CARD_HEIGHT,
 	CON_CARD_SHEET_WIDTH,
@@ -616,5 +617,57 @@ describe('conCardFileBase', () => {
 	it('falls back when the name slugs to nothing', () => {
 		expect(conCardFileBase('タロウ')).toBe('con-card');
 		expect(conCardFileBase('')).toBe('con-card');
+	});
+});
+
+// The card embeds the avatar as a data URI, and the byte proxy in front of it
+// hands anything outside the stored raster allowlist back as a download. A URI
+// built from one of those draws nothing, so the type decides whether the card
+// keeps the face or falls back to the initial in the ring.
+describe('isEmbeddableAvatarType', () => {
+	it('takes the raster types the gallery stores, whatever their spelling', () => {
+		for (const type of ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']) {
+			expect(isEmbeddableAvatarType(type), type).toBe(true);
+		}
+		expect(isEmbeddableAvatarType('Image/PNG; charset=binary')).toBe(true);
+	});
+
+	it('refuses the proxy download type and svg', () => {
+		const refused = ['application/octet-stream', 'image/svg+xml', 'text/html'];
+		for (const type of refused) {
+			expect(isEmbeddableAvatarType(type), String(type)).toBe(false);
+		}
+	});
+
+	// The guard also runs on the direct same-origin avatar URL, and the proxy
+	// always sets a content-type. Only a PRESENT, non-raster type is a refusal —
+	// treating a missing header as one drops a perfectly good avatar to the
+	// initial.
+	it('takes a response with no content-type at all', () => {
+		for (const type of ['', null, undefined]) {
+			expect(isEmbeddableAvatarType(type), String(type)).toBe(true);
+		}
+	});
+
+	// GALLERY_ACCEPT has no spaces today, and an accept list is just as valid
+	// written with them. Read literally, a single space would drop the avatar to
+	// the initial for a type the server's own allowlist stores.
+	it('reads an accept list written with spaces after the commas', async () => {
+		vi.resetModules();
+		vi.doMock('$lib/config', async () => {
+			const actual = await vi.importActual<typeof import('./config')>('./config');
+			return { ...actual, GALLERY_ACCEPT: 'image/jpeg, image/png, image/webp' };
+		});
+		try {
+			const spaced = await import('./con-card');
+			expect(spaced.isEmbeddableAvatarType('image/png')).toBe(true);
+			expect(spaced.isEmbeddableAvatarType('image/webp')).toBe(true);
+			// Not in the stubbed list, so a false here also proves the stub is the
+			// list being read rather than the real constant.
+			expect(spaced.isEmbeddableAvatarType('image/gif')).toBe(false);
+		} finally {
+			vi.doUnmock('$lib/config');
+			vi.resetModules();
+		}
 	});
 });

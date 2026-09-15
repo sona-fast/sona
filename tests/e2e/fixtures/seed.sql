@@ -82,6 +82,17 @@ VALUES
    '/e2e/matureposter.png', '/e2e/matureposter-thumb.png',
    900, 700, 1, 0, 1, NULL, NULL, '2026-07-04T00:00:00.000Z');
 
+-- Edit-page target for the artist-lookup spec (SONA-156). Credited to Avatar
+-- Artist, not Test Artist: the lookup stub names Test Artist, so the select
+-- must still read Avatar Artist until "Use Test Artist" is clicked. Unpublished
+-- and untagged, so no gallery spec's counts or strips move.
+INSERT OR REPLACE INTO images
+  (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, parent_image_id, variant_label, created_at)
+VALUES
+  (10, 'Lookup Edit Target', 'lookup-edit-target',
+   '/e2e/lookuptarget.png', '/e2e/lookuptarget-thumb.png',
+   900, 700, 0, 0, 2, NULL, NULL, '2026-07-05T00:00:00.000Z');
+
 -- Untagged images with a Bluesky or X source post, for the suggest-tags spec
 -- (SONA-220). UNPUBLISHED, like image 4, so the gallery specs' counts stay
 -- untouched; the backfill page lists by source URL and tags alone. Twenty-eight

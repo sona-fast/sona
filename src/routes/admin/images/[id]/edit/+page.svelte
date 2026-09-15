@@ -1,11 +1,30 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { tick } from 'svelte';
-	import { Loader2 } from 'lucide-svelte';
+	import { tick, untrack } from 'svelte';
+	import { Loader2, Search } from 'lucide-svelte';
 	import TagSuggestions from '$lib/components/TagSuggestions.svelte';
 	import TagRatingNote from '$lib/components/TagRatingNote.svelte';
 	import type { EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
+	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
+	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
+	import { Announcer } from '$lib/live-announcer.svelte';
+	import {
+		LOOKUP_RESULT_THREW,
+		lookupSentFile,
+		newArtistSeed,
+		prefillForResult,
+		ratingTag,
+		seedStatusKind,
+		runLookup,
+		sentAfterApplyThrew,
+		strictestRating,
+		type LookupFields,
+		type LookupSite,
+		type LookupState,
+		type NewArtistSeed,
+		type SourceClash
+	} from '$lib/artist-lookup';
 
 	let { data, form } = $props();
 
@@ -28,44 +47,379 @@
 	//
 	// $state seeded from `data`, not writable $derived: the sidebar's reference
 	// form calls update(), which invalidates every load and would hand these
-	// three back their stored values — throwing away accepted tags, a typed
-	// source URL and a ticked NSFW box, and then saving the reverted ones.
-	let tagsValue = $state(data.imageTags.join(', '));
-	let sourcePostUrl = $state(data.image.sourcePostUrl || '');
+	// back their stored values — throwing away accepted tags and a ticked NSFW
+	// box, and then saving the reverted ones. The source post URL is seeded the
+	// same way, declared with the lookup fields below.
+	let tagsValue = $state(untrack(() => data.imageTags.join(', ')));
 	let suggestedRating = $state<EntailRating | null>(null);
 	// Set by the suggestion control while its hint is refusing this URL, so a
 	// screen reader user who tabs to the field finds the refusal on it.
 	let sourceDescribedBy = $state<string | undefined>(undefined);
-	let nsfw = $state(data.image.nsfw);
+	let nsfw = $state(untrack(() => data.image.nsfw));
 	let nsfwInput = $state<HTMLInputElement | null>(null);
-	// A same-route navigation to a DIFFERENT image is the one case the fields
-	// must follow `data` again. Keyed on the id, so an invalidation of the row
-	// already on screen leaves what the operator typed alone.
-	// The {#key} around the form covers the fields seeded by a plain attribute,
-	// but it only rebuilds markup — this script does not run again — so every
-	// value held in $state below still has to be re-seeded here, or the remounted
-	// bound inputs would come back carrying the previous image's values.
-	let seededImageId = data.image.id;
+
+	// ---- Artist lookup (SONA-156) -------------------------------------------
+	// The bytes are on the storage host, and the CSP blocks the browser from
+	// reading them (docs/reading-image-bytes.md), so the request names the image
+	// by id and the server fetches it. Nothing is filled that already has a
+	// value, and the artist only changes on an explicit click.
+	let lookup = $state<LookupState>({ kind: 'idle' });
+	let lookupFilled = $state<LookupFields>({});
+	// Held-ness of the source post URL at the moment the prefill ran, beside the
+	// record of what it wrote. Read live, the clash sentence flips as the operator
+	// types: clearing a pasted URL afterwards would make the panel say Sona left
+	// the field empty, which the operator did, not Sona.
+	let lookupUrlHeld = $state(false);
+	// Read once, like every other form seed on this page: these are the values
+	// the form OPENS with, and a later `data` change must not throw away what the
+	// operator has typed. untrack is the documented spelling for that.
+	let sourcePostUrl = $state(untrack(() => data.image.sourcePostUrl || ''));
+	let commissionedAt = $state(untrack(() => data.image.commissionedAt || ''));
+	// Number, not a string: the option values are numbers and the select binding
+	// compares with Object.is.
+	let selectedArtistId = $state<string | number>(untrack(() => data.image.artistId ?? ''));
+	// An artist the lookup names can be one created in another tab since this
+	// page loaded, with no option in the select. They are appended here so "Use
+	// {name}" has something to select — `data.artists` is left untouched, the
+	// same shape the upload page's list has.
+	let artistList = $state<{ id: number; name: string }[]>(
+		untrack(() => data.artists.map((a) => ({ id: a.id, name: a.name })))
+	);
+	let sourceTagged = $state(false);
+	let dateTagged = $state(false);
+	/** The artist the panel applied to the SELECT. Handed to the panel only
+	 * while the select is what saves: in new-artist mode the save posts
+	 * artistId=new and creates somebody else, so "Using {name}" there named an
+	 * artist this form was about to replace. Both ways into that mode — the
+	 * panel's "Add as a new artist instead" and the toggle above the form — are
+	 * the same flip, so the prop reads the mode instead of each path clearing. */
+	let appliedArtist = $state<{ id: number; name: string } | null>(null);
+	let artistName = $state('');
+	let newTwitter = $state('');
+	let newFuraffinity = $state('');
+	// What the last seed wrote into the inline new-artist form, for the panel's
+	// status line, plus the tag on each field it filled. Handed to the panel only
+	// while that form is what saves, the same way appliedArtist is: the sentence
+	// names fields the artist select replaced. The record itself outlives the
+	// flip so the fields, their tags, and the sentence come back together.
+	let lookupSeeded = $state<NewArtistSeed>({});
+	let nameTagged = $state(false);
+	let twitterTagged = $state(false);
+	let furaffinityTagged = $state(false);
+	// Both records above are written once per lookup and never edited: they say
+	// what the lookup did. Whether a filled field is still attributable to it is
+	// the tag's job, and these read the two together so the status lines name
+	// only the fields the operator has not typed over (SONA-156). The seed writes
+	// its link to whichever of the two social fields matches the site, so either
+	// tag standing means the seeded link is still the lookup's.
+	const lookupEdited = $derived({
+		sourcePostUrl: lookupFilled.sourcePostUrl !== undefined && !sourceTagged,
+		commissionedAt: lookupFilled.commissionedAt !== undefined && !dateTagged
+	});
+	const lookupSeedEdited = $derived({
+		artistName: lookupSeeded.artistName !== undefined && !nameTagged,
+		profileUrl: lookupSeeded.profileUrl !== undefined && !twitterTagged && !furaffinityTagged
+	});
+	let lookupAbort: AbortController | null = null;
+	// The artist select sits above the panel and the panel's own status region
+	// does not change when an artist is applied, so this is the only thing that
+	// reports it (4.1.3).
+	const announcer = new Announcer();
+	// Closing or cancelling the panel destroys the button the operator is
+	// standing on, so focus is moved back here first (2.4.3).
+	let lookupPill = $state<HTMLButtonElement | null>(null);
+	let parentSelect = $state<HTMLSelectElement | null>(null);
+	// Parent options the page did not load with, added by "Add as a variant" for a
+	// clash piece that postdates this page. Same shape as data.parentCandidates.
+	let extraParents = $state<{ id: number; title: string }[]>([]);
+	const parentOptions = $derived([...data.parentCandidates, ...extraParents]);
+	// The flip replaces the artist select with this field. When the seed left it
+	// empty there is nothing to read and the announcement says to type the name,
+	// so focus lands where that typing goes (2.4.3).
+	let artistNameInput = $state<HTMLInputElement | null>(null);
+
+	// SvelteKit reuses this component across a route-param change, so the seeds
+	// above describe the PREVIOUS image after an in-app move between two edit
+	// pages. Re-read them, and drop every lookup flag that rode along with them.
+	let seededImageId = untrack(() => data.image.id);
 	$effect(() => {
-		if (data.image.id === seededImageId) return;
-		seededImageId = data.image.id;
-		tagsValue = data.imageTags.join(', ');
+		const id = data.image.id;
+		if (id === seededImageId) return;
+		seededImageId = id;
+		untrack(() => resetForImage());
+	});
+
+	function resetForImage() {
+		lookupAbort?.abort();
+		lookupAbort = null;
+		lookup = { kind: 'idle' };
+		lookupFilled = {};
+		lookupSeeded = {};
 		sourcePostUrl = data.image.sourcePostUrl || '';
+		commissionedAt = data.image.commissionedAt || '';
+		selectedArtistId = data.image.artistId ?? '';
+		artistList = data.artists.map((a) => ({ id: a.id, name: a.name }));
+		selectedParentId = String(data.image.parentImageId ?? '');
+		isPrivate = !data.image.published;
+		// Both describe the PREVIOUS image: a send, and a reference sheet cleared.
+		sentPrivate = false;
+		referenceCleared = false;
+		extraParents = [];
+		artistMode = 'existing';
+		artistName = '';
+		newTwitter = '';
+		newFuraffinity = '';
+		sourceTagged = false;
+		dateTagged = false;
+		nameTagged = false;
+		twitterTagged = false;
+		furaffinityTagged = false;
+		lookupUrlHeld = false;
+		appliedArtist = null;
+		// The tag-suggestion state rides along: the accepted tags, the rating
+		// entail.dev returned for the PREVIOUS image, and its NSFW box (SONA-220).
+		tagsValue = data.imageTags.join(', ');
 		suggestedRating = null;
 		nsfw = data.image.nsfw;
-		// The parent is a bound select: left alone it keeps image A's choice, and
-		// if that parent is eligible for B too, saving B files it under A's parent.
-		selectedParentId = String(data.image.parentImageId ?? '');
-		// Per-image UI state rather than stored values, but just as stale: the
-		// artist toggle would open B on a blank new-artist form, and the reference
-		// live region would tell B's operator a designation had just been cleared.
-		artistMode = 'existing';
-		referenceCleared = false;
 		// And the in-flight flag: a navigation away mid-save would otherwise leave
 		// B's Save button disabled until A's request lands.
 		saving = false;
-	});
+	}
+
+	// The image is not published, so "look this up" means "send a private file to
+	// a third party" — say so before the click and again after it. Bound to the
+	// checkbox rather than derived from the saved row: an operator who ticks
+	// Private and then runs the lookup is about to send an unpublished file, and
+	// a disclosure keyed on the row would say nothing until the save.
+	let isPrivate = $state(untrack(() => !data.image.published));
+	// Either half makes the file one no visitor can see: the stored row is what
+	// hides it today, the checkbox is the operator's intent to hide it at the
+	// next save. Unticking Private on a row that is still unpublished does not
+	// turn the lookup into a public-file lookup.
+	const sendingPrivate = $derived(!data.image.published || isPrivate);
+	// What the file that ACTUALLY went out was, read when the request fired. The
+	// hint above the button is about the next click, so it stays live; the notice
+	// under a finished lookup describes a send that already happened, and reading
+	// the checkbox live let a tick made after the click rewrite that history.
+	let sentPrivate = $state(false);
+	const ratingTagText = $derived(
+		lookup.kind === 'results' ? ratingTag(strictestRating(lookup.data.matches)) : null
+	);
+	// Two rating pills can sit beside the one NSFW box, so it points at whichever
+	// of them is on screen (SONA-156 + SONA-220).
+	const nsfwDescribedBy = $derived(
+		[ratingTagText ? 'lookup-rating-tag' : undefined, suggestedRating ? 'tags-rating' : undefined]
+			.filter(Boolean)
+			.join(' ') || undefined
+	);
+	// The source field can carry two descriptions at once: the tag-suggestions
+	// hint that points at it, and the "From lookup" tag (SONA-220 + SONA-156).
+	const sourceFieldDescribedBy = $derived(
+		[sourceDescribedBy, sourceTagged ? 'source-lookup-tag' : undefined].filter(Boolean).join(' ') ||
+			undefined
+	);
+
+	/** Undo what the PREVIOUS lookup wrote, but only where the operator has not
+	 * typed over it since — the tag is the record of that. Without this a second
+	 * lookup reads the first one's URL as operator-typed, fills nothing, and
+	 * leaves a "From lookup" tag on a value from the other post. The upload
+	 * page's resetSharedPrefill, plus the inline new-artist fields this page
+	 * owns. */
+	function resetLookupPrefill() {
+		if (sourceTagged) sourcePostUrl = '';
+		if (dateTagged) commissionedAt = '';
+		if (nameTagged) artistName = '';
+		if (twitterTagged) newTwitter = '';
+		if (furaffinityTagged) newFuraffinity = '';
+		// The mode is left alone. Flipping back to the artist select unmounts the
+		// inline form, and five of its inputs (Bluesky, Telegram, DeviantArt,
+		// Patreon, Instagram) are uncontrolled — anything typed there goes with
+		// the form. An empty required form is a smaller cost than lost typing,
+		// and the clearing announcement in startLookup says what happened.
+		sourceTagged = false;
+		dateTagged = false;
+		nameTagged = false;
+		twitterTagged = false;
+		furaffinityTagged = false;
+		lookupFilled = {};
+		lookupSeeded = {};
+		lookupUrlHeld = false;
+		appliedArtist = null;
+		// A clash carried into the parent select belongs to the lookup that found
+		// it, so a second lookup must not leave the first one's piece on offer. The
+		// one the operator actually chose stays: dropping it would silently blank
+		// the select and save no parent, which is what carrying it in prevented.
+		extraParents = extraParents.filter((c) => String(c.id) === selectedParentId);
+	}
+
+	function startLookup() {
+		if (lookup.kind === 'searching') return;
+		// The reset empties inline new-artist fields the last lookup filled while
+		// the form stays on screen, so a sighted operator watches them empty and a
+		// screen-reader one gets nothing. Say it with the searching announcement.
+		const clearedInline =
+			artistMode === 'new' && (nameTagged || twitterTagged || furaffinityTagged);
+		resetLookupPrefill();
+		lookupAbort?.abort();
+		const controller = new AbortController();
+		lookupAbort = controller;
+		lookup = { kind: 'searching' };
+		sentPrivate = sendingPrivate;
+		if (clearedInline) announcer.say(m.admin_lookup_announce_searching_cleared());
+		// What runLookup settled on, so the catch below can keep this lookup's own
+		// answer to "did the file leave the browser" instead of assuming it did.
+		let settled: LookupState | null = null;
+		// Whether the result reached the panel. The callback writes the state
+		// before it prefills from it, so a throw out of the prefill must not be
+		// read as "nothing arrived" and rewrite the matches away. Nothing in
+		// applyPrefill throws today — the upload page's announcement is what made
+		// this reachable there — but the two pages catch into the same failed
+		// state and should decide it the same way.
+		let applied = false;
+		void runLookup({ imageId: data.image.id }, { signal: controller.signal })
+			.then((next) => {
+				settled = next;
+				if (lookupAbort !== controller) return;
+				lookup = next;
+				applied = true;
+				applyPrefill(next);
+				// Cleared last, so a throw in applyPrefill still reads as this
+				// lookup's in the catch below rather than as a cancelled one.
+				lookupAbort = null;
+			})
+			// runLookup itself resolves on every path, so only a throw in the
+			// callback above lands here. Without this the panel would sit on
+			// "searching" for the rest of the page's life, with nothing to retry
+			// from. What that synthesised failure discloses about the file having
+			// left the browser is sentAfterApplyThrew's call, off the state the
+			// request settled on — hardcoding it put a private-image notice on a
+			// client-refused too_large the bytes never left for.
+			.catch(() => {
+				if (lookupAbort !== controller) return;
+				lookupAbort = null;
+				if (!applied) {
+					const sent = sentAfterApplyThrew(settled);
+					lookup = { kind: 'failed', reason: 'unavailable', sent };
+				}
+				console.error(LOOKUP_RESULT_THREW);
+			});
+	}
+
+	function cancelLookup() {
+		lookupAbort?.abort();
+		lookupAbort = null;
+		closeLookup();
+	}
+
+	/** Fields only. A handle with no local artist behind it is not a reason to
+	 * change this image's artist: the panel offers "Add {handle} as a new
+	 * artist", and only that click flips the form and seeds it — the same rule
+	 * the upload page's "Use {name}" follows. Flipping here would seed a
+	 * duplicate artist behind the operator's back and re-credit a piece that
+	 * already has one. */
+	function applyPrefill(next: LookupState) {
+		if (next.kind !== 'results') return;
+		// A new result describes a new seed, even when that seed is empty.
+		lookupSeeded = {};
+		lookupUrlHeld = sourcePostUrl.trim() !== '';
+		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
+		lookupFilled = fields;
+		if (fields.sourcePostUrl !== undefined) {
+			sourcePostUrl = fields.sourcePostUrl;
+			sourceTagged = true;
+		}
+		if (fields.commissionedAt !== undefined) {
+			commissionedAt = fields.commissionedAt;
+			dateTagged = true;
+		}
+	}
+
+	/** The inline new-artist form obeys the same rule as the two fields above:
+	 * a lookup is a suggestion, so it fills only what is empty, tags what it
+	 * filled, and the tag clears the moment the operator edits that field. */
+	function seedNewArtist(handle: string, site: LookupSite, linkable: boolean): NewArtistSeed {
+		const url = site === 'Twitter' ? newTwitter : newFuraffinity;
+		const seed = newArtistSeed(handle, site, linkable, {
+			artistName: artistName.trim() === '',
+			profileUrl: url.trim() === ''
+		});
+		// Merged field by field, never replaced. A second click on the same result
+		// seeds nothing, because the first click already filled the fields it was
+		// allowed to touch, and overwriting the record with that empty seed would
+		// retract the sentence describing what the FIRST click wrote — and the
+		// guess disclosure with it — while the values and their "From lookup" tags
+		// stay on screen. A partial re-seed (the operator cleared the name, then
+		// clicked again) is the same retraction one field narrower: it writes the
+		// name only, and a replaced record would drop the profile URL while that
+		// field keeps its value and its tag.
+		lookupSeeded = { ...lookupSeeded, ...seed };
+		if (seed.artistName !== undefined) {
+			artistName = seed.artistName;
+			nameTagged = true;
+		}
+		if (seed.profileUrl !== undefined) {
+			if (site === 'Twitter') {
+				newTwitter = seed.profileUrl;
+				twitterTagged = true;
+			} else {
+				newFuraffinity = seed.profileUrl;
+				furaffinityTagged = true;
+			}
+		}
+		// What THIS click wrote. The caller announces on it rather than on the
+		// merged record, which survives a click that wrote nothing and would
+		// therefore report the first click's work as this one's.
+		return seed;
+	}
+
+	function useLookupArtist(artist: { id: number; name: string }) {
+		artistMode = 'existing';
+		// The options were built when the page loaded. An artist created in another
+		// tab since then comes back as a candidate with no option of their own, so
+		// the button would flip to "Using {name}" over an empty select and the save
+		// would be refused by `required`.
+		// Unlike a clash parent carried into the variant select, this option stays
+		// through the next lookup: an artist is a global record, so once it is known
+		// it belongs in the list, while a clash is one result's finding about this
+		// image.
+		if (!artistList.some((a) => a.id === artist.id)) {
+			artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
+		}
+		selectedArtistId = artist.id;
+		appliedArtist = artist;
+		// The seed record and the field tags are left standing. The sentence they
+		// feed is about fields this click replaced with the select, so the PROP is
+		// gated on the mode instead — clearing the record here would empty the
+		// inline form's story while its values stayed typed in, and flipping back
+		// to new-artist mode would show Sona's name and link with no "From lookup"
+		// tag and nothing said about where they came from (3.3.2).
+		announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
+	}
+
+	async function addAsVariant(clash: SourceClash) {
+		// The options were built when the page loaded. A clash piece uploaded in
+		// another tab since then has none, so the select would fall back to blank
+		// with the panel already closed: the operator asked for a variant and would
+		// silently save none. Carry the clash in as its own option first.
+		if (!parentOptions.some((c) => c.id === clash.imageId)) {
+			extraParents = [...extraParents, { id: clash.imageId, title: clash.title }];
+		}
+		selectedParentId = String(clash.imageId);
+		lookup = { kind: 'idle' };
+		// The click unmounted its own button; land on the select it just set.
+		await tick();
+		parentSelect?.focus();
+	}
+
+	/** Close and Cancel destroy the button the operator is on, so focus goes
+	 * back to the control the lookup started from. */
+	function closeLookup() {
+		lookup = { kind: 'idle' };
+		lookupPill?.focus();
+	}
 </script>
+
+<LiveAnnouncer {announcer} />
 
 <div class="page-header">
 	<h1>{m.admin_image_edit_title()}</h1>
@@ -145,6 +499,7 @@
 
 			<fieldset class="artist-section">
 				<legend>{m.admin_field_artist()}</legend>
+				<div class="artist-toggle-row">
 				<div class="artist-toggle">
 					<button
 						type="button"
@@ -163,28 +518,147 @@
 						{m.admin_upload_add_new_artist()}
 					</button>
 				</div>
+				{#if data.lookupEnabled}
+					<!-- Pushed to the end of the row: flush against the two-segment
+					     toggle it reads as a third segment of that control. -->
+					<button
+						type="button"
+						class="lookup-pill"
+						bind:this={lookupPill}
+						aria-describedby="lookup-hint"
+						aria-disabled={lookup.kind === 'searching'}
+						onclick={startLookup}
+					>
+						<Search size={14} aria-hidden="true" /> {m.admin_lookup_button()}
+					</button>
+				{/if}
+				</div>
+				{#if data.lookupEnabled}
+					<small class="hint" class:hint-warn={sendingPrivate} id="lookup-hint">
+						{sendingPrivate ? m.admin_lookup_hint_private() : m.admin_lookup_hint()}
+					</small>
+				{:else}
+					<small class="hint" id="lookup-hint">
+						{m.admin_lookup_no_key_pre()}<a class="link" href="/admin/settings?tab=connections"
+							>{m.admin_lookup_no_key_link()}</a
+						>{m.admin_lookup_no_key_post()}
+					</small>
+				{/if}
+
+				{#if data.lookupEnabled}
+					<!-- No key means no lookup can ever start, so the panel's empty
+					     landmark and the gap it holds open earn nothing (SONA-156). -->
+					<ArtistLookupPanel
+						{lookup}
+						filled={lookupFilled}
+						edited={lookupEdited}
+						seeded={artistMode === 'new' ? lookupSeeded : {}}
+						seedEdited={lookupSeedEdited}
+						sourceUrlHeld={lookupUrlHeld}
+						appliedArtist={artistMode === 'existing' ? appliedArtist : null}
+						editMode
+						variantBlocked={data.hasVariants}
+						privateNotice={sentPrivate && lookupSentFile(lookup)}
+						onclose={closeLookup}
+						onretry={startLookup}
+						oncancel={cancelLookup}
+						onuseartist={useLookupArtist}
+						onaddnew={async (seed) => {
+							// Only this click flips the form. The operator may have opened the
+							// inline form by hand before the lookup, though, and then nothing
+							// switched — say it only when this click is what did.
+							const wasExisting = artistMode === 'existing';
+							artistMode = 'new';
+							const wrote = seedNewArtist(seed.handle, seed.site, seed.linkable);
+							// A seed that wrote something is announced by the panel's own status
+							// line. An empty handle (the no_match action) writes nothing, so the
+							// select is replaced by a name field with nothing said about it.
+							// Judged by what THIS click wrote: the record keeps the previous
+							// seed, so reading it would call a click that wrote nothing a
+							// success and leave a second click unanswered.
+							const seededNothing = seedStatusKind(wrote) === 'none';
+							if (wasExisting && seededNothing) announcer.say(m.admin_lookup_announce_new_form());
+							// The form was already open, the seed had both a handle and a link
+							// to offer, and the fields hold the operator's own values: this
+							// click wrote nothing because what it carried was already spoken
+							// for. An empty name field is the one case this sentence would be
+							// false in, and there the focus move below is the answer.
+							else if (seededNothing && seed.handle && seed.linkable && artistName.trim() !== '')
+								announcer.say(m.admin_lookup_announce_seed_kept());
+							// The no_match action carries no handle, and an unlinked site
+							// (SONA-219) carries no profile URL, so in both cases fewer fields
+							// were offered than "already have values, so Sona left them alone"
+							// claims — the FurAffinity field it names is empty and was never a
+							// candidate. The click still has to be answered, so say the state
+							// it found the form in.
+							else if (seededNothing && artistName.trim() !== '')
+								announcer.say(m.admin_lookup_announce_form_already_open());
+							// Nothing landed in the name field, and both sentences above tell the
+							// operator to type it — so that is where focus goes.
+							if (artistName.trim() === '') {
+								await tick();
+								artistNameInput?.focus();
+							}
+						}}
+						onaddvariant={addAsVariant}
+					/>
+				{/if}
 
 				{#if artistMode === 'existing'}
 					<label>
 						<span>{m.admin_field_artist()}</span>
-						<select class="input" name="artistId" required>
+						<select class="input" name="artistId" bind:value={selectedArtistId} onchange={() => (appliedArtist = null)} required>
 							<option value="">{m.admin_upload_select_artist()}</option>
-							{#each data.artists as artist}
-								<option value={artist.id} selected={artist.id === data.image.artistId}>{artist.name}</option>
+							{#each artistList as artist}
+								<option value={artist.id}>{artist.name}</option>
 							{/each}
 						</select>
 					</label>
 				{:else}
 					<input type="hidden" name="artistId" value="new" />
-					<label>
-						<span>{m.admin_field_artist_name()}</span>
-						<input type="text" class="input" placeholder={m.admin_upload_artist_name_placeholder()} name="artistName" required />
-					</label>
+					<!-- Same shape as the commissioned-date and source-URL fields: the
+					     label wraps its own text, the "From lookup" tag is a sibling
+					     reached through aria-describedby (SONA-220), and typing in the
+					     field drops the tag. -->
+					<div class="field">
+						<div class="label-row">
+							<label class="field-label" for="artistName">{m.admin_field_artist_name()}</label>
+							{#if nameTagged}
+								<span class="lookup-tag" id="artist-name-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+							{/if}
+						</div>
+						<input
+							id="artistName"
+							type="text"
+							class="input"
+							placeholder={m.admin_upload_artist_name_placeholder()}
+							name="artistName"
+							bind:this={artistNameInput}
+							bind:value={artistName}
+							oninput={() => (nameTagged = false)}
+							aria-describedby={nameTagged ? 'artist-name-lookup-tag' : undefined}
+							required
+						/>
+					</div>
 					<div class="social-grid">
-						<label>
-							<span>Twitter/X</span>
-							<input type="text" class="input" placeholder={m.admin_social_handle_placeholder()} name="twitter" />
-						</label>
+						<div class="field">
+							<div class="label-row">
+								<label class="field-label" for="new-artist-twitter">Twitter/X</label>
+								{#if twitterTagged}
+									<span class="lookup-tag" id="twitter-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+								{/if}
+							</div>
+							<input
+								id="new-artist-twitter"
+								type="text"
+								class="input"
+								placeholder={m.admin_social_handle_placeholder()}
+								name="twitter"
+								bind:value={newTwitter}
+								oninput={() => (twitterTagged = false)}
+								aria-describedby={twitterTagged ? 'twitter-lookup-tag' : undefined}
+							/>
+						</div>
 						<label>
 							<span>Bluesky</span>
 							<input type="text" class="input" placeholder="bsky.app/profile/..." name="bluesky" />
@@ -193,10 +667,24 @@
 							<span>Telegram</span>
 							<input type="text" class="input" placeholder="t.me/..." name="telegram" />
 						</label>
-						<label>
-							<span>FurAffinity</span>
-							<input type="text" class="input" placeholder="furaffinity.net/user/..." name="furaffinity" />
-						</label>
+						<div class="field">
+							<div class="label-row">
+								<label class="field-label" for="new-artist-furaffinity">FurAffinity</label>
+								{#if furaffinityTagged}
+									<span class="lookup-tag" id="furaffinity-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+								{/if}
+							</div>
+							<input
+								id="new-artist-furaffinity"
+								type="text"
+								class="input"
+								placeholder="furaffinity.net/user/..."
+								name="furaffinity"
+								bind:value={newFuraffinity}
+								oninput={() => (furaffinityTagged = false)}
+								aria-describedby={furaffinityTagged ? 'furaffinity-lookup-tag' : undefined}
+							/>
+						</div>
 						<label>
 							<span>DeviantArt</span>
 							<input type="text" class="input" placeholder="deviantart.com/..." name="deviantart" />
@@ -245,9 +733,9 @@
 				<div class="row">
 					<label class="flex-1">
 						<span>{m.admin_field_variant_of()}</span>
-						<select class="input" name="parentImageId" bind:value={selectedParentId}>
+						<select class="input" name="parentImageId" bind:this={parentSelect} bind:value={selectedParentId}>
 							<option value="">{m.admin_variant_none()}</option>
-							{#each data.parentCandidates as candidate}
+							{#each parentOptions as candidate}
 								<option value={String(candidate.id)}>{candidate.title}</option>
 							{/each}
 						</select>
@@ -289,22 +777,63 @@
 				</div>
 			{/if}
 
-			<label>
-				<span>{m.admin_field_commissioned_date()}</span>
-				<input type="date" class="input" name="commissionedAt" value={data.image.commissionedAt || ''} />
-				<small class="hint">{m.admin_hint_commissioned_date()}</small>
-			</label>
+			<!-- The label wraps only its own text; the "From lookup" pill sits after it
+			     as a sibling and is referenced with aria-describedby, so the input's
+			     accessible name stays the field name (SONA-220). -->
+			<div class="field">
+				<div class="label-row">
+					<label class="field-label" for="commissionedAt">{m.admin_field_commissioned_date()}</label>
+					{#if dateTagged}
+						<span class="lookup-tag" id="commissioned-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+					{/if}
+				</div>
+				<input
+					id="commissionedAt"
+					type="date"
+					class="input"
+					name="commissionedAt"
+					bind:value={commissionedAt}
+					oninput={() => {
+						// The panel's status line reads the filled record through this tag: a
+						// field typed over stops being the lookup's, and the sentence then
+						// neither claims it nor says it was left alone.
+						dateTagged = false;
+					}}
+					aria-describedby={dateTagged ? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'}
+				/>
+				<!-- The hint was inside the wrapping label before this restructure, which
+				     put it in the input's accessible name. Out here it is a plain sibling,
+				     so it is referenced instead — otherwise a screen reader never gets it
+				     (1.3.1). The lookup tag joins it when there is one. -->
+				<small class="hint" id="commissioned-hint">{m.admin_hint_commissioned_date()}</small>
+			</div>
 
-			<div class="tag-check-row">
+			<!-- One checkbox, two ratings beside it: FuzzySearch's from the artist
+			     lookup (SONA-156) and entail.dev's from the tag suggestion
+			     (SONA-220). Neither ever ticks it; both sit outside the label so a
+			     screen reader doesn't read a classifier's guess as part of the
+			     checkbox's own name. -->
+			<div class="nsfw-row tag-check-row">
 				<label class="checkbox-label">
-					<input type="checkbox" name="nsfw" bind:checked={nsfw} bind:this={nsfwInput} aria-describedby={suggestedRating ? 'tags-rating' : undefined} />
+					<input
+						type="checkbox"
+						name="nsfw"
+						bind:checked={nsfw}
+						bind:this={nsfwInput}
+						aria-describedby={nsfwDescribedBy}
+					/>
 					<span>{m.admin_field_mark_nsfw()}</span>
 				</label>
+				<!-- Never checked by a lookup: the rating is what the sites said, and the
+				     call about this gallery stays the operator's. -->
+				{#if ratingTagText}
+					<span class="rating-tag" id="lookup-rating-tag">{ratingTagText}</span>
+				{/if}
 				<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw checkbox={nsfwInput} />
 			</div>
 
 			<label class="checkbox-label">
-				<input type="checkbox" name="published" checked={!data.image.published} />
+				<input type="checkbox" name="published" bind:checked={isPrivate} />
 				<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
 			</label>
 
@@ -319,16 +848,25 @@
 				<small class="hint">{m.admin_field_featured_order_hint()}</small>
 			</label>
 
-			<label>
-				<span>{m.admin_field_source_url()}</span>
+			<div class="field">
+				<div class="label-row">
+					<label class="field-label" for="sourcePostUrl">{m.admin_field_source_url()}</label>
+					{#if sourceTagged}
+						<span class="lookup-tag" id="source-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+					{/if}
+				</div>
 				<input
+					id="sourcePostUrl"
 					type="url"
 					class="input"
 					name="sourcePostUrl"
-					aria-describedby={sourceDescribedBy}
 					bind:value={sourcePostUrl}
+					oninput={() => {
+						sourceTagged = false;
+					}}
+					aria-describedby={sourceFieldDescribedBy}
 				/>
-			</label>
+			</div>
 
 			<div class="form-actions">
 				<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
@@ -449,6 +987,98 @@
 		font-size: 14px;
 		font-weight: 500;
 		padding: 0 8px;
+	}
+
+	/* Artist lookup (SONA-156) */
+	.artist-toggle-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.lookup-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 12px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		background: transparent;
+		color: var(--foreground);
+		font-size: 13px;
+		font-family: inherit;
+		cursor: pointer;
+		/* Off the toggle's shoulder: adjacent and same-height, it reads as a
+		   third segment of the Select existing / Add new control. */
+		margin-left: auto;
+	}
+
+	/* aria-disabled, not `disabled`: a keyboard user mid-lookup keeps the focus
+	   they had. The click guard in startLookup is what actually refuses. The
+	   fill is --secondary, so the text is --foreground: the --muted-foreground
+	   pairing measures 3.96:1 in terracotta light (SONA-124 found the same). */
+	.lookup-pill[aria-disabled='true'] {
+		background: var(--secondary);
+		color: var(--foreground);
+		cursor: default;
+	}
+
+	/* The pill is not a .btn, so app.css's focus ring doesn't reach it. */
+	.lookup-pill:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+
+	.hint-warn {
+		color: var(--status-warn);
+	}
+
+	.label-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.lookup-tag {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		padding: 1px 8px;
+		white-space: nowrap;
+	}
+
+	/* The rating never changes the checkbox — it reports what the sites said and
+	   sits beside it. nowrap so the sentence stays one unit, and the row wraps
+	   the whole pill to its own line when it no longer fits. */
+	.nsfw-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.rating-tag {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		padding: 1px 8px;
+		white-space: nowrap;
+		max-width: 100%;
+	}
+
+	/* The text grows with the number of sites, so at narrow widths the pill
+	   wraps rather than pushing the document into a sideways scroll. */
+	@media (max-width: 480px) {
+		.rating-tag {
+			white-space: normal;
+			overflow-wrap: anywhere;
+		}
 	}
 
 	.artist-toggle {
