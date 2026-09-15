@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { THEMES, DEFAULT_THEME_ID } from './index.ts';
 import { ALL_THEMES } from './all.ts';
@@ -62,5 +64,64 @@ describe('the theme registry', () => {
 		const source = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
 		const imported = specifiers(source);
 		expect(imported.filter((s) => s.includes('/all') || /\.theme\.ts$/.test(s))).toEqual([]);
+	});
+
+	// The direct probe above only sees index.ts's own specifiers, so a module in
+	// between — index.ts -> helper.ts -> all.ts — would pass it while shipping
+	// every palette. This walk follows the specifiers transitively instead. A
+	// static walk is enough for this module set because none of these files use
+	// dynamic `import()`; if one ever does, the build-time grep for palette hexes
+	// in the admin bundles stays the last line of defence.
+	const srcRoot = fileURLToPath(new URL('../../', import.meta.url));
+
+	// Resolves the specifiers a bundler would follow into files: relative paths
+	// against the importing file, and `$lib/` against src/lib, which is how this
+	// repo aliases it. Packages and the `$app/`/`$env/` virtual modules carry no
+	// palette data, so they are skipped.
+	const resolveSpecifier = (spec: string, fromFile: string, root: string) => {
+		let base: string;
+		if (spec.startsWith('$lib/')) base = join(root, 'lib', spec.slice('$lib/'.length));
+		else if (spec.startsWith('./') || spec.startsWith('../')) base = resolvePath(dirname(fromFile), spec);
+		else return null;
+		for (const candidate of [base, `${base}.ts`, `${base}.js`, join(base, 'index.ts')]) {
+			if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+		}
+		return null;
+	};
+
+	const reachableFrom = (entry: string, root: string) => {
+		const seen = new Set<string>();
+		const queue = [entry];
+		while (queue.length > 0) {
+			const file = queue.pop()!;
+			if (seen.has(file)) continue;
+			seen.add(file);
+			for (const spec of specifiers(readFileSync(file, 'utf8'))) {
+				const resolved = resolveSpecifier(spec, file, root);
+				if (resolved && resolved.startsWith(root)) queue.push(resolved);
+			}
+		}
+		return [...seen];
+	};
+
+	it('reaches no palette data through any chain of imports', () => {
+		const reached = reachableFrom(fileURLToPath(new URL('./index.ts', import.meta.url)), srcRoot);
+		const palette = reached.filter((f) => f.endsWith('/all.ts') || f.endsWith('.theme.ts'));
+		expect(palette).toEqual([]);
+	});
+
+	// The walk IS the guard here too: one that stopped following an intermediate
+	// module would report a clean chain about a file that ships every palette.
+	it('reports palette data reached through an intermediate module', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'theme-walk-'));
+		try {
+			writeFileSync(join(dir, 'a.ts'), `import { b } from './b.ts';\nexport { b };\n`);
+			writeFileSync(join(dir, 'b.ts'), `export { ALL_THEMES as b } from './all.ts';\n`);
+			writeFileSync(join(dir, 'all.ts'), `export const ALL_THEMES = [];\n`);
+			const reached = reachableFrom(join(dir, 'a.ts'), dir);
+			expect(reached.filter((f) => f.endsWith('/all.ts'))).toEqual([join(dir, 'all.ts')]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
