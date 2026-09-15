@@ -33,7 +33,14 @@ describe('defaultAiDisclosure', () => {
 	});
 
 	it('states the runtime boundary and the dev-time access plainly', () => {
-		expect(all).toMatch(/never calls an AI service, so nothing you do is sent to one as you browse/);
+		// SONA-220 added the one runtime call; the disclosure names it and keeps
+		// the browsing-time claim scoped so it stays true.
+		expect(all).toMatch(/calls an AI service in one place/);
+		expect(all).toContain('entail.dev');
+		// Both paths: the post link (Bluesky) and the picture link X hands back.
+		expect(all).toMatch(/points at the artwork's source post, or at the picture in that post/);
+		expect(all).toMatch(/the site first asks X's own service which picture the post carries/);
+		expect(all).toMatch(/Only the site owner can start that, so nothing you do is sent to an AI service as you browse/);
 		expect(all).toMatch(/logs and database/);
 		expect(all).toContain('CodeRabbit');
 		// Honesty about what dev-time log access can expose: no "your data never

@@ -104,7 +104,7 @@ describe('defaultPrivacyPolicy', () => {
 		// The runtime boundary, honestly scoped: nothing browsing-time goes to the
 		// tools, but shared diagnostic logs can carry request data — both halves
 		// must stay, or the paragraph overclaims again.
-		expect(text).toMatch(/nothing you do here is sent to them as you browse/);
+		expect(text).toMatch(/nothing you do here is sent to those tools as you browse/);
 		expect(text).toMatch(/can contain request data such as IP addresses/);
 	});
 
@@ -180,7 +180,10 @@ describe('defaultPrivacyPolicy', () => {
 		expect(text).toContain('cons.fyi');
 		// The integrations list reads exhaustive, so it must actually be: every
 		// remote service a feature calls out to is named (SONA-167 round 1).
-		expect(text).toContain('Bluesky');
+		// Picture lookup is an X-only ask; Bluesky posts go to entail.dev whole.
+		expect(text).toMatch(/X \(formerly Twitter\) and Bluesky \(fetching the profile pictures shown on this site; X is also asked which picture a post carries\)/);
+		// SONA-220: the tag-suggestion lookup sends a post or picture URL to entail.dev.
+		expect(text).toMatch(/entail.dev \(an image classifier that suggests tags for artwork from its source post or the picture in it\)/);
 		expect(text).toContain('FurTrack');
 		expect(text).toContain('FuzzySearch');
 		// The lookup sends a copy of the image, and an unpublished one too; naming
@@ -297,8 +300,8 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// privacy page would show a "Last updated" line older than its own text.
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '3a1187cb2970888de509560a9e0c028b3340d5ba39f393da83e0c943b407a780';
-	const RECORDED_UPDATED = '2026-09-14';
+	const RECORDED_TEXT_HASH = 'b2c656867b76ec288a85b230ccce8279bdff6cd963edea4e90e1b31f0c7351fa';
+	const RECORDED_UPDATED = '2026-09-15';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both
