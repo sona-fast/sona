@@ -75,7 +75,13 @@ describe('lookup button and its disclosure hint', () => {
 		// directly above it and its name already says where it goes, so pointing it
 		// at the same two lines read them a third time through one failed tile.
 		// (Tempered to the anchor itself: the button right below it does carry one.)
-		expect(UPLOAD).not.toMatch(/class="tile-settings-link"(?:(?!<\/a)[\s\S])*?aria-describedby=/);
+		// Anchored on the element, not on attribute order: the attribute could be
+		// put back above the class line and a class-first match would miss it.
+		const settingsLink = UPLOAD.match(
+			/<a\s(?:(?!<\/a)[\s\S])*?class="tile-settings-link"(?:(?!<\/a)[\s\S])*?<\/a/
+		)?.[0];
+		expect(settingsLink).toBeDefined();
+		expect(settingsLink).not.toContain('aria-describedby=');
 	});
 
 	// A variant tile renders its own outcome, so a tile that called every failure
