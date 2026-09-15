@@ -728,9 +728,16 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	// the body — it carries forwarded: false, and there is no path to this shape
 	// that forwarded anything — so `sent` is false.
 	if (data.enabled === false) return { kind: 'failed', reason: 'no_key', sent: false };
-	const raw = Array.isArray(data.matches) ? data.matches : [];
+	// A 200 whose body carries no `matches` array is not an answer about the art:
+	// nothing said "nobody has this", the response just did not have the field.
+	// Calling it no_match told the operator their piece is unindexed when in fact
+	// nobody looked. Same treatment as the refused-list branch below.
+	if (!Array.isArray(data.matches)) {
+		return { kind: 'failed', reason: 'unavailable', sent: (body as FailureBody).forwarded !== false };
+	}
+	const raw = data.matches;
 	const { matches, indexMap } = usableMatches(raw);
-	// Same reasoning as the non-array branch above: something looked, something
+	// Same reasoning as the malformed-body branch above: something looked, something
 	// answered, and the client refused to show it. Calling that "no matches" would
 	// tell the operator their art is unindexed when it may well be posted.
 	if (matches.length === 0 && raw.length > 0) return { kind: 'failed', reason: 'unavailable', sent: true };

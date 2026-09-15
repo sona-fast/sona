@@ -869,6 +869,20 @@ describe('what the lookup copy names', () => {
 		}
 	});
 
+	// An unreadable file is a dead end on a variant tile: not retryable, no
+	// Settings remedy, and the focus handler sends the operator to the artist
+	// select. So the body has to end by telling them to type the name, the way
+	// the parallel too-large body does. Nothing pinned that sentence, so dropping
+	// it again left the tile saying only what went wrong.
+	it('ends the unreadable-file body by sending the operator to the artist field', () => {
+		const enClosing = 'Add the artist by hand.';
+		expect(en.admin_lookup_too_large_body).toContain(enClosing);
+		expect(en.admin_lookup_invalid_body).toBe(`FuzzySearch couldn't read this file. ${enClosing}`);
+		const jaClosing = 'アーティストを手で入力してください。';
+		expect(ja.admin_lookup_too_large_body).toContain(jaClosing);
+		expect(ja.admin_lookup_invalid_body.endsWith(jaClosing)).toBe(true);
+	});
+
 	it('blames the image being edited for the variant block', () => {
 		expect(en.admin_lookup_clash_has_variants).toBe(
 			"The image you're editing already has variants of its own, so it can't become a variant of another piece."

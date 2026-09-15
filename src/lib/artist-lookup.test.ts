@@ -945,6 +945,30 @@ describe('stateFromResponse', () => {
 		});
 	});
 
+	// An empty list says nobody has this piece. A 200 with no list at all, or one
+	// whose `matches` is not an array, says nothing about the piece: the response
+	// is malformed and nobody looked. Reading it as no_match told the operator
+	// their art is unindexed, which is a different and wrong fact.
+	it('refuses to call a body with no match list a no_match', async () => {
+		expect(await stateFromResponse(jsonResponse({ enabled: true }))).toEqual({
+			kind: 'failed',
+			reason: 'unavailable',
+			sent: true
+		});
+		expect(await stateFromResponse(jsonResponse({ enabled: true, matches: 'x' }))).toEqual({
+			kind: 'failed',
+			reason: 'unavailable',
+			sent: true
+		});
+		// And the disclosure still reads the endpoint rather than assuming: a body
+		// that says the file never left is taken at its word.
+		expect(await stateFromResponse(jsonResponse({ enabled: true, forwarded: false }))).toEqual({
+			kind: 'failed',
+			reason: 'unavailable',
+			sent: false
+		});
+	});
+
 	// The upstream side: FuzzySearch answered, so the bytes had already gone out
 	// and the endpoint says so with forwarded: true.
 	it('maps an upstream failure by the body error, not by the status', async () => {
