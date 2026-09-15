@@ -138,6 +138,85 @@ function makeVanishingDb(name: string) {
 	};
 }
 
+/**
+ * A database where writing an image_tags row fails — a D1 error part-way through
+ * a save. The delete that opens the write is in the same batch, so the failure
+ * has to leave the image's previous tags where they were.
+ */
+function makeFailingInsertDb() {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(SCHEMA_SQL);
+	const d1 = makeD1(sqlite);
+	const failing = {
+		...d1,
+		prepare(sql: string) {
+			const stmt = d1.prepare(sql);
+			if (!/^insert into "image_tags"/i.test(sql)) return stmt;
+			return {
+				bind: (...params: unknown[]) => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const bound = (stmt as any).bind(...params);
+					const fail = () => {
+						throw new Error('D1_ERROR: network');
+					};
+					return { ...bound, run: fail, _run: fail };
+				}
+			};
+		}
+	};
+	return {
+		db: drizzle(failing as unknown as ReturnType<typeof makeD1>, { schema }),
+		sqlite
+	};
+}
+
+/**
+ * A database where another request tags the image while this save is minting its
+ * tag rows — the gap between the backfill page's "still untagged" look and its
+ * write.
+ */
+function makeTaggedMidSaveDb(imageId: number, tagId: number) {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(SCHEMA_SQL);
+	const d1 = makeD1(sqlite);
+	let tagged = false;
+	const steal = () => {
+		if (tagged) return;
+		tagged = true;
+		sqlite.prepare('INSERT INTO image_tags (image_id, tag_id) VALUES (?, ?)').run(imageId, tagId);
+	};
+	const racing = {
+		...d1,
+		prepare(sql: string) {
+			const stmt = d1.prepare(sql);
+			if (!/^select/i.test(sql) || !sql.includes('"tags"')) return stmt;
+			return {
+				bind: (...params: unknown[]) => {
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const bound = (stmt as any).bind(...params);
+					return {
+						...bound,
+						raw: () => {
+							const out = bound.raw();
+							steal();
+							return out;
+						},
+						all: () => {
+							const out = bound.all();
+							steal();
+							return out;
+						}
+					};
+				}
+			};
+		}
+	};
+	return {
+		db: drizzle(racing as unknown as ReturnType<typeof makeD1>, { schema }),
+		sqlite
+	};
+}
+
 type Db = ReturnType<typeof makeDb>;
 
 async function tagNamesOf(db: Db, imageId: number) {
@@ -168,7 +247,7 @@ describe('replaceImageTags', () => {
 		const names = Array.from({ length: MAX_IMAGE_TAGS + 5 }, (_, i) => `tag-${i}`);
 		const input = ['tag-0', 'TAG-0', '!!!', ...names].join(', ');
 
-		const written = await replaceImageTags(db, 1, input);
+		const { written } = await replaceImageTags(db, 1, input);
 		expect(written).toHaveLength(MAX_IMAGE_TAGS);
 		expect(written[0]).toBe('tag-0');
 		expect(written[MAX_IMAGE_TAGS - 1]).toBe(`tag-${MAX_IMAGE_TAGS - 1}`);
@@ -186,7 +265,7 @@ describe('replaceImageTags', () => {
 		const { db, sqlite } = makeRacingDb('fox');
 		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art', imageUrl: 'https://cdn.example.com/1.png', artistId: 1 });
 
-		await expect(replaceImageTags(db, 1, 'fox')).resolves.toEqual(['fox']);
+		await expect(replaceImageTags(db, 1, 'fox')).resolves.toEqual({ written: ['fox'], skipped: false });
 
 		// One tag row, and the image points at the one the other save minted.
 		const rows = sqlite.prepare("SELECT id FROM tags WHERE name = 'fox'").all();
@@ -203,7 +282,10 @@ describe('replaceImageTags', () => {
 		const { db, sqlite } = makeVanishingDb('fox');
 		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art', imageUrl: 'https://cdn.example.com/1.png', artistId: 1 });
 
-		await expect(replaceImageTags(db, 1, 'fox, bird')).resolves.toEqual(['bird']);
+		await expect(replaceImageTags(db, 1, 'fox, bird')).resolves.toEqual({
+			written: ['bird'],
+			skipped: false
+		});
 
 		// No image_tags row points at the name that went, and the one that did not
 		// go is written in the same call.
@@ -223,10 +305,104 @@ describe('replaceImageTags', () => {
 		await replaceImageTags(db, 1, 'fox, bird');
 		expect(await tagNamesOf(db, 1)).toEqual(['fox', 'bird']);
 
-		expect(await replaceImageTags(db, 1, '')).toEqual([]);
+		expect(await replaceImageTags(db, 1, '')).toEqual({ written: [], skipped: false });
 		expect(await tagNamesOf(db, 1)).toEqual([]);
 		// The tag rows themselves survive: other images may still carry them.
 		expect(await db.select({ id: tags.id }).from(tags)).toHaveLength(2);
+	});
+
+	// A field with nothing a tag name can be made of reads as an empty one: the
+	// operator typed over the image's tags and the save has to clear them. Skipping
+	// the delete because no id came out of the mint loop would leave the old tags
+	// standing while the action reported the save had gone through.
+	it('clears an image whose field sanitizes away to no names at all', async () => {
+		const db = makeDb();
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art', imageUrl: 'https://cdn.example.com/1.png', artistId: 1 });
+		await replaceImageTags(db, 1, 'fox, bird');
+		expect(await tagNamesOf(db, 1)).toEqual(['fox', 'bird']);
+
+		expect(await replaceImageTags(db, 1, '!!!')).toEqual({ written: [], skipped: false });
+		expect(await tagNamesOf(db, 1)).toEqual([]);
+	});
+
+	// The same field under the backfill page's guard writes nothing and deletes
+	// nothing, exactly as an empty one does: that caller never clears tags.
+	it('deletes nothing for a requireUntagged save whose field holds no names', async () => {
+		const db = makeDb();
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art', imageUrl: 'https://cdn.example.com/1.png', artistId: 1 });
+		await replaceImageTags(db, 1, 'fox');
+
+		expect(await replaceImageTags(db, 1, '🦊', { requireUntagged: true })).toEqual({
+			written: [],
+			skipped: false
+		});
+		expect(await tagNamesOf(db, 1)).toEqual(['fox']);
+	});
+
+	// The write used to delete the old rows and then insert the new ones one
+	// awaited call at a time, so a D1 error half-way through left the image with
+	// neither set. The delete and the inserts go in one batch now: a failure
+	// leaves the image exactly as it was.
+	it('leaves the previous tags in place when the association write fails', async () => {
+		const { db, sqlite } = makeFailingInsertDb();
+		sqlite.prepare('INSERT INTO images (id, title, image_url) VALUES (1, ?, ?)').run('Art', 'https://cdn.example.com/1.png');
+		// The tags this image already carries, written straight to SQLite so the
+		// failing insert has something to lose.
+		sqlite.prepare("INSERT INTO tags (id, name) VALUES (1, 'fox'), (2, 'bird')").run();
+		sqlite.prepare('INSERT INTO image_tags (image_id, tag_id) VALUES (1, 1), (1, 2)').run();
+
+		// Bare: what the caller sees is that the write threw, and the tags below are
+		// the signal. Matching the message would tie the test to the shim's wording
+		// rather than to the behaviour under test.
+		await expect(replaceImageTags(db, 1, 'otter')).rejects.toThrow();
+
+		expect(await tagNamesOf(db, 1)).toEqual(['fox', 'bird']);
+	});
+
+	// The backfill page's save: the image had no tags when the page looked, and
+	// another tab tagged it before the write ran. The old write would have deleted
+	// that tab's work; the condition rides inside the write instead, so nothing
+	// happens and the caller hears about it.
+	it('writes nothing when requireUntagged meets an image tagged since the check', async () => {
+		const { db, sqlite } = makeTaggedMidSaveDb(1, 1);
+		sqlite.prepare('INSERT INTO images (id, title, image_url) VALUES (1, ?, ?)').run('Art', 'https://cdn.example.com/1.png');
+		sqlite.prepare("INSERT INTO tags (id, name) VALUES (1, 'otter')").run();
+
+		await expect(replaceImageTags(db, 1, 'fox, bird', { requireUntagged: true })).resolves.toEqual({
+			written: [],
+			skipped: true
+		});
+
+		// The other tab's tag is the only one on the image.
+		expect(await tagNamesOf(db, 1)).toEqual(['otter']);
+	});
+
+	it('writes the whole set when requireUntagged meets an image that is still untagged', async () => {
+		const db = makeDb();
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art', imageUrl: 'https://cdn.example.com/1.png', artistId: 1 });
+
+		await expect(replaceImageTags(db, 1, 'fox, bird', { requireUntagged: true })).resolves.toEqual({
+			written: ['fox', 'bird'],
+			skipped: false
+		});
+		expect(await tagNamesOf(db, 1)).toEqual(['fox', 'bird']);
+	});
+
+	// The guard has to be read once, so its insert cannot be split the way the
+	// ordinary save's is: a full-cap write goes in as ONE statement. It carries
+	// the ids as a single bound JSON array for that reason, and the shim refuses
+	// more than D1's hundred bound parameters — so a version that bound a
+	// parameter a row would fail here rather than passing and breaking in
+	// production.
+	it('writes a full cap of names under requireUntagged in one statement', async () => {
+		const db = makeDb();
+		await db.insert(images).values({ id: 1, title: 'Art', slug: 'art', imageUrl: 'https://cdn.example.com/1.png', artistId: 1 });
+		const names = Array.from({ length: MAX_IMAGE_TAGS }, (_, i) => `tag-${i}`);
+
+		const answer = await replaceImageTags(db, 1, names.join(', '), { requireUntagged: true });
+		expect(answer).toEqual({ written: names, skipped: false });
+		// Every name landed, in the order it was given.
+		expect(await tagNamesOf(db, 1)).toEqual(names);
 	});
 });
 

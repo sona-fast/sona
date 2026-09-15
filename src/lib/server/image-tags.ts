@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getDb } from './db';
 import { imageTags, tags } from './db/schema';
 import { sanitizeText } from './validate';
@@ -56,6 +56,17 @@ export function readTagInput(
 	return { problem: null, value };
 }
 
+/** How many associations one insert statement carries. D1 allows 100 bound
+ * parameters per statement and each row binds two, so a hundred-tag save goes
+ * in as several statements inside the one batch rather than a single insert
+ * that D1 would refuse. */
+const ASSOCIATION_CHUNK = 45;
+
+/** What a tag write did: the names that landed, and whether the write was
+ * refused because the image had gained tags since the caller looked. `skipped`
+ * is only ever true for a `requireUntagged` write. */
+export type ImageTagWrite = { written: string[]; skipped: boolean };
+
 /**
  * Replace an image's tags with the ones in a comma-separated string, minting
  * any tag row that does not exist yet.
@@ -64,17 +75,57 @@ export function readTagInput(
  * page writes tags the same way the form does: same sanitizer, same
  * delete-then-insert, same tag table. Returns the tag names actually written,
  * so a caller can say how many landed.
+ *
+ * The delete and the association inserts go in one D1 batch, which commits as a
+ * single transaction: a failure part-way through leaves the image's previous
+ * tags where they were rather than dropping them and saving some of the new set.
+ *
+ * With `requireUntagged`, the write only happens if the image still has no tag
+ * rows when it runs — the precondition the backfill page needs, checked inside
+ * the write instead of before it, so a tab that tagged the image meanwhile gets
+ * a conflict rather than having its work deleted. The answer carries
+ * `skipped: true` when that guard refused the write.
  */
-export async function replaceImageTags(db: Db, imageId: number, tagNames: string): Promise<string[]> {
-	await db.delete(imageTags).where(eq(imageTags.imageId, imageId));
-
+export async function replaceImageTags(
+	db: Db,
+	imageId: number,
+	tagNames: string,
+	options: { requireUntagged?: boolean } = {}
+): Promise<ImageTagWrite> {
 	// An empty field still deletes: clearing the Tags box on the edit form is how
 	// an image loses its tags. A caller with nothing to delete — a just-inserted
-	// image — skips this function instead.
-	if (!tagNames) return [];
+	// image — skips this function instead. A `requireUntagged` caller has nothing
+	// to write, so it has nothing to delete either.
+	//
+	// A field that holds no usable name says the same thing as an empty one: a
+	// Tags box of "🦊" or "!!!" sanitizes away to nothing, and the operator who
+	// typed it over the image's tags asked for those tags to go. Read here rather
+	// than in the loop below so that case cannot be mistaken for the very
+	// different one further down, where names parsed fine and then fell away
+	// while they were being minted.
+	const names = parseImageTags(tagNames);
+	if (names.length === 0) {
+		if (!options.requireUntagged) {
+			await db.delete(imageTags).where(eq(imageTags.imageId, imageId));
+		}
+		return { written: [], skipped: false };
+	}
 
+	// Tag rows are shared between images, so minting them stays outside the batch:
+	// a name another save minted first is one this save links to, not one it has
+	// to undo.
+	//
+	// Which means a write that does not go through — the `requireUntagged` guard
+	// refusing, or the batch below failing — leaves the names it minted in the tag
+	// table with nothing pointing at them, and /admin/tags lists them as zero-use
+	// names. That is accepted rather than cleaned up: a tag row is shared and
+	// carries nothing of its own, the operator can remove it from /admin/tags, and
+	// deleting it here would race the save that read it a moment ago and is about
+	// to link it — which would leave a real association pointing at a row that is
+	// gone. An unused name is the cheaper of the two.
 	const written: string[] = [];
-	for (const tagName of parseImageTags(tagNames)) {
+	const tagIds: number[] = [];
+	for (const tagName of names) {
 		// The actions refuse an over-cap input before they write; this is the net
 		// under anything that reaches here by another path.
 		if (written.length >= MAX_IMAGE_TAGS) break;
@@ -92,8 +143,45 @@ export async function replaceImageTags(db: Db, imageId: number, tagNames: string
 			// the re-select. Skip the name rather than fail the whole save.
 			if (!tag) continue;
 		}
-		await db.insert(imageTags).values({ imageId, tagId: tag.id });
+		tagIds.push(tag.id);
 		written.push(tagName);
 	}
-	return written;
+
+	// Every name fell away inside the mint loop — the input had names, and their
+	// tag rows went between the conflict and the re-select. Nothing to write, and
+	// for an edit-form save nothing to delete either: a save that stored none of
+	// what it was given should not clear what the image already had. An input
+	// that never had a name is the branch above, which does delete.
+	if (tagIds.length === 0) return { written, skipped: false };
+
+	if (options.requireUntagged) {
+		// One statement, so the NOT EXISTS is read once — before any of the rows it
+		// is about to insert exist. Split over several statements, the second would
+		// see the first's rows and refuse. The image had no tag rows by definition
+		// of the guard, so there is nothing to delete.
+		//
+		// The ids ride in as one bound JSON array read through json_each, the way
+		// the artist search reads an aliases blob. Binding a parameter a row would
+		// put a hundred-tag save over D1's ceiling of 100 per statement and the
+		// guard cannot be split, so the choice is this or interpolating the ids
+		// into the statement; the array is a single parameter whatever its length.
+		const result = await db.run(
+			sql`INSERT INTO image_tags (image_id, tag_id)
+				SELECT ${imageId}, je.value FROM json_each(${JSON.stringify(tagIds)}) AS je
+				WHERE NOT EXISTS (SELECT 1 FROM image_tags WHERE image_id = ${imageId})`
+		);
+		// No rows changed means the guard refused: something tagged the image
+		// between the caller's look and this write.
+		if (!result.meta?.changes) return { written: [], skipped: true };
+		return { written, skipped: false };
+	}
+
+	const inserts = [];
+	for (let from = 0; from < tagIds.length; from += ASSOCIATION_CHUNK) {
+		const rows = tagIds.slice(from, from + ASSOCIATION_CHUNK).map((tagId) => ({ imageId, tagId }));
+		inserts.push(db.insert(imageTags).values(rows));
+	}
+	// The delete and the inserts commit together or not at all.
+	await db.batch([db.delete(imageTags).where(eq(imageTags.imageId, imageId)), ...inserts]);
+	return { written, skipped: false };
 }

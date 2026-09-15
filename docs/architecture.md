@@ -13,6 +13,7 @@ graph TB
         Hooks[🛡️ hooks.server — CSP, setup gate, sessions]
         Public[🖼️ Public routes — galleries, characters, VR, stickers]
         Admin[🛠️ Admin routes — setup wizard, uploads, settings]
+        TagCallers[🏷️ Tag suggestion callers — upload form, image edit form, /admin/images/suggest-tags backfill]
         API[⚙️ API routes — /api/*, /img, oEmbed, RSS feed, cron]
         QR[📱 /connect/qr — convention scan target, reads no D1]
 
@@ -66,6 +67,8 @@ graph TB
     Hooks --> QR
 
     Admin --> Auth
+    Admin --> TagCallers
+    TagCallers -->|POST /api/admin/tag-suggestions| API
     Admin --> Storage
     Admin --> Importers
     Importers --> Storage
@@ -135,7 +138,11 @@ graph TB
   off secrets or settings (see `wrangler.toml.example` for the full list).
 - entail.dev needs no key or secret. The app calls it only when an operator
   asks for tag suggestions on an image whose source post is on Bluesky or X,
-  and never on a render path or a schedule. An X post takes one extra hop:
+  and never on a render path or a schedule. Three admin surfaces ask: the
+  upload form, the image edit form, and the `/admin/images/suggest-tags`
+  backfill list, which works through the images that already carry such a post
+  and have no tags yet. All three go through `POST
+  /api/admin/tag-suggestions`. An X post takes one extra hop:
   X's own API resolves the post to its image, and that image URL is what
   entail.dev classifies.
 - GitHub Actions is part of the runtime, not just delivery: the scheduled

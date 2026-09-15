@@ -84,13 +84,24 @@ VALUES
 
 -- Untagged images with a Bluesky or X source post, for the suggest-tags spec
 -- (SONA-220). UNPUBLISHED, like image 4, so the gallery specs' counts stay
--- untouched; the backfill page lists by source URL and tags alone. Twenty-three
--- of them: one page is twenty, so "Load more" has a second page to grow into.
--- Ids start at 101 to stay clear of the fixtures above. The spec saves tags on
--- some of these rows, which is why it runs on its own seeded server.
+-- untouched; the backfill page lists by source URL and tags alone. Twenty-eight
+-- of them: one page is twenty, so "Load more" has a second page to grow into,
+-- and the extra rows are the spec's reserve. The spec's save tests take three
+-- rows off the list for good, and a retry of that serial file starts from what
+-- is left: at twenty-three the retry began with exactly one page and the Load
+-- more test had nothing to grow, so it skipped every time it was retried.
+-- Ids start at 96 to stay clear of the fixtures above; the list orders by id,
+-- so the reserve sits at the bottom and the rows the spec works on keep their
+-- places. The spec saves tags on some of these rows, which is why it runs on
+-- its own seeded server.
 INSERT OR REPLACE INTO images
   (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, source_post_url, created_at)
 VALUES
+  (96, 'Backfill 96', 'backfill-96', '/e2e/backfill-96.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc096', '2026-07-06T00:00:36.000Z'),
+  (97, 'Backfill 97', 'backfill-97', '/e2e/backfill-97.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc097', '2026-07-06T00:00:37.000Z'),
+  (98, 'Backfill 98', 'backfill-98', '/e2e/backfill-98.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc098', '2026-07-06T00:00:38.000Z'),
+  (99, 'Backfill 99', 'backfill-99', '/e2e/backfill-99.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc099', '2026-07-06T00:00:39.000Z'),
+  (100, 'Backfill 100', 'backfill-100', '/e2e/backfill-100.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc100', '2026-07-06T00:00:40.000Z'),
   (101, 'Backfill 101', 'backfill-101', '/e2e/backfill-101.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc101', '2026-07-06T00:00:41.000Z'),
   (102, 'Backfill 102', 'backfill-102', '/e2e/backfill-102.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc102', '2026-07-06T00:00:42.000Z'),
   (103, 'Backfill 103', 'backfill-103', '/e2e/backfill-103.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc103', '2026-07-06T00:00:43.000Z'),

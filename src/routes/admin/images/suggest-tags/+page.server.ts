@@ -1,20 +1,24 @@
 import { fail } from '@sveltejs/kit';
-import { and, desc, eq, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, notInArray, or } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { artists, imageTags, images } from '$lib/server/db/schema';
 import { parseImageTags, readTagInput, replaceImageTags } from '$lib/server/image-tags';
-import { classifySourceUrl } from '$lib/tags';
+import { classifySourceUrl, SOURCE_POST_HOSTS } from '$lib/tags';
 import type { Actions, PageServerLoad } from './$types';
 
 // The backfill list behind /admin/images/suggest-tags (SONA-220): every image
 // that already carries a Bluesky or X source post but has no tags yet.
 //
-// SQLite cannot tell a Bluesky post URL from any other link, so the query
-// narrows to rows that have SOME source URL and no tag rows, and
-// classifySourceUrl — the recogniser the endpoint and the pill also use —
-// decides which of those belong on the page. The candidate set is small on a
-// personal gallery (an image either has tags or it does not), so it is
-// classified whole: that is what lets the page say "Showing 4 of 12" honestly.
+// SQLite cannot parse a URL, but it can match one's scheme and host, so the
+// query narrows to untagged rows whose source URL starts with a host
+// classifySourceUrl knows — and classifySourceUrl, the recogniser the endpoint
+// and the pill also use, is still what decides whether a fetched row belongs on
+// the page. Filtering in SQL rather than after the scan is what keeps the cap
+// honest: the newest 2,000 untagged images can all be FurAffinity links, and
+// the page would have reported no work left while Bluesky rows sat below them.
+// The candidate set is small on a personal gallery (an image either has tags or
+// it does not), so it is classified whole: that is what lets the page say
+// "Showing 4 of 12" honestly.
 
 // SvelteKit rejects any other named export from a +page.server file unless it
 // starts with an underscore; the tests read these under these names.
@@ -30,6 +34,23 @@ export { MAX_SCAN as _MAX_SCAN };
 
 /** How many ids one display query binds. D1 allows 100 bound parameters. */
 const ID_CHUNK = 90;
+
+/** The scan's "this link could be a post we understand" test, in SQL.
+ *
+ * One LIKE per scheme and host, with and without `www.`, because that is the
+ * part of a URL SQLite can match without parsing it. SQLite's LIKE is
+ * case-insensitive over ASCII, so a stored URL that shouts its host still
+ * matches. The patterns are deliberately the plain forms an operator pastes or
+ * an importer stores; an exotic equivalent (a port, say) is not scanned, and
+ * that image is still taggable from its own edit page. */
+const SUPPORTED_SOURCE = or(
+	...SOURCE_POST_HOSTS.flatMap((host) =>
+		['https://', 'http://'].flatMap((scheme) => [
+			like(images.sourcePostUrl, `${scheme}${host}/%`),
+			like(images.sourcePostUrl, `${scheme}www.${host}/%`)
+		])
+	)
+);
 
 export type SuggestRow = {
 	id: number;
@@ -66,13 +87,9 @@ export const load: PageServerLoad = async ({ platform, url }) => {
 	const candidates = await db
 		.select({ id: images.id, sourcePostUrl: images.sourcePostUrl })
 		.from(images)
-		.where(
-			and(
-				isNotNull(images.sourcePostUrl),
-				sql`${images.sourcePostUrl} <> ''`,
-				notInArray(images.id, tagged)
-			)
-		)
+		// A URL on a supported host is never null and never empty, so this one
+		// condition carries what two used to.
+		.where(and(SUPPORTED_SOURCE, notInArray(images.id, tagged)))
 		.orderBy(desc(images.id))
 		.limit(MAX_SCAN);
 
@@ -145,9 +162,11 @@ export const actions: Actions = {
 		if (!row) return fail(404, { error: 'not_found' });
 
 		// The row was listed because it had no tags, but the edit form or another
-		// tab may have tagged it since the list loaded. replaceImageTags deletes
-		// before it inserts, so writing now would throw those tags away: refuse,
-		// and let the row send the operator to the edit form instead.
+		// tab may have tagged it since the list loaded. Writing now would throw
+		// those tags away: refuse, and let the row send the operator to the edit
+		// form instead. This look is the fast path — it answers the common case
+		// without attempting a write — but it is not what makes the refusal safe;
+		// the write carries the same condition (see below).
 		const tagged = await db
 			.select({ tagId: imageTags.tagId })
 			.from(imageTags)
@@ -157,8 +176,14 @@ export const actions: Actions = {
 		if (tagged) return fail(409, { error: 'tagged_elsewhere' });
 
 		// The same persistence the edit form's save uses, so a tag written here is
-		// indistinguishable from one typed there.
-		const written = await replaceImageTags(db, id, tagNames);
+		// indistinguishable from one typed there — plus the still-untagged
+		// condition, evaluated inside the write itself. A tab that tags the image
+		// in the gap after the look above loses no work: the write does nothing and
+		// reports the conflict the operator would have got a moment earlier.
+		const { written, skipped } = await replaceImageTags(db, id, tagNames, {
+			requireUntagged: true
+		});
+		if (skipped) return fail(409, { error: 'tagged_elsewhere' });
 		// The count above said there was something to write, so an empty answer
 		// means every name fell away inside the write — a tag row deleted between
 		// the conflict and the re-select. Reporting success would render "Saved 0

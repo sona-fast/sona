@@ -27,6 +27,18 @@ export function sanitizeTag(tag: string): string {
 		.slice(0, TAG_MAX_LENGTH);
 }
 
+/** The X hosts a post URL may arrive on. Named rather than inlined because the
+ * backfill list narrows its scan to these hosts in SQL, and a host this
+ * function accepts that the query does not know about is an image the page
+ * would never offer. */
+const X_HOSTS = ['x.com', 'twitter.com', 'mobile.x.com', 'mobile.twitter.com'];
+
+/** Every host `classifySourceUrl` can recognise a post on, `www.` stripped and
+ * lowercased as it compares them. The backfill list builds its SQL filter from
+ * this, and `classifySourceUrl` stays the final word on any row that survives
+ * it: the filter is a net, not a second copy of the rule. */
+export const SOURCE_POST_HOSTS = ['bsky.app', ...X_HOSTS];
+
 /** The `x` kind carries the status id so the tweet lookup never re-parses
  * the URL. */
 export type SourceKind = { kind: 'bluesky'; url: string } | { kind: 'x'; url: string; id: string };
@@ -76,7 +88,7 @@ export function classifySourceUrl(url: string): SourceKind | null {
 		return { kind: 'bluesky', url: `https://bsky.app/profile/${actor}/post/${rkey}` };
 	}
 
-	if (host === 'x.com' || host === 'twitter.com' || host === 'mobile.x.com' || host === 'mobile.twitter.com') {
+	if (X_HOSTS.includes(host)) {
 		// /<user>/status/<id>, /i/status/<id>, /i/web/status/<id>, any with a
 		// trailing /photo/N. The `/i/web/` permalink is the form X's own share
 		// sheet hands out, so it canonicalises to /i/status/<id> like the rest.

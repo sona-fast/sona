@@ -1,5 +1,10 @@
 import type { D1Database } from '@cloudflare/workers-types';
 
+/** What D1 takes in one statement. better-sqlite3's own ceiling is in the
+ * thousands, so without this the shim accepts a statement production refuses and
+ * every cap-sized write test passes whatever the code chunks at. */
+const D1_MAX_BOUND_PARAMS = 100;
+
 // Thin better-sqlite3 shim over the D1Database surface drizzle's d1 driver uses
 // (client.prepare().bind().run()/all()/raw(), plus batch() in a transaction with
 // D1's all-or-nothing semantics). Shared by the *.test.ts suites so the shim
@@ -25,12 +30,23 @@ export function makeD1(sqlite: any): D1Database {
 	}
 	function prepare(sql: string) {
 		return {
-			bind: (...params: unknown[]) => ({
-				run: () => exec(sql, params, 'run'),
-				all: () => exec(sql, params, 'all'),
-				raw: () => exec(sql, params, 'raw'),
-				_run: () => exec(sql, params, 'run')
-			})
+			bind: (...params: unknown[]) => {
+				// SQLite itself takes far more than D1 does, so a statement that binds a
+				// parameter per row passes here and fails in production. The tests that
+				// write at a cap (a hundred tags on one image) are only a guard on the
+				// chunking while the shim refuses what D1 refuses.
+				if (params.length > D1_MAX_BOUND_PARAMS) {
+					throw new Error(
+						`D1_ERROR: too many SQL variables: ${params.length} bound, D1 allows ${D1_MAX_BOUND_PARAMS}`
+					);
+				}
+				return {
+					run: () => exec(sql, params, 'run'),
+					all: () => exec(sql, params, 'all'),
+					raw: () => exec(sql, params, 'raw'),
+					_run: () => exec(sql, params, 'run')
+				};
+			}
 		};
 	}
 	async function batch(statements: Array<{ _run: () => unknown }>) {

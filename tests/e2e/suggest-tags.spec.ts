@@ -18,10 +18,12 @@ import { ENDPOINT, stubSuggestions } from './tag-suggestions-helpers';
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml.
 const PASSWORD = 'e2e-admin-password';
-// The seed (tests/e2e/fixtures/seed.sql) lists 23 untagged images with a post
-// URL, ids 101–123, newest first. One page is 20 rows. The total is READ from
-// the page rather than pinned at 23: the save tests below take their rows off
-// the list, so a retry of this file starts from a shorter one.
+// The seed (tests/e2e/fixtures/seed.sql) lists 28 untagged images with a post
+// URL, ids 96–123, newest first. One page is 20 rows, and the eight past it are
+// the reserve a retry runs on: the save tests below take three rows off the list
+// for good, so a retry of this serial file starts from a shorter one and still
+// has more than a page to grow. The total is READ from the page rather than
+// pinned at 28 for the same reason.
 const PAGE = 20;
 const BSKY_POST = 'https://bsky.app/profile/kirin.example/post/3kq7x2abc';
 
@@ -124,11 +126,16 @@ test('the explainer keeps a reading measure on a wide screen', async ({ page }) 
 
 test('Load more grows the list rather than paging away from it', async ({ page, baseURL }) => {
 	await openList(page);
-	await expect(page.locator('li.rowcard')).toHaveCount(PAGE);
 	const showing = page.getByText(/^Showing \d+ of \d+$/);
-	await expect(showing).toContainText(`Showing ${PAGE} of `);
+	await expect(showing).toBeVisible();
 	const total = Number(/of (\d+)$/.exec((await showing.textContent()) ?? '')?.[1]);
-	expect(total).toBeGreaterThan(PAGE);
+	// The count is read rather than pinned, as everywhere else in this file: the
+	// saves below take rows off the list, so a retry starts from a shorter one.
+	// The seed reserves enough rows that a retry still has a second page, so this
+	// is the genuine edge case — a list worked down to one page by hand — and not
+	// what a retry lands on.
+	test.skip(total <= PAGE, 'the list is one page or shorter, so there is nothing to grow');
+	await expect(page.locator('li.rowcard')).toHaveCount(PAGE);
 
 	// The placeholder replaces a thumbnail that 404s, which takes a client
 	// handler: it standing in for the image is the page saying it has hydrated.
@@ -182,7 +189,7 @@ test('Load more grows the list rather than paging away from it', async ({ page, 
 	// test has already taken a row off.
 	await expect(page.getByRole('link', { name: 'Load more' })).toHaveCount(0);
 	await expect(page.locator('li.rowcard').first()).toContainText('Backfill 123');
-	await expect(page.locator('li.rowcard').last()).toContainText('Backfill 101');
+	await expect(page.locator('li.rowcard').last()).toContainText('Backfill 96');
 	const grown = await listedIds(page);
 	expect(grown.length).toBeGreaterThan(PAGE);
 

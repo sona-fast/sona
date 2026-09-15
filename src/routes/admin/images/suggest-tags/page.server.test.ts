@@ -71,6 +71,17 @@ function makeDb() {
 
 type Db = ReturnType<typeof makeDb>['db'];
 
+/** Thousands of fixture rows, in statements D1 would accept. One insert of two
+ * thousand rows binds ten parameters a row, which the shim refuses the way D1
+ * does; ten rows a statement keeps each one inside the hundred-parameter
+ * ceiling. Only the seeding needs this — the load under test chunks its own
+ * reads. */
+async function seedImages(db: Db, rows: (typeof images.$inferInsert)[]) {
+	for (let from = 0; from < rows.length; from += 10) {
+		await db.insert(images).values(rows.slice(from, from + 10));
+	}
+}
+
 async function seedImage(db: Db, id: number, sourcePostUrl: string | null, title = `Art ${id}`) {
 	await db.insert(images).values({
 		id,
@@ -121,10 +132,18 @@ describe('suggest-tags load', () => {
 		// A Bluesky post that already has a tag: nothing to backfill.
 		await seedImage(db, 6, BSKY);
 		await tagImage(db, 6, 'fox');
+		// The forms the SQL host filter has to admit as well as the canonical one:
+		// a www. host, a plain-http link, and a mobile X host.
+		await seedImage(db, 7, 'https://www.bsky.app/profile/kirin.example/post/3kq7x2zzz');
+		await seedImage(db, 8, 'http://x.com/kirin_draws/status/1834455667788990012');
+		await seedImage(db, 9, 'https://mobile.twitter.com/kirin_draws/status/1834455667788990013');
+		// A link whose host only appears further along: the filter matches the
+		// start of the URL, so this is not a post the page offers.
+		await seedImage(db, 10, 'https://example.com/redirect?to=https://bsky.app/profile/a/post/b');
 
 		const data = await runLoad(platform);
-		expect(data.rows.map((r) => r.id)).toEqual([2, 1]);
-		expect(data.total).toBe(2);
+		expect(data.rows.map((r) => r.id)).toEqual([9, 8, 7, 2, 1]);
+		expect(data.total).toBe(5);
 	});
 
 	it("names each row's source kind, which is what the row meta line shows", async () => {
@@ -203,7 +222,8 @@ describe('suggest-tags load', () => {
 		// images table on every page view. Past the ceiling the page shows what it
 		// found and says so with a capped total rather than the true count.
 		const { db, platform } = makeDb();
-		await db.insert(images).values(
+		await seedImages(
+			db,
 			Array.from({ length: MAX_SCAN + 5 }, (_, i) => ({
 				id: i + 1,
 				title: `Art ${i + 1}`,
@@ -219,6 +239,32 @@ describe('suggest-tags load', () => {
 		expect(data.rows).toHaveLength(PER_PAGE);
 		// Newest first, so the ceiling drops the oldest rows, not the newest.
 		expect(data.rows[0].id).toBe(MAX_SCAN + 5);
+	});
+
+	it('finds a supported row under more unsupported ones than the ceiling scans', async () => {
+		// The scan used to take the newest MAX_SCAN untagged rows and only then ask
+		// the classifier about them, so a gallery whose newest 2,000 untagged images
+		// are FurAffinity links showed an empty page while Bluesky rows sat below
+		// them — the page saying the work is done when it is not. The host filter
+		// runs in SQL, so the ceiling counts rows the page could actually offer.
+		const { db, platform } = makeDb();
+		await seedImages(
+			db,
+			Array.from({ length: MAX_SCAN + 1 }, (_, i) => ({
+				id: i + 2,
+				title: `Art ${i + 2}`,
+				slug: `art-${i + 2}`,
+				imageUrl: `https://cdn.example.com/${i + 2}.png`,
+				artistId: 1,
+				sourcePostUrl: `https://www.furaffinity.net/view/${i + 2}/`
+			}))
+		);
+		// The oldest row of the lot, and the only one the page can do anything with.
+		await seedImage(db, 1, BSKY);
+
+		const data = await runLoad(platform);
+		expect(data.total).toBe(1);
+		expect(data.rows.map((r) => r.id)).toEqual([1]);
 	});
 
 	it('clamps pages to what the scan ceiling can cover', async () => {
@@ -323,11 +369,25 @@ describe('suggest-tags save action', () => {
 		// and an empty chip row where the tray used to be.
 		const { db, platform } = makeDb();
 		await seedImage(db, 1, BSKY);
-		vi.mocked(replaceImageTags).mockResolvedValueOnce([]);
+		vi.mocked(replaceImageTags).mockResolvedValueOnce({ written: [], skipped: false });
 
 		const result = await actions.save({ request: form({ id: '1', tags: 'fox' }), platform } as never);
 		expect(result).toMatchObject({ status: 500, data: { error: 'save_failed' } });
 		expect(await tagNamesOf(db, 1)).toEqual([]);
+	});
+
+	it('reports the conflict when the write finds the image tagged after the check', async () => {
+		// The look before the write answers the common case, but a tab that tags the
+		// image in the gap after it would have had its tags deleted. The write
+		// carries the still-untagged condition itself and does nothing when it
+		// fails, so the action has a skip to report: the same 409 the look gives,
+		// raised a moment later.
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		vi.mocked(replaceImageTags).mockResolvedValueOnce({ written: [], skipped: true });
+
+		const result = await actions.save({ request: form({ id: '1', tags: 'fox' }), platform } as never);
+		expect(result).toMatchObject({ status: 409, data: { error: 'tagged_elsewhere' } });
 	});
 
 	it('refuses an empty list rather than reporting a save of nothing', async () => {
