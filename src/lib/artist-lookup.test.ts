@@ -949,7 +949,7 @@ describe('stateFromResponse', () => {
 	// whose `matches` is not an array, says nothing about the piece: the response
 	// is malformed and nobody looked. Reading it as no_match told the operator
 	// their art is unindexed, which is a different and wrong fact.
-	it('refuses to call a body with no match list a no_match', async () => {
+	it('refuses to call an unusable 200 a no_match, with or without a match list', async () => {
 		expect(await stateFromResponse(jsonResponse({ enabled: true }))).toEqual({
 			kind: 'failed',
 			reason: 'unavailable',
