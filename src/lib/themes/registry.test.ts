@@ -36,7 +36,10 @@ describe('the theme registry', () => {
 	// surely as an import, so the pattern matches both forms.
 	// The second alternative is the bare side-effect form, `import './all.ts';`,
 	// which has no `from` but still pulls the module into the graph.
-	const fromClause = /^\s*(?:(?:import|export)\s[^;]*?from\s*|import\s*)(['"])([^'"]+)\1/gm;
+	// Whole-statement type imports (`import type { X } from`, `export type { X }
+	// from`) are erased at compile time and pull nothing into the bundle, so the
+	// walk skips them; inline `type` specifiers inside braces still count.
+	const fromClause = /^\s*(?:(?:import|export)\s(?!type\s)[^;]*?from\s*|import\s*)(['"])([^'"]+)\1/gm;
 	const specifiers = (source: string) => [...source.matchAll(fromClause)].map((m) => m[2]);
 
 	// The regex IS the guard: a pattern that stopped matching one of these forms
@@ -44,6 +47,9 @@ describe('the theme registry', () => {
 	it('matches every form a palette import can take', () => {
 		expect(specifiers(`export { ALL_THEMES } from './all.ts';`)).toEqual(['./all.ts']);
 		expect(specifiers(`import { ALL_THEMES } from './all.ts';`)).toEqual(['./all.ts']);
+		// Erased at compile time: neither form ships the module.
+		expect(specifiers(`import type { ThemeDefinition } from './all.ts';`)).toEqual([]);
+		expect(specifiers(`export type { ThemeDefinition } from './all.ts';`)).toEqual([]);
 		// A bare side-effect import has no `from` clause and still ships the module.
 		expect(specifiers(`import './all.ts';`)).toEqual(['./all.ts']);
 		// Double quotes, which a differently configured formatter writes.

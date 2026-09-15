@@ -273,7 +273,7 @@ describe('the app.css @import of the generated CSS', () => {
 		const allowed = [
 			/^\s+/,
 			/^\/\*[\s\S]*?\*\//,
-			/^@(?:charset|import)\b(?:[^;'"]|'[^']*'|"[^"]*")*;/
+			/^@(?:charset|import|layer)\b(?:[^;'"]|'[^']*'|"[^"]*")*;/
 		];
 		let rest = appCss.slice(0, appCss.indexOf(IMPORT_LINE));
 		for (let eaten = true; eaten; ) {
