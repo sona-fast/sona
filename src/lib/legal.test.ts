@@ -183,6 +183,9 @@ describe('defaultPrivacyPolicy', () => {
 		expect(text).toContain('Bluesky');
 		expect(text).toContain('FurTrack');
 		expect(text).toContain('FuzzySearch');
+		// The lookup sends a copy of the image, and an unpublished one too; naming
+		// the provider alone would not disclose either (SONA-156).
+		expect(text).toMatch(/FuzzySearch \(finding where a piece was posted; when the site owner asks for a lookup, a copy of that image is sent, including images not published on this site\)/);
 		expect(text).toMatch(/shared artist registry/);
 	});
 });
