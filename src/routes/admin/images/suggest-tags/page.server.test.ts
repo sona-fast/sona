@@ -24,7 +24,7 @@ vi.mock('$lib/server/image-tags', async (importOriginal) => {
 // row writes tags through the same path the edit form's save uses.
 
 const BSKY = 'https://bsky.app/profile/kirin.example/post/3kq7x2abc';
-const X = 'https://x.com/kirin_draws/status/1834455667788990011';
+const X = 'https://x.com/examplefox/status/1834455667788990011';
 
 type Query = { sql: string; params: unknown[] };
 
@@ -135,8 +135,8 @@ describe('suggest-tags load', () => {
 		// The forms the SQL host filter has to admit as well as the canonical one:
 		// a www. host, a plain-http link, and a mobile X host.
 		await seedImage(db, 7, 'https://www.bsky.app/profile/kirin.example/post/3kq7x2zzz');
-		await seedImage(db, 8, 'http://x.com/kirin_draws/status/1834455667788990012');
-		await seedImage(db, 9, 'https://mobile.twitter.com/kirin_draws/status/1834455667788990013');
+		await seedImage(db, 8, 'http://x.com/examplefox/status/1834455667788990012');
+		await seedImage(db, 9, 'https://mobile.twitter.com/examplefox/status/1834455667788990013');
 		// A link whose host only appears further along: the filter matches the
 		// start of the URL, so this is not a post the page offers.
 		await seedImage(db, 10, 'https://example.com/redirect?to=https://bsky.app/profile/a/post/b');
