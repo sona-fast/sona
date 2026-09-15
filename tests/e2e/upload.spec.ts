@@ -1029,9 +1029,18 @@ test('the sticker pack form names the refusal and keeps the good file in the bat
 	test.setTimeout(60_000);
 	await adminLogin(page, PASSWORD);
 
+	// Responses are counted against the staging attempt that issued their
+	// request: stagePackFiles may re-stage on a hydration retry, and a late
+	// response from the superseded attempt must not stand in for one of the
+	// current batch's two.
 	const statuses: number[] = [];
+	let attempt = 0;
+	const attemptOf = new WeakMap<Request, number>();
+	page.on('request', (r) => {
+		if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/upload') attemptOf.set(r, attempt);
+	});
 	page.on('response', (r) => {
-		if (new URL(r.url()).pathname === '/api/upload') statuses.push(r.status());
+		if (attemptOf.get(r.request()) === attempt) statuses.push(r.status());
 	});
 	const uploads = countUploadPosts(page);
 
@@ -1044,6 +1053,7 @@ test('the sticker pack form names the refusal and keeps the good file in the bat
 		],
 		uploads,
 		() => {
+			attempt++;
 			statuses.length = 0;
 		}
 	);
@@ -1058,11 +1068,9 @@ test('the sticker pack form names the refusal and keeps the good file in the bat
 
 	// The form uploads one file at a time and renders the banner as soon as the
 	// refusal comes back, so the banner above can appear while the good file's
-	// POST is still in flight. Wait for both responses before reading statuses.
-	// At least two rather than exactly two: a response from a superseded staging
-	// attempt can land after the reset, and the sorted comparison below names
-	// what was actually seen instead of timing out here.
-	await expect.poll(() => statuses.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+	// POST is still in flight. Wait for both of this attempt's responses before
+	// reading statuses.
+	await expect.poll(() => statuses.length, { timeout: 10_000 }).toBe(2);
 
 	// The statuses the server really answered with — one refusal, one success.
 	// Order varies with staging order, so compare sorted.
