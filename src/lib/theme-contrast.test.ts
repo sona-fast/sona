@@ -1318,10 +1318,12 @@ describe('no accent-color override on form controls (SONA-172)', () => {
 // resolve through --link, the token that already exists for exactly this: it
 // tracks --primary where it passes and darkens where it does not.
 describe('SONA-220 tag chip and pill hover contrast, every theme × surface × mode', () => {
-	// Mirrors the CSS: a block declaring its own --link uses it, the rest fall
-	// through to their --primary.
+	// The --link the block actually computes (SONA-209): every theme × mode
+	// declares the token, either as a hex of its own or as an alias onto its
+	// --primary, and the cascade resolves both — which is what the old read of
+	// the app.css palette block plus a --primary fallback was approximating.
 	function linkColor(sel: string): string {
-		return blockBody(sel).match(/--link:\s*(#[0-9A-Fa-f]{6})\s*;/)?.[1] ?? blockToken(sel, 'primary');
+		return blockToken(sel, 'link');
 	}
 
 	it('colors the hovered pill label with var(--link)', () => {
