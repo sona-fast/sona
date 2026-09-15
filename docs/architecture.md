@@ -109,6 +109,7 @@ graph TB
     ThemeData --> ThemeBuild
     ThemeBuild -->|renders| ThemeCSS
     ThemeCSS -->|styles every page| Public
+    ThemeCSS --> Admin
     CI -->|tracked, no drift, themes:check| ThemeCSS
 ```
 
