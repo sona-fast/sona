@@ -99,16 +99,13 @@ export const defaultTheme: ThemeDefinition = {
 		secondary: "'Geist', sans-serif",
 		// Geist is NOT here: its three faces are hand-written in app.css and always
 		// apply, because this theme is the fallback floor for every other one.
-		// JetBrains Mono is fetched by `node scripts/fetch-fonts.mjs`.
+		// JetBrains Mono is fetched by `node scripts/fetch-fonts.mjs`. Google serves
+		// it as ONE variable file per subset covering every weight, so each subset is
+		// declared once over the 400-700 range rather than four times over the same
+		// bytes.
 		faces: [
-			{ family: 'JetBrains Mono', weight: 400, src: '/fonts/JetBrainsMono-400-latin.woff2', unicodeRange: SUBSET_LATIN },
-			{ family: 'JetBrains Mono', weight: 400, src: '/fonts/JetBrainsMono-400-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
-			{ family: 'JetBrains Mono', weight: 500, src: '/fonts/JetBrainsMono-500-latin.woff2', unicodeRange: SUBSET_LATIN },
-			{ family: 'JetBrains Mono', weight: 500, src: '/fonts/JetBrainsMono-500-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
-			{ family: 'JetBrains Mono', weight: 600, src: '/fonts/JetBrainsMono-600-latin.woff2', unicodeRange: SUBSET_LATIN },
-			{ family: 'JetBrains Mono', weight: 600, src: '/fonts/JetBrainsMono-600-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
-			{ family: 'JetBrains Mono', weight: 700, src: '/fonts/JetBrainsMono-700-latin.woff2', unicodeRange: SUBSET_LATIN },
-			{ family: 'JetBrains Mono', weight: 700, src: '/fonts/JetBrainsMono-700-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT }
+			{ family: 'JetBrains Mono', weight: '400 700', src: '/fonts/JetBrainsMono-latin.woff2', unicodeRange: SUBSET_LATIN },
+			{ family: 'JetBrains Mono', weight: '400 700', src: '/fonts/JetBrainsMono-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT }
 		]
 	}
 };

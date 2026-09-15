@@ -48,6 +48,22 @@ you sync — or to catch up on what shipped since you last did — read the
 the merged changes since the previous one. `git log --oneline <last-tag>..upstream/main`
 after a fetch gives the same view from a clone.
 
+## Read before upgrading: your site now serves its own fonts (SONA-181, SONA-126)
+
+The typefaces ship with the site. Nothing on a page load reaches Google's font
+CDN any more — the files are in `static/fonts/` and the CSP names no external
+style or font origin.
+
+- **Check your privacy text.** The built-in privacy policy dropped its Google
+  Fonts sentence, because the transfer no longer happens. If you pasted your own
+  privacy text in Settings, Legal, **it was not updated**: read it and remove the
+  line naming Google Fonts, or it discloses a transfer your site no longer makes.
+- **Theme colors moved with this release too.** Every theme gained a
+  `--primary-text` color for the primary used as small text, and form fields and
+  outline buttons now draw a 3:1 boundary. If you edited theme colors, they live
+  in `src/lib/themes/<id>.theme.ts` — edit the theme file, run `npm run themes`,
+  and commit the regenerated `src/lib/themes/generated.css` alongside it.
+
 ## Read before upgrading: tag suggestions call entail.dev (SONA-220)
 
 This release adds an admin-only tag suggestion lookup for artwork. It appears in
@@ -186,7 +202,7 @@ Two knock-on effects worth knowing:
   logs can still reach development tools on any site. If you do use those tools
   and want them named, write your own privacy text in Settings, Legal.
 - The built-in privacy policy gained disclosures for the AI development tools,
-  Cloudflare's Web Analytics beacon, and the feature integrations
+  Cloudflare's Web Analytics beacon, Google Fonts, and the feature integrations
   (Turnstile, Telegram, cons.fyi, X, Bluesky, FurTrack, and the shared artist
   registry). **If you pasted your own privacy text, none of that was added to
   your site** and the third-party recipients your deployment actually contacts

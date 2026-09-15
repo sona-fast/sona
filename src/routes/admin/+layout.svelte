@@ -288,6 +288,13 @@
 		overflow: hidden;
 	}
 
+	/* Light mode darkens the primary for text (--primary-text), which the badge
+	   beside this disc uses. Matching it here keeps the header to one orange
+	   instead of two; dark mode's two tokens are the same colour already. */
+	:global([data-theme='light']) .admin-avatar {
+		background: var(--primary-text);
+	}
+
 	.admin-avatar img {
 		width: 100%;
 		height: 100%;

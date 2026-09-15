@@ -103,14 +103,17 @@ export const terracottaTheme: ThemeDefinition = {
 	dark,
 	light,
 	fonts: {
-		primary: "'Chakra Petch', sans-serif",
+		primary: "'Chakra Petch', 'IBM Plex Sans JP', sans-serif",
 		secondary: "'IBM Plex Sans JP', sans-serif",
+		// Chakra Petch carries no Japanese, so the headings name the body face next:
+		// a Japanese heading falls to the theme's own typeface rather than to the
+		// reader's system font.
+		//
 		// Self-hosted. The Latin slices come from `node scripts/fetch-fonts.mjs`; the
 		// two Japanese ones are cut from the upstream OFL release by
-		// `node scripts/subset-plex-jp.mjs`, because Google serves that coverage as
-		// 123 unnamed slices per weight. Japanese weights are 400 and 700 only — a
-		// browser asked for 500 or 600 picks the nearer one, and four weights would
-		// be 2.5 MiB.
+		// `node scripts/subset-plex-jp.mjs` — static/fonts/README.md says why.
+		// Japanese weights are 400 and 700 only — a browser asked for 500 or 600
+		// picks the nearer one, and four weights would be 2.5 MiB.
 		faces: [
 			{ family: 'Chakra Petch', weight: 400, src: '/fonts/ChakraPetch-400-latin.woff2', unicodeRange: SUBSET_LATIN },
 			{ family: 'Chakra Petch', weight: 400, src: '/fonts/ChakraPetch-400-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },

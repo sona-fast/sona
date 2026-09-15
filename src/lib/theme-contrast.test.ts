@@ -1626,9 +1626,11 @@ describe('light --primary-text is readable as small text (SONA-126)', () => {
 describe('no text rule paints with raw --primary (SONA-126)', () => {
 	const srcRoot = fileURLToPath(new URL('..', import.meta.url));
 
-	// file → the rules that keep raw --primary, and why. Icons carry no text, so
-	// WCAG's 4.5:1 small-text bar does not apply to them; the one text entry sits
-	// on a dark scrim rather than on --background or --card.
+	// file → the rules that keep raw --primary, and why. Every entry is an icon:
+	// icons carry no text, so WCAG's 4.5:1 small-text bar does not apply to them.
+	// The list is counted, not just matched — a file may keep exactly as many raw
+	// --primary colour rules as it has reasons here, so a NEW one in a listed file
+	// fails this test the same way a new one anywhere else does.
 	const ALLOWED = new Map<string, string[]>([
 		['/app.css', ["tag-chip[aria-pressed='true'] svg — the chip's check glyph, not its label"]],
 		[
@@ -1641,7 +1643,11 @@ describe('no text rule paints with raw --primary (SONA-126)', () => {
 		],
 		[
 			'/lib/components/RefSheetPicker.svelte',
-			['.modal-sub :global(svg) — the same subtitle glyph as SetupDialog']
+			[
+				'.modal-sub :global(svg) — the same subtitle glyph as SetupDialog',
+				'.slot-chip :global(svg) — the check glyph on a selected slot chip',
+				'.suggestion :global(svg) — the same check glyph on a suggestion'
+			]
 		],
 		[
 			'/lib/components/LinkRow.svelte',
@@ -1667,12 +1673,6 @@ describe('no text rule paints with raw --primary (SONA-126)', () => {
 			]
 		],
 		[
-			'/routes/(public)/stickers/+page.svelte',
-			[
-				".source-chip.telegram — text, but on the chip's rgba(0, 0, 0, 0.7) scrim over artwork, where the darkened token would lose contrast rather than gain it"
-			]
-		],
-		[
 			'/routes/(public)/stickers/[slug]/[id]/+page.svelte',
 			['.pack-link-arrow — the arrow glyph after the link, which uses --primary-text']
 		]
@@ -1684,20 +1684,29 @@ describe('no text rule paints with raw --primary (SONA-126)', () => {
 		.map((p) => `/${p}`);
 
 	// `color:` only — `background-color:` and `border-color:` end in the same
-	// characters, and both are legitimate --primary uses.
-	const RAW = /(?:^|[;{\s])color:\s*var\(--primary\)/;
+	// characters, and both are legitimate --primary uses. The trailing `[,)]`
+	// catches the fallback spelling, `var(--primary, var(--foreground))`, which is
+	// the same colour on every theme that declares one.
+	const RAW = /(?:^|[;{\s])color:\s*var\(--primary[,)]/g;
+	const rawCount = (file: string) => (readFileSync(`${srcRoot}${file}`, 'utf8').match(RAW) ?? []).length;
 
 	it('has no allowlist entry for a file that no longer uses raw --primary', () => {
-		const stale = [...ALLOWED.keys()].filter(
-			(f) => !styled.includes(f) || !RAW.test(readFileSync(`${srcRoot}${f}`, 'utf8'))
-		);
+		const stale = [...ALLOWED.keys()].filter((f) => !styled.includes(f) || rawCount(f) === 0);
 		expect(stale, 'these files stopped using raw --primary — drop them from ALLOWED').toEqual([]);
 	});
 
+	it('allows exactly as many raw --primary rules per file as it has reasons', () => {
+		const drifted = [...ALLOWED]
+			.filter(([file, reasons]) => styled.includes(file) && rawCount(file) !== reasons.length)
+			.map(([file, reasons]) => `${file}: ${rawCount(file)} rules, ${reasons.length} reasons`);
+		expect(
+			drifted,
+			'a raw `color: var(--primary)` rule was added to or removed from an allowlisted file — repoint it at --primary-text, or list it above with the reason it is not text.'
+		).toEqual([]);
+	});
+
 	it('paints text with --primary-text everywhere else', () => {
-		const offenders = styled.filter(
-			(f) => !ALLOWED.has(f) && RAW.test(readFileSync(`${srcRoot}${f}`, 'utf8'))
-		);
+		const offenders = styled.filter((f) => !ALLOWED.has(f) && rawCount(f) > 0);
 		expect(
 			offenders,
 			'`color: var(--primary)` measures 2.20:1 on Ember light. Use var(--primary-text) for text, or add the rule to ALLOWED above with the reason it is not text.'

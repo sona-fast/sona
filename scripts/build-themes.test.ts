@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderThemesCss, checkThemesCss, OUTPUT_PATH } from './build-themes.ts';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
-import type { ThemeDefinition, TokenKey } from '../src/lib/themes/types.ts';
+import type { FontFace, ThemeDefinition, TokenKey } from '../src/lib/themes/types.ts';
 
 // A two-token fixture rather than the real palettes: this asserts the LAYOUT
 // (selectors, order, aliases, fonts, the inherit rule), and pinning it to the
@@ -208,6 +208,59 @@ describe('renderThemesCss', () => {
 			}
 		];
 		expect(renderThemesCss(ok)).toContain("--font-primary: 'ヒラギノ角ゴシック', sans-serif;");
+	});
+
+	// A face's family and src reach the CSS unescaped too — inside a quoted string
+	// and inside url() — and a src that resolves to no file renders as a valid
+	// @font-face the browser silently falls back from, so the page just wears the
+	// wrong typeface. Each of these is a build failure instead.
+	const withFace = (face: Partial<FontFace>): ThemeDefinition[] => [
+		{
+			id: 'default',
+			label: 'Faces',
+			dark: {},
+			light: {},
+			fonts: {
+				primary: "'A', monospace",
+				secondary: "'B', sans-serif",
+				faces: [
+					{
+						family: 'JetBrains Mono',
+						weight: 400,
+						src: '/fonts/JetBrainsMono-latin.woff2',
+						...face
+					}
+				]
+			}
+		}
+	];
+
+	it.each([
+		['a src that climbs out of /fonts/', { src: '/fonts/../../etc/passwd.woff2' }, /must be a \/fonts\/\*\.woff2 path/],
+		['a src that closes the url()', { src: '/fonts/x).woff2' }, /must be a \/fonts\/\*\.woff2 path/],
+		['a family with a quote', { family: "Jet'Brains" }, /must not contain a quote/],
+		['a weight that is neither three digits nor a range', { weight: 40 }, /not a 3-digit weight/],
+		['a style that is not normal, italic or oblique', { style: 'slanted' }, /is not normal, italic or oblique/],
+		['a malformed unicode-range', { unicodeRange: 'U+ZZZZ' }, /is not a comma-separated list of U\+ ranges/],
+		['a src with no file behind it', { src: '/fonts/NotHere-400-latin.woff2' }, /has no file at/]
+	])('rejects %s', (_name, face, message) => {
+		expect(() => renderThemesCss(withFace(face))).toThrow(message);
+	});
+
+	it('emits a face with font-display: swap and its unicode-range', () => {
+		const css = renderThemesCss(withFace({ unicodeRange: 'U+0000-00FF, U+2122' }));
+		const block = css.match(/@font-face \{([^}]*)\}/)?.[1] ?? '';
+		expect(block).toContain("font-family: 'JetBrains Mono';");
+		expect(block).toContain('font-style: normal;');
+		expect(block).toContain('font-weight: 400;');
+		expect(block).toContain('font-display: swap;');
+		expect(block).toContain("src: url('/fonts/JetBrainsMono-latin.woff2') format('woff2');");
+		expect(block).toContain('unicode-range: U+0000-00FF, U+2122;');
+	});
+
+	it('accepts a variable face declared over a weight range', () => {
+		const css = renderThemesCss(withFace({ weight: '400 700' }));
+		expect(css).toContain('font-weight: 400 700;');
 	});
 
 	it('rejects a theme list whose first entry is not the default theme', () => {

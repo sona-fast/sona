@@ -138,6 +138,6 @@
 	}
 
 	.card:hover .furtrack-link {
-		color: var(--primary, var(--foreground));
+		color: var(--primary-text, var(--foreground));
 	}
 </style>

@@ -1,0 +1,10 @@
+# Cloudflare Pages headers. The adapter copies this file into the build and
+# appends its own block for SvelteKit's hashed assets, so only hand-written
+# rules belong here.
+#
+# The self-hosted typefaces (SONA-181) are static bytes that change only when
+# scripts/fetch-fonts.mjs runs, but their names carry no content hash — so a
+# month of caching, and no `immutable`, which would let a stale file outlive a
+# font update.
+/fonts/*
+  Cache-Control: public, max-age=2592000

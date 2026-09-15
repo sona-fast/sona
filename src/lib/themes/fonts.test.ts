@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { KANA_UNICODES, KANJI_BLOCK } from '../../../scripts/subset-plex-jp.mjs';
 import { ALL_THEMES } from './all.ts';
+import { SUBSET_JP_KANA, SUBSET_JP_KANJI } from './types.ts';
 
 // SONA-181 moved the typefaces off Google's CDN and into static/fonts/. Three
 // things have to stay true for that to hold, and each fails silently otherwise:
@@ -113,16 +116,16 @@ describe('terracotta font families stay scoped to terracotta (SONA-181)', () => 
 			.filter((line) => /--font-(primary|secondary):/.test(line));
 		const naming = tokenLines.filter((line) => families.some((f) => line.includes(f)));
 		expect(naming).toEqual([
-			"\t--font-primary: 'Chakra Petch', sans-serif;",
+			"\t--font-primary: 'Chakra Petch', 'IBM Plex Sans JP', sans-serif;",
 			"\t--font-secondary: 'IBM Plex Sans JP', sans-serif;"
 		]);
 	});
 });
 
 // SONA-181 follow-up: terracotta is the akito.dog fork's theme and IBM Plex
-// Sans JP is there to set Japanese. Google serves that coverage as 123 unnamed
-// slices per weight, so the two slices below are cut from the upstream OFL
-// release by `node scripts/subset-plex-jp.mjs`. Nothing else in the repo would
+// Sans JP is there to set Japanese. The two slices below are cut from the
+// upstream OFL release by `node scripts/subset-plex-jp.mjs` rather than taken
+// from Google — static/fonts/README.md says why. Nothing else in the repo would
 // notice if they went missing — the Latin faces would still resolve and
 // Japanese would quietly fall back to the reader's system font — so the
 // coverage is asserted here rather than left to a screenshot.
@@ -151,7 +154,15 @@ describe('terracotta sets Japanese in IBM Plex Sans JP (SONA-181)', () => {
 		});
 	}
 
-	it('covers kana, kanji and fullwidth punctuation across the declared ranges', () => {
+	// The ranges are declared twice: in types.ts, which the faces use, and in the
+	// subsetter, which decides what actually goes in the file. A range the CSS
+	// claims and the file does not hold renders as a blank, not a fallback glyph.
+	it('declares the ranges the subsetter cuts', () => {
+		expect(SUBSET_JP_KANA).toBe(KANA_UNICODES.join(', '));
+		expect(SUBSET_JP_KANJI).toBe(KANJI_BLOCK);
+	});
+
+	it('declares ranges that cover kana, kanji and fullwidth punctuation', () => {
 		const ranges = jp.flatMap((f) =>
 			(f.unicodeRange ?? '').split(',').map((part) => {
 				const [lo, hi] = part.trim().replace(/U\+/g, '').split('-');
@@ -177,5 +188,46 @@ describe('terracotta sets Japanese in IBM Plex Sans JP (SONA-181)', () => {
 				floors[kind]
 			);
 		}
+	});
+});
+
+// scripts/fetch-fonts.mjs records a sha256 per file it writes and re-checks it
+// on the next run. That only catches a change made THROUGH the script; this
+// catches a font file edited or replaced in the repo, where the manifest is the
+// only record of what we fetched.
+describe('the fetched fonts match their recorded digests (SONA-181)', () => {
+	const manifest = JSON.parse(readFileSync(`${repoRoot}static/fonts/manifest.json`, 'utf8')) as {
+		files: Record<string, string>;
+	};
+
+	it('records every Google-fetched file in static/fonts/', () => {
+		const fetched = readdirSync(`${repoRoot}static/fonts`)
+			.filter((f) => f.endsWith('.woff2') && !f.startsWith('Geist-') && !/-(kana|kanji)\./.test(f))
+			.sort();
+		expect(Object.keys(manifest.files).sort()).toEqual(fetched);
+	});
+
+	for (const [name, digest] of Object.entries(manifest.files)) {
+		it(`${name} hashes as recorded`, () => {
+			const bytes = readFileSync(`${repoRoot}static/fonts/${name}`);
+			expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
+		});
+	}
+});
+
+// The font files are served straight off Pages under names that carry no
+// content hash, so the cache rule is hand-written in the root _headers file.
+// Without it they inherit the default and are revalidated far more often than
+// bytes that change only when scripts/fetch-fonts.mjs runs.
+describe('the fonts are cached at the edge (SONA-181)', () => {
+	// Root, not static/: adapter-cloudflare throws if _headers sits in the assets
+	// directory, and copies the root one into the build before appending its own
+	// block for SvelteKit's hashed assets.
+	const headers = readFileSync(`${repoRoot}_headers`, 'utf8');
+
+	it('gives /fonts/* a month of caching, and no immutable', () => {
+		const rule = headers.match(/^\/fonts\/\*\n((?:[ \t]+\S.*\n)+)/m)?.[1] ?? '';
+		expect(rule).toContain('Cache-Control: public, max-age=2592000');
+		expect(rule).not.toContain('immutable');
 	});
 });

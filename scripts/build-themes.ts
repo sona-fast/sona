@@ -105,14 +105,10 @@ function validateTheme(theme: ThemeDefinition): void {
 		throw new Error(`theme '${theme.id}': label must not contain a comment terminator`);
 	}
 	// Only the two family lists — `faces` is an array and is validated separately
-	// by validateFace. Entries the caller left unset are skipped, the way the
-	// Object.entries walk this replaced did.
-	const families: Array<[string, string]> = [];
+	// by validateFace. A slot the caller left unset is skipped.
 	for (const slot of ['primary', 'secondary'] as const) {
-		const value = theme.fonts?.[slot];
-		if (value !== undefined) families.push([slot, value]);
-	}
-	for (const [slot, family] of families) {
+		const family = theme.fonts?.[slot];
+		if (family === undefined) continue;
 		if (!FONT_FAMILY.test(family)) {
 			throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has characters outside letters, digits, spaces, commas, quotes, and hyphens`);
 		}

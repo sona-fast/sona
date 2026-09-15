@@ -6,17 +6,18 @@
  *   node scripts/subset-plex-jp.mjs
  *
  * Why this is separate from scripts/fetch-fonts.mjs: that script takes Google's
- * ready-made woff2 slices as they are. Google splits this family's Japanese
- * coverage across 123 unnamed slices per weight — 2.5 MiB of binaries and ~295
- * KB of unicode-range text in a stylesheet EVERY visitor downloads, whatever
- * theme they are on. Two slices per weight, cut ourselves from the upstream OFL
- * release, cost 1.26 MiB total and two @font-face blocks.
+ * ready-made woff2 slices as they are, and Google's slicing of this family is a
+ * bad deal — static/fonts/README.md does the arithmetic. Two slices per weight,
+ * cut ourselves from the upstream OFL release, cost 1.26 MiB total and two
+ * @font-face blocks.
  *
  * Subsetting needs fonttools, which is Python and is deliberately not a repo
  * dependency. This script builds a throwaway virtualenv in the OS temp dir,
- * installs fonttools + brotli into it, and deletes nothing — rerunning reuses
- * it. Node stays the only thing a contributor needs installed to BUILD Sona;
- * Python is needed only to regenerate these four files, which are committed.
+ * installs the pinned, hash-checked fonttools + brotli from
+ * scripts/requirements-subset.txt into it, and deletes nothing — rerunning
+ * reuses it. Node stays the only thing a contributor needs installed to BUILD
+ * Sona; Python is needed only to regenerate these four files, which are
+ * committed.
  *
  * The source is pinned by version AND sha256. An upstream tarball that changes
  * bytes under the same version is a supply-chain event, not a font update, so
@@ -24,14 +25,15 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exit } from 'node:process';
+import { argv, exit, getuid } from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const OUT_DIR = fileURLToPath(new URL('../static/fonts/', import.meta.url));
 const WORK_DIR = join(tmpdir(), 'sona-plex-jp-subset');
+const REQUIREMENTS = fileURLToPath(new URL('./requirements-subset.txt', import.meta.url));
 
 // The OFL release, from the npm registry rather than the GitHub release zip:
 // same fonts under the same license, 72 MB instead of 317 MB, and the registry
@@ -57,8 +59,12 @@ const WEIGHTS = [
  * Kana, the CJK punctuation that sets Japanese text, and the fullwidth forms.
  * One contiguous list, because every Japanese sentence needs all of it — there
  * is no page that renders hiragana without also wanting 、。「」 and ！？.
+ *
+ * Exported because src/lib/themes/types.ts declares the SAME ranges as the
+ * face's unicode-range, and a range the CSS claims but the file does not hold
+ * renders as a blank rather than a fallback glyph. A test pins the two together.
  */
-const KANA_UNICODES = [
+export const KANA_UNICODES = [
 	'U+3000-303F', // CJK symbols and punctuation: 、。〜「」々
 	'U+3040-309F', // hiragana
 	'U+30A0-30FF', // katakana
@@ -73,7 +79,15 @@ const KANA_UNICODES = [
  * character. So the list comes out of the standard library, with no data file to
  * go stale and no list to trust. Level 2 (rows 48-84, another 3,390 rare kanji)
  * is left out; those fall back to the reader's system font.
+ *
+ * KANJI_BLOCK is the CJK Unified Ideographs block every one of those kanji sits
+ * in, and the range types.ts declares for this face — a rarer kanji matches the
+ * face, finds no glyph and falls back per character, which is cheaper than
+ * spelling 2,965 code points out in a stylesheet. The build checks the derived
+ * list against it; a test checks it against the declaration.
  */
+export const KANJI_BLOCK = 'U+4E00-9FFF';
+
 const JIS_LEVEL1_PY = `
 chars = []
 for ku in range(16, 48):
@@ -86,26 +100,66 @@ open(OUT, 'w').write(''.join(chars))
 print(len(chars))
 `;
 
+/**
+ * @param {string} cmd
+ * @param {string[]} args
+ * @param {import('node:child_process').ExecFileSyncOptions} [opts]
+ */
 function run(cmd, args, opts = {}) {
 	return execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'inherit'], ...opts })
 		.toString()
 		.trim();
 }
 
+/**
+ * The work directory lives in the shared OS temp dir, so anyone on the machine
+ * could have created it first and left a tarball (or a venv) there for this
+ * script to trust. Ours or nothing: same owner, mode 0700.
+ */
+function prepareWorkDir() {
+	if (!existsSync(WORK_DIR)) {
+		mkdirSync(WORK_DIR, { recursive: true, mode: 0o700 });
+		return;
+	}
+	const st = statSync(WORK_DIR);
+	// getuid is POSIX-only; on Windows there is no uid to compare.
+	if (getuid !== undefined && st.uid !== getuid()) {
+		throw new Error(`${WORK_DIR} belongs to uid ${st.uid}, not you — remove it or point TMPDIR elsewhere.`);
+	}
+	if ((st.mode & 0o777) !== 0o700) {
+		throw new Error(
+			`${WORK_DIR} is mode ${(st.mode & 0o777).toString(8)}, not 700 — anything there is writable by others. Remove it and rerun.`
+		);
+	}
+}
+
+/**
+ * The tarball, cached between runs, and never used unless it hashes as pinned.
+ * @param {string} tarball
+ */
+function download(tarball) {
+	console.log(`fetching ${SOURCE.url}`);
+	// Into a .part file, renamed only once it is whole: an interrupted curl
+	// otherwise leaves a truncated tarball that the next run reads as cached.
+	// --fail so an error PAGE is an error, not a 500-byte "font".
+	const part = `${tarball}.part`;
+	run('curl', ['-sSL', '--fail', SOURCE.url, '-o', part]);
+	renameSync(part, tarball);
+}
+
 function fetchPinned() {
 	const tarball = join(WORK_DIR, `plex-sans-jp-${SOURCE.version}.tgz`);
-	let bytes;
-	try {
-		bytes = readFileSync(tarball);
-	} catch {
-		bytes = undefined;
+	const cached = existsSync(tarball);
+	if (!cached) download(tarball);
+	let digest = createHash('sha256').update(readFileSync(tarball)).digest('hex');
+	// A cached file that no longer hashes is most often a half-written or stale
+	// download, so replace it once before calling it a supply-chain event.
+	if (cached && digest !== SOURCE.sha256) {
+		console.log(`cached ${tarball} hashed ${digest}; refetching once`);
+		rmSync(tarball);
+		download(tarball);
+		digest = createHash('sha256').update(readFileSync(tarball)).digest('hex');
 	}
-	if (bytes === undefined) {
-		console.log(`fetching ${SOURCE.url}`);
-		run('curl', ['-sSL', SOURCE.url, '-o', tarball]);
-		bytes = readFileSync(tarball);
-	}
-	const digest = createHash('sha256').update(bytes).digest('hex');
 	if (digest !== SOURCE.sha256) {
 		throw new Error(
 			`IBM Plex Sans JP ${SOURCE.version} hashed ${digest}, expected ${SOURCE.sha256}. The pinned tarball changed under its version — do not subset it; work out why first.`
@@ -125,13 +179,15 @@ function pythonEnv() {
 	} catch {
 		console.log(`building ${venv} (fonttools + brotli)`);
 		run('python3', ['-m', 'venv', venv]);
-		run(join(venv, 'bin/pip'), ['install', '--quiet', 'fonttools', 'brotli']);
+		// Exact versions with hashes: the tools that reshape the fonts we ship are
+		// pinned the same way the source tarball is.
+		run(join(venv, 'bin/pip'), ['install', '--quiet', '--require-hashes', '-r', REQUIREMENTS]);
 		return { pyftsubset, python: join(venv, 'bin/python') };
 	}
 }
 
 function main() {
-	mkdirSync(WORK_DIR, { recursive: true });
+	prepareWorkDir();
 	mkdirSync(OUT_DIR, { recursive: true });
 	const fontsDir = fetchPinned();
 	const { pyftsubset, python } = pythonEnv();
@@ -142,6 +198,19 @@ function main() {
 	const count = run(python, ['-c', `OUT = ${JSON.stringify(kanjiTxt)}\n${JIS_LEVEL1_PY}`]);
 	console.log(`JIS X 0208 level 1: ${count} kanji`);
 
+	// The face declares KANJI_BLOCK; a derived character outside it would be in
+	// the file and unreachable from the CSS.
+	const [blockLo, blockHi] = KANJI_BLOCK.replace('U+', '')
+		.split('-')
+		.map((h) => parseInt(h, 16));
+	const outside = [...readFileSync(kanjiTxt, 'utf8')].filter((ch) => {
+		const point = ch.codePointAt(0) ?? 0;
+		return point < Number(blockLo) || point > Number(blockHi);
+	});
+	if (outside.length > 0) {
+		throw new Error(`${outside.length} derived kanji fall outside ${KANJI_BLOCK}: ${outside.join('')}`);
+	}
+
 	for (const { weight, file } of WEIGHTS) {
 		const source = join(fontsDir, file);
 		const slices = [
@@ -151,11 +220,14 @@ function main() {
 		for (const slice of slices) {
 			// --layout-features='*' keeps the vertical and proportional-kana features
 			// the family ships; dropping them is what makes a cheap subset look wrong
-			// set rather than merely incomplete.
+			// set rather than merely incomplete. --name-IDs+=13,14 keeps the license
+			// description and URL in the file, so the OFL notice travels with the
+			// binary the way the license asks, not only in static/fonts/OFL.txt.
 			run(pyftsubset, [
 				source,
 				'--flavor=woff2',
 				'--layout-features=*',
+				'--name-IDs+=13,14',
 				...slice.args,
 				`--output-file=${join(OUT_DIR, slice.name)}`
 			]);
@@ -170,4 +242,9 @@ function main() {
 	return 0;
 }
 
-exit(main());
+// Only run when invoked directly, so a test can import the unicode lists above
+// without building a virtualenv. Realpaths, for the reason build-themes.ts
+// gives: a symlinked checkout makes the two spellings differ.
+if (argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(argv[1])) {
+	exit(main());
+}
