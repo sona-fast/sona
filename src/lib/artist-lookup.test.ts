@@ -967,6 +967,12 @@ describe('stateFromResponse', () => {
 			reason: 'unavailable',
 			sent: false
 		});
+		// The refused-list branch below it states the same rule.
+		expect(
+			await stateFromResponse(
+				jsonResponse({ enabled: true, forwarded: false, matches: [{ site: 'nowhere' }] })
+			)
+		).toEqual({ kind: 'failed', reason: 'unavailable', sent: false });
 	});
 
 	// The upstream side: FuzzySearch answered, so the bytes had already gone out

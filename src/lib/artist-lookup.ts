@@ -732,15 +732,21 @@ export async function stateFromResponse(res: Response): Promise<LookupState> {
 	// nothing said "nobody has this", the response just did not have the field.
 	// Calling it no_match told the operator their piece is unindexed when in fact
 	// nobody looked. Same treatment as the refused-list branch below.
+	// Both unusable-200 branches read the disclosure the same way: the endpoint's
+	// success body never carries `forwarded`, so this is true unless something
+	// that is not Sona's endpoint says the file never left.
+	const forwarded = (body as FailureBody).forwarded !== false;
 	if (!Array.isArray(data.matches)) {
-		return { kind: 'failed', reason: 'unavailable', sent: (body as FailureBody).forwarded !== false };
+		return { kind: 'failed', reason: 'unavailable', sent: forwarded };
 	}
 	const raw = data.matches;
 	const { matches, indexMap } = usableMatches(raw);
 	// Same reasoning as the malformed-body branch above: something looked, something
 	// answered, and the client refused to show it. Calling that "no matches" would
 	// tell the operator their art is unindexed when it may well be posted.
-	if (matches.length === 0 && raw.length > 0) return { kind: 'failed', reason: 'unavailable', sent: true };
+	if (matches.length === 0 && raw.length > 0) {
+		return { kind: 'failed', reason: 'unavailable', sent: forwarded };
+	}
 	if (matches.length === 0) return { kind: 'no_match' };
 	return {
 		kind: 'results',

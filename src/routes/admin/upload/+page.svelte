@@ -1113,7 +1113,9 @@
 							     it is the panel that reports the failure, so the button is
 							     unchanged by one. The reason lines describe the button while
 							     it is standing under them, so a screen-reader operator coming
-							     back to the tile hears what went wrong, not just "Try again". -->
+							     back to the tile hears what went wrong, not just "Try again". The
+							     lookup hint stays in the description behind the reason, so the
+							     retry still discloses that it sends the file out. -->
 							<button
 								type="button"
 								class="tile-lookup"
