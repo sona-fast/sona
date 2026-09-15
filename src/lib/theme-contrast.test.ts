@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { THEMES } from './themes';
+import { ALL_THEMES } from './themes/all.ts';
+import { resolveToken, type ThemeMode } from './themes/cascade.ts';
+import { TOKEN_CSS_NAMES, cssName, type TokenKey } from './themes/types.ts';
+import { themeSelectors } from '../../scripts/build-themes.ts';
 
 // Guards WCAG AA contrast for the resting theme tokens (#76): the terracotta
 // accent used as small-text foreground on the page background and on cards, and
@@ -11,8 +14,14 @@ import { THEMES } from './themes';
 //
 // Scope note: these #76 asserts cover the terracotta pairings in full and
 // destructive everywhere; the other resting default/aurora pairings predate the
-// AA work and are not asserted. The .btn hover states are asserted separately in
-// the #103 describe block below (which DOES cover default/aurora hover).
+// AA work. The generic sweep at the bottom of this file (SONA-209) covers the
+// rest of the resting surface pairings for every theme × mode. The .btn hover
+// states are asserted separately in the #103 describe block below.
+//
+// Token values come from the theme DATA (src/lib/themes/*.theme.ts), which is
+// also what generates the CSS — so this file measures the same numbers the
+// browser gets. Only rules that are still hand-written (the .btn blocks, the
+// component styles) are read out of the stylesheets.
 
 const css = readFileSync(fileURLToPath(new URL('../app.css', import.meta.url)), 'utf8');
 
@@ -26,11 +35,133 @@ function blockBody(selector: string): string {
 	return body;
 }
 
-function blockToken(selector: string, name: string): string {
-	const block = blockBody(selector);
-	const value = block.match(new RegExp(`--${name}:\\s*(#[0-9A-Fa-f]{6})\\s*;`))?.[1];
-	if (!value) throw new Error(`--${name} not found as a 6-digit hex in the ${selector} block`);
+// The same read against a component source file: the describes below parse the
+// tint rules out of the components that paint them, so a rule that moves or
+// stops matching fails here instead of dropping silently out of a sweep.
+function ruleBody(file: string, selector: string): string {
+	const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
+	if (!body) throw new Error(`${selector} rule not found in ${file}`);
+	return body;
+}
+
+// One self-tint rule: `background: color-mix(in srgb, var(--<ink>) N%,
+// transparent)` plus the token its label is painted with. The percentage may be
+// fractional, and the label is anchored to a declaration boundary so a rule
+// whose FIRST declaration is `color:` still parses while `border-color:` still
+// does not.
+// `where` names the rule in the failure, so a component that stops self-tinting
+// says which one rather than leaving the reader to find it among the rows below.
+function selfTint(body: string, where = 'rule'): { ink: string; pct: number; label: string | undefined } {
+	const tint = body.match(
+		/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+(?:\.\d+)?)%,\s*transparent\)/
+	);
+	if (!tint) throw new Error(`${where} no longer tints with a color-mix over transparent`);
+	return {
+		ink: tint[1],
+		pct: Number(tint[2]),
+		label: body.match(/(?:^|[;{])\s*color:\s*var\(--([\w-]+)\)/)?.[1]
+	};
+}
+
+describe('selfTint rule parsing', () => {
+	it('parses a rule whose first declaration is the label color', () => {
+		const { ink, pct, label } = selfTint(
+			'\n\tcolor: var(--status-ok);\n\tbackground: color-mix(in srgb, var(--status-ok) 14%, transparent);\n'
+		);
+		expect({ ink, pct, label }).toEqual({ ink: 'status-ok', pct: 14, label: 'status-ok' });
+	});
+
+	it('parses a fractional tint percentage', () => {
+		const { pct } = selfTint(
+			'\n\tbackground: color-mix(in srgb, var(--destructive) 12.5%, transparent);\n\tcolor: var(--foreground);\n'
+		);
+		expect(pct).toBe(12.5);
+	});
+
+	it('does not read a border-color declaration as the label', () => {
+		const { label } = selfTint(
+			'\n\tborder-color: var(--border);\n\tbackground: color-mix(in srgb, var(--destructive) 20%, transparent);\n'
+		);
+		expect(label).toBeUndefined();
+	});
+
+	it('names the rule when it no longer tints', () => {
+		expect(() => selfTint('\n\tbackground: var(--card);\n', './components/X.svelte .chip')).toThrow(
+			'./components/X.svelte .chip no longer tints'
+		);
+	});
+});
+
+type Mode = ThemeMode;
+
+/** The selector the generator emits for one theme × mode (build-themes.ts). */
+function selectorFor(theme: (typeof ALL_THEMES)[number], mode: Mode): string {
+	return themeSelectors(theme)[mode];
+}
+
+// Selector → the theme block it is generated from. The selectors are the ones
+// the rest of this file already names; keeping them as the lookup key means the
+// describes below read tokens the same way they always did.
+const BLOCK_BY_SELECTOR = new Map<string, { id: string; mode: Mode }>(
+	ALL_THEMES.flatMap((theme) =>
+		(['dark', 'light'] as Mode[]).map(
+			(mode) => [selectorFor(theme, mode), { id: theme.id, mode }] as const
+		)
+	)
+);
+
+// Every theme × mode block in app.css, shared by the describes below (it was
+// copy-pasted three times). Derived from BLOCK_BY_SELECTOR (and so from the
+// generator's own selectors) rather than hardcoded, so a new theme is
+// enumerated automatically — a hardcoded list would let it skip the per-block
+// --link declaration guard and inherit another theme's link color through the
+// shared [data-theme='light'] selector. `name` labels the default theme by its
+// palette name (ember); the describes that predate the sweep spell their own
+// names out of `id` and `mode`.
+const THEME_BLOCKS = [...BLOCK_BY_SELECTOR].map(([sel, { id, mode }]) => ({
+	name: `${id === 'default' ? 'ember' : id} ${mode}`,
+	id,
+	mode,
+	sel
+}));
+
+const TOKEN_BY_CSS_NAME = new Map<string, TokenKey>(
+	Object.entries(TOKEN_CSS_NAMES).map(([key, name]) => [name.slice(2), key as TokenKey])
+);
+
+// The hex one token resolves to on one theme × mode. The cascade itself lives in
+// ./themes/cascade.ts, which the generator also uses, so the chain this measures
+// and the chain that renders the CSS cannot drift apart. Hex-only: every pairing
+// asserted here is a contrast measurement, and rgba()/var() would give a
+// silently wrong number rather than an error.
+function themeHex(id: string, mode: Mode, key: TokenKey): string {
+	const value = resolveToken(ALL_THEMES, id, mode, key);
+	if (value === undefined) {
+		throw new Error(`${id} ${mode}: ${cssName(key)} is not declared in any matching block`);
+	}
+	if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
+		throw new Error(`${cssName(key)} resolves to '${value}' on ${id} ${mode}, not a 6-digit hex`);
+	}
 	return value;
+}
+
+// The same read by generated-block SELECTOR, which is how every describe that
+// predates the sweep names a theme × mode.
+function blockHex(selector: string, key: TokenKey): string {
+	const block = BLOCK_BY_SELECTOR.get(selector);
+	if (!block) throw new Error(`${selector} is not a generated theme block`);
+	return themeHex(block.id, block.mode, key);
+}
+
+// The same read by CSS custom-property name, the way the old regex over app.css
+// did it. The describes that predate the sweep name tokens that way, so this is
+// the string adapter for them; new code takes the key.
+function blockToken(selector: string, name: string): string {
+	const key = TOKEN_BY_CSS_NAME.get(name);
+	if (!key) throw new Error(`--${name} is not a theme token`);
+	return blockHex(selector, key);
 }
 
 function luminance(hex: string): number {
@@ -99,20 +230,11 @@ function hoverBorderMix(selector: string): { pct: number; token: string } {
 
 describe('destructive button WCAG AA contrast, every theme × mode', () => {
 	// The default theme lives on :root / [data-theme='light']; alternate themes
-	// on [data-theme-id='<id>'] and its [data-theme='light'] variant.
-	const blocks = THEMES.flatMap(({ id }) =>
-		id === 'default'
-			? [
-					{ name: 'default dark', sel: ':root' },
-					{ name: 'default light', sel: "[data-theme='light']" }
-				]
-			: [
-					{ name: `${id} dark`, sel: `[data-theme-id='${id}']` },
-					{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
-				]
-	);
-
-	for (const { name, sel } of blocks) {
+	// on [data-theme-id='<id>'] and its [data-theme='light'] variant — all of
+	// which the generator already spells out, so take them from THEME_BLOCKS
+	// rather than from a copy that can drift.
+	for (const { id, mode, sel } of THEME_BLOCKS) {
+		const name = `${id} ${mode}`;
 		it(`${name}: destructive-foreground text on destructive buttons meets 4.5:1`, () => {
 			const destructive = blockToken(sel, 'destructive');
 			const destructiveForeground = blockToken(sel, 'destructive-foreground');
@@ -316,23 +438,173 @@ describe('ember light theme WCAG AA contrast', () => {
 // dark primary drop (#121) fails here; terracotta light primary (4.68:1) sits
 // closest to the floor. Scope: assert only; do not tune colors to pass — a new
 // failure is a finding to report, not to silence.
-// Every theme × mode block in app.css, shared by the resting-state and
-// focus-ring describes below (was copy-pasted three times). Derived from
-// THEMES rather than hardcoded so a new theme is enumerated automatically —
-// a hardcoded list would let it skip the per-block --link declaration guard
-// and inherit another theme's link color through the shared
-// [data-theme='light'] selector.
-const THEME_BLOCKS = THEMES.flatMap(({ id }) =>
-	id === 'default'
-		? [
-				{ name: 'ember dark', sel: ':root' },
-				{ name: 'ember light', sel: "[data-theme='light']" }
-			]
-		: [
-				{ name: `${id} dark`, sel: `[data-theme-id='${id}']` },
-				{ name: `${id} light`, sel: `[data-theme-id='${id}'][data-theme='light']` }
-			]
-);
+// SONA-209: the resting surface pairings, swept over the theme DATA rather than
+// picked one at a time. Everything above grew pairing-by-pairing out of a bug
+// report, so a palette could (and did) carry combinations nothing measured. This
+// iterates every theme × mode and checks the pairings that hold for all of them:
+// text on its surface at 4.5:1, and the two non-text tokens at 3:1.
+//
+// Scope: raw --primary as TEXT is deliberately absent. It fails on Ember light
+// (2.20:1), which is the whole reason --link and --status-attention exist; fixing
+// it is SONA-126, not this sweep. --primary IS swept at the 3:1 non-text floor
+// below, where it draws selection and drop-target borders.
+//
+// Scope: only --sidebar-border is out of the sweep. Its dark value is an alpha
+// value (rgba over whatever sits behind it), and this sweep measures opaque
+// pairs only — compositing it would be a second mechanism, not another row in
+// this table. --sidebar and --sidebar-foreground are opaque hexes and ARE
+// swept below.
+const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> = [
+	{ ink: 'foreground', ground: 'background', floor: 4.5 },
+	{ ink: 'foreground', ground: 'card', floor: 4.5 },
+	{ ink: 'cardForeground', ground: 'card', floor: 4.5 },
+	{ ink: 'mutedForeground', ground: 'background', floor: 4.5 },
+	{ ink: 'mutedForeground', ground: 'card', floor: 4.5 },
+	// Chips and pills: muted label on the --secondary fill, live in the admin
+	// pages today. Re-pointing those uses at a darker token is the palette step.
+	{ ink: 'mutedForeground', ground: 'secondary', floor: 4.5 },
+	// --muted is where those same chips and rows go on hover (the gallery
+	// character chips, the about page's convention rows), so the muted label sits
+	// on it for as long as the pointer is there. Terracotta light fails it today,
+	// like the resting --secondary pairing above.
+	{ ink: 'mutedForeground', ground: 'muted', floor: 4.5 },
+	// The admin shell's nav: the active/heading label uses --sidebar-foreground,
+	// the resting links --muted-foreground, both on the --sidebar fill
+	// (src/routes/admin/+layout.svelte).
+	{ ink: 'sidebarForeground', ground: 'sidebar', floor: 4.5 },
+	{ ink: 'mutedForeground', ground: 'sidebar', floor: 4.5 },
+	{ ink: 'link', ground: 'background', floor: 4.5 },
+	{ ink: 'link', ground: 'card', floor: 4.5 },
+	{ ink: 'statusOk', ground: 'card', floor: 4.5 },
+	{ ink: 'statusWarn', ground: 'card', floor: 4.5 },
+	// The same two status inks also label rows that sit straight on the page (the
+	// storage breakdown, the settings status lines), not only on cards.
+	{ ink: 'statusOk', ground: 'background', floor: 4.5 },
+	{ ink: 'statusWarn', ground: 'background', floor: 4.5 },
+	{ ink: 'statusAttention', ground: 'card', floor: 4.5 },
+	{ ink: 'destructiveForeground', ground: 'destructive', floor: 4.5 },
+	{ ink: 'primaryForeground', ground: 'primary', floor: 4.5 },
+	// The other two foreground/fill pairs the palettes declare. Both clear AA
+	// comfortably today (9.07:1 at the worst), so they are pinned rather than
+	// fixed — nothing here tunes a colour.
+	{ ink: 'secondaryForeground', ground: 'secondary', floor: 4.5 },
+	{ ink: 'accentForeground', ground: 'accent', floor: 4.5 },
+	{ ink: 'border', ground: 'background', floor: 3 },
+	{ ink: 'border', ground: 'card', floor: 3 },
+	{ ink: 'ring', ground: 'background', floor: 3 },
+	// --input is the form-field boundary, in both places a field sits: on the
+	// page and inside a card. WCAG 1.4.11 wants 3:1 of it.
+	{ ink: 'input', ground: 'background', floor: 3 },
+	{ ink: 'input', ground: 'card', floor: 3 },
+	// --primary is not only a fill: it draws the selected-item and drop-target
+	// borders, which are non-text state indicators and so 1.4.11 at 3:1. Fixing
+	// the light-Ember case is SONA-126.
+	{ ink: 'primary', ground: 'background', floor: 3 },
+	{ ink: 'primary', ground: 'card', floor: 3 }
+];
+
+// Pairings that fail TODAY, allowlisted with the ratio measured when the sweep
+// was written so the debt is visible instead of silencing the assertion. No
+// palette value was changed to make this suite green (SONA-209).
+//
+// WCAG 1.4.11 asks 3:1 of a boundary only where the boundary is what identifies
+// a control or its state. Two of the allowlisted pairings below ARE that, and
+// two are the decorative use the exception is for:
+//
+//   • REAL 1.4.11 failures. `.input` draws the form-field boundary with --input
+//     on a --background (or --card) fill, and `.btn-outline` fills with
+//     --background and draws its ONLY boundary with --border — both at the same
+//     1.3–1.8:1 as the hairlines, and both are controls a sighted user has to
+//     find by their edge. They fail today in every palette × mode. Deferred to
+//     the palette step (SONA-126, tracked on SONA-209) because this change moves
+//     the palettes into data and alters no colour value.
+//   • DECORATIVE. --border also draws the card and table hairlines — a rule
+//     between two adjacent surfaces of the same family, identifying nothing.
+//     1.4.11 does not apply there.
+//
+// Raising --border and --input to 3:1 repaints every card and table rule in
+// every palette, so it is a design decision, not a test tweak — which is why the
+// ratios are recorded here rather than silenced. Same for --primary as a
+// selection/drop-target border on light Ember.
+const KNOWN_FAILURES = new Map<string, number>([
+	['default dark border on background', 1.39],
+	['default light border on background', 1.45],
+	['aurora dark border on background', 1.43],
+	['aurora light border on background', 1.29],
+	['terracotta dark border on background', 1.39],
+	['terracotta light border on background', 1.38],
+	['default dark border on card', 1.28],
+	['default light border on card', 1.61],
+	['aurora dark border on card', 1.32],
+	['aurora light border on card', 1.4],
+	['terracotta dark border on card', 1.26],
+	['terracotta light border on card', 1.82],
+	['default dark input on background', 1.39],
+	['default light input on background', 1.45],
+	['aurora dark input on background', 1.43],
+	['aurora light input on background', 1.29],
+	['terracotta dark input on background', 1.39],
+	['terracotta light input on background', 1.38],
+	['default dark input on card', 1.28],
+	['default light input on card', 1.61],
+	['aurora dark input on card', 1.32],
+	['aurora light input on card', 1.4],
+	['terracotta dark input on card', 1.26],
+	['terracotta light input on card', 1.82],
+	['default light primary on background', 2.2],
+	['default light primary on card', 2.46],
+	['terracotta light mutedForeground on secondary', 3.96],
+	// The hover twin of the pairing above, and it fails for the same reason.
+	['terracotta light mutedForeground on muted', 4.11],
+	// The admin nav's resting labels on the same palette, same cause: terracotta
+	// light's --muted-foreground is too pale for its warm mid-tone surfaces.
+	['terracotta light mutedForeground on sidebar', 3.96]
+]);
+
+// The sweep walks the theme DATA, not the selector list: every theme × mode,
+// named by the id + mode that also form its KNOWN_FAILURES key, so a failure
+// message names the exact entry to add or drop.
+const SWEEP_BLOCKS = [...BLOCK_BY_SELECTOR.values()];
+
+describe('resting token pairings, every theme × mode (SONA-209)', () => {
+	// An allowlist key the sweep never generates — a renamed token, a dropped
+	// pairing, a typo — silences nothing and reads as debt that is still there.
+	it('has no KNOWN_FAILURES entry the sweep does not generate', () => {
+		const generated = new Set(
+			SWEEP_BLOCKS.flatMap(({ id, mode }) =>
+				RESTING_PAIRS.map(({ ink, ground }) => `${id} ${mode} ${ink} on ${ground}`)
+			)
+		);
+		expect([...KNOWN_FAILURES.keys()].filter((k) => !generated.has(k))).toEqual([]);
+	});
+
+	for (const { id, mode } of SWEEP_BLOCKS) {
+		for (const { ink, ground, floor } of RESTING_PAIRS) {
+			const key = `${id} ${mode} ${ink} on ${ground}`;
+			it(`${id} ${mode}: --${ink} on --${ground} meets ${floor}:1`, () => {
+				const ratio = contrast(themeHex(id, mode, ink), themeHex(id, mode, ground));
+				const known = KNOWN_FAILURES.get(key);
+				if (known !== undefined) {
+					// Self-cleaning: once the pairing clears its floor, the allowlist
+					// entry is stale and has to go, or it hides the next regression.
+					expect(
+						ratio,
+						`${id} ${mode}: --${ink} on --${ground} now measures ${ratio.toFixed(2)}:1 and clears ${floor}:1 — drop it from KNOWN_FAILURES`
+					).toBeLessThan(floor);
+					expect(
+						ratio,
+						`${id} ${mode}: --${ink} on --${ground} moved from the recorded ${known}:1 to ${ratio.toFixed(2)}:1 and still fails ${floor}:1 — update its KNOWN_FAILURES ratio to the new measurement`
+					).toBeCloseTo(known, 1);
+					return;
+				}
+				expect(
+					ratio,
+					`${id} ${mode}: --${ink} on --${ground} measures ${ratio.toFixed(2)}:1, under the ${floor}:1 floor`
+				).toBeGreaterThanOrEqual(floor);
+			});
+		}
+	}
+});
 
 describe('resting .btn WCAG AA contrast — every theme × variant × mode (#121)', () => {
 	const variants = [
@@ -378,8 +650,20 @@ describe('focus ring WCAG AA contrast, every theme × surface × mode (#121, SON
 });
 
 // --muted-foreground is not only hint TEXT: it's the resting color of the social
-// icons, the copy button, the select chevron and other icon-only affordances,
-// which WCAG 1.4.11 (non-text contrast) holds to 3:1 against their background.
+// icons, the copy button and other icon-only affordances, which WCAG 1.4.11
+// (non-text contrast) holds to 3:1 against their background.
+//
+// The select chevron is NOT one of them, despite sitting on `select.input`: it
+// is an SVG data URI in app.css painted with a hardcoded #9ca3af (a data URI
+// can't read a custom property), so it neither follows this token nor changes
+// with the theme, and nothing here measures it. Moving it onto a token is the
+// palette step (SONA-126); this change alters no colour.
+//
+// Recorded so the debt has a number rather than a shrug: on the LIGHT page
+// backgrounds #9ca3af measures 2.28:1 (ember), 2.34:1 (aurora) and 1.92:1
+// (terracotta) — all under the 3:1 that 1.4.11 asks of the glyph that says a
+// field is a dropdown. The dark modes pass. Measured 2026-09-14 against the
+// theme data; re-measure rather than trust these once a palette moves.
 // Every pairing currently clears it with room to spare — the tightest is
 // terracotta light on --background at 4.53:1 — so this is a pin against a future
 // token tweak, not a fix. A failure here is a finding to report, not to silence
@@ -432,31 +716,17 @@ describe('.btn hover-state WCAG AA contrast, every theme × variant (#103)', () 
 
 	// Dark modes use the base `.btn-*:hover` rule; light modes the
 	// `[data-theme='light'] .btn-*:hover` override (every light theme carries that
-	// attribute, so one override branch serves them all).
-	const themeBlocks = THEMES.flatMap(({ id }) =>
-		id === 'default'
-			? [
-					{ name: 'default dark', block: ':root', mode: 'dark' as const },
-					{ name: 'default light', block: "[data-theme='light']", mode: 'light' as const }
-				]
-			: [
-					{ name: `${id} dark`, block: `[data-theme-id='${id}']`, mode: 'dark' as const },
-					{
-						name: `${id} light`,
-						block: `[data-theme-id='${id}'][data-theme='light']`,
-						mode: 'light' as const
-					}
-				]
-	);
-
-	for (const { name, block, mode } of themeBlocks) {
+	// attribute, so one override branch serves them all). The blocks themselves
+	// come from the generator's own selectors, not a hardcoded copy.
+	for (const { id, mode, sel } of THEME_BLOCKS) {
+		const name = `${id} ${mode}`;
 		for (const v of variants) {
 			it(`${name}: hovered .btn-${v.name} label meets 4.5:1`, () => {
 				const hoverSel =
 					mode === 'light' ? `[data-theme='light'] .btn-${v.name}:hover` : `.btn-${v.name}:hover`;
 				const { pct, toward } = hoverMix(hoverSel);
-				const fill = blockToken(block, v.fill);
-				const label = blockToken(block, v.label);
+				const fill = blockToken(sel, v.fill);
+				const label = blockToken(sel, v.label);
 				const hovered = mixSrgb(fill, pct, toward);
 				expect(contrast(label, hovered)).toBeGreaterThanOrEqual(4.5);
 			});
@@ -468,15 +738,16 @@ describe('.btn hover-state WCAG AA contrast, every theme × variant (#103)', () 
 	// solid fill (#103 designer finding). Assert the hovered border stays visibly
 	// distinct from the hovered fill in every theme × mode — a plain dissolve sits
 	// near 1:1, so 1.5:1 is a comfortable floor above it.
-	for (const { name, block, mode } of themeBlocks) {
+	for (const { id, mode, sel } of THEME_BLOCKS) {
+		const name = `${id} ${mode}`;
 		it(`${name}: hovered .btn-outline border stays distinct from the fill`, () => {
 			const hoverSel =
 				mode === 'light' ? "[data-theme='light'] .btn-outline:hover" : '.btn-outline:hover';
 			const { pct: fillPct, toward } = hoverMix(hoverSel);
-			const fill = mixSrgb(blockToken(block, 'background'), fillPct, toward);
+			const fill = mixSrgb(blockToken(sel, 'background'), fillPct, toward);
 			// The border-color shift lives on the base rule and cascades to both modes.
 			const { pct: borderPct, token } = hoverBorderMix('.btn-outline:hover');
-			const border = mix2(blockToken(block, 'border'), borderPct, blockToken(block, token));
+			const border = mix2(blockToken(sel, 'border'), borderPct, blockToken(sel, token));
 			expect(contrast(border, fill)).toBeGreaterThanOrEqual(1.5);
 		});
 	}
@@ -729,23 +1000,17 @@ describe('SONA-124 chip CSS keeps the --foreground token (R2-A3)', () => {
 describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)', () => {
 	const banners: Array<{ file: string; selector: string }> = [
 		{ file: './components/VrAvatarForm.svelte', selector: '.banner.err' },
-		{ file: './components/VrViewer.svelte', selector: '.load-error' }
+		{ file: './components/VrViewer.svelte', selector: '.load-error' },
+		// Same banner shape on the sticker-pack form. Its text is --foreground
+		// today, so this row pins that rather than fixing anything (r4-06).
+		{ file: './components/StickerPackForm.svelte', selector: '.banner.err' }
 	];
 
 	for (const { file, selector } of banners) {
-		const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
-		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const body = source.match(new RegExp(`^\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm'))?.[1];
-		if (!body) throw new Error(`${selector} rule not found in ${file}`);
-		const tintPct = Number(
-			body.match(
-				/background:\s*color-mix\(in srgb,\s*var\(--destructive\)\s*(\d+)%,\s*transparent\)/
-			)?.[1]
-		);
-		const textToken = body.match(/color:\s*var\(--([\w-]+)\)/)?.[1];
+		const { ink, pct: tintPct, label: textToken } = selfTint(ruleBody(file, selector), `${file} ${selector}`);
 
 		it(`${file} ${selector} keeps the destructive tint and --foreground text`, () => {
-			if (!Number.isFinite(tintPct)) throw new Error(`${selector} lost its destructive tint`);
+			expect(ink, `${selector} lost its destructive tint`).toBe('destructive');
 			expect(textToken).toBe('foreground');
 		});
 
@@ -761,6 +1026,121 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 	}
 });
 
+// The status chips and callouts paint their label in the SAME ink as their
+// fill: color-mix(in srgb, var(--<ink>) N%, transparent) over whatever surface
+// the chip sits on, with the label left at the raw token. That tint lifts the
+// surface toward the ink, so the real ratio is the ink against the composite,
+// not against the bare --background or --card that the resting sweep measures.
+//
+// --destructive is in the sweep too, not only the status inks: the
+// observability page's .sbadge.red paints destructive-on-destructive-tint,
+// which is the same self-tint shape and fails in nine theme × mode × surface
+// combinations (recorded below). Its SOLID counterpart is a different pairing
+// and lives in the destructive-button describe at the top of this file.
+//
+// Each row below is one RULE (file + selector), not a percentage: the tint
+// percentage and the ink token are parsed out of the rule itself, so a retuned
+// chip re-runs its own math instead of matching a hardcoded table.
+//
+// --status-attention is deliberately absent: nothing paints a tint of it (it is
+// small text on a plain surface, covered by the SONA-162 describe below).
+describe('status-ink text on its own tint (SONA-209)', () => {
+	const TINTED_RULES: Array<{ file: string; selector: string }> = [
+		{ file: './components/CloudflareSetupDialog.svelte', selector: '.scope' },
+		{ file: './components/CloudflareSetupDialog.svelte', selector: '.callout' },
+		{ file: '../routes/admin/vr/+page.svelte', selector: '.vis-chip.published' },
+		{ file: '../routes/admin/vr/+page.svelte', selector: '.vis-chip.mature' },
+		{ file: '../routes/admin/observability/+page.svelte', selector: '.en' },
+		{ file: '../routes/admin/observability/+page.svelte', selector: '.sbadge.amber' },
+		{ file: '../routes/admin/observability/+page.svelte', selector: '.sbadge.red' }
+	];
+	const SURFACES = ['background', 'card'] as const;
+
+	// Read each rule once: the tint percentage, the token it mixes, and the token
+	// the label is painted with. A rule that stops self-tinting (or stops being
+	// found at all) throws here rather than dropping silently out of the sweep.
+	const TINTS = TINTED_RULES.map(({ file, selector }) => ({
+		file,
+		selector,
+		...selfTint(ruleBody(file, selector), `${file} ${selector}`)
+	}));
+
+	// Same bargain as KNOWN_FAILURES above: record the ratio measured when this
+	// describe was written rather than silence the assert, because no palette
+	// value moves in SONA-209. Terracotta light's status inks are the palest of
+	// the three themes, and its page background is the lighter of the two
+	// surfaces, so that is where a status ink and its tint converge. --destructive
+	// is a saturated red in every palette and sits close to its own 20% tint on
+	// most of them, which is why its failures are not confined to one theme.
+	const TINT_KNOWN_FAILURES = new Map<string, number>([
+		['terracotta light status-ok 14% on background', 4.43],
+		['terracotta light status-ok 15% on background', 4.38],
+		['terracotta light status-warn 15% on background', 4.34],
+		['terracotta light status-warn 20% on background', 4.02],
+		['ember dark destructive 20% on card', 4.31],
+		['ember light destructive 20% on background', 3.79],
+		['ember light destructive 20% on card', 4.19],
+		['aurora dark destructive 20% on card', 4.47],
+		['aurora light destructive 20% on background', 3.47],
+		['aurora light destructive 20% on card', 3.73],
+		['terracotta dark destructive 20% on background', 4.13],
+		['terracotta dark destructive 20% on card', 3.72],
+		['terracotta light destructive 20% on background', 3.57]
+	]);
+
+	for (const { file, selector, ink, pct, label } of TINTS) {
+		it(`${file} ${selector} still paints --${ink} on its own ${pct}% tint`, () => {
+			expect(
+				label,
+				`${file} ${selector} tints with --${ink} but labels with --${label} — the sweep below measures the self-tint pairing only`
+			).toBe(ink);
+		});
+	}
+
+	it('has no allowlist entry this sweep does not generate', () => {
+		const generated = new Set(
+			TINTS.flatMap(({ ink, pct }) =>
+				SURFACES.flatMap((surface) =>
+					THEME_BLOCKS.map(({ name }) => `${name} ${ink} ${pct}% on ${surface}`)
+				)
+			)
+		);
+		expect([...TINT_KNOWN_FAILURES.keys()].filter((k) => !generated.has(k))).toEqual([]);
+	});
+
+	// Two rules can share an ink and a percentage (the two 20% observability
+	// badges do not, but a third could), so measure each distinct pairing once.
+	const PAIRINGS = [...new Map(TINTS.map((t) => [`${t.ink} ${t.pct}`, t])).values()];
+
+	for (const { ink, pct } of PAIRINGS) {
+		for (const surface of SURFACES) {
+			for (const { name, sel } of THEME_BLOCKS) {
+				const key = `${name} ${ink} ${pct}% on ${surface}`;
+				it(`${name}: --${ink} text meets 4.5:1 on its ${pct}% tint over the ${surface}`, () => {
+					const hex = blockToken(sel, ink);
+					const ratio = contrast(hex, mix2(hex, pct, blockToken(sel, surface)));
+					const known = TINT_KNOWN_FAILURES.get(key);
+					if (known !== undefined) {
+						expect(
+							ratio,
+							`${key} now measures ${ratio.toFixed(2)}:1 and clears 4.5:1 — drop it from TINT_KNOWN_FAILURES`
+						).toBeLessThan(4.5);
+						expect(
+							ratio,
+							`${key} moved from the recorded ${known}:1 to ${ratio.toFixed(2)}:1 and still fails 4.5:1 — update its TINT_KNOWN_FAILURES ratio`
+						).toBeCloseTo(known, 1);
+						return;
+					}
+					expect(
+						ratio,
+						`${key} measures ${ratio.toFixed(2)}:1, under the 4.5:1 floor`
+					).toBeGreaterThanOrEqual(4.5);
+				});
+			}
+		}
+	}
+});
+
 // The VR export guide and the avatar form's guide link color small text with
 // --status-attention precisely BECAUSE --primary fails AA on ember light
 // (2.20:1) — the SONA-162 CSS comments assert the token passes 4.5:1 in every
@@ -770,15 +1150,14 @@ describe('SONA-124 destructive-tint banner text on its composite surface (R3-A2)
 // attention color at an AA-failing value sinks the guide's eyebrow, its
 // highlighted table value, and the form's guide link silently.
 describe('status-attention small-text WCAG AA contrast, every theme × surface × mode (SONA-162)', () => {
-	function statusAttention(sel: string): string {
-		const body = blockBody(sel);
-		const hex = body.match(/--status-attention:\s*(#[0-9A-Fa-f]{6})\s*;/)?.[1];
-		return hex ?? blockToken(sel, 'primary');
-	}
+	// blockToken does the lazy resolution now: a block either declares a hex or
+	// aliases/inherits its way to one, exactly as the cascade would.
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			it(`${name}: --status-attention text meets 4.5:1 on the ${surface} surface`, () => {
-				expect(contrast(statusAttention(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+				expect(
+					contrast(blockToken(sel, 'status-attention'), blockToken(sel, surface))
+				).toBeGreaterThanOrEqual(4.5);
 			});
 		}
 	}
@@ -794,12 +1173,6 @@ describe('status-attention small-text WCAG AA contrast, every theme × surface �
 // bleeds into the other light themes through the plain [data-theme='light']
 // selector they all carry.
 describe('prose-link WCAG AA contrast, every theme × surface × mode (SONA-171)', () => {
-	function linkColor(sel: string): string {
-		const body = blockBody(sel);
-		const hex = body.match(/--link:\s*(#[0-9A-Fa-f]{6})\s*;/)?.[1];
-		return hex ?? blockToken(sel, 'primary');
-	}
-
 	it('the global anchor rule colors with var(--link), not var(--primary)', () => {
 		const rule = css.match(/^a\s*\{([^}]*)\}/m)?.[1];
 		if (!rule) throw new Error('global a rule not found in app.css');
@@ -813,15 +1186,17 @@ describe('prose-link WCAG AA contrast, every theme × surface × mode (SONA-171)
 	});
 
 	for (const { name, sel } of THEME_BLOCKS) {
-		it(`${name}: declares --link in its own block`, () => {
-			expect(blockBody(sel)).toMatch(/--link:\s*(#[0-9A-Fa-f]{6}|var\(--primary\))\s*;/);
+		it(`${name}: declares link in its own token set`, () => {
+			const { id, mode } = BLOCK_BY_SELECTOR.get(sel)!;
+			const theme = ALL_THEMES.find((t) => t.id === id)!;
+			expect(theme[mode].link, `${name} inherits --link instead of declaring it`).toBeDefined();
 		});
 	}
 
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			it(`${name}: link text meets 4.5:1 on the ${surface} surface`, () => {
-				expect(contrast(linkColor(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+				expect(contrast(blockToken(sel, 'link'), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
 			});
 		}
 	}

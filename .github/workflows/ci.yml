@@ -34,6 +34,23 @@ jobs:
 
       - run: npm ci
 
+      # `prepare` recreates generated.css, so a commit that DELETED the file
+      # leaves no diff to fail on — the working tree is clean and the file is
+      # simply untracked. Assert it is still tracked before reading the diff.
+      - run: git ls-files --error-unmatch src/lib/themes/generated.css
+
+      # THIS is the drift guard (SONA-209). `npm ci` above runs `prepare`, which
+      # runs `npm run themes` and rewrites src/lib/themes/generated.css from the
+      # theme data — so a commit that edited a palette without regenerating
+      # leaves a dirty working tree right here, and this step fails on it.
+      - run: git diff --exit-code -- src/lib/themes/generated.css
+
+      # Catches what prepare's rewrite hides: `prepare` ends in `|| echo ''`, so
+      # theme data that fails to render at all (a bad value, an alias cycle, a
+      # theme file nobody listed) leaves the stale CSS in place and installs
+      # anyway. This runs the renderer with its exit code exposed.
+      - run: npm run themes:check
+
       - run: npm run check
 
       - run: npm test

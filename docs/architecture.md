@@ -58,6 +58,12 @@ graph TB
         Release[🏷️ release.yml — tagged v* releases]
     end
 
+    subgraph "Theme build"
+        ThemeData[🎨 src/lib/themes/*.theme.ts — theme data]
+        ThemeBuild[🛠️ scripts/build-themes.ts — runs on prepare]
+        ThemeCSS[📄 src/lib/themes/generated.css — committed, imported by src/app.css]
+    end
+
     Forks[🌍 Forks — independent deployments, sync via releases]
 
     Visitor --> Hooks
@@ -106,6 +112,12 @@ graph TB
     API -->|fetch profile pictures to re-host, resolve tweet media| Avatars
     Admin -->|fetch profile pictures to re-host| Avatars
     Release -.->|pull tagged releases| Forks
+
+    ThemeData --> ThemeBuild
+    ThemeBuild -->|renders| ThemeCSS
+    ThemeCSS -->|styles every page| Public
+    ThemeCSS --> Admin
+    CI -->|tracked, no drift, themes:check| ThemeCSS
 ```
 
 ## What the diagram asserts
@@ -164,6 +176,14 @@ graph TB
   `deploy.yml`, which redeploys the Pages project; `deploy.yml` also has a
   manual dispatch for forks synced through GitHub's Sync fork button, which
   emits no push event.
+- Themes are data. Each theme lives in `src/lib/themes/*.theme.ts`, and
+  `scripts/build-themes.ts` renders them into `src/lib/themes/generated.css`,
+  which `src/app.css` imports. The renderer runs from `prepare`, so `npm ci`
+  regenerates the file. That file is committed, and `ci.yml` guards it three
+  ways: `git ls-files --error-unmatch` proves it is still tracked, `git diff
+  --exit-code` after the install catches a palette edit that was never
+  regenerated, and `npm run themes:check` runs the renderer with its exit code
+  exposed, because `prepare` swallows failures.
 - Forks are independent deployments of the same stack on their owners' own
   Cloudflare accounts. They adopt changes by pulling the tagged releases that
   `release.yml` publishes — see `UPDATING.md` — not by tracking `main`.
