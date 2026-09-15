@@ -32,14 +32,17 @@ describe('the theme registry', () => {
 
 	// `export { X } from './all.ts'` re-exports the palette and ships it just as
 	// surely as an import, so the pattern matches both forms.
-	const fromClause = /^\s*(?:import|export)\s[^;]*?from\s*'([^']+)'/gm;
-	const specifiers = (source: string) => [...source.matchAll(fromClause)].map((m) => m[1]);
+	const fromClause = /^\s*(?:import|export)\s[^;]*?from\s*(['"])([^'"]+)\1/gm;
+	const specifiers = (source: string) => [...source.matchAll(fromClause)].map((m) => m[2]);
 
 	// The regex IS the guard: a pattern that stopped matching one of these forms
 	// would report "imports no palette data" about a file that ships all of it.
 	it('matches every form a palette import can take', () => {
 		expect(specifiers(`export { ALL_THEMES } from './all.ts';`)).toEqual(['./all.ts']);
 		expect(specifiers(`import { ALL_THEMES } from './all.ts';`)).toEqual(['./all.ts']);
+		// Double quotes, which a differently configured formatter writes.
+		expect(specifiers(`export { ALL_THEMES } from "./all.ts";`)).toEqual(['./all.ts']);
+		expect(specifiers(`import { ALL_THEMES } from "./all.ts";`)).toEqual(['./all.ts']);
 		// Wrapped across lines, the way a formatter writes a long specifier list.
 		expect(specifiers(`import {\n\tALL_THEMES\n} from './all.ts';`)).toEqual(['./all.ts']);
 		// And still found when it is not the first import in the file.

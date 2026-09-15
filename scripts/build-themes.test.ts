@@ -309,7 +309,8 @@ describe('running the script directly', () => {
 	it('runs main() and writes the themes', () => {
 		expect(wrote.stderr).toBe('');
 		expect(wrote.status).toBe(0);
-		expect(wrote.stdout).toMatch(/wrote .* \(3 themes\)/);
+		expect(wrote.stdout).toMatch(/wrote .* \(\d+ themes\)/);
+		expect(wrote.stdout).toContain(`(${ALL_THEMES.length} themes)`);
 		expect(written).toBe(readFileSync(OUTPUT_PATH, 'utf8'));
 	});
 
