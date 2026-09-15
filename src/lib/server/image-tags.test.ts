@@ -224,7 +224,11 @@ async function tagNamesOf(db: Db, imageId: number) {
 		.select({ name: tags.name })
 		.from(imageTags)
 		.innerJoin(tags, eq(imageTags.tagId, tags.id))
-		.where(eq(imageTags.imageId, imageId));
+		.where(eq(imageTags.imageId, imageId))
+		// Ordered by mint order, which is the input order the assertions below
+		// read as. Without it the row order is the database's and the ones that
+		// pin a sequence would be passing by luck.
+		.orderBy(tags.id);
 	return rows.map((r) => r.name);
 }
 

@@ -41,6 +41,10 @@
 	// A same-route navigation to a DIFFERENT image is the one case the fields
 	// must follow `data` again. Keyed on the id, so an invalidation of the row
 	// already on screen leaves what the operator typed alone.
+	// The {#key} around the form covers the fields seeded by a plain attribute,
+	// but it only rebuilds markup — this script does not run again — so every
+	// value held in $state below still has to be re-seeded here, or the remounted
+	// bound inputs would come back carrying the previous image's values.
 	let seededImageId = data.image.id;
 	$effect(() => {
 		if (data.image.id === seededImageId) return;
@@ -49,6 +53,17 @@
 		sourcePostUrl = data.image.sourcePostUrl || '';
 		suggestedRating = null;
 		nsfw = data.image.nsfw;
+		// The parent is a bound select: left alone it keeps image A's choice, and
+		// if that parent is eligible for B too, saving B files it under A's parent.
+		selectedParentId = String(data.image.parentImageId ?? '');
+		// Per-image UI state rather than stored values, but just as stale: the
+		// artist toggle would open B on a blank new-artist form, and the reference
+		// live region would tell B's operator a designation had just been cleared.
+		artistMode = 'existing';
+		referenceCleared = false;
+		// And the in-flight flag: a navigation away mid-save would otherwise leave
+		// B's Save button disabled until A's request lands.
+		saving = false;
 	});
 </script>
 
@@ -109,109 +124,112 @@
 		{/if}
 	</div>
 
-	<form method="POST" action="?/save" use:enhance={() => {
-		saving = true;
-		return async ({ update }) => {
-			await update();
-			saving = false;
-		};
-	}} class="edit-form">
-		<label>
-			<span>{m.admin_field_title()}</span>
-			<input type="text" class="input" name="title" value={data.image.title} required />
-		</label>
+	<!-- Keyed on the image so a same-route navigation to a different image builds
+	     the whole form again from that image's data. Fields seeded by a plain
+	     attribute (the artist and collection selects, the character chips, the
+	     checkboxes, the variant label, the dates) only re-render when the
+	     expression's value changes, so without this an operator's edit to one of
+	     them carries over to the next image whenever the two share a value. -->
+	{#key data.image.id}
+		<form method="POST" action="?/save" use:enhance={() => {
+			saving = true;
+			return async ({ update }) => {
+				await update();
+				saving = false;
+			};
+		}} class="edit-form">
+			<label>
+				<span>{m.admin_field_title()}</span>
+				<input type="text" class="input" name="title" value={data.image.title} required />
+			</label>
 
-		<fieldset class="artist-section">
-			<legend>{m.admin_field_artist()}</legend>
-			<div class="artist-toggle">
-				<button
-					type="button"
-					class="toggle-btn"
-					class:active={artistMode === 'existing'}
-					onclick={() => (artistMode = 'existing')}
-				>
-					{m.admin_upload_select_existing()}
-				</button>
-				<button
-					type="button"
-					class="toggle-btn"
-					class:active={artistMode === 'new'}
-					onclick={() => (artistMode = 'new')}
-				>
-					{m.admin_upload_add_new_artist()}
-				</button>
-			</div>
-
-			{#if artistMode === 'existing'}
-				<label>
-					<span>{m.admin_field_artist()}</span>
-					<select class="input" name="artistId" required>
-						<option value="">{m.admin_upload_select_artist()}</option>
-						{#each data.artists as artist}
-							<option value={artist.id} selected={artist.id === data.image.artistId}>{artist.name}</option>
-						{/each}
-					</select>
-				</label>
-			{:else}
-				<input type="hidden" name="artistId" value="new" />
-				<label>
-					<span>{m.admin_field_artist_name()}</span>
-					<input type="text" class="input" placeholder={m.admin_upload_artist_name_placeholder()} name="artistName" required />
-				</label>
-				<div class="social-grid">
-					<label>
-						<span>Twitter/X</span>
-						<input type="text" class="input" placeholder={m.admin_social_handle_placeholder()} name="twitter" />
-					</label>
-					<label>
-						<span>Bluesky</span>
-						<input type="text" class="input" placeholder="bsky.app/profile/..." name="bluesky" />
-					</label>
-					<label>
-						<span>Telegram</span>
-						<input type="text" class="input" placeholder="t.me/..." name="telegram" />
-					</label>
-					<label>
-						<span>FurAffinity</span>
-						<input type="text" class="input" placeholder="furaffinity.net/user/..." name="furaffinity" />
-					</label>
-					<label>
-						<span>DeviantArt</span>
-						<input type="text" class="input" placeholder="deviantart.com/..." name="deviantart" />
-					</label>
-					<label>
-						<span>Patreon</span>
-						<input type="text" class="input" placeholder="patreon.com/..." name="patreon" />
-					</label>
-					<label>
-						<span>Instagram</span>
-						<input type="text" class="input" placeholder="instagram.com/..." name="instagram" />
-					</label>
+			<fieldset class="artist-section">
+				<legend>{m.admin_field_artist()}</legend>
+				<div class="artist-toggle">
+					<button
+						type="button"
+						class="toggle-btn"
+						class:active={artistMode === 'existing'}
+						onclick={() => (artistMode = 'existing')}
+					>
+						{m.admin_upload_select_existing()}
+					</button>
+					<button
+						type="button"
+						class="toggle-btn"
+						class:active={artistMode === 'new'}
+						onclick={() => (artistMode = 'new')}
+					>
+						{m.admin_upload_add_new_artist()}
+					</button>
 				</div>
-			{/if}
-		</fieldset>
 
-		<label>
-			<span>{m.admin_field_collection()}</span>
-			<select class="input" name="collectionId">
-				<option value="">{m.admin_upload_no_collection()}</option>
-				{#each data.collections as collection}
-					<option value={collection.id} selected={collection.id === data.image.collectionId}>{collection.name}</option>
-				{/each}
-			</select>
-		</label>
+				{#if artistMode === 'existing'}
+					<label>
+						<span>{m.admin_field_artist()}</span>
+						<select class="input" name="artistId" required>
+							<option value="">{m.admin_upload_select_artist()}</option>
+							{#each data.artists as artist}
+								<option value={artist.id} selected={artist.id === data.image.artistId}>{artist.name}</option>
+							{/each}
+						</select>
+					</label>
+				{:else}
+					<input type="hidden" name="artistId" value="new" />
+					<label>
+						<span>{m.admin_field_artist_name()}</span>
+						<input type="text" class="input" placeholder={m.admin_upload_artist_name_placeholder()} name="artistName" required />
+					</label>
+					<div class="social-grid">
+						<label>
+							<span>Twitter/X</span>
+							<input type="text" class="input" placeholder={m.admin_social_handle_placeholder()} name="twitter" />
+						</label>
+						<label>
+							<span>Bluesky</span>
+							<input type="text" class="input" placeholder="bsky.app/profile/..." name="bluesky" />
+						</label>
+						<label>
+							<span>Telegram</span>
+							<input type="text" class="input" placeholder="t.me/..." name="telegram" />
+						</label>
+						<label>
+							<span>FurAffinity</span>
+							<input type="text" class="input" placeholder="furaffinity.net/user/..." name="furaffinity" />
+						</label>
+						<label>
+							<span>DeviantArt</span>
+							<input type="text" class="input" placeholder="deviantart.com/..." name="deviantart" />
+						</label>
+						<label>
+							<span>Patreon</span>
+							<input type="text" class="input" placeholder="patreon.com/..." name="patreon" />
+						</label>
+						<label>
+							<span>Instagram</span>
+							<input type="text" class="input" placeholder="instagram.com/..." name="instagram" />
+						</label>
+					</div>
+				{/if}
+			</fieldset>
 
-		<!-- Tags takes a full-width row of its own so the "Suggest tags" pill sits
-		     beside the input. The control draws the existing-tags hint under the
-		     field, as this form did before it. -->
-		<!-- Keyed on the image: a same-route navigation to a different image
-		     re-seeds the fields above, and a tray still offering the previous
-		     image's suggestions would add them to this one. -->
-		<!-- The tray's card ends 20px above the variant controls, close enough to
-		     read as part of the tray; the wrapper adds room under it while it is
-		     open, and only then, so the resting form keeps its rhythm. -->
-		<div class="tags-field">
-			{#key data.image.id}
+			<label>
+				<span>{m.admin_field_collection()}</span>
+				<select class="input" name="collectionId">
+					<option value="">{m.admin_upload_no_collection()}</option>
+					{#each data.collections as collection}
+						<option value={collection.id} selected={collection.id === data.image.collectionId}>{collection.name}</option>
+					{/each}
+				</select>
+			</label>
+
+			<!-- Tags takes a full-width row of its own so the "Suggest tags" pill sits
+			     beside the input. The control draws the existing-tags hint under the
+			     field, as this form did before it. -->
+			<!-- The tray's card ends 20px above the variant controls, close enough to
+			     read as part of the tray; the wrapper adds room under it while it is
+			     open, and only then, so the resting form keeps its rhythm. -->
+			<div class="tags-field">
 				<TagSuggestions
 					bind:value={tagsValue}
 					bind:rating={suggestedRating}
@@ -219,107 +237,107 @@
 					sourceUrl={sourcePostUrl}
 					existingTags={data.tags.map((t) => t.name)}
 				/>
-			{/key}
-		</div>
+			</div>
 
-		{#if data.hasVariants}
-			<p class="hint">{m.admin_variant_parent_hint()}</p>
-		{:else}
-			<div class="row">
-				<label class="flex-1">
-					<span>{m.admin_field_variant_of()}</span>
-					<select class="input" name="parentImageId" bind:value={selectedParentId}>
-						<option value="">{m.admin_variant_none()}</option>
-						{#each data.parentCandidates as candidate}
-							<option value={String(candidate.id)}>{candidate.title}</option>
-						{/each}
-					</select>
-				</label>
-				{#if selectedParentId}
+			{#if data.hasVariants}
+				<p class="hint">{m.admin_variant_parent_hint()}</p>
+			{:else}
+				<div class="row">
 					<label class="flex-1">
-						<span>{m.admin_field_variant_label()}</span>
-						<input
-							type="text"
-							class="input"
-							name="variantLabel"
-							placeholder={m.admin_variant_label_placeholder()}
-							value={data.image.variantLabel || ''}
-						/>
+						<span>{m.admin_field_variant_of()}</span>
+						<select class="input" name="parentImageId" bind:value={selectedParentId}>
+							<option value="">{m.admin_variant_none()}</option>
+							{#each data.parentCandidates as candidate}
+								<option value={String(candidate.id)}>{candidate.title}</option>
+							{/each}
+						</select>
 					</label>
-				{/if}
-			</div>
-		{/if}
-
-		{#if data.characters.length > 0}
-			<div class="field">
-				<span class="field-label">{m.gallery_featured_characters()}</span>
-				<div class="character-chips">
-					{#each data.characters as char}
-						<label class="chip">
-							<input type="checkbox" name="char-{char.id}" checked={data.imageCharacterIds.includes(char.id)} onchange={(e) => {
-								const el = document.querySelector('input[name="characters"]') as HTMLInputElement;
-								const current = new Set(el.value.split(',').filter(Boolean));
-								if (e.currentTarget.checked) current.add(String(char.id));
-								else current.delete(String(char.id));
-								el.value = Array.from(current).join(',');
-							}} />
-							<span>{char.name}</span>
-							{#if char.ownerName}<span class="chip-owner">({char.ownerName})</span>{/if}
+					{#if selectedParentId}
+						<label class="flex-1">
+							<span>{m.admin_field_variant_label()}</span>
+							<input
+								type="text"
+								class="input"
+								name="variantLabel"
+								placeholder={m.admin_variant_label_placeholder()}
+								value={data.image.variantLabel || ''}
+							/>
 						</label>
-					{/each}
+					{/if}
 				</div>
-				<input type="hidden" name="characters" value={data.imageCharacterIds.join(',')} />
-			</div>
-		{/if}
+			{/if}
 
-		<label>
-			<span>{m.admin_field_commissioned_date()}</span>
-			<input type="date" class="input" name="commissionedAt" value={data.image.commissionedAt || ''} />
-			<small class="hint">{m.admin_hint_commissioned_date()}</small>
-		</label>
+			{#if data.characters.length > 0}
+				<div class="field">
+					<span class="field-label">{m.gallery_featured_characters()}</span>
+					<div class="character-chips">
+						{#each data.characters as char}
+							<label class="chip">
+								<input type="checkbox" name="char-{char.id}" checked={data.imageCharacterIds.includes(char.id)} onchange={(e) => {
+									const el = document.querySelector('input[name="characters"]') as HTMLInputElement;
+									const current = new Set(el.value.split(',').filter(Boolean));
+									if (e.currentTarget.checked) current.add(String(char.id));
+									else current.delete(String(char.id));
+									el.value = Array.from(current).join(',');
+								}} />
+								<span>{char.name}</span>
+								{#if char.ownerName}<span class="chip-owner">({char.ownerName})</span>{/if}
+							</label>
+						{/each}
+					</div>
+					<input type="hidden" name="characters" value={data.imageCharacterIds.join(',')} />
+				</div>
+			{/if}
 
-		<div class="tag-check-row">
-			<label class="checkbox-label">
-				<input type="checkbox" name="nsfw" bind:checked={nsfw} bind:this={nsfwInput} aria-describedby={suggestedRating ? 'tags-rating' : undefined} />
-				<span>{m.admin_field_mark_nsfw()}</span>
+			<label>
+				<span>{m.admin_field_commissioned_date()}</span>
+				<input type="date" class="input" name="commissionedAt" value={data.image.commissionedAt || ''} />
+				<small class="hint">{m.admin_hint_commissioned_date()}</small>
 			</label>
-			<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw checkbox={nsfwInput} />
-		</div>
 
-		<label class="checkbox-label">
-			<input type="checkbox" name="published" checked={!data.image.published} />
-			<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
-		</label>
+			<div class="tag-check-row">
+				<label class="checkbox-label">
+					<input type="checkbox" name="nsfw" bind:checked={nsfw} bind:this={nsfwInput} aria-describedby={suggestedRating ? 'tags-rating' : undefined} />
+					<span>{m.admin_field_mark_nsfw()}</span>
+				</label>
+				<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw checkbox={nsfwInput} />
+			</div>
 
-		<label class="checkbox-label">
-			<input type="checkbox" name="featured" checked={data.image.featured} />
-			<span>{m.admin_field_featured()}</span>
-		</label>
+			<label class="checkbox-label">
+				<input type="checkbox" name="published" checked={!data.image.published} />
+				<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
+			</label>
 
-		<label>
-			<span>{m.admin_field_featured_order()}</span>
-			<input type="number" class="input" name="featuredOrder" value={data.image.featuredOrder ?? ''} />
-			<small class="hint">{m.admin_field_featured_order_hint()}</small>
-		</label>
+			<label class="checkbox-label">
+				<input type="checkbox" name="featured" checked={data.image.featured} />
+				<span>{m.admin_field_featured()}</span>
+			</label>
 
-		<label>
-			<span>{m.admin_field_source_url()}</span>
-			<input
-				type="url"
-				class="input"
-				name="sourcePostUrl"
-				aria-describedby={sourceDescribedBy}
-				bind:value={sourcePostUrl}
-			/>
-		</label>
+			<label>
+				<span>{m.admin_field_featured_order()}</span>
+				<input type="number" class="input" name="featuredOrder" value={data.image.featuredOrder ?? ''} />
+				<small class="hint">{m.admin_field_featured_order_hint()}</small>
+			</label>
 
-		<div class="form-actions">
-			<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
-			<button type="submit" class="btn btn-primary" disabled={saving}>
-				{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_save_changes()}{/if}
-			</button>
-		</div>
-	</form>
+			<label>
+				<span>{m.admin_field_source_url()}</span>
+				<input
+					type="url"
+					class="input"
+					name="sourcePostUrl"
+					aria-describedby={sourceDescribedBy}
+					bind:value={sourcePostUrl}
+				/>
+			</label>
+
+			<div class="form-actions">
+				<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
+				<button type="submit" class="btn btn-primary" disabled={saving}>
+					{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_save_changes()}{/if}
+				</button>
+			</div>
+		</form>
+	{/key}
 </div>
 
 <style>

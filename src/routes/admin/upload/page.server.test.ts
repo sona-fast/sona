@@ -186,7 +186,8 @@ describe('admin upload — tags that are accepted', () => {
 			.from(imageTags)
 			.innerJoin(tags, eq(tags.id, imageTags.tagId))
 			.where(eq(imageTags.imageId, newImage!.id));
-		expect(written.map((row) => row.name)).toEqual(['fox', 'bird']);
+		// Sorted: the select has no orderBy, so the row order is the database's.
+		expect(written.map((row) => row.name).sort()).toEqual(['bird', 'fox']);
 	});
 });
 

@@ -323,7 +323,12 @@ test('a pick of nothing but oversized files is counted, and never says it finish
 	// tiles are reported, and no batch opened that could later claim to be done.
 	await expect(page.locator(LIVE_REGION)).toHaveText("2 file(s) couldn't be added");
 	await page.waitForTimeout(300);
-	expect(await announced()).toEqual(["2 file(s) couldn't be added"]);
+	// The region above is the positive claim. The log is read for the negative
+	// one only: stageFiles retries the pick, and a retry clears the log after the
+	// first attempt's refusal has already been recorded while the region keeps
+	// showing it, so pinning the log to exactly that sentence raced the retry.
+	// What must never appear is a batch that claims to have finished.
+	expect((await announced()).filter((line) => line.startsWith('Upload finished'))).toEqual([]);
 	expect(uploads.counters.total).toBe(0);
 });
 

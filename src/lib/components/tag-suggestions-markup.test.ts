@@ -12,6 +12,28 @@ const chips = read('./TagSuggestionChips.svelte');
 const ratingNote = read('./TagRatingNote.svelte');
 const uploadPage = read('../../routes/admin/upload/+page.svelte');
 const editPage = read('../../routes/admin/images/[id]/edit/+page.svelte');
+
+describe('the edit page\'s re-seed effect', () => {
+	it('resets every piece of per-image state, the in-flight flag included', () => {
+		// The form is keyed on the image id, which rebuilds the markup, but the
+		// script's $state survives the remount: each value has to be re-seeded
+		// here or image B starts with image A's. `saving` is the one that is not a
+		// stored value, and a navigation mid-save would otherwise leave B's Save
+		// disabled until A's request landed.
+		const effect = editPage.match(/seededImageId = data\.image\.id;([\s\S]*?)\}\);/)?.[1] ?? '';
+		for (const line of [
+			'tagsValue = ',
+			'sourcePostUrl = ',
+			'selectedParentId = ',
+			"artistMode = 'existing';",
+			'referenceCleared = false;',
+			'saving = false;'
+		]) {
+			expect(effect).toContain(line);
+		}
+	});
+});
+
 const backfillPage = read('../../routes/admin/images/suggest-tags/+page.svelte');
 
 describe('the tag suggestion live region', () => {
@@ -284,32 +306,13 @@ describe('the backfill rows', () => {
 		);
 	});
 
-	it('leaves the thumbnail alt empty, because the row heading names the image', () => {
-		expect(backfillPage).toMatch(/src=\{cdnImage\(row\.thumbnailUrl \|\| row\.imageUrl, THUMB_WIDTH\)\}\s*alt=""/);
-	});
-
-	it('loads thumbnails at thumbnail width, lazily, like the other admin lists', () => {
-		// A row with no thumbnail would otherwise pull the full-size original,
-		// twenty times per page, before the operator has scrolled to it.
-		expect(backfillPage).toMatch(
-			/cdnImage\(row\.thumbnailUrl \|\| row\.imageUrl, THUMB_WIDTH\)[\s\S]{0,120}loading="lazy"\s*decoding="async"/
-		);
-	});
-
 	it('does not preload the backfill list on hover from the images page', () => {
 		// app.html preloads data on hover app-wide; the backfill load scans and
-		// classifies every untagged image, so this link waits for the tap.
+		// classifies every untagged image, so this link waits for the tap. A browser
+		// test cannot see the absence — a hover that preloads nothing looks the same
+		// as a hover the runtime never got around to — so the attribute is pinned here.
 		const imagesPage = read('../../routes/admin/images/+page.svelte');
 		expect(imagesPage).toMatch(/href="\/admin\/images\/suggest-tags"[^>]*data-sveltekit-preload-data="tap"/);
-	});
-
-	it('scopes the live-region and help ids per row so they stay unique', () => {
-		expect(backfillPage).toMatch(/id="row-\{row\.id\}-status"/);
-		expect(backfillPage).toMatch(/id="row-\{row\.id\}-help"/);
-		// The chip group takes its name from the eyebrow and the row title, so the
-		// title carries a per-row id too.
-		expect(backfillPage).toMatch(/id="row-\{row\.id\}-title"/);
-		expect(backfillPage).toMatch(/labelledBy="row-\{row\.id\}-status row-\{row\.id\}-title"/);
 	});
 });
 

@@ -99,9 +99,40 @@ test('the Suggest tags link on the image list opens the backfill page', async ({
 	// UI, so a renamed or dropped link would leave the backfill unreachable.
 	await loginRetrying(page, PASSWORD);
 	await gotoAfterLogin(page, '/admin/images');
-	await page.getByRole('link', { name: 'Suggest tags' }).click();
+	const link = page.getByRole('link', { name: 'Suggest tags' });
+
+	// The link also opts out of the app-wide hover preload, because this load scans
+	// and classifies every untagged image. That is asserted on the source in
+	// src/lib/components/tag-suggestions-markup.test.ts: a hover that preloads
+	// nothing is indistinguishable here from a hover the runtime ignored, so the
+	// browser cannot tell the guard from its absence.
+	await link.click();
 	await expect(page).toHaveURL(/\/admin\/images\/suggest-tags$/);
 	await expect(page.getByRole('heading', { level: 1, name: 'Suggest tags' })).toBeVisible();
+});
+
+test('a row thumbnail is decorative and loads lazily', async ({ page }) => {
+	// The seeded thumbnails 404, and a row swaps a failed one for its placeholder,
+	// so the image under test is served here rather than left to degrade.
+	await page.route('**/e2e/backfill-*', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'image/gif',
+			body: Buffer.from('R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==', 'base64')
+		})
+	);
+	await openList(page);
+
+	const thumb = row(page, 'Backfill 123').locator('.rowthumb img');
+	// Empty alt: the row heading beside it already names the image, and a screen
+	// reader hearing the title twice per row learns nothing the second time.
+	await expect(thumb).toHaveAttribute('alt', '');
+	// A row with no thumbnail would otherwise pull its full-size original, twenty
+	// times over, before the operator has scrolled to it.
+	await expect(thumb).toHaveAttribute('loading', 'lazy');
+	await expect(thumb).toHaveAttribute('decoding', 'async');
+	await expect(thumb).toHaveJSProperty('naturalWidth', 1);
+	await page.unroute('**/e2e/backfill-*');
 });
 
 test('the explainer keeps a reading measure on a wide screen', async ({ page }) => {
@@ -228,6 +259,35 @@ test('a row meta line names the source without an orphaned separator', async ({ 
 	await expect(row(page, 'Backfill 123').locator('.rowthumb svg')).toBeVisible();
 });
 
+test('two rows open at once keep their ids and their group names apart', async ({ page }) => {
+	// Every id inside an expanded row is scoped with the row id, because the page
+	// can hold more than one row open: a duplicate id would point both groups'
+	// aria-labelledby at the first row's status line, and a screen-reader user
+	// would hear the same image named twice. One open row cannot show that, so
+	// this test opens two.
+	await openList(page);
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['mammal', 'fox'],
+		rating: 'safe',
+		imageCount: 1
+	});
+
+	await clickSuggest(page, 'Backfill 123');
+	await clickSuggest(page, 'Backfill 121');
+	await expect(page.locator('li.rowcard [role="group"]')).toHaveCount(2);
+
+	// Each group's name carries its own row's title, so the two resolve apart.
+	await expect(page.getByRole('group', { name: /Backfill 123$/ })).toHaveCount(1);
+	await expect(page.getByRole('group', { name: /Backfill 121$/ })).toHaveCount(1);
+
+	const ids = await page.evaluate(() =>
+		Array.from(document.querySelectorAll('[id^="row-"]')).map((el) => el.id)
+	);
+	expect(ids.length).toBeGreaterThan(0);
+	expect(new Set(ids).size).toBe(ids.length);
+});
+
 test("a row's Suggest renders chips, and leaving one out changes the Save count", async ({ page }) => {
 	await openList(page);
 	await stubSuggestions(page, 200, {
@@ -247,6 +307,11 @@ test("a row's Suggest renders chips, and leaving one out changes the Save count"
 	await expect(
 		target.getByRole('group', { name: '4 suggested tags from entail.dev Backfill 120' })
 	).toBeVisible();
+	// And the help line under the chips describes the group, so the instruction
+	// reaches a screen-reader user who lands on a chip rather than reading past it.
+	await expect(target.getByRole('group')).toHaveAccessibleDescription(
+		'Select a tag to leave it out. Sona only shows tags entail.dev is confident about.'
+	);
 	await expect(chips.first()).toHaveAttribute('aria-pressed', 'true');
 	await expect(target.getByText('Rated safe by entail.dev.')).toBeVisible();
 	// The expanded row lines up with the title, not with the card padding. The
@@ -1058,6 +1123,8 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 	await gotoAfterLogin(page, '/admin/images/102/edit');
 	const storedTags = await page.locator('input[name="tags"]').inputValue();
 	const storedUrl = await page.locator('input[name="sourcePostUrl"]').inputValue();
+	const storedParent = await page.locator('select[name="parentImageId"]').inputValue();
+	const storedArtist = await page.locator('select[name="artistId"]').inputValue();
 
 	await gotoRetrying(page, '/admin/images/101/edit');
 	const tags = page.locator('input[name="tags"]');
@@ -1071,6 +1138,50 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 	await url.fill(BSKY_POST);
 	await tags.fill('typed-on-101');
 	await expect(pill).toHaveAttribute('aria-disabled', 'false');
+
+	// The parent select is bound state too, and image 103 is an eligible parent
+	// for both images: left alone across the navigation, saving 102 would file it
+	// under the parent picked for 101.
+	const parent = page.locator('select[name="parentImageId"]');
+	await parent.selectOption({ label: 'Backfill 103' });
+
+	// The rest of the form is seeded by plain attributes, which only re-render
+	// when the expression's VALUE changes: two images sharing a value (here: the
+	// same artist, both unfeatured, both with no characters and no explicit
+	// order) would carry the operator's edit across the navigation. The {#key}
+	// around the form is what builds them again from image 102's data.
+	const artist = page.locator('select[name="artistId"]');
+	const featured = page.locator('input[name="featured"]');
+	const featuredOrder = page.locator('input[name="featuredOrder"]');
+	const taroChip = page.locator('label.chip').filter({ hasText: 'Taro' });
+	const characters = page.locator('input[name="characters"]');
+	await artist.selectOption({ label: 'Avatar Artist' });
+	await featured.check();
+	await featuredOrder.fill('7');
+	// The chip writes the hidden field imperatively, so neither the checkbox nor
+	// the field is re-rendered by a value change on its own.
+	await taroChip.click();
+	await expect(characters).toHaveValue('1');
+	await page.locator('input[name="variantLabel"]').fill('typed-on-101');
+
+	// The reference live region is per-image UI state, not a stored value: cleared
+	// on 101, it would tell 102's operator that a designation they never made had
+	// just been cleared. Set first, so the clear has something to clear whatever
+	// an earlier test in this file left the owner character holding.
+	const clearReference = page.getByRole('button', { name: 'Clear reference sheet' });
+	if ((await clearReference.count()) === 0) {
+		await page.getByRole('button', { name: /^Use as .*reference sheet$/ }).click();
+		await expect(clearReference).toBeVisible();
+	}
+	await clearReference.click();
+	await expect(page.getByText('Reference sheet cleared')).toBeVisible();
+
+	// The artist toggle is per-image state too, and it decides which fields the
+	// form even has: left on "new", image 102 opens on a blank name field instead
+	// of its own artist.
+	await page.getByRole('button', { name: 'Add New Artist' }).click();
+	await expect(page.locator('input[name="artistName"]')).toBeVisible();
+	await expect(artist).toHaveCount(0);
 
 	// A tray open on image 101: its chips would otherwise still be there to Add
 	// onto image 102 after the navigation below.
@@ -1099,7 +1210,34 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 
 	await expect(tags).toHaveValue(storedTags);
 	await expect(url).toHaveValue(storedUrl);
+	await expect(parent).toHaveValue(storedParent);
 	await expect(page.locator('.tag-tray')).toHaveCount(0);
+
+	// Image 102's own stored values, not image 101's edits.
+	// The artist select is back, rather than the new-artist form left open on 101.
+	await expect(artist).toBeVisible();
+	await expect(page.locator('input[name="artistName"]')).toHaveCount(0);
+	await expect(artist).toHaveValue(storedArtist);
+	// And nothing was cleared on this image, so the live region says nothing.
+	await expect(page.getByText('Reference sheet cleared')).toHaveCount(0);
+	await expect(featured).not.toBeChecked();
+	await expect(featuredOrder).toHaveValue('');
+	await expect(page.locator('input[name="char-1"]')).not.toBeChecked();
+	await expect(characters).toHaveValue('');
+	// 102 has no parent, so the variant label it was typed into is gone with the
+	// block that held it.
+	await expect(page.locator('input[name="variantLabel"]')).toHaveCount(0);
+
+	// And what the form carries is what the save writes: read the row back from
+	// the database through a fresh load of the edit page.
+	await page.getByRole('button', { name: 'Save Changes' }).click();
+	await page.waitForURL('**/admin/images');
+	await gotoRetrying(page, '/admin/images/102/edit');
+	await expect(page.locator('select[name="artistId"]')).toHaveValue(storedArtist);
+	await expect(page.locator('input[name="featured"]')).not.toBeChecked();
+	await expect(page.locator('input[name="char-1"]')).not.toBeChecked();
+	await expect(page.locator('select[name="parentImageId"]')).toHaveValue(storedParent);
+	await expect(page.locator('input[name="tags"]')).toHaveValue(storedTags);
 });
 
 test('a failed lookup replaces the row pill with a tray that offers Try again', async ({ page }) => {

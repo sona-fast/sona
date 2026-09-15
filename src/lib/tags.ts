@@ -56,7 +56,8 @@ const STATUS_ID = /^\d{1,20}$/;
 
 /**
  * Recognise a post URL we know how to get suggestions for, and return it in
- * canonical form (no query string, no trailing slash, no `/photo/1` suffix).
+ * canonical form (no query string, no trailing slash, no `/photo/1` or
+ * `/video/1` suffix).
  * Anything else — including a bare media URL — returns null. Pure.
  */
 export function classifySourceUrl(url: string): SourceKind | null {
@@ -90,13 +91,26 @@ export function classifySourceUrl(url: string): SourceKind | null {
 
 	if (X_HOSTS.includes(host)) {
 		// /<user>/status/<id>, /i/status/<id>, /i/web/status/<id>, any with a
-		// trailing /photo/N. The `/i/web/` permalink is the form X's own share
+		// trailing /photo/N or /video/N. The `/i/web/` permalink is the form X's own share
 		// sheet hands out, so it canonicalises to /i/status/<id> like the rest.
 		if (parts[0] === 'i' && parts[1] === 'web') parts.splice(1, 1);
 		if (parts.length < 3) return null;
-		const [user, keyword, id] = parts;
+		const [user, keyword, id, ...rest] = parts;
 		if (keyword !== 'status' && keyword !== 'statuses') return null;
 		if (!STATUS_ID.test(id)) return null;
+		// Only a media permalink may follow the id — /photo/<n> for stills and
+		// /video/<n> for video and GIF posts, both naming the same status.
+		// Anything else is a page the contract says nothing about, and reading it
+		// as the post would hand the lookup a URL the operator never pointed at.
+		if (
+			rest.length > 0 &&
+			!(
+				rest.length === 2 &&
+				(rest[0] === 'photo' || rest[0] === 'video') &&
+				STATUS_ID.test(rest[1])
+			)
+		)
+			return null;
 		// `i` (the /i/status form) is a valid user segment by this pattern too.
 		if (!X_USER.test(user)) return null;
 		return { kind: 'x', url: `https://x.com/${user}/status/${id}`, id };

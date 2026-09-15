@@ -64,6 +64,16 @@ describe('classifySourceUrl', () => {
 		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890')).toEqual(canonical);
 		expect(classifySourceUrl('https://twitter.com/examplefox/status/1234567890?s=21')).toEqual(canonical);
 		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/photo/1')).toEqual(canonical);
+		// Video and GIF posts get a /video/<n> permalink for the same status.
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/video/1')).toEqual(canonical);
+		// Only a media permalink may follow the id: another page under the same
+		// status is not the post, and reading it as one looks up something the
+		// operator never linked.
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/not-a-photo')).toBeNull();
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/photo')).toBeNull();
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/photo/x')).toBeNull();
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/video/x')).toBeNull();
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/photo/1/extra')).toBeNull();
 		expect(classifySourceUrl('https://mobile.twitter.com/examplefox/statuses/1234567890')).toEqual(
 			canonical
 		);
