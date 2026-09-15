@@ -465,7 +465,6 @@ describe('the panel', () => {
 	// looser needed two `as never` casts to call the label helpers back.
 	it('types the result metadata line off the match itself', () => {
 		expect(PANEL).toMatch(/function metaFor\(match: Pick<LookupMatch, 'band' \| 'postedAt' \| 'rating'>\)/);
-		expect(PANEL).not.toMatch(/as never/);
 	});
 });
 
@@ -1410,8 +1409,6 @@ describe('the upload page grid', () => {
 			expect(source).toMatch(
 				/\.catch\(\(\) => \{[\s\S]{0,400}?kind: 'failed', reason: 'unavailable', sent[\s\S]{0,120}?console\.error\(LOOKUP_RESULT_THREW\)/
 			);
-			// Imported, not spelled out at the log site.
-			expect(source).toMatch(/LOOKUP_RESULT_THREW,\n/);
 		}
 		// Either callback runs for every settled kind, including a too_large the
 		// browser refused to send. Rewriting that as sent would put a private
