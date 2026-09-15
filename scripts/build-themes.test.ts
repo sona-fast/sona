@@ -148,6 +148,40 @@ describe('renderThemesCss', () => {
 		expect(() => renderThemesCss(bad)).toThrow(/unbalanced ' quote/);
 	});
 
+	// The character set allows spaces and commas, so a value that is nothing but
+	// separators passes it and still emits a declaration with no family in it.
+	it.each([
+		['whitespace only', '   '],
+		['a lone comma', ','],
+		['an empty entry between two names', 'Arial,,sans-serif']
+	])('rejects a font-family that is %s', (_name, primary) => {
+		const bad: ThemeDefinition[] = [
+			{
+				id: 'default',
+				label: 'Bad',
+				dark: {},
+				light: {},
+				fonts: { primary, secondary: "'B', sans-serif" }
+			}
+		];
+		expect(() => renderThemesCss(bad)).toThrow(/empty family name/);
+	});
+
+	// The split is on commas outside quotes, so a comma inside a quoted name is
+	// part of the name rather than a separator.
+	it('accepts a comma inside a quoted family name', () => {
+		const ok: ThemeDefinition[] = [
+			{
+				id: 'default',
+				label: 'Default',
+				dark: {},
+				light: {},
+				fonts: { primary: "'Foo, Bar', serif" }
+			}
+		];
+		expect(renderThemesCss(ok)).toContain("--font-primary: 'Foo, Bar', serif;");
+	});
+
 	// The scan tracks which quote opened the string, so the other one inside it is
 	// just a character: a per-quote count rejected this well-formed family.
 	it('accepts an apostrophe inside a double-quoted family name', () => {

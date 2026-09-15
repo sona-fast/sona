@@ -101,17 +101,33 @@ function validateTheme(theme: ThemeDefinition): void {
 		// leaves the rest of the stylesheet inside a literal. One scan, tracking
 		// which quote opened the current string and ignoring the other while it is
 		// open — counting each quote separately would reject the legitimate
-		// `"Sparky's Font", sans-serif`.
+		// `"Sparky's Font", sans-serif`. The same scan splits the list on the
+		// commas that are outside a quoted name, so `"Foo, Bar", serif` stays one
+		// name plus a fallback.
 		let open: "'" | '"' | undefined;
+		const entries: string[] = [];
+		let entry = '';
 		for (const char of family) {
 			if (open === undefined) {
 				if (char === "'" || char === '"') open = char;
+				else if (char === ',') {
+					entries.push(entry);
+					entry = '';
+					continue;
+				}
 			} else if (char === open) {
 				open = undefined;
 			}
+			entry += char;
 		}
+		entries.push(entry);
 		if (open !== undefined) {
 			throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has an unbalanced ${open} quote`);
+		}
+		// An empty entry — a blank value, a lone comma, `Arial,,sans-serif` — emits
+		// a declaration the browser drops, so reject it here instead.
+		if (entries.some((name) => name.trim() === '')) {
+			throw new Error(`theme '${theme.id}': ${slot} font-family '${family}' has an empty family name`);
 		}
 	}
 }
