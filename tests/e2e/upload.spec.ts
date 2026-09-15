@@ -1056,6 +1056,14 @@ test('the sticker pack form names the refusal and keeps the good file in the bat
 	await expect(banner).toContainText('e2e-unscrubbable.png');
 	await expect(banner).toContainText('Export a fresh copy from an image editor');
 
+	// The form uploads one file at a time and renders the banner as soon as the
+	// refusal comes back, so the banner above can appear while the good file's
+	// POST is still in flight. Wait for both responses before reading statuses.
+	// At least two rather than exactly two: a response from a superseded staging
+	// attempt can land after the reset, and the sorted comparison below names
+	// what was actually seen instead of timing out here.
+	await expect.poll(() => statuses.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+
 	// The statuses the server really answered with — one refusal, one success.
 	// Order varies with staging order, so compare sorted.
 	expect([...statuses].sort((a, b) => a - b)).toEqual([200, 422]);
