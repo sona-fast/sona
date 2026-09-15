@@ -23,6 +23,7 @@
 		lookupSentFile,
 		sentAfterApplyThrew,
 		withCreatedArtist,
+		type LookupCleared,
 		type LookupFailReason,
 		type LookupFields,
 		type LookupMatch,
@@ -510,6 +511,11 @@
 	// operator types: clearing a pasted URL afterwards would make the panel say
 	// Sona left the field empty, which the operator did, not Sona.
 	let sharedUrlHeld = $state(false);
+	// The other half of that record: which of the two fields this result EMPTIED,
+	// because the last lookup filled it and this one has no post or no date to
+	// put back (SONA-220). Without it the status line says a field was left as it
+	// was while the operator watched it go blank (4.1.3).
+	let sharedCleared = $state<LookupCleared>({});
 	const sharedEdited = $derived({
 		sourcePostUrl: sharedFilled.sourcePostUrl !== undefined && !sourceTagged,
 		commissionedAt: sharedFilled.commissionedAt !== undefined && !dateTagged
@@ -804,6 +810,7 @@
 		dateTagged = false;
 		sharedFilled = {};
 		sharedUrlHeld = false;
+		sharedCleared = {};
 		resetSharedResult();
 	}
 
@@ -845,30 +852,35 @@
 			commissionedAt: ownDate
 		});
 		sharedFilled = fields;
+		const cleared: LookupCleared = {};
 		if (fields.sourcePostUrl !== undefined) {
-			// Written only when it is really different. Re-assigning the same URL
-			// still counts as a change to everything watching the field, and the
-			// suggestion control answers one by dropping the chips and the rating it
-			// is holding — for a second lookup that landed on the same post.
-			if (sourcePostUrl !== fields.sourcePostUrl) sourcePostUrl = fields.sourcePostUrl;
+			// Assigned plainly. A second lookup that lands on the SAME post writes
+			// the same string, and $state only notifies on a value that differs, so
+			// the suggestion control keeps the chips and the rating it is holding
+			// rather than answering a change that did not happen.
+			sourcePostUrl = fields.sourcePostUrl;
 			sourceTagged = true;
 			wrote.sourcePostUrl = true;
 		} else if (sourceTagged) {
 			// This result has no post to offer — no match, or a clash whose URL
 			// belongs to another piece — so the last one's URL goes now. Deferred to
 			// here rather than done at the start: until the result was in, there was
-			// no way to know it would not be refilled.
+			// no way to know it would not be refilled. Recorded, because the status
+			// line has to say the field was emptied instead of left alone.
 			sourcePostUrl = '';
 			sourceTagged = false;
+			cleared.sourcePostUrl = true;
 		}
 		if (fields.commissionedAt !== undefined) {
-			if (commissionedAt !== fields.commissionedAt) commissionedAt = fields.commissionedAt;
+			commissionedAt = fields.commissionedAt;
 			dateTagged = true;
 			wrote.commissionedAt = true;
 		} else if (dateTagged) {
 			commissionedAt = '';
 			dateTagged = false;
+			cleared.commissionedAt = true;
 		}
+		sharedCleared = cleared;
 		return wrote;
 	}
 
@@ -1430,6 +1442,7 @@
 				fileName={tiles.length > 1 ? (parentTile?.fileName ?? '') : ''}
 				filled={sharedFilled}
 				edited={sharedEdited}
+				cleared={sharedCleared}
 				sourceUrlHeld={sharedUrlHeld}
 				{appliedArtist}
 				privateNotice={sharedSentPrivate && lookupSentFile(sharedLookup)}
@@ -1630,6 +1643,12 @@
 		flex-direction: column;
 		gap: 20px;
 		max-width: 800px;
+		/* The NSFW row's wrapping is about this column's width, not the window's
+		   (SONA-220). Safe to contain: the width comes from the page and the
+		   max-width above, never from the content, and the new-artist dialog with
+		   its fixed overlay is mounted outside this form. */
+		container-type: inline-size;
+		container-name: admin-form;
 	}
 
 	.upload-form h2 {
@@ -2114,11 +2133,33 @@
 		font-size: 11px;
 		color: var(--muted-foreground);
 		border: 1px solid var(--border);
-		border-radius: var(--radius-pill);
+		/* A fixed radius, not the pill token. Wrapped to three or more lines the
+		   token clamps to half the box height, which pulls the end caps' arc inside
+		   the text's own inset and leaves the first and last lines running flush
+		   against the border. At one line the two are identical. */
+		border-radius: 12px;
 		padding: 1px 8px;
 		white-space: normal;
-		overflow-wrap: anywhere;
+		overflow-wrap: break-word;
 		max-width: 100%;
+	}
+
+	/* With room for all four, this row holds one line and the two rating items
+	   give up the difference instead of pushing "Mark it NSFW" onto a second row.
+	   Flex picks its line breaks from each item's CONTENT size however shrinkable
+	   it is, so a zero basis is what takes the two out of that decision; the cap
+	   keeps either from stretching past its own text. The floor is what makes it
+	   safe: without one, a column narrower than the row shrinks both items until
+	   the text is a character per line, and with one an overfull row drops the
+	   button to a second line the way it always did. Asked of the column, not the
+	   window — this form's column is 219px wide in an 800px window. */
+	@container admin-form (min-width: 560px) {
+		.nsfw-row .rating-tag,
+		.nsfw-row :global(.tag-rating-note) {
+			flex: 1 1 0;
+			min-width: 14ch;
+			max-width: max-content;
+		}
 	}
 
 	.field-label {

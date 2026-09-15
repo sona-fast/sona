@@ -537,7 +537,7 @@ describe('the "From lookup" tag', () => {
 		// cannot drop a field it did not write. It still cannot carry a PREVIOUS
 		// result's seed: applyPrefill empties it before the new one is described.
 		expect(EDIT).toMatch(
-			/function applyPrefill\([\s\S]{0,300}?lookupSeeded = \{\};/
+			/function applyPrefill\([\s\S]{0,600}?lookupSeeded = \{\};/
 		);
 		expect(EDIT).toMatch(
 			/const lookupSeedEdited = \$derived\(\{[\s\S]{0,300}?artistName: lookupSeeded\.artistName !== undefined && !nameTagged/
@@ -562,7 +562,9 @@ describe('the "From lookup" tag', () => {
 		expect(PANEL).toContain("statusKind === 'date_kept'");
 		expect(PANEL).toContain('m.admin_lookup_status_url_kept(');
 		expect(PANEL).toContain('m.admin_lookup_status_date_kept(');
-		expect(PANEL).toMatch(/statusLineKind\(filled, \{ clash: !!clash, edited, urlHeld: sourceUrlHeld \}\)/);
+		expect(PANEL).toMatch(
+			/statusLineKind\(filled, \{ clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared \}\)/
+		);
 		expect(PANEL).toMatch(/seedStatusKind\(seeded, seedEdited\)/);
 	});
 
@@ -630,10 +632,10 @@ describe('the artist on the edit page', () => {
 	it('undoes the previous lookup before running another one', () => {
 		expect(EDIT).toMatch(/function startLookup\(\)[\s\S]{0,400}?resetLookupPrefill\(\);/);
 		const reset = EDIT.match(/function resetLookupPrefill\(\)[\s\S]*?\n\t\}/)?.[0] ?? '';
-		// Only what the lookup itself wrote: the tag is the record of that.
+		// Only what the lookup itself wrote: the tag is the record of that. The
+		// inline new-artist fields go at the click; the two prefilled fields wait
+		// for the result, which is the only thing that can refill them (SONA-220).
 		for (const [tag, field] of [
-			['sourceTagged', 'sourcePostUrl'],
-			['dateTagged', 'commissionedAt'],
 			['nameTagged', 'artistName'],
 			['twitterTagged', 'newTwitter'],
 			['furaffinityTagged', 'newFuraffinity']
@@ -641,8 +643,19 @@ describe('the artist on the edit page', () => {
 			expect(reset).toMatch(new RegExp(`if \\(${tag}\\) ${field} = '';`));
 			expect(reset).toMatch(new RegExp(`${tag} = false;`));
 		}
+		expect(reset).not.toMatch(/sourceTagged|dateTagged/);
 		expect(reset).toMatch(/lookupFilled = \{\};/);
 		expect(reset).toMatch(/lookupSeeded = \{\};/);
+		// The two the reset no longer owns are still undone, by the result.
+		const applyPrefill = EDIT.match(/function applyPrefill\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		for (const [tag, field] of [
+			['sourceTagged', 'sourcePostUrl'],
+			['dateTagged', 'commissionedAt']
+		]) {
+			expect(applyPrefill).toMatch(new RegExp(`\\} else if \\(${tag}\\) \\{`));
+			expect(applyPrefill).toMatch(new RegExp(`${field} = '';`));
+			expect(applyPrefill).toMatch(new RegExp(`${tag} = false;`));
+		}
 	});
 
 	// Five of the inline form's inputs (Bluesky, Telegram, DeviantArt, Patreon,
@@ -681,10 +694,10 @@ describe('round 11 wiring', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(/sourceUrlHeld=\{(shared|lookup)UrlHeld\}/);
 			expect(source).not.toContain("sourceUrlHeld={sourcePostUrl.trim() !== ''}");
-			// The upload page reads the value the operator OWNS rather than the raw
-			// field: a URL its own last prefill wrote is not held by anybody, and
-			// that one is no longer blanked before the result lands.
-			expect(source).toMatch(/(shared|lookup)UrlHeld = (ownSource|sourcePostUrl)\.trim\(\) !== '';/);
+			// Both pages read the value the operator OWNS rather than the raw field:
+			// a URL their own last prefill wrote is not held by anybody, and that one
+			// is no longer blanked before the result lands.
+			expect(source).toMatch(/(shared|lookup)UrlHeld = ownSource\.trim\(\) !== '';/);
 		}
 	});
 
@@ -692,7 +705,10 @@ describe('round 11 wiring', () => {
 	// the sentence goes away as soon as the operator edits the field the lookup
 	// filled — which says nothing about whether the artist is still unapplied.
 	it('renders the artist hint on its own condition, not the status line\'s', () => {
-		const status = PANEL.match(/\{#if statusKind !== 'none' && prefill\}[\s\S]*?\{\/if\}/)?.[0] ?? '';
+		const status =
+			PANEL.match(/\{#if statusKind !== 'none' && \(prefill \|\| emptiedOnly\)\}[\s\S]*?\{\/if\}/)?.[0] ??
+			'';
+		expect(status).toContain('admin_lookup_status_both');
 		expect(status).not.toContain('admin_lookup_status_artist_hint');
 		expect(PANEL).toMatch(
 			/const artistHintShown = \$derived\(\s*\n?\s*editMode && outcome === 'existing' && !appliedArtist && !!candidates\[0\]/
@@ -1132,6 +1148,67 @@ describe('focus after the panel goes away', () => {
 		);
 	});
 
+	// A repeat lookup used to blank the source post URL at the click and refill it
+	// when the result came back. Everything downstream of that field saw it change
+	// twice — the tag-suggestion control drops its chips and its rating on any
+	// change (SONA-220) — for a lookup that landed on the very same post. Both
+	// pages now keep the two prefilled fields until the result is in.
+	it('keeps the two prefilled fields until the result lands, on both pages', () => {
+		// Neither click-time reset touches them any more.
+		expect(UPLOAD).not.toMatch(
+			/function resetSharedResult\(\)[\s\S]{0,900}?if \(sourceTagged\) sourcePostUrl = '';/
+		);
+		expect(EDIT).not.toMatch(
+			/function resetLookupPrefill\(\)[\s\S]{0,900}?if \(sourceTagged\) sourcePostUrl = '';/
+		);
+		expect(EDIT).not.toMatch(
+			/function resetLookupPrefill\(\)[\s\S]{0,900}?if \(dateTagged\) commissionedAt = '';/
+		);
+		// The inline new-artist fields still go at the click: nothing downstream
+		// watches them, and the announcement in startLookup says they went.
+		expect(EDIT).toMatch(
+			/function resetLookupPrefill\(\)[\s\S]{0,400}?if \(nameTagged\) artistName = '';/
+		);
+		expect(EDIT).toMatch(/resetLookupPrefill\(\);/);
+		for (const [source, apply] of [
+			[UPLOAD, 'applyShared'],
+			[EDIT, 'applyPrefill']
+		] as const) {
+			// The result reads a still-tagged value as the lookup's own, so it may
+			// refill it. Only the tag tells that from something the operator typed.
+			expect(source).toMatch(
+				new RegExp(
+					`function ${apply}\\([\\s\\S]{0,900}?const ownSource = sourceTagged \\? '' : sourcePostUrl;\\s+const ownDate = dateTagged \\? '' : commissionedAt;`
+				)
+			);
+			// And where the result offers nothing, the deferred field is emptied
+			// there instead — recorded, so the status line can say so (4.1.3).
+			expect(source).toMatch(
+				new RegExp(
+					`function ${apply}\\([\\s\\S]{0,2000}?\\} else if \\(sourceTagged\\) \\{[\\s\\S]{0,600}?sourcePostUrl = '';\\s+sourceTagged = false;\\s+cleared\\.sourcePostUrl = true;`
+				)
+			);
+			expect(source).toMatch(
+				new RegExp(
+					`function ${apply}\\([\\s\\S]{0,2400}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
+				)
+			);
+			expect(source).toMatch(/cleared=\{(shared|lookup)Cleared\}/);
+		}
+		// The panel reads that record, and says the field was emptied rather than
+		// left as it was.
+		expect(PANEL).toMatch(/statusLineKind\(filled, \{ clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared \}\)/);
+		for (const key of [
+			'admin_lookup_status_url_and_date_emptied',
+			'admin_lookup_status_date_and_url_emptied',
+			'admin_lookup_status_both_emptied',
+			'admin_lookup_status_url_emptied',
+			'admin_lookup_status_date_emptied'
+		]) {
+			expect(PANEL).toContain(`m.${key}`);
+		}
+	});
+
 	// The Remove button lives inside the tile it removes, so activating it from
 	// the keyboard dropped focus on <body> and the next Tab restarted at the top
 	// of the page (2.4.3). Every tile's button also read "Remove file" (2.4.6).
@@ -1206,10 +1283,14 @@ describe('the rating tag beside NSFW', () => {
 			expect(source).toMatch(/\.nsfw-row[\s\S]{0,80}\{[^}]*flex-wrap: wrap;/);
 		}
 		// Wrapped, the two pills and the "Mark it NSFW" button all line up under
-		// the label text rather than one of them under the checkbox.
+		// the label text rather than one of them under the checkbox. Asked of the
+		// COLUMN: both forms hold this row in a grid column far narrower than the
+		// window, so a viewport query indented the phone and left every width in
+		// between wrapping to the checkbox's edge.
 		expect(APP_CSS).toMatch(
-			/@media \(max-width: 640px\) \{[\s\S]{0,400}?\.tag-check-row \.tag-rating-note,\s+\.tag-check-row \.rating-tag,\s+\.tag-check-row \.btn \{\s+margin-left: 24px;/
+			/@container admin-form \(max-width: 559px\) \{[\s\S]{0,900}?\.tag-check-row \.tag-rating-note,\s+\.tag-check-row \.rating-tag,\s+\.tag-check-row \.btn \{\s+margin-left: 24px;/
 		);
+		expect(APP_CSS).not.toMatch(/@media \(max-width: 640px\)[\s\S]{0,900}?\.tag-check-row/);
 	});
 
 	// The text grows with the number of sites; nowrap made the pill wider than
@@ -1220,11 +1301,49 @@ describe('the rating tag beside NSFW', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(/\.rating-tag \{[^}]*max-width: 100%/);
 			expect(source).toMatch(/\.rating-tag \{[^}]*white-space: normal;/);
-			expect(source).toMatch(/\.rating-tag \{[^}]*overflow-wrap: anywhere;/);
+			// break-word, not anywhere: anywhere breaks mid-word, which is how a
+			// squeezed pill ends up one character per line.
+			expect(source).toMatch(/\.rating-tag \{[^}]*overflow-wrap: break-word;/);
+			expect(source).not.toMatch(/\.rating-tag \{[^}]*overflow-wrap: anywhere;/);
 			// No rule anywhere puts it back on one line.
 			expect(source).not.toMatch(/\.rating-tag \{[^}]*white-space: nowrap;/);
 		}
 		expect(UPLOAD).toMatch(/\.tile-nsfw-row \{[^}]*min-width: 0/);
+	});
+
+	// Wrapped to three or more lines, the pill token clamps to half the box height
+	// and the end caps' arc lands inside the text's own inset, so the first and
+	// last lines run flush against the border. A fixed radius holds through any
+	// number of lines, and at one line the two are the same shape.
+	it('caps the pill radius rather than following the box height', () => {
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(/\.rating-tag \{[^}]*border-radius: 12px;/);
+			expect(source).not.toMatch(/\.rating-tag \{[^}]*border-radius: var\(--radius-pill\)/);
+		}
+	});
+
+	// Where the column has room for all four, the two rating items give up the
+	// difference rather than pushing "Mark it NSFW" onto a second row: flex breaks
+	// a line on each item's CONTENT size however shrinkable it is, so a zero basis
+	// is what takes them out of that decision. The floor is what makes that safe —
+	// keyed to the window instead, the same rule ran in a 219px column and shrank
+	// both items to about one character per line.
+	it('shrinks the two rating items only where the column has room', () => {
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(
+				/@container admin-form \(min-width: 560px\) \{\s+\.nsfw-row \.rating-tag,\s+\.nsfw-row :global\(\.tag-rating-note\) \{\s+flex: 1 1 0;\s+min-width: 14ch;\s+max-width: max-content;/
+			);
+			// Nothing shrinks off a viewport query any more.
+			expect(source).not.toMatch(/@media \([^)]*\) \{\s+\.nsfw-row \.rating-tag,/);
+		}
+		// The column each form names, and the tile row is not one of them.
+		expect(EDIT).toMatch(
+			/\.edit-form \{[\s\S]{0,400}?container-type: inline-size;\s+container-name: admin-form;/
+		);
+		expect(UPLOAD).toMatch(
+			/\.upload-form \{[\s\S]{0,400}?container-type: inline-size;\s+container-name: admin-form;/
+		);
+		expect(UPLOAD).not.toMatch(/\.tile-nsfw-row[\s\S]{0,200}?container-type/);
 	});
 });
 

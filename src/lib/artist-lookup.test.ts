@@ -749,6 +749,75 @@ describe('statusLineKind', () => {
 		}
 	});
 
+	// A second lookup keeps the fields the first one filled until its own result
+	// lands, so a result with no post or no date empties one of them THEN. Saying
+	// it was "left as it was" is a false report of a field the operator just
+	// watched go blank (4.1.3).
+	it('says a deferred field was emptied rather than left alone', () => {
+		expect(
+			statusLineKind({ sourcePostUrl: 'u' }, { cleared: { commissionedAt: true } })
+		).toBe('url_and_date_emptied');
+		expect(
+			statusLineKind({ commissionedAt: 'd' }, { cleared: { sourcePostUrl: true } })
+		).toBe('date_and_url_emptied');
+		// Nothing filled at all: a no-match, or a result the operator's own typing
+		// left no room for.
+		expect(
+			statusLineKind({}, { cleared: { sourcePostUrl: true, commissionedAt: true } })
+		).toBe('both_emptied');
+		expect(statusLineKind({}, { cleared: { sourcePostUrl: true } })).toBe('url_emptied');
+		expect(statusLineKind({}, { cleared: { commissionedAt: true } })).toBe('date_emptied');
+		// An empty record changes nothing about the sentences that were there.
+		expect(statusLineKind({ sourcePostUrl: 'u' }, { cleared: {} })).toBe('url_only');
+		expect(statusLineKind({ sourcePostUrl: 'u', commissionedAt: 'd' }, { cleared: {} })).toBe(
+			'both'
+		);
+	});
+
+	// The clash sentence already says the URL was left empty, which is exactly
+	// what emptying it leaves behind — so only the date needs the new kinds.
+	it('keeps the clash sentence over an emptied URL', () => {
+		expect(
+			statusLineKind({ commissionedAt: 'd' }, { clash: true, cleared: { sourcePostUrl: true } })
+		).toBe('clash');
+		// A clash that carries no date either: the clash sentence claims a date it
+		// did not fill, so the emptied one is what is left to say.
+		expect(
+			statusLineKind(
+				{},
+				{ clash: true, cleared: { sourcePostUrl: true, commissionedAt: true } }
+			)
+		).toBe('both_emptied');
+	});
+
+	it('names the emptied field in the sentence, in both locales', () => {
+		expect(m.admin_lookup_status_url_and_date_emptied({ site: 'Twitter' }, { locale: 'en' })).toBe(
+			'Sona filled the source post URL from the Twitter post and emptied the commissioned date the last lookup filled, because that post carries no date. You can change the URL before you save.'
+		);
+		expect(m.admin_lookup_status_url_emptied({}, { locale: 'en' })).toBe(
+			'Sona emptied the source post URL the last lookup filled, because this result has no post to put there.'
+		);
+		for (const line of [
+			m.admin_lookup_status_url_and_date_emptied({ site: 'Twitter' }, { locale: 'ja' }),
+			m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'ja' }),
+			m.admin_lookup_status_both_emptied({}, { locale: 'ja' }),
+			m.admin_lookup_status_url_emptied({}, { locale: 'ja' }),
+			m.admin_lookup_status_date_emptied({}, { locale: 'ja' })
+		]) {
+			expect(line).toContain('空にしました');
+		}
+		// None of them claims a field was left alone, which is what they replace.
+		for (const locale of ['en', 'ja'] as const) {
+			for (const key of [
+				m.admin_lookup_status_both_emptied,
+				m.admin_lookup_status_url_emptied,
+				m.admin_lookup_status_date_emptied
+			]) {
+				expect(key({}, { locale })).not.toMatch(/left as it was|そのままに/);
+			}
+		}
+	});
+
 	// url_only has two causes and the kind cannot tell them apart: the post
 	// carried no date, or the date field already held one. The sentence used to
 	// assert the first ("That post has no date"), which is a false claim in the

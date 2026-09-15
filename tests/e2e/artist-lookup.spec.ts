@@ -54,65 +54,62 @@ function matchedBody(over: Record<string, unknown> = {}) {
 // suggestion control refusing and only one pill on the page.
 const X_POST = 'https://x.com/kuttoya/status/1789012345678901234';
 
+const X_MATCH = {
+	site: 'Twitter',
+	siteId: '1789012345678901234',
+	handles: ['kuttoya'],
+	distance: 0,
+	band: 'exact',
+	postedAt: '2026-03-04T10:00:00Z',
+	rating: 'adult',
+	postUrl: X_POST
+};
+
 /** One confident match on that X post, rated adult, so the lookup fills the
- * source field with a URL the suggestion pill will accept. */
-function xMatchBody() {
-	return matchedBody({
-		matches: [
-			{
-				site: 'Twitter',
-				siteId: '1789012345678901234',
-				handles: ['kuttoya'],
-				distance: 0,
-				band: 'exact',
-				postedAt: '2026-03-04T10:00:00Z',
-				rating: 'adult',
-				postUrl: X_POST
-			}
-		]
-	});
+ * source field with a URL the suggestion pill will accept. `over` changes that
+ * one match, which is how the repeat-lookup tests name another post without
+ * restating the other seven fields. */
+function xMatchBody(over: Record<string, unknown> = {}) {
+	return matchedBody({ matches: [{ ...X_MATCH, ...over }] });
 }
 
 // A second X status, for the case where a repeat lookup lands somewhere else.
 const X_POST_2 = 'https://x.com/kuttoya/status/1789012345678909999';
+const X_SITE_ID_2 = '1789012345678909999';
+/** The same match on that second post: what a repeat lookup that lands
+ * elsewhere comes back with. */
+const SECOND_POST = {
+	siteId: X_SITE_ID_2,
+	postUrl: X_POST_2,
+	postedAt: '2026-03-05T10:00:00Z'
+};
+
+/** The clash row itself: a piece that already claims the matched post. */
+function sourceClash(imageId: number, title: string) {
+	return {
+		imageId,
+		title,
+		isVariant: false,
+		parentImageId: null,
+		variantCount: 0,
+		thumbnailUrl: null,
+		artistName: 'Test Artist',
+		uploadedAt: '2026-07-09T00:00:00.000Z',
+		width: 1200,
+		height: 900
+	};
+}
 
 /** The X match with a source clash on it: the post already belongs to another
  * piece, so the prefill deliberately leaves the source URL alone. */
 function xClashBody(imageId: number, title: string) {
-	return {
-		...xMatchBody(),
-		sourceClash: {
-			imageId,
-			title,
-			isVariant: false,
-			parentImageId: null,
-			variantCount: 0,
-			thumbnailUrl: null,
-			artistName: 'Test Artist',
-			uploadedAt: '2026-07-09T00:00:00.000Z',
-			width: 1200,
-			height: 900
-		}
-	};
+	return { ...xMatchBody(), sourceClash: sourceClash(imageId, title) };
 }
 
 /** The same confident match, plus a source clash on a piece the page never
  * loaded an option for. */
 function clashBody(imageId: number, title: string) {
-	return matchedBody({
-		sourceClash: {
-			imageId,
-			title,
-			isVariant: false,
-			parentImageId: null,
-			variantCount: 0,
-			thumbnailUrl: null,
-			artistName: 'Test Artist',
-			uploadedAt: '2026-07-09T00:00:00.000Z',
-			width: 1200,
-			height: 900
-		}
-	});
+	return matchedBody({ sourceClash: sourceClash(imageId, title) });
 }
 
 async function stubLookup(page: Page, body: unknown, status = 200) {
@@ -644,15 +641,74 @@ test.describe('with a key saved', () => {
 		await expect(nsfw).toHaveAccessibleDescription(/Rated explicit by entail.dev/);
 		await expect(nsfw).not.toBeChecked();
 
-		// Both pills fit on the row itself at this width. "Mark it NSFW" does not:
-		// the two forms hold the same row in different columns (this one is 600px
-		// wide, the upload form 800px), and the four items want about 606px here,
-		// so the button wraps on this page and not on that one. Left as an open
-		// question rather than pinned either way — closing it means changing how
-		// wide this whole form is, which is a layout decision about every field on
-		// the page and not something a rating pill gets to settle.
+		// All four items hold one row at this width. They want about 606px in a
+		// 600px column, and flex breaks a line on content size however shrinkable
+		// an item is, so "Mark it NSFW" used to drop to a row of its own here while
+		// the upload form, 800px wide, kept it inline. The two pills give up the
+		// difference instead and wrap their own text (SONA-220).
 		await expect(page.locator('#lookup-rating-tag')).toBeVisible();
 		await expect(page.locator('#tags-rating')).toBeVisible();
+		// Compared by centre, not by top: the row centres its items, and the button
+		// is 36px tall beside an 18px label, so equal tops would be the wrong test
+		// for "same row" — they were never equal, even before the button wrapped.
+		const centre = async (selector: string) => {
+			const box = await page.locator(selector).boundingBox();
+			if (!box) throw new Error(`${selector} has no box`);
+			return box.y + box.height / 2;
+		};
+		const labelCentre = await centre('.tag-check-row .checkbox-label');
+		for (const selector of [
+			'#lookup-rating-tag',
+			'#tags-rating',
+			'.tag-check-row .btn'
+		]) {
+			expect(Math.abs((await centre(selector)) - labelCentre)).toBeLessThanOrEqual(1);
+		}
+		await expect(page.locator('.tag-check-row .btn')).toHaveText('Mark it NSFW');
+		// And the phone is untouched by that: shrinking the pills is a rule for the
+		// wide row only, so at 320 the row still wraps whole items, each onto its
+		// own line under the label text rather than under the checkbox.
+		await page.setViewportSize({ width: 320, height: 900 });
+		const label = await page.locator('.tag-check-row .checkbox-label').boundingBox();
+		if (!label) throw new Error('the checkbox label has no box');
+		for (const selector of [
+			'#lookup-rating-tag',
+			'#tags-rating',
+			'.tag-check-row .btn'
+		]) {
+			const box = await page.locator(selector).boundingBox();
+			if (!box) throw new Error(`${selector} has no box`);
+			expect(box.y).toBeGreaterThan(label.y);
+			expect(box.x).toBeCloseTo(label.x + 24, 0);
+		}
+		// Wrapped rather than pushed: the page still does not scroll sideways.
+		const overflow = await page.evaluate(() => {
+			const el = document.scrollingElement;
+			return el ? el.scrollWidth - el.clientWidth : 0;
+		});
+		expect(overflow).toBeLessThanOrEqual(0);
+
+		// 900px: the layout is still two columns here, so this form's column is
+		// 284px — far narrower than the window. That is the range the row's
+		// wrapping has to be keyed to. A viewport-keyed shrink rule let both
+		// rating items collapse to about one character per line in that column.
+		await page.setViewportSize({ width: 900, height: 900 });
+		for (const selector of ['#lookup-rating-tag', '#tags-rating']) {
+			const box = await page.locator(selector).boundingBox();
+			if (!box) throw new Error(`${selector} has no box`);
+			// One line is 18px for the pill and 16px for the note, and each extra
+			// line adds about the same again, so 60px is inside three lines. The
+			// shattered state measured 88px and taller.
+			expect(box.height).toBeLessThanOrEqual(60);
+			// And no item is squeezed under its floor, which is what shattered the
+			// text in the first place.
+			expect(box.width).toBeGreaterThanOrEqual(60);
+		}
+		const narrowOverflow = await page.evaluate(() => {
+			const el = document.scrollingElement;
+			return el ? el.scrollWidth - el.clientWidth : 0;
+		});
+		expect(narrowOverflow).toBeLessThanOrEqual(0);
 	});
 
 	// ---- The Source Post URL field's own two descriptions --------------------
@@ -770,23 +826,7 @@ test.describe('with a key saved', () => {
 		await suggestPill(page).click();
 		await expect(page.locator('.tag-chip')).toHaveCount(3);
 
-		await stubLookup(
-			page,
-			matchedBody({
-				matches: [
-					{
-						site: 'Twitter',
-						siteId: '1789012345678909999',
-						handles: ['kuttoya'],
-						distance: 0,
-						band: 'exact',
-						postedAt: '2026-03-05T10:00:00Z',
-						rating: 'adult',
-						postUrl: X_POST_2
-					}
-				]
-			})
-		);
+		await stubLookup(page, xMatchBody(SECOND_POST));
 		await pill(page).click();
 
 		await expect(sourceInput(page)).toHaveValue(X_POST_2);
@@ -847,6 +887,129 @@ test.describe('with a key saved', () => {
 		// wrote is gone, because this result had nothing to put in its place.
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+	});
+
+	// The branch that empties the commissioned date had no test of its own: a
+	// second result that carries a post but no date leaves the field the first one
+	// filled with nothing to refill it, so it goes when the result lands — and the
+	// panel's role="status" has to say so rather than "left the date as it was".
+	test('a repeat lookup on a dateless post empties the date it filled', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
+
+		await stubLookup(page, xMatchBody({ ...SECOND_POST, postedAt: null }));
+		await pill(page).click();
+
+		// The URL took the new post, and the date it can no longer stand behind is
+		// empty rather than left describing the old one.
+		await expect(sourceInput(page)).toHaveValue(X_POST_2);
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL from the Twitter post and emptied the commissioned date the last lookup filled, because that post carries no date.'
+		);
+		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
+	});
+
+	// The same three cases on the edit page, which ran its full reset at the click
+	// until now: a repeat lookup there dropped the chips and the rating of a
+	// suggestion about the very post it was on its way back with.
+	test('the edit page keeps the suggested chips through a repeat lookup', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, {
+			source: 'x',
+			tags: ['mammal', 'canine', 'fox'],
+			rating: 'explicit',
+			imageCount: 1
+		});
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await suggestPill(page).click();
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+		await pill(page).click();
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+		await expect(page.locator('#tags-rating')).toHaveText('Rated explicit by entail.dev.');
+
+		// And a lookup that fails outright leaves the field as it was, rather than
+		// emptying it with nothing to put back.
+		await stubLookup(page, { enabled: true, error: 'rate_limited', forwarded: true }, 429);
+		await pill(page).click();
+		await expect(panel(page)).toContainText(
+			'FuzzySearch is limiting how often your site can search right now.'
+		);
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+		await expect(page.locator('#tags-status')).not.toContainText('set that lookup aside');
+	});
+
+	test('the edit page replaces the URL when the repeat lookup lands elsewhere', async ({
+		page
+	}) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, {
+			source: 'x',
+			tags: ['mammal', 'canine', 'fox'],
+			rating: 'explicit',
+			imageCount: 1
+		});
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await suggestPill(page).click();
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+		await stubLookup(page, xMatchBody(SECOND_POST));
+		await pill(page).click();
+
+		await expect(sourceInput(page)).toHaveValue(X_POST_2);
+		await expect(dateInput(page)).toHaveValue('2026-03-05');
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		// The suggestion was about the old post, so it goes with it — and says so.
+		await expect(page.locator('.tag-chip')).toHaveCount(0);
+		await expect(page.locator('#tags-rating')).toHaveCount(0);
+		await expect(page.locator('#tags-status')).toHaveText(
+			'The source post URL changed, so Sona set that lookup aside.'
+		);
+	});
+
+	test('the edit page empties both fields when the result has nothing to put back', async ({
+		page
+	}) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
+
+		// Nothing confident enough to prefill from: the second result offers no
+		// post at all, so both fields the first one filled are emptied when it
+		// lands — and the panel names them rather than claiming they were kept.
+		await stubLookup(page, xMatchBody({ band: 'possible' }));
+		await pill(page).click();
+
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		await expect(panel(page)).toContainText(
+			'Sona emptied the source post URL and commissioned date the last lookup filled, because this result has nothing to put there.'
+		);
+		await expect(panel(page)).not.toContainText('left the source post URL as it was');
 	});
 
 	test('a refused key says so and offers Settings, not a retry', async ({ page }) => {

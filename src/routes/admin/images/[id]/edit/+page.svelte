@@ -19,6 +19,7 @@
 		runLookup,
 		sentAfterApplyThrew,
 		strictestRating,
+		type LookupCleared,
 		type LookupFields,
 		type LookupSite,
 		type LookupState,
@@ -70,6 +71,11 @@
 	// types: clearing a pasted URL afterwards would make the panel say Sona left
 	// the field empty, which the operator did, not Sona.
 	let lookupUrlHeld = $state(false);
+	// The other half of that record: which of the two fields a result EMPTIED,
+	// because the last lookup filled it and this one has no post or no date to
+	// put back (SONA-220). Without it the status line says a field was left as it
+	// was while the operator watched it go blank (4.1.3).
+	let lookupCleared = $state<LookupCleared>({});
 	// Read once, like every other form seed on this page: these are the values
 	// the form OPENS with, and a later `data` change must not throw away what the
 	// operator has typed. untrack is the documented spelling for that.
@@ -175,6 +181,7 @@
 		twitterTagged = false;
 		furaffinityTagged = false;
 		lookupUrlHeld = false;
+		lookupCleared = {};
 		appliedArtist = null;
 		// The tag-suggestion state rides along: the accepted tags, the rating
 		// entail.dev returned for the PREVIOUS image, and its NSFW box (SONA-220).
@@ -219,15 +226,19 @@
 			undefined
 	);
 
-	/** Undo what the PREVIOUS lookup wrote, but only where the operator has not
-	 * typed over it since — the tag is the record of that. Without this a second
-	 * lookup reads the first one's URL as operator-typed, fills nothing, and
-	 * leaves a "From lookup" tag on a value from the other post. The upload
-	 * page's resetSharedPrefill, plus the inline new-artist fields this page
-	 * owns. */
+	/** What the last lookup put on the page OUTSIDE the two prefilled fields,
+	 * undone the moment a new search starts: none of it is recoverable from the
+	 * result on its way, and what it says is about a search that is over.
+	 *
+	 * The source post URL and the commissioned date are the exception. Blanking
+	 * them for the length of the round trip tears down everything downstream of
+	 * the URL — the suggestion control drops its standing chips and its rating
+	 * the moment that field changes (SONA-220) — and a lookup that comes back
+	 * with the same post, or fails outright, then has nothing to put back. They
+	 * are replaced, or emptied, in applyPrefill when the result lands, which is
+	 * also when the status line can say so. The upload page's resetSharedResult,
+	 * plus the inline new-artist fields this page owns. */
 	function resetLookupPrefill() {
-		if (sourceTagged) sourcePostUrl = '';
-		if (dateTagged) commissionedAt = '';
 		if (nameTagged) artistName = '';
 		if (twitterTagged) newTwitter = '';
 		if (furaffinityTagged) newFuraffinity = '';
@@ -236,14 +247,13 @@
 		// Patreon, Instagram) are uncontrolled — anything typed there goes with
 		// the form. An empty required form is a smaller cost than lost typing,
 		// and the clearing announcement in startLookup says what happened.
-		sourceTagged = false;
-		dateTagged = false;
 		nameTagged = false;
 		twitterTagged = false;
 		furaffinityTagged = false;
 		lookupFilled = {};
 		lookupSeeded = {};
 		lookupUrlHeld = false;
+		lookupCleared = {};
 		appliedArtist = null;
 		// A clash carried into the parent select belongs to the lookup that found
 		// it, so a second lookup must not leave the first one's piece on offer. The
@@ -318,20 +328,51 @@
 	 * duplicate artist behind the operator's back and re-credit a piece that
 	 * already has one. */
 	function applyPrefill(next: LookupState) {
+		// A failure, or a search cancelled back to idle, leaves both fields exactly
+		// as they are: there is no new post to describe them, and what the last
+		// lookup wrote is still the best thing the page knows.
 		if (next.kind !== 'results') return;
 		// A new result describes a new seed, even when that seed is empty.
 		lookupSeeded = {};
-		lookupUrlHeld = sourcePostUrl.trim() !== '';
-		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
+		// A field the LAST prefill wrote and the operator has not typed over since
+		// is still the lookup's to replace, so this result reads it as empty and
+		// fills it. Only the tag can tell the two apart, which is why the value is
+		// kept until here rather than blanked when the search started — and why the
+		// clash sentence reads a still-tagged value as nobody's rather than as the
+		// operator's.
+		const ownSource = sourceTagged ? '' : sourcePostUrl;
+		const ownDate = dateTagged ? '' : commissionedAt;
+		lookupUrlHeld = ownSource.trim() !== '';
+		const fields = prefillForResult(next.data, {
+			sourcePostUrl: ownSource,
+			commissionedAt: ownDate
+		});
 		lookupFilled = fields;
+		const cleared: LookupCleared = {};
 		if (fields.sourcePostUrl !== undefined) {
+			// Assigned plainly. A second lookup that lands on the SAME post writes
+			// the same string, and $state only notifies on a value that differs, so
+			// the suggestion control keeps the chips and the rating it is holding
+			// rather than answering a change that did not happen.
 			sourcePostUrl = fields.sourcePostUrl;
 			sourceTagged = true;
+		} else if (sourceTagged) {
+			// This result has no post to offer — no match, or a clash whose URL
+			// belongs to another piece — so the last one's URL goes now, and the
+			// status line says it was emptied rather than left alone.
+			sourcePostUrl = '';
+			sourceTagged = false;
+			cleared.sourcePostUrl = true;
 		}
 		if (fields.commissionedAt !== undefined) {
 			commissionedAt = fields.commissionedAt;
 			dateTagged = true;
+		} else if (dateTagged) {
+			commissionedAt = '';
+			dateTagged = false;
+			cleared.commissionedAt = true;
 		}
+		lookupCleared = cleared;
 	}
 
 	/** The inline new-artist form obeys the same rule as the two fields above:
@@ -552,6 +593,7 @@
 						{lookup}
 						filled={lookupFilled}
 						edited={lookupEdited}
+						cleared={lookupCleared}
 						seeded={artistMode === 'new' ? lookupSeeded : {}}
 						seedEdited={lookupSeedEdited}
 						sourceUrlHeld={lookupUrlHeld}
@@ -952,6 +994,11 @@
 		flex-direction: column;
 		gap: 20px;
 		max-width: 600px;
+		/* The NSFW row's wrapping is about this column's width, not the window's
+		   (SONA-220). Safe to contain: the width comes from the grid track and the
+		   max-width above, never from the content. */
+		container-type: inline-size;
+		container-name: admin-form;
 	}
 
 	.tags-field:has(:global(.tag-tray)) {
@@ -1063,19 +1110,40 @@
 
 	/* The text grows with the number of sites, so the pill wraps rather than
 	   pushing the document into a sideways scroll. Kept on one line it cannot
-	   shrink at all, which on this narrower form pushed the suggestion's own
-	   note and its button onto a second row while the upload form kept them
-	   inline at the same width. */
+	   shrink at all, and this form's column is 600px wide: the pill would rather
+	   widen the row than break. */
 	.rating-tag {
 		font-family: var(--font-primary);
 		font-size: 11px;
 		color: var(--muted-foreground);
 		border: 1px solid var(--border);
-		border-radius: var(--radius-pill);
+		/* A fixed radius, not the pill token. Wrapped to three or more lines the
+		   token clamps to half the box height, which pulls the end caps' arc inside
+		   the text's own inset and leaves the first and last lines running flush
+		   against the border. At one line the two are identical. */
+		border-radius: 12px;
 		padding: 1px 8px;
 		white-space: normal;
-		overflow-wrap: anywhere;
+		overflow-wrap: break-word;
 		max-width: 100%;
+	}
+
+	/* With room for all four, this row holds one line and the two rating items
+	   give up the difference instead of pushing "Mark it NSFW" onto a second row.
+	   Flex picks its line breaks from each item's CONTENT size however shrinkable
+	   it is, so a zero basis is what takes the two out of that decision; the cap
+	   keeps either from stretching past its own text. The floor is what makes it
+	   safe: without one, a column narrower than the row shrinks both items until
+	   the text is a character per line, and with one an overfull row drops the
+	   button to a second line the way it always did. Asked of the column, not the
+	   window — this form's column is 219px wide in an 800px window. */
+	@container admin-form (min-width: 560px) {
+		.nsfw-row .rating-tag,
+		.nsfw-row :global(.tag-rating-note) {
+			flex: 1 1 0;
+			min-width: 14ch;
+			max-width: max-content;
+		}
 	}
 
 	.artist-toggle {

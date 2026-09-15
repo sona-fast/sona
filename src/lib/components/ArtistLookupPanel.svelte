@@ -26,6 +26,7 @@
 		siteLabel,
 		statusLineKind,
 		type ArtistChoice,
+		type LookupCleared,
 		type LookupEdited,
 		type LookupFields,
 		type LookupMatch,
@@ -51,6 +52,10 @@
 		 * line — the seed is subject to the same never-overwrite rule, so the
 		 * sentence has to say which of the two fields it actually filled. */
 		seeded?: NewArtistSeed;
+		/** Which of the two fields this result EMPTIED, because the last lookup
+		 * filled them and this one has nothing to put in their place (SONA-220).
+		 * A snapshot like `filled`: the sentence says what this result did. */
+		cleared?: LookupCleared;
 		/** `edited`, for the seeded fields — same rule, same reason. */
 		seedEdited?: SeedEdited;
 		/** Whether the source post URL field held anything when the prefill ran.
@@ -84,6 +89,7 @@
 		fileName = '',
 		filled = {},
 		edited = {},
+		cleared = {},
 		seeded = {},
 		seedEdited = {},
 		sourceUrlHeld = false,
@@ -117,7 +123,12 @@
 	const clash = $derived(data?.sourceClash ?? null);
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
 	const statusKind = $derived(
-		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld })
+		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared })
+	);
+	// The sentences that only report an emptied field name no site, and the
+	// result that empties one can be a no-match with no prefill match to name.
+	const emptiedOnly = $derived(
+		statusKind === 'both_emptied' || statusKind === 'url_emptied' || statusKind === 'date_emptied'
 	);
 	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
 	// The "Sets the artist to {name}." sentence and the button it
@@ -369,12 +380,26 @@
 					{/if}
 				{/if}
 
-				{#if statusKind !== 'none' && prefill}
+				{#if statusKind !== 'none' && (prefill || emptiedOnly)}
 					<p class="lookup-status">
-						{#if statusKind === 'both'}
+						{#if statusKind === 'both_emptied'}
+							{m.admin_lookup_status_both_emptied()}
+						{:else if statusKind === 'url_emptied'}
+							{m.admin_lookup_status_url_emptied()}
+						{:else if statusKind === 'date_emptied'}
+							{m.admin_lookup_status_date_emptied()}
+						{:else if !prefill}
+							<!-- Unreachable: the three sentences above are the only ones that
+							     render without a prefill match. Here so every sentence below
+							     can name the post it filled from. -->
+						{:else if statusKind === 'both'}
 							{m.admin_lookup_status_both({ site: siteLabel(prefill.site) })}
 						{:else if statusKind === 'url_only'}
 							{m.admin_lookup_status_url_only({ site: siteLabel(prefill.site) })}
+						{:else if statusKind === 'url_and_date_emptied'}
+							{m.admin_lookup_status_url_and_date_emptied({ site: siteLabel(prefill.site) })}
+						{:else if statusKind === 'date_and_url_emptied'}
+							{m.admin_lookup_status_date_and_url_emptied({ site: siteLabel(prefill.site) })}
 						{:else if statusKind === 'url_kept'}
 							{m.admin_lookup_status_url_kept({ site: siteLabel(prefill.site) })}
 						{:else if statusKind === 'date_kept'}

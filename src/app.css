@@ -552,11 +552,21 @@ select.input {
 	flex-wrap: wrap;
 }
 
-@media (max-width: 640px) {
+/* Where this row breaks is decided by the COLUMN it sits in, not by the window.
+   Both admin forms hold it inside a grid column that is far narrower than the
+   viewport for most of the range — the edit form's column is 219px wide in an
+   800px window — so a viewport query indented the phone and left the whole
+   middle of the range wrapping to the checkbox's edge. Both forms name
+   themselves `admin-form` instead, and this asks the column. */
+@container admin-form (max-width: 559px) {
 	/* Wrapped onto its own line, the note lines up under the label text rather
 	   than under the checkbox. The lookup's rating pill (SONA-156) shares the
 	   row and wraps the same way, so it takes the same indent — otherwise the
-	   two pills wrap to two different left edges. */
+	   two pills wrap to two different left edges. CSS cannot ask whether an item
+	   wrapped, so the indent is by column width alone: a short pill that still
+	   fits inline just under 560px carries a 24px gap. That is what the note
+	   beside it has always done, and matching it beats a third behaviour on one
+	   row. */
 	.tag-check-row .tag-rating-note,
 	.tag-check-row .rating-tag,
 	.tag-check-row .btn {

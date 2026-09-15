@@ -468,6 +468,14 @@ export interface LookupEdited {
 	commissionedAt?: boolean;
 }
 
+/** Which of the two fields this result EMPTIED: the previous lookup filled it,
+ * the operator never typed over it, and the new result has nothing to put in
+ * its place. A field can never be both filled and emptied by one result. */
+export interface LookupCleared {
+	sourcePostUrl?: boolean;
+	commissionedAt?: boolean;
+}
+
 /** Which sentence describes what the prefill actually did. */
 export type StatusLineKind =
 	| 'both'
@@ -477,6 +485,11 @@ export type StatusLineKind =
 	| 'date_kept'
 	| 'clash'
 	| 'clash_kept'
+	| 'url_and_date_emptied'
+	| 'date_and_url_emptied'
+	| 'both_emptied'
+	| 'url_emptied'
+	| 'date_emptied'
 	| 'none';
 
 /**
@@ -492,23 +505,46 @@ export type StatusLineKind =
  * empty" is true only of a field that WAS empty. `urlHeld` says it is not, and
  * picks `clash_kept`, which claims the date and says the URL was not filled
  * without claiming it is empty.
+ *
+ * `cleared` is the other half of the same honesty. A second lookup keeps the
+ * fields the first one filled until its own result lands, so a result with no
+ * post or no date EMPTIES one of them then (SONA-220) — and `url_only` saying
+ * the date was "left as it was" would be a false report of a field the operator
+ * just watched go blank. The emptied kinds name it instead.
  */
 export function statusLineKind(
 	filled: LookupFields,
-	options: { clash?: boolean; edited?: LookupEdited; urlHeld?: boolean } = {}
+	options: {
+		clash?: boolean;
+		edited?: LookupEdited;
+		urlHeld?: boolean;
+		cleared?: LookupCleared;
+	} = {}
 ): StatusLineKind {
 	const edited = options.edited ?? {};
+	const cleared = options.cleared ?? {};
 	const urlFilled = filled.sourcePostUrl !== undefined;
 	const dateFilled = filled.commissionedAt !== undefined;
 	const url = urlFilled && !edited.sourcePostUrl;
 	const date = dateFilled && !edited.commissionedAt;
 	if (options.clash) {
-		if (!date) return 'none';
-		return options.urlHeld ? 'clash_kept' : 'clash';
+		// The clash sentence already says the URL was left empty, which is what
+		// emptying it leaves behind, so only the date needs the extra kinds below.
+		if (date) return options.urlHeld ? 'clash_kept' : 'clash';
+	} else {
+		if (url && date) return 'both';
+		if (url) {
+			if (cleared.commissionedAt) return 'url_and_date_emptied';
+			return dateFilled ? 'url_kept' : 'url_only';
+		}
+		if (date) {
+			if (cleared.sourcePostUrl) return 'date_and_url_emptied';
+			return urlFilled ? 'date_kept' : 'date_only';
+		}
 	}
-	if (url && date) return 'both';
-	if (url) return dateFilled ? 'url_kept' : 'url_only';
-	if (date) return urlFilled ? 'date_kept' : 'date_only';
+	if (cleared.sourcePostUrl && cleared.commissionedAt) return 'both_emptied';
+	if (cleared.sourcePostUrl) return 'url_emptied';
+	if (cleared.commissionedAt) return 'date_emptied';
 	return 'none';
 }
 
