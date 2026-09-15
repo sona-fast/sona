@@ -11,6 +11,7 @@ import {
 	REFERENCE_BECOMES_VARIANT_ERROR,
 	VARIANT_BECOMES_REFERENCE_ERROR
 } from '$lib/server/variants';
+import { resolveFuzzysearchKey } from '$lib/server/fuzzysearch';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {
@@ -37,8 +38,15 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		.innerJoin(characters, eq(imageCharacters.characterId, characters.id))
 		.where(eq(imageCharacters.imageId, id));
 
-	const [allArtists, allCollections, allTags, allCharacters, parentCandidates, firstVariant] =
-		await Promise.all([
+	const [
+		allArtists,
+		allCollections,
+		allTags,
+		allCharacters,
+		parentCandidates,
+		firstVariant,
+		lookupKey
+	] = await Promise.all([
 			db.select().from(artists).orderBy(artists.name),
 			db.select().from(collections).orderBy(collections.name),
 			db.select().from(tags).orderBy(tags.name),
@@ -49,7 +57,11 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 				.from(images)
 				.where(and(isNull(images.parentImageId), ne(images.id, id)))
 				.orderBy(images.title),
-			db.select({ id: images.id }).from(images).where(eq(images.parentImageId, id)).get()
+			db.select({ id: images.id }).from(images).where(eq(images.parentImageId, id)).get(),
+			// In the batch, not after it: a fork without the deploy secret reads the
+			// stored key from D1, and awaited below this it cost a serial round trip
+			// on every page load.
+			resolveFuzzysearchKey(db, platform?.env)
 		]);
 
 	// The site's owner character (first, if several) carries the canonical
@@ -65,6 +77,9 @@ export const load: PageServerLoad = async ({ params, platform }) => {
 		tags: allTags,
 		characters: allCharacters,
 		parentCandidates,
+		// Presence only — the key itself never leaves the server. Without one,
+		// "Look up artist" is not offered at all (SONA-156).
+		lookupEnabled: !!lookupKey,
 		// An image that already has variants is a parent — it can't also be a variant.
 		hasVariants: !!firstVariant,
 		ownerCharacter: ownerCharacter && {

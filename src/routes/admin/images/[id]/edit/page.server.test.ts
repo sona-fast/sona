@@ -5,15 +5,17 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { characters, images } from '$lib/server/db/schema';
+import { characters, images, siteSettings } from '$lib/server/db/schema';
 import { REFERENCE_BECOMES_VARIANT_ERROR, VARIANT_BECOMES_REFERENCE_ERROR } from '$lib/server/variants';
 import { load, actions } from './+page.server';
 
-import { makeD1 } from '$lib/server/test/d1';
+import { makeD1, withFailingSettingsRead } from '$lib/server/test/d1';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec(`
+		-- The load resolves the FuzzySearch key from here (SONA-156).
+		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE artists (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT, twitter_url TEXT,
 			bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT, deviantart_url TEXT, patreon_url TEXT,
@@ -276,5 +278,54 @@ describe('admin image edit — load ownerCharacter', () => {
 			ownerCharacter: unknown;
 		};
 		expect(data.ownerCharacter).toBe(null);
+	});
+});
+
+describe('admin image edit — load lookupEnabled (SONA-156)', () => {
+	const lookupEnabled = async (platform: App.Platform) =>
+		((await load({ params: { id: '5' }, platform } as never)) as { lookupEnabled: boolean })
+			.lookupEnabled;
+
+	it('is false with no key anywhere', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		expect(await lookupEnabled(platform)).toBe(false);
+	});
+
+	it('is true for a key saved in settings', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: 'a-saved-key' });
+		expect(await lookupEnabled(platform)).toBe(true);
+	});
+
+	it('is true for the deploy secret alone', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		const withEnv = { env: { ...platform.env, FUZZYSEARCH_API_KEY: 'from-deploy' } };
+		expect(await lookupEnabled(withEnv as unknown as App.Platform)).toBe(true);
+	});
+
+	// The key read moved into the load's Promise.all, so a D1 failure on it now
+	// rejects alongside the image read instead of after it. It still rejects:
+	// there is no page without the image either, and a lookupEnabled quietly
+	// forced to false would hide a broken database behind a missing button.
+	it('lets a failed key read reject the load rather than reporting no key', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		const broken = { env: { ...platform.env, DB: withFailingSettingsRead(platform.env.DB) } };
+		// Named on the helper's own error, which drizzle keeps as the cause: the
+		// message drizzle prints only names the table, and the key read wins the
+		// rejection race, so /site_settings/ alone passed just as happily against
+		// a helper that failed every query.
+		const err = await Promise.resolve(
+			load({ params: { id: '5' }, platform: broken } as never)
+		).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(Error);
+		expect(String((err as { cause?: unknown }).cause)).toContain('settings read failed');
+		// And the image read beside it still answers, so what rejected was the key
+		// read and not a database the helper had taken away wholesale.
+		const brokenDb = drizzle(broken.env.DB, { schema });
+		await expect(brokenDb.select().from(images).where(eq(images.id, 5))).resolves.toHaveLength(1);
 	});
 });

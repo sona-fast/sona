@@ -423,9 +423,10 @@
 	"admin_field_variant_label": "Variant label",
 	"admin_variant_none": "Not a variant",
 	"admin_variant_label_placeholder": "e.g. Transparent BG, NSFW alt",
+	"admin_variant_label_for": "Variant label for {fileName}",
 	"admin_variant_parent_hint": "This image has variants of its own, so it can't be made a variant of another image.",
 	"admin_variant_parent_radio": "Parent",
-	"admin_variant_remove_file": "Remove file",
+	"admin_variant_remove_file": "Remove {fileName}",
 	"admin_variant_add_files": "Add files",
 	"admin_variant_group_legend": "Variant group",
 	"admin_variant_group_single": "New piece",
@@ -1182,6 +1183,32 @@
 	"admin_settings_disconnecting": "Disconnecting…",
 	"admin_settings_connect_registry": "Connect to registry",
 	"admin_settings_forkkey_hint": "The fork key is stored in your site's database (not a deploy secret). It's a low-privilege, revocable, submit-only key.",
+	"admin_settings_lookup_heading": "Artist lookup",
+	"admin_settings_lookup_explainer_1": "Find who drew a piece when the post doesn't say. When you click Look up artist on an upload, Sona sends that image file to FuzzySearch. FuzzySearch matches it against its index of FurAffinity, Weasyl, e621, and the Twitter accounts it tracks. Sona sends nothing until you click, and keeps only the values you apply to the form.",
+	"admin_settings_lookup_explainer_2": "FuzzySearch is an independent service, not part of Sona. It may keep a copy or a hash of what you send. Sona has no agreement with it and can't delete anything on your behalf.",
+	"admin_settings_lookup_key_label": "FuzzySearch API key",
+	"admin_settings_lookup_key_placeholder": "Paste your key",
+	"admin_settings_lookup_hint_pre": "You can get a free key at ",
+	"admin_settings_lookup_hint_post": ".",
+	"admin_settings_lookup_save": "Save key",
+	"admin_settings_lookup_saved": "Key saved.",
+	"admin_settings_lookup_error_invalid": "That doesn't look like a key. Paste it exactly as FuzzySearch gave it to you.",
+	"admin_settings_lookup_connected_eyebrow": "Connected",
+	"admin_settings_lookup_key_ending": "ending {tail}",
+	"admin_settings_lookup_saved_key_label": "Saved key",
+	"admin_settings_lookup_replace": "To use a different key, remove this one and save the new one.",
+	"admin_settings_lookup_remove": "Remove key",
+	"admin_settings_lookup_removed": "Key removed.",
+	"admin_settings_lookup_confirm": "Remove the key? Look up artist disappears from upload and edit until you save a new one.",
+	"admin_settings_lookup_confirm_remove": "Remove",
+	"admin_settings_lookup_removing": "Removing…",
+	"admin_settings_lookup_confirm_keep": "Keep",
+	"admin_settings_lookup_refused_eyebrow": "Key refused",
+	"admin_settings_lookup_refused_line": "FuzzySearch didn't accept this key on the last lookup ({date}).",
+	"admin_settings_lookup_refused_key_label": "Refused key",
+	"admin_settings_lookup_new_key_label": "New FuzzySearch API key",
+	"admin_settings_lookup_secret_pre": "Set by the ",
+	"admin_settings_lookup_secret_post": " deploy secret. Manage it wherever you set your deploy secrets.",
 	"admin_settings_danger_zone": "Danger Zone",
 	"admin_settings_export_title": "Export data",
 	"admin_settings_export_desc": "Download a full backup of all images, metadata, collections, and tags as a JSON file.",
@@ -1756,5 +1783,187 @@
 	"con_card_save_front": "Save the front for a lock screen",
 	"con_card_art_failed": "Your avatar wouldn't load, so the card uses your initial instead.",
 	"con_card_save_failed": "Couldn't save the card. Try again.",
-	"con_qr_svg_label": "QR code for {url}"
+	"con_qr_svg_label": "QR code for {url}",
+	"admin_lookup_button": "Look up artist",
+	"admin_lookup_button_for": " for {fileName}",
+	"admin_lookup_hint": "Sona sends this image to FuzzySearch to find who posted it.",
+	"admin_lookup_hint_private": "This image is private. Looking it up still sends the file to FuzzySearch.",
+	"admin_lookup_hint_multi": "Sona sends each image to FuzzySearch to find who posted it. The parent's result fills the shared fields below; a variant's result only rates that variant.",
+	"admin_lookup_hint_multi_private": "These images are private. Looking them up still sends the files to FuzzySearch. The parent's result fills the shared fields below; a variant's result only rates that variant.",
+	"admin_lookup_no_key_pre": "Sona can find who posted a piece if you add a FuzzySearch key in ",
+	"admin_lookup_no_key_link": "Settings",
+	"admin_lookup_no_key_post": ".",
+	"admin_lookup_tile_searching": "Looking up…",
+	"admin_lookup_tile_done": "Looked up",
+	"admin_lookup_panel_label": "Artist lookup",
+	"admin_lookup_searching_eyebrow": "Looking up",
+	"admin_lookup_searching_body": "Sending the image to FuzzySearch.",
+	"admin_lookup_cancel": "Cancel lookup",
+	"admin_lookup_found_on_sites": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Found on {count} site",
+				"countPlural=other": "Found on {count} sites"
+			}
+		}
+	],
+	"admin_lookup_eyebrow_file": " · {fileName}",
+	"admin_lookup_match_line": "{handles} on {site}",
+	"admin_lookup_match_unknown": "Unknown poster on {site}",
+	"admin_lookup_band_exact": "Exact match",
+	"admin_lookup_band_strong": "Strong match",
+	"admin_lookup_band_possible": "Possible match",
+	"admin_lookup_posted": "Posted {date}",
+	"admin_lookup_rating_general": "General",
+	"admin_lookup_rating_mature": "Mature",
+	"admin_lookup_rating_adult": "Adult",
+	"admin_lookup_view_post": "View post",
+	"admin_lookup_view_post_site": " on {site} (opens in a new tab)",
+	"admin_lookup_existing": "{handle} is already in your artist list as {name}.",
+	"admin_lookup_use_artist": "Use {name}",
+	"admin_lookup_using_artist": "Using {name}",
+	"admin_lookup_close": "Close",
+	"admin_lookup_ambiguous": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{handle} matches {count} artist in your list.",
+				"countPlural=other": "{handle} matches {count} artists in your list."
+			}
+		}
+	],
+	"admin_lookup_ambiguous_cross": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "These matches point to {count} artist in your list.",
+				"countPlural=other": "These matches point to {count} artists in your list."
+			}
+		}
+	],
+	"admin_lookup_which_one": "Which one?",
+	"admin_lookup_pieces": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} piece",
+				"countPlural=other": "{count} pieces"
+			}
+		}
+	],
+	"admin_lookup_via_site": "via {site}",
+	"admin_lookup_use_selected": "Use selected artist",
+	"admin_lookup_new": "{handle} isn't in your artist list yet.",
+	"admin_lookup_add_new": "Add {handle} as a new artist",
+	"admin_lookup_name_match": "{handle} may already be in your list as {name}.",
+	"admin_lookup_add_instead": "Add as a new artist instead",
+	"admin_lookup_unlinked": "Sona can't link Weasyl or e621 handles to your artist list yet.",
+	"admin_lookup_clash_eyebrow": "Source already in your gallery",
+	"admin_lookup_clash_body": "The {site} post Sona found is already the source of {title}{variants}. If this upload is a new version, add it as a variant of that piece.",
+	"admin_lookup_variants": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": " and its {count} variant",
+				"countPlural=other": " and its {count} variants"
+			}
+		}
+	],
+	"admin_lookup_clash_dimensions": "{width} × {height}",
+	"admin_lookup_clash_uploaded": "Uploaded {date}",
+	"admin_lookup_clash_add_variant": "Add as a variant",
+	"admin_lookup_clash_has_variants": "The image you're editing already has variants of its own, so it can't become a variant of another piece.",
+	"admin_lookup_clash_open": "Open {title}",
+	"admin_lookup_status_both": "Sona filled the source post URL and commissioned date from the {site} post. You can change both before you save.",
+	"admin_lookup_status_url_only": "Sona filled the source post URL from the {site} post and left the commissioned date as it was. You can change the URL before you save.",
+	"admin_lookup_status_date_only": "Sona filled the commissioned date from the {site} post and left the source post URL as it was. You can change the date before you save.",
+	"admin_lookup_status_clash": "Sona filled the commissioned date from the {site} post and left the source post URL empty, because that post is already the source of {title}. You can change the date before you save.",
+	"admin_lookup_status_clash_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was, because that post is already the source of {title}. You can change the date before you save.",
+	"admin_lookup_status_url_kept": "Sona filled the source post URL from the {site} post. You can change it before you save.",
+	"admin_lookup_status_date_kept": "Sona filled the commissioned date from the {site} post. You can change it before you save.",
+	"admin_lookup_status_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was.",
+	"admin_lookup_status_artist_hint": "Sets the artist to {name}.",
+	"admin_lookup_status_seed_both": "Sona filled the new artist's name and {site} link. They're a guess until you check them, and you're the one publishing them.",
+	"admin_lookup_status_seed_name": "Sona filled the new artist's name. It's a guess until you check it, and you're the one publishing it.",
+	"admin_lookup_status_seed_link": "Sona filled the new artist's {site} link. It's a guess until you check it, and you're the one publishing it.",
+	"admin_lookup_no_match_eyebrow": "No match",
+	"admin_lookup_no_match_body": "Nothing matched on FurAffinity, Weasyl, e621, or Twitter. The piece might not be posted publicly, or it might have been cropped or edited since it was posted.",
+	"admin_lookup_no_match_hint": "Add the artist by hand, or try again with the original file.",
+	"admin_lookup_try_again": "Try again",
+	"admin_lookup_paused_eyebrow": "Lookup paused",
+	"admin_lookup_paused_body": "FuzzySearch is limiting how often your site can search right now.",
+	"admin_lookup_paused_hint": "Try again in a minute, or add the artist by hand. Your upload is unaffected.",
+	"admin_lookup_refused_eyebrow": "Key refused",
+	"admin_lookup_refused_body": "FuzzySearch didn't accept your API key.",
+	"admin_lookup_refused_hint": "Check the key in Settings, or add the artist by hand. Your upload is unaffected.",
+	"admin_lookup_open_settings": "Open Settings",
+	"admin_lookup_failed_eyebrow": "Lookup failed",
+	"admin_lookup_failed_body": "FuzzySearch didn't answer.",
+	"admin_lookup_too_large_eyebrow": "Too large to look up",
+	"admin_lookup_too_large_body": "This file is too large for FuzzySearch. Add the artist by hand.",
+	"admin_lookup_invalid_body": "FuzzySearch couldn't read this file. Add the artist by hand.",
+	"admin_lookup_gone_eyebrow": "Image is gone",
+	"admin_lookup_gone_body": "This image is no longer in your gallery. Go back to All Images to see what is there now.",
+	"admin_lookup_signed_out_eyebrow": "Signed out",
+	"admin_lookup_signed_out_body": "Your admin session expired. Sign in again, then look up the artist.",
+	"admin_lookup_no_key_eyebrow": "No key",
+	"admin_lookup_no_key_body": "This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.",
+	"admin_lookup_private_notice": "Sona sent this file to FuzzySearch while it was marked private.",
+	"admin_lookup_from_lookup": "From lookup",
+	"admin_lookup_rating_tag": "Rated {rating} on {sites}",
+	"admin_lookup_rating_tag_parent": "Rated {rating} on {sites} · parent",
+	"admin_lookup_tile_result": "{handle} on {site}",
+	"admin_lookup_tile_result_band": "{result} · {band}",
+	"admin_lookup_tile_result_spoken": "{result}, {band}",
+	"admin_lookup_tile_different": "Different artist: {handle} on {site}",
+	"admin_lookup_tile_different_unknown": "Different artist: unknown poster on {site}",
+	"admin_lookup_parent_radio": "Parent: {fileName}",
+	"admin_lookup_nsfw_for_file": " for {fileName}",
+	"admin_lookup_nsfw_for_parent": " for the parent",
+	"admin_lookup_guess_line_site": "Sona filled the name and {site} link from an image match. They're a guess until you check them, and you're the one publishing them.",
+	"admin_lookup_guess_line_name": "Sona filled the name from an image match. It's a guess until you check it, and you're the one publishing it.",
+	"admin_lookup_guess_line_registry": "Picking a registry match replaces what Sona filled.",
+	"admin_lookup_announce_tile_match": "{fileName}: {result}.",
+	"admin_lookup_announce_tile_no_match": "{fileName}: no match.",
+	"admin_lookup_announce_tile_failure": "{fileName}: {reason}",
+	"admin_lookup_announce_tile_with_notice": "{outcome} {disclosure}",
+	"admin_lookup_announce_using": "Using {name} as the artist.",
+	"admin_lookup_announce_new_form": "Switched to the new artist form. Add the artist by hand.",
+	"admin_lookup_announce_form_already_open": "The new artist form is already open.",
+	"admin_lookup_announce_seed_kept": "The new artist's fields already have values, so Sona left them alone.",
+	"admin_lookup_announce_searching_cleared": "Sona cleared the fields the last lookup filled.",
+	"admin_lookup_announce_shared_refilled": "Sona filled the shared fields from the parent image's result.",
+	"admin_lookup_announce_shared_refilled_source": "Sona filled the source post URL from the parent image's result.",
+	"admin_lookup_announce_shared_refilled_date": "Sona filled the commissioned date from the parent image's result."
 }

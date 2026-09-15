@@ -5,14 +5,16 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { characters, images } from '$lib/server/db/schema';
+import { characters, images, siteSettings } from '$lib/server/db/schema';
 import { load, actions } from './+page.server';
 
-import { makeD1 } from '$lib/server/test/d1';
+import { makeD1, withFailingSettingsRead } from '$lib/server/test/d1';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec(`
+		-- The load resolves the FuzzySearch key from here (SONA-156).
+		CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 		CREATE TABLE artists (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT, twitter_url TEXT,
 			bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT, deviantart_url TEXT, patreon_url TEXT,
@@ -110,5 +112,62 @@ describe('admin upload — load ownerCharacter', () => {
 
 		const data = (await load({ platform } as never)) as { ownerCharacter: unknown };
 		expect(data.ownerCharacter).toBe(null);
+	});
+});
+
+describe('admin upload — load lookupEnabled (SONA-156)', () => {
+	it('is false with no key anywhere', async () => {
+		const { platform } = makeDb();
+		const data = (await load({ platform } as never)) as { lookupEnabled: boolean };
+		expect(data.lookupEnabled).toBe(false);
+	});
+
+	it('is true for a key saved in settings', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: 'a-saved-key' });
+		const data = (await load({ platform } as never)) as { lookupEnabled: boolean };
+		expect(data.lookupEnabled).toBe(true);
+	});
+
+	it('is true for the deploy secret alone', async () => {
+		const { platform } = makeDb();
+		const withEnv = { env: { ...platform.env, FUZZYSEARCH_API_KEY: 'from-deploy' } };
+		const data = (await load({ platform: withEnv } as never)) as { lookupEnabled: boolean };
+		expect(data.lookupEnabled).toBe(true);
+	});
+
+	it('is false for a key row that "Remove key" emptied', async () => {
+		const { db, platform } = makeDb();
+		await db.insert(siteSettings).values({ key: 'fuzzysearchApiKey', value: '' });
+		const data = (await load({ platform } as never)) as { lookupEnabled: boolean };
+		expect(data.lookupEnabled).toBe(false);
+	});
+
+	// The key read moved into the load's Promise.all, so a D1 failure on it now
+	// rejects alongside the other five reads instead of after them. It still
+	// rejects: the page has no artist list without those reads either, and a
+	// lookupEnabled quietly forced to false would hide a broken database behind
+	// a missing button. This pins today's shape so a later fold cannot change it
+	// by accident.
+	it('lets a failed key read reject the load rather than reporting no key', async () => {
+		const { platform } = makeDb();
+		const broken = { env: { ...platform.env, DB: withFailingSettingsRead(platform.env.DB) } };
+		// Asserted on the helper's own wording, not on the table name drizzle
+		// prints: the key read wins the rejection race either way, so a helper
+		// loosened to fail every query would still satisfy a /site_settings/ pin
+		// while testing something else entirely.
+		const err = await Promise.resolve(load({ platform: broken } as never)).catch(
+			(e: unknown) => e
+		);
+		// Named on the helper's own error, which drizzle keeps as the cause: the
+		// message drizzle prints only names the table, and the key read wins the
+		// rejection race, so /site_settings/ alone passed just as happily against
+		// a helper that failed every query.
+		expect(err).toBeInstanceOf(Error);
+		expect(String((err as { cause?: unknown }).cause)).toContain('settings read failed');
+		// And the reads beside it still answer, so what rejected was the key read
+		// and not a database the helper had taken away wholesale.
+		const brokenDb = drizzle(broken.env.DB, { schema });
+		await expect(brokenDb.select().from(images)).resolves.toEqual([]);
 	});
 });

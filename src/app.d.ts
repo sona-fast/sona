@@ -13,7 +13,16 @@ declare global {
 	const __BUILD_REPO_URL__: string;
 
 	namespace App {
-		// interface Error {}
+		interface Error {
+			message: string;
+			/**
+			 * Whether the request's bytes reached a third party before the failure.
+			 * Set by /api/admin/artist-lookup (SONA-156), whose client has to tell an
+			 * endpoint-side refusal apart from FuzzySearch answering the same way and
+			 * reads a missing field as sent.
+			 */
+			forwarded?: boolean;
+		}
 		interface Locals {
 			admin?: boolean;
 			/**
@@ -96,6 +105,13 @@ declare global {
 				 * the site runs entirely on its local artists table.
 				 */
 				REGISTRY_API_KEY?: string;
+				/**
+				 * FuzzySearch API key, enabling "Look up artist" (reverse image search).
+				 * Optional: without it — and without the key saved in Settings →
+				 * Connections, which this secret overrides — the lookup endpoint answers
+				 * `{ enabled: false }` and the button never appears.
+				 */
+				FUZZYSEARCH_API_KEY?: string;
 				/**
 				 * Resend API key. Gates the admin "Forgot password" flow: when unset,
 				 * /admin/forgot silently no-ops (still returns the generic response) and

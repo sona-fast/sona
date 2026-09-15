@@ -916,3 +916,77 @@ describe('no accent-color override on form controls (SONA-172)', () => {
 		}
 	});
 });
+
+// The Artist lookup "Remove key" button rides .btn-outline but overrides its
+// label to --destructive. .btn-outline's hover fill mixes --background 88%
+// toward white or black, and --destructive on that mix falls to 3.6-4.4:1 on
+// five of the six themes, so the component pins the fill back to --background
+// and lets the border carry the hover signal (SONA-156). Asserted the way the
+// #103 hover tests are: resolve the rule's own fill in each theme block and
+// measure the label against it, so any fill that clears AA passes and any that
+// doesn't fails, whatever it is spelled as.
+describe('SONA-156 Remove-key label on its hover fill', () => {
+	/** The body of a `.lookup-section .btn-remove` rule, as written. */
+	function removeRule(suffix: string): string {
+		const source = readFileSync(
+			fileURLToPath(new URL('../routes/admin/settings/+page.svelte', import.meta.url)),
+			'utf8'
+		);
+		const body = source.match(
+			new RegExp(`^\\s*\\.lookup-section \\.btn-remove${suffix}\\s*\\{([^}]*)\\}`, 'm')
+		)?.[1];
+		if (!body) throw new Error(`.lookup-section .btn-remove${suffix} rule not found`);
+		return body;
+	}
+
+	/** The `background-color` the hovered button actually paints, as written. */
+	function removeHoverFill(): string {
+		const fill = removeRule(':hover')
+			.match(/background-color:\s*([^;]+);/)?.[1]
+			.trim();
+		// No fill of its own means the button inherits .btn-outline's hover mix,
+		// which is the pairing this block exists to keep it away from.
+		if (!fill) throw new Error('.lookup-section .btn-remove:hover sets no background-color');
+		return fill;
+	}
+
+	/**
+	 * The label color the hovered button paints. The hover rule may set its own
+	 * `color`; when it doesn't, the base rule's `color` still applies, so the
+	 * measurement follows whichever one the button actually wears.
+	 */
+	function removeHoverColor(): string {
+		const declared = (body: string) =>
+			body
+				.match(/(?:^|[;{\s])color:\s*([^;]+);/)?.[1]
+				.trim();
+		const color = declared(removeRule(':hover')) ?? declared(removeRule(''));
+		if (!color) throw new Error('.lookup-section .btn-remove declares no color');
+		return color;
+	}
+
+	// A token, or a srgb color-mix of one toward black, white or another token —
+	// the two shapes the app's hover fills and labels use. Anything else throws
+	// rather than passing unmeasured.
+	function resolveColor(value: string, sel: string): string {
+		const token = value.match(/^var\(--([\w-]+)\)$/);
+		if (token) return blockToken(sel, token[1]);
+		const mixed = value.match(
+			/^color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*(black|white|var\(--[\w-]+\))\)$/
+		);
+		if (!mixed) throw new Error(`cannot resolve "${value}" to a color`);
+		const base = blockToken(sel, mixed[1]);
+		const pct = Number(mixed[2]);
+		const toward = mixed[3];
+		if (toward === 'black' || toward === 'white') return mixSrgb(base, pct, toward);
+		return mix2(base, pct, blockToken(sel, toward.slice('var(--'.length, -1)));
+	}
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: the label on the hovered fill meets 4.5:1`, () => {
+			const fill = resolveColor(removeHoverFill(), sel);
+			const label = resolveColor(removeHoverColor(), sel);
+			expect(contrast(label, fill)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});

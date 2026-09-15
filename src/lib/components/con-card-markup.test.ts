@@ -67,6 +67,19 @@ describe('ConCard download paths', () => {
 		expect(source).toMatch(/avatarFailed = true;[\s\S]*?return null;/);
 	});
 
+	it('checks the proxy answered an image before it builds the data URI', () => {
+		// isEmbeddableAvatarType is unit-tested in con-card.test.ts; what has to be
+		// pinned here is that the fetch path actually calls it, on the response's
+		// own content-type, and throws instead of reaching the FileReader — a data
+		// URI made from an octet-stream body draws nothing and would be saved as a
+		// blank avatar with no message. Only the order matters — the header read,
+		// then the guard, then the reader — so renaming the local or moving a
+		// comment between them doesn't fail this.
+		expect(source).toMatch(
+			/embedAvatar\(\)[\s\S]*?headers\.get\(['"]content-type['"]\)[\s\S]*?isEmbeddableAvatarType\([\s\S]*?throw[\s\S]*?readAsDataURL/
+		);
+	});
+
 	it('separates "saved without your avatar" from "nothing saved"', () => {
 		// avatarFailed is the embed path's alone; a raster failure must never claim
 		// a file was saved. Both save paths route their catch to rasterFailed.
