@@ -1,0 +1,190 @@
+/* GENERATED FILE — do not edit.
+   Rendered from src/lib/themes/*.theme.ts by scripts/build-themes.ts.
+   Edit the theme file and run `npm run themes`, then commit this file.
+
+   Only one block shape wins on specificity: an alternate theme's light block,
+   which carries two attribute selectors. The other three (:root,
+   [data-theme='light'], [data-theme-id='x']) all tie, so among them the later
+   block in this file wins — which is why an alternate theme's light block has to
+   re-declare --link rather than inherit it from [data-theme='light']. A token no
+   matching block declares falls through to :root — see types.ts. */
+
+/* Ember — warm orange (default) */
+:root {
+	--background: #111111;
+	--foreground: #FFFFFF;
+	--card: #1A1A1A;
+	--card-foreground: #FFFFFF;
+	--primary: #FF8400;
+	--primary-foreground: #111111;
+	--secondary: #2E2E2E;
+	--secondary-foreground: #FFFFFF;
+	--muted: #2E2E2E;
+	--muted-foreground: #B8B9B6;
+	--accent: #111111;
+	--accent-foreground: #F2F3F0;
+	--destructive: #FF5C33;
+	--destructive-foreground: #111111;
+	--status-ok: #4ade80;
+	--status-warn: #f5a623;
+	--status-attention: var(--primary);
+	--link: var(--primary);
+	--border: #2E2E2E;
+	--input: #2E2E2E;
+	--ring: #666666;
+	--sidebar: #18181b;
+	--sidebar-accent: #2a2a30;
+	--sidebar-foreground: #fafafa;
+	--sidebar-border: rgba(255, 255, 255, 0.1);
+
+	--font-primary: 'JetBrains Mono', monospace;
+	--font-secondary: 'Geist', sans-serif;
+
+	color-scheme: dark;
+}
+
+[data-theme='light'] {
+	--background: #F2F3F0;
+	--foreground: #111111;
+	--card: #FFFFFF;
+	--card-foreground: #111111;
+	--primary: #FF8400;
+	--primary-foreground: #111111;
+	--secondary: #E7E8E5;
+	--secondary-foreground: #111111;
+	--muted: #F2F3F0;
+	--muted-foreground: #666666;
+	--accent: #F2F3F0;
+	--accent-foreground: #111111;
+	--destructive: #BE320E;
+	--destructive-foreground: #FFFFFF;
+	--status-ok: #166534;
+	--status-warn: #92400E;
+	--status-attention: #C2410C;
+	--link: #A04E00;
+	--border: #CBCCC9;
+	--input: #CBCCC9;
+	--ring: #666666;
+	--sidebar: #E7E8E5;
+	--sidebar-accent: #CBCCC9;
+	--sidebar-foreground: #18181b;
+	--sidebar-border: #CBCCC9;
+
+	color-scheme: light;
+}
+
+/* Aurora — cool violet */
+[data-theme-id='aurora'] {
+	--background: #0e0f1a;
+	--foreground: #f4f4ff;
+	--card: #16172a;
+	--card-foreground: #f4f4ff;
+	--primary: #7c5cff;
+	--primary-foreground: #07080d;
+	--secondary: #232544;
+	--secondary-foreground: #f4f4ff;
+	--muted: #232544;
+	--muted-foreground: #a9abce;
+	--accent: #0e0f1a;
+	--accent-foreground: #f4f4ff;
+	--destructive: #ff5c7a;
+	--destructive-foreground: #0e0f1a;
+	--status-attention: #a48bff;
+	--link: #a48bff;
+	--border: #2a2c50;
+	--input: #2a2c50;
+	--ring: #7c5cff;
+	--sidebar: #131426;
+	--sidebar-accent: #232544;
+	--sidebar-foreground: #f4f4ff;
+	--sidebar-border: rgba(255, 255, 255, 0.1);
+
+	color-scheme: dark;
+}
+
+[data-theme-id='aurora'][data-theme='light'] {
+	--background: #f5f5fc;
+	--foreground: #16172a;
+	--card: #ffffff;
+	--card-foreground: #16172a;
+	--primary: #6a4cf0;
+	--primary-foreground: #ffffff;
+	--secondary: #ececfa;
+	--secondary-foreground: #16172a;
+	--muted: #f0f0fb;
+	--muted-foreground: #5b5d80;
+	--accent: #f5f5fc;
+	--accent-foreground: #16172a;
+	--destructive: #d1284c;
+	--destructive-foreground: #ffffff;
+	--status-attention: var(--primary);
+	--link: var(--primary);
+	--border: #d8d8ee;
+	--input: #d8d8ee;
+	--ring: #6a4cf0;
+	--sidebar: #ececfa;
+	--sidebar-accent: #d8d8ee;
+	--sidebar-foreground: #16172a;
+	--sidebar-border: #d8d8ee;
+
+	color-scheme: light;
+}
+
+/* Terracotta — warm clay */
+[data-theme-id='terracotta'] {
+	--background: #1E1E1E;
+	--foreground: #EADED6;
+	--card: #282624;
+	--card-foreground: #EADED6;
+	--primary: #E2694D;
+	--primary-foreground: #1E1E1E;
+	--secondary: #3A3633;
+	--secondary-foreground: #EADED6;
+	--muted: #3A3633;
+	--muted-foreground: #B5A99E;
+	--accent: #1E1E1E;
+	--accent-foreground: #EADED6;
+	--destructive: #FF5C33;
+	--destructive-foreground: #1E1E1E;
+	--link: var(--primary);
+	--border: #3A3633;
+	--input: #3A3633;
+	--ring: #E2694D;
+	--sidebar: #181716;
+	--sidebar-accent: #2A2724;
+	--sidebar-foreground: #EADED6;
+	--sidebar-border: rgba(255, 255, 255, 0.1);
+
+	--font-primary: 'Chakra Petch', sans-serif;
+	--font-secondary: 'IBM Plex Sans JP', sans-serif;
+
+	color-scheme: dark;
+}
+
+[data-theme-id='terracotta'][data-theme='light'] {
+	--background: #EADED6;
+	--foreground: #1E1E1E;
+	--card: #FFFFFF;
+	--card-foreground: #1E1E1E;
+	--primary: #AD3A1E;
+	--primary-foreground: #EADED6;
+	--secondary: #DDD0C6;
+	--secondary-foreground: #1E1E1E;
+	--muted: #E0D4CA;
+	--muted-foreground: #6B6259;
+	--accent: #EADED6;
+	--accent-foreground: #1E1E1E;
+	--destructive: #B23008;
+	--destructive-foreground: #EADED6;
+	--status-attention: var(--primary);
+	--link: var(--primary);
+	--border: #CBBEB3;
+	--input: #CBBEB3;
+	--ring: #AD3A1E;
+	--sidebar: #DDD0C6;
+	--sidebar-accent: #CBBEB3;
+	--sidebar-foreground: #1E1E1E;
+	--sidebar-border: #CBBEB3;
+
+	color-scheme: light;
+}
