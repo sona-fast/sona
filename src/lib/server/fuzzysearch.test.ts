@@ -19,6 +19,7 @@ import {
 	parseFuzzysearchRefusedMarker,
 	type LookupMatch
 } from './fuzzysearch';
+import { RATING_ORDER } from '$lib/artist-lookup';
 
 // A fetch stand-in that records what the client sent and answers with a fixed
 // response. Injected rather than stubbed globally (the furtrack.test.ts shape).
@@ -119,6 +120,25 @@ describe('normalizeMatches', () => {
 		expect(matches[3].rating).toBeNull();
 	});
 
+	// The parse held its own copy of the rating list, so a rating added to the
+	// comparators' order was dropped here and a rating added here sorted ahead of
+	// every rating they knew. One list now, read from both ends.
+	it('accepts exactly the ratings the comparators order by', () => {
+		// The loop below passes for any list, including an emptied or reordered
+		// one, so the list itself is pinned: least to most restrictive.
+		expect(RATING_ORDER).toEqual(['general', 'mature', 'adult']);
+		for (const rating of RATING_ORDER) {
+			const [match] = normalizeMatches([
+				{ site: 'FurAffinity', site_id_str: '12345', artists: [], distance: 0, rating }
+			]);
+			expect(match.rating).toBe(rating);
+		}
+		const [unknown] = normalizeMatches([
+			{ site: 'FurAffinity', site_id_str: '12345', artists: [], distance: 0, rating: 'explicit' }
+		]);
+		expect(unknown.rating).toBeNull();
+	});
+
 	it('returns nothing for a payload that is not a list', () => {
 		expect(normalizeMatches({ matches: [] })).toEqual([]);
 		expect(normalizeMatches(null)).toEqual([]);
@@ -160,6 +180,60 @@ describe('normalizeMatches', () => {
 
 		expect(junk.map((m) => m.siteId)).toEqual(['2', '3']);
 		expect(junk.every((m) => m.distance === null && m.band === null)).toBe(true);
+	});
+
+	// The panel keys its rows on site + siteId, so one post returned twice would
+	// crash the keyed each. The closest copy is the one that survives, and it
+	// takes the handles of the copies folded into it.
+	it('keeps one row per post, the closest copy', () => {
+		const deduped = normalizeMatches([
+			{ site: 'FurAffinity', site_id_str: '12345', artists: ['far'], distance: 4 },
+			{ site: 'FurAffinity', site_id_str: '12345', artists: ['near'], distance: 1 },
+			{ site: 'FurAffinity', site_id_str: '999', artists: ['other'], distance: 2 }
+		]);
+		expect(deduped.map((m) => `${m.siteId}:${m.distance}`)).toEqual(['12345:1', '999:2']);
+		expect(deduped[0].handles).toEqual(['near', 'far']);
+	});
+
+	// Equal distances leave the order to the payload, so the copy with no
+	// artists at all can be the one kept. Dropping its twin took the handle with
+	// it: the row said nobody posted this, offered no artist to add, and its
+	// /i/status/ URL matched no stored twitter.com/{handle}/status/{id}, so a
+	// piece already in the library raised no clash.
+	it('merges a handle-less duplicate rather than letting it win', () => {
+		const [match] = normalizeMatches([
+			{ site: 'Twitter', site_id_str: '160', artists: [], distance: 0, rating: 'general' },
+			{ site: 'Twitter', site_id_str: '160', artists: ['kuttoya'], distance: 0, rating: 'adult' }
+		]);
+		expect(match.handles).toEqual(['kuttoya']);
+		expect(match.postUrl).toBe('https://twitter.com/kuttoya/status/160');
+		// The stricter rating survives the fold: an NSFW hint must not be lost to
+		// whichever copy the payload happened to list first.
+		expect(match.rating).toBe('adult');
+	});
+
+	// Same shape one field over: a copy with no posted_at kept its own empty date
+	// and the commissioned date could not be filled from a post its twin dated.
+	it('takes the twin\'s date when the kept copy has none', () => {
+		const [match] = normalizeMatches([
+			{ site: 'FurAffinity', site_id_str: '12345', artists: ['kuttoya'], distance: 0 },
+			{
+				site: 'FurAffinity',
+				site_id_str: '12345',
+				artists: ['kuttoya'],
+				distance: 0,
+				posted_at: '2026-03-04T10:00:00Z'
+			}
+		]);
+		expect(match.postedAt).toBe('2026-03-04T10:00:00Z');
+	});
+
+	it('keeps the same id on two different sites', () => {
+		const both = normalizeMatches([
+			{ site: 'FurAffinity', site_id_str: '160', artists: [], distance: 1 },
+			{ site: 'Twitter', site_id_str: '160', artists: [], distance: 1 }
+		]);
+		expect(both.map((m) => m.site)).toEqual(['FurAffinity', 'Twitter']);
 	});
 
 	it('keeps only usable handles, and still builds a Twitter URL without one', () => {

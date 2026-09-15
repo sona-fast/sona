@@ -93,7 +93,17 @@ const RECOVERY_SPEC = '**/forgot-reset.spec.ts';
 // storage-breakdown rides the ut-stat server: it also flips the storage
 // provider, which would race the shared server's specs (SONA-192).
 const UT_SPECS = ['**/ut-stat.spec.ts', '**/storage-breakdown.spec.ts'];
-const UPLOAD_SPEC = '**/upload.spec.ts';
+// artist-lookup rides the upload server too: it saves and removes the
+// FuzzySearch key row, which decides whether "Look up artist" renders at all —
+// on the shared server that would race every other spec (SONA-156).
+// fuzzysearch-key writes and removes that same row from the settings page, so
+// it belongs on the same single-worker server rather than racing artist-lookup
+// over the key from the shared one.
+const UPLOAD_SPECS = [
+	'**/upload.spec.ts',
+	'**/artist-lookup.spec.ts',
+	'**/fuzzysearch-key.spec.ts'
+];
 
 // Seed a fresh throwaway D1 first, then boot the dev server against it. Seeding
 // here (not in globalSetup) guarantees it finishes before the server reads the
@@ -134,7 +144,7 @@ export default defineConfig({
 	projects: [
 		{
 			name: 'chromium',
-			testIgnore: [RECOVERY_SPEC, ...UT_SPECS, UPLOAD_SPEC],
+			testIgnore: [RECOVERY_SPEC, ...UT_SPECS, ...UPLOAD_SPECS],
 			use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${PORT}` }
 		},
 		{
@@ -152,7 +162,7 @@ export default defineConfig({
 		},
 		{
 			name: 'upload',
-			testMatch: UPLOAD_SPEC,
+			testMatch: UPLOAD_SPECS,
 			// The upload tests share one seeded dev server and an admin
 			// session flow that flakes under parallel load — run them serially.
 			workers: 1,

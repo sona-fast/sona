@@ -115,7 +115,13 @@ export async function proxyStoredImage(
 		// from here, so the timer must not fire mid-download.
 		clearTimeout(headersTimer);
 	}
-	if (!upstream.ok || !upstream.body) return null;
+	if (!upstream.ok || !upstream.body) {
+		// Nobody is going to read an error page, and an unread stream holds the
+		// subrequest open until the runtime reaps it. Cancelling a body that was
+		// already ended (or never there) is as harmless as the cancel itself.
+		await upstream.body?.cancel().catch(() => {});
+		return null;
+	}
 
 	const contentType = upstream.headers.get('content-type') ?? '';
 	// The same raster allowlist stored uploads pass, rather than the whole of

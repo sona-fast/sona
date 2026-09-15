@@ -27,7 +27,7 @@ export interface LegalSection {
 // on every fork by construction (a build/deploy date would falsely advance on a
 // redeploy that didn't touch the text). Bump this whenever you edit
 // defaultPrivacyPolicy or defaultTerms.
-export const LEGAL_DEFAULTS_UPDATED = '2026-08-24';
+export const LEGAL_DEFAULTS_UPDATED = '2026-09-14';
 
 /**
  * Resolve the "Last updated" date to show on a legal page from a *stable* source
@@ -156,7 +156,7 @@ export function defaultPrivacyPolicy(opts: LegalOptions): LegalSection[] {
 					: [
 							"For this site those tools are Anthropic's Claude, which writes and debugs code under the developer's direction, and CodeRabbit, a code review service that reads proposed changes."
 						]),
-				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) and Bluesky (fetching the profile pictures shown on this site), FurTrack (importing fursuit photos), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
+				"For specific features the site also talks to Cloudflare Turnstile (bot protection on the sign-in page), Telegram (importing sticker packs), cons.fyi (convention listings), X (formerly Twitter) and Bluesky (fetching the profile pictures shown on this site), FurTrack (importing fursuit photos), FuzzySearch (finding where a piece was posted; when the site owner asks for a lookup, a copy of that image is sent, including images not published on this site), and the shared artist registry (syncing artist credits; the registry receives this site's name and hostname as part of the sync). The site contacts these services to run the feature; they are not used to track visitors."
 			]
 		},
 		{

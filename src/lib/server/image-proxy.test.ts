@@ -159,6 +159,17 @@ describe('proxyStoredImage', () => {
 		expect(called).toBe(false);
 	});
 
+	// An error page nobody reads still holds the subrequest open until the
+	// runtime reaps it, so the body is cancelled on the way out.
+	it('cancels the body of a response it refuses', async () => {
+		const upstream = new Response('nope', { status: 500 });
+		const cancel = vi.spyOn(upstream.body as ReadableStream, 'cancel');
+		const fetcher = (async () => upstream) as unknown as typeof fetch;
+
+		expect(await proxyStoredImage('https://cdn.example/img.png', fetcher)).toBeNull();
+		expect(cancel).toHaveBeenCalled();
+	});
+
 	// A fetch that REJECTS rather than answering — DNS failure, reset connection,
 	// TLS error. Handled here rather than in each route, so all three callers
 	// report the stored image as unreachable instead of throwing a 500.

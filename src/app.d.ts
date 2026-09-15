@@ -13,7 +13,16 @@ declare global {
 	const __BUILD_REPO_URL__: string;
 
 	namespace App {
-		// interface Error {}
+		interface Error {
+			message: string;
+			/**
+			 * Whether the request's bytes reached a third party before the failure.
+			 * Set by /api/admin/artist-lookup (SONA-156), whose client has to tell an
+			 * endpoint-side refusal apart from FuzzySearch answering the same way and
+			 * reads a missing field as sent.
+			 */
+			forwarded?: boolean;
+		}
 		interface Locals {
 			admin?: boolean;
 			/**

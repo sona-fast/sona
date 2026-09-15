@@ -32,6 +32,21 @@ vi.mock('$lib/server/fuzzysearch', async (importOriginal) => {
 	return { ...original, searchImage };
 });
 
+// The real proxy by default. It swallows its own fetch, parse and cancel
+// errors today, so the only way to ask "what if it threw" is to make it throw.
+const proxyStoredImageSpy = vi.hoisted(() => vi.fn<(...args: never[]) => Promise<unknown>>());
+const realProxyStoredImage = vi.hoisted(() => ({
+	fn: null as null | ((...args: never[]) => Promise<unknown>)
+}));
+vi.mock('$lib/server/image-proxy', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/server/image-proxy')>();
+	realProxyStoredImage.fn = original.proxyStoredImage as unknown as (
+		...args: never[]
+	) => Promise<unknown>;
+	proxyStoredImageSpy.mockImplementation(realProxyStoredImage.fn);
+	return { ...original, proxyStoredImage: proxyStoredImageSpy };
+});
+
 // The real write by default; a test that needs the settings row to fail makes
 // this reject for that one call. The endpoint's answer must not depend on it.
 const setRawSettingSpy = vi.hoisted(() =>
@@ -48,6 +63,24 @@ vi.mock('$lib/server/settings', async (importOriginal) => {
 	realSetRawSetting.fn = original.setRawSetting as unknown as (...args: never[]) => Promise<unknown>;
 	setRawSettingSpy.mockImplementation(realSetRawSetting.fn);
 	return { ...original, setRawSetting: setRawSettingSpy };
+});
+
+// The real buffering by default. bufferStream allocates an exact-size array, so
+// a Blob built from the view and one built from its backing buffer carry the
+// same bytes and no assertion can tell them apart. The byte-for-byte test makes
+// this hand back a view into a larger allocation for one call, which is what
+// gives that test something to fail on.
+const bufferStreamSpy = vi.hoisted(() => vi.fn<(...args: never[]) => Promise<Uint8Array>>());
+const realBufferStream = vi.hoisted(() => ({
+	fn: null as null | ((...args: never[]) => Promise<Uint8Array>)
+}));
+vi.mock('$lib/server/storage/buffer', async (importOriginal) => {
+	const original = await importOriginal<typeof import('$lib/server/storage/buffer')>();
+	realBufferStream.fn = original.bufferStream as unknown as (
+		...args: never[]
+	) => Promise<Uint8Array>;
+	bufferStreamSpy.mockImplementation(realBufferStream.fn);
+	return { ...original, bufferStream: bufferStreamSpy };
 });
 
 const DDL = `CREATE TABLE site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -120,12 +153,15 @@ function pngFile(size = 32) {
 	return new File([bytes], 'a.png', { type: 'image/png' });
 }
 
-async function statusOf(fn: () => unknown): Promise<number> {
+/** The status AND the body of an exit that answers by throwing. The body is
+ * asserted too because the client dates a failure by its `forwarded` field, and
+ * a throw above the FuzzySearch call that omits it reads as sent. */
+async function errorOf(fn: () => unknown): Promise<{ status: number; body: unknown }> {
 	try {
 		await fn();
-		return 200;
+		return { status: 200, body: null };
 	} catch (e) {
-		if (isHttpError(e)) return e.status;
+		if (isHttpError(e)) return { status: e.status, body: e.body };
 		throw e;
 	}
 }
@@ -146,6 +182,10 @@ beforeEach(() => {
 	searchImage.mockResolvedValue({ ok: true, matches: [] });
 	setRawSettingSpy.mockReset();
 	if (realSetRawSetting.fn) setRawSettingSpy.mockImplementation(realSetRawSetting.fn);
+	proxyStoredImageSpy.mockReset();
+	if (realProxyStoredImage.fn) proxyStoredImageSpy.mockImplementation(realProxyStoredImage.fn);
+	bufferStreamSpy.mockReset();
+	if (realBufferStream.fn) bufferStreamSpy.mockImplementation(realBufferStream.fn);
 });
 
 describe('artist-lookup — configuration', () => {
@@ -153,7 +193,7 @@ describe('artist-lookup — configuration', () => {
 		const { platform } = makeEnv();
 		const res = await POST(multipartEvent(platform, pngFile()));
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ enabled: false });
+		expect(await res.json()).toEqual({ enabled: false, forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -174,6 +214,28 @@ describe('artist-lookup — configuration', () => {
 
 		expect(searchImage.mock.calls[0][1]).toBe('from-settings');
 	});
+
+	// The FIRST await in the handler, and on a fork whose key lives in settings
+	// it reads D1 — where getRawSetting lets an error propagate. Unguarded it
+	// answers a 500 with no `forwarded`, which the client reads as "the bytes
+	// were sent" and the edit page turns into the private-image disclosure for
+	// bytes that never left the worker. Deliberately no env key: with one, the
+	// resolution never touches D1 and this fires nothing.
+	it('answers a key lookup that throws with a dated failure, not a 500', async () => {
+		const { platform } = makeEnv();
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = (sql: string) => {
+			if (/from "site_settings"/i.test(sql)) throw new Error('D1_ERROR: database is locked');
+			return realPrepare(sql);
+		};
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
 });
 
 describe('artist-lookup — uploaded file', () => {
@@ -190,7 +252,10 @@ describe('artist-lookup — uploaded file', () => {
 		const body = (await res.json()) as {
 			enabled: boolean;
 			matches: unknown[];
-			localArtists: Array<{ matchIndex: number; artists: Array<{ id: number; name: string }> }>;
+			localArtists: Array<{
+				matchIndex: number;
+				artists: Array<{ id: number; name: string; pieces: number }>;
+			}>;
 			nameMatches: Array<{ matchIndex: number; artists: Array<{ id: number }> }>;
 			sourceClash: unknown;
 		};
@@ -198,18 +263,132 @@ describe('artist-lookup — uploaded file', () => {
 		expect(res.status).toBe(200);
 		expect(body.enabled).toBe(true);
 		expect(body.matches).toEqual([FA_EXACT]);
-		expect(body.localArtists).toEqual([{ matchIndex: 0, artists: [{ id: 1, name: 'Kuttoya' }] }]);
+		// `pieces` rides along so the ambiguous picker can tell two same-named
+		// artists apart; this gallery has no images, so the count is 0.
+		expect(body.localArtists).toEqual([
+			{ matchIndex: 0, artists: [{ id: 1, name: 'Kuttoya', pieces: 0 }] }
+		]);
 		// Both rows are named for the handle; the name-only one is the weak hit.
 		expect(body.nameMatches[0].artists.map((a) => a.id)).toEqual([1, 2]);
 		expect(body.sourceClash).toBeNull();
 		expect(searchImage.mock.calls[0][0]).toBeInstanceOf(File);
 	});
 
+	// Two artists can share a display name, so the picker needs something else to
+	// tell them apart. One grouped count, not a query per hit.
+	it('counts how many pieces each matched artist already has', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, furaffinity_url, created_at)
+			 VALUES (1, 'Kuttoya', 'https://www.furaffinity.net/user/KUTTOYA/', '2026-01-01');
+			 INSERT INTO images (id, title, slug, image_url, artist_id, created_at)
+			 VALUES (1, 'One', 'one', 'https://cdn/1.png', 1, '2026-01-01'),
+				(2, 'Two', 'two', 'https://cdn/2.png', 1, '2026-01-02');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+		const body = (await res.json()) as {
+			localArtists: Array<{ artists: Array<{ pieces: number }> }>;
+		};
+		expect(body.localArtists[0].artists[0].pieces).toBe(2);
+	});
+
+	// /admin/artists shows a plain COUNT(*) over images.artist_id in its Artworks
+	// column, so this count is the same one: a variant and an unpublished piece
+	// both count there, and two different numbers for one artist on two admin
+	// screens is the worse answer. An image with no artist is nobody's count.
+	it('counts pieces the way /admin/artists does, and skips the unattributed', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, furaffinity_url, created_at)
+			 VALUES (1, 'Kuttoya', 'https://www.furaffinity.net/user/KUTTOYA/', '2026-01-01');
+			 INSERT INTO images (id, title, slug, image_url, artist_id, published, parent_image_id, created_at)
+			 VALUES (1, 'One', 'one', 'https://cdn/1.png', 1, 1, NULL, '2026-01-01'),
+				(2, 'Draft', 'two', 'https://cdn/2.png', 1, 0, NULL, '2026-01-02'),
+				(3, 'Variant', 'three', 'https://cdn/3.png', 1, 1, 1, '2026-01-03'),
+				(4, 'Nobody', 'four', 'https://cdn/4.png', NULL, 1, NULL, '2026-01-04');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+		const body = (await res.json()) as {
+			localArtists: Array<{ artists: Array<{ pieces: number }> }>;
+		};
+		// The same expression /admin/artists selects for its Artworks column.
+		const asAdminArtists = sqlite
+			.prepare('SELECT COUNT(*) AS n FROM images WHERE images.artist_id = 1')
+			.get() as { n: number };
+		expect(asAdminArtists.n).toBe(3);
+		expect(body.localArtists[0].artists[0].pieces).toBe(3);
+	});
+
+	// Nothing matched, so there is nobody to match against: neither the artist
+	// table nor the piece counts are read. The gallery's whole artist list is the
+	// bigger of the two queries, and it used to run on every no-match answer.
+	it('reads no artists when nothing matched', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO artists (id, name, created_at) VALUES (1, 'Kuttoya', '2026-01-01');`
+		);
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		const statements: string[] = [];
+		d1.prepare = (sql: string) => {
+			statements.push(sql);
+			return realPrepare(sql);
+		};
+		searchImage.mockResolvedValue({ ok: true, matches: [] });
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(200);
+		expect(statements.some((sql) => /from "artists"/i.test(sql))).toBe(false);
+		expect(statements.some((sql) => /count\(\*\)/i.test(sql))).toBe(false);
+	});
+
 	it('refuses a file over the remote-body cap on its exact size', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const res = await POST(multipartEvent(platform, pngFile(FUZZYSEARCH_MAX_BYTES + 1)));
 		expect(res.status).toBe(413);
-		expect(await res.json()).toEqual({ enabled: true, error: 'too_large' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'too_large', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// The adapter enforces its own body cap while parsing, and rejects with a 413
+	// HttpError. A chunked body carries no content-length, so the declared-length
+	// check above never sees it and this is where it lands: the operator gets
+	// "too large", not an outage, and it stays out of the 5xx rollup.
+	it('keeps the 413 when the adapter refuses an oversized body', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const request = {
+			headers: new Headers({ 'content-type': 'multipart/form-data; boundary=x' }),
+			formData: async () => {
+				throw Object.assign(new Error('Content-length exceeds limit'), { status: 413 });
+			}
+		};
+
+		const res = await POST({ request, platform, fetch: imageFetch().fn } as never);
+
+		expect(res.status).toBe(413);
+		expect(await res.json()).toEqual({ enabled: true, error: 'too_large', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// Any other formData rejection is still an outage, not a size refusal.
+	it('reports unavailable when the body parse fails for any other reason', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const request = {
+			headers: new Headers({ 'content-type': 'multipart/form-data; boundary=x' }),
+			formData: async () => {
+				throw new Error('connection reset');
+			}
+		};
+
+		const res = await POST({ request, platform, fetch: imageFetch().fn } as never);
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -240,7 +419,7 @@ describe('artist-lookup — uploaded file', () => {
 		for (const file of cases) {
 			const res = await POST(multipartEvent(platform, file));
 			expect(res.status, file.type).toBe(422);
-			expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+			expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
 		}
 		expect(searchImage).not.toHaveBeenCalled();
 	});
@@ -254,7 +433,56 @@ describe('artist-lookup — uploaded file', () => {
 		const res = await POST(multipartEvent(platform, spoofed));
 
 		expect(res.status).toBe(422);
-		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// Every typed exit above searchImage carries `forwarded`. An UNGUARDED throw
+	// carries none: SvelteKit answers 500 with a body the client cannot date, the
+	// client's "err toward sent" default then shows the private-image disclosure
+	// for bytes that never left the endpoint, and the 500 lands in the operator's
+	// error rollup as a server fault. The three awaits below can all reject on a
+	// connection that drops mid-POST or a database that will not answer.
+	it('answers a rejected formData() with a dated failure, not a 500', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const request = {
+			headers: new Headers({ 'content-type': 'multipart/form-data; boundary=x' }),
+			formData: async () => {
+				throw new TypeError('connection reset');
+			}
+		} as unknown as Request;
+
+		const res = await POST({ request, platform, fetch: imageFetch().fn } as never);
+
+		// 502, the status this file gives unavailable everywhere: the point of the
+		// guard is the dated body, not the number.
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	it('answers a file whose leading bytes will not read the same way', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const file = pngFile();
+		// The part arrived, the body behind it stopped: slice() hands back a blob
+		// whose arrayBuffer() never resolves with bytes.
+		Object.defineProperty(file, 'slice', {
+			value: () => ({
+				arrayBuffer: async () => {
+					throw new TypeError('stalled');
+				}
+			})
+		});
+		const form = new FormData();
+		form.append('file', file);
+		const request = {
+			headers: new Headers({ 'content-type': 'multipart/form-data; boundary=x' }),
+			formData: async () => form
+		} as unknown as Request;
+
+		const res = await POST({ request, platform, fetch: imageFetch().fn } as never);
+
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -264,8 +492,8 @@ describe('artist-lookup — uploaded file', () => {
 			method: 'POST',
 			body: new FormData()
 		});
-		expect(await statusOf(() => POST({ request, platform, fetch: imageFetch().fn } as never))).toBe(
-			400
+		expect(await errorOf(() => POST({ request, platform, fetch: imageFetch().fn } as never))).toEqual(
+			{ status: 400, body: { message: 'No file provided', forwarded: false } }
 		);
 	});
 });
@@ -293,17 +521,20 @@ describe('artist-lookup — stored image by id', () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const fetcher = imageFetch();
 		expect(
-			await statusOf(() =>
+			await errorOf(() =>
 				POST(jsonEvent(platform, { imageUrl: 'https://evil.example/x.png' }, fetcher.fn))
 			)
-		).toBe(400);
+		).toEqual({ status: 400, body: { message: 'Invalid image id', forwarded: false } });
 		expect(fetcher.calls).toEqual([]);
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
 	it('404s an unknown id', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
-		expect(await statusOf(() => POST(jsonEvent(platform, { imageId: 404 })))).toBe(404);
+		expect(await errorOf(() => POST(jsonEvent(platform, { imageId: 404 })))).toEqual({
+			status: 404,
+			body: { message: 'Image not found', forwarded: false }
+		});
 	});
 
 	it('sends the stored image with the content type the proxy validated', async () => {
@@ -322,6 +553,35 @@ describe('artist-lookup — stored image by id', () => {
 		// The upload page forwards a File, which carries its own type; the edit
 		// page has to attach one or FuzzySearch sees an untyped part.
 		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/jpeg');
+	});
+
+	// The Blob is built from the buffered view, not from its backing ArrayBuffer.
+	// Reading the buffer only matches the payload while bufferStream allocates an
+	// exact-size array; a view into a larger allocation would send trailing zero
+	// bytes FuzzySearch would then be matching against.
+	it('forwards a stored image byte for byte', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+		);
+
+		// The payload as a view into a larger, 0xff-padded allocation. Against the
+		// exact-size array bufferStream really returns, reading the view and
+		// reading its buffer give the same bytes, so this test passed either way;
+		// with the padding in place a Blob built from `.buffer` sends the padding
+		// too and the assertion below fails.
+		bufferStreamSpy.mockImplementationOnce(async (...args) => {
+			const real = await realBufferStream.fn!(...args);
+			const padded = new Uint8Array(real.byteLength + 8).fill(0xff);
+			padded.set(real, 4);
+			return padded.subarray(4, 4 + real.byteLength);
+		});
+
+		await POST(jsonEvent(platform, { imageId: 1 }));
+
+		const sent = new Uint8Array(await (searchImage.mock.calls[0][0] as Blob).arrayBuffer());
+		expect(Array.from(sent)).toEqual(Array.from(IMAGE_BYTES));
 	});
 
 	// Media types are case-insensitive. An upstream spelling it `Image/JPEG` was
@@ -354,7 +614,7 @@ describe('artist-lookup — stored image by id', () => {
 		const missing = imageFetch(new Response('nope', { status: 404 }));
 		const gone = await POST(jsonEvent(platform, { imageId: 1 }, missing.fn));
 		expect(gone.status).toBe(502);
-		expect(await gone.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(await gone.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
 
 		// A link-local host stored in the row is refused before any fetch.
 		const internal = imageFetch();
@@ -363,6 +623,131 @@ describe('artist-lookup — stored image by id', () => {
 		expect(internal.calls).toEqual([]);
 
 		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// Every other await before the search is guarded. This one was left to the
+	// callee's own discipline, and the callee has one thread it cannot catch: a
+	// `cancel()` that throws synchronously never gets its `.catch` attached. A
+	// throw here answers 500 with no `forwarded` field for bytes that never left
+	// the worker, and the edit page then shows the private-image notice.
+	it('answers a stored-image read that throws with a dated failure, not a 500', async () => {
+		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, created_at)
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+		);
+		proxyStoredImageSpy.mockRejectedValueOnce(new Error('cancel threw'));
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// The same rule as the multipart guards: a database that throws must not
+	// become a 500 whose body the client cannot date.
+	it('answers a select that throws with a dated failure, not a 500', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = (sql: string) => {
+			if (/from "images"/i.test(sql)) throw new Error('D1_ERROR: database is locked');
+			return realPrepare(sql);
+		};
+		const fetcher = imageFetch();
+
+		const res = await POST(jsonEvent(platform, { imageId: 1 }, fetcher.fn));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+		expect(fetcher.calls).toEqual([]);
+		expect(searchImage).not.toHaveBeenCalled();
+	});
+
+	// The proxy's timeout bounds the wait for HEADERS only. A host that answers
+	// and then trickles nothing leaves the panel spinning until the platform
+	// kills the request, so the buffering carries a deadline of its own.
+	// Explicit timeout: the body advances a simulated 20 s deadline in two
+	// steps, and the awaits between them have run past vitest's 5 s default on a
+	// loaded machine.
+	it('gives up on a stored body that stops arriving', { timeout: 15_000 }, async () => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			sqlite.exec(
+				`INSERT INTO images (id, title, slug, image_url, created_at)
+				 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+			);
+			let cancelled = false;
+			// Headers, then nothing: the stream never enqueues and never closes.
+			const trickle = new ReadableStream<Uint8Array>({
+				cancel() {
+					cancelled = true;
+				}
+			});
+			const stalling = imageFetch(
+				new Response(trickle, { status: 200, headers: { 'content-type': 'image/png' } })
+			);
+
+			// Mirrors the endpoint's BODY_BUFFER_TIMEOUT_MS. Held here rather than
+			// imported (a +server.ts exports handlers), and pinned by advancing to
+			// just short of it first: a shorter deadline settles early, a longer one
+			// leaves the second advance with nothing to fire.
+			const deadlineMs = 20_000;
+			let settled = false;
+			const pending = Promise.resolve(
+				POST(jsonEvent(platform, { imageId: 1 }, stalling.fn))
+			).then((r) => {
+				settled = true;
+				return r;
+			});
+			await vi.advanceTimersByTimeAsync(deadlineMs - 1_000);
+			expect(settled).toBe(false);
+			await vi.advanceTimersByTimeAsync(1_001);
+			const res = await pending;
+
+			expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+			// The bytes are not left flowing into an isolate nobody is reading.
+			expect(cancelled).toBe(true);
+			expect(searchImage).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	// An upstream that RESETS mid-body rather than stalling. The deadline stream
+	// errors, and an errored stream never calls cancel — the other place the timer
+	// is cleared — so an unguarded version leaves a 20 s timer armed on a request
+	// that has already been answered, firing reader.cancel() into a request
+	// context workerd has closed.
+	it('clears the body deadline when the stored read rejects', { timeout: 15_000 }, async () => {
+		vi.useFakeTimers();
+		try {
+			const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+			sqlite.exec(
+				`INSERT INTO images (id, title, slug, image_url, created_at)
+				 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
+			);
+			const resetting = new ReadableStream<Uint8Array>({
+				pull() {
+					throw new Error('connection reset by peer');
+				}
+			});
+			const failing = imageFetch(
+				new Response(resetting, { status: 200, headers: { 'content-type': 'image/png' } })
+			);
+
+			const res = await POST(jsonEvent(platform, { imageId: 1 }, failing.fn));
+
+			expect(res.status).toBe(502);
+			expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
+			// The point of the test: nothing is still armed once the answer is out.
+			expect(vi.getTimerCount()).toBe(0);
+			expect(searchImage).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	// A fetch that REJECTS rather than answering — DNS failure, reset connection,
@@ -381,7 +766,7 @@ describe('artist-lookup — stored image by id', () => {
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, rejecting));
 
 		expect(res.status).toBe(502);
-		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -407,11 +792,11 @@ describe('artist-lookup — stored image by id', () => {
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(huge).fn));
 
 		expect(res.status).toBe(413);
-		expect(await res.json()).toEqual({ enabled: true, error: 'too_large' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'too_large', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
-	it('reports unavailable when the stored image is not an image', async () => {
+	it('refuses a stored response whose bytes are not an image at all', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		sqlite.exec(
 			`INSERT INTO images (id, title, slug, image_url, created_at)
@@ -424,38 +809,36 @@ describe('artist-lookup — stored image by id', () => {
 
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(html).fn));
 
-		expect(res.status).toBe(502);
-		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(res.status).toBe(422);
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
-	// Nothing reads the body of a refused type, and an unread subrequest stream
-	// holds its connection open for the rest of the invocation.
-	it('cancels the proxied body when the stored type is refused', async () => {
+	// The proxy hands anything off its allowlist back as application/octet-stream,
+	// so a stored PNG whose origin serves it untyped used to be refused as an
+	// outage. The bytes are what the gate reads, and the part carries the type
+	// they sniff to.
+	it('sends a stored image the upstream typed octet-stream, under its sniffed type', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		sqlite.exec(
 			`INSERT INTO images (id, title, slug, image_url, created_at)
-			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.svg', '2026-01-01');`
+			 VALUES (1, 'Ref', 'ref', 'https://cdn.example.com/stored.png', '2026-01-01');`
 		);
-		const canceled = vi.fn();
-		const body = new ReadableStream<Uint8Array>({
-			pull(controller) {
-				controller.enqueue(new Uint8Array([1]));
-			},
-			cancel: canceled
+		const untyped = new Response(IMAGE_BYTES, {
+			status: 200,
+			headers: { 'content-type': 'application/octet-stream' }
 		});
-		const svg = new Response(body, { status: 200, headers: { 'content-type': 'image/svg+xml' } });
 
-		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(svg).fn));
+		await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(untyped).fn));
 
-		expect(res.status).toBe(502);
-		expect(canceled).toHaveBeenCalled();
+		expect(searchImage).toHaveBeenCalled();
+		expect((searchImage.mock.calls[0][0] as Blob).type).toBe('image/png');
 	});
 
 	// SVG is an image type, so an `image/*` check would have sent it on. It is
-	// not one of the raster types storage accepts, the proxy demotes it to a
-	// download, and nothing is uploaded to FuzzySearch.
-	it('reports unavailable when the stored image is an svg', async () => {
+	// not one of the raster types storage accepts, and its bytes sniff to
+	// nothing, so nothing is uploaded to FuzzySearch.
+	it('refuses a stored image that is an svg', async () => {
 		const { sqlite, platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		sqlite.exec(
 			`INSERT INTO images (id, title, slug, image_url, created_at)
@@ -468,8 +851,8 @@ describe('artist-lookup — stored image by id', () => {
 
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(svg).fn));
 
-		expect(res.status).toBe(502);
-		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable' });
+		expect(res.status).toBe(422);
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -490,7 +873,7 @@ describe('artist-lookup — stored image by id', () => {
 		const res = await POST(jsonEvent(platform, { imageId: 1 }, imageFetch(spoofed).fn));
 
 		expect(res.status).toBe(422);
-		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'invalid_image', forwarded: false });
 		expect(searchImage).not.toHaveBeenCalled();
 	});
 
@@ -510,6 +893,91 @@ describe('artist-lookup — stored image by id', () => {
 	});
 });
 
+describe('artist-lookup — after the search', () => {
+	// These reads run AFTER the bytes reached FuzzySearch, so the failure is
+	// dated `forwarded: true` — the private-image notice on the edit page is then
+	// honest about a lookup that did leave the app. A typed answer rather than a
+	// throw because only a typed body can carry `forwarded`.
+	//
+	// NOT degraded to the matches with an empty localArtists: the panel reads
+	// that as "no local artist has this handle" and offers to add one that
+	// already exists, which is a duplicate artist row to merge by hand.
+	it('answers a post-search read that throws with a forwarded failure', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+		const d1 = platform.env.DB as unknown as { prepare: (sql: string) => unknown };
+		const realPrepare = d1.prepare.bind(d1);
+		d1.prepare = (sql: string) => {
+			if (/from "artists"/i.test(sql)) throw new Error('D1_ERROR: database is locked');
+			return realPrepare(sql);
+		};
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: true });
+		expect(searchImage).toHaveBeenCalled();
+	});
+
+	// The call itself is guarded too. searchImage catches its own failures, so a
+	// throw out of it means something unforeseen, and the bytes are gone either
+	// way — an unguarded throw would answer 500 with no `forwarded` field for a
+	// file that already left the worker, and the edit page's private-image notice
+	// reads that field.
+	it('answers a search that throws with a forwarded failure, not a 500', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockRejectedValue(new Error('connection reset'));
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: true });
+		expect(searchImage).toHaveBeenCalled();
+	});
+
+	// A rejection that is not an Error has no `.message` to log, and a fetch
+	// failure can throw a value holding the request that carried the key
+	// upstream. Logged whole, that key lands in the worker's log.
+	it('keeps a non-Error thrown value out of the log', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		searchImage.mockRejectedValue({
+			request: { headers: { 'X-Api-Key': 'fuzzysearch-key-in-the-request' } }
+		});
+
+		const res = await POST(multipartEvent(platform, pngFile()));
+
+		expect(res.status).toBe(502);
+		expect(await res.json()).toEqual({ enabled: true, error: 'unavailable', forwarded: true });
+		const logged = warn.mock.calls
+			.flat()
+			.map((value) => JSON.stringify(value))
+			.join(' ');
+		expect(logged).not.toContain('fuzzysearch-key-in-the-request');
+		expect(logged).not.toContain('X-Api-Key');
+		warn.mockRestore();
+	});
+
+	// Only the reads are guarded. A fault in the mapping below them is a bug in
+	// this file, not an upstream outage, and reporting it as one hides it: the
+	// operator is told FuzzySearch is down and nothing is logged anywhere. A
+	// match with no handles array is the cheapest way to make that code throw.
+	//
+	// That shape is synthetic: normalizeMatch in fuzzysearch.ts guards handles
+	// with Array.isArray, so a real client response can never reach the mapping
+	// without one. This test says what happens if the mapping throws, NOT that
+	// the guard is redundant — do not relax it on the strength of this test.
+	it('does not report a fault in its own mapping as an upstream outage', async () => {
+		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({
+			ok: true,
+			matches: [{ ...FA_EXACT, handles: undefined as unknown as string[] }]
+		});
+
+		await expect(POST(multipartEvent(platform, pngFile()))).rejects.toThrow(TypeError);
+	});
+});
+
 describe('artist-lookup — failure mapping and the refused marker', () => {
 	// 424, not 401: the admin gate answers an expired session with its own 401
 	// and a plain-text body, so a 401 here would be indistinguishable from a
@@ -522,7 +990,7 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 
 		const refused = await POST(multipartEvent(platform, pngFile()));
 		expect(refused.status).toBe(424);
-		expect(await refused.json()).toEqual({ enabled: true, error: 'key_refused' });
+		expect(await refused.json()).toEqual({ enabled: true, error: 'key_refused', forwarded: true });
 		// The source rides along with the date: this refusal was the deploy
 		// secret's, and the settings card must not blame a stored key for it.
 		expect(await getRawSetting(db, FUZZYSEARCH_KEY_REFUSED_SETTING)).toMatch(
@@ -610,7 +1078,7 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 		const res = await POST(multipartEvent(platform, pngFile()));
 
 		expect(res.status).toBe(424);
-		expect(await res.json()).toEqual({ enabled: true, error: 'key_refused' });
+		expect(await res.json()).toEqual({ enabled: true, error: 'key_refused', forwarded: true });
 	});
 
 	it('still answers the matches when the marker cannot be cleared', async () => {
@@ -625,6 +1093,39 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 		expect((await res.json()).matches).toHaveLength(1);
 	});
 
+	// Same rule as the search catch above: a rejected value that is not an Error
+	// can be an object holding the request that carried the key, so both marker
+	// catches log a constant in that arm rather than the value itself.
+	it('keeps a non-Error marker failure out of the log, writing and clearing', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const thrown = { request: { headers: { 'X-Api-Key': 'fuzzysearch-key-in-the-request' } } };
+
+		const refused = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		searchImage.mockResolvedValue({ ok: false, reason: 'key_refused' });
+		setRawSettingSpy.mockRejectedValueOnce(thrown);
+		expect((await POST(multipartEvent(refused.platform, pngFile()))).status).toBe(424);
+
+		const cleared = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		await setRawSetting(
+			cleared.db,
+			FUZZYSEARCH_KEY_REFUSED_SETTING,
+			'2026-09-01T00:00:00.000Z|env'
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+		setRawSettingSpy.mockRejectedValueOnce(thrown);
+		expect((await POST(multipartEvent(cleared.platform, pngFile()))).status).toBe(200);
+
+		const logged = warn.mock.calls
+			.flat()
+			.map((value) => JSON.stringify(value))
+			.join(' ');
+		expect(logged).toContain('marker not written');
+		expect(logged).toContain('marker not cleared');
+		expect(logged).not.toContain('fuzzysearch-key-in-the-request');
+		expect(logged).not.toContain('X-Api-Key');
+		warn.mockRestore();
+	});
+
 	it('maps each remaining failure to its status without echoing a body', async () => {
 		const { platform } = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
 		const cases = [
@@ -637,7 +1138,7 @@ describe('artist-lookup — failure mapping and the refused marker', () => {
 			searchImage.mockResolvedValue({ ok: false, reason });
 			const res = await POST(multipartEvent(platform, pngFile()));
 			expect(res.status, reason).toBe(status);
-			expect(await res.json()).toEqual({ enabled: true, error: reason });
+			expect(await res.json()).toEqual({ enabled: true, error: reason, forwarded: true });
 		}
 	});
 
@@ -682,9 +1183,42 @@ describe('artist-lookup — source-post clash', () => {
 		expect(body.sourceClash).toEqual({
 			imageId: 1,
 			title: 'Sparky at the beach',
+			// No thumbnail column on the seeded row, so the full image stands in.
+			thumbnailUrl: 'https://cdn/1.png',
+			artistName: null,
+			uploadedAt: '2026-01-01',
+			// The seeded row has no size columns, so the meta line drops that part.
+			width: null,
+			height: null,
 			isVariant: false,
 			parentImageId: null,
 			variantCount: 1
+		});
+	});
+
+	// The warning shows the operator the piece itself, so the row carries what it
+	// takes to recognize one: its thumbnail, who drew it, and when it landed.
+	it('carries the clashing piece thumbnail, artist, upload date and size', async () => {
+		const env = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		env.sqlite.exec(
+			`INSERT INTO artists (id, name, created_at) VALUES (7, 'Kuttoya', '2026-01-01');
+			 INSERT INTO images (id, title, slug, image_url, thumbnail_url, source_post_url,
+				 artist_id, parent_image_id, width, height, created_at)
+			 VALUES (1, 'Sparky at the beach', 'beach', 'https://cdn/1.png', 'https://cdn/1-thumb.png',
+				 'https://www.furaffinity.net/view/12345/', 7, NULL, 1600, 900, '2026-02-09');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const res = await POST(multipartEvent(env.platform, pngFile()));
+		const body = (await res.json()) as { sourceClash: Record<string, unknown> };
+
+		expect(body.sourceClash).toMatchObject({
+			imageId: 1,
+			thumbnailUrl: 'https://cdn/1-thumb.png',
+			artistName: 'Kuttoya',
+			uploadedAt: '2026-02-09',
+			width: 1600,
+			height: 900
 		});
 	});
 
@@ -707,11 +1241,37 @@ describe('artist-lookup — source-post clash', () => {
 		expect(body.sourceClash).toEqual({
 			imageId: 10,
 			title: 'Sparky at the beach',
+			thumbnailUrl: 'https://cdn/10.png',
+			artistName: null,
+			uploadedAt: '2026-01-01',
+			width: null,
+			height: null,
 			isVariant: true,
 			parentImageId: 10,
-			// One row in the set carries the URL, and it is the row being reported.
-			variantCount: 0
+			// The variant is the row that carries the URL, and the parent named
+			// above is not in the set — so it is one variant, not none.
+			variantCount: 1
 		});
+	});
+
+	// Same shape, more than one variant: the count is what the set holds, not the
+	// set minus a root row that never matched.
+	it('counts every variant when the parent carries no source URL', async () => {
+		const env = makeEnv({ FUZZYSEARCH_API_KEY: 'k' });
+		env.sqlite.exec(
+			`INSERT INTO images (id, title, slug, image_url, source_post_url, parent_image_id, created_at)
+			 VALUES (10, 'Sparky at the beach', 'beach', 'https://cdn/10.png', NULL, NULL, '2026-01-01'),
+				(11, 'Beach variant', 'beach-v', 'https://cdn/11.png',
+				 'https://www.furaffinity.net/view/12345/', 10, '2026-01-02'),
+				(12, 'Beach variant 2', 'beach-v2', 'https://cdn/12.png',
+				 'https://www.furaffinity.net/view/12345/', 10, '2026-01-03');`
+		);
+		searchImage.mockResolvedValue({ ok: true, matches: [FA_EXACT] });
+
+		const res = await POST(multipartEvent(env.platform, pngFile()));
+		const body = (await res.json()) as { sourceClash: Record<string, unknown> };
+
+		expect(body.sourceClash).toMatchObject({ imageId: 10, variantCount: 2 });
 	});
 
 	// Two unrelated images can carry the same source post (a two-piece

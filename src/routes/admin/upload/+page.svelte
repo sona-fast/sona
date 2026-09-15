@@ -1,7 +1,33 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { CloudUpload, Check, FileBox, Loader2, Plus, X } from 'lucide-svelte';
+	import { tick } from 'svelte';
+	import { CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
+	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
+	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
+	import { Announcer } from '$lib/live-announcer.svelte';
+	import {
+		LOOKUP_RESULT_THREW,
+		matchHandle,
+		pickPrefillMatch,
+		prefillForResult,
+		profileUrlFor,
+		ratingTag,
+		runLookup,
+		siteLabel,
+		strictestRating,
+		tileResultText,
+		candidateArtists,
+		lookupSentFile,
+		sentAfterApplyThrew,
+		withCreatedArtist,
+		type LookupFailReason,
+		type LookupFields,
+		type LookupMatch,
+		type LookupSite,
+		type LookupState,
+		type SourceClash
+	} from '$lib/artist-lookup';
 	import { extractImageFiles, isTextEditable, shouldHandleImagePaste } from '$lib/clipboard';
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { GALLERY_ACCEPT, MAX_BUFFER_BYTES } from '$lib/config';
@@ -15,19 +41,12 @@
 	let artistList = $state<{ id: number; name: string }[]>(
 		data.artists.map((a) => ({ id: a.id, name: a.name }))
 	);
-	let selectedArtistId = $state('');
+	let selectedArtistId = $state<string | number>('');
 	let showNewArtist = $state(false);
 	let saving = $state(false);
-	let announce = $state('');
-	// Bumped on every write so {#key} replaces the node inside the live region:
-	// two identical batches say the same thing, and re-assigning text the region
-	// already holds changes no DOM, so nothing would be announced. Same shape the
-	// VR and sticker forms use.
-	let announceUid = $state(0);
-	function setAnnounce(text: string) {
-		announce = text;
-		announceUid++;
-	}
+	// Two identical batches say the same thing, so the region is keyed on a
+	// counter rather than on the text — see `$lib/live-announcer.svelte`.
+	const announcer = new Announcer();
 	let fileInput: HTMLInputElement;
 
 	type Tile = {
@@ -42,6 +61,22 @@
 		error: string;
 		label: string;
 		nsfw: boolean;
+		// The bytes, kept for "Look up artist" (SONA-156): the lookup endpoint
+		// never accepts a URL from the client, so the file itself is what gets
+		// posted. Held for the tile's whole life and released with it: a lookup
+		// can be asked for at any point before the form is saved, and repeated.
+		// A dropped or picked file is a handle to something on disk, but a PASTED
+		// one is a blob the page is holding in memory — so the cost of keeping it
+		// is real, and dropping it early would cost the operator a lookup they
+		// can still ask for. Release it only where the code can tell no further
+		// lookup is possible.
+		file: File | null;
+		lookup: LookupState;
+		// What the Private box read when this tile's request fired. The notice
+		// describes a send that already happened, so reading the box live let a
+		// tick made afterwards claim a file that went out published, and an untick
+		// hide a true notice about a private one.
+		sentPrivate: boolean;
 	};
 	let tiles = $state<Tile[]>([]);
 	let tileKey = 0;
@@ -56,6 +91,10 @@
 	// 'existing' = every file becomes a variant of an already-uploaded piece.
 	let groupMode = $state<'new' | 'existing'>('new');
 	let existingParentId = $state('');
+	// Parent options the page did not load with, added by "Add as a variant" for a
+	// clash piece that postdates this page. Same shape as data.parentCandidates.
+	let extraParents = $state<{ id: number; title: string }[]>([]);
+	const parentOptions = $derived([...data.parentCandidates, ...extraParents]);
 
 	const isUploading = $derived(tiles.some((t) => t.status === 'uploading'));
 	const allUploaded = $derived(tiles.length > 0 && tiles.every((t) => t.status === 'done'));
@@ -100,9 +139,11 @@
 			}
 
 			if (exists && !confirm(m.admin_upload_duplicate_confirm({ fileName: file.name }))) {
-				// Declined: the tile goes, and so does the preview it was holding.
-				if (tile.previewUrl) URL.revokeObjectURL(tile.previewUrl);
-				tiles = tiles.filter((t) => t.key !== tile.key);
+				// Declined: the tile goes the same way the Remove button sends it.
+				// Filtering the array by hand skipped the parent bookkeeping —
+				// parentIndex kept pointing past the end, the shared panel went quiet,
+				// and the save action dereferenced a tile that was no longer there.
+				removeTile(tile.key);
 				return;
 			}
 
@@ -190,7 +231,11 @@
 				status: error ? 'error' : 'uploading',
 				error,
 				label: '',
-				nsfw: false
+				nsfw: false,
+				// A refused file is never looked up either, so it holds no bytes.
+				file: error ? null : file,
+				lookup: { kind: 'idle' },
+				sentPrivate: false
 			};
 			tiles = [...tiles, tile];
 			created.push(tile.key);
@@ -205,7 +250,7 @@
 		// created; the mixed case is its own message so each locale can punctuate
 		// the two sentences its own way.
 		const notUploaded = fileArray.length - batch.length;
-		setAnnounce(
+		announcer.say(
 			batch.length > 0 && notUploaded > 0
 				? m.admin_upload_images_added_and_rejected({ added: batch.length, rejected: notUploaded })
 				: batch.length > 0
@@ -250,7 +295,7 @@
 			if (createdAnError()) batchHadErrors = true;
 			inFlightBatches--;
 			if (inFlightBatches === 0) {
-				setAnnounce(batchHadErrors ? m.admin_upload_batch_issues() : m.admin_upload_batch_done());
+				announcer.say(batchHadErrors ? m.admin_upload_batch_issues() : m.admin_upload_batch_done());
 				batchHadErrors = false;
 			}
 		}
@@ -261,8 +306,56 @@
 		if (idx === -1) return;
 		// A wrong-type tile never got an object URL to revoke.
 		if (tiles[idx].previewUrl) URL.revokeObjectURL(tiles[idx].previewUrl);
+		// A lookup still in flight for this tile has nowhere to land, and its
+		// result is discarded with the tile.
+		lookupAborts.get(key)?.abort();
+		lookupAborts.delete(key);
+		// Both focus-target records are keyed by tile as well, and a key is never
+		// reused, so an entry for a removed tile is dead weight nothing can read
+		// again. Dropped after the flush that unmounts the tile, not here:
+		// Svelte writes null back into a bind:this slot when its element goes, so
+		// a delete now is undone a moment later and the record still grows one
+		// dead entry per removed tile.
+		void tick().then(() => {
+			delete tileLookupButtons[key];
+			delete tileRemoveButtons[key];
+		});
+		// The parent is a tile, not a position: removing anything before it shifts
+		// every later tile down one, and parentIndex rides along to the server as
+		// the hidden field that picks the parent piece. Left stale, the saved
+		// parent would be a different file while the shared artist, date, source
+		// URL, and tags still describe the old one.
+		const parentKey = tiles[parentIndex]?.key ?? null;
 		tiles = tiles.filter((t) => t.key !== key);
-		if (parentIndex >= tiles.length) parentIndex = 0;
+		const movedTo = parentKey === null ? -1 : tiles.findIndex((t) => t.key === parentKey);
+		if (movedTo !== -1) {
+			parentIndex = movedTo;
+		} else {
+			if (parentIndex >= tiles.length) parentIndex = 0;
+			// The parent itself is gone: the shared fields described it, so
+			// re-derive them from whichever tile the radio landed on. Only in the
+			// new-set mode, where a tile really is the parent. In 'existing' no
+			// tile owns the shared fields and the panel is not even rendered, so
+			// re-deriving would clear a lookup-tagged source URL and date that
+			// survived the flip out of 'new' and write nothing back, erasing them
+			// with none of the announcement returnToNewSet makes. The flip back
+			// to 'new' goes through returnToNewSet, which re-derives them there.
+			if (groupMode !== 'existing') onParentChanged(parentIndex);
+		}
+	}
+
+	/** Remove driven from the tile's own button, which the removal destroys.
+	 * Focus lands on the Remove button of the tile that slid into its place, else
+	 * the one before it, else the dropzone the empty grid leaves behind (2.4.3).
+	 * The declined-duplicate path calls removeTile directly: focus is on the file
+	 * input or the dropzone there, and neither goes away. */
+	async function removeTileFromButton(key: number) {
+		const idx = tiles.findIndex((t) => t.key === key);
+		if (idx === -1) return;
+		removeTile(key);
+		await tick();
+		const neighbour = tiles[idx] ?? tiles[idx - 1] ?? null;
+		(neighbour ? tileRemoveButtons[neighbour.key] : dropzone)?.focus();
 	}
 
 	function handleFileSelect(e: Event) {
@@ -304,18 +397,584 @@
 		handleFiles(accepted, rejected);
 	}
 
-	function onArtistCreated(artist: { id: number; name: string }) {
+	async function onArtistCreated(artist: { id: number; name: string }) {
+		// Which button opened the dialog, captured before the seed is cleared
+		// below. The panel's "Add {handle} as a new artist" seeds it; the
+		// standalone "+ Add New Artist" button above the panel does not, and an
+		// artist created from that one has nothing to do with the match on screen
+		// — credited to it, the panel would claim the handle "is already in your
+		// artist list as <unrelated name>" and drop the real add-new action.
+		const fromLookup = artistSeed !== null;
+		// The tile the seed came from, also captured before the clear below.
+		const seedKey = artistSeed?.tileKey ?? null;
 		artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
-		selectedArtistId = String(artist.id);
+		// The option values are numbers, and the select binding compares with
+		// Object.is — a stringified id would match no option and select nothing.
+		selectedArtistId = artist.id;
+		appliedArtist = artist;
 		showNewArtist = false;
+		artistSeed = null;
+		// The result now names a local artist, so the panel stops offering to add
+		// one. Left alone it would still read "Add {handle} as a new artist", and a
+		// second click would create the same artist again.
+		// The seed's own tile, not whichever one is parent now: with no focus trap
+		// on the dialog, the Parent radio can be moved while it is open, and
+		// folding into the new parent would credit an unrelated result while
+		// leaving the seed's tile still offering to add the artist.
+		const tile = seedKey === null ? null : (tiles.find((t) => t.key === seedKey) ?? null);
+		if (!fromLookup || !tile || tile.lookup.kind !== 'results') {
+			// That tile can also be removed while the dialog is open, taking the
+			// button the dialog would have restored focus to with it (2.4.3). The
+			// tile surviving is not enough either: a lookup cancelled back to idle
+			// or retried into searching unmounts the same add-new button, so the
+			// opener is gone there too and focus falls to <body> with the next Tab
+			// restarting at the top of the page. There is nothing to fold in either
+			// case; land on the tile's own lookup button while it exists, else on
+			// the select holding the new artist.
+			if (fromLookup) {
+				await tick();
+				const button = tile ? tileLookupButtons[tile.key] : null;
+				(button ?? artistSelect)?.focus();
+			}
+			return;
+		}
+		tile.lookup = { ...tile.lookup, data: withCreatedArtist(tile.lookup.data, artist) };
+		// That swap destroys the button the dialog captured as its opener, so its
+		// onDestroy has nothing connected to restore focus to and the operator
+		// lands on <body> with the next Tab restarting at the top of the page
+		// (2.4.3). Land on the button that replaced it, or on the select holding
+		// the new artist when the result went ambiguous instead.
+		await tick();
+		// The panel renders the parent tile's lookup, so that button is the seed
+		// tile's only while the seed tile is still the parent. Move the Parent
+		// radio while the dialog is open and the id belongs to another tile's
+		// result, which would send focus to an unrelated part of the page; land on
+		// the seed tile's own lookup button there instead.
+		if (!isParent(tile.key)) {
+			// Focus lands on the seed tile's own lookup button, which is nowhere near
+			// the select the artist went into and carries no trace of the creation,
+			// so the same sentence "Use X" gives on click has to be spoken here.
+			// Moved first: a throw while formatting that sentence would otherwise
+			// skip the focus call and leave the operator on <body> (2.4.3), and the
+			// live region still mutates on the flush after this.
+			(tileLookupButtons[tile.key] ?? artistSelect)?.focus();
+			announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
+			return;
+		}
+		(document.getElementById('lookup-applied-artist') ?? artistSelect)?.focus();
+	}
+
+	// ---- Artist lookup (SONA-156) -------------------------------------------
+	// One lookup per tile. The parent tile's result drives the shared fields
+	// below the grid; a variant's result only rates that variant, because the
+	// shared fields describe the piece and a variant is the same piece.
+
+	// The two shared fields a lookup may fill. Controlled (they were plain
+	// uncontrolled inputs) so a result can write them and so an edit can drop the
+	// "From lookup" tag.
+	let sourcePostUrl = $state('');
+	let commissionedAt = $state('');
+	let sourceTagged = $state(false);
+	let dateTagged = $state(false);
+	// What the last shared prefill actually wrote, for the panel's status line.
+	// Never edited afterwards: it is the record of what the lookup did, and a
+	// field the operator types over stops being attributable through the flags
+	// below instead (SONA-156). The tag is that record — it goes up with the
+	// prefill and comes off on the first keystroke.
+	let sharedFilled = $state<LookupFields>({});
+	// Held-ness of the source post URL at the moment the prefill ran, beside the
+	// record of what it wrote. Read live, the clash sentence flips as the
+	// operator types: clearing a pasted URL afterwards would make the panel say
+	// Sona left the field empty, which the operator did, not Sona.
+	let sharedUrlHeld = $state(false);
+	const sharedEdited = $derived({
+		sourcePostUrl: sharedFilled.sourcePostUrl !== undefined && !sourceTagged,
+		commissionedAt: sharedFilled.commissionedAt !== undefined && !dateTagged
+	});
+	// The artist this result put in the select, so "Use X" can read back as
+	// "Using X" and revert when the operator changes the select by hand.
+	let appliedArtist = $state<{ id: number; name: string } | null>(null);
+	// What the New Artist dialog opens prefilled with, when a lookup opened it.
+	// `tileKey` is the tile whose result offered the handle, carried inside the
+	// seed so the two are cleared together and can never drift apart.
+	let artistSeed = $state<{
+		handle: string;
+		site: LookupSite;
+		linkable: boolean;
+		tileKey: number | null;
+	} | null>(null);
+	// Per-tile aborts. Not $state — nothing renders them.
+	const lookupAborts = new Map<number, AbortController>();
+	// Closing or cancelling the panel destroys the button the operator is
+	// standing on, so focus has to be moved deliberately first (2.4.3). The
+	// origin is the parent tile's own button in a set, the fieldset pill alone.
+	let lookupPill = $state<HTMLButtonElement | null>(null);
+	let existingParentSelect = $state<HTMLSelectElement | null>(null);
+	let artistSelect = $state<HTMLSelectElement | null>(null);
+	// $state so `bind:this` into it is a reactive write (Svelte warns otherwise).
+	const tileLookupButtons = $state<Record<number, HTMLButtonElement | null>>({});
+	// Each tile's Remove button sits inside the tile it removes, so activating one
+	// from the keyboard would drop focus to <body> (2.4.3). These are where focus
+	// goes instead — the neighbour that took the removed tile's place.
+	const tileRemoveButtons = $state<Record<number, HTMLButtonElement | null>>({});
+	// The last tile's removal replaces the whole grid with the dropzone, which is
+	// then the only control left to land on.
+	let dropzone = $state<HTMLDivElement | null>(null);
+
+	const parentTile = $derived(groupMode === 'new' ? (tiles[parentIndex] ?? null) : null);
+	const sharedLookup = $derived<LookupState>(parentTile?.lookup ?? { kind: 'idle' });
+	const sharedSentPrivate = $derived(parentTile?.sentPrivate ?? false);
+	const sharedRating = $derived(
+		sharedLookup.kind === 'results' ? strictestRating(sharedLookup.data.matches) : null
+	);
+	const sharedRatingTag = $derived(ratingTag(sharedRating, { parent: tiles.length > 1 }));
+	// Private is the checkbox's inverse ("Private" checked = not published), so
+	// the warn hint and the panel notice both key off it directly.
+	let isPrivate = $state(false);
+
+	function startLookup(key: number) {
+		const tile = tiles.find((t) => t.key === key);
+		if (!tile || !tile.file || tile.lookup.kind === 'searching') return;
+		lookupAborts.get(key)?.abort();
+		const controller = new AbortController();
+		lookupAborts.set(key, controller);
+		tile.lookup = { kind: 'searching' };
+		tile.sentPrivate = isPrivate;
+		if (isParent(key)) resetSharedPrefill();
+		// What runLookup settled on, so the catch below can keep this lookup's own
+		// answer to "did the file leave the browser" instead of assuming it did.
+		let settled: LookupState | null = null;
+		// Whether that answer reached the tile. The callback writes the state
+		// before it announces it, so a throw out of the announcement must not be
+		// read as "nothing arrived" and rewrite matches away.
+		let applied = false;
+		void runLookup({ file: tile.file }, { signal: controller.signal })
+			.then(async (next) => {
+				settled = next;
+				// Cancelled, or the tile was removed while the request was out.
+				if (lookupAborts.get(key) !== controller) return;
+				const live = tiles.find((t) => t.key === key);
+				if (!live) {
+					lookupAborts.delete(key);
+					return;
+				}
+				live.lookup = next;
+				applied = true;
+				// The role as it is NOW, not as it was when the request fired. Ticking
+				// another tile's Parent radio mid-lookup re-points the shared fields at
+				// that tile, and a late result from the tile that used to be the parent
+				// would otherwise write its post URL and date under a panel showing the
+				// new one. Going the other way, a tile promoted to parent mid-lookup
+				// applies its result instead of showing it over empty fields. The
+				// group-mode round trip that made this a snapshot is handled where it
+				// happens: the "new" radio re-derives from the parent tile.
+				if (isParent(key)) applyShared(next);
+				else {
+					// Focus first, then the announcement — the same order the created
+					// artist takes above. A failure that unmounts the button takes the
+					// focus standing on it (2.4.3), and moving focus in the same frame
+					// the polite region mutates can cost the queued sentence; a throw
+					// out of the announcement would skip the focus call entirely. The
+					// await is the tick the replacement control needs to exist; for a
+					// failure that keeps its button, and for every other outcome, this
+					// resolves without touching focus.
+					await moveFocusOffTileButton(key, live);
+					// A variant tile's outcome renders as plain text on the tile, outside
+					// the panel's live region — say it out loud, naming the file, or a
+					// screen-reader user has no way to know the lookup finished (4.1.3).
+					announceTileLookup(live);
+				}
+				// Cleared last, so a throw anywhere above still reads as this
+				// lookup's in the catch below rather than as a cancelled one. Only
+				// if the entry is still this request's: the focus handoff above
+				// awaits a tick, and a lookup started again in that window owns the
+				// slot — deleting it there would leave the newer one uncancellable.
+				if (lookupAborts.get(key) === controller) lookupAborts.delete(key);
+			})
+			// runLookup itself resolves on every path, so only a throw in the
+			// callback above lands here. Without this the tile would sit on
+			// "searching" for the rest of the page's life, with nothing to retry
+			// from. A failure is synthesised only when nothing was applied: the
+			// state goes on the tile before it is announced, so a throw while
+			// announcing would otherwise discard matches that did arrive and tell
+			// the operator FuzzySearch never answered. What that synthesised failure
+			// discloses about the file having left the browser is
+			// sentAfterApplyThrew's call, off the state the request settled on.
+			.catch(() => {
+				if (lookupAborts.get(key) !== controller) return;
+				lookupAborts.delete(key);
+				const live = tiles.find((t) => t.key === key);
+				if (!live) return;
+				if (!applied) {
+					const sent = sentAfterApplyThrew(settled);
+					live.lookup = { kind: 'failed', reason: 'unavailable', sent };
+				}
+				console.error(LOOKUP_RESULT_THREW);
+				// A variant tile's outcome is plain text outside any live region, so
+				// without this the tile silently stops searching (4.1.3). Said from
+				// the state the tile has now settled on — the result that stands, or
+				// the failure synthesised above — so the announcement matches what
+				// the tile shows instead of reporting a failure over matches. Through
+				// the composer rather than announceTileLookup, which is one of the
+				// things that could have thrown, and guarded: on a second throw the
+				// constant is logged and nothing is said, rather than escaping into
+				// another unhandled rejection.
+				if (!isParent(key)) {
+					try {
+						announcer.say(tileLookupLine(live));
+					} catch {
+						console.error(LOOKUP_RESULT_THREW);
+					}
+				}
+			});
+	}
+
+	/** What a tile's lookup has to say, as one sentence naming the file: the
+	 * match, the no-match, or the failure the tile is showing, with the private
+	 * disclosure when one is due. Composed rather than said, so the catch below
+	 * can announce the state a tile actually settled on without going back
+	 * through anything that already threw. */
+	/** The panel's own eyebrow for a failure reason, so a variant tile names the
+	 * failure the same way the panel does instead of calling every one of them a
+	 * lookup failure. `invalid_image` and `unavailable` share the panel's plain
+	 * "Lookup failed", the way its own branch does. */
+	function tileFailureLabel(reason: LookupFailReason): string {
+		switch (reason) {
+			case 'rate_limited':
+				return m.admin_lookup_paused_eyebrow();
+			case 'key_refused':
+				return m.admin_lookup_refused_eyebrow();
+			case 'too_large':
+				return m.admin_lookup_too_large_eyebrow();
+			case 'no_key':
+				return m.admin_lookup_no_key_eyebrow();
+			case 'gone':
+				return m.admin_lookup_gone_eyebrow();
+			case 'signed_out':
+				return m.admin_lookup_signed_out_eyebrow();
+			default:
+				return m.admin_lookup_failed_eyebrow();
+		}
+	}
+
+	/** The panel's sentence for a failure reason — the part that carries the
+	 * remedy (Settings, signing in again, a different file), which the eyebrow
+	 * alone cannot. Shown on the tile and spoken, for the same reason. */
+	function tileFailureBody(reason: LookupFailReason): string {
+		switch (reason) {
+			case 'rate_limited':
+				return m.admin_lookup_paused_body();
+			case 'key_refused':
+				return m.admin_lookup_refused_body();
+			case 'too_large':
+				return m.admin_lookup_too_large_body();
+			case 'invalid_image':
+				return m.admin_lookup_invalid_body();
+			case 'no_key':
+				return m.admin_lookup_no_key_body();
+			case 'gone':
+				return m.admin_lookup_gone_body();
+			case 'signed_out':
+				return m.admin_lookup_signed_out_body();
+			default:
+				return m.admin_lookup_failed_body();
+		}
+	}
+
+	/** The reasons the tile keeps Try again for. A deleted image and a file
+	 * FuzzySearch would not read hit the same wall on a second click, so the tile
+	 * stops offering one. Everything else is here because the operator can go and
+	 * fix it: an expired session ends in a sign-in elsewhere, and a missing or
+	 * refused key ends in Settings, which the tile now opens in a new tab — the
+	 * key is read per request, so the click that comes back works. The panel gets
+	 * to a usable state through its Close; a variant tile whose button went away
+	 * has nothing left to click at all. A retry that was too early re-renders
+	 * what is already there. */
+	function tileCanRetry(reason: LookupFailReason): boolean {
+		return reason !== 'too_large' && reason !== 'invalid_image' && reason !== 'gone';
+	}
+
+	/** Such a failure unmounts the button the operator is standing on — it is the
+	 * one they clicked to start the lookup — so focus has to be moved deliberately
+	 * or it falls to <body> and the next Tab restarts at the top of the page
+	 * (2.4.3). It lands on the artist select, which is where "add the artist by
+	 * hand" happens: the three reasons that get here have no remedy on the tile. */
+	async function moveFocusOffTileButton(key: number, tile: Tile) {
+		if (tile.lookup.kind !== 'failed' || tileCanRetry(tile.lookup.reason)) return;
+		if (document.activeElement !== tileLookupButtons[key]) return;
+		// The replacement only exists after the DOM catches up with the state the
+		// caller just wrote.
+		await tick();
+		artistSelect?.focus();
+	}
+
+	function tileLookupLine(tile: Tile): string {
+		const fileName = tile.fileName;
+		let line: string;
+		if (tile.lookup.kind === 'failed') {
+			// The reason, not a bare "lookup failed": spoken is the only way a
+			// screen-reader operator learns the key went away or the session
+			// expired, and a generic failure invites a retry that cannot work.
+			line = m.admin_lookup_announce_tile_failure({
+				fileName,
+				reason: tileFailureBody(tile.lookup.reason)
+			});
+		} else {
+			const result = tileResult(tile);
+			line = result
+				? m.admin_lookup_announce_tile_match({ fileName, result: result.spoken })
+				: m.admin_lookup_announce_tile_no_match({ fileName });
+		}
+		// The tile's private notice is a plain paragraph outside any live region,
+		// so this is the only way the disclosure reaches a screen-reader operator.
+		// Both halves of the same test the rendered notice uses: the file went out
+		// (lookupSentFile of the state the tile settled on) AND Private was ticked
+		// when it went. Off sentPrivate alone, a client-refused too_large would be
+		// spoken as a private send of a file that never left the browser.
+		if (tile.sentPrivate && lookupSentFile(tile.lookup)) {
+			// One key holding both parts, not a concatenation: the separator between
+			// them is the locale's business (ja runs them together, en takes a space).
+			line = m.admin_lookup_announce_tile_with_notice({
+				outcome: line,
+				disclosure: m.admin_lookup_private_notice()
+			});
+		}
+		return line;
+	}
+
+	function announceTileLookup(tile: Tile) {
+		announcer.say(tileLookupLine(tile));
+	}
+
+	function isParent(key: number): boolean {
+		return groupMode === 'new' && tiles[parentIndex]?.key === key;
+	}
+
+	function cancelLookup(key: number) {
+		lookupAborts.get(key)?.abort();
+		lookupAborts.delete(key);
+		const tile = tiles.find((t) => t.key === key);
+		if (tile) tile.lookup = { kind: 'idle' };
+	}
+
+	/** Undo what a previous shared prefill wrote, but only where the operator has
+	 * not typed over it since — the tag is the record of that. */
+	function resetSharedPrefill() {
+		if (sourceTagged) sourcePostUrl = '';
+		if (dateTagged) commissionedAt = '';
+		sourceTagged = false;
+		dateTagged = false;
+		sharedFilled = {};
+		sharedUrlHeld = false;
+		// A second lookup's panel is about a new result, and an artist applied
+		// from the last one is not applied to it: cleared here, the way the edit
+		// page's resetLookupPrefill does. The group-mode round trip, which shows
+		// the SAME result again, holds this across the reset itself.
+		appliedArtist = null;
+		// A clash carried into the select belongs to the lookup that found it, so
+		// a second lookup must not leave the first one's piece on offer. The one
+		// the operator actually chose stays: dropping it would silently blank the
+		// select and save no parent, which is what carrying it in prevented.
+		extraParents = extraParents.filter((c) => String(c.id) === existingParentId);
+	}
+
+	/** Which of the two shared fields this call actually wrote. A result whose
+	 * fields the operator has typed over writes neither, and a caller that speaks
+	 * about the refill has to know that before it claims one happened. */
+	function applyShared(next: LookupState): { sourcePostUrl: boolean; commissionedAt: boolean } {
+		const wrote = { sourcePostUrl: false, commissionedAt: false };
+		if (next.kind !== 'results') return wrote;
+		sharedUrlHeld = sourcePostUrl.trim() !== '';
+		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
+		sharedFilled = fields;
+		if (fields.sourcePostUrl !== undefined) {
+			sourcePostUrl = fields.sourcePostUrl;
+			sourceTagged = true;
+			wrote.sourcePostUrl = true;
+		}
+		if (fields.commissionedAt !== undefined) {
+			commissionedAt = fields.commissionedAt;
+			dateTagged = true;
+			wrote.commissionedAt = true;
+		}
+		return wrote;
+	}
+
+	/** Back to a new set. Only re-derive when the parent tile still HAS a result:
+	 * closing the panel leaves the lookup idle while the fields it filled stay on
+	 * screen, and an unconditional re-derivation cleared both tagged fields and
+	 * then applied nothing, erasing them with no notice. The panel and its status
+	 * region are mounted by this same mode swap, so a region inserted together
+	 * with its first content is commonly missed — say the refill out loud, but
+	 * only when a field was really written, and name the field when only one of
+	 * them was. The operator who typed over both fields keeps what they typed,
+	 * and hearing that Sona filled them would be a false report of a change that
+	 * did not happen. */
+	function returnToNewSet() {
+		if (tiles[parentIndex]?.lookup.kind !== 'results') return;
+		// "Using {name}" is about the SELECT, not about the result that put the
+		// artist there. The re-derivation behind this round trip clears it, and
+		// the button relabelled itself back to "Use {name}" over a select that
+		// still held that artist. Only this round trip restores it: the operator
+		// changing the select, or a new result, is a real reason to drop it.
+		const held = appliedArtist;
+		const wrote = onParentChanged(parentIndex);
+		if (held && Number(selectedArtistId) === held.id) appliedArtist = held;
+		if (wrote.sourcePostUrl && wrote.commissionedAt) {
+			announcer.say(m.admin_lookup_announce_shared_refilled());
+		} else if (wrote.sourcePostUrl) {
+			announcer.say(m.admin_lookup_announce_shared_refilled_source());
+		} else if (wrote.commissionedAt) {
+			announcer.say(m.admin_lookup_announce_shared_refilled_date());
+		}
+	}
+
+	/** The parent moved: the shared fields describe whatever the parent is now. */
+	function onParentChanged(index: number) {
+		parentIndex = index;
+		resetSharedPrefill();
+		const tile = tiles[parentIndex];
+		return tile ? applyShared(tile.lookup) : { sourcePostUrl: false, commissionedAt: false };
+	}
+
+	function useLookupArtist(artist: { id: number; name: string }) {
+		// The options were built when the page loaded. An artist created in another
+		// tab since then comes back as a candidate with no option of their own, so
+		// the button would flip to "Using {name}" over an empty select and the save
+		// would be refused by `required`. Carry them in, the way the dialog does.
+		// Unlike a clash parent carried into the variant select, this option stays
+		// through the next lookup: an artist is a global record, so once it is known
+		// it belongs in the list, while a clash is one result's finding about this
+		// image.
+		if (!artistList.some((a) => a.id === artist.id)) {
+			artistList = [...artistList, artist].sort((a, b) => a.name.localeCompare(b.name));
+		}
+		// The option values are numbers, and the select binding compares with
+		// Object.is — a stringified id would match no option and select nothing.
+		selectedArtistId = artist.id;
+		appliedArtist = artist;
+		// The select sits above the panel and the button relabels itself in place,
+		// so nothing else tells a screen-reader user the artist was applied.
+		announcer.say(m.admin_lookup_announce_using({ name: artist.name }));
+	}
+
+	function openLookupDialog(seed: { handle: string; site: LookupSite; linkable: boolean }) {
+		// The no_match action carries no handle: that is a plain "Add New Artist",
+		// with nothing for the dialog's guess disclosure to be about.
+		// The tile is captured HERE rather than read back when the dialog closes:
+		// the dialog has no focus trap, so the Parent radio behind it can still be
+		// reached from the keyboard, and the result the created artist belongs to
+		// is the one that offered the handle, not whichever tile is parent later.
+		artistSeed = seed.handle ? { ...seed, tileKey: parentTile?.key ?? null } : null;
+		showNewArtist = true;
+	}
+
+	async function addAsVariant(clash: SourceClash) {
+		// Reset the tile's lookup FIRST: closeSharedLookup reaches the tile through
+		// parentTile, which is null the moment the mode is no longer 'new', and a
+		// clash panel left behind resurfaces on the way back to a new group.
+		closeSharedLookup({ focus: false });
+		groupMode = 'existing';
+		// The options were built when the page loaded. A clash piece uploaded in
+		// another tab since then has none, so the select would fall back to blank
+		// with the panel already closed: the operator asked for a variant and would
+		// silently save none. Carry the clash in as its own option first.
+		if (!parentOptions.some((c) => c.id === clash.imageId)) {
+			extraParents = [...extraParents, { id: clash.imageId, title: clash.title }];
+		}
+		existingParentId = String(clash.imageId);
+		// This click unmounts both the panel and the fieldset pill, so the landing
+		// spot is the select it just populated.
+		await tick();
+		existingParentSelect?.focus();
+	}
+
+	/** The control a shared lookup was started from — where focus goes back to
+	 * when the panel it opened is closed or cancelled (2.4.3). */
+	function focusLookupOrigin() {
+		const tile = parentTile;
+		const button = tile ? tileLookupButtons[tile.key] : null;
+		// The pill renders for a single file only, so in a group it is null and
+		// the select is the last resort — the same one moveFocusOffTileButton
+		// falls back to.
+		(button ?? lookupPill ?? artistSelect)?.focus();
+	}
+
+	/** Every caller passes the options bag explicitly or calls this with nothing:
+	 * handed to a callback prop bare, a DOM MouseEvent lands here as `options`,
+	 * and focus return survives only because an event has no `focus` property. */
+	function closeSharedLookup(options: { focus?: boolean } = {}) {
+		const tile = parentTile;
+		if (tile) tile.lookup = { kind: 'idle' };
+		if (options.focus !== false) focusLookupOrigin();
+	}
+
+	/** A variant tile whose confident match names a different local artist than
+	 * the shared one — worth flagging rather than silently rating. Returns the
+	 * match whose local-artist hit triggered it, because that is the poster the
+	 * line names: the candidates are unioned across every confident match, so
+	 * the trigger is not necessarily the prefill match. */
+	function differentArtistMatch(tile: Tile): LookupMatch | null {
+		if (tile.lookup.kind !== 'results') return null;
+		// The shared SELECTION, not just a panel-applied one: appliedArtist is set
+		// by the panel's Use button and by a created artist, so keying off it meant
+		// an artist the operator picked from the select by hand never warned.
+		// Number('') is 0, which is the unselected case.
+		const sharedId = Number(selectedArtistId);
+		if (!sharedId) return null;
+		const data = tile.lookup.data;
+		const own = candidateArtists(data);
+		if (own.length === 0 || own.some((a) => a.id === sharedId)) return null;
+		return (
+			data.matches.find(
+				(match, index) =>
+					(match.band === 'exact' || match.band === 'strong') &&
+					data.localArtists.some((hit) => hit.matchIndex === index && hit.artists.length > 0)
+			) ?? null
+		);
+	}
+
+	/** Everything a variant tile shows from its own result. One guard and one
+	 * match fallback (the closest confident match, else the first row) rather
+	 * than the same pair re-derived per field. Null when there is nothing to
+	 * show. */
+	function tileResult(tile: Tile) {
+		if (tile.lookup.kind !== 'results') return null;
+		const matches = tile.lookup.data.matches;
+		const match = pickPrefillMatch(matches) ?? matches[0];
+		if (!match) return null;
+		// No fallback to the file name: a match that names no handle is an unknown
+		// poster, and tileResultText says so.
+		const handle = matchHandle(match);
+		// The different-artist line names the poster whose local artist triggered
+		// it, which is not always the match the rest of the tile reads from.
+		const differentMatch = differentArtistMatch(tile);
+		const different = differentMatch !== null;
+		// The visible line and the spoken one come from the same parts, so the
+		// middle dot never reaches the live region and never dangles. The
+		// different-artist line carries no band, so it reads the same either way.
+		const differentHandle = differentMatch ? matchHandle(differentMatch) : '';
+		const differentSite = siteLabel(differentMatch ? differentMatch.site : match.site);
+		const differentLine = differentHandle
+			? m.admin_lookup_tile_different({ handle: differentHandle, site: differentSite })
+			: m.admin_lookup_tile_different_unknown({ site: differentSite });
+		const text = different
+			? { line: differentLine, spoken: differentLine }
+			: tileResultText(handle, match.site, match.band);
+		return {
+			different,
+			line: text.line,
+			spoken: text.spoken,
+			postUrl: match.postUrl,
+			site: match.site,
+			ratingTag: ratingTag(strictestRating(matches))
+		};
 	}
 </script>
 
 <svelte:window onpaste={handlePaste} ondragover={swallowStrayFileDrop} ondrop={swallowStrayFileDrop} />
 
-<!-- The region itself stays put; only the node inside it is keyed, so repeating
-     an announcement still mutates the region and gets read out. -->
-<div class="sr-only" aria-live="polite">{#key announceUid}<span>{announce}</span>{/key}</div>
+<LiveAnnouncer {announcer} />
 
 <div class="page-header">
 	<h1>{m.admin_upload_title()}</h1>
@@ -348,6 +1007,7 @@
 	{#if tiles.length === 0}
 		<div
 			class="dropzone"
+			bind:this={dropzone}
 			class:disabled={saving}
 			{@attach dropFiles({ accept: GALLERY_ACCEPT, onFiles: handleFiles, disabled: () => saving })}
 			onclick={() => { if (!saving) fileInput?.click(); }}
@@ -402,30 +1062,147 @@
 								<span class="error-text">{tile.error}</span>
 							{/if}
 						</div>
-						<button type="button" class="tile-remove" aria-label={m.admin_variant_remove_file()} onclick={() => removeTile(tile.key)}>
+						<!-- The file name rides in the accessible name so a screen reader can
+						     tell the grid's Remove buttons apart (2.4.6, 4.1.2). -->
+						<button
+							type="button"
+							class="tile-remove"
+							bind:this={tileRemoveButtons[tile.key]}
+							aria-label={m.admin_variant_remove_file({ fileName: tile.fileName })}
+							onclick={() => removeTileFromButton(tile.key)}
+						>
 							<X size={14} />
 						</button>
 					</div>
 					<div class="tile-meta">{tile.width} x {tile.height} &bull; {formatSize(tile.fileSize)}</div>
+					{#if data.lookupEnabled && isGroup && tile.status === 'done'}
+						{#if tile.lookup.kind === 'failed' && !isParent(tile.key)}
+							<!-- The reason on the tile's own lines, whether or not a retry
+							     can fix it: composed into the button label instead, it wrapped
+							     to a second line starting with the separator. Two lines here
+							     also keep the tile saying what the announcement says. Variant
+							     tiles only: the parent's failure is reported by the shared
+							     panel, which carries the same reason and the same actions, and
+							     the parent's button is where the panel's Close sends focus
+							     back to (2.4.3), so it has to stay mounted and unchanged. -->
+							<p class="tile-lookup-failed" id="tile-fail-label-{tile.key}">
+								{tileFailureLabel(tile.lookup.reason)}
+							</p>
+							<p class="tile-lookup-reason" id="tile-fail-reason-{tile.key}">
+								{tileFailureBody(tile.lookup.reason)}
+							</p>
+						{/if}
+						{#if tile.lookup.kind === 'failed' && !isParent(tile.key) && (tile.lookup.reason === 'no_key' || tile.lookup.reason === 'key_refused')}
+							<!-- The remedy sits beside the retry rather than replacing it: the
+							     key is read per request, so once it is saved the click that
+							     comes back works. Replacing the button left the tile with no
+							     control at all once this link opened in a new tab. A new tab,
+							     like the other lookup links: navigating this page away would
+							     drop the batch — the tiles, their labels, the shared fields —
+							     with no way back to it. -->
+							<a
+								class="tile-settings-link"
+								href="/admin/settings?tab=connections"
+								target="_blank"
+								rel="noopener noreferrer"
+								>{m.admin_lookup_open_settings()}<span class="sr-only"
+									>{' '}{m.link_opens_new_tab()}</span
+								></a
+							>
+						{/if}
+						{#if !(tile.lookup.kind === 'failed' && !tileCanRetry(tile.lookup.reason) && !isParent(tile.key))}
+							<!-- One lookup per tile: the parent's result fills the shared
+							     fields, a variant's only rates that variant. The file name
+							     rides in the accessible name so a screen reader can tell the
+							     grid's buttons apart. A failure names itself on the lines
+							     above and leaves this button a plain Try again; on the parent
+							     it is the panel that reports the failure, so the button is
+							     unchanged by one. The reason lines describe the button while
+							     it is standing under them, so a screen-reader operator coming
+							     back to the tile hears what went wrong, not just "Try again". The
+							     lookup hint stays in the description behind the reason, so the
+							     retry still discloses that it sends the file out. -->
+							<button
+								type="button"
+								class="tile-lookup"
+								bind:this={tileLookupButtons[tile.key]}
+								aria-busy={tile.lookup.kind === 'searching'}
+								aria-describedby={tile.lookup.kind === 'failed' && !isParent(tile.key)
+									? `tile-fail-label-${tile.key} tile-fail-reason-${tile.key} lookup-hint`
+									: 'lookup-hint'}
+								onclick={() => startLookup(tile.key)}
+							>
+								<Search size={12} aria-hidden="true" />
+								{#if tile.lookup.kind === 'searching'}{m.admin_lookup_tile_searching()}
+								{:else if tile.lookup.kind === 'results' || tile.lookup.kind === 'no_match'}{m.admin_lookup_tile_done()}
+								{:else if tile.lookup.kind === 'failed' && !isParent(tile.key)}{m.admin_lookup_try_again()}
+								{:else}{m.admin_lookup_button()}{/if}
+								<span class="sr-only">{m.admin_lookup_button_for({ fileName: tile.fileName })}</span>
+							</button>
+						{/if}
+					{/if}
 					{#if isGroup}
 						{#if groupMode === 'new'}
 							<label class="tile-parent-pick">
-								<input type="radio" name="parentPick" checked={parentIndex === i} onchange={() => (parentIndex = i)} />
+								<input
+									type="radio"
+									name="parentPick"
+									checked={parentIndex === i}
+									aria-label={m.admin_lookup_parent_radio({ fileName: tile.fileName })}
+									onchange={() => onParentChanged(i)}
+								/>
 								<span>{m.admin_variant_parent_radio()}</span>
 							</label>
 						{/if}
 						{#if groupMode === 'existing' || parentIndex !== i}
+							{@const result = tileResult(tile)}
+							{#if result}
+								<p class="tile-result" class:tile-result-warn={result.different}>{result.line}</p>
+								<a class="tile-post-link" href={result.postUrl} target="_blank" rel="noopener noreferrer">
+									{m.admin_lookup_view_post()}<span class="sr-only"
+										>{m.admin_lookup_view_post_site({ site: siteLabel(result.site) })}</span
+									>
+								</a>
+							{/if}
+							<!-- The file went to FuzzySearch while the shared Private box was
+							     checked: say so on the tile the way the panel says it for the
+							     parent. Read from the tile's own snapshot, not the live box. -->
+							{#if tile.sentPrivate && lookupSentFile(tile.lookup)}
+								<p class="tile-private-notice">{m.admin_lookup_private_notice()}</p>
+							{/if}
+							<!-- The placeholder disappears the moment the operator types, so it
+							     cannot be the field's name; the aria-label names the field and
+							     the file it belongs to, the way the tile's other controls do. -->
 							<input
 								type="text"
 								class="input tile-label"
 								name="label_{i}"
+								aria-label={m.admin_variant_label_for({ fileName: tile.fileName })}
 								placeholder={m.admin_variant_label_placeholder()}
 								bind:value={tile.label}
 							/>
-							<label class="tile-nsfw">
-								<input type="checkbox" name="nsfw_{i}" bind:checked={tile.nsfw} />
-								<span>{m.admin_field_mark_nsfw()}</span>
-							</label>
+							{@const tileTag = result?.ratingTag ?? null}
+							<!-- The pill is a SIBLING of the label, not inside it: inside, it
+							     would join the checkbox's accessible name and a click on it
+							     would toggle the box (SONA-220). -->
+							<div class="tile-nsfw-row">
+								<label class="tile-nsfw">
+									<input
+										type="checkbox"
+										name="nsfw_{i}"
+										bind:checked={tile.nsfw}
+										aria-describedby={tileTag ? `tile-rating-${tile.key}` : undefined}
+									/>
+									<span
+										>{m.admin_field_mark_nsfw()}<span class="sr-only"
+											>{m.admin_lookup_nsfw_for_file({ fileName: tile.fileName })}</span
+										></span
+									>
+								</label>
+								{#if tileTag}
+									<span class="rating-tag" id="tile-rating-{tile.key}">{tileTag}</span>
+								{/if}
+							</div>
 						{/if}
 					{/if}
 				</div>
@@ -457,20 +1234,50 @@
 		<fieldset class="group-section">
 			<legend>{m.admin_variant_group_legend()}</legend>
 			<label class="radio-label">
-				<input type="radio" checked={groupMode === 'new'} onchange={() => (groupMode = 'new')} />
+				<!-- Back to a new set: the shared fields belong to the parent tile
+				     again, so re-derive them from whatever its lookup found. A lookup
+				     that resolved while the mode was "existing" filled nothing, and
+				     without this the operator returned to a results panel sitting over
+				     empty fields. -->
+				<input
+					type="radio"
+					name="groupMode"
+					checked={groupMode === 'new'}
+					onchange={() => {
+						groupMode = 'new';
+						returnToNewSet();
+					}}
+				/>
 				<span>{tiles.length > 1 ? m.admin_variant_group_new() : m.admin_variant_group_single()}</span>
 			</label>
 			<label class="radio-label">
-				<input type="radio" checked={groupMode === 'existing'} onchange={() => (groupMode = 'existing')} />
+				<input
+					type="radio"
+					name="groupMode"
+					checked={groupMode === 'existing'}
+					onchange={() => (groupMode = 'existing')}
+				/>
 				<span>{m.admin_variant_group_existing()}</span>
 			</label>
 			{#if groupMode === 'existing'}
-				<select class="input" bind:value={existingParentId} required>
-					<option value="">{m.admin_variant_pick_parent()}</option>
-					{#each data.parentCandidates as candidate}
-						<option value={String(candidate.id)}>{candidate.title}</option>
-					{/each}
-				</select>
+				<!-- Named like the edit page's own parent select: the legend names the
+				     group, not this field, and "Add as a variant" now pushes an option
+				     in and lands focus here, so a screen reader would otherwise read
+				     the clash title with nothing saying what holds it (4.1.2, 3.3.2). -->
+				<label>
+					<span>{m.admin_field_variant_of()}</span>
+					<select
+						class="input"
+						bind:this={existingParentSelect}
+						bind:value={existingParentId}
+						required
+					>
+						<option value="">{m.admin_variant_pick_parent()}</option>
+						{#each parentOptions as candidate}
+							<option value={String(candidate.id)}>{candidate.title}</option>
+						{/each}
+					</select>
+				</label>
 			{/if}
 		</fieldset>
 	{/if}
@@ -491,16 +1298,81 @@
 		<legend>{m.admin_field_artist()}</legend>
 		<label>
 			<span>{m.admin_field_artist()}</span>
-			<select class="input" name="artistId" bind:value={selectedArtistId} required>
+			<select
+				class="input"
+				name="artistId"
+				bind:this={artistSelect}
+				bind:value={selectedArtistId}
+				onchange={() => (appliedArtist = null)}
+				required
+			>
 				<option value="">{m.admin_upload_select_artist()}</option>
 				{#each artistList as artist}
 					<option value={artist.id}>{artist.name}</option>
 				{/each}
 			</select>
 		</label>
-		<button type="button" class="add-artist-btn" onclick={() => (showNewArtist = true)}>
-			<Plus size={14} /> {m.admin_upload_add_new_artist()}
-		</button>
+		<div class="artist-actions">
+			{#if data.lookupEnabled && !isGroup && tiles.length === 1 && tiles[0].status === 'done'}
+				<button
+					type="button"
+					class="lookup-pill"
+					bind:this={lookupPill}
+					aria-describedby="lookup-hint"
+					aria-disabled={sharedLookup.kind === 'searching'}
+					onclick={() => startLookup(tiles[0].key)}
+				>
+					<Search size={14} aria-hidden="true" /> {m.admin_lookup_button()}
+				</button>
+			{/if}
+			<button type="button" class="add-artist-btn" onclick={() => { artistSeed = null; showNewArtist = true; }}>
+				<Plus size={14} /> {m.admin_upload_add_new_artist()}
+			</button>
+		</div>
+		{#if data.lookupEnabled}
+			<small class="hint" class:hint-warn={isPrivate} id="lookup-hint">
+				{#if isGroup && isPrivate}{m.admin_lookup_hint_multi_private()}
+				{:else if isGroup}{m.admin_lookup_hint_multi()}
+				{:else if isPrivate}{m.admin_lookup_hint_private()}
+				{:else}{m.admin_lookup_hint()}{/if}
+			</small>
+		{:else}
+			<small class="hint" id="lookup-hint">
+				<!-- The third Settings remedy, and a new tab for the same reason as the
+				     other two: this page holds a batch that a same-tab navigation
+				     would discard. -->
+				{m.admin_lookup_no_key_pre()}<a
+					class="link"
+					href="/admin/settings?tab=connections"
+					target="_blank"
+					rel="noopener noreferrer"
+					>{m.admin_lookup_no_key_link()}<span class="sr-only"
+						>{' '}{m.link_opens_new_tab()}</span
+					></a
+				>{m.admin_lookup_no_key_post()}
+			</small>
+		{/if}
+		{#if data.lookupEnabled && groupMode === 'new'}
+			<ArtistLookupPanel
+				lookup={sharedLookup}
+				fileName={tiles.length > 1 ? (parentTile?.fileName ?? '') : ''}
+				filled={sharedFilled}
+				edited={sharedEdited}
+				sourceUrlHeld={sharedUrlHeld}
+				{appliedArtist}
+				privateNotice={sharedSentPrivate && lookupSentFile(sharedLookup)}
+				onclose={() => closeSharedLookup()}
+				onretry={() => parentTile && startLookup(parentTile.key)}
+				oncancel={() => {
+					if (parentTile) cancelLookup(parentTile.key);
+					// Cancel destroys itself; land back on the control that started it.
+					focusLookupOrigin();
+				}}
+				onuseartist={useLookupArtist}
+				onaddnew={openLookupDialog}
+				onaddvariant={addAsVariant}
+			/>
+		{/if}
 	</fieldset>
 
 	<div class="row">
@@ -544,19 +1416,59 @@
 		</div>
 	{/if}
 
-	<label>
-		<span>{m.admin_field_commissioned_date()}</span>
-		<input type="date" class="input" name="commissionedAt" />
-		<small class="hint">{m.admin_hint_commissioned_date()}</small>
-	</label>
+	<!-- The label wraps only its own text; the "From lookup" pill sits after it
+	     as a sibling and is referenced with aria-describedby, so the input's
+	     accessible name stays the field name (SONA-220). -->
+	<div class="field">
+		<div class="label-row">
+			<label class="field-label" for="commissionedAt">{m.admin_field_commissioned_date()}</label>
+			{#if dateTagged}
+				<span class="lookup-tag" id="commissioned-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+			{/if}
+		</div>
+		<input
+			id="commissionedAt"
+			type="date"
+			class="input"
+			name="commissionedAt"
+			bind:value={commissionedAt}
+			oninput={() => {
+				// The panel's status line reads the filled record through this tag: a
+				// field typed over stops being the lookup's, and the sentence then
+				// neither claims it nor says it was left alone.
+				dateTagged = false;
+			}}
+			aria-describedby={dateTagged ? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'}
+		/>
+		<!-- The hint was inside the wrapping label before this restructure, which
+		     put it in the input's accessible name. Out here it is a plain sibling,
+		     so it is referenced instead — otherwise a screen reader never gets it
+		     (1.3.1). The lookup tag joins it when there is one. -->
+		<small class="hint" id="commissioned-hint">{m.admin_hint_commissioned_date()}</small>
+	</div>
+
+	<div class="nsfw-row">
+		<label class="checkbox-label">
+			<input
+				type="checkbox"
+				name="nsfw"
+				aria-describedby={sharedRatingTag ? 'shared-rating-tag' : undefined}
+			/>
+			<span
+				>{m.admin_field_mark_nsfw()}{#if tiles.length > 1}<span class="sr-only"
+						>{m.admin_lookup_nsfw_for_parent()}</span
+					>{/if}</span
+			>
+		</label>
+		<!-- Never checked by a lookup: the rating is what the sites said, and the
+		     call about this gallery stays the operator's. -->
+		{#if sharedRatingTag}
+			<span class="rating-tag" id="shared-rating-tag">{sharedRatingTag}</span>
+		{/if}
+	</div>
 
 	<label class="checkbox-label">
-		<input type="checkbox" name="nsfw" />
-		<span>{m.admin_field_mark_nsfw()}</span>
-	</label>
-
-	<label class="checkbox-label">
-		<input type="checkbox" name="published" />
+		<input type="checkbox" name="published" bind:checked={isPrivate} />
 		<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
 	</label>
 
@@ -567,10 +1479,26 @@
 		</label>
 	{/if}
 
-	<label>
-		<span>{m.admin_field_source_url()}</span>
-		<input type="url" class="input" placeholder={m.admin_upload_source_placeholder()} name="sourcePostUrl" />
-	</label>
+	<div class="field">
+		<div class="label-row">
+			<label class="field-label" for="sourcePostUrl">{m.admin_field_source_url()}</label>
+			{#if sourceTagged}
+				<span class="lookup-tag" id="source-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+			{/if}
+		</div>
+		<input
+			id="sourcePostUrl"
+			type="url"
+			class="input"
+			placeholder={m.admin_upload_source_placeholder()}
+			name="sourcePostUrl"
+			bind:value={sourcePostUrl}
+			oninput={() => {
+				sourceTagged = false;
+			}}
+			aria-describedby={sourceTagged ? 'source-lookup-tag' : undefined}
+		/>
+	</div>
 
 	<div class="form-actions">
 		<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
@@ -583,8 +1511,17 @@
 {#if showNewArtist}
 	<NewArtistDialog
 		registryEnabled={data.registryEnabled}
+		initialName={artistSeed?.handle ?? ''}
+		initialSocials={artistSeed && artistSeed.linkable
+			? {
+					[artistSeed.site === 'Twitter' ? 'twitter' : 'furaffinity']:
+						profileUrlFor(artistSeed.site, artistSeed.handle) ?? ''
+				}
+			: undefined}
+		prefillSource={artistSeed ? 'lookup' : undefined}
+		prefillSite={artistSeed && artistSeed.linkable ? siteLabel(artistSeed.site) : ''}
 		oncreated={onArtistCreated}
-		oncancel={() => (showNewArtist = false)}
+		oncancel={() => { showNewArtist = false; artistSeed = null; }}
 	/>
 {/if}
 
@@ -796,6 +1733,18 @@
 		color: var(--destructive-foreground);
 	}
 
+	/* Not a .btn, and app.css has no bare button:focus-visible rule, so removing
+	   a tile would land focus on the next Remove wearing only the user-agent
+	   ring — over an arbitrary image, on a chip that is 60% black (2.4.7). The
+	   offset puts the outline on the image itself, where no single colour clears
+	   3:1 against every photo, so the box-shadow draws a second, near-white edge
+	   inside it: one of the two always separates from what is behind it (1.4.11). */
+	.tile-remove:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9);
+	}
+
 	.tile-meta {
 		font-size: 11px;
 		color: var(--muted-foreground);
@@ -960,6 +1909,151 @@
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
+	}
+
+	/* Artist lookup (SONA-156) */
+	.artist-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.lookup-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 12px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		background: transparent;
+		color: var(--foreground);
+		font-size: 13px;
+		font-family: inherit;
+		cursor: pointer;
+	}
+
+	/* aria-disabled, not `disabled`: a keyboard user mid-lookup keeps the focus
+	   they had. The click guard in startLookup is what actually refuses. The
+	   fill is --secondary, so the text is --foreground: the --muted-foreground
+	   pairing measures 3.96:1 in terracotta light (SONA-124 found the same). */
+	.lookup-pill[aria-disabled='true'] {
+		background: var(--secondary);
+		color: var(--foreground);
+		cursor: default;
+	}
+
+	/* Neither pill is a .btn, so app.css's focus ring doesn't reach them. */
+	.lookup-pill:focus-visible,
+	.tile-lookup:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+
+	.hint-warn {
+		color: var(--status-warn);
+	}
+
+	.tile-lookup {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		padding: 0;
+		border: 0;
+		background: none;
+		color: var(--link);
+		font-size: 12px;
+		font-family: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.tile-result,
+	.tile-lookup-failed,
+	.tile-lookup-reason {
+		font-size: 12px;
+		color: var(--muted-foreground);
+		margin: 0;
+		line-height: 1.4;
+	}
+
+	.tile-result-warn,
+	.tile-lookup-failed {
+		color: var(--status-warn);
+	}
+
+	.tile-post-link,
+	.tile-settings-link {
+		font-size: 12px;
+		color: var(--link);
+	}
+
+	.tile-private-notice {
+		font-size: 12px;
+		color: var(--status-warn);
+		margin: 0;
+		line-height: 1.4;
+	}
+
+	.label-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.lookup-tag {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		padding: 1px 8px;
+		white-space: nowrap;
+	}
+
+	/* The rating never changes the checkbox — it reports what the sites said and
+	   sits beside it. nowrap so the sentence stays one unit, and the row wraps
+	   the whole pill to its own line when it no longer fits. */
+	.nsfw-row,
+	.tile-nsfw-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	/* A grid child's default min-width is its content, so a long pill would
+	   push the tile — and the document — wider than the viewport. */
+	.tile-nsfw-row {
+		min-width: 0;
+	}
+
+	.rating-tag {
+		font-family: var(--font-primary);
+		font-size: 11px;
+		color: var(--muted-foreground);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		padding: 1px 8px;
+		white-space: nowrap;
+		max-width: 100%;
+	}
+
+	/* The tile is ~170px wide and the text grows with the number of sites, so
+	   the pill wraps inside the tile rather than spilling out of it. */
+	.tile-nsfw-row .rating-tag {
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+
+	/* Same story for the shared row once the column itself is narrow: one line
+	   of pill is worth less than a page that doesn't scroll sideways. */
+	@media (max-width: 480px) {
+		.rating-tag {
+			white-space: normal;
+			overflow-wrap: anywhere;
+		}
 	}
 
 	.field-label {

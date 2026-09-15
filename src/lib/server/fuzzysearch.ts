@@ -14,7 +14,21 @@
 import { bufferStream, MAX_REMOTE_BUFFER_BYTES } from './storage/buffer';
 import { getRawSetting } from './settings';
 import { normalizeHandle, socialsToHandles, type Platform } from './handle-normalize';
+import { matchKey, mergeSamePost, RATING_ORDER } from '$lib/artist-lookup';
 import type { Database } from './db';
+
+// Four rules the browser needs as much as this file does: which match the form
+// is prefilled from, the strictest rating across the confident matches, the
+// canonical profile URL for a handle, and how a duplicate of one post folds
+// into the row that stays. They live in the client-safe
+// `$lib/artist-lookup` and are re-exported here so server importers keep this
+// path — the handle-normalize.ts pattern, and the reason there is one copy.
+export {
+	pickPrefillMatch,
+	strictestRating,
+	profileUrlFor as handleProfileUrl,
+	mergeSamePost
+} from '$lib/artist-lookup';
 
 type Env = App.Platform['env'];
 
@@ -69,7 +83,6 @@ export type LookupResult =
 	| { ok: false; reason: LookupFailure };
 
 const SITES: readonly LookupSite[] = ['FurAffinity', 'Weasyl', 'e621', 'Twitter'];
-const RATINGS: readonly LookupRating[] = ['general', 'mature', 'adult'];
 
 /** Display order when distances tie: the sites whose matches are most likely to
  * name an artist we can link locally come first. */
@@ -174,19 +187,6 @@ export function postUrlFor(site: LookupSite, siteId: string, handles: string[]):
 	}
 }
 
-/** Canonical profile URL for a handle on a site we hold an artist column for.
- * Weasyl and e621 have no column yet (SONA-219), so they resolve to null. */
-export function handleProfileUrl(site: LookupSite, handle: string): string | null {
-	const h = cleanHandle(handle);
-	if (!h) return null;
-	// Percent-encoded like postUrlFor's ids: a handle is third-party text, and a
-	// slash or a '?' in it would otherwise re-point the URL at another page.
-	const safe = encodeURIComponent(h);
-	if (site === 'FurAffinity') return `https://www.furaffinity.net/user/${safe}/`;
-	if (site === 'Twitter') return `https://twitter.com/${safe}`;
-	return null;
-}
-
 /** Hosts that are the same site under two names. Without folding these, an
  * operator who saved an `x.com` link gets no clash warning for the `twitter.com`
  * URL this client builds. A Map, not an object literal: a plain lookup answers
@@ -270,7 +270,9 @@ function normalizeMatch(raw: RawMatch): LookupMatch | null {
 	const handles = Array.isArray(raw.artists)
 		? raw.artists.filter((a): a is string => typeof a === 'string' && a.trim() !== '')
 		: [];
-	const rating = RATINGS.find((r) => r === raw.rating) ?? null;
+	// The same list the comparators order by: a rating this parse accepted but
+	// they did not know would have sorted ahead of every rating they did.
+	const rating = RATING_ORDER.find((r) => r === raw.rating) ?? null;
 
 	return {
 		site,
@@ -292,13 +294,24 @@ function compareMatches(a: LookupMatch, b: LookupMatch): number {
 	return SITE_ORDER[a.site] - SITE_ORDER[b.site];
 }
 
-/** Normalize + filter + sort a raw v1/image payload. Exported for tests. */
+/** Normalize + filter + sort + dedupe a raw v1/image payload. Exported for
+ * tests. FuzzySearch can return one post twice (two hashes of the same
+ * submission), and site + siteId is the key the panel renders its rows under —
+ * a repeat would crash the keyed each. Folded after the sort, so the row that
+ * survives is the closest one, carrying what its twins knew. */
 export function normalizeMatches(payload: unknown): LookupMatch[] {
 	if (!Array.isArray(payload)) return [];
-	return payload
+	const sorted = payload
 		.map((entry) => (entry && typeof entry === 'object' ? normalizeMatch(entry as RawMatch) : null))
 		.filter((m): m is LookupMatch => m !== null)
 		.sort(compareMatches);
+	const kept = new Map<string, LookupMatch>();
+	for (const match of sorted) {
+		const key = matchKey(match);
+		const first = kept.get(key);
+		kept.set(key, first ? mergeSamePost(first, match) : match);
+	}
+	return [...kept.values()];
 }
 
 /**
@@ -410,38 +423,6 @@ export async function searchImage(
 	// art is unindexed when nobody actually looked.
 	if (!Array.isArray(payload)) return { ok: false, reason: 'unavailable' };
 	return { ok: true, matches: normalizeMatches(payload) };
-}
-
-/**
- * The match worth prefilling the form from: the closest exact or strong one.
- * `normalizeMatches` already sorted by distance then site, so the first
- * qualifying entry is the best one.
- */
-export function pickPrefillMatch(matches: LookupMatch[]): LookupMatch | null {
-	return matches.find((m) => m.band === 'exact' || m.band === 'strong') ?? null;
-}
-
-/**
- * The strictest rating carried by the confident matches, with the sites that
- * carried it — so the UI can say where an NSFW suggestion came from. Possible
- * and unknown-distance matches are excluded: a loose match must not flip the
- * operator's NSFW flag.
- */
-export function strictestRating(
-	matches: LookupMatch[]
-): { rating: LookupRating; sites: LookupSite[] } | null {
-	const confident = matches.filter((m) => m.band === 'exact' || m.band === 'strong');
-	let best: LookupRating | null = null;
-	for (const m of confident) {
-		if (!m.rating) continue;
-		if (best === null || RATINGS.indexOf(m.rating) > RATINGS.indexOf(best)) best = m.rating;
-	}
-	if (!best) return null;
-	const sites: LookupSite[] = [];
-	for (const m of confident) {
-		if (m.rating === best && !sites.includes(m.site)) sites.push(m.site);
-	}
-	return { rating: best, sites };
 }
 
 /** The platform a site's handles live on, for the sites we hold a column for. */

@@ -5,23 +5,29 @@ import { eq, isNull, count as countFn } from 'drizzle-orm';
 import { slugify } from '$lib/server/slugify';
 import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
 import { variantAssignmentError, MAX_VARIANT_SET } from '$lib/server/variants';
+import { resolveFuzzysearchKey } from '$lib/server/fuzzysearch';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ platform }) => {
 	const db = getDb(platform!.env.DB);
 
-	const [allArtists, allCollections, allTags, allCharacters, parentCandidates] = await Promise.all([
-		db.select().from(artists).orderBy(artists.name),
-		db.select().from(collections).orderBy(collections.name),
-		db.select().from(tags).orderBy(tags.name),
-		db.select().from(characters).orderBy(characters.name),
-		// For "add as variants of an existing piece": parents only (one level).
-		db
-			.select({ id: images.id, title: images.title })
-			.from(images)
-			.where(isNull(images.parentImageId))
-			.orderBy(images.title)
-	]);
+	const [allArtists, allCollections, allTags, allCharacters, parentCandidates, lookupKey] =
+		await Promise.all([
+			db.select().from(artists).orderBy(artists.name),
+			db.select().from(collections).orderBy(collections.name),
+			db.select().from(tags).orderBy(tags.name),
+			db.select().from(characters).orderBy(characters.name),
+			// For "add as variants of an existing piece": parents only (one level).
+			db
+				.select({ id: images.id, title: images.title })
+				.from(images)
+				.where(isNull(images.parentImageId))
+				.orderBy(images.title),
+			// In the batch, not after it: a fork without the deploy secret reads the
+			// stored key from D1, and awaited below this it cost a serial round trip
+			// on every page load.
+			resolveFuzzysearchKey(db, platform?.env)
+		]);
 
 	// Only offer the "use as reference sheet" control when an owner character
 	// exists (first, if several) — it carries the canonical reference image.
@@ -34,6 +40,9 @@ export const load: PageServerLoad = async ({ platform }) => {
 		characters: allCharacters,
 		parentCandidates,
 		maxVariantSet: MAX_VARIANT_SET,
+		// Presence only — the key itself never leaves the server. Without one,
+		// "Look up artist" is not offered at all (SONA-156).
+		lookupEnabled: !!lookupKey,
 		ownerCharacter: ownerCharacter && {
 			name: ownerCharacter.name,
 			// A designation already exists on some image — checking the box replaces it.

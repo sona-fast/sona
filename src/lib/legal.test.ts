@@ -182,6 +182,10 @@ describe('defaultPrivacyPolicy', () => {
 		// remote service a feature calls out to is named (SONA-167 round 1).
 		expect(text).toContain('Bluesky');
 		expect(text).toContain('FurTrack');
+		expect(text).toContain('FuzzySearch');
+		// The lookup sends a copy of the image, and an unpublished one too; naming
+		// the provider alone would not disclose either (SONA-156).
+		expect(text).toMatch(/FuzzySearch \(finding where a piece was posted; when the site owner asks for a lookup, a copy of that image is sent, including images not published on this site\)/);
 		expect(text).toMatch(/shared artist registry/);
 	});
 });
@@ -293,8 +297,8 @@ describe('LEGAL_DEFAULTS_UPDATED tracks the default text', () => {
 	// privacy page would show a "Last updated" line older than its own text.
 	// Deliberately two assertions, not a diff — the point is to force the date
 	// bump, not to review the prose.
-	const RECORDED_TEXT_HASH = '1a2371801ad230c1791ca926588bdf7329e4844e9b6535742a6188ec7dd89385';
-	const RECORDED_UPDATED = '2026-08-24';
+	const RECORDED_TEXT_HASH = '3a1187cb2970888de509560a9e0c028b3340d5ba39f393da83e0c943b407a780';
+	const RECORDED_UPDATED = '2026-09-14';
 
 	function defaultsText(): string {
 		// Fixed opts so the hash depends on the prose alone, not the caller. Both
