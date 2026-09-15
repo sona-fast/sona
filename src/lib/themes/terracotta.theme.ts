@@ -1,7 +1,7 @@
 import type { ThemeDefinition, PartialThemeTokens } from './types.ts';
 
-// Terracotta — warm clay (akito.dog's brand palette, upstreamed). Also carries
-// akito's typography; the font tokens are emitted in the dark block and apply to
+// Terracotta — warm clay (the akito.dog fork's brand palette, upstreamed). Also
+// carries that fork's typography; the font tokens are emitted in the dark block and apply to
 // the light variant too, since [data-theme-id='terracotta'] matches in both
 // modes. Tokens it does not declare fall through to the default theme.
 
@@ -10,7 +10,7 @@ const dark: PartialThemeTokens = {
 	foreground: '#EADED6',
 	card: '#282624',
 	cardForeground: '#EADED6',
-	// Lightened terracotta: akito's brand #DD5131 was 4.20:1 on the dark
+	// Lightened terracotta: the fork's brand #DD5131 was 4.20:1 on the dark
 	// background and 3.80:1 on cards — below WCAG AA (4.5:1) for small text.
 	// #E2694D (same hue/saturation, minimally lighter) clears AA on both the
 	// background (5.05:1) and cards (4.57:1); the near-black foreground on it
