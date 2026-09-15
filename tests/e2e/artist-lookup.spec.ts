@@ -420,6 +420,11 @@ test.describe('with a key saved', () => {
 		// The clash row's own action is there, so this is the clash branch and not
 		// the plain "existing artist" one.
 		await expect(panel(page).getByRole('button', { name: 'Add as a variant' })).toBeVisible();
+		// The row's link to the piece it collided with is the fourth new-tab link
+		// in the feature, and it says so in its name like the other three.
+		const clashOpen = panel(page).getByRole('link', { name: 'Open Test Image' });
+		await expect(clashOpen).toHaveAttribute('target', '_blank');
+		await expect(clashOpen).toHaveAccessibleName('Open Test Image (opens in a new tab)');
 
 		await panel(page).getByRole('button', { name: 'Use Test Artist' }).click();
 
@@ -2260,13 +2265,16 @@ test.describe('with a key saved', () => {
 		await expect(tileLookup(page).nth(1)).toContainText('Try again');
 		await expect(tileLookup(page).nth(1)).toBeFocused();
 		// The reason rides in the button's description, or a screen-reader
-		// operator coming back to the tile hears only "Try again for back.png".
+		// operator coming back to the tile hears only "Try again for back.png" —
+		// and it joins the lookup hint rather than replacing it, so the retry still
+		// says out loud that it sends the file to an outside service.
 		await expect(tileLookup(page).nth(1)).toHaveAccessibleDescription(
-			'No key This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.'
+			'No key This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.' +
+				" Sona sends each image to FuzzySearch to find who posted it. The parent's result fills the shared fields below; a variant's result only rates that variant."
 		);
-		await expect(settings).toHaveAccessibleDescription(
-			'No key This site no longer has a FuzzySearch key. Add one in Settings, or add the artist by hand.'
-		);
+		// The link beside it repeats none of that: the reason is the line right
+		// above it and its own name says where it goes.
+		await expect(settings).toHaveAccessibleDescription('');
 
 		// The operator saves a key in that other tab and comes back: the click
 		// that was still there runs a lookup that works.

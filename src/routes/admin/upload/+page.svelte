@@ -1099,7 +1099,6 @@
 								href="/admin/settings?tab=connections"
 								target="_blank"
 								rel="noopener noreferrer"
-								aria-describedby="tile-fail-label-{tile.key} tile-fail-reason-{tile.key}"
 								>{m.admin_lookup_open_settings()}<span class="sr-only"
 									>{' '}{m.link_opens_new_tab()}</span
 								></a
@@ -1121,7 +1120,7 @@
 								bind:this={tileLookupButtons[tile.key]}
 								aria-busy={tile.lookup.kind === 'searching'}
 								aria-describedby={tile.lookup.kind === 'failed' && !isParent(tile.key)
-									? `tile-fail-label-${tile.key} tile-fail-reason-${tile.key}`
+									? `tile-fail-label-${tile.key} tile-fail-reason-${tile.key} lookup-hint`
 									: 'lookup-hint'}
 								onclick={() => startLookup(tile.key)}
 							>

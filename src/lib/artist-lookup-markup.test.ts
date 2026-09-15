@@ -60,20 +60,22 @@ describe('lookup button and its disclosure hint', () => {
 		expect(UPLOAD).toContain('m.admin_lookup_hint_multi_private()');
 	});
 
-	// Except while the tile is showing a failure of its own: there the two
-	// reason lines above the button describe it, so a screen-reader operator
-	// coming back to the tile hears what went wrong rather than "Try again for
-	// foo.png" with no reason attached.
-	it('describes each per-tile button with that same hint', () => {
+	// While the tile is showing a failure of its own the two reason lines above
+	// the button join that hint rather than replacing it: the operator hears what
+	// went wrong, and still hears the disclosure that the retry sends the file to
+	// an outside service. The reason comes first, so "Try again for foo.png" is
+	// not the whole of it.
+	it('describes each per-tile button with that hint, and with its failure reason first', () => {
 		expect(UPLOAD).toMatch(
-			/class="tile-lookup"[\s\S]{0,400}?aria-describedby=\{tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\s*\n\s*\? `tile-fail-label-\$\{tile\.key\} tile-fail-reason-\$\{tile\.key\}`\s*\n\s*: 'lookup-hint'\}/
+			/class="tile-lookup"[\s\S]{0,400}?aria-describedby=\{tile\.lookup\.kind === 'failed' && !isParent\(tile\.key\)\s*\n\s*\? `tile-fail-label-\$\{tile\.key\} tile-fail-reason-\$\{tile\.key\} lookup-hint`\s*\n\s*: 'lookup-hint'\}/
 		);
 		expect(UPLOAD).toMatch(/<p class="tile-lookup-failed" id="tile-fail-label-\{tile\.key\}">/);
 		expect(UPLOAD).toMatch(/<p class="tile-lookup-reason" id="tile-fail-reason-\{tile\.key\}">/);
-		// The remedy beside it is described by the same two lines.
-		expect(UPLOAD).toMatch(
-			/class="tile-settings-link"[\s\S]{0,300}?aria-describedby="tile-fail-label-\{tile\.key\} tile-fail-reason-\{tile\.key\}"/
-		);
+		// The remedy beside it carries no description of its own: the reason sits
+		// directly above it and its name already says where it goes, so pointing it
+		// at the same two lines read them a third time through one failed tile.
+		// (Tempered to the anchor itself: the button right below it does carry one.)
+		expect(UPLOAD).not.toMatch(/class="tile-settings-link"(?:(?!<\/a)[\s\S])*?aria-describedby=/);
 	});
 
 	// A variant tile renders its own outcome, so a tile that called every failure
@@ -157,12 +159,13 @@ describe('lookup button and its disclosure hint', () => {
 	// Both Settings remedies leave the page they are offered from intact: the
 	// upload page holds a whole batch and the edit page an unsaved row, and
 	// either would be discarded by a same-tab navigation to fix the key.
-	// All three of them: the tile's link, the panel's action, and the hint the
-	// page shows when no key is configured at all. Each says out loud that it
-	// opens a new tab, the way every other new-tab link on the admin does — a
-	// link that moves the operator somewhere else without warning is worse when
-	// the thing it leaves behind is an unsaved batch.
-	it('opens the Settings remedy in a new tab from the tile and the panel', () => {
+	// All four of them: the tile's link, the panel's action, the hint the page
+	// shows when no key is configured at all, and the clash row's link to the
+	// piece it collided with. Each says out loud that it opens a new tab, the way
+	// every other new-tab link on the admin does — a link that moves the operator
+	// somewhere else without warning is worse when the thing it leaves behind is
+	// an unsaved batch.
+	it('opens every new-tab link in the feature with an announced new tab', () => {
 		expect(UPLOAD).toMatch(
 			/class="tile-settings-link"[\s\S]{0,300}?target="_blank"\s*\n\s*rel="noopener noreferrer"[\s\S]{0,300}?\{m\.admin_lookup_open_settings\(\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
 		);
@@ -171,6 +174,11 @@ describe('lookup button and its disclosure hint', () => {
 		);
 		expect(UPLOAD).toMatch(
 			/\{m\.admin_lookup_no_key_pre\(\)\}<a\s*\n\s*class="link"\s*\n\s*href="\/admin\/settings\?tab=connections"\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"\s*\n\s*>\{m\.admin_lookup_no_key_link\(\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
+		);
+		// The clash row's link to the piece the upload collided with: the fourth
+		// and last target="_blank" in the feature.
+		expect(PANEL).toMatch(
+			/class="text-action" href="\/admin\/images\/\{clash\.imageId\}\/edit" target="_blank" rel="noopener noreferrer">\s*\n\s*\{m\.admin_lookup_clash_open\(\{ title: clash\.title \}\)\}<span class="sr-only"\s*\n\s*>\{' '\}\{m\.link_opens_new_tab\(\)\}<\/span/
 		);
 	});
 

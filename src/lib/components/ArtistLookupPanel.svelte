@@ -549,7 +549,9 @@
 					<!-- A text link, not a third button: the row reads primary,
 					     secondary, link, so "Add as a variant" is visibly the action. -->
 					<a class="text-action" href="/admin/images/{clash.imageId}/edit" target="_blank" rel="noopener noreferrer">
-						{m.admin_lookup_clash_open({ title: clash.title })}
+						{m.admin_lookup_clash_open({ title: clash.title })}<span class="sr-only"
+							>{' '}{m.link_opens_new_tab()}</span
+						>
 					</a>
 				{:else if outcome === 'existing' && candidates[0]}
 					{@render useArtistAction(candidates[0], true)}
