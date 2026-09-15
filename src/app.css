@@ -554,8 +554,11 @@ select.input {
 
 @media (max-width: 640px) {
 	/* Wrapped onto its own line, the note lines up under the label text rather
-	   than under the checkbox. */
+	   than under the checkbox. The lookup's rating pill (SONA-156) shares the
+	   row and wraps the same way, so it takes the same indent — otherwise the
+	   two pills wrap to two different left edges. */
 	.tag-check-row .tag-rating-note,
+	.tag-check-row .rating-tag,
 	.tag-check-row .btn {
 		margin-left: 24px;
 	}

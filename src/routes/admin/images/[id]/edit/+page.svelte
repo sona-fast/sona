@@ -1052,8 +1052,8 @@
 	}
 
 	/* The rating never changes the checkbox — it reports what the sites said and
-	   sits beside it. nowrap so the sentence stays one unit, and the row wraps
-	   the whole pill to its own line when it no longer fits. */
+	   sits beside it. The row wraps a pill to its own line when it no longer
+	   fits. */
 	.nsfw-row {
 		display: flex;
 		align-items: center;
@@ -1061,6 +1061,11 @@
 		flex-wrap: wrap;
 	}
 
+	/* The text grows with the number of sites, so the pill wraps rather than
+	   pushing the document into a sideways scroll. Kept on one line it cannot
+	   shrink at all, which on this narrower form pushed the suggestion's own
+	   note and its button onto a second row while the upload form kept them
+	   inline at the same width. */
 	.rating-tag {
 		font-family: var(--font-primary);
 		font-size: 11px;
@@ -1068,17 +1073,9 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius-pill);
 		padding: 1px 8px;
-		white-space: nowrap;
+		white-space: normal;
+		overflow-wrap: anywhere;
 		max-width: 100%;
-	}
-
-	/* The text grows with the number of sites, so at narrow widths the pill
-	   wraps rather than pushing the document into a sideways scroll. */
-	@media (max-width: 480px) {
-		.rating-tag {
-			white-space: normal;
-			overflow-wrap: anywhere;
-		}
 	}
 
 	.artist-toggle {

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { adminLogin } from './admin-login';
 import { dropOn, waitForDropAttachment } from './drop-files';
+import { stubSuggestions } from './tag-suggestions-helpers';
 
 // "Look up artist" on the upload page (SONA-156), driven in a real browser.
 // Nothing renders Svelte under vitest, so the unit suite can only grep the
@@ -44,6 +45,54 @@ function matchedBody(over: Record<string, unknown> = {}) {
 		nameMatches: [],
 		sourceClash: null,
 		...over
+	};
+}
+
+// An X status the tag-suggestion pill also recognises. The two features only
+// meet on a post BOTH of them can read: FuzzySearch matches it, and the pill
+// runs on Bluesky and X links alone — so a FurAffinity match leaves the
+// suggestion control refusing and only one pill on the page.
+const X_POST = 'https://x.com/kuttoya/status/1789012345678901234';
+
+/** One confident match on that X post, rated adult, so the lookup fills the
+ * source field with a URL the suggestion pill will accept. */
+function xMatchBody() {
+	return matchedBody({
+		matches: [
+			{
+				site: 'Twitter',
+				siteId: '1789012345678901234',
+				handles: ['kuttoya'],
+				distance: 0,
+				band: 'exact',
+				postedAt: '2026-03-04T10:00:00Z',
+				rating: 'adult',
+				postUrl: X_POST
+			}
+		]
+	});
+}
+
+// A second X status, for the case where a repeat lookup lands somewhere else.
+const X_POST_2 = 'https://x.com/kuttoya/status/1789012345678909999';
+
+/** The X match with a source clash on it: the post already belongs to another
+ * piece, so the prefill deliberately leaves the source URL alone. */
+function xClashBody(imageId: number, title: string) {
+	return {
+		...xMatchBody(),
+		sourceClash: {
+			imageId,
+			title,
+			isVariant: false,
+			parentImageId: null,
+			variantCount: 0,
+			thumbnailUrl: null,
+			artistName: 'Test Artist',
+			uploadedAt: '2026-07-09T00:00:00.000Z',
+			width: 1200,
+			height: 900
+		}
 	};
 }
 
@@ -202,6 +251,8 @@ async function saveLookupKey(page: Page) {
 }
 
 const pill = (page: Page) => page.locator('button.lookup-pill');
+// The tag-suggestion control's own pill, beside the Tags field (SONA-220).
+const suggestPill = (page: Page) => page.getByRole('button', { name: 'Suggest tags', exact: true });
 // The page's own polite region (the admin layout has a separate one, a <p>).
 const LIVE_REGION = 'div.sr-only[aria-live="polite"]';
 const panel = (page: Page) => page.getByRole('region', { name: 'Artist lookup' });
@@ -488,6 +539,314 @@ test.describe('with a key saved', () => {
 		// The pill is a sibling, so clicking it must not toggle the box.
 		await tag.click();
 		await expect(nsfw).not.toBeChecked();
+	});
+
+	// ---- Both rating pills at once (SONA-156 + SONA-220) --------------------
+	// The merge put two classifiers beside ONE checkbox, and nothing here or in
+	// tag-suggestions.spec.ts had ever drawn them together: that spec's server
+	// holds no FuzzySearch key, so the lookup pill is not even on its page.
+	// These run here, where the key is saved, with the suggestion endpoint
+	// stubbed the same way it is over there.
+
+	test('both rating pills sit beside the one NSFW box, and neither ticks it', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, {
+			source: 'x',
+			tags: ['mammal', 'canine', 'fox'],
+			rating: 'explicit',
+			imageCount: 1
+		});
+		await oneDoneTile(page);
+		const nsfw = page.locator('input[name="nsfw"]');
+
+		// The lookup fills the source field with the post it matched, which is what
+		// lets the suggestion run on the same piece without anything being typed.
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#shared-rating-tag')).toHaveText('Rated Adult on Twitter');
+
+		await expect(suggestPill(page)).toHaveAttribute('aria-disabled', 'false');
+		await suggestPill(page).click();
+		await expect(page.locator('#tags-rating')).toHaveText('Rated explicit by entail.dev.');
+
+		// Both on screen, and the box points at BOTH of them: pinned to one id, the
+		// describedby silently drops whichever classifier ran second.
+		await expect(page.locator('#shared-rating-tag')).toBeVisible();
+		const described = (await nsfw.getAttribute('aria-describedby'))?.split(' ') ?? [];
+		expect(described).toContain('shared-rating-tag');
+		expect(described).toContain('tags-rating');
+		await expect(nsfw).toHaveAccessibleDescription(/Rated Adult on Twitter/);
+		await expect(nsfw).toHaveAccessibleDescription(/Rated explicit by entail.dev/);
+		// Two guesses about the artwork, still no decision about the gallery.
+		await expect(nsfw).not.toBeChecked();
+
+		// On a phone the row wraps, and everything that wraps lines up under the
+		// label text rather than under the checkbox. Read as the indent rather than
+		// as two boxes: the pill can now shrink its own text, so which line it
+		// lands on depends on how long the site list is, while the indent that
+		// decides where it lands when it wraps is the same either way. The
+		// suggestion's note and button already had it; the lookup's pill did not.
+		await page.setViewportSize({ width: 390, height: 900 });
+		await expect(page.locator('#shared-rating-tag')).toHaveCSS('margin-left', '24px');
+		await expect(page.locator('#tags-rating')).toHaveCSS('margin-left', '24px');
+		await expect(page.getByRole('button', { name: 'Mark it NSFW' })).toHaveCSS(
+			'margin-left',
+			'24px'
+		);
+		// Whatever did wrap shares one left edge with the rest of the wrapped row.
+		const rowTop = (await page.locator('.tag-check-row .checkbox-label').boundingBox())?.y ?? 0;
+		const wrapped: number[] = [];
+		for (const id of ['#shared-rating-tag', '#tags-rating']) {
+			const box = await page.locator(id).boundingBox();
+			if (!box) throw new Error(`${id} has no box`);
+			if (box.y > rowTop) wrapped.push(box.x);
+		}
+		expect(wrapped.length).toBeGreaterThan(0);
+		for (const x of wrapped) expect(Math.abs(x - wrapped[0])).toBeLessThanOrEqual(1);
+
+		// And on the narrowest phone the long pill wraps its own text rather than
+		// pushing the document sideways.
+		await page.setViewportSize({ width: 320, height: 900 });
+		await expect(page.locator('#shared-rating-tag')).toBeVisible();
+		const overflow = await page.evaluate(() => {
+			const el = document.scrollingElement;
+			return el ? el.scrollWidth - el.clientWidth : 0;
+		});
+		expect(overflow).toBeLessThanOrEqual(0);
+	});
+
+	test('the edit page draws both pills on one row too', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, {
+			source: 'x',
+			tags: ['mammal', 'canine', 'fox'],
+			rating: 'explicit',
+			imageCount: 1
+		});
+		// 1280 first: what the operator is most likely on, and the width the two
+		// forms disagreed at.
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await gotoEditHydrated(page);
+		const nsfw = page.locator('input[name="nsfw"]');
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#lookup-rating-tag')).toHaveText('Rated Adult on Twitter');
+
+		await expect(suggestPill(page)).toHaveAttribute('aria-disabled', 'false');
+		await suggestPill(page).click();
+		await expect(page.locator('#tags-rating')).toHaveText('Rated explicit by entail.dev.');
+
+		const described = (await nsfw.getAttribute('aria-describedby'))?.split(' ') ?? [];
+		expect(described).toContain('lookup-rating-tag');
+		expect(described).toContain('tags-rating');
+		await expect(nsfw).toHaveAccessibleDescription(/Rated Adult on Twitter/);
+		await expect(nsfw).toHaveAccessibleDescription(/Rated explicit by entail.dev/);
+		await expect(nsfw).not.toBeChecked();
+
+		// Both pills fit on the row itself at this width. "Mark it NSFW" does not:
+		// the two forms hold the same row in different columns (this one is 600px
+		// wide, the upload form 800px), and the four items want about 606px here,
+		// so the button wraps on this page and not on that one. Left as an open
+		// question rather than pinned either way — closing it means changing how
+		// wide this whole form is, which is a layout decision about every field on
+		// the page and not something a rating pill gets to settle.
+		await expect(page.locator('#lookup-rating-tag')).toBeVisible();
+		await expect(page.locator('#tags-rating')).toBeVisible();
+	});
+
+	// ---- The Source Post URL field's own two descriptions --------------------
+	// That field can be described twice at once as well: the suggestion control's
+	// hint refusing the link it holds (SONA-220) and the "From lookup" tag on the
+	// value a lookup wrote into it (SONA-156). Neither spec had ever put both
+	// there, so the join could have dropped one and stayed green.
+
+	/** Lookup first so the source URL is filled AND tagged, then a refused
+	 * suggestion on that same URL so the hint points at the field too. The other
+	 * order pins nothing: a refusal leaves the operator's own URL in the field,
+	 * which the lookup then declines to overwrite, so no tag is ever added. */
+	async function bothSourceDescriptions(page: Page) {
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+
+		await expect(suggestPill(page)).toHaveAttribute('aria-disabled', 'false');
+		await suggestPill(page).click();
+		await expect(page.locator('#tags-hint')).toHaveText(
+			"Sona can't look up this link. Check the source post URL."
+		);
+
+		// Both ids, space-separated, in one attribute — and both still resolve to
+		// something on the page, which is what an id in describedby is worth.
+		await expect(sourceInput(page)).toHaveAttribute(
+			'aria-describedby',
+			'tags-hint source-lookup-tag'
+		);
+		await expect(page.locator('#tags-hint')).toBeVisible();
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		// Read as one description rather than as two ids, the way a screen reader
+		// would announce it on focus.
+		await expect(sourceInput(page)).toHaveAccessibleDescription(
+			/Sona can't look up this link[\s\S]*From lookup/
+		);
+	}
+
+	test('the source URL field carries the refusal and the lookup tag at once', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 422, { error: 'unsupported_source' });
+		await oneDoneTile(page);
+		await bothSourceDescriptions(page);
+	});
+
+	test('the edit page joins the same two descriptions on that field', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 422, { error: 'unsupported_source' });
+		await gotoEditHydrated(page);
+		await bothSourceDescriptions(page);
+	});
+
+	test('a second lookup that lands on the same post keeps the suggested chips', async ({
+		page
+	}) => {
+		// The source URL used to be blanked the moment the second lookup started
+		// and refilled only when it came back, so the suggestion control saw the
+		// post change and threw away chips the operator was still choosing from —
+		// for a lookup that landed on the very same post.
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, {
+			source: 'x',
+			tags: ['mammal', 'canine', 'fox'],
+			rating: 'explicit',
+			imageCount: 1
+		});
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await suggestPill(page).click();
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+		await pill(page).click();
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+		await expect(page.locator('#tags-rating')).toHaveText('Rated explicit by entail.dev.');
+
+		// And a lookup that fails outright leaves the field as it was, rather than
+		// emptying it with nothing to put back.
+		await stubLookup(page, { enabled: true, error: 'rate_limited', forwarded: true }, 429);
+		await pill(page).click();
+		await expect(panel(page)).toContainText(
+			'FuzzySearch is limiting how often your site can search right now.'
+		);
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+		// Nothing was ever set aside, so nothing said it was. The control announces
+		// that only when the post under it really changes, and neither a repeat of
+		// the same post nor a failed lookup is that.
+		await expect(page.locator('#tags-status')).not.toContainText('set that lookup aside');
+	});
+
+	test('a second lookup that lands elsewhere replaces the URL, and the chips go with it', async ({
+		page
+	}) => {
+		// The other half of the same rule: keeping the field through the round trip
+		// must not turn into keeping a URL the new result disagrees with. The
+		// replacement happens when the result lands, and the suggestion about the
+		// old post goes then — not at the click, and not never.
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, {
+			source: 'x',
+			tags: ['mammal', 'canine', 'fox'],
+			rating: 'explicit',
+			imageCount: 1
+		});
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await suggestPill(page).click();
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'Twitter',
+						siteId: '1789012345678909999',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: '2026-03-05T10:00:00Z',
+						rating: 'adult',
+						postUrl: X_POST_2
+					}
+				]
+			})
+		);
+		await pill(page).click();
+
+		await expect(sourceInput(page)).toHaveValue(X_POST_2);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		await expect(page.locator('.tag-chip')).toHaveCount(0);
+		await expect(page.locator('#tags-rating')).toHaveCount(0);
+		await expect(page.locator('#tags-status')).toHaveText(
+			'The source post URL changed, so Sona set that lookup aside.'
+		);
+	});
+
+	// The click-time reset was narrowed so a repeat lookup keeps the field it is
+	// about to refill. Moving the PARENT is a different question with the same
+	// shape, and it keeps the full reset: the shared fields describe whichever
+	// tile is parent now, so a URL filled from the old parent's post must not
+	// survive under the new one still wearing "From lookup".
+	test('moving the parent still clears what the last lookup filled', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await twoDoneTiles(page);
+
+		// In a set the lookup is per tile, and the first tile is the parent.
+		await tileLookup(page).first().click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile has no result of its own, so there is nothing to
+		// re-derive and the fields go back to empty rather than keeping the first
+		// tile's post.
+		await page.getByRole('radio', { name: 'Parent: back.png' }).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+	});
+
+	test('a clash after a lookup calls the field empty, not the operator\'s', async ({ page }) => {
+		// The clash sentence turns on whether the URL in the field was the
+		// OPERATOR'S when the prefill ran. The field now still holds the previous
+		// lookup's value at that moment, and that value is nobody's to keep: read
+		// as held, the panel would say Sona left "your" URL alone while the field
+		// it is talking about had just been emptied.
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+
+		await stubLookup(page, xClashBody(9001, 'Clash Piece'));
+		await pill(page).click();
+
+		await expect(panel(page)).toContainText(
+			'left the source post URL empty, because that post is already the source of Clash Piece'
+		);
+		await expect(panel(page)).not.toContainText('left your source post URL as it was');
+		// And the sentence matches the field: the tagged value the first lookup
+		// wrote is gone, because this result had nothing to put in its place.
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 	});
 
 	test('a refused key says so and offers Settings, not a retry', async ({ page }) => {

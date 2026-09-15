@@ -14,6 +14,9 @@ const EDIT = read('src/routes/admin/images/[id]/edit/+page.svelte');
 const PANEL = read('src/lib/components/ArtistLookupPanel.svelte');
 const DIALOG = read('src/lib/components/NewArtistDialog.svelte');
 const ANNOUNCER = read('src/lib/components/LiveAnnouncer.svelte');
+// The row the two rating pills share is styled globally, beside the
+// tag-suggestion note it also holds (SONA-220).
+const APP_CSS = read('src/app.css');
 
 describe('lookup button and its disclosure hint', () => {
 	it('offers the button only when a key is configured, on both pages', () => {
@@ -678,7 +681,10 @@ describe('round 11 wiring', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(/sourceUrlHeld=\{(shared|lookup)UrlHeld\}/);
 			expect(source).not.toContain("sourceUrlHeld={sourcePostUrl.trim() !== ''}");
-			expect(source).toMatch(/(shared|lookup)UrlHeld = sourcePostUrl\.trim\(\) !== '';/);
+			// The upload page reads the value the operator OWNS rather than the raw
+			// field: a URL its own last prefill wrote is not held by anybody, and
+			// that one is no longer blanked before the result lands.
+			expect(source).toMatch(/(shared|lookup)UrlHeld = (ownSource|sourcePostUrl)\.trim\(\) !== '';/);
 		}
 	});
 
@@ -1045,9 +1051,13 @@ describe('focus after the panel goes away', () => {
 		// Same on the upload page, where a second lookup replaces the shared
 		// prefill: the first clash's piece stops being on offer unless the operator
 		// chose it, and dropping a chosen one would blank the select instead.
+		// In resetSharedResult, which resetSharedPrefill calls and a starting
+		// lookup calls on its own: the clash is about the search that is over,
+		// while the two shared FIELDS now wait for the new result to land.
 		expect(UPLOAD).toMatch(
-			/function resetSharedPrefill\(\)[\s\S]{0,900}?extraParents = extraParents\.filter\(\(c\) => String\(c\.id\) === existingParentId\);/
+			/function resetSharedResult\(\)[\s\S]{0,900}?extraParents = extraParents\.filter\(\(c\) => String\(c\.id\) === existingParentId\);/
 		);
+		expect(UPLOAD).toMatch(/function resetSharedPrefill\(\)[\s\S]{0,400}?resetSharedResult\(\);/);
 		// And on the edit page's own repeat lookup, which resetForImage does not
 		// cover: it only runs on a move to another image.
 		expect(EDIT).toMatch(
@@ -1082,7 +1092,7 @@ describe('focus after the panel goes away', () => {
 	// "new" radio re-deriving the shared fields from the parent tile.
 	it('applies the shared prefill by the role the tile has when the result lands', () => {
 		expect(UPLOAD).toMatch(
-			/function startLookup\(key: number\)[\s\S]{0,900}?if \(isParent\(key\)\) resetSharedPrefill\(\);/
+			/function startLookup\(key: number\)[\s\S]{0,1400}?if \(isParent\(key\)\) resetSharedResult\(\);/
 		);
 		expect(UPLOAD).toMatch(/if \(isParent\(key\)\) applyShared\(next\);/);
 		expect(UPLOAD).not.toMatch(/wasParent/);
@@ -1114,7 +1124,7 @@ describe('focus after the panel goes away', () => {
 		// still-selected artist also spared it on a SECOND lookup, whose result
 		// names somebody else, leaving "Using {name}" over an unrelated match.
 		expect(UPLOAD).toMatch(
-			/function resetSharedPrefill\(\)[\s\S]{0,900}?\n\t\tappliedArtist = null;/
+			/function resetSharedResult\(\)[\s\S]{0,900}?\n\t\tappliedArtist = null;/
 		);
 		expect(UPLOAD).not.toMatch(/if \(!appliedArtist \|\| Number\(selectedArtistId\) !== appliedArtist\.id\)/);
 		expect(UPLOAD).toMatch(
@@ -1191,25 +1201,30 @@ describe('the rating tag beside NSFW', () => {
 		}
 	});
 
-	it('keeps the tag on one line and lets the row wrap instead', () => {
+	it('lets the row wrap a pill to its own line', () => {
 		for (const source of [UPLOAD, EDIT]) {
-			expect(source).toMatch(/\.rating-tag \{[^}]*white-space: nowrap;/);
 			expect(source).toMatch(/\.nsfw-row[\s\S]{0,80}\{[^}]*flex-wrap: wrap;/);
 		}
+		// Wrapped, the two pills and the "Mark it NSFW" button all line up under
+		// the label text rather than one of them under the checkbox.
+		expect(APP_CSS).toMatch(
+			/@media \(max-width: 640px\) \{[\s\S]{0,400}?\.tag-check-row \.tag-rating-note,\s+\.tag-check-row \.rating-tag,\s+\.tag-check-row \.btn \{\s+margin-left: 24px;/
+		);
 	});
 
-	// The text grows with the number of sites; nowrap alone made the pill wider
-	// than its column and gave the whole document a horizontal scrollbar at
-	// 320px (1.4.10), and wider than its tile in the grid.
+	// The text grows with the number of sites; nowrap made the pill wider than
+	// its column and gave the whole document a horizontal scrollbar at 320px
+	// (1.4.10), wider than its tile in the grid, and — kept on one line beside a
+	// second pill and a button — it pushed that button onto a row of its own.
 	it('lets the pill wrap rather than pushing the page sideways', () => {
 		for (const source of [UPLOAD, EDIT]) {
 			expect(source).toMatch(/\.rating-tag \{[^}]*max-width: 100%/);
-			expect(source).toMatch(
-				/@media \(max-width: 480px\) \{[\s\S]{0,200}?\.rating-tag \{[^}]*white-space: normal/
-			);
+			expect(source).toMatch(/\.rating-tag \{[^}]*white-space: normal;/);
+			expect(source).toMatch(/\.rating-tag \{[^}]*overflow-wrap: anywhere;/);
+			// No rule anywhere puts it back on one line.
+			expect(source).not.toMatch(/\.rating-tag \{[^}]*white-space: nowrap;/);
 		}
 		expect(UPLOAD).toMatch(/\.tile-nsfw-row \{[^}]*min-width: 0/);
-		expect(UPLOAD).toMatch(/\.tile-nsfw-row \.rating-tag \{[^}]*white-space: normal/);
 	});
 });
 

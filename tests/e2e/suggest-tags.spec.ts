@@ -1125,6 +1125,10 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 	const storedUrl = await page.locator('input[name="sourcePostUrl"]').inputValue();
 	const storedParent = await page.locator('select[name="parentImageId"]').inputValue();
 	const storedArtist = await page.locator('select[name="artistId"]').inputValue();
+	// The NSFW box is seeded from `data` the same way, and a suggestion's rating
+	// is what talks the operator into ticking it — read what 102 really stores so
+	// a tick made on 101 cannot pass as this image's own.
+	const storedNsfw = await page.locator('input[name="nsfw"]').isChecked();
 
 	await gotoRetrying(page, '/admin/images/101/edit');
 	const tags = page.locator('input[name="tags"]');
@@ -1183,11 +1187,30 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 	await expect(page.locator('input[name="artistName"]')).toBeVisible();
 	await expect(artist).toHaveCount(0);
 
-	// A tray open on image 101: its chips would otherwise still be there to Add
-	// onto image 102 after the navigation below.
+	// A suggestion accepted on image 101: the tags it wrote into the field, the
+	// rating it returned, and the NSFW tick that rating asked for are all three
+	// staged on THIS image. Carried across, image 102 would be saved with another
+	// image's tags under another image's rating, with its NSFW box moved by it.
 	await stubSuggestions(page, 200, {
 		source: 'bluesky',
-		tags: ['fox'],
+		tags: ['e2e-canine', 'e2e-vulpine'],
+		rating: 'explicit',
+		imageCount: 1
+	});
+	await pill.click();
+	await expect(page.locator('.tag-tray .tag-chip')).toHaveCount(2);
+	await page.getByRole('button', { name: 'Add 2 tags' }).click();
+	await expect(tags).toHaveValue('typed-on-101, e2e-canine, e2e-vulpine');
+	const nsfwBox = page.locator('input[name="nsfw"]');
+	await page.getByRole('button', { name: 'Mark it NSFW' }).click();
+	await expect(nsfwBox).toBeChecked();
+	await expect(page.locator('#tags-rating')).toHaveText('Rated explicit by entail.dev.');
+
+	// And a second tray, left open: its chips would otherwise still be there to
+	// Add onto image 102 after the navigation below.
+	await stubSuggestions(page, 200, {
+		source: 'bluesky',
+		tags: ['e2e-marine'],
 		rating: 'safe',
 		imageCount: 1
 	});
@@ -1212,6 +1235,12 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 	await expect(url).toHaveValue(storedUrl);
 	await expect(parent).toHaveValue(storedParent);
 	await expect(page.locator('.tag-tray')).toHaveCount(0);
+	// The accepted suggestion goes with the image it was about: no rating note
+	// beside the checkbox, and the checkbox back on what 102 stores rather than
+	// on the tick 101's explicit rating earned.
+	await expect(page.locator('#tags-rating')).toHaveCount(0);
+	await expect(page.locator('.tag-status-line')).toHaveCount(0);
+	expect(await nsfwBox.isChecked()).toBe(storedNsfw);
 
 	// Image 102's own stored values, not image 101's edits.
 	// The artist select is back, rather than the new-artist form left open on 101.
@@ -1238,6 +1267,7 @@ test('the edit page re-seeds its fields when a client-side navigation swaps the 
 	await expect(page.locator('input[name="char-1"]')).not.toBeChecked();
 	await expect(page.locator('select[name="parentImageId"]')).toHaveValue(storedParent);
 	await expect(page.locator('input[name="tags"]')).toHaveValue(storedTags);
+	expect(await page.locator('input[name="nsfw"]').isChecked()).toBe(storedNsfw);
 });
 
 test('a failed lookup replaces the row pill with a tray that offers Try again', async ({ page }) => {

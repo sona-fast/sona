@@ -570,7 +570,15 @@
 		lookupAborts.set(key, controller);
 		tile.lookup = { kind: 'searching' };
 		tile.sentPrivate = isPrivate;
-		if (isParent(key)) resetSharedPrefill();
+		// The fields the last prefill wrote are NOT emptied here. Blanking the
+		// source post URL for the length of the round trip tears down everything
+		// downstream of it — the suggestion control drops its standing chips and
+		// its rating the moment that field changes (SONA-220) — and a lookup that
+		// comes back with the same post, or fails outright, then has nothing to
+		// put back. They are replaced where the result lands instead, and only
+		// when the result names a different post. What the panel says about the
+		// LAST result does go now: it is about a search that is over.
+		if (isParent(key)) resetSharedResult();
 		// What runLookup settled on, so the catch below can keep this lookup's own
 		// answer to "did the file leave the browser" instead of assuming it did.
 		let settled: LookupState | null = null;
@@ -796,6 +804,14 @@
 		dateTagged = false;
 		sharedFilled = {};
 		sharedUrlHeld = false;
+		resetSharedResult();
+	}
+
+	/** What the last result put on the page OUTSIDE the two shared fields. A new
+	 * search invalidates all of it the moment it starts, because none of it is
+	 * recoverable from the result that is on its way. The fields are the
+	 * exception and are handled by applyShared when that result lands. */
+	function resetSharedResult() {
 		// A second lookup's panel is about a new result, and an artist applied
 		// from the last one is not applied to it: cleared here, the way the edit
 		// page's resetLookupPrefill does. The group-mode round trip, which shows
@@ -813,19 +829,45 @@
 	 * about the refill has to know that before it claims one happened. */
 	function applyShared(next: LookupState): { sourcePostUrl: boolean; commissionedAt: boolean } {
 		const wrote = { sourcePostUrl: false, commissionedAt: false };
+		// A failure, or a search cancelled back to idle, leaves both fields exactly
+		// as they are: there is no new post to describe them, and what the last
+		// lookup wrote is still the best thing the page knows.
 		if (next.kind !== 'results') return wrote;
-		sharedUrlHeld = sourcePostUrl.trim() !== '';
-		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
+		// A field the LAST prefill wrote and the operator has not typed over since
+		// is still the lookup's to replace, so this result reads it as empty and
+		// fills it. Only the tag can tell the two apart, which is why the value is
+		// kept until here rather than blanked when the search started.
+		const ownSource = sourceTagged ? '' : sourcePostUrl;
+		const ownDate = dateTagged ? '' : commissionedAt;
+		sharedUrlHeld = ownSource.trim() !== '';
+		const fields = prefillForResult(next.data, {
+			sourcePostUrl: ownSource,
+			commissionedAt: ownDate
+		});
 		sharedFilled = fields;
 		if (fields.sourcePostUrl !== undefined) {
-			sourcePostUrl = fields.sourcePostUrl;
+			// Written only when it is really different. Re-assigning the same URL
+			// still counts as a change to everything watching the field, and the
+			// suggestion control answers one by dropping the chips and the rating it
+			// is holding — for a second lookup that landed on the same post.
+			if (sourcePostUrl !== fields.sourcePostUrl) sourcePostUrl = fields.sourcePostUrl;
 			sourceTagged = true;
 			wrote.sourcePostUrl = true;
+		} else if (sourceTagged) {
+			// This result has no post to offer — no match, or a clash whose URL
+			// belongs to another piece — so the last one's URL goes now. Deferred to
+			// here rather than done at the start: until the result was in, there was
+			// no way to know it would not be refilled.
+			sourcePostUrl = '';
+			sourceTagged = false;
 		}
 		if (fields.commissionedAt !== undefined) {
-			commissionedAt = fields.commissionedAt;
+			if (commissionedAt !== fields.commissionedAt) commissionedAt = fields.commissionedAt;
 			dateTagged = true;
 			wrote.commissionedAt = true;
+		} else if (dateTagged) {
+			commissionedAt = '';
+			dateTagged = false;
 		}
 		return wrote;
 	}
@@ -2046,8 +2088,8 @@
 	}
 
 	/* The rating never changes the checkbox — it reports what the sites said and
-	   sits beside it. nowrap so the sentence stays one unit, and the row wraps
-	   the whole pill to its own line when it no longer fits. */
+	   sits beside it. The row wraps a pill to its own line when it no longer
+	   fits. */
 	.nsfw-row,
 	.tile-nsfw-row {
 		display: flex;
@@ -2062,6 +2104,11 @@
 		min-width: 0;
 	}
 
+	/* The text grows with the number of sites, so the pill wraps inside whatever
+	   holds it rather than spilling out: the tile is ~170px wide, and the shared
+	   row is beside a second pill and a button once a suggestion has run. Kept
+	   on one line the pill cannot shrink at all, which pushed the document into
+	   a sideways scroll on a narrow phone. */
 	.rating-tag {
 		font-family: var(--font-primary);
 		font-size: 11px;
@@ -2069,24 +2116,9 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius-pill);
 		padding: 1px 8px;
-		white-space: nowrap;
-		max-width: 100%;
-	}
-
-	/* The tile is ~170px wide and the text grows with the number of sites, so
-	   the pill wraps inside the tile rather than spilling out of it. */
-	.tile-nsfw-row .rating-tag {
 		white-space: normal;
 		overflow-wrap: anywhere;
-	}
-
-	/* Same story for the shared row once the column itself is narrow: one line
-	   of pill is worth less than a page that doesn't scroll sideways. */
-	@media (max-width: 480px) {
-		.rating-tag {
-			white-space: normal;
-			overflow-wrap: anywhere;
-		}
+		max-width: 100%;
 	}
 
 	.field-label {
