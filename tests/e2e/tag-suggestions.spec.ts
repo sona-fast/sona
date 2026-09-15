@@ -10,9 +10,9 @@ import { ENDPOINT, stubSuggestions } from './tag-suggestions-helpers';
 // which state each status code produces, that chips write into the Tags input,
 // what the live region says, and where focus lands afterwards.
 //
-// Runs on the SHARED read-only DB/server: nothing here submits the form, so no
-// row is ever written. The edit-page test only reads the form and intercepts
-// the lookup.
+// Runs serially on its OWN throwaway DB/server (see E2E_PERSIST_TO_TAGS in
+// tests/e2e/paths.ts): nothing here submits the form, so no row is ever
+// written. The edit-page tests only read the form and intercept the lookup.
 
 // Matches ADMIN_PASSWORD in tests/e2e/wrangler.e2e.toml (throwaway local value).
 const PASSWORD = 'e2e-admin-password';
