@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync, statSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { dirname, join, resolve as resolvePath } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { THEMES, DEFAULT_THEME_ID } from './index.ts';
@@ -116,7 +116,7 @@ describe('the theme registry', () => {
 
 	it('reaches no palette data through any chain of imports', () => {
 		const reached = reachableFrom(fileURLToPath(new URL('./index.ts', import.meta.url)), srcRoot);
-		const palette = reached.filter((f) => f.endsWith('/all.ts') || f.endsWith('.theme.ts'));
+		const palette = reached.filter((f) => basename(f) === 'all.ts' || f.endsWith('.theme.ts'));
 		expect(palette).toEqual([]);
 	});
 
@@ -129,7 +129,7 @@ describe('the theme registry', () => {
 			writeFileSync(join(dir, 'b.ts'), `export { ALL_THEMES as b } from './all.ts';\n`);
 			writeFileSync(join(dir, 'all.ts'), `export const ALL_THEMES = [];\n`);
 			const reached = reachableFrom(join(dir, 'a.ts'), dir);
-			expect(reached.filter((f) => f.endsWith('/all.ts'))).toEqual([join(dir, 'all.ts')]);
+			expect(reached.filter((f) => basename(f) === 'all.ts')).toEqual([join(dir, 'all.ts')]);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
