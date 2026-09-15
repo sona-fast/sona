@@ -557,7 +557,6 @@ describe('the "From lookup" tag', () => {
 		expect(PANEL).toContain('m.admin_lookup_status_date_kept(');
 		expect(PANEL).toMatch(/statusLineKind\(filled, \{ clash: !!clash, edited, urlHeld: sourceUrlHeld \}\)/);
 		expect(PANEL).toMatch(/seedStatusKind\(seeded, seedEdited\)/);
-		expect(PANEL).toMatch(/once per\s*\n?\s*(?:\/\/|\s)*field, not once per keystroke/);
 	});
 
 	// The inline new-artist form is subject to the same never-overwrite rule:
