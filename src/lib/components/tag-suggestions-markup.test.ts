@@ -1,0 +1,472 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+
+// Source-pins, following the copy-command-markup.test.ts precedent: the repo has
+// no component renderer under vitest, so the accessibility contract of the tag
+// suggestion control (SONA-220) is pinned by reading the markup. Each of these
+// is a rule a screen-reader user depends on and a refactor could quietly drop.
+
+const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+const suggestions = read('./TagSuggestions.svelte');
+const chips = read('./TagSuggestionChips.svelte');
+const ratingNote = read('./TagRatingNote.svelte');
+const uploadPage = read('../../routes/admin/upload/+page.svelte');
+const editPage = read('../../routes/admin/images/[id]/edit/+page.svelte');
+
+describe('the edit page\'s re-seed effect', () => {
+	it('resets every piece of per-image state, the in-flight flag included', () => {
+		// The form is keyed on the image id, which rebuilds the markup, but the
+		// script's $state survives the remount: each value has to be re-seeded
+		// here or image B starts with image A's. `saving` is the one that is not a
+		// stored value, and a navigation mid-save would otherwise leave B's Save
+		// disabled until A's request landed. The effect itself only spots the move;
+		// the re-seeding lives in resetForImage, which the artist lookup shares.
+		expect(editPage).toMatch(/if \(id === seededImageId\) return;[\s\S]{0,200}?resetForImage\(\)/);
+		const reset = editPage.match(/function resetForImage\(\) \{([\s\S]*?)\n\t\}/)?.[1] ?? '';
+		for (const line of [
+			'tagsValue = ',
+			'sourcePostUrl = ',
+			'suggestedRating = null;',
+			'nsfw = data.image.nsfw;',
+			'selectedParentId = ',
+			"artistMode = 'existing';",
+			'referenceCleared = false;',
+			'saving = false;'
+		]) {
+			expect(reset).toContain(line);
+		}
+	});
+});
+
+const backfillPage = read('../../routes/admin/images/suggest-tags/+page.svelte');
+
+describe('the tag suggestion live region', () => {
+	it('is one element rendered on load and written into, not inserted with its text', () => {
+		// A role=status element that appears WITH text already inside announces
+		// nothing in NVDA or JAWS. The region is unconditional; only the string
+		// inside it changes.
+		expect(suggestions).toMatch(/<p class="sr-only" role="status" id=\{statusId\}>\{announcement\}<\/p>/);
+		expect(backfillPage).toMatch(/<p class="sr-only" role="status">\{announcement\}<\/p>/);
+	});
+
+	it('names the chip group from the visible eyebrow, and describes it with the instruction line', () => {
+		// The eyebrow is the line a sighted operator reads above the chips; naming
+		// the group from the live region instead gives it a name only a screen
+		// reader can see, which then drifts from what is on screen.
+		expect(suggestions).toMatch(/labelledBy=\{eyebrowId\}/);
+		expect(suggestions).toMatch(/describedBy=\{helpId\}/);
+		expect(chips).toMatch(/aria-labelledby=\{labelledBy\} aria-describedby=\{describedBy\}/);
+	});
+});
+
+describe('the suggest pill', () => {
+	it('stays focusable when it cannot run, and refuses the click itself', () => {
+		// `disabled` would drop the pill out of the tab order, so a keyboard user
+		// would never reach the hint explaining what to do about it.
+		expect(suggestions).toMatch(/aria-disabled=\{disabled\}/);
+		expect(suggestions).not.toMatch(/(?<!aria-)disabled=\{disabled\}/);
+	});
+
+	it('refuses the tray\'s Try again by the same rule, since it runs the same lookup', () => {
+		// Try again calls suggest(), so it reads `disabled` rather than restating
+		// part of it — a URL edited to something unrecognisable stops both.
+		expect(suggestions).toMatch(
+			/\{#if tray\.retry\}[\s\S]*?aria-disabled=\{disabled\}[\s\S]*?onclick=\{suggest\}/
+		);
+	});
+
+	it('lists the site\'s existing tags under the field rather than in a tooltip', () => {
+		// Both forms showed this as a hint line before the field became a component.
+		// A title attribute is a mouse-only affordance: no touch, no keyboard, and
+		// screen-reader support for it varies.
+		expect(suggestions).toMatch(
+			/<small class="hint">\{m\.admin_upload_existing_tags\(\{ tags: existingTags\.join\(', '\) \}\)\}<\/small>/
+		);
+		expect(suggestions).not.toMatch(/title=\{/);
+	});
+
+	it('keeps the "From suggestions" badge out of the label, so the input stays "Tags"', () => {
+		// Inside <label for="tags-input"> the badge joins the input's accessible
+		// name, which then reads "Tags From suggestions" once tags are applied.
+		expect(suggestions).toMatch(
+			/<label class="field-label" for=\{inputId\}>\{m\.admin_field_tags\(\)\}<\/label>/
+		);
+		expect(suggestions).toMatch(
+			/<\/label>\s*\{#if suggestion\.kind === 'applied'\}<span class="tag">/
+		);
+	});
+
+	it('points the Source Post URL field at the hint while that URL is what was refused', () => {
+		// The hint lives under the Tags field; the URL it refuses lives in another
+		// field of the form. Without this, a screen reader user who tabs to the
+		// named field is told nothing about why the lookup will not run.
+		expect(suggestions).toMatch(
+			/sourceDescribedBy = suggestion\.kind === 'noSource' \? hintId : undefined;/
+		);
+		for (const page of [uploadPage, editPage]) {
+			expect(page).toMatch(/bind:sourceDescribedBy/);
+			// Since SONA-156 the same field can also carry the lookup's "From lookup"
+			// tag, so the two ids are joined and the field points at the pair.
+			expect(page).toMatch(/aria-describedby=\{sourceFieldDescribedBy\}/);
+			expect(page).toMatch(
+				/const sourceFieldDescribedBy = \$derived\(\s*\[sourceDescribedBy, sourceTagged \? 'source-lookup-tag' : undefined\]/
+			);
+		}
+	});
+
+	it('reads the post the field names, never a stored URL the field has moved away from', () => {
+		// On the edit page the stored URL and the field can differ once the operator
+		// edits it; the pill, the hint and the lookup all follow the field.
+		expect(suggestions).not.toMatch(/imageId/);
+		expect(editPage).not.toMatch(/imageId=\{data\.image\.id\}/);
+	});
+});
+
+describe('focus after a suggestion is accepted or dismissed', () => {
+	it('moves to the applied status line, which is focusable for the purpose', () => {
+		expect(suggestions).toMatch(/tabindex="-1"[\s\S]{0,40}bind:this=\{statusLine\}/);
+		expect(suggestions).toMatch(/await tick\(\);\s*statusLine\?\.focus\(\)/);
+	});
+
+	it('returns to the pill after Dismiss, rather than dropping to the body', () => {
+		expect(suggestions).toMatch(/function dismiss\(\)[\s\S]*?pill\?\.focus\(\)/);
+		// The backfill row's pill only renders once the row is idle again, so the
+		// focus call has to wait for that render.
+		expect(backfillPage).toMatch(
+			/async function dismiss\(id: number\)[\s\S]*?await tick\(\);\s*pills\[id\]\?\.focus\(\)/
+		);
+	});
+
+	it('keeps focus on the pill after Try again, whose own button is gone with the tray', () => {
+		expect(suggestions).toMatch(/kind: 'searching'[\s\S]*?await tick\(\);\s*pill\?\.focus\(\)/);
+		expect(backfillPage).toMatch(/kind: 'searching'[\s\S]*?await tick\(\);\s*pills\[id\]\?\.focus\(\)/);
+	});
+
+	it('waits for the saved line to render before focusing it on the backfill page', () => {
+		expect(backfillPage).toMatch(/await tick\(\);\s*statusLines\[row\.id\]\?\.focus\(\)/);
+	});
+
+	it('waits for the failure line too, which reannounce does not always wait for', () => {
+		// reannounce awaits a tick only when the region already holds the same
+		// sentence. On the first failure it does not, so without a tick of its own
+		// this branch would focus a paragraph setFailure has not rendered yet and
+		// focus would drop to the body.
+		// Bounded to one statement block: a brace between the pieces means the
+		// match has left the failure branch. Unbounded, the lazy gaps slid past
+		// this branch's closing brace and matched the SAVED branch's tick further
+		// down, so the pin went on passing with the tick it is about deleted.
+		expect(backfillPage).toMatch(
+			/setFailure\(row\.id, true\);(?:(?![{}])[\s\S])*?await reannounce\((?:(?![{}])[\s\S])*?await tick\(\);\s*statusLines\[row\.id\]\?\.focus\(\)/
+		);
+	});
+});
+
+describe('chips', () => {
+	it('are toggle buttons carrying their state in aria-pressed', () => {
+		// Not checkboxes: the tray is a filter on one suggestion, and a pressed
+		// button is what a screen reader reads as "on".
+		expect(chips).toMatch(/type="button"[\s\S]*?aria-pressed=\{!leftOut\.has\(tag\)\}/);
+	});
+
+	it('mark a left-out tag with a plus rather than only a colour', () => {
+		// Both glyphs are decorative: the tag name beside them is the chip's whole
+		// accessible name, and aria-pressed already carries the state.
+		expect(chips).toMatch(
+			/\{#if leftOut\.has\(tag\)\}<Plus size=\{14\} aria-hidden="true" \/>\{:else\}<Check size=\{14\} aria-hidden="true" \/>\{\/if\}/
+		);
+	});
+});
+
+describe('the rating never touches the NSFW checkbox', () => {
+	it('offers a button instead of checking the box for the operator', () => {
+		// The classifier is a hint about the artwork, not a decision about the
+		// gallery; a wrong automatic check publishes a piece under the wrong rating.
+		expect(ratingNote).toMatch(/async function markNsfw\(\) \{\n\t\tnsfw = true;/);
+		expect(ratingNote).toMatch(/\{#if warn && !nsfw\}/);
+		expect(ratingNote).not.toMatch(/rating[\s\S]{0,80}=>[\s\S]{0,40}nsfw = true/);
+	});
+
+	it('moves focus to the checkbox it just checked, since its own button is gone', () => {
+		expect(ratingNote).toMatch(/nsfw = true;[\s\S]*?await tick\(\);\n\t\tcheckbox\?\.focus\(\)/);
+		for (const page of [uploadPage, editPage]) {
+			expect(page).toMatch(/name="nsfw"\s+bind:checked=\{nsfw\}\s+bind:this=\{nsfwInput\}/);
+		}
+	});
+
+	it('keeps the note up for an answer that suggested nothing', () => {
+		// The forms read the rating off the answer, and an empty answer carries one
+		// too: a post rated explicit whose tags all sat under the confidence floor
+		// is exactly the one the "Mark it NSFW" prompt exists for.
+		expect(suggestions).toMatch(
+			/rating = next\.kind === 'suggested' \|\| next\.kind === 'empty' \? next\.rating : null;/
+		);
+	});
+
+	it('marks the warning triangle decorative, so the rating is read once', () => {
+		// The label beside it already says the rating; an unlabelled icon here would
+		// either be skipped or read as "graphic" in front of the sentence.
+		expect(ratingNote).toMatch(
+			/\{#if warn\}<TriangleAlert size=\{14\} aria-hidden="true" \/>\{\/if\}/
+		);
+	});
+
+	it('is referenced by the checkbox rather than sitting inside its label', () => {
+		// Inside the label, a screen reader would read the classifier's guess as
+		// part of the checkbox's own name.
+		for (const page of [uploadPage, editPage]) {
+			// Pointed at the note only while there is a note: an aria-describedby that
+			// names a missing id describes nothing, and screen readers vary on whether
+			// they say so.
+			// The lookup's own rating pill can sit in the same row (SONA-156), so the
+			// two ids are joined and the box points at whichever are on screen.
+			expect(page).toMatch(
+				/name="nsfw"\s+bind:checked=\{nsfw\}\s+bind:this=\{nsfwInput\}\s+aria-describedby=\{nsfwDescribedBy\}/
+			);
+			expect(page).toMatch(
+				/const nsfwDescribedBy = \$derived\([\s\S]{0,200}?suggestedRating \? 'tags-rating' : undefined/
+			);
+			expect(page).toMatch(
+				/<TagRatingNote rating=\{suggestedRating\} id="tags-rating" bind:nsfw checkbox=\{nsfwInput\} \/>/
+			);
+		}
+	});
+});
+
+describe('a dead session', () => {
+	it('offers the login page on both surfaces, since another lookup sends the same cookie', () => {
+		// trayFor sets signIn only for a 401. Both surfaces have to draw it, or the
+		// one that does not leaves a Try again that can only fail the same way.
+		for (const source of [suggestions, backfillPage]) {
+			// The icon is decorative: the label beside it is the anchor's whole name.
+			expect(source).toMatch(
+				/\{#if tray\.signIn\}[\s\S]*?<a class="tag-pill" href="\/admin\/login">\s*<LogIn size=\{14\} aria-hidden="true" \/>\s*\{m\.admin_tag_suggest_sign_in\(\)\}\s*<\/a>/
+			);
+		}
+	});
+});
+
+describe('the backfill rows', () => {
+	it('name every control by its image, since the page repeats them per row', () => {
+		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_suggest\(\{ title: row\.title \}\)/);
+		// While the lookup runs the pill reads "Suggesting tags…", so its accessible
+		// name has to say the same thing rather than keep the resting label.
+		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_searching\(\{ title: row\.title \}\)/);
+		// Try again is not the same action as Suggest, so it is not named like it.
+		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_try_again\(\{ title: row\.title \}\)\}/);
+		// And Save reads "Saving" while its own save runs, so its name follows the
+		// same way the pill's does — and contains the visible label, which is why
+		// neither carries an ellipsis.
+		expect(backfillPage).toMatch(/m\.admin_suggest_tags_row_save_label\(\{/);
+		expect(backfillPage).toMatch(
+			/m\.admin_suggest_tags_row_saving_label\(\{ title: row\.title \}\)/
+		);
+		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_row_dismiss\(\{ title: row\.title \}\)\}/);
+		expect(backfillPage).toMatch(/aria-label=\{m\.admin_suggest_tags_edit_image_label\(\{ title: row\.title \}\)\}/);
+	});
+
+	// The Save button holding its resting width while the label narrows to
+	// "Saving", and letting go of it afterwards, is measured in the browser by
+	// tests/e2e/suggest-tags.spec.ts — a grep here would keep passing if the line
+	// moved into a branch that only some saves reach.
+
+	it('keeps the visible saving label inside the accessible name, in every locale', () => {
+		// WCAG 2.5.3 label in name: speech input picks the button by what it can
+		// read on it, so an accessible name that drops the visible word leaves the
+		// button unspeakable. An ellipsis on one side and not the other breaks it.
+		for (const locale of ['en', 'ja']) {
+			const messages = JSON.parse(read(`../../../messages/${locale}.json`)) as Record<string, string>;
+			expect(messages.admin_suggest_tags_row_saving_label).toContain(
+				messages.admin_suggest_tags_row_saving_short
+			);
+		}
+	});
+
+	it('marks the edit link\'s pencil decorative, since the link is named for its image', () => {
+		// The anchor already carries an aria-label naming the image; an icon with a
+		// name of its own would be read in front of it.
+		expect(backfillPage).toMatch(
+			/\{#snippet editLink\([\s\S]*?<Pencil size=\{14\} aria-hidden="true" \/>/
+		);
+	});
+
+	it('gives the conflict its own eyebrow, and the sentence the body text and the focus', () => {
+		// A whole sentence in .tag-eyebrow renders 11px uppercase and tracked.
+		expect(backfillPage).toMatch(/<p class="tag-eyebrow warn">\{m\.admin_suggest_tags_not_saved\(\)\}<\/p>/);
+		expect(backfillPage).toMatch(
+			/<p class="tag-panel-body" tabindex="-1" bind:this=\{statusLines\[row\.id\]\}>\s*\{m\.admin_suggest_tags_save_conflict\(\)\}/
+		);
+	});
+
+	it('prints the separator in the row meta only when an artist name precedes it', () => {
+		// `{' '}` rather than a bare space: Svelte trims whitespace at the block edge.
+		expect(backfillPage).toMatch(/\{#if row\.artistName\}\{row\.artistName\} &middot;\{' '\}\{\/if\}\{sourceLabel\(row\.source\)\}/);
+	});
+
+	it('keeps the rating and the NSFW note in one line of row meta', () => {
+		// Structural, not whitespace-exact: what matters is that the classifier's
+		// rating and the note that it changes nothing here share one paragraph.
+		const meta = backfillPage.match(/<p class="rowmeta">\s*\{#if rowState\.rating\}[\s\S]*?<\/p>/)?.[0];
+		expect(meta, 'the suggested row has no rowmeta paragraph').toBeTruthy();
+		expect(meta).toContain('class="tag-rating-note"');
+		expect(meta).toContain('m.admin_suggest_tags_nsfw_note()');
+	});
+
+	it('spins the save loader with the class app.css animates', () => {
+		// The keyframes and their reduced-motion guard live in app.css, so the same
+		// class spins on both surfaces. That it actually animates is asserted in
+		// the browser, in tests/e2e/tag-suggestions.spec.ts.
+		expect(backfillPage).toMatch(
+			/<LoaderCircle size=\{14\} class="tag-spin" aria-hidden="true" \/>\s*\{m\.admin_suggest_tags_row_saving_short\(\)\}/
+		);
+	});
+
+	it('does not preload the backfill list on hover from the images page', () => {
+		// app.html preloads data on hover app-wide; the backfill load scans and
+		// classifies every untagged image, so this link waits for the tap. A browser
+		// test cannot see the absence — a hover that preloads nothing looks the same
+		// as a hover the runtime never got around to — so the attribute is pinned here.
+		const imagesPage = read('../../routes/admin/images/+page.svelte');
+		expect(imagesPage).toMatch(/href="\/admin\/images\/suggest-tags"[^>]*data-sveltekit-preload-data="tap"/);
+	});
+});
+
+describe('the multi-tile hint sentence', () => {
+	it('adds what the extra sentence has to add, without restating the hint it follows', () => {
+		// It is appended to admin_tag_suggest_hint on the upload form, so a sentence
+		// about where suggestions come from would say that twice in one paragraph.
+		const en = JSON.parse(read('../../../messages/en.json')) as Record<string, string>;
+		expect(en.admin_tag_suggest_hint_first_tile).toBe(
+			'Accepted tags apply to every image in this upload.'
+		);
+		expect(en.admin_tag_suggest_hint_first_tile).not.toMatch(/source post/);
+	});
+
+	it('is left off the refusal, which is not a hint the batch sentence belongs on', () => {
+		// In the noSource state the hint says the site cannot look this link up.
+		// Appending "accepted tags apply to every image" answers a question nobody
+		// asked about a lookup that never ran.
+		expect(suggestions).toMatch(
+			/multiTile && source !== null && suggestion\.kind !== 'noSource'/
+		);
+	});
+
+	it('joins the two sentences through a message, not a literal space', () => {
+		// Both sentences carry their own full stop, and Japanese sets no space after
+		// one: the separator is the locale's to choose.
+		expect(suggestions).toMatch(/m\.admin_tag_suggest_hint_join\(\{/);
+		expect(suggestions).not.toMatch(/&nbsp;\{m\.admin_tag_suggest_hint_first_tile/);
+		const en = JSON.parse(read('../../../messages/en.json')) as Record<string, string>;
+		const ja = JSON.parse(read('../../../messages/ja.json')) as Record<string, string>;
+		expect(en.admin_tag_suggest_hint_join).toBe('{first} {second}');
+		expect(ja.admin_tag_suggest_hint_join).toBe('{first}{second}');
+	});
+});
+
+describe('an answer that stops being about the post in the field', () => {
+	it('is compared by the post each URL names, so a harmless edit keeps it', () => {
+		// A trailing slash, a tracking parameter or an X status under another
+		// handle names the same post. Compared as text, any of them would throw
+		// away chips the operator is in the middle of choosing from. The key is
+		// read off the `source` derived, which already classified the field, and
+		// the snapshot a lookup went out with is taken from the same derived.
+		expect(suggestions).toMatch(/post !== askedPost &&/);
+		expect(suggestions).toMatch(/answeredFor === null \|\| answeredFor === post/);
+		expect(suggestions).not.toMatch(/canonical\(/);
+	});
+
+	it('says the lookup was set aside rather than blanking the live region', () => {
+		// The region last said "Reading the …". Emptied, a screen reader is left
+		// with a lookup that never ends.
+		expect(suggestions).toMatch(/announcement = m\.admin_tag_suggest_dropped_body\(\);/);
+	});
+
+	it('says nothing when the tags had already been accepted', () => {
+		// After Add the tags stay in the field, so "set that lookup aside" would
+		// tell a screen reader the opposite of what happened.
+		expect(suggestions).toMatch(
+			/const wasApplied = suggestion\.kind === 'applied';[\s\S]*?if \(wasApplied\) return;[\s\S]*?announcement = m\.admin_tag_suggest_dropped_body\(\);/
+		);
+	});
+});
+
+describe('the backfill row\'s rating line', () => {
+	it('joins the rating to the NSFW note through the message, not a literal space', () => {
+		// Both sentences carry their own full stop and Japanese sets no space
+		// after one, so a literal space left a gap after the full stop in ja. The
+		// rating keeps its own span, which is what carries the warn colour, so the
+		// join supplies the separator with nothing in front of it.
+		expect(backfillPage).toMatch(
+			/<\/span>\{m\.admin_tag_suggest_hint_join\(\{ first: '', second: m\.admin_suggest_tags_nsfw_note\(\) \}\)\}/
+		);
+		expect(backfillPage).not.toMatch(/<\/span>\{' '\}/);
+	});
+
+	it('draws the same line when the answer came back with no tags', () => {
+		// The rating is a verdict on the picture, so it stands whether or not any
+		// tag cleared the confidence floor. Rendered only in the suggested branch,
+		// an explicit post whose tags all fell short showed the operator nothing.
+		expect(backfillPage).toMatch(
+			/\{#if rowState\.kind === 'empty' && rowState\.rating\}[\s\S]*?class:warn=\{rowState\.rating !== 'safe'\}>\{ratingLabel\(rowState\.rating\)\}<\/span>\{m\.admin_tag_suggest_hint_join\(/
+		);
+	});
+
+	it('reads an unsaved row the same way in the pill guard and the saved branch', () => {
+		// A row whose save wrote no tags leaves savedTags as an empty array: truthy
+		// to `!savedTags`, falsy to `savedTags?.length`. Read differently, the row
+		// lost its pill AND drew no saved line, so there was no way back to a lookup.
+		expect(backfillPage).toMatch(/\{#if !savedTags\?\.length && !conflicts\[row\.id\]/);
+		expect(backfillPage).toMatch(/\{:else if savedTags\?\.length\}/);
+	});
+
+	it('sets no space in Japanese and one in English, which is what the join is for', () => {
+		const en = JSON.parse(read('../../../messages/en.json')) as Record<string, string>;
+		const ja = JSON.parse(read('../../../messages/ja.json')) as Record<string, string>;
+		expect(en.admin_tag_suggest_hint_join).toBe('{first} {second}');
+		expect(ja.admin_tag_suggest_hint_join).toBe('{first}{second}');
+	});
+});
+
+describe('Load more', () => {
+	it('announces and moves focus only for the navigation its own click started', () => {
+		// afterNavigate runs for every navigation. Clicking Load more and then
+		// another link before it lands leaves the arming set, and without the
+		// check the page announces how far the list grew and pulls focus onto a
+		// row on the way out of the page.
+		expect(backfillPage).toMatch(/grewToPages = data\.pages \+ 1;/);
+		expect(backfillPage).toMatch(
+			/afterNavigate\(async \(\{ to \}\) => \{[\s\S]*?grewAfterId = null;\s*grewToPages = null;/
+		);
+		expect(backfillPage).toMatch(
+			/if \(after === null \|\| to\?\.url\.searchParams\.get\('pages'\) !== String\(pages\)\) return;/
+		);
+	});
+});
+
+describe('the Add button and the line that confirms it', () => {
+	it('count the tags that will actually land, not the chips that are lit', () => {
+		// applyTo skips a suggested tag the operator has since typed into the field
+		// themselves, so a count taken off the chips would say three tags were
+		// added when two were — in the button, in the status line and in the live
+		// region at once.
+		// aria-disabled, not disabled: a real disabled attribute takes the button
+		// out of the tab order, so an operator who tabbed to it cannot find out why
+		// it does nothing. The bare-attribute check is anchored on the space or
+		// newline before it, since `aria-disabled=` ends in the same characters.
+		expect(suggestions).toMatch(/aria-disabled=\{toAdd\.length === 0\}/);
+		expect(suggestions).not.toMatch(/\sdisabled=\{toAdd/);
+		expect(suggestions).toMatch(/m\.admin_tag_suggest_add\(\{ count: toAdd\.length \}\)/);
+		expect(suggestions).not.toMatch(/count: chosen\.length/);
+	});
+});
+
+describe('the backfill page\'s shared live region', () => {
+	it('lets a later writer take the region back while a re-announce is mid-blank', () => {
+		// The empty-save refusal calls reannounce from a synchronous use:enhance
+		// callback without awaiting it. Claiming the region only after the tick
+		// would let that write land on top of another row's sentence, with
+		// announcedFor naming the wrong row afterwards.
+		expect(backfillPage).toMatch(
+			/announcedFor = id;\s*announcement = '';\s*await tick\(\);\s*if \(announcedFor !== id\) return;/
+		);
+	});
+});

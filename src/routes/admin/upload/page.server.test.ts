@@ -5,10 +5,11 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { characters, images, siteSettings } from '$lib/server/db/schema';
+import { characters, imageTags, images, siteSettings, tags } from '$lib/server/db/schema';
 import { load, actions } from './+page.server';
 
 import { makeD1, withFailingSettingsRead } from '$lib/server/test/d1';
+import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH } from '$lib/server/image-tags';
 
 function makeDb() {
 	const sqlite = new Database(':memory:');
@@ -40,7 +41,22 @@ function makeDb() {
 		);
 	`);
 	const d1 = makeD1(sqlite);
-	return { db: drizzle(d1, { schema }), platform: { env: { DB: d1 } } as unknown as App.Platform };
+	// Every statement the action runs, so a test can assert which writes an
+	// upload issues rather than only what ends up stored.
+	const queries: string[] = [];
+	const prepare = d1.prepare.bind(d1);
+	const logged = {
+		...d1,
+		prepare: (sql: string) => {
+			queries.push(sql);
+			return prepare(sql);
+		}
+	} as unknown as typeof d1;
+	return {
+		db: drizzle(logged, { schema }),
+		platform: { env: { DB: logged } } as unknown as App.Platform,
+		queries
+	};
 }
 
 // The upload action ends in redirect(302, …), which throws; swallow it.
@@ -58,6 +74,124 @@ function form(fields: Record<string, string>): Request {
 	for (const [k, v] of Object.entries(fields)) fd.set(k, v);
 	return new Request('http://localhost/admin/upload', { method: 'POST', body: fd });
 }
+
+function shortTags(n: number): string[] {
+	const letters = 'abcdefghijklmnopqrstuvwxyz';
+	const names: string[] = [];
+	for (const a of letters) {
+		names.push(a);
+		if (names.length === n) return names;
+	}
+	for (const a of letters) {
+		for (const b of letters) {
+			names.push(a + b);
+			if (names.length === n) return names;
+		}
+	}
+	return names;
+}
+
+describe('admin upload — tag cap', () => {
+	it('refuses a tag list past the cap and uploads nothing', async () => {
+		const { db, platform } = makeDb();
+		const tooMany = shortTags(MAX_IMAGE_TAGS + 1).join(', ');
+
+		const result = await callDefault({
+			request: form({ count: '1', imageUrl_0: 'https://cdn.example.com/new.png', title: 'New Art', artistId: '1', tags: tooMany }),
+			platform
+		});
+
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe('Use up to 100 tags.');
+		expect(await db.select({ id: images.id }).from(images).get()).toBeUndefined();
+	});
+
+	// The field used to be cut to 500 characters BEFORE the count guard ran, so a
+	// hundred and one ordinary names arrived as sixty-odd with the last one
+	// truncated mid-word, and uploaded as a success.
+	it('refuses ordinary-length names past the cap instead of truncating them', async () => {
+		const { db, platform } = makeDb();
+		const tooMany = Array.from({ length: MAX_IMAGE_TAGS + 1 }, (_, i) => `cap-test-tag-${i}`).join(', ');
+		expect(tooMany.length).toBeGreaterThan(500);
+
+		const result = await callDefault({
+			request: form({ count: '1', imageUrl_0: 'https://cdn.example.com/new.png', title: 'New Art', artistId: '1', tags: tooMany }),
+			platform
+		});
+
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe('Use up to 100 tags.');
+		expect(await db.select({ id: images.id }).from(images).get()).toBeUndefined();
+		expect(await db.select({ id: tags.id }).from(tags).get()).toBeUndefined();
+	});
+
+	it('refuses a tags field longer than the input ceiling', async () => {
+		const { db, platform } = makeDb();
+		const huge = 'a'.repeat(MAX_TAGS_INPUT_LENGTH + 1);
+
+		const result = await callDefault({
+			request: form({ count: '1', imageUrl_0: 'https://cdn.example.com/new.png', title: 'New Art', artistId: '1', tags: huge }),
+			platform
+		});
+
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe(
+			`Tags are too long. Use up to ${MAX_TAGS_INPUT_LENGTH} characters.`
+		);
+		expect(await db.select({ id: images.id }).from(images).get()).toBeUndefined();
+	});
+});
+
+describe('admin upload — tags that are accepted', () => {
+	it('issues no tag delete when the Tags field is empty', async () => {
+		// The shared write opens with a delete, which is what clearing the field on
+		// the edit form needs. A just-inserted image has nothing to delete, and a
+		// variant set would run one such delete per tile.
+		const { platform, queries } = makeDb();
+
+		await callDefault({
+			request: form({
+				count: '2',
+				imageUrl_0: 'https://cdn.example.com/a.png',
+				imageUrl_1: 'https://cdn.example.com/b.png',
+				title: 'No Tags',
+				artistId: '1',
+				tags: ''
+			}),
+			platform
+		});
+
+		expect(queries.some((sql) => /delete from "image_tags"/i.test(sql))).toBe(false);
+	});
+
+	it('writes the sanitized, de-duplicated names to the new image', async () => {
+		// The upload writes through replaceImageTags, the same call the edit form and
+		// the Suggest tags page use. Without a successful upload here, dropping that
+		// call would leave the cap tests above green and store no tags at all.
+		const { db, platform } = makeDb();
+
+		await callDefault({
+			request: form({
+				count: '1',
+				imageUrl_0: 'https://cdn.example.com/new.png',
+				title: 'New Art',
+				artistId: '1',
+				tags: 'fox, Fox , , fox, bird'
+			}),
+			platform
+		});
+
+		const newImage = await db.select({ id: images.id }).from(images).get();
+		expect(newImage?.id).toBeTruthy();
+		const written = await db
+			.select({ name: tags.name })
+			.from(imageTags)
+			.innerJoin(tags, eq(tags.id, imageTags.tagId))
+			.where(eq(imageTags.imageId, newImage!.id));
+		// Sorted: the select has no orderBy, so the row order is the database's.
+		expect(written.map((row) => row.name).sort()).toEqual(['bird', 'fox']);
+	});
+});
 
 describe('admin upload — use as reference sheet', () => {
 	it('sets the owner reference to the uploaded image when the box is checked', async () => {

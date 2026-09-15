@@ -93,6 +93,50 @@ VALUES
    '/e2e/lookuptarget.png', '/e2e/lookuptarget-thumb.png',
    900, 700, 0, 0, 2, NULL, NULL, '2026-07-05T00:00:00.000Z');
 
+-- Untagged images with a Bluesky or X source post, for the suggest-tags spec
+-- (SONA-220). UNPUBLISHED, like image 4, so the gallery specs' counts stay
+-- untouched; the backfill page lists by source URL and tags alone. Twenty-eight
+-- of them: one page is twenty, so "Load more" has a second page to grow into,
+-- and the extra rows are the spec's reserve. The spec's save tests take three
+-- rows off the list for good, and a retry of that serial file starts from what
+-- is left: at twenty-three the retry began with exactly one page and the Load
+-- more test had nothing to grow, so it skipped every time it was retried.
+-- Ids start at 96 to stay clear of the fixtures above; the list orders by id,
+-- so the reserve sits at the bottom and the rows the spec works on keep their
+-- places. The spec saves tags on some of these rows, which is why it runs on
+-- its own seeded server.
+INSERT OR REPLACE INTO images
+  (id, title, slug, image_url, thumbnail_url, width, height, nsfw, published, artist_id, source_post_url, created_at)
+VALUES
+  (96, 'Backfill 96', 'backfill-96', '/e2e/backfill-96.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc096', '2026-07-06T00:00:36.000Z'),
+  (97, 'Backfill 97', 'backfill-97', '/e2e/backfill-97.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc097', '2026-07-06T00:00:37.000Z'),
+  (98, 'Backfill 98', 'backfill-98', '/e2e/backfill-98.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc098', '2026-07-06T00:00:38.000Z'),
+  (99, 'Backfill 99', 'backfill-99', '/e2e/backfill-99.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc099', '2026-07-06T00:00:39.000Z'),
+  (100, 'Backfill 100', 'backfill-100', '/e2e/backfill-100.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc100', '2026-07-06T00:00:40.000Z'),
+  (101, 'Backfill 101', 'backfill-101', '/e2e/backfill-101.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc101', '2026-07-06T00:00:41.000Z'),
+  (102, 'Backfill 102', 'backfill-102', '/e2e/backfill-102.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc102', '2026-07-06T00:00:42.000Z'),
+  (103, 'Backfill 103', 'backfill-103', '/e2e/backfill-103.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc103', '2026-07-06T00:00:43.000Z'),
+  (104, 'Backfill 104', 'backfill-104', '/e2e/backfill-104.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc104', '2026-07-06T00:00:44.000Z'),
+  (105, 'Backfill 105', 'backfill-105', '/e2e/backfill-105.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc105', '2026-07-06T00:00:45.000Z'),
+  (106, 'Backfill 106', 'backfill-106', '/e2e/backfill-106.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc106', '2026-07-06T00:00:46.000Z'),
+  (107, 'Backfill 107', 'backfill-107', '/e2e/backfill-107.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc107', '2026-07-06T00:00:47.000Z'),
+  (108, 'Backfill 108', 'backfill-108', '/e2e/backfill-108.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc108', '2026-07-06T00:00:48.000Z'),
+  (109, 'Backfill 109', 'backfill-109', '/e2e/backfill-109.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc109', '2026-07-06T00:00:49.000Z'),
+  (110, 'Backfill 110', 'backfill-110', '/e2e/backfill-110.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc110', '2026-07-06T00:00:50.000Z'),
+  (111, 'Backfill 111', 'backfill-111', '/e2e/backfill-111.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc111', '2026-07-06T00:00:51.000Z'),
+  (112, 'Backfill 112', 'backfill-112', '/e2e/backfill-112.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc112', '2026-07-06T00:00:52.000Z'),
+  (113, 'Backfill 113', 'backfill-113', '/e2e/backfill-113.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc113', '2026-07-06T00:00:53.000Z'),
+  (114, 'Backfill 114', 'backfill-114', '/e2e/backfill-114.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc114', '2026-07-06T00:00:54.000Z'),
+  (115, 'Backfill 115', 'backfill-115', '/e2e/backfill-115.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc115', '2026-07-06T00:00:55.000Z'),
+  (116, 'Backfill 116', 'backfill-116', '/e2e/backfill-116.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc116', '2026-07-06T00:00:56.000Z'),
+  (117, 'Backfill 117', 'backfill-117', '/e2e/backfill-117.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc117', '2026-07-06T00:00:57.000Z'),
+  (118, 'Backfill 118', 'backfill-118', '/e2e/backfill-118.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc118', '2026-07-06T00:00:58.000Z'),
+  (119, 'Backfill 119', 'backfill-119', '/e2e/backfill-119.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc119', '2026-07-06T00:00:59.000Z'),
+  (120, 'Backfill 120', 'backfill-120', '/e2e/backfill-120.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc120', '2026-07-06T00:00:00.000Z'),
+  (121, 'Backfill 121', 'backfill-121', '/e2e/backfill-121.png', NULL, 900, 700, 0, 0, 1, 'https://bsky.app/profile/e2e.example/post/3kq7x2abc121', '2026-07-06T00:00:01.000Z'),
+  (122, 'Backfill 122', 'backfill-122', '/e2e/backfill-122.png', NULL, 900, 700, 0, 0, 1, 'https://x.com/e2e_artist/status/1834455667788990122', '2026-07-06T00:00:02.000Z'),
+  (123, 'Backfill 123', 'backfill-123', '/e2e/backfill-123.png', NULL, 900, 700, 0, 0, 1, 'https://x.com/e2e_artist/status/1834455667788990123', '2026-07-06T00:00:03.000Z');
+
 -- VR avatar fixtures for the vr-avatar spec (SONA-124). Characters to satisfy
 -- the FK (see the note on their names below), one PUBLISHED avatar with a
 -- self-hosted model whose license

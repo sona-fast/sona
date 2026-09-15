@@ -2,6 +2,9 @@
 	import { enhance } from '$app/forms';
 	import { tick, untrack } from 'svelte';
 	import { Loader2, Search } from 'lucide-svelte';
+	import TagSuggestions from '$lib/components/TagSuggestions.svelte';
+	import TagRatingNote from '$lib/components/TagRatingNote.svelte';
+	import type { EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
 	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
@@ -36,6 +39,24 @@
 	// explicit message — an emptied region announces nothing.
 	let referenceHint = $state<HTMLElement | null>(null);
 	let referenceCleared = $state(false);
+
+	// Bound so the suggestion control can read the source URL as it is edited and
+	// write accepted tags back into the field. Both still submit by name.
+	// entail.dev's rating for the last suggestion never moves the checkbox;
+	// `nsfw` starts at the stored value and only the operator changes it.
+	//
+	// $state seeded from `data`, not writable $derived: the sidebar's reference
+	// form calls update(), which invalidates every load and would hand these
+	// back their stored values — throwing away accepted tags and a ticked NSFW
+	// box, and then saving the reverted ones. The source post URL is seeded the
+	// same way, declared with the lookup fields below.
+	let tagsValue = $state(untrack(() => data.imageTags.join(', ')));
+	let suggestedRating = $state<EntailRating | null>(null);
+	// Set by the suggestion control while its hint is refusing this URL, so a
+	// screen reader user who tabs to the field finds the refusal on it.
+	let sourceDescribedBy = $state<string | undefined>(undefined);
+	let nsfw = $state(untrack(() => data.image.nsfw));
+	let nsfwInput = $state<HTMLInputElement | null>(null);
 
 	// ---- Artist lookup (SONA-156) -------------------------------------------
 	// The bytes are on the storage host, and the CSP blocks the browser from
@@ -155,6 +176,14 @@
 		furaffinityTagged = false;
 		lookupUrlHeld = false;
 		appliedArtist = null;
+		// The tag-suggestion state rides along: the accepted tags, the rating
+		// entail.dev returned for the PREVIOUS image, and its NSFW box (SONA-220).
+		tagsValue = data.imageTags.join(', ');
+		suggestedRating = null;
+		nsfw = data.image.nsfw;
+		// And the in-flight flag: a navigation away mid-save would otherwise leave
+		// B's Save button disabled until A's request lands.
+		saving = false;
 	}
 
 	// The image is not published, so "look this up" means "send a private file to
@@ -175,6 +204,19 @@
 	let sentPrivate = $state(false);
 	const ratingTagText = $derived(
 		lookup.kind === 'results' ? ratingTag(strictestRating(lookup.data.matches)) : null
+	);
+	// Two rating pills can sit beside the one NSFW box, so it points at whichever
+	// of them is on screen (SONA-156 + SONA-220).
+	const nsfwDescribedBy = $derived(
+		[ratingTagText ? 'lookup-rating-tag' : undefined, suggestedRating ? 'tags-rating' : undefined]
+			.filter(Boolean)
+			.join(' ') || undefined
+	);
+	// The source field can carry two descriptions at once: the tag-suggestions
+	// hint that points at it, and the "From lookup" tag (SONA-220 + SONA-156).
+	const sourceFieldDescribedBy = $derived(
+		[sourceDescribedBy, sourceTagged ? 'source-lookup-tag' : undefined].filter(Boolean).join(' ') ||
+			undefined
 	);
 
 	/** Undo what the PREVIOUS lookup wrote, but only where the operator has not
@@ -436,224 +478,230 @@
 		{/if}
 	</div>
 
-	<form method="POST" action="?/save" use:enhance={() => {
-		saving = true;
-		return async ({ update }) => {
-			await update();
-			saving = false;
-		};
-	}} class="edit-form">
-		<label>
-			<span>{m.admin_field_title()}</span>
-			<input type="text" class="input" name="title" value={data.image.title} required />
-		</label>
+	<!-- Keyed on the image so a same-route navigation to a different image builds
+	     the whole form again from that image's data. Fields seeded by a plain
+	     attribute (the artist and collection selects, the character chips, the
+	     checkboxes, the variant label, the dates) only re-render when the
+	     expression's value changes, so without this an operator's edit to one of
+	     them carries over to the next image whenever the two share a value. -->
+	{#key data.image.id}
+		<form method="POST" action="?/save" use:enhance={() => {
+			saving = true;
+			return async ({ update }) => {
+				await update();
+				saving = false;
+			};
+		}} class="edit-form">
+			<label>
+				<span>{m.admin_field_title()}</span>
+				<input type="text" class="input" name="title" value={data.image.title} required />
+			</label>
 
-		<fieldset class="artist-section">
-			<legend>{m.admin_field_artist()}</legend>
-			<div class="artist-toggle-row">
-			<div class="artist-toggle">
-				<button
-					type="button"
-					class="toggle-btn"
-					class:active={artistMode === 'existing'}
-					onclick={() => (artistMode = 'existing')}
-				>
-					{m.admin_upload_select_existing()}
-				</button>
-				<button
-					type="button"
-					class="toggle-btn"
-					class:active={artistMode === 'new'}
-					onclick={() => (artistMode = 'new')}
-				>
-					{m.admin_upload_add_new_artist()}
-				</button>
-			</div>
-			{#if data.lookupEnabled}
-				<!-- Pushed to the end of the row: flush against the two-segment
-				     toggle it reads as a third segment of that control. -->
-				<button
-					type="button"
-					class="lookup-pill"
-					bind:this={lookupPill}
-					aria-describedby="lookup-hint"
-					aria-disabled={lookup.kind === 'searching'}
-					onclick={startLookup}
-				>
-					<Search size={14} aria-hidden="true" /> {m.admin_lookup_button()}
-				</button>
-			{/if}
-			</div>
-			{#if data.lookupEnabled}
-				<small class="hint" class:hint-warn={sendingPrivate} id="lookup-hint">
-					{sendingPrivate ? m.admin_lookup_hint_private() : m.admin_lookup_hint()}
-				</small>
-			{:else}
-				<small class="hint" id="lookup-hint">
-					{m.admin_lookup_no_key_pre()}<a class="link" href="/admin/settings?tab=connections"
-						>{m.admin_lookup_no_key_link()}</a
-					>{m.admin_lookup_no_key_post()}
-				</small>
-			{/if}
+			<fieldset class="artist-section">
+				<legend>{m.admin_field_artist()}</legend>
+				<div class="artist-toggle-row">
+				<div class="artist-toggle">
+					<button
+						type="button"
+						class="toggle-btn"
+						class:active={artistMode === 'existing'}
+						onclick={() => (artistMode = 'existing')}
+					>
+						{m.admin_upload_select_existing()}
+					</button>
+					<button
+						type="button"
+						class="toggle-btn"
+						class:active={artistMode === 'new'}
+						onclick={() => (artistMode = 'new')}
+					>
+						{m.admin_upload_add_new_artist()}
+					</button>
+				</div>
+				{#if data.lookupEnabled}
+					<!-- Pushed to the end of the row: flush against the two-segment
+					     toggle it reads as a third segment of that control. -->
+					<button
+						type="button"
+						class="lookup-pill"
+						bind:this={lookupPill}
+						aria-describedby="lookup-hint"
+						aria-disabled={lookup.kind === 'searching'}
+						onclick={startLookup}
+					>
+						<Search size={14} aria-hidden="true" /> {m.admin_lookup_button()}
+					</button>
+				{/if}
+				</div>
+				{#if data.lookupEnabled}
+					<small class="hint" class:hint-warn={sendingPrivate} id="lookup-hint">
+						{sendingPrivate ? m.admin_lookup_hint_private() : m.admin_lookup_hint()}
+					</small>
+				{:else}
+					<small class="hint" id="lookup-hint">
+						{m.admin_lookup_no_key_pre()}<a class="link" href="/admin/settings?tab=connections"
+							>{m.admin_lookup_no_key_link()}</a
+						>{m.admin_lookup_no_key_post()}
+					</small>
+				{/if}
 
-			{#if data.lookupEnabled}
-				<!-- No key means no lookup can ever start, so the panel's empty
-				     landmark and the gap it holds open earn nothing (SONA-156). -->
-				<ArtistLookupPanel
-					{lookup}
-					filled={lookupFilled}
-					edited={lookupEdited}
-					seeded={artistMode === 'new' ? lookupSeeded : {}}
-					seedEdited={lookupSeedEdited}
-					sourceUrlHeld={lookupUrlHeld}
-					appliedArtist={artistMode === 'existing' ? appliedArtist : null}
-					editMode
-					variantBlocked={data.hasVariants}
-					privateNotice={sentPrivate && lookupSentFile(lookup)}
-					onclose={closeLookup}
-					onretry={startLookup}
-					oncancel={cancelLookup}
-					onuseartist={useLookupArtist}
-					onaddnew={async (seed) => {
-						// Only this click flips the form. The operator may have opened the
-						// inline form by hand before the lookup, though, and then nothing
-						// switched — say it only when this click is what did.
-						const wasExisting = artistMode === 'existing';
-						artistMode = 'new';
-						const wrote = seedNewArtist(seed.handle, seed.site, seed.linkable);
-						// A seed that wrote something is announced by the panel's own status
-						// line. An empty handle (the no_match action) writes nothing, so the
-						// select is replaced by a name field with nothing said about it.
-						// Judged by what THIS click wrote: the record keeps the previous
-						// seed, so reading it would call a click that wrote nothing a
-						// success and leave a second click unanswered.
-						const seededNothing = seedStatusKind(wrote) === 'none';
-						if (wasExisting && seededNothing) announcer.say(m.admin_lookup_announce_new_form());
-						// The form was already open, the seed had both a handle and a link
-						// to offer, and the fields hold the operator's own values: this
-						// click wrote nothing because what it carried was already spoken
-						// for. An empty name field is the one case this sentence would be
-						// false in, and there the focus move below is the answer.
-						else if (seededNothing && seed.handle && seed.linkable && artistName.trim() !== '')
-							announcer.say(m.admin_lookup_announce_seed_kept());
-						// The no_match action carries no handle, and an unlinked site
-						// (SONA-219) carries no profile URL, so in both cases fewer fields
-						// were offered than "already have values, so Sona left them alone"
-						// claims — the FurAffinity field it names is empty and was never a
-						// candidate. The click still has to be answered, so say the state
-						// it found the form in.
-						else if (seededNothing && artistName.trim() !== '')
-							announcer.say(m.admin_lookup_announce_form_already_open());
-						// Nothing landed in the name field, and both sentences above tell the
-						// operator to type it — so that is where focus goes.
-						if (artistName.trim() === '') {
-							await tick();
-							artistNameInput?.focus();
-						}
-					}}
-					onaddvariant={addAsVariant}
-				/>
-			{/if}
-
-			{#if artistMode === 'existing'}
-				<label>
-					<span>{m.admin_field_artist()}</span>
-					<select class="input" name="artistId" bind:value={selectedArtistId} onchange={() => (appliedArtist = null)} required>
-						<option value="">{m.admin_upload_select_artist()}</option>
-						{#each artistList as artist}
-							<option value={artist.id}>{artist.name}</option>
-						{/each}
-					</select>
-				</label>
-			{:else}
-				<input type="hidden" name="artistId" value="new" />
-				<!-- Same shape as the commissioned-date and source-URL fields: the
-				     label wraps its own text, the "From lookup" tag is a sibling
-				     reached through aria-describedby (SONA-220), and typing in the
-				     field drops the tag. -->
-				<div class="field">
-					<div class="label-row">
-						<label class="field-label" for="artistName">{m.admin_field_artist_name()}</label>
-						{#if nameTagged}
-							<span class="lookup-tag" id="artist-name-lookup-tag">{m.admin_lookup_from_lookup()}</span>
-						{/if}
-					</div>
-					<input
-						id="artistName"
-						type="text"
-						class="input"
-						placeholder={m.admin_upload_artist_name_placeholder()}
-						name="artistName"
-						bind:this={artistNameInput}
-						bind:value={artistName}
-						oninput={() => (nameTagged = false)}
-						aria-describedby={nameTagged ? 'artist-name-lookup-tag' : undefined}
-						required
+				{#if data.lookupEnabled}
+					<!-- No key means no lookup can ever start, so the panel's empty
+					     landmark and the gap it holds open earn nothing (SONA-156). -->
+					<ArtistLookupPanel
+						{lookup}
+						filled={lookupFilled}
+						edited={lookupEdited}
+						seeded={artistMode === 'new' ? lookupSeeded : {}}
+						seedEdited={lookupSeedEdited}
+						sourceUrlHeld={lookupUrlHeld}
+						appliedArtist={artistMode === 'existing' ? appliedArtist : null}
+						editMode
+						variantBlocked={data.hasVariants}
+						privateNotice={sentPrivate && lookupSentFile(lookup)}
+						onclose={closeLookup}
+						onretry={startLookup}
+						oncancel={cancelLookup}
+						onuseartist={useLookupArtist}
+						onaddnew={async (seed) => {
+							// Only this click flips the form. The operator may have opened the
+							// inline form by hand before the lookup, though, and then nothing
+							// switched — say it only when this click is what did.
+							const wasExisting = artistMode === 'existing';
+							artistMode = 'new';
+							const wrote = seedNewArtist(seed.handle, seed.site, seed.linkable);
+							// A seed that wrote something is announced by the panel's own status
+							// line. An empty handle (the no_match action) writes nothing, so the
+							// select is replaced by a name field with nothing said about it.
+							// Judged by what THIS click wrote: the record keeps the previous
+							// seed, so reading it would call a click that wrote nothing a
+							// success and leave a second click unanswered.
+							const seededNothing = seedStatusKind(wrote) === 'none';
+							if (wasExisting && seededNothing) announcer.say(m.admin_lookup_announce_new_form());
+							// The form was already open, the seed had both a handle and a link
+							// to offer, and the fields hold the operator's own values: this
+							// click wrote nothing because what it carried was already spoken
+							// for. An empty name field is the one case this sentence would be
+							// false in, and there the focus move below is the answer.
+							else if (seededNothing && seed.handle && seed.linkable && artistName.trim() !== '')
+								announcer.say(m.admin_lookup_announce_seed_kept());
+							// The no_match action carries no handle, and an unlinked site
+							// (SONA-219) carries no profile URL, so in both cases fewer fields
+							// were offered than "already have values, so Sona left them alone"
+							// claims — the FurAffinity field it names is empty and was never a
+							// candidate. The click still has to be answered, so say the state
+							// it found the form in.
+							else if (seededNothing && artistName.trim() !== '')
+								announcer.say(m.admin_lookup_announce_form_already_open());
+							// Nothing landed in the name field, and both sentences above tell the
+							// operator to type it — so that is where focus goes.
+							if (artistName.trim() === '') {
+								await tick();
+								artistNameInput?.focus();
+							}
+						}}
+						onaddvariant={addAsVariant}
 					/>
-				</div>
-				<div class="social-grid">
-					<div class="field">
-						<div class="label-row">
-							<label class="field-label" for="new-artist-twitter">Twitter/X</label>
-							{#if twitterTagged}
-								<span class="lookup-tag" id="twitter-lookup-tag">{m.admin_lookup_from_lookup()}</span>
-							{/if}
-						</div>
-						<input
-							id="new-artist-twitter"
-							type="text"
-							class="input"
-							placeholder={m.admin_social_handle_placeholder()}
-							name="twitter"
-							bind:value={newTwitter}
-							oninput={() => (twitterTagged = false)}
-							aria-describedby={twitterTagged ? 'twitter-lookup-tag' : undefined}
-						/>
-					</div>
-					<label>
-						<span>Bluesky</span>
-						<input type="text" class="input" placeholder="bsky.app/profile/..." name="bluesky" />
-					</label>
-					<label>
-						<span>Telegram</span>
-						<input type="text" class="input" placeholder="t.me/..." name="telegram" />
-					</label>
-					<div class="field">
-						<div class="label-row">
-							<label class="field-label" for="new-artist-furaffinity">FurAffinity</label>
-							{#if furaffinityTagged}
-								<span class="lookup-tag" id="furaffinity-lookup-tag">{m.admin_lookup_from_lookup()}</span>
-							{/if}
-						</div>
-						<input
-							id="new-artist-furaffinity"
-							type="text"
-							class="input"
-							placeholder="furaffinity.net/user/..."
-							name="furaffinity"
-							bind:value={newFuraffinity}
-							oninput={() => (furaffinityTagged = false)}
-							aria-describedby={furaffinityTagged ? 'furaffinity-lookup-tag' : undefined}
-						/>
-					</div>
-					<label>
-						<span>DeviantArt</span>
-						<input type="text" class="input" placeholder="deviantart.com/..." name="deviantart" />
-					</label>
-					<label>
-						<span>Patreon</span>
-						<input type="text" class="input" placeholder="patreon.com/..." name="patreon" />
-					</label>
-					<label>
-						<span>Instagram</span>
-						<input type="text" class="input" placeholder="instagram.com/..." name="instagram" />
-					</label>
-				</div>
-			{/if}
-		</fieldset>
+				{/if}
 
-		<div class="row">
-			<label class="flex-1">
+				{#if artistMode === 'existing'}
+					<label>
+						<span>{m.admin_field_artist()}</span>
+						<select class="input" name="artistId" bind:value={selectedArtistId} onchange={() => (appliedArtist = null)} required>
+							<option value="">{m.admin_upload_select_artist()}</option>
+							{#each artistList as artist}
+								<option value={artist.id}>{artist.name}</option>
+							{/each}
+						</select>
+					</label>
+				{:else}
+					<input type="hidden" name="artistId" value="new" />
+					<!-- Same shape as the commissioned-date and source-URL fields: the
+					     label wraps its own text, the "From lookup" tag is a sibling
+					     reached through aria-describedby (SONA-220), and typing in the
+					     field drops the tag. -->
+					<div class="field">
+						<div class="label-row">
+							<label class="field-label" for="artistName">{m.admin_field_artist_name()}</label>
+							{#if nameTagged}
+								<span class="lookup-tag" id="artist-name-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+							{/if}
+						</div>
+						<input
+							id="artistName"
+							type="text"
+							class="input"
+							placeholder={m.admin_upload_artist_name_placeholder()}
+							name="artistName"
+							bind:this={artistNameInput}
+							bind:value={artistName}
+							oninput={() => (nameTagged = false)}
+							aria-describedby={nameTagged ? 'artist-name-lookup-tag' : undefined}
+							required
+						/>
+					</div>
+					<div class="social-grid">
+						<div class="field">
+							<div class="label-row">
+								<label class="field-label" for="new-artist-twitter">Twitter/X</label>
+								{#if twitterTagged}
+									<span class="lookup-tag" id="twitter-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+								{/if}
+							</div>
+							<input
+								id="new-artist-twitter"
+								type="text"
+								class="input"
+								placeholder={m.admin_social_handle_placeholder()}
+								name="twitter"
+								bind:value={newTwitter}
+								oninput={() => (twitterTagged = false)}
+								aria-describedby={twitterTagged ? 'twitter-lookup-tag' : undefined}
+							/>
+						</div>
+						<label>
+							<span>Bluesky</span>
+							<input type="text" class="input" placeholder="bsky.app/profile/..." name="bluesky" />
+						</label>
+						<label>
+							<span>Telegram</span>
+							<input type="text" class="input" placeholder="t.me/..." name="telegram" />
+						</label>
+						<div class="field">
+							<div class="label-row">
+								<label class="field-label" for="new-artist-furaffinity">FurAffinity</label>
+								{#if furaffinityTagged}
+									<span class="lookup-tag" id="furaffinity-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+								{/if}
+							</div>
+							<input
+								id="new-artist-furaffinity"
+								type="text"
+								class="input"
+								placeholder="furaffinity.net/user/..."
+								name="furaffinity"
+								bind:value={newFuraffinity}
+								oninput={() => (furaffinityTagged = false)}
+								aria-describedby={furaffinityTagged ? 'furaffinity-lookup-tag' : undefined}
+							/>
+						</div>
+						<label>
+							<span>DeviantArt</span>
+							<input type="text" class="input" placeholder="deviantart.com/..." name="deviantart" />
+						</label>
+						<label>
+							<span>Patreon</span>
+							<input type="text" class="input" placeholder="patreon.com/..." name="patreon" />
+						</label>
+						<label>
+							<span>Instagram</span>
+							<input type="text" class="input" placeholder="instagram.com/..." name="instagram" />
+						</label>
+					</div>
+				{/if}
+			</fieldset>
+
+			<label>
 				<span>{m.admin_field_collection()}</span>
 				<select class="input" name="collectionId">
 					<option value="">{m.admin_upload_no_collection()}</option>
@@ -662,156 +710,172 @@
 					{/each}
 				</select>
 			</label>
-			<label class="flex-1">
-				<span>{m.admin_field_tags()}</span>
-				<input type="text" class="input" name="tags" value={data.imageTags.join(', ')} />
-				{#if data.tags.length > 0}
-					<small class="hint">{m.admin_upload_existing_tags({ tags: data.tags.map((t) => t.name).join(', ') })}</small>
-				{/if}
-			</label>
-		</div>
 
-		{#if data.hasVariants}
-			<p class="hint">{m.admin_variant_parent_hint()}</p>
-		{:else}
-			<div class="row">
-				<label class="flex-1">
-					<span>{m.admin_field_variant_of()}</span>
-					<select class="input" name="parentImageId" bind:this={parentSelect} bind:value={selectedParentId}>
-						<option value="">{m.admin_variant_none()}</option>
-						{#each parentOptions as candidate}
-							<option value={String(candidate.id)}>{candidate.title}</option>
-						{/each}
-					</select>
-				</label>
-				{#if selectedParentId}
-					<label class="flex-1">
-						<span>{m.admin_field_variant_label()}</span>
-						<input
-							type="text"
-							class="input"
-							name="variantLabel"
-							placeholder={m.admin_variant_label_placeholder()}
-							value={data.image.variantLabel || ''}
-						/>
-					</label>
-				{/if}
-			</div>
-		{/if}
-
-		{#if data.characters.length > 0}
-			<div class="field">
-				<span class="field-label">{m.gallery_featured_characters()}</span>
-				<div class="character-chips">
-					{#each data.characters as char}
-						<label class="chip">
-							<input type="checkbox" name="char-{char.id}" checked={data.imageCharacterIds.includes(char.id)} onchange={(e) => {
-								const el = document.querySelector('input[name="characters"]') as HTMLInputElement;
-								const current = new Set(el.value.split(',').filter(Boolean));
-								if (e.currentTarget.checked) current.add(String(char.id));
-								else current.delete(String(char.id));
-								el.value = Array.from(current).join(',');
-							}} />
-							<span>{char.name}</span>
-							{#if char.ownerName}<span class="chip-owner">({char.ownerName})</span>{/if}
-						</label>
-					{/each}
-				</div>
-				<input type="hidden" name="characters" value={data.imageCharacterIds.join(',')} />
-			</div>
-		{/if}
-
-		<!-- The label wraps only its own text; the "From lookup" pill sits after it
-		     as a sibling and is referenced with aria-describedby, so the input's
-		     accessible name stays the field name (SONA-220). -->
-		<div class="field">
-			<div class="label-row">
-				<label class="field-label" for="commissionedAt">{m.admin_field_commissioned_date()}</label>
-				{#if dateTagged}
-					<span class="lookup-tag" id="commissioned-lookup-tag">{m.admin_lookup_from_lookup()}</span>
-				{/if}
-			</div>
-			<input
-				id="commissionedAt"
-				type="date"
-				class="input"
-				name="commissionedAt"
-				bind:value={commissionedAt}
-				oninput={() => {
-					// The panel's status line reads the filled record through this tag: a
-					// field typed over stops being the lookup's, and the sentence then
-					// neither claims it nor says it was left alone.
-					dateTagged = false;
-				}}
-				aria-describedby={dateTagged ? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'}
-			/>
-			<!-- The hint was inside the wrapping label before this restructure, which
-			     put it in the input's accessible name. Out here it is a plain sibling,
-			     so it is referenced instead — otherwise a screen reader never gets it
-			     (1.3.1). The lookup tag joins it when there is one. -->
-			<small class="hint" id="commissioned-hint">{m.admin_hint_commissioned_date()}</small>
-		</div>
-
-		<div class="nsfw-row">
-			<label class="checkbox-label">
-				<input
-					type="checkbox"
-					name="nsfw"
-					checked={data.image.nsfw}
-					aria-describedby={ratingTagText ? 'lookup-rating-tag' : undefined}
+			<!-- Tags takes a full-width row of its own so the "Suggest tags" pill sits
+			     beside the input. The control draws the existing-tags hint under the
+			     field, as this form did before it. -->
+			<!-- The tray's card ends 20px above the variant controls, close enough to
+			     read as part of the tray; the wrapper adds room under it while it is
+			     open, and only then, so the resting form keeps its rhythm. -->
+			<div class="tags-field">
+				<TagSuggestions
+					bind:value={tagsValue}
+					bind:rating={suggestedRating}
+					bind:sourceDescribedBy
+					sourceUrl={sourcePostUrl}
+					existingTags={data.tags.map((t) => t.name)}
 				/>
-				<span>{m.admin_field_mark_nsfw()}</span>
-			</label>
-			<!-- Never checked by a lookup: the rating is what the sites said, and the
-			     call about this gallery stays the operator's. -->
-			{#if ratingTagText}
-				<span class="rating-tag" id="lookup-rating-tag">{ratingTagText}</span>
-			{/if}
-		</div>
-
-		<label class="checkbox-label">
-			<input type="checkbox" name="published" bind:checked={isPrivate} />
-			<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
-		</label>
-
-		<label class="checkbox-label">
-			<input type="checkbox" name="featured" checked={data.image.featured} />
-			<span>{m.admin_field_featured()}</span>
-		</label>
-
-		<label>
-			<span>{m.admin_field_featured_order()}</span>
-			<input type="number" class="input" name="featuredOrder" value={data.image.featuredOrder ?? ''} />
-			<small class="hint">{m.admin_field_featured_order_hint()}</small>
-		</label>
-
-		<div class="field">
-			<div class="label-row">
-				<label class="field-label" for="sourcePostUrl">{m.admin_field_source_url()}</label>
-				{#if sourceTagged}
-					<span class="lookup-tag" id="source-lookup-tag">{m.admin_lookup_from_lookup()}</span>
-				{/if}
 			</div>
-			<input
-				id="sourcePostUrl"
-				type="url"
-				class="input"
-				name="sourcePostUrl"
-				bind:value={sourcePostUrl}
-				oninput={() => {
-					sourceTagged = false;
-				}}
-				aria-describedby={sourceTagged ? 'source-lookup-tag' : undefined}
-			/>
-		</div>
 
-		<div class="form-actions">
-			<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
-			<button type="submit" class="btn btn-primary" disabled={saving}>
-				{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_save_changes()}{/if}
-			</button>
-		</div>
-	</form>
+			{#if data.hasVariants}
+				<p class="hint">{m.admin_variant_parent_hint()}</p>
+			{:else}
+				<div class="row">
+					<label class="flex-1">
+						<span>{m.admin_field_variant_of()}</span>
+						<select class="input" name="parentImageId" bind:this={parentSelect} bind:value={selectedParentId}>
+							<option value="">{m.admin_variant_none()}</option>
+							{#each parentOptions as candidate}
+								<option value={String(candidate.id)}>{candidate.title}</option>
+							{/each}
+						</select>
+					</label>
+					{#if selectedParentId}
+						<label class="flex-1">
+							<span>{m.admin_field_variant_label()}</span>
+							<input
+								type="text"
+								class="input"
+								name="variantLabel"
+								placeholder={m.admin_variant_label_placeholder()}
+								value={data.image.variantLabel || ''}
+							/>
+						</label>
+					{/if}
+				</div>
+			{/if}
+
+			{#if data.characters.length > 0}
+				<div class="field">
+					<span class="field-label">{m.gallery_featured_characters()}</span>
+					<div class="character-chips">
+						{#each data.characters as char}
+							<label class="chip">
+								<input type="checkbox" name="char-{char.id}" checked={data.imageCharacterIds.includes(char.id)} onchange={(e) => {
+									const el = document.querySelector('input[name="characters"]') as HTMLInputElement;
+									const current = new Set(el.value.split(',').filter(Boolean));
+									if (e.currentTarget.checked) current.add(String(char.id));
+									else current.delete(String(char.id));
+									el.value = Array.from(current).join(',');
+								}} />
+								<span>{char.name}</span>
+								{#if char.ownerName}<span class="chip-owner">({char.ownerName})</span>{/if}
+							</label>
+						{/each}
+					</div>
+					<input type="hidden" name="characters" value={data.imageCharacterIds.join(',')} />
+				</div>
+			{/if}
+
+			<!-- The label wraps only its own text; the "From lookup" pill sits after it
+			     as a sibling and is referenced with aria-describedby, so the input's
+			     accessible name stays the field name (SONA-220). -->
+			<div class="field">
+				<div class="label-row">
+					<label class="field-label" for="commissionedAt">{m.admin_field_commissioned_date()}</label>
+					{#if dateTagged}
+						<span class="lookup-tag" id="commissioned-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+					{/if}
+				</div>
+				<input
+					id="commissionedAt"
+					type="date"
+					class="input"
+					name="commissionedAt"
+					bind:value={commissionedAt}
+					oninput={() => {
+						// The panel's status line reads the filled record through this tag: a
+						// field typed over stops being the lookup's, and the sentence then
+						// neither claims it nor says it was left alone.
+						dateTagged = false;
+					}}
+					aria-describedby={dateTagged ? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'}
+				/>
+				<!-- The hint was inside the wrapping label before this restructure, which
+				     put it in the input's accessible name. Out here it is a plain sibling,
+				     so it is referenced instead — otherwise a screen reader never gets it
+				     (1.3.1). The lookup tag joins it when there is one. -->
+				<small class="hint" id="commissioned-hint">{m.admin_hint_commissioned_date()}</small>
+			</div>
+
+			<!-- One checkbox, two ratings beside it: FuzzySearch's from the artist
+			     lookup (SONA-156) and entail.dev's from the tag suggestion
+			     (SONA-220). Neither ever ticks it; both sit outside the label so a
+			     screen reader doesn't read a classifier's guess as part of the
+			     checkbox's own name. -->
+			<div class="nsfw-row tag-check-row">
+				<label class="checkbox-label">
+					<input
+						type="checkbox"
+						name="nsfw"
+						bind:checked={nsfw}
+						bind:this={nsfwInput}
+						aria-describedby={nsfwDescribedBy}
+					/>
+					<span>{m.admin_field_mark_nsfw()}</span>
+				</label>
+				<!-- Never checked by a lookup: the rating is what the sites said, and the
+				     call about this gallery stays the operator's. -->
+				{#if ratingTagText}
+					<span class="rating-tag" id="lookup-rating-tag">{ratingTagText}</span>
+				{/if}
+				<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw checkbox={nsfwInput} />
+			</div>
+
+			<label class="checkbox-label">
+				<input type="checkbox" name="published" bind:checked={isPrivate} />
+				<span>{m.admin_field_private()} <span class="checkbox-helper">{m.admin_field_private_hint()}</span></span>
+			</label>
+
+			<label class="checkbox-label">
+				<input type="checkbox" name="featured" checked={data.image.featured} />
+				<span>{m.admin_field_featured()}</span>
+			</label>
+
+			<label>
+				<span>{m.admin_field_featured_order()}</span>
+				<input type="number" class="input" name="featuredOrder" value={data.image.featuredOrder ?? ''} />
+				<small class="hint">{m.admin_field_featured_order_hint()}</small>
+			</label>
+
+			<div class="field">
+				<div class="label-row">
+					<label class="field-label" for="sourcePostUrl">{m.admin_field_source_url()}</label>
+					{#if sourceTagged}
+						<span class="lookup-tag" id="source-lookup-tag">{m.admin_lookup_from_lookup()}</span>
+					{/if}
+				</div>
+				<input
+					id="sourcePostUrl"
+					type="url"
+					class="input"
+					name="sourcePostUrl"
+					bind:value={sourcePostUrl}
+					oninput={() => {
+						sourceTagged = false;
+					}}
+					aria-describedby={sourceFieldDescribedBy}
+				/>
+			</div>
+
+			<div class="form-actions">
+				<a href="/admin/images" class="btn btn-secondary">{m.admin_cancel()}</a>
+				<button type="submit" class="btn btn-primary" disabled={saving}>
+					{#if saving}<Loader2 size={16} class="spin" /> {m.admin_saving()}{:else}{m.admin_save_changes()}{/if}
+				</button>
+			</div>
+		</form>
+	{/key}
 </div>
 
 <style>
@@ -888,6 +952,10 @@
 		flex-direction: column;
 		gap: 20px;
 		max-width: 600px;
+	}
+
+	.tags-field:has(:global(.tag-tray)) {
+		margin-bottom: 12px;
 	}
 
 	label {

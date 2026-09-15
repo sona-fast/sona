@@ -14,6 +14,10 @@ import { FETCH_TIMEOUT_MS as ACTIVATE_TIMEOUT_MS } from '$lib/server/twitter-ava
 import { FETCH_TIMEOUT_MS as TWEET_TIMEOUT_MS, type TweetMediaOutcome } from '$lib/server/twitter-media';
 import { makeD1 } from '$lib/server/test/d1';
 import { POST, _LOOKUP_DEADLINE_MS } from './+server';
+// The client's own give-up timeout, pinned against this endpoint's deadline
+// below. Imported here rather than beside the rest of the client tests, which
+// would pull this server module (and its bindings) into a client test file.
+import { _REQUEST_TIMEOUT_MS } from '$lib/tag-suggestions';
 
 // Only the outbound calls are stubbed. classifySourceUrl stays real, so the
 // URL recognition the endpoint depends on is exercised rather than mocked.
@@ -176,6 +180,14 @@ describe('POST /api/admin/tag-suggestions', () => {
 			POLL_ATTEMPTS * POLL_TIMEOUT_MS +
 			(POLL_ATTEMPTS - 1) * POLL_PAUSE_MS;
 		expect(_LOOKUP_DEADLINE_MS).toBeGreaterThan(firstAttempt);
+	});
+
+	it('gives the client longer than the deadline, so a slow answer still lands', () => {
+		// The client gives up on a lookup of its own accord. Set at or below the
+		// deadline, it would abort calls the endpoint was about to answer with a
+		// 502 the tray can explain, and the operator would get the generic
+		// "unavailable" instead. The headroom is for the answer's trip back.
+		expect(_REQUEST_TIMEOUT_MS).toBeGreaterThan(_LOOKUP_DEADLINE_MS);
 	});
 
 	it('502s unavailable when the deadline fires mid-lookup', async () => {

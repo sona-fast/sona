@@ -47,11 +47,33 @@ describe('classifySourceUrl', () => {
 		expect(classifySourceUrl('https://bsky.app/profile/foo%252ebar/post/3abc')).toBeNull();
 	});
 
+	it('rejects a bluesky actor made only of dots', () => {
+		// The URL parser collapses "." and ".." out of the path before the
+		// classifier sees them, so those two fail on shape; "..." survives parsing,
+		// passes the character class, and names no handle or DID.
+		expect(classifySourceUrl('https://bsky.app/profile/./post/3abc')).toBeNull();
+		expect(classifySourceUrl('https://bsky.app/profile/%2e%2e/post/3abc')).toBeNull();
+		expect(classifySourceUrl('https://bsky.app/profile/.../post/3abc')).toBeNull();
+		expect(classifySourceUrl('https://bsky.app/profile/%2E%2E%2E/post/3abc')).toBeNull();
+		// A dot inside a handle is still fine.
+		expect(classifySourceUrl('https://bsky.app/profile/a.b/post/3abc')).not.toBeNull();
+	});
+
 	it('accepts the x/twitter status shapes and canonicalises them', () => {
 		const canonical = { kind: 'x', url: 'https://x.com/examplefox/status/1234567890', id: '1234567890' };
 		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890')).toEqual(canonical);
 		expect(classifySourceUrl('https://twitter.com/examplefox/status/1234567890?s=21')).toEqual(canonical);
 		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/photo/1')).toEqual(canonical);
+		// Video and GIF posts get a /video/<n> permalink for the same status.
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/video/1')).toEqual(canonical);
+		// Only a media permalink may follow the id: another page under the same
+		// status is not the post, and reading it as one looks up something the
+		// operator never linked.
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/not-a-photo')).toBeNull();
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/photo')).toBeNull();
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/photo/x')).toBeNull();
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/video/x')).toBeNull();
+		expect(classifySourceUrl('https://x.com/examplefox/status/1234567890/photo/1/extra')).toBeNull();
 		expect(classifySourceUrl('https://mobile.twitter.com/examplefox/statuses/1234567890')).toEqual(
 			canonical
 		);

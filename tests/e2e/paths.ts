@@ -68,3 +68,21 @@ export const E2E_UPLOADTHING_MOCK = path.join(here, 'uploadthing-mock.mjs');
 // server. Sharing a server would race under fullyParallel.
 export const E2E_PERSIST_TO_UPLOAD = path.join(persistRoot, '.wrangler-e2e-upload');
 export const E2E_PLATFORM_PERSIST_UPLOAD = path.join(E2E_PERSIST_TO_UPLOAD, 'v3');
+
+// The tag-suggestions spec reads the two admin forms with the lookup endpoint
+// intercepted, so it writes no rows — but it runs one worker at a time (a
+// client-side navigation landing after a fill detaches the form under the
+// assertion), and on the shared server that serial run sits behind the parallel
+// chromium project's load, where its admin logins time out. So it gets its OWN
+// throwaway DB + dev server. The shared wrangler config is enough: it needs no
+// extra token or preload. See playwright.config.ts.
+export const E2E_PERSIST_TO_TAGS = path.join(persistRoot, '.wrangler-e2e-tag-suggestions');
+export const E2E_PLATFORM_PERSIST_TAGS = path.join(E2E_PERSIST_TO_TAGS, 'v3');
+
+// The suggest-tags spec drives the backfill list, whose Save WRITES tag rows.
+// It used to ride the upload server, whose DB the upload spec counts on, and
+// the two flaked each other in combined runs. So it gets its OWN throwaway DB
+// + dev server, serial like tag-suggestions and on the shared wrangler config:
+// the lookup endpoint is intercepted, so no token or preload is needed.
+export const E2E_PERSIST_TO_SUGGEST = path.join(persistRoot, '.wrangler-e2e-suggest-tags');
+export const E2E_PLATFORM_PERSIST_SUGGEST = path.join(E2E_PERSIST_TO_SUGGEST, 'v3');

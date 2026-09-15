@@ -1,10 +1,17 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
-import { artists, collections, tags, images, imageTags, characters, imageCharacters } from '$lib/server/db/schema';
+import { artists, collections, tags, images, characters, imageCharacters } from '$lib/server/db/schema';
 import { eq, isNull, count as countFn } from 'drizzle-orm';
 import { slugify } from '$lib/server/slugify';
-import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
+import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
 import { variantAssignmentError, MAX_VARIANT_SET } from '$lib/server/variants';
+import {
+	MAX_IMAGE_TAGS,
+	MAX_TAGS_INPUT_LENGTH,
+	readTagInput,
+	replaceImageTags
+} from '$lib/server/image-tags';
+import * as m from '$lib/paraglide/messages';
 import { resolveFuzzysearchKey } from '$lib/server/fuzzysearch';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -58,16 +65,12 @@ async function attachTagsAndCharacters(
 	tagNames: string,
 	characterIds: string
 ) {
-	if (tagNames) {
-		const tagList = tagNames.split(',').map(sanitizeTag).filter(Boolean);
-		for (const tagName of tagList) {
-			let tag = await db.select().from(tags).where(eq(tags.name, tagName)).get();
-			if (!tag) {
-				tag = await db.insert(tags).values({ name: tagName }).returning().get();
-			}
-			await db.insert(imageTags).values({ imageId, tagId: tag.id });
-		}
-	}
+	// The same write the edit form and the Suggest tags page use, so all three
+	// paths dedupe and sanitize identically. An upload with an empty Tags field
+	// skips the call: the image was just inserted, so the delete that write opens
+	// with would run against a fresh row, once per tile in a variant set. The
+	// edit form still calls it with an empty field, where the delete is the point.
+	if (tagNames) await replaceImageTags(db, imageId, tagNames);
 
 	if (characterIds) {
 		const ids = characterIds.split(',').map((id) => Number(id.trim())).filter(Boolean);
@@ -102,7 +105,11 @@ export const actions = {
 		const title = sanitizeText(data.get('title') as string, 200);
 		const artistId = data.get('artistId') as string;
 		const collectionId = data.get('collectionId') as string;
-		const tagNames = sanitizeText(data.get('tags') as string, 500);
+		// Read raw and checked below before anything shortens it: the 500-character
+		// cut this field used to take ran BEFORE the count guard, so a hundred
+		// ordinary names lost their tail mid-word and the fragment uploaded as a
+		// success.
+		const tagsRaw = String(data.get('tags') ?? '');
 		const characterIds = (data.get('characters') as string)?.trim();
 		const nsfw = data.get('nsfw') === 'on';
 		const published = data.get('published') !== 'on';
@@ -118,6 +125,17 @@ export const actions = {
 		if (count < 1 || count > MAX_VARIANT_SET) {
 			return fail(400, { error: `A variant set is 1–${MAX_VARIANT_SET} files` });
 		}
+
+		// Refused, not truncated, and before anything is inserted: an upload that
+		// silently dropped tags would report success without them.
+		const tagInput = readTagInput(tagsRaw);
+		if (tagInput.problem === 'too_long') {
+			return fail(400, { error: m.admin_field_tags_too_long({ max: MAX_TAGS_INPUT_LENGTH }) });
+		}
+		if (tagInput.problem === 'too_many') {
+			return fail(400, { error: m.admin_field_tags_too_many({ max: MAX_IMAGE_TAGS }) });
+		}
+		const tagNames = tagInput.value;
 
 		type Tile = {
 			imageUrl: string;

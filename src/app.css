@@ -379,6 +379,396 @@ select.input {
 	}
 }
 
+/* ── SONA-220: tag suggestion tray ───────────────────────────────────────────
+   Shared by the "Suggest tags" control on /admin/upload and the edit form and
+   by the rows on /admin/images/suggest-tags, so the tray, the chips and the
+   status lines cannot drift apart between the three. Prefixed `tag-` because
+   both forms already scope a `.chip` of their own to the character pickers. */
+.tag-tray {
+	margin-top: 2px;
+	padding: 14px 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-s);
+}
+
+.tag-eyebrow {
+	margin: 0;
+	font-family: var(--font-primary);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--muted-foreground);
+}
+
+.tag-eyebrow.warn {
+	color: var(--status-warn);
+}
+
+.tag-panel-sub,
+.tag-panel-body {
+	margin: 0;
+	font-size: 13px;
+}
+
+.tag-panel-sub {
+	color: var(--muted-foreground);
+}
+
+.tag-chiprow {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+/* One capsule, two uses: a chip is a toggle in the suggestion row, a pill opens
+   a lookup. The shared shape lives here; each keeps only what differs. */
+.tag-chip,
+.tag-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 36px;
+	padding: 6px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-pill);
+	background: transparent;
+	color: var(--foreground);
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.tag-chip {
+	transition: border-color 0.12s, background-color 0.12s;
+}
+
+/* A kept tag reads as a tint and its check, not an outline: the accent border
+   belongs to hover and focus, and nine outlined chips would outshout the one
+   primary button in the tray. The check is the non-colour cue for the state. */
+.tag-chip[aria-pressed='true'] {
+	background: color-mix(in srgb, var(--primary) 14%, transparent);
+	border-color: var(--border);
+}
+
+.tag-chip[aria-pressed='true'] svg {
+	color: var(--primary);
+}
+
+/* --primary's check icon is 2.16:1 on the tint in the light themes, under the
+   3:1 bar for non-text. --link is the darkened orange they already use where
+   --primary fails. */
+[data-theme='light'] .tag-chip[aria-pressed='true'] svg {
+	color: var(--link);
+}
+
+/* Left out, not deleted — the dashed outline and the plus say it can come back.
+   No strikethrough: the tag is not wrong, it is just not wanted. */
+.tag-chip[aria-pressed='false'] {
+	border-style: dashed;
+	color: var(--muted-foreground);
+}
+
+.tag-chip[aria-pressed='false']:hover {
+	color: var(--foreground);
+}
+
+/* After the pressed rules, which carry the same specificity: a kept chip has to
+   show the hover border too. */
+.tag-chip:hover {
+	border-color: var(--primary);
+}
+
+/* The saved tags on a backfill row: the same pill, with nothing to click. */
+.tag-chip-static {
+	cursor: default;
+	border-style: solid;
+}
+
+.tag-chip-static:hover {
+	border-color: var(--border);
+}
+
+.tag-skel-chip {
+	width: 88px;
+	height: 36px;
+	border-radius: var(--radius-pill);
+	background: var(--secondary);
+}
+
+.tag-skel-chip:nth-child(2) {
+	width: 64px;
+}
+
+.tag-skel-chip:nth-child(4) {
+	width: 110px;
+}
+
+.tag-status-line {
+	margin: 0;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+	color: var(--foreground);
+}
+
+.tag-status-line svg {
+	color: var(--status-ok);
+	flex: none;
+}
+
+/* Plain text, not a capsule: a capsule beside the "Mark it NSFW" button would
+   read as a second button. */
+.tag-rating-note {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--muted-foreground);
+}
+
+.tag-rating-note.warn {
+	color: var(--status-warn);
+}
+
+.tag-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+/* The "Mark as NSFW" row once a rating can sit beside it. The rating is a
+   sibling of the label, not inside it: a screen reader reading the label would
+   otherwise say the classifier's guess as part of the checkbox's own name. */
+.tag-check-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+	/* Wrapped onto its own line, the note lines up under the label text rather
+	   than under the checkbox. */
+	.tag-check-row .tag-rating-note,
+	.tag-check-row .btn {
+		margin-left: 24px;
+	}
+}
+
+/* The pill that opens a lookup — the outline capsule the "Add New Artist"
+   button already established on these forms. Its shape is the chip's, above. */
+.tag-pill {
+	font-family: var(--font-primary);
+	white-space: nowrap;
+	transition: border-color 0.15s, color 0.15s;
+}
+
+/* The tray's Sign in link wears the pill. An anchor brings an underline the
+   buttons beside it do not have. */
+a.tag-pill {
+	text-decoration: none;
+}
+
+/* --link, not --primary, for the label: the hovered label is small text, and
+   raw --primary is 2.32:1 on the light background and 4.06:1 on an aurora dark
+   card. --link is the same orange everywhere it passes and the darkened one
+   where it does not. */
+.tag-pill:hover {
+	border-color: var(--primary);
+	color: var(--link);
+}
+
+/* The hover border is the same 2.46:1 on light cards that the selected chip's
+   border was, and a border has a 3:1 bar of its own. The static saved chips
+   are excluded: they have nothing to click, so their border stays put. */
+[data-theme='light'] .tag-chip:not(.tag-chip-static):hover,
+[data-theme='light'] .tag-pill:hover {
+	border-color: var(--link);
+}
+
+/* aria-disabled, not disabled: the pill stays focusable so a keyboard user can
+   reach it and read why it will not run, and it reads out "Suggesting tags…"
+   while a lookup runs. Its label is therefore text that has to be read, and
+   --muted-foreground on --secondary is 3.96:1 in terracotta light — mixing most
+   of the way to --foreground clears 4.5:1 in every theme while still reading as
+   off. The handler refuses the click. */
+.tag-pill[aria-disabled='true'] {
+	background: var(--secondary);
+	color: color-mix(in srgb, var(--foreground) 75%, var(--secondary));
+	cursor: default;
+}
+
+.tag-pill[aria-disabled='true']:hover {
+	border-color: var(--border);
+	color: color-mix(in srgb, var(--foreground) 75%, var(--secondary));
+}
+
+/* The saved and refused rows offer one action beside a row of static saved-tag
+   chips wearing the same capsule. The chips' resting --border is 1.3-1.8:1 on a
+   card, so a shared border makes the action read as one more tag: this one takes
+   a border mixed most of the way to --foreground, which clears the 3:1 bar for a
+   control boundary on every theme's card (worst 3.79:1 on terracotta light). */
+.tag-pill-action {
+	border-color: color-mix(in srgb, var(--foreground) 55%, var(--card));
+}
+
+.tag-btn-text {
+	padding: 8px 10px;
+	min-height: 36px;
+	/* Transparent rather than none: the refused state below draws a real border,
+	   and a border appearing from nothing would widen the button by 2px as a save
+	   starts, nudging the row it sits in. */
+	border: 1px solid transparent;
+	/* The capsule the refused border draws, matching Save and the pill it sits
+	   beside. Invisible at rest, where the border is transparent. */
+	border-radius: var(--radius-pill);
+	background: none;
+	color: var(--muted-foreground);
+	font-family: var(--font-primary);
+	font-size: 13px;
+	cursor: pointer;
+	/* "Edit image" is an anchor wearing this class; without this it underlines
+	   and reads as a different kind of control from Dismiss beside it. */
+	text-decoration: none;
+}
+
+.tag-btn-text:hover {
+	color: var(--foreground);
+}
+
+/* Refused while a save runs. A cursor and a hover that no longer brightens say
+   nothing on a touch screen, where there is neither — so it takes the same
+   inert treatment as the Save button and the row pill beside it, and the three
+   refused controls read as one state. The label still has to be read
+   (aria-disabled keeps it in the tab order), and the same mix that carries the
+   other two clears 4.5:1 on --secondary in every theme. */
+.tag-btn-text[aria-disabled='true'],
+.tag-btn-text[aria-disabled='true']:hover {
+	background: var(--secondary);
+	color: color-mix(in srgb, var(--foreground) 75%, var(--secondary));
+	border: 1px solid var(--border);
+	cursor: default;
+}
+
+/* Alone in the actions row it has no primary button to sit beside, so drop the
+   padding that would push it off the tray's content edge. */
+.tag-btn-text-flush {
+	padding-left: 0;
+}
+
+.tag-btn-sm {
+	height: 36px;
+	padding: 8px 14px;
+}
+
+/* Save with nothing picked, or with its own save already running. At the full
+   --primary fill it is the loudest control on the row and the one that does
+   nothing, so it takes the aria-disabled pill's inert treatment instead — same
+   label mix, which clears 4.5:1 on --secondary in every theme. The hover rule
+   holds those values: .btn-primary:hover would otherwise lift the fill. */
+.tag-btn-sm[aria-disabled='true'],
+.tag-btn-sm[aria-disabled='true']:hover {
+	background-color: var(--secondary);
+	color: color-mix(in srgb, var(--foreground) 75%, var(--secondary));
+	border: 1px solid var(--border);
+	cursor: default;
+}
+
+/* Keyboard-focus ring, matching .btn:focus-visible: --ring, not --primary, for
+   the 3:1 non-text reason (SONA-171). */
+.tag-pill:focus-visible,
+.tag-chip:focus-visible,
+.tag-btn-text:focus-visible,
+/* The saved line and the conflict sentence are focused programmatically when
+   the button that was clicked disappears with the tray, so they need a ring
+   too — they are where the keyboard user resumes. So is a backfill row's
+   heading, which Load more focuses once the longer list has rendered. */
+.tag-status-line:focus-visible,
+.rowtitle:focus-visible,
+.tag-panel-body:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+	/* Too narrow for a row: the tray's actions stack, and the primary button
+	   spans the tray. */
+	/* Centred, so a resting Dismiss sits under the middle of the primary that
+	   spans the tray above it rather than flush at its left edge. */
+	.tag-actions {
+		flex-direction: column;
+		align-items: center;
+	}
+
+	.tag-actions .btn {
+		width: 100%;
+	}
+
+	/* Stacked and centred there is no content edge for a lone Dismiss to sit
+	   flush against, and the missing left pad pulled its label about 5px right
+	   of centre. It takes the resting padding back on both sides here: 10px is
+	   .tag-btn-text's own horizontal padding, and a test pins the two together. */
+	.tag-actions .tag-btn-text-flush {
+		padding-left: 10px;
+	}
+
+	/* Refused, stacked. On one line the three refused controls share the inert
+	   fill; stacked under a Save that spans the tray, that same fill would draw a
+	   67px pill orphaned at the left edge. So it spans the tray too, the width
+	   Save already takes here, and the two read as one inert row of controls.
+	   Touch is the reason the fill has to stay: there is no cursor and no hover
+	   on a phone, so the fill, the outline and the darker label are the only cues
+	   that the button is refusing. The flush rule above passes this variant over,
+	   so it keeps its resting padding: full width centres the label, and a
+	   missing left pad would pull it off centre. */
+	.tag-actions .tag-btn-text[aria-disabled='true'],
+	.tag-actions .tag-btn-text[aria-disabled='true']:hover {
+		width: 100%;
+	}
+
+	/* Try again, Sign in and the backfill row's Edit image are the tray's action
+	   wherever there is no primary button — none of them ever appear together —
+	   so they take the width the primary takes here, the same width the field's
+	   own Suggest tags pill already spans. A pill left at its intrinsic width
+	   reads as an aside beside a full-width Dismiss. The pill's label is centred
+	   by the box, not by padding, so nothing else has to change. Together with
+	   the two rules above, that is the whole of the stacked row: the tray's
+	   action pill spans the tray, so does a refused Dismiss beside it, and a
+	   resting Dismiss keeps its natural width, centred under it. */
+	.tag-actions .tag-pill {
+		width: 100%;
+		justify-content: center;
+	}
+}
+
+/* The loader turns while a lookup or a save runs; a spinner that never stops
+   is exactly the motion prefers-reduced-motion is asking about, so it holds
+   still. Shared by the forms' pill and the backfill row's Save button. */
+.tag-spin {
+	animation: tag-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.tag-spin {
+		animation: none;
+	}
+}
+
+@keyframes tag-spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
 /* ── SONA-81: forced-colors: active (Windows High Contrast) ───────────────────
    In forced-colors, custom colours are replaced by the user's system palette, so
    colour-only cues vanish. Re-assert shape with system-colour borders and a

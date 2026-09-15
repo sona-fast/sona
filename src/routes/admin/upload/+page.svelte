@@ -3,6 +3,8 @@
 	import { tick } from 'svelte';
 	import { CloudUpload, Check, FileBox, Loader2, Plus, Search, X } from 'lucide-svelte';
 	import NewArtistDialog from '$lib/components/NewArtistDialog.svelte';
+	import TagSuggestions from '$lib/components/TagSuggestions.svelte';
+	import TagRatingNote from '$lib/components/TagRatingNote.svelte';
 	import ArtistLookupPanel from '$lib/components/ArtistLookupPanel.svelte';
 	import LiveAnnouncer from '$lib/components/LiveAnnouncer.svelte';
 	import { Announcer } from '$lib/live-announcer.svelte';
@@ -32,6 +34,7 @@
 	import { dropFiles, partitionByAccept, swallowStrayFileDrop } from '$lib/drop-files';
 	import { GALLERY_ACCEPT, MAX_BUFFER_BYTES } from '$lib/config';
 	import { toast } from '$lib/toast.svelte';
+	import type { EntailRating } from '$lib/tag-suggestions';
 	import * as m from '$lib/paraglide/messages';
 
 	let { data, form } = $props();
@@ -48,6 +51,20 @@
 	// counter rather than on the text — see `$lib/live-announcer.svelte`.
 	const announcer = new Announcer();
 	let fileInput: HTMLInputElement;
+
+	// The Tags field is bound so the suggestion control can write accepted tags
+	// back into it; it still submits through its own name attribute, unchanged.
+	// The Source Post URL the control reads is the lookup's own binding, declared
+	// with the rest of the shared fields below.
+	let tagsValue = $state('');
+	// Set by the suggestion control while its hint is refusing this URL, so a
+	// screen reader user who tabs to the field finds the refusal on it.
+	let sourceDescribedBy = $state<string | undefined>(undefined);
+	// entail.dev's rating for the last suggestion, shown beside the NSFW box. A
+	// suggestion never checks that box; `nsfw` only moves when the operator does.
+	let suggestedRating = $state<EntailRating | null>(null);
+	let nsfw = $state(false);
+	let nsfwInput = $state<HTMLInputElement | null>(null);
 
 	type Tile = {
 		key: number;
@@ -475,6 +492,12 @@
 	let sourcePostUrl = $state('');
 	let commissionedAt = $state('');
 	let sourceTagged = $state(false);
+	// The source field can carry two descriptions at once: the tag-suggestions
+	// hint that points at it, and the "From lookup" tag (SONA-220 + SONA-156).
+	const sourceFieldDescribedBy = $derived(
+		[sourceDescribedBy, sourceTagged ? 'source-lookup-tag' : undefined].filter(Boolean).join(' ') ||
+			undefined
+	);
 	let dateTagged = $state(false);
 	// What the last shared prefill actually wrote, for the panel's status line.
 	// Never edited afterwards: it is the record of what the lookup did, and a
@@ -528,6 +551,13 @@
 		sharedLookup.kind === 'results' ? strictestRating(sharedLookup.data.matches) : null
 	);
 	const sharedRatingTag = $derived(ratingTag(sharedRating, { parent: tiles.length > 1 }));
+	// Two rating pills can sit beside the one NSFW box, so it points at whichever
+	// of them is on screen (SONA-156 + SONA-220).
+	const nsfwDescribedBy = $derived(
+		[sharedRatingTag ? 'shared-rating-tag' : undefined, suggestedRating ? 'tags-rating' : undefined]
+			.filter(Boolean)
+			.join(' ') || undefined
+	);
 	// Private is the checkbox's inverse ("Private" checked = not published), so
 	// the warn hint and the panel notice both key off it directly.
 	let isPrivate = $state(false);
@@ -1375,24 +1405,29 @@
 		{/if}
 	</fieldset>
 
-	<div class="row">
-		<label class="flex-1">
-			<span>{m.admin_field_collection()}</span>
-			<select class="input" name="collectionId">
-				<option value="">{m.admin_upload_no_collection()}</option>
-				{#each data.collections as collection}
-					<option value={collection.id}>{collection.name}</option>
-				{/each}
-			</select>
-		</label>
-		<label class="flex-1">
-			<span>{m.admin_field_tags()}</span>
-			<input type="text" class="input" placeholder={m.admin_upload_tags_placeholder()} name="tags" />
-			{#if data.tags.length > 0}
-				<small class="hint">{m.admin_upload_existing_tags({ tags: data.tags.map((t) => t.name).join(', ') })}</small>
-			{/if}
-		</label>
-	</div>
+	<label>
+		<span>{m.admin_field_collection()}</span>
+		<select class="input" name="collectionId">
+			<option value="">{m.admin_upload_no_collection()}</option>
+			{#each data.collections as collection}
+				<option value={collection.id}>{collection.name}</option>
+			{/each}
+		</select>
+	</label>
+
+	<!-- Tags takes a full-width row of its own so the "Suggest tags" pill sits
+	     beside the input and the accepted tags are readable without truncation.
+	     The control draws the existing-tags hint under the field, as this form
+	     did before it. -->
+	<TagSuggestions
+		bind:value={tagsValue}
+		bind:rating={suggestedRating}
+		bind:sourceDescribedBy
+		sourceUrl={sourcePostUrl}
+		existingTags={data.tags.map((t) => t.name)}
+		placeholder={m.admin_upload_tags_placeholder()}
+		multiTile={tiles.length > 1}
+	/>
 
 	{#if data.characters.length > 0}
 		<div class="field">
@@ -1447,12 +1482,18 @@
 		<small class="hint" id="commissioned-hint">{m.admin_hint_commissioned_date()}</small>
 	</div>
 
-	<div class="nsfw-row">
+	<!-- One checkbox, two ratings beside it: FuzzySearch's from the artist lookup
+	     (SONA-156) and entail.dev's from the tag suggestion (SONA-220). Neither
+	     ever ticks it; both sit outside the label so a screen reader doesn't read
+	     a classifier's guess as part of the checkbox's own name. -->
+	<div class="nsfw-row tag-check-row">
 		<label class="checkbox-label">
 			<input
 				type="checkbox"
 				name="nsfw"
-				aria-describedby={sharedRatingTag ? 'shared-rating-tag' : undefined}
+				bind:checked={nsfw}
+				bind:this={nsfwInput}
+				aria-describedby={nsfwDescribedBy}
 			/>
 			<span
 				>{m.admin_field_mark_nsfw()}{#if tiles.length > 1}<span class="sr-only"
@@ -1465,6 +1506,7 @@
 		{#if sharedRatingTag}
 			<span class="rating-tag" id="shared-rating-tag">{sharedRatingTag}</span>
 		{/if}
+		<TagRatingNote rating={suggestedRating} id="tags-rating" bind:nsfw checkbox={nsfwInput} />
 	</div>
 
 	<label class="checkbox-label">
@@ -1496,7 +1538,7 @@
 			oninput={() => {
 				sourceTagged = false;
 			}}
-			aria-describedby={sourceTagged ? 'source-lookup-tag' : undefined}
+			aria-describedby={sourceFieldDescribedBy}
 		/>
 	</div>
 
@@ -1896,15 +1938,6 @@
 		color: var(--primary);
 	}
 
-	.row {
-		display: flex;
-		gap: 16px;
-	}
-
-	.flex-1 {
-		flex: 1;
-	}
-
 	.field {
 		display: flex;
 		flex-direction: column;
@@ -2139,10 +2172,6 @@
 
 		.tile-grid {
 			grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-		}
-
-		.row {
-			flex-direction: column;
 		}
 
 		.form-actions {

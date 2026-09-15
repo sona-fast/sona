@@ -5,8 +5,9 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { characters, images, siteSettings } from '$lib/server/db/schema';
+import { characters, imageTags, images, siteSettings, tags } from '$lib/server/db/schema';
 import { REFERENCE_BECOMES_VARIANT_ERROR, VARIANT_BECOMES_REFERENCE_ERROR } from '$lib/server/variants';
+import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH } from '$lib/server/image-tags';
 import { load, actions } from './+page.server';
 
 import { makeD1, withFailingSettingsRead } from '$lib/server/test/d1';
@@ -67,8 +68,33 @@ async function refOf(db: ReturnType<typeof makeDb>['db'], id: number) {
 	return row?.ref ?? null;
 }
 
+async function tagNamesOf(db: ReturnType<typeof makeDb>['db'], imageId: number) {
+	const rows = await db
+		.select({ name: tags.name })
+		.from(imageTags)
+		.innerJoin(tags, eq(imageTags.tagId, tags.id))
+		.where(eq(imageTags.imageId, imageId));
+	return rows.map((r) => r.name).sort();
+}
+
 async function seedImage(db: ReturnType<typeof makeDb>['db'], id: number, published = true) {
 	await db.insert(images).values({ id, title: 'Art', slug: `art-${id}`, imageUrl: `https://cdn.example.com/${id}.png`, artistId: 1, published });
+}
+
+function shortTags(n: number): string[] {
+	const letters = 'abcdefghijklmnopqrstuvwxyz';
+	const names: string[] = [];
+	for (const a of letters) {
+		names.push(a);
+		if (names.length === n) return names;
+	}
+	for (const a of letters) {
+		for (const b of letters) {
+			names.push(a + b);
+			if (names.length === n) return names;
+		}
+	}
+	return names;
 }
 
 describe('admin image edit — reference action', () => {
@@ -156,6 +182,110 @@ describe('admin image edit — save action', () => {
 		expect((result as { status: number }).status).toBe(302);
 		const row = await db.select({ title: images.title }).from(images).where(eq(images.id, 5)).get();
 		expect(row?.title).toBe('Renamed');
+	});
+
+	// The cap in replaceImageTags is a net, not the answer: a save that quietly
+	// kept the first hundred would report success and drop the rest silently.
+	it('refuses a tag list past the cap and writes nothing', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		const tooMany = shortTags(MAX_IMAGE_TAGS + 1).join(', ');
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Renamed', artistId: '1', tags: tooMany }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe('Use up to 100 tags.');
+		// Neither the tags nor the rest of the form landed.
+		expect(await tagNamesOf(db, 5)).toEqual([]);
+		expect((await db.select({ title: images.title }).from(images).where(eq(images.id, 5)).get())?.title).toBe('Art');
+	});
+
+	// The field used to be cut to 500 characters BEFORE the count guard ran, so a
+	// hundred and one ordinary names arrived as sixty-odd with the last one
+	// truncated mid-word, and saved as a success.
+	it('refuses ordinary-length names past the cap instead of truncating them', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		const tooMany = Array.from({ length: MAX_IMAGE_TAGS + 1 }, (_, i) => `cap-test-tag-${i}`).join(', ');
+		expect(tooMany.length).toBeGreaterThan(500);
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Renamed', artistId: '1', tags: tooMany }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe('Use up to 100 tags.');
+		// Nothing was written, and no fragment of a cut-off name was minted.
+		expect(await tagNamesOf(db, 5)).toEqual([]);
+		expect(await db.select({ id: tags.id }).from(tags).get()).toBeUndefined();
+		expect((await db.select({ title: images.title }).from(images).where(eq(images.id, 5)).get())?.title).toBe('Art');
+	});
+
+	it('refuses a tags field longer than the input ceiling', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		const huge = 'a'.repeat(MAX_TAGS_INPUT_LENGTH + 1);
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Renamed', artistId: '1', tags: huge }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(400);
+		expect((result as { data: { error: string } }).data.error).toBe(
+			`Tags are too long. Use up to ${MAX_TAGS_INPUT_LENGTH} characters.`
+		);
+		expect(await tagNamesOf(db, 5)).toEqual([]);
+	});
+
+	it('saves a list exactly at the cap', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+		// Repeats and blanks do not count against it: the guard counts what would
+		// land, the same way the write does.
+		const atCap = ['a', 'A', '', ...shortTags(MAX_IMAGE_TAGS)].join(', ');
+
+		const result = await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', tags: atCap }), platform } as never)
+		);
+		expect((result as { status: number }).status).toBe(302);
+		expect(await tagNamesOf(db, 5)).toHaveLength(MAX_IMAGE_TAGS);
+	});
+
+	// SONA-220 moved this write into replaceImageTags, the path the Suggest tags
+	// page also uses. It deletes before it inserts, so a save that dropped the
+	// delete would leave the old rows behind and the field would stop matching
+	// what the page shows.
+	it('replaces the image tags with the ones the form posted', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', tags: 'fox, Digital Media' }), platform } as never)
+		);
+		expect(await tagNamesOf(db, 5)).toEqual(['digital-media', 'fox']);
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', tags: 'beach' }), platform } as never)
+		);
+		expect(await tagNamesOf(db, 5)).toEqual(['beach']);
+	});
+
+	// Clearing the box is the only way to take every tag off an image, so an
+	// empty Tags field has to reach the write path rather than be read as
+	// "nothing to do". The upload action skips the write for a fresh image on
+	// exactly that reading, which is safe only while this stays true here.
+	it('clears the image tags when the Tags field is posted empty', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 5);
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', tags: 'fox, beach' }), platform } as never)
+		);
+		expect(await tagNamesOf(db, 5)).toEqual(['beach', 'fox']);
+
+		await callAction(() =>
+			actions.save({ params: { id: '5' }, request: form({ title: 'Art', artistId: '1', tags: '' }), platform } as never)
+		);
+		expect(await tagNamesOf(db, 5)).toEqual([]);
 	});
 
 	// SONA-18: the other ordering of the same conflict — the guard in the

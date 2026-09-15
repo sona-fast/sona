@@ -487,7 +487,12 @@ describe('the "From lookup" tag', () => {
 			expect(source).toMatch(
 				/aria-describedby=\{dateTagged \? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'\}/
 			);
-			expect(source).toMatch(/aria-describedby=\{sourceTagged \? 'source-lookup-tag' : undefined\}/);
+			// The source field can also carry the tag-suggestion hint (SONA-220), so
+			// the field points at a derived that joins whichever ids are on screen.
+			expect(source).toMatch(/aria-describedby=\{sourceFieldDescribedBy\}/);
+			expect(source).toMatch(
+				/const sourceFieldDescribedBy = \$derived\(\s*\[sourceDescribedBy, sourceTagged \? 'source-lookup-tag' : undefined\]/
+			);
 			// Editing a tagged field drops its tag — however the handler is spelled.
 			expect(source).toMatch(/oninput=\{[^}]*dateTagged = false/);
 			expect(source).toMatch(/oninput=\{[^}]*sourceTagged = false/);
@@ -1166,10 +1171,19 @@ describe('the rating tag beside NSFW', () => {
 		// The pill is a SIBLING of the label, not inside it (SONA-220). Any
 		// comment between the two is prose, not part of the contract.
 		expect(EDIT).toMatch(
-			/<div class="nsfw-row">[\s\S]*?<\/label>[\s\S]*?<span class="rating-tag" id="lookup-rating-tag">/
+			/<div class="nsfw-row tag-check-row">[\s\S]*?<\/label>[\s\S]*?<span class="rating-tag" id="lookup-rating-tag">/
 		);
-		expect(EDIT).toMatch(/aria-describedby=\{ratingTagText \? 'lookup-rating-tag' : undefined\}/);
-		expect(UPLOAD).toMatch(/aria-describedby=\{sharedRatingTag \? 'shared-rating-tag' : undefined\}/);
+		// entail.dev's rating shares the row since SONA-220, so the checkbox points
+		// at a derived that joins whichever of the two pills is on screen.
+		for (const source of [UPLOAD, EDIT]) {
+			expect(source).toMatch(/name="nsfw"[\s\S]{0,120}?aria-describedby=\{nsfwDescribedBy\}/);
+		}
+		expect(EDIT).toMatch(
+			/const nsfwDescribedBy = \$derived\(\s*\[ratingTagText \? 'lookup-rating-tag' : undefined/
+		);
+		expect(UPLOAD).toMatch(
+			/const nsfwDescribedBy = \$derived\(\s*\[sharedRatingTag \? 'shared-rating-tag' : undefined/
+		);
 		expect(UPLOAD).toMatch(/aria-describedby=\{tileTag \? `tile-rating-\$\{tile\.key\}` : undefined\}/);
 		// No page ever writes to the nsfw checkbox from a lookup.
 		for (const source of [UPLOAD, EDIT]) {

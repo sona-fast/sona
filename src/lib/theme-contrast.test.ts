@@ -680,6 +680,25 @@ describe('muted-foreground non-text contrast, every theme × surface × mode (WC
 	}
 });
 
+// The refused-link hint under the Tags field is coloured --status-warn, the same
+// token the suggestion tray's eyebrow uses (SONA-220). It is small text on the
+// admin form's card, so it is held to 4.5:1 there. --status-warn is declared once
+// per MODE (:root for dark, [data-theme='light'] for light) and inherited by the
+// alternate themes, so the colour comes from the mode block and the surface from
+// the theme's own block. A failure here is a finding to report, not to silence.
+describe('warn text WCAG AA contrast on cards, every theme × mode (SONA-220)', () => {
+	const warnFor = (sel: string) =>
+		blockToken(sel.includes("[data-theme='light']") ? "[data-theme='light']" : ':root', 'status-warn');
+
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			it(`${name}: text colored --status-warn meets 4.5:1 on the ${surface} surface`, () => {
+				expect(contrast(warnFor(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+			});
+		}
+	}
+});
+
 // The .btn hover shifts only the fill (color-mix), never the label opacity: a
 // blanket `opacity` hover composited the label over the page and dropped its
 // contrast below AA in several themes (#103). Here we parse the actual color-mix
@@ -1290,6 +1309,213 @@ describe('no accent-color override on form controls (SONA-172)', () => {
 			expect(row).toContain(`id="${id}-desc"`);
 		}
 	});
+});
+
+// SONA-220: the tag chip and the suggest pill both hover. The pill's hovered
+// LABEL is small text (4.5:1) and both hovered BORDERS are non-text boundaries
+// (3:1), and raw --primary clears neither on a light card (2.32:1 as a label,
+// 2.46:1 as a border) nor, as a label, on an aurora dark one (4.06:1). Both
+// resolve through --link, the token that already exists for exactly this: it
+// tracks --primary where it passes and darkens where it does not.
+describe('SONA-220 tag chip and pill hover contrast, every theme × surface × mode', () => {
+	// The --link the block actually computes (SONA-209): every theme × mode
+	// declares the token, either as a hex of its own or as an alias onto its
+	// --primary, and the cascade resolves both — which is what the old read of
+	// the app.css palette block plus a --primary fallback was approximating.
+	function linkColor(sel: string): string {
+		return blockToken(sel, 'link');
+	}
+
+	it('colors the hovered pill label with var(--link)', () => {
+		expect(blockBody('.tag-pill:hover')).toMatch(/color:\s*var\(--link\)\s*;/);
+	});
+
+	it('darkens the hovered chip and pill border to var(--link) in the light themes', () => {
+		const rule = css.match(
+			/^\[data-theme='light'\] \.tag-chip:not\(\.tag-chip-static\):hover,\n\[data-theme='light'\] \.tag-pill:hover\s*\{([^}]*)\}/m
+		)?.[1];
+		if (!rule) throw new Error('the light-theme tag hover border rule is missing from app.css');
+		expect(rule).toMatch(/border-color:\s*var\(--link\)\s*;/);
+	});
+
+	// The disabled pill keeps its place in the tab order and reads out
+	// "Suggesting tags…" while a lookup runs, so its label is text under the
+	// 4.5:1 bar. It is color-mix(in srgb, var(--foreground) N%, var(--secondary))
+	// over its own --secondary fill; parse N rather than pinning it.
+	const disabledMix = (() => {
+		const rule = blockBody(".tag-pill[aria-disabled='true']");
+		const mix = rule.match(
+			/color:\s*color-mix\(in srgb,\s*var\(--foreground\)\s*(\d+)%,\s*var\(--secondary\)\)/
+		);
+		if (!mix) throw new Error('the disabled pill label is no longer a foreground/secondary mix');
+		return Number(mix[1]);
+	})();
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: the disabled pill label meets 4.5:1 on its own fill`, () => {
+			const fill = blockToken(sel, 'secondary');
+			const label = mix2(blockToken(sel, 'foreground'), disabledMix, fill);
+			expect(contrast(label, fill)).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+
+	// The backfill row's Save takes the same treatment when it refuses a click —
+	// same mix on the same fill — so the loop above covers it too. Pinned here so
+	// the two cannot drift into separate pairings unnoticed.
+	it('the refused Save button reuses the disabled pill label mix on the same fill', () => {
+		const rule = css.match(
+			/^\.tag-btn-sm\[aria-disabled='true'\],\n\.tag-btn-sm\[aria-disabled='true'\]:hover\s*\{([^}]*)\}/m
+		)?.[1];
+		if (!rule) throw new Error('the refused Save button rule is missing from app.css');
+		expect(rule).toMatch(/background-color:\s*var\(--secondary\)\s*;/);
+		expect(rule).toMatch(
+			new RegExp(
+				`color:\\s*color-mix\\(in srgb,\\s*var\\(--foreground\\)\\s*${disabledMix}%,\\s*var\\(--secondary\\)\\)`
+			)
+		);
+	});
+
+	// And so does the row's Dismiss. A cursor and a hover that stops brightening
+	// say nothing on a touch screen, so the three refused controls carry the same
+	// fill and the same label mix — which puts Dismiss's label under the same
+	// 4.5:1 bar the loop above measures.
+	it('the refused Dismiss button reuses the disabled pill label mix on the same fill', () => {
+		const rule = css.match(
+			/^\.tag-btn-text\[aria-disabled='true'\],\n\.tag-btn-text\[aria-disabled='true'\]:hover\s*\{([^}]*)\}/m
+		)?.[1];
+		if (!rule) throw new Error('the refused Dismiss button rule is missing from app.css');
+		expect(rule).toMatch(/background:\s*var\(--secondary\)\s*;/);
+		expect(rule).toMatch(
+			new RegExp(
+				`color:\\s*color-mix\\(in srgb,\\s*var\\(--foreground\\)\\s*${disabledMix}%,\\s*var\\(--secondary\\)\\)`
+			)
+		);
+	});
+
+	// Stacked under a full-width Save, that shared fill would be a short pill
+	// orphaned at the left edge, so the phone breakpoint widens it to the tray
+	// instead of dropping it. Dropping it is what this test is here to stop: a
+	// phone has no cursor and no hover, so the fill, the outline and the label
+	// mix are the whole of the refused cue. The mix rides on --secondary, which
+	// the disabled-pill loop above already floors at 4.5:1 in every theme.
+	it('widens the refused Dismiss to the tray on a phone and keeps the shared fill', () => {
+		const rule = css.match(
+			/\.tag-actions \.tag-btn-text\[aria-disabled='true'\],\n\t\.tag-actions \.tag-btn-text\[aria-disabled='true'\]:hover\s*\{([^}]*)\}/
+		)?.[1];
+		if (!rule) throw new Error('the phone-width refused Dismiss rule is missing from app.css');
+		expect(rule).toMatch(/width:\s*100%\s*;/);
+		// Full width centres the label, which takes the resting padding on both
+		// sides. A resting Dismiss keeps that padding too and is centred under the
+		// primary by the stacked row itself, so no rule zeroes a pad on either.
+		expect(css).toMatch(
+			/@media \(max-width: 640px\) \{[^}]*\.tag-actions\s*\{\s*flex-direction:\s*column;\s*align-items:\s*center;/
+		);
+		expect(css).not.toMatch(/\.tag-actions \.tag-btn-text:not\(\[aria-disabled='true'\]\)/);
+		expect(rule).not.toMatch(/padding/);
+		// And nothing here may undo the inert treatment the base rule sets.
+		expect(rule).not.toMatch(/background/);
+		expect(rule).not.toMatch(/border/);
+		expect(rule).not.toMatch(/color:/);
+	});
+
+	// A lone Dismiss drops its left pad on a wide screen to sit on the tray's
+	// content edge. Stacked there is no edge to sit on, so the phone breakpoint
+	// gives the pad back — and it has to be the pad the button rests at, or the
+	// label lands off centre by the difference. Pinned to the base rule so the
+	// two cannot drift apart.
+	it('restores the resting left pad to a lone Dismiss on a phone', () => {
+		const base = css.match(/^\.tag-btn-text\s*\{([^}]*)\}/m)?.[1];
+		if (!base) throw new Error('the .tag-btn-text rest rule is missing from app.css');
+		const resting = /padding:\s*[\d.]+px\s+([\d.]+px)\s*;/.exec(base)?.[1];
+		if (!resting) throw new Error('the .tag-btn-text rest rule has no horizontal padding');
+		const rule = css.match(/\.tag-actions \.tag-btn-text-flush\s*\{([^}]*)\}/)?.[1];
+		if (!rule) throw new Error('the phone-width flush Dismiss rule is missing from app.css');
+		expect(rule).toMatch(new RegExp(`padding-left:\\s*${resting.replace('.', '\\.')}\\s*;`));
+	});
+
+	// The refused state draws a real border. The rest rule reserves the same 1px
+	// as a transparent one, so the border appearing mid-save does not widen
+	// Dismiss and shove the row; the radius rides along so the visible border is
+	// the capsule the buttons beside it wear.
+	it('the resting Dismiss button reserves the refused border and its capsule', () => {
+		const rule = css.match(/^\.tag-btn-text\s*\{([^}]*)\}/m)?.[1];
+		if (!rule) throw new Error('the .tag-btn-text rest rule is missing from app.css');
+		expect(rule).toMatch(/border:\s*1px solid transparent\s*;/);
+		expect(rule).toMatch(/border-radius:\s*var\(--radius-pill\)\s*;/);
+	});
+
+	// A kept chip is a tint plus a check, and the check is the non-colour cue for
+	// the state, so it is a meaningful graphic under the 3:1 bar. It sits on the
+	// tint over the tray's --card, and takes --link in the light themes where raw
+	// --primary is too pale on it. Aurora dark is the tightest pair at 3.49:1.
+	const keptTint = (() => {
+		const rule = blockBody(".tag-chip[aria-pressed='true']");
+		const mix = rule.match(
+			/background:\s*color-mix\(in srgb,\s*var\(--primary\)\s*(\d+)%,\s*transparent\)/
+		);
+		if (!mix) throw new Error('the kept chip fill is no longer a primary tint');
+		return Number(mix[1]);
+	})();
+
+	it('draws the kept chip check in --primary, and in --link in the light themes', () => {
+		expect(blockBody(".tag-chip[aria-pressed='true'] svg")).toMatch(/color:\s*var\(--primary\)\s*;/);
+		expect(blockBody("[data-theme='light'] .tag-chip[aria-pressed='true'] svg")).toMatch(
+			/color:\s*var\(--link\)\s*;/
+		);
+	});
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: the kept chip's check meets 3:1 on the chip tint`, () => {
+			const card = blockToken(sel, 'card');
+			const tint = mix2(blockToken(sel, 'primary'), keptTint, card);
+			const icon = name.endsWith('light') ? linkColor(sel) : blockToken(sel, 'primary');
+			expect(contrast(icon, tint)).toBeGreaterThanOrEqual(3);
+		});
+	}
+
+	for (const surface of ['background', 'card'] as const) {
+		for (const { name, sel } of THEME_BLOCKS) {
+			const border = name.endsWith('light') ? linkColor : (s: string) => blockToken(s, 'primary');
+
+			it(`${name}: the hovered pill label meets 4.5:1 on the ${surface} surface`, () => {
+				expect(contrast(linkColor(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+			});
+
+			it(`${name}: the hovered chip and pill border meets 3:1 on the ${surface} surface`, () => {
+				expect(contrast(border(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(3);
+			});
+		}
+	}
+});
+
+// SONA-220: the saved and refused backfill rows put one action beside a row of
+// static saved-tag chips wearing the same capsule. The action's border is what
+// separates them, so it is a control boundary held to 3:1 on the card it sits
+// on — the chips' resting --border is nowhere near that, which is the point.
+describe('SONA-220 saved-row action border contrast, every theme × mode', () => {
+	// color-mix(in srgb, var(--foreground) N%, var(--card)); parse N rather than
+	// pinning it, so a later tweak is measured instead of failing on the number.
+	const actionMix = (() => {
+		const mix = blockBody('.tag-pill-action').match(
+			/border-color:\s*color-mix\(in srgb,\s*var\(--foreground\)\s*(\d+)%,\s*var\(--card\)\)/
+		);
+		if (!mix) throw new Error('the saved-row action border is no longer a foreground/card mix');
+		return Number(mix[1]);
+	})();
+
+	for (const { name, sel } of THEME_BLOCKS) {
+		it(`${name}: the action border meets 3:1 on the card it sits on`, () => {
+			const card = blockToken(sel, 'card');
+			expect(contrast(mix2(blockToken(sel, 'foreground'), actionMix, card), card)).toBeGreaterThanOrEqual(3);
+		});
+
+		it(`${name}: it is a clear step up from the static chip border beside it`, () => {
+			const card = blockToken(sel, 'card');
+			const chip = contrast(blockToken(sel, 'border'), card);
+			const action = contrast(mix2(blockToken(sel, 'foreground'), actionMix, card), card);
+			expect(action).toBeGreaterThan(chip * 1.5);
+		});
+	}
 });
 
 // The Artist lookup "Remove key" button rides .btn-outline but overrides its

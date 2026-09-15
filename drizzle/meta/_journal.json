@@ -204,6 +204,13 @@
       "when": 1787098140533,
       "tag": "0028_convention_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1788859140799,
+      "tag": "0029_image_tags_image_id_idx",
+      "breakpoints": true
     }
   ]
 }

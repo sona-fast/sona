@@ -37,6 +37,7 @@ function cdnImageWidths(src: string): number[] {
 describe('shared thumbnail width', () => {
 	const gallery = read('../routes/(public)/gallery/+page.svelte');
 	const adminImages = read('../routes/admin/images/+page.svelte');
+	const backfill = read('../routes/admin/images/suggest-tags/+page.svelte');
 
 	it('matches the width the public gallery grid emits', () => {
 		// The gallery grid is the surface that generates these variants first;
@@ -46,6 +47,26 @@ describe('shared thumbnail width', () => {
 
 	it('matches the width the admin image list emits', () => {
 		expect(cdnImageWidths(adminImages)).toContain(THUMB_WIDTH);
+	});
+
+	it('transforms the tag backfill list at the shared width', () => {
+		// The same rows as the admin image list, so the variants already exist: a
+		// width of its own here buys a second transformation for every untagged
+		// image and shows nothing new. cdnImage returns the src unchanged in dev,
+		// so no browser test can tell the two apart — this is the only guard.
+		// The shared symbol, like the pickers below: a literal 200 would work today
+		// and drift from the gallery the day THUMB_WIDTH moves.
+		const widths = [
+			...backfill.matchAll(/cdnImage\((?:[^()]|\([^()]*\))*?,\s*([A-Za-z_$][\w$]*|\d+)\s*\)/g)
+		].map((match) => match[1]);
+		expect(widths).toEqual(['THUMB_WIDTH']);
+	});
+
+	it('never renders a backfill row original as the img src', () => {
+		// The pre-fix shape. thumbnail_url is null on every row until a backfill
+		// populates it, so this fallback served full-size originals, twenty to a
+		// page, before the operator had scrolled to them.
+		expect(backfill).not.toMatch(/src=\{\s*row\.thumbnailUrl \|\| row\.imageUrl\s*\}/);
 	});
 });
 

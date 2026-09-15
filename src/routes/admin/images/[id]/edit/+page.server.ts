@@ -4,13 +4,20 @@ import { images, artists, collections, tags, imageTags, characters, imageCharact
 import { eq, and, isNull, ne } from 'drizzle-orm';
 import { resolveAvatarUrl } from '$lib/server/avatar';
 import { getSettings } from '$lib/server/settings';
-import { sanitizeText, sanitizeUrl, sanitizeTag } from '$lib/server/validate';
+import { sanitizeText, sanitizeUrl } from '$lib/server/validate';
+import {
+	MAX_IMAGE_TAGS,
+	MAX_TAGS_INPUT_LENGTH,
+	readTagInput,
+	replaceImageTags
+} from '$lib/server/image-tags';
 import { normalizeSocialUrl } from '$lib/server/handle-normalize';
 import {
 	variantAssignmentError,
 	REFERENCE_BECOMES_VARIANT_ERROR,
 	VARIANT_BECOMES_REFERENCE_ERROR
 } from '$lib/server/variants';
+import * as m from '$lib/paraglide/messages';
 import { resolveFuzzysearchKey } from '$lib/server/fuzzysearch';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -103,7 +110,21 @@ export const actions = {
 		const artistId = data.get('artistId') as string;
 		const artistName = sanitizeText(data.get('artistName') as string, 200);
 		const collectionId = data.get('collectionId') as string;
-		const tagNames = sanitizeText(data.get('tags') as string, 500);
+		// Read raw and checked before anything shortens it: the 500-character cut
+		// this field used to take ran BEFORE the count guard, so a hundred ordinary
+		// names lost their tail mid-word and the fragment saved as a success.
+		const tagsRaw = String(data.get('tags') ?? '');
+		// Refused, not truncated: a save that quietly dropped tags would report
+		// success and leave the operator to notice the missing ones later. Counted
+		// the way the write counts, so what is refused is what would not have fit.
+		const tagInput = readTagInput(tagsRaw);
+		if (tagInput.problem === 'too_long') {
+			return fail(400, { error: m.admin_field_tags_too_long({ max: MAX_TAGS_INPUT_LENGTH }) });
+		}
+		if (tagInput.problem === 'too_many') {
+			return fail(400, { error: m.admin_field_tags_too_many({ max: MAX_IMAGE_TAGS }) });
+		}
+		const tagNames = tagInput.value;
 		const characterIds = (data.get('characters') as string)?.trim();
 		const nsfw = data.get('nsfw') === 'on';
 		const published = data.get('published') !== 'on';
@@ -231,19 +252,9 @@ export const actions = {
 			})
 			.where(eq(images.id, id));
 
-		// Update tags: remove old, add new
-		await db.delete(imageTags).where(eq(imageTags.imageId, id));
-
-		if (tagNames) {
-			const tagList = tagNames.split(',').map(sanitizeTag).filter(Boolean);
-			for (const tagName of tagList) {
-				let tag = await db.select().from(tags).where(eq(tags.name, tagName)).get();
-				if (!tag) {
-					tag = await db.insert(tags).values({ name: tagName }).returning().get();
-				}
-				await db.insert(imageTags).values({ imageId: id, tagId: tag.id });
-			}
-		}
+		// Update tags: remove old, add new. Shared with the Suggest tags page so
+		// both write tags through one sanitizer and one table (SONA-220).
+		await replaceImageTags(db, id, tagNames);
 
 		// Update characters: remove old, add new
 		await db.delete(imageCharacters).where(eq(imageCharacters.imageId, id));

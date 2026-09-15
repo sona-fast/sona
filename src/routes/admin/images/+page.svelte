@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff, Loader2, Layers } from 'lucide-svelte';
+	import { Search, Upload, Pencil, Trash2, ArrowUpDown, Eye, EyeOff, Loader2, Layers, Tag } from 'lucide-svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { formatDate, cdnImage } from '$lib';
 	import * as m from '$lib/paraglide/messages';
@@ -66,7 +66,14 @@
 	<div>
 		<h1>{m.admin_nav_all_images()} <span class="count">{m.admin_count_items({ count: data.total })}</span></h1>
 	</div>
-	<a href="/admin/upload" class="btn btn-primary desktop-upload"><Upload size={16} /> {m.admin_images_upload_new()}</a>
+	<div class="header-actions">
+		<!-- Entry point for the tag backfill list (SONA-220). Secondary beside
+		     Upload new: it is housekeeping, not the page's main job. -->
+		<!-- tap, not the app-wide hover preload: the backfill load scans every
+		     untagged image and classifies its URL, too much work for a hover. -->
+		<a href="/admin/images/suggest-tags" class="btn btn-secondary" data-sveltekit-preload-data="tap"><Tag size={16} /> {m.admin_tag_suggest_button()}</a>
+		<a href="/admin/upload" class="btn btn-primary desktop-upload"><Upload size={16} /> {m.admin_images_upload_new()}</a>
+	</div>
 </div>
 
 <div class="toolbar">
@@ -348,6 +355,16 @@
 
 	h1 {
 		font-size: 24px;
+	}
+
+	/* The Suggest tags link keeps no desktop-only class: unlike Upload new it has
+	   no mobile fallback, and hiding it would make the route unreachable there. */
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+		justify-content: flex-end;
 	}
 
 	.count {

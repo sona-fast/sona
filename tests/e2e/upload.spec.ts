@@ -141,6 +141,10 @@ test('admin upload streams to UploadThing and the stored image renders', async (
 	// NOT `button[type="submit"]` — the sidebar's Logout button matches that first.
 	await page.getByRole('button', { name: 'Upload Artwork' }).click();
 	await page.waitForURL(/\/admin\/images/);
+	// The list defaults to commissioned-date order, and the twenty-eight seeded
+	// backfill rows (SONA-220) fill its first page, so ask for the newest-uploaded
+	// view rather than assuming the new piece landed on it.
+	await page.goto('/admin/images?sort=uploaded&dir=desc');
 
 	// The saved piece renders from its STORED UploadThing URL (dev's cdnImage
 	// passes the raw src through), served by the route stub above.
@@ -180,6 +184,67 @@ test('a multi-file batch uploads sequentially within the batch — one in-flight
 	}
 	// The sequential-uploads property: uploads never overlapped.
 	expect(uploads.counters.peak).toBe(1);
+});
+
+test('the Tags hint says accepted tags cover the batch only while the batch has two tiles', async ({
+	page
+}) => {
+	// The upload form stages one set of tags for every tile it saves, so the hint
+	// carries an extra sentence about that once a second tile exists (SONA-220).
+	// The sentence rides on the ordinary hint, which needs a post URL in the
+	// field to be the ordinary hint at all.
+	const BATCH = 'Accepted tags apply to every image in this upload.';
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/upload');
+	await page.fill('input[name="sourcePostUrl"]', 'https://bsky.app/profile/e2e.example/post/3kq7x');
+
+	// One tile: the hint is the ordinary sentence alone.
+	await stageFiles(page, [{ name: 'e2e-hint-1.png', mimeType: 'image/png', buffer: PNG }], 1);
+	await expect(page.locator('#tags-hint')).toContainText('Suggestions come from entail.dev');
+	await expect(page.locator('#tags-hint')).not.toContainText(BATCH);
+
+	// A second tile joins the batch and the sentence appears.
+	await stageFiles(page, [{ name: 'e2e-hint-2.png', mimeType: 'image/png', buffer: PNG }], 2);
+	await expect(page.locator('#tags-hint')).toContainText(BATCH);
+
+	// And it goes when the batch is one tile again: a sentence about every image
+	// in the upload, over an upload of one, describes a batch that is not there.
+	// Each tile's remove button names its own file, so a screen-reader user knows
+	// which one goes (SONA-156) — matched by prefix rather than by the bare label.
+	await page.getByRole('button', { name: /^Remove / }).last().click();
+	await expect(page.locator('input[name^="imageUrl_"]')).toHaveCount(1);
+	await expect(page.locator('#tags-hint')).not.toContainText(BATCH);
+	await expect(page.locator('#tags-hint')).toContainText('Suggestions come from entail.dev');
+});
+
+test('the batch sentence stays off the hint while it refuses the source URL', async ({ page }) => {
+	// Appended to a refusal, the batch sentence would answer a link the site
+	// cannot look up with a note about where accepted tags go.
+	const BATCH = 'Accepted tags apply to every image in this upload.';
+	await adminLogin(page, PASSWORD);
+	await page.goto('/admin/upload');
+	await page.fill('input[name="sourcePostUrl"]', 'https://bsky.app/profile/e2e.example/post/3kq7x');
+	await stageFiles(
+		page,
+		[
+			{ name: 'e2e-hint-3.png', mimeType: 'image/png', buffer: PNG },
+			{ name: 'e2e-hint-4.png', mimeType: 'image/png', buffer: PNG }
+		],
+		2
+	);
+	await expect(page.locator('#tags-hint')).toContainText(BATCH);
+
+	await page.route('**/api/admin/tag-suggestions', (route: Route) =>
+		route.fulfill({
+			status: 422,
+			contentType: 'application/json',
+			body: JSON.stringify({ error: 'unsupported_source' })
+		})
+	);
+	await page.getByRole('button', { name: 'Suggest tags', exact: true }).click();
+
+	await expect(page.locator('#tags-hint')).toContainText("Sona can't look up this link.");
+	await expect(page.locator('#tags-hint')).not.toContainText(BATCH);
 });
 
 // A file one byte over the 64 MiB cap. Payload buffers are capped at 50 MB by
@@ -260,7 +325,12 @@ test('a pick of nothing but oversized files is counted, and never says it finish
 	// tiles are reported, and no batch opened that could later claim to be done.
 	await expect(page.locator(LIVE_REGION)).toHaveText("2 file(s) couldn't be added");
 	await page.waitForTimeout(300);
-	expect(await announced()).toEqual(["2 file(s) couldn't be added"]);
+	// The region above is the positive claim. The log is read for the negative
+	// one only: stageFiles retries the pick, and a retry clears the log after the
+	// first attempt's refusal has already been recorded while the region keeps
+	// showing it, so pinning the log to exactly that sentence raced the retry.
+	// What must never appear is a batch that claims to have finished.
+	expect((await announced()).filter((line) => line.startsWith('Upload finished'))).toEqual([]);
 	expect(uploads.counters.total).toBe(0);
 });
 

@@ -126,7 +126,12 @@ export const imageCharacters = sqliteTable('image_characters', {
 export const imageTags = sqliteTable('image_tags', {
 	imageId: integer('image_id').notNull().references(() => images.id, { onDelete: 'cascade' }),
 	tagId: integer('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' })
-});
+}, (table) => [
+	// The Suggest tags page asks "which images have no tag rows" on every load,
+	// and the edit form deletes an image's rows on every save. Without this both
+	// scan the whole table (SONA-220).
+	index('image_tags_image_id_idx').on(table.imageId)
+]);
 
 // Fursuit photos imported from FurTrack and self-hosted (image_url points to our
 // storage, e.g. R2). One row per FurTrack post; furtrack_post_id dedupes imports.

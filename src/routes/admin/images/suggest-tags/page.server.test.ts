@@ -1,0 +1,408 @@
+import { describe, it, expect, vi } from 'vitest';
+// better-sqlite3 ships no bundled types and is a dev-only test dependency here.
+// @ts-expect-error - no declaration file for 'better-sqlite3'
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { eq } from 'drizzle-orm';
+import * as schema from '$lib/server/db/schema';
+import { imageTags, images, tags } from '$lib/server/db/schema';
+import { makeD1 } from '$lib/server/test/d1';
+import { MAX_IMAGE_TAGS, MAX_TAGS_INPUT_LENGTH, replaceImageTags } from '$lib/server/image-tags';
+import { load, actions, _MAX_SCAN as MAX_SCAN, _PER_PAGE as PER_PAGE } from './+page.server';
+
+// The write helper is the real one everywhere except the one test that needs it
+// to write nothing, which no input can produce: the action counts the names
+// before it calls, so an empty answer only comes from a row vanishing mid-write.
+vi.mock('$lib/server/image-tags', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/server/image-tags')>();
+	return { ...actual, replaceImageTags: vi.fn(actual.replaceImageTags) };
+});
+
+// The backfill list (SONA-220). What is worth pinning here is which rows reach
+// the page — an image is a candidate only when its source URL is one the
+// suggestion endpoint would accept AND it has no tags — and that accepting a
+// row writes tags through the same path the edit form's save uses.
+
+const BSKY = 'https://bsky.app/profile/kirin.example/post/3kq7x2abc';
+const X = 'https://x.com/examplefox/status/1834455667788990011';
+
+type Query = { sql: string; params: unknown[] };
+
+function makeDb() {
+	const sqlite = new Database(':memory:');
+	sqlite.exec(`
+		CREATE TABLE artists (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, avatar_url TEXT,
+			twitter_url TEXT, bluesky_url TEXT, telegram_url TEXT, furaffinity_url TEXT, deviantart_url TEXT,
+			patreon_url TEXT, instagram_url TEXT, global_id TEXT, registry_version INTEGER,
+			registry_synced_at TEXT, aliases TEXT, avatar_resolved_at TEXT, created_at TEXT NOT NULL DEFAULT '');
+		CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT '');
+		CREATE TABLE image_tags (image_id INTEGER NOT NULL, tag_id INTEGER NOT NULL);
+		CREATE TABLE images (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, slug TEXT,
+			image_url TEXT NOT NULL, thumbnail_url TEXT, width INTEGER, height INTEGER, file_size INTEGER,
+			md5hash TEXT, nsfw INTEGER NOT NULL DEFAULT 0, published INTEGER NOT NULL DEFAULT 1,
+			source_post_url TEXT, artist_id INTEGER, collection_id INTEGER, commissioned_at TEXT,
+			parent_image_id INTEGER, variant_label TEXT, featured INTEGER NOT NULL DEFAULT 0,
+			featured_order INTEGER, created_at TEXT NOT NULL DEFAULT '');
+	`);
+	const d1 = makeD1(sqlite);
+	// Every statement the load runs, so a test can assert WHICH columns are read
+	// for how many rows, not only what comes back.
+	const queries: Query[] = [];
+	const prepare = d1.prepare.bind(d1);
+	const logged = {
+		...d1,
+		prepare: (sql: string) => {
+			const stmt = prepare(sql);
+			return {
+				...stmt,
+				bind: (...params: unknown[]) => {
+					queries.push({ sql, params });
+					return stmt.bind(...params);
+				}
+			};
+		}
+	} as unknown as typeof d1;
+	return {
+		db: drizzle(logged, { schema }),
+		platform: { env: { DB: logged } } as unknown as App.Platform,
+		queries
+	};
+}
+
+type Db = ReturnType<typeof makeDb>['db'];
+
+/** Thousands of fixture rows, in statements D1 would accept. One insert of two
+ * thousand rows binds ten parameters a row, which the shim refuses the way D1
+ * does; ten rows a statement keeps each one inside the hundred-parameter
+ * ceiling. Only the seeding needs this — the load under test chunks its own
+ * reads. */
+async function seedImages(db: Db, rows: (typeof images.$inferInsert)[]) {
+	for (let from = 0; from < rows.length; from += 10) {
+		await db.insert(images).values(rows.slice(from, from + 10));
+	}
+}
+
+async function seedImage(db: Db, id: number, sourcePostUrl: string | null, title = `Art ${id}`) {
+	await db.insert(images).values({
+		id,
+		title,
+		slug: `art-${id}`,
+		imageUrl: `https://cdn.example.com/${id}.png`,
+		artistId: 1,
+		sourcePostUrl
+	});
+}
+
+async function tagImage(db: Db, imageId: number, name: string) {
+	const [tag] = await db.insert(tags).values({ name }).returning({ id: tags.id });
+	await db.insert(imageTags).values({ imageId, tagId: tag.id });
+}
+
+const runLoad = (platform: App.Platform, search = '') =>
+	load({ platform, url: new URL(`http://localhost/admin/images/suggest-tags${search}`) } as never) as Promise<{
+		rows: { id: number; source: string; title: string }[];
+		total: number;
+		pages: number;
+	}>;
+
+function form(fields: Record<string, string>): Request {
+	const fd = new FormData();
+	for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+	return new Request('http://localhost/admin/images/suggest-tags', { method: 'POST', body: fd });
+}
+
+async function tagNamesOf(db: Db, imageId: number) {
+	const rows = await db
+		.select({ name: tags.name })
+		.from(imageTags)
+		.innerJoin(tags, eq(imageTags.tagId, tags.id))
+		.where(eq(imageTags.imageId, imageId));
+	return rows.map((r) => r.name).sort();
+}
+
+describe('suggest-tags load', () => {
+	it('lists only untagged images whose source URL the endpoint would accept', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		await seedImage(db, 2, X);
+		// A source post we have no classifier for.
+		await seedImage(db, 3, 'https://www.furaffinity.net/view/12345/');
+		await seedImage(db, 4, null);
+		await seedImage(db, 5, '');
+		// A Bluesky post that already has a tag: nothing to backfill.
+		await seedImage(db, 6, BSKY);
+		await tagImage(db, 6, 'fox');
+		// The forms the SQL host filter has to admit as well as the canonical one:
+		// a www. host, a plain-http link, and a mobile X host.
+		await seedImage(db, 7, 'https://www.bsky.app/profile/kirin.example/post/3kq7x2zzz');
+		await seedImage(db, 8, 'http://x.com/examplefox/status/1834455667788990012');
+		await seedImage(db, 9, 'https://mobile.twitter.com/examplefox/status/1834455667788990013');
+		// A link whose host only appears further along: the filter matches the
+		// start of the URL, so this is not a post the page offers.
+		await seedImage(db, 10, 'https://example.com/redirect?to=https://bsky.app/profile/a/post/b');
+
+		const data = await runLoad(platform);
+		expect(data.rows.map((r) => r.id)).toEqual([9, 8, 7, 2, 1]);
+		expect(data.total).toBe(5);
+	});
+
+	it("names each row's source kind, which is what the row meta line shows", async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		await seedImage(db, 2, X);
+
+		const data = await runLoad(platform);
+		expect(data.rows.find((r) => r.id === 1)?.source).toBe('bluesky');
+		expect(data.rows.find((r) => r.id === 2)?.source).toBe('x');
+	});
+
+	it('shows one page at a time and reports the full total behind Load more', async () => {
+		const { db, platform } = makeDb();
+		for (let i = 1; i <= PER_PAGE + 3; i++) await seedImage(db, i, BSKY);
+
+		const first = await runLoad(platform);
+		expect(first.rows).toHaveLength(PER_PAGE);
+		expect(first.total).toBe(PER_PAGE + 3);
+
+		// Load more grows the page rather than paging away from it, so the rows
+		// already worked through stay where they were.
+		const second = await runLoad(platform, '?pages=2');
+		expect(second.rows).toHaveLength(PER_PAGE + 3);
+		expect(second.rows.slice(0, PER_PAGE).map((r) => r.id)).toEqual(first.rows.map((r) => r.id));
+	});
+
+	it('scans ids only, and fetches display columns for the rendered rows alone', async () => {
+		// The scan can reach MAX_SCAN rows to render twenty. Carrying titles,
+		// thumbnails and image URLs through it puts hundreds of kilobytes in one
+		// D1 response, against a 1 MB cap.
+		const { db, platform, queries } = makeDb();
+		for (let i = 1; i <= PER_PAGE + 3; i++) await seedImage(db, i, BSKY);
+		queries.length = 0;
+
+		const data = await runLoad(platform);
+		expect(data.rows).toHaveLength(PER_PAGE);
+		expect(data.total).toBe(PER_PAGE + 3);
+
+		const scan = queries.find((q) => q.sql.includes('"source_post_url"'));
+		expect(scan, 'the candidate scan did not run').toBeTruthy();
+		expect(scan!.sql).not.toContain('"title"');
+		expect(scan!.sql).not.toContain('"thumbnail_url"');
+
+		// One display query, bound to exactly the ids on the page.
+		const display = queries.filter((q) => q.sql.includes('"title"'));
+		expect(display).toHaveLength(1);
+		expect(display[0].params).toEqual(data.rows.map((r) => r.id));
+	});
+
+	it('chunks the display fetch, since Load more can grow past D1 bound parameters', async () => {
+		const { db, platform, queries } = makeDb();
+		for (let i = 1; i <= 130; i++) await seedImage(db, i, BSKY);
+		queries.length = 0;
+
+		const data = await runLoad(platform, '?pages=7');
+		expect(data.rows).toHaveLength(130);
+
+		const display = queries.filter((q) => q.sql.includes('"title"'));
+		// Every chunk is issued: 130 ids at 90 per query. The chunks run together
+		// rather than one after the other, so this counts them and checks their
+		// coverage as a set; the page's order comes from the candidate scan, which
+		// the assertion below pins.
+		expect(display).toHaveLength(2);
+		for (const q of display) expect(q.params.length).toBeLessThanOrEqual(100);
+		expect(new Set(display.flatMap((q) => q.params))).toEqual(
+			new Set(data.rows.map((r) => r.id))
+		);
+		// The expected order is written out rather than sorted from the answer: a
+		// sorted copy of the rows agrees with itself whatever order they arrived in.
+		expect(data.rows.map((r) => r.id)).toEqual(Array.from({ length: 130 }, (_, i) => 130 - i));
+	});
+
+	it('stops at the scan ceiling and reports a total capped at it', async () => {
+		// A library where nothing is tagged yet would otherwise classify the whole
+		// images table on every page view. Past the ceiling the page shows what it
+		// found and says so with a capped total rather than the true count.
+		const { db, platform } = makeDb();
+		await seedImages(
+			db,
+			Array.from({ length: MAX_SCAN + 5 }, (_, i) => ({
+				id: i + 1,
+				title: `Art ${i + 1}`,
+				slug: `art-${i + 1}`,
+				imageUrl: `https://cdn.example.com/${i + 1}.png`,
+				artistId: 1,
+				sourcePostUrl: BSKY
+			}))
+		);
+
+		const data = await runLoad(platform);
+		expect(data.total).toBe(MAX_SCAN);
+		expect(data.rows).toHaveLength(PER_PAGE);
+		// Newest first, so the ceiling drops the oldest rows, not the newest.
+		expect(data.rows[0].id).toBe(MAX_SCAN + 5);
+	});
+
+	it('finds a supported row under more unsupported ones than the ceiling scans', async () => {
+		// The scan used to take the newest MAX_SCAN untagged rows and only then ask
+		// the classifier about them, so a gallery whose newest 2,000 untagged images
+		// are FurAffinity links showed an empty page while Bluesky rows sat below
+		// them — the page saying the work is done when it is not. The host filter
+		// runs in SQL, so the ceiling counts rows the page could actually offer.
+		const { db, platform } = makeDb();
+		await seedImages(
+			db,
+			Array.from({ length: MAX_SCAN + 1 }, (_, i) => ({
+				id: i + 2,
+				title: `Art ${i + 2}`,
+				slug: `art-${i + 2}`,
+				imageUrl: `https://cdn.example.com/${i + 2}.png`,
+				artistId: 1,
+				sourcePostUrl: `https://www.furaffinity.net/view/${i + 2}/`
+			}))
+		);
+		// The oldest row of the lot, and the only one the page can do anything with.
+		await seedImage(db, 1, BSKY);
+
+		const data = await runLoad(platform);
+		expect(data.total).toBe(1);
+		expect(data.rows.map((r) => r.id)).toEqual([1]);
+	});
+
+	it('clamps pages to what the scan ceiling can cover', async () => {
+		// Above the ceiling another page adds no row, so the count is held there:
+		// otherwise a hand-edited ?pages=500 keeps the Load more link counting up
+		// past anything the page could ever show.
+		const { db, platform } = makeDb();
+		for (let i = 1; i <= PER_PAGE + 1; i++) await seedImage(db, i, BSKY);
+
+		const data = await runLoad(platform, '?pages=500');
+		expect(data.pages).toBe(Math.ceil(MAX_SCAN / PER_PAGE));
+		expect(data.rows).toHaveLength(PER_PAGE + 1);
+	});
+
+	it('reads a junk or missing pages parameter as the first page', async () => {
+		const { db, platform } = makeDb();
+		for (let i = 1; i <= PER_PAGE + 1; i++) await seedImage(db, i, BSKY);
+
+		for (const search of ['', '?pages=0', '?pages=-3', '?pages=banana']) {
+			expect((await runLoad(platform, search)).rows).toHaveLength(PER_PAGE);
+		}
+	});
+});
+
+describe('suggest-tags save action', () => {
+	it('writes the accepted tags and reports which ones landed', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+
+		const result = await actions.save({ request: form({ id: '1', tags: 'fox, beach' }), platform } as never);
+		expect(result).toMatchObject({ savedId: 1, savedTags: ['fox', 'beach'] });
+		expect(await tagNamesOf(db, 1)).toEqual(['beach', 'fox']);
+	});
+
+	it('sanitizes through the same rule the tag inputs use', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+
+		await actions.save({ request: form({ id: '1', tags: 'Digital Media, FOX!' }), platform } as never);
+		expect(await tagNamesOf(db, 1)).toEqual(['digital-media', 'fox']);
+	});
+
+	it('reuses an existing tag row rather than minting a second one', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		await seedImage(db, 2, BSKY);
+		await tagImage(db, 2, 'fox');
+
+		await actions.save({ request: form({ id: '1', tags: 'fox' }), platform } as never);
+		const rows = await db.select({ id: tags.id }).from(tags).where(eq(tags.name, 'fox'));
+		expect(rows).toHaveLength(1);
+	});
+
+	it('refuses an id that is not a real image, and one that is not an id at all', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+
+		const missing = await actions.save({ request: form({ id: '99', tags: 'fox' }), platform } as never);
+		expect(missing).toMatchObject({ status: 404 });
+		const junk = await actions.save({ request: form({ id: 'banana', tags: 'fox' }), platform } as never);
+		expect(junk).toMatchObject({ status: 400 });
+		// Neither wrote anything.
+		expect(await tagNamesOf(db, 1)).toEqual([]);
+	});
+
+	it('refuses to overwrite tags the image picked up since the list loaded', async () => {
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		// The list showed image 1 as untagged; the edit form tagged it meanwhile.
+		await tagImage(db, 1, 'fox');
+
+		const result = await actions.save({ request: form({ id: '1', tags: 'beach, sand' }), platform } as never);
+		expect(result).toMatchObject({ status: 409, data: { error: 'tagged_elsewhere' } });
+		// The tag written elsewhere is still there and nothing from the row landed.
+		expect(await tagNamesOf(db, 1)).toEqual(['fox']);
+	});
+
+	it('refuses an over-cap list, the way the two forms do', async () => {
+		// These tags come from the tray, so reaching the cap takes a hand-made post.
+		// The three write paths still agree, and this one refuses rather than
+		// storing the first hundred and reporting success.
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		const tooMany = Array.from({ length: MAX_IMAGE_TAGS + 1 }, (_, i) => `cap-test-tag-${i}`).join(', ');
+
+		const result = await actions.save({ request: form({ id: '1', tags: tooMany }), platform } as never);
+		expect(result).toMatchObject({ status: 400, data: { error: 'too_many_tags' } });
+		expect(await tagNamesOf(db, 1)).toEqual([]);
+
+		const huge = await actions.save({
+			request: form({ id: '1', tags: 'a'.repeat(MAX_TAGS_INPUT_LENGTH + 1) }),
+			platform
+		} as never);
+		expect(huge).toMatchObject({ status: 400, data: { error: 'too_many_tags' } });
+		expect(await tagNamesOf(db, 1)).toEqual([]);
+	});
+
+	it('reports a failure when the write stored none of the names it was given', async () => {
+		// replaceImageTags skips a name whose tag row is deleted between the unique
+		// conflict and the re-select that follows it. With every name skipped the
+		// save wrote nothing, and answering with a success would put "Saved 0 tags"
+		// and an empty chip row where the tray used to be.
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		vi.mocked(replaceImageTags).mockResolvedValueOnce({ written: [], skipped: false });
+
+		const result = await actions.save({ request: form({ id: '1', tags: 'fox' }), platform } as never);
+		expect(result).toMatchObject({ status: 500, data: { error: 'save_failed' } });
+		expect(await tagNamesOf(db, 1)).toEqual([]);
+	});
+
+	it('reports the conflict when the write finds the image tagged after the check', async () => {
+		// The look before the write answers the common case, but a tab that tags the
+		// image in the gap after it would have had its tags deleted. The write
+		// carries the still-untagged condition itself and does nothing when it
+		// fails, so the action has a skip to report: the same 409 the look gives,
+		// raised a moment later.
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+		vi.mocked(replaceImageTags).mockResolvedValueOnce({ written: [], skipped: true });
+
+		const result = await actions.save({ request: form({ id: '1', tags: 'fox' }), platform } as never);
+		expect(result).toMatchObject({ status: 409, data: { error: 'tagged_elsewhere' } });
+	});
+
+	it('refuses an empty list rather than reporting a save of nothing', async () => {
+		// The tray cancels this submit, so an empty field only arrives from a
+		// hand-made post or a form submitted before the page hydrated. Reporting
+		// success would put "Saved 0 tags" on a row nothing was written to.
+		const { db, platform } = makeDb();
+		await seedImage(db, 1, BSKY);
+
+		const empty = await actions.save({ request: form({ id: '1', tags: '' }), platform } as never);
+		expect(empty).toMatchObject({ status: 400, data: { error: 'invalid_request' } });
+		// Separators and blanks alone sanitize down to nothing, and are refused the
+		// same way rather than deleting the row's tags.
+		const blank = await actions.save({ request: form({ id: '1', tags: ' , ,' }), platform } as never);
+		expect(blank).toMatchObject({ status: 400, data: { error: 'invalid_request' } });
+		expect(await tagNamesOf(db, 1)).toEqual([]);
+	});
+});
