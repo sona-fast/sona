@@ -128,28 +128,39 @@ function readManifest() {
 	}
 }
 
-/** One face's binary, fetched or taken from disk, with its digest checked. */
-async function writeFace(name, url, { force, recorded }) {
-	let bytes;
-	if (!force && existsOnDisk(name)) {
-		bytes = readFileSync(OUT_DIR + name);
-	} else {
-		if (!url.startsWith(BINARY_ORIGIN)) {
-			throw new Error(`${name}: ${url} is not on ${BINARY_ORIGIN} — refusing to fetch it`);
-		}
-		const res = await fetch(url, { headers: { 'user-agent': CHROME_UA } });
-		if (!res.ok) throw new Error(`${name}: ${res.status} fetching ${url}`);
-		bytes = Buffer.from(await res.arrayBuffer());
-		writeFileSync(OUT_DIR + name, bytes);
-	}
+/**
+ * The digest of bytes just fetched, or a throw if they are not the bytes the
+ * manifest records. Called BEFORE anything is written, so a re-cut upstream file
+ * leaves the committed woff2 alone instead of overwriting it and then failing.
+ * --force is how you accept a genuine upstream update.
+ */
+export function acceptBytes(name, bytes, { force, recorded }) {
 	const digest = sha256(bytes);
-	// --force is how you accept a genuine upstream update; without it, bytes that
-	// moved under the same URL stop the run.
 	if (!force && recorded !== undefined && recorded !== digest) {
 		throw new Error(
 			`${name} hashed ${digest}, but static/fonts/manifest.json records ${recorded}. Work out why before accepting it; re-run with --force to record the new bytes.`
 		);
 	}
+	return digest;
+}
+
+/** One face's binary, fetched or taken from disk. */
+async function writeFace(name, url, { force, recorded }) {
+	// Already on disk and not re-fetched: nothing can have changed under it during
+	// this run, and src/lib/themes/fonts.test.ts already asserts the committed
+	// bytes against manifest.json. Hash it only for the manifest this run writes.
+	if (!force && existsOnDisk(name)) {
+		const onDisk = readFileSync(OUT_DIR + name);
+		return { bytes: onDisk.length, sha256: sha256(onDisk) };
+	}
+	if (!url.startsWith(BINARY_ORIGIN)) {
+		throw new Error(`${name}: ${url} is not on ${BINARY_ORIGIN} — refusing to fetch it`);
+	}
+	const res = await fetch(url, { headers: { 'user-agent': CHROME_UA } });
+	if (!res.ok) throw new Error(`${name}: ${res.status} fetching ${url}`);
+	const bytes = Buffer.from(await res.arrayBuffer());
+	const digest = acceptBytes(name, bytes, { force, recorded });
+	writeFileSync(OUT_DIR + name, bytes);
 	return { bytes: bytes.length, sha256: digest };
 }
 
@@ -209,7 +220,7 @@ async function main() {
 		MANIFEST_PATH,
 		`${JSON.stringify(
 			{
-				note: 'sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Re-checked on each run: bytes that move under the same URL stop the run.',
+				note: 'sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Checked before a fetched file is written: bytes that moved under the same URL stop the run and leave the committed file alone.',
 				files
 			},
 			undefined,

@@ -25,10 +25,12 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { argv, exit, getuid } from 'node:process';
+// The default export, not named getuid: `getuid` is not an export on Windows, so
+// a named import throws at module load — and this module is imported by a test.
+import process, { argv, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const OUT_DIR = fileURLToPath(new URL('../static/fonts/', import.meta.url));
@@ -114,7 +116,9 @@ function run(cmd, args, opts = {}) {
 /**
  * The work directory lives in the shared OS temp dir, so anyone on the machine
  * could have created it first and left a tarball (or a venv) there for this
- * script to trust. Ours or nothing: same owner, mode 0700.
+ * script to trust. Ours or nothing: same owner, and nothing group- or
+ * world-accessible. What the OWNER bits say does not matter, so a directory an
+ * earlier version of this script created with the default mode still passes.
  */
 function prepareWorkDir() {
 	if (!existsSync(WORK_DIR)) {
@@ -123,12 +127,13 @@ function prepareWorkDir() {
 	}
 	const st = statSync(WORK_DIR);
 	// getuid is POSIX-only; on Windows there is no uid to compare.
-	if (getuid !== undefined && st.uid !== getuid()) {
+	const uid = process.getuid?.();
+	if (uid !== undefined && st.uid !== uid) {
 		throw new Error(`${WORK_DIR} belongs to uid ${st.uid}, not you — remove it or point TMPDIR elsewhere.`);
 	}
-	if ((st.mode & 0o777) !== 0o700) {
+	if ((st.mode & 0o077) !== 0) {
 		throw new Error(
-			`${WORK_DIR} is mode ${(st.mode & 0o777).toString(8)}, not 700 — anything there is writable by others. Remove it and rerun.`
+			`${WORK_DIR} is mode ${(st.mode & 0o777).toString(8)} — group or others can reach it. Remove it and rerun, or \`chmod go-rwx\` it.`
 		);
 	}
 }
@@ -169,21 +174,29 @@ function fetchPinned() {
 	return join(WORK_DIR, 'package/fonts/complete/woff2/hinted');
 }
 
-/** A venv with fonttools + brotli, built once and reused. */
+/**
+ * A venv with fonttools + brotli, built once and reused — but only while it was
+ * built from the requirements file we have now. The stamp beside pyftsubset
+ * holds the sha256 of that file, so a venv left over from an earlier, unpinned
+ * version of this script is rebuilt instead of trusted forever.
+ */
 function pythonEnv() {
 	const venv = join(WORK_DIR, 'fontenv');
 	const pyftsubset = join(venv, 'bin/pyftsubset');
-	try {
-		statSync(pyftsubset);
-		return { pyftsubset, python: join(venv, 'bin/python') };
-	} catch {
-		console.log(`building ${venv} (fonttools + brotli)`);
-		run('python3', ['-m', 'venv', venv]);
-		// Exact versions with hashes: the tools that reshape the fonts we ship are
-		// pinned the same way the source tarball is.
-		run(join(venv, 'bin/pip'), ['install', '--quiet', '--require-hashes', '-r', REQUIREMENTS]);
-		return { pyftsubset, python: join(venv, 'bin/python') };
-	}
+	const stamp = join(venv, 'bin/.requirements-sha256');
+	const python = join(venv, 'bin/python');
+	const want = createHash('sha256').update(readFileSync(REQUIREMENTS)).digest('hex');
+	const built = existsSync(pyftsubset) && existsSync(stamp) ? readFileSync(stamp, 'utf8').trim() : null;
+	if (built === want) return { pyftsubset, python };
+
+	console.log(`building ${venv} (fonttools + brotli)`);
+	rmSync(venv, { recursive: true, force: true });
+	run('python3', ['-m', 'venv', venv]);
+	// Exact versions with hashes: the tools that reshape the fonts we ship are
+	// pinned the same way the source tarball is.
+	run(join(venv, 'bin/pip'), ['install', '--quiet', '--require-hashes', '-r', REQUIREMENTS]);
+	writeFileSync(stamp, `${want}\n`, { mode: 0o600 });
+	return { pyftsubset, python };
 }
 
 function main() {
@@ -205,7 +218,7 @@ function main() {
 		.map((h) => parseInt(h, 16));
 	const outside = [...readFileSync(kanjiTxt, 'utf8')].filter((ch) => {
 		const point = ch.codePointAt(0) ?? 0;
-		return point < Number(blockLo) || point > Number(blockHi);
+		return point < blockLo || point > blockHi;
 	});
 	if (outside.length > 0) {
 		throw new Error(`${outside.length} derived kanji fall outside ${KANJI_BLOCK}: ${outside.join('')}`);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FAMILIES, OWNED_ELSEWHERE, fileName, staleFiles } from './fetch-fonts.mjs';
+import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, fileName, staleFiles } from './fetch-fonts.mjs';
 
 // The prune is the one destructive thing this script does, and it runs over a
 // directory holding three other things: Geist (hand-placed), the Japanese slices
@@ -63,5 +63,32 @@ describe('fetch-fonts file names', () => {
 			'Chakra Petch',
 			'IBM Plex Sans JP'
 		]);
+	});
+});
+
+// The digest check runs on the fetched buffer, before anything reaches
+// static/fonts/ — a re-cut upstream file used to overwrite the committed woff2
+// and only then throw. The ordering is structural: writeFace calls this
+// and writes only with what it returns.
+describe('fetch-fonts digest check on fetched bytes', () => {
+	const bytes = Buffer.from('woff2 bytes');
+	const digest = acceptBytes('Test-latin.woff2', bytes, { force: false, recorded: undefined });
+
+	it('returns the digest when the manifest records nothing yet', () => {
+		expect(digest).toMatch(/^[0-9a-f]{64}$/);
+	});
+
+	it('returns the digest when the bytes still hash as recorded', () => {
+		expect(acceptBytes('Test-latin.woff2', bytes, { force: false, recorded: digest })).toBe(digest);
+	});
+
+	it('throws on bytes that moved under the same URL', () => {
+		expect(() => acceptBytes('Test-latin.woff2', bytes, { force: false, recorded: 'a'.repeat(64) })).toThrow(
+			/static\/fonts\/manifest\.json records/
+		);
+	});
+
+	it('accepts the new bytes under --force, which is how an update is recorded', () => {
+		expect(acceptBytes('Test-latin.woff2', bytes, { force: true, recorded: 'a'.repeat(64) })).toBe(digest);
 	});
 });

@@ -1742,4 +1742,31 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 	it('.btn-outline:hover shifts the border it actually has', () => {
 		expect(hoverBorderMix('.btn-outline:hover').base).toBe('input');
 	});
+
+	// The same segmented control is hand-written in three routes. When only one of
+	// them carried the boundary, the outline appeared and disappeared as a visitor
+	// clicked between the tabs of one switch, so every copy is pinned here
+	// along with the view toggle that sits in the gallery's filter row.
+	const componentRules: Array<{ file: string; selector: string }> = [
+		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.tabs' },
+		{ file: '../routes/(public)/gallery/+page.svelte', selector: '.view-toggle' },
+		{ file: '../routes/(public)/stickers/+page.svelte', selector: '.tabs' },
+		{ file: '../routes/(public)/vr/+page.svelte', selector: '.tabs' }
+	];
+
+	for (const { file, selector } of componentRules) {
+		it(`${file} ${selector} draws its border with --input`, () => {
+			expect(ruleBody(file, selector)).toMatch(/border:\s*1px solid var\(--input\)/);
+		});
+	}
+
+	// The admin header's avatar disc is a solid fill, not a boundary, but it is the
+	// other place this change swapped a token: on light themes it paints with
+	// --primary-text so the disc and the header's primary text are one orange
+	// rather than two.
+	it('the light-theme admin avatar disc fills with --primary-text', () => {
+		expect(
+			ruleBody('../routes/admin/+layout.svelte', ":global([data-theme='light']) .admin-avatar")
+		).toMatch(/background:\s*var\(--primary-text\)/);
+	});
 });

@@ -6,8 +6,9 @@ privacy policy names no font provider.
 
 The Latin slices are fetched by `node scripts/fetch-fonts.mjs`, which asks
 Google's CSS2 API for the woff2 files and their `unicode-range` subsets, then
-writes them here with a sha256 per file in `manifest.json` — the next run
-re-checks it, so bytes that move under the same URL stop the fetch. The
+writes them here with a sha256 per file in `manifest.json`. The next run
+re-checks those hashes before it writes anything and stops if the bytes behind a
+URL have changed, so a re-cut upstream file never lands on the committed one. The
 `@font-face` blocks are not written by hand: they are generated into
 `src/lib/themes/generated.css` from the `faces` arrays in
 `src/lib/themes/*.theme.ts` by `npm run themes`. To add a family or a weight,
@@ -15,8 +16,8 @@ edit the theme file and the `FAMILIES` list in the fetch script, then run both.
 
 Some families ship as one variable file per subset covering every weight.
 JetBrains Mono does, so `JetBrainsMono-latin.woff2` carries no weight in its
-name and its face is declared once over `400 700`; a per-weight name there meant
-four identical binaries in the repo.
+name and its face is declared once over `400 700`; a per-weight name there would
+put four identical binaries in the repo.
 
 Geist is the exception. Its three files were placed here by hand and its
 `@font-face` blocks live in `src/app.css`, because it is the default theme's

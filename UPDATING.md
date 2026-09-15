@@ -48,21 +48,29 @@ you sync — or to catch up on what shipped since you last did — read the
 the merged changes since the previous one. `git log --oneline <last-tag>..upstream/main`
 after a fetch gives the same view from a clone.
 
-## Read before upgrading: your site now serves its own fonts (SONA-181, SONA-126)
+## Read before upgrading: self-hosted fonts and new theme colors (SONA-181, SONA-126)
 
 The typefaces ship with the site. Nothing on a page load reaches Google's font
-CDN any more — the files are in `static/fonts/` and the CSP names no external
-style or font origin.
+CDN anymore, because the files are in `static/fonts/` and the CSP names no
+external style or font origin.
 
 - **Check your privacy text.** The built-in privacy policy dropped its Google
   Fonts sentence, because the transfer no longer happens. If you pasted your own
-  privacy text in Settings, Legal, **it was not updated**: read it and remove the
-  line naming Google Fonts, or it discloses a transfer your site no longer makes.
+  privacy text in Settings, Legal, **it was not updated**: delete this sentence
+  from it, or it discloses a transfer your site no longer makes.
+
+  > Public pages also load web fonts from Google Fonts, so Google receives your
+  > IP address, browser user-agent, and the page you are viewing when those files
+  > are fetched.
+
+  Your wording may differ; the sentence to remove is whichever one names Google
+  Fonts as a recipient.
 - **Theme colors moved with this release too.** Every theme gained a
-  `--primary-text` color for the primary used as small text, and form fields and
-  outline buttons now draw a 3:1 boundary. If you edited theme colors, they live
-  in `src/lib/themes/<id>.theme.ts` — edit the theme file, run `npm run themes`,
-  and commit the regenerated `src/lib/themes/generated.css` alongside it.
+  `--primary-text` color for the primary color used as small text, and form
+  fields and outline buttons now draw a border that meets 3:1 contrast. If you
+  edited theme colors, they live in `src/lib/themes/<id>.theme.ts` — edit the
+  theme file, run `npm run themes`, and commit the regenerated
+  `src/lib/themes/generated.css` alongside it.
 
 ## Read before upgrading: tag suggestions call entail.dev (SONA-220)
 
