@@ -12,8 +12,20 @@
  * Callers pass a URL the SERVER looked up (a stored row, a setting), never one
  * the client supplied, which is what keeps this from being an SSRF hole. On top
  * of that: private and link-local hosts are refused, redirects are not
- * followed, and only image/* content types are echoed back.
+ * followed, and only the raster types the storage layer itself accepts are
+ * echoed back inline.
  */
+
+import { isAllowedImageType } from './storage/allowlist';
+
+/**
+ * How long the upstream has to answer with HEADERS. The bound covers the wait
+ * for the response only — once the headers land the timer is cleared, so a
+ * large image streams for as long as it needs. Without it a host that accepts
+ * the connection and then says nothing holds the request open until the
+ * platform kills it, and the operator sees a spinner with no end.
+ */
+export const PROXY_HEADERS_TIMEOUT_MS = 10_000;
 
 // Loopback / unspecified / RFC1918 / link-local / ULA hosts a stored URL must
 // never point the server-side fetch at.
@@ -86,14 +98,38 @@ export async function proxyStoredImage(
 
 	// A storage host answering with a redirect is unexpected — treat it as an
 	// upstream error rather than following it to an arbitrary location.
-	const upstream = await fetcher(imageUrl, { redirect: 'manual' });
+	let upstream: Response;
+	const controller = new AbortController();
+	const headersTimer = setTimeout(() => controller.abort(), PROXY_HEADERS_TIMEOUT_MS);
+	try {
+		upstream = await fetcher(imageUrl, { redirect: 'manual', signal: controller.signal });
+	} catch {
+		// A DNS failure, a reset connection or a TLS error rejects rather than
+		// answering, and so does the abort above. The stored image is as
+		// unreachable as it is on a non-ok response, so it reports the same way —
+		// every caller already handles null, and none of them has to answer 500 to
+		// a network blip.
+		return null;
+	} finally {
+		// The headers are in (or the fetch is over): the body streams unbounded
+		// from here, so the timer must not fire mid-download.
+		clearTimeout(headersTimer);
+	}
 	if (!upstream.ok || !upstream.body) return null;
 
 	const contentType = upstream.headers.get('content-type') ?? '';
+	// The same raster allowlist stored uploads pass, rather than the whole of
+	// `image/*`: SVG is an image type that carries script, and an upstream is
+	// free to label anything it likes. isAllowedImageType is case-insensitive
+	// and ignores parameters, so `Image/JPEG; charset=binary` still passes.
+	// Anything else is handed back as an opaque download that no browser will
+	// render, with a sandbox CSP as a second, redundant layer in case one does.
+	const isImage = isAllowedImageType(contentType);
 	return new Response(upstream.body, {
 		headers: {
-			'Content-Type': contentType.startsWith('image/') ? contentType : 'application/octet-stream',
-			'Content-Disposition': 'inline',
+			'Content-Type': isImage ? contentType : 'application/octet-stream',
+			'Content-Disposition': isImage ? 'inline' : 'attachment',
+			'Content-Security-Policy': 'sandbox',
 			'Cache-Control': 'private, no-store'
 		}
 	});

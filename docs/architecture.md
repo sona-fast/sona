@@ -41,6 +41,7 @@ graph TB
     subgraph "External services"
         TG[🤖 Telegram Bot API]
         FurTrack[📸 FurTrack]
+        FuzzySearch[🔍 FuzzySearch — reverse image search]
         Resend[✉️ Resend]
         Turnstile[🧩 Cloudflare Turnstile]
         ConsFYI[📅 cons.fyi]
@@ -86,6 +87,7 @@ graph TB
 
     Importers -->|sticker sets| TG
     Importers -->|photo import| FurTrack
+    Admin -->|artist lookup| FuzzySearch
     Auth -->|reset email| Resend
     RateLimit --> Turnstile
     Public -->|convention dates| ConsFYI
@@ -129,8 +131,8 @@ graph TB
 - The cons.fyi feed supplies each convention's IANA timezone as well as its
   dates, which is what lets `/connect` decide "here now" in the event's own
   zone rather than the reader's or UTC.
-- Telegram, FurTrack, Resend, and Turnstile are optional integrations, keyed
-  off secrets or settings (see `wrangler.toml.example` for the full list).
+- Telegram, FurTrack, FuzzySearch, Resend, and Turnstile are optional
+  integrations, keyed off secrets or settings (see `wrangler.toml.example` for the full list).
 - GitHub Actions is part of the runtime, not just delivery: the scheduled
   workflows (`sticker-resync` daily 06:00 UTC, `artist-sync` 06:30,
   `avatar-refresh` 07:00, `cleanup-orphans` weekly, `backfill-animated`

@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { isPrivateHost, isSameOriginUrl } from './image-proxy';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+	isPrivateHost,
+	isSameOriginUrl,
+	proxyStoredImage,
+	PROXY_HEADERS_TIMEOUT_MS
+} from './image-proxy';
 
 // The guard both byte proxies rely on. Driven directly rather than through a
 // route, because the boundaries are the whole point and a route test only ever
@@ -89,5 +94,124 @@ describe('isSameOriginUrl', () => {
 		expect(isSameOriginUrl('https://cdn.bsky.app/img/x', origin)).toBe(false);
 		// Same host, different scheme is a different origin.
 		expect(isSameOriginUrl('http://fork.example/img/x.png', origin)).toBe(false);
+	});
+});
+
+// The response the proxy builds. Three callers share this file (artist-lookup,
+// avatar, ref-image) and only one of them pins the content-type fold, so a
+// regression here would silently turn the other two's images into downloads.
+describe('proxyStoredImage', () => {
+	function fetcherAnswering(contentType: string): typeof fetch {
+		return (async () =>
+			new Response('bytes', { headers: { 'content-type': contentType } })) as unknown as typeof fetch;
+	}
+
+	async function proxy(contentType: string): Promise<Response> {
+		const res = await proxyStoredImage('https://cdn.example/img.png', fetcherAnswering(contentType));
+		if (!res) throw new Error('proxyStoredImage returned null');
+		return res;
+	}
+
+	// Media types are case-insensitive, so the upstream's own spelling is echoed
+	// back rather than demoted to a download.
+	it('passes an image content type through whatever its case', async () => {
+		expect((await proxy('Image/PNG')).headers.get('content-type')).toBe('Image/PNG');
+		expect((await proxy('image/png')).headers.get('content-type')).toBe('image/png');
+	});
+
+	// The type parameters an upstream may attach are not part of the media type.
+	it('passes an allowed type through with its parameters', async () => {
+		const res = await proxy('Image/JPEG; charset=binary');
+		expect(res.headers.get('content-type')).toBe('Image/JPEG; charset=binary');
+		expect(res.headers.get('content-disposition')).toBe('inline');
+	});
+
+	// Narrower than image/*: SVG is an image type that carries script, so it is
+	// demoted exactly like a text/html payload wearing an image URL.
+	it('demotes svg and non-image types to a download', async () => {
+		for (const type of ['image/svg+xml', 'text/html']) {
+			const res = await proxy(type);
+			expect(res.headers.get('content-type'), type).toBe('application/octet-stream');
+			expect(res.headers.get('content-disposition'), type).toBe('attachment');
+		}
+	});
+
+	it('serves inline and never caches', async () => {
+		const res = await proxy('image/png');
+		expect(res.headers.get('content-disposition')).toBe('inline');
+		expect(res.headers.get('cache-control')).toBe('private, no-store');
+	});
+
+	// A second, redundant layer: even a response a browser decided to render
+	// gets an opaque origin with scripts off.
+	it('sandboxes the response', async () => {
+		expect((await proxy('image/png')).headers.get('content-security-policy')).toBe('sandbox');
+		expect((await proxy('text/html')).headers.get('content-security-policy')).toBe('sandbox');
+	});
+
+	it('refuses a private host without fetching', async () => {
+		let called = false;
+		const fetcher = (async () => {
+			called = true;
+			return new Response('bytes', { headers: { 'content-type': 'image/png' } });
+		}) as unknown as typeof fetch;
+		expect(await proxyStoredImage('http://127.0.0.1/img.png', fetcher)).toBeNull();
+		expect(called).toBe(false);
+	});
+
+	// A fetch that REJECTS rather than answering — DNS failure, reset connection,
+	// TLS error. Handled here rather than in each route, so all three callers
+	// report the stored image as unreachable instead of throwing a 500.
+	it('answers null when the fetch rejects', async () => {
+		const rejecting = (async () => {
+			throw new TypeError('fetch failed');
+		}) as unknown as typeof fetch;
+		expect(await proxyStoredImage('https://cdn.example/img.png', rejecting)).toBeNull();
+	});
+
+	// The bound is on the HEADERS only. A host that accepts the connection and
+	// then says nothing would otherwise hold the operator's request open until
+	// the platform kills it; a big image that answers promptly must still be
+	// allowed to stream for as long as it takes.
+	describe('the wait for upstream headers', () => {
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => vi.useRealTimers());
+
+		it('gives up on a fetcher that never answers', async () => {
+			let signal: AbortSignal | undefined;
+			const silent = ((_url: string, init?: RequestInit) => {
+				signal = init?.signal ?? undefined;
+				// Rejects the way a real fetch does when its signal aborts.
+				return new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener('abort', () =>
+						reject(new DOMException('aborted', 'AbortError'))
+					);
+				});
+			}) as unknown as typeof fetch;
+
+			const pending = proxyStoredImage('https://cdn.example/img.png', silent);
+			await vi.advanceTimersByTimeAsync(PROXY_HEADERS_TIMEOUT_MS - 1);
+			expect(signal?.aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(2);
+			expect(signal?.aborted).toBe(true);
+			expect(await pending).toBeNull();
+		});
+
+		it('clears the timer once the headers land, so the body streams unbounded', async () => {
+			let signal: AbortSignal | undefined;
+			const answering = ((_url: string, init?: RequestInit) => {
+				signal = init?.signal ?? undefined;
+				return Promise.resolve(
+					new Response('bytes', { headers: { 'content-type': 'image/png' } })
+				);
+			}) as unknown as typeof fetch;
+
+			const res = await proxyStoredImage('https://cdn.example/img.png', answering);
+			expect(res?.headers.get('content-type')).toBe('image/png');
+			// Long past the bound: nothing is left to fire at a body still arriving.
+			await vi.advanceTimersByTimeAsync(PROXY_HEADERS_TIMEOUT_MS * 10);
+			expect(signal?.aborted).toBe(false);
+			expect(vi.getTimerCount()).toBe(0);
+		});
 	});
 });
