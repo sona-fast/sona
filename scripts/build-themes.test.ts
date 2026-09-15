@@ -234,6 +234,13 @@ describe('renderThemesCss', () => {
 
 	// `007` is a padded 7, which CSS accepts — the channel bound is on the value,
 	// not on the digit count.
+	it('accepts an rgba() alpha written as 1.0', () => {
+		const ok: ThemeDefinition[] = [
+			{ id: 'default', label: 'Alpha', dark: { sidebarBorder: 'rgba(255, 255, 255, 1.0)' }, light: {} }
+		];
+		expect(renderThemesCss(ok)).toContain('--sidebar-border: rgba(255, 255, 255, 1.0);');
+	});
+
 	it('accepts an rgba() channel written with leading zeros', () => {
 		const ok: ThemeDefinition[] = [
 			{ id: 'default', label: 'Padded', dark: { sidebarBorder: 'rgba(007, 12, 12, 0.5)' }, light: {} }

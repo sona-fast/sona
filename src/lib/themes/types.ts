@@ -94,7 +94,7 @@ const HEX = /^#[0-9A-Fa-f]{6}$/;
 // `007` is a padded 7 rather than a fourth digit.
 const CHANNEL = '(?:0*(?:25[0-5]|2[0-4]\\d|1?\\d?\\d))';
 const RGBA = new RegExp(
-	`^rgba\\(\\s*${CHANNEL}\\s*,\\s*${CHANNEL}\\s*,\\s*${CHANNEL}\\s*,\\s*(?:0|1|0?\\.\\d+)\\s*\\)$`
+	`^rgba\\(\\s*${CHANNEL}\\s*,\\s*${CHANNEL}\\s*,\\s*${CHANNEL}\\s*,\\s*(?:0|1|0?\\.\\d+|1\\.0+)\\s*\\)$`
 );
 
 export function isAlias(value: TokenValue): value is TokenAlias {
