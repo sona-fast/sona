@@ -1621,10 +1621,16 @@ describe('the new-artist dialog prefill', () => {
 			/aria-describedby=\{prefillSource === 'lookup' \? 'lookup-guess-lines' : undefined\}/
 		);
 		expect(DIALOG).toMatch(/class="prefill-mark" id="lookup-prefill-mark"/);
+		// The mark itself renders only for a lookup prefill with a site, so the
+		// fields have to carry the same guard. Seeded socials from any other
+		// source used to point at an id that was never in the document.
+		expect(DIALOG).toMatch(
+			/\{#if prefillSource === 'lookup' && prefillSite\}\s*\n\s*<p class="prefill-mark" id="lookup-prefill-mark">/
+		);
 		for (const field of ['twitter', 'furaffinity']) {
 			expect(DIALOG).toMatch(
 				new RegExp(
-					`bind:value=\\{${field}\\}[\\s\\S]{0,120}?aria-describedby=\\{initialSocials\\?\\.${field} \\? 'lookup-prefill-mark'`
+					`bind:value=\\{${field}\\}[\\s\\S]{0,160}?aria-describedby=\\{prefillSource === 'lookup' && prefillSite && initialSocials\\?\\.${field} \\? 'lookup-prefill-mark'`
 				)
 			);
 		}
