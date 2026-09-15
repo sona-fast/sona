@@ -10,6 +10,7 @@ import {
 	rowToFocusAfter,
 	sentenceFor,
 	sourceKey,
+	_REQUEST_TIMEOUT_MS,
 	tagsToAdd,
 	toggleTag,
 	trayFor,
@@ -552,19 +553,40 @@ describe('requestSuggestions', () => {
 		// reload. The call now carries a timeout signal; when it fires, fetch
 		// rejects with an AbortError, which reads as the same unavailable outcome
 		// a dropped connection does, so the tray with Try again appears.
-		const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => {
-			throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
-		});
+		//
+		// The signal has to be the timeout one, at the client's own ceiling: a
+		// never-aborting controller signal would also be "an AbortSignal", so the
+		// test spies on AbortSignal.timeout and checks the fetch was handed what it
+		// made. The mock rejects only once that signal fires, so a call that sent
+		// no timeout would hang here instead of passing.
+		const controller = new AbortController();
+		const timeoutSpy = vi
+			.spyOn(AbortSignal, 'timeout')
+			.mockImplementation(() => controller.signal);
+		const fetchMock = vi.fn(
+			(_url: string, init: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					init.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+						once: true
+					});
+				})
+		);
 		vi.stubGlobal('fetch', fetchMock);
-		expect(await requestSuggestions({ imageId: 7 })).toEqual({ status: 0, body: null });
-		expect(fetchMock).toHaveBeenCalledTimes(1);
-		// Read out here rather than asserted inside the mock: requestSuggestions
-		// catches everything, so an assertion that failed in the callback would be
-		// swallowed as a transport failure and the test would pass with no signal
-		// sent at all.
-		const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-		expect(init.signal).toBeInstanceOf(AbortSignal);
-		expect(init.signal?.aborted).toBe(false);
+		try {
+			const pending = requestSuggestions({ imageId: 7 });
+			expect(timeoutSpy).toHaveBeenCalledWith(_REQUEST_TIMEOUT_MS);
+			// Read out here rather than asserted inside the mock: requestSuggestions
+			// catches everything, so an assertion that failed in the callback would
+			// be swallowed as a transport failure and the test would pass with no
+			// signal sent at all.
+			const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+			expect(init.signal).toBe(controller.signal);
+			expect(init.signal?.aborted).toBe(false);
+			controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+			expect(await pending).toEqual({ status: 0, body: null });
+		} finally {
+			timeoutSpy.mockRestore();
+		}
 	});
 });
 
