@@ -129,10 +129,12 @@ function readManifest() {
 }
 
 /**
- * The digest of bytes just fetched, or a throw if they are not the bytes the
- * manifest records. Called BEFORE anything is written, so a re-cut upstream file
- * leaves the committed woff2 alone instead of overwriting it and then failing.
- * --force is how you accept a genuine upstream update.
+ * Returns the sha256 of the bytes just fetched or read from disk. Throws if they
+ * are not the bytes the manifest records. Every file goes through here on every
+ * run: a file already on disk is checked as it is read, and a fetched file is
+ * checked BEFORE it is written, so a re-cut upstream file leaves the committed
+ * woff2 alone instead of overwriting it and then failing. --force is how you
+ * accept a genuine upstream update.
  */
 export function acceptBytes(name, bytes, { force, recorded }) {
 	const digest = sha256(bytes);
@@ -146,12 +148,11 @@ export function acceptBytes(name, bytes, { force, recorded }) {
 
 /** One face's binary, fetched or taken from disk. */
 async function writeFace(name, url, { force, recorded }) {
-	// Already on disk and not re-fetched: nothing can have changed under it during
-	// this run, and src/lib/themes/fonts.test.ts already asserts the committed
-	// bytes against manifest.json. Hash it only for the manifest this run writes.
+	// Already on disk and not re-fetched: checked against the manifest too, so an
+	// edited file cannot record its own digest. See acceptBytes.
 	if (!force && existsOnDisk(name)) {
 		const onDisk = readFileSync(OUT_DIR + name);
-		return { bytes: onDisk.length, sha256: sha256(onDisk) };
+		return { bytes: onDisk.length, sha256: acceptBytes(name, onDisk, { force, recorded }) };
 	}
 	if (!url.startsWith(BINARY_ORIGIN)) {
 		throw new Error(`${name}: ${url} is not on ${BINARY_ORIGIN} — refusing to fetch it`);
@@ -220,7 +221,7 @@ async function main() {
 		MANIFEST_PATH,
 		`${JSON.stringify(
 			{
-				note: 'sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Checked before a fetched file is written: bytes that moved under the same URL stop the run and leave the committed file alone.',
+				note: 'sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Every file is checked against this manifest on every run, and a fetched file is checked before it is written: bytes that no longer match stop the run and leave the committed file alone.',
 				files
 			},
 			undefined,

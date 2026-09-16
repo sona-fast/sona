@@ -66,10 +66,7 @@ describe('fetch-fonts file names', () => {
 	});
 });
 
-// The digest check runs on the fetched buffer, before anything reaches
-// static/fonts/ — a re-cut upstream file used to overwrite the committed woff2
-// and only then throw. The ordering is structural: writeFace calls this
-// and writes only with what it returns.
+// Every file writeFace handles goes through acceptBytes — see its doc comment.
 describe('fetch-fonts digest check on fetched bytes', () => {
 	const bytes = Buffer.from('woff2 bytes');
 	const digest = acceptBytes('Test-latin.woff2', bytes, { force: false, recorded: undefined });

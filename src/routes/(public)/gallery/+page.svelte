@@ -393,13 +393,13 @@
 		color: var(--muted-foreground);
 	}
 
-	/* Pill segmented control — the same bar as /stickers and /vr, which carry this
-	   --input boundary too. It is the same edge the selects and the view toggle in
-	   this row carry, so the row reads as one family of controls (SONA-126). */
+	/* Pill segmented control, matching the tab bars on /stickers and /vr. Its
+	   --input boundary is the edge the selects and the view toggle in this row also
+	   carry, so the row reads as one family of controls (SONA-126). */
 	.tabs {
 		display: inline-flex;
 		gap: 8px;
-		margin-bottom: 20px;
+		margin-bottom: 24px;
 		padding: 4px;
 		border: 1px solid var(--input);
 		border-radius: var(--radius-pill);

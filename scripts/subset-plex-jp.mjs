@@ -25,7 +25,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // The default export, not named getuid: `getuid` is not an export on Windows, so
@@ -114,26 +114,39 @@ function run(cmd, args, opts = {}) {
 }
 
 /**
+ * Whether a mode leaves the directory reachable by anyone but its owner. What
+ * the OWNER bits say does not matter, so a directory an earlier version of this
+ * script created with the default mode still passes.
+ * @param {number} mode
+ */
+export function reachableByOthers(mode) {
+	return (mode & 0o077) !== 0;
+}
+
+/**
  * The work directory lives in the shared OS temp dir, so anyone on the machine
  * could have created it first and left a tarball (or a venv) there for this
- * script to trust. Ours or nothing: same owner, and nothing group- or
- * world-accessible. What the OWNER bits say does not matter, so a directory an
- * earlier version of this script created with the default mode still passes.
+ * script to trust. Ours or nothing: not a symlink, same owner, and nothing
+ * group- or world-accessible. lstat rather than stat, because a symlink planted
+ * at this path would otherwise be checked as whatever it points at.
  */
 function prepareWorkDir() {
 	if (!existsSync(WORK_DIR)) {
 		mkdirSync(WORK_DIR, { recursive: true, mode: 0o700 });
 		return;
 	}
-	const st = statSync(WORK_DIR);
+	const st = lstatSync(WORK_DIR);
+	if (st.isSymbolicLink()) {
+		throw new Error(`${WORK_DIR} is a symlink, not a directory. Remove it and rerun.`);
+	}
 	// getuid is POSIX-only; on Windows there is no uid to compare.
 	const uid = process.getuid?.();
 	if (uid !== undefined && st.uid !== uid) {
 		throw new Error(`${WORK_DIR} belongs to uid ${st.uid}, not you — remove it or point TMPDIR elsewhere.`);
 	}
-	if ((st.mode & 0o077) !== 0) {
+	if (reachableByOthers(st.mode)) {
 		throw new Error(
-			`${WORK_DIR} is mode ${(st.mode & 0o777).toString(8)} — group or others can reach it. Remove it and rerun, or \`chmod go-rwx\` it.`
+			`${WORK_DIR} is mode ${(st.mode & 0o777).toString(8)}, so the group or other users can reach it. Remove it and rerun, or run: chmod go-rwx ${WORK_DIR}`
 		);
 	}
 }
@@ -175,6 +188,16 @@ function fetchPinned() {
 }
 
 /**
+ * Whether the stamp beside pyftsubset says the venv was built from the
+ * requirements file we have now. `null` means no venv or no stamp at all.
+ * @param {string | null} stamp contents of the stamp file
+ * @param {string} want sha256 of scripts/requirements-subset.txt
+ */
+export function venvIsCurrent(stamp, want) {
+	return stamp !== null && stamp.trim() === want;
+}
+
+/**
  * A venv with fonttools + brotli, built once and reused — but only while it was
  * built from the requirements file we have now. The stamp beside pyftsubset
  * holds the sha256 of that file, so a venv left over from an earlier, unpinned
@@ -186,8 +209,8 @@ function pythonEnv() {
 	const stamp = join(venv, 'bin/.requirements-sha256');
 	const python = join(venv, 'bin/python');
 	const want = createHash('sha256').update(readFileSync(REQUIREMENTS)).digest('hex');
-	const built = existsSync(pyftsubset) && existsSync(stamp) ? readFileSync(stamp, 'utf8').trim() : null;
-	if (built === want) return { pyftsubset, python };
+	const built = existsSync(pyftsubset) && existsSync(stamp) ? readFileSync(stamp, 'utf8') : null;
+	if (venvIsCurrent(built, want)) return { pyftsubset, python };
 
 	console.log(`building ${venv} (fonttools + brotli)`);
 	rmSync(venv, { recursive: true, force: true });

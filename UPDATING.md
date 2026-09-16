@@ -63,8 +63,8 @@ external style or font origin.
   > IP address, browser user-agent, and the page you are viewing when those files
   > are fetched.
 
-  Your wording may differ; the sentence to remove is whichever one names Google
-  Fonts as a recipient.
+  Your wording may differ. Remove whichever sentence names Google Fonts as a
+  recipient.
 - **Theme colors moved with this release too.** Every theme gained a
   `--primary-text` color for the primary color used as small text, and form
   fields and outline buttons now draw a border that meets 3:1 contrast. If you

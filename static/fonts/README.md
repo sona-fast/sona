@@ -6,10 +6,11 @@ privacy policy names no font provider.
 
 The Latin slices are fetched by `node scripts/fetch-fonts.mjs`, which asks
 Google's CSS2 API for the woff2 files and their `unicode-range` subsets, then
-writes them here with a sha256 per file in `manifest.json`. The next run
-re-checks those hashes before it writes anything and stops if the bytes behind a
-URL have changed, so a re-cut upstream file never lands on the committed one. The
-`@font-face` blocks are not written by hand: they are generated into
+writes them here with a sha256 per file in `manifest.json`. Every run checks
+every file against that manifest — the ones already on disk as it reads them,
+and a fetched one before it is written — and stops if the bytes no longer match,
+so a re-cut upstream file never lands on the committed one. The `@font-face`
+blocks are not written by hand: they are generated into
 `src/lib/themes/generated.css` from the `faces` arrays in
 `src/lib/themes/*.theme.ts` by `npm run themes`. To add a family or a weight,
 edit the theme file and the `FAMILIES` list in the fetch script, then run both.
