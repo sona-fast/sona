@@ -1826,6 +1826,7 @@
 		gap: 6px;
 		min-height: 160px;
 		border-style: dashed;
+		border-color: var(--input);
 		background: none;
 		color: var(--muted-foreground);
 		font-size: 13px;
@@ -1835,7 +1836,7 @@
 	}
 
 	.tile-add:hover {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		color: var(--primary-text);
 	}
 
@@ -1849,7 +1850,7 @@
 	/* aria-disabled leaves the button hoverable, so undo exactly what :hover
 	   above sets and hold the resting look. */
 	.tile-add[aria-disabled='true']:hover {
-		border-color: var(--border);
+		border-color: var(--input);
 		color: var(--muted-foreground);
 	}
 

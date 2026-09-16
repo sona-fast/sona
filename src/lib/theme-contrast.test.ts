@@ -1814,6 +1814,15 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 		{ file: '../routes/admin/conventions/+page.svelte', selector: '.mobile-add-row' }
 	];
 
+	// The upload page's add tile inherits its 1px solid border from .tile and
+	// only switches the style to dashed, so its tokens are set by border-color.
+	it('the upload add tile draws and hovers with passing tokens', () => {
+		const UPLOAD = '../routes/admin/upload/+page.svelte';
+		expect(ruleBody(UPLOAD, '.tile-add')).toMatch(/border-color:\s*var\(--input\)/);
+		expect(ruleBody(UPLOAD, '.tile-add:hover')).toMatch(/border-color:\s*var\(--primary-text\)/);
+		expect(ruleBody(UPLOAD, ".tile-add[aria-disabled='true']:hover")).toMatch(/border-color:\s*var\(--input\)/);
+	});
+
 	for (const { file, selector, hover } of dashedRules) {
 		it(`${file} ${selector} draws its dashed border with --input`, () => {
 			expect(ruleBody(file, selector)).toMatch(/border:\s*1px dashed var\(--input\)/);

@@ -236,6 +236,9 @@ function fetchPinned() {
 			`IBM Plex Sans JP ${SOURCE.version} hashed ${digest}, expected ${SOURCE.sha256}. The pinned tarball changed under its version — do not subset it; work out why first.`
 		);
 	}
+	// A tree left by an earlier release would keep files the new archive no
+	// longer carries, and a later weight lookup could read one of those.
+	rmSync(join(WORK_DIR, 'package'), { recursive: true, force: true });
 	run('tar', ['xzf', tarball, '-C', WORK_DIR, 'package/fonts/complete/woff2/hinted/']);
 	return join(WORK_DIR, 'package/fonts/complete/woff2/hinted');
 }
