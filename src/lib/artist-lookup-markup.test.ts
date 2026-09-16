@@ -521,15 +521,34 @@ describe('the "From lookup" tag', () => {
 			// operator has filled since it went blank stops being one the panel may
 			// say Sona cleared. The filled half is untouched by that arm: a status
 			// line naming a field needs it filled as well as untagged (SONA-220).
+			//
+			// That arm reads a LATCH rather than the text in the input. Derived from
+			// the text, deleting what the operator typed into an emptied field puts
+			// the cleared claim back and the panel re-attributes their own deletion
+			// to Sona, so the flag goes up on their first non-empty input and comes
+			// down only where the cleared record it speaks for is reset.
 			expect(source).toMatch(
 				new RegExp(
-					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,400}?sourcePostUrl:\\s+!sourceTagged && \\(${record}\\.sourcePostUrl !== undefined \\|\\| sourcePostUrl\\.trim\\(\\) !== ''\\)`
+					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,400}?sourcePostUrl: !sourceTagged && \\(${record}\\.sourcePostUrl !== undefined \\|\\| sourceTypedIn\\)`
 				)
 			);
 			expect(source).toMatch(
 				new RegExp(
-					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,400}?commissionedAt:\\s+!dateTagged && \\(${record}\\.commissionedAt !== undefined \\|\\| commissionedAt\\.trim\\(\\) !== ''\\)`
+					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,400}?commissionedAt: !dateTagged && \\(${record}\\.commissionedAt !== undefined \\|\\| dateTypedIn\\)`
 				)
+			);
+			// Raised on the operator's own input, off the event rather than the
+			// bound value, and never lowered by a later keystroke.
+			expect(source).toMatch(
+				/oninput=\{[\s\S]{0,400}?sourceTagged = false;[\s\S]{0,300}?if \(event\.currentTarget\.value\.trim\(\) !== ''\) sourceTypedIn = true;/
+			);
+			expect(source).toMatch(
+				/oninput=\{[\s\S]{0,400}?dateTagged = false;[\s\S]{0,300}?if \(event\.currentTarget\.value\.trim\(\) !== ''\) dateTypedIn = true;/
+			);
+			// And lowered beside the record, so the two can never speak for
+			// different results.
+			expect(source).toMatch(
+				/(sharedCleared|lookupCleared) = \{\};\s+sourceTypedIn = false;\s+dateTypedIn = false;/
 			);
 			// And the panel is handed both halves.
 			expect(source).toMatch(new RegExp(`filled=\\{${record}\\}\\s+edited=\\{${edited}\\}`));

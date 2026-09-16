@@ -30,7 +30,10 @@ import {
 	runLookup,
 	sentAfterApplyThrew,
 	withCreatedArtist,
+	type LookupCleared,
+	type LookupEdited,
 	type LookupFailReason,
+	type LookupFields,
 	type LookupMatch,
 	type LookupRating,
 	type LookupResponse,
@@ -835,24 +838,25 @@ describe('statusLineKind', () => {
 		expect(
 			statusLineKind({}, { cleared: { commissionedAt: true }, edited: { commissionedAt: true } })
 		).toBe('none');
-		// The mixed sentences drop the same half: a result that filled the date
-		// over a URL the operator has typed back in says only what it filled.
+		// The mixed sentences drop the same half, but they do not fall back to the
+		// "only" pair: date_only says the URL was "left as it was", and this result
+		// emptied it. The kept sentence claims the date and stays silent about a
+		// field whose state neither of them can state honestly.
 		expect(
 			statusLineKind(
 				{ commissionedAt: 'd' },
 				{ cleared: { sourcePostUrl: true }, edited: { sourcePostUrl: true } }
 			)
-		).toBe('date_only');
+		).toBe('date_kept');
 		// And the clash pair, where the emptied URL is what picks the sentence: the
-		// dated clash goes back to the plain one, off the urlHeld snapshot taken
-		// when the prefill ran, rather than claiming a clearing the operator has
-		// undone.
+		// plain clash says the URL was left EMPTY, which the operator's own text in
+		// the field contradicts, so the kept one answers instead.
 		expect(
 			statusLineKind(
 				{ commissionedAt: 'd' },
 				{ clash: true, cleared: { sourcePostUrl: true }, edited: { sourcePostUrl: true } }
 			)
-		).toBe('clash');
+		).toBe('clash_kept');
 		expect(
 			statusLineKind(
 				{},
@@ -868,6 +872,8 @@ describe('statusLineKind', () => {
 	// The clash sentence says the URL was "left empty", which is true of a field
 	// that WAS empty and a false report of one the result just blanked under the
 	// operator — so a dated clash over an emptied URL gets its own sentence.
+	// (The truth table below is the whole of this rule; this block keeps the
+	// sentences themselves beside the kind they belong to.)
 	it('says a dated clash emptied the URL rather than leaving it empty', () => {
 		expect(
 			statusLineKind({ commissionedAt: 'd' }, { clash: true, cleared: { sourcePostUrl: true } })
@@ -1085,6 +1091,264 @@ describe('statusLineKind', () => {
 			'制作依頼日はそのままにしています。保存前にURLを変更できます。'
 		);
 	});
+});
+
+/**
+ * Every branch of statusLineKind against the one invariant it answers to: no
+ * sentence claims a field state the screen contradicts. A row is one pair of
+ * field states and the kind they have to produce, and one it() runs each — so a
+ * change that flips a single row fails by name instead of disappearing into a
+ * block of assertions (SONA-220).
+ *
+ * The five states a field can be in by the time the panel renders, and what
+ * each one puts in the two records the function reads:
+ *
+ * - `empty`: nobody filled it, this result did not clear it, the operator has
+ *   not typed in it. Both records silent.
+ * - `refilled`: this result blanked what the last lookup filled and the
+ *   operator has typed their own text in since. Cleared flag set, edited flag
+ *   set, and the two disagree about the field on purpose.
+ * - `emptied`: blanked and still blank, and nobody has typed in it since.
+ *   Cleared flag set, edited flag clear.
+ * - `retyped`: blanked, typed into, then emptied again by the operator. Blank
+ *   on screen like `emptied`, but the records read like `refilled`, because the
+ *   page LATCHES the typed-into flag on the first non-empty input instead of
+ *   deriving it from the text. Without the latch the cleared claim comes back
+ *   when they delete their text, and the panel tells them Sona cleared a field
+ *   they emptied themselves (SONA-220).
+ * - `filled`: this result wrote it.
+ * - `held`: the operator's own text was already in it when the result landed,
+ *   so no prefill touched it. This is the state `urlHeld` snapshots.
+ *
+ * A clash never fills the URL — `prefillForResult` skips it whatever the field
+ * holds — so `url: 'filled'` has no clash row.
+ */
+describe('statusLineKind — the truth table', () => {
+	type FieldState = 'empty' | 'refilled' | 'retyped' | 'emptied' | 'filled' | 'held';
+
+	interface Row {
+		url: FieldState;
+		date: FieldState;
+		clash?: boolean;
+		kind: StatusLineKind;
+		/** Why that kind is the only honest one for this pair. */
+		why: string;
+	}
+
+	function argsFor(row: Row): Parameters<typeof statusLineKind> {
+		const filled: LookupFields = {};
+		const cleared: LookupCleared = {};
+		const edited: LookupEdited = {};
+		if (row.url === 'filled') filled.sourcePostUrl = 'https://x.com/kuttoya/status/1';
+		if (row.date === 'filled') filled.commissionedAt = '2026-03-04';
+		if (row.url !== 'empty' && row.url !== 'filled' && row.url !== 'held')
+			cleared.sourcePostUrl = true;
+		if (row.date !== 'empty' && row.date !== 'filled' && row.date !== 'held')
+			cleared.commissionedAt = true;
+		if (row.url === 'refilled' || row.url === 'retyped' || row.url === 'held')
+			edited.sourcePostUrl = true;
+		if (row.date === 'refilled' || row.date === 'retyped' || row.date === 'held')
+			edited.commissionedAt = true;
+		return [filled, { clash: row.clash, edited, urlHeld: row.url === 'held', cleared }];
+	}
+
+	/** The claims a field in this state would contradict, whichever kind the row
+	 * lands on. A field holding the operator's text is not empty; a field this
+	 * result blanked was not left as it was. */
+	function forbidden(row: Row): string[] {
+		const out: string[] = [];
+		if (row.url === 'refilled' || row.url === 'held') out.push('left the source post URL empty');
+		if (row.url === 'emptied')
+			out.push('left the source post URL as it was', 'left your source post URL as it was');
+		if (row.date === 'emptied') out.push('left the commissioned date as it was');
+		// A field the operator emptied last is not one Sona may claim it cleared:
+		// the clearing on screen is theirs. "As it was" stays allowed for these —
+		// Sona did leave the field the way they left it.
+		if (row.url === 'retyped') out.push('cleared the source post URL');
+		if (row.date === 'retyped') out.push('cleared the commissioned date');
+		return out;
+	}
+
+	const rows: Row[] = [
+		// Nothing to report at all.
+		{ url: 'empty', date: 'empty', kind: 'none', why: 'the result touched neither field' },
+		{ url: 'empty', date: 'refilled', kind: 'none', why: 'the date on screen belongs to the operator' },
+		{ url: 'empty', date: 'emptied', kind: 'date_emptied', why: 'the date went blank under them' },
+		{ url: 'empty', date: 'filled', kind: 'date_only', why: 'the URL really was left as it was' },
+		{ url: 'empty', date: 'held', kind: 'none', why: 'the result wrote nothing' },
+
+		{ url: 'refilled', date: 'empty', kind: 'none', why: 'the URL on screen belongs to the operator' },
+		{ url: 'refilled', date: 'refilled', kind: 'none', why: 'both fields are theirs again' },
+		{
+			url: 'refilled',
+			date: 'emptied',
+			kind: 'date_emptied',
+			why: 'only the date is still blank'
+		},
+		{
+			url: 'refilled',
+			date: 'filled',
+			kind: 'date_kept',
+			why: 'date_only would say the URL was left as it was, and this result emptied it'
+		},
+		{ url: 'refilled', date: 'held', kind: 'none', why: 'the result wrote nothing' },
+
+		{ url: 'emptied', date: 'empty', kind: 'url_emptied', why: 'the URL went blank under them' },
+		{ url: 'emptied', date: 'refilled', kind: 'url_emptied', why: 'the date is theirs again' },
+		{ url: 'emptied', date: 'emptied', kind: 'both_emptied', why: 'both fields went blank' },
+		{
+			url: 'emptied',
+			date: 'filled',
+			kind: 'date_and_url_emptied',
+			why: 'the sentence names the fill and the clearing together'
+		},
+		{ url: 'emptied', date: 'held', kind: 'url_emptied', why: 'the date belongs to the operator' },
+
+		{ url: 'filled', date: 'empty', kind: 'url_only', why: 'the date really was left as it was' },
+		{
+			url: 'filled',
+			date: 'refilled',
+			kind: 'url_kept',
+			why: 'url_only would say the date was left as it was, and this result emptied it'
+		},
+		{
+			url: 'filled',
+			date: 'emptied',
+			kind: 'url_and_date_emptied',
+			why: 'the sentence names the fill and the clearing together'
+		},
+		{ url: 'filled', date: 'filled', kind: 'both', why: 'the result wrote both' },
+		{ url: 'filled', date: 'held', kind: 'url_only', why: 'their date was left as it was' },
+
+		// Typed into and then emptied again. The records still say the field is
+		// theirs, so none of these hands the clearing back to Sona.
+		{
+			url: 'retyped',
+			date: 'empty',
+			kind: 'none',
+			why: 'the operator emptied the field last, so nobody claims the clearing'
+		},
+		{ url: 'retyped', date: 'filled', kind: 'date_kept', why: 'only the fill is left for Sona to name' },
+		{ url: 'retyped', date: 'emptied', kind: 'date_emptied', why: 'only the date went blank by Sona' },
+		{ url: 'empty', date: 'retyped', kind: 'none', why: 'the date was emptied by the operator' },
+		{ url: 'filled', date: 'retyped', kind: 'url_kept', why: 'the sentence claims only the URL' },
+		{ url: 'emptied', date: 'retyped', kind: 'url_emptied', why: 'only the URL went blank by Sona' },
+
+		{ url: 'held', date: 'empty', kind: 'none', why: 'the result wrote nothing' },
+		{ url: 'held', date: 'refilled', kind: 'none', why: 'both fields are theirs' },
+		{ url: 'held', date: 'emptied', kind: 'date_emptied', why: 'the date went blank under them' },
+		{ url: 'held', date: 'filled', kind: 'date_only', why: 'their URL was left as it was' },
+		{ url: 'held', date: 'held', kind: 'none', why: 'the result wrote nothing' },
+
+		// The clash half. The URL is never filled here, so the question is only
+		// what the sentence may say about it.
+		{ url: 'empty', date: 'empty', clash: true, kind: 'none', why: 'nothing happened to report' },
+		{
+			url: 'empty',
+			date: 'filled',
+			clash: true,
+			kind: 'clash',
+			why: 'the URL was empty before the clash and is empty now'
+		},
+		{
+			url: 'empty',
+			date: 'emptied',
+			clash: true,
+			kind: 'date_emptied',
+			why: 'the clash sentence would claim a date it did not fill'
+		},
+		{
+			url: 'refilled',
+			date: 'empty',
+			clash: true,
+			kind: 'none',
+			why: 'the URL is theirs and no date was filled'
+		},
+		{
+			url: 'refilled',
+			date: 'filled',
+			clash: true,
+			kind: 'clash_kept',
+			why: 'clash would say the URL was left empty, and their URL is in it'
+		},
+		{
+			url: 'emptied',
+			date: 'empty',
+			clash: true,
+			kind: 'clash_emptied',
+			why: 'the clash names its own reason for the clearing'
+		},
+		{
+			url: 'emptied',
+			date: 'refilled',
+			clash: true,
+			kind: 'clash_emptied',
+			why: 'the date is theirs again, so the clearing is all that is left to name'
+		},
+		{
+			url: 'emptied',
+			date: 'filled',
+			clash: true,
+			kind: 'clash_date_url_emptied',
+			why: 'the URL went blank under them and the date was filled'
+		},
+		{
+			url: 'emptied',
+			date: 'emptied',
+			clash: true,
+			kind: 'both_emptied',
+			why: 'a clash with no date to report claims no reason its body contradicts'
+		},
+		{
+			url: 'retyped',
+			date: 'empty',
+			clash: true,
+			kind: 'none',
+			why: 'the clash cleared the URL, but the operator emptied it last'
+		},
+		{
+			url: 'retyped',
+			date: 'filled',
+			clash: true,
+			kind: 'clash_kept',
+			why: 'the field is as the operator left it, and clash_emptied would claim their deletion'
+		},
+		{
+			url: 'held',
+			date: 'empty',
+			clash: true,
+			kind: 'none',
+			why: 'the result wrote nothing'
+		},
+		{
+			url: 'held',
+			date: 'filled',
+			clash: true,
+			kind: 'clash_kept',
+			why: 'their URL was never empty'
+		},
+		{
+			url: 'held',
+			date: 'emptied',
+			clash: true,
+			kind: 'date_emptied',
+			why: 'only the date changed'
+		}
+	];
+
+	for (const row of rows) {
+		const name = `${row.clash ? 'a clash with' : 'a result with'} the URL ${row.url} and the date ${row.date} reads ${row.kind}: ${row.why}`;
+		it(name, () => {
+			const [filled, options] = argsFor(row);
+			expect(statusLineKind(filled, options)).toBe(row.kind);
+			// And the sentence it picks says nothing the screen contradicts, on
+			// either page — the edit page swaps one of the two mixed sentences.
+			for (const editMode of [false, true]) {
+				const line = statusSentence(row.kind, 'Twitter', { title: 'Clash Piece', editMode });
+				for (const claim of forbidden(row)) expect(line).not.toContain(claim);
+			}
+		});
+	}
 });
 
 describe('stateFromResponse', () => {

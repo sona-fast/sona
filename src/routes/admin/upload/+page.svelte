@@ -518,6 +518,10 @@
 	// put back (SONA-220). Without it the status line says a field was left as it
 	// was while the operator watched it go blank (4.1.3).
 	let sharedCleared = $state<LookupCleared>({});
+	// Whether the operator has put text of their own into each field since that
+	// record was written. See sharedEdited.
+	let sourceTypedIn = $state(false);
+	let dateTypedIn = $state(false);
 	// Not $state: nothing renders it. See takePendingCleared.
 	let pendingCleared: { key: number; emptied: LookupCleared } | null = null;
 	// A field the operator has typed into is theirs whether or not a lookup
@@ -525,11 +529,15 @@
 	// panel may still say Sona cleared (SONA-220). The filled half is unchanged
 	// — a status line that names a field needs it filled as well as untouched,
 	// so the extra arm only ever speaks for the cleared half.
+	// The typed-into half is LATCHED rather than read off the input. Derived live
+	// from the text, deleting what the operator typed into a field this result
+	// emptied puts "Sona cleared the source post URL" back over a field THEY just
+	// emptied, and the panel re-attributes their own deletion to Sona (SONA-220).
+	// Each latch lives exactly as long as the cleared record it speaks for: up on
+	// the first text of theirs, down where that record is reset.
 	const sharedEdited = $derived({
-		sourcePostUrl:
-			!sourceTagged && (sharedFilled.sourcePostUrl !== undefined || sourcePostUrl.trim() !== ''),
-		commissionedAt:
-			!dateTagged && (sharedFilled.commissionedAt !== undefined || commissionedAt.trim() !== '')
+		sourcePostUrl: !sourceTagged && (sharedFilled.sourcePostUrl !== undefined || sourceTypedIn),
+		commissionedAt: !dateTagged && (sharedFilled.commissionedAt !== undefined || dateTypedIn)
 	});
 	// The artist this result put in the select, so "Use X" can read back as
 	// "Using X" and revert when the operator changes the select by hand.
@@ -860,6 +868,8 @@
 		sharedFilled = {};
 		sharedUrlHeld = false;
 		sharedCleared = {};
+		sourceTypedIn = false;
+		dateTypedIn = false;
 		resetSharedResult();
 		return emptied;
 	}
@@ -1703,11 +1713,15 @@
 			class="input"
 			name="commissionedAt"
 			bind:value={commissionedAt}
-			oninput={() => {
+			oninput={(event) => {
 				// The panel's status line reads the filled record through this tag: a
 				// field typed over stops being the lookup's, and the sentence then
 				// neither claims it nor says it was left alone.
 				dateTagged = false;
+				// And the latch for the cleared record, which no later deletion
+				// lowers. Read off the event rather than the bound value, which this
+				// handler may run before.
+				if (event.currentTarget.value.trim() !== '') dateTypedIn = true;
 			}}
 			aria-describedby={dateTagged ? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'}
 		/>
@@ -1771,8 +1785,9 @@
 			placeholder={m.admin_upload_source_placeholder()}
 			name="sourcePostUrl"
 			bind:value={sourcePostUrl}
-			oninput={() => {
+			oninput={(event) => {
 				sourceTagged = false;
+				if (event.currentTarget.value.trim() !== '') sourceTypedIn = true;
 			}}
 			aria-describedby={sourceFieldDescribedBy}
 		/>

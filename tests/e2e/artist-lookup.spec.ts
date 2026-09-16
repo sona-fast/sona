@@ -939,6 +939,18 @@ test.describe('with a key saved', () => {
 		// wrote is gone, because this result had nothing to put in its place.
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+
+		// The operator types a URL into the field the clash emptied. The clearing
+		// is no longer theirs to be told about — but the plain clash sentence says
+		// the URL was "left empty", which the text they just typed contradicts, so
+		// the kept one answers instead (SONA-220).
+		await sourceInput(page).fill('https://www.furaffinity.net/view/999999/');
+		await expect(panel(page)).toContainText(
+			'left your source post URL as it was, because that post is already the source of Clash Piece'
+		);
+		await expect(panel(page)).not.toContainText('left the source post URL empty');
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
+		await expect(sourceInput(page)).toHaveValue('https://www.furaffinity.net/view/999999/');
 	});
 
 	/** A no-match is a result too, and it prefills nothing. It used to return
@@ -1000,6 +1012,19 @@ test.describe('with a key saved', () => {
 		// And the no-match itself is still on screen: only the sentence about the
 		// two fields went.
 		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+
+		// Deleting what they typed does not hand the clearing back to Sona. The
+		// field is empty again, but the operator emptied it this time, and the
+		// sentence would re-attribute their own deletion — so the flag stays down
+		// once their first keystroke put it there (SONA-220).
+		await sourceInput(page).fill('');
+		await dateInput(page).fill('');
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
+		await expect(panel(page)).not.toContainText('cleared the commissioned date');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
 	}
 
 	test('typing into an emptied field stops the panel naming it', async ({ page }) => {
@@ -1039,6 +1064,34 @@ test.describe('with a key saved', () => {
 			'Sona filled the source post URL from the Twitter post and cleared the commissioned date the last lookup filled, because that post has no date.'
 		);
 		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
+	});
+
+	// Dropping the cleared flag off a field the operator filled must not reroute
+	// the sentence to url_only, which says the date was "left as it was" — this
+	// result emptied it under them, and the flag going does not undo that. The
+	// kept sentence claims the URL and says nothing about the date (SONA-220).
+	test('a date typed over an emptied one keeps the sentence off it', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await stubLookup(page, xMatchBody({ ...SECOND_POST, postedAt: null }));
+		await pill(page).click();
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(panel(page)).toContainText('cleared the commissioned date the last lookup filled');
+
+		await dateInput(page).fill('2026-05-06');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL from the Twitter post. You can change it before you save.'
+		);
+		await expect(panel(page)).not.toContainText('cleared the commissioned date');
+		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
+		// The date they typed is still theirs, and the URL the lookup wrote is
+		// still tagged as its own.
+		await expect(dateInput(page)).toHaveValue('2026-05-06');
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
 	});
 
 	// The same three cases on the edit page, which ran its full reset at the click

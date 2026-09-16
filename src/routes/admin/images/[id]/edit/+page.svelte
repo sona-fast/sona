@@ -93,6 +93,15 @@
 	);
 	let sourceTagged = $state(false);
 	let dateTagged = $state(false);
+	// Latched, not read off the input: once the operator has typed into a field
+	// this result emptied, the cleared claim is off it for good. Derived live
+	// from the text, deleting what they typed puts "Sona cleared the source post
+	// URL" back over a field THEY just emptied, and the panel re-attributes
+	// their own deletion to Sona (SONA-220). Each latch lives exactly as long as
+	// the cleared record it speaks for: up on the first text of theirs, down
+	// wherever that record is reset.
+	let sourceTypedIn = $state(false);
+	let dateTypedIn = $state(false);
 	/** The artist the panel applied to the SELECT. Handed to the panel only
 	 * while the select is what saves: in new-artist mode the save posts
 	 * artistId=new and creates somebody else, so "Using {name}" there named an
@@ -124,10 +133,8 @@
 	// — a status line that names a field needs it filled as well as untouched,
 	// so the extra arm only ever speaks for the cleared half.
 	const lookupEdited = $derived({
-		sourcePostUrl:
-			!sourceTagged && (lookupFilled.sourcePostUrl !== undefined || sourcePostUrl.trim() !== ''),
-		commissionedAt:
-			!dateTagged && (lookupFilled.commissionedAt !== undefined || commissionedAt.trim() !== '')
+		sourcePostUrl: !sourceTagged && (lookupFilled.sourcePostUrl !== undefined || sourceTypedIn),
+		commissionedAt: !dateTagged && (lookupFilled.commissionedAt !== undefined || dateTypedIn)
 	});
 	const lookupSeedEdited = $derived({
 		artistName: lookupSeeded.artistName !== undefined && !nameTagged,
@@ -189,6 +196,8 @@
 		furaffinityTagged = false;
 		lookupUrlHeld = false;
 		lookupCleared = {};
+		sourceTypedIn = false;
+		dateTypedIn = false;
 		appliedArtist = null;
 		// The tag-suggestion state rides along: the accepted tags, the rating
 		// entail.dev returned for the PREVIOUS image, and its NSFW box (SONA-220).
@@ -261,6 +270,8 @@
 		lookupSeeded = {};
 		lookupUrlHeld = false;
 		lookupCleared = {};
+		sourceTypedIn = false;
+		dateTypedIn = false;
 		appliedArtist = null;
 		// A clash carried into the parent select belongs to the lookup that found
 		// it, so a second lookup must not leave the first one's piece on offer. The
@@ -849,11 +860,15 @@
 					class="input"
 					name="commissionedAt"
 					bind:value={commissionedAt}
-					oninput={() => {
+					oninput={(event) => {
 						// The panel's status line reads the filled record through this tag: a
 						// field typed over stops being the lookup's, and the sentence then
 						// neither claims it nor says it was left alone.
 						dateTagged = false;
+						// And the latch for the cleared record, which no later deletion
+						// lowers. Read off the event rather than the bound value, which
+						// this handler may run before.
+						if (event.currentTarget.value.trim() !== '') dateTypedIn = true;
 					}}
 					aria-describedby={dateTagged ? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'}
 				/>
@@ -917,8 +932,9 @@
 					class="input"
 					name="sourcePostUrl"
 					bind:value={sourcePostUrl}
-					oninput={() => {
+					oninput={(event) => {
 						sourceTagged = false;
+						if (event.currentTarget.value.trim() !== '') sourceTypedIn = true;
 					}}
 					aria-describedby={sourceFieldDescribedBy}
 				/>

@@ -222,9 +222,12 @@
 
      The region is atomic, so every change to the status line re-speaks the whole
      panel. What the lookup filled is a fixed record and only the edited-since
-     flags move, and a flag flips on the FIRST keystroke in a field and not
-     again — so an operator revising a filled field hears the panel once per
-     field, not once per keystroke. -->
+     flags move, and a flag flips the first time a field holds text of the
+     operator's and not again: the tag half is dropped by the first keystroke
+     over a filled field, and the typed-into half is latched by the page on the
+     first non-empty input rather than derived from the text, so deleting what
+     they typed does not flip it back (SONA-220). An operator revising a field
+     hears the panel once for it, not once per keystroke. -->
 <div
 	class="lookup-panel"
 	class:idle={lookup.kind === 'idle'}

@@ -495,18 +495,32 @@ export type StatusLineKind =
 	| 'none';
 
 /**
+ * The one invariant every branch here answers to: NO SENTENCE CLAIMS A FIELD
+ * STATE THE SCREEN CONTRADICTS. A kind is chosen off two records of the same
+ * two fields — `cleared`, what the last result BLANKED, worked out once when
+ * the fields went blank, and `edited`, which of them hold the operator's own
+ * text NOW — and the pair disagree on a field the result emptied and the
+ * operator then typed into. Which record answers depends on the question the
+ * sentence asks: "did Sona clear this field" is about the screen, so it reads
+ * the cleared flag with the edited one applied; "was this field empty before"
+ * is about history, so it reads the raw flag, which no later keystroke undoes.
+ * The truth table for all five states of a field is in the unit tests.
+ *
  * The sentence names only the fields still attributable to the lookup, and
  * asserts nothing about one the operator has edited since. `url_only` says the
  * date was "left as it was", which is true of a date the lookup never filled
  * and false of one it filled and the operator then changed — that case gets
  * `url_kept`, which claims the URL and stays silent about the date. `date_kept`
- * is the mirror.
+ * is the mirror, and a date this result EMPTIED under the operator picks it
+ * too: the field is theirs again, but "left as it was" is still a false report
+ * of a field they watched go blank.
  *
  * The clash pair follows the same rule for the URL. `prefillForResult` skips the
  * URL on any clash, whatever the field holds, so "left the source post URL
  * empty" is true only of a field that WAS empty. `urlHeld` says it is not, and
  * picks `clash_kept`, which claims the date and says the URL was not filled
- * without claiming it is empty.
+ * without claiming it is empty. A URL this result emptied and the operator has
+ * typed back in is not empty either, so it picks `clash_kept` as well.
  *
  * `cleared` is the other half of the same honesty. A second lookup keeps the
  * fields the first one filled until its own result lands, so a result with no
@@ -535,6 +549,12 @@ export function statusLineKind(
 		sourcePostUrl: held.sourcePostUrl === true && edited.sourcePostUrl !== true,
 		commissionedAt: held.commissionedAt === true && edited.commissionedAt !== true
 	};
+	// The raw flags, which the keystroke above does not reach. A field the result
+	// blanked is one it CHANGED, whoever has typed into it since — so the kept
+	// sentences, which exist to avoid claiming a field was "left as it was", are
+	// chosen off these rather than off the dropped ones (SONA-220).
+	const urlWasEmptied = held.sourcePostUrl === true;
+	const dateWasEmptied = held.commissionedAt === true;
 	const urlFilled = filled.sourcePostUrl !== undefined;
 	const dateFilled = filled.commissionedAt !== undefined;
 	const url = urlFilled && !edited.sourcePostUrl;
@@ -545,7 +565,10 @@ export function statusLineKind(
 		// — the operator watched it go, and only the emptied kind names it.
 		if (date) {
 			if (cleared.sourcePostUrl) return 'clash_date_url_emptied';
-			return options.urlHeld ? 'clash_kept' : 'clash';
+			// The snapshot is taken when the prefill runs, so it still says "empty"
+			// about a URL the operator has typed in since — and the field they are
+			// looking at is not empty. The raw emptied flag answers for them.
+			return options.urlHeld || urlWasEmptied ? 'clash_kept' : 'clash';
 		}
 		// A clash with no date to report either. The plain url_emptied sentence
 		// gives "this lookup filled nothing in its place" as the reason, which
@@ -558,11 +581,11 @@ export function statusLineKind(
 		if (url && date) return 'both';
 		if (url) {
 			if (cleared.commissionedAt) return 'url_and_date_emptied';
-			return dateFilled ? 'url_kept' : 'url_only';
+			return dateFilled || dateWasEmptied ? 'url_kept' : 'url_only';
 		}
 		if (date) {
 			if (cleared.sourcePostUrl) return 'date_and_url_emptied';
-			return urlFilled ? 'date_kept' : 'date_only';
+			return urlFilled || urlWasEmptied ? 'date_kept' : 'date_only';
 		}
 	}
 	if (cleared.sourcePostUrl && cleared.commissionedAt) return 'both_emptied';
