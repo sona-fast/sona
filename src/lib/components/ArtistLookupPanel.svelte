@@ -142,6 +142,30 @@
 	// lists have to be kept in step, and the one that decides WHERE the sentence
 	// renders is the one that can silently disagree with the sentence itself.
 	const emptiedOnly = $derived(emptiedText !== '');
+	// Every sentence that reports a field going blank, and not only the three
+	// that report nothing else. The other three say it inline in the markup, so
+	// there is no text to read it off the way emptiedOnly does — kept next to
+	// that one, as the single answer to "does this line describe a change the
+	// operator's fields just made".
+	const reportsEmptied = $derived(
+		emptiedOnly ||
+			statusKind === 'url_and_date_emptied' ||
+			statusKind === 'date_and_url_emptied' ||
+			statusKind === 'clash_emptied'
+	);
+	// The two failure reasons that carry advice under the lead. Held as text so
+	// the emptied sentence can go ABOVE it: a parent move onto a tile whose
+	// lookup failed empties the fields, and what just happened to the form is
+	// read before what to do about the failure.
+	const failedHint = $derived(
+		lookup.kind !== 'failed'
+			? ''
+			: lookup.reason === 'rate_limited'
+				? m.admin_lookup_paused_hint()
+				: lookup.reason === 'key_refused'
+					? m.admin_lookup_refused_hint()
+					: ''
+	);
 	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
 	// The "Sets the artist to {name}." sentence and the button it
 	// names render on the same condition, so the button can describe itself with
@@ -237,11 +261,9 @@
 				{#if lookup.reason === 'rate_limited'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_paused_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_paused_body()}</p>
-					<p class="lookup-status">{m.admin_lookup_paused_hint()}</p>
 				{:else if lookup.reason === 'key_refused'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_refused_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_refused_body()}</p>
-					<p class="lookup-status">{m.admin_lookup_refused_hint()}</p>
 				{:else if lookup.reason === 'too_large'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_too_large_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_too_large_body()}</p>
@@ -266,6 +288,17 @@
 				{:else}
 					<div class="lookup-eyebrow">{m.admin_lookup_failed_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_failed_body()}</p>
+				{/if}
+				<!-- A failure fills nothing, but a parent move onto a tile that failed
+				     still empties what the last parent's lookup filled. This arm carries
+				     no status line of its own, so the sentence renders here — above the
+				     advice, because the fields went blank under the operator and that is
+				     the part nothing else on screen reports. -->
+				{#if emptiedOnly}
+					<p class="lookup-status lookup-emptied">{emptiedText}</p>
+				{/if}
+				{#if failedHint}
+					<p class="lookup-status">{failedHint}</p>
 				{/if}
 			{:else if data}
 				{#if clash}
@@ -402,7 +435,7 @@
 				{#if emptiedOnly}
 					<p class="lookup-status lookup-emptied">{emptiedText}</p>
 				{:else if statusKind !== 'none' && prefill}
-					<p class="lookup-status">
+					<p class="lookup-status" class:lookup-emptied={reportsEmptied}>
 						{#if statusKind === 'both'}
 							{m.admin_lookup_status_both({ site: siteLabel(prefill.site) })}
 						{:else if statusKind === 'url_only'}

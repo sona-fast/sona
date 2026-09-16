@@ -1587,7 +1587,7 @@
 	"admin_lookup_status_date_and_url_emptied": "{site}の投稿から制作依頼日を入力しました。今回の結果には入れられるリンクがないため、前回の検索で入力した投稿元URLは消去しました。保存前に日付を変更できます。",
 	"admin_lookup_status_both_emptied": "今回の検索はどちらの項目も入力しなかったため、前回の検索で入力した投稿元URLと制作依頼日は消去しました。",
 	"admin_lookup_status_url_emptied": "今回の検索は代わりの値を入力しなかったため、前回の検索で入力した投稿元URLは消去しました。保存前に入力できます。",
-	"admin_lookup_status_date_emptied": "今回の検索は日付を入力しなかったため、前回の検索で入力した制作依頼日は消去しました。",
+	"admin_lookup_status_date_emptied": "今回の検索は代わりの日付を入力しなかったため、前回の検索で入力した制作依頼日は消去しました。保存前に入力できます。",
 	"admin_lookup_status_artist_hint": "アーティストに{name}を設定します。",
 	"admin_lookup_status_seed_both": "新しいアーティストの名前と{site}のリンクを入力しました。確認するまでは推測にすぎず、公開するのはあなたです。",
 	"admin_lookup_status_seed_name": "新しいアーティストの名前を入力しました。確認するまでは推測にすぎず、公開するのはあなたです。",

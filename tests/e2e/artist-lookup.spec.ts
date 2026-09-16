@@ -2294,7 +2294,7 @@ test.describe('with a key saved', () => {
 	// "left as it was", over an input the operator had just watched go blank, and
 	// the live region said nothing at all because the URL had been written
 	// (4.1.3).
-	test('a parent move that refills the URL says the date was cleared', async ({ page }) => {
+	test('a parent move that refills the URL reports the cleared date once', async ({ page }) => {
 		await stubLookup(page, matchedBody());
 		await twoDoneTiles(page);
 
@@ -2340,10 +2340,53 @@ test.describe('with a key saved', () => {
 			'Sona filled the source post URL from the FurAffinity post and cleared the commissioned date the last lookup filled, because that post has no date.'
 		);
 		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
-		// And so does the live region: the refill is visible in a field the
-		// operator can see, the clearing is the part nothing else reports.
-		await expect(page.locator(LIVE_REGION)).toHaveText(
+		// Drawn as a report of what just happened, like the standalone cleared
+		// sentence, rather than in the muted colour the advice lines use.
+		await expect(
+			panel(page).locator('p.lookup-status').filter({ hasText: 'cleared the commissioned date' })
+		).toHaveClass(/lookup-emptied/);
+		// And the announcer does not say it a second time. The panel's own status
+		// region carries that sentence, and the announcement it used to make said
+		// only half of what happened — the clearing, never the refill.
+		await expect(page.locator(LIVE_REGION)).not.toContainText(
 			"Sona cleared the commissioned date the last parent image's lookup filled."
+		);
+	});
+
+	// A move onto a tile whose lookup FAILED empties the fields too: the failure
+	// has nothing to put back. That arm carries no status line of its own, so the
+	// two fields went blank with the panel talking only about the failure.
+	test('a parent move onto a failed tile says what it emptied, above the advice', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await stubLookup(page, { enabled: true, error: 'rate_limited', forwarded: true }, 429);
+		await tileLookup(page).nth(1).click();
+		await expect(page.locator('.tile-lookup-failed')).toHaveText('Lookup paused');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const emptied =
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.';
+		await expect(panel(page)).toContainText(emptied);
+		// Above the "try again in a minute" advice: what happened to the form is
+		// read before what to do about the failure.
+		const lines = await panel(page).locator('p.lookup-status').allInnerTexts();
+		expect(lines.indexOf(emptied)).toBeGreaterThanOrEqual(0);
+		expect(lines.indexOf(emptied)).toBeLessThan(
+			lines.findIndex((l) => l.includes('Try again in a minute'))
+		);
+		// The panel reports it, so the announcer does not repeat it.
+		await expect(page.locator(LIVE_REGION)).not.toContainText(
+			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled."
 		);
 	});
 
@@ -2465,6 +2508,61 @@ test.describe('with a key saved', () => {
 		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
 		await page.getByRole('radio', { name: 'New piece' }).check();
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+	});
+
+	// The round trip can refill one field and leave the other blank, and the two
+	// halves used to be announced separately: the clearing went out first and the
+	// refill overwrote it in the same tick, so the region held "filled the source
+	// post URL" and the operator never heard that the date had gone (4.1.3). One
+	// sentence now, the panel's own, naming both halves.
+	test('returning to a new set names the refill and the clearing in one line', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The same tile, looked up again while no tile is the parent — so the
+		// result lands on the tile and not on the shared fields, which keep what
+		// the first lookup filled. Its post carries no date.
+		const DATELESS_POST = 'https://www.furaffinity.net/view/54321/';
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '54321',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: null,
+						rating: 'general',
+						postUrl: DATELESS_POST
+					}
+				]
+			})
+		);
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await tileLookup(page).nth(0).click();
+		await expect(tileLookup(page).nth(0)).toHaveAttribute('aria-busy', 'false');
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+
+		await page.getByRole('radio', { name: 'New piece' }).check();
+
+		// The re-derivation empties both and puts only the URL back.
+		await expect(sourceInput(page)).toHaveValue(DATELESS_POST);
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// One line, naming both: the field that was filled and the field that was
+		// emptied. The panel says the same thing, but its region is mounted by this
+		// same mode swap and a region inserted with its first content is missed.
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			'Sona filled the source post URL from the FurAffinity post and cleared the commissioned date the last lookup filled, because that post has no date. You can change the URL before you save.'
+		);
 	});
 
 	// The refill is announced because it happened. applyShared never overwrites a

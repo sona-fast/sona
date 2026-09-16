@@ -847,8 +847,13 @@ describe('statusLineKind', () => {
 		);
 		// The reason blames the lookup, the way its siblings do: this sentence
 		// renders on the no-match arm too, where there is no result to have a date.
+		// And it ends on the next step, the way its URL sibling does — the field
+		// is empty and the operator is the one who can put a date back in it.
 		expect(m.admin_lookup_status_date_emptied({}, { locale: 'en' })).toBe(
-			'Sona cleared the commissioned date the last lookup filled, because this lookup filled no date in its place.'
+			'Sona cleared the commissioned date the last lookup filled, because this lookup filled no date in its place. You can set one before you save.'
+		);
+		expect(m.admin_lookup_status_date_emptied({}, { locale: 'ja' })).toBe(
+			'今回の検索は代わりの日付を入力しなかったため、前回の検索で入力した制作依頼日は消去しました。保存前に入力できます。'
 		);
 		// The panel's click-time announcement and these lines describe the same
 		// thing, so they use the same verb.

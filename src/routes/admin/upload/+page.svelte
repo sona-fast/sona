@@ -358,7 +358,7 @@
 			// survived the flip out of 'new' and write nothing back, erasing them
 			// with none of the announcement returnToNewSet makes. The flip back
 			// to 'new' goes through returnToNewSet, which re-derives them there.
-			if (groupMode !== 'existing') onParentChanged(parentIndex);
+			if (groupMode !== 'existing') pickParent(parentIndex);
 		}
 	}
 
@@ -843,8 +843,17 @@
 
 	/** Which of the two shared fields this call actually wrote. A result whose
 	 * fields the operator has typed over writes neither, and a caller that speaks
-	 * about the refill has to know that before it claims one happened. */
-	function applyShared(next: LookupState): { sourcePostUrl: boolean; commissionedAt: boolean } {
+	 * about the refill has to know that before it claims one happened.
+	 *
+	 * `emptied` is what a reset the caller ran first took out of those fields —
+	 * a parent move, which untags both before this runs, so this call cannot see
+	 * it and the panel would say the field was "left as it was" over an input the
+	 * operator just watched go blank (4.1.3). Merged in here rather than
+	 * recomputed by the caller, so `sharedCleared` has exactly one writer. */
+	function applyShared(
+		next: LookupState,
+		emptied: LookupCleared = {}
+	): { sourcePostUrl: boolean; commissionedAt: boolean } {
 		const wrote = { sourcePostUrl: false, commissionedAt: false };
 		// A failure, or a search cancelled back to idle, leaves both fields exactly
 		// as they are: there is no new post to describe them, and what the last
@@ -856,7 +865,12 @@
 		// the panel's no-match arm renders. Returning early here instead left the
 		// last lookup's URL and date on the form, still tagged From lookup, under
 		// a panel saying Sona found nothing.
-		if (next.kind !== 'results' && next.kind !== 'no_match') return wrote;
+		// Nothing lands, so whatever the caller's reset took out is the whole of
+		// what this move did to the fields.
+		if (next.kind !== 'results' && next.kind !== 'no_match') {
+			sharedCleared = { ...emptied };
+			return wrote;
+		}
 		// A field the LAST prefill wrote and the operator has not typed over since
 		// is still the lookup's to replace, so this result reads it as empty and
 		// fills it. Only the tag can tell the two apart, which is why the value is
@@ -869,7 +883,10 @@
 				? prefillForResult(next.data, { sourcePostUrl: ownSource, commissionedAt: ownDate })
 				: {};
 		sharedFilled = fields;
-		const cleared: LookupCleared = {};
+		// Seeded with what the caller's reset emptied, and unset again for a field
+		// this result writes back: a move that empties both and refills the URL has
+		// cleared the date and nothing else.
+		const cleared: LookupCleared = { ...emptied };
 		if (fields.sourcePostUrl !== undefined) {
 			// Assigned plainly. A second lookup that lands on the SAME post writes
 			// the same string, and $state only notifies on a value that differs, so
@@ -878,6 +895,7 @@
 			sourcePostUrl = fields.sourcePostUrl;
 			sourceTagged = true;
 			wrote.sourcePostUrl = true;
+			cleared.sourcePostUrl = false;
 		} else if (sourceTagged) {
 			// This result has no post to offer — no match, or a clash whose URL
 			// belongs to another piece — so the last one's URL goes now. Deferred to
@@ -892,6 +910,7 @@
 			commissionedAt = fields.commissionedAt;
 			dateTagged = true;
 			wrote.commissionedAt = true;
+			cleared.commissionedAt = false;
 		} else if (dateTagged) {
 			commissionedAt = '';
 			dateTagged = false;
@@ -912,48 +931,70 @@
 	 * and hearing that Sona filled them would be a false report of a change that
 	 * did not happen. */
 	function returnToNewSet() {
-		if (tiles[parentIndex]?.lookup.kind !== 'results') return;
+		const parent = tiles[parentIndex]?.lookup;
+		const data = parent?.kind === 'results' ? parent.data : null;
+		if (!data) return;
+		// The site the panel's own sentence names, read the way the panel reads it
+		// so the two say the same post.
+		const site = pickPrefillMatch(data.matches)?.site ?? null;
 		// "Using {name}" is about the SELECT, not about the result that put the
 		// artist there. The re-derivation behind this round trip clears it, and
 		// the button relabelled itself back to "Use {name}" over a select that
 		// still held that artist. Only this round trip restores it: the operator
 		// changing the select, or a new result, is a real reason to drop it.
 		const held = appliedArtist;
-		const wrote = onParentChanged(parentIndex);
+		const { wrote, cleared } = onParentChanged(parentIndex);
 		if (held && Number(selectedArtistId) === held.id) appliedArtist = held;
-		if (wrote.sourcePostUrl && wrote.commissionedAt) {
+		// Exactly one line. The round trip can refill one field and leave the
+		// other blank, and a say() per field would have the second overwrite the
+		// first before a screen reader reached it — so the mixed case borrows the
+		// panel's own sentence for it, which names both halves at once.
+		if (site && wrote.sourcePostUrl && cleared.commissionedAt) {
+			announcer.say(m.admin_lookup_status_url_and_date_emptied({ site: siteLabel(site) }));
+		} else if (site && wrote.commissionedAt && cleared.sourcePostUrl) {
+			announcer.say(m.admin_lookup_status_date_and_url_emptied({ site: siteLabel(site) }));
+		} else if (wrote.sourcePostUrl && wrote.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_refilled());
 		} else if (wrote.sourcePostUrl) {
 			announcer.say(m.admin_lookup_announce_shared_refilled_source());
 		} else if (wrote.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_refilled_date());
+		} else if (cleared.sourcePostUrl && cleared.commissionedAt) {
+			announcer.say(m.admin_lookup_announce_shared_cleared());
+		} else if (cleared.sourcePostUrl) {
+			announcer.say(m.admin_lookup_announce_shared_cleared_source());
+		} else if (cleared.commissionedAt) {
+			announcer.say(m.admin_lookup_announce_shared_cleared_date());
 		}
 	}
 
-	/** The parent moved: the shared fields describe whatever the parent is now. */
-	function onParentChanged(index: number) {
+	/** The parent moved: the shared fields describe whatever the parent is now.
+	 * Says nothing itself. The live region holds one line at a time, so a
+	 * function that announced here AND left its caller free to announce would
+	 * have the second say() overwrite the first inside the same tick — the
+	 * caller gets the record and picks the one sentence for it. A tile that is
+	 * gone is read as idle: the fields empty with no result on its way, which is
+	 * what applyShared does with a lookup that never ran. */
+	function onParentChanged(index: number): {
+		wrote: { sourcePostUrl: boolean; commissionedAt: boolean };
+		cleared: LookupCleared;
+	} {
 		parentIndex = index;
 		const emptied = resetSharedPrefill();
-		const tile = tiles[parentIndex];
-		const wrote = tile
-			? applyShared(tile.lookup)
-			: { sourcePostUrl: false, commissionedAt: false };
-		// What the move left blank: emptied by the reset above and not written
-		// back by the new parent's result. applyShared cannot see this itself —
-		// the reset untags both fields before it runs, so its own record comes
-		// back empty and the panel would say the field was "left as it was" over
-		// an input the operator just watched go blank (4.1.3).
-		const cleared: LookupCleared = {
-			sourcePostUrl: !!emptied.sourcePostUrl && !wrote.sourcePostUrl,
-			commissionedAt: !!emptied.commissionedAt && !wrote.commissionedAt
-		};
-		sharedCleared = cleared;
-		// A tile with no result of its own shows no panel and no status line, so a
-		// field that empties does it with nothing on screen saying why — said out
-		// loud instead, the way returnToNewSet announces a refill. Per field, not
-		// only when nothing at all was written: a move that refills the URL and
-		// empties the date is exactly the case the panel used to misreport, and
-		// the operator hears about the one that went blank.
+		const wrote = applyShared(tiles[parentIndex]?.lookup ?? { kind: 'idle' }, emptied);
+		return { wrote, cleared: sharedCleared };
+	}
+
+	/** The Parent radio moved, or the parent tile was removed and the radio
+	 * landed on another one. The panel under it is already mounted and its status
+	 * region carries the sentence for every settled result, so announcing here
+	 * too would say the same thing twice. Only a lookup that never ran or is
+	 * still running draws no sentence at all, and then the two fields empty with
+	 * nothing on screen saying why (4.1.3). */
+	function pickParent(index: number) {
+		const { cleared } = onParentChanged(index);
+		const kind = tiles[index]?.lookup.kind ?? 'idle';
+		if (kind !== 'idle' && kind !== 'searching') return;
 		if (cleared.sourcePostUrl && cleared.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_cleared());
 		} else if (cleared.sourcePostUrl) {
@@ -961,7 +1002,6 @@
 		} else if (cleared.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_cleared_date());
 		}
-		return wrote;
 	}
 
 	function useLookupArtist(artist: { id: number; name: string }) {
@@ -1276,7 +1316,7 @@
 									name="parentPick"
 									checked={parentIndex === i}
 									aria-label={m.admin_lookup_parent_radio({ fileName: tile.fileName })}
-									onchange={() => onParentChanged(i)}
+									onchange={() => pickParent(i)}
 								/>
 								<span>{m.admin_variant_parent_radio()}</span>
 							</label>
