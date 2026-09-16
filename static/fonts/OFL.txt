@@ -1,6 +1,7 @@
 Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git)
 Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
 Copyright 2018 The Chakra Petch Project Authors (https://github.com/m4rc1e/Chakra-Petch.git)
+Copyright 2014 The Nunito Project Authors (https://github.com/googlefonts/nunito)
 Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

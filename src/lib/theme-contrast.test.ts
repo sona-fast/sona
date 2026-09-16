@@ -477,6 +477,12 @@ const RESTING_PAIRS: Array<{ ink: TokenKey; ground: TokenKey; floor: number }> =
 	// (src/routes/admin/+layout.svelte).
 	{ ink: 'sidebarForeground', ground: 'sidebar', floor: 4.5 },
 	{ ink: 'mutedForeground', ground: 'sidebar', floor: 4.5 },
+	// The admin nav paints its hover and active items this way (+layout.svelte:217
+	// and :223): --sidebar-foreground on the --sidebar-accent fill.
+	{ ink: 'sidebarForeground', ground: 'sidebarAccent', floor: 4.5 },
+	// The admin nav link's focus ring is drawn on the --sidebar surface, so
+	// WCAG 1.4.11 wants 3:1 of it there too.
+	{ ink: 'ring', ground: 'sidebar', floor: 3 },
 	{ ink: 'link', ground: 'background', floor: 4.5 },
 	{ ink: 'link', ground: 'card', floor: 4.5 },
 	// --primary-text is --primary in its small-text role (SONA-126): headings,
@@ -532,12 +538,22 @@ const KNOWN_FAILURES = new Map<string, number>([
 	['aurora light border on background', 1.29],
 	['terracotta dark border on background', 1.39],
 	['terracotta light border on background', 1.38],
+	// Petal and Pewter draw the same soft hairline as the shipped themes, and fail
+	// the same way (SONA-227).
+	['petal dark border on background', 1.33],
+	['petal light border on background', 1.35],
+	['pewter dark border on background', 1.34],
+	['pewter light border on background', 1.4],
 	['default dark border on card', 1.28],
 	['default light border on card', 1.61],
 	['aurora dark border on card', 1.32],
 	['aurora light border on card', 1.4],
 	['terracotta dark border on card', 1.26],
 	['terracotta light border on card', 1.82],
+	['petal dark border on card', 1.22],
+	['petal light border on card', 1.48],
+	['pewter dark border on card', 1.23],
+	['pewter light border on card', 1.59],
 	['terracotta light mutedForeground on secondary', 3.96],
 	// The hover twin of the pairing above, and it fails for the same reason.
 	['terracotta light mutedForeground on muted', 4.11],
@@ -667,18 +683,17 @@ describe('muted-foreground non-text contrast, every theme × surface × mode (WC
 
 // The refused-link hint under the Tags field is coloured --status-warn, the same
 // token the suggestion tray's eyebrow uses (SONA-220). It is small text on the
-// admin form's card, so it is held to 4.5:1 there. --status-warn is declared once
-// per MODE (:root for dark, [data-theme='light'] for light) and inherited by the
-// alternate themes, so the colour comes from the mode block and the surface from
-// the theme's own block. A failure here is a finding to report, not to silence.
+// admin form's card, so it is held to 4.5:1 there. A theme inherits --status-warn
+// from its mode block (:root for dark, [data-theme='light'] for light) unless it
+// declares its own, so the colour is read through the theme cascade rather than
+// off the mode block. A failure here is a finding to report, not to silence.
 describe('warn text WCAG AA contrast on cards, every theme × mode (SONA-220)', () => {
-	const warnFor = (sel: string) =>
-		blockToken(sel.includes("[data-theme='light']") ? "[data-theme='light']" : ':root', 'status-warn');
-
 	for (const surface of ['background', 'card'] as const) {
 		for (const { name, sel } of THEME_BLOCKS) {
 			it(`${name}: text colored --status-warn meets 4.5:1 on the ${surface} surface`, () => {
-				expect(contrast(warnFor(sel), blockToken(sel, surface))).toBeGreaterThanOrEqual(4.5);
+				expect(
+					contrast(blockToken(sel, 'status-warn'), blockToken(sel, surface))
+				).toBeGreaterThanOrEqual(4.5);
 			});
 		}
 	}
@@ -1053,7 +1068,7 @@ describe('status-ink text on its own tint (SONA-209)', () => {
 	// Same bargain as KNOWN_FAILURES above: record the ratio measured when this
 	// describe was written rather than silence the assert, because no palette
 	// value moves in SONA-209. Terracotta light's status inks are the palest of
-	// the three themes, and its page background is the lighter of the two
+	// the themes, and its page background is the lighter of the two
 	// surfaces, so that is where a status ink and its tint converge. --destructive
 	// is a saturated red in every palette and sits close to its own 20% tint on
 	// most of them, which is why its failures are not confined to one theme.

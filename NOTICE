@@ -9,7 +9,7 @@ the Sona project. The Apache License 2.0 does not grant permission to use
 these trade names except as required for reasonable and customary use in
 describing the origin of the work (see License section 6).
 
-This product bundles four typefaces, all used under the SIL Open Font
+This product bundles five typefaces, all used under the SIL Open Font
 License 1.1. The license text is in static/fonts/OFL.txt, next to the font
 files it covers:
 
@@ -21,6 +21,9 @@ files it covers:
 
   Copyright 2018 The Chakra Petch Project Authors
   (https://github.com/m4rc1e/Chakra-Petch.git)
+
+  Copyright 2014 The Nunito Project Authors
+  (https://github.com/googlefonts/nunito)
 
   Copyright (c) 2017 IBM Corp. with Reserved Font Name "Plex"
   (https://github.com/IBM/plex)
