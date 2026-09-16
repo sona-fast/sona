@@ -237,7 +237,7 @@
      hears the panel once for it, not once per keystroke. -->
 <div
 	class="lookup-panel"
-	class:idle={lookup.kind === 'idle'}
+	class:idle={lookup.kind === 'idle' && !movedEmptied}
 	role="region"
 	aria-label={m.admin_lookup_panel_label()}
 >
@@ -487,6 +487,17 @@
 			{#if privateNotice}
 				<p class="private-notice">{m.admin_lookup_private_notice()}</p>
 			{/if}
+		{:else if movedEmptied}
+			<!-- A parent move onto a tile that was never looked up empties what the
+			     last lookup filled, and the idle arm drew nothing at all: the two
+			     fields went blank with only the announcement saying why, so a
+			     sighted operator was told nothing (4.1.3). The searching arm's
+			     sentence and the searching arm's class, off the same chooser, so
+			     the two states name the fields the same way.
+			     aria-hidden because this paragraph lands inside the panel's own
+			     status region: pickParent announces the move, and without it the
+			     region would speak the same sentence a second time. -->
+			<p class="lookup-status lookup-emptied" aria-hidden="true">{movedEmptied}</p>
 		{/if}
 		</div>
 
@@ -673,7 +684,9 @@
 
 	/* Idle: no card, no space, but the live region above still exists so the
 	   first message written into it is announced. Not display:none — a hidden
-	   region is not a region a screen reader watches. */
+	   region is not a region a screen reader watches. Dropped when the idle arm
+	   has a cleared sentence to draw, so that line sits in the card every other
+	   arm's status line sits in rather than against a padless edge. */
 	.lookup-panel.idle {
 		border: 0;
 		padding: 0;

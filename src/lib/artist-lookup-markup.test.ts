@@ -21,33 +21,151 @@ const ANNOUNCER = read('src/lib/components/LiveAnnouncer.svelte');
 // tag-suggestion note it also holds (SONA-220).
 const APP_CSS = read('src/app.css');
 
+// The end of the string literal that opens at `i`, one past its closing quote.
+// Throws rather than running to the end of the file: an unterminated literal
+// means the scanner has lost its place, and a silent slice from there would
+// hand every assertion under it the wrong text.
+function endOfString(source: string, i: number): number {
+	const quote = source[i];
+	for (let j = i + 1; j < source.length; j++) {
+		if (source[j] === '\\') {
+			j++;
+			continue;
+		}
+		if (source[j] === quote) return j + 1;
+		// A plain quote cannot span a line; a template literal can.
+		if (quote !== '`' && source[j] === '\n') break;
+	}
+	throw new Error(`unterminated ${quote} literal at index ${i} in source`);
+}
+
+// The index of the `close` that matches the first `open` at or after `from`,
+// stepping over `//` line comments, `/* */` block comments and string literals
+// so a delimiter written inside one never moves the depth. Throws when the
+// closer never arrives, so a scan that walks off the end says so instead of
+// returning a slice that stops wherever the source did.
+function matchDelim(
+	source: string,
+	from: number,
+	open: string,
+	close: string,
+	what: string
+): number {
+	let depth = 0;
+	let i = from;
+	while (i < source.length) {
+		if (source.startsWith('//', i)) {
+			const eol = source.indexOf('\n', i);
+			i = eol < 0 ? source.length : eol + 1;
+			continue;
+		}
+		if (source.startsWith('/*', i)) {
+			const end = source.indexOf('*/', i + 2);
+			if (end < 0) throw new Error(`unterminated block comment at index ${i} in source`);
+			i = end + 2;
+			continue;
+		}
+		if (source[i] === '"' || source[i] === "'" || source[i] === '`') {
+			i = endOfString(source, i);
+			continue;
+		}
+		if (source[i] === open) depth++;
+		else if (source[i] === close && --depth === 0) return i;
+		i++;
+	}
+	throw new Error(
+		depth === 0
+			? `no ${open} for ${what} in source`
+			: `no closing ${close} for ${what} in source (depth ${depth} at the end of the file)`
+	);
+}
+
 // A function's body, sliced from its declaration by matching braces. A
 // `[\s\S]*?\n\t}` span stops at the first one-tab closing brace, which on a
 // multi-line return type is the end of the annotation rather than the end of
 // the body, and every assertion under it then reads the signature alone
 // (SONA-220). Throws when the function is gone, so a rename can never leave a
-// negative assertion asserting nothing.
+// negative assertion asserting nothing, and throws again when the braces never
+// balance rather than scanning to the end of the file and slicing whatever it
+// reached.
 function fnBody(source: string, name: string): string {
 	const start = source.indexOf(`function ${name}(`);
 	if (start < 0) throw new Error(`no function named ${name} in source`);
-	let i = start;
-	for (let depth = 0; ; i++) {
-		if (source[i] === '(') depth++;
-		else if (source[i] === ')' && --depth === 0) break;
-	}
+	let i = matchDelim(source, start, '(', ')', `${name}'s parameter list`) + 1;
 	// Past the parameter list, a brace-balanced span with another `{` after it is
 	// a return-type annotation; the one nothing follows is the body.
 	for (;;) {
-		let close = source.indexOf('{', i);
-		for (let depth = 0; ; close++) {
-			if (source[close] === '{') depth++;
-			else if (source[close] === '}' && --depth === 0) break;
-		}
+		const close = matchDelim(source, i, '{', '}', `${name}'s body`);
 		const rest = source.slice(close + 1);
 		if (rest[rest.search(/\S/)] !== '{') return source.slice(start, close + 1);
 		i = close + 1;
 	}
 }
+
+// Every assertion in this file that reads one function rather than the whole
+// source rests on the slicer above, so the slicer is pinned too: a brace it
+// miscounts hands the assertion under it a body that stops in the middle, and
+// a negative assertion then passes on text that was never searched.
+describe('the function-body slicer', () => {
+	it('ignores a brace written inside a comment', () => {
+		const line = [
+			'function sample() {',
+			'\t// a stray } in a line comment',
+			'\tconst kept = 1;',
+			'}',
+			'const after = 2;'
+		].join('\n');
+		expect(fnBody(line, 'sample')).toContain('const kept = 1;');
+		expect(fnBody(line, 'sample')).not.toContain('const after');
+
+		const block = [
+			'function sample() {',
+			'\t/* a stray } and a { in a block comment',
+			'\t   that runs over two lines */',
+			'\tconst kept = 1;',
+			'}',
+			'const after = 2;'
+		].join('\n');
+		expect(fnBody(block, 'sample')).toContain('const kept = 1;');
+		expect(fnBody(block, 'sample')).not.toContain('const after');
+	});
+
+	it('ignores a brace written inside a string', () => {
+		const strings = [
+			'function sample() {',
+			"\tconst quoted = '}';",
+			'\tconst template = `${quoted} {`;',
+			'\tconst kept = 1;',
+			'}',
+			'const after = 2;'
+		].join('\n');
+		expect(fnBody(strings, 'sample')).toContain('const kept = 1;');
+		expect(fnBody(strings, 'sample')).not.toContain('const after');
+	});
+
+	// The reason the scan is bounded: run off the end and it used to read past
+	// the string entirely, comparing undefined forever.
+	it('says so when the closing brace never comes', () => {
+		expect(() => fnBody('function sample() {\n\tconst unclosed = 1;\n', 'sample')).toThrow(
+			/no closing \} for sample's body/
+		);
+		expect(() => fnBody('const x = 1;\n', 'sample')).toThrow(/no function named sample/);
+	});
+
+	// The case the slicer exists for: a multi-line return type annotation is a
+	// balanced brace span that another `{` follows, and the body is the one
+	// nothing follows.
+	it('takes the body rather than a multi-line return type', () => {
+		const annotated = [
+			'function sample(): {',
+			'\tfield: string;',
+			'} {',
+			'\tconst kept = 1;',
+			'}'
+		].join('\n');
+		expect(fnBody(annotated, 'sample')).toContain('const kept = 1;');
+	});
+});
 
 describe('lookup button and its disclosure hint', () => {
 	it('offers the button only when a key is configured, on both pages', () => {
@@ -254,13 +372,32 @@ describe('the panel', () => {
 	// and that first content is the "lookup has started" message. The region is
 	// in the DOM from the first render; the state branch is inside it.
 	it('keeps the live region mounted while idle, collapsed to nothing', () => {
-		expect(PANEL).toMatch(/class:idle=\{lookup\.kind === 'idle'\}/);
+		// Collapsed only while the idle arm has nothing to draw: with a cleared
+		// sentence in it, the padless card would put that line against the edge.
+		expect(PANEL).toMatch(/class:idle=\{lookup\.kind === 'idle' && !movedEmptied\}/);
 		expect(PANEL).toMatch(
 			/<div class="lookup-body" role="status">\s*\{#if lookup\.kind !== 'idle'\}/
 		);
 		expect(PANEL).toMatch(/\.lookup-panel\.idle \{[^}]*padding: 0;/);
 		// Not display:none — a hidden region is not one a screen reader watches.
 		expect(PANEL).not.toMatch(/\.lookup-panel\.idle \{[^}]*display: none/);
+	});
+
+	// A parent move onto a tile that was never looked up empties the two shared
+	// fields, and the idle arm drew nothing: the announcement was the whole
+	// telling, so a sighted operator watched the fields go blank with no reason
+	// anywhere on screen (4.1.3).
+	it('draws the cleared sentence in the idle arm too, without re-speaking it', () => {
+		expect(PANEL).toMatch(
+			/\{:else if movedEmptied\}(?:\s|<!--(?:[^-]|-(?!->))*-->)*<p class="lookup-status lookup-emptied" aria-hidden="true">\{movedEmptied\}<\/p>/
+		);
+		// The same sentence the searching arm draws and pickParent announces, off
+		// the one chooser: a second source could name a different field.
+		expect(PANEL).toMatch(/const movedEmptied = \$derived\(clearedLine\(cleared, edited\)\);/);
+		// aria-hidden is the whole reason the announcement can stay: the paragraph
+		// lands inside the panel's own status region, which would otherwise say it
+		// a second time.
+		expect(PANEL).toMatch(/<div class="lookup-body" role="status">/);
 	});
 
 	// "Fu", "We", "e6", "Tw" read as truncated text next to the site's own name.
@@ -1172,18 +1309,20 @@ describe('what the lookup copy names', () => {
 		expect(PANEL).toMatch(
 			/const statusText = \$derived\(\s+statusSentence\(statusKind, prefill\?\.site \?\? null, \{ title: clash\?\.title \?\? '', editMode \}\)\s+\);/
 		);
-		// And the radio path stays quiet wherever the panel carries the sentence,
+		// And the radio path stays quiet wherever the panel SPEAKS the sentence,
 		// which is every arm but idle: the searching arm renders it too, and the
 		// region is atomic, so a say() alongside it would be the second telling.
+		// The idle arm draws it aria-hidden, which the region does not read, so
+		// the announcement there is still the only telling a screen reader gets.
 		const pickBody = fnBody(UPLOAD, 'pickParent');
 		expect(pickBody).toMatch(/if \(kind !== 'idle'\) return;/);
-		// Gated the way sharedLookup is, not read straight off the tile. The panel
-		// is mounted in the new-set mode only, so outside it no arm carries the
-		// sentence however that tile's own lookup ended — read from the tile
-		// there, the guard would fall silent with nothing on screen in its place
-		// (4.1.3).
-		expect(pickBody).toContain(
-			"const kind = (groupMode === 'new' ? tiles[index]?.lookup.kind : undefined) ?? 'idle';"
+		// Read straight off the tile: both callers run in the new-set mode only,
+		// so a mode test here had no second answer to give.
+		expect(pickBody).toContain("const kind = tiles[index]?.lookup.kind ?? 'idle';");
+		// The radio is the one caller that could reach another mode, and it is
+		// rendered inside the new-set branch.
+		expect(UPLOAD).toMatch(
+			/\{#if groupMode === 'new'\}(?:[\s\S]{0,600}?)onchange=\{\(\) => pickParent\(i\)\}/
 		);
 		expect(UPLOAD).toMatch(
 			/const parentTile = \$derived\(groupMode === 'new' \? \(tiles\[parentIndex\] \?\? null\) : null\);/

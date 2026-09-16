@@ -536,7 +536,7 @@
 	// emptied puts "Sona cleared the source post URL" back over a field THEY just
 	// emptied, and the panel re-attributes their own deletion to Sona (SONA-220).
 	// Each latch lives exactly as long as the cleared record it speaks for: it
-	// rises on input to either field, and applyShared recomputes it against the
+	// rises on input to its own field, and applyShared recomputes it against the
 	// fields as each result lands. See the recompute there for why.
 	const sharedEdited = $derived({
 		sourcePostUrl: !sourceTagged && (sharedFilled.sourcePostUrl !== undefined || sourceTypedIn),
@@ -1123,16 +1123,17 @@
 	 * region carries the sentence for every settled result, and the searching arm
 	 * carries it too, so announcing here on either would say the same thing twice
 	 * — the region is atomic, so the panel re-speaks whole when the sentence
-	 * appears in it. Only a lookup that never ran draws no sentence at all, and
-	 * then the two fields empty with nothing on screen saying why (4.1.3).
+	 * appears in it. Only a lookup that never ran carries no sentence of its own,
+	 * so the announcement is this move's telling; the panel's idle arm draws the
+	 * same line for sighted operators, aria-hidden so the region does not repeat
+	 * it (4.1.3).
 	 *
-	 * Gated the way `sharedLookup` is, rather than read straight off the tile:
-	 * the panel is mounted in the new-set mode only, so outside it no arm carries
-	 * the sentence however that tile's own lookup ended, and the announcement is
-	 * the only telling there is. */
+	 * Read straight off the tile: both callers run in the new-set mode only — the
+	 * radio renders under `{#if groupMode === 'new'}`, and the removal path checks
+	 * the mode before calling — so there is no other mode to answer for. */
 	function pickParent(index: number) {
 		const { cleared } = onParentChanged(index);
-		const kind = (groupMode === 'new' ? tiles[index]?.lookup.kind : undefined) ?? 'idle';
+		const kind = tiles[index]?.lookup.kind ?? 'idle';
 		if (kind !== 'idle') return;
 		const line = clearedLine(cleared, {});
 		if (line) announcer.say(line);

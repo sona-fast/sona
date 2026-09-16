@@ -127,15 +127,37 @@ async function openConnectionsTab(page: Page) {
 	}).toPass();
 }
 
-// Serial: the two tests below share one settings row, and the second one's
-// starting point is the state the seed leaves behind.
+// Take the key away if one is saved, leaving the section unconnected. The
+// Connections tab has to be open already. Returns whether it removed anything,
+// so a caller can say where the leftover came from.
+async function removeSavedKey(page: Page): Promise<boolean> {
+	if ((await removeButton(page).count()) === 0) return false;
+	await removeButton(page).click();
+	await confirmRemoval(page);
+	await expect(keyInput(page)).toBeVisible({ timeout: 15_000 });
+	return true;
+}
+
+// Serial: the three tests below share one settings row, and each one's starting
+// point is the state the seed leaves behind.
 test.describe.configure({ mode: 'serial' });
 
 test.describe('admin settings artist lookup key', () => {
+	// Every test here starts from the unconnected state, whoever left the row
+	// otherwise. The saving test writes the shared row, so a failure part way
+	// through it used to hand the next run a connected section: under serial
+	// retries the block restarts at the unconnected-state test, which then fails
+	// for a reason that has nothing to do with it. Removing here rather than
+	// only in afterAll makes each test's starting point its own (the shape
+	// artist-lookup.spec.ts uses for the same row).
 	test.beforeEach(async ({ page }) => {
 		await adminLogin(page, PASSWORD);
 		await page.goto('/admin/settings');
 		await openConnectionsTab(page);
+		if (await removeSavedKey(page)) {
+			console.warn('fuzzysearch-key: a key was saved before this test; removed it');
+			await openConnectionsTab(page);
+		}
 	});
 
 	test('the unconnected state discloses what leaves the site and takes a key', async ({
@@ -179,14 +201,9 @@ test.describe('admin settings artist lookup key', () => {
 			// button (it lives in the panel's else branch) and spin to the timeout.
 			await page.goto('/admin/settings');
 			await openConnectionsTab(page);
-			if ((await removeButton(page).count()) > 0) {
-				// The aborted attempt saved the key: put the section back to
-				// unconnected before trying again.
-				await removeButton(page).click();
-				await confirmRemoval(page);
-				await expect(keyInput(page)).toBeVisible();
-				await openConnectionsTab(page);
-			}
+			// The aborted attempt saved the key: put the section back to
+			// unconnected before trying again.
+			if (await removeSavedKey(page)) await openConnectionsTab(page);
 			await page.evaluate(() => {
 				(window as unknown as Record<string, boolean>).__sonaSaveMarker = true;
 			});
@@ -264,20 +281,19 @@ test.describe('admin settings artist lookup key', () => {
 });
 
 // The save above writes to the SHARED seeded DB. If anything between it and the
-// final Remove fails, the key stays saved: the CI retry restarts this serial
-// block at the unconnected-state test, which then fails for the wrong reason,
-// and every later spec sees a connected section. Put the row back the way this
-// file found it (legal.spec.ts carries the same guard for privacyPolicy).
+// final Remove fails, the key stays saved and every later spec sees a connected
+// section — the beforeEach only covers the tests in this file. Put the row back
+// the way this file found it (legal.spec.ts carries the same guard for
+// privacyPolicy).
 test.afterAll(async ({ browser }) => {
 	const page = await browser.newPage();
 	try {
 		await adminLogin(page, PASSWORD);
 		await page.goto('/admin/settings');
 		await openConnectionsTab(page);
-		if ((await removeButton(page).count()) === 0) return;
-		await removeButton(page).click();
-		await confirmRemoval(page);
-		await expect(keyRecord(page)).toHaveCount(0);
+		if (await removeSavedKey(page)) {
+			console.warn('fuzzysearch-key: the serial chain left the key behind; removed it here');
+		}
 	} finally {
 		await page.close();
 	}
