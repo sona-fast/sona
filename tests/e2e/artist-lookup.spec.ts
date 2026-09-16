@@ -898,7 +898,7 @@ test.describe('with a key saved', () => {
 		// And it says so. The new parent has no result, so the panel shows nothing
 		// about the two fields that just emptied under the operator (4.1.3).
 		await expect(page.locator(LIVE_REGION)).toContainText(
-			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled."
+			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled."
 		);
 	});
 
@@ -2360,7 +2360,7 @@ test.describe('with a key saved', () => {
 		// region carries that sentence, and the announcement it used to make said
 		// only half of what happened — the clearing, never the refill.
 		await expect(page.locator(LIVE_REGION)).not.toContainText(
-			"Sona cleared the commissioned date the last parent image's lookup filled."
+			"Sona cleared the commissioned date the parent image's last lookup filled."
 		);
 	});
 
@@ -2380,7 +2380,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('');
 		await expect(page.locator(LIVE_REGION)).toHaveText(
-			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled."
+			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled."
 		);
 	});
 
@@ -2423,7 +2423,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('');
 		const spoken =
-			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled.";
+			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled.";
 		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
 
 		release();
@@ -2464,7 +2464,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('');
 		const spoken =
-			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled.";
+			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled.";
 		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
 
 		release();
@@ -2579,6 +2579,69 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).not.toContainText('the last lookup filled');
 	});
 
+	// The same record, carried through a group-mode round trip instead of a
+	// cancel. Dropped only where the parent branch consumes it, the record
+	// survived: the flip into the existing-piece mode made the landing result a
+	// variant's, the flip back bailed because that tile has no results to
+	// re-derive from, and the NEXT lookup on it — parent again — consumed a
+	// record several steps old and re-reported a clearing the operator had
+	// already been told about (SONA-220).
+	test('a group-mode round trip drops the record the parent move left', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile's search is still out when the parent moves onto it, so
+		// the move's record is held for the result on its way.
+		const release = await deferredLookup(page, { enabled: true, matches: [] });
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const move =
+			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled.";
+		await expect(page.locator(LIVE_REGION)).toHaveText(move);
+
+		// Into the existing-piece mode while that search is out: no tile is the
+		// parent there, so the result lands as a variant tile's.
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		await expect(page.getByRole('combobox', { name: 'Variant of' })).toBeVisible();
+		release();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'false');
+
+		// Back to the new-set mode. The tile's lookup is a no-match, so the
+		// re-derivation bails and nothing else looks at the record either.
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'New piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		// What the panel says now is true: the move emptied both fields and that
+		// no-match put nothing back.
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+		);
+
+		// A second search on that tile, with nothing to show for it either. Both
+		// fields have been empty since the move, so THIS result emptied neither
+		// and the panel has no clearing left to report.
+		const releaseAgain = await deferredLookup(page, { enabled: true, matches: [] });
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+		releaseAgain();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'false');
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		// And the move's line was not said a second time: the region holds the
+		// variant tile's own outcome, from before the flip back.
+		await expect(page.locator(LIVE_REGION)).not.toContainText('lookup filled');
+	});
+
 	// A move onto a tile whose lookup FAILED empties the fields too: the failure
 	// has nothing to put back. That arm carries no status line of its own, so the
 	// two fields went blank with the panel talking only about the failure.
@@ -2612,7 +2675,7 @@ test.describe('with a key saved', () => {
 		);
 		// The panel reports it, so the announcer does not repeat it.
 		await expect(page.locator(LIVE_REGION)).not.toContainText(
-			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled."
+			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled."
 		);
 	});
 
@@ -3086,7 +3149,7 @@ test.describe('with a key saved', () => {
 		// Said once, and by the removal: the panel under an idle lookup carries no
 		// sentence to read it from.
 		await expect(page.locator(LIVE_REGION)).toHaveText(
-			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled."
+			"Sona cleared the source post URL and commissioned date the parent image's last lookup filled."
 		);
 		await expect(panel(page)).not.toContainText('cleared the source post URL');
 	});

@@ -591,17 +591,16 @@ export function statusSentence(
 	site: LookupSite | null,
 	options: { title?: string; editMode?: boolean } = {}
 ): string {
-	if (namesNoSite(kind)) {
-		switch (kind) {
-			case 'both_emptied':
-				return m.admin_lookup_status_both_emptied();
-			case 'url_emptied':
-				return m.admin_lookup_status_url_emptied();
-			case 'date_emptied':
-				return m.admin_lookup_status_date_emptied();
-		}
+	switch (kind) {
+		case 'both_emptied':
+			return m.admin_lookup_status_both_emptied();
+		case 'url_emptied':
+			return m.admin_lookup_status_url_emptied();
+		case 'date_emptied':
+			return m.admin_lookup_status_date_emptied();
+		case 'none':
+			return '';
 	}
-	if (kind === 'none') return '';
 	if (!site) return '';
 	const label = siteLabel(site);
 	const title = options.title ?? '';

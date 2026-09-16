@@ -951,7 +951,7 @@ describe('statusLineKind', () => {
 		// A clash result DOES have a post — Sona declined it — so no sentence on
 		// this path may say the lookup found nothing to put there.
 		expect(m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'en' })).toBe(
-			'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because the match Sona found has no link to put there. You can change the date before you save.'
+			'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because the result Sona found has no link to put there. You can change the date before you save.'
 		);
 		// 一致 is what a database calls a matching row. The thing the operator is
 		// looking at is a search result, which is what the rest of the file calls

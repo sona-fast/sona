@@ -1986,7 +1986,7 @@
 	"admin_lookup_status_date_kept": "Sona filled the commissioned date from the {site} post. You can change it before you save.",
 	"admin_lookup_status_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was. You can change the date before you save.",
 	"admin_lookup_status_url_and_date_emptied": "Sona filled the source post URL from the {site} post and cleared the commissioned date the last lookup filled, because that post has no date. You can change the URL before you save.",
-	"admin_lookup_status_date_and_url_emptied": "Sona filled the commissioned date from the {site} post and cleared the source post URL the last lookup filled, because the match Sona found has no link to put there. You can change the date before you save.",
+	"admin_lookup_status_date_and_url_emptied": "Sona filled the commissioned date from the {site} post and cleared the source post URL the last lookup filled, because the result Sona found has no link to put there. You can change the date before you save.",
 	"admin_lookup_status_both_emptied": "Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one. You can fill them in before you save.",
 	"admin_lookup_status_url_emptied": "Sona cleared the source post URL the last lookup filled, because this lookup filled nothing in its place. You can type one in before you save.",
 	"admin_lookup_status_date_emptied": "Sona cleared the commissioned date the last lookup filled, because this lookup filled no date in its place. You can set one before you save.",
@@ -2043,7 +2043,7 @@
 	"admin_lookup_announce_shared_refilled": "Sona filled the shared fields from the parent image's result.",
 	"admin_lookup_announce_shared_refilled_source": "Sona filled the source post URL from the parent image's result.",
 	"admin_lookup_announce_shared_refilled_date": "Sona filled the commissioned date from the parent image's result.",
-	"admin_lookup_announce_shared_cleared": "Sona cleared the source post URL and commissioned date the last parent image's lookup filled.",
-	"admin_lookup_announce_shared_cleared_source": "Sona cleared the source post URL the last parent image's lookup filled.",
-	"admin_lookup_announce_shared_cleared_date": "Sona cleared the commissioned date the last parent image's lookup filled."
+	"admin_lookup_announce_shared_cleared": "Sona cleared the source post URL and commissioned date the parent image's last lookup filled.",
+	"admin_lookup_announce_shared_cleared_source": "Sona cleared the source post URL the parent image's last lookup filled.",
+	"admin_lookup_announce_shared_cleared_date": "Sona cleared the commissioned date the parent image's last lookup filled."
 }
