@@ -27,7 +27,7 @@
  * No new dependency: fetch, node:crypto and node:fs only.
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { argv, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 
@@ -213,6 +213,7 @@ export function acceptCached(name, bytes, { force, recorded, present }) {
 async function writeFace(name, url, { force, recorded, present }) {
 	// Already on disk and not re-fetched: checked against the manifest too, so an
 	// edited file cannot record its own digest. See acceptCached and acceptBytes.
+	refuseSymlink(OUT_DIR + name);
 	if (!force && existsOnDisk(name)) {
 		const onDisk = readFileSync(OUT_DIR + name);
 		return { bytes: onDisk.length, sha256: acceptCached(name, onDisk, { force, recorded, present }) };
@@ -224,8 +225,29 @@ async function writeFace(name, url, { force, recorded, present }) {
 	if (!res.ok) throw new Error(`${name}: ${res.status} fetching ${url}`);
 	const bytes = Buffer.from(await res.arrayBuffer());
 	const digest = acceptBytes(name, bytes, { force, recorded });
-	writeFileSync(OUT_DIR + name, bytes);
+	// Through a .part file and a rename, so an interrupted write cannot leave a
+	// truncated font under the committed name.
+	writeFileSync(`${OUT_DIR + name}.part`, bytes);
+	renameSync(`${OUT_DIR + name}.part`, OUT_DIR + name);
 	return { bytes: bytes.length, sha256: digest };
+}
+
+/**
+ * A symlink at a managed font path would make a read or write land wherever it
+ * points, so it is refused before either. A missing entry is fine: that is the
+ * fetch case. Exported so the test can point it at a temp dir.
+ */
+export function refuseSymlink(path) {
+	let st;
+	try {
+		st = lstatSync(path);
+	} catch (err) {
+		if (err.code === 'ENOENT') return;
+		throw err;
+	}
+	if (st.isSymbolicLink()) {
+		throw new Error(`${path} is a symlink, not a font file — remove it and rerun`);
+	}
 }
 
 function existsOnDisk(name) {

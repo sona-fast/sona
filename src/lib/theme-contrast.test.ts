@@ -1615,6 +1615,34 @@ describe('light --primary-text is readable as small text (SONA-126)', () => {
 // measures. --primary-text landed between 3.75:1 and 4.08:1 there on three of the
 // six pairs; --foreground clears 4.5:1 on all six. The tint is read out of the
 // rule rather than assumed, so a change to the percentage is measured.
+// The Cloudflare setup dialog's step numbers sit on the same kind of tint,
+// mixed over --card, and are measured by the same loop.
+describe('the setup dialog step number is readable on its tint (SONA-126)', () => {
+	const body = ruleBody('./components/CloudflareSetupDialog.svelte', '.step-num');
+	const tint = body.match(
+		/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/
+	);
+	const ink = body.match(/(?<![-\w])color:\s*var\(--([\w-]+)\)/)?.[1];
+
+	it('still tints its background over a token and names an ink token', () => {
+		expect(tint, '.step-num no longer mixes its background over a token').not.toBeNull();
+		expect(ink, '.step-num declares no color').toBeDefined();
+	});
+
+	for (const { name, id, mode } of THEME_BLOCKS) {
+		it(`${name}: the step number clears 4.5:1`, () => {
+			const [, base, pct, over] = tint!;
+			const ground = mix2(
+				themeHex(id, mode, TOKEN_BY_CSS_NAME.get(base)!),
+				Number(pct),
+				themeHex(id, mode, TOKEN_BY_CSS_NAME.get(over)!)
+			);
+			const ratio = contrast(themeHex(id, mode, TOKEN_BY_CSS_NAME.get(ink!)!), ground);
+			expect(ratio, `${name}: --${ink} on the step tint (${ground}) measures ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
+
 describe('the Telegram pack chip is readable on its tint (SONA-126)', () => {
 	const CHIP = '../routes/(public)/stickers/[slug]/+page.svelte';
 	const body = ruleBody(CHIP, '.pack-chip.telegram');

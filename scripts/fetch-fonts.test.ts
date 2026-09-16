@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, acceptCached, fileName, missingFaces, parseManifest, readManifest, staleFiles } from './fetch-fonts.mjs';
+import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, acceptCached, fileName, missingFaces, parseManifest, readManifest, refuseSymlink, staleFiles } from './fetch-fonts.mjs';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
 
 // The prune is the one destructive thing this script does, and it runs over a
@@ -200,5 +200,27 @@ describe('fetch-fonts missingFaces', () => {
 
 	it('names everything when nothing matched', () => {
 		expect(missingFaces(entry, [])).toHaveLength(4);
+	});
+});
+
+// A symlink under static/fonts/ would send a fetched write, or a cached read,
+// wherever it points.
+describe('fetch-fonts refuseSymlink', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'sona-fetch-fonts-symlink-'));
+
+	it('lets a missing path through, which is the fetch case', () => {
+		expect(() => refuseSymlink(join(dir, 'absent.woff2'))).not.toThrow();
+	});
+
+	it('lets a regular file through', () => {
+		writeFileSync(join(dir, 'real.woff2'), 'bytes');
+		expect(() => refuseSymlink(join(dir, 'real.woff2'))).not.toThrow();
+	});
+
+	it('refuses a symlink, dangling or not', () => {
+		symlinkSync(join(dir, 'real.woff2'), join(dir, 'link.woff2'));
+		symlinkSync(join(dir, 'nowhere.woff2'), join(dir, 'dangling.woff2'));
+		expect(() => refuseSymlink(join(dir, 'link.woff2'))).toThrow(/symlink/);
+		expect(() => refuseSymlink(join(dir, 'dangling.woff2'))).toThrow(/symlink/);
 	});
 });

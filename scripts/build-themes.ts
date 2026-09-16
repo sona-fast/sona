@@ -11,7 +11,7 @@
  * are load-bearing, because theme blocks tie on specificity and the later one
  * wins.
  */
-import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { argv, env, exit } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
@@ -203,7 +203,9 @@ function validateFace(id: string, face: FontFace): void {
 	}
 	if (face.unicodeRange !== undefined) validateUnicodeRange(id, face.unicodeRange);
 	const onDisk = STATIC_DIR + face.src.slice(1);
-	if (!existsSync(onDisk) || !statSync(onDisk).isFile() || statSync(onDisk).size === 0) {
+	// lstat, so a symlink is seen as what it is rather than as its target: the
+	// face has to be a real file inside static/fonts/, not a pointer out of it.
+	if (!existsSync(onDisk) || lstatSync(onDisk).isSymbolicLink() || !statSync(onDisk).isFile() || statSync(onDisk).size === 0) {
 		throw new Error(`theme '${id}': font face src '${face.src}' has no file at ${onDisk} — run \`node scripts/fetch-fonts.mjs\``);
 	}
 }

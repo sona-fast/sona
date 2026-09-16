@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -257,6 +257,18 @@ describe('renderThemesCss', () => {
 
 	// A directory named like a font passes an existence check and has a size,
 	// and the browser cannot load it. Made and removed here, under static/fonts/.
+	// A symlink to a real font elsewhere passes every stat check, and the face
+	// would then point out of static/fonts/.
+	it('rejects a src that is a symlink', () => {
+		const link = new URL('../static/fonts/NotALink-400-latin.woff2', import.meta.url);
+		symlinkSync(new URL('../static/fonts/Geist-Regular.woff2', import.meta.url), link);
+		try {
+			expect(() => renderThemesCss(withFace({ src: '/fonts/NotALink-400-latin.woff2' }))).toThrow(/has no file at/);
+		} finally {
+			rmSync(link, { force: true });
+		}
+	});
+
 	it('rejects a src that is a directory', () => {
 		const dir = new URL('../static/fonts/NotAFile-400-latin.woff2', import.meta.url);
 		mkdirSync(dir);
