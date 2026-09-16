@@ -1,6 +1,4 @@
 import {
-	SUBSET_JP_KANA,
-	SUBSET_JP_KANJI,
 	SUBSET_LATIN,
 	SUBSET_LATIN_EXT,
 	SUBSET_VIETNAMESE,
@@ -106,14 +104,12 @@ export const terracottaTheme: ThemeDefinition = {
 		primary: "'Chakra Petch', 'IBM Plex Sans JP', sans-serif",
 		secondary: "'IBM Plex Sans JP', sans-serif",
 		// Chakra Petch carries no Japanese, so the headings name the body face next:
-		// a Japanese heading falls to the theme's own typeface rather than to the
+		// a Japanese heading falls to IBM Plex Sans JP rather than straight to the
 		// reader's system font.
 		//
-		// Self-hosted. The Latin slices come from `node scripts/fetch-fonts.mjs`; the
-		// two Japanese ones are cut from the upstream OFL release by
-		// `node scripts/subset-plex-jp.mjs` — static/fonts/README.md says why.
-		// Japanese weights are 400 and 700 only — a browser asked for 500 or 600
-		// picks the nearer one, and four weights would be 2.5 MiB.
+		// Self-hosted, Latin only: the slices come from `node scripts/fetch-fonts.mjs`
+		// — static/fonts/README.md says why. Japanese text falls back to the reader's
+		// system font, since the Japanese glyph set is megabytes every visitor pays for.
 		faces: [
 			{ family: 'Chakra Petch', weight: 400, src: '/fonts/ChakraPetch-400-latin.woff2', unicodeRange: SUBSET_LATIN },
 			{ family: 'Chakra Petch', weight: 400, src: '/fonts/ChakraPetch-400-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
@@ -134,11 +130,7 @@ export const terracottaTheme: ThemeDefinition = {
 			{ family: 'IBM Plex Sans JP', weight: 600, src: '/fonts/IBMPlexSansJP-600-latin.woff2', unicodeRange: SUBSET_LATIN },
 			{ family: 'IBM Plex Sans JP', weight: 600, src: '/fonts/IBMPlexSansJP-600-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
 			{ family: 'IBM Plex Sans JP', weight: 700, src: '/fonts/IBMPlexSansJP-700-latin.woff2', unicodeRange: SUBSET_LATIN },
-			{ family: 'IBM Plex Sans JP', weight: 700, src: '/fonts/IBMPlexSansJP-700-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT },
-			{ family: 'IBM Plex Sans JP', weight: 400, src: '/fonts/IBMPlexSansJP-400-kana.woff2', unicodeRange: SUBSET_JP_KANA },
-			{ family: 'IBM Plex Sans JP', weight: 400, src: '/fonts/IBMPlexSansJP-400-kanji.woff2', unicodeRange: SUBSET_JP_KANJI },
-			{ family: 'IBM Plex Sans JP', weight: 700, src: '/fonts/IBMPlexSansJP-700-kana.woff2', unicodeRange: SUBSET_JP_KANA },
-			{ family: 'IBM Plex Sans JP', weight: 700, src: '/fonts/IBMPlexSansJP-700-kanji.woff2', unicodeRange: SUBSET_JP_KANJI }
+			{ family: 'IBM Plex Sans JP', weight: 700, src: '/fonts/IBMPlexSansJP-700-latin-ext.woff2', unicodeRange: SUBSET_LATIN_EXT }
 		]
 	}
 };

@@ -2,9 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { KANA_UNICODES, KANJI_BLOCK } from '../../../scripts/subset-plex-jp.mjs';
 import { ALL_THEMES } from './all.ts';
-import { SUBSET_JP_KANA, SUBSET_JP_KANJI } from './types.ts';
 
 // SONA-181 moved the typefaces off Google's CDN and into static/fonts/. Three
 // things have to stay true for that to hold, and each fails silently otherwise:
@@ -159,77 +157,6 @@ describe('terracotta font families stay scoped to terracotta (SONA-181)', () => 
 	});
 });
 
-// SONA-181 follow-up: terracotta is the akito.dog fork's theme and IBM Plex
-// Sans JP is there to set Japanese. The two slices below are cut from the
-// upstream OFL release by `node scripts/subset-plex-jp.mjs` rather than taken
-// from Google — static/fonts/README.md says why. Nothing else in the repo would
-// notice if they went missing — the Latin faces would still resolve and
-// Japanese would quietly fall back to the reader's system font — so the
-// coverage is asserted here rather than left to a screenshot.
-describe('terracotta sets Japanese in IBM Plex Sans JP (SONA-181)', () => {
-	const jp = (ALL_THEMES.find((t) => t.id === 'terracotta')?.fonts?.faces ?? []).filter((f) =>
-		/-(kana|kanji)\.woff2$/.test(f.src)
-	);
-
-	it('declares kana and kanji at the two Japanese weights', () => {
-		expect(jp.map((f) => `${f.weight} ${f.src}`)).toEqual([
-			'400 /fonts/IBMPlexSansJP-400-kana.woff2',
-			'400 /fonts/IBMPlexSansJP-400-kanji.woff2',
-			'700 /fonts/IBMPlexSansJP-700-kana.woff2',
-			'700 /fonts/IBMPlexSansJP-700-kanji.woff2'
-		]);
-	});
-
-	// A subset that lost a block renders as a font the browser happily uses and
-	// falls back from character by character, which reads as mixed typography
-	// rather than as a bug. Check the declared ranges against real text.
-	const SAMPLES = 'あいうえおカタカナ漢字日本語！？、。「」';
-
-	// Each slice is bound to its own range: a kana file declared over the kanji
-	// block would load for every kanji and cover none of them.
-	for (const face of jp) {
-		it(`${face.src} declares the range its name promises`, () => {
-			expect(face.unicodeRange).toBe(face.src.includes('kanji') ? SUBSET_JP_KANJI : SUBSET_JP_KANA);
-		});
-	}
-
-	// The ranges are declared twice: in types.ts, which the faces use, and in the
-	// subsetter, which decides what actually goes in the file. A range the CSS
-	// claims and the file does not hold renders as a blank, not a fallback glyph.
-	it('declares the ranges the subsetter cuts', () => {
-		expect(SUBSET_JP_KANA).toBe(KANA_UNICODES.join(', '));
-		expect(SUBSET_JP_KANJI).toBe(KANJI_BLOCK);
-	});
-
-	it('declares ranges that cover kana, kanji and fullwidth punctuation', () => {
-		const ranges = jp.flatMap((f) =>
-			(f.unicodeRange ?? '').split(',').map((part) => {
-				const [lo, hi] = part.trim().replace(/U\+/g, '').split('-');
-				return [parseInt(lo, 16), parseInt(hi ?? lo, 16)] as const;
-			})
-		);
-		const uncovered = [...SAMPLES].filter(
-			(ch) => !ranges.some(([lo, hi]) => ch.codePointAt(0)! >= lo && ch.codePointAt(0)! <= hi)
-		);
-		expect(uncovered, `no declared face claims ${uncovered.join('')}`).toEqual([]);
-	});
-
-	// The kanji file holds JIS X 0208 level 1 (2,965 glyphs) and the kana file
-	// holds kana plus CJK punctuation. Rough size floors catch a subset run that
-	// produced a valid but nearly empty font — the failure mode of a bad
-	// --unicodes or a --text-file that did not resolve.
-	it('ships subsets big enough to hold what they claim', () => {
-		const floors = { kana: 100_000, kanji: 300_000 };
-		for (const face of jp) {
-			const kind = face.src.includes('kanji') ? 'kanji' : 'kana';
-			const bytes = statSync(`${repoRoot}static${face.src}`).size;
-			expect(bytes, `${face.src} is ${bytes} bytes — did the subset lose its glyphs?`).toBeGreaterThan(
-				floors[kind]
-			);
-		}
-	});
-});
-
 // scripts/fetch-fonts.mjs records a sha256 per file it writes and re-checks it
 // on the next run. That only catches a change made THROUGH the script; this
 // catches a font file edited or replaced in the repo, where the manifest is the
@@ -241,33 +168,9 @@ describe('the fetched fonts match their recorded digests (SONA-181)', () => {
 
 	it('records every Google-fetched file in static/fonts/', () => {
 		const fetched = readdirSync(`${repoRoot}static/fonts`)
-			.filter((f) => f.endsWith('.woff2') && !f.startsWith('Geist-') && !/-(kana|kanji)\./.test(f))
+			.filter((f) => f.endsWith('.woff2') && !f.startsWith('Geist-'))
 			.sort();
 		expect(Object.keys(manifest.files).sort()).toEqual(fetched);
-	});
-
-	for (const [name, digest] of Object.entries(manifest.files)) {
-		it(`${name} hashes as recorded`, () => {
-			const bytes = readFileSync(`${repoRoot}static/fonts/${name}`);
-			expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
-		});
-	}
-});
-
-// The four Japanese slices are the ones manifest.json does NOT cover: they come
-// out of scripts/subset-plex-jp.mjs, not Google, and that script writes its own
-// manifest for them. Without this they would be the only fonts in the directory
-// nothing checks against recorded bytes.
-describe('the subset Japanese slices match their recorded digests (SONA-181)', () => {
-	const manifest = JSON.parse(readFileSync(`${repoRoot}static/fonts/manifest-jp.json`, 'utf8')) as {
-		files: Record<string, string>;
-	};
-
-	it('records exactly the Japanese slices on disk', () => {
-		const onDisk = readdirSync(`${repoRoot}static/fonts`)
-			.filter((f) => /^IBMPlexSansJP-\d+-(kana|kanji)\.woff2$/.test(f))
-			.sort();
-		expect(Object.keys(manifest.files).sort()).toEqual(onDisk);
 	});
 
 	for (const [name, digest] of Object.entries(manifest.files)) {

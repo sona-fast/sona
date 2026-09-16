@@ -2,12 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, acceptCached, fileName, missingFaces, parseManifest, readManifest, refuseSymlink, staleFiles } from './fetch-fonts.mjs';
+import { FAMILIES, acceptBytes, acceptCached, fileName, missingFaces, parseManifest, readManifest, refuseSymlink, staleFiles } from './fetch-fonts.mjs';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
 
 // The prune is the one destructive thing this script does, and it runs over a
-// directory holding three other things: Geist (hand-placed), the Japanese slices
-// scripts/subset-plex-jp.mjs cuts, and the slices this script fetched last time.
+// directory holding two other things: Geist (hand-placed) and the slices this
+// script fetched last time.
 // Nothing here touches the network — the decision is a function of the listing.
 describe('fetch-fonts prune (SONA-181)', () => {
 	const wanted = [
@@ -17,14 +17,11 @@ describe('fetch-fonts prune (SONA-181)', () => {
 	];
 	const listing = [
 		...wanted,
-		'IBMPlexSansJP-400-kana.woff2',
-		'IBMPlexSansJP-700-kanji.woff2',
 		'IBMPlexSansJP-300-latin.woff2',
 		'Geist-Regular.woff2',
 		'Geist-Medium.woff2',
 		'README.md',
-		'manifest.json',
-		'manifest-jp.json'
+		'manifest.json'
 	];
 	const stale = staleFiles(listing, wanted);
 
@@ -32,10 +29,13 @@ describe('fetch-fonts prune (SONA-181)', () => {
 		expect(stale).toEqual(['IBMPlexSansJP-300-latin.woff2']);
 	});
 
-	it('leaves the Japanese slices the subsetter owns', () => {
-		expect(stale).not.toContain('IBMPlexSansJP-400-kana.woff2');
-		expect(stale).not.toContain('IBMPlexSansJP-700-kanji.woff2');
-		expect(OWNED_ELSEWHERE.test('IBMPlexSansJP-400-kana.woff2')).toBe(true);
+	// The kana and kanji slices were cut by a subsetter this repo no longer
+	// carries, and the prune used to be told to leave them alone. A leftover is
+	// now this script's to remove like any other slice the families do not ask for.
+	it('prunes a leftover Japanese slice', () => {
+		expect(staleFiles([...wanted, 'IBMPlexSansJP-400-kana.woff2'], wanted)).toEqual([
+			'IBMPlexSansJP-400-kana.woff2'
+		]);
 	});
 
 	it('leaves Geist alone, because app.css declares it and no family here owns the slug', () => {
@@ -46,11 +46,10 @@ describe('fetch-fonts prune (SONA-181)', () => {
 		expect(stale).not.toContain('JetBrainsMono-latin.woff2');
 	});
 
-	// The subsetter writes manifest-jp.json into the same directory, and only
-	// binaries are ever this script's to remove.
+	// Only binaries are ever this script's to remove.
 	it('considers nothing but woff2 files', () => {
 		expect(stale.every((f) => f.endsWith('.woff2'))).toBe(true);
-		expect(staleFiles(['IBMPlexSansJP-manifest-jp.json'], [])).toEqual([]);
+		expect(staleFiles(['IBMPlexSansJP-notes.json'], [])).toEqual([]);
 	});
 });
 

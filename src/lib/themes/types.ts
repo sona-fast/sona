@@ -109,22 +109,6 @@ export const SUBSET_LATIN_EXT =
 export const SUBSET_VIETNAMESE =
 	'U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB';
 
-/**
- * The two Japanese slices, cut from the upstream OFL release by
- * `node scripts/subset-plex-jp.mjs` rather than taken from Google (see that
- * script for why). Kana and the punctuation that sets Japanese text travel
- * together — no page renders hiragana without also wanting 、。「」！？ — so they
- * are one file; the 2,965 JIS X 0208 level 1 kanji are the other, four times the
- * size and only needed once the text is more than kana.
- */
-export const SUBSET_JP_KANA =
-	'U+3000-303F, U+3040-309F, U+30A0-30FF, U+31F0-31FF, U+FF00-FFEF';
-// The CJK Unified Ideographs block. The FILE holds JIS level 1 only, so a rarer
-// kanji matches this face, finds no glyph and falls back per character — which
-// is the behaviour we want, and cheaper than spelling 2,965 code points out as
-// ~1,200 ranges in a stylesheet every visitor downloads.
-export const SUBSET_JP_KANJI = 'U+4E00-9FFF';
-
 export interface ThemeFonts {
 	/** CSS font-family list for --font-primary (headings, UI chrome). */
 	primary: string;

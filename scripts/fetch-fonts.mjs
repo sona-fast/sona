@@ -44,17 +44,12 @@ const CHROME_UA =
 // file of unknown origin into static/fonts/.
 const BINARY_ORIGIN = 'https://fonts.gstatic.com/';
 
-// Files in static/fonts/ that another script writes. They share a family slug
-// with something below, so the prune has to be told to leave them alone.
-export const OWNED_ELSEWHERE = /^IBMPlexSansJP-\d+-(kana|kanji)\.woff2$/;
-
 /**
  * The families each theme names, with the weights its CSS asks for, and the
  * Google subset slices to keep for each.
  *
- * IBM Plex Sans JP takes its LATIN slices from here and its Japanese coverage
- * from scripts/subset-plex-jp.mjs — static/fonts/README.md says why. Run both
- * scripts when this family changes.
+ * IBM Plex Sans JP is self-hosted for its LATIN slices only — Japanese text
+ * falls back to the reader's system font. static/fonts/README.md says why.
  */
 export const FAMILIES = [
 	{ family: 'JetBrains Mono', weights: [400, 500, 600, 700], subsets: ['latin', 'latin-ext'] },
@@ -72,8 +67,9 @@ function cssUrl({ family, weights }) {
  * Splits a CSS2 response into its @font-face blocks.
  *
  * Google names the well-known slices with a `/* latin *\/` comment before the
- * block. The CJK slices carry no comment and this script never wants them (see
- * static/fonts/README.md), so an unnamed block is skipped.
+ * block. The CJK slices carry no comment and this script never wants them —
+ * they are 123 unnamed slices per weight, and nothing here sets Japanese — so an
+ * unnamed block is skipped.
  */
 function parseFaces(css) {
 	const faces = [];
@@ -107,19 +103,15 @@ export function fileName(family, { weight, subset, shared }) {
  * The prune decision, as a function of the directory listing and the names this
  * run wants. A dropped weight or subset leaves a binary nothing references, but
  * only files whose name starts with a slug this script manages are its to
- * remove: Geist is hand-placed and declared in app.css, and OWNED_ELSEWHERE is
- * the Japanese slices scripts/subset-plex-jp.mjs cuts into the same directory.
- * Binaries only — the two manifests, the README and OFL.txt are never candidates.
+ * remove: Geist is hand-placed and declared in app.css.
+ * Binaries only — the manifest, the README and OFL.txt are never candidates.
  */
 export function staleFiles(existing, wanted) {
 	const keep = new Set(wanted);
 	const slugs = FAMILIES.map(({ family }) => family.replace(/[^A-Za-z0-9]/g, '') + '-');
 	return [...existing].filter(
 		(name) =>
-			name.endsWith('.woff2') &&
-			!keep.has(name) &&
-			!OWNED_ELSEWHERE.test(name) &&
-			slugs.some((s) => name.startsWith(s))
+			name.endsWith('.woff2') && !keep.has(name) && slugs.some((s) => name.startsWith(s))
 	);
 }
 

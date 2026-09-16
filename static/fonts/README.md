@@ -24,36 +24,6 @@ Geist is the exception. Its three files were placed here by hand and its
 `@font-face` blocks live in `src/app.css`, because it is the default theme's
 body font and applies whatever theme is selected.
 
-## Japanese
-
-Terracotta sets body text in IBM Plex Sans JP, so it needs real Japanese
-coverage. Google serves that coverage as 123 unnamed slices per weight — 2.5 MiB
-of binaries and roughly 295 KB of `unicode-range` text in a stylesheet every
-visitor downloads, whatever theme they are on. So the Japanese side is cut from
-the upstream release instead, by `node scripts/subset-plex-jp.mjs`:
-
-| file | covers | bytes | cmap entries |
-| --- | --- | --- | --- |
-| `IBMPlexSansJP-400-kana.woff2` | kana, CJK punctuation, fullwidth forms | 167,432 | 409 |
-| `IBMPlexSansJP-400-kanji.woff2` | JIS X 0208 level 1 | 482,892 | 2,965 |
-| `IBMPlexSansJP-700-kana.woff2` | kana, CJK punctuation, fullwidth forms | 168,724 | 409 |
-| `IBMPlexSansJP-700-kanji.woff2` | JIS X 0208 level 1 | 498,900 | 2,965 |
-
-The subsetter records a sha256 per slice in `manifest-jp.json`, the same shape as
-`manifest.json` and checked the same way by `src/lib/themes/fonts.test.ts`.
-
-That is 1.26 MiB in four files instead of 2.5 MiB in 246. Weights are 400 and
-700 only; a browser asked for 500 or 600 picks the nearer one. The kanji set is
-JIS X 0208 level 1, derived from Python's `euc_jp` codec over JIS rows 16-47
-rather than from a bundled list — see the script. Level 2 (3,390 rarer kanji)
-falls back to the reader's system font, as does any kanji outside level 1.
-
-The script pins the source by version and sha256, and installs the pinned,
-hash-checked `fonttools` and `brotli` from `scripts/requirements-subset.txt`. It
-needs Python: it builds a throwaway virtualenv in the OS temp directory. Node
-stays the only thing you need to build Sona — these four files are committed, so
-a normal build never runs the subsetter.
-
 ## Licenses
 
 All four families are under the SIL Open Font License 1.1. The license text is
@@ -66,9 +36,7 @@ lines, as each font file states them in its own name table:
 - IBM Plex Sans JP: `Copyright 2018 IBM Corp. All rights reserved.`, released as
   `Copyright (c) 2017 IBM Corp. with Reserved Font Name "Plex"`
 
-The Japanese files are glyph-set subsets cut from IBM's own release. They keep
-the family name, as the Google Fonts distribution of the same family does, and
-the subsetter keeps the license name records (IDs 13 and 14) in them. "Plex" is
-a Reserved Font Name, and the license does not allow a Modified Version to use
-it. Before changing these files in any way beyond subsetting, read OFL.txt and
+The IBM Plex Sans JP files here are Google Fonts' own Latin slices, unmodified.
+"Plex" is a Reserved Font Name under the license, which does not allow a Modified
+Version to use it. Before changing these files in any way, read OFL.txt and
 rename the result.

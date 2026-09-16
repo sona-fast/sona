@@ -25,9 +25,7 @@ files it covers:
   Copyright (c) 2017 IBM Corp. with Reserved Font Name "Plex"
   (https://github.com/IBM/plex)
 
-The IBM Plex Sans JP files here are glyph-set subsets cut by
-scripts/subset-plex-jp.mjs from IBM's own release, and they keep the family
-name, as the Google Fonts distribution of the same family does. "Plex" is a
-Reserved Font Name under the license, which does not allow a Modified
-Version to use that name. Before changing these files in any way beyond
-subsetting, read static/fonts/OFL.txt and rename the result.
+The IBM Plex Sans JP files here are Google Fonts' own Latin slices,
+unmodified. "Plex" is a Reserved Font Name under the license, which does not
+allow a Modified Version to use that name. Before changing these files in
+any way, read static/fonts/OFL.txt and rename the result.
