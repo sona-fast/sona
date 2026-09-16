@@ -155,10 +155,10 @@ export function readManifest(path = MANIFEST_PATH) {
 	try {
 		text = readFileSync(path, 'utf8');
 	} catch (err) {
-		if (err.code === 'ENOENT') return {};
+		if (err.code === 'ENOENT') return { present: false, files: {} };
 		throw err;
 	}
-	return parseManifest(text);
+	return { present: true, files: parseManifest(text) };
 }
 
 /**
@@ -179,13 +179,29 @@ export function acceptBytes(name, bytes, { force, recorded }) {
 	return digest;
 }
 
+/**
+ * A file already on disk, checked against the manifest the same way fetched
+ * bytes are, with one more rule: when a manifest exists and does not name the
+ * file, the file is refused. A fetched file with no entry is a new face; a file
+ * that is already here with no entry is a manifest that lost its line, and
+ * accepting it would record whatever bytes are there as the baseline.
+ */
+export function acceptCached(name, bytes, { force, recorded, present }) {
+	if (!force && present && recorded === undefined) {
+		throw new Error(
+			`${name} is in static/fonts/ but static/fonts/manifest.json does not record it. Remove the file to fetch it again, or re-run with --force to record the bytes on disk.`
+		);
+	}
+	return acceptBytes(name, bytes, { force, recorded });
+}
+
 /** One face's binary, fetched or taken from disk. */
-async function writeFace(name, url, { force, recorded }) {
+async function writeFace(name, url, { force, recorded, present }) {
 	// Already on disk and not re-fetched: checked against the manifest too, so an
-	// edited file cannot record its own digest. See acceptBytes.
+	// edited file cannot record its own digest. See acceptCached and acceptBytes.
 	if (!force && existsOnDisk(name)) {
 		const onDisk = readFileSync(OUT_DIR + name);
-		return { bytes: onDisk.length, sha256: acceptBytes(name, onDisk, { force, recorded }) };
+		return { bytes: onDisk.length, sha256: acceptCached(name, onDisk, { force, recorded, present }) };
 	}
 	if (!url.startsWith(BINARY_ORIGIN)) {
 		throw new Error(`${name}: ${url} is not on ${BINARY_ORIGIN} — refusing to fetch it`);
@@ -210,7 +226,7 @@ async function main() {
 	const force = argv.includes('--force');
 	mkdirSync(OUT_DIR, { recursive: true });
 	const existing = readdirSync(OUT_DIR);
-	const recorded = readManifest();
+	const { present, files: recorded } = readManifest();
 	const manifest = [];
 
 	for (const entry of FAMILIES) {
@@ -235,7 +251,7 @@ async function main() {
 		for (const face of byUrl.values()) {
 			const shared = face.weights.length > 1;
 			const name = fileName(entry.family, { ...face, shared });
-			const written = await writeFace(name, face.url, { force, recorded: recorded[name] });
+			const written = await writeFace(name, face.url, { force, recorded: recorded[name], present });
 			manifest.push({ ...face, family: entry.family, name, shared, ...written });
 		}
 	}

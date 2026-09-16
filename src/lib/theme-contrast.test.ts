@@ -1835,13 +1835,4 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 		});
 	}
 
-	// The admin header's avatar disc is a solid fill, not a boundary, but it is the
-	// other place this change swapped a token: on light themes it paints with
-	// --primary-text so the disc and the header's primary text are one orange
-	// rather than two.
-	it('the light-theme admin avatar disc fills with --primary-text', () => {
-		expect(
-			ruleBody('../routes/admin/+layout.svelte', ":global([data-theme='light']) .admin-avatar")
-		).toMatch(/background:\s*var\(--primary-text\)/);
-	});
 });

@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, fileName, parseManifest, readManifest, staleFiles } from './fetch-fonts.mjs';
+import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, acceptCached, fileName, parseManifest, readManifest, staleFiles } from './fetch-fonts.mjs';
+import { ALL_THEMES } from '../src/lib/themes/all.ts';
 
 // The prune is the one destructive thing this script does, and it runs over a
 // directory holding three other things: Geist (hand-placed), the Japanese slices
@@ -90,12 +91,14 @@ describe('fetch-fonts file names', () => {
 		);
 	});
 
+	// Read from the theme data, not a second list here: a family added to a theme
+	// without a FAMILIES entry would otherwise ship a face with no file behind it.
+	// Geist is the one family declared in app.css by hand, so it is not in faces.
 	it('covers every family the themes declare', () => {
-		expect(FAMILIES.map((f) => f.family)).toEqual([
-			'JetBrains Mono',
-			'Chakra Petch',
-			'IBM Plex Sans JP'
-		]);
+		const declared = new Set(
+			ALL_THEMES.flatMap((theme) => (theme.fonts?.faces ?? []).map((face) => face.family))
+		);
+		expect(new Set(FAMILIES.map((f) => f.family))).toEqual(declared);
 	});
 });
 
@@ -130,7 +133,7 @@ describe('fetch-fonts readManifest', () => {
 	const dir = mkdtempSync(join(tmpdir(), 'sona-fetch-fonts-test-'));
 
 	it('reads an empty baseline only when the file is missing', () => {
-		expect(readManifest(join(dir, 'absent.json'))).toEqual({});
+		expect(readManifest(join(dir, 'absent.json'))).toEqual({ present: false, files: {} });
 	});
 
 	it('propagates a corrupt manifest instead of resetting the baseline', () => {
@@ -148,6 +151,33 @@ describe('fetch-fonts readManifest', () => {
 		const good = join(dir, 'good.json');
 		const files = { 'A-400-latin.woff2': 'a'.repeat(64) };
 		writeFileSync(good, JSON.stringify({ note: 'x', files }));
-		expect(readManifest(good)).toEqual(files);
+		expect(readManifest(good)).toEqual({ present: true, files });
+	});
+});
+
+// A manifest that exists but does not name a file already on disk is a lost
+// line, not a first run; accepting the file would record its bytes unchecked.
+describe('fetch-fonts acceptCached', () => {
+	const bytes = Buffer.from('woff2 bytes');
+	const digest = acceptBytes('Test-latin.woff2', bytes, { force: false, recorded: undefined });
+
+	it('accepts an unrecorded file when there is no manifest yet', () => {
+		expect(acceptCached('Test-latin.woff2', bytes, { force: false, recorded: undefined, present: false })).toBe(digest);
+	});
+
+	it('refuses an unrecorded file when a manifest exists', () => {
+		expect(() =>
+			acceptCached('Test-latin.woff2', bytes, { force: false, recorded: undefined, present: true })
+		).toThrow(/does not record it/);
+	});
+
+	it('accepts an unrecorded file under --force', () => {
+		expect(acceptCached('Test-latin.woff2', bytes, { force: true, recorded: undefined, present: true })).toBe(digest);
+	});
+
+	it('still checks a recorded file against its digest', () => {
+		expect(() =>
+			acceptCached('Test-latin.woff2', bytes, { force: false, recorded: 'a'.repeat(64), present: true })
+		).toThrow(/records/);
 	});
 });
