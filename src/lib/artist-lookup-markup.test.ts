@@ -525,8 +525,11 @@ describe('the "From lookup" tag', () => {
 			// That arm reads a LATCH rather than the text in the input. Derived from
 			// the text, deleting what the operator typed into an emptied field puts
 			// the cleared claim back and the panel re-attributes their own deletion
-			// to Sona, so the flag goes up on their first non-empty input and comes
-			// down only where the cleared record it speaks for is reset.
+			// to Sona, so the flag goes up on their first non-empty input and no
+			// later keystroke lowers it. It comes down where the cleared record it
+			// speaks for is replaced: at every lookup start on the edit page, and
+			// in applyShared on the upload page, whose parent tile has no per-
+			// lookup reset (see the recompute pinned below).
 			expect(source).toMatch(
 				new RegExp(
 					`const ${edited} = \\$derived\\(\\{[\\s\\S]{0,400}?sourcePostUrl: !sourceTagged && \\(${record}\\.sourcePostUrl !== undefined \\|\\| sourceTypedIn\\)`
@@ -545,11 +548,22 @@ describe('the "From lookup" tag', () => {
 			expect(source).toMatch(
 				/oninput=\{[\s\S]{0,400}?dateTagged = false;[\s\S]{0,300}?if \(event\.currentTarget\.value\.trim\(\) !== ''\) dateTypedIn = true;/
 			);
-			// And lowered beside the record, so the two can never speak for
-			// different results.
-			expect(source).toMatch(
-				/(sharedCleared|lookupCleared) = \{\};\s+sourceTypedIn = false;\s+dateTypedIn = false;/
-			);
+			// And lowered beside the record at EVERY site that resets it, so the two
+			// can never speak for different results. Counted rather than matched
+			// once: an alternation that passes on one file's single reset site says
+			// nothing about the edit page's second one, which could drop its latch
+			// lines unnoticed (SONA-220).
+			const clearedRecord = source === UPLOAD ? 'sharedCleared' : 'lookupCleared';
+			const resets = source.match(new RegExp(`${clearedRecord} = \\{\\};`, 'g')) ?? [];
+			const withLatches =
+				source.match(
+					new RegExp(
+						`${clearedRecord} = \\{\\};\\s+sourceTypedIn = false;\\s+dateTypedIn = false;`,
+						'g'
+					)
+				) ?? [];
+			expect(resets.length).toBeGreaterThan(0);
+			expect(withLatches.length).toBe(resets.length);
 			// And the panel is handed both halves.
 			expect(source).toMatch(new RegExp(`filled=\\{${record}\\}\\s+edited=\\{${edited}\\}`));
 		}
@@ -975,23 +989,48 @@ describe('what the lookup copy names', () => {
 		expect(UPLOAD).toMatch(/applyShared\(tile\?\.lookup \?\? \{ kind: 'idle' \}, emptied\)/);
 		const parentBody = UPLOAD.match(/function onParentChanged\([\s\S]*?\n\t\}/)?.[0] ?? '';
 		expect(parentBody).not.toContain('sharedCleared =');
-		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,2600}?sharedCleared = \{ \.\.\.seed \};/);
-		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,3600}?const cleared: LookupCleared = \{ \.\.\.seed \};/);
-		// And the record is checked against the fields before either of those
-		// reads it. A move onto a still-searching tile holds its record until that
-		// result lands, and the operator can type into an emptied field in the
-		// meantime — a cleared flag over a field with something in it has the
-		// panel say Sona cleared a URL that is sitting in the input (SONA-220).
-		// Off the operator's own text, which the result's own fill branches read
-		// too: a second copy of the untagged-and-non-empty test could disagree
-		// with them about whose text is in the field. The URL half is one named
-		// answer, shared with the clash sentence's own snapshot.
+		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,3200}?sharedCleared = \{ \.\.\.seed \};/);
+		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,3700}?const cleared: LookupCleared = \{ \.\.\.seed \};/);
+		// The operator's own text is one named answer, which the result's own fill
+		// branches read too: a second copy of the untagged-and-non-empty test could
+		// disagree with them about whose text is in the field. The URL half is
+		// shared with the clash sentence's own snapshot.
 		expect(UPLOAD).toMatch(
 			/const sourceHeld = ownSource\.trim\(\) !== '';/
 		);
+		// And it is what the two latches are recomputed from as each result lands.
+		// The upload page's parent tile has no per-lookup reset, so a latch raised
+		// once survived every later lookup on that tile: a lookup fills the URL,
+		// the operator types a character and deletes it, a second lookup refills
+		// the field, and the stale latch then dropped the third result's cleared
+		// flag over a field it had just blanked (SONA-220).
 		expect(UPLOAD).toMatch(
-			/function applyShared\([\s\S]{0,1700}?const seed: LookupCleared = \{ \.\.\.emptied \};\s+if \(sourceHeld\) seed\.sourcePostUrl = false;\s+if \(ownDate\.trim\(\) !== ''\) seed\.commissionedAt = false;/
+			/function applyShared\([\s\S]{0,1800}?sourceTypedIn = sourceHeld;\s+dateTypedIn = ownDate\.trim\(\) !== '';/
 		);
+		// The recompute sits at the tagging site, where the result takes the two
+		// fields over, so a latch and the tag it qualifies are always written for
+		// the same result. The edit page deliberately has none: resetLookupPrefill
+		// runs at every lookup start there, so no latch can outlive its result,
+		// and a second lowering would drop a latch the operator raised while that
+		// page's search was still out.
+		const applyPrefill = EDIT.match(/function applyPrefill\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(applyPrefill).toContain('sourceTagged = true;');
+		expect(applyPrefill).not.toMatch(/TypedIn =/);
+		expect(EDIT).toMatch(
+			/function startLookup\(\)[\s\S]{0,600}?resetLookupPrefill\(\);/
+		);
+		// The seed is the raw record of what the caller's reset emptied. It is NOT
+		// re-checked against the fields here: the latch above carries the
+		// operator's text into `sharedEdited`, which the status line applies where
+		// the sentence speaks about the screen, and erasing the raw emptied fact
+		// instead routed a date the move emptied and the operator retyped to
+		// "left the commissioned date as it was" (SONA-220).
+		expect(UPLOAD).toMatch(
+			/function applyShared\([\s\S]{0,2400}?const seed: LookupCleared = \{ \.\.\.emptied \};/
+		);
+		const appliedShared = UPLOAD.match(/function applyShared\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(appliedShared).not.toContain('seed.sourcePostUrl = false');
+		expect(appliedShared).not.toContain('seed.commissionedAt = false');
 		expect(UPLOAD).toMatch(/sharedUrlHeld = sourceHeld;/);
 		// And nothing else writes sharedCleared. The catch that synthesises a
 		// failure used to assign the held record straight, which skipped the check
@@ -1401,12 +1440,12 @@ describe('focus after the panel goes away', () => {
 			// there instead — recorded, so the status line can say so (4.1.3).
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,3600}?\\} else if \\(sourceTagged\\) \\{[\\s\\S]{0,600}?sourcePostUrl = '';\\s+sourceTagged = false;\\s+cleared\\.sourcePostUrl = true;`
+					`function ${apply}\\([\\s\\S]{0,4200}?\\} else if \\(sourceTagged\\) \\{[\\s\\S]{0,600}?sourcePostUrl = '';\\s+sourceTagged = false;\\s+cleared\\.sourcePostUrl = true;`
 				)
 			);
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,4200}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
+					`function ${apply}\\([\\s\\S]{0,4900}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
 				)
 			);
 			expect(source).toMatch(/cleared=\{(shared|lookup)Cleared\}/);
@@ -1420,7 +1459,7 @@ describe('focus after the panel goes away', () => {
 		] as const) {
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,2600}?if \\(next\\.kind !== 'results' && next\\.kind !== 'no_match'\\)`
+					`function ${apply}\\([\\s\\S]{0,3200}?if \\(next\\.kind !== 'results' && next\\.kind !== 'no_match'\\)`
 				)
 			);
 			// And a no-match prefills nothing, so every fill branch is skipped and

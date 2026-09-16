@@ -518,8 +518,9 @@
 	// put back (SONA-220). Without it the status line says a field was left as it
 	// was while the operator watched it go blank (4.1.3).
 	let sharedCleared = $state<LookupCleared>({});
-	// Whether the operator has put text of their own into each field since that
-	// record was written. See sharedEdited.
+	// Whether the operator has text of their own in each field. Raised on input
+	// to either field, recomputed against the fields in applyShared when a result
+	// lands, and lowered in resetSharedPrefill. See sharedEdited.
 	let sourceTypedIn = $state(false);
 	let dateTypedIn = $state(false);
 	// Not $state: nothing renders it. See takePendingCleared.
@@ -533,8 +534,11 @@
 	// from the text, deleting what the operator typed into a field this result
 	// emptied puts "Sona cleared the source post URL" back over a field THEY just
 	// emptied, and the panel re-attributes their own deletion to Sona (SONA-220).
-	// Each latch lives exactly as long as the cleared record it speaks for: up on
-	// the first text of theirs, down where that record is reset.
+	// Each latch lives exactly as long as the cleared record it speaks for. It
+	// rises on input to either field — even a character typed and deleted — and
+	// applyShared recomputes it against the fields as each result lands, so a
+	// result that refills a field lowers it again and one the operator's text
+	// survives keeps it up. resetSharedPrefill lowers both on a parent move.
 	const sharedEdited = $derived({
 		sourcePostUrl: !sourceTagged && (sharedFilled.sourcePostUrl !== undefined || sourceTypedIn),
 		commissionedAt: !dateTagged && (sharedFilled.commissionedAt !== undefined || dateTypedIn)
@@ -916,16 +920,26 @@
 		// below and for the clash sentence's snapshot: computed twice, the two
 		// could disagree about whose text the field holds.
 		const sourceHeld = ownSource.trim() !== '';
-		// A cleared flag means an empty field. The record a parent move hands over
-		// can be minutes old — the move onto a still-searching tile holds it until
-		// that result lands — and the operator is free to type into either field
-		// in between. Left in, the flag has the panel say Sona cleared a URL that
-		// is sitting in the input, because the sentence for it is chosen before
-		// the one that says the field was held. Read off the operator's own text:
-		// a field with something of theirs in it was not left empty by anyone.
+		// Each latch is recomputed here, against THIS result, so it describes the
+		// operator's text relative to the record it speaks for. Raised once and
+		// left alone, a latch outlives the cleared record it belongs to: a lookup
+		// fills the URL, the operator types a character and deletes it, a second
+		// lookup refills the field, and the latch is still up over text that is
+		// the lookup's. A third result then blanks the field and the stale latch
+		// drops its own cleared flag, so the panel says nothing about a field the
+		// operator watched go blank, or claims it was left as it was (SONA-220).
+		// Lowered only here and in resetSharedPrefill, never in resetSharedResult:
+		// the previous record's protection has to survive the round trip.
+		sourceTypedIn = sourceHeld;
+		dateTypedIn = ownDate.trim() !== '';
+		// What a reset the caller ran took out of the fields, kept raw. A field
+		// the operator has typed into since is handled by the latch above feeding
+		// `sharedEdited`, which the status line applies to the cleared flags for
+		// the sentences that speak about the screen. Dropped here instead, the
+		// raw fact that the move emptied the field would go with it, and a date
+		// the move emptied and the operator retyped would read as "left the
+		// commissioned date as it was" (SONA-220).
 		const seed: LookupCleared = { ...emptied };
-		if (sourceHeld) seed.sourcePostUrl = false;
-		if (ownDate.trim() !== '') seed.commissionedAt = false;
 		// A failure, or a search cancelled back to idle, leaves both fields exactly
 		// as they are: there is no new post to describe them, and what the last
 		// lookup wrote is still the best thing the page knows.

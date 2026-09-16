@@ -98,8 +98,11 @@
 	// from the text, deleting what they typed puts "Sona cleared the source post
 	// URL" back over a field THEY just emptied, and the panel re-attributes
 	// their own deletion to Sona (SONA-220). Each latch lives exactly as long as
-	// the cleared record it speaks for: up on the first text of theirs, down
-	// wherever that record is reset.
+	// the cleared record it speaks for. It rises on input to either field — even
+	// a character typed and deleted — and resetLookupPrefill lowers both at the
+	// start of every lookup on this page, so no latch outlives the result it was
+	// raised against. (The upload page's parent tile has no such per-lookup
+	// reset, so applyShared recomputes the latches there instead.)
 	let sourceTypedIn = $state(false);
 	let dateTypedIn = $state(false);
 	/** The artist the panel applied to the SELECT. Handed to the panel only
