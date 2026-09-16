@@ -45,8 +45,9 @@ function endOfString(source: string, i: number): number {
 // closer never arrives, so a scan that walks off the end says so instead of
 // returning a slice that stops wherever the source did.
 // Regex literals are NOT tracked: a `/[{}]/` inside a scanned body would move
-// the depth and a `/won't/` would open a string that never closes. No function
-// this file slices has one.
+// the depth and a `/won't/` would open a string that never closes. Nor are
+// template literals nested inside a `${}` expression: the scan ends at the
+// next backtick. No function this file slices has either.
 function matchDelim(
 	source: string,
 	from: number,

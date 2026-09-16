@@ -867,8 +867,9 @@
 		// record left standing kept the panel open as a bordered card holding the
 		// sentence after the operator cancelled, and the atomic status region spoke
 		// it again as the arm changed (SONA-220). This leaves the fields exactly as
-		// it found them, so the typed-in latches stay where they are.
-		sharedCleared = {};
+		// it found them, so the typed-in latches stay where they are. The record
+		// only ever describes the parent, so only the parent's cancel drops it.
+		if (isParent(key)) sharedCleared = {};
 	}
 
 	/** Undo what a previous shared prefill wrote, but only where the operator has
