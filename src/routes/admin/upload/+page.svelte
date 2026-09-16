@@ -938,20 +938,28 @@
 		const wrote = tile
 			? applyShared(tile.lookup)
 			: { sourcePostUrl: false, commissionedAt: false };
-		// The new parent put nothing back. A tile with no result of its own shows
-		// no panel and no status line, so the two fields the last parent's lookup
-		// filled empty with nothing on screen saying why — said out loud instead,
-		// the way returnToNewSet announces a refill. Only when nothing was
-		// written: a refill has its own announcement there, and two in one tick
-		// leaves the region holding the second.
-		if (!wrote.sourcePostUrl && !wrote.commissionedAt) {
-			if (emptied.sourcePostUrl && emptied.commissionedAt) {
-				announcer.say(m.admin_lookup_announce_shared_cleared());
-			} else if (emptied.sourcePostUrl) {
-				announcer.say(m.admin_lookup_announce_shared_cleared_source());
-			} else if (emptied.commissionedAt) {
-				announcer.say(m.admin_lookup_announce_shared_cleared_date());
-			}
+		// What the move left blank: emptied by the reset above and not written
+		// back by the new parent's result. applyShared cannot see this itself —
+		// the reset untags both fields before it runs, so its own record comes
+		// back empty and the panel would say the field was "left as it was" over
+		// an input the operator just watched go blank (4.1.3).
+		const cleared: LookupCleared = {
+			sourcePostUrl: !!emptied.sourcePostUrl && !wrote.sourcePostUrl,
+			commissionedAt: !!emptied.commissionedAt && !wrote.commissionedAt
+		};
+		sharedCleared = cleared;
+		// A tile with no result of its own shows no panel and no status line, so a
+		// field that empties does it with nothing on screen saying why — said out
+		// loud instead, the way returnToNewSet announces a refill. Per field, not
+		// only when nothing at all was written: a move that refills the URL and
+		// empties the date is exactly the case the panel used to misreport, and
+		// the operator hears about the one that went blank.
+		if (cleared.sourcePostUrl && cleared.commissionedAt) {
+			announcer.say(m.admin_lookup_announce_shared_cleared());
+		} else if (cleared.sourcePostUrl) {
+			announcer.say(m.admin_lookup_announce_shared_cleared_source());
+		} else if (cleared.commissionedAt) {
+			announcer.say(m.admin_lookup_announce_shared_cleared_date());
 		}
 		return wrote;
 	}
@@ -2157,6 +2165,15 @@
 
 	/* The pill itself, and how the shared row shares its width with it, are
 	   global — the tiles hold the same pill. See `.rating-tag` in app.css. */
+
+	/* One exception to that. The tile is about 170px wide, and break-word does
+	   not shrink an item's min-content width, so a rating naming four sites
+	   pushed the tile — and the document — wider than a phone's viewport. Only
+	   here: `anywhere` is what shatters a squeezed pill into one character per
+	   line, and the shared row is wide enough never to need it. */
+	.tile-nsfw-row .rating-tag {
+		overflow-wrap: anywhere;
+	}
 
 	.field-label {
 		font-size: 14px;

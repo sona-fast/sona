@@ -610,6 +610,16 @@ select.input {
 	.tag-check-row {
 		gap: 4px;
 	}
+
+	/* The 4px above is the gap BETWEEN the two rating items, which report the
+	   same kind of thing and belong together. The action after them is a
+	   different kind of thing, so it takes some of that separation back. 4px, not
+	   the 8px the row would read better with: the edit form's column has about
+	   6px of slack at 1280, and 8px spent here wrapped "entail.dev." onto a
+	   second line — which is the shortfall the narrower gap was paying off. */
+	.tag-check-row .btn {
+		margin-left: 4px;
+	}
 }
 
 /* The pill that opens a lookup — the outline capsule the "Add New Artist"

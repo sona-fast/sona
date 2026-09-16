@@ -706,7 +706,7 @@ describe('round 11 wiring', () => {
 	// filled — which says nothing about whether the artist is still unapplied.
 	it('renders the artist hint on its own condition, not the status line\'s', () => {
 		const status =
-			PANEL.match(/\{#if statusKind !== 'none' && \(prefill \|\| emptiedOnly\)\}[\s\S]*?\{\/if\}/)?.[0] ??
+			PANEL.match(/\{:else if statusKind !== 'none' && prefill\}[\s\S]*?\{\/if\}/)?.[0] ??
 			'';
 		expect(status).toContain('admin_lookup_status_both');
 		expect(status).not.toContain('admin_lookup_status_artist_hint');
@@ -915,15 +915,30 @@ describe('what the lookup copy names', () => {
 			];
 			expect(new Set(sentences).size).toBe(3);
 		}
-		// The reset hands back what it emptied, and the parent move says it —
-		// only where nothing was written, because a refill has its own line and
-		// two announcements in one tick leave the region holding the second.
+		// The en side names the image, not the tile's turn at being parent: "the
+		// last parent's lookup" reads as a person.
+		for (const sentence of [
+			en.admin_lookup_announce_shared_cleared,
+			en.admin_lookup_announce_shared_cleared_source,
+			en.admin_lookup_announce_shared_cleared_date
+		]) {
+			expect(sentence).toContain("the last parent image's lookup filled");
+		}
+		// The reset hands back what it emptied, and the parent move records which
+		// of those the new parent did NOT write back — applyShared cannot see it,
+		// because the reset untagged both fields before it ran.
 		expect(UPLOAD).toMatch(
 			/function resetSharedPrefill\(\): LookupCleared \{[\s\S]{0,400}?emptied\.sourcePostUrl = true;[\s\S]{0,300}?emptied\.commissionedAt = true;[\s\S]{0,300}?return emptied;/
 		);
 		expect(UPLOAD).toMatch(
-			/function onParentChanged\(index: number\)[\s\S]{0,900}?if \(!wrote\.sourcePostUrl && !wrote\.commissionedAt\) \{[\s\S]{0,400}?m\.admin_lookup_announce_shared_cleared\(\)/
+			/function onParentChanged\(index: number\)[\s\S]{0,1200}?const cleared: LookupCleared = \{\s+sourcePostUrl: !!emptied\.sourcePostUrl && !wrote\.sourcePostUrl,\s+commissionedAt: !!emptied\.commissionedAt && !wrote\.commissionedAt\s+\};\s+sharedCleared = cleared;/
 		);
+		// Said per field, not only where nothing at all was written: a move that
+		// refills the URL and empties the date announces the date.
+		expect(UPLOAD).toMatch(
+			/function onParentChanged\(index: number\)[\s\S]{0,1600}?if \(cleared\.sourcePostUrl && cleared\.commissionedAt\) \{[\s\S]{0,400}?m\.admin_lookup_announce_shared_cleared\(\)/
+		);
+		expect(UPLOAD).not.toMatch(/if \(!wrote\.sourcePostUrl && !wrote\.commissionedAt\) \{/);
 	});
 
 	// An unreadable file is a dead end on a variant tile: not retryable, no
@@ -1247,8 +1262,14 @@ describe('focus after the panel goes away', () => {
 		// The no-match arm has no status line of its own, so the sentence is
 		// rendered there as well as under a result.
 		expect(PANEL).toMatch(
-			/\{:else if lookup\.kind === 'no_match'\}[\s\S]{0,600}?\{#if emptiedOnly\}\s+<p class="lookup-status">\{emptiedText\}<\/p>/
+			/\{:else if lookup\.kind === 'no_match'\}[\s\S]{0,600}?\{#if emptiedOnly\}\s+<p class="lookup-status lookup-emptied">\{emptiedText\}<\/p>/
 		);
+		// Where the sentence renders is read off the sentence itself: a second
+		// list of the same three kinds can disagree with the text it guards.
+		expect(PANEL).toMatch(/const emptiedOnly = \$derived\(emptiedText !== ''\);/);
+		// And it reports a change the fields just made, so it is not drawn in the
+		// muted colour the advice lines use.
+		expect(PANEL).toMatch(/\.lookup-emptied \{\s+color: var\(--foreground\);/);
 		// The panel reads that record, and says the field was emptied rather than
 		// left as it was.
 		expect(PANEL).toMatch(/statusLineKind\(filled, \{ clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared \}\)/);
@@ -1380,9 +1401,14 @@ describe('the rating tag beside NSFW', () => {
 		// copy of the rule any more.
 		expect(APP_CSS).not.toMatch(/\.rating-tag \{[^}]*white-space: nowrap;/);
 		for (const source of [UPLOAD, EDIT]) {
-			expect(source).not.toMatch(/\.rating-tag \{/);
+			// A page-local copy of the whole pill, which is what the consolidation
+			// took away. The tile's one-property override below is not one.
+			expect(source).not.toMatch(/^\t\.rating-tag \{/m);
 		}
 		expect(UPLOAD).toMatch(/\.tile-nsfw-row \{[^}]*min-width: 0/);
+		// break-word does not shrink an item's min-content width, and the tile is
+		// about 170px wide, so the tile pill keeps the `anywhere` it always had.
+		expect(UPLOAD).toMatch(/\.tile-nsfw-row \.rating-tag \{[^}]*overflow-wrap: anywhere;/);
 	});
 
 	// Wrapped to three or more lines, the pill token clamps to half the box height
@@ -1409,6 +1435,12 @@ describe('the rating tag beside NSFW', () => {
 		// line. 4px buys back the 12px that keeps all four items on one line.
 		expect(APP_CSS).toMatch(
 			/@container admin-form \(min-width: 560px\) \{[\s\S]{0,600}?\.tag-check-row \{\s+gap: 4px;/
+		);
+		// That gap is between the two rating items, which report the same kind of
+		// thing. The action after them is a different kind of thing and takes some
+		// of that separation back — 4px, which is all the column's slack allows.
+		expect(APP_CSS).toMatch(
+			/@container admin-form \(min-width: 560px\) \{[\s\S]{0,900}?\.tag-check-row \.btn \{\s+margin-left: 4px;/
 		);
 		// Nothing shrinks off a viewport query any more, and the rule is keyed to
 		// the row rather than to either page's copy of it.

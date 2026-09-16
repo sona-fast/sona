@@ -129,9 +129,6 @@
 	// result that empties one can be a no-match with no prefill match to name.
 	// Held as text rather than inline in the markup because a no-match renders
 	// its own arm, well above the status line every other result uses.
-	const emptiedOnly = $derived(
-		statusKind === 'both_emptied' || statusKind === 'url_emptied' || statusKind === 'date_emptied'
-	);
 	const emptiedText = $derived(
 		statusKind === 'both_emptied'
 			? m.admin_lookup_status_both_emptied()
@@ -141,6 +138,10 @@
 					? m.admin_lookup_status_date_emptied()
 					: ''
 	);
+	// Off the text rather than off a second list of the same three kinds: two
+	// lists have to be kept in step, and the one that decides WHERE the sentence
+	// renders is the one that can silently disagree with the sentence itself.
+	const emptiedOnly = $derived(emptiedText !== '');
 	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
 	// The "Sets the artist to {name}." sentence and the button it
 	// names render on the same condition, so the button can describe itself with
@@ -229,7 +230,7 @@
 				     watches the two fields go blank and this arm carries no status
 				     line of its own. -->
 				{#if emptiedOnly}
-					<p class="lookup-status">{emptiedText}</p>
+					<p class="lookup-status lookup-emptied">{emptiedText}</p>
 				{/if}
 				<p class="lookup-status">{m.admin_lookup_no_match_hint()}</p>
 			{:else if lookup.kind === 'failed'}
@@ -398,15 +399,11 @@
 					{/if}
 				{/if}
 
-				{#if statusKind !== 'none' && (prefill || emptiedOnly)}
+				{#if emptiedOnly}
+					<p class="lookup-status lookup-emptied">{emptiedText}</p>
+				{:else if statusKind !== 'none' && prefill}
 					<p class="lookup-status">
-						{#if emptiedOnly}
-							{emptiedText}
-						{:else if !prefill}
-							<!-- Unreachable: the three sentences above are the only ones that
-							     render without a prefill match. Here so every sentence below
-							     can name the post it filled from. -->
-						{:else if statusKind === 'both'}
+						{#if statusKind === 'both'}
 							{m.admin_lookup_status_both({ site: siteLabel(prefill.site) })}
 						{:else if statusKind === 'url_only'}
 							{m.admin_lookup_status_url_only({ site: siteLabel(prefill.site) })}
@@ -688,6 +685,12 @@
 		line-height: 1.55;
 		margin: 10px 0 0;
 		max-width: 62ch;
+	}
+	/* A report of a change the operator's fields just made, not the advice the
+	   muted status lines carry — at the hint's colour it reads as something to
+	   consider rather than as something that happened. */
+	.lookup-emptied {
+		color: var(--foreground);
 	}
 	/* The searching line carries the spinner, so it lines up with its text. */
 	.searching-line {

@@ -767,6 +767,29 @@ describe('statusLineKind', () => {
 		).toBe('both_emptied');
 		expect(statusLineKind({}, { cleared: { sourcePostUrl: true } })).toBe('url_emptied');
 		expect(statusLineKind({}, { cleared: { commissionedAt: true } })).toBe('date_emptied');
+		// The shape a parent move hands over: both keys present, false for the
+		// field the new parent's result wrote back. A move that empties both and
+		// refills only the URL has to reach the same sentence as a plain result
+		// that filled the URL and emptied the date (SONA-220).
+		expect(
+			statusLineKind(
+				{ sourcePostUrl: 'u' },
+				{ cleared: { sourcePostUrl: false, commissionedAt: true } }
+			)
+		).toBe('url_and_date_emptied');
+		expect(
+			statusLineKind(
+				{ commissionedAt: 'd' },
+				{ cleared: { sourcePostUrl: true, commissionedAt: false } }
+			)
+		).toBe('date_and_url_emptied');
+		// Both written back: nothing was left blank, so nothing claims it was.
+		expect(
+			statusLineKind(
+				{ sourcePostUrl: 'u', commissionedAt: 'd' },
+				{ cleared: { sourcePostUrl: false, commissionedAt: false } }
+			)
+		).toBe('both');
 		// An empty record changes nothing about the sentences that were there.
 		expect(statusLineKind({ sourcePostUrl: 'u' }, { cleared: {} })).toBe('url_only');
 		expect(statusLineKind({ sourcePostUrl: 'u', commissionedAt: 'd' }, { cleared: {} })).toBe(
@@ -822,8 +845,10 @@ describe('statusLineKind', () => {
 		expect(m.admin_lookup_status_both_emptied({}, { locale: 'en' })).toBe(
 			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
 		);
+		// The reason blames the lookup, the way its siblings do: this sentence
+		// renders on the no-match arm too, where there is no result to have a date.
 		expect(m.admin_lookup_status_date_emptied({}, { locale: 'en' })).toBe(
-			'Sona cleared the commissioned date the last lookup filled, because this result has no date.'
+			'Sona cleared the commissioned date the last lookup filled, because this lookup filled no date in its place.'
 		);
 		// The panel's click-time announcement and these lines describe the same
 		// thing, so they use the same verb.

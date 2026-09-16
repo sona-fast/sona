@@ -668,6 +668,14 @@ test.describe('with a key saved', () => {
 			expect(box.height).toBeLessThan(24);
 		}
 		await expect(page.locator('.tag-check-row')).toHaveCSS('gap', '4px');
+		// The 4px is between the two rating items, which report the same kind of
+		// thing. The action after them takes some of that separation back, and all
+		// four still hold one line each — 8px here wrapped the note.
+		await expect(page.locator('.tag-check-row .btn')).toHaveCSS('margin-left', '4px');
+		const wideNote = await page.locator('#tags-rating').boundingBox();
+		const wideButton = await page.locator('.tag-check-row .btn').boundingBox();
+		if (!wideNote || !wideButton) throw new Error('the wide row has no box');
+		expect(wideButton.x - (wideNote.x + wideNote.width)).toBeGreaterThanOrEqual(7);
 		// And the phone is untouched by that: shrinking the pills is a rule for the
 		// wide row only, so at 320 the row still wraps whole items, each onto its
 		// own line under the label text rather than under the checkbox.
@@ -890,7 +898,7 @@ test.describe('with a key saved', () => {
 		// And it says so. The new parent has no result, so the panel shows nothing
 		// about the two fields that just emptied under the operator (4.1.3).
 		await expect(page.locator(LIVE_REGION)).toContainText(
-			"Sona cleared the source post URL and commissioned date the last parent's lookup filled."
+			"Sona cleared the source post URL and commissioned date the last parent image's lookup filled."
 		);
 	});
 
@@ -2279,6 +2287,109 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+	});
+
+	// A parent move empties both shared fields, and the new parent's result puts
+	// only one of them back. The panel used to reach url_only and call the date
+	// "left as it was", over an input the operator had just watched go blank, and
+	// the live region said nothing at all because the URL had been written
+	// (4.1.3).
+	test('a parent move that refills the URL says the date was cleared', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile's own post: a different one, carrying no date.
+		const DATELESS_POST = 'https://www.furaffinity.net/view/54321/';
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '54321',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: null,
+						rating: 'general',
+						postUrl: DATELESS_POST
+					}
+				]
+			})
+		);
+		await tileLookup(page).nth(1).click();
+		await expect(page.locator('.tile-nsfw-row .rating-tag')).toHaveText(
+			'Rated General on FurAffinity'
+		);
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+
+		// The URL is the new parent's, and the date it had no replacement for is
+		// gone rather than left pointing at the first tile's post.
+		await expect(sourceInput(page)).toHaveValue(DATELESS_POST);
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+
+		// The panel says which field went, and never says it was left alone.
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL from the FurAffinity post and cleared the commissioned date the last lookup filled, because that post has no date.'
+		);
+		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
+		// And so does the live region: the refill is visible in a field the
+		// operator can see, the clearing is the part nothing else reports.
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			"Sona cleared the commissioned date the last parent image's lookup filled."
+		);
+	});
+
+	// The tile is about 170px wide and the pill's text grows with the number of
+	// sites. The consolidated rule's break-word does not shrink an item's
+	// min-content width, so a four-site rating pushed the tile — and the document
+	// — wider than a phone's viewport (SONA-220).
+	test('a four-site rating wraps inside the tile rather than widening the page', async ({
+		page
+	}) => {
+		const sites = ['FurAffinity', 'Weasyl', 'e621', 'Twitter'];
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: sites.map((site, i) => ({
+					site,
+					siteId: `9000${i}`,
+					handles: ['kuttoya'],
+					distance: 0,
+					band: 'exact',
+					postedAt: '2026-03-04T10:00:00Z',
+					rating: 'adult',
+					postUrl: `https://example.invalid/${i}`
+				}))
+			})
+		);
+		await twoDoneTiles(page);
+		await page.setViewportSize({ width: 390, height: 900 });
+
+		// The variant tile, which is where the tile pill renders.
+		await tileLookup(page).nth(1).click();
+		const tag = page.locator('.tile-nsfw-row .rating-tag');
+		await expect(tag).toHaveText('Rated Adult on FurAffinity, Weasyl, e621, Twitter');
+		await expect(tag).toHaveCSS('overflow-wrap', 'anywhere');
+
+		// Inside its own tile, to the pixel.
+		const tile = await page.locator('.tile').nth(1).boundingBox();
+		const box = await tag.boundingBox();
+		if (!tile || !box) throw new Error('the tile or its pill has no box');
+		expect(box.x + box.width).toBeLessThanOrEqual(tile.x + tile.width + 1);
+		// And the page still does not scroll sideways.
+		const overflow = await page.evaluate(() => {
+			const el = document.scrollingElement;
+			return el ? el.scrollWidth - el.clientWidth : 0;
+		});
+		expect(overflow).toBeLessThanOrEqual(0);
 	});
 
 	// The role used to be snapshotted when the request fired, so a lookup started
