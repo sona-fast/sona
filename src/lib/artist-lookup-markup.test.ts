@@ -941,8 +941,8 @@ describe('what the lookup copy names', () => {
 	});
 
 	// The mirror of those three. Moving the parent empties the two fields the
-	// last parent's lookup filled, and a parent with no result of its own puts
-	// nothing in the panel to say so (4.1.3).
+	// last lookup filled, and a parent with no result of its own puts nothing in
+	// the panel to say so (4.1.3).
 	it('names the cleared shared fields in both catalogs, and says them out loud', () => {
 		expect(ja.admin_lookup_announce_shared_cleared).toBeTruthy();
 		expect(ja.admin_lookup_announce_shared_cleared_source).toContain('投稿元URL');
@@ -989,10 +989,12 @@ describe('what the lookup copy names', () => {
 		expect(UPLOAD).toMatch(/applyShared\(tile\?\.lookup \?\? \{ kind: 'idle' \}, emptied\)/);
 		const parentBody = UPLOAD.match(/function onParentChanged\([\s\S]*?\n\t\}/)?.[0] ?? '';
 		expect(parentBody).not.toContain('sharedCleared =');
-		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,3600}?sharedCleared = \{ \.\.\.emptied \};/);
-		expect(UPLOAD).toMatch(
-			/function applyShared\([\s\S]{0,4100}?const cleared: LookupCleared = \{ \.\.\.emptied \};/
-		);
+		// Sliced, the way parentBody is: a character span from the function's name
+		// measures how much prose sits between the two, and every comment added
+		// here has had to widen it.
+		const appliedShared = UPLOAD.match(/function applyShared\([\s\S]*?\n\t\}/)?.[0] ?? '';
+		expect(appliedShared).toMatch(/sharedCleared = \{ \.\.\.emptied \};/);
+		expect(appliedShared).toMatch(/const cleared: LookupCleared = \{ \.\.\.emptied \};/);
 		// The operator's own text is one named answer, which the result's own fill
 		// branches read too: a second copy of the untagged-and-non-empty test could
 		// disagree with them about whose text is in the field. The URL half is
@@ -1006,8 +1008,8 @@ describe('what the lookup copy names', () => {
 		// the operator types a character and deletes it, a second lookup refills
 		// the field, and the stale latch then dropped the third result's cleared
 		// flag over a field it had just blanked (SONA-220).
-		expect(UPLOAD).toMatch(
-			/function applyShared\([\s\S]{0,2200}?sourceTypedIn = sourceHeld;\s+dateTypedIn = ownDate\.trim\(\) !== '';/
+		expect(appliedShared).toMatch(
+			/sourceTypedIn = sourceHeld;\s+dateTypedIn = ownDate\.trim\(\) !== '';/
 		);
 		// The recompute sits at the tagging site, where the result takes the two
 		// fields over, so a latch and the tag it qualifies are always written for
@@ -1028,7 +1030,6 @@ describe('what the lookup copy names', () => {
 		// the sentence speaks about the screen, and erasing the raw emptied fact
 		// instead routed a date the move emptied and the operator retyped to
 		// "left the commissioned date as it was" (SONA-220).
-		const appliedShared = UPLOAD.match(/function applyShared\([\s\S]*?\n\t\}/)?.[0] ?? '';
 		expect(appliedShared).not.toMatch(/emptied\.sourcePostUrl = (?:true|false)/);
 		expect(appliedShared).not.toMatch(/emptied\.commissionedAt = (?:true|false)/);
 		expect(UPLOAD).toMatch(/sharedUrlHeld = sourceHeld;/);
@@ -1085,14 +1086,16 @@ describe('what the lookup copy names', () => {
 			// ends on one line held in a variable, returnToNewSet on an else-if chain
 			// that ends the same way — either shape says at most one thing.
 			expect(body).toMatch(/announcer\.say/);
-			expect(body).toMatch(/const line = clearedLine\(cleared\);\s+if \(line\) announcer\.say\(line\);/);
+			expect(body).toMatch(
+				/const line = clearedLine\(cleared, \{\}\);\s+if \(line\) announcer\.say\(line\);/
+			);
 		}
 		// One chain for what a move emptied, in the shared module rather than on
 		// the page: the panel's searching arm renders the same three sentences
 		// while the result is still out, and a copy on the page could disagree
 		// with it about which field to name.
 		expect(LOOKUP).toMatch(
-			/export function clearedLine\(cleared: LookupCleared, edited: LookupEdited = \{\}\): string \| null \{[\s\S]{0,600}?return null;/
+			/export function clearedLine\(cleared: LookupCleared, edited: LookupEdited\): string \| null \{[\s\S]{0,600}?return null;/
 		);
 		expect(UPLOAD).not.toContain('function clearedLine(');
 		// The mixed case — one field refilled, the other emptied — borrows the
@@ -1108,9 +1111,11 @@ describe('what the lookup copy names', () => {
 		expect(PANEL).toMatch(
 			/const statusText = \$derived\(\s+statusSentence\(statusKind, prefill\?\.site \?\? null, \{ title: clash\?\.title \?\? '', editMode \}\)\s+\);/
 		);
-		// And the radio path stays quiet where the panel carries the sentence.
+		// And the radio path stays quiet wherever the panel carries the sentence,
+		// which is every arm but idle: the searching arm renders it too, and the
+		// region is atomic, so a say() alongside it would be the second telling.
 		expect(UPLOAD).toMatch(
-			/function pickParent\(index: number\) \{[\s\S]{0,500}?if \(kind !== 'idle' && kind !== 'searching'\) return;/
+			/function pickParent\(index: number\) \{[\s\S]{0,500}?if \(kind !== 'idle'\) return;/
 		);
 	});
 
@@ -1439,24 +1444,23 @@ describe('focus after the panel goes away', () => {
 			[UPLOAD, 'applyShared'],
 			[EDIT, 'applyPrefill']
 		] as const) {
+			// Sliced rather than reached for through a character span: the span
+			// measured the prose between the function's name and its code, and grew
+			// with every comment added to either.
+			const body = source.match(new RegExp(`function ${apply}\\([\\s\\S]*?\\n\\t\\}`))?.[0] ?? '';
+			expect(body).not.toBe('');
 			// The result reads a still-tagged value as the lookup's own, so it may
 			// refill it. Only the tag tells that from something the operator typed.
-			expect(source).toMatch(
-				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,2400}?const ownSource = sourceTagged \\? '' : sourcePostUrl;\\s+const ownDate = dateTagged \\? '' : commissionedAt;`
-				)
+			expect(body).toMatch(
+				/const ownSource = sourceTagged \? '' : sourcePostUrl;\s+const ownDate = dateTagged \? '' : commissionedAt;/
 			);
 			// And where the result offers nothing, the deferred field is emptied
 			// there instead — recorded, so the status line can say so (4.1.3).
-			expect(source).toMatch(
-				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,4800}?\\} else if \\(sourceTagged\\) \\{[\\s\\S]{0,600}?sourcePostUrl = '';\\s+sourceTagged = false;\\s+cleared\\.sourcePostUrl = true;`
-				)
+			expect(body).toMatch(
+				/\} else if \(sourceTagged\) \{[\s\S]{0,600}?sourcePostUrl = '';\s+sourceTagged = false;\s+cleared\.sourcePostUrl = true;/
 			);
-			expect(source).toMatch(
-				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,5500}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
-				)
+			expect(body).toMatch(
+				/\} else if \(dateTagged\) \{\s+commissionedAt = '';\s+dateTagged = false;\s+cleared\.commissionedAt = true;/
 			);
 			expect(source).toMatch(/cleared=\{(shared|lookup)Cleared\}/);
 		}
@@ -1467,11 +1471,8 @@ describe('focus after the panel goes away', () => {
 			[UPLOAD, 'applyShared'],
 			[EDIT, 'applyPrefill']
 		] as const) {
-			expect(source).toMatch(
-				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,3600}?if \\(next\\.kind !== 'results' && next\\.kind !== 'no_match'\\)`
-				)
-			);
+			const body = source.match(new RegExp(`function ${apply}\\([\\s\\S]*?\\n\\t\\}`))?.[0] ?? '';
+			expect(body).toMatch(/if \(next\.kind !== 'results' && next\.kind !== 'no_match'\)/);
 			// And a no-match prefills nothing, so every fill branch is skipped and
 			// every clearing branch runs.
 			expect(source).toMatch(

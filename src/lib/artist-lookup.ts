@@ -497,9 +497,11 @@ function clearedOnScreen(held: LookupCleared, edited: LookupEdited): LookupClear
  *
  * `edited` drops a field the operator has typed into since, the way
  * `statusLineKind` does — during a search they are free to fill a field the
- * move emptied, and the sentence must not claim their own text.
+ * move emptied, and the sentence must not claim their own text. Required, not
+ * defaulted: a caller with nothing to pass says so with `{}` rather than
+ * forgetting the argument exists.
  */
-export function clearedLine(cleared: LookupCleared, edited: LookupEdited = {}): string | null {
+export function clearedLine(cleared: LookupCleared, edited: LookupEdited): string | null {
 	const now = clearedOnScreen(cleared, edited);
 	if (now.sourcePostUrl && now.commissionedAt) return m.admin_lookup_announce_shared_cleared();
 	if (now.sourcePostUrl) return m.admin_lookup_announce_shared_cleared_source();

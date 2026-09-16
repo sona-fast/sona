@@ -939,18 +939,18 @@ describe('statusLineKind', () => {
 	// a parent move — so a lookup that is still running is never blamed for the
 	// clearing, and the two surfaces name the same fields.
 	it('names what a move emptied without blaming a result', () => {
-		expect(clearedLine({ sourcePostUrl: true, commissionedAt: true })).toBe(
+		expect(clearedLine({ sourcePostUrl: true, commissionedAt: true }, {})).toBe(
 			m.admin_lookup_announce_shared_cleared()
 		);
-		expect(clearedLine({ sourcePostUrl: true })).toBe(
+		expect(clearedLine({ sourcePostUrl: true }, {})).toBe(
 			m.admin_lookup_announce_shared_cleared_source()
 		);
-		expect(clearedLine({ commissionedAt: true })).toBe(
+		expect(clearedLine({ commissionedAt: true }, {})).toBe(
 			m.admin_lookup_announce_shared_cleared_date()
 		);
 		// Nothing emptied, nothing said: the arm renders no paragraph at all.
-		expect(clearedLine({})).toBe(null);
-		expect(clearedLine({ sourcePostUrl: false, commissionedAt: false })).toBe(null);
+		expect(clearedLine({}, {})).toBe(null);
+		expect(clearedLine({ sourcePostUrl: false, commissionedAt: false }, {})).toBe(null);
 	});
 
 	// The operator is free to type into a field the move emptied while the

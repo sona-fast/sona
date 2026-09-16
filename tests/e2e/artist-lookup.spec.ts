@@ -2570,10 +2570,11 @@ test.describe('with a key saved', () => {
 		);
 	});
 
-	// A move onto a tile that is still SEARCHING is the same case: the panel says
-	// only that a search is running. The result on its way then describes the
-	// fields itself, so the move's line is never said twice.
-	test('a move onto a searching tile says it once, and its result does not repeat it', async ({
+	// A move onto a tile that is still SEARCHING is NOT that case: the searching
+	// arm renders the same sentence, and its region is atomic, so the panel
+	// re-speaks whole when the sentence appears in it. The move stays quiet there
+	// — an announcement alongside it would be the second telling.
+	test('a move onto a searching tile says it once, in the panel and not the live region', async ({
 		page
 	}) => {
 		await stubLookup(page, matchedBody());
@@ -2610,26 +2611,30 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		const spoken =
 			"Sona cleared the source post URL and commissioned date the last lookup filled.";
-		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
-		// And it is on screen while the search is still out. The searching arm
-		// rendered nothing about the fields until the result landed, so a sighted
-		// operator watched both go blank with only the progress line to read. The
-		// sentence is the reasonless one the move announces, word for word: the
-		// status line's version blames a lookup that has not answered yet.
+		// It is on screen while the search is still out. The searching arm rendered
+		// nothing about the fields until the result landed, so a sighted operator
+		// watched both go blank with only the progress line to read. The sentence
+		// is the reasonless one, word for word: the status line's version blames a
+		// lookup that has not answered yet.
 		await expect(panel(page)).toContainText('Looking up');
 		await expect(panel(page)).toContainText(spoken);
 		await expect(panel(page)).not.toContainText('because this lookup filled neither one');
+		// And the announcer stays out of it, still holding what the upload left
+		// there. The panel's status region is atomic, so rendering that sentence
+		// re-speaks the panel whole; a say() alongside would be the same move
+		// told twice.
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
 
 		release();
 
 		// The result fills both fields back, and its own sentence is the panel's
-		// to say — the region still holds the one line the move said.
+		// to say — the announcer never had a line here to be repeated.
 		await expect(sourceInput(page)).toHaveValue(SECOND_POST_URL);
 		await expect(dateInput(page)).toHaveValue('2026-04-05');
 		await expect(panel(page)).toContainText(
 			'Sona filled the source post URL and commissioned date from the FurAffinity post.'
 		);
-		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
 	});
 
 	// The move empties the fields while that tile's own lookup is still out, and
@@ -2659,7 +2664,10 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		const spoken =
 			"Sona cleared the source post URL and commissioned date the last lookup filled.";
-		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+		// The searching arm carries it, and the announcer stays quiet beside it,
+		// still holding what the upload left there.
+		await expect(panel(page)).toContainText(spoken);
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
 
 		release();
 
@@ -2669,8 +2677,8 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).toContainText(
 			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one. You can fill them in before you save.'
 		);
-		// Said once. The region still holds the move's own line, not a second copy.
-		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+		// Said once, by the panel. The announcer never had a line here to repeat.
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
 	});
 
 	// The move's record is held until that tile's own result lands, and the
@@ -2806,7 +2814,8 @@ test.describe('with a key saved', () => {
 		await expect(dateInput(page)).toHaveValue('');
 		const move =
 			"Sona cleared the source post URL and commissioned date the last lookup filled.";
-		await expect(page.locator(LIVE_REGION)).toHaveText(move);
+		await expect(panel(page)).toContainText(move);
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
 
 		// Into the existing-piece mode while that search is out: no tile is the
 		// parent there, so the result lands as a variant tile's.
@@ -2838,8 +2847,8 @@ test.describe('with a key saved', () => {
 		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'false');
 		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
 		await expect(panel(page)).not.toContainText('the last lookup filled');
-		// And the move's line was not said a second time: the region holds the
-		// variant tile's own outcome, from before the flip back.
+		// And the move's line was not said a second time: it belongs to the panel
+		// on this path, and the announcer never carried it.
 		await expect(page.locator(LIVE_REGION)).not.toContainText('lookup filled');
 	});
 

@@ -257,7 +257,7 @@
 					{m.admin_lookup_searching_body()}
 				</p>
 				<!-- A parent move onto a tile whose own lookup is still out empties
-				     what the last parent's lookup filled, and this arm used to say
+				     what the last lookup filled, and this arm used to say
 				     nothing about it: the two fields went blank while the panel talked
 				     only about the search, so a sighted operator saw nothing until the
 				     result landed. The reasonless sentence, not the status line's:
@@ -311,7 +311,7 @@
 					<p class="lookup-lead">{m.admin_lookup_failed_body()}</p>
 				{/if}
 				<!-- A failure fills nothing, but a parent move onto a tile that failed
-				     still empties what the last parent's lookup filled. This arm carries
+				     still empties what the last lookup filled. This arm carries
 				     no status line of its own, so the sentence renders here — above the
 				     advice, because the fields went blank under the operator and that is
 				     the part nothing else on screen reports. -->
@@ -717,10 +717,12 @@
 		color: var(--foreground);
 	}
 	/* On the no-match and failed arms it lands under the lead that explains the
-	   result, and on the searching arm under the progress line, a point of size
-	   apart and margin-collapsed to the same 10px every status line sits at —
-	   two subjects reading as one paragraph. Only there: under a result it
-	   follows the outcome lines it belongs with. */
+	   result, and on the searching arm under the progress line. Either way the
+	   line above is a different subject at a different size — the 14px lead, or
+	   the 13px progress line this sentence matches — and margin collapse would
+	   leave the pair at the same 10px every status line sits at, reading as one
+	   paragraph. Only there: under a result it follows the outcome lines it
+	   belongs with. */
 	.lookup-lead + .lookup-emptied,
 	.searching-line + .lookup-emptied {
 		margin-top: 18px;

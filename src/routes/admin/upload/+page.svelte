@@ -1058,7 +1058,7 @@
 		} else if (wrote.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_refilled_date());
 		} else {
-			const line = clearedLine(cleared);
+			const line = clearedLine(cleared, {});
 			if (line) announcer.say(line);
 		}
 	}
@@ -1108,15 +1108,16 @@
 
 	/** The Parent radio moved, or the parent tile was removed and the radio
 	 * landed on another one. The panel under it is already mounted and its status
-	 * region carries the sentence for every settled result, so announcing here
-	 * too would say the same thing twice. Only a lookup that never ran or is
-	 * still running draws no sentence at all, and then the two fields empty with
-	 * nothing on screen saying why (4.1.3). */
+	 * region carries the sentence for every settled result, and the searching arm
+	 * carries it too, so announcing here on either would say the same thing twice
+	 * — the region is atomic, so the panel re-speaks whole when the sentence
+	 * appears in it. Only a lookup that never ran draws no sentence at all, and
+	 * then the two fields empty with nothing on screen saying why (4.1.3). */
 	function pickParent(index: number) {
 		const { cleared } = onParentChanged(index);
 		const kind = tiles[index]?.lookup.kind ?? 'idle';
-		if (kind !== 'idle' && kind !== 'searching') return;
-		const line = clearedLine(cleared);
+		if (kind !== 'idle') return;
+		const line = clearedLine(cleared, {});
 		if (line) announcer.say(line);
 	}
 
