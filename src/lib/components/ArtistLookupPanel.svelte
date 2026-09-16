@@ -497,12 +497,15 @@
 			     Not aria-hidden: the paragraph lands inside the panel's own status
 			     region, which speaks it the way it speaks the searching arm, so the
 			     move needs no announcement of its own and the sentence stays in the
-			     accessibility tree instead of being spoken and gone. -->
+			     accessibility tree instead of being spoken and gone.
+			     The actions row below renders for this arm too, with Close alone:
+			     the card this sentence sits in needs a way out that is not typing
+			     into a field or starting another lookup. -->
 			<p class="lookup-status lookup-emptied">{movedEmptied}</p>
 		{/if}
 		</div>
 
-		{#if lookup.kind !== 'idle'}
+		{#if lookup.kind !== 'idle' || movedEmptied}
 		<div class="lookup-actions">
 			<!-- One Use button for both action rows. Under a clash it used to render
 			     unapplied whatever the state, so clicking it moved the select and the
@@ -576,7 +579,18 @@
 					</button>
 				{/if}
 			{/snippet}
-			{#if lookup.kind === 'searching'}
+			{#if lookup.kind === 'idle'}
+				<!-- The idle arm's only action. No lookup is running and none has
+				     settled, so the row holds Close alone: nothing here can be
+				     retried, applied or cancelled, and the card is on screen only to
+				     say what a parent move emptied. Without it the sentence had no
+				     dismissal at all — the operator's ways out were typing into a
+				     field or starting another lookup — while every other arm that
+				     draws this sentence offers Close or Cancel. Same onclose as those
+				     arms, so the record goes and the panel collapses, and focus
+				     returns wherever the page's Close returns it. -->
+				<button type="button" class="btn btn-secondary" onclick={() => onclose()}>{m.admin_lookup_close()}</button>
+			{:else if lookup.kind === 'searching'}
 				<button type="button" class="btn btn-secondary" onclick={oncancel}>
 					{m.admin_lookup_cancel()}
 				</button>

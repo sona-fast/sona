@@ -413,6 +413,20 @@ describe('the panel', () => {
 		expect(fnBody(UPLOAD, 'pickParent')).not.toContain('announcer.say(');
 	});
 
+	// The same card with no way out of it: the actions row was gated on a lookup
+	// that was not idle, so this arm drew a bordered card holding the sentence
+	// and nothing to dismiss it with, while every other arm that draws that
+	// sentence offers Close or Cancel (SONA-220).
+	it('gives the idle cleared card a Close button', () => {
+		expect(PANEL).toMatch(/\{#if lookup\.kind !== 'idle' \|\| movedEmptied\}\s*<div class="lookup-actions">/);
+		// Close alone — nothing is running and nothing has settled, so there is
+		// nothing to retry, apply or cancel — and on the same onclose the settled
+		// arms use, which drops the record and collapses the panel.
+		expect(PANEL).toMatch(
+			/\{#if lookup\.kind === 'idle'\}(?:\s|<!--(?:[^-]|-(?!->))*-->)*<button type="button" class="btn btn-secondary" onclick=\{\(\) => onclose\(\)\}>\{m\.admin_lookup_close\(\)\}<\/button>\s*\{:else if lookup\.kind === 'searching'\}/
+		);
+	});
+
 	// "Fu", "We", "e6", "Tw" read as truncated text next to the site's own name.
 	it('marks each result row with a brand icon, not two letters of the name', () => {
 		expect(PANEL).not.toContain('match.site.slice(0, 2)');
@@ -746,11 +760,11 @@ describe('the "From lookup" tag', () => {
 			// the way Close does, leaving the fields as it found them, so it is
 			// sliced away for the same reason.
 			const closer = source === UPLOAD ? 'closeSharedLookup' : 'closeLookup';
-			// Cancel too: it only drops a sentence the page has already spoken.
+			// Cancel needs no slice: it drops no record at all, and the edit page's
+			// routes through Close.
 			const counted = source
 				.replace(fnBody(source, 'startLookup'), '')
 				.replace(fnBody(source, closer), '')
-				.replace(fnBody(source, 'cancelLookup'), '')
 				.replace(fnBody(source, 'addAsVariant'), '');
 			const resets = counted.match(new RegExp(`${clearedRecord} = \\{\\};`, 'g')) ?? [];
 			const withLatches =
@@ -984,7 +998,8 @@ describe('round 11 wiring', () => {
 	// carry no `focus` property.
 	it('calls the close handlers with no arguments', () => {
 		expect(PANEL).not.toMatch(/onclick=\{onclose\}/);
-		expect(PANEL.match(/onclick=\{\(\) => onclose\(\)\}/g) ?? []).toHaveLength(3);
+		// Four Close buttons: the three settled arms and the idle cleared card.
+		expect(PANEL.match(/onclick=\{\(\) => onclose\(\)\}/g) ?? []).toHaveLength(4);
 		expect(UPLOAD).toContain('onclose={() => closeSharedLookup()}');
 	});
 
@@ -1237,13 +1252,13 @@ describe('what the lookup copy names', () => {
 		// And nothing else writes sharedCleared. The catch that synthesises a
 		// failure used to assign the held record straight, which skipped the check
 		// above and had the panel report a URL the operator had typed back in.
-		// Seven assignments in the file and no more: the declaration, four
-		// blankings that hand over no record — startLookup's, Cancel's, the
-		// reset's and Close's — and applyShared's two. Everything that DESCRIBES a
+		// Six assignments in the file and no more: the declaration, three
+		// blankings that hand over no record — startLookup's, the reset's and
+		// Close's — and applyShared's two. Cancel is not among them: it leaves the
+		// record standing for the idle arm to draw. Everything that DESCRIBES a
 		// clearing goes through applyShared.
 		expect(UPLOAD.match(/sharedCleared = [^;]*/g) ?? []).toEqual([
 			'sharedCleared = $state<LookupCleared>({})',
-			'sharedCleared = {}',
 			'sharedCleared = {}',
 			'sharedCleared = {}',
 			'sharedCleared = { ...emptied }',
@@ -1534,13 +1549,15 @@ describe('focus after the panel goes away', () => {
 	it('drops the cleared record when the panel is closed', () => {
 		expect(fnBody(UPLOAD, 'closeSharedLookup')).toContain('sharedCleared = {};');
 		expect(fnBody(EDIT, 'closeLookup')).toContain('lookupCleared = {};');
-		// Cancel ends the same way — idle, with the panel gone — so it drops the
-		// record too. The upload page's cancelLookup goes idle on its own rather
-		// than through Close, and left the record standing: a parent move that
-		// emptied the fields mid-search then kept the panel on screen as a
-		// bordered card with no Close button after Cancel (SONA-220). The edit
-		// page's cancelLookup routes through closeLookup, covered above.
-		expect(fnBody(UPLOAD, 'cancelLookup')).toContain('sharedCleared = {};');
+		// Cancel does NOT. The search ends, but the two shared fields stay blank,
+		// and the record is the only account of why: dropped, the panel collapsed
+		// and took the sentence with it, leaving the operator with two empty
+		// fields and no reason on screen (4.1.3). It goes to the panel's idle arm
+		// instead, which draws the sentence and a Close button, and Close is what
+		// drops the record (SONA-220). The edit page's cancelLookup routes through
+		// closeLookup, which is correct there: that page never reaches idle with a
+		// record standing, because it clears the record when a lookup starts.
+		expect(fnBody(UPLOAD, 'cancelLookup')).not.toContain('sharedCleared = {}');
 		expect(fnBody(EDIT, 'cancelLookup')).toContain('closeLookup();');
 		// The edit page's "Add as a variant" goes idle on its own rather than
 		// through closeLookup, so it drops the record itself; the upload page's

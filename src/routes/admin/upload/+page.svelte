@@ -862,14 +862,13 @@
 		if (pendingCleared?.key === key) pendingCleared = null;
 		const tile = tiles.find((t) => t.key === key);
 		if (tile) tile.lookup = { kind: 'idle' };
-		// And the record a parent move parked for the search being cancelled, the
-		// way closeSharedLookup drops it. The idle arm draws that record too, so a
-		// record left standing kept the panel open as a bordered card holding the
-		// sentence after the operator cancelled, and the atomic status region spoke
-		// it again as the arm changed (SONA-220). This leaves the fields exactly as
-		// it found them, so the typed-in latches stay where they are. The record
-		// only ever describes the parent, so only the parent's cancel drops it.
-		if (isParent(key)) sharedCleared = {};
+		// `sharedCleared` is NOT dropped here. Cancelling ends the search, but the
+		// two shared fields stay blank, and that record is the only account of why
+		// they are (4.1.3): dropped, the panel collapsed and the sentence went with
+		// it, leaving the operator with two empty fields and no reason anywhere on
+		// screen. The panel goes to its idle arm instead, which draws the sentence
+		// and a Close button — and Close is what drops the record and collapses the
+		// card (SONA-220).
 	}
 
 	/** Undo what a previous shared prefill wrote, but only where the operator has

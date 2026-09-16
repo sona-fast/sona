@@ -3437,12 +3437,15 @@ test.describe('with a key saved', () => {
 		await expect(panel(page)).toBeHidden();
 	});
 
-	// Cancel ends the same way, and the searching arm it ends is the one arm that
-	// draws a parent move's record. Left standing, Cancel dropped the panel to
-	// idle with that sentence still in it — a bordered card with no Close button
-	// on it, and the atomic status region spoke the sentence again as the arm
-	// changed (SONA-220).
-	test('cancelling a lookup that emptied the fields collapses the panel', async ({ page }) => {
+	// Cancel does NOT end that way. The searching arm it ends is the one arm that
+	// draws a parent move's record, and the two fields the move emptied are still
+	// blank after the cancel: dropping the record collapsed the panel and took
+	// the only reason for those blank fields with it (4.1.3). The panel falls to
+	// its idle arm holding the sentence, and Close is the way out of it
+	// (SONA-220).
+	test('cancelling a lookup that emptied the fields keeps the sentence until Close', async ({
+		page
+	}) => {
 		await stubLookup(page, matchedBody());
 		await twoDoneTiles(page);
 
@@ -3464,8 +3467,45 @@ test.describe('with a key saved', () => {
 
 		await panel(page).getByRole('button', { name: 'Cancel lookup' }).click();
 		release();
+
+		// The idle arm: the sentence still on screen over the two fields it
+		// describes, with Close as its one action and nothing left to cancel.
+		await expectMovedEmptiedSentence(page);
+		await expect(panel(page).getByRole('button', { name: 'Cancel lookup' })).toHaveCount(0);
+		const close = panel(page).getByRole('button', { name: 'Close' });
+		await expect(close).toBeVisible();
+		// And the page's own live region does not say it a second time: the panel's
+		// status region is where this sentence lives.
+		await expect(page.locator(LIVE_REGION)).not.toContainText('the last lookup filled');
+
+		await close.click();
 		await expect(panel(page)).toBeHidden();
 		await expect(page.locator('body')).not.toContainText(moved);
+	});
+
+	// The other way into that idle card, and the one with no test on it: a parent
+	// move onto a tile that was never looked up. No lookup runs, no result lands,
+	// so the card the sentence sits in has only its own Close to go by — without
+	// one the operator's ways out were typing into a field or starting another
+	// lookup (SONA-220).
+	test('the idle card a parent move leaves closes on its own Close', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile has never been looked up, so the move empties both fields
+		// with no result on its way and the idle arm is what says so.
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expectMovedEmptiedSentence(page);
+
+		await panel(page).getByRole('button', { name: 'Close' }).click();
+		await expect(panel(page)).toBeHidden();
+		await expect(page.locator('body')).not.toContainText('the last lookup filled');
 	});
 
 	// The edit page's two drops, which only source assertions covered: Close and
