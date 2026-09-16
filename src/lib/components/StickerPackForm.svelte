@@ -623,7 +623,7 @@
 	   button hugs its content so it stays compact next to the dropdown. */
 	.select-with-action { display: flex; align-items: stretch; gap: 8px; }
 	.select-with-action .input { flex: 1; min-width: 0; }
-	/* Small, orange (color:var(--primary)) dashed "New artist" button — matches the
+	/* Small, orange (color:var(--primary-text)) dashed "New artist" button — matches the
 	   Telegram import page's .ctx-new-artist so the inline new-artist control reads the
 	   same everywhere (manager select, default-artist select, bulk bar). */
 	.new-artist-btn {
