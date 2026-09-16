@@ -717,12 +717,12 @@
 		color: var(--foreground);
 	}
 	/* On the no-match and failed arms it lands under the lead that explains the
-	   result, and on the searching arm under the progress line. Either way the
-	   line above is a different subject at a different size — the 14px lead, or
-	   the 13px progress line this sentence matches — and margin collapse would
-	   leave the pair at the same 10px every status line sits at, reading as one
-	   paragraph. Only there: under a result it follows the outcome lines it
-	   belongs with. */
+	   result: a change of subject and of size, 14px to 13px. On the searching
+	   arm it lands under the progress line, which is 13px too, so only the
+	   subject changes and nothing else marks the break. Either way the default
+	   10px every status line sits at would read as one paragraph, so both get
+	   18px. Only there: under a result it follows the outcome lines it belongs
+	   with. */
 	.lookup-lead + .lookup-emptied,
 	.searching-line + .lookup-emptied {
 		margin-top: 18px;

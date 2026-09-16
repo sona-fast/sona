@@ -596,6 +596,9 @@
 		lookupAborts.get(key)?.abort();
 		const controller = new AbortController();
 		lookupAborts.set(key, controller);
+		// Read before the tile flips to searching: what its lookup WAS decides
+		// whether a move onto it has already been spoken. See below.
+		const wasIdle = tile.lookup.kind === 'idle';
 		tile.lookup = { kind: 'searching' };
 		tile.sentPrivate = isPrivate;
 		// The fields the last prefill wrote are NOT emptied here. Blanking the
@@ -606,7 +609,18 @@
 		// put back. They are replaced where the result lands instead, and only
 		// when the result names a different post. What the panel says about the
 		// LAST result does go now: it is about a search that is over.
-		if (isParent(key)) resetSharedResult();
+		if (isParent(key)) {
+			// The move's own record goes too, but only where the page already spoke
+			// it. A move onto an idle tile draws no panel arm at all, so pickParent
+			// announces it; left standing, the searching arm about to render would
+			// put the same sentence in the panel's status region, and that region is
+			// atomic, so the move would be told a second time (4.1.3). Every other
+			// kind had the panel carry it, and the reasonless sentence is the right
+			// one to keep while this search is out — the settled arm's version
+			// blames a lookup that is over.
+			if (wasIdle) sharedCleared = {};
+			resetSharedResult();
+		}
 		// What runLookup settled on, so the catch below can keep this lookup's own
 		// answer to "did the file leave the browser" instead of assuming it did.
 		let settled: LookupState | null = null;
@@ -1112,10 +1126,15 @@
 	 * carries it too, so announcing here on either would say the same thing twice
 	 * — the region is atomic, so the panel re-speaks whole when the sentence
 	 * appears in it. Only a lookup that never ran draws no sentence at all, and
-	 * then the two fields empty with nothing on screen saying why (4.1.3). */
+	 * then the two fields empty with nothing on screen saying why (4.1.3).
+	 *
+	 * Gated the way `sharedLookup` is, rather than read straight off the tile:
+	 * the panel is mounted in the new-set mode only, so outside it no arm carries
+	 * the sentence however that tile's own lookup ended, and the announcement is
+	 * the only telling there is. */
 	function pickParent(index: number) {
 		const { cleared } = onParentChanged(index);
-		const kind = tiles[index]?.lookup.kind ?? 'idle';
+		const kind = (groupMode === 'new' ? tiles[index]?.lookup.kind : undefined) ?? 'idle';
 		if (kind !== 'idle') return;
 		const line = clearedLine(cleared, {});
 		if (line) announcer.say(line);

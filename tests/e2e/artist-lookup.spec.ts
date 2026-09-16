@@ -2570,6 +2570,44 @@ test.describe('with a key saved', () => {
 		);
 	});
 
+	// And starting that tile's own lookup must not say it again. The searching
+	// arm renders the same sentence off the same record, and the panel's status
+	// region is atomic, so the move would be told a second time — beside the
+	// announcement still standing in the live region (4.1.3).
+	test('a lookup started on that tile does not repeat what the move emptied', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		const spoken =
+			"Sona cleared the source post URL and commissioned date the last lookup filled.";
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+
+		// The second tile is the parent now and has never been looked up. Held
+		// open, so the searching arm is what is on screen.
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(panel(page)).toContainText('Looking up');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		// And the announcer holds the one telling, unchanged: nothing was queued
+		// behind it, so nothing was said twice.
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+
+		release();
+
+		// The result then fills both fields and the panel says so, the way it does
+		// after any other lookup.
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL and commissioned date from the FurAffinity post.'
+		);
+	});
+
 	// A move onto a tile that is still SEARCHING is NOT that case: the searching
 	// arm renders the same sentence, and its region is atomic, so the panel
 	// re-speaks whole when the sentence appears in it. The move stays quiet there
