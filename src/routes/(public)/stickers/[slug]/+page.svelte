@@ -460,7 +460,9 @@
 
 	.pack-chip.telegram {
 		background: color-mix(in srgb, var(--primary) 16%, var(--background));
-		color: var(--primary-text);
+		/* --primary-text reads between 3.75:1 and 4.08:1 on this tint on three of
+		   the six theme × mode pairs, short of AA for 13px text. */
+		color: var(--foreground);
 	}
 
 	.telegram-cta {

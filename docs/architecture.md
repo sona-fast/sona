@@ -49,6 +49,8 @@ graph TB
         Avatars[🖼️ Bluesky + X — profile pictures, tweet media]
         Entail[🏷️ entail.dev — image tag classifier]
         UT[☁️ UploadThing — optional]
+        GoogleCSS2[🔤 Google CSS2 API — build time only]
+        PlexRelease[📦 IBM Plex Sans JP release tarball — pinned version + sha256]
     end
 
     subgraph "GitHub Actions"
@@ -62,6 +64,9 @@ graph TB
         ThemeData[🎨 src/lib/themes/*.theme.ts — theme data]
         ThemeBuild[🛠️ scripts/build-themes.ts — runs on prepare]
         ThemeCSS[📄 src/lib/themes/generated.css — committed, imported by src/app.css]
+        FetchFonts[🔤 scripts/fetch-fonts.mjs — developer-run, not CI]
+        SubsetJP[✂️ scripts/subset-plex-jp.mjs — developer-run, not CI]
+        FontFiles[📁 static/fonts/ — committed woff2 + manifests]
     end
 
     Forks[🌍 Forks — independent deployments, sync via releases]
@@ -115,6 +120,12 @@ graph TB
 
     ThemeData --> ThemeBuild
     ThemeBuild -->|renders| ThemeCSS
+    GoogleCSS2 -->|woff2 slices + unicode-range| FetchFonts
+    PlexRelease -->|kana + kanji subsets| SubsetJP
+    FetchFonts --> FontFiles
+    SubsetJP --> FontFiles
+    FontFiles -->|every face src must exist| ThemeBuild
+    FontFiles -->|/fonts/* same-origin at runtime| Visitor
     ThemeCSS -->|styles every page| Public
     ThemeCSS --> Admin
     CI -->|tracked, no drift, themes:check| ThemeCSS
@@ -184,9 +195,18 @@ graph TB
   --exit-code` after the install catches a palette edit that was never
   regenerated, and `npm run themes:check` runs the renderer with its exit code
   exposed, because `prepare` swallows failures. The renderer also emits the
-  `@font-face` blocks for the self-hosted typefaces in `static/fonts/` (fetched
-  by `node scripts/fetch-fonts.mjs`), so no page load reaches a font CDN and the
-  CSP names no external stylesheet or font origin.
+  `@font-face` blocks for the self-hosted typefaces in `static/fonts/`, so no
+  page load reaches a font CDN and the CSP names no external stylesheet or font
+  origin. `static/fonts/` is an input to the renderer as well as an output of the
+  font scripts: a face whose `src` has no file behind it fails the build rather
+  than rendering as CSS the browser silently falls back from.
+- The two font scripts are developer-run, not part of CI or the deploy. `node
+  scripts/fetch-fonts.mjs` asks Google's CSS2 API for the Latin woff2 slices, and
+  `node scripts/subset-plex-jp.mjs` cuts the Japanese slices from IBM's pinned
+  release tarball. Both write into `static/fonts/` and record a sha256 per file
+  (`manifest.json` and `manifest-jp.json`), and the woff2 files are committed, so
+  a normal build and every fork deploy run neither script. At runtime the browser
+  fetches `/fonts/*` from the site's own origin — see `static/fonts/README.md`.
 - Forks are independent deployments of the same stack on their owners' own
   Cloudflare accounts. They adopt changes by pulling the tagged releases that
   `release.yml` publishes — see `UPDATING.md` — not by tracking `main`.

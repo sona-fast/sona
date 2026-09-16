@@ -1617,6 +1617,42 @@ describe('light --primary-text is readable as small text (SONA-126)', () => {
 	});
 });
 
+// SONA-126 follow-up: the Telegram pack chip paints 13px text on a tint of
+// --primary over --background, which is neither of the two surfaces the sweep
+// measures. --primary-text landed between 3.75:1 and 4.08:1 there on three of the
+// six pairs; --foreground clears 4.5:1 on all six. The tint is read out of the
+// rule rather than assumed, so a change to the percentage is measured.
+describe('the Telegram pack chip is readable on its tint (SONA-126)', () => {
+	const CHIP = '../routes/(public)/stickers/[slug]/+page.svelte';
+	const body = ruleBody(CHIP, '.pack-chip.telegram');
+	const tint = body.match(
+		/background:\s*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/
+	);
+	// Lookbehind so `background-color:` and `border-color:` are not read as the ink.
+	const ink = body.match(/(?<![-\w])color:\s*var\(--([\w-]+)\)/)?.[1];
+
+	it('still tints its background and names an ink token', () => {
+		expect(tint, '.pack-chip.telegram no longer mixes its background').not.toBeNull();
+		expect(ink, '.pack-chip.telegram declares no color').toBeDefined();
+	});
+
+	for (const { name, id, mode } of THEME_BLOCKS) {
+		it(`${name}: the chip label clears 4.5:1`, () => {
+			const [, base, pct, over] = tint!;
+			const ground = mix2(
+				themeHex(id, mode, TOKEN_BY_CSS_NAME.get(base)!),
+				Number(pct),
+				themeHex(id, mode, TOKEN_BY_CSS_NAME.get(over)!)
+			);
+			const ratio = contrast(themeHex(id, mode, TOKEN_BY_CSS_NAME.get(ink!)!), ground);
+			expect(
+				ratio,
+				`${name}: --${ink} on the chip tint (${ground}) measures ${ratio.toFixed(2)}:1`
+			).toBeGreaterThanOrEqual(4.5);
+		});
+	}
+});
+
 // SONA-126: `color: var(--primary)` on a TEXT selector is the bug --primary-text
 // fixes — on Ember light it paints 14px labels at 2.20:1. The sweep moved every
 // text use over; what is left is --primary drawing something that is not read as
@@ -1762,6 +1798,25 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 	for (const { file, selector } of componentRules) {
 		it(`${file} ${selector} draws its border with --input`, () => {
 			expect(ruleBody(file, selector)).toMatch(/border:\s*1px solid var\(--input\)/);
+		});
+	}
+
+	// The selected platform chip is the same kind of boundary, drawn with
+	// border-color rather than the border shorthand because the resting rule
+	// already sets the width and style. It marked selection with raw --primary,
+	// which is 2.46:1 against --card on Ember light; --primary-text is 4.57:1 at
+	// its worst (terracotta dark) across the six theme × mode pairs.
+	it('the selected platform chip draws its edge with --primary-text', () => {
+		const body = ruleBody('./components/VrAvatarForm.svelte', '.platform-chip.on');
+		const border = body.match(/border-color:\s*var\(--([\w-]+)\)/)?.[1];
+		expect(border, '.platform-chip.on declares no border-color').toBeDefined();
+		expect(border).toBe('primary-text');
+	});
+
+	for (const { name, id, mode } of THEME_BLOCKS) {
+		it(`${name}: the selected chip's edge clears 3:1 on --card`, () => {
+			const ratio = contrast(themeHex(id, mode, 'primaryText'), themeHex(id, mode, 'card'));
+			expect(ratio, `${name}: --primary-text on --card measures ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
 		});
 	}
 

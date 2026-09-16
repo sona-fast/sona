@@ -239,7 +239,12 @@ describe('renderThemesCss', () => {
 		['a src that climbs out of /fonts/', { src: '/fonts/../../etc/passwd.woff2' }, /must be a \/fonts\/\*\.woff2 path/],
 		['a src that closes the url()', { src: '/fonts/x).woff2' }, /must be a \/fonts\/\*\.woff2 path/],
 		['a family with a quote', { family: "Jet'Brains" }, /must not contain a quote/],
-		['a weight that is neither three digits nor a range', { weight: 40 }, /not a 3-digit weight/],
+		['a weight that is neither three digits nor a range', { weight: 40 }, /not a 3- or 4-digit weight/],
+		['a weight of zero, which is three digits but names nothing', { weight: '000' }, /outside the 1-1000 CSS range/],
+		['a weight past the top of the CSS range', { weight: 1001 }, /outside the 1-1000 CSS range/],
+		['a weight range that runs from high to low', { weight: '700 400' }, /runs from high to low/],
+		['a unicode-range past the last codepoint', { unicodeRange: 'U+110000' }, /above U\+10FFFF/],
+		['a unicode-range interval that runs backwards', { unicodeRange: 'U+4E00-3040' }, /runs from high to low/],
 		['a style that is not normal, italic or oblique', { style: 'slanted' }, /is not normal, italic or oblique/],
 		['a malformed unicode-range', { unicodeRange: 'U+ZZZZ' }, /is not a comma-separated list of U\+ ranges/],
 		['a src with no file behind it', { src: '/fonts/NotHere-400-latin.woff2' }, /has no file at/]
@@ -261,6 +266,14 @@ describe('renderThemesCss', () => {
 	it('accepts a variable face declared over a weight range', () => {
 		const css = renderThemesCss(withFace({ weight: '400 700' }));
 		expect(css).toContain('font-weight: 400 700;');
+	});
+
+	it('accepts 1000, the top of the CSS weight range', () => {
+		expect(renderThemesCss(withFace({ weight: 1000 }))).toContain('font-weight: 1000;');
+	});
+
+	it('accepts a wildcard range inside the codepoint space', () => {
+		expect(renderThemesCss(withFace({ unicodeRange: 'U+4E??' }))).toContain('unicode-range: U+4E??;');
 	});
 
 	it('rejects a theme list whose first entry is not the default theme', () => {

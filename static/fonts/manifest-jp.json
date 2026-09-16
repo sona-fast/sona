@@ -1,0 +1,9 @@
+{
+	"note": "sha256 of the Japanese slices scripts/subset-plex-jp.mjs cuts into this directory. src/lib/themes/fonts.test.ts checks every file against it; scripts/fetch-fonts.mjs owns the other manifest and leaves these alone.",
+	"files": {
+		"IBMPlexSansJP-400-kana.woff2": "dd702ce8d0402c4da6d71cc2a793ddbfb2ec3950105c75a013c452dd4b8718d1",
+		"IBMPlexSansJP-400-kanji.woff2": "dfd932a1b8680a726a348775e1e3cea10393ad6bf28a8d3eb0a9f0bed929733d",
+		"IBMPlexSansJP-700-kana.woff2": "2c89c87a386d5d471409ab483ada326e3def25549de0509899bf1b1380ee675c",
+		"IBMPlexSansJP-700-kanji.woff2": "3b4d7602cbf9387a2987990af850827a02d543d1174edffd7b50bca550d9c422"
+	}
+}

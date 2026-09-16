@@ -109,23 +109,53 @@ export function fileName(family, { weight, subset, shared }) {
  * only files whose name starts with a slug this script manages are its to
  * remove: Geist is hand-placed and declared in app.css, and OWNED_ELSEWHERE is
  * the Japanese slices scripts/subset-plex-jp.mjs cuts into the same directory.
+ * Binaries only — the two manifests, the README and OFL.txt are never candidates.
  */
 export function staleFiles(existing, wanted) {
 	const keep = new Set(wanted);
 	const slugs = FAMILIES.map(({ family }) => family.replace(/[^A-Za-z0-9]/g, '') + '-');
 	return [...existing].filter(
-		(name) => !keep.has(name) && !OWNED_ELSEWHERE.test(name) && slugs.some((s) => name.startsWith(s))
+		(name) =>
+			name.endsWith('.woff2') &&
+			!keep.has(name) &&
+			!OWNED_ELSEWHERE.test(name) &&
+			slugs.some((s) => name.startsWith(s))
 	);
 }
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
-function readManifest() {
-	try {
-		return JSON.parse(readFileSync(MANIFEST_PATH, 'utf8')).files ?? {};
-	} catch {
-		return {};
+/**
+ * The recorded digests, from the manifest's text. Throws on anything that is not
+ * the shape this script writes: a manifest that failed to parse used to read as
+ * an empty one, which silently drops the baseline every later run checks against
+ * — exactly the case the digests exist to catch.
+ */
+export function parseManifest(text) {
+	const parsed = JSON.parse(text);
+	const files = parsed?.files;
+	if (files === null || typeof files !== 'object' || Array.isArray(files)) {
+		throw new Error('static/fonts/manifest.json has no `files` object');
 	}
+	for (const [name, digest] of Object.entries(files)) {
+		if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) {
+			throw new Error(`static/fonts/manifest.json records a non-sha256 digest for ${name}`);
+		}
+	}
+	return files;
+}
+
+// Only a missing manifest is an empty baseline: that is the first run. Anything
+// else propagates, so a corrupt file stops the run instead of resetting it.
+function readManifest() {
+	let text;
+	try {
+		text = readFileSync(MANIFEST_PATH, 'utf8');
+	} catch (err) {
+		if (err.code === 'ENOENT') return {};
+		throw err;
+	}
+	return parseManifest(text);
 }
 
 /**

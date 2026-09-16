@@ -117,6 +117,34 @@ function run(cmd, args, opts = {}) {
 		.trim();
 }
 
+const JP_MANIFEST_PATH = join(OUT_DIR, 'manifest-jp.json');
+const JP_SLICE = /^IBMPlexSansJP-\d+-(kana|kanji)\.woff2$/;
+
+/**
+ * The digests of the four slices this script owns, in the shape
+ * static/fonts/manifest.json uses. fetch-fonts.mjs writes that one and never
+ * these names, so without a second manifest the Japanese files are the only
+ * fonts in the directory nothing checks against recorded bytes.
+ */
+function writeJpManifest() {
+	/** @type {Record<string, string>} */
+	const files = {};
+	for (const name of readdirSync(OUT_DIR).filter((f) => JP_SLICE.test(f)).sort()) {
+		files[name] = createHash('sha256').update(readFileSync(join(OUT_DIR, name))).digest('hex');
+	}
+	writeFileSync(
+		JP_MANIFEST_PATH,
+		`${JSON.stringify(
+			{
+				note: 'sha256 of the Japanese slices scripts/subset-plex-jp.mjs cuts into this directory. src/lib/themes/fonts.test.ts checks every file against it; scripts/fetch-fonts.mjs owns the other manifest and leaves these alone.',
+				files
+			},
+			undefined,
+			'\t'
+		)}\n`
+	);
+}
+
 /**
  * Whether a mode leaves the directory reachable by anyone but its owner. What
  * the OWNER bits say does not matter, so a directory an earlier version of this
@@ -297,6 +325,8 @@ function main() {
 			console.log(`${slice.name}\t${statSync(outPath).size} bytes`);
 		}
 	}
+
+	writeJpManifest();
 
 	const total = readdirSync(OUT_DIR)
 		.filter((f) => /^IBMPlexSansJP-\d+-(kana|kanji)\.woff2$/.test(f))

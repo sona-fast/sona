@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, fileName, staleFiles } from './fetch-fonts.mjs';
+import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, fileName, parseManifest, staleFiles } from './fetch-fonts.mjs';
 
 // The prune is the one destructive thing this script does, and it runs over a
 // directory holding three other things: Geist (hand-placed), the Japanese slices
@@ -19,7 +19,8 @@ describe('fetch-fonts prune (SONA-181)', () => {
 		'Geist-Regular.woff2',
 		'Geist-Medium.woff2',
 		'README.md',
-		'manifest.json'
+		'manifest.json',
+		'manifest-jp.json'
 	];
 	const stale = staleFiles(listing, wanted);
 
@@ -39,6 +40,35 @@ describe('fetch-fonts prune (SONA-181)', () => {
 
 	it('keeps the shared JetBrains Mono file, which carries no weight in its name', () => {
 		expect(stale).not.toContain('JetBrainsMono-latin.woff2');
+	});
+
+	// The subsetter writes manifest-jp.json into the same directory, and only
+	// binaries are ever this script's to remove.
+	it('considers nothing but woff2 files', () => {
+		expect(stale.every((f) => f.endsWith('.woff2'))).toBe(true);
+		expect(staleFiles(['IBMPlexSansJP-manifest-jp.json'], [])).toEqual([]);
+	});
+});
+
+// A manifest that fails to parse used to read as an empty one, which drops the
+// baseline acceptBytes checks against — the run then records whatever bytes it
+// finds as correct.
+describe('fetch-fonts manifest parsing (SONA-181)', () => {
+	it('returns the recorded digests', () => {
+		const files = { 'Test-latin.woff2': 'a'.repeat(64) };
+		expect(parseManifest(JSON.stringify({ note: 'x', files }))).toEqual(files);
+	});
+
+	it('throws on invalid JSON rather than reading as empty', () => {
+		expect(() => parseManifest('{ files: ')).toThrow();
+	});
+
+	it('throws when `files` is missing', () => {
+		expect(() => parseManifest('{"note":"x"}')).toThrow(/no `files` object/);
+	});
+
+	it('throws on a digest that is not 64 hex characters', () => {
+		expect(() => parseManifest('{"files":{"Test-latin.woff2":"nope"}}')).toThrow(/non-sha256 digest/);
 	});
 });
 

@@ -108,17 +108,44 @@ describe('terracotta font families stay scoped to terracotta (SONA-181)', () => 
 		});
 	}
 
-	// The same thing said about the emitted CSS: the families appear only inside
-	// the terracotta block's --font-primary/--font-secondary declarations.
-	it('names them only under [data-theme-id=terracotta] in the generated CSS', () => {
-		const tokenLines = generatedCss
-			.split('\n')
-			.filter((line) => /--font-(primary|secondary):/.test(line));
-		const naming = tokenLines.filter((line) => families.some((f) => line.includes(f)));
-		expect(naming).toEqual([
-			"\t--font-primary: 'Chakra Petch', 'IBM Plex Sans JP', sans-serif;",
-			"\t--font-secondary: 'IBM Plex Sans JP', sans-serif;"
+	// The same thing said about the emitted CSS. Matching lines alone would pass
+	// even if a family moved into another theme's block, so the file is split into
+	// its top-level blocks first and the naming is attributed to a selector.
+	// @font-face is skipped: those blocks are top-level by design and name every
+	// family (the describe's own opening comment says why).
+	// A block may be preceded by the theme's `/* Label */` comment on its own
+	// line, so the selector is the last line of the match before the brace.
+	const blocks = [...generatedCss.matchAll(/^([^\s{][^{}]*)\{([^}]*)\}/gm)]
+		.map(([, sel, body]) => ({ selector: sel.trim().split('\n').pop()!.trim(), body }))
+		.filter((b) => !b.selector.startsWith('@'));
+
+	it('finds every theme block in the generated CSS', () => {
+		expect(blocks.map((b) => b.selector)).toEqual([
+			':root',
+			"[data-theme='light']",
+			"[data-theme-id='aurora']",
+			"[data-theme-id='aurora'][data-theme='light']",
+			"[data-theme-id='terracotta']",
+			"[data-theme-id='terracotta'][data-theme='light']"
 		]);
+	});
+
+	it('names them only inside the terracotta blocks', () => {
+		const naming = blocks
+			.filter((b) =>
+				b.body
+					.split('\n')
+					.filter((line) => /--font-(primary|secondary):/.test(line))
+					.some((line) => families.some((f) => line.includes(f)))
+			)
+			.map((b) => b.selector);
+		expect(naming).toEqual(["[data-theme-id='terracotta']"]);
+	});
+
+	it('is the terracotta dark block that carries both font tokens', () => {
+		const body = blocks.find((b) => b.selector === "[data-theme-id='terracotta']")?.body ?? '';
+		expect(body).toContain("--font-primary: 'Chakra Petch', 'IBM Plex Sans JP', sans-serif;");
+		expect(body).toContain("--font-secondary: 'IBM Plex Sans JP', sans-serif;");
 	});
 });
 
@@ -205,6 +232,30 @@ describe('the fetched fonts match their recorded digests (SONA-181)', () => {
 			.filter((f) => f.endsWith('.woff2') && !f.startsWith('Geist-') && !/-(kana|kanji)\./.test(f))
 			.sort();
 		expect(Object.keys(manifest.files).sort()).toEqual(fetched);
+	});
+
+	for (const [name, digest] of Object.entries(manifest.files)) {
+		it(`${name} hashes as recorded`, () => {
+			const bytes = readFileSync(`${repoRoot}static/fonts/${name}`);
+			expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
+		});
+	}
+});
+
+// The four Japanese slices are the ones manifest.json does NOT cover: they come
+// out of scripts/subset-plex-jp.mjs, not Google, and that script writes its own
+// manifest for them. Without this they would be the only fonts in the directory
+// nothing checks against recorded bytes.
+describe('the subset Japanese slices match their recorded digests (SONA-181)', () => {
+	const manifest = JSON.parse(readFileSync(`${repoRoot}static/fonts/manifest-jp.json`, 'utf8')) as {
+		files: Record<string, string>;
+	};
+
+	it('records exactly the Japanese slices on disk', () => {
+		const onDisk = readdirSync(`${repoRoot}static/fonts`)
+			.filter((f) => /^IBMPlexSansJP-\d+-(kana|kanji)\.woff2$/.test(f))
+			.sort();
+		expect(Object.keys(manifest.files).sort()).toEqual(onDisk);
 	});
 
 	for (const [name, digest] of Object.entries(manifest.files)) {

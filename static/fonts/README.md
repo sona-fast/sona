@@ -39,6 +39,9 @@ the upstream release instead, by `node scripts/subset-plex-jp.mjs`:
 | `IBMPlexSansJP-700-kana.woff2` | kana, CJK punctuation, fullwidth forms | 168,724 | 409 |
 | `IBMPlexSansJP-700-kanji.woff2` | JIS X 0208 level 1 | 498,900 | 2,965 |
 
+The subsetter records a sha256 per slice in `manifest-jp.json`, the same shape as
+`manifest.json` and checked the same way by `src/lib/themes/fonts.test.ts`.
+
 That is 1.26 MiB in four files instead of 2.5 MiB in 246. Weights are 400 and
 700 only; a browser asked for 500 or 600 picks the nearer one. The kanji set is
 JIS X 0208 level 1, derived from Python's `euc_jp` codec over JIS rows 16-47

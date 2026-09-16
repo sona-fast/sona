@@ -151,7 +151,8 @@ function validateTheme(theme: ThemeDefinition): void {
 // lists above. The family goes inside a quoted string and the src inside url(),
 // so anything that could close either one is rejected rather than emitted.
 const FACE_SRC = /^\/fonts\/[A-Za-z0-9._-]+\.woff2$/;
-const FACE_WEIGHT = /^\d{3}( \d{3})?$/;
+const FACE_WEIGHT = /^\d{3,4}( \d{3,4})?$/;
+const MAX_CODEPOINT = 0x10ffff;
 
 /**
  * One theme's `@font-face` blocks. They are emitted at the TOP of the file and
@@ -188,8 +189,9 @@ function validateFace(id: string, face: FontFace): void {
 		throw new Error(`theme '${id}': font face family '${face.family}' must not contain a quote`);
 	}
 	if (!FACE_WEIGHT.test(String(face.weight))) {
-		throw new Error(`theme '${id}': font face weight '${face.weight}' is not a 3-digit weight or a 'min max' range`);
+		throw new Error(`theme '${id}': font face weight '${face.weight}' is not a 3- or 4-digit weight or a 'min max' range`);
 	}
+	validateWeightValues(id, String(face.weight));
 	if (face.style !== undefined && !/^(normal|italic|oblique)$/.test(face.style)) {
 		throw new Error(`theme '${id}': font face style '${face.style}' is not normal, italic or oblique`);
 	}
@@ -199,9 +201,42 @@ function validateFace(id: string, face: FontFace): void {
 	if (face.unicodeRange !== undefined && !/^U\+[0-9A-Fa-f?]+(-[0-9A-Fa-f]+)?(,\s*U\+[0-9A-Fa-f?]+(-[0-9A-Fa-f]+)?)*$/.test(face.unicodeRange)) {
 		throw new Error(`theme '${id}': font face unicode-range '${face.unicodeRange}' is not a comma-separated list of U+ ranges`);
 	}
+	if (face.unicodeRange !== undefined) validateUnicodeRange(id, face.unicodeRange);
 	const onDisk = STATIC_DIR + face.src.slice(1);
 	if (!existsSync(onDisk) || statSync(onDisk).size === 0) {
 		throw new Error(`theme '${id}': font face src '${face.src}' has no file at ${onDisk} — run \`node scripts/fetch-fonts.mjs\``);
+	}
+}
+
+// The shapes above are digit counts, which accept numbers CSS has no meaning
+// for: '000' is three digits and names no weight, and U+110000 is valid hex past
+// the last codepoint. A face carrying either parses and then matches nothing, so
+// the numbers are checked too.
+function validateWeightValues(id: string, weight: string): void {
+	const parts = weight.split(' ').map(Number);
+	for (const n of parts) {
+		if (n < 1 || n > 1000) {
+			throw new Error(`theme '${id}': font face weight '${weight}' is outside the 1-1000 CSS range`);
+		}
+	}
+	if (parts.length === 2 && parts[0] > parts[1]) {
+		throw new Error(`theme '${id}': font face weight range '${weight}' runs from high to low`);
+	}
+}
+
+function validateUnicodeRange(id: string, range: string): void {
+	for (const part of range.split(',')) {
+		// 'U+4E?' covers U+4E0 through U+4EF: the wildcards read as 0 at the low end
+		// and F at the high end.
+		const [low, high] = part.trim().slice(2).split('-');
+		const from = parseInt(low.replace(/\?/g, '0'), 16);
+		const to = high === undefined ? parseInt(low.replace(/\?/g, 'F'), 16) : parseInt(high, 16);
+		if (to > MAX_CODEPOINT) {
+			throw new Error(`theme '${id}': font face unicode-range '${range}' names a codepoint above U+10FFFF`);
+		}
+		if (from > to) {
+			throw new Error(`theme '${id}': font face unicode-range '${range}' has an interval that runs from high to low`);
+		}
 	}
 }
 
