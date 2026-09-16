@@ -99,8 +99,8 @@ export interface FontFace {
 
 /**
  * The unicode-range strings Google's CSS2 API emits for its named subsets. They
- * are identical across all three families we self-host, so they are named once
- * here rather than repeated in every face.
+ * are identical across every family we self-host, so they are named once here
+ * rather than repeated in every face.
  */
 export const SUBSET_LATIN =
 	'U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD';
@@ -130,7 +130,7 @@ export interface ThemeDefinition {
 	label: string;
 	dark: PartialThemeTokens;
 	light: PartialThemeTokens;
-	/** Set only by themes that carry their own typography (terracotta does). */
+	/** Set only by themes that carry their own typography (terracotta and petal do). */
 	fonts?: ThemeFonts;
 }
 

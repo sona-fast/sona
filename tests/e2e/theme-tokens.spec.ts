@@ -31,10 +31,12 @@ test('the generated theme tokens reach the document, and the theme id switches t
 	expect(stock).toMatch(COLOR);
 
 	// The theme id is what SSR puts on <html> (src/app.html). Setting it here
-	// drives the same selector the generated block carries, so a terracotta block
-	// that never made it into the stylesheet leaves the value unchanged.
-	await page.evaluate(() => document.documentElement.setAttribute('data-theme-id', 'terracotta'));
-	const terracotta = await background(page);
-	expect(terracotta).toMatch(COLOR);
-	expect(terracotta).not.toBe(stock);
+	// drives the same selector the generated block carries, so a theme block that
+	// never made it into the stylesheet leaves the value unchanged.
+	for (const id of ['terracotta', 'petal', 'pewter']) {
+		await page.evaluate((theme) => document.documentElement.setAttribute('data-theme-id', theme), id);
+		const themed = await background(page);
+		expect(themed, `${id} sets --background to a colour`).toMatch(COLOR);
+		expect(themed, `${id} changes --background from the default`).not.toBe(stock);
+	}
 });

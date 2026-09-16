@@ -3,11 +3,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ALL_THEMES } from './all.ts';
+import { DEFAULT_THEME_ID } from './index.ts';
 
 // SONA-181 moved the typefaces off Google's CDN and into static/fonts/. Three
 // things have to stay true for that to hold, and each fails silently otherwise:
 // nothing reaches back out to Google, every @font-face points at a file that is
-// actually there, and the terracotta families stay scoped to terracotta.
+// actually there, and a theme's own families stay scoped to that theme.
 
 const srcRoot = fileURLToPath(new URL('../../', import.meta.url));
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
@@ -101,24 +102,10 @@ describe('every @font-face points at a real file (SONA-181)', () => {
 // every page. What keeps an unselected theme's files from being DOWNLOADED is
 // that only its own block names those families — so no other theme's
 // font-family list may mention them.
-describe('terracotta font families stay scoped to terracotta (SONA-181)', () => {
-	const terracotta = ALL_THEMES.find((t) => t.id === 'terracotta');
-	const families = [...new Set((terracotta?.fonts?.faces ?? []).map((f) => f.family))];
-
-	it('has terracotta faces to check', () => {
-		expect(families).toEqual(['Chakra Petch', 'IBM Plex Sans JP']);
-	});
-
-	for (const other of ALL_THEMES.filter((t) => t.id !== 'terracotta')) {
-		it(`${other.id} names none of them in its font tokens`, () => {
-			const lists = [other.fonts?.primary ?? '', other.fonts?.secondary ?? ''].join(' ');
-			expect(families.filter((f) => lists.includes(f))).toEqual([]);
-		});
-	}
-
-	// The same thing said about the emitted CSS. Matching lines alone would pass
-	// even if a family moved into another theme's block, so the file is split into
-	// its top-level blocks first and the naming is attributed to a selector.
+describe('a theme with its own faces keeps those families to itself (SONA-181)', () => {
+	// The emitted CSS, split into its top-level blocks first: matching lines alone
+	// would pass even if a family moved into another theme's block, so the naming
+	// is attributed to a selector.
 	// @font-face is skipped: those blocks are top-level by design and name every
 	// family (the describe's own opening comment says why).
 	// A block may be preceded by the theme's `/* Label */` comment on its own
@@ -134,27 +121,76 @@ describe('terracotta font families stay scoped to terracotta (SONA-181)', () => 
 			"[data-theme-id='aurora']",
 			"[data-theme-id='aurora'][data-theme='light']",
 			"[data-theme-id='terracotta']",
-			"[data-theme-id='terracotta'][data-theme='light']"
+			"[data-theme-id='terracotta'][data-theme='light']",
+			"[data-theme-id='petal']",
+			"[data-theme-id='petal'][data-theme='light']",
+			"[data-theme-id='pewter']",
+			"[data-theme-id='pewter'][data-theme='light']"
 		]);
 	});
 
-	it('names them only inside the terracotta blocks', () => {
-		const naming = blocks
-			.filter((b) =>
-				b.body
-					.split('\n')
-					.filter((line) => /--font-(primary|secondary):/.test(line))
-					.some((line) => families.some((f) => line.includes(f)))
-			)
-			.map((b) => b.selector);
-		expect(naming).toEqual(["[data-theme-id='terracotta']"]);
+	// The default theme is left out: its block is `:root`, the floor every other
+	// theme falls back to, so its JetBrains Mono applies wherever a theme declares
+	// no font of its own. Scoping is a question about the alternates only.
+	const withFaces = ALL_THEMES.filter(
+		(t) => t.id !== DEFAULT_THEME_ID && (t.fonts?.faces ?? []).length > 0
+	);
+
+	// These literals are written out rather than read off the theme data on
+	// purpose: a family or a token dropped from a theme has to fail here.
+	const EXPECTED: Record<string, { families: string[]; tokens: string[] }> = {
+		terracotta: {
+			families: ['Chakra Petch', 'IBM Plex Sans JP'],
+			tokens: [
+				"--font-primary: 'Chakra Petch', 'IBM Plex Sans JP', sans-serif;",
+				"--font-secondary: 'IBM Plex Sans JP', sans-serif;"
+			]
+		},
+		petal: {
+			families: ['Nunito'],
+			tokens: ["--font-primary: 'Nunito', sans-serif;", "--font-secondary: 'Geist', sans-serif;"]
+		}
+	};
+
+	// A theme that lost its `faces` array would make every assert below vacuous.
+	it('finds the alternate themes that self-host a family', () => {
+		expect(withFaces.map((t) => t.id)).toEqual(Object.keys(EXPECTED));
 	});
 
-	it('is the terracotta dark block that carries both font tokens', () => {
-		const body = blocks.find((b) => b.selector === "[data-theme-id='terracotta']")?.body ?? '';
-		expect(body).toContain("--font-primary: 'Chakra Petch', 'IBM Plex Sans JP', sans-serif;");
-		expect(body).toContain("--font-secondary: 'IBM Plex Sans JP', sans-serif;");
-	});
+	for (const theme of withFaces) {
+		const families = [...new Set(theme.fonts!.faces!.map((f) => f.family))];
+		const darkSelector = `[data-theme-id='${theme.id}']`;
+
+		it(`${theme.id} declares exactly the families listed for it`, () => {
+			expect(families).toEqual(EXPECTED[theme.id].families);
+		});
+
+		for (const other of ALL_THEMES.filter((t) => t.id !== theme.id)) {
+			it(`${other.id} names none of ${theme.id}'s families in its font tokens`, () => {
+				const lists = [other.fonts?.primary ?? '', other.fonts?.secondary ?? ''].join(' ');
+				expect(families.filter((f) => lists.includes(f))).toEqual([]);
+			});
+		}
+
+		it(`names them only inside the ${theme.id} blocks`, () => {
+			const naming = blocks
+				.filter((b) =>
+					b.body
+						.split('\n')
+						.filter((line) => /--font-(primary|secondary):/.test(line))
+						.some((line) => families.some((f) => line.includes(f)))
+				)
+				.map((b) => b.selector);
+			expect(naming).toEqual([darkSelector]);
+		});
+
+		it(`is the ${theme.id} dark block that carries its font tokens`, () => {
+			const body = blocks.find((b) => b.selector === darkSelector)?.body ?? '';
+			for (const token of EXPECTED[theme.id].tokens) {
+				expect(body).toContain(token);
+			}
+		});
+	}
 });
 
 // scripts/fetch-fonts.mjs records a sha256 per file it writes and re-checks it

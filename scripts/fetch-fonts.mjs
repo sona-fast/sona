@@ -54,7 +54,8 @@ const BINARY_ORIGIN = 'https://fonts.gstatic.com/';
 export const FAMILIES = [
 	{ family: 'JetBrains Mono', weights: [400, 500, 600, 700], subsets: ['latin', 'latin-ext'] },
 	{ family: 'Chakra Petch', weights: [400, 500, 600, 700], subsets: ['latin', 'latin-ext', 'vietnamese'] },
-	{ family: 'IBM Plex Sans JP', weights: [400, 500, 600, 700], subsets: ['latin', 'latin-ext'] }
+	{ family: 'IBM Plex Sans JP', weights: [400, 500, 600, 700], subsets: ['latin', 'latin-ext'] },
+	{ family: 'Nunito', weights: [400, 500, 600, 700], subsets: ['latin', 'latin-ext', 'vietnamese'] }
 ];
 
 /** `family=Chakra+Petch:wght@400;500;600;700` */

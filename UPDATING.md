@@ -48,6 +48,12 @@ you sync — or to catch up on what shipped since you last did — read the
 the merged changes since the previous one. `git log --oneline <last-tag>..upstream/main`
 after a fetch gives the same view from a clone.
 
+## Nothing to do: two more themes (SONA-227)
+
+Settings, Appearance gains two palettes: **Petal — soft pink** and **Pewter —
+quiet slate**. Your current theme is unchanged, and your fork needs no action.
+Pick one of the new palettes if you want it.
+
 ## Read before upgrading: self-hosted fonts and new theme colors (SONA-181, SONA-126)
 
 The typefaces ship with the site. Nothing on a page load reaches Google's font

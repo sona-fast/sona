@@ -15,5 +15,13 @@ import type { ThemeDefinition } from './types.ts';
 import { defaultTheme } from './default.theme.ts';
 import { auroraTheme } from './aurora.theme.ts';
 import { terracottaTheme } from './terracotta.theme.ts';
+import { petalTheme } from './petal.theme.ts';
+import { pewterTheme } from './pewter.theme.ts';
 
-export const ALL_THEMES: ThemeDefinition[] = [defaultTheme, auroraTheme, terracottaTheme];
+export const ALL_THEMES: ThemeDefinition[] = [
+	defaultTheme,
+	auroraTheme,
+	terracottaTheme,
+	petalTheme,
+	pewterTheme
+];
