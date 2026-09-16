@@ -66,6 +66,16 @@ describe('every @font-face points at a real file (SONA-181)', () => {
 	const srcs = [...generatedCss.matchAll(/src:\s*url\('([^']+)'\)/g)].map((m) => m[1]);
 	const appSrcs = [...appCss.matchAll(/src:\s*url\('([^']+)'\)/g)].map((m) => m[1]);
 
+	// Geist is declared by hand in app.css, so the existence check below would
+	// pass vacuously if those declarations went missing.
+	it('finds the three Geist faces app.css declares', () => {
+		expect(appSrcs).toEqual([
+			'/fonts/Geist-Regular.woff2',
+			'/fonts/Geist-Medium.woff2',
+			'/fonts/Geist-SemiBold.woff2'
+		]);
+	});
+
 	it('finds the faces the themes declare', () => {
 		const declared = ALL_THEMES.flatMap((t) => t.fonts?.faces ?? []).map((f) => f.src);
 		expect(srcs).toEqual(declared);

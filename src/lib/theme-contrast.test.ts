@@ -1821,6 +1821,8 @@ describe('control boundaries use --input, not --border (SONA-126)', () => {
 		expect(ruleBody(UPLOAD, '.tile-add')).toMatch(/border-color:\s*var\(--input\)/);
 		expect(ruleBody(UPLOAD, '.tile-add:hover')).toMatch(/border-color:\s*var\(--primary-text\)/);
 		expect(ruleBody(UPLOAD, ".tile-add[aria-disabled='true']:hover")).toMatch(/border-color:\s*var\(--input\)/);
+		expect(ruleBody(UPLOAD, '.add-artist-btn')).toMatch(/border:\s*1px solid var\(--input\)/);
+		expect(ruleBody(UPLOAD, '.add-artist-btn:hover')).toMatch(/border-color:\s*var\(--primary-text\)/);
 	});
 
 	for (const { file, selector, hover } of dashedRules) {

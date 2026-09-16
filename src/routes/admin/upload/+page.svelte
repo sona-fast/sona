@@ -1924,7 +1924,7 @@
 		gap: 6px;
 		align-self: flex-start;
 		padding: 6px 12px;
-		border: 1px solid var(--border);
+		border: 1px solid var(--input);
 		border-radius: var(--radius-pill);
 		background: none;
 		color: var(--foreground);
@@ -1935,7 +1935,7 @@
 	}
 
 	.add-artist-btn:hover {
-		border-color: var(--primary);
+		border-color: var(--primary-text);
 		color: var(--primary-text);
 	}
 

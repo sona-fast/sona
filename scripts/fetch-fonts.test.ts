@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, acceptCached, fileName, parseManifest, readManifest, staleFiles } from './fetch-fonts.mjs';
+import { FAMILIES, OWNED_ELSEWHERE, acceptBytes, acceptCached, fileName, missingFaces, parseManifest, readManifest, staleFiles } from './fetch-fonts.mjs';
 import { ALL_THEMES } from '../src/lib/themes/all.ts';
 
 // The prune is the one destructive thing this script does, and it runs over a
@@ -179,5 +179,26 @@ describe('fetch-fonts acceptCached', () => {
 		expect(() =>
 			acceptCached('Test-latin.woff2', bytes, { force: false, recorded: 'a'.repeat(64), present: true })
 		).toThrow(/records/);
+	});
+});
+
+// A CSS2 response that carries some of the requested slices used to pass, and
+// the prune then deleted the committed file for the slice it lacked.
+describe('fetch-fonts missingFaces', () => {
+	const entry = { family: 'Test', weights: [400, 700], subsets: ['latin', 'latin-ext'] };
+	const face = (weight: number, subset: string) => ({ weight, subset, url: 'https://fonts.gstatic.com/x' });
+
+	it('is empty when every requested pair is present', () => {
+		expect(
+			missingFaces(entry, [face(400, 'latin'), face(400, 'latin-ext'), face(700, 'latin'), face(700, 'latin-ext')])
+		).toEqual([]);
+	});
+
+	it('names each pair the response lacks', () => {
+		expect(missingFaces(entry, [face(400, 'latin'), face(700, 'latin')])).toEqual(['400/latin-ext', '700/latin-ext']);
+	});
+
+	it('names everything when nothing matched', () => {
+		expect(missingFaces(entry, [])).toHaveLength(4);
 	});
 });

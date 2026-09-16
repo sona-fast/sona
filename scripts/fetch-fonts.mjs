@@ -123,6 +123,20 @@ export function staleFiles(existing, wanted) {
 	);
 }
 
+/**
+ * The (weight, subset) pairs an entry asks for that the CSS2 response did not
+ * carry. A partial response used to pass as long as one face matched; the prune
+ * then removed the missing slice's committed file and the theme CSS pointed at
+ * nothing. Every requested pair has to be there before anything is written.
+ */
+export function missingFaces(entry, faces) {
+	return entry.weights.flatMap((weight) =>
+		entry.subsets
+			.filter((subset) => !faces.some((f) => f.weight === weight && f.subset === subset))
+			.map((subset) => `${weight}/${subset}`)
+	);
+}
+
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 /**
@@ -236,7 +250,10 @@ async function main() {
 		const faces = parseFaces(css).filter(
 			(f) => entry.weights.includes(f.weight) && entry.subsets.includes(f.subset)
 		);
-		if (faces.length === 0) throw new Error(`${entry.family}: no @font-face matched the requested weights`);
+		const missing = missingFaces(entry, faces);
+		if (missing.length > 0) {
+			throw new Error(`${entry.family}: the CSS2 response has no @font-face for ${missing.join(', ')}`);
+		}
 
 		// One file per distinct URL. A variable family serves every weight from the
 		// same URL, and writing it once per weight put four byte-identical copies of
