@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reachableByOthers, venvIsCurrent } from './subset-plex-jp.mjs';
+import { reachableByOthers, venvIsCurrent, workDirProblem } from './subset-plex-jp.mjs';
 
 // The work dir sits in the shared OS temp dir, so the mode rule is the thing
 // keeping another user's tarball or venv out of the build. Importing the module
@@ -14,6 +14,38 @@ describe('subset-plex-jp work-dir mode (SONA-181)', () => {
 		expect(reachableByOthers(0o755)).toBe(true);
 		expect(reachableByOthers(0o750)).toBe(true);
 		expect(reachableByOthers(0o707)).toBe(true);
+	});
+});
+
+// prepareWorkDir builds its error message from this predicate, which is where
+// every reason to refuse the temp directory lives. The directory itself is only
+// reachable at module load, so the decision is tested here rather than through
+// the filesystem.
+describe('subset-plex-jp work-dir predicate (SONA-181)', () => {
+	const stat = (over: { symlink?: boolean; uid?: number; mode?: number } = {}) => ({
+		isSymbolicLink: () => over.symlink ?? false,
+		uid: over.uid ?? 501,
+		mode: over.mode ?? 0o40700
+	});
+
+	it('accepts a directory its owner owns at 0o700', () => {
+		expect(workDirProblem(stat(), 501)).toBeNull();
+	});
+
+	it('rejects a symlink planted at the path', () => {
+		expect(workDirProblem(stat({ symlink: true }), 501)).toMatch(/symlink/);
+	});
+
+	it('rejects a directory another user owns', () => {
+		expect(workDirProblem(stat({ uid: 502 }), 501)).toMatch(/uid 502/);
+	});
+
+	it('skips the owner check where there is no uid (Windows)', () => {
+		expect(workDirProblem(stat({ uid: 502 }), undefined)).toBeNull();
+	});
+
+	it('rejects a mode other users can reach', () => {
+		expect(workDirProblem(stat({ mode: 0o40755 }), 501)).toMatch(/other users can reach it/);
 	});
 });
 

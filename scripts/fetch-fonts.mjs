@@ -221,7 +221,7 @@ async function main() {
 		MANIFEST_PATH,
 		`${JSON.stringify(
 			{
-				note: 'sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Every file is checked against this manifest on every run, and a fetched file is checked before it is written: bytes that no longer match stop the run and leave the committed file alone.',
+				note: 'sha256 of every file scripts/fetch-fonts.mjs writes into this directory. Each run checks every file against it and stops on a mismatch; see the script.',
 				files
 			},
 			undefined,

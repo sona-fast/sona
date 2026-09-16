@@ -124,30 +124,41 @@ export function reachableByOthers(mode) {
 }
 
 /**
+ * Why the work directory cannot be used as it stands, or `null` when it can.
+ * Ours or nothing: not a symlink, same owner, and nothing group- or
+ * world-accessible.
+ * @param {{ isSymbolicLink(): boolean, uid: number, mode: number }} st an lstat of the path
+ * @param {number | undefined} uid the current uid; undefined on Windows, which has none
+ */
+export function workDirProblem(st, uid) {
+	if (st.isSymbolicLink()) return 'it is a symlink, not a directory';
+	if (uid !== undefined && st.uid !== uid) return `it belongs to uid ${st.uid}, not you`;
+	if (reachableByOthers(st.mode)) {
+		return `it is mode ${(st.mode & 0o777).toString(8)}, so other users can reach it`;
+	}
+	return null;
+}
+
+/**
  * The work directory lives in the shared OS temp dir, so anyone on the machine
  * could have created it first and left a tarball (or a venv) there for this
- * script to trust. Ours or nothing: not a symlink, same owner, and nothing
- * group- or world-accessible. lstat rather than stat, because a symlink planted
- * at this path would otherwise be checked as whatever it points at.
+ * script to trust. Create it ourselves and check what is there either way: a
+ * checked existsSync followed by a create trusts a directory another user wins
+ * the race to make. lstat rather than stat, because a symlink planted at this
+ * path would otherwise be checked as whatever it points at.
  */
 function prepareWorkDir() {
-	if (!existsSync(WORK_DIR)) {
-		mkdirSync(WORK_DIR, { recursive: true, mode: 0o700 });
-		return;
-	}
-	const st = lstatSync(WORK_DIR);
-	if (st.isSymbolicLink()) {
-		throw new Error(`${WORK_DIR} is a symlink, not a directory. Remove it and rerun.`);
+	try {
+		// No `recursive`: that flag makes an existing directory a success, which is
+		// the case the check below has to see.
+		mkdirSync(WORK_DIR, { mode: 0o700 });
+	} catch (err) {
+		if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'EEXIST') throw err;
 	}
 	// getuid is POSIX-only; on Windows there is no uid to compare.
-	const uid = process.getuid?.();
-	if (uid !== undefined && st.uid !== uid) {
-		throw new Error(`${WORK_DIR} belongs to uid ${st.uid}, not you — remove it or point TMPDIR elsewhere.`);
-	}
-	if (reachableByOthers(st.mode)) {
-		throw new Error(
-			`${WORK_DIR} is mode ${(st.mode & 0o777).toString(8)}, so the group or other users can reach it. Remove it and rerun, or run: chmod go-rwx ${WORK_DIR}`
-		);
+	const reason = workDirProblem(lstatSync(WORK_DIR), process.getuid?.());
+	if (reason !== null) {
+		throw new Error(`${WORK_DIR}: ${reason}. Remove it and rerun.`);
 	}
 }
 
@@ -259,14 +270,19 @@ function main() {
 			// set rather than merely incomplete. --name-IDs+=13,14 keeps the license
 			// description and URL in the file, so the OFL notice travels with the
 			// binary the way the license asks, not only in static/fonts/OFL.txt.
+			// Into a .part file and renamed once whole, the way download() does: the
+			// output path is a committed file, and an interrupted run would otherwise
+			// leave it truncated in the working tree.
+			const outPath = join(OUT_DIR, slice.name);
 			run(pyftsubset, [
 				source,
 				'--flavor=woff2',
 				'--layout-features=*',
 				'--name-IDs+=13,14',
 				...slice.args,
-				`--output-file=${join(OUT_DIR, slice.name)}`
+				`--output-file=${outPath}.part`
 			]);
+			renameSync(`${outPath}.part`, outPath);
 			console.log(`${slice.name}\t${statSync(join(OUT_DIR, slice.name)).size} bytes`);
 		}
 	}
