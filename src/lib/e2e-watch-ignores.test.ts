@@ -5,7 +5,9 @@ import {
 	E2E_PERSIST_TO,
 	E2E_PERSIST_TO_RECOVERY,
 	E2E_PERSIST_TO_UT,
-	E2E_PERSIST_TO_UPLOAD
+	E2E_PERSIST_TO_UPLOAD,
+	E2E_PERSIST_TO_TAGS,
+	E2E_PERSIST_TO_SUGGEST
 } from '../../tests/e2e/paths';
 
 // Read the resolved config rather than the source text: the glob only silences
@@ -46,7 +48,9 @@ describe('the dev server does not watch the e2e harness it is running under', ()
 			E2E_PERSIST_TO,
 			E2E_PERSIST_TO_RECOVERY,
 			E2E_PERSIST_TO_UT,
-			E2E_PERSIST_TO_UPLOAD
+			E2E_PERSIST_TO_UPLOAD,
+			E2E_PERSIST_TO_TAGS,
+			E2E_PERSIST_TO_SUGGEST
 		];
 		expect(new Set(roots).size).toBe(roots.length);
 		for (const root of roots) {

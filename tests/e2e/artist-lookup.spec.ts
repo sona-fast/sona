@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { adminLogin } from './admin-login';
 import { dropOn, waitForDropAttachment } from './drop-files';
+import { stubSuggestions } from './tag-suggestions-helpers';
 
 // "Look up artist" on the upload page (SONA-156), driven in a real browser.
 // Nothing renders Svelte under vitest, so the unit suite can only grep the
@@ -47,23 +48,62 @@ function matchedBody(over: Record<string, unknown> = {}) {
 	};
 }
 
+// An X status the tag-suggestion pill also recognises. The two features only
+// meet on a post BOTH of them can read: FuzzySearch matches it, and the pill
+// runs on Bluesky and X links alone — so a FurAffinity match leaves the
+// suggestion control refusing and only one pill on the page.
+const X_POST = 'https://x.com/kuttoya/status/1789012345678901234';
+
+const X_MATCH = {
+	site: 'Twitter',
+	siteId: '1789012345678901234',
+	handles: ['kuttoya'],
+	distance: 0,
+	band: 'exact',
+	postedAt: '2026-03-04T10:00:00Z',
+	rating: 'adult',
+	postUrl: X_POST
+};
+
+/** One confident match on that X post, rated adult, so the lookup fills the
+ * source field with a URL the suggestion pill will accept. `over` changes that
+ * one match, which is how the repeat-lookup tests name another post without
+ * restating the other seven fields. */
+function xMatchBody(over: Record<string, unknown> = {}) {
+	return matchedBody({ matches: [{ ...X_MATCH, ...over }] });
+}
+
+// A second X status, for the case where a repeat lookup lands somewhere else.
+const X_POST_2 = 'https://x.com/kuttoya/status/1789012345678909999';
+const X_SITE_ID_2 = '1789012345678909999';
+/** The same match on that second post: what a repeat lookup that lands
+ * elsewhere comes back with. */
+const SECOND_POST = {
+	siteId: X_SITE_ID_2,
+	postUrl: X_POST_2,
+	postedAt: '2026-03-05T10:00:00Z'
+};
+
+/** The clash row itself: a piece that already claims the matched post. */
+function sourceClash(imageId: number, title: string) {
+	return {
+		imageId,
+		title,
+		isVariant: false,
+		parentImageId: null,
+		variantCount: 0,
+		thumbnailUrl: null,
+		artistName: 'Test Artist',
+		uploadedAt: '2026-07-09T00:00:00.000Z',
+		width: 1200,
+		height: 900
+	};
+}
+
 /** The same confident match, plus a source clash on a piece the page never
  * loaded an option for. */
 function clashBody(imageId: number, title: string) {
-	return matchedBody({
-		sourceClash: {
-			imageId,
-			title,
-			isVariant: false,
-			parentImageId: null,
-			variantCount: 0,
-			thumbnailUrl: null,
-			artistName: 'Test Artist',
-			uploadedAt: '2026-07-09T00:00:00.000Z',
-			width: 1200,
-			height: 900
-		}
-	});
+	return matchedBody({ sourceClash: sourceClash(imageId, title) });
 }
 
 async function stubLookup(page: Page, body: unknown, status = 200) {
@@ -75,7 +115,7 @@ async function stubLookup(page: Page, body: unknown, status = 200) {
 /** A lookup stub the test releases by hand. The role a tile plays is only
  * readable at two different moments if the request can be held open while the
  * operator moves the parent or the group mode under it. */
-async function deferredLookup(page: Page, body: unknown) {
+async function deferredLookup(page: Page, body: unknown, status = 200) {
 	let release!: () => void;
 	const held = new Promise<void>((resolve) => {
 		release = resolve;
@@ -83,7 +123,7 @@ async function deferredLookup(page: Page, body: unknown) {
 	await page.route('**/api/admin/artist-lookup', async (route) => {
 		await held;
 		await route.fulfill({
-			status: 200,
+			status,
 			contentType: 'application/json',
 			body: JSON.stringify(body)
 		});
@@ -202,8 +242,20 @@ async function saveLookupKey(page: Page) {
 }
 
 const pill = (page: Page) => page.locator('button.lookup-pill');
+// The tag-suggestion control's own pill, beside the Tags field (SONA-220).
+const suggestPill = (page: Page) => page.getByRole('button', { name: 'Suggest tags', exact: true });
 // The page's own polite region (the admin layout has a separate one, a <p>).
 const LIVE_REGION = 'div.sr-only[aria-live="polite"]';
+
+/** The suggestion every chips test stubs: three tags and a rating, from the X
+ * post the lookup fills the source field with. */
+const THREE_TAG_SUGGESTION = {
+	source: 'x',
+	tags: ['mammal', 'canine', 'fox'],
+	rating: 'explicit',
+	imageCount: 1
+};
+
 const panel = (page: Page) => page.getByRole('region', { name: 'Artist lookup' });
 
 test('without a key there is no button, only a pointer at Settings', async ({ page }) => {
@@ -488,6 +540,727 @@ test.describe('with a key saved', () => {
 		// The pill is a sibling, so clicking it must not toggle the box.
 		await tag.click();
 		await expect(nsfw).not.toBeChecked();
+	});
+
+	// ---- Both rating pills at once (SONA-156 + SONA-220) --------------------
+	// The merge put two classifiers beside ONE checkbox, and nothing here or in
+	// tag-suggestions.spec.ts had ever drawn them together: that spec's server
+	// holds no FuzzySearch key, so the lookup pill is not even on its page.
+	// These run here, where the key is saved, with the suggestion endpoint
+	// stubbed the same way it is over there.
+
+	test('both rating pills sit beside the one NSFW box, and neither ticks it', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
+		await oneDoneTile(page);
+		const nsfw = page.locator('input[name="nsfw"]');
+
+		// The lookup fills the source field with the post it matched, which is what
+		// lets the suggestion run on the same piece without anything being typed.
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#shared-rating-tag')).toHaveText('Rated Adult on Twitter');
+
+		await expect(suggestPill(page)).toHaveAttribute('aria-disabled', 'false');
+		await suggestPill(page).click();
+		await expect(page.locator('#tags-rating')).toHaveText('Rated explicit by entail.dev.');
+
+		// Both on screen, and the box points at BOTH of them: pinned to one id, the
+		// describedby silently drops whichever classifier ran second.
+		await expect(page.locator('#shared-rating-tag')).toBeVisible();
+		const described = (await nsfw.getAttribute('aria-describedby'))?.split(' ') ?? [];
+		expect(described).toContain('shared-rating-tag');
+		expect(described).toContain('tags-rating');
+		await expect(nsfw).toHaveAccessibleDescription(/Rated Adult on Twitter/);
+		await expect(nsfw).toHaveAccessibleDescription(/Rated explicit by entail.dev/);
+		// Two guesses about the artwork, still no decision about the gallery.
+		await expect(nsfw).not.toBeChecked();
+
+		// On a phone the row wraps, and everything that wraps lines up under the
+		// label text rather than under the checkbox. Read as the indent rather than
+		// as two boxes: the pill can now shrink its own text, so which line it
+		// lands on depends on how long the site list is, while the indent that
+		// decides where it lands when it wraps is the same either way. The
+		// suggestion's note and button already had it; the lookup's pill did not.
+		await page.setViewportSize({ width: 390, height: 900 });
+		await expect(page.locator('#shared-rating-tag')).toHaveCSS('margin-left', '24px');
+		await expect(page.locator('#tags-rating')).toHaveCSS('margin-left', '24px');
+		await expect(page.getByRole('button', { name: 'Mark it NSFW' })).toHaveCSS(
+			'margin-left',
+			'24px'
+		);
+		// Whatever did wrap shares one left edge with the rest of the wrapped row.
+		const rowTop = (await page.locator('.tag-check-row .checkbox-label').boundingBox())?.y ?? 0;
+		const wrapped: number[] = [];
+		for (const id of ['#shared-rating-tag', '#tags-rating']) {
+			const box = await page.locator(id).boundingBox();
+			if (!box) throw new Error(`${id} has no box`);
+			if (box.y > rowTop) wrapped.push(box.x);
+		}
+		expect(wrapped.length).toBeGreaterThan(0);
+		for (const x of wrapped) expect(Math.abs(x - wrapped[0])).toBeLessThanOrEqual(1);
+
+		// And on the narrowest phone the long pill wraps its own text rather than
+		// pushing the document sideways.
+		await page.setViewportSize({ width: 320, height: 900 });
+		await expect(page.locator('#shared-rating-tag')).toBeVisible();
+		const overflow = await page.evaluate(() => {
+			const el = document.scrollingElement;
+			return el ? el.scrollWidth - el.clientWidth : 0;
+		});
+		expect(overflow).toBeLessThanOrEqual(0);
+	});
+
+	test('the edit page draws both pills on one row too', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
+		// 1280 first: what the operator is most likely on, and the width the two
+		// forms disagreed at.
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await gotoEditHydrated(page);
+		const nsfw = page.locator('input[name="nsfw"]');
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#lookup-rating-tag')).toHaveText('Rated Adult on Twitter');
+
+		await expect(suggestPill(page)).toHaveAttribute('aria-disabled', 'false');
+		await suggestPill(page).click();
+		await expect(page.locator('#tags-rating')).toHaveText('Rated explicit by entail.dev.');
+
+		const described = (await nsfw.getAttribute('aria-describedby'))?.split(' ') ?? [];
+		expect(described).toContain('lookup-rating-tag');
+		expect(described).toContain('tags-rating');
+		await expect(nsfw).toHaveAccessibleDescription(/Rated Adult on Twitter/);
+		await expect(nsfw).toHaveAccessibleDescription(/Rated explicit by entail.dev/);
+		await expect(nsfw).not.toBeChecked();
+
+		// All four items hold one row at this width. They want about 606px in a
+		// 600px column, and flex breaks a line on content size however shrinkable
+		// an item is, so "Mark it NSFW" used to drop to a row of its own here while
+		// the upload form, 800px wide, kept it inline. The two pills give up the
+		// difference instead and wrap their own text (SONA-220).
+		await expect(page.locator('#lookup-rating-tag')).toBeVisible();
+		await expect(page.locator('#tags-rating')).toBeVisible();
+		// Compared by centre, not by top: the row centres its items, and the button
+		// is 36px tall beside an 18px label, so equal tops would be the wrong test
+		// for "same row" — they were never equal, even before the button wrapped.
+		const centre = async (selector: string) => {
+			const box = await page.locator(selector).boundingBox();
+			if (!box) throw new Error(`${selector} has no box`);
+			return box.y + box.height / 2;
+		};
+		const labelCentre = await centre('.tag-check-row .checkbox-label');
+		for (const selector of [
+			'#lookup-rating-tag',
+			'#tags-rating',
+			'.tag-check-row .btn'
+		]) {
+			expect(Math.abs((await centre(selector)) - labelCentre)).toBeLessThanOrEqual(1);
+		}
+		await expect(page.locator('.tag-check-row .btn')).toHaveText('Mark it NSFW');
+		// One line each, not just one row. The note wrapped "entail.dev." onto a
+		// second line for an 8px shortfall, which the row's own gap pays for: three
+		// gaps at 4px instead of 8px buys back 12px (SONA-220). How much the four
+		// items want depends on the font the pills are drawn in, and the theme's
+		// primary face is not self-hosted yet, so a machine without it draws them
+		// in whatever monospace it has (the CI runner's is wider than a Mac's).
+		// Measured, then: when the items fit unwrapped, each holds one line, and
+		// when they do not, the pills give up their width and the button keeps it.
+		const fits = await page.evaluate(() => {
+			const row = document.querySelector('.tag-check-row');
+			if (!(row instanceof HTMLElement)) throw new Error('no row');
+			const items = Array.from(row.children).filter(
+				(el): el is HTMLElement => el instanceof HTMLElement
+			);
+			const want = items.reduce((sum, el) => {
+				const probe = el.cloneNode(true) as HTMLElement;
+				probe.style.position = 'absolute';
+				probe.style.width = 'max-content';
+				probe.style.whiteSpace = 'nowrap';
+				row.appendChild(probe);
+				const style = getComputedStyle(probe);
+				const width =
+					probe.getBoundingClientRect().width +
+					parseFloat(style.marginLeft) +
+					parseFloat(style.marginRight);
+				probe.remove();
+				return sum + width;
+			}, 0);
+			const gap = parseFloat(getComputedStyle(row).columnGap) * (items.length - 1);
+			return want + gap <= row.clientWidth;
+		});
+		const button = await page.locator('.tag-check-row .btn').boundingBox();
+		if (!button) throw new Error('the button has no box');
+		expect(button.height).toBeLessThan(44);
+		if (fits) {
+			for (const selector of ['#tags-rating', '#lookup-rating-tag']) {
+				const box = await page.locator(selector).boundingBox();
+				if (!box) throw new Error(`${selector} has no box`);
+				expect(box.height).toBeLessThan(24);
+			}
+		}
+		await expect(page.locator('.tag-check-row')).toHaveCSS('gap', '4px');
+		// The 4px is between the two rating items, which report the same kind of
+		// thing. The action after them takes some of that separation back, and all
+		// four still hold one line each — 8px here wrapped the note.
+		await expect(page.locator('.tag-check-row .btn')).toHaveCSS('margin-left', '4px');
+		const wideNote = await page.locator('#tags-rating').boundingBox();
+		const wideButton = await page.locator('.tag-check-row .btn').boundingBox();
+		if (!wideNote || !wideButton) throw new Error('the wide row has no box');
+		expect(wideButton.x - (wideNote.x + wideNote.width)).toBeGreaterThanOrEqual(7);
+		// And the phone is untouched by that: shrinking the pills is a rule for the
+		// wide row only, so at 320 the row still wraps whole items, each onto its
+		// own line under the label text rather than under the checkbox.
+		await page.setViewportSize({ width: 320, height: 900 });
+		const label = await page.locator('.tag-check-row .checkbox-label').boundingBox();
+		if (!label) throw new Error('the checkbox label has no box');
+		for (const selector of [
+			'#lookup-rating-tag',
+			'#tags-rating',
+			'.tag-check-row .btn'
+		]) {
+			const box = await page.locator(selector).boundingBox();
+			if (!box) throw new Error(`${selector} has no box`);
+			expect(box.y).toBeGreaterThan(label.y);
+			expect(box.x).toBeCloseTo(label.x + 24, 0);
+		}
+		// Wrapped rather than pushed: the page still does not scroll sideways.
+		const overflow = await page.evaluate(() => {
+			const el = document.scrollingElement;
+			return el ? el.scrollWidth - el.clientWidth : 0;
+		});
+		expect(overflow).toBeLessThanOrEqual(0);
+
+		// 900px: the layout is still two columns here, so this form's column is
+		// 284px — far narrower than the window. That is the range the row's
+		// wrapping has to be keyed to. A viewport-keyed shrink rule let both
+		// rating items collapse to about one character per line in that column.
+		await page.setViewportSize({ width: 900, height: 900 });
+		for (const selector of ['#lookup-rating-tag', '#tags-rating']) {
+			const box = await page.locator(selector).boundingBox();
+			if (!box) throw new Error(`${selector} has no box`);
+			// One line is 18px for the pill and 16px for the note, and each extra
+			// line adds about the same again, so 60px is inside three lines. The
+			// shattered state measured 88px and taller.
+			expect(box.height).toBeLessThanOrEqual(60);
+			// And no item is squeezed under its floor, which is what shattered the
+			// text in the first place.
+			expect(box.width).toBeGreaterThanOrEqual(60);
+		}
+		const narrowOverflow = await page.evaluate(() => {
+			const el = document.scrollingElement;
+			return el ? el.scrollWidth - el.clientWidth : 0;
+		});
+		expect(narrowOverflow).toBeLessThanOrEqual(0);
+
+		// 1024: a wide window whose column is still under 560px. Wrapping put the
+		// 24px indent on items that had not wrapped, so the row read as inline with
+		// 32px gaps between its items. Stacked, every item that carries the indent
+		// is on a line of its own and they share one left edge.
+		await page.setViewportSize({ width: 1024, height: 900 });
+		const pillBox = await page.locator('#lookup-rating-tag').boundingBox();
+		const noteBox = await page.locator('#tags-rating').boundingBox();
+		const buttonBox = await page.locator('.tag-check-row .btn').boundingBox();
+		if (!pillBox || !noteBox || !buttonBox) throw new Error('the stacked row has no box');
+		expect(buttonBox.x).toBeCloseTo(pillBox.x, 0);
+		expect(noteBox.x).toBeCloseTo(pillBox.x, 0);
+		// Stacked, not inline: each one sits below the one before it.
+		expect(noteBox.y).toBeGreaterThan(pillBox.y);
+		expect(buttonBox.y).toBeGreaterThan(noteBox.y);
+	});
+
+	// ---- The Source Post URL field's own two descriptions --------------------
+	// That field can be described twice at once as well: the suggestion control's
+	// hint refusing the link it holds (SONA-220) and the "From lookup" tag on the
+	// value a lookup wrote into it (SONA-156). Neither spec had ever put both
+	// there, so the join could have dropped one and stayed green.
+
+	/** Lookup first so the source URL is filled AND tagged, then a refused
+	 * suggestion on that same URL so the hint points at the field too. The other
+	 * order pins nothing: a refusal leaves the operator's own URL in the field,
+	 * which the lookup then declines to overwrite, so no tag is ever added. */
+	async function bothSourceDescriptions(page: Page) {
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+
+		await expect(suggestPill(page)).toHaveAttribute('aria-disabled', 'false');
+		await suggestPill(page).click();
+		await expect(page.locator('#tags-hint')).toHaveText(
+			"Sona can't look up this link. Check the source post URL."
+		);
+
+		// Both ids, space-separated, in one attribute — and both still resolve to
+		// something on the page, which is what an id in describedby is worth.
+		await expect(sourceInput(page)).toHaveAttribute(
+			'aria-describedby',
+			'tags-hint source-lookup-tag'
+		);
+		await expect(page.locator('#tags-hint')).toBeVisible();
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		// Read as one description rather than as two ids, the way a screen reader
+		// would announce it on focus.
+		await expect(sourceInput(page)).toHaveAccessibleDescription(
+			/Sona can't look up this link[\s\S]*From lookup/
+		);
+	}
+
+	test('the source URL field carries the refusal and the lookup tag at once', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 422, { error: 'unsupported_source' });
+		await oneDoneTile(page);
+		await bothSourceDescriptions(page);
+	});
+
+	test('the edit page joins the same two descriptions on that field', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 422, { error: 'unsupported_source' });
+		await gotoEditHydrated(page);
+		await bothSourceDescriptions(page);
+	});
+
+	/** A repeat lookup on the SAME post, then one that fails outright. Neither is
+	 * a reason to disturb the source URL field, and the suggestion standing on it
+	 * survives both. The source URL used to be blanked the moment the second
+	 * lookup started and refilled only when it came back, so the control saw the
+	 * post change and threw away chips the operator was still choosing from. */
+	async function chipsSurviveARepeatLookup(page: Page) {
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await suggestPill(page).click();
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+		await pill(page).click();
+		await expect(panel(page)).toContainText('kuttoya');
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+		await expect(page.locator('#tags-rating')).toHaveText('Rated explicit by entail.dev.');
+
+		// And a lookup that fails outright leaves the field as it was, rather than
+		// emptying it with nothing to put back.
+		await stubLookup(page, { enabled: true, error: 'rate_limited', forwarded: true }, 429);
+		await pill(page).click();
+		await expect(panel(page)).toContainText(
+			'FuzzySearch is limiting how often your site can search right now.'
+		);
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+		// Nothing was ever set aside, so nothing said it was. The control announces
+		// that only when the post under it really changes, and neither a repeat of
+		// the same post nor a failed lookup is that.
+		await expect(page.locator('#tags-status')).not.toContainText('set that lookup aside');
+	}
+
+	test('a second lookup that lands on the same post keeps the suggested chips', async ({
+		page
+	}) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
+		await oneDoneTile(page);
+		await chipsSurviveARepeatLookup(page);
+	});
+
+	/** The other half of the same rule: keeping the field through the round trip
+	 * must not turn into keeping a URL the new result disagrees with. The
+	 * replacement happens when the result lands, and the suggestion about the old
+	 * post goes then — not at the click, and not never. */
+	async function aRepeatLookupElsewhereReplacesTheURL(page: Page) {
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await suggestPill(page).click();
+		await expect(page.locator('.tag-chip')).toHaveCount(3);
+
+		await stubLookup(page, xMatchBody(SECOND_POST));
+		await pill(page).click();
+
+		await expect(sourceInput(page)).toHaveValue(X_POST_2);
+		await expect(dateInput(page)).toHaveValue('2026-03-05');
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		// The suggestion was about the old post, so it goes with it — and says so.
+		await expect(page.locator('.tag-chip')).toHaveCount(0);
+		await expect(page.locator('#tags-rating')).toHaveCount(0);
+		await expect(page.locator('#tags-status')).toHaveText(
+			'The source post URL changed, so Sona set that lookup aside.'
+		);
+	}
+
+	test('a second lookup that lands elsewhere replaces the URL, and the chips go with it', async ({
+		page
+	}) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
+		await oneDoneTile(page);
+		await aRepeatLookupElsewhereReplacesTheURL(page);
+	});
+
+	test('the edit page replaces the URL when the repeat lookup lands elsewhere', async ({
+		page
+	}) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
+		await gotoEditHydrated(page);
+		await aRepeatLookupElsewhereReplacesTheURL(page);
+	});
+
+	// The click-time reset was narrowed so a repeat lookup keeps the field it is
+	// about to refill. Moving the PARENT is a different question with the same
+	// shape, and it keeps the full reset: the shared fields describe whichever
+	// tile is parent now, so a URL filled from the old parent's post must not
+	// survive under the new one still wearing "From lookup".
+	test('moving the parent still clears what the last lookup filled', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await twoDoneTiles(page);
+
+		// In a set the lookup is per tile, and the first tile is the parent.
+		await tileLookup(page).first().click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile has no result of its own, so there is nothing to
+		// re-derive and the fields go back to empty rather than keeping the first
+		// tile's post.
+		await page.getByRole('radio', { name: 'Parent: back.png' }).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// And it says so. The new parent has no result, so the panel shows nothing
+		// about the two fields that just emptied under the operator (4.1.3).
+		await expect(page.locator(LIVE_REGION)).toContainText(
+			"Sona cleared the source post URL and commissioned date the last lookup filled."
+		);
+	});
+
+	test('a clash after a lookup says it emptied the field, not that it was empty', async ({
+		page
+	}) => {
+		// The clash sentence turns on what was in the field when the prefill ran.
+		// The previous lookup's value is nobody's to keep, so it is not "your" URL
+		// — and it is not an empty field either: this result blanked it under the
+		// operator, and "left the source post URL empty" would quietly claim it had
+		// been empty all along (SONA-220).
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+
+		// The X match with a clash on it: the post already belongs to another
+		// piece, so the prefill deliberately puts no source URL back.
+		await stubLookup(page, { ...xMatchBody(), sourceClash: sourceClash(9001, 'Clash Piece') });
+		await pill(page).click();
+
+		await expect(panel(page)).toContainText(
+			'cleared the source post URL the last lookup filled, because the post Sona just found is already the source of Clash Piece'
+		);
+		await expect(panel(page)).not.toContainText('left your source post URL as it was');
+		await expect(panel(page)).not.toContainText('left the source post URL empty');
+		// And drawn as a report of what just happened to the field, like every
+		// other sentence that says one went blank, rather than in the muted colour
+		// the advice lines use.
+		await expect(
+			panel(page)
+				.locator('p.lookup-status')
+				.filter({ hasText: 'cleared the source post URL the last lookup filled' })
+		).toHaveClass(/lookup-emptied/);
+		// And the sentence matches the field: the tagged value the first lookup
+		// wrote is gone, because this result had nothing to put in its place.
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+
+		// The operator types a URL into the field the clash emptied. The clearing
+		// is no longer theirs to be told about — but the plain clash sentence says
+		// the URL was "left empty", which the text they just typed contradicts, so
+		// the kept one answers instead (SONA-220).
+		await sourceInput(page).fill('https://www.furaffinity.net/view/999999/');
+		await expect(panel(page)).toContainText(
+			'left your source post URL as it was, because that post is already the source of Clash Piece'
+		);
+		await expect(panel(page)).not.toContainText('left the source post URL empty');
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
+		await expect(sourceInput(page)).toHaveValue('https://www.furaffinity.net/view/999999/');
+	});
+
+	/** A no-match is a result too, and it prefills nothing. It used to return
+	 * before the clearing branches, so the first lookup's URL and date stayed on
+	 * the form, still tagged "From lookup", under a panel saying Sona found
+	 * nothing — the values and the sentence disagreeing on the same screen. */
+	async function aNoMatchEmptiesWhatTheLastLookupFilled(page: Page) {
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
+
+		await stubLookup(page, { enabled: true, matches: [] });
+		await pill(page).click();
+
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// The no-match arm carries no status line of its own, so the sentence is
+		// rendered there beside the body rather than only under a result.
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+		);
+	}
+
+	test('a no-match empties the fields the last lookup filled', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+		await aNoMatchEmptiesWhatTheLastLookupFilled(page);
+	});
+
+	test('the edit page empties them on a no-match too', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+		await aNoMatchEmptiesWhatTheLastLookupFilled(page);
+	});
+
+	// The record of what that no-match emptied is worked out once and rendered on
+	// every frame after. The operator is free to type into either field, and the
+	// sentence for a cleared one invites them to fill in something already
+	// sitting in the input — so each half goes as its field is filled, and when
+	// both are the panel says nothing about them at all (SONA-220).
+	async function typingIntoAnEmptiedFieldDropsItsHalfOfTheSentence(page: Page) {
+		await aNoMatchEmptiesWhatTheLastLookupFilled(page);
+
+		await sourceInput(page).fill('https://www.furaffinity.net/view/999999/');
+		// Half the sentence goes with it. The date is still Sona's doing, so that
+		// half stands, and the URL is named by nothing.
+		await expect(panel(page)).toContainText(
+			'Sona cleared the commissioned date the last lookup filled, because this lookup filled no date in its place.'
+		);
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
+
+		await dateInput(page).fill('2026-05-06');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		// And the no-match itself is still on screen: only the sentence about the
+		// two fields went.
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+
+		// Deleting what they typed does not hand the clearing back to Sona. The
+		// field is empty again, but the operator emptied it this time, and the
+		// sentence would re-attribute their own deletion — so the flag stays down
+		// once their first keystroke put it there (SONA-220).
+		await sourceInput(page).fill('');
+		await dateInput(page).fill('');
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
+		await expect(panel(page)).not.toContainText('cleared the commissioned date');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+	}
+
+	test('typing into an emptied field stops the panel naming it', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+		await typingIntoAnEmptiedFieldDropsItsHalfOfTheSentence(page);
+	});
+
+	test('the edit page stops naming an emptied field the operator fills too', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+		await typingIntoAnEmptiedFieldDropsItsHalfOfTheSentence(page);
+	});
+
+	// The branch that empties the commissioned date had no test of its own: a
+	// second result that carries a post but no date leaves the field the first one
+	// filled with nothing to refill it, so it goes when the result lands — and the
+	// panel's role="status" has to say so rather than "left the date as it was".
+	test('a repeat lookup on a dateless post empties the date it filled', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
+
+		await stubLookup(page, xMatchBody({ ...SECOND_POST, postedAt: null }));
+		await pill(page).click();
+
+		// The URL took the new post, and the date it can no longer stand behind is
+		// empty rather than left describing the old one.
+		await expect(sourceInput(page)).toHaveValue(X_POST_2);
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL from the Twitter post and cleared the commissioned date the last lookup filled, because that post has no date.'
+		);
+		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
+	});
+
+	// Dropping the cleared flag off a field the operator filled must not reroute
+	// the sentence to url_only, which says the date was "left as it was" — this
+	// result emptied it under them, and the flag going does not undo that. The
+	// kept sentence claims the URL and says nothing about the date (SONA-220).
+	test('a date typed over an emptied one keeps the sentence off it', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await stubLookup(page, xMatchBody({ ...SECOND_POST, postedAt: null }));
+		await pill(page).click();
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(panel(page)).toContainText('cleared the commissioned date the last lookup filled');
+
+		await dateInput(page).fill('2026-05-06');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL from the Twitter post. You can change it before you save.'
+		);
+		await expect(panel(page)).not.toContainText('cleared the commissioned date');
+		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
+		// The date they typed is still theirs, and the URL the lookup wrote is
+		// still tagged as its own.
+		await expect(dateInput(page)).toHaveValue('2026-05-06');
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+	});
+
+	/** Four lookups on the same tile, and the operator typing between two of
+	 * them. The typed-into latch keeps their own text out of Sona's cleared
+	 * claim, and on the upload page it outlived the result it was raised
+	 * against: the parent tile has no per-lookup reset, so a latch raised while
+	 * one field sat empty was still up two results later, over a URL the next
+	 * lookup had refilled and tagged. The result after that blanked the field and
+	 * the stale latch dropped its own cleared flag, so the panel said nothing
+	 * about a field the operator watched go blank. applyShared recomputes both
+	 * latches against each result now; the edit page reaches the same place
+	 * through resetLookupPrefill, which runs at every lookup start (SONA-220).
+	 *
+	 * Both endings run the same four lookups, so the sequence lives here once and
+	 * the caller supplies the refill body, the result that closes it, and what
+	 * the panel has to say about the URL afterwards. `absent` is the sentence
+	 * that ending must NOT produce. */
+	async function aRefilledUrlIsStillSonas(
+		page: Page,
+		opts: { refill: unknown; closing: unknown; says: string; absent?: string }
+	) {
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+
+		// A no-match takes it away again, and says so. Only the URL half of that
+		// sentence is pinned: the clash ending's stubs carry a date, so its
+		// no-match names the date here as well.
+		await stubLookup(page, { enabled: true, matches: [] });
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(panel(page)).toContainText('Sona cleared the source post URL');
+
+		// A URL typed and deleted. The field is empty and theirs, which is exactly
+		// the state the latch exists for.
+		await sourceInput(page).fill('https://www.furaffinity.net/view/999999/');
+		await sourceInput(page).fill('');
+
+		// A matching lookup puts the URL back and tags it. Nothing in the field is
+		// theirs any more.
+		await stubLookup(page, opts.refill);
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(page.locator('#source-lookup-tag')).toHaveText('From lookup');
+
+		// And the fourth result empties it. Under the stale latch the panel said
+		// nothing at all about a field that had just gone blank.
+		await stubLookup(page, opts.closing);
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(panel(page)).toContainText(opts.says);
+		if (opts.absent) await expect(panel(page)).not.toContainText(opts.absent);
+	}
+
+	/** The no-match ending: every stub has no posted date, so each sentence is
+	 * about the URL alone. */
+	const goesBackToBeingSonas = {
+		refill: xMatchBody({ postedAt: null }),
+		closing: { enabled: true, matches: [] },
+		says: 'Sona cleared the source post URL the last lookup filled, because this lookup filled nothing in its place.'
+	};
+
+	/** The clash ending, which is the worse half: the stale latch dropped the
+	 * cleared flag, and with a date to report the clash sentence then read "left
+	 * your source post URL as it was" over a field the same result had just
+	 * blanked (SONA-220). The clash fills the date and has nowhere to put its
+	 * URL. */
+	const isNotLeftAsItWasByAClash = {
+		refill: xMatchBody(),
+		closing: { ...xMatchBody(), sourceClash: sourceClash(9001, 'Clash Piece') },
+		says: 'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because the post Sona just found is already the source of Clash Piece.',
+		absent: 'left your source post URL as it was'
+	};
+
+	test('a fourth lookup still says it cleared a URL the operator once typed in', async ({
+		page
+	}) => {
+		await stubLookup(page, xMatchBody({ postedAt: null }));
+		await oneDoneTile(page);
+		await aRefilledUrlIsStillSonas(page, goesBackToBeingSonas);
+	});
+
+	test('the edit page says so too', async ({ page }) => {
+		await stubLookup(page, xMatchBody({ postedAt: null }));
+		await gotoEditHydrated(page);
+		await aRefilledUrlIsStillSonas(page, goesBackToBeingSonas);
+	});
+
+	test('and a clash after one does not say it left their URL as it was', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await oneDoneTile(page);
+		await aRefilledUrlIsStillSonas(page, isNotLeftAsItWasByAClash);
+	});
+
+	test('the edit page does not say it either', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+		await aRefilledUrlIsStillSonas(page, isNotLeftAsItWasByAClash);
+	});
+
+	// The same three cases on the edit page, which ran its full reset at the click
+	// until now: a repeat lookup there dropped the chips and the rating of a
+	// suggestion about the very post it was on its way back with.
+	test('the edit page keeps the suggested chips through a repeat lookup', async ({ page }) => {
+		await stubLookup(page, xMatchBody());
+		await stubSuggestions(page, 200, THREE_TAG_SUGGESTION);
+		await gotoEditHydrated(page);
+		await chipsSurviveARepeatLookup(page);
+	});
+
+	test('the edit page empties both fields when the result has nothing to put back', async ({
+		page
+	}) => {
+		await stubLookup(page, xMatchBody());
+		await gotoEditHydrated(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(X_POST);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		await expect(page.locator('#commissioned-lookup-tag')).toBeVisible();
+
+		// Nothing confident enough to prefill from: the second result offers no
+		// post at all, so both fields the first one filled are emptied when it
+		// lands — and the panel names them rather than claiming they were kept.
+		await stubLookup(page, xMatchBody({ band: 'possible' }));
+		await pill(page).click();
+
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+		);
+		await expect(panel(page)).not.toContainText('left the source post URL as it was');
 	});
 
 	test('a refused key says so and offers Settings, not a retry', async ({ page }) => {
@@ -1746,6 +2519,536 @@ test.describe('with a key saved', () => {
 		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
 	});
 
+	// A parent move empties both shared fields, and the new parent's result puts
+	// only one of them back. The panel used to reach url_only and call the date
+	// "left as it was", over an input the operator had just watched go blank, and
+	// the live region said nothing at all because the URL had been written
+	// (4.1.3).
+	test('a parent move that refills the URL reports the cleared date once', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile's own post: a different one, carrying no date.
+		const DATELESS_POST = 'https://www.furaffinity.net/view/54321/';
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '54321',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: null,
+						rating: 'general',
+						postUrl: DATELESS_POST
+					}
+				]
+			})
+		);
+		await tileLookup(page).nth(1).click();
+		await expect(page.locator('.tile-nsfw-row .rating-tag')).toHaveText(
+			'Rated General on FurAffinity'
+		);
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+
+		// The URL is the new parent's, and the date it had no replacement for is
+		// gone rather than left pointing at the first tile's post.
+		await expect(sourceInput(page)).toHaveValue(DATELESS_POST);
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+
+		// The panel says which field went, and never says it was left alone.
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL from the FurAffinity post and cleared the commissioned date the last lookup filled, because that post has no date.'
+		);
+		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
+		// Drawn as a report of what just happened, like the standalone cleared
+		// sentence, rather than in the muted colour the advice lines use.
+		await expect(
+			panel(page).locator('p.lookup-status').filter({ hasText: 'cleared the commissioned date' })
+		).toHaveClass(/lookup-emptied/);
+		// And the announcer does not say it a second time. The panel's own status
+		// region carries that sentence, and the announcement it used to make said
+		// only half of what happened — the clearing, never the refill.
+		await expect(page.locator(LIVE_REGION)).not.toContainText(
+			"Sona cleared the commissioned date the last lookup filled."
+		);
+	});
+
+	// A parent with no lookup of its own draws no sentence at all: the panel under
+	// it is idle, and the two fields go blank with nothing on screen saying why
+	// (4.1.3). So the move says it, and says it once.
+	test('a parent move onto a tile with no lookup says what it emptied', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			"Sona cleared the source post URL and commissioned date the last lookup filled."
+		);
+	});
+
+	// And starting that tile's own lookup must not say it again. The searching
+	// arm renders the same sentence off the same record, and the panel's status
+	// region is atomic, so the move would be told a second time — beside the
+	// announcement still standing in the live region (4.1.3).
+	test('a lookup started on that tile does not repeat what the move emptied', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		const spoken =
+			"Sona cleared the source post URL and commissioned date the last lookup filled.";
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+
+		// The second tile is the parent now and has never been looked up. Held
+		// open, so the searching arm is what is on screen.
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(panel(page)).toContainText('Looking up');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		// And the announcer holds the one telling, unchanged: nothing was queued
+		// behind it, so nothing was said twice.
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+
+		release();
+
+		// The result then fills both fields and the panel says so, the way it does
+		// after any other lookup.
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL and commissioned date from the FurAffinity post.'
+		);
+	});
+
+	// No parent move involved: a plain second lookup on a settled tile. The
+	// no-match before it emptied the two fields and the panel said so, and that
+	// record has to go at the start of the next search — it describes a lookup
+	// that is over, and this one has changed nothing yet. Left standing, the
+	// searching arm re-renders the same sentence into the panel's atomic status
+	// region and the clearing is spoken a second time (4.1.3).
+	test('a repeat lookup does not re-speak what the last result cleared', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// A no-match next, which fills neither field and so empties both.
+		await stubLookup(page, { enabled: true, matches: [] });
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+		);
+		const spoken = (await page.locator(LIVE_REGION).textContent()) ?? '';
+
+		// Held open, so the searching arm is what is on screen. The tile is
+		// settled rather than idle, which is the case the first gate let through.
+		const release = await deferredLookup(page, matchedBody());
+		await pill(page).click();
+		await expect(panel(page)).toContainText('Looking up');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		// And nothing was queued into the live region behind it either.
+		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
+
+		release();
+
+		// The result then refills both fields and the panel reports that, with no
+		// clearing left over from the no-match.
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL and commissioned date from the FurAffinity post.'
+		);
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+	});
+
+	// A move onto a tile that is still SEARCHING is NOT that case: the searching
+	// arm renders the same sentence, and its region is atomic, so the panel
+	// re-speaks whole when the sentence appears in it. The move stays quiet there
+	// — an announcement alongside it would be the second telling.
+	test('a move onto a searching tile says it once, in the panel and not the live region', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile's own post, on another date, held open across the move.
+		const SECOND_POST_URL = 'https://www.furaffinity.net/view/54321/';
+		const release = await deferredLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '54321',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: '2026-04-05T10:00:00Z',
+						rating: 'general',
+						postUrl: SECOND_POST_URL
+					}
+				]
+			})
+		);
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const spoken =
+			"Sona cleared the source post URL and commissioned date the last lookup filled.";
+		// It is on screen while the search is still out. The searching arm rendered
+		// nothing about the fields until the result landed, so a sighted operator
+		// watched both go blank with only the progress line to read. The sentence
+		// is the reasonless one, word for word: the status line's version blames a
+		// lookup that has not answered yet.
+		await expect(panel(page)).toContainText('Looking up');
+		await expect(panel(page)).toContainText(spoken);
+		await expect(panel(page)).not.toContainText('because this lookup filled neither one');
+		// And the announcer stays out of it, still holding what the upload left
+		// there. The panel's status region is atomic, so rendering that sentence
+		// re-speaks the panel whole; a say() alongside would be the same move
+		// told twice.
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
+
+		release();
+
+		// The result fills both fields back, and its own sentence is the panel's
+		// to say — the announcer never had a line here to be repeated.
+		await expect(sourceInput(page)).toHaveValue(SECOND_POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-04-05');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL and commissioned date from the FurAffinity post.'
+		);
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
+	});
+
+	// The move empties the fields while that tile's own lookup is still out, and
+	// the result that lands afterwards calls applyShared again knowing nothing
+	// about the move. It used to overwrite the record with one saying nothing was
+	// emptied, so the failure showed no cleared sentence over two blank fields.
+	test('a move onto a searching tile keeps the cleared sentence when its lookup fails', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		const release = await deferredLookup(
+			page,
+			{ enabled: true, error: 'rate_limited', forwarded: true },
+			429
+		);
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const spoken =
+			"Sona cleared the source post URL and commissioned date the last lookup filled.";
+		// The searching arm carries it, and the announcer stays quiet beside it,
+		// still holding what the upload left there.
+		await expect(panel(page)).toContainText(spoken);
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
+
+		release();
+
+		await expect(panel(page)).toContainText('Lookup paused');
+		// The failure fills nothing, so what the move emptied is still the whole
+		// story about the two fields — and the panel is where it is read now.
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one. You can fill them in before you save.'
+		);
+		// Said once, by the panel. The announcer never had a line here to repeat.
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
+	});
+
+	// The move's record is held until that tile's own result lands, and the
+	// operator is free to type into a field it emptied while the search is still
+	// out. Unanswered, the flag had the panel report a URL Sona cleared while the
+	// operator's own typing sat in the input — and the sentence for a cleared
+	// field is chosen before the one that says a field was held, so the typing
+	// never got a word in. The record keeps the raw fact that the move emptied
+	// the field; their typing is carried alongside it and applied where the
+	// sentence speaks about the screen (SONA-220).
+	test('a URL typed while the search is out is not reported as cleared', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile's result, held open across the move AND the typing.
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+
+		// Typed by hand into the field the move emptied. This URL is the
+		// operator's, and no lookup tagged it.
+		const TYPED_URL = 'https://www.furaffinity.net/view/999999/';
+		await sourceInput(page).fill(TYPED_URL);
+
+		release();
+
+		// The result has a date to fill and nowhere to put its URL, so the typed
+		// one stays. The sentence claims the date and says nothing about the URL:
+		// the panel speaks for the move as well as the result, and the move blanked
+		// that field, so "left the source post URL as it was" would be a false
+		// report of a field the operator watched empty (SONA-220).
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(sourceInput(page)).toHaveValue(TYPED_URL);
+		await expect(panel(page)).toContainText(
+			'Sona filled the commissioned date from the FurAffinity post. You can change it before you save.'
+		);
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
+		await expect(panel(page)).not.toContainText('left the source post URL as it was');
+	});
+
+	// The mirror, on the other field.
+	test('a date typed while the search is out is not reported as cleared', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(dateInput(page)).toHaveValue('');
+
+		await dateInput(page).fill('2026-05-06');
+
+		release();
+
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-05-06');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL from the FurAffinity post. You can change it before you save.'
+		);
+		await expect(panel(page)).not.toContainText('cleared the commissioned date');
+		await expect(panel(page)).not.toContainText('left the commissioned date as it was');
+	});
+
+	// Cancelling that search means its result is never coming, so the record the
+	// move left with it goes too. Held on, the NEXT lookup on the same tile
+	// consumed it and reported two fields as just emptied that had been blank
+	// since the move.
+	test('a cancelled search drops the record the parent move left with it', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+
+		await panel(page).getByRole('button', { name: 'Cancel lookup' }).click();
+		release();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'false');
+
+		// A second search on that tile, with nothing to show for it. Both fields
+		// have been empty since the move, so this result emptied neither.
+		await stubLookup(page, { enabled: true, matches: [] });
+		await tileLookup(page).nth(1).click();
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+	});
+
+	// The same record, carried through a group-mode round trip instead of a
+	// cancel. Dropped only where the parent branch consumes it, the record
+	// survived: the flip into the existing-piece mode made the landing result a
+	// variant's, the flip back bailed because that tile has no results to
+	// re-derive from, and the NEXT lookup on it — parent again — consumed a
+	// record several steps old and re-reported a clearing the operator had
+	// already been told about (SONA-220).
+	test('a group-mode round trip drops the record the parent move left', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile's search is still out when the parent moves onto it, so
+		// the move's record is held for the result on its way.
+		const release = await deferredLookup(page, { enabled: true, matches: [] });
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const move =
+			"Sona cleared the source post URL and commissioned date the last lookup filled.";
+		await expect(panel(page)).toContainText(move);
+		await expect(page.locator(LIVE_REGION)).toHaveText('Upload finished.');
+
+		// Into the existing-piece mode while that search is out: no tile is the
+		// parent there, so the result lands as a variant tile's.
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		await expect(page.getByRole('combobox', { name: 'Variant of' })).toBeVisible();
+		release();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'false');
+
+		// Back to the new-set mode. The tile's lookup is a no-match, so the
+		// re-derivation bails and nothing else looks at the record either.
+		await expect(async () => {
+			await page.getByRole('radio', { name: 'New piece' }).check();
+		}).toPass({ timeout: 10_000 });
+		// What the panel says now is true: the move emptied both fields and that
+		// no-match put nothing back.
+		await expect(panel(page)).toContainText(
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one.'
+		);
+
+		// A second search on that tile, with nothing to show for it either. Both
+		// fields have been empty since the move, so THIS result emptied neither
+		// and the panel has no clearing left to report.
+		const releaseAgain = await deferredLookup(page, { enabled: true, matches: [] });
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+		releaseAgain();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'false');
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+		// And the move's line was not said a second time: it belongs to the panel
+		// on this path, and the announcer never carried it.
+		await expect(page.locator(LIVE_REGION)).not.toContainText('lookup filled');
+	});
+
+	// A move onto a tile whose lookup FAILED empties the fields too: the failure
+	// has nothing to put back. That arm carries no status line of its own, so the
+	// two fields went blank with the panel talking only about the failure.
+	test('a parent move onto a failed tile says what it emptied, above the advice', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		await stubLookup(page, { enabled: true, error: 'rate_limited', forwarded: true }, 429);
+		await tileLookup(page).nth(1).click();
+		await expect(page.locator('.tile-lookup-failed')).toHaveText('Lookup paused');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		const emptied =
+			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one. You can fill them in before you save.';
+		await expect(panel(page)).toContainText(emptied);
+		// Above the "try again in a minute" advice: what happened to the form is
+		// read before what to do about the failure.
+		const lines = await panel(page).locator('p.lookup-status').allInnerTexts();
+		expect(lines.indexOf(emptied)).toBeGreaterThanOrEqual(0);
+		expect(lines.indexOf(emptied)).toBeLessThan(
+			lines.findIndex((l) => l.includes('Try again in a minute'))
+		);
+		// The panel reports it, so the announcer does not repeat it.
+		await expect(page.locator(LIVE_REGION)).not.toContainText(
+			"Sona cleared the source post URL and commissioned date the last lookup filled."
+		);
+	});
+
+	// The tile is about 170px wide and the pill's text grows with the number of
+	// sites. The consolidated rule's break-word does not shrink an item's
+	// min-content width, so a four-site rating pushed the tile — and the document
+	// — wider than a phone's viewport (SONA-220).
+	test('a four-site rating wraps inside the tile rather than widening the page', async ({
+		page
+	}) => {
+		const sites = ['FurAffinity', 'Weasyl', 'e621', 'Twitter'];
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: sites.map((site, i) => ({
+					site,
+					siteId: `9000${i}`,
+					handles: ['kuttoya'],
+					distance: 0,
+					band: 'exact',
+					postedAt: '2026-03-04T10:00:00Z',
+					rating: 'adult',
+					postUrl: `https://example.invalid/${i}`
+				}))
+			})
+		);
+		await twoDoneTiles(page);
+		await page.setViewportSize({ width: 390, height: 900 });
+
+		// The variant tile, which is where the tile pill renders.
+		await tileLookup(page).nth(1).click();
+		const tag = page.locator('.tile-nsfw-row .rating-tag');
+		await expect(tag).toHaveText('Rated Adult on FurAffinity, Weasyl, e621, Twitter');
+		await expect(tag).toHaveCSS('overflow-wrap', 'anywhere');
+
+		// Inside its own tile, to the pixel.
+		const tile = await page.locator('.tile').nth(1).boundingBox();
+		const box = await tag.boundingBox();
+		if (!tile || !box) throw new Error('the tile or its pill has no box');
+		expect(box.x + box.width).toBeLessThanOrEqual(tile.x + tile.width + 1);
+		// And the page still does not scroll sideways.
+		const overflow = await page.evaluate(() => {
+			const el = document.scrollingElement;
+			return el ? el.scrollWidth - el.clientWidth : 0;
+		});
+		expect(overflow).toBeLessThanOrEqual(0);
+	});
+
 	// The role used to be snapshotted when the request fired, so a lookup started
 	// on the parent and then demoted mid-flight still wrote its post URL and date
 	// into the shared fields — under a panel already pointing at the tile the
@@ -1819,6 +3122,107 @@ test.describe('with a key saved', () => {
 		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
 		await page.getByRole('radio', { name: 'New piece' }).check();
 		await expect(panel(page).getByRole('button', { name: 'Using Test Artist' })).toBeVisible();
+	});
+
+	// The round trip can refill one field and leave the other blank, and the two
+	// halves used to be announced separately: the clearing went out first and the
+	// refill overwrote it in the same tick, so the region held "filled the source
+	// post URL" and the operator never heard that the date had gone (4.1.3). One
+	// sentence now, the panel's own, naming both halves.
+	test('returning to a new set names the refill and the clearing in one line', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The same tile, looked up again while no tile is the parent — so the
+		// result lands on the tile and not on the shared fields, which keep what
+		// the first lookup filled. Its post carries no date.
+		const DATELESS_POST = 'https://www.furaffinity.net/view/54321/';
+		await stubLookup(
+			page,
+			matchedBody({
+				matches: [
+					{
+						site: 'FurAffinity',
+						siteId: '54321',
+						handles: ['kuttoya'],
+						distance: 0,
+						band: 'exact',
+						postedAt: null,
+						rating: 'general',
+						postUrl: DATELESS_POST
+					}
+				]
+			})
+		);
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await tileLookup(page).nth(0).click();
+		await expect(tileLookup(page).nth(0)).toHaveAttribute('aria-busy', 'false');
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+
+		await page.getByRole('radio', { name: 'New piece' }).check();
+
+		// The re-derivation empties both and puts only the URL back.
+		await expect(sourceInput(page)).toHaveValue(DATELESS_POST);
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// One line, naming both: the field that was filled and the field that was
+		// emptied. The panel says the same thing, but its region is mounted by this
+		// same mode swap and a region inserted with its first content is missed.
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			'Sona filled the source post URL from the FurAffinity post and cleared the commissioned date the last lookup filled, because that post has no date. You can change the URL before you save.'
+		);
+	});
+
+	// The mixed line is the panel's own sentence, and it used to be picked by
+	// hand: a second result that is a DATED clash refills the date and empties the
+	// URL, and the hand-picked branch said the result had no link to put there
+	// while the panel said the post already belonged to another piece (SONA-220).
+	test('returning to a new set names a dated clash the same way the panel does', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await oneDoneTile(page);
+
+		await pill(page).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// Out of new-piece mode, so this second result lands on the tile rather
+		// than on the shared fields. It claims the same post for another piece.
+		await stubLookup(page, clashBody(9001, 'Clash Piece'));
+		await page.getByRole('radio', { name: 'Add as variants of an existing piece' }).check();
+		await tileLookup(page).nth(0).click();
+		await expect(tileLookup(page).nth(0)).toHaveAttribute('aria-busy', 'false');
+
+		await page.getByRole('radio', { name: 'New piece' }).check();
+
+		// The clash fills the date and has no URL to offer, so the one the first
+		// lookup filled is gone from the form.
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		const sentence =
+			'Sona filled the commissioned date from the FurAffinity post and cleared the source post URL the last lookup filled, because the post Sona just found is already the source of Clash Piece. You can change the date before you save.';
+		// One sentence, in both places: the panel renders it and the region says
+		// it, off the same mapping.
+		await expect(panel(page)).toContainText(sentence);
+		await expect(page.locator(LIVE_REGION)).toHaveText(sentence);
+		// Neither of them calls a field Sona just blanked "left empty", and
+		// neither blames a match with no link when Sona found one and declined it.
+		await expect(panel(page)).not.toContainText('left the source post URL empty');
+		await expect(page.locator(LIVE_REGION)).not.toContainText('no link to put there');
+		// The date it filled is not the subject: the field that went blank is, so
+		// the line is drawn as a report rather than as advice.
+		await expect(
+			panel(page)
+				.locator('p.lookup-status')
+				.filter({ hasText: 'cleared the source post URL the last lookup filled' })
+		).toHaveClass(/lookup-emptied/);
 	});
 
 	// The refill is announced because it happened. applyShared never overwrites a
@@ -2027,6 +3431,52 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue(POST_URL);
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
 		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+	});
+
+	// Removing the parent tile itself routes through the same pickParent the
+	// radio does, so the fields re-derive from the tile the parent pick lands on.
+	// The tile that lands there has no lookup of its own, so its panel draws no
+	// sentence and nothing on screen says why the two fields just went blank
+	// (4.1.3) — the removal says it, once.
+	test('removing the parent tile re-derives the fields and says what it emptied', async ({
+		page
+	}) => {
+		await stubLookup(page, matchedBody());
+		await page.route('**/api/upload', (route) =>
+			route.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: '/x1.png' }) })
+		);
+		await page.goto('/admin/upload');
+		await waitForDropAttachment(page, '.dropzone');
+		await dropOn(page, '.dropzone', [
+			{ name: 'first.png', type: 'image/png' },
+			{ name: 'second.png', type: 'image/png' }
+		]);
+		await expect(page.locator('input[name="imageUrl_1"]')).toHaveValue('/x1.png', {
+			timeout: 15_000
+		});
+
+		// The first tile is the parent, and its result fills the shared fields.
+		await tileLookup(page).first().click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(page.locator('#source-lookup-tag')).toBeVisible();
+
+		await page.getByRole('button', { name: 'Remove first.png' }).click();
+		await expect(page.getByRole('button', { name: 'Remove first.png' })).toHaveCount(0);
+
+		// The surviving tile is the parent now, and it has no result: the fields
+		// describe whatever the parent is, so they empty rather than keep the
+		// removed tile's post.
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+		await expect(page.locator('#source-lookup-tag')).toHaveCount(0);
+		await expect(page.locator('#commissioned-lookup-tag')).toHaveCount(0);
+		// Said once, and by the removal: the panel under an idle lookup carries no
+		// sentence to read it from.
+		await expect(page.locator(LIVE_REGION)).toHaveText(
+			"Sona cleared the source post URL and commissioned date the last lookup filled."
+		);
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
 	});
 
 	// In the existing-piece mode no tile is the parent: the panel is not rendered

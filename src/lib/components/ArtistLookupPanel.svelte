@@ -12,12 +12,14 @@
 	import {
 		bandLabel,
 		candidateArtists,
+		clearedLine,
 		isCrossSiteAmbiguity,
 		matchForArtist,
 		matchHandle,
 		matchHandles,
 		matchKey,
 		nameMatchArtists,
+		namesNoSite,
 		pickPrefillMatch,
 		postDateToInput,
 		ratingLabel,
@@ -25,7 +27,9 @@
 		seedStatusKind,
 		siteLabel,
 		statusLineKind,
+		statusSentence,
 		type ArtistChoice,
+		type LookupCleared,
 		type LookupEdited,
 		type LookupFields,
 		type LookupMatch,
@@ -43,14 +47,21 @@
 		/** What the page's prefill actually wrote, for the status line. This record
 		 * is immutable — it describes the lookup, not the form as it stands now. */
 		filled?: LookupFields;
-		/** Which of those fields the operator has typed over since. An edited field
-		 * is no longer the lookup's, so the sentence stops claiming it AND stops
-		 * saying it was left alone. */
+		/** Which of the two fields holds the operator's own text: one they typed
+		 * over since, or one they filled that no lookup had. An edited field is
+		 * no longer the lookup's, so the sentence stops claiming it, stops saying
+		 * it was left alone, and stops saying Sona cleared it. */
 		edited?: LookupEdited;
 		/** What the page seeded into an inline new-artist form, for the status
 		 * line — the seed is subject to the same never-overwrite rule, so the
 		 * sentence has to say which of the two fields it actually filled. */
 		seeded?: NewArtistSeed;
+		/** Which of the two fields this result EMPTIED, because the last lookup
+		 * filled them and this one has nothing to put in their place (SONA-220).
+		 * A snapshot like `filled`: the sentence says what this result did. Read
+		 * against `edited`, which is live — a field the operator has filled since
+		 * is theirs, and no sentence may still say Sona cleared it. */
+		cleared?: LookupCleared;
 		/** `edited`, for the seeded fields — same rule, same reason. */
 		seedEdited?: SeedEdited;
 		/** Whether the source post URL field held anything when the prefill ran.
@@ -84,6 +95,7 @@
 		fileName = '',
 		filled = {},
 		edited = {},
+		cleared = {},
 		seeded = {},
 		seedEdited = {},
 		sourceUrlHeld = false,
@@ -117,7 +129,49 @@
 	const clash = $derived(data?.sourceClash ?? null);
 	const siteCount = $derived(data ? new Set(data.matches.map((x) => x.site)).size : 0);
 	const statusKind = $derived(
-		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld })
+		statusLineKind(filled, { clash: !!clash, edited, urlHeld: sourceUrlHeld, cleared })
+	);
+	// The one sentence for that kind, from the mapping the upload page's
+	// announcement reads too — picked by hand on either side, the two named
+	// different reasons for the same move (SONA-220).
+	const statusText = $derived(
+		statusSentence(statusKind, prefill?.site ?? null, { title: clash?.title ?? '', editMode })
+	);
+	// The kinds that report an emptied field and NOTHING else, off the same test
+	// the mapping uses to answer them without a site: a second list here could
+	// disagree with that one about which kinds get rendered in their own
+	// paragraph, and the sentence would land in the arm that has no site to name.
+	const emptiedOnly = $derived(namesNoSite(statusKind));
+	// The same fields, said without a reason, for the searching arm: a move onto
+	// a tile whose lookup is still out empties them right then, and every
+	// status-line sentence blames a lookup that has not answered yet ("because
+	// this lookup filled neither one"). Off the chooser the upload page's own
+	// announcement of that move reads, so the two name the same fields.
+	const movedEmptied = $derived(clearedLine(cleared, edited));
+	// Every sentence that reports a field going blank, and not only the three
+	// that report nothing else — the single answer to "does this line describe a
+	// change the operator's fields just made".
+	const reportsEmptied = $derived(
+		emptiedOnly ||
+			statusKind === 'url_and_date_emptied' ||
+			statusKind === 'date_and_url_emptied' ||
+			statusKind === 'clash_emptied' ||
+			statusKind === 'clash_date_url_emptied'
+	);
+	// The two failure reasons that carry advice under the lead. Held as text so
+	// the emptied sentence can go ABOVE it: a parent move onto a tile whose
+	// lookup failed empties the fields, and what just happened to the form is
+	// read before what to do about the failure. This list and the failed arm's
+	// own reason branches have to stay in step — a reason that grows a hint in
+	// one and not the other renders nothing.
+	const failedHint = $derived(
+		lookup.kind !== 'failed'
+			? ''
+			: lookup.reason === 'rate_limited'
+				? m.admin_lookup_paused_hint()
+				: lookup.reason === 'key_refused'
+					? m.admin_lookup_refused_hint()
+					: ''
 	);
 	const seedKind = $derived(seedStatusKind(seeded, seedEdited));
 	// The "Sets the artist to {name}." sentence and the button it
@@ -175,9 +229,12 @@
 
      The region is atomic, so every change to the status line re-speaks the whole
      panel. What the lookup filled is a fixed record and only the edited-since
-     flags move, and a flag flips on the FIRST keystroke in a field and not
-     again — so an operator revising a filled field hears the panel once per
-     field, not once per keystroke. -->
+     flags move, and a flag flips the first time a field holds text of the
+     operator's and not again: the tag half is dropped by the first keystroke
+     over a filled field, and the typed-into half is latched by the page on the
+     first non-empty input rather than derived from the text, so deleting what
+     they typed does not flip it back (SONA-220). An operator revising a field
+     hears the panel once for it, not once per keystroke. -->
 <div
 	class="lookup-panel"
 	class:idle={lookup.kind === 'idle'}
@@ -199,19 +256,35 @@
 					<Loader2 size={14} class="spin" aria-hidden="true" />
 					{m.admin_lookup_searching_body()}
 				</p>
+				<!-- A parent move onto a tile whose own lookup is still out empties
+				     what the last lookup filled, and this arm used to say
+				     nothing about it: the two fields went blank while the panel talked
+				     only about the search, so a sighted operator saw nothing until the
+				     result landed. The reasonless sentence, not the status line's:
+				     nothing is settled about a lookup still running. Under the progress
+				     line, the way the no-match and failed arms put it under their
+				     lead. -->
+				{#if movedEmptied}
+					<p class="lookup-status lookup-emptied">{movedEmptied}</p>
+				{/if}
 			{:else if lookup.kind === 'no_match'}
 				<div class="lookup-eyebrow">{m.admin_lookup_no_match_eyebrow()}</div>
 				<p class="lookup-lead">{m.admin_lookup_no_match_body()}</p>
+				<!-- A no-match is a result with nothing to prefill, so it empties what
+				     the last lookup filled. Said here, above the hint: the operator
+				     watches the two fields go blank and this arm carries no status
+				     line of its own. -->
+				{#if emptiedOnly}
+					<p class="lookup-status lookup-emptied">{statusText}</p>
+				{/if}
 				<p class="lookup-status">{m.admin_lookup_no_match_hint()}</p>
 			{:else if lookup.kind === 'failed'}
 				{#if lookup.reason === 'rate_limited'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_paused_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_paused_body()}</p>
-					<p class="lookup-status">{m.admin_lookup_paused_hint()}</p>
 				{:else if lookup.reason === 'key_refused'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_refused_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_refused_body()}</p>
-					<p class="lookup-status">{m.admin_lookup_refused_hint()}</p>
 				{:else if lookup.reason === 'too_large'}
 					<div class="lookup-eyebrow warn">{m.admin_lookup_too_large_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_too_large_body()}</p>
@@ -236,6 +309,17 @@
 				{:else}
 					<div class="lookup-eyebrow">{m.admin_lookup_failed_eyebrow()}</div>
 					<p class="lookup-lead">{m.admin_lookup_failed_body()}</p>
+				{/if}
+				<!-- A failure fills nothing, but a parent move onto a tile that failed
+				     still empties what the last lookup filled. This arm carries
+				     no status line of its own, so the sentence renders here — above the
+				     advice, because the fields went blank under the operator and that is
+				     the part nothing else on screen reports. -->
+				{#if emptiedOnly}
+					<p class="lookup-status lookup-emptied">{statusText}</p>
+				{/if}
+				{#if failedHint}
+					<p class="lookup-status">{failedHint}</p>
 				{/if}
 			{:else if data}
 				{#if clash}
@@ -369,29 +453,10 @@
 					{/if}
 				{/if}
 
-				{#if statusKind !== 'none' && prefill}
-					<p class="lookup-status">
-						{#if statusKind === 'both'}
-							{m.admin_lookup_status_both({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'url_only'}
-							{m.admin_lookup_status_url_only({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'url_kept'}
-							{m.admin_lookup_status_url_kept({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'date_kept'}
-							{m.admin_lookup_status_date_kept({ site: siteLabel(prefill.site) })}
-						{:else if statusKind === 'clash'}
-							{m.admin_lookup_status_clash({ site: siteLabel(prefill.site), title: clash?.title ?? '' })}
-						{:else if statusKind === 'clash_kept'}
-							{m.admin_lookup_status_clash_kept({
-								site: siteLabel(prefill.site),
-								title: clash?.title ?? ''
-							})}
-						{:else if editMode}
-							{m.admin_lookup_status_kept({ site: siteLabel(prefill.site) })}
-						{:else}
-							{m.admin_lookup_status_date_only({ site: siteLabel(prefill.site) })}
-						{/if}
-					</p>
+				{#if emptiedOnly}
+					<p class="lookup-status lookup-emptied">{statusText}</p>
+				{:else if statusText}
+					<p class="lookup-status" class:lookup-emptied={reportsEmptied}>{statusText}</p>
 				{/if}
 
 				<!-- Its own paragraph, on its own condition: nested in the status sentence
@@ -644,6 +709,23 @@
 		line-height: 1.55;
 		margin: 10px 0 0;
 		max-width: 62ch;
+	}
+	/* A report of a change the operator's fields just made, not the advice the
+	   muted status lines carry — at the hint's colour it reads as something to
+	   consider rather than as something that happened. */
+	.lookup-emptied {
+		color: var(--foreground);
+	}
+	/* On the no-match and failed arms it lands under the lead that explains the
+	   result: a change of subject and of size, 14px to 13px. On the searching
+	   arm it lands under the progress line, which is 13px too, so only the
+	   subject changes and nothing else marks the break. Either way the default
+	   10px every status line sits at would read as one paragraph, so both get
+	   18px. Only there: under a result it follows the outcome lines it belongs
+	   with. */
+	.lookup-lead + .lookup-emptied,
+	.searching-line + .lookup-emptied {
+		margin-top: 18px;
 	}
 	/* The searching line carries the spinner, so it lines up with its text. */
 	.searching-line {

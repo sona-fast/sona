@@ -10,6 +10,7 @@
 	import { Announcer } from '$lib/live-announcer.svelte';
 	import {
 		LOOKUP_RESULT_THREW,
+		clearedLine,
 		matchHandle,
 		pickPrefillMatch,
 		prefillForResult,
@@ -17,12 +18,15 @@
 		ratingTag,
 		runLookup,
 		siteLabel,
+		statusLineKind,
+		statusSentence,
 		strictestRating,
 		tileResultText,
 		candidateArtists,
 		lookupSentFile,
 		sentAfterApplyThrew,
 		withCreatedArtist,
+		type LookupCleared,
 		type LookupFailReason,
 		type LookupFields,
 		type LookupMatch,
@@ -357,7 +361,7 @@
 			// survived the flip out of 'new' and write nothing back, erasing them
 			// with none of the announcement returnToNewSet makes. The flip back
 			// to 'new' goes through returnToNewSet, which re-derives them there.
-			if (groupMode !== 'existing') onParentChanged(parentIndex);
+			if (groupMode !== 'existing') pickParent(parentIndex);
 		}
 	}
 
@@ -510,9 +514,33 @@
 	// operator types: clearing a pasted URL afterwards would make the panel say
 	// Sona left the field empty, which the operator did, not Sona.
 	let sharedUrlHeld = $state(false);
+	// The other half of that record: which of the two fields this result EMPTIED,
+	// because the last lookup filled it and this one has no post or no date to
+	// put back (SONA-220). Without it the status line says a field was left as it
+	// was while the operator watched it go blank (4.1.3).
+	let sharedCleared = $state<LookupCleared>({});
+	// Whether the operator has text of their own in each field. Raised on input
+	// to either field, recomputed against the fields in applyShared when a result
+	// lands, and lowered in resetSharedPrefill. See sharedEdited.
+	let sourceTypedIn = $state(false);
+	let dateTypedIn = $state(false);
+	// Not $state: nothing renders it. See takePendingCleared.
+	let pendingCleared: { key: number; emptied: LookupCleared } | null = null;
+	// A field the operator has typed into is theirs whether or not a lookup
+	// filled it first: an emptied field they have since filled is not one the
+	// panel may still say Sona cleared (SONA-220). The filled half is unchanged
+	// — a status line that names a field needs it filled as well as untouched,
+	// so the extra arm only ever speaks for the cleared half.
+	// The typed-into half is LATCHED rather than read off the input. Derived live
+	// from the text, deleting what the operator typed into a field this result
+	// emptied puts "Sona cleared the source post URL" back over a field THEY just
+	// emptied, and the panel re-attributes their own deletion to Sona (SONA-220).
+	// Each latch lives exactly as long as the cleared record it speaks for: it
+	// rises on input to either field, and applyShared recomputes it against the
+	// fields as each result lands. See the recompute there for why.
 	const sharedEdited = $derived({
-		sourcePostUrl: sharedFilled.sourcePostUrl !== undefined && !sourceTagged,
-		commissionedAt: sharedFilled.commissionedAt !== undefined && !dateTagged
+		sourcePostUrl: !sourceTagged && (sharedFilled.sourcePostUrl !== undefined || sourceTypedIn),
+		commissionedAt: !dateTagged && (sharedFilled.commissionedAt !== undefined || dateTypedIn)
 	});
 	// The artist this result put in the select, so "Use X" can read back as
 	// "Using X" and revert when the operator changes the select by hand.
@@ -570,7 +598,27 @@
 		lookupAborts.set(key, controller);
 		tile.lookup = { kind: 'searching' };
 		tile.sentPrivate = isPrivate;
-		if (isParent(key)) resetSharedPrefill();
+		// The fields the last prefill wrote are NOT emptied here. Blanking the
+		// source post URL for the length of the round trip tears down everything
+		// downstream of it — the suggestion control drops its standing chips and
+		// its rating the moment that field changes (SONA-220) — and a lookup that
+		// comes back with the same post, or fails outright, then has nothing to
+		// put back. They are replaced where the result lands instead, and only
+		// when the result names a different post. What the panel says about the
+		// LAST result does go now: it is about a search that is over.
+		if (isParent(key)) {
+			// The move's own record goes too. Whatever it describes has already been
+			// told — by pickParent's announcement when the move landed on an idle
+			// tile, by the settled arm otherwise — and this search has changed
+			// nothing yet, so the searching arm about to render must not say it
+			// again into the panel's atomic status region (4.1.3). The one record
+			// the searching arm does speak for is a move that landed on a search
+			// still in flight, and no lookup can start on that tile: the guard above
+			// returns on a searching tile rather than restarting it, which is also
+			// why the record that move parks in `pendingCleared` survives this.
+			sharedCleared = {};
+			resetSharedResult();
+		}
 		// What runLookup settled on, so the catch below can keep this lookup's own
 		// answer to "did the file leave the browser" instead of assuming it did.
 		let settled: LookupState | null = null;
@@ -598,7 +646,16 @@
 				// applies its result instead of showing it over empty fields. The
 				// group-mode round trip that made this a snapshot is handled where it
 				// happens: the "new" radio re-derives from the parent tile.
-				if (isParent(key)) applyShared(next);
+				// The record belongs to the request it was waiting for, not to the
+				// tile's parent status, so it is taken before the branch: a flip into
+				// the existing-piece mode between the move and the result does not
+				// make the request any less over. Taken only on the parent branch, it
+				// outlived the flip — the flip back bails when this tile has no
+				// results of its own, and the NEXT lookup on it, parent again,
+				// consumed the record and re-reported a clearing announced several
+				// steps earlier (SONA-220).
+				const emptied = takePendingCleared(key);
+				if (isParent(key)) applyShared(next, emptied);
 				else {
 					// Focus first, then the announcement — the same order the created
 					// artist takes above. A failure that unmounts the button takes the
@@ -635,9 +692,24 @@
 				lookupAborts.delete(key);
 				const live = tiles.find((t) => t.key === key);
 				if (!live) return;
+				// Taken before the branch here too, for the same reason: this request
+				// is over however it ended, so the record it was holding dies with it
+				// rather than waiting for the next lookup on the tile.
+				const emptied = takePendingCleared(key);
 				if (!applied) {
 					const sent = sentAfterApplyThrew(settled);
-					live.lookup = { kind: 'failed', reason: 'unavailable', sent };
+					const failed: LookupState = { kind: 'failed', reason: 'unavailable', sent };
+					live.lookup = failed;
+					// That failure fills nothing, so the only true thing the panel can
+					// say about the two shared fields is what a parent move onto this
+					// still-searching tile emptied. Without this the record the LAST
+					// result left stands, and the failed arm renders its sentence over
+					// fields that never changed. Through applyShared rather than
+					// assigned here: it is the one writer of sharedCleared, and it is
+					// where a flag the operator's own typing has since invalidated gets
+					// dropped — assigned straight, the panel said Sona cleared a URL
+					// that was sitting in the input.
+					if (isParent(key)) applyShared(failed, emptied);
 				}
 				console.error(LOOKUP_RESULT_THREW);
 				// A variant tile's outcome is plain text outside any live region, so
@@ -783,19 +855,45 @@
 	function cancelLookup(key: number) {
 		lookupAborts.get(key)?.abort();
 		lookupAborts.delete(key);
+		// The result this tile's record was waiting for is never coming. Left
+		// behind, the NEXT lookup on this tile consumes it and reports fields that
+		// tile's cancelled search emptied, minutes after they went — a no-match
+		// saying Sona cleared two fields that have been blank the whole time.
+		if (pendingCleared?.key === key) pendingCleared = null;
 		const tile = tiles.find((t) => t.key === key);
 		if (tile) tile.lookup = { kind: 'idle' };
 	}
 
 	/** Undo what a previous shared prefill wrote, but only where the operator has
-	 * not typed over it since — the tag is the record of that. */
-	function resetSharedPrefill() {
-		if (sourceTagged) sourcePostUrl = '';
-		if (dateTagged) commissionedAt = '';
+	 * not typed over it since — the tag is the record of that. Returns which of
+	 * the two fields that emptied, so the caller can say so: this reset runs on a
+	 * parent move, where no result is on its way to describe what happened. */
+	function resetSharedPrefill(): LookupCleared {
+		const emptied: LookupCleared = {};
+		if (sourceTagged) {
+			sourcePostUrl = '';
+			emptied.sourcePostUrl = true;
+		}
+		if (dateTagged) {
+			commissionedAt = '';
+			emptied.commissionedAt = true;
+		}
 		sourceTagged = false;
 		dateTagged = false;
 		sharedFilled = {};
 		sharedUrlHeld = false;
+		sharedCleared = {};
+		sourceTypedIn = false;
+		dateTypedIn = false;
+		resetSharedResult();
+		return emptied;
+	}
+
+	/** What the last result put on the page OUTSIDE the two shared fields. A new
+	 * search invalidates all of it the moment it starts, because none of it is
+	 * recoverable from the result that is on its way. The fields are the
+	 * exception and are handled by applyShared when that result lands. */
+	function resetSharedResult() {
 		// A second lookup's panel is about a new result, and an artist applied
 		// from the last one is not applied to it: cleared here, the way the edit
 		// page's resetLookupPrefill does. The group-mode round trip, which shows
@@ -810,23 +908,111 @@
 
 	/** Which of the two shared fields this call actually wrote. A result whose
 	 * fields the operator has typed over writes neither, and a caller that speaks
-	 * about the refill has to know that before it claims one happened. */
-	function applyShared(next: LookupState): { sourcePostUrl: boolean; commissionedAt: boolean } {
+	 * about the refill has to know that before it claims one happened.
+	 *
+	 * `emptied` is what a reset the caller ran first took out of those fields —
+	 * a parent move, which untags both before this runs, so this call cannot see
+	 * it and the panel would say the field was "left as it was" over an input the
+	 * operator just watched go blank (4.1.3). Merged in here rather than
+	 * recomputed by the caller, so `sharedCleared` has exactly one writer. */
+	function applyShared(
+		next: LookupState,
+		emptied: LookupCleared = {}
+	): { sourcePostUrl: boolean; commissionedAt: boolean } {
 		const wrote = { sourcePostUrl: false, commissionedAt: false };
-		if (next.kind !== 'results') return wrote;
-		sharedUrlHeld = sourcePostUrl.trim() !== '';
-		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
+		// What is in the two fields that the LAST prefill did not write: the
+		// operator's own text. A field the prefill wrote and the operator has not
+		// typed over since is still the lookup's to replace, so a result reads it
+		// as empty and fills it. Only the tag can tell the two apart, which is why
+		// the value is kept until here rather than blanked when the search started.
+		const ownSource = sourceTagged ? '' : sourcePostUrl;
+		const ownDate = dateTagged ? '' : commissionedAt;
+		// One answer to "is the operator's own URL in that field", read by the
+		// latch recompute just below and by `sharedUrlHeld`, the clash sentence's
+		// snapshot: computed twice, the two could disagree about whose text the
+		// field holds.
+		const sourceHeld = ownSource.trim() !== '';
+		// Each latch is recomputed here, against THIS result, so it describes the
+		// operator's text relative to the record it speaks for. Raised once and
+		// left alone, a latch outlives the cleared record it belongs to: a lookup
+		// fills the URL, the operator types a character and deletes it, a second
+		// lookup refills the field, and the latch is still up over text that is
+		// the lookup's. A third result then blanks the field and the stale latch
+		// drops its own cleared flag, so the panel says nothing about a field the
+		// operator watched go blank, or claims it was left as it was (SONA-220).
+		// Read off the fields as they stand when the result LANDS, so text the
+		// operator typed and deleted during the round trip is not remembered: a
+		// parent move onto a searching tile, a character typed into the emptied
+		// URL and deleted again, and then a failure leaves the latch down and the
+		// panel says Sona cleared the URL. That is the accepted trade — the move
+		// did clear it, and the sentence matches the empty field on screen.
+		sourceTypedIn = sourceHeld;
+		dateTypedIn = ownDate.trim() !== '';
+		// What a reset the caller ran took out of the fields, kept raw. A field
+		// the operator has typed into since is handled by the latch above feeding
+		// `sharedEdited`, which the status line applies to the cleared flags for
+		// the sentences that speak about the screen. Dropped here instead, the
+		// raw fact that the move emptied the field would go with it, and a date
+		// the move emptied and the operator retyped would read as "left the
+		// commissioned date as it was" (SONA-220). So `emptied` is spread as it
+		// came in at both sites below, never filtered.
+		//
+		// A failure, or a search cancelled back to idle, leaves both fields exactly
+		// as they are: there is no new post to describe them, and what the last
+		// lookup wrote is still the best thing the page knows.
+		//
+		// A no-match is not one of those. It is a settled result with nothing to
+		// prefill, so it runs the whole of this: it fills neither field, which
+		// empties whatever the last lookup filled and records it for the sentence
+		// the panel's no-match arm renders. Returning early here instead left the
+		// last lookup's URL and date on the form, still tagged From lookup, under
+		// a panel saying Sona found nothing.
+		// Nothing lands, so whatever the caller's reset took out is the whole of
+		// what this move did to the fields.
+		if (next.kind !== 'results' && next.kind !== 'no_match') {
+			sharedCleared = { ...emptied };
+			return wrote;
+		}
+		sharedUrlHeld = sourceHeld;
+		const fields: LookupFields =
+			next.kind === 'results'
+				? prefillForResult(next.data, { sourcePostUrl: ownSource, commissionedAt: ownDate })
+				: {};
 		sharedFilled = fields;
+		// Seeded with what the caller's reset emptied and the operator has not put
+		// back, and unset again for a field this result writes back: a move that
+		// empties both and refills the URL has cleared the date and nothing else.
+		const cleared: LookupCleared = { ...emptied };
 		if (fields.sourcePostUrl !== undefined) {
+			// Assigned plainly. A second lookup that lands on the SAME post writes
+			// the same string, and $state only notifies on a value that differs, so
+			// the suggestion control keeps the chips and the rating it is holding
+			// rather than answering a change that did not happen.
 			sourcePostUrl = fields.sourcePostUrl;
 			sourceTagged = true;
 			wrote.sourcePostUrl = true;
+			cleared.sourcePostUrl = false;
+		} else if (sourceTagged) {
+			// This result has no post to offer — no match, or a clash whose URL
+			// belongs to another piece — so the last one's URL goes now. Deferred to
+			// here rather than done at the start: until the result was in, there was
+			// no way to know it would not be refilled. Recorded, because the status
+			// line has to say the field was emptied instead of left alone.
+			sourcePostUrl = '';
+			sourceTagged = false;
+			cleared.sourcePostUrl = true;
 		}
 		if (fields.commissionedAt !== undefined) {
 			commissionedAt = fields.commissionedAt;
 			dateTagged = true;
 			wrote.commissionedAt = true;
+			cleared.commissionedAt = false;
+		} else if (dateTagged) {
+			commissionedAt = '';
+			dateTagged = false;
+			cleared.commissionedAt = true;
 		}
+		sharedCleared = cleared;
 		return wrote;
 	}
 
@@ -841,30 +1027,115 @@
 	 * and hearing that Sona filled them would be a false report of a change that
 	 * did not happen. */
 	function returnToNewSet() {
-		if (tiles[parentIndex]?.lookup.kind !== 'results') return;
+		const parent = tiles[parentIndex]?.lookup;
+		const data = parent?.kind === 'results' ? parent.data : null;
+		if (!data) return;
+		// The site the panel's own sentence names, read the way the panel reads it
+		// so the two say the same post.
+		const site = pickPrefillMatch(data.matches)?.site ?? null;
 		// "Using {name}" is about the SELECT, not about the result that put the
 		// artist there. The re-derivation behind this round trip clears it, and
 		// the button relabelled itself back to "Use {name}" over a select that
 		// still held that artist. Only this round trip restores it: the operator
 		// changing the select, or a new result, is a real reason to drop it.
 		const held = appliedArtist;
-		const wrote = onParentChanged(parentIndex);
+		const { wrote, cleared } = onParentChanged(parentIndex);
 		if (held && Number(selectedArtistId) === held.id) appliedArtist = held;
-		if (wrote.sourcePostUrl && wrote.commissionedAt) {
+		// Exactly one line. The round trip can refill one field and leave the
+		// other blank, and a say() per field would have the second overwrite the
+		// first before a screen reader reached it — so the mixed case borrows the
+		// panel's own sentence for it, which names both halves at once. Read off
+		// the kind the panel is rendering rather than picked by hand: chosen
+		// here, the announcement said the URL had no link to put there while the
+		// panel said the post already belonged to another piece (SONA-220).
+		const mixed = statusSentence(
+			statusLineKind(sharedFilled, {
+				clash: !!data.sourceClash,
+				edited: sharedEdited,
+				urlHeld: sharedUrlHeld,
+				cleared
+			}),
+			site,
+			{ title: data.sourceClash?.title ?? '' }
+		);
+		const refilledOne =
+			(wrote.sourcePostUrl && cleared.commissionedAt) ||
+			(wrote.commissionedAt && cleared.sourcePostUrl);
+		if (refilledOne && mixed) {
+			announcer.say(mixed);
+		} else if (wrote.sourcePostUrl && wrote.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_refilled());
 		} else if (wrote.sourcePostUrl) {
 			announcer.say(m.admin_lookup_announce_shared_refilled_source());
 		} else if (wrote.commissionedAt) {
 			announcer.say(m.admin_lookup_announce_shared_refilled_date());
+		} else {
+			const line = clearedLine(cleared, {});
+			if (line) announcer.say(line);
 		}
 	}
 
-	/** The parent moved: the shared fields describe whatever the parent is now. */
-	function onParentChanged(index: number) {
+	/** The parent moved: the shared fields describe whatever the parent is now.
+	 * Says nothing itself. The live region holds one line at a time, so a
+	 * function that announced here AND left its caller free to announce would
+	 * have the second say() overwrite the first inside the same tick — the
+	 * caller gets the record and picks the one sentence for it. A tile that is
+	 * gone is read as idle: the fields empty with no result on its way, which is
+	 * what applyShared does with a lookup that never ran. */
+	function onParentChanged(index: number): {
+		wrote: { sourcePostUrl: boolean; commissionedAt: boolean };
+		cleared: LookupCleared;
+	} {
 		parentIndex = index;
-		resetSharedPrefill();
+		const emptied = resetSharedPrefill();
 		const tile = tiles[parentIndex];
-		return tile ? applyShared(tile.lookup) : { sourcePostUrl: false, commissionedAt: false };
+		// A move onto a tile still searching has a result on its way, and that
+		// result calls applyShared again knowing nothing about this move. Held
+		// until it lands, or the record it writes says nothing was emptied and the
+		// fields the operator watched go blank are reported by no sentence at all
+		// (4.1.3). Any other move drops it: the pending record belongs to the tile
+		// the fields are pointing at now. It never reaches a LATER lookup on that
+		// tile. A record exists only while that tile is searching, startLookup
+		// bails on a searching tile, and the request it is waiting for ends in one
+		// of three places that all account for it: both arms of startLookup take
+		// it before they ask anything about the tile, and a cancel drops it.
+		pendingCleared = tile?.lookup.kind === 'searching' ? { key: tile.key, emptied } : null;
+		const wrote = applyShared(tile?.lookup ?? { kind: 'idle' }, emptied);
+		return { wrote, cleared: sharedCleared };
+	}
+
+	/** What a parent move emptied while that tile's own lookup was still out.
+	 * Taken once: from then on the result that landed owns the record. Whichever
+	 * arm of that request lands takes it, whatever the tile's parent status is by
+	 * then, so a result that is over can never leave it for the lookup after.
+	 * Nor can a restart reach around that: a tile only holds a record while it is
+	 * searching, and startLookup returns on a searching tile rather than aborting
+	 * the request the record belongs to. */
+	function takePendingCleared(key: number): LookupCleared {
+		if (pendingCleared?.key !== key) return {};
+		const { emptied } = pendingCleared;
+		pendingCleared = null;
+		return emptied;
+	}
+
+	/** The Parent radio moved, or the parent tile was removed and the radio
+	 * landed on another one. The panel under it is already mounted and its status
+	 * region carries the sentence for every settled result, and the searching arm
+	 * carries it too, so announcing here on either would say the same thing twice
+	 * — the region is atomic, so the panel re-speaks whole when the sentence
+	 * appears in it. Only a lookup that never ran draws no sentence at all, and
+	 * then the two fields empty with nothing on screen saying why (4.1.3).
+	 *
+	 * Gated the way `sharedLookup` is, rather than read straight off the tile:
+	 * the panel is mounted in the new-set mode only, so outside it no arm carries
+	 * the sentence however that tile's own lookup ended, and the announcement is
+	 * the only telling there is. */
+	function pickParent(index: number) {
+		const { cleared } = onParentChanged(index);
+		const kind = (groupMode === 'new' ? tiles[index]?.lookup.kind : undefined) ?? 'idle';
+		if (kind !== 'idle') return;
+		const line = clearedLine(cleared, {});
+		if (line) announcer.say(line);
 	}
 
 	function useLookupArtist(artist: { id: number; name: string }) {
@@ -1179,7 +1450,7 @@
 									name="parentPick"
 									checked={parentIndex === i}
 									aria-label={m.admin_lookup_parent_radio({ fileName: tile.fileName })}
-									onchange={() => onParentChanged(i)}
+									onchange={() => pickParent(i)}
 								/>
 								<span>{m.admin_variant_parent_radio()}</span>
 							</label>
@@ -1388,6 +1659,7 @@
 				fileName={tiles.length > 1 ? (parentTile?.fileName ?? '') : ''}
 				filled={sharedFilled}
 				edited={sharedEdited}
+				cleared={sharedCleared}
 				sourceUrlHeld={sharedUrlHeld}
 				{appliedArtist}
 				privateNotice={sharedSentPrivate && lookupSentFile(sharedLookup)}
@@ -1467,11 +1739,15 @@
 			class="input"
 			name="commissionedAt"
 			bind:value={commissionedAt}
-			oninput={() => {
+			oninput={(event) => {
 				// The panel's status line reads the filled record through this tag: a
 				// field typed over stops being the lookup's, and the sentence then
 				// neither claims it nor says it was left alone.
 				dateTagged = false;
+				// And the latch for the cleared record, which no later deletion
+				// lowers. Read off the event rather than the bound value, which this
+				// handler may run before.
+				if (event.currentTarget.value.trim() !== '') dateTypedIn = true;
 			}}
 			aria-describedby={dateTagged ? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'}
 		/>
@@ -1486,7 +1762,7 @@
 	     (SONA-156) and entail.dev's from the tag suggestion (SONA-220). Neither
 	     ever ticks it; both sit outside the label so a screen reader doesn't read
 	     a classifier's guess as part of the checkbox's own name. -->
-	<div class="nsfw-row tag-check-row">
+	<div class="tag-check-row">
 		<label class="checkbox-label">
 			<input
 				type="checkbox"
@@ -1535,8 +1811,9 @@
 			placeholder={m.admin_upload_source_placeholder()}
 			name="sourcePostUrl"
 			bind:value={sourcePostUrl}
-			oninput={() => {
+			oninput={(event) => {
 				sourceTagged = false;
+				if (event.currentTarget.value.trim() !== '') sourceTypedIn = true;
 			}}
 			aria-describedby={sourceFieldDescribedBy}
 		/>
@@ -1588,6 +1865,12 @@
 		flex-direction: column;
 		gap: 20px;
 		max-width: 800px;
+		/* The NSFW row's wrapping is about this column's width, not the window's
+		   (SONA-220). Safe to contain: the width comes from the page and the
+		   max-width above, never from the content, and the new-artist dialog with
+		   its fixed overlay is mounted outside this form. */
+		container-type: inline-size;
+		container-name: admin-form;
 	}
 
 	.upload-form h2 {
@@ -2046,47 +2329,29 @@
 	}
 
 	/* The rating never changes the checkbox — it reports what the sites said and
-	   sits beside it. nowrap so the sentence stays one unit, and the row wraps
-	   the whole pill to its own line when it no longer fits. */
-	.nsfw-row,
+	   sits beside it. The row wraps a pill to its own line when it no longer
+	   fits. The shared row is a `.tag-check-row` and takes the same shape from
+	   app.css; the tile is not, and keeps its own. */
 	.tile-nsfw-row {
 		display: flex;
 		align-items: center;
 		gap: 8px;
 		flex-wrap: wrap;
-	}
-
-	/* A grid child's default min-width is its content, so a long pill would
-	   push the tile — and the document — wider than the viewport. */
-	.tile-nsfw-row {
+		/* A grid child's default min-width is its content, so a long pill would
+		   push the tile — and the document — wider than the viewport. */
 		min-width: 0;
 	}
 
-	.rating-tag {
-		font-family: var(--font-primary);
-		font-size: 11px;
-		color: var(--muted-foreground);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-pill);
-		padding: 1px 8px;
-		white-space: nowrap;
-		max-width: 100%;
-	}
+	/* The pill itself, and how the shared row shares its width with it, are
+	   global — the tiles hold the same pill. See `.rating-tag` in app.css. */
 
-	/* The tile is ~170px wide and the text grows with the number of sites, so
-	   the pill wraps inside the tile rather than spilling out of it. */
+	/* One exception to that. The tile is about 170px wide, and break-word does
+	   not shrink an item's min-content width, so a rating naming four sites
+	   pushed the tile — and the document — wider than a phone's viewport. Only
+	   here: `anywhere` is what shatters a squeezed pill into one character per
+	   line, and the shared row is wide enough never to need it. */
 	.tile-nsfw-row .rating-tag {
-		white-space: normal;
 		overflow-wrap: anywhere;
-	}
-
-	/* Same story for the shared row once the column itself is narrow: one line
-	   of pill is worth less than a page that doesn't scroll sideways. */
-	@media (max-width: 480px) {
-		.rating-tag {
-			white-space: normal;
-			overflow-wrap: anywhere;
-		}
 	}
 
 	.field-label {

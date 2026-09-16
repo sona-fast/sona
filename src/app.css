@@ -552,12 +552,73 @@ select.input {
 	flex-wrap: wrap;
 }
 
-@media (max-width: 640px) {
-	/* Wrapped onto its own line, the note lines up under the label text rather
-	   than under the checkbox. */
+/* Where this row breaks is the COLUMN's business, not the window's: the edit
+   form's column is 219px wide in an 800px window, so a viewport query left the
+   whole middle of the range wrapping to the checkbox's edge. */
+@container admin-form not (min-width: 560px) {
+	/* Wrapped onto its own line, each of these lines up under the label text
+	   rather than under the checkbox. CSS cannot ask whether an item wrapped, so
+	   the indent goes by column width alone, as the note has always done. */
 	.tag-check-row .tag-rating-note,
+	.tag-check-row .rating-tag,
 	.tag-check-row .btn {
 		margin-left: 24px;
+	}
+
+	/* Stacked rather than wrapped, which is what the mocks draw. Wrapping put the
+	   24px indent on items that had not wrapped, so an inline row carried 32px
+	   gaps; stacking makes the indent true of every item that has it. */
+	.tag-check-row {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+}
+
+/* The lookup's rating pill (SONA-156) — both admin forms and the upload tiles
+   hold the same one. A fixed radius, not the pill token: wrapped to three lines
+   the token clamps to half the box height and the end caps' arc lands inside the
+   text's own inset. */
+.rating-tag {
+	font-family: var(--font-primary);
+	font-size: 11px;
+	color: var(--muted-foreground);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	padding: 1px 8px;
+	/* The text grows with the number of sites, so the pill wraps inside whatever
+	   holds it rather than pushing the document into a sideways scroll. */
+	white-space: normal;
+	overflow-wrap: break-word;
+	max-width: 100%;
+}
+
+/* With room for all four, the two rating items give up the difference instead
+   of pushing "Mark it NSFW" onto a second row: flex breaks a line on content
+   size, so a zero basis takes them out of that decision and the floor keeps a
+   narrow column from shrinking them to a character per line. */
+@container admin-form (min-width: 560px) {
+	.tag-check-row .rating-tag,
+	.tag-check-row .tag-rating-note {
+		flex: 1 1 0;
+		min-width: 14ch;
+		max-width: max-content;
+	}
+
+	/* Three gaps at 8px against an 8px shortfall: the edit form's row wants 608px
+	   in a 600px column, and 4px buys back the 12px that keeps all four on one
+	   line. The wider gap stays wherever the row has room for it. */
+	.tag-check-row {
+		gap: 4px;
+	}
+
+	/* The 4px above is the gap BETWEEN the two rating items, which report the
+	   same kind of thing and belong together. The action after them is a
+	   different kind of thing, so it takes some of that separation back. 4px, not
+	   the 8px the row would read better with: the edit form's column has about
+	   6px of slack at 1280, and 8px spent here wrapped "entail.dev." onto a
+	   second line — which is the shortfall the narrower gap was paying off. */
+	.tag-check-row .btn {
+		margin-left: 4px;
 	}
 }
 

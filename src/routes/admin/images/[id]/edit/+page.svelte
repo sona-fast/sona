@@ -19,6 +19,7 @@
 		runLookup,
 		sentAfterApplyThrew,
 		strictestRating,
+		type LookupCleared,
 		type LookupFields,
 		type LookupSite,
 		type LookupState,
@@ -70,6 +71,11 @@
 	// types: clearing a pasted URL afterwards would make the panel say Sona left
 	// the field empty, which the operator did, not Sona.
 	let lookupUrlHeld = $state(false);
+	// The other half of that record: which of the two fields a result EMPTIED,
+	// because the last lookup filled it and this one has no post or no date to
+	// put back (SONA-220). Without it the status line says a field was left as it
+	// was while the operator watched it go blank (4.1.3).
+	let lookupCleared = $state<LookupCleared>({});
 	// Read once, like every other form seed on this page: these are the values
 	// the form OPENS with, and a later `data` change must not throw away what the
 	// operator has typed. untrack is the documented spelling for that.
@@ -87,6 +93,18 @@
 	);
 	let sourceTagged = $state(false);
 	let dateTagged = $state(false);
+	// Latched, not read off the input: once the operator has typed into a field
+	// this result emptied, the cleared claim is off it for good. Derived live
+	// from the text, deleting what they typed puts "Sona cleared the source post
+	// URL" back over a field THEY just emptied, and the panel re-attributes
+	// their own deletion to Sona (SONA-220). Each latch lives exactly as long as
+	// the cleared record it speaks for: it rises on input to either field, and
+	// resetLookupPrefill lowers both at the start of every lookup on this page,
+	// so no latch outlives the result it was raised against. The upload page's
+	// parent tile has no such per-lookup reset — see the recompute in its
+	// applyShared for what that costs.
+	let sourceTypedIn = $state(false);
+	let dateTypedIn = $state(false);
 	/** The artist the panel applied to the SELECT. Handed to the panel only
 	 * while the select is what saves: in new-artist mode the save posts
 	 * artistId=new and creates somebody else, so "Using {name}" there named an
@@ -112,9 +130,14 @@
 	// only the fields the operator has not typed over (SONA-156). The seed writes
 	// its link to whichever of the two social fields matches the site, so either
 	// tag standing means the seeded link is still the lookup's.
+	// A field the operator has typed into is theirs whether or not a lookup
+	// filled it first: an emptied field they have since filled is not one the
+	// panel may still say Sona cleared (SONA-220). The filled half is unchanged
+	// — a status line that names a field needs it filled as well as untouched,
+	// so the extra arm only ever speaks for the cleared half.
 	const lookupEdited = $derived({
-		sourcePostUrl: lookupFilled.sourcePostUrl !== undefined && !sourceTagged,
-		commissionedAt: lookupFilled.commissionedAt !== undefined && !dateTagged
+		sourcePostUrl: !sourceTagged && (lookupFilled.sourcePostUrl !== undefined || sourceTypedIn),
+		commissionedAt: !dateTagged && (lookupFilled.commissionedAt !== undefined || dateTypedIn)
 	});
 	const lookupSeedEdited = $derived({
 		artistName: lookupSeeded.artistName !== undefined && !nameTagged,
@@ -175,6 +198,9 @@
 		twitterTagged = false;
 		furaffinityTagged = false;
 		lookupUrlHeld = false;
+		lookupCleared = {};
+		sourceTypedIn = false;
+		dateTypedIn = false;
 		appliedArtist = null;
 		// The tag-suggestion state rides along: the accepted tags, the rating
 		// entail.dev returned for the PREVIOUS image, and its NSFW box (SONA-220).
@@ -219,15 +245,19 @@
 			undefined
 	);
 
-	/** Undo what the PREVIOUS lookup wrote, but only where the operator has not
-	 * typed over it since — the tag is the record of that. Without this a second
-	 * lookup reads the first one's URL as operator-typed, fills nothing, and
-	 * leaves a "From lookup" tag on a value from the other post. The upload
-	 * page's resetSharedPrefill, plus the inline new-artist fields this page
-	 * owns. */
+	/** What the last lookup put on the page OUTSIDE the two prefilled fields,
+	 * undone the moment a new search starts: none of it is recoverable from the
+	 * result on its way, and what it says is about a search that is over.
+	 *
+	 * The source post URL and the commissioned date are the exception. Blanking
+	 * them for the length of the round trip tears down everything downstream of
+	 * the URL — the suggestion control drops its standing chips and its rating
+	 * the moment that field changes (SONA-220) — and a lookup that comes back
+	 * with the same post, or fails outright, then has nothing to put back. They
+	 * are replaced, or emptied, in applyPrefill when the result lands, which is
+	 * also when the status line can say so. The upload page's resetSharedResult,
+	 * plus the inline new-artist fields this page owns. */
 	function resetLookupPrefill() {
-		if (sourceTagged) sourcePostUrl = '';
-		if (dateTagged) commissionedAt = '';
 		if (nameTagged) artistName = '';
 		if (twitterTagged) newTwitter = '';
 		if (furaffinityTagged) newFuraffinity = '';
@@ -236,14 +266,15 @@
 		// Patreon, Instagram) are uncontrolled — anything typed there goes with
 		// the form. An empty required form is a smaller cost than lost typing,
 		// and the clearing announcement in startLookup says what happened.
-		sourceTagged = false;
-		dateTagged = false;
 		nameTagged = false;
 		twitterTagged = false;
 		furaffinityTagged = false;
 		lookupFilled = {};
 		lookupSeeded = {};
 		lookupUrlHeld = false;
+		lookupCleared = {};
+		sourceTypedIn = false;
+		dateTypedIn = false;
 		appliedArtist = null;
 		// A clash carried into the parent select belongs to the lookup that found
 		// it, so a second lookup must not leave the first one's piece on offer. The
@@ -318,20 +349,58 @@
 	 * duplicate artist behind the operator's back and re-credit a piece that
 	 * already has one. */
 	function applyPrefill(next: LookupState) {
-		if (next.kind !== 'results') return;
+		// A failure, or a search cancelled back to idle, leaves both fields exactly
+		// as they are: there is no new post to describe them, and what the last
+		// lookup wrote is still the best thing the page knows.
+		//
+		// A no-match is not one of those. It is a settled result with nothing to
+		// prefill, so it runs the whole of this: it fills neither field, which
+		// empties whatever the last lookup filled and records it for the sentence
+		// the panel's no-match arm renders. Returning early here instead left the
+		// last lookup's URL and date on the form, still tagged From lookup, under
+		// a panel saying Sona found nothing.
+		if (next.kind !== 'results' && next.kind !== 'no_match') return;
 		// A new result describes a new seed, even when that seed is empty.
 		lookupSeeded = {};
-		lookupUrlHeld = sourcePostUrl.trim() !== '';
-		const fields = prefillForResult(next.data, { sourcePostUrl, commissionedAt });
+		// A field the LAST prefill wrote and the operator has not typed over since
+		// is still the lookup's to replace, so this result reads it as empty and
+		// fills it. Only the tag can tell the two apart, which is why the value is
+		// kept until here rather than blanked when the search started — and why the
+		// clash sentence reads a still-tagged value as nobody's rather than as the
+		// operator's.
+		const ownSource = sourceTagged ? '' : sourcePostUrl;
+		const ownDate = dateTagged ? '' : commissionedAt;
+		lookupUrlHeld = ownSource.trim() !== '';
+		const fields: LookupFields =
+			next.kind === 'results'
+				? prefillForResult(next.data, { sourcePostUrl: ownSource, commissionedAt: ownDate })
+				: {};
 		lookupFilled = fields;
+		const cleared: LookupCleared = {};
 		if (fields.sourcePostUrl !== undefined) {
+			// Assigned plainly. A second lookup that lands on the SAME post writes
+			// the same string, and $state only notifies on a value that differs, so
+			// the suggestion control keeps the chips and the rating it is holding
+			// rather than answering a change that did not happen.
 			sourcePostUrl = fields.sourcePostUrl;
 			sourceTagged = true;
+		} else if (sourceTagged) {
+			// This result has no post to offer — no match, or a clash whose URL
+			// belongs to another piece — so the last one's URL goes now, and the
+			// status line says it was emptied rather than left alone.
+			sourcePostUrl = '';
+			sourceTagged = false;
+			cleared.sourcePostUrl = true;
 		}
 		if (fields.commissionedAt !== undefined) {
 			commissionedAt = fields.commissionedAt;
 			dateTagged = true;
+		} else if (dateTagged) {
+			commissionedAt = '';
+			dateTagged = false;
+			cleared.commissionedAt = true;
 		}
+		lookupCleared = cleared;
 	}
 
 	/** The inline new-artist form obeys the same rule as the two fields above:
@@ -552,6 +621,7 @@
 						{lookup}
 						filled={lookupFilled}
 						edited={lookupEdited}
+						cleared={lookupCleared}
 						seeded={artistMode === 'new' ? lookupSeeded : {}}
 						seedEdited={lookupSeedEdited}
 						sourceUrlHeld={lookupUrlHeld}
@@ -793,11 +863,15 @@
 					class="input"
 					name="commissionedAt"
 					bind:value={commissionedAt}
-					oninput={() => {
+					oninput={(event) => {
 						// The panel's status line reads the filled record through this tag: a
 						// field typed over stops being the lookup's, and the sentence then
 						// neither claims it nor says it was left alone.
 						dateTagged = false;
+						// And the latch for the cleared record, which no later deletion
+						// lowers. Read off the event rather than the bound value, which
+						// this handler may run before.
+						if (event.currentTarget.value.trim() !== '') dateTypedIn = true;
 					}}
 					aria-describedby={dateTagged ? 'commissioned-hint commissioned-lookup-tag' : 'commissioned-hint'}
 				/>
@@ -813,7 +887,7 @@
 			     (SONA-220). Neither ever ticks it; both sit outside the label so a
 			     screen reader doesn't read a classifier's guess as part of the
 			     checkbox's own name. -->
-			<div class="nsfw-row tag-check-row">
+			<div class="tag-check-row">
 				<label class="checkbox-label">
 					<input
 						type="checkbox"
@@ -861,8 +935,9 @@
 					class="input"
 					name="sourcePostUrl"
 					bind:value={sourcePostUrl}
-					oninput={() => {
+					oninput={(event) => {
 						sourceTagged = false;
+						if (event.currentTarget.value.trim() !== '') sourceTypedIn = true;
 					}}
 					aria-describedby={sourceFieldDescribedBy}
 				/>
@@ -952,6 +1027,11 @@
 		flex-direction: column;
 		gap: 20px;
 		max-width: 600px;
+		/* The NSFW row's wrapping is about this column's width, not the window's
+		   (SONA-220). Safe to contain: the width comes from the grid track and the
+		   max-width above, never from the content. */
+		container-type: inline-size;
+		container-name: admin-form;
 	}
 
 	.tags-field:has(:global(.tag-tray)) {
@@ -1051,35 +1131,9 @@
 		white-space: nowrap;
 	}
 
-	/* The rating never changes the checkbox — it reports what the sites said and
-	   sits beside it. nowrap so the sentence stays one unit, and the row wraps
-	   the whole pill to its own line when it no longer fits. */
-	.nsfw-row {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		flex-wrap: wrap;
-	}
-
-	.rating-tag {
-		font-family: var(--font-primary);
-		font-size: 11px;
-		color: var(--muted-foreground);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-pill);
-		padding: 1px 8px;
-		white-space: nowrap;
-		max-width: 100%;
-	}
-
-	/* The text grows with the number of sites, so at narrow widths the pill
-	   wraps rather than pushing the document into a sideways scroll. */
-	@media (max-width: 480px) {
-		.rating-tag {
-			white-space: normal;
-			overflow-wrap: anywhere;
-		}
-	}
+	/* The row itself, the pill in it, and how the two share the row's width are
+	   global — both admin forms hold the same row. See `.tag-check-row` and
+	   `.rating-tag` in app.css. */
 
 	.artist-toggle {
 		display: flex;

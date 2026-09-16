@@ -468,6 +468,47 @@ export interface LookupEdited {
 	commissionedAt?: boolean;
 }
 
+/** Which of the two fields this result EMPTIED: the previous lookup filled it,
+ * the operator never typed over it, and the new result has nothing to put in
+ * its place. A field can never be both filled and emptied by one result. */
+export interface LookupCleared {
+	sourcePostUrl?: boolean;
+	commissionedAt?: boolean;
+}
+
+/** The cleared record as the SCREEN has it: a field the operator has typed into
+ * since is theirs again, and no sentence may still say Sona cleared it. The one
+ * copy of that drop — `statusLineKind` and `clearedLine` both answer "did Sona
+ * clear this field" and a second copy could answer it differently (SONA-220). */
+function clearedOnScreen(held: LookupCleared, edited: LookupEdited): LookupCleared {
+	return {
+		sourcePostUrl: held.sourcePostUrl === true && edited.sourcePostUrl !== true,
+		commissionedAt: held.commissionedAt === true && edited.commissionedAt !== true
+	};
+}
+
+/**
+ * The one sentence for what a move emptied, or null when it emptied nothing.
+ * No reason is attached to it, which is what makes it the sentence for a moment
+ * when no reason is settled: the upload page announces it on a parent move, and
+ * the panel's searching arm renders it while the result that would explain the
+ * blank fields is still out. The status-line kinds say "because this lookup
+ * filled neither one", which is not yet true of a lookup still running.
+ *
+ * `edited` drops a field the operator has typed into since, the way
+ * `statusLineKind` does — during a search they are free to fill a field the
+ * move emptied, and the sentence must not claim their own text. Required, not
+ * defaulted: a caller with nothing to pass says so with `{}` rather than
+ * forgetting the argument exists.
+ */
+export function clearedLine(cleared: LookupCleared, edited: LookupEdited): string | null {
+	const now = clearedOnScreen(cleared, edited);
+	if (now.sourcePostUrl && now.commissionedAt) return m.admin_lookup_announce_shared_cleared();
+	if (now.sourcePostUrl) return m.admin_lookup_announce_shared_cleared_source();
+	if (now.commissionedAt) return m.admin_lookup_announce_shared_cleared_date();
+	return null;
+}
+
 /** Which sentence describes what the prefill actually did. */
 export type StatusLineKind =
 	| 'both'
@@ -477,39 +518,183 @@ export type StatusLineKind =
 	| 'date_kept'
 	| 'clash'
 	| 'clash_kept'
+	| 'clash_emptied'
+	| 'clash_date_url_emptied'
+	| 'url_and_date_emptied'
+	| 'date_and_url_emptied'
+	| 'both_emptied'
+	| 'url_emptied'
+	| 'date_emptied'
 	| 'none';
 
 /**
+ * The one invariant every branch here answers to: NO SENTENCE CLAIMS A FIELD
+ * STATE THE SCREEN CONTRADICTS. A kind is chosen off two records of the same
+ * two fields — `cleared`, what the last result BLANKED, worked out once when
+ * the fields went blank, and `edited`, which of them hold the operator's own
+ * text NOW — and the pair disagree on a field the result emptied and the
+ * operator then typed into. Which record answers depends on the question the
+ * sentence asks: "did Sona clear this field" is about the screen, so it reads
+ * the cleared flag with the edited one applied; "was this field empty before"
+ * is about history, so it reads the raw flag, which no later keystroke undoes.
+ * The truth table for all five states of a field is in the unit tests.
+ *
  * The sentence names only the fields still attributable to the lookup, and
  * asserts nothing about one the operator has edited since. `url_only` says the
  * date was "left as it was", which is true of a date the lookup never filled
  * and false of one it filled and the operator then changed — that case gets
  * `url_kept`, which claims the URL and stays silent about the date. `date_kept`
- * is the mirror.
+ * is the mirror, and a date this result EMPTIED under the operator picks it
+ * too: the field is theirs again, but "left as it was" is still a false report
+ * of a field they watched go blank.
  *
  * The clash pair follows the same rule for the URL. `prefillForResult` skips the
  * URL on any clash, whatever the field holds, so "left the source post URL
  * empty" is true only of a field that WAS empty. `urlHeld` says it is not, and
  * picks `clash_kept`, which claims the date and says the URL was not filled
- * without claiming it is empty.
+ * without claiming it is empty. A URL this result emptied and the operator has
+ * typed back in is not empty either, so it picks `clash_kept` as well.
+ *
+ * `cleared` is the other half of the same honesty. A second lookup keeps the
+ * fields the first one filled until its own result lands, so a result with no
+ * post or no date EMPTIES one of them then (SONA-220) — and `url_only` saying
+ * the date was "left as it was" would be a false report of a field the operator
+ * just watched go blank. The emptied kinds name it instead.
  */
 export function statusLineKind(
 	filled: LookupFields,
-	options: { clash?: boolean; edited?: LookupEdited; urlHeld?: boolean } = {}
+	options: {
+		clash?: boolean;
+		edited?: LookupEdited;
+		urlHeld?: boolean;
+		cleared?: LookupCleared;
+	} = {}
 ): StatusLineKind {
 	const edited = options.edited ?? {};
+	// A cleared flag is worked out once, when the field goes blank, and read on
+	// every render after — including the renders that follow the operator typing
+	// into the field it names. Their own text is not a field Sona cleared, and
+	// the sentence for it invites them to fill in something already sitting in
+	// the input. So an edited field drops the flag, the same way the filled half
+	// below drops a value the operator has typed over (SONA-220).
+	const held = options.cleared ?? {};
+	const cleared = clearedOnScreen(held, edited);
+	// The raw flags, which the keystroke above does not reach. A field the result
+	// blanked is one it CHANGED, whoever has typed into it since — so the kept
+	// sentences, which exist to avoid claiming a field was "left as it was", are
+	// chosen off these rather than off the dropped ones (SONA-220).
+	const urlWasEmptied = held.sourcePostUrl === true;
+	const dateWasEmptied = held.commissionedAt === true;
 	const urlFilled = filled.sourcePostUrl !== undefined;
 	const dateFilled = filled.commissionedAt !== undefined;
 	const url = urlFilled && !edited.sourcePostUrl;
 	const date = dateFilled && !edited.commissionedAt;
 	if (options.clash) {
-		if (!date) return 'none';
-		return options.urlHeld ? 'clash_kept' : 'clash';
+		// The clash sentence says the URL was "left empty", which is true of a
+		// field that WAS empty and a false report of one this result just blanked
+		// — the operator watched it go, and only the emptied kind names it.
+		if (date) {
+			if (cleared.sourcePostUrl) return 'clash_date_url_emptied';
+			// The snapshot is taken when the prefill runs, so it still says "empty"
+			// about a URL the operator has typed in since — and the field they are
+			// looking at is not empty. The raw emptied flag answers for them.
+			return options.urlHeld || urlWasEmptied ? 'clash_kept' : 'clash';
+		}
+		// A clash with no date to report either. The plain url_emptied sentence
+		// gives "this lookup filled nothing in its place" as the reason, which
+		// reads as a lookup that found nothing under a body saying Sona found a
+		// post and declined it, so the clash names its own reason. Both fields
+		// emptied keeps both_emptied below: that one claims no reason the clash
+		// body contradicts.
+		if (cleared.sourcePostUrl && !cleared.commissionedAt) return 'clash_emptied';
+	} else {
+		if (url && date) return 'both';
+		if (url) {
+			if (cleared.commissionedAt) return 'url_and_date_emptied';
+			return dateFilled || dateWasEmptied ? 'url_kept' : 'url_only';
+		}
+		if (date) {
+			if (cleared.sourcePostUrl) return 'date_and_url_emptied';
+			return urlFilled || urlWasEmptied ? 'date_kept' : 'date_only';
+		}
 	}
-	if (url && date) return 'both';
-	if (url) return dateFilled ? 'url_kept' : 'url_only';
-	if (date) return urlFilled ? 'date_kept' : 'date_only';
+	if (cleared.sourcePostUrl && cleared.commissionedAt) return 'both_emptied';
+	if (cleared.sourcePostUrl) return 'url_emptied';
+	if (cleared.commissionedAt) return 'date_emptied';
 	return 'none';
+}
+
+/**
+ * Whether this kind's sentence names no post. The three that report an emptied
+ * field and NOTHING else: they are the ones a no-match or a failure can still
+ * say, having no prefill match to name, which is also why the panel renders
+ * them in a paragraph of their own well above its status line. One answer for
+ * both questions — listed separately, the mapping and the panel could disagree
+ * about which kinds belong here.
+ */
+export function namesNoSite(
+	kind: StatusLineKind
+): kind is 'both_emptied' | 'url_emptied' | 'date_emptied' {
+	return kind === 'both_emptied' || kind === 'url_emptied' || kind === 'date_emptied';
+}
+
+/**
+ * The sentence for a status kind. The panel renders it and the upload page
+ * announces it, off this one mapping: read separately, the announcement picked
+ * a sentence by hand and named a different reason for the same move than the
+ * panel did (SONA-220).
+ *
+ * `site` is the post the prefill match came from. The kinds that report only an
+ * emptied field name no site — they render over a no-match, which has no match
+ * to name — so a missing site answers with the empty string rather than an
+ * unfilled placeholder, and so does `none`.
+ */
+export function statusSentence(
+	kind: StatusLineKind,
+	site: LookupSite | null,
+	options: { title?: string; editMode?: boolean } = {}
+): string {
+	switch (kind) {
+		case 'both_emptied':
+			return m.admin_lookup_status_both_emptied();
+		case 'url_emptied':
+			return m.admin_lookup_status_url_emptied();
+		case 'date_emptied':
+			return m.admin_lookup_status_date_emptied();
+		case 'none':
+			return '';
+	}
+	if (!site) return '';
+	const label = siteLabel(site);
+	const title = options.title ?? '';
+	switch (kind) {
+		case 'both':
+			return m.admin_lookup_status_both({ site: label });
+		case 'url_only':
+			return m.admin_lookup_status_url_only({ site: label });
+		case 'url_kept':
+			return m.admin_lookup_status_url_kept({ site: label });
+		case 'date_kept':
+			return m.admin_lookup_status_date_kept({ site: label });
+		case 'url_and_date_emptied':
+			return m.admin_lookup_status_url_and_date_emptied({ site: label });
+		case 'date_and_url_emptied':
+			return m.admin_lookup_status_date_and_url_emptied({ site: label });
+		case 'clash':
+			return m.admin_lookup_status_clash({ site: label, title });
+		case 'clash_kept':
+			return m.admin_lookup_status_clash_kept({ site: label, title });
+		case 'clash_emptied':
+			return m.admin_lookup_status_clash_emptied({ site: label, title });
+		case 'clash_date_url_emptied':
+			return m.admin_lookup_status_clash_date_url_emptied({ site: label, title });
+		case 'date_only':
+			// The edit page's source URL belongs to the image rather than to this
+			// lookup, so the sentence there calls it the operator's own.
+			return options.editMode
+				? m.admin_lookup_status_kept({ site: label })
+				: m.admin_lookup_status_date_only({ site: label });
+	}
 }
 
 /**
