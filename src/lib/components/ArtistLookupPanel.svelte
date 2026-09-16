@@ -18,6 +18,7 @@
 		matchHandles,
 		matchKey,
 		nameMatchArtists,
+		namesNoSite,
 		pickPrefillMatch,
 		postDateToInput,
 		ratingLabel,
@@ -132,12 +133,11 @@
 	const statusText = $derived(
 		statusSentence(statusKind, prefill?.site ?? null, { title: clash?.title ?? '', editMode })
 	);
-	// The kinds that report an emptied field and NOTHING else. They name no site,
-	// which is why they are the ones a no-match or a failure can still say, and
-	// those two arms render well above the status line every result uses.
-	const emptiedOnly = $derived(
-		statusKind === 'both_emptied' || statusKind === 'url_emptied' || statusKind === 'date_emptied'
-	);
+	// The kinds that report an emptied field and NOTHING else, off the same test
+	// the mapping uses to answer them without a site: a second list here could
+	// disagree with that one about which kinds get rendered in their own
+	// paragraph, and the sentence would land in the arm that has no site to name.
+	const emptiedOnly = $derived(namesNoSite(statusKind));
 	// Every sentence that reports a field going blank, and not only the three
 	// that report nothing else — the single answer to "does this line describe a
 	// change the operator's fields just made".

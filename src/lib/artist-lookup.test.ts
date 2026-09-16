@@ -11,6 +11,7 @@ import {
 	lookupSentFile,
 	mergeSamePost,
 	nameMatchArtists,
+	namesNoSite,
 	newArtistSeed,
 	seedStatusKind,
 	pickPrefillMatch,
@@ -814,7 +815,7 @@ describe('statusLineKind', () => {
 				{ locale: 'en' }
 			)
 		).toBe(
-			'Sona filled the commissioned date from the FurAffinity post and cleared the source post URL the last lookup filled, because that post is already the source of Ref. You can change the date before you save.'
+			'Sona filled the commissioned date from the FurAffinity post and cleared the source post URL the last lookup filled, because the post Sona just found is already the source of Ref. You can change the date before you save.'
 		);
 		for (const locale of ['en', 'ja'] as const) {
 			const line = m.admin_lookup_status_clash_date_url_emptied(
@@ -855,6 +856,37 @@ describe('statusLineKind', () => {
 	// hand on either side, the two named different reasons for the same move:
 	// the announcement said the result had no link to put there while the panel
 	// said the post already belonged to another piece (SONA-220).
+	// The panel renders these three in a paragraph of their own, on the no-match
+	// and failed arms, where there is no prefill match to name. It used to decide
+	// that off its own list of the same three kinds, which could drift from the
+	// mapping's — and a kind in one list but not the other renders a sentence
+	// with an empty site in it, or no sentence at all.
+	it('answers which kinds name no post', () => {
+		expect(namesNoSite('both_emptied')).toBe(true);
+		expect(namesNoSite('url_emptied')).toBe(true);
+		expect(namesNoSite('date_emptied')).toBe(true);
+		// Every other kind names the post the prefill came from, which is exactly
+		// why they cannot render where there is none.
+		for (const kind of [
+			'both',
+			'url_only',
+			'date_only',
+			'url_kept',
+			'date_kept',
+			'clash',
+			'clash_kept',
+			'clash_emptied',
+			'clash_date_url_emptied',
+			'url_and_date_emptied',
+			'date_and_url_emptied',
+			'none'
+		] as StatusLineKind[]) {
+			expect(namesNoSite(kind)).toBe(false);
+			// And the mapping agrees: with no site, these say nothing at all.
+			expect(statusSentence(kind, null, { title: 'Ref' })).toBe('');
+		}
+	});
+
 	it('maps every status kind to exactly one sentence', () => {
 		const kinds: StatusLineKind[] = [
 			'both',
@@ -893,6 +925,16 @@ describe('statusLineKind', () => {
 		expect(statusSentence('date_only', 'FurAffinity', { editMode: true })).toBe(
 			m.admin_lookup_status_kept({ site: 'FurAffinity' })
 		);
+		// Spelled out rather than compared to the key it came from: read off the
+		// key on both sides, the assertion passes whatever the key says, and this
+		// is the one sentence in the set that says the date can still be changed
+		// — its siblings all end on that and it used to stop before it.
+		expect(m.admin_lookup_status_kept({ site: 'Twitter' }, { locale: 'en' })).toBe(
+			'Sona filled the commissioned date from the Twitter post and left your source post URL as it was. You can change the date before you save.'
+		);
+		expect(m.admin_lookup_status_kept({ site: 'Twitter' }, { locale: 'ja' })).toMatch(
+			/保存前に日付を変更できます。$/
+		);
 		expect(statusSentence('date_only', 'FurAffinity')).toBe(
 			m.admin_lookup_status_date_only({ site: 'FurAffinity' })
 		);
@@ -910,6 +952,12 @@ describe('statusLineKind', () => {
 		// this path may say the lookup found nothing to put there.
 		expect(m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'en' })).toBe(
 			'Sona filled the commissioned date from the Twitter post and cleared the source post URL the last lookup filled, because the match Sona found has no link to put there. You can change the date before you save.'
+		);
+		// 一致 is what a database calls a matching row. The thing the operator is
+		// looking at is a search result, which is what the rest of the file calls
+		// it, so the Japanese sentence names it that way too.
+		expect(m.admin_lookup_status_date_and_url_emptied({ site: 'Twitter' }, { locale: 'ja' })).toBe(
+			'Twitterの投稿から制作依頼日を入力しました。見つかった検索結果には入れられるリンクがないため、前回の検索で入力した投稿元URLは消去しました。保存前に日付を変更できます。'
 		);
 		expect(m.admin_lookup_status_both_emptied({}, { locale: 'en' })).toBe(
 			'Sona cleared the source post URL and commissioned date the last lookup filled, because this lookup filled neither one. You can fill them in before you save.'

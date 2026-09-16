@@ -935,8 +935,22 @@ describe('what the lookup copy names', () => {
 		expect(UPLOAD).toMatch(/applyShared\(tile\?\.lookup \?\? \{ kind: 'idle' \}, emptied\)/);
 		const parentBody = UPLOAD.match(/function onParentChanged\([\s\S]*?\n\t\}/)?.[0] ?? '';
 		expect(parentBody).not.toContain('sharedCleared =');
-		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,2000}?sharedCleared = \{ \.\.\.emptied \};/);
-		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,3000}?const cleared: LookupCleared = \{ \.\.\.emptied \};/);
+		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,2000}?sharedCleared = \{ \.\.\.seed \};/);
+		expect(UPLOAD).toMatch(/function applyShared\([\s\S]{0,3000}?const cleared: LookupCleared = \{ \.\.\.seed \};/);
+		// And the record is checked against the fields before either of those
+		// reads it. A move onto a still-searching tile holds its record until that
+		// result lands, and the operator can type into an emptied field in the
+		// meantime — a cleared flag over a field with something in it has the
+		// panel say Sona cleared a URL that is sitting in the input (SONA-220).
+		expect(UPLOAD).toMatch(
+			/function applyShared\([\s\S]{0,900}?const seed: LookupCleared = \{ \.\.\.emptied \};\s+if \(!sourceTagged && sourcePostUrl\.trim\(\) !== ''\) seed\.sourcePostUrl = false;\s+if \(!dateTagged && commissionedAt\.trim\(\) !== ''\) seed\.commissionedAt = false;/
+		);
+		// A cancelled search is never coming back, so the record it was holding
+		// goes with it: left behind, the NEXT lookup on that tile consumes it and
+		// reports fields that have been blank the whole time.
+		expect(UPLOAD).toMatch(
+			/function cancelLookup\(key: number\) \{[\s\S]{0,600}?if \(pendingCleared\?\.key === key\) pendingCleared = null;/
+		);
 		// The move itself says nothing: one tick holds one line, so the caller
 		// picks it. Each of the three callers says at most one.
 		expect(UPLOAD).not.toMatch(/function onParentChanged\([\s\S]{0,800}?announcer\.say/);
@@ -1000,6 +1014,18 @@ describe('what the lookup copy names', () => {
 	// 10px every status line sits at — two subjects reading as one paragraph.
 	it('separates the cleared sentence from the lead above it', () => {
 		expect(PANEL).toMatch(/\.lookup-lead \+ \.lookup-emptied \{\s+margin-top: 18px;/);
+		// The rule is an adjacent-sibling one, so a paragraph slipped between the
+		// lead and the cleared sentence would silently take the gap away and leave
+		// the two subjects reading as one. Pinned here in both arms: only comments
+		// and whitespace stand between them.
+		expect(PANEL).toMatch(
+			/<p class="lookup-lead">\{m\.admin_lookup_no_match_body\(\)\}<\/p>(?:\s|<!--[\s\S]*?-->)*\{#if emptiedOnly\}/
+		);
+		// Every branch of the failed arm ends on a lead, so the last one before
+		// the arm's own {/if} stands for all of them.
+		expect(PANEL).toMatch(
+			/<p class="lookup-lead">\{m\.admin_lookup_failed_body\(\)\}<\/p>\s*\{\/if\}(?:\s|<!--[\s\S]*?-->)*\{#if emptiedOnly\}/
+		);
 	});
 
 	// An unreadable file is a dead end on a variant tile: not retryable, no
@@ -1283,19 +1309,19 @@ describe('focus after the panel goes away', () => {
 			// refill it. Only the tag tells that from something the operator typed.
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,1600}?const ownSource = sourceTagged \\? '' : sourcePostUrl;\\s+const ownDate = dateTagged \\? '' : commissionedAt;`
+					`function ${apply}\\([\\s\\S]{0,2400}?const ownSource = sourceTagged \\? '' : sourcePostUrl;\\s+const ownDate = dateTagged \\? '' : commissionedAt;`
 				)
 			);
 			// And where the result offers nothing, the deferred field is emptied
 			// there instead — recorded, so the status line can say so (4.1.3).
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,2800}?\\} else if \\(sourceTagged\\) \\{[\\s\\S]{0,600}?sourcePostUrl = '';\\s+sourceTagged = false;\\s+cleared\\.sourcePostUrl = true;`
+					`function ${apply}\\([\\s\\S]{0,3600}?\\} else if \\(sourceTagged\\) \\{[\\s\\S]{0,600}?sourcePostUrl = '';\\s+sourceTagged = false;\\s+cleared\\.sourcePostUrl = true;`
 				)
 			);
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,3200}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
+					`function ${apply}\\([\\s\\S]{0,4000}?\\} else if \\(dateTagged\\) \\{\\s+commissionedAt = '';\\s+dateTagged = false;\\s+cleared\\.commissionedAt = true;`
 				)
 			);
 			expect(source).toMatch(/cleared=\{(shared|lookup)Cleared\}/);
@@ -1309,7 +1335,7 @@ describe('focus after the panel goes away', () => {
 		] as const) {
 			expect(source).toMatch(
 				new RegExp(
-					`function ${apply}\\([\\s\\S]{0,1200}?if \\(next\\.kind !== 'results' && next\\.kind !== 'no_match'\\)`
+					`function ${apply}\\([\\s\\S]{0,2000}?if \\(next\\.kind !== 'results' && next\\.kind !== 'no_match'\\)`
 				)
 			);
 			// And a no-match prefills nothing, so every fill branch is skipped and
@@ -1334,9 +1360,14 @@ describe('focus after the panel goes away', () => {
 		expect(PANEL).not.toMatch(/<p class="lookup-status">\{m\.admin_lookup_paused_hint\(\)\}<\/p>/);
 		// Where the sentence renders: the three kinds that name no site are the
 		// ones an arm with no match to name can still say.
-		expect(PANEL).toMatch(
-			/const emptiedOnly = \$derived\(\s+statusKind === 'both_emptied' \|\| statusKind === 'url_emptied' \|\| statusKind === 'date_emptied'\s+\);/
+		expect(PANEL).toMatch(/const emptiedOnly = \$derived\(namesNoSite\(statusKind\)\);/);
+		// Off the mapping's own test rather than a second copy of the same list:
+		// the two could drift, and the sentence would land in an arm with no post
+		// to name.
+		expect(LOOKUP).toMatch(
+			/export function namesNoSite\([\s\S]{0,200}?return kind === 'both_emptied' \|\| kind === 'url_emptied' \|\| kind === 'date_emptied';/
 		);
+		expect(LOOKUP).toMatch(/if \(namesNoSite\(kind\)\) \{/);
 		// And it reports a change the fields just made, so it is not drawn in the
 		// muted colour the advice lines use.
 		expect(PANEL).toMatch(/\.lookup-emptied \{\s+color: var\(--foreground\);/);

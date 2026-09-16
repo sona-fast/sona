@@ -923,7 +923,7 @@ test.describe('with a key saved', () => {
 		await pill(page).click();
 
 		await expect(panel(page)).toContainText(
-			'cleared the source post URL the last lookup filled, because that post is already the source of Clash Piece'
+			'cleared the source post URL the last lookup filled, because the post Sona just found is already the source of Clash Piece'
 		);
 		await expect(panel(page)).not.toContainText('left your source post URL as it was');
 		await expect(panel(page)).not.toContainText('left the source post URL empty');
@@ -2479,6 +2479,106 @@ test.describe('with a key saved', () => {
 		await expect(page.locator(LIVE_REGION)).toHaveText(spoken);
 	});
 
+	// The move's record is held until that tile's own result lands, and the
+	// operator is free to type into a field it emptied while the search is still
+	// out. Left in the record, the flag had the panel report a URL Sona cleared
+	// while the operator's own typing sat in the input — and the sentence for a
+	// cleared field is chosen before the one that says a field was held, so the
+	// typing never got a word in (SONA-220).
+	test('a URL typed while the search is out is not reported as cleared', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		// The second tile's result, held open across the move AND the typing.
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+
+		// Typed by hand into the field the move emptied. This URL is the
+		// operator's, and no lookup tagged it.
+		const TYPED_URL = 'https://www.furaffinity.net/view/999999/';
+		await sourceInput(page).fill(TYPED_URL);
+
+		release();
+
+		// The result has a date to fill and nowhere to put its URL, so the typed
+		// one stays and the sentence says so.
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+		await expect(sourceInput(page)).toHaveValue(TYPED_URL);
+		await expect(panel(page)).toContainText(
+			'Sona filled the commissioned date from the FurAffinity post and left the source post URL as it was. You can change the date before you save.'
+		);
+		await expect(panel(page)).not.toContainText('cleared the source post URL');
+	});
+
+	// The mirror, on the other field.
+	test('a date typed while the search is out is not reported as cleared', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(dateInput(page)).toHaveValue('');
+
+		await dateInput(page).fill('2026-05-06');
+
+		release();
+
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-05-06');
+		await expect(panel(page)).toContainText(
+			'Sona filled the source post URL from the FurAffinity post and left the commissioned date as it was. You can change the URL before you save.'
+		);
+		await expect(panel(page)).not.toContainText('cleared the commissioned date');
+	});
+
+	// Cancelling that search means its result is never coming, so the record the
+	// move left with it goes too. Held on, the NEXT lookup on the same tile
+	// consumed it and reported two fields as just emptied that had been blank
+	// since the move.
+	test('a cancelled search drops the record the parent move left with it', async ({ page }) => {
+		await stubLookup(page, matchedBody());
+		await twoDoneTiles(page);
+
+		await tileLookup(page).nth(0).click();
+		await expect(sourceInput(page)).toHaveValue(POST_URL);
+		await expect(dateInput(page)).toHaveValue('2026-03-04');
+
+		const release = await deferredLookup(page, matchedBody());
+		await tileLookup(page).nth(1).click();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'true');
+
+		await page.locator('input[name="parentPick"]').nth(1).check();
+		await expect(sourceInput(page)).toHaveValue('');
+		await expect(dateInput(page)).toHaveValue('');
+
+		await panel(page).getByRole('button', { name: 'Cancel lookup' }).click();
+		release();
+		await expect(tileLookup(page).nth(1)).toHaveAttribute('aria-busy', 'false');
+
+		// A second search on that tile, with nothing to show for it. Both fields
+		// have been empty since the move, so this result emptied neither.
+		await stubLookup(page, { enabled: true, matches: [] });
+		await tileLookup(page).nth(1).click();
+		await expect(panel(page)).toContainText('Nothing matched on FurAffinity');
+		await expect(panel(page)).not.toContainText('the last lookup filled');
+	});
+
 	// A move onto a tile whose lookup FAILED empties the fields too: the failure
 	// has nothing to put back. That arm carries no status line of its own, so the
 	// two fields went blank with the panel talking only about the failure.
@@ -2719,7 +2819,7 @@ test.describe('with a key saved', () => {
 		await expect(sourceInput(page)).toHaveValue('');
 		await expect(dateInput(page)).toHaveValue('2026-03-04');
 		const sentence =
-			'Sona filled the commissioned date from the FurAffinity post and cleared the source post URL the last lookup filled, because that post is already the source of Clash Piece. You can change the date before you save.';
+			'Sona filled the commissioned date from the FurAffinity post and cleared the source post URL the last lookup filled, because the post Sona just found is already the source of Clash Piece. You can change the date before you save.';
 		// One sentence, in both places: the panel renders it and the region says
 		// it, off the same mapping.
 		await expect(panel(page)).toContainText(sentence);

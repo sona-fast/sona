@@ -1981,7 +1981,7 @@
 	"admin_lookup_status_clash": "Sona filled the commissioned date from the {site} post and left the source post URL empty, because that post is already the source of {title}. You can change the date before you save.",
 	"admin_lookup_status_clash_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was, because that post is already the source of {title}. You can change the date before you save.",
 	"admin_lookup_status_clash_emptied": "Sona cleared the source post URL the last lookup filled, because the {site} post Sona found is already the source of {title}. You can type one in before you save.",
-	"admin_lookup_status_clash_date_url_emptied": "Sona filled the commissioned date from the {site} post and cleared the source post URL the last lookup filled, because that post is already the source of {title}. You can change the date before you save.",
+	"admin_lookup_status_clash_date_url_emptied": "Sona filled the commissioned date from the {site} post and cleared the source post URL the last lookup filled, because the post Sona just found is already the source of {title}. You can change the date before you save.",
 	"admin_lookup_status_url_kept": "Sona filled the source post URL from the {site} post. You can change it before you save.",
 	"admin_lookup_status_date_kept": "Sona filled the commissioned date from the {site} post. You can change it before you save.",
 	"admin_lookup_status_kept": "Sona filled the commissioned date from the {site} post and left your source post URL as it was. You can change the date before you save.",

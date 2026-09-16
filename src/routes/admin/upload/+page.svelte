@@ -808,6 +808,11 @@
 	function cancelLookup(key: number) {
 		lookupAborts.get(key)?.abort();
 		lookupAborts.delete(key);
+		// The result this tile's record was waiting for is never coming. Left
+		// behind, the NEXT lookup on this tile consumes it and reports fields that
+		// tile's cancelled search emptied, minutes after they went — a no-match
+		// saying Sona cleared two fields that have been blank the whole time.
+		if (pendingCleared?.key === key) pendingCleared = null;
 		const tile = tiles.find((t) => t.key === key);
 		if (tile) tile.lookup = { kind: 'idle' };
 	}
@@ -866,6 +871,16 @@
 		emptied: LookupCleared = {}
 	): { sourcePostUrl: boolean; commissionedAt: boolean } {
 		const wrote = { sourcePostUrl: false, commissionedAt: false };
+		// A cleared flag means an empty field. The record a parent move hands over
+		// can be minutes old — the move onto a still-searching tile holds it until
+		// that result lands — and the operator is free to type into either field
+		// in between. Left in, the flag has the panel say Sona cleared a URL that
+		// is sitting in the input, because the sentence for it is chosen before
+		// the one that says the field was held. A tagged field is what a lookup
+		// wrote rather than what was typed, so only an untagged one drops it.
+		const seed: LookupCleared = { ...emptied };
+		if (!sourceTagged && sourcePostUrl.trim() !== '') seed.sourcePostUrl = false;
+		if (!dateTagged && commissionedAt.trim() !== '') seed.commissionedAt = false;
 		// A failure, or a search cancelled back to idle, leaves both fields exactly
 		// as they are: there is no new post to describe them, and what the last
 		// lookup wrote is still the best thing the page knows.
@@ -879,7 +894,7 @@
 		// Nothing lands, so whatever the caller's reset took out is the whole of
 		// what this move did to the fields.
 		if (next.kind !== 'results' && next.kind !== 'no_match') {
-			sharedCleared = { ...emptied };
+			sharedCleared = { ...seed };
 			return wrote;
 		}
 		// A field the LAST prefill wrote and the operator has not typed over since
@@ -894,10 +909,10 @@
 				? prefillForResult(next.data, { sourcePostUrl: ownSource, commissionedAt: ownDate })
 				: {};
 		sharedFilled = fields;
-		// Seeded with what the caller's reset emptied, and unset again for a field
-		// this result writes back: a move that empties both and refills the URL has
-		// cleared the date and nothing else.
-		const cleared: LookupCleared = { ...emptied };
+		// Seeded with what the caller's reset emptied and the operator has not put
+		// back, and unset again for a field this result writes back: a move that
+		// empties both and refills the URL has cleared the date and nothing else.
+		const cleared: LookupCleared = { ...seed };
 		if (fields.sourcePostUrl !== undefined) {
 			// Assigned plainly. A second lookup that lands on the SAME post writes
 			// the same string, and $state only notifies on a value that differs, so

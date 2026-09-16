@@ -562,6 +562,20 @@ export function statusLineKind(
 }
 
 /**
+ * Whether this kind's sentence names no post. The three that report an emptied
+ * field and NOTHING else: they are the ones a no-match or a failure can still
+ * say, having no prefill match to name, which is also why the panel renders
+ * them in a paragraph of their own well above its status line. One answer for
+ * both questions — listed separately, the mapping and the panel could disagree
+ * about which kinds belong here.
+ */
+export function namesNoSite(
+	kind: StatusLineKind
+): kind is 'both_emptied' | 'url_emptied' | 'date_emptied' {
+	return kind === 'both_emptied' || kind === 'url_emptied' || kind === 'date_emptied';
+}
+
+/**
  * The sentence for a status kind. The panel renders it and the upload page
  * announces it, off this one mapping: read separately, the announcement picked
  * a sentence by hand and named a different reason for the same move than the
@@ -577,16 +591,17 @@ export function statusSentence(
 	site: LookupSite | null,
 	options: { title?: string; editMode?: boolean } = {}
 ): string {
-	switch (kind) {
-		case 'both_emptied':
-			return m.admin_lookup_status_both_emptied();
-		case 'url_emptied':
-			return m.admin_lookup_status_url_emptied();
-		case 'date_emptied':
-			return m.admin_lookup_status_date_emptied();
-		case 'none':
-			return '';
+	if (namesNoSite(kind)) {
+		switch (kind) {
+			case 'both_emptied':
+				return m.admin_lookup_status_both_emptied();
+			case 'url_emptied':
+				return m.admin_lookup_status_url_emptied();
+			case 'date_emptied':
+				return m.admin_lookup_status_date_emptied();
+		}
 	}
+	if (kind === 'none') return '';
 	if (!site) return '';
 	const label = siteLabel(site);
 	const title = options.title ?? '';
